@@ -108,7 +108,17 @@ import {
   type ReusePlanPredecessor,
   type ScopePlanPredecessor,
 } from './reuse-plan.js';
-import { NO_TASK_OUTCOME_REASON, PRE_RUN_REPORT_REASON, runReportDigest, runReportProjection, type RunReportRecord } from './run-report.js';
+import {
+  NO_TASK_OUTCOME_REASON,
+  PRE_RUN_REPORT_REASON,
+  RUN_REPORT_NO_USAGE,
+  buildRunReport,
+  runReportDigest,
+  runReportProjection,
+  runReportReflectionNotRun,
+  type RunReportRecord,
+} from './run-report.js';
+import { assuranceSampleNotRun } from './reducers.js';
 import { baselineAnalysisKindDefinition } from './kind-definition.js';
 import { describeComposition } from '../harness/primary-agent-harness.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../provider/egress-gate.js';
@@ -179,6 +189,15 @@ export const RECONCILED_PAUSED_DETAIL = 'AI7 上次关闭时这项任务正在�
  * A start AI7 closed on while it waited for a place (Issue #49 review; ADR 0034): it never began, and a restart starts
  * nothing by itself, so it is blocked before dispatch with why, and the editor starts it again when they choose.
  */
+/**
+ * What reconciliation records for a Run of a kind that cannot resume (Issue #429 review, P1): AI7 closed while it ran,
+ * its results lived only in the Run it lost, and nothing of it will be sent again. It ends 已中断 with this outcome, and
+ * the editor prepares the Task again — the kind's own surface offers that at once.
+ */
+export const RECONCILED_INTERRUPTED_DETAIL =
+  'AI7 上次关闭时这项任务正在运行；这类任务不能续行，已读的内容没有形成结果集修订版，此后不会再发送任何内容。需要时请重新准备并开始。' as const;
+/** Why such a Run's later stages never ran, in its Run Report. */
+const RECONCILED_INTERRUPTED_STAGE_REASON = 'AI7 上次关闭时运行中断，这一步没有发起。' as const;
 export const RECONCILED_QUEUED_DETAIL =
   'AI7 上次关闭时这项任务还在等待运行名额，没有开始，也没有发送任何内容；重新启动后它不会自己开始。需要时请重新准备并开始。' as const;
 
@@ -605,13 +624,13 @@ function firstBaselineCounts(unitCount: number): AnalysisReusePlanCounts {
  * editor cancels it to prepare another (Issue #502, OFF-010); a cancelling one still holds the slot until it has
  * stopped (Issue #422).
  */
-function runIsActive(state: BaselineAnalysisRunState | null): boolean {
+export function runIsActive(state: BaselineAnalysisRunState | null): boolean {
   return state === 'authorized' || state === 'awaiting-connectivity' || state === 'admitted' || state === 'executing' ||
     state === 'cancelling' || state === 'pausing' || state === 'paused' || state === 'resumable' || state === 'awaiting-clarification';
 }
 
 /** Why an active Run blocks a new Task, in the words of its state: a waiting Run is never said to be under way. */
-function activeRunReason(state: BaselineAnalysisRunState | null): string {
+export function activeRunReason(state: BaselineAnalysisRunState | null): string {
   return state === 'awaiting-connectivity' ? WAITING_RUN_REASON : state === 'authorized' ? QUEUED_RUN_REASON : ACTIVE_RUN_REASON;
 }
 
@@ -3324,7 +3343,8 @@ export class BaselineAnalysisStore {
    * nothing running it. One pausing settles `paused` — the boundary it waited for is reached — and one admitted or
    * executing `resumable`, 任务已中断 · 可续行, its Run Authorization kept and nothing dispatched until 续行. A start the
    * governor had not admitted yet is blocked before dispatch with why: nothing starts by itself after a restart (ADR
-   * 0034). A Run left cancelling is named for the execution owner, which finishes the cancellation.
+   * 0034). A Run left cancelling is named for the execution owner, which finishes the cancellation. A kind with no 续行
+   * (every kind but the baseline) ends a Run left admitted, executing or pausing `interrupted` instead, with its outcome.
    */
   reconcileStoppedRuns(): { settled: number; cancelling: ReadonlyArray<string>; answered: ReadonlyArray<string> } {
     const rows = this.#db.prepare(
@@ -3335,6 +3355,9 @@ export class BaselineAnalysisStore {
        WHERE i.kind = ?
        ORDER BY r.recorded_at, r.rowid`,
     ).all(this.#definition.kind) as SqlRow[];
+    // Only the baseline kind keeps unit checkpoints and offers 续行 (Issue #422, S76b); every other kind's Run left
+    // under way ends interrupted instead, as the execution owner's own `resumableOnInterrupt` reads it.
+    const resumable = this.#definition.kind === BASELINE_ANALYSIS_KIND;
     let settled = 0;
     const cancelling: string[] = [];
     // A Run that waits for an answer the editor has already given (Issue #422, S76d) — answered while another Run held
@@ -3343,7 +3366,11 @@ export class BaselineAnalysisStore {
     for (const row of rows) {
       const runRecordId = asString(row.run_record_id);
       const state = row.last_state === null ? null : asString(row.last_state);
-      if (state === 'pausing') {
+      if (!resumable && (state === 'admitted' || state === 'executing' || state === 'pausing')) {
+        // A kind with no 续行 (Issue #429 review, P1): left under way, it would read as running for good. It ends here.
+        this.#settleInterruptedWithoutResume(runRecordId);
+        settled += 1;
+      } else if (state === 'pausing') {
         this.recordRunState(runRecordId, 'paused', { detail: RECONCILED_PAUSED_DETAIL, reconciled: true });
         settled += 1;
       } else if (state === 'admitted' || state === 'executing') {
@@ -3361,6 +3388,42 @@ export class BaselineAnalysisStore {
       }
     }
     return { settled, cancelling, answered };
+  }
+
+  /**
+   * The terminal `interrupted` of a Run a stopped service left under way, for a kind that cannot resume: no revision
+   * formed, and its Task Outcome and Run Report say exactly that — stages that never ran, no units, no usage.
+   */
+  #settleInterruptedWithoutResume(runRecordId: string): void {
+    const facts = this.cancellationFacts(runRecordId);
+    this.recordRunState(runRecordId, 'interrupted', { detail: RECONCILED_INTERRUPTED_DETAIL, reconciled: true });
+    this.recordOutcome({
+      taskIntentId: facts.taskIntentId,
+      runRecordId,
+      classification: 'interrupted',
+      resultSetRevisionId: null,
+      summary: RECONCILED_INTERRUPTED_DETAIL,
+      safeNextAction: RECONCILED_INTERRUPTED_DETAIL,
+      report: buildRunReport({
+        runRecordId,
+        taskIntentId: facts.taskIntentId,
+        attemptId: facts.attemptId,
+        resultSetRevisionId: null,
+        classification: 'interrupted',
+        recordedAt: new Date().toISOString(),
+        spans: new Map(),
+        usage: { units: RUN_REPORT_NO_USAGE, 'cross-unit-reduction': RUN_REPORT_NO_USAGE, 'assurance-sampling': RUN_REPORT_NO_USAGE },
+        unitRows: [],
+        // The turns it sent before AI7 closed were sent: the units the ledger recorded a turn for are the ones it submitted.
+        submitted: facts.attemptId === null ? 0 : this.submittedUnitCount(facts.attemptId),
+        adaptations: [],
+        gaps: [],
+        crossUnit: { state: 'not-run', reason: RECONCILED_INTERRUPTED_STAGE_REASON },
+        sample: assuranceSampleNotRun(RECONCILED_INTERRUPTED_STAGE_REASON),
+        findingCounts: [],
+        terminalFailure: null,
+      }, runReportReflectionNotRun(RECONCILED_INTERRUPTED_STAGE_REASON)),
+    });
   }
 
   /** Every Run of this kind waiting in Connectivity Wait, oldest first, with its Book. */

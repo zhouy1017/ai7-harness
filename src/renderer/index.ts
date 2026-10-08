@@ -24,6 +24,8 @@ import type {
   BookWorkbenchRoute,
   BookWorkOverviewProjection,
   ProposeSeriesKnowledgeInput,
+  AskAboutSelectionInput,
+  DialogueProjection,
   FidelityCategoryProjection,
   ContinueImportProjection,
   EditorialWorkspaceProfileProjection,
@@ -303,6 +305,9 @@ const taskDrawer = mountTaskDrawer({
   openTaskTarget: (target) => void leaveThen(() => openGlobalAttentionTarget(target)),
   openTaskResult: (entry, backToPanel) => openTaskResult(entry, backToPanel),
   startWholeBookTask: (bookId, input) => startWholeBookTask(bookId, input),
+  // 就这段提问… (Issue #52, S17a): 回到所选文字, and a 修改建议 made from an answer opened on the manuscript with its card.
+  dialogueJump: (bookId, target) => void jumpToManuscript(bookId, { manuscriptId: target.manuscriptId, blockId: target.blockId, markId: null }),
+  dialogueConverted: (dialogue, markId) => void jumpToManuscript(dialogue.bookId, { manuscriptId: dialogue.manuscriptId, blockId: dialogue.range.blockId, markId }),
 });
 
 /** 查看结果's floating window while it is open (Issue #423, S77a); any change of screen closes it. */
@@ -476,6 +481,7 @@ async function openTaskRunSurface(plan: TaskPlanProjection): Promise<void> {
   try {
     if (plan.kind === 'baseline-analysis') renderBookAnalysis(plan.bookId, plan.goal.chips.book);
     else if (plan.kind === 'review-run') renderBookReview(plan.bookId, plan.goal.chips.book, { reviewRunId: plan.ref, findingId: null });
+    else if (plan.kind === 'initial-evaluation') renderBookEvaluation(plan.bookId, plan.goal.chips.book);
     else renderBookOverview(await window.ai7.getBookOverview({ bookId: plan.bookId, historyCursor: null }));
   } catch (error) {
     setStatus(rendererErrorMessage(error, '无法打开运行所在的页面。'), 'error');
@@ -799,6 +805,13 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysis
       return;
     case 'learning-materials':
       await renderQualityLearning('learning', target.bookId);
+      return;
+    // A dialogue (Issue #52, S17a): the Book's 工作概览 with the dialogue in the foreground beside it.
+    case 'dialogue':
+      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
+        renderBookOverview(await window.ai7.getBookOverview({ bookId: route.bookId, historyCursor: null }));
+        taskDrawer.openDialogue(route.bookId, target.dialogueId, () => null);
+      });
       return;
   }
 }
@@ -2291,7 +2304,16 @@ function renderBookEvaluation(bookId: string, bookTitle: string): void {
     element('p', 'field-note', EVALUATION_LEDE),
     host,
   );
-  const surface = mountEvaluation({ root: host, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, technicalDetails });
+  const surface = mountEvaluation({
+    root: host,
+    api: window.ai7,
+    setStatus,
+    errorMessage: rendererErrorMessage,
+    technicalDetails,
+    awaitServiceJob,
+    // AI7 初评's plan opens in the Task Drawer beside 评估 (Issue #429, S81b1), and its bar starts it.
+    openPlan: (ref) => openTaskPlan(bookId, 'initial-evaluation', ref),
+  });
   const actions = element('div', 'button-row workbench-actions');
   const openManuscript = button(DELIVERABLES_DESTINATION_ACTIONS[0], 'primary', async () => {
     openManuscript.disabled = true;
@@ -2316,6 +2338,7 @@ function renderBookEvaluation(bookId: string, bookTitle: string): void {
   actions.append(openManuscript, openOverview);
   content.append(actions);
   replaceScreen('book-evaluation', content);
+  taskSurfaceRefresh = { 'initial-evaluation': () => surface.refresh() };
   setStatus(EVALUATION_STATUS.loading, 'busy');
   void surface.load().then(
     () => {
@@ -6804,7 +6827,7 @@ async function awaitServiceJob(
   const requireMonotonicReimportProgress = (next: ServiceJobProjection): void => {
     if (next.kind !== 'reimport-preparation' && next.kind !== 'reimport-resolution' && next.kind !== 'reimport-commit' &&
         next.kind !== 'task-authorization-preparation' && next.kind !== 'baseline-analysis-preparation' &&
-        next.kind !== 'review-run-preparation') return;
+        next.kind !== 'review-run-preparation' && next.kind !== 'initial-evaluation-preparation') return;
     if (!Number.isSafeInteger(next.progress.completed) || !Number.isSafeInteger(next.progress.total) ||
       next.progress.completed < previousReimportProgress || next.progress.completed > next.progress.total ||
       next.progress.total <= 0 ||
@@ -8424,6 +8447,11 @@ function renderEditorWindow(
     ...(isDocument ? {} : {
       seriesOf: (after) => window.ai7.inspectBookSeries({ bookId: initialWindow.bookId, membershipsAfter: after }),
       proposeSeriesKnowledge: (input: ProposeSeriesKnowledgeInput) => window.ai7.proposeSeriesKnowledge(input),
+    }),
+    // 就这段提问… (Issue #52, S17a): the Book's manuscript only; its dialogue comes to the foreground in the side slot.
+    ...(isDocument ? {} : {
+      askAboutSelection: (input: AskAboutSelectionInput) => window.ai7.askAboutSelection(input),
+      onAsked: (dialogue: DialogueProjection) => taskDrawer.openDialogue(dialogue.bookId, dialogue.dialogueId, () => editorHost.querySelector<HTMLElement>('.ProseMirror')),
     }),
     // An Apply is an authoritative write like a replacement or an undo: the window is reloaded from the
     // service and must show exactly the manuscript state the Effect Receipt names.

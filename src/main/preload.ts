@@ -273,9 +273,13 @@ const api: RendererApi = Object.freeze({
   inspectEvaluationProfiles: () => invoke<ServiceOperationMap['inspectEvaluationProfiles']['output']>(IPC_CHANNELS.inspectEvaluationProfiles),
   inspectEvaluation: (input: { recordId: string | null; recordsBefore?: number | null }) =>
     invoke<ServiceOperationMap['inspectEvaluation']['output']>(IPC_CHANNELS.inspectEvaluation, input),
-  startEvaluation: () => invoke<ServiceOperationMap['startEvaluation']['output']>(IPC_CHANNELS.startEvaluation),
+  startEvaluation: (input?: { fromInitial: boolean }) =>
+    invoke<ServiceOperationMap['startEvaluation']['output']>(IPC_CHANNELS.startEvaluation, input),
   saveEvaluation: (input: Omit<ServiceOperationMap['saveEvaluation']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['saveEvaluation']['output']>(IPC_CHANNELS.saveEvaluation, input),
+  prepareInitialEvaluation: () => invoke<ServiceOperationMap['prepareInitialEvaluation']['output']>(IPC_CHANNELS.prepareInitialEvaluation),
+  authorizeInitialEvaluation: (input: Omit<ServiceOperationMap['authorizeInitialEvaluation']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['authorizeInitialEvaluation']['output']>(IPC_CHANNELS.authorizeInitialEvaluation, input),
   inspectAnalysisFeedback: (input: { revisionId: string }) =>
     invoke<ServiceOperationMap['inspectAnalysisFeedback']['output']>(IPC_CHANNELS.inspectAnalysisFeedback, input),
   recordAnalysisFeedback: (input: Omit<ServiceOperationMap['recordAnalysisFeedback']['input'], 'bookId'>) =>
@@ -464,6 +468,18 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['inspectProductionDocuments']['output']>(IPC_CHANNELS.inspectProductionDocuments),
   inspectBookTasks: () =>
     invoke<ServiceOperationMap['inspectBookTasks']['output']>(IPC_CHANNELS.inspectBookTasks),
+  askAboutSelection: (input: Parameters<RendererApi['askAboutSelection']>[0]) =>
+    invoke<ServiceOperationMap['askAboutSelection']['output']>(IPC_CHANNELS.askAboutSelection, input),
+  inspectDialogue: (input: Parameters<RendererApi['inspectDialogue']>[0]) =>
+    invoke<ServiceOperationMap['inspectDialogue']['output']>(IPC_CHANNELS.inspectDialogue, input),
+  stopDialogueAnswer: (input: Parameters<RendererApi['stopDialogueAnswer']>[0]) =>
+    invoke<ServiceOperationMap['stopDialogueAnswer']['output']>(IPC_CHANNELS.stopDialogueAnswer, input),
+  continueDialogueAnswer: (input: Parameters<RendererApi['continueDialogueAnswer']>[0]) =>
+    invoke<ServiceOperationMap['continueDialogueAnswer']['output']>(IPC_CHANNELS.continueDialogueAnswer, input),
+  regenerateDialogueAnswer: (input: Parameters<RendererApi['regenerateDialogueAnswer']>[0]) =>
+    invoke<ServiceOperationMap['regenerateDialogueAnswer']['output']>(IPC_CHANNELS.regenerateDialogueAnswer, input),
+  convertDialogueToChangeSuggestion: (input: Parameters<RendererApi['convertDialogueToChangeSuggestion']>[0]) =>
+    invoke<ServiceOperationMap['convertDialogueToChangeSuggestion']['output']>(IPC_CHANNELS.convertDialogueToChangeSuggestion, input),
   inspectBookDeliveryPackage: () =>
     invoke<ServiceOperationMap['inspectBookDeliveryPackage']['output']>(IPC_CHANNELS.inspectBookDeliveryPackage),
   prepareBookDeliveryPackage: (input: Omit<ServiceOperationMap['prepareBookDeliveryPackage']['input'], 'bookId'>) =>

@@ -52,8 +52,19 @@ const PEOPLE = Object.freeze({ authors: '周一、吴二', editors: '郑三', re
 const PEOPLE_NOTE = '作者与责编用于标注和查找这本书，也是之后反馈与学习记录的归属；它们不是账号，也不决定谁能做什么。';
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
 const THIRD = Object.freeze({ title: '评估旅程丙' });
-/** The J-04 model adapter's base fixture: every unit, the reduction and the sample of exact `sample1` answered (Issue #94). */
-const FIXTURE_IDENTITY = 'sample1-baseline-happy';
+/**
+ * The J-04 model adapter's fixture: AI7 初评's authored units and synthesis of exact `sample1` (Issue #429, S81b1), layered over
+ * the base fixture that answers every unit, the reduction and the sample of the baseline analysis (Issue #94).
+ */
+const FIXTURE_IDENTITY = 'sample1-evaluation-authored';
+/** AI7 初评's scores and lines as the authored fixture gives them, item by item (Issue #429, S81b1). */
+const AI7_ITEM_LINES = [
+  ['literary-quality', 'sufficient', '文学品质与作者声音：AI7 初评 16.5 / 20 · 依据充分度 充分（引用 19 个段落，分布在 8 个阅读范围）'],
+  ['theme-and-context', 'fair', '主题、价值与社会文化语境：AI7 初评 15 / 20 · 依据充分度 一般（引用 6 个段落，分布在 3 个阅读范围）'],
+  ['structure-and-coherence', 'sufficient', '结构、叙事逻辑与连贯：AI7 初评 15.5 / 20 · 依据充分度 充分（引用 16 个段落，分布在 8 个阅读范围）'],
+  ['chinese-language', 'sufficient', '中文语言与表达：AI7 初评 14 / 20 · 依据充分度 充分（引用 9 个段落，分布在 7 个阅读范围）'],
+  ['readers-and-market', 'insufficient', '读者与市场潜力：AI7 初评 12 / 20 · 依据充分度 不足（没有引用内容块）'],
+];
 /** 分析反馈's words the Journey writes: stand-ins of its own, never the manuscript's. */
 const ENTITY_CORRECTION = '（旅程示例）应分作两个人物';
 const SYNOPSIS_REASON = '（旅程示例）少了尾声';
@@ -257,7 +268,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     database.exec('PRAGMA query_only = ON;');
     // The terminal version the service stamps, as J-16 reads it: the 分析反馈 revision since Issue #94 (S38), and after it
     // this pin moves with whatever revision a later slice takes.
-    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 58, 'credential-cleanup-metadata-version');
+    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 60, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
               approved_fallback_chain, credential_slot, credential_reference, credential_operation_state
@@ -504,6 +515,20 @@ const READ_EVALUATION = `(() => {
     startReason: host.querySelector('.evaluation-start-reason')?.textContent ?? null,
     versions: Array.from(host.querySelectorAll('.evaluation-version-list button'), (button) => button.textContent),
     refusal: host.querySelector('.evaluation-refusal')?.textContent ?? null,
+    startFromInitial: host.querySelector('[data-evaluation-action="start-from-initial"]')?.textContent ?? null,
+    initial: (() => {
+      const section = host.querySelector('.evaluation-initial');
+      return section === null ? null : {
+        state: section.dataset.initialState ?? null,
+        task: section.querySelector('.evaluation-initial-task')?.textContent ?? null,
+        none: section.querySelector('.evaluation-initial-none')?.textContent ?? null,
+        latest: section.querySelector('.evaluation-initial-latest')?.textContent ?? null,
+        items: Array.from(section.querySelectorAll('.evaluation-initial-items li'), (line) => [line.dataset.itemId, line.dataset.sufficiency, line.textContent]),
+        conclusion: section.querySelector('.evaluation-initial-conclusion')?.textContent ?? null,
+        actions: Array.from(section.querySelectorAll('.evaluation-initial-actions button'), (button) => [button.dataset.evaluationAction, button.textContent, button.disabled]),
+        reason: section.querySelector('.evaluation-initial-reason')?.textContent ?? null,
+      };
+    })(),
     record: record === null ? null : {
       state: record.dataset.evaluationState,
       entries: record.dataset.entries,
@@ -520,6 +545,17 @@ const READ_EVALUATION = `(() => {
           band instanceof HTMLElement && !band.hidden ? band.textContent : null, item.querySelector('[data-evaluation-field="not-rated"]')?.checked ?? null];
       }),
       conclusions: Array.from(record.querySelectorAll('.evaluation-conclusion [data-conclusion]'), (choice) => [choice.dataset.conclusion, choice.querySelector('input')?.checked ?? null, choice.querySelector('input')?.disabled ?? null]),
+      // AI7's score beside each item, whether 调分原因 is offered, and what is ticked (Issue #429, S81b1).
+      ai7Items: Array.from(record.querySelectorAll('.evaluation-item'), (item) => {
+        const group = item.querySelector('.evaluation-adjustment');
+        return [item.dataset.itemId, item.querySelector('.evaluation-item-ai7')?.textContent ?? null, group instanceof HTMLElement ? !group.hidden : null,
+          Array.from(item.querySelectorAll('[data-evaluation-field="adjustment-reason"]:checked'), (input) => input.value)];
+      }),
+      // What each of AI7's scores rests on (EVAL-006), and the ranges a 初评 with gaps never read (Issue #429 review).
+      ai7Evidence: Array.from(record.querySelectorAll('.evaluation-item'), (item) => item.querySelector('.evaluation-item-ai7-evidence summary')?.textContent ?? null),
+      ai7Unread: record.querySelector('.evaluation-ai7-unread')?.textContent ?? null,
+      suggested: Array.from(record.querySelectorAll('.evaluation-conclusion [data-conclusion]'), (choice) => choice.querySelector('.evaluation-ai7-suggested')?.textContent ?? null),
+      ai7Conclusion: record.querySelector('.evaluation-ai7-conclusion')?.textContent ?? null,
       blocked: record.querySelector('.evaluation-recommend-blocked')?.hidden === false,
       allDisabled: Array.from(record.querySelectorAll('input, textarea')).every((control) => control.disabled),
       actions: Array.from(record.querySelectorAll('.evaluation-actions button'), (button) => button.textContent),
@@ -1352,7 +1388,7 @@ async function main() {
     await clickSelector(renderer, '[data-evaluation-action="start"]', 'evaluation-start');
     const started = await readEvaluation(renderer, (page) => page.record !== null && page.focus === 'heading', 'evaluation-started');
     requireJourney(started.record.heading === '第 1 版 · 编辑评分中' && started.record.revision === '评估的是修订版 r1' &&
-      started.record.ai7 === 'AI7 初评尚未接通：这一版由你打分。' && started.record.total === '总分 0 / 100 · 还有 5 项没有打分' &&
+      started.record.ai7 === '这一版不是从 AI7 初评开始的：由你打分。' && started.record.total === '总分 0 / 100 · 还有 5 项没有打分' &&
       JSON.stringify(started.record.items.map(([, legend, score]) => [legend, score])) === JSON.stringify(ITEM_LEGENDS.map((legend) => [legend, ''])) &&
       started.record.conclusions.every(([, checked]) => checked === false) && JSON.stringify(started.record.actions) === JSON.stringify(['保存评估', '定稿']) &&
       started.startReason === '第 1 版还没有定稿；定稿后才能重新评估。', 'evaluation-started-words', started);
@@ -1731,6 +1767,106 @@ async function main() {
     await waitFor(renderer, `document.querySelectorAll('.evaluation-version-list li').length===10 && document.querySelector('.evaluation-version-list button')?.textContent.startsWith('第 13 版') && document.activeElement===document.querySelector('.evaluation-versions h3')`, 'evaluation-pages-latest-focus');
     await clickSelector(renderer, '[data-evaluation-action="save"]', 'evaluation-pages-save-input');
     await readEvaluation(renderer, (page) => page.record?.entries === '2' && page.record.items[0][2] === '17.5', 'evaluation-pages-saved-input');
+
+    // ---- AI7 初评 (Issue #429, plan slice S81b1; V2-UX-EVAL-001, EVAL-005 to EVAL-007, EVAL-011, EVAL-014) ---------------
+    at('initial-evaluation-start');
+    // ②C offers AI7's 初评 before there is one; 准备 AI7 初评 opens its plan in the Task Drawer, whose bar starts it, and ②C follows
+    // the Run to its end on the J-04 adapter's authored fixture.
+    const beforeInitial = await readEvaluation(renderer, (page) => page.initial !== null, 'initial-evaluation-offered');
+    requireJourney(beforeInitial.initial.state === 'none' && beforeInitial.initial.none === 'AI7 还没有为这本书做初评。' &&
+      JSON.stringify(beforeInitial.initial.actions) === JSON.stringify([['prepare-initial', '准备 AI7 初评', false]]) && beforeInitial.startFromInitial === null,
+    'initial-evaluation-offered-words', beforeInitial.initial);
+    await clickSelector(renderer, '[data-evaluation-action="prepare-initial"]', 'initial-evaluation-prepare');
+    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer === 'open' && drawer.dataset.taskPlanKind === 'initial-evaluation' && drawer.dataset.taskPlanStart === 'ready' && drawer.querySelector('[data-task-drawer-control="start"]')?.disabled === false; })()`, 'initial-evaluation-plan', 120_000);
+    // The plan in the editor's words, as the drawer reads it: its task, its two steps, its 工序, and that it scores nothing for
+    // the editor; no button of the drawer carries 授权.
+    const planWords = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'initial-evaluation', ref: document.querySelector('#task-drawer').dataset.taskPlanRef })
+      .then((plan) => JSON.stringify([plan.goal.sentence, plan.steps.map((step) => step.label), plan.notDo.editorial.includes('不替你打分：评估记录保存的是你的评分'), plan.goal.chips.procedure]))`);
+    requireJourney(planWords === JSON.stringify(['按本社评估方案为这本书做 AI7 初评：各评分项的初评分数与评语，供你打分时参考', ['逐章读取，记下各评分项的依据', '全书综合'], true, '审稿评估方案 第 1 版']),
+      'initial-evaluation-plan-words', planWords);
+    await assertRenderer(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return (drawer?.textContent ?? '').includes('按本社评估方案为这本书做 AI7 初评') && Array.from(drawer.querySelectorAll('button'), (button) => button.textContent).every((label) => !label.includes('授权')); })()`, 'initial-evaluation-plan-shown');
+    const prepared = await readEvaluation(renderer, (page) => page.initial?.state === 'prepared', 'initial-evaluation-prepared');
+    requireJourney(JSON.stringify(prepared.initial.actions) === JSON.stringify([['open-initial-plan', '查看计划并开始', false]]) &&
+      prepared.initial.task === 'AI7 初评 · 尚未开始', 'initial-evaluation-prepared-words', prepared.initial);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'initial-evaluation-run');
+    const settledInitial = await readEvaluation(renderer, (page) => ['settled', 'failed', 'interrupted'].includes(page.initial?.state), 'initial-evaluation-ended');
+    requireJourney(settledInitial.initial.state === 'settled', 'initial-evaluation-settled', settledInitial.initial);
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState === 'settled'`, 'initial-evaluation-drawer-settled', 30_000);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'initial-evaluation-drawer-close');
+    await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'initial-evaluation-drawer-closed');
+
+    at('initial-evaluation-draft');
+    // AI7's 初评 on ②C: each item's score with its 依据充分度 — 充分, 一般 or 不足 by what it cited — and the conclusion it would
+    // suggest, said as AI7's. A version begins from it once the open one is 定稿; it reads 「AI7 初稿」 with AI7's scores beside the
+    // editor's, no risk and no conclusion chosen for them.
+    requireJourney(settledInitial.initial.latest === '第 1 次初评 · 读的是修订版 r1 · 总分 73 / 100 · 优秀' &&
+      JSON.stringify(settledInitial.initial.items) === JSON.stringify(AI7_ITEM_LINES) &&
+      settledInitial.initial.conclusion === 'AI7 建议的结论：修改后再议（由你选定）' &&
+      JSON.stringify(settledInitial.initial.actions) === JSON.stringify([['prepare-initial', '重新初评', false], ['open-initial-task', '查看任务', false]]) &&
+      settledInitial.startReason === '第 13 版还没有定稿；定稿后才能重新评估。' && settledInitial.startFromInitial === null,
+    'initial-evaluation-latest-words', settledInitial.initial);
+    await tick(renderer, '[data-screen="book-evaluation"] .evaluation-conclusion [data-conclusion="revise"] input', 'initial-evaluation-close-open-conclusion');
+    await clickSelector(renderer, '[data-evaluation-action="finalize"]', 'initial-evaluation-close-open');
+    const closedOpen = await readEvaluation(renderer, (page) => page.record?.heading === '第 13 版 · 定稿' && page.startFromInitial !== null, 'initial-evaluation-open-closed');
+    requireJourney(closedOpen.startFromInitial === '从 AI7 初评开始' && closedOpen.start === '重新评估', 'initial-evaluation-start-offered', closedOpen);
+    await clickSelector(renderer, '[data-evaluation-action="start-from-initial"]', 'initial-evaluation-begin');
+    const draft = await readEvaluation(renderer, (page) => page.record?.heading === '第 14 版 · AI7 初稿', 'initial-evaluation-begun');
+    requireJourney(draft.record.ai7 === '这一版从 AI7 第 1 次初评开始（读的是修订版 r1）：AI7 的分数列在每一项旁边，记录保存的是你的评分。' &&
+      JSON.stringify(draft.record.items.map(([, , score]) => score)) === JSON.stringify(['16.5', '15', '15.5', '14', '12']) &&
+      JSON.stringify(draft.record.ai7Items.map(([itemId, line, offered, ticked]) => [itemId, line, offered, ticked.length])) ===
+        JSON.stringify(AI7_ITEM_LINES.map(([itemId, , line]) => [itemId, line.slice(line.indexOf('：') + 1), false, 0])) &&
+      draft.record.total === '总分 73 / 100 · 优秀' && draft.record.conclusions.every(([, checked]) => checked === false) &&
+      JSON.stringify(draft.record.ai7Evidence) === JSON.stringify(['AI7 的依据（9 条）', 'AI7 的依据（3 条）', 'AI7 的依据（8 条）', 'AI7 的依据（7 条）', null]) &&
+      draft.record.ai7Unread === null &&
+      JSON.stringify(draft.record.suggested) === JSON.stringify([null, 'AI7 建议', null, null]) &&
+      draft.record.ai7Conclusion === 'AI7 建议的结论：修改后再议（由你选定）' && JSON.stringify(draft.record.actions) === JSON.stringify(['保存评估', '定稿']) && draft.versions[0].startsWith('第 14 版 · AI7 初稿 · 修订版 r1 · 总分 73 / 100'),
+    'initial-evaluation-draft-words', draft.record);
+
+    at('initial-evaluation-adjust');
+    // The editor's own score departs from AI7's: 调分原因 is offered beside it, none ticked, and the one they tick is kept with
+    // the score. The record keeps the editor's; AI7's stays beside it.
+    await fill(renderer, `${item('readers-and-market')} [data-evaluation-field="score"]`, '10', 'initial-evaluation-adjust-score');
+    const adjustmentOffered = await readEvaluation(renderer, (page) => page.record?.ai7Items[4]?.[2] === true, 'initial-evaluation-reasons-offered');
+    requireJourney(JSON.stringify(adjustmentOffered.record.ai7Items.map(([, , open, ticked]) => [open, ticked.length])) === JSON.stringify([[false, 0], [false, 0], [false, 0], [false, 0], [true, 0]]) &&
+      adjustmentOffered.record.total === '总分 71 / 100 · 优秀', 'initial-evaluation-reasons-unticked', adjustmentOffered.record.ai7Items);
+    await tick(renderer, `${item('readers-and-market')} [data-evaluation-field="adjustment-reason"][value="too-high"]`, 'initial-evaluation-reason');
+    await clickSelector(renderer, '[data-evaluation-action="save"]', 'initial-evaluation-adjust-save');
+    await waitFor(renderer, `${status} === '评估已保存。'`, 'initial-evaluation-adjust-saved-status');
+    const adjusted = await readEvaluation(renderer, (page) => page.record?.heading === '第 14 版 · 编辑评分中' && page.record.entries === '2', 'initial-evaluation-adjusted');
+    requireJourney(JSON.stringify(adjusted.record.ai7Items[4]) === JSON.stringify(['readers-and-market', AI7_ITEM_LINES[4][2].slice(AI7_ITEM_LINES[4][2].indexOf('：') + 1), true, ['too-high']]) &&
+      adjusted.record.items[4][2] === '10', 'initial-evaluation-adjusted-words', adjusted.record);
+    const storedAdjustment = await renderer.evaluate(`window.ai7.inspectEvaluation({ recordId: null }).then((page) => JSON.stringify([page.record.content.items.map((entry) => entry.score), page.record.content.items[4].adjustment, page.record.initial.items.map((entry) => entry.score)]))`);
+    requireJourney(storedAdjustment === JSON.stringify([[16.5, 15, 15.5, 14, 10], { note: null, reasons: ['too-high'] }, [16.5, 15, 15.5, 14, 12]]), 'initial-evaluation-adjusted-service', storedAdjustment);
+
+    at('initial-evaluation-finalize');
+    // 定稿: the conclusion is the editor's to choose — AI7's suggestion was never chosen for them — and the risks carry from the
+    // version before, as 重新评估 carries them.
+    await tick(renderer, '[data-screen="book-evaluation"] .evaluation-conclusion [data-conclusion="revise"] input', 'initial-evaluation-conclusion');
+    await clickSelector(renderer, '[data-evaluation-action="finalize"]', 'initial-evaluation-finalize');
+    await waitFor(renderer, `${status} === '第 14 版评估已定稿。'`, 'initial-evaluation-finalized-status');
+    const finalizedInitial = await readEvaluation(renderer, (page) => page.record?.state === 'finalized' && page.record.heading === '第 14 版 · 定稿', 'initial-evaluation-finalized');
+    requireJourney(finalizedInitial.record.total === '总分 71 / 100 · 优秀' && finalizedInitial.record.allDisabled === true &&
+      JSON.stringify(finalizedInitial.record.ai7Items[4][3]) === JSON.stringify(['too-high']), 'initial-evaluation-finalized-words', finalizedInitial.record);
+
+    at('initial-evaluation-calibration');
+    // 设置 › 评估校准与预测 counts the Book whose AI7 初评 the editor adjusted, once — 「1 本」 — and no longer says AI7's 初评 is not
+    // connected. The calibration itself waits for ten such Books.
+    await assertRenderer(renderer, `(() => { const open = Array.from(document.querySelectorAll('[data-screen="book-evaluation"] .workbench-actions button')).find((button) => button.textContent === '工作概览'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'initial-evaluation-overview');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'initial-evaluation-overview-ready');
+    await click(renderer, '返回图书列表', 'initial-evaluation-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'initial-evaluation-landing');
+    await click(renderer, '评估校准与预测', 'initial-evaluation-calibration-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration .calibration-progress')?.textContent === '调分记录 1 / 10 本 · 满 10 本后生效'`, 'initial-evaluation-calibration-count');
+    await assertRenderer(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-waiting') === null`, 'initial-evaluation-calibration-connected');
+    const calibrationService = await renderer.evaluate(`window.ai7.inspectEvaluationCalibration({ after: null, focusBookId: null }).then((answer) => JSON.stringify([answer.calibration.adjustments, answer.calibration.initialScoresConnected, answer.calibration.active]))`);
+    requireJourney(calibrationService === JSON.stringify([1, true, false]), 'initial-evaluation-calibration-service', calibrationService);
+    // Back to 评估 by the manuscript's 工作 group, where the Journey goes on.
+    await click(renderer, '返回', 'initial-evaluation-calibration-back');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'initial-evaluation-back-landing');
+    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id="${thirdId}"]`, 'initial-evaluation-back-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell [data-work-destination="evaluation"]')`, 'initial-evaluation-back-manuscript', 120_000);
+    await clickSelector(renderer, '.editor-shell [data-work-destination="evaluation"]', 'initial-evaluation-back-open');
+    await readEvaluation(renderer, (page) => page.state === 'ready' && page.record?.heading === '第 14 版 · 定稿', 'initial-evaluation-back-ready');
 
     // ---- 就地反馈轻问 after a Proposal Decision (Issue #61, plan slice S26a; FDBK-001 to FDBK-007, PDEC-009, MARK-005) -------
     at('decision-feedback-suggestions');

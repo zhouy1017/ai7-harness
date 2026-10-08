@@ -494,7 +494,7 @@ export class ScheduledBackups {
       // A file under a backup's name that no record names would never be listed or removed (Issue #434 review). One the removal
       // cannot take — a scanner holding the file just put there, say — is a whole backup: it is recorded instead, so it is
       // listed and expires as any other, and the next check finds the day's backup made rather than a file at its name
-      // (Issue #644). Should the record fail as well, the file stays as it was.
+      // (Issue #644). Should the record fail as well — at shutdown the store is already closing — the file stays as it was.
       if (placed && !(await rm(target, { force: true }).then(() => true, () => false))) {
         try {
           recordPlaced?.();

@@ -242,9 +242,10 @@ export async function backUpBeforeUpgrade(
     partial = join(location, `.${randomUUID()}${DATABASE_PACKAGE_EXTENSION}.partial`);
     const written = await writeDatabasePackage(db, dataRoot, partial, () => ({
       dataVersion: fromDataVersion,
-      // The software whose data this is, which can import it again. A predecessor whose migration stopped partway left a
-      // middle state no software imports, so that backup names the software that made it, this one (Issue #644); going back
-      // then goes to the earlier complete backup its `rollback` names.
+      // The software whose data this is. A predecessor whose migration stopped partway left a middle state that no AI7
+      // imports — not that predecessor, and not this AI7, which previews it as an older Data Version — so that backup names
+      // only who made it, this AI7, as provenance (Issue #644). The upgrade record still names the predecessor it came
+      // from, and going back uses the earlier complete backup its `rollback` names.
       softwareVersion: previous.rollback === undefined ? fromSoftwareVersion ?? options.softwareVersion : options.softwareVersion,
       schemaRevision: revision,
       createdAt: options.now.toISOString(),

@@ -135,7 +135,7 @@ function serviceEnvironment(
 
 function readinessIsExact(value: ServiceReadiness): boolean {
   return (
-    value.protocolVersion === 92 &&
+    value.protocolVersion === 94 &&
     value.state === 'ready' &&
     value.runtime.electron === '43.4.1' &&
     value.runtime.node === '24.18.1' &&
@@ -193,6 +193,7 @@ export class ServiceClient {
     modelAdapterControl?: J04ModelAdapterControl,
     connectivityPath?: string,
     unitHoldPath?: string,
+    answerHoldPath?: string,
   ): Promise<ServiceClient> {
     if (!isAbsolute(executable) || !isAbsolute(serviceEntry) || !isAbsolute(dataRoot)) {
       throw new ServiceCallError('SERVICE_LAUNCH_INVALID', '本地业务服务启动参数无效。');
@@ -212,6 +213,8 @@ export class ServiceClient {
     if (connectivityPath !== undefined) args.push('--j04-connectivity-path', connectivityPath);
     // J-10's unit hold (Issue #422) rides beside the adapter as well: the file whose number lets units settle.
     if (unitHoldPath !== undefined) args.push('--j10-unit-hold-path', unitHoldPath);
+    // J-16's answer hold (Issue #52, S17a) likewise: the file whose number lets a dialogue answer's deltas through.
+    if (answerHoldPath !== undefined) args.push('--j16-answer-hold-path', answerHoldPath);
     const child = spawn(
       executable,
       args,

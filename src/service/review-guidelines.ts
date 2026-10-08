@@ -482,7 +482,8 @@ export class ReviewGuidelineLedger {
       this.#rebuildUsage(known);
       this.#db.exec('COMMIT');
     } catch (error) {
-      this.#db.exec('ROLLBACK');
+      // SQLite may have rolled back already (SQLITE_FULL, say): a second rollback would hide the error that ended it.
+      if (this.#db.isTransaction) this.#db.exec('ROLLBACK');
       throw error;
     }
   }
