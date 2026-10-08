@@ -3,7 +3,7 @@ import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSyn
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
-import { CAPTURED_PROCEDURE_SCOPE_SLOTS, MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_PAGE, MAX_LEARNING_LINEAGE_DECISIONS, MAX_LEARNING_REMEDIATION_ITEMS, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
+import { CAPTURED_PROCEDURE_SCOPE_SLOTS, CAPTURED_PROCEDURE_STATE_LABELS, MAX_CAPTURED_PROCEDURE_RUNS_SHOWN, MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_PAGE, MAX_LEARNING_LINEAGE_DECISIONS, MAX_LEARNING_REMEDIATION_ITEMS, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
   InspectSeriesKnowledgeReviewInput,
   ServiceOperationMap,
@@ -19,6 +19,8 @@ import type {
   CapturedProcedureProjection,
   CapturedProceduresProjection,
   CapturedProcedureRunProjection,
+  CapturedProcedureStopPreviewProjection,
+  CapturedProcedureStopRunProjection,
   CapturedProcedureValidationProjection,
   DeveloperProposalProjection,
   DeveloperProposalVersionProjection,
@@ -609,8 +611,13 @@ import {
   ceilingWiderThanSource,
   developerProposalFileText,
   houseExecutor,
+  boundedPage,
   initializeCapturedProcedureSchema,
+  resolveProcedureVersions,
   validCapturedProcedureTitle,
+  versionEligible,
+  versionIneligibleReason,
+  type ResolvableVersion,
   type ReviewRunProcedurePinInput,
   type StepWords,
   type StoredCapturedVersion,
@@ -6278,8 +6285,24 @@ export class EditorialStore {
   }
 
   #capturedProcedureProjection(procedureId: string, before: number | null = null): CapturedProcedureProjection {
+    const { eligible } = resolveProcedureVersions(this.#resolvableVersions(this.#capturedProcedures.versions(procedureId)));
     return this.#capturedProcedures.projection(procedureId, this.#capturedStepWords(), (bookId) => this.#evaluationBookTitle(bookId),
-      (reviewRunId) => this.#reviewRuns.ordinalOf(reviewRunId), before);
+      (reviewRunId) => this.#reviewRuns.ordinalOf(reviewRunId), (reviewRunId) => this.#reviewRuns.runStatus(reviewRunId).stateLabel,
+      eligible[0]?.versionId ?? null, before);
+  }
+
+  /**
+   * Each version as Latest Eligible Version Resolution weighs it (Issue #66, S31; REUSE-043, REUSE-044): its state, and for an
+   * 已启用 one whether it still validates against the configuration as it applies now — deterministic and provider-free.
+   */
+  #resolvableVersions(versions: ReadonlyArray<StoredCapturedVersion>): ResolvableVersion[] {
+    return versions.map((stored) => ({
+      versionId: stored.versionId,
+      version: stored.version,
+      state: stored.state,
+      failedValidation: stored.validationProblems.length > 0,
+      problem: stored.state === 'enabled' ? this.#capturedValidation(stored).problems[0] ?? null : null,
+    }));
   }
 
   /** 知识库 › 工序与规则's 可复用工序, apart from the built-in 工序, and the 开发建议 (ADR 0087 §5, §6). A read. */
@@ -6480,64 +6503,159 @@ export class EditorialStore {
   }
 
   /**
-   * `停用` (ADR 0087 §5): one version, or — with `versionId` \`null\` — every version not stopped yet. Final for each: a stopped
-   * version is never resolved again and stays as its own Historical Version Stub, and every Run that pinned it keeps naming it.
+   * `停用…`'s preview (Issue #66, plan slice S31; REUSE-038, REUSE-040, REUSE-041): the Version Removal Preview for a 停用, which
+   * removes nothing (ADR 0087 §5). For one version, or — with `versionId` `null` — every version not stopped yet: each with the
+   * Review Runs that pinned it — a prepared one not yet approved and still its Book's newest is prepared again, an approved one
+   * not yet finished goes on under the version it was approved with, and every one keeps naming it — and the version a new use
+   * resolves to afterwards. Its digest is what `stopCapturedProcedure` confirms. A read.
    */
-  stopCapturedProcedure(procedureId: string, versionId: string | null, now: Date = new Date()): CapturedProcedureProjection {
+  previewCapturedProcedureStop(procedureId: string, versionId: string | null): CapturedProcedureStopPreviewProjection {
+    return this.#procedureCall(() => this.#capturedStopPreview(procedureId, versionId).projection);
+  }
+
+  #capturedStopPreview(procedureId: string, versionId: string | null): { projection: CapturedProcedureStopPreviewProjection; stoppingIds: string[] } {
+    requireStore(typeof procedureId === 'string' && UUID_PATTERN.test(procedureId), 'CAPTURED_PROCEDURE_INVALID', '可复用工序标识无效。');
+    requireStore(versionId === null || (typeof versionId === 'string' && UUID_PATTERN.test(versionId)), 'CAPTURED_PROCEDURE_INVALID', '可复用工序的版本标识无效。');
+    const versions = this.#capturedProcedures.versions(procedureId);
+    requireStore(versions.length > 0, 'CAPTURED_PROCEDURE_NOT_FOUND', '这个可复用工序不存在。');
+    if (versionId !== null) {
+      const chosen = versions.find((stored) => stored.versionId === versionId);
+      requireStore(chosen !== undefined, 'CAPTURED_PROCEDURE_NOT_FOUND', '这一版可复用工序不存在。');
+      requireStore(chosen.state !== 'stopped', 'CAPTURED_PROCEDURE_STOPPED', `《${chosen.document.title}》第 ${chosen.version} 版已经停用。`);
+    }
+    const stopping = versions.filter((stored) => stored.state !== 'stopped' && (versionId === null || stored.versionId === versionId));
+    requireStore(stopping.length > 0, 'CAPTURED_PROCEDURE_STOPPED', `《${versions[0]!.document.title}》的全部版本都已停用。`);
+    const link = (reviewRunId: string, status: { bookId: string; ordinal: number; stateLabel: string }): CapturedProcedureStopRunProjection => ({
+      bookId: status.bookId, bookTitle: this.#evaluationBookTitle(status.bookId), reviewRunId, label: `第 ${status.ordinal} 次`, stateLabel: status.stateLabel,
+    });
+    // Every version it takes, each with every Run it touches: the digest binds all of them, the answer shows what one frame holds.
+    const weighed = stopping.map((stored) => {
+      const prepared: CapturedProcedureStopRunProjection[] = [];
+      const active: CapturedProcedureStopRunProjection[] = [];
+      for (const reviewRunId of this.#capturedProcedures.liveCandidateRunIds(stored.versionId)) {
+        const status = this.#reviewRuns.runStatus(reviewRunId);
+        // Prepared and still its Book's newest: its approval would be refused once the version is stopped (ADR 0087 §5).
+        if (!status.authorized && status.newestOfBook) prepared.push(link(reviewRunId, status));
+        // Approved and not finished — running, or with 继续审阅 left: it goes on under the version it was approved with.
+        else if (status.authorized && (status.state === 'running' || status.canContinue)) active.push(link(reviewRunId, status));
+      }
+      return { stored, prepared, active };
+    });
+    const previewVersions = weighed.map(({ stored, prepared, active }) => ({
+      versionId: stored.versionId,
+      version: stored.version,
+      stateLabel: CAPTURED_PROCEDURE_STATE_LABELS[stored.state],
+      runCount: this.#capturedProcedures.pinCounts(stored.versionId).ran,
+      prepared: prepared.slice(-MAX_CAPTURED_PROCEDURE_RUNS_SHOWN).reverse(),
+      preparedCount: prepared.length,
+      active: active.slice(-MAX_CAPTURED_PROCEDURE_RUNS_SHOWN).reverse(),
+      activeCount: active.length,
+    }));
+    const after = resolveProcedureVersions(this.#resolvableVersions(versions), new Set(stopping.map((stored) => stored.versionId))).eligible[0] ?? null;
+    const previewDigest = sha256(canonicalJson({
+      procedureId,
+      versionId,
+      versions: weighed.map(({ stored, prepared, active }) => ({
+        versionId: stored.versionId,
+        state: stored.state,
+        prepared: prepared.map((run) => run.reviewRunId),
+        active: active.map((run) => run.reviewRunId),
+      })),
+      afterVersionId: after?.versionId ?? null,
+    }));
+    return {
+      stoppingIds: stopping.map((stored) => stored.versionId),
+      projection: {
+        procedureId,
+        title: versions[0]!.document.title,
+        versionId,
+        // As many of the newest as one frame holds, at most a page (S31 review P2-2); the rest are counted.
+        versions: boundedPage(previewVersions, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE),
+        versionCount: previewVersions.length,
+        afterVersion: after?.version ?? null,
+        previewDigest,
+      },
+    };
+  }
+
+  /**
+   * `停用` (ADR 0087 §5): one version, or — with `versionId` `null` — every version not stopped yet, confirming exactly the
+   * `停用…` preview the editor read, by its digest, checked inside the write (Issue #66, S31). Final for each: a stopped version
+   * is never resolved again and stays as its own Historical Version Stub, and every Run that pinned it keeps naming it. Nothing
+   * is deleted or blocked.
+   */
+  stopCapturedProcedure(procedureId: string, versionId: string | null, previewDigest: string, now: Date = new Date()): CapturedProcedureProjection {
     return this.#procedureCall(() => {
-      const versions = this.#capturedProcedures.versions(procedureId);
-      requireStore(versions.length > 0, 'CAPTURED_PROCEDURE_NOT_FOUND', '这个可复用工序不存在。');
-      const stopping = versionId === null ? versions.filter((stored) => stored.state !== 'stopped') : versions.filter((stored) => stored.versionId === versionId);
-      requireStore(versionId === null || stopping.length === 1, 'CAPTURED_PROCEDURE_NOT_FOUND', '这一版可复用工序不存在。');
-      this.#transaction(this.#authority, () => { for (const stored of stopping) this.#capturedProcedures.stop(stored.versionId, now); });
+      this.#transaction(this.#authority, () => {
+        const preview = this.#capturedStopPreview(procedureId, versionId);
+        requireStore(typeof previewDigest === 'string' && preview.projection.previewDigest === previewDigest, 'CAPTURED_PROCEDURE_STOP_PREVIEW_STALE',
+          '停用的影响在你查看之后有了变化；请重新查看再停用。');
+        for (const stopping of preview.stoppingIds) this.#capturedProcedures.stop(stopping, previewDigest, now);
+      });
       return this.#capturedProcedureProjection(procedureId);
     });
   }
 
   /**
-   * `运行此工序…` / `按已保存的工序` for one Book (ADR 0087 §4; UI ADR 0013, REUSE-043 to REUSE-045): the newest `已启用`
-   * version that still validates — a newer one that no longer does is passed over and said so — with its steps as this Book can
-   * take them and where today's guideline versions differ from the source Run's. A read: the ordinary 新建审阅 sheet prepares.
+   * `运行此工序…` / `按已保存的工序` for one Book (ADR 0087 §4; UI ADR 0013; REUSE-043 to REUSE-045, REUSE-054): the newest
+   * `已启用` version that still validates — every newer one passed over and said why — or, with `versionId`, the exact eligible
+   * version the editor chose instead (Issue #66, S31), with its steps as this Book can take them and where today's guideline
+   * versions differ from the source Run's. A version that is not eligible cannot be chosen. A read: the 新建审阅 sheet prepares.
    */
-  inspectCapturedProcedureRun(bookId: string, procedureId: string): CapturedProcedureRunProjection {
+  inspectCapturedProcedureRun(bookId: string, procedureId: string, versionId: string | null = null): CapturedProcedureRunProjection {
     return this.#procedureCall(() => {
-      requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
-      const versions = this.#capturedProcedures.versions(procedureId);
-      requireStore(versions.length > 0, 'CAPTURED_PROCEDURE_NOT_FOUND', '这个可复用工序不存在。');
-      const passedOver: Array<{ version: number; reason: string }> = [];
-      let resolved: { stored: StoredCapturedVersion; validation: CapturedProcedureValidationProjection } | null = null;
-      for (const stored of versions) {
-        if (stored.state !== 'enabled') continue;
-        const validation = this.#capturedValidation(stored);
-        if (!validation.passes) {
-          passedOver.push({ version: stored.version, reason: validation.problems[0]! });
-          continue;
-        }
-        resolved = { stored, validation };
-        break;
-      }
-      const title = versions[0]!.document.title;
-      if (resolved === null) {
-        return {
+      const resolution = this.#capturedRunResolution(bookId, procedureId, versionId);
+      requireStore(resolution.ineligible === null, 'REVIEW_PROCEDURE_VERSION_INELIGIBLE', resolution.ineligible ?? '');
+      return resolution.projection;
+    });
+  }
+
+  #capturedRunResolution(bookId: string, procedureId: string, versionId: string | null): { projection: CapturedProcedureRunProjection; ineligible: string | null } {
+    requireStore(typeof bookId === 'string' && UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+    requireStore(versionId === null || (typeof versionId === 'string' && UUID_PATTERN.test(versionId)), 'CAPTURED_PROCEDURE_INVALID', '可复用工序的版本标识无效。');
+    const versions = this.#capturedProcedures.versions(procedureId);
+    requireStore(versions.length > 0, 'CAPTURED_PROCEDURE_NOT_FOUND', '这个可复用工序不存在。');
+    const resolvable = this.#resolvableVersions(versions);
+    const { eligible, passedOver } = resolveProcedureVersions(resolvable);
+    const title = versions[0]!.document.title;
+    const eligibleVersions = eligible.map((version) => ({ versionId: version.versionId, version: version.version }));
+    let chosen = eligible[0] ?? null;
+    let ineligible: string | null = null;
+    if (versionId !== null) {
+      const asked = resolvable.find((version) => version.versionId === versionId);
+      requireStore(asked !== undefined, 'CAPTURED_PROCEDURE_NOT_FOUND', '这一版可复用工序不存在。');
+      if (!versionEligible(asked)) ineligible = `《${title}》第 ${asked.version} 版现在不能选用：${versionIneligibleReason(asked) ?? ''}`;
+      chosen = asked;
+    }
+    if (chosen === null || ineligible !== null) {
+      return {
+        ineligible,
+        projection: {
           bookId,
           procedureId,
           title,
           resolved: null,
           passedOver,
-          unavailableReason: passedOver.length > 0
+          eligibleVersions,
+          unavailableReason: resolvable.some((version) => version.state === 'enabled')
             ? '这个工序启用的各版现在都不能按原样运行；请从一次新的审阅重新保存。'
             : '这个工序还没有启用的版本；先在知识库「工序与规则」里验证并启用。',
-        };
-      }
-      const { stored, validation } = resolved;
-      const availability = this.#reviewRuns.categoryAvailability(bookId, stored.document.parameters.scope);
-      return {
+        },
+      };
+    }
+    const stored = versions.find((candidate) => candidate.versionId === chosen.versionId)!;
+    const validation = this.#capturedValidation(stored);
+    const availability = this.#reviewRuns.categoryAvailability(bookId, stored.document.parameters.scope);
+    return {
+      ineligible: null,
+      projection: {
         bookId,
         procedureId,
         title,
         resolved: {
           versionId: stored.versionId,
           version: stored.version,
+          latestEligible: stored.versionId === eligible[0]!.versionId,
           documentSha256: stored.documentSha256,
           scopeSlot: stored.document.parameters.scope,
           steps: validation.steps.map((step) => {
@@ -6549,23 +6667,26 @@ export class EditorialStore {
             .map((guideline) => ({ categoryId: step.categoryId, label: step.label, title: guideline.title, sourceVersion: guideline.sourceVersion, version: guideline.version }))),
         },
         passedOver,
+        eligibleVersions,
         unavailableReason: null,
-      };
-    });
+      },
+    };
   }
 
   /**
    * The pin a preparation from a Captured Procedure carries (ADR 0087 §4): only exactly the version and digest the sheet was
-   * pre-filled from, and only while it is still the one this Book resolves — a version stopped, a newer one enabled, or one that
-   * no longer validates since makes the editor choose it again.
+   * pre-filled from, and only while it is still eligible for this Book — the latest eligible, or the older eligible one the
+   * editor chose (Issue #66, S31; REUSE-054). A version stopped, or one that no longer validates since, makes the editor choose
+   * again.
    */
   #capturedProcedurePin(bookId: string, chosen: { versionId: string; documentSha256: string }): ReviewRunProcedurePinInput {
     requireStore(typeof chosen === 'object' && chosen !== null && typeof chosen.versionId === 'string' && UUID_PATTERN.test(chosen.versionId) &&
       typeof chosen.documentSha256 === 'string' && /^[0-9a-f]{64}$/u.test(chosen.documentSha256), 'REVIEW_PROCEDURE_INVALID', '所选的可复用工序无效。');
     const stored = this.#requireCapturedVersion(chosen.versionId);
-    const run = this.inspectCapturedProcedureRun(bookId, stored.procedureId);
-    requireStore(run.resolved !== null && run.resolved.versionId === chosen.versionId && run.resolved.documentSha256 === chosen.documentSha256,
-      'REVIEW_PROCEDURE_STALE', `可复用工序《${stored.document.title}》在你选择之后有了变化；请重新选择它。`);
+    const run = this.#capturedRunResolution(bookId, stored.procedureId, chosen.versionId);
+    requireStore(run.ineligible === null && run.projection.resolved !== null && run.projection.resolved.versionId === chosen.versionId &&
+      run.projection.resolved.documentSha256 === chosen.documentSha256,
+    'REVIEW_PROCEDURE_STALE', `可复用工序《${stored.document.title}》在你选择之后有了变化；请重新选择它。`);
     return {
       procedureId: stored.procedureId,
       versionId: stored.versionId,

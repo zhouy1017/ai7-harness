@@ -582,10 +582,12 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.previewCapturedProcedureValidation(request.input.versionId) };
     case 'enableCapturedProcedure':
       return { id: request.id, ok: true, op: request.op, result: store.enableCapturedProcedure(request.input.versionId, request.input.previewDigest) };
+    case 'previewCapturedProcedureStop':
+      return { id: request.id, ok: true, op: request.op, result: store.previewCapturedProcedureStop(request.input.procedureId, request.input.versionId) };
     case 'stopCapturedProcedure':
-      return { id: request.id, ok: true, op: request.op, result: store.stopCapturedProcedure(request.input.procedureId, request.input.versionId) };
+      return { id: request.id, ok: true, op: request.op, result: store.stopCapturedProcedure(request.input.procedureId, request.input.versionId, request.input.previewDigest) };
     case 'inspectCapturedProcedureRun':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectCapturedProcedureRun(request.input.bookId, request.input.procedureId) };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectCapturedProcedureRun(request.input.bookId, request.input.procedureId, request.input.versionId) };
     case 'saveDeveloperProposal':
       return { id: request.id, ok: true, op: request.op, result: store.saveDeveloperProposal(request.input) };
     case 'writeDeveloperProposalFile':

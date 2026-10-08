@@ -1319,7 +1319,12 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'capture-developer-proposal',
     'capture-validate-enable',
     'capture-run-second-book',
+    // Issue #66 (S31): a second version made 最新可用, an older eligible version chosen and pinned instead, 停用… previewed
+    // before it is confirmed with a linked Run opened, and 全部停用… leaving nothing to run.
+    'procedure-second-version',
+    'procedure-exact-version',
     'capture-stop',
+    'procedure-stop-all',
     'capture-proposal-file',
     'capture-restart',
     'j14-capture-keyboard-reflow-forced-colors',
