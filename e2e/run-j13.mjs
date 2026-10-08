@@ -1,12 +1,11 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { spawn } from 'node:child_process';
-import { lstat, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // J-13 (Issue #63, plan slice S28a; V2-UX-SER-001 to SER-012): 书系 as a stable global destination. Three empty Books; 新建书系
 // with a name refused past its bound; one Series' 成员与共享范围; 加入书系 through the four-part Series Membership Impact Preview
@@ -46,10 +45,13 @@ const EDITOR_WORDS = '三部曲里海边小城的地名，以第一部的写法�
 const KNOWLEDGE_NOTE = '书系知识只有经过纳入审阅才会成为书系可以选用的知识；候选项不会被任何任务读取，纳入也不会授权读取、发送或改动稿件。';
 const FIXTURE_IDENTITY = 'sample1-series-consistency-authored';
 const NO_KNOWLEDGE = `书系「${SERIES}」还没有纳入可用于一致性审阅的书系知识；在书系中纳入后才能选。`;
+// 书系检索排除 (Issue #64, S29b).
+const ITEM_LABEL = `书系知识条目「${PLACE}」（地点）`;
+const EXCLUSION_REASON = '地名写法待与第一部核对';
+const SCOPE_CHANGED = '书系检索范围已变化 · 需要重新确认计划';
+const MARKER = '此结果使用的材料后来被排除';
+const EXCLUDED_REASON = `书系「${SERIES}」可用于一致性审阅的书系知识都已排除在书系检索之外；停止排除或纳入其他书系知识后才能选。`;
 const CONSISTENCY_BASIS = `依据：书系「${SERIES}」的书系知识：地点「${PLACE}」第 2 版 · 工序：书系一致性检查（第 1 版） · 不使用搜索引擎`;
-const CREDENTIAL_CLEANUP_TIMEOUT_MS = 15_000;
-const FORCE_EXIT_TIMEOUT_MS = 5_000;
-const CREDENTIAL_CLEANUP_TIMEOUT = journeyCheckFailure('J-13', 'credential-cleanup-timeout');
 let location = 'entry';
 
 function at(next) {
@@ -96,169 +98,6 @@ function productEnvironment(executable) {
   return selected;
 }
 
-async function awaitFixedOperation(operation, timeoutMs, timeoutError) {
-  operation.catch(() => undefined);
-  let timeout;
-  try {
-    return await Promise.race([
-      operation,
-      new Promise((_, reject) => {
-        timeout = setTimeout(() => reject(timeoutError), timeoutMs);
-      }),
-    ]);
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-// ---- the one synthetic credential, and its cleanup (J-03 and J-04's ownership, as J-11 carries it) ------------------
-
-async function assertSecretsAbsentFromDataRoot(root, secrets) {
-  const needles = secrets.flatMap((secret) => {
-    const digest = createHash('sha256').update(secret, 'utf8').digest();
-    return [
-      Buffer.from(secret, 'utf8'),
-      Buffer.from(secret, 'utf16le'),
-      digest,
-      Buffer.from(digest.toString('hex'), 'utf8'),
-      Buffer.from(digest.toString('base64'), 'utf8'),
-      Buffer.from(digest.toString('base64url'), 'utf8'),
-    ];
-  });
-  const visit = async (directory) => {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      const path = resolve(directory, entry.name);
-      const metadata = await lstat(path);
-      requireJourney(!metadata.isSymbolicLink(), 'cleanup-data-symlink');
-      if (metadata.isDirectory()) await visit(path);
-      else if (metadata.isFile()) {
-        const bytes = await readFile(path);
-        requireJourney(!needles.some((needle) => bytes.includes(needle)), 'secret-absent-from-product-data');
-      }
-    }
-  };
-  await visit(root);
-}
-
-const CREDENTIAL_CLEANUP_SCRIPT = `
-let input = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', (chunk) => {
-  input += chunk;
-  if (input.length > 128) process.exit(2);
-});
-process.stdin.once('end', async () => {
-  try {
-    const value = JSON.parse(input);
-    if (value === null || typeof value !== 'object' ||
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.credentialReference)) {
-      process.exit(2);
-    }
-    const { pathToFileURL } = require('node:url');
-    const { resolve } = require('node:path');
-    const denial = await import(pathToFileURL(resolve('dist/shared/network-denial.mjs')).href);
-    denial.installNodeNetworkDenial();
-    const { AsyncEntry } = require('@napi-rs/keyring');
-    const removed = await new AsyncEntry(
-      'io.github.zhouy1017.ai7.model-service',
-      'credential-reference:' + value.credentialReference,
-    ).deleteCredential();
-    process.exit(removed === true ? 0 : 3);
-  } catch {
-    process.exit(4);
-  }
-});
-`;
-
-async function removeSyntheticCredentialWithElectron(executable, credentialReference) {
-  requireJourney(isAbsolute(executable), 'credential-direct-cleanup-executable');
-  requireJourney(UUID_PATTERN.test(credentialReference), 'credential-direct-cleanup-reference');
-  requireJourney(
-    process.env.NAPI_RS_NATIVE_LIBRARY_PATH === undefined && process.env.NAPI_RS_FORCE_WASI === undefined,
-    'credential-direct-cleanup-override',
-  );
-  const child = spawn(executable, ['-e', CREDENTIAL_CLEANUP_SCRIPT], {
-    cwd: ROOT,
-    env: { ...productEnvironment(executable), ELECTRON_RUN_AS_NODE: '1' },
-    stdio: ['pipe', 'ignore', 'ignore'],
-    windowsHide: true,
-  });
-  child.stdin.on('error', () => undefined);
-  const terminal = new Promise((resolveTerminal, rejectTerminal) => {
-    child.once('error', rejectTerminal);
-    child.once('exit', (code, signal) => resolveTerminal({ code, signal }));
-  });
-  terminal.catch(() => undefined);
-  child.stdin.end(JSON.stringify({ credentialReference }));
-  let result;
-  try {
-    result = await awaitFixedOperation(terminal, CREDENTIAL_CLEANUP_TIMEOUT_MS, CREDENTIAL_CLEANUP_TIMEOUT);
-  } catch (error) {
-    try { child.kill('SIGKILL'); } catch {
-      // The bounded terminal observation below remains authoritative.
-    }
-    try {
-      await awaitFixedOperation(terminal, FORCE_EXIT_TIMEOUT_MS, CREDENTIAL_CLEANUP_TIMEOUT);
-    } catch {
-      child.unref();
-    }
-    throw error;
-  }
-  requireJourney(result.code === 0 && result.signal === null, 'credential-direct-cleanup-unconfirmed');
-}
-
-function hasErrorCode(error, code) {
-  return error !== null && typeof error === 'object' && 'code' in error && error.code === code;
-}
-
-async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
-  requireJourney(dataRoot === resolve(runRoot, 'data') && inside(runRoot, dataRoot), 'credential-cleanup-metadata-root');
-  const databasePath = resolve(dataRoot, 'store', 'ai7.sqlite');
-  let metadata;
-  try {
-    metadata = await lstat(databasePath);
-  } catch (error) {
-    if (hasErrorCode(error, 'ENOENT')) return { kind: 'not-started' };
-    throw journeyCheckFailure('J-13', 'credential-cleanup-metadata');
-  }
-  requireJourney(metadata.isFile() && !metadata.isSymbolicLink() && (await realpath(databasePath)) === databasePath,
-    'credential-cleanup-metadata-file');
-  let database;
-  try {
-    database = new DatabaseSync(databasePath, { readOnly: true });
-  } catch {
-    throw journeyCheckFailure('J-13', 'credential-cleanup-metadata');
-  }
-  try {
-    database.exec('PRAGMA query_only = ON;');
-    // The terminal version the service stamps, as J-11 reads it; this pin moves with whatever revision a later slice takes.
-    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 62, 'credential-cleanup-metadata-version');
-    const rows = database.prepare(
-      `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
-              approved_fallback_chain, credential_slot, credential_reference, credential_operation_state
-       FROM model_service_connections LIMIT 2`,
-    ).all();
-    requireJourney(rows.length <= 1, 'credential-cleanup-metadata-cardinality');
-    if (rows.length === 0) return { kind: 'not-started' };
-    const row = rows[0];
-    requireJourney(
-      row.connection_id === 'main-editorial-deepseek-v4-pro' && row.role_id === 'main-editorial' &&
-      row.provider_id === 'deepseek-open-platform' && row.model_id === 'deepseek-v4-pro' &&
-      row.adapter_revision === 1 && row.configuration_revision === 1 && row.approved_fallback_chain === '[]' &&
-      row.credential_slot === 'deepseek-api-key' && typeof row.credential_reference === 'string' &&
-      UUID_PATTERN.test(row.credential_reference) && ['ready', 'missing', 'needs-attention'].includes(row.credential_operation_state),
-      'credential-cleanup-metadata-binding',
-    );
-    return row.credential_operation_state === 'missing'
-      ? { kind: 'removed' }
-      : { kind: 'reference', credentialReference: row.credential_reference };
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith('J-13/')) throw error;
-    throw journeyCheckFailure('J-13', 'credential-cleanup-metadata');
-  } finally {
-    database.close();
-  }
-}
 
 async function createLoopbackSentinel() {
   let observedRequests = 0;
@@ -730,13 +569,13 @@ async function main() {
       if (credentialMutationReached && !credentialRemoved) {
         try {
           if (credentialReferenceForCleanup === undefined && dataRoot !== undefined && runRoot !== undefined) {
-            const recovered = await recoverSyntheticCredentialCleanupState(dataRoot, runRoot);
+            const recovered = await recoverSyntheticCredentialCleanupState('J-13', dataRoot, runRoot);
             if (recovered.kind === 'not-started' || recovered.kind === 'removed') credentialRemoved = true;
             else credentialReferenceForCleanup = recovered.credentialReference;
           }
           if (!credentialRemoved && credentialReferenceForCleanup !== undefined) {
             requireJourney(electronExecutableForCleanup !== undefined, 'credential-direct-cleanup-executable');
-            await removeSyntheticCredentialWithElectron(electronExecutableForCleanup, credentialReferenceForCleanup);
+            await removeSyntheticCredentialWithElectron('J-13', electronExecutableForCleanup, productEnvironment(electronExecutableForCleanup), credentialReferenceForCleanup);
             credentialRemoved = true;
           }
         } catch (error) {
@@ -750,7 +589,7 @@ async function main() {
       const ownedRoot = runRoot ?? (runRootAcquisition === undefined ? undefined : await runRootAcquisition.catch(() => undefined));
       if (ownedRoot !== undefined) {
         if (syntheticSecret !== undefined && dataRoot !== undefined) {
-          try { await assertSecretsAbsentFromDataRoot(dataRoot, [syntheticSecret]); } catch (error) { failure ??= error; }
+          try { await assertSecretsAbsentFromDataRoot('J-13', dataRoot, [syntheticSecret]); } catch (error) { failure ??= error; }
         }
         requireJourney(tempParent !== undefined && dirname(ownedRoot) === tempParent && basename(ownedRoot).startsWith('ai7-j13-e2e-') && (await realpath(ownedRoot)) === ownedRoot, 'cleanup-target');
         await rm(ownedRoot, { recursive: true, force: true });
@@ -789,6 +628,9 @@ async function main() {
     const sample1Bytes = await readFile(SAMPLE1_PATH);
     const sample1 = { sha256: createHash('sha256').update(sample1Bytes).digest('hex'), bytes: sample1Bytes.length };
     requireJourney(sample1.sha256 === 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' && sample1.bytes === 29_550, 'exact-sample1');
+    // A 书系一致性 Run's first reading range is held through this file while an exclusion is recorded (Issue #64, S29b); absent,
+    // it holds nothing, so every other launch runs as before.
+    const holdPath = resolve(runRoot, 'j13-unit-hold.txt');
     const launch = async () => {
       const args = [
         '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
@@ -798,6 +640,7 @@ async function main() {
         '--j13-picker-path', SAMPLE1_PATH,
         // Its 书系一致性 Review Run executes on the J-04 model adapter (Issue #64, S29a).
         '--j04-model-adapter', FIXTURE_IDENTITY,
+        '--j10-unit-hold-path', holdPath,
       ];
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       cancellation.throwIfRequested();
@@ -1283,6 +1126,183 @@ async function main() {
     const reviewedRow = await readSeries(renderer, (read) => read.members.some(([id]) => id === member), 'consistency-reviewed-row');
     const reviewedLine = reviewedRow.members.find(([id]) => id === member)?.[5] ?? '';
     requireJourney(reviewedLine.startsWith('审阅于 ') && reviewedLine.endsWith(' · 可以审阅'), 'consistency-member-reviewed-line', reviewedLine);
+
+    // ---- 书系检索排除 (Issue #64, plan slice S29b; V2-UX-SER-020 to SER-027) ---------------------------------------------
+    at('exclusion-held-run');
+    // A second 书系一致性 Review Run, its first reading range held in flight by the unit hold, so the exclusion is recorded
+    // while the Run reads.
+    await writeFile(holdPath, '0', 'utf8');
+    await leaveSeries(renderer, 'exclusion-series-leave');
+    const openMemberReview = async () => {
+      await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(member)}]`, 'exclusion-review-book');
+      await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(member)}]')`, 'exclusion-review-manuscript', 120_000);
+      await assertRenderer(renderer, `(() => { const group=document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]'); const button=group?.querySelector('button[data-work-destination="review"]'); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, 'exclusion-review-entry');
+      await waitFor(renderer, `document.querySelector('[data-screen="book-review"] .book-review .review-workspace-card')`, 'exclusion-review-card');
+    };
+    const leaveMemberReview = async () => {
+      await assertRenderer(renderer, `(() => { const open = Array.from(document.querySelectorAll('[data-screen="book-review"] .workbench-actions button')).find((button) => button.textContent === '工作概览'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'exclusion-review-overview');
+      await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview')?.dataset.bookId===${JSON.stringify(member)}`, 'exclusion-review-overview-ready');
+      await backToLibrary(renderer, 'exclusion-review-library');
+    };
+    await openMemberReview();
+    await clickSelector(renderer, '[data-review-action="new-review"]', 'exclusion-new-review');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'exclusion-sheet-open');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=sheet.querySelector('input[name="review-category"][value="series-consistency"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'exclusion-prepare');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, 'exclusion-prepared', 120_000);
+    const heldRun = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
+    requireJourney(heldRun?.state === 'prepared' && heldRun.ordinal === 2 && UUID_PATTERN.test(heldRun.reviewRunId), 'exclusion-prepared-run', heldRun?.state);
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(heldRun.reviewRunId)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='ready'`, 'exclusion-drawer');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'exclusion-start');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='running' && document.querySelector('ol.review-progress li[data-review-category="series-consistency"]')?.dataset.categoryState==='running'`, 'exclusion-running', 120_000);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'exclusion-drawer-close');
+    await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'exclusion-drawer-closed');
+    await leaveMemberReview();
+
+    at('exclusion-preview');
+    // 添加检索排除…: the item, a reason, and 书系检索排除影响预览 — exact target, scope, effective time, how far it reaches, reason
+    // and actor, then four groups naming the Run reading now and the result that used the item. Nothing is recorded yet.
+    await openSeries(renderer, seriesId, 'exclusion-series');
+    await waitFor(renderer, `document.querySelector('.series-exclusions')?.dataset.exclusionsEffective==='0'`, 'exclusion-section');
+    await clickSelector(renderer, '[data-exclusion-action="add-open"]', 'exclusion-add-open');
+    await clickSelector(renderer, 'input[name="series-exclusion-kind"][value="knowledge-item"]', 'exclusion-kind');
+    await waitFor(renderer, `document.querySelector('input[name="series-exclusion-target"][value=${JSON.stringify(itemId)}]') instanceof HTMLInputElement`, 'exclusion-targets');
+    await clickSelector(renderer, `input[name="series-exclusion-target"][value=${JSON.stringify(itemId)}]`, 'exclusion-target');
+    await fill(renderer, '#series-exclusion-reason', EXCLUSION_REASON, 'exclusion-reason');
+    await clickSelector(renderer, '[data-exclusion-action="preview"]', 'exclusion-preview-open');
+    await waitFor(renderer, `document.querySelector('.series-exclusion-preview')?.dataset.previewAction==='add' && document.activeElement === document.querySelector('.series-exclusion-preview-heading')`, 'exclusion-previewed');
+    const exclusionPreview = await renderer.evaluate(`(() => { const box=document.querySelector('.series-exclusion-preview'); return {
+      rows: Array.from(box.querySelectorAll('.series-exclusion-preview-identity dt'), (term) => [term.textContent, term.nextElementSibling?.textContent ?? null]),
+      groups: Array.from(box.querySelectorAll(':scope > .series-impact-group'), (group) => [group.dataset.impactGroup, group.querySelector('h5')?.textContent ?? null,
+        Array.from(group.querySelectorAll('.series-impact-changes li'), (line) => line.textContent)]),
+      commit: box.querySelector('[data-exclusion-action="commit"]')?.textContent ?? null,
+    }; })()`);
+    requireJourney(JSON.stringify(exclusionPreview?.rows) === JSON.stringify([
+      ['对象', ITEM_LABEL], ['范围', `只限书系「${SERIES}」的书系检索`], ['生效时间', '记录后立即生效'], ['持续范围', '这个条目现在和以后的修订版都一并排除。'],
+      ['理由', EXCLUSION_REASON], ['操作人', '本机编辑'],
+    ]), 'exclusion-preview-rows', exclusionPreview?.rows);
+    requireJourney(JSON.stringify(exclusionPreview?.groups.map((group) => [group[0], group[1]])) === JSON.stringify([
+      ['future-reads', '今后的检索'], ['runs', '已排队、已授权或正在运行的任务'], ['history', '已完成的历史'], ['unaffected', '不受影响的授权'],
+    ]) && exclusionPreview.groups[1][2][0] === `1 个已授权或正在运行的任务会在下一次读取前停下，显示「书系检索范围已变化 · 需要重新确认计划」：《${MEMBER}》第 2 次审阅。` &&
+      exclusionPreview.groups[2][2][0] === `1 个已完成的结果用过这些材料，会标上「${MARKER}」：《${MEMBER}》第 1 次审阅。` && exclusionPreview.commit === '添加检索排除',
+    'exclusion-preview-groups', exclusionPreview?.groups);
+    requireJourney((await renderer.evaluate(`window.ai7.inspectSeries({ seriesId: ${JSON.stringify(seriesId)} })`))?.exclusions.effective.length === 0, 'exclusion-preview-records-nothing');
+
+    at('exclusion-recorded');
+    // 添加检索排除: in force at once, listed with its reason, and the member can no longer choose 书系一致性 — the plan it would make
+    // leaves the item out, and with it everything there was to read.
+    await clickSelector(renderer, '[data-exclusion-action="commit"]', 'exclusion-commit');
+    await waitFor(renderer, `document.querySelector('.series-exclusions')?.dataset.exclusionsEffective==='1' && document.querySelector('li.series-exclusion')?.dataset.targetId===${JSON.stringify(itemId)}`, 'exclusion-listed');
+    await assertRenderer(renderer, `(document.querySelector('li.series-exclusion .series-exclusion-reason')?.textContent ?? '') === ${JSON.stringify(`理由：${EXCLUSION_REASON}`)} && document.querySelectorAll('ol.series-exclusion-revisions > li').length === 1`, 'exclusion-listed-words');
+    const excludedRow = await readSeries(renderer, (read) => read.members.some(([id]) => id === member), 'exclusion-member-row');
+    requireJourney((excludedRow.members.find(([id]) => id === member)?.[5] ?? '').endsWith(`暂不能审阅：${EXCLUDED_REASON}`), 'exclusion-member-unavailable', excludedRow.members);
+
+    at('exclusion-held-run-stopped');
+    // The held range is let go; before the next one the current-read guard stops the Run, which offers exactly 修改计划并重新授权
+    // and 取消任务 — never 继续审阅.
+    await writeFile(holdPath, 'release', 'utf8');
+    await leaveSeries(renderer, 'exclusion-stopped-leave');
+    await openMemberReview();
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='scope-changed'`, 'exclusion-stopped', 120_000);
+    const stoppedRun = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
+    requireJourney(stoppedRun?.reviewRunId === heldRun.reviewRunId && stoppedRun.stateLabel === SCOPE_CHANGED && stoppedRun.canContinue === false &&
+      stoppedRun.categories[0]?.state === 'interrupted' && stoppedRun.categories[0]?.stateLabel === SCOPE_CHANGED && stoppedRun.findings.length === 0,
+    'exclusion-stopped-run', { state: stoppedRun?.state, categories: stoppedRun?.categories?.map((category) => [category.state, category.stateLabel]) });
+    await assertRenderer(renderer, `document.querySelector('[data-review-action="continue"]') === null && document.querySelector('.review-scope-stop [data-review-action="scope-redo"]')?.textContent === '修改计划并重新授权' && document.querySelector('.review-scope-stop [data-review-action="scope-cancel"]')?.textContent === '取消任务'`, 'exclusion-stopped-actions');
+
+    at('exclusion-plan-leaves-out');
+    // 修改计划并重新授权 opens 新建审阅 with the Run's own choices; the plan it would make leaves the excluded item out, and here
+    // that is every item, so 书系一致性 cannot be chosen and says why.
+    await clickSelector(renderer, '[data-review-action="scope-redo"]', 'exclusion-redo');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'exclusion-redo-sheet');
+    await assertRenderer(renderer, `(() => { const box=document.querySelector('dialog.review-sheet input[name="review-category"][value="series-consistency"]'); return box instanceof HTMLInputElement && box.disabled && !box.checked && box.dataset.unavailableReason === ${JSON.stringify(EXCLUDED_REASON)}; })()`, 'exclusion-redo-unavailable');
+    await clickSelector(renderer, 'dialog.review-sheet [data-review-action="close-sheet"]', 'exclusion-redo-close');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open!==true`, 'exclusion-redo-closed');
+
+    at('exclusion-marker');
+    // The first Run's result used the item: it is marked beside the Run, its report and each finding, and nothing is rewritten.
+    await clickSelector(renderer, 'ol.review-runs li[data-review-run="1"] [data-review-action="open-run"]', 'exclusion-open-first');
+    await waitFor(renderer, `document.querySelector('section.review-run')?.dataset.reviewRunState==='settled' && document.querySelectorAll('article.review-finding').length===3`, 'exclusion-first-open');
+    await assertRenderer(renderer, `document.querySelector('section.review-run .review-historical-marker .review-historical-marker-label')?.textContent === ${JSON.stringify(MARKER)} && document.querySelector('.review-report-marker')?.textContent === ${JSON.stringify(MARKER)} && Array.from(document.querySelectorAll('article.review-finding .review-finding-marker')).every((line) => line.textContent === ${JSON.stringify(MARKER)}) && document.querySelectorAll('article.review-finding .review-finding-marker').length === 3 && document.querySelector('ol.review-runs li[data-review-run="1"] .review-run-marker')?.textContent === ${JSON.stringify(MARKER)}`, 'exclusion-marker-shown');
+    await leaveMemberReview();
+
+    at('exclusion-ended');
+    // 停止此排除 after its own preview: later reads may read the item again, the member may choose 书系一致性 again — and the Run
+    // the exclusion stopped stays stopped, its authorization never restored.
+    await openSeries(renderer, seriesId, 'exclusion-end-series');
+
+    at('j14-exclusions-keyboard');
+    // Without a pointer (Issue #64 review): Enter on 添加检索排除… opens the chooser at its first kind and Escape closes it back
+    // onto the opener; Enter on 停止此排除… shows the preview with focus on its heading, and Escape closes it back onto the
+    // exclusion's own 停止此排除…. Nothing is recorded.
+    await assertRenderer(renderer, `(() => { const open=document.querySelector('[data-exclusion-action="add-open"]'); if(!(open instanceof HTMLButtonElement)||open.disabled)return false; open.focus(); return document.activeElement===open; })()`, 'exclusion-keyboard-opener');
+    await press(renderer, 'Enter');
+    await waitFor(renderer, `document.activeElement?.getAttribute('name') === 'series-exclusion-kind' && document.querySelector('.series-exclusion-chooser') !== null`, 'exclusion-keyboard-chooser', 10_000);
+    await press(renderer, 'Escape');
+    await waitFor(renderer, `document.querySelector('.series-exclusion-chooser') === null && document.activeElement?.dataset.exclusionAction === 'add-open'`, 'exclusion-keyboard-chooser-escaped', 10_000);
+    await assertRenderer(renderer, `(() => { const end=document.querySelector('li.series-exclusion [data-exclusion-action="end-open"]'); if(!(end instanceof HTMLButtonElement)||end.disabled)return false; end.focus(); return document.activeElement===end; })()`, 'exclusion-keyboard-end-focus');
+    await press(renderer, 'Enter');
+    await waitFor(renderer, `document.querySelector('.series-exclusion-preview')?.dataset.previewAction==='end' && document.activeElement === document.querySelector('.series-exclusion-preview-heading')`, 'exclusion-keyboard-preview', 10_000);
+    await press(renderer, 'Escape');
+    await waitFor(renderer, `document.querySelector('.series-exclusion-preview') === null && document.activeElement?.dataset.exclusionAction === 'end-open' && document.querySelector('.series-exclusions')?.dataset.exclusionsEffective === '1'`, 'exclusion-keyboard-preview-escaped', 10_000);
+
+    at('j14-exclusions-reflow-forced-colors');
+    // At 200% the exclusion list, its preview and its records wrap within the width; under forced colours the preview keeps its
+    // border and the exclusion its rule.
+    await clickSelector(renderer, 'li.series-exclusion [data-exclusion-action="end-open"]', 'exclusion-reflow-preview-open');
+    await waitFor(renderer, `document.querySelector('.series-exclusion-preview')?.dataset.previewAction==='end'`, 'exclusion-reflow-preview');
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
+    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
+    await waitFor(renderer, `(() => { const parts=[document.querySelector('.series-exclusion-preview'), document.querySelector('ul.series-exclusion-list'), document.querySelector('ol.series-exclusion-revisions')]; return parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2); })()`, 'exclusion-reflow-200', 10_000);
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
+    await assertRenderer(renderer, `(() => {
+      if (!matchMedia('(forced-colors: active)').matches) return false;
+      const preview = document.querySelector('.series-exclusion-preview');
+      const exclusion = document.querySelector('li.series-exclusion');
+      return preview instanceof HTMLElement && getComputedStyle(preview).borderTopStyle === 'solid' &&
+        exclusion instanceof HTMLElement && getComputedStyle(exclusion).borderLeftStyle === 'solid';
+    })()`, 'exclusion-forced-colors');
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
+    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
+    await clickSelector(renderer, '[data-exclusion-action="preview-cancel"]', 'exclusion-reflow-cancel');
+    await waitFor(renderer, `document.querySelector('.series-exclusion-preview') === null && document.querySelector('.series-exclusions')?.dataset.exclusionsEffective === '1'`, 'exclusion-reflow-cancelled');
+    await clickSelector(renderer, 'li.series-exclusion [data-exclusion-action="end-open"]', 'exclusion-end-open');
+    await waitFor(renderer, `document.querySelector('.series-exclusion-preview')?.dataset.previewAction==='end' && document.querySelector('.series-exclusion-preview [data-exclusion-action="commit"]')?.textContent==='停止此排除'`, 'exclusion-end-previewed');
+    await assertRenderer(renderer, `Array.from(document.querySelectorAll('.series-exclusion-preview [data-impact-group="runs"] .series-impact-unchanged li'), (line) => line.textContent).includes('因这条排除停下的任务不会自动恢复，旧的授权和来源范围也不会恢复；要继续，需修改计划并重新授权。')`, 'exclusion-end-preview-words');
+    await clickSelector(renderer, '.series-exclusion-preview [data-exclusion-action="commit"]', 'exclusion-end-commit');
+    await waitFor(renderer, `document.querySelector('.series-exclusions')?.dataset.exclusionsEffective==='0' && document.querySelectorAll('ol.series-exclusion-revisions > li').length === 2`, 'exclusion-ended-listed');
+    const endedRow = await readSeries(renderer, (read) => (read.members.find(([id]) => id === member)?.[5] ?? '').endsWith(' · 可以审阅'), 'exclusion-member-available');
+    requireJourney(endedRow.members.some(([id]) => id === member), 'exclusion-member-row-again');
+    await leaveSeries(renderer, 'exclusion-ended-leave');
+    await openMemberReview();
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='scope-changed'`, 'exclusion-still-stopped');
+
+    at('j14-scope-stop-keyboard-reflow-forced-colors');
+    // The stopped Run without a pointer (Issue #64 review): Enter on 取消任务 moves focus to 确认取消任务, and Escape keeps the Run,
+    // focus back on 取消任务. At 200% the stop and the marker wrap within the width; under forced colours the marker keeps its rule.
+    await assertRenderer(renderer, `(() => { const cancel=document.querySelector('[data-review-action="scope-cancel"]'); if(!(cancel instanceof HTMLButtonElement)||cancel.disabled)return false; cancel.focus(); return document.activeElement===cancel; })()`, 'scope-keyboard-focus');
+    await press(renderer, 'Enter');
+    await waitFor(renderer, `document.activeElement?.dataset.reviewAction === 'scope-cancel-confirm'`, 'scope-keyboard-confirm', 10_000);
+    await press(renderer, 'Escape');
+    await waitFor(renderer, `document.activeElement?.dataset.reviewAction === 'scope-cancel' && document.querySelector('[data-review-action="scope-cancel-confirm"]') === null && document.querySelector('.review-workspace-card')?.dataset.reviewState==='scope-changed'`, 'scope-keyboard-kept', 10_000);
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
+    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
+    await waitFor(renderer, `(() => { const stop=document.querySelector('.review-scope-stop'); const marker=document.querySelector('ol.review-runs li[data-review-run="1"]'); return stop instanceof HTMLElement && stop.scrollWidth<=stop.clientWidth+2 && marker instanceof HTMLElement && marker.scrollWidth<=marker.clientWidth+2; })()`, 'scope-reflow-200', 10_000);
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
+    await assertRenderer(renderer, `(() => { if (!matchMedia('(forced-colors: active)').matches) return false; const parts = [document.querySelector('.review-scope-stop .attention-note'), document.querySelector('ol.review-runs li[data-review-run="1"] .review-run-marker')]; return parts.every((part) => part instanceof HTMLElement && part.offsetHeight > 0 && getComputedStyle(part).color !== getComputedStyle(part).backgroundColor); })()`, 'scope-forced-colors');
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
+    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
+
+    at('exclusion-cancel');
+    // 取消任务, confirmed inline: the Run reads 已取消 and offers nothing more; the marked result stays marked.
+    await clickSelector(renderer, '[data-review-action="scope-cancel"]', 'exclusion-cancel-open');
+    await waitFor(renderer, `document.activeElement === document.querySelector('[data-review-action="scope-cancel-confirm"]')`, 'exclusion-cancel-confirm-focus');
+    await clickSelector(renderer, '[data-review-action="scope-cancel-confirm"]', 'exclusion-cancel-confirm');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='cancelled' && document.querySelector('.review-scope-stop') === null && document.querySelector('[data-review-action="continue"]') === null`, 'exclusion-cancelled');
+    await assertRenderer(renderer, `document.querySelector('ol.review-runs li[data-review-run="1"] .review-run-marker')?.textContent === ${JSON.stringify(MARKER)}`, 'exclusion-marker-kept');
+    await leaveMemberReview();
+    await openSeries(renderer, seriesId, 'exclusion-back-series');
 
     at('knowledge-bounded-pages');
     const pagesSeeded = await renderer.evaluate(`(async () => {

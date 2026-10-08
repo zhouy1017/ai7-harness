@@ -3,7 +3,7 @@ import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSyn
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
-import { J03_TASK_GOAL, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
+import { J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
   InspectSeriesKnowledgeReviewInput,
   ServiceOperationMap,
@@ -11,6 +11,11 @@ import type {
   TaskPlanProjection,
   GlobalAttentionProjection,
   BookTasksProjection,
+  AskAboutSelectionInput,
+  ConvertDialogueToChangeSuggestionInput,
+  DialogueAttemptInput,
+  DialogueConversionProjection,
+  DialogueProjection,
   ApproveManuscriptExportInput,
   InspectManuscriptExportReceiptInput,
   StageManuscriptExportInput,
@@ -313,6 +318,7 @@ import {
   type LearningMaterialsAttentionReading,
 } from './global-attention.js';
 import { ALWAYS_ONLINE, type TaskPlanConnectivity } from './connectivity.js';
+import { RecentCache } from './recent-cache.js';
 import {
   baselineAnalysisPlan,
   initialEvaluationPlan,
@@ -495,6 +501,63 @@ import {
 } from './database-replacement.js';
 import { DatabaseMergeError, initializeDatabaseMergeSchema } from './database-merge.js';
 import {
+  SeriesExclusionError,
+  SeriesExclusionLedger,
+  initializeSeriesRetrievalExclusionSchema,
+  isSeriesExclusionAction,
+  isSeriesExclusionTargetKind,
+  coveringExclusions,
+  seriesExclusionCovers,
+  seriesExclusionImpact,
+  seriesExclusionPreviewDigest,
+  seriesExclusionReason,
+  seriesExclusionTarget,
+  type SeriesKnowledgeMaterial,
+  type StoredExclusion,
+  type StoredExclusionRevision,
+} from './series-exclusions.js';
+import {
+  MAX_SERIES_EXCLUSIONS,
+  MAX_SERIES_EXCLUSION_HISTORY_PAGE,
+  MAX_SERIES_EXCLUSION_REASON_CHARACTERS,
+  MAX_SERIES_EXCLUSION_TARGETS_PAGE,
+  SERIES_EXCLUSION_ACTION_LABELS,
+  SERIES_KNOWLEDGE_CLASSES,
+  type InspectSeriesExclusionHistoryInput,
+  type InspectSeriesExclusionTargetsInput,
+  type PreviewSeriesExclusionInput,
+  type RecordSeriesExclusionInput,
+  type SeriesExclusionHistoryCursor,
+  type SeriesExclusionHistoryPageProjection,
+  type SeriesExclusionPreviewProjection,
+  type SeriesExclusionProjection,
+  type SeriesExclusionResultProjection,
+  type SeriesExclusionRevisionProjection,
+  type SeriesExclusionTargetKind,
+  type SeriesExclusionTargetProjection,
+  type SeriesExclusionTargetsProjection,
+  type SeriesExclusionsProjection,
+} from '../shared/protocol.js';
+/** How many items or Runs one line of an exclusion's impact preview names before it gives the count. */
+const NAMED_EXCLUSION_ENTRIES = 5;
+import { isRecord } from './analysis/canonical.js';
+import {
+  DIALOGUE_BASIS_QUOTE_CHARACTERS,
+  DIALOGUE_MARK_SOURCE_LABEL,
+  DialogueError,
+  DialogueLedger,
+  MAX_DIALOGUE_PROPOSAL_CHARACTERS,
+  initializeDialogueSchema,
+  type DialogueOutcome,
+  type DialogueTurnStart,
+  type StoredDialogueBinding,
+  type StoredDialogueTask,
+} from './dialogue/dialogue-ledger.js';
+import { dialogueProjection, harnessHistoryReader, keptText, resolveAttempts, type DialogueHistoryReader, type LiveAnswer } from './dialogue/dialogue-history.js';
+import { dialogueQuestion } from './dialogue/contract.js';
+import { HARNESS_SESSION_LOG_DIRECTORY, readHarnessSessionLog } from './harness/session-log.js';
+import type { DialogueTaskReading } from './global-attention.js';
+import {
   SeriesKnowledgeError,
   SeriesKnowledgeLedger,
   initializeSeriesKnowledgeSchema,
@@ -633,6 +696,8 @@ import {
   DATABASE_REPLACEMENT_SCHEMA_VERSION,
   DATABASE_MERGE_SCHEMA_VERSION,
   INITIAL_EVALUATION_SCHEMA_VERSION,
+  DIALOGUE_SCHEMA_VERSION,
+  SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
   READERS_REPORT_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -1870,6 +1935,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       currentVersion === DATABASE_MERGE_SCHEMA_VERSION ||
       currentVersion === INITIAL_EVALUATION_SCHEMA_VERSION ||
+      currentVersion === DIALOGUE_SCHEMA_VERSION ||
+      currentVersion === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       currentVersion === READERS_REPORT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
@@ -1926,6 +1993,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       currentVersion === DATABASE_MERGE_SCHEMA_VERSION ||
       currentVersion === INITIAL_EVALUATION_SCHEMA_VERSION ||
+      currentVersion === DIALOGUE_SCHEMA_VERSION ||
+      currentVersion === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       currentVersion === READERS_REPORT_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
@@ -2296,6 +2365,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       version === DATABASE_MERGE_SCHEMA_VERSION ||
       version === INITIAL_EVALUATION_SCHEMA_VERSION ||
+      version === DIALOGUE_SCHEMA_VERSION ||
+      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       version === READERS_REPORT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
@@ -2341,6 +2412,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       version === DATABASE_MERGE_SCHEMA_VERSION ||
       version === INITIAL_EVALUATION_SCHEMA_VERSION ||
+      version === DIALOGUE_SCHEMA_VERSION ||
+      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       version === READERS_REPORT_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2478,6 +2551,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       version === DATABASE_MERGE_SCHEMA_VERSION ||
       version === INITIAL_EVALUATION_SCHEMA_VERSION ||
+      version === DIALOGUE_SCHEMA_VERSION ||
+      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       version === READERS_REPORT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
@@ -2522,6 +2597,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       version === DATABASE_MERGE_SCHEMA_VERSION ||
       version === INITIAL_EVALUATION_SCHEMA_VERSION ||
+      version === DIALOGUE_SCHEMA_VERSION ||
+      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       version === READERS_REPORT_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
@@ -2861,6 +2938,8 @@ function validateModelServiceSchema(
       version >= DATABASE_REPLACEMENT_SCHEMA_VERSION,
       version >= DATABASE_MERGE_SCHEMA_VERSION,
       version >= INITIAL_EVALUATION_SCHEMA_VERSION,
+      version >= DIALOGUE_SCHEMA_VERSION,
+      version >= SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
       version >= READERS_REPORT_SCHEMA_VERSION,
     );
   }
@@ -2933,6 +3012,8 @@ function initializeModelServiceSchema(
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       version === DATABASE_MERGE_SCHEMA_VERSION ||
       version === INITIAL_EVALUATION_SCHEMA_VERSION ||
+      version === DIALOGUE_SCHEMA_VERSION ||
+      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       version === READERS_REPORT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
@@ -2977,6 +3058,8 @@ function initializeModelServiceSchema(
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       version === DATABASE_MERGE_SCHEMA_VERSION ||
       version === INITIAL_EVALUATION_SCHEMA_VERSION ||
+      version === DIALOGUE_SCHEMA_VERSION ||
+      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       version === READERS_REPORT_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
@@ -3764,6 +3847,14 @@ function closeDatabaseQuietly(db: DatabaseSync | null): void {
  * Why a Book's own Source Version cannot take the same file again (Issue #532): an earlier parser read it, and AI7 reads
  * files differently now. Said at the choice, in the editor's words; the way on is a new Book.
  */
+/**
+ * How many review-category ledgers, and as many category kind definitions, the store keeps (Issue #649). Every distinct
+ * category contract — with 书系一致性, every Series Knowledge revision and Series a member Book reviews against — asks
+ * for its own, so the store keeps the most recently used and makes any other afresh from the Book database; a ledger
+ * with a preparation in flight is always kept, because only that instance holds it.
+ */
+export const REVIEW_CATEGORY_CACHE_CAPACITY = 16;
+
 export const SOURCE_VERSION_PARSER_CHANGED_MESSAGE =
   '这本书里已有同一个文件的来源版本，但它是用旧版 AI7 的读取方式导入的；AI7 现在读取文件的方式已经不同，不能在原来的来源版本上再次导入这个文件。可以把它作为新建图书导入。';
 
@@ -3813,10 +3904,10 @@ export class EditorialStore {
   readonly #factualReview: BaselineAnalysisStore;
   /** AI7 初评 (Issue #429, S81b1): the evaluation kind's own ledger over the same Book database. */
   readonly #initialEvaluation: BaselineAnalysisStore;
-  /** One ledger per review-category kind and frozen category contract, made when first asked for (Issue #417). */
-  readonly #reviewCategoryLedgers = new Map<string, BaselineAnalysisStore>();
-  /** The kind definition of each configured category a Review Run snapshotted, by its contract input. */
-  readonly #reviewCategoryDefinitions = new Map<string, AnalysisKindDefinition>();
+  /** One ledger per review-category kind and frozen category contract, made when first asked for (Issue #417); bounded (#649). */
+  readonly #reviewCategoryLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
+  /** The kind definition of each configured category a Review Run snapshotted, by its contract input; bounded (#649). */
+  readonly #reviewCategoryDefinitions = new RecentCache<AnalysisKindDefinition>(REVIEW_CATEGORY_CACHE_CAPACITY);
   /** 审稿意见 (Issue #429, S81c): one ledger per frozen reader's report contract, made when first asked for. */
   readonly #readersReportLedgers = new Map<string, BaselineAnalysisStore>();
   /** The ledger each 审稿意见 preparation in flight belongs to, by its work. */
@@ -3835,6 +3926,8 @@ export class EditorialStore {
   readonly #evaluationCalibration: EvaluationCalibrationLedger;
   readonly #series: SeriesLedger;
   readonly #seriesKnowledge: SeriesKnowledgeLedger;
+  /** 书系检索排除 (Issue #64, S29b): each Series' Retrieval Exclusions and their revisions. */
+  readonly #seriesExclusions: SeriesExclusionLedger;
   readonly #dataVersions: DataVersionLedger;
   /** 导出数据库 (Issue #434, S86a): the package's preparations, approvals and receipts. */
   readonly #databaseExports: DatabaseExports;
@@ -3852,6 +3945,9 @@ export class EditorialStore {
   readonly #evaluations: EvaluationRecords;
   /** ②A 分析反馈 (Issue #94, S38): the editor's judgments of analysis results. */
   readonly #analysisFeedback: AnalysisFeedbackLedger;
+  /** 就这段提问… (Issue #52, S17a): the dialogue Tasks, and the reader that joins them to the Harness Session Ledger. */
+  readonly #dialogues: DialogueLedger;
+  readonly #dialogueHistory: DialogueHistoryReader;
   readonly #productionDocuments: ProductionDocuments;
   /** Each Production Document's Deliverable Workflow (Issue #415, S66c). */
   readonly #documentWorkflow: ProductionDocumentWorkflow;
@@ -3914,6 +4010,9 @@ export class EditorialStore {
     this.#evaluationCalibration = new EvaluationCalibrationLedger(authority);
     this.#series = new SeriesLedger(authority);
     this.#seriesKnowledge = new SeriesKnowledgeLedger(authority);
+    this.#seriesExclusions = new SeriesExclusionLedger(authority);
+    this.#dialogues = new DialogueLedger(authority);
+    this.#dialogueHistory = harnessHistoryReader(join(dataRoot, HARNESS_SESSION_LOG_DIRECTORY));
     this.#dataVersions = new DataVersionLedger(authority);
     this.#databaseExports = new DatabaseExports(authority, dataRoot, {
       facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: READERS_REPORT_SCHEMA_VERSION }),
@@ -4144,7 +4243,8 @@ export class EditorialStore {
       // (Issue #433, S85a) the versions that opened the store; revision 55 (Issue #434, S86a) the database exports; revision 56
       // (Issue #434, S86b) the scheduled backups; revision 57 (Issue #434, S86c) the replacements of the local data; and revision
       // 58 (Issue #434, S86d) the merges of a package's Books. Revision 59 (Issue #429, S81b1) adds the AI7 初评 each Evaluation
-      // Record version began from, and `initializeTaskAuthorizationSchema` rebuilds the kind-coupled analysis relations for it.
+      // Record version began from, and `initializeTaskAuthorizationSchema` rebuilds the kind-coupled analysis relations for it;
+      // revision 60 (Issue #52, S17a) adds the dialogue Tasks, and revision 61 (Issue #64, S29b) the Series Retrieval Exclusions.
       initializeBookPeopleSchema(authority);
       initializeReviewGuidelineSchema(authority);
       initializeLibraryMaterialSchema(authority);
@@ -4161,6 +4261,8 @@ export class EditorialStore {
       initializeDatabaseReplacementSchema(authority);
       initializeDatabaseMergeSchema(authority);
       initializeEvaluationInitialDraftSchema(authority);
+      initializeDialogueSchema(authority);
+      initializeSeriesRetrievalExclusionSchema(authority);
       // Revision 62 (Issue #429, S81c): which 定稿 version each 审稿意见 Task drafts from, and which result became a draft.
       initializeReadersReportSchema(authority);
       initializeTaskAuthorizationSchema(authority);
@@ -4348,7 +4450,10 @@ export class EditorialStore {
    * is built by the caller (`reviewCategoryKindDefinition`) and its ledger is made when first asked
    * for rather than at open. It is kept per kind *and* frozen category contract: a ledger holds the
    * preparations in flight, so the same definition must keep finding the same ledger, and a category
-   * whose clauses changed is a different contract that must not inherit them.
+   * whose clauses changed is a different contract that must not inherit them. Only the
+   * `REVIEW_CATEGORY_CACHE_CAPACITY` most recently used are kept besides those with a preparation in
+   * flight (Issue #649); everything else a ledger knows is in the Book database, so one made afresh
+   * reads exactly what the one let go would have.
    *
    * The ledger takes the route and the launch the baseline ledger was bound to, so every plan it
    * freezes names the binding this launch actually bound — which the one execution owner then checks.
@@ -4356,14 +4461,11 @@ export class EditorialStore {
   reviewCategoryLedger(definition: AnalysisKindDefinition): BaselineAnalysisStore {
     this.#assertAvailable();
     requireStore(isReviewCategoryKindId(definition.kind), 'REVIEW_CATEGORY_INVALID', '该分析种类不是审阅类别。');
-    const key = `${definition.kind}\n${definition.promptContractDigest}`;
-    let ledger = this.#reviewCategoryLedgers.get(key);
-    if (ledger === undefined) {
-      ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
+    return this.#reviewCategoryLedgers.obtain(`${definition.kind}\n${definition.promptContractDigest}`, () => {
+      const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
       ledger.bindLaunch(this.#baselineAnalysis.launch);
-      this.#reviewCategoryLedgers.set(key, ledger);
-    }
-    return ledger;
+      return ledger;
+    });
   }
 
   /** One category's Task, latest Result Set Revision, history and update controls; `revisionId` opens one exact revision read-only. */
@@ -4437,12 +4539,7 @@ export class EditorialStore {
     if (entry.executor === 'factual-review-kind') return this.#factualReview;
     requireStore(entry.executor === 'review-category-contract', 'REVIEW_CATEGORY_NOT_TASK_BACKED', '这一类没有自己的任务账本。');
     const input = reviewCategoryContractInput(entry);
-    const key = JSON.stringify(input);
-    let definition = this.#reviewCategoryDefinitions.get(key);
-    if (definition === undefined) {
-      definition = this.#analysisCall(() => reviewCategoryKindDefinition(input));
-      this.#reviewCategoryDefinitions.set(key, definition);
-    }
+    const definition = this.#reviewCategoryDefinitions.obtain(JSON.stringify(input), () => this.#analysisCall(() => reviewCategoryKindDefinition(input)));
     return this.reviewCategoryLedger(definition);
   }
 
@@ -4852,6 +4949,30 @@ export class EditorialStore {
   reconcileStoppedInitialEvaluationRuns(): { settled: number } {
     this.#assertAvailable();
     return { settled: this.#analysisCall(() => this.#initialEvaluation.reconcileStoppedRuns()).settled };
+  }
+
+  /**
+   * Startup reconciliation of the factual kind's ledger (Issue #657): its Runs — 事实核查's own, and a Review Run's 事实核查
+   * category — cannot resume either, so one left admitted, executing or pausing ends 已中断 with its outcome, and one left
+   * waiting for a place is blocked before dispatch with why. The Book can then check facts again at once. A Review Run's
+   * 事实核查 left authorized sent nothing and is left for 继续审阅 to dispatch, as every category of a Review Run is.
+   */
+  reconcileStoppedFactualReviewRuns(): { settled: number } {
+    this.#assertAvailable();
+    return {
+      settled: this.#analysisCall(() =>
+        this.#factualReview.reconcileStoppedRuns({ leaveAuthorized: (runRecordId) => this.#reviewRuns.ownsCategoryRun(runRecordId) })).settled,
+    };
+  }
+
+  /**
+   * Startup reconciliation of the review categories' ledgers (Issue #657), as the factual kind's: a category Run a stopped
+   * service left under way is settled now, not only when the editor happens on 继续审阅, which then records what it came
+   * to; one left authorized is 继续审阅's to dispatch.
+   */
+  reconcileStoppedReviewCategoryRuns(): { settled: number } {
+    this.#assertAvailable();
+    return { settled: this.#reviewCall(() => this.#analysisCall(() => this.#reviewRuns.reconcileStoppedCategoryRuns())) };
   }
 
   /**
@@ -6981,14 +7102,18 @@ export class EditorialStore {
       };
     }
     const row = one(this.#authority.prepare(
-      `SELECT m.mark_id, m.manuscript_id, m.branch_id, m.block_id, m.anchor_state, m.source_task_id, m.source_label
+      `SELECT m.mark_id, m.manuscript_id, m.branch_id, m.block_id, m.anchor_state, m.source_task_id, m.source_label,
+              EXISTS (SELECT 1 FROM dialogue_tasks t WHERE t.dialogue_id = m.source_task_id) AS from_dialogue
        FROM proposal_item_decisions d JOIN proposal_change_items i ON i.item_id = d.item_id
        JOIN editorial_marks m ON m.mark_id = i.mark_id WHERE d.decision_id = ? AND m.book_id = ?`,
     ).all(source.decisionId, bookId) as SqlRow[], 'LEARNING_MATERIAL_NOT_FOUND', '这份学习材料的来源记录不存在。');
     return {
       target: { kind: 'mark', bookId, manuscriptId: asString(row.manuscript_id), branchId: asString(row.branch_id),
         blockId: asString(row.block_id), markId: asString(row.mark_id), detached: row.anchor_state === 'detached' },
-      sourceTask: row.source_task_id === null ? null : { taskIntentId: asString(row.source_task_id), label: asString(row.source_label) },
+      // A 修改建议 made of a dialogue's answer (Issue #52, S17a) names the dialogue on its card, never as a Task Intent here.
+      sourceTask: row.source_task_id === null || row.from_dialogue === 1
+        ? null
+        : { taskIntentId: asString(row.source_task_id), label: asString(row.source_label) },
     };
   }
 
@@ -11920,6 +12045,7 @@ export class EditorialStore {
       historyCount: history.count,
       historyNext: history.nextCursor,
       knowledge: this.#seriesKnowledgeProjection(series.seriesId),
+      exclusions: this.#seriesExclusionsProjection(series.seriesId),
     };
   }
 
@@ -11989,6 +12115,311 @@ export class EditorialStore {
       actor: '本机编辑',
       recordedAt: change.recordedAt,
       impact: change.impact,
+    };
+  }
+
+  // ---- 书系检索排除 (Issue #64, plan slice S29b; V2-UX-SER-020 to SER-029; ADR 0037) -----------------------------------
+
+  /**
+   * 添加检索排除…'s choices (SER-020): a page of what one kind of target may name in this Series — its knowledge items by name,
+   * the eight classes, its member Books newest joined first, or its members' Source Versions newest first — each saying whether
+   * an exclusion in force names it already. A read.
+   */
+  inspectSeriesExclusionTargets(input: InspectSeriesExclusionTargetsInput): SeriesExclusionTargetsProjection {
+    return this.#seriesCall(() => {
+      const series = this.#requireSeries(input.seriesId);
+      requireStore(isSeriesExclusionTargetKind(input.kind), 'SERIES_EXCLUSION_TARGET_INVALID', '检索排除的对象无效。');
+      const after = input.after;
+      requireStore(after === null || (isRecord(after) && typeof after.key === 'string' && after.key.length <= 400 && typeof after.id === 'string' &&
+        after.id.length >= 1 && after.id.length <= 64), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
+      const effective = this.#seriesExclusions.effective(series.seriesId);
+      const excluded = (kind: SeriesExclusionTargetKind, id: string): boolean => effective.some((entry) => entry.target.kind === kind && entry.target.id === id);
+      const rows: Array<{ target: SeriesExclusionTargetProjection; key: string }> = [];
+      const limit = MAX_SERIES_EXCLUSION_TARGETS_PAGE + 1;
+      if (input.kind === 'knowledge-item') {
+        for (const item of this.#seriesKnowledge.itemsPage(series.seriesId, '', after === null ? null : { subject: after.key, itemId: after.id }, limit)) {
+          rows.push({ key: item.subject, target: seriesExclusionTarget('knowledge-item', item.itemId, { subject: item.subject, knowledgeClass: item.knowledgeClass }) });
+        }
+      } else if (input.kind === 'knowledge-class') {
+        for (const knowledgeClass of SERIES_KNOWLEDGE_CLASSES) rows.push({ key: knowledgeClass, target: seriesExclusionTarget('knowledge-class', knowledgeClass, {}) });
+      } else if (input.kind === 'book') {
+        for (const member of this.#series.members(series.seriesId)) {
+          if (after !== null && (member.joinedAt > after.key || (member.joinedAt === after.key && member.bookId >= after.id))) continue;
+          rows.push({ key: member.joinedAt, target: seriesExclusionTarget('book', member.bookId, { bookTitle: this.#evaluationBookTitle(member.bookId) }) });
+          if (rows.length >= limit) break;
+        }
+      } else {
+        for (const row of this.#authority.prepare(
+          `SELECT sv.source_version_id, sv.display_name, sv.created_at, b.title FROM source_versions sv JOIN books b ON b.book_id = sv.book_id
+           WHERE EXISTS (SELECT 1 FROM series_membership_changes c WHERE c.series_id = ? AND c.book_id = sv.book_id AND c.kind = 'add'
+               AND c.ordinal = (SELECT max(d.ordinal) FROM series_membership_changes d WHERE d.series_id = c.series_id AND d.book_id = c.book_id))
+             AND (? IS NULL OR sv.created_at < ? OR (sv.created_at = ? AND sv.source_version_id < ?))
+           ORDER BY sv.created_at DESC, sv.source_version_id DESC LIMIT ?`,
+        ).all(series.seriesId, after?.key ?? null, after?.key ?? null, after?.key ?? null, after?.id ?? null, limit) as SqlRow[]) {
+          rows.push({ key: asString(row.created_at), target: seriesExclusionTarget('source-version', asString(row.source_version_id),
+            { displayName: asString(row.display_name), bookTitle: asString(row.title) }) });
+        }
+      }
+      const { page, more } = weighedPage(rows, MAX_SERIES_EXCLUSION_TARGETS_PAGE);
+      const last = page.at(-1);
+      return {
+        kind: input.kind,
+        targets: page.map((row) => ({ ...row.target, excluded: excluded(row.target.kind, row.target.id) })),
+        nextCursor: more && last !== undefined ? { key: last.key, id: last.target.id } : null,
+      };
+    });
+  }
+
+  /** `更早的排除记录…`: the next page of one Series' exclusion revisions, newest first. A read. */
+  inspectSeriesExclusionHistory(input: InspectSeriesExclusionHistoryInput): SeriesExclusionHistoryPageProjection {
+    return this.#seriesCall(() => {
+      const series = this.#requireSeries(input.seriesId);
+      requireStore(isRecord(input.after) && typeof input.after.recordedAt === 'string' && !Number.isNaN(Date.parse(input.after.recordedAt)) &&
+        typeof input.after.revisionId === 'string' && UUID_PATTERN.test(input.after.revisionId), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
+      const read = this.#seriesExclusionHistoryPage(series.seriesId, input.after);
+      return { history: read.history, nextCursor: read.nextCursor };
+    });
+  }
+
+  /**
+   * 书系检索排除影响预览 (SER-021, SER-022) for 添加检索排除, 修改检索排除 or 停止此排除. A read: nothing is recorded until the
+   * editor commits the exclusion against this preview's digest.
+   */
+  previewSeriesExclusion(input: PreviewSeriesExclusionInput): SeriesExclusionPreviewProjection {
+    return this.#seriesCall(() => this.#seriesExclusionPreview(input).preview);
+  }
+
+  /**
+   * 添加检索排除, 修改检索排除 or 停止此排除 (SER-020 to SER-027): the preview is recomputed inside the transaction and a stale one
+   * is refused; the revision keeps what the preview showed. An exclusion takes effect as it is recorded: an approved Run whose
+   * reading of the excluded material has not begun stops in the same transaction, and one reading now stops at the guard
+   * before its next range. Ending one restores nothing it stopped.
+   */
+  recordSeriesExclusion(input: RecordSeriesExclusionInput): SeriesExclusionResultProjection {
+    return this.#seriesCall(() => {
+      const { revision, stoppedRuns } = this.#transaction(this.#authority, () => {
+        const { preview, prior, reach } = this.#seriesExclusionPreview(input);
+        requireStore(typeof input.previewDigest === 'string' && preview.previewDigest === input.previewDigest, 'SERIES_EXCLUSION_PREVIEW_STALE',
+          '预览之后，检索排除、书系知识或相关任务有了变化；请重新查看影响，再决定。');
+        const stored = this.#seriesExclusions.record({
+          seriesId: preview.seriesId,
+          action: preview.action,
+          prior,
+          target: preview.target,
+          reason: preview.reason,
+          previewDigest: preview.previewDigest,
+          impact: preview.groups,
+        });
+        let stopped = 0;
+        if (preview.action === 'add') {
+          for (const run of reach.active) {
+            if (!run.started && this.#reviewRuns.stopForSeriesScope(run.reviewRunId, run.categoryId)) stopped += 1;
+          }
+        }
+        return { revision: stored, stoppedRuns: stopped };
+      });
+      return {
+        exclusionId: revision.exclusionId,
+        revisionId: revision.revisionId,
+        completionLabel: revision.action === 'add' ? '书系检索排除已生效' : revision.action === 'change' ? '检索排除已修改' : '已停止此排除',
+        stoppedRuns,
+        revision: this.#seriesExclusionRevision(revision),
+      };
+    });
+  }
+
+  /**
+   * The current-read guard the execution owner asks before each reading range of a Run (Issue #64, S29b; SER-023): what an
+   * exclusion in force reaches of the Series material the Run froze, or `null`. A record it cannot read stops the Run rather
+   * than let it read past a restriction it could not check.
+   */
+  seriesReadGuard(runRecordId: string): string | null {
+    this.#assertAvailable();
+    try {
+      return this.#reviewRuns.seriesReadGuard(runRecordId);
+    } catch (error) {
+      if (error instanceof ReviewRunError || error instanceof SeriesExclusionError) return '无法读取的书系检索排除记录';
+      throw error;
+    }
+  }
+
+  /**
+   * 取消任务 of a Review Run an exclusion stopped (SER-024): it then reads 已取消 and offers nothing more; what it put on the
+   * manuscript stays as it is. The answer is the Book's 审阅 with the Run open.
+   */
+  cancelReviewRun(bookId: string, reviewRunId: string, progress?: ProgressReader): ReviewWorkspaceProjection {
+    return this.#reviewCall(() => {
+      this.#reviewRuns.cancelStoppedRun(bookId, reviewRunId);
+      return this.#reviewRuns.workspace(bookId, reviewRunId, progress);
+    });
+  }
+
+  /** What an exclusion target names now, read from the records that own it; refused when this Series cannot name it. */
+  #seriesExclusionTargetOf(series: StoredSeries, input: unknown): SeriesExclusionTargetProjection {
+    requireStore(isRecord(input) && isSeriesExclusionTargetKind(input.kind) && typeof input.id === 'string', 'SERIES_EXCLUSION_TARGET_INVALID', '检索排除的对象无效。');
+    const id = input.id;
+    switch (input.kind) {
+      case 'knowledge-item': {
+        const item = UUID_PATTERN.test(id) ? this.#seriesKnowledge.item(id) : null;
+        requireStore(item !== null && item.seriesId === series.seriesId, 'SERIES_EXCLUSION_TARGET_NOT_FOUND', `书系「${series.title}」没有这个书系知识条目。`);
+        return seriesExclusionTarget('knowledge-item', id, { subject: item.subject, knowledgeClass: item.knowledgeClass });
+      }
+      case 'knowledge-class':
+        requireStore(isSeriesKnowledgeClass(id), 'SERIES_EXCLUSION_TARGET_NOT_FOUND', '没有这个知识类别。');
+        return seriesExclusionTarget('knowledge-class', id, {});
+      case 'book': {
+        requireStore(UUID_PATTERN.test(id), 'SERIES_EXCLUSION_TARGET_INVALID', '检索排除的对象无效。');
+        const bookTitle = this.#evaluationBookTitle(id);
+        requireStore(this.#series.latest(series.seriesId, id)?.kind === 'add', 'SERIES_EXCLUSION_NOT_MEMBER',
+          `《${bookTitle}》不在书系「${series.title}」中；检索排除只针对这个书系的成员图书。`);
+        return seriesExclusionTarget('book', id, { bookTitle });
+      }
+      case 'source-version': {
+        const row = UUID_PATTERN.test(id)
+          ? this.#authority.prepare('SELECT sv.book_id, sv.display_name, b.title FROM source_versions sv JOIN books b ON b.book_id = sv.book_id WHERE sv.source_version_id = ?').get(id) as SqlRow | undefined
+          : undefined;
+        requireStore(row !== undefined, 'SERIES_EXCLUSION_TARGET_NOT_FOUND', '没有这个来源版本。');
+        requireStore(this.#series.latest(series.seriesId, asString(row.book_id))?.kind === 'add', 'SERIES_EXCLUSION_NOT_MEMBER',
+          `《${asString(row.title)}》不在书系「${series.title}」中；检索排除只针对这个书系成员图书的来源版本。`);
+        return seriesExclusionTarget('source-version', id, { displayName: asString(row.display_name), bookTitle: asString(row.title) });
+      }
+    }
+  }
+
+  #seriesExclusionPreview(input: PreviewSeriesExclusionInput): {
+    preview: SeriesExclusionPreviewProjection;
+    prior: StoredExclusion | null;
+    reach: ReturnType<ReviewRunStore['seriesExclusionReach']>;
+  } {
+    const series = this.#requireSeries(input.seriesId);
+    requireStore(isSeriesExclusionAction(input.action), 'SERIES_EXCLUSION_INVALID', '检索排除只有添加、修改和停止。');
+    const reason = seriesExclusionReason(input.reason);
+    requireStore(reason !== null, 'SERIES_EXCLUSION_REASON_INVALID', `排除理由最多 ${MAX_SERIES_EXCLUSION_REASON_CHARACTERS} 个字，写在一行里。`);
+    const effective = this.#seriesExclusions.effective(series.seriesId);
+    let prior: StoredExclusion | null = null;
+    let target: SeriesExclusionTargetProjection;
+    if (input.action === 'add') {
+      requireStore(input.exclusionId === null && input.target !== null, 'SERIES_EXCLUSION_INVALID', '添加检索排除要指定一个对象。');
+      target = this.#seriesExclusionTargetOf(series, input.target);
+      requireStore(!effective.some((entry) => entry.target.kind === target.kind && entry.target.id === target.id), 'SERIES_EXCLUSION_ALREADY',
+        `${target.label}已经排除在书系「${series.title}」的检索之外。`);
+      requireStore(effective.length < MAX_SERIES_EXCLUSIONS, 'SERIES_EXCLUSION_LIMIT',
+        `书系「${series.title}」已有 ${MAX_SERIES_EXCLUSIONS} 条检索排除在生效；先停止不再需要的，再添加。`);
+    } else {
+      requireStore(typeof input.exclusionId === 'string' && UUID_PATTERN.test(input.exclusionId) && input.target === null, 'SERIES_EXCLUSION_INVALID',
+        '要指定修改或停止哪一条检索排除。');
+      prior = this.#seriesExclusions.exclusion(series.seriesId, input.exclusionId);
+      requireStore(prior !== null, 'SERIES_EXCLUSION_NOT_FOUND', '这条检索排除不存在。');
+      requireStore(prior.effective, 'SERIES_EXCLUSION_ENDED', '这条检索排除已经停止；以后的检索已经可以读取它。');
+      requireStore(input.action !== 'change' || reason !== prior.current.reason, 'SERIES_EXCLUSION_UNCHANGED', '排除理由没有变化。');
+      target = prior.target;
+    }
+    const covers = (material: SeriesKnowledgeMaterial): boolean => seriesExclusionCovers(series.seriesId, target, material);
+    // What the target reaches of the Series' knowledge now, and every version governing the preview, hashed one by one.
+    const governing = createHash('sha256');
+    const itemsNamed: string[] = [];
+    let itemCount = 0;
+    // 停止此排除 reopens only what no other exclusion in force still reaches (Issue #64 review).
+    const others = prior === null ? [] : effective.filter((entry) => entry.exclusionId !== prior!.exclusionId);
+    const stillNamed: string[] = [];
+    let stillCount = 0;
+    for (const item of this.#seriesKnowledge.items(series.seriesId)) {
+      const material = { seriesId: series.seriesId, itemId: item.itemId, knowledgeClass: item.knowledgeClass, sourceBookId: item.current.provenance?.bookId ?? null };
+      if (!covers(material)) continue;
+      itemCount += 1;
+      if (itemsNamed.length < NAMED_EXCLUSION_ENTRIES) itemsNamed.push(`「${item.subject}」`);
+      if (coveringExclusions(others, material).length > 0) {
+        stillCount += 1;
+        if (stillNamed.length < NAMED_EXCLUSION_ENTRIES) stillNamed.push(`「${item.subject}」`);
+      }
+      governing.update(canonicalJson({ kind: 'item', itemId: item.itemId, revisionId: item.current.revisionId }));
+      governing.update('\n');
+    }
+    for (const entry of effective) {
+      governing.update(canonicalJson({ kind: 'exclusion', exclusionId: entry.exclusionId, revisionId: entry.current.revisionId }));
+      governing.update('\n');
+    }
+    const reach = input.action === 'add' ? this.#reviewRuns.seriesExclusionReach(covers) : { active: [], prepared: 0, completed: [] };
+    governing.update(canonicalJson({ kind: 'runs', active: reach.active, prepared: reach.prepared, completed: reach.completed }));
+    // One entry per Review Run, even where two Books share a title (Issue #64 review).
+    const routes = (runs: ReadonlyArray<{ readonly reviewRunId: string; readonly route: string }>): string[] =>
+      [...new Map(runs.map((run) => [run.reviewRunId, run.route] as const)).values()];
+    const runRoutes = routes(reach.active);
+    const completedRoutes = routes(reach.completed);
+    const groups = seriesExclusionImpact(input.action, {
+      seriesTitle: series.title,
+      target,
+      reason,
+      priorReason: prior?.current.reason ?? null,
+      itemsNamed,
+      itemCount,
+      stillNamed,
+      stillCount,
+      runsNamed: runRoutes.slice(0, NAMED_EXCLUSION_ENTRIES),
+      runCount: runRoutes.length,
+      preparedCount: reach.prepared,
+      completedNamed: completedRoutes.slice(0, NAMED_EXCLUSION_ENTRIES),
+      completedCount: completedRoutes.length,
+    });
+    const preview: SeriesExclusionPreviewProjection = {
+      seriesId: series.seriesId,
+      seriesTitle: series.title,
+      action: input.action,
+      actionLabel: SERIES_EXCLUSION_ACTION_LABELS[input.action],
+      exclusionId: prior?.exclusionId ?? null,
+      target,
+      reason,
+      scope: `只限书系「${series.title}」的书系检索`,
+      effectiveTime: '记录后立即生效',
+      actor: '本机编辑',
+      groups,
+      previewDigest: seriesExclusionPreviewDigest({
+        seriesId: series.seriesId,
+        action: input.action,
+        exclusionId: prior?.exclusionId ?? null,
+        target,
+        reason,
+        chainHead: prior?.current.revisionId ?? null,
+        governingDigest: governing.digest('hex'),
+        groups,
+      }),
+    };
+    return { preview, prior, reach };
+  }
+
+  /** A Series' 检索排除 as its page opens: every exclusion in force, and the first page of revisions. */
+  #seriesExclusionsProjection(seriesId: string): SeriesExclusionsProjection {
+    const effective = this.#seriesExclusions.effective(seriesId).map((entry): SeriesExclusionProjection => ({
+      exclusionId: entry.exclusionId,
+      target: entry.target,
+      reason: entry.current.reason,
+      effectiveSince: entry.since,
+      revision: entry.current.revision,
+    }));
+    const history = this.#seriesExclusionHistoryPage(seriesId, null);
+    return { effective, history: history.history, historyCount: history.count, historyNext: history.nextCursor };
+  }
+
+  #seriesExclusionHistoryPage(seriesId: string, after: SeriesExclusionHistoryCursor | null):
+  SeriesExclusionHistoryPageProjection & { count: number } {
+    const { entries, count } = this.#seriesExclusions.historyPage(seriesId, after, MAX_SERIES_EXCLUSION_HISTORY_PAGE + 1);
+    const { page, more } = weighedPage(entries.map((entry) => this.#seriesExclusionRevision(entry)), MAX_SERIES_EXCLUSION_HISTORY_PAGE);
+    const last = page.at(-1);
+    return { history: page, nextCursor: more && last !== undefined ? { recordedAt: last.recordedAt, revisionId: last.revisionId } : null, count };
+  }
+
+  #seriesExclusionRevision(entry: StoredExclusionRevision): SeriesExclusionRevisionProjection {
+    return {
+      revisionId: entry.revisionId,
+      exclusionId: entry.exclusionId,
+      revision: entry.revision,
+      action: entry.action,
+      actionLabel: SERIES_EXCLUSION_ACTION_LABELS[entry.action],
+      target: entry.target,
+      reason: entry.reason,
+      actor: '本机编辑',
+      recordedAt: entry.recordedAt,
+      impact: entry.impact,
     };
   }
 
@@ -12569,7 +13000,8 @@ export class EditorialStore {
       return operation();
     } catch (error) {
       if (error instanceof SeriesError || error instanceof SeriesKnowledgeError || error instanceof LearningEligibilityError ||
-          error instanceof DecisionFeedbackError || error instanceof AnalysisFeedbackError) {
+          error instanceof DecisionFeedbackError || error instanceof AnalysisFeedbackError || error instanceof SeriesExclusionError ||
+          error instanceof ReviewRunError) {
         throw new StoreError(error.code, error.message);
       }
       throw error;
@@ -13073,7 +13505,7 @@ export class EditorialStore {
    * cancelled included — composed into 等你处理, 进行中 and 最近完成 by `global-attention.ts`. A read: nothing is written,
    * claimed or terminalized.
    */
-  inspectBookTasks(bookId: string, progress: ProgressReader, waitingFor: WaitingFor = 'admitting'): BookTasksProjection {
+  inspectBookTasks(bookId: string, progress: ProgressReader, waitingFor: WaitingFor = 'admitting', dialogueLive: (attemptId: string) => LiveAnswer | null = () => null): BookTasksProjection {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
     one(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').all(bookId) as SqlRow[], 'BOOK_NOT_FOUND', '图书不存在。');
@@ -13089,12 +13521,227 @@ export class EditorialStore {
           reviewRuns: review.latest,
           reviewCompletions: review.completed,
           waitingFor,
+          // Its dialogue Tasks (Issue #52, S17a; TASK-044), each read through the Harness Session Ledger.
+          dialogues: this.#dialogueCall(() => this.#dialogueTaskReadings(bookId, dialogueLive)),
         });
       } catch (error) {
         if (error instanceof GlobalAttentionError) throw new StoreError(error.code, error.message);
         throw error;
       }
     });
+  }
+
+  // ---- 就这段提问… (Issue #52, plan slice S17a; UI ADR 0014; V2-UX-DIALOG-001 to 016, TASK-044) ---------------------------
+
+  /** The Harness Session Ledger under the Agent Data Root: one JSONL file per technical Session (UI ADR 0014, ADR 0011). */
+  get harnessSessionLogRoot(): string {
+    return join(this.#dataRoot, HARNESS_SESSION_LOG_DIRECTORY);
+  }
+
+  /**
+   * 就这段提问… (the Owner, 2026-10-07: selecting words and asking is enough — no plan, no 开始任务): a dialogue Task on the
+   * exact words selected in the Book's manuscript, verified as a mark's range is, and its first attempt. Nothing is sent here;
+   * the execution owner sends the message this answers, which holds the selected words and the question and nothing else.
+   */
+  askAboutSelection(bookId: string, input: AskAboutSelectionInput, now: Date = new Date()): DialogueTurnStart {
+    return this.#dialogueCall(() => {
+      requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+      requireStore(typeof input === 'object' && input !== null && typeof input.selection === 'object' && input.selection !== null,
+        'DIALOGUE_SELECTION_INVALID', '所选文字无效。');
+      const question = dialogueQuestion(input.question);
+      const verified = this.#markCall(() => this.#editorialMarks.verifySpan(input.selection));
+      requireStore(verified.bookId === bookId, 'DIALOGUE_SELECTION_INVALID', '所选文字不在这本书的稿件中。');
+      requireStore(verified.text.length > 0 && input.selection.toGrapheme - input.selection.fromGrapheme <= MAX_DIALOGUE_SELECTION_GRAPHEMES,
+        'DIALOGUE_SELECTION_TOO_LONG', `所选文字最多 ${MAX_DIALOGUE_SELECTION_GRAPHEMES} 个字；请选短一些再提问。`);
+      const { task, attemptId } = this.#transaction(this.#authority, () => this.#dialogues.ask({
+        bookId,
+        manuscriptId: input.selection.manuscriptId,
+        branchId: input.selection.branchId,
+        revisionId: verified.revisionId,
+        journalSequence: verified.journalSequence,
+        blockId: input.selection.blockId,
+        fromGrapheme: input.selection.fromGrapheme,
+        toGrapheme: input.selection.toGrapheme,
+        blockDigest: input.selection.baseBlockDigest,
+        selectionSha256: sha256(verified.text),
+        questionSha256: sha256(question),
+        now,
+      }));
+      return { dialogueId: task.dialogueId, attemptId, message: { kind: 'ask', selection: verified.text, question, kept: null } };
+    });
+  }
+
+  /**
+   * 继续回答 or 重新回答 (DIALOG-014): a new traceable attempt after the latest, which `attemptId` must name. Its message is read
+   * back from the Harness Session Ledger — the words the dialogue's turns sent, under the digests its Task bound — so a new
+   * attempt sends exactly what was asked, and 继续回答 adds the complete fragments the stopped answer kept.
+   */
+  nextDialogueAttempt(bookId: string, input: DialogueAttemptInput, kind: 'continue' | 'regenerate', now: Date = new Date()): DialogueTurnStart {
+    return this.#dialogueCall(() => {
+      const task = this.#requireDialogueTask(bookId, input.dialogueId);
+      const resolved = resolveAttempts(this.#dialogues.attempts(task.dialogueId), this.#dialogueHistory, () => null);
+      const latest = resolved.attempts.at(-1);
+      requireStore(latest !== undefined && latest.attempt.attemptId === input.attemptId, 'DIALOGUE_STALE', '这段对话已有新的回答；请看最新的回答再操作。');
+      // An answer in flight is stopped first, whatever its log holds yet (DIALOG-014).
+      requireStore(latest.state !== 'answering', 'DIALOGUE_ANSWERING', '这个问题还在回答中；停止回答后才能继续或重新回答。');
+      const first = resolved.first;
+      requireStore(first !== null, 'DIALOGUE_HISTORY_MISSING', '这个问题的记录不在本机，不能继续或重新回答。');
+      requireStore(sha256(first.selection) === task.selectionSha256 && sha256(first.question) === task.questionSha256,
+        'DIALOGUE_RECORD_INVALID', '对话记录与它的问题不一致。');
+      const attemptId = this.#transaction(this.#authority, () => this.#dialogues.nextAttempt(task.dialogueId, kind, () => latest.fragments.length, now));
+      return {
+        dialogueId: task.dialogueId,
+        attemptId,
+        message: kind === 'continue'
+          ? { kind: 'continue', selection: first.selection, question: first.question, kept: keptText(latest) }
+          : { kind: 'ask', selection: first.selection, question: first.question, kept: null },
+      };
+    });
+  }
+
+  /** The answer in flight of a dialogue, which `attemptId` must name: what 停止回答 stops. */
+  answeringDialogueAttempt(bookId: string, input: DialogueAttemptInput): string {
+    return this.#dialogueCall(() => {
+      const task = this.#requireDialogueTask(bookId, input.dialogueId);
+      const latest = this.#dialogues.attempts(task.dialogueId).at(-1);
+      requireStore(latest !== undefined && latest.attemptId === input.attemptId, 'DIALOGUE_STALE', '这段对话已有新的回答；请看最新的回答再操作。');
+      requireStore(latest.outcome === null, 'DIALOGUE_NOT_ANSWERING', '这次回答已经结束。');
+      return latest.attemptId;
+    });
+  }
+
+  bindDialogueAttempt(attemptId: string, binding: StoredDialogueBinding): void {
+    this.#dialogueCall(() => this.#transaction(this.#authority, () => this.#dialogues.bind(attemptId, binding)));
+  }
+
+  openDialogueSpan(attemptId: string, harnessSessionId: string, startSeq: number, now: Date = new Date()): void {
+    this.#dialogueCall(() => this.#transaction(this.#authority, () => this.#dialogues.openSpan(attemptId, harnessSessionId, startSeq, now)));
+  }
+
+  settleDialogueAttempt(attemptId: string, outcome: DialogueOutcome, endSeq: number | null, causeCode: string | null, now: Date = new Date()): void {
+    this.#dialogueCall(() => this.#transaction(this.#authority, () => this.#dialogues.settle(attemptId, outcome, endSeq, causeCode, now)));
+  }
+
+  /**
+   * A dialogue as the editor reads it (DIALOG-009 to 016), joined again from its records to the Harness Session Ledger; the
+   * attempt answering now is read from what it has streamed (`live`). A read: nothing is written.
+   */
+  inspectDialogue(bookId: string, dialogueId: string, afterFragment: number, live: (attemptId: string) => LiveAnswer | null): DialogueProjection {
+    return this.#dialogueCall(() => {
+      requireStore(Number.isSafeInteger(afterFragment) && afterFragment >= 0, 'DIALOGUE_CURSOR_INVALID', '对话位置无效。');
+      const task = this.#requireDialogueTask(bookId, dialogueId);
+      return dialogueProjection(task, resolveAttempts(this.#dialogues.attempts(task.dialogueId), this.#dialogueHistory, live), afterFragment);
+    });
+  }
+
+  /**
+   * 转为修改建议 (DIALOG-016): a separate governed object — an AI7-produced 修改建议 on the dialogue's selected words, its origin
+   * the dialogue Task and its basis the completed answer — made by the editor's explicit action and never applied. An
+   * Incomplete Dialogue Answer is refused (DIALOG-013), and so are words the manuscript no longer holds at the range.
+   */
+  convertDialogueToChangeSuggestion(bookId: string, input: ConvertDialogueToChangeSuggestionInput, now: Date = new Date()): DialogueConversionProjection {
+    return this.#dialogueCall(() => {
+      const task = this.#requireDialogueTask(bookId, input.dialogueId);
+      const resolved = resolveAttempts(this.#dialogues.attempts(task.dialogueId), this.#dialogueHistory, () => null);
+      const latest = resolved.attempts.at(-1);
+      requireStore(latest !== undefined && latest.attempt.attemptId === input.attemptId, 'DIALOGUE_STALE', '这段对话已有新的回答；请看最新的回答再操作。');
+      requireStore(latest.state === 'completed' && latest.fragments.length > 0, 'DIALOGUE_INCOMPLETE', '内容不完整的回答不能转为修改建议。');
+      const first = resolved.first;
+      requireStore(first !== null && sha256(first.selection) === task.selectionSha256, 'DIALOGUE_HISTORY_MISSING', '这个问题的记录不在本机，不能转为修改建议。');
+      requireStore(typeof input.proposedText === 'string' && input.proposedText.trim().length > 0 && input.proposedText.length <= MAX_DIALOGUE_PROPOSAL_CHARACTERS,
+        'DIALOGUE_PROPOSAL_INVALID', `建议改为的文字要 1–${MAX_DIALOGUE_PROPOSAL_CHARACTERS} 个字。`);
+      requireStore(typeof input.rationale === 'string' && input.rationale.length <= MAX_DIALOGUE_PROPOSAL_CHARACTERS,
+        'DIALOGUE_PROPOSAL_INVALID', `理由最多 ${MAX_DIALOGUE_PROPOSAL_CHARACTERS} 个字。`);
+      const answer = keptText(latest);
+      const quote = [...answer].length > DIALOGUE_BASIS_QUOTE_CHARACTERS ? `${[...answer].slice(0, DIALOGUE_BASIS_QUOTE_CHARACTERS).join('')}…` : answer;
+      const markId = this.#markCall(() => this.#editorialMarks.createProducedMany([{
+        manuscriptId: task.manuscriptId,
+        branchId: task.branchId,
+        blockId: task.blockId,
+        fromGrapheme: task.fromGrapheme,
+        toGrapheme: task.toGrapheme,
+        pinnedText: first.selection,
+        kind: 'change-suggestion',
+        body: '',
+        proposedText: input.proposedText,
+        rationale: input.rationale,
+        atomicGroupId: null,
+        source: { kind: 'ai7', origin: 'task', label: DIALOGUE_MARK_SOURCE_LABEL, taskId: task.dialogueId },
+        basis: [{ label: `${DIALOGUE_MARK_SOURCE_LABEL} · 第 ${latest.attempt.ordinal} 次`, blockId: task.blockId, fromGrapheme: task.fromGrapheme, toGrapheme: task.toGrapheme, quote }],
+      }], ([created]) => {
+        requireStore(created !== null && created !== undefined, 'MARK_ANCHOR_CHANGED', '所选文字已不在当前稿件中；不能把这次回答转为修改建议。');
+        this.#dialogues.convert(latest.attempt.attemptId, created, now);
+        return created;
+      }));
+      return {
+        markId,
+        completionLabel: '已新建修改建议：它不会自动应用，是否接受由你决定。',
+        dialogue: dialogueProjection(task, resolveAttempts(this.#dialogues.attempts(task.dialogueId), this.#dialogueHistory, () => null), 0),
+      };
+    });
+  }
+
+  /**
+   * Startup reconciliation (DIALOG-012): an attempt this service's predecessor left answering has nothing streaming it now. It
+   * settles 回答中断 · 内容不完整 at once, its turn ending where the Harness Session Ledger's record of it ends, and nothing
+   * is retried or sent (DIALOG-014).
+   */
+  reconcileDialogueAttempts(now: Date = new Date()): number {
+    return this.#dialogueCall(() => {
+      const unsettled = this.#dialogues.unsettled();
+      for (const attempt of unsettled) {
+        let endSeq: number | null = null;
+        if (attempt.span !== null) {
+          const log = (() => {
+            try {
+              return readHarnessSessionLog(this.harnessSessionLogRoot, attempt.span.harnessSessionId);
+            } catch {
+              return null;
+            }
+          })();
+          if (log !== null && log.events.length > attempt.span.startSeq) endSeq = log.events.length - 1;
+        }
+        this.#transaction(this.#authority, () => this.#dialogues.settle(attempt.attemptId, 'interrupted', endSeq, 'SERVICE_STOPPED', now));
+      }
+      return unsettled.length;
+    });
+  }
+
+  /** The Book's dialogue Tasks as the 任务 panel reads them (TASK-044): each latest answer's state, from the ledger. */
+  #dialogueTaskReadings(bookId: string, live: (attemptId: string) => LiveAnswer | null): DialogueTaskReading[] {
+    const bookTitle = this.#evaluationBookTitle(bookId);
+    return this.#dialogues.tasksOf(bookId).map((task) => {
+      const resolved = resolveAttempts(this.#dialogues.attempts(task.dialogueId), this.#dialogueHistory, live);
+      const latest = resolved.attempts.at(-1)!;
+      return {
+        bookId,
+        bookTitle,
+        dialogueId: task.dialogueId,
+        question: resolved.first?.question ?? null,
+        state: latest.state,
+        answered: latest.fragments.length > 0,
+        attempts: resolved.attempts.length,
+        at: latest.attempt.outcome?.settledAt ?? latest.attempt.createdAt,
+      };
+    });
+  }
+
+  #requireDialogueTask(bookId: string, dialogueId: string): StoredDialogueTask {
+    requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+    requireStore(typeof dialogueId === 'string' && UUID_PATTERN.test(dialogueId), 'DIALOGUE_INVALID', '对话标识无效。');
+    const task = this.#dialogues.task(dialogueId);
+    requireStore(task !== null && task.bookId === bookId, 'DIALOGUE_NOT_FOUND', '这段对话不存在。');
+    return task;
+  }
+
+  #dialogueCall<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof DialogueError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
   }
 
   undoManuscript(manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection {
@@ -16330,7 +16977,7 @@ export class EditorialStore {
       // A guideline version that no longer reads refuses the review's configuration in its own words (Issue #427 review).
       // So does a Series record that no longer reads (Issue #64 review), should one reach here past 书系一致性's own reading.
       if (error instanceof ReviewRunError || error instanceof AnalysisError || error instanceof EditorialMarkError || error instanceof ProposalConflictError ||
-        error instanceof ReviewGuidelineError || error instanceof SeriesError || error instanceof SeriesKnowledgeError) {
+        error instanceof ReviewGuidelineError || error instanceof SeriesError || error instanceof SeriesKnowledgeError || error instanceof SeriesExclusionError) {
         throw new StoreError(error.code, error.message);
       }
       if (error instanceof BoundedStoreFatalError) {

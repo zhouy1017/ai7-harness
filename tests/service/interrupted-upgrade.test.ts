@@ -14,6 +14,7 @@ import { BoundedStoreError, initializeManuscriptEntryPositionSchema } from '../.
 import { DATA_VERSION_SCHEMA_SQL, initializeDataVersionSchema } from '../../src/service/data-version.js';
 import { DATABASE_EXPORT_SCHEMA_SQL, initializeDatabaseExportSchema } from '../../src/service/database-exports.js';
 import { DATABASE_MERGE_SCHEMA_SQL, initializeDatabaseMergeSchema } from '../../src/service/database-merge.js';
+import { DIALOGUE_SCHEMA_SQL, initializeDialogueSchema } from '../../src/service/dialogue/dialogue-ledger.js';
 import { DATABASE_REPLACEMENT_SCHEMA_SQL, initializeDatabaseReplacementSchema } from '../../src/service/database-replacement.js';
 import { DECISION_FEEDBACK_SCHEMA_SQL, initializeDecisionFeedbackSchema } from '../../src/service/decision-feedback.js';
 import { initializeDefaultExecutionRuleSchema } from '../../src/service/default-execution-rules.js';
@@ -60,6 +61,7 @@ import {
   READERS_REPORT_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import { READERS_REPORT_SCHEMA_SQL, initializeReadersReportSchema } from '../../src/service/readers-reports.js';
+import { SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL, initializeSeriesRetrievalExclusionSchema } from '../../src/service/series-exclusions.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 import { plantRevision34Relations } from '../support/clarifications.js';
 import { downgradeAnalysisRunStatesToRevision29 } from '../support/connectivity-wait.js';
@@ -149,22 +151,31 @@ interface Revision {
   readonly step: ((database: DatabaseSync) => void) | null;
   /** Take a store at this revision back to the one before, as the suites' own plants do. */
   readonly undo: (database: DatabaseSync) => void;
-  /** The revision before it, when that is not the one just below: revisions 60 and 61 are other slices'. */
-  readonly previous?: number;
 }
 
 // Newest first: a store is walked down one revision at a time.
 const REVISIONS: ReadonlyArray<Revision> = [
   {
     // Revision 62 (Issue #429, S81c) rebuilds the three kind-coupled relations and stamps its version in one transaction, so the
-    // one step an interruption can leave committed without the stamp is the two relations of 审稿意见.
+    // one step an interruption can leave committed without the stamp is the two relations of 审稿意见. Revisions 60 and 61 left
+    // the kind-coupled relations as revision 59 shaped them.
     revision: 62,
-    previous: 59,
     step: initializeReadersReportSchema,
     undo: (database) => {
       drop(database, Object.keys(READERS_REPORT_SCHEMA_SQL).reverse());
       downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_59_SQL);
     },
+  },
+  // Revision 61 (Issue #64, S29b): the Series Retrieval Exclusions.
+  {
+    revision: 61,
+    step: initializeSeriesRetrievalExclusionSchema,
+    undo: (database) => drop(database, Object.keys(SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL).reverse()),
+  },
+  {
+    revision: 60,
+    step: initializeDialogueSchema,
+    undo: (database) => drop(database, Object.keys(DIALOGUE_SCHEMA_SQL).reverse()),
   },
   {
     // Revision 59 rebuilds the three kind-coupled relations and stamps its version in one transaction, so the one step an
@@ -342,9 +353,9 @@ const tables = (): string[] => {
 };
 
 describe('an upgrade interrupted before its version stamp', () => {
-  for (const { revision, step, previous } of REVISIONS) {
-    const before = previous ?? revision - 1;
+  for (const { revision, step } of REVISIONS) {
     if (step === null) continue;
+    const before = revision - 1;
     it(`is finished by the next open when revision ${revision}'s relations committed and its stamp did not`, async () => {
       expect(await opened()).toBe(READERS_REPORT_SCHEMA_VERSION);
       const terminal = tables();

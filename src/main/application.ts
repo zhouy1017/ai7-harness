@@ -24,6 +24,11 @@ import {
   RUN_BUDGET_CEILING_ARGUMENT,
   TRUSTED_SCOPE_ARGUMENT,
   parseTrustedLaunchForm,
+  type AskAboutSelectionInput,
+  type ConvertDialogueToChangeSuggestionInput,
+  type DialogueAttemptInput,
+  type DialogueProjection,
+  type InspectDialogueInput,
   type CommitNewBookRendererInput,
   type CommitManuscriptReimportRendererInput,
   type CommitSourceImportRendererInput,
@@ -81,6 +86,8 @@ interface LaunchArguments {
   connectivityPath: string | undefined;
   /** J-10 only (Issue #422): the file whose number says how many units may settle; a unit waits, in flight, for it. */
   unitHoldPath: string | undefined;
+  /** J-16 only (Issue #52, S17a): the file whose number says how many text deltas a dialogue answer may stream. */
+  answerHoldPath: string | undefined;
   /** J-05 only: the first Apply commits and its acknowledgement is withheld from the renderer, once. */
   applyControl: 'lose-first-acknowledgement' | undefined;
   observeJ12Reveal: boolean;
@@ -200,6 +207,7 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j04-model-adapter' ||
           key === '--j04-connectivity-path' ||
           key === '--j10-unit-hold-path' ||
+          key === '--j16-answer-hold-path' ||
           key === '--j05-apply-control' ||
           key === '--j12-observe-reveal' ||
           key === '--launcher-pid' ||
@@ -362,10 +370,16 @@ function parseArguments(argv: string[]): LaunchArguments {
   const connectivityPath = values.get('--j04-connectivity-path');
   requireDesktop(connectivityPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-04' && isAbsolute(connectivityPath)));
   // J-10's unit hold (Issue #422) is guarded the same way — J-10's own, J-16's to hold a Run in its 任务 panel (Issue
-  // #423), and J-09's to hold several Books' Runs at once (Issue #49), and absolute — and sits beside the adapter.
+  // #423), J-09's to hold several Books' Runs at once (Issue #49), J-11's to keep a Run under way while ②A's follower is held
+  // (#641), and J-13's to hold a 书系一致性 Run while an exclusion is recorded (Issue #64, S29b), and absolute — and sits
+  // beside the adapter.
   const unitHoldPath = values.get('--j10-unit-hold-path');
   requireDesktop(unitHoldPath === undefined ||
-    ((process.env.AI7_E2E_JOURNEY === 'J-09' || process.env.AI7_E2E_JOURNEY === 'J-10' || process.env.AI7_E2E_JOURNEY === 'J-16') && isAbsolute(unitHoldPath)));
+    ((process.env.AI7_E2E_JOURNEY === 'J-09' || process.env.AI7_E2E_JOURNEY === 'J-10' || process.env.AI7_E2E_JOURNEY === 'J-11' ||
+      process.env.AI7_E2E_JOURNEY === 'J-13' || process.env.AI7_E2E_JOURNEY === 'J-16') && isAbsolute(unitHoldPath)));
+  // J-16's answer hold (Issue #52, S17a): J-16's own, absolute, beside the adapter — it holds a dialogue answer mid-stream.
+  const answerHoldPath = values.get('--j16-answer-hold-path');
+  requireDesktop(answerHoldPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-16' && isAbsolute(answerHoldPath)));
   requireDesktop(
     observeJ12RevealValue === undefined ||
       (process.env.AI7_E2E_JOURNEY === 'J-12' && observeJ12RevealValue === 'true'),
@@ -377,7 +391,7 @@ function parseArguments(argv: string[]): LaunchArguments {
       (process.env.AI7_E2E_JOURNEY === undefined && injectedPickerPath === undefined && observeJ12RevealValue === undefined &&
         importControlValue === undefined && foregroundExecutionControlValue === undefined && recoveryControlValue === undefined && modelAdapterControlValue === undefined &&
         applyControlValue === undefined && injectedSavePath === undefined && injectedFolderPath === undefined && connectivityPath === undefined &&
-        unitHoldPath === undefined),
+        unitHoldPath === undefined && answerHoldPath === undefined),
   );
   return {
     dataRoot,
@@ -391,6 +405,7 @@ function parseArguments(argv: string[]): LaunchArguments {
     modelAdapterControl,
     connectivityPath,
     unitHoldPath,
+    answerHoldPath,
     applyControl,
     observeJ12Reveal,
     launcherPid,
@@ -3309,6 +3324,47 @@ function registerRendererHandlers(
       return service.call('inspectSeriesKnowledgeRevisions', { seriesId: input.seriesId, itemId: input.itemId, before: input.before ?? null });
     }),
   );
+  // 书系检索排除 (Issue #64, S29b): house reads of a Series' targets and revisions, the impact preview, and the commit of one
+  // revision — serialized like every other effect, since it may stop an approved Run in the same transaction.
+  ipcMain.handle(IPC_CHANNELS.inspectSeriesExclusionTargets, (event, input: ServiceOperationMap['inspectSeriesExclusionTargets']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectSeriesExclusionTargets', { seriesId: input.seriesId, kind: input.kind, after: input.after ?? null });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectSeriesExclusionHistory, (event, input: ServiceOperationMap['inspectSeriesExclusionHistory']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectSeriesExclusionHistory', { seriesId: input.seriesId, after: input.after });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.previewSeriesExclusion, (event, input: ServiceOperationMap['previewSeriesExclusion']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('previewSeriesExclusion', {
+        seriesId: input.seriesId, action: input.action, exclusionId: input.exclusionId, target: input.target, reason: input.reason,
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.recordSeriesExclusion, (event, input: ServiceOperationMap['recordSeriesExclusion']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('recordSeriesExclusion', {
+          seriesId: input.seriesId, action: input.action, exclusionId: input.exclusionId, target: input.target, reason: input.reason,
+          previewDigest: input.previewDigest,
+        });
+      });
+    }),
+  );
   // 设置 › 数据与存储 › 版本 (Issue #433, S85a): a house read, bound to no Book route.
   ipcMain.handle(IPC_CHANNELS.inspectDataVersion, (event) =>
     envelope(async () => {
@@ -3510,6 +3566,22 @@ function registerRendererHandlers(
         });
       }),
   );
+  // 取消任务 of the current Book's Review Run a Series Retrieval Exclusion stopped (Issue #64, S29b), bound to the window's route.
+  ipcMain.handle(
+    IPC_CHANNELS.cancelReviewRun,
+    (event, input: Omit<ServiceOperationMap['cancelReviewRun']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('cancelReviewRun', { reviewRunId: input.reviewRunId, bookId: route.bookId });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          return requireReviewWorkspaceOfRoute(route, result, input.reviewRunId);
+        });
+      }),
+  );
   ipcMain.handle(
     IPC_CHANNELS.generateReviewReport,
     (event, input: Omit<ServiceOperationMap['generateReviewReport']['input'], 'bookId'>) =>
@@ -3703,6 +3775,73 @@ function registerRendererHandlers(
       requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
       if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '任务不属于当前图书工作台。');
       return result;
+    }),
+  );
+  // 就这段提问… (Issue #52, S17a; UI ADR 0014): a dialogue of the route's Book. Asking takes the exact selection of the
+  // manuscript this window holds and the question; the renderer names neither the Book nor anything sent.
+  const requireDialogueOfRoute = (route: { bookId: string }, result: DialogueProjection): DialogueProjection => {
+    if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '对话不属于当前图书工作台。');
+    return result;
+  };
+  ipcMain.handle(IPC_CHANNELS.askAboutSelection, (event, input: AskAboutSelectionInput) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object' && input.selection !== null && typeof input.selection === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        requireManuscriptCapability(owned, input.selection);
+        const result = await service.call('askAboutSelection', { bookId: route.bookId, selection: input.selection, question: input.question });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        return requireDialogueOfRoute(route, result);
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectDialogue, (event, input: InspectDialogueInput) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const routeGeneration = owned.routeGeneration;
+      const routeRequestSequence = owned.routeRequestSequence;
+      const result = await service.call('inspectDialogue', { bookId: route.bookId, dialogueId: input.dialogueId, afterFragment: input.afterFragment });
+      requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+      return requireDialogueOfRoute(route, result);
+    }),
+  );
+  for (const operation of ['stopDialogueAnswer', 'continueDialogueAnswer', 'regenerateDialogueAnswer'] as const) {
+    ipcMain.handle(IPC_CHANNELS[operation], (event, input: DialogueAttemptInput) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call(operation, { bookId: route.bookId, dialogueId: input.dialogueId, attemptId: input.attemptId });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          return requireDialogueOfRoute(route, result);
+        });
+      }),
+    );
+  }
+  ipcMain.handle(IPC_CHANNELS.convertDialogueToChangeSuggestion, (event, input: ConvertDialogueToChangeSuggestionInput) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const result = await service.call('convertDialogueToChangeSuggestion', {
+          bookId: route.bookId, dialogueId: input.dialogueId, attemptId: input.attemptId, proposedText: input.proposedText, rationale: input.rationale,
+        });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        requireDialogueOfRoute(route, result.dialogue);
+        return result;
+      });
     }),
   );
   ipcMain.handle(IPC_CHANNELS.inspectProductionDocuments, (event) =>
@@ -4562,6 +4701,7 @@ export async function runApplication(): Promise<void> {
       launch.modelAdapterControl,
       launch.connectivityPath,
       launch.unitHoldPath,
+      launch.answerHoldPath,
     );
     service.onUnexpectedExit(() => {
       serviceInterrupted = true;

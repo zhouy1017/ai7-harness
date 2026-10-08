@@ -4,6 +4,8 @@ import {
   FEEDBACK_HISTORY_SIGNALS,
   BASELINE_ANALYSIS_UPDATE_MODES,
   MAX_BLOCK_CODE_UNITS,
+  MAX_DIALOGUE_PROPOSAL_CHARACTERS,
+  MAX_DIALOGUE_QUESTION_CHARACTERS,
   MAX_EDIT_CODE_UNITS,
   MAX_EXPORT_DESTINATION_CODE_UNITS,
   MAX_MARK_BODY_CODE_UNITS,
@@ -62,6 +64,7 @@ import {
   type ServiceRequest,
   type TaskPlanKind,
 } from '../shared/protocol.js';
+import { SERIES_EXCLUSION_ACTIONS, SERIES_EXCLUSION_TARGET_KINDS, type SeriesExclusionAction, type SeriesExclusionTargetKind } from '../shared/protocol.js';
 import { CONFLICT_RESOLUTIONS, type ConflictResolution } from '../shared/conflict-units.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -1049,6 +1052,42 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (!validUuid(input.seriesId) || !validUuid(input.itemId) || !(input.before === null || isSafeInteger(input.before, 1))) throw new ProtocolError(tentativeId);
       break;
     }
+    // 书系检索排除 (Issue #64, S29b): a page of one kind's targets after one of them; a page of revisions after one; and an exclusion
+    // revision with its preview — an action, the exclusion it supersedes or the target it adds, a line of reason — and the
+    // digest of the preview the editor saw.
+    case 'inspectSeriesExclusionTargets': {
+      const input = requireInput(value.input, ['seriesId', 'kind', 'after'], tentativeId);
+      const after = input.after;
+      if (!validUuid(input.seriesId) || !SERIES_EXCLUSION_TARGET_KINDS.includes(input.kind as SeriesExclusionTargetKind) ||
+          !(after === null || (isRecord(after) && hasExactKeys(after, ['key', 'id']) && isBoundedString(after.key, 400) && isBoundedString(after.id, 64)))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'inspectSeriesExclusionHistory': {
+      const input = requireInput(value.input, ['seriesId', 'after'], tentativeId);
+      const after = input.after;
+      if (!validUuid(input.seriesId) || !isRecord(after) || !hasExactKeys(after, ['recordedAt', 'revisionId']) ||
+          !isBoundedString(after.recordedAt, 40) || !CURSOR_INSTANT.test(after.recordedAt) || !validUuid(after.revisionId)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'previewSeriesExclusion':
+    case 'recordSeriesExclusion': {
+      const record = value.op === 'recordSeriesExclusion';
+      const input = requireInput(value.input, ['seriesId', 'action', 'exclusionId', 'target', 'reason', ...(record ? ['previewDigest'] : [])], tentativeId);
+      const target = input.target;
+      if (!validUuid(input.seriesId) || !SERIES_EXCLUSION_ACTIONS.includes(input.action as SeriesExclusionAction) ||
+          !(input.exclusionId === null || validUuid(input.exclusionId)) ||
+          !(target === null || (isRecord(target) && hasExactKeys(target, ['kind', 'id']) &&
+            SERIES_EXCLUSION_TARGET_KINDS.includes(target.kind as SeriesExclusionTargetKind) && isBoundedString(target.id, 64))) ||
+          !isBoundedString(input.reason, 2_000, true) ||
+          (record && (!isBoundedString(input.previewDigest, 64) || !HEX_DIGEST_PATTERN.test(input.previewDigest)))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     // 质量与学习 › 学习准入 (Issue #61, S26b): every Book's Learning Material, or one Book's.
     case 'inspectLearningMaterials': {
       const input = requireInput(value.input, ['bookId', 'after'], tentativeId);
@@ -1142,6 +1181,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'continueReviewRun':
+    case 'cancelReviewRun':
     case 'generateReviewReport': {
       const input = requireInput(value.input, ['bookId', 'reviewRunId'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.reviewRunId)) throw new ProtocolError(tentativeId);
@@ -1742,6 +1782,36 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // 交付 · 生产文档 (Issue #415). A house type by its identity, a material and a document by theirs, all within
     // the route's Book; whether they are that Book's is the store's to decide.
+    // 就这段提问… (Issue #52, S17a): the route's Book, the exact span as a mark names one, and the question within its bound;
+    // the dialogue's actions name the dialogue and the attempt the editor sees, a read the fragments it has shown.
+    case 'askAboutSelection': {
+      const input = requireInput(value.input, ['bookId', 'selection', 'question'], tentativeId);
+      if (!validUuid(input.bookId) || input.selection === null || !validKnowledgeSpan(input.selection) ||
+          !isBoundedString(input.question, 4 * MAX_DIALOGUE_QUESTION_CHARACTERS)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'inspectDialogue': {
+      const input = requireInput(value.input, ['bookId', 'dialogueId', 'afterFragment'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.dialogueId) || !isSafeInteger(input.afterFragment, 0)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'stopDialogueAnswer':
+    case 'continueDialogueAnswer':
+    case 'regenerateDialogueAnswer': {
+      const input = requireInput(value.input, ['bookId', 'dialogueId', 'attemptId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.dialogueId) || !validUuid(input.attemptId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'convertDialogueToChangeSuggestion': {
+      const input = requireInput(value.input, ['bookId', 'dialogueId', 'attemptId', 'proposedText', 'rationale'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.dialogueId) || !validUuid(input.attemptId) ||
+          !isBoundedString(input.proposedText, 2 * MAX_DIALOGUE_PROPOSAL_CHARACTERS) || !isBoundedString(input.rationale, 2 * MAX_DIALOGUE_PROPOSAL_CHARACTERS, true)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     case 'inspectBookTasks':
     case 'inspectProductionDocuments': {
       const input = requireInput(value.input, ['bookId'], tentativeId);

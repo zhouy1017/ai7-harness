@@ -4,6 +4,7 @@ import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { graphemeCount, sliceGraphemes } from '../analysis/factual-review-contract.js';
 import { SeriesError, SeriesLedger } from '../series.js';
 import { SeriesKnowledgeError, SeriesKnowledgeLedger } from '../series-knowledge.js';
+import { SeriesExclusionError, SeriesExclusionLedger, coveringExclusions, type StoredExclusion } from '../series-exclusions.js';
 import type { ReviewCategoryConfigurationEntry, ReviewGuidelineDocument, SeriesKnowledgePins } from './category-configuration.js';
 
 /**
@@ -20,6 +21,10 @@ import type { ReviewCategoryConfigurationEntry, ReviewGuidelineDocument, SeriesK
  *
  * What a Run used is pinned beside the documents (`seriesKnowledge`): every Series the Book was in, and each revision with its
  * content digest. A plan prepared over pins that no longer match what the Book would be given now is no longer current.
+ *
+ * The Series Retrieval Exclusions in force are read with the knowledge (Issue #64, S29b; SER-011, SER-028): an item an exclusion
+ * reaches — by itself, by its class, or by the member Book its current revision was taken from — is left out of what the
+ * review reads, so a plan prepared now never pins it.
  */
 
 export const SERIES_KNOWLEDGE_CLAUSE_PREFIX = 'series-knowledge' as const;
@@ -99,6 +104,16 @@ export function seriesConsistencyNoKnowledgeReason(titles: ReadonlyArray<string>
 export const SERIES_CONSISTENCY_TOO_MANY_REASON =
   `这本书所在书系的书系知识超过 ${MAX_SERIES_KNOWLEDGE_CLAUSES} 条审阅依据，一次审阅带不下，暂不能选；请在书系中合并或精简这些书系知识。`;
 
+/**
+ * Why the review has nothing left to check against: every item it could read is excluded from its Series' retrieval (Issue
+ * #64, S29b). Ending the exclusion, or taking in other knowledge, makes it available again.
+ */
+export function seriesConsistencyExcludedReason(titles: ReadonlyArray<string>, total: number = titles.length): string {
+  const named = titles.map((title) => `「${title}」`).join('、');
+  const which = total > titles.length ? `这本书所在的 ${total} 个书系，包括${named}，` : total === 1 ? `书系${named}` : `这本书所在的书系${named}`;
+  return `${which}可用于一致性审阅的书系知识都已排除在书系检索之外；停止排除或纳入其他书系知识后才能选。`;
+}
+
 /** Why a Series' records could not be read: the category waits rather than taking the rest of 审阅 with it. */
 export const SERIES_CONSISTENCY_UNREADABLE_REASON = '这本书所在书系的记录读取失败，书系一致性暂不能选；其余审阅类别不受影响。' as const;
 
@@ -110,7 +125,7 @@ const NAMED_SERIES = 3;
  * clauses an authored fixture answers without a store. An item whose words fold to nothing gives no clause and is left out.
  */
 export function seriesConsistencyFromSources(memberships: ReadonlyArray<{ readonly seriesId: string; readonly title: string }>,
-  sources: ReadonlyArray<SeriesKnowledgeSource>): SeriesConsistencyResolution {
+  sources: ReadonlyArray<SeriesKnowledgeSource>, excluded = 0): SeriesConsistencyResolution {
   if (memberships.length === 0) return { kind: 'unavailable', reason: SERIES_CONSISTENCY_NO_SERIES_REASON };
   const ordered = [...sources].sort((left, right) => compare(left.title, right.title) || compare(left.seriesId, right.seriesId));
   const documents: ReviewGuidelineDocument[] = [];
@@ -136,7 +151,12 @@ export function seriesConsistencyFromSources(memberships: ReadonlyArray<{ readon
   }
   if (revisions.length === 0) {
     const titles = [...memberships].sort((left, right) => compare(left.title, right.title)).map((series) => series.title);
-    return { kind: 'unavailable', reason: seriesConsistencyNoKnowledgeReason(titles.slice(0, NAMED_SERIES), titles.length) };
+    return {
+      kind: 'unavailable',
+      reason: excluded > 0
+        ? seriesConsistencyExcludedReason(titles.slice(0, NAMED_SERIES), titles.length)
+        : seriesConsistencyNoKnowledgeReason(titles.slice(0, NAMED_SERIES), titles.length),
+    };
   }
   const series = [...memberships].sort((left, right) => compare(left.title, right.title) || compare(left.seriesId, right.seriesId))
     .map((entry) => ({ seriesId: entry.seriesId, title: entry.title }));
@@ -168,6 +188,8 @@ function membershipsOf(db: DatabaseSync, bookId: string): Array<{ seriesId: stri
 interface SeriesKnowledgeReading {
   readonly items: SeriesKnowledgeSource['items'];
   readonly overflow: boolean;
+  /** How many eligible items an exclusion in force left out (Issue #64, S29b). */
+  readonly excluded: number;
 }
 
 /**
@@ -184,14 +206,21 @@ export function newSeriesKnowledgeReadings(): SeriesKnowledgeReadings {
  * One Series' eligible items, filtered in SQL and verified one by one, stopping as soon as their clauses alone pass the bound:
  * a Series of hundreds of items costs at most the items one review could carry.
  */
-function readSeries(knowledge: SeriesKnowledgeLedger, seriesId: string): SeriesKnowledgeReading {
+function readSeries(knowledge: SeriesKnowledgeLedger, seriesId: string, exclusions: ReadonlyArray<StoredExclusion>): SeriesKnowledgeReading {
   const items: Array<SeriesKnowledgeSource['items'][number]> = [];
   let clauses = 0;
+  let excluded = 0;
   for (const item of knowledge.itemsCurrentlyFor(seriesId, CONSISTENCY_REUSE_SCOPES)) {
+    // The current-read guard (SER-023): an item an exclusion in force reaches is never read, nor counted against the bound.
+    if (coveringExclusions(exclusions, { seriesId, itemId: item.itemId, knowledgeClass: item.knowledgeClass,
+      sourceBookId: item.current.provenance?.bookId ?? null }).length > 0) {
+      excluded += 1;
+      continue;
+    }
     const count = seriesKnowledgeItemClauses(1, { subject: item.subject, knowledgeClass: item.knowledgeClass, content: item.current.content }).length;
     if (count === 0) continue;
     clauses += count;
-    if (clauses > MAX_SERIES_KNOWLEDGE_CLAUSES) return { items: [], overflow: true };
+    if (clauses > MAX_SERIES_KNOWLEDGE_CLAUSES) return { items: [], overflow: true, excluded };
     items.push({
       itemId: item.itemId,
       subject: item.subject,
@@ -201,7 +230,7 @@ function readSeries(knowledge: SeriesKnowledgeLedger, seriesId: string): SeriesK
       content: item.current.content,
     });
   }
-  return { items, overflow: false };
+  return { items, overflow: false, excluded };
 }
 
 /**
@@ -213,22 +242,27 @@ export function resolveSeriesConsistency(db: DatabaseSync, bookId: string, readi
     const memberships = membershipsOf(db, bookId);
     if (memberships.length === 0) return seriesConsistencyFromSources(memberships, []);
     const knowledge = new SeriesKnowledgeLedger(db);
+    const exclusions = new SeriesExclusionLedger(db);
     const sources: SeriesKnowledgeSource[] = [];
     let clauses = 0;
+    let excluded = 0;
     for (const series of memberships) {
       let reading = readings.get(series.seriesId);
       if (reading === undefined) {
-        reading = readSeries(knowledge, series.seriesId);
+        reading = readSeries(knowledge, series.seriesId, exclusions.effective(series.seriesId));
         readings.set(series.seriesId, reading);
       }
+      excluded += reading.excluded;
       if (reading.overflow) return { kind: 'unavailable', reason: SERIES_CONSISTENCY_TOO_MANY_REASON };
       for (const item of reading.items) clauses += seriesKnowledgeItemClauses(1, item).length;
       if (clauses > MAX_SERIES_KNOWLEDGE_CLAUSES) return { kind: 'unavailable', reason: SERIES_CONSISTENCY_TOO_MANY_REASON };
       sources.push({ seriesId: series.seriesId, title: series.title, items: reading.items });
     }
-    return seriesConsistencyFromSources(memberships, sources);
+    return seriesConsistencyFromSources(memberships, sources, excluded);
   } catch (error) {
-    if (error instanceof SeriesKnowledgeError || error instanceof SeriesError) return { kind: 'unavailable', reason: SERIES_CONSISTENCY_UNREADABLE_REASON };
+    if (error instanceof SeriesKnowledgeError || error instanceof SeriesError || error instanceof SeriesExclusionError) {
+      return { kind: 'unavailable', reason: SERIES_CONSISTENCY_UNREADABLE_REASON };
+    }
     throw error;
   }
 }

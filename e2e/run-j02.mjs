@@ -927,6 +927,15 @@ async function runWorkspaceJourney(renderer, dataRoot) {
       cancelResult.kind === 'search' && cancelResult.state === 'cancelled',
     'cancel-search-exact-ipc-terminal',
   );
+  // 已取消 is drawn from the cancel's own answer while the search's job is still the active one: 查找全稿 and the query
+  // field stay disabled until that job's poll has read the terminal state and let go of it, which on a slow runner comes
+  // after the next click (#665). The search says 查找已取消 only once it has let go.
+  await waitForChecks(
+    renderer,
+    `(() => { const search = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '查找全稿'); const cancel = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作'); const input = document.querySelector('#manuscript-search'); return { searchSettledCancelled: document.querySelector('.search-section .field-note')?.textContent === '查找已取消；当前本地编辑不受影响。', cancelReleased: cancel instanceof HTMLButtonElement && cancel.hidden && cancel.dataset.serviceJobId === '', searchInputReady: input instanceof HTMLInputElement && !input.disabled, searchStartReady: search instanceof HTMLButtonElement && !search.disabled }; })()`,
+    'cancel-search-settled',
+    30_000,
+  );
 
   await fill(renderer, '#manuscript-search', OVERLAP_QUERY, 'overlap-search-fill');
   await clickButton(renderer, '查找全稿', 'overlap-search-start');

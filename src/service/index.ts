@@ -27,7 +27,11 @@ import { BACKUP_CHECK_INTERVAL_MS } from './scheduled-backups.js';
 import { decodeRequest, isSafeInteger, ProtocolError } from './request-frames.js';
 import { controlledConnectivity, hostConnectivity, type TaskPlanConnectivity } from './connectivity.js';
 import type { WaitingFor } from './task-plan.js';
-import { controlledUnitHold } from './unit-hold.js';
+import { controlledAnswerHold, controlledUnitHold } from './unit-hold.js';
+import type { DialogueExecutionOwner } from './dialogue/dialogue-execution.js';
+import { DialogueError } from './dialogue/dialogue-ledger.js';
+import { HARNESS_SESSION_LOG_DIRECTORY } from './harness/session-log.js';
+import { ensureCanonicalDataDirectory } from '../shared/data-root.js';
 import { readBookTasks, readGlobalAttention } from './global-attention.js';
 import { reconnectPreflight } from './reconnect-preflight.js';
 import { LOCAL_DETERMINISTIC_ROUTE } from './provider/egress-gate.js';
@@ -144,9 +148,12 @@ function requireNothingRunning(
   jobs: CooperativeJobOwner,
   analysisExecution: BaselineAnalysisExecutionOwner,
   reviewRuns: ReviewRunDriver,
+  dialogues: DialogueExecutionOwner,
 ): void {
+  // A dialogue answering writes its outcome when it settles (Issue #52, S17a), so it holds a replacement back as a Run does.
   const blocked = replacementBlockedBy({
-    runsIdle: analysisExecution.idle, reviewRunsDriving: reviewRuns.driving, jobsBusy: jobs.busy, exportRunning: store.databaseExportRunning(),
+    runsIdle: analysisExecution.idle && !dialogues.answering, reviewRunsDriving: reviewRuns.driving, jobsBusy: jobs.busy,
+    exportRunning: store.databaseExportRunning(),
   });
   if (blocked !== null) throw new StoreErrorClass('DATABASE_REPLACEMENT_BUSY', blocked);
 }
@@ -157,6 +164,7 @@ async function dispatch(
   jobs: CooperativeJobOwner,
   analysisExecution: BaselineAnalysisExecutionOwner,
   reviewRuns: ReviewRunDriver,
+  dialogues: DialogueExecutionOwner,
   request: ServiceRequest,
   importControl: J01ImportControl | undefined,
   launchPolicy: LaunchPolicyProjection,
@@ -627,14 +635,14 @@ async function dispatch(
     case 'inspectDatabaseImport':
       return { id: request.id, ok: true, op: request.op, result: await store.inspectDatabaseImport(request.input.source) };
     case 'prepareDatabaseReplacement':
-      requireNothingRunning(store, jobs, analysisExecution, reviewRuns);
+      requireNothingRunning(store, jobs, analysisExecution, reviewRuns, dialogues);
       return { id: request.id, ok: true, op: request.op, result: await store.prepareDatabaseReplacement(request.input.previewId) };
     case 'cancelDatabaseReplacement':
       return { id: request.id, ok: true, op: request.op, result: await store.cancelDatabaseReplacement(request.input.replacementId) };
     case 'inspectDatabaseReplacements':
       return { id: request.id, ok: true, op: request.op, result: await store.inspectDatabaseReplacements() };
     case 'rollBackDatabaseReplacement':
-      requireNothingRunning(store, jobs, analysisExecution, reviewRuns);
+      requireNothingRunning(store, jobs, analysisExecution, reviewRuns, dialogues);
       return { id: request.id, ok: true, op: request.op, result: await store.rollBackDatabaseReplacement(request.input.replacementId) };
     case 'prepareDatabaseMerge':
       return { id: request.id, ok: true, op: request.op, result: await store.prepareDatabaseMerge(request.input.previewId) };
@@ -656,6 +664,15 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesKnowledgeConflicts(request.input) };
     case 'inspectSeriesKnowledgeRevisions':
       return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesKnowledgeRevisions(request.input.seriesId, request.input.itemId, request.input.before) };
+    // 书系检索排除 (Issue #64, S29b).
+    case 'inspectSeriesExclusionTargets':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesExclusionTargets(request.input) };
+    case 'inspectSeriesExclusionHistory':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesExclusionHistory(request.input) };
+    case 'previewSeriesExclusion':
+      return { id: request.id, ok: true, op: request.op, result: store.previewSeriesExclusion(request.input) };
+    case 'recordSeriesExclusion':
+      return { id: request.id, ok: true, op: request.op, result: store.recordSeriesExclusion(request.input) };
     case 'inspectEvaluationProfiles':
       return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluationProfiles() };
     case 'inspectEvaluation':
@@ -770,6 +787,9 @@ async function dispatch(
         op: request.op,
         result: store.generateReviewReport(request.input.bookId, request.input.reviewRunId, analysisProgress),
       };
+    // 取消任务 of a Review Run a Series Retrieval Exclusion stopped (Issue #64, S29b): nothing of it is driven, so it is recorded.
+    case 'cancelReviewRun':
+      return { id: request.id, ok: true, op: request.op, result: store.cancelReviewRun(request.input.bookId, request.input.reviewRunId, analysisProgress) };
     case 'inspectReviewFindingOfMark': {
       // A mark of another Book answers exactly as a mark no Review Run produced.
       const found = store.reviewFindingOfMark(request.input.markId);
@@ -1094,11 +1114,39 @@ async function dispatch(
         id: request.id, ok: true, op: request.op,
         result: await readGlobalAttention(store, analysisProgress, analysisExecution.busy, () => connectivity.waitingFor()),
       };
+    // 就这段提问… (Issue #52, plan slice S17a; UI ADR 0014): no plan and no 开始任务 (the Owner, 2026-10-07) — asking records the
+    // dialogue Task and starts its answer at once, and the answer streams into the owner's memory whether anyone watches or
+    // not; a read joins the records to the Harness Session Ledger, and to what the answer in flight has streamed so far.
+    case 'askAboutSelection': {
+      dialogueReady(dialogues);
+      const turn = store.askAboutSelection(request.input.bookId, { selection: request.input.selection, question: request.input.question });
+      dialogueBegin(dialogues, turn);
+      return { id: request.id, ok: true, op: request.op, result: store.inspectDialogue(request.input.bookId, turn.dialogueId, 0, (attemptId) => dialogues.liveText(attemptId)) };
+    }
+    case 'inspectDialogue':
+      return {
+        id: request.id, ok: true, op: request.op,
+        result: store.inspectDialogue(request.input.bookId, request.input.dialogueId, request.input.afterFragment, (attemptId) => dialogues.liveText(attemptId)),
+      };
+    case 'stopDialogueAnswer': {
+      const attemptId = store.answeringDialogueAttempt(request.input.bookId, request.input);
+      await dialogues.stop(attemptId);
+      return { id: request.id, ok: true, op: request.op, result: store.inspectDialogue(request.input.bookId, request.input.dialogueId, 0, (id) => dialogues.liveText(id)) };
+    }
+    case 'continueDialogueAnswer':
+    case 'regenerateDialogueAnswer': {
+      dialogueReady(dialogues);
+      const turn = store.nextDialogueAttempt(request.input.bookId, request.input, request.op === 'continueDialogueAnswer' ? 'continue' : 'regenerate');
+      dialogueBegin(dialogues, turn);
+      return { id: request.id, ok: true, op: request.op, result: store.inspectDialogue(request.input.bookId, request.input.dialogueId, 0, (id) => dialogues.liveText(id)) };
+    }
+    case 'convertDialogueToChangeSuggestion':
+      return { id: request.id, ok: true, op: request.op, result: store.convertDialogueToChangeSuggestion(request.input.bookId, request.input) };
     // ① 任务面 (Issue #423, plan slice S77a): the Book's Tasks, read as 待我处理 reads them.
     case 'inspectBookTasks':
       return {
         id: request.id, ok: true, op: request.op,
-        result: await readBookTasks(store, request.input.bookId, analysisProgress, () => connectivity.waitingFor()),
+        result: await readBookTasks(store, request.input.bookId, analysisProgress, () => connectivity.waitingFor(), (attemptId) => dialogues.liveText(attemptId)),
       };
     // ④ 导出 (Issue #413, plan slice S64): local only, and only under this launch's verified External Export Policy.
     case 'reviewManuscriptExport':
@@ -1151,6 +1199,25 @@ async function dispatch(
   }
 }
 
+/** A dialogue refusal from the execution owner, said as the store says its own. */
+function dialogueReady(dialogues: DialogueExecutionOwner): void {
+  try {
+    dialogues.requireReady();
+  } catch (error) {
+    if (error instanceof DialogueError) throw new StoreErrorClass(error.code, error.message);
+    throw error;
+  }
+}
+
+function dialogueBegin(dialogues: DialogueExecutionOwner, turn: Parameters<DialogueExecutionOwner['begin']>[0]): void {
+  try {
+    dialogues.begin(turn);
+  } catch (error) {
+    if (error instanceof DialogueError) throw new StoreErrorClass(error.code, error.message);
+    throw error;
+  }
+}
+
 function parseArguments(argv: string[]): {
   dataRoot: string;
   parentPid: number;
@@ -1161,6 +1228,7 @@ function parseArguments(argv: string[]): {
   modelAdapterControl: J04ModelAdapterControl | undefined;
   connectivityPath: string | undefined;
   unitHoldPath: string | undefined;
+  answerHoldPath: string | undefined;
 } {
   const values = new Map<string, string>();
   for (let index = 0; index < argv.length; index += 2) {
@@ -1172,7 +1240,7 @@ function parseArguments(argv: string[]): {
       values.has(key) ||
       (key !== '--data-root' && key !== '--parent-pid' && key !== '--j01-import-control' &&
         key !== '--j03-foreground-execution-control' && key !== '--j08-recovery-control' &&
-        key !== '--j04-model-adapter' && key !== '--j04-connectivity-path' && key !== '--j10-unit-hold-path' &&
+        key !== '--j04-model-adapter' && key !== '--j04-connectivity-path' && key !== '--j10-unit-hold-path' && key !== '--j16-answer-hold-path' &&
         key !== TRUSTED_SCOPE_ARGUMENT && key !== RUN_BUDGET_CEILING_ARGUMENT &&
         key !== PROVIDER_CACHE_ROOT_ARGUMENT)
     ) {
@@ -1221,6 +1289,8 @@ function parseArguments(argv: string[]): {
   // J-10's unit hold (Issue #422): a file the Journey writes, read before a unit settles; beside the adapter too. J-16
   // holds a Run in its 任务 panel with it (Issue #423), and J-09 several Books' Runs at once (Issue #49).
   const unitHoldPath = values.get('--j10-unit-hold-path');
+  // J-16's answer hold (Issue #52, S17a): a file the Journey writes, read before each text delta of a dialogue answer.
+  const answerHoldPath = values.get('--j16-answer-hold-path');
   if (
     !dataRoot ||
     !isAbsolute(dataRoot) ||
@@ -1240,18 +1310,22 @@ function parseArguments(argv: string[]): {
         (process.env.AI7_E2E_JOURNEY !== 'J-04' && process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10' &&
           process.env.AI7_E2E_JOURNEY !== 'J-16' && process.env.AI7_E2E_JOURNEY !== 'J-11' && process.env.AI7_E2E_JOURNEY !== 'J-13'))) ||
     (connectivityPath !== undefined && (process.env.AI7_E2E_JOURNEY !== 'J-04' || !isAbsolute(connectivityPath))) ||
-    (unitHoldPath !== undefined && ((process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10' && process.env.AI7_E2E_JOURNEY !== 'J-16') ||
+    // J-11 keeps a Run under way while ②A's follower is held (#641); J-13 holds a 书系一致性 Run while a Series Retrieval
+    // Exclusion is recorded (Issue #64, S29b).
+    (unitHoldPath !== undefined && ((process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10' &&
+      process.env.AI7_E2E_JOURNEY !== 'J-11' && process.env.AI7_E2E_JOURNEY !== 'J-13' && process.env.AI7_E2E_JOURNEY !== 'J-16') ||
       !isAbsolute(unitHoldPath))) ||
+    (answerHoldPath !== undefined && (process.env.AI7_E2E_JOURNEY !== 'J-16' || !isAbsolute(answerHoldPath))) ||
     [importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl].filter(Boolean).length > 1 ||
     // developer-live is a human-attended developer-host launch: never a Journey launch, never with a Journey control.
     (launchForm.trustedOperationalScope !== 'development-ci' &&
       (process.env.AI7_E2E_JOURNEY !== undefined || importControlValue !== undefined || foregroundExecutionControlValue !== undefined ||
         recoveryControlValue !== undefined || modelAdapterControlValue !== undefined || connectivityPath !== undefined ||
-        unitHoldPath !== undefined))
+        unitHoldPath !== undefined || answerHoldPath !== undefined))
   ) {
     throw new ProtocolError();
   }
-  return { dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, connectivityPath, unitHoldPath };
+  return { dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, connectivityPath, unitHoldPath, answerHoldPath };
 }
 
 function parentIsAlive(parentPid: number): boolean {
@@ -1273,7 +1347,7 @@ async function run(): Promise<void> {
   // The native `fetch` is captured before the denial replaces the global; only the developer-live
   // `opencode-go` transport ever receives it, and only through the adapter's transmit step.
   const nativeFetch: typeof fetch = globalThis.fetch;
-  const { dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, connectivityPath, unitHoldPath } =
+  const { dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, connectivityPath, unitHoldPath, answerHoldPath } =
     parseArguments(process.argv.slice(2));
   if (launchForm.trustedOperationalScope === 'developer-live') {
     // The single-host allowance (settlement l): armed before the denial so its gates admit exactly the
@@ -1291,6 +1365,7 @@ async function run(): Promise<void> {
     { loadModelFixture },
     { createKeyringSecretResolver },
     { ReviewRunDriver },
+    { DialogueExecutionOwner },
   ] =
     await Promise.all([
       import('./store.js'),
@@ -1301,6 +1376,7 @@ async function run(): Promise<void> {
       import('./provider/model-fixture.js'),
       import('./provider/keyring-secret-resolver.js'),
       import('./review/review-run-driver.js'),
+      import('./dialogue/dialogue-execution.js'),
     ]);
   StoreErrorClass = StoreError;
   let stopping = false;
@@ -1321,6 +1397,7 @@ async function run(): Promise<void> {
   let jobs: CooperativeJobOwner | undefined;
   let analysisExecution: BaselineAnalysisExecutionOwner | undefined;
   let reviewRuns: ReviewRunDriver | undefined;
+  let dialogues: DialogueExecutionOwner | undefined;
   let preflightTimer: NodeJS.Timeout | undefined;
   let backupTimer: NodeJS.Timeout | undefined;
   try {
@@ -1377,6 +1454,7 @@ async function run(): Promise<void> {
     store.initialEvaluationLedger.bindLaunch(launch);
     harness = await mountDormantHarness();
     jobs = new CooperativeJobOwner(store);
+    const guardedStore = store;
     analysisExecution = new BaselineAnalysisExecutionOwner({
       ledger: store.baselineAnalysisLedger,
       launchPolicy,
@@ -1384,6 +1462,8 @@ async function run(): Promise<void> {
       secretResolver: createKeyringSecretResolver(),
       developerLive,
       unitHold: unitHoldPath === undefined ? null : controlledUnitHold(unitHoldPath),
+      // The current-read guard over Series material (Issue #64, S29b; SER-023): asked before each reading range of every Run.
+      readGuard: (runRecordId) => guardedStore.seriesReadGuard(runRecordId),
     });
     // Startup reconciliation (Issue #422, S76b; CONT-014): a baseline Run this service's predecessor left under way has
     // nothing running it now. It settles 已暂停 or 任务已中断 · 可续行 before any request is read; one left cancelling is
@@ -1409,6 +1489,11 @@ async function run(): Promise<void> {
     // AI7 初评 has no 续行 (Issue #429 review, P1): one left under way ends 已中断 with its outcome, and one left waiting for a
     // place is blocked with why, so 评估 offers 重新初评 instead of reading a Run under way for good.
     store.reconcileStoppedInitialEvaluationRuns();
+    // 事实核查 and the review categories have no 续行 either (Issue #657): each settles the same way, so the Book can
+    // prepare them again and no page polls a Run nothing executes. 继续审阅 then records what such a category came to.
+    // A Review Run's category left authorized sent nothing and is 继续审阅's to dispatch, the editor's own choice.
+    store.reconcileStoppedFactualReviewRuns();
+    store.reconcileStoppedReviewCategoryRuns();
     // 审稿意见 has no 续行 either (Issue #429, S81c): reconciled by kind exactly as 初评 is. A damaged record of it never stops the
     // service starting: its Run stays as it was and 评估 says 审稿意见 is unavailable, with why.
     try {
@@ -1418,6 +1503,16 @@ async function run(): Promise<void> {
     }
     // A Review Run's categories take a place of the one owner's governor one after another.
     reviewRuns = new ReviewRunDriver(store.reviewRunDriveSteps, analysisExecution);
+    // Interactive Editorial Dialogue (Issue #52, S17a): its answers persist their Session logs — the Harness Session Ledger —
+    // under the Agent Data Root. An answer the predecessor left in flight settles 回答中断 before any request is read.
+    store.reconcileDialogueAttempts();
+    dialogues = new DialogueExecutionOwner({
+      records: store,
+      fixture,
+      sessionLogRoot: await ensureCanonicalDataDirectory(dataRoot, HARNESS_SESSION_LOG_DIRECTORY),
+      developerLive: developerLive !== null,
+      answerHold: answerHoldPath === undefined ? null : controlledAnswerHold(answerHoldPath),
+    });
     // Connectivity Wait (Issue #502). The reading is the device's own unless J-04's control names a file; the
     // live route reaches its model over the network, and so — under that control only — does J-04's route.
     const owner = analysisExecution;
@@ -1476,7 +1571,7 @@ async function run(): Promise<void> {
       }
       let response: ServiceResponse;
       try {
-        response = await dispatch(store, harness, jobs, analysisExecution, reviewRuns, request, importControl, launchPolicy, connectivity);
+        response = await dispatch(store, harness, jobs, analysisExecution, reviewRuns, dialogues, request, importControl, launchPolicy, connectivity);
       } catch (error) {
         if (error instanceof StoreFatalError) {
           stop();
@@ -1520,6 +1615,8 @@ async function run(): Promise<void> {
       // A database export under way stops as 取消导出 stops it, and leaves no package it was writing (Issue #434 review).
       const exportsStopped = store?.stopDatabaseExports();
       await jobs?.dispose();
+      // A dialogue answering is interrupted and settles 回答中断 while the store is still open (Issue #52, S17a).
+      await dialogues?.dispose();
       // The Review Run loop stops first and starts no further category; the owner then interrupts the
       // Run in flight, and the loop records what that Run came to before the store closes.
       const reviewRunsStopped = reviewRuns?.dispose();

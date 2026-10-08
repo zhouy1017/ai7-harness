@@ -298,6 +298,21 @@ function contentsOfCopy(path: string): DatabaseExportContentsProjection {
 }
 
 /**
+ * A package's store opened to be read (Issue #644): a package 导入数据库 previews is supplied from outside, and is read before
+ * the editor confirms anything, so it is opened read-only, in defensive mode, and trusting no function its schema names.
+ */
+export function openPackageStore(path: string): DatabaseSync {
+  const db = new DatabaseSync(path, { readOnly: true, defensive: true });
+  try {
+    db.exec('PRAGMA trusted_schema = OFF');
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+  return db;
+}
+
+/**
  * The database copy is the authority for external files: a live deletion after copying must not turn a self-consistent ZIP
  * into an incomplete backup. Compare every frozen reference with the bytes actually packed, retaining only the already
  * bounded member index. Rows stream, and cancellation/service requests get a turn between bounded batches.
@@ -316,7 +331,7 @@ export async function verifyCopiedPayloads(
   live?: DatabaseSync,
 ): Promise<void> {
   const incomplete = (): never => { throw new DatabaseExportError('DATABASE_PACKAGE_INCOMPLETE', '数据文件在打包期间发生变化或已损坏；没有生成完整备份，请重试。'); };
-  const copy = new DatabaseSync(path, { readOnly: true });
+  const copy = openPackageStore(path);
   const packed = new Map(members.map((member) => [member.path, member]));
   const damaged: Record<DamagedPayloadKind, number> = { manuscript: 0, recovery: 0, library: 0, profile: 0 };
   let checked = 0;

@@ -149,6 +149,11 @@ export const IPC_CHANNELS = {
   inspectSeriesKnowledgeItems: 'ai7:j13:inspect-series-knowledge-items',
   inspectSeriesKnowledgeCandidates: 'ai7:j13:inspect-series-knowledge-candidates',
   inspectSeriesKnowledgeRevisions: 'ai7:j13:inspect-series-knowledge-revisions',
+  inspectSeriesExclusionTargets: 'ai7:j13:inspect-series-exclusion-targets',
+  inspectSeriesExclusionHistory: 'ai7:j13:inspect-series-exclusion-history',
+  previewSeriesExclusion: 'ai7:j13:preview-series-exclusion',
+  recordSeriesExclusion: 'ai7:j13:record-series-exclusion',
+  cancelReviewRun: 'ai7:j13:cancel-review-run',
   inspectDataVersion: 'ai7:j12:inspect-data-version',
   chooseDatabaseExportDestination: 'ai7:j12:choose-database-export-destination',
   approveDatabaseExport: 'ai7:j12:approve-database-export',
@@ -207,6 +212,12 @@ export const IPC_CHANNELS = {
   transitionProductionDocumentPhase: 'ai7:j07:transition-production-document-phase',
   inspectGlobalAttention: 'ai7:j09:inspect-global-attention',
   inspectBookTasks: 'ai7:j16:inspect-book-tasks',
+  askAboutSelection: 'ai7:j16:ask-about-selection',
+  inspectDialogue: 'ai7:j16:inspect-dialogue',
+  stopDialogueAnswer: 'ai7:j16:stop-dialogue-answer',
+  continueDialogueAnswer: 'ai7:j16:continue-dialogue-answer',
+  regenerateDialogueAnswer: 'ai7:j16:regenerate-dialogue-answer',
+  convertDialogueToChangeSuggestion: 'ai7:j16:convert-dialogue-to-change-suggestion',
   reviewManuscriptExport: 'ai7:j07:review-manuscript-export',
   chooseManuscriptExportDestination: 'ai7:j07:choose-manuscript-export-destination',
   approveManuscriptExport: 'ai7:j07:approve-manuscript-export',
@@ -4224,8 +4235,10 @@ export const REVIEW_COVERAGE_STATE_LABELS = {
 /**
  * A Review Run as a whole. `partial` is a Run that stopped with some categories finished and others not
  * — after a restart, `canContinue` says whether 继续审阅 would pick up the categories never finished.
+ * `scope-changed` is a Run a Series Retrieval Exclusion stopped before a further read (Issue #64, S29b; SER-024): its only ways
+ * on are 修改计划并重新授权 and 取消任务; `cancelled` is such a Run the editor then cancelled.
  */
-export type ReviewRunState = 'prepared' | 'running' | 'settled' | 'partial' | 'failed';
+export type ReviewRunState = 'prepared' | 'running' | 'settled' | 'partial' | 'failed' | 'scope-changed' | 'cancelled';
 
 /**
  * One category inside a Review Run. `settled` means its findings are on the manuscript and actionable
@@ -4317,6 +4330,8 @@ export interface ReviewRunSummaryProjection {
   findingCounts: ReviewFindingCountsProjection;
   /** The latest 审阅报告 version; `null` before one is generated. */
   reportVersion: number | null;
+  /** `此结果使用的材料后来被排除` when a result of the Run used Series material later excluded (Issue #64, S29b; SER-026). */
+  historicalMarker: string | null;
 }
 
 /** What a category's Task plan freezes, as the plan screen states it before the one approval. */
@@ -4388,6 +4403,11 @@ export interface ReviewFindingProjection {
   markStatus: 'open' | 'resolved' | 'applied' | 'removed' | 'converted' | null;
   anchorState: 'exact' | 'drifted' | 'detached' | 'anchor-changed';
   ignoreReason: string | null;
+  /**
+   * `此结果使用的材料后来被排除` when the finding's category read Series material later excluded (Issue #64, S29b; SER-026):
+   * history, never a verdict on the finding, which stays exactly as it was.
+   */
+  historicalMarker: string | null;
 }
 
 /** The versioned 审阅报告 (REV-009) exactly as recorded, read back with the digest of its canonical JSON. */
@@ -4485,6 +4505,11 @@ export interface ReviewRunProjection {
   findingCounts: ReviewFindingCountsProjection;
   report: ReviewReportProjection | null;
   reportVersions: ReadonlyArray<{ reportId: string; version: number; generatedAt: string; digest: string }>;
+  /**
+   * The Historically Affected Result Marker (Issue #64, S29b; SER-026): the result the Run formed used Series material that was
+   * excluded afterwards. The Run, its findings and its reports are never rewritten; this says so beside them.
+   */
+  historicalMarker: null | { label: typeof HISTORICALLY_AFFECTED_RESULT_MARKER | typeof HISTORICAL_MARKER_UNVERIFIABLE; detail: string };
 }
 
 /**
@@ -4583,6 +4608,12 @@ export interface RecordReviewFindingDispositionInput {
 }
 
 export interface GenerateReviewReportInput {
+  bookId: string;
+  reviewRunId: string;
+}
+
+/** 取消任务 of a Review Run a Series Retrieval Exclusion stopped (Issue #64, S29b; SER-024). */
+export interface CancelReviewRunInput {
   bookId: string;
   reviewRunId: string;
 }
@@ -6337,6 +6368,8 @@ export interface SeriesProjection {
   readonly historyCount: number;
   readonly historyNext: SeriesHistoryCursor | null;
   readonly knowledge: SeriesKnowledgeProjection;
+  /** 书系检索排除 (Issue #64, S29b): the exclusions in force and their revisions, newest first. */
+  readonly exclusions: SeriesExclusionsProjection;
 }
 
 /** A further page of a Series' members (`更多成员…`). */
@@ -6749,6 +6782,179 @@ export interface SeriesMembershipChangeResultProjection {
   readonly completionLabel: string;
   /** The record the change made: the answer carries it alone, and the page reads the Series again (Issue #63 review). */
   readonly change: SeriesMembershipChangeProjection;
+}
+
+// ---- 书系检索排除 (Issue #64, plan slice S29b; V2-UX-SER-020 to SER-029; ADR 0037) --------------------------------------
+
+/**
+ * What a Series Retrieval Exclusion may name (SER-020): one exact Series Knowledge Item (its current and later revisions), one
+ * stable knowledge class (its items now and later), one member Book (the Series Knowledge taken from its manuscript, now and
+ * later), or one Source Version of a member Book — which no Series read reaches yet, so it is recorded and read by nothing.
+ */
+export const SERIES_EXCLUSION_TARGET_KINDS = ['knowledge-item', 'knowledge-class', 'book', 'source-version'] as const;
+export type SeriesExclusionTargetKind = (typeof SERIES_EXCLUSION_TARGET_KINDS)[number];
+export const SERIES_EXCLUSION_TARGET_KIND_LABELS: Readonly<Record<SeriesExclusionTargetKind, string>> = {
+  'knowledge-item': '书系知识条目',
+  'knowledge-class': '知识类别',
+  book: '成员图书',
+  'source-version': '来源版本',
+};
+/** `添加检索排除`, `修改检索排除` (its reason) and `停止此排除`: each appends one revision, never edits one. */
+export const SERIES_EXCLUSION_ACTIONS = ['add', 'change', 'end'] as const;
+export type SeriesExclusionAction = (typeof SERIES_EXCLUSION_ACTIONS)[number];
+export type SeriesExclusionActionLabel = '添加检索排除' | '修改检索排除' | '停止此排除';
+export const SERIES_EXCLUSION_ACTION_LABELS: Readonly<Record<SeriesExclusionAction, SeriesExclusionActionLabel>> = {
+  add: '添加检索排除',
+  change: '修改检索排除',
+  end: '停止此排除',
+};
+/** An exclusion's optional reason, in characters once NFC-normalized and trimmed. */
+export const MAX_SERIES_EXCLUSION_REASON_CHARACTERS = 200;
+/** How many exclusions one Series holds in force at once; every one is listed on its page. */
+export const MAX_SERIES_EXCLUSIONS = 100;
+export const MAX_SERIES_EXCLUSION_HISTORY_PAGE = 20;
+export const MAX_SERIES_EXCLUSION_TARGETS_PAGE = 50;
+/** The state an affected Run stops in, whose only ways on are `修改计划并重新授权` and `取消任务` (SER-024). */
+export const SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL = '书系检索范围已变化 · 需要重新确认计划' as const;
+/** The Historically Affected Result Marker (SER-026). */
+export const HISTORICALLY_AFFECTED_RESULT_MARKER = '此结果使用的材料后来被排除' as const;
+/** The marker where the exclusion ledger no longer reads (Issue #64 review): history that cannot be checked says so. */
+export const HISTORICAL_MARKER_UNVERIFIABLE = '此结果使用的材料是否后来被排除：无法核对' as const;
+
+/** What an exclusion names: an item, a class key, a Book or a Source Version identity. */
+export interface SeriesExclusionTargetInput {
+  readonly kind: SeriesExclusionTargetKind;
+  readonly id: string;
+}
+
+/** A target in the editor's words: what it is, and how it keeps applying (SER-021). */
+export interface SeriesExclusionTargetProjection {
+  readonly kind: SeriesExclusionTargetKind;
+  readonly id: string;
+  /** `书系知识条目「海边小城」（地点）`, `知识类别「地点」`, `成员图书《星河之三》`, `来源版本「….docx」（《…》）`. */
+  readonly label: string;
+  /** Continuing or fixed (SER-021): what later material it also covers, or that it covers this one alone. */
+  readonly continuing: string;
+  /** Whether any Series read reads this kind of material yet: never for a Source Version (SER-028), which none reaches. */
+  readonly read: boolean;
+}
+
+/** Where the next page of targets starts: after this one, in the kind's own order. */
+export interface SeriesExclusionTargetsCursor {
+  readonly key: string;
+  readonly id: string;
+}
+
+export interface InspectSeriesExclusionTargetsInput {
+  readonly seriesId: string;
+  readonly kind: SeriesExclusionTargetKind;
+  readonly after: SeriesExclusionTargetsCursor | null;
+}
+
+/** A page of what `添加检索排除…` may name, each saying whether an exclusion in force names it already. */
+export interface SeriesExclusionTargetsProjection {
+  readonly kind: SeriesExclusionTargetKind;
+  readonly targets: ReadonlyArray<SeriesExclusionTargetProjection & { readonly excluded: boolean }>;
+  readonly nextCursor: SeriesExclusionTargetsCursor | null;
+}
+
+/** One of the impact preview's four groups (SER-022): what changes, and what stays as it is. */
+export interface SeriesExclusionImpactGroupProjection {
+  readonly key: 'future-reads' | 'runs' | 'history' | 'unaffected';
+  readonly title: '今后的检索' | '已排队、已授权或正在运行的任务' | '已完成的历史' | '不受影响的授权';
+  readonly changes: ReadonlyArray<string>;
+  readonly unchanged: ReadonlyArray<string>;
+}
+
+/** One appended revision of an exclusion: what it did, why, who, when, and the impact it showed. */
+export interface SeriesExclusionRevisionProjection {
+  readonly revisionId: string;
+  readonly exclusionId: string;
+  readonly revision: number;
+  readonly action: SeriesExclusionAction;
+  readonly actionLabel: SeriesExclusionActionLabel;
+  readonly target: SeriesExclusionTargetProjection;
+  readonly reason: string;
+  readonly actor: '本机编辑';
+  readonly recordedAt: string;
+  readonly impact: ReadonlyArray<SeriesExclusionImpactGroupProjection>;
+}
+
+/** An exclusion in force now: its target, its reason, and since when it applies. */
+export interface SeriesExclusionProjection {
+  readonly exclusionId: string;
+  readonly target: SeriesExclusionTargetProjection;
+  readonly reason: string;
+  /** When its first revision took effect: the instant it was recorded. */
+  readonly effectiveSince: string;
+  readonly revision: number;
+}
+
+/** Where the next page of exclusion revisions starts: after this one, newest first. */
+export interface SeriesExclusionHistoryCursor {
+  readonly recordedAt: string;
+  readonly revisionId: string;
+}
+
+/** A Series' 检索排除: every exclusion in force, and its revisions newest first, a page at a time. */
+export interface SeriesExclusionsProjection {
+  readonly effective: ReadonlyArray<SeriesExclusionProjection>;
+  readonly history: ReadonlyArray<SeriesExclusionRevisionProjection>;
+  readonly historyCount: number;
+  readonly historyNext: SeriesExclusionHistoryCursor | null;
+}
+
+export interface InspectSeriesExclusionHistoryInput {
+  readonly seriesId: string;
+  readonly after: SeriesExclusionHistoryCursor;
+}
+
+export interface SeriesExclusionHistoryPageProjection {
+  readonly history: ReadonlyArray<SeriesExclusionRevisionProjection>;
+  readonly nextCursor: SeriesExclusionHistoryCursor | null;
+}
+
+/** `添加检索排除` names a target; `修改检索排除` and `停止此排除` name the exclusion they supersede. */
+export interface PreviewSeriesExclusionInput {
+  readonly seriesId: string;
+  readonly action: SeriesExclusionAction;
+  readonly exclusionId: string | null;
+  readonly target: SeriesExclusionTargetInput | null;
+  readonly reason: string;
+}
+
+/** 书系检索排除影响预览 (SER-021, SER-022): exact target, scope, effective time, reason and actor, then the four groups. */
+export interface SeriesExclusionPreviewProjection {
+  readonly seriesId: string;
+  readonly seriesTitle: string;
+  readonly action: SeriesExclusionAction;
+  readonly actionLabel: SeriesExclusionActionLabel;
+  readonly exclusionId: string | null;
+  readonly target: SeriesExclusionTargetProjection;
+  /** The reason as it would be recorded: empty when none is given. */
+  readonly reason: string;
+  /** `只限书系「…」的书系检索`: the one retrieval path it restricts (SER-029). */
+  readonly scope: string;
+  /** `记录后立即生效`: the exclusion is the current-read guard from the instant it is recorded (SER-023). */
+  readonly effectiveTime: string;
+  readonly actor: '本机编辑';
+  readonly groups: ReadonlyArray<SeriesExclusionImpactGroupProjection>;
+  /** What the commit names, so a preview the exclusions, the knowledge or the Runs moved past is refused. */
+  readonly previewDigest: string;
+}
+
+export interface RecordSeriesExclusionInput extends PreviewSeriesExclusionInput {
+  readonly previewDigest: string;
+}
+
+export interface SeriesExclusionResultProjection {
+  readonly exclusionId: string;
+  readonly revisionId: string;
+  readonly completionLabel: '书系检索排除已生效' | '检索排除已修改' | '已停止此排除';
+  /** How many authorized Runs it stopped at once, before their next read. */
+  readonly stoppedRuns: number;
+  /** The revision it appended: the answer carries it alone, and the page reads the Series again. */
+  readonly revision: SeriesExclusionRevisionProjection;
 }
 
 /**
@@ -8123,7 +8329,14 @@ export type GlobalAttentionStateKey =
   // A Book's Learning Material waiting for the editor (Issue #61, S26b; LEARN-002, ATTN-009): one item per Book, while any
   // material waits for a decision or changed since it had one, or else while any was left for later.
   | 'learning-materials-pending'
-  | 'learning-materials-deferred';
+  | 'learning-materials-deferred'
+  // A dialogue Task of the Book (Issue #52, S17a; TASK-044, DIALOG-010, 012): only the 任务 panel lists it. Away from the
+  // foreground dialogue an answer in flight reads `等待回答` and nothing more; settled, it is answered or incomplete.
+  | 'dialogue-answering'
+  | 'dialogue-answered'
+  | 'dialogue-stopped'
+  | 'dialogue-interrupted'
+  | 'dialogue-failed';
 
 /**
  * The closed map of safe next steps (V2-UX-ATTN-007): each is an action the item's own record offers, in
@@ -8155,12 +8368,14 @@ export type GlobalAttentionNextStep =
   | 'set-library-attribution'
   | 'set-learning-eligibility'
   // A Book's Learning Material in 质量与学习 (Issue #61, S26b).
-  | 'decide-learning-materials';
+  | 'decide-learning-materials'
+  // A dialogue Task's 打开对话 (Issue #52, S17a; TASK-044).
+  | 'open-dialogue';
 export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
   'view-run', 'view-review', 'reconfirm-plan', 'continue-review', 'return-to-recovery', 'retry-abandon-cleanup', 'await-local-check',
   'resolve-conflict', 'answer-clarification', 'adjust-budget-redo', 'resolve-model-service', 'reprepare', 'redo', 'view-plan',
   'maintenance-link-proposal', 'maintenance-link-publication', 'maintenance-write-errata', 'maintenance-conclude',
-  'set-library-attribution', 'set-learning-eligibility', 'decide-learning-materials',
+  'set-library-attribution', 'set-learning-eligibility', 'decide-learning-materials', 'open-dialogue',
 ];
 
 /**
@@ -8181,7 +8396,9 @@ export type GlobalAttentionTarget =
   // 知识库 › 资料库 with the item's card (Issue #427, S79c).
   | { kind: 'library-material'; materialId: string }
   // 质量与学习 › 学习准入 with the Book's materials (Issue #61, S26b).
-  | { kind: 'learning-materials'; bookId: string };
+  | { kind: 'learning-materials'; bookId: string }
+  // The dialogue in the side slot, in the foreground (Issue #52, S17a).
+  | { kind: 'dialogue'; bookId: string; dialogueId: string };
 
 /** The Active Work Object of one item, in its record's own terms (V2-UX-ATTN-007). */
 export type GlobalAttentionObjectProjection =
@@ -8194,7 +8411,10 @@ export type GlobalAttentionObjectProjection =
   // A 资料库 item (Issue #427, S79c): its title and kind, and where it belongs so far — a Book, the house, or not yet decided.
   | { kind: 'library-material'; title: string; materialKind: LibraryMaterialKind; scope: 'none' | 'book' | 'house' }
   // A Book's Learning Material (Issue #61, S26b): how many wait for a decision, and how many were left for later.
-  | { kind: 'learning-materials'; pending: number; deferred: number };
+  | { kind: 'learning-materials'; pending: number; deferred: number }
+  // A dialogue Task (Issue #52, S17a): the editor's own question, as the Harness Session Ledger holds it — `null` when it
+  // holds no turn of it here.
+  | { kind: 'dialogue'; question: string | null };
 
 /** The record facts an item's reason is told from: identities, counts and states, never manuscript text. */
 export interface GlobalAttentionFactsProjection {
@@ -8265,7 +8485,9 @@ export const BOOK_TASK_RECENT_LIMIT = 10;
 /** What a finished Task's `查看结果` opens (V2-UX-TASK-045): the result it formed, read as its own screen reads it. */
 export type BookTaskResultRef =
   | { kind: 'analysis-revision'; revisionId: string }
-  | { kind: 'review-run'; reviewRunId: string };
+  | { kind: 'review-run'; reviewRunId: string }
+  // A dialogue Task's `回答` (Issue #52, S17a; TASK-044): its latest answer, read from the Harness Session Ledger.
+  | { kind: 'dialogue'; dialogueId: string };
 
 /** One Task of the Book as the panel shows it: 待我处理's item for it, and the result `查看结果` opens. */
 export interface BookTaskItemProjection {
@@ -8292,6 +8514,104 @@ export interface BookTasksProjection {
   groups: ReadonlyArray<BookTaskGroupProjection>;
   /** A Run of this Book is in flight, a Review Run is being driven, or a Run waits to start: the panel follows it. */
   running: boolean;
+}
+
+// ---- 就这段提问… (Issue #52, plan slice S17a; UI ADR 0014; V2-UX-DIALOG-001 to 016, TASK-044, TASK-046) ---------------
+
+/** The longest question the editor may ask, in characters. */
+export const MAX_DIALOGUE_QUESTION_CHARACTERS = 500;
+/** The longest 建议改为 or 理由 a 转为修改建议 takes, in characters. */
+export const MAX_DIALOGUE_PROPOSAL_CHARACTERS = 4_000;
+/** The longest selection a dialogue may be asked about, in graphemes. */
+export const MAX_DIALOGUE_SELECTION_GRAPHEMES = 2_000;
+
+/** The exact words of that Book's manuscript the question is about, as the editor selected them (one block). */
+export type DialogueSelectionInput = SeriesKnowledgeSpanInput;
+
+export interface AskAboutSelectionInput {
+  readonly selection: DialogueSelectionInput;
+  readonly question: string;
+}
+
+export interface InspectDialogueInput {
+  readonly dialogueId: string;
+  /** How many of the latest answer's fragments the reader has already shown. */
+  readonly afterFragment: number;
+}
+
+/** One action on a dialogue's latest answer: the attempt the editor sees, so an action on a stale one is refused. */
+export interface DialogueAttemptInput {
+  readonly dialogueId: string;
+  readonly attemptId: string;
+}
+
+export interface ConvertDialogueToChangeSuggestionInput extends DialogueAttemptInput {
+  /** What the selected words would become, taken from the answer by the editor. */
+  readonly proposedText: string;
+  /** Why, in the editor's words; the dialogue is the basis either way. */
+  readonly rationale: string;
+}
+
+export type DialogueAttemptKind = 'ask' | 'continue' | 'regenerate';
+/** An answer in flight, settled whole, or — stopped, interrupted or failed — an Incomplete Dialogue Answer (DIALOG-012). */
+export type DialogueAnswerState = 'answering' | 'completed' | 'stopped' | 'interrupted' | 'failed';
+
+/** One complete semantic fragment of an answer (DIALOG-006): a whole sentence, list item or row, never a broken tail. */
+export interface DialogueFragmentProjection {
+  readonly text: string;
+  /** A line break follows it: the next fragment starts a new paragraph, item or row. */
+  readonly breakAfter: boolean;
+}
+
+export interface DialogueAttemptProjection {
+  readonly attemptId: string;
+  readonly ordinal: number;
+  readonly kind: DialogueAttemptKind;
+  readonly state: DialogueAnswerState;
+  /**
+   * The answer's complete fragments from `fragmentsFrom` on — every one, for an attempt that is not the latest. A 继续回答
+   * carries what the answer it went on from kept, then its own.
+   */
+  readonly fragments: ReadonlyArray<DialogueFragmentProjection>;
+  readonly fragmentsFrom: number;
+  readonly fragmentTotal: number;
+  /**
+   * Where the answer was read: `live` while it streams, `ledger` from the Harness Session Ledger, `missing` when that ledger
+   * holds no record of it here, `damaged` when it holds one that does not read.
+   */
+  readonly source: 'live' | 'ledger' | 'missing' | 'damaged';
+  /** The known cause of an interruption or a failure, as a code; `null` otherwise. */
+  readonly causeCode: string | null;
+  readonly startedAt: string;
+  readonly settledAt: string | null;
+  /** The 修改建议 made from this answer with 转为修改建议. */
+  readonly convertedMarkIds: ReadonlyArray<string>;
+}
+
+/**
+ * One Interactive Editorial Dialogue (DIALOG-001, 015): bound to one exact Book, manuscript branch and selected range. Its
+ * question, the selected words as they were sent and every answer are read from the Harness Session Ledger each time; AI7's
+ * own records hold only identities, digests, spans and states. Nothing it says is manuscript text, a factual conclusion or
+ * a Proposal (DIALOG-016).
+ */
+export interface DialogueProjection {
+  readonly dialogueId: string;
+  readonly bookId: string;
+  readonly manuscriptId: string;
+  readonly branchId: string;
+  /** `null` when the Harness Session Ledger holds no turn of this dialogue here. */
+  readonly question: string | null;
+  readonly selection: string | null;
+  readonly range: { readonly blockId: string; readonly fromGrapheme: number; readonly toGrapheme: number };
+  readonly askedAt: string;
+  readonly attempts: ReadonlyArray<DialogueAttemptProjection>;
+  readonly actions: { readonly stop: boolean; readonly continue: boolean; readonly regenerate: boolean; readonly convert: boolean };
+}
+
+export interface DialogueConversionProjection {
+  readonly markId: string;
+  readonly completionLabel: string;
+  readonly dialogue: DialogueProjection;
 }
 
 // ---- ④ 导出 · DOCX (Issue #413, plan slice S64; editor-surfaces §7 导出, V2-UX-EXP-001 to EXP-024) ------
@@ -9250,6 +9570,13 @@ export interface ServiceOperationMap {
   inspectSeriesKnowledgeCandidates: { input: { seriesId: string; after: SeriesKnowledgeCandidatesCursor | null }; output: SeriesKnowledgeCandidatesPageProjection };
   inspectSeriesKnowledgeConflicts: { input: { seriesId: string; itemId: string; revisionId: string; after: number }; output: SeriesKnowledgeConflictsProjection };
   inspectSeriesKnowledgeRevisions: { input: { seriesId: string; itemId: string; before: number | null }; output: SeriesKnowledgeRevisionsProjection };
+  // 书系检索排除 (Issue #64, S29b): the targets a Series may exclude, its revisions' further pages, the impact preview and the
+  // commit of one revision; and 取消任务 of a Review Run an exclusion stopped.
+  inspectSeriesExclusionTargets: { input: InspectSeriesExclusionTargetsInput; output: SeriesExclusionTargetsProjection };
+  inspectSeriesExclusionHistory: { input: InspectSeriesExclusionHistoryInput; output: SeriesExclusionHistoryPageProjection };
+  previewSeriesExclusion: { input: PreviewSeriesExclusionInput; output: SeriesExclusionPreviewProjection };
+  recordSeriesExclusion: { input: RecordSeriesExclusionInput; output: SeriesExclusionResultProjection };
+  cancelReviewRun: { input: CancelReviewRunInput; output: ReviewWorkspaceProjection };
   inspectDataVersion: { input: Record<string, never>; output: DataVersionProjection };
   /**
    * 导出数据库 (Issue #434, S86a): the destination the Save dialog answered becomes one preparation of the package, packed off
@@ -9386,6 +9713,21 @@ export interface ServiceOperationMap {
   inspectGlobalAttention: { input: Record<string, never>; output: GlobalAttentionProjection };
   /** The Book's 任务 panel (Issue #423, plan slice S77a): a read of that Book's Tasks in the three groups. */
   inspectBookTasks: { input: { bookId: string }; output: BookTasksProjection };
+  /**
+   * 就这段提问… (Issue #52, S17a): a dialogue Task on the exact selected words of that Book's manuscript and the editor's
+   * question, its first answer started at once — only the selected words and the question are sent, and nothing changes.
+   */
+  askAboutSelection: { input: AskAboutSelectionInput & { bookId: string }; output: DialogueProjection };
+  /** The dialogue as it stands: a read, the latest answer's fragments from `afterFragment` on. */
+  inspectDialogue: { input: InspectDialogueInput & { bookId: string }; output: DialogueProjection };
+  /** 停止回答: the answer in flight keeps only its complete fragments, labelled incomplete. */
+  stopDialogueAnswer: { input: DialogueAttemptInput & { bookId: string }; output: DialogueProjection };
+  /** 继续回答: a new attempt going on from what a stopped or interrupted answer kept. */
+  continueDialogueAnswer: { input: DialogueAttemptInput & { bookId: string }; output: DialogueProjection };
+  /** 重新回答: a new attempt asking the same question about the same words again. */
+  regenerateDialogueAnswer: { input: DialogueAttemptInput & { bookId: string }; output: DialogueProjection };
+  /** 转为修改建议: an AI7-produced 修改建议 on the dialogue's selected words, from a completed answer; never applied. */
+  convertDialogueToChangeSuggestion: { input: ConvertDialogueToChangeSuggestionInput & { bookId: string }; output: DialogueConversionProjection };
   reviewManuscriptExport: { input: ReviewManuscriptExportInput; output: ManuscriptExportReviewProjection };
   prepareManuscriptExport: { input: PrepareManuscriptExportInput; output: ManuscriptExportPreparationProjection };
   approveManuscriptExport: { input: ApproveManuscriptExportInput; output: ManuscriptExportReceiptProjection };
@@ -9639,6 +9981,12 @@ export interface RendererApi {
   inspectSeriesKnowledgeCandidates(input: { seriesId: string; after: SeriesKnowledgeCandidatesCursor | null }): Promise<SeriesKnowledgeCandidatesPageProjection>;
   inspectSeriesKnowledgeConflicts(input: { seriesId: string; itemId: string; revisionId: string; after: number }): Promise<SeriesKnowledgeConflictsProjection>;
   inspectSeriesKnowledgeRevisions(input: { seriesId: string; itemId: string; before: number | null }): Promise<SeriesKnowledgeRevisionsProjection>;
+  inspectSeriesExclusionTargets(input: InspectSeriesExclusionTargetsInput): Promise<SeriesExclusionTargetsProjection>;
+  inspectSeriesExclusionHistory(input: InspectSeriesExclusionHistoryInput): Promise<SeriesExclusionHistoryPageProjection>;
+  previewSeriesExclusion(input: PreviewSeriesExclusionInput): Promise<SeriesExclusionPreviewProjection>;
+  recordSeriesExclusion(input: RecordSeriesExclusionInput): Promise<SeriesExclusionResultProjection>;
+  /** 取消任务 of the current Book's Review Run a Series Retrieval Exclusion stopped (Issue #64, S29b). */
+  cancelReviewRun(input: Omit<CancelReviewRunInput, 'bookId'>): Promise<ReviewWorkspaceProjection>;
   inspectDataVersion(): Promise<DataVersionProjection>;
   /**
    * 导出数据库… (Issue #434, S86a): the platform's Save dialog, then the preparation of the package for the chosen file — begun,
@@ -9729,6 +10077,13 @@ export interface RendererApi {
   inspectGlobalAttention(): Promise<GlobalAttentionProjection>;
   /** The 任务 panel of the Book this window shows (Issue #423, S77a): a read; it holds and grants nothing. */
   inspectBookTasks(): Promise<BookTasksProjection>;
+  /** 就这段提问… on the Book this window shows (Issue #52, S17a): only the selected words and the question are sent. */
+  askAboutSelection(input: AskAboutSelectionInput): Promise<DialogueProjection>;
+  inspectDialogue(input: InspectDialogueInput): Promise<DialogueProjection>;
+  stopDialogueAnswer(input: DialogueAttemptInput): Promise<DialogueProjection>;
+  continueDialogueAnswer(input: DialogueAttemptInput): Promise<DialogueProjection>;
+  regenerateDialogueAnswer(input: DialogueAttemptInput): Promise<DialogueProjection>;
+  convertDialogueToChangeSuggestion(input: ConvertDialogueToChangeSuggestionInput): Promise<DialogueConversionProjection>;
   /**
    * ④ 导出 (Issue #413): the Export Fidelity Review of one exact version of that Book's Manuscript. A current
    * revision with unsaved edits is saved as a revision first.

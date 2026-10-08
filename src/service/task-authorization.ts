@@ -359,11 +359,25 @@ export const DATABASE_MERGE_SCHEMA_VERSION = 58;
  */
 export const INITIAL_EVALUATION_SCHEMA_VERSION = 59;
 /**
+ * The dialogue revision (Issue #52, S17a; UI ADR 0014; V2-UX-DIALOG-001 to 016): six additive, append-only relations owned by
+ * `dialogue/dialogue-ledger.ts` and created before this version is stamped — each dialogue Task, its attempts, and each
+ * attempt's Execution Binding, Harness Execution Span, outcome and conversions. No existing row changes. It follows revision 59
+ * (Issue #429, S81b1) and moves nothing of its ledger.
+ */
+export const DIALOGUE_SCHEMA_VERSION = 60;
+/**
+ * The Series Retrieval Exclusion revision (Issue #64, S29b; V2-UX-SER-020 to SER-029; ADR 0037): one additive, append-only
+ * relation owned by `series-exclusions.ts` and created before this version is stamped — each revision of an exclusion of
+ * material from one Series' retrieval. No existing row changes. It follows revision 60 (Issue #52, S17a) and moves nothing
+ * of its relations.
+ */
+export const SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION = 61;
+/**
  * The 审稿意见 revision (Issue #429, S81c; V2-UX-EVAL-013): the three kind-coupled analysis relations admit the reader's report
  * kind — rebuilt exactly as revisions 20, 24 and 59 rebuilt them, every row copied byte for byte — and two additive,
  * append-only relations owned by `readers-reports.ts` and created before this version is stamped record which finalized
- * record and template each 审稿意见 Task drafts from, and which draft document each drafted result became. Revisions 60 and 61
- * are other slices'. No existing row changes. This is the terminal version.
+ * record and template each 审稿意见 Task drafts from, and which draft document each drafted result became. It follows revision 61
+ * (Issue #64, S29b). No existing row changes. This is the terminal version.
  */
 export const READERS_REPORT_SCHEMA_VERSION = 62;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -1897,7 +1911,8 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === EVALUATION_CALIBRATION_SCHEMA_VERSION || version === SERIES_SCHEMA_VERSION || version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
       version === STORE_VERSION_SCHEMA_VERSION || version === DATABASE_EXPORT_SCHEMA_VERSION || version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION || version === DATABASE_MERGE_SCHEMA_VERSION ||
-      version === INITIAL_EVALUATION_SCHEMA_VERSION || version === READERS_REPORT_SCHEMA_VERSION,
+      version === INITIAL_EVALUATION_SCHEMA_VERSION || version === DIALOGUE_SCHEMA_VERSION || version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
+      version === READERS_REPORT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
   if (version === READERS_REPORT_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
@@ -1943,9 +1958,10 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
     validateRevision58AnalysisLedgerSchema(db);
     return migrateAnalysisLedgerToRevision59(db);
   }
-  if (version === INITIAL_EVALUATION_SCHEMA_VERSION) {
-    // Revisions 60 and 61 add no task-authorization or analysis relation: a revision-59 store carries the ledger revision 59
-    // left, validated as exactly that, and revision 62's rebuild brings it to the terminal shape.
+  if (version === INITIAL_EVALUATION_SCHEMA_VERSION || version === DIALOGUE_SCHEMA_VERSION || version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION) {
+    // Revisions 60 (Issue #52, S17a) and 61 (Issue #64, S29b) add no task-authorization or analysis relation: a revision-59,
+    // revision-60 or revision-61 store carries the ledger revision 59 left, validated as exactly that, and revision 62's
+    // rebuild of the three kind-coupled relations brings it to the terminal shape and stamps the terminal version.
     validateJ03TaskAuthorizationSchema(db);
     validateRevision59AnalysisLedgerSchema(db);
     return migrateAnalysisLedgerToRevision62(db);

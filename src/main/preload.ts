@@ -421,6 +421,16 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['inspectSeriesKnowledgeConflicts']['output']>(IPC_CHANNELS.inspectSeriesKnowledgeConflicts, input),
   inspectSeriesKnowledgeRevisions: (input: ServiceOperationMap['inspectSeriesKnowledgeRevisions']['input']) =>
     invoke<ServiceOperationMap['inspectSeriesKnowledgeRevisions']['output']>(IPC_CHANNELS.inspectSeriesKnowledgeRevisions, input),
+  inspectSeriesExclusionTargets: (input: ServiceOperationMap['inspectSeriesExclusionTargets']['input']) =>
+    invoke<ServiceOperationMap['inspectSeriesExclusionTargets']['output']>(IPC_CHANNELS.inspectSeriesExclusionTargets, input),
+  inspectSeriesExclusionHistory: (input: ServiceOperationMap['inspectSeriesExclusionHistory']['input']) =>
+    invoke<ServiceOperationMap['inspectSeriesExclusionHistory']['output']>(IPC_CHANNELS.inspectSeriesExclusionHistory, input),
+  previewSeriesExclusion: (input: ServiceOperationMap['previewSeriesExclusion']['input']) =>
+    invoke<ServiceOperationMap['previewSeriesExclusion']['output']>(IPC_CHANNELS.previewSeriesExclusion, input),
+  recordSeriesExclusion: (input: ServiceOperationMap['recordSeriesExclusion']['input']) =>
+    invoke<ServiceOperationMap['recordSeriesExclusion']['output']>(IPC_CHANNELS.recordSeriesExclusion, input),
+  cancelReviewRun: (input: Omit<ServiceOperationMap['cancelReviewRun']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['cancelReviewRun']['output']>(IPC_CHANNELS.cancelReviewRun, input),
   applyChangeSuggestion: (input: ServiceOperationMap['applyChangeSuggestion']['input']) =>
     invoke<ServiceOperationMap['applyChangeSuggestion']['output']>(IPC_CHANNELS.applyChangeSuggestion, input),
   applyChangeSuggestionBatch: (input: ServiceOperationMap['applyChangeSuggestionBatch']['input']) =>
@@ -474,6 +484,18 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['inspectProductionDocuments']['output']>(IPC_CHANNELS.inspectProductionDocuments),
   inspectBookTasks: () =>
     invoke<ServiceOperationMap['inspectBookTasks']['output']>(IPC_CHANNELS.inspectBookTasks),
+  askAboutSelection: (input: Parameters<RendererApi['askAboutSelection']>[0]) =>
+    invoke<ServiceOperationMap['askAboutSelection']['output']>(IPC_CHANNELS.askAboutSelection, input),
+  inspectDialogue: (input: Parameters<RendererApi['inspectDialogue']>[0]) =>
+    invoke<ServiceOperationMap['inspectDialogue']['output']>(IPC_CHANNELS.inspectDialogue, input),
+  stopDialogueAnswer: (input: Parameters<RendererApi['stopDialogueAnswer']>[0]) =>
+    invoke<ServiceOperationMap['stopDialogueAnswer']['output']>(IPC_CHANNELS.stopDialogueAnswer, input),
+  continueDialogueAnswer: (input: Parameters<RendererApi['continueDialogueAnswer']>[0]) =>
+    invoke<ServiceOperationMap['continueDialogueAnswer']['output']>(IPC_CHANNELS.continueDialogueAnswer, input),
+  regenerateDialogueAnswer: (input: Parameters<RendererApi['regenerateDialogueAnswer']>[0]) =>
+    invoke<ServiceOperationMap['regenerateDialogueAnswer']['output']>(IPC_CHANNELS.regenerateDialogueAnswer, input),
+  convertDialogueToChangeSuggestion: (input: Parameters<RendererApi['convertDialogueToChangeSuggestion']>[0]) =>
+    invoke<ServiceOperationMap['convertDialogueToChangeSuggestion']['output']>(IPC_CHANNELS.convertDialogueToChangeSuggestion, input),
   inspectBookDeliveryPackage: () =>
     invoke<ServiceOperationMap['inspectBookDeliveryPackage']['output']>(IPC_CHANNELS.inspectBookDeliveryPackage),
   prepareBookDeliveryPackage: (input: Omit<ServiceOperationMap['prepareBookDeliveryPackage']['input'], 'bookId'>) =>

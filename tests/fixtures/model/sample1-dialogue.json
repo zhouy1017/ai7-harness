@@ -1,0 +1,37 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-dialogue",
+  "description": "Hand-written synthetic Interactive Editorial Dialogue answers (Issue #52, S17a) layered over sample1-baseline-happy, so J-16's analyses read exactly as before. One question, 这段的叙述视角是否一致？, is answered under unit ordinal 0 by the dialogue contract's request digest: asked (and asked again by 重新回答) it streams five text deltas, the second ending in the middle of a sentence and the last with no end mark; continued from a stopped answer it streams the two sentences that answer left. The words are the fixture's own and quote nothing of the Book.",
+  "basedOn": "sample1-baseline-happy",
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "99d222cfa2aac85a27b6839fed74ea01b00f602a19028cc903f0872c33a206ed",
+      "response": {
+        "kind": "answer-chunks",
+        "chunks": [
+          "这段一直用第三人称",
+          "限知视角叙述。人物的心理只写到",
+          "主人公为止，没有越界。",
+          "唯一可以斟酌的是末句的语气",
+          "，略显突兀，可以改得更平缓些"
+        ],
+        "usage": { "inputTokens": 120, "outputTokens": 60 }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "e3460da6fdc716fe6a8087d4b408341f661d6c1b5716e5e64b6c0a524e03dad3",
+      "response": {
+        "kind": "answer-chunks",
+        "chunks": [
+          "人物的心理只写到主人公为止，",
+          "没有越界。唯一可以斟酌的是末句的语气，略显突兀，可以改得更平缓些。"
+        ],
+        "usage": { "inputTokens": 160, "outputTokens": 40 }
+      }
+    }
+  ]
+}

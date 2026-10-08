@@ -109,11 +109,11 @@ function serviceEnvironment(
   if (importControl) selected.AI7_E2E_JOURNEY = 'J-01';
   if (foregroundExecutionControl) selected.AI7_E2E_JOURNEY = 'J-03';
   if (recoveryControl) selected.AI7_E2E_JOURNEY = 'J-08';
-  // The model adapter binds J-04's Runs, J-09's (Issue #424), J-10's (Issue #422), J-16's (Issue #423) and J-11's (Issue #94);
-  // main admitted it for exactly one.
+  // The model adapter binds J-04's Runs, J-09's (Issue #424), J-10's (Issue #422), J-16's (Issue #423), J-11's (Issue #94) and J-13's,
+  // whose unit hold the service admits for J-13 only as itself (Issue #64, S29b); main admitted it for exactly one.
   if (modelAdapterControl) {
     const journey = process.env.AI7_E2E_JOURNEY;
-    selected.AI7_E2E_JOURNEY = journey === 'J-09' || journey === 'J-10' || journey === 'J-16' || journey === 'J-11' ? journey : 'J-04';
+    selected.AI7_E2E_JOURNEY = journey === 'J-09' || journey === 'J-10' || journey === 'J-16' || journey === 'J-11' || journey === 'J-13' ? journey : 'J-04';
   }
   const names =
     process.platform === 'win32'
@@ -193,6 +193,7 @@ export class ServiceClient {
     modelAdapterControl?: J04ModelAdapterControl,
     connectivityPath?: string,
     unitHoldPath?: string,
+    answerHoldPath?: string,
   ): Promise<ServiceClient> {
     if (!isAbsolute(executable) || !isAbsolute(serviceEntry) || !isAbsolute(dataRoot)) {
       throw new ServiceCallError('SERVICE_LAUNCH_INVALID', '本地业务服务启动参数无效。');
@@ -212,6 +213,8 @@ export class ServiceClient {
     if (connectivityPath !== undefined) args.push('--j04-connectivity-path', connectivityPath);
     // J-10's unit hold (Issue #422) rides beside the adapter as well: the file whose number lets units settle.
     if (unitHoldPath !== undefined) args.push('--j10-unit-hold-path', unitHoldPath);
+    // J-16's answer hold (Issue #52, S17a) likewise: the file whose number lets a dialogue answer's deltas through.
+    if (answerHoldPath !== undefined) args.push('--j16-answer-hold-path', answerHoldPath);
     const child = spawn(
       executable,
       args,

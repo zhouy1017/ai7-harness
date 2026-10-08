@@ -4,6 +4,7 @@ import type {
   BookTaskItemProjection,
   ClarificationOptionId,
   DefaultExecutionRuleReference,
+  DialogueProjection,
   GlobalAttentionTarget,
   RendererApi,
   RunBudgetCeilingState,
@@ -15,6 +16,8 @@ import type {
 } from '../shared/protocol.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 import { mountTaskPanel } from './task-panel.js';
+import { mountDialogue } from './dialogue.js';
+import { DIALOGUE_TITLE } from './dialogue-labels.js';
 import { TASK_PANEL_TITLE } from './task-panel-labels.js';
 import {
   parseBudgetCeiling,
@@ -164,8 +167,13 @@ export interface TaskDrawerSurface {
    * keeps `← 任务`, which comes back here.
    */
   openPanel(bookId: string, returnFocus: () => HTMLElement | null): void;
-  /** What the drawer shows now: one Task's plan, a Book's 任务 panel, or nothing. */
-  view(): { readonly kind: 'plan' | 'panel'; readonly bookId: string } | null;
+  /**
+   * One dialogue of the Book in the same slot, in the foreground (Issue #52, S17a; DIALOG-009): its answer streams by complete
+   * fragment while it is shown. `← 任务` goes back to the panel, which is the dialogue in the background.
+   */
+  openDialogue(bookId: string, dialogueId: string, returnFocus: () => HTMLElement | null): void;
+  /** What the drawer shows now: one Task's plan, a Book's 任务 panel, a dialogue, or nothing. */
+  view(): { readonly kind: 'plan' | 'panel' | 'dialogue'; readonly bookId: string } | null;
   /** Read the plan on show again when it is one of `kind`'s: the surface that raised it just recorded something. */
   refresh(kind: TaskPlanKind): void;
   close(restoreFocus: boolean): void;
@@ -196,6 +204,11 @@ type DrawerApi = Pick<
   | 'answerBaselineAnalysisClarification'
   | 'runReconnectPreflight'
   | 'setDefaultExecutionRule'
+  | 'inspectDialogue'
+  | 'stopDialogueAnswer'
+  | 'continueDialogueAnswer'
+  | 'regenerateDialogueAnswer'
+  | 'convertDialogueToChangeSuggestion'
 >;
 
 export interface MountTaskDrawerOptions {
@@ -231,6 +244,10 @@ export interface MountTaskDrawerOptions {
     bookId: string,
     input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; quick: DefaultExecutionRuleReference | null },
   ): Promise<{ ref: string; note?: string } | null>;
+  /** 回到所选文字 from a dialogue (Issue #52, S17a): the selected words in the manuscript. */
+  dialogueJump(bookId: string, target: { readonly manuscriptId: string; readonly blockId: string }): void;
+  /** 转为修改建议 made a 修改建议: the manuscript's marks read again. */
+  dialogueConverted(dialogue: DialogueProjection, markId: string): void;
 }
 
 /** How often the drawer reads a running Task's plan again, so the bar follows the Run to its end. */
@@ -339,8 +356,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   /** Said beside the bar's actions once the plan the drawer was opened on is painted (`open`'s `note`). */
   let pendingNote: string | null = null;
   let pollTimer: number | undefined;
-  /** What the slot shows (Issue #423, S77a): one Task's plan, or the Book's 任务 panel. */
-  let view: 'plan' | 'panel' = 'plan';
+  /** What the slot shows (Issue #423, S77a): one Task's plan, the Book's 任务 panel, or one dialogue (Issue #52, S17a). */
+  let view: 'plan' | 'panel' | 'dialogue' = 'plan';
   let panelBookId: string | null = null;
   /** The plan was opened from a card's 取消任务: its Cancellation Impact Summary opens once the plan is painted. */
   let cancelOnOpen = false;
@@ -357,7 +374,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   const back = control(TASK_DRAWER_BACK, 'quiet task-drawer-back', 'tasks');
   back.title = TASK_DRAWER_BACK_TITLE;
   back.addEventListener('click', () => {
-    const book = request?.bookId ?? panelBookId;
+    const book = view === 'dialogue' ? panelBookId : request?.bookId ?? panelBookId;
     if (book !== null) surface.openPanel(book, returnFocus);
   });
   const title = el('h2', 'task-drawer-title', TASK_DRAWER_TITLE);
@@ -398,7 +415,11 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     openPlan: (kind, ref, cancel) => {
       if (panelBookId !== null) surface.open({ bookId: panelBookId, kind, ref }, returnFocus, undefined, { cancel });
     },
-    openTarget: (target) => options.openTaskTarget(target),
+    // A dialogue Task's 打开对话 brings its dialogue to the foreground in the same slot (TASK-044, DIALOG-011).
+    openTarget: (target) => {
+      if (target.kind === 'dialogue') surface.openDialogue(target.bookId, target.dialogueId, returnFocus);
+      else options.openTaskTarget(target);
+    },
     openResult: (entry) => {
       const book = panelBookId;
       const finder = returnFocus;
@@ -417,14 +438,27 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     onRecorded: (book) => options.onRecorded('baseline-analysis', book),
   });
 
-  /** The header and the footer of what the slot shows: the panel has no mode, no plan state and no bar. */
+  const dialogueSurface = mountDialogue({
+    api,
+    setStatus: options.setStatus,
+    errorMessage: options.errorMessage,
+    jump: (target) => {
+      if (panelBookId !== null) options.dialogueJump(panelBookId, target);
+    },
+    onConverted: (dialogue, markId) => options.dialogueConverted(dialogue, markId),
+    onChanged: () => undefined,
+  });
+
+  /** The header and the footer of what the slot shows: the panel and a dialogue have no mode, no plan state and no bar. */
   function showView(): void {
     root.dataset['taskDrawerView'] = view;
     back.hidden = view === 'panel';
-    title.textContent = view === 'panel' ? TASK_PANEL_TITLE : TASK_DRAWER_TITLE;
-    modes.hidden = view === 'panel';
-    foot.hidden = view === 'panel';
-    if (view === 'panel') {
+    title.textContent = view === 'panel' ? TASK_PANEL_TITLE : view === 'dialogue' ? DIALOGUE_TITLE : TASK_DRAWER_TITLE;
+    modes.hidden = view !== 'plan';
+    foot.hidden = view !== 'plan';
+    // Leaving a dialogue is backgrounding it (DIALOG-010): nothing is read or shown, and its answer runs on unchanged.
+    if (view !== 'dialogue') dialogueSurface.stop();
+    if (view !== 'plan') {
       pill.hidden = true;
       delete root.dataset['taskPlanKind'];
       delete root.dataset['taskPlanRef'];
@@ -434,7 +468,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
   }
   root.addEventListener('keydown', (event) => {
-    if (event.key !== 'Escape' || event.defaultPrevented || root.hidden) return;
+    // An Escape that ends an input method's composition belongs to it (J-14): 转为修改建议's form, 设置上限…'s field and every
+    // other field in the slot keep it, and the slot stays open.
+    if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented || root.hidden) return;
     event.preventDefault();
     surface.close(true);
   });
@@ -2076,13 +2112,41 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       title.focus();
       if (interrupted) disableAll();
     },
+    openDialogue(bookId, dialogueId, finder) {
+      ticket += 1;
+      clearPoll();
+      panel.stop();
+      view = 'dialogue';
+      panelBookId = bookId;
+      request = null;
+      plan = null;
+      painted = '';
+      refusal = null;
+      pendingNote = null;
+      cancelOnOpen = false;
+      returnFocus = finder;
+      root.hidden = false;
+      root.dataset['taskDrawer'] = 'open';
+      shell.dataset['taskDrawer'] = 'open';
+      showView();
+      questions.replaceChildren();
+      questionsPainted = '';
+      bar.hidden = true;
+      bar.replaceChildren();
+      body.replaceChildren(dialogueSurface.element);
+      options.onOpen();
+      dialogueSurface.show(dialogueId);
+      title.focus();
+      if (interrupted) disableAll();
+    },
     view() {
       if (root.hidden) return null;
+      if (view === 'dialogue') return panelBookId === null ? null : { kind: 'dialogue', bookId: panelBookId };
       if (view === 'panel') return panelBookId === null ? null : { kind: 'panel', bookId: panelBookId };
       return request === null ? null : { kind: 'plan', bookId: request.bookId };
     },
     refresh(kind) {
-      if (root.hidden || interrupted) return;
+      if (root.hidden || interrupted || view === 'dialogue') return;
       if (view === 'panel') {
         panel.refresh();
         return;
@@ -2095,6 +2159,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       ticket += 1;
       clearPoll();
       panel.stop();
+      dialogueSurface.stop();
       panelBookId = null;
       cancelOnOpen = false;
       request = null;
@@ -2114,6 +2179,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     },
     followScreen(state, bookId) {
       if (root.hidden) return;
+      if (view === 'dialogue') {
+        if (bookId === null || bookId !== panelBookId || !TASK_DRAWER_SCREENS.includes(state)) surface.close(false);
+        return;
+      }
       if (view === 'panel') {
         if (bookId === null || bookId !== panelBookId || !TASK_DRAWER_SCREENS.includes(state)) {
           surface.close(false);
@@ -2134,6 +2203,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       ticket += 1;
       clearPoll();
       panel.stop();
+      dialogueSurface.stop();
       disableAll();
     },
   };

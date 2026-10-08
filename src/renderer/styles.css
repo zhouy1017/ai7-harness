@@ -232,6 +232,12 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .review-category-basis { margin: .35rem 0 0; color: #4e564c; font-size: .9rem; }
 .review-authorize-note { margin: .9rem 0 0; font-weight: 800; }
 .review-continue .attention-note { margin-bottom: 0; }
+/* 书系检索范围已变化 · 需要重新确认计划 and 此结果使用的材料后来被排除 (S29b): the stop with its two ways on, and the marker beside a result. */
+.review-scope-stop { display: grid; gap: .4rem; margin-top: .6rem; }
+.review-scope-stop .attention-note, .review-scope-cancel-note { margin: 0; }
+.review-historical-marker { display: grid; gap: .2rem; margin-top: .6rem; padding: .5rem .8rem; border-left: 3px solid #b9774b; }
+.review-historical-marker p { margin: 0; overflow-wrap: anywhere; }
+.review-historical-marker-label { font-weight: 700; color: #7a4a26; }
 .review-progress { display: grid; gap: .45rem; margin: .55rem 0 0; padding-left: 1.4rem; }
 .review-progress > li { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; }
 .review-progress-label { font-weight: 800; }
@@ -683,6 +689,22 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .knowledge-review-conflicts { display: grid; gap: .4rem; min-width: 0; }
 .knowledge-review-conflicts ul { margin: 0; padding-left: 1.2rem; }
 .knowledge-dispositions [aria-pressed="true"] { outline: 2px solid #3f6f64; outline-offset: 2px; }
+/* 书系检索排除 (S29b): the exclusions in force, 添加检索排除… with its target and reason, the four-part preview, the records. */
+.series-exclusions { display: grid; gap: .6rem; min-width: 0; }
+.series-exclusions h3, .series-exclusions h4, .series-exclusions p { margin: 0; overflow-wrap: anywhere; }
+.series-exclusion-list, .series-exclusion-revisions { display: grid; gap: .6rem; margin: 0; padding: 0; list-style: none; }
+.series-exclusion, .series-exclusion-revision { display: grid; gap: .25rem; min-width: 0; padding: .5rem .8rem; border-left: 3px solid #b9774b; }
+.series-exclusion-revision { border-left-color: #c9d6d2; }
+.series-exclusion-line, .series-exclusion-revision-line { font-weight: 700; }
+.series-exclusion-chooser, .series-exclusion-change { display: grid; gap: .4rem; min-width: 0; margin: 0; padding: .8rem 1rem; border: 1px solid #ded9cd; border-radius: 12px; }
+.series-exclusion-kinds, .series-exclusion-targets { display: grid; gap: .3rem; min-width: 0; }
+.series-exclusion-kind, .series-exclusion-choice { display: flex; align-items: center; gap: .45rem; }
+.series-exclusion-choice input:disabled + span { color: #6f7569; }
+.series-exclusion-preview { display: grid; gap: .6rem; min-width: 0; padding: 1rem; border: 1px solid #c9d6d2; border-radius: 12px; background: #f7faf9; }
+.series-exclusion-preview-identity { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .3rem .8rem; margin: 0; }
+.series-exclusion-preview-identity dt { font-weight: 700; }
+.series-exclusion-preview-identity dd { margin: 0; overflow-wrap: anywhere; }
+.series-exclusion-history { display: grid; gap: .6rem; min-width: 0; }
 /* 设置 › 评估校准与预测 (S82): two switches with what each waits for, then each published Book's 定价与首印. */
 .evaluation-calibration { display: grid; gap: .8rem; }
 .calibration-section { display: grid; gap: .4rem; min-width: 0; padding: 1rem; border: 1px solid #ded9cd; border-radius: 12px; background: #fffdf8; }
@@ -855,6 +877,27 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .task-result-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .task-result-table th, .task-result-table td { padding: .35rem .4rem; border-bottom: 1px solid #d8dee5; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
 .task-result-table th:first-child, .task-result-table td:first-child { width: 2.4rem; }
+/* 就这段提问… (Issue #52, S17a): the dialogue in the side slot. Fragments run on as prose; one a line break follows ends its
+   line. The answer in flight carries its state in words beside it, never in colour alone. */
+.dialogue { display: grid; gap: .8rem; min-width: 0; }
+.dialogue-context { display: grid; gap: .3rem; min-width: 0; }
+.dialogue-context h3 { margin: 0; }
+.dialogue-selection { margin: 0; overflow-wrap: anywhere; }
+.dialogue-question { margin: 0; font-weight: 700; overflow-wrap: anywhere; white-space: pre-wrap; }
+.dialogue-jump { justify-self: start; }
+.dialogue-attempts { display: grid; gap: .6rem; min-width: 0; }
+.dialogue-attempt { display: grid; gap: .35rem; min-width: 0; padding: .6rem .7rem; border: 1px solid #d8dee5; border-left: 3px solid #b9c2cc; border-radius: 8px; background: #fff; }
+.dialogue-attempt[data-dialogue-state="answering"] { border-left-style: dashed; }
+.dialogue-attempt[data-dialogue-state="stopped"], .dialogue-attempt[data-dialogue-state="interrupted"], .dialogue-attempt[data-dialogue-state="failed"] { border-left-width: 5px; }
+.dialogue-attempt-head { display: flex; flex-wrap: wrap; gap: .3rem .5rem; align-items: center; justify-content: space-between; min-width: 0; }
+.dialogue-attempt-heading { margin: 0; font-size: .9rem; }
+.dialogue-answer { min-width: 0; line-height: 1.7; overflow-wrap: anywhere; }
+.dialogue-fragment-break::after { content: "\A"; white-space: pre; }
+.dialogue-incomplete, .dialogue-converted, .dialogue-authority { margin: 0; }
+.dialogue-convert { display: grid; gap: .35rem; min-width: 0; }
+.dialogue-convert textarea { width: 100%; box-sizing: border-box; }
+.task-result-dialogue-answer { line-height: 1.7; overflow-wrap: anywhere; }
+.task-result-dialogue-state, .task-result-dialogue-place { margin: 0; }
 .task-result-foot { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; padding: .55rem .8rem; border-top: 1px solid #d8dee5; border-radius: 0 0 12px 12px; background: #fbf9f4; }
 .return-chip-host { margin-top: .35rem; }
 .return-chip-host[hidden] { display: none; }
@@ -1353,6 +1396,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .maintenance-draft, .maintenance-case, .maintenance-classifications, .maintenance-choices, .maintenance-errata,
   .book-people-related,
   .task-panel-compose, .task-panel-count, .task-card, .task-result-window, .task-result-bar, .task-result-foot, .return-chip,
+  .dialogue-attempt, .dialogue-convert,
   .task-drawer, .task-drawer-head, .task-drawer-footer, .task-drawer-modes, .task-plan-goal, .task-plan-compact,
   .task-plan-chip, .task-plan-boundary, .task-plan-lock, .task-plan-section-number, .task-plan-edit-remove, .task-plan-edit-tag,
   .task-drawer-foot, .task-drawer-bar, .task-bar-actions, .task-bar-note, .task-bar-refusal,
@@ -1365,6 +1409,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .analysis-feedback-card, .analysis-feedback-card fieldset,
   .learning-book, .learning-card, .learning-choices, .feedback-book, .calibration-section,
   .series-create-form, .series-add-chooser, .series-preview, .knowledge-form, .knowledge-review, .knowledge-targets, .knowledge-reuse,
+  .series-exclusion, .series-exclusion-chooser, .series-exclusion-change, .series-exclusion-preview, .review-historical-marker,
   .task-plan-clarification, .task-plan-choice, .task-plan-choice-recommended, .task-plan-clarification-deferred, .task-plan-edit-ask-first,
   .task-plan-budget-form, .task-plan-budget-input {
     color: CanvasText;
@@ -1381,6 +1426,10 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   /* A 任务 card that holds other work keeps its heavier left rule without colour (Issue #423, S77a). */
   .task-card { border-left: 2px solid CanvasText; }
   .task-card[data-task-blocked="true"] { border-left: 6px solid CanvasText; }
+  /* A dialogue's answer keeps its left rule without colour: dashed while it streams, heavier once incomplete (Issue #52). */
+  .dialogue-attempt { border-left: 2px solid CanvasText; }
+  .dialogue-attempt[data-dialogue-state="answering"] { border-left-style: dashed; }
+  .dialogue-attempt[data-dialogue-state="stopped"], .dialogue-attempt[data-dialogue-state="interrupted"], .dialogue-attempt[data-dialogue-state="failed"] { border-left-width: 6px; }
   .global-attention-open { color: LinkText; }
   .global-attention-title:focus-visible, .global-attention-open:focus-visible { outline-color: Highlight; }
   /* Without colour the chosen mode keeps a heavier outline of its own, and the drawer its edge; the bar keeps
