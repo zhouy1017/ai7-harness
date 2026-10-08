@@ -111,6 +111,7 @@ import {
   DATABASE_REPLACEMENT_SCHEMA_VERSION,
   DATABASE_MERGE_SCHEMA_VERSION,
   INITIAL_EVALUATION_SCHEMA_VERSION,
+  DIALOGUE_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -191,6 +192,7 @@ import { SCHEDULED_BACKUP_FOREIGN_KEYS, SCHEDULED_BACKUP_SCHEMA_SQL, SCHEDULED_B
 import { DATABASE_REPLACEMENT_FOREIGN_KEYS, DATABASE_REPLACEMENT_SCHEMA_SQL, DATABASE_REPLACEMENT_TRIGGER_SQL } from './database-replacement.js';
 import { DATABASE_MERGE_FOREIGN_KEYS, DATABASE_MERGE_SCHEMA_SQL, DATABASE_MERGE_TRIGGER_SQL } from './database-merge.js';
 import { EVALUATION_INITIAL_DRAFT_FOREIGN_KEYS, EVALUATION_INITIAL_DRAFT_SCHEMA_SQL, EVALUATION_INITIAL_DRAFT_TRIGGER_SQL } from './evaluation-records.js';
+import { DIALOGUE_FOREIGN_KEYS, DIALOGUE_SCHEMA_SQL, DIALOGUE_TRIGGER_SQL } from './dialogue/dialogue-ledger.js';
 import {
   MANUSCRIPT_EFFECT_FOREIGN_KEYS,
   MANUSCRIPT_EFFECT_SCHEMA_SQL,
@@ -1915,6 +1917,7 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...DATABASE_REPLACEMENT_FOREIGN_KEYS,
   ...DATABASE_MERGE_FOREIGN_KEYS,
   ...EVALUATION_INITIAL_DRAFT_FOREIGN_KEYS,
+  ...DIALOGUE_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2545,6 +2548,7 @@ function requireManuscriptReimportTargetSchema(
   includeDatabaseReplacementTables = false,
   includeDatabaseMergeTables = false,
   includeEvaluationInitialDraftTables = false,
+  includeDialogueTables = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
@@ -2591,6 +2595,7 @@ function requireManuscriptReimportTargetSchema(
   includeDatabaseReplacementTables ||= committed(DATABASE_REPLACEMENT_SCHEMA_SQL);
   includeDatabaseMergeTables ||= committed(DATABASE_MERGE_SCHEMA_SQL);
   includeEvaluationInitialDraftTables ||= committed(EVALUATION_INITIAL_DRAFT_SCHEMA_SQL);
+  includeDialogueTables ||= committed(DIALOGUE_SCHEMA_SQL);
   requireExactSchema(
     db,
     {
@@ -2703,6 +2708,8 @@ function requireManuscriptReimportTargetSchema(
       ...(includeDatabaseMergeTables ? DATABASE_MERGE_SCHEMA_SQL : {}),
       // Revision 59 (Issue #429, S81b1) adds the AI7 初评 each Evaluation Record version began from.
       ...(includeEvaluationInitialDraftTables ? EVALUATION_INITIAL_DRAFT_SCHEMA_SQL : {}),
+      // Revision 60 (Issue #52, S17a) adds the dialogue Tasks, their attempts, bindings, spans, outcomes and conversions.
+      ...(includeDialogueTables ? DIALOGUE_SCHEMA_SQL : {}),
     },
     // The partial index that keeps one primary Manuscript per Book stands with the rebuilt relation, whatever the version.
     {
@@ -2750,6 +2757,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeDatabaseReplacementTables ? DATABASE_REPLACEMENT_TRIGGER_SQL : {}),
       ...(includeDatabaseMergeTables ? DATABASE_MERGE_TRIGGER_SQL : {}),
       ...(includeEvaluationInitialDraftTables ? EVALUATION_INITIAL_DRAFT_TRIGGER_SQL : {}),
+      ...(includeDialogueTables ? DIALOGUE_TRIGGER_SQL : {}),
     },
   );
 }
@@ -5488,6 +5496,7 @@ export function validateManuscriptReimportSchemaTruth(
   includeDatabaseReplacementTables = false,
   includeDatabaseMergeTables = false,
   includeEvaluationInitialDraftTables = false,
+  includeDialogueTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -5533,6 +5542,7 @@ export function validateManuscriptReimportSchemaTruth(
     includeDatabaseReplacementTables,
     includeDatabaseMergeTables,
     includeEvaluationInitialDraftTables,
+    includeDialogueTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -5624,7 +5634,8 @@ export function initializeBoundedSchema(
       version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       version === DATABASE_MERGE_SCHEMA_VERSION ||
-      version === INITIAL_EVALUATION_SCHEMA_VERSION,
+      version === INITIAL_EVALUATION_SCHEMA_VERSION ||
+      version === DIALOGUE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5666,9 +5677,10 @@ export function initializeBoundedSchema(
       version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       version === DATABASE_MERGE_SCHEMA_VERSION ||
-      version === INITIAL_EVALUATION_SCHEMA_VERSION) {
+      version === INITIAL_EVALUATION_SCHEMA_VERSION ||
+      version === DIALOGUE_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== INITIAL_EVALUATION_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== DIALOGUE_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,
@@ -5714,6 +5726,7 @@ export function initializeBoundedSchema(
           version >= DATABASE_REPLACEMENT_SCHEMA_VERSION,
           version >= DATABASE_MERGE_SCHEMA_VERSION,
           version >= INITIAL_EVALUATION_SCHEMA_VERSION,
+          version >= DIALOGUE_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);

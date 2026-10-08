@@ -855,6 +855,27 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .task-result-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .task-result-table th, .task-result-table td { padding: .35rem .4rem; border-bottom: 1px solid #d8dee5; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
 .task-result-table th:first-child, .task-result-table td:first-child { width: 2.4rem; }
+/* 就这段提问… (Issue #52, S17a): the dialogue in the side slot. Fragments run on as prose; one a line break follows ends its
+   line. The answer in flight carries its state in words beside it, never in colour alone. */
+.dialogue { display: grid; gap: .8rem; min-width: 0; }
+.dialogue-context { display: grid; gap: .3rem; min-width: 0; }
+.dialogue-context h3 { margin: 0; }
+.dialogue-selection { margin: 0; overflow-wrap: anywhere; }
+.dialogue-question { margin: 0; font-weight: 700; overflow-wrap: anywhere; white-space: pre-wrap; }
+.dialogue-jump { justify-self: start; }
+.dialogue-attempts { display: grid; gap: .6rem; min-width: 0; }
+.dialogue-attempt { display: grid; gap: .35rem; min-width: 0; padding: .6rem .7rem; border: 1px solid #d8dee5; border-left: 3px solid #b9c2cc; border-radius: 8px; background: #fff; }
+.dialogue-attempt[data-dialogue-state="answering"] { border-left-style: dashed; }
+.dialogue-attempt[data-dialogue-state="stopped"], .dialogue-attempt[data-dialogue-state="interrupted"], .dialogue-attempt[data-dialogue-state="failed"] { border-left-width: 5px; }
+.dialogue-attempt-head { display: flex; flex-wrap: wrap; gap: .3rem .5rem; align-items: center; justify-content: space-between; min-width: 0; }
+.dialogue-attempt-heading { margin: 0; font-size: .9rem; }
+.dialogue-answer { min-width: 0; line-height: 1.7; overflow-wrap: anywhere; }
+.dialogue-fragment-break::after { content: "\A"; white-space: pre; }
+.dialogue-incomplete, .dialogue-converted, .dialogue-authority { margin: 0; }
+.dialogue-convert { display: grid; gap: .35rem; min-width: 0; }
+.dialogue-convert textarea { width: 100%; box-sizing: border-box; }
+.task-result-dialogue-answer { line-height: 1.7; overflow-wrap: anywhere; }
+.task-result-dialogue-state, .task-result-dialogue-place { margin: 0; }
 .task-result-foot { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; padding: .55rem .8rem; border-top: 1px solid #d8dee5; border-radius: 0 0 12px 12px; background: #fbf9f4; }
 .return-chip-host { margin-top: .35rem; }
 .return-chip-host[hidden] { display: none; }
@@ -1353,6 +1374,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .maintenance-draft, .maintenance-case, .maintenance-classifications, .maintenance-choices, .maintenance-errata,
   .book-people-related,
   .task-panel-compose, .task-panel-count, .task-card, .task-result-window, .task-result-bar, .task-result-foot, .return-chip,
+  .dialogue-attempt, .dialogue-convert,
   .task-drawer, .task-drawer-head, .task-drawer-footer, .task-drawer-modes, .task-plan-goal, .task-plan-compact,
   .task-plan-chip, .task-plan-boundary, .task-plan-lock, .task-plan-section-number, .task-plan-edit-remove, .task-plan-edit-tag,
   .task-drawer-foot, .task-drawer-bar, .task-bar-actions, .task-bar-note, .task-bar-refusal,
@@ -1381,6 +1403,10 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   /* A 任务 card that holds other work keeps its heavier left rule without colour (Issue #423, S77a). */
   .task-card { border-left: 2px solid CanvasText; }
   .task-card[data-task-blocked="true"] { border-left: 6px solid CanvasText; }
+  /* A dialogue's answer keeps its left rule without colour: dashed while it streams, heavier once incomplete (Issue #52). */
+  .dialogue-attempt { border-left: 2px solid CanvasText; }
+  .dialogue-attempt[data-dialogue-state="answering"] { border-left-style: dashed; }
+  .dialogue-attempt[data-dialogue-state="stopped"], .dialogue-attempt[data-dialogue-state="interrupted"], .dialogue-attempt[data-dialogue-state="failed"] { border-left-width: 6px; }
   .global-attention-open { color: LinkText; }
   .global-attention-title:focus-visible, .global-attention-open:focus-visible { outline-color: Highlight; }
   /* Without colour the chosen mode keeps a heavier outline of its own, and the drawer its edge; the bar keeps

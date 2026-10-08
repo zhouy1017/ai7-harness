@@ -305,6 +305,7 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
         return;
       }
       case 'result':
+      case 'answer':
         options.openResult(entry);
         return;
       case 'next':

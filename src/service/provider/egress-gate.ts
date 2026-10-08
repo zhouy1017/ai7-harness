@@ -71,13 +71,20 @@ export type EgressPolicyPin =
  */
 export type EgressCeilingState = 'unset' | 'within' | 'reached';
 
+/**
+ * What a Run may send. Analysis sends the admitted public or synthetic material it was planned over; an Interactive Editorial
+ * Dialogue (Issue #52, S17a) sends the words the editor selected in their own manuscript, and its question. A dialogue's
+ * excerpt reaches only the local deterministic route until a dialogue-purpose Provider Processing revision admits it (S17c).
+ */
+export type OutboundDataCategory = 'public-or-synthetic' | 'editor-selected-manuscript-excerpt';
+
 /** The binding facts the gate compares against; a frozen subset of the persisted Execution Binding. */
 export interface EgressBindingFacts {
   readonly bindingDigest: string;
   readonly route: ExecutionRoute;
   readonly model: string;
   readonly systemPrompt: string;
-  readonly outboundDataCategory: 'public-or-synthetic';
+  readonly outboundDataCategory: OutboundDataCategory;
   readonly policy: EgressPolicyPin;
   /** Every admitted user-role message text, exactly as the Run Source Scope permits it to be sent. */
   readonly admittedUserMessages: ReadonlySet<string>;
@@ -137,8 +144,9 @@ export function evaluateEgress(
   if (!DIGEST_PATTERN.test(binding.bindingDigest) || scope.currentBindingDigest() !== binding.bindingDigest) {
     return refuse('binding-stale', '执行绑定已不是当前绑定；未发送任何内容。');
   }
-  if (binding.outboundDataCategory !== 'public-or-synthetic') {
-    return refuse('outbound-category-mismatch', '外发数据类别不是 public-or-synthetic；未发送任何内容。');
+  if (binding.outboundDataCategory !== 'public-or-synthetic' &&
+      !(binding.outboundDataCategory === 'editor-selected-manuscript-excerpt' && binding.route === LOCAL_DETERMINISTIC_ROUTE)) {
+    return refuse('outbound-category-mismatch', '外发数据类别不允许经这条路由发送；未发送任何内容。');
   }
   if (payload.provider !== binding.route) return refuse('route-mismatch', '请求路由与执行绑定不一致；未发送任何内容。');
   if (payload.model !== binding.model) return refuse('model-mismatch', '请求模型与执行绑定不一致；未发送任何内容。');
