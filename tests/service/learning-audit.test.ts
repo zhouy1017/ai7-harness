@@ -94,6 +94,13 @@ describe('学习回溯 over the real store', () => {
 
       const all = store.inspectLearningAudit();
       expect(all.nextCursor).toBeNull();
+      // The filters' choices come with the page (Issue #677): every Book of the house by title, and its Series.
+      expect(all.choices).toEqual({
+        books: [{ bookId: second.bookId, title: '回溯乙' }, { bookId: first.bookId, title: '回溯甲' }],
+        booksTruncated: false,
+        series: [],
+        seriesTruncated: false,
+      });
       expect(all.books.map((book) => [book.title, book.authors, book.editors, book.materialCount, book.materials.map((material) => material.standing)])).toEqual([
         ['回溯乙', [], [], 1, ['pending']],
         ['回溯甲', ['周一'], ['郑三'], 3, ['book', 'house', 'pending']],
@@ -120,8 +127,16 @@ describe('学习回溯 over the real store', () => {
       const preview = store.previewSeriesMembershipChange({ seriesId, bookId: second.bookId, kind: 'add' });
       store.changeSeriesMembership({ seriesId, bookId: second.bookId, kind: 'add', previewDigest: preview.previewDigest });
       expect(standings({ seriesId })).toEqual([['回溯乙', 1, ['pending']]]);
+      // A filter narrows the page, never the choices: every Book and the new Series are still offered.
+      const filtered = store.inspectLearningAudit({ seriesId, standing: 'house' });
+      expect(filtered.books).toEqual([]);
+      expect(filtered.choices).toEqual({ ...all.choices, series: [{ seriesId, title: '回溯书系' }] });
       expect(refusal(() => store.inspectLearningAudit({ seriesId: randomUUID() }))).toBe('SERIES_NOT_FOUND');
       expect(refusal(() => store.inspectLearningAudit({ bookId: 'not-a-book' }))).toBe('BOOK_INVALID');
+      // A Book that does not exist — a remembered filter's, gone since — is refused as a missing Series is, never answered
+      // with an empty page (Issue #677).
+      expect(refusal(() => store.inspectLearningAudit({ bookId: randomUUID() }))).toBe('BOOK_NOT_FOUND');
+      expect(refusal(() => store.inspectLearningAudit({ bookId: randomUUID(), standing: 'pending' }))).toBe('BOOK_NOT_FOUND');
       store.markCleanShutdown();
     } finally {
       store.close();

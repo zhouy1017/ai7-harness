@@ -13,7 +13,9 @@ import {
   LEARNING_REMEDIATION_LEFT_OUT,
   learningAuditBatchStop,
   learningAuditBookHeading,
+  learningAuditChoicesCut,
   learningAuditMaterialName,
+  learningAuditMaterialNames,
   learningAuditOpenLabel,
   learningAuditSelectLabel,
   learningLineageDecisionLine,
@@ -73,5 +75,38 @@ describe('学习回溯 words', () => {
     expect(name).toBe('修改建议 · 拒绝 · 本地 T · 你的原因：篇幅');
     expect(learningAuditMaterialName({ originLabel: '审阅 · 错别字', recordedAt: 'T', excerpt: [] }, instant)).toBe('审阅 · 错别字 · 本地 T');
     expect([learningAuditSelectLabel(name), learningAuditOpenLabel(name)]).toEqual([`选择：${name}`, `查看来源链：${name}`]);
+  });
+
+  it('tells apart, by an ordinal in page order, only the materials on a page whose names read alike (Issue #677)', () => {
+    const instant = (iso: string) => `本地 ${iso}`;
+    const material = (materialKey: string, excerpt: string[], recordedAt = 'T') => ({ materialKey, originLabel: '修改建议 · 拒绝', recordedAt, excerpt });
+    const names = learningAuditMaterialNames([
+      material('a', ['原文：甲', '你的原因：篇幅']),
+      material('b', ['原文：乙']),
+      material('c', ['原文：丙', '你的原因：篇幅']),
+      material('d', ['原文：丁', '你的原因：篇幅'], 'U'),
+      material('e', ['原文：戊', '你的原因：篇幅']),
+      material('f', ['原文：己', '你的原因：不符合体例']),
+      material('g', ['原文：庚', '你的原因：不符合体例']),
+    ], instant);
+    expect([...names]).toEqual([
+      ['a', '修改建议 · 拒绝 · 本地 T · 你的原因：篇幅（第 1 条）'],
+      ['b', '修改建议 · 拒绝 · 本地 T · 原文：乙'],
+      ['c', '修改建议 · 拒绝 · 本地 T · 你的原因：篇幅（第 2 条）'],
+      ['d', '修改建议 · 拒绝 · 本地 U · 你的原因：篇幅'],
+      ['e', '修改建议 · 拒绝 · 本地 T · 你的原因：篇幅（第 3 条）'],
+      // Each group that reads alike counts on its own.
+      ['f', '修改建议 · 拒绝 · 本地 T · 你的原因：不符合体例（第 1 条）'],
+      ['g', '修改建议 · 拒绝 · 本地 T · 你的原因：不符合体例（第 2 条）'],
+    ]);
+    expect(new Set(names.values()).size).toBe(7);
+    expect(learningAuditMaterialNames([], instant).size).toBe(0);
+  });
+
+  it('says a filter lists only the first of the house’s Books or Series, and a refusal not read again that the list may be out of date (Issue #677)', () => {
+    expect(learningAuditChoicesCut('book', 1200)).toBe('图书筛选只列出按书名排序的前 1200 本图书。');
+    expect(learningAuditChoicesCut('series', 500)).toBe('书系筛选只列出按名称排序的前 500 个书系。');
+    expect(learningRemediationRereadFailed('预览之后，这些学习材料或它们的准入决定有了变化；请重新查看影响，再决定。'))
+      .toBe('预览之后，这些学习材料或它们的准入决定有了变化；请重新查看影响，再决定。但学习回溯没能重新读取，列表可能还是之前的状态；请稍后重新打开。');
   });
 });

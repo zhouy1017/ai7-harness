@@ -9,6 +9,9 @@ import {
 import {
   MAX_FEEDBACK_HISTORY_ENTRIES,
   MAX_FEEDBACK_HISTORY_REASON_GRAPHEMES,
+  MAX_FRAME_BYTES,
+  MAX_LEARNING_AUDIT_BOOK_CHOICES,
+  MAX_LEARNING_AUDIT_SERIES_CHOICES,
   MAX_LEARNING_ELIGIBILITY_REASON_GRAPHEMES,
   type FeedbackHistoryBookProjection,
   type FeedbackHistoryEntryProjection,
@@ -18,6 +21,7 @@ import {
   type LearningMaterialKind,
   type LearningMaterialProjection,
   type LearningMaterialTarget,
+  type LearningAuditChoicesProjection,
   type LearningAuditStanding,
   type LearningRemediationItemInput,
   type LearningRemediationPreviewProjection,
@@ -25,6 +29,7 @@ import {
 import { graphemesOf } from '../shared/mark-anchor.js';
 import { canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
 import { graphemeCount } from './analysis/factual-review-contract.js';
+import { weighedPage } from './series.js';
 
 /**
  * 质量与学习 › 学习准入 (Issue #61, plan slice S26b; V2-UX-LEARN-001 to LEARN-012, ATTN-009, FDBK-013). A Learning Material is
@@ -580,6 +585,24 @@ export class LearningEligibilityLedger {
 }
 
 // ---- 学习回溯 (Issue #62, plan slice S27a; V2-UX-LAUD-001 to LAUD-012) --------------------------------------------------------
+
+/** The bytes 学习回溯's Book choices may take beside the page's half frame: a quarter of the frame (Issue #677). */
+export const LEARNING_AUDIT_BOOK_CHOICE_BYTES = MAX_FRAME_BYTES / 4;
+/** The bytes its Series choices may take: a sixteenth. */
+export const LEARNING_AUDIT_SERIES_CHOICE_BYTES = MAX_FRAME_BYTES / 16;
+
+/**
+ * 学习回溯's filter choices (LAUD-002; Issue #677) from the house's Books and Series in title order, read one beyond each
+ * count bound: each list cut at its bound or its share of the frame, whichever comes first, and saying whether it was cut.
+ */
+export function learningAuditChoices(
+  books: ReadonlyArray<{ readonly bookId: string; readonly title: string }>,
+  series: ReadonlyArray<{ readonly seriesId: string; readonly title: string }>,
+): LearningAuditChoicesProjection {
+  const bookChoices = weighedPage(books, MAX_LEARNING_AUDIT_BOOK_CHOICES, LEARNING_AUDIT_BOOK_CHOICE_BYTES);
+  const seriesChoices = weighedPage(series, MAX_LEARNING_AUDIT_SERIES_CHOICES, LEARNING_AUDIT_SERIES_CHOICE_BYTES);
+  return { books: bookChoices.page, booksTruncated: bookChoices.more, series: seriesChoices.page, seriesTruncated: seriesChoices.more };
+}
 
 /** Where a material stands for learning now: its state, and for one decided, the choice it holds. */
 export function learningAuditStanding(material: Pick<LearningMaterialProjection, 'state' | 'decision'>): LearningAuditStanding {

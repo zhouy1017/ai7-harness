@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 99 as const;
+export const SERVICE_PROTOCOL_VERSION = 102 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -6382,6 +6382,13 @@ export const LEARNING_AUDIT_STANDINGS: readonly LearningAuditStanding[] = ['pend
 
 /** The materials one answer of 学习回溯 carries, Book by Book; `更多学习材料…` reads the next. */
 export const MAX_LEARNING_AUDIT_PAGE = 40;
+/**
+ * The most Books 学习回溯's 图书 filter offers, by title (Issue #677); fewer when their titles fill the filter's share of the
+ * frame. A house with more says so in the filter.
+ */
+export const MAX_LEARNING_AUDIT_BOOK_CHOICES = 1_000;
+/** The most Series its 书系 filter offers, by name, on the same terms. */
+export const MAX_LEARNING_AUDIT_SERIES_CHOICES = 200;
 /** The longest search a 学习回溯 filter carries, in UTF-16 units. */
 export const MAX_LEARNING_AUDIT_QUERY = 100;
 /** The newest decisions a Learning Lineage Explorer shows of one chain; earlier ones are counted. */
@@ -6436,10 +6443,23 @@ export interface LearningAuditBookProjection {
   readonly materials: ReadonlyArray<LearningAuditMaterialProjection>;
 }
 
-/** 质量与学习 › 学习回溯: one page of the Books whose material matches, Book by Book (LAUD-001). A read. */
+/**
+ * 学习回溯's filter choices (LAUD-002; Issue #677): the house's Books and Series by title, answered with every page so opening
+ * the audit reads no Book list of its own. Each list holds at most its count bound and its share of the frame, and says
+ * whether the house holds more.
+ */
+export interface LearningAuditChoicesProjection {
+  readonly books: ReadonlyArray<{ readonly bookId: string; readonly title: string }>;
+  readonly booksTruncated: boolean;
+  readonly series: ReadonlyArray<{ readonly seriesId: string; readonly title: string }>;
+  readonly seriesTruncated: boolean;
+}
+
+/** 质量与学习 › 学习回溯: one page of the Books whose material matches, Book by Book (LAUD-001), and the filters' choices. A read. */
 export interface LearningAuditProjection {
   readonly books: ReadonlyArray<LearningAuditBookProjection>;
   readonly nextCursor: LearningMaterialCursor | null;
+  readonly choices: LearningAuditChoicesProjection;
 }
 
 /** One decision of a material's chain (LAUD-003, LAUD-005, LAUD-009): none rewritten, a later one superseding. */
