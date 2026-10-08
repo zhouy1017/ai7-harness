@@ -457,13 +457,18 @@ describe('exact procedure versions (Issue #66, plan slice S31; UI ADR 0013; REUS
       expect(refusal(() => prepare(session, target, [STYLE], WHOLE, { versionId: v1, documentSha256: latest.resolved!.documentSha256 }))).toBe('REVIEW_PROCEDURE_STALE');
       const waiting = prepare(session, target, [STYLE], WHOLE, pinOne);
       expect(waiting.procedure).toMatchObject({ versionId: v1, stopped: false });
+      // A second Book's prepared Run from version 1 too: the preview names the newest first.
+      const waitingSource = prepare(session, source, [STYLE], WHOLE, pinOne);
 
-      // 停用… of version 1 names the prepared Run as one prepared again, keeps the finished one, and says version 2 runs afterwards.
+      // 停用… of version 1 names the prepared Runs as ones prepared again, keeps the finished one, and says version 2 runs afterwards.
       const preview = store.previewCapturedProcedureStop(procedureId, v1);
       expect(preview).toMatchObject({ procedureId, title: '体例复核', versionId: v1, afterVersion: 2 });
       expect(preview.versions).toEqual([{
-        versionId: v1, version: 1, stateLabel: '已启用', runCount: 2, preparedCount: 1, activeCount: 0, active: [],
-        prepared: [{ bookId: target, bookTitle: 'L2 版本目标', reviewRunId: waiting.reviewRunId, label: '第 2 次', stateLabel: '计划已冻结 · 待授权' }],
+        versionId: v1, version: 1, stateLabel: '已启用', runCount: 3, preparedCount: 2, activeCount: 0, active: [],
+        prepared: [
+          { bookId: source, bookTitle: 'L2 版本来源', reviewRunId: waitingSource.reviewRunId, label: '第 2 次', stateLabel: '计划已冻结 · 待授权' },
+          { bookId: target, bookTitle: 'L2 版本目标', reviewRunId: waiting.reviewRunId, label: '第 2 次', stateLabel: '计划已冻结 · 待授权' },
+        ],
       }]);
       // A preview that moved — another Run prepared from version 1 since — is refused, and nothing is stopped.
       const newer = prepare(session, target, [STYLE], WHOLE, pinOne);
@@ -471,17 +476,19 @@ describe('exact procedure versions (Issue #66, plan slice S31; UI ADR 0013; REUS
       expect(store.inspectCapturedProcedure(procedureId, null).versions.find((version) => version.versionId === v1)!.state).toBe('enabled');
       // The superseded prepared Run can never be approved anyway: only the Book's newest is named.
       const again = store.previewCapturedProcedureStop(procedureId, v1);
-      expect(again.versions[0]!.prepared.map((run) => run.reviewRunId)).toEqual([newer.reviewRunId]);
+      expect(again.versions[0]!.prepared.map((run) => run.reviewRunId)).toEqual([newer.reviewRunId, waitingSource.reviewRunId]);
       expect(again.previewDigest).not.toBe(preview.previewDigest);
       const stopped = store.stopCapturedProcedure(procedureId, v1, again.previewDigest);
       expect(stopped.versions.map((version) => [version.version, version.state])).toEqual([[3, 'pending-validation'], [2, 'enabled'], [1, 'stopped']]);
       expect(stopped.latestEligibleVersionId).toBe(v2);
       expect(refusal(() => store.authorizeReviewRun(target, newer.reviewRunId, approvals(newer)))).toBe('REVIEW_PROCEDURE_STOPPED');
+      expect(refusal(() => store.authorizeReviewRun(source, waitingSource.reviewRunId, approvals(waitingSource)))).toBe('REVIEW_PROCEDURE_STOPPED');
       expect(store.inspectReviewWorkspace(target, ranOne.reviewRunId).run!.procedure).toMatchObject({ versionId: v1, stopped: true });
       // A stopped version is no longer offered, cannot be chosen, and is said when newer than the latest eligible.
       expect(store.inspectCapturedProcedureRun(target, procedureId).eligibleVersions.map((version) => version.version)).toEqual([2]);
       expect(refusal(() => store.inspectCapturedProcedureRun(target, procedureId, v1))).toBe('REVIEW_PROCEDURE_VERSION_INELIGIBLE');
       expect(refusal(() => store.previewCapturedProcedureStop(procedureId, v1))).toBe('CAPTURED_PROCEDURE_STOPPED');
+      expect(() => store.previewCapturedProcedureStop(procedureId, v1)).toThrowError('《体例复核》第 1 版已经停用。');
 
       // An approved Run that is still running goes on under its version: the preview says so and the 停用 does not move it.
       const pinTwo = { versionId: v2, documentSha256: latest.resolved!.documentSha256 };
@@ -513,6 +520,107 @@ describe('exact procedure versions (Issue #66, plan slice S31; UI ADR 0013; REUS
       }
     } finally {
       await close(session);
+    }
+  }, 300_000);
+});
+
+/**
+ * The one owner, holding its `gateAt`-th wait after it is armed until released, as a service stopped between two categories
+ * would leave it.
+ */
+class GatedOwner implements ReviewRunExecutionOwner {
+  readonly #inner: BaselineAnalysisExecutionOwner;
+  readonly #gateAt: number;
+  readonly reached: Promise<void>;
+  readonly #gate: Promise<void>;
+  #reach: () => void = () => {};
+  #release: () => void = () => {};
+  #waits = 0;
+  #armed = false;
+
+  constructor(inner: BaselineAnalysisExecutionOwner, gateAt: number) {
+    this.#inner = inner;
+    this.#gateAt = gateAt;
+    this.reached = new Promise((resolve) => { this.#reach = resolve; });
+    this.#gate = new Promise((resolve) => { this.#release = resolve; });
+  }
+
+  admitAndDispatch(runRecordId: string, ledger: BaselineAnalysisStore): void {
+    this.#inner.admitAndDispatch(runRecordId, ledger);
+  }
+
+  whenPlaceFree(): Promise<void> {
+    return this.#wait(() => this.#inner.whenPlaceFree());
+  }
+
+  whenDone(runRecordId: string): Promise<void> {
+    return this.#wait(() => this.#inner.whenDone(runRecordId));
+  }
+
+  arm(): void {
+    this.#armed = true;
+  }
+
+  async #wait(then: () => Promise<void>): Promise<void> {
+    if (this.#armed) this.#waits += 1;
+    if (this.#armed && this.#waits === this.#gateAt) {
+      this.#reach();
+      await this.#gate;
+    }
+    return then();
+  }
+
+  release(): void {
+    this.#release();
+  }
+}
+
+describe('a 停用 while an approved Run is left to continue (Issue #66, S31)', () => {
+  it('names the interrupted Run as going on under its version, and 继续审阅 finishes it after the 停用', async () => {
+    let gated = null as GatedOwner | null;
+    const first = await open((inner) => { gated = new GatedOwner(inner, 3); return gated; });
+    let source = '';
+    let procedureId = '';
+    let versionId = '';
+    let reviewRunId = '';
+    try {
+      const { store } = first;
+      source = await importBook(first, 'L2 中断');
+      const finished = await authorizeAndDrive(first, source, prepare(first, source, [STYLE, LITERARY]));
+      const saved = store.saveCapturedProcedure({ bookId: source, reviewRunId: finished.reviewRunId, categoryIds: [STYLE, LITERARY], scopeSlot: 'whole', title: '体例与表达', procedureId: null });
+      procedureId = saved.procedureId;
+      versionId = saved.versions[0]!.versionId;
+      store.enableCapturedProcedure(versionId, store.previewCapturedProcedureValidation(versionId).previewDigest);
+      const resolved = store.inspectCapturedProcedureRun(source, procedureId).resolved!;
+      const pinned = prepare(first, source, [STYLE, LITERARY], WHOLE, { versionId, documentSha256: resolved.documentSha256 });
+      reviewRunId = pinned.reviewRunId;
+      store.authorizeReviewRun(source, reviewRunId, approvals(pinned));
+      gated!.arm();
+      const loop = first.driver.drive(reviewRunId);
+      // The first category is on the manuscript; the service stops before the second starts.
+      await gated!.reached;
+      const stopped = first.driver.dispose();
+      gated!.release();
+      await stopped;
+      await loop;
+    } finally {
+      await close(first);
+    }
+    const second = await open();
+    try {
+      const { store } = second;
+      expect(store.inspectReviewWorkspace(source, reviewRunId).run).toMatchObject({ state: 'partial', canContinue: true });
+      const preview = store.previewCapturedProcedureStop(procedureId, versionId);
+      expect(preview.versions[0]).toMatchObject({ preparedCount: 0, activeCount: 1, runCount: 1 });
+      expect(preview.versions[0]!.active).toEqual([{ bookId: source, bookTitle: 'L2 中断', reviewRunId, label: '第 2 次', stateLabel: '部分完成 · 可继续审阅' }]);
+      store.stopCapturedProcedure(procedureId, versionId, preview.previewDigest);
+      // The 停用 does not move an approved Run: it continues under the version it was approved with, and keeps naming it.
+      await second.driver.continue(reviewRunId);
+      const done = store.inspectReviewWorkspace(source, reviewRunId).run!;
+      expect(done.state).toBe('settled');
+      expect(done.procedure).toMatchObject({ versionId, stopped: true });
+    } finally {
+      await close(second);
     }
   }, 300_000);
 });
