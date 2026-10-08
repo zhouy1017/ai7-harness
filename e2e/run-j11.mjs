@@ -551,6 +551,9 @@ const READ_EVALUATION = `(() => {
         return [item.dataset.itemId, item.querySelector('.evaluation-item-ai7')?.textContent ?? null, group instanceof HTMLElement ? !group.hidden : null,
           Array.from(item.querySelectorAll('[data-evaluation-field="adjustment-reason"]:checked'), (input) => input.value)];
       }),
+      // What each of AI7's scores rests on (EVAL-006), and the ranges a 初评 with gaps never read (Issue #429 review).
+      ai7Evidence: Array.from(record.querySelectorAll('.evaluation-item'), (item) => item.querySelector('.evaluation-item-ai7-evidence summary')?.textContent ?? null),
+      ai7Unread: record.querySelector('.evaluation-ai7-unread')?.textContent ?? null,
       suggested: Array.from(record.querySelectorAll('.evaluation-conclusion [data-conclusion]'), (choice) => choice.querySelector('.evaluation-ai7-suggested')?.textContent ?? null),
       ai7Conclusion: record.querySelector('.evaluation-ai7-conclusion')?.textContent ?? null,
       blocked: record.querySelector('.evaluation-recommend-blocked')?.hidden === false,
@@ -1784,6 +1787,8 @@ async function main() {
       JSON.stringify(draft.record.ai7Items.map(([itemId, line, offered, ticked]) => [itemId, line, offered, ticked.length])) ===
         JSON.stringify(AI7_ITEM_LINES.map(([itemId, , line]) => [itemId, line.slice(line.indexOf('：') + 1), false, 0])) &&
       draft.record.total === '总分 73 / 100 · 优秀' && draft.record.conclusions.every(([, checked]) => checked === false) &&
+      JSON.stringify(draft.record.ai7Evidence) === JSON.stringify(['AI7 的依据（9 条）', 'AI7 的依据（3 条）', 'AI7 的依据（8 条）', 'AI7 的依据（7 条）', null]) &&
+      draft.record.ai7Unread === null &&
       JSON.stringify(draft.record.suggested) === JSON.stringify([null, 'AI7 建议', null, null]) &&
       draft.record.ai7Conclusion === 'AI7 建议的结论：修改后再议（由你选定）' && JSON.stringify(draft.record.actions) === JSON.stringify(['保存评估', '定稿']) && draft.versions[0].startsWith('第 14 版 · AI7 初稿 · 修订版 r1 · 总分 73 / 100'),
     'initial-evaluation-draft-words', draft.record);

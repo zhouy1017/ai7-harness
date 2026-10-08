@@ -1810,10 +1810,12 @@ export class BaselineAnalysisExecutionOwner {
           : step.requestDigest(closedOutcomes);
         const gap = (code: Extract<CrossUnitOutcome, { state: 'gap' }>['code'], reason: string): CrossUnitOutcome =>
           ({ state: 'gap', code, reason, requestDigest });
-        if (live !== null && policy.providerProcessing.crossUnitReductionAllowed !== true) {
+        if (live !== null && (step !== null || policy.providerProcessing.crossUnitReductionAllowed !== true)) {
           // The reduction is a transmission the active Provider Processing policy does not name, so it
-          // never forms a request at all. The verified v5 document names it; a projection that does not
-          // is exactly the policy-bounded case this guard exists for.
+          // never forms a request at all. The verified v5 document names the baseline's reduction; a
+          // projection that does not is exactly the policy-bounded case this guard exists for. Another
+          // kind's book-level step is a transmission no policy names yet (Issue #429 review): under a live
+          // scope it is never sent under the baseline's term, whatever that term reads.
           crossUnit = gap('policy-bounded', named('跨单元归纳未派发：当前 Provider Processing 策略仅授权单元数内的传输'));
         } else if (ceilingState() === 'reached') {
           // The ceiling is evaluated before this dispatch exactly as before a unit's, so a Run that has

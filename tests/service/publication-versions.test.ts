@@ -4,7 +4,7 @@ import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { PUBLICATION_VERSION_SCHEMA_SQL } from '../../src/service/publication-versions.js';
-import { EDITORIAL_REVIEW_SCHEMA_VERSION, CLARIFICATION_SCHEMA_VERSION, INITIAL_EVALUATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { EDITORIAL_REVIEW_SCHEMA_VERSION, CLARIFICATION_SCHEMA_VERSION, INITIAL_EVALUATION_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import {
   PUBLICATION_ACTUALS_PROMPT_LABEL,
   PUBLICATION_ACTUALS_PROMPT_STATE,
@@ -34,6 +34,7 @@ import { CLARIFICATION_RELATIONS_DROP_ORDER } from '../support/clarifications.js
 import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from '../support/reimport-groups.js';
 import { MIGRATION_EMPTY_RELATIONS, PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
 import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation.js';
+import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for ⑥ 发稿 (Issue #414, plan slice S65): Milestone Versions with their
 // purposes, 设为发稿版本 and the 交付物 read, over the real `EditorialStore` on a temporary Agent Data
@@ -557,6 +558,7 @@ describe('⑥ 发稿: Milestone Versions and 设为发稿版本', () => {
         ${[...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...PUBLICATION_VERSION_RELATIONS_DROP_ORDER].map((relation) => `DROP TABLE ${relation};`).join('\n        ')}
         PRAGMA user_version = ${EDITORIAL_REVIEW_SCHEMA_VERSION};
         COMMIT;`);
+      downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
       expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EDITORIAL_REVIEW_SCHEMA_VERSION);
       expect(database.prepare("SELECT count(*) total FROM sqlite_schema WHERE name LIKE 'publication%' OR name LIKE 'public_release%'").get()).toEqual({ total: 0 });
       return relationTruth(database);
@@ -575,7 +577,8 @@ describe('⑥ 发稿: Milestone Versions and 设为发稿版本', () => {
       // held changed shape, and the only content that moved is the service lifetime every open appends.
       expect([...truthAfter.keys()]).toEqual([...truthBefore.keys(), ...PUBLICATION_VERSION_RELATIONS_DROP_ORDER, ...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER].sort());
       for (const relation of [...PUBLICATION_VERSION_RELATIONS_DROP_ORDER, ...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...MIGRATION_EMPTY_RELATIONS, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER]) expect(truthAfter.get(relation)?.content).toMatch(/^0:/);
-      expect([...truthBefore].filter(([name, before]) => truthAfter.get(name)!.sql !== before.sql).map(([name]) => name)).toEqual([]);
+      // Revision 59 rebuilds the three kind-coupled analysis relations for the evaluation kind (Issue #429), every row kept.
+      expect([...truthBefore].filter(([name, before]) => truthAfter.get(name)!.sql !== before.sql).map(([name]) => name)).toEqual(['analysis_result_set_revisions', 'analysis_result_sets', 'analysis_task_intents']);
       expect([...truthBefore].filter(([name, before]) => truthAfter.get(name)!.content !== before.content).map(([name]) => name)).toEqual(['service_lifetimes']);
       expect(database.prepare("SELECT count(*) total FROM sqlite_schema WHERE type = 'trigger' AND tbl_name IN ('publication_versions', 'public_release_permissions', 'publication_events')").get()).toEqual({ total: 6 });
       expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);

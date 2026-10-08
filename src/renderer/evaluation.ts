@@ -33,6 +33,9 @@ import {
   evaluationAi7LatestLine,
   evaluationAi7RecordLine,
   evaluationAi7TaskLine,
+  evaluationAi7EvidenceLine,
+  evaluationAi7EvidenceSummary,
+  evaluationAi7UnreadLine,
   EVALUATION_AI7_PENDING,
   EVALUATION_COMMENT,
   EVALUATION_CONCLUSION_LEGEND,
@@ -160,6 +163,8 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       section.dataset['initialRevision'] = latest.revisionId;
       section.dataset['initialCurrent'] = String(latest.current);
       section.append(el('p', 'evaluation-initial-latest', evaluationAi7LatestLine(page.profile, latest)));
+      const unread = evaluationAi7UnreadLine(latest);
+      if (unread !== null) section.append(el('p', 'field-note evaluation-initial-unread', unread));
       const items = el('ul', 'evaluation-initial-items');
       for (const item of page.profile.items) {
         const ai7 = latest.items.find((entry) => entry.itemId === item.itemId);
@@ -392,6 +397,9 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const initial = record.initial;
     node.dataset['initial'] = String(initial !== null);
     node.append(el('p', 'field-note evaluation-ai7', initial === null ? EVALUATION_AI7_PENDING : evaluationAi7RecordLine(initial)));
+    // A version begun from a 初评 that completed with gaps says which ranges AI7's draft never read.
+    const unread = initial === null ? null : evaluationAi7UnreadLine(initial);
+    if (unread !== null) node.append(el('p', 'field-note evaluation-ai7-unread', unread));
     const total = el('p', 'evaluation-total', evaluationTotalLine(profile, record.total));
     total.setAttribute('aria-live', 'polite');
     node.append(total);
@@ -445,6 +453,19 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         line.dataset['sufficiency'] = ai7.sufficiency;
         beside.push(line);
         if (ai7.comment !== null) beside.push(el('p', 'field-note evaluation-item-ai7-comment', `AI7 评语：${ai7.comment}`));
+        // What AI7's score rests on (EVAL-006): each note it made toward the item, with the range it read it in.
+        if (ai7.evidence.length > 0) {
+          const evidence = el('details', 'evaluation-item-ai7-evidence');
+          const list = el('ul');
+          for (const entry of ai7.evidence) {
+            const line = el('li', undefined, evaluationAi7EvidenceLine(entry));
+            line.dataset['unitOrdinal'] = String(entry.unitOrdinal);
+            line.dataset['blockIds'] = entry.blockIds.join(' ');
+            list.append(line);
+          }
+          evidence.append(el('summary', undefined, evaluationAi7EvidenceSummary(ai7.evidence.length)), list);
+          beside.push(evidence);
+        }
         beside.push(adjustmentNode(record, item.itemId, content.adjustment ?? null, readOnly));
       }
       set.append(scoreRow, ...beside, reasonField, field(EVALUATION_COMMENT, textarea(content.comment ?? '', 'comment')));

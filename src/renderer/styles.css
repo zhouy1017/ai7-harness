@@ -621,6 +621,8 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .evaluation-initial-lists { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .2rem .8rem; }
 .evaluation-initial-lists dd { margin: 0; }
 .evaluation-item-ai7 { font-weight: 600; color: #2c463b; }
+.evaluation-item-ai7-evidence { min-width: 0; color: #3f4a44; overflow-wrap: anywhere; }
+.evaluation-item-ai7-evidence ul { display: grid; gap: .2rem; margin: .3rem 0 0; padding-left: 1.2rem; }
 .evaluation-adjustment { display: grid; gap: .4rem; min-width: 0; margin: 0; padding: .5rem .7rem; border: 1px dashed #b9b2a2; border-radius: 8px; }
 .evaluation-adjustment[hidden] { display: none; }
 .evaluation-adjustment-reasons { display: flex; flex-wrap: wrap; gap: .4rem .9rem; }

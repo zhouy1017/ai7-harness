@@ -11,8 +11,9 @@ import {
   MAX_STORE_VERSIONS_LISTED,
 } from '../../src/service/data-version.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { SERIES_KNOWLEDGE_SCHEMA_VERSION, INITIAL_EVALUATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { SERIES_KNOWLEDGE_SCHEMA_VERSION, INITIAL_EVALUATION_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for 数据版本 (Issue #433, plan slice S85a; V2-UX-DSTO-016; ADR 0079 §1) over the real store:
 // the software version and the Data Version apart, one record of the versions that opened the store and none for an
@@ -238,6 +239,7 @@ describe('数据版本 over the real store', () => {
     const plant = new DatabaseSync(databasePath());
     try {
       plant.exec(`DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; PRAGMA user_version = ${SERIES_KNOWLEDGE_SCHEMA_VERSION};`);
+      downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
     } finally {
       plant.close();
     }

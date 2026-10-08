@@ -12,6 +12,9 @@ import {
   evaluationAi7RecordLine,
   evaluationAi7SufficiencyLine,
   evaluationAi7TaskLine,
+  evaluationAi7EvidenceLine,
+  evaluationAi7EvidenceSummary,
+  evaluationAi7UnreadLine,
   EVALUATION_LEDE,
   EVALUATION_RECOMMEND_BLOCKED,
   evaluationBandLine,
@@ -148,10 +151,19 @@ describe('AI7 初评 words (Issue #429, S81b1; EVAL-001, EVAL-005 to EVAL-007)',
     const latest = {
       revisionId: 'r', ordinal: 1, revisionLabel: 'r1', createdAt: '2026-10-07T00:00:00.000Z', items: [], strengths: [], weaknesses: [], nextStep: null,
       suggestedConclusion: null, complete: true, current: true, total: { score: 73, fullMarks: 100, notRated: 0, unscored: 0 },
+      unitsTotal: 8, unreadUnits: [],
     };
     expect(evaluationAi7LatestLine(PROFILE, latest)).toBe('第 1 次初评 · 读的是修订版 r1 · 总分 73 / 100 · 优秀');
     expect(evaluationAi7LatestLine(PROFILE, { ...latest, current: false })).toBe('第 1 次初评 · 读的是修订版 r1 · 总分 73 / 100 · 优秀（稿件此后改过：重新初评后才能从初评开始）');
     expect(evaluationAi7LatestLine(PROFILE, { ...latest, complete: false })).toBe('第 1 次初评 · 读的是修订版 r1 · 全书综合没有给出分数');
     expect(EVALUATION_AI7_PREPARE).toEqual({ 'evaluation-first': '准备 AI7 初评', 'evaluation-again': '重新初评' });
+  });
+
+  it('shows AI7\'s evidence range by range, and says which ranges a 初评 that completed with gaps never read', () => {
+    expect(evaluationAi7EvidenceSummary(3)).toBe('AI7 的依据（3 条）');
+    expect(evaluationAi7EvidenceLine({ unitOrdinal: 2, note: '冲突在第二章升级' })).toBe('阅读范围 2：冲突在第二章升级');
+    expect(evaluationAi7UnreadLine({ unitsTotal: 8, unreadUnits: [] })).toBeNull();
+    expect(evaluationAi7UnreadLine({ unitsTotal: 8, unreadUnits: [3, 5] }))
+      .toBe('AI7 这次没有读到 2 / 8 个阅读范围（第 3、5 个）：这些范围里的内容没有进入它的分数和评语。');
   });
 });

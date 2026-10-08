@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
   FACTUAL_REVIEW_SCHEMA_VERSION,
-  CLARIFICATION_SCHEMA_VERSION, INITIAL_EVALUATION_SCHEMA_VERSION,
+  CLARIFICATION_SCHEMA_VERSION, INITIAL_EVALUATION_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_23_SQL,
 } from '../../src/service/task-authorization.js';
 import { MAX_WINDOW_BLOCKS } from '../../src/shared/protocol.js';
 import {
@@ -14,7 +14,7 @@ import {
   composeManuscriptDocx,
   type ComposedManuscriptRequest,
 } from '../support/composed-fixture.js';
-import { KIND_COUPLED_ANALYSIS_RELATIONS, downgradeKindCoupledRelationsToRevision23 } from '../support/analysis-ledger-revisions.js';
+import { KIND_COUPLED_ANALYSIS_RELATIONS, downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 import { REVIEW_RUN_RELATIONS_DROP_ORDER } from '../support/review-categories.js';
 import { PUBLICATION_VERSION_RELATIONS_DROP_ORDER } from '../support/publication-versions.js';
 import { PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER } from '../support/proposal-conflicts.js';
@@ -167,7 +167,7 @@ function commitPreparedReplacement(store: EditorialStore, searchId: string): {
 function downgradeToRevision20(databasePath: string): void {
   const database = new DatabaseSync(databasePath);
   try {
-    downgradeKindCoupledRelationsToRevision23(database);
+    downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_23_SQL);
     database.exec(`BEGIN IMMEDIATE;
       ${[...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER].map((relation) => `DROP TABLE ${relation};`).join('\n      ')}
       ${PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join('\n      ')}

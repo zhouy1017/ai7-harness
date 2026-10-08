@@ -4,7 +4,7 @@ import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { KEEP_CURRENT_REASON, PROPOSAL_CONFLICT_SCHEMA_SQL } from '../../src/service/proposal-conflicts.js';
-import { CLARIFICATION_SCHEMA_VERSION, INITIAL_EVALUATION_SCHEMA_VERSION, PUBLICATION_VERSION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { CLARIFICATION_SCHEMA_VERSION, INITIAL_EVALUATION_SCHEMA_VERSION, PUBLICATION_VERSION_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { conflictUnits, initialResolutions, type ConflictUnitResolution } from '../../src/shared/conflict-units.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type { ManuscriptWindowProjection, ProposalConflictProjection } from '../../src/shared/protocol.js';
@@ -23,6 +23,7 @@ import { CLARIFICATION_RELATIONS_DROP_ORDER } from '../support/clarifications.js
 import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from '../support/reimport-groups.js';
 import { MIGRATION_EMPTY_RELATIONS, PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
 import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation.js';
+import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for 稿件冲突 of a single 修改建议 (Issue #57, plan slice S22; ADR 0085). It
 // drives the real `EditorialStore` on a temporary Agent Data Root. The manuscript is composed from the one
@@ -675,6 +676,7 @@ describe('稿件冲突 of a single 修改建议 (ADR 0085)', () => {
         ${PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join('\n        ')}
         PRAGMA user_version = ${PUBLICATION_VERSION_SCHEMA_VERSION};
         COMMIT;`);
+      downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
       expect(database.prepare("SELECT count(*) total FROM sqlite_schema WHERE name LIKE 'proposal_conflict%'").get()).toEqual({ total: 0 });
       return relationTruth(database);
     });
@@ -689,7 +691,8 @@ describe('稿件冲突 of a single 修改建议 (ADR 0085)', () => {
       const truthAfter = relationTruth(database);
       expect([...truthAfter.keys()]).toEqual([...truthBefore.keys(), ...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER].sort());
       for (const relation of [...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...MIGRATION_EMPTY_RELATIONS, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER]) expect(truthAfter.get(relation)?.content).toMatch(/^0:/);
-      expect([...truthBefore].filter(([name, before]) => truthAfter.get(name)!.sql !== before.sql).map(([name]) => name)).toEqual([]);
+      // Revision 59 rebuilds the three kind-coupled analysis relations for the evaluation kind (Issue #429), every row kept.
+      expect([...truthBefore].filter(([name, before]) => truthAfter.get(name)!.sql !== before.sql).map(([name]) => name)).toEqual(['analysis_result_set_revisions', 'analysis_result_sets', 'analysis_task_intents']);
       expect([...truthBefore].filter(([name, before]) => truthAfter.get(name)!.content !== before.content).map(([name]) => name)).toEqual(['service_lifetimes']);
       expect(database.prepare(`SELECT count(*) total FROM sqlite_schema WHERE type = 'trigger' AND tbl_name IN (${LEDGER.map((table) => `'${table}'`).join(', ')})`).get())
         .toEqual({ total: 6 });

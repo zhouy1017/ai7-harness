@@ -1388,6 +1388,9 @@ async function run(): Promise<void> {
     }
     // Starts the governor had not admitted when AI7 closed were blocked with why by the reconciliation: nothing starts by
     // itself after a restart (ADR 0034), and the editor starts them again when they choose.
+    // AI7 初评 has no 续行 (Issue #429 review, P1): one left under way ends 已中断 with its outcome, and one left waiting for a
+    // place is blocked with why, so 评估 offers 重新初评 instead of reading a Run under way for good.
+    store.reconcileStoppedInitialEvaluationRuns();
     // A Review Run's categories take a place of the one owner's governor one after another.
     reviewRuns = new ReviewRunDriver(store.reviewRunDriveSteps, analysisExecution);
     // Connectivity Wait (Issue #502). The reading is the device's own unless J-04's control names a file; the

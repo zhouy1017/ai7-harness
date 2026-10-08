@@ -422,10 +422,16 @@ function sameContent(a: EvaluationContent, b: EvaluationContent): boolean {
   return canonicalJson(a) === canonicalJson(b);
 }
 
-/** Content of an entry written before S81b1, read with every item's adjustment `null`: it had none to carry. */
-function contentOfEntry(content: Record<string, unknown>): EvaluationContent {
+/**
+ * An entry's content as its schema wrote it (Issue #429 review): a `/2` entry names every item's adjustment, `null` included,
+ * and one that leaves the key out is not one AI7 wrote; a `/1` entry, written before S81b1, names none, and each reads as
+ * having none to carry.
+ */
+function contentOfEntry(schema: typeof ENTRY_SCHEMA | typeof ENTRY_SCHEMA_V1, content: Record<string, unknown>): EvaluationContent {
+  requireEvaluation(Array.isArray(content.items) && content.items.every((item) => isRecord(item) &&
+    Object.hasOwn(item, 'adjustment') === (schema === ENTRY_SCHEMA)), 'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
   const read = content as unknown as EvaluationContent;
-  return { ...read, items: read.items.map((item) => ({ ...item, adjustment: item.adjustment ?? null })) };
+  return schema === ENTRY_SCHEMA ? read : { ...read, items: read.items.map((item) => ({ ...item, adjustment: null })) };
 }
 
 function totalOfScores(profile: Pick<Profile, 'items'>, items: ReadonlyArray<{ readonly itemId: string; readonly score: number | null }>): EvaluationTotalProjection {
@@ -498,7 +504,7 @@ export class EvaluationRecords {
       latest = {
         ordinal: count,
         kind: entry.kind as StoredEntry['kind'],
-        content: contentOfEntry(entry.content as Record<string, unknown>),
+        content: contentOfEntry(entry.schema as typeof ENTRY_SCHEMA | typeof ENTRY_SCHEMA_V1, entry.content as Record<string, unknown>),
         recordedAt: String(row.recorded_at),
         sha256: String(row.sha256),
       };

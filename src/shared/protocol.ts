@@ -5291,6 +5291,13 @@ export interface EvaluationTotalProjection {
  * AI7's 初评 as one version of the record keeps it (EVAL-001, EVAL-005 to EVAL-007): what the version began from, snapshotted
  * when it began, so AI7's score stands beside the editor's for as long as the version does.
  */
+/** One thing AI7 noted toward an item while it read one range (EVAL-006): its words, and the blocks it cited there. */
+export interface EvaluationInitialEvidenceProjection {
+  readonly unitOrdinal: number;
+  readonly note: string;
+  readonly blockIds: ReadonlyArray<string>;
+}
+
 export interface EvaluationInitialDraftProjection {
   /** The Result Set Revision of AI7's 初评, its number, and the manuscript revision it read. */
   readonly revisionId: string;
@@ -5304,7 +5311,12 @@ export interface EvaluationInitialDraftProjection {
     readonly sufficiency: InitialEvaluationSufficiency;
     readonly citedBlocks: number;
     readonly unitsCited: number;
+    /** What AI7 noted toward the item, range by range: the evidence its score rests on (EVAL-006). */
+    readonly evidence: ReadonlyArray<EvaluationInitialEvidenceProjection>;
   }>;
+  /** How many ranges the 初评 meant to read, and the ones it did not — a 初评 that completed with gaps says which. */
+  readonly unitsTotal: number;
+  readonly unreadUnits: ReadonlyArray<number>;
   readonly total: EvaluationTotalProjection;
   readonly strengths: ReadonlyArray<string>;
   readonly weaknesses: ReadonlyArray<string>;
@@ -5745,6 +5757,11 @@ export interface EvaluationCalibrationProjection {
     readonly initialScoresConnected: boolean;
     readonly threshold: number;
     readonly enabled: boolean;
+    /**
+     * Whether the house offset calibration applies has been computed (Issue #429 review): not yet in any build. `active` is
+     * never true without it, so the page never says 「已生效」 while AI7's starting scores are left as they are.
+     */
+    readonly offsetComputed: boolean;
     readonly active: boolean;
   };
   readonly prediction: {

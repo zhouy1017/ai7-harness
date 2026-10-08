@@ -211,6 +211,24 @@ export function evaluationAi7ItemLine(item: Pick<EvaluationInitialDraftProjectio
   return `AI7 初评 ${score} · ${evaluationAi7SufficiencyLine(item)}`;
 }
 
+/** AI7's evidence for one item (EVAL-006): how many notes, and each as the range it came from and AI7's words. */
+export function evaluationAi7EvidenceSummary(count: number): string {
+  return `AI7 的依据（${count} 条）`;
+}
+
+export function evaluationAi7EvidenceLine(entry: Pick<EvaluationInitialDraftProjection['items'][number]['evidence'][number], 'unitOrdinal' | 'note'>): string {
+  return `阅读范围 ${entry.unitOrdinal}：${entry.note}`;
+}
+
+/**
+ * The ranges a 初评 did not read, when it completed with gaps; `null` when it read them all. A version begun from it says so,
+ * since nothing in those ranges reached AI7's scores or comments.
+ */
+export function evaluationAi7UnreadLine(draft: Pick<EvaluationInitialDraftProjection, 'unitsTotal' | 'unreadUnits'>): string | null {
+  if (draft.unreadUnits.length === 0) return null;
+  return `AI7 这次没有读到 ${draft.unreadUnits.length} / ${draft.unitsTotal} 个阅读范围（第 ${draft.unreadUnits.join('、')} 个）：这些范围里的内容没有进入它的分数和评语。`;
+}
+
 /** What a version begun from AI7's 初评 says it began from. */
 export function evaluationAi7RecordLine(initial: Pick<EvaluationInitialDraftProjection, 'ordinal' | 'revisionLabel'>): string {
   return `这一版从 AI7 第 ${initial.ordinal} 次初评开始（读的是修订版 ${initial.revisionLabel}）：AI7 的分数列在每一项旁边，记录保存的是你的评分。`;

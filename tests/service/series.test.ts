@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SERIES_SCHEMA_SQL, SERIES_TRIGGER_SQL, SeriesError, SeriesLedger, initializeSeriesSchema, seriesMembershipImpact } from '../../src/service/series.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { EVALUATION_CALIBRATION_SCHEMA_VERSION, INITIAL_EVALUATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { EVALUATION_CALIBRATION_SCHEMA_VERSION, INITIAL_EVALUATION_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import {
   MAX_FRAME_BYTES,
   MAX_BOOK_SERIES_MEMBERSHIPS,
@@ -15,6 +15,7 @@ import {
   type SeriesImpactGroupProjection,
 } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for 书系 › 成员与共享范围 (Issue #63, plan slice S28a; V2-UX-SER-001 to SER-012; ADR 0002,
 // ADR 0036) over the real store: 新建书系, the four-part Series Membership Impact Preview, 加入书系 and 移出书系 against the
@@ -342,6 +343,8 @@ describe('书系 over the real store', () => {
     try {
       plant.exec(`DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_conflicts; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; PRAGMA user_version = ${EVALUATION_CALIBRATION_SCHEMA_VERSION};`);
       before = schemaOf(plant);
+      // Taken before the kind-coupled relations go back to revision 58: revision 59 rebuilds them to these exact shapes again.
+      downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
     } finally {
       plant.close();
     }

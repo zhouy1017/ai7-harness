@@ -36,11 +36,19 @@ import {
 import { reduceInitialEvaluation, type InitialEvaluationUnitOutcome } from './initial-evaluation-reducers.js';
 
 /**
+ * Why 初评 cannot be prepared or started under a live scope (Issue #429 review, P2): its book-level synthesis is a transmission
+ * the active Provider Processing policy (v5) does not name — v5 names the baseline's cross-unit reduction, and no reading has
+ * made that term cover another kind's book-level turn. The provider-free scope is unaffected.
+ */
+export const INITIAL_EVALUATION_LIVE_UNAVAILABLE =
+  'AI7 初评暂不可用：当前的模型处理策略没有写明 AI7 初评的全书综合可以发送给模型，在这个运行范围下不能准备或开始初评。' as const;
+
+/**
  * AI7's 初评 as an analysis kind (Issue #429, plan slice S81b1): `evaluation`, read under `ai7.evaluation/1`, on the same real
  * path as every other kind — Task Intent, input checkpoint, Coverage Manifest, Plan Envelope, standard Run Authorization, Run,
  * Result Set Revision — through the same ledger, execution owner, Egress Gate and adapter. Its one book-level step is the
  * synthesis that scores the items, run as the baseline's cross-unit reduction is run: one admitted message, one turn, one
- * attempt, under the same Provider Processing gate.
+ * attempt — and, unlike that reduction, never under a live scope, since no Provider Processing policy names it yet.
  *
  * The kind takes the house Evaluation Profile it scores under; the profile is frozen into the contract, so the contract digest
  * and the schema digest every revision pins are that profile's own. It declares no assurance sample: AI7's scores are a draft

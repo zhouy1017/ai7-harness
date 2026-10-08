@@ -1480,17 +1480,11 @@ function validateRevision23AnalysisLedgerSchema(db: DatabaseSync): void {
 
 /**
  * The analysis relations as revisions 24 to 58 carried them, validated exactly — shapes, triggers, row digests and references —
- * before revision 59's forward copy rebuilds the three kind-coupled relations for the evaluation kind. The three may also read
- * exactly as the terminal shapes already, which admit every row the revision-24 shapes do: the rebuild copies them byte for
- * byte all the same, so either exact shape lands on the terminal one.
+ * before revision 59's forward copy rebuilds the three kind-coupled relations for the evaluation kind. Only those exact shapes
+ * are read as revision 58: a store at 24 to 58 whose relations already read as revision 59's is not one AI7 wrote.
  */
 function validateRevision58AnalysisLedgerSchema(db: DatabaseSync): void {
-  try {
-    requireExactObjects(db, 'table', { ...ANALYSIS_LEDGER_SCHEMA_SQL, ...ANALYSIS_LEDGER_REVISION_58_SQL }, '分析任务账本表（修订版 58）');
-  } catch (error) {
-    if (!(error instanceof TaskAuthorizationError)) throw error;
-    requireExactObjects(db, 'table', ANALYSIS_LEDGER_SCHEMA_SQL, '分析任务账本表（修订版 58）');
-  }
+  requireExactObjects(db, 'table', { ...ANALYSIS_LEDGER_SCHEMA_SQL, ...ANALYSIS_LEDGER_REVISION_58_SQL }, '分析任务账本表（修订版 58）');
   requireExactObjects(db, 'trigger', ANALYSIS_LEDGER_TRIGGER_SQL, '分析任务账本触发器（修订版 58）');
   validateCanonicalRowDigests(db, ANALYSIS_LEDGER_TABLES);
   requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0,

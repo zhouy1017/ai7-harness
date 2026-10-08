@@ -9,7 +9,7 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
   INITIAL_EVALUATION_SCHEMA_VERSION,
   PRODUCTION_DOCUMENT_SCHEMA_VERSION,
-  REIMPORT_GROUP_SCHEMA_VERSION,
+  REIMPORT_GROUP_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL,
 } from '../../src/service/task-authorization.js';
 import {
   DEFAULT_MANUSCRIPT_EXPORT_OPTIONS,
@@ -20,6 +20,7 @@ import {
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx, sourceSpanText, type SourceSpan } from '../support/composed-fixture.js';
 import { MIGRATION_EMPTY_RELATIONS, PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for 交付 · 生产文档 (Issue #415, plan slices S66a and S66b; V2-UX-DELIV-001 to DELIV-004,
 // WORK-013, MILE-014, EXP-024) over the real `EditorialStore` on a temporary Agent Data Root. The manuscript and the draft a document starts
@@ -361,6 +362,7 @@ describe('Production Documents', () => {
         DROP TABLE manuscripts_v37;
         PRAGMA user_version = ${REIMPORT_GROUP_SCHEMA_VERSION};
         COMMIT;`);
+      downgradeKindCoupledRelations(planted, ANALYSIS_LEDGER_REVISION_58_SQL);
       planted.exec('PRAGMA legacy_alter_table = OFF; PRAGMA foreign_keys = ON;');
       rows = planted.prepare('SELECT rowid, * FROM manuscripts ORDER BY rowid').all();
       expect(rows).toHaveLength(1);
@@ -616,6 +618,7 @@ describe('交付 of a Production Document (S66b)', () => {
         DROP TABLE production_document_deliveries;
         PRAGMA user_version = ${PRODUCTION_DOCUMENT_SCHEMA_VERSION};
         COMMIT;`);
+      downgradeKindCoupledRelations(planted, ANALYSIS_LEDGER_REVISION_58_SQL);
       planted.exec('PRAGMA foreign_keys = ON');
     } finally {
       planted.close();

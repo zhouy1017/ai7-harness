@@ -8,9 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/canonical.js';
 import { DATABASE_EXPORT_TRIGGER_SQL, copyStore, databasePackageSources, writeDatabasePackage, type DatabasePackageBounds } from '../../src/service/database-exports.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { INITIAL_EVALUATION_SCHEMA_VERSION, STORE_VERSION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { INITIAL_EVALUATION_SCHEMA_VERSION, STORE_VERSION_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 const payloadWalk = vi.hoisted(() => ({ root: null as string | null, pause: null as (() => Promise<void>) | null }));
 vi.mock('node:fs/promises', async (importOriginal) => {
@@ -371,6 +372,7 @@ describe('导出数据库 over the real store', () => {
         const plant = new DatabaseSync(join(other.dataRoot, 'store', 'ai7.sqlite'));
         try {
           plant.exec(`DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; PRAGMA user_version = ${STORE_VERSION_SCHEMA_VERSION};`);
+          downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
         } finally {
           plant.close();
         }

@@ -8,9 +8,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/canonical.js';
 import { DATA_VERSION_TRIGGER_SQL, DataVersionLedger, PRE_UPGRADE_BACKUP_NAME, type ClassifiedSchemaRevision, type DataVersionUpgrade } from '../../src/service/data-version.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { INITIAL_EVALUATION_SCHEMA_VERSION, DATABASE_REPLACEMENT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { INITIAL_EVALUATION_SCHEMA_VERSION, DATABASE_REPLACEMENT_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { backUpBeforeUpgrade, preUpgradeBackupFileName, writePendingUpgrade } from '../../src/service/upgrade-backup.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for 升级前备份 (Issue #433, plan slice S85b; V2-UX-DSTO-016; ADR 0079 §1.1, §1.3, §1.4) over the
 // real store. Nothing is frozen before the first packaged release, so no revision is breaking yet: the suite opens a store with
@@ -30,14 +31,15 @@ afterEach(async () => {
   await roots.dispose();
 });
 
-const CHANGE = '导入记录同时记下合并';
+/** The terminal revision's change as the classification names it: revision 59, each 评估 version's AI7 初评 (Issue #429). */
+const CHANGE = '评估记录同时记下所依据的 AI7 初评';
 const BREAKING: ReadonlyArray<ClassifiedSchemaRevision> = [{ revision: INITIAL_EVALUATION_SCHEMA_VERSION, class: 'breaking', change: CHANGE }];
-/** Revisions 57 and 58 both breaking: Data Version 1 at revision 56, 2 at 57 and 3 at 58. */
+/** Revisions 57 and 59 both breaking: Data Version 1 at revision 56, 2 at 57 and 58, and 3 at 59. */
 const BOTH: ReadonlyArray<ClassifiedSchemaRevision> = [
   { revision: DATABASE_REPLACEMENT_SCHEMA_VERSION, class: 'breaking', change: '替换记录' },
   { revision: INITIAL_EVALUATION_SCHEMA_VERSION, class: 'breaking', change: CHANGE },
 ];
-/** Revisions 56, 57 and 58 all breaking: Data Version 1 at revision 55, 2 at 56, 3 at 57 and 4 at 58. */
+/** Revisions 56, 57 and 59 all breaking: Data Version 1 at revision 55, 2 at 56, 3 at 57 and 58, and 4 at 59. */
 const THREE: ReadonlyArray<ClassifiedSchemaRevision> = [
   { revision: DATABASE_REPLACEMENT_SCHEMA_VERSION - 1, class: 'breaking', change: '定时备份' },
   ...BOTH,
@@ -105,6 +107,7 @@ async function storeBeforeUpgrade(): Promise<void> {
   const plant = new DatabaseSync(storePath());
   try {
     plant.exec(`DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; PRAGMA user_version = ${DATABASE_REPLACEMENT_SCHEMA_VERSION};`);
+    downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
   } finally {
     plant.close();
   }
@@ -393,7 +396,7 @@ describe('升级前备份 over the real store', () => {
   }, 180_000);
 
   it('records an upgrade another software noted and never recorded before its own, and still makes the backup its own needs (Issue #433 review)', async () => {
-    // Revisions 57 and 58 both breaking: 0.0.10 brought the data from revision 56 to 57, backed up, and stopped before it
+    // Revisions 57 and 59 both breaking: 0.0.10 brought the data from revision 56 to 57, backed up, and stopped before it
     // recorded that upgrade.
     await storeBeforeUpgrade();
     await writePendingUpgrade(roots.dataRoot, THEIRS, THEIR_TARGET);
@@ -494,8 +497,8 @@ describe('升级前备份 over the real store', () => {
   it('never takes the note of an earlier build of the same version for its own, though it reached the same Data Version (Issue #433 review)', async () => {
     const software = await packageVersion();
     await storeBeforeUpgrade();
-    // Revision 57 breaking and 58 additive: an earlier build of this same version brought the data from Data Version 1 at
-    // revision 56 to 2 at 57, and stopped before recording it. This build goes on to 58, still Data Version 2.
+    // Revision 57 breaking and 59 additive: an earlier build of this same version brought the data from Data Version 1 at
+    // revision 56 to 2 at 57, and stopped before recording it. This build goes on to 59, still Data Version 2.
     const classes: ReadonlyArray<ClassifiedSchemaRevision> = [
       { revision: DATABASE_REPLACEMENT_SCHEMA_VERSION, class: 'breaking', change: '替换记录' },
       { revision: INITIAL_EVALUATION_SCHEMA_VERSION, class: 'additive' },
@@ -536,7 +539,7 @@ describe('升级前备份 over the real store', () => {
   it("records another software's upgrade only as far as its migration took the data (Issue #433 review)", async () => {
     const software = await packageVersion();
     await storeBeforeUpgrade();
-    // Under THREE, 0.0.10 set out to bring the data from Data Version 1 at revision 55 to 4 at 58, and stopped at revision 57,
+    // Under THREE, 0.0.10 set out to bring the data from Data Version 1 at revision 55 to 4 at 59, and stopped at revision 57,
     // at Data Version 3, before recording anything.
     await writePendingUpgrade(roots.dataRoot, madeUpgrade(1, DATABASE_REPLACEMENT_SCHEMA_VERSION - 2, '0.0.9', ['定时备份', '替换记录', CHANGE], '09-00-00'),
       { softwareVersion: '0.0.10', dataVersion: 4, schemaRevision: INITIAL_EVALUATION_SCHEMA_VERSION });

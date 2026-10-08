@@ -1,18 +1,19 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { RECONCILED_INTERRUPTED_DETAIL, RECONCILED_QUEUED_DETAIL } from '../../src/service/analysis/baseline-analysis-store.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
+import { INITIAL_EVALUATION_LIVE_UNAVAILABLE } from '../../src/service/evaluation/initial-evaluation-kind.js';
 import { runReportUsageReconciles } from '../../src/service/analysis/run-report.js';
-import { EVALUATION_INITIAL_DRAFT_TRIGGER_SQL } from '../../src/service/evaluation-records.js';
+import { EVALUATION_INITIAL_DRAFT_TRIGGER_SQL, EVALUATION_RECORD_TRIGGER_SQL } from '../../src/service/evaluation-records.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
   ANALYSIS_LEDGER_REVISION_58_SQL,
   ANALYSIS_LEDGER_SCHEMA_SQL,
-  ANALYSIS_LEDGER_TRIGGER_SQL,
   DATABASE_MERGE_SCHEMA_VERSION,
   INITIAL_EVALUATION_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
@@ -24,7 +25,7 @@ import {
   type EvaluationContent,
   type LaunchPolicyProjection,
 } from '../../src/shared/protocol.js';
-import { KIND_COUPLED_ANALYSIS_RELATIONS } from '../support/analysis-ledger-revisions.js';
+import { KIND_COUPLED_ANALYSIS_RELATIONS, downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
@@ -170,6 +171,11 @@ describe('AI7 初评 over the real store on exact sample1', () => {
       expect(after.initial.latest).toMatchObject({ revisionId: revision.revisionId, ordinal: 1, revisionLabel: 'r1', complete: true, current: true,
         total: { score: 73, fullMarks: 100, notRated: 0, unscored: 0 }, suggestedConclusion: 'revise' });
       expect(after.start).toEqual({ allowed: true, kind: 'first', fromInitial: { revisionId: revision.revisionId, ordinal: 1 } });
+      // What each score rests on travels with it (EVAL-006): AI7's notes range by range, with the blocks they cite; every range read.
+      expect(after.initial.latest!.items.map((item) => item.evidence)).toEqual(evaluation.items.map((item) =>
+        item.observations.map((observation) => ({ unitOrdinal: observation.unitOrdinal, note: observation.note, blockIds: observation.blockIds }))));
+      expect(after.initial.latest!.items.map((item) => item.evidence.length > 0)).toEqual([true, true, true, true, false]);
+      expect(after.initial.latest).toMatchObject({ unitsTotal: 8, unreadUnits: [] });
     });
   }, 300_000);
 
@@ -186,6 +192,9 @@ describe('AI7 初评 over the real store on exact sample1', () => {
       expect(draft.content.strengths.length).toBe(2);
       expect(draft.initial).toMatchObject({ ordinal: 1, revisionLabel: 'r1', suggestedConclusion: 'revise', complete: true });
       expect(draft.initial!.items.map((item) => item.score)).toEqual(AI7_SCORES);
+      // The snapshot keeps AI7's evidence for each item, so the version shows what each of AI7's scores rests on.
+      expect(draft.initial!.items.map((item) => item.evidence)).toEqual(book.store.inspectEvaluation(book.bookId, null).initial.latest!.items.map((item) => item.evidence));
+      expect(draft.initial!.unreadUnits).toEqual([]);
       expect(book.store.inspectEvaluation(book.bookId, null).records.map((record) => record.state)).toEqual(['draft']);
 
       const save = (expectedEntries: number, content: EvaluationContent, finalize = false) =>
@@ -291,9 +300,97 @@ describe('AI7 初评 over the real store on exact sample1', () => {
       expect(revision.reducerClosure.label).toBe('归约/综合闭合：已闭合 · 全书综合未给出分数');
       const workspace = book.store.inspectEvaluation(book.bookId, null);
       expect(workspace.initial.latest).toMatchObject({ complete: false, current: true, total: { score: 0, fullMarks: 100, unscored: 5 } });
+      // The ranges it never read are named.
+      expect(workspace.initial.latest).toMatchObject({ unitsTotal: 8, unreadUnits: [2, 3, 4, 5, 6, 7, 8] });
       expect(workspace.start).toEqual({ allowed: true, kind: 'first', fromInitial: null });
       expect(await refusal(() => book.store.startEvaluation(book.bookId, true)))
         .toBe('EVALUATION_INITIAL_UNAVAILABLE:最近一次 AI7 初评没有给出全部评分项的分数；请重新初评。');
+    });
+  }, 300_000);
+
+  it('settles a 初评 a stopped AI7 left under way or waiting, so 评估 offers 重新初评 and polls nothing', async () => {
+    let bookId = '';
+    await withBook(async (book) => {
+      bookId = book.bookId;
+      await runInitialEvaluation(book);
+    });
+    // The states the renderer polls while the 初评 reads as under way (evaluation.ts).
+    const polled = ['waiting', 'admitted', 'executing', 'cancelling', 'pausing', 'queued'];
+    for (const planted of ['authorized', 'admitted', 'executing'] as const) {
+      const first = await openStore();
+      let runRecordId: string;
+      try {
+        let progress = first.createInitialEvaluationPreparationWork(bookId, launchPolicy);
+        while (!progress.done) progress = first.advanceInitialEvaluationPreparationWork(progress.workId!);
+        const prepared = progress.projection!;
+        expect(prepared.taskIntent!.mode).toBe('evaluation-again');
+        // AI7 closes with the Run authorized and not admitted, or admitted, or reading: nothing executes it any more.
+        runRecordId = first.authorizeInitialEvaluation(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
+        if (planted !== 'authorized') first.initialEvaluationLedger.recordRunState(runRecordId, 'admitted', { detail: 'planted' });
+        if (planted === 'executing') first.initialEvaluationLedger.recordRunState(runRecordId, 'executing', { detail: 'planted' });
+        expect(first.initialEvaluationLedger.currentRunState(runRecordId)).toBe(planted);
+      } finally {
+        first.close();
+      }
+      const second = await openStore();
+      try {
+        // Unreconciled, the 初评 reads as under way for good: no 重新初评, and a state the renderer polls.
+        const stuck = second.inspectEvaluation(bookId, null).initial;
+        expect(stuck.prepare.allowed).toBe(false);
+        expect(polled).toContain(stuck.task!.state);
+
+        expect(second.reconcileStoppedInitialEvaluationRuns()).toEqual({ settled: 1 });
+        const settled = second.inspectInitialEvaluation(bookId);
+        if (planted === 'authorized') {
+          // It never began: blocked before dispatch with why, no outcome.
+          expect(settled.state).toBe('authorized-blocked');
+          expect(settled.run).toMatchObject({ runRecordId, state: 'blocked-before-dispatch', blockedReasons: [RECONCILED_QUEUED_DETAIL] });
+          expect(settled.taskOutcome).toBeNull();
+        } else {
+          // This kind cannot resume: 已中断, with its outcome, no revision — and never 可续行.
+          expect(settled.state).toBe('interrupted');
+          expect(settled.run).toMatchObject({ runRecordId, state: 'interrupted' });
+          expect(settled.taskOutcome).toMatchObject({ classification: 'interrupted', resultSetRevisionId: null, safeNextAction: RECONCILED_INTERRUPTED_DETAIL });
+        }
+        // The latest settled 初评 is still the one AI7 drafted from, and 重新初评 is offered at once.
+        const initial = second.inspectEvaluation(bookId, null).initial;
+        expect(initial.prepare).toEqual({ allowed: true, mode: 'evaluation-again' });
+        expect(polled).not.toContain(initial.task!.state);
+        expect(initial.latest).toMatchObject({ complete: true, current: true });
+        // A second reconciliation settles nothing more.
+        expect(second.reconcileStoppedInitialEvaluationRuns()).toEqual({ settled: 0 });
+        second.markCleanShutdown();
+      } finally {
+        second.close();
+      }
+    }
+  }, 300_000);
+
+  it('offers no 初评 under a live scope, whose policy does not name the book-level synthesis, and prepares or starts none there', async () => {
+    await withBook(async (book) => {
+      const live = book.store.initialEvaluationLedger.launch;
+      book.store.initialEvaluationLedger.bindLaunch({
+        operationalScope: 'developer-live',
+        live: {
+          route: 'opencode-go',
+          model: 'deepseek-v4-flash',
+          endpoint: 'https://example.invalid/v1',
+          credentialSlot: 'opencode-go',
+          credentialReference: randomUUID(),
+          runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 100_000 },
+        },
+      });
+      try {
+        expect(book.store.inspectEvaluation(book.bookId, null).initial.prepare).toEqual({ allowed: false, reason: INITIAL_EVALUATION_LIVE_UNAVAILABLE });
+        expect(await refusal(() => book.store.createInitialEvaluationPreparationWork(book.bookId, launchPolicy)))
+          .toBe(`EVALUATION_INITIAL_UNAVAILABLE:${INITIAL_EVALUATION_LIVE_UNAVAILABLE}`);
+        expect(await refusal(() => book.store.authorizeInitialEvaluation(book.bookId, randomUUID(), 'a'.repeat(64))))
+          .toBe(`EVALUATION_INITIAL_UNAVAILABLE:${INITIAL_EVALUATION_LIVE_UNAVAILABLE}`);
+      } finally {
+        book.store.initialEvaluationLedger.bindLaunch(live);
+      }
+      // The provider-free scope is unaffected.
+      expect(book.store.inspectEvaluation(book.bookId, null).initial.prepare).toEqual({ allowed: true, mode: 'evaluation-first' });
     });
   }, 300_000);
 
@@ -310,22 +407,8 @@ describe('AI7 初评 over the real store on exact sample1', () => {
     let before: string;
     try {
       // Revision 58 exactly: the three relations as revision 24 left them, and no relation of revision 59.
-      plant.exec('PRAGMA foreign_keys = OFF');
-      plant.exec('BEGIN IMMEDIATE');
-      plant.exec('DROP TABLE evaluation_initial_drafts');
-      for (const table of KIND_COUPLED_ANALYSIS_RELATIONS) {
-        const columns = (plant.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((column) => column.name).join(', ');
-        plant.exec(`CREATE TEMP TABLE downgrade_${table} AS SELECT rowid AS r, * FROM ${table}`);
-        plant.exec(`DROP TABLE ${table}`);
-        plant.exec(ANALYSIS_LEDGER_REVISION_58_SQL[table]);
-        plant.exec(`INSERT INTO ${table}(${columns}) SELECT ${columns} FROM temp.downgrade_${table} ORDER BY r`);
-        plant.exec(`DROP TABLE temp.downgrade_${table}`);
-        plant.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_update`]!);
-        plant.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_delete`]!);
-      }
-      plant.exec(`PRAGMA user_version = ${DATABASE_MERGE_SCHEMA_VERSION}`);
-      plant.exec('COMMIT');
-      plant.exec('PRAGMA foreign_keys = ON');
+      plant.exec(`DROP TABLE evaluation_initial_drafts; PRAGMA user_version = ${DATABASE_MERGE_SCHEMA_VERSION};`);
+      downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
       before = rows(plant);
       // At revision 58 the evaluation kind is refused by the CHECK itself.
       expect(() => plant.exec(`INSERT INTO analysis_result_sets(result_set_id, book_id, kind, created_at, canonical_json, sha256)
@@ -350,5 +433,65 @@ describe('AI7 初评 over the real store on exact sample1', () => {
     } finally {
       after.close();
     }
+  }, 300_000);
+
+  it('refuses an entry of the adjustments\' schema whose item leaves its adjustment out', async () => {
+    let bookId = '';
+    let recordId = '';
+    await withBook(async (book) => {
+      bookId = book.bookId;
+      await runInitialEvaluation(book);
+      recordId = book.store.startEvaluation(book.bookId, true).record!.recordId;
+    });
+    // Rewritten whole, its digest with it: only the schema's own rule is left to notice.
+    let original = '';
+    const rewrite = (change: (json: string) => string): void => {
+      const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try {
+        const row = database.prepare('SELECT entry_id, canonical_json FROM evaluation_record_entries WHERE record_id = ?').get(recordId) as { entry_id: string; canonical_json: string };
+        if (original === '') original = row.canonical_json;
+        const json = change(original);
+        database.exec('DROP TRIGGER evaluation_record_entries_no_update');
+        database.prepare('UPDATE evaluation_record_entries SET canonical_json = ?, sha256 = ? WHERE entry_id = ?')
+          .run(json, createHash('sha256').update(json).digest('hex'), row.entry_id);
+        database.exec(EVALUATION_RECORD_TRIGGER_SQL.evaluation_record_entries_no_update!);
+      } finally {
+        database.close();
+      }
+    };
+    const read = async (): Promise<string> => {
+      const reopened = await openStore();
+      try {
+        const answer = await refusal(() => reopened.inspectEvaluation(bookId, recordId));
+        if (answer === 'no-error') {
+          // An entry written before S81b1 names no adjustment, and each item reads as having none.
+          expect(reopened.inspectEvaluation(bookId, recordId).record!.content.items.map((item) => item.adjustment)).toEqual([null, null, null, null, null]);
+        }
+        reopened.markCleanShutdown();
+        return answer;
+      } finally {
+        reopened.close();
+      }
+    };
+    // As schema 1 wrote it — no item names an adjustment — it reads.
+    rewrite((json) => json.replaceAll('"adjustment":null,', '').replace('"schema":"ai7.evaluation-entry/2"', '"schema":"ai7.evaluation-entry/1"'));
+    expect(original).toContain('"schema":"ai7.evaluation-entry/2"');
+    expect(await read()).toBe('no-error');
+    // Schema 2 with one item's adjustment left out is refused.
+    rewrite((json) => json.replace('"adjustment":null,', ''));
+    expect(await read()).toBe('EVALUATION_RECORD_INVALID:评估记录已损坏。');
+  }, 300_000);
+
+  it('refuses a store stamped revision 58 whose kind-coupled relations already read as revision 59\'s', async () => {
+    await withBook(async () => undefined);
+    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    const plant = new DatabaseSync(path);
+    try {
+      // Only the version moves back: no store AI7 wrote at revision 58 held these shapes, and none is read as one.
+      plant.exec(`DROP TABLE evaluation_initial_drafts; PRAGMA user_version = ${DATABASE_MERGE_SCHEMA_VERSION};`);
+    } finally {
+      plant.close();
+    }
+    await expect(openStore()).rejects.toThrowError(/分析任务账本表（修订版 58） analysis_task_intents 结构不兼容/u);
   }, 300_000);
 });

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/canonical.js';
 import { PRODUCTION_DOCUMENT_WORKFLOW_TRIGGER_SQL } from '../../src/service/production-document-workflow.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION, INITIAL_EVALUATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION, INITIAL_EVALUATION_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import {
   DEFAULT_MANUSCRIPT_EXPORT_OPTIONS,
   MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS,
@@ -17,6 +17,7 @@ import {
 } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx, type SourceSpan } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for a Production Document's Deliverable Workflow (Issue #415, plan slice S66c;
 // V2-UX-WORK-001 to 009, WORK-011) over the real `EditorialStore` on a temporary Agent Data Root. The manuscript and the draft
@@ -341,6 +342,7 @@ describe('the Deliverable Workflow of a Production Document (Issue #415, S66c)',
         DROP TABLE production_document_workflow_instances;
         PRAGMA user_version = ${BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION};
         COMMIT;`);
+      downgradeKindCoupledRelations(planted, ANALYSIS_LEDGER_REVISION_58_SQL);
       planted.exec('PRAGMA foreign_keys = ON');
     } finally {
       planted.close();

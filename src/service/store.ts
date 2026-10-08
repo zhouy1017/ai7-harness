@@ -237,7 +237,7 @@ import type {
   ReviewWorkspaceProjection,
 } from '../shared/protocol.js';
 import { INITIAL_EVALUATION_MODE_GOALS } from '../shared/protocol.js';
-import { initialEvaluationKindDefinition } from './evaluation/initial-evaluation-kind.js';
+import { INITIAL_EVALUATION_LIVE_UNAVAILABLE, initialEvaluationKindDefinition } from './evaluation/initial-evaluation-kind.js';
 import {
   AnalysisError,
   BaselineAnalysisStore,
@@ -416,7 +416,13 @@ import {
   type StoredMembershipChange,
   type StoredSeries,
 } from './series.js';
-import { CALIBRATION_MIN_ADJUSTMENTS, PREDICTION_MIN_BOOKS_WITH_ACTUALS, calibrationActive, predictionAvailable } from '../shared/evaluation-calibration.js';
+import {
+  CALIBRATION_MIN_ADJUSTMENTS,
+  CALIBRATION_OFFSET_COMPUTED,
+  PREDICTION_MIN_BOOKS_WITH_ACTUALS,
+  calibrationActive,
+  predictionAvailable,
+} from '../shared/evaluation-calibration.js';
 import {
   MAX_FEEDBACK_HISTORY_ENTRIES,
   MAX_SERIES_CANDIDATE_QUERY_CHARACTERS,
@@ -4765,6 +4771,16 @@ export class EditorialStore {
   }
 
   /**
+   * Startup reconciliation of the evaluation kind's ledger (Issue #429 review, P1): a 初评 left admitted or executing has nothing
+   * running it and cannot resume, so it ends 已中断 with its outcome; a start the governor had not admitted is blocked before
+   * dispatch with why. Either way 评估 offers 重新初评 at once instead of reading a Run under way for good.
+   */
+  reconcileStoppedInitialEvaluationRuns(): { settled: number } {
+    this.#assertAvailable();
+    return { settled: this.#analysisCall(() => this.#initialEvaluation.reconcileStoppedRuns()).settled };
+  }
+
+  /**
    * What the drawer reads of the Task's Run when nothing executes it — paused, left 可续行, or left under way when AI7
    * closed: what it kept; for a stopped one, why 续行 cannot go on as authorized, if not; and — read by the execution
    * owner — whether this launch can still carry it under the binding it persisted.
@@ -6122,6 +6138,7 @@ export class EditorialStore {
    * goal is the kind's own fixed text. The preparation is a cooperative job; its plan opens in the Task Drawer.
    */
   createInitialEvaluationPreparationWork(bookId: string, launchPolicy: LaunchPolicyProjection): AnalysisPreparationResult<InitialEvaluationProjection> {
+    this.#requireInitialEvaluationScope();
     const current = this.inspectInitialEvaluation(bookId);
     const mode = current.resultSetRevision === null ? 'evaluation-first' : 'evaluation-again';
     const result = this.#analysisCall(() => this.#initialEvaluation.prepare({
@@ -6147,8 +6164,18 @@ export class EditorialStore {
 
   /** 开始任务 in the drawer's bar: the standard-direct Run Authorization and the Run; the caller hands the Run to the owner. */
   authorizeInitialEvaluation(bookId: string, taskIntentId: string, planEnvelopeDigest: string): { dispatchRunRecordId: string | null } {
+    this.#requireInitialEvaluationScope();
     const authorized = this.#analysisCall(() => this.#initialEvaluation.authorize(bookId, taskIntentId, planEnvelopeDigest));
     return { dispatchRunRecordId: authorized.dispatchRunRecordId };
+  }
+
+  /**
+   * 初评 runs only where its book-level synthesis may be sent (Issue #429 review, P2): under a live scope the active policy does
+   * not name it, so nothing is prepared or started there, and 评估 says why. The provider-free scope is unaffected.
+   */
+  #requireInitialEvaluationScope(): void {
+    this.#assertAvailable();
+    if (this.#initialEvaluation.launch.live !== null) throw new StoreError('EVALUATION_INITIAL_UNAVAILABLE', INITIAL_EVALUATION_LIVE_UNAVAILABLE);
   }
 
   /** AI7's latest settled 初评 as 评估 snapshots it; `null` while there is none, or the Book cannot be evaluated by AI7 at all. */
@@ -6165,6 +6192,8 @@ export class EditorialStore {
     const evaluation = revision.evaluation;
     const items = evaluation.items.map((item) => ({
       itemId: item.itemId, score: item.score, comment: item.comment, sufficiency: item.sufficiency, citedBlocks: item.citedBlocks, unitsCited: item.unitsCited,
+      // AI7's evidence for the item (EVAL-006), kept with the draft a version begins from so the record shows what each score rests on.
+      evidence: item.observations.map((observation) => ({ unitOrdinal: observation.unitOrdinal, note: observation.note, blockIds: [...observation.blockIds] })),
     }));
     return {
       draft: {
@@ -6178,6 +6207,9 @@ export class EditorialStore {
         nextStep: evaluation.nextStep,
         suggestedConclusion: evaluation.suggestedConclusion,
         complete: evaluation.synthesis.state === 'closed' && items.every((item) => item.score !== null),
+        // A 初评 that completed with gaps scored without these ranges; every version begun from it says so.
+        unitsTotal: revision.coverage.unitsTotal,
+        unreadUnits: [...new Set(revision.gaps.map((gap) => gap.unitOrdinal))].sort((left, right) => left - right),
       },
       manuscriptRevisionId: revision.manuscriptPin.revisionId,
       current: revision.freshness.state === 'current',
@@ -6200,7 +6232,9 @@ export class EditorialStore {
     const runState = projection.run?.state ?? null;
     return {
       task: projection.taskIntent === null ? null : { taskIntentId: projection.taskIntent.taskIntentId, state: projection.state, label: analysisTaskStateLabel(projection) },
-      prepare: runIsActive(runState)
+      prepare: this.#initialEvaluation.launch.live !== null
+        ? { allowed: false, reason: INITIAL_EVALUATION_LIVE_UNAVAILABLE }
+        : runIsActive(runState)
         ? { allowed: false, reason: activeRunReason(runState) }
         : { allowed: true, mode: projection.resultSetRevision === null ? 'evaluation-first' : 'evaluation-again' },
     };
@@ -11248,7 +11282,8 @@ export class EditorialStore {
         initialScoresConnected: true,
         threshold: CALIBRATION_MIN_ADJUSTMENTS,
         enabled: preferences.calibrationEnabled,
-        active: calibrationActive(adjustments, preferences.calibrationEnabled),
+        offsetComputed: CALIBRATION_OFFSET_COMPUTED,
+        active: calibrationActive(adjustments, preferences.calibrationEnabled, CALIBRATION_OFFSET_COMPUTED),
       },
       prediction: {
         booksWithActuals,
