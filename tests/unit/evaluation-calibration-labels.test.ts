@@ -15,6 +15,7 @@ import {
   MAX_FIRST_PRINT,
   MAX_PRICE_FEN,
   PREDICTION_MIN_BOOKS_WITH_ACTUALS,
+  CALIBRATION_OFFSET_COMPUTED,
   calibrationActive,
   formatPriceFen,
   parseFirstPrint,
@@ -40,11 +41,14 @@ describe('评估校准与预测 thresholds', () => {
   });
 
   it('applies calibration only at ten adjustments, and never while the editor has turned it off', () => {
-    expect(calibrationActive(0, true)).toBe(false);
-    expect(calibrationActive(9, true)).toBe(false);
-    expect(calibrationActive(10, true)).toBe(true);
-    expect(calibrationActive(10, false)).toBe(false);
-    expect(calibrationActive(40, false)).toBe(false);
+    expect(calibrationActive(0, true, true)).toBe(false);
+    expect(calibrationActive(9, true, true)).toBe(false);
+    expect(calibrationActive(10, true, true)).toBe(true);
+    expect(calibrationActive(10, false, true)).toBe(false);
+    expect(calibrationActive(40, false, true)).toBe(false);
+    // No offset, no calibration: however many adjustments, nothing reads as applied (Issue #429 review).
+    expect(calibrationActive(10, true, false)).toBe(false);
+    expect(calibrationActive(40, true, CALIBRATION_OFFSET_COMPUTED)).toBe(false);
   });
 });
 
@@ -96,6 +100,9 @@ describe('评估校准与预测 words', () => {
     expect(calibrationProgressLine({ adjustments: 0, threshold: 10, enabled: true, active: false })).toBe('调分记录 0 / 10 本 · 满 10 本后生效');
     expect(calibrationProgressLine({ adjustments: 3, threshold: 10, enabled: false, active: false })).toBe('调分记录 3 / 10 本 · 已关闭');
     expect(calibrationProgressLine({ adjustments: 12, threshold: 10, enabled: true, active: true })).toBe('调分记录 12 / 10 本 · 已生效');
+    expect(calibrationProgressLine({ adjustments: 10, threshold: 10, enabled: true, active: false }))
+      .toBe('调分记录 10 / 10 本 · 已满数，但校准还没有计算：AI7 的初评分数暂不调整');
+    expect(calibrationProgressLine({ adjustments: 9, threshold: 10, enabled: true, active: false })).toBe('调分记录 9 / 10 本 · 满 10 本后生效');
   });
 
   it('states what the prediction switch waits for until it may be turned on, then whether it is on', () => {

@@ -75,6 +75,7 @@ describe('every Journey uses the one shared cleanup', () => {
         /deleteCredential\(/u,
         /credential-cleanup-metadata/u,
         /user_version\s*===\s*\d/u,
+        /schemaRevision\s*===\s*\d/u,
       ]) {
         expect(source, `${file} ${copy.source}`).not.toMatch(copy);
       }

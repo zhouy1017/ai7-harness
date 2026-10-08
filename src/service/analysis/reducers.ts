@@ -127,6 +127,8 @@ export type CrossUnitOutcome =
       readonly findings: ReadonlyArray<CrossUnitFinding>;
       readonly requestDigest: string;
       readonly usage: { readonly inputTokens: number; readonly outputTokens: number } | null;
+      /** The parsed answer of a kind whose book-level step is not the baseline reduction (Issue #429, S81b1). */
+      readonly result?: unknown;
     }
   | { readonly state: 'gap'; readonly code: CrossUnitGapCode; readonly reason: string; readonly requestDigest: string }
   | { readonly state: 'not-run'; readonly reason: string };

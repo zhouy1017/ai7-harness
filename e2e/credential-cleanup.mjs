@@ -13,11 +13,12 @@ import { journeyCheckFailure } from './controller.mjs';
 // Journey and a constant label, as a runner's own checks are (`tests/unit/journey-check-markers.test.ts`).
 
 /**
- * The terminal schema revision the service stamps on the Agent Data Root store, which the metadata fallback reads.
+ * The terminal schema revision the service stamps on the Agent Data Root store, which the metadata fallback reads, and
+ * which J-12 reads in the database packages it makes.
  * `tests/unit/credential-cleanup.test.ts` holds it equal to the highest `*_SCHEMA_VERSION` in
  * `src/service/task-authorization.ts`, so a schema slice moves it in the same pull request or a unit test fails.
  */
-export const CREDENTIAL_CLEANUP_SCHEMA_VERSION = 58;
+export const CREDENTIAL_CLEANUP_SCHEMA_VERSION = 60;
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

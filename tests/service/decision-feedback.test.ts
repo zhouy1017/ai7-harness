@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DECISION_FEEDBACK_TRIGGER_SQL } from '../../src/service/decision-feedback.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { ANALYSIS_FEEDBACK_SCHEMA_VERSION, DATABASE_MERGE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { ANALYSIS_FEEDBACK_SCHEMA_VERSION, DIALOGUE_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type {
   CreateEditorialMarkInput,
@@ -14,6 +14,7 @@ import type {
 } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx, type ComposedManuscriptRequest } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for the Contextual Feedback Prompt of a Proposal Decision (Issue #61, plan slice S26a;
 // V2-UX-FDBK-001 to FDBK-007, PDEC-008 to PDEC-010, MARK-005) over the real store. The manuscript is composed from the one
@@ -175,7 +176,7 @@ describe('the reason after a Proposal Decision', () => {
     }
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_MERGE_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DIALOGUE_SCHEMA_VERSION);
       expect((database.prepare('SELECT count(*) count FROM proposal_decision_feedback').get() as { count: number }).count).toBe(68);
       expect((database.prepare("SELECT group_concat(reason, '|') reasons FROM (SELECT reason FROM proposal_decision_reasons ORDER BY reason)").get() as { reasons: string }).reasons)
         .toBe('更贴近作者的语气|证据不足');
@@ -206,7 +207,8 @@ describe('the reason after a Proposal Decision', () => {
     }
     const plant = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      plant.exec(`DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_conflicts; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; DROP TABLE learning_eligibility_decisions; DROP TABLE proposal_decision_feedback; PRAGMA user_version = ${ANALYSIS_FEEDBACK_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_conflicts; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; DROP TABLE learning_eligibility_decisions; DROP TABLE proposal_decision_feedback; PRAGMA user_version = ${ANALYSIS_FEEDBACK_SCHEMA_VERSION};`);
+      downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
     } finally {
       plant.close();
     }
@@ -218,7 +220,7 @@ describe('the reason after a Proposal Decision', () => {
     }
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_MERGE_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DIALOGUE_SCHEMA_VERSION);
       expect((database.prepare('SELECT count(*) count FROM proposal_decision_feedback').get() as { count: number }).count).toBe(0);
     } finally {
       database.close();

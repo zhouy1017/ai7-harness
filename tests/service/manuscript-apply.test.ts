@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { EDITORIAL_MARK_SCHEMA_VERSION, CLARIFICATION_SCHEMA_VERSION, DATABASE_MERGE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { ANALYSIS_LEDGER_REVISION_23_SQL, EDITORIAL_MARK_SCHEMA_VERSION, CLARIFICATION_SCHEMA_VERSION, DIALOGUE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type { ManuscriptWindowProjection } from '../../src/shared/protocol.js';
 import {
@@ -11,7 +11,7 @@ import {
   composeManuscriptDocx,
   type ComposedManuscriptRequest,
 } from '../support/composed-fixture.js';
-import { downgradeKindCoupledRelationsToRevision23 } from '../support/analysis-ledger-revisions.js';
+import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 import { REVIEW_RUN_RELATIONS_DROP_ORDER } from '../support/review-categories.js';
 import { PUBLICATION_VERSION_RELATIONS_DROP_ORDER } from '../support/publication-versions.js';
 import { PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER } from '../support/proposal-conflicts.js';
@@ -486,7 +486,7 @@ describe('AI7 Apply on a Change Suggestion', () => {
     try {
       // A revision-22 store also carried the three kind-coupled analysis relations as revision 20 left
       // them, and none of revision 24's Review Run relations (Issue #417).
-      downgradeKindCoupledRelationsToRevision23(downgrade);
+      downgradeKindCoupledRelations(downgrade, ANALYSIS_LEDGER_REVISION_23_SQL);
       downgrade.exec(`BEGIN IMMEDIATE;
         ${[...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...PUBLICATION_VERSION_RELATIONS_DROP_ORDER, ...REVIEW_RUN_RELATIONS_DROP_ORDER, ...EFFECT_RELATIONS].map((relation) => `DROP TABLE ${relation};`).join('\n')}
         PRAGMA user_version = ${EDITORIAL_MARK_SCHEMA_VERSION};
@@ -509,7 +509,7 @@ describe('AI7 Apply on a Change Suggestion', () => {
     try {
       // Through revisions 23 to 25 to the terminal 26: the widened text, every row of the five relations exactly
       // as revision 22 held it, and the Effect relations beside them.
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_MERGE_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DIALOGUE_SCHEMA_VERSION);
       expect(markText(after)).toEqual({ sql: EDITORIAL_MARK_SCHEMA_SQL.editorial_marks });
       expect(rowsOf(after)).toEqual(planted);
       expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
@@ -590,7 +590,7 @@ describe('AI7 Apply on a Change Suggestion', () => {
       // A revision-22 store carried the three kind-coupled analysis relations as revision 20 left them;
       // revision 24 (Issue #417) validates exactly that before it rebuilds them, and adds its Review Run
       // relations, which a store that old never held.
-      downgradeKindCoupledRelationsToRevision23(downgrade);
+      downgradeKindCoupledRelations(downgrade, ANALYSIS_LEDGER_REVISION_23_SQL);
       downgrade.exec(`BEGIN IMMEDIATE;
         ${[...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER, ...PUBLICATION_VERSION_RELATIONS_DROP_ORDER, ...REVIEW_RUN_RELATIONS_DROP_ORDER, ...EFFECT_RELATIONS].map((relation) => `DROP TABLE ${relation};`).join('\n')}
         PRAGMA user_version = ${EDITORIAL_MARK_SCHEMA_VERSION};
@@ -610,7 +610,7 @@ describe('AI7 Apply on a Change Suggestion', () => {
     }
     const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_MERGE_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DIALOGUE_SCHEMA_VERSION);
       expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     } finally {
       after.close();

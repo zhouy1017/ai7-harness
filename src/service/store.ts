@@ -3,7 +3,7 @@ import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSyn
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
-import { J03_TASK_GOAL, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
+import { J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
   InspectSeriesKnowledgeReviewInput,
   ServiceOperationMap,
@@ -11,6 +11,11 @@ import type {
   TaskPlanProjection,
   GlobalAttentionProjection,
   BookTasksProjection,
+  AskAboutSelectionInput,
+  ConvertDialogueToChangeSuggestionInput,
+  DialogueAttemptInput,
+  DialogueConversionProjection,
+  DialogueProjection,
   ApproveManuscriptExportInput,
   InspectManuscriptExportReceiptInput,
   StageManuscriptExportInput,
@@ -227,6 +232,8 @@ import type {
   TaskPlanDefaultRuleProjection,
   FactualReviewGoal,
   FactualReviewProjection,
+  EvaluationInitialProjection,
+  InitialEvaluationProjection,
   ReviewCategoryGoal,
   ReviewCategoryProjection,
   ReviewCategoryTaskRequest,
@@ -234,9 +241,13 @@ import type {
   ReviewRunScopeRequest,
   ReviewWorkspaceProjection,
 } from '../shared/protocol.js';
+import { INITIAL_EVALUATION_MODE_GOALS } from '../shared/protocol.js';
+import { INITIAL_EVALUATION_LIVE_UNAVAILABLE, initialEvaluationKindDefinition } from './evaluation/initial-evaluation-kind.js';
 import {
   AnalysisError,
   BaselineAnalysisStore,
+  activeRunReason,
+  runIsActive,
   type AnalysisPreparationResult,
   type BaselineAnalysisPreparationResult,
   type BaselineAnalysisRouteFacts,
@@ -288,6 +299,8 @@ import { ALWAYS_ONLINE, type TaskPlanConnectivity } from './connectivity.js';
 import { RecentCache } from './recent-cache.js';
 import {
   baselineAnalysisPlan,
+  initialEvaluationPlan,
+  analysisTaskStateLabel,
   defaultRuleBindingRows,
   fixedTaskPlan,
   noDefaultRule,
@@ -367,7 +380,15 @@ import { MaintenanceCaseError, MaintenanceCases, initializeMaintenanceCaseSchema
 import { BookPeople, BookPeopleError, initializeBookPeopleSchema } from './book-people.js';
 import { ReviewGuidelineError, ReviewGuidelineLedger, initializeReviewGuidelineSchema, readGuidelineFile } from './review-guidelines.js';
 import { LibraryMaterialError, LibraryMaterialLedger, initializeLibraryMaterialSchema, libraryMaterialTitle } from './library-materials.js';
-import { EvaluationError, EvaluationRecords, initializeEvaluationRecordSchema } from './evaluation-records.js';
+import {
+  BUILTIN_EVALUATION_PROFILE,
+  EvaluationError,
+  EvaluationRecords,
+  evaluationProfileDigest,
+  initializeEvaluationInitialDraftSchema,
+  initializeEvaluationRecordSchema,
+  type InitialEvaluationFacts,
+} from './evaluation-records.js';
 import { AnalysisFeedbackError, AnalysisFeedbackLedger, analysisFeedbackItems, initializeAnalysisFeedbackSchema } from './analysis-feedback.js';
 import { DecisionFeedbackError, DecisionFeedbackLedger, initializeDecisionFeedbackSchema } from './decision-feedback.js';
 import {
@@ -402,7 +423,13 @@ import {
   type StoredMembershipChange,
   type StoredSeries,
 } from './series.js';
-import { CALIBRATION_MIN_ADJUSTMENTS, PREDICTION_MIN_BOOKS_WITH_ACTUALS, calibrationActive, predictionAvailable } from '../shared/evaluation-calibration.js';
+import {
+  CALIBRATION_MIN_ADJUSTMENTS,
+  CALIBRATION_OFFSET_COMPUTED,
+  PREDICTION_MIN_BOOKS_WITH_ACTUALS,
+  calibrationActive,
+  predictionAvailable,
+} from '../shared/evaluation-calibration.js';
 import {
   MAX_FEEDBACK_HISTORY_ENTRIES,
   MAX_SERIES_CANDIDATE_QUERY_CHARACTERS,
@@ -448,6 +475,22 @@ import {
   openWithPendingReplacement,
 } from './database-replacement.js';
 import { DatabaseMergeError, initializeDatabaseMergeSchema } from './database-merge.js';
+import {
+  DIALOGUE_BASIS_QUOTE_CHARACTERS,
+  DIALOGUE_MARK_SOURCE_LABEL,
+  DialogueError,
+  DialogueLedger,
+  MAX_DIALOGUE_PROPOSAL_CHARACTERS,
+  initializeDialogueSchema,
+  type DialogueOutcome,
+  type DialogueTurnStart,
+  type StoredDialogueBinding,
+  type StoredDialogueTask,
+} from './dialogue/dialogue-ledger.js';
+import { dialogueProjection, harnessHistoryReader, keptText, resolveAttempts, type DialogueHistoryReader, type LiveAnswer } from './dialogue/dialogue-history.js';
+import { dialogueQuestion } from './dialogue/contract.js';
+import { HARNESS_SESSION_LOG_DIRECTORY, readHarnessSessionLog } from './harness/session-log.js';
+import type { DialogueTaskReading } from './global-attention.js';
 import {
   SeriesKnowledgeError,
   SeriesKnowledgeLedger,
@@ -580,6 +623,8 @@ import {
   SCHEDULED_BACKUP_SCHEMA_VERSION,
   DATABASE_REPLACEMENT_SCHEMA_VERSION,
   DATABASE_MERGE_SCHEMA_VERSION,
+  INITIAL_EVALUATION_SCHEMA_VERSION,
+  DIALOGUE_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1814,7 +1859,9 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === DATABASE_EXPORT_SCHEMA_VERSION ||
       currentVersion === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       currentVersion === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      currentVersion === DATABASE_MERGE_SCHEMA_VERSION,
+      currentVersion === DATABASE_MERGE_SCHEMA_VERSION ||
+      currentVersion === INITIAL_EVALUATION_SCHEMA_VERSION ||
+      currentVersion === DIALOGUE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1868,7 +1915,9 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === DATABASE_EXPORT_SCHEMA_VERSION ||
       currentVersion === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       currentVersion === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      currentVersion === DATABASE_MERGE_SCHEMA_VERSION
+      currentVersion === DATABASE_MERGE_SCHEMA_VERSION ||
+      currentVersion === INITIAL_EVALUATION_SCHEMA_VERSION ||
+      currentVersion === DIALOGUE_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2236,7 +2285,9 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === DATABASE_EXPORT_SCHEMA_VERSION ||
       version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      version === DATABASE_MERGE_SCHEMA_VERSION,
+      version === DATABASE_MERGE_SCHEMA_VERSION ||
+      version === INITIAL_EVALUATION_SCHEMA_VERSION ||
+      version === DIALOGUE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2279,7 +2330,9 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === DATABASE_EXPORT_SCHEMA_VERSION ||
       version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      version === DATABASE_MERGE_SCHEMA_VERSION) return;
+      version === DATABASE_MERGE_SCHEMA_VERSION ||
+      version === INITIAL_EVALUATION_SCHEMA_VERSION ||
+      version === DIALOGUE_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2414,7 +2467,9 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === DATABASE_EXPORT_SCHEMA_VERSION ||
       version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      version === DATABASE_MERGE_SCHEMA_VERSION,
+      version === DATABASE_MERGE_SCHEMA_VERSION ||
+      version === INITIAL_EVALUATION_SCHEMA_VERSION ||
+      version === DIALOGUE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2456,7 +2511,9 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === DATABASE_EXPORT_SCHEMA_VERSION ||
       version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      version === DATABASE_MERGE_SCHEMA_VERSION) return;
+      version === DATABASE_MERGE_SCHEMA_VERSION ||
+      version === INITIAL_EVALUATION_SCHEMA_VERSION ||
+      version === DIALOGUE_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2749,7 +2806,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== DATABASE_MERGE_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== DIALOGUE_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2794,6 +2851,8 @@ function validateModelServiceSchema(
       version >= SCHEDULED_BACKUP_SCHEMA_VERSION,
       version >= DATABASE_REPLACEMENT_SCHEMA_VERSION,
       version >= DATABASE_MERGE_SCHEMA_VERSION,
+      version >= INITIAL_EVALUATION_SCHEMA_VERSION,
+      version >= DIALOGUE_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2863,7 +2922,9 @@ function initializeModelServiceSchema(
       version === DATABASE_EXPORT_SCHEMA_VERSION ||
       version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      version === DATABASE_MERGE_SCHEMA_VERSION,
+      version === DATABASE_MERGE_SCHEMA_VERSION ||
+      version === INITIAL_EVALUATION_SCHEMA_VERSION ||
+      version === DIALOGUE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2905,7 +2966,9 @@ function initializeModelServiceSchema(
       version === DATABASE_EXPORT_SCHEMA_VERSION ||
       version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      version === DATABASE_MERGE_SCHEMA_VERSION) {
+      version === DATABASE_MERGE_SCHEMA_VERSION ||
+      version === INITIAL_EVALUATION_SCHEMA_VERSION ||
+      version === DIALOGUE_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3747,6 +3810,8 @@ export class EditorialStore {
   readonly #taskAuthorization: TaskAuthorizationStore;
   readonly #baselineAnalysis: BaselineAnalysisStore;
   readonly #factualReview: BaselineAnalysisStore;
+  /** AI7 初评 (Issue #429, S81b1): the evaluation kind's own ledger over the same Book database. */
+  readonly #initialEvaluation: BaselineAnalysisStore;
   /** One ledger per review-category kind and frozen category contract, made when first asked for (Issue #417); bounded (#649). */
   readonly #reviewCategoryLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
   /** The kind definition of each configured category a Review Run snapshotted, by its contract input; bounded (#649). */
@@ -3781,6 +3846,9 @@ export class EditorialStore {
   readonly #evaluations: EvaluationRecords;
   /** ②A 分析反馈 (Issue #94, S38): the editor's judgments of analysis results. */
   readonly #analysisFeedback: AnalysisFeedbackLedger;
+  /** 就这段提问… (Issue #52, S17a): the dialogue Tasks, and the reader that joins them to the Harness Session Ledger. */
+  readonly #dialogues: DialogueLedger;
+  readonly #dialogueHistory: DialogueHistoryReader;
   readonly #productionDocuments: ProductionDocuments;
   /** Each Production Document's Deliverable Workflow (Issue #415, S66c). */
   readonly #documentWorkflow: ProductionDocumentWorkflow;
@@ -3815,6 +3883,7 @@ export class EditorialStore {
     taskAuthorization: TaskAuthorizationStore,
     baselineAnalysis: BaselineAnalysisStore,
     factualReview: BaselineAnalysisStore,
+    initialEvaluation: BaselineAnalysisStore,
     workflowProfile: BuiltInWorkflowProfile,
     lifetimeId: string,
     control: StoreControl,
@@ -3831,6 +3900,7 @@ export class EditorialStore {
     this.#taskAuthorization = taskAuthorization;
     this.#baselineAnalysis = baselineAnalysis;
     this.#factualReview = factualReview;
+    this.#initialEvaluation = initialEvaluation;
     this.#editorialMarks = new EditorialMarkStore(authority);
     this.#rules = new DefaultExecutionRuleLedger(authority);
     this.#manuscriptApply = new ManuscriptApplyStore(authority, boundedAuthority, this.#editorialMarks, lifetimeId);
@@ -3841,15 +3911,17 @@ export class EditorialStore {
     this.#evaluationCalibration = new EvaluationCalibrationLedger(authority);
     this.#series = new SeriesLedger(authority);
     this.#seriesKnowledge = new SeriesKnowledgeLedger(authority);
+    this.#dialogues = new DialogueLedger(authority);
+    this.#dialogueHistory = harnessHistoryReader(join(dataRoot, HARNESS_SESSION_LOG_DIRECTORY));
     this.#dataVersions = new DataVersionLedger(authority);
     this.#databaseExports = new DatabaseExports(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: DIALOGUE_SCHEMA_VERSION }),
     });
     this.#scheduledBackups = new ScheduledBackups(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: DIALOGUE_SCHEMA_VERSION }),
     });
     this.#databaseReplacements = new DatabaseReplacements(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: DIALOGUE_SCHEMA_VERSION }),
       // A package's data opens as a store of its own, with no launch control: brought to this revision and checked whole.
       openPackage: async (root) => {
         const opened = await EditorialStore.open(root, this.#codeRoot, {
@@ -3864,7 +3936,10 @@ export class EditorialStore {
         opened.close();
       },
     });
-    this.#evaluations = new EvaluationRecords(authority, { current: (bookId) => this.#evaluationManuscript(bookId) });
+    this.#evaluations = new EvaluationRecords(authority, { current: (bookId) => this.#evaluationManuscript(bookId) }, {
+      latest: (bookId) => this.#initialEvaluationFacts(bookId),
+      task: (bookId) => this.#initialEvaluationTask(bookId),
+    });
     this.#analysisFeedback = new AnalysisFeedbackLedger(authority);
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
       ledgerOf: (entry) => this.#reviewLedgerOf(entry),
@@ -3992,7 +4067,7 @@ export class EditorialStore {
       // the backup location before anything migrates it, and a backup that cannot be made opens nothing.
       const classes = control.schemaRevisionClasses ?? SCHEMA_REVISION_CLASSES;
       const { upgrade, earlier } = await backUpBeforeUpgrade(authority, dataRoot, {
-        terminalRevision: DATABASE_MERGE_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
+        terminalRevision: DIALOGUE_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
       }).catch((error: unknown) => {
         if (error instanceof DataVersionError) throw new StoreError(error.code, error.message);
         throw error;
@@ -4064,7 +4139,9 @@ export class EditorialStore {
       // and revision 53 (Issue #63, S28b) Series Knowledge: candidates, items, revisions and promotion decisions; revision 54
       // (Issue #433, S85a) the versions that opened the store; revision 55 (Issue #434, S86a) the database exports; revision 56
       // (Issue #434, S86b) the scheduled backups; revision 57 (Issue #434, S86c) the replacements of the local data; and revision
-      // 58 (Issue #434, S86d) the merges of a package's Books.
+      // 58 (Issue #434, S86d) the merges of a package's Books. Revision 59 (Issue #429, S81b1) adds the AI7 初评 each Evaluation
+      // Record version began from, and `initializeTaskAuthorizationSchema` rebuilds the kind-coupled analysis relations for it;
+      // revision 60 (Issue #52, S17a) adds the dialogue Tasks.
       initializeBookPeopleSchema(authority);
       initializeReviewGuidelineSchema(authority);
       initializeLibraryMaterialSchema(authority);
@@ -4080,6 +4157,8 @@ export class EditorialStore {
       initializeScheduledBackupSchema(authority);
       initializeDatabaseReplacementSchema(authority);
       initializeDatabaseMergeSchema(authority);
+      initializeEvaluationInitialDraftSchema(authority);
+      initializeDialogueSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -4103,6 +4182,9 @@ export class EditorialStore {
         new TaskAuthorizationStore(authority, boundedAuthority),
         new BaselineAnalysisStore(authority, boundedAuthority, control.baselineAnalysisRoute),
         new BaselineAnalysisStore(authority, boundedAuthority, control.baselineAnalysisRoute, factualReviewKindDefinition()),
+        // AI7 初评 (Issue #429, S81b1): the evaluation kind under the profile a new 评估 version snapshots.
+        new BaselineAnalysisStore(authority, boundedAuthority, control.baselineAnalysisRoute,
+          initialEvaluationKindDefinition({ ...BUILTIN_EVALUATION_PROFILE, sha256: evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE) })),
         workflowProfile,
         lifetimeId,
         control,
@@ -4124,7 +4206,7 @@ export class EditorialStore {
       // Every store records the versions that open it (Issue #433, S85a; DSTO-016): a new record only when one changed.
       store.#softwareVersion = softwareVersion;
       store.#codeRoot = codeRoot;
-      store.#dataVersion = dataVersionAt(DATABASE_MERGE_SCHEMA_VERSION, classes);
+      store.#dataVersion = dataVersionAt(DIALOGUE_SCHEMA_VERSION, classes);
       if (control.interruptUpgradeAt === 'before-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在记录版本之前停止。');
       // The open that raised the Data Version records the upgrade it made with the backup (S85b), and only then clears the note
       // that let an open stopped before this record it (Issue #433 review).
@@ -4132,7 +4214,7 @@ export class EditorialStore {
         // Upgrades other opens made and never recorded go first, oldest first, as those opens would have recorded them; one a
         // record already holds is not recorded again (Issue #433 review).
         for (const carried of earlier) store.#dataVersions.recordCarried(carried);
-        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION, upgrade });
+        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: DIALOGUE_SCHEMA_VERSION, upgrade });
       }));
       if (control.interruptUpgradeAt === 'after-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在清除升级记录之前停止。');
       await completeUpgrade(dataRoot).catch(() => undefined);
@@ -4531,6 +4613,17 @@ export class EditorialStore {
       const plan = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, defaultRule, clarifications, ...(stopped === null ? {} : { stopped }) }));
       return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
+    if (input.kind === 'initial-evaluation') {
+      // AI7 初评 (Issue #429, S81b1): the evaluation kind's latest Task, read as the baseline's is.
+      const projection = this.inspectInitialEvaluation(input.bookId, progress);
+      const checkpoint = projection.checkpoint;
+      requireStore(projection.taskIntent !== null && checkpoint !== null, 'TASK_PLAN_UNAVAILABLE', 'AI7 初评还没有准备计划。');
+      current(projection.taskIntent.taskIntentId);
+      const blocks = this.#analysisCall(() => this.#initialEvaluation.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
+      const profile = this.#evaluations.profile();
+      const plan = this.#taskPlanCall(() => initialEvaluationPlan({ projection, bookTitle, blocks, profile }));
+      return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+    }
     const reviewRunId = input.ref;
     requireStore(reviewRunId !== null, 'TASK_PLAN_INVALID', '审阅的计划要指明是哪一次审阅。');
     const facts = this.#reviewCall(() => this.#reviewRuns.planFacts(input.bookId, reviewRunId));
@@ -4719,6 +4812,16 @@ export class EditorialStore {
   reconcileStoppedBaselineAnalysisRuns(): { settled: number; cancelling: ReadonlyArray<string>; answered: ReadonlyArray<string> } {
     this.#assertAvailable();
     return this.#analysisCall(() => this.#baselineAnalysis.reconcileStoppedRuns());
+  }
+
+  /**
+   * Startup reconciliation of the evaluation kind's ledger (Issue #429 review, P1): a 初评 left admitted or executing has nothing
+   * running it and cannot resume, so it ends 已中断 with its outcome; a start the governor had not admitted is blocked before
+   * dispatch with why. Either way 评估 offers 重新初评 at once instead of reading a Run under way for good.
+   */
+  reconcileStoppedInitialEvaluationRuns(): { settled: number } {
+    this.#assertAvailable();
+    return { settled: this.#analysisCall(() => this.#initialEvaluation.reconcileStoppedRuns()).settled };
   }
 
   /**
@@ -5021,6 +5124,7 @@ export class EditorialStore {
     this.#reviewRuns.prepare({ phase: 'cancel-all' });
     this.#baselineAnalysis.prepare({ phase: 'cancel-all' });
     this.#factualReview.prepare({ phase: 'cancel-all' });
+    this.#initialEvaluation.prepare({ phase: 'cancel-all' });
     for (const ledger of this.#reviewCategoryLedgers.values()) ledger.prepare({ phase: 'cancel-all' });
     for (const workId of Array.from(this.#reimportPreparationWork.keys())) {
       this.cancelManuscriptReimportPreparationWork(workId);
@@ -6048,13 +6152,136 @@ export class EditorialStore {
     return this.#evaluationCall(() => this.#evaluations.workspace(bookId, this.#evaluationBookTitle(bookId), recordId, recordsBefore));
   }
 
-  /** 开始评估 or 重新评估: a new version bound to the manuscript's current revision, and the page with it on show. */
-  startEvaluation(bookId: string): EvaluationWorkspaceProjection {
+  /**
+   * 开始评估 or 重新评估: a new version bound to the manuscript's current revision, and the page with it on show — begun from
+   * AI7's latest 初评 when `fromInitial` (Issue #429, S81b1).
+   */
+  startEvaluation(bookId: string, fromInitial = false): EvaluationWorkspaceProjection {
     return this.#evaluationCall(() => {
       const title = this.#evaluationBookTitle(bookId);
-      const recordId = this.#transaction(this.#authority, () => this.#evaluations.start(bookId));
+      const recordId = this.#transaction(this.#authority, () => this.#evaluations.start(bookId, fromInitial));
       return this.#evaluations.workspace(bookId, title, recordId);
     });
+  }
+
+  // ---- AI7 初评 (Issue #429, plan slice S81b1; V2-UX-EVAL-001, EVAL-005 to EVAL-007) ----------------------------------------
+
+  /** The evaluation kind's append-only ledger, which its execution owner writes through; service-internal. */
+  get initialEvaluationLedger(): BaselineAnalysisStore {
+    this.#assertAvailable();
+    return this.#initialEvaluation;
+  }
+
+  /** The Book's AI7 初评 Task, latest Result Set Revision and history, as the evaluation kind's ledger holds them. */
+  inspectInitialEvaluation(bookId: string, progress?: ProgressReader, revisionId: string | null = null): InitialEvaluationProjection {
+    return this.#analysisCall(() => this.#initialEvaluation.inspect(bookId, progress, revisionId)) as InitialEvaluationProjection;
+  }
+
+  /**
+   * 准备 AI7 初评: the evaluation kind's Task in the mode that applies — the first 初评, or 重新初评 once one settled — whose
+   * goal is the kind's own fixed text. The preparation is a cooperative job; its plan opens in the Task Drawer.
+   */
+  createInitialEvaluationPreparationWork(bookId: string, launchPolicy: LaunchPolicyProjection): AnalysisPreparationResult<InitialEvaluationProjection> {
+    this.#requireInitialEvaluationScope();
+    const current = this.inspectInitialEvaluation(bookId);
+    const mode = current.resultSetRevision === null ? 'evaluation-first' : 'evaluation-again';
+    const result = this.#analysisCall(() => this.#initialEvaluation.prepare({
+      phase: 'start',
+      bookId,
+      goal: INITIAL_EVALUATION_MODE_GOALS[mode],
+      update: mode === 'evaluation-first' ? null : { mode, selectedRange: null },
+      reconfirm: false,
+      launchPolicy,
+    }));
+    return { ...result, projection: result.projection as InitialEvaluationProjection | null };
+  }
+
+  advanceInitialEvaluationPreparationWork(workId: string): AnalysisPreparationResult<InitialEvaluationProjection> {
+    const result = this.#analysisCall(() => this.#initialEvaluation.prepare({ phase: 'advance', workId }));
+    return { ...result, projection: result.projection as InitialEvaluationProjection | null };
+  }
+
+  cancelInitialEvaluationPreparationWork(workId: string): boolean {
+    this.#analysisCall(() => this.#initialEvaluation.prepare({ phase: 'cancel', workId }));
+    return true;
+  }
+
+  /** 开始任务 in the drawer's bar: the standard-direct Run Authorization and the Run; the caller hands the Run to the owner. */
+  authorizeInitialEvaluation(bookId: string, taskIntentId: string, planEnvelopeDigest: string): { dispatchRunRecordId: string | null } {
+    this.#requireInitialEvaluationScope();
+    const authorized = this.#analysisCall(() => this.#initialEvaluation.authorize(bookId, taskIntentId, planEnvelopeDigest));
+    return { dispatchRunRecordId: authorized.dispatchRunRecordId };
+  }
+
+  /**
+   * 初评 runs only where its book-level synthesis may be sent (Issue #429 review, P2): under a live scope the active policy does
+   * not name it, so nothing is prepared or started there, and 评估 says why. The provider-free scope is unaffected.
+   */
+  #requireInitialEvaluationScope(): void {
+    this.#assertAvailable();
+    if (this.#initialEvaluation.launch.live !== null) throw new StoreError('EVALUATION_INITIAL_UNAVAILABLE', INITIAL_EVALUATION_LIVE_UNAVAILABLE);
+  }
+
+  /** AI7's latest settled 初评 as 评估 snapshots it; `null` while there is none, or the Book cannot be evaluated by AI7 at all. */
+  #initialEvaluationFacts(bookId: string): InitialEvaluationFacts | null {
+    let projection: InitialEvaluationProjection;
+    try {
+      projection = this.#initialEvaluation.inspect(bookId) as InitialEvaluationProjection;
+    } catch (error) {
+      if (error instanceof AnalysisError) return null;
+      throw error;
+    }
+    const revision = projection.resultSetRevision;
+    if (revision === null) return null;
+    const evaluation = revision.evaluation;
+    const items = evaluation.items.map((item) => ({
+      itemId: item.itemId, score: item.score, comment: item.comment, sufficiency: item.sufficiency, citedBlocks: item.citedBlocks, unitsCited: item.unitsCited,
+      // AI7's evidence for the item (EVAL-006), kept with the draft a version begins from so the record shows what each score rests on.
+      evidence: item.observations.map((observation) => ({ unitOrdinal: observation.unitOrdinal, note: observation.note, blockIds: [...observation.blockIds] })),
+    }));
+    return {
+      draft: {
+        revisionId: revision.revisionId,
+        ordinal: revision.ordinal,
+        revisionLabel: revision.manuscriptPin.revisionLabel,
+        createdAt: revision.createdAt,
+        items,
+        strengths: [...evaluation.strengths],
+        weaknesses: [...evaluation.weaknesses],
+        nextStep: evaluation.nextStep,
+        suggestedConclusion: evaluation.suggestedConclusion,
+        complete: evaluation.synthesis.state === 'closed' && items.every((item) => item.score !== null),
+        // A 初评 that completed with gaps scored without these ranges; every version begun from it says so.
+        unitsTotal: revision.coverage.unitsTotal,
+        unreadUnits: [...new Set(revision.gaps.map((gap) => gap.unitOrdinal))].sort((left, right) => left - right),
+      },
+      manuscriptRevisionId: revision.manuscriptPin.revisionId,
+      current: revision.freshness.state === 'current',
+      profileSha256: evaluation.profile.sha256,
+    };
+  }
+
+  /**
+   * The Book's 初评 Task as 评估 offers it: the latest Task the drawer opens, and whether one can be prepared now — not while a
+   * Run of it is under way or waiting, and not for a Book AI7 cannot read, which says why.
+   */
+  #initialEvaluationTask(bookId: string): Pick<EvaluationInitialProjection, 'task' | 'prepare'> {
+    let projection: InitialEvaluationProjection;
+    try {
+      projection = this.#initialEvaluation.inspect(bookId) as InitialEvaluationProjection;
+    } catch (error) {
+      if (error instanceof AnalysisError) return { task: null, prepare: { allowed: false, reason: `AI7 初评暂不可用：${error.message}` } };
+      throw error;
+    }
+    const runState = projection.run?.state ?? null;
+    return {
+      task: projection.taskIntent === null ? null : { taskIntentId: projection.taskIntent.taskIntentId, state: projection.state, label: analysisTaskStateLabel(projection) },
+      prepare: this.#initialEvaluation.launch.live !== null
+        ? { allowed: false, reason: INITIAL_EVALUATION_LIVE_UNAVAILABLE }
+        : runIsActive(runState)
+        ? { allowed: false, reason: activeRunReason(runState) }
+        : { allowed: true, mode: projection.resultSetRevision === null ? 'evaluation-first' : 'evaluation-again' },
+    };
   }
 
   /** 保存评估 or 定稿: the editor's content appended to the version's chain, and the page as it now reads. */
@@ -6401,14 +6628,18 @@ export class EditorialStore {
       };
     }
     const row = one(this.#authority.prepare(
-      `SELECT m.mark_id, m.manuscript_id, m.branch_id, m.block_id, m.anchor_state, m.source_task_id, m.source_label
+      `SELECT m.mark_id, m.manuscript_id, m.branch_id, m.block_id, m.anchor_state, m.source_task_id, m.source_label,
+              EXISTS (SELECT 1 FROM dialogue_tasks t WHERE t.dialogue_id = m.source_task_id) AS from_dialogue
        FROM proposal_item_decisions d JOIN proposal_change_items i ON i.item_id = d.item_id
        JOIN editorial_marks m ON m.mark_id = i.mark_id WHERE d.decision_id = ? AND m.book_id = ?`,
     ).all(source.decisionId, bookId) as SqlRow[], 'LEARNING_MATERIAL_NOT_FOUND', '这份学习材料的来源记录不存在。');
     return {
       target: { kind: 'mark', bookId, manuscriptId: asString(row.manuscript_id), branchId: asString(row.branch_id),
         blockId: asString(row.block_id), markId: asString(row.mark_id), detached: row.anchor_state === 'detached' },
-      sourceTask: row.source_task_id === null ? null : { taskIntentId: asString(row.source_task_id), label: asString(row.source_label) },
+      // A 修改建议 made of a dialogue's answer (Issue #52, S17a) names the dialogue on its card, never as a Task Intent here.
+      sourceTask: row.source_task_id === null || row.from_dialogue === 1
+        ? null
+        : { taskIntentId: asString(row.source_task_id), label: asString(row.source_label) },
     };
   }
 
@@ -11076,8 +11307,9 @@ export class EditorialStore {
     requireStore(focusBookId === null || UUID_PATTERN.test(focusBookId), 'BOOK_INVALID', '图书标识无效。');
     const preferences = this.#evaluationCalibration.preferences();
     const booksWithActuals = this.#evaluationCalibration.booksWithActuals();
-    // AI7's 初评 arrives with S81b; no score exists for the editor to adjust yet.
-    const adjustments = 0;
+    // The Books whose editor adjusted AI7's 初评 in a 定稿 version, each counted once (Issue #429, S81b1; §8.6 「10 本调分记录」).
+    // The calibration itself — the offset it would apply to AI7's starting scores — is not computed yet: it waits for its slice.
+    const adjustments = this.#evaluations.adjustedBooks();
     const where = 'EXISTS (SELECT 1 FROM publication_versions p WHERE p.book_id = b.book_id)';
     const rows = (after === null
       ? this.#authority.prepare(`SELECT b.book_id, b.title FROM books b WHERE ${where} ORDER BY b.title, b.book_id LIMIT ?`).all(MAX_EVALUATION_CALIBRATION_BOOKS + 1)
@@ -11095,10 +11327,11 @@ export class EditorialStore {
     return {
       calibration: {
         adjustments,
-        initialScoresConnected: false,
+        initialScoresConnected: true,
         threshold: CALIBRATION_MIN_ADJUSTMENTS,
         enabled: preferences.calibrationEnabled,
-        active: calibrationActive(adjustments, preferences.calibrationEnabled),
+        offsetComputed: CALIBRATION_OFFSET_COMPUTED,
+        active: calibrationActive(adjustments, preferences.calibrationEnabled, CALIBRATION_OFFSET_COMPUTED),
       },
       prediction: {
         booksWithActuals,
@@ -12485,7 +12718,7 @@ export class EditorialStore {
    * cancelled included — composed into 等你处理, 进行中 and 最近完成 by `global-attention.ts`. A read: nothing is written,
    * claimed or terminalized.
    */
-  inspectBookTasks(bookId: string, progress: ProgressReader, waitingFor: WaitingFor = 'admitting'): BookTasksProjection {
+  inspectBookTasks(bookId: string, progress: ProgressReader, waitingFor: WaitingFor = 'admitting', dialogueLive: (attemptId: string) => LiveAnswer | null = () => null): BookTasksProjection {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
     one(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').all(bookId) as SqlRow[], 'BOOK_NOT_FOUND', '图书不存在。');
@@ -12501,12 +12734,227 @@ export class EditorialStore {
           reviewRuns: review.latest,
           reviewCompletions: review.completed,
           waitingFor,
+          // Its dialogue Tasks (Issue #52, S17a; TASK-044), each read through the Harness Session Ledger.
+          dialogues: this.#dialogueCall(() => this.#dialogueTaskReadings(bookId, dialogueLive)),
         });
       } catch (error) {
         if (error instanceof GlobalAttentionError) throw new StoreError(error.code, error.message);
         throw error;
       }
     });
+  }
+
+  // ---- 就这段提问… (Issue #52, plan slice S17a; UI ADR 0014; V2-UX-DIALOG-001 to 016, TASK-044) ---------------------------
+
+  /** The Harness Session Ledger under the Agent Data Root: one JSONL file per technical Session (UI ADR 0014, ADR 0011). */
+  get harnessSessionLogRoot(): string {
+    return join(this.#dataRoot, HARNESS_SESSION_LOG_DIRECTORY);
+  }
+
+  /**
+   * 就这段提问… (the Owner, 2026-10-07: selecting words and asking is enough — no plan, no 开始任务): a dialogue Task on the
+   * exact words selected in the Book's manuscript, verified as a mark's range is, and its first attempt. Nothing is sent here;
+   * the execution owner sends the message this answers, which holds the selected words and the question and nothing else.
+   */
+  askAboutSelection(bookId: string, input: AskAboutSelectionInput, now: Date = new Date()): DialogueTurnStart {
+    return this.#dialogueCall(() => {
+      requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+      requireStore(typeof input === 'object' && input !== null && typeof input.selection === 'object' && input.selection !== null,
+        'DIALOGUE_SELECTION_INVALID', '所选文字无效。');
+      const question = dialogueQuestion(input.question);
+      const verified = this.#markCall(() => this.#editorialMarks.verifySpan(input.selection));
+      requireStore(verified.bookId === bookId, 'DIALOGUE_SELECTION_INVALID', '所选文字不在这本书的稿件中。');
+      requireStore(verified.text.length > 0 && input.selection.toGrapheme - input.selection.fromGrapheme <= MAX_DIALOGUE_SELECTION_GRAPHEMES,
+        'DIALOGUE_SELECTION_TOO_LONG', `所选文字最多 ${MAX_DIALOGUE_SELECTION_GRAPHEMES} 个字；请选短一些再提问。`);
+      const { task, attemptId } = this.#transaction(this.#authority, () => this.#dialogues.ask({
+        bookId,
+        manuscriptId: input.selection.manuscriptId,
+        branchId: input.selection.branchId,
+        revisionId: verified.revisionId,
+        journalSequence: verified.journalSequence,
+        blockId: input.selection.blockId,
+        fromGrapheme: input.selection.fromGrapheme,
+        toGrapheme: input.selection.toGrapheme,
+        blockDigest: input.selection.baseBlockDigest,
+        selectionSha256: sha256(verified.text),
+        questionSha256: sha256(question),
+        now,
+      }));
+      return { dialogueId: task.dialogueId, attemptId, message: { kind: 'ask', selection: verified.text, question, kept: null } };
+    });
+  }
+
+  /**
+   * 继续回答 or 重新回答 (DIALOG-014): a new traceable attempt after the latest, which `attemptId` must name. Its message is read
+   * back from the Harness Session Ledger — the words the dialogue's turns sent, under the digests its Task bound — so a new
+   * attempt sends exactly what was asked, and 继续回答 adds the complete fragments the stopped answer kept.
+   */
+  nextDialogueAttempt(bookId: string, input: DialogueAttemptInput, kind: 'continue' | 'regenerate', now: Date = new Date()): DialogueTurnStart {
+    return this.#dialogueCall(() => {
+      const task = this.#requireDialogueTask(bookId, input.dialogueId);
+      const resolved = resolveAttempts(this.#dialogues.attempts(task.dialogueId), this.#dialogueHistory, () => null);
+      const latest = resolved.attempts.at(-1);
+      requireStore(latest !== undefined && latest.attempt.attemptId === input.attemptId, 'DIALOGUE_STALE', '这段对话已有新的回答；请看最新的回答再操作。');
+      // An answer in flight is stopped first, whatever its log holds yet (DIALOG-014).
+      requireStore(latest.state !== 'answering', 'DIALOGUE_ANSWERING', '这个问题还在回答中；停止回答后才能继续或重新回答。');
+      const first = resolved.first;
+      requireStore(first !== null, 'DIALOGUE_HISTORY_MISSING', '这个问题的记录不在本机，不能继续或重新回答。');
+      requireStore(sha256(first.selection) === task.selectionSha256 && sha256(first.question) === task.questionSha256,
+        'DIALOGUE_RECORD_INVALID', '对话记录与它的问题不一致。');
+      const attemptId = this.#transaction(this.#authority, () => this.#dialogues.nextAttempt(task.dialogueId, kind, () => latest.fragments.length, now));
+      return {
+        dialogueId: task.dialogueId,
+        attemptId,
+        message: kind === 'continue'
+          ? { kind: 'continue', selection: first.selection, question: first.question, kept: keptText(latest) }
+          : { kind: 'ask', selection: first.selection, question: first.question, kept: null },
+      };
+    });
+  }
+
+  /** The answer in flight of a dialogue, which `attemptId` must name: what 停止回答 stops. */
+  answeringDialogueAttempt(bookId: string, input: DialogueAttemptInput): string {
+    return this.#dialogueCall(() => {
+      const task = this.#requireDialogueTask(bookId, input.dialogueId);
+      const latest = this.#dialogues.attempts(task.dialogueId).at(-1);
+      requireStore(latest !== undefined && latest.attemptId === input.attemptId, 'DIALOGUE_STALE', '这段对话已有新的回答；请看最新的回答再操作。');
+      requireStore(latest.outcome === null, 'DIALOGUE_NOT_ANSWERING', '这次回答已经结束。');
+      return latest.attemptId;
+    });
+  }
+
+  bindDialogueAttempt(attemptId: string, binding: StoredDialogueBinding): void {
+    this.#dialogueCall(() => this.#transaction(this.#authority, () => this.#dialogues.bind(attemptId, binding)));
+  }
+
+  openDialogueSpan(attemptId: string, harnessSessionId: string, startSeq: number, now: Date = new Date()): void {
+    this.#dialogueCall(() => this.#transaction(this.#authority, () => this.#dialogues.openSpan(attemptId, harnessSessionId, startSeq, now)));
+  }
+
+  settleDialogueAttempt(attemptId: string, outcome: DialogueOutcome, endSeq: number | null, causeCode: string | null, now: Date = new Date()): void {
+    this.#dialogueCall(() => this.#transaction(this.#authority, () => this.#dialogues.settle(attemptId, outcome, endSeq, causeCode, now)));
+  }
+
+  /**
+   * A dialogue as the editor reads it (DIALOG-009 to 016), joined again from its records to the Harness Session Ledger; the
+   * attempt answering now is read from what it has streamed (`live`). A read: nothing is written.
+   */
+  inspectDialogue(bookId: string, dialogueId: string, afterFragment: number, live: (attemptId: string) => LiveAnswer | null): DialogueProjection {
+    return this.#dialogueCall(() => {
+      requireStore(Number.isSafeInteger(afterFragment) && afterFragment >= 0, 'DIALOGUE_CURSOR_INVALID', '对话位置无效。');
+      const task = this.#requireDialogueTask(bookId, dialogueId);
+      return dialogueProjection(task, resolveAttempts(this.#dialogues.attempts(task.dialogueId), this.#dialogueHistory, live), afterFragment);
+    });
+  }
+
+  /**
+   * 转为修改建议 (DIALOG-016): a separate governed object — an AI7-produced 修改建议 on the dialogue's selected words, its origin
+   * the dialogue Task and its basis the completed answer — made by the editor's explicit action and never applied. An
+   * Incomplete Dialogue Answer is refused (DIALOG-013), and so are words the manuscript no longer holds at the range.
+   */
+  convertDialogueToChangeSuggestion(bookId: string, input: ConvertDialogueToChangeSuggestionInput, now: Date = new Date()): DialogueConversionProjection {
+    return this.#dialogueCall(() => {
+      const task = this.#requireDialogueTask(bookId, input.dialogueId);
+      const resolved = resolveAttempts(this.#dialogues.attempts(task.dialogueId), this.#dialogueHistory, () => null);
+      const latest = resolved.attempts.at(-1);
+      requireStore(latest !== undefined && latest.attempt.attemptId === input.attemptId, 'DIALOGUE_STALE', '这段对话已有新的回答；请看最新的回答再操作。');
+      requireStore(latest.state === 'completed' && latest.fragments.length > 0, 'DIALOGUE_INCOMPLETE', '内容不完整的回答不能转为修改建议。');
+      const first = resolved.first;
+      requireStore(first !== null && sha256(first.selection) === task.selectionSha256, 'DIALOGUE_HISTORY_MISSING', '这个问题的记录不在本机，不能转为修改建议。');
+      requireStore(typeof input.proposedText === 'string' && input.proposedText.trim().length > 0 && input.proposedText.length <= MAX_DIALOGUE_PROPOSAL_CHARACTERS,
+        'DIALOGUE_PROPOSAL_INVALID', `建议改为的文字要 1–${MAX_DIALOGUE_PROPOSAL_CHARACTERS} 个字。`);
+      requireStore(typeof input.rationale === 'string' && input.rationale.length <= MAX_DIALOGUE_PROPOSAL_CHARACTERS,
+        'DIALOGUE_PROPOSAL_INVALID', `理由最多 ${MAX_DIALOGUE_PROPOSAL_CHARACTERS} 个字。`);
+      const answer = keptText(latest);
+      const quote = [...answer].length > DIALOGUE_BASIS_QUOTE_CHARACTERS ? `${[...answer].slice(0, DIALOGUE_BASIS_QUOTE_CHARACTERS).join('')}…` : answer;
+      const markId = this.#markCall(() => this.#editorialMarks.createProducedMany([{
+        manuscriptId: task.manuscriptId,
+        branchId: task.branchId,
+        blockId: task.blockId,
+        fromGrapheme: task.fromGrapheme,
+        toGrapheme: task.toGrapheme,
+        pinnedText: first.selection,
+        kind: 'change-suggestion',
+        body: '',
+        proposedText: input.proposedText,
+        rationale: input.rationale,
+        atomicGroupId: null,
+        source: { kind: 'ai7', origin: 'task', label: DIALOGUE_MARK_SOURCE_LABEL, taskId: task.dialogueId },
+        basis: [{ label: `${DIALOGUE_MARK_SOURCE_LABEL} · 第 ${latest.attempt.ordinal} 次`, blockId: task.blockId, fromGrapheme: task.fromGrapheme, toGrapheme: task.toGrapheme, quote }],
+      }], ([created]) => {
+        requireStore(created !== null && created !== undefined, 'MARK_ANCHOR_CHANGED', '所选文字已不在当前稿件中；不能把这次回答转为修改建议。');
+        this.#dialogues.convert(latest.attempt.attemptId, created, now);
+        return created;
+      }));
+      return {
+        markId,
+        completionLabel: '已新建修改建议：它不会自动应用，是否接受由你决定。',
+        dialogue: dialogueProjection(task, resolveAttempts(this.#dialogues.attempts(task.dialogueId), this.#dialogueHistory, () => null), 0),
+      };
+    });
+  }
+
+  /**
+   * Startup reconciliation (DIALOG-012): an attempt this service's predecessor left answering has nothing streaming it now. It
+   * settles 回答中断 · 内容不完整 at once, its turn ending where the Harness Session Ledger's record of it ends, and nothing
+   * is retried or sent (DIALOG-014).
+   */
+  reconcileDialogueAttempts(now: Date = new Date()): number {
+    return this.#dialogueCall(() => {
+      const unsettled = this.#dialogues.unsettled();
+      for (const attempt of unsettled) {
+        let endSeq: number | null = null;
+        if (attempt.span !== null) {
+          const log = (() => {
+            try {
+              return readHarnessSessionLog(this.harnessSessionLogRoot, attempt.span.harnessSessionId);
+            } catch {
+              return null;
+            }
+          })();
+          if (log !== null && log.events.length > attempt.span.startSeq) endSeq = log.events.length - 1;
+        }
+        this.#transaction(this.#authority, () => this.#dialogues.settle(attempt.attemptId, 'interrupted', endSeq, 'SERVICE_STOPPED', now));
+      }
+      return unsettled.length;
+    });
+  }
+
+  /** The Book's dialogue Tasks as the 任务 panel reads them (TASK-044): each latest answer's state, from the ledger. */
+  #dialogueTaskReadings(bookId: string, live: (attemptId: string) => LiveAnswer | null): DialogueTaskReading[] {
+    const bookTitle = this.#evaluationBookTitle(bookId);
+    return this.#dialogues.tasksOf(bookId).map((task) => {
+      const resolved = resolveAttempts(this.#dialogues.attempts(task.dialogueId), this.#dialogueHistory, live);
+      const latest = resolved.attempts.at(-1)!;
+      return {
+        bookId,
+        bookTitle,
+        dialogueId: task.dialogueId,
+        question: resolved.first?.question ?? null,
+        state: latest.state,
+        answered: latest.fragments.length > 0,
+        attempts: resolved.attempts.length,
+        at: latest.attempt.outcome?.settledAt ?? latest.attempt.createdAt,
+      };
+    });
+  }
+
+  #requireDialogueTask(bookId: string, dialogueId: string): StoredDialogueTask {
+    requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+    requireStore(typeof dialogueId === 'string' && UUID_PATTERN.test(dialogueId), 'DIALOGUE_INVALID', '对话标识无效。');
+    const task = this.#dialogues.task(dialogueId);
+    requireStore(task !== null && task.bookId === bookId, 'DIALOGUE_NOT_FOUND', '这段对话不存在。');
+    return task;
+  }
+
+  #dialogueCall<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof DialogueError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
   }
 
   undoManuscript(manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection {

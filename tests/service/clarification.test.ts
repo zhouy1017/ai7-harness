@@ -17,7 +17,7 @@ import { PLAN_EDIT_ADAPTATION_LABELS } from '../../src/service/analysis/plan-edi
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { CLARIFICATION_SCHEMA_VERSION, DATABASE_MERGE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { CLARIFICATION_SCHEMA_VERSION, DIALOGUE_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import {
   ANSWER_BLOCKED_OFFLINE,
   RESUME_BLOCKED_BINDING,
@@ -37,6 +37,7 @@ import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from '../support/reimport-groups.
 import { PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for Clarification Requests (Issue #422, plan slice S76d; V2-UX-CLAR-001 to CLAR-007,
 // PLAN-011, PLAN-012): the real store on a temporary Agent Data Root, exact `sample1` imported through the supported path,
@@ -179,6 +180,7 @@ describe('schema revision 35 over the real store', () => {
     const before = withDatabase(false, (database) => {
       plantRevision34Relations(database);
       database.exec('PRAGMA user_version = 34');
+      downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
       expect(runStatesShapeAt34(database)).toBe('revision-34');
       return { states: database.prepare('SELECT rowid, * FROM analysis_run_states ORDER BY rowid').all() as Row[], truth: relationTruth(database) };
     });
@@ -190,13 +192,14 @@ describe('schema revision 35 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_MERGE_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DIALOGUE_SCHEMA_VERSION);
       expect(runStatesShapeAt34(database)).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM analysis_run_states ORDER BY rowid').all()).toEqual(before.states);
       const after = relationTruth(database);
       expect([...after.keys()]).toEqual([...before.truth.keys(), ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER].sort());
       for (const relation of CLARIFICATION_RELATIONS_DROP_ORDER) expect(after.get(relation)?.content).toMatch(/^0:/);
-      expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name)).toEqual(['analysis_run_states']);
+      // Revision 59 rebuilds the three kind-coupled analysis relations for the evaluation kind (Issue #429), every row kept.
+      expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name)).toEqual(['analysis_result_set_revisions', 'analysis_result_sets', 'analysis_run_states', 'analysis_task_intents']);
       expect([...before.truth].filter(([name, was]) => after.get(name)!.content !== was.content).map(([name]) => name)).toEqual(['service_lifetimes']);
       // Still a ledger: nothing rewrites or removes a question or its answer.
       for (const relation of CLARIFICATION_RELATIONS_DROP_ORDER) {

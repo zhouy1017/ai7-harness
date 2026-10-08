@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { closeSync, constants, copyFileSync, existsSync, fstatSync, fsyncSync, mkdirSync, openSync, readSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs';
+import { closeSync, constants, copyFileSync, existsSync, fstatSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { DIGEST_PATTERN, canonicalJson, isRecord, parseCanonicalJson } from './analysis/canonical.js';
 import { LIBRARY_OBJECT_DIRECTORY } from './library-materials.js';
+import { HARNESS_SESSION_LOG_DIRECTORY, harnessSessionLogBytes, harnessSessionLogPath, readHarnessSessionLog } from './harness/session-log.js';
 
 /**
  * 只导入其中的图书，与本机合并（重名的另存） (Issue #434, plan slice S86d; V2-UX-DSTO-017; ADR 0079 §1.5). A Book merges with
@@ -203,6 +204,15 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   review_reports: 'owned',
   quality_signals: 'owned',
   learning_eligibility_decisions: 'owned',
+  // Its dialogue Tasks (Issue #52, S17a): what was asked, bound to its selection, and each attempt's binding, span and outcome.
+  // The Harness Session Ledger the spans join to is a file per Session beside the store; a merged Book's dialogues read
+  // their history only where that ledger holds it.
+  dialogue_tasks: 'owned',
+  dialogue_attempts: 'owned',
+  dialogue_execution_bindings: 'owned',
+  dialogue_harness_spans: 'owned',
+  dialogue_attempt_outcomes: 'owned',
+  dialogue_conversions: 'owned',
   // Its deliverables, publication and people.
   publication_versions: 'owned',
   publication_events: 'owned',
@@ -226,6 +236,8 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   maintenance_errata_versions: 'owned',
   evaluation_records: 'owned',
   evaluation_record_entries: 'owned',
+  // The AI7 初评 each version began from (Issue #429, S81b1): the version's own, as its entries are.
+  evaluation_initial_drafts: 'owned',
   book_dimension_sets: 'owned',
   book_dimensions: 'owned',
   book_people_versions: 'owned',
@@ -761,6 +773,51 @@ function copyStoredFile(
   return existed ? 'repaired' : 'placed';
 }
 
+/**
+ * Copy one Harness Session Ledger log a merged dialogue's span names (Issue #52, S17a). The dialogue records hold no digest of
+ * it, so it is held to what a log is instead: it must read whole as the Session it is named for, within its bound. A log here
+ * already that reads the same is kept; one that does not is replaced. The copy is written beside the merge, synced, and only
+ * then renamed onto its name, as every stored file a merge takes is.
+ */
+function copyHarnessLog(roots: MergeRoots, sessionId: string): 'placed' | 'repaired' | 'present' | 'absent' {
+  requireMerge(UUID_KEY.test(sessionId), 'DATABASE_MERGE_FILE_INVALID', '合并所需的文件名无效。');
+  const sourceRoot = join(roots.source, HARNESS_SESSION_LOG_DIRECTORY);
+  const read = (root: string): Buffer | null => {
+    try {
+      return readHarnessSessionLog(root, sessionId) === null ? null : readFileSync(harnessSessionLogPath(root, sessionId));
+    } catch {
+      return null;
+    }
+  };
+  if (harnessSessionLogBytes(sourceRoot, sessionId) === null) return 'absent';
+  const bytes = read(sourceRoot);
+  requireMerge(bytes !== null, 'DATABASE_MERGE_FILE_INVALID', '数据库文件里一段对话的会话记录已损坏。');
+  const targetRoot = join(roots.target, HARNESS_SESSION_LOG_DIRECTORY);
+  const target = harnessSessionLogPath(targetRoot, sessionId);
+  const existed = existsSync(target);
+  const here = existed ? read(targetRoot) : null;
+  if (here !== null && here.equals(bytes)) return 'present';
+  mkdirSync(roots.copying, { recursive: true });
+  const partial = join(roots.copying, `${randomUUID()}.partial`);
+  try {
+    writeFileSync(partial, bytes, { flag: 'wx' });
+    const fd = openSync(partial, 'r+');
+    try {
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    mkdirSync(targetRoot, { recursive: true });
+    renameSync(partial, target);
+  } finally {
+    rmSync(partial, { force: true });
+  }
+  syncDirectory(targetRoot);
+  return existed ? 'repaired' : 'placed';
+}
+
+const UUID_KEY = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+
 /** Where a merge reads the package's files, where it puts them, and where a copy waits until it is whole. */
 interface MergeRoots {
   readonly source: string;
@@ -929,6 +986,18 @@ function mergeListedBooks(
        WHERE x.artifact_id NOT IN (SELECT artifact_id FROM main.native_artifact_installations)`,
     ).iterate() as Iterable<SqlRow>) {
       take('native-artifacts', String(row.k), RETAINED_CARRIER_KEY, expectation(row.d, row.n));
+    }
+    // The Harness Session Ledger's logs the Books' dialogue spans name (Issue #52, S17a), so a merged dialogue reads its history
+    // here as it did where it came from. A log the package lacks is not refused: its dialogue reads 「…不在本机」.
+    if (tableExists(db, 'src', 'dialogue_harness_spans')) {
+      for (const row of db.prepare(
+        `SELECT DISTINCT x.harness_session_id AS s FROM src.dialogue_harness_spans x ${owned('dialogue_harness_spans', 'x')}`,
+      ).iterate() as Iterable<SqlRow>) {
+        const outcome = copyHarnessLog(roots, String(row.s));
+        if (outcome === 'present' || outcome === 'absent') continue;
+        files += 1;
+        if (outcome === 'placed') placed.push(join(roots.target, HARNESS_SESSION_LOG_DIRECTORY, `${String(row.s)}.jsonl`));
+      }
     }
     // The rows. A Book whose 内部编号 is already another Book's here merges without one; a house row this store already has
     // stays as it is.

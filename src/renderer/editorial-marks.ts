@@ -1,4 +1,15 @@
-import { SERIES_KNOWLEDGE_CLASSES, SERIES_KNOWLEDGE_CLASS_LABELS } from '../shared/protocol.js';
+import { MAX_DIALOGUE_QUESTION_CHARACTERS, SERIES_KNOWLEDGE_CLASSES, SERIES_KNOWLEDGE_CLASS_LABELS } from '../shared/protocol.js';
+import type { AskAboutSelectionInput, DialogueProjection } from '../shared/protocol.js';
+import {
+  DIALOGUE_ASK,
+  DIALOGUE_COMPOSER_TITLE,
+  DIALOGUE_MENU_HINT,
+  DIALOGUE_MENU_LABEL,
+  DIALOGUE_QUESTION_LABEL,
+  DIALOGUE_SENDS_NOTE,
+  DIALOGUE_STATUS,
+  dialogueQuestionRefusal,
+} from './dialogue-labels.js';
 import type { BookSeriesProjection, ProposeSeriesKnowledgeInput, SeriesKnowledgeClass, SeriesKnowledgeProposalProjection, SeriesListCursor } from '../shared/protocol.js';
 import {
   KNOWLEDGE_CLASS_LABEL,
@@ -97,6 +108,13 @@ interface MountOptions {
    */
   seriesOf?(after: SeriesListCursor | null): Promise<Pick<BookSeriesProjection, 'memberships' | 'membershipsNext' | 'membershipCount'>>;
   proposeSeriesKnowledge?(input: ProposeSeriesKnowledgeInput): Promise<SeriesKnowledgeProposalProjection>;
+  /**
+   * 就这段提问… (Issue #52, S17a; TASK-046): the selected words of the Book's manuscript and the editor's question, sent as they
+   * stand — no plan and no 开始任务. Without it (a Production Document) the item stays disabled with its reason.
+   */
+  askAboutSelection?(input: AskAboutSelectionInput): Promise<DialogueProjection>;
+  /** The question was asked: its dialogue comes to the foreground beside the manuscript. */
+  onAsked?(dialogue: DialogueProjection): void;
   busy(): boolean;
   /** The set of marks changed: whatever counts them elsewhere on the surface reads again. */
   marksChanged?(): void;
@@ -111,7 +129,7 @@ interface MountOptions {
 }
 
 interface FormField {
-  name: 'body' | 'proposedText' | 'rationale' | 'reason' | 'subject' | 'knowledgeClass';
+  name: 'body' | 'proposedText' | 'rationale' | 'reason' | 'subject' | 'knowledgeClass' | 'question';
   label: string;
   value: string;
   required: boolean;
@@ -402,7 +420,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     form.append(problem, row);
     form.addEventListener('submit', (event) => {
       event.preventDefault();
-      const values = { body: '', proposedText: '', rationale: '', reason: '', subject: '', knowledgeClass: '' };
+      const values = { body: '', proposedText: '', rationale: '', reason: '', subject: '', knowledgeClass: '', question: '' };
       for (const [name, input] of inputs) values[name] = input.value;
       const missing = config.fields.find((field) => field.required && values[field.name].trim().length === 0);
       if (missing) {
@@ -1267,20 +1285,77 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     controls.find((control) => !control.disabled)?.focus({ preventScroll: true });
   };
 
-  // The 任务 panel is connected (Issue #423, S77a); a Task started on a selection is not yet.
+  // The 任务 panel is connected (Issue #423, S77a); a Task started on a selection is not yet. 就这段提问… is (Issue #52, S17a).
   const AI7_TASK_REASON = '就选区发起的任务尚未接通';
   const VIEW_TASK_REASON = '这条标记的来源任务还不能从这里打开';
-  const aiTaskGroup = (): MenuGroup => ({
+  const aiTaskGroup = (selectionReason: string | undefined): MenuGroup => ({
     label: 'AI7 任务',
     note: AI7_TASK_REASON,
     items: [
       { action: 'task-on-selection', label: '就这段发起任务…', disabledReason: AI7_TASK_REASON },
-      { action: 'ask-on-selection', label: '就这段提问…', hint: '对话，不改稿件', disabledReason: AI7_TASK_REASON },
+      {
+        action: 'ask-on-selection', label: DIALOGUE_MENU_LABEL, hint: DIALOGUE_MENU_HINT,
+        ...(options.askAboutSelection === undefined ? { disabledReason: AI7_TASK_REASON }
+          : selectionReason !== undefined ? { disabledReason: selectionReason } : { run: () => void composeQuestion() }),
+      },
       { action: 'preset-polish', label: '润色这段', hint: '常用工序 · 生成修改建议', disabledReason: AI7_TASK_REASON },
       { action: 'preset-names', label: '核查人名与称谓一致', hint: '常用工序 · 生成批注 / 建议', disabledReason: AI7_TASK_REASON },
       { action: 'preset-continuity', label: '检查与前文的连贯', hint: '常用工序 · 生成批注', disabledReason: AI7_TASK_REASON },
     ],
   });
+
+  /**
+   * 就这段提问… (Issue #52, S17a; TASK-046; the Owner, 2026-10-07): the question about the exact selected words, asked at once.
+   * The composer says plainly what is sent — only the selected words and the question — and nothing in the manuscript changes.
+   */
+  const composeQuestion = async (): Promise<void> => {
+    if (refuseWhileBusy() || options.askAboutSelection === undefined) return;
+    const ask = options.askAboutSelection;
+    const range = await settledRange();
+    if (range === null) return;
+    openComposer(range.blockId, {
+      id: 'ask-about-selection',
+      title: DIALOGUE_COMPOSER_TITLE,
+      quote: range.text,
+      fields: [{ name: 'question', label: DIALOGUE_QUESTION_LABEL, value: '', required: true }],
+      submitLabel: DIALOGUE_ASK,
+      note: DIALOGUE_SENDS_NOTE,
+      submit: async (values) => {
+        const refusal = dialogueQuestionRefusal([...values.question.trim()].length, MAX_DIALOGUE_QUESTION_CHARACTERS);
+        if (refusal !== null) {
+          options.setStatus(refusal, 'error');
+          return;
+        }
+        try {
+          await editor.flush();
+          const current = editor.currentWindow();
+          options.setStatus(DIALOGUE_STATUS.asking, 'busy');
+          const dialogue = await ask({
+            selection: {
+              ...binding(),
+              baseRevisionId: current.revisionId,
+              expectedJournalSequence: current.journalSequence,
+              blockId: range.blockId,
+              baseBlockDigest: range.blockDigest,
+              fromGrapheme: range.fromGrapheme,
+              toGrapheme: range.toGrapheme,
+              selectedText: range.text,
+            },
+            question: values.question,
+          });
+          options.setStatus(DIALOGUE_STATUS.asked, 'success');
+          closeFloating();
+          options.onAsked?.(dialogue);
+        } catch (error) {
+          options.setStatus(options.errorMessage(error, DIALOGUE_STATUS.askFailed), 'error');
+        }
+      },
+      cancel: () => {
+        closeFloating();
+        editor.focus();
+      },
+    });
+  };
 
   /** Select any current member Series, one bounded page at a time, keeping the exact settled manuscript selection. */
   const chooseKnowledgeSeries = async (): Promise<void> => {
@@ -1401,7 +1476,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           })),
         ],
       },
-      aiTaskGroup(),
+      aiTaskGroup(range.kind === 'range' ? undefined : why ?? selectionMenuReason(range.kind)),
       ...(knowledge === null ? [] : [knowledge]),
     ], at);
     if (!reread || inSeries === null) return;
@@ -1567,7 +1642,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     if (floating !== undefined && !(event.target instanceof Element && event.target.closest('[data-mark-id]'))) closeFloating();
   };
   const onDocumentKeyDown = (event: KeyboardEvent): void => {
-    if (event.key !== 'Escape' || (menu === undefined && floating === undefined)) return;
+    // An Escape that ends an input method's composition belongs to the composition (J-14): the composer stays open.
+    if (event.key !== 'Escape' || event.isComposing || (menu === undefined && floating === undefined)) return;
     event.preventDefault();
     close();
     editor.focus();

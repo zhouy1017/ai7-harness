@@ -19,9 +19,18 @@ export function predictionAvailable(booksWithActuals: number): boolean {
   return booksWithActuals >= PREDICTION_MIN_BOOKS_WITH_ACTUALS;
 }
 
-/** Whether house calibration applies to AI7's starting scores: enough adjustments, and the editor has not turned it off. */
-export function calibrationActive(adjustments: number, enabled: boolean): boolean {
-  return enabled && adjustments >= CALIBRATION_MIN_ADJUSTMENTS;
+/**
+ * Whether this build computes the house offset calibration applies to AI7's starting scores (Issue #429 review): it does not
+ * yet. Until one does, calibration never reads as applied, however many adjustments the house holds, and the page says why.
+ */
+export const CALIBRATION_OFFSET_COMPUTED = false as boolean;
+
+/**
+ * Whether house calibration applies to AI7's starting scores: enough adjustments, the editor has not turned it off, and an
+ * offset exists to apply.
+ */
+export function calibrationActive(adjustments: number, enabled: boolean, offsetComputed: boolean): boolean {
+  return enabled && offsetComputed && adjustments >= CALIBRATION_MIN_ADJUSTMENTS;
 }
 
 /** A price in 分 as the editor writes it: yuan with two decimals. */
