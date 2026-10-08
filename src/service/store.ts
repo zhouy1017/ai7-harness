@@ -285,6 +285,7 @@ import {
   type LearningMaterialsAttentionReading,
 } from './global-attention.js';
 import { ALWAYS_ONLINE, type TaskPlanConnectivity } from './connectivity.js';
+import { RecentCache } from './recent-cache.js';
 import {
   baselineAnalysisPlan,
   defaultRuleBindingRows,
@@ -3691,6 +3692,14 @@ function closeDatabaseQuietly(db: DatabaseSync | null): void {
  * Why a Book's own Source Version cannot take the same file again (Issue #532): an earlier parser read it, and AI7 reads
  * files differently now. Said at the choice, in the editor's words; the way on is a new Book.
  */
+/**
+ * How many review-category ledgers, and as many category kind definitions, the store keeps (Issue #649). Every distinct
+ * category contract — with 书系一致性, every Series Knowledge revision and Series a member Book reviews against — asks
+ * for its own, so the store keeps the most recently used and makes any other afresh from the Book database; a ledger
+ * with a preparation in flight is always kept, because only that instance holds it.
+ */
+export const REVIEW_CATEGORY_CACHE_CAPACITY = 16;
+
 export const SOURCE_VERSION_PARSER_CHANGED_MESSAGE =
   '这本书里已有同一个文件的来源版本，但它是用旧版 AI7 的读取方式导入的；AI7 现在读取文件的方式已经不同，不能在原来的来源版本上再次导入这个文件。可以把它作为新建图书导入。';
 
@@ -3738,10 +3747,10 @@ export class EditorialStore {
   readonly #taskAuthorization: TaskAuthorizationStore;
   readonly #baselineAnalysis: BaselineAnalysisStore;
   readonly #factualReview: BaselineAnalysisStore;
-  /** One ledger per review-category kind and frozen category contract, made when first asked for (Issue #417). */
-  readonly #reviewCategoryLedgers = new Map<string, BaselineAnalysisStore>();
-  /** The kind definition of each configured category a Review Run snapshotted, by its contract input. */
-  readonly #reviewCategoryDefinitions = new Map<string, AnalysisKindDefinition>();
+  /** One ledger per review-category kind and frozen category contract, made when first asked for (Issue #417); bounded (#649). */
+  readonly #reviewCategoryLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
+  /** The kind definition of each configured category a Review Run snapshotted, by its contract input; bounded (#649). */
+  readonly #reviewCategoryDefinitions = new RecentCache<AnalysisKindDefinition>(REVIEW_CATEGORY_CACHE_CAPACITY);
   readonly #editorialMarks: EditorialMarkStore;
   readonly #manuscriptApply: ManuscriptApplyStore;
   readonly #reviewRuns: ReviewRunStore;
@@ -4253,7 +4262,10 @@ export class EditorialStore {
    * is built by the caller (`reviewCategoryKindDefinition`) and its ledger is made when first asked
    * for rather than at open. It is kept per kind *and* frozen category contract: a ledger holds the
    * preparations in flight, so the same definition must keep finding the same ledger, and a category
-   * whose clauses changed is a different contract that must not inherit them.
+   * whose clauses changed is a different contract that must not inherit them. Only the
+   * `REVIEW_CATEGORY_CACHE_CAPACITY` most recently used are kept besides those with a preparation in
+   * flight (Issue #649); everything else a ledger knows is in the Book database, so one made afresh
+   * reads exactly what the one let go would have.
    *
    * The ledger takes the route and the launch the baseline ledger was bound to, so every plan it
    * freezes names the binding this launch actually bound — which the one execution owner then checks.
@@ -4261,14 +4273,11 @@ export class EditorialStore {
   reviewCategoryLedger(definition: AnalysisKindDefinition): BaselineAnalysisStore {
     this.#assertAvailable();
     requireStore(isReviewCategoryKindId(definition.kind), 'REVIEW_CATEGORY_INVALID', '该分析种类不是审阅类别。');
-    const key = `${definition.kind}\n${definition.promptContractDigest}`;
-    let ledger = this.#reviewCategoryLedgers.get(key);
-    if (ledger === undefined) {
-      ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
+    return this.#reviewCategoryLedgers.obtain(`${definition.kind}\n${definition.promptContractDigest}`, () => {
+      const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
       ledger.bindLaunch(this.#baselineAnalysis.launch);
-      this.#reviewCategoryLedgers.set(key, ledger);
-    }
-    return ledger;
+      return ledger;
+    });
   }
 
   /** One category's Task, latest Result Set Revision, history and update controls; `revisionId` opens one exact revision read-only. */
@@ -4342,12 +4351,7 @@ export class EditorialStore {
     if (entry.executor === 'factual-review-kind') return this.#factualReview;
     requireStore(entry.executor === 'review-category-contract', 'REVIEW_CATEGORY_NOT_TASK_BACKED', '这一类没有自己的任务账本。');
     const input = reviewCategoryContractInput(entry);
-    const key = JSON.stringify(input);
-    let definition = this.#reviewCategoryDefinitions.get(key);
-    if (definition === undefined) {
-      definition = this.#analysisCall(() => reviewCategoryKindDefinition(input));
-      this.#reviewCategoryDefinitions.set(key, definition);
-    }
+    const definition = this.#reviewCategoryDefinitions.obtain(JSON.stringify(input), () => this.#analysisCall(() => reviewCategoryKindDefinition(input)));
     return this.reviewCategoryLedger(definition);
   }
 
