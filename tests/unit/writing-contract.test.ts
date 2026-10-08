@@ -171,7 +171,7 @@ describe('Writing Contract v1 — the reference bound (KB-004)', () => {
     expect(exemplarCopied(draft(edited(source, 5)), exemplar)).toBeNull();
   });
 
-  it('(b) refuses a near-copied paragraph inside a long draft: half the shingles of one 200-character span', () => {
+  it('(b) refuses a near-copied paragraph inside a long draft: 30% of the shingles of one 200-character span', () => {
     const source = synthetic(700);
     const exemplar = input({ exemplars: [{ bookTitle: '范例书', version: 3, text: source, excerpt: false }] });
     const long = synthetic(1800, 0x6000);
@@ -181,7 +181,11 @@ describe('Writing Contract v1 — the reference bound (KB-004)', () => {
     expect(copied).toMatchObject({ exemplar: 0, kind: 'span' });
     expect(copied?.kind === 'span' ? copied.share : 0).toBeGreaterThanOrEqual(EXEMPLAR_SPAN_SHARE);
     const detail = parseWritingSynthesis(JSON.stringify({ schema: WRITING_SYNTHESIS_RESULT_SCHEMA, title: '标题', sections: [{ heading: '一', paragraphs: [long.slice(0, 500), edited(source.slice(0, 590), 12), long.slice(500, 1000)] }] }), exemplar);
-    expect(detail.ok ? '' : detail.detail).toMatch(new RegExp(`^草稿与范例《范例书》版本 3 在草稿的一段 ${EXEMPLAR_SPAN} 字中，${EXEMPLAR_SHINGLE} 字片段重合达 \\d+%（不少于 50% 即算照抄）；范例只参照，不复制，这份草稿不予采用。$`, 'u'));
+    expect(detail.ok ? '' : detail.detail).toMatch(new RegExp(`^草稿与范例《范例书》版本 3 在草稿的一段 ${EXEMPLAR_SPAN} 字中，${EXEMPLAR_SHINGLE} 字片段重合达 \\d+%（不少于 30% 即算照抄）；范例只参照，不复制，这份草稿不予采用。$`, 'u'));
+    // Edits every nine characters are still caught inside a long draft; every eight pass there (a known limit).
+    const within = (period: number) => ({ title: '标题', sections: [{ heading: '一', paragraphs: [long.slice(0, 900), edited(source.slice(0, 600), period), long.slice(900)] }] });
+    expect(exemplarCopied(within(9), exemplar)).toMatchObject({ exemplar: 0, kind: 'span' });
+    expect(exemplarCopied(within(8), exemplar)).toBeNull();
     // Ordinary prose that shares a few common phrases with the exemplar, here and there, is the draft's own.
     const phrases = [0, 120, 260, 400, 530].map((at) => source.slice(at, at + 8));
     const prose = { title: '标题', sections: [{ heading: '一', paragraphs: phrases.map((phrase, index) => `${long.slice(index * 300, index * 300 + 280)}${phrase}`) }] };

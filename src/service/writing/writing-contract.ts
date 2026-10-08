@@ -60,7 +60,7 @@ export const EXEMPLAR_SHINGLE = 6;
 export const EXEMPLAR_SHINGLE_SHARE = 0.25;
 /** …or, in any span of this many characters of the draft, this share or more of the span's shingles in one exemplar (#688 re-review). */
 export const EXEMPLAR_SPAN = 200;
-export const EXEMPLAR_SPAN_SHARE = 0.5;
+export const EXEMPLAR_SPAN_SHARE = 0.3;
 /** A Task whose exemplar no longer gives the text its reference pinned is not started again; the editor prepares a new one. */
 export const WRITING_EXEMPLAR_MOVED = '这次起草参照的范例已不在本机，不能再开始；可以用「新建文档…」重新准备。' as const;
 
@@ -476,9 +476,9 @@ export type ExemplarCopy =
  *   distinct shingles stand in one exemplar — a draft that is mostly a lightly edited exemplar — or, in any
  *   {@link EXEMPLAR_SPAN}-character span of the draft, {@link EXEMPLAR_SPAN_SHARE} or more of the span's shingles do — a
  *   near-copied paragraph inside a long draft. An edit every n characters keeps n − 6 clean shingles of every n (n ≥ 13 is a
- *   verbatim run), so a draft that is all such a copy is caught from n = 8 and a paragraph inside a long draft at n = 12. The
- *   known limits: edits every 5 characters or fewer leave no shingle in common; every 6 or 7 pass however much is copied;
- *   every 8 to 11 pass inside a long draft.
+ *   verbatim run), so a draft that is all such a copy is caught from n = 8 and a paragraph inside a long draft from n = 9.
+ *   The known limits: edits every 5 characters or fewer leave no shingle in common; every 6 or 7 pass however much is
+ *   copied; every 8 passes inside a long draft.
  * - (c) House boilerplate is no one's copy: a run that stands in two or more exemplars — each another Book's, one per Book —
  *   or one of digits and ASCII letters only, or one touching an ISBN-like run of the draft.
  * - (d) A run the Book's own reference words share — its title, a character's name, its synopsis, its evaluation's words — is

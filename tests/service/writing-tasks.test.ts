@@ -13,7 +13,7 @@ import {
   EVALUATION_REWRITE_SCHEMA_VERSION,
   WRITING_TASK_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
-import { WRITING_NOT_DRAFTED_LABEL, WRITING_NO_RULE } from '../../src/service/task-plan.js';
+import { WRITING_EXEMPLAR_GONE_LABEL, WRITING_EXEMPLAR_GONE_SUFFIX, WRITING_NOT_DRAFTED_LABEL, WRITING_NO_RULE } from '../../src/service/task-plan.js';
 import { WRITING_EXEMPLAR_MOVED, WRITING_TASK_TRIGGER_SQL, writingDraftBlocks } from '../../src/service/writing-tasks.js';
 import { WRITING_EXEMPLAR_REFUSAL_PREFIX } from '../../src/service/writing/writing-kind.js';
 import {
@@ -464,9 +464,11 @@ describe('写作任务 over the real store on exact sample1', () => {
       expect(promotionType.prepare).toEqual({ allowed: true, mode: 'writing-again' });
       expect(promotionType.drafted!.revisionId).toBe(parts!.draftedRevision);
       expect(promotionType.exemplars.count).toBe(0);
-      // Its plan still reads as it was frozen (this data's own connection is another, which the plan says) and starting it is refused.
+      // Its plan still reads as it was frozen, says the 范例 is gone, and its bar offers no start — only why.
       const plan = target.inspectTaskPlan({ bookId: parts!.bookId, kind: 'writing', ref: third!.taskIntent!.taskIntentId });
-      expect(plan.scope.reference[2]).toBe('参照本社 1 份宣传文章范例（只参照，不照抄）：《范例来源书》版本 1');
+      expect(plan.scope.reference[2]).toBe(`参照本社 1 份宣传文章范例（只参照，不照抄）：《范例来源书》版本 1${WRITING_EXEMPLAR_GONE_SUFFIX}`);
+      expect(plan.state).toEqual({ key: 'ready', label: WRITING_EXEMPLAR_GONE_LABEL });
+      expect(plan.start).toMatchObject({ readiness: 'unavailable', planEnvelopeDigest: null, unavailableReason: WRITING_EXEMPLAR_MOVED });
       expect(target.inspectWriting(parts!.bookId)).toMatchObject({ planEnvelope: { digest: third!.planEnvelope!.digest } });
       expect(await refusal(() => target.authorizeWriting(parts!.bookId, third!.taskIntent!.taskIntentId, third!.planEnvelope!.digest)))
         .toBe(`WRITING_EXEMPLAR_MOVED:${WRITING_EXEMPLAR_MOVED}`);

@@ -4953,7 +4953,7 @@ export class EditorialStore {
       requireStore(latest !== null && projection !== null && projection.taskIntent !== null && checkpoint !== null, 'TASK_PLAN_UNAVAILABLE', '写作任务还没有准备计划。');
       current(projection.taskIntent.taskIntentId);
       const blocks = this.#analysisCall(() => latest.ledger.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
-      const plan = this.#taskPlanCall(() => writingPlan({ projection, bookTitle, blocks, input: latest.task.input }));
+      const plan = this.#taskPlanCall(() => writingPlan({ projection, bookTitle, blocks, input: latest.task.input, exemplarsHere: latest.task.exemplarsReadable }));
       return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     if (input.kind === 'initial-evaluation') {

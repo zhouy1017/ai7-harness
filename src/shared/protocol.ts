@@ -5189,7 +5189,7 @@ export interface TaskPlanRunControlProjection {
  *   yet, so its start is disabled with that reason;
  * - `started`: an authorization exists — the bar is the Run's state (AUTH-007).
  */
-export type TaskPlanStartReadiness = 'ready' | 'record-only' | 'no-route' | 'needs-connection' | 'changed' | 'offline' | 'started';
+export type TaskPlanStartReadiness = 'ready' | 'record-only' | 'no-route' | 'needs-connection' | 'changed' | 'offline' | 'started' | 'unavailable';
 
 /**
  * What one Reconnect Preflight did (Issue #502; OFF-007, OFF-008, OFF-009): each waiting Run is admitted to the
@@ -5219,6 +5219,11 @@ export interface TaskPlanStartProjection {
    * `null` unless the plan changed and can be reconfirmed.
    */
   reconfirm: null | { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null };
+  /**
+   * Why this plan can never be started, with readiness `unavailable` (Issue #432 re-review): a writing Task whose 范例 is no
+   * longer here. Absent or `null` for every other plan.
+   */
+  unavailableReason?: string | null;
 }
 
 /** One editorial business step and what it leaves behind (V2-UX-PLAN-003). */

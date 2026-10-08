@@ -34,7 +34,7 @@ import type { Connectivity } from './connectivity.js';
 import { PLAN_MOVED_LABEL } from './reconnect-preflight.js';
 import { graphemeCount, sliceGraphemes } from './analysis/factual-review-contract.js';
 import type { ReviewRunPlanFacts } from './review/review-runs.js';
-import { EXEMPLAR_COPY_WINDOW, writingExemplarLine, type WritingContractInput } from './writing/writing-contract.js';
+import { EXEMPLAR_COPY_WINDOW, WRITING_EXEMPLAR_MOVED, writingExemplarLine, type WritingContractInput } from './writing/writing-contract.js';
 
 /**
  * The Task Drawer's plan projection (Issue #418, plan slice S72; editor-surfaces §6 ③, V2-UX-PLAN-001 to
@@ -1098,6 +1098,10 @@ export function writingTaskStateLabel(projection: WritingProjection): string {
   return writingState(projection).label;
 }
 
+/** A writing Task whose 范例 is no longer here (#688 re-review): its state, and what its 参考 line adds. */
+export const WRITING_EXEMPLAR_GONE_LABEL = '不能开始 · 范例已不在本机' as const;
+export const WRITING_EXEMPLAR_GONE_SUFFIX = '——这些范例已不在本机，这次起草不能再开始' as const;
+
 /** 快速开始 of a writing Task waits for its 默认执行规则 (S84b): until then the plan says so where the rule would be set. */
 export const WRITING_NO_RULE = '写作任务还不能设为快速开始默认：写作任务的默认执行规则随下一步提供；每次起草都先看计划，再开始。';
 
@@ -1105,7 +1109,7 @@ export const WRITING_NO_RULE = '写作任务还不能设为快速开始默认：
  * What a writing Task references, in the plan's words (DELIV-007): each part of its frozen reference set as it is there, or
  * that the Book has none — read from the contract input, never from anything the Task did not freeze.
  */
-export function writingReferenceLines(input: WritingContractInput): string[] {
+export function writingReferenceLines(input: WritingContractInput, exemplarsHere = true): string[] {
   const named = (list: ReadonlyArray<string>, none: string): string => (list.length === 0 ? none : list.join('、'));
   const synopsis = input.synopsis;
   const evaluation = input.evaluation;
@@ -1118,7 +1122,8 @@ export function writingReferenceLines(input: WritingContractInput): string[] {
       : `定稿评估的结论「${evaluation.conclusion}」与主要优点 ${evaluation.strengths.length} 条${evaluation.market === null
         ? '（这一版没有 AI7 初评的市场部分）'
         : `，营销要点：目标读者 ${evaluation.market.readers.length} 条、差异化卖点 ${evaluation.market.sellingPoints.length} 条、渠道与策略 ${evaluation.market.channels.length} 条`}`,
-    writingExemplarLine(input.type.label, input.exemplars),
+    // A 范例 the Task referenced and this data no longer holds is said so where it is named (#688 re-review).
+    exemplarsHere ? writingExemplarLine(input.type.label, input.exemplars) : `${writingExemplarLine(input.type.label, input.exemplars)}${WRITING_EXEMPLAR_GONE_SUFFIX}`,
     `图书信息：《${input.book.title}》 · 作者：${named(input.book.authors, '未填写')} · 责编：${named(input.book.editors, '未填写')} · 书系：${named(input.book.series, '不在任何书系中')}`,
     `你写的受众「${input.audience}」、渠道「${input.channel}」${input.requirements === null ? '' : `与其他要求「${input.requirements}」`}`,
   ];
@@ -1137,9 +1142,12 @@ export function writingPlan(input: {
   bookTitle: string;
   blocks: ReadonlyArray<ManifestBlockInput>;
   input: WritingContractInput;
+  /** Whether every 范例 the Task referenced still gives the text it pinned; when not, the plan can never be started. */
+  exemplarsHere?: boolean;
 }): TaskPlanProjection {
   const { projection, bookTitle, blocks } = input;
   const task = input.input;
+  const exemplarsHere = input.exemplarsHere ?? true;
   const intent = projection.taskIntent;
   const checkpoint = projection.checkpoint;
   const manifest = projection.coverageManifest;
@@ -1157,9 +1165,13 @@ export function writingPlan(input: {
   const ceiling = provider.runBudgetCeiling;
   const revision = projection.planRevision;
   const boundary = envelope.boundary;
-  const state = writingState(projection);
+  const gone = !exemplarsHere && projection.authorization === null;
+  const state = gone ? { key: 'ready' as const, label: WRITING_EXEMPLAR_GONE_LABEL } : writingState(projection);
   const needsModelConnection = route.kind === 'opencode-go';
-  const start: TaskPlanStartProjection = projection.authorization !== null
+  // A Task whose 范例 is no longer here is never started (#688 re-review): the bar says why, and offers nothing that starts it.
+  const start: TaskPlanStartProjection = gone
+    ? { readiness: 'unavailable', needsModelConnection, planEnvelopeDigest: null, categoryDigests: [], reconfirm: null, unavailableReason: WRITING_EXEMPLAR_MOVED }
+    : projection.authorization !== null
     ? startedBar(needsModelConnection)
     : !projection.actions.canAuthorize
       ? { readiness: 'changed', needsModelConnection, planEnvelopeDigest: null, categoryDigests: [], reconfirm: null }
@@ -1169,7 +1181,7 @@ export function writingPlan(input: {
     bookId: projection.bookId,
     kind: 'writing',
     ref: intent.taskIntentId,
-    state: revision !== null && projection.authorization === null ? { key: 'changed', label: '计划已变化' } : state,
+    state: !gone && revision !== null && projection.authorization === null ? { key: 'changed', label: '计划已变化' } : state,
     planVersion: version.ordinal,
     goal: {
       sentence: `为《${bookTitle}》起草「${typeLabel}」：受众「${task.audience}」，渠道「${task.channel}」`,
@@ -1178,7 +1190,7 @@ export function writingPlan(input: {
     },
     scope: {
       process: `《${bookTitle}》全书 · ${groupedCount(reading.graphemes)} 字 · ${units} 个阅读范围`,
-      reference: writingReferenceLines(task),
+      reference: writingReferenceLines(task, exemplarsHere),
       send: live
         ? `全书各阅读范围的稿件正文（${units} 个）、上面列出的参考材料——其中包括其他图书的范例原文——与你写的受众、渠道和要求，以及汇总时各处段落的说明`
         : '不发送任何内容',

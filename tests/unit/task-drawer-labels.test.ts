@@ -389,6 +389,17 @@ describe('the authorization bar (S74a)', () => {
     expect(action(noRoute, 'start')?.disabledReason).toBeNull();
   });
 
+  it('says why a plan can never be started, beside a disabled 开始任务, and offers nothing that starts it (Issue #432 re-review)', () => {
+    const reason = '这次起草参照的范例已不在本机，不能再开始；可以用「新建文档…」重新准备。';
+    const view = taskBarView(barOf({ readiness: 'unavailable', planEnvelopeDigest: null, unavailableReason: reason }));
+    expect(names(view)).toEqual(['start']);
+    expect(action(view, 'start')?.disabledReason).toBe(reason);
+    expect(view.note).toBe(reason);
+    expect(view.statement).toBeNull();
+    // A plan that names no reason of its own still says it cannot start.
+    expect(taskBarView(barOf({ readiness: 'unavailable', planEnvelopeDigest: null })).note).toBe('这份计划不能再开始。');
+  });
+
   it('keeps 开始任务 disabled with the reason and offers 去设置连接 while the model is not connected (MODEL-008)', () => {
     const view = taskBarView(barOf({ readiness: 'needs-connection', needsModelConnection: true, planEnvelopeDigest: null }, { state: { key: 'unconnected', label: '模型未连接' } }));
     expect(names(view)).toEqual(['start', 'connect', 'revise', 'save-draft']);
