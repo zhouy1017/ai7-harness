@@ -3954,10 +3954,11 @@ export class EditorialStore {
   readonly #reviewCategoryLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
   /** The kind definition of each configured category a Review Run snapshotted, by its contract input; bounded (#649). */
   readonly #reviewCategoryDefinitions = new RecentCache<AnalysisKindDefinition>(REVIEW_CATEGORY_CACHE_CAPACITY);
-  /** 审稿意见 (Issue #429, S81c): one ledger per frozen reader's report contract, made when first asked for. */
-  readonly #readersReportLedgers = new Map<string, BaselineAnalysisStore>();
-  /** The ledger each 审稿意见 preparation in flight belongs to, by its work. */
-  readonly #readersReportWork = new Map<string, BaselineAnalysisStore>();
+  /**
+   * 审稿意见 (Issue #429, S81c): one ledger per frozen reader's report contract, made when first asked for; bounded as the
+   * category ledgers are (#672), and a preparation in flight is found on the ledger that holds it.
+   */
+  readonly #readersReportLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
   #readersReports!: ReadersReports;
   readonly #editorialMarks: EditorialMarkStore;
   readonly #manuscriptApply: ManuscriptApplyStore;
@@ -5332,7 +5333,6 @@ export class EditorialStore {
     this.#initialEvaluation.prepare({ phase: 'cancel-all' });
     for (const ledger of this.#reviewCategoryLedgers.values()) ledger.prepare({ phase: 'cancel-all' });
     for (const ledger of this.#readersReportLedgers.values()) ledger.prepare({ phase: 'cancel-all' });
-    this.#readersReportWork.clear();
     for (const workId of Array.from(this.#reimportPreparationWork.keys())) {
       this.cancelManuscriptReimportPreparationWork(workId);
     }
@@ -6859,19 +6859,25 @@ export class EditorialStore {
   // ---- 审稿意见 (Issue #429, plan slice S81c; V2-UX-EVAL-013; editor-surfaces §5 ②C) -------------------------------------
 
   /**
-   * The reader's report ledger of one frozen contract — a template and one 定稿 version's words — made when first asked for and
-   * kept: a ledger holds the preparations in flight, so the same contract keeps finding the same ledger, as a review category's
-   * does. It takes the launch the baseline ledger was bound to.
+   * The reader's report ledger of one frozen contract — a template and one 定稿 version's words — made when first asked for. As
+   * a review category's, only the `REVIEW_CATEGORY_CACHE_CAPACITY` most recently used are kept besides those with a preparation
+   * in flight, which only that instance holds (Issue #672); any other is made afresh from the Book database and reads exactly
+   * what the one let go would have. It takes the launch the baseline ledger was bound to.
    */
-  #readersReportLedger(input: ReadersReportContractInput): BaselineAnalysisStore {
+  readersReportLedger(input: ReadersReportContractInput): BaselineAnalysisStore {
+    this.#assertAvailable();
     const definition = this.#analysisCall(() => readersReportKindDefinition(input));
-    let ledger = this.#readersReportLedgers.get(definition.promptContractDigest);
-    if (ledger === undefined) {
-      ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
+    return this.#readersReportLedgers.obtain(definition.promptContractDigest, () => {
+      const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
       ledger.bindLaunch(this.#baselineAnalysis.launch);
-      this.#readersReportLedgers.set(definition.promptContractDigest, ledger);
-    }
-    return ledger;
+      return ledger;
+    });
+  }
+
+  /** The kept reader's report ledger that holds the preparation `workId`, if one does: a ledger preparing is never let go. */
+  #readersReportLedgerPreparing(workId: string): BaselineAnalysisStore | undefined {
+    for (const ledger of this.#readersReportLedgers.values()) if (ledger.holdsPreparation(workId)) return ledger;
+    return undefined;
   }
 
   #readersReportCall<T>(operation: () => T): T {
@@ -6890,12 +6896,12 @@ export class EditorialStore {
   #readersReportTaskOf(taskIntentId: string): { task: StoredReadersReportTask; ledger: BaselineAnalysisStore } | null {
     let task = this.#readersReportCall(() => this.#readersReports.task(taskIntentId));
     if (task === null) return null;
-    let ledger = this.#readersReportLedger(task.input);
+    let ledger = this.readersReportLedger(task.input);
     const planContract = this.#readersReportCall(() => this.#readersReports.planContract(taskIntentId));
     if (planContract !== null && planContract !== task.promptContractSha256) {
       task = this.#readersReportCall(() => this.#readersReports.task(taskIntentId, planContract));
       requireStore(task !== null, 'READERS_REPORT_RECORD_INVALID', '审稿意见任务的计划与它的记录不一致。');
-      ledger = this.#readersReportLedger(task.input);
+      ledger = this.readersReportLedger(task.input);
     }
     return { task, ledger };
   }
@@ -6953,7 +6959,7 @@ export class EditorialStore {
     requireStore(this.#documentCall(() => this.#productionDocuments.documentOfType(bookId, readersReportDocumentTypeId(template))) === undefined,
       'READERS_REPORT_DRAFT_EXISTS', `这本书已经有「${READERS_REPORT_TEMPLATE_LABELS[template]}」的草稿；请打开它继续修改。`);
     const input = this.#readersReportCall(() => readersReportContractInput(template, basis, this.#readersReportExemplars()));
-    const ledger = this.#readersReportLedger(input);
+    const ledger = this.readersReportLedger(input);
     const latest = this.#latestReadersReport(bookId);
     const mode = latest === null || latest.projection.resultSetRevision === null ? 'readers-report-first' : 'readers-report-again';
     const result = this.#analysisCall(() => ledger.prepare({
@@ -6975,22 +6981,21 @@ export class EditorialStore {
       contract: input,
       promptContractSha256: ledger.definition.promptContractDigest,
     })));
-    if (result.workId !== null) this.#readersReportWork.set(result.workId, ledger);
     return { ...result, projection: result.projection as ReadersReportProjection | null };
   }
 
   advanceReadersReportPreparationWork(workId: string): AnalysisPreparationResult<ReadersReportProjection> {
-    const ledger = this.#readersReportWork.get(workId);
+    this.#assertAvailable();
+    const ledger = this.#readersReportLedgerPreparing(workId);
     requireStore(ledger !== undefined, 'ANALYSIS_PREPARATION_NOT_FOUND', '审稿意见的计划准备已不存在。');
     const result = this.#analysisCall(() => ledger.prepare({ phase: 'advance', workId }));
-    if (result.done) this.#readersReportWork.delete(workId);
     return { ...result, projection: result.projection as ReadersReportProjection | null };
   }
 
   cancelReadersReportPreparationWork(workId: string): boolean {
-    const ledger = this.#readersReportWork.get(workId);
+    this.#assertAvailable();
+    const ledger = this.#readersReportLedgerPreparing(workId);
     if (ledger === undefined) return false;
-    this.#readersReportWork.delete(workId);
     this.#analysisCall(() => ledger.prepare({ phase: 'cancel', workId }));
     return true;
   }
@@ -7014,7 +7019,7 @@ export class EditorialStore {
     this.#assertAvailable();
     const any = this.#readersReportCall(() => this.#readersReports.anyTask());
     if (any === null) return { settled: 0 };
-    return { settled: this.#analysisCall(() => this.#readersReportLedger(any.input).reconcileStoppedRuns()).settled };
+    return { settled: this.#analysisCall(() => this.readersReportLedger(any.input).reconcileStoppedRuns()).settled };
   }
 
   /**

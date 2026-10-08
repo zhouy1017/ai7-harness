@@ -1939,6 +1939,16 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
     validateAnalysisLedgerSchema(db);
     return advanceToTerminalRevision(db);
   }
+  if (version === INITIAL_EVALUATION_SCHEMA_VERSION || version === DIALOGUE_SCHEMA_VERSION || version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION) {
+    // Revisions 60 (Issue #52, S17a) and 61 (Issue #64, S29b) add no task-authorization or analysis relation: a revision-59,
+    // revision-60 or revision-61 store carries the ledger revision 59 left, validated as exactly that, and revision 62's
+    // rebuild of the three kind-coupled relations brings it to the terminal shape and stamps the terminal version. Revision 59
+    // came long after the four widenings below, so it is checked exactly before them: a store stamped 59, 60 or 61 that holds
+    // an older text of one of those relations is not one AI7 wrote, and is refused rather than widened (Issue #672).
+    validateJ03TaskAuthorizationSchema(db);
+    validateRevision59AnalysisLedgerSchema(db);
+    return migrateAnalysisLedgerToRevision62(db);
+  }
   // Revisions 30 to 32 widen the Run states, the Run Authorizations' origin and the Task Outcomes first, for every
   // store that has an analysis ledger: each revision from 15 up carries them as revision 15 created them or as an
   // earlier one of these widenings left them, so once widened, every older revision's own validation below reads
@@ -1980,14 +1990,6 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
     validateJ03TaskAuthorizationSchema(db);
     validateRevision58AnalysisLedgerSchema(db);
     return migrateAnalysisLedgerToRevision59(db);
-  }
-  if (version === INITIAL_EVALUATION_SCHEMA_VERSION || version === DIALOGUE_SCHEMA_VERSION || version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION) {
-    // Revisions 60 (Issue #52, S17a) and 61 (Issue #64, S29b) add no task-authorization or analysis relation: a revision-59,
-    // revision-60 or revision-61 store carries the ledger revision 59 left, validated as exactly that, and revision 62's
-    // rebuild of the three kind-coupled relations brings it to the terminal shape and stamps the terminal version.
-    validateJ03TaskAuthorizationSchema(db);
-    validateRevision59AnalysisLedgerSchema(db);
-    return migrateAnalysisLedgerToRevision62(db);
   }
   if (version === FACTUAL_REVIEW_SCHEMA_VERSION || version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION ||
       version === EDITORIAL_MARK_SCHEMA_VERSION || version === MANUSCRIPT_EFFECT_SCHEMA_VERSION) {
