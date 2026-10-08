@@ -34,13 +34,17 @@ export interface AssembledToolCall {
  * The text and tool calls of an assistant message whose blocks are only text and tool calls, with at least one tool call;
  * `null` for any other message. Reasoning, images, and results are not part of a tool-call message.
  */
-export function assistantToolCalls(message: AssembledMessage): { text: string; calls: AssembledToolCall[] } | null {
+export function assistantToolCalls(message: AssembledMessage): { text: string; reasoning: string; calls: AssembledToolCall[] } | null {
   if (message.role !== 'assistant') return null;
   const texts: string[] = [];
+  const reasoning: string[] = [];
   const calls: AssembledToolCall[] = [];
   for (const block of message.content) {
     if (block.type === 'text' && typeof block.text === 'string') {
       texts.push(block.text);
+    } else if (block.type === 'reasoning' && typeof block.text === 'string') {
+      // The reasoning a thinking-mode model wrote beside its calls travels back with them (the review of #671).
+      reasoning.push(block.text);
     } else if (block.type === 'tool-call' && typeof block.id === 'string' && block.id.length > 0 &&
         typeof block.name === 'string' && typeof block.arguments === 'string') {
       calls.push({ id: block.id, name: block.name, arguments: block.arguments });
@@ -48,7 +52,7 @@ export function assistantToolCalls(message: AssembledMessage): { text: string; c
       return null;
     }
   }
-  return calls.length === 0 ? null : { text: texts.join(''), calls };
+  return calls.length === 0 ? null : { text: texts.join(''), reasoning: reasoning.join(''), calls };
 }
 
 /**

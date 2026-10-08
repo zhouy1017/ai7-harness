@@ -19,7 +19,7 @@ import {
   type ProviderModelProfile,
 } from './model-profile.js';
 import { assistantToolCalls, messageText, toolResultOf, type AssembledModelPayload } from './payload.js';
-import { normalizeModelResponse, type CanonicalModelResult } from './response-normalization.js';
+import { normalizeModelResponse, type CanonicalModelResult, type NormalizeOptions } from './response-normalization.js';
 
 /**
  * The AI7-owned Provider adapter, revision 1. One adapter serves every remote route and all four
@@ -283,6 +283,7 @@ function chatCompletionsConversation(payload: AssembledModelPayload): Array<Reco
       messages.push({
         role: 'assistant',
         content: calls.text.length > 0 ? calls.text : null,
+        ...(calls.reasoning.length > 0 ? { reasoning_content: calls.reasoning } : {}),
         tool_calls: calls.calls.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments } })),
       });
       continue;
@@ -546,6 +547,7 @@ export function parseProviderResponse(
   codes: DshFailureCodes,
   profile: ProviderRouteProfile,
   model: ProviderModelProfile,
+  options: NormalizeOptions = {},
 ): ProviderResponseOutcome {
   const errorText = errorTextOf(body);
   if (status === 401 || status === 403) return { kind: 'failure', code: codes.INVALID_CREDENTIAL_CODE, message: '模型服务拒绝了凭据。', status };
@@ -558,7 +560,7 @@ export function parseProviderResponse(
   }
   if (status >= 500) return { kind: 'failure', code: AI7_FAILURE_CODES.PROVIDER_ERROR, message: '模型服务返回服务端错误。', status };
   if (status !== 200) return { kind: 'failure', code: AI7_FAILURE_CODES.INVALID_RESPONSE, message: '模型服务返回了无法分类的状态。', status };
-  return normalizeModelResponse(model, body);
+  return normalizeModelResponse(model, body, options);
 }
 
 /** Classify a transport-level rejection (network denial, abort, other) into failure facts. */
@@ -715,7 +717,9 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
         } catch {
           body = null;
         }
-        return parseProviderResponse(response.status, body, this.#deps.codes, this.#profile, this.#modelProfile);
+        // Tool calls are read only for a request that offered tools (Issue #473); to any other the response reads as before.
+        return parseProviderResponse(response.status, body, this.#deps.codes, this.#profile, this.#modelProfile,
+          { toolCallsOffered: (options.tools ?? []).length > 0 });
       });
     } catch (error) {
       const classified = classifyTransportError(error);
@@ -726,9 +730,6 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       yield fail(outcome.code, outcome.message, outcome.status);
       return;
     }
-    // A request for tools answers only a request that offered tools (Issue #473): to a request that carried none it is a
-    // response with no usable content, exactly as it read before tool calls were parsed at all.
-    if (outcome.kind === 'tool-calls' && (options.tools ?? []).length === 0) outcome = { kind: 'malformed', reason: 'answer-channel-absent' };
     this.#lastResult = outcome;
     // A response that matched no declared channel is this route's `INVALID_RESPONSE`, exactly as it
     // was before the channels were declared; the canonical result records which channel was missing.
@@ -737,8 +738,15 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       return;
     }
     if (outcome.kind === 'tool-calls') {
-      // The text the model wrote beside its calls, then each call as one assembled block, in order; the loop executes them.
+      // The reasoning and the text the model wrote beside its calls, then each call as one assembled block, in order; the
+      // loop executes them, and the reasoning travels back with the calls in the next request.
       let index = 0;
+      if (outcome.reasoningText !== null) {
+        yield { type: 'block-start', index, blockType: 'reasoning' };
+        yield { type: 'reasoning-delta', index, text: outcome.reasoningText };
+        yield { type: 'block-end', index, block: { type: 'reasoning', text: outcome.reasoningText } };
+        index += 1;
+      }
       if (outcome.text.length > 0) {
         yield { type: 'block-start', index, blockType: 'text' };
         yield { type: 'text-delta', index, text: outcome.text };

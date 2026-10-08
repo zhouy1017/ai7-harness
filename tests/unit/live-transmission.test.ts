@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -84,54 +84,107 @@ describe('the ledger across slices and kinds', () => {
   });
 });
 
+const SEARCH_ORIGIN = 'parallel@search.parallel.ai';
+
 describe('platformToolCallOnce', () => {
-  it('sends a call once under an S87 item, keeps its snapshot, and answers the identical call from it', async () => {
+  async function opened(): Promise<{ cache: ProviderResultCache; snapshots: ResearchSnapshotCache }> {
     const cache = new ProviderResultCache(root);
     await cache.open();
     const snapshots = new ResearchSnapshotCache(root);
     await snapshots.open();
+    return { cache, snapshots };
+  }
+
+  it('sends a call once under an S87 item, keeps its snapshot, and answers the identical call from it', async () => {
+    const { cache, snapshots } = await opened();
     const bytes = new TextEncoder().encode('{"result":"x"}');
     let sent = 0;
-    const perform = async () => {
-      sent += 1;
-      return { url: 'https://search.parallel.ai/mcp', status: 200, contentType: 'application/json', bytes, text: '结果' };
+    let authorized = 0;
+    const call = {
+      authorize: () => { authorized += 1; return 'ok' as const; },
+      send: async () => {
+        sent += 1;
+        return { url: 'https://search.parallel.ai/mcp', status: 200, contentType: 'application/json', bytes, text: '结果' };
+      },
     };
-    const item = { kind: 'search-call' as const, purpose: 'factual-review', argumentsDigest: 'b'.repeat(64), host: 'search.parallel.ai' };
+    const item = { kind: 'search-call' as const, purpose: 'factual-review', argumentsDigest: 'b'.repeat(64), host: 'search.parallel.ai', origin: SEARCH_ORIGIN };
     let clock = 1_000;
-    const first = await platformToolCallOnce(cache, snapshots, item, perform, () => (clock += 7));
+    const first = await platformToolCallOnce(cache, snapshots, item, call, () => (clock += 7));
     expect(first).toMatchObject({ replayed: false, status: 200, snapshot: { text: '结果', url: 'https://search.parallel.ai/mcp', responseBytes: bytes.byteLength } });
-    const again = await platformToolCallOnce(cache, new ResearchSnapshotCache(root), item, perform);
+    const again = await platformToolCallOnce(cache, new ResearchSnapshotCache(root), item, call);
     expect(again).toMatchObject({ replayed: true, snapshot: { text: '结果' } });
     expect(sent).toBe(1);
+    // A replay authorizes nothing: no ticket is redeemed for a call that sends nothing.
+    expect(authorized).toBe(1);
     const digest = createHash('sha256').update(bytes).digest('hex');
     expect(cache.lines).toMatchObject([
       { itemId: 'S87/factual-review/1', kind: 'search-call', outcome: 'transmitted', host: 'search.parallel.ai', resultDigest: digest, resultBytes: bytes.byteLength, elapsedMs: 7 },
       { itemId: 'S87/factual-review/2', kind: 'search-call', outcome: 'replayed', resultDigest: digest },
     ]);
-    // Identities and counts only: the ledger never holds the text.
     expect(await readFile(join(root, PROVIDER_LEDGER_FILE), 'utf8')).not.toContain('结果');
+    // Another service or host never replays this one's answer.
+    expect(await snapshots.lookup('search-call', 'exa@mcp.exa.ai', item.argumentsDigest)).toBeNull();
+    await platformToolCallOnce(cache, snapshots, { ...item, origin: 'exa@mcp.exa.ai' }, call);
+    expect(sent).toBe(2);
+  });
+
+  it('claims no item and records nothing when the ticket does not redeem', async () => {
+    const { cache, snapshots } = await opened();
+    let sent = 0;
+    const refused = platformToolCallOnce(cache, snapshots,
+      { kind: 'fetch', purpose: 'factual-review', argumentsDigest: 'c'.repeat(64), host: 'example.org', origin: 'webfetch' },
+      {
+        authorize: () => { throw Object.assign(new Error('refused'), { code: 'PLATFORM_TOOL_TICKET_REFUSED' }); },
+        send: async () => { sent += 1; return { url: 'https://example.org/', status: 200, contentType: null, bytes: new Uint8Array(0), text: 'x' }; },
+      });
+    await expect(refused).rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
+    expect(sent).toBe(0);
+    expect(cache.lines).toEqual([]);
+    expect(cache.nextItemId('factual-review', 'S87')).toBe('S87/factual-review/1');
   });
 
   it('keeps nothing from an unusable or failed call, and records it as failed', async () => {
-    const cache = new ProviderResultCache(root);
-    await cache.open();
+    const { cache, snapshots } = await opened();
+    const item = { kind: 'fetch' as const, purpose: 'factual-review', argumentsDigest: 'c'.repeat(64), host: 'example.org', origin: 'webfetch' };
+    const unusable = await platformToolCallOnce(cache, snapshots, item,
+      { authorize: () => null, send: async () => ({ url: 'https://example.org/', status: 404, contentType: null, bytes: new Uint8Array(0), text: null }) });
+    expect(unusable).toMatchObject({ snapshot: null, status: 404, replayed: false });
+    await expect(platformToolCallOnce(cache, snapshots, item, { authorize: () => null, send: async () => { throw new Error('boom'); } })).rejects.toThrowError('boom');
+    expect(cache.lines.map((line) => [line.itemId, line.outcome])).toEqual([['S87/factual-review/1', 'failed'], ['S87/factual-review/2', 'failed']]);
+    expect(await snapshots.lookup('fetch', 'webfetch', item.argumentsDigest)).toBeNull();
+  });
+});
+
+describe('ResearchSnapshotCache', () => {
+  const snapshot = {
+    kind: 'fetch' as const, origin: 'webfetch', argumentsDigest: 'd'.repeat(64), url: 'https://example.org/', retrievedAt: '2026-10-08T00:00:00.000Z',
+    status: 200, contentType: 'text/plain', responseDigest: createHash('sha256').update('x').digest('hex'), responseBytes: 1,
+    bodyBase64: Buffer.from('x').toString('base64'), text: 'x',
+  };
+
+  it('refuses to keep bytes that do not match their digest, and keeps nothing half-written', async () => {
     const snapshots = new ResearchSnapshotCache(root);
     await snapshots.open();
-    const item = { kind: 'fetch' as const, purpose: 'factual-review', argumentsDigest: 'c'.repeat(64), host: 'example.org' };
-    const unusable = await platformToolCallOnce(cache, snapshots, item, async () => ({ url: 'https://example.org/', status: 404, contentType: null, bytes: new Uint8Array(0), text: null }));
-    expect(unusable).toMatchObject({ snapshot: null, status: 404, replayed: false });
-    await expect(platformToolCallOnce(cache, snapshots, item, async () => { throw new Error('boom'); })).rejects.toThrowError('boom');
-    expect(cache.lines.map((line) => [line.itemId, line.outcome])).toEqual([['S87/factual-review/1', 'failed'], ['S87/factual-review/2', 'failed']]);
-    expect(await snapshots.lookup('fetch', item.argumentsDigest)).toBeNull();
+    await expect(snapshots.store({ ...snapshot, responseDigest: 'e'.repeat(64) })).rejects.toMatchObject({ code: 'RESEARCH_SNAPSHOT_DIGEST_MISMATCH' });
+    await snapshots.store(snapshot);
+    expect(await snapshots.lookup('fetch', 'webfetch', snapshot.argumentsDigest)).toEqual(snapshot);
+    expect((await readdir(snapshots.root)).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+    expect(() => new ResearchSnapshotCache('relative')).toThrowError(/绝对路径/u);
   });
 
-  it('refuses a snapshot whose digest is not the digest of its bytes', async () => {
+  it('reads a torn, tampered, or foreign entry as a miss, which the next store overwrites', async () => {
     const snapshots = new ResearchSnapshotCache(root);
     await snapshots.open();
-    await expect(snapshots.store({
-      kind: 'fetch', argumentsDigest: 'd'.repeat(64), url: 'https://example.org/', retrievedAt: '2026-10-08T00:00:00.000Z', status: 200,
-      contentType: 'text/plain', responseDigest: 'e'.repeat(64), responseBytes: 1, bodyBase64: Buffer.from('x').toString('base64'), text: 'x',
-    })).rejects.toMatchObject({ code: 'RESEARCH_SNAPSHOT_DIGEST_MISMATCH' });
-    expect(() => new ResearchSnapshotCache('relative')).toThrowError(/绝对路径/u);
+    const path = snapshots.entryPath('fetch', 'webfetch', snapshot.argumentsDigest);
+    await writeFile(path, '{"kind":"fetch","ori', 'utf8');
+    expect(await snapshots.lookup('fetch', 'webfetch', snapshot.argumentsDigest)).toBeNull();
+    await writeFile(path, JSON.stringify({ ...snapshot, bodyBase64: Buffer.from('y').toString('base64') }), 'utf8');
+    expect(await snapshots.lookup('fetch', 'webfetch', snapshot.argumentsDigest)).toBeNull();
+    await writeFile(path, JSON.stringify({ ...snapshot, text: 7 }), 'utf8');
+    expect(await snapshots.lookup('fetch', 'webfetch', snapshot.argumentsDigest)).toBeNull();
+    await writeFile(path, JSON.stringify({ ...snapshot, origin: 'other' }), 'utf8');
+    expect(await snapshots.lookup('fetch', 'webfetch', snapshot.argumentsDigest)).toBeNull();
+    await snapshots.store(snapshot);
+    expect(await snapshots.lookup('fetch', 'webfetch', snapshot.argumentsDigest)).toEqual(snapshot);
   });
 });

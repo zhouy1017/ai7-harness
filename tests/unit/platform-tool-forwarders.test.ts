@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   EgressTicketBook,
   OPENCODE_GO_MODEL,
@@ -18,6 +18,7 @@ import type { PlatformToolFetch, PlatformToolHttpInit } from '../../src/service/
 import { declaredCharset, fetchPublicSource } from '../../src/service/provider/public-source-fetch.js';
 import {
   SEARCH_RESULT_MAX_CHARACTERS,
+  SEARCH_SERVICE_TIMEOUT_MS,
   capCharacters,
   forwardSearchCall,
   readSearchServiceAnswer,
@@ -192,6 +193,105 @@ describe('the webfetch owner', () => {
     await expect(run()).rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
     expect(calls).toHaveLength(1);
     expect(released).toBe(1);
+  });
+});
+
+describe('the forwarders\' bounds', () => {
+  /** A transport that never answers, and rejects with the abort reason when its signal fires. */
+  function hanging(seen: { aborted: boolean }): PlatformToolFetch {
+    return (_url, init) => new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => {
+        seen.aborted = true;
+        reject(init.signal.reason as Error);
+      }, { once: true });
+    });
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('gives a search 25 seconds and not one more', async () => {
+    vi.useFakeTimers();
+    const rule = await v7Rule();
+    const book = new EgressTicketBook();
+    const seen = { aborted: false };
+    const decision = evaluateSearchServiceCall({ host: rule.websearch.host, arguments: websearch, outboundDataCategory: 'public-or-synthetic' }, binding(rule), scope, book);
+    const pending = forwardSearchCall({ ticket: (decision as { ticket: SearchServiceTicket }).ticket, book, rule, arguments: websearch, fetch: hanging(seen) });
+    const settled = pending.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(SEARCH_SERVICE_TIMEOUT_MS - 1);
+    expect(seen.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await settled).toMatchObject({ code: 'PLATFORM_TOOL_TIMEOUT' });
+  });
+
+  it('gives a fetch the rule\'s seconds and not one more, releasing its host', async () => {
+    vi.useFakeTimers();
+    const rule = await v7Rule();
+    const book = new EgressTicketBook();
+    const seen = { aborted: false };
+    let released = 0;
+    const decision = evaluatePublicSourceFetch({ arguments: webfetch }, binding(rule), scope, book) as { ticket: PublicSourceTicket };
+    const settled = fetchPublicSource({ ticket: decision.ticket, book, rule, fetch: hanging(seen), admitHost: () => () => { released += 1; } })
+      .catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(rule.webfetch.timeoutSeconds * 1000 - 1);
+    expect(seen.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await settled).toMatchObject({ code: 'PLATFORM_TOOL_TIMEOUT' });
+    expect(released).toBe(1);
+  });
+
+  it('cancels an endless body the moment it passes the cap, pulling nothing after', async () => {
+    const rule = await v7Rule();
+    const small = { ...rule, webfetch: { ...rule.webfetch, maxBytes: 10 } };
+    const book = new EgressTicketBook();
+    const decision = evaluatePublicSourceFetch({ arguments: webfetch }, binding(small), scope, book) as { ticket: PublicSourceTicket };
+    let pulls = 0;
+    let cancelled = false;
+    const endless = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(new Uint8Array(4));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    }, { highWaterMark: 0 });
+    await expect(fetchPublicSource({
+      ticket: decision.ticket, book, rule: small, admitHost: () => () => undefined,
+      fetch: async () => new Response(endless, { status: 200, headers: { 'content-type': 'text/plain' } }),
+    })).rejects.toMatchObject({ code: 'PLATFORM_TOOL_BODY_TOO_LARGE' });
+    expect(cancelled).toBe(true);
+    // Three 4-byte chunks pass 10 bytes; at most the one read-ahead the stream machinery takes follows.
+    expect(pulls).toBeLessThanOrEqual(4);
+  });
+});
+
+describe('htmlToMarkdown on hostile markup', () => {
+  // A quadratic scan converted 80 KB of `<a` in about a second, so a megabyte would take minutes; a linear one takes
+  // milliseconds. The budget leaves room for a loaded guest and none for quadratic growth.
+  const MEGABYTE = 1024 * 1024;
+  const cases: Array<[string, string]> = [
+    ['unclosed tags', '<a'.repeat(MEGABYTE / 2)],
+    ['unclosed comments', '<!--'.repeat(MEGABYTE / 4)],
+    ['unclosed declarations', '<!x'.repeat(MEGABYTE / 3)],
+    ['stray angle brackets', '< '.repeat(MEGABYTE / 2)],
+    ['one endless tag', `<a ${' '.repeat(MEGABYTE)}`],
+    ['trailing blanks in pre', `<pre>${' '.repeat(MEGABYTE)}x</pre>`],
+    ['closed tags', '<b>x</b>'.repeat(MEGABYTE / 8)],
+  ];
+  for (const [name, html] of cases) {
+    it(`converts a megabyte of ${name} in linear time`, () => {
+      const started = performance.now();
+      htmlToMarkdown(html, 'https://example.org/');
+      expect(performance.now() - started).toBeLessThan(2_000);
+    });
+  }
+
+  it('keeps the text before an unclosed construct and drops what an unclosed comment hides', () => {
+    expect(htmlToMarkdown('<p>正文</p><a')).toBe('正文\n\n<a');
+    expect(htmlToMarkdown('<p>正文</p><!-- 未闭合 <p>隐藏</p>')).toBe('正文');
+    expect(htmlToMarkdown('a < b and c > d')).toBe('a < b and c > d');
   });
 });
 

@@ -12,6 +12,7 @@ import {
   evaluatePublicSourceFetch,
   evaluateSearchServiceCall,
   payloadDigest,
+  toolResultKey,
   type AdmittedToolResult,
   type EgressAttemptScope,
   type EgressBindingFacts,
@@ -65,13 +66,17 @@ function admitted(overrides: Partial<AdmittedToolResult> = {}): AdmittedToolResu
   return { callId: 'call_1', tool: 'websearch', sourceUrl: SEARCH_URL, sha256: sha(RESULT_TEXT), byteCount: Buffer.byteLength(RESULT_TEXT), ...overrides };
 }
 
+function results(...records: AdmittedToolResult[]): Map<string, AdmittedToolResult> {
+  return new Map(records.map((record) => [toolResultKey(record.callId, record.tool), record]));
+}
+
 function scope(overrides: Partial<EgressAttemptScope> = {}): EgressAttemptScope {
   return {
     currentBindingDigest: () => BINDING_DIGEST,
     acceptedOutputDigests: new Set(),
     ceilingState: () => 'within',
     acceptedToolCallDigests: new Set([assistantToolCallDigest(CALL_CONTENT)]),
-    admittedToolResults: new Map([['call_1', admitted()]]),
+    admittedToolResults: results(admitted()),
     breakerState: () => 'intact',
     citationAdmits: (url) => url === CITED,
     ...overrides,
@@ -113,7 +118,7 @@ describe('under the selected Provider Processing v5 every platform-tool path sti
     expect(evaluateEgress(payload(LOOP, false), v5, scope())).toMatchObject({ decision: 'refuse', reason: 'payload-out-of-scope' });
     expect(evaluateEgress(payload([user(UNIT), toolResult()], false), v5, scope())).toMatchObject({ decision: 'refuse', reason: 'payload-out-of-scope' });
     // Not even a refusal AI7 composed itself, which carries no URL to check: the rule alone keys the tool branch.
-    const composed = scope({ admittedToolResults: new Map([['call_1', admitted({ sourceUrl: null })]]) });
+    const composed = scope({ admittedToolResults: results(admitted({ sourceUrl: null })) });
     expect(evaluateEgress(payload(LOOP, false), v5, composed)).toMatchObject({ decision: 'refuse', reason: 'payload-out-of-scope' });
     expect(evaluateEgress(payload(LOOP, false), binding(await ruleOf('v7'), 'v8'), composed)).toMatchObject({ decision: 'transmit-remote' });
   });
@@ -167,9 +172,15 @@ describe('under a rule naming the platform tools (v7\'s block, selected by nothi
     const shell: AssembledContentBlock[] = [{ type: 'tool-call', id: 'call_1', name: 'shell', arguments: '{}' }];
     expect(evaluateEgress(payload([user(UNIT), toolCallMessage(shell), toolResult()]), named,
       scope({ acceptedToolCallDigests: new Set([assistantToolCallDigest(shell)]) }))).toMatchObject({ reason: 'payload-out-of-scope' });
+    // Reasoning written beside the calls travels back with them, under the digest that covers it; any other block does not.
     const reasoning: AssembledContentBlock[] = [{ type: 'reasoning', text: 'x' }, CALL_CONTENT[1]!];
     expect(evaluateEgress(payload([user(UNIT), toolCallMessage(reasoning), toolResult()]), named,
+      scope({ acceptedToolCallDigests: new Set([assistantToolCallDigest(reasoning)]) }))).toMatchObject({ decision: 'transmit-remote' });
+    expect(evaluateEgress(payload([user(UNIT), toolCallMessage([{ type: 'reasoning', text: 'y' }, CALL_CONTENT[1]!]), toolResult()]), named,
       scope({ acceptedToolCallDigests: new Set([assistantToolCallDigest(reasoning)]) }))).toMatchObject({ reason: 'payload-out-of-scope' });
+    const image: AssembledContentBlock[] = [{ type: 'image' }, CALL_CONTENT[1]!];
+    expect(evaluateEgress(payload([user(UNIT), toolCallMessage(image), toolResult()]), named,
+      scope({ acceptedToolCallDigests: new Set([assistantToolCallDigest(image)]) }))).toMatchObject({ reason: 'payload-out-of-scope' });
   });
 
   it('admits a tool result only by call id, URL, SHA-256, and byte count', async () => {
@@ -179,21 +190,40 @@ describe('under a rule naming the platform tools (v7\'s block, selected by nothi
     refused([user(UNIT), toolCallMessage(), toolResult(`${RESULT_TEXT}。`)]);
     refused([user(UNIT), toolCallMessage(), toolResult(RESULT_TEXT, 'call_2')]);
     refused([user(UNIT), toolCallMessage(), toolResult(RESULT_TEXT, 'call_1', 'call_2')]);
-    refused(LOOP, { admittedToolResults: new Map([['call_1', admitted({ byteCount: 1 })]]) });
-    refused(LOOP, { admittedToolResults: new Map([['call_1', admitted({ sha256: sha('x') })]]) });
-    refused(LOOP, { admittedToolResults: new Map([['call_1', admitted({ sourceUrl: 'https://search.parallel.ai.attacker.example/mcp' })]]) });
-    refused(LOOP, { admittedToolResults: new Map([['call_1', admitted({ sourceUrl: 'http://search.parallel.ai/mcp' })]]) });
+    refused(LOOP, { admittedToolResults: results(admitted({ byteCount: 1 })) });
+    refused(LOOP, { admittedToolResults: results(admitted({ sha256: sha('x') })) });
+    refused(LOOP, { admittedToolResults: results(admitted({ sourceUrl: 'https://search.parallel.ai.attacker.example/mcp' })) });
+    refused(LOOP, { admittedToolResults: results(admitted({ sourceUrl: 'http://search.parallel.ai/mcp' })) });
     refused(LOOP, { admittedToolResults: new Map() });
     // A result for a call no earlier message asked for, and a second result for one call.
     refused([user(UNIT), toolResult()]);
     refused([user(UNIT), toolCallMessage(), toolResult(), toolResult()]);
-    // A fetched page's URL must be one the attempt cited.
+    // A fetched page's URL must be one the attempt cited, and the result must be of the tool its call named.
+    const fetchCall: AssembledContentBlock[] = [{ type: 'tool-call', id: 'call_1', name: 'webfetch', arguments: `{"url":"${CITED}"}` }];
+    const fetchLoop = [user(UNIT), toolCallMessage(fetchCall), toolResult()];
+    const fetchScope = { acceptedToolCallDigests: new Set([assistantToolCallDigest(fetchCall)]) };
     const fetched = admitted({ tool: 'webfetch', sourceUrl: CITED });
-    expect(evaluateEgress(payload(LOOP), named, scope({ admittedToolResults: new Map([['call_1', fetched]]) }))).toMatchObject({ decision: 'transmit-remote' });
-    refused(LOOP, { admittedToolResults: new Map([['call_1', fetched]]), citationAdmits: () => false });
+    expect(evaluateEgress(payload(fetchLoop), named, scope({ ...fetchScope, admittedToolResults: results(fetched) }))).toMatchObject({ decision: 'transmit-remote' });
+    refused(fetchLoop, { ...fetchScope, admittedToolResults: results(fetched), citationAdmits: () => false });
+    refused(LOOP, { admittedToolResults: results(fetched) });
+    refused(fetchLoop, { ...fetchScope, admittedToolResults: results(admitted()) });
+    // A call id reused by a later call is refused, whatever the second call names.
+    const reused: AssembledContentBlock[] = [{ type: 'tool-call', id: 'call_1', name: 'websearch', arguments: '{"query":"另一个"}' }];
+    refused([user(UNIT), toolCallMessage(), toolResult(), toolCallMessage(reused), toolResult()],
+      { acceptedToolCallDigests: new Set([assistantToolCallDigest(CALL_CONTENT), assistantToolCallDigest(reused)]) });
     // A refusal AI7 composed itself carries no external bytes and no URL.
-    expect(evaluateEgress(payload(LOOP), named, scope({ admittedToolResults: new Map([['call_1', admitted({ sourceUrl: null })]]) })))
+    expect(evaluateEgress(payload(LOOP), named, scope({ admittedToolResults: results(admitted({ sourceUrl: null })) })))
       .toMatchObject({ decision: 'transmit-remote' });
+  });
+
+  it('ends a unit whose breaker tripped: the model is not asked again with the refusal in hand', async () => {
+    const named = binding(await ruleOf('v7'), 'v8');
+    expect(evaluateEgress(payload(LOOP), named, scope({ breakerState: () => 'tripped' })))
+      .toMatchObject({ decision: 'refuse', reason: 'circuit-breaker-tripped', detail: expect.stringContaining('联网核查未完成') });
+    // A payload that opens with the next unit's message is not the tripped unit's.
+    expect(evaluateEgress(payload([user(UNIT)]), named, scope({ breakerState: () => 'tripped' }))).toMatchObject({ decision: 'transmit-remote' });
+    // Under v5 the breaker is never consulted: nothing about it moves a text-only payload.
+    expect(evaluateEgress(payload([user(UNIT)], false), binding(await ruleOf('v5')), scope({ breakerState: () => 'tripped' }))).toMatchObject({ decision: 'transmit-remote' });
   });
 
   it('leaves the user and model branches exactly as strict as before', async () => {

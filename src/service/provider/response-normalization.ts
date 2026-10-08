@@ -142,11 +142,13 @@ function isBlockOfType(block: unknown, type: string): block is Record<string, un
 /**
  * The chat-completions reading: one choice, one message, the answer a string on it.
  */
-function normalizeMessageContentString(profile: ProviderModelProfile, body: unknown): CanonicalModelResult {
+function normalizeMessageContentString(profile: ProviderModelProfile, body: unknown, options: NormalizeOptions): CanonicalModelResult {
   if (!isRecord(body) || !Array.isArray(body.choices)) return { kind: 'malformed', reason: 'response-not-a-record' };
   const choice: unknown = body.choices[0];
   if (body.choices.length === 0 || !isRecord(choice)) return { kind: 'malformed', reason: 'choice-absent' };
-  if (profile.capabilities.toolCalling === 'function' && isRecord(choice.message) &&
+  // `tool_calls` is a channel only when the request offered tools to a function-calling model: to every other request the
+  // response reads exactly as it always has, its `content` an answer and its calls nothing.
+  if (options.toolCallsOffered === true && profile.capabilities.toolCalling === 'function' && isRecord(choice.message) &&
       Array.isArray(choice.message.tool_calls) && choice.message.tool_calls.length > 0) {
     return toolCallsOf(profile, body, choice.message);
   }
@@ -174,15 +176,17 @@ function toolCallsOf(profile: ProviderModelProfile, body: Record<string, unknown
         typeof entry.function.name !== 'string' || typeof entry.function.arguments !== 'string') {
       return { kind: 'malformed', reason: 'tool-calls-malformed' };
     }
+    // Two calls under one id would let one result answer both.
+    if (calls.some((call) => call.id === entry.id)) return { kind: 'malformed', reason: 'tool-calls-malformed' };
     calls.push({ id: entry.id, name: entry.function.name, arguments: entry.function.arguments });
   }
   if (message.content !== null && message.content !== undefined && typeof message.content !== 'string') {
     return { kind: 'malformed', reason: 'tool-calls-malformed' };
   }
-  const reasoning = profile.capabilities.reasoningChannel === 'message-reasoning-content' &&
-    typeof message.reasoning_content === 'string' && message.reasoning_content.length > 0
-    ? message.reasoning_content
-    : null;
+  // Whatever reasoning the model wrote beside its calls is kept, declared channel or not: a thinking-mode tool loop hands
+  // it back with the calls (the review of #671; the §7.7 live item confirms the gateway's requirement). It is never read
+  // as an answer.
+  const reasoning = typeof message.reasoning_content === 'string' && message.reasoning_content.length > 0 ? message.reasoning_content : null;
   return { kind: 'tool-calls', text: typeof message.content === 'string' ? message.content : '', calls, reasoningText: reasoning, usage: usageOf(body) };
 }
 
@@ -285,10 +289,15 @@ function normalizeCandidateParts(profile: ProviderModelProfile, body: unknown): 
  * The shape is chosen by the declared answer channel and by nothing else — no route, no model id, no
  * endpoint — which is what keeps a second vendor's response shape a row in the profile table.
  */
-export function normalizeModelResponse(profile: ProviderModelProfile, body: unknown): CanonicalModelResult {
+export function normalizeModelResponse(profile: ProviderModelProfile, body: unknown, options: NormalizeOptions = {}): CanonicalModelResult {
   if (profile.capabilities.answerChannel === 'none') return { kind: 'malformed', reason: 'answer-channel-not-declared' };
   if (profile.capabilities.answerChannel === 'content-text-blocks') return normalizeContentBlocks(profile, body);
   if (profile.capabilities.answerChannel === 'output-message-text') return normalizeOutputItems(profile, body);
   if (profile.capabilities.answerChannel === 'candidate-parts-text') return normalizeCandidateParts(profile, body);
-  return normalizeMessageContentString(profile, body);
+  return normalizeMessageContentString(profile, body, options);
+}
+
+/** What the request a response answers offered: tools, or not (Issue #473). Absent, as for every replay, it offered none. */
+export interface NormalizeOptions {
+  readonly toolCallsOffered?: boolean;
 }

@@ -132,7 +132,7 @@ export interface EgressAttemptScope {
   ceilingState?: () => EgressCeilingState;
   /** Digests (`assistantToolCallDigest`) of the tool-call messages this attempt's adapter returned (Issue #473). */
   readonly acceptedToolCallDigests?: ReadonlySet<string>;
-  /** The tool results AI7 produced for this attempt, by tool-call id (Issue #473). */
+  /** The tool results AI7 produced for this attempt, by `toolResultKey(callId, tool)` (Issue #473). */
   readonly admittedToolResults?: ReadonlyMap<string, AdmittedToolResult>;
   /** The unit's circuit breaker (ADR 0080 §7.4); intact when absent. */
   breakerState?: () => 'intact' | 'tripped';
@@ -283,7 +283,7 @@ function evaluateToolMessage(
   binding: EgressBindingFacts,
   rule: PlatformToolsRule,
   scope: EgressAttemptScope,
-  issuedCallIds: Set<string>,
+  calls: { readonly open: Map<string, PlatformToolName>; readonly seen: Set<string> },
 ): EgressDecision | null {
   const toolCalls = assistantToolCalls(message);
   if (toolCalls !== null) {
@@ -292,19 +292,30 @@ function evaluateToolMessage(
         !(scope.acceptedToolCallDigests?.has(assistantToolCallDigest(message.content)) ?? false)) {
       return refuse('payload-out-of-scope', `第 ${index + 1} 条模型工具调用不是本次尝试已接受的输出；未发送任何内容。`);
     }
-    for (const call of toolCalls.calls) issuedCallIds.add(call.id);
+    // A call id names one call for the whole history: a gateway that reuses ids would let one result answer two calls.
+    for (const call of toolCalls.calls) {
+      if (calls.seen.has(call.id)) return refuse('payload-out-of-scope', `第 ${index + 1} 条模型工具调用重复使用了调用标识；未发送任何内容。`);
+      calls.seen.add(call.id);
+      calls.open.set(call.id, call.name as PlatformToolName);
+    }
     return null;
   }
   const result = toolResultOf(message);
-  const admitted = result === null ? undefined : scope.admittedToolResults?.get(result.callId);
-  if (result === null || admitted === undefined || admitted.callId !== result.callId || !issuedCallIds.has(result.callId) ||
+  const tool = result === null ? undefined : calls.open.get(result.callId);
+  const admitted = result === null || tool === undefined ? undefined : scope.admittedToolResults?.get(toolResultKey(result.callId, tool));
+  if (result === null || tool === undefined || admitted === undefined || admitted.callId !== result.callId || admitted.tool !== tool ||
       sha256Hex(result.text) !== admitted.sha256 || Buffer.byteLength(result.text, 'utf8') !== admitted.byteCount ||
       !toolResultSourceAdmitted(admitted, rule, scope)) {
     return refuse('payload-out-of-scope', `第 ${index + 1} 条工具结果不是本次尝试已取得的结果；未发送任何内容。`);
   }
   // One result per call: a second message answering the same call is not a result AI7 produced.
-  issuedCallIds.delete(result.callId);
+  calls.open.delete(result.callId);
   return null;
+}
+
+/** The key one admitted tool result is held under: the call id and the tool that call named (the review of #671). */
+export function toolResultKey(callId: string, tool: PlatformToolName): string {
+  return JSON.stringify([callId, tool]);
 }
 
 /** Whether a tool result's URL is one its tool may have read: the rule's search host, or a cited public page. */
@@ -346,13 +357,13 @@ export function evaluateEgress(
     return refuse('system-prompt-mismatch', '系统提示与冻结的提示契约不一致；未发送任何内容。');
   }
   if (payload.messages.length === 0) return refuse('payload-out-of-scope', '请求不含任何单元消息；未发送任何内容。');
-  const issuedCallIds = new Set<string>();
+  const calls = { open: new Map<string, PlatformToolName>(), seen: new Set<string>() };
   for (const [index, message] of payload.messages.entries()) {
     // The tool branch is reached only under a rule naming the platform tools and only for a message that is a tool call
     // or a tool result; every other message — and both kinds under every other rule — takes the unchanged branches below,
     // where a non-text block is still a refusal.
     if (rule !== null && (assistantToolCalls(message) !== null || (message.role === 'user' && message.source.kind === 'tool'))) {
-      const refused = evaluateToolMessage(message, index, binding, rule, scope, issuedCallIds);
+      const refused = evaluateToolMessage(message, index, binding, rule, scope, calls);
       if (refused !== null) return refused;
       continue;
     }
@@ -375,6 +386,11 @@ export function evaluateEgress(
   }
   const last = payload.messages[payload.messages.length - 1]!;
   if (last.role !== 'user') return refuse('payload-out-of-scope', '请求末尾不是单元消息；未发送任何内容。');
+  // ADR 0080 §7.4: a unit past the breaker ends there, with 联网核查未完成 on its affected findings — the model is not asked
+  // again with the refusal in hand, so a looping model stops transmitting rather than running into the Run's ceiling.
+  if (rule !== null && last.source.kind === 'tool' && (scope.breakerState?.() ?? 'intact') === 'tripped') {
+    return refuse('circuit-breaker-tripped', '联网核查未完成：本单元的工具往返已达到熔断上限，本单元到此结束；未发送任何内容。');
+  }
   const digest = payloadDigest(payload);
   if (binding.route === LOCAL_DETERMINISTIC_ROUTE) return { decision: 'transmit-local', payloadDigest: digest };
   if (binding.policy.operationalScope === 'development-ci') {

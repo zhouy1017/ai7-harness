@@ -105,6 +105,7 @@ describe('canonical tool arguments', () => {
     for (const refused of [
       'http://example.org/', 'https://user:pass@example.org/', 'https://127.0.0.1/', 'https://localhost/', 'https://a.localhost/',
       'https://example.org:8443/', 'https://[::1]/', 'file:///etc/hosts', 'not a url', 'https://single/',
+      'https://foo.local/', 'https://metadata.google.internal/x', 'https://router.home.arpa/', 'https://localhost./',
     ]) {
       expect(canonicalPublicUrl(refused)).toBeNull();
     }

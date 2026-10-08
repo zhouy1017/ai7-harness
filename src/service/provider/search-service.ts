@@ -113,10 +113,33 @@ export interface SearchCallOutcome {
   readonly text: string | null;
 }
 
+/** One search call whose ticket was redeemed: the only thing `sendSearchCall` sends. */
+export interface AuthorizedSearchCall {
+  readonly request: { url: string; headers: Record<string, string>; body: string };
+}
+
+const authorizedSearchCalls = new WeakSet<AuthorizedSearchCall>();
+
 /**
- * Forward one `websearch` call. The ticket must be for exactly the rule's host and exactly this query's canonical-argument
- * digest, and it is redeemed before a byte is sent; a ticket that does not redeem sends nothing.
+ * Redeem one `websearch` call's ticket. The ticket must be for exactly the rule's host and exactly this query's
+ * canonical-argument digest; a ticket that does not redeem refuses the call before anything is claimed or sent.
  */
+export function authorizeSearchCall(input: {
+  readonly ticket: SearchServiceTicket;
+  readonly book: EgressTicketBook;
+  readonly rule: PlatformToolsRule;
+  readonly arguments: Extract<PlatformToolArguments, { tool: 'websearch' }>;
+}): AuthorizedSearchCall {
+  const { ticket, rule } = input;
+  if (ticket.host !== rule.websearch.host || ticket.argumentsDigest !== toolArgumentsDigest(input.arguments) || !input.book.redeem(ticket)) {
+    throw new SearchServiceError('PLATFORM_TOOL_TICKET_REFUSED', '没有本次搜索的 call-search-service 决定；未发送任何内容。');
+  }
+  const authorized = Object.freeze({ request: searchServiceRequest(rule, input.arguments.query) });
+  authorizedSearchCalls.add(authorized);
+  return authorized;
+}
+
+/** Forward one `websearch` call: redeem its ticket, then send it once. */
 export async function forwardSearchCall(input: {
   readonly ticket: SearchServiceTicket;
   readonly book: EgressTicketBook;
@@ -125,11 +148,16 @@ export async function forwardSearchCall(input: {
   readonly fetch: PlatformToolFetch;
   readonly signal?: AbortSignal;
 }): Promise<SearchCallOutcome> {
-  const { ticket, rule } = input;
-  if (ticket.host !== rule.websearch.host || ticket.argumentsDigest !== toolArgumentsDigest(input.arguments) || !input.book.redeem(ticket)) {
+  return sendSearchCall(authorizeSearchCall(input), input.fetch, input.signal);
+}
+
+/** Send one authorized search call, exactly once; an object `authorizeSearchCall` did not return sends nothing. */
+export async function sendSearchCall(authorized: AuthorizedSearchCall, fetch: PlatformToolFetch, signal?: AbortSignal): Promise<SearchCallOutcome> {
+  if (!authorizedSearchCalls.delete(authorized)) {
     throw new SearchServiceError('PLATFORM_TOOL_TICKET_REFUSED', '没有本次搜索的 call-search-service 决定；未发送任何内容。');
   }
-  const request = searchServiceRequest(rule, input.arguments.query);
+  const { request } = authorized;
+  const input = { fetch, signal };
   const deadline = deadlineSignal(SEARCH_SERVICE_TIMEOUT_MS, input.signal);
   try {
     const response = await input.fetch(request.url, { method: 'POST', headers: request.headers, body: request.body, signal: deadline.signal, redirect: 'manual' });

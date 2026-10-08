@@ -134,23 +134,27 @@ export interface PlatformToolCallItem {
   readonly slice?: ProviderTestItemSlice;
   readonly argumentsDigest: string;
   readonly host: string;
+  /** Where the call goes, as the rule names it — the Research Snapshot Cache's key beside the arguments. */
+  readonly origin: string;
 }
 
 /**
  * One platform-tool call, at most once (ADR 0080 §7.4, §7.6). The Research Snapshot Cache answers an identical call — same
- * tool, same canonical arguments — and nothing leaves the host; otherwise the call claims a fresh test item, `perform`
- * sends it once, a usable answer is kept, and the ledger records the arguments' digest, the host, the result's digest and
- * size, and the elapsed time — never the text.
+ * origin, same tool, same canonical arguments — and nothing leaves the host. Otherwise `authorize` redeems the call's
+ * ticket first: a ticket that does not redeem refuses the call before any test item is claimed, so the ledger never shows
+ * a live item that was never sent. Then the call claims a fresh test item, `send` sends it once, a usable answer is kept,
+ * and the ledger records the arguments' digest, the host, the result's digest and size, and the elapsed time — never the
+ * text.
  */
-export async function platformToolCallOnce(
+export async function platformToolCallOnce<Authorized>(
   cache: ProviderResultCache,
   snapshots: ResearchSnapshotCache,
   item: PlatformToolCallItem,
-  perform: () => Promise<PlatformToolCallResult>,
+  call: { authorize(): Authorized; send(authorized: Authorized): Promise<PlatformToolCallResult> },
   now: () => number = Date.now,
 ): Promise<{ readonly snapshot: ResearchSnapshot | null; readonly status: number; readonly replayed: boolean }> {
   const slice = item.slice ?? 'S87';
-  const replayed = await snapshots.lookup(item.kind, item.argumentsDigest);
+  const replayed = await snapshots.lookup(item.kind, item.origin, item.argumentsDigest);
   if (replayed !== null) {
     await cache.record({
       itemId: cache.nextItemId(item.purpose, slice), kind: item.kind, purpose: item.purpose, argumentsDigest: item.argumentsDigest,
@@ -159,12 +163,13 @@ export async function platformToolCallOnce(
     });
     return { snapshot: replayed, status: replayed.status, replayed: true };
   }
+  const authorized = call.authorize();
   const itemId = cache.nextItemId(item.purpose, slice);
   cache.claimItem(itemId);
   const started = now();
   let result: PlatformToolCallResult;
   try {
-    result = await perform();
+    result = await call.send(authorized);
   } catch (error) {
     await cache.record({
       itemId, kind: item.kind, purpose: item.purpose, argumentsDigest: item.argumentsDigest, host: item.host, outcome: 'failed',
@@ -178,6 +183,7 @@ export async function platformToolCallOnce(
   const snapshot: ResearchSnapshot | null = usable
     ? {
         kind: item.kind,
+        origin: item.origin,
         argumentsDigest: item.argumentsDigest,
         url: result.url,
         retrievedAt: new Date(started).toISOString(),

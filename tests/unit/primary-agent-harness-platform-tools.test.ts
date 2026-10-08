@@ -61,6 +61,8 @@ function bindingOf(rule: PlatformToolsRule | null, digest: string): EgressBindin
 /** A stub model: it asks for one search, then answers once the search result is in its history. */
 class SearchingModel implements LlmAdapter {
   readonly requests: GenerateOptions[] = [];
+  /** Search again after every result instead of answering, each time with a new query. */
+  looping = false;
   #calls = 0;
 
   providerInfo(provider: string): LlmProviderInfo {
@@ -82,7 +84,7 @@ class SearchingModel implements LlmAdapter {
   async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     this.requests.push(options);
     const last = options.messages.at(-1)!;
-    if (last.source.kind === 'tool') {
+    if (last.source.kind === 'tool' && !this.looping) {
       yield { type: 'block-start', index: 0, blockType: 'text' };
       yield { type: 'text-delta', index: 0, text: ANSWER };
       yield { type: 'block-end', index: 0, block: { type: 'text', text: ANSWER } };
@@ -92,7 +94,7 @@ class SearchingModel implements LlmAdapter {
     }
     this.#calls += 1;
     const id = `call_${this.#calls}` as CallId;
-    const args = '{"query":"狂人日记 发表 年份"}';
+    const args = this.looping ? `{"query":"狂人日记 第 ${this.#calls} 次"}` : '{"query":"狂人日记 发表 年份"}';
     yield { type: 'block-start', index: 0, blockType: 'tool-call' };
     yield { type: 'tool-call-delta', index: 0, id, name: 'websearch', argumentsDelta: args };
     yield { type: 'block-end', index: 0, block: { type: 'tool-call', id, name: 'websearch', arguments: args } };
@@ -211,6 +213,93 @@ describe('the platform tools inside the composition', () => {
     } finally {
       await handle.finish();
     }
+  });
+
+  it('ends a looping unit at the breaker with 联网核查未完成, so the model is not asked again', async () => {
+    const rule = (await ruleOf('v7'))!;
+    const bindingDigest = 'b'.repeat(64);
+    const binding = bindingOf(rule, bindingDigest);
+    const cache = new ProviderResultCache(root);
+    await cache.open();
+    const snapshots = new ResearchSnapshotCache(root);
+    await snapshots.open();
+    let sent = 0;
+    const session = new PlatformToolSession({
+      binding,
+      scope: { currentBindingDigest: () => bindingDigest, acceptedOutputDigests: new Set(), ceilingState: () => 'within' },
+      fetch: async () => {
+        sent += 1;
+        return new Response(JSON.stringify({ result: { content: [{ type: 'text', text: SEARCH_TEXT }] } }), { status: 200, headers: { 'content-type': 'application/json' } });
+      },
+      admitHost: () => () => undefined,
+      cache,
+      snapshots,
+      purpose: 'factual-review',
+      breaker: new PlatformToolBreaker(1),
+    });
+    // A model that never stops searching, a new query every time.
+    const model = new SearchingModel();
+    model.looping = true;
+    const decisions: string[] = [];
+    const sessionId = randomUUID();
+    const handle = await prepareExecution({
+      sessionId,
+      route: LOCAL_DETERMINISTIC_ROUTE,
+      model: LOCAL_DETERMINISTIC_MODEL,
+      systemPrompt: SYSTEM,
+      promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
+      adapterFactory: () => model,
+      gate: (payload) => {
+        const decision = evaluateEgress(payload, binding, session.egressScope);
+        decisions.push(decision.decision === 'refuse' ? `refuse:${decision.reason}` : decision.decision);
+        return decision;
+      },
+      onTransmitTicket: () => { throw new Error('the local route issues no remote ticket'); },
+      platformTools: session,
+    });
+    try {
+      handle.bindExecution({ harnessSessionId: sessionId, behaviorCompositionDigest: handle.composition.digest, promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST });
+      session.startUnit();
+      const outcome = await handle.submitUnit(UNIT);
+      // First call sent; the second trips the breaker and comes back as a refusal; the third model call is refused.
+      expect(decisions).toEqual(['transmit-local', 'transmit-local', 'refuse:circuit-breaker-tripped']);
+      expect(model.requests).toHaveLength(2);
+      expect(sent).toBe(1);
+      expect(outcome.terminal).toBe('interrupted');
+      expect(outcome.signals.at(-1)).toMatchObject({ kind: 'interrupted', failure: { code: 'AI7_EGRESS_REFUSED' } });
+      expect(session.unitDisclosure).toBe('联网核查未完成');
+      session.startUnit();
+      expect(session.unitDisclosure).toBeNull();
+    } finally {
+      await handle.finish();
+    }
+  });
+
+  it('answers a reused call id with a refusal and never replaces the result its first call was admitted with', async () => {
+    const rule = (await ruleOf('v7'))!;
+    const bindingDigest = 'b'.repeat(64);
+    const cache = new ProviderResultCache(root);
+    await cache.open();
+    const session = new PlatformToolSession({
+      binding: bindingOf(rule, bindingDigest),
+      scope: { currentBindingDigest: () => bindingDigest, acceptedOutputDigests: new Set(), ceilingState: () => 'within' },
+      fetch: async () => new Response(JSON.stringify({ result: { content: [{ type: 'text', text: SEARCH_TEXT }] } }), { status: 200, headers: { 'content-type': 'application/json' } }),
+      admitHost: () => () => undefined,
+      cache,
+      snapshots: new ResearchSnapshotCache(root),
+      purpose: 'factual-review',
+    });
+    await new ResearchSnapshotCache(root).open();
+    const signal = new AbortController().signal;
+    session.startUnit();
+    expect(await session.execute({ callId: 'call_0', tool: 'websearch', arguments: { query: '甲' }, signal })).toMatchObject({ sourceUrl: 'https://search.parallel.ai/mcp' });
+    expect(await session.execute({ callId: 'call_0', tool: 'websearch', arguments: { query: '乙' }, signal })).toEqual({ text: expect.stringContaining('调用标识'), sourceUrl: null });
+    session.admit({ callId: 'call_0', tool: 'websearch', sourceUrl: 'https://search.parallel.ai/mcp', text: SEARCH_TEXT });
+    session.admit({ callId: 'call_0', tool: 'websearch', sourceUrl: null, text: '另一个结果' });
+    session.admit({ callId: 'call_0', tool: 'webfetch', sourceUrl: null, text: '另一个结果' });
+    expect([...session.egressScope.admittedToolResults!.values()]).toEqual([
+      expect.objectContaining({ callId: 'call_0', tool: 'websearch', sourceUrl: 'https://search.parallel.ai/mcp' }),
+    ]);
   });
 
   it('returns a duplicate call within one unit to the model as a refusal, sending nothing more', async () => {

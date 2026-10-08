@@ -1,4 +1,5 @@
 import { canonicalJson, isRecord, sha256Hex } from '../analysis/canonical.js';
+import { isPublicHostName } from '../../shared/network-denial.js';
 
 /**
  * AI7's platform tools, `websearch` and `webfetch` (ADR 0080 §7, Issue #473 S87-f3a): what a Provider Processing rule must
@@ -179,8 +180,7 @@ export function canonicalPublicUrl(raw: string): string | null {
   if (parsed.protocol !== 'https:' || parsed.username !== '' || parsed.password !== '') return null;
   if (parsed.port !== '' && parsed.port !== '443') return null;
   const host = parsed.hostname.toLowerCase();
-  const labels = host.split('.');
-  if (!HOSTNAME_SHAPE.test(host) || /^[0-9]+$/u.test(labels[labels.length - 1]!) || host.endsWith('.localhost')) return null;
+  if (!HOSTNAME_SHAPE.test(host) || !isPublicHostName(host)) return null;
   parsed.hash = '';
   return parsed.href;
 }

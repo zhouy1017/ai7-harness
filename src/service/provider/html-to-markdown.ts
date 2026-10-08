@@ -45,15 +45,12 @@ function resolvedHref(href: string, baseUrl: string | null): string | null {
 
 /** Convert one HTML document to Markdown. `baseUrl` resolves relative links; without it only absolute links survive. */
 export function htmlToMarkdown(html: string, baseUrl: string | null = null): string {
-  const source = html.replace(/<!--[\s\S]*?-->/gu, '').replace(/<!doctype[^>]*>/giu, '');
   const out: string[] = [];
   const links: Array<string | null> = [];
   const lists: Array<{ ordered: boolean; next: number }> = [];
   let dropDepth = 0;
   let dropName: string | null = null;
   let preDepth = 0;
-  const tagPattern = /<\/?([a-zA-Z][a-zA-Z0-9-]*)\b[^>]*>/gu;
-  let cursor = 0;
   const pushText = (raw: string): void => {
     if (dropDepth > 0 || raw.length === 0) return;
     const decoded = decodeEntities(raw);
@@ -62,11 +59,12 @@ export function htmlToMarkdown(html: string, baseUrl: string | null = null): str
   const block = (): void => {
     out.push('\n\n');
   };
-  for (let match = tagPattern.exec(source); match !== null; match = tagPattern.exec(source)) {
-    pushText(source.slice(cursor, match.index));
-    cursor = match.index + match[0].length;
-    const tag = match[0];
-    const name = match[1]!.toLowerCase();
+  for (const token of scanHtml(html)) {
+    if (token.kind === 'text') {
+      pushText(token.text);
+      continue;
+    }
+    const { tag, name } = token;
     const closing = tag.startsWith('</');
     if (dropDepth > 0) {
       if (name === dropName) dropDepth += closing ? -1 : tag.endsWith('/>') ? 0 : 1;
@@ -149,11 +147,74 @@ export function htmlToMarkdown(html: string, baseUrl: string | null = null): str
         continue;
     }
   }
-  pushText(source.slice(cursor));
   return out.join('')
     .split('\n')
-    .map((line) => line.replace(/[ \t]+$/u, '').replace(/^[ \t]+(?=[^-\d ])/u, ''))
+    .map((line) => trimTrailingBlanks(line).replace(/^[ \t]+(?=[^-\d ])/u, ''))
     .join('\n')
     .replace(/\n{3,}/gu, '\n\n')
     .trim();
+}
+
+/** A line without its trailing spaces and tabs, by one backward walk (a `[ \t]+$` pattern backtracks over every run). */
+function trimTrailingBlanks(line: string): string {
+  let end = line.length;
+  while (end > 0 && (line.charCodeAt(end - 1) === 0x20 || line.charCodeAt(end - 1) === 0x09)) end -= 1;
+  return line.slice(0, end);
+}
+
+type HtmlToken = { readonly kind: 'text'; readonly text: string } | { readonly kind: 'tag'; readonly tag: string; readonly name: string };
+
+function isAsciiLetter(code: number): boolean {
+  return (code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a);
+}
+
+function isTagNameCode(code: number): boolean {
+  return isAsciiLetter(code) || (code >= 0x30 && code <= 0x39) || code === 0x2d;
+}
+
+/**
+ * One forward pass over the markup, linear in its length whatever it holds (the review of #671): each `<` is answered by
+ * at most one `indexOf` for its end, and a construct whose end never comes ends the scan instead of being searched for
+ * again from the next `<`. An unclosed comment, declaration, or processing instruction hides the rest of the page; an
+ * unclosed tag leaves the rest as text. A `<` that opens no tag is text.
+ */
+export function* scanHtml(source: string): Generator<HtmlToken> {
+  let index = 0;
+  while (index < source.length) {
+    const open = source.indexOf('<', index);
+    if (open < 0) {
+      yield { kind: 'text', text: source.slice(index) };
+      return;
+    }
+    if (open > index) yield { kind: 'text', text: source.slice(index, open) };
+    if (source.startsWith('<!--', open)) {
+      const end = source.indexOf('-->', open + 4);
+      if (end < 0) return;
+      index = end + 3;
+      continue;
+    }
+    const next = source.charCodeAt(open + 1);
+    if (next === 0x21 || next === 0x3f) {
+      // `<!doctype …>`, `<![CDATA[…]]>`-like declarations, and `<?…>` carry no text worth keeping.
+      const end = source.indexOf('>', open + 2);
+      if (end < 0) return;
+      index = end + 1;
+      continue;
+    }
+    const nameStart = next === 0x2f ? open + 2 : open + 1;
+    if (!isAsciiLetter(source.charCodeAt(nameStart))) {
+      yield { kind: 'text', text: '<' };
+      index = open + 1;
+      continue;
+    }
+    const end = source.indexOf('>', nameStart);
+    if (end < 0) {
+      yield { kind: 'text', text: source.slice(open) };
+      return;
+    }
+    let nameEnd = nameStart;
+    while (nameEnd < end && isTagNameCode(source.charCodeAt(nameEnd))) nameEnd += 1;
+    yield { kind: 'tag', tag: source.slice(open, end + 1), name: source.slice(nameStart, nameEnd).toLowerCase() };
+    index = end + 1;
+  }
 }

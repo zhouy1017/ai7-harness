@@ -58,17 +58,21 @@ function mediaTypeOf(contentType: string | null, text: string): 'html' | 'text' 
   return null;
 }
 
-/** Fetch one cited public page under one redeemed ticket. */
-export async function fetchPublicSource(input: {
-  readonly ticket: PublicSourceTicket;
-  readonly book: EgressTicketBook;
+/** One fetch whose ticket was redeemed: the only thing `sendPublicFetch` sends. */
+export interface AuthorizedPublicFetch {
+  readonly url: string;
+  readonly host: string;
   readonly rule: PlatformToolsRule;
-  readonly fetch: PlatformToolFetch;
-  /** Per-ticket host admission (`admitTicketHost` of the network denial); returns the release. */
-  readonly admitHost: (target: { host: string; port: number }) => () => void;
-  readonly signal?: AbortSignal;
-}): Promise<PublicSourceOutcome> {
-  const { ticket, rule } = input;
+}
+
+const authorizedFetches = new WeakSet<AuthorizedPublicFetch>();
+
+/**
+ * Redeem one `webfetch` call's ticket: the URL's host and canonical-argument digest must be the ticket's. A ticket that
+ * does not redeem refuses the call before anything is claimed, opened, or sent.
+ */
+export function authorizePublicFetch(input: { readonly ticket: PublicSourceTicket; readonly book: EgressTicketBook; readonly rule: PlatformToolsRule }): AuthorizedPublicFetch {
+  const { ticket } = input;
   let host: string | null = null;
   try {
     host = new URL(ticket.url).hostname;
@@ -79,6 +83,35 @@ export async function fetchPublicSource(input: {
       !input.book.redeem(ticket)) {
     throw new PublicSourceFetchError('PLATFORM_TOOL_TICKET_REFUSED', '没有本次取回的 fetch-public-source 决定；未发送任何内容。');
   }
+  const authorized = Object.freeze({ url: ticket.url, host: ticket.host, rule: input.rule });
+  authorizedFetches.add(authorized);
+  return authorized;
+}
+
+/** Fetch one cited public page under one redeemed ticket. */
+export async function fetchPublicSource(input: {
+  readonly ticket: PublicSourceTicket;
+  readonly book: EgressTicketBook;
+  readonly rule: PlatformToolsRule;
+  readonly fetch: PlatformToolFetch;
+  /** Per-ticket host admission (`admitTicketHost` of the network denial); returns the release. */
+  readonly admitHost: (target: { host: string; port: number }) => () => void;
+  readonly signal?: AbortSignal;
+}): Promise<PublicSourceOutcome> {
+  return sendPublicFetch(authorizePublicFetch(input), input);
+}
+
+/** Send one authorized fetch, exactly once; an object `authorizePublicFetch` did not return sends nothing and opens nothing. */
+export async function sendPublicFetch(authorized: AuthorizedPublicFetch, input: {
+  readonly fetch: PlatformToolFetch;
+  readonly admitHost: (target: { host: string; port: number }) => () => void;
+  readonly signal?: AbortSignal;
+}): Promise<PublicSourceOutcome> {
+  if (!authorizedFetches.delete(authorized)) {
+    throw new PublicSourceFetchError('PLATFORM_TOOL_TICKET_REFUSED', '没有本次取回的 fetch-public-source 决定；未发送任何内容。');
+  }
+  const { rule } = authorized;
+  const ticket = authorized;
   const release = input.admitHost({ host: ticket.host, port: 443 });
   const deadline = deadlineSignal(rule.webfetch.timeoutSeconds * 1000, input.signal);
   try {

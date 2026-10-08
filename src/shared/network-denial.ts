@@ -49,10 +49,153 @@ function validatedTarget(target: SingleHostAllowance): SingleHostAllowance {
   return { host, port: target.port };
 }
 
-/** Whether a host is a name the public network resolves, rather than an address literal or a loopback name. */
-function isPublicHostName(host: string): boolean {
-  const labels = host.split('.');
-  return labels.length >= 2 && !/^[0-9]+$/u.test(labels[labels.length - 1]!) && host !== 'localhost' && !host.endsWith('.localhost');
+/** Name suffixes that never resolve on the public network: loopback, mDNS, and the conventional private zones. */
+const NON_PUBLIC_NAME_SUFFIXES = ['localhost', 'local', 'internal', 'home.arpa', 'lan', 'intranet', 'corp'] as const;
+
+/**
+ * Whether a host is a name the public network resolves, rather than an address literal, a loopback name, or a name in a
+ * zone that only a local or private resolver answers. Shared by the URL check of `webfetch` and per-ticket admission.
+ */
+export function isPublicHostName(host: string): boolean {
+  const name = host.toLowerCase().replace(/\.$/u, '');
+  const labels = name.split('.');
+  if (labels.length < 2 || /^[0-9]+$/u.test(labels[labels.length - 1]!)) return false;
+  return !NON_PUBLIC_NAME_SUFFIXES.some((suffix) => name === suffix || name.endsWith(`.${suffix}`));
+}
+
+/** The four octets of a dotted IPv4 address, or `null`. */
+function ipv4Octets(address: string): number[] | null {
+  const parts = address.split('.');
+  if (parts.length !== 4) return null;
+  const octets = parts.map((part) => (/^[0-9]{1,3}$/u.test(part) ? Number(part) : Number.NaN));
+  return octets.every((octet) => Number.isInteger(octet) && octet <= 255) ? octets : null;
+}
+
+function isPublicIpv4(octets: readonly number[]): boolean {
+  const [a, b] = octets as [number, number, number, number];
+  if (a === 0 || a === 10 || a === 127 || a >= 224) return false; // this network, RFC 1918, loopback, multicast and reserved
+  if (a === 100 && b >= 64 && b <= 127) return false; // CGNAT 100.64.0.0/10
+  if (a === 169 && b === 254) return false; // link-local, the cloud metadata endpoint included
+  if (a === 172 && b >= 16 && b <= 31) return false; // RFC 1918
+  if (a === 192 && b === 168) return false; // RFC 1918
+  if (a === 192 && b === 0 && octets[2] === 0) return false; // IETF protocol assignments
+  if (a === 198 && (b === 18 || b === 19)) return false; // benchmarking
+  return true;
+}
+
+/** The eight 16-bit groups of an IPv6 address (a trailing dotted IPv4 part included), or `null`. */
+function ipv6Groups(address: string): number[] | null {
+  let text = address.toLowerCase();
+  const zone = text.indexOf('%');
+  if (zone >= 0) text = text.slice(0, zone);
+  const lastColon = text.lastIndexOf(':');
+  if (lastColon < 0) return null;
+  if (text.slice(lastColon + 1).includes('.')) {
+    // A trailing dotted IPv4 part is two groups written another way.
+    const octets = ipv4Octets(text.slice(lastColon + 1));
+    if (octets === null) return null;
+    const hex = (high: number, low: number): string => ((high << 8) | low).toString(16);
+    text = `${text.slice(0, lastColon + 1)}${hex(octets[0]!, octets[1]!)}:${hex(octets[2]!, octets[3]!)}`;
+  }
+  const halves = text.split('::');
+  if (halves.length > 2) return null;
+  const parse = (part: string): number[] | null => {
+    if (part === '') return [];
+    const groups = part.split(':').map((group) => (/^[0-9a-f]{1,4}$/u.test(group) ? Number.parseInt(group, 16) : Number.NaN));
+    return groups.every((group) => Number.isInteger(group)) ? groups : null;
+  };
+  const head = parse(halves[0]!);
+  const rest = halves.length === 2 ? parse(halves[1]!) : [];
+  if (head === null || rest === null) return null;
+  const explicit = head.length + rest.length;
+  if (halves.length === 1 ? explicit !== 8 : explicit > 7) return null;
+  return [...head, ...new Array<number>(8 - explicit).fill(0), ...rest];
+}
+
+/**
+ * Whether one resolved address is on the public network (ADR 0080 §7.3, the review of #671). Loopback, unspecified,
+ * link-local (the cloud metadata endpoint 169.254.169.254 included), RFC 1918 and unique-local, CGNAT, multicast and
+ * reserved ranges are not, nor is any IPv6 form that embeds one of them (IPv4-mapped, IPv4-compatible, NAT64).
+ */
+export function isPublicAddress(address: string): boolean {
+  const v4 = ipv4Octets(address);
+  if (v4 !== null) return isPublicIpv4(v4);
+  const groups = ipv6Groups(address);
+  if (groups === null) return false;
+  const embedded = [(groups[6]! >> 8) & 0xff, groups[6]! & 0xff, (groups[7]! >> 8) & 0xff, groups[7]! & 0xff];
+  const zeroPrefix = groups.slice(0, 5).every((group) => group === 0);
+  if (zeroPrefix && groups[5] === 0xffff) return isPublicIpv4(embedded); // IPv4-mapped ::ffff:a.b.c.d
+  if (zeroPrefix && groups[5] === 0) return false; // `::`, `::1`, and the deprecated IPv4-compatible ::a.b.c.d
+  if (groups[0] === 0x64 && groups[1] === 0xff9b && groups.slice(2, 6).every((group) => group === 0)) return isPublicIpv4(embedded); // NAT64
+  const first = groups[0]!;
+  if ((first & 0xfe00) === 0xfc00) return false; // unique local fc00::/7
+  if ((first & 0xffc0) === 0xfe80) return false; // link-local fe80::/10
+  if ((first & 0xff00) === 0xff00) return false; // multicast ff00::/8
+  if (first === 0x2001 && groups[1] === 0x0db8) return false; // documentation
+  return true;
+}
+
+type LookupCallback = (error: Error | null, address?: unknown, family?: number) => void;
+
+/** Every address one lookup answered, whatever its shape: a string, or the `all: true` list of records. */
+function lookupAddresses(address: unknown): string[] | null {
+  if (typeof address === 'string') return [address];
+  if (!Array.isArray(address)) return null;
+  const addresses = address.map((entry) => (entry !== null && typeof entry === 'object' ? (entry as { address?: unknown }).address : entry));
+  return addresses.every((entry) => typeof entry === 'string') ? (addresses as string[]) : null;
+}
+
+/** Whether a lookup's answer may be connected to: at least one address, and every one of them public. */
+function lookupAnswerPublic(address: unknown): boolean {
+  const addresses = lookupAddresses(address);
+  return addresses !== null && addresses.length > 0 && addresses.every(isPublicAddress);
+}
+
+/** Whether one lookup names the host a ticket holds open, whose answer must be vetted before any connect uses it. */
+function namesTicketHost(args: readonly unknown[]): boolean {
+  return ticketHost !== null && typeof args[0] === 'string' && args[0].toLowerCase() === ticketHost.host;
+}
+
+/**
+ * The gate on the callback `dns.lookup`, given the original (exported so a test can hand it a stub resolver). An
+ * unadmitted name is denied before any query. A ticket host's answer is vetted inside the lookup's own callback, which is
+ * the answer `net` and `tls` connect to: a name that resolves to any non-public address is denied there, so no connect
+ * ever reaches it and nothing re-resolves between the check and the connect.
+ */
+export function guardedLookup(original: (...args: unknown[]) => unknown): (...args: unknown[]) => unknown {
+  return function gatedLookup(this: unknown, ...args: unknown[]): unknown {
+    if (!allowanceAdmitsLookup(args)) return denyNetwork();
+    if (!namesTicketHost(args)) return Reflect.apply(original, this, args);
+    const callbackIndex = args.findIndex((arg) => typeof arg === 'function');
+    if (callbackIndex < 0) return denyNetwork();
+    const callback = args[callbackIndex] as LookupCallback;
+    const vetted = [...args];
+    vetted[callbackIndex] = (error: Error | null, address?: unknown, family?: number): void => {
+      if (error !== null && error !== undefined) {
+        callback(error);
+        return;
+      }
+      if (!lookupAnswerPublic(address)) {
+        callback(new OutboundNetworkDeniedError());
+        return;
+      }
+      callback(null, address, family);
+    };
+    return Reflect.apply(original, this, vetted);
+  };
+}
+
+/** The same gate on the promise `dns/promises.lookup`. */
+export function guardedLookupPromise(original: (...args: unknown[]) => Promise<unknown>): (...args: unknown[]) => Promise<unknown> {
+  return function gatedLookupPromise(this: unknown, ...args: unknown[]): Promise<unknown> {
+    if (!allowanceAdmitsLookup(args)) return denyNetwork();
+    if (!namesTicketHost(args)) return Reflect.apply(original, this, args) as Promise<unknown>;
+    return (Reflect.apply(original, this, args) as Promise<unknown>).then((answer) => {
+      const address = answer !== null && typeof answer === 'object' && !Array.isArray(answer) ? (answer as { address?: unknown }).address : answer;
+      if (!lookupAnswerPublic(address)) throw new OutboundNetworkDeniedError();
+      return answer;
+    });
+  };
 }
 
 class OutboundNetworkDeniedError extends Error {
@@ -154,7 +297,12 @@ export function connectionTargetOf(args: readonly unknown[]): { host: string; po
 /** Whether one connection request addresses exactly an admitted host and its port. */
 export function allowanceAdmitsConnection(args: readonly unknown[]): boolean {
   const target = connectionTargetOf(args);
-  return target !== null && admittedTargets().some((admitted) => target.host === admitted.host && target.port === admitted.port);
+  if (target === null) return false;
+  if (allowances.some((admitted) => target.host === admitted.host && target.port === admitted.port)) return true;
+  // A ticket host is reached only through the gated `dns.lookup`, whose answer is vetted: a connect that brings its own
+  // `lookup` would resolve the name past that check, so it is denied.
+  const options = args[0] !== null && typeof args[0] === 'object' ? (args[0] as Record<string, unknown>) : null;
+  return ticketHost !== null && target.host === ticketHost.host && target.port === ticketHost.port && options?.['lookup'] === undefined;
 }
 
 /** Whether one name lookup names exactly an admitted host. */
@@ -205,6 +353,12 @@ function gateCallable(target: object, key: PropertyKey, admits: (args: readonly 
   Object.defineProperty(target, key, { ...descriptor, configurable: false, writable: false, value: gated });
 }
 
+/** Replace a primitive with a wrapper built over the original. */
+function wrapCallable(target: object, key: PropertyKey, wrap: (original: (...args: unknown[]) => unknown) => (...args: unknown[]) => unknown): void {
+  const descriptor = requireDescriptor(target, key, true)!;
+  Object.defineProperty(target, key, { ...descriptor, configurable: false, writable: false, value: wrap(descriptor.value as (...args: unknown[]) => unknown) });
+}
+
 function replaceConstructor(target: object, key: PropertyKey, required = true): void {
   const descriptor = requireDescriptor(target, key, required);
   if (!descriptor) return;
@@ -244,8 +398,9 @@ export function installNodeNetworkDenial(): void {
   replaceCallable(dgram.Socket.prototype, 'connect');
   replaceCallable(dgram.Socket.prototype, 'send');
 
-  gateCallable(dns, 'lookup', allowanceAdmitsLookup);
-  gateCallable(dnsPromises, 'lookup', allowanceAdmitsLookup);
+  // The two lookups admit only an armed or ticket-held name, and vet a ticket host's answer before any connect uses it.
+  wrapCallable(dns, 'lookup', (original) => guardedLookup(original));
+  wrapCallable(dnsPromises, 'lookup', (original) => guardedLookupPromise(original as (...args: unknown[]) => Promise<unknown>));
   for (const key of ['resolve', 'resolve4', 'resolve6', 'resolveAny', 'resolveCaa', 'resolveCname', 'resolveMx', 'resolveNaptr', 'resolveNs', 'resolvePtr', 'resolveSoa', 'resolveSrv', 'resolveTxt', 'reverse'] as const) {
     replaceCallable(dns, key);
     replaceCallable(dnsPromises, key);

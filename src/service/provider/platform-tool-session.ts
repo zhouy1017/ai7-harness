@@ -4,6 +4,7 @@ import {
   EgressTicketBook,
   evaluatePublicSourceFetch,
   evaluateSearchServiceCall,
+  toolResultKey,
   type AdmittedToolResult,
   type EgressAttemptScope,
   type EgressBindingFacts,
@@ -19,9 +20,9 @@ import {
 } from './platform-tools.js';
 import type { PlatformToolFetch } from './platform-tool-http.js';
 import type { ProviderResultCache } from './provider-result-cache.js';
-import { fetchPublicSource } from './public-source-fetch.js';
+import { authorizePublicFetch, sendPublicFetch } from './public-source-fetch.js';
 import type { ResearchSnapshotCache } from './research-snapshot-cache.js';
-import { forwardSearchCall } from './search-service.js';
+import { authorizeSearchCall, sendSearchCall } from './search-service.js';
 
 /**
  * One attempt's platform tools, end to end (ADR 0080 §7, Issue #473 S87-f3a): the owner the harness routes `websearch`
@@ -42,11 +43,14 @@ export class PlatformToolSession implements PlatformToolOwner {
   readonly #cache: ProviderResultCache;
   readonly #snapshots: ResearchSnapshotCache;
   readonly #purpose: string;
+  /** Where a search goes, as the rule names it: the Research Snapshot Cache never answers one service's query with another's. */
+  readonly #searchOrigin: string;
   readonly #breaker: PlatformToolBreaker;
   readonly #book = new EgressTicketBook();
   readonly #acceptedToolCallDigests = new Set<string>();
   readonly #admittedToolResults = new Map<string, AdmittedToolResult>();
   readonly #citations = new Set<string>();
+  readonly #executedCallIds = new Set<string>();
 
   constructor(deps: {
     readonly binding: EgressBindingFacts;
@@ -69,6 +73,7 @@ export class PlatformToolSession implements PlatformToolOwner {
     this.#cache = deps.cache;
     this.#snapshots = deps.snapshots;
     this.#purpose = deps.purpose;
+    this.#searchOrigin = `${rule.websearch.service}@${rule.websearch.host}`;
     this.#breaker = deps.breaker ?? new PlatformToolBreaker();
   }
 
@@ -88,6 +93,15 @@ export class PlatformToolSession implements PlatformToolOwner {
     return this.#breaker.state;
   }
 
+  /**
+   * The disclosed state the unit in flight ends with: 联网核查未完成 once its breaker tripped (ADR 0080 §7.4). The gate then
+   * refuses the unit's next model call (`circuit-breaker-tripped`), so its turn ends interrupted, and the execution owner
+   * records this state on the unit's affected findings instead of retrying.
+   */
+  get unitDisclosure(): '联网核查未完成' | null {
+    return this.#breaker.state === 'tripped' ? '联网核查未完成' : null;
+  }
+
   /** Start a unit: its breaker is intact and no call is a duplicate yet. Citations persist across the attempt. */
   startUnit(): void {
     this.#breaker.startUnit();
@@ -104,7 +118,10 @@ export class PlatformToolSession implements PlatformToolOwner {
   }
 
   admit(result: { readonly callId: string; readonly tool: PlatformToolName; readonly sourceUrl: string | null; readonly text: string }): void {
-    this.#admittedToolResults.set(result.callId, {
+    // A call id is admitted once per attempt: a reused id never replaces the result its first call was answered with, so
+    // the gate refuses whatever history would carry the second one.
+    if ([...this.#admittedToolResults.values()].some((admitted) => admitted.callId === result.callId)) return;
+    this.#admittedToolResults.set(toolResultKey(result.callId, result.tool), {
       callId: result.callId,
       tool: result.tool,
       sourceUrl: result.sourceUrl,
@@ -114,6 +131,8 @@ export class PlatformToolSession implements PlatformToolOwner {
   }
 
   async execute(call: PlatformToolExecution): Promise<{ readonly text: string; readonly sourceUrl: string | null }> {
+    if (this.#executedCallIds.has(call.callId)) return refusal('调用标识已在本次尝试中使用过；不执行。');
+    this.#executedCallIds.add(call.callId);
     const args = canonicalToolArguments(call.tool, call.arguments);
     if (args === null) return refusal('参数不是这个工具接受的形式。');
     const verdict = this.#breaker.observe(toolArgumentsDigest(args));
@@ -126,8 +145,11 @@ export class PlatformToolSession implements PlatformToolOwner {
           this.#binding, scope, this.#book);
         if (decision.decision !== 'call-search-service') return refusal(decision.detail);
         const settled = await platformToolCallOnce(this.#cache, this.#snapshots,
-          { kind: 'search-call', purpose: this.#purpose, argumentsDigest: decision.ticket.argumentsDigest, host: decision.ticket.host },
-          async () => forwardSearchCall({ ticket: decision.ticket, book: this.#book, rule: this.#rule, arguments: args, fetch: this.#fetch, signal: call.signal }));
+          { kind: 'search-call', purpose: this.#purpose, argumentsDigest: decision.ticket.argumentsDigest, host: decision.ticket.host, origin: this.#searchOrigin },
+          {
+            authorize: () => authorizeSearchCall({ ticket: decision.ticket, book: this.#book, rule: this.#rule, arguments: args }),
+            send: (authorized) => sendSearchCall(authorized, this.#fetch, call.signal),
+          });
         if (settled.replayed) this.#book.revoke(decision.ticket);
         if (settled.snapshot === null) return refusal(`搜索服务没有返回可用结果（状态 ${settled.status}）。`);
         for (const url of urlsIn(settled.snapshot.text)) this.cite(url);
@@ -136,8 +158,11 @@ export class PlatformToolSession implements PlatformToolOwner {
       const decision = evaluatePublicSourceFetch({ arguments: args }, this.#binding, scope, this.#book);
       if (decision.decision !== 'fetch-public-source') return refusal(`${decision.detail}请改用下一条引用。`);
       const settled = await platformToolCallOnce(this.#cache, this.#snapshots,
-        { kind: 'fetch', purpose: this.#purpose, argumentsDigest: decision.ticket.argumentsDigest, host: decision.ticket.host },
-        async () => fetchPublicSource({ ticket: decision.ticket, book: this.#book, rule: this.#rule, fetch: this.#fetch, admitHost: this.#admitHost, signal: call.signal }));
+        { kind: 'fetch', purpose: this.#purpose, argumentsDigest: decision.ticket.argumentsDigest, host: decision.ticket.host, origin: 'webfetch' },
+        {
+          authorize: () => authorizePublicFetch({ ticket: decision.ticket, book: this.#book, rule: this.#rule }),
+          send: (authorized) => sendPublicFetch(authorized, { fetch: this.#fetch, admitHost: this.#admitHost, signal: call.signal }),
+        });
       if (settled.replayed) this.#book.revoke(decision.ticket);
       if (settled.snapshot === null) return refusal(`未能取回该来源（状态 ${settled.status}）；请改用下一条引用。`);
       return { text: settled.snapshot.text, sourceUrl: settled.snapshot.url };
@@ -154,5 +179,10 @@ function refusal(text: string): { readonly text: string; readonly sourceUrl: nul
 
 /** Every absolute `https` URL a search answer names, for the citation set a later `webfetch` is bounded by. */
 export function urlsIn(text: string): string[] {
-  return [...text.matchAll(/https:\/\/[^\s<>"'()[\]{}，。；、）》]+/gu)].map((match) => match[0].replace(/[.,;:!?]+$/u, ''));
+  return [...text.matchAll(/https:\/\/[^\s<>"'()[\]{}，。；、）》]+/gu)].map((match) => {
+    // Trailing sentence punctuation is not part of the address; trimmed by one backward walk, never a backtracking pattern.
+    let end = match[0].length;
+    while (end > 0 && '.,;:!?'.includes(match[0][end - 1]!)) end -= 1;
+    return match[0].slice(0, end);
+  });
 }
