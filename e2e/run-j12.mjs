@@ -1189,7 +1189,11 @@ async function main() {
     );
     at('sender-owned-editor-capabilities-start-search');
     const searchJobCall = await primary.evaluate(`window.ai7.startSearch({manuscriptId:${JSON.stringify(bookBWork.manuscriptId)},branchId:${JSON.stringify(bookBWork.branchId)},query:'J12'}).then(job=>({ok:true,job}),error=>({ok:false,code:error?.code}))`);
-    requireJourney(searchJobCall?.ok === true, `book-b-search-${searchJobCall?.code ?? 'unknown'}`);
+    // A refusal's code is the product's; the label names it only from this closed set (Issue #652).
+    const searchRefusal = searchJobCall?.code === 'AI7_EDITOR_ROUTE_INVALID' ? 'route-invalid'
+      : searchJobCall?.code === 'AI7_EDITOR_CAPABILITY_INVALID' ? 'capability-invalid'
+        : searchJobCall?.code === undefined ? 'unknown' : 'other';
+    requireJourney(searchJobCall?.ok === true, `book-b-search-${searchRefusal}`, { code: searchJobCall?.code });
     const searchJob = searchJobCall.job;
     requireJourney(UUID_PATTERN.test(searchJob?.jobId) && searchJob.kind === 'search', 'book-b-search-job');
     at('sender-owned-editor-capabilities-foreign-job');

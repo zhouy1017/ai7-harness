@@ -1043,12 +1043,13 @@ async function resolveAndCommitManuscriptReimport(renderer, expectation) {
     }
     // No verb is preselected (V2-UX-IMP-041): the scenario's, else 改写与新增 where the row has new paragraphs, else 删除.
     const verb = verbs[row.ordinal] ?? (row.verbs.includes('rewrite') ? 'rewrite' : 'delete');
-    requireJourney(row.verbs.includes(verb), `${scenario}-row-${row.ordinal}-admits-${verb}`);
+    // The row's ordinal is read from the page, so only its number reaches the label; the verb goes to the debug detail.
+    requireJourney(row.verbs.includes(verb), `${scenario}-row-${Number(row.ordinal)}-admits-verb`, { verb });
     const resolvingVersion = await renderer.evaluate(`document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion`);
     await assertRenderer(
       renderer,
       `(() => { const choose = document.querySelector('[data-reimport-verb-choice=${JSON.stringify(verb)}][data-reimport-group-id=${JSON.stringify(row.groupId)}]:not(:disabled)'); if (!choose) return false; choose.click(); return true; })()`,
-      `${scenario}-resolve-row-${row.ordinal}`,
+      `${scenario}-resolve-row-${Number(row.ordinal)}`,
     );
     await waitFor(
       renderer,
@@ -1224,7 +1225,8 @@ async function resolveAmbiguousIdentitiesAsNoChange(renderer, currentIdentities,
     `${scenario}-rewrite-persisted`,
   );
   const failure = await renderer.evaluate(`document.querySelector('#persistence-status')?.dataset.tone === 'error' ? document.querySelector('#persistence-status')?.textContent : null`);
-  requireJourney(failure === null, `${scenario}-rewrite-valid:${failure}`);
+  // The status words go only to the local debug detail; the label stays a code identifier (Issue #652).
+  requireJourney(failure === null, `${scenario}-rewrite-valid`, { persistence_status: failure });
   await waitFor(renderer, `document.querySelector('[data-reimport-mappings="ready"]')`, `${scenario}-row-reloaded`);
   await assertRenderer(
     renderer,
@@ -1289,7 +1291,7 @@ async function resolvePagedIdentityConsequences(renderer, scenario) {
   await assertRenderer(renderer, `(() => { const rewrite = ${rewriteFirst}; if (!rewrite) return false; rewrite.click(); return true; })()`, `${scenario}-rewrite-first-row-retry`);
   await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion !== ${JSON.stringify(editedVersion)} || document.querySelector('#persistence-status')?.dataset.tone === 'error'`, `${scenario}-rewrite-first-row-persisted`);
   const rewriteFailure = await renderer.evaluate(`document.querySelector('#persistence-status')?.dataset.tone === 'error' ? document.querySelector('#persistence-status')?.textContent : null`);
-  requireJourney(rewriteFailure === null, `${scenario}-rewrite-first-row-valid:${rewriteFailure}`);
+  requireJourney(rewriteFailure === null, `${scenario}-rewrite-first-row-valid`, { persistence_status: rewriteFailure });
   await waitFor(renderer, `document.querySelector('[data-reimport-mappings="ready"]')`, `${scenario}-rewrite-first-row-page`);
   await assertRenderer(
     renderer,

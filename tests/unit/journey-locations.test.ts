@@ -272,7 +272,7 @@ describe('J07 package export failures expose only closed locations', () => {
       expect(j07PackageExportFailureLocation('package-export', error)).toBe(name);
       expect(JOURNEY_LOCATIONS['J-07']).toContain(name);
     }
-    expect(j07PackageExportFailureLocation('package-export', new Error('J-07/package-export-docx-document:news-release'))).toBe('package-export-docx-news-release');
+    expect(j07PackageExportFailureLocation('package-export', new Error('J-07/package-export-docx-news-release'))).toBe('package-export-docx-news-release');
     expect(j07PackageExportFailureLocation('package-export', new Error('J-07/renderer-evaluate'))).toBe('package-export-renderer-evaluate');
   });
 

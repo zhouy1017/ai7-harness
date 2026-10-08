@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { refusedCheckLabels } from '../support/journey-check-labels.js';
 
 // Issue #652: a failed Journey names the check that failed beside its stage, as a content-free label the runner wrote,
 // and the orchestrations repeat it as one extra marker line next to the unchanged one. `e2e/*.mjs` and `tools/*.mjs`
@@ -211,12 +212,55 @@ describe('every runner builds its failures the one shared way', () => {
     }
   });
 
-  it('every literal label a runner passes is content-free', () => {
+  it('every label a runner passes to a check, directly or through its helpers, is built from code alone', () => {
+    let labels = 0;
     for (const file of runners) {
-      const source = readFileSync(resolve(E2E, file), 'utf8');
-      for (const match of source.matchAll(/journeyCheckFailure\('J-\d\d', '([^']*)'/gu)) {
-        expect(controller.isContentFreeCheckLabel(match[1]), `${file}: ${match[1]}`).toBe(true);
-      }
+      const read = refusedCheckLabels(readFileSync(resolve(E2E, file), 'utf8'), file);
+      labels += read.labels;
+      expect(read.refused, file).toEqual([]);
     }
+    // Thousands of labels go through requireJourney, waitFor, assertRenderer, click and the runners' own helpers.
+    expect(labels).toBeGreaterThan(4_000);
+  });
+});
+
+describe('the label guard itself', () => {
+  const HELPERS = [
+    "function requireJourney(condition, name) { if (!condition) throw journeyCheckFailure('J-99', name); }",
+    'async function waitFor(renderer, expression, name, timeout = 1) { requireJourney(await renderer.evaluate(expression), name); }',
+    'async function click(renderer, label, name) { await waitFor(renderer, label, `${name}-click`); }',
+  ].join('\n');
+  const refused = (body: string) => refusedCheckLabels(`${HELPERS}\n${body}`).refused;
+
+  it('admits literals, loop indices, constant lists, module constants and label parameters', () => {
+    expect(refused([
+      "const PREFIX = 'book';",
+      "const NAMES = Object.freeze(['first', 'second']);",
+      'async function run(renderer, name) {',
+      "  requireJourney(true, 'a-literal');",
+      '  await waitFor(renderer, `x`, `${name}-ready`);',
+      '  for (let index = 0; index < 3; index += 1) await click(renderer, \'按钮\', `${PREFIX}-${index + 1}`);',
+      '  for (const item of NAMES) requireJourney(true, `select-${item}`);',
+      "  for (const [words, key] of [['甲', 'one'], ['乙', 'two']]) await click(renderer, words, `pick-${key}`);",
+      '  let count = 0; while (count < 9) { requireJourney(true, `page-${count}`); count += 3; }',
+      "  const which = count > 3 ? 'many' : 'few'; requireJourney(true, which);",
+      "  const row = await renderer.evaluate('x'); requireJourney(true, `row-${Number(row.ordinal)}`);",
+      '}',
+    ].join('\n'))).toEqual([]);
+  });
+
+  it('refuses a label built from page text, a product value, a title or a call outside the file', () => {
+    const cases = [
+      "async function run(renderer) { const failure = await renderer.evaluate('x'); requireJourney(false, `rewrite-valid:${failure}`); }",
+      "async function run(renderer) { const failure = await renderer.evaluate('x'); requireJourney(false, `rewrite-${failure}`); }",
+      "async function run(renderer) { const call = await renderer.evaluate('x'); requireJourney(call.ok, `search-${call?.code ?? 'unknown'}`); }",
+      "const TITLE = '星河之一'; async function run(renderer) { await click(renderer, '新建图书', `${TITLE}-open`); }",
+      "async function make(renderer, title) { await click(renderer, '新建', `${title}-open`); } async function run(renderer) { await make(renderer, '书名'); }",
+      "async function run(renderer) { for (const key of ['includeAnnotations']) requireJourney(true, `option-${key}`); }",
+      "async function run(renderer, rows) { for (const row of rows) requireJourney(true, `row-${row.ordinal}`); }",
+      "async function run(renderer) { requireJourney(true, `bad-${String(Date.now())}`); }",
+      "async function run(renderer, text) { requireJourney(true, text); } async function main(renderer) { await run(renderer, (await renderer.evaluate('x')).title); }",
+    ];
+    for (const body of cases) expect(refused(body), body).toHaveLength(1);
   });
 });

@@ -298,13 +298,12 @@ const J07_PACKAGE_EXPORT_ASSERTIONS = Object.freeze([
   'package-export-remaining-choose', 'package-export-remaining-prepared',
   'package-export-one-prepared-member', 'package-export-remaining-approve',
   'package-export-remaining-written', 'package-export-two-subset-receipts',
-  'package-export-folder-files', 'package-export-docx-publication',
+  'package-export-folder-files', 'package-export-docx-publication', 'package-export-docx-news-release',
   'package-export-manifest-words', 'package-export-not-in-export-records',
   'package-export-close', 'package-export-closed', 'package-export-without-forbidden-words',
 ]);
 const J07_PACKAGE_EXPORT_FAILURES = new Map([
   ...J07_PACKAGE_EXPORT_ASSERTIONS.map((name) => ['J-07/' + name, name]),
-  ['J-07/package-export-docx-document:news-release', 'package-export-docx-news-release'],
   ['J-07/renderer-evaluate', 'package-export-renderer-evaluate'],
 ]);
 const J07_PACKAGE_EXPORT_IO = Object.freeze({
@@ -1363,6 +1362,8 @@ export function journeyCheckFailure(journey, check, options = {}) {
   const message = `${journey}/${label}${failed}`;
   const error = Object.hasOwn(options, 'cause') ? new Error(message, { cause: options.cause }) : new Error(message);
   Object.defineProperty(error, JOURNEY_CHECK, { value: label, enumerable: false });
+  // The stack starts at the runner's own check, not here, so a debug failure.txt reads as it did before.
+  Error.captureStackTrace?.(error, journeyCheckFailure);
   return error;
 }
 

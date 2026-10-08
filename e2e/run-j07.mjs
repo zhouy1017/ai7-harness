@@ -1355,9 +1355,9 @@ async function main() {
     await assertRenderer(renderer, `window.__j07.exportCard().querySelector('h4')?.textContent === '导出 · 当前修订版 r3' && window.__j07.exportCard().querySelector('.export-saved-line') === null`, 'export-keyboard-nothing-to-save');
     await press(renderer, 'Tab');
     await waitFor(renderer, `(() => { const summary = window.__j07.exportCard()?.querySelector('details.export-fallback-formats > summary'); return document.activeElement === summary && summary.textContent === '备用格式' && summary.matches(':focus-visible') && summary.parentElement.open === false; })()`, 'export-keyboard-fallback-formats-reached', 10_000);
-    for (const key of ['includeAnnotations', 'includeSuggestions', 'includeEditorNotes']) {
+    for (const [key, name] of [['includeAnnotations', 'annotations'], ['includeSuggestions', 'suggestions'], ['includeEditorNotes', 'editor-notes']]) {
       await press(renderer, 'Tab');
-      await waitFor(renderer, `document.activeElement === window.__j07.exportOption(${JSON.stringify(key)}) && document.activeElement.matches(':focus-visible')`, `export-keyboard-${key}-reached`, 10_000);
+      await waitFor(renderer, `document.activeElement === window.__j07.exportOption(${JSON.stringify(key)}) && document.activeElement.matches(':focus-visible')`, `export-keyboard-${name}-reached`, 10_000);
     }
     await pressSpace(renderer);
     await waitFor(renderer, `(() => { const box = window.__j07.exportOption('includeEditorNotes'); return window.__j07.exportCard()?.dataset.exportPhase === 'ready' && box?.checked === true && document.activeElement === box && window.__j07.exportRows().includes('editor-notes:preserved:1') && !window.__j07.exportRows().some((row) => row.includes(':excluded:')); })()`, 'export-keyboard-space-includes-the-note', 60_000);
@@ -1885,9 +1885,10 @@ async function main() {
     // files — the 发稿版本's revision and the 新闻稿's delivered 版本 3 as DOCX, and the 交付包清单 in the package's own
     // words — v2's history says so, and 交付物's export records and the package itself stay as they were.
     const packageFiles = [
-      ['publication', 'docx', `稿件 · 发稿版本「${FIRST.label}」 · r1`, `001 ${EXCERPT.title} · ${FIRST.label}.docx`],
-      ['document:news-release', 'docx', '新闻稿 · 版本 3', `002 ${EXCERPT.title} · 新闻稿 · 版本 3.docx`],
-      ['manifest', 'markdown', '交付包清单', PACKAGE_MANIFEST_FILE],
+      // The fifth field names the file in a check label (Issue #652); the key itself carries a colon.
+      ['publication', 'docx', `稿件 · 发稿版本「${FIRST.label}」 · r1`, `001 ${EXCERPT.title} · ${FIRST.label}.docx`, 'publication'],
+      ['document:news-release', 'docx', '新闻稿 · 版本 3', `002 ${EXCERPT.title} · 新闻稿 · 版本 3.docx`, 'news-release'],
+      ['manifest', 'markdown', '交付包清单', PACKAGE_MANIFEST_FILE, 'manifest'],
     ];
     const firstMembers = packageFiles.filter(([key]) => key !== 'document:news-release');
     const packageFileLines = (outcome, words, members = packageFiles) => members.map(([key, format, label, fileName]) =>
@@ -1994,10 +1995,10 @@ async function main() {
     // The folder holds exactly the three files; each DOCX is a package, and the 交付包清单 is the version's own words, byte
     // for byte, as the package and its Delivery Records answer them.
     requireJourney(JSON.stringify((await readdir(packageFolder)).sort()) === JSON.stringify(packageFiles.map(([, , , fileName]) => fileName).sort()), 'package-export-folder-files');
-    for (const [key, format, , fileName] of packageFiles) {
+    for (const [, format, , fileName, name] of packageFiles) {
       if (format !== 'docx') continue;
       const bytes = await readFile(resolve(packageFolder, fileName));
-      requireJourney(bytes.byteLength > 1_000 && bytes.subarray(0, 2).toString('latin1') === 'PK', `package-export-docx-${key}`);
+      requireJourney(bytes.byteLength > 1_000 && bytes.subarray(0, 2).toString('latin1') === 'PK', `package-export-docx-${name}`);
     }
     const manifestInputs = await renderer.evaluate(`Promise.all([window.ai7.inspectBookDeliveryPackage(), window.ai7.inspectProductionDocuments()]).then(([bundle, documents]) => ({
       version: bundle.versions[0], included: bundle.content.included, limitations: bundle.content.limitations, statement: bundle.statement,

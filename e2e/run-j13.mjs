@@ -222,16 +222,17 @@ async function press(renderer, key) {
 
 const status = `(document.querySelector('#persistence-status')?.textContent ?? '')`;
 
-async function createEmptyBook(renderer, title) {
-  await click(renderer, '新建图书', `${title}-open`);
-  await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, `${title}-form`);
-  await fill(renderer, '#empty-book-title', title, `${title}-title`);
-  await click(renderer, '复核创建', `${title}-review`);
-  await waitFor(renderer, `document.querySelector('[data-screen="book-create-review"]')`, `${title}-review-ready`);
-  await click(renderer, '新建图书', `${title}-commit`);
-  await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-manuscript-state="empty"]')`, `${title}-created`, 120_000);
+/** Create an empty Book titled `title`; its checks are labelled by `name`, never by the title (Issue #652). */
+async function createEmptyBook(renderer, title, name) {
+  await click(renderer, '新建图书', `${name}-open`);
+  await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, `${name}-form`);
+  await fill(renderer, '#empty-book-title', title, `${name}-title`);
+  await click(renderer, '复核创建', `${name}-review`);
+  await waitFor(renderer, `document.querySelector('[data-screen="book-create-review"]')`, `${name}-review-ready`);
+  await click(renderer, '新建图书', `${name}-commit`);
+  await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-manuscript-state="empty"]')`, `${name}-created`, 120_000);
   const bookId = await renderer.evaluate(`document.querySelector('.book-overview')?.dataset.bookId`);
-  requireJourney(UUID_PATTERN.test(bookId), `${title}-book-id`);
+  requireJourney(UUID_PATTERN.test(bookId), `${name}-book-id`);
   return bookId;
 }
 
@@ -587,13 +588,13 @@ async function main() {
     const fetchRejected = await renderer.evaluate(`(async()=>{try{await fetch(${JSON.stringify(loopback.url)});return false}catch{return true}})()`);
     await renderer.send('Page.setBypassCSP', { enabled: false });
     requireJourney(fetchRejected === true && loopback.healthy() && loopback.observedRequests() === 0, 'offline-product');
-    const first = await createEmptyBook(renderer, FIRST);
+    const first = await createEmptyBook(renderer, FIRST, 'book-1');
     const firstNone = await readBookSeries(renderer, (side) => side.bookId === first, 'first-overview-series');
     requireJourney(firstNone.none === '不在任何书系中。' && firstNone.memberships.length === 0 && firstNone.summary === null, 'first-in-no-series', firstNone);
     await backToLibrary(renderer, 'first');
-    const second = await createEmptyBook(renderer, SECOND);
+    const second = await createEmptyBook(renderer, SECOND, 'book-2');
     await backToLibrary(renderer, 'second');
-    const outside = await createEmptyBook(renderer, OUTSIDE);
+    const outside = await createEmptyBook(renderer, OUTSIDE, 'book-3');
     await backToLibrary(renderer, 'outside');
 
     at('series-empty');
@@ -1114,7 +1115,7 @@ async function main() {
     const pageBooks = [];
     for (let index = 0; index < 51; index += 1) {
       // Creation binds this window to that Book. The real return action releases the route before the next creation.
-      pageBooks.push(await createEmptyBook(renderer, '分页图书' + String(index).padStart(3, '0')));
+      pageBooks.push(await createEmptyBook(renderer, '分页图书' + String(index).padStart(3, '0'), `page-book-${index}`));
       await backToLibrary(renderer, 'page-book-created');
     }
     requireJourney(pageBooks.length === 51 && new Set(pageBooks).size === 51 && pageBooks.every((id) => UUID_PATTERN.test(id)), 'page-books-created');
