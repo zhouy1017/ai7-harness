@@ -9,13 +9,25 @@ import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execu
 import { runReportUsageReconciles } from '../../src/service/analysis/run-report.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
-import { READERS_REPORT_NEEDS_FINALIZED, READERS_REPORT_TRIGGER_SQL } from '../../src/service/readers-reports.js';
-import { EditorialStore, StoreError } from '../../src/service/store.js';
+import { READERS_REPORT_NEEDS_FINALIZED, READERS_REPORT_SCHEMA_SQL, READERS_REPORT_TRIGGER_SQL } from '../../src/service/readers-reports.js';
+import { CAPTURED_PROCEDURE_SCHEMA_SQL } from '../../src/service/captured-procedures.js';
+import { EVALUATION_REWRITE_SCHEMA_SQL } from '../../src/service/evaluation-rewrites.js';
+import { DIALOGUE_SCHEMA_SQL } from '../../src/service/dialogue/dialogue-ledger.js';
+import { SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL } from '../../src/service/series-exclusions.js';
+import type { ReadersReportContractInput } from '../../src/service/evaluation/readers-report-contract.js';
+import { EditorialStore, REVIEW_CATEGORY_CACHE_CAPACITY, StoreError } from '../../src/service/store.js';
 import {
+  ANALYSIS_LEDGER_REVISION_29_SQL,
+  ANALYSIS_LEDGER_REVISION_30_SQL,
+  ANALYSIS_LEDGER_REVISION_31_SQL,
+  ANALYSIS_LEDGER_REVISION_33_SQL,
   ANALYSIS_LEDGER_REVISION_59_SQL,
   ANALYSIS_LEDGER_SCHEMA_SQL,
+  ANALYSIS_LEDGER_TRIGGER_SQL,
   INITIAL_EVALUATION_SCHEMA_VERSION,
   EVALUATION_REWRITE_SCHEMA_VERSION,
+  DIALOGUE_SCHEMA_VERSION,
+  SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import {
   DEFAULT_MANUSCRIPT_EXPORT_OPTIONS,
@@ -69,6 +81,8 @@ interface Book {
   readonly store: EditorialStore;
   readonly owner: BaselineAnalysisExecutionOwner;
   readonly bookId: string;
+  readonly manuscriptId: string;
+  readonly branchId: string;
 }
 
 async function openStore(): Promise<EditorialStore> {
@@ -90,7 +104,7 @@ async function withBook(body: (book: Book) => Promise<void>): Promise<void> {
     const imported = await importSample1Book(store, roots.codeRoot, '审稿意见之书');
     await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
     recordMissingCredentialConnection(store, 'L2 主编辑连接');
-    await body({ store, owner, bookId: imported.bookId });
+    await body({ store, owner, bookId: imported.bookId, manuscriptId: imported.manuscriptId, branchId: imported.branchId });
     store.markCleanShutdown();
   } finally {
     await owner.dispose();
@@ -111,6 +125,46 @@ async function draftReport(book: Book, template: 'author' | 'editorial'): Promis
 }
 
 const { schema: _schema, ...SECTIONS } = AUTHORED_SECTIONS;
+
+/** The three revisions that carry the analysis ledger exactly as revision 59 left it, each with the relations it held. */
+const REVISIONS_BEFORE_62 = [INITIAL_EVALUATION_SCHEMA_VERSION, DIALOGUE_SCHEMA_VERSION, SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION] as const;
+
+/**
+ * Take a store the current code wrote back to exactly one of revisions 59 to 61 (Issue #672): every relation a later revision
+ * added dropped — revision 63's Captured Procedures and revision 62's 审稿意见 records always, revision 61's Series Retrieval
+ * Exclusions below 61, revision 60's dialogue ledger below 60 — the three kind-coupled relations as revision 59 left them, and
+ * the version stamped. Each relation is dropped before the one it refers to.
+ */
+function plantRevisionBefore62(plant: DatabaseSync, version: (typeof REVISIONS_BEFORE_62)[number]): void {
+  const later = [
+    ...Object.keys(EVALUATION_REWRITE_SCHEMA_SQL).reverse(),
+    ...Object.keys(CAPTURED_PROCEDURE_SCHEMA_SQL).reverse(),
+    ...Object.keys(READERS_REPORT_SCHEMA_SQL).reverse(),
+    ...(version < SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ? Object.keys(SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL).reverse() : []),
+    ...(version < DIALOGUE_SCHEMA_VERSION ? Object.keys(DIALOGUE_SCHEMA_SQL).reverse() : []),
+  ];
+  plant.exec(`${later.map((table) => `DROP TABLE ${table};`).join(' ')} PRAGMA user_version = ${version};`);
+  downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_59_SQL);
+}
+
+/** A reader's report contract of the shape a 定稿 version gives, its words told apart by `version`. */
+function contractInput(version: number): ReadersReportContractInput {
+  return {
+    template: 'author',
+    record: {
+      profile: { title: '审稿评估方案', version: '1' },
+      items: [{ label: '文学品质与作者声音', fullMarks: 20, score: 16, notRated: null, comment: `第 ${version} 次的评语。`, ai7: null }],
+      total: { score: 16, fullMarks: 20 },
+      risks: [],
+      readiness: [],
+      strengths: [],
+      weaknesses: [],
+      verdict: null,
+      conclusion: '修改后再议',
+    },
+    exemplars: [],
+  };
+}
 
 describe('审稿意见 over the real store on exact sample1', () => {
   it('drafts from a 定稿 version under a template, says it has no exemplar, and opens the draft as a document that exports as DOCX', async () => {
@@ -291,7 +345,7 @@ describe('审稿意见 over the real store on exact sample1', () => {
     });
   }, 300_000);
 
-  it('rebuilds a revision-59 store\'s kind-coupled relations for the reader\'s report kind, every row kept byte for byte', async () => {
+  it.each(REVISIONS_BEFORE_62)('rebuilds a revision-%i store\'s kind-coupled relations for the reader\'s report kind, every row kept byte for byte', async (version) => {
     await withBook(async (book) => {
       // A 初评 Task, so the rebuilt relations carry rows of the evaluation kind.
       await runInitialEvaluationToEnd(book.store, book.owner, book.bookId, launchPolicy);
@@ -301,9 +355,8 @@ describe('审稿意见 over the real store on exact sample1', () => {
     const plant = new DatabaseSync(path);
     let before: string;
     try {
-      // Revision 59 exactly: the three relations as revision 59 left them, and no relation of revision 62.
-      plant.exec(`DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; PRAGMA user_version = ${INITIAL_EVALUATION_SCHEMA_VERSION};`);
-      downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_59_SQL);
+      // That revision exactly: the three relations as revision 59 left them, and no relation a later revision added.
+      plantRevisionBefore62(plant, version);
       before = rows(plant);
       expect(() => plant.exec(`INSERT INTO analysis_result_sets(result_set_id, book_id, kind, created_at, canonical_json, sha256)
         VALUES ('${randomUUID()}', (SELECT book_id FROM books LIMIT 1), '${READERS_REPORT_KIND}', 'x', '{}', '${'a'.repeat(64)}')`)).toThrowError(/CHECK constraint failed/u);
@@ -327,6 +380,75 @@ describe('审稿意见 over the real store on exact sample1', () => {
     } finally {
       after.close();
     }
+  }, 300_000);
+
+  // A store stamped 59, 60 or 61 holds the four relations revisions 30 to 35 widened in their widened text: revision 59 came long
+  // after. One that holds an older text was not written by AI7, so it is refused before any widening, not quietly widened
+  // (Issue #672) — whichever of the four it is.
+  it.each([
+    [INITIAL_EVALUATION_SCHEMA_VERSION, 'analysis_run_authorizations', ANALYSIS_LEDGER_REVISION_30_SQL.analysis_run_authorizations],
+    [INITIAL_EVALUATION_SCHEMA_VERSION, 'analysis_plan_revisions', ANALYSIS_LEDGER_REVISION_33_SQL.analysis_plan_revisions],
+    [DIALOGUE_SCHEMA_VERSION, 'analysis_run_states', ANALYSIS_LEDGER_REVISION_29_SQL.analysis_run_states],
+    [SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION, 'analysis_task_outcomes', ANALYSIS_LEDGER_REVISION_31_SQL.analysis_task_outcomes],
+  ] as const)('refuses a store stamped %i whose %s holds an older text, rather than widening it', async (version, table, olderSql) => {
+    const first = await openStore();
+    try {
+      first.markCleanShutdown();
+    } finally {
+      first.close();
+    }
+    const plant = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      plantRevisionBefore62(plant, version);
+      // The damage: the relation, empty, back in a text an earlier revision gave it, its two ledger triggers re-armed.
+      plant.exec(`PRAGMA foreign_keys = OFF; DROP TABLE ${table}; ${olderSql}; ${ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_update`]!};
+        ${ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_delete`]!}; PRAGMA foreign_keys = ON;`);
+    } finally {
+      plant.close();
+    }
+    await expect(openStore()).rejects.toThrowError(`分析任务账本表（修订版 59） ${table} 结构不兼容。`);
+    const after = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try {
+      // Nothing moved: the version stands and the relation keeps the text it was found in.
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(version);
+      expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(olderSql);
+    } finally {
+      after.close();
+    }
+  }, 300_000);
+
+  it('keeps a bounded number of reader\'s report ledgers, and never the one a preparation is still running on (Issue #672)', async () => {
+    await withBook(async (book) => {
+      await runInitialEvaluationToEnd(book.store, book.owner, book.bookId, launchPolicy);
+      finalizeAsJ11(book.store, book.bookId);
+      // An unsaved edit makes the Task's input checkpoint a preparation that takes more than one step.
+      const window = book.store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const block = window.blocks[0]!;
+      book.store.flushJournalEdit({
+        clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: window.revisionId,
+        blockId: block.blockId, windowStartBlockId: block.blockId, baseBlockDigest: block.digest,
+        expectedJournalSequence: window.journalSequence, fromGrapheme: 0, toGrapheme: 0, insertText: '（编辑）',
+      });
+      let progress = book.store.createReadersReportPreparationWork(book.bookId, 'author', launchPolicy);
+      expect(progress.done).toBe(false);
+      // Every distinct contract — every 定稿 version's words under a template — asks for a ledger of its own. Ledgers are
+      // compared by identity alone: a failed `toBe` would print one, and printing a ledger reads through it.
+      const idle = book.store.readersReportLedger(contractInput(0));
+      expect(book.store.readersReportLedger(contractInput(0)) === idle).toBe(true);
+      for (let version = 1; version <= REVIEW_CATEGORY_CACHE_CAPACITY * 2; version += 1) book.store.readersReportLedger(contractInput(version));
+      // The idle contract's ledger was let go and is made afresh; the preparing one was kept, and its preparation finishes.
+      expect(book.store.readersReportLedger(contractInput(0)) === idle).toBe(false);
+      // A preparation no kept ledger holds is not found, even while another is in flight.
+      expect(await refusal(() => book.store.advanceReadersReportPreparationWork(randomUUID())))
+        .toBe('ANALYSIS_PREPARATION_NOT_FOUND:审稿意见的计划准备已不存在。');
+      expect(book.store.cancelReadersReportPreparationWork(randomUUID())).toBe(false);
+      const workId = progress.workId!;
+      while (!progress.done) progress = book.store.advanceReadersReportPreparationWork(progress.workId!);
+      expect(progress.projection).toMatchObject({ kind: READERS_REPORT_KIND, state: 'prepared' });
+      // Once finished, the preparation is gone.
+      expect(await refusal(() => book.store.advanceReadersReportPreparationWork(workId)))
+        .toBe('ANALYSIS_PREPARATION_NOT_FOUND:审稿意见的计划准备已不存在。');
+    });
   }, 300_000);
 
   it('refuses a 审稿意见 Task record rewritten whole', async () => {

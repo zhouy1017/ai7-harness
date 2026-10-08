@@ -792,6 +792,11 @@ export class BaselineAnalysisStore {
     return this.#work.size > 0;
   }
 
+  /** Whether this instance holds the preparation `workId`; the store finds a kept ledger's preparation by it (Issue #672). */
+  holdsPreparation(workId: string): boolean {
+    return this.#work.has(workId);
+  }
+
   /**
    * Bind the trusted launch facts. The service entry calls this once, before it serves any frame, so
    * that the store never has to reach for a launch policy of its own; a `developer-live` scope
