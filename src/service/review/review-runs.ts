@@ -67,6 +67,7 @@ import type { PackageReviewRunReading } from '../book-delivery-packages.js';
 import type { EditorialMarkStore, ProducedEditorialMarkInput } from '../editorial-marks.js';
 import type { ReviewRunAttentionReading } from '../global-attention.js';
 import {
+  capturedVersionStopped,
   procedureCaptureSource,
   procedurePinRefusal,
   readReviewRunProcedurePin,
@@ -1097,6 +1098,10 @@ export class ReviewRunStore {
         snapshot.configuration.digest, createdAt, record.json, record.digest);
       // The exact Captured Procedure version the Run was prepared from, pinned with it (Issue #65, S30; ADR 0087 §4).
       if (work.procedure !== null) {
+        // A version stopped while the preparation advanced is not pinned (Issue #66, S31 review P3-1): its 停用… preview could
+        // not name this Run, so the preparation ends here and the editor chooses again.
+        requireReview(!capturedVersionStopped(this.#db, work.procedure.pin.versionId), 'REVIEW_PROCEDURE_STALE',
+          `可复用工序《${work.procedure.pin.title}》第 ${work.procedure.pin.version} 版在准备期间已停用；请重新选择它。`);
         recordReviewRunProcedurePin(this.#db, reviewRunId, work.procedure.pin, work.prepared.map((category) => category.categoryId),
           work.procedure.leftOut, createdAt);
       }
@@ -1328,6 +1333,28 @@ export class ReviewRunStore {
   /** A Run's ordinal, for naming it: 第 N 次. */
   ordinalOf(reviewRunId: string): number {
     return this.#run(reviewRunId).ordinal;
+  }
+
+  /**
+   * Where one Run stands, as a Captured Procedure version's linked work and its `停用…` preview name it (Issue #66, S31): its
+   * state and words, whether it was approved, whether 继续审阅 is left, and whether it is still its Book's newest Run — the only
+   * one a prepared Run's approval may name. A read.
+   */
+  runStatus(reviewRunId: string): {
+    bookId: string; ordinal: number; state: ReviewRunState; stateLabel: string; authorized: boolean; canContinue: boolean; newestOfBook: boolean;
+  } {
+    const snapshot = this.#run(reviewRunId);
+    const view = this.#runStateView(snapshot);
+    const newest = this.#db.prepare('SELECT review_run_id FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC LIMIT 1').get(snapshot.bookId) as SqlRow;
+    return {
+      bookId: snapshot.bookId,
+      ordinal: snapshot.ordinal,
+      state: view.state,
+      stateLabel: reviewRunStateLabel(view.state, view.canContinue),
+      authorized: view.authorization !== null,
+      canContinue: view.canContinue,
+      newestOfBook: text(newest.review_run_id) === reviewRunId,
+    };
   }
 
   /**

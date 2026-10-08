@@ -11,10 +11,11 @@ import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.j
 import { HARNESS_SESSION_LOG_DIRECTORY } from '../../src/service/harness/session-log.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { ANALYSIS_LEDGER_REVISION_59_SQL, CAPTURED_PROCEDURE_SCHEMA_VERSION, INITIAL_EVALUATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { ANALYSIS_LEDGER_REVISION_59_SQL, EVALUATION_REWRITE_SCHEMA_VERSION, INITIAL_EVALUATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { READERS_REPORT_SCHEMA_SQL } from '../../src/service/readers-reports.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 import { CAPTURED_PROCEDURE_SCHEMA_SQL } from '../../src/service/captured-procedures.js';
+import { EVALUATION_REWRITE_SCHEMA_SQL } from '../../src/service/evaluation-rewrites.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type { DialogueProjection, DialogueSelectionInput } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -417,8 +418,9 @@ describe('就这段提问… over the real store and harness', () => {
     let database = new DatabaseSync(path);
     try {
       database.exec('PRAGMA foreign_keys = OFF');
-      // A revision-59 store held neither the Captured Procedures (revision 63) nor 审稿意见's relations and the reader's report kind
-      // in its kind-coupled CHECKs (revision 62).
+      // A revision-59 store held neither the evaluation rewrite records (revision 64), the Captured Procedures (revision 63) nor
+      // 审稿意见's relations and the reader's report kind in its kind-coupled CHECKs (revision 62).
+      for (const table of Object.keys(EVALUATION_REWRITE_SCHEMA_SQL).reverse()) database.exec(`DROP TABLE ${table}`);
       for (const table of Object.keys(CAPTURED_PROCEDURE_SCHEMA_SQL).reverse()) database.exec(`DROP TABLE ${table}`);
       for (const table of Object.keys(READERS_REPORT_SCHEMA_SQL).reverse()) database.exec(`DROP TABLE ${table}`);
       for (const table of Object.keys(DIALOGUE_SCHEMA_SQL).reverse()) database.exec(`DROP TABLE ${table}`);
@@ -446,7 +448,7 @@ describe('就这段提问… over the real store and harness', () => {
     }
     database = new DatabaseSync(path);
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(CAPTURED_PROCEDURE_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EVALUATION_REWRITE_SCHEMA_VERSION);
       expect(() => database.prepare('UPDATE dialogue_tasks SET asked_at = asked_at').run()).toThrowError(/DIALOGUE_LEDGER_IMMUTABLE/u);
       expect(() => database.prepare('DELETE FROM dialogue_attempt_outcomes').run()).toThrowError(/DIALOGUE_LEDGER_IMMUTABLE/u);
       // A row altered by hand does not read.

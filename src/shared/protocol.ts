@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 98 as const;
+export const SERVICE_PROTOCOL_VERSION = 101 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -87,6 +87,7 @@ export const IPC_CHANNELS = {
   saveCapturedProcedure: 'ai7:j15:save-captured-procedure',
   previewCapturedProcedureValidation: 'ai7:j15:preview-captured-procedure-validation',
   enableCapturedProcedure: 'ai7:j15:enable-captured-procedure',
+  previewCapturedProcedureStop: 'ai7:j15:preview-captured-procedure-stop',
   stopCapturedProcedure: 'ai7:j15:stop-captured-procedure',
   inspectCapturedProcedureRun: 'ai7:j15:inspect-captured-procedure-run',
   saveDeveloperProposal: 'ai7:j15:save-developer-proposal',
@@ -105,6 +106,9 @@ export const IPC_CHANNELS = {
   prepareReadersReport: 'ai7:j11:prepare-readers-report',
   authorizeReadersReport: 'ai7:j11:authorize-readers-report',
   createReadersReportDraft: 'ai7:j11:create-readers-report-draft',
+  prepareEvaluationRewrite: 'ai7:j11:prepare-evaluation-rewrite',
+  authorizeEvaluationRewrite: 'ai7:j11:authorize-evaluation-rewrite',
+  decideEvaluationRewrite: 'ai7:j11:decide-evaluation-rewrite',
   inspectAnalysisFeedback: 'ai7:j11:inspect-analysis-feedback',
   recordAnalysisFeedback: 'ai7:j11:record-analysis-feedback',
   readLibraryDecisionReason: 'ai7:j15:read-library-decision-reason',
@@ -2485,12 +2489,16 @@ export const READERS_REPORT_ASSURANCE_STATEMENT =
 /** AI7's 初评 (Issue #429, S81b1): scores to score against, never the editor's — the record keeps theirs (V2-UX-EVAL-006). */
 export const INITIAL_EVALUATION_ASSURANCE_STATEMENT =
   'AI7 初评是模型据所读稿件给出的初步分数与评语，只作编辑打分的参考；记录保存的是编辑的评分，结论由编辑选定。' as const;
+/** 按我的评分重写评语 (Issue #429, S81b2): words to the editor's scores, never a number — 采用 is the editor's (V2-UX-EVAL-008). */
+export const EVALUATION_REWRITE_ASSURANCE_STATEMENT =
+  '重写的评语是模型按编辑的评分与所读稿件写成的建议文字，只在编辑采用后才记入评估；它不改任何分数，也不选定结论。' as const;
 export type AnalysisAssuranceStatement =
   | typeof BASELINE_ANALYSIS_ASSURANCE_STATEMENT
   | typeof FACTUAL_REVIEW_ASSURANCE_STATEMENT
   | typeof REVIEW_CATEGORY_ASSURANCE_STATEMENT
   | typeof INITIAL_EVALUATION_ASSURANCE_STATEMENT
-  | typeof READERS_REPORT_ASSURANCE_STATEMENT;
+  | typeof READERS_REPORT_ASSURANCE_STATEMENT
+  | typeof EVALUATION_REWRITE_ASSURANCE_STATEMENT;
 
 export const BASELINE_ANALYSIS_KIND = 'baseline-manuscript-analysis' as const;
 export const BASELINE_ANALYSIS_CONTRACT_VERSION = 'ai7.baseline-manuscript-analysis/1' as const;
@@ -2638,6 +2646,38 @@ export const READERS_REPORT_LIVE_UNAVAILABLE =
   '审稿意见暂不可用：当前的模型处理策略没有写明审稿意见可以发送给模型，在这个运行范围下不能准备或开始起草。' as const;
 
 /**
+ * 按我的评分重写评语 (Issue #429, plan slice S81b2; V2-UX-EVAL-008): the evaluation rewrite kind, on the same real path as the
+ * others, read under its own exact-versioned contract `ai7.evaluation-rewrite/1`. It is asked of one version begun from AI7's
+ * 初评 at one saved entry, once the editor's scores depart from AI7's: each Analysis Unit is read for what bears out the
+ * editor's score of each item, citing its blocks; one book-level synthesis then rewrites each scored item's 评语 and the 总评
+ * to the editor's scores, reasons and comments. It never writes a number: the result is a proposal the editor 采用 or 放弃,
+ * and only 采用 records it — as a new entry of the version, every score as the editor left it.
+ */
+export const EVALUATION_REWRITE_KIND = 'evaluation-rewrite' as const;
+export const EVALUATION_REWRITE_CONTRACT_VERSION = 'ai7.evaluation-rewrite/1' as const;
+export const EVALUATION_REWRITE_EXPECTED_OUTCOME = '按编辑评分重写的评语结果集修订版（评语重写契约 v1）' as const;
+/** The first rewrite of a Book's 评语, and every later one: the whole manuscript read again, nothing carried over. */
+export type EvaluationRewriteTaskMode = 'evaluation-rewrite-first' | 'evaluation-rewrite-again';
+export const EVALUATION_REWRITE_TASK_MODES: readonly EvaluationRewriteTaskMode[] = ['evaluation-rewrite-first', 'evaluation-rewrite-again'];
+export const EVALUATION_REWRITE_UPDATE_MODES: readonly EvaluationRewriteTaskMode[] = ['evaluation-rewrite-again'];
+export const EVALUATION_REWRITE_MODE_GOALS = {
+  'evaluation-rewrite-first': '按编辑的评分重写评语：逐单元找出能说明编辑所给分数的依据并引用内容块，再把各评分项的评语与总评改写得与编辑的分数一致，不改任何分数，形成结果集修订版。',
+  'evaluation-rewrite-again': '再次按编辑的评分重写评语：按当前覆盖清单重读每个分析单元，不沿用以前的结果，重新改写各评分项的评语与总评，不改任何分数，追加一个结果集修订版。',
+} as const satisfies Record<EvaluationRewriteTaskMode, string>;
+export type EvaluationRewriteGoal = (typeof EVALUATION_REWRITE_MODE_GOALS)[EvaluationRewriteTaskMode];
+export const EVALUATION_REWRITE_MODE_LABELS = {
+  'evaluation-rewrite-first': '按我的评分重写评语',
+  'evaluation-rewrite-again': '再次按我的评分重写评语',
+} as const satisfies Record<EvaluationRewriteTaskMode, string>;
+export const EVALUATION_REWRITE_MODE_MEANINGS = {
+  'evaluation-rewrite-first': '对固定的任务输入修订版派生覆盖清单并逐单元执行评语重写契约 v1，再做一次全书综合，形成首个结果集修订版。',
+  'evaluation-rewrite-again': '绕过全部既有单元结果，按当前覆盖清单重读每个分析单元并重新做全书综合，追加一个结果集修订版。',
+} as const satisfies Record<EvaluationRewriteTaskMode, string>;
+/** Under a live scope no Provider Processing policy names the rewrite yet: nothing is prepared or started there. */
+export const EVALUATION_REWRITE_LIVE_UNAVAILABLE =
+  '按我的评分重写评语暂不可用：当前的模型处理策略没有写明评语重写可以发送给模型，在这个运行范围下不能准备或开始。' as const;
+
+/**
  * The review-category kind family (Issue #417, plan slice S69): one analysis kind per Review Category,
  * `editorial-review/<categoryId>`, all read under the one exact-versioned contract
  * `ai7.editorial-review/1`. The categories themselves are configuration (V2-UX-REV-002: a house may
@@ -2727,9 +2767,10 @@ export function reviewCategoryExpectedOutcome(label: string): string {
 
 /** Every analysis kind a Book may hold, and every Task mode any of them declares. */
 export type AnalysisKindId = typeof BASELINE_ANALYSIS_KIND | typeof FACTUAL_REVIEW_KIND | ReviewCategoryKindId | typeof INITIAL_EVALUATION_KIND |
-  typeof READERS_REPORT_KIND;
-export type AnalysisTaskMode = BaselineAnalysisTaskMode | FactualReviewTaskMode | ReviewCategoryTaskMode | InitialEvaluationTaskMode | ReadersReportTaskMode;
-export type AnalysisGoal = BaselineAnalysisGoal | FactualReviewGoal | ReviewCategoryGoal | InitialEvaluationGoal | ReadersReportGoal;
+  typeof READERS_REPORT_KIND | typeof EVALUATION_REWRITE_KIND;
+export type AnalysisTaskMode = BaselineAnalysisTaskMode | FactualReviewTaskMode | ReviewCategoryTaskMode | InitialEvaluationTaskMode | ReadersReportTaskMode |
+  EvaluationRewriteTaskMode;
+export type AnalysisGoal = BaselineAnalysisGoal | FactualReviewGoal | ReviewCategoryGoal | InitialEvaluationGoal | ReadersReportGoal | EvaluationRewriteGoal;
 
 /** An explicit editor choice over exact block positions of the Task Input revision (inclusive). */
 export interface BaselineAnalysisSelectedRange {
@@ -4003,6 +4044,38 @@ export interface InitialEvaluationResultProjection {
   suggestedConclusion: EvaluationConclusion | null;
   /** Whether the one book-level synthesis closed, and why not. */
   synthesis: { state: 'closed' | 'gap' | 'not-run'; reason: string | null };
+  /**
+   * AI7's market section (Issue #429, S81b2; EVAL-009), written by the same synthesis from what it read in the Book alone;
+   * `null` when the synthesis did not close, and for a 初评 settled before the market section existed.
+   */
+  market: InitialEvaluationMarketProjection | null;
+}
+
+/**
+ * One of the two predictions the market section's `预测 · 低确定性` block makes (EVAL-009): what AI7 would say, and what it
+ * rests on — never a promise, and always low certainty.
+ */
+export interface InitialEvaluationPredictionProjection {
+  readonly statement: string;
+  readonly basis: string;
+}
+
+/**
+ * AI7's market section of a 初评 (Issue #429, plan slice S81b2; V2-UX-EVAL-009): 目标读者, 差异化卖点 and 渠道与策略 as the
+ * synthesis read them in the Book, and the `预测 · 低确定性` block for 市场回报 and 评奖可能性 — each a statement with its basis,
+ * or `null` for `暂无法预测`. Web search is not connected, so nothing here rests on 外网检索 (ADR 0080 §7, 未联网核查).
+ */
+export interface InitialEvaluationMarketProjection {
+  readonly readers: ReadonlyArray<string>;
+  readonly sellingPoints: ReadonlyArray<string>;
+  readonly channels: ReadonlyArray<string>;
+  readonly marketReturn: InitialEvaluationPredictionProjection | null;
+  readonly awards: InitialEvaluationPredictionProjection | null;
+  /**
+   * What AI7 wrote but the page does not show, one reason a part: a line or prediction that stated a quantity, or a part out
+   * of shape. Empty when everything AI7 wrote is shown.
+   */
+  readonly withheld: ReadonlyArray<string>;
 }
 
 export interface InitialEvaluationRevisionUpdateProjection extends Omit<ReviewCategoryRevisionUpdateProjection, 'mode'> {
@@ -4197,6 +4270,114 @@ export interface ReadersReportProjection extends Omit<
   updateControls: null | ReadersReportUpdateControlsProjection;
   history: null | ReadersReportHistoryProjection;
   inspectedRevision: null | { revision: ReadersReportResultSetRevisionProjection; current: boolean; readOnly: true };
+}
+
+// ---- 按我的评分重写评语 (Issue #429, plan slice S81b2; V2-UX-EVAL-008) ---------------------------------------------------
+
+/** One thing AI7 noted in one reading range that bears out the editor's score of one item, with the blocks it rests on. */
+export interface EvaluationRewriteObservationProjection {
+  itemId: string;
+  unitOrdinal: number;
+  note: string;
+  blockIds: ReadonlyArray<string>;
+}
+
+/** The rewritten words as the book-level synthesis wrote them: each scored item's 评语, and the 总评. Never a number. */
+export interface EvaluationRewriteWordsProjection {
+  /** The 评语 offered: every scored item's but those set aside. */
+  items: ReadonlyArray<{ itemId: string; comment: string }>;
+  /** The 总评 offered, or `null` when it was set aside. */
+  verdict: string | null;
+  /** What was written but is not offered — a 评语 (`itemId`) or the 总评 (`null`) that stated a score or a conclusion — and why. */
+  withheld: ReadonlyArray<{ itemId: string | null; reason: string }>;
+}
+
+/** The evaluation rewrite kind's own component of a Result Set Revision. */
+export interface EvaluationRewriteResultProjection {
+  observations: ReadonlyArray<EvaluationRewriteObservationProjection>;
+  /** `null` when the book-level synthesis did not close: AI7 then rewrote nothing. */
+  words: EvaluationRewriteWordsProjection | null;
+  synthesis: { state: 'closed' | 'gap' | 'not-run'; reason: string | null };
+}
+
+export interface EvaluationRewriteRevisionUpdateProjection extends Omit<ReviewCategoryRevisionUpdateProjection, 'mode'> {
+  mode: EvaluationRewriteTaskMode;
+}
+
+export type EvaluationRewriteUnitProjection =
+  | {
+      unitOrdinal: number;
+      state: 'closed';
+      requestDigest: string;
+      responseDigest: string;
+      usage: { inputTokens: number; outputTokens: number } | null;
+      lineage: ReviewCategoryUnitLineage;
+      observations: ReadonlyArray<{ itemId: string; note: string; blockOrdinals: ReadonlyArray<number> }>;
+    }
+  | { unitOrdinal: number; state: 'gap'; requestDigest: string; lineage: ReviewCategoryUnitLineage; gap: AnalysisGapProjection };
+
+export interface EvaluationRewriteResultSetRevisionProjection extends Omit<
+  ReviewCategoryResultSetRevisionProjection,
+  'contractVersion' | 'update' | 'category' | 'findings' | 'excluded' | 'findingCounts' | 'units'
+> {
+  contractVersion: typeof EVALUATION_REWRITE_CONTRACT_VERSION;
+  update: EvaluationRewriteRevisionUpdateProjection;
+  rewrite: EvaluationRewriteResultProjection;
+  units: ReadonlyArray<EvaluationRewriteUnitProjection>;
+}
+
+export interface EvaluationRewriteUpdateProjection extends Omit<ReviewCategoryUpdateProjection, 'mode'> {
+  mode: 'evaluation-rewrite-again';
+}
+
+export interface EvaluationRewriteUpdateControlsProjection extends Omit<BaselineAnalysisUpdateControlsProjection, 'actions'> {
+  actions: { 'evaluation-rewrite-again': Omit<ReviewCategoryUpdateActionProjection, 'mode'> & { mode: 'evaluation-rewrite-again' } };
+}
+
+export interface EvaluationRewriteHistoryEntryProjection extends Omit<BaselineAnalysisHistoryEntryProjection, 'mode' | 'contractVersion' | 'counts'> {
+  mode: EvaluationRewriteTaskMode;
+  contractVersion: typeof EVALUATION_REWRITE_CONTRACT_VERSION;
+  counts: ReviewScopePlanCounts;
+}
+
+export interface EvaluationRewriteHistoryProjection {
+  resultSetId: string;
+  kind: typeof EVALUATION_REWRITE_KIND;
+  createdAt: string;
+  latestOrdinal: number;
+  entries: ReadonlyArray<EvaluationRewriteHistoryEntryProjection>;
+}
+
+/** The evaluation rewrite kind's Task projection: a member of the analysis projection union, discriminated on `kind`. */
+export interface EvaluationRewriteProjection extends Omit<
+  BaselineAnalysisProjection,
+  'kind' | 'contractVersion' | 'taskIntent' | 'executionPlan' | 'resultSetRevision' | 'update' | 'updateControls' | 'history' | 'inspectedRevision'
+> {
+  kind: typeof EVALUATION_REWRITE_KIND;
+  contractVersion: typeof EVALUATION_REWRITE_CONTRACT_VERSION;
+  taskIntent: null | {
+    taskIntentId: string;
+    goal: EvaluationRewriteGoal;
+    expectedOutcome: typeof EVALUATION_REWRITE_EXPECTED_OUTCOME;
+    createdAt: string;
+    mode: EvaluationRewriteTaskMode;
+    modeLabel: string;
+  };
+  executionPlan: null | {
+    steps: ReadonlyArray<string>;
+    effects: readonly [];
+    unitCount: number;
+    recomputedUnitCount?: number;
+    reusedUnitCount?: number;
+    unreviewedUnitCount?: number;
+    reducerStages: readonly ['unit-validation', 'cross-unit-reduction', 'book-synthesis'];
+    stopCondition: string;
+  };
+  resultSetRevision: null | EvaluationRewriteResultSetRevisionProjection;
+  update: null | EvaluationRewriteUpdateProjection;
+  updateControls: null | EvaluationRewriteUpdateControlsProjection;
+  history: null | EvaluationRewriteHistoryProjection;
+  inspectedRevision: null | { revision: EvaluationRewriteResultSetRevisionProjection; current: boolean; readOnly: true };
 }
 
 // ---- 审阅记录 Review Runs (Issue #417, plan slice S69) ---------------------------------------------
@@ -4686,8 +4867,8 @@ export interface ReviewFindingOfMarkProjection {
  * slice that brings its ledger; nothing here is an authority record of its own. AI7's 初评 (Issue #429, S81b1) joins them
  * with its own ledger.
  */
-export type TaskPlanKind = 'fixed-task' | 'baseline-analysis' | 'review-run' | 'initial-evaluation' | 'readers-report';
-export const TASK_PLAN_KINDS: readonly TaskPlanKind[] = ['fixed-task', 'baseline-analysis', 'review-run', 'initial-evaluation', 'readers-report'];
+export type TaskPlanKind = 'fixed-task' | 'baseline-analysis' | 'review-run' | 'initial-evaluation' | 'readers-report' | 'evaluation-rewrite';
+export const TASK_PLAN_KINDS: readonly TaskPlanKind[] = ['fixed-task', 'baseline-analysis', 'review-run', 'initial-evaluation', 'readers-report', 'evaluation-rewrite'];
 
 /** Which plan the drawer reads. The Book is always the route's; the renderer never names it. */
 export interface InspectTaskPlanInput {
@@ -5462,6 +5643,8 @@ export interface CapturedProcedureRunLinkProjection {
   readonly reviewRunId: string;
   readonly label: string;
   readonly createdAt: string;
+  /** Where the Run stands now, in the Review Run's own words (Issue #66, S31): 已完成, 计划已冻结 · 待授权 … */
+  readonly stateLabel: string;
 }
 
 export interface CapturedProcedureVersionProjection {
@@ -5480,7 +5663,10 @@ export interface CapturedProcedureVersionProjection {
   readonly validationProblems: ReadonlyArray<string>;
   /** The local provenance outside the digest (REUSE-015): the Review Run it was captured from. */
   readonly source: { readonly bookId: string; readonly bookTitle: string; readonly reviewRunId: string; readonly runLabel: string };
+  /** The Review Runs approved under it — ran, or began to (Issue #66, S31 review P3-3). */
   readonly runCount: number;
+  /** The Review Runs prepared from it and never approved; each is linked with its state like the others. */
+  readonly preparedRunCount: number;
   readonly runs: ReadonlyArray<CapturedProcedureRunLinkProjection>;
   readonly technical: { readonly documentSha256: string; readonly previousDocumentSha256: string | null };
 }
@@ -5500,6 +5686,11 @@ export interface CapturedProcedureSummaryProjection {
 
 /** One Captured Procedure with one page of its versions, newest first; `versionsBefore` reads the next older page. */
 export interface CapturedProcedureProjection extends CapturedProcedureSummaryProjection {
+  /**
+   * The version a new use resolves to now — the newest 已启用 one that still validates (Issue #66, S31; REUSE-043, REUSE-044) —
+   * marked 最新可用 on its row; `null` when none is.
+   */
+  readonly latestEligibleVersionId: string | null;
   readonly versions: ReadonlyArray<CapturedProcedureVersionProjection>;
   /** The version number the next older page starts below; `null` when this page reaches version 1. */
   readonly versionsBefore: number | null;
@@ -5601,15 +5792,67 @@ export interface CapturedProcedureRunProjection {
   readonly resolved: null | {
     readonly versionId: string;
     readonly version: number;
+    /** Whether it is the latest eligible version — `false` when the editor chose an older eligible one (REUSE-054). */
+    readonly latestEligible: boolean;
     readonly documentSha256: string;
     readonly scopeSlot: CapturedProcedureScopeSlot;
     readonly steps: ReadonlyArray<CapturedProcedureRunStepProjection>;
     readonly guidelineChanges: ReadonlyArray<{ readonly categoryId: string; readonly label: string; readonly title: string; readonly sourceVersion: string | null; readonly version: string }>;
   };
-  /** Newer 已启用 versions passed over because they no longer validate, with why (REUSE-043: disclosed, never silent). */
+  /**
+   * Every version newer than the latest eligible one, passed over with why — stopped, still waiting for validation, or no longer
+   * validating (REUSE-043, REUSE-044: disclosed, never silent; Issue #66, S31).
+   */
   readonly passedOver: ReadonlyArray<{ readonly version: number; readonly reason: string }>;
+  /**
+   * The versions the editor may choose instead, newest first: each 已启用 and still validating (Issue #66, S31; REUSE-054's manual
+   * selector). The first is the latest eligible, which a new use takes unless the editor chooses another.
+   */
+  readonly eligibleVersions: ReadonlyArray<{ readonly versionId: string; readonly version: number }>;
   /** Why it cannot run now; `null` when `resolved` is set. */
   readonly unavailableReason: string | null;
+}
+
+/** A Review Run one version's 停用 touches (Issue #66, S31; REUSE-038, REUSE-041): an exact link and where it stands. */
+export interface CapturedProcedureStopRunProjection {
+  readonly bookId: string;
+  readonly bookTitle: string;
+  readonly reviewRunId: string;
+  readonly label: string;
+  readonly stateLabel: string;
+}
+
+/** One version as `停用…`'s preview names it. */
+export interface CapturedProcedureStopVersionProjection {
+  readonly versionId: string;
+  readonly version: number;
+  readonly stateLabel: string;
+  /** The Review Runs approved under it — ran, or began to: each keeps naming it after the 停用 (REUSE-040). */
+  readonly runCount: number;
+  /** Prepared from it and not yet approved, still the newest of their Book: they cannot be approved after it and are prepared again. */
+  readonly prepared: ReadonlyArray<CapturedProcedureStopRunProjection>;
+  readonly preparedCount: number;
+  /** Approved and not yet finished: they go on under the version they were approved with; the 停用 does not move them. */
+  readonly active: ReadonlyArray<CapturedProcedureStopRunProjection>;
+  readonly activeCount: number;
+}
+
+/**
+ * `停用…`'s preview (Issue #66, S31): the Version Removal Preview (REUSE-038, REUSE-040, REUSE-041) for a 停用, which removes
+ * nothing (ADR 0087 §5). It names the Runs it touches, what a new use resolves to afterwards, and what stays; `stopCapturedProcedure`
+ * confirms exactly this preview by its digest. A read.
+ */
+export interface CapturedProcedureStopPreviewProjection {
+  readonly procedureId: string;
+  readonly title: string;
+  /** `null` for 全部停用. */
+  readonly versionId: string | null;
+  /** The newest versions it takes, as many as one frame holds (S31 review P2-2); `versionCount` counts them all. */
+  readonly versions: ReadonlyArray<CapturedProcedureStopVersionProjection>;
+  readonly versionCount: number;
+  /** The version a new use resolves to afterwards; `null` when none will be runnable. */
+  readonly afterVersion: number | null;
+  readonly previewDigest: string;
 }
 
 /** The pin a Review Run prepared from a Captured Procedure records (ADR 0087 §4): never moved by a later version or a 停用. */
@@ -5887,6 +6130,11 @@ export interface EvaluationInitialDraftProjection {
   readonly suggestedConclusion: EvaluationConclusion | null;
   /** Every item scored: the book-level synthesis closed. */
   readonly complete: boolean;
+  /**
+   * AI7's market section (Issue #429, S81b2; EVAL-009): from what the 初评 read in the Book alone; `null` for a 初评 that wrote
+   * none — one whose synthesis did not close, or one a version began from before the market section existed.
+   */
+  readonly market: InitialEvaluationMarketProjection | null;
 }
 
 /** AI7's 初评 on ②C: its Task, whether one can be prepared now, and the latest that settled. */
@@ -5970,6 +6218,120 @@ export interface EvaluationWorkspaceProjection {
   readonly initial: EvaluationInitialProjection;
   /** 审稿意见 of the Book (Issue #429, S81c). */
   readonly readersReport: EvaluationReadersReportProjection;
+  /** The market section's house data for the version on show (Issue #429, S81b2): 书系 comparables and 定价与首印. */
+  readonly market: EvaluationMarketProjection;
+  /** 按我的评分重写评语 of the version on show (Issue #429, S81b2). */
+  readonly rewrite: EvaluationRewriteWorkspaceProjection;
+}
+
+// ---- 市场 and 按我的评分重写评语 (Issue #429, plan slice S81b2; V2-UX-EVAL-008 to EVAL-010) --------------------------------
+
+/** The most 书系 comparables the market section lists; the count says how many more there are. */
+export const MAX_EVALUATION_COMPARABLES = 10;
+/**
+ * The fewest other published Books of the Book's own 书系 with actuals that 定价与首印 gives a 书系 range over (S81b2): fewer,
+ * and the quartiles would be one or two Books' own figures shown as a prediction. Below it only the house range shows.
+ */
+export const MIN_SERIES_PREDICTION_BOOKS = 5;
+
+/**
+ * A 定价与首印 range over published Books' actuals (EVAL-010; the Owner's answer of 2026-10-07: 「按本社已出版同类书的实际数据
+ * 统计」): the middle half of the Books — from the lower to the upper quartile — and the median, with how many Books it rests
+ * on. Prices in 分. Statistics over the house's own entries, never a model's and never the web's.
+ */
+export interface EvaluationPredictionRangeProjection {
+  readonly books: number;
+  readonly priceFen: { readonly low: number; readonly median: number; readonly high: number };
+  readonly firstPrint: { readonly low: number; readonly median: number; readonly high: number };
+}
+
+/**
+ * 定价与首印 in the market section (EVAL-010, EVAL-014): shown only once 设置 › 评估校准与预测's switch is on and enough
+ * other published Books carry actuals; otherwise what it waits for. The ranges never count the Book itself, and neither does
+ * the gate they wait on.
+ */
+export interface EvaluationPricingProjection {
+  /** Every published Book with actuals: what the switch in 设置 waits on. */
+  readonly booksWithActuals: number;
+  /** The published Books with actuals other than this one: what the ranges rest on, and what they wait on. */
+  readonly otherBooksWithActuals: number;
+  readonly threshold: number;
+  readonly enabled: boolean;
+  /** The switch may be on: `booksWithActuals` reached the threshold. */
+  readonly available: boolean;
+  /** The house data could not be read this time (a damaged entry): nothing is predicted, and 评估 stays readable. */
+  readonly unreadable: boolean;
+  /** The house's other published Books with actuals, when the prediction shows; `null` otherwise. */
+  readonly house: EvaluationPredictionRangeProjection | null;
+  /** The other published Books with actuals of the Book's own 书系, when the prediction shows and they reach `MIN_SERIES_PREDICTION_BOOKS`; `null` otherwise. */
+  readonly series: EvaluationPredictionRangeProjection | null;
+  /** How many of those the Book's 书系 holds, when the prediction shows and the Book is in one; `null` otherwise. */
+  readonly seriesBooksWithActuals: number | null;
+  readonly seriesMinimum: number;
+}
+
+/** One comparable Book from house data (EVAL-009): another member of a 书系 this Book is in, tagged `书系`. */
+export interface EvaluationComparableProjection {
+  readonly bookId: string;
+  readonly title: string;
+  readonly seriesTitle: string;
+  /** It has a 发稿版本. */
+  readonly published: boolean;
+  readonly source: 'series';
+}
+
+/** The market section's house data (EVAL-009, EVAL-010): the Book's 书系, their other Books, and 定价与首印. */
+export interface EvaluationMarketProjection {
+  readonly series: ReadonlyArray<{ readonly seriesId: string; readonly title: string }>;
+  readonly comparables: ReadonlyArray<EvaluationComparableProjection>;
+  /** How many comparables there are in all; the list holds at most `MAX_EVALUATION_COMPARABLES`. */
+  readonly comparableCount: number;
+  /** The 书系 data could not be read this time (a damaged entry): no 书系 and no comparables are listed, and 评估 stays readable. */
+  readonly seriesUnreadable: boolean;
+  readonly pricing: EvaluationPricingProjection;
+}
+
+/** 采用 records the rewrite as a new entry of the version; 放弃 sets it aside. */
+export type EvaluationRewriteDecision = 'accept' | 'discard';
+
+/**
+ * 按我的评分重写评语 of the version on show (EVAL-008): whether it can be asked now, the Book's latest rewrite Task, the rewrite
+ * waiting for the editor's decision with its words beside the version's, and the version's last decision.
+ */
+export interface EvaluationRewriteWorkspaceProjection {
+  readonly prepare: { readonly allowed: true; readonly mode: EvaluationRewriteTaskMode } | { readonly allowed: false; readonly reason: string };
+  /** The Book's latest rewrite Task, which the Task Drawer opens, and the version and entry it rewrites. */
+  readonly task: null | {
+    readonly taskIntentId: string;
+    readonly recordId: string;
+    readonly recordOrdinal: number;
+    readonly entryOrdinal: number;
+    readonly state: BaselineAnalysisProjection['state'];
+    readonly label: string;
+  };
+  /** The newest rewrite of the version on show that the editor has not decided; `null` when none waits. */
+  readonly proposal: null | {
+    readonly revisionId: string;
+    readonly createdAt: string;
+    /** The saved entry it rewrote, and whether that is still the version's latest — only then can it be 采用. */
+    readonly entryOrdinal: number;
+    readonly current: boolean;
+    /** How much of the Book the rewrite read: its notes, and so its words, rest on the ranges read and never on the rest. */
+    readonly reading: { readonly unitsTotal: number; readonly unitsRead: number };
+    /** Each 评语 offered beside the version's own, with the notes AI7 rests it on (EVAL-006): the range and the blocks cited. */
+    readonly items: ReadonlyArray<{
+      readonly itemId: string;
+      readonly before: string | null;
+      readonly after: string;
+      readonly evidence: ReadonlyArray<{ readonly unitOrdinal: number; readonly note: string; readonly blockIds: ReadonlyArray<string> }>;
+    }>;
+    /** The 总评 offered beside the version's own; `null` when it was set aside. */
+    readonly verdict: null | { readonly before: string | null; readonly after: string };
+    /** What AI7 wrote but does not offer — a 评语 or the 总评 that stated a score or a conclusion — each with why. */
+    readonly withheld: ReadonlyArray<string>;
+  };
+  /** The version's latest decision on a rewrite; `null` before the first. */
+  readonly decided: null | { readonly decision: 'accepted' | 'discarded'; readonly entryOrdinal: number | null; readonly decidedAt: string };
 }
 
 /** One template's 审稿意见 on ②C (Issue #429, S81c; EVAL-013): whether it can be drafted, its result, and its draft. */
@@ -6319,6 +6681,13 @@ export const LEARNING_AUDIT_STANDINGS: readonly LearningAuditStanding[] = ['pend
 
 /** The materials one answer of 学习回溯 carries, Book by Book; `更多学习材料…` reads the next. */
 export const MAX_LEARNING_AUDIT_PAGE = 40;
+/**
+ * The most Books 学习回溯's 图书 filter offers, by title (Issue #677); fewer when their titles fill the filter's share of the
+ * frame. A house with more says so in the filter.
+ */
+export const MAX_LEARNING_AUDIT_BOOK_CHOICES = 1_000;
+/** The most Series its 书系 filter offers, by name, on the same terms. */
+export const MAX_LEARNING_AUDIT_SERIES_CHOICES = 200;
 /** The longest search a 学习回溯 filter carries, in UTF-16 units. */
 export const MAX_LEARNING_AUDIT_QUERY = 100;
 /** The newest decisions a Learning Lineage Explorer shows of one chain; earlier ones are counted. */
@@ -6373,10 +6742,27 @@ export interface LearningAuditBookProjection {
   readonly materials: ReadonlyArray<LearningAuditMaterialProjection>;
 }
 
-/** 质量与学习 › 学习回溯: one page of the Books whose material matches, Book by Book (LAUD-001). A read. */
+/**
+ * 学习回溯's filter choices (LAUD-002; Issue #677): the house's Books and Series by title, answered with every page so opening
+ * the audit reads no Book list of its own. Each list holds at most its count bound and its share of the frame, and says
+ * whether the house holds more.
+ */
+export interface LearningAuditChoicesProjection {
+  /** The first `booksListed` Books by title, then the Book the filter names when it lies beyond them. */
+  readonly books: ReadonlyArray<{ readonly bookId: string; readonly title: string }>;
+  readonly booksListed: number;
+  readonly booksTruncated: boolean;
+  readonly series: ReadonlyArray<{ readonly seriesId: string; readonly title: string }>;
+  readonly seriesTruncated: boolean;
+  /** The Series could not be read (a damaged record): the audit still answers, with no Series to choose. */
+  readonly seriesUnavailable: boolean;
+}
+
+/** 质量与学习 › 学习回溯: one page of the Books whose material matches, Book by Book (LAUD-001), and the filters' choices. A read. */
 export interface LearningAuditProjection {
   readonly books: ReadonlyArray<LearningAuditBookProjection>;
   readonly nextCursor: LearningMaterialCursor | null;
+  readonly choices: LearningAuditChoicesProjection;
 }
 
 /** One decision of a material's chain (LAUD-003, LAUD-005, LAUD-009): none rewritten, a later one superseding. */
@@ -7533,7 +7919,7 @@ export interface QuickStartBaselineAnalysisResult {
 
 /** Every analysis projection, discriminated on `kind`. */
 export type AnalysisProjection = BaselineAnalysisProjection | FactualReviewProjection | ReviewCategoryProjection | InitialEvaluationProjection |
-  ReadersReportProjection;
+  ReadersReportProjection | EvaluationRewriteProjection;
 
 export interface HistoricalRevisionProjection {
   mode: 'historical-revision';
@@ -9423,7 +9809,7 @@ export interface ServiceJobProjection {
    */
   kind: 'search' | 'replacement' | 'reimport-preparation' | 'reimport-resolution' | 'reimport-commit' |
     'task-authorization-preparation' | 'baseline-analysis-preparation' | 'review-run-preparation' | 'package-export' |
-    'initial-evaluation-preparation' | 'readers-report-preparation';
+    'initial-evaluation-preparation' | 'readers-report-preparation' | 'evaluation-rewrite-preparation';
   state: 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
   progress: { completed: number; total: number; label: string };
   result: SearchSummaryProjection | ReplacementPreviewProjection | ReviewBeforeManuscriptReimportProjection |
@@ -9883,10 +10269,15 @@ export interface ServiceOperationMap {
   previewCapturedProcedureValidation: { input: { versionId: string }; output: CapturedProcedureValidationProjection };
   /** Confirms the preview by its digest: `已启用` when it passes, its reasons recorded when it does not (ADR 0087 §3). */
   enableCapturedProcedure: { input: { versionId: string; previewDigest: string }; output: CapturedProcedureProjection };
-  /** `停用`: one version or all of them, final for each (ADR 0087 §5). */
-  stopCapturedProcedure: { input: { procedureId: string; versionId: string | null }; output: CapturedProcedureProjection };
-  /** The newest 已启用 version that still validates, for the Book's 新建审阅 sheet (ADR 0087 §4). */
-  inspectCapturedProcedureRun: { input: { bookId: string; procedureId: string }; output: CapturedProcedureRunProjection };
+  /** `停用…`'s preview (Issue #66, S31; REUSE-038, REUSE-040, REUSE-041): what stopping one version, or all of them, changes. */
+  previewCapturedProcedureStop: { input: { procedureId: string; versionId: string | null }; output: CapturedProcedureStopPreviewProjection };
+  /** `停用`: one version or all of them, final for each (ADR 0087 §5), confirming exactly the preview the editor read (S31). */
+  stopCapturedProcedure: { input: { procedureId: string; versionId: string | null; previewDigest: string }; output: CapturedProcedureProjection };
+  /**
+   * For the Book's 新建审阅 sheet (ADR 0087 §4): the newest 已启用 version that still validates, or — `versionId` — the exact
+   * eligible version the editor chose instead (Issue #66, S31; REUSE-043 to REUSE-045, REUSE-054).
+   */
+  inspectCapturedProcedureRun: { input: { bookId: string; procedureId: string; versionId: string | null }; output: CapturedProcedureRunProjection };
   /** 保存开发建议: a new Developer Capability Proposal, or its next version (ADR 0087 §6). */
   saveDeveloperProposal: { input: SaveDeveloperProposalInput; output: DeveloperProposalProjection };
   /** 导出为文件…: the proposal version written to the file the editor chose through the Save dialog (ADR 0087 §6). */
@@ -9969,6 +10360,27 @@ export interface ServiceOperationMap {
   /** 打开草稿: one drafted 审稿意见 result made the template's draft document, once; 评估 then names it. */
   createReadersReportDraft: {
     input: { bookId: string; revisionId: string };
+    output: EvaluationWorkspaceProjection;
+  };
+  /**
+   * 按我的评分重写评语 (Issue #429, S81b2; EVAL-008): the evaluation rewrite kind's Task over one version's latest saved entry,
+   * prepared as one cooperative job. The completed job's result is 评估 with that version on show and the prepared Task named.
+   */
+  prepareEvaluationRewrite: {
+    input: { bookId: string; recordId: string };
+    output: ServiceJobProjection;
+  };
+  /** 开始任务 in the drawer's bar for 按我的评分重写评语. */
+  authorizeEvaluationRewrite: {
+    input: { bookId: string; taskIntentId: string; planEnvelopeDigest: string };
+    output: EvaluationWorkspaceProjection;
+  };
+  /**
+   * 采用 or 放弃 one rewrite: 采用 appends the rewritten 评语 and 总评 to the version as a new entry, every score as it stands;
+   * 放弃 records that the editor set it aside. Either is recorded once.
+   */
+  decideEvaluationRewrite: {
+    input: { bookId: string; revisionId: string; decision: EvaluationRewriteDecision };
     output: EvaluationWorkspaceProjection;
   };
   /** ②A 分析反馈 (Issue #94, S38): one Result Set Revision's items with their latest judgments, and the Book's metric. */
@@ -10448,9 +10860,10 @@ export interface RendererApi {
   saveCapturedProcedure(input: Omit<SaveCapturedProcedureInput, 'bookId'>): Promise<CapturedProcedureProjection>;
   previewCapturedProcedureValidation(input: { versionId: string }): Promise<CapturedProcedureValidationProjection>;
   enableCapturedProcedure(input: { versionId: string; previewDigest: string }): Promise<CapturedProcedureProjection>;
-  stopCapturedProcedure(input: { procedureId: string; versionId: string | null }): Promise<CapturedProcedureProjection>;
-  /** For the current Book's 新建审阅 sheet. */
-  inspectCapturedProcedureRun(input: { procedureId: string }): Promise<CapturedProcedureRunProjection>;
+  previewCapturedProcedureStop(input: { procedureId: string; versionId: string | null }): Promise<CapturedProcedureStopPreviewProjection>;
+  stopCapturedProcedure(input: { procedureId: string; versionId: string | null; previewDigest: string }): Promise<CapturedProcedureProjection>;
+  /** For the current Book's 新建审阅 sheet: the latest eligible version, or the exact eligible one chosen (`versionId`). */
+  inspectCapturedProcedureRun(input: { procedureId: string; versionId?: string | null }): Promise<CapturedProcedureRunProjection>;
   saveDeveloperProposal(input: SaveDeveloperProposalInput): Promise<DeveloperProposalProjection>;
   /** 导出为文件…: the platform Save dialog, then the file; nothing is written or recorded when the dialog is cancelled. */
   saveDeveloperProposalFile(input: { proposalVersionId: string }): Promise<SaveDeveloperProposalFileOutcome>;
@@ -10480,6 +10893,12 @@ export interface RendererApi {
   authorizeReadersReport(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<EvaluationWorkspaceProjection>;
   /** 打开草稿: the drafted result made the template's draft document; the renderer then opens it on the editing surface. */
   createReadersReportDraft(input: { revisionId: string }): Promise<EvaluationWorkspaceProjection>;
+  /** 按我的评分重写评语 (Issue #429, S81b2): an `evaluation-rewrite-preparation` job over one version; its plan opens in the Task Drawer. */
+  prepareEvaluationRewrite(input: { recordId: string }): Promise<ServiceJobProjection>;
+  /** The Task Drawer bar's 开始任务 for 按我的评分重写评语. */
+  authorizeEvaluationRewrite(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<EvaluationWorkspaceProjection>;
+  /** 采用 or 放弃 one rewrite of the version on show. */
+  decideEvaluationRewrite(input: { revisionId: string; decision: EvaluationRewriteDecision }): Promise<EvaluationWorkspaceProjection>;
   /** ②A 分析反馈 of the Book the window is showing (Issue #94, S38); the renderer never names the Book. */
   inspectAnalysisFeedback(input: { revisionId: string }): Promise<AnalysisFeedbackProjection>;
   recordAnalysisFeedback(input: RecordAnalysisFeedbackInput): Promise<AnalysisFeedbackProjection>;

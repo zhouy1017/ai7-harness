@@ -8,7 +8,7 @@ import { ASSURANCE_SAMPLING_REMOVED, NO_PLAN_EDITS, SAFE_RETRY_WITHHELD, planEdi
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { CLARIFICATION_SCHEMA_VERSION, CAPTURED_PROCEDURE_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
+import { CLARIFICATION_SCHEMA_VERSION, EVALUATION_REWRITE_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { SET_RULE_EDITED } from '../../src/service/default-execution-rules.js';
 import { PLAN_EDIT_DRIFT_REASON, PLAN_EDIT_STARTED_REASON } from '../../src/service/task-plan.js';
 import {
@@ -159,7 +159,7 @@ describe('schema revision 34 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(CAPTURED_PROCEDURE_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EVALUATION_REWRITE_SCHEMA_VERSION);
       expect(planRevisionsShapeAt33(database)).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM analysis_plan_revisions ORDER BY rowid').all()).toEqual(before.revisions);
       const after = relationTruth(database);

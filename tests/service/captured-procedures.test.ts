@@ -12,7 +12,7 @@ import type { BaselineAnalysisStore } from '../../src/service/analysis/baseline-
 import { ReviewRunDriver, type ReviewRunExecutionOwner } from '../../src/service/review/review-run-driver.js';
 import { LEADS_ABSENT_REASON } from '../../src/service/review/review-scope.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { CAPTURED_PROCEDURE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { EVALUATION_REWRITE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { BASELINE_ANALYSIS_TASK_GOAL, MAX_FRAME_BYTES, type LaunchPolicyProjection, type ReviewRunProjection, type ReviewRunScopeRequest } from '../../src/shared/protocol.js';
 import { LITERARY_EXPRESSION, STYLE_AND_FORMAT } from '../support/review-categories.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
@@ -261,7 +261,7 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
 
       // A Run prepared from version 1 and not yet authorized when version 1 is stopped is prepared again, never authorized.
       const waiting = prepare(session, target, [STYLE], WHOLE, pin);
-      const stopped = store.stopCapturedProcedure(saved.procedureId, first!.versionId);
+      const stopped = store.stopCapturedProcedure(saved.procedureId, first!.versionId, store.previewCapturedProcedureStop(saved.procedureId, first!.versionId).previewDigest);
       expect(stopped.versions.map((version) => [version.version, version.state])).toEqual([[2, 'pending-validation'], [1, 'stopped']]);
       expect(stopped.runnable).toBe(false);
       expect(refusal(() => store.authorizeReviewRun(target, waiting.reviewRunId, approvals(waiting)))).toBe('REVIEW_PROCEDURE_STOPPED');
@@ -275,11 +275,12 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       });
       expect(refusal(() => prepare(session, target, [STYLE], WHOLE, pin))).toBe('REVIEW_PROCEDURE_STALE');
       // 停用 for all of them stops version 2 too, and nothing is deleted.
-      expect(store.stopCapturedProcedure(saved.procedureId, null).versions.map((version) => version.state)).toEqual(['stopped', 'stopped']);
+      expect(store.stopCapturedProcedure(saved.procedureId, null, store.previewCapturedProcedureStop(saved.procedureId, null).previewDigest).versions
+        .map((version) => version.state)).toEqual(['stopped', 'stopped']);
       const check = database();
       try {
         expect((check.prepare('SELECT count(*) n FROM captured_procedure_versions').get() as { n: number }).n).toBe(2);
-        expect((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(CAPTURED_PROCEDURE_SCHEMA_VERSION);
+        expect((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EVALUATION_REWRITE_SCHEMA_VERSION);
       } finally {
         check.close();
       }
@@ -411,6 +412,272 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
 
 const wireBytes = (value: unknown): number => Buffer.byteLength(JSON.stringify(value), 'utf8');
 
+describe('exact procedure versions (Issue #66, plan slice S31; UI ADR 0013; REUSE-031, REUSE-038 to REUSE-045, REUSE-054)', () => {
+  it('resolves the latest eligible version, lets the editor pin an older eligible one, and previews a 停用 before it is confirmed', async () => {
+    const session = await open();
+    try {
+      const { store } = session;
+      const source = await importBook(session, 'L2 版本来源');
+      const finished = await authorizeAndDrive(session, source, prepare(session, source, [STYLE, LITERARY]));
+      const enable = (versionId: string): void => {
+        store.enableCapturedProcedure(versionId, store.previewCapturedProcedureValidation(versionId).previewDigest);
+      };
+      const one = store.saveCapturedProcedure({ bookId: source, reviewRunId: finished.reviewRunId, categoryIds: [STYLE], scopeSlot: 'whole', title: '体例复核', procedureId: null });
+      const procedureId = one.procedureId;
+      const v1 = one.versions[0]!.versionId;
+      enable(v1);
+      const v2 = store.saveCapturedProcedure({ bookId: source, reviewRunId: finished.reviewRunId, categoryIds: [STYLE, LITERARY], scopeSlot: 'whole', title: '体例复核', procedureId }).versions[0]!.versionId;
+      enable(v2);
+      // A third version waits for validation: never resolved, and said so (REUSE-044).
+      const v3 = store.saveCapturedProcedure({ bookId: source, reviewRunId: finished.reviewRunId, categoryIds: [LITERARY], scopeSlot: 'whole', title: '体例复核', procedureId }).versions[0]!.versionId;
+      const target = await importBook(session, 'L2 版本目标', false);
+
+      // The latest eligible version by default, every eligible one offered, the newer one passed over with why.
+      const latest = store.inspectCapturedProcedureRun(target, procedureId);
+      expect(latest.resolved).toMatchObject({ versionId: v2, version: 2, latestEligible: true });
+      expect(latest.eligibleVersions).toEqual([{ versionId: v2, version: 2 }, { versionId: v1, version: 1 }]);
+      expect(latest.passedOver).toEqual([{ version: 3, reason: '这一版还没有验证并启用。' }]);
+      expect(store.inspectCapturedProcedure(procedureId, null).latestEligibleVersionId).toBe(v2);
+      // The older eligible version chosen instead (REUSE-054); a version that is not eligible cannot be.
+      const older = store.inspectCapturedProcedureRun(target, procedureId, v1);
+      expect(older.resolved).toMatchObject({ versionId: v1, version: 1, latestEligible: false });
+      expect(older.resolved!.steps.map((step) => step.categoryId)).toEqual([STYLE]);
+      expect(refusal(() => store.inspectCapturedProcedureRun(target, procedureId, v3))).toBe('REVIEW_PROCEDURE_VERSION_INELIGIBLE');
+      expect(refusal(() => store.inspectCapturedProcedureRun(target, procedureId, '00000000-0000-4000-8000-000000000000'))).toBe('CAPTURED_PROCEDURE_NOT_FOUND');
+
+      // The Run pins exactly the version chosen, and a finished Run names it among the version's linked work with where it stands.
+      const pinOne = { versionId: v1, documentSha256: older.resolved!.documentSha256 };
+      const ranOne = await authorizeAndDrive(session, target, prepare(session, target, [STYLE], WHOLE, pinOne));
+      expect(ranOne.procedure).toMatchObject({ versionId: v1, version: 1 });
+      const page = store.inspectCapturedProcedure(procedureId, null);
+      expect(page.versions.find((version) => version.versionId === v1)!.runs).toEqual([
+        { bookId: target, bookTitle: 'L2 版本目标', reviewRunId: ranOne.reviewRunId, label: '第 1 次', createdAt: expect.any(String), stateLabel: '已完成' },
+      ]);
+      // A choice of version 1 is still a choice of exactly version 1: version 2's digest under its identity is refused.
+      expect(refusal(() => prepare(session, target, [STYLE], WHOLE, { versionId: v1, documentSha256: latest.resolved!.documentSha256 }))).toBe('REVIEW_PROCEDURE_STALE');
+      const waiting = prepare(session, target, [STYLE], WHOLE, pinOne);
+      expect(waiting.procedure).toMatchObject({ versionId: v1, stopped: false });
+      // A second Book's prepared Run from version 1 too: the preview names the newest first.
+      const waitingSource = prepare(session, source, [STYLE], WHOLE, pinOne);
+
+      // 停用… of version 1 names the prepared Runs as ones prepared again, keeps the finished one, and says version 2 runs afterwards.
+      const preview = store.previewCapturedProcedureStop(procedureId, v1);
+      expect(preview).toMatchObject({ procedureId, title: '体例复核', versionId: v1, afterVersion: 2 });
+      expect(preview.versions).toEqual([{
+        versionId: v1, version: 1, stateLabel: '已启用', runCount: 1, preparedCount: 2, activeCount: 0, active: [],
+        prepared: [
+          { bookId: source, bookTitle: 'L2 版本来源', reviewRunId: waitingSource.reviewRunId, label: '第 2 次', stateLabel: '计划已冻结 · 待授权' },
+          { bookId: target, bookTitle: 'L2 版本目标', reviewRunId: waiting.reviewRunId, label: '第 2 次', stateLabel: '计划已冻结 · 待授权' },
+        ],
+      }]);
+      // A preview that moved is refused, and nothing is stopped: the older of its two prepared Runs superseded by a Run chosen
+      // by hand — the newest it named unchanged — binds the digest as much as the newest does (S31 review P2-2, P3-4).
+      prepare(session, target, [STYLE]);
+      expect(store.previewCapturedProcedureStop(procedureId, v1).versions[0]!.prepared.map((run) => run.reviewRunId)).toEqual([waitingSource.reviewRunId]);
+      expect(refusal(() => store.stopCapturedProcedure(procedureId, v1, preview.previewDigest))).toBe('CAPTURED_PROCEDURE_STOP_PREVIEW_STALE');
+      // So is one that moved by another Run prepared from version 1 since.
+      const newer = prepare(session, target, [STYLE], WHOLE, pinOne);
+      expect(refusal(() => store.stopCapturedProcedure(procedureId, v1, preview.previewDigest))).toBe('CAPTURED_PROCEDURE_STOP_PREVIEW_STALE');
+      expect(store.inspectCapturedProcedure(procedureId, null).versions.find((version) => version.versionId === v1)!.state).toBe('enabled');
+      // The superseded prepared Run can never be approved anyway: only the Book's newest is named.
+      const again = store.previewCapturedProcedureStop(procedureId, v1);
+      expect(again.versions[0]!.prepared.map((run) => run.reviewRunId)).toEqual([newer.reviewRunId, waitingSource.reviewRunId]);
+      expect(again.previewDigest).not.toBe(preview.previewDigest);
+      const stopped = store.stopCapturedProcedure(procedureId, v1, again.previewDigest);
+      expect(stopped.versions.map((version) => [version.version, version.state])).toEqual([[3, 'pending-validation'], [2, 'enabled'], [1, 'stopped']]);
+      expect(stopped.latestEligibleVersionId).toBe(v2);
+      expect(refusal(() => store.authorizeReviewRun(target, newer.reviewRunId, approvals(newer)))).toBe('REVIEW_PROCEDURE_STOPPED');
+      expect(refusal(() => store.authorizeReviewRun(source, waitingSource.reviewRunId, approvals(waitingSource)))).toBe('REVIEW_PROCEDURE_STOPPED');
+      expect(store.inspectReviewWorkspace(target, ranOne.reviewRunId).run!.procedure).toMatchObject({ versionId: v1, stopped: true });
+      // A stopped version is no longer offered, cannot be chosen, and is said when newer than the latest eligible.
+      expect(store.inspectCapturedProcedureRun(target, procedureId).eligibleVersions.map((version) => version.version)).toEqual([2]);
+      expect(refusal(() => store.inspectCapturedProcedureRun(target, procedureId, v1))).toBe('REVIEW_PROCEDURE_VERSION_INELIGIBLE');
+      expect(refusal(() => store.previewCapturedProcedureStop(procedureId, v1))).toBe('CAPTURED_PROCEDURE_STOPPED');
+      expect(() => store.previewCapturedProcedureStop(procedureId, v1)).toThrowError('《体例复核》第 1 版已经停用。');
+
+      // An approved Run that is still running goes on under its version, and the preview says so. Once it has finished, that
+      // preview no longer holds: the confirmation is refused as stale and nothing is stopped (S31 review P3-4).
+      const pinTwo = { versionId: v2, documentSha256: latest.resolved!.documentSha256 };
+      const runningTwo = prepare(session, target, [STYLE, LITERARY], WHOLE, pinTwo);
+      store.authorizeReviewRun(target, runningTwo.reviewRunId, approvals(runningTwo));
+      const driving = session.driver.drive(runningTwo.reviewRunId);
+      const whileRunning = store.previewCapturedProcedureStop(procedureId, null);
+      expect(whileRunning.versions.map((version) => version.version)).toEqual([3, 2]);
+      expect(whileRunning.afterVersion).toBeNull();
+      const two = whileRunning.versions.find((version) => version.version === 2)!;
+      expect([two.preparedCount, two.activeCount, two.active.map((run) => run.reviewRunId)]).toEqual([0, 1, [runningTwo.reviewRunId]]);
+      expect(two.active[0]!.stateLabel).toBe('正在审阅');
+      await driving;
+      expect(refusal(() => store.stopCapturedProcedure(procedureId, null, whileRunning.previewDigest))).toBe('CAPTURED_PROCEDURE_STOP_PREVIEW_STALE');
+      expect(store.inspectCapturedProcedure(procedureId, null).latestEligibleVersionId).toBe(v2);
+      const afterRun = store.previewCapturedProcedureStop(procedureId, null);
+      expect(afterRun.versions.find((version) => version.version === 2)).toMatchObject({ activeCount: 0, active: [], runCount: 1 });
+      expect(afterRun.versionCount).toBe(2);
+      store.stopCapturedProcedure(procedureId, null, afterRun.previewDigest);
+      const finishedTwo = store.inspectReviewWorkspace(target, runningTwo.reviewRunId).run!;
+      expect(finishedTwo.state).toBe('settled');
+      expect(finishedTwo.procedure).toMatchObject({ versionId: v2, stopped: true });
+      expect(refusal(() => store.previewCapturedProcedureStop(procedureId, null))).toBe('CAPTURED_PROCEDURE_STOPPED');
+      expect(store.inspectCapturedProcedure(procedureId, null).latestEligibleVersionId).toBeNull();
+      // Nothing was deleted, and each 停用 records the preview it confirmed.
+      const db = database();
+      try {
+        expect((db.prepare('SELECT count(*) n FROM captured_procedure_versions').get() as { n: number }).n).toBe(3);
+        const states = db.prepare("SELECT canonical_json FROM captured_procedure_states WHERE state = 'stopped' ORDER BY recorded_at").all() as Array<{ canonical_json: string }>;
+        expect(states.map((row) => (JSON.parse(row.canonical_json) as { previewDigest: string }).previewDigest))
+          .toEqual([again.previewDigest, afterRun.previewDigest, afterRun.previewDigest]);
+      } finally {
+        db.close();
+      }
+    } finally {
+      await close(session);
+    }
+  }, 300_000);
+});
+
+describe('a 停用 that moved, or met a preparation in flight (Issue #66, S31 review P3-1, P3-4)', () => {
+  it('refuses a confirmation once a newer version became the one a new use takes, and a preparation that finishes after the 停用', async () => {
+    const session = await open();
+    try {
+      const { store } = session;
+      const source = await importBook(session, 'L2 停用之后');
+      const finished = await authorizeAndDrive(session, source, prepare(session, source, [STYLE, LITERARY]));
+      const one = store.saveCapturedProcedure({ bookId: source, reviewRunId: finished.reviewRunId, categoryIds: [STYLE, LITERARY], scopeSlot: 'whole', title: '体例', procedureId: null });
+      const procedureId = one.procedureId;
+      const v1 = one.versions[0]!.versionId;
+      store.enableCapturedProcedure(v1, store.previewCapturedProcedureValidation(v1).previewDigest);
+      const v2 = store.saveCapturedProcedure({ bookId: source, reviewRunId: finished.reviewRunId, categoryIds: [LITERARY], scopeSlot: 'whole', title: '体例', procedureId }).versions[0]!.versionId;
+
+      // 停用… of version 1 says nothing will run afterwards; version 2 enabled meanwhile changes that, so the preview is stale.
+      const before = store.previewCapturedProcedureStop(procedureId, v1);
+      expect(before.afterVersion).toBeNull();
+      store.enableCapturedProcedure(v2, store.previewCapturedProcedureValidation(v2).previewDigest);
+      expect(refusal(() => store.stopCapturedProcedure(procedureId, v1, before.previewDigest))).toBe('CAPTURED_PROCEDURE_STOP_PREVIEW_STALE');
+      expect(store.inspectCapturedProcedure(procedureId, null).versions.map((version) => version.state)).toEqual(['enabled', 'enabled']);
+      const after = store.previewCapturedProcedureStop(procedureId, v1);
+      expect(after.afterVersion).toBe(2);
+
+      // A preparation pinned to version 1 still advancing when version 1 is stopped is not written: its preview could not name it.
+      const pin = { versionId: v1, documentSha256: store.inspectCapturedProcedureRun(source, procedureId, v1).resolved!.documentSha256 };
+      // Two categories: the first step plans one and returns, the Run is written by a later step.
+      let progress = store.createReviewRunPreparationWork(source, [STYLE, LITERARY], WHOLE, launchPolicy, pin);
+      expect(progress.done).toBe(false);
+      store.stopCapturedProcedure(procedureId, v1, store.previewCapturedProcedureStop(procedureId, v1).previewDigest);
+      const finish = (): void => {
+        while (!progress.done) progress = store.advanceReviewRunPreparationWork(progress.workId!);
+      };
+      expect(refusal(finish)).toBe('REVIEW_PROCEDURE_STALE');
+      expect(refusal(() => store.createReviewRunPreparationWork(source, [STYLE, LITERARY], WHOLE, launchPolicy, pin))).toBe('REVIEW_PROCEDURE_STALE');
+      // The Book's newest Run is still the finished one: nothing was prepared against the stopped version.
+      expect(store.inspectReviewWorkspace(source, null).run!.reviewRunId).toBe(finished.reviewRunId);
+      expect(store.inspectCapturedProcedure(procedureId, null).versions.find((version) => version.versionId === v1)).toMatchObject({ runCount: 0, preparedRunCount: 0 });
+    } finally {
+      await close(session);
+    }
+  }, 300_000);
+});
+
+/**
+ * The one owner, holding its `gateAt`-th wait after it is armed until released, as a service stopped between two categories
+ * would leave it.
+ */
+class GatedOwner implements ReviewRunExecutionOwner {
+  readonly #inner: BaselineAnalysisExecutionOwner;
+  readonly #gateAt: number;
+  readonly reached: Promise<void>;
+  readonly #gate: Promise<void>;
+  #reach: () => void = () => {};
+  #release: () => void = () => {};
+  #waits = 0;
+  #armed = false;
+
+  constructor(inner: BaselineAnalysisExecutionOwner, gateAt: number) {
+    this.#inner = inner;
+    this.#gateAt = gateAt;
+    this.reached = new Promise((resolve) => { this.#reach = resolve; });
+    this.#gate = new Promise((resolve) => { this.#release = resolve; });
+  }
+
+  admitAndDispatch(runRecordId: string, ledger: BaselineAnalysisStore): void {
+    this.#inner.admitAndDispatch(runRecordId, ledger);
+  }
+
+  whenPlaceFree(): Promise<void> {
+    return this.#wait(() => this.#inner.whenPlaceFree());
+  }
+
+  whenDone(runRecordId: string): Promise<void> {
+    return this.#wait(() => this.#inner.whenDone(runRecordId));
+  }
+
+  arm(): void {
+    this.#armed = true;
+  }
+
+  async #wait(then: () => Promise<void>): Promise<void> {
+    if (this.#armed) this.#waits += 1;
+    if (this.#armed && this.#waits === this.#gateAt) {
+      this.#reach();
+      await this.#gate;
+    }
+    return then();
+  }
+
+  release(): void {
+    this.#release();
+  }
+}
+
+describe('a 停用 while an approved Run is left to continue (Issue #66, S31)', () => {
+  it('names the interrupted Run as going on under its version, and 继续审阅 finishes it after the 停用', async () => {
+    let gated = null as GatedOwner | null;
+    const first = await open((inner) => { gated = new GatedOwner(inner, 3); return gated; });
+    let source = '';
+    let procedureId = '';
+    let versionId = '';
+    let reviewRunId = '';
+    try {
+      const { store } = first;
+      source = await importBook(first, 'L2 中断');
+      const finished = await authorizeAndDrive(first, source, prepare(first, source, [STYLE, LITERARY]));
+      const saved = store.saveCapturedProcedure({ bookId: source, reviewRunId: finished.reviewRunId, categoryIds: [STYLE, LITERARY], scopeSlot: 'whole', title: '体例与表达', procedureId: null });
+      procedureId = saved.procedureId;
+      versionId = saved.versions[0]!.versionId;
+      store.enableCapturedProcedure(versionId, store.previewCapturedProcedureValidation(versionId).previewDigest);
+      const resolved = store.inspectCapturedProcedureRun(source, procedureId).resolved!;
+      const pinned = prepare(first, source, [STYLE, LITERARY], WHOLE, { versionId, documentSha256: resolved.documentSha256 });
+      reviewRunId = pinned.reviewRunId;
+      store.authorizeReviewRun(source, reviewRunId, approvals(pinned));
+      gated!.arm();
+      const loop = first.driver.drive(reviewRunId);
+      // The first category is on the manuscript; the service stops before the second starts.
+      await gated!.reached;
+      const stopped = first.driver.dispose();
+      gated!.release();
+      await stopped;
+      await loop;
+    } finally {
+      await close(first);
+    }
+    const second = await open();
+    try {
+      const { store } = second;
+      expect(store.inspectReviewWorkspace(source, reviewRunId).run).toMatchObject({ state: 'partial', canContinue: true });
+      const preview = store.previewCapturedProcedureStop(procedureId, versionId);
+      expect(preview.versions[0]).toMatchObject({ preparedCount: 0, activeCount: 1, runCount: 1 });
+      expect(preview.versions[0]!.active).toEqual([{ bookId: source, bookTitle: 'L2 中断', reviewRunId, label: '第 2 次', stateLabel: '部分完成 · 可继续审阅' }]);
+      store.stopCapturedProcedure(procedureId, versionId, preview.previewDigest);
+      // The 停用 does not move an approved Run: it continues under the version it was approved with, and keeps naming it.
+      await second.driver.continue(reviewRunId);
+      const done = store.inspectReviewWorkspace(source, reviewRunId).run!;
+      expect(done.state).toBe('settled');
+      expect(done.procedure).toMatchObject({ versionId, stopped: true });
+    } finally {
+      await close(second);
+    }
+  }, 300_000);
+});
+
 describe('what 工序与规则 answers stays within one frame (Issue #65 review)', () => {
   it('lists summaries, pages long version histories by bytes, and answers every save within the frame', async () => {
     const session = await open();
@@ -465,6 +732,22 @@ describe('what 工序与规则 answers stays within one frame (Issue #65 review)
         return seen;
       };
       expect(walk((before) => store.inspectCapturedProcedure(first, before))).toEqual(Array.from({ length: 30 }, (_, index) => 30 - index));
+      // 全部停用… of thirty versions lists the newest page within the frame and counts the rest; confirmed, it stops all thirty
+      // (Issue #66, S31 review P2-2).
+      const stopAll = store.previewCapturedProcedureStop(first, null);
+      expect(wireBytes(stopAll)).toBeLessThan(MAX_FRAME_BYTES);
+      expect(stopAll.versionCount).toBe(30);
+      expect(stopAll.versions.map((version) => version.version)).toEqual([30, 29, 28, 27, 26]);
+      const stoppedAll = store.stopCapturedProcedure(first, null, stopAll.previewDigest);
+      expect(wireBytes(stoppedAll)).toBeLessThan(MAX_FRAME_BYTES);
+      expect(walk((before) => store.inspectCapturedProcedure(first, before)).length).toBe(30);
+      let page: ReturnType<typeof store.inspectCapturedProcedure> | null = null;
+      let before: number | null = null;
+      do {
+        page = store.inspectCapturedProcedure(first, before);
+        expect(page.versions.every((version) => version.state === 'stopped')).toBe(true);
+        before = page.versionsBefore;
+      } while (before !== null);
       expect(walk((before) => store.inspectDeveloperProposal(proposalId!, before))).toEqual(Array.from({ length: 25 }, (_, index) => 25 - index));
     } finally {
       await close(session);

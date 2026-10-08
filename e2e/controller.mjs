@@ -1148,6 +1148,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     // 定稿, and 设置 › 评估校准与预测 counting the Book once.
     'initial-evaluation-start',
     'initial-evaluation-draft',
+    // Issue #429 (S81b2): the market section of the version begun from the 初评 — AI7's words, no comparable, 预测 · 低确定性.
+    'evaluation-market',
     'initial-evaluation-adjust',
     'initial-evaluation-finalize',
     'initial-evaluation-calibration',
@@ -1158,6 +1160,12 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'readers-report-draft-open',
     'readers-report-version',
     'readers-report-docx',
+    // Issue #429 (S81b2): 按我的评分重写评语 on 第 15 版 — offered once a saved score departs from AI7's, refused with the form unsaved,
+    // run through the Task Drawer, shown beside the version's words, and 采用 with every score as it was.
+    'evaluation-rewrite-offered',
+    'evaluation-rewrite-run',
+    'evaluation-rewrite-proposal',
+    'evaluation-rewrite-accept',
     'decision-feedback-suggestions',
     'decision-feedback-dismiss',
     'decision-feedback-own-accord',
@@ -1319,7 +1327,12 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'capture-developer-proposal',
     'capture-validate-enable',
     'capture-run-second-book',
+    // Issue #66 (S31): a second version made 最新可用, an older eligible version chosen and pinned instead, 停用… previewed
+    // before it is confirmed with a linked Run opened, and 全部停用… leaving nothing to run.
+    'procedure-second-version',
+    'procedure-exact-version',
     'capture-stop',
+    'procedure-stop-all',
     'capture-proposal-file',
     'capture-restart',
     'j14-capture-keyboard-reflow-forced-colors',

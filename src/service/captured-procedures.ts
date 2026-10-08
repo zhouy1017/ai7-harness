@@ -512,6 +512,11 @@ export function readReviewRunProcedurePin(db: DatabaseSync, reviewRunId: string)
   };
 }
 
+/** Whether one Captured Procedure version has been stopped (Issue #66, S31): final, whoever stopped it. */
+export function capturedVersionStopped(db: DatabaseSync, versionId: string): boolean {
+  return db.prepare("SELECT 1 FROM captured_procedure_states WHERE version_id = ? AND state = 'stopped'").get(versionId) !== undefined;
+}
+
 /**
  * Why a prepared Run pinned to a Captured Procedure version cannot be authorized; `null` when nothing stands in the way. A
  * stopped version is final (ADR 0087 §5); a version this house does not hold — the Book was merged in from another (Issue #65
@@ -526,6 +531,55 @@ export function procedurePinRefusal(db: DatabaseSync, reviewRunId: string): { co
   return pin.stopped
     ? { code: 'REVIEW_PROCEDURE_STOPPED', message: `这次审阅按可复用工序《${pin.title}》第 ${pin.version} 版准备，这一版已停用；请重新准备这次审阅。` }
     : null;
+}
+
+// ---- Latest Eligible Version Resolution (Issue #66, plan slice S31; UI ADR 0013; REUSE-043 to REUSE-045, REUSE-054) --------
+
+/** One version as resolution weighs it: its state, and — for an 已启用 one — the first reason it no longer validates. */
+export interface ResolvableVersion {
+  readonly versionId: string;
+  readonly version: number;
+  readonly state: CapturedProcedureState;
+  /** Whether the last `验证并启用…` failed, for a version still waiting. */
+  readonly failedValidation: boolean;
+  /** For an 已启用 version: why it no longer validates, `null` when it does. Ignored for any other state. */
+  readonly problem: string | null;
+}
+
+export const PASSED_OVER_STOPPED = '这一版已停用。' as const;
+export const PASSED_OVER_PENDING = '这一版还没有验证并启用。' as const;
+export const PASSED_OVER_FAILED = '这一版上次验证没有通过，仍是「待验证」。' as const;
+
+/** Whether one version may be resolved or chosen for a new use: 已启用 and still validating (REUSE-044). */
+export function versionEligible(version: ResolvableVersion): boolean {
+  return version.state === 'enabled' && version.problem === null;
+}
+
+/** Why one version is not eligible, in the editor's words; `null` when it is. */
+export function versionIneligibleReason(version: ResolvableVersion): string | null {
+  if (version.state === 'stopped') return PASSED_OVER_STOPPED;
+  if (version.state === 'pending-validation') return version.failedValidation ? PASSED_OVER_FAILED : PASSED_OVER_PENDING;
+  return version.problem;
+}
+
+/**
+ * Latest Eligible Version Resolution over one procedure's versions, in any order (REUSE-043, REUSE-044): the eligible versions
+ * newest first — the first is the one a new unpinned use takes — and every version newer than it, passed over with why. With no
+ * eligible version every version is passed over. `excluded` versions are weighed as stopped: what a 停用 would leave.
+ */
+export function resolveProcedureVersions(
+  versions: ReadonlyArray<ResolvableVersion>,
+  excluded: ReadonlySet<string> = new Set(),
+): { eligible: ResolvableVersion[]; passedOver: Array<{ version: number; reason: string }> } {
+  const weighed = [...versions]
+    .map((version) => excluded.has(version.versionId) ? { ...version, state: 'stopped' as const } : version)
+    .sort((left, right) => right.version - left.version);
+  const eligible = weighed.filter(versionEligible);
+  const latest = eligible[0]?.version ?? 0;
+  const passedOver = weighed
+    .filter((version) => version.version > latest)
+    .map((version) => ({ version: version.version, reason: versionIneligibleReason(version) ?? '' }));
+  return { eligible, passedOver };
 }
 
 /** Room kept beside a page of versions for the rest of its answer and its envelope. */
@@ -674,12 +728,52 @@ export class CapturedProcedures {
     return this.version(versionId)!;
   }
 
-  /** `停用` (ADR 0087 §5): final for the version, which is never resolved again and stays as its own Historical Version Stub. */
-  stop(versionId: string, now: Date = new Date()): void {
+  /**
+   * `停用` (ADR 0087 §5): final for the version, which is never resolved again and stays as its own Historical Version Stub. The
+   * state records the digest of the `停用…` preview the editor confirmed (Issue #66, S31).
+   */
+  stop(versionId: string, previewDigest: string, now: Date = new Date()): void {
     const current = this.version(versionId);
     requireProcedure(current !== null, 'CAPTURED_PROCEDURE_NOT_FOUND', '这一版可复用工序不存在。');
     if (current.state === 'stopped') return;
-    this.#appendState(versionId, 'stopped', {}, now);
+    this.#appendState(versionId, 'stopped', { previewDigest }, now);
+  }
+
+  /** Every Review Run that pinned one version, oldest first (Issue #66, S31). */
+  pinnedRunIds(versionId: string): string[] {
+    // A pin is written with its Run, so the order it was recorded in is the order the Runs were prepared in.
+    return (this.#db.prepare('SELECT review_run_id FROM review_run_procedure_pins WHERE version_id = ? ORDER BY recorded_at, review_run_id')
+      .all(versionId) as SqlRow[]).map((row) => text(row.review_run_id));
+  }
+
+  /**
+   * The Review Runs pinned to one version that its `停用…` preview has to weigh, oldest first (Issue #66, S31 review P3-10): a
+   * superset of those still prepared or still going, read in one query so the preview never derives the state of a Run that
+   * finished long ago. A prepared Run counts only while it is its Book's newest — no other can be approved — and an approved
+   * Run only while one of its categories has no terminal last event (materialized, failed, interrupted or refused) yet.
+   */
+  liveCandidateRunIds(versionId: string): string[] {
+    return (this.#db.prepare(
+      `SELECT p.review_run_id FROM review_run_procedure_pins p JOIN review_runs r ON r.review_run_id = p.review_run_id
+       WHERE p.version_id = ? AND (
+         (NOT EXISTS (SELECT 1 FROM review_run_authorizations a WHERE a.review_run_id = r.review_run_id)
+           AND r.ordinal = (SELECT max(o.ordinal) FROM review_runs o WHERE o.book_id = r.book_id))
+         OR (EXISTS (SELECT 1 FROM review_run_authorizations a WHERE a.review_run_id = r.review_run_id)
+           AND (SELECT count(*) FROM review_run_category_events e
+                WHERE e.review_run_id = r.review_run_id AND e.state IN ('materialized', 'failed', 'interrupted', 'refused')
+                  AND e.sequence = (SELECT max(f.sequence) FROM review_run_category_events f WHERE f.review_run_id = e.review_run_id AND f.category_id = e.category_id))
+               < json_array_length(r.canonical_json, '$.categories'))
+       ) ORDER BY p.recorded_at, p.review_run_id`,
+    ).all(versionId) as SqlRow[]).map((row) => text(row.review_run_id));
+  }
+
+  /** How many Review Runs pinned to one version were approved — ran, or began to — and how many were only prepared (S31 review P3-3). */
+  pinCounts(versionId: string): { ran: number; prepared: number } {
+    const row = this.#db.prepare(
+      `SELECT count(a.review_run_id) ran, count(*) - count(a.review_run_id) prepared FROM review_run_procedure_pins p
+       LEFT JOIN review_run_authorizations a ON a.review_run_id = p.review_run_id WHERE p.version_id = ?`,
+    ).get(versionId) as SqlRow;
+    return { ran: integer(row.ran), prepared: integer(row.prepared) };
   }
 
   #appendState(versionId: string, state: 'enabled' | 'validation-failed' | 'stopped', facts: Readonly<Record<string, unknown>>, now: Date): void {
@@ -700,17 +794,18 @@ export class CapturedProcedures {
     return { ids: rows.slice(0, MAX_CAPTURED_PROCEDURES_SHOWN).map((row) => text(row.procedure_id)), truncated: rows.length > MAX_CAPTURED_PROCEDURES_SHOWN };
   }
 
-  /** The Review Runs that pinned one version, newest first, with how many there are (REUSE-031). */
-  runsOf(versionId: string): { count: number; runs: Array<{ bookId: string; bookTitle: string; reviewRunId: string; ordinal: number; createdAt: string }> } {
-    const count = integer((this.#db.prepare('SELECT count(*) n FROM review_run_procedure_pins WHERE version_id = ?').get(versionId) as SqlRow).n);
-    const runs = (this.#db.prepare(
+  /**
+   * The Review Runs that pinned one version, newest first, at most `MAX_CAPTURED_PROCEDURE_RUNS_SHOWN` (REUSE-031). How many
+   * ran and how many were only prepared is `pinCounts`'s answer, so nothing here counts them a second time (Issue #684).
+   */
+  runsOf(versionId: string): Array<{ bookId: string; bookTitle: string; reviewRunId: string; ordinal: number; createdAt: string }> {
+    return (this.#db.prepare(
       `SELECT r.book_id, b.title, r.review_run_id, r.ordinal, r.created_at FROM review_run_procedure_pins p
        JOIN review_runs r ON r.review_run_id = p.review_run_id JOIN books b ON b.book_id = r.book_id
        WHERE p.version_id = ? ORDER BY r.created_at DESC, r.review_run_id LIMIT ?`,
     ).all(versionId, MAX_CAPTURED_PROCEDURE_RUNS_SHOWN) as SqlRow[]).map((row) => ({
       bookId: text(row.book_id), bookTitle: text(row.title), reviewRunId: text(row.review_run_id), ordinal: integer(row.ordinal), createdAt: text(row.created_at),
     }));
-    return { count, runs };
   }
 
   /** One procedure as 工序与规则's list names it: its newest version's title and state, its count, and whether it runs. */
@@ -738,6 +833,9 @@ export class CapturedProcedures {
     words: StepWords,
     bookTitle: (bookId: string) => string,
     runOrdinal: (reviewRunId: string) => number,
+    // Where each linked Run stands now, and the version a new use resolves to (Issue #66, S31; REUSE-031, REUSE-043).
+    runStateLabel: (reviewRunId: string) => string,
+    latestEligibleVersionId: string | null,
     before: number | null = null,
   ): CapturedProcedureProjection {
     requireProcedure(before === null || (Number.isSafeInteger(before) && before >= 1), 'CAPTURED_PROCEDURE_INVALID', '版本位置无效。');
@@ -746,7 +844,8 @@ export class CapturedProcedures {
       'SELECT * FROM captured_procedure_versions WHERE procedure_id = ? AND (? IS NULL OR version < ?) ORDER BY version DESC LIMIT ?',
     ).all(procedureId, before, before, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE) as SqlRow[]).map((row): CapturedProcedureVersionProjection => {
       const stored = this.#versionOf(row);
-      const { count, runs } = this.runsOf(stored.versionId);
+      const runs = this.runsOf(stored.versionId);
+      const counts = this.pinCounts(stored.versionId);
       return {
         versionId: stored.versionId,
         procedureId: stored.procedureId,
@@ -765,14 +864,18 @@ export class CapturedProcedures {
           reviewRunId: stored.sourceReviewRunId,
           runLabel: `第 ${runOrdinal(stored.sourceReviewRunId)} 次审阅`,
         },
-        runCount: count,
-        runs: runs.map((run) => ({ bookId: run.bookId, bookTitle: run.bookTitle, reviewRunId: run.reviewRunId, label: `第 ${run.ordinal} 次`, createdAt: run.createdAt })),
+        runCount: counts.ran,
+        preparedRunCount: counts.prepared,
+        runs: runs.map((run) => ({
+          bookId: run.bookId, bookTitle: run.bookTitle, reviewRunId: run.reviewRunId, label: `第 ${run.ordinal} 次`, createdAt: run.createdAt,
+          stateLabel: runStateLabel(run.reviewRunId),
+        })),
         technical: { documentSha256: stored.documentSha256, previousDocumentSha256: stored.previousDocumentSha256 },
       };
     });
     const versions = boundedPage(candidates, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE);
     const last = versions.at(-1);
-    return { ...summary, versions, versionsBefore: last === undefined || last.version === 1 ? null : last.version };
+    return { ...summary, latestEligibleVersionId, versions, versionsBefore: last === undefined || last.version === 1 ? null : last.version };
   }
 
   // ---- Developer Capability Proposals (ADR 0087 §6; REUSE-063, REUSE-064) ------------------------------------

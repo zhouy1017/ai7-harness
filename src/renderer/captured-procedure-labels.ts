@@ -5,6 +5,8 @@ import {
   type CapturedProcedureRunProjection,
   type CapturedProcedureScopeSlot,
   type CapturedProcedureStepProjection,
+  type CapturedProcedureStopPreviewProjection,
+  type CapturedProcedureStopRunProjection,
   type CapturedProcedureVersionProjection,
   type DeveloperProposalVersionProjection,
   type ProcedureCaptureResultKind,
@@ -133,8 +135,9 @@ export const PROCEDURE_ACTIONS = {
   validate: '验证并启用…',
   confirm: '确认启用',
   cancel: '取消',
-  stop: '停用',
-  stopAll: '全部停用',
+  stop: '停用…',
+  stopAll: '全部停用…',
+  confirmStop: '确认停用',
   run: '运行此工序…',
   open: '打开这本书的审阅',
   proposalFile: '导出为文件…',
@@ -152,12 +155,61 @@ export function procedureSourceLine(version: Pick<CapturedProcedureVersionProjec
   return `来自《${version.source.bookTitle}》${version.source.runLabel}`;
 }
 
-export function procedureRunsLine(version: Pick<CapturedProcedureVersionProjection, 'runCount'>): string {
-  return version.runCount === 0 ? '还没有审阅按这一版运行过' : `按这一版运行过 ${version.runCount} 次审阅`;
+/**
+ * How many Review Runs ran under a version — approved, so they ran or began to — and, apart, how many were prepared from it
+ * and never approved (Issue #66, S31 review P3-3).
+ */
+export function procedureRunsLine(version: Pick<CapturedProcedureVersionProjection, 'runCount' | 'preparedRunCount'>): string {
+  const ran = version.runCount === 0 ? '还没有审阅按这一版运行过' : `按这一版运行过 ${version.runCount} 次`;
+  return version.preparedRunCount === 0 ? ran : `${ran}；另有 ${version.preparedRunCount} 次已准备、未开始`;
 }
 
-export function procedureRunLinkLine(run: { bookTitle: string; label: string }, at: string): string {
-  return `《${run.bookTitle}》${run.label}审阅 · ${at}`;
+/** One Review Run a version ran (REUSE-031): an exact link, with where it stands now (Issue #66, S31). */
+export function procedureRunLinkLine(run: { bookTitle: string; label: string; stateLabel: string }, at: string): string {
+  return `《${run.bookTitle}》${run.label}审阅 · ${run.stateLabel} · ${at}`;
+}
+
+/** The mark on the version a new use resolves to now (Issue #66, S31; REUSE-043; interaction-spec `最新可用`). */
+export const PROCEDURE_LATEST_ELIGIBLE = '最新可用' as const;
+export const PROCEDURE_LATEST_ELIGIBLE_NOTE = '新建审阅按这个工序运行时，默认用这一版。' as const;
+
+// ---- 停用… (Issue #66, plan slice S31; REUSE-038, REUSE-040, REUSE-041; ADR 0087 §5) -------------------------------------
+
+export const PROCEDURE_STOP_PREPARED_HEADING = '停用后不能再开始，需要重新准备' as const;
+export const PROCEDURE_STOP_ACTIVE_HEADING = '已开始的审阅不受影响，按授权时的这一版继续' as const;
+export const PROCEDURE_STOP_KEPT = '不会删除任何东西：这一版的内容、摘要与来源记录都保留为历史版本，按它运行过的审阅仍然记着它。' as const;
+
+/** The preview's heading: one version, or every version not stopped yet. */
+export function procedureStopHeading(preview: Pick<CapturedProcedureStopPreviewProjection, 'title' | 'versionId' | 'versions' | 'versionCount'>): string {
+  return preview.versionId === null
+    ? `停用《${preview.title}》尚未停用的 ${preview.versionCount} 个版本`
+    : `停用《${preview.title}》第 ${preview.versions[0]?.version ?? ''} 版`;
+}
+
+/** Versions the preview takes but does not list, beyond what one frame holds (S31 review P2-2). */
+export function procedureStopMoreVersionsLine(shown: number, count: number): string {
+  return `另有 ${count - shown} 个较早的版本一并停用，未逐一列出。`;
+}
+
+/** One version the 停用 takes: where it stands, and the history that keeps naming it. */
+export function procedureStopVersionLine(version: CapturedProcedureStopPreviewProjection['versions'][number]): string {
+  return `第 ${version.version} 版 · ${version.stateLabel} · ${version.runCount === 0 ? '还没有审阅按它运行过' : `按它运行过 ${version.runCount} 次，停用后仍然记着它`}`;
+}
+
+export function procedureStopRunLine(run: CapturedProcedureStopRunProjection): string {
+  return `《${run.bookTitle}》${run.label}审阅 · ${run.stateLabel}`;
+}
+
+/** More Runs than the preview names. */
+export function procedureStopMoreLine(shown: number, count: number): string {
+  return `另有 ${count - shown} 次，未逐一列出。`;
+}
+
+/** What a new use resolves to after the 停用 (REUSE-043: the next newest eligible version, disclosed). */
+export function procedureStopAfterLine(afterVersion: number | null): string {
+  return afterVersion === null
+    ? '停用后，这个工序没有可以运行的版本；要再用它，请从一次新的审阅重新保存。'
+    : `停用后，新建审阅按这个工序运行时用第 ${afterVersion} 版。`;
 }
 
 /** A guideline document a run would apply today, against the source Run's (ADR 0087 §3). */
@@ -194,6 +246,8 @@ export function procedureValidationFailedLine(title: string, version: number): s
   return `《${title}》第 ${version} 版没有通过验证，仍是「待验证」。`;
 }
 
+export const PROCEDURE_STOP_STALE = '停用的影响在你查看之后有了变化，已重新列出；请再看一遍再停用。' as const;
+
 export function procedureStoppedLine(title: string, versions: number): string {
   return versions === 1 ? `已停用《${title}》的这一版；按它运行过的审阅仍然记着它。` : `已停用《${title}》的全部版本；按它们运行过的审阅仍然记着它们。`;
 }
@@ -211,6 +265,12 @@ export function proposalFileSavedLine(fileName: string): string {
 export const SHEET_PROCEDURE_LABEL = '按已保存的工序' as const;
 export const SHEET_PROCEDURE_NONE = '不按工序（自己选类别）' as const;
 export const SHEET_PROCEDURE_NONE_ENABLED = '还没有启用的可复用工序。' as const;
+/** The manual selector of an exact eligible version (Issue #66, S31; REUSE-054): the latest eligible first and marked. */
+export const SHEET_PROCEDURE_VERSION_LABEL = '版本' as const;
+
+export function sheetProcedureVersionOption(version: number, latest: boolean): string {
+  return `第 ${version} 版${latest ? '（最新可用）' : ''}`;
+}
 
 /** What the sheet says once a Captured Procedure filled it (ADR 0087 §4; REUSE-054): the exact version, and what it leaves out. */
 export function sheetProcedureLines(run: CapturedProcedureRunProjection): string[] {
@@ -223,6 +283,9 @@ export function sheetProcedureLines(run: CapturedProcedureRunProjection): string
       ? `「${change.label}」按今天的《${change.title}》第 ${change.version} 版`
       : `「${change.label}」按今天的《${change.title}》第 ${change.version} 版，来源审阅用的是第 ${change.sourceVersion} 版`);
   }
+  // An older eligible version chosen instead of the latest (REUSE-054): said, never hidden by the default.
+  const latest = run.eligibleVersions[0];
+  if (!resolved.latestEligible && latest !== undefined) lines.push(`你选了第 ${resolved.version} 版；最新可用的是第 ${latest.version} 版。`);
   for (const passed of run.passedOver) lines.push(`没有用第 ${passed.version} 版：${passed.reason}`);
   return lines;
 }

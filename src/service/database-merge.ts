@@ -244,6 +244,9 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   // 审稿意见 (Issue #429, S81c): which 定稿 version each Task drafts from, and which result became a draft — the Book's own.
   readers_report_tasks: 'owned',
   readers_report_drafts: 'owned',
+  // 按我的评分重写评语 (Issue #429, S81b2): which version each rewrite Task rewrites, and the editor's decisions — the Book's own.
+  evaluation_rewrite_tasks: 'owned',
+  evaluation_rewrite_decisions: 'owned',
   book_dimension_sets: 'owned',
   book_dimensions: 'owned',
   book_people_versions: 'owned',

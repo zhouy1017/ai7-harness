@@ -25,10 +25,19 @@ import { reportExportLabel } from '../shared/report-wording.js';
 import { applyOnce } from './manuscript-apply.js';
 import { openProcedureCapture } from './procedure-capture.js';
 import {
+  ProcedureChoiceRequests,
+  procedureChoiceAfter,
+  procedureChoiceFocus,
+  procedurePreparationPin,
+  type ProcedureChoiceOutcome,
+} from './procedure-choice.js';
+import {
   CAPTURE_ACTION,
   SHEET_PROCEDURE_LABEL,
   SHEET_PROCEDURE_NONE,
   SHEET_PROCEDURE_NONE_ENABLED,
+  SHEET_PROCEDURE_VERSION_LABEL,
+  sheetProcedureVersionOption,
   runProcedureLeftOutLine,
   runProcedureLine,
   sheetProcedureLines,
@@ -261,6 +270,8 @@ interface SheetState {
   procedures: ReadonlyArray<CapturedProcedureSummaryProjection>;
   /** The Captured Procedure the sheet was filled from, resolved for this Book; `null` for categories chosen by hand. */
   procedure: CapturedProcedureRunProjection | null;
+  /** Its choices in flight (Issue #66, S31 review P2-1): only the newest answer fills the sheet, and 先看计划 waits for it. */
+  readonly requests: ProcedureChoiceRequests;
 }
 
 const NO_FILTERS: Filters = { categoryId: null, severity: null, status: null, chapterBlockId: null };
@@ -1622,6 +1633,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       prepared: false,
       procedures,
       procedure: null,
+      requests: new ProcedureChoiceRequests(),
     };
     renderSheet(projection, sheetState);
     sheet.showModal();
@@ -1633,38 +1645,45 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   }
 
   /**
-   * Fill the sheet from one Captured Procedure (ADR 0087 §4): the newest enabled version that validates, its steps this Book can
-   * take ticked and every other category closed, the scope its slot. `''` returns the sheet to categories chosen by hand.
+   * Fill the sheet from one Captured Procedure (ADR 0087 §4): the newest enabled version that validates — or, with `versionId`,
+   * the exact eligible version the editor chose instead (Issue #66, S31; REUSE-054) — its steps this Book can take ticked and
+   * every other category closed, the scope its slot. `''` returns the sheet to categories chosen by hand.
    */
-  async function chooseProcedure(state: SheetState, procedureId: string): Promise<void> {
+  async function chooseProcedure(state: SheetState, procedureId: string, versionId: string | null = null): Promise<void> {
     if (projection === null || sheetState !== state) return;
+    const ticket = state.requests.ask();
+    let outcome: ProcedureChoiceOutcome;
     if (procedureId === '') {
-      state.procedure = null;
-      state.categories.clear();
-      state.problem = null;
+      outcome = { kind: 'cleared' };
     } else {
       options.setStatus('正在读取所选的可复用工序…', 'busy');
+      // Loading: 先看计划 and both selects wait, so nothing is prepared from the choice on screen before its answer.
+      sheetUpdate();
       try {
-        const run = await api.inspectCapturedProcedureRun({ procedureId });
-        if (sheetState !== state || destroyed) return;
-        state.procedure = run;
-        state.categories.clear();
-        state.problem = run.unavailableReason;
-        if (run.resolved !== null) {
-          for (const step of run.resolved.steps) if (step.available) state.categories.add(step.categoryId);
-          state.scope = run.resolved.scopeSlot;
-          state.from = null;
-          state.to = null;
-        }
+        const run = await api.inspectCapturedProcedureRun({ procedureId, versionId });
+        // A later choice superseded this one: its answer, not this, fills the sheet.
+        if (sheetState !== state || destroyed || !state.requests.current(ticket)) return;
+        outcome = { kind: 'answered', run };
         options.setStatus(run.resolved === null ? run.unavailableReason ?? '' : `已按《${run.title}》第 ${run.resolved.version} 版选好类别。`);
       } catch (error) {
-        if (sheetState !== state || destroyed) return;
-        state.procedure = null;
-        state.problem = options.errorMessage(error, '无法读取所选的可复用工序。');
+        if (sheetState !== state || destroyed || !state.requests.current(ticket)) return;
+        // The choice the sheet held stays, its version and categories with it, and the reason is shown (Issue #684).
+        outcome = { kind: 'failed', reason: options.errorMessage(error, '无法读取所选的可复用工序。') };
+        options.setStatus(outcome.reason, 'error');
       }
     }
+    state.requests.settle(ticket);
+    const next = procedureChoiceAfter(state, outcome);
+    state.procedure = next.procedure;
+    state.categories.clear();
+    for (const categoryId of next.categories) state.categories.add(categoryId);
+    state.scope = next.scope;
+    state.from = next.from;
+    state.to = next.to;
+    state.problem = next.problem;
     renderSheet(projection, state);
-    sheet.querySelector<HTMLElement>('[data-review-field="procedure"]')?.focus();
+    // Back on the selector the editor used, while the sheet still shows it.
+    sheet.querySelector<HTMLElement>(`[data-review-field="${procedureChoiceFocus(versionId !== null, state.procedure)}"]`)?.focus();
   }
 
   function renderSheet(workspace: ReviewWorkspaceProjection, state: SheetState): void {
@@ -1678,6 +1697,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const procedureField = el('div', 'review-sheet-procedure');
     const procedureLabel = el('label', 'review-field');
     const procedureSelect = el('select');
+    const versionSelect = el('select');
     procedureSelect.dataset['reviewField'] = 'procedure';
     procedureSelect.append(new Option(SHEET_PROCEDURE_NONE, ''));
     for (const procedure of state.procedures) procedureSelect.append(new Option(`《${procedure.title}》`, procedure.procedureId));
@@ -1692,6 +1712,16 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (state.procedure.resolved !== null) {
         procedureField.dataset['procedureVersionId'] = state.procedure.resolved.versionId;
         procedureField.dataset['procedureVersion'] = String(state.procedure.resolved.version);
+        procedureField.dataset['procedureLatestEligible'] = String(state.procedure.resolved.latestEligible);
+        // The exact version (Issue #66, S31; REUSE-054): the latest eligible by default, any other eligible one by choice.
+        const versionLabel = el('label', 'review-field');
+        versionSelect.dataset['reviewField'] = 'procedure-version';
+        const procedureId = state.procedure.procedureId;
+        state.procedure.eligibleVersions.forEach((version, index) => versionSelect.append(new Option(sheetProcedureVersionOption(version.version, index === 0), version.versionId)));
+        versionSelect.value = state.procedure.resolved.versionId;
+        versionSelect.addEventListener('change', () => void chooseProcedure(state, procedureId, versionSelect.value));
+        versionLabel.append(el('span', undefined, SHEET_PROCEDURE_VERSION_LABEL), versionSelect);
+        procedureField.append(versionLabel);
       }
       for (const line of sheetProcedureLines(state.procedure)) procedureField.append(el('p', 'field-note review-sheet-procedure-line', line));
     }
@@ -1819,6 +1849,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     function updateSheet(): void {
       const preparing = state.job !== null;
       const filled = state.procedure?.resolved ?? null;
+      const loading = state.requests.loading;
+      procedureField.dataset['procedureLoading'] = String(loading);
       for (const { input, label, reason, entry } of categoryInputs.values()) {
         const scopeAvailability = state.scope === null ? null : entry.scopes[state.scope];
         const step = filled?.steps.find((candidate) => candidate.categoryId === entry.categoryId) ?? null;
@@ -1844,7 +1876,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         }
       }
       for (const [kind, input] of scopeInputs) input.disabled = !workspace.scopeOptions[kind].available || preparing || (filled !== null && kind !== filled.scopeSlot);
-      procedureSelect.disabled = preparing || state.procedures.length === 0;
+      procedureSelect.disabled = preparing || loading || state.procedures.length === 0;
+      versionSelect.disabled = preparing || loading || versionSelect.options.length < 2;
       range.hidden = state.scope !== 'chapters';
       fromSelect.disabled = state.scope !== 'chapters' || preparing;
       toSelect.disabled = state.scope !== 'chapters' || preparing;
@@ -1856,7 +1889,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       problem.hidden = state.problem === null;
       progress.hidden = state.job === null;
       progress.textContent = state.job === null ? '' : reviewPreparationLine(state.job.progress);
-      prepare.disabled = preparing;
+      prepare.disabled = preparing || loading;
       close.disabled = preparing;
       cancelPreparation.hidden = !preparing;
       cancelPreparation.disabled = !preparing;
@@ -1878,6 +1911,15 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
   async function prepareRun(state: SheetState): Promise<void> {
     if (destroyed || state.job !== null || projection === null) return;
+    // The version on show is the version pinned, and never while a choice is still loading (S31 review P2-1; REUSE-054).
+    const resolved = state.procedure?.resolved ?? null;
+    const shown = resolved === null ? null : sheet.querySelector<HTMLSelectElement>('[data-review-field="procedure-version"]')?.value ?? null;
+    const choice = procedurePreparationPin(resolved, shown, state.requests.loading);
+    if (choice.refusal !== null) {
+      state.problem = choice.refusal;
+      sheetUpdate();
+      return;
+    }
     const categoryIds = projection.categories.filter((entry) => state.categories.has(entry.categoryId)).map((entry) => entry.categoryId);
     const { from, to } = chaptersOf(state);
     state.problem = categoryIds.length === 0 ? REVIEW_PICK_CATEGORY
@@ -1897,11 +1939,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     };
     options.setStatus(REVIEW_STATUS_LINES.preparing, 'busy');
     try {
-      const resolved = state.procedure?.resolved ?? null;
       const initial = await api.prepareReviewRun({
         categoryIds,
         scope,
-        ...(resolved === null ? {} : { capturedProcedure: { versionId: resolved.versionId, documentSha256: resolved.documentSha256 } }),
+        ...(choice.pin === null ? {} : { capturedProcedure: choice.pin }),
       });
       state.job = initial;
       sheetUpdate();

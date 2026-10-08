@@ -1,6 +1,6 @@
 import type {
-  BookSummaryCursor,
   LearningAuditBookProjection,
+  LearningAuditChoicesProjection,
   LearningAuditInput,
   LearningAuditMaterialProjection,
   LearningAuditProjection,
@@ -9,8 +9,6 @@ import type {
   LearningRemediationItemInput,
   LearningRemediationPreviewProjection,
   RendererApi,
-  SeriesListCursor,
-  SeriesSummaryProjection,
 } from '../shared/protocol.js';
 import { LEARNING_AUDIT_STANDINGS, LEARNING_MATERIAL_KINDS } from '../shared/protocol.js';
 import {
@@ -28,6 +26,7 @@ import {
   LEARNING_AUDIT_OPEN,
   LEARNING_AUDIT_SEARCH,
   LEARNING_AUDIT_STANDING_LABELS,
+  LEARNING_AUDIT_SERIES_UNAVAILABLE,
   LEARNING_AUDIT_STATUS,
   LEARNING_AUDIT_UNUSED,
   LEARNING_LINEAGE_BACK,
@@ -49,7 +48,9 @@ import {
   LEARNING_REMEDIATION_RUNNING,
   learningAuditBatchStop,
   learningAuditBookHeading,
+  learningAuditChoicesCut,
   learningAuditMaterialName,
+  learningAuditMaterialNames,
   learningAuditOpenLabel,
   learningAuditSelectLabel,
   learningAuditSelected,
@@ -87,7 +88,7 @@ import { localInstantLabel } from './plan-preview-labels.js';
 export interface MountLearningAuditOptions {
   readonly root: HTMLElement;
   readonly api: Pick<RendererApi, 'inspectLearningAudit' | 'inspectLearningLineage' | 'previewLearningRemediation' | 'recordLearningRemediation' |
-    'decideLearningMaterial' | 'inspectSeriesList' | 'listBooks'>;
+    'decideLearningMaterial'>;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly errorMessage: (error: unknown, fallback: string) => string;
 }
@@ -123,9 +124,6 @@ const itemOf = (material: { readonly materialKey: string; readonly digest: strin
  */
 let remembered: { readonly chosen: Readonly<Record<Filter, string>>; readonly pageAfter: LearningMaterialCursor | null } | null = null;
 
-/** The most pages of Books or Series the filters' choices read: a bound on a house far larger than any yet seen. */
-const MAX_CHOICE_PAGES = 100;
-
 export function mountLearningAudit(options: MountLearningAuditOptions): { load(): Promise<void> } {
   const { root, api, setStatus, errorMessage } = options;
   root.classList.add('learning-audit');
@@ -134,9 +132,14 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
   let chosen: Record<Filter, string> = { query: '', book: '', series: '', kind: '', standing: '', from: '', to: '' };
   /** The cursor the shown page was read from: `null` for the first. */
   let pageAfter: LearningMaterialCursor | null = null;
-  let series: ReadonlyArray<SeriesSummaryProjection> = [];
-  /** Every Book of the house, for the 图书 filter (LAUD-002), with any a page names besides. */
+  /**
+   * The filters' choices as the last page answered them (LAUD-002; Issue #677): the house's Books and Series, and whether
+   * either list was cut. The 图书 filter also keeps every Book a page has named, so a chosen Book stays offered.
+   */
+  let filterChoices: LearningAuditChoicesProjection = { books: [], booksListed: 0, booksTruncated: false, series: [], seriesTruncated: false, seriesUnavailable: false };
   const knownBooks = new Map<string, string>();
+  /** Each material's name on the shown page, told apart where two read alike (Issue #677). */
+  let names = new Map<string, string>();
   let busy = false;
   const selection = new Map<string, Selected>();
   let batch: Extract<Panel, { kind: 'preview' }> | null = null;
@@ -192,7 +195,10 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       chosen = { ...filters };
       pageAfter = after;
       remembered = { chosen: { ...filters }, pageAfter: after };
+      filterChoices = page.choices;
+      for (const book of page.choices.books) knownBooks.set(book.bookId, book.title);
       for (const book of page.books) knownBooks.set(book.bookId, book.title);
+      names = learningAuditMaterialNames(page.books.flatMap((book) => book.materials), localInstantLabel);
       selection.clear();
       batch = null;
       listRefusal = refusal;
@@ -222,6 +228,17 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
   /** The search as typed: another filter changed applies it too, so words typed are never dropped. */
   const liveQuery = (): string => root.querySelector<HTMLInputElement>('#learning-audit-query')?.value ?? chosen.query;
 
+  /** A material's name as its page tells it apart from any that read alike. */
+  const nameOf = (material: Parameters<typeof learningAuditMaterialName>[0] & { readonly materialKey: string }): string =>
+    names.get(material.materialKey) ?? learningAuditMaterialName(material, localInstantLabel);
+
+  /** The note under a filter whose list was cut, which that filter names as its description. */
+  const cutNote = (filter: 'book' | 'series', text: string): HTMLElement => {
+    const note = el('p', `field-note learning-audit-cut learning-audit-cut-${filter}`, text);
+    note.id = `learning-audit-cut-${filter}`;
+    return note;
+  };
+
   const select = (filter: 'book' | 'series' | 'kind' | 'standing', choices: ReadonlyArray<readonly [string, string]>): HTMLLabelElement => {
     const wrapper = el('label', 'feedback-filter learning-audit-filter');
     const control = el('select');
@@ -234,6 +251,9 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     }
     control.value = chosen[filter];
     control.disabled = busy;
+    if ((filter === 'book' && filterChoices.booksTruncated) || (filter === 'series' && (filterChoices.seriesTruncated || filterChoices.seriesUnavailable))) {
+      control.setAttribute('aria-describedby', `learning-audit-cut-${filter}`);
+    }
     control.addEventListener('change', () => {
       if (busy) return;
       void request({ ...chosen, query: liveQuery(), [filter]: control.value }, null, `#learning-audit-filter-${filter}`);
@@ -307,7 +327,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     if (!homogeneous()) section.append(el('p', 'field-note learning-audit-mismatch', LEARNING_AUDIT_BATCH_MISMATCH));
     if (batch !== null) section.append(previewNode(batch, null, (materialKey) => {
       const entry = selection.get(materialKey);
-      return entry === undefined ? null : learningAuditMaterialName(entry.material, localInstantLabel);
+      return entry === undefined ? null : nameOf(entry.material);
     }, () => {
       batch = null;
       paint('[data-learning-audit-action="batch-stop"]');
@@ -322,12 +342,22 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     filters.append(
       searchFilter(),
       select('book', [...knownBooks].sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0)).map(([bookId, title]) => [bookId, `《${title}》`] as const)),
-      select('series', series.map((entry) => [entry.seriesId, entry.title] as const)),
+      select('series', filterChoices.series.map((entry) => [entry.seriesId, entry.title] as const)),
       select('kind', LEARNING_MATERIAL_KINDS.map((kind) => [kind, LEARNING_AUDIT_KIND_LABELS[kind]] as const)),
       select('standing', LEARNING_AUDIT_STANDINGS.map((standing) => [standing, LEARNING_AUDIT_STANDING_LABELS[standing]] as const)),
       dateFilter('from'), dateFilter('to'),
     );
-    parts.push(filters, el('p', 'field-note learning-audit-later', LEARNING_AUDIT_FILTERS_LATER));
+    parts.push(filters);
+    // A house with more Books or Series than the filters list says so beside them (Issue #677).
+    // The 图书 select offers every Book it knows: the first listed by title, the one chosen, and any a page named; the note
+    // counts both parts, so it never disagrees with the select.
+    if (filterChoices.booksTruncated) {
+      parts.push(cutNote('book', learningAuditChoicesCut('book', filterChoices.booksListed, Math.max(0, knownBooks.size - filterChoices.booksListed))));
+    }
+    // A damaged Series record leaves the 书系 filter with 全部 alone, and says so; the audit reads on (Issue #677).
+    if (filterChoices.seriesUnavailable) parts.push(cutNote('series', LEARNING_AUDIT_SERIES_UNAVAILABLE));
+    else if (filterChoices.seriesTruncated) parts.push(cutNote('series', learningAuditChoicesCut('series', filterChoices.series.length)));
+    parts.push(el('p', 'field-note learning-audit-later', LEARNING_AUDIT_FILTERS_LATER));
     if (listRefusal !== null) {
       const alert = el('p', 'attention-note learning-audit-refusal', listRefusal);
       alert.setAttribute('role', 'alert');
@@ -383,7 +413,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       check.type = 'checkbox';
       check.checked = selection.has(material.materialKey);
       check.disabled = busy || batch !== null;
-      check.setAttribute('aria-label', learningAuditSelectLabel(learningAuditMaterialName(material, localInstantLabel)));
+      check.setAttribute('aria-label', learningAuditSelectLabel(nameOf(material)));
       check.addEventListener('change', () => {
         if (busy || batch !== null) return;
         if (check.checked) selection.set(material.materialKey, { bookId: book.bookId, material });
@@ -401,7 +431,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     if (reason !== undefined) item.append(el('p', 'learning-audit-excerpt', reason));
     item.append(el('p', 'field-note learning-audit-use', LEARNING_AUDIT_UNUSED));
     const open = action(LEARNING_AUDIT_OPEN, 'quiet', 'open', () => void openLineage(book.bookId, material.materialKey));
-    open.setAttribute('aria-label', learningAuditOpenLabel(learningAuditMaterialName(material, localInstantLabel)));
+    open.setAttribute('aria-label', learningAuditOpenLabel(nameOf(material)));
     open.disabled = busy || batch !== null;
     item.append(open);
     return item;
@@ -444,11 +474,18 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       // the refusal stays above it — as the explorer does with its chain.
       const refusal = errorMessage(error, LEARNING_AUDIT_STATUS.failed);
       batch = null;
-      if (!(await request(chosen, pageAfter, '.learning-audit-refusal', refusal))) {
-        listRefusal = refusal;
-        paint('.learning-audit-refusal');
+      const reread = await request(chosen, pageAfter, '.learning-audit-refusal', refusal);
+      // The editor may have left 学习回溯 while it was read again: nothing more is said on another screen.
+      if (!root.isConnected) return;
+      if (reread) {
+        setStatus(refusal, 'error');
+        return;
       }
-      setStatus(refusal, 'error');
+      // Not read again: the refusal stays above the page, and the status says the list may be out of date, as a recorded
+      // batch's does (Issue #677).
+      listRefusal = refusal;
+      paint('.learning-audit-refusal');
+      setStatus(learningRemediationRereadFailed(refusal), 'error');
       return;
     }
     busy = false;
@@ -457,7 +494,9 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     batch = null;
     selection.clear();
     const message = learningRemediationOutcome(outcome.recorded.length, outcome.leftOut.length);
-    if (await request(chosen, pageAfter, '#learning-audit-query')) setStatus(message, 'success');
+    const reread = await request(chosen, pageAfter, '#learning-audit-query');
+    if (!root.isConnected) return;
+    if (reread) setStatus(message, 'success');
     else {
       paint('#learning-audit-query');
       setStatus(learningRemediationRereadFailed(message), 'error');
@@ -753,7 +792,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     actions.append(leave);
     section.append(actions);
     if (open.panel?.kind === 'preview') {
-      const name = learningAuditMaterialName(material, localInstantLabel);
+      const name = nameOf(material);
       section.append(previewNode(open.panel, null, (materialKey) => (materialKey === material.materialKey ? name : null), closePanel, () => void confirmOne()));
     }
     if (open.panel?.kind === 'reinclude') section.append(reincludeNode(open, open.panel));
@@ -799,30 +838,10 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
   return {
     async load(): Promise<void> {
       root.replaceChildren(el('p', 'field-note', LEARNING_AUDIT_STATUS.loading));
-      // The filters' choices are every Book and every Series of the house (LAUD-002), read page by page once on opening; a
-      // list that cannot be read leaves its filter with what it has, and every filter still offers 全部.
-      try {
-        let after: BookSummaryCursor | null = null;
-        for (let page = 0; page < MAX_CHOICE_PAGES; page += 1) {
-          const books = await api.listBooks({ after });
-          for (const book of books.items) knownBooks.set(book.bookId, book.title);
-          if (books.nextCursor === null) break;
-          after = books.nextCursor;
-        }
-      } catch { /* the Books read so far stay offered */ }
-      try {
-        const all: SeriesSummaryProjection[] = [];
-        let after: SeriesListCursor | null = null;
-        for (let page = 0; page < MAX_CHOICE_PAGES; page += 1) {
-          const read = await api.inspectSeriesList({ after });
-          all.push(...read.series);
-          if (read.nextCursor === null) break;
-          after = read.nextCursor;
-        }
-        series = all;
-      } catch { series = []; }
-      // The view state this window kept from an earlier visit, if any: the filters and the page they were read at.
-      // A kept Series or Book may be gone since; the page then opens unfiltered at its start.
+      // The filters' choices — the house's Books and Series (LAUD-002) — come with the page itself (Issue #677): opening reads
+      // no Book or Series list of its own. The view state this window kept from an earlier visit, if any: the filters and the
+      // page they were read at. A kept Series or Book may be gone since: the service refuses either, and the page then opens
+      // unfiltered at its start.
       const kept = remembered;
       if (kept !== null) {
         try {

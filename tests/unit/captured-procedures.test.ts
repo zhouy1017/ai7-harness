@@ -12,6 +12,9 @@ import {
   CAPTURE_NOTHING_SETTLED,
   CAPTURE_RUNNING,
   CapturedProcedures,
+  PASSED_OVER_FAILED,
+  PASSED_OVER_PENDING,
+  PASSED_OVER_STOPPED,
   boundedPage,
   capturedProcedureDocument,
   capturedStepProblem,
@@ -23,7 +26,11 @@ import {
   readCapturedProcedureDocument,
   readReviewRunProcedurePin,
   recordReviewRunProcedurePin,
+  resolveProcedureVersions,
   validCapturedProcedureTitle,
+  versionEligible,
+  versionIneligibleReason,
+  type ResolvableVersion,
 } from '../../src/service/captured-procedures.js';
 import {
   BUILTIN_REVIEW_CATEGORY_CONFIGURATION,
@@ -236,8 +243,8 @@ describe('the ledger', () => {
     const second = ledger.save({ procedureId: first.procedureId, document: capturedProcedureDocument('体例二', [STYLE, LITERARY], 'chapters'), ...source });
     expect(second).toMatchObject({ version: 2, previousDocumentSha256: first.documentSha256 });
     expect(ledger.versions(first.procedureId).map((version) => version.version)).toEqual([2, 1]);
-    ledger.stop(first.versionId);
-    ledger.stop(first.versionId);
+    ledger.stop(first.versionId, 'f'.repeat(64));
+    ledger.stop(first.versionId, 'f'.repeat(64));
     expect(ledger.version(first.versionId)!.state).toBe('stopped');
     expect(() => ledger.recordValidation(first.versionId, [], 'c'.repeat(64))).toThrowError('这一版已停用');
     // The ledger itself refuses a state after 停用, and any rewrite or removal.
@@ -267,7 +274,7 @@ describe('the ledger', () => {
     });
     expect(procedurePinRefusal(db, run)).toBeNull();
     expect(readReviewRunProcedurePin(db, '22222222-2222-4222-8222-222222222222')).toBeNull();
-    ledger.stop(version.versionId);
+    ledger.stop(version.versionId, 'f'.repeat(64));
     expect(readReviewRunProcedurePin(db, run)!.stopped).toBe(true);
     expect(procedurePinRefusal(db, run)).toEqual({ code: 'REVIEW_PROCEDURE_STOPPED', message: '这次审阅按可复用工序《体例》第 1 版准备，这一版已停用；请重新准备这次审阅。' });
     // A pin naming a version this house never held — a Book merged in from another — reads as missing and is refused.
@@ -297,6 +304,68 @@ describe('the ledger', () => {
     expect(text).toContain(`记录摘要（SHA-256）：${version.technical.sha256}`);
     ledger.recordProposalFile(version.proposalVersionId, 'x.md', new TextEncoder().encode(text));
     expect(ledger.proposal(proposalId).versions[0]!.files.map((file) => file.fileName)).toEqual(['x.md']);
+    db.close();
+  });
+});
+
+// ---- Issue #66, plan slice S31: Latest Eligible Version Resolution, and what a 停用 records ----------------------------------
+
+const resolvable = (version: number, state: ResolvableVersion['state'], problem: string | null = null, failedValidation = false): ResolvableVersion => ({
+  versionId: `00000000-0000-4000-8000-00000000000${version}`, version, state, problem, failedValidation,
+});
+
+describe('Latest Eligible Version Resolution (UI ADR 0013; REUSE-043, REUSE-044)', () => {
+  it('takes the newest 已启用 version that still validates, and names every newer one it passed over with why', () => {
+    const versions = [resolvable(2, 'enabled'), resolvable(5, 'pending-validation'), resolvable(1, 'enabled'), resolvable(4, 'stopped'),
+      resolvable(3, 'enabled', '「体例与格式」现在不能运行。'), resolvable(6, 'pending-validation', null, true)];
+    const { eligible, passedOver } = resolveProcedureVersions(versions);
+    expect(eligible.map((version) => version.version)).toEqual([2, 1]);
+    expect(passedOver).toEqual([
+      { version: 6, reason: PASSED_OVER_FAILED },
+      { version: 5, reason: PASSED_OVER_PENDING },
+      { version: 4, reason: PASSED_OVER_STOPPED },
+      { version: 3, reason: '「体例与格式」现在不能运行。' },
+    ]);
+  });
+
+  it('weighs an excluded version as stopped: what a 停用 would leave a new use', () => {
+    const versions = [resolvable(1, 'enabled'), resolvable(2, 'enabled')];
+    expect(resolveProcedureVersions(versions, new Set([versions[1]!.versionId])).eligible.map((version) => version.version)).toEqual([1]);
+    expect(resolveProcedureVersions(versions, new Set([versions[1]!.versionId])).passedOver).toEqual([{ version: 2, reason: PASSED_OVER_STOPPED }]);
+    const none = resolveProcedureVersions(versions, new Set(versions.map((version) => version.versionId)));
+    expect(none.eligible).toEqual([]);
+    expect(none.passedOver.map((version) => version.version)).toEqual([2, 1]);
+    // Excluding never changes what it was given.
+    expect(versions.map((version) => version.state)).toEqual(['enabled', 'enabled']);
+  });
+
+  it('reads eligibility from the state and, only for an 已启用 version, its validation', () => {
+    expect(versionEligible(resolvable(1, 'enabled'))).toBe(true);
+    expect(versionEligible(resolvable(1, 'enabled', '不再通过'))).toBe(false);
+    expect(versionEligible(resolvable(1, 'pending-validation'))).toBe(false);
+    expect(versionEligible(resolvable(1, 'stopped'))).toBe(false);
+    expect(versionIneligibleReason(resolvable(1, 'enabled'))).toBeNull();
+    expect(versionIneligibleReason(resolvable(1, 'stopped', '不再通过'))).toBe(PASSED_OVER_STOPPED);
+    expect(versionIneligibleReason(resolvable(1, 'pending-validation', '不再通过'))).toBe(PASSED_OVER_PENDING);
+    expect(versionIneligibleReason(resolvable(1, 'pending-validation', null, true))).toBe(PASSED_OVER_FAILED);
+    expect(resolveProcedureVersions([]).eligible).toEqual([]);
+  });
+});
+
+describe('a 停用 in the ledger (Issue #66, S31)', () => {
+  it('records the digest of the preview it confirmed, and lists the Runs that pinned a version in the order they were prepared', () => {
+    const db = ledgerDatabase();
+    const ledger = new CapturedProcedures(db);
+    const version = ledger.save({ procedureId: null, document: capturedProcedureDocument('体例', [STYLE], 'whole'),
+      sourceBookId: '11111111-1111-4111-8111-111111111111', sourceReviewRunId: '22222222-2222-4222-8222-222222222222', sourceRunOrdinal: 1 });
+    const pin = { procedureId: version.procedureId, versionId: version.versionId, version: 1, title: '体例', documentSha256: version.documentSha256, scope: 'whole' as const, steps: ['style-and-format'] };
+    recordReviewRunProcedurePin(db, '33333333-3333-4333-8333-333333333333', pin, ['style-and-format'], [], '2026-10-08T00:00:00.000Z');
+    recordReviewRunProcedurePin(db, '22222222-2222-4222-8222-222222222222', pin, ['style-and-format'], [], '2026-10-09T00:00:00.000Z');
+    expect(ledger.pinnedRunIds(version.versionId)).toEqual(['33333333-3333-4333-8333-333333333333', '22222222-2222-4222-8222-222222222222']);
+    expect(ledger.pinnedRunIds('44444444-4444-4444-8444-444444444444')).toEqual([]);
+    ledger.stop(version.versionId, 'a'.repeat(64));
+    const state = db.prepare("SELECT canonical_json FROM captured_procedure_states WHERE state = 'stopped'").get() as { canonical_json: string };
+    expect(JSON.parse(state.canonical_json)).toMatchObject({ state: 'stopped', previewDigest: 'a'.repeat(64) });
     db.close();
   });
 });

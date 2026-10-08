@@ -7,7 +7,8 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner, type UnitHold } from '../../src/service/analysis/execution.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
-import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
+import { ReviewRunDriver, type ReviewRunExecutionOwner } from '../../src/service/review/review-run-driver.js';
+import { CAPTURE_CANCELLED, CAPTURE_SCOPE_CHANGED } from '../../src/service/captured-procedures.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { SERIES_RETRIEVAL_EXCLUSION_TRIGGER_SQL, SERIES_SCOPE_STOP_SUMMARY, SeriesExclusionLedger, seriesExclusionImpact, seriesExclusionTarget } from '../../src/service/series-exclusions.js';
 import {
@@ -32,6 +33,8 @@ import { J13_PLACE, J13_SERIES_TITLE, makeJ13Series } from '../support/series-co
 
 const FIXTURES_ROOT = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url)));
 const FIXTURE = 'sample1-series-consistency-authored';
+/** The authored review fixture, which answers 错别字与规范用语 but not 书系一致性. */
+const REVIEW_FIXTURE = 'sample1-review-authored';
 const WHOLE = { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null } as const;
 const ITEM_LABEL = `书系知识条目「${J13_PLACE}」（地点）`;
 
@@ -66,9 +69,9 @@ function gate(): { hold: UnitHold; release(): void; reached: Promise<void> } {
   };
 }
 
-async function withSession(body: (session: Session, bookId: string) => Promise<void>, unitHold: UnitHold | null = null): Promise<void> {
+async function withSession(body: (session: Session, bookId: string) => Promise<void>, unitHold: UnitHold | null = null, fixtureIdentity = FIXTURE): Promise<void> {
   await requireExactSample1(roots.codeRoot);
-  const fixture = await loadModelFixture(FIXTURES_ROOT, FIXTURE);
+  const fixture = await loadModelFixture(FIXTURES_ROOT, fixtureIdentity);
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false,
     persistLegacyReviewedDraft: false,
@@ -394,6 +397,62 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
       expect(() => driver.continue(reviewing.reviewRunId)).toThrowError(/只能修改计划并重新授权，或取消任务/u);
       expect(run(store, bookId, reviewing.reviewRunId).state).toBe('scope-changed');
     }, held.hold);
+  }, 300_000);
+
+  // 可复用工序 (Issue #674): a Run an exclusion stopped is not finished, whatever one of its categories settled first — so it
+  // offers no capture, stopped or cancelled, and the store refuses one asked for all the same.
+  it('refuses to capture a two-category Run an exclusion stopped after one category settled, stopped or cancelled', async () => {
+    await withSession(async ({ store, owner, seriesId }, bookId) => {
+      const itemId = itemOf(store, seriesId);
+      let progress = store.createReviewRunPreparationWork(bookId, ['typos-and-usage', 'series-consistency'], WHOLE, launchPolicy);
+      while (!progress.done) progress = store.advanceReviewRunPreparationWork(progress.workId!);
+      const prepared = progress.projection!.run!;
+      store.authorizeReviewRun(bookId, prepared.reviewRunId, prepared.categories.map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.planEnvelopeDigest! })));
+      // 错别字与规范用语 runs to its end; as 书系一致性 waits for its place, the exclusion is recorded and stops the Run there.
+      let places = 0;
+      let atStop: string[][] = [];
+      // The driver records a throw inside this hook as a category failure, so the hook keeps what happened and the test
+      // asserts it once the drive is over: a failing exclusion is then named here, not lost behind the Run-state check.
+      let hookOutcome: { stoppedRuns: number } | { error: string } | null = null;
+      const stopping: ReviewRunExecutionOwner = {
+        admitAndDispatch: (runRecordId, ledger) => owner.admitAndDispatch(runRecordId, ledger),
+        whenDone: (runRecordId) => owner.whenDone(runRecordId),
+        whenPlaceFree: async () => {
+          places += 1;
+          if (places === 2) {
+            try {
+              atStop = run(store, bookId, prepared.reviewRunId).categories.map((category) => [category.categoryId, category.state]);
+              hookOutcome = { stoppedRuns: exclude(store, seriesId, 'add', { target: { kind: 'knowledge-item', id: itemId } }).result.stoppedRuns };
+            } catch (error) {
+              hookOutcome = { error: error instanceof Error ? `${error.name}: ${error.message}` : String(error) };
+            }
+          }
+          return owner.whenPlaceFree();
+        },
+      };
+      const driver = new ReviewRunDriver(store.reviewRunDriveSteps, stopping);
+      try {
+        await driver.drive(prepared.reviewRunId);
+      } finally {
+        await driver.dispose();
+      }
+      expect(hookOutcome).toEqual({ stoppedRuns: 1 });
+      expect(atStop[0]).toEqual(['typos-and-usage', 'settled']);
+      const stopped = run(store, bookId, prepared.reviewRunId);
+      expect([stopped.state, stopped.canContinue, stopped.categories.map((category) => [category.categoryId, category.state])])
+        .toEqual(['scope-changed', false, [['typos-and-usage', 'settled'], ['series-consistency', 'refused']]]);
+      const capture = { bookId, reviewRunId: prepared.reviewRunId, categoryIds: ['typos-and-usage'], scopeSlot: 'whole', title: '错别字复核', procedureId: null } as const;
+      const refused = (reason: string): void => {
+        expect(run(store, bookId, prepared.reviewRunId).capture).toEqual({ available: false, unavailableReason: reason });
+        expect(store.inspectProcedureCapture(bookId, prepared.reviewRunId)).toMatchObject({ available: false, unavailableReason: reason });
+        expect(refusal(() => store.saveCapturedProcedure(capture))).toBe(`CAPTURED_PROCEDURE_SOURCE_INELIGIBLE:${reason}`);
+      };
+      refused(CAPTURE_SCOPE_CHANGED);
+      // 取消任务: 已取消, and still nothing to capture; no procedure was saved either time.
+      expect(store.cancelReviewRun(bookId, prepared.reviewRunId).run!.state).toBe('cancelled');
+      refused(CAPTURE_CANCELLED);
+      expect(store.inspectCapturedProcedures().procedures).toEqual([]);
+    }, null, REVIEW_FIXTURE);
   }, 300_000);
 
   it('marks a completed result that used material excluded afterwards, rewrites nothing, and keeps the marker once the exclusion ends', async () => {
