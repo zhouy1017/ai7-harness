@@ -7,7 +7,7 @@ import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-poli
 import { BaselineAnalysisExecutionOwner, type UnitHold } from '../../src/service/analysis/execution.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
-import { SERIES_SCOPE_STOP_SUMMARY } from '../../src/service/series-exclusions.js';
+import { SERIES_SCOPE_STOP_SUMMARY, SeriesExclusionLedger, seriesExclusionImpact, seriesExclusionTarget } from '../../src/service/series-exclusions.js';
 import {
   HISTORICALLY_AFFECTED_RESULT_MARKER,
   SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL,
@@ -184,6 +184,32 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
       const fresh = prepare(store, bookId);
       expect(refusal(() => store.cancelReviewRun(bookId, fresh.reviewRunId)))
         .toBe(`REVIEW_RUN_NOT_CANCELLABLE:只有显示「${SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL}」的审阅可以在这里取消任务。`);
+    });
+  }, 300_000);
+
+  it('guards the read itself: an exclusion in force that stopped nothing as it was recorded still stops a Run at its turn', async () => {
+    await withSession(async ({ store, driver, seriesId }, bookId) => {
+      const itemId = itemOf(store, seriesId);
+      const approved = prepare(store, bookId);
+      approve(store, bookId, approved);
+      // Written to the ledger directly, as no command of the product would: nothing stopped the Run when it was recorded.
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try {
+        const target = seriesExclusionTarget('knowledge-item', itemId, { subject: J13_PLACE, knowledgeClass: 'places' });
+        new SeriesExclusionLedger(db).record({
+          seriesId, action: 'add', prior: null, target, reason: '', previewDigest: 'a'.repeat(64),
+          impact: seriesExclusionImpact('add', { seriesTitle: J13_SERIES_TITLE, target, reason: '', priorReason: null, itemsNamed: [], itemCount: 1,
+            runsNamed: [], runCount: 0, preparedCount: 0, completedNamed: [], completedCount: 0 }),
+        });
+      } finally {
+        db.close();
+      }
+      expect(run(store, bookId, approved.reviewRunId).state).toBe('partial');
+      await driver.drive(approved.reviewRunId);
+      const stopped = run(store, bookId, approved.reviewRunId);
+      expect([stopped.state, stopped.categories[0]!.state, stopped.categories[0]!.stateLabel, stopped.findings.length])
+        .toEqual(['scope-changed', 'refused', SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL, 0]);
+      expect(stopped.categories[0]!.detail).toContain(`${ITEM_LABEL}已排除在书系检索之外，它在读取前停下，没有发送任何内容。`);
     });
   }, 300_000);
 
