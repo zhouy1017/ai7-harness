@@ -18,7 +18,7 @@ import {
   IMPORTED_MARKS_REJECTED_BLOCKS,
 } from './composed-docx.mjs';
 import { attachProductOutput, awaitWithinDeadline, createJ01CompletionLocation, discloseJourneySkip, installJourneyCancellationCleanup, journeyCheckFailure, LOCAL_ONLY_DOC, localDebugEnabled, localManuscriptAvailable, localManuscriptPath, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
-import { createLaunchTrace, formatReadinessTrace, readBrowserLog } from './readiness-trace.mjs';
+import { classifyRendererTargetMiss, createLaunchTrace, formatReadinessTrace, readBrowserLog, waitingForService } from './readiness-trace.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const PRODUCT_RENDERER_URL = pathToFileURL(resolve(ROOT, 'dist', 'renderer', 'index.html')).href;
@@ -46,6 +46,11 @@ const PRODUCT_READY_TIMEOUT_MS = 60_000;
 // outer race gives up on it — the relationship this pair has always had.
 const BROWSER_LAUNCH_TIMEOUT_MS = PRODUCT_READY_TIMEOUT_MS + 5_000;
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
+// The product's own deadline for its service to become ready, src/main/service-client.ts STARTUP_READY_TIMEOUT_MS, and the
+// margin for main to say it failed and exit after it. A launch whose renderer target misses J-01's budget while main still
+// waits at `service-ready` is watched to that deadline, only to say whether the service was slow or stalled (Issue #675).
+const PRODUCT_SERVICE_READY_TIMEOUT_MS = 2 * 60_000;
+const PRODUCT_SERVICE_READY_MARGIN_MS = 15_000;
 const BROWSER_LAUNCH_TIMEOUT = journeyCheckFailure('J-01', 'browser-launch-timeout');
 const BROWSER_CLOSE_TIMEOUT = journeyCheckFailure('J-01', 'browser-close-timeout');
 const BROWSER_DISCONNECTED = journeyCheckFailure('J-01', 'browser-disconnected');
@@ -264,6 +269,72 @@ function productEnvironment(executable) {
   return selected;
 }
 
+/** A renderer-target miss's outcome as a check label's word: one of the outcomes `classifyRendererTargetMiss` names. */
+function targetMissWord(outcome) {
+  switch (outcome) {
+    case 'service-start-stalled': return 'service-start-stalled';
+    case 'service-start-slow': return 'service-start-slow';
+    case 'service-start-exited': return 'service-start-exited';
+    case 'service-start-unbounded': return 'service-start-unbounded';
+    case 'startup-failed': return 'startup-failed';
+    case 'product-exited': return 'product-exited';
+    case 'window': return 'window';
+    case 'after-readiness': return 'after-readiness';
+    default: return 'timeout';
+  }
+}
+
+/** The service's startup step as a check label's word: one of the fixed steps the trace admits, or `none`. */
+function serviceStepWord(step) {
+  switch (step) {
+    case 'spawned': return 'spawned';
+    case 'process': return 'process';
+    case 'store': return 'store';
+    case 'owners': return 'owners';
+    case 'serving': return 'serving';
+    case 'stopped': return 'stopped';
+    default: return 'none';
+  }
+}
+
+/**
+ * The launch's renderer target did not appear within J-01's budget: fail, naming why from the launch's trace (Issue #675).
+ * Main makes the window only once its service is ready, so a launch still at `service-ready` cannot have a target yet; it
+ * is watched until the product's own service deadline has passed, never to let it pass, only to say whether the service
+ * then became ready (`-slow`), the product gave up on it (`-stalled`), it exited (`-exited`) or neither (`-unbounded`),
+ * each `-at-<step>` the service's own startup had reached when the budget passed. Otherwise the check says the product
+ * failed or exited, that main was making the window, or that it had said it was ready.
+ */
+async function rendererTargetMissing(browser) {
+  const atBudget = launchTraceNow();
+  let trace = atBudget;
+  if (waitingForService(atBudget)) {
+    const bound = launchInFlight.startedAt + atBudget.lastAt + PRODUCT_SERVICE_READY_TIMEOUT_MS + PRODUCT_SERVICE_READY_MARGIN_MS;
+    while (waitingForService(trace) && Date.now() < bound) {
+      await new Promise((settle) => setTimeout(settle, 250));
+      trace = launchTraceNow();
+    }
+  }
+  // The label is fixed now: the service step when J-01's budget passed, and what the watch then saw.
+  const miss = classifyRendererTargetMiss(atBudget, trace);
+  // A product that gave up on its startup goes on to stop its service and exit: wait, bounded, for that exit to reach the
+  // browser and the trace, so the launch's cleanup finds the product gone rather than going (#694 review).
+  if (trace !== null && (trace.failed !== null || trace.exited !== null)) {
+    if (browser.isConnected()) {
+      await Promise.race([
+        new Promise((settle) => browser.once('disconnected', settle)),
+        new Promise((settle) => setTimeout(settle, BROWSER_CLOSE_TIMEOUT_MS)),
+      ]);
+    }
+    const exitBound = Date.now() + 5_000;
+    while (!browser.isConnected() && launchTraceNow()?.exited === null && Date.now() < exitBound) {
+      await new Promise((settle) => setTimeout(settle, 100));
+    }
+  }
+  if (miss.step === null) requireJourney(false, `renderer-target-${targetMissWord(miss.outcome)}`);
+  requireJourney(false, `renderer-target-${targetMissWord(miss.outcome)}-at-${serviceStepWord(miss.step)}`);
+}
+
 /**
  * Attach to the product's page and wait until its renderer is ready. `onTarget` runs once the page target is found and
  * attached, before that wait (Issue #518): a stall at `renderer-ready` then says the target existed.
@@ -297,7 +368,7 @@ async function attachRendererTarget(browser, onTarget = () => undefined) {
     );
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  requireJourney(pageTarget, 'renderer-target-timeout');
+  if (!pageTarget) await rendererTargetMissing(browser);
   const { sessionId } = await sendRoot(
     'Target.attachToTarget',
     {
@@ -2222,9 +2293,19 @@ async function main() {
       cancellation.throwIfRequested();
       at(`launch-${launchScenario}-renderer-target`);
       // The trace says the target existed as soon as it is attached, before the renderer is ready (Issue #518).
-      return attachRendererTarget(browser, () => {
-        inFlight.target = true;
-      });
+      try {
+        return await attachRendererTarget(browser, () => {
+          inFlight.target = true;
+        });
+      } catch (error) {
+        // A launch whose product gave up on its startup and exited while J-01 watched it (Issue #675) leaves nothing to
+        // close, and the cleanup's refusal of a closed browser must not replace the check that named why. Only a product
+        // the trace saw exit is dropped: a broken pipe with the product still there keeps the cleanup's own refusal.
+        if (error !== BROWSER_DISCONNECTED && browser?.isConnected() === false && (launchTraceNow()?.exited ?? null) !== null) {
+          browser = undefined;
+        }
+        throw error;
+      }
     };
     const closeProduct = async () => {
       at('window-close');
