@@ -546,6 +546,10 @@ describe('升级前备份 over the real store', () => {
       expect(store.inspectDataVersion().upgrades[0]!.rollback).toMatchObject({
         softwareVersion: '0.0.9', dataVersion: 1, backupFileName: 'AI7 升级前备份 2026-09-26 09-00-00.ai7db', backupPresent: false,
       });
+      // No software can import the middle state this backup holds — 0.0.10 stopped short of it — so the backup names the
+      // software that made it, this one, not 0.0.10 beside a Data Version 0.0.10 never reached whole (Issue #644).
+      const backedUp = unzipSync(await readFile(join(backups(), store.inspectDataVersion().upgrades[0]!.backupFileName)));
+      expect(parseCanonicalJson(strFromU8(backedUp['manifest.json']!))).toMatchObject({ softwareVersion: software, dataVersion: 3 });
       store.markCleanShutdown();
     } finally {
       store.close();

@@ -24,10 +24,18 @@ import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
 
 const sourceRead = vi.hoisted(() => ({ path: null as string | null, atEnd: null as (() => Promise<void>) | null }));
+/** While set, every write into a file opened under this directory fails as a full disk fails. */
+const noSpace = vi.hoisted(() => ({ under: null as string | null }));
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
   const open: typeof actual.open = async (...args) => {
     const handle = await actual.open(...args);
+    if (noSpace.under !== null && typeof args[0] === 'string' && args[0].startsWith(noSpace.under)) {
+      const full = (): Promise<never> =>
+        Promise.reject(Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC', errno: -28, syscall: 'write' }));
+      handle.writeFile = full as typeof handle.writeFile;
+      handle.write = full as typeof handle.write;
+    }
     if (args[0] === sourceRead.path) {
       const read = handle.read.bind(handle);
       handle.read = ((...readArgs: Parameters<typeof read>) => read(...readArgs).then(async (result) => {
@@ -170,6 +178,60 @@ describe('导入数据库 over the real store', () => {
       expect(existsSync(replacementStagingFor(roots.dataRoot))).toBe(false);
       expect((await readdir(join(roots.dataRoot, 'export-staging'))).filter((name) => name.startsWith('.'))).toEqual([]);
     } finally { store.close(); }
+  });
+
+  it.each(['another revision', 'not SQLite'] as const)('refuses a package whose store member is %s, whatever its manifest says of it (Issue #644)', async (damage) => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      createBook(store, '仓库成员');
+      const packagePath = await exported(store, '仓库成员.ai7db');
+      const entries = unzipSync(await readFile(packagePath));
+      const manifest = parseCanonicalJson(strFromU8(entries['manifest.json']!)) as { schemaRevision: number; members: { path: string; bytes: number; sha256: string }[] };
+      const member = manifest.members.find((candidate) => candidate.path === 'store/ai7.sqlite')!;
+      if (damage === 'another revision') {
+        // The same store, stamped one revision short of the manifest's: every member still matches its digest.
+        const restamped = join(roots.inputRoot, 'restamped.sqlite');
+        await writeFile(restamped, entries[member.path]!);
+        const database = new DatabaseSync(restamped);
+        try {
+          database.exec(`PRAGMA user_version = ${manifest.schemaRevision - 1}`);
+        } finally { database.close(); }
+        entries[member.path] = await readFile(restamped);
+      } else {
+        entries[member.path] = Buffer.from('这不是一个 SQLite 数据库文件。'.repeat(64));
+      }
+      member.bytes = entries[member.path]!.byteLength;
+      member.sha256 = sha256Hex(entries[member.path]!);
+      entries['manifest.json'] = Buffer.from(canonicalRecord(manifest).json);
+      const damaged = join(roots.inputRoot, `${damage}.ai7db`);
+      await writeFile(damaged, zipSync(entries, { mtime: fixedArchiveTime() }));
+      expect(code(await store.inspectDatabaseImport(damaged).catch((error: unknown) => error))).toBe('DATABASE_PACKAGE_DAMAGED');
+      expect((await readdir(join(roots.dataRoot, 'export-staging'))).filter((name) => name.startsWith('.'))).toEqual([]);
+    } finally { store.close(); }
+  });
+
+  it.each(['replace', 'merge'] as const)('refuses to %s with a coded refusal, not the file system\'s, when the disk runs out of space (Issue #644)', async (kind) => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      createBook(store, '空间不足');
+      const packagePath = await exported(store, '空间不足.ai7db');
+      const preview = await store.inspectDatabaseImport(packagePath);
+      noSpace.under = replacementStagingFor(roots.dataRoot);
+      const prepared = kind === 'replace'
+        ? store.prepareDatabaseReplacement(preview.previewId, T)
+        : store.prepareDatabaseMerge(preview.previewId, T);
+      const error = await prepared.catch((caught: unknown) => caught);
+      noSpace.under = null;
+      expect(code(error)).toBe('DATABASE_REPLACEMENT_NO_SPACE');
+      expect((error as Error).message).toContain(kind === 'replace' ? '替换' : '合并');
+      expect((await store.inspectDatabaseReplacements()).pending).toBeNull();
+      expect(existsSync(replacementStagingFor(roots.dataRoot))).toBe(false);
+      expect(existsSync(backups())).toBe(false);
+      expect(store.replacementFrozen()).toBe(false);
+    } finally {
+      noSpace.under = null;
+      store.close();
+    }
   });
 
   it('keeps a reader copy while an export is prepared, and reclaims abandoned reader files at startup', async () => {

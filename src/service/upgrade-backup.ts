@@ -242,7 +242,10 @@ export async function backUpBeforeUpgrade(
     partial = join(location, `.${randomUUID()}${DATABASE_PACKAGE_EXTENSION}.partial`);
     const written = await writeDatabasePackage(db, dataRoot, partial, () => ({
       dataVersion: fromDataVersion,
-      softwareVersion: fromSoftwareVersion ?? options.softwareVersion,
+      // The software whose data this is, which can import it again. A predecessor whose migration stopped partway left a
+      // middle state no software imports, so that backup names the software that made it, this one (Issue #644); going back
+      // then goes to the earlier complete backup its `rollback` names.
+      softwareVersion: previous.rollback === undefined ? fromSoftwareVersion ?? options.softwareVersion : options.softwareVersion,
       schemaRevision: revision,
       createdAt: options.now.toISOString(),
       origin: 'pre-upgrade-backup',

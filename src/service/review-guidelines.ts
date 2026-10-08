@@ -468,8 +468,26 @@ export class ReviewGuidelineLedger {
       DROP TABLE IF EXISTS temp.guideline_categories; DROP TABLE IF EXISTS temp.guideline_snapshots;`);
   }
 
-  /** Disk-backed grouping retains one applied document at a time, including complete foreign snapshot histories. */
+  /**
+   * Disk-backed grouping retains one applied document at a time, including complete foreign snapshot histories. Its inserts are
+   * one transaction (Issue #644): a read of the page writes only temporary tables, and one commit for them all, not one per row.
+   */
   #materializeUsage(known: ReturnType<typeof builtinDocuments>): void {
+    if (this.#db.isTransaction) {
+      this.#rebuildUsage(known);
+      return;
+    }
+    this.#db.exec('BEGIN');
+    try {
+      this.#rebuildUsage(known);
+      this.#db.exec('COMMIT');
+    } catch (error) {
+      this.#db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  #rebuildUsage(known: ReturnType<typeof builtinDocuments>): void {
     this.#dropUsage();
     this.#db.exec(`
       CREATE TEMP TABLE guideline_own(document_id TEXT, version INTEGER, content TEXT, PRIMARY KEY(document_id, version)) WITHOUT ROWID;
