@@ -1,7 +1,7 @@
 ---
 status: accepted — the Owner decided on 2026-10-07 and 2026-10-08 what this record states, and on 2026-10-08 directed that the Commander merge it once drafted (「可以，起草后由你合并」); the Commander's merge is this record's acceptance
 date: 2026-10-08
-deciders: Owner (chooow.yang@gmail.com)
+deciders: Owner
 amends: ADR 0065 — its Purpose and boundary, and its Origin, Bounded transmissions and Hard ceiling clauses, for a dialogue attempt only (§1, §2); its Inputs clause is read as §4 states; AGENTS.md's Protected material paragraph gains a one-line clarification of the same reading (§4)
 ---
 
