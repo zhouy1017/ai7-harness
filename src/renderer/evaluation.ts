@@ -4,6 +4,7 @@ import type {
   EvaluationConclusion,
   EvaluationContent,
   EvaluationRecordProjection,
+  EvaluationRecordSummaryProjection,
   EvaluationWorkspaceProjection,
   RendererApi,
   ServiceJobProjection,
@@ -12,7 +13,9 @@ import {
   EVALUATION_ADJUSTMENT_REASONS,
   evaluationItemAdjusted,
   evaluationTotal,
+  finalizationNeedsScore,
   recommendationBlocked,
+  validEvaluationScore,
   type EvaluationRiskLevel,
 } from '../shared/evaluation-scoring.js';
 import {
@@ -41,6 +44,7 @@ import {
   EVALUATION_CONCLUSION_LEGEND,
   EVALUATION_EMPTY,
   EVALUATION_FINALIZE,
+  EVALUATION_FINALIZE_NEEDS_SCORE,
   EVALUATION_NOT_RATED,
   EVALUATION_NOT_RATED_REASON,
   EVALUATION_READINESS,
@@ -53,19 +57,24 @@ import {
   EVALUATION_SCORE,
   EVALUATION_START,
   EVALUATION_STATUS,
+  EVALUATION_STAY,
   EVALUATION_STRENGTHS,
   EVALUATION_VERDICT,
   EVALUATION_VERSIONS_HEADING,
   EVALUATION_WEAKNESSES,
   evaluationBandLabel,
   evaluationComparisonLines,
+  evaluationDiscardAndOpen,
   evaluationFinalized,
   evaluationFinalizedLine,
   evaluationHeading,
   evaluationItemLegend,
   evaluationRevisionLine,
+  evaluationScoreFeedback,
+  evaluationScoreInvalidLine,
   evaluationStarted,
   evaluationTotalLine,
+  evaluationUnsavedLine,
   evaluationVersionLine,
 } from './evaluation-labels.js';
 import { localInstantLabel } from './plan-preview-labels.js';
@@ -226,6 +235,11 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     }, INITIAL_POLL_MS);
   };
 
+  /** The version asked for from the list while the open one had unsaved edits: the page asks before it opens it (Issue #638). */
+  let leaving: EvaluationRecordSummaryProjection | null = null;
+  /** What each version's form held when it was drawn, in the record's shape: anything else in it is not saved yet. */
+  const drawn = new WeakMap<HTMLElement, string>();
+
   const paint = (focus: string | null, preserveForm = false): void => {
     if (workspace === null) return;
     const keptForm = preserveForm ? root.querySelector<HTMLElement>('.evaluation-record') : null;
@@ -242,13 +256,32 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         const item = el('li');
         item.dataset['recordId'] = summary.recordId;
         item.dataset['evaluationState'] = summary.state;
-        const open = action(evaluationVersionLine(workspace.profile, summary), 'quiet', 'open-version', () => void show(summary.recordId));
+        const open = action(evaluationVersionLine(workspace.profile, summary), 'quiet', 'open-version', () => openVersion(summary));
         open.disabled = busy;
         open.setAttribute('aria-current', String(workspace.record?.recordId === summary.recordId));
         item.append(open);
         list.append(item);
       }
       versions.append(list);
+      if (leaving !== null && workspace.record !== null) {
+        // Typed work is never lost by a click on the list: staying is the first way, and the discard says what it does.
+        const target = leaving;
+        const guard = el('div', 'attention-note evaluation-unsaved');
+        guard.setAttribute('role', 'alert');
+        const row = el('div', 'button-row');
+        row.append(
+          action(EVALUATION_STAY, 'secondary', 'stay', () => {
+            leaving = null;
+            paint('.evaluation-record h3', true);
+          }),
+          action(evaluationDiscardAndOpen(target.ordinal), 'quiet', 'discard-and-open', () => {
+            leaving = null;
+            void show(target.recordId);
+          }),
+        );
+        guard.append(el('p', undefined, evaluationUnsavedLine(workspace.record.ordinal, target.ordinal)), row);
+        versions.append(guard);
+      }
       if (workspace.recordCount > workspace.records.length) {
         const controls = el('div', 'button-row');
         const latest = action('最新版本', 'quiet', 'versions-latest', () => void turn(null));
@@ -429,6 +462,9 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       score.dataset['evaluationField'] = 'score';
       const band = el('span', 'status-pill evaluation-band', content.score === null ? '' : evaluationBandLabel(profile, content.score, item.fullMarks));
       band.hidden = content.score === null;
+      const invalid = el('p', 'field-note evaluation-score-invalid', evaluationScoreInvalidLine(item.fullMarks));
+      invalid.id = `evaluation-score-invalid-${record.recordId}-${item.itemId}`;
+      invalid.hidden = true;
       const notRated = el('input');
       notRated.type = 'checkbox';
       notRated.checked = content.notRated !== null;
@@ -468,12 +504,26 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         }
         beside.push(adjustmentNode(record, item.itemId, content.adjustment ?? null, readOnly));
       }
-      set.append(scoreRow, ...beside, reasonField, field(EVALUATION_COMMENT, textarea(content.comment ?? '', 'comment')));
+      set.append(scoreRow, invalid, ...beside, reasonField, field(EVALUATION_COMMENT, textarea(content.comment ?? '', 'comment')));
       set.querySelector<HTMLTextAreaElement>('[data-evaluation-field="comment"]')!.disabled = readOnly;
+      // Only a score the scale admits reaches a band; any other says why and counts for nothing until it is corrected,
+      // while the form keeps it as typed for the service's own refusal (Issue #638).
+      const showScore = (): void => {
+        const typed = evaluationScoreFeedback(score.value, score.validity.badInput, item.fullMarks);
+        band.hidden = typed.score === null;
+        band.textContent = typed.score === null ? '' : evaluationBandLabel(profile, typed.score, item.fullMarks);
+        invalid.hidden = typed.line === null;
+        invalid.textContent = typed.line ?? '';
+        if (typed.line !== null) {
+          score.setAttribute('aria-invalid', 'true');
+          score.setAttribute('aria-describedby', invalid.id);
+        } else {
+          score.removeAttribute('aria-invalid');
+          score.removeAttribute('aria-describedby');
+        }
+      };
       score.addEventListener('input', () => {
-        const value = score.value === '' ? null : Number(score.value);
-        band.hidden = value === null || !Number.isFinite(value);
-        band.textContent = value === null || !Number.isFinite(value) ? '' : evaluationBandLabel(profile, value, item.fullMarks);
+        showScore();
         refresh(node, record);
       });
       notRated.addEventListener('change', () => {
@@ -482,7 +532,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         reasonField.hidden = !notRated.checked;
         if (notRated.checked) {
           score.value = '';
-          band.hidden = true;
+          showScore();
           reason.focus();
         }
         refresh(node, record);
@@ -557,14 +607,18 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       const finalize = action(EVALUATION_FINALIZE, 'primary', 'finalize', () => void save(record, true));
       saveButton.disabled = busy;
       finalize.disabled = busy;
+      const needsScore = el('p', 'field-note evaluation-finalize-blocked', EVALUATION_FINALIZE_NEEDS_SCORE);
+      needsScore.id = `evaluation-finalize-blocked-${record.recordId}`;
+      needsScore.hidden = true;
       row.append(saveButton, finalize);
-      node.append(row);
+      node.append(row, needsScore);
     }
     node.append(technicalDetails('evaluation-facts',
       el('dt', undefined, '评估版本'), el('dd', 'technical-identity', record.recordId),
       el('dt', undefined, '修订版'), el('dd', 'technical-identity', record.revisionId),
       el('dt', undefined, '评估方案摘要'), el('dd', 'technical-identity', record.profile.sha256)));
     refresh(node, record);
+    drawn.set(node, JSON.stringify(collect(node, record)));
     return node;
   };
 
@@ -580,6 +634,28 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     if (reasons.length === 0) return null;
     const note = group.querySelector<HTMLInputElement>('[data-evaluation-field="adjustment-note"]')!.value.trim();
     return { reasons, note: reasons.includes('own') && note.length > 0 ? note : null };
+  };
+
+  /** The open version's form holds edits not yet saved: a finalized version holds none. */
+  const unsaved = (): boolean => {
+    const record = workspace?.record ?? null;
+    const node = root.querySelector<HTMLElement>('.evaluation-record');
+    return record !== null && node !== null && record.state !== 'finalized' && JSON.stringify(collect(node, record)) !== drawn.get(node);
+  };
+
+  /**
+   * A version from the list (Issue #638). With nothing unsaved it opens at once; with unsaved edits the open version stays as
+   * typed — reopening it changes nothing — and another is opened only once the editor chooses to discard them.
+   */
+  const openVersion = (summary: EvaluationRecordSummaryProjection): void => {
+    if (busy || workspace === null) return;
+    if (!unsaved()) {
+      leaving = null;
+      void show(summary.recordId);
+      return;
+    }
+    leaving = summary.recordId === workspace.record?.recordId ? null : summary;
+    paint(leaving === null ? '.evaluation-record h3' : '[data-evaluation-action="stay"]', true);
   };
 
   /** What the form holds now, in the record's shape. */
@@ -624,7 +700,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const content = collect(node, record);
     const total = evaluationTotal(record.profile.items.map((item, index) => ({
       fullMarks: item.fullMarks,
-      score: content.items[index]!.score !== null && Number.isFinite(content.items[index]!.score) ? content.items[index]!.score : null,
+      score: content.items[index]!.score !== null && validEvaluationScore(content.items[index]!.score!, item.fullMarks) ? content.items[index]!.score : null,
       notRated: content.items[index]!.notRated !== null,
     })));
     node.querySelector('.evaluation-total')!.textContent = evaluationTotalLine(record.profile, total);
@@ -636,6 +712,16 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       const score = entry.score !== null && Number.isFinite(entry.score) ? entry.score : null;
       group.hidden = !evaluationItemAdjusted({ score, notRated: entry.notRated !== null }, ai7ScoreOf(record, item.itemId));
     });
+    // 定稿 waits while every item is 不评, and says why (Issue #638; the Owner's answer of 2026-10-07).
+    const finalize = node.querySelector<HTMLButtonElement>('[data-evaluation-action="finalize"]');
+    const needsScore = node.querySelector<HTMLElement>('.evaluation-finalize-blocked');
+    if (finalize !== null && needsScore !== null) {
+      const waits = finalizationNeedsScore(content.items.map((item) => ({ score: item.score, notRated: item.notRated !== null })));
+      finalize.disabled = busy || waits;
+      needsScore.hidden = !waits;
+      if (waits) finalize.setAttribute('aria-describedby', needsScore.id);
+      else finalize.removeAttribute('aria-describedby');
+    }
     const blocked = recommendationBlocked(content.risks);
     const recommend = node.querySelector<HTMLInputElement>('.evaluation-conclusion [data-conclusion="recommend"] input');
     const note = node.querySelector<HTMLElement>('.evaluation-recommend-blocked');
@@ -652,6 +738,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     if (busy) return;
     busy = true;
     refusal = null;
+    leaving = null;
     setStatus(EVALUATION_STATUS.loading, 'busy');
     try {
       workspace = await api.inspectEvaluation({ recordId });
@@ -701,6 +788,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     try {
       workspace = await api.saveEvaluation({ recordId: record.recordId, expectedEntries: record.entries, content, finalize });
       busy = false;
+      leaving = null;
       setStatus(finalize ? evaluationFinalized(record.ordinal) : EVALUATION_STATUS.saved, 'success');
       paint(finalize ? '.evaluation-record h3' : '[data-evaluation-action="save"]');
     } catch (error) {

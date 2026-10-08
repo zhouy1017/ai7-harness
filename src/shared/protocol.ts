@@ -5898,8 +5898,10 @@ export interface SeriesMemberProjection {
   readonly authors: ReadonlyArray<string>;
   readonly editors: ReadonlyArray<string>;
   readonly joinedAt: string;
-  /** The Book's latest 书系一致性审阅; `null` while it had none — and none can run before Series Knowledge reaches review. */
+  /** When the Book's 书系一致性 findings were last put on its manuscript; `null` while they never were. */
   readonly seriesConsistencyReview: { readonly reviewedAt: string } | null;
+  /** Why 书系一致性 cannot be chosen for the Book now — no knowledge taken in for it, too much, no manuscript; `null` when it can (Issue #64, S29a). */
+  readonly seriesConsistencyUnavailableReason: string | null;
 }
 
 // ---- 书系知识 (Issue #63, plan slice S28b; V2-UX-SER-013 to SER-019; ADR 0036) -------------------------------------------

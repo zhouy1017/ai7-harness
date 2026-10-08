@@ -325,6 +325,12 @@ export const TASK_BAR_CANCEL_FAILED = '无法取消这项任务。';
 export const TASK_BAR_WAITING_FOR_CONNECTION = '需要处理模型连接';
 /** The sentence beside a waiting Run: recorded, and it starts by itself once it can — never implying it began (OFF-005). */
 export const TASK_BAR_WAITING_NOTE = '已记录这次授权。联网、并确认计划没有变化后会自动开始；在此之前不会发送任何内容';
+/**
+ * Online with every place of the governor taken (Issue #632): the pill and its sentence agree that it holds no place in the
+ * capacity queue — a later start may begin first.
+ */
+export const TASK_BAR_WAITING_FOR_SLOT = '已联网 · 名额已满';
+export const TASK_BAR_WAITING_SLOT_NOTE = '已记录这次授权。已经联网，但运行名额已满：有名额空出时，AI7 先核对计划再开始，之后开始的任务可能先开始；在此之前不会发送任何内容';
 /** AUTH-010's three controls of a Run under way (Issue #422): 暂停 and 改计划重做 are shown with why they wait. */
 export const TASK_BAR_PAUSE = '暂停';
 export const TASK_BAR_CANCEL_RUN = '取消任务';
@@ -568,7 +574,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         readiness,
         summary,
         statement: null,
-        note: TASK_BAR_WAITING_NOTE,
+        note: plan.state.label === TASK_BAR_WAITING_FOR_SLOT ? TASK_BAR_WAITING_SLOT_NOTE : TASK_BAR_WAITING_NOTE,
         status: plan.state.label,
         actions: [
           ...(plan.state.label === TASK_BAR_WAITING_FOR_CONNECTION

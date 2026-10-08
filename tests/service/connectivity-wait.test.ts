@@ -321,7 +321,8 @@ describe('联网后开始任务 and Connectivity Wait over the real store', () =
       expect(waiting.state).toEqual({ key: 'waiting', label: '等待网络' });
       state.connectivity = 'online';
       state.busy = true;
-      expect((await store.inspectTaskPlanWithConnection(input, async () => null, reader(state))).state.label).toBe('等待运行名额');
+      // Online with every place taken, it is not in the capacity queue (Issue #632): it never reads 等待运行名额.
+      expect((await store.inspectTaskPlanWithConnection(input, async () => null, reader(state))).state.label).toBe('已联网 · 名额已满');
       state.busy = false;
       expect((await store.inspectTaskPlanWithConnection(input, async () => null, reader(state))).state.label).toBe('正在排队');
       expect((await store.inspectTaskPlanWithConnection(input, async () => 'missing', reader(state))).state.label).toBe('需要处理模型连接');

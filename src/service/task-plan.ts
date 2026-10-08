@@ -306,7 +306,12 @@ export function withConnectivityReadiness(plan: TaskPlanProjection, reachesNetwo
  * admit it (正在排队, AUTH-007). Each is its own words, so a wait never reads as a pause, as activity, or as
  * the plan having changed.
  */
-export const WAITING_LABELS = { network: '等待网络', connection: '需要处理模型连接', slot: '等待运行名额', admitting: '正在排队' } as const;
+/**
+ * A Run in Connectivity Wait, by what it waits for. Online with every place taken it holds no place in the governor's
+ * queue — the next Reconnect Preflight that finds one free admits it, and a later start can take that place first — so
+ * it never reads 等待运行名额, which says a place in that queue (Issue #632; V2-UX-CONC-007).
+ */
+export const WAITING_LABELS = { network: '等待网络', connection: '需要处理模型连接', slot: '已联网 · 名额已满', admitting: '正在排队' } as const;
 export type WaitingFor = keyof typeof WAITING_LABELS;
 
 /** The waiting Run's pill, in the words of what it waits for now; any other plan reads exactly as it came. */

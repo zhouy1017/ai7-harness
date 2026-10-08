@@ -93,6 +93,18 @@ export const REVIEW_RUN_CATEGORY_STATE_LABELS = {
   refused: '未能开始',
 } as const satisfies Record<ReviewRunCategoryState, string>;
 
+/**
+ * A category whose turn came while every place of the governor is taken (Issue #632; V2-UX-CONC-007): it waits for a place
+ * behind the starts already waiting for one, and reads so rather than 等待审阅. Nothing of it is sent meanwhile.
+ */
+export const REVIEW_CATEGORY_PLACE_WAIT_LABEL = '等待运行名额' as const;
+export const REVIEW_CATEGORY_PLACE_WAIT_DETAIL = '运行名额已满：等待运行名额的任务先开始，有名额空出时这一类接着审；在此之前这一类什么都没有发送。' as const;
+
+/** A category's state in words: its state's, unless it is the category waiting for a place now. */
+export function reviewRunCategoryStateLabel(state: ReviewRunCategoryState, waitingForPlace: boolean): string {
+  return state === 'waiting' && waitingForPlace ? REVIEW_CATEGORY_PLACE_WAIT_LABEL : REVIEW_RUN_CATEGORY_STATE_LABELS[state];
+}
+
 export const REVIEW_RUN_STATE_LABELS = {
   prepared: '计划已冻结 · 待授权',
   running: '正在审阅',

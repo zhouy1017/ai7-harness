@@ -14,7 +14,6 @@ import type { ReviewCategoryConfiguration } from './review/category-configuratio
 
 /** Why a 工序 cannot run yet, said of the house: the category's own reason speaks of one Book (Issue #427 review). */
 const HOUSE_UNAVAILABLE_REASONS: Readonly<Record<string, string>> = {
-  'series-consistency': '书系知识还没有接通。',
   'cross-deliverable-consistency': '生产文档之间的一致性核对还没有接通。',
 };
 const HOUSE_UNAVAILABLE_FALLBACK = '这一工序的依据还没有接通。';

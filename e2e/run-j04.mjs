@@ -6,7 +6,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 // Supported-journey scenario: J-04 covered baseline manuscript analysis (Issue #92, bounded S36 slice)
 // extended in place by Issue #93 (S37): after the acknowledged edit, the three Analysis Update
@@ -152,8 +152,8 @@ const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL'
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
 const CREDENTIAL_CLEANUP_TIMEOUT_MS = 15_000;
 const FORCE_EXIT_TIMEOUT_MS = 5_000;
-const BROWSER_CLOSE_TIMEOUT = new Error('J-04/browser-close-timeout');
-const CREDENTIAL_CLEANUP_TIMEOUT = new Error('J-04/credential-cleanup-timeout');
+const BROWSER_CLOSE_TIMEOUT = journeyCheckFailure('J-04', 'browser-close-timeout');
+const CREDENTIAL_CLEANUP_TIMEOUT = journeyCheckFailure('J-04', 'credential-cleanup-timeout');
 let location = 'entry';
 let runnerLifecycleIncomplete = false;
 
@@ -163,7 +163,7 @@ function at(next) {
 }
 function requireJourney(condition, name, detail) {
   if (condition) return;
-  const error = new Error(`J-04/${name}`);
+  const error = journeyCheckFailure('J-04', name);
   if (detail !== undefined) error.detail = detail;
   throw error;
 }
@@ -332,7 +332,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     metadata = await lstat(databasePath);
   } catch (error) {
     if (hasErrorCode(error, 'ENOENT')) return { kind: 'not-started' };
-    throw new Error('J-04/credential-cleanup-metadata');
+    throw journeyCheckFailure('J-04', 'credential-cleanup-metadata');
   }
   requireJourney(metadata.isFile() && !metadata.isSymbolicLink() && (await realpath(databasePath)) === databasePath,
     'credential-cleanup-metadata-file');
@@ -340,7 +340,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
   try {
     database = new DatabaseSync(databasePath, { readOnly: true });
   } catch {
-    throw new Error('J-04/credential-cleanup-metadata');
+    throw journeyCheckFailure('J-04', 'credential-cleanup-metadata');
   }
   try {
     database.exec('PRAGMA query_only = ON;');
@@ -370,7 +370,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
       : { kind: 'reference', credentialReference: row.credential_reference };
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('J-04/')) throw error;
-    throw new Error('J-04/credential-cleanup-metadata');
+    throw journeyCheckFailure('J-04', 'credential-cleanup-metadata');
   } finally {
     database.close();
   }
@@ -387,7 +387,7 @@ async function createLoopbackSentinel() {
   });
   server.on('error', () => { runtimeFault = true; });
   await new Promise((resolveListen, rejectListen) => {
-    server.once('error', () => rejectListen(new Error('J-04/loopback-listen')));
+    server.once('error', () => rejectListen(journeyCheckFailure('J-04', 'loopback-listen')));
     server.listen(0, '127.0.0.1', resolveListen);
   });
   server.unref();
@@ -416,7 +416,7 @@ async function createRendererManager(browser) {
     const completion = pending.get(key);
     if (!completion) return;
     pending.delete(key);
-    if (response.error) completion.reject(new Error('J-04/renderer-cdp-response'));
+    if (response.error) completion.reject(journeyCheckFailure('J-04', 'renderer-cdp-response'));
     else completion.resolve(response.result);
   });
   const attach = async (target) => {
@@ -428,7 +428,7 @@ async function createRendererManager(browser) {
       const response = new Promise((resolveResponse, rejectResponse) => {
         const timeout = setTimeout(() => {
           pending.delete(key);
-          rejectResponse(new Error('J-04/renderer-cdp-timeout'));
+          rejectResponse(journeyCheckFailure('J-04', 'renderer-cdp-timeout'));
         }, 60_000);
         timeout.unref();
         pending.set(key, {
@@ -459,7 +459,7 @@ async function createRendererManager(browser) {
       if (current.length === 1) return current[0];
       await new Promise((resolveWait) => setTimeout(resolveWait, 50));
     }
-    throw new Error('J-04/renderer-window');
+    throw journeyCheckFailure('J-04', 'renderer-window');
   };
 }
 
@@ -647,7 +647,8 @@ async function pressEnter(renderer) {
 /**
  * Start the prepared baseline Task from the drawer's authorization bar (Issue #420, S74a A2): the drawer
  * shows the Task the preparation opened it for, and the card's 查看计划并开始 opens it when it does not. One
- * activation of 开始任务 records the authorization and the Run and hands the Run to the one slot.
+ * activation of 开始任务 records the authorization and the Run and hands the Run to the execution owner, which admits it
+ * to a place of its governor (Issue #49, S14).
  */
 async function startFromBar(renderer, name) {
   const showing = await renderer.evaluate(`(() => { const drawer=document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer==='open' && drawer.dataset.taskPlanKind==='baseline-analysis' && drawer.dataset.taskPlanRef===document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId; })()`);
@@ -708,7 +709,7 @@ async function waitFor(renderer, expression, name, timeout = 60_000) {
     if (await renderer.evaluate(`Boolean(${expression})`).catch(() => false)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  throw new Error(`J-04/${name}`);
+  throw journeyCheckFailure('J-04', name);
 }
 
 async function importSample1(renderer, cancellation) {
@@ -972,7 +973,7 @@ async function main() {
     if (ownedBrowser.isConnected()) {
       browserCloseRejected = true;
       runnerLifecycleIncomplete = true;
-      throw new Error('J-04/browser-close-unconfirmed');
+      throw journeyCheckFailure('J-04', 'browser-close-unconfirmed');
     }
   };
   const closeOwnedBrowser = async () => {
@@ -1027,7 +1028,7 @@ async function main() {
     return true;
   };
   const cleanup = () => (cleanupPromise ??= (async () => {
-    if (browserCloseRejected) throw cleanupFailure ?? new Error('J-04/browser-cleanup-failed');
+    if (browserCloseRejected) throw cleanupFailure ?? journeyCheckFailure('J-04', 'browser-cleanup-failed');
     if (credentialMutationReached && !credentialRemoved) {
       try {
         await removeCredentialThroughProduct();
@@ -1036,7 +1037,7 @@ async function main() {
       }
       if (!credentialRemoved && launchForCleanup !== undefined) {
         const closedForRetry = await closeOwnedBrowserForCleanup();
-        if (browserCloseRejected) throw cleanupFailure ?? new Error('J-04/browser-cleanup-failed');
+        if (browserCloseRejected) throw cleanupFailure ?? journeyCheckFailure('J-04', 'browser-cleanup-failed');
         if (closedForRetry) {
           try {
             await launchForCleanup(true);
@@ -1048,9 +1049,9 @@ async function main() {
         }
       }
       if (!credentialRemoved) {
-        if (browserCloseRejected) throw cleanupFailure ?? new Error('J-04/browser-cleanup-failed');
+        if (browserCloseRejected) throw cleanupFailure ?? journeyCheckFailure('J-04', 'browser-cleanup-failed');
         const closedForFallback = await closeOwnedBrowserForCleanup();
-        if (browserCloseRejected) throw cleanupFailure ?? new Error('J-04/browser-cleanup-failed');
+        if (browserCloseRejected) throw cleanupFailure ?? journeyCheckFailure('J-04', 'browser-cleanup-failed');
         if (closedForFallback && credentialReferenceForCleanup === undefined && dataRoot !== undefined && runRoot !== undefined) {
           try {
             const recovered = await recoverSyntheticCredentialCleanupState(dataRoot, runRoot);
@@ -1071,14 +1072,14 @@ async function main() {
         }
       }
     }
-    if (browserCloseRejected) throw cleanupFailure ?? new Error('J-04/browser-cleanup-failed');
+    if (browserCloseRejected) throw cleanupFailure ?? journeyCheckFailure('J-04', 'browser-cleanup-failed');
     const browserClosed = await closeOwnedBrowserForCleanup();
-    if (!browserClosed) throw cleanupFailure ?? new Error('J-04/browser-cleanup-failed');
+    if (!browserClosed) throw cleanupFailure ?? journeyCheckFailure('J-04', 'browser-cleanup-failed');
     const ownedLoopback = loopback ?? (loopbackAcquisition === undefined ? undefined : await loopbackAcquisition.catch(() => undefined));
     try { await ownedLoopback?.close(); } catch (error) { cleanupFailure ??= error; }
     loopback = undefined;
     if (credentialMutationReached && !credentialRemoved) {
-      throw credentialCleanupFailure ?? new Error('J-04/credential-cleanup-failed');
+      throw credentialCleanupFailure ?? journeyCheckFailure('J-04', 'credential-cleanup-failed');
     }
     const ownedRoot = runRoot ?? (runRootAcquisition === undefined ? undefined : await runRootAcquisition.catch(() => undefined));
     if (ownedRoot !== undefined) {
@@ -1413,7 +1414,7 @@ async function main() {
     at('authorize-dispatch');
     cancellation.throwIfRequested();
     // Synchronized delta with Issue #420 (S74a A2): one activation of the bar's 开始任务 records the
-    // authorization and the Run and hands it to the one slot; ②A beside the drawer follows the Run.
+    // authorization and the Run and hands it to the execution owner's governor; ②A beside the drawer follows the Run.
     await startFromBar(renderer, 'authorize');
     await waitFor(renderer, `['settled','failed','interrupted'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState)`, 'run-settled', 180_000);
     await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'run-settled-state');
@@ -2838,7 +2839,7 @@ async function main() {
     at('connectivity-online-dispatch');
     cancellation.throwIfRequested();
     // The network returns. The drawer showing the waiting Run asks Reconnect Preflight on its own clock; the plan it
-    // bound still stands, so the Run enters the one slot and runs to its end (OFF-008).
+    // bound still stands and a place of the governor is free, so the Run is admitted and runs to its end (OFF-008).
     await writeFile(connectivityPath, 'online');
     await waitFor(renderer, `['settled','failed','interrupted'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState)`, 'online-settled', 180_000);
     const onlineSettled = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);

@@ -165,7 +165,8 @@ describe('each item', () => {
       'analysis-running': '运行中',
       'analysis-waiting-network': '等待网络',
       'analysis-waiting-connection': '需要处理模型连接',
-      'analysis-waiting-slot': '等待运行名额',
+      // Issue #632: a Connectivity-Wait Run holds no place in the capacity queue, so it never reads 等待运行名额.
+      'analysis-waiting-slot': '已联网 · 名额已满',
       'analysis-waiting-admission': '正在排队',
       'analysis-waiting-capacity': '等待运行名额',
       'analysis-cancelling': '正在取消',
@@ -373,7 +374,7 @@ describe('each item', () => {
       'analysis-running': '正在逐个阅读范围分析 · 已完成 3/8 个阅读范围',
       'analysis-waiting-network': '联网后开始任务：恢复联网后，AI7 先核对计划再开始；现在什么都没有运行。',
       'analysis-waiting-connection': '模型连接缺少凭据：到设置连接模型服务后，任务会在联网时开始。',
-      'analysis-waiting-slot': '运行名额已满：正在运行的任务结束后，这项任务在联网时开始。',
+      'analysis-waiting-slot': '已经联网，但运行名额已满：有名额空出时，AI7 先核对计划再开始；之后开始的任务可能先开始。现在什么都没有运行。',
       // Issue #539: online with nothing in its way, it is not in the scheduler yet.
       'analysis-waiting-admission': '已经联网：AI7 先核对计划，没有变化就开始；现在什么都没有运行。',
       // Issue #49 (S14; CONC-007): a start waiting on the governor for a place.

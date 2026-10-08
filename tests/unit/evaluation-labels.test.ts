@@ -15,10 +15,13 @@ import {
   evaluationAi7EvidenceLine,
   evaluationAi7EvidenceSummary,
   evaluationAi7UnreadLine,
+  EVALUATION_FINALIZE_NEEDS_SCORE,
   EVALUATION_LEDE,
   EVALUATION_RECOMMEND_BLOCKED,
+  EVALUATION_STAY,
   evaluationBandLine,
   evaluationComparisonLines,
+  evaluationDiscardAndOpen,
   evaluationFinalizedLine,
   evaluationHeading,
   evaluationItemLegend,
@@ -27,11 +30,14 @@ import {
   evaluationProfileUse,
   evaluationRevisionLine,
   evaluationScore,
+  evaluationScoreFeedback,
+  evaluationScoreInvalidLine,
   evaluationTotalLine,
+  evaluationUnsavedLine,
   evaluationVersionLine,
 } from '../../src/renderer/evaluation-labels.js';
 import { BUILTIN_EVALUATION_PROFILE, evaluationProfileDigest } from '../../src/service/evaluation-records.js';
-import { evaluationBand, evaluationTotal, recommendationBlocked, validEvaluationScore } from '../../src/shared/evaluation-scoring.js';
+import { evaluationBand, evaluationTotal, finalizationNeedsScore, provisionalEvaluationScore, recommendationBlocked, validEvaluationScore } from '../../src/shared/evaluation-scoring.js';
 import type { EvaluationProfileProjection, EvaluationRecordSummaryProjection } from '../../src/shared/protocol.js';
 
 // Unit suite for ②C 评估's arithmetic and words (Issue #429, plan slice S81a; V2-UX-EVAL-002 to EVAL-005, EVAL-007, EVAL-012):
@@ -40,6 +46,50 @@ import type { EvaluationProfileProjection, EvaluationRecordSummaryProjection } f
 
 const PROFILE: EvaluationProfileProjection = { ...BUILTIN_EVALUATION_PROFILE, sha256: evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE) };
 const instant = (iso: string): string => `〔${iso.slice(0, 10)}〕`;
+
+describe('a score as the editor types it (Issue #638)', () => {
+  it('counts a whole or half point within its 满分, and takes anything else for no score, saying so', () => {
+    expect(provisionalEvaluationScore('', 20)).toEqual({ score: null, invalid: false });
+    expect(provisionalEvaluationScore('16.5', 20)).toEqual({ score: 16.5, invalid: false });
+    expect(provisionalEvaluationScore('0', 20)).toEqual({ score: 0, invalid: false });
+    expect(provisionalEvaluationScore('20', 20)).toEqual({ score: 20, invalid: false });
+    for (const raw of ['25', '-5', '7.25', 'abc', 'Infinity']) expect(provisionalEvaluationScore(raw, 20)).toEqual({ score: null, invalid: true });
+    // An inadmissible score reaches neither a band nor the total: the total reads that item as not yet scored.
+    expect(evaluationTotal([
+      { fullMarks: 20, score: provisionalEvaluationScore('25', 20).score, notRated: false },
+      { fullMarks: 80, score: provisionalEvaluationScore('60', 80).score, notRated: false },
+    ])).toEqual({ score: 60, fullMarks: 100, notRated: 0, unscored: 1 });
+    expect(evaluationScoreInvalidLine(20)).toBe('得分要在 0 到 20 之间，按整分或半分填写；这个得分不计入总分，也不能保存。');
+  });
+
+  it('says what the field holds: a counted score, a number the scale refuses, or text the number field cannot read (Issue #638 review)', () => {
+    expect(evaluationScoreFeedback('', false, 20)).toEqual({ score: null, line: null });
+    expect(evaluationScoreFeedback('16.5', false, 20)).toEqual({ score: 16.5, line: null });
+    expect(evaluationScoreFeedback('25', false, 20)).toEqual({ score: null, line: evaluationScoreInvalidLine(20) });
+    // A type=number field reports "" for text it cannot parse; validity.badInput says it holds some.
+    expect(evaluationScoreFeedback('', true, 20)).toEqual({ score: null, line: '这里填的不是数字，这一项按没有打分计；得分要在 0 到 20 之间，按整分或半分填写。' });
+  });
+});
+
+describe('定稿 with every item 不评 (Issue #638; the Owner\'s answer of 2026-10-07)', () => {
+  it('waits while every item is 不评, and says why', () => {
+    const notRated = { score: null, notRated: true };
+    expect(finalizationNeedsScore([notRated, notRated, notRated, notRated, notRated])).toBe(true);
+    expect(finalizationNeedsScore([{ score: 0, notRated: false }, notRated, notRated, notRated, notRated])).toBe(false);
+    // An item not yet scored is the per-item refusal's, not this one's.
+    expect(finalizationNeedsScore([{ score: null, notRated: false }, notRated, notRated, notRated, notRated])).toBe(false);
+    expect(finalizationNeedsScore([])).toBe(false);
+    expect(EVALUATION_FINALIZE_NEEDS_SCORE).toBe('至少要给一项打分才能定稿。');
+  });
+});
+
+describe('another version asked for while the open one has unsaved edits (Issue #638)', () => {
+  it('says what would be lost, keeps the version by default, and names the discard', () => {
+    expect(evaluationUnsavedLine(2, 1)).toBe('第 2 版有未保存的修改；打开第 1 版会放弃这些修改。');
+    expect(EVALUATION_STAY).toBe('留在这一版');
+    expect(evaluationDiscardAndOpen(1)).toBe('放弃修改并打开第 1 版');
+  });
+});
 
 describe('评估 arithmetic', () => {
   it('takes whole and half points within 满分, and bands each item by its share of the scale', () => {

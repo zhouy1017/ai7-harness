@@ -21,6 +21,16 @@ export function validEvaluationScore(score: number, fullMarks: number): boolean 
   return Number.isFinite(score) && score >= 0 && score <= fullMarks && Number.isInteger(score * 2);
 }
 
+/**
+ * A score as the editor types it, before anything is saved (Issue #638): one the scale admits counts; anything else counts as
+ * no score — no band, nothing in the total — and is `invalid`, so the page can say why. Saving it is still refused.
+ */
+export function provisionalEvaluationScore(raw: string, fullMarks: number): { readonly score: number | null; readonly invalid: boolean } {
+  if (raw.trim() === '') return { score: null, invalid: false };
+  const score = Number(raw);
+  return validEvaluationScore(score, fullMarks) ? { score, invalid: false } : { score: null, invalid: true };
+}
+
 /** The band a score reaches out of its 满分: its proportion of the 100-point scale against the floors, never shown as one. */
 export function evaluationBand(score: number, fullMarks: number): EvaluationBandId {
   const scaled = fullMarks === 0 ? 0 : (score * 100) / fullMarks;
@@ -59,6 +69,15 @@ export function evaluationTotal(items: ReadonlyArray<EvaluationItemScoreInput>):
   }
   return { score, fullMarks, notRated, unscored };
 }
+
+/**
+ * 定稿 waits while every item is `不评` (Issue #638; the Owner's answer of 2026-10-07): a version that scored nothing is no
+ * evaluation to keep. An item neither scored nor `不评` is the per-item refusal's, not this one's.
+ */
+export function finalizationNeedsScore(items: ReadonlyArray<{ readonly score: number | null; readonly notRated: boolean }>): boolean {
+  return items.length > 0 && items.every((item) => item.notRated);
+}
+export const EVALUATION_FINALIZE_NEEDS_SCORE = '至少要给一项打分才能定稿。';
 
 export type EvaluationRiskLevel = 'low' | 'medium' | 'high';
 

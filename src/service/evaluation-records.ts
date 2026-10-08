@@ -23,8 +23,10 @@ import {
 } from '../shared/protocol.js';
 import {
   EVALUATION_ADJUSTMENT_REASONS,
+  EVALUATION_FINALIZE_NEEDS_SCORE,
   evaluationItemAdjusted,
   evaluationTotal,
+  finalizationNeedsScore,
   recommendationBlocked,
   validEvaluationScore,
 } from '../shared/evaluation-scoring.js';
@@ -295,8 +297,9 @@ function adjustmentOf(value: unknown, adjusted: boolean, label: string): Evaluat
 /**
  * The editor's content held to the profile it scores under: exactly its items and risks, each score a whole or half point
  * within its 满分, `不评` only with a reason, `推荐出版` never while a `高` risk is unreviewed — and, to finalize, every item
- * scored or `不评`, every risk rated with a statement, and a conclusion chosen. `initialScores` are AI7's, for a version begun
- * from its 初评: an item whose score departs from AI7's keeps the reasons the editor gave.
+ * scored or `不评` and at least one scored (Issue #638), every risk rated with a statement, and a conclusion chosen.
+ * `initialScores` are AI7's, for a version begun from its 初评: an item whose score departs from AI7's keeps the reasons the
+ * editor gave.
  */
 export function evaluationContent(
   input: unknown,
@@ -316,7 +319,7 @@ export function evaluationContent(
     requireEvaluation(given.notRated === null || notRated !== null, 'EVALUATION_NOT_RATED_REASON', `「${item.label}」不评时要写明理由。`);
     const score = given.score;
     requireEvaluation(score === null || (typeof score === 'number' && validEvaluationScore(score, item.fullMarks)),
-      'EVALUATION_SCORE_INVALID', `「${item.label}」的得分要在 0 到 ${item.fullMarks} 之间，可以有半分。`);
+      'EVALUATION_SCORE_INVALID', `「${item.label}」的得分要在 0 到 ${item.fullMarks} 之间，按整分或半分填写。`);
     requireEvaluation(notRated === null || score === null, 'EVALUATION_CONTENT_INVALID', `「${item.label}」不评时不能有得分。`);
     requireEvaluation(!finalize || score !== null || notRated !== null, 'EVALUATION_ITEM_UNSCORED', `定稿前，「${item.label}」要打分或写明不评的理由。`);
     const comment = text(given.comment, MAX_EVALUATION_COMMENT_GRAPHEMES, 'EVALUATION_COMMENT_TOO_LONG', `评语要在 ${MAX_EVALUATION_COMMENT_GRAPHEMES} 字以内。`, true);
@@ -325,6 +328,9 @@ export function evaluationContent(
     const adjustment = adjustmentOf(given.adjustment, adjusted, item.label);
     return { itemId: item.itemId, score: score as number | null, notRated, comment, adjustment };
   });
+  // Every item 不评 scores nothing, and such a version is not finalized (Issue #638; the Owner's answer of 2026-10-07).
+  requireEvaluation(!finalize || !finalizationNeedsScore(items.map((item) => ({ score: item.score, notRated: item.notRated !== null }))),
+    'EVALUATION_NOTHING_SCORED', EVALUATION_FINALIZE_NEEDS_SCORE);
   const risks = profile.risks.map((risk, index) => {
     const given = givenRisks[index];
     requireEvaluation(isRecord(given) && given.riskId === risk.riskId, 'EVALUATION_CONTENT_INVALID', '评估内容与评估方案不一致。');

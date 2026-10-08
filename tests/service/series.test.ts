@@ -72,7 +72,7 @@ function groupsOf(groups: ReadonlyArray<SeriesImpactGroupProjection>): unknown[]
 function pageOf(store: EditorialStore, seriesId: string): { members: unknown[]; candidates: string[]; history: unknown[] } {
   const series = store.inspectSeries(seriesId);
   return {
-    members: series.members.map((member) => [member.title, member.seriesConsistencyReview]),
+    members: series.members.map((member) => [member.title, member.seriesConsistencyReview, member.seriesConsistencyUnavailableReason]),
     candidates: store.inspectSeriesCandidates(seriesId, '', null).candidates.map((candidate) => candidate.title),
     history: series.history.map((change) => [change.label, change.bookTitle, change.priorMember, change.newMember]),
   };
@@ -139,7 +139,7 @@ describe('书系 over the real store', () => {
       // 加入书系 against the preview: the record keeps what it showed, and both sides list it.
       const added = store.changeSeriesMembership({ seriesId, bookId: first, kind: 'add', previewDigest: preview.previewDigest });
       expect(added.completionLabel).toBe('已加入书系「星河三部曲」：《星河之一》');
-      expect(pageOf(store, seriesId)).toEqual({ members: [['星河之一', null]], candidates: ['星河之二'], history: [['加入书系', '星河之一', false, true]] });
+      expect(pageOf(store, seriesId)).toEqual({ members: [['星河之一', null, '书系「星河三部曲」还没有纳入可用于一致性审阅的书系知识；在书系中纳入后才能选。']], candidates: ['星河之二'], history: [['加入书系', '星河之一', false, true]] });
       // The answer is the record it made (Issue #63 review), with what the preview showed.
       expect([added.change.changeId, added.change.label, added.change.bookTitle, added.change.seriesTitle, added.change.impact])
         .toEqual([added.changeId, '加入书系', '星河之一', '星河三部曲', preview.groups]);
@@ -170,12 +170,12 @@ describe('书系 over the real store', () => {
       const found = (field: 'series' | 'all' | 'title', text: string): string[] => store.listBooks(null, { field, text }).items.map((item) => item.title);
       expect([found('series', '星河'), found('all', '三部曲'), found('title', '三部曲')]).toEqual([['星河之一', '星河之二'], ['星河之一', '星河之二'], []]);
 
-      // 书系一致性 still waits, and says the Book is in the Series.
+      // 书系一致性 says why it cannot be chosen: the Series holds no knowledge taken in for it, or the Book is in no Series.
       const category = (bookId: string): unknown => store.inspectReviewWorkspace(bookId, null).categories
         .filter((entry) => entry.categoryId === 'series-consistency').map((entry) => [entry.available, entry.unavailableReason]);
-      expect(category(first)).toEqual([[false, '这本书已在书系「星河三部曲」中；书系一致性审阅还没有接入书系知识，暂不能选。']]);
+      expect(category(first)).toEqual([[false, '书系「星河三部曲」还没有纳入可用于一致性审阅的书系知识；在书系中纳入后才能选。']]);
       const outside = emptyBook(store, '书系之外');
-      expect(category(outside)).toEqual([[false, '这本书不在任何书系中；书系一致性审阅还没有接入书系知识，暂不能选。']]);
+      expect(category(outside)).toEqual([[false, '这本书不在任何书系中；加入书系、并且书系纳入了可用于一致性审阅的书系知识后才能选。']]);
 
       // 移出书系: prospective, its own four groups, and the record on both sides; the Book's own history keeps both.
       const leave = store.previewSeriesMembershipChange({ seriesId, bookId: first, kind: 'remove' });
@@ -188,7 +188,7 @@ describe('书系 over the real store', () => {
       const removed = store.changeSeriesMembership({ seriesId, bookId: first, kind: 'remove', previewDigest: leave.previewDigest });
       expect(removed.completionLabel).toBe('已移出书系「星河三部曲」：《星河之一》');
       expect(pageOf(store, seriesId)).toEqual({
-        members: [['星河之二', null]],
+        members: [['星河之二', null, '书系「星河三部曲」还没有纳入可用于一致性审阅的书系知识；在书系中纳入后才能选。']],
         candidates: ['书系之外', '星河之一'],
         history: [['移出书系', '星河之一', true, false], ['加入书系', '星河之二', false, true], ['移出书系', '星河之二', true, false],
           ['加入书系', '星河之二', false, true], ['加入书系', '星河之一', false, true]],
@@ -196,7 +196,7 @@ describe('书系 over the real store', () => {
       expect(store.inspectBookSeries(first).history.map((change) => change.label)).toEqual(['移出书系', '加入书系']);
       expect(store.inspectBookSeries(first).memberships).toEqual([]);
       expect(found('series', '星河')).toEqual(['星河之二']);
-      expect(category(first)).toEqual([[false, '这本书不在任何书系中；书系一致性审阅还没有接入书系知识，暂不能选。']]);
+      expect(category(first)).toEqual([[false, '这本书不在任何书系中；加入书系、并且书系纳入了可用于一致性审阅的书系知识后才能选。']]);
       store.markCleanShutdown();
     } finally {
       store.close();
@@ -208,7 +208,7 @@ describe('书系 over the real store', () => {
     try {
       const series = reopened.inspectSeriesList().series.find((entry) => entry.title === '星河三部曲')!;
       seriesId = series.seriesId;
-      expect(pageOf(reopened, seriesId).members).toEqual([['星河之二', null]]);
+      expect(pageOf(reopened, seriesId).members).toEqual([['星河之二', null, '书系「星河三部曲」还没有纳入可用于一致性审阅的书系知识；在书系中纳入后才能选。']]);
       reopened.markCleanShutdown();
     } finally {
       reopened.close();
@@ -433,7 +433,7 @@ describe('书系 over the real store', () => {
       expect(refusal(() => store.inspectBookSeries(books[0]!, { title: '', seriesId: many.memberships[0]!.seriesId })))
         .toBe('SERIES_CURSOR_INVALID:书系列表位置无效。');
       const reason = store.inspectReviewWorkspace(books[0]!, null).categories.find((entry) => entry.categoryId === 'series-consistency')!.unavailableReason;
-      expect(reason).toContain('已加入 52 个书系，包括');
+      expect(reason).toContain('这本书所在的 52 个书系，包括「书系000」');
       expect(reason).not.toContain('书系051');
       store.markCleanShutdown();
     } finally {

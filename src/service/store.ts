@@ -278,6 +278,7 @@ import {
 } from './text-manuscript.js';
 import { initializeManuscriptEffectSchema, ManuscriptApplyStore } from './manuscript-apply.js';
 import { initializeReviewRunSchema, ReviewRunError, ReviewRunStore, type ReviewRunPreparationProgress } from './review/review-runs.js';
+import { newSeriesKnowledgeReadings } from './review/series-consistency.js';
 import { initializePublicationVersionSchema, PublicationVersionError, PublicationVersionStore } from './publication-versions.js';
 import {
   GLOBAL_ATTENTION_READ_LIMIT,
@@ -4514,6 +4515,7 @@ export class EditorialStore {
       settle: (reviewRunId, categoryId) => this.#reviewCall(() => runs.settle(reviewRunId, categoryId)),
       write: (reviewRunId, categoryId) => this.#reviewCall(() => runs.write(reviewRunId, categoryId)),
       fail: (reviewRunId, categoryId, code, message) => this.#reviewCall(() => runs.fail(reviewRunId, categoryId, code, message)),
+      waitingForPlace: (reviewRunId, categoryId) => runs.waitingForPlace(reviewRunId, categoryId),
     };
   }
 
@@ -11530,19 +11532,23 @@ export class EditorialStore {
   #seriesMembersPage(seriesId: string, after: SeriesMembersCursor | null): SeriesMembersPageProjection & { count: number } {
     const members: SeriesMemberProjection[] = [];
     let count = 0;
+    // Each Series' knowledge is read once for the whole page, however many members share it (Issue #64 review).
+    const readings = newSeriesKnowledgeReadings();
     for (const entry of this.#series.members(seriesId)) {
       count += 1;
       if (members.length >= MAX_SERIES_MEMBERS_PAGE + 1 || (after !== null &&
         (entry.joinedAt > after.joinedAt || (entry.joinedAt === after.joinedAt && entry.bookId >= after.bookId)))) continue;
       const people = this.#bookPeople.current(entry.bookId);
+      const consistency = this.#reviewRuns.seriesConsistencyState(entry.bookId, readings);
       members.push({
         bookId: entry.bookId,
         title: this.#evaluationBookTitle(entry.bookId),
         authors: people.authors,
         editors: people.editors,
         joinedAt: entry.joinedAt,
-        // 书系一致性 stays unavailable until Series Knowledge reaches review (Issue #64, S29), so no member has had one.
-        seriesConsistencyReview: null,
+        // 书系一致性 for this member (Issue #64, S29a): when its findings last reached the manuscript, and why not now.
+        seriesConsistencyReview: consistency.reviewedAt === null ? null : { reviewedAt: consistency.reviewedAt },
+        seriesConsistencyUnavailableReason: consistency.unavailableReason,
       });
     }
     const { page, more } = weighedPage(members, MAX_SERIES_MEMBERS_PAGE);
@@ -15921,8 +15927,9 @@ export class EditorialStore {
       return operation();
     } catch (error) {
       // A guideline version that no longer reads refuses the review's configuration in its own words (Issue #427 review).
+      // So does a Series record that no longer reads (Issue #64 review), should one reach here past 书系一致性's own reading.
       if (error instanceof ReviewRunError || error instanceof AnalysisError || error instanceof EditorialMarkError || error instanceof ProposalConflictError ||
-        error instanceof ReviewGuidelineError) {
+        error instanceof ReviewGuidelineError || error instanceof SeriesError || error instanceof SeriesKnowledgeError) {
         throw new StoreError(error.code, error.message);
       }
       if (error instanceof BoundedStoreFatalError) {
