@@ -1,5 +1,5 @@
 ---
-status: proposed — the Owner decided on 2026-10-08 that a captured procedure must run in this version; the Owner merging this pull request accepts this text
+status: accepted — the Owner decided on 2026-10-08 that a captured procedure must run in this version, and accepted this text on 2026-10-08 in the Commander session (「采纳，由你合并」), which this record names as its acceptance
 date: 2026-10-08
 deciders: Owner
 amends: V2-UX-REUSE-003 and REUSE-005 — a captured Review Run is saved as an AI7-owned Captured Procedure, not a native DSH Skill draft (§1); REUSE-012 — its steps keep the configuration's order (§2); the interaction specification's Reusable procedure classification table; Reusable Procedure Classification Preview and Authority Ceiling in their contexts (§1, §4); journeys J-15 (Consequences)
@@ -7,7 +7,7 @@ amends: V2-UX-REUSE-003 and REUSE-005 — a captured Review Run is saved as an A
 
 # Make a captured procedure runnable through the Review Run path
 
-On 2026-10-08, answering the questions S30 (#65) raised, the Owner decided two things. A procedure saved with `将以上工序保存为可复用工序` must be runnable in this version (「要能运行」), not only saved. A Developer Capability Proposal is kept locally and may be exported to a file; AI7 never sends it. This record decides the smallest carrier, validation and run path that make the first true without widening any authority. The Owner merging this pull request accepts this text.
+On 2026-10-08, answering the questions S30 (#65) raised, the Owner decided two things. A procedure saved with `将以上工序保存为可复用工序` must be runnable in this version (「要能运行」), not only saved. A Developer Capability Proposal is kept locally and may be exported to a file; AI7 never sends it. This record decides the smallest carrier, validation and run path that make the first true without widening any authority. The Owner accepted this text on 2026-10-08.
 
 ## Context
 
