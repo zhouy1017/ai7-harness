@@ -73,6 +73,7 @@ The existing ADRs disagree about whether even non-expansive Policy revisions may
 
 **Task Intent**:
 The exact goal, selected native DSH artifacts and revisions where applicable, inputs, Book or deliverable context, document/revision/selection pins, and expected Task Outcome of one requested task.
+Wherever a Task names its range, the range reads as its latest plan version's, not as the range the Task Intent was first prepared with, which a Plan Revision leaves unchanged (Owner, 2026-10-07, Issue #288 甲).
 _中文_: 任务意图
 _Avoid_: Prompt, Run, Execution Plan
 

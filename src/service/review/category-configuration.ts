@@ -28,9 +28,21 @@ export const BUILTIN_GUIDELINE_ISSUER = 'AI7 内置默认' as const;
  * How a category's findings come to exist. `review-category-contract` runs the category's own Task
  * under the Editorial Review Contract; `baseline-leads` reads the leads the baseline analysis already
  * holds and calls no model (REV-011); `factual-review-kind` runs the factual-review kind and its
- * contract (S18a); `unavailable` names a category whose basis does not exist yet.
+ * contract (S18a); `unavailable` names a category whose basis does not exist yet. `series-knowledge` is the house's
+ * 书系一致性 before it is resolved for one Book (Issue #64, S29a): the contract over that Book's Series Knowledge, or
+ * unavailable with the Book's own reason — nothing reads the house entry unresolved.
  */
-export type ReviewCategoryExecutor = 'review-category-contract' | 'baseline-leads' | 'factual-review-kind' | 'unavailable';
+export type ReviewCategoryExecutor = 'review-category-contract' | 'baseline-leads' | 'factual-review-kind' | 'series-knowledge' | 'unavailable';
+
+/**
+ * What a 书系一致性 entry resolved for one Book used (Issue #64, S29a; REV-013): every Series the Book was in, by name, and
+ * each Series Knowledge revision its clauses were built from, in clause order, with the digest of its words. A Run snapshots
+ * these with the entry, and a plan whose pins no longer match the Book's knowledge now is not current.
+ */
+export interface SeriesKnowledgePins {
+  readonly series: ReadonlyArray<{ readonly seriesId: string; readonly title: string }>;
+  readonly revisions: ReadonlyArray<{ readonly seriesId: string; readonly itemId: string; readonly revisionId: string; readonly ordinal: number; readonly digest: string }>;
+}
 
 export interface ReviewGuidelineClause {
   readonly clauseId: string;
@@ -62,6 +74,8 @@ export interface ReviewCategoryConfigurationEntry {
   readonly unavailableReason: string | null;
   readonly guidelineDocuments: ReadonlyArray<ReviewGuidelineDocument>;
   readonly procedure: { readonly procedureId: string; readonly title: string; readonly version: string };
+  /** Present exactly on a 书系一致性 entry resolved for a Book whose Series Knowledge it executes. */
+  readonly seriesKnowledge?: SeriesKnowledgePins;
 }
 
 export interface ReviewCategoryConfiguration {
@@ -207,8 +221,9 @@ export const BUILTIN_REVIEW_CATEGORY_CONFIGURATION: ReviewCategoryConfiguration 
       riskPointsOnly: false,
       batchApply: false,
       searchEngine: false,
-      executor: 'unavailable',
-      unavailableReason: '这本书不在任何书系中；书系一致性审阅还没有接入书系知识，暂不能选。',
+      // Resolved for each Book from the Series Knowledge of the Series it is in (Issue #64, S29a).
+      executor: 'series-knowledge',
+      unavailableReason: null,
       guidelineDocuments: [],
       procedure: { procedureId: 'ai7-review-procedure/series-consistency', title: '书系一致性检查', version: '1' },
     },
@@ -262,6 +277,8 @@ export function reviewCategoryContractInput(entry: ReviewCategoryConfigurationEn
  * the house's own text, which the category's prompt would carry to the model.
  */
 export function houseGuidelineDocuments(entry: ReviewCategoryConfigurationEntry): ReviewGuidelineDocument[] {
+  // A 书系一致性 entry's documents are Series Knowledge revisions, which the knowledge base does not manage as guidelines.
+  if (entry.seriesKnowledge !== undefined) return [];
   return entry.guidelineDocuments.filter((document) => document.issuer !== BUILTIN_GUIDELINE_ISSUER);
 }
 
@@ -273,9 +290,18 @@ export function houseGuidelineDocuments(entry: ReviewCategoryConfigurationEntry)
 export function reviewCategoryBasisStatement(entry: ReviewCategoryConfigurationEntry): string {
   const procedure = `工序：${entry.procedure.title}（第 ${entry.procedure.version} 版）`;
   if (entry.executor === 'baseline-leads') return `依据：这本书最新的基线分析结果 · ${procedure} · 不调用模型，不使用搜索引擎`;
-  if (entry.executor === 'unavailable') {
+  if (entry.executor === 'unavailable' || entry.executor === 'series-knowledge') {
     const source = entry.categoryId === 'series-consistency' ? '依据：书系知识' : '依据：这本书的编辑交付物';
     return `${source} · ${procedure}`;
+  }
+  if (entry.seriesKnowledge !== undefined) {
+    // REV-013: the basis names the exact Series Knowledge revisions used, each Series with the items it gave.
+    const bySeries = new Map<string, string[]>();
+    for (const document of entry.guidelineDocuments) {
+      bySeries.set(document.issuer, [...(bySeries.get(document.issuer) ?? []), `${document.title}第 ${document.version} 版`]);
+    }
+    const knowledge = Array.from(bySeries, ([series, items]) => `${series}的书系知识：${items.join('、')}`).join('；');
+    return `依据：${knowledge} · ${procedure} · 不使用搜索引擎`;
   }
   const documents = entry.guidelineDocuments.map((document) => `${document.issuer} · ${document.title}（第 ${document.version} 版）`).join('、');
   const search = entry.searchEngine ? '会使用搜索引擎（外部核查接入前为「未联网核查」）' : '不使用搜索引擎';
