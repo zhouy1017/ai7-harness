@@ -7,6 +7,7 @@ import type {
   InitialEvaluationSufficiency,
   InitialEvaluationTaskMode,
   EvaluationProfileProjection,
+  EvaluationReadersReportProjection,
   EvaluationRecordProjection,
   EvaluationRecordSummaryProjection,
   EvaluationTotalProjection,
@@ -267,4 +268,47 @@ export function evaluationAi7RecordLine(initial: Pick<EvaluationInitialDraftProj
 /** The conclusion AI7 would suggest, said as AI7's (EVAL-007). */
 export function evaluationAi7ConclusionLine(profile: Pick<EvaluationProfileProjection, 'conclusions'>, conclusion: EvaluationConclusion | null): string {
   return conclusion === null ? 'AI7 没有给出建议结论。' : `AI7 建议的结论：${evaluationConclusionLabel(profile, conclusion)}（由你选定）`;
+}
+
+// ---- 审稿意见 (Issue #429, plan slice S81c; V2-UX-EVAL-013) ------------------------------------------------------------
+
+export const READERS_REPORT_HEADING = '审稿意见';
+export const READERS_REPORT_LEDE =
+  '从定稿的评估起草审稿意见：总体评价、主要优点、主要问题、修改建议与结论。草稿在稿件编辑面上由你修改，保存为版本后可导出为 DOCX；它是草稿，不会交付或发送，也不改变评估记录。';
+export const READERS_REPORT_ACTIONS = {
+  prepare: '起草',
+  openPlan: '查看计划并开始',
+  openTask: '查看任务',
+  createDraft: '打开草稿',
+  openDraft: '打开草稿',
+  exportDraft: '导出…',
+} as const;
+export const READERS_REPORT_STATUS = {
+  preparing: '正在准备审稿意见的任务计划…',
+  prepared: '审稿意见的任务计划已准备：在任务计划里看过再开始。',
+  cancelled: '审稿意见的任务计划准备已取消。',
+  failed: '无法准备审稿意见。',
+  creating: '正在打开审稿意见草稿…',
+  openFailed: '无法打开审稿意见草稿。',
+} as const;
+
+/** The 定稿 version a new 审稿意见 drafts from, or `null` while there is none (the template rows then say why). */
+export function readersReportBasisLine(basis: EvaluationReadersReportProjection['basis']): string | null {
+  return basis === null ? null : `依据第 ${basis.ordinal} 版定稿（评估的是修订版 ${basis.revisionLabel}）`;
+}
+
+/** The Book's latest 审稿意见 Task in one line: its template, and its state as the drawer names it. */
+export function readersReportTaskLine(task: NonNullable<EvaluationReadersReportProjection['task']>, templateLabel: string): string {
+  return `${READERS_REPORT_HEADING}「${templateLabel}」 · ${task.label}`;
+}
+
+/** A drafted result not yet opened: what it was drafted from. */
+export function readersReportDraftedLine(drafted: NonNullable<EvaluationReadersReportProjection['templates'][number]['drafted']>): string {
+  return `AI7 已写出草稿 · 依据第 ${drafted.recordOrdinal} 版定稿 · 打开后在稿件编辑面上修改`;
+}
+
+/** A template's draft document: its latest version, what it was drafted from, and whether the text moved past the version. */
+export function readersReportDraftLine(draft: NonNullable<EvaluationReadersReportProjection['templates'][number]['draft']>): string {
+  const latest = draft.document.versions[0]?.label ?? '版本 1';
+  return `草稿 · ${latest} · 依据第 ${draft.recordOrdinal} 版定稿${draft.document.changedSinceVersion ? ' · 有修改尚未保存为版本' : ''}`;
 }

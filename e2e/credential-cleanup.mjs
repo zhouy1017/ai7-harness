@@ -18,7 +18,7 @@ import { journeyCheckFailure } from './controller.mjs';
  * `tests/unit/credential-cleanup.test.ts` holds it equal to the highest `*_SCHEMA_VERSION` in
  * `src/service/task-authorization.ts`, so a schema slice moves it in the same pull request or a unit test fails.
  */
-export const CREDENTIAL_CLEANUP_SCHEMA_VERSION = 61;
+export const CREDENTIAL_CLEANUP_SCHEMA_VERSION = 62;
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

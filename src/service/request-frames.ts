@@ -763,6 +763,19 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
       break;
     }
+    // 起草审稿意见 (Issue #429, S81c): the route's Book and one of the two templates; the 定稿 version is the service's to find.
+    case 'prepareReadersReport': {
+      const input = requireInput(value.input, ['bookId', 'template'], tentativeId);
+      if (!validUuid(input.bookId) || (input.template !== 'author' && input.template !== 'editorial')) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 打开草稿: one drafted result of the route's Book's 审稿意见.
+    case 'createReadersReportDraft': {
+      const input = requireInput(value.input, ['bookId', 'revisionId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.revisionId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'authorizeReadersReport':
     case 'authorizeInitialEvaluation': {
       const input = requireInput(value.input, ['bookId', 'taskIntentId', 'planEnvelopeDigest'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.taskIntentId) || !isBoundedString(input.planEnvelopeDigest, 64) ||

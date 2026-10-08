@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
@@ -38,6 +38,11 @@ import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState
 // 待我处理 then says; Enter and Escape reach the card without a pointer; it reflows at 200% and keeps its borders without
 // colour; and a restart moves nothing.
 //
+// Since #429 (S81c) J-11 also drafts a 审稿意见 from 评估旅程丙's 第 14 版定稿: 给作者的修改意见 is prepared into the Task Drawer,
+// whose plan says the house has no 审稿意见 among its 范例 and drafts without one; its Run ends on the J-04 adapter's authored
+// fixture; 打开草稿 opens the draft on the manuscript surface with its five sections; an edit is saved as 版本 2; and 导出… writes it
+// as DOCX through the system's Save dialog, which this launch's control answers for.
+//
 // Since #61 (S26c) 质量与学习 opens from the landing at 反馈历史, the passive history of the same Book's feedback: newest
 // first, each entry's verdict and reason as it stands and nothing pending; filtered by 来源, and — once the Book's 作者 and
 // 责编 are set on its 工作概览 — by them; each opening the exact record it came from.
@@ -52,10 +57,17 @@ const PEOPLE_NOTE = '作者与责编用于标注和查找这本书，也是之�
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
 const THIRD = Object.freeze({ title: '评估旅程丙' });
 /**
- * The J-04 model adapter's fixture: AI7 初评's authored units and synthesis of exact `sample1` (Issue #429, S81b1), layered over
- * the base fixture that answers every unit, the reduction and the sample of the baseline analysis (Issue #94).
+ * The J-04 model adapter's fixture: 审稿意见's authored units and five sections from 第 14 版定稿 (Issue #429, S81c), layered over
+ * AI7 初评's authored units and synthesis of exact `sample1` (S81b1), layered in turn over the base fixture that answers every
+ * unit, the reduction and the sample of the baseline analysis (Issue #94).
  */
-const FIXTURE_IDENTITY = 'sample1-evaluation-authored';
+const FIXTURE_IDENTITY = 'sample1-readers-report-authored';
+/** What a 审稿意见 says when the house holds no 审稿意见 among its 范例 (the Owner's answer of 2026-10-07). */
+const NO_EXEMPLAR = '本社暂无审稿意见范例，本次不参考范例';
+/** The Journey's own edit of the draft, and the file its DOCX is written to (Issue #429, S81c). */
+const DRAFT_EDIT = '（旅程修订）';
+const DRAFT_FILE = '评估旅程丙 · 审稿意见 · 给作者的修改意见 · 版本 2.docx';
+const READERS_REPORT_HEADINGS = ['总体评价', '主要优点', '主要问题', '修改建议', '结论'];
 /** AI7 初评's scores and lines as the authored fixture gives them, item by item (Issue #429, S81b1). */
 const AI7_ITEM_LINES = [
   ['literary-quality', 'sufficient', '文学品质与作者声音：AI7 初评 16.5 / 20 · 依据充分度 充分（引用 19 个段落，分布在 8 个阅读范围）'],
@@ -998,6 +1010,9 @@ async function main() {
     cancellation.throwIfRequested();
     runRootAcquisition = mkdtemp(join(tempParent, 'ai7-j11-e2e-'));
     runRoot = await runRootAcquisition;
+    // 审稿意见's DOCX is written here through the Save dialog's launch control (Issue #429, S81c).
+    const draftExportsRoot = resolve(runRoot, 'exports');
+    const draftExportPath = resolve(draftExportsRoot, DRAFT_FILE);
     cancellation.throwIfRequested();
     requireJourney(dirname(runRoot) === tempParent && basename(runRoot).startsWith('ai7-j11-e2e-'), 'temp-root');
     dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
@@ -1017,7 +1032,9 @@ async function main() {
       // J-11's picker imports the manuscript its 评估 evaluates (Issue #429, S81a): one choice per window. The J-04 model
       // adapter runs the baseline 分析反馈 judges (Issue #94, S38), and J-10's unit hold keeps one Run in flight (#641). A
       // cleanup launch names none of them.
-      if (!forCleanup) args.push('--j11-picker-path', SAMPLE1_PATH, '--j04-model-adapter', FIXTURE_IDENTITY, '--j10-unit-hold-path', unitHoldPath);
+      if (!forCleanup) {
+        args.push('--j11-picker-path', SAMPLE1_PATH, '--j04-model-adapter', FIXTURE_IDENTITY, '--j10-unit-hold-path', unitHoldPath, '--j11-save-path', draftExportPath);
+      }
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       if (!forCleanup) cancellation.throwIfRequested();
       const acquisition = chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args, env: productEnvironment(executable), timeout: 60_000 });
@@ -1716,6 +1733,122 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.editor-shell [data-work-destination="evaluation"]')`, 'initial-evaluation-back-manuscript', 120_000);
     await clickSelector(renderer, '.editor-shell [data-work-destination="evaluation"]', 'initial-evaluation-back-open');
     await readEvaluation(renderer, (page) => page.state === 'ready' && page.record?.heading === '第 14 版 · 定稿', 'initial-evaluation-back-ready');
+
+    // ---- 审稿意见 (Issue #429, plan slice S81c; V2-UX-EVAL-013) --------------------------------------------------------------
+    at('readers-report-offered');
+    // ②C drafts a 审稿意见 from the latest 定稿 version under one of the two templates, and says the house has no 审稿意见 among
+    // its 范例 to seed it: the draft is written without one.
+    const READ_REPORT = `(() => {
+      const section = document.querySelector('[data-screen="book-evaluation"] .evaluation-readers-report');
+      if (!(section instanceof HTMLElement)) return null;
+      return {
+        state: section.dataset.readersReportState ?? null,
+        basis: section.querySelector('.readers-report-basis')?.textContent ?? null,
+        exemplars: section.querySelector('.readers-report-exemplars')?.textContent ?? null,
+        task: section.querySelector('.readers-report-task')?.textContent ?? null,
+        templates: Array.from(section.querySelectorAll('ul.readers-report-templates > li'), (entry) => [
+          entry.dataset.template, entry.querySelector('.readers-report-template')?.textContent ?? null,
+          entry.querySelector('.readers-report-draft, .readers-report-drafted, .readers-report-reason')?.textContent ?? null,
+          Array.from(entry.querySelectorAll('button'), (button) => [button.dataset.readersReportAction, button.textContent, button.disabled]),
+        ]),
+      };
+    })()`;
+    const readReport = async (predicate, name) => {
+      const deadline = Date.now() + 120_000;
+      let page = null;
+      while (Date.now() < deadline) {
+        page = await renderer.evaluate(READ_REPORT).catch(() => null);
+        if (page !== null && predicate(page)) return page;
+        await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+      }
+      const error = journeyCheckFailure('J-11', name);
+      error.detail = page;
+      throw error;
+    };
+    const reportOffered = await readReport((page) => page.templates.length === 2, 'readers-report-offered-read');
+    requireJourney(reportOffered.basis === '依据第 14 版定稿（评估的是修订版 r1）' && reportOffered.exemplars === `${NO_EXEMPLAR}。` && reportOffered.task === null &&
+      JSON.stringify(reportOffered.templates) === JSON.stringify([
+        ['author', '给作者的修改意见', null, [['prepare', '起草', false]]],
+        ['editorial', '给编辑部 / 选题会的审读报告', null, [['prepare', '起草', false]]],
+      ]), 'readers-report-offered-words', reportOffered);
+    await clickSelector(renderer, '[data-screen="book-evaluation"] .evaluation-readers-report li[data-template="author"] [data-readers-report-action="prepare"]', 'readers-report-prepare');
+    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer === 'open' && drawer.dataset.taskPlanKind === 'readers-report' && drawer.dataset.taskPlanStart === 'ready' && drawer.querySelector('[data-task-drawer-control="start"]')?.disabled === false; })()`, 'readers-report-plan', 120_000);
+    // The plan in the editor's words: the 定稿 version and template it drafts from, no exemplar, its two steps, and that it writes
+    // no marketing points and delivers nothing; no button of the drawer carries 授权.
+    const reportPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'readers-report', ref: document.querySelector('#task-drawer').dataset.taskPlanRef })
+      .then((plan) => JSON.stringify([plan.goal.sentence, plan.scope.reference, plan.steps.map((step) => step.label),
+        plan.notDo.editorial.includes('不写营销要点：营销要点由交付物中的写作任务生成'), plan.notDo.editorial.includes('不交付、不发送：草稿在稿件编辑面上由你修改')]))`);
+    requireJourney(reportPlan === JSON.stringify([
+      '从第 14 版定稿的评估起草审稿意见「给作者的修改意见」：总体评价、主要优点、主要问题、修改建议与结论',
+      ['评估记录第 14 版定稿（审稿评估方案 第 1 版）：各项得分与评语、主要优点与问题、风险与结论', NO_EXEMPLAR],
+      ['逐章读取，找出可以引用的段落', '按模板写出审稿意见'], true, true,
+    ]), 'readers-report-plan-words', reportPlan);
+    await assertRenderer(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return (drawer?.textContent ?? '').includes(${JSON.stringify(NO_EXEMPLAR)}) && Array.from(drawer.querySelectorAll('button'), (button) => button.textContent).every((label) => !label.includes('授权')); })()`, 'readers-report-plan-shown');
+    const preparedReport = await readReport((page) => page.state === 'prepared', 'readers-report-prepared');
+    requireJourney(preparedReport.task === '审稿意见「给作者的修改意见」 · 尚未开始' &&
+      JSON.stringify(preparedReport.templates[0][3]) === JSON.stringify([['open-plan', '查看计划并开始', false]]), 'readers-report-prepared-words', preparedReport);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'readers-report-run');
+    const endedReport = await readReport((page) => ['settled', 'failed', 'interrupted'].includes(page.state), 'readers-report-ended');
+    requireJourney(endedReport.state === 'settled', 'readers-report-settled', endedReport);
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState === 'settled'`, 'readers-report-drawer-settled', 30_000);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'readers-report-drawer-close');
+    await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'readers-report-drawer-closed');
+
+    at('readers-report-drafted');
+    // AI7's draft waits to be opened; the other template can still be drafted; the 定稿 version it drafted from is unchanged.
+    const draftedReport = await readReport((page) => page.templates[0]?.[2] !== null, 'readers-report-drafted-read');
+    requireJourney(draftedReport.task === '审稿意见「给作者的修改意见」 · 已完成' && JSON.stringify(draftedReport.templates) === JSON.stringify([
+      ['author', '给作者的修改意见', 'AI7 已写出草稿 · 依据第 14 版定稿 · 打开后在稿件编辑面上修改', [['create-draft', '打开草稿', false], ['open-task', '查看任务', false]]],
+      ['editorial', '给编辑部 / 选题会的审读报告', null, [['prepare', '起草', false]]],
+    ]), 'readers-report-drafted-words', draftedReport);
+    const recordUnmoved = await renderer.evaluate(`window.ai7.inspectEvaluation({ recordId: null }).then((page) => JSON.stringify([page.record.ordinal, page.record.state, page.record.entries, page.recordCount]))`);
+    requireJourney(recordUnmoved === JSON.stringify([14, 'finalized', 3, 14]), 'readers-report-record-unmoved', recordUnmoved);
+
+    at('readers-report-draft-open');
+    // 打开草稿: the draft on the manuscript surface, named by its type and 版本 1, its five sections under its title, with the
+    // 工作流程 column beside it as every document has.
+    await clickSelector(renderer, '[data-screen="book-evaluation"] .evaluation-readers-report li[data-template="author"] [data-readers-report-action="create-draft"]', 'readers-report-create-draft');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"][data-document-type-id="readers-report-author"] .editor-toolbar h2')?.textContent === '审稿意见 · 给作者的修改意见 · 版本 1' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]') !== null`, 'readers-report-draft-surface', 120_000);
+    const draftBlocks = await renderer.evaluate(`JSON.stringify(Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]'), (block) => block.textContent ?? ''))`);
+    const draftTexts = JSON.parse(draftBlocks);
+    requireJourney(draftTexts[0] === '《评估旅程丙》审稿意见 · 给作者的修改意见' &&
+      JSON.stringify(draftTexts.filter((text) => READERS_REPORT_HEADINGS.includes(text))) === JSON.stringify(READERS_REPORT_HEADINGS) &&
+      draftTexts.length > READERS_REPORT_HEADINGS.length + 5, 'readers-report-draft-sections', draftTexts.length);
+    await assertRenderer(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] aside.document-lens') instanceof HTMLElement`, 'readers-report-draft-lens');
+
+    at('readers-report-version');
+    // An edit in the draft's own journal, then 保存为版本: 版本 2.
+    await assertRenderer(renderer, `(() => { const block = document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')[2]; if (!(block instanceof HTMLElement)) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText', false, ${JSON.stringify(DRAFT_EDIT)}); return block.textContent?.endsWith(${JSON.stringify(DRAFT_EDIT)}); })()`, 'readers-report-edit');
+    await waitFor(renderer, `Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '保存当前编辑' && !button.disabled)`, 'readers-report-edit-save-ready');
+    await click(renderer, '保存当前编辑', 'readers-report-edit-save');
+    await waitFor(renderer, `${status}.includes('已写入修订日志')`, 'readers-report-edit-durable');
+    await clickSelector(renderer, '.editor-shell[data-deliverable="production-document"] [data-document-action="saveVersion"]', 'readers-report-save-version');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] .editor-toolbar h2')?.textContent === '审稿意见 · 给作者的修改意见 · 版本 2' && ${status} === '已保存为版本 2'`, 'readers-report-version-saved', 120_000);
+
+    at('readers-report-docx');
+    // Back in 评估 the draft names 版本 2, and 导出… writes it as DOCX through the Save dialog: the card's review, the place it
+    // returned, and 按上述方式导出 — nothing written before that.
+    await click(renderer, '返回图书工作概览', 'readers-report-overview');
+    await waitFor(renderer, `document.querySelector('.book-evaluation-summary [data-evaluation-action="open"]')`, 'readers-report-overview-ready', 60_000);
+    await clickSelector(renderer, '.book-evaluation-summary [data-evaluation-action="open"]', 'readers-report-evaluation');
+    const versioned = await readReport((page) => (page.templates[0]?.[2] ?? '').startsWith('草稿 · 版本 2'), 'readers-report-versioned');
+    requireJourney(JSON.stringify(versioned.templates[0]) === JSON.stringify(['author', '给作者的修改意见', '草稿 · 版本 2 · 依据第 14 版定稿',
+      [['open-draft', '打开草稿', false], ['export', '导出…', false], ['open-task', '查看任务', false]]]) &&
+      JSON.stringify(versioned.templates[1][3]) === JSON.stringify([['prepare', '起草', false]]), 'readers-report-versioned-words', versioned);
+    await mkdir(draftExportsRoot, { recursive: true });
+    await clickSelector(renderer, '[data-screen="book-evaluation"] .evaluation-readers-report li[data-template="author"] [data-readers-report-action="export"]', 'readers-report-export-open');
+    const draftCard = `document.querySelector('[data-screen="book-evaluation"] .readers-report-export-slot > section.manuscript-export')`;
+    await waitFor(renderer, `(() => { const choose = ${draftCard}?.querySelector('[data-export-action="choose"]'); return choose instanceof HTMLButtonElement && !choose.disabled && choose.textContent === '选择保存位置…'; })()`, 'readers-report-export-reviewed', 120_000);
+    requireJourney(!existsSync(draftExportPath), 'readers-report-export-nothing-before');
+    await clickSelector(renderer, '[data-screen="book-evaluation"] .readers-report-export-slot > section.manuscript-export [data-export-action="choose"]', 'readers-report-export-choose');
+    await waitFor(renderer, `${draftCard}?.dataset.exportPhase === 'prepared' && ${draftCard}.querySelector('.export-destination-line')?.textContent === ${JSON.stringify(`${draftExportPath}（新建文件）`)}`, 'readers-report-export-prepared', 120_000);
+    requireJourney(!existsSync(draftExportPath), 'readers-report-export-nothing-before-approval');
+    await clickSelector(renderer, '[data-screen="book-evaluation"] .readers-report-export-slot > section.manuscript-export [data-export-action="approve"]', 'readers-report-export-approve');
+    await waitFor(renderer, `${draftCard}?.dataset.exportPhase === 'done' && ${draftCard}.querySelector('.export-receipt')?.dataset.exportOutcome === 'created'`, 'readers-report-export-written', 120_000);
+    const writtenDraft = await readFile(draftExportPath);
+    requireJourney(writtenDraft.length > 0 && writtenDraft.subarray(0, 2).toString('latin1') === 'PK' &&
+      JSON.stringify(await readdir(draftExportsRoot)) === JSON.stringify([DRAFT_FILE]), 'readers-report-docx-written', writtenDraft.length);
+    await clickSelector(renderer, '[data-screen="book-evaluation"] .readers-report-export-slot > section.manuscript-export [data-export-action="close"]', 'readers-report-export-close');
 
     // ---- 就地反馈轻问 after a Proposal Decision (Issue #61, plan slice S26a; FDBK-001 to FDBK-007, PDEC-009, MARK-005) -------
     at('decision-feedback-suggestions');

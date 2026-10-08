@@ -697,6 +697,24 @@ async function dispatch(
       }
       return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluation(request.input.bookId, null) };
     }
+    // 审稿意见 (Issue #429, S81c): drafted from the Book's latest 定稿 version, prepared as a cooperative job whose plan the Task
+    // Drawer opens, and started from its bar through the governor on the ledger of the plan's contract, as 初评 is.
+    case 'prepareReadersReport':
+      return { id: request.id, ok: true, op: request.op, result: jobs.startReadersReportPreparation(request.input.bookId, request.input.template, launchPolicy) };
+    case 'authorizeReadersReport': {
+      const authorized = store.authorizeReadersReport(request.input.bookId, request.input.taskIntentId, request.input.planEnvelopeDigest);
+      if (authorized.dispatchRunRecordId !== null) {
+        try {
+          analysisExecution.admitOrQueue(authorized.dispatchRunRecordId, authorized.ledger);
+        } catch (error) {
+          const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
+          throw new StoreErrorClass(code, error instanceof Error ? error.message : '运行未能进入调度。');
+        }
+      }
+      return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluation(request.input.bookId, null) };
+    }
+    case 'createReadersReportDraft':
+      return { id: request.id, ok: true, op: request.op, result: store.createReadersReportDraft(request.input.bookId, request.input.revisionId) };
     case 'inspectAnalysisFeedback':
       return { id: request.id, ok: true, op: request.op, result: store.inspectAnalysisFeedback(request.input.bookId, request.input.revisionId) };
     case 'recordAnalysisFeedback':
@@ -1476,6 +1494,13 @@ async function run(): Promise<void> {
     // A Review Run's category left authorized sent nothing and is 继续审阅's to dispatch, the editor's own choice.
     store.reconcileStoppedFactualReviewRuns();
     store.reconcileStoppedReviewCategoryRuns();
+    // 审稿意见 has no 续行 either (Issue #429, S81c): reconciled by kind exactly as 初评 is. A damaged record of it never stops the
+    // service starting: its Run stays as it was and 评估 says 审稿意见 is unavailable, with why.
+    try {
+      store.reconcileStoppedReadersReportRuns();
+    } catch {
+      // Reported where the 审稿意见 is read.
+    }
     // A Review Run's categories take a place of the one owner's governor one after another.
     reviewRuns = new ReviewRunDriver(store.reviewRunDriveSteps, analysisExecution);
     // Interactive Editorial Dialogue (Issue #52, S17a): its answers persist their Session logs — the Harness Session Ledger —

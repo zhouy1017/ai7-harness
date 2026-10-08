@@ -238,6 +238,9 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   evaluation_record_entries: 'owned',
   // The AI7 初评 each version began from (Issue #429, S81b1): the version's own, as its entries are.
   evaluation_initial_drafts: 'owned',
+  // 审稿意见 (Issue #429, S81c): which 定稿 version each Task drafts from, and which result became a draft — the Book's own.
+  readers_report_tasks: 'owned',
+  readers_report_drafts: 'owned',
   book_dimension_sets: 'owned',
   book_dimensions: 'owned',
   book_people_versions: 'owned',
