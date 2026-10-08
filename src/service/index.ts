@@ -1280,7 +1280,8 @@ function parseArguments(argv: string[]): {
         (process.env.AI7_E2E_JOURNEY !== 'J-04' && process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10' &&
           process.env.AI7_E2E_JOURNEY !== 'J-16' && process.env.AI7_E2E_JOURNEY !== 'J-11' && process.env.AI7_E2E_JOURNEY !== 'J-13'))) ||
     (connectivityPath !== undefined && (process.env.AI7_E2E_JOURNEY !== 'J-04' || !isAbsolute(connectivityPath))) ||
-    (unitHoldPath !== undefined && ((process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10' && process.env.AI7_E2E_JOURNEY !== 'J-16') ||
+    (unitHoldPath !== undefined && ((process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10' && process.env.AI7_E2E_JOURNEY !== 'J-16' &&
+      process.env.AI7_E2E_JOURNEY !== 'J-11') ||
       !isAbsolute(unitHoldPath))) ||
     (answerHoldPath !== undefined && (process.env.AI7_E2E_JOURNEY !== 'J-16' || !isAbsolute(answerHoldPath))) ||
     [importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl].filter(Boolean).length > 1 ||
