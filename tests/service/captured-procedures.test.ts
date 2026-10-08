@@ -1060,6 +1060,19 @@ describe('a version linked to the 图书交付包 that holds its Runs\' reports 
       }
       const damaged = store.inspectCapturedProcedure(saved.procedureId, null).versions[1]!;
       expect([damaged.packages.map((link) => link.version), damaged.packageCount]).toEqual([[2], 2]);
+      // A package that is JSON but holds a string where a report should be (Issue #697): first a report entry, then the whole
+      // reviewReports. Neither names a Run and neither fails the page; the 停用 below answers over the second.
+      for (const reports of ['["x"]', '"x"']) {
+        const shaped = new DatabaseSync(path);
+        try {
+          shaped.prepare("UPDATE book_delivery_package_versions SET canonical_json = json_object('content', json_object('reviewReports', json(?))) WHERE package_version_id = ?")
+            .run(reports, firstPackage.packageVersionId);
+        } finally {
+          shaped.close();
+        }
+        const page = store.inspectCapturedProcedure(saved.procedureId, null).versions[1]!;
+        expect([reports, page.packages.map((link) => link.version), page.packageCount]).toEqual([reports, [2], 2]);
+      }
       const stopped = store.stopCapturedProcedure(saved.procedureId, first.versionId, store.previewCapturedProcedureStop(saved.procedureId, first.versionId).previewDigest);
       expect(stopped.versions.map((version) => [version.version, version.state])).toEqual([[2, 'pending-validation'], [1, 'stopped']]);
       expect(stopped.versions[1]!.packages.map((link) => link.version)).toEqual([2]);

@@ -204,6 +204,13 @@ describe('Series material chosen apart, applicability and linked packages (Issue
   it('names the 图书交付包 versions holding a report of a Run under a version (REUSE-031)', () => {
     expect(procedurePackagesLine(1, 1)).toBe('按这一版运行的审阅，报告收入了 1 个图书交付包版本');
     expect(procedurePackagesLine(10, 12)).toBe('按这一版运行的审阅，报告收入了 12 个图书交付包版本；列出最新的 10 个');
+    // Damaged rows among the newest read are counted but not listed: the line says so and never calls an older one 最新的 (Issue #697).
+    expect(procedurePackagesLine(1, 3)).toBe('按这一版运行的审阅，报告收入了 3 个图书交付包版本；这 3 个里有 2 个无法读取，列出其余 1 个');
+    expect(procedurePackagesLine(0, 2)).toBe('按这一版运行的审阅，报告收入了 2 个图书交付包版本；这 2 个都无法读取，未列出');
+    expect(procedurePackagesLine(8, 12)).toBe('按这一版运行的审阅，报告收入了 12 个图书交付包版本；最新的 10 个里有 2 个无法读取，列出其余 8 个');
+    expect(procedurePackagesLine(0, 12)).toBe('按这一版运行的审阅，报告收入了 12 个图书交付包版本；最新的 10 个都无法读取，未列出');
+    expect(procedurePackagesLine(2, 3, 2)).toBe('按这一版运行的审阅，报告收入了 3 个图书交付包版本；列出最新的 2 个');
+    expect(procedurePackagesLine(1, 3, 2)).toBe('按这一版运行的审阅，报告收入了 3 个图书交付包版本；最新的 2 个里有 1 个无法读取，列出其余 1 个');
     expect(procedurePackageLinkLine({ bookTitle: '工序运行之书', version: 2 }, '10月9日')).toBe('《工序运行之书》图书交付包 v2 · 准备于 10月9日');
   });
 });

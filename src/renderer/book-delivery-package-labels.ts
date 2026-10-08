@@ -142,3 +142,23 @@ export const PACKAGE_EXPORT_STATUS_LINES = {
   revealed: '已在文件夹中显示。',
   revealFailed: '无法在文件夹中显示。',
 } as const;
+
+/**
+ * The one frozen version a Captured Procedure version's link brings into view (Issue #66, S31b review P3-4; Issue #697): the
+ * version it names, on the card's first read only, and only when the listed page holds it — `null` focuses no version. Later
+ * reads keep focus where the editor is.
+ */
+export class LinkedPackageVersionFocus {
+  #pending: string | null;
+
+  constructor(packageVersionId: string | null) {
+    this.#pending = packageVersionId;
+  }
+
+  /** The version to focus on this read, if any; asked once, whatever the answer. */
+  take(versions: ReadonlyArray<Pick<BookDeliveryPackageVersionProjection, 'packageVersionId'>>): string | null {
+    const named = this.#pending;
+    this.#pending = null;
+    return named !== null && versions.some((version) => version.packageVersionId === named) ? named : null;
+  }
+}
