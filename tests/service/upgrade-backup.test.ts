@@ -549,6 +549,16 @@ describe('升级前备份 over the real store', () => {
       expect(store.inspectDataVersion().upgrades[0]!.rollback).toMatchObject({
         softwareVersion: '0.0.9', dataVersion: 1, backupFileName: 'AI7 升级前备份 2026-09-26 09-00-00.ai7db', backupPresent: false,
       });
+      // No AI7 imports the middle state this backup holds — 0.0.10 stopped short of it — so the backup names only who made
+      // it, this AI7, as provenance, not 0.0.10 beside a Data Version 0.0.10 never reached whole (Issue #644).
+      const backupPath = join(backups(), store.inspectDataVersion().upgrades[0]!.backupFileName);
+      const backedUp = unzipSync(await readFile(backupPath));
+      expect(parseCanonicalJson(strFromU8(backedUp['manifest.json']!))).toMatchObject({ softwareVersion: software, dataVersion: 3 });
+      // Nor does this AI7 import it: its preview reads the maker and an older Data Version, which it does not take. Going
+      // back is to the earlier complete backup the record names.
+      expect(await store.inspectDatabaseImport(backupPath)).toMatchObject({
+        origin: 'pre-upgrade-backup', softwareVersion: software, dataVersion: 3, localDataVersion: 4, compatibility: 'older-data-version',
+      });
       store.markCleanShutdown();
     } finally {
       store.close();

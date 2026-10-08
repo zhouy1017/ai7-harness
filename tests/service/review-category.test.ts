@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { EditorialStore } from '../../src/service/store.js';
+import { EditorialStore, REVIEW_CATEGORY_CACHE_CAPACITY } from '../../src/service/store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner, ExecutionAdmissionError } from '../../src/service/analysis/execution.js';
 import { sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
@@ -245,5 +245,32 @@ describe('a review category over the real store on exact sample1', () => {
       // The baseline kind's own Result Set is untouched by either.
       expect(book.store.inspectBaselineAnalysis(book.bookId).resultSetRevision).toBeNull();
     }, 1);
+  });
+
+  it('keeps a bounded number of category ledgers, and never the one a preparation is still running on (Issue #649)', async () => {
+    // Every distinct contract — each Series Knowledge revision of 书系一致性, say — asks for a ledger of its own.
+    const contract = (version: number): ReviewCategoryContractInput => ({
+      ...STYLE_AND_FORMAT,
+      procedure: { ...STYLE_AND_FORMAT.procedure, version: `649.${version}` },
+    });
+    await withBook(async (book) => {
+      // An unsaved edit makes the Task's input checkpoint a preparation that takes more than one step.
+      appendToFirstBlock(book);
+      const definition = reviewCategoryKindDefinition(TYPOS_AND_USAGE);
+      let progress = book.store.createReviewCategoryPreparationWork(book.bookId, definition, { mode: 'review-first', selectedRange: null }, launchPolicy);
+      expect(progress.done).toBe(false);
+      // Ledgers are compared by identity alone: a failed `toBe` would print one, and printing a ledger reads through it.
+      const preparing = book.store.reviewCategoryLedger(definition);
+      const idle = book.store.reviewCategoryLedger(reviewCategoryKindDefinition(contract(0)));
+      expect(book.store.reviewCategoryLedger(reviewCategoryKindDefinition(contract(0))) === idle).toBe(true);
+      for (let version = 1; version <= REVIEW_CATEGORY_CACHE_CAPACITY * 2; version += 1) {
+        book.store.reviewCategoryLedger(reviewCategoryKindDefinition(contract(version)));
+      }
+      // The idle contract's ledger was let go and is made afresh; the preparing one is the same ledger, and finishes.
+      expect(book.store.reviewCategoryLedger(reviewCategoryKindDefinition(contract(0))) === idle).toBe(false);
+      expect(book.store.reviewCategoryLedger(definition) === preparing).toBe(true);
+      while (!progress.done) progress = book.store.advanceReviewCategoryPreparationWork(definition, progress.workId!);
+      expect(progress.projection!.state).toBe('prepared');
+    });
   });
 });

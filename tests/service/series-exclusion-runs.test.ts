@@ -214,6 +214,35 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
     });
   }, 300_000);
 
+  it('blocks a category start a hand-off left authorized, so neither 继续审阅 nor startup reconciliation keeps it (Issue #64 review)', async () => {
+    await withSession(async ({ store, seriesId }, bookId) => {
+      const itemId = itemOf(store, seriesId);
+      const approved = prepare(store, bookId);
+      approve(store, bookId, approved);
+      // The category's ledger Run authorized by its turn and never handed to the owner, as a service stopping there leaves it.
+      const handOff = store.reviewRunDriveSteps.start(approved.reviewRunId, 'series-consistency');
+      expect(handOff).not.toBeNull();
+      const lastState = (): string => {
+        const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+        try {
+          return (db.prepare('SELECT state FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC LIMIT 1').get(handOff!.runRecordId) as { state: string }).state;
+        } finally {
+          db.close();
+        }
+      };
+      expect([lastState(), store.reviewRunDriveSteps.step(approved.reviewRunId, 'series-consistency').kind]).toEqual(['authorized', 'dispatch']);
+      const { result } = exclude(store, seriesId, 'add', { target: { kind: 'knowledge-item', id: itemId } });
+      expect(result.stoppedRuns).toBe(1);
+      // Blocked before dispatch in the stop's words; the Run reads the stop, and the drive loop has nothing to dispatch.
+      expect(lastState()).toBe('blocked-before-dispatch');
+      expect(run(store, bookId, approved.reviewRunId).state).toBe('scope-changed');
+      expect(store.reviewRunDriveSteps.step(approved.reviewRunId, 'series-consistency').kind).toBe('done');
+      // Startup reconciliation settles what is left, and moves nothing of this Run.
+      store.reconcileStoppedReviewCategoryRuns();
+      expect([lastState(), run(store, bookId, approved.reviewRunId).state]).toEqual(['blocked-before-dispatch', 'scope-changed']);
+    });
+  }, 300_000);
+
   it('never lets a plan prepared before an exclusion be approved after the exclusion ends (Issue #64 review)', async () => {
     await withSession(async ({ store, seriesId }, bookId) => {
       const itemId = itemOf(store, seriesId);

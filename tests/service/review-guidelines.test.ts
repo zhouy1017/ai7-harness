@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, type SQLInputValue, type StatementResultingChanges } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LaunchBinding } from '../../src/service/analysis/baseline-analysis-store.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
@@ -511,6 +511,41 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
       expect(after.olderVersionBooks.map((book) => book.bookTitle))
         .toEqual(Array.from({ length: MAX_GUIDELINE_OLDER_BOOKS_SHOWN }, (_, index) => `L2 书 ${String(index + 1).padStart(2, '0')}`));
     } finally {
+      await close(session);
+    }
+  }, 300_000);
+
+  it('counts the usage it reads in one transaction, not one per row (Issue #644)', async () => {
+    await requireExactSample1(roots.codeRoot);
+    const session = await openStore();
+    const inserts: boolean[] = [];
+    const prepare = DatabaseSync.prototype.prepare;
+    const spy = vi.spyOn(DatabaseSync.prototype, 'prepare').mockImplementation(function (this: DatabaseSync, sql: string) {
+      const statement = prepare.call(this, sql);
+      if (/INTO temp\.guideline_/u.test(sql)) {
+        const run = statement.run.bind(statement) as (...values: SQLInputValue[]) => StatementResultingChanges;
+        statement.run = ((...values: SQLInputValue[]) => {
+          inserts.push(this.isTransaction);
+          return run(...values);
+        }) as typeof statement.run;
+      }
+      return statement;
+    });
+    try {
+      const { store, driver } = session;
+      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+      const { bookId } = await importSample1Book(store, roots.codeRoot, 'L2 用量');
+      await pinEditorialWorkspaceProfileRevision2(store, bookId);
+      const run = prepareReview(store, bookId);
+      approve(store, bookId, run);
+      await driver.drive(run.reviewRunId);
+      inserts.length = 0;
+      expect(typosDocument(store.inspectReviewGuidelines()).versions[0]!.usedByCount).toBe(1);
+      // The built-in documents' own versions and the one Run's use of each: every insert inside the one transaction.
+      expect(inserts.length).toBeGreaterThan(1);
+      expect(inserts.every((open) => open)).toBe(true);
+    } finally {
+      spy.mockRestore();
       await close(session);
     }
   }, 300_000);
