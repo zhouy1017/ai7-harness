@@ -792,6 +792,21 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .learning-note { display: grid; gap: .3rem; min-width: 0; }
 .learning-note textarea { width: 100%; min-width: 0; box-sizing: border-box; font: inherit; }
 .learning-consequence[hidden] { display: none; }
+/* 质量与学习 › 学习回溯 (S27a): the audit list, one material's lineage in its fixed order, and the remediation preview. */
+.learning-audit { display: grid; gap: .8rem; }
+.learning-audit p { margin: 0; overflow-wrap: anywhere; }
+.learning-audit-search { display: flex; flex-wrap: wrap; align-items: end; gap: .4rem; min-width: 0; }
+.learning-audit-batch, .learning-lineage, .learning-remediation-preview { display: grid; gap: .5rem; min-width: 0; padding: .8rem; border: 2px solid #2c463b; border-radius: 10px; background: #f6f8f2; }
+.learning-lineage h4, .learning-lineage h5, .learning-remediation-preview h4, .learning-remediation-preview h5 { margin: 0; overflow-wrap: anywhere; }
+.learning-lineage-steps { display: grid; gap: .5rem; margin: 0; padding-left: 1.4rem; }
+.learning-lineage-step { display: grid; gap: .3rem; min-width: 0; padding: .45rem .6rem; border: 1px solid #ded9cd; border-radius: 8px; background: #fffdf8; }
+.learning-lineage-decisions { display: grid; gap: .35rem; margin: 0; padding: 0; list-style: none; }
+.learning-lineage-decision { display: grid; gap: .15rem; min-width: 0; padding-left: .6rem; border-left: 3px solid #2c463b; }
+.learning-lineage-decision[data-decision-state="superseded"] { border-left-style: dashed; border-left-color: #8a9187; }
+.learning-lineage-forward { display: grid; gap: .4rem; min-width: 0; }
+.learning-remediation-group { display: grid; gap: .2rem; min-width: 0; padding: .4rem .6rem; border-left: 3px solid #c9d6d2; }
+.learning-remediation-left-out { margin: 0; padding-left: 1.1rem; }
+.learning-audit-details dl { margin-top: .4rem; }
 /* 知识库 › 资料库 (S79c): one card per collected item; the arrival form and each decision open inside the page, never a modal. */
 .library-list { display: grid; gap: .8rem; }
 .library-material, .library-preview { display: grid; gap: .45rem; min-width: 0; padding: 1rem; border: 1px solid #ded9cd; border-radius: 12px; background: #fffdf8; }
@@ -1450,6 +1465,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .evaluation-initial, .evaluation-adjustment,
   .analysis-feedback-card, .analysis-feedback-card fieldset,
   .learning-book, .learning-card, .learning-choices, .feedback-book, .calibration-section,
+  .learning-audit-batch, .learning-lineage, .learning-lineage-step, .learning-remediation-preview, .learning-remediation-group,
   .series-create-form, .series-add-chooser, .series-preview, .knowledge-form, .knowledge-review, .knowledge-targets, .knowledge-reuse,
   .series-exclusion, .series-exclusion-chooser, .series-exclusion-change, .series-exclusion-preview, .review-historical-marker,
   .task-plan-clarification, .task-plan-choice, .task-plan-choice-recommended, .task-plan-clarification-deferred, .task-plan-edit-ask-first,
@@ -1468,6 +1484,9 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .global-attention-badge { color: CanvasText; background: Canvas; border: 2px solid CanvasText; forced-color-adjust: none; }
   .global-attention-item { border-left: 2px solid CanvasText; }
   .global-attention-item[data-attention-blocked="true"] { border-left: 6px solid CanvasText; }
+  /* A lineage decision keeps its left rule without colour, dashed once a later decision superseded it (Issue #62, S27a). */
+  .learning-lineage-decision { border-left: 3px solid CanvasText; }
+  .learning-lineage-decision[data-decision-state="superseded"] { border-left-style: dashed; }
   /* A 任务 card that holds other work keeps its heavier left rule without colour (Issue #423, S77a). */
   .task-card { border-left: 2px solid CanvasText; }
   .task-card[data-task-blocked="true"] { border-left: 6px solid CanvasText; }

@@ -93,7 +93,7 @@ describe('反馈历史 words (Issue #61, S26c)', () => {
 
   it('opens at the history, says what it is not, and reads each entry by origin, dimension, verdict and reason', () => {
     // The view is named as the spec names it: 反馈历史 (Issue #61, S26c review).
-    expect(QUALITY_LEARNING_TABS.map((entry) => [entry.tab, entry.label])).toEqual([['feedback', '反馈历史'], ['learning', '学习准入']]);
+    expect(QUALITY_LEARNING_TABS.map((entry) => [entry.tab, entry.label])).toEqual([['feedback', '反馈历史'], ['learning', '学习准入'], ['audit', '学习回溯']]);
     expect([FEEDBACK_HISTORY_HEADING, FEEDBACK_HISTORY_STATUS.loading, FEEDBACK_HISTORY_STATUS.opened]).toEqual(['反馈历史', '正在读取反馈历史…', '反馈历史已打开']);
     // An entry names the people it is attributed to where they are not the Book's now, and a gone paragraph says so.
     expect(feedbackAttributionLine({ authors: ['周一'], editors: ['郑三'] })).toBe('当时的人员 · 作者：周一 · 责编：郑三');

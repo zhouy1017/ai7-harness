@@ -18,6 +18,9 @@ import {
   type LearningMaterialKind,
   type LearningMaterialProjection,
   type LearningMaterialTarget,
+  type LearningAuditStanding,
+  type LearningRemediationItemInput,
+  type LearningRemediationPreviewProjection,
 } from '../shared/protocol.js';
 import { graphemesOf } from '../shared/mark-anchor.js';
 import { canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
@@ -374,6 +377,33 @@ interface StoredDecision {
   readonly choice: LearningEligibilityChoice;
   readonly note: string | null;
   readonly recordedAt: string;
+  readonly supersedes: string | null;
+  readonly recordDigest: string;
+  /** The governing policy it was made under, by identity, mode and version. */
+  readonly basis: { readonly policy: string; readonly mode: string; readonly version: number };
+  readonly attribution: LearningAttribution | null;
+  /** The 学习补救影响预览 a 停止今后使用 was recorded against (Issue #62, S27a); `null` for a decision made in 学习准入. */
+  readonly remediationPreview: string | null;
+}
+
+/** One decision of a material's chain as 学习回溯 shows it (Issue #62, S27a; LAUD-003, LAUD-005, LAUD-009). */
+export type LearningDecisionRecord = StoredDecision;
+
+const HEX_DIGEST = /^[0-9a-f]{64}$/u;
+
+function attributionOf(value: unknown): LearningAttribution | null | false {
+  if (value === undefined) return null;
+  if (!isRecord(value) || !Number.isSafeInteger(value.peopleVersion) || (value.peopleVersion as number) < 0) return false;
+  const names = (list: unknown): list is string[] => Array.isArray(list) && list.every((name) => typeof name === 'string');
+  if (!names(value.authors) || !names(value.editors)) return false;
+  return { peopleVersion: value.peopleVersion as number, authors: value.authors, editors: value.editors };
+}
+
+function remediationOf(value: unknown, choice: unknown): string | null | false {
+  if (value === undefined) return null;
+  return isRecord(value) && typeof value.previewDigest === 'string' && HEX_DIGEST.test(value.previewDigest) && choice === 'excluded'
+    ? value.previewDigest
+    : false;
 }
 
 /** Who a decision is attributed to (FDBK-013): the Book's people as their newest version lists them. */
@@ -424,6 +454,9 @@ export class LearningEligibilityLedger {
         (record.supersedes ?? null) === (row.supersedes_decision_id ?? null) && (record.supersedes ?? null) === previousId &&
         ordinal === previousOrdinal + 1 && (record.note === null || typeof record.note === 'string'),
       'LEARNING_ELIGIBILITY_RECORD_INVALID', '学习准入记录已损坏。');
+      const attribution = attributionOf(record.attribution);
+      const remediation = remediationOf(record.remediation, record.choice);
+      requireLearning(attribution !== false && remediation !== false, 'LEARNING_ELIGIBILITY_RECORD_INVALID', '学习准入记录已损坏。');
       const entry: StoredDecision = {
         decisionId: String(row.decision_id),
         materialKey,
@@ -432,6 +465,11 @@ export class LearningEligibilityLedger {
         choice: String(row.choice) as LearningEligibilityChoice,
         note: record.note as string | null,
         recordedAt: String(row.recorded_at),
+        supersedes: (record.supersedes as string | null | undefined) ?? null,
+        recordDigest: String(row.sha256),
+        basis: record.basis as StoredDecision['basis'],
+        attribution,
+        remediationPreview: remediation,
       };
       previousMaterial = materialKey;
       previousId = entry.decisionId;
@@ -450,6 +488,14 @@ export class LearningEligibilityLedger {
     return latest;
   }
 
+  /**
+   * A material's whole chain of decisions, oldest first, each verified (Issue #62, S27a; LAUD-003, LAUD-009): the decision
+   * that stands last, every one it superseded before it, none rewritten.
+   */
+  history(bookId: string, materialKey: string): StoredDecision[] {
+    return Array.from(this.#entries(bookId, materialKey));
+  }
+
   /** Each candidate as its Review Card shows it, and where it stands. */
   project(bookId: string, candidates: ReadonlyArray<LearningMaterialCandidate>): Array<Omit<LearningMaterialProjection, 'target' | 'sourceTask'>> {
     return Array.from(this.projectEntries(bookId, candidates));
@@ -457,11 +503,16 @@ export class LearningEligibilityLedger {
 
   /** Stream current standings after validating the complete Book ledger, retaining one candidate at a time. */
   *projectEntries(bookId: string, candidates: Iterable<LearningMaterialCandidate>): IterableIterator<Omit<LearningMaterialProjection, 'target' | 'sourceTask'>> {
+    for (const [, projection] of this.projectCandidates(bookId, candidates)) yield projection;
+  }
+
+  /** As `projectEntries`, each standing beside the candidate it is of (Issue #62, S27a). */
+  *projectCandidates(bookId: string, candidates: Iterable<LearningMaterialCandidate>): IterableIterator<[LearningMaterialCandidate, Omit<LearningMaterialProjection, 'target' | 'sourceTask'>]> {
     this.#validateBook(bookId);
     for (const candidate of candidates) {
       const latest = this.#latest(bookId, candidate.materialKey);
       const digest = learningMaterialDigest(candidate);
-      yield {
+      yield [candidate, {
         materialKey: candidate.materialKey,
         kind: candidate.kind,
         digest,
@@ -472,7 +523,7 @@ export class LearningEligibilityLedger {
         state: latest === null ? 'pending' : latest.materialDigest !== digest ? 'changed' : latest.choice === 'deferred' ? 'deferred' : 'decided',
         decision: latest === null ? null : { choice: latest.choice, note: latest.note, decidedAt: latest.recordedAt },
         decisions: latest?.ordinal ?? 0,
-      };
+      }];
     }
   }
 
@@ -487,8 +538,12 @@ export class LearningEligibilityLedger {
     readonly choice: LearningEligibilityChoice;
     readonly note: string | null;
     readonly attribution: LearningAttribution;
+    /** The 学习补救影响预览 an exclusion from 学习回溯 was confirmed against (Issue #62, S27a). */
+    readonly remediationPreview?: string;
   }): void {
     requireLearning(CHOICES.includes(input.choice), 'LEARNING_ELIGIBILITY_INVALID', '学习准入的选择无效。');
+    requireLearning(input.remediationPreview === undefined || (input.choice === 'excluded' && HEX_DIGEST.test(input.remediationPreview)),
+      'LEARNING_ELIGIBILITY_INVALID', '学习准入的选择无效。');
     const note = noteOf(input.note);
     this.#validateBook(input.bookId);
     const latest = this.#latest(input.bookId, input.candidate.materialKey);
@@ -515,10 +570,96 @@ export class LearningEligibilityLedger {
       supersedes: latest?.decisionId ?? null,
       actor: ACTOR,
       recordedAt,
+      ...(input.remediationPreview === undefined ? {} : { remediation: { previewDigest: input.remediationPreview } }),
     });
     this.#db.prepare(
       `INSERT INTO learning_eligibility_decisions(decision_id, book_id, material_key, material_digest, ordinal, choice, supersedes_decision_id, recorded_at, canonical_json, sha256)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(decisionId, input.bookId, input.candidate.materialKey, digest, ordinal, input.choice, latest?.decisionId ?? null, recordedAt, record.json, record.digest);
   }
+}
+
+// ---- 学习回溯 (Issue #62, plan slice S27a; V2-UX-LAUD-001 to LAUD-012) --------------------------------------------------------
+
+/** Where a material stands for learning now: its state, and for one decided, the choice it holds. */
+export function learningAuditStanding(material: Pick<LearningMaterialProjection, 'state' | 'decision'>): LearningAuditStanding {
+  return material.state === 'decided' ? material.decision!.choice as Exclude<LearningAuditStanding, 'pending' | 'changed'> : material.state;
+}
+
+const REMEDIATION_PREVIEW_SCHEMA = 'ai7.learning-remediation-preview/1';
+
+/**
+ * 学习补救影响预览 for the materials one Book's 停止今后使用 names (LAUD-006, LAUD-010, LAUD-011), from where each stands now.
+ * The first one included for learning sets the scope and kind; every other one is included only when it was read at the
+ * version and decision count it stands at now, is included for learning in that same scope, and is of that same kind —
+ * otherwise it is left out and named with why, never coerced. Nothing reads learning material yet, so no running Task,
+ * candidate, enabled memory or completed Task is affected; every decision the included materials hold stays on record.
+ * The digest covers what the preview shows and is what the record binds: a preview whose materials moved since reads anew.
+ */
+export function learningRemediationPreview(
+  book: { readonly bookId: string; readonly title: string },
+  items: ReadonlyArray<LearningRemediationItemInput>,
+  standing: (materialKey: string) => null | {
+    readonly candidate: Pick<LearningMaterialCandidate, 'kind' | 'originLabel'>;
+    readonly projection: Pick<LearningMaterialProjection, 'digest' | 'decisions' | 'state' | 'decision'>;
+  },
+): LearningRemediationPreviewProjection {
+  const included: Array<{ materialKey: string; originLabel: string; digest: string; decisions: number }> = [];
+  const leftOut: Array<{ materialKey: string; originLabel: string | null; reason: LearningRemediationPreviewProjection['leftOut'][number]['reason'] }> = [];
+  const seen = new Set<string>();
+  let scope: 'book' | 'house' | null = null;
+  let kind: LearningMaterialKind | null = null;
+  for (const item of items) {
+    if (seen.has(item.materialKey)) {
+      leftOut.push({ materialKey: item.materialKey, originLabel: null, reason: 'duplicate' });
+      continue;
+    }
+    seen.add(item.materialKey);
+    const found = standing(item.materialKey);
+    if (found === null) {
+      leftOut.push({ materialKey: item.materialKey, originLabel: null, reason: 'not-found' });
+      continue;
+    }
+    const { candidate, projection } = found;
+    const now = learningAuditStanding(projection);
+    const reason = projection.digest !== item.materialDigest || projection.decisions !== item.expectedDecisions ? 'changed'
+      : now !== 'book' && now !== 'house' ? 'not-included'
+        : scope !== null && now !== scope ? 'different-scope'
+          : kind !== null && candidate.kind !== kind ? 'different-kind'
+            : null;
+    if (reason !== null) {
+      leftOut.push({ materialKey: item.materialKey, originLabel: candidate.originLabel, reason });
+      continue;
+    }
+    scope = now as 'book' | 'house';
+    kind = candidate.kind;
+    included.push({ materialKey: item.materialKey, originLabel: candidate.originLabel, digest: projection.digest, decisions: projection.decisions });
+  }
+  const groups = {
+    future: included.length,
+    running: 0 as const,
+    memory: 0 as const,
+    completed: 0 as const,
+    decisionsKept: included.reduce((sum, entry) => sum + entry.decisions, 0),
+  };
+  const previewDigest = sha256Hex(canonicalJson({
+    schema: REMEDIATION_PREVIEW_SCHEMA,
+    bookId: book.bookId,
+    disposition: 'excluded',
+    scope,
+    kind,
+    included: included.map(({ materialKey, digest, decisions }) => ({ materialKey, digest, decisions })),
+    leftOut: leftOut.map(({ materialKey, reason }) => ({ materialKey, reason })),
+    groups,
+  }));
+  return {
+    bookId: book.bookId,
+    bookTitle: book.title,
+    scope,
+    kind,
+    included: included.map(({ materialKey, originLabel }) => ({ materialKey, originLabel })),
+    leftOut,
+    groups,
+    previewDigest,
+  };
 }

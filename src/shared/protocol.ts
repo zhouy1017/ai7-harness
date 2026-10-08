@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 97 as const;
+export const SERVICE_PROTOCOL_VERSION = 98 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -141,6 +141,10 @@ export const IPC_CHANNELS = {
   decideLearningMaterial: 'ai7:j11:decide-learning-material',
   inspectLearningMaterial: 'ai7:j11:inspect-learning-material',
   inspectFeedbackHistory: 'ai7:j11:inspect-feedback-history',
+  inspectLearningAudit: 'ai7:j11:inspect-learning-audit',
+  inspectLearningLineage: 'ai7:j11:inspect-learning-lineage',
+  previewLearningRemediation: 'ai7:j11:preview-learning-remediation',
+  recordLearningRemediation: 'ai7:j11:record-learning-remediation',
   inspectEvaluationCalibration: 'ai7:j12:inspect-evaluation-calibration',
   recordPublicationActuals: 'ai7:j12:record-publication-actuals',
   setEvaluationPreferences: 'ai7:j12:set-evaluation-preferences',
@@ -6304,6 +6308,174 @@ export interface FeedbackHistoryProjection {
   readonly truncated: boolean;
 }
 
+// ---- 质量与学习 › 学习回溯 (Issue #62, plan slice S27a; V2-UX-LAUD-001 to LAUD-012) -----------------------------------------
+
+/**
+ * Where a material stands for learning now, as 学习回溯 lists and filters it (LAUD-001, LAUD-002): waiting for a decision,
+ * changed since the one it had, left for later, included for its Book or for the house, or excluded.
+ */
+export type LearningAuditStanding = 'pending' | 'changed' | 'deferred' | 'book' | 'house' | 'excluded';
+export const LEARNING_AUDIT_STANDINGS: readonly LearningAuditStanding[] = ['pending', 'changed', 'deferred', 'book', 'house', 'excluded'];
+
+/** The materials one answer of 学习回溯 carries, Book by Book; `更多学习材料…` reads the next. */
+export const MAX_LEARNING_AUDIT_PAGE = 40;
+/** The longest search a 学习回溯 filter carries, in UTF-16 units. */
+export const MAX_LEARNING_AUDIT_QUERY = 100;
+/** The newest decisions a Learning Lineage Explorer shows of one chain; earlier ones are counted. */
+export const MAX_LEARNING_LINEAGE_DECISIONS = 50;
+/** The most materials one 停止今后使用 names. */
+export const MAX_LEARNING_REMEDIATION_ITEMS = 40;
+
+/**
+ * 学习回溯's filters (LAUD-002), each applied before the page is cut; omitted or `null` means all. A Series names the Books
+ * it holds now. Candidate, memory, downstream-use and historical-impact filters wait for the records they would filter.
+ */
+export interface LearningAuditInput {
+  readonly bookId?: string | null;
+  readonly seriesId?: string | null;
+  readonly kind?: LearningMaterialKind | null;
+  readonly standing?: LearningAuditStanding | null;
+  /** Inclusive lower and exclusive upper UTC instants of when each material was recorded or last changed. */
+  readonly recordedFrom?: string | null;
+  readonly recordedBefore?: string | null;
+  /** Words found in a material's origin or bounded excerpt, case folded. */
+  readonly query?: string | null;
+  readonly after?: LearningMaterialCursor | null;
+}
+
+/** One material as 学习回溯 lists it: what it is, where it stands, and what used it (LAUD-001). */
+export interface LearningAuditMaterialProjection {
+  readonly materialKey: string;
+  readonly kind: LearningMaterialKind;
+  readonly digest: string;
+  readonly originLabel: string;
+  readonly recordedAt: string;
+  readonly excerpt: ReadonlyArray<string>;
+  readonly standing: LearningAuditStanding;
+  /** How many decisions it holds: the count the next one names. */
+  readonly decisions: number;
+  /** When the decision that stands — or, when it changed, the one it had — was made. */
+  readonly decidedAt: string | null;
+  /**
+   * How many Tasks used it. Nothing in AI7 reads learning material yet — no Learning Signal, Memory Candidate or memory is
+   * made of it — so it is none, and says so.
+   */
+  readonly downstreamTasks: 0;
+}
+
+export interface LearningAuditBookProjection {
+  readonly bookId: string;
+  readonly title: string;
+  readonly authors: ReadonlyArray<string>;
+  readonly editors: ReadonlyArray<string>;
+  /** How many of its materials match the filters, whichever page shows them. */
+  readonly materialCount: number;
+  readonly materials: ReadonlyArray<LearningAuditMaterialProjection>;
+}
+
+/** 质量与学习 › 学习回溯: one page of the Books whose material matches, Book by Book (LAUD-001). A read. */
+export interface LearningAuditProjection {
+  readonly books: ReadonlyArray<LearningAuditBookProjection>;
+  readonly nextCursor: LearningMaterialCursor | null;
+}
+
+/** One decision of a material's chain (LAUD-003, LAUD-005, LAUD-009): none rewritten, a later one superseding. */
+export interface LearningLineageDecisionProjection {
+  readonly decisionId: string;
+  readonly ordinal: number;
+  readonly choice: LearningEligibilityChoice;
+  readonly note: string | null;
+  readonly recordedAt: string;
+  /** Whether a later decision superseded it. */
+  readonly superseded: boolean;
+  /** Whether it was made on the material as it reads now; one made on an earlier version binds it no longer. */
+  readonly currentVersion: boolean;
+  /**
+   * Whether it is a 停止今后使用 recorded in 学习回溯 against a preview (`learning-audit`) or any other decision
+   * (`learning-eligibility`) — a 重新纳入 made in 学习回溯 included, since it is an ordinary decision and records no origin.
+   */
+  readonly via: 'learning-eligibility' | 'learning-audit';
+  /** The Book's 作者 and 责编 it was attributed to; `null` for none recorded. */
+  readonly attribution: null | { readonly peopleVersion: number; readonly authors: ReadonlyArray<string>; readonly editors: ReadonlyArray<string> };
+  /** 审计详情 (LAUD-005): the exact version it bound, the decision it superseded, its record and governing basis. */
+  readonly audit: {
+    readonly materialDigest: string;
+    readonly supersedes: string | null;
+    readonly recordDigest: string;
+    readonly basis: string;
+    readonly remediationPreview: string | null;
+  };
+}
+
+/**
+ * One material's Learning Lineage Explorer (LAUD-003 to LAUD-005): 学习材料 → 准入决定 → 学习信号 → 记忆候选 → 已启用记忆 →
+ * 使用过的任务. The last four are empty because nothing in AI7 makes them yet; each count says none.
+ */
+export interface LearningLineageProjection {
+  readonly bookId: string;
+  readonly bookTitle: string;
+  readonly material: LearningMaterialProjection;
+  readonly standing: LearningAuditStanding;
+  /** The newest `MAX_LEARNING_LINEAGE_DECISIONS` decisions, oldest first, the last the one that stands. */
+  readonly decisions: ReadonlyArray<LearningLineageDecisionProjection>;
+  /** How many earlier decisions the chain holds beyond those. */
+  readonly earlierDecisions: number;
+  readonly downstream: { readonly signals: 0; readonly memoryCandidates: 0; readonly activeMemories: 0; readonly tasks: 0 };
+}
+
+/** One material a 停止今后使用 names, at the version and decision count the editor read. */
+export interface LearningRemediationItemInput {
+  readonly materialKey: string;
+  readonly materialDigest: string;
+  readonly expectedDecisions: number;
+}
+
+/** 停止今后使用 (LAUD-006, LAUD-010): one Book's selected materials, one or many. */
+export interface PreviewLearningRemediationInput {
+  readonly bookId: string;
+  readonly items: ReadonlyArray<LearningRemediationItemInput>;
+}
+
+/** Why a material named is left out of the batch, named rather than coerced (LAUD-011). */
+export type LearningRemediationLeftOut = 'not-found' | 'changed' | 'not-included' | 'different-scope' | 'different-kind' | 'duplicate';
+
+/**
+ * 学习补救影响预览 (LAUD-006): what stopping future use of the included materials changes, in the four groups — 未来使用,
+ * 正在运行, 候选或已启用记忆 and 已完成历史 — with what was left out and why. A read; `previewDigest` binds the record.
+ */
+export interface LearningRemediationPreviewProjection {
+  readonly bookId: string;
+  readonly bookTitle: string;
+  /** The one scope and kind every included material shares; `null` when none is included. */
+  readonly scope: 'book' | 'house' | null;
+  readonly kind: LearningMaterialKind | null;
+  readonly included: ReadonlyArray<{ readonly materialKey: string; readonly originLabel: string }>;
+  readonly leftOut: ReadonlyArray<{ readonly materialKey: string; readonly originLabel: string | null; readonly reason: LearningRemediationLeftOut }>;
+  readonly groups: {
+    /** The included materials stop being eligible for any later learning. */
+    readonly future: number;
+    /** Running Tasks that read them: none, since no Task reads learning material yet. */
+    readonly running: 0;
+    /** Candidates or enabled memory made of them: none, since none is made yet. */
+    readonly memory: 0;
+    /** Completed Tasks that used them: none; the decisions they hold stay on record. */
+    readonly completed: 0;
+    readonly decisionsKept: number;
+  };
+  readonly previewDigest: string;
+}
+
+export interface RecordLearningRemediationInput extends PreviewLearningRemediationInput {
+  readonly previewDigest: string;
+}
+
+/** Each material's own outcome (LAUD-011): those excluded now, and those left out with why. */
+export interface LearningRemediationOutcomeProjection {
+  readonly bookId: string;
+  readonly recorded: ReadonlyArray<{ readonly materialKey: string; readonly originLabel: string }>;
+  readonly leftOut: LearningRemediationPreviewProjection['leftOut'];
+}
+
 // ---- 设置 › 评估校准与预测 (Issue #430, plan slice S82; V2-UX-EVAL-010, EVAL-011, EVAL-014) --------------------------------------
 
 /** One published Book's 定价与首印 as the editor entered them for one 发稿版本. */
@@ -9925,6 +10097,10 @@ export interface ServiceOperationMap {
   /** 记录学习准入决定, answered with the one material it decided. */
   decideLearningMaterial: { input: DecideLearningMaterialInput; output: LearningMaterialProjection };
   inspectFeedbackHistory: { input: FeedbackHistoryInput; output: FeedbackHistoryProjection };
+  inspectLearningAudit: { input: LearningAuditInput; output: LearningAuditProjection };
+  inspectLearningLineage: { input: { bookId: string; materialKey: string }; output: LearningLineageProjection };
+  previewLearningRemediation: { input: PreviewLearningRemediationInput; output: LearningRemediationPreviewProjection };
+  recordLearningRemediation: { input: RecordLearningRemediationInput; output: LearningRemediationOutcomeProjection };
   inspectEvaluationCalibration: { input: InspectEvaluationCalibrationInput; output: EvaluationCalibrationProjection };
   recordPublicationActuals: { input: RecordPublicationActualsInput; output: EvaluationCalibrationProjection };
   setEvaluationPreferences: { input: SetEvaluationPreferencesInput; output: EvaluationCalibrationProjection };
@@ -10352,6 +10528,10 @@ export interface RendererApi {
   inspectLearningMaterial(input: { bookId: string; materialKey: string }): Promise<LearningMaterialProjection>;
   decideLearningMaterial(input: DecideLearningMaterialInput): Promise<LearningMaterialProjection>;
   inspectFeedbackHistory(input?: FeedbackHistoryInput): Promise<FeedbackHistoryProjection>;
+  inspectLearningAudit(input?: LearningAuditInput): Promise<LearningAuditProjection>;
+  inspectLearningLineage(input: { bookId: string; materialKey: string }): Promise<LearningLineageProjection>;
+  previewLearningRemediation(input: PreviewLearningRemediationInput): Promise<LearningRemediationPreviewProjection>;
+  recordLearningRemediation(input: RecordLearningRemediationInput): Promise<LearningRemediationOutcomeProjection>;
   inspectEvaluationCalibration(input?: InspectEvaluationCalibrationInput): Promise<EvaluationCalibrationProjection>;
   recordPublicationActuals(input: RecordPublicationActualsInput): Promise<EvaluationCalibrationProjection>;
   setEvaluationPreferences(input: SetEvaluationPreferencesInput): Promise<EvaluationCalibrationProjection>;
