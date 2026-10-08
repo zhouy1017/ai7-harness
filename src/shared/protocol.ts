@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 100 as const;
+export const SERVICE_PROTOCOL_VERSION = 101 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -109,6 +109,10 @@ export const IPC_CHANNELS = {
   prepareEvaluationRewrite: 'ai7:j11:prepare-evaluation-rewrite',
   authorizeEvaluationRewrite: 'ai7:j11:authorize-evaluation-rewrite',
   decideEvaluationRewrite: 'ai7:j11:decide-evaluation-rewrite',
+  inspectWritingTask: 'ai7:j07:inspect-writing-task',
+  prepareWritingTask: 'ai7:j07:prepare-writing-task',
+  authorizeWritingTask: 'ai7:j07:authorize-writing-task',
+  createWritingDraft: 'ai7:j07:create-writing-draft',
   inspectAnalysisFeedback: 'ai7:j11:inspect-analysis-feedback',
   recordAnalysisFeedback: 'ai7:j11:record-analysis-feedback',
   readLibraryDecisionReason: 'ai7:j15:read-library-decision-reason',
@@ -2492,7 +2496,11 @@ export const INITIAL_EVALUATION_ASSURANCE_STATEMENT =
 /** 按我的评分重写评语 (Issue #429, S81b2): words to the editor's scores, never a number — 采用 is the editor's (V2-UX-EVAL-008). */
 export const EVALUATION_REWRITE_ASSURANCE_STATEMENT =
   '重写的评语是模型按编辑的评分与所读稿件写成的建议文字，只在编辑采用后才记入评估；它不改任何分数，也不选定结论。' as const;
+/** 写作任务 (Issue #432, S84a): a document draft the editor edits, with an exemplar only referenced (V2-UX-DELIV-007, KB-004). */
+export const WRITING_ASSURANCE_STATEMENT =
+  '写作草稿是模型依据本书的稿件与所列参考材料写成的文档草稿，由编辑在稿件编辑面上修改；范例只作参照，不照抄；草稿不会交付或发送。' as const;
 export type AnalysisAssuranceStatement =
+  | typeof WRITING_ASSURANCE_STATEMENT
   | typeof BASELINE_ANALYSIS_ASSURANCE_STATEMENT
   | typeof FACTUAL_REVIEW_ASSURANCE_STATEMENT
   | typeof REVIEW_CATEGORY_ASSURANCE_STATEMENT
@@ -2678,6 +2686,48 @@ export const EVALUATION_REWRITE_LIVE_UNAVAILABLE =
   '按我的评分重写评语暂不可用：当前的模型处理策略没有写明评语重写可以发送给模型，在这个运行范围下不能准备或开始。' as const;
 
 /**
+ * 写作任务 (Issue #432, plan slice S84a; V2-UX-DELIV-007, KB-004; editor-surfaces §9 新建文档 · 写作任务): the writing kind, on
+ * the same real path as the others, read under its own exact-versioned contract `ai7.writing/1`. It drafts one Production
+ * Document of a house type: each Analysis Unit is read for the passages the document can draw on — a highlight, a character,
+ * a theme or background — each citing its blocks; one book-level synthesis then writes the document's title and sections from
+ * those passages, the Book's metadata, its synopsis and characters, its 定稿 evaluation's conclusion and marketing points, the
+ * house's 范例 of the type — referenced, never copied — and the audience, channel and requirements the editor wrote. The draft
+ * is an Editorial Artifact in the document's 起草 phase; nothing of it is delivered or sent.
+ */
+export const WRITING_KIND = 'writing' as const;
+export const WRITING_CONTRACT_VERSION = 'ai7.writing/1' as const;
+export const WRITING_EXPECTED_OUTCOME = '生产文档草稿结果集修订版（写作契约 v1）' as const;
+/** The first writing Task of a Book, and every later one, of whatever type: the whole manuscript read again, nothing carried over. */
+export type WritingTaskMode = 'writing-first' | 'writing-again';
+export const WRITING_TASK_MODES: readonly WritingTaskMode[] = ['writing-first', 'writing-again'];
+export const WRITING_UPDATE_MODES: readonly WritingTaskMode[] = ['writing-again'];
+export const WRITING_MODE_GOALS = {
+  'writing-first': '起草生产文档：逐单元找出文档可以取用的看点、人物与主题并引用内容块，再依据所列参考材料与编辑写的受众、渠道和要求写出文档的标题与各部分，范例只作参照，形成结果集修订版。',
+  'writing-again': '再次起草生产文档：按当前覆盖清单重读每个分析单元，不沿用以前的结果，依据所列参考材料重新写出文档的标题与各部分，范例只作参照，追加一个结果集修订版。',
+} as const satisfies Record<WritingTaskMode, string>;
+export type WritingGoal = (typeof WRITING_MODE_GOALS)[WritingTaskMode];
+export const WRITING_MODE_LABELS = {
+  'writing-first': '起草文档',
+  'writing-again': '再次起草文档',
+} as const satisfies Record<WritingTaskMode, string>;
+export const WRITING_MODE_MEANINGS = {
+  'writing-first': '对固定的任务输入修订版派生覆盖清单并逐单元执行写作契约 v1，再做一次全书综合，形成首个结果集修订版。',
+  'writing-again': '绕过全部既有单元结果，按当前覆盖清单重读每个分析单元并重新做全书综合，追加一个结果集修订版。',
+} as const satisfies Record<WritingTaskMode, string>;
+/** Under a live scope no Provider Processing policy names the writing kind yet: nothing is prepared or started there. */
+export const WRITING_LIVE_UNAVAILABLE =
+  '写作任务暂不可用：当前的模型处理策略没有写明写作任务可以发送给模型，在这个运行范围下不能准备或开始起草。' as const;
+/**
+ * 快速开始 of a writing Task waits for a 默认执行规则 of the writing kind (S84b): until then it is shown disabled with this reason,
+ * and every writing Task is started from its plan (S75 D6: no rule, no quick start).
+ */
+export const WRITING_QUICK_START_REASON = '写作任务还没有默认执行规则：先看计划，再在计划里开始任务。' as const;
+/** The editor's own words for the draft: who reads it, where it appears, and anything else it must do. */
+export const MAX_WRITING_AUDIENCE_GRAPHEMES = 60;
+export const MAX_WRITING_CHANNEL_GRAPHEMES = 60;
+export const MAX_WRITING_REQUIREMENTS_GRAPHEMES = 300;
+
+/**
  * The review-category kind family (Issue #417, plan slice S69): one analysis kind per Review Category,
  * `editorial-review/<categoryId>`, all read under the one exact-versioned contract
  * `ai7.editorial-review/1`. The categories themselves are configuration (V2-UX-REV-002: a house may
@@ -2767,10 +2817,11 @@ export function reviewCategoryExpectedOutcome(label: string): string {
 
 /** Every analysis kind a Book may hold, and every Task mode any of them declares. */
 export type AnalysisKindId = typeof BASELINE_ANALYSIS_KIND | typeof FACTUAL_REVIEW_KIND | ReviewCategoryKindId | typeof INITIAL_EVALUATION_KIND |
-  typeof READERS_REPORT_KIND | typeof EVALUATION_REWRITE_KIND;
+  typeof READERS_REPORT_KIND | typeof EVALUATION_REWRITE_KIND | typeof WRITING_KIND;
 export type AnalysisTaskMode = BaselineAnalysisTaskMode | FactualReviewTaskMode | ReviewCategoryTaskMode | InitialEvaluationTaskMode | ReadersReportTaskMode |
-  EvaluationRewriteTaskMode;
-export type AnalysisGoal = BaselineAnalysisGoal | FactualReviewGoal | ReviewCategoryGoal | InitialEvaluationGoal | ReadersReportGoal | EvaluationRewriteGoal;
+  EvaluationRewriteTaskMode | WritingTaskMode;
+export type AnalysisGoal = BaselineAnalysisGoal | FactualReviewGoal | ReviewCategoryGoal | InitialEvaluationGoal | ReadersReportGoal | EvaluationRewriteGoal |
+  WritingGoal;
 
 /** An explicit editor choice over exact block positions of the Task Input revision (inclusive). */
 export interface BaselineAnalysisSelectedRange {
@@ -4371,6 +4422,171 @@ export interface EvaluationRewriteProjection extends Omit<
   inspectedRevision: null | { revision: EvaluationRewriteResultSetRevisionProjection; current: boolean; readOnly: true };
 }
 
+// ---- 写作任务 (Issue #432, plan slice S84a; V2-UX-DELIV-007) ------------------------------------------------------------
+
+/** What a passage the document can draw on is: a highlight to lead with, a character, or a theme or background. */
+export type WritingPassageKind = 'highlight' | 'character' | 'theme';
+export const WRITING_PASSAGE_KINDS: readonly WritingPassageKind[] = ['highlight', 'character', 'theme'];
+
+/** One passage AI7 noted in one reading range for the document, with the blocks it rests on. */
+export interface WritingPassageProjection {
+  unitOrdinal: number;
+  kind: WritingPassageKind;
+  note: string;
+  blockIds: ReadonlyArray<string>;
+}
+
+/** The document as the book-level synthesis wrote it: a title, then each section's heading and paragraphs. */
+export interface WritingDraftWordsProjection {
+  title: string;
+  sections: ReadonlyArray<{ heading: string; paragraphs: ReadonlyArray<string> }>;
+}
+
+/** The writing kind's own component of a Result Set Revision. */
+export interface WritingResultProjection {
+  /** The house type the draft is of, by its identity and its label. */
+  typeId: string;
+  typeLabel: string;
+  /** The house's 范例 of the type the draft referenced, and what the plan said of them. */
+  exemplars: { count: number; statement: string };
+  passages: ReadonlyArray<WritingPassageProjection>;
+  /** `null` when the book-level synthesis did not close — a refused copy of an exemplar included: AI7 then wrote no draft. */
+  draft: WritingDraftWordsProjection | null;
+  synthesis: { state: 'closed' | 'gap' | 'not-run'; reason: string | null };
+}
+
+export interface WritingRevisionUpdateProjection extends Omit<ReviewCategoryRevisionUpdateProjection, 'mode'> {
+  mode: WritingTaskMode;
+}
+
+export type WritingUnitProjection =
+  | {
+      unitOrdinal: number;
+      state: 'closed';
+      requestDigest: string;
+      responseDigest: string;
+      usage: { inputTokens: number; outputTokens: number } | null;
+      lineage: ReviewCategoryUnitLineage;
+      passages: ReadonlyArray<{ kind: WritingPassageKind; note: string; blockOrdinals: ReadonlyArray<number> }>;
+    }
+  | { unitOrdinal: number; state: 'gap'; requestDigest: string; lineage: ReviewCategoryUnitLineage; gap: AnalysisGapProjection };
+
+export interface WritingResultSetRevisionProjection extends Omit<
+  ReviewCategoryResultSetRevisionProjection,
+  'contractVersion' | 'update' | 'category' | 'findings' | 'excluded' | 'findingCounts' | 'units'
+> {
+  contractVersion: typeof WRITING_CONTRACT_VERSION;
+  update: WritingRevisionUpdateProjection;
+  writing: WritingResultProjection;
+  units: ReadonlyArray<WritingUnitProjection>;
+}
+
+export interface WritingUpdateProjection extends Omit<ReviewCategoryUpdateProjection, 'mode'> {
+  mode: 'writing-again';
+}
+
+export interface WritingUpdateControlsProjection extends Omit<BaselineAnalysisUpdateControlsProjection, 'actions'> {
+  actions: { 'writing-again': Omit<ReviewCategoryUpdateActionProjection, 'mode'> & { mode: 'writing-again' } };
+}
+
+export interface WritingHistoryEntryProjection extends Omit<BaselineAnalysisHistoryEntryProjection, 'mode' | 'contractVersion' | 'counts'> {
+  mode: WritingTaskMode;
+  contractVersion: typeof WRITING_CONTRACT_VERSION;
+  counts: ReviewScopePlanCounts;
+}
+
+export interface WritingHistoryProjection {
+  resultSetId: string;
+  kind: typeof WRITING_KIND;
+  createdAt: string;
+  latestOrdinal: number;
+  entries: ReadonlyArray<WritingHistoryEntryProjection>;
+}
+
+/** The writing kind's Task projection: a member of the analysis projection union, discriminated on `kind`. */
+export interface WritingProjection extends Omit<
+  BaselineAnalysisProjection,
+  'kind' | 'contractVersion' | 'taskIntent' | 'executionPlan' | 'resultSetRevision' | 'update' | 'updateControls' | 'history' | 'inspectedRevision'
+> {
+  kind: typeof WRITING_KIND;
+  contractVersion: typeof WRITING_CONTRACT_VERSION;
+  taskIntent: null | {
+    taskIntentId: string;
+    goal: WritingGoal;
+    expectedOutcome: typeof WRITING_EXPECTED_OUTCOME;
+    createdAt: string;
+    mode: WritingTaskMode;
+    modeLabel: string;
+  };
+  executionPlan: null | {
+    steps: ReadonlyArray<string>;
+    effects: readonly [];
+    unitCount: number;
+    recomputedUnitCount?: number;
+    reusedUnitCount?: number;
+    unreviewedUnitCount?: number;
+    reducerStages: readonly ['unit-validation', 'cross-unit-reduction', 'book-synthesis'];
+    stopCondition: string;
+  };
+  resultSetRevision: null | WritingResultSetRevisionProjection;
+  update: null | WritingUpdateProjection;
+  updateControls: null | WritingUpdateControlsProjection;
+  history: null | WritingHistoryProjection;
+  inspectedRevision: null | { revision: WritingResultSetRevisionProjection; current: boolean; readOnly: true };
+}
+
+/** One house type in 新建文档 · 写作任务 (DELIV-007): whether a writing Task may draft it now, and what it would reference. */
+export interface WritingTaskTypeProjection {
+  readonly typeId: string;
+  readonly label: string;
+  /** 先看计划, or why this type cannot be drafted now — it has a document, it is 本书不做, or a Task is under way. */
+  readonly prepare: { readonly allowed: true; readonly mode: WritingTaskMode } | { readonly allowed: false; readonly reason: string };
+  /** The house's 范例 of this type from other Books a draft would reference — never copy — and the plan's line for them. */
+  readonly exemplars: { readonly count: number; readonly statement: string };
+  /** The newest drafted result of this type whose document has not been made yet: 打开草稿 makes it the document. */
+  readonly drafted: null | { readonly revisionId: string; readonly createdAt: string };
+}
+
+/**
+ * 新建文档 · 写作任务 on ⑥ 交付物 (Issue #432, S84a; V2-UX-DELIV-007): the house types, what every draft references — each
+ * line saying what is there or that there is none — the four consequence rows, the Book's latest writing Task, and why
+ * 快速开始 is not offered yet.
+ */
+export interface WritingTaskProjection {
+  readonly bookId: string;
+  /** Why no writing Task can be prepared at all — no manuscript, a live scope, or a damaged record — or `null`. */
+  readonly unavailable: string | null;
+  readonly references: {
+    /** 梗概与人物: the Book's latest baseline analysis, or that it has none. */
+    readonly synopsis: string;
+    /** 评估结论与营销要点: the latest 定稿 version, or that there is none. */
+    readonly evaluation: string;
+    /** 图书信息: title, authors, editors and 书系 as they stand. */
+    readonly book: string;
+  };
+  /** The four rows (editor-surfaces §9: 四行后果): 会读取 · 会发送 · 不会做 · 费用. */
+  readonly consequences: { readonly read: string; readonly send: string; readonly notDo: string; readonly cost: string };
+  readonly types: ReadonlyArray<WritingTaskTypeProjection>;
+  /** The Book's latest writing Task, which the Task Drawer opens; `null` before the first is prepared. */
+  readonly task: null | {
+    readonly taskIntentId: string;
+    readonly typeId: string;
+    readonly typeLabel: string;
+    readonly state: BaselineAnalysisProjection['state'];
+    readonly label: string;
+  };
+  /** 快速开始 is not offered before a writing 默认执行规则 exists (S84b). */
+  readonly quickStart: { readonly allowed: false; readonly reason: typeof WRITING_QUICK_START_REASON };
+}
+
+/** 打开草稿's answer: the document the draft became, of its type, and 新建文档 · 写作任务 as it stands after it. */
+export interface WritingDraftCreatedProjection {
+  readonly writing: WritingTaskProjection;
+  readonly typeId: string;
+  readonly typeLabel: string;
+  readonly document: ProductionDocumentProjection;
+}
+
 // ---- 审阅记录 Review Runs (Issue #417, plan slice S69) ---------------------------------------------
 
 /**
@@ -4858,8 +5074,10 @@ export interface ReviewFindingOfMarkProjection {
  * slice that brings its ledger; nothing here is an authority record of its own. AI7's 初评 (Issue #429, S81b1) joins them
  * with its own ledger.
  */
-export type TaskPlanKind = 'fixed-task' | 'baseline-analysis' | 'review-run' | 'initial-evaluation' | 'readers-report' | 'evaluation-rewrite';
-export const TASK_PLAN_KINDS: readonly TaskPlanKind[] = ['fixed-task', 'baseline-analysis', 'review-run', 'initial-evaluation', 'readers-report', 'evaluation-rewrite'];
+export type TaskPlanKind = 'fixed-task' | 'baseline-analysis' | 'review-run' | 'initial-evaluation' | 'readers-report' | 'evaluation-rewrite' | 'writing';
+export const TASK_PLAN_KINDS: readonly TaskPlanKind[] = [
+  'fixed-task', 'baseline-analysis', 'review-run', 'initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing',
+];
 
 /** Which plan the drawer reads. The Book is always the route's; the renderer never names it. */
 export interface InspectTaskPlanInput {
@@ -7858,7 +8076,7 @@ export interface QuickStartBaselineAnalysisResult {
 
 /** Every analysis projection, discriminated on `kind`. */
 export type AnalysisProjection = BaselineAnalysisProjection | FactualReviewProjection | ReviewCategoryProjection | InitialEvaluationProjection |
-  ReadersReportProjection | EvaluationRewriteProjection;
+  ReadersReportProjection | EvaluationRewriteProjection | WritingProjection;
 
 export interface HistoricalRevisionProjection {
   mode: 'historical-revision';
@@ -8558,9 +8776,10 @@ export interface ProductionDocumentProjection {
   /**
    * The Book's source material it was made from, and how many of its 批注与修订 the document did not carry (Issue #547):
    * its text was read with every tracked change rejected and its comments left out. `null` for a document made before
-   * the count was recorded.
+   * the count was recorded. `drafted`: the document began as AI7's writing draft (Issue #432, S84a) — its words were read from
+   * no file, and the Source Version is the manuscript file of the revision its writing Task read.
    */
-  origin: { sourceVersionId: string; displayName: string; marksNotCarried: number | null };
+  origin: { sourceVersionId: string; displayName: string; marksNotCarried: number | null; drafted: boolean };
   /** Newest first, at most `MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED`. */
   versions: ReadonlyArray<ProductionDocumentVersionProjection>;
   versionsTruncated: boolean;
@@ -9748,12 +9967,12 @@ export interface ServiceJobProjection {
    */
   kind: 'search' | 'replacement' | 'reimport-preparation' | 'reimport-resolution' | 'reimport-commit' |
     'task-authorization-preparation' | 'baseline-analysis-preparation' | 'review-run-preparation' | 'package-export' |
-    'initial-evaluation-preparation' | 'readers-report-preparation' | 'evaluation-rewrite-preparation';
+    'initial-evaluation-preparation' | 'readers-report-preparation' | 'evaluation-rewrite-preparation' | 'writing-preparation';
   state: 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
   progress: { completed: number; total: number; label: string };
   result: SearchSummaryProjection | ReplacementPreviewProjection | ReviewBeforeManuscriptReimportProjection |
     ManuscriptReimportCommitProjection | TaskAuthorizationProjection | BaselineAnalysisProjection | ReviewWorkspaceProjection | BookDeliveryPackageExportResultProjection |
-    EvaluationWorkspaceProjection | null;
+    EvaluationWorkspaceProjection | WritingTaskProjection | null;
   failure: null | { code: string; message: string };
 }
 
@@ -10322,6 +10541,29 @@ export interface ServiceOperationMap {
     input: { bookId: string; revisionId: string; decision: EvaluationRewriteDecision };
     output: EvaluationWorkspaceProjection;
   };
+  /** 新建文档 · 写作任务 (Issue #432, S84a; DELIV-007): the house types, what a draft references, and the Book's latest writing Task. */
+  inspectWritingTask: {
+    input: { bookId: string };
+    output: WritingTaskProjection;
+  };
+  /**
+   * 先看计划 of a writing Task: one house type and the editor's audience, channel and requirements, prepared as one cooperative
+   * job. The completed job's result is 新建文档 · 写作任务 with the prepared Task named, whose plan the Task Drawer opens.
+   */
+  prepareWritingTask: {
+    input: { bookId: string; typeId: string; audience: string; channel: string; requirements: string | null };
+    output: ServiceJobProjection;
+  };
+  /** 开始任务 in the drawer's bar for a writing Task. */
+  authorizeWritingTask: {
+    input: { bookId: string; taskIntentId: string; planEnvelopeDigest: string };
+    output: WritingTaskProjection;
+  };
+  /** 打开草稿: one drafted result made the type's document, its 起草 phase started; once per type of a Book. */
+  createWritingDraft: {
+    input: { bookId: string; revisionId: string };
+    output: WritingDraftCreatedProjection;
+  };
   /** ②A 分析反馈 (Issue #94, S38): one Result Set Revision's items with their latest judgments, and the Book's metric. */
   inspectAnalysisFeedback: {
     input: { bookId: string; revisionId: string };
@@ -10838,6 +11080,14 @@ export interface RendererApi {
   authorizeEvaluationRewrite(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<EvaluationWorkspaceProjection>;
   /** 采用 or 放弃 one rewrite of the version on show. */
   decideEvaluationRewrite(input: { revisionId: string; decision: EvaluationRewriteDecision }): Promise<EvaluationWorkspaceProjection>;
+  /** 新建文档 · 写作任务 of the Book the window is showing (Issue #432, S84a); the renderer never names the Book. */
+  inspectWritingTask(): Promise<WritingTaskProjection>;
+  /** 先看计划 of a writing Task: a `writing-preparation` job; its plan opens in the Task Drawer. */
+  prepareWritingTask(input: { typeId: string; audience: string; channel: string; requirements: string | null }): Promise<ServiceJobProjection>;
+  /** The Task Drawer bar's 开始任务 for a writing Task. */
+  authorizeWritingTask(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<WritingTaskProjection>;
+  /** 打开草稿: the drafted result made the type's document in its 起草 phase; the renderer then opens it on the editing surface. */
+  createWritingDraft(input: { revisionId: string }): Promise<WritingDraftCreatedProjection>;
   /** ②A 分析反馈 of the Book the window is showing (Issue #94, S38); the renderer never names the Book. */
   inspectAnalysisFeedback(input: { revisionId: string }): Promise<AnalysisFeedbackProjection>;
   recordAnalysisFeedback(input: RecordAnalysisFeedbackInput): Promise<AnalysisFeedbackProjection>;

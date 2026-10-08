@@ -417,6 +417,7 @@ export const TASK_BAR_OUTCOMES: Readonly<Record<TaskPlanKind, string>> = {
   'initial-evaluation': 'AI7 初评',
   'readers-report': '审稿意见草稿',
   'evaluation-rewrite': '按你的评分重写的评语（待你采用）',
+  writing: '文档草稿（打开后处于「起草」阶段）',
 };
 
 /** Where each kind's Run is followed once it started (AUTH-007): the record's card, ②A or ②B. */
@@ -427,6 +428,7 @@ export const TASK_BAR_RUN_LINKS: Readonly<Record<TaskPlanKind, string>> = {
   'initial-evaluation': '查看评估',
   'readers-report': '查看评估',
   'evaluation-rewrite': '查看评估',
+  writing: '查看交付物',
 };
 
 /** The bar's actions, each by the `data-task-drawer-control` it carries. */

@@ -1032,8 +1032,9 @@ describe('decodeRequest rejects malformed frames', () => {
       { bookId, kind: 'fixed-task' },
       { kind: 'fixed-task', ref: null },
       { bookId: 'not-a-uuid', kind: 'fixed-task', ref: null },
-      // A kind with no ledger of its own has no plan to read yet (S72 D1).
-      { bookId, kind: 'writing', ref: null },
+      // A kind with no ledger of its own has no plan to read yet (S72 D1); 写作任务 has one since Issue #432 (S84a), named by
+      // its Task or read as the Book's latest, but never by anything else.
+      { bookId, kind: 'writing', ref: 'latest' },
       { bookId, kind: 'selection-task', ref: null },
       { bookId, kind: null, ref: null },
       { bookId, kind: 'baseline-analysis', ref: 'latest' },
@@ -1207,6 +1208,13 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'authorizeEvaluationRewrite', input: { bookId, taskIntentId: recordId, planEnvelopeDigest: 'b'.repeat(64) } },
       { op: 'decideEvaluationRewrite', input: { bookId, revisionId: recordId, decision: 'accept' } },
       { op: 'decideEvaluationRewrite', input: { bookId, revisionId: recordId, decision: 'discard' } },
+      // 写作任务 (Issue #432, S84a): the page, a type with the editor's words — an empty field is the store's to refuse in words —
+      // the Task's start, and one drafted result.
+      { op: 'inspectWritingTask', input: { bookId } },
+      { op: 'prepareWritingTask', input: { bookId, typeId: 'promotion-article', audience: '读者', channel: '公众号', requirements: null } },
+      { op: 'prepareWritingTask', input: { bookId, typeId: 'news-release', audience: '', channel: '', requirements: '一千字以内' } },
+      { op: 'authorizeWritingTask', input: { bookId, taskIntentId: recordId, planEnvelopeDigest: 'c'.repeat(64) } },
+      { op: 'createWritingDraft', input: { bookId, revisionId: recordId } },
     ];
     for (const { op, input } of inputs) {
       const request = { id: randomUUID(), op, input };
@@ -1233,6 +1241,18 @@ describe('decodeRequest rejects malformed frames', () => {
       ['decideEvaluationRewrite', { bookId, revisionId: recordId }],
       ['decideEvaluationRewrite', { bookId, revisionId: 'revision', decision: 'accept' }],
       ['decideEvaluationRewrite', { bookId, revisionId: recordId, decision: 'accept', comment: '改' }],
+      ['inspectWritingTask', { bookId: 'book' }],
+      ['inspectWritingTask', { bookId, typeId: 'news-release' }],
+      ['prepareWritingTask', { bookId, typeId: 'promotion-article', audience: '读者', channel: '公众号' }],
+      ['prepareWritingTask', { bookId, typeId: '', audience: '读者', channel: '公众号', requirements: null }],
+      ['prepareWritingTask', { bookId, typeId: 't'.repeat(65), audience: '读者', channel: '公众号', requirements: null }],
+      ['prepareWritingTask', { bookId, typeId: 'promotion-article', audience: 1, channel: '公众号', requirements: null }],
+      ['prepareWritingTask', { bookId, typeId: 'promotion-article', audience: '读者', channel: '公'.repeat(1_001), requirements: null }],
+      ['prepareWritingTask', { bookId, typeId: 'promotion-article', audience: '读者', channel: '公众号', requirements: '' }],
+      ['prepareWritingTask', { bookId: 'book', typeId: 'promotion-article', audience: '读者', channel: '公众号', requirements: null }],
+      ['authorizeWritingTask', { bookId, taskIntentId: recordId, planEnvelopeDigest: 'c'.repeat(65) }],
+      ['createWritingDraft', { bookId, revisionId: 'revision' }],
+      ['createWritingDraft', { bookId }],
       ['saveEvaluation', { bookId, recordId, expectedEntries: 1, finalize: false,
         content: { ...content, items: [{ itemId: 'x', score: 18, notRated: null, comment: null, adjustment: { reasons: ['too-strict'], note: null } }] } }],
       ['saveEvaluation', { bookId, recordId, expectedEntries: 1, finalize: false,

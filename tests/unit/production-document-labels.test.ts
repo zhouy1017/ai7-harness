@@ -21,7 +21,7 @@ const document: ProductionDocumentProjection = {
   documentId: identity,
   branchId: identity,
   createdAt: '2026-09-24T02:00:00.000Z',
-  origin: { sourceVersionId: identity, displayName: '新闻稿初稿.docx', marksNotCarried: 2 },
+  origin: { sourceVersionId: identity, displayName: '新闻稿初稿.docx', marksNotCarried: 2, drafted: false },
   versions: [
     { revisionId: identity, label: '版本 2', ordinal: 2, createdAt: '2026-09-24T03:00:00.000Z', revisionDigest: 'a'.repeat(64) },
     { revisionId: identity, label: '版本 1', ordinal: 1, createdAt: '2026-09-24T02:00:00.000Z', revisionDigest: 'b'.repeat(64) },

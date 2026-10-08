@@ -180,7 +180,9 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
       expect(storeCode(() => plan(store, bookId, 'fixed-task'))).toBe('TASK_PLAN_UNAVAILABLE');
       expect(storeCode(() => plan(store, randomUUID(), 'fixed-task'))).toBe('TASK_PLAN_BOOK_NOT_FOUND');
       expect(storeCode(() => plan(store, bookId, 'review-run'))).toBe('TASK_PLAN_INVALID');
-      expect(storeCode(() => store.inspectTaskPlan({ bookId, kind: 'writing' as TaskPlanKind, ref: null }))).toBe('TASK_PLAN_INVALID');
+      // 写作任务 (Issue #432, S84a) reads its own plan: none is prepared yet.
+      expect(storeCode(() => store.inspectTaskPlan({ bookId, kind: 'writing' as TaskPlanKind, ref: null }))).toBe('TASK_PLAN_UNAVAILABLE');
+      expect(storeCode(() => store.inspectTaskPlan({ bookId, kind: 'selection-task' as TaskPlanKind, ref: null }))).toBe('TASK_PLAN_INVALID');
 
       acknowledgeEdit(store, imported.manuscriptId, imported.branchId);
       let progress = store.createTaskAuthorizationPreparationWork(bookId, J03_TASK_GOAL, launchPolicy);

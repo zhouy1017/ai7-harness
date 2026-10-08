@@ -8,6 +8,7 @@ import type {
   ReadersReportProjection,
   ReadersReportTemplate,
   EvaluationRewriteProjection,
+  WritingProjection,
   BaselineAnalysisSelectedRange,
   PlanRevisionDiffEntryProjection,
   PlanRevisionDiffValue,
@@ -33,6 +34,7 @@ import type { Connectivity } from './connectivity.js';
 import { PLAN_MOVED_LABEL } from './reconnect-preflight.js';
 import { graphemeCount, sliceGraphemes } from './analysis/factual-review-contract.js';
 import type { ReviewRunPlanFacts } from './review/review-runs.js';
+import { EXEMPLAR_COPY_WINDOW, writingExemplarLine, type WritingContractInput } from './writing/writing-contract.js';
 
 /**
  * The Task Drawer's plan projection (Issue #418, plan slice S72; editor-surfaces §6 ③, V2-UX-PLAN-001 to
@@ -1067,6 +1069,188 @@ export function readersReportPlan(input: {
     ],
     start,
     defaultRule: noDefaultRule(READERS_REPORT_NO_RULE),
+    runControl: null,
+    redo: null,
+    reprepare: null,
+    clarifications: [],
+    budgetStop: null,
+  };
+}
+
+// ---- 写作任务 (Issue #432, plan slice S84a; V2-UX-DELIV-007) --------------------------------------------------------------
+
+/** A writing Task's state in the drawer's own words, for 交付物's 新建文档 · 写作任务 beside the drawer. */
+export function writingTaskStateLabel(projection: WritingProjection): string {
+  return baselineState(projection as unknown as BaselineAnalysisProjection).label;
+}
+
+/** 快速开始 of a writing Task waits for its 默认执行规则 (S84b): until then the plan says so where the rule would be set. */
+export const WRITING_NO_RULE = '写作任务还不能设为快速开始默认：写作任务的默认执行规则随下一步提供；每次起草都先看计划，再开始。';
+
+/**
+ * What a writing Task references, in the plan's words (DELIV-007): each part of its frozen reference set as it is there, or
+ * that the Book has none — read from the contract input, never from anything the Task did not freeze.
+ */
+export function writingReferenceLines(input: WritingContractInput): string[] {
+  const named = (list: ReadonlyArray<string>, none: string): string => (list.length === 0 ? none : list.join('、'));
+  const synopsis = input.synopsis;
+  const evaluation = input.evaluation;
+  return [
+    synopsis === null
+      ? '本书尚无基线分析，本次不参考梗概与人物'
+      : `基线分析的梗概${synopsis.excerpt ? '（节选开头）' : ''}与 ${synopsis.characters.length} 位人物${synopsis.characters.length === 0 ? '' : `：${synopsis.characters.map((entry) => entry.name).join('、')}`}`,
+    evaluation === null
+      ? '本书尚无定稿的评估，本次不参考评估结论与营销要点'
+      : `定稿评估的结论「${evaluation.conclusion}」与主要优点 ${evaluation.strengths.length} 条${evaluation.market === null
+        ? '（这一版没有 AI7 初评的市场部分）'
+        : `，营销要点：目标读者 ${evaluation.market.readers.length} 条、差异化卖点 ${evaluation.market.sellingPoints.length} 条、渠道与策略 ${evaluation.market.channels.length} 条`}`,
+    writingExemplarLine(input.type.label, input.exemplars),
+    `图书信息：《${input.book.title}》 · 作者：${named(input.book.authors, '未填写')} · 责编：${named(input.book.editors, '未填写')} · 书系：${named(input.book.series, '不在任何书系中')}`,
+    `你写的受众「${input.audience}」、渠道「${input.channel}」${input.requirements === null ? '' : `与其他要求「${input.requirements}」`}`,
+  ];
+}
+
+/**
+ * The plan of the Book's writing Task (DELIV-007): the writing kind's ledger read in the editor's words, as 审稿意见's plan is.
+ * It names the house type, the editor's words and — in `参考` — each part of the reference set or that the Book has none, the
+ * house's 范例 of the type among them, referenced and never copied. Its steps are what the kind does — read each range for what
+ * the document can draw on, then write it — and what it makes is a draft that becomes the type's document in its 起草 phase
+ * once the editor opens it: never a delivery. It is started from the bar and takes no edits, rules, pause or redo in this
+ * slice: a changed plan is drafted again from 交付物.
+ */
+export function writingPlan(input: {
+  projection: WritingProjection;
+  bookTitle: string;
+  blocks: ReadonlyArray<ManifestBlockInput>;
+  input: WritingContractInput;
+}): TaskPlanProjection {
+  const { projection, bookTitle, blocks } = input;
+  const task = input.input;
+  const intent = projection.taskIntent;
+  const checkpoint = projection.checkpoint;
+  const manifest = projection.coverageManifest;
+  const provider = projection.providerResolutionPlan;
+  const plan = projection.executionPlan;
+  const envelope = projection.planEnvelope;
+  const version = projection.planVersion;
+  requirePlan(intent !== null && checkpoint !== null && manifest !== null && provider !== null && plan !== null &&
+    envelope !== null && version !== null, '写作任务还没有准备计划。');
+  const reading = readRange(blocks, null);
+  const units = manifest.units.length;
+  const route = provider.executionRoute;
+  const remote = provider.remoteBinding;
+  const live = route.kind === 'opencode-go';
+  const ceiling = provider.runBudgetCeiling;
+  const revision = projection.planRevision;
+  const boundary = envelope.boundary;
+  const state = baselineState(projection as unknown as BaselineAnalysisProjection);
+  const needsModelConnection = route.kind === 'opencode-go';
+  const start: TaskPlanStartProjection = projection.authorization !== null
+    ? startedBar(needsModelConnection)
+    : !projection.actions.canAuthorize
+      ? { readiness: 'changed', needsModelConnection, planEnvelopeDigest: null, categoryDigests: [], reconfirm: null }
+      : { readiness: route.kind === 'none' ? 'no-route' : 'ready', needsModelConnection, planEnvelopeDigest: envelope.digest, categoryDigests: [], reconfirm: null };
+  const typeLabel = task.type.label;
+  return {
+    bookId: projection.bookId,
+    kind: 'writing',
+    ref: intent.taskIntentId,
+    state: revision !== null && projection.authorization === null ? { key: 'changed', label: '计划已变化' } : state,
+    planVersion: version.ordinal,
+    goal: {
+      sentence: `为《${bookTitle}》起草「${typeLabel}」：受众「${task.audience}」，渠道「${task.channel}」`,
+      chips: { book: bookTitle, position: '全书', selectedGraphemes: reading.graphemes, taskInputRevision: checkpoint.revisionLabel, procedure: `写作任务 · ${typeLabel}` },
+      savedForEdits: checkpoint.createdForDirtyJournal,
+    },
+    scope: {
+      process: `《${bookTitle}》全书 · ${groupedCount(reading.graphemes)} 字 · ${units} 个阅读范围`,
+      reference: writingReferenceLines(task),
+      send: live ? `全书各阅读范围的稿件正文（${units} 个）、上面列出的参考材料与你写的受众、渠道和要求，以及汇总时各处段落的说明` : '不发送任何内容',
+      notRead: NOT_READ,
+    },
+    steps: [
+      { id: 'units', label: '逐章读取，找出文档可以取用的看点、人物与主题', result: '每处段落引用它所在的内容块', removable: false, removed: false },
+      { id: 'reduction', label: `依据参考材料写出「${typeLabel}」`, result: '文档的标题与各部分；范例只参照，不复制', removable: false, removed: false },
+    ],
+    participation: {
+      during: boundary !== null && boundary.participation.expected ? boundary.participation.statement : NO_PARTICIPATION,
+      after: `在「交付物」的新建文档 · 写作任务中打开草稿：它成为这本书的「${typeLabel}」，处于「起草」阶段，在稿件编辑面上修改`,
+    },
+    service: {
+      role: roleLabel(provider.role),
+      provider: live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`,
+      decision: live
+        ? `开发者实时（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}）：实时传输受运行边界约束`
+        : route.kind === 'none'
+          ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
+          : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`,
+      send: live ? `所读范围内的稿件正文与参考材料发往 ${route.kind} · ${route.model}` : NOTHING_SENT,
+      sendCategory: outboundLabel(provider.outboundDataCategory),
+      usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : NO_USAGE,
+      usageIsCeiling: ceiling !== 'unset',
+      duration: DURATION_UNKNOWN,
+      budgetCeiling: budgetCeilingLabel(ceiling),
+      accountLimit: ACCOUNT_LIMIT_UNKNOWN,
+    },
+    outcomes: [
+      `「${typeLabel}」草稿：标题与各部分，打开后处于「起草」阶段`,
+      '这次运行的运行报告',
+    ],
+    notDo: {
+      editorial: [
+        ...EDITORIAL_NOT_DO,
+        `不照抄范例：与范例有连续 ${EXEMPLAR_COPY_WINDOW} 个字以上相同的草稿不予采用`,
+        '不交付、不发送：草稿在稿件编辑面上由你修改',
+        '不改评估记录与基线分析',
+        '不读这本书以外的稿件',
+      ],
+      technical: [...projection.namedNonEffects],
+    },
+    boundary: {
+      adaptable: boundary === null ? [] : boundary.adaptable.map((entry) => ({
+        id: entry.adaptationClass,
+        label: PLAN_EDIT_ADAPTATION_LABELS[entry.adaptationClass] ?? SAFE_RETRY_ADAPTATION,
+        removable: false,
+        removed: false,
+        movable: false,
+        askFirst: false,
+      })),
+      askFirst: [...LOCKED_BOUNDARY],
+    },
+    edit: NOT_EDITABLE,
+    drift: revision === null ? null : {
+      reasons: ['计划冻结之后，它的关键内容已经变化；原计划不能再开始。'],
+      entries: revision.diff.map((entry) => driftEntry(entry, blocks)),
+      resolution: '请在「交付物」的新建文档 · 写作任务里重新起草。',
+    },
+    technical: [
+      { key: 'task-intent', label: '任务意图', value: intent.taskIntentId },
+      { key: 'mode', label: '更新方式', value: `${intent.modeLabel} · ${intent.mode}` },
+      { key: 'goal', label: '固定任务目标', value: intent.goal },
+      { key: 'expected-outcome', label: '预期结果类别', value: intent.expectedOutcome },
+      { key: 'document-type', label: '文档类型', value: `${typeLabel} · ${task.type.typeId}` },
+      { key: 'task-input-revision', label: '任务输入修订版', value: `${checkpoint.revisionLabel} · ${checkpoint.revisionId} · ${checkpoint.revisionDigest}` },
+      { key: 'coverage-manifest', label: '覆盖清单', value: `${units} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个内容块 · ${manifest.totalGraphemes} 字素 · ${manifest.digest}` },
+      { key: 'execution-route', label: '执行路由', value: route.kind === 'none'
+        ? `none · ${route.reason}`
+        : route.kind === 'opencode-go' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
+      { key: 'provider-processing', label: '模型服务数据处理策略', value: pinReading(remote.providerProcessing) },
+      { key: 'run-budget-ceiling', label: '任务运行预算上限', value: ceiling === 'unset' ? 'unset' : `${ceiling.maxTotalTokens} tokens` },
+      { key: 'execution-steps', label: '计划步骤（记录）', value: plan.steps.join(' → ') },
+      { key: 'reducer-stages', label: '归约阶段', value: plan.reducerStages.join(' → ') },
+      { key: 'stop-condition', label: '停止条件', value: plan.stopCondition },
+      { key: 'prompt-contract', label: '提示契约摘要', value: envelope.promptContractDigest },
+      { key: 'dispatch', label: '派发状态', value: envelope.summary },
+      { key: 'plan-envelope', label: '计划权限边界', value: envelope.digest },
+      ...(projection.authorization === null ? [] : [
+        { key: 'authorization', label: '运行授权', value: `${projection.authorization.authorizationId} · ${projection.authorization.origin} · ${projection.authorization.authority} · ${projection.authorization.authorizedAt}` },
+      ]),
+      ...(projection.run === null ? [] : [
+        { key: 'run-record', label: '运行记录', value: `${projection.run.runRecordId} · ${projection.run.state} · ${projection.run.recordedAt}` },
+      ]),
+    ],
+    start,
+    defaultRule: noDefaultRule(WRITING_NO_RULE),
     runControl: null,
     redo: null,
     reprepare: null,

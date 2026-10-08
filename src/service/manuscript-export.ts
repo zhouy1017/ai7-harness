@@ -28,6 +28,7 @@ import { ensureCanonicalDataDirectory } from '../shared/data-root.js';
 import { reportExportLabel } from '../shared/report-wording.js';
 import { DIGEST_PATTERN, UUID_PATTERN, canonicalJson, canonicalRecord, isRecord, parseCanonicalJson, sha256Hex } from './analysis/canonical.js';
 import { documentTypeLabel, readersReportDocumentType } from './production-document-types.js';
+import { WRITING_DRAFT_PARSER_IDENTITY } from './writing-tasks.js';
 import type { ManuscriptCheckpointBinding, ManuscriptCheckpointProgress, ManuscriptCheckpointPurpose } from './bounded-manuscript.js';
 import {
   DOCX_EXPORT_WRITER_IDENTITY,
@@ -1308,6 +1309,12 @@ export class ManuscriptExportStore {
     };
   }
 
+  /** Whether a document's words began as AI7's writing draft (Issue #432, S84a), as its record's parser identity says. */
+  #drafted(documentId: string): boolean {
+    return this.#db.prepare('SELECT 1 FROM production_documents WHERE document_id = ? AND parser_identity = ?')
+      .get(documentId, WRITING_DRAFT_PARSER_IDENTITY) !== undefined;
+  }
+
   /**
    * One saved version of a Production Document of this Book (Issue #415, S66b; EXP-024, DELIV-003): a revision the
    * document's version ledger names, on the document's own branch. A version is never rewritten, so nothing is saved
@@ -1466,9 +1473,10 @@ export class ManuscriptExportStore {
     const converter = nullableText(source.converter_identity);
     let exportSource: DocxExportSource;
     let mapping: DocxExportSourceRow[] = [];
-    if (target.document !== null && readersReportDocumentType(target.document.typeId) !== undefined) {
-      // A 审稿意见 draft (Issue #429, S81c) was written from a finalized Evaluation Record, not from a file: its revision names
-      // the manuscript file it reviews only because every revision names one, and nothing of that file belongs in it.
+    if (target.document !== null && (readersReportDocumentType(target.document.typeId) !== undefined || this.#drafted(target.document.documentId))) {
+      // A 审稿意见 draft (Issue #429, S81c) was written from a finalized Evaluation Record, and a writing draft (Issue #432, S84a)
+      // from the Book and its reference set, not from a file: each revision names the manuscript file only because every revision
+      // names one, and nothing of that file belongs in it.
       exportSource = { kind: 'fresh', reason: 'no-mapping', scan: null, converter: null };
     } else if (converter !== null) {
       const working = nullableText(source.working_object_digest);

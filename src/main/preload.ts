@@ -316,6 +316,14 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['authorizeEvaluationRewrite']['output']>(IPC_CHANNELS.authorizeEvaluationRewrite, input),
   decideEvaluationRewrite: (input: Omit<ServiceOperationMap['decideEvaluationRewrite']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['decideEvaluationRewrite']['output']>(IPC_CHANNELS.decideEvaluationRewrite, input),
+  // 新建文档 · 写作任务 (Issue #432, S84a).
+  inspectWritingTask: () => invoke<ServiceOperationMap['inspectWritingTask']['output']>(IPC_CHANNELS.inspectWritingTask),
+  prepareWritingTask: (input: Omit<ServiceOperationMap['prepareWritingTask']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['prepareWritingTask']['output']>(IPC_CHANNELS.prepareWritingTask, input),
+  authorizeWritingTask: (input: Omit<ServiceOperationMap['authorizeWritingTask']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['authorizeWritingTask']['output']>(IPC_CHANNELS.authorizeWritingTask, input),
+  createWritingDraft: (input: Omit<ServiceOperationMap['createWritingDraft']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['createWritingDraft']['output']>(IPC_CHANNELS.createWritingDraft, input),
   inspectAnalysisFeedback: (input: { revisionId: string }) =>
     invoke<ServiceOperationMap['inspectAnalysisFeedback']['output']>(IPC_CHANNELS.inspectAnalysisFeedback, input),
   recordAnalysisFeedback: (input: Omit<ServiceOperationMap['recordAnalysisFeedback']['input'], 'bookId'>) =>

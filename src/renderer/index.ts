@@ -486,6 +486,8 @@ async function openTaskRunSurface(plan: TaskPlanProjection): Promise<void> {
     if (plan.kind === 'baseline-analysis') renderBookAnalysis(plan.bookId, plan.goal.chips.book);
     else if (plan.kind === 'review-run') renderBookReview(plan.bookId, plan.goal.chips.book, { reviewRunId: plan.ref, findingId: null });
     else if (plan.kind === 'initial-evaluation' || plan.kind === 'readers-report' || plan.kind === 'evaluation-rewrite') renderBookEvaluation(plan.bookId, plan.goal.chips.book);
+    // 写作任务 (Issue #432, S84a) is followed in 交付物, where its draft opens.
+    else if (plan.kind === 'writing') renderBookDeliverables(plan.bookId, plan.goal.chips.book);
     else renderBookOverview(await window.ai7.getBookOverview({ bookId: plan.bookId, historyCursor: null }));
   } catch (error) {
     setStatus(rendererErrorMessage(error, '无法打开运行所在的页面。'), 'error');
@@ -2389,6 +2391,9 @@ function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { 
     },
     // 前往审阅 from 图书交付包's work records (Issue #416): the Book's 审阅, where a report is generated.
     openReview: () => renderBookReview(bookId, bookTitle),
+    // 新建文档 · 写作任务 (Issue #432, S84a): its preparation job, and its plan in the Task Drawer beside 交付物.
+    awaitServiceJob,
+    openWritingPlan: (ref) => openTaskPlan(bookId, 'writing', ref),
   });
   const actions = element('div', 'button-row workbench-actions');
   const openManuscript = button(DELIVERABLES_DESTINATION_ACTIONS[0], 'primary', async () => {
@@ -2415,6 +2420,7 @@ function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { 
   content.append(actions);
   replaceScreen('book-deliverables', content);
   deliverablesSurface = surface;
+  taskSurfaceRefresh = { writing: () => surface.refreshWriting() };
   surface.start();
   setStatus(DELIVERABLES_STATUS_LINES.opened);
 }
@@ -6879,7 +6885,7 @@ async function awaitServiceJob(
     if (next.kind !== 'reimport-preparation' && next.kind !== 'reimport-resolution' && next.kind !== 'reimport-commit' &&
         next.kind !== 'task-authorization-preparation' && next.kind !== 'baseline-analysis-preparation' &&
         next.kind !== 'review-run-preparation' && next.kind !== 'initial-evaluation-preparation' && next.kind !== 'readers-report-preparation' &&
-        next.kind !== 'evaluation-rewrite-preparation') return;
+        next.kind !== 'evaluation-rewrite-preparation' && next.kind !== 'writing-preparation') return;
     if (!Number.isSafeInteger(next.progress.completed) || !Number.isSafeInteger(next.progress.total) ||
       next.progress.completed < previousReimportProgress || next.progress.completed > next.progress.total ||
       next.progress.total <= 0 ||

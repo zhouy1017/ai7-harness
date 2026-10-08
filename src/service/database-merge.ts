@@ -247,6 +247,10 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   // 按我的评分重写评语 (Issue #429, S81b2): which version each rewrite Task rewrites, and the editor's decisions — the Book's own.
   evaluation_rewrite_tasks: 'owned',
   evaluation_rewrite_decisions: 'owned',
+  // 写作任务 (Issue #432, S84a): which type and reference set each writing Task drafts from, and which result became a
+  // document — the Book's own.
+  writing_tasks: 'owned',
+  writing_drafts: 'owned',
   book_dimension_sets: 'owned',
   book_dimensions: 'owned',
   book_people_versions: 'owned',
