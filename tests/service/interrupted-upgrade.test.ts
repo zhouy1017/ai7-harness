@@ -59,8 +59,10 @@ import {
   ANALYSIS_LEDGER_REVISION_23_SQL,
   ANALYSIS_LEDGER_REVISION_58_SQL,
   ANALYSIS_LEDGER_REVISION_59_SQL,
-  CAPTURED_PROCEDURE_SCHEMA_VERSION,
+  ANALYSIS_LEDGER_REVISION_62_SQL,
+  EVALUATION_REWRITE_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
+import { EVALUATION_REWRITE_SCHEMA_SQL, initializeEvaluationRewriteSchema } from '../../src/service/evaluation-rewrites.js';
 import { READERS_REPORT_SCHEMA_SQL, initializeReadersReportSchema } from '../../src/service/readers-reports.js';
 import { SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL, initializeSeriesRetrievalExclusionSchema } from '../../src/service/series-exclusions.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
@@ -156,6 +158,17 @@ interface Revision {
 
 // Newest first: a store is walked down one revision at a time.
 const REVISIONS: ReadonlyArray<Revision> = [
+  {
+    // Revision 64 (Issue #429, S81b2) rebuilds the three kind-coupled relations and stamps its version in one transaction, so the
+    // one step an interruption can leave committed without the stamp is the two relations of 按我的评分重写评语. Revision 63 left
+    // the kind-coupled relations as revision 62 shaped them.
+    revision: 64,
+    step: initializeEvaluationRewriteSchema,
+    undo: (database) => {
+      drop(database, Object.keys(EVALUATION_REWRITE_SCHEMA_SQL).reverse());
+      downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_62_SQL);
+    },
+  },
   {
     // Revision 63 (Issue #65, S30): the Captured Procedures and the Developer Capability Proposals, created before the stamp.
     revision: 63,
@@ -364,11 +377,11 @@ describe('an upgrade interrupted before its version stamp', () => {
     if (step === null) continue;
     const before = revision - 1;
     it(`is finished by the next open when revision ${revision}'s relations committed and its stamp did not`, async () => {
-      expect(await opened()).toBe(CAPTURED_PROCEDURE_SCHEMA_VERSION);
+      expect(await opened()).toBe(EVALUATION_REWRITE_SCHEMA_VERSION);
       const terminal = tables();
       // The plant is a store at the revision before, which opens and upgrades as one.
       plant(before);
-      expect(await opened()).toBe(CAPTURED_PROCEDURE_SCHEMA_VERSION);
+      expect(await opened()).toBe(EVALUATION_REWRITE_SCHEMA_VERSION);
       expect(tables()).toEqual(terminal);
       // The step commits the revision's relations, and the process stops before the stamp.
       plant(before);
@@ -376,15 +389,15 @@ describe('an upgrade interrupted before its version stamp', () => {
         step(database);
         expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(before);
       });
-      expect(await opened()).toBe(CAPTURED_PROCEDURE_SCHEMA_VERSION);
+      expect(await opened()).toBe(EVALUATION_REWRITE_SCHEMA_VERSION);
       expect(tables()).toEqual(terminal);
       // Once finished it opens as any store does.
-      expect(await opened()).toBe(CAPTURED_PROCEDURE_SCHEMA_VERSION);
+      expect(await opened()).toBe(EVALUATION_REWRITE_SCHEMA_VERSION);
     }, 120_000);
   }
 
   it('still refuses a store holding only some of a revision\'s relations', async () => {
-    expect(await opened()).toBe(CAPTURED_PROCEDURE_SCHEMA_VERSION);
+    expect(await opened()).toBe(EVALUATION_REWRITE_SCHEMA_VERSION);
     plant(36);
     withDatabase((database) => database.exec(PRODUCTION_DOCUMENT_SCHEMA_SQL.production_documents));
     const refused = await EditorialStore.open(roots.dataRoot, roots.codeRoot).then((store) => {

@@ -109,6 +109,14 @@ export function evaluationSufficiency(input: { readonly citedBlocks: number; rea
 /** Why the editor's score departs from AI7's (EVAL-006): offered, never preselected. `own` carries the editor's words. */
 export type EvaluationAdjustmentReason = 'too-high' | 'too-low' | 'insufficient-basis' | 'missed-aspect' | 'own';
 export const EVALUATION_ADJUSTMENT_REASONS: ReadonlyArray<EvaluationAdjustmentReason> = ['too-high', 'too-low', 'insufficient-basis', 'missed-aspect', 'own'];
+/** Each reason in the editor's words: the page offers them so, and 按我的评分重写评语 hands them to AI7 so (S81b2). */
+export const EVALUATION_ADJUSTMENT_REASON_WORDS: Readonly<Record<EvaluationAdjustmentReason, string>> = {
+  'too-high': '打分偏高',
+  'too-low': '打分偏低',
+  'insufficient-basis': '依据不足',
+  'missed-aspect': '未考虑某方面',
+  own: '自行输入',
+};
 
 /**
  * Whether the editor adjusted AI7's 初评 of one item: AI7 gave a score, and the editor's own differs from it — another number,

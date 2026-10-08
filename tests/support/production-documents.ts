@@ -18,6 +18,9 @@ import type { DatabaseSync } from 'node:sqlite';
  * validation accepts, exactly as a store an earlier build planted after this one would hold them.
  */
 export const PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER: ReadonlyArray<string> = [
+  // 按我的评分重写评语 (revision 64; Issue #429, S81b2): its decisions and Task records.
+  'evaluation_rewrite_decisions',
+  'evaluation_rewrite_tasks',
   'developer_capability_proposal_exports',
   'developer_capability_proposals',
   'review_run_procedure_pins',

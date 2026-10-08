@@ -1202,6 +1202,11 @@ describe('decodeRequest rejects malformed frames', () => {
         content: { ...content, items: [{ itemId: 'literary-quality', score: 18, notRated: null, comment: null, adjustment: null }] } } },
       { op: 'prepareInitialEvaluation', input: { bookId } },
       { op: 'authorizeInitialEvaluation', input: { bookId, taskIntentId: recordId, planEnvelopeDigest: 'a'.repeat(64) } },
+      // 按我的评分重写评语 (Issue #429, S81b2): one version, its Task's start, and the editor's decision on one result.
+      { op: 'prepareEvaluationRewrite', input: { bookId, recordId } },
+      { op: 'authorizeEvaluationRewrite', input: { bookId, taskIntentId: recordId, planEnvelopeDigest: 'b'.repeat(64) } },
+      { op: 'decideEvaluationRewrite', input: { bookId, revisionId: recordId, decision: 'accept' } },
+      { op: 'decideEvaluationRewrite', input: { bookId, revisionId: recordId, decision: 'discard' } },
     ];
     for (const { op, input } of inputs) {
       const request = { id: randomUUID(), op, input };
@@ -1220,6 +1225,14 @@ describe('decodeRequest rejects malformed frames', () => {
       ['prepareInitialEvaluation', { bookId, mode: 'evaluation-first' }],
       ['authorizeInitialEvaluation', { bookId, taskIntentId: recordId, planEnvelopeDigest: 'A'.repeat(64) }],
       ['authorizeInitialEvaluation', { bookId, taskIntentId: 'task', planEnvelopeDigest: 'a'.repeat(64) }],
+      ['prepareEvaluationRewrite', { bookId }],
+      ['prepareEvaluationRewrite', { bookId, recordId: 'record' }],
+      ['prepareEvaluationRewrite', { bookId, recordId, entry: 2 }],
+      ['authorizeEvaluationRewrite', { bookId, taskIntentId: recordId, planEnvelopeDigest: 'b'.repeat(63) }],
+      ['decideEvaluationRewrite', { bookId, revisionId: recordId, decision: 'keep' }],
+      ['decideEvaluationRewrite', { bookId, revisionId: recordId }],
+      ['decideEvaluationRewrite', { bookId, revisionId: 'revision', decision: 'accept' }],
+      ['decideEvaluationRewrite', { bookId, revisionId: recordId, decision: 'accept', comment: '改' }],
       ['saveEvaluation', { bookId, recordId, expectedEntries: 1, finalize: false,
         content: { ...content, items: [{ itemId: 'x', score: 18, notRated: null, comment: null, adjustment: { reasons: ['too-strict'], note: null } }] } }],
       ['saveEvaluation', { bookId, recordId, expectedEntries: 1, finalize: false,

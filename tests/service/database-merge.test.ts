@@ -652,15 +652,16 @@ describe('what a merge refuses, puts back and brings forward', () => {
     } finally {
       source.close();
     }
-    // The package as an AI7 at revision 57 exactly would have made it: its store without any relation revisions 58 to 63 added —
-    // the Captured Procedures (63), the 审稿意见 records (62), the Series Retrieval Exclusions (61), the dialogue ledger (60), the
+    // The package as an AI7 at revision 57 exactly would have made it: its store without any relation revisions 58 to 64 added —
+    // the evaluation rewrite records (64), the Captured Procedures (63), the 审稿意见 records (62), the Series Retrieval Exclusions (61), the dialogue ledger (60), the
     // 初评 drafts (59) and the merges (58) — and its kind-coupled relations as revision 58 left them (Issue #674).
     const older = join(roots.inputRoot, 'older.sqlite');
     copyFileSync(storeOf(roots.dataRoot), older);
     const packagePath = join(roots.inputRoot, 'AI7 旧版数据库.ai7db');
     const db = new DatabaseSync(older);
     try {
-      db.exec(`DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins;
+      db.exec(`DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks;
+        DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins;
         DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures;
         DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions;
         DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings;
