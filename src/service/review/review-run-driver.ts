@@ -34,6 +34,8 @@ export interface ReviewRunDriveSteps {
   settle(reviewRunId: string, categoryId: string): void;
   write(reviewRunId: string, categoryId: string): void;
   fail(reviewRunId: string, categoryId: string, code: string, message: string): void;
+  /** The category now waiting for a place of the governor, or `null` once it has one (Issue #632); in memory only. */
+  waitingForPlace(reviewRunId: string, categoryId: string | null): void;
 }
 
 /**
@@ -41,6 +43,8 @@ export interface ReviewRunDriveSteps {
  * signal that one is free, and the end of the category Run it handed over.
  */
 export interface ReviewRunExecutionOwner {
+  /** Every place is taken; an owner that does not say is read as having one free. */
+  readonly busy?: boolean;
   admitAndDispatch(runRecordId: string, ledger: BaselineAnalysisStore): void;
   whenPlaceFree(): Promise<void>;
   whenDone(runRecordId: string): Promise<void>;
@@ -150,7 +154,7 @@ export class ReviewRunDriver {
           if (this.#stopping) return;
           // A place first, then the ledger's authorization: while other Runs hold every place the category waits,
           // and the authorization is written only once it can be handed over at once.
-          await this.#owner.whenPlaceFree();
+          await this.#place(reviewRunId, categoryId);
           if (this.#stopping) return;
           const handOff = this.#steps.start(reviewRunId, categoryId);
           if (handOff !== null) await this.#dispatch(reviewRunId, categoryId, handOff);
@@ -158,11 +162,25 @@ export class ReviewRunDriver {
         }
         case 'dispatch':
           if (this.#stopping) return;
-          await this.#owner.whenPlaceFree();
+          await this.#place(reviewRunId, categoryId);
           if (this.#stopping) return;
           await this.#dispatch(reviewRunId, categoryId, step);
           break;
       }
+    }
+  }
+
+  /**
+   * Wait for a place of the governor. While every place is taken the category is named as waiting for one — behind the
+   * starts already waiting, which take a freed place first — so it reads 等待运行名额, not only 等待审阅 (Issue #632).
+   */
+  async #place(reviewRunId: string, categoryId: string): Promise<void> {
+    if (this.#owner.busy !== true) return this.#owner.whenPlaceFree();
+    this.#steps.waitingForPlace(reviewRunId, categoryId);
+    try {
+      await this.#owner.whenPlaceFree();
+    } finally {
+      this.#steps.waitingForPlace(reviewRunId, null);
     }
   }
 

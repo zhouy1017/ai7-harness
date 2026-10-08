@@ -613,7 +613,7 @@ const READ_SERVICE = `window.ai7.inspectGlobalAttention().then((projection) => (
   groups: projection.groups.map((group) => ({ key: group.key, total: group.total, items: group.items.map((item) => ({ itemId: item.itemId, state: item.state, nextStep: item.nextStep, target: item.target, bookId: item.book.bookId, title: item.book.title })) })),
 }))`;
 
-/** The service's answer once no Run is in flight — a completed Run's last step may still hold the slot. */
+/** The service's answer once no Run is in flight — a completed Run's last step may still hold its place of the governor. */
 async function readSettledAttention(renderer) {
   const deadline = Date.now() + 60_000;
   for (;;) {

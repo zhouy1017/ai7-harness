@@ -54,8 +54,10 @@ describe('the built-in review categories', () => {
     expect(by((category) => category.searchEngine)).toEqual(['factual-review', 'academic-integrity']);
     expect(by((category) => category.executor === 'baseline-leads')).toEqual(['plot-consistency']);
     expect(by((category) => category.executor === 'factual-review-kind')).toEqual(['factual-review']);
-    expect(by((category) => category.executor === 'unavailable')).toEqual(['series-consistency', 'cross-deliverable-consistency']);
-    expect(entry('series-consistency').unavailableReason).toBe('这本书不在任何书系中；书系一致性审阅还没有接入书系知识，暂不能选。');
+    expect(by((category) => category.executor === 'unavailable')).toEqual(['cross-deliverable-consistency']);
+    // 书系一致性 is the house's until resolved for one Book from the Series Knowledge of its Series (Issue #64, S29a).
+    expect(by((category) => category.executor === 'series-knowledge')).toEqual(['series-consistency']);
+    expect(entry('series-consistency').unavailableReason).toBeNull();
     expect(entry('cross-deliverable-consistency').unavailableReason).toBe('这本书还没有编辑交付物；有了交付物后才能选。');
     expect(BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.filter((category) => category.executor !== 'unavailable')
       .every((category) => category.unavailableReason === null)).toBe(true);

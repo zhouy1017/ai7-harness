@@ -23,7 +23,9 @@ import {
   TASK_BAR_START_WHEN_ONLINE,
   TASK_BAR_STATEMENT,
   TASK_BAR_WAITING_FOR_CONNECTION,
+  TASK_BAR_WAITING_FOR_SLOT,
   TASK_BAR_WAITING_NOTE,
+  TASK_BAR_WAITING_SLOT_NOTE,
   TASK_DRAWER_BACK,
   TASK_DRAWER_BACK_TITLE,
   TASK_DRAWER_FOOTER,
@@ -457,6 +459,11 @@ describe('the authorization bar (S74a)', () => {
       expect(view.status).toBe(label);
       expect(names(view)).toEqual(['cancel-wait', 'run-link']);
     }
+    // Online with every place taken (Issue #632): the note says what the pill says — it holds no place in the queue.
+    const slot = taskBarView(barOf(started, { state: { key: 'waiting', label: TASK_BAR_WAITING_FOR_SLOT } }));
+    expect(slot).toMatchObject({ status: '已联网 · 名额已满', note: TASK_BAR_WAITING_SLOT_NOTE });
+    expect(names(slot)).toEqual(['cancel-wait', 'run-link']);
+    expect(TASK_BAR_WAITING_SLOT_NOTE).toBe('已记录这次授权。已经联网，但运行名额已满：有名额空出时，AI7 先核对计划再开始，之后开始的任务可能先开始；在此之前不会发送任何内容');
   });
 
   it('says a start waiting on the governor waits for a place, that nothing has begun, and offers its 取消 (Issue #49, S14; CONC-007)', () => {

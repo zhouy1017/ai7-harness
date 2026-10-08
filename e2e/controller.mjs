@@ -1212,7 +1212,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'completion-cleanup',
   ]),
   // J-13 (Issue #63, plan slice S28a): 书系 — 新建书系, 成员与共享范围, 加入书系 and 移出书系 through the four-part impact
-  // preview, a stale preview refused, 书库's search by 书系, each Book's own records, and a restart.
+  // preview, a stale preview refused, 书库's search by 书系, each Book's own records, and a restart; since Issue #64 (S29a)
+  // a 书系一致性 Review Run on the J-04 model adapter.
   'J-13': Object.freeze([
     'entry',
     'controller-loopback',
@@ -1243,6 +1244,15 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'knowledge-review-edit',
     'j14-knowledge-keyboard',
     'knowledge-restart',
+    // Issue #64 (S29a): 书系一致性 — the member Book's Review Run over its Series Knowledge on the J-04 adapter, findings as
+    // 批注 on the manuscript, and the member column's state; its prerequisites as J-11 makes them.
+    'consistency-prerequisites',
+    'model-credential-saved',
+    'model-credential-removed',
+    'consistency-offered',
+    'consistency-review-run',
+    'consistency-marks-on-manuscript',
+    'consistency-member-reviewed',
     'knowledge-bounded-pages',
     'zero-activity',
   ]),

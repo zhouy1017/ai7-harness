@@ -273,12 +273,6 @@ function isImpact(value: unknown): value is SeriesImpactGroupProjection[] {
     Array.isArray(group.unchanged) && group.unchanged.every((line) => typeof line === 'string'));
 }
 
-/** 书系一致性 for a Book already in a Series (Issue #63, S28a): the category still waits for Series Knowledge to reach review. */
-export function seriesConsistencyWaitingReason(titles: ReadonlyArray<string>, total: number = titles.length): string {
-  if (total > titles.length) return `这本书已加入 ${total} 个书系，包括${titles.map((title) => `「${title}」`).join('、')}；书系一致性审阅还没有接入书系知识，暂不能选。`;
-  return `这本书已在书系${titles.map((title) => `「${title}」`).join('、')}中；书系一致性审阅还没有接入书系知识，暂不能选。`;
-}
-
 /** Why 加入书系 cannot go on: the Book already is a member. */
 export function seriesMemberAlready(book: string, series: string): string {
   return `《${book}》已经在书系「${series}」中。`;

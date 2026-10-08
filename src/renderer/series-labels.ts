@@ -67,9 +67,13 @@ export function seriesListLine(series: Pick<SeriesSummaryProjection, 'title' | '
   return `书系「${series.title}」 · 成员 ${series.memberCount} 本`;
 }
 
-/** 书系一致性审阅 for one member: when it last ran, or that it has not. */
-export function seriesConsistencyLine(member: Pick<SeriesMemberProjection, 'seriesConsistencyReview'>, instant: (iso: string) => string): string {
-  return member.seriesConsistencyReview === null ? '尚未审阅' : `审阅于 ${instant(member.seriesConsistencyReview.reviewedAt)}`;
+/** 书系一致性审阅 for one member: when it last ran, or that it has not, and whether it can be chosen now or why not (Issue #64, S29a). */
+export function seriesConsistencyLine(
+  member: Pick<SeriesMemberProjection, 'seriesConsistencyReview' | 'seriesConsistencyUnavailableReason'>,
+  instant: (iso: string) => string,
+): string {
+  const last = member.seriesConsistencyReview === null ? '尚未审阅' : `审阅于 ${instant(member.seriesConsistencyReview.reviewedAt)}`;
+  return member.seriesConsistencyUnavailableReason === null ? `${last} · 可以审阅` : `${last} · 暂不能审阅：${member.seriesConsistencyUnavailableReason}`;
 }
 
 /** A list of names, or 未填写. */
