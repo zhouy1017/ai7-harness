@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
+  EDITORIAL_REVIEW_KIND_PREFIX,
   MAX_FRAME_BYTES,
   MAX_REVIEW_FINDING_REASON_CHARACTERS,
   MAX_REVIEW_FINDINGS_PER_PAGE,
@@ -1436,6 +1437,38 @@ export class ReviewRunStore {
       }
       this.#recordEvent(reviewRunId, categoryId, 'failed', detail, { runRecordId, extra: { code } });
     });
+  }
+
+  /**
+   * Startup reconciliation of the review-category kinds (Issue #657): a category Run a stopped service left admitted,
+   * executing or pausing has nothing running it, and one left authorized never reached the owner. Unsettled, either reads
+   * as under way for good — the category's next Task is refused, and a page may poll — until the editor happens on
+   * 继续审阅. Each kind's ledger settles them as it settles every kind with no 续行: `interrupted` with its outcome, or
+   * blocked before dispatch with why. A kind's ledger is the one the configuration entry a Review Run snapshotted names,
+   * and it settles every Run of its kind, whatever contract prepared it. Returns how many it settled.
+   */
+  reconcileStoppedCategoryRuns(): number {
+    const rows = this.#db.prepare(
+      `SELECT i.kind, rr.review_run_id, json_extract(c.value, '$.categoryId') AS category_id
+       FROM analysis_run_records r
+       JOIN analysis_task_intents i ON i.task_intent_id = r.task_intent_id
+       JOIN review_runs rr ON rr.book_id = i.book_id
+       JOIN json_each(rr.canonical_json, '$.categories') c ON json_extract(c.value, '$.task.taskIntentId') = i.task_intent_id
+       WHERE substr(i.kind, 1, ?) = ?
+         AND (SELECT s.state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1)
+           IN ('authorized', 'admitted', 'executing', 'pausing')
+       ORDER BY r.recorded_at, r.rowid`,
+    ).all(EDITORIAL_REVIEW_KIND_PREFIX.length, EDITORIAL_REVIEW_KIND_PREFIX) as SqlRow[];
+    const reconciled = new Set<string>();
+    let settled = 0;
+    for (const row of rows) {
+      const kind = text(row.kind);
+      if (reconciled.has(kind)) continue;
+      reconciled.add(kind);
+      const { category } = this.#category(text(row.review_run_id), text(row.category_id));
+      settled += this.#ledgers.ledgerOf(category.entry).reconcileStoppedRuns().settled;
+    }
+    return settled;
   }
 
   // ---- materialization (B4) -----------------------------------------------------------------------

@@ -4783,6 +4783,26 @@ export class EditorialStore {
   }
 
   /**
+   * Startup reconciliation of the factual kind's ledger (Issue #657): its Runs — 事实核查's own, and a Review Run's 事实核查
+   * category — cannot resume either, so one left admitted, executing or pausing ends 已中断 with its outcome, and one left
+   * waiting for a place is blocked before dispatch with why. The Book can then check facts again at once.
+   */
+  reconcileStoppedFactualReviewRuns(): { settled: number } {
+    this.#assertAvailable();
+    return { settled: this.#analysisCall(() => this.#factualReview.reconcileStoppedRuns()).settled };
+  }
+
+  /**
+   * Startup reconciliation of the review categories' ledgers (Issue #657), as the factual kind's: a category Run a stopped
+   * service left under way or waiting is settled now, not only when the editor happens on 继续审阅, which then records what
+   * it came to.
+   */
+  reconcileStoppedReviewCategoryRuns(): { settled: number } {
+    this.#assertAvailable();
+    return { settled: this.#reviewCall(() => this.#analysisCall(() => this.#reviewRuns.reconcileStoppedCategoryRuns())) };
+  }
+
+  /**
    * What the drawer reads of the Task's Run when nothing executes it — paused, left 可续行, or left under way when AI7
    * closed: what it kept; for a stopped one, why 续行 cannot go on as authorized, if not; and — read by the execution
    * owner — whether this launch can still carry it under the binding it persisted.

@@ -10,7 +10,7 @@ import { REPORT_EXPORT_FORMATS, REPORT_FORMAT_LINES } from '../../src/service/ma
 import { CooperativeJobOwner } from '../../src/service/cooperative-jobs.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
-import type { BaselineAnalysisStore } from '../../src/service/analysis/baseline-analysis-store.js';
+import { RECONCILED_INTERRUPTED_DETAIL, RECONCILED_QUEUED_DETAIL, type BaselineAnalysisStore } from '../../src/service/analysis/baseline-analysis-store.js';
 import { graphemeCount, sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
@@ -31,6 +31,7 @@ import {
   MAX_REVIEW_FINDINGS_PER_PAGE,
   MAX_REVIEW_RUN_SUMMARIES,
   type LaunchPolicyProjection,
+  type ReviewCategoryProjection,
   type ReviewFindingPageRequest,
   type ReviewRunProjection,
   type ReviewRunScopeRequest,
@@ -856,6 +857,65 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(prepare(second, book, [TYPOS], WHOLE).categories[0]!.modeLabel).toBe('全书审阅');
     } finally {
       await close(second);
+    }
+  }, 300_000);
+
+  it('settles at the next start a category Run a stopped service left admitted, executing or waiting, before any 继续审阅 (Issue #657)', async () => {
+    let book: Book | undefined;
+    for (const planted of ['authorized', 'admitted', 'executing'] as const) {
+      const first = await open('sample1-review-authored');
+      let reviewRunId: string;
+      let runRecordId: string;
+      try {
+        book ??= await importBook(first);
+        const prepared = prepare(first, book, [TYPOS], WHOLE);
+        reviewRunId = prepared.reviewRunId;
+        first.store.authorizeReviewRun(book.bookId, reviewRunId, approvals(prepared));
+        // The category's turn came and its ledger authorized it; AI7 closed before, or after, the owner admitted it.
+        const steps = first.store.reviewRunDriveSteps;
+        const handOff = steps.start(reviewRunId, TYPOS)!;
+        runRecordId = handOff.runRecordId;
+        if (planted !== 'authorized') {
+          handOff.ledger.recordRunState(runRecordId, 'admitted', { detail: '已进入 AI7 调度器（单槽位）。' });
+          steps.recordDispatch(reviewRunId, TYPOS, runRecordId);
+        }
+        if (planted === 'executing') handOff.ledger.recordRunState(runRecordId, 'executing', { detail: '正在执行。' });
+      } finally {
+        await close(first);
+      }
+
+      const second = await open('sample1-review-authored');
+      const opened = book!;
+      try {
+        const typos = (): ReviewCategoryProjection => second.store.inspectReviewCategory(opened.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
+        // Unreconciled, the category's Run reads as under way for good, and the Book cannot review that category again.
+        expect(typos().run).toMatchObject({ runRecordId, state: planted });
+        expect((() => {
+          try {
+            prepare(second, opened, [TYPOS], WHOLE);
+            return 'prepared';
+          } catch {
+            return 'refused';
+          }
+        })()).toBe('refused');
+        expect(second.store.reconcileStoppedReviewCategoryRuns()).toEqual({ settled: 1 });
+        if (planted === 'authorized') {
+          expect(typos().run).toMatchObject({ runRecordId, state: 'blocked-before-dispatch', blockedReasons: [RECONCILED_QUEUED_DETAIL] });
+          expect(typos().taskOutcome).toBeNull();
+        } else {
+          // A review category cannot resume: 已中断 with its outcome, no revision.
+          expect(typos().run).toMatchObject({ runRecordId, state: 'interrupted' });
+          expect(typos().taskOutcome).toMatchObject({ classification: 'interrupted', resultSetRevisionId: null, safeNextAction: RECONCILED_INTERRUPTED_DETAIL });
+        }
+        expect(second.store.reconcileStoppedReviewCategoryRuns()).toEqual({ settled: 0 });
+        // 继续审阅 then records what the Run came to, sending nothing, and the category can be reviewed again.
+        await second.driver.continue(reviewRunId);
+        const continued = workspace(second, opened, reviewRunId).run!;
+        expect(continued.categories.map((category) => category.state)).toEqual([planted === 'authorized' ? 'refused' : 'interrupted']);
+        expect(typos().run).toMatchObject({ runRecordId });
+      } finally {
+        await close(second);
+      }
     }
   }, 300_000);
 

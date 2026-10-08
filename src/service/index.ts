@@ -1391,6 +1391,10 @@ async function run(): Promise<void> {
     // AI7 初评 has no 续行 (Issue #429 review, P1): one left under way ends 已中断 with its outcome, and one left waiting for a
     // place is blocked with why, so 评估 offers 重新初评 instead of reading a Run under way for good.
     store.reconcileStoppedInitialEvaluationRuns();
+    // 事实核查 and the review categories have no 续行 either (Issue #657): each settles the same way, so the Book can
+    // prepare them again and no page polls a Run nothing executes. 继续审阅 then records what such a category came to.
+    store.reconcileStoppedFactualReviewRuns();
+    store.reconcileStoppedReviewCategoryRuns();
     // A Review Run's categories take a place of the one owner's governor one after another.
     reviewRuns = new ReviewRunDriver(store.reviewRunDriveSteps, analysisExecution);
     // Connectivity Wait (Issue #502). The reading is the device's own unless J-04's control names a file; the

@@ -16,7 +16,8 @@ import type { ReviewRunDriveStep, ReviewRunHandOff } from './review-runs.js';
  * store answers from the records alone — the category's events and its ledger Run — so a loop lost to
  * a restart is resumed by 继续审阅 exactly where it stopped: a category never started starts, one whose
  * Run finished is settled from that Run's record, one settled and not written is written, and one whose
- * Run the stopped service left executing is recorded interrupted.
+ * Run the stopped service left executing is recorded interrupted — the service's startup reconciliation has ended that
+ * ledger Run already (Issue #657), so only the category's own record is left to write.
  *
  * The service entry constructs it beside the owner. On shutdown it must stop the driver before the
  * owner: `const stopped = driver.dispose(); await owner.dispose(); await stopped;` — the driver then
