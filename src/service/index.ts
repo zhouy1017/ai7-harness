@@ -585,6 +585,14 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.decideLearningMaterial(request.input) };
     case 'inspectFeedbackHistory':
       return { id: request.id, ok: true, op: request.op, result: store.inspectFeedbackHistory(request.input) };
+    case 'inspectLearningAudit':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectLearningAudit(request.input) };
+    case 'inspectLearningLineage':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectLearningLineage(request.input.bookId, request.input.materialKey) };
+    case 'previewLearningRemediation':
+      return { id: request.id, ok: true, op: request.op, result: store.previewLearningRemediation(request.input) };
+    case 'recordLearningRemediation':
+      return { id: request.id, ok: true, op: request.op, result: store.recordLearningRemediation(request.input) };
     case 'inspectEvaluationCalibration':
       return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluationCalibration(request.input) };
     case 'recordPublicationActuals':

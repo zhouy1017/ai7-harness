@@ -85,6 +85,8 @@ import type { LearningMaterialTarget } from '../shared/protocol.js';
 import { mountLearningMaterials } from './quality-learning.js';
 import type { FeedbackHistoryTarget } from '../shared/protocol.js';
 import { mountFeedbackHistory } from './feedback-history.js';
+import { mountLearningAudit } from './learning-audit.js';
+import { LEARNING_AUDIT_HEADING, LEARNING_AUDIT_STATUS } from './learning-audit-labels.js';
 import { mountEvaluationCalibration } from './evaluation-calibration.js';
 import { mountBookSeries, mountSeries, mountSeriesList } from './series.js';
 import {
@@ -118,6 +120,7 @@ import {
   QUALITY_LEARNING_TABS,
   QUALITY_LEARNING_TABS_LABEL,
   QUALITY_LEARNING_TITLE,
+  type QualityLearningTab,
 } from './quality-learning-labels.js';
 import {
   EVALUATION_LEDE,
@@ -4774,10 +4777,11 @@ function renderExemplars(root: HTMLElement, projection: ExemplarsProjection): vo
 
 /**
  * 质量与学习 (Issue #61, plan slices S26b and S26c; LEARN-002, FDBK-009, FDBK-010): a house-wide destination beside 知识库 with
- * two tabs — 反馈历史, the passive history it opens at from the landing, and 学习准入, where a Book's 学习准入待处理 in
- * 待我处理 opens it, for that Book, with the way to every Book one step away.
+ * three tabs — 反馈历史, the passive history it opens at from the landing; 学习准入, where a Book's 学习准入待处理 in
+ * 待我处理 opens it, for that Book, with the way to every Book one step away; and 学习回溯 (Issue #62, S27a), the learning
+ * audit of every material's lineage and 停止今后使用.
  */
-async function renderQualityLearning(tab: 'feedback' | 'learning', bookId: string | null, tabFocused = false): Promise<void> {
+async function renderQualityLearning(tab: QualityLearningTab, bookId: string | null, tabFocused = false): Promise<void> {
   const content = panel();
   content.classList.add('quality-learning');
   content.dataset['qualityTab'] = tab;
@@ -4807,7 +4811,8 @@ async function renderQualityLearning(tab: 'feedback' | 'learning', bookId: strin
   section.id = 'quality-panel';
   section.setAttribute('role', 'tabpanel');
   section.setAttribute('aria-labelledby', `quality-tab-${tab}`);
-  section.append(element('h3', undefined, tab === 'feedback' ? FEEDBACK_HISTORY_HEADING : LEARNING_HEADING));
+  const heading = tab === 'feedback' ? FEEDBACK_HISTORY_HEADING : tab === 'learning' ? LEARNING_HEADING : LEARNING_AUDIT_HEADING;
+  section.append(element('h3', undefined, heading));
   const host = element('div');
   section.append(host);
   const back = element('div', 'button-row');
@@ -4818,7 +4823,7 @@ async function renderQualityLearning(tab: 'feedback' | 'learning', bookId: strin
   }
   back.append(button('返回', 'quiet', () => void initializeStartup()));
   content.append(
-    element('p', 'section-label', `${QUALITY_LEARNING_TITLE} · ${tab === 'feedback' ? FEEDBACK_HISTORY_HEADING : LEARNING_HEADING}`),
+    element('p', 'section-label', `${QUALITY_LEARNING_TITLE} · ${heading}`),
     element('h2', undefined, QUALITY_LEARNING_TITLE),
     element('p', 'field-note', QUALITY_LEARNING_LEDE),
     tabs,
@@ -4827,11 +4832,13 @@ async function renderQualityLearning(tab: 'feedback' | 'learning', bookId: strin
   );
   replaceScreen('quality-learning', content);
   if (tabFocused) content.querySelector<HTMLElement>(`#quality-tab-${tab}`)?.focus();
-  const status = tab === 'feedback' ? FEEDBACK_HISTORY_STATUS : LEARNING_STATUS;
+  const status = tab === 'feedback' ? FEEDBACK_HISTORY_STATUS : tab === 'learning' ? LEARNING_STATUS : LEARNING_AUDIT_STATUS;
   setStatus(status.loading, 'busy');
   const surface = tab === 'feedback'
     ? mountFeedbackHistory({ root: host, api: window.ai7, open: openFeedbackTarget, setStatus, errorMessage: rendererErrorMessage })
-    : mountLearningMaterials({ root: host, bookId, api: window.ai7, openSource: openLearningMaterialSource, setStatus, errorMessage: rendererErrorMessage, technicalDetails });
+    : tab === 'learning'
+      ? mountLearningMaterials({ root: host, bookId, api: window.ai7, openSource: openLearningMaterialSource, setStatus, errorMessage: rendererErrorMessage, technicalDetails })
+      : mountLearningAudit({ root: host, api: window.ai7, setStatus, errorMessage: rendererErrorMessage });
   try {
     await surface.load();
     if (content.isConnected) setStatus(status.opened);

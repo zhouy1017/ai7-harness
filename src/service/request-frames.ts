@@ -2,6 +2,10 @@ import { isAbsolute } from 'node:path';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
   FEEDBACK_HISTORY_SIGNALS,
+  LEARNING_AUDIT_STANDINGS,
+  LEARNING_MATERIAL_KINDS,
+  MAX_LEARNING_AUDIT_QUERY,
+  MAX_LEARNING_REMEDIATION_ITEMS,
   BASELINE_ANALYSIS_UPDATE_MODES,
   MAX_BLOCK_CODE_UNITS,
   MAX_DIALOGUE_PROPOSAL_CHARACTERS,
@@ -1083,6 +1087,48 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           !(after === null || (isRecord(after) && hasExactKeys(after, ['bookTitle', 'bookId', 'orderedAt', 'materialKey']) &&
             isBoundedString(after.bookTitle, 180) && validUuid(after.bookId) && isBoundedString(after.orderedAt, 40) &&
             CURSOR_INSTANT.test(after.orderedAt) && validLearningMaterialKey(after.materialKey)))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // 质量与学习 › 学习回溯 (Issue #62, S27a): filters over every material before the page, with one exclusive cursor.
+    case 'inspectLearningAudit': {
+      const input = requireInputWithOptional(value.input, [], ['bookId', 'seriesId', 'kind', 'standing', 'recordedFrom', 'recordedBefore', 'query', 'after'], tentativeId);
+      const instant = (candidate: unknown): boolean => typeof candidate === 'string' && CURSOR_INSTANT.test(candidate) &&
+        Number.isFinite(Date.parse(candidate)) && new Date(candidate).toISOString() === candidate;
+      if (!optionalOrNull(input, 'bookId', validUuid) ||
+          !optionalOrNull(input, 'seriesId', validUuid) ||
+          !optionalOrNull(input, 'kind', (kind) => LEARNING_MATERIAL_KINDS.some((known) => known === kind)) ||
+          !optionalOrNull(input, 'standing', (standing) => LEARNING_AUDIT_STANDINGS.some((known) => known === standing)) ||
+          !optionalOrNull(input, 'recordedFrom', instant) ||
+          !optionalOrNull(input, 'recordedBefore', instant) ||
+          (typeof input.recordedFrom === 'string' && typeof input.recordedBefore === 'string' && input.recordedFrom >= input.recordedBefore) ||
+          !optionalOrNull(input, 'query', (query) => isBoundedString(query, MAX_LEARNING_AUDIT_QUERY, true)) ||
+          !optionalOrNull(input, 'after', (after) => isRecord(after) && hasExactKeys(after, ['bookTitle', 'bookId', 'orderedAt', 'materialKey']) &&
+            isBoundedString(after.bookTitle, 180) && validUuid(after.bookId) && isBoundedString(after.orderedAt, 40) &&
+            CURSOR_INSTANT.test(after.orderedAt) && validLearningMaterialKey(after.materialKey))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // One material's Learning Lineage Explorer, by its Book and place.
+    case 'inspectLearningLineage': {
+      const input = requireInput(value.input, ['bookId', 'materialKey'], tentativeId);
+      if (!validUuid(input.bookId) || !validLearningMaterialKey(input.materialKey)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 停止今后使用: one Book, its selected materials each at the version and decision count read, and — to record — the
+    // exact preview; whether each still stands so is the store's.
+    case 'previewLearningRemediation':
+    case 'recordLearningRemediation': {
+      const input = value.op === 'previewLearningRemediation'
+        ? requireInput(value.input, ['bookId', 'items'], tentativeId)
+        : requireInput(value.input, ['bookId', 'items', 'previewDigest'], tentativeId);
+      if (!validUuid(input.bookId) || !Array.isArray(input.items) || input.items.length < 1 || input.items.length > MAX_LEARNING_REMEDIATION_ITEMS ||
+          !input.items.every((item) => isRecord(item) && hasExactKeys(item, ['materialKey', 'materialDigest', 'expectedDecisions']) &&
+            validLearningMaterialKey(item.materialKey) && isBoundedString(item.materialDigest, 64) && HEX_DIGEST_PATTERN.test(item.materialDigest) &&
+            Number.isSafeInteger(item.expectedDecisions) && (item.expectedDecisions as number) >= 0) ||
+          (value.op === 'recordLearningRemediation' && !(isBoundedString(input.previewDigest, 64) && HEX_DIGEST_PATTERN.test(input.previewDigest)))) {
         throw new ProtocolError(tentativeId);
       }
       break;
