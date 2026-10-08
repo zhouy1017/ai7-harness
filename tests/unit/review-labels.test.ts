@@ -119,6 +119,7 @@ describe('the words of the 审阅 destination', () => {
       'open-manuscript': '打开稿件',
       'open-review': '打开审阅',
       'view-plan': '查看计划',
+      capture: '将以上工序保存为可复用工序',
     });
     expect(reviewGenerateReportLabel(null)).toBe('生成报告');
     expect(reviewGenerateReportLabel(2)).toBe('生成新版本');

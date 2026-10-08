@@ -218,6 +218,7 @@ import { GLOBAL_ATTENTION_ACTIONS, GLOBAL_ATTENTION_STATUS_LINES } from './globa
 import { mountEditorialMarks, type EditorialMarksSurface } from './editorial-marks.js';
 import { mountPositionRail, type PositionRail } from './position-rail.js';
 import { mountReviewWorkspace, type ReviewFocus, type ReviewWorkspaceSurface } from './review-workspace.js';
+import { mountCapturedProcedures } from './captured-procedures.js';
 import { mountTaskDrawer } from './task-drawer.js';
 import {
   TASK_DRAWER_TITLE,
@@ -2163,7 +2164,7 @@ function showJudgedAnalysisItem(host: HTMLElement, itemKey: string): void {
  * last for the same reason ②A's is (LAYER-005). `focus` opens a named Review Run with one finding in
  * view, which is how a Mark Card's 查看任务 arrives here.
  */
-function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus | null = null): void {
+function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus | null = null, procedureId: string | null = null): void {
   const content = panel();
   content.classList.add('book-review');
   content.dataset['bookId'] = bookId;
@@ -2175,6 +2176,8 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
     bookId,
     bookTitle,
     focus,
+    // 运行此工序… from 知识库 (Issue #65, S30): the 新建审阅 sheet opens filled from the procedure.
+    procedureId,
     api: window.ai7,
     awaitServiceJob,
     technicalDetails,
@@ -4941,7 +4944,29 @@ function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjecti
       ...procedures.procedures.flatMap((procedure) => [element('dt', undefined, procedure.title), element('dd', 'technical-identity', procedure.procedureId)]),
     );
     section.append(element('h3', undefined, PROCEDURES_HEADING), list, artifacts, identities);
-    panelNode.append(section, element('h3', undefined, RULES_HEADING));
+    // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087 §5, §6): apart from the built-in 工序, read on their own.
+    const captured = element('div', 'knowledge-captured');
+    const surface = mountCapturedProcedures({
+      root: captured,
+      api: window.ai7,
+      setStatus,
+      errorMessage: rendererErrorMessage,
+      technicalDetails,
+      localInstantLabel,
+      openRun: async (book, procedureId) => {
+        setStatus('正在打开这本书的审阅…', 'busy');
+        try {
+          await requestBookWorkbenchRoute({ kind: 'book', bookId: book.bookId }, async (route) =>
+            renderBookReview(route.bookId, route.bookTitle, null, procedureId));
+        } catch (error) {
+          setStatus(rendererErrorMessage(error, '无法打开这本书的审阅。'), 'error');
+        }
+      },
+    });
+    panelNode.append(section, captured, element('h3', undefined, RULES_HEADING));
+    void surface.load().catch((error: unknown) => {
+      if (captured.isConnected) captured.append(element('p', 'attention-note', rendererErrorMessage(error, '无法读取可复用工序。')));
+    });
   }
   panelNode.append(element('p', 'field-note', projection.statement));
   if (projection.rules.length === 0) {
