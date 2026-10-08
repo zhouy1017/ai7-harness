@@ -1776,7 +1776,8 @@ async function main() {
     'validate-pending', pending);
     await clickSelector(renderer, `[data-procedure-id="${procedureId}"] [data-procedure-action="versions"]`, 'validate-versions');
     const opened = await readProcedures(renderer, (page) => page.procedures[0]?.versions.length === 1, 'validate-versions-open');
-    requireJourney(opened.procedures[0].versions[0].source.startsWith(`来自《${MEMBER}》第 2 次审阅`) &&
+    // The member Book's third Review Run: its first finished and its second stopped at the 书系检索排除 (S29b) above.
+    requireJourney(opened.procedures[0].versions[0].source.startsWith(`来自《${MEMBER}》第 3 次审阅`) &&
       JSON.stringify(opened.procedures[0].versions[0].actions) === JSON.stringify(['validate', 'stop']), 'validate-version-words', opened.procedures[0].versions[0]);
     await clickSelector(renderer, `[data-procedure-id="${procedureId}"] [data-version="1"] [data-procedure-action="validate"]`, 'validate-open');
     const validationPreview = await readProcedures(renderer, (page) => page.procedures[0]?.versions[0]?.validation === 'true', 'validate-preview');
