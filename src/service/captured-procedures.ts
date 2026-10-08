@@ -317,9 +317,9 @@ export function ceilingWiderThanSource(
       problems.push(`「${step.categoryId}」不是来源审阅运行过的类别。`);
       return;
     }
+    // A step's model use is its executor's (a document that says otherwise does not read), so the same executor is the same model use.
     const executor = document.authorityCeiling.steps[index]!.executor;
-    if (houseExecutor(source) !== executor || source.output !== step.output || (step.searchEngine && !source.searchEngine) ||
-        (step.model && !callsModel(houseExecutor(source)))) {
+    if (houseExecutor(source) !== executor || source.output !== step.output || (step.searchEngine && !source.searchEngine)) {
       problems.push(`「${source.label}」的权限超出了来源审阅。`);
     }
   });

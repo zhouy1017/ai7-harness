@@ -549,6 +549,14 @@ async function openBookReview(renderer, bookId, name) {
   await waitFor(renderer, `document.querySelector('[data-screen="book-review"] .book-review .review-workspace-card')`, `${name}-card`, 60_000);
 }
 
+/** From ②B 审阅 back to 书库: its 工作概览, then the library. */
+async function leaveReviewToLibrary(renderer, name) {
+  await click(renderer, '工作概览', `${name}-overview`);
+  await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview')`, `${name}-overview-ready`);
+  await click(renderer, '返回图书列表', `${name}-library`);
+  await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
+}
+
 /** The 方案 enabled for one Book on its 工作概览, as every Book a Review Run executes for has it. */
 async function enableProfileForBook(renderer, bookId, name) {
   await clickBook(renderer, bookId, `${name}-book`);
@@ -1619,8 +1627,7 @@ async function main() {
     at('capture-validate-enable');
     // 知识库 › 工序与规则 lists it apart from the built-in 工序: version 1 待验证, dashed. 验证并启用… previews it — today's
     // guideline the same as the source Run's — and 确认启用 makes it 已启用, solid, runnable.
-    await click(renderer, '返回图书列表', 'validate-library');
-    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'validate-landing');
+    await leaveReviewToLibrary(renderer, 'validate-leave');
     await openProcedures(renderer, 'validate');
     const pending = await readProcedures(renderer, (page) => page.count === '1' && page.proposalCount === '1', 'validate-listed');
     requireJourney(pending.procedures[0].title === `《${PROCEDURE_TITLE}》` && pending.procedures[0].runnable === 'false' && !pending.procedures[0].run &&
@@ -1681,8 +1688,7 @@ async function main() {
 
     at('capture-stop');
     // 停用 is final for version 1: it is never offered to run again, and the Run that pinned it keeps naming it.
-    await click(renderer, '返回图书列表', 'stop-library');
-    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'stop-landing');
+    await leaveReviewToLibrary(renderer, 'stop-leave');
     await openProcedures(renderer, 'stop');
     const beforeStop = await readProcedures(renderer, (page) => page.procedures[0]?.versions[0]?.state === 'enabled', 'stop-listed');
     requireJourney(beforeStop.procedures[0].versions[0].runs === '按这一版运行过 1 次审阅', 'stop-runs-before', beforeStop.procedures[0].versions[0]);
@@ -1695,8 +1701,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'stop-back-landing');
     await openBookReview(renderer, targetBook, 'stop-review');
     await waitFor(renderer, `document.querySelector('.review-procedure-pin')?.dataset.procedureStopped==='true'`, 'stop-pin-kept', 30_000);
-    await click(renderer, '返回图书列表', 'stop-review-library');
-    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'stop-review-landing');
+    await leaveReviewToLibrary(renderer, 'stop-review-leave');
 
     at('capture-proposal-file');
     // 导出为文件…: the platform Save dialog (this window's launch control answers it once); the file is the proposal in words

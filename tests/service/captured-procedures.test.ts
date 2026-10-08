@@ -7,7 +7,8 @@ import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execu
 import { CAPTURED_PROCEDURE_SCHEMA_SQL } from '../../src/service/captured-procedures.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
-import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
+import type { BaselineAnalysisStore } from '../../src/service/analysis/baseline-analysis-store.js';
+import { ReviewRunDriver, type ReviewRunExecutionOwner } from '../../src/service/review/review-run-driver.js';
 import { LEADS_ABSENT_REASON } from '../../src/service/review/review-scope.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { CAPTURED_PROCEDURE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
@@ -46,7 +47,33 @@ interface Session {
   readonly driver: ReviewRunDriver;
 }
 
-async function open(): Promise<Session> {
+/** The one owner, refusing its first hand-off as a launch without a route would: that category fails, the rest go on. */
+class RefusingFirstDispatch implements ReviewRunExecutionOwner {
+  readonly #inner: BaselineAnalysisExecutionOwner;
+  #refused = false;
+
+  constructor(inner: BaselineAnalysisExecutionOwner) {
+    this.#inner = inner;
+  }
+
+  admitAndDispatch(runRecordId: string, ledger: BaselineAnalysisStore): void {
+    if (!this.#refused) {
+      this.#refused = true;
+      throw Object.assign(new Error('没有可执行的本地确定性路由。'), { code: 'EXECUTION_ROUTE_ABSENT' });
+    }
+    this.#inner.admitAndDispatch(runRecordId, ledger);
+  }
+
+  whenPlaceFree(): Promise<void> {
+    return this.#inner.whenPlaceFree();
+  }
+
+  whenDone(runRecordId: string): Promise<void> {
+    return this.#inner.whenDone(runRecordId);
+  }
+}
+
+async function open(wrap?: (inner: BaselineAnalysisExecutionOwner) => ReviewRunExecutionOwner): Promise<Session> {
   const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored');
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false,
@@ -57,7 +84,7 @@ async function open(): Promise<Session> {
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
   });
   const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
-  return { store, owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, owner) };
+  return { store, owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, wrap === undefined ? owner : wrap(owner)) };
 }
 
 async function close(session: Session): Promise<void> {
@@ -207,6 +234,10 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       expect(refusal(() => prepare(session, target, [STYLE, LITERARY], WHOLE, pin))).toBe('REVIEW_PROCEDURE_STEPS_INVALID');
       expect(refusal(() => prepare(session, target, [STYLE], { kind: 'changed', fromChapterBlockId: null, toChapterBlockId: null }, pin))).toBe('REVIEW_PROCEDURE_SCOPE_INVALID');
       expect(refusal(() => prepare(session, target, [STYLE], WHOLE, { ...pin, documentSha256: '0'.repeat(64) }))).toBe('REVIEW_PROCEDURE_STALE');
+      // In the source Book the leads can run: leaving them out there is refused.
+      const inSource = store.inspectCapturedProcedureRun(source, saved.procedureId);
+      expect(inSource.resolved!.steps.every((step) => step.available)).toBe(true);
+      expect(refusal(() => prepare(session, source, [STYLE], WHOLE, pin))).toBe('REVIEW_PROCEDURE_STEP_SKIPPED');
       const pinned = prepare(session, target, [STYLE], WHOLE, pin);
       expect(pinned.procedure).toEqual({
         procedureId: saved.procedureId, versionId: first!.versionId, version: 1, title: '线索与体例复核', documentSha256: pin.documentSha256, stopped: false,
@@ -277,6 +308,26 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       expect(store.inspectCapturedProcedureRun(source, saved.procedureId).resolved!.guidelineChanges).toEqual([
         { categoryId: STYLE, label: '体例与格式', title: '体例条款', sourceVersion: '1', version: '2' },
       ]);
+    } finally {
+      await close(session);
+    }
+  });
+
+  it('captures a partial Run only from the categories it settled, refusing the one that failed', async () => {
+    const session = await open((inner) => new RefusingFirstDispatch(inner));
+    try {
+      const { store } = session;
+      const source = await importBook(session, 'L2 部分完成');
+      // 体例与格式's dispatch is refused, so that category fails and the Run ends 部分完成 with nothing to continue.
+      const partial = await authorizeAndDrive(session, source, prepare(session, source, [STYLE, LITERARY]));
+      expect([partial.state, partial.canContinue]).toEqual(['partial', false]);
+      expect(partial.capture.available).toBe(true);
+      const capture = store.inspectProcedureCapture(source, partial.reviewRunId);
+      expect(capture.steps.map((step) => [step.categoryId, step.eligible])).toEqual([[STYLE, false], [LITERARY, true]]);
+      expect(capture.steps[0]!.excludedReason).toBe('这一类在这次审阅中没有完成（运行失败），不会保存。');
+      expect(refusal(() => store.saveCapturedProcedure({ bookId: source, reviewRunId: partial.reviewRunId, categoryIds: [STYLE, LITERARY], scopeSlot: 'whole', title: '表达', procedureId: null })))
+        .toBe('CAPTURED_PROCEDURE_STEP_INELIGIBLE');
+      expect(store.saveCapturedProcedure({ bookId: source, reviewRunId: partial.reviewRunId, categoryIds: [LITERARY], scopeSlot: 'whole', title: '表达', procedureId: null }).versionCount).toBe(1);
     } finally {
       await close(session);
     }
