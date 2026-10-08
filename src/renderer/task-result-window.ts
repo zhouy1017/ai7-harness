@@ -31,6 +31,7 @@ import {
 } from './task-panel-labels.js';
 import {
   DIALOGUE_AUTHORITY_NOTE,
+  DIALOGUE_HISTORY_DAMAGED,
   DIALOGUE_HISTORY_MISSING,
   DIALOGUE_OPEN_LABEL,
   DIALOGUE_STATE_LABELS,
@@ -259,7 +260,9 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
       parts.push(state);
       const answer = el('div', 'task-result-dialogue-answer');
       answer.dataset['dialogueAnswer'] = latest.attemptId;
-      if (latest.source === 'missing') answer.append(el('p', 'field-note', DIALOGUE_HISTORY_MISSING));
+      if (latest.source === 'missing' || latest.source === 'damaged') {
+        answer.append(el('p', 'field-note', latest.source === 'damaged' ? DIALOGUE_HISTORY_DAMAGED : DIALOGUE_HISTORY_MISSING));
+      }
       for (const fragment of latest.fragments) answer.append(el('span', `dialogue-fragment${fragment.breakAfter ? ' dialogue-fragment-break' : ''}`, fragment.text));
       parts.push(answer);
       const incomplete = dialogueIncompleteLine(latest);

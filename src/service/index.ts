@@ -1435,7 +1435,7 @@ async function run(): Promise<void> {
     // A Review Run's categories take a place of the one owner's governor one after another.
     reviewRuns = new ReviewRunDriver(store.reviewRunDriveSteps, analysisExecution);
     // Interactive Editorial Dialogue (Issue #52, S17a): its answers persist their Session logs — the Harness Session Ledger —
-    // under the Agent Data Root. An answer the predecessor left in flight settles 回答已中断 before any request is read.
+    // under the Agent Data Root. An answer the predecessor left in flight settles 回答中断 before any request is read.
     store.reconcileDialogueAttempts();
     dialogues = new DialogueExecutionOwner({
       records: store,
@@ -1546,7 +1546,7 @@ async function run(): Promise<void> {
       // A database export under way stops as 取消导出 stops it, and leaves no package it was writing (Issue #434 review).
       const exportsStopped = store?.stopDatabaseExports();
       await jobs?.dispose();
-      // A dialogue answering is interrupted and settles 回答已中断 while the store is still open (Issue #52, S17a).
+      // A dialogue answering is interrupted and settles 回答中断 while the store is still open (Issue #52, S17a).
       await dialogues?.dispose();
       // The Review Run loop stops first and starts no further category; the owner then interrupts the
       // Run in flight, and the loop records what that Run came to before the store closes.

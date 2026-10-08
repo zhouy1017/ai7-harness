@@ -34,7 +34,7 @@ describe('the words of 就这段提问…', () => {
       answering: '正在回答 · 内容尚未完成',
       completed: '回答完成',
       stopped: '回答已停止 · 内容不完整',
-      interrupted: '回答已中断 · 内容不完整',
+      interrupted: '回答中断 · 内容不完整',
       failed: '回答未能完成 · 内容不完整',
     });
     expect(labels.DIALOGUE_ACTIONS).toEqual({ stop: '停止回答', continue: '继续回答', regenerate: '重新回答', convert: '转为修改建议' });
@@ -56,8 +56,7 @@ describe('the words of 就这段提问…', () => {
     expect(labels.dialogueIncompleteLine({ state: 'completed', causeCode: null, fragmentTotal: 3 })).toBeNull();
     expect(labels.dialogueIncompleteLine({ state: 'answering', causeCode: null, fragmentTotal: 3 })).toBeNull();
     expect(labels.dialogueConvertedLine(1)).toBe('已从这次回答新建 1 条修改建议。');
-    expect(labels.dialogueConvertRationale(QUESTION)).toBe(`依据对话回答：${QUESTION}`);
-    expect(labels.dialogueConvertRationale(null)).toBe('依据对话回答。');
+    expect(labels.DIALOGUE_HISTORY_DAMAGED).toBe('这次回答的记录已损坏，读不出来。');
     expect(labels.dialogueQuestionRefusal(0, 500)).toBe('先写下你的问题。');
     expect(labels.dialogueQuestionRefusal(501, 500)).toBe('问题最多 500 个字。');
     expect(labels.dialogueQuestionRefusal(500, 500)).toBeNull();
@@ -180,9 +179,13 @@ describe('a dialogue’s attempts and what each allows', () => {
     expect(continued.attempts[1]!.fragments.map((fragment) => fragment.text)).toEqual(['一句。', '二句。', '三']);
     expect(continued.actions.convert).toBe(true);
     // Without a turn the ledger holds, there is no question to ask again.
-    const missing = dialogueProjection(task, resolveAttempts([attempt(1, 'ask', 'stopped')], { turn: () => null }, () => null), 0);
+    const missing = dialogueProjection(task, resolveAttempts([attempt(1, 'ask', 'stopped')], { turn: () => 'missing' }, () => null), 0);
     expect(missing).toMatchObject({ question: null, selection: null, actions: { continue: false, regenerate: false, convert: false } });
     expect(missing.attempts[0]!.source).toBe('missing');
+    // A record that is here and does not read is told apart from one that is not here.
+    const damaged = dialogueProjection(task, resolveAttempts([attempt(1, 'ask', 'stopped')], { turn: () => 'damaged' }, () => null), 0);
+    expect(damaged.attempts[0]).toMatchObject({ source: 'damaged', fragmentTotal: 0 });
+    expect(damaged.actions).toEqual({ stop: false, continue: false, regenerate: false, convert: false });
   });
 
   it('gives a reader the latest answer from the fragment it has shown, and every earlier one whole', () => {

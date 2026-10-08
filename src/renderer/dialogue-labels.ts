@@ -48,6 +48,8 @@ export const DIALOGUE_AUTHORITY_NOTE = '回答是生成的内容，只供参考�
 /** The question or the words the Harness Session Ledger no longer holds here (a merged Book's, or a record that does not read). */
 export const DIALOGUE_HISTORY_MISSING = '这次回答的记录不在本机。';
 export const DIALOGUE_QUESTION_MISSING = '这个问题的记录不在本机。';
+/** A record the Harness Session Ledger holds and that does not read: never passed off as one that is not here. */
+export const DIALOGUE_HISTORY_DAMAGED = '这次回答的记录已损坏，读不出来。';
 /** Background presentation (DIALOG-010): an answer in flight away from the foreground dialogue. */
 export const DIALOGUE_WAITING_LABEL = '等待回答';
 export const DIALOGUE_OPEN_LABEL = '打开对话';
@@ -58,7 +60,7 @@ export const DIALOGUE_STATE_LABELS: Readonly<Record<DialogueAnswerState, string>
   answering: '正在回答 · 内容尚未完成',
   completed: '回答完成',
   stopped: '回答已停止 · 内容不完整',
-  interrupted: '回答已中断 · 内容不完整',
+  interrupted: '回答中断 · 内容不完整',
   failed: '回答未能完成 · 内容不完整',
 };
 
@@ -104,9 +106,6 @@ export const DIALOGUE_CONVERT_RATIONALE = '理由';
 /** The conversion is a separate governed object (DIALOG-016): nothing is applied until the editor decides it. */
 export const DIALOGUE_CONVERT_NOTE = '会在所选文字上新建一条 AI7 修改建议，依据这次回答；它不会自动应用，是否接受由你决定。';
 export const DIALOGUE_CONVERT_SUBMIT = '新建修改建议';
-export function dialogueConvertRationale(question: string | null): string {
-  return question === null ? '依据对话回答。' : `依据对话回答：${question}`;
-}
 export function dialogueConvertedLine(count: number): string {
   return `已从这次回答新建 ${count} 条修改建议。`;
 }

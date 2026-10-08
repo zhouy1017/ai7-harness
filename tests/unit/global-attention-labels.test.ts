@@ -196,7 +196,7 @@ describe('each item', () => {
       'dialogue-answering': '等待回答',
       'dialogue-answered': '已回答',
       'dialogue-stopped': '回答已停止 · 内容不完整',
-      'dialogue-interrupted': '回答已中断 · 内容不完整',
+      'dialogue-interrupted': '回答中断 · 内容不完整',
       'dialogue-failed': '回答未能完成 · 内容不完整',
     });
     for (const state of STATES) {

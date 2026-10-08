@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -156,5 +156,20 @@ describe('Harness Session Ledger', () => {
     expect(readHarnessSessionLog(root, randomUUID())).toBeNull();
     writeFileSync(path, whole);
     expect((await backend.list()).map((header) => header.id)).toEqual([handle.sessionId]);
+  });
+
+  it('refuses a log that is no plain file, and an append that would grow a log past what a read takes', async () => {
+    const root = tempRoot();
+    const backend = new HarnessSessionLogBackend(root);
+    const id = randomUUID();
+    mkdirSync(join(root, `${id}.jsonl`));
+    expect(() => readHarnessSessionLog(root, id)).toThrowError(/普通文件/u);
+    await expect(backend.readStoredRevision(id as never)).rejects.toThrowError(/普通文件/u);
+    const other = randomUUID();
+    const otherMeta = { version: 0, id: other, createdAt: 1 } as never;
+    await backend.appendBatch(otherMeta, [], false);
+    const huge = [{ type: 'x', seq: 0, time: 1, data: 'a'.repeat(33 * 1024 * 1024) }] as never;
+    await expect(backend.appendBatch(otherMeta, huge, true)).rejects.toThrowError(/超出安全大小/u);
+    expect(readHarnessSessionLog(root, other)?.events).toEqual([]);
   });
 });

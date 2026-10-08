@@ -6434,14 +6434,18 @@ export class EditorialStore {
       };
     }
     const row = one(this.#authority.prepare(
-      `SELECT m.mark_id, m.manuscript_id, m.branch_id, m.block_id, m.anchor_state, m.source_task_id, m.source_label
+      `SELECT m.mark_id, m.manuscript_id, m.branch_id, m.block_id, m.anchor_state, m.source_task_id, m.source_label,
+              EXISTS (SELECT 1 FROM dialogue_tasks t WHERE t.dialogue_id = m.source_task_id) AS from_dialogue
        FROM proposal_item_decisions d JOIN proposal_change_items i ON i.item_id = d.item_id
        JOIN editorial_marks m ON m.mark_id = i.mark_id WHERE d.decision_id = ? AND m.book_id = ?`,
     ).all(source.decisionId, bookId) as SqlRow[], 'LEARNING_MATERIAL_NOT_FOUND', '这份学习材料的来源记录不存在。');
     return {
       target: { kind: 'mark', bookId, manuscriptId: asString(row.manuscript_id), branchId: asString(row.branch_id),
         blockId: asString(row.block_id), markId: asString(row.mark_id), detached: row.anchor_state === 'detached' },
-      sourceTask: row.source_task_id === null ? null : { taskIntentId: asString(row.source_task_id), label: asString(row.source_label) },
+      // A 修改建议 made of a dialogue's answer (Issue #52, S17a) names the dialogue on its card, never as a Task Intent here.
+      sourceTask: row.source_task_id === null || row.from_dialogue === 1
+        ? null
+        : { taskIntentId: asString(row.source_task_id), label: asString(row.source_label) },
     };
   }
 
@@ -12696,7 +12700,7 @@ export class EditorialStore {
 
   /**
    * Startup reconciliation (DIALOG-012): an attempt this service's predecessor left answering has nothing streaming it now. It
-   * settles 回答已中断 · 内容不完整 at once, its turn ending where the Harness Session Ledger's record of it ends, and nothing
+   * settles 回答中断 · 内容不完整 at once, its turn ending where the Harness Session Ledger's record of it ends, and nothing
    * is retried or sent (DIALOG-014).
    */
   reconcileDialogueAttempts(now: Date = new Date()): number {

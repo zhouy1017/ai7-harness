@@ -466,7 +466,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
   }
   root.addEventListener('keydown', (event) => {
-    if (event.key !== 'Escape' || event.defaultPrevented || root.hidden) return;
+    // An Escape that ends an input method's composition belongs to it (J-14): 转为修改建议's form, 设置上限…'s field and every
+    // other field in the slot keep it, and the slot stays open.
+    if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented || root.hidden) return;
     event.preventDefault();
     surface.close(true);
   });

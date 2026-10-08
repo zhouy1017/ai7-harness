@@ -1,4 +1,4 @@
-import { closeSync, existsSync, fstatSync, fsyncSync, ftruncateSync, mkdirSync, openSync, readFileSync, readdirSync, statSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, fstatSync, fsyncSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, writeSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import type { SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session';
 import type { PersistenceBackend, SessionPersistenceRevision, StoredPrefix } from '@deepseek-ai/dsh-session-persistence';
@@ -59,13 +59,29 @@ export function harnessSessionLogPath(root: string, sessionId: string): string {
 }
 
 /**
+ * A Session log's length, read without reading the log; `null` when there is none. A log is a plain file — never a link or a
+ * directory — within its bound, or it is refused as damaged.
+ */
+export function harnessSessionLogBytes(root: string, sessionId: string): number | null {
+  const path = harnessSessionLogPath(root, sessionId);
+  let metadata;
+  try {
+    metadata = lstatSync(path);
+  } catch {
+    return null;
+  }
+  requireLog(metadata.isFile() && !metadata.isSymbolicLink(), 'HARNESS_SESSION_LOG_INVALID', '技术会话记录不是普通文件。');
+  requireLog(metadata.size <= MAX_LOG_BYTES, 'HARNESS_SESSION_LOG_TOO_LARGE', '技术会话记录超出安全大小。');
+  return metadata.size;
+}
+
+/**
  * Read one Session's log as it stands: its header, its contiguous events and the torn tail, if any. `null` when the Session
  * has no log here — never written, or a log whose header line itself was cut off, which held nothing.
  */
 export function readHarnessSessionLog(root: string, sessionId: string): StoredHarnessLog | null {
-  const path = harnessSessionLogPath(root, sessionId);
-  if (!existsSync(path)) return null;
-  const bytes = readFileSync(path);
+  if (harnessSessionLogBytes(root, sessionId) === null) return null;
+  const bytes = readFileSync(harnessSessionLogPath(root, sessionId));
   requireLog(bytes.length <= MAX_LOG_BYTES, 'HARNESS_SESSION_LOG_TOO_LARGE', '技术会话记录超出安全大小。');
   const lines: Array<{ text: string; offset: number }> = [];
   let start = 0;
@@ -101,9 +117,12 @@ export function readHarnessSessionLog(root: string, sessionId: string): StoredHa
 
 /** Only a log's header, from its first line: what a listing reads without parsing every event. */
 export function readHarnessSessionHeader(root: string, sessionId: string): SessionHeader | null {
-  const path = harnessSessionLogPath(root, sessionId);
-  if (!existsSync(path)) return null;
-  const bytes = readFileSync(path);
+  try {
+    if (harnessSessionLogBytes(root, sessionId) === null) return null;
+  } catch {
+    return null;
+  }
+  const bytes = readFileSync(harnessSessionLogPath(root, sessionId));
   const end = bytes.indexOf(0x0a);
   if (end === -1) return null;
   try {
@@ -111,6 +130,19 @@ export function readHarnessSessionHeader(root: string, sessionId: string): Sessi
     return isRecord(header) && header.id === sessionId ? header as unknown as SessionHeader : null;
   } catch {
     return null;
+  }
+}
+
+/** Sync a directory's entries, where the system lets a directory be opened for it; Windows does not, and NTFS journals them. */
+export function syncDirectory(directory: string): void {
+  let fd: number | null = null;
+  try {
+    fd = openSync(directory, 'r');
+    fsyncSync(fd);
+  } catch {
+    // Nothing to sync on this system.
+  } finally {
+    if (fd !== null) closeSync(fd);
   }
 }
 
@@ -164,9 +196,12 @@ export class HarnessSessionLogBackend implements PersistenceBackend<number> {
   }
 
   readStoredRevision(id: SessionId): Promise<SessionPersistenceRevision | undefined> {
-    const path = harnessSessionLogPath(this.#root, id);
-    if (!existsSync(path)) return Promise.resolve(undefined);
-    return Promise.resolve(this.#revision(statSync(path).size));
+    try {
+      const bytes = harnessSessionLogBytes(this.#root, id);
+      return Promise.resolve(bytes === null ? undefined : this.#revision(bytes));
+    } catch (error) {
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
   }
 
   appendBatch(meta: SessionHeader, events: readonly SessionEvent[], isMaterialized: boolean): Promise<void> {
@@ -174,14 +209,20 @@ export class HarnessSessionLogBackend implements PersistenceBackend<number> {
       mkdirSync(this.#root, { recursive: true });
       const path = harnessSessionLogPath(this.#root, meta.id);
       // The header and the first batch are one write: a crash between them leaves a file whose header line is torn, which
-      // reads as no log at all.
+      // reads as no log at all. A log never grows past what a read takes: an append that would is refused, and the Session
+      // the attempt ran in is then not persisted further.
+      const text = isMaterialized ? lines(events) : lines([meta, ...events]);
+      const before = isMaterialized ? harnessSessionLogBytes(this.#root, meta.id) ?? 0 : 0;
+      requireLog(before + Buffer.byteLength(text, 'utf8') <= MAX_LOG_BYTES, 'HARNESS_SESSION_LOG_TOO_LARGE', '技术会话记录超出安全大小。');
       const fd = openSync(path, isMaterialized ? 'a' : 'wx');
       try {
-        writeAll(fd, isMaterialized ? lines(events) : lines([meta, ...events]));
+        writeAll(fd, text);
         fsyncSync(fd);
       } finally {
         closeSync(fd);
       }
+      // A new log's name is made durable with its directory, where the system lets a directory be synced.
+      if (!isMaterialized) syncDirectory(this.#root);
       return Promise.resolve();
     } catch (error) {
       return Promise.reject(error instanceof Error ? error : new Error(String(error)));

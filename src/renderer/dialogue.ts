@@ -16,6 +16,7 @@ import {
   DIALOGUE_CONVERT_SUBMIT,
   DIALOGUE_CONVERT_TITLE,
   DIALOGUE_CANCEL,
+  DIALOGUE_HISTORY_DAMAGED,
   DIALOGUE_HISTORY_MISSING,
   DIALOGUE_QUESTION_HEADING,
   DIALOGUE_QUESTION_MISSING,
@@ -23,7 +24,6 @@ import {
   DIALOGUE_STATE_LABELS,
   DIALOGUE_STATUS,
   dialogueAttemptHeading,
-  dialogueConvertRationale,
   dialogueConvertedLine,
   dialogueIncompleteLine,
 } from './dialogue-labels.js';
@@ -124,7 +124,9 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     answer.dataset['dialogueAnswer'] = attempt.attemptId;
     answer.setAttribute('aria-label', DIALOGUE_ANSWER_HEADING);
     if (latest && attempt.state === 'answering') answer.setAttribute('aria-busy', 'true');
-    if (attempt.source === 'missing') answer.append(el('p', 'field-note', DIALOGUE_HISTORY_MISSING));
+    if (attempt.source === 'missing' || attempt.source === 'damaged') {
+      answer.append(el('p', 'field-note', attempt.source === 'damaged' ? DIALOGUE_HISTORY_DAMAGED : DIALOGUE_HISTORY_MISSING));
+    }
     for (const fragment of attempt.fragments) answer.append(fragmentNode(fragment.text, fragment.breakAfter));
     section.append(head, answer);
     const incomplete = dialogueIncompleteLine(attempt);
@@ -301,7 +303,8 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     form.append(title, original);
     const proposed = field(DIALOGUE_CONVERT_PROPOSED, '', 'proposedText');
     proposed.required = true;
-    const rationale = field(DIALOGUE_CONVERT_RATIONALE, dialogueConvertRationale(target.question), 'rationale');
+    // 理由 starts empty: what is written there is kept with the 修改建议, so the question is never copied into it unasked.
+    const rationale = field(DIALOGUE_CONVERT_RATIONALE, '', 'rationale');
     const row = el('div', 'button-row compact-actions');
     const submit = el('button', 'primary', DIALOGUE_CONVERT_SUBMIT);
     submit.type = 'submit';

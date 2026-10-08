@@ -54,6 +54,9 @@ interface ActiveAnswer {
   readonly done: Promise<void>;
 }
 
+/** How long an outcome the store refused waits before it is written again, once. */
+const SETTLE_RETRY_MS = 50;
+
 /** The code an interruption's outcome records when AI7 itself closed under the answer. */
 export const DIALOGUE_CLOSED_CAUSE = 'AI7_CLOSED';
 
@@ -106,7 +109,7 @@ export class DialogueExecutionOwner {
     await active.done;
   }
 
-  /** AI7 is closing: the answer in flight is interrupted and settles 回答已中断 before the store closes. */
+  /** AI7 is closing: the answer in flight is interrupted and settles 回答中断 before the store closes. */
   async dispose(): Promise<void> {
     this.#disposed = true;
     const active = this.#active;
@@ -130,7 +133,8 @@ export class DialogueExecutionOwner {
       route: LOCAL_DETERMINISTIC_ROUTE,
       model: LOCAL_DETERMINISTIC_MODEL,
       systemPrompt,
-      outboundDataCategory: 'public-or-synthetic',
+      // The editor's own selected words and question: admitted for the local deterministic route only (S17c widens it).
+      outboundDataCategory: 'editor-selected-manuscript-excerpt',
       policy: { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 },
       // The one message this attempt may send: the selected words and the question, and what a stopped answer kept.
       admittedUserMessages: new Set([message]),
@@ -172,6 +176,8 @@ export class DialogueExecutionOwner {
         if (active.stopRequested || this.#disposed) harness.interrupt();
         outcome = await harness.submitStreaming(message, (delta) => {
           active.streamed += delta;
+          // A stop asked before the turn began found the agent idle, which ignores an interruption: it is asked again now.
+          if (active.stopRequested || this.#disposed) harness.interrupt();
         });
       } finally {
         current = null;
@@ -202,11 +208,15 @@ export class DialogueExecutionOwner {
       const last = outcome.signals.at(-1);
       cause = last?.kind === 'failed' ? last.failure.code : 'AMBIGUOUS';
     }
-    try {
-      records.settleDialogueAttempt(turn.attemptId, settled, endSeq, cause);
-    } catch {
-      // The store refused to record the outcome (it is closing, or the record is damaged): the attempt stays unsettled, and
-      // the next start's reconciliation settles it 回答已中断 from the ledger.
+    // A write the store refused once (a moment's lock, a busy disk) is tried once more; one refused twice leaves the attempt
+    // unsettled, and the next start's reconciliation settles it 回答中断 from the ledger.
+    for (let tries = 0; tries < 2; tries += 1) {
+      try {
+        records.settleDialogueAttempt(turn.attemptId, settled, endSeq, cause);
+        return;
+      } catch {
+        if (tries === 0) await new Promise((resolve) => setTimeout(resolve, SETTLE_RETRY_MS));
+      }
     }
   }
 }

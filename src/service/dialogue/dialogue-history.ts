@@ -1,5 +1,5 @@
 import type { DialogueAnswerState, DialogueAttemptProjection, DialogueProjection } from '../../shared/protocol.js';
-import { readHarnessSessionLog, type StoredHarnessLog } from '../harness/session-log.js';
+import { harnessSessionLogBytes, readHarnessSessionLog, type StoredHarnessLog } from '../harness/session-log.js';
 import { parseDialogueMessage, type DialogueMessageInput } from './contract.js';
 import type { StoredDialogueAttempt, StoredDialogueTask } from './dialogue-ledger.js';
 import { fragmentsText, splitFragments, type DialogueFragment, type FragmentReading } from './fragments.js';
@@ -44,31 +44,44 @@ export function attemptTurn(log: StoredHarnessLog, startSeq: number, endSeq: num
   return { message, streamed };
 }
 
+/** An attempt's turn, or why there is none: its log is not here, or it is here and does not read. */
+export type TurnReading = AttemptTurn | 'missing' | 'damaged';
+
 export interface DialogueHistoryReader {
-  /** An attempt's turn from the Harness Session Ledger, or `null` when its log is not here or does not read. */
-  turn(attempt: StoredDialogueAttempt): AttemptTurn | null;
+  turn(attempt: StoredDialogueAttempt): TurnReading;
 }
 
-/** The reader over the Harness Session Ledger under `root`, caching each Session's log by its length. */
+/** The most Session logs the reader keeps parsed; past it, the oldest goes first. */
+const HISTORY_CACHE_LOGS = 32;
+
+/**
+ * The reader over the Harness Session Ledger under `root`. A log is parsed again only when its length changed — the length is
+ * read first, without reading the file — and at most `HISTORY_CACHE_LOGS` parsed logs are kept.
+ */
 export function harnessHistoryReader(root: string): DialogueHistoryReader {
   const cache = new Map<string, { bytes: number; log: StoredHarnessLog }>();
-  const logOf = (sessionId: string): StoredHarnessLog | null => {
+  const logOf = (sessionId: string): StoredHarnessLog | 'missing' | 'damaged' => {
     try {
-      const log = readHarnessSessionLog(root, sessionId);
-      if (log === null) return null;
+      const bytes = harnessSessionLogBytes(root, sessionId);
+      if (bytes === null) return 'missing';
       const cached = cache.get(sessionId);
-      if (cached !== undefined && cached.bytes === log.bytes) return cached.log;
+      if (cached !== undefined && cached.bytes === bytes) return cached.log;
+      const log = readHarnessSessionLog(root, sessionId);
+      if (log === null) return 'missing';
+      cache.delete(sessionId);
       cache.set(sessionId, { bytes: log.bytes, log });
+      while (cache.size > HISTORY_CACHE_LOGS) cache.delete(cache.keys().next().value!);
       return log;
     } catch {
-      return null;
+      return 'damaged';
     }
   };
   return {
     turn(attempt) {
-      if (attempt.span === null) return null;
+      if (attempt.span === null) return 'missing';
       const log = logOf(attempt.span.harnessSessionId);
-      if (log === null || log.events.length <= attempt.span.startSeq) return null;
+      if (log === 'missing' || log === 'damaged') return log;
+      if (log.events.length <= attempt.span.startSeq) return 'missing';
       return attemptTurn(log, attempt.span.startSeq, attempt.outcome?.endSeq ?? null);
     },
   };
@@ -89,7 +102,7 @@ export interface ResolvedAttempt {
   readonly state: DialogueAnswerState;
   /** The answer's complete fragments: a 继续回答 carries what the answer it goes on from kept, then its own. */
   readonly fragments: ReadonlyArray<DialogueFragment>;
-  readonly source: 'live' | 'ledger' | 'missing';
+  readonly source: 'live' | 'ledger' | 'missing' | 'damaged';
 }
 
 /**
@@ -111,14 +124,15 @@ export function resolveAttempts(
   let first: DialogueMessageInput | null = null;
   for (const attempt of attempts) {
     const state = attemptState(attempt);
-    const turn = reader.turn(attempt);
+    const reading = reader.turn(attempt);
+    const turn = typeof reading === 'string' ? null : reading;
     const streaming = state === 'answering' ? live(attempt.attemptId) : null;
     // Every turn sends the question and the selected words; the earliest one the ledger — or, before its log is written, the
     // answer in flight — still holds says them.
     const message = turn?.message ?? streaming?.message ?? null;
     if (first === null && message !== null) first = message;
     const streamed = streaming?.streamed ?? turn?.streamed ?? null;
-    const source: ResolvedAttempt['source'] = streaming !== null ? 'live' : turn !== null ? 'ledger' : 'missing';
+    const source: ResolvedAttempt['source'] = streaming !== null ? 'live' : turn !== null ? 'ledger' : reading as 'missing' | 'damaged';
     const own = streamed === null ? [] : splitFragments(streamed, fragmentReading(state));
     const prior = attempt.kind === 'continue' ? resolved.at(-1) : undefined;
     const carried = prior === undefined ? [] : prior.fragments;

@@ -1,4 +1,6 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mergeBooks } from '../../src/service/database-merge.js';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
@@ -19,7 +21,7 @@ import { importSample1Book, requireExactSample1 } from '../support/sample1-basel
 // real store, the real PrimaryAgentHarness composition and the AI7 local deterministic adapter: an answer streamed by
 // complete fragment with a sentence cut in two held back; 停止回答 keeping only complete fragments; 重新回答 and 继续回答 as
 // new attempts linked to the one before; the history read back from the Harness Session Ledger after a restart, with no
-// answer text in any AI7 table; an answer AI7 closed under settled 回答已中断 at the next start; 转为修改建议 of a completed
+// answer text in any AI7 table; an answer AI7 closed under settled 回答中断 at the next start; 转为修改建议 of a completed
 // answer, refused for an incomplete one, leaving the manuscript as it was; and revision 60 added to a revision-58 store.
 
 const FIXTURES_ROOT = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url)));
@@ -215,6 +217,15 @@ describe('就这段提问… over the real store and harness', () => {
       expect(card.suggestion).toMatchObject({ currentText: selection.selectedText, proposedText: '这段话的语气改得平缓些', decision: null, application: null });
       expect(card.basis).toEqual([{ label: '对话回答 · 第 2 次', blockId: selection.blockId, fromGrapheme: 2, toGrapheme: 22, quote: `${FIRST_SENTENCE}${SECOND_SENTENCE}${TAIL}` }]);
       expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null).workingDigest).toBe(workingBefore);
+      // Rejected with a reason, it is Learning Material that names no source Task: a dialogue is no Task Intent.
+      const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      store.recordChangeSuggestionDecision({
+        manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId,
+        markId: converted.markId, clientDecisionId: randomUUID(), disposition: 'rejected', editedText: null, reason: '语气本来就合适',
+      });
+      const materials = store.inspectLearningMaterials(book.bookId).books[0]!.materials;
+      expect(materials).toHaveLength(1);
+      expect(materials[0]!.sourceTask).toBeNull();
     } finally {
       await dialogues.dispose();
       store.close();
@@ -446,6 +457,123 @@ describe('就这段提问… over the real store and harness', () => {
       store.close();
     }
   });
+});
+
+describe('就这段提问… at its edges (PR #658 review)', () => {
+  /** A Book with one dialogue asked about it and answered whole, the store left open. */
+  async function answered(store: EditorialStore, dialogues: DialogueExecutionOwner, title: string): Promise<{ bookId: string; dialogueId: string }> {
+    const book = await importSample1Book(store, roots.codeRoot, title);
+    const turn = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
+    dialogues.begin(turn);
+    await waitFor(() => store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null), (value) => value.attempts[0]!.state !== 'answering', 'settled');
+    return { bookId: book.bookId, dialogueId: turn.dialogueId };
+  }
+
+  it('honours a stop asked before the turn began, once the answer streams', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const dialogues = owner(store, null);
+    try {
+      const book = await importSample1Book(store, roots.codeRoot, '先停');
+      const turn = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
+      dialogues.begin(turn);
+      // Asked at once: the harness is still being composed, and the agent is idle when the turn would be interrupted.
+      await dialogues.stop(turn.attemptId);
+      const stopped = store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null);
+      expect(stopped.attempts[0]!.state).toBe('stopped');
+      expect(stopped.attempts[0]!.fragmentTotal).toBeLessThan(3);
+    } finally {
+      await dialogues.dispose();
+      store.close();
+    }
+  });
+
+  it('writes an outcome the store refused once again, and settles the attempt', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let refusals = 1;
+    const settle = store.settleDialogueAttempt.bind(store);
+    const dialogues = new DialogueExecutionOwner({
+      records: {
+        bindDialogueAttempt: store.bindDialogueAttempt.bind(store),
+        openDialogueSpan: store.openDialogueSpan.bind(store),
+        settleDialogueAttempt: (...args: Parameters<EditorialStore['settleDialogueAttempt']>) => {
+          if (refusals > 0) {
+            refusals -= 1;
+            throw new StoreError('STORE_BUSY', '存储暂时不可写。');
+          }
+          settle(...args);
+        },
+      },
+      fixture,
+      sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY),
+      developerLive: false,
+      answerHold: null,
+    });
+    try {
+      const { bookId, dialogueId } = await answered(store, dialogues, '重写');
+      expect(refusals).toBe(0);
+      expect(store.inspectDialogue(bookId, dialogueId, 0, () => null).attempts[0]).toMatchObject({ state: 'completed', fragmentTotal: 3 });
+      expect(store.reconcileDialogueAttempts()).toBe(0);
+    } finally {
+      await dialogues.dispose();
+      store.close();
+    }
+  });
+
+  it('says a log that is here and does not read is damaged, never that it is not here', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const dialogues = owner(store, null);
+    try {
+      const { bookId, dialogueId } = await answered(store, dialogues, '损坏');
+      const directory = join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY);
+      const [name] = readdirSync(directory);
+      writeFileSync(join(directory, name!), `${readFileSync(join(directory, name!), 'utf8')}{"seq":"x"}\n`);
+      const damaged = store.inspectDialogue(bookId, dialogueId, 0, () => null);
+      expect(damaged.attempts[0]).toMatchObject({ source: 'damaged', fragmentTotal: 0 });
+      expect(damaged.question).toBeNull();
+      // And one that is gone is missing.
+      rmSync(join(directory, name!));
+      expect(store.inspectDialogue(bookId, dialogueId, 0, () => null).attempts[0]!.source).toBe('missing');
+    } finally {
+      await dialogues.dispose();
+      store.close();
+    }
+  });
+
+  it('brings the Session logs a merged Book\'s dialogues name, so their history reads where it was merged', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const dialogues = owner(store, null);
+    let before: DialogueProjection;
+    let bookId: string;
+    let dialogueId: string;
+    try {
+      ({ bookId, dialogueId } = await answered(store, dialogues, '合并对话'));
+      before = store.inspectDialogue(bookId, dialogueId, 0, () => null);
+      expect(before.attempts[0]!.source).toBe('ledger');
+    } finally {
+      await dialogues.dispose();
+      store.close();
+    }
+    const other = join(roots.dataRoot, '..', 'merged-data');
+    const target = await EditorialStore.open(other, roots.codeRoot);
+    target.close();
+    const db = new DatabaseSync(join(other, 'store', 'ai7.sqlite'));
+    try {
+      db.prepare('ATTACH DATABASE ? AS src').run(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      const counts = mergeBooks(db, [bookId], { source: roots.dataRoot, target: other });
+      expect(counts.files).toBeGreaterThan(0);
+      db.exec('DETACH DATABASE src');
+    } finally {
+      db.close();
+    }
+    const logs = readdirSync(join(other, HARNESS_SESSION_LOG_DIRECTORY));
+    expect(logs).toEqual(readdirSync(join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY)));
+    store = await EditorialStore.open(other, roots.codeRoot);
+    try {
+      expect(store.inspectDialogue(bookId, dialogueId, 0, () => null)).toEqual(before);
+    } finally {
+      store.close();
+    }
+  }, 120_000);
 });
 
 const DIALOGUE_TRIGGER_FOR_TEST = `CREATE TRIGGER dialogue_harness_spans_no_update

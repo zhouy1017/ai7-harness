@@ -7917,9 +7917,9 @@ export interface DialogueAttemptProjection {
   readonly fragmentTotal: number;
   /**
    * Where the answer was read: `live` while it streams, `ledger` from the Harness Session Ledger, `missing` when that ledger
-   * holds no record of it here — a Book merged from another computer's data, or a record that does not read.
+   * holds no record of it here, `damaged` when it holds one that does not read.
    */
-  readonly source: 'live' | 'ledger' | 'missing';
+  readonly source: 'live' | 'ledger' | 'missing' | 'damaged';
   /** The known cause of an interruption or a failure, as a code; `null` otherwise. */
   readonly causeCode: string | null;
   readonly startedAt: string;
