@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeExportAdmittedDocx, readExportedDocx } from './composed-docx.mjs';
 import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect } from './controller.mjs';
 import { openRemainingPackageExport } from './package-export-readiness.mjs';
+import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // J-07 (Issue #414, plan slice S65): ⑥ 发稿. An editor saves Milestone Versions of the manuscript — each
 // purpose chosen from an unselected card set, never typed and never preselected — finds them on 交付物 with
@@ -43,6 +44,27 @@ import { openRemainingPackageExport } from './package-export-readiness.mjs';
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 const EXCERPT = Object.freeze({ source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 30, title: '发稿旅程甲' });
+// Issue #432 (S84a): 写作任务 drafts a 宣传文章 for a second Book of exact sample1 on a launch whose model adapter answers from the
+// authored fixture; the editor's words and the draft's are the fixture's (`tests/support/writing-task.ts`), and the service's
+// words are pinned by its own suites.
+const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
+const WRITING_FIXTURE = 'sample1-writing-authored';
+const WRITING_TITLE = '写作旅程乙';
+const WRITING_REQUEST = Object.freeze({ typeId: 'promotion-article', audience: '喜欢历史与悬疑小说的读者', channel: '出版社微信公众号' });
+const WRITING_TYPES = Object.freeze([['news-release', '新闻稿'], ['promotion-article', '宣传文章'], ['review-article', '评论文章'], ['launch-materials', '发布会材料'], ['marketing-points', '营销要点']]);
+const WRITING_SEND = '不发送任何内容：写作任务目前只在不连接模型服务的运行范围内起草。';
+const WRITING_NOT_DO = '不改稿件；不照抄范例；不交付、不发送；草稿由你在稿件编辑面上修改后才用。';
+const WRITING_QUICK_START_REASON = '写作任务还没有默认执行规则：先看计划，再在计划里开始任务。';
+const READ_CONNECTION = `window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection??null)`;
+
+/** The draft's blocks as the authored fixture's synthesis wrote them: its title, then each heading and its paragraphs. */
+async function writingDraftTexts() {
+  const fixture = JSON.parse(await readFile(resolve(ROOT, 'tests', 'fixtures', 'model', `${WRITING_FIXTURE}.json`), 'utf8'));
+  const draft = fixture.entries.map((entry) => { try { return JSON.parse(entry.response.text); } catch { return null; } })
+    .find((value) => value?.schema === 'ai7.writing.synthesis-result/1');
+  requireJourney(draft !== undefined, 'writing-fixture-draft');
+  return [draft.title, ...draft.sections.flatMap((section) => [section.heading, ...section.paragraphs])];
+}
 const FIRST = Object.freeze({ label: '一审稿', purpose: 'stage-archive', purposeLabel: '阶段留档', note: '一审完成后留档' });
 const SECOND = Object.freeze({ label: '二审稿', purpose: 'review-candidate', purposeLabel: '送审候选', note: '' });
 const FIRST_EDIT = '〔发稿前改动〕';
@@ -752,22 +774,68 @@ async function main() {
   let browserAcquisition;
   let tempParent;
   let journeyCompleted = false;
+  // 写作任务's analysis needs a Main Editorial Role connection (Issue #432, S84a), so J-07 owns the one synthetic credential and
+  // its cleanup as J-13 does: through the product while it answers, and directly by its reference as the last resort.
+  let credentialDataRoot;
+  let credentialRenderer;
+  let credentialMutationReached = false;
+  let credentialRemoved = false;
+  let credentialReferenceForCleanup;
+  let syntheticSecret;
   const closeOwnedBrowser = async () => {
     const ownedBrowser = browser ?? (browserAcquisition === undefined ? undefined : await browserAcquisition.catch(() => undefined));
     await ownedBrowser?.close().catch(() => undefined);
     browser = undefined;
   };
+  const removeCredentialThroughProduct = async () => {
+    if (credentialRenderer === undefined || browser === undefined || !browser.isConnected()) return;
+    const state = await credentialRenderer.evaluate(READ_CONNECTION);
+    if (UUID_PATTERN.test(state?.credentialReference ?? '')) credentialReferenceForCleanup = state.credentialReference;
+    if (state === null || state.credentialOperationState === 'missing') {
+      credentialRemoved = true;
+      return;
+    }
+    await credentialRenderer.evaluate(`window.ai7.removeModelServiceCredential()`);
+    const after = await credentialRenderer.evaluate(READ_CONNECTION);
+    credentialRemoved = after === null || after.credentialOperationState === 'missing';
+  };
   const cancellation = installJourneyCancellationCleanup(async () => {
+    let failure;
+    if (credentialMutationReached && !credentialRemoved) {
+      try { await removeCredentialThroughProduct(); } catch (error) { failure ??= error; }
+    }
     await closeOwnedBrowser();
+    if (credentialMutationReached && !credentialRemoved) {
+      try {
+        if (credentialReferenceForCleanup === undefined && credentialDataRoot !== undefined && runRoot !== undefined) {
+          const recovered = await recoverSyntheticCredentialCleanupState('J-07', credentialDataRoot, runRoot);
+          if (recovered.kind === 'not-started' || recovered.kind === 'removed') credentialRemoved = true;
+          else credentialReferenceForCleanup = recovered.credentialReference;
+        }
+        if (!credentialRemoved && credentialReferenceForCleanup !== undefined) {
+          requireJourney(electronExecutable !== undefined, 'credential-direct-cleanup-executable');
+          const executable = electronExecutable();
+          await removeSyntheticCredentialWithElectron('J-07', executable, productEnvironment(executable), credentialReferenceForCleanup);
+          credentialRemoved = true;
+        }
+      } catch (error) {
+        failure ??= error;
+      }
+    }
     const ownedLoopback = loopback ?? (loopbackAcquisition === undefined ? undefined : await loopbackAcquisition.catch(() => undefined));
     await ownedLoopback?.close().catch(() => undefined);
     loopback = undefined;
+    if (credentialMutationReached && !credentialRemoved) throw failure ?? journeyCheckFailure('J-07', 'credential-cleanup-failed');
     const ownedRoot = runRoot ?? (runRootAcquisition === undefined ? undefined : await runRootAcquisition.catch(() => undefined));
     if (ownedRoot !== undefined) {
+      if (syntheticSecret !== undefined && credentialDataRoot !== undefined) {
+        try { await assertSecretsAbsentFromDataRoot('J-07', credentialDataRoot, [syntheticSecret]); } catch (error) { failure ??= error; }
+      }
       requireJourney(tempParent !== undefined && dirname(ownedRoot) === tempParent && basename(ownedRoot).startsWith('ai7-j07-e2e-') && (await realpath(ownedRoot)) === ownedRoot, 'cleanup-target');
       await rm(ownedRoot, { recursive: true, force: true });
       runRoot = undefined;
     }
+    if (failure !== undefined) throw failure;
   }, closeOwnedBrowser);
   try {
     at('controller-loopback-sentinel');
@@ -811,9 +879,10 @@ async function main() {
     const metadata = await lstat(manuscript);
     requireJourney(metadata.isFile() && !metadata.isSymbolicLink() && metadata.size > 1_000, 'fixture-composed');
     const dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
+    credentialDataRoot = dataRoot;
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const executable = electronExecutable();
-    const launch = async ({ picker, save, folder } = {}) => {
+    const launch = async ({ picker, save, folder, adapter } = {}) => {
       const args = [
         '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
         '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
@@ -824,6 +893,8 @@ async function main() {
       if (save) args.push('--j07-save-path', save);
       // Issue #416 (S67b): the folder dialog's one answer for this launch.
       if (folder) args.push('--j07-folder-path', folder);
+      // Issue #432 (S84a): the writing Task's launch answers its model requests from the authored fixture, and sends nothing.
+      if (adapter) args.push('--j04-model-adapter', adapter);
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       cancellation.throwIfRequested();
       browserAcquisition = chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args, env: productEnvironment(executable), timeout: 60_000 });
@@ -2379,6 +2450,159 @@ async function main() {
       await clickSelector(renderer, '[data-exemplar-action="first"]', 'exemplars-return-first');
       await waitFor(renderer, `document.querySelectorAll('.exemplar-book').length === 20 && document.activeElement === document.querySelector('.exemplar-book h3') && document.querySelector('[data-exemplar-action="first"]').hidden`, 'exemplars-first-page-replaced');
     }
+
+    at('writing-book');
+    // 写作任务 (Issue #432, plan slice S84a; DELIV-007, KB-004): a second Book of exact sample1 — an analysis kind reads only that
+    // lineage (ADR 0044) — on a launch whose model adapter answers from the authored fixture, which also holds the draft's words.
+    // Its prerequisites are made through the product as J-11 makes them: the editorial workspace profile at Revision 2, and one
+    // Main Editorial Role connection whose synthetic credential is saved and removed again, so only its reference is recorded.
+    await close();
+    renderer = await launch({ picker: SAMPLE1_PATH, adapter: WRITING_FIXTURE });
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true'`, 'writing-product-ready');
+    await assertRenderer(renderer, PAGE_HELPERS, 'writing-page-helpers');
+    await importAndOpen(renderer, WRITING_TITLE);
+    const writingBookId = await renderer.evaluate(`document.querySelector('.editor-shell')?.dataset.bookId ?? null`);
+    requireJourney(UUID_PATTERN.test(writingBookId ?? ''), 'writing-book-identity');
+
+    at('writing-prerequisites');
+    await click(renderer, '返回图书工作概览', 'writing-overview');
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="install-disabled"], [data-native-artifact-action="enable-current-book"]')`, 'writing-artifact-ready');
+    await assertRenderer(renderer, `(() => { const install = document.querySelector('[data-native-artifact-action="install-disabled"]'); if (install instanceof HTMLButtonElement) install.click(); return true; })()`, 'writing-artifact-install');
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'writing-artifact-enable-ready');
+    await click(renderer, '审阅并为本图书启用 Revision 2', 'writing-artifact-enable');
+    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision === '2'`, 'writing-artifact-enabled');
+    await click(renderer, '返回图书列表', 'writing-model-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'writing-model-landing');
+    await click(renderer, '模型服务', 'writing-model-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'writing-model-ready');
+    cancellation.throwIfRequested();
+    syntheticSecret = randomBytes(48).toString('base64url');
+    credentialRenderer = renderer;
+    await fill(renderer, '#main-editorial-connection-name', 'J-07 主编辑连接', 'writing-model-name');
+    await fill(renderer, '#main-editorial-credential', syntheticSecret, 'writing-model-secret');
+    cancellation.throwIfRequested();
+    credentialMutationReached = true;
+    await click(renderer, '保护并保存', 'writing-model-save');
+    at('model-credential-saved');
+    await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus === 'available' && document.querySelector('[data-credential-state="ready"]')`, 'writing-model-saved');
+    const readyConnection = await renderer.evaluate(READ_CONNECTION);
+    requireJourney(UUID_PATTERN.test(readyConnection?.credentialReference ?? '') && readyConnection?.credentialOperationState === 'ready', 'writing-model-ready-reference');
+    credentialReferenceForCleanup = readyConnection.credentialReference;
+    await click(renderer, '移除', 'writing-model-remove');
+    at('model-credential-removed');
+    await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus === 'setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'writing-model-removed');
+    credentialRemoved = true;
+    await click(renderer, '返回', 'writing-model-back');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'writing-landing');
+    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(writingBookId)}]`, 'writing-book-open');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(writingBookId)}] [data-testid="manuscript-editor"] > [data-block-id]')`, 'writing-manuscript', 120_000);
+    await openDeliverables(renderer, 'writing-deliverables');
+
+    at('writing-sheet');
+    // 新建文档 · 写作任务 under 交付 · 生产文档: 新建文档… opens the sheet in place — the five house types with none chosen, what AI7
+    // will reference (each part the Book does not have says so, the 范例 once a type is chosen), the four consequence rows and
+    // 快速开始 waiting, with why, for a writing 默认执行规则.
+    const READ_WRITING = `(() => {
+      const section = document.querySelector('[data-screen="book-deliverables"] .writing-task');
+      if (!(section instanceof HTMLElement)) return null;
+      const quick = section.querySelector('[data-writing-action="quick"]');
+      return {
+        state: section.dataset.writingState ?? null,
+        heading: section.querySelector('h3')?.textContent ?? null,
+        task: section.querySelector('.writing-task-line')?.textContent ?? null,
+        drafted: Array.from(section.querySelectorAll('ul.writing-drafted > li'), (item) => [item.dataset.writingTypeId ?? null, item.querySelector('.writing-drafted-line')?.textContent ?? null]),
+        open: section.querySelector('form.writing-sheet') !== null,
+        types: Array.from(section.querySelectorAll('.writing-type'), (item) => { const radio = item.querySelector('input'); return [item.dataset.writingTypeId ?? null, item.querySelector('label')?.textContent ?? null, radio?.checked ?? null, radio?.disabled ?? null]; }),
+        references: Array.from(section.querySelectorAll('dl.writing-references > dd'), (node) => node.textContent ?? ''),
+        consequences: Array.from(section.querySelectorAll('dl.writing-consequences > dt, dl.writing-consequences > dd'), (node) => node.textContent ?? ''),
+        problem: section.querySelector('.writing-problem')?.textContent ?? null,
+        quick: quick === null ? null : [quick.disabled, document.getElementById(quick.getAttribute('aria-describedby') ?? '')?.textContent ?? null],
+        buttons: Array.from(section.querySelectorAll('button'), (button) => [button.dataset.writingAction ?? null, button.textContent, button.disabled]),
+      };
+    })()`;
+    const readWriting = async (predicate, name) => {
+      const deadline = Date.now() + 120_000;
+      let page = null;
+      while (Date.now() < deadline) {
+        page = await renderer.evaluate(READ_WRITING).catch(() => null);
+        if (page !== null && predicate(page)) return page;
+        await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+      }
+      const error = journeyCheckFailure('J-07', name);
+      error.detail = page;
+      throw error;
+    };
+    const writingBefore = await readWriting((page) => page.heading === '新建文档 · 写作任务', 'writing-section');
+    requireJourney(writingBefore.state === 'none' && writingBefore.task === null && writingBefore.drafted.length === 0 && !writingBefore.open &&
+      JSON.stringify(writingBefore.buttons) === JSON.stringify([['new', '新建文档…', false]]), 'writing-section-words', writingBefore);
+    await clickSelector(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-action="new"]', 'writing-new');
+    const writingSheet = await readWriting((page) => page.open, 'writing-sheet-open');
+    requireJourney(JSON.stringify(writingSheet.types) === JSON.stringify(WRITING_TYPES.map(([typeId, label]) => [typeId, label, false, false])) &&
+      JSON.stringify(writingSheet.references) === JSON.stringify([
+        '本书尚无基线分析，本次不参考梗概与人物', '本书尚无定稿的评估，本次不参考评估结论与营销要点', '选好类型后显示',
+        `《${WRITING_TITLE}》 · 作者：未填写 · 责编：未填写 · 书系：不在任何书系中`,
+      ]) &&
+      JSON.stringify(writingSheet.consequences) === JSON.stringify(['会读取', '当前稿件的全部 97 个内容块，以及上面列出的参考材料', '会发送', WRITING_SEND, '不会做', WRITING_NOT_DO, '费用', '先看计划后显示']) &&
+      JSON.stringify(writingSheet.quick) === JSON.stringify([true, WRITING_QUICK_START_REASON]), 'writing-sheet-words', writingSheet);
+    // 先看计划 with no type chosen asks for one; choosing 宣传文章 names its 范例 — none in this house.
+    await clickSelector(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-action="plan"]', 'writing-plan-unchosen');
+    await readWriting((page) => page.problem === '请选择一类文档。', 'writing-pick-type');
+    await assertRenderer(renderer, `(() => { const radio = document.querySelector('[data-screen="book-deliverables"] .writing-task input[name="writing-type"][value=${JSON.stringify(WRITING_REQUEST.typeId)}]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'writing-type-choose');
+    await readWriting((page) => page.references[2] === '本社暂无其他图书的宣传文章范例，本次不参考范例' && page.problem === null, 'writing-type-chosen');
+    await fill(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-field="audience"]', WRITING_REQUEST.audience, 'writing-audience');
+    await fill(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-field="channel"]', WRITING_REQUEST.channel, 'writing-channel');
+
+    at('writing-plan');
+    // 先看计划 prepares the Task and opens its plan in the Task Drawer: the type and the editor's words, each reference part, its
+    // two steps, and that it copies no 范例; no button of the drawer carries 授权.
+    await clickSelector(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-action="plan"]', 'writing-plan-open');
+    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer === 'open' && drawer.dataset.taskPlanKind === 'writing' && drawer.dataset.taskPlanStart === 'ready' && drawer.querySelector('[data-task-drawer-control="start"]')?.disabled === false; })()`, 'writing-plan-ready', 120_000);
+    const writingPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'writing', ref: document.querySelector('#task-drawer').dataset.taskPlanRef })
+      .then((plan) => JSON.stringify([plan.goal.sentence, plan.scope.reference, plan.steps.map((step) => step.label), plan.notDo.editorial.includes('不照抄范例：与范例有连续 12 个字以上相同的草稿不予采用')]))`);
+    requireJourney(writingPlan === JSON.stringify([
+      `为《${WRITING_TITLE}》起草「宣传文章」：受众「${WRITING_REQUEST.audience}」，渠道「${WRITING_REQUEST.channel}」`,
+      ['本书尚无基线分析，本次不参考梗概与人物', '本书尚无定稿的评估，本次不参考评估结论与营销要点', '本社暂无其他图书的宣传文章范例，本次不参考范例',
+        `图书信息：《${WRITING_TITLE}》 · 作者：未填写 · 责编：未填写 · 书系：不在任何书系中`, `你写的受众「${WRITING_REQUEST.audience}」、渠道「${WRITING_REQUEST.channel}」`],
+      ['逐章读取，找出文档可以取用的看点、人物与主题', '依据参考材料写出「宣传文章」'], true,
+    ]), 'writing-plan-words', writingPlan);
+    await assertRenderer(renderer, `Array.from(document.querySelectorAll('#task-drawer button'), (button) => button.textContent ?? '').every((label) => !label.includes('授权'))`, 'writing-plan-shown');
+    const writingPrepared = await readWriting((page) => page.state === 'prepared', 'writing-prepared');
+    requireJourney(writingPrepared.task === '写作任务「宣传文章」：尚未开始' && !writingPrepared.open, 'writing-prepared-words', writingPrepared);
+
+    at('writing-run');
+    // 开始任务 in the bar: the Run reads the eight ranges, writes the draft and settles; the drawer says so and closes.
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'writing-start');
+    const writingEnded = await readWriting((page) => ['settled', 'failed', 'interrupted'].includes(page.state), 'writing-ended');
+    requireJourney(writingEnded.state === 'settled', 'writing-settled', writingEnded);
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState === 'settled'`, 'writing-drawer-settled', 30_000);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'writing-drawer-close');
+    await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'writing-drawer-closed');
+
+    at('writing-draft');
+    // AI7's draft waits to be opened; 打开草稿 makes it the Book's 宣传文章 — its words the draft's, 版本 1 — and its 起草 phase is
+    // started by that command and nothing else.
+    const writingDrafted = await readWriting((page) => page.drafted.length === 1, 'writing-drafted');
+    requireJourney(writingDrafted.task === '写作任务「宣传文章」：已完成' && writingDrafted.drafted[0][0] === 'promotion-article' &&
+      (writingDrafted.drafted[0][1] ?? '').startsWith('「宣传文章」的草稿已写好（') &&
+      (writingDrafted.drafted[0][1] ?? '').endsWith('）；打开后成为这本书的宣传文章，处于「起草」阶段。'), 'writing-drafted-words', writingDrafted);
+    await clickSelector(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-action="open-draft"]', 'writing-open-draft');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"][data-document-type-id="promotion-article"] .editor-toolbar h2')?.textContent === '宣传文章 · 版本 1' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]') !== null`, 'writing-draft-surface', 120_000);
+    const writingTexts = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]'), (block) => block.textContent ?? '')`);
+    requireJourney(JSON.stringify(writingTexts) === JSON.stringify(await writingDraftTexts()), 'writing-draft-words', Array.isArray(writingTexts) ? writingTexts.length : null);
+    await assertRenderer(renderer, `(() => { const rows = Array.from(document.querySelectorAll('aside.document-lens li.document-phase')); return rows.length === 7 && rows.find((row) => row.dataset.phaseId === 'drafting')?.dataset.phaseState === 'in-progress' && rows.filter((row) => row.dataset.phaseState !== 'not-started').length === 1; })()`, 'writing-draft-drafting');
+
+    at('writing-card');
+    // Back on 交付物 the 宣传文章's card names the document as drafted by the writing Task, its 起草 under way; nothing is left to
+    // open, and nothing on the page or in the records says it was delivered or sent.
+    await clickSelector(renderer, '.editor-shell[data-deliverable="production-document"] nav.book-work-group button[data-work-destination="deliverables"]', 'writing-back');
+    await waitForDeliverables(renderer, 'writing-card');
+    await waitFor(renderer, `window.__j07.card('promotion-article')?.dataset.documentState === 'document'`, 'writing-card-document');
+    await assertRenderer(renderer, `(() => { const card = window.__j07.card('promotion-article'); return card?.querySelector('.document-card-line')?.textContent === '版本 1 · 由写作任务起草（范例只参照，不复制）' && card.querySelector('.document-workflow-summary')?.textContent === '1 个阶段进行中 · 0 项等待处理'; })()`, 'writing-card-words');
+    const writingDocument = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then((page) => { const document = page.types.find((type) => type.typeId === 'promotion-article')?.document; return document ? JSON.stringify([document.origin.drafted, document.versions.length, document.workflow.phases.find((phase) => phase.phaseId === 'drafting')?.state, document.workflow.transitions]) : null; })`);
+    requireJourney(writingDocument === JSON.stringify([true, 1, 'in-progress', 1]), 'writing-card-service', writingDocument);
+    const writingAfter = await readWriting((page) => page.state === 'settled', 'writing-after');
+    requireJourney(writingAfter.drafted.length === 0 && !writingAfter.open, 'writing-nothing-to-open', writingAfter);
+    await assertNoForbiddenWords(renderer, 'writing-without-forbidden-words');
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

@@ -408,6 +408,8 @@ export const TASK_BAR_NOTES = {
   'needs-connection': '模型未连接：这份计划要发送到模型服务，所需的凭据还没有就绪；连接好之后才能开始',
   offline: '离线：这份计划要连到模型服务，而这台设备现在没有网络。联网后开始任务会先记录这次授权，联网后自动开始；在此之前不会发送任何内容',
 } as const satisfies Partial<Record<TaskPlanStartReadiness, string>>;
+/** Why a plan that can never be started cannot, when its plan names no reason of its own. */
+export const TASK_BAR_UNAVAILABLE = '这份计划不能再开始。';
 
 /** What each kind leaves behind, as the summary line names it (§6: 产出). */
 export const TASK_BAR_OUTCOMES: Readonly<Record<TaskPlanKind, string>> = {
@@ -417,6 +419,7 @@ export const TASK_BAR_OUTCOMES: Readonly<Record<TaskPlanKind, string>> = {
   'initial-evaluation': 'AI7 初评',
   'readers-report': '审稿意见草稿',
   'evaluation-rewrite': '按你的评分重写的评语（待你采用）',
+  writing: '文档草稿（打开后处于「起草」阶段）',
 };
 
 /** Where each kind's Run is followed once it started (AUTH-007): the record's card, ②A or ②B. */
@@ -427,6 +430,7 @@ export const TASK_BAR_RUN_LINKS: Readonly<Record<TaskPlanKind, string>> = {
   'initial-evaluation': '查看评估',
   'readers-report': '查看评估',
   'evaluation-rewrite': '查看评估',
+  writing: '查看交付物',
 };
 
 /** The bar's actions, each by the `data-task-drawer-control` it carries. */
@@ -752,6 +756,18 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         revise,
         SAVE_DRAFT,
       ],
+    };
+  }
+  // A plan that can never be started (Issue #432 re-review): why, beside a 开始任务 that says it, and nothing that starts it.
+  if (readiness === 'unavailable') {
+    const reason = plan.start.unavailableReason ?? TASK_BAR_UNAVAILABLE;
+    return {
+      readiness,
+      summary,
+      statement: null,
+      note: reason,
+      status: null,
+      actions: [{ name: 'start', label: TASK_BAR_START, tone: 'primary', disabledReason: reason }],
     };
   }
   if (readiness === 'needs-connection') {

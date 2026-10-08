@@ -869,6 +869,19 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .document-create { margin-top: .6rem; }
 .document-create fieldset { min-width: 0; margin: 0; padding: .55rem .6rem; border: 1px solid #d5dcd9; border-radius: 8px; }
 .document-create .choice-row { display: flex; gap: .45rem; align-items: flex-start; margin-top: .35rem; }
+/* 新建文档 · 写作任务 (Issue #432, S84a): the sheet in place under 交付 · 生产文档 — types, references, the editor's words, four rows. */
+.writing-task { margin-top: 1.3rem; padding: 1.15rem 1.25rem; border: 1px solid #c9d6d2; border-radius: 12px; background: #f4f9f7; overflow-wrap: anywhere; }
+.writing-task h3, .writing-task h4 { margin: 0; }
+.writing-task > p, .writing-task > .button-row { margin: .45rem 0 0; }
+.writing-drafted { margin: .6rem 0 0; padding: 0; list-style: none; }
+.writing-drafted > li { padding: .55rem .7rem; border: 1px solid #d5dcd9; border-radius: 9px; background: #fffdf8; }
+.writing-sheet { margin-top: .6rem; display: grid; gap: .55rem; }
+.writing-sheet fieldset { min-width: 0; margin: 0; padding: .55rem .6rem; border: 1px solid #d5dcd9; border-radius: 8px; }
+.writing-type { display: flex; flex-wrap: wrap; gap: .45rem; align-items: baseline; margin-top: .35rem; }
+.writing-references, .writing-consequences { display: grid; grid-template-columns: minmax(0, 8rem) minmax(0, 1fr); gap: .3rem .7rem; margin: 0; }
+.writing-references dd, .writing-consequences dd { margin: 0; }
+.writing-field { display: grid; gap: .25rem; }
+.writing-field input, .writing-field textarea { max-width: 100%; box-sizing: border-box; }
 /* 交付 (Issue #415, S66b): the delivery form and the Delivery Records inside a document's card. */
 .document-delivery { margin-top: .6rem; }
 .document-delivery h5, .document-deliveries-section h5 { margin: .6rem 0 0; font-size: .95rem; }
@@ -1468,6 +1481,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .publication-designate, .publication-milestone-option, .publication-designate-summary, .publication-statement,
   .book-deliverables-summary, .milestone-section .milestone-purpose-option,
   .deliverables-documents, .production-document-card, .document-create fieldset, .document-lens, .document-version-current,
+  .writing-task, .writing-drafted > li, .writing-sheet fieldset,
   .document-phase, .phase-pill, .phase-chip, .document-phase-form fieldset,
   .document-delivery fieldset, .delivery-statement,
   .deliverables-package, .package-current-mark, .package-export, .package-export-result, .package-export-list > li,

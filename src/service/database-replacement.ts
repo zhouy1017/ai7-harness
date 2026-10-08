@@ -210,7 +210,7 @@ type MergePhase = 'saving-store' | 'merging' | 'opening-merge' | 'merge-applied'
 const PHASES: ReadonlyArray<string> = ['moving-out', 'moving-in', 'opening', 'applied', 'discarding', 'restoring', 'restored', 'refused',
   'saving-store', 'merging', 'opening-merge', 'merge-applied', 'restoring-store', 'store-restored'];
 const ORIGINS: ReadonlyArray<string> = ['database-export', 'scheduled-backup', 'pre-replace-backup', 'pre-merge-backup', 'pre-upgrade-backup'];
-const MERGE_NOTICES: ReadonlyArray<string> = ['series', 'internal-number'];
+const MERGE_NOTICES: ReadonlyArray<string> = ['series', 'internal-number', 'writing-exemplar'];
 const BOOK_STATUSES: ReadonlyArray<string> = ['new', 'present', 'same-title'];
 
 function isBook(value: unknown): value is DatabaseImportBookProjection {

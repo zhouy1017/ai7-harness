@@ -977,6 +977,17 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'documents-restart',
     'knowledge-exemplars',
     'publication-actuals',
+    // Issue #432 (S84a): 新建文档 · 写作任务 — a second Book's prerequisites, the sheet, the plan, the Run, the draft opened as the
+    // Book's 宣传文章 in its 起草 phase, and its card.
+    'writing-book',
+    'writing-prerequisites',
+    'model-credential-saved',
+    'model-credential-removed',
+    'writing-sheet',
+    'writing-plan',
+    'writing-run',
+    'writing-draft',
+    'writing-card',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',

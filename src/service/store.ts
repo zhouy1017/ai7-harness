@@ -267,6 +267,10 @@ import type {
   EvaluationRewriteDecision,
   EvaluationRewriteProjection,
   EvaluationRewriteWorkspaceProjection,
+  WritingDraftCreatedProjection,
+  WritingProjection,
+  WritingTaskProjection,
+  WritingTaskTypeProjection,
   ReviewCategoryGoal,
   ReviewCategoryProjection,
   ReviewCategoryTaskRequest,
@@ -285,6 +289,12 @@ import {
   READERS_REPORT_NO_EXEMPLAR,
   READERS_REPORT_TEMPLATE_LABELS,
   READERS_REPORT_TEMPLATES,
+  MAX_WRITING_AUDIENCE_GRAPHEMES,
+  MAX_WRITING_CHANNEL_GRAPHEMES,
+  MAX_WRITING_REQUIREMENTS_GRAPHEMES,
+  WRITING_LIVE_UNAVAILABLE,
+  WRITING_MODE_GOALS,
+  WRITING_QUICK_START_REASON,
 } from '../shared/protocol.js';
 import { INITIAL_EVALUATION_LIVE_UNAVAILABLE, initialEvaluationKindDefinition } from './evaluation/initial-evaluation-kind.js';
 import { readersReportKindDefinition } from './evaluation/readers-report-kind.js';
@@ -312,6 +322,41 @@ import {
   readersReportDraftBlocks,
   type StoredReadersReportTask,
 } from './readers-reports.js';
+import {
+  MAX_WRITING_CHARACTERS,
+  MAX_WRITING_EXEMPLARS_REFERENCED as MAX_WRITING_EXEMPLARS,
+  MAX_WRITING_EXEMPLAR_GRAPHEMES,
+  MAX_WRITING_SYNOPSIS_GRAPHEMES,
+  WRITING_COST_BEFORE_PLAN,
+  WRITING_DRAFT_PARSER_IDENTITY,
+  WRITING_EXEMPLAR_MOVED,
+  WRITING_FIELD_CONTROL,
+  WRITING_NEEDS_MANUSCRIPT,
+  WRITING_NOT_DO,
+  WRITING_SEND_CONSEQUENCE,
+  WritingTaskError,
+  WritingTasks,
+  graphemeLength,
+  readWritingExemplarWords,
+  writingExemplarDigest,
+  initializeWritingTaskSchema,
+  writingBlockLength,
+  writingDocumentExists,
+  writingDraftBlocks,
+  writingNotForThisBook,
+  writingWords,
+  type StoredWritingTask,
+  type WritingExemplarSource,
+} from './writing-tasks.js';
+import { writingKindDefinition, writingRecordedKindDefinition } from './writing/writing-kind.js';
+import {
+  writingExemplarLine,
+  type WritingBookInput,
+  type WritingContractInput,
+  type WritingEvaluationInput,
+  type WritingExemplarInput,
+  type WritingSynopsisInput,
+} from './writing/writing-contract.js';
 import {
   AnalysisError,
   BaselineAnalysisStore,
@@ -374,6 +419,8 @@ import {
   readersReportTaskStateLabel,
   evaluationRewritePlan,
   evaluationRewriteTaskStateLabel,
+  writingPlan,
+  writingTaskStateLabel,
   defaultRuleBindingRows,
   fixedTaskPlan,
   noDefaultRule,
@@ -775,6 +822,7 @@ import {
   READERS_REPORT_SCHEMA_VERSION,
   CAPTURED_PROCEDURE_SCHEMA_VERSION,
   EVALUATION_REWRITE_SCHEMA_VERSION,
+  WRITING_TASK_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -2015,7 +2063,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       currentVersion === READERS_REPORT_SCHEMA_VERSION ||
       currentVersion === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
-      currentVersion === EVALUATION_REWRITE_SCHEMA_VERSION,
+      currentVersion === EVALUATION_REWRITE_SCHEMA_VERSION ||
+      currentVersion === WRITING_TASK_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2075,7 +2124,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       currentVersion === READERS_REPORT_SCHEMA_VERSION ||
       currentVersion === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
-      currentVersion === EVALUATION_REWRITE_SCHEMA_VERSION
+      currentVersion === EVALUATION_REWRITE_SCHEMA_VERSION ||
+      currentVersion === WRITING_TASK_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2449,7 +2499,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       version === READERS_REPORT_SCHEMA_VERSION ||
       version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
-      version === EVALUATION_REWRITE_SCHEMA_VERSION,
+      version === EVALUATION_REWRITE_SCHEMA_VERSION ||
+      version === WRITING_TASK_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2498,7 +2549,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       version === READERS_REPORT_SCHEMA_VERSION ||
       version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
-      version === EVALUATION_REWRITE_SCHEMA_VERSION) return;
+      version === EVALUATION_REWRITE_SCHEMA_VERSION ||
+      version === WRITING_TASK_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2639,7 +2691,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       version === READERS_REPORT_SCHEMA_VERSION ||
       version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
-      version === EVALUATION_REWRITE_SCHEMA_VERSION,
+      version === EVALUATION_REWRITE_SCHEMA_VERSION ||
+      version === WRITING_TASK_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2687,7 +2740,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       version === READERS_REPORT_SCHEMA_VERSION ||
       version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
-      version === EVALUATION_REWRITE_SCHEMA_VERSION) return;
+      version === EVALUATION_REWRITE_SCHEMA_VERSION ||
+      version === WRITING_TASK_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2980,7 +3034,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== EVALUATION_REWRITE_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== WRITING_TASK_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -3031,6 +3085,7 @@ function validateModelServiceSchema(
       version >= READERS_REPORT_SCHEMA_VERSION,
       version >= CAPTURED_PROCEDURE_SCHEMA_VERSION,
       version >= EVALUATION_REWRITE_SCHEMA_VERSION,
+      version >= WRITING_TASK_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -3106,7 +3161,8 @@ function initializeModelServiceSchema(
       version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       version === READERS_REPORT_SCHEMA_VERSION ||
       version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
-      version === EVALUATION_REWRITE_SCHEMA_VERSION,
+      version === EVALUATION_REWRITE_SCHEMA_VERSION ||
+      version === WRITING_TASK_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3154,7 +3210,8 @@ function initializeModelServiceSchema(
       version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       version === READERS_REPORT_SCHEMA_VERSION ||
       version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
-      version === EVALUATION_REWRITE_SCHEMA_VERSION) {
+      version === EVALUATION_REWRITE_SCHEMA_VERSION ||
+      version === WRITING_TASK_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -4007,6 +4064,20 @@ export class EditorialStore {
    * category ledgers are (#672), and a preparation in flight is found on the ledger that holds it.
    */
   readonly #readersReportLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
+  /**
+   * 写作任务 (Issue #432, S84a): one ledger per frozen writing contract, made when first asked for and bounded as the others are;
+   * a preparation in flight is held by its work identity.
+   */
+  readonly #writingLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
+  readonly #writingWork = new Map<string, BaselineAnalysisStore>();
+  /** Each writing Result Set Revision's type and whether it holds a draft — facts a revision never changes. Bounded. */
+  readonly #writingRevisionDrafts = new Map<string, { typeId: string; drafted: boolean }>();
+  /**
+   * The house's 范例 each Book's page last read, by type (#688 review): while a writing Task is under way the page is read on
+   * every poll and no type can be drafted, so the scan is not repeated then. Bounded by the Books whose page was read.
+   */
+  readonly #writingExemplarCache = new Map<string, Map<string, Array<{ input: WritingExemplarInput; source: WritingExemplarSource }>>>();
+  #writingTasks!: WritingTasks;
   #readersReports!: ReadersReports;
   /** 按我的评分重写评语 (Issue #429, S81b2): one ledger per frozen rewrite contract, made when first asked for; bounded. */
   readonly #evaluationRewriteLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
@@ -4117,13 +4188,13 @@ export class EditorialStore {
     this.#dialogueHistory = harnessHistoryReader(join(dataRoot, HARNESS_SESSION_LOG_DIRECTORY));
     this.#dataVersions = new DataVersionLedger(authority);
     this.#databaseExports = new DatabaseExports(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: EVALUATION_REWRITE_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: WRITING_TASK_SCHEMA_VERSION }),
     });
     this.#scheduledBackups = new ScheduledBackups(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: EVALUATION_REWRITE_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: WRITING_TASK_SCHEMA_VERSION }),
     });
     this.#databaseReplacements = new DatabaseReplacements(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: EVALUATION_REWRITE_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: WRITING_TASK_SCHEMA_VERSION }),
       // A package's data opens as a store of its own, with no launch control: brought to this revision and checked whole.
       openPackage: async (root) => {
         const opened = await EditorialStore.open(root, this.#codeRoot, {
@@ -4140,6 +4211,7 @@ export class EditorialStore {
     });
     this.#readersReports = new ReadersReports(authority);
     this.#evaluationRewrites = new EvaluationRewrites(authority);
+    this.#writingTasks = new WritingTasks(authority);
     this.#evaluations = new EvaluationRecords(authority, { current: (bookId) => this.#evaluationManuscript(bookId) }, {
       latest: (bookId) => this.#initialEvaluationFacts(bookId),
       task: (bookId) => this.#initialEvaluationTask(bookId),
@@ -4278,7 +4350,7 @@ export class EditorialStore {
       // the backup location before anything migrates it, and a backup that cannot be made opens nothing.
       const classes = control.schemaRevisionClasses ?? SCHEMA_REVISION_CLASSES;
       const { upgrade, earlier } = await backUpBeforeUpgrade(authority, dataRoot, {
-        terminalRevision: EVALUATION_REWRITE_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
+        terminalRevision: WRITING_TASK_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
       }).catch((error: unknown) => {
         if (error instanceof DataVersionError) throw new StoreError(error.code, error.message);
         throw error;
@@ -4377,6 +4449,8 @@ export class EditorialStore {
       initializeCapturedProcedureSchema(authority);
       // Revision 64 (Issue #429, S81b2): which version each 按我的评分重写评语 Task rewrites, and the editor's decisions.
       initializeEvaluationRewriteSchema(authority);
+      // Revision 65 (Issue #432, S84a): which type and reference set each writing Task drafts from, and which result became a document.
+      initializeWritingTaskSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -4424,7 +4498,7 @@ export class EditorialStore {
       // Every store records the versions that open it (Issue #433, S85a; DSTO-016): a new record only when one changed.
       store.#softwareVersion = softwareVersion;
       store.#codeRoot = codeRoot;
-      store.#dataVersion = dataVersionAt(EVALUATION_REWRITE_SCHEMA_VERSION, classes);
+      store.#dataVersion = dataVersionAt(WRITING_TASK_SCHEMA_VERSION, classes);
       if (control.interruptUpgradeAt === 'before-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在记录版本之前停止。');
       // The open that raised the Data Version records the upgrade it made with the backup (S85b), and only then clears the note
       // that let an open stopped before this record it (Issue #433 review).
@@ -4432,7 +4506,7 @@ export class EditorialStore {
         // Upgrades other opens made and never recorded go first, oldest first, as those opens would have recorded them; one a
         // record already holds is not recorded again (Issue #433 review).
         for (const carried of earlier) store.#dataVersions.recordCarried(carried);
-        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: EVALUATION_REWRITE_SCHEMA_VERSION, upgrade });
+        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: WRITING_TASK_SCHEMA_VERSION, upgrade });
       }));
       if (control.interruptUpgradeAt === 'after-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在清除升级记录之前停止。');
       await completeUpgrade(dataRoot).catch(() => undefined);
@@ -4874,6 +4948,17 @@ export class EditorialStore {
           scored: evaluationRewriteScoredItems(latest.task.input).map((item) => ({ label: item.label, score: item.score!, fullMarks: item.fullMarks })),
         },
       }));
+      return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+    }
+    if (input.kind === 'writing') {
+      // 写作任务 (Issue #432, S84a): the writing kind's latest Task, on the ledger of the contract its plan froze.
+      const latest = this.#latestWriting(input.bookId, progress);
+      const projection = latest?.projection ?? null;
+      const checkpoint = projection?.checkpoint ?? null;
+      requireStore(latest !== null && projection !== null && projection.taskIntent !== null && checkpoint !== null, 'TASK_PLAN_UNAVAILABLE', '写作任务还没有准备计划。');
+      current(projection.taskIntent.taskIntentId);
+      const blocks = this.#analysisCall(() => latest.ledger.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
+      const plan = this.#taskPlanCall(() => writingPlan({ projection, bookTitle, blocks, input: latest.task.input, exemplarsHere: latest.task.exemplarsReadable }));
       return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     if (input.kind === 'initial-evaluation') {
@@ -5416,6 +5501,8 @@ export class EditorialStore {
     for (const ledger of this.#readersReportLedgers.values()) ledger.prepare({ phase: 'cancel-all' });
     for (const ledger of this.#evaluationRewriteLedgers.values()) ledger.prepare({ phase: 'cancel-all' });
     this.#evaluationRewriteWork.clear();
+    for (const ledger of this.#writingLedgers.values()) ledger.prepare({ phase: 'cancel-all' });
+    this.#writingWork.clear();
     for (const workId of Array.from(this.#reimportPreparationWork.keys())) {
       this.cancelManuscriptReimportPreparationWork(workId);
     }
@@ -7439,6 +7526,551 @@ export class EditorialStore {
       });
     })));
     return this.inspectEvaluation(bookId, null);
+  }
+
+  // ---- 写作任务 (Issue #432, plan slice S84a; V2-UX-DELIV-007, KB-004; editor-surfaces §9 新建文档 · 写作任务) -----------------
+
+  /**
+   * The writing ledger of one frozen contract — a house type, the editor's words and one reference set — made when first asked
+   * for and kept while it prepares, as 审稿意见's is. It takes the launch the baseline ledger was bound to.
+   */
+  #writingLedger(input: WritingContractInput): BaselineAnalysisStore {
+    const definition = this.#analysisCall(() => writingKindDefinition(input));
+    return this.#writingLedgers.obtain(definition.promptContractDigest, () => {
+      const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
+      ledger.bindLaunch(this.#baselineAnalysis.launch);
+      return ledger;
+    });
+  }
+
+  /**
+   * The ledger one recorded Task reads on (#688 re-review): its contract's own, or — when an exemplar it referenced no longer
+   * gives the text it pinned — one that reads what the Task recorded under the row's contract digest and refuses to build any
+   * request, so its outcome and drafts stay readable and nothing of it is run again.
+   */
+  #writingLedgerOf(task: StoredWritingTask): BaselineAnalysisStore {
+    if (task.exemplarsReadable) return this.#writingLedger(task.input);
+    const definition = this.#analysisCall(() => writingRecordedKindDefinition(task.input, task.promptContractSha256));
+    return this.#writingLedgers.obtain(`${task.promptContractSha256}:recorded`, () => {
+      const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
+      ledger.bindLaunch(this.#baselineAnalysis.launch);
+      return ledger;
+    });
+  }
+
+  #writingCall<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof WritingTaskError || error instanceof AnalysisError || error instanceof EvaluationError) {
+        throw new StoreError(error.code, error.message);
+      }
+      throw error;
+    }
+  }
+
+  /** One Task's type and reference set — the one its frozen plan names when it froze one. */
+  #writingTaskOf(taskIntentId: string): { task: StoredWritingTask; ledger: BaselineAnalysisStore } | null {
+    let task = this.#writingCall(() => this.#writingTasks.task(taskIntentId));
+    if (task === null) return null;
+    let ledger = this.#writingLedgerOf(task);
+    const planContract = this.#writingCall(() => this.#writingTasks.planContract(taskIntentId));
+    if (planContract !== null && planContract !== task.promptContractSha256) {
+      task = this.#writingCall(() => this.#writingTasks.task(taskIntentId, planContract));
+      requireStore(task !== null, 'WRITING_RECORD_INVALID', '写作任务的计划与它的记录不一致。');
+      ledger = this.#writingLedgerOf(task);
+    }
+    return { task, ledger };
+  }
+
+  /** The Book's latest writing Task with its ledger and projection; `null` before the first, or for one no record names. */
+  #latestWriting(bookId: string, progress?: ProgressReader): { task: StoredWritingTask; ledger: BaselineAnalysisStore; projection: WritingProjection } | null {
+    const intentId = this.#writingCall(() => this.#writingTasks.latestTaskIntentId(bookId));
+    if (intentId === null) return null;
+    const found = this.#writingTaskOf(intentId);
+    if (found === null) return null;
+    const projection = this.#analysisCall(() => found.ledger.inspect(bookId, progress)) as WritingProjection;
+    return { ...found, projection };
+  }
+
+  /** The Book's latest writing Task as its ledger reads it, or `null`; `progress` is the execution owner's reader. */
+  inspectWriting(bookId: string, progress?: ProgressReader): WritingProjection | null {
+    this.#assertAvailable();
+    return this.#latestWriting(bookId, progress)?.projection ?? null;
+  }
+
+  /**
+   * 写作任务 runs only where it may be sent (as 审稿意见): under a live scope no Provider Processing policy names it, so nothing is
+   * prepared or started there, and 交付物 says why. The provider-free scope is unaffected.
+   */
+  #requireWritingScope(): void {
+    this.#assertAvailable();
+    if (this.#baselineAnalysis.launch.live !== null) throw new StoreError('WRITING_UNAVAILABLE', WRITING_LIVE_UNAVAILABLE);
+  }
+
+  /** The Book's metadata as a draft may state it: its title, its people as they read now, and its 书系. */
+  #writingBook(bookId: string): WritingBookInput {
+    const book = this.#authority.prepare('SELECT title FROM books WHERE book_id = ?').get(bookId) as SqlRow | undefined;
+    requireStore(book !== undefined, 'BOOK_NOT_FOUND', '图书不存在。');
+    const people = this.#peopleCall(() => this.#bookPeople.current(bookId));
+    const series = this.#seriesCall(() => this.#series.seriesOf(bookId)).memberships.map((membership) => membership.title);
+    return {
+      title: asString(book.title),
+      authors: people.authors.slice(0, 20).map((name) => writingWords(name, 80)),
+      editors: people.editors.slice(0, 20).map((name) => writingWords(name, 80)),
+      series: series.slice(0, 20).map((title) => writingWords(title, 120)),
+    };
+  }
+
+  /**
+   * 梗概与人物 (DELIV-007): the synopsis and the people of the Book's latest baseline analysis, by its words — its opening when
+   * longer than the contract takes — or `null` while the Book has none that wrote a synopsis.
+   */
+  #writingSynopsis(bookId: string): { input: WritingSynopsisInput; revisionId: string; ordinal: number } | null {
+    const baseline = this.#analysisCall(() => this.#baselineAnalysis.inspect(bookId)) as BaselineAnalysisProjection;
+    const revision = baseline.resultSetRevision;
+    if (revision === null) return null;
+    const synopsis = writingWords(revision.synthesis.synopsis, MAX_WRITING_SYNOPSIS_GRAPHEMES);
+    if (synopsis.length === 0) return null;
+    return {
+      revisionId: revision.revisionId,
+      ordinal: revision.ordinal,
+      input: {
+        text: synopsis,
+        excerpt: graphemeLength(revision.synthesis.synopsis.trim()) > MAX_WRITING_SYNOPSIS_GRAPHEMES,
+        characters: revision.synthesis.entities
+          .filter((entity) => entity.kind === 'person' && writingWords(entity.name, 80).length > 0)
+          .slice(0, MAX_WRITING_CHARACTERS)
+          .map((entity) => {
+            const note = entity.note === null ? '' : writingWords(entity.note, 300);
+            return { name: writingWords(entity.name, 80), note: note.length === 0 ? null : note };
+          }),
+      },
+    };
+  }
+
+  /**
+   * 评估结论与营销要点 (DELIV-007): the Book's latest 定稿 evaluation — the conclusion the editor chose, the strengths, and the
+   * market section of the 初评 the version began from (S81b2) — or `null` while no version is 定稿.
+   */
+  #writingEvaluation(bookId: string): { input: WritingEvaluationInput; recordId: string; ordinal: number } | null {
+    const finalized = this.#evaluationCall(() => this.#evaluations.latestFinalized(bookId));
+    if (finalized === null) return null;
+    const conclusion = finalized.profile.conclusions.find((entry) => entry.conclusion === finalized.content.conclusion);
+    requireStore(conclusion !== undefined, 'WRITING_RECORD_INVALID', '定稿的评估没有结论。');
+    const lines = (list: ReadonlyArray<string>, most: number): string[] =>
+      list.map((entry) => writingWords(entry, 400)).filter((entry) => entry.length > 0).slice(0, most);
+    const market = finalized.initial?.market ?? null;
+    return {
+      recordId: finalized.recordId,
+      ordinal: finalized.ordinal,
+      input: {
+        conclusion: conclusion.label,
+        strengths: lines(finalized.content.strengths, 20),
+        market: market === null ? null : { readers: lines(market.readers, 5), sellingPoints: lines(market.sellingPoints, 5), channels: lines(market.channels, 5) },
+      },
+    };
+  }
+
+  /**
+   * The house's 范例 of one type that a draft of this Book references (KB-004, KB-006; S79b): organized by Book, each the
+   * version its latest delivery that came into 范例 named, from other Books only — the Book's own document of the type is the
+   * one being drafted — at most two, the first Books in 范例's own order. Each is its words — the opening when longer than the
+   * contract takes — and the version it is, never copied (the contract's bound refuses a copy).
+   */
+  #writingExemplars(bookId: string, typeId: string): Array<{ input: WritingExemplarInput; source: WritingExemplarSource }> {
+    return this.#writingExemplarsByType(bookId, [typeId]).get(typeId) ?? [];
+  }
+
+  /** The same for several types in one pass over 范例's pages, which stops once every type holds its two. */
+  #writingExemplarsByType(bookId: string, typeIds: ReadonlyArray<string>): Map<string, Array<{ input: WritingExemplarInput; source: WritingExemplarSource }>> {
+    const found = new Map(typeIds.map((typeId) => [typeId, [] as Array<{ input: WritingExemplarInput; source: WritingExemplarSource }>]));
+    const full = (): boolean => [...found.values()].every((list) => list.length >= MAX_WRITING_EXEMPLARS);
+    let after: ExemplarBookCursor | null = null;
+    do {
+      const page: ExemplarsProjection = this.inspectExemplars(after);
+      for (const book of page.books) {
+        if (book.bookId === bookId) continue;
+        for (const [typeId, list] of found) {
+          if (list.length >= MAX_WRITING_EXEMPLARS) continue;
+          const exemplar = book.exemplars.find((entry) => entry.typeId === typeId);
+          if (exemplar === undefined) continue;
+          // Its text as the contract takes it, read from its own revision, and the reference that pins it with the facts the
+          // plan names it by.
+          const words = readWritingExemplarWords(this.#authority, exemplar.revisionId);
+          if (words === null) continue;
+          const input: WritingExemplarInput = { bookTitle: writingWords(book.bookTitle, 200), version: exemplar.version, text: words.text, excerpt: words.excerpt };
+          list.push({
+            input,
+            source: {
+              documentId: exemplar.documentId, revisionId: exemplar.revisionId, bookId: book.bookId,
+              bookTitle: input.bookTitle, version: input.version, excerpt: input.excerpt, sha256: writingExemplarDigest(words.text),
+            },
+          });
+        }
+      }
+      after = page.nextCursor;
+    } while (after !== null && !full());
+    return found;
+  }
+
+  /** The editor's own words for one field, as the contract freezes them, or why they cannot be taken. */
+  #writingField(value: unknown, most: number, missing: string, field: string): string {
+    requireStore(typeof value === 'string', 'WRITING_INVALID', `${field}无效。`);
+    const words = value.normalize('NFC').trim();
+    requireStore(words.length > 0, 'WRITING_FIELD_REQUIRED', missing);
+    requireStore(words.isWellFormed() && !WRITING_FIELD_CONTROL.test(words) && graphemeLength(words) <= most, 'WRITING_FIELD_INVALID',
+      `${field}最多 ${most} 个字，只能写在一行里。`);
+    return words;
+  }
+
+  /**
+   * 先看计划 of a writing Task (DELIV-007): the writing kind's Task for one house type of the Book, from the editor's audience,
+   * channel and requirements and the reference set as it stands now, in the mode that applies — the Book's first writing Task,
+   * or another once one settled. Refused under a live scope, without a manuscript, for a type the Book has a document of or
+   * marks 本书不做, and while a writing Task is under way. Its plan opens in the Task Drawer.
+   */
+  createWritingPreparationWork(
+    bookId: string,
+    request: { typeId: string; audience: string; channel: string; requirements: string | null },
+    launchPolicy: LaunchPolicyProjection,
+  ): AnalysisPreparationResult<WritingProjection> {
+    this.#requireWritingScope();
+    requireStore(UUID_PATTERN.test(bookId), 'WRITING_INVALID', '写作任务参数无效。');
+    const type = productionDocumentType(request.typeId);
+    requireStore(type !== undefined, 'WRITING_TYPE_INVALID', '这个文档类型不在本社的类型配置中。');
+    const audience = this.#writingField(request.audience, MAX_WRITING_AUDIENCE_GRAPHEMES, '请写下这份文档的受众。', '受众');
+    const channel = this.#writingField(request.channel, MAX_WRITING_CHANNEL_GRAPHEMES, '请写下这份文档的渠道。', '渠道');
+    const requirements = request.requirements === null || request.requirements.trim().length === 0
+      ? null
+      : this.#writingField(request.requirements, MAX_WRITING_REQUIREMENTS_GRAPHEMES, '', '其他要求');
+    const primary = this.#authority.prepare("SELECT 1 FROM manuscripts WHERE book_id = ? AND role = 'primary'").get(bookId);
+    requireStore(primary !== undefined, 'WRITING_NEEDS_MANUSCRIPT', WRITING_NEEDS_MANUSCRIPT);
+    requireStore(this.#documentCall(() => this.#productionDocuments.documentOfType(bookId, type.typeId)) === undefined,
+      'WRITING_DOCUMENT_EXISTS', writingDocumentExists(type.label));
+    requireStore(!this.#documentCall(() => this.#productionDocuments.notForThisBook(bookId, type.typeId)),
+      'WRITING_NOT_FOR_THIS_BOOK', writingNotForThisBook(type.label));
+    const latest = this.#latestWriting(bookId);
+    requireStore(!runIsActive(latest?.projection.run?.state ?? null), 'WRITING_UNAVAILABLE', activeRunReason(latest?.projection.run?.state ?? null));
+    const synopsis = this.#writingSynopsis(bookId);
+    const evaluation = this.#writingEvaluation(bookId);
+    const exemplars = this.#writingExemplars(bookId, type.typeId);
+    const input: WritingContractInput = {
+      type: { typeId: type.typeId, label: type.label },
+      book: this.#writingBook(bookId),
+      audience,
+      channel,
+      requirements,
+      synopsis: synopsis?.input ?? null,
+      evaluation: evaluation?.input ?? null,
+      exemplars: exemplars.map((exemplar) => exemplar.input),
+    };
+    const ledger = this.#writingLedger(input);
+    const mode = latest === null || latest.projection.resultSetRevision === null ? 'writing-first' : 'writing-again';
+    const result = this.#analysisCall(() => ledger.prepare({
+      phase: 'start',
+      bookId,
+      goal: WRITING_MODE_GOALS[mode],
+      update: mode === 'writing-first' ? null : { mode, selectedRange: null },
+      reconfirm: false,
+      launchPolicy,
+    }));
+    // Which type, words and reference set the Task drafts from, recorded once for it and this contract.
+    const taskIntentId = this.#writingCall(() => this.#writingTasks.latestTaskIntentId(bookId));
+    requireStore(taskIntentId !== null, 'WRITING_RECORD_INVALID', '写作任务没有准备出来。');
+    this.#writingCall(() => this.#transaction(this.#authority, () => this.#writingTasks.recordTask({
+      taskIntentId,
+      bookId,
+      evaluationRecordId: evaluation?.recordId ?? null,
+      baselineRevisionId: synopsis?.revisionId ?? null,
+      exemplarSources: exemplars.map((exemplar) => exemplar.source),
+      contract: input,
+      promptContractSha256: ledger.definition.promptContractDigest,
+    })));
+    if (result.workId !== null) this.#writingWork.set(result.workId, ledger);
+    return { ...result, projection: result.projection as WritingProjection | null };
+  }
+
+  advanceWritingPreparationWork(workId: string): AnalysisPreparationResult<WritingProjection> {
+    this.#assertAvailable();
+    const ledger = this.#writingWork.get(workId);
+    requireStore(ledger !== undefined, 'ANALYSIS_PREPARATION_NOT_FOUND', '写作任务的计划准备已不存在。');
+    let result: AnalysisPreparationResult<unknown>;
+    try {
+      result = this.#analysisCall(() => ledger.prepare({ phase: 'advance', workId }));
+    } catch (error) {
+      // A preparation that failed is over: nothing holds its work any more (#688 review).
+      this.#writingWork.delete(workId);
+      throw error;
+    }
+    if (result.done) this.#writingWork.delete(workId);
+    return { ...result, projection: result.projection as WritingProjection | null };
+  }
+
+  cancelWritingPreparationWork(workId: string): boolean {
+    const ledger = this.#writingWork.get(workId);
+    if (ledger === undefined) return false;
+    this.#writingWork.delete(workId);
+    this.#analysisCall(() => ledger.prepare({ phase: 'cancel', workId }));
+    return true;
+  }
+
+  /** 开始任务 in the drawer's bar: the Run Authorization and the Run on the ledger of the plan's contract, for the owner. */
+  authorizeWriting(bookId: string, taskIntentId: string, planEnvelopeDigest: string): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore } {
+    this.#requireWritingScope();
+    const latest = this.#latestWriting(bookId);
+    requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT',
+      '这项任务已不是这本书当前的任务；请从它所在的位置重新打开计划。');
+    // A Task whose exemplar no longer gives the text it pinned is never run on other words (#688 re-review).
+    requireStore(latest.task.exemplarsReadable, 'WRITING_EXEMPLAR_MOVED', WRITING_EXEMPLAR_MOVED);
+    const authorized = this.#analysisCall(() => latest.ledger.authorize(bookId, taskIntentId, planEnvelopeDigest));
+    return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger: latest.ledger };
+  }
+
+  /**
+   * Startup reconciliation of the writing kind (as 审稿意见's): a draft left admitted or executing has nothing running it and
+   * cannot resume, so it ends 已中断 with its outcome; a start the governor had not admitted is blocked before dispatch with
+   * why. The kind's Runs are reconciled by kind, so any of its ledgers does it.
+   */
+  reconcileStoppedWritingRuns(): { settled: number } {
+    this.#assertAvailable();
+    const any = this.#writingCall(() => this.#writingTasks.anyTask());
+    if (any === null) return { settled: 0 };
+    return { settled: this.#analysisCall(() => this.#writingLedgerOf(any).reconcileStoppedRuns()).settled };
+  }
+
+  /**
+   * The newest drafted result of each type whose document is not made yet: what 打开草稿 can make into it. A newer attempt that
+   * wrote no draft — a refused copy of an exemplar — does not hide an older draft that can still be opened (#688 review).
+   */
+  #writingDrafted(bookId: string): Map<string, { revisionId: string; createdAt: string }> {
+    const drafted = new Map<string, { revisionId: string; createdAt: string }>();
+    for (const revision of this.#writingCall(() => this.#writingTasks.revisions(bookId))) {
+      // Whether a revision holds a draft never changes, so each is read once while the store is open (#688 re-review).
+      let known = this.#writingRevisionDrafts.get(revision.revisionId);
+      if (known === undefined) {
+        const found = this.#writingTaskOf(revision.taskIntentId);
+        if (found === null) continue;
+        const inspected = this.#analysisCall(() => found.ledger.inspect(bookId, undefined, revision.revisionId)) as WritingProjection;
+        known = { typeId: found.task.typeId, drafted: inspected.inspectedRevision?.revision.writing.draft != null };
+        if (this.#writingRevisionDrafts.size >= 1024) this.#writingRevisionDrafts.clear();
+        this.#writingRevisionDrafts.set(revision.revisionId, known);
+      }
+      if (known.drafted && !drafted.has(known.typeId)) drafted.set(known.typeId, { revisionId: revision.revisionId, createdAt: revision.createdAt });
+    }
+    return drafted;
+  }
+
+  /** Why the Book's latest writing Task wrote no draft: its book-level synthesis's own reason, or `null` when it wrote one. */
+  #writingRefusal(projection: WritingProjection): string | null {
+    const revision = projection.resultSetRevision;
+    if (revision === null || projection.taskOutcome === null || projection.taskOutcome.resultSetRevisionId !== revision.revisionId ||
+        revision.writing.draft !== null) return null;
+    return revision.writing.synthesis.reason;
+  }
+
+  /**
+   * 新建文档 · 写作任务 on ⑥ 交付物 (DELIV-007): what every draft references — each part said as it stands, or that the Book has
+   * none — the four consequence rows, each house type with whether a writing Task may draft it now and its 范例, the newest
+   * drafted result not yet made a document, and the Book's latest writing Task. 快速开始 waits for a writing 默认执行规则 (S84b).
+   */
+  inspectWritingTask(bookId: string): WritingTaskProjection {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+    const book = this.#writingBook(bookId);
+    const manuscript = this.#authority.prepare(
+      `SELECT count(*) AS blocks FROM working_blocks wb JOIN manuscript_branches mb ON mb.branch_id = wb.branch_id
+       JOIN manuscripts m ON m.manuscript_id = mb.manuscript_id AND m.role = 'primary' WHERE m.book_id = ?`,
+    ).get(bookId) as SqlRow;
+    const blocks = asNumber(manuscript.blocks);
+    let unavailable: string | null = this.#baselineAnalysis.launch.live !== null ? WRITING_LIVE_UNAVAILABLE
+      : blocks === 0 ? WRITING_NEEDS_MANUSCRIPT : null;
+    let latest: { task: StoredWritingTask; ledger: BaselineAnalysisStore; projection: WritingProjection } | null = null;
+    let drafted = new Map<string, { revisionId: string; createdAt: string }>();
+    try {
+      latest = this.#latestWriting(bookId);
+      drafted = this.#writingDrafted(bookId);
+    } catch (error) {
+      if (!(error instanceof StoreError)) throw error;
+      unavailable = `写作任务暂不可用：${error.message}`;
+    }
+    // What a draft would reference: a Book whose manuscript no analysis may read, or whose records no longer read, says why.
+    let synopsis: { input: WritingSynopsisInput; revisionId: string; ordinal: number } | null = null;
+    let evaluation: { input: WritingEvaluationInput; recordId: string; ordinal: number } | null = null;
+    try {
+      synopsis = blocks === 0 ? null : this.#writingSynopsis(bookId);
+      evaluation = this.#writingEvaluation(bookId);
+    } catch (error) {
+      if (!(error instanceof StoreError)) throw error;
+      unavailable ??= `写作任务暂不可用：${error.message}`;
+    }
+    const documents = this.#documentCall(() => this.#productionDocuments.documents(bookId, blocks > 0));
+    const runState = latest?.projection.run?.state ?? null;
+    // The house's 范例 of every type in one pass — read again only when no writing Task is under way; a record that no longer
+    // reads says so, as any other part does.
+    let exemplarsByType = new Map<string, Array<{ input: WritingExemplarInput; source: WritingExemplarSource }>>();
+    const cached = runIsActive(runState) ? this.#writingExemplarCache.get(bookId) : undefined;
+    if (cached !== undefined) exemplarsByType = cached;
+    else {
+      try {
+        exemplarsByType = this.#writingExemplarsByType(bookId, documents.types.map((type) => type.typeId));
+        if (this.#writingExemplarCache.size >= REVIEW_CATEGORY_CACHE_CAPACITY) this.#writingExemplarCache.clear();
+        this.#writingExemplarCache.set(bookId, exemplarsByType);
+      } catch (error) {
+        if (!(error instanceof StoreError)) throw error;
+        unavailable ??= `写作任务暂不可用：${error.message}`;
+      }
+    }
+    const named = (list: ReadonlyArray<string>, none: string): string => (list.length === 0 ? none : list.join('、'));
+    return {
+      bookId,
+      unavailable,
+      references: {
+        synopsis: synopsis === null
+          ? '本书尚无基线分析，本次不参考梗概与人物'
+          : `基线分析第 ${synopsis.ordinal} 版的梗概${synopsis.input.excerpt ? '（节选开头）' : ''}与 ${synopsis.input.characters.length} 位人物`,
+        evaluation: evaluation === null
+          ? '本书尚无定稿的评估，本次不参考评估结论与营销要点'
+          : `第 ${evaluation.ordinal} 版定稿评估的结论「${evaluation.input.conclusion}」、主要优点${evaluation.input.market === null ? '（这一版没有 AI7 初评的市场部分）' : '与营销要点（目标读者、差异化卖点、渠道与策略）'}`,
+        book: `《${book.title}》 · 作者：${named(book.authors, '未填写')} · 责编：${named(book.editors, '未填写')} · 书系：${named(book.series, '不在任何书系中')}`,
+      },
+      consequences: {
+        read: blocks === 0 ? '这本书还没有稿件。' : `当前稿件的全部 ${blocks} 个内容块，以及上面列出的参考材料`,
+        send: WRITING_SEND_CONSEQUENCE,
+        notDo: WRITING_NOT_DO,
+        cost: WRITING_COST_BEFORE_PLAN,
+      },
+      types: documents.types.map((type): WritingTaskTypeProjection => {
+        const exemplars: WritingExemplarInput[] = (exemplarsByType.get(type.typeId) ?? []).map((exemplar) => exemplar.input);
+        const prepare: WritingTaskTypeProjection['prepare'] =
+          unavailable !== null ? { allowed: false, reason: unavailable }
+          : type.document !== null ? { allowed: false, reason: writingDocumentExists(type.label) }
+          : type.notForThisBook ? { allowed: false, reason: writingNotForThisBook(type.label) }
+          : runIsActive(runState) ? { allowed: false, reason: activeRunReason(runState) }
+          : { allowed: true, mode: latest === null || latest.projection.resultSetRevision === null ? 'writing-first' : 'writing-again' };
+        return {
+          typeId: type.typeId,
+          label: type.label,
+          prepare,
+          exemplars: { count: exemplars.length, statement: writingExemplarLine(type.label, exemplars) },
+          drafted: type.document === null ? drafted.get(type.typeId) ?? null : null,
+        };
+      }),
+      task: latest === null || latest.projection.taskIntent === null ? null : {
+        taskIntentId: latest.projection.taskIntent.taskIntentId,
+        typeId: latest.task.typeId,
+        typeLabel: latest.task.input.type.label,
+        state: latest.projection.state,
+        label: writingTaskStateLabel(latest.projection),
+        // A Task not yet run whose exemplar is no longer here says it cannot start; one that ran says why it wrote no draft.
+        refusal: !latest.task.exemplarsReadable && latest.projection.taskOutcome === null ? WRITING_EXEMPLAR_MOVED : this.#writingRefusal(latest.projection),
+      },
+      quickStart: { allowed: false, reason: WRITING_QUICK_START_REASON },
+    };
+  }
+
+  /**
+   * 打开草稿 (DELIV-007): one drafted result made its type's document — an Editorial Artifact in the same block store as every
+   * Production Document, edited on the manuscript surface with the same marks, saved as `版本 N`, delivered and exported as any
+   * document is — with its 起草 phase started, in one transaction with the record of which result it was made from. The editor's
+   * command starts the phase; no Run moves one. Once per type of a Book, and refused for a draft that copies an exemplar, checked
+   * again here against the contract's bound. Nothing is delivered or sent.
+   */
+  createWritingDraft(bookId: string, revisionId: string): WritingDraftCreatedProjection {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(revisionId), 'WRITING_INVALID', '写作任务参数无效。');
+    const revision = this.#writingCall(() => this.#writingTasks.revisions(bookId)).find((entry) => entry.revisionId === revisionId);
+    requireStore(revision !== undefined, 'WRITING_NOT_FOUND', '这本书没有这一次起草的文档。');
+    const found = this.#writingTaskOf(revision.taskIntentId);
+    requireStore(found !== null, 'WRITING_RECORD_INVALID', '这一次起草没有记下它的类型与参考材料。');
+    const inspected = this.#analysisCall(() => found.ledger.inspect(bookId, undefined, revisionId)) as WritingProjection;
+    const draft = inspected.inspectedRevision?.revision.writing.draft ?? null;
+    requireStore(draft !== null, 'WRITING_NOT_DRAFTED', '这一次起草没有写出文档草稿，不能打开草稿。');
+    const type = productionDocumentType(found.task.typeId);
+    requireStore(type !== undefined, 'WRITING_TYPE_INVALID', '这个文档类型不在本社的类型配置中。');
+    // Every revision names a Source Version; a draft's names the manuscript file of the revision the Task read (its export is
+    // written fresh from its own words, never from that file).
+    const source = this.#authority.prepare(
+      `SELECT mr.source_version_id FROM analysis_task_input_checkpoints c JOIN manuscript_revisions mr ON mr.revision_id = c.revision_id
+       WHERE c.task_intent_id = ?`,
+    ).get(revision.taskIntentId) as SqlRow | undefined;
+    requireStore(source !== undefined, 'WRITING_RECORD_INVALID', '写作任务的输入修订版缺失。');
+    const sourceVersionId = asString(source.source_version_id);
+    const blocks = writingDraftBlocks(draft).map((block) => ({
+      ...block,
+      digest: sha256(canonicalJson({ kind: block.kind, level: block.level, text: block.text })),
+      graphemeLength: writingBlockLength(block.text),
+    }));
+    const now = new Date().toISOString();
+    const documentId = randomUUID();
+    const branchId = randomUUID();
+    const draftRevisionId = randomUUID();
+    const characterCount = blocks.reduce((total, block) => total + block.graphemeLength, 0);
+    const revisionDigest = WritingTasks.draftRevisionDigest(documentId, revisionId, blocks.map(({ kind, level, text }) => ({ kind, level, text })));
+    this.#documentCall(() => this.#writingCall(() => this.#transaction(this.#authority, () => {
+      // The checks again, inside the transaction that writes: a document of the type made meanwhile refuses this one.
+      requireStore(this.#productionDocuments.documentOfType(bookId, type.typeId) === undefined, 'WRITING_DOCUMENT_EXISTS', writingDocumentExists(type.label));
+      requireStore(!this.#productionDocuments.notForThisBook(bookId, type.typeId), 'WRITING_NOT_FOR_THIS_BOOK', writingNotForThisBook(type.label));
+      this.#authority.prepare("INSERT INTO manuscripts(manuscript_id, book_id, role, created_at) VALUES (?, ?, 'production-document', ?)")
+        .run(documentId, bookId, now);
+      this.#authority.prepare('INSERT INTO manuscript_branches(branch_id, manuscript_id, name, created_at) VALUES (?, ?, ?, ?)')
+        .run(branchId, documentId, type.label, now);
+      this.#authority.prepare(
+        `INSERT INTO manuscript_revisions(
+           revision_id, manuscript_id, branch_id, ordinal, revision_label, parent_revision_id,
+           source_version_id, revision_digest, created_at
+         ) VALUES (?, ?, ?, 1, 'r1', NULL, ?, ?, ?)`,
+      ).run(draftRevisionId, documentId, branchId, sourceVersionId, revisionDigest, now);
+      this.#authority.prepare('UPDATE manuscript_branches SET base_revision_id = ? WHERE branch_id = ?').run(draftRevisionId, branchId);
+      const insertBlock = this.#authority.prepare('INSERT INTO manuscript_blocks(block_id, manuscript_id, created_revision_id) VALUES (?, ?, ?)');
+      const insertVersion = this.#authority.prepare(
+        `INSERT INTO manuscript_block_versions(
+           revision_id, block_id, position, kind, level, text, digest, start_offset, grapheme_length
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      const insertWorking = this.#authority.prepare(
+        `INSERT INTO working_blocks(branch_id, block_id, position, kind, level, text, digest, grapheme_length)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      let offset = 0;
+      blocks.forEach((block, index) => {
+        const position = index + 1;
+        const blockId = `blk_${sha256(`${draftRevisionId}\u0000${position}\u0000${block.digest}`).slice(0, 24)}`;
+        insertBlock.run(blockId, documentId, draftRevisionId);
+        insertVersion.run(draftRevisionId, blockId, position, block.kind, block.level, block.text, block.digest, offset, block.graphemeLength);
+        insertWorking.run(branchId, blockId, position, block.kind, block.level, block.text, block.digest, block.graphemeLength);
+        offset += block.graphemeLength;
+      });
+      this.#authority.prepare(
+        `INSERT INTO branch_working_state(
+           branch_id, manuscript_id, base_revision_id, journal_sequence, working_digest,
+           total_graphemes, history_sequence, last_checkpoint_sequence
+         ) VALUES (?, ?, ?, 0, ?, ?, 0, 0)`,
+      ).run(branchId, documentId, draftRevisionId, revisionDigest, characterCount);
+      requireStore(
+        this.#boundedCall(() => this.#boundedAuthority.initializeImportedBranch(branchId)) === characterCount,
+        'WRITING_INVALID', '文档草稿的索引无法由它的文字精确建立。',
+      );
+      this.#productionDocuments.record({
+        documentId, bookId, typeId: type.typeId, originSourceVersionId: sourceVersionId, parserIdentity: WRITING_DRAFT_PARSER_IDENTITY, createdAt: now,
+      });
+      this.#documentWorkflow.recordInstance(documentId, now);
+      // The draft is the document's 起草 (DELIV-007): the editor's 打开草稿 starts that phase, as 开始 would.
+      this.#documentWorkflow.transition({ bookId, documentId, phaseId: 'drafting', action: 'start', expectedTransitions: 0, reason: null }, now);
+      this.#productionDocuments.recordVersion(documentId, draftRevisionId, revisionDigest, 'created');
+      this.#writingTasks.recordDraft({
+        documentId, bookId, typeId: type.typeId, analysisRevisionId: revisionId, taskIntentId: revision.taskIntentId, recordedAt: now,
+      });
+    })));
+    const row = this.#documentCall(() => this.#productionDocuments.documentById(bookId, documentId));
+    requireStore(row !== undefined, 'WRITING_RECORD_INVALID', '文档草稿没有建立。');
+    return {
+      writing: this.inspectWritingTask(bookId),
+      typeId: type.typeId,
+      typeLabel: type.label,
+      document: this.#documentCall(() => this.#productionDocuments.document(row)),
+    };
   }
 
   // ---- 市场 and 按我的评分重写评语 (Issue #429, plan slice S81b2; V2-UX-EVAL-008 to EVAL-010; editor-surfaces §5 ②C) ----------

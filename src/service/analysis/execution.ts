@@ -1909,9 +1909,10 @@ export class BaselineAnalysisExecutionOwner {
               crossUnit = gap('contract-invalid', named(crossUnitEmptyAnswerGapReason(canonical.reasoningPresent)));
             } else if (step !== null) {
               const parsed = step.parse(candidate.text, closedOutcomes);
+              const refused = parsed.ok ? null : step.refusalReason?.(parsed.code, parsed.detail) ?? null;
               crossUnit = parsed.ok
                 ? { state: 'closed', findings: [], requestDigest, usage: crossUnitUsage, result: parsed.result }
-                : gap('contract-invalid', named(unparsableCrossUnitAnswerGapReason(parsed.code, parsed.detail, candidate.text)));
+                : gap('contract-invalid', refused ?? named(unparsableCrossUnitAnswerGapReason(parsed.code, parsed.detail, candidate.text)));
             } else {
               const parsed = parseCrossUnitResult(candidate.text, {
                 closedOrdinals: closedOutcomes.map((outcome) => outcome.unitOrdinal),
@@ -1952,6 +1953,10 @@ export class BaselineAnalysisExecutionOwner {
       // A unit the plan left out of scope is a gap in the revision's coverage and not in the Run: a
       // range review that closed everything it was asked to read completed, without qualification.
       if (terminalClassification === 'completed' && reduced.gaps.some((gapEntry) => gapEntry.code !== 'out-of-scope')) {
+        terminalClassification = 'completed-with-gaps';
+      }
+      // A kind whose book-level step is its result (Issue #432 review): no closed step, no complete Run.
+      if (terminalClassification === 'completed' && definition.crossUnit?.step?.requiredForCompletion === true && crossUnit.state !== 'closed') {
         terminalClassification = 'completed-with-gaps';
       }
       clock.close();
