@@ -750,6 +750,24 @@ async function dispatch(
     }
     case 'createReadersReportDraft':
       return { id: request.id, ok: true, op: request.op, result: store.createReadersReportDraft(request.input.bookId, request.input.revisionId) };
+    // 按我的评分重写评语 (Issue #429, S81b2): asked of one version, prepared as a cooperative job whose plan the Task Drawer opens,
+    // started from its bar through the governor on the ledger of the plan's contract, and decided by the editor — 采用 or 放弃.
+    case 'prepareEvaluationRewrite':
+      return { id: request.id, ok: true, op: request.op, result: jobs.startEvaluationRewritePreparation(request.input.bookId, request.input.recordId, launchPolicy) };
+    case 'authorizeEvaluationRewrite': {
+      const authorized = store.authorizeEvaluationRewrite(request.input.bookId, request.input.taskIntentId, request.input.planEnvelopeDigest);
+      if (authorized.dispatchRunRecordId !== null) {
+        try {
+          analysisExecution.admitOrQueue(authorized.dispatchRunRecordId, authorized.ledger);
+        } catch (error) {
+          const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
+          throw new StoreErrorClass(code, error instanceof Error ? error.message : '运行未能进入调度。');
+        }
+      }
+      return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluation(request.input.bookId, authorized.recordId) };
+    }
+    case 'decideEvaluationRewrite':
+      return { id: request.id, ok: true, op: request.op, result: store.decideEvaluationRewrite(request.input.bookId, request.input.revisionId, request.input.decision) };
     case 'inspectAnalysisFeedback':
       return { id: request.id, ok: true, op: request.op, result: store.inspectAnalysisFeedback(request.input.bookId, request.input.revisionId) };
     case 'recordAnalysisFeedback':
@@ -1537,6 +1555,13 @@ async function run(): Promise<void> {
       store.reconcileStoppedReadersReportRuns();
     } catch {
       // Reported where the 审稿意见 is read.
+    }
+    // 按我的评分重写评语 has no 续行 either (Issue #429, S81b2): reconciled by kind as 审稿意见 is, and a damaged record of it never
+    // stops the service starting.
+    try {
+      store.reconcileStoppedEvaluationRewriteRuns();
+    } catch {
+      // Reported where 评估 reads the rewrite.
     }
     // A Review Run's categories take a place of the one owner's governor one after another.
     reviewRuns = new ReviewRunDriver(store.reviewRunDriveSteps, analysisExecution);

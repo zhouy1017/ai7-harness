@@ -7,6 +7,7 @@ import type {
   InitialEvaluationTaskMode,
   ReadersReportProjection,
   ReadersReportTemplate,
+  EvaluationRewriteProjection,
   BaselineAnalysisSelectedRange,
   PlanRevisionDiffEntryProjection,
   PlanRevisionDiffValue,
@@ -835,7 +836,7 @@ export function initialEvaluationPlan(input: {
     },
     steps: [
       { id: 'units', label: '逐章读取，记下各评分项的依据', result: '每条依据引用它所在的段落', removable: false, removed: false },
-      { id: 'reduction', label: '全书综合', result: '各评分项的初评分数与评语，主要优点、主要问题、下一步建议与建议结论', removable: false, removed: false },
+      { id: 'reduction', label: '全书综合', result: '各评分项的初评分数与评语，主要优点、主要问题、下一步建议与建议结论，以及市场部分', removable: false, removed: false },
     ],
     participation: { during: boundary !== null && boundary.participation.expected ? boundary.participation.statement : NO_PARTICIPATION, after: '在「评估」中从 AI7 初评开始新的一版，再按你的判断定分' },
     service: {
@@ -856,10 +857,12 @@ export function initialEvaluationPlan(input: {
     },
     outcomes: [
       'AI7 初评：各评分项的初评分数、评语与依据充分度',
+      '市场部分：目标读者、差异化卖点、渠道与策略，以及标明「预测 · 低确定性」的市场回报与评奖可能性',
       '这次运行的运行报告',
     ],
     notDo: {
-      editorial: [...EDITORIAL_NOT_DO, '不替你打分：评估记录保存的是你的评分', '不选结论：建议结论只标明是 AI7 的', '不评风险项', '不读这本书以外的内容'],
+      editorial: [...EDITORIAL_NOT_DO, '不替你打分：评估记录保存的是你的评分', '不选结论：建议结论只标明是 AI7 的', '不评风险项', '不读这本书以外的内容',
+        '不联网检索：市场部分只依据这本书的稿件，不对比他社图书，也不预测定价与首印'],
       technical: [...projection.namedNonEffects],
     },
     boundary: {
@@ -1064,6 +1067,159 @@ export function readersReportPlan(input: {
     ],
     start,
     defaultRule: noDefaultRule(READERS_REPORT_NO_RULE),
+    runControl: null,
+    redo: null,
+    reprepare: null,
+    clarifications: [],
+    budgetStop: null,
+  };
+}
+
+// ---- 按我的评分重写评语 (Issue #429, plan slice S81b2) ------------------------------------------------------------------
+
+/** An analysis Task's state in the drawer's own words, for 评估's rewrite beside the drawer. */
+export function evaluationRewriteTaskStateLabel(projection: EvaluationRewriteProjection): string {
+  return baselineState(projection as unknown as BaselineAnalysisProjection).label;
+}
+
+const EVALUATION_REWRITE_NO_RULE = '按我的评分重写评语还不能设为快速开始默认：每次重写都先看计划，再开始。';
+
+/**
+ * The plan of the Book's rewrite Task (EVAL-008): the evaluation rewrite kind's ledger read in the editor's words, as 审稿意见's
+ * plan is. It names the version and the saved entry whose scores the 评语 are rewritten to, and the items the editor scored; its
+ * steps are what the kind does — read each range for what bears out the editor's scores, then rewrite each 评语 and the 总评 —
+ * and what it makes is a proposal: never a number, never a change of the record until the editor 采用 it. It is started from
+ * the bar and takes no edits, rules, pause or redo: a changed plan is asked again from 评估.
+ */
+export function evaluationRewritePlan(input: {
+  projection: EvaluationRewriteProjection;
+  bookTitle: string;
+  blocks: ReadonlyArray<ManifestBlockInput>;
+  task: { recordOrdinal: number; entryOrdinal: number; profile: { title: string; version: string }; scored: ReadonlyArray<{ label: string; score: number; fullMarks: number }> };
+}): TaskPlanProjection {
+  const { projection, bookTitle, blocks, task } = input;
+  const intent = projection.taskIntent;
+  const checkpoint = projection.checkpoint;
+  const manifest = projection.coverageManifest;
+  const provider = projection.providerResolutionPlan;
+  const plan = projection.executionPlan;
+  const envelope = projection.planEnvelope;
+  const version = projection.planVersion;
+  requirePlan(intent !== null && checkpoint !== null && manifest !== null && provider !== null && plan !== null &&
+    envelope !== null && version !== null, '按我的评分重写评语还没有准备计划。');
+  const reading = readRange(blocks, null);
+  const units = manifest.units.length;
+  const route = provider.executionRoute;
+  const remote = provider.remoteBinding;
+  const live = route.kind === 'opencode-go';
+  const ceiling = provider.runBudgetCeiling;
+  const revision = projection.planRevision;
+  const boundary = envelope.boundary;
+  const state = baselineState(projection as unknown as BaselineAnalysisProjection);
+  const needsModelConnection = route.kind === 'opencode-go';
+  const start: TaskPlanStartProjection = projection.authorization !== null
+    ? startedBar(needsModelConnection)
+    : !projection.actions.canAuthorize
+      ? { readiness: 'changed', needsModelConnection, planEnvelopeDigest: null, categoryDigests: [], reconfirm: null }
+      : { readiness: route.kind === 'none' ? 'no-route' : 'ready', needsModelConnection, planEnvelopeDigest: envelope.digest, categoryDigests: [], reconfirm: null };
+  const basis = `第 ${task.recordOrdinal} 版评估（第 ${task.entryOrdinal} 次保存）`;
+  const scored = task.scored.map((item) => `${item.label} ${Number.isInteger(item.score) ? item.score : item.score.toFixed(1)} / ${item.fullMarks}`).join('、');
+  return {
+    bookId: projection.bookId,
+    kind: 'evaluation-rewrite',
+    ref: intent.taskIntentId,
+    state: revision !== null && projection.authorization === null ? { key: 'changed', label: '计划已变化' } : state,
+    planVersion: version.ordinal,
+    goal: {
+      sentence: `按你在${basis}中的评分重写各项评语与总评，分数不变；重写后由你决定采用还是放弃`,
+      chips: { book: bookTitle, position: '全书', selectedGraphemes: reading.graphemes, taskInputRevision: checkpoint.revisionLabel, procedure: `${task.profile.title} 第 ${task.profile.version} 版 · ${basis}` },
+      savedForEdits: checkpoint.createdForDirtyJournal,
+    },
+    scope: {
+      process: `《${bookTitle}》全书 · ${groupedCount(reading.graphemes)} 字 · ${units} 个阅读范围`,
+      reference: [`${basis}：你的评分（${scored}）、调分原因、现在的评语与总评，以及 AI7 初评的分数与评语`],
+      send: live ? `全书各阅读范围的稿件正文（${units} 个）与这一版评估的评分和评语，以及汇总时各项依据的说明` : '不发送任何内容',
+      notRead: NOT_READ,
+    },
+    steps: [
+      { id: 'units', label: '逐章读取，记下能说明你所给分数的依据', result: '每条依据引用它所在的段落', removable: false, removed: false },
+      { id: 'reduction', label: '按你的评分重写评语', result: '各项评语与总评，与你的分数一致', removable: false, removed: false },
+    ],
+    participation: { during: boundary !== null && boundary.participation.expected ? boundary.participation.statement : NO_PARTICIPATION, after: '在「评估」中对照重写前后的评语，决定采用还是放弃' },
+    service: {
+      role: roleLabel(provider.role),
+      provider: live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`,
+      decision: live
+        ? `开发者实时（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}）：实时传输受运行边界约束`
+        : route.kind === 'none'
+          ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
+          : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`,
+      send: live ? `所读范围内的稿件正文与这一版评估的评分和评语发往 ${route.kind} · ${route.model}` : NOTHING_SENT,
+      sendCategory: outboundLabel(provider.outboundDataCategory),
+      usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : NO_USAGE,
+      usageIsCeiling: ceiling !== 'unset',
+      duration: DURATION_UNKNOWN,
+      budgetCeiling: budgetCeilingLabel(ceiling),
+      accountLimit: ACCOUNT_LIMIT_UNKNOWN,
+    },
+    outcomes: [
+      '重写后的各项评语与总评，放在原来的评语旁边，等你采用或放弃',
+      '这次运行的运行报告',
+    ],
+    notDo: {
+      editorial: [
+        ...EDITORIAL_NOT_DO,
+        '不改分数：只重写评语与总评，每一项的分数照你保存的',
+        '不自动写入评估：重写的评语要你采用后才记入这一版',
+        '不选结论，不评风险项',
+        '不读这本书以外的内容',
+      ],
+      technical: [...projection.namedNonEffects],
+    },
+    boundary: {
+      adaptable: boundary === null ? [] : boundary.adaptable.map((entry) => ({
+        id: entry.adaptationClass,
+        label: PLAN_EDIT_ADAPTATION_LABELS[entry.adaptationClass] ?? SAFE_RETRY_ADAPTATION,
+        removable: false,
+        removed: false,
+        movable: false,
+        askFirst: false,
+      })),
+      askFirst: [...LOCKED_BOUNDARY],
+    },
+    edit: NOT_EDITABLE,
+    drift: revision === null ? null : {
+      reasons: ['计划冻结之后，它的关键内容已经变化；原计划不能再开始。'],
+      entries: revision.diff.map((entry) => driftEntry(entry, blocks)),
+      resolution: '请在「评估」里再次按你的评分重写评语。',
+    },
+    technical: [
+      { key: 'task-intent', label: '任务意图', value: intent.taskIntentId },
+      { key: 'mode', label: '更新方式', value: `${intent.modeLabel} · ${intent.mode}` },
+      { key: 'goal', label: '固定任务目标', value: intent.goal },
+      { key: 'expected-outcome', label: '预期结果类别', value: intent.expectedOutcome },
+      { key: 'task-input-revision', label: '任务输入修订版', value: `${checkpoint.revisionLabel} · ${checkpoint.revisionId} · ${checkpoint.revisionDigest}` },
+      { key: 'coverage-manifest', label: '覆盖清单', value: `${units} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个内容块 · ${manifest.totalGraphemes} 字素 · ${manifest.digest}` },
+      { key: 'execution-route', label: '执行路由', value: route.kind === 'none'
+        ? `none · ${route.reason}`
+        : route.kind === 'opencode-go' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
+      { key: 'provider-processing', label: '模型服务数据处理策略', value: pinReading(remote.providerProcessing) },
+      { key: 'run-budget-ceiling', label: '任务运行预算上限', value: ceiling === 'unset' ? 'unset' : `${ceiling.maxTotalTokens} tokens` },
+      { key: 'execution-steps', label: '计划步骤（记录）', value: plan.steps.join(' → ') },
+      { key: 'reducer-stages', label: '归约阶段', value: plan.reducerStages.join(' → ') },
+      { key: 'stop-condition', label: '停止条件', value: plan.stopCondition },
+      { key: 'prompt-contract', label: '提示契约摘要', value: envelope.promptContractDigest },
+      { key: 'dispatch', label: '派发状态', value: envelope.summary },
+      { key: 'plan-envelope', label: '计划权限边界', value: envelope.digest },
+      ...(projection.authorization === null ? [] : [
+        { key: 'authorization', label: '运行授权', value: `${projection.authorization.authorizationId} · ${projection.authorization.origin} · ${projection.authorization.authority} · ${projection.authorization.authorizedAt}` },
+      ]),
+      ...(projection.run === null ? [] : [
+        { key: 'run-record', label: '运行记录', value: `${projection.run.runRecordId} · ${projection.run.state} · ${projection.run.recordedAt}` },
+      ]),
+    ],
+    start,
+    defaultRule: noDefaultRule(EVALUATION_REWRITE_NO_RULE),
     runControl: null,
     redo: null,
     reprepare: null,

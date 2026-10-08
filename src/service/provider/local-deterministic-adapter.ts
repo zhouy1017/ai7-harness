@@ -33,6 +33,12 @@ import {
   readersReportRequestDigest,
   readersReportSynthesisRequestDigest,
 } from '../evaluation/readers-report-contract.js';
+import {
+  evaluationRewriteRequestDigest,
+  evaluationRewriteSynthesisRequestDigest,
+  parseEvaluationRewriteSynthesisMessageHeader,
+  parseEvaluationRewriteUnitMessageHeader,
+} from '../evaluation/evaluation-rewrite-contract.js';
 import { AI7_FAILURE_CODES, type DshFailureCodes } from './classification.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from './egress-gate.js';
 import { lastUserMessageText } from './payload.js';
@@ -303,19 +309,22 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     const synthesis = text === null || crossUnit !== null ? null : parseInitialEvaluationSynthesisMessageHeader(text);
     // 审稿意见's book-level synthesis (Issue #429, S81c) likewise, keyed by the passages its header names.
     const report = text === null || crossUnit !== null || synthesis !== null ? null : parseReadersReportSynthesisMessageHeader(text);
-    const sampling = text === null || crossUnit !== null || synthesis !== null || report !== null ? null : parseAssuranceSamplingMessageHeader(text);
-    const reflection = text === null || crossUnit !== null || synthesis !== null || report !== null || sampling !== null
+    // 按我的评分重写评语's book-level synthesis (Issue #429, S81b2) likewise, keyed by the observations its header names.
+    const rewrite = text === null || crossUnit !== null || synthesis !== null || report !== null ? null : parseEvaluationRewriteSynthesisMessageHeader(text);
+    const sampling = text === null || crossUnit !== null || synthesis !== null || report !== null || rewrite !== null ? null : parseAssuranceSamplingMessageHeader(text);
+    const reflection = text === null || crossUnit !== null || synthesis !== null || report !== null || rewrite !== null || sampling !== null
       ? null
       : parseRunReportReflectionMessageHeader(text);
-    const named = crossUnit !== null || synthesis !== null || report !== null || sampling !== null || reflection !== null;
+    const named = crossUnit !== null || synthesis !== null || report !== null || rewrite !== null || sampling !== null || reflection !== null;
     // A review-category unit is a unit like the two others, and its header additionally names the
     // category, which its request digest carries as well. An evaluation unit is one too, under its own header.
     const review = text === null || named ? null : parseReviewCategoryUnitMessageHeader(text);
     const evaluation = text === null || named || review !== null ? null : parseInitialEvaluationUnitMessageHeader(text);
     const readers = text === null || named || review !== null || evaluation !== null ? null : parseReadersReportUnitMessageHeader(text);
+    const rewriting = text === null || named || review !== null || evaluation !== null || readers !== null ? null : parseEvaluationRewriteUnitMessageHeader(text);
     const header = text === null || named
       ? null
-      : review ?? evaluation ?? readers ?? parseUnitMessageHeader(text) ?? parseFactualReviewUnitMessageHeader(text);
+      : review ?? evaluation ?? readers ?? rewriting ?? parseUnitMessageHeader(text) ?? parseFactualReviewUnitMessageHeader(text);
     if (!named && header === null) {
       yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '请求不含可识别的分析单元消息头。');
       return;
@@ -331,6 +340,8 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
         ? initialEvaluationSynthesisRequestDigest(this.#promptContractDigest, synthesis.setDigest)
         : report !== null
           ? readersReportSynthesisRequestDigest(this.#promptContractDigest, report.setDigest)
+        : rewrite !== null
+          ? evaluationRewriteSynthesisRequestDigest(this.#promptContractDigest, rewrite.setDigest)
         : sampling !== null
           ? assuranceSamplingRequestDigest(ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, sampling.unitOrdinal, sampling.unitDigest, sampling.sampleDigest)
           : reflection !== null
@@ -343,7 +354,9 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
                   ? initialEvaluationRequestDigest(this.#promptContractDigest, evaluation.ordinal, evaluation.unitDigest)
                   : readers !== null
                     ? readersReportRequestDigest(this.#promptContractDigest, readers.ordinal, readers.unitDigest)
-                    : unitRequestDigest(this.#promptContractDigest, header!.ordinal, header!.unitDigest);
+                    : rewriting !== null
+                      ? evaluationRewriteRequestDigest(this.#promptContractDigest, rewriting.ordinal, rewriting.unitDigest)
+                      : unitRequestDigest(this.#promptContractDigest, header!.ordinal, header!.unitDigest);
     const pairKey = fixtureEntryKey(ordinal, expectedDigest);
     const attempt = (this.#servedByKey.get(pairKey) ?? (ordinal > 0 ? this.#attemptsBefore.get(ordinal) ?? 0 : 0)) + 1;
     this.#servedByKey.set(pairKey, attempt);
@@ -353,6 +366,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
       const subject = crossUnit !== null ? '跨单元归纳'
         : synthesis !== null ? 'AI7 初评的全书综合'
         : report !== null ? '审稿意见的全书综合'
+        : rewrite !== null ? '评语重写的全书综合'
         : sampling !== null ? `单元 ${sampling.unitOrdinal} 的保证抽样`
           : reflection !== null ? '运行反思'
             : `单元 ${ordinal}`;
@@ -369,7 +383,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
         // because the factual kind mints a `findingId` per import and a fixture cannot know one. A
         // reflection response needs no placeholder at all: it names no finding and no block, because
         // its request carried neither.
-        const replay = reflection !== null || synthesis !== null || report !== null
+        const replay = reflection !== null || synthesis !== null || report !== null || rewrite !== null
           ? response.text
           : sampling !== null
             ? substituteAssuranceSamplingRefPlaceholders(response.text, parseAssuranceSamplingListedRefs(text!))

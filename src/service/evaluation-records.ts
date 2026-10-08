@@ -14,14 +14,18 @@ import {
   type EvaluationContent,
   type EvaluationInitialDraftProjection,
   type EvaluationInitialProjection,
+  type EvaluationMarketProjection,
   type EvaluationProfileProjection,
   type EvaluationProfilesProjection,
   type EvaluationReadersReportProjection,
   type EvaluationRecordProjection,
   type EvaluationRecordSummaryProjection,
+  type EvaluationRewriteWorkspaceProjection,
   type EvaluationTotalProjection,
   type EvaluationWorkspaceProjection,
 } from '../shared/protocol.js';
+import { PREDICTION_MIN_BOOKS_WITH_ACTUALS } from '../shared/evaluation-calibration.js';
+import { contentWithRewrite, type RewritableEvaluation } from './evaluation-rewrites.js';
 import {
   EVALUATION_ADJUSTMENT_REASONS,
   EVALUATION_FINALIZE_NEEDS_SCORE,
@@ -40,7 +44,7 @@ import { graphemeCount } from './analysis/factual-review-contract.js';
  * and snapshots the profile; the editor scores each item out of its 满分 — a whole or half point, or `不评` with a reason —
  * rates the two risk items, lists what is still missing, and chooses the conclusion, which `推荐出版` waits on while a `高`
  * risk is unreviewed. `定稿` closes the version with the actor and the time; `重新评估` begins the next, seeded from it and
- * compared with it item by item. The market block and 审稿意见 arrive with the later S81 slices.
+ * compared with it item by item. 审稿意见, the market section and 按我的评分重写评语 belong to the later S81 slices, below.
  *
  * Schema revision 47 owns two relations, ledgers like the others: each version's record, and its entries — one chain per
  * version, every save appending the editor's whole content, the last one `finalized` — appended once and never rewritten.
@@ -53,6 +57,11 @@ import { graphemeCount } from './analysis/factual-review-contract.js';
  *
  * 审稿意见 (S81c; EVAL-013) is drafted from a 定稿 version: this owner says which version that is and hands its finalized words —
  * with the 初评 it began from — to `readers-reports.ts`, which owns the drafts. A version is never changed by one.
+ *
+ * The market section and 按我的评分重写评语 (S81b2; EVAL-008 to EVAL-010): AI7's market words are its 初评's, snapshotted with
+ * the version it began (draft snapshot `/2`); the 书系 comparables and 定价与首印 are house data the store reads beside the
+ * page. A rewrite reads a version at its latest saved entry (`rewritable`), and 采用 appends its words as a new entry of the
+ * version (`applyRewrite`) — every score exactly as it was — only while that entry is still the latest.
  */
 
 export const EVALUATION_RECORD_SCHEMA_SQL = {
@@ -161,7 +170,10 @@ const RECORD_SCHEMA = 'ai7.evaluation-record/1';
 const ENTRY_SCHEMA_V1 = 'ai7.evaluation-entry/1';
 /** Every entry written since S81b1: each item carries its adjustment of AI7's 初评, or `null`. */
 const ENTRY_SCHEMA = 'ai7.evaluation-entry/2';
-const INITIAL_DRAFT_SCHEMA = 'ai7.evaluation-initial-draft/1';
+/** A 初评 snapshotted before the market section existed (S81b1): it names none, and reads as having none. */
+const INITIAL_DRAFT_SCHEMA_V1 = 'ai7.evaluation-initial-draft/1';
+/** Every snapshot since S81b2: the draft names its market section, `null` included. */
+const INITIAL_DRAFT_SCHEMA = 'ai7.evaluation-initial-draft/2';
 const PROFILE_SCHEMA = 'ai7.evaluation-profile/1';
 /** Who scores and finalizes, as the other editor records of this device name it. */
 export const EVALUATION_ACTOR = '本机编辑' as const;
@@ -445,6 +457,23 @@ const NO_READERS_REPORT: ReadersReportReader = {
   workspace: () => ({ basis: null, exemplars: { count: 0, statement: '' }, task: null, templates: [] }),
 };
 
+/** What 评估 reads beside the record (S81b2): the market section's house data, and 按我的评分重写评语 of the version on show. */
+export interface EvaluationExtrasReader {
+  market(bookId: string): EvaluationMarketProjection;
+  rewrite(bookId: string, version: RewritableEvaluation | null): EvaluationRewriteWorkspaceProjection;
+}
+
+/** A Book whose market section and rewrite are not wired: no house data, nothing to rewrite. The store wires the real ones. */
+const NO_EXTRAS: EvaluationExtrasReader = {
+  market: () => ({
+    series: [],
+    comparables: [],
+    comparableCount: 0,
+    pricing: { booksWithActuals: 0, threshold: PREDICTION_MIN_BOOKS_WITH_ACTUALS, enabled: false, available: false, house: null, series: null },
+  }),
+  rewrite: () => ({ prepare: { allowed: false, reason: '按我的评分重写评语暂不可用。' }, task: null, proposal: null, decided: null }),
+};
+
 /** A Book whose 初评 is not wired: nothing settled, nothing to prepare. The store wires the real one. */
 const NO_INITIAL_EVALUATION: InitialEvaluationReader = {
   latest: () => null,
@@ -484,17 +513,20 @@ export class EvaluationRecords {
   readonly #manuscripts: EvaluationManuscriptReader;
   readonly #initial: InitialEvaluationReader;
   readonly #readersReport: ReadersReportReader;
+  readonly #extras: EvaluationExtrasReader;
 
   constructor(
     db: DatabaseSync,
     manuscripts: EvaluationManuscriptReader,
     initial: InitialEvaluationReader = NO_INITIAL_EVALUATION,
     readersReport: ReadersReportReader = NO_READERS_REPORT,
+    extras: EvaluationExtrasReader = NO_EXTRAS,
   ) {
     this.#db = db;
     this.#manuscripts = manuscripts;
     this.#initial = initial;
     this.#readersReport = readersReport;
+    this.#extras = extras;
   }
 
   /** The profile a new version snapshots: AI7's built-in one until a house's own is managed in 知识库. */
@@ -714,12 +746,14 @@ export class EvaluationRecords {
     const json = String(row.canonical_json);
     requireEvaluation(sha256Hex(json) === String(row.sha256), 'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
     const stored = JSON.parse(json) as unknown;
-    requireEvaluation(isRecord(stored) && stored.schema === INITIAL_DRAFT_SCHEMA && stored.recordId === record.recordId &&
-      stored.analysisRevisionId === row.analysis_revision_id && stored.recordedAt === row.recorded_at &&
-      stored.profileSha256 === record.profile.sha256 && isRecord(stored.draft) && stored.draft.revisionId === row.analysis_revision_id,
+    requireEvaluation(isRecord(stored) && (stored.schema === INITIAL_DRAFT_SCHEMA || stored.schema === INITIAL_DRAFT_SCHEMA_V1) &&
+      stored.recordId === record.recordId && stored.analysisRevisionId === row.analysis_revision_id && stored.recordedAt === row.recorded_at &&
+      stored.profileSha256 === record.profile.sha256 && isRecord(stored.draft) && stored.draft.revisionId === row.analysis_revision_id &&
+      // A `/2` snapshot names its market section, `null` included; a `/1` one, written before it existed, names none.
+      Object.hasOwn(stored.draft, 'market') === (stored.schema === INITIAL_DRAFT_SCHEMA),
     'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
     const draft = stored.draft as unknown as Omit<EvaluationInitialDraftProjection, 'total'>;
-    return { ...draft, total: totalOfScores(record.profile, draft.items) };
+    return { ...draft, market: stored.schema === INITIAL_DRAFT_SCHEMA ? draft.market : null, total: totalOfScores(record.profile, draft.items) };
   }
 
   /** AI7's scores of a version begun from its 初评, by item; `null` for any other. */
@@ -796,6 +830,56 @@ export class EvaluationRecords {
     this.#append(record, last.sha256, entries.count + 1, finalize ? 'finalized' : 'draft', checked);
   }
 
+  #rewritableOf(record: StoredRecord, chain: { count: number; latest: StoredEntry }, initial: EvaluationInitialDraftProjection | null): RewritableEvaluation {
+    return {
+      recordId: record.recordId,
+      bookId: record.bookId,
+      ordinal: record.ordinal,
+      state: this.#summary(record, chain.latest, initial !== null).state,
+      profile: record.profile,
+      content: chain.latest.content,
+      entryOrdinal: chain.count,
+      entrySha256: chain.latest.sha256,
+      initial,
+    };
+  }
+
+  /**
+   * One version of the Book at its latest saved entry, as 按我的评分重写评语 reads it (S81b2; EVAL-008): its words, the entry's
+   * ordinal and digest, and the 初评 it began from. Refused for a version of another Book.
+   */
+  rewritable(bookId: string, recordId: string): RewritableEvaluation {
+    requireEvaluation(UUID_PATTERN.test(recordId), 'EVALUATION_NOT_FOUND', '没有这个评估版本。');
+    const row = this.#db.prepare('SELECT * FROM evaluation_records WHERE record_id = ? AND book_id = ?').get(recordId, bookId) as SqlRow | undefined;
+    requireEvaluation(row !== undefined, 'EVALUATION_NOT_FOUND', '没有这个评估版本。');
+    const record = this.#record(row);
+    return this.#rewritableOf(record, this.#entries(record), this.#initialDraft(record));
+  }
+
+  /**
+   * 采用 one rewrite (S81b2; EVAL-008), inside the caller's transaction: the version's latest content with each scored item's
+   * 评语 and the 总评 replaced by AI7's words, appended as a new entry — refused when the version is 定稿, or moved past the
+   * entry the rewrite read, so the words never land on scores the editor changed since. It changes no number: every score,
+   * `不评`, adjustment, risk and the conclusion are the entry's own. Returns the new entry's ordinal.
+   */
+  applyRewrite(bookId: string, recordId: string, read: { entryOrdinal: number; entrySha256: string },
+    words: { items: ReadonlyArray<{ itemId: string; comment: string }>; verdict: string }): number {
+    const version = this.rewritable(bookId, recordId);
+    requireEvaluation(version.state !== 'finalized', 'EVALUATION_FINALIZED', `第 ${version.ordinal} 版已经定稿，不能再改；要改就重新评估。`);
+    requireEvaluation(version.entryOrdinal === read.entryOrdinal && version.entrySha256 === read.entrySha256, 'EVALUATION_REWRITE_STALE',
+      '这一版评估在重写之后又保存过：重写的评语依据的是之前的分数，不能采用；可以放弃它，再按现在的评分重写。');
+    const { sha256: _digest, ...profile } = version.profile;
+    const next = contentWithRewrite(version.content, words);
+    const checked = evaluationContent(next, profile, false, EvaluationRecords.#initialScores(version.initial));
+    // The rewrite is words only: a number that moved is a fault here, never the model's to make.
+    requireEvaluation(checked.items.every((item, index) => item.score === version.content.items[index]!.score &&
+      item.notRated === version.content.items[index]!.notRated), 'EVALUATION_REWRITE_INVALID', '重写不能改动分数。');
+    requireEvaluation(!sameContent(checked, version.content), 'EVALUATION_UNCHANGED', '重写的评语与现在的评语相同，没有可以采用的变化。');
+    const record = this.#record(this.#db.prepare('SELECT * FROM evaluation_records WHERE record_id = ?').get(recordId) as SqlRow);
+    this.#append(record, version.entrySha256, version.entryOrdinal + 1, 'draft', checked);
+    return version.entryOrdinal + 1;
+  }
+
   /** EVAL-001's three states: AI7's draft until the editor saves the version begun from it, then the editor's, then 定稿. */
   #summary(record: StoredRecord, last: StoredEntry, fromInitial: boolean): EvaluationRecordSummaryProjection {
     return {
@@ -854,6 +938,7 @@ export class EvaluationRecords {
     }
     requireEvaluation(recordId === null || shown !== undefined, 'EVALUATION_NOT_FOUND', '没有这个评估版本。');
     let record: EvaluationRecordProjection | null = null;
+    let rewritable: RewritableEvaluation | null = null;
     if (shown !== undefined) {
       const last = shown.latest;
       const previousRow = shown.record.previousRecordId === null ? undefined : this.#db.prepare('SELECT * FROM evaluation_records WHERE record_id = ? AND book_id = ?')
@@ -874,6 +959,7 @@ export class EvaluationRecords {
         comparison: this.#comparison(previous, { record: shown.record, content: last.content }),
         initial,
       };
+      rewritable = this.#rewritableOf(shown.record, shown, initial);
     }
     const manuscript = this.#manuscripts.current(bookId);
     const profile = this.profile();
@@ -915,6 +1001,8 @@ export class EvaluationRecords {
         latest: latestInitial === null ? null : { ...latestInitial.draft, total: totalOfScores(profile, latestInitial.draft.items), current: latestInitial.current },
       },
       readersReport,
+      market: this.#extras.market(bookId),
+      rewrite: this.#extras.rewrite(bookId, rewritable),
     };
   }
 

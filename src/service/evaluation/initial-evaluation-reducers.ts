@@ -147,6 +147,8 @@ export function reduceInitialEvaluation(input: InitialEvaluationReductionInput):
       nextStep: synthesis?.nextStep ?? null,
       suggestedConclusion: synthesis?.suggestedConclusion ?? null,
       synthesis: synthesisState,
+      // The market section (S81b2; EVAL-009) is the synthesis's, or nothing: the reducer never writes one.
+      market: synthesis?.market ?? null,
     },
   };
 }
