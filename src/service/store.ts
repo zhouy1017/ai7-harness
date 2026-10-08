@@ -12589,6 +12589,8 @@ export class EditorialStore {
       const resolved = resolveAttempts(this.#dialogues.attempts(task.dialogueId), this.#dialogueHistory, () => null);
       const latest = resolved.attempts.at(-1);
       requireStore(latest !== undefined && latest.attempt.attemptId === input.attemptId, 'DIALOGUE_STALE', '这段对话已有新的回答；请看最新的回答再操作。');
+      // An answer in flight is stopped first, whatever its log holds yet (DIALOG-014).
+      requireStore(latest.state !== 'answering', 'DIALOGUE_ANSWERING', '这个问题还在回答中；停止回答后才能继续或重新回答。');
       const first = resolved.first;
       requireStore(first !== null, 'DIALOGUE_HISTORY_MISSING', '这个问题的记录不在本机，不能继续或重新回答。');
       requireStore(sha256(first.selection) === task.selectionSha256 && sha256(first.question) === task.questionSha256,
