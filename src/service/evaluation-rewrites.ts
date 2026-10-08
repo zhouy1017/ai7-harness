@@ -1,7 +1,14 @@
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
-import { EVALUATION_REWRITE_KIND, type EvaluationContent, type EvaluationInitialDraftProjection, type EvaluationProfileProjection } from '../shared/protocol.js';
+import {
+  EVALUATION_REWRITE_KIND,
+  MAX_EVALUATION_EVIDENCE_NOTES,
+  type EvaluationContent,
+  type EvaluationProfileProjection,
+  type EvaluationRewriteWorkspaceProjection,
+} from '../shared/protocol.js';
+import type { EvaluationInitialDraft } from './evaluation-records.js';
 import { EVALUATION_ADJUSTMENT_REASON_WORDS, evaluationItemAdjusted } from '../shared/evaluation-scoring.js';
-import { UUID_PATTERN, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
+import { UUID_PATTERN, canonicalRecord, isRecord, parseStoredJson, sha256Hex } from './analysis/canonical.js';
 import {
   evaluationRewriteContract,
   evaluationRewriteContractDigest,
@@ -96,6 +103,7 @@ type SqlRow = Record<string, SQLOutputValue>;
 const TASK_SCHEMA = 'ai7.evaluation-rewrite-task/1';
 const DECISION_SCHEMA = 'ai7.evaluation-rewrite-decision/1';
 const CORRUPT = '评语重写记录已损坏。';
+const corrupt = (): EvaluationRewriteError => new EvaluationRewriteError('EVALUATION_REWRITE_RECORD_INVALID', CORRUPT);
 const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'evaluation_rewrite_tasks'";
 
 /** Revision 64's relations, created once: a store that predates them gains two empty relations and nothing existing moves. */
@@ -126,7 +134,7 @@ export interface RewritableEvaluation {
   readonly entryOrdinal: number;
   readonly entrySha256: string;
   /** The AI7 初评 the version began from; `null` for a version the editor began alone. */
-  readonly initial: EvaluationInitialDraftProjection | null;
+  readonly initial: EvaluationInitialDraft | null;
 }
 
 /** Why 按我的评分重写评语 cannot be asked of a version now, in the editor's words; `null` when it can. */
@@ -189,6 +197,79 @@ export function contentWithRewrite(content: EvaluationContent, words: { items: R
   };
 }
 
+/**
+ * At most `limit` of AI7's notes toward one item, for 评估's page (Issue #689): a long Book's every note would outgrow the
+ * frame. Beyond the limit the notes kept are spread over the ranges read — each range's first note, then each one's second —
+ * and, where a round has more ranges than room, evenly over them, the last ranges as much as the first; they are shown in
+ * reading order, with how many there are.
+ */
+export function boundedEvidence<T extends { readonly unitOrdinal: number }>(evidence: ReadonlyArray<T>, limit: number): { evidence: T[]; evidenceCount: number } {
+  if (evidence.length <= limit) return { evidence: [...evidence], evidenceCount: evidence.length };
+  const seen = new Map<number, number>();
+  const rounds: number[][] = [];
+  evidence.forEach((entry, index) => {
+    const round = seen.get(entry.unitOrdinal) ?? 0;
+    seen.set(entry.unitOrdinal, round + 1);
+    (rounds[round] ??= []).push(index);
+  });
+  const kept: number[] = [];
+  for (const round of rounds) {
+    const room = limit - kept.length;
+    if (room <= 0) break;
+    if (round.length <= room) kept.push(...round);
+    else for (let pick = 0; pick < room; pick += 1) kept.push(round[Math.floor(((pick + 0.5) * round.length) / room)]!);
+  }
+  kept.sort((left, right) => left - right);
+  return { evidence: kept.map((index) => evidence[index]!), evidenceCount: evidence.length };
+}
+
+/**
+ * How many of each item's notes one 初评 or rewrite carries on 评估's page (Issue #689 review): `budget` notes shared among its
+ * items however many the profile has — an item with fewer notes than its share keeps them all and leaves the rest to the
+ * others, filled a note at a time in the profile's order.
+ */
+export function evidenceShares(counts: ReadonlyArray<number>, budget: number = MAX_EVALUATION_EVIDENCE_NOTES): number[] {
+  const shares = counts.map(() => 0);
+  let left = budget;
+  let open = counts.flatMap((count, index) => (count > 0 ? [index] : []));
+  while (left > 0 && open.length > 0) {
+    const share = Math.max(1, Math.floor(left / open.length));
+    for (const index of open) {
+      const give = Math.min(share, counts[index]! - shares[index]!, left);
+      shares[index]! += give;
+      left -= give;
+      if (left === 0) break;
+    }
+    open = open.filter((index) => shares[index]! < counts[index]!);
+  }
+  return shares;
+}
+
+/** Each item's notes as one 初评 or rewrite carries them on 评估's page: its share of the budget, with how many in all. */
+export function boundedEvidenceSet<T extends { readonly unitOrdinal: number }>(lists: ReadonlyArray<ReadonlyArray<T>>): Array<{ evidence: T[]; evidenceCount: number }> {
+  const shares = evidenceShares(lists.map((list) => list.length));
+  return lists.map((list, index) => boundedEvidence(list, shares[index]!));
+}
+
+/**
+ * Each rewritten 评语 of a proposal beside the version's own (EVAL-006): AI7's words, the version's, and the notes AI7 rests
+ * them on — the range and the blocks they cite — bounded as 评估 carries them, with how many there are (Issue #689).
+ */
+export function rewriteProposalItems(
+  words: ReadonlyArray<{ readonly itemId: string; readonly comment: string }>,
+  observations: ReadonlyArray<{ readonly itemId: string; readonly unitOrdinal: number; readonly note: string; readonly blockIds: ReadonlyArray<string> }>,
+  content: EvaluationContent,
+): NonNullable<EvaluationRewriteWorkspaceProjection['proposal']>['items'] {
+  const evidence = boundedEvidenceSet(words.map((item) => observations.filter((observation) => observation.itemId === item.itemId)
+    .map((observation) => ({ unitOrdinal: observation.unitOrdinal, note: observation.note, blockIds: [...observation.blockIds] }))));
+  return words.map((item, index) => ({
+    itemId: item.itemId,
+    before: content.items.find((entry) => entry.itemId === item.itemId)?.comment ?? null,
+    after: item.comment,
+    ...evidence[index]!,
+  }));
+}
+
 /** One rewrite Task as its row holds it, verified. */
 export interface StoredEvaluationRewriteTask {
   readonly taskIntentId: string;
@@ -227,7 +308,7 @@ export class EvaluationRewrites {
   #task(row: SqlRow): StoredEvaluationRewriteTask {
     const json = text(row.canonical_json);
     requireRewrite(sha256Hex(json) === text(row.sha256), 'EVALUATION_REWRITE_RECORD_INVALID', CORRUPT);
-    const stored = JSON.parse(json) as unknown;
+    const stored = parseStoredJson(json, corrupt);
     requireRewrite(isRecord(stored) && stored.schema === TASK_SCHEMA && stored.taskIntentId === row.task_intent_id &&
       stored.promptContractSha256 === row.prompt_contract_sha256 && stored.bookId === row.book_id && stored.recordId === row.record_id &&
       stored.entryOrdinal === Number(row.entry_ordinal) && stored.entrySha256 === row.entry_sha256 && stored.recordedAt === row.recorded_at &&
@@ -317,7 +398,7 @@ export class EvaluationRewrites {
     if (row === undefined) return null;
     const json = text(row.canonical_json);
     requireRewrite(sha256Hex(json) === text(row.sha256), 'EVALUATION_REWRITE_RECORD_INVALID', CORRUPT);
-    const envelope = JSON.parse(json) as unknown;
+    const envelope = parseStoredJson(json, corrupt);
     requireRewrite(isRecord(envelope) && typeof envelope.promptContractDigest === 'string', 'EVALUATION_REWRITE_RECORD_INVALID', CORRUPT);
     return envelope.promptContractDigest;
   }
@@ -362,7 +443,7 @@ export class EvaluationRewrites {
   #decision(row: SqlRow): StoredEvaluationRewriteDecision {
     const json = text(row.canonical_json);
     requireRewrite(sha256Hex(json) === text(row.sha256), 'EVALUATION_REWRITE_RECORD_INVALID', CORRUPT);
-    const stored = JSON.parse(json) as unknown;
+    const stored = parseStoredJson(json, corrupt);
     const entryOrdinal = row.entry_ordinal === null ? null : Number(row.entry_ordinal);
     requireRewrite(isRecord(stored) && stored.schema === DECISION_SCHEMA && stored.analysisRevisionId === row.analysis_revision_id &&
       stored.bookId === row.book_id && stored.recordId === row.record_id && stored.taskIntentId === row.task_intent_id &&

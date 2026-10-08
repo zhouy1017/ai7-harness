@@ -1320,6 +1320,12 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'inspectCapturedProcedureApplicability': {
+      // The house's enabled procedures as each applies to the route's Book (Issue #66, S31b).
+      const input = requireInput(value.input, ['bookId'], tentativeId);
+      if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'saveDeveloperProposal': {
       const input = requireInput(value.input, ['proposalId', 'title', 'missingCapability', 'affectedProcedure', 'direction', 'pluginCandidate'], tentativeId);
       if ((input.proposalId !== null && !validUuid(input.proposalId)) || !isBoundedString(input.title, 1024) ||

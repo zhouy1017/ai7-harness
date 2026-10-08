@@ -1344,6 +1344,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'procedure-exact-version',
     'capture-stop',
     'procedure-stop-all',
+    // Issue #66 (S31b): a 书系一致性 procedure whose Series step the editor chooses apart, and how it fits a Book in no Series.
+    'procedure-series-capture',
+    'procedure-series-chosen-apart',
+    'procedure-series-mismatch',
     'capture-proposal-file',
     'capture-restart',
     'j14-capture-keyboard-reflow-forced-colors',

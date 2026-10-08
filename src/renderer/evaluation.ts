@@ -537,7 +537,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       reading.dataset['unitsTotal'] = String(proposal.reading.unitsTotal);
       card.append(reading);
       const list = el('dl', 'evaluation-rewrite-items');
-      const pair = (label: string, before: string | null, after: string, itemId: string | null, evidence: NonNullable<typeof proposal>['items'][number]['evidence']): void => {
+      const pair = (label: string, before: string | null, after: string, itemId: string | null, evidence: NonNullable<typeof proposal>['items'][number]['evidence'], evidenceCount: number): void => {
         const value = el('dd');
         if (itemId !== null) value.dataset['itemId'] = itemId;
         value.append(
@@ -554,16 +554,16 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
             line.dataset['blockIds'] = entry.blockIds.join(' ');
             lines.append(line);
           }
-          notes.append(el('summary', undefined, evaluationAi7EvidenceSummary(evidence.length)), lines);
+          notes.append(el('summary', undefined, evaluationAi7EvidenceSummary(evidence.length, evidenceCount)), lines);
           value.append(notes);
         }
         list.append(el('dt', undefined, label), value);
       };
       for (const item of proposal.items) {
         const label = record.profile.items.find((entry) => entry.itemId === item.itemId)?.label ?? item.itemId;
-        pair(label, item.before, item.after, item.itemId, item.evidence);
+        pair(label, item.before, item.after, item.itemId, item.evidence, item.evidenceCount);
       }
-      if (proposal.verdict !== null) pair(EVALUATION_REWRITE_VERDICT, proposal.verdict.before, proposal.verdict.after, null, []);
+      if (proposal.verdict !== null) pair(EVALUATION_REWRITE_VERDICT, proposal.verdict.before, proposal.verdict.after, null, [], 0);
       card.append(list);
       // What AI7 wrote but does not offer, and why: a 评语 or the 总评 that stated a score or a conclusion.
       for (const reason of proposal.withheld) card.append(el('p', 'field-note evaluation-rewrite-withheld', reason));
@@ -968,7 +968,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
             line.dataset['blockIds'] = entry.blockIds.join(' ');
             list.append(line);
           }
-          evidence.append(el('summary', undefined, evaluationAi7EvidenceSummary(ai7.evidence.length)), list);
+          evidence.append(el('summary', undefined, evaluationAi7EvidenceSummary(ai7.evidence.length, ai7.evidenceCount)), list);
           beside.push(evidence);
         }
         beside.push(adjustmentNode(record, item.itemId, content.adjustment ?? null, readOnly));

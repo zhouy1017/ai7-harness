@@ -14,7 +14,7 @@ import {
   type ReviewRunProjection,
   type ReviewRunScopeRequest,
   type ReviewScopeKind,
-  type CapturedProcedureSummaryProjection,
+  type CapturedProcedureApplicabilityEntryProjection,
   type CapturedProcedureRunProjection,
   type ReviewWorkspaceCategoryProjection,
   type ReviewWorkspaceProjection,
@@ -26,6 +26,7 @@ import { applyOnce } from './manuscript-apply.js';
 import { openProcedureCapture } from './procedure-capture.js';
 import {
   ProcedureChoiceRequests,
+  procedureCategoryOpen,
   procedureChoiceAfter,
   procedureChoiceFocus,
   procedurePreparationPin,
@@ -37,8 +38,10 @@ import {
   SHEET_PROCEDURE_NONE,
   SHEET_PROCEDURE_NONE_ENABLED,
   SHEET_PROCEDURE_VERSION_LABEL,
+  sheetProcedureChosenStatus,
+  sheetProcedureOption,
   sheetProcedureVersionOption,
-  runProcedureLeftOutLine,
+  runProcedureLeftOutView,
   runProcedureLine,
   sheetProcedureLines,
 } from './captured-procedure-labels.js';
@@ -191,7 +194,7 @@ type ReviewApi = Pick<
   'updateEditorialMark' | 'getEditorialMarkCard' |
   'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
   // 可复用工序 (Issue #65, S30; ADR 0087): capture from a finished Run, and 按已保存的工序 on 新建审阅.
-  'inspectProcedureCapture' | 'saveCapturedProcedure' | 'saveDeveloperProposal' | 'inspectCapturedProcedures' | 'inspectCapturedProcedureRun'
+  'inspectProcedureCapture' | 'saveCapturedProcedure' | 'saveDeveloperProposal' | 'inspectCapturedProcedureApplicability' | 'inspectCapturedProcedureRun'
 >;
 
 export interface MountReviewWorkspaceOptions {
@@ -266,8 +269,8 @@ interface SheetState {
   readonly openerKey: string | null;
   /** The plan is on screen: focus goes to it instead of back to the opener. */
   prepared: boolean;
-  /** The enabled Captured Procedures 按已保存的工序 offers (Issue #65, S30), read when the sheet opens. */
-  procedures: ReadonlyArray<CapturedProcedureSummaryProjection>;
+  /** The enabled Captured Procedures 按已保存的工序 offers (Issue #65, S30), each as it applies to this Book (S31b), read when the sheet opens. */
+  procedures: ReadonlyArray<CapturedProcedureApplicabilityEntryProjection>;
   /** The Captured Procedure the sheet was filled from, resolved for this Book; `null` for categories chosen by hand. */
   procedure: CapturedProcedureRunProjection | null;
   /** Its choices in flight (Issue #66, S31 review P2-1): only the newest answer fills the sheet, and 先看计划 waits for it. */
@@ -754,7 +757,13 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       pin.dataset['procedureStopped'] = String(run.procedure.stopped);
       pin.dataset['procedureMissing'] = String(run.procedure.missing);
       pin.append(el('p', 'field-note review-procedure-line', runProcedureLine(run.procedure)));
-      for (const entry of run.procedure.leftOut) pin.append(el('p', 'field-note review-procedure-left-out', runProcedureLeftOutLine(entry)));
+      for (const entry of run.procedure.leftOut) {
+        // A Series step the editor did not choose (S31b; REUSE-050), told apart from one the Book could not take.
+        const view = runProcedureLeftOutView(entry);
+        const line = el('p', 'field-note review-procedure-left-out', view.text);
+        Object.assign(line.dataset, view.data);
+        pin.append(line);
+      }
       section.append(pin);
     }
     if (run.state === 'prepared') {
@@ -1612,11 +1621,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   ): Promise<void> {
     if (destroyed || projection === null || sheet.open || working || sheetOpening) return;
     sheetOpening = true;
-    // 按已保存的工序 (Issue #65, S30): the house's enabled Captured Procedures, read as the sheet opens. A sheet that cannot
-    // read them still opens, offering none.
-    let procedures: ReadonlyArray<CapturedProcedureSummaryProjection> = [];
+    // 按已保存的工序 (Issue #65, S30): the house's enabled Captured Procedures, each as it applies to this Book (Issue #66,
+    // S31b), read as the sheet opens. A sheet that cannot read them still opens, offering none.
+    let procedures: ReadonlyArray<CapturedProcedureApplicabilityEntryProjection> = [];
     try {
-      procedures = (await api.inspectCapturedProcedures()).procedures.filter((procedure) => procedure.runnable);
+      procedures = (await api.inspectCapturedProcedureApplicability()).procedures;
     } catch {
       procedures = [];
     }
@@ -1664,7 +1673,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         // A later choice superseded this one: its answer, not this, fills the sheet.
         if (sheetState !== state || destroyed || !state.requests.current(ticket)) return;
         outcome = { kind: 'answered', run };
-        options.setStatus(run.resolved === null ? run.unavailableReason ?? '' : `已按《${run.title}》第 ${run.resolved.version} 版选好类别。`);
+        options.setStatus(sheetProcedureChosenStatus(run));
       } catch (error) {
         if (sheetState !== state || destroyed || !state.requests.current(ticket)) return;
         // The choice the sheet held stays, its version and categories with it, and the reason is shown (Issue #684).
@@ -1700,7 +1709,12 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const versionSelect = el('select');
     procedureSelect.dataset['reviewField'] = 'procedure';
     procedureSelect.append(new Option(SHEET_PROCEDURE_NONE, ''));
-    for (const procedure of state.procedures) procedureSelect.append(new Option(`《${procedure.title}》`, procedure.procedureId));
+    // Each with the one version a new use takes and how much of it this Book can take (S31b; REUSE-053): said, never ruled out.
+    for (const procedure of state.procedures) {
+      const option = new Option(sheetProcedureOption(procedure), procedure.procedureId);
+      option.dataset['procedureFit'] = procedure.fit;
+      procedureSelect.append(option);
+    }
     procedureSelect.value = state.procedure?.procedureId ?? '';
     procedureSelect.disabled = state.procedures.length === 0;
     procedureSelect.addEventListener('change', () => void chooseProcedure(state, procedureSelect.value));
@@ -1863,8 +1877,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
           input.checked = false;
           state.categories.delete(entry.categoryId);
         }
-        // A filled sheet's categories are the procedure's: neither added to nor dropped here (ADR 0087 §4).
-        input.disabled = why !== null || preparing || filled !== null;
+        // A filled sheet's categories are the procedure's: neither added to nor dropped here (ADR 0087 §4) — but a Series step
+        // is the editor's to choose at each run (S31b; REUSE-050).
+        input.disabled = why !== null || preparing || !procedureCategoryOpen(filled !== null, step);
+        if (step !== null && step.available && step.chosenApart) label.dataset['procedureChosenApart'] = 'true';
+        else delete label.dataset['procedureChosenApart'];
         reason.textContent = why ?? '';
         reason.hidden = why === null;
         if (why === null) {

@@ -82,6 +82,11 @@ export interface MountBookDeliveryPackageOptions {
   errorMessage(error: unknown, fallback: string): string;
   /** Follow a condition row's route; the destination around the block owns what it opens. */
   route(route: BookDeliveryPackageRoute): void;
+  /**
+   * One frozen version to bring into view and focus once the package is first read (Issue #66, S31b review P3-4): a Captured
+   * Procedure version's row links it exactly. A version not on the listed page is not focused.
+   */
+  focusVersionId?: string;
 }
 
 export interface BookDeliveryPackageSurface {
@@ -127,7 +132,7 @@ interface ExportState {
 }
 
 /** Where focus goes once the card is drawn. */
-type Focus = 'keep' | 'prepare' | 'version' | 'export-heading' | 'export-choose' | 'export-approve' | 'export-result' | { opener: string };
+type Focus = 'keep' | 'prepare' | 'version' | 'export-heading' | 'export-choose' | 'export-approve' | 'export-result' | { opener: string } | { packageVersion: string };
 
 /**
  * 图书交付包 on 交付物 (Issue #416, plan slice S67a; editor-surfaces §9; V2-UX-BUNDLE-001 to 005): the third of the
@@ -155,6 +160,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
   let section: HTMLElement | undefined;
   let exporting: ExportState | null = null;
   let exportTicket = 0;
+  let pendingVersionFocus = options.focusVersionId ?? null;
 
   const exportWorking = (): boolean =>
     exporting !== null && (exporting.phase === 'reviewing' || exporting.phase === 'choosing' || exporting.phase === 'writing');
@@ -168,7 +174,9 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       (next) => {
         if (destroyed || ticket !== generation || !options.root.isConnected || next.bookId !== bookId) return;
         projection = next;
-        draw('keep');
+        const focusVersion = pendingVersionFocus;
+        pendingVersionFocus = null;
+        draw(focusVersion === null ? 'keep' : { packageVersion: focusVersion });
       },
       (error) => {
         if (destroyed || ticket !== generation || !options.root.isConnected) return;
@@ -232,6 +240,15 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       (approve !== null && !approve.disabled ? approve : view.querySelector<HTMLElement>('.package-export [data-package-action="export-choose"]'))?.focus();
     } else if (focus === 'export-result') {
       view.querySelector<HTMLElement>('.package-export-result [data-package-action]')?.focus();
+    } else if (typeof focus === 'object' && 'packageVersion' in focus) {
+      // The exact version a link named (S31b review P3-4), marked and focused.
+      const item = view.querySelector<HTMLElement>(`ol.package-version-list > li[data-package-version-id="${CSS.escape(focus.packageVersion)}"]`);
+      if (item !== null) {
+        item.dataset['packageLinked'] = 'true';
+        const line = item.querySelector<HTMLElement>('.package-version-line');
+        line?.focus();
+        line?.scrollIntoView({ block: 'nearest' });
+      }
     } else if (typeof focus === 'object') {
       view.querySelector<HTMLElement>(`[data-package-action="export"][data-package-version-id="${CSS.escape(focus.opener)}"]`)?.focus();
     }

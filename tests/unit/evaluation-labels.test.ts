@@ -226,6 +226,9 @@ describe('AI7 初评 words (Issue #429, S81b1; EVAL-001, EVAL-005 to EVAL-007)',
 
   it('shows AI7\'s evidence range by range, and says which ranges a 初评 that completed with gaps never read', () => {
     expect(evaluationAi7EvidenceSummary(3)).toBe('AI7 的依据（3 条）');
+    expect(evaluationAi7EvidenceSummary(3, 3)).toBe('AI7 的依据（3 条）');
+    // A long Book's notes, cut to a few spread over the ranges (Issue #689), say how many there are in all.
+    expect(evaluationAi7EvidenceSummary(12, 140)).toBe('AI7 的依据（共 140 条，这里列出分布在各阅读范围的 12 条）');
     expect(evaluationAi7EvidenceLine({ unitOrdinal: 2, note: '冲突在第二章升级' })).toBe('阅读范围 2：冲突在第二章升级');
     expect(evaluationAi7UnreadLine({ unitsTotal: 8, unreadUnits: [] })).toBeNull();
     expect(evaluationAi7UnreadLine({ unitsTotal: 8, unreadUnits: [3, 5] }))
