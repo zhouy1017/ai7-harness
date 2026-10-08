@@ -78,6 +78,10 @@ describe('评估 on a long Book stays within one frame (Issue #689)', () => {
     const few = [1, 1, 1, 2, 2, 3].map((unitOrdinal, index) => ({ unitOrdinal, index }));
     expect(boundedEvidence(few, 4).evidence.map((note) => note.index)).toEqual([0, 1, 3, 5]);
     expect(boundedEvidence(few, 6)).toEqual({ evidence: few, evidenceCount: 6 });
+    // At the bound and one past it.
+    expect(boundedEvidence(evidence.slice(0, MAX_EVALUATION_EVIDENCE_NOTES)).evidence).toHaveLength(MAX_EVALUATION_EVIDENCE_NOTES);
+    expect(boundedEvidence(evidence.slice(0, MAX_EVALUATION_EVIDENCE_NOTES + 1))).toMatchObject({ evidenceCount: MAX_EVALUATION_EVIDENCE_NOTES + 1 });
+    expect(boundedEvidence(evidence.slice(0, MAX_EVALUATION_EVIDENCE_NOTES + 1)).evidence).toHaveLength(MAX_EVALUATION_EVIDENCE_NOTES);
     expect(boundedEvidence([], 4)).toEqual({ evidence: [], evidenceCount: 0 });
   });
 
