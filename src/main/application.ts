@@ -61,7 +61,7 @@ import {
   type TrustedLaunchForm,
 } from '../shared/protocol.js';
 import { developerProposalFileName } from '../shared/developer-proposal.js';
-import { ServiceCallError, ServiceClient } from './service-client.js';
+import { journeyStartupRelay, ServiceCallError, ServiceClient } from './service-client.js';
 import { openProtectedSecretStore, type ProtectedSecretStore } from './protected-secret-store.js';
 import {
   createCanonicalExternalDataRoot,
@@ -4974,9 +4974,7 @@ export async function runApplication(): Promise<void> {
       launch.unitHoldPath,
       launch.answerHoldPath,
       // A Journey reads how far the service's own startup came (Issue #675), beside main's steps and under the same switch.
-      process.env.AI7_E2E_JOURNEY === undefined
-        ? undefined
-        : (step) => void process.stderr.write(`AI7_SERVICE_STARTUP/${step}\n`),
+      journeyStartupRelay(process.env, (line) => void process.stderr.write(line)),
     );
     service.onUnexpectedExit(() => {
       serviceInterrupted = true;

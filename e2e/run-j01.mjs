@@ -18,7 +18,7 @@ import {
   IMPORTED_MARKS_REJECTED_BLOCKS,
 } from './composed-docx.mjs';
 import { attachProductOutput, awaitWithinDeadline, createJ01CompletionLocation, discloseJourneySkip, installJourneyCancellationCleanup, journeyCheckFailure, LOCAL_ONLY_DOC, localDebugEnabled, localManuscriptAvailable, localManuscriptPath, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
-import { createLaunchTrace, formatReadinessTrace, readBrowserLog } from './readiness-trace.mjs';
+import { classifyRendererTargetMiss, createLaunchTrace, formatReadinessTrace, readBrowserLog, waitingForService } from './readiness-trace.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const PRODUCT_RENDERER_URL = pathToFileURL(resolve(ROOT, 'dist', 'renderer', 'index.html')).href;
@@ -269,6 +269,21 @@ function productEnvironment(executable) {
   return selected;
 }
 
+/** A renderer-target miss's outcome as a check label's word: one of the outcomes `classifyRendererTargetMiss` names. */
+function targetMissWord(outcome) {
+  switch (outcome) {
+    case 'service-start-stalled': return 'service-start-stalled';
+    case 'service-start-slow': return 'service-start-slow';
+    case 'service-start-exited': return 'service-start-exited';
+    case 'service-start-unbounded': return 'service-start-unbounded';
+    case 'startup-failed': return 'startup-failed';
+    case 'product-exited': return 'product-exited';
+    case 'window': return 'window';
+    case 'after-readiness': return 'after-readiness';
+    default: return 'timeout';
+  }
+}
+
 /** The service's startup step as a check label's word: one of the fixed steps the trace admits, or `none`. */
 function serviceStepWord(step) {
   switch (step) {
@@ -290,27 +305,34 @@ function serviceStepWord(step) {
  * each `-at-<step>` the service's own startup had reached when the budget passed. Otherwise the check says the product
  * failed or exited, that main was making the window, or that it had said it was ready.
  */
-async function rendererTargetMissing() {
-  let trace = launchTraceNow();
-  const waitingForService = (current) => current?.last === 'service-ready' && current.failed === null && current.exited === null;
-  if (waitingForService(trace)) {
-    // Where the service's own startup stood when J-01's budget passed, which the check names whatever follows.
-    const stood = serviceStepWord(trace.service);
-    const bound = launchInFlight.startedAt + trace.lastAt + PRODUCT_SERVICE_READY_TIMEOUT_MS + PRODUCT_SERVICE_READY_MARGIN_MS;
+async function rendererTargetMissing(browser) {
+  const atBudget = launchTraceNow();
+  let trace = atBudget;
+  if (waitingForService(atBudget)) {
+    const bound = launchInFlight.startedAt + atBudget.lastAt + PRODUCT_SERVICE_READY_TIMEOUT_MS + PRODUCT_SERVICE_READY_MARGIN_MS;
     while (waitingForService(trace) && Date.now() < bound) {
       await new Promise((settle) => setTimeout(settle, 250));
       trace = launchTraceNow();
     }
-    requireJourney(trace.failed !== 'service-ready', `renderer-target-service-start-stalled-at-${stood}`);
-    requireJourney(trace.failed !== null || trace.exited !== null || trace.last === 'service-ready', `renderer-target-service-start-slow-at-${stood}`);
-    requireJourney(trace.failed !== null || trace.exited === null, `renderer-target-service-start-exited-at-${stood}`);
-    requireJourney(trace.failed !== null, `renderer-target-service-start-unbounded-at-${stood}`);
   }
-  requireJourney(trace === null || trace.failed === null, 'renderer-target-startup-failed');
-  requireJourney(trace === null || trace.exited === null, 'renderer-target-product-exited');
-  requireJourney(trace?.last !== 'renderer-first-paint', 'renderer-target-window');
-  requireJourney(trace?.last !== 'readiness-signal', 'renderer-target-after-readiness');
-  requireJourney(false, 'renderer-target-timeout');
+  // The label is fixed now: the service step when J-01's budget passed, and what the watch then saw.
+  const miss = classifyRendererTargetMiss(atBudget, trace);
+  // A product that gave up on its startup goes on to stop its service and exit: wait, bounded, for that exit to reach the
+  // browser and the trace, so the launch's cleanup finds the product gone rather than going (#694 review).
+  if (trace !== null && (trace.failed !== null || trace.exited !== null)) {
+    if (browser.isConnected()) {
+      await Promise.race([
+        new Promise((settle) => browser.once('disconnected', settle)),
+        new Promise((settle) => setTimeout(settle, BROWSER_CLOSE_TIMEOUT_MS)),
+      ]);
+    }
+    const exitBound = Date.now() + 5_000;
+    while (!browser.isConnected() && launchTraceNow()?.exited === null && Date.now() < exitBound) {
+      await new Promise((settle) => setTimeout(settle, 100));
+    }
+  }
+  if (miss.step === null) requireJourney(false, `renderer-target-${targetMissWord(miss.outcome)}`);
+  requireJourney(false, `renderer-target-${targetMissWord(miss.outcome)}-at-${serviceStepWord(miss.step)}`);
 }
 
 /**
@@ -346,7 +368,7 @@ async function attachRendererTarget(browser, onTarget = () => undefined) {
     );
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  if (!pageTarget) await rendererTargetMissing();
+  if (!pageTarget) await rendererTargetMissing(browser);
   const { sessionId } = await sendRoot(
     'Target.attachToTarget',
     {
@@ -2277,8 +2299,11 @@ async function main() {
         });
       } catch (error) {
         // A launch whose product gave up on its startup and exited while J-01 watched it (Issue #675) leaves nothing to
-        // close, and the cleanup's refusal of a closed browser must not replace the check that named why.
-        if (error !== BROWSER_DISCONNECTED && browser?.isConnected() === false) browser = undefined;
+        // close, and the cleanup's refusal of a closed browser must not replace the check that named why. Only a product
+        // the trace saw exit is dropped: a broken pipe with the product still there keeps the cleanup's own refusal.
+        if (error !== BROWSER_DISCONNECTED && browser?.isConnected() === false && (launchTraceNow()?.exited ?? null) !== null) {
+          browser = undefined;
+        }
         throw error;
       }
     };

@@ -15,6 +15,11 @@ const trace = (await import(new URL('../../e2e/readiness-trace.mjs', import.meta
   readBrowserLog(trace: Record<string, unknown>, text: string): Record<string, unknown>;
   formatReadinessTrace(journey: string, trace: Record<string, unknown>, now?: number): string;
   readReadinessTrace(stderr: string, journey: string): string | null;
+  waitingForService(trace: Record<string, unknown> | null): boolean;
+  classifyRendererTargetMiss(
+    atBudget: Record<string, unknown> | null,
+    afterWatch?: Record<string, unknown> | null,
+  ): { outcome: string; step: string | null };
 };
 const controller = (await import(new URL('../../e2e/controller.mjs', import.meta.url).href)) as {
   collectReadinessTrace(result: { stderr: string }, journey: string): string | null;
@@ -109,6 +114,43 @@ describe('the readiness trace (Issue #518)', () => {
     }
     expect(trace.readReadinessTrace(line.replace('service=store', 'service=renderer-first-paint'), 'J-01')).toBeNull();
     expect(trace.readReadinessTrace(`READINESS/J-01/${fields.replace(';service=store@1900', '')}`, 'J-01')).toBeNull();
+  });
+
+  it('names why a renderer target missed its budget, from the trace at the budget and after the watch (#675)', () => {
+    const at = (lines: ReadonlyArray<readonly [number, string]>) => launched([[7, '<launched> pid=5'], ...lines]);
+    const waiting = at([[126, '[pid=5][err] AI7_STARTUP/service-ready'], [281, '[pid=5][err] AI7_SERVICE_STARTUP/store']]);
+    expect(trace.waitingForService(waiting)).toBe(true);
+    // Main still waiting for its service at the budget, then what the watch to the product's own deadline saw.
+    const after = (lines: ReadonlyArray<readonly [number, string]>) => at([
+      [126, '[pid=5][err] AI7_STARTUP/service-ready'], [281, '[pid=5][err] AI7_SERVICE_STARTUP/store'], ...lines]);
+    expect(trace.classifyRendererTargetMiss(waiting, after([[120_100, '[pid=5][err] AI7_STARTUP_FAILED/service-ready']])))
+      .toEqual({ outcome: 'service-start-stalled', step: 'store' });
+    expect(trace.classifyRendererTargetMiss(waiting, after([
+      [73_943, '[pid=5][err] AI7_SERVICE_STARTUP/serving'], [73_961, '[pid=5][err] AI7_STARTUP/renderer-first-paint']])))
+      .toEqual({ outcome: 'service-start-slow', step: 'store' });
+    expect(trace.classifyRendererTargetMiss(waiting, after([[90_000, '[pid=5] <process did exit: exitCode=1, signal=null>']])))
+      .toEqual({ outcome: 'service-start-exited', step: 'store' });
+    expect(trace.classifyRendererTargetMiss(waiting, after([]))).toEqual({ outcome: 'service-start-unbounded', step: 'store' });
+    // The step is the one at the budget, whatever the service reached later; a service that named none says so.
+    const silent = at([[126, '[pid=5][err] AI7_STARTUP/service-ready']]);
+    expect(trace.classifyRendererTargetMiss(silent, silent)).toEqual({ outcome: 'service-start-unbounded', step: 'none' });
+    // A failure other than the service's, after the watch, is a startup failure.
+    expect(trace.classifyRendererTargetMiss(waiting, after([
+      [70_000, '[pid=5][err] AI7_STARTUP/renderer-first-paint'], [80_000, '[pid=5][err] AI7_STARTUP_FAILED/renderer-first-paint']])))
+      .toEqual({ outcome: 'startup-failed', step: null });
+    // Main past its service at the budget: no watch, and the trace then says why.
+    const failed = at([[900, '[pid=5][err] AI7_STARTUP/renderer-first-paint'], [1_000, '[pid=5][err] AI7_STARTUP_FAILED/renderer-first-paint']]);
+    expect(trace.waitingForService(failed)).toBe(false);
+    expect(trace.classifyRendererTargetMiss(failed)).toEqual({ outcome: 'startup-failed', step: null });
+    expect(trace.classifyRendererTargetMiss(at([[900, '[pid=5] <process did exit: exitCode=0, signal=null>']])))
+      .toEqual({ outcome: 'product-exited', step: null });
+    expect(trace.classifyRendererTargetMiss(at([[900, '[pid=5][err] AI7_STARTUP/renderer-first-paint']])))
+      .toEqual({ outcome: 'window', step: null });
+    expect(trace.classifyRendererTargetMiss(at([[900, '[pid=5][err] AI7_STARTUP/readiness-signal']])))
+      .toEqual({ outcome: 'after-readiness', step: null });
+    expect(trace.classifyRendererTargetMiss(at([[900, '[pid=5][err] AI7_STARTUP/electron-ready']])))
+      .toEqual({ outcome: 'timeout', step: null });
+    expect(trace.classifyRendererTargetMiss(null)).toEqual({ outcome: 'timeout', step: null });
   });
 
   it('reads only the launch in flight: nothing from before it began, from another process, or without its time', () => {

@@ -40,6 +40,19 @@ const SERVICE_STARTUP_LINE = /^AI7_SERVICE_(?:STARTUP\/(process|store|owners|ser
 const MAX_STARTUP_LINE_BYTES = 128;
 
 /**
+ * Main's relay of the service's startup steps (Issue #675): under an E2E Journey only, the same switch as main's own
+ * `AI7_STARTUP/` steps, each step one fixed line on main's stderr; otherwise no relay at all, and the service's stderr is
+ * discarded as before.
+ */
+export function journeyStartupRelay(
+  env: NodeJS.ProcessEnv,
+  write: (line: string) => void,
+): ((step: ServiceStartupStep) => void) | undefined {
+  if (env.AI7_E2E_JOURNEY === undefined) return undefined;
+  return (step) => write(`AI7_SERVICE_STARTUP/${step}\n`);
+}
+
+/**
  * How long one request may take before the service is treated as hung and stopped: startup's readiness, the operations
  * whose work grows with a file or a manuscript, and every other request, each as the reason beside it says.
  */

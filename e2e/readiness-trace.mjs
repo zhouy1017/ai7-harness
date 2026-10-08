@@ -166,3 +166,36 @@ export function readReadinessTrace(stderr, journey) {
     .filter((line) => line.startsWith(prefix) && FIELDS.test(line.slice(prefix.length)));
   return found.length === 1 ? found[0].slice(prefix.length) : null;
 }
+
+/**
+ * Whether main is still waiting for its service when a renderer target misses its budget (Issue #675): at `service-ready`,
+ * with no startup failure and no exit. Main makes the window only once the service is ready, so no target can exist yet.
+ */
+export function waitingForService(trace) {
+  return trace !== null && trace !== undefined && trace.last === 'service-ready' && trace.failed === null && trace.exited === null;
+}
+
+/**
+ * Why a launch's renderer target missed its budget (Issue #675), from its trace when the budget passed and again after the
+ * launch was watched to the product's own service deadline (the same trace when it was not watched). `outcome` is one of:
+ * `service-start-stalled` (the product gave up on its service), `service-start-slow` (the service became ready after all),
+ * `service-start-exited` (the product exited without a failure), `service-start-unbounded` (none of these by the deadline),
+ * each with `step`, how far the service's own startup had come when the budget passed; or, with `step` null,
+ * `startup-failed`, `product-exited`, `window` (main was making the window), `after-readiness`, or `timeout`.
+ */
+export function classifyRendererTargetMiss(atBudget, afterWatch = atBudget) {
+  if (waitingForService(atBudget)) {
+    const step = SERVICE_STARTUP_STEPS.includes(atBudget.service) ? atBudget.service : 'none';
+    if (afterWatch.failed === 'service-ready') return { outcome: 'service-start-stalled', step };
+    if (afterWatch.failed === null && afterWatch.exited === null) {
+      return { outcome: afterWatch.last === 'service-ready' ? 'service-start-unbounded' : 'service-start-slow', step };
+    }
+    if (afterWatch.failed === null) return { outcome: 'service-start-exited', step };
+  }
+  const trace = afterWatch ?? atBudget ?? null;
+  if (trace !== null && trace.failed !== null) return { outcome: 'startup-failed', step: null };
+  if (trace !== null && trace.exited !== null) return { outcome: 'product-exited', step: null };
+  if (trace?.last === 'renderer-first-paint') return { outcome: 'window', step: null };
+  if (trace?.last === 'readiness-signal') return { outcome: 'after-readiness', step: null };
+  return { outcome: 'timeout', step: null };
+}

@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { resolve } from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ServiceClient, type ServiceStartupStep } from '../../src/main/service-client.js';
+import { journeyStartupRelay, ServiceClient, type ServiceStartupStep } from '../../src/main/service-client.js';
 import { SERVICE_PROTOCOL_VERSION, type ServiceReadiness } from '../../src/shared/protocol.js';
 
 const childProcess = vi.hoisted(() => ({ spawn: vi.fn() }));
@@ -89,6 +89,16 @@ describe('the service startup trace (Issue #675)', () => {
     peer.emit('exit', 1, null);
     expect(await started).toMatchObject({ code: 'SERVICE_STOPPED' });
     expect(steps).toEqual(['store', 'stopped']);
+  });
+
+  it('is relayed by main only under an E2E Journey, one fixed line per step', () => {
+    const written: string[] = [];
+    expect(journeyStartupRelay({}, (line) => written.push(line))).toBeUndefined();
+    expect(journeyStartupRelay({ AI7_E2E_JOURNEY: undefined }, (line) => written.push(line))).toBeUndefined();
+    const relay = journeyStartupRelay({ AI7_E2E_JOURNEY: 'J-01' }, (line) => written.push(line));
+    relay?.('store');
+    relay?.('stopped');
+    expect(written).toEqual(['AI7_SERVICE_STARTUP/store\n', 'AI7_SERVICE_STARTUP/stopped\n']);
   });
 
   it('reads nothing from the stream when no one asks for the trace', async () => {
