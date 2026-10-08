@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
@@ -1004,6 +1004,8 @@ async function main() {
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const executable = electronExecutable();
     electronExecutableForCleanup = executable;
+    // J-10's unit hold, admitted under J-11 (#641): absent until feedback-pending-submit writes it, so nothing before is held.
+    const unitHoldPath = resolve(runRoot, 'j11-unit-hold.txt');
     const sample1Bytes = await readFile(SAMPLE1_PATH);
     const sample1 = { sha256: createHash('sha256').update(sample1Bytes).digest('hex'), bytes: sample1Bytes.length };
     const launch = async ({ forCleanup = false } = {}) => {
@@ -1013,8 +1015,9 @@ async function main() {
         resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid),
       ];
       // J-11's picker imports the manuscript its 评估 evaluates (Issue #429, S81a): one choice per window. The J-04 model
-      // adapter runs the baseline 分析反馈 judges (Issue #94, S38). A cleanup launch names neither.
-      if (!forCleanup) args.push('--j11-picker-path', SAMPLE1_PATH, '--j04-model-adapter', FIXTURE_IDENTITY);
+      // adapter runs the baseline 分析反馈 judges (Issue #94, S38), and J-10's unit hold keeps one Run in flight (#641). A
+      // cleanup launch names none of them.
+      if (!forCleanup) args.push('--j11-picker-path', SAMPLE1_PATH, '--j04-model-adapter', FIXTURE_IDENTITY, '--j10-unit-hold-path', unitHoldPath);
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       if (!forCleanup) cancellation.throwIfRequested();
       const acquisition = chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args, env: productEnvironment(executable), timeout: 60_000 });
@@ -2316,6 +2319,10 @@ async function main() {
     await click(renderer, '重新分析全书', 'feedback-pending-mode');
     await clickSelector(renderer, '[data-analysis-action="reanalyze-book"]', 'feedback-pending-prepare');
     await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'feedback-pending-plan-ready');
+    // ②A arms its 250 ms follower only when a draw finds the Run under way. Unheld, the J-04 adapter's Run can end before
+    // the card's first read after 开始任务 answers on a slow runner, leaving no follower to hold (#641). J-10's unit hold
+    // keeps the Run's first unit in flight until the follower is held; nothing else in the stage waits on the hold.
+    await writeFile(unitHoldPath, '0', 'utf8');
     await assertRenderer(renderer, `(() => {
       const original=window.setTimeout;
       const held={original,timers:[],release:null}; window.__j11HeldFeedbackFollow=held;
@@ -2331,7 +2338,8 @@ async function main() {
       document.querySelector('#task-drawer [data-task-drawer-control="start"]').click();
       return true;
     })()`, 'feedback-pending-hold-follow');
-    await waitFor(renderer, `typeof window.__j11HeldFeedbackFollow?.release==='function'`, 'feedback-pending-follow-held');
+    await waitFor(renderer, `typeof window.__j11HeldFeedbackFollow?.release==='function' && ['admitted','executing'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState)`, 'feedback-pending-follow-held', 60_000);
+    await rm(unitHoldPath, { force: true });
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'feedback-pending-close-plan');
     await clickSelector(renderer, '#analysis-tab-synopsis', 'feedback-pending-synopsis');
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${feedbackItem('synopsis')} [data-analysis-action="open-feedback"]`)})?.disabled===false`, 'feedback-pending-card-ready');
