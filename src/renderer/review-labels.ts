@@ -93,6 +93,11 @@ export const REVIEW_ACTION_LABELS = {
    * drawer bar's 开始任务, so a prepared Run's entry reads `查看计划并开始` (TASK_PLAN_OPEN_START).
    */
   'view-plan': '查看计划',
+  // A Run a Series Retrieval Exclusion stopped (Issue #64, S29b; SER-024): exactly these two ways on, never 继续审阅.
+  'scope-redo': '修改计划并重新授权',
+  'scope-cancel': '取消任务',
+  'scope-cancel-confirm': '确认取消任务',
+  'scope-cancel-keep': '不取消',
 } as const;
 export type ReviewAction = keyof typeof REVIEW_ACTION_LABELS;
 
@@ -131,6 +136,10 @@ export const REVIEW_RUN_STATE_PILLS: Readonly<Record<ReviewRunState, ReviewPill>
   settled: { tone: 'good', shape: 'circle' },
   partial: { tone: 'attention', shape: 'triangle' },
   failed: { tone: 'blocked', shape: 'square' },
+  // 书系检索范围已变化 · 需要重新确认计划 (Issue #64, S29b): the editor's decision, as 需要重新确认计划 is everywhere — never the
+  // square of a failure; and a Run the editor then cancelled keeps the dash of every 已取消.
+  'scope-changed': { tone: 'attention', shape: 'triangle' },
+  cancelled: { tone: 'neutral', shape: 'dash' },
 };
 
 export const REVIEW_CATEGORY_STATE_PILLS: Readonly<Record<ReviewRunCategoryState, ReviewPill>> = {
@@ -478,7 +487,18 @@ export const REVIEW_STATUS_LINES = {
   reportFailed: '无法生成审阅报告。',
   openingText: '正在打开对应的稿件位置…',
   openTextFailed: '无法打开对应的稿件位置。',
+  cancelling: '正在取消任务…',
+  cancelled: '已取消任务；这次审阅不再继续。',
+  cancelFailed: '无法取消任务。',
 } as const;
+
+/**
+ * 书系检索范围已变化 · 需要重新确认计划 (Issue #64, S29b; SER-024, SER-025): why the Run stopped, what it kept, what cannot be
+ * recalled, and the only two ways on.
+ */
+export const REVIEW_SCOPE_STOP_NOTE = '这次审阅所依据的书系材料已排除在书系检索之外，它在下一次读取前停下了。已经写到稿件上的发现和已形成的结果都保持原样，已经发给模型服务的内容无法收回。只能修改计划并重新授权，或取消任务；不能继续审阅、重试或改用别的材料。';
+/** What 取消任务 of such a Run does, said before it is confirmed. */
+export const REVIEW_SCOPE_CANCEL_NOTE = '取消后这次审阅不再继续，也不再提供「修改计划并重新授权」；已经写到稿件上的发现和已形成的结果都保持原样。';
 
 export function reviewBatchReadyLine(count: number): string {
   return `将把 ${count} 条修改建议写入稿件；请核对后确认应用。`;

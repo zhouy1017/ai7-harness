@@ -286,7 +286,7 @@ describe('the words of the 审阅 destination', () => {
   });
 
   it('reads 审阅 in one line on 工作概览', () => {
-    const summary = { reviewRunId: 'run', ordinal: 2, label: '第 2 次', createdAt: '', scopeLabel: '全书', categoryLabels: ['错别字与规范用语'], state: 'settled' as const, stateLabel: '已完成', findingCounts: counts, reportVersion: null };
+    const summary = { reviewRunId: 'run', ordinal: 2, label: '第 2 次', createdAt: '', scopeLabel: '全书', categoryLabels: ['错别字与规范用语'], state: 'settled' as const, stateLabel: '已完成', findingCounts: counts, reportVersion: null, historicalMarker: null };
     const row = (state: 'current' | 'needs-review') => ({ categoryId: 'x', label: 'x', state, stateLabel: '', lastRunOrdinal: 2, lastReviewedRevisionLabel: 'r1', changedBlocks: 0, unavailableReason: null });
     expect(reviewOverviewLine({ runs: [], coverage: [] })).toBe('审阅 · 还没有审阅记录');
     expect(reviewOverviewLine({ runs: [summary], coverage: [row('current')] })).toBe('审阅 · 最近一次是第 2 次（已完成），待处理 6 条');

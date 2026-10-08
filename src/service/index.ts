@@ -656,6 +656,15 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesKnowledgeConflicts(request.input) };
     case 'inspectSeriesKnowledgeRevisions':
       return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesKnowledgeRevisions(request.input.seriesId, request.input.itemId, request.input.before) };
+    // 书系检索排除 (Issue #64, S29b).
+    case 'inspectSeriesExclusionTargets':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesExclusionTargets(request.input) };
+    case 'inspectSeriesExclusionHistory':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectSeriesExclusionHistory(request.input) };
+    case 'previewSeriesExclusion':
+      return { id: request.id, ok: true, op: request.op, result: store.previewSeriesExclusion(request.input) };
+    case 'recordSeriesExclusion':
+      return { id: request.id, ok: true, op: request.op, result: store.recordSeriesExclusion(request.input) };
     case 'inspectEvaluationProfiles':
       return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluationProfiles() };
     case 'inspectEvaluation':
@@ -736,6 +745,9 @@ async function dispatch(
         op: request.op,
         result: store.generateReviewReport(request.input.bookId, request.input.reviewRunId, analysisProgress),
       };
+    // 取消任务 of a Review Run a Series Retrieval Exclusion stopped (Issue #64, S29b): nothing of it is driven, so it is recorded.
+    case 'cancelReviewRun':
+      return { id: request.id, ok: true, op: request.op, result: store.cancelReviewRun(request.input.bookId, request.input.reviewRunId, analysisProgress) };
     case 'inspectReviewFindingOfMark': {
       // A mark of another Book answers exactly as a mark no Review Run produced.
       const found = store.reviewFindingOfMark(request.input.markId);
@@ -1206,8 +1218,9 @@ function parseArguments(argv: string[]): {
         (process.env.AI7_E2E_JOURNEY !== 'J-04' && process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10' &&
           process.env.AI7_E2E_JOURNEY !== 'J-16' && process.env.AI7_E2E_JOURNEY !== 'J-11' && process.env.AI7_E2E_JOURNEY !== 'J-13'))) ||
     (connectivityPath !== undefined && (process.env.AI7_E2E_JOURNEY !== 'J-04' || !isAbsolute(connectivityPath))) ||
-    (unitHoldPath !== undefined && ((process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10' && process.env.AI7_E2E_JOURNEY !== 'J-16') ||
-      !isAbsolute(unitHoldPath))) ||
+    // J-13 holds a 书系一致性 Run with it while a Series Retrieval Exclusion is recorded (Issue #64, S29b).
+    (unitHoldPath !== undefined && ((process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10' && process.env.AI7_E2E_JOURNEY !== 'J-13' &&
+      process.env.AI7_E2E_JOURNEY !== 'J-16') || !isAbsolute(unitHoldPath))) ||
     [importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl].filter(Boolean).length > 1 ||
     // developer-live is a human-attended developer-host launch: never a Journey launch, never with a Journey control.
     (launchForm.trustedOperationalScope !== 'development-ci' &&
@@ -1341,6 +1354,7 @@ async function run(): Promise<void> {
     store.factualReviewLedger.bindLaunch(launch);
     harness = await mountDormantHarness();
     jobs = new CooperativeJobOwner(store);
+    const guardedStore = store;
     analysisExecution = new BaselineAnalysisExecutionOwner({
       ledger: store.baselineAnalysisLedger,
       launchPolicy,
@@ -1348,6 +1362,8 @@ async function run(): Promise<void> {
       secretResolver: createKeyringSecretResolver(),
       developerLive,
       unitHold: unitHoldPath === undefined ? null : controlledUnitHold(unitHoldPath),
+      // The current-read guard over Series material (Issue #64, S29b; SER-023): asked before each reading range of every Run.
+      readGuard: (runRecordId) => guardedStore.seriesReadGuard(runRecordId),
     });
     // Startup reconciliation (Issue #422, S76b; CONT-014): a baseline Run this service's predecessor left under way has
     // nothing running it now. It settles 已暂停 or 任务已中断 · 可续行 before any request is read; one left cancelling is

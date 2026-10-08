@@ -448,6 +448,46 @@ import {
 } from './database-replacement.js';
 import { DatabaseMergeError, initializeDatabaseMergeSchema } from './database-merge.js';
 import {
+  SeriesExclusionError,
+  SeriesExclusionLedger,
+  initializeSeriesRetrievalExclusionSchema,
+  isSeriesExclusionAction,
+  isSeriesExclusionTargetKind,
+  seriesExclusionCovers,
+  seriesExclusionImpact,
+  seriesExclusionPreviewDigest,
+  seriesExclusionReason,
+  seriesExclusionTarget,
+  type SeriesKnowledgeMaterial,
+  type StoredExclusion,
+  type StoredExclusionRevision,
+} from './series-exclusions.js';
+import {
+  MAX_SERIES_EXCLUSIONS,
+  MAX_SERIES_EXCLUSION_HISTORY_PAGE,
+  MAX_SERIES_EXCLUSION_REASON_CHARACTERS,
+  MAX_SERIES_EXCLUSION_TARGETS_PAGE,
+  SERIES_EXCLUSION_ACTION_LABELS,
+  SERIES_KNOWLEDGE_CLASSES,
+  type InspectSeriesExclusionHistoryInput,
+  type InspectSeriesExclusionTargetsInput,
+  type PreviewSeriesExclusionInput,
+  type RecordSeriesExclusionInput,
+  type SeriesExclusionHistoryCursor,
+  type SeriesExclusionHistoryPageProjection,
+  type SeriesExclusionPreviewProjection,
+  type SeriesExclusionProjection,
+  type SeriesExclusionResultProjection,
+  type SeriesExclusionRevisionProjection,
+  type SeriesExclusionTargetKind,
+  type SeriesExclusionTargetProjection,
+  type SeriesExclusionTargetsProjection,
+  type SeriesExclusionsProjection,
+} from '../shared/protocol.js';
+/** How many items or Runs one line of an exclusion's impact preview names before it gives the count. */
+const NAMED_EXCLUSION_ENTRIES = 5;
+import { isRecord } from './analysis/canonical.js';
+import {
   SeriesKnowledgeError,
   SeriesKnowledgeLedger,
   initializeSeriesKnowledgeSchema,
@@ -579,6 +619,7 @@ import {
   SCHEDULED_BACKUP_SCHEMA_VERSION,
   DATABASE_REPLACEMENT_SCHEMA_VERSION,
   DATABASE_MERGE_SCHEMA_VERSION,
+  SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1813,7 +1854,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === DATABASE_EXPORT_SCHEMA_VERSION ||
       currentVersion === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       currentVersion === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      currentVersion === DATABASE_MERGE_SCHEMA_VERSION,
+      currentVersion === DATABASE_MERGE_SCHEMA_VERSION ||
+      currentVersion === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1867,7 +1909,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === DATABASE_EXPORT_SCHEMA_VERSION ||
       currentVersion === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       currentVersion === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      currentVersion === DATABASE_MERGE_SCHEMA_VERSION
+      currentVersion === DATABASE_MERGE_SCHEMA_VERSION ||
+      currentVersion === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2235,7 +2278,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === DATABASE_EXPORT_SCHEMA_VERSION ||
       version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      version === DATABASE_MERGE_SCHEMA_VERSION,
+      version === DATABASE_MERGE_SCHEMA_VERSION ||
+      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2278,7 +2322,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === DATABASE_EXPORT_SCHEMA_VERSION ||
       version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      version === DATABASE_MERGE_SCHEMA_VERSION) return;
+      version === DATABASE_MERGE_SCHEMA_VERSION ||
+      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2413,7 +2458,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === DATABASE_EXPORT_SCHEMA_VERSION ||
       version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      version === DATABASE_MERGE_SCHEMA_VERSION,
+      version === DATABASE_MERGE_SCHEMA_VERSION ||
+      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2455,7 +2501,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === DATABASE_EXPORT_SCHEMA_VERSION ||
       version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      version === DATABASE_MERGE_SCHEMA_VERSION) return;
+      version === DATABASE_MERGE_SCHEMA_VERSION ||
+      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2748,7 +2795,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== DATABASE_MERGE_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2793,6 +2840,7 @@ function validateModelServiceSchema(
       version >= SCHEDULED_BACKUP_SCHEMA_VERSION,
       version >= DATABASE_REPLACEMENT_SCHEMA_VERSION,
       version >= DATABASE_MERGE_SCHEMA_VERSION,
+      version >= SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -2862,7 +2910,8 @@ function initializeModelServiceSchema(
       version === DATABASE_EXPORT_SCHEMA_VERSION ||
       version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      version === DATABASE_MERGE_SCHEMA_VERSION,
+      version === DATABASE_MERGE_SCHEMA_VERSION ||
+      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2904,7 +2953,8 @@ function initializeModelServiceSchema(
       version === DATABASE_EXPORT_SCHEMA_VERSION ||
       version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      version === DATABASE_MERGE_SCHEMA_VERSION) {
+      version === DATABASE_MERGE_SCHEMA_VERSION ||
+      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3755,6 +3805,8 @@ export class EditorialStore {
   readonly #evaluationCalibration: EvaluationCalibrationLedger;
   readonly #series: SeriesLedger;
   readonly #seriesKnowledge: SeriesKnowledgeLedger;
+  /** 书系检索排除 (Issue #64, S29b): each Series' Retrieval Exclusions and their revisions. */
+  readonly #seriesExclusions: SeriesExclusionLedger;
   readonly #dataVersions: DataVersionLedger;
   /** 导出数据库 (Issue #434, S86a): the package's preparations, approvals and receipts. */
   readonly #databaseExports: DatabaseExports;
@@ -3832,15 +3884,16 @@ export class EditorialStore {
     this.#evaluationCalibration = new EvaluationCalibrationLedger(authority);
     this.#series = new SeriesLedger(authority);
     this.#seriesKnowledge = new SeriesKnowledgeLedger(authority);
+    this.#seriesExclusions = new SeriesExclusionLedger(authority);
     this.#dataVersions = new DataVersionLedger(authority);
     this.#databaseExports = new DatabaseExports(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION }),
     });
     this.#scheduledBackups = new ScheduledBackups(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION }),
     });
     this.#databaseReplacements = new DatabaseReplacements(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION }),
       // A package's data opens as a store of its own, with no launch control: brought to this revision and checked whole.
       openPackage: async (root) => {
         const opened = await EditorialStore.open(root, this.#codeRoot, {
@@ -3983,7 +4036,7 @@ export class EditorialStore {
       // the backup location before anything migrates it, and a backup that cannot be made opens nothing.
       const classes = control.schemaRevisionClasses ?? SCHEMA_REVISION_CLASSES;
       const { upgrade, earlier } = await backUpBeforeUpgrade(authority, dataRoot, {
-        terminalRevision: DATABASE_MERGE_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
+        terminalRevision: SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
       }).catch((error: unknown) => {
         if (error instanceof DataVersionError) throw new StoreError(error.code, error.message);
         throw error;
@@ -4054,8 +4107,8 @@ export class EditorialStore {
       // and the house's evaluation preferences; revision 52 (Issue #63, S28a) the house's Series and their membership changes,
       // and revision 53 (Issue #63, S28b) Series Knowledge: candidates, items, revisions and promotion decisions; revision 54
       // (Issue #433, S85a) the versions that opened the store; revision 55 (Issue #434, S86a) the database exports; revision 56
-      // (Issue #434, S86b) the scheduled backups; revision 57 (Issue #434, S86c) the replacements of the local data; and revision
-      // 58 (Issue #434, S86d) the merges of a package's Books.
+      // (Issue #434, S86b) the scheduled backups; revision 57 (Issue #434, S86c) the replacements of the local data; revision
+      // 58 (Issue #434, S86d) the merges of a package's Books; and revision 61 (Issue #64, S29b) the Series Retrieval Exclusions.
       initializeBookPeopleSchema(authority);
       initializeReviewGuidelineSchema(authority);
       initializeLibraryMaterialSchema(authority);
@@ -4071,6 +4124,7 @@ export class EditorialStore {
       initializeScheduledBackupSchema(authority);
       initializeDatabaseReplacementSchema(authority);
       initializeDatabaseMergeSchema(authority);
+      initializeSeriesRetrievalExclusionSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -4115,7 +4169,7 @@ export class EditorialStore {
       // Every store records the versions that open it (Issue #433, S85a; DSTO-016): a new record only when one changed.
       store.#softwareVersion = softwareVersion;
       store.#codeRoot = codeRoot;
-      store.#dataVersion = dataVersionAt(DATABASE_MERGE_SCHEMA_VERSION, classes);
+      store.#dataVersion = dataVersionAt(SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION, classes);
       if (control.interruptUpgradeAt === 'before-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在记录版本之前停止。');
       // The open that raised the Data Version records the upgrade it made with the backup (S85b), and only then clears the note
       // that let an open stopped before this record it (Issue #433 review).
@@ -4123,7 +4177,7 @@ export class EditorialStore {
         // Upgrades other opens made and never recorded go first, oldest first, as those opens would have recorded them; one a
         // record already holds is not recorded again (Issue #433 review).
         for (const carried of earlier) store.#dataVersions.recordCarried(carried);
-        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION, upgrade });
+        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION, upgrade });
       }));
       if (control.interruptUpgradeAt === 'after-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在清除升级记录之前停止。');
       await completeUpgrade(dataRoot).catch(() => undefined);
@@ -11334,6 +11388,7 @@ export class EditorialStore {
       historyCount: history.count,
       historyNext: history.nextCursor,
       knowledge: this.#seriesKnowledgeProjection(series.seriesId),
+      exclusions: this.#seriesExclusionsProjection(series.seriesId),
     };
   }
 
@@ -11403,6 +11458,298 @@ export class EditorialStore {
       actor: '本机编辑',
       recordedAt: change.recordedAt,
       impact: change.impact,
+    };
+  }
+
+  // ---- 书系检索排除 (Issue #64, plan slice S29b; V2-UX-SER-020 to SER-029; ADR 0037) -----------------------------------
+
+  /**
+   * 添加检索排除…'s choices (SER-020): a page of what one kind of target may name in this Series — its knowledge items by name,
+   * the eight classes, its member Books newest joined first, or its members' Source Versions newest first — each saying whether
+   * an exclusion in force names it already. A read.
+   */
+  inspectSeriesExclusionTargets(input: InspectSeriesExclusionTargetsInput): SeriesExclusionTargetsProjection {
+    return this.#seriesCall(() => {
+      const series = this.#requireSeries(input.seriesId);
+      requireStore(isSeriesExclusionTargetKind(input.kind), 'SERIES_EXCLUSION_TARGET_INVALID', '检索排除的对象无效。');
+      const after = input.after;
+      requireStore(after === null || (isRecord(after) && typeof after.key === 'string' && after.key.length <= 400 && typeof after.id === 'string' &&
+        after.id.length >= 1 && after.id.length <= 64), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
+      const effective = this.#seriesExclusions.effective(series.seriesId);
+      const excluded = (kind: SeriesExclusionTargetKind, id: string): boolean => effective.some((entry) => entry.target.kind === kind && entry.target.id === id);
+      const rows: Array<{ target: SeriesExclusionTargetProjection; key: string }> = [];
+      const limit = MAX_SERIES_EXCLUSION_TARGETS_PAGE + 1;
+      if (input.kind === 'knowledge-item') {
+        for (const item of this.#seriesKnowledge.itemsPage(series.seriesId, '', after === null ? null : { subject: after.key, itemId: after.id }, limit)) {
+          rows.push({ key: item.subject, target: seriesExclusionTarget('knowledge-item', item.itemId, { subject: item.subject, knowledgeClass: item.knowledgeClass }) });
+        }
+      } else if (input.kind === 'knowledge-class') {
+        for (const knowledgeClass of SERIES_KNOWLEDGE_CLASSES) rows.push({ key: knowledgeClass, target: seriesExclusionTarget('knowledge-class', knowledgeClass, {}) });
+      } else if (input.kind === 'book') {
+        for (const member of this.#series.members(series.seriesId)) {
+          if (after !== null && (member.joinedAt > after.key || (member.joinedAt === after.key && member.bookId >= after.id))) continue;
+          rows.push({ key: member.joinedAt, target: seriesExclusionTarget('book', member.bookId, { bookTitle: this.#evaluationBookTitle(member.bookId) }) });
+          if (rows.length >= limit) break;
+        }
+      } else {
+        for (const row of this.#authority.prepare(
+          `SELECT sv.source_version_id, sv.display_name, sv.created_at, b.title FROM source_versions sv JOIN books b ON b.book_id = sv.book_id
+           WHERE EXISTS (SELECT 1 FROM series_membership_changes c WHERE c.series_id = ? AND c.book_id = sv.book_id AND c.kind = 'add'
+               AND c.ordinal = (SELECT max(d.ordinal) FROM series_membership_changes d WHERE d.series_id = c.series_id AND d.book_id = c.book_id))
+             AND (? IS NULL OR sv.created_at < ? OR (sv.created_at = ? AND sv.source_version_id < ?))
+           ORDER BY sv.created_at DESC, sv.source_version_id DESC LIMIT ?`,
+        ).all(series.seriesId, after?.key ?? null, after?.key ?? null, after?.key ?? null, after?.id ?? null, limit) as SqlRow[]) {
+          rows.push({ key: asString(row.created_at), target: seriesExclusionTarget('source-version', asString(row.source_version_id),
+            { displayName: asString(row.display_name), bookTitle: asString(row.title) }) });
+        }
+      }
+      const { page, more } = weighedPage(rows, MAX_SERIES_EXCLUSION_TARGETS_PAGE);
+      const last = page.at(-1);
+      return {
+        kind: input.kind,
+        targets: page.map((row) => ({ ...row.target, excluded: excluded(row.target.kind, row.target.id) })),
+        nextCursor: more && last !== undefined ? { key: last.key, id: last.target.id } : null,
+      };
+    });
+  }
+
+  /** `更早的排除记录…`: the next page of one Series' exclusion revisions, newest first. A read. */
+  inspectSeriesExclusionHistory(input: InspectSeriesExclusionHistoryInput): SeriesExclusionHistoryPageProjection {
+    return this.#seriesCall(() => {
+      const series = this.#requireSeries(input.seriesId);
+      requireStore(isRecord(input.after) && typeof input.after.recordedAt === 'string' && !Number.isNaN(Date.parse(input.after.recordedAt)) &&
+        typeof input.after.revisionId === 'string' && UUID_PATTERN.test(input.after.revisionId), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
+      const read = this.#seriesExclusionHistoryPage(series.seriesId, input.after);
+      return { history: read.history, nextCursor: read.nextCursor };
+    });
+  }
+
+  /**
+   * 书系检索排除影响预览 (SER-021, SER-022) for 添加检索排除, 修改检索排除 or 停止此排除. A read: nothing is recorded until the
+   * editor commits the exclusion against this preview's digest.
+   */
+  previewSeriesExclusion(input: PreviewSeriesExclusionInput): SeriesExclusionPreviewProjection {
+    return this.#seriesCall(() => this.#seriesExclusionPreview(input).preview);
+  }
+
+  /**
+   * 添加检索排除, 修改检索排除 or 停止此排除 (SER-020 to SER-027): the preview is recomputed inside the transaction and a stale one
+   * is refused; the revision keeps what the preview showed. An exclusion takes effect as it is recorded: an approved Run whose
+   * reading of the excluded material has not begun stops in the same transaction, and one reading now stops at the guard
+   * before its next range. Ending one restores nothing it stopped.
+   */
+  recordSeriesExclusion(input: RecordSeriesExclusionInput): SeriesExclusionResultProjection {
+    return this.#seriesCall(() => {
+      const { revision, stoppedRuns } = this.#transaction(this.#authority, () => {
+        const { preview, prior, reach } = this.#seriesExclusionPreview(input);
+        requireStore(typeof input.previewDigest === 'string' && preview.previewDigest === input.previewDigest, 'SERIES_EXCLUSION_PREVIEW_STALE',
+          '预览之后，检索排除、书系知识或相关任务有了变化；请重新查看影响，再决定。');
+        const stored = this.#seriesExclusions.record({
+          seriesId: preview.seriesId,
+          action: preview.action,
+          prior,
+          target: preview.target,
+          reason: preview.reason,
+          previewDigest: preview.previewDigest,
+          impact: preview.groups,
+        });
+        let stopped = 0;
+        if (preview.action === 'add') {
+          for (const run of reach.active) {
+            if (!run.started && this.#reviewRuns.stopForSeriesScope(run.reviewRunId, run.categoryId)) stopped += 1;
+          }
+        }
+        return { revision: stored, stoppedRuns: stopped };
+      });
+      return {
+        exclusionId: revision.exclusionId,
+        revisionId: revision.revisionId,
+        completionLabel: revision.action === 'add' ? '书系检索排除已生效' : revision.action === 'change' ? '检索排除已修改' : '已停止此排除',
+        stoppedRuns,
+        revision: this.#seriesExclusionRevision(revision),
+      };
+    });
+  }
+
+  /**
+   * The current-read guard the execution owner asks before each reading range of a Run (Issue #64, S29b; SER-023): what an
+   * exclusion in force reaches of the Series material the Run froze, or `null`. A record it cannot read stops the Run rather
+   * than let it read past a restriction it could not check.
+   */
+  seriesReadGuard(runRecordId: string): string | null {
+    this.#assertAvailable();
+    try {
+      return this.#reviewRuns.seriesReadGuard(runRecordId);
+    } catch (error) {
+      if (error instanceof ReviewRunError || error instanceof SeriesExclusionError) return '无法读取的书系检索排除记录';
+      throw error;
+    }
+  }
+
+  /**
+   * 取消任务 of a Review Run an exclusion stopped (SER-024): it then reads 已取消 and offers nothing more; what it put on the
+   * manuscript stays as it is. The answer is the Book's 审阅 with the Run open.
+   */
+  cancelReviewRun(bookId: string, reviewRunId: string, progress?: ProgressReader): ReviewWorkspaceProjection {
+    return this.#reviewCall(() => {
+      this.#reviewRuns.cancelStoppedRun(bookId, reviewRunId);
+      return this.#reviewRuns.workspace(bookId, reviewRunId, progress);
+    });
+  }
+
+  /** What an exclusion target names now, read from the records that own it; refused when this Series cannot name it. */
+  #seriesExclusionTargetOf(series: StoredSeries, input: unknown): SeriesExclusionTargetProjection {
+    requireStore(isRecord(input) && isSeriesExclusionTargetKind(input.kind) && typeof input.id === 'string', 'SERIES_EXCLUSION_TARGET_INVALID', '检索排除的对象无效。');
+    const id = input.id;
+    switch (input.kind) {
+      case 'knowledge-item': {
+        const item = UUID_PATTERN.test(id) ? this.#seriesKnowledge.item(id) : null;
+        requireStore(item !== null && item.seriesId === series.seriesId, 'SERIES_EXCLUSION_TARGET_NOT_FOUND', `书系「${series.title}」没有这个书系知识条目。`);
+        return seriesExclusionTarget('knowledge-item', id, { subject: item.subject, knowledgeClass: item.knowledgeClass });
+      }
+      case 'knowledge-class':
+        requireStore(isSeriesKnowledgeClass(id), 'SERIES_EXCLUSION_TARGET_NOT_FOUND', '没有这个知识类别。');
+        return seriesExclusionTarget('knowledge-class', id, {});
+      case 'book': {
+        requireStore(UUID_PATTERN.test(id), 'SERIES_EXCLUSION_TARGET_INVALID', '检索排除的对象无效。');
+        const bookTitle = this.#evaluationBookTitle(id);
+        requireStore(this.#series.latest(series.seriesId, id)?.kind === 'add', 'SERIES_EXCLUSION_NOT_MEMBER',
+          `《${bookTitle}》不在书系「${series.title}」中；检索排除只针对这个书系的成员图书。`);
+        return seriesExclusionTarget('book', id, { bookTitle });
+      }
+      case 'source-version': {
+        const row = UUID_PATTERN.test(id)
+          ? this.#authority.prepare('SELECT sv.book_id, sv.display_name, b.title FROM source_versions sv JOIN books b ON b.book_id = sv.book_id WHERE sv.source_version_id = ?').get(id) as SqlRow | undefined
+          : undefined;
+        requireStore(row !== undefined, 'SERIES_EXCLUSION_TARGET_NOT_FOUND', '没有这个来源版本。');
+        requireStore(this.#series.latest(series.seriesId, asString(row.book_id))?.kind === 'add', 'SERIES_EXCLUSION_NOT_MEMBER',
+          `《${asString(row.title)}》不在书系「${series.title}」中；检索排除只针对这个书系成员图书的来源版本。`);
+        return seriesExclusionTarget('source-version', id, { displayName: asString(row.display_name), bookTitle: asString(row.title) });
+      }
+    }
+  }
+
+  #seriesExclusionPreview(input: PreviewSeriesExclusionInput): {
+    preview: SeriesExclusionPreviewProjection;
+    prior: StoredExclusion | null;
+    reach: ReturnType<ReviewRunStore['seriesExclusionReach']>;
+  } {
+    const series = this.#requireSeries(input.seriesId);
+    requireStore(isSeriesExclusionAction(input.action), 'SERIES_EXCLUSION_INVALID', '检索排除只有添加、修改和停止。');
+    const reason = seriesExclusionReason(input.reason);
+    requireStore(reason !== null, 'SERIES_EXCLUSION_REASON_INVALID', `排除理由最多 ${MAX_SERIES_EXCLUSION_REASON_CHARACTERS} 个字，写在一行里。`);
+    const effective = this.#seriesExclusions.effective(series.seriesId);
+    let prior: StoredExclusion | null = null;
+    let target: SeriesExclusionTargetProjection;
+    if (input.action === 'add') {
+      requireStore(input.exclusionId === null && input.target !== null, 'SERIES_EXCLUSION_INVALID', '添加检索排除要指定一个对象。');
+      target = this.#seriesExclusionTargetOf(series, input.target);
+      requireStore(!effective.some((entry) => entry.target.kind === target.kind && entry.target.id === target.id), 'SERIES_EXCLUSION_ALREADY',
+        `${target.label}已经排除在书系「${series.title}」的检索之外。`);
+      requireStore(effective.length < MAX_SERIES_EXCLUSIONS, 'SERIES_EXCLUSION_LIMIT',
+        `书系「${series.title}」已有 ${MAX_SERIES_EXCLUSIONS} 条检索排除在生效；先停止不再需要的，再添加。`);
+    } else {
+      requireStore(typeof input.exclusionId === 'string' && UUID_PATTERN.test(input.exclusionId) && input.target === null, 'SERIES_EXCLUSION_INVALID',
+        '要指定修改或停止哪一条检索排除。');
+      prior = this.#seriesExclusions.exclusion(series.seriesId, input.exclusionId);
+      requireStore(prior !== null, 'SERIES_EXCLUSION_NOT_FOUND', '这条检索排除不存在。');
+      requireStore(prior.effective, 'SERIES_EXCLUSION_ENDED', '这条检索排除已经停止；以后的检索已经可以读取它。');
+      requireStore(input.action !== 'change' || reason !== prior.current.reason, 'SERIES_EXCLUSION_UNCHANGED', '排除理由没有变化。');
+      target = prior.target;
+    }
+    const covers = (material: SeriesKnowledgeMaterial): boolean => seriesExclusionCovers(series.seriesId, target, material);
+    // What the target reaches of the Series' knowledge now, and every version governing the preview, hashed one by one.
+    const governing = createHash('sha256');
+    const itemsNamed: string[] = [];
+    let itemCount = 0;
+    for (const item of this.#seriesKnowledge.items(series.seriesId)) {
+      if (!covers({ seriesId: series.seriesId, itemId: item.itemId, knowledgeClass: item.knowledgeClass, sourceBookId: item.current.provenance?.bookId ?? null })) continue;
+      itemCount += 1;
+      if (itemsNamed.length < NAMED_EXCLUSION_ENTRIES) itemsNamed.push(`「${item.subject}」`);
+      governing.update(canonicalJson({ kind: 'item', itemId: item.itemId, revisionId: item.current.revisionId }));
+      governing.update('\n');
+    }
+    for (const entry of effective) {
+      governing.update(canonicalJson({ kind: 'exclusion', exclusionId: entry.exclusionId, revisionId: entry.current.revisionId }));
+      governing.update('\n');
+    }
+    const reach = input.action === 'add' ? this.#reviewRuns.seriesExclusionReach(covers) : { active: [], prepared: 0, completed: [] };
+    governing.update(canonicalJson({ kind: 'runs', active: reach.active, prepared: reach.prepared, completed: reach.completed }));
+    const routes = (runs: ReadonlyArray<{ readonly route: string }>): string[] => [...new Set(runs.map((run) => run.route))];
+    const runRoutes = routes(reach.active);
+    const completedRoutes = routes(reach.completed);
+    const groups = seriesExclusionImpact(input.action, {
+      seriesTitle: series.title,
+      target,
+      reason,
+      priorReason: prior?.current.reason ?? null,
+      itemsNamed,
+      itemCount,
+      runsNamed: runRoutes.slice(0, NAMED_EXCLUSION_ENTRIES),
+      runCount: runRoutes.length,
+      preparedCount: reach.prepared,
+      completedNamed: completedRoutes.slice(0, NAMED_EXCLUSION_ENTRIES),
+      completedCount: completedRoutes.length,
+    });
+    const preview: SeriesExclusionPreviewProjection = {
+      seriesId: series.seriesId,
+      seriesTitle: series.title,
+      action: input.action,
+      actionLabel: SERIES_EXCLUSION_ACTION_LABELS[input.action],
+      exclusionId: prior?.exclusionId ?? null,
+      target,
+      reason,
+      scope: `只限书系「${series.title}」的书系检索`,
+      effectiveTime: '记录后立即生效',
+      actor: '本机编辑',
+      groups,
+      previewDigest: seriesExclusionPreviewDigest({
+        seriesId: series.seriesId,
+        action: input.action,
+        exclusionId: prior?.exclusionId ?? null,
+        target,
+        reason,
+        chainHead: prior?.current.revisionId ?? null,
+        governingDigest: governing.digest('hex'),
+        groups,
+      }),
+    };
+    return { preview, prior, reach };
+  }
+
+  /** A Series' 检索排除 as its page opens: every exclusion in force, and the first page of revisions. */
+  #seriesExclusionsProjection(seriesId: string): SeriesExclusionsProjection {
+    const effective = this.#seriesExclusions.effective(seriesId).map((entry): SeriesExclusionProjection => ({
+      exclusionId: entry.exclusionId,
+      target: entry.target,
+      reason: entry.current.reason,
+      effectiveSince: entry.since,
+      revision: entry.current.revision,
+    }));
+    const history = this.#seriesExclusionHistoryPage(seriesId, null);
+    return { effective, history: history.history, historyCount: history.count, historyNext: history.nextCursor };
+  }
+
+  #seriesExclusionHistoryPage(seriesId: string, after: SeriesExclusionHistoryCursor | null):
+  SeriesExclusionHistoryPageProjection & { count: number } {
+    const { entries, count } = this.#seriesExclusions.historyPage(seriesId, after, MAX_SERIES_EXCLUSION_HISTORY_PAGE + 1);
+    const { page, more } = weighedPage(entries.map((entry) => this.#seriesExclusionRevision(entry)), MAX_SERIES_EXCLUSION_HISTORY_PAGE);
+    const last = page.at(-1);
+    return { history: page, nextCursor: more && last !== undefined ? { recordedAt: last.recordedAt, revisionId: last.revisionId } : null, count };
+  }
+
+  #seriesExclusionRevision(entry: StoredExclusionRevision): SeriesExclusionRevisionProjection {
+    return {
+      revisionId: entry.revisionId,
+      exclusionId: entry.exclusionId,
+      revision: entry.revision,
+      action: entry.action,
+      actionLabel: SERIES_EXCLUSION_ACTION_LABELS[entry.action],
+      target: entry.target,
+      reason: entry.reason,
+      actor: '本机编辑',
+      recordedAt: entry.recordedAt,
+      impact: entry.impact,
     };
   }
 
@@ -11983,7 +12330,8 @@ export class EditorialStore {
       return operation();
     } catch (error) {
       if (error instanceof SeriesError || error instanceof SeriesKnowledgeError || error instanceof LearningEligibilityError ||
-          error instanceof DecisionFeedbackError || error instanceof AnalysisFeedbackError) {
+          error instanceof DecisionFeedbackError || error instanceof AnalysisFeedbackError || error instanceof SeriesExclusionError ||
+          error instanceof ReviewRunError) {
         throw new StoreError(error.code, error.message);
       }
       throw error;
@@ -15738,7 +16086,7 @@ export class EditorialStore {
       // A guideline version that no longer reads refuses the review's configuration in its own words (Issue #427 review).
       // So does a Series record that no longer reads (Issue #64 review), should one reach here past 书系一致性's own reading.
       if (error instanceof ReviewRunError || error instanceof AnalysisError || error instanceof EditorialMarkError || error instanceof ProposalConflictError ||
-        error instanceof ReviewGuidelineError || error instanceof SeriesError || error instanceof SeriesKnowledgeError) {
+        error instanceof ReviewGuidelineError || error instanceof SeriesError || error instanceof SeriesKnowledgeError || error instanceof SeriesExclusionError) {
         throw new StoreError(error.code, error.message);
       }
       if (error instanceof BoundedStoreFatalError) {

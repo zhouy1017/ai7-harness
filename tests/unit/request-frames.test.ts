@@ -1592,6 +1592,47 @@ describe('decodeRequest rejects malformed frames', () => {
     }
   });
 
+  it('accepts 书系检索排除: a page of one kind\'s targets, a page of revisions, and a revision with its preview and digest (Issue #64, S29b)', () => {
+    const seriesId = randomUUID();
+    const exclusionId = randomUUID();
+    const add = { seriesId, action: 'add', exclusionId: null, target: { kind: 'knowledge-item', id: randomUUID() }, reason: '待核对' };
+    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+      { op: 'inspectSeriesExclusionTargets', input: { seriesId, kind: 'knowledge-item', after: null } },
+      { op: 'inspectSeriesExclusionTargets', input: { seriesId, kind: 'source-version', after: { key: '2026-10-08T01:02:03.004Z', id: randomUUID() } } },
+      { op: 'inspectSeriesExclusionTargets', input: { seriesId, kind: 'knowledge-class', after: null } },
+      { op: 'inspectSeriesExclusionHistory', input: { seriesId, after: { recordedAt: '2026-10-08T01:02:03.004Z', revisionId: randomUUID() } } },
+      { op: 'previewSeriesExclusion', input: add },
+      { op: 'previewSeriesExclusion', input: { ...add, target: { kind: 'knowledge-class', id: 'places' }, reason: '' } },
+      { op: 'previewSeriesExclusion', input: { seriesId, action: 'change', exclusionId, target: null, reason: '另有安排' } },
+      { op: 'previewSeriesExclusion', input: { seriesId, action: 'end', exclusionId, target: null, reason: '' } },
+      { op: 'recordSeriesExclusion', input: { ...add, previewDigest: 'e'.repeat(64) } },
+      { op: 'cancelReviewRun', input: { bookId: randomUUID(), reviewRunId: randomUUID() } },
+    ];
+    for (const { op, input } of inputs) {
+      const request = { id: randomUUID(), op, input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    for (const [op, input] of [
+      ['inspectSeriesExclusionTargets', { seriesId, kind: 'members', after: null }],
+      ['inspectSeriesExclusionTargets', { seriesId, kind: 'book' }],
+      ['inspectSeriesExclusionTargets', { seriesId, kind: 'book', after: { key: '', id: '', extra: 1 } }],
+      ['inspectSeriesExclusionHistory', { seriesId, after: null }],
+      ['inspectSeriesExclusionHistory', { seriesId, after: { recordedAt: 'yesterday', revisionId: randomUUID() } }],
+      ['previewSeriesExclusion', { ...add, action: 'remove' }],
+      ['previewSeriesExclusion', { ...add, target: { kind: 'cross-project', id: 'x' } }],
+      ['previewSeriesExclusion', { ...add, target: { kind: 'knowledge-item', id: 'x'.repeat(65) } }],
+      ['previewSeriesExclusion', { ...add, exclusionId: 'exclusion' }],
+      ['previewSeriesExclusion', { seriesId, action: 'add', target: null, reason: '' }],
+      ['previewSeriesExclusion', { ...add, reason: 1 }],
+      ['previewSeriesExclusion', { ...add, previewDigest: 'e'.repeat(64) }],
+      ['recordSeriesExclusion', add],
+      ['recordSeriesExclusion', { ...add, previewDigest: 'E'.repeat(64) }],
+      ['cancelReviewRun', { reviewRunId: randomUUID() }],
+    ] as const) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
   it('accepts 知识库 › 资料库: the read naming nothing, a preview by absolute path, an arrival, and a decision of a closed shape (Issue #427, S79c)', () => {
     const materialId = randomUUID();
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [

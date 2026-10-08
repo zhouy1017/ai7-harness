@@ -431,6 +431,12 @@ export class BookDeliveryPackages {
         unfinished ??= `${run.label}审阅正在进行`;
         continue;
       }
+      // A Run a Series Retrieval Exclusion stopped, or the editor then cancelled (Issue #64, S29b), never goes on: without a
+      // report it is not in the package, and says so, rather than keep the package waiting for it.
+      if ((run.state === 'scope-changed' || run.state === 'cancelled') && run.report === null) {
+        reviewLimitations.push(`${run.label}审阅${run.state === 'cancelled' ? '已取消' : '因书系检索范围变化停下'}，不在包中。`);
+        continue;
+      }
       if (run.report === null) {
         unfinished ??= `${run.label}审阅尚未生成报告`;
         continue;
@@ -439,6 +445,7 @@ export class BookDeliveryPackages {
       reportItems.push({ kind: 'review-report', label: reportExportLabel(run.label, run.report.version), detail: null });
       if (run.state === 'partial') reviewLimitations.push(`${run.label}审阅部分完成，报告按它的实际结果写出。`);
       if (run.state === 'failed') reviewLimitations.push(`${run.label}审阅未能完成，报告写明了原因。`);
+      if (run.state === 'scope-changed' || run.state === 'cancelled') reviewLimitations.push(`${run.label}审阅中途停下，报告按它的实际结果写出。`);
     }
     conditions.push({
       key: 'work-records',

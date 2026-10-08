@@ -411,6 +411,16 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['inspectSeriesKnowledgeConflicts']['output']>(IPC_CHANNELS.inspectSeriesKnowledgeConflicts, input),
   inspectSeriesKnowledgeRevisions: (input: ServiceOperationMap['inspectSeriesKnowledgeRevisions']['input']) =>
     invoke<ServiceOperationMap['inspectSeriesKnowledgeRevisions']['output']>(IPC_CHANNELS.inspectSeriesKnowledgeRevisions, input),
+  inspectSeriesExclusionTargets: (input: ServiceOperationMap['inspectSeriesExclusionTargets']['input']) =>
+    invoke<ServiceOperationMap['inspectSeriesExclusionTargets']['output']>(IPC_CHANNELS.inspectSeriesExclusionTargets, input),
+  inspectSeriesExclusionHistory: (input: ServiceOperationMap['inspectSeriesExclusionHistory']['input']) =>
+    invoke<ServiceOperationMap['inspectSeriesExclusionHistory']['output']>(IPC_CHANNELS.inspectSeriesExclusionHistory, input),
+  previewSeriesExclusion: (input: ServiceOperationMap['previewSeriesExclusion']['input']) =>
+    invoke<ServiceOperationMap['previewSeriesExclusion']['output']>(IPC_CHANNELS.previewSeriesExclusion, input),
+  recordSeriesExclusion: (input: ServiceOperationMap['recordSeriesExclusion']['input']) =>
+    invoke<ServiceOperationMap['recordSeriesExclusion']['output']>(IPC_CHANNELS.recordSeriesExclusion, input),
+  cancelReviewRun: (input: Omit<ServiceOperationMap['cancelReviewRun']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['cancelReviewRun']['output']>(IPC_CHANNELS.cancelReviewRun, input),
   applyChangeSuggestion: (input: ServiceOperationMap['applyChangeSuggestion']['input']) =>
     invoke<ServiceOperationMap['applyChangeSuggestion']['output']>(IPC_CHANNELS.applyChangeSuggestion, input),
   applyChangeSuggestionBatch: (input: ServiceOperationMap['applyChangeSuggestionBatch']['input']) =>

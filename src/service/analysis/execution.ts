@@ -62,6 +62,7 @@ import {
   type GapUnitOutcome,
 } from './reducers.js';
 import { OUT_OF_SCOPE_GAP_REASON } from './reuse-plan.js';
+import { SERIES_SCOPE_STOP_SUMMARY } from '../series-exclusions.js';
 import {
   buildRunReportReflectionMessage,
   parseRunReportReflectionResult,
@@ -141,6 +142,13 @@ export interface ExecutionOwnerDependencies {
    * Absent in every launch.
    */
   readonly stageHold?: ((stage: 'cross-unit-reduction' | 'assurance-sampling') => Promise<void>) | null;
+  /**
+   * The current-read guard (Issue #64, S29b; V2-UX-SER-023, SER-028): asked before each reading range of a Run, and once more
+   * before what follows them, whether a Series Retrieval Exclusion in force now reaches the Series material the Run's plan froze.
+   * A non-`null` answer names what is excluded, and the Run stops there — its Plan Envelope and authorization predate the
+   * exclusion, and that never lets a further read go on. Absent, nothing is guarded: no Series material exists for the Run.
+   */
+  readonly readGuard?: ((runRecordId: string) => string | null) | null;
 }
 
 /**
@@ -285,6 +293,13 @@ const LIVE_INTERRUPTIONS = {
     detail: 'Provider Account Limit：模型服务账户限额结束了本次运行；没有重试、回退或第二个模型。',
     summary: 'Provider Account Limit：模型服务账户限额结束了运行，部分结果集修订版已保留。',
     safeNextAction: '待模型服务账户限额窗口恢复后，通过分析更新操作发起新的授权运行；本次运行不会自动重试，也不会改用其它模型。',
+  },
+  // A Series Retrieval Exclusion recorded while the Run read (Issue #64, S29b; SER-023 to SER-025): it stops before the next
+  // range, keeps what it read, and goes on only through a revised plan and a new authorization.
+  'series-retrieval-scope-changed': {
+    detail: '书系检索范围已变化：这次运行所依据的书系材料已排除在书系检索之外；已完成单元的结果与缺口均已保留，未再发起任何传输。',
+    summary: SERIES_SCOPE_STOP_SUMMARY,
+    safeNextAction: '修改计划并重新授权，或取消任务；这次运行不能续行、重试，也不会改用别的材料。',
   },
 } as const;
 
@@ -1570,6 +1585,14 @@ export class BaselineAnalysisExecutionOwner {
         }
         // 取消任务 (CTRL-005): the Run stops at this unit boundary, and the unit before it has finished.
         if (active.cancelRequested) break;
+        // The current-read guard (Issue #64, S29b; SER-023): an exclusion recorded since the last range stops the Run before this
+        // one forms a request — before a pause or AI7 stopping, which would leave it to be continued past the exclusion.
+        if (this.#deps.readGuard?.(facts.runRecordId) != null) {
+          liveInterruption = 'series-retrieval-scope-changed';
+          terminalClassification = 'interrupted';
+          unitsEnded = true;
+          break;
+        }
         // The ceiling is evaluated before every dispatch, not only inside the gate: reaching it ends
         // the Run here, before the next unit forms a request at all — and before a pause or AI7 stopping is honoured,
         // which would leave a Run to be continued past what it may spend (Issue #51, S16a).
@@ -1670,6 +1693,12 @@ export class BaselineAnalysisExecutionOwner {
         if (answers === 'end') unitsEnded = true;
       }
       clock.close();
+      // What follows the ranges — the reduction, the sample, the reflection — reads the same material; an exclusion recorded while
+      // the last range was out stops the Run before any of it (Issue #64, S29b; SER-023).
+      if (!active.cancelRequested && liveInterruption === null && this.#deps.readGuard?.(facts.runRecordId) != null) {
+        liveInterruption = 'series-retrieval-scope-changed';
+        terminalClassification = 'interrupted';
+      }
       // 暂停, or AI7 stopping under a Run it can continue (Issue #422, S76b): the Run stops here keeping what it read —
       // no reduction, no revision, no outcome — and 续行 goes on from the next unit. A cancellation outranks both, and a
       // spent ceiling, an account limit, or a unit whose turn ended the Run — refused, cut off or ambiguous — still ends

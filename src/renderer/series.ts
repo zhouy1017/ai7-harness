@@ -12,6 +12,7 @@ import type {
 } from '../shared/protocol.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 import { mountSeriesKnowledge } from './series-knowledge.js';
+import { mountSeriesExclusions } from './series-exclusions.js';
 import {
   BOOK_SERIES_HEADING,
   BOOK_SERIES_HISTORY,
@@ -303,7 +304,8 @@ export interface MountSeriesOptions {
   readonly api: Pick<RendererApi, 'inspectSeries' | 'inspectSeriesMembers' | 'inspectSeriesCandidates' | 'inspectSeriesHistory' |
     'previewSeriesMembershipChange' | 'changeSeriesMembership' | 'proposeSeriesKnowledge' | 'inspectSeriesKnowledgeReview' |
     'editSeriesKnowledgeCandidate' | 'promoteSeriesKnowledge' | 'inspectSeriesKnowledgeItems' | 'inspectSeriesKnowledgeCandidates' |
-    'inspectSeriesKnowledgeRevisions' | 'inspectSeriesKnowledgeConflicts'>;
+    'inspectSeriesKnowledgeRevisions' | 'inspectSeriesKnowledgeConflicts' | 'inspectSeriesExclusionTargets' | 'inspectSeriesExclusionHistory' |
+    'previewSeriesExclusion' | 'recordSeriesExclusion'>;
   readonly setStatus: Status;
   readonly errorMessage: (error: unknown, fallback: string) => string;
 }
@@ -342,6 +344,8 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
   // Three stable parts, so a membership repaint never moves focus inside 书系知识 (Issue #63, S28b), which paints itself.
   const membersBox = el('div', 'series-members-box');
   const knowledgeHost = el('section');
+  // 书系检索排除 (Issue #64, S29b) paints itself as well, between the knowledge it restricts and the membership records.
+  const exclusionsHost = el('section');
   const historyBox = el('div', 'series-history-box');
   const knowledge = mountSeriesKnowledge({
     root: knowledgeHost,
@@ -349,6 +353,18 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
     api,
     setStatus,
     errorMessage,
+    seriesChanged: (series) => {
+      projection = series;
+      paint(null, false);
+    },
+  });
+  const exclusions = mountSeriesExclusions({
+    root: exclusionsHost,
+    seriesId: options.seriesId,
+    api,
+    setStatus,
+    errorMessage,
+    // A revision may change what 书系一致性 can read for each member: the member table repaints from the Series read again.
     seriesChanged: (series) => {
       projection = series;
       paint(null, false);
@@ -416,8 +432,11 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
     }
     membersBox.replaceChildren(members);
     historyBox.replaceChildren(history);
-    if (membersBox.parentElement !== root) root.replaceChildren(membersBox, knowledgeHost, historyBox);
-    if (withKnowledge) knowledge.update(projection.knowledge);
+    if (membersBox.parentElement !== root) root.replaceChildren(membersBox, knowledgeHost, exclusionsHost, historyBox);
+    if (withKnowledge) {
+      knowledge.update(projection.knowledge);
+      exclusions.update(projection.exclusions);
+    }
     if (focus !== null) root.querySelector<HTMLElement>(focus)?.focus();
   };
 

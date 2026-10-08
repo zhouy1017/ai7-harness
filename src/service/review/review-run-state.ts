@@ -1,8 +1,9 @@
-import type {
-  EditorialMarkKind,
-  ReviewFindingStatus,
-  ReviewRunCategoryState,
-  ReviewRunState,
+import {
+  SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL,
+  type EditorialMarkKind,
+  type ReviewFindingStatus,
+  type ReviewRunCategoryState,
+  type ReviewRunState,
 } from '../../shared/protocol.js';
 
 /**
@@ -105,12 +106,28 @@ export function reviewRunCategoryStateLabel(state: ReviewRunCategoryState, waiti
   return state === 'waiting' && waitingForPlace ? REVIEW_CATEGORY_PLACE_WAIT_LABEL : REVIEW_RUN_CATEGORY_STATE_LABELS[state];
 }
 
+/**
+ * The codes a category's terminal event carries when the Run stopped for a Series Retrieval Exclusion (Issue #64, S29b;
+ * SER-023, SER-024), and when the editor then cancelled it. Each is kept in the event's canonical record, so the stop and the
+ * cancellation are durable: ending the exclusion later restores neither (SER-027).
+ */
+export const SERIES_RETRIEVAL_SCOPE_CHANGED = 'SERIES_RETRIEVAL_SCOPE_CHANGED' as const;
+export const REVIEW_RUN_CANCELLED = 'REVIEW_RUN_CANCELLED' as const;
+export const REVIEW_RUN_CANCELLED_LABEL = '已取消' as const;
+
+/** How a stopped category reads: the stop's own words, never 未能开始 or 已中断 (SER-024). */
+export function reviewRunCategoryStopLabel(code: unknown): string | null {
+  return code === SERIES_RETRIEVAL_SCOPE_CHANGED ? SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL : code === REVIEW_RUN_CANCELLED ? REVIEW_RUN_CANCELLED_LABEL : null;
+}
+
 export const REVIEW_RUN_STATE_LABELS = {
   prepared: '计划已冻结 · 待授权',
   running: '正在审阅',
   settled: '已完成',
   partial: '部分完成',
   failed: '未能完成',
+  'scope-changed': SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL,
+  cancelled: REVIEW_RUN_CANCELLED_LABEL,
 } as const satisfies Record<ReviewRunState, string>;
 
 /**
@@ -161,8 +178,16 @@ export function reviewRunState(input: {
   readonly authorized: boolean;
   readonly driving: boolean;
   readonly categories: ReadonlyArray<{ readonly pending: boolean; readonly materialized: boolean }>;
+  /**
+   * What stopped the Run for good, from its categories' events (Issue #64, S29b): a Series Retrieval Exclusion, which leaves
+   * only 修改计划并重新授权 and 取消任务 — never 继续审阅 (SER-024) — or the editor's 取消任务 after it. Absent, nothing did.
+   */
+  readonly stop?: 'scope-changed' | 'cancelled' | null;
 }): { state: ReviewRunState; canContinue: boolean } {
   if (!input.authorized) return { state: 'prepared', canContinue: false };
+  if (input.stop === 'cancelled') return { state: 'cancelled', canContinue: false };
+  // A Run still driven finishes its own step first; once it is not, it reads the stop, whatever categories are left.
+  if (input.stop === 'scope-changed' && !input.driving) return { state: 'scope-changed', canContinue: false };
   if (input.categories.some((category) => category.pending)) {
     return input.driving ? { state: 'running', canContinue: false } : { state: 'partial', canContinue: true };
   }
