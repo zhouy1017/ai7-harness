@@ -2502,6 +2502,7 @@ async function main() {
     // 使用过的任务, the one decision standing, and each later stage empty with why; ids stay under a closed 审计详情.
     await fill(renderer, '#learning-audit-query', '', 'learning-audit-query-cleared');
     await choose(renderer, '#learning-audit-filter-kind', '', 'learning-audit-kind-cleared');
+    await readAudit(renderer, (page) => page.rows.length === 1, 'learning-audit-kind-cleared-read');
     await choose(renderer, '#learning-audit-filter-standing', 'book', 'learning-audit-standing-book');
     await readAudit(renderer, (page) => page.rows.length === 3, 'learning-audit-book-again');
     await clickSelector(renderer, `${auditRow(auditFirst)} [data-learning-audit-action="open"]`, 'learning-audit-open');
