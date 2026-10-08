@@ -4,6 +4,7 @@ import {
   newestSuggestionVersion,
   reviewFindingStatus,
   reviewRunCategoryState,
+  reviewRunCategoryStateLabel,
   reviewRunState,
   reviewRunStateLabel,
   type ReviewFindingStatusInput,
@@ -108,5 +109,13 @@ describe('a Review Run\'s state', () => {
     expect(reviewRunState({ authorized: true, driving: false, categories: [lost, lost] })).toEqual({ state: 'failed', canContinue: false });
     expect(reviewRunStateLabel('partial', true)).toBe('部分完成 · 可继续审阅');
     expect(reviewRunStateLabel('partial', false)).toBe('部分完成');
+  });
+});
+
+describe('a category waiting for a place of the governor (Issue #632; CONC-007)', () => {
+  it('reads 等待运行名额 only while it is the category waiting for one, and its state\'s words otherwise', () => {
+    expect(reviewRunCategoryStateLabel('waiting', true)).toBe('等待运行名额');
+    expect(reviewRunCategoryStateLabel('waiting', false)).toBe('等待审阅');
+    expect(reviewRunCategoryStateLabel('running', true)).toBe('正在审阅');
   });
 });

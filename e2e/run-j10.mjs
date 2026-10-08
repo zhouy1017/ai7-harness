@@ -7,7 +7,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 // J-10 (Issue #422, plan slices S76a to S76d; Issue #51, S16a and S16b): the operations on a Run under way, told apart by
 // their consequence (V2-UX-AUTH-010, AUTH-011, CTRL-001 to CTRL-009, CONT-013 to CONT-015, CLAR-001 to CLAR-007, MODEL-013
@@ -19,7 +19,7 @@ import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabl
 // On the first Book: the Task Drawer's activity card names the phase, the range in flight, the time, the attempt,
 // the last update and the milestones, and its bar offers 暂停, 取消任务, 改计划重做 with why it waits, and 查看运行.
 // 暂停 is one click: 正在暂停 holds while the range in flight finishes, and 已暂停 follows with three ranges kept and
-// the slot free. 续行 goes on in the same Run from the fourth range, and with the sixth in flight 取消任务 opens one
+// its place free. 续行 goes on in the same Run from the fourth range, and with the sixth in flight 取消任务 opens one
 // inline Cancellation Impact Summary that records nothing; 继续运行 closes it; confirming — by keyboard alone — records
 // 正在取消, which holds while that range finishes, and 已取消 follows with six ranges kept in a partial Result Set
 // Revision, two named not attempted, and nothing sent after them. 改计划重做 then sits beside 查看运行: it prepares a
@@ -123,8 +123,8 @@ const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL'
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
 const CREDENTIAL_CLEANUP_TIMEOUT_MS = 15_000;
 const FORCE_EXIT_TIMEOUT_MS = 5_000;
-const BROWSER_CLOSE_TIMEOUT = new Error('J-10/browser-close-timeout');
-const CREDENTIAL_CLEANUP_TIMEOUT = new Error('J-10/credential-cleanup-timeout');
+const BROWSER_CLOSE_TIMEOUT = journeyCheckFailure('J-10', 'browser-close-timeout');
+const CREDENTIAL_CLEANUP_TIMEOUT = journeyCheckFailure('J-10', 'credential-cleanup-timeout');
 
 let location = 'entry';
 let runnerLifecycleIncomplete = false;
@@ -135,7 +135,7 @@ function at(next) {
 }
 function requireJourney(condition, name, detail) {
   if (condition) return;
-  const error = new Error(`J-10/${name}`);
+  const error = journeyCheckFailure('J-10', name);
   if (detail !== undefined) error.detail = detail;
   throw error;
 }
@@ -298,7 +298,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     metadata = await lstat(databasePath);
   } catch (error) {
     if (hasErrorCode(error, 'ENOENT')) return { kind: 'not-started' };
-    throw new Error('J-10/credential-cleanup-metadata');
+    throw journeyCheckFailure('J-10', 'credential-cleanup-metadata');
   }
   requireJourney(metadata.isFile() && !metadata.isSymbolicLink() && (await realpath(databasePath)) === databasePath,
     'credential-cleanup-metadata-file');
@@ -306,7 +306,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
   try {
     database = new DatabaseSync(databasePath, { readOnly: true });
   } catch {
-    throw new Error('J-10/credential-cleanup-metadata');
+    throw journeyCheckFailure('J-10', 'credential-cleanup-metadata');
   }
   try {
     database.exec('PRAGMA query_only = ON;');
@@ -334,7 +334,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
       : { kind: 'reference', credentialReference: row.credential_reference };
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('J-10/')) throw error;
-    throw new Error('J-10/credential-cleanup-metadata');
+    throw journeyCheckFailure('J-10', 'credential-cleanup-metadata');
   } finally {
     database.close();
   }
@@ -354,13 +354,13 @@ async function createLoopbackSentinel() {
   });
   server.on('error', () => { runtimeFault = true; });
   await new Promise((resolveListen, rejectListen) => {
-    server.once('error', () => rejectListen(new Error('J-10/loopback-listen')));
+    server.once('error', () => rejectListen(journeyCheckFailure('J-10', 'loopback-listen')));
     server.listen(0, '127.0.0.1', resolveListen);
   });
   const address = server.address();
   if (!(address !== null && typeof address === 'object' && address.address === '127.0.0.1' && Number.isSafeInteger(address.port) && address.port > 0)) {
     await new Promise((resolveClose) => server.close(() => resolveClose()));
-    throw new Error('J-10/loopback-address');
+    throw journeyCheckFailure('J-10', 'loopback-address');
   }
   server.unref();
   return {
@@ -398,13 +398,13 @@ async function attachRenderer(browser) {
     const completion = pending.get(response.id);
     if (!completion) return;
     pending.delete(response.id);
-    if (response.error) completion.reject(new Error('J-10/renderer-cdp-response'));
+    if (response.error) completion.reject(journeyCheckFailure('J-10', 'renderer-cdp-response'));
     else completion.resolve(response.result);
   });
   const send = async (method, params = {}) => {
     const id = nextId++;
     const response = new Promise((resolveResponse, rejectResponse) => {
-      const timeout = setTimeout(() => { pending.delete(id); rejectResponse(new Error('J-10/renderer-cdp-timeout')); }, 60_000);
+      const timeout = setTimeout(() => { pending.delete(id); rejectResponse(journeyCheckFailure('J-10', 'renderer-cdp-timeout')); }, 60_000);
       timeout.unref();
       pending.set(id, {
         resolve: (value) => { clearTimeout(timeout); resolveResponse(value); },
@@ -431,7 +431,7 @@ async function waitFor(renderer, expression, name, timeout = 60_000) {
     if (await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`).catch(() => false)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  throw new Error(`J-10/${name}`);
+  throw journeyCheckFailure('J-10', name);
 }
 async function assertRenderer(renderer, expression, name) {
   requireJourney(await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`), name);
@@ -502,7 +502,7 @@ async function openAnalysisOf(renderer, bookId, name) {
 
 /**
  * 开始基线稿件分析 prepares the Task and opens its plan in the drawer (the card's 查看计划并开始 opens it when it
- * does not); the bar's 开始任务 records the Run — and, with a route, hands it to the one slot.
+ * does not); the bar's 开始任务 records the Run — and, with a route, hands it to the execution owner's governor.
  */
 async function startFirstBaseline(renderer, readiness, name) {
   await prepareFirstBaseline(renderer, readiness, name);
@@ -674,7 +674,7 @@ async function main() {
     if (ownedBrowser.isConnected()) {
       browserCloseRejected = true;
       runnerLifecycleIncomplete = true;
-      throw new Error('J-10/browser-close-unconfirmed');
+      throw journeyCheckFailure('J-10', 'browser-close-unconfirmed');
     }
   };
   const closeOwnedBrowser = async () => {
@@ -727,7 +727,7 @@ async function main() {
     return true;
   };
   const cleanup = () => (cleanupPromise ??= (async () => {
-    if (browserCloseRejected) throw cleanupFailure ?? new Error('J-10/browser-cleanup-failed');
+    if (browserCloseRejected) throw cleanupFailure ?? journeyCheckFailure('J-10', 'browser-cleanup-failed');
     if (credentialMutationReached && !credentialRemoved) {
       try {
         await removeCredentialThroughProduct();
@@ -736,7 +736,7 @@ async function main() {
       }
       if (!credentialRemoved && launchForCleanup !== undefined) {
         const closedForRetry = await closeOwnedBrowserForCleanup();
-        if (browserCloseRejected) throw cleanupFailure ?? new Error('J-10/browser-cleanup-failed');
+        if (browserCloseRejected) throw cleanupFailure ?? journeyCheckFailure('J-10', 'browser-cleanup-failed');
         if (closedForRetry) {
           try {
             await launchForCleanup({ forCleanup: true });
@@ -748,9 +748,9 @@ async function main() {
         }
       }
       if (!credentialRemoved) {
-        if (browserCloseRejected) throw cleanupFailure ?? new Error('J-10/browser-cleanup-failed');
+        if (browserCloseRejected) throw cleanupFailure ?? journeyCheckFailure('J-10', 'browser-cleanup-failed');
         const closedForFallback = await closeOwnedBrowserForCleanup();
-        if (browserCloseRejected) throw cleanupFailure ?? new Error('J-10/browser-cleanup-failed');
+        if (browserCloseRejected) throw cleanupFailure ?? journeyCheckFailure('J-10', 'browser-cleanup-failed');
         if (closedForFallback && credentialReferenceForCleanup === undefined && dataRoot !== undefined && runRoot !== undefined) {
           try {
             const recovered = await recoverSyntheticCredentialCleanupState(dataRoot, runRoot);
@@ -771,14 +771,14 @@ async function main() {
         }
       }
     }
-    if (browserCloseRejected) throw cleanupFailure ?? new Error('J-10/browser-cleanup-failed');
+    if (browserCloseRejected) throw cleanupFailure ?? journeyCheckFailure('J-10', 'browser-cleanup-failed');
     const browserClosed = await closeOwnedBrowserForCleanup();
-    if (!browserClosed) throw cleanupFailure ?? new Error('J-10/browser-cleanup-failed');
+    if (!browserClosed) throw cleanupFailure ?? journeyCheckFailure('J-10', 'browser-cleanup-failed');
     const ownedLoopback = loopback ?? (loopbackAcquisition === undefined ? undefined : await loopbackAcquisition.catch(() => undefined));
     try { await ownedLoopback?.close(); } catch (error) { cleanupFailure ??= error; }
     loopback = undefined;
     if (credentialMutationReached && !credentialRemoved) {
-      throw credentialCleanupFailure ?? new Error('J-10/credential-cleanup-failed');
+      throw credentialCleanupFailure ?? journeyCheckFailure('J-10', 'credential-cleanup-failed');
     }
     const ownedRoot = runRoot ?? (runRootAcquisition === undefined ? undefined : await runRootAcquisition.catch(() => undefined));
     if (ownedRoot !== undefined) {
@@ -964,7 +964,7 @@ async function main() {
 
     at('paused');
     // The range in flight finishes and is kept; the Run waits at the boundary after it, holding nothing, and reads
-    // 已暂停 with where 续行 will go on — and 续行 is offered, since nothing else holds the slot.
+    // 已暂停 with where 续行 will go on — and 续行 is offered, since a place of the governor is free.
     await writeFile(holdPath, String(FIRST_HOLD + 1), 'utf8');
     await waitForBar(renderer, { state: 'paused', pill: '已暂停', status: '已暂停', note: PAUSED_NOTE, actions: STOPPED_ACTIONS }, 'paused-bar');
     await assertRenderer(renderer, `(() => { const activity=document.querySelector('#task-drawer .task-plan-activity'); return activity?.dataset.taskPlanActivity==='stopped' && activity.dataset.taskPlanActivityProgress===${JSON.stringify(`${FIRST_HOLD + 1}/${SAMPLE1_UNITS}`)} && activity.querySelector('.field-note')?.textContent===${JSON.stringify(PAUSED_NOTE)}; })()`, 'paused-activity');

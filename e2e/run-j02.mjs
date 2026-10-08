@@ -5,7 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -66,7 +66,7 @@ function at(location) {
 
 function requireJourney(condition, location, detail) {
   if (condition) return;
-  const error = new Error(`J-02/${location}`);
+  const error = journeyCheckFailure('J-02', location);
   if (detail !== undefined) error.detail = detail;
   throw error;
 }
@@ -265,7 +265,7 @@ async function attachRendererTarget(browser, launchScenario) {
     const completion = pending.get(response.id);
     if (!completion) return;
     pending.delete(response.id);
-    if (response.error) completion.reject(new Error('J-02/renderer-cdp-response'));
+    if (response.error) completion.reject(journeyCheckFailure('J-02', 'renderer-cdp-response'));
     else completion.resolve(response.result);
   });
   const send = async (method, params = {}) => {
@@ -273,7 +273,7 @@ async function attachRendererTarget(browser, launchScenario) {
     const response = new Promise((resolveResponse, rejectResponse) => {
       const timeout = setTimeout(() => {
         pending.delete(id);
-        rejectResponse(new Error('J-02/renderer-cdp-timeout'));
+        rejectResponse(journeyCheckFailure('J-02', 'renderer-cdp-timeout'));
       }, 60_000);
       timeout.unref();
       pending.set(id, {
@@ -305,7 +305,7 @@ async function attachRendererTarget(browser, launchScenario) {
         executionContexts.delete(contextId);
       }
     }
-    throw new Error('J-02/preload-ipc-observation');
+    throw journeyCheckFailure('J-02', 'preload-ipc-observation');
   };
   at(`launch-${launchScenario}-renderer-runtime-enable`);
   await send('Runtime.enable');
@@ -318,7 +318,7 @@ async function waitFor(renderer, expression, location, timeout = 60_000) {
     if (await renderer.evaluate(`Boolean(${expression})`)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  throw new Error(`J-02/${location}`);
+  throw journeyCheckFailure('J-02', location);
 }
 
 async function waitForChecks(renderer, expression, location, timeout = 60_000) {
@@ -335,7 +335,7 @@ async function waitForChecks(renderer, expression, location, timeout = 60_000) {
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  throw new Error(`J-02/${location}:${failed.join(',')}`);
+  throw journeyCheckFailure('J-02', location, { failed });
 }
 
 /**
@@ -542,7 +542,7 @@ async function milestoneObjectTimeoutCategory(dataRoot) {
     directory = await opendir(join(dataRoot, 'recovery-objects', 'v1'));
   } catch (error) {
     if (error?.code === 'ENOENT') return 'recovery-object-absent';
-    throw new Error('J-02/milestone-r2-object-inspection');
+    throw journeyCheckFailure('J-02', 'milestone-r2-object-inspection');
   }
   let promoted = false;
   for await (const entry of directory) {
@@ -1030,7 +1030,7 @@ async function runWorkspaceJourney(renderer, dataRoot) {
     const objectCategory = await milestoneObjectTimeoutCategory(dataRoot);
     // Both categories are closed literals; expose no IPC payload, file name or manuscript text.
     at(`milestone-r2-${ipcCategory}-${objectCategory}`);
-    throw new Error(`J-02/milestone-r2-${ipcCategory}-${objectCategory}`);
+    throw journeyCheckFailure('J-02', `milestone-r2-${ipcCategory}-${objectCategory}`);
   }
   at('milestone-save-ipc-order');
   const milestoneDrainCompleted = await renderer.observeIpc();

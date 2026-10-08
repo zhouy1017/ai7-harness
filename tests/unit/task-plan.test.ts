@@ -210,7 +210,7 @@ describe('route-aware readiness of the authorization bar (S74a A3; AUTH-005, MOD
   });
 
   it('says what a waiting Run waits for in its own words, and leaves every other plan as it came (OFF-006, OFF-009)', () => {
-    expect(WAITING_LABELS).toEqual({ network: '等待网络', connection: '需要处理模型连接', slot: '等待运行名额', admitting: '正在排队' });
+    expect(WAITING_LABELS).toEqual({ network: '等待网络', connection: '需要处理模型连接', slot: '已联网 · 名额已满', admitting: '正在排队' });
     const waiting: TaskPlanProjection = { ...planWith({ readiness: 'started', planEnvelopeDigest: null }), state: { key: 'waiting', label: '等待网络' } };
     for (const [reason, label] of Object.entries(WAITING_LABELS)) {
       expect(withWaitingReason(waiting, reason as keyof typeof WAITING_LABELS).state).toEqual({ key: 'waiting', label });

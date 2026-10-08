@@ -1,0 +1,155 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-series-consistency-authored",
+  "description": "编辑审阅契约 v1 下「书系一致性」的人工撰写夹具：逐单元阅读 sample1（ADR 0043 收录的 Public SampleBook）后写成，对照 J-13 的书系知识——书系「星河三部曲」的地点「海边小城」，三部曲里的地名以第一部的写法为准——这一条依据（series-knowledge/1），回答这本书在全书审阅下发出的八个单元请求。三条发现都指出本书中需要与书系第一部核对写法的地名，每条引文都是其所声明内容块的逐字子串并在块内唯一；其余单元没有发现。unitOrdinal 为 0 的条目回答这次运行发起的保证抽样与运行反思：抽样判定一律为「成立」，理由只说明引文经引文完整性逐字定位于其所声明的内容块，这是这一步能据本单元内容块作出的全部判断。",
+  "basedOn": null,
+  "provenance": "authored",
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "2dc28a02725d4734265c7881f2d52efab6a91e32a34cec22a92edaf7005412f6",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":1,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 1430,
+          "outputTokens": 60
+        }
+      }
+    },
+    {
+      "unitOrdinal": 2,
+      "requestDigest": "d1b6408577203f38897fe183fbbfdec0eb33976dce4205a1184354c7e35010f3",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":2,\"findings\":[{\"quote\":\"东湖公园\",\"blockOrdinal\":8,\"severity\":\"should\",\"note\":\"书系知识规定三部曲里的地名以第一部的写法为准；「东湖公园」在本书首次出现，请与第一部核对写法后再定。\",\"clauseId\":\"series-knowledge/1\"}]}",
+        "usage": {
+          "inputTokens": 1460,
+          "outputTokens": 130
+        }
+      }
+    },
+    {
+      "unitOrdinal": 3,
+      "requestDigest": "6f4cb9d0ab22671f3fa2d94cb87fb1421103b9c4ca1fcd9110abe7430417af86",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":3,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 1490,
+          "outputTokens": 60
+        }
+      }
+    },
+    {
+      "unitOrdinal": 4,
+      "requestDigest": "f9121daf911a541c81d5556a7fdb9f4f7c915bc46a634bac50deaad32c126951",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":4,\"findings\":[{\"quote\":\"水果湖一家银行\",\"blockOrdinal\":14,\"severity\":\"note\",\"note\":\"「水果湖」在本书多处出现，作为地名请与书系第一部的写法保持一致。\",\"clauseId\":\"series-knowledge/1\"}]}",
+        "usage": {
+          "inputTokens": 1520,
+          "outputTokens": 130
+        }
+      }
+    },
+    {
+      "unitOrdinal": 5,
+      "requestDigest": "43e34703e20d30f099a7e0032904800a34e6904cda9ea21e86d7994e91b7ba94",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":5,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 1550,
+          "outputTokens": 60
+        }
+      }
+    },
+    {
+      "unitOrdinal": 6,
+      "requestDigest": "5dd066e54ababfb10c26f56af544c0bb2940718234be00b9acf9ddf5724d2c6c",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":6,\"findings\":[{\"quote\":\"武珞路\",\"blockOrdinal\":6,\"severity\":\"note\",\"note\":\"街道名「武珞路」请按书系第一部的写法核对，书系内各书统一。\",\"clauseId\":\"series-knowledge/1\"}]}",
+        "usage": {
+          "inputTokens": 1580,
+          "outputTokens": 130
+        }
+      }
+    },
+    {
+      "unitOrdinal": 7,
+      "requestDigest": "d955d3ebc1e66bd514aea084574be6a4feccff2dc144fcedc36840844693c6bc",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":7,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 1610,
+          "outputTokens": 60
+        }
+      }
+    },
+    {
+      "unitOrdinal": 8,
+      "requestDigest": "c4d2b5bbf52b4c66a8670f285d1342a5e32d7bf1215d112d3ebc800b2c612bb0",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":8,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 1640,
+          "outputTokens": 60
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "081a46f7eec93ecad6b1ce5ffdebbe67484489566b421188aa00dfa0bf0004e4",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"引文经引文完整性逐字定位于其所声明的内容块，内容块按原样支持该发现的提法与定位。\"}]}",
+        "usage": {
+          "inputTokens": 1660,
+          "outputTokens": 100
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "29ab91c0a7ae34ea068407ef850bd589e8e1814ae94f7a47a1489ba8b9f999dc",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"引文经引文完整性逐字定位于其所声明的内容块，内容块按原样支持该发现的提法与定位。\"}]}",
+        "usage": {
+          "inputTokens": 1720,
+          "outputTokens": 100
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "2d56b42a55f8bfe7059774bb65e6a09f45ffaa21ceecf0e8d539240f32e6c78c",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"引文经引文完整性逐字定位于其所声明的内容块，内容块按原样支持该发现的提法与定位。\"}]}",
+        "usage": {
+          "inputTokens": 1780,
+          "outputTokens": 100
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "5c8886cfcea12869bbcbea8150ce75cbba199a6db0294de3d6b74a35bbb60b9c",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"下一次运行可以维持当前的单元预算不变，本次没有任何单元因预算而失败。\",\"basis\":\"账目中没有适配器失败或契约无效的缺口，计划内调整次数为 0。\"},{\"suggestion\":\"书系知识纳入新的版本后，书系一致性审阅的依据随之改变，应重新审阅全书而不是复用旧的单元结果。\",\"basis\":\"账目记录了本次提交与复用的单元数；依据条款改变时，没有单元可以复用。\"}]}",
+        "usage": {
+          "inputTokens": 900,
+          "outputTokens": 180
+        }
+      }
+    }
+  ]
+}

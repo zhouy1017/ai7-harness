@@ -7,7 +7,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 // J-11 (Issue #431, plan slice S83): a Book's 作者, 责编 and 相关人 — the attribution dimensions later feedback and learning
 // records name. Two empty Books are created through 新建图书, so this Journey reads no manuscript and composes no input:
@@ -72,8 +72,8 @@ const LEARNING_INFLUENCE = '纳入以后，它只可能在所选范围内帮 AI7
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
 const CREDENTIAL_CLEANUP_TIMEOUT_MS = 15_000;
 const FORCE_EXIT_TIMEOUT_MS = 5_000;
-const BROWSER_CLOSE_TIMEOUT = new Error('J-11/browser-close-timeout');
-const CREDENTIAL_CLEANUP_TIMEOUT = new Error('J-11/credential-cleanup-timeout');
+const BROWSER_CLOSE_TIMEOUT = journeyCheckFailure('J-11', 'browser-close-timeout');
+const CREDENTIAL_CLEANUP_TIMEOUT = journeyCheckFailure('J-11', 'credential-cleanup-timeout');
 let location = 'entry';
 let electronExecutable;
 let runnerLifecycleIncomplete = false;
@@ -84,7 +84,7 @@ function at(next) {
 }
 function requireJourney(condition, name, detail) {
   if (condition) return;
-  const error = new Error(`J-11/${name}`);
+  const error = journeyCheckFailure('J-11', name);
   if (detail !== undefined) error.detail = detail;
   throw error;
 }
@@ -243,7 +243,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     metadata = await lstat(databasePath);
   } catch (error) {
     if (hasErrorCode(error, 'ENOENT')) return { kind: 'not-started' };
-    throw new Error('J-11/credential-cleanup-metadata');
+    throw journeyCheckFailure('J-11', 'credential-cleanup-metadata');
   }
   requireJourney(metadata.isFile() && !metadata.isSymbolicLink() && (await realpath(databasePath)) === databasePath,
     'credential-cleanup-metadata-file');
@@ -251,7 +251,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
   try {
     database = new DatabaseSync(databasePath, { readOnly: true });
   } catch {
-    throw new Error('J-11/credential-cleanup-metadata');
+    throw journeyCheckFailure('J-11', 'credential-cleanup-metadata');
   }
   try {
     database.exec('PRAGMA query_only = ON;');
@@ -279,7 +279,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
       : { kind: 'reference', credentialReference: row.credential_reference };
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('J-11/')) throw error;
-    throw new Error('J-11/credential-cleanup-metadata');
+    throw journeyCheckFailure('J-11', 'credential-cleanup-metadata');
   } finally {
     database.close();
   }
@@ -296,14 +296,14 @@ async function createLoopbackSentinel() {
   });
   server.on('error', () => { runtimeFault = true; });
   await new Promise((resolveListen, rejectListen) => {
-    server.once('error', () => rejectListen(new Error('J-11/loopback-listen')));
+    server.once('error', () => rejectListen(journeyCheckFailure('J-11', 'loopback-listen')));
     server.listen(0, '127.0.0.1', resolveListen);
   });
   const address = server.address();
   if (!(address !== null && typeof address === 'object' && address.address === '127.0.0.1' &&
       Number.isSafeInteger(address.port) && address.port > 0)) {
     await new Promise((resolveClose) => server.close(() => resolveClose()));
-    throw new Error('J-11/loopback-address');
+    throw journeyCheckFailure('J-11', 'loopback-address');
   }
   server.unref();
   return {
@@ -314,7 +314,7 @@ async function createLoopbackSentinel() {
       if (closed) return;
       closed = true;
       await new Promise((resolveClose, rejectClose) => {
-        server.close((error) => error ? rejectClose(new Error('J-11/loopback-close')) : resolveClose());
+        server.close((error) => error ? rejectClose(journeyCheckFailure('J-11', 'loopback-close')) : resolveClose());
       });
       requireJourney(!runtimeFault, 'loopback-runtime');
     },
@@ -344,13 +344,13 @@ async function attachRenderer(browser, excludedTargetId = null) {
     const completion = pending.get(response.id);
     if (!completion) return;
     pending.delete(response.id);
-    if (response.error) completion.reject(new Error('J-11/renderer-cdp-response'));
+    if (response.error) completion.reject(journeyCheckFailure('J-11', 'renderer-cdp-response'));
     else completion.resolve(response.result);
   });
   const send = async (method, params = {}) => {
     const id = nextId++;
     const response = new Promise((resolveResponse, rejectResponse) => {
-      const timeout = setTimeout(() => { pending.delete(id); rejectResponse(new Error('J-11/renderer-cdp-timeout')); }, 60_000);
+      const timeout = setTimeout(() => { pending.delete(id); rejectResponse(journeyCheckFailure('J-11', 'renderer-cdp-timeout')); }, 60_000);
       timeout.unref();
       pending.set(id, {
         resolve: (value) => { clearTimeout(timeout); resolveResponse(value); },
@@ -378,7 +378,7 @@ async function waitFor(renderer, expression, name, timeout = 60_000) {
     if (await renderer.evaluate(`Boolean(${expression})`)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  throw new Error(`J-11/${name}`);
+  throw journeyCheckFailure('J-11', name);
 }
 async function assertRenderer(renderer, expression, name) {
   requireJourney(await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`), name);
@@ -535,7 +535,7 @@ async function readEvaluation(renderer, predicate, name) {
     if (page !== null && predicate(page)) return page;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  const error = new Error(`J-11/${name}`);
+  const error = journeyCheckFailure('J-11', name);
   error.detail = page;
   throw error;
 }
@@ -650,7 +650,7 @@ async function readFeedback(renderer, predicate, name) {
     if (page !== null && predicate(page)) return page;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  const error = new Error(`J-11/${name}`);
+  const error = journeyCheckFailure('J-11', name);
   error.detail = page;
   throw error;
 }
@@ -741,7 +741,7 @@ async function rightClickUntil(renderer, prepare, target, ready, name) {
     await pressEscape(renderer);
     await new Promise((resolveWait) => setTimeout(resolveWait, 120));
   }
-  throw new Error(`J-11/${name}`);
+  throw journeyCheckFailure('J-11', name);
 }
 async function openSelectionMenu(renderer, blockId, from, to, name) {
   await rightClickUntil(
@@ -768,7 +768,7 @@ async function openMarkCard(renderer, kind, blockId, name) {
       await new Promise((resolveWait) => setTimeout(resolveWait, 50));
     }
   }
-  throw new Error(`J-11/${name}-card`);
+  throw journeyCheckFailure('J-11', `${name}-card`);
 }
 
 /**
@@ -807,7 +807,7 @@ async function readDecision(renderer, predicate, name) {
     if (card !== null && predicate(card)) return card;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  const error = new Error(`J-11/${name}`);
+  const error = journeyCheckFailure('J-11', name);
   error.detail = card;
   throw error;
 }
@@ -875,7 +875,7 @@ async function readLearning(renderer, predicate, name) {
     if (page !== null && predicate(page)) return page;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  const error = new Error(`J-11/${name}`);
+  const error = journeyCheckFailure('J-11', name);
   error.detail = page;
   throw error;
 }
@@ -918,7 +918,7 @@ async function readHistory(renderer, predicate, name) {
     if (page !== null && !page.loading && predicate(page)) return page;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  const error = new Error(`J-11/${name}`);
+  const error = journeyCheckFailure('J-11', name);
   error.detail = page;
   throw error;
 }
@@ -970,7 +970,7 @@ async function main() {
     if (ownedBrowser.isConnected()) {
       browserCloseRejected = true;
       runnerLifecycleIncomplete = true;
-      throw new Error('J-11/browser-close-unconfirmed');
+      throw journeyCheckFailure('J-11', 'browser-close-unconfirmed');
     }
   };
   const closeOwnedBrowser = async () => {
@@ -1023,7 +1023,7 @@ async function main() {
     return true;
   };
   const cleanup = () => (cleanupPromise ??= (async () => {
-    if (browserCloseRejected) throw cleanupFailure ?? new Error('J-11/browser-cleanup-failed');
+    if (browserCloseRejected) throw cleanupFailure ?? journeyCheckFailure('J-11', 'browser-cleanup-failed');
     if (credentialMutationReached && !credentialRemoved) {
       try {
         await removeCredentialThroughProduct();
@@ -1032,7 +1032,7 @@ async function main() {
       }
       if (!credentialRemoved && launchForCleanup !== undefined) {
         const closedForRetry = await closeOwnedBrowserForCleanup();
-        if (browserCloseRejected) throw cleanupFailure ?? new Error('J-11/browser-cleanup-failed');
+        if (browserCloseRejected) throw cleanupFailure ?? journeyCheckFailure('J-11', 'browser-cleanup-failed');
         if (closedForRetry) {
           try {
             await launchForCleanup({ forCleanup: true });
@@ -1044,9 +1044,9 @@ async function main() {
         }
       }
       if (!credentialRemoved) {
-        if (browserCloseRejected) throw cleanupFailure ?? new Error('J-11/browser-cleanup-failed');
+        if (browserCloseRejected) throw cleanupFailure ?? journeyCheckFailure('J-11', 'browser-cleanup-failed');
         const closedForFallback = await closeOwnedBrowserForCleanup();
-        if (browserCloseRejected) throw cleanupFailure ?? new Error('J-11/browser-cleanup-failed');
+        if (browserCloseRejected) throw cleanupFailure ?? journeyCheckFailure('J-11', 'browser-cleanup-failed');
         if (closedForFallback && credentialReferenceForCleanup === undefined && dataRoot !== undefined && runRoot !== undefined) {
           try {
             const recovered = await recoverSyntheticCredentialCleanupState(dataRoot, runRoot);
@@ -1067,14 +1067,14 @@ async function main() {
         }
       }
     }
-    if (browserCloseRejected) throw cleanupFailure ?? new Error('J-11/browser-cleanup-failed');
+    if (browserCloseRejected) throw cleanupFailure ?? journeyCheckFailure('J-11', 'browser-cleanup-failed');
     const browserClosed = await closeOwnedBrowserForCleanup();
-    if (!browserClosed) throw cleanupFailure ?? new Error('J-11/browser-cleanup-failed');
+    if (!browserClosed) throw cleanupFailure ?? journeyCheckFailure('J-11', 'browser-cleanup-failed');
     const ownedLoopback = loopback ?? (loopbackAcquisition === undefined ? undefined : await loopbackAcquisition.catch(() => undefined));
     try { await ownedLoopback?.close(); } catch (error) { cleanupFailure ??= error; }
     loopback = undefined;
     if (credentialMutationReached && !credentialRemoved) {
-      throw credentialCleanupFailure ?? new Error('J-11/credential-cleanup-failed');
+      throw credentialCleanupFailure ?? journeyCheckFailure('J-11', 'credential-cleanup-failed');
     }
     const ownedRoot = runRoot ?? (runRootAcquisition === undefined ? undefined : await runRootAcquisition.catch(() => undefined));
     if (ownedRoot !== undefined) {
@@ -1359,10 +1359,26 @@ async function main() {
     await waitFor(renderer, `${status} === '已开始第 1 版评估。'`, 'evaluation-started-status', 10_000);
 
     at('evaluation-score');
+    // A score the scale does not admit shows no band, counts for nothing and says why until it is corrected (Issue #638).
+    const literaryScore = `${item('literary-quality')} [data-evaluation-field="score"]`;
+    const literaryInvalid = `document.querySelector(${JSON.stringify(`${item('literary-quality')} .evaluation-score-invalid`)})`;
+    await fill(renderer, literaryScore, '25', 'evaluation-score-inadmissible');
+    const inadmissible = await readEvaluation(renderer, (page) => page.record?.items[0]?.[2] === '25', 'evaluation-score-inadmissible-read');
+    requireJourney(inadmissible.record.items[0][3] === null && inadmissible.record.total === '总分 0 / 100 · 还有 5 项没有打分' &&
+      await renderer.evaluate(`${literaryInvalid}?.hidden === false && ${literaryInvalid}.textContent === '得分要在 0 到 20 之间，按整分或半分填写；这个得分不计入总分，也不能保存。' && document.querySelector(${JSON.stringify(literaryScore)})?.getAttribute('aria-invalid') === 'true'`),
+      'evaluation-score-inadmissible-words', inadmissible.record);
+    // Every item 不评 leaves nothing scored: 定稿 waits and says why, as the Owner answered on #638.
+    const everyItem = ['literary-quality', 'theme-and-context', 'structure-and-coherence', 'chinese-language', 'readers-and-market'];
+    const notRatedBox = (itemId) => `${item(itemId)} [data-evaluation-field="not-rated"]`;
+    for (const itemId of everyItem) await tick(renderer, notRatedBox(itemId), `evaluation-all-not-rated-${itemId}`);
+    await waitFor(renderer, `(() => { const finalize = document.querySelector('[data-screen="book-evaluation"] [data-evaluation-action="finalize"]'); const note = document.querySelector('[data-screen="book-evaluation"] .evaluation-finalize-blocked'); return finalize instanceof HTMLButtonElement && finalize.disabled && note instanceof HTMLElement && !note.hidden && note.textContent === '至少要给一项打分才能定稿。' && finalize.getAttribute('aria-describedby') === note.id; })()`, 'evaluation-all-not-rated-waits', 10_000);
+    for (const itemId of everyItem) await tick(renderer, notRatedBox(itemId), `evaluation-all-not-rated-undo-${itemId}`);
+    await waitFor(renderer, `document.querySelector('[data-screen="book-evaluation"] [data-evaluation-action="finalize"]')?.disabled === false && document.querySelector('[data-screen="book-evaluation"] .evaluation-finalize-blocked')?.hidden === true`, 'evaluation-finalize-open-again', 10_000);
     // Four items scored, half points allowed; the fifth 不评 with its reason, leaving the total out of 80; each band shown.
     for (const [itemId, score] of [['literary-quality', '18'], ['theme-and-context', '16.5'], ['structure-and-coherence', '15'], ['chinese-language', '17']]) {
       await fill(renderer, `${item(itemId)} [data-evaluation-field="score"]`, score, `evaluation-score-${itemId}`);
     }
+    await assertRenderer(renderer, `${literaryInvalid}?.hidden === true && !document.querySelector(${JSON.stringify(literaryScore)})?.hasAttribute('aria-invalid')`, 'evaluation-score-corrected');
     await tick(renderer, `${item('readers-and-market')} [data-evaluation-field="not-rated"]`, 'evaluation-not-rated');
     await fill(renderer, `${item('readers-and-market')} [data-evaluation-field="not-rated-reason"]`, '市场资料尚未收集。', 'evaluation-not-rated-reason');
     const scoredPage = await readEvaluation(renderer, (page) => page.record?.total === '总分 66.5 / 80 · 优秀（1 项不评）', 'evaluation-total');
@@ -1424,6 +1440,19 @@ async function main() {
     const compared = await readEvaluation(renderer, (page) => page.record?.entries === '2' && page.record.comparison?.length === 4, 'evaluation-compared');
     requireJourney(JSON.stringify(compared.record.comparison) === JSON.stringify(['与第 1 版相比', '文学品质与作者声音：18 → 19', '总分：66.5 / 80 → 67.5 / 80', '结论：修改后再议 → 结论未定']) &&
       compared.versions.length === 2 && compared.versions[1] === '第 1 版 · 定稿 · 修订版 r1 · 总分 66.5 / 80 · 优秀（1 项不评） · 修改后再议', 'evaluation-compared-words', compared);
+    // Version 1 asked for with an unsaved score keeps it: 留在这一版 comes first, and only the named discard opens it (Issue #638).
+    const openVersion = (nth) => `[data-screen="book-evaluation"] .evaluation-version-list li:nth-child(${nth}) [data-evaluation-action="open-version"]`;
+    await fill(renderer, `${item('literary-quality')} [data-evaluation-field="score"]`, '20', 'evaluation-unsaved-score');
+    await clickSelector(renderer, openVersion(2), 'evaluation-unsaved-open-first');
+    await waitFor(renderer, `document.querySelector('.evaluation-unsaved p')?.textContent === '第 2 版有未保存的修改；打开第 1 版会放弃这些修改。' && document.activeElement?.dataset.evaluationAction === 'stay' && document.querySelector('[data-evaluation-action="discard-and-open"]')?.textContent === '放弃修改并打开第 1 版'`, 'evaluation-unsaved-asks', 10_000);
+    await clickSelector(renderer, '[data-evaluation-action="stay"]', 'evaluation-unsaved-stay');
+    const stayed = await readEvaluation(renderer, (page) => page.record?.heading === '第 2 版 · 编辑评分中' && page.record.items[0][2] === '20', 'evaluation-unsaved-stayed');
+    requireJourney(await renderer.evaluate(`document.querySelector('.evaluation-unsaved') === null && document.activeElement === document.querySelector('.evaluation-record h3')`), 'evaluation-unsaved-kept', stayed.record.items);
+    await clickSelector(renderer, openVersion(2), 'evaluation-unsaved-open-again');
+    await clickSelector(renderer, '[data-evaluation-action="discard-and-open"]', 'evaluation-unsaved-discard');
+    await readEvaluation(renderer, (page) => page.record?.heading === '第 1 版 · 定稿', 'evaluation-discarded-opens-first');
+    await clickSelector(renderer, openVersion(1), 'evaluation-back-to-second');
+    await readEvaluation(renderer, (page) => page.record?.heading === '第 2 版 · 编辑评分中' && page.record.items[0][2] === '19', 'evaluation-discard-left-saved');
 
     at('j14-evaluation-reflow-forced-colors');
     // At 200% the version, its items and risks reflow into the width; under forced colours each keeps its border.

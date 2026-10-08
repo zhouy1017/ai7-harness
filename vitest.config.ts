@@ -9,5 +9,10 @@ export default defineConfig({
     isolate: true,
     reporters: ['default'],
     watch: false,
+    // A case's give-up point, not its speed budget: on a background test guest under load, store-backed cases have taken
+    // longer than vitest's 5 s default (hooks 10 s) with no product cause, failing the Ladder (2026-10-07, #650). A hang
+    // still fails, half a minute later.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
   },
 });
