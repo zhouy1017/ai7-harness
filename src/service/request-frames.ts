@@ -1275,14 +1275,26 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
-    case 'stopCapturedProcedure': {
+    case 'previewCapturedProcedureStop': {
       const input = requireInput(value.input, ['procedureId', 'versionId'], tentativeId);
       if (!validUuid(input.procedureId) || (input.versionId !== null && !validUuid(input.versionId))) throw new ProtocolError(tentativeId);
       break;
     }
+    case 'stopCapturedProcedure': {
+      // 停用 confirms exactly the 停用… preview the editor read (Issue #66, S31).
+      const input = requireInput(value.input, ['procedureId', 'versionId', 'previewDigest'], tentativeId);
+      if (!validUuid(input.procedureId) || (input.versionId !== null && !validUuid(input.versionId)) ||
+          !isBoundedString(input.previewDigest, 64) || !HEX_DIGEST_PATTERN.test(input.previewDigest)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     case 'inspectCapturedProcedureRun': {
-      const input = requireInput(value.input, ['bookId', 'procedureId'], tentativeId);
-      if (!validUuid(input.bookId) || !validUuid(input.procedureId)) throw new ProtocolError(tentativeId);
+      // `versionId` names the exact eligible version the editor chose instead of the latest (Issue #66, S31); `null` for the latest.
+      const input = requireInput(value.input, ['bookId', 'procedureId', 'versionId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.procedureId) || (input.versionId !== null && !validUuid(input.versionId))) {
+        throw new ProtocolError(tentativeId);
+      }
       break;
     }
     case 'saveDeveloperProposal': {

@@ -87,6 +87,7 @@ export const IPC_CHANNELS = {
   saveCapturedProcedure: 'ai7:j15:save-captured-procedure',
   previewCapturedProcedureValidation: 'ai7:j15:preview-captured-procedure-validation',
   enableCapturedProcedure: 'ai7:j15:enable-captured-procedure',
+  previewCapturedProcedureStop: 'ai7:j15:preview-captured-procedure-stop',
   stopCapturedProcedure: 'ai7:j15:stop-captured-procedure',
   inspectCapturedProcedureRun: 'ai7:j15:inspect-captured-procedure-run',
   saveDeveloperProposal: 'ai7:j15:save-developer-proposal',
@@ -5642,6 +5643,8 @@ export interface CapturedProcedureRunLinkProjection {
   readonly reviewRunId: string;
   readonly label: string;
   readonly createdAt: string;
+  /** Where the Run stands now, in the Review Run's own words (Issue #66, S31): 已完成, 计划已冻结 · 待授权 … */
+  readonly stateLabel: string;
 }
 
 export interface CapturedProcedureVersionProjection {
@@ -5660,7 +5663,10 @@ export interface CapturedProcedureVersionProjection {
   readonly validationProblems: ReadonlyArray<string>;
   /** The local provenance outside the digest (REUSE-015): the Review Run it was captured from. */
   readonly source: { readonly bookId: string; readonly bookTitle: string; readonly reviewRunId: string; readonly runLabel: string };
+  /** The Review Runs approved under it — ran, or began to (Issue #66, S31 review P3-3). */
   readonly runCount: number;
+  /** The Review Runs prepared from it and never approved; each is linked with its state like the others. */
+  readonly preparedRunCount: number;
   readonly runs: ReadonlyArray<CapturedProcedureRunLinkProjection>;
   readonly technical: { readonly documentSha256: string; readonly previousDocumentSha256: string | null };
 }
@@ -5680,6 +5686,11 @@ export interface CapturedProcedureSummaryProjection {
 
 /** One Captured Procedure with one page of its versions, newest first; `versionsBefore` reads the next older page. */
 export interface CapturedProcedureProjection extends CapturedProcedureSummaryProjection {
+  /**
+   * The version a new use resolves to now — the newest 已启用 one that still validates (Issue #66, S31; REUSE-043, REUSE-044) —
+   * marked 最新可用 on its row; `null` when none is.
+   */
+  readonly latestEligibleVersionId: string | null;
   readonly versions: ReadonlyArray<CapturedProcedureVersionProjection>;
   /** The version number the next older page starts below; `null` when this page reaches version 1. */
   readonly versionsBefore: number | null;
@@ -5781,15 +5792,67 @@ export interface CapturedProcedureRunProjection {
   readonly resolved: null | {
     readonly versionId: string;
     readonly version: number;
+    /** Whether it is the latest eligible version — `false` when the editor chose an older eligible one (REUSE-054). */
+    readonly latestEligible: boolean;
     readonly documentSha256: string;
     readonly scopeSlot: CapturedProcedureScopeSlot;
     readonly steps: ReadonlyArray<CapturedProcedureRunStepProjection>;
     readonly guidelineChanges: ReadonlyArray<{ readonly categoryId: string; readonly label: string; readonly title: string; readonly sourceVersion: string | null; readonly version: string }>;
   };
-  /** Newer 已启用 versions passed over because they no longer validate, with why (REUSE-043: disclosed, never silent). */
+  /**
+   * Every version newer than the latest eligible one, passed over with why — stopped, still waiting for validation, or no longer
+   * validating (REUSE-043, REUSE-044: disclosed, never silent; Issue #66, S31).
+   */
   readonly passedOver: ReadonlyArray<{ readonly version: number; readonly reason: string }>;
+  /**
+   * The versions the editor may choose instead, newest first: each 已启用 and still validating (Issue #66, S31; REUSE-054's manual
+   * selector). The first is the latest eligible, which a new use takes unless the editor chooses another.
+   */
+  readonly eligibleVersions: ReadonlyArray<{ readonly versionId: string; readonly version: number }>;
   /** Why it cannot run now; `null` when `resolved` is set. */
   readonly unavailableReason: string | null;
+}
+
+/** A Review Run one version's 停用 touches (Issue #66, S31; REUSE-038, REUSE-041): an exact link and where it stands. */
+export interface CapturedProcedureStopRunProjection {
+  readonly bookId: string;
+  readonly bookTitle: string;
+  readonly reviewRunId: string;
+  readonly label: string;
+  readonly stateLabel: string;
+}
+
+/** One version as `停用…`'s preview names it. */
+export interface CapturedProcedureStopVersionProjection {
+  readonly versionId: string;
+  readonly version: number;
+  readonly stateLabel: string;
+  /** The Review Runs approved under it — ran, or began to: each keeps naming it after the 停用 (REUSE-040). */
+  readonly runCount: number;
+  /** Prepared from it and not yet approved, still the newest of their Book: they cannot be approved after it and are prepared again. */
+  readonly prepared: ReadonlyArray<CapturedProcedureStopRunProjection>;
+  readonly preparedCount: number;
+  /** Approved and not yet finished: they go on under the version they were approved with; the 停用 does not move them. */
+  readonly active: ReadonlyArray<CapturedProcedureStopRunProjection>;
+  readonly activeCount: number;
+}
+
+/**
+ * `停用…`'s preview (Issue #66, S31): the Version Removal Preview (REUSE-038, REUSE-040, REUSE-041) for a 停用, which removes
+ * nothing (ADR 0087 §5). It names the Runs it touches, what a new use resolves to afterwards, and what stays; `stopCapturedProcedure`
+ * confirms exactly this preview by its digest. A read.
+ */
+export interface CapturedProcedureStopPreviewProjection {
+  readonly procedureId: string;
+  readonly title: string;
+  /** `null` for 全部停用. */
+  readonly versionId: string | null;
+  /** The newest versions it takes, as many as one frame holds (S31 review P2-2); `versionCount` counts them all. */
+  readonly versions: ReadonlyArray<CapturedProcedureStopVersionProjection>;
+  readonly versionCount: number;
+  /** The version a new use resolves to afterwards; `null` when none will be runnable. */
+  readonly afterVersion: number | null;
+  readonly previewDigest: string;
 }
 
 /** The pin a Review Run prepared from a Captured Procedure records (ADR 0087 §4): never moved by a later version or a 停用. */
@@ -10182,10 +10245,15 @@ export interface ServiceOperationMap {
   previewCapturedProcedureValidation: { input: { versionId: string }; output: CapturedProcedureValidationProjection };
   /** Confirms the preview by its digest: `已启用` when it passes, its reasons recorded when it does not (ADR 0087 §3). */
   enableCapturedProcedure: { input: { versionId: string; previewDigest: string }; output: CapturedProcedureProjection };
-  /** `停用`: one version or all of them, final for each (ADR 0087 §5). */
-  stopCapturedProcedure: { input: { procedureId: string; versionId: string | null }; output: CapturedProcedureProjection };
-  /** The newest 已启用 version that still validates, for the Book's 新建审阅 sheet (ADR 0087 §4). */
-  inspectCapturedProcedureRun: { input: { bookId: string; procedureId: string }; output: CapturedProcedureRunProjection };
+  /** `停用…`'s preview (Issue #66, S31; REUSE-038, REUSE-040, REUSE-041): what stopping one version, or all of them, changes. */
+  previewCapturedProcedureStop: { input: { procedureId: string; versionId: string | null }; output: CapturedProcedureStopPreviewProjection };
+  /** `停用`: one version or all of them, final for each (ADR 0087 §5), confirming exactly the preview the editor read (S31). */
+  stopCapturedProcedure: { input: { procedureId: string; versionId: string | null; previewDigest: string }; output: CapturedProcedureProjection };
+  /**
+   * For the Book's 新建审阅 sheet (ADR 0087 §4): the newest 已启用 version that still validates, or — `versionId` — the exact
+   * eligible version the editor chose instead (Issue #66, S31; REUSE-043 to REUSE-045, REUSE-054).
+   */
+  inspectCapturedProcedureRun: { input: { bookId: string; procedureId: string; versionId: string | null }; output: CapturedProcedureRunProjection };
   /** 保存开发建议: a new Developer Capability Proposal, or its next version (ADR 0087 §6). */
   saveDeveloperProposal: { input: SaveDeveloperProposalInput; output: DeveloperProposalProjection };
   /** 导出为文件…: the proposal version written to the file the editor chose through the Save dialog (ADR 0087 §6). */
@@ -10768,9 +10836,10 @@ export interface RendererApi {
   saveCapturedProcedure(input: Omit<SaveCapturedProcedureInput, 'bookId'>): Promise<CapturedProcedureProjection>;
   previewCapturedProcedureValidation(input: { versionId: string }): Promise<CapturedProcedureValidationProjection>;
   enableCapturedProcedure(input: { versionId: string; previewDigest: string }): Promise<CapturedProcedureProjection>;
-  stopCapturedProcedure(input: { procedureId: string; versionId: string | null }): Promise<CapturedProcedureProjection>;
-  /** For the current Book's 新建审阅 sheet. */
-  inspectCapturedProcedureRun(input: { procedureId: string }): Promise<CapturedProcedureRunProjection>;
+  previewCapturedProcedureStop(input: { procedureId: string; versionId: string | null }): Promise<CapturedProcedureStopPreviewProjection>;
+  stopCapturedProcedure(input: { procedureId: string; versionId: string | null; previewDigest: string }): Promise<CapturedProcedureProjection>;
+  /** For the current Book's 新建审阅 sheet: the latest eligible version, or the exact eligible one chosen (`versionId`). */
+  inspectCapturedProcedureRun(input: { procedureId: string; versionId?: string | null }): Promise<CapturedProcedureRunProjection>;
   saveDeveloperProposal(input: SaveDeveloperProposalInput): Promise<DeveloperProposalProjection>;
   /** 导出为文件…: the platform Save dialog, then the file; nothing is written or recorded when the dialog is cancelled. */
   saveDeveloperProposalFile(input: { proposalVersionId: string }): Promise<SaveDeveloperProposalFileOutcome>;

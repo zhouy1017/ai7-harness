@@ -2840,8 +2840,17 @@ function registerRendererHandlers(
       requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
       return serializeEffect(async () => {
         requireAuthority();
-        return service.call('stopCapturedProcedure', { procedureId: input.procedureId, versionId: input.versionId });
+        return service.call('stopCapturedProcedure', { procedureId: input.procedureId, versionId: input.versionId, previewDigest: input.previewDigest });
       });
+    }),
+  );
+  // 停用…'s preview (Issue #66, S31): a read over the house's procedure, naming the Review Runs it touches; it stops nothing.
+  ipcMain.handle(IPC_CHANNELS.previewCapturedProcedureStop, (event, input: Parameters<RendererApi['previewCapturedProcedureStop']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('previewCapturedProcedureStop', { procedureId: input.procedureId, versionId: input.versionId });
     }),
   );
   ipcMain.handle(IPC_CHANNELS.inspectCapturedProcedureRun, (event, input: Parameters<RendererApi['inspectCapturedProcedureRun']>[0]) =>
@@ -2852,7 +2861,7 @@ function registerRendererHandlers(
       const route = requireCurrentBookRoute(owned);
       const routeGeneration = owned.routeGeneration;
       const routeRequestSequence = owned.routeRequestSequence;
-      const result = await service.call('inspectCapturedProcedureRun', { bookId: route.bookId, procedureId: input.procedureId });
+      const result = await service.call('inspectCapturedProcedureRun', { bookId: route.bookId, procedureId: input.procedureId, versionId: input.versionId ?? null });
       requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
       if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '工序的运行预览不属于当前图书工作台。');
       return result;

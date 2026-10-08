@@ -4978,6 +4978,16 @@ function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjecti
           setStatus(rendererErrorMessage(error, '无法打开这本书的审阅。'), 'error');
         }
       },
+      // A Review Run a version ran (Issue #66, S31; REUSE-031): its Book's 审阅 on that exact Run.
+      openReviewRun: async (book, reviewRunId) => {
+        setStatus('正在打开这次审阅…', 'busy');
+        try {
+          await requestBookWorkbenchRoute({ kind: 'book', bookId: book.bookId }, async (route) =>
+            renderBookReview(route.bookId, route.bookTitle, { reviewRunId, findingId: null }));
+        } catch (error) {
+          setStatus(rendererErrorMessage(error, '无法打开这次审阅。'), 'error');
+        }
+      },
     });
     panelNode.append(section, captured, element('h3', undefined, RULES_HEADING));
     void surface.load().catch((error: unknown) => {
