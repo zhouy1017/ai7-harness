@@ -462,7 +462,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     // Production Documents beside their ledgers, revision 38 adds their Delivery Records and revision 39 the Book's
     // 图书交付包 versions, so this pin moves with the terminal version the service stamps
     // (`BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION`).
-    requireJourney(version?.user_version === 60, 'credential-cleanup-metadata-version');
+    requireJourney(version?.user_version === 63, 'credential-cleanup-metadata-version');
     const rows = database.prepare(
       `SELECT connection_id, role_id, connection_name, provider_id, model_id,
               adapter_revision, configuration_revision, approved_fallback_chain,
@@ -1518,7 +1518,7 @@ async function main() {
     const packaged = unzipSync(await readFile(databaseExportPath));
     const manifest = JSON.parse(strFromU8(packaged['manifest.json']));
     requireJourney(
-      manifest.schema === 'ai7.database-package/1' && manifest.dataVersion === 1 && manifest.schemaRevision === 60 &&
+      manifest.schema === 'ai7.database-package/1' && manifest.dataVersion === 1 && manifest.schemaRevision === 63 &&
         manifest.credentials === 'excluded' && manifest.contents?.books === booksShown && Object.keys(packaged)[0] === 'store/ai7.sqlite',
       'database-export-manifest',
       { schema: manifest.schema, dataVersion: manifest.dataVersion, schemaRevision: manifest.schemaRevision, contents: manifest.contents },
@@ -1530,7 +1530,7 @@ async function main() {
     requireJourney(backupFiles.length === 1 && backupFiles[0].startsWith('AI7 自动备份 '), 'scheduled-backup-file', backupFiles);
     const backupPackage = unzipSync(await readFile(resolve(backupLocation, backupFiles[0])));
     const backupManifest = JSON.parse(strFromU8(backupPackage['manifest.json']));
-    requireJourney(backupManifest.origin === 'scheduled-backup' && backupManifest.schemaRevision === 60 && backupManifest.credentials === 'excluded',
+    requireJourney(backupManifest.origin === 'scheduled-backup' && backupManifest.schemaRevision === 63 && backupManifest.credentials === 'excluded',
       'scheduled-backup-manifest', { origin: backupManifest.origin, schemaRevision: backupManifest.schemaRevision });
     const backupMembersWithSecret = Object.entries(backupPackage).filter(([, bytes]) => [secretOne, secretTwo].some((secret) =>
       Buffer.from(bytes).includes(Buffer.from(secret, 'utf8')) || Buffer.from(bytes).includes(Buffer.from(secret, 'utf16le')))).map(([name]) => name);
@@ -1683,7 +1683,7 @@ async function main() {
     for (const name of replaceBackups) {
       const replacedPackage = unzipSync(await readFile(resolve(backupLocation, name)));
       const replacedManifest = JSON.parse(strFromU8(replacedPackage['manifest.json']));
-      requireJourney(replacedManifest.origin === (name === mergeBackup ? 'pre-merge-backup' : 'pre-replace-backup') && replacedManifest.schemaRevision === 60 &&
+      requireJourney(replacedManifest.origin === (name === mergeBackup ? 'pre-merge-backup' : 'pre-replace-backup') && replacedManifest.schemaRevision === 63 &&
         replacedManifest.credentials === 'excluded' && replacedManifest.contents?.books === (name === mergeBackup ? booksShown : booksShown + 1),
       'database-replace-backup-manifest', { name, contents: replacedManifest.contents });
       const withSecret = Object.entries(replacedPackage).filter(([, bytes]) => [secretOne, secretTwo].some((secret) =>
