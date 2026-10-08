@@ -64,8 +64,8 @@ export const INITIAL_EVALUATION_REDUCER_DESCRIPTOR = {
 export const INITIAL_EVALUATION_REDUCER_DIGEST = sha256Hex(canonicalJson(INITIAL_EVALUATION_REDUCER_DESCRIPTOR));
 
 const STAGES = ['unit-validation', 'cross-unit-reduction', 'book-synthesis'] as const;
-const EXECUTION_STEPS = ['派生覆盖清单', '逐单元执行评估契约 v1，记下各评分项的依据', '全书综合：给出各项初评分数与评语', '形成结果集修订版'] as const;
-const UPDATE_EXECUTION_STEPS = ['派生覆盖清单并计算重读计划', '逐单元执行评估契约 v1，记下各评分项的依据', '全书综合：给出各项初评分数与评语', '追加结果集修订版'] as const;
+const EXECUTION_STEPS = ['派生覆盖清单', '逐单元执行评估契约 v1，记下各评分项的依据', '全书综合：给出各项初评分数与评语，写出市场部分', '形成结果集修订版'] as const;
+const UPDATE_EXECUTION_STEPS = ['派生覆盖清单并计算重读计划', '逐单元执行评估契约 v1，记下各评分项的依据', '全书综合：给出各项初评分数与评语，写出市场部分', '追加结果集修订版'] as const;
 const NO_SAMPLE = 'AI7 初评没有保证抽样阶段：初评分数只作编辑打分的参考。' as const;
 const SYNTHESIS_LABEL = '全书综合' as const;
 
@@ -181,7 +181,11 @@ export function initialEvaluationKindDefinition(profile: InitialEvaluationProfil
     }),
     // The contract names a block by its position in the unit message, which a reused unit keeps.
     remapReusedResult: (result, predecessorUnit, newUnit) => carryPositionalResult(result as InitialEvaluationUnitResult, predecessorUnit, newUnit),
-    revisionComponents: (body) => ({ evaluation: body.evaluation, assuranceSample: body.assuranceSample ?? PRE_ASSURANCE_SAMPLE }),
+    // A 初评 settled before the market section existed (S81b2) holds none: it reads as having none.
+    revisionComponents: (body) => ({
+      evaluation: { ...(body.evaluation as InitialEvaluationResultProjection), market: (body.evaluation as Partial<InitialEvaluationResultProjection>).market ?? null },
+      assuranceSample: body.assuranceSample ?? PRE_ASSURANCE_SAMPLE,
+    }),
     conflictCountOf: () => 0,
     mode: modeIndex(MODES),
   };

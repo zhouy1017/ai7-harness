@@ -47,6 +47,13 @@ const synthesis = (overrides: Record<string, unknown> = {}): string => JSON.stri
   weaknesses: ['残句'],
   nextStep: '先校改残句。',
   suggestedConclusion: 'revise',
+  market: {
+    readers: ['文史爱好者。'],
+    sellingPoints: ['甲骨文悬念。'],
+    channels: ['读书会。'],
+    marketReturn: null,
+    awards: { statement: '有参评潜力，确定性低。', basis: '主题与语言。' },
+  },
   ...overrides,
 });
 

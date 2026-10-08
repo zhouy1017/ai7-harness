@@ -201,7 +201,7 @@ describe('AI7 初评 words (Issue #429, S81b1; EVAL-001, EVAL-005 to EVAL-007)',
     const latest = {
       revisionId: 'r', ordinal: 1, revisionLabel: 'r1', createdAt: '2026-10-07T00:00:00.000Z', items: [], strengths: [], weaknesses: [], nextStep: null,
       suggestedConclusion: null, complete: true, current: true, total: { score: 73, fullMarks: 100, notRated: 0, unscored: 0 },
-      unitsTotal: 8, unreadUnits: [],
+      unitsTotal: 8, unreadUnits: [], market: null,
     };
     expect(evaluationAi7LatestLine(PROFILE, latest)).toBe('第 1 次初评 · 读的是修订版 r1 · 总分 73 / 100 · 优秀');
     expect(evaluationAi7LatestLine(PROFILE, { ...latest, current: false })).toBe('第 1 次初评 · 读的是修订版 r1 · 总分 73 / 100 · 优秀（稿件此后改过：重新初评后才能从初评开始）');

@@ -100,6 +100,18 @@ export const AUTHORED_SYNTHESIS: InitialEvaluationSynthesisResult = {
   weaknesses: ['个别句子成分残缺，需要逐句校改。', '比喻偶有俗套，可以更贴切。'],
   nextStep: '先校改残句与俗套的比喻，再补充目标读者与同类书的资料，以便判断市场潜力。',
   suggestedConclusion: 'revise',
+  // The market section (Issue #429, S81b2; EVAL-009): only what the observations above say of the Book itself — no sales figure,
+  // no other house's book, no award record — so 市场回报 is 暂无法预测 and 评奖可能性 states its in-book basis.
+  market: {
+    readers: ['对考古、青铜器与古文字题材有兴趣的成年读者。', '关注学界人情、学术与名利之争的知识分子读者。'],
+    sellingPoints: ['以一封甲骨文来信开篇设下悬念，学术悬疑贯穿始终。', '学者之间的对白各具声口，写出学界中人的性情与分寸。'],
+    channels: ['可从书中的考古与青铜器话题切入，面向文史爱好者推介。', '以学术与名利的冲突为话题，组织书评与读书会讨论。'],
+    marketReturn: null,
+    awards: {
+      statement: '有参评文学奖的潜力，但确定性低。',
+      basis: '所读部分叙述凝练、意象运用纯熟，并触及学术与权力的主题；没有对比任何获奖作品。',
+    },
+  },
 };
 
 const REFLECTION_TEXT = JSON.stringify({
@@ -222,7 +234,7 @@ it.runIf(process.env['AI7_REGENERATE_EVALUATION_FIXTURE'] === '1')('generates th
   const body = {
     schema: 'ai7.model-fixture/1',
     identity: FIXTURE_IDENTITY,
-    description: '评估契约 v1 的人工撰写夹具：逐单元阅读 sample1（ADR 0043 收录的 Public SampleBook）后写成，回答内置评估方案（审稿评估方案第 1 版）下 AI7 初评发出的八个单元请求与一次全书综合。每条依据都按其在单元消息中的位置引用它所依据的内容块；「读者与市场潜力」在所读内容中没有任何依据，「主题、价值与社会文化语境」只在三个阅读范围中有依据，用来证明依据充分度的三档。全书综合只依据这些依据给出五个评分项的整数或半分初评分数、评语、主要优点、主要问题、下一步建议与建议结论「修改后再议」。unitOrdinal 为 0 的条目回答全书综合与这次运行的运行反思。本夹具叠加在 sample1-baseline-happy 之上：同一次启动既能运行基线分析，也能运行 AI7 初评；两者的请求摘要互不相同，叠加不改变任何条目的键。',
+    description: '评估契约 v1 的人工撰写夹具：逐单元阅读 sample1（ADR 0043 收录的 Public SampleBook）后写成，回答内置评估方案（审稿评估方案第 1 版）下 AI7 初评发出的八个单元请求与一次全书综合。每条依据都按其在单元消息中的位置引用它所依据的内容块；「读者与市场潜力」在所读内容中没有任何依据，「主题、价值与社会文化语境」只在三个阅读范围中有依据，用来证明依据充分度的三档。全书综合只依据这些依据给出五个评分项的整数或半分初评分数、评语、主要优点、主要问题、下一步建议与建议结论「修改后再议」，并写出市场部分：目标读者、差异化卖点、渠道与策略各两条，市场回报暂无法预测，评奖可能性只说明它在书稿内的依据。unitOrdinal 为 0 的条目回答全书综合与这次运行的运行反思。本夹具叠加在 sample1-baseline-happy 之上：同一次启动既能运行基线分析，也能运行 AI7 初评；两者的请求摘要互不相同，叠加不改变任何条目的键。',
     basedOn: 'sample1-baseline-happy',
     provenance: 'authored',
     provider: 'ai7-local-deterministic',

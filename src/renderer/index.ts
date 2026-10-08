@@ -482,7 +482,7 @@ async function openTaskRunSurface(plan: TaskPlanProjection): Promise<void> {
   try {
     if (plan.kind === 'baseline-analysis') renderBookAnalysis(plan.bookId, plan.goal.chips.book);
     else if (plan.kind === 'review-run') renderBookReview(plan.bookId, plan.goal.chips.book, { reviewRunId: plan.ref, findingId: null });
-    else if (plan.kind === 'initial-evaluation' || plan.kind === 'readers-report') renderBookEvaluation(plan.bookId, plan.goal.chips.book);
+    else if (plan.kind === 'initial-evaluation' || plan.kind === 'readers-report' || plan.kind === 'evaluation-rewrite') renderBookEvaluation(plan.bookId, plan.goal.chips.book);
     else renderBookOverview(await window.ai7.getBookOverview({ bookId: plan.bookId, historyCursor: null }));
   } catch (error) {
     setStatus(rendererErrorMessage(error, '无法打开运行所在的页面。'), 'error');
@@ -2319,6 +2319,8 @@ function renderBookEvaluation(bookId: string, bookTitle: string): void {
     // 审稿意见 (Issue #429, S81c): its plan in the drawer likewise, and its draft on the manuscript surface as 交付物 opens one.
     bookId,
     openReadersReportPlan: (ref) => openTaskPlan(bookId, 'readers-report', ref),
+    // 按我的评分重写评语 (Issue #429, S81b2): its plan in the drawer likewise.
+    openRewritePlan: (ref) => openTaskPlan(bookId, 'evaluation-rewrite', ref),
     openDraft: async (draft) => {
       const opened = await window.ai7.getManuscriptWindow({ manuscriptId: draft.document.documentId, branchId: draft.document.branchId, cursor: null });
       renderEditorWindow(opened, bookTitle, undefined, undefined, undefined, undefined, { typeId: draft.typeId, typeLabel: draft.typeLabel, document: draft.document });
@@ -2348,7 +2350,7 @@ function renderBookEvaluation(bookId: string, bookTitle: string): void {
   actions.append(openManuscript, openOverview);
   content.append(actions);
   replaceScreen('book-evaluation', content);
-  taskSurfaceRefresh = { 'initial-evaluation': () => surface.refresh(), 'readers-report': () => surface.refresh() };
+  taskSurfaceRefresh = { 'initial-evaluation': () => surface.refresh(), 'readers-report': () => surface.refresh(), 'evaluation-rewrite': () => surface.refresh() };
   setStatus(EVALUATION_STATUS.loading, 'busy');
   void surface.load().then(
     () => {
@@ -6859,7 +6861,8 @@ async function awaitServiceJob(
   const requireMonotonicReimportProgress = (next: ServiceJobProjection): void => {
     if (next.kind !== 'reimport-preparation' && next.kind !== 'reimport-resolution' && next.kind !== 'reimport-commit' &&
         next.kind !== 'task-authorization-preparation' && next.kind !== 'baseline-analysis-preparation' &&
-        next.kind !== 'review-run-preparation' && next.kind !== 'initial-evaluation-preparation' && next.kind !== 'readers-report-preparation') return;
+        next.kind !== 'review-run-preparation' && next.kind !== 'initial-evaluation-preparation' && next.kind !== 'readers-report-preparation' &&
+        next.kind !== 'evaluation-rewrite-preparation') return;
     if (!Number.isSafeInteger(next.progress.completed) || !Number.isSafeInteger(next.progress.total) ||
       next.progress.completed < previousReimportProgress || next.progress.completed > next.progress.total ||
       next.progress.total <= 0 ||

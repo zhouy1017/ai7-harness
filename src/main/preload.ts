@@ -308,6 +308,12 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['authorizeReadersReport']['output']>(IPC_CHANNELS.authorizeReadersReport, input),
   createReadersReportDraft: (input: Omit<ServiceOperationMap['createReadersReportDraft']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['createReadersReportDraft']['output']>(IPC_CHANNELS.createReadersReportDraft, input),
+  prepareEvaluationRewrite: (input: Omit<ServiceOperationMap['prepareEvaluationRewrite']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['prepareEvaluationRewrite']['output']>(IPC_CHANNELS.prepareEvaluationRewrite, input),
+  authorizeEvaluationRewrite: (input: Omit<ServiceOperationMap['authorizeEvaluationRewrite']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['authorizeEvaluationRewrite']['output']>(IPC_CHANNELS.authorizeEvaluationRewrite, input),
+  decideEvaluationRewrite: (input: Omit<ServiceOperationMap['decideEvaluationRewrite']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['decideEvaluationRewrite']['output']>(IPC_CHANNELS.decideEvaluationRewrite, input),
   inspectAnalysisFeedback: (input: { revisionId: string }) =>
     invoke<ServiceOperationMap['inspectAnalysisFeedback']['output']>(IPC_CHANNELS.inspectAnalysisFeedback, input),
   recordAnalysisFeedback: (input: Omit<ServiceOperationMap['recordAnalysisFeedback']['input'], 'bookId'>) =>

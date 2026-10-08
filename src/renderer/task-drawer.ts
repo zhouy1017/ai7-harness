@@ -194,6 +194,7 @@ type DrawerApi = Pick<
   | 'authorizeReviewRun'
   | 'authorizeInitialEvaluation'
   | 'authorizeReadersReport'
+  | 'authorizeEvaluationRewrite'
   | 'prepareBaselineAnalysis'
   | 'startBaselineAnalysisWhenOnline'
   | 'cancelWaitingBaselineAnalysis'
@@ -1514,6 +1515,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         else if (current.kind === 'initial-evaluation') queued = (await api.authorizeInitialEvaluation({ taskIntentId: current.ref, planEnvelopeDigest })).initial.task?.state === 'queued';
         // 审稿意见 (Issue #429, S81c) likewise.
         else if (current.kind === 'readers-report') queued = (await api.authorizeReadersReport({ taskIntentId: current.ref, planEnvelopeDigest })).readersReport.task?.state === 'queued';
+        // 按我的评分重写评语 (Issue #429, S81b2) likewise.
+        else if (current.kind === 'evaluation-rewrite') queued = (await api.authorizeEvaluationRewrite({ taskIntentId: current.ref, planEnvelopeDigest })).rewrite.task?.state === 'queued';
         else queued = (await api.authorizeBaselineAnalysis({ taskIntentId: current.ref, planEnvelopeDigest })).state === 'queued';
       }
       // The status line names the event, never a state the Run will leave (V2-UX-LIVE-004): the bar shows the state. A

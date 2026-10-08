@@ -777,6 +777,21 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (!validUuid(input.bookId) || !validUuid(input.revisionId)) throw new ProtocolError(tentativeId);
       break;
     }
+    // 按我的评分重写评语 (Issue #429, S81b2): one version of the route's Book; its saved entry is the service's to read.
+    case 'prepareEvaluationRewrite': {
+      const input = requireInput(value.input, ['bookId', 'recordId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.recordId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 采用 or 放弃: one rewritten result of the route's Book, and the editor's decision.
+    case 'decideEvaluationRewrite': {
+      const input = requireInput(value.input, ['bookId', 'revisionId', 'decision'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.revisionId) || (input.decision !== 'accept' && input.decision !== 'discard')) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'authorizeEvaluationRewrite':
     case 'authorizeReadersReport':
     case 'authorizeInitialEvaluation': {
       const input = requireInput(value.input, ['bookId', 'taskIntentId', 'planEnvelopeDigest'], tentativeId);

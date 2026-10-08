@@ -111,7 +111,7 @@ interface ManuscriptCapability {
 interface EditorResourceCapability {
   kind: 'job' | 'search' | 'preview';
   operation: 'search' | 'replacement' | 'reimport' | 'task-authorization' | 'baseline-analysis' | 'review-run' | 'initial-evaluation' |
-    'readers-report';
+    'readers-report' | 'evaluation-rewrite';
   bookId: string;
   manuscriptId: string | null;
   branchId: string | null;
@@ -713,7 +713,9 @@ function registerRendererHandlers(
                 ? 'initial-evaluation'
                 : job.kind === 'readers-report-preparation'
                   ? 'readers-report'
-                  : 'reimport';
+                  : job.kind === 'evaluation-rewrite-preparation'
+                    ? 'evaluation-rewrite'
+                    : 'reimport';
   const resourceSeed = (
     capability: ManuscriptCapability | EditorResourceCapability,
     operation: EditorResourceCapability['operation'] = 'operation' in capability ? capability.operation : 'search',
@@ -784,8 +786,9 @@ function registerRendererHandlers(
         throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', '审阅计划准备结果不属于当前图书工作台。');
       }
     } else if (result !== null && 'recordCount' in result && 'initial' in result) {
-      // 评估 answers both AI7 初评's preparation and 审稿意见's (Issue #429, S81c).
-      if ((actualOperation !== 'initial-evaluation' && actualOperation !== 'readers-report') || result.bookId !== capability.bookId) {
+      // 评估 answers AI7 初评's preparation, 审稿意见's (Issue #429, S81c) and 按我的评分重写评语's (S81b2).
+      if ((actualOperation !== 'initial-evaluation' && actualOperation !== 'readers-report' && actualOperation !== 'evaluation-rewrite') ||
+          result.bookId !== capability.bookId) {
         throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', 'AI7 初评准备结果不属于当前图书工作台。');
       }
     } else if (result !== null && 'taskIntent' in result) {
@@ -3047,6 +3050,66 @@ function registerRendererHandlers(
           taskIntentId: input.taskIntentId,
           planEnvelopeDigest: input.planEnvelopeDigest,
         });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '评估不属于当前图书工作台。');
+        return result;
+      });
+    }),
+  );
+  // 按我的评分重写评语 (Issue #429, S81b2): asked of one version, started and decided within the route's Book, as 审稿意见 is; the
+  // renderer names a version, a Task or a rewritten result, never the Book, and every answer must be that Book's.
+  ipcMain.handle(IPC_CHANNELS.prepareEvaluationRewrite, (event, input: Parameters<RendererApi['prepareEvaluationRewrite']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object' && typeof input.recordId === 'string', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const result = await service.call('prepareEvaluationRewrite', { bookId: route.bookId, recordId: input.recordId });
+        const prepared = result.result;
+        if (result.kind !== 'evaluation-rewrite-preparation' ||
+            (prepared !== null && !('recordCount' in prepared && 'initial' in prepared && prepared.bookId === route.bookId))) {
+          throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '评语重写准备结果类型无效或不属于当前图书工作台。');
+        }
+        rememberEditorResource(owned, 'job', result.jobId, {
+          operation: 'evaluation-rewrite',
+          bookId: route.bookId,
+          manuscriptId: null,
+          branchId: null,
+        });
+        return result;
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.authorizeEvaluationRewrite, (event, input: Parameters<RendererApi['authorizeEvaluationRewrite']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const result = await service.call('authorizeEvaluationRewrite', {
+          bookId: route.bookId,
+          taskIntentId: input.taskIntentId,
+          planEnvelopeDigest: input.planEnvelopeDigest,
+        });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '评估不属于当前图书工作台。');
+        return result;
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.decideEvaluationRewrite, (event, input: Parameters<RendererApi['decideEvaluationRewrite']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object' && typeof input.revisionId === 'string' &&
+        (input.decision === 'accept' || input.decision === 'discard'), 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const result = await service.call('decideEvaluationRewrite', { bookId: route.bookId, revisionId: input.revisionId, decision: input.decision });
         requireCurrentRouteGeneration(owned, routeGeneration);
         if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '评估不属于当前图书工作台。');
         return result;
