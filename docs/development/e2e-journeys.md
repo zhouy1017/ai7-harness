@@ -185,7 +185,7 @@ J-16 review repairs (#562): 在分析中打开 carries the selected completed Ta
 
 ## J-13 书系: Series membership
 
-J-13 covers two slices of Issue #63: S28a, Series membership, and S28b, Series Knowledge, and the first slice of Issue #64: S29a, 书系一致性 over that knowledge. Series-scope pins and retrieval exclusions come with S29b.
+J-13 covers two slices of Issue #63: S28a, Series membership, and S28b, Series Knowledge, and Issue #64: S29a, 书系一致性 over that knowledge, and S29b, Series Retrieval Exclusions over what that review reads. Series-scope Tasks beyond 书系一致性 and any Cross-project source do not exist yet.
 
 The `knowledge-bounded-pages` stage also preserves 51 conflicts on a revision, adds a later revision, and reads the older revision through repeated 50 → 1 → 50 conflict pages with exact-revision labeling and keyboard focus. The service regression preserves 2,500 conflicts and verifies bounded responses, complete page traversal, cross-Series refusal and restart reads.
 
@@ -267,11 +267,28 @@ It answers `书系知识已更新`, and the item reads `第 2 版`, in the edito
 
 **The member column.** Back on the Series page, the row reads `审阅于 … · 可以审阅`.
 
+### 书系检索排除 (S29b)
+
+Every launch since S29b also names `--j10-unit-hold-path`, a file in the run root that is absent until this section writes it, so every earlier stage runs as before.
+
+**A Run reading now.** With the hold at `0`, a second 书系一致性 Run over 全书 is prepared (第 2 次) and started from the drawer; its first reading range comes back and waits, in flight, while the category reads 正在审阅 (`exclusion-held-run`).
+
+**The impact preview.** On the Series page, `书系检索排除` has nothing in force. `添加检索排除…` → 书系知识条目 → 「海边小城」 with the reason `地名写法待与第一部核对` → `查看影响` opens `书系检索排除影响预览`: 对象 `书系知识条目「海边小城」（地点）`, 范围 `只限书系「星河三部曲」的书系检索`, 生效时间 `记录后立即生效`, 持续范围 `这个条目现在和以后的修订版都一并排除。`, the reason, and 操作人 `本机编辑`; then 今后的检索, 已排队、已授权或正在运行的任务 — naming 《星河之三》第 2 次审阅 as stopping before its next read with `书系检索范围已变化 · 需要重新确认计划` — 已完成的历史 — naming 第 1 次审阅 as about to be marked `此结果使用的材料后来被排除` — and 不受影响的授权. Nothing is recorded by the preview (`exclusion-preview`).
+
+**In force.** `添加检索排除` lists the exclusion with its reason and one revision, and the member row reads `… · 暂不能审阅：书系「星河三部曲」可用于一致性审阅的书系知识都已排除在书系检索之外；停止排除或纳入其他书系知识后才能选。` (`exclusion-recorded`).
+
+**The guard.** The hold is released. Before its next range the Run stops: 第 2 次 reads `书系检索范围已变化 · 需要重新确认计划`, its category too, with no finding written; `继续审阅` is absent and the only actions are `修改计划并重新授权` and `取消任务` (`exclusion-held-run-stopped`). `修改计划并重新授权` opens 新建审阅 with the Run's choices, where 书系一致性 cannot be chosen and says why — the plan leaves the excluded item out, and it was the only one (`exclusion-plan-leaves-out`).
+
+**The marker.** 第 1 次, settled before the exclusion, is unchanged and reads `此结果使用的材料后来被排除` beside the Run, its report, each of its three findings and its line in 审阅记录 (`exclusion-marker`).
+
+**Ending it.** `停止此排除…` previews that the stopped Run is not resumed and its authorization not restored; `停止此排除` leaves nothing in force and two revisions, and the member row reads `… · 可以审阅` again — yet 第 2 次 still reads `书系检索范围已变化 · 需要重新确认计划` (`exclusion-ended`). Its `取消任务`, confirmed inline, makes it `已取消` with nothing more to do, and 第 1 次 keeps its marker (`exclusion-cancel`).
+
 Not proven here:
 - Learning Material counted in the preview, proven over the real store in `tests/service/series.test.ts` and by the unit suites;
 - 书系一致性's other reasons — no Series, more knowledge than one review carries, no manuscript — the exact pins a Run freezes, an approval refused once the knowledge or the Book's Series moved, a frozen Run that a later revision leaves alone, and the refusal under developer-live, proven over the real store in `tests/service/series-consistency.test.ts` and by the unit suite; J-04 still sees the category unavailable for its Book in no Series;
 - a review the knowledge moved past, and a candidate from a Book that left the Series, both proven over the real store in `tests/service/series-knowledge.test.ts`;
-- the knowledge lists' further pages, `查找条目`, `提议修改…` and the opening of `历次版本`, and a passage cited while changes waited in the journal (Issue #63 review), proven over the real store and by the unit suites; J-13's lists fit their first pages.
+- the knowledge lists' further pages, `查找条目`, `提议修改…` and the opening of `历次版本`, and a passage cited while changes waited in the journal (Issue #63 review), proven over the real store and by the unit suites; J-13's lists fit their first pages;
+- exclusions by knowledge class, by member Book (the knowledge taken from its manuscript) and of a Source Version, which no Series read reaches yet, `修改检索排除`, the targets' pages, a stale exclusion preview refused, the ledger's refusal to be rewritten and a record that no longer reads, proven over the real store in `tests/service/series-exclusions.test.ts`; an approved Run stopped as the exclusion is recorded, an approval refused in the exclusion's words, and the guard at a Run's turn, in `tests/service/series-exclusion-runs.test.ts`.
 
 J-14 has no runner of its own. Its keyboard, IME, focus, 200% reflow, and forced-colors obligations are asserted inside the Journeys above where they apply; the Mark surface's are J-05's `j14-marks-*` and `marks-keyboard-menu-*` stages, 稿件冲突's are J-06's `j14-conflict-keyboard`, `j14-conflict-zoom-200-reflow` and `j14-conflict-forced-colors`, 交付物's are J-07's `j14-designate-keyboard`, `j14-deliverables-zoom-200-reflow` and `j14-deliverables-forced-colors`, with the export card's `j14-export-keyboard`, `j14-export-zoom-200-reflow` and `j14-export-forced-colors`, 待我处理's are J-09's `j14-attention-keyboard`, `j14-attention-zoom-200-reflow` and `j14-attention-forced-colors`, `等待运行名额`'s is J-09's `j14-queued-forced-colors`, 取消任务's are J-10's `j14-cancel-keyboard` and `j14-cancelling-forced-colors`, 改计划重做's is J-10's `j14-redo-keyboard`, the question card's is J-10's `j14-clarification-keyboard`, `设置上限…`'s is J-10's `j14-budget-keyboard`, the editable plan's is J-04's `j14-plan-edit-keyboard`, 人员's are J-11's `j14-people-keyboard`, `j14-people-zoom-200-reflow` and `j14-people-forced-colors`, 评估's is J-11's `j14-evaluation-reflow-forced-colors`, 分析反馈's are J-11's `j14-feedback-keyboard` and `j14-feedback-reflow-forced-colors`, a decision's reason row's is J-11's `j14-decision-feedback-keyboard`, 学习准入's are J-11's `j14-learning-keyboard` and `j14-learning-reflow-forced-colors`, 知识库's are J-15's `j14-knowledge-keyboard` and `j14-knowledge-reflow-forced-colors`, with 资料库's `j14-library-reflow-forced-colors`, the 任务 panel's are J-16's `j14-panel-keyboard`, `j14-panel-zoom-200-reflow` and `j14-panel-forced-colors`, 书系's are J-13's `j14-series-keyboard` and `j14-series-reflow-forced-colors`, with 书系知识's `j14-knowledge-keyboard`, and the Task Drawer's are J-03's `drawer-keyboard`, `drawer-push-overlay` and `drawer-reflow-forced-colors`.
 
