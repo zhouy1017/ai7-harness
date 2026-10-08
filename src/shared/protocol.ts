@@ -80,6 +80,17 @@ export const IPC_CHANNELS = {
   importReviewGuidelineVersion: 'ai7:j15:import-review-guideline-version',
   inspectExemplars: 'ai7:j07:inspect-exemplars',
   inspectKnowledgeProcedures: 'ai7:j15:inspect-knowledge-procedures',
+  inspectCapturedProcedures: 'ai7:j15:inspect-captured-procedures',
+  inspectCapturedProcedure: 'ai7:j15:inspect-captured-procedure',
+  inspectDeveloperProposal: 'ai7:j15:inspect-developer-proposal',
+  inspectProcedureCapture: 'ai7:j15:inspect-procedure-capture',
+  saveCapturedProcedure: 'ai7:j15:save-captured-procedure',
+  previewCapturedProcedureValidation: 'ai7:j15:preview-captured-procedure-validation',
+  enableCapturedProcedure: 'ai7:j15:enable-captured-procedure',
+  stopCapturedProcedure: 'ai7:j15:stop-captured-procedure',
+  inspectCapturedProcedureRun: 'ai7:j15:inspect-captured-procedure-run',
+  saveDeveloperProposal: 'ai7:j15:save-developer-proposal',
+  saveDeveloperProposalFile: 'ai7:j15:save-developer-proposal-file',
   inspectLibraryMaterials: 'ai7:j15:inspect-library-materials',
   previewLibraryMaterial: 'ai7:j15:preview-library-material',
   addLibraryMaterial: 'ai7:j15:add-library-material',
@@ -91,6 +102,9 @@ export const IPC_CHANNELS = {
   saveEvaluation: 'ai7:j11:save-evaluation',
   prepareInitialEvaluation: 'ai7:j11:prepare-initial-evaluation',
   authorizeInitialEvaluation: 'ai7:j11:authorize-initial-evaluation',
+  prepareReadersReport: 'ai7:j11:prepare-readers-report',
+  authorizeReadersReport: 'ai7:j11:authorize-readers-report',
+  createReadersReportDraft: 'ai7:j11:create-readers-report-draft',
   inspectAnalysisFeedback: 'ai7:j11:inspect-analysis-feedback',
   recordAnalysisFeedback: 'ai7:j11:record-analysis-feedback',
   readLibraryDecisionReason: 'ai7:j15:read-library-decision-reason',
@@ -2456,6 +2470,9 @@ export const FACTUAL_REVIEW_ASSURANCE_STATEMENT =
 /** A review category's: findings are located, never decided — the editor disposes of each (V2-UX-REV-003). */
 export const REVIEW_CATEGORY_ASSURANCE_STATEMENT =
   '仅为模型按审阅依据列出的发现与其精确引文位置；是否采纳由编辑逐条决定，不构成事实判定、合规结论或稿件变更。' as const;
+/** 审稿意见 (Issue #429, S81c): a draft from the record and what was read, never a delivery (V2-UX-EVAL-013). */
+export const READERS_REPORT_ASSURANCE_STATEMENT =
+  '审稿意见是模型依据定稿的评估记录与所读稿件写成的草稿，由编辑在稿件编辑面上修改；它不会交付或发送，也不改变评估记录。' as const;
 /** AI7's 初评 (Issue #429, S81b1): scores to score against, never the editor's — the record keeps theirs (V2-UX-EVAL-006). */
 export const INITIAL_EVALUATION_ASSURANCE_STATEMENT =
   'AI7 初评是模型据所读稿件给出的初步分数与评语，只作编辑打分的参考；记录保存的是编辑的评分，结论由编辑选定。' as const;
@@ -2463,7 +2480,8 @@ export type AnalysisAssuranceStatement =
   | typeof BASELINE_ANALYSIS_ASSURANCE_STATEMENT
   | typeof FACTUAL_REVIEW_ASSURANCE_STATEMENT
   | typeof REVIEW_CATEGORY_ASSURANCE_STATEMENT
-  | typeof INITIAL_EVALUATION_ASSURANCE_STATEMENT;
+  | typeof INITIAL_EVALUATION_ASSURANCE_STATEMENT
+  | typeof READERS_REPORT_ASSURANCE_STATEMENT;
 
 export const BASELINE_ANALYSIS_KIND = 'baseline-manuscript-analysis' as const;
 export const BASELINE_ANALYSIS_CONTRACT_VERSION = 'ai7.baseline-manuscript-analysis/1' as const;
@@ -2557,6 +2575,60 @@ export const INITIAL_EVALUATION_MODE_MEANINGS = {
 } as const satisfies Record<InitialEvaluationTaskMode, string>;
 
 /**
+ * 审稿意见 (Issue #429, plan slice S81c; V2-UX-EVAL-013; editor-surfaces §5): the reader's report kind, on the same real path
+ * as the others, read under its own exact-versioned contract `ai7.readers-report/1`. It is drafted from one finalized
+ * Evaluation Record under one of the two V1 templates: each Analysis Unit is read for the passages the report can point to —
+ * what bears out a strength, shows a problem, or where a revision applies — each citing its blocks; one book-level synthesis
+ * then writes the five sections from the record and those passages. The draft is an Editorial Artifact the editor edits;
+ * nothing of it is delivered or sent.
+ */
+export const READERS_REPORT_KIND = 'readers-report' as const;
+export const READERS_REPORT_CONTRACT_VERSION = 'ai7.readers-report/1' as const;
+export const READERS_REPORT_EXPECTED_OUTCOME = '审稿意见草稿结果集修订版（审稿意见契约 v1）' as const;
+/** The first draft of a Book's 审稿意见, and every later one: the whole manuscript read again, nothing carried over. */
+export type ReadersReportTaskMode = 'readers-report-first' | 'readers-report-again';
+export const READERS_REPORT_TASK_MODES: readonly ReadersReportTaskMode[] = ['readers-report-first', 'readers-report-again'];
+export const READERS_REPORT_UPDATE_MODES: readonly ReadersReportTaskMode[] = ['readers-report-again'];
+export const READERS_REPORT_MODE_GOALS = {
+  'readers-report-first': '从定稿的评估记录起草审稿意见：逐单元找出可以引用的段落并引用内容块，再按所选模板写出总体评价、主要优点、主要问题、修改建议与结论，形成结果集修订版。',
+  'readers-report-again': '重新起草审稿意见：按当前覆盖清单重读每个分析单元，不沿用以前的结果，按所选模板重新写出五个部分，追加一个结果集修订版。',
+} as const satisfies Record<ReadersReportTaskMode, string>;
+export type ReadersReportGoal = (typeof READERS_REPORT_MODE_GOALS)[ReadersReportTaskMode];
+export const READERS_REPORT_MODE_LABELS = {
+  'readers-report-first': '起草审稿意见',
+  'readers-report-again': '重新起草审稿意见',
+} as const satisfies Record<ReadersReportTaskMode, string>;
+export const READERS_REPORT_MODE_MEANINGS = {
+  'readers-report-first': '对固定的任务输入修订版派生覆盖清单并逐单元执行审稿意见契约 v1，再做一次全书综合，形成首个结果集修订版。',
+  'readers-report-again': '绕过全部既有单元结果，按当前覆盖清单重读每个分析单元并重新做全书综合，追加一个结果集修订版。',
+} as const satisfies Record<ReadersReportTaskMode, string>;
+/** The two V1 templates (EVAL-013): for the author, or for the editorial board and its topic meeting. */
+export type ReadersReportTemplate = 'author' | 'editorial';
+export const READERS_REPORT_TEMPLATES: readonly ReadersReportTemplate[] = ['author', 'editorial'];
+export const READERS_REPORT_TEMPLATE_LABELS: Readonly<Record<ReadersReportTemplate, string>> = {
+  author: '给作者的修改意见',
+  editorial: '给编辑部 / 选题会的审读报告',
+};
+/** The five sections every 审稿意见 is structured in (EVAL-013), in their order. */
+export type ReadersReportSectionId = 'overall' | 'strengths' | 'problems' | 'suggestions' | 'conclusion';
+export const READERS_REPORT_SECTIONS: readonly ReadersReportSectionId[] = ['overall', 'strengths', 'problems', 'suggestions', 'conclusion'];
+export const READERS_REPORT_SECTION_LABELS: Readonly<Record<ReadersReportSectionId, string>> = {
+  overall: '总体评价',
+  strengths: '主要优点',
+  problems: '主要问题',
+  suggestions: '修改建议',
+  conclusion: '结论',
+};
+/**
+ * What the plan says when the house holds no 审稿意见 among its 范例 (the Owner's answer of 2026-10-07): the draft is written
+ * without one, and the plan says so.
+ */
+export const READERS_REPORT_NO_EXEMPLAR = '本社暂无审稿意见范例，本次不参考范例' as const;
+/** Under a live scope no Provider Processing policy names 审稿意见 yet: nothing is prepared or started there. */
+export const READERS_REPORT_LIVE_UNAVAILABLE =
+  '审稿意见暂不可用：当前的模型处理策略没有写明审稿意见可以发送给模型，在这个运行范围下不能准备或开始起草。' as const;
+
+/**
  * The review-category kind family (Issue #417, plan slice S69): one analysis kind per Review Category,
  * `editorial-review/<categoryId>`, all read under the one exact-versioned contract
  * `ai7.editorial-review/1`. The categories themselves are configuration (V2-UX-REV-002: a house may
@@ -2645,9 +2717,10 @@ export function reviewCategoryExpectedOutcome(label: string): string {
 }
 
 /** Every analysis kind a Book may hold, and every Task mode any of them declares. */
-export type AnalysisKindId = typeof BASELINE_ANALYSIS_KIND | typeof FACTUAL_REVIEW_KIND | ReviewCategoryKindId | typeof INITIAL_EVALUATION_KIND;
-export type AnalysisTaskMode = BaselineAnalysisTaskMode | FactualReviewTaskMode | ReviewCategoryTaskMode | InitialEvaluationTaskMode;
-export type AnalysisGoal = BaselineAnalysisGoal | FactualReviewGoal | ReviewCategoryGoal | InitialEvaluationGoal;
+export type AnalysisKindId = typeof BASELINE_ANALYSIS_KIND | typeof FACTUAL_REVIEW_KIND | ReviewCategoryKindId | typeof INITIAL_EVALUATION_KIND |
+  typeof READERS_REPORT_KIND;
+export type AnalysisTaskMode = BaselineAnalysisTaskMode | FactualReviewTaskMode | ReviewCategoryTaskMode | InitialEvaluationTaskMode | ReadersReportTaskMode;
+export type AnalysisGoal = BaselineAnalysisGoal | FactualReviewGoal | ReviewCategoryGoal | InitialEvaluationGoal | ReadersReportGoal;
 
 /** An explicit editor choice over exact block positions of the Task Input revision (inclusive). */
 export interface BaselineAnalysisSelectedRange {
@@ -4003,6 +4076,120 @@ export interface InitialEvaluationProjection extends Omit<
   inspectedRevision: null | { revision: InitialEvaluationResultSetRevisionProjection; current: boolean; readOnly: true };
 }
 
+// ---- 审稿意见 (Issue #429, plan slice S81c; V2-UX-EVAL-013) ------------------------------------------------------------
+
+/** What a passage the report can point to bears out: a strength, a problem, or where a revision applies. */
+export type ReadersReportPassageKind = 'strength' | 'problem' | 'suggestion';
+export const READERS_REPORT_PASSAGE_KINDS: readonly ReadersReportPassageKind[] = ['strength', 'problem', 'suggestion'];
+
+/** One passage AI7 noted in one reading range for the report, with the blocks it rests on. */
+export interface ReadersReportPassageProjection {
+  unitOrdinal: number;
+  kind: ReadersReportPassageKind;
+  note: string;
+  blockIds: ReadonlyArray<string>;
+}
+
+/** The five sections as the book-level synthesis wrote them: two paragraphs and three lists. */
+export interface ReadersReportSectionsProjection {
+  overall: string;
+  strengths: ReadonlyArray<string>;
+  problems: ReadonlyArray<string>;
+  suggestions: ReadonlyArray<string>;
+  conclusion: string;
+}
+
+/** The reader's report kind's own component of a Result Set Revision. */
+export interface ReadersReportResultProjection {
+  template: ReadersReportTemplate;
+  /** The house's 审稿意见 the draft was seeded with, and what the plan said of them. */
+  exemplars: { count: number; statement: string };
+  passages: ReadonlyArray<ReadersReportPassageProjection>;
+  /** `null` when the book-level synthesis did not close: AI7 then wrote no draft. */
+  sections: ReadersReportSectionsProjection | null;
+  synthesis: { state: 'closed' | 'gap' | 'not-run'; reason: string | null };
+}
+
+export interface ReadersReportRevisionUpdateProjection extends Omit<ReviewCategoryRevisionUpdateProjection, 'mode'> {
+  mode: ReadersReportTaskMode;
+}
+
+export type ReadersReportUnitProjection =
+  | {
+      unitOrdinal: number;
+      state: 'closed';
+      requestDigest: string;
+      responseDigest: string;
+      usage: { inputTokens: number; outputTokens: number } | null;
+      lineage: ReviewCategoryUnitLineage;
+      passages: ReadonlyArray<{ kind: ReadersReportPassageKind; note: string; blockOrdinals: ReadonlyArray<number> }>;
+    }
+  | { unitOrdinal: number; state: 'gap'; requestDigest: string; lineage: ReviewCategoryUnitLineage; gap: AnalysisGapProjection };
+
+export interface ReadersReportResultSetRevisionProjection extends Omit<
+  ReviewCategoryResultSetRevisionProjection,
+  'contractVersion' | 'update' | 'category' | 'findings' | 'excluded' | 'findingCounts' | 'units'
+> {
+  contractVersion: typeof READERS_REPORT_CONTRACT_VERSION;
+  update: ReadersReportRevisionUpdateProjection;
+  readersReport: ReadersReportResultProjection;
+  units: ReadonlyArray<ReadersReportUnitProjection>;
+}
+
+export interface ReadersReportUpdateProjection extends Omit<ReviewCategoryUpdateProjection, 'mode'> {
+  mode: 'readers-report-again';
+}
+
+export interface ReadersReportUpdateControlsProjection extends Omit<BaselineAnalysisUpdateControlsProjection, 'actions'> {
+  actions: { 'readers-report-again': Omit<ReviewCategoryUpdateActionProjection, 'mode'> & { mode: 'readers-report-again' } };
+}
+
+export interface ReadersReportHistoryEntryProjection extends Omit<BaselineAnalysisHistoryEntryProjection, 'mode' | 'contractVersion' | 'counts'> {
+  mode: ReadersReportTaskMode;
+  contractVersion: typeof READERS_REPORT_CONTRACT_VERSION;
+  counts: ReviewScopePlanCounts;
+}
+
+export interface ReadersReportHistoryProjection {
+  resultSetId: string;
+  kind: typeof READERS_REPORT_KIND;
+  createdAt: string;
+  latestOrdinal: number;
+  entries: ReadonlyArray<ReadersReportHistoryEntryProjection>;
+}
+
+/** The reader's report kind's Task projection: a member of the analysis projection union, discriminated on `kind`. */
+export interface ReadersReportProjection extends Omit<
+  BaselineAnalysisProjection,
+  'kind' | 'contractVersion' | 'taskIntent' | 'executionPlan' | 'resultSetRevision' | 'update' | 'updateControls' | 'history' | 'inspectedRevision'
+> {
+  kind: typeof READERS_REPORT_KIND;
+  contractVersion: typeof READERS_REPORT_CONTRACT_VERSION;
+  taskIntent: null | {
+    taskIntentId: string;
+    goal: ReadersReportGoal;
+    expectedOutcome: typeof READERS_REPORT_EXPECTED_OUTCOME;
+    createdAt: string;
+    mode: ReadersReportTaskMode;
+    modeLabel: string;
+  };
+  executionPlan: null | {
+    steps: ReadonlyArray<string>;
+    effects: readonly [];
+    unitCount: number;
+    recomputedUnitCount?: number;
+    reusedUnitCount?: number;
+    unreviewedUnitCount?: number;
+    reducerStages: readonly ['unit-validation', 'cross-unit-reduction', 'book-synthesis'];
+    stopCondition: string;
+  };
+  resultSetRevision: null | ReadersReportResultSetRevisionProjection;
+  update: null | ReadersReportUpdateProjection;
+  updateControls: null | ReadersReportUpdateControlsProjection;
+  history: null | ReadersReportHistoryProjection;
+  inspectedRevision: null | { revision: ReadersReportResultSetRevisionProjection; current: boolean; readOnly: true };
+}
+
 // ---- 审阅记录 Review Runs (Issue #417, plan slice S69) ---------------------------------------------
 
 /**
@@ -4338,6 +4525,10 @@ export interface ReviewRunProjection {
    * excluded afterwards. The Run, its findings and its reports are never rewritten; this says so beside them.
    */
   historicalMarker: null | { label: typeof HISTORICALLY_AFFECTED_RESULT_MARKER | typeof HISTORICAL_MARKER_UNVERIFIABLE; detail: string };
+  /** The Captured Procedure version the Run was prepared from, pinned (Issue #65, S30; ADR 0087 §4); `null` for one chosen by hand. */
+  procedure: ReviewRunProcedureProjection | null;
+  /** Whether `将以上工序保存为可复用工序` is offered on this Run, and why not (ADR 0087 §2). */
+  capture: ReviewAvailabilityProjection;
 }
 
 /**
@@ -4412,6 +4603,11 @@ export interface PrepareReviewRunInput {
   bookId: string;
   categoryIds: ReadonlyArray<string>;
   scope: ReviewRunScopeRequest;
+  /**
+   * The Captured Procedure version the sheet was pre-filled from (Issue #65, S30; ADR 0087 §4): exactly the version and digest
+   * `inspectCapturedProcedureRun` resolved. Left out, or `null`, for categories chosen by hand.
+   */
+  capturedProcedure?: { versionId: string; documentSha256: string } | null;
 }
 
 export interface AuthorizeReviewRunInput {
@@ -4481,8 +4677,8 @@ export interface ReviewFindingOfMarkProjection {
  * slice that brings its ledger; nothing here is an authority record of its own. AI7's 初评 (Issue #429, S81b1) joins them
  * with its own ledger.
  */
-export type TaskPlanKind = 'fixed-task' | 'baseline-analysis' | 'review-run' | 'initial-evaluation';
-export const TASK_PLAN_KINDS: readonly TaskPlanKind[] = ['fixed-task', 'baseline-analysis', 'review-run', 'initial-evaluation'];
+export type TaskPlanKind = 'fixed-task' | 'baseline-analysis' | 'review-run' | 'initial-evaluation' | 'readers-report';
+export const TASK_PLAN_KINDS: readonly TaskPlanKind[] = ['fixed-task', 'baseline-analysis', 'review-run', 'initial-evaluation', 'readers-report'];
 
 /** Which plan the drawer reads. The Book is always the route's; the renderer never names it. */
 export interface InspectTaskPlanInput {
@@ -5131,6 +5327,329 @@ export interface KnowledgeProceduresProjection {
   readonly artifacts: ReadonlyArray<KnowledgeArtifactProjection>;
 }
 
+// ---- 可复用工序 (Issue #65, plan slice S30; ADR 0087; V2-UX-REUSE-001 to 020, 029 to 031, 038 to 054, 063 to 066, KB-010) --
+
+/** The one schema a Captured Procedure version's document is written in (ADR 0087 §1). */
+export const CAPTURED_PROCEDURE_SCHEMA = 'ai7.captured-procedure/1' as const;
+/** The one parameter slot a Captured Procedure carries: the review scope kind. The chapters are chosen at each run. */
+export type CapturedProcedureScopeSlot = 'whole' | 'chapters';
+export const CAPTURED_PROCEDURE_SCOPE_SLOTS: readonly CapturedProcedureScopeSlot[] = ['whole', 'chapters'];
+export const CAPTURED_PROCEDURE_SCOPE_LABELS = {
+  whole: '全书',
+  chapters: '选定章节',
+} as const satisfies Record<CapturedProcedureScopeSlot, string>;
+/** The editor's title of a Captured Procedure: a label, never given to a model — in graphemes, and in UTF-16 code units. */
+export const MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES = 60;
+export const MAX_CAPTURED_PROCEDURE_TITLE_CHARACTERS = 240;
+/**
+ * What one answer of 工序与规则 carries (Issue #65 review): the newest procedures and proposals as summaries; one procedure's or
+ * proposal's versions a page at a time, newest first, each page also held to a byte budget so it always fits one frame; each
+ * version naming its newest Runs or files and how many there are.
+ */
+export const MAX_CAPTURED_PROCEDURES_SHOWN = 50;
+export const MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE = 5;
+export const MAX_DEVELOPER_PROPOSAL_VERSIONS_PAGE = 3;
+export const MAX_CAPTURED_PROCEDURE_RUNS_SHOWN = 10;
+export const MAX_DEVELOPER_PROPOSAL_FILES_SHOWN = 10;
+
+/** A version's state (KB-010): 待验证 until `验证并启用…` succeeds, 已启用 after, 已停用 for good once stopped (ADR 0087 §3, §5). */
+export type CapturedProcedureState = 'pending-validation' | 'enabled' | 'stopped';
+export const CAPTURED_PROCEDURE_STATE_LABELS = {
+  'pending-validation': '待验证',
+  enabled: '已启用',
+  stopped: '已停用',
+} as const satisfies Record<CapturedProcedureState, string>;
+
+/** One step of a Captured Procedure: a review category AI7 already executes, at the 工序 version the source Run used. */
+export interface CapturedProcedureStepDocument {
+  readonly categoryId: string;
+  readonly procedure: { readonly procedureId: string; readonly version: string };
+  readonly output: ReviewCategoryOutputKind;
+  readonly model: boolean;
+  readonly searchEngine: boolean;
+}
+
+/**
+ * One Captured Procedure version's document, exactly its keys (ADR 0087 §1): the editor's title, `runAs`, the ordered steps,
+ * the scope slot and the Authority Ceiling. It names no Book, chapter, Series, manuscript text, finding, decision,
+ * authorization, receipt, plan digest, Provider, route or model, and no guideline clause or version.
+ */
+export interface CapturedProcedureDocument {
+  readonly schema: typeof CAPTURED_PROCEDURE_SCHEMA;
+  readonly title: string;
+  readonly runAs: 'review-run';
+  readonly steps: ReadonlyArray<CapturedProcedureStepDocument>;
+  readonly parameters: { readonly scope: CapturedProcedureScopeSlot };
+  /**
+   * The most a Run prepared from it may do (ADR 0087 §4): its steps with their executors, the output kinds, whether any step
+   * calls a model or a search engine, and the current-Book Run Source Scope.
+   */
+  readonly authorityCeiling: {
+    readonly runSourceScope: 'current-book';
+    readonly steps: ReadonlyArray<{ readonly categoryId: string; readonly executor: string }>;
+    readonly outputs: ReadonlyArray<ReviewCategoryOutputKind>;
+    readonly model: boolean;
+    readonly searchEngine: boolean;
+  };
+}
+
+/** One category of a finished Review Run as the capture's source set offers it (REUSE-011, REUSE-012, REUSE-019). */
+export interface ProcedureCaptureStepProjection {
+  readonly categoryId: string;
+  readonly label: string;
+  readonly procedureTitle: string;
+  readonly procedureVersion: string;
+  readonly output: ReviewCategoryOutputKind;
+  readonly model: boolean;
+  readonly searchEngine: boolean;
+  /** Whether the step may be kept: the source Run settled it, and its 工序 is still the current, available one. */
+  readonly eligible: boolean;
+  /** Why it is left out when it may not be kept; `null` when it may. */
+  readonly excludedReason: string | null;
+}
+
+/** The kinds a capture could create; in this version only a Captured Procedure or a Developer Capability Proposal is open. */
+export type ProcedureCaptureResultKind = 'captured-procedure' | 'developer-proposal' | 'skill-draft' | 'workflow-draft' | 'default-rule';
+
+/**
+ * `将以上工序保存为可复用工序` on one finished Review Run (ADR 0087 §2): its source set, what extraction would keep, and the
+ * deterministic classification. A read: nothing is created.
+ */
+export interface ProcedureCaptureProjection {
+  readonly bookId: string;
+  readonly reviewRunId: string;
+  readonly runLabel: string;
+  readonly available: boolean;
+  readonly unavailableReason: string | null;
+  /** Every category of the source Run, in the configuration's order, which a Captured Procedure keeps. */
+  readonly steps: ReadonlyArray<ProcedureCaptureStepProjection>;
+  /** The scope slot the source Run suggests: 全书 for a whole-book review, otherwise 选定章节. */
+  readonly scopeSlot: CapturedProcedureScopeSlot;
+  readonly sourceScopeLabel: string;
+  /** The deterministic, provider-free classification (REUSE-002 to REUSE-009): the recommended type, and the others with why. */
+  readonly classification: {
+    readonly recommended: 'captured-procedure';
+    readonly alternatives: ReadonlyArray<{ readonly kind: Exclude<ProcedureCaptureResultKind, 'captured-procedure'>; readonly available: boolean }>;
+  };
+  /** The Captured Procedures a capture may add its next version to, newest first, by their latest title. */
+  readonly procedures: ReadonlyArray<{ readonly procedureId: string; readonly title: string; readonly latestVersion: number }>;
+}
+
+/** One step of a saved version, in the editor's words and with the facts the document holds. */
+export interface CapturedProcedureStepProjection {
+  readonly categoryId: string;
+  readonly label: string;
+  readonly procedureTitle: string;
+  readonly procedureVersion: string;
+  readonly output: ReviewCategoryOutputKind;
+  readonly model: boolean;
+  readonly searchEngine: boolean;
+}
+
+/** A Review Run that pinned one version (REUSE-031): an exact link, never a copy of what it found. */
+export interface CapturedProcedureRunLinkProjection {
+  readonly bookId: string;
+  readonly bookTitle: string;
+  readonly reviewRunId: string;
+  readonly label: string;
+  readonly createdAt: string;
+}
+
+export interface CapturedProcedureVersionProjection {
+  readonly versionId: string;
+  readonly procedureId: string;
+  readonly version: number;
+  readonly title: string;
+  readonly state: CapturedProcedureState;
+  readonly stateLabel: string;
+  readonly createdAt: string;
+  /** When it was enabled or stopped; `null` while it waits for validation. */
+  readonly stateRecordedAt: string | null;
+  readonly steps: ReadonlyArray<CapturedProcedureStepProjection>;
+  readonly scopeSlot: CapturedProcedureScopeSlot;
+  /** Why the last `验证并启用…` failed, while the version still waits; empty otherwise (REUSE-025). */
+  readonly validationProblems: ReadonlyArray<string>;
+  /** The local provenance outside the digest (REUSE-015): the Review Run it was captured from. */
+  readonly source: { readonly bookId: string; readonly bookTitle: string; readonly reviewRunId: string; readonly runLabel: string };
+  readonly runCount: number;
+  readonly runs: ReadonlyArray<CapturedProcedureRunLinkProjection>;
+  readonly technical: { readonly documentSha256: string; readonly previousDocumentSha256: string | null };
+}
+
+/** A Captured Procedure as 工序与规则's list names it: its newest title and state, how many versions it has, whether it runs. */
+export interface CapturedProcedureSummaryProjection {
+  readonly procedureId: string;
+  /** Its newest version's title. */
+  readonly title: string;
+  readonly versionCount: number;
+  readonly latestVersion: number;
+  readonly latestState: CapturedProcedureState;
+  readonly latestStateLabel: string;
+  /** Whether `运行此工序…` is offered: one of its versions is 已启用. */
+  readonly runnable: boolean;
+}
+
+/** One Captured Procedure with one page of its versions, newest first; `versionsBefore` reads the next older page. */
+export interface CapturedProcedureProjection extends CapturedProcedureSummaryProjection {
+  readonly versions: ReadonlyArray<CapturedProcedureVersionProjection>;
+  /** The version number the next older page starts below; `null` when this page reaches version 1. */
+  readonly versionsBefore: number | null;
+}
+
+/** One version of a Developer Capability Proposal (REUSE-063, REUSE-064): no Book material, sent nowhere. */
+export interface DeveloperProposalVersionProjection {
+  readonly proposalVersionId: string;
+  readonly proposalId: string;
+  readonly version: number;
+  readonly title: string;
+  readonly missingCapability: string;
+  readonly affectedProcedure: string;
+  readonly direction: string;
+  readonly pluginCandidate: string;
+  readonly createdAt: string;
+  /** The newest files it was written to through the Save dialog, at most `MAX_DEVELOPER_PROPOSAL_FILES_SHOWN`: the name only, never where. */
+  readonly files: ReadonlyArray<{ readonly fileName: string; readonly writtenAt: string }>;
+  readonly fileCount: number;
+  readonly technical: { readonly sha256: string };
+}
+
+export interface DeveloperProposalSummaryProjection {
+  readonly proposalId: string;
+  /** Its newest version's title. */
+  readonly title: string;
+  readonly versionCount: number;
+  readonly latestVersion: number;
+  readonly latestCreatedAt: string;
+}
+
+/** One proposal with one page of its versions, newest first; `versionsBefore` reads the next older page. */
+export interface DeveloperProposalProjection extends DeveloperProposalSummaryProjection {
+  readonly versions: ReadonlyArray<DeveloperProposalVersionProjection>;
+  readonly versionsBefore: number | null;
+}
+
+/**
+ * 知识库 › 工序与规则's 可复用工序 and 开发建议, apart from the built-in 工序 (ADR 0087 §5, REUSE-029, REUSE-030): summaries only,
+ * so the list always fits one frame; each one's versions are read a page at a time.
+ */
+export interface CapturedProceduresProjection {
+  readonly procedures: ReadonlyArray<CapturedProcedureSummaryProjection>;
+  readonly proceduresTruncated: boolean;
+  readonly proposals: ReadonlyArray<DeveloperProposalSummaryProjection>;
+  readonly proposalsTruncated: boolean;
+}
+
+/** A guideline document one step applies, today against the source Run (ADR 0087 §3): a run applies today's. */
+export interface CapturedProcedureGuidelineProjection {
+  readonly title: string;
+  readonly issuer: string;
+  readonly version: string;
+  /** The version the source Run applied; `null` when it applied none of this document. */
+  readonly sourceVersion: string | null;
+}
+
+export interface CapturedProcedureCheckStepProjection extends CapturedProcedureStepProjection {
+  readonly guidelines: ReadonlyArray<CapturedProcedureGuidelineProjection>;
+  /** Why this step no longer resolves; `null` when it does. */
+  readonly problem: string | null;
+}
+
+/**
+ * `验证并启用…`'s preview (ADR 0087 §3): deterministic and provider-free. It creates no Task, Plan, Run, Provider call or
+ * Session; `enableCapturedProcedure` confirms exactly this preview by its digest.
+ */
+export interface CapturedProcedureValidationProjection {
+  readonly versionId: string;
+  readonly procedureId: string;
+  readonly version: number;
+  readonly title: string;
+  readonly state: CapturedProcedureState;
+  readonly steps: ReadonlyArray<CapturedProcedureCheckStepProjection>;
+  readonly scopeSlot: CapturedProcedureScopeSlot;
+  readonly ceiling: CapturedProcedureDocument['authorityCeiling'];
+  readonly problems: ReadonlyArray<string>;
+  readonly passes: boolean;
+  readonly previewDigest: string;
+}
+
+/** A step of the resolved version as the current Book can take it, or why it is left out (ADR 0087 §4). */
+export interface CapturedProcedureRunStepProjection {
+  readonly categoryId: string;
+  readonly label: string;
+  readonly available: boolean;
+  readonly unavailableReason: string | null;
+}
+
+/**
+ * `运行此工序…` or `按已保存的工序` for the current Book (ADR 0087 §4; UI ADR 0013, REUSE-043 to REUSE-045, REUSE-054): the newest
+ * 已启用 version that still validates, its steps for this Book, and where today's guideline versions differ from the source
+ * Run's. A read: it prepares nothing.
+ */
+export interface CapturedProcedureRunProjection {
+  readonly bookId: string;
+  readonly procedureId: string;
+  readonly title: string;
+  readonly resolved: null | {
+    readonly versionId: string;
+    readonly version: number;
+    readonly documentSha256: string;
+    readonly scopeSlot: CapturedProcedureScopeSlot;
+    readonly steps: ReadonlyArray<CapturedProcedureRunStepProjection>;
+    readonly guidelineChanges: ReadonlyArray<{ readonly categoryId: string; readonly label: string; readonly title: string; readonly sourceVersion: string | null; readonly version: string }>;
+  };
+  /** Newer 已启用 versions passed over because they no longer validate, with why (REUSE-043: disclosed, never silent). */
+  readonly passedOver: ReadonlyArray<{ readonly version: number; readonly reason: string }>;
+  /** Why it cannot run now; `null` when `resolved` is set. */
+  readonly unavailableReason: string | null;
+}
+
+/** The pin a Review Run prepared from a Captured Procedure records (ADR 0087 §4): never moved by a later version or a 停用. */
+export interface ReviewRunProcedureProjection {
+  readonly procedureId: string;
+  readonly versionId: string;
+  readonly version: number;
+  readonly title: string;
+  readonly documentSha256: string;
+  /** The version was stopped since: a Run not yet authorized cannot be (ADR 0087 §5). */
+  readonly stopped: boolean;
+  /**
+   * This house has no such version — the Book was merged in from another (Issue #65 review): the Run keeps naming what it was
+   * prepared from, and one not yet authorized cannot be, as with a stopped version.
+   */
+  readonly missing: boolean;
+  readonly leftOut: ReadonlyArray<{ readonly categoryId: string; readonly label: string; readonly reason: string }>;
+}
+
+export const MAX_DEVELOPER_PROPOSAL_TITLE_GRAPHEMES = 60;
+/** Each field of a 开发建议, in graphemes and in UTF-16 code units: a page of versions then always fits one frame. */
+export const MAX_DEVELOPER_PROPOSAL_FIELD_GRAPHEMES = 2000;
+export const MAX_DEVELOPER_PROPOSAL_FIELD_CHARACTERS = 4000;
+
+export interface SaveCapturedProcedureInput {
+  bookId: string;
+  reviewRunId: string;
+  /** The steps kept, each a category the source Run settled; their order is the configuration's (ADR 0087 §2). */
+  categoryIds: ReadonlyArray<string>;
+  scopeSlot: CapturedProcedureScopeSlot;
+  title: string;
+  /** The Captured Procedure this capture is the next version of; `null` for a new one. */
+  procedureId: string | null;
+}
+
+export interface SaveDeveloperProposalInput {
+  /** The proposal this is the next version of; `null` for a new one. */
+  proposalId: string | null;
+  title: string;
+  missingCapability: string;
+  affectedProcedure: string;
+  direction: string;
+  pluginCandidate: string;
+}
+
+export type SaveDeveloperProposalFileOutcome =
+  | { readonly outcome: 'cancelled' }
+  | { readonly outcome: 'saved'; readonly fileName: string; readonly proposal: DeveloperProposalProjection };
+
 // ---- 知识库 › 资料库 (Issue #427, plan slice S79c; V2-UX-KB-007, KB-002, ATTN-009, LEARN-004 to LEARN-010) --------------
 
 /** The largest file 资料库 takes in, and the bounds of what the editor writes about one. */
@@ -5440,6 +5959,42 @@ export interface EvaluationWorkspaceProjection {
     | { readonly allowed: false; readonly reason: string };
   /** AI7's 初评 of the Book (Issue #429, S81b1). */
   readonly initial: EvaluationInitialProjection;
+  /** 审稿意见 of the Book (Issue #429, S81c). */
+  readonly readersReport: EvaluationReadersReportProjection;
+}
+
+/** One template's 审稿意见 on ②C (Issue #429, S81c; EVAL-013): whether it can be drafted, its result, and its draft. */
+export interface EvaluationReadersReportTemplateProjection {
+  readonly template: ReadersReportTemplate;
+  readonly label: string;
+  /** 起草, or why it cannot be drafted now. */
+  readonly prepare: { readonly allowed: true; readonly mode: ReadersReportTaskMode } | { readonly allowed: false; readonly reason: string };
+  /** The latest result of this template whose draft has not been opened yet: 打开草稿 makes it the draft document. */
+  readonly drafted: null | { readonly revisionId: string; readonly recordOrdinal: number; readonly createdAt: string };
+  /** The template's draft, once made: an Editorial Artifact edited on the manuscript surface, a draft and never a delivery. */
+  readonly draft: null | {
+    readonly typeId: string;
+    readonly typeLabel: string;
+    /** The 定稿 version it was drafted from. */
+    readonly recordOrdinal: number;
+    readonly document: ProductionDocumentProjection;
+  };
+}
+
+/** 审稿意见 on ②C (Issue #429, S81c; EVAL-013): drafted from the Book's latest 定稿 version, under one of two templates. */
+export interface EvaluationReadersReportProjection {
+  /** The 定稿 version a new 审稿意见 drafts from: the latest; `null` while there is none. */
+  readonly basis: null | { readonly recordId: string; readonly ordinal: number; readonly revisionLabel: string; readonly finalizedAt: string };
+  /** The house's 审稿意见 among its 范例, and what a plan says of them. */
+  readonly exemplars: { readonly count: number; readonly statement: string };
+  /** The Book's latest 审稿意见 Task, which the Task Drawer opens; `null` before the first is prepared. */
+  readonly task: null | {
+    readonly taskIntentId: string;
+    readonly template: ReadersReportTemplate;
+    readonly state: BaselineAnalysisProjection['state'];
+    readonly label: string;
+  };
+  readonly templates: ReadonlyArray<EvaluationReadersReportTemplateProjection>;
 }
 
 /** 开始评估 or 重新评估: alone, or from AI7's latest 初评 (Issue #429, S81b1). */
@@ -6968,7 +7523,8 @@ export interface QuickStartBaselineAnalysisResult {
 }
 
 /** Every analysis projection, discriminated on `kind`. */
-export type AnalysisProjection = BaselineAnalysisProjection | FactualReviewProjection | ReviewCategoryProjection | InitialEvaluationProjection;
+export type AnalysisProjection = BaselineAnalysisProjection | FactualReviewProjection | ReviewCategoryProjection | InitialEvaluationProjection |
+  ReadersReportProjection;
 
 export interface HistoricalRevisionProjection {
   mode: 'historical-revision';
@@ -8858,7 +9414,7 @@ export interface ServiceJobProjection {
    */
   kind: 'search' | 'replacement' | 'reimport-preparation' | 'reimport-resolution' | 'reimport-commit' |
     'task-authorization-preparation' | 'baseline-analysis-preparation' | 'review-run-preparation' | 'package-export' |
-    'initial-evaluation-preparation';
+    'initial-evaluation-preparation' | 'readers-report-preparation';
   state: 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
   progress: { completed: number; total: number; label: string };
   result: SearchSummaryProjection | ReplacementPreviewProjection | ReviewBeforeManuscriptReimportProjection |
@@ -9302,6 +9858,30 @@ export interface ServiceOperationMap {
     input: Record<string, never>;
     output: KnowledgeProceduresProjection;
   };
+  /** 知识库 › 工序与规则's 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087 §5, §6): names no Book. */
+  inspectCapturedProcedures: { input: Record<string, never>; output: CapturedProceduresProjection };
+  /** One Captured Procedure with a page of its versions, newest first, below `before` when it is given. */
+  inspectCapturedProcedure: { input: { procedureId: string; before: number | null }; output: CapturedProcedureProjection };
+  /** One 开发建议 with a page of its versions, newest first, below `before` when it is given. */
+  inspectDeveloperProposal: { input: { proposalId: string; before: number | null }; output: DeveloperProposalProjection };
+  /** One 开发建议 version alone: what 导出为文件… names and writes. Main reads it; the renderer never does. */
+  inspectDeveloperProposalVersion: { input: { proposalVersionId: string }; output: DeveloperProposalVersionProjection };
+  /** The capture's source set, extraction and classification for one finished Review Run of the Book (ADR 0087 §2). */
+  inspectProcedureCapture: { input: { bookId: string; reviewRunId: string }; output: ProcedureCaptureProjection };
+  /** 保存为可复用工序: version 1 `待验证`, or a next version of an existing Captured Procedure (ADR 0087 §2). */
+  saveCapturedProcedure: { input: SaveCapturedProcedureInput; output: CapturedProcedureProjection };
+  /** `验证并启用…`'s deterministic preview (ADR 0087 §3). */
+  previewCapturedProcedureValidation: { input: { versionId: string }; output: CapturedProcedureValidationProjection };
+  /** Confirms the preview by its digest: `已启用` when it passes, its reasons recorded when it does not (ADR 0087 §3). */
+  enableCapturedProcedure: { input: { versionId: string; previewDigest: string }; output: CapturedProcedureProjection };
+  /** `停用`: one version or all of them, final for each (ADR 0087 §5). */
+  stopCapturedProcedure: { input: { procedureId: string; versionId: string | null }; output: CapturedProcedureProjection };
+  /** The newest 已启用 version that still validates, for the Book's 新建审阅 sheet (ADR 0087 §4). */
+  inspectCapturedProcedureRun: { input: { bookId: string; procedureId: string }; output: CapturedProcedureRunProjection };
+  /** 保存开发建议: a new Developer Capability Proposal, or its next version (ADR 0087 §6). */
+  saveDeveloperProposal: { input: SaveDeveloperProposalInput; output: DeveloperProposalProjection };
+  /** 导出为文件…: the proposal version written to the file the editor chose through the Save dialog (ADR 0087 §6). */
+  writeDeveloperProposalFile: { input: { proposalVersionId: string; destination: string }; output: DeveloperProposalProjection };
   /** 知识库 › 资料库 (Issue #427, S79c): the items the editor collected, a page at a time, with their attribution and eligibility. */
   inspectLibraryMaterials: {
     input: { after: LibraryMaterialCursor | null };
@@ -9362,6 +9942,24 @@ export interface ServiceOperationMap {
   /** 开始任务 in the drawer's bar: the Run Authorization and the Run, admitted at once or waiting for a place. */
   authorizeInitialEvaluation: {
     input: { bookId: string; taskIntentId: string; planEnvelopeDigest: string };
+    output: EvaluationWorkspaceProjection;
+  };
+  /**
+   * 起草审稿意见 (Issue #429, S81c): the reader's report kind's Task, drafted from the Book's latest 定稿 version under one
+   * template, prepared as one cooperative job. The completed job's result is 评估 with the prepared Task named.
+   */
+  prepareReadersReport: {
+    input: { bookId: string; template: ReadersReportTemplate };
+    output: ServiceJobProjection;
+  };
+  /** 开始任务 in the drawer's bar for 审稿意见. */
+  authorizeReadersReport: {
+    input: { bookId: string; taskIntentId: string; planEnvelopeDigest: string };
+    output: EvaluationWorkspaceProjection;
+  };
+  /** 打开草稿: one drafted 审稿意见 result made the template's draft document, once; 评估 then names it. */
+  createReadersReportDraft: {
+    input: { bookId: string; revisionId: string };
     output: EvaluationWorkspaceProjection;
   };
   /** ②A 分析反馈 (Issue #94, S38): one Result Set Revision's items with their latest judgments, and the Book's metric. */
@@ -9832,6 +10430,21 @@ export interface RendererApi {
   inspectExemplars(input?: { after: ExemplarBookCursor | null }): Promise<ExemplarsProjection>;
   /** 知识库 › 工序与规则's expert 工序 (Issue #427, S79d): names no Book. */
   inspectKnowledgeProcedures(): Promise<KnowledgeProceduresProjection>;
+  /** 知识库 › 工序与规则's 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087): names no Book. */
+  inspectCapturedProcedures(): Promise<CapturedProceduresProjection>;
+  inspectCapturedProcedure(input: { procedureId: string; before: number | null }): Promise<CapturedProcedureProjection>;
+  inspectDeveloperProposal(input: { proposalId: string; before: number | null }): Promise<DeveloperProposalProjection>;
+  /** The current Book's finished Review Run as a capture's source (ADR 0087 §2). */
+  inspectProcedureCapture(input: { reviewRunId: string }): Promise<ProcedureCaptureProjection>;
+  saveCapturedProcedure(input: Omit<SaveCapturedProcedureInput, 'bookId'>): Promise<CapturedProcedureProjection>;
+  previewCapturedProcedureValidation(input: { versionId: string }): Promise<CapturedProcedureValidationProjection>;
+  enableCapturedProcedure(input: { versionId: string; previewDigest: string }): Promise<CapturedProcedureProjection>;
+  stopCapturedProcedure(input: { procedureId: string; versionId: string | null }): Promise<CapturedProcedureProjection>;
+  /** For the current Book's 新建审阅 sheet. */
+  inspectCapturedProcedureRun(input: { procedureId: string }): Promise<CapturedProcedureRunProjection>;
+  saveDeveloperProposal(input: SaveDeveloperProposalInput): Promise<DeveloperProposalProjection>;
+  /** 导出为文件…: the platform Save dialog, then the file; nothing is written or recorded when the dialog is cancelled. */
+  saveDeveloperProposalFile(input: { proposalVersionId: string }): Promise<SaveDeveloperProposalFileOutcome>;
   /** 知识库 › 资料库 (Issue #427, S79c): names no Book; an item names the Book it was attributed to. A page at a time. */
   inspectLibraryMaterials(input?: { after: LibraryMaterialCursor | null }): Promise<LibraryMaterialsProjection>;
   /** One 资料库 item, by its identity. */
@@ -9852,6 +10465,12 @@ export interface RendererApi {
   prepareInitialEvaluation(): Promise<ServiceJobProjection>;
   /** The Task Drawer bar's 开始任务 for AI7's 初评. */
   authorizeInitialEvaluation(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<EvaluationWorkspaceProjection>;
+  /** 起草审稿意见 (Issue #429, S81c): a `readers-report-preparation` job; its plan opens in the Task Drawer. */
+  prepareReadersReport(input: { template: ReadersReportTemplate }): Promise<ServiceJobProjection>;
+  /** The Task Drawer bar's 开始任务 for 审稿意见. */
+  authorizeReadersReport(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<EvaluationWorkspaceProjection>;
+  /** 打开草稿: the drafted result made the template's draft document; the renderer then opens it on the editing surface. */
+  createReadersReportDraft(input: { revisionId: string }): Promise<EvaluationWorkspaceProjection>;
   /** ②A 分析反馈 of the Book the window is showing (Issue #94, S38); the renderer never names the Book. */
   inspectAnalysisFeedback(input: { revisionId: string }): Promise<AnalysisFeedbackProjection>;
   recordAnalysisFeedback(input: RecordAnalysisFeedbackInput): Promise<AnalysisFeedbackProjection>;

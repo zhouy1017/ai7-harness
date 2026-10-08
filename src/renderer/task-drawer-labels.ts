@@ -415,6 +415,7 @@ export const TASK_BAR_OUTCOMES: Readonly<Record<TaskPlanKind, string>> = {
   'baseline-analysis': '一份基线分析',
   'review-run': '审阅发现与审阅报告',
   'initial-evaluation': 'AI7 初评',
+  'readers-report': '审稿意见草稿',
 };
 
 /** Where each kind's Run is followed once it started (AUTH-007): the record's card, ②A or ②B. */
@@ -423,6 +424,7 @@ export const TASK_BAR_RUN_LINKS: Readonly<Record<TaskPlanKind, string>> = {
   'baseline-analysis': '查看运行',
   'review-run': '查看审阅',
   'initial-evaluation': '查看评估',
+  'readers-report': '查看评估',
 };
 
 /** The bar's actions, each by the `data-task-drawer-control` it carries. */

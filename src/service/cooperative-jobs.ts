@@ -176,6 +176,44 @@ export class CooperativeJobOwner {
     return structuredClone(job.projection);
   }
 
+  /**
+   * 起草审稿意见 (Issue #429, S81c): the reader's report kind's Task prepared one bounded step at a time, as 初评's is. The
+   * completed job's result is 评估 with the prepared Task named, whose plan the Task Drawer opens.
+   */
+  startReadersReportPreparation(
+    bookId: string,
+    template: Parameters<EditorialStore['createReadersReportPreparationWork']>[1],
+    launchPolicy: Parameters<EditorialStore['createReadersReportPreparationWork']>[2],
+  ): ServiceJobProjection {
+    this.#requireCapacity();
+    const work = this.#store.createReadersReportPreparationWork(bookId, template, launchPolicy);
+    const jobId = randomUUID();
+    const job: JobRecord = {
+      subjectId: work.workId ?? bookId,
+      bookId,
+      cancelRequested: false,
+      scheduled: false,
+      projection: {
+        jobId,
+        kind: 'readers-report-preparation',
+        state: work.done ? 'completed' : 'queued',
+        progress: {
+          completed: work.done ? work.total : 0,
+          total: work.total,
+          label: work.done ? '审稿意见的任务计划已准备' : '正在为任务保存修订版并整理阅读范围…',
+        },
+        result: work.done ? this.#store.inspectEvaluation(bookId, null) : null,
+        failure: null,
+      },
+    };
+    if (work.done) this.#rememberPolledTerminal(jobId, job);
+    else {
+      this.#jobs.set(jobId, job);
+      this.#schedule(job);
+    }
+    return structuredClone(job.projection);
+  }
+
   startBaselineAnalysisPreparation(
     bookId: Parameters<EditorialStore['createBaselineAnalysisPreparationWork']>[0],
     goal: Parameters<EditorialStore['createBaselineAnalysisPreparationWork']>[1],
@@ -222,9 +260,10 @@ export class CooperativeJobOwner {
     categoryIds: Parameters<EditorialStore['createReviewRunPreparationWork']>[1],
     scope: Parameters<EditorialStore['createReviewRunPreparationWork']>[2],
     launchPolicy: Parameters<EditorialStore['createReviewRunPreparationWork']>[3],
+    capturedProcedure: Parameters<EditorialStore['createReviewRunPreparationWork']>[4] = null,
   ): ServiceJobProjection {
     this.#requireCapacity();
-    const work = this.#store.createReviewRunPreparationWork(bookId, categoryIds, scope, launchPolicy);
+    const work = this.#store.createReviewRunPreparationWork(bookId, categoryIds, scope, launchPolicy, capturedProcedure);
     const jobId = randomUUID();
     const job: JobRecord = {
       subjectId: work.workId ?? bookId,
@@ -396,7 +435,7 @@ export class CooperativeJobOwner {
     } else if ((job.projection.kind === 'reimport-preparation' || job.projection.kind === 'reimport-resolution' ||
       job.projection.kind === 'task-authorization-preparation' || job.projection.kind === 'baseline-analysis-preparation' ||
       job.projection.kind === 'review-run-preparation' || job.projection.kind === 'reimport-commit' ||
-      job.projection.kind === 'initial-evaluation-preparation') &&
+      job.projection.kind === 'initial-evaluation-preparation' || job.projection.kind === 'readers-report-preparation') &&
       (job.projection.state === 'queued' || job.projection.state === 'running')) {
       job.cancelRequested = true;
       if (job.projection.kind === 'reimport-preparation') {
@@ -407,6 +446,8 @@ export class CooperativeJobOwner {
         this.#store.cancelBaselineAnalysisPreparationWork(job.subjectId);
       } else if (job.projection.kind === 'initial-evaluation-preparation') {
         this.#store.cancelInitialEvaluationPreparationWork(job.subjectId);
+      } else if (job.projection.kind === 'readers-report-preparation') {
+        this.#store.cancelReadersReportPreparationWork(job.subjectId);
       } else if (job.projection.kind === 'review-run-preparation') {
         this.#store.cancelReviewRunPreparationWork(job.subjectId);
       } else if (job.projection.kind === 'reimport-resolution') {
@@ -429,6 +470,8 @@ export class CooperativeJobOwner {
               ? '基线分析的任务计划准备已取消'
             : job.projection.kind === 'initial-evaluation-preparation'
               ? 'AI7 初评的任务计划准备已取消'
+            : job.projection.kind === 'readers-report-preparation'
+              ? '审稿意见的任务计划准备已取消'
             : job.projection.kind === 'review-run-preparation'
               ? '审阅计划准备已取消'
             : job.projection.kind === 'reimport-resolution'
@@ -468,6 +511,8 @@ export class CooperativeJobOwner {
           this.#store.cancelBaselineAnalysisPreparationWork(job.subjectId);
         } else if (job.projection.kind === 'initial-evaluation-preparation') {
           this.#store.cancelInitialEvaluationPreparationWork(job.subjectId);
+        } else if (job.projection.kind === 'readers-report-preparation') {
+          this.#store.cancelReadersReportPreparationWork(job.subjectId);
         } else if (job.projection.kind === 'review-run-preparation') {
           this.#store.cancelReviewRunPreparationWork(job.subjectId);
         } else if (job.projection.kind === 'reimport-resolution') {
@@ -556,6 +601,21 @@ export class CooperativeJobOwner {
             label: progress.done ? '基线分析的任务计划已准备' : '正在为任务保存修订版并整理阅读范围…',
           },
           result: progress.projection,
+        };
+        if (!progress.done) this.#schedule(job, REIMPORT_BATCH_YIELD_MS);
+        return;
+      }
+      if (job.projection.kind === 'readers-report-preparation') {
+        const progress = this.#store.advanceReadersReportPreparationWork(job.subjectId);
+        job.projection = {
+          ...job.projection,
+          state: progress.done ? 'completed' : 'running',
+          progress: {
+            completed: progress.completed,
+            total: progress.total,
+            label: progress.done ? '审稿意见的任务计划已准备' : '正在为任务保存修订版并整理阅读范围…',
+          },
+          result: progress.done && job.bookId !== undefined ? this.#store.inspectEvaluation(job.bookId, null) : null,
         };
         if (!progress.done) this.#schedule(job, REIMPORT_BATCH_YIELD_MS);
         return;
@@ -654,6 +714,8 @@ export class CooperativeJobOwner {
         this.#store.cancelBaselineAnalysisPreparationWork(job.subjectId);
       } else if (job.projection.kind === 'initial-evaluation-preparation') {
         this.#store.cancelInitialEvaluationPreparationWork(job.subjectId);
+      } else if (job.projection.kind === 'readers-report-preparation') {
+        this.#store.cancelReadersReportPreparationWork(job.subjectId);
       } else if (job.projection.kind === 'review-run-preparation') {
         this.#store.cancelReviewRunPreparationWork(job.subjectId);
       } else if (job.projection.kind === 'reimport-resolution') {

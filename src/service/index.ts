@@ -565,6 +565,31 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectExemplars(request.input.after) };
     case 'inspectKnowledgeProcedures':
       return { id: request.id, ok: true, op: request.op, result: await store.inspectKnowledgeProcedures() };
+    // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087): deterministic, provider-free; running one is an ordinary Review Run.
+    case 'inspectCapturedProcedures':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectCapturedProcedures() };
+    case 'inspectCapturedProcedure':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectCapturedProcedure(request.input.procedureId, request.input.before) };
+    case 'inspectDeveloperProposal':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectDeveloperProposal(request.input.proposalId, request.input.before) };
+    case 'inspectDeveloperProposalVersion':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectDeveloperProposalVersion(request.input.proposalVersionId) };
+    case 'inspectProcedureCapture':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectProcedureCapture(request.input.bookId, request.input.reviewRunId) };
+    case 'saveCapturedProcedure':
+      return { id: request.id, ok: true, op: request.op, result: store.saveCapturedProcedure(request.input) };
+    case 'previewCapturedProcedureValidation':
+      return { id: request.id, ok: true, op: request.op, result: store.previewCapturedProcedureValidation(request.input.versionId) };
+    case 'enableCapturedProcedure':
+      return { id: request.id, ok: true, op: request.op, result: store.enableCapturedProcedure(request.input.versionId, request.input.previewDigest) };
+    case 'stopCapturedProcedure':
+      return { id: request.id, ok: true, op: request.op, result: store.stopCapturedProcedure(request.input.procedureId, request.input.versionId) };
+    case 'inspectCapturedProcedureRun':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectCapturedProcedureRun(request.input.bookId, request.input.procedureId) };
+    case 'saveDeveloperProposal':
+      return { id: request.id, ok: true, op: request.op, result: store.saveDeveloperProposal(request.input) };
+    case 'writeDeveloperProposalFile':
+      return { id: request.id, ok: true, op: request.op, result: await store.writeDeveloperProposalFile(request.input.proposalVersionId, request.input.destination) };
     case 'inspectLibraryMaterials':
       return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterials(request.input.after) };
     case 'inspectLibraryMaterial':
@@ -705,6 +730,24 @@ async function dispatch(
       }
       return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluation(request.input.bookId, null) };
     }
+    // 审稿意见 (Issue #429, S81c): drafted from the Book's latest 定稿 version, prepared as a cooperative job whose plan the Task
+    // Drawer opens, and started from its bar through the governor on the ledger of the plan's contract, as 初评 is.
+    case 'prepareReadersReport':
+      return { id: request.id, ok: true, op: request.op, result: jobs.startReadersReportPreparation(request.input.bookId, request.input.template, launchPolicy) };
+    case 'authorizeReadersReport': {
+      const authorized = store.authorizeReadersReport(request.input.bookId, request.input.taskIntentId, request.input.planEnvelopeDigest);
+      if (authorized.dispatchRunRecordId !== null) {
+        try {
+          analysisExecution.admitOrQueue(authorized.dispatchRunRecordId, authorized.ledger);
+        } catch (error) {
+          const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
+          throw new StoreErrorClass(code, error instanceof Error ? error.message : '运行未能进入调度。');
+        }
+      }
+      return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluation(request.input.bookId, null) };
+    }
+    case 'createReadersReportDraft':
+      return { id: request.id, ok: true, op: request.op, result: store.createReadersReportDraft(request.input.bookId, request.input.revisionId) };
     case 'inspectAnalysisFeedback':
       return { id: request.id, ok: true, op: request.op, result: store.inspectAnalysisFeedback(request.input.bookId, request.input.revisionId) };
     case 'recordAnalysisFeedback':
@@ -732,7 +775,8 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: jobs.startReviewRunPreparation(request.input.bookId, request.input.categoryIds, request.input.scope, launchPolicy),
+        result: jobs.startReviewRunPreparation(request.input.bookId, request.input.categoryIds, request.input.scope, launchPolicy,
+          request.input.capturedProcedure ?? null),
       };
     case 'authorizeReviewRun':
       // The one approval, then the drive loop at once: an approved Run nobody drives reads `partial`, so
@@ -1294,7 +1338,8 @@ function parseArguments(argv: string[]): {
     (recoveryControlValue !== undefined &&
       (recoveryControl === undefined || process.env.AI7_E2E_JOURNEY !== 'J-08')) ||
     // The model adapter binds a Journey whose Runs execute: J-04's analysis, J-09's 运行中 and 最近完成, J-10's
-    // cancelled Run (Issue #422), J-16's 任务 panel (Issue #423), J-11's 分析反馈 (Issue #94) and J-13's 书系一致性 (Issue #64).
+    // cancelled Run (Issue #422), J-16's 任务 panel (Issue #423), J-11's 分析反馈 (Issue #94) and J-13's 书系一致性 (Issue #64)
+    // and the Review Runs a Captured Procedure is captured from and run as (Issue #65).
     (modelAdapterControlValue !== undefined &&
       (modelAdapterControl === undefined ||
         (process.env.AI7_E2E_JOURNEY !== 'J-04' && process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10' &&
@@ -1484,6 +1529,13 @@ async function run(): Promise<void> {
     // A Review Run's category left authorized sent nothing and is 继续审阅's to dispatch, the editor's own choice.
     store.reconcileStoppedFactualReviewRuns();
     store.reconcileStoppedReviewCategoryRuns();
+    // 审稿意见 has no 续行 either (Issue #429, S81c): reconciled by kind exactly as 初评 is. A damaged record of it never stops the
+    // service starting: its Run stays as it was and 评估 says 审稿意见 is unavailable, with why.
+    try {
+      store.reconcileStoppedReadersReportRuns();
+    } catch {
+      // Reported where the 审稿意见 is read.
+    }
     // A Review Run's categories take a place of the one owner's governor one after another.
     reviewRuns = new ReviewRunDriver(store.reviewRunDriveSteps, analysisExecution);
     // Interactive Editorial Dialogue (Issue #52, S17a): its answers persist their Session logs — the Harness Session Ledger —

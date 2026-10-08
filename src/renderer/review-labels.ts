@@ -98,6 +98,8 @@ export const REVIEW_ACTION_LABELS = {
   'scope-cancel': '取消任务',
   'scope-cancel-confirm': '确认取消任务',
   'scope-cancel-keep': '不取消',
+  /** 将以上工序保存为可复用工序 (Issue #65, S30; ADR 0087 §2). */
+  capture: '将以上工序保存为可复用工序',
 } as const;
 export type ReviewAction = keyof typeof REVIEW_ACTION_LABELS;
 

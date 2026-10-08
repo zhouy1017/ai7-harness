@@ -221,6 +221,7 @@ import { GLOBAL_ATTENTION_ACTIONS, GLOBAL_ATTENTION_STATUS_LINES } from './globa
 import { mountEditorialMarks, type EditorialMarksSurface } from './editorial-marks.js';
 import { mountPositionRail, type PositionRail } from './position-rail.js';
 import { mountReviewWorkspace, type ReviewFocus, type ReviewWorkspaceSurface } from './review-workspace.js';
+import { mountCapturedProcedures } from './captured-procedures.js';
 import { mountTaskDrawer } from './task-drawer.js';
 import {
   TASK_DRAWER_TITLE,
@@ -484,7 +485,7 @@ async function openTaskRunSurface(plan: TaskPlanProjection): Promise<void> {
   try {
     if (plan.kind === 'baseline-analysis') renderBookAnalysis(plan.bookId, plan.goal.chips.book);
     else if (plan.kind === 'review-run') renderBookReview(plan.bookId, plan.goal.chips.book, { reviewRunId: plan.ref, findingId: null });
-    else if (plan.kind === 'initial-evaluation') renderBookEvaluation(plan.bookId, plan.goal.chips.book);
+    else if (plan.kind === 'initial-evaluation' || plan.kind === 'readers-report') renderBookEvaluation(plan.bookId, plan.goal.chips.book);
     else renderBookOverview(await window.ai7.getBookOverview({ bookId: plan.bookId, historyCursor: null }));
   } catch (error) {
     setStatus(rendererErrorMessage(error, '无法打开运行所在的页面。'), 'error');
@@ -2166,7 +2167,7 @@ function showJudgedAnalysisItem(host: HTMLElement, itemKey: string): void {
  * last for the same reason ②A's is (LAYER-005). `focus` opens a named Review Run with one finding in
  * view, which is how a Mark Card's 查看任务 arrives here.
  */
-function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus | null = null): void {
+function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus | null = null, procedureId: string | null = null): void {
   const content = panel();
   content.classList.add('book-review');
   content.dataset['bookId'] = bookId;
@@ -2178,6 +2179,8 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
     bookId,
     bookTitle,
     focus,
+    // 运行此工序… from 知识库 (Issue #65, S30): the 新建审阅 sheet opens filled from the procedure.
+    procedureId,
     api: window.ai7,
     awaitServiceJob,
     technicalDetails,
@@ -2316,6 +2319,13 @@ function renderBookEvaluation(bookId: string, bookTitle: string): void {
     awaitServiceJob,
     // AI7 初评's plan opens in the Task Drawer beside 评估 (Issue #429, S81b1), and its bar starts it.
     openPlan: (ref) => openTaskPlan(bookId, 'initial-evaluation', ref),
+    // 审稿意见 (Issue #429, S81c): its plan in the drawer likewise, and its draft on the manuscript surface as 交付物 opens one.
+    bookId,
+    openReadersReportPlan: (ref) => openTaskPlan(bookId, 'readers-report', ref),
+    openDraft: async (draft) => {
+      const opened = await window.ai7.getManuscriptWindow({ manuscriptId: draft.document.documentId, branchId: draft.document.branchId, cursor: null });
+      renderEditorWindow(opened, bookTitle, undefined, undefined, undefined, undefined, { typeId: draft.typeId, typeLabel: draft.typeLabel, document: draft.document });
+    },
   });
   const actions = element('div', 'button-row workbench-actions');
   const openManuscript = button(DELIVERABLES_DESTINATION_ACTIONS[0], 'primary', async () => {
@@ -2341,7 +2351,7 @@ function renderBookEvaluation(bookId: string, bookTitle: string): void {
   actions.append(openManuscript, openOverview);
   content.append(actions);
   replaceScreen('book-evaluation', content);
-  taskSurfaceRefresh = { 'initial-evaluation': () => surface.refresh() };
+  taskSurfaceRefresh = { 'initial-evaluation': () => surface.refresh(), 'readers-report': () => surface.refresh() };
   setStatus(EVALUATION_STATUS.loading, 'busy');
   void surface.load().then(
     () => {
@@ -4948,7 +4958,29 @@ function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjecti
       ...procedures.procedures.flatMap((procedure) => [element('dt', undefined, procedure.title), element('dd', 'technical-identity', procedure.procedureId)]),
     );
     section.append(element('h3', undefined, PROCEDURES_HEADING), list, artifacts, identities);
-    panelNode.append(section, element('h3', undefined, RULES_HEADING));
+    // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087 §5, §6): apart from the built-in 工序, read on their own.
+    const captured = element('div', 'knowledge-captured');
+    const surface = mountCapturedProcedures({
+      root: captured,
+      api: window.ai7,
+      setStatus,
+      errorMessage: rendererErrorMessage,
+      technicalDetails,
+      localInstantLabel,
+      openRun: async (book, procedureId) => {
+        setStatus('正在打开这本书的审阅…', 'busy');
+        try {
+          await requestBookWorkbenchRoute({ kind: 'book', bookId: book.bookId }, async (route) =>
+            renderBookReview(route.bookId, route.bookTitle, null, procedureId));
+        } catch (error) {
+          setStatus(rendererErrorMessage(error, '无法打开这本书的审阅。'), 'error');
+        }
+      },
+    });
+    panelNode.append(section, captured, element('h3', undefined, RULES_HEADING));
+    void surface.load().catch((error: unknown) => {
+      if (captured.isConnected) captured.append(element('p', 'attention-note', rendererErrorMessage(error, '无法读取可复用工序。')));
+    });
   }
   panelNode.append(element('p', 'field-note', projection.statement));
   if (projection.rules.length === 0) {
@@ -6834,7 +6866,7 @@ async function awaitServiceJob(
   const requireMonotonicReimportProgress = (next: ServiceJobProjection): void => {
     if (next.kind !== 'reimport-preparation' && next.kind !== 'reimport-resolution' && next.kind !== 'reimport-commit' &&
         next.kind !== 'task-authorization-preparation' && next.kind !== 'baseline-analysis-preparation' &&
-        next.kind !== 'review-run-preparation' && next.kind !== 'initial-evaluation-preparation') return;
+        next.kind !== 'review-run-preparation' && next.kind !== 'initial-evaluation-preparation' && next.kind !== 'readers-report-preparation') return;
     if (!Number.isSafeInteger(next.progress.completed) || !Number.isSafeInteger(next.progress.total) ||
       next.progress.completed < previousReimportProgress || next.progress.completed > next.progress.total ||
       next.progress.total <= 0 ||
@@ -6862,8 +6894,20 @@ async function awaitServiceJob(
 async function documentContextOf(window_: ManuscriptWindowProjection): Promise<ProductionDocumentContext> {
   const documents = await window.ai7.inspectProductionDocuments();
   const type = documents.types.find((entry) => entry.document?.documentId === window_.manuscriptId);
-  if (documents.bookId !== window_.bookId || type === undefined || type.document === null) throw new Error('这份生产文档已不在这本书的交付物中。');
-  return { typeId: type.typeId, typeLabel: type.label, document: type.document };
+  if (documents.bookId === window_.bookId && type !== undefined && type.document !== null) {
+    return { typeId: type.typeId, typeLabel: type.label, document: type.document };
+  }
+  // A 审稿意见 draft (Issue #429, S81c) is no card of 交付物: 评估 names it, and it is drawn exactly as a document is.
+  const draft = await readersReportDraftOf(window_.manuscriptId);
+  if (draft === null) throw new Error('这份生产文档已不在这本书的交付物中。');
+  return draft;
+}
+
+/** A 审稿意见 draft of the route's Book, as 评估 reads it, by its document identity; `null` for any other. */
+async function readersReportDraftOf(documentId: string): Promise<ProductionDocumentContext | null> {
+  const page = await window.ai7.inspectEvaluation({ recordId: null });
+  const draft = page.readersReport.templates.find((entry) => entry.draft?.document.documentId === documentId)?.draft ?? null;
+  return draft === null ? null : { typeId: draft.typeId, typeLabel: draft.typeLabel, document: draft.document };
 }
 
 /**
@@ -7296,7 +7340,11 @@ function renderEditorWindow(
   // The document's workflow moves by the editor's commands in its lens (Issue #415, S66c); a refused move reads it again.
   const documentLens = productionDocument === undefined ? undefined : renderDocumentLens(productionDocument, {
     move: async (input) => (await window.ai7.transitionProductionDocumentPhase({ documentId: productionDocument.document.documentId, ...input })).document,
-    read: async () => (await window.ai7.inspectProductionDocuments()).types.find((type) => type.typeId === productionDocument.typeId)?.document ?? null,
+    read: async () => {
+      const documents = await window.ai7.inspectProductionDocuments();
+      return documents.types.find((type) => type.typeId === productionDocument.typeId)?.document ??
+        (await readersReportDraftOf(productionDocument.document.documentId))?.document ?? null;
+    },
     setStatus,
     errorMessage: rendererErrorMessage,
   });

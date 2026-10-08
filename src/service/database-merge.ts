@@ -213,6 +213,9 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   dialogue_harness_spans: 'owned',
   dialogue_attempt_outcomes: 'owned',
   dialogue_conversions: 'owned',
+  // The Captured Procedure version each of its Review Runs pinned (Issue #65, S30): named by value, so the Run keeps naming
+  // what it ran in a house that never had that procedure.
+  review_run_procedure_pins: 'owned',
   // Its deliverables, publication and people.
   publication_versions: 'owned',
   publication_events: 'owned',
@@ -238,6 +241,9 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   evaluation_record_entries: 'owned',
   // The AI7 初评 each version began from (Issue #429, S81b1): the version's own, as its entries are.
   evaluation_initial_drafts: 'owned',
+  // 审稿意见 (Issue #429, S81c): which 定稿 version each Task drafts from, and which result became a draft — the Book's own.
+  readers_report_tasks: 'owned',
+  readers_report_drafts: 'owned',
   book_dimension_sets: 'owned',
   book_dimensions: 'owned',
   book_people_versions: 'owned',
@@ -277,6 +283,12 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   // The house's own versions of its guideline documents: a Book brings those its Runs applied as the snapshots they hold.
   review_guideline_versions: 'house',
   series: 'house',
+  // The house's Captured Procedures and Developer Capability Proposals (Issue #65, S30; ADR 0087): no Book material in them.
+  captured_procedures: 'house',
+  captured_procedure_versions: 'house',
+  captured_procedure_states: 'house',
+  developer_capability_proposals: 'house',
+  developer_capability_proposal_exports: 'house',
   series_knowledge_items: 'house',
   series_knowledge_promotions: 'house',
   series_knowledge_conflicts: 'house',

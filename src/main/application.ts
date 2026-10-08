@@ -60,6 +60,7 @@ import {
   type ServiceOperationMap,
   type TrustedLaunchForm,
 } from '../shared/protocol.js';
+import { developerProposalFileName } from '../shared/developer-proposal.js';
 import { ServiceCallError, ServiceClient } from './service-client.js';
 import { openProtectedSecretStore, type ProtectedSecretStore } from './protected-secret-store.js';
 import {
@@ -109,7 +110,8 @@ interface ManuscriptCapability {
 
 interface EditorResourceCapability {
   kind: 'job' | 'search' | 'preview';
-  operation: 'search' | 'replacement' | 'reimport' | 'task-authorization' | 'baseline-analysis' | 'review-run' | 'initial-evaluation';
+  operation: 'search' | 'replacement' | 'reimport' | 'task-authorization' | 'baseline-analysis' | 'review-run' | 'initial-evaluation' |
+    'readers-report';
   bookId: string;
   manuscriptId: string | null;
   branchId: string | null;
@@ -199,6 +201,8 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j07-folder-path' ||
           key === '--j04-save-path' ||
           key === '--j12-save-path' ||
+          key === '--j11-save-path' ||
+          key === '--j13-save-path' ||
           key === '--j01-import-control' ||
           key === '--j03-foreground-execution-control' ||
           key === '--j08-recovery-control' ||
@@ -306,7 +310,13 @@ function parseArguments(argv: string[]): LaunchArguments {
   requireDesktop(j07SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-07' && isAbsolute(j07SavePath)));
   requireDesktop(j04SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-04' && isAbsolute(j04SavePath)));
   requireDesktop(j12SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-12' && isAbsolute(j12SavePath)));
-  const injectedSavePath = j07SavePath ?? j04SavePath ?? j12SavePath;
+  // J-11's for a 审稿意见 draft's DOCX (Issue #429, S81c).
+  const j11SavePath = values.get('--j11-save-path');
+  requireDesktop(j11SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-11' && isAbsolute(j11SavePath)));
+  // J-13's for a 开发建议's 导出为文件… (Issue #65, S30).
+  const j13SavePath = values.get('--j13-save-path');
+  requireDesktop(j13SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-13' && isAbsolute(j13SavePath)));
+  const injectedSavePath = j07SavePath ?? j04SavePath ?? j12SavePath ?? j11SavePath ?? j13SavePath;
   const injectedFolderPath = values.get('--j07-folder-path');
   requireDesktop(injectedFolderPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-07' && isAbsolute(injectedFolderPath)));
   const importControlValue = values.get('--j01-import-control');
@@ -352,7 +362,7 @@ function parseArguments(argv: string[]): LaunchArguments {
   );
   // The model adapter binds a Journey whose Runs execute: J-04's analysis, J-09's 运行中 and 最近完成 (Issue #424),
   // J-10's cancelled Run (Issue #422), J-16's 任务 panel (Issue #423), J-11's 分析反馈 (Issue #94), and J-13's 书系一致性
-  // (Issue #64).
+  // (Issue #64) and the Review Runs a Captured Procedure is captured from and run as (Issue #65).
   requireDesktop(
     modelAdapterControlValue === undefined ||
       ((process.env.AI7_E2E_JOURNEY === 'J-04' || process.env.AI7_E2E_JOURNEY === 'J-09' || process.env.AI7_E2E_JOURNEY === 'J-10' ||
@@ -701,7 +711,9 @@ function registerRendererHandlers(
               ? 'review-run'
               : job.kind === 'initial-evaluation-preparation'
                 ? 'initial-evaluation'
-                : 'reimport';
+                : job.kind === 'readers-report-preparation'
+                  ? 'readers-report'
+                  : 'reimport';
   const resourceSeed = (
     capability: ManuscriptCapability | EditorResourceCapability,
     operation: EditorResourceCapability['operation'] = 'operation' in capability ? capability.operation : 'search',
@@ -772,7 +784,8 @@ function registerRendererHandlers(
         throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', '审阅计划准备结果不属于当前图书工作台。');
       }
     } else if (result !== null && 'recordCount' in result && 'initial' in result) {
-      if (actualOperation !== 'initial-evaluation' || result.bookId !== capability.bookId) {
+      // 评估 answers both AI7 初评's preparation and 审稿意见's (Issue #429, S81c).
+      if ((actualOperation !== 'initial-evaluation' && actualOperation !== 'readers-report') || result.bookId !== capability.bookId) {
         throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', 'AI7 初评准备结果不属于当前图书工作台。');
       }
     } else if (result !== null && 'taskIntent' in result) {
@@ -1249,6 +1262,29 @@ function registerRendererHandlers(
       buttonLabel: '选择此位置',
       defaultPath: resolve(app.getPath('documents'), fileName),
       filters: [{ name: format.name, extensions: [format.extension] }],
+      properties: ['createDirectory', 'showOverwriteConfirmation'],
+    });
+    if (chosen.canceled || chosen.filePath === undefined || chosen.filePath.length === 0) return undefined;
+    requireDesktop(isAbsolute(chosen.filePath));
+    return chosen.filePath;
+  };
+
+  /**
+   * 导出为文件… of a 开发建议 (Issue #65, S30; ADR 0087 §6): the platform's own Save dialog, which owns an existing file's
+   * replace-or-rename choice, offering the proposal's own file name in the documents folder. J-13 alone may answer it once with
+   * a launch control instead; `undefined` is a cancelled dialog. The proposal holds no Book material.
+   */
+  const chooseDeveloperProposalFile = async (owned: OwnedRendererWindow, suggestedFileName: string): Promise<string | undefined> => {
+    const injected = consumeInjectedSavePath();
+    if (injected !== undefined) {
+      requireDesktop(isAbsolute(injected));
+      return injected;
+    }
+    const chosen = await dialog.showSaveDialog(owned.window, {
+      title: '选择开发建议的保存位置',
+      buttonLabel: '保存到此位置',
+      defaultPath: resolve(app.getPath('documents'), suggestedFileName),
+      filters: [{ name: 'Markdown', extensions: ['md'] }],
       properties: ['createDirectory', 'showOverwriteConfirmation'],
     });
     if (chosen.canceled || chosen.filePath === undefined || chosen.filePath.length === 0) return undefined;
@@ -2719,6 +2755,140 @@ function registerRendererHandlers(
       return service.call('inspectKnowledgeProcedures', {});
     }),
   );
+  // ---- 可复用工序 and 开发建议 (Issue #65, plan slice S30; ADR 0087) ---------------------------------------------------
+  // The house's list names no Book; capturing from a Review Run and resolving a procedure for a run are the route's Book's,
+  // which the renderer never names. Nothing here plans, prepares or runs: running one is the ordinary 新建审阅 sheet.
+  ipcMain.handle(IPC_CHANNELS.inspectCapturedProcedures, (event) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return service.call('inspectCapturedProcedures', {});
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectCapturedProcedure, (event, input: Parameters<RendererApi['inspectCapturedProcedure']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectCapturedProcedure', { procedureId: input.procedureId, before: input.before });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectDeveloperProposal, (event, input: Parameters<RendererApi['inspectDeveloperProposal']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectDeveloperProposal', { proposalId: input.proposalId, before: input.before });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectProcedureCapture, (event, input: Parameters<RendererApi['inspectProcedureCapture']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const routeGeneration = owned.routeGeneration;
+      const routeRequestSequence = owned.routeRequestSequence;
+      const result = await service.call('inspectProcedureCapture', { bookId: route.bookId, reviewRunId: input.reviewRunId });
+      requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+      if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '工序的来源不属于当前图书工作台。');
+      return result;
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.saveCapturedProcedure, (event, input: Parameters<RendererApi['saveCapturedProcedure']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        return service.call('saveCapturedProcedure', {
+          bookId: route.bookId,
+          reviewRunId: input.reviewRunId,
+          categoryIds: input.categoryIds,
+          scopeSlot: input.scopeSlot,
+          title: input.title,
+          procedureId: input.procedureId,
+        });
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.previewCapturedProcedureValidation, (event, input: Parameters<RendererApi['previewCapturedProcedureValidation']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('previewCapturedProcedureValidation', { versionId: input.versionId });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.enableCapturedProcedure, (event, input: Parameters<RendererApi['enableCapturedProcedure']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('enableCapturedProcedure', { versionId: input.versionId, previewDigest: input.previewDigest });
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.stopCapturedProcedure, (event, input: Parameters<RendererApi['stopCapturedProcedure']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('stopCapturedProcedure', { procedureId: input.procedureId, versionId: input.versionId });
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectCapturedProcedureRun, (event, input: Parameters<RendererApi['inspectCapturedProcedureRun']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const routeGeneration = owned.routeGeneration;
+      const routeRequestSequence = owned.routeRequestSequence;
+      const result = await service.call('inspectCapturedProcedureRun', { bookId: route.bookId, procedureId: input.procedureId });
+      requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+      if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '工序的运行预览不属于当前图书工作台。');
+      return result;
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.saveDeveloperProposal, (event, input: Parameters<RendererApi['saveDeveloperProposal']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('saveDeveloperProposal', {
+          proposalId: input.proposalId,
+          title: input.title,
+          missingCapability: input.missingCapability,
+          affectedProcedure: input.affectedProcedure,
+          direction: input.direction,
+          pluginCandidate: input.pluginCandidate,
+        });
+      });
+    }),
+  );
+  // 导出为文件… (ADR 0087 §6): the Save dialog chooses where; the renderer never sees the path, and a cancelled dialog writes
+  // and records nothing. The proposal's own name is offered from the version the service holds, never from the renderer.
+  ipcMain.handle(IPC_CHANNELS.saveDeveloperProposalFile, (event, input: Parameters<RendererApi['saveDeveloperProposalFile']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async (): Promise<Awaited<ReturnType<RendererApi['saveDeveloperProposalFile']>>> => {
+        requireAuthority();
+        // The one version, read alone, names the file — never a listing that a long history could outgrow (Issue #65 review).
+        const version = await service.call('inspectDeveloperProposalVersion', { proposalVersionId: input.proposalVersionId });
+        const destination = await chooseDeveloperProposalFile(owned, developerProposalFileName(version));
+        if (destination === undefined) return { outcome: 'cancelled' };
+        const proposal = await service.call('writeDeveloperProposalFile', { proposalVersionId: input.proposalVersionId, destination });
+        return { outcome: 'saved', fileName: basename(destination), proposal };
+      });
+    }),
+  );
   // ②A 分析反馈 (Issue #94, S38) is the route's Book's, as ②A is: the renderer names a revision, never the Book.
   ipcMain.handle(IPC_CHANNELS.inspectAnalysisFeedback, (event, input: Parameters<RendererApi['inspectAnalysisFeedback']>[0]) =>
     envelope(async () => {
@@ -2833,6 +3003,65 @@ function registerRendererHandlers(
           taskIntentId: input.taskIntentId,
           planEnvelopeDigest: input.planEnvelopeDigest,
         });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '评估不属于当前图书工作台。');
+        return result;
+      });
+    }),
+  );
+  // 审稿意见 (Issue #429, S81c): drafted, started and opened within the route's Book, as 初评 is; the renderer names a template,
+  // a Task or a drafted result, never the Book, and every answer must be that Book's.
+  ipcMain.handle(IPC_CHANNELS.prepareReadersReport, (event, input: Parameters<RendererApi['prepareReadersReport']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object' && (input.template === 'author' || input.template === 'editorial'), 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const result = await service.call('prepareReadersReport', { bookId: route.bookId, template: input.template });
+        const prepared = result.result;
+        if (result.kind !== 'readers-report-preparation' ||
+            (prepared !== null && !('recordCount' in prepared && 'initial' in prepared && prepared.bookId === route.bookId))) {
+          throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '审稿意见准备结果类型无效或不属于当前图书工作台。');
+        }
+        rememberEditorResource(owned, 'job', result.jobId, {
+          operation: 'readers-report',
+          bookId: route.bookId,
+          manuscriptId: null,
+          branchId: null,
+        });
+        return result;
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.authorizeReadersReport, (event, input: Parameters<RendererApi['authorizeReadersReport']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const result = await service.call('authorizeReadersReport', {
+          bookId: route.bookId,
+          taskIntentId: input.taskIntentId,
+          planEnvelopeDigest: input.planEnvelopeDigest,
+        });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '评估不属于当前图书工作台。');
+        return result;
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.createReadersReportDraft, (event, input: Parameters<RendererApi['createReadersReportDraft']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object' && typeof input.revisionId === 'string', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const result = await service.call('createReadersReportDraft', { bookId: route.bookId, revisionId: input.revisionId });
         requireCurrentRouteGeneration(owned, routeGeneration);
         if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '评估不属于当前图书工作台。');
         return result;
@@ -3462,6 +3691,8 @@ function registerRendererHandlers(
             categoryIds: input.categoryIds,
             scope: input.scope,
             bookId: route.bookId,
+            // A sheet pre-filled from a Captured Procedure (Issue #65, S30) names the version it was filled from.
+            ...(input.capturedProcedure === undefined || input.capturedProcedure === null ? {} : { capturedProcedure: input.capturedProcedure }),
           });
           // A Run of the leads alone is prepared by the job's first step, so its answer may already carry the workspace.
           const prepared = result.result;

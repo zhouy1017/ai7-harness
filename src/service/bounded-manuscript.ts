@@ -60,6 +60,7 @@ import {
   ANALYSIS_LEDGER_REVISION_19_SQL,
   ANALYSIS_LEDGER_REVISION_23_SQL,
   ANALYSIS_LEDGER_REVISION_58_SQL,
+  ANALYSIS_LEDGER_REVISION_59_SQL,
   ANALYSIS_LEDGER_REVISION_29_SQL,
   ANALYSIS_LEDGER_REVISION_31_SQL,
   ANALYSIS_LEDGER_REVISION_32_SQL,
@@ -113,6 +114,8 @@ import {
   INITIAL_EVALUATION_SCHEMA_VERSION,
   DIALOGUE_SCHEMA_VERSION,
   SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
+  READERS_REPORT_SCHEMA_VERSION,
+  CAPTURED_PROCEDURE_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -194,11 +197,13 @@ import { DATABASE_REPLACEMENT_FOREIGN_KEYS, DATABASE_REPLACEMENT_SCHEMA_SQL, DAT
 import { DATABASE_MERGE_FOREIGN_KEYS, DATABASE_MERGE_SCHEMA_SQL, DATABASE_MERGE_TRIGGER_SQL } from './database-merge.js';
 import { EVALUATION_INITIAL_DRAFT_FOREIGN_KEYS, EVALUATION_INITIAL_DRAFT_SCHEMA_SQL, EVALUATION_INITIAL_DRAFT_TRIGGER_SQL } from './evaluation-records.js';
 import { DIALOGUE_FOREIGN_KEYS, DIALOGUE_SCHEMA_SQL, DIALOGUE_TRIGGER_SQL } from './dialogue/dialogue-ledger.js';
+import { CAPTURED_PROCEDURE_FOREIGN_KEYS, CAPTURED_PROCEDURE_SCHEMA_SQL, CAPTURED_PROCEDURE_TRIGGER_SQL } from './captured-procedures.js';
 import {
   SERIES_RETRIEVAL_EXCLUSION_FOREIGN_KEYS,
   SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL,
   SERIES_RETRIEVAL_EXCLUSION_TRIGGER_SQL,
 } from './series-exclusions.js';
+import { READERS_REPORT_FOREIGN_KEYS, READERS_REPORT_SCHEMA_SQL, READERS_REPORT_TRIGGER_SQL } from './readers-reports.js';
 import {
   MANUSCRIPT_EFFECT_FOREIGN_KEYS,
   MANUSCRIPT_EFFECT_SCHEMA_SQL,
@@ -241,6 +246,7 @@ const ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL: Readonly<Record<string, string | Read
   ...ANALYSIS_LEDGER_SCHEMA_SQL,
   analysis_task_intents: [
     ANALYSIS_LEDGER_SCHEMA_SQL.analysis_task_intents,
+    ANALYSIS_LEDGER_REVISION_59_SQL.analysis_task_intents,
     ANALYSIS_LEDGER_REVISION_58_SQL.analysis_task_intents,
     ANALYSIS_LEDGER_REVISION_23_SQL.analysis_task_intents,
     ANALYSIS_LEDGER_REVISION_19_SQL.analysis_task_intents,
@@ -249,12 +255,14 @@ const ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL: Readonly<Record<string, string | Read
   analysis_plan_records: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_plan_records, ANALYSIS_LEDGER_REVISION_16_SQL.analysis_plan_records, ANALYSIS_LEDGER_REVISION_15_SQL.analysis_plan_records],
   analysis_result_sets: [
     ANALYSIS_LEDGER_SCHEMA_SQL.analysis_result_sets,
+    ANALYSIS_LEDGER_REVISION_59_SQL.analysis_result_sets,
     ANALYSIS_LEDGER_REVISION_58_SQL.analysis_result_sets,
     ANALYSIS_LEDGER_REVISION_23_SQL.analysis_result_sets,
     ANALYSIS_LEDGER_REVISION_19_SQL.analysis_result_sets,
   ],
   analysis_result_set_revisions: [
     ANALYSIS_LEDGER_SCHEMA_SQL.analysis_result_set_revisions,
+    ANALYSIS_LEDGER_REVISION_59_SQL.analysis_result_set_revisions,
     ANALYSIS_LEDGER_REVISION_58_SQL.analysis_result_set_revisions,
     ANALYSIS_LEDGER_REVISION_23_SQL.analysis_result_set_revisions,
     ANALYSIS_LEDGER_REVISION_19_SQL.analysis_result_set_revisions,
@@ -1925,6 +1933,8 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...EVALUATION_INITIAL_DRAFT_FOREIGN_KEYS,
   ...DIALOGUE_FOREIGN_KEYS,
   ...SERIES_RETRIEVAL_EXCLUSION_FOREIGN_KEYS,
+  ...READERS_REPORT_FOREIGN_KEYS,
+  ...CAPTURED_PROCEDURE_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2557,6 +2567,8 @@ function requireManuscriptReimportTargetSchema(
   includeEvaluationInitialDraftTables = false,
   includeDialogueTables = false,
   includeSeriesRetrievalExclusionTables = false,
+  includeReadersReportTables = false,
+  includeCapturedProcedureTables = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
@@ -2605,6 +2617,8 @@ function requireManuscriptReimportTargetSchema(
   includeEvaluationInitialDraftTables ||= committed(EVALUATION_INITIAL_DRAFT_SCHEMA_SQL);
   includeDialogueTables ||= committed(DIALOGUE_SCHEMA_SQL);
   includeSeriesRetrievalExclusionTables ||= committed(SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL);
+  includeReadersReportTables ||= committed(READERS_REPORT_SCHEMA_SQL);
+  includeCapturedProcedureTables ||= committed(CAPTURED_PROCEDURE_SCHEMA_SQL);
   requireExactSchema(
     db,
     {
@@ -2721,6 +2735,11 @@ function requireManuscriptReimportTargetSchema(
       ...(includeDialogueTables ? DIALOGUE_SCHEMA_SQL : {}),
       // Revision 61 (Issue #64, S29b) adds the revisions of the Series Retrieval Exclusions.
       ...(includeSeriesRetrievalExclusionTables ? SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL : {}),
+      // Revision 62 (Issue #429, S81c) adds which 定稿 version each 审稿意见 Task drafts from, and which result became a draft.
+      ...(includeReadersReportTables ? READERS_REPORT_SCHEMA_SQL : {}),
+      // Revision 63 (Issue #65, S30) adds the Captured Procedures, their versions, states and pins, and the Developer Capability
+      // Proposals with the files they were written to.
+      ...(includeCapturedProcedureTables ? CAPTURED_PROCEDURE_SCHEMA_SQL : {}),
     },
     // The partial index that keeps one primary Manuscript per Book stands with the rebuilt relation, whatever the version.
     {
@@ -2770,6 +2789,8 @@ function requireManuscriptReimportTargetSchema(
       ...(includeEvaluationInitialDraftTables ? EVALUATION_INITIAL_DRAFT_TRIGGER_SQL : {}),
       ...(includeDialogueTables ? DIALOGUE_TRIGGER_SQL : {}),
       ...(includeSeriesRetrievalExclusionTables ? SERIES_RETRIEVAL_EXCLUSION_TRIGGER_SQL : {}),
+      ...(includeReadersReportTables ? READERS_REPORT_TRIGGER_SQL : {}),
+      ...(includeCapturedProcedureTables ? CAPTURED_PROCEDURE_TRIGGER_SQL : {}),
     },
   );
 }
@@ -5510,6 +5531,8 @@ export function validateManuscriptReimportSchemaTruth(
   includeEvaluationInitialDraftTables = false,
   includeDialogueTables = false,
   includeSeriesRetrievalExclusionTables = false,
+  includeReadersReportTables = false,
+  includeCapturedProcedureTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -5557,6 +5580,8 @@ export function validateManuscriptReimportSchemaTruth(
     includeEvaluationInitialDraftTables,
     includeDialogueTables,
     includeSeriesRetrievalExclusionTables,
+    includeReadersReportTables,
+    includeCapturedProcedureTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -5650,7 +5675,9 @@ export function initializeBoundedSchema(
       version === DATABASE_MERGE_SCHEMA_VERSION ||
       version === INITIAL_EVALUATION_SCHEMA_VERSION ||
       version === DIALOGUE_SCHEMA_VERSION ||
-      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
+      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
+      version === READERS_REPORT_SCHEMA_VERSION ||
+      version === CAPTURED_PROCEDURE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5694,9 +5721,11 @@ export function initializeBoundedSchema(
       version === DATABASE_MERGE_SCHEMA_VERSION ||
       version === INITIAL_EVALUATION_SCHEMA_VERSION ||
       version === DIALOGUE_SCHEMA_VERSION ||
-      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION) {
+      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
+      version === READERS_REPORT_SCHEMA_VERSION ||
+      version === CAPTURED_PROCEDURE_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== CAPTURED_PROCEDURE_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,
@@ -5744,6 +5773,8 @@ export function initializeBoundedSchema(
           version >= INITIAL_EVALUATION_SCHEMA_VERSION,
           version >= DIALOGUE_SCHEMA_VERSION,
           version >= SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
+          version >= READERS_REPORT_SCHEMA_VERSION,
+          version >= CAPTURED_PROCEDURE_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);
