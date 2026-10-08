@@ -1398,6 +1398,15 @@ let StoreErrorClass: typeof import('./store.js').StoreError;
 /** How often Reconnect Preflight looks again while the service runs (Issue #502): a local read, then nothing, when no Run waits. */
 const RECONNECT_PREFLIGHT_INTERVAL_MS = 15_000;
 
+/**
+ * The startup step the service is entering, said on its stderr (Issue #675) as `AI7_SERVICE_STOPPED/…` already is: fixed
+ * words only. Main reads them while it waits for this service to be ready and relays them only under an E2E Journey, so a
+ * launch that waits past its budget can say where the service's own startup stood; otherwise main discards the stream.
+ */
+function reachServiceStartup(step: 'process' | 'store' | 'owners' | 'serving'): void {
+  process.stderr.write(`AI7_SERVICE_STARTUP/${step}\n`);
+}
+
 async function run(): Promise<void> {
   // The native `fetch` is captured before the denial replaces the global; only the developer-live
   // `opencode-go` transport ever receives it, and only through the adapter's transmit step.
@@ -1411,6 +1420,7 @@ async function run(): Promise<void> {
     armSingleHostAllowance({ host: endpoint.hostname, port: endpoint.port === '' ? 443 : Number(endpoint.port) });
   }
   installNodeNetworkDenial();
+  reachServiceStartup('process');
   const [
     { EditorialStore, StoreError, StoreFatalError },
     { mountDormantHarness },
@@ -1474,6 +1484,7 @@ async function run(): Promise<void> {
     // The software version the store records beside its Data Version (Issue #433, S85a) is the package the product ships
     // in: the carrier holds no package manifest, so it is read from the source checkout that contains `dist/`.
     const softwareVersion = await readSoftwareVersion(resolve(codeRoot, '..'));
+    reachServiceStartup('store');
     store = await EditorialStore.open(dataRoot, codeRoot, {
       softwareVersion,
       induceUnprovableReconciliation: importControl === 'uncertain-reconciliation',
@@ -1485,6 +1496,7 @@ async function run(): Promise<void> {
         ? null
         : { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
     });
+    reachServiceStartup('owners');
     // The ledger learns the trusted launch once, before any frame is served, so every plan it freezes
     // names the binding this launch actually bound rather than re-deriving one at dispatch.
     const launch: LaunchBinding = developerLive === null
@@ -1622,6 +1634,7 @@ async function run(): Promise<void> {
     void openStore.runScheduledBackupIfDue().catch(() => undefined);
     backupTimer = setInterval(() => void openStore.runScheduledBackupIfDue().catch(() => undefined), BACKUP_CHECK_INTERVAL_MS);
     backupTimer.unref();
+    reachServiceStartup('serving');
     for await (const frame of readFrames()) {
       let request: ServiceRequest;
       try {

@@ -46,6 +46,11 @@ const PRODUCT_READY_TIMEOUT_MS = 60_000;
 // outer race gives up on it — the relationship this pair has always had.
 const BROWSER_LAUNCH_TIMEOUT_MS = PRODUCT_READY_TIMEOUT_MS + 5_000;
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
+// The product's own deadline for its service to become ready, src/main/service-client.ts STARTUP_READY_TIMEOUT_MS, and the
+// margin for main to say it failed and exit after it. A launch whose renderer target misses J-01's budget while main still
+// waits at `service-ready` is watched to that deadline, only to say whether the service was slow or stalled (Issue #675).
+const PRODUCT_SERVICE_READY_TIMEOUT_MS = 2 * 60_000;
+const PRODUCT_SERVICE_READY_MARGIN_MS = 15_000;
 const BROWSER_LAUNCH_TIMEOUT = journeyCheckFailure('J-01', 'browser-launch-timeout');
 const BROWSER_CLOSE_TIMEOUT = journeyCheckFailure('J-01', 'browser-close-timeout');
 const BROWSER_DISCONNECTED = journeyCheckFailure('J-01', 'browser-disconnected');
@@ -265,6 +270,34 @@ function productEnvironment(executable) {
 }
 
 /**
+ * The launch's renderer target did not appear within J-01's budget: fail, naming why from the launch's trace (Issue #675).
+ * Main makes the window only once its service is ready, so a launch still at `service-ready` cannot have a target yet; it
+ * is watched until the product's own service deadline has passed, never to let it pass, only to say whether the service
+ * then became ready (`-slow`), or the product gave up on it (`-stalled`), or neither (`-unbounded`). Otherwise the check
+ * says the product failed or exited, that main was making the window, or that it had said it was ready.
+ */
+async function rendererTargetMissing() {
+  let trace = launchTraceNow();
+  const waitingForService = (current) => current?.last === 'service-ready' && current.failed === null && current.exited === null;
+  if (waitingForService(trace)) {
+    const bound = launchInFlight.startedAt + trace.lastAt + PRODUCT_SERVICE_READY_TIMEOUT_MS + PRODUCT_SERVICE_READY_MARGIN_MS;
+    while (waitingForService(trace) && Date.now() < bound) {
+      await new Promise((settle) => setTimeout(settle, 250));
+      trace = launchTraceNow();
+    }
+    requireJourney(trace.failed !== 'service-ready', 'renderer-target-service-start-stalled');
+    requireJourney(trace.failed !== null || trace.exited !== null || trace.last === 'service-ready', 'renderer-target-service-start-slow');
+    requireJourney(trace.failed !== null || trace.exited === null, 'renderer-target-service-start-exited');
+    requireJourney(trace.failed !== null, 'renderer-target-service-start-unbounded');
+  }
+  requireJourney(trace === null || trace.failed === null, 'renderer-target-startup-failed');
+  requireJourney(trace === null || trace.exited === null, 'renderer-target-product-exited');
+  requireJourney(trace?.last !== 'renderer-first-paint', 'renderer-target-window');
+  requireJourney(trace?.last !== 'readiness-signal', 'renderer-target-after-readiness');
+  requireJourney(false, 'renderer-target-timeout');
+}
+
+/**
  * Attach to the product's page and wait until its renderer is ready. `onTarget` runs once the page target is found and
  * attached, before that wait (Issue #518): a stall at `renderer-ready` then says the target existed.
  */
@@ -297,7 +330,7 @@ async function attachRendererTarget(browser, onTarget = () => undefined) {
     );
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  requireJourney(pageTarget, 'renderer-target-timeout');
+  if (!pageTarget) await rendererTargetMissing();
   const { sessionId } = await sendRoot(
     'Target.attachToTarget',
     {

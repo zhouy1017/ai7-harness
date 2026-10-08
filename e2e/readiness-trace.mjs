@@ -1,7 +1,8 @@
 // Issue #518: a Journey that waits past its readiness budget names what the product reported while it waited. For the
-// launch in flight, that is when it launched, the last startup step main reached, AI7_READY, a startup failure and the
-// exit, each in milliseconds since the launch began. The product's own words never pass: only its fixed markers are read,
-// every other line is counted, and the one line a failure prints carries nothing else.
+// launch in flight, that is when it launched, the last startup step main reached, how far the service's own startup came
+// (Issue #675), AI7_READY, a startup failure and the exit, each in milliseconds since the launch began. The product's own
+// words never pass: only its fixed markers are read, every other line is counted, and the one line a failure prints
+// carries nothing else.
 //
 // Playwright reports a launch's lines — its process's output and its exit — only to its own `browser` debug log, which it
 // sets up when it loads: never to a client logger. A Journey therefore points that log at a file in its run root before it
@@ -23,6 +24,13 @@ export const STARTUP_LOCATIONS = Object.freeze([
   'readiness-signal',
 ]);
 
+/**
+ * How far the service's own startup came while main waited for it at `service-ready` (Issue #675), in order: its process
+ * exists, its module runs, it opens the store, it sets up the owners over the store, it serves requests — or it stopped
+ * before it was ready. Main relays each as `AI7_SERVICE_STARTUP/<step>` on its own stderr.
+ */
+export const SERVICE_STARTUP_STEPS = Object.freeze(['spawned', 'process', 'store', 'owners', 'serving', 'stopped']);
+
 const LOCATION = new Set(STARTUP_LOCATIONS);
 const SCENARIO = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 
@@ -36,6 +44,8 @@ export function createLaunchTrace(scenario, startedAt = Date.now()) {
     launched: null,
     last: null,
     lastAt: null,
+    service: null,
+    serviceAt: null,
     ready: null,
     failed: null,
     exited: null,
@@ -75,6 +85,15 @@ export function observeBrowserLog(trace, message, now = Date.now()) {
       if (reached !== null && LOCATION.has(reached[1])) {
         trace.last = reached[1];
         trace.lastAt = at;
+        return;
+      }
+      // The furthest step the service reached, however main's relays of them interleave.
+      const service = /^AI7_SERVICE_STARTUP\/([a-z]+)$/u.exec(line);
+      if (service !== null && SERVICE_STARTUP_STEPS.includes(service[1])) {
+        if (trace.service === null || SERVICE_STARTUP_STEPS.indexOf(service[1]) > SERVICE_STARTUP_STEPS.indexOf(trace.service)) {
+          trace.service = service[1];
+          trace.serviceAt = at;
+        }
         return;
       }
       const failed = /^AI7_STARTUP_FAILED\/([a-z-]+)$/u.exec(line);
@@ -120,6 +139,7 @@ export function formatReadinessTrace(journey, trace, now = Date.now()) {
     `launch=${trace.scenario}`,
     `launched=${ms(trace.launched)}`,
     `last=${trace.last ?? 'none'}@${ms(trace.lastAt)}`,
+    `service=${trace.service ?? 'none'}@${ms(trace.serviceAt)}`,
     `ready=${ms(trace.ready)}`,
     `failed=${trace.failed ?? 'none'}`,
     `exit=${trace.exitCode ?? 'none'}@${ms(trace.exited)}`,
@@ -130,9 +150,10 @@ export function formatReadinessTrace(journey, trace, now = Date.now()) {
 }
 
 const LOCATION_WORD = `(?:${STARTUP_LOCATIONS.join('|')}|none)`;
+const SERVICE_WORD = `(?:${SERVICE_STARTUP_STEPS.join('|')}|none)`;
 const MS = '(?:\\d{1,9}|none)';
 const FIELDS = new RegExp(
-  `^launch=[a-z0-9]+(?:-[a-z0-9]+)*;launched=${MS};last=${LOCATION_WORD}@${MS};ready=${MS};failed=${LOCATION_WORD};` +
+  `^launch=[a-z0-9]+(?:-[a-z0-9]+)*;launched=${MS};last=${LOCATION_WORD}@${MS};service=${SERVICE_WORD}@${MS};ready=${MS};failed=${LOCATION_WORD};` +
     `exit=(?:-?\\d{1,10}|null|none)@${MS};target=(?:yes|no);other=\\d{1,6};age=\\d{1,9}$`,
   'u',
 );

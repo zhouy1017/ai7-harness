@@ -30,6 +30,16 @@ const SERVICE_STOP_GRACE_MS = 5_000;
 const SERVICE_STOP_FORCE_MS = 5_000;
 
 /**
+ * How far the service's startup came (Issue #675): `spawned` once its process exists, which the client sees itself, then
+ * the steps the service names on its stderr as it enters them, and `stopped` if it stopped before it was ready. Only these
+ * fixed lines are read from that stream, and only until the service is ready; everything else on it is discarded as before.
+ */
+export type ServiceStartupStep = 'spawned' | 'process' | 'store' | 'owners' | 'serving' | 'stopped';
+const SERVICE_STARTUP_LINE = /^AI7_SERVICE_(?:STARTUP\/(process|store|owners|serving)|(STOPPED)\/[A-Z][A-Z0-9_]{0,63})$/u;
+// A startup line is a few dozen bytes; a longer unfinished line is something else the service said, and is dropped.
+const MAX_STARTUP_LINE_BYTES = 128;
+
+/**
  * How long one request may take before the service is treated as hung and stopped: startup's readiness, the operations
  * whose work grows with a file or a manuscript, and every other request, each as the reason beside it says.
  */
@@ -166,10 +176,12 @@ export class ServiceClient {
   #faulted = false;
   #terminalUnexpected = false;
   #unexpectedExit: (() => void) | undefined;
+  #endStartupTrace: (() => void) | undefined;
 
-  private constructor(child: ChildProcessWithoutNullStreams) {
+  private constructor(child: ChildProcessWithoutNullStreams, onStartupStep?: (step: ServiceStartupStep) => void) {
     this.#child = child;
-    child.stderr.resume();
+    if (onStartupStep === undefined) child.stderr.resume();
+    else this.#traceStartup(onStartupStep);
     child.stdout.on('data', (chunk: Buffer) => this.#acceptStdout(chunk));
     child.stdout.on('error', () => this.#fault());
     child.stdin.on('error', () => this.#fault());
@@ -194,6 +206,7 @@ export class ServiceClient {
     connectivityPath?: string,
     unitHoldPath?: string,
     answerHoldPath?: string,
+    onStartupStep?: (step: ServiceStartupStep) => void,
   ): Promise<ServiceClient> {
     if (!isAbsolute(executable) || !isAbsolute(serviceEntry) || !isAbsolute(dataRoot)) {
       throw new ServiceCallError('SERVICE_LAUNCH_INVALID', '本地业务服务启动参数无效。');
@@ -225,15 +238,50 @@ export class ServiceClient {
         windowsHide: true,
       },
     );
-    const client = new ServiceClient(child);
+    const client = new ServiceClient(child, onStartupStep);
     try {
       const readiness = await client.call('ready', {});
       if (!readinessIsExact(readiness)) throw new ServiceCallError('SERVICE_READINESS_INVALID', '本地业务服务就绪校验失败。');
+      client.#endStartupTrace?.();
       return client;
     } catch (error) {
       await client.stop();
       throw error;
     }
+  }
+
+  /** Read the service's startup lines from its stderr until it is ready (Issue #675); every other byte is discarded. */
+  #traceStartup(onStartupStep: (step: ServiceStartupStep) => void): void {
+    const child = this.#child;
+    let line = '';
+    let overlong = false;
+    const read = (chunk: Buffer): void => {
+      const parts = chunk.toString('latin1').split('\n');
+      for (let index = 0; index < parts.length; index += 1) {
+        const part = parts[index] ?? '';
+        if (index < parts.length - 1) {
+          const found = overlong ? null : SERVICE_STARTUP_LINE.exec((line + part).replace(/\r$/u, ''));
+          if (found !== null) onStartupStep(found[2] === 'STOPPED' ? 'stopped' : (found[1] as ServiceStartupStep));
+          line = '';
+          overlong = false;
+        } else if (!overlong) {
+          line += part;
+          if (line.length > MAX_STARTUP_LINE_BYTES) {
+            line = '';
+            overlong = true;
+          }
+        }
+      }
+    };
+    const spawned = (): void => onStartupStep('spawned');
+    child.once('spawn', spawned);
+    child.stderr.on('data', read);
+    this.#endStartupTrace = () => {
+      this.#endStartupTrace = undefined;
+      child.off('spawn', spawned);
+      child.stderr.off('data', read);
+      child.stderr.resume();
+    };
   }
 
   onUnexpectedExit(callback: () => void): void {

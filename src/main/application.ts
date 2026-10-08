@@ -4973,6 +4973,10 @@ export async function runApplication(): Promise<void> {
       launch.connectivityPath,
       launch.unitHoldPath,
       launch.answerHoldPath,
+      // A Journey reads how far the service's own startup came (Issue #675), beside main's steps and under the same switch.
+      process.env.AI7_E2E_JOURNEY === undefined
+        ? undefined
+        : (step) => void process.stderr.write(`AI7_SERVICE_STARTUP/${step}\n`),
     );
     service.onUnexpectedExit(() => {
       serviceInterrupted = true;
