@@ -1856,8 +1856,11 @@ async function main() {
       JSON.stringify(draft.market.predictions) === JSON.stringify([['marketReturn', ['暂无法预测']], ['awards', [MARKET_AWARDS]], ['pricing', [PRICING_WAITING]]]),
     'evaluation-market-words', draft.market);
     // Nothing of it is chosen for the editor: no conclusion is preselected, and the service holds no range.
-    const marketService = await renderer.evaluate(`window.ai7.inspectEvaluation({ recordId: null }).then((page) => JSON.stringify([page.market.pricing, page.market.comparableCount, page.record.content.conclusion]))`);
-    requireJourney(marketService === JSON.stringify([{ booksWithActuals: 0, threshold: 30, enabled: false, available: false, house: null, series: null }, 0, null]),
+    const marketService = await renderer.evaluate(`window.ai7.inspectEvaluation({ recordId: null }).then((page) => JSON.stringify([page.market.pricing, page.market.comparableCount, page.market.seriesUnreadable, page.record.content.conclusion]))`);
+    requireJourney(marketService === JSON.stringify([{
+      booksWithActuals: 0, otherBooksWithActuals: 0, threshold: 30, enabled: false, available: false, unreadable: false,
+      house: null, series: null, seriesBooksWithActuals: null, seriesMinimum: 5,
+    }, 0, false, null]),
       'evaluation-market-service', marketService);
     requireJourney(draft.rewrite !== null && draft.rewrite.reason === '先把至少一项改成你的分数并保存：重写会让评语与你保存的分数一致。' &&
       JSON.stringify(draft.rewrite.actions) === JSON.stringify([]) && draft.rewrite.proposal === null, 'evaluation-market-rewrite-not-yet', draft.rewrite);
