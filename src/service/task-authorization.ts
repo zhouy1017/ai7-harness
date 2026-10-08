@@ -399,7 +399,7 @@ export const CAPTURED_PROCEDURE_SCHEMA_VERSION = 63;
  * version and saved entry each rewrite Task rewrites, and the editor's one decision on each rewritten result. It follows
  * revision 63 (Issue #65, S30); revision 64 is another slice's. No existing row changes. This is the terminal version.
  */
-export const EVALUATION_REWRITE_SCHEMA_VERSION = 65;
+export const EVALUATION_REWRITE_SCHEMA_VERSION = 64;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;

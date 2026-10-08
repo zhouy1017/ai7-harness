@@ -159,10 +159,10 @@ interface Revision {
 // Newest first: a store is walked down one revision at a time.
 const REVISIONS: ReadonlyArray<Revision> = [
   {
-    // Revision 65 (Issue #429, S81b2) rebuilds the three kind-coupled relations and stamps its version in one transaction, so the
+    // Revision 64 (Issue #429, S81b2) rebuilds the three kind-coupled relations and stamps its version in one transaction, so the
     // one step an interruption can leave committed without the stamp is the two relations of 按我的评分重写评语. Revision 63 left
-    // the kind-coupled relations as revision 62 shaped them; revision 64 is another slice's, so 63 is the revision before.
-    revision: 65,
+    // the kind-coupled relations as revision 62 shaped them.
+    revision: 64,
     step: initializeEvaluationRewriteSchema,
     undo: (database) => {
       drop(database, Object.keys(EVALUATION_REWRITE_SCHEMA_SQL).reverse());
