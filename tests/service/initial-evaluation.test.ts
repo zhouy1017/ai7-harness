@@ -15,7 +15,7 @@ import {
   ANALYSIS_LEDGER_REVISION_58_SQL,
   ANALYSIS_LEDGER_SCHEMA_SQL,
   DATABASE_MERGE_SCHEMA_VERSION,
-  INITIAL_EVALUATION_SCHEMA_VERSION,
+  DIALOGUE_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import {
   INITIAL_EVALUATION_ASSURANCE_STATEMENT,
@@ -258,7 +258,7 @@ describe('AI7 初评 over the real store on exact sample1', () => {
     // The snapshot is immutable, as the rest of the record is.
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(INITIAL_EVALUATION_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DIALOGUE_SCHEMA_VERSION);
       expect(() => database.exec('UPDATE evaluation_initial_drafts SET canonical_json = canonical_json')).toThrowError(/EVALUATION_LEDGER_IMMUTABLE/u);
       expect(() => database.exec('DELETE FROM evaluation_initial_drafts')).toThrowError(/EVALUATION_LEDGER_IMMUTABLE/u);
       database.exec('DROP TRIGGER evaluation_initial_drafts_no_update');
@@ -406,8 +406,8 @@ describe('AI7 初评 over the real store on exact sample1', () => {
     const plant = new DatabaseSync(path);
     let before: string;
     try {
-      // Revision 58 exactly: the three relations as revision 24 left them, and no relation of revision 59.
-      plant.exec(`DROP TABLE evaluation_initial_drafts; PRAGMA user_version = ${DATABASE_MERGE_SCHEMA_VERSION};`);
+      // Revision 58 exactly: the three relations as revision 24 left them, and no relation of revision 59 or 60.
+      plant.exec(`DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; PRAGMA user_version = ${DATABASE_MERGE_SCHEMA_VERSION};`);
       downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
       before = rows(plant);
       // At revision 58 the evaluation kind is refused by the CHECK itself.
@@ -424,7 +424,7 @@ describe('AI7 初评 over the real store on exact sample1', () => {
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(INITIAL_EVALUATION_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DIALOGUE_SCHEMA_VERSION);
       expect(rows(after)).toBe(before!);
       for (const table of KIND_COUPLED_ANALYSIS_RELATIONS) {
         expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(ANALYSIS_LEDGER_SCHEMA_SQL[table]);
@@ -488,7 +488,7 @@ describe('AI7 初评 over the real store on exact sample1', () => {
     const plant = new DatabaseSync(path);
     try {
       // Only the version moves back: no store AI7 wrote at revision 58 held these shapes, and none is read as one.
-      plant.exec(`DROP TABLE evaluation_initial_drafts; PRAGMA user_version = ${DATABASE_MERGE_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; PRAGMA user_version = ${DATABASE_MERGE_SCHEMA_VERSION};`);
     } finally {
       plant.close();
     }

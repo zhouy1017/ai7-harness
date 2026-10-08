@@ -15,6 +15,7 @@ import {
 } from './global-attention-labels.js';
 import type { ReviewPill } from './review-labels.js';
 import { TASK_PLAN_OPEN } from './task-drawer-labels.js';
+import { DIALOGUE_ANSWER_LABEL } from './dialogue-labels.js';
 
 /**
  * The words of the 任务 panel (Issue #423, plan slice S77a; editor-surfaces §1 任务面, V2-UX-TASK-044, TASK-045): the
@@ -54,10 +55,11 @@ export const TASK_PANEL_STATUS_LINES = {
 
 // ---- one card ---------------------------------------------------------------------------------------------
 
-/** What kind of Task a card is (TASK-044): every Task today runs without a dialogue. */
+/** What kind of Task a card is (TASK-044): a dialogue Task (Issue #52, S17a), or one that runs without a dialogue. */
 export const TASK_PANEL_KIND_LABELS = {
   analysis: '分析任务 · 不需要对话',
   review: '审阅任务 · 不需要对话',
+  dialogue: '对话任务 · 就所选文字提问',
 } as const;
 
 export const TASK_PANEL_ACTION_LABELS = {
@@ -66,6 +68,8 @@ export const TASK_PANEL_ACTION_LABELS = {
   cancel: '取消任务',
   plan: TASK_PLAN_OPEN,
   result: '查看结果',
+  // A dialogue Task's own two (TASK-044): its latest answer in the floating window, and the dialogue in the foreground.
+  answer: DIALOGUE_ANSWER_LABEL,
 } as const;
 
 /**
@@ -73,7 +77,7 @@ export const TASK_PANEL_ACTION_LABELS = {
  * Cancellation Impact Summary, where the cancellation is confirmed; `plan` and `next` open the plan or the Task's own
  * surface; `result` opens `查看结果`'s floating window.
  */
-export type TaskPanelActionKey = 'pause' | 'resume' | 'cancel' | 'plan' | 'next' | 'result';
+export type TaskPanelActionKey = 'pause' | 'resume' | 'cancel' | 'plan' | 'next' | 'result' | 'answer';
 export interface TaskPanelAction {
   readonly key: TaskPanelActionKey;
   readonly label: string;
@@ -117,6 +121,14 @@ export function taskPanelCardView(entry: BookTaskItemProjection): TaskPanelCardV
     case 'analysis-resumable':
       actions = [action('resume', true), action('cancel'), action('plan')];
       break;
+    // A dialogue Task offers 回答 and 打开对话 (TASK-044); 回答 once its latest answer settled with something to read.
+    case 'dialogue-answering':
+    case 'dialogue-answered':
+    case 'dialogue-stopped':
+    case 'dialogue-interrupted':
+    case 'dialogue-failed':
+      actions = [...(entry.result !== null ? [action('answer')] : []), next];
+      break;
     case 'analysis-cancelling':
     case 'analysis-waiting-capacity':
     case 'analysis-waiting-network':
@@ -129,7 +141,8 @@ export function taskPanelCardView(entry: BookTaskItemProjection): TaskPanelCardV
       actions = item.group === 'recent' && entry.result !== null ? [action('result', true)] : [next];
   }
   return {
-    kindLabel: item.object.kind === 'review' ? TASK_PANEL_KIND_LABELS.review : TASK_PANEL_KIND_LABELS.analysis,
+    kindLabel: item.object.kind === 'review' ? TASK_PANEL_KIND_LABELS.review
+      : item.object.kind === 'dialogue' ? TASK_PANEL_KIND_LABELS.dialogue : TASK_PANEL_KIND_LABELS.analysis,
     title: globalAttentionObjectLabel(item.object),
     stateLabel: GLOBAL_ATTENTION_STATE_LABELS[item.state],
     pill: GLOBAL_ATTENTION_STATE_PILLS[item.state],

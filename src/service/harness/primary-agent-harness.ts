@@ -2,11 +2,13 @@ import { randomUUID } from 'node:crypto';
 import type { Context } from '@deepseek-ai/cordis';
 import type { AgentHandle } from '@deepseek-ai/dsh-agent';
 import type { GenerateOptions, LlmAdapter, LlmRuntime, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm';
-import type { SessionEvent } from '@deepseek-ai/dsh-session';
+import type { SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session';
+import type { SessionInspection, SessionPersistenceRevision } from '@deepseek-ai/dsh-session-persistence';
 import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { AI7_FAILURE_CODES, classifyModelFailure, type ClassifiedModelFailure, type DshFailureCodes } from '../provider/classification.js';
 import type { EgressDecision, ExecutionRoute, TransmitTicket } from '../provider/egress-gate.js';
 import type { AssembledModelPayload } from '../provider/payload.js';
+import { HarnessSessionLogBackend } from './session-log.js';
 
 /**
  * `PrimaryAgentHarness`: the AI7-owned composition of the pinned DSH subset for one execution
@@ -40,11 +42,25 @@ export interface HarnessCompositionDescriptor {
   readonly route: ExecutionRoute;
   readonly model: string;
   readonly promptContractDigest: string;
+  /**
+   * Present only on a composition that persists its Session log (Issue #52, S17a): the Harness Session Ledger written under
+   * the Agent Data Root through DSH's persistence seam. Every composition without it keeps the descriptor — and the digest
+   * every frozen plan pins — exactly as it was.
+   */
+  readonly sessionLog?: { readonly package: { readonly '@deepseek-ai/dsh-session-persistence': typeof SESSION_LOG_PACKAGE_PIN }; readonly storage: 'agent-data-root-jsonl' };
   /** SHA-256 over every field above in canonical JSON; the Execution Binding pins it. */
   readonly digest: string;
 }
 
-export function describeComposition(route: ExecutionRoute, model: string, promptContractDigest: string): HarnessCompositionDescriptor {
+/** The pinned version of DSH's persistence seam the Harness Session Ledger is written through (Issue #52, S17a). */
+export const SESSION_LOG_PACKAGE_PIN = '0.1.0-rc.6' as const;
+
+export interface CompositionOptions {
+  /** The composition persists its Session log under the Agent Data Root. */
+  readonly sessionLog?: boolean;
+}
+
+export function describeComposition(route: ExecutionRoute, model: string, promptContractDigest: string, options: CompositionOptions = {}): HarnessCompositionDescriptor {
   const body = {
     packages: HARNESS_PACKAGE_PINS,
     services: HARNESS_SERVICE_SET,
@@ -55,6 +71,9 @@ export function describeComposition(route: ExecutionRoute, model: string, prompt
     route,
     model,
     promptContractDigest,
+    ...(options.sessionLog === true
+      ? { sessionLog: { package: { '@deepseek-ai/dsh-session-persistence': SESSION_LOG_PACKAGE_PIN }, storage: 'agent-data-root-jsonl' as const } }
+      : {}),
   };
   return { ...body, digest: sha256Hex(canonicalJson(body)) };
 }
@@ -106,6 +125,11 @@ export interface HarnessExecutionRequest {
   readonly gate: (payload: AssembledModelPayload) => EgressDecision;
   /** Receives a `transmit-remote` ticket for the adapter's transmit step; never called under v1. */
   readonly onTransmitTicket: (ticket: TransmitTicket) => void;
+  /**
+   * The directory under the Agent Data Root the composition's Session log is persisted in (Issue #52, S17a), or absent for a
+   * composition whose log stays in memory, as every analysis composition's does.
+   */
+  readonly sessionLogRoot?: string;
 }
 
 export interface PrimaryAgentHarnessHandle {
@@ -120,6 +144,13 @@ export interface PrimaryAgentHarnessHandle {
   bindExecution(binding: { harnessSessionId: string; behaviorCompositionDigest: string; promptContractDigest: string }): void;
   /** Start one turn with authorized unit material and return its ordered signals; the last is terminal. */
   submitUnit(text: string): Promise<HarnessTurnOutcome>;
+  /**
+   * Start one turn as `submitUnit` does, and hand every text delta the model streams to `onText` as DSH records it, in order
+   * (Issue #52, S17a). The Interactive Answer Stream reads these; the terminal outcome is the same as `submitUnit`'s.
+   */
+  submitStreaming(text: string, onText: (delta: string) => void): Promise<HarnessTurnOutcome>;
+  /** Where the next turn's span starts: the Session that will carry it and its first sequence number. */
+  nextSpanStart(): { readonly sessionId: string; readonly startSeq: number };
   interrupt(): void;
   /** Finalize the technical span set and dispose the composition. */
   finish(): Promise<ReadonlyArray<HarnessExecutionSpan>>;
@@ -155,15 +186,18 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     INVALID_CREDENTIAL_CODE: llm.INVALID_CREDENTIAL_CODE,
     CONTEXT_WINDOW_EXCEEDED_CODE: llm.CONTEXT_WINDOW_EXCEEDED_CODE,
   };
-  const composition = describeComposition(request.route, request.model, request.promptContractDigest);
+  const composition = describeComposition(request.route, request.model, request.promptContractDigest, { sessionLog: request.sessionLogRoot !== undefined });
   const context: Context = new cordis.Context();
   let bound = false;
+  // The Interactive Answer Stream's reader for the turn in flight, if one streams (Issue #52, S17a).
+  let streamReader: ((delta: string) => void) | null = null;
   let disposed = false;
   let handle: AgentHandle | undefined;
   const spans: HarnessExecutionSpan[] = [];
   try {
     await context.plugin(agent.AgentRegistry);
     await context.plugin(sessions.SessionStore);
+    if (request.sessionLogRoot !== undefined) await context.plugin(await sessionLogService(), { root: request.sessionLogRoot });
     await context.plugin(llm.LlmRuntime);
     await context.plugin(prompt.SystemPrompt, { includeHarnessIdentity: false, includeRuntimeContext: false, persona: '' });
     await context.plugin(tools.ToolRuntime, { mode: 'native', maxParallelSubCalls: 1 });
@@ -171,6 +205,13 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     context.systemPrompt.suppressRuntimeContext();
     context.systemPrompt.section({ name: PROMPT_SECTION_NAME, order: 0, text: request.systemPrompt, complete: true });
     context.llm.registerAdapter([request.route], request.adapterFactory(failureCodes));
+    // Each text delta the turn in flight streams, as DSH records it: never a business fact, only what the foreground
+    // dialogue shows by complete fragment.
+    context.on('session/event', (_session, event) => {
+      if (streamReader === null || event.type !== 'assistant/chunk') return;
+      const { chunk } = event.data;
+      if (chunk.type === 'text-delta') streamReader(chunk.text);
+    });
     context.on('llm/stream', function (this: LlmRuntime, options: GenerateOptions, next: () => AsyncIterable<StreamChunk>) {
       if (!bound) return refusalStream('执行绑定尚未核对；未发送任何内容。');
       const decision = request.gate(options);
@@ -184,7 +225,8 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
         context.tools.schemas().length === 0 && assembly.tools.length === 0 &&
         prompt.renderPrompt(assembly) === request.systemPrompt && prompt.renderContextSnapshot(assembly) === '' &&
         context.llm.listProviders().length === 1 && context.llm.listProviders()[0]?.id === request.route &&
-        context.agentLoop.config.agents.length === 0 && context.agents.list().length === 0 && context.sessions.list().length === 0,
+        context.agentLoop.config.agents.length === 0 && context.agents.list().length === 0 && context.sessions.list().length === 0 &&
+        (context.get('sessionPersistence') !== undefined) === (request.sessionLogRoot !== undefined),
       'HARNESS_COMPOSITION_INVALID',
       'PrimaryAgentHarness 组合未满足零工具、单路由、完整提示的约束。',
     );
@@ -269,6 +311,30 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     currentSessionId = nextId;
   };
 
+  const submit = async (text: string, onText: ((delta: string) => void) | null): Promise<HarnessTurnOutcome> => {
+    requireHarness(!disposed, 'HARNESS_DISPOSED', 'PrimaryAgentHarness 已释放。');
+    requireHarness(bound, 'HARNESS_UNBOUND', '执行绑定尚未核对，不能提交单元。');
+    requireHarness(streamReader === null, 'HARNESS_TURN_IN_FLIGHT', '上一个回合尚未结束。');
+    if (sessionMode === 'per-unit') await openUnitSession();
+    const session = live.agent.session;
+    const startSeq = session.seq;
+    streamReader = onText;
+    try {
+      live.agent.followup(llm.createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } }));
+      await live.agent.whenIdle();
+    } finally {
+      streamReader = null;
+    }
+    // A persisted log holds the turn once it is flushed: the span names exactly what the Harness Session Ledger keeps.
+    if (request.sessionLogRoot !== undefined) await context.sessions.flush(session);
+    const endSeq = session.seq - 1;
+    const events = session.events.slice(startSeq);
+    // Each span records the Session that actually carried the turn, so per-unit lineage is exact.
+    const span = { sessionId: currentSessionId, startSeq, endSeq };
+    spans.push(span);
+    return { ...projectTurn(events), span };
+  };
+
   return {
     sessionId: request.sessionId,
     sessionMode,
@@ -288,19 +354,13 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
       bound = true;
     },
     async submitUnit(text) {
-      requireHarness(!disposed, 'HARNESS_DISPOSED', 'PrimaryAgentHarness 已释放。');
-      requireHarness(bound, 'HARNESS_UNBOUND', '执行绑定尚未核对，不能提交单元。');
-      if (sessionMode === 'per-unit') await openUnitSession();
-      const session = live.agent.session;
-      const startSeq = session.seq;
-      live.agent.followup(llm.createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } }));
-      await live.agent.whenIdle();
-      const endSeq = session.seq - 1;
-      const events = session.events.slice(startSeq);
-      // Each span records the Session that actually carried the turn, so per-unit lineage is exact.
-      const span = { sessionId: currentSessionId, startSeq, endSeq };
-      spans.push(span);
-      return { ...projectTurn(events), span };
+      return submit(text, null);
+    },
+    async submitStreaming(text, onText) {
+      return submit(text, onText);
+    },
+    nextSpanStart() {
+      return { sessionId: currentSessionId, startSeq: live.agent.session.seq };
     },
     interrupt() {
       if (!disposed) live.agent.cancel({ kind: 'user' });
@@ -317,4 +377,64 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
       return spans;
     },
   };
+}
+
+/**
+ * The Harness Session Ledger's service (Issue #52, S17a): DSH's own `SessionPersistence` seam, its write path the
+ * `PersistenceCoordinator` DSH ships, over AI7's JSONL storage primitive. Built only after the dynamic imports, so no DSH
+ * runtime value loads before the service installs network denial.
+ */
+async function sessionLogService(): Promise<new (ctx: Context, config: { root: string }) => object> {
+  const persistence = await import('@deepseek-ai/dsh-session-persistence');
+  class HarnessSessionLedger extends persistence.SessionPersistence {
+    static readonly inject = ['sessions'];
+    readonly supportsRawArtifacts = false;
+    readonly #backend: HarnessSessionLogBackend;
+    readonly #coordinator: InstanceType<typeof persistence.PersistenceCoordinator<number>>;
+
+    constructor(ctx: Context, config: { root: string }) {
+      super(ctx);
+      this.#backend = new HarnessSessionLogBackend(config.root);
+      // Every event is written as soon as it is recorded: a dialogue interrupted by AI7 closing keeps all it streamed.
+      this.#coordinator = new persistence.PersistenceCoordinator(ctx, this.#backend, { preparedSessionCacheSize: 1, writeBatchMaxDelayMs: 1 });
+    }
+
+    locate(meta: SessionHeader): { kind: string; path: string } {
+      return this.#backend.locate(meta);
+    }
+
+    create(meta: SessionHeader): Promise<void> {
+      return this.#coordinator.create(meta);
+    }
+
+    append(id: SessionId, events: readonly SessionEvent[]): Promise<void> {
+      return this.#coordinator.append(id, events);
+    }
+
+    load(id: SessionId): Promise<SessionInspection> {
+      return this.#coordinator.load(id);
+    }
+
+    inspect(id: SessionId, signal?: AbortSignal): Promise<SessionInspection> {
+      return this.#coordinator.inspect(id, signal);
+    }
+
+    readFrom(id: SessionId, fromSeq: number, signal?: AbortSignal): Promise<{ meta: SessionHeader; events: SessionEvent[] }> {
+      return this.#coordinator.readFrom(id, fromSeq, signal);
+    }
+
+    list(): Promise<SessionHeader[]> {
+      return this.#backend.list();
+    }
+
+    async listSnapshots(): Promise<Array<{ header: SessionHeader; revision: SessionPersistenceRevision }>> {
+      const snapshots: Array<{ header: SessionHeader; revision: SessionPersistenceRevision }> = [];
+      for (const header of await this.#backend.list()) {
+        const revision = await this.#backend.readStoredRevision(header.id);
+        if (revision !== undefined) snapshots.push({ header, revision });
+      }
+      return snapshots;
+    }
+  }
+  return HarnessSessionLedger as unknown as new (ctx: Context, config: { root: string }) => object;
 }
