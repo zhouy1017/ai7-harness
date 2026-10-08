@@ -1393,6 +1393,7 @@ async function run(): Promise<void> {
     store.reconcileStoppedInitialEvaluationRuns();
     // 事实核查 and the review categories have no 续行 either (Issue #657): each settles the same way, so the Book can
     // prepare them again and no page polls a Run nothing executes. 继续审阅 then records what such a category came to.
+    // A Review Run's category left authorized sent nothing and is 继续审阅's to dispatch, the editor's own choice.
     store.reconcileStoppedFactualReviewRuns();
     store.reconcileStoppedReviewCategoryRuns();
     // A Review Run's categories take a place of the one owner's governor one after another.

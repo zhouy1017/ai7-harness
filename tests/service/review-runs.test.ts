@@ -10,7 +10,7 @@ import { REPORT_EXPORT_FORMATS, REPORT_FORMAT_LINES } from '../../src/service/ma
 import { CooperativeJobOwner } from '../../src/service/cooperative-jobs.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
-import { RECONCILED_INTERRUPTED_DETAIL, RECONCILED_QUEUED_DETAIL, type BaselineAnalysisStore } from '../../src/service/analysis/baseline-analysis-store.js';
+import { RECONCILED_INTERRUPTED_DETAIL, type BaselineAnalysisStore } from '../../src/service/analysis/baseline-analysis-store.js';
 import { graphemeCount, sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
@@ -898,21 +898,28 @@ describe('a Review Run over the real store on exact sample1', () => {
             return 'refused';
           }
         })()).toBe('refused');
-        expect(second.store.reconcileStoppedReviewCategoryRuns()).toEqual({ settled: 1 });
         if (planted === 'authorized') {
-          expect(typos().run).toMatchObject({ runRecordId, state: 'blocked-before-dispatch', blockedReasons: [RECONCILED_QUEUED_DETAIL] });
-          expect(typos().taskOutcome).toBeNull();
+          // A category whose turn came and that never reached the owner sent nothing. Its Review Run owns it, and
+          // 继续审阅 — the editor's own choice — dispatches it, so the start leaves it as it is (ADR 0034).
+          expect(second.store.reconcileStoppedReviewCategoryRuns()).toEqual({ settled: 0 });
+          expect(typos().run).toMatchObject({ runRecordId, state: 'authorized' });
+          await second.driver.continue(reviewRunId);
+          const continued = workspace(second, opened, reviewRunId).run!;
+          expect(continued.categories.map((category) => category.state)).toEqual(['settled']);
+          expect(typos().run).toMatchObject({ runRecordId });
+          expect(['completed', 'completed-with-gaps']).toContain(typos().run!.state);
         } else {
+          expect(second.store.reconcileStoppedReviewCategoryRuns()).toEqual({ settled: 1 });
           // A review category cannot resume: 已中断 with its outcome, no revision.
           expect(typos().run).toMatchObject({ runRecordId, state: 'interrupted' });
           expect(typos().taskOutcome).toMatchObject({ classification: 'interrupted', resultSetRevisionId: null, safeNextAction: RECONCILED_INTERRUPTED_DETAIL });
+          expect(second.store.reconcileStoppedReviewCategoryRuns()).toEqual({ settled: 0 });
+          // 继续审阅 then records what the Run came to, sending nothing, and the category can be reviewed again.
+          await second.driver.continue(reviewRunId);
+          const continued = workspace(second, opened, reviewRunId).run!;
+          expect(continued.categories.map((category) => category.state)).toEqual(['interrupted']);
+          expect(typos().run).toMatchObject({ runRecordId, state: 'interrupted' });
         }
-        expect(second.store.reconcileStoppedReviewCategoryRuns()).toEqual({ settled: 0 });
-        // 继续审阅 then records what the Run came to, sending nothing, and the category can be reviewed again.
-        await second.driver.continue(reviewRunId);
-        const continued = workspace(second, opened, reviewRunId).run!;
-        expect(continued.categories.map((category) => category.state)).toEqual([planted === 'authorized' ? 'refused' : 'interrupted']);
-        expect(typos().run).toMatchObject({ runRecordId });
       } finally {
         await close(second);
       }

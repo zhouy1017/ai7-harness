@@ -1310,8 +1310,9 @@ export class ReviewRunStore {
     const runRecordId = this.#runRecordOf(category.task.taskIntentId);
     requireReview(runRecordId !== null || last === null, 'REVIEW_RECORD_INVALID', '这一类的运行记录缺失。');
     if (runRecordId === null) return START;
-    // A ledger Run still only authorized is one an earlier hand-off never got to the owner; every other
-    // Run is settled from its own record — including one the owner took that this history never heard of.
+    // A ledger Run still only authorized is one an earlier hand-off never got to the owner — the startup reconciliation
+    // leaves it so for 继续审阅 (Issue #657 review) — and is dispatched; every other Run is settled from its own record,
+    // including one the owner took that this history never heard of.
     const ledger = this.#ledgers.ledgerOf(category.entry);
     return ledger.currentRunState(runRecordId) === 'authorized' ? { kind: 'dispatch', runRecordId, ledger } : SETTLE;
   }
@@ -1440,12 +1441,30 @@ export class ReviewRunStore {
   }
 
   /**
+   * Whether a Review Run's snapshot names the Task of this ledger Run: a category the Run owns, which 继续审阅 takes on.
+   */
+  ownsCategoryRun(runRecordId: string): boolean {
+    return this.#db.prepare(
+      `SELECT 1 FROM analysis_run_records r
+       JOIN analysis_task_intents i ON i.task_intent_id = r.task_intent_id
+       JOIN review_runs rr ON rr.book_id = i.book_id
+       JOIN json_each(rr.canonical_json, '$.categories') c ON json_extract(c.value, '$.task.taskIntentId') = i.task_intent_id
+       WHERE r.run_record_id = ? LIMIT 1`,
+    ).get(runRecordId) !== undefined;
+  }
+
+  /**
    * Startup reconciliation of the review-category kinds (Issue #657): a category Run a stopped service left admitted,
-   * executing or pausing has nothing running it, and one left authorized never reached the owner. Unsettled, either reads
-   * as under way for good — the category's next Task is refused, and a page may poll — until the editor happens on
-   * 继续审阅. Each kind's ledger settles them as it settles every kind with no 续行: `interrupted` with its outcome, or
-   * blocked before dispatch with why. A kind's ledger is the one the configuration entry a Review Run snapshotted names,
-   * and it settles every Run of its kind, whatever contract prepared it. Returns how many it settled.
+   * executing or pausing has nothing running it. Unsettled, it reads as under way for good — the category's next Task is
+   * refused, and a page may poll — until the editor happens on 继续审阅. Each kind's ledger settles it as it settles every
+   * kind with no 续行: `interrupted` with its outcome. A category Run left `authorized` sent nothing and stays as it is:
+   * its Review Run owns it, and 继续审阅 — the editor's own choice — dispatches it (ADR 0034; Issue #657 review). One
+   * no Review Run owns is blocked before dispatch with why.
+   *
+   * A kind's ledger is the one the configuration entry a Review Run snapshotted names, and it settles every Run of its
+   * kind, whatever contract prepared it. So a stranded Run whose Task no Review Run snapshotted is settled only when a
+   * Run of the same kind that one did is stranded too; 继续审阅 and a new Task are its other ways out. A snapshot that does
+   * not read back is passed over, so one damaged record never stops the service starting. Returns how many it settled.
    */
   reconcileStoppedCategoryRuns(): number {
     const rows = this.#db.prepare(
@@ -1456,7 +1475,7 @@ export class ReviewRunStore {
        JOIN json_each(rr.canonical_json, '$.categories') c ON json_extract(c.value, '$.task.taskIntentId') = i.task_intent_id
        WHERE substr(i.kind, 1, ?) = ?
          AND (SELECT s.state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1)
-           IN ('authorized', 'admitted', 'executing', 'pausing')
+           IN ('admitted', 'executing', 'pausing')
        ORDER BY r.recorded_at, r.rowid`,
     ).all(EDITORIAL_REVIEW_KIND_PREFIX.length, EDITORIAL_REVIEW_KIND_PREFIX) as SqlRow[];
     const reconciled = new Set<string>();
@@ -1464,9 +1483,15 @@ export class ReviewRunStore {
     for (const row of rows) {
       const kind = text(row.kind);
       if (reconciled.has(kind)) continue;
+      let ledger: BaselineAnalysisStore;
+      try {
+        ledger = this.#ledgers.ledgerOf(this.#category(text(row.review_run_id), text(row.category_id)).category.entry);
+      } catch {
+        // This snapshot does not read back; another Run of the kind, or 继续审阅, may still reach its ledger.
+        continue;
+      }
       reconciled.add(kind);
-      const { category } = this.#category(text(row.review_run_id), text(row.category_id));
-      settled += this.#ledgers.ledgerOf(category.entry).reconcileStoppedRuns().settled;
+      settled += ledger.reconcileStoppedRuns({ leaveAuthorized: (runRecordId) => this.ownsCategoryRun(runRecordId) }).settled;
     }
     return settled;
   }
