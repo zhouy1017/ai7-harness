@@ -385,6 +385,14 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['decideLearningMaterial']['output']>(IPC_CHANNELS.decideLearningMaterial, input),
   inspectFeedbackHistory: (input = {}) =>
     invoke<ServiceOperationMap['inspectFeedbackHistory']['output']>(IPC_CHANNELS.inspectFeedbackHistory, input),
+  inspectLearningAudit: (input = {}) =>
+    invoke<ServiceOperationMap['inspectLearningAudit']['output']>(IPC_CHANNELS.inspectLearningAudit, input),
+  inspectLearningLineage: (input: ServiceOperationMap['inspectLearningLineage']['input']) =>
+    invoke<ServiceOperationMap['inspectLearningLineage']['output']>(IPC_CHANNELS.inspectLearningLineage, input),
+  previewLearningRemediation: (input: ServiceOperationMap['previewLearningRemediation']['input']) =>
+    invoke<ServiceOperationMap['previewLearningRemediation']['output']>(IPC_CHANNELS.previewLearningRemediation, input),
+  recordLearningRemediation: (input: ServiceOperationMap['recordLearningRemediation']['input']) =>
+    invoke<ServiceOperationMap['recordLearningRemediation']['output']>(IPC_CHANNELS.recordLearningRemediation, input),
   inspectEvaluationCalibration: (input: ServiceOperationMap['inspectEvaluationCalibration']['input'] = { after: null, focusBookId: null }) =>
     invoke<ServiceOperationMap['inspectEvaluationCalibration']['output']>(IPC_CHANNELS.inspectEvaluationCalibration, input),
   recordPublicationActuals: (input: ServiceOperationMap['recordPublicationActuals']['input']) =>

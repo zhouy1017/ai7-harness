@@ -1190,6 +1190,20 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'learning-source-records',
     'learning-material-pages',
     'feedback-pending-submit',
+    // Issue #62 (S27a): 质量与学习 › 学习回溯 — the Book-grouped audit list, one material's lineage with its whole decision
+    // chain and nothing downstream yet, 停止今后使用 through its preview, 学习准入 reflecting it, a batch with a drifted member
+    // named and left out, re-inclusion, a stale preview refused, and all of it kept across a restart.
+    'learning-audit-list',
+    'learning-audit-lineage',
+    'learning-audit-stop-preview',
+    'learning-audit-stop-recorded',
+    'learning-audit-eligibility-reflects',
+    'learning-audit-batch',
+    'learning-audit-reinclude',
+    'learning-audit-stale-refused',
+    'learning-audit-restart',
+    'j14-learning-audit-keyboard',
+    'j14-learning-audit-reflow-forced-colors',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',

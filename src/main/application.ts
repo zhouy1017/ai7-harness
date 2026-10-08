@@ -3608,6 +3608,41 @@ function registerRendererHandlers(
       return service.call('inspectFeedbackHistory', input);
     }),
   );
+  // 质量与学习 › 学习回溯 (Issue #62, S27a): house-wide reads, and 停止今后使用 serialized with every other record.
+  ipcMain.handle(IPC_CHANNELS.inspectLearningAudit, (event, input: ServiceOperationMap['inspectLearningAudit']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return service.call('inspectLearningAudit', input);
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectLearningLineage, (event, input: ServiceOperationMap['inspectLearningLineage']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return service.call('inspectLearningLineage', { bookId: input.bookId, materialKey: input.materialKey });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.previewLearningRemediation, (event, input: ServiceOperationMap['previewLearningRemediation']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return service.call('previewLearningRemediation', { bookId: input.bookId, items: input.items });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.recordLearningRemediation, (event, input: ServiceOperationMap['recordLearningRemediation']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('recordLearningRemediation', { bookId: input.bookId, items: input.items, previewDigest: input.previewDigest });
+      });
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.decideLearningMaterial, (event, input: ServiceOperationMap['decideLearningMaterial']['input']) =>
     envelope(async () => {
       requireSender(event);

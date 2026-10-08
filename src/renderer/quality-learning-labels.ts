@@ -110,9 +110,12 @@ export function learningDecisionLine(material: Pick<LearningMaterialProjection, 
 
 // ---- 反馈历史 (Issue #61, plan slice S26c; V2-UX-FDBK-009, FDBK-010, FDBK-013) ----------------------------------------------
 
-export const QUALITY_LEARNING_TABS: ReadonlyArray<{ readonly tab: 'feedback' | 'learning'; readonly label: string }> = [
+/** 质量与学习's tabs: the passive history, the decisions waiting, and the audit of what was decided (Issue #62, S27a). */
+export type QualityLearningTab = 'feedback' | 'learning' | 'audit';
+export const QUALITY_LEARNING_TABS: ReadonlyArray<{ readonly tab: QualityLearningTab; readonly label: string }> = [
   { tab: 'feedback', label: '反馈历史' },
   { tab: 'learning', label: '学习准入' },
+  { tab: 'audit', label: '学习回溯' },
 ];
 export const QUALITY_LEARNING_TABS_LABEL = '质量与学习的内容';
 export const FEEDBACK_HISTORY_HEADING = '反馈历史';
