@@ -252,6 +252,44 @@ export class CooperativeJobOwner {
     return structuredClone(job.projection);
   }
 
+  /**
+   * 先看计划 of a writing Task (Issue #432, S84a): the writing kind's Task for one house type prepared one bounded step at a time,
+   * as 审稿意见's is. The completed job's result is 新建文档 · 写作任务 with the prepared Task named.
+   */
+  startWritingPreparation(
+    bookId: string,
+    request: Parameters<EditorialStore['createWritingPreparationWork']>[1],
+    launchPolicy: Parameters<EditorialStore['createWritingPreparationWork']>[2],
+  ): ServiceJobProjection {
+    this.#requireCapacity();
+    const work = this.#store.createWritingPreparationWork(bookId, request, launchPolicy);
+    const jobId = randomUUID();
+    const job: JobRecord = {
+      subjectId: work.workId ?? bookId,
+      bookId,
+      cancelRequested: false,
+      scheduled: false,
+      projection: {
+        jobId,
+        kind: 'writing-preparation',
+        state: work.done ? 'completed' : 'queued',
+        progress: {
+          completed: work.done ? work.total : 0,
+          total: work.total,
+          label: work.done ? '写作任务的计划已准备' : '正在为任务保存修订版并整理阅读范围…',
+        },
+        result: work.done ? this.#store.inspectWritingTask(bookId) : null,
+        failure: null,
+      },
+    };
+    if (work.done) this.#rememberPolledTerminal(jobId, job);
+    else {
+      this.#jobs.set(jobId, job);
+      this.#schedule(job);
+    }
+    return structuredClone(job.projection);
+  }
+
   startBaselineAnalysisPreparation(
     bookId: Parameters<EditorialStore['createBaselineAnalysisPreparationWork']>[0],
     goal: Parameters<EditorialStore['createBaselineAnalysisPreparationWork']>[1],
@@ -474,7 +512,7 @@ export class CooperativeJobOwner {
       job.projection.kind === 'task-authorization-preparation' || job.projection.kind === 'baseline-analysis-preparation' ||
       job.projection.kind === 'review-run-preparation' || job.projection.kind === 'reimport-commit' ||
       job.projection.kind === 'initial-evaluation-preparation' || job.projection.kind === 'readers-report-preparation' ||
-      job.projection.kind === 'evaluation-rewrite-preparation') &&
+      job.projection.kind === 'evaluation-rewrite-preparation' || job.projection.kind === 'writing-preparation') &&
       (job.projection.state === 'queued' || job.projection.state === 'running')) {
       job.cancelRequested = true;
       if (job.projection.kind === 'reimport-preparation') {
@@ -489,6 +527,8 @@ export class CooperativeJobOwner {
         this.#store.cancelReadersReportPreparationWork(job.subjectId);
       } else if (job.projection.kind === 'evaluation-rewrite-preparation') {
         this.#store.cancelEvaluationRewritePreparationWork(job.subjectId);
+      } else if (job.projection.kind === 'writing-preparation') {
+        this.#store.cancelWritingPreparationWork(job.subjectId);
       } else if (job.projection.kind === 'review-run-preparation') {
         this.#store.cancelReviewRunPreparationWork(job.subjectId);
       } else if (job.projection.kind === 'reimport-resolution') {
@@ -515,6 +555,8 @@ export class CooperativeJobOwner {
               ? '审稿意见的任务计划准备已取消'
             : job.projection.kind === 'evaluation-rewrite-preparation'
               ? '评语重写的任务计划准备已取消'
+            : job.projection.kind === 'writing-preparation'
+              ? '写作任务的计划准备已取消'
             : job.projection.kind === 'review-run-preparation'
               ? '审阅计划准备已取消'
             : job.projection.kind === 'reimport-resolution'
@@ -558,6 +600,8 @@ export class CooperativeJobOwner {
           this.#store.cancelReadersReportPreparationWork(job.subjectId);
         } else if (job.projection.kind === 'evaluation-rewrite-preparation') {
           this.#store.cancelEvaluationRewritePreparationWork(job.subjectId);
+        } else if (job.projection.kind === 'writing-preparation') {
+          this.#store.cancelWritingPreparationWork(job.subjectId);
         } else if (job.projection.kind === 'review-run-preparation') {
           this.#store.cancelReviewRunPreparationWork(job.subjectId);
         } else if (job.projection.kind === 'reimport-resolution') {
@@ -646,6 +690,21 @@ export class CooperativeJobOwner {
             label: progress.done ? '基线分析的任务计划已准备' : '正在为任务保存修订版并整理阅读范围…',
           },
           result: progress.projection,
+        };
+        if (!progress.done) this.#schedule(job, REIMPORT_BATCH_YIELD_MS);
+        return;
+      }
+      if (job.projection.kind === 'writing-preparation') {
+        const progress = this.#store.advanceWritingPreparationWork(job.subjectId);
+        job.projection = {
+          ...job.projection,
+          state: progress.done ? 'completed' : 'running',
+          progress: {
+            completed: progress.completed,
+            total: progress.total,
+            label: progress.done ? '写作任务的计划已准备' : '正在为任务保存修订版并整理阅读范围…',
+          },
+          result: progress.done && job.bookId !== undefined ? this.#store.inspectWritingTask(job.bookId) : null,
         };
         if (!progress.done) this.#schedule(job, REIMPORT_BATCH_YIELD_MS);
         return;
@@ -780,6 +839,8 @@ export class CooperativeJobOwner {
         this.#store.cancelReadersReportPreparationWork(job.subjectId);
       } else if (job.projection.kind === 'evaluation-rewrite-preparation') {
         this.#store.cancelEvaluationRewritePreparationWork(job.subjectId);
+      } else if (job.projection.kind === 'writing-preparation') {
+        this.#store.cancelWritingPreparationWork(job.subjectId);
       } else if (job.projection.kind === 'review-run-preparation') {
         this.#store.cancelReviewRunPreparationWork(job.subjectId);
       } else if (job.projection.kind === 'reimport-resolution') {

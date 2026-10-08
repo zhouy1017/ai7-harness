@@ -7,7 +7,7 @@ import {
   PREDICTION_MIN_BOOKS_WITH_ACTUALS,
   predictionAvailable,
 } from '../shared/evaluation-calibration.js';
-import { canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
+import { canonicalRecord, isRecord, parseStoredJson, sha256Hex } from './analysis/canonical.js';
 
 /**
  * 设置 › 评估校准与预测 (Issue #430, plan slice S82; V2-UX-EVAL-010, EVAL-011, EVAL-014; ADR 0076 §7). Pricing and first print
@@ -133,7 +133,7 @@ export class EvaluationCalibrationLedger {
     for (const row of rows) {
       const json = String(row.canonical_json);
       requireCalibration(sha256Hex(json) === String(row.sha256), 'ACTUALS_RECORD_INVALID', '定价与首印的记录已损坏。');
-      const record = JSON.parse(json) as unknown;
+      const record = parseStoredJson(json, () => new EvaluationCalibrationError('ACTUALS_RECORD_INVALID', '定价与首印的记录已损坏。'));
       const ordinal = Number(row.ordinal);
       requireCalibration(isRecord(record) && record.schema === ACTUALS_SCHEMA && record.actualId === row.actual_id && record.bookId === bookId &&
         record.publicationVersionId === row.publication_version_id && record.ordinal === ordinal && record.priceFen === Number(row.price_fen) &&
@@ -188,7 +188,7 @@ export class EvaluationCalibrationLedger {
     for (const row of rows) {
       const json = String(row.canonical_json);
       requireCalibration(sha256Hex(json) === String(row.sha256), 'PREFERENCES_RECORD_INVALID', '评估设置的记录已损坏。');
-      const record = JSON.parse(json) as unknown;
+      const record = parseStoredJson(json, () => new EvaluationCalibrationError('PREFERENCES_RECORD_INVALID', '评估设置的记录已损坏。'));
       requireCalibration(isRecord(record) && record.schema === PREFERENCES_SCHEMA && record.preferenceId === row.preference_id &&
         record.ordinal === entries + 1 && Number(row.ordinal) === entries + 1 && record.predictionEnabled === (Number(row.prediction_enabled) === 1) &&
         record.calibrationEnabled === (Number(row.calibration_enabled) === 1) && record.recordedAt === row.recorded_at && record.actor === ACTOR &&

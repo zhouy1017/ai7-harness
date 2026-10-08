@@ -586,6 +586,8 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.previewCapturedProcedureStop(request.input.procedureId, request.input.versionId) };
     case 'stopCapturedProcedure':
       return { id: request.id, ok: true, op: request.op, result: store.stopCapturedProcedure(request.input.procedureId, request.input.versionId, request.input.previewDigest) };
+    case 'inspectCapturedProcedureApplicability':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectCapturedProcedureApplicability(request.input.bookId) };
     case 'inspectCapturedProcedureRun':
       return { id: request.id, ok: true, op: request.op, result: store.inspectCapturedProcedureRun(request.input.bookId, request.input.procedureId, request.input.versionId) };
     case 'saveDeveloperProposal':
@@ -768,6 +770,37 @@ async function dispatch(
     }
     case 'decideEvaluationRewrite':
       return { id: request.id, ok: true, op: request.op, result: store.decideEvaluationRewrite(request.input.bookId, request.input.revisionId, request.input.decision) };
+    // 写作任务 (Issue #432, S84a): one house type and the editor's words, prepared as a cooperative job whose plan the Task Drawer
+    // opens, started from its bar through the governor on the ledger of the plan's contract, and a drafted result made the
+    // type's document by the editor's 打开草稿.
+    case 'inspectWritingTask':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectWritingTask(request.input.bookId) };
+    case 'prepareWritingTask':
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: jobs.startWritingPreparation(request.input.bookId, {
+          typeId: request.input.typeId,
+          audience: request.input.audience,
+          channel: request.input.channel,
+          requirements: request.input.requirements,
+        }, launchPolicy),
+      };
+    case 'authorizeWritingTask': {
+      const authorized = store.authorizeWriting(request.input.bookId, request.input.taskIntentId, request.input.planEnvelopeDigest);
+      if (authorized.dispatchRunRecordId !== null) {
+        try {
+          analysisExecution.admitOrQueue(authorized.dispatchRunRecordId, authorized.ledger);
+        } catch (error) {
+          const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
+          throw new StoreErrorClass(code, error instanceof Error ? error.message : '运行未能进入调度。');
+        }
+      }
+      return { id: request.id, ok: true, op: request.op, result: store.inspectWritingTask(request.input.bookId) };
+    }
+    case 'createWritingDraft':
+      return { id: request.id, ok: true, op: request.op, result: store.createWritingDraft(request.input.bookId, request.input.revisionId) };
     case 'inspectAnalysisFeedback':
       return { id: request.id, ok: true, op: request.op, result: store.inspectAnalysisFeedback(request.input.bookId, request.input.revisionId) };
     case 'recordAnalysisFeedback':
@@ -1359,11 +1392,12 @@ function parseArguments(argv: string[]): {
       (recoveryControl === undefined || process.env.AI7_E2E_JOURNEY !== 'J-08')) ||
     // The model adapter binds a Journey whose Runs execute: J-04's analysis, J-09's 运行中 and 最近完成, J-10's
     // cancelled Run (Issue #422), J-16's 任务 panel (Issue #423), J-11's 分析反馈 (Issue #94) and J-13's 书系一致性 (Issue #64)
-    // and the Review Runs a Captured Procedure is captured from and run as (Issue #65).
+    // and the Review Runs a Captured Procedure is captured from and run as (Issue #65), and J-07's 写作任务 (Issue #432).
     (modelAdapterControlValue !== undefined &&
       (modelAdapterControl === undefined ||
         (process.env.AI7_E2E_JOURNEY !== 'J-04' && process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10' &&
-          process.env.AI7_E2E_JOURNEY !== 'J-16' && process.env.AI7_E2E_JOURNEY !== 'J-11' && process.env.AI7_E2E_JOURNEY !== 'J-13'))) ||
+          process.env.AI7_E2E_JOURNEY !== 'J-16' && process.env.AI7_E2E_JOURNEY !== 'J-11' && process.env.AI7_E2E_JOURNEY !== 'J-13' &&
+          process.env.AI7_E2E_JOURNEY !== 'J-07'))) ||
     (connectivityPath !== undefined && (process.env.AI7_E2E_JOURNEY !== 'J-04' || !isAbsolute(connectivityPath))) ||
     // J-11 keeps a Run under way while ②A's follower is held (#641); J-13 holds a 书系一致性 Run while a Series Retrieval
     // Exclusion is recorded (Issue #64, S29b).
@@ -1574,6 +1608,13 @@ async function run(): Promise<void> {
       store.reconcileStoppedEvaluationRewriteRuns();
     } catch {
       // Reported where 评估 reads the rewrite.
+    }
+    // 写作任务 has no 续行 either (Issue #432, S84a): reconciled by kind exactly as 审稿意见 is, and a damaged record of it never
+    // stops the service starting.
+    try {
+      store.reconcileStoppedWritingRuns();
+    } catch {
+      // Reported where 交付物 reads the writing Task.
     }
     // A Review Run's categories take a place of the one owner's governor one after another.
     reviewRuns = new ReviewRunDriver(store.reviewRunDriveSteps, analysisExecution);

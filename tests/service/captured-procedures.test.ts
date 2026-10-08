@@ -1,10 +1,13 @@
 import { readFileSync, writeFileSync } from 'node:fs';
+import { copyFile, mkdir, readdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
-import { CAPTURED_PROCEDURE_SCHEMA_SQL } from '../../src/service/captured-procedures.js';
+import { sha256Hex } from '../../src/service/analysis/canonical.js';
+import { BookDeliveryPackages } from '../../src/service/book-delivery-packages.js';
+import { CAPTURED_PROCEDURE_SCHEMA_SQL, PROCEDURE_STEP_NOT_CHOSEN } from '../../src/service/captured-procedures.js';
 import { mergeBooks } from '../../src/service/database-merge.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -12,10 +15,11 @@ import type { BaselineAnalysisStore } from '../../src/service/analysis/baseline-
 import { ReviewRunDriver, type ReviewRunExecutionOwner } from '../../src/service/review/review-run-driver.js';
 import { LEADS_ABSENT_REASON } from '../../src/service/review/review-scope.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { EVALUATION_REWRITE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { WRITING_TASK_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { BASELINE_ANALYSIS_TASK_GOAL, MAX_FRAME_BYTES, type LaunchPolicyProjection, type ReviewRunProjection, type ReviewRunScopeRequest } from '../../src/shared/protocol.js';
 import { LITERARY_EXPRESSION, STYLE_AND_FORMAT } from '../support/review-categories.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
+import { makeJ13Series } from '../support/series-consistency.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // Service-integration suite (L2) for 可复用工序 (Issue #65, plan slice S30; ADR 0087): the real store on a temporary Agent Data
@@ -29,6 +33,9 @@ const WHOLE: ReviewRunScopeRequest = { kind: 'whole', fromChapterBlockId: null, 
 const STYLE = STYLE_AND_FORMAT.categoryId;
 const LITERARY = LITERARY_EXPRESSION.categoryId;
 const PLOT = 'plot-consistency';
+const SERIES = 'series-consistency';
+const SERIES_FIXTURE = 'sample1-series-consistency-authored';
+const LAYERED_FIXTURE = 'l2-review-and-series-consistency';
 
 let roots: ServiceTestRoots;
 let launchPolicy: LaunchPolicyProjection;
@@ -227,8 +234,8 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       expect(run.unavailableReason).toBeNull();
       expect(run.resolved).toMatchObject({ versionId: first!.versionId, version: 1, scopeSlot: 'whole', guidelineChanges: [] });
       expect(run.resolved!.steps).toEqual([
-        { categoryId: STYLE, label: '体例与格式', available: true, unavailableReason: null },
-        { categoryId: PLOT, label: '情节逻辑与前后一致', available: false, unavailableReason: LEADS_ABSENT_REASON },
+        { categoryId: STYLE, label: '体例与格式', available: true, unavailableReason: null, chosenApart: false },
+        { categoryId: PLOT, label: '情节逻辑与前后一致', available: false, unavailableReason: LEADS_ABSENT_REASON, chosenApart: false },
       ]);
       const pin = { versionId: run.resolved!.versionId, documentSha256: run.resolved!.documentSha256 };
       // Nothing beyond its steps, never a step the Book could take dropped, and the scope its slot says.
@@ -239,10 +246,21 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       const inSource = store.inspectCapturedProcedureRun(source, saved.procedureId);
       expect(inSource.resolved!.steps.every((step) => step.available)).toBe(true);
       expect(refusal(() => prepare(session, source, [STYLE], WHOLE, pin))).toBe('REVIEW_PROCEDURE_STEP_SKIPPED');
+      // 按已保存的工序 on each Book (Issue #66, S31b): the one version a new use takes, and how much of it the Book can take.
+      expect(store.inspectCapturedProcedureApplicability(target)).toEqual({
+        bookId: target, truncated: false,
+        procedures: [{
+          procedureId: saved.procedureId, title: '线索与体例复核', latestEligible: { versionId: first!.versionId, version: 1 }, fit: 'partial',
+          stepCount: 2, availableCount: 1, chosenApart: [], leftOut: [{ label: '情节逻辑与前后一致', reason: LEADS_ABSENT_REASON }],
+        }],
+      });
+      expect(store.inspectCapturedProcedureApplicability(source).procedures).toEqual([expect.objectContaining({ fit: 'all', stepCount: 2, availableCount: 2, leftOut: [] })]);
+      expect(refusal(() => store.inspectCapturedProcedureApplicability('book'))).toBe('BOOK_INVALID');
+      expect(first!.steps.map((step) => step.requirement)).toEqual([null, 'baseline-analysis']);
       const pinned = prepare(session, target, [STYLE], WHOLE, pin);
       expect(pinned.procedure).toEqual({
         procedureId: saved.procedureId, versionId: first!.versionId, version: 1, title: '线索与体例复核', documentSha256: pin.documentSha256, stopped: false, missing: false,
-        leftOut: [{ categoryId: PLOT, label: '情节逻辑与前后一致', reason: LEADS_ABSENT_REASON }],
+        leftOut: [{ categoryId: PLOT, label: '情节逻辑与前后一致', reason: LEADS_ABSENT_REASON, byChoice: false }],
       });
       // The ordinary path: its plan, the one approval, the drive.
       const ran = await authorizeAndDrive(session, target, pinned);
@@ -264,6 +282,8 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       const stopped = store.stopCapturedProcedure(saved.procedureId, first!.versionId, store.previewCapturedProcedureStop(saved.procedureId, first!.versionId).previewDigest);
       expect(stopped.versions.map((version) => [version.version, version.state])).toEqual([[2, 'pending-validation'], [1, 'stopped']]);
       expect(stopped.runnable).toBe(false);
+      // A procedure with no enabled version is offered nowhere.
+      expect(store.inspectCapturedProcedureApplicability(target).procedures).toEqual([]);
       expect(refusal(() => store.authorizeReviewRun(target, waiting.reviewRunId, approvals(waiting)))).toBe('REVIEW_PROCEDURE_STOPPED');
       expect(store.inspectReviewWorkspace(target, waiting.reviewRunId).run!.procedure!.stopped).toBe(true);
       // The finished Run keeps naming it, and a stopped version is final.
@@ -280,7 +300,7 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       const check = database();
       try {
         expect((check.prepare('SELECT count(*) n FROM captured_procedure_versions').get() as { n: number }).n).toBe(2);
-        expect((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EVALUATION_REWRITE_SCHEMA_VERSION);
+        expect((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
       } finally {
         check.close();
       }
@@ -714,6 +734,10 @@ describe('what 工序与规则 answers stays within one frame (Issue #65 review)
       expect(listed.procedures).toHaveLength(50);
       expect(listed.proposals).toHaveLength(50);
       expect([listed.proceduresTruncated, listed.proposalsTruncated]).toEqual([true, true]);
+      // 按已保存的工序 weighs the same newest page and says it is cut; none of these is enabled, so none is offered (S31b review P3-2).
+      const offered = store.inspectCapturedProcedureApplicability(source);
+      expect([offered.procedures, offered.truncated]).toEqual([[], true]);
+      expect(wireBytes(offered)).toBeLessThan(MAX_FRAME_BYTES);
       expect(wireBytes(listed)).toBeLessThan(MAX_FRAME_BYTES);
       // Summaries only: no versions in the list.
       expect(Object.keys(listed.procedures[0]!).sort()).toEqual(['latestState', 'latestStateLabel', 'latestVersion', 'procedureId', 'runnable', 'title', 'versionCount']);
@@ -803,6 +827,246 @@ describe('a Book merged from another house (Issue #65 review)', () => {
       await close(merged);
     }
   }, 300_000);
+});
+
+/**
+ * A fixtures root holding every authored fixture and one layered over the review fixture with the 书系一致性 fixture's answers
+ * (Issue #66, S31b): one Review Run of 体例与格式 and 书系一致性 in J-13's Series Book is answered whole. It is written for this
+ * suite only, under its scratch input root, from the two admitted fixtures' own entries.
+ */
+async function layeredFixturesRoot(): Promise<string> {
+  const root = join(roots.inputRoot, 'fixtures');
+  await mkdir(root);
+  for (const name of await readdir(FIXTURES_ROOT)) if (name.endsWith('.json')) await copyFile(join(FIXTURES_ROOT, name), join(root, name));
+  const read = (name: string) => JSON.parse(readFileSync(join(FIXTURES_ROOT, `${name}.json`), 'utf8')) as { entries: unknown[] } & Record<string, unknown>;
+  const review = read('sample1-review-authored');
+  // The review fixture's own entries and base, with the 书系一致性 fixture's entries beside them: no deeper a base chain.
+  writeFileSync(join(root, `${LAYERED_FIXTURE}.json`), JSON.stringify({
+    ...review, identity: LAYERED_FIXTURE, entries: [...review.entries, ...read(SERIES_FIXTURE).entries],
+    description: 'L2 套件专用：审阅夹具的条目之外加上书系一致性夹具的条目，使一次审阅同时覆盖体例与格式和书系一致性。',
+  }));
+  return root;
+}
+
+async function openLayered(): Promise<Session> {
+  const fixturesRoot = await layeredFixturesRoot();
+  const fixture = await loadModelFixture(fixturesRoot, LAYERED_FIXTURE);
+  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
+    induceUnprovableReconciliation: false,
+    persistLegacyReviewedDraft: false,
+    induceReimportProofTamper: false,
+    induceAbandonObjectRemovalFailure: false,
+    interruptAfterAbandonObjectRemoval: false,
+    baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
+  });
+  const owner = new BaselineAnalysisExecutionOwner({
+    ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
+    readGuard: (runRecordId) => store.seriesReadGuard(runRecordId),
+  });
+  return { store, owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, owner) };
+}
+
+describe('Series material chosen apart, and how each procedure fits a Book (Issue #66, plan slice S31b; REUSE-046, REUSE-049, REUSE-050, REUSE-053)', () => {
+  it('never ticks a Series step for the editor, records it left out by choice, and says how each enabled procedure fits each Book', async () => {
+    const session = await openLayered();
+    try {
+      const { store } = session;
+      const member = await importBook(session, '星河之三');
+      makeJ13Series(store, member);
+      const finished = await authorizeAndDrive(session, member, prepare(session, member, [STYLE, SERIES]));
+      expect(finished.state).toBe('settled');
+      expect(finished.categories.map((category) => [category.categoryId, category.state])).toEqual([[STYLE, 'settled'], [SERIES, 'settled']]);
+      const saved = store.saveCapturedProcedure({ bookId: member, reviewRunId: finished.reviewRunId, categoryIds: [STYLE, SERIES], scopeSlot: 'whole', title: '书系复核', procedureId: null });
+      const version = saved.versions[0]!;
+      // Each step says what a Book must have for it to run there (REUSE-048).
+      expect(version.steps.map((step) => [step.categoryId, step.requirement])).toEqual([[STYLE, null], [SERIES, 'series']]);
+      store.enableCapturedProcedure(version.versionId, store.previewCapturedProcedureValidation(version.versionId).previewDigest);
+      const alone = store.saveCapturedProcedure({ bookId: member, reviewRunId: finished.reviewRunId, categoryIds: [SERIES], scopeSlot: 'whole', title: '只看书系', procedureId: null });
+      store.enableCapturedProcedure(alone.versions[0]!.versionId, store.previewCapturedProcedureValidation(alone.versions[0]!.versionId).previewDigest);
+
+      // In the Series Book both steps can run; the Series step is the editor's to choose (REUSE-049, REUSE-050).
+      const run = store.inspectCapturedProcedureRun(member, saved.procedureId);
+      expect(run.resolved!.steps).toEqual([
+        { categoryId: STYLE, label: '体例与格式', available: true, unavailableReason: null, chosenApart: false },
+        { categoryId: SERIES, label: '书系一致性', available: true, unavailableReason: null, chosenApart: true },
+      ]);
+      expect(store.inspectCapturedProcedureApplicability(member)).toEqual({
+        bookId: member, truncated: false,
+        procedures: [
+          { procedureId: alone.procedureId, title: '只看书系', latestEligible: { versionId: alone.versions[0]!.versionId, version: 1 }, fit: 'all', stepCount: 1, availableCount: 1, chosenApart: ['书系一致性'], leftOut: [] },
+          { procedureId: saved.procedureId, title: '书系复核', latestEligible: { versionId: version.versionId, version: 1 }, fit: 'all', stepCount: 2, availableCount: 2, chosenApart: ['书系一致性'], leftOut: [] },
+        ],
+      });
+      const pin = { versionId: version.versionId, documentSha256: version.technical.documentSha256 };
+      // Left unchosen, the Run records it as left out by choice, and runs the rest.
+      const unchosen = prepare(session, member, [STYLE], WHOLE, pin);
+      expect(unchosen.categories.map((category) => category.categoryId)).toEqual([STYLE]);
+      expect(unchosen.procedure!.leftOut).toEqual([{ categoryId: SERIES, label: '书系一致性', reason: PROCEDURE_STEP_NOT_CHOSEN, byChoice: true }]);
+      // Chosen, it runs with the rest and nothing is left out.
+      const chosen = prepare(session, member, [STYLE, SERIES], WHOLE, pin);
+      expect(chosen.categories.map((category) => category.categoryId)).toEqual([STYLE, SERIES]);
+      expect(chosen.procedure!.leftOut).toEqual([]);
+      // Only a Series step may be left unchosen: a step the Book could take is never dropped.
+      expect(refusal(() => prepare(session, member, [SERIES], WHOLE, pin))).toBe('REVIEW_PROCEDURE_STEP_SKIPPED');
+
+      // A Book in no Series cannot take it: left out with why — not by choice — and said before the editor chooses (REUSE-053).
+      const outsider = await importBook(session, 'L2 书系外', false);
+      const outside = store.inspectCapturedProcedureApplicability(outsider).procedures;
+      expect(outside.map((entry) => [entry.title, entry.fit, entry.availableCount, entry.chosenApart, entry.leftOut.map((step) => step.label)])).toEqual([
+        ['只看书系', 'none', 0, [], ['书系一致性']], ['书系复核', 'partial', 1, [], ['书系一致性']],
+      ]);
+      const reason = outside[1]!.leftOut[0]!.reason;
+      expect(reason.length).toBeGreaterThan(0);
+      expect(store.inspectCapturedProcedureRun(outsider, saved.procedureId).resolved!.steps[1]).toEqual(
+        { categoryId: SERIES, label: '书系一致性', available: false, unavailableReason: reason, chosenApart: true });
+      const outsideRun = prepare(session, outsider, [STYLE], WHOLE, pin);
+      expect(outsideRun.procedure!.leftOut).toEqual([{ categoryId: SERIES, label: '书系一致性', reason, byChoice: false }]);
+      // A stopped procedure is offered nowhere.
+      store.stopCapturedProcedure(alone.procedureId, null, store.previewCapturedProcedureStop(alone.procedureId, null).previewDigest);
+      expect(store.inspectCapturedProcedureApplicability(member).procedures.map((entry) => entry.title)).toEqual(['书系复核']);
+    } finally {
+      await close(session);
+    }
+  });
+});
+
+describe('a procedure whose enabled versions no longer run (Issue #66, S31b review P3-2)', () => {
+  it('is still offered on 新建审阅, with no version, and says why when chosen', async () => {
+    const session = await open();
+    try {
+      const { store } = session;
+      const source = await importBook(session, 'L2 不再可用');
+      const finished = await authorizeAndDrive(session, source, prepare(session, source, [STYLE]));
+      const saved = store.saveCapturedProcedure({ bookId: source, reviewRunId: finished.reviewRunId, categoryIds: [STYLE], scopeSlot: 'whole', title: '体例复核', procedureId: null });
+      const versionId = saved.versions[0]!.versionId;
+      store.enableCapturedProcedure(versionId, store.previewCapturedProcedureValidation(versionId).previewDigest);
+      // The enabled version's document now names a 工序 version the configuration no longer has, its digests kept whole: it
+      // reads as a version, still 已启用, and no longer validates.
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try {
+        db.exec('DROP TRIGGER captured_procedure_versions_no_update');
+        const row = db.prepare('SELECT document_json, document_sha256, canonical_json FROM captured_procedure_versions WHERE version_id = ?').get(versionId) as
+          { document_json: string; document_sha256: string; canonical_json: string };
+        const document = row.document_json.replace('"procedureId":"ai7-review-procedure/style-and-format","version":"1"', '"procedureId":"ai7-review-procedure/style-and-format","version":"9"');
+        expect(document).not.toBe(row.document_json);
+        const documentSha256 = sha256Hex(document);
+        const record = row.canonical_json.replace(row.document_sha256, documentSha256);
+        db.prepare('UPDATE captured_procedure_versions SET document_json = ?, document_sha256 = ?, canonical_json = ?, sha256 = ? WHERE version_id = ?')
+          .run(document, documentSha256, record, sha256Hex(record), versionId);
+      } finally {
+        db.close();
+      }
+      expect(store.inspectCapturedProcedure(saved.procedureId, null)).toMatchObject({ runnable: true, latestEligibleVersionId: null, versions: [{ state: 'enabled' }] });
+      expect(store.inspectCapturedProcedureApplicability(source)).toEqual({
+        bookId: source, truncated: false,
+        procedures: [{ procedureId: saved.procedureId, title: '体例复核', latestEligible: null, fit: 'no-version', stepCount: 0, availableCount: 0, chosenApart: [], leftOut: [] }],
+      });
+      expect(store.inspectCapturedProcedureRun(source, saved.procedureId)).toMatchObject({
+        resolved: null, unavailableReason: '这个工序启用的各版现在都不能按原样运行；请从一次新的审阅重新保存。',
+      });
+    } finally {
+      await close(session);
+    }
+  });
+});
+
+describe('a version linked to the 图书交付包 that holds its Runs\' reports (Issue #66, plan slice S31b; REUSE-031)', () => {
+  it('links each package version holding a report of a Run pinned to the version, and no other', async () => {
+    const session = await open();
+    try {
+      const { store } = session;
+      await requireExactSample1(roots.codeRoot);
+      const book = await importSample1Book(store, roots.codeRoot, 'L2 交付之书');
+      await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
+      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+      const source = await authorizeAndDrive(session, book.bookId, prepare(session, book.bookId, [STYLE]));
+      const saved = store.saveCapturedProcedure({ bookId: book.bookId, reviewRunId: source.reviewRunId, categoryIds: [STYLE], scopeSlot: 'whole', title: '体例复核', procedureId: null });
+      const first = saved.versions[0]!;
+      store.enableCapturedProcedure(first.versionId, store.previewCapturedProcedureValidation(first.versionId).previewDigest);
+      const second = store.saveCapturedProcedure({ bookId: book.bookId, reviewRunId: source.reviewRunId, categoryIds: [STYLE], scopeSlot: 'chapters', title: '体例复核', procedureId: saved.procedureId });
+      // A Run pinned to version 1, prepared and not yet approved: no package holds it.
+      const waiting = prepare(session, book.bookId, [STYLE], WHOLE, { versionId: first.versionId, documentSha256: first.technical.documentSha256 });
+      expect(store.inspectCapturedProcedure(saved.procedureId, null).versions.map((version) => [version.version, version.packageCount, version.packages])).toEqual([[2, 0, []], [1, 0, []]]);
+
+      // The source Run reported, a 发稿版本, and each document type 本书不做: package v1 holds the source Run's report only.
+      store.generateReviewReport(book.bookId, source.reviewRunId);
+      const milestone = await store.saveMilestone(book.manuscriptId, book.branchId, '一审稿', 'stage-archive', null, '');
+      store.designatePublicationVersion({ bookId: book.bookId, milestoneId: milestone.milestoneId, scope: '纸质版首印', basis: '三审通过' });
+      for (const typeId of ['news-release', 'promotion-article', 'review-article', 'launch-materials', 'marketing-points']) {
+        store.decideProductionDocumentType({ bookId: book.bookId, typeId, notForThisBook: true });
+      }
+      const unpinned = store.inspectBookDeliveryPackage(book.bookId);
+      expect(unpinned.ready).toBe(true);
+      const firstPackage = store.prepareBookDeliveryPackage({ bookId: book.bookId, purpose: '交出版社存档', expectedContentDigest: unpinned.content.digest }).package.versions[0]!;
+      // Same Book, but no report of a Run pinned to version 1: nothing is linked.
+      expect(store.inspectCapturedProcedure(saved.procedureId, null).versions[1]!.packages).toEqual([]);
+
+      // The pinned Run approved, run and reported: package v2 holds both reports, and only v2 is linked to version 1.
+      const pinned = await authorizeAndDrive(session, book.bookId, waiting);
+      expect(pinned.state).toBe('settled');
+      store.generateReviewReport(book.bookId, pinned.reviewRunId);
+      const bundle = store.inspectBookDeliveryPackage(book.bookId);
+      expect(bundle.ready).toBe(true);
+      const prepared = store.prepareBookDeliveryPackage({ bookId: book.bookId, purpose: '交印厂', expectedContentDigest: bundle.content.digest });
+      expect(prepared.version).toBe(2);
+      const packageVersion = prepared.package.versions[0]!;
+      const versions = store.inspectCapturedProcedure(saved.procedureId, null).versions;
+      // Version 1 ran the pinned Run, whose report the package holds; version 2 ran nothing and links nothing.
+      expect(versions[1]!.packages).toEqual([{ bookId: book.bookId, bookTitle: 'L2 交付之书', packageVersionId: packageVersion.packageVersionId, version: 2, preparedAt: packageVersion.preparedAt }]);
+      expect(versions[1]!.packageCount).toBe(1);
+      expect([versions[0]!.version, versions[0]!.packageCount, versions[0]!.packages]).toEqual([2, 0, []]);
+      expect(second.versions[0]!.packages).toEqual([]);
+
+      // A third package version holds both reports too: newest first, and the total counted past what one call lists (S31b
+      // review P3-2).
+      const third = store.prepareBookDeliveryPackage({ bookId: book.bookId, purpose: '交发行部', expectedContentDigest: bundle.content.digest });
+      expect(third.version).toBe(3);
+      const thirdPackage = third.package.versions[0]!;
+      const linked = store.inspectCapturedProcedure(saved.procedureId, null).versions[1]!;
+      expect([linked.packages.map((link) => link.version), linked.packageCount]).toEqual([[3, 2], 2]);
+      const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
+      // Package versions prepared in the same instant are still listed newest version first.
+      const tie = new DatabaseSync(path);
+      try {
+        tie.exec('DROP TRIGGER book_delivery_package_versions_no_update');
+        tie.prepare("UPDATE book_delivery_package_versions SET prepared_at = '2026-10-09T00:00:00.000Z' WHERE book_id = ?").run(book.bookId);
+      } finally {
+        tie.close();
+      }
+      expect(store.inspectCapturedProcedure(saved.procedureId, null).versions[1]!.packages.map((link) => link.version)).toEqual([3, 2]);
+      const reader = new DatabaseSync(path, { readOnly: true });
+      try {
+        const packages = new BookDeliveryPackages(reader, { publication: () => null, documents: () => [], reviewRuns: () => [] });
+        expect(packages.holdingReviewRuns([pinned.reviewRunId], 1)).toEqual({
+          packages: [{ bookId: book.bookId, packageVersionId: thirdPackage.packageVersionId, version: 3, preparedAt: thirdPackage.preparedAt }], total: 2,
+        });
+        expect(packages.holdingReviewRuns([source.reviewRunId], 10).packages.map((link) => link.version)).toEqual([3, 2, 1]);
+        expect(packages.holdingReviewRuns([], 10)).toEqual({ packages: [], total: 0 });
+      } finally {
+        reader.close();
+      }
+
+      // A damaged package fails nothing (S31b review P3-1): v1, holding no pinned Run's report, no longer even JSON, and v3, which
+      // holds one, altered behind its digest. The page still reads — v3 counted but not linked — and a 停用 confirmed after
+      // the damage answers with what it did.
+      const writer = new DatabaseSync(path);
+      try {
+        writer.exec('DROP TRIGGER IF EXISTS book_delivery_package_versions_no_update');
+        writer.prepare("UPDATE book_delivery_package_versions SET canonical_json = '{' WHERE package_version_id = ?").run(firstPackage.packageVersionId);
+        writer.prepare("UPDATE book_delivery_package_versions SET canonical_json = replace(canonical_json, '交发行部', '改过的用途') WHERE package_version_id = ?")
+          .run(thirdPackage.packageVersionId);
+      } finally {
+        writer.close();
+      }
+      const damaged = store.inspectCapturedProcedure(saved.procedureId, null).versions[1]!;
+      expect([damaged.packages.map((link) => link.version), damaged.packageCount]).toEqual([[2], 2]);
+      const stopped = store.stopCapturedProcedure(saved.procedureId, first.versionId, store.previewCapturedProcedureStop(saved.procedureId, first.versionId).previewDigest);
+      expect(stopped.versions.map((version) => [version.version, version.state])).toEqual([[2, 'pending-validation'], [1, 'stopped']]);
+      expect(stopped.versions[1]!.packages.map((link) => link.version)).toEqual([2]);
+    } finally {
+      await close(session);
+    }
+  });
 });
 
 describe('revision 63', () => {

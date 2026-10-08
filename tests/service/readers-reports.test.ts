@@ -12,6 +12,7 @@ import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/p
 import { READERS_REPORT_NEEDS_FINALIZED, READERS_REPORT_SCHEMA_SQL, READERS_REPORT_TRIGGER_SQL } from '../../src/service/readers-reports.js';
 import { CAPTURED_PROCEDURE_SCHEMA_SQL } from '../../src/service/captured-procedures.js';
 import { EVALUATION_REWRITE_SCHEMA_SQL } from '../../src/service/evaluation-rewrites.js';
+import { WRITING_TASK_SCHEMA_SQL } from '../../src/service/writing-tasks.js';
 import { DIALOGUE_SCHEMA_SQL } from '../../src/service/dialogue/dialogue-ledger.js';
 import { SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL } from '../../src/service/series-exclusions.js';
 import type { ReadersReportContractInput } from '../../src/service/evaluation/readers-report-contract.js';
@@ -25,7 +26,7 @@ import {
   ANALYSIS_LEDGER_SCHEMA_SQL,
   ANALYSIS_LEDGER_TRIGGER_SQL,
   INITIAL_EVALUATION_SCHEMA_VERSION,
-  EVALUATION_REWRITE_SCHEMA_VERSION,
+  WRITING_TASK_SCHEMA_VERSION,
   DIALOGUE_SCHEMA_VERSION,
   SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
@@ -137,6 +138,7 @@ const REVISIONS_BEFORE_62 = [INITIAL_EVALUATION_SCHEMA_VERSION, DIALOGUE_SCHEMA_
  */
 function plantRevisionBefore62(plant: DatabaseSync, version: (typeof REVISIONS_BEFORE_62)[number]): void {
   const later = [
+    ...Object.keys(WRITING_TASK_SCHEMA_SQL).reverse(),
     ...Object.keys(EVALUATION_REWRITE_SCHEMA_SQL).reverse(),
     ...Object.keys(CAPTURED_PROCEDURE_SCHEMA_SQL).reverse(),
     ...Object.keys(READERS_REPORT_SCHEMA_SQL).reverse(),
@@ -371,7 +373,7 @@ describe('审稿意见 over the real store on exact sample1', () => {
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EVALUATION_REWRITE_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
       expect(rows(after)).toBe(before!);
       for (const table of KIND_COUPLED_ANALYSIS_RELATIONS) {
         expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(ANALYSIS_LEDGER_SCHEMA_SQL[table]);

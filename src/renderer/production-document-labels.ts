@@ -56,10 +56,13 @@ export function documentSourceLine(source: ProductionDocumentSourceProjection, i
   return `${source.displayName} · ${source.format} · 导入于 ${importedAt}`;
 }
 
+/** Where a document drafted by a writing Task (Issue #432, S84a) came from: AI7's draft, never a file of the Book's. */
+export const DOCUMENT_DRAFTED_ORIGIN = '由写作任务起草（范例只参照，不复制）';
+
 /** The first line of a document's card: its latest version and the material it was made from. */
 export function documentCardLine(document: ProductionDocumentProjection): string {
   const latest = document.versions[0];
-  return `${latest === undefined ? '' : `${latest.label} · `}由「${document.origin.displayName}」创建`;
+  return `${latest === undefined ? '' : `${latest.label} · `}${document.origin.drafted ? DOCUMENT_DRAFTED_ORIGIN : `由「${document.origin.displayName}」创建`}`;
 }
 
 /**

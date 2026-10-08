@@ -21,6 +21,7 @@ import {
 import { UUID_PATTERN, canonicalJson, canonicalRecord, sha256Hex } from './analysis/canonical.js';
 import type { PackageDeliveryReading, PackageDocumentReading } from './book-delivery-packages.js';
 import { ProductionDocumentOriginError, productionDocumentOriginMarks } from './production-document-origins.js';
+import { WRITING_DRAFT_PARSER_IDENTITY } from './writing-tasks.js';
 import type { ProductionDocumentWorkflow } from './production-document-workflow.js';
 import {
   BUILTIN_PRODUCTION_DOCUMENT_TYPES,
@@ -97,6 +98,8 @@ export interface ProductionDocumentRow {
   branchId: string;
   originSourceVersionId: string;
   createdAt: string;
+  /** The words the document began with were AI7's writing draft (Issue #432, S84a), read from no file. */
+  drafted: boolean;
 }
 
 /**
@@ -179,7 +182,7 @@ export class ProductionDocuments {
       documentId: row.documentId,
       branchId: row.branchId,
       createdAt: row.createdAt,
-      origin: { sourceVersionId: row.originSourceVersionId, displayName: text(state.display_name), marksNotCarried: this.#originMarks(row) },
+      origin: { sourceVersionId: row.originSourceVersionId, displayName: text(state.display_name), marksNotCarried: this.#originMarks(row), drafted: row.drafted },
       versions: versions.slice(0, MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED),
       versionsTruncated: versions.length > MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED,
       changedSinceVersion,
@@ -489,7 +492,7 @@ export class ProductionDocuments {
 
   #documentRows(bookId: string): ProductionDocumentRow[] {
     return (this.#db.prepare(
-      `SELECT pd.document_id, pd.book_id, pd.type_id, pd.origin_source_version_id, pd.created_at, mb.branch_id
+      `SELECT pd.document_id, pd.book_id, pd.type_id, pd.origin_source_version_id, pd.created_at, pd.parser_identity, mb.branch_id
        FROM production_documents pd
        JOIN manuscripts m ON m.manuscript_id = pd.document_id AND m.role = 'production-document' AND m.book_id = pd.book_id
        JOIN manuscript_branches mb ON mb.manuscript_id = pd.document_id
@@ -501,6 +504,7 @@ export class ProductionDocuments {
       branchId: text(row.branch_id),
       originSourceVersionId: text(row.origin_source_version_id),
       createdAt: text(row.created_at),
+      drafted: row.parser_identity === WRITING_DRAFT_PARSER_IDENTITY,
     }));
   }
 

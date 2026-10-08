@@ -172,6 +172,16 @@ export interface CrossUnitStep {
   buildMessage(closed: ReadonlyArray<ClosedUnitOutcome<unknown>>, totalUnits: number): string;
   requestDigest(closed: ReadonlyArray<ClosedUnitOutcome<unknown>>): string;
   parse(text: string, closed: ReadonlyArray<ClosedUnitOutcome<unknown>>): { ok: true; result: unknown } | { ok: false; code: string; detail: string };
+  /**
+   * The step's own reading of a parsed answer it refused (Issue #432 review): an answer that parsed and was turned away by the
+   * kind's rule — never "no parsable result". `null` keeps the common reading.
+   */
+  refusalReason?(code: string, detail: string): string | null;
+  /**
+   * The step is the Run's result itself (Issue #432 review): when it does not close, the Run completed with gaps, never
+   * 已完成. A kind that declares nothing keeps its Run completed as before.
+   */
+  readonly requiredForCompletion?: boolean;
 }
 
 /**
