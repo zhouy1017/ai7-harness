@@ -226,7 +226,7 @@ At 200% the member table stacks, each cell naming its column, and the preview an
 
 ### Series Knowledge (S28b)
 
-The member-Series selector regression also joins the manuscript Book to fifty-one runner-authored Series. It opens the visible selector, traverses and resets fifty-name pages, chooses the off-page Series and proposes the pinned selection. The service answer must retain the original Book, exact block, grapheme offsets and selected quote. The existing conflict reader tests retain all fifty-one conflicts before promotion, reject a same-count candidate edit as stale, reset unchosen review decisions on refresh, and navigate immutable historical conflicts after later revisions.
+The member-Series selector regression also joins the manuscript Book to fifty-one runner-authored Series while its editor is open. The first selection menu after that shows the one Series the editor knew and is drawn again with the first fifty once its own read answers (Issue #642). It opens the visible selector, traverses and resets fifty-name pages, chooses the off-page Series and proposes the pinned selection. The service answer must retain the original Book, exact block, grapheme offsets and selected quote. The existing conflict reader tests retain all fifty-one conflicts before promotion, reject a same-count candidate edit as stale, reset unchosen review decisions on refresh, and navigate immutable historical conflicts after later revisions.
 
 After the restart, J-13 brings a fourth Book, 星河之三, in from exact `sample1` through the launch control `--j13-picker-path`, and adds it to the Series like the others. The 书系知识 section says a candidate is read by no Task and that taking it in authorizes nothing, and reads `还没有书系知识。` and `没有待审阅的候选项。`.
 
