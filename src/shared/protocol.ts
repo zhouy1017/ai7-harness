@@ -4122,6 +4122,11 @@ export interface InitialEvaluationMarketProjection {
   readonly channels: ReadonlyArray<string>;
   readonly marketReturn: InitialEvaluationPredictionProjection | null;
   readonly awards: InitialEvaluationPredictionProjection | null;
+  /**
+   * What AI7 wrote but the page does not show, one reason a part: a line or prediction that stated a quantity, or a part out
+   * of shape. Empty when everything AI7 wrote is shown.
+   */
+  readonly withheld: ReadonlyArray<string>;
 }
 
 export interface InitialEvaluationRevisionUpdateProjection extends Omit<ReviewCategoryRevisionUpdateProjection, 'mode'> {
@@ -4330,8 +4335,12 @@ export interface EvaluationRewriteObservationProjection {
 
 /** The rewritten words as the book-level synthesis wrote them: each scored item's 评语, and the 总评. Never a number. */
 export interface EvaluationRewriteWordsProjection {
+  /** The 评语 offered: every scored item's but those set aside. */
   items: ReadonlyArray<{ itemId: string; comment: string }>;
-  verdict: string;
+  /** The 总评 offered, or `null` when it was set aside. */
+  verdict: string | null;
+  /** What was written but is not offered — a 评语 (`itemId`) or the 总评 (`null`) that stated a score or a conclusion — and why. */
+  withheld: ReadonlyArray<{ itemId: string | null; reason: string }>;
 }
 
 /** The evaluation rewrite kind's own component of a Result Set Revision. */
@@ -6437,6 +6446,11 @@ export interface EvaluationWorkspaceProjection {
 
 /** The most 书系 comparables the market section lists; the count says how many more there are. */
 export const MAX_EVALUATION_COMPARABLES = 10;
+/**
+ * The fewest other published Books of the Book's own 书系 with actuals that 定价与首印 gives a 书系 range over (S81b2): fewer,
+ * and the quartiles would be one or two Books' own figures shown as a prediction. Below it only the house range shows.
+ */
+export const MIN_SERIES_PREDICTION_BOOKS = 5;
 
 /**
  * A 定价与首印 range over published Books' actuals (EVAL-010; the Owner's answer of 2026-10-07: 「按本社已出版同类书的实际数据
@@ -6451,17 +6465,27 @@ export interface EvaluationPredictionRangeProjection {
 
 /**
  * 定价与首印 in the market section (EVAL-010, EVAL-014): shown only once 设置 › 评估校准与预测's switch is on and enough
- * published Books carry actuals; otherwise what it waits for. The ranges never count the Book itself.
+ * other published Books carry actuals; otherwise what it waits for. The ranges never count the Book itself, and neither does
+ * the gate they wait on.
  */
 export interface EvaluationPricingProjection {
+  /** Every published Book with actuals: what the switch in 设置 waits on. */
   readonly booksWithActuals: number;
+  /** The published Books with actuals other than this one: what the ranges rest on, and what they wait on. */
+  readonly otherBooksWithActuals: number;
   readonly threshold: number;
   readonly enabled: boolean;
+  /** The switch may be on: `booksWithActuals` reached the threshold. */
   readonly available: boolean;
-  /** The house's published Books with actuals, when the prediction shows; `null` otherwise. */
+  /** The house data could not be read this time (a damaged entry): nothing is predicted, and 评估 stays readable. */
+  readonly unreadable: boolean;
+  /** The house's other published Books with actuals, when the prediction shows; `null` otherwise. */
   readonly house: EvaluationPredictionRangeProjection | null;
-  /** The published Books with actuals of the Book's own 书系, when the prediction shows and any exist; `null` otherwise. */
+  /** The other published Books with actuals of the Book's own 书系, when the prediction shows and they reach `MIN_SERIES_PREDICTION_BOOKS`; `null` otherwise. */
   readonly series: EvaluationPredictionRangeProjection | null;
+  /** How many of those the Book's 书系 holds, when the prediction shows and the Book is in one; `null` otherwise. */
+  readonly seriesBooksWithActuals: number | null;
+  readonly seriesMinimum: number;
 }
 
 /** One comparable Book from house data (EVAL-009): another member of a 书系 this Book is in, tagged `书系`. */
@@ -6480,6 +6504,8 @@ export interface EvaluationMarketProjection {
   readonly comparables: ReadonlyArray<EvaluationComparableProjection>;
   /** How many comparables there are in all; the list holds at most `MAX_EVALUATION_COMPARABLES`. */
   readonly comparableCount: number;
+  /** The 书系 data could not be read this time (a damaged entry): no 书系 and no comparables are listed, and 评估 stays readable. */
+  readonly seriesUnreadable: boolean;
   readonly pricing: EvaluationPricingProjection;
 }
 
@@ -6508,8 +6534,19 @@ export interface EvaluationRewriteWorkspaceProjection {
     /** The saved entry it rewrote, and whether that is still the version's latest — only then can it be 采用. */
     readonly entryOrdinal: number;
     readonly current: boolean;
-    readonly items: ReadonlyArray<{ readonly itemId: string; readonly before: string | null; readonly after: string }>;
-    readonly verdict: { readonly before: string | null; readonly after: string };
+    /** How much of the Book the rewrite read: its notes, and so its words, rest on the ranges read and never on the rest. */
+    readonly reading: { readonly unitsTotal: number; readonly unitsRead: number };
+    /** Each 评语 offered beside the version's own, with the notes AI7 rests it on (EVAL-006): the range and the blocks cited. */
+    readonly items: ReadonlyArray<{
+      readonly itemId: string;
+      readonly before: string | null;
+      readonly after: string;
+      readonly evidence: ReadonlyArray<{ readonly unitOrdinal: number; readonly note: string; readonly blockIds: ReadonlyArray<string> }>;
+    }>;
+    /** The 总评 offered beside the version's own; `null` when it was set aside. */
+    readonly verdict: null | { readonly before: string | null; readonly after: string };
+    /** What AI7 wrote but does not offer — a 评语 or the 总评 that stated a score or a conclusion — each with why. */
+    readonly withheld: ReadonlyArray<string>;
   };
   /** The version's latest decision on a rewrite; `null` before the first. */
   readonly decided: null | { readonly decision: 'accepted' | 'discarded'; readonly entryOrdinal: number | null; readonly decidedAt: string };

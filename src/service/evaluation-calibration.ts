@@ -169,6 +169,11 @@ export class EvaluationCalibrationLedger {
     return books;
   }
 
+  /** Whether this Book carries any actuals: it is left out of the Books its own prediction counts (S81b2). */
+  hasActuals(bookId: string): boolean {
+    return this.#db.prepare('SELECT 1 FROM publication_actuals WHERE book_id = ? LIMIT 1').get(bookId) !== undefined;
+  }
+
   /** How many Books carry any actuals: what the prediction switch waits on (EVAL-010). */
   booksWithActuals(): number {
     return Number((this.#db.prepare('SELECT count(DISTINCT book_id) count FROM publication_actuals').get() as SqlRow).count);

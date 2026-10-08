@@ -2,6 +2,7 @@ import { EVALUATION_REWRITE_CONTRACT_VERSION, type CoverageManifestUnitProjectio
 import { DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, requireAnalysis, sha256Hex } from '../analysis/canonical.js';
 import type { ManifestBlockInput } from '../analysis/coverage-manifest.js';
 import { graphemeCount } from '../analysis/factual-review-contract.js';
+import { claimsConclusion, claimsScore } from './claim-guards.js';
 
 /**
  * Evaluation Rewrite Contract v1 (Issue #429, plan slice S81b2; V2-UX-EVAL-008): `按我的评分重写评语` — AI7 rewrites one
@@ -11,7 +12,9 @@ import { graphemeCount } from '../analysis/factual-review-contract.js';
  * score can rest on — each citing, by position in the unit message, the blocks it rests on. One book-level synthesis then reads
  * the version's words and every unit's notes — never the manuscript — and writes one 评语 for every item the editor scored and
  * one 总评. A model answer outside the keys or the bounds, or one that leaves a scored item out, names one twice or names one
- * the editor did not score, is refused whole, never trimmed.
+ * the editor did not score, is refused whole, never trimmed. A 评语 or the 总评 that states a score or names one of the
+ * profile's conclusions is not offered (S81b2 review): the numbers and the conclusion are the editor's. That one is set aside
+ * with its reason and the rest stand, so one sentence never costs the others.
  *
  * The version is frozen into the contract by its words alone: each item's label and 满分, the editor's score or `不评` with its
  * reason, the comment as it stands, AI7's 初评 score and comment, and the reasons the editor gave for departing from AI7; the
@@ -63,6 +66,8 @@ export interface EvaluationRewriteContractInput {
   readonly strengths: ReadonlyArray<string>;
   readonly weaknesses: ReadonlyArray<string>;
   readonly verdict: string | null;
+  /** The profile's conclusions in its words: a rewritten 评语 or 总评 that names one is not offered. */
+  readonly conclusions: ReadonlyArray<string>;
 }
 
 /** One observation exactly as the model listed it. */
@@ -81,9 +86,12 @@ export interface EvaluationRewriteUnitResult {
 
 export interface EvaluationRewriteSynthesisResult {
   readonly schema: typeof EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA;
-  /** Every item the editor scored, once each, in the profile's order once read. */
+  /** Every item the editor scored whose 评语 may be offered, once each, in the profile's order once read. */
   readonly items: ReadonlyArray<{ readonly itemId: string; readonly comment: string }>;
-  readonly verdict: string;
+  /** The rewritten 总评, or `null` when it is not offered. */
+  readonly verdict: string | null;
+  /** What was written but is not offered, and why: an item's 评语 (`itemId`) or the 总评 (`null`). */
+  readonly withheld: ReadonlyArray<{ readonly itemId: string | null; readonly reason: string }>;
 }
 
 /**
@@ -138,7 +146,8 @@ function halfPoint(value: unknown): value is number {
 function frozenInput(input: EvaluationRewriteContractInput): EvaluationRewriteContractInput {
   requireAnalysis(isRecord(input) && isRecord(input.profile) && text(input.profile.title, 80) && text(input.profile.version, 32) &&
     Array.isArray(input.items) && input.items.length >= 1 && input.items.length <= 16 && Array.isArray(input.strengths) &&
-    Array.isArray(input.weaknesses) && (input.verdict === null || text(input.verdict, 4_000)),
+    Array.isArray(input.weaknesses) && (input.verdict === null || text(input.verdict, 4_000)) &&
+    Array.isArray(input.conclusions) && input.conclusions.length >= 1 && input.conclusions.every((label) => text(label, 20)),
   'EVALUATION_REWRITE_INPUT_INVALID', '评语重写所依据的评估版本无效。');
   const items = input.items.map((given): EvaluationRewriteItemInput => {
     const item = given as EvaluationRewriteItemInput;
@@ -173,6 +182,7 @@ function frozenInput(input: EvaluationRewriteContractInput): EvaluationRewriteCo
     strengths: lines(input.strengths),
     weaknesses: lines(input.weaknesses),
     verdict: input.verdict,
+    conclusions: [...input.conclusions],
   };
 }
 
@@ -220,7 +230,8 @@ function synthesisInstructionOf(input: EvaluationRewriteContractInput): string {
   return [
     '以下是同一部书稿各已闭合阅读范围按评分项记下的依据。依据系统提示中这一版评估的评分、调分原因与现有评语，以及这些依据，按编辑的分数重写评语。',
     '评语要与编辑给的分数一致：编辑比 AI7 打分低的项，写清它的不足；打分高的项，写清它的长处；照顾编辑写下的调分原因与现有评语中编辑自己的判断。',
-    '不改任何分数，也不在评语里写分数；不重读稿件原文、不进行事实核查、不引用外部知识、不调用任何工具、不改写稿件、不选定结论。',
+    `不改任何分数，也不在评语或总评里写分数；不选定结论，也不在评语或总评里写出${input.conclusions.map((label) => `「${label}」`).join('、')}这些结论；写了分数或结论的那一段不会提供给编辑。`,
+    '不重读稿件原文、不进行事实核查、不引用外部知识、不调用任何工具、不改写稿件。',
     '只输出一个 JSON 对象，不加说明文字，不加代码围栏。JSON 必须精确包含以下键，且不得多出任何键：',
     'schema（固定为 "ai7.evaluation-rewrite.synthesis-result/1"）、items、verdict。',
     `items 为数组，下列每个编辑已打分的评分项恰好一项：${scored.map((item) => item.itemId).join('、')}；每项精确包含 itemId 与 comment（重写后的评语，一段话，不超过 300 字素）。`,
@@ -326,7 +337,7 @@ export function parseEvaluationRewriteUnitResult(
  * Admit the synthesis: one 评语 for every item the editor scored, none for another, and the 总评 — and no other key, so no
  * number can come back with them. The items are returned in the version's order whatever order the model wrote them in.
  */
-export function parseEvaluationRewriteSynthesis(value: string, input: Pick<EvaluationRewriteContractInput, 'items'>): EvaluationRewriteSynthesisParse {
+export function parseEvaluationRewriteSynthesis(value: string, input: Pick<EvaluationRewriteContractInput, 'items' | 'conclusions'>): EvaluationRewriteSynthesisParse {
   const parsed = parseJson(value);
   if (!parsed.ok) return { ok: false, code: 'not-json', detail: '模型输出不是 JSON。' };
   const result = parsed.value;
@@ -350,9 +361,22 @@ export function parseEvaluationRewriteSynthesis(value: string, input: Pick<Evalu
   const missing = scored.find((item) => !byId.has(item.itemId));
   if (missing !== undefined) return { ok: false, code: 'items-incomplete', detail: `没有给出评分项 ${missing.itemId} 的评语。` };
   if (!line(result.verdict, MAX_REWRITTEN_VERDICT_GRAPHEMES)) return invalid('总评缺失、含有控制字符或超出 600 字素边界。');
+  // The numbers and the conclusion are the editor's: a 评语 or the 总评 that states either is set aside, alone, with why.
+  const claim = (words: string): string | null =>
+    claimsScore(words) ? '写了分数，没有采用：分数只由你定。' : claimsConclusion(words, input.conclusions) ? '写出了结论，没有采用：结论由你选。' : null;
+  const withheld: Array<{ itemId: string | null; reason: string }> = [];
+  const items: Array<{ itemId: string; comment: string }> = [];
+  for (const item of scored) {
+    const written = byId.get(item.itemId)!;
+    const reason = claim(written.comment);
+    if (reason === null) items.push(written);
+    else withheld.push({ itemId: item.itemId, reason: `「${item.label}」的重写评语${reason}` });
+  }
+  const verdictReason = claim(result.verdict);
+  if (verdictReason !== null) withheld.push({ itemId: null, reason: `重写的总评${verdictReason}` });
   return {
     ok: true,
-    result: { schema: EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA, items: scored.map((item) => byId.get(item.itemId)!), verdict: result.verdict },
+    result: { schema: EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA, items, verdict: verdictReason === null ? result.verdict : null, withheld },
   };
 }
 

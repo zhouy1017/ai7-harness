@@ -386,10 +386,9 @@ const tables = (): string[] => {
 };
 
 describe('an upgrade interrupted before its version stamp', () => {
-  for (const [index, { revision, step }] of REVISIONS.entries()) {
+  for (const { revision, step } of REVISIONS) {
     if (step === null) continue;
-    // The revision before is the next one down the list: a number another slice holds is not one this build knows.
-    const before = REVISIONS[index + 1]?.revision ?? revision - 1;
+    const before = revision - 1;
     it(`is finished by the next open when revision ${revision}'s relations committed and its stamp did not`, async () => {
       expect(await opened()).toBe(WRITING_TASK_SCHEMA_VERSION);
       const terminal = tables();

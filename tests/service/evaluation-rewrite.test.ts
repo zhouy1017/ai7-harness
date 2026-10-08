@@ -9,7 +9,13 @@ import { runReportUsageReconciles } from '../../src/service/analysis/run-report.
 import { EVALUATION_INITIAL_DRAFT_TRIGGER_SQL } from '../../src/service/evaluation-records.js';
 import { EVALUATION_REWRITE_SCHEMA_SQL, EVALUATION_REWRITE_TRIGGER_SQL } from '../../src/service/evaluation-rewrites.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
-import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { fixtureEntryKey, loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import {
+  EVALUATION_REWRITE_UNIT_RESULT_SCHEMA,
+  evaluationRewriteObservationSetDigest,
+  evaluationRewriteRequestDigest,
+  evaluationRewriteSynthesisRequestDigest,
+} from '../../src/service/evaluation/evaluation-rewrite-contract.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
   ANALYSIS_LEDGER_REVISION_62_SQL,
@@ -26,7 +32,7 @@ import {
   type LaunchPolicyProjection,
 } from '../../src/shared/protocol.js';
 import { KIND_COUPLED_ANALYSIS_RELATIONS, downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
-import { AUTHORED_REWRITE_WORDS, EVALUATION_REWRITE_FIXTURE_IDENTITY, J11_REWRITE_ADJUSTMENTS, beginRewriteAsJ11 } from '../support/evaluation-rewrite.js';
+import { AUTHORED_REWRITE_OBSERVATIONS, AUTHORED_REWRITE_WORDS, EVALUATION_REWRITE_FIXTURE_IDENTITY, J11_REWRITE_ADJUSTMENTS, beginRewriteAsJ11 } from '../support/evaluation-rewrite.js';
 import { finalizeAsJ11, runInitialEvaluationToEnd } from '../support/readers-report.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -137,8 +143,11 @@ describe('the market section and 按我的评分重写评语 over the real store
       expect(seeded.record!.content.conclusion).toBeNull();
       // The Book is in no 书系: no comparable, and 定价与首印 waits for thirty published Books.
       expect(seeded.market).toEqual({
-        series: [], comparables: [], comparableCount: 0,
-        pricing: { booksWithActuals: 0, threshold: 30, enabled: false, available: false, house: null, series: null },
+        series: [], comparables: [], comparableCount: 0, seriesUnreadable: false,
+        pricing: {
+          booksWithActuals: 0, otherBooksWithActuals: 0, threshold: 30, enabled: false, available: false, unreadable: false,
+          house: null, series: null, seriesBooksWithActuals: null, seriesMinimum: 5,
+        },
       });
       // Its 书系's other Books are comparables tagged 书系, the Book itself never one of them.
       const created = book.store.createSeries({ title: '评估书系', note: '' });
@@ -202,7 +211,7 @@ describe('the market section and 按我的评分重写评语 over the real store
       const revision = settled.resultSetRevision!;
       expect(revision.coverage).toMatchObject({ state: 'complete', unitsTotal: 8, unitsClosed: 8 });
       expect(revision.assurance).toMatchObject({ state: 'qualified', statement: EVALUATION_REWRITE_ASSURANCE_STATEMENT });
-      expect(revision.rewrite.words).toEqual({ items: AUTHORED_REWRITE_WORDS.items, verdict: AUTHORED_REWRITE_WORDS.verdict });
+      expect(revision.rewrite.words).toEqual({ items: AUTHORED_REWRITE_WORDS.items, verdict: AUTHORED_REWRITE_WORDS.verdict, withheld: [] });
       expect(revision.rewrite.observations.length).toBe(12);
       expect(runReportUsageReconciles(settled.taskOutcome!.report!, revision.usage)).toBe(true);
 
@@ -210,10 +219,14 @@ describe('the market section and 按我的评分重写评语 over the real store
       const waiting = book.store.inspectEvaluation(book.bookId, adjusted.recordId);
       expect(waiting.record).toMatchObject({ entries: 2, content: adjusted.content });
       const proposal = waiting.rewrite.proposal!;
-      expect(proposal).toMatchObject({ revisionId: revision.revisionId, entryOrdinal: 2, current: true });
+      expect(proposal).toMatchObject({ revisionId: revision.revisionId, entryOrdinal: 2, current: true, reading: { unitsTotal: 8, unitsRead: 8 }, withheld: [] });
+      // Each rewritten 评语 beside the version's own, with the notes it rests on: the range and the blocks they cite (EVAL-006).
       expect(proposal.items).toEqual(AUTHORED_REWRITE_WORDS.items.map((item) => ({
         itemId: item.itemId, before: adjusted.content.items.find((entry) => entry.itemId === item.itemId)!.comment, after: item.comment,
+        evidence: revision.rewrite.observations.filter((observation) => observation.itemId === item.itemId)
+          .map((observation) => ({ unitOrdinal: observation.unitOrdinal, note: observation.note, blockIds: observation.blockIds })),
       })));
+      expect(proposal.items.map((item) => item.evidence.length)).toEqual([3, 2, 4, 3, 0]);
       expect(proposal.verdict).toEqual({ before: null, after: AUTHORED_REWRITE_WORDS.verdict });
 
       // 放弃: recorded once, nothing of the version moves, and nothing waits any more.
@@ -223,7 +236,7 @@ describe('the market section and 按我的评分重写评语 over the real store
       expect(await refusal(() => book.store.decideEvaluationRewrite(book.bookId, revision.revisionId, 'accept'))).toBe('EVALUATION_REWRITE_DECIDED:这一次重写已经处理过了。');
 
       // Asked again of the same saved entry, then 采用: a new entry with AI7's words, every score and reason as the editor left them.
-      await rewrite(book, adjusted.recordId);
+      const againTask = await rewrite(book, adjusted.recordId);
       const again = book.store.inspectEvaluation(book.bookId, adjusted.recordId).rewrite.proposal!;
       expect(again.revisionId).not.toBe(revision.revisionId);
       const accepted = book.store.decideEvaluationRewrite(book.bookId, again.revisionId, 'accept');
@@ -236,6 +249,15 @@ describe('the market section and 按我的评分重写评语 over the real store
       expect([record.content.risks, record.content.readiness, record.content.strengths, record.content.weaknesses, record.content.conclusion])
         .toEqual([adjusted.content.risks, adjusted.content.readiness, adjusted.content.strengths, adjusted.content.weaknesses, adjusted.content.conclusion]);
       expect(accepted.rewrite).toMatchObject({ proposal: null, decided: { decision: 'accepted', entryOrdinal: 3 } });
+      // The entry names the rewrite its words came from: they are AI7's, never to be learned as the editor's (EVAL-011).
+      const reader = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        const entries = (reader.prepare('SELECT canonical_json FROM evaluation_record_entries WHERE record_id = ? ORDER BY ordinal').all(adjusted.recordId) as Array<{ canonical_json: string }>)
+          .map((row) => JSON.parse(row.canonical_json) as { rewrittenFrom?: unknown });
+        expect(entries.map((entry) => entry.rewrittenFrom ?? null)).toEqual([null, null, { taskIntentId: againTask, analysisRevisionId: again.revisionId }]);
+      } finally {
+        reader.close();
+      }
     });
   }, 300_000);
 
@@ -261,8 +283,27 @@ describe('the market section and 按我的评分重写评语 over the real store
       expect(await refusal(() => book.store.decideEvaluationRewrite(book.bookId, randomUUID(), 'accept'))).toBe('EVALUATION_REWRITE_NOT_FOUND:这本书没有这一次重写的评语。');
       expect(await refusal(() => book.store.decideEvaluationRewrite(book.bookId, proposal.revisionId, 'keep' as 'accept'))).toBe('EVALUATION_REWRITE_INVALID:评语重写参数无效。');
       expect(await refusal(() => book.store.createEvaluationRewritePreparationWork(book.bookId, randomUUID(), launchPolicy))).toBe('EVALUATION_NOT_FOUND:没有这个评估版本。');
+      // A plan prepared, then the version saved again while the drawer stayed open: 开始任务 is refused before any Run is spent.
+      const prepare = (): { taskIntentId: string; digest: string } => {
+        let progress = book.store.createEvaluationRewritePreparationWork(book.bookId, record.recordId, launchPolicy);
+        while (!progress.done) progress = book.store.advanceEvaluationRewritePreparationWork(progress.workId!);
+        return { taskIntentId: progress.projection!.taskIntent!.taskIntentId, digest: progress.projection!.planEnvelope!.digest };
+      };
+      const planned = prepare();
+      const movedAgain = book.store.saveEvaluation({
+        bookId: book.bookId, recordId: record.recordId, expectedEntries: 3, finalize: false,
+        content: { ...moved.content, readiness: [...moved.content.readiness, '再补一句。'] },
+      }).record!;
+      expect(await refusal(() => book.store.authorizeEvaluationRewrite(book.bookId, planned.taskIntentId, planned.digest)))
+        .toBe('EVALUATION_REWRITE_STALE:这一版在准备重写之后又保存过：这份计划依据的是之前的分数；请按现在的评分重新准备重写。');
+      expect(book.store.inspectEvaluationRewrite(book.bookId)?.run ?? null).toBeNull();
+      // Planned again at the new entry, then 定稿: 开始任务 is refused as any rewrite of a 定稿 version is.
+      const replanned = prepare();
+      const finalized = book.store.saveEvaluation({ bookId: book.bookId, recordId: record.recordId, expectedEntries: 4, finalize: true, content: { ...movedAgain.content, conclusion: 'revise' } }).record!;
+      expect(await refusal(() => book.store.authorizeEvaluationRewrite(book.bookId, replanned.taskIntentId, replanned.digest)))
+        .toBe(`EVALUATION_REWRITE_UNAVAILABLE:第 ${finalized.ordinal} 版已经定稿：评语不再重写；要改就重新评估。`);
+      expect(book.store.inspectEvaluationRewrite(book.bookId)?.run ?? null).toBeNull();
       // A 定稿 version takes no rewrite.
-      const finalized = book.store.saveEvaluation({ bookId: book.bookId, recordId: record.recordId, expectedEntries: 3, finalize: true, content: { ...moved.content, conclusion: 'revise' } }).record!;
       expect(book.store.inspectEvaluation(book.bookId, finalized.recordId).rewrite.prepare)
         .toEqual({ allowed: false, reason: `第 ${finalized.ordinal} 版已经定稿：评语不再重写；要改就重新评估。` });
       // A version begun alone has no AI7 评语 to rewrite.
@@ -327,6 +368,48 @@ describe('the market section and 按我的评分重写评语 over the real store
     }
   }, 300_000);
 
+  it('says how much of the Book a rewrite read, and offers no 总评 that names a conclusion while its 评语 stand', async () => {
+    // A fixture of this test's own over the authored one: the third range never answers, and the synthesis over the other
+    // seven writes a 总评 that chooses a conclusion.
+    const entries = new Map(fixture.entries);
+    fixture = { ...fixture, entries };
+    await withBook(async (book) => {
+      await runInitialEvaluationToEnd(book.store, book.owner, book.bookId, launchPolicy);
+      finalizeAsJ11(book.store, book.bookId);
+      const record = beginRewriteAsJ11(book.store, book.bookId);
+      let progress = book.store.createEvaluationRewritePreparationWork(book.bookId, record.recordId, launchPolicy);
+      while (!progress.done) progress = book.store.advanceEvaluationRewritePreparationWork(progress.workId!);
+      const prepared = progress.projection!;
+      const manifest = prepared.coverageManifest!;
+      const contract = prepared.planEnvelope!.promptContractDigest;
+      const third = manifest.units[2]!;
+      expect(entries.delete(fixtureEntryKey(third.ordinal, evaluationRewriteRequestDigest(contract, third.ordinal, third.digest)))).toBe(true);
+      const closed = manifest.units.filter((unit) => unit.ordinal !== third.ordinal).map((unit) => ({
+        unitOrdinal: unit.ordinal,
+        result: { schema: EVALUATION_REWRITE_UNIT_RESULT_SCHEMA, unitOrdinal: unit.ordinal, observations: AUTHORED_REWRITE_OBSERVATIONS[unit.ordinal]! },
+      }));
+      const verdict = '总体较好，建议推荐出版。';
+      const requestDigest = evaluationRewriteSynthesisRequestDigest(contract, evaluationRewriteObservationSetDigest(closed));
+      entries.set(fixtureEntryKey(0, requestDigest), {
+        unitOrdinal: 0, requestDigest, attempt: null, contentDigest: null,
+        response: { kind: 'unit-result', text: JSON.stringify({ ...AUTHORED_REWRITE_WORDS, verdict }), usage: { inputTokens: 2600, outputTokens: 560 } },
+      });
+      const authorized = book.store.authorizeEvaluationRewrite(book.bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+      book.owner.admitOrQueue(authorized.dispatchRunRecordId!, authorized.ledger);
+      await book.owner.whenIdle();
+      const page = book.store.inspectEvaluation(book.bookId, record.recordId);
+      const proposal = page.rewrite.proposal!;
+      // Seven of eight ranges read, and said so; the 评语 stand, the 总评 is set aside with why.
+      expect(proposal.reading).toEqual({ unitsTotal: 8, unitsRead: 7 });
+      expect(proposal.items.map((item) => item.after)).toEqual(AUTHORED_REWRITE_WORDS.items.map((item) => item.comment));
+      expect([proposal.verdict, proposal.withheld]).toEqual([null, ['重写的总评写出了结论，没有采用：结论由你选。']]);
+      // 采用 takes the 评语 alone: the version's own 总评 stays.
+      const accepted = book.store.decideEvaluationRewrite(book.bookId, proposal.revisionId, 'accept').record!;
+      expect([accepted.entries, accepted.content.verdict]).toEqual([record.entries + 1, record.content.verdict]);
+      expect(accepted.content.items.filter((item) => item.score !== null).map((item) => item.comment)).toEqual(AUTHORED_REWRITE_WORDS.items.map((item) => item.comment));
+    });
+  }, 300_000);
+
   it('offers no rewrite under a live scope, and prepares or starts none there', async () => {
     await withBook(async (book) => {
       await runInitialEvaluationToEnd(book.store, book.owner, book.bookId, launchPolicy);
@@ -357,7 +440,7 @@ describe('the market section and 按我的评分重写评语 over the real store
     });
   }, 300_000);
 
-  it('keeps its two ledgers immutable, refuses a rewrite Task record rewritten whole, and reads a 初评 snapshot of either shape', async () => {
+  it('keeps its two ledgers immutable, reads 评估 past a damaged older decision or Task record, and reads a 初评 snapshot of either shape', async () => {
     let bookId = '';
     let recordId = '';
     await withBook(async (book) => {
@@ -369,7 +452,28 @@ describe('the market section and 按我的评分重写评语 over the real store
       await rewrite(book, record.recordId);
       const proposal = book.store.inspectEvaluation(book.bookId, record.recordId).rewrite.proposal!;
       book.store.decideEvaluationRewrite(book.bookId, proposal.revisionId, 'discard');
+      // A second rewrite waits undecided beside the first one's decision.
+      await rewrite(book, record.recordId);
+      expect(book.store.inspectEvaluation(book.bookId, record.recordId).rewrite).toMatchObject({ decided: { decision: 'discarded' }, proposal: { current: true } });
     });
+    // The older rewrite's decision, damaged: 评估 still opens, the version with it, and the rewrite says it is unavailable.
+    const older = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      older.exec('DROP TRIGGER evaluation_rewrite_decisions_no_update');
+      older.exec("UPDATE evaluation_rewrite_decisions SET canonical_json = canonical_json || ' '");
+      older.exec(EVALUATION_REWRITE_TRIGGER_SQL.evaluation_rewrite_decisions_no_update!);
+    } finally {
+      older.close();
+    }
+    const damaged = await openStore();
+    try {
+      const page = damaged.inspectEvaluation(bookId, recordId);
+      expect(page.record!.recordId).toBe(recordId);
+      expect(page.rewrite).toMatchObject({ prepare: { allowed: false, reason: '按我的评分重写评语暂不可用：评语重写记录已损坏。' }, proposal: null, decided: null });
+      damaged.markCleanShutdown();
+    } finally {
+      damaged.close();
+    }
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
       expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
@@ -395,7 +499,7 @@ describe('the market section and 按我的评分重写评语 over the real store
       };
       rewriteSnapshot(v1);
       // The rewrite Task's frozen words changed, their digest with them: the contract it names is no longer this one.
-      const row = database.prepare('SELECT task_intent_id, canonical_json FROM evaluation_rewrite_tasks').get() as { task_intent_id: string; canonical_json: string };
+      const row = database.prepare('SELECT task_intent_id, canonical_json FROM evaluation_rewrite_tasks ORDER BY recorded_at DESC LIMIT 1').get() as { task_intent_id: string; canonical_json: string };
       const json = row.canonical_json.replace('"score":13', '"score":12');
       expect(json).not.toBe(row.canonical_json);
       database.exec('DROP TRIGGER evaluation_rewrite_tasks_no_update');
@@ -479,7 +583,7 @@ describe('the market section and 按我的评分重写评语 over the real store
     }
   }, 300_000);
 
-  it('refuses a revision-63 store whose kind-coupled relations already read as revision 65\'s', async () => {
+  it('refuses a revision-63 store whose kind-coupled relations already read as revision 64\'s', async () => {
     await withBook(async () => undefined);
     const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const plant = new DatabaseSync(path);

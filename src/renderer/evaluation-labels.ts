@@ -316,12 +316,12 @@ export function readersReportDraftLine(draft: NonNullable<EvaluationReadersRepor
 // ---- 市场 (Issue #429, plan slice S81b2; V2-UX-EVAL-009, EVAL-010) ------------------------------------------------------
 
 export const EVALUATION_MARKET_HEADING = '市场定位与策略';
-export const EVALUATION_MARKET_LEDE = '「读者与市场潜力」一项的展开：AI7 只依据这本书的稿件写出目标读者、卖点与渠道；可比图书与定价首印来自本社数据。';
+export const EVALUATION_MARKET_LEDE = '「读者与市场潜力」一项的展开：目标读者、卖点与渠道是 AI7 从所读书稿的题材与写法推断的，不是书稿里写明的；可比图书与定价首印来自本社数据。';
 /** The market section's basis while web search is not connected (ADR 0080 §7: 未联网核查). */
 export const EVALUATION_MARKET_OFFLINE = '未联网核查：市场部分只依据本书稿件与本社数据，没有检索外网，也没有对比他社图书或获奖作品。';
 export const EVALUATION_MARKET_LISTS = { readers: '目标读者', sellingPoints: '差异化卖点', channels: '渠道与策略' } as const;
 /** Said beside AI7's market words: whose they are, and what they rest on. */
-export const EVALUATION_MARKET_AI7 = 'AI7 · 依据书稿';
+export const EVALUATION_MARKET_AI7 = 'AI7 · 据书稿题材推断';
 export const EVALUATION_MARKET_NONE_ALONE = '这一版不是从 AI7 初评开始的：没有 AI7 写的目标读者、卖点与渠道。';
 export const EVALUATION_MARKET_NONE_INITIAL = '这一版开始时的 AI7 初评没有写出市场部分。';
 export const EVALUATION_COMPARABLES_HEADING = '可比图书';
@@ -334,6 +334,9 @@ export const EVALUATION_PREDICTION_NOT_PROMISE = '不是承诺';
 export const EVALUATION_PREDICTION_LABELS = { marketReturn: '市场回报', awards: '评奖可能性', pricing: '定价与首印' } as const;
 /** EVAL-009: a prediction AI7 could not ground in what it read. */
 export const EVALUATION_PREDICTION_NONE = '暂无法预测';
+/** House data that could not be read this time (S81b2 review): said as such, and 评估 stays readable. */
+export const EVALUATION_PRICING_UNREADABLE = '暂时读不到本社数据：定价与首印的记录这次没有读出来，不预测。';
+export const EVALUATION_COMPARABLES_UNREADABLE = '暂时读不到本社数据：书系的记录这次没有读出来，不列可比图书。';
 /** What 定价与首印's range rests on, whenever it shows (EVAL-010; the Owner's answer of 2026-10-07). */
 export const EVALUATION_PRICING_BASIS = '依据：本社已发稿图书录入的实际定价与首印，取中间一半图书的范围和中位数；不含这本书，没有用模型，也没有检索外网。';
 
@@ -365,20 +368,26 @@ export function evaluationPricingRangeLine(scope: string, range: EvaluationPredi
 }
 
 /**
- * 定价与首印 in the prediction block (EVAL-010, EVAL-014): the ranges once 设置's switch is on and enough Books carry actuals —
- * the Book's own 书系 first where it has any — or what the prediction waits for.
+ * 定价与首印 in the prediction block (EVAL-010, EVAL-014): the ranges once 设置's switch is on and enough other Books carry
+ * actuals — the Book's own 书系 first where enough of its Books do — or what the prediction waits for.
  */
 export function evaluationPricingLines(pricing: EvaluationPricingProjection): string[] {
+  if (pricing.unreadable) return [EVALUATION_PRICING_UNREADABLE];
   if (!pricing.available) {
     return [`不预测。本社已录入定价与首印的已发稿图书 ${pricing.booksWithActuals} / ${pricing.threshold} 本；满 ${pricing.threshold} 本后，可在「设置 › 评估校准与预测」里打开预测。`];
   }
   if (!pricing.enabled) {
     return [`不预测：「设置 › 评估校准与预测」里没有打开定价与首印预测（已录入实际数据的已发稿图书 ${pricing.booksWithActuals} 本）。`];
   }
+  if (pricing.house === null) {
+    return [`不预测：不计这本书，本社已录入定价与首印的已发稿图书 ${pricing.otherBooksWithActuals} / ${pricing.threshold} 本；范围只依据其他图书，满 ${pricing.threshold} 本后才给出。`];
+  }
   const lines: string[] = [];
   if (pricing.series !== null) lines.push(evaluationPricingRangeLine('同书系已发稿图书', pricing.series));
-  if (pricing.house !== null) lines.push(evaluationPricingRangeLine('本社已发稿图书', pricing.house));
-  if (lines.length === 0) return ['不预测：除这本书以外，本社还没有录入实际数据的已发稿图书。'];
+  else if (pricing.seriesBooksWithActuals !== null) {
+    lines.push(`同书系已录入实际数据的已发稿图书 ${pricing.seriesBooksWithActuals} 本，不足 ${pricing.seriesMinimum} 本，不给出同书系的范围。`);
+  }
+  lines.push(evaluationPricingRangeLine('本社已发稿图书', pricing.house));
   return [...lines, EVALUATION_PRICING_BASIS];
 }
 
@@ -420,6 +429,16 @@ export function evaluationRewriteTaskLine(task: NonNullable<EvaluationRewriteWor
 /** The proposal waiting for the editor: which save it was written from. */
 export function evaluationRewriteProposalLine(proposal: NonNullable<EvaluationRewriteWorkspaceProjection['proposal']>): string {
   return `AI7 按你第 ${proposal.entryOrdinal} 次保存的评分重写了评语，等你决定：采用后才记入这一版，分数不变。`;
+}
+
+/**
+ * How much of the Book the rewrite read (S81b2 review): its notes, and so its words, rest on the ranges read alone — said
+ * whenever a proposal shows, and plainly when some were not read.
+ */
+export function evaluationRewriteReadingLine(reading: NonNullable<EvaluationRewriteWorkspaceProjection['proposal']>['reading']): string {
+  return reading.unitsRead < reading.unitsTotal
+    ? `AI7 这次重写只读到 ${reading.unitsRead} / ${reading.unitsTotal} 个阅读范围：没读到的范围里的内容没有进入重写的评语。`
+    : `AI7 这次重写读了全部 ${reading.unitsTotal} 个阅读范围。`;
 }
 
 /** The version's last decision on a rewrite. */
