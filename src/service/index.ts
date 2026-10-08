@@ -680,6 +680,24 @@ async function dispatch(
       }
       return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluation(request.input.bookId, null) };
     }
+    // 审稿意见 (Issue #429, S81c): drafted from the Book's latest 定稿 version, prepared as a cooperative job whose plan the Task
+    // Drawer opens, and started from its bar through the governor on the ledger of the plan's contract, as 初评 is.
+    case 'prepareReadersReport':
+      return { id: request.id, ok: true, op: request.op, result: jobs.startReadersReportPreparation(request.input.bookId, request.input.template, launchPolicy) };
+    case 'authorizeReadersReport': {
+      const authorized = store.authorizeReadersReport(request.input.bookId, request.input.taskIntentId, request.input.planEnvelopeDigest);
+      if (authorized.dispatchRunRecordId !== null) {
+        try {
+          analysisExecution.admitOrQueue(authorized.dispatchRunRecordId, authorized.ledger);
+        } catch (error) {
+          const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
+          throw new StoreErrorClass(code, error instanceof Error ? error.message : '运行未能进入调度。');
+        }
+      }
+      return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluation(request.input.bookId, null) };
+    }
+    case 'createReadersReportDraft':
+      return { id: request.id, ok: true, op: request.op, result: store.createReadersReportDraft(request.input.bookId, request.input.revisionId) };
     case 'inspectAnalysisFeedback':
       return { id: request.id, ok: true, op: request.op, result: store.inspectAnalysisFeedback(request.input.bookId, request.input.revisionId) };
     case 'recordAnalysisFeedback':
@@ -1391,6 +1409,8 @@ async function run(): Promise<void> {
     // AI7 初评 has no 续行 (Issue #429 review, P1): one left under way ends 已中断 with its outcome, and one left waiting for a
     // place is blocked with why, so 评估 offers 重新初评 instead of reading a Run under way for good.
     store.reconcileStoppedInitialEvaluationRuns();
+    // 审稿意见 has no 续行 either (Issue #429, S81c): reconciled by kind exactly as 初评 is.
+    store.reconcileStoppedReadersReportRuns();
     // A Review Run's categories take a place of the one owner's governor one after another.
     reviewRuns = new ReviewRunDriver(store.reviewRunDriveSteps, analysisExecution);
     // Connectivity Wait (Issue #502). The reading is the device's own unless J-04's control names a file; the

@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 93 as const;
+export const SERVICE_PROTOCOL_VERSION = 96 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -91,6 +91,9 @@ export const IPC_CHANNELS = {
   saveEvaluation: 'ai7:j11:save-evaluation',
   prepareInitialEvaluation: 'ai7:j11:prepare-initial-evaluation',
   authorizeInitialEvaluation: 'ai7:j11:authorize-initial-evaluation',
+  prepareReadersReport: 'ai7:j11:prepare-readers-report',
+  authorizeReadersReport: 'ai7:j11:authorize-readers-report',
+  createReadersReportDraft: 'ai7:j11:create-readers-report-draft',
   inspectAnalysisFeedback: 'ai7:j11:inspect-analysis-feedback',
   recordAnalysisFeedback: 'ai7:j11:record-analysis-feedback',
   readLibraryDecisionReason: 'ai7:j15:read-library-decision-reason',
@@ -2441,6 +2444,9 @@ export const FACTUAL_REVIEW_ASSURANCE_STATEMENT =
 /** A review category's: findings are located, never decided — the editor disposes of each (V2-UX-REV-003). */
 export const REVIEW_CATEGORY_ASSURANCE_STATEMENT =
   '仅为模型按审阅依据列出的发现与其精确引文位置；是否采纳由编辑逐条决定，不构成事实判定、合规结论或稿件变更。' as const;
+/** 审稿意见 (Issue #429, S81c): a draft from the record and what was read, never a delivery (V2-UX-EVAL-013). */
+export const READERS_REPORT_ASSURANCE_STATEMENT =
+  '审稿意见是模型依据定稿的评估记录与所读稿件写成的草稿，由编辑在稿件编辑面上修改；它不会交付或发送，也不改变评估记录。' as const;
 /** AI7's 初评 (Issue #429, S81b1): scores to score against, never the editor's — the record keeps theirs (V2-UX-EVAL-006). */
 export const INITIAL_EVALUATION_ASSURANCE_STATEMENT =
   'AI7 初评是模型据所读稿件给出的初步分数与评语，只作编辑打分的参考；记录保存的是编辑的评分，结论由编辑选定。' as const;
@@ -2448,7 +2454,8 @@ export type AnalysisAssuranceStatement =
   | typeof BASELINE_ANALYSIS_ASSURANCE_STATEMENT
   | typeof FACTUAL_REVIEW_ASSURANCE_STATEMENT
   | typeof REVIEW_CATEGORY_ASSURANCE_STATEMENT
-  | typeof INITIAL_EVALUATION_ASSURANCE_STATEMENT;
+  | typeof INITIAL_EVALUATION_ASSURANCE_STATEMENT
+  | typeof READERS_REPORT_ASSURANCE_STATEMENT;
 
 export const BASELINE_ANALYSIS_KIND = 'baseline-manuscript-analysis' as const;
 export const BASELINE_ANALYSIS_CONTRACT_VERSION = 'ai7.baseline-manuscript-analysis/1' as const;
@@ -2542,6 +2549,60 @@ export const INITIAL_EVALUATION_MODE_MEANINGS = {
 } as const satisfies Record<InitialEvaluationTaskMode, string>;
 
 /**
+ * 审稿意见 (Issue #429, plan slice S81c; V2-UX-EVAL-013; editor-surfaces §5): the reader's report kind, on the same real path
+ * as the others, read under its own exact-versioned contract `ai7.readers-report/1`. It is drafted from one finalized
+ * Evaluation Record under one of the two V1 templates: each Analysis Unit is read for the passages the report can point to —
+ * what bears out a strength, shows a problem, or where a revision applies — each citing its blocks; one book-level synthesis
+ * then writes the five sections from the record and those passages. The draft is an Editorial Artifact the editor edits;
+ * nothing of it is delivered or sent.
+ */
+export const READERS_REPORT_KIND = 'readers-report' as const;
+export const READERS_REPORT_CONTRACT_VERSION = 'ai7.readers-report/1' as const;
+export const READERS_REPORT_EXPECTED_OUTCOME = '审稿意见草稿结果集修订版（审稿意见契约 v1）' as const;
+/** The first draft of a Book's 审稿意见, and every later one: the whole manuscript read again, nothing carried over. */
+export type ReadersReportTaskMode = 'readers-report-first' | 'readers-report-again';
+export const READERS_REPORT_TASK_MODES: readonly ReadersReportTaskMode[] = ['readers-report-first', 'readers-report-again'];
+export const READERS_REPORT_UPDATE_MODES: readonly ReadersReportTaskMode[] = ['readers-report-again'];
+export const READERS_REPORT_MODE_GOALS = {
+  'readers-report-first': '从定稿的评估记录起草审稿意见：逐单元找出可以引用的段落并引用内容块，再按所选模板写出总体评价、主要优点、主要问题、修改建议与结论，形成结果集修订版。',
+  'readers-report-again': '重新起草审稿意见：按当前覆盖清单重读每个分析单元，不沿用以前的结果，按所选模板重新写出五个部分，追加一个结果集修订版。',
+} as const satisfies Record<ReadersReportTaskMode, string>;
+export type ReadersReportGoal = (typeof READERS_REPORT_MODE_GOALS)[ReadersReportTaskMode];
+export const READERS_REPORT_MODE_LABELS = {
+  'readers-report-first': '起草审稿意见',
+  'readers-report-again': '重新起草审稿意见',
+} as const satisfies Record<ReadersReportTaskMode, string>;
+export const READERS_REPORT_MODE_MEANINGS = {
+  'readers-report-first': '对固定的任务输入修订版派生覆盖清单并逐单元执行审稿意见契约 v1，再做一次全书综合，形成首个结果集修订版。',
+  'readers-report-again': '绕过全部既有单元结果，按当前覆盖清单重读每个分析单元并重新做全书综合，追加一个结果集修订版。',
+} as const satisfies Record<ReadersReportTaskMode, string>;
+/** The two V1 templates (EVAL-013): for the author, or for the editorial board and its topic meeting. */
+export type ReadersReportTemplate = 'author' | 'editorial';
+export const READERS_REPORT_TEMPLATES: readonly ReadersReportTemplate[] = ['author', 'editorial'];
+export const READERS_REPORT_TEMPLATE_LABELS: Readonly<Record<ReadersReportTemplate, string>> = {
+  author: '给作者的修改意见',
+  editorial: '给编辑部 / 选题会的审读报告',
+};
+/** The five sections every 审稿意见 is structured in (EVAL-013), in their order. */
+export type ReadersReportSectionId = 'overall' | 'strengths' | 'problems' | 'suggestions' | 'conclusion';
+export const READERS_REPORT_SECTIONS: readonly ReadersReportSectionId[] = ['overall', 'strengths', 'problems', 'suggestions', 'conclusion'];
+export const READERS_REPORT_SECTION_LABELS: Readonly<Record<ReadersReportSectionId, string>> = {
+  overall: '总体评价',
+  strengths: '主要优点',
+  problems: '主要问题',
+  suggestions: '修改建议',
+  conclusion: '结论',
+};
+/**
+ * What the plan says when the house holds no 审稿意见 among its 范例 (the Owner's answer of 2026-10-07): the draft is written
+ * without one, and the plan says so.
+ */
+export const READERS_REPORT_NO_EXEMPLAR = '本社暂无审稿意见范例，本次不参考范例' as const;
+/** Under a live scope no Provider Processing policy names 审稿意见 yet: nothing is prepared or started there. */
+export const READERS_REPORT_LIVE_UNAVAILABLE =
+  '审稿意见暂不可用：当前的模型处理策略没有写明审稿意见可以发送给模型，在这个运行范围下不能准备或开始起草。' as const;
+
+/**
  * The review-category kind family (Issue #417, plan slice S69): one analysis kind per Review Category,
  * `editorial-review/<categoryId>`, all read under the one exact-versioned contract
  * `ai7.editorial-review/1`. The categories themselves are configuration (V2-UX-REV-002: a house may
@@ -2630,9 +2691,10 @@ export function reviewCategoryExpectedOutcome(label: string): string {
 }
 
 /** Every analysis kind a Book may hold, and every Task mode any of them declares. */
-export type AnalysisKindId = typeof BASELINE_ANALYSIS_KIND | typeof FACTUAL_REVIEW_KIND | ReviewCategoryKindId | typeof INITIAL_EVALUATION_KIND;
-export type AnalysisTaskMode = BaselineAnalysisTaskMode | FactualReviewTaskMode | ReviewCategoryTaskMode | InitialEvaluationTaskMode;
-export type AnalysisGoal = BaselineAnalysisGoal | FactualReviewGoal | ReviewCategoryGoal | InitialEvaluationGoal;
+export type AnalysisKindId = typeof BASELINE_ANALYSIS_KIND | typeof FACTUAL_REVIEW_KIND | ReviewCategoryKindId | typeof INITIAL_EVALUATION_KIND |
+  typeof READERS_REPORT_KIND;
+export type AnalysisTaskMode = BaselineAnalysisTaskMode | FactualReviewTaskMode | ReviewCategoryTaskMode | InitialEvaluationTaskMode | ReadersReportTaskMode;
+export type AnalysisGoal = BaselineAnalysisGoal | FactualReviewGoal | ReviewCategoryGoal | InitialEvaluationGoal | ReadersReportGoal;
 
 /** An explicit editor choice over exact block positions of the Task Input revision (inclusive). */
 export interface BaselineAnalysisSelectedRange {
@@ -3988,6 +4050,120 @@ export interface InitialEvaluationProjection extends Omit<
   inspectedRevision: null | { revision: InitialEvaluationResultSetRevisionProjection; current: boolean; readOnly: true };
 }
 
+// ---- 审稿意见 (Issue #429, plan slice S81c; V2-UX-EVAL-013) ------------------------------------------------------------
+
+/** What a passage the report can point to bears out: a strength, a problem, or where a revision applies. */
+export type ReadersReportPassageKind = 'strength' | 'problem' | 'suggestion';
+export const READERS_REPORT_PASSAGE_KINDS: readonly ReadersReportPassageKind[] = ['strength', 'problem', 'suggestion'];
+
+/** One passage AI7 noted in one reading range for the report, with the blocks it rests on. */
+export interface ReadersReportPassageProjection {
+  unitOrdinal: number;
+  kind: ReadersReportPassageKind;
+  note: string;
+  blockIds: ReadonlyArray<string>;
+}
+
+/** The five sections as the book-level synthesis wrote them: two paragraphs and three lists. */
+export interface ReadersReportSectionsProjection {
+  overall: string;
+  strengths: ReadonlyArray<string>;
+  problems: ReadonlyArray<string>;
+  suggestions: ReadonlyArray<string>;
+  conclusion: string;
+}
+
+/** The reader's report kind's own component of a Result Set Revision. */
+export interface ReadersReportResultProjection {
+  template: ReadersReportTemplate;
+  /** The house's 审稿意见 the draft was seeded with, and what the plan said of them. */
+  exemplars: { count: number; statement: string };
+  passages: ReadonlyArray<ReadersReportPassageProjection>;
+  /** `null` when the book-level synthesis did not close: AI7 then wrote no draft. */
+  sections: ReadersReportSectionsProjection | null;
+  synthesis: { state: 'closed' | 'gap' | 'not-run'; reason: string | null };
+}
+
+export interface ReadersReportRevisionUpdateProjection extends Omit<ReviewCategoryRevisionUpdateProjection, 'mode'> {
+  mode: ReadersReportTaskMode;
+}
+
+export type ReadersReportUnitProjection =
+  | {
+      unitOrdinal: number;
+      state: 'closed';
+      requestDigest: string;
+      responseDigest: string;
+      usage: { inputTokens: number; outputTokens: number } | null;
+      lineage: ReviewCategoryUnitLineage;
+      passages: ReadonlyArray<{ kind: ReadersReportPassageKind; note: string; blockOrdinals: ReadonlyArray<number> }>;
+    }
+  | { unitOrdinal: number; state: 'gap'; requestDigest: string; lineage: ReviewCategoryUnitLineage; gap: AnalysisGapProjection };
+
+export interface ReadersReportResultSetRevisionProjection extends Omit<
+  ReviewCategoryResultSetRevisionProjection,
+  'contractVersion' | 'update' | 'category' | 'findings' | 'excluded' | 'findingCounts' | 'units'
+> {
+  contractVersion: typeof READERS_REPORT_CONTRACT_VERSION;
+  update: ReadersReportRevisionUpdateProjection;
+  readersReport: ReadersReportResultProjection;
+  units: ReadonlyArray<ReadersReportUnitProjection>;
+}
+
+export interface ReadersReportUpdateProjection extends Omit<ReviewCategoryUpdateProjection, 'mode'> {
+  mode: 'readers-report-again';
+}
+
+export interface ReadersReportUpdateControlsProjection extends Omit<BaselineAnalysisUpdateControlsProjection, 'actions'> {
+  actions: { 'readers-report-again': Omit<ReviewCategoryUpdateActionProjection, 'mode'> & { mode: 'readers-report-again' } };
+}
+
+export interface ReadersReportHistoryEntryProjection extends Omit<BaselineAnalysisHistoryEntryProjection, 'mode' | 'contractVersion' | 'counts'> {
+  mode: ReadersReportTaskMode;
+  contractVersion: typeof READERS_REPORT_CONTRACT_VERSION;
+  counts: ReviewScopePlanCounts;
+}
+
+export interface ReadersReportHistoryProjection {
+  resultSetId: string;
+  kind: typeof READERS_REPORT_KIND;
+  createdAt: string;
+  latestOrdinal: number;
+  entries: ReadonlyArray<ReadersReportHistoryEntryProjection>;
+}
+
+/** The reader's report kind's Task projection: a member of the analysis projection union, discriminated on `kind`. */
+export interface ReadersReportProjection extends Omit<
+  BaselineAnalysisProjection,
+  'kind' | 'contractVersion' | 'taskIntent' | 'executionPlan' | 'resultSetRevision' | 'update' | 'updateControls' | 'history' | 'inspectedRevision'
+> {
+  kind: typeof READERS_REPORT_KIND;
+  contractVersion: typeof READERS_REPORT_CONTRACT_VERSION;
+  taskIntent: null | {
+    taskIntentId: string;
+    goal: ReadersReportGoal;
+    expectedOutcome: typeof READERS_REPORT_EXPECTED_OUTCOME;
+    createdAt: string;
+    mode: ReadersReportTaskMode;
+    modeLabel: string;
+  };
+  executionPlan: null | {
+    steps: ReadonlyArray<string>;
+    effects: readonly [];
+    unitCount: number;
+    recomputedUnitCount?: number;
+    reusedUnitCount?: number;
+    unreviewedUnitCount?: number;
+    reducerStages: readonly ['unit-validation', 'cross-unit-reduction', 'book-synthesis'];
+    stopCondition: string;
+  };
+  resultSetRevision: null | ReadersReportResultSetRevisionProjection;
+  update: null | ReadersReportUpdateProjection;
+  updateControls: null | ReadersReportUpdateControlsProjection;
+  history: null | ReadersReportHistoryProjection;
+  inspectedRevision: null | { revision: ReadersReportResultSetRevisionProjection; current: boolean; readOnly: true };
+}
+
 // ---- 审阅记录 Review Runs (Issue #417, plan slice S69) ---------------------------------------------
 
 /**
@@ -4446,8 +4622,8 @@ export interface ReviewFindingOfMarkProjection {
  * slice that brings its ledger; nothing here is an authority record of its own. AI7's 初评 (Issue #429, S81b1) joins them
  * with its own ledger.
  */
-export type TaskPlanKind = 'fixed-task' | 'baseline-analysis' | 'review-run' | 'initial-evaluation';
-export const TASK_PLAN_KINDS: readonly TaskPlanKind[] = ['fixed-task', 'baseline-analysis', 'review-run', 'initial-evaluation'];
+export type TaskPlanKind = 'fixed-task' | 'baseline-analysis' | 'review-run' | 'initial-evaluation' | 'readers-report';
+export const TASK_PLAN_KINDS: readonly TaskPlanKind[] = ['fixed-task', 'baseline-analysis', 'review-run', 'initial-evaluation', 'readers-report'];
 
 /** Which plan the drawer reads. The Book is always the route's; the renderer never names it. */
 export interface InspectTaskPlanInput {
@@ -5405,6 +5581,42 @@ export interface EvaluationWorkspaceProjection {
     | { readonly allowed: false; readonly reason: string };
   /** AI7's 初评 of the Book (Issue #429, S81b1). */
   readonly initial: EvaluationInitialProjection;
+  /** 审稿意见 of the Book (Issue #429, S81c). */
+  readonly readersReport: EvaluationReadersReportProjection;
+}
+
+/** One template's 审稿意见 on ②C (Issue #429, S81c; EVAL-013): whether it can be drafted, its result, and its draft. */
+export interface EvaluationReadersReportTemplateProjection {
+  readonly template: ReadersReportTemplate;
+  readonly label: string;
+  /** 起草, or why it cannot be drafted now. */
+  readonly prepare: { readonly allowed: true; readonly mode: ReadersReportTaskMode } | { readonly allowed: false; readonly reason: string };
+  /** The latest result of this template whose draft has not been opened yet: 打开草稿 makes it the draft document. */
+  readonly drafted: null | { readonly revisionId: string; readonly recordOrdinal: number; readonly createdAt: string };
+  /** The template's draft, once made: an Editorial Artifact edited on the manuscript surface, a draft and never a delivery. */
+  readonly draft: null | {
+    readonly typeId: string;
+    readonly typeLabel: string;
+    /** The 定稿 version it was drafted from. */
+    readonly recordOrdinal: number;
+    readonly document: ProductionDocumentProjection;
+  };
+}
+
+/** 审稿意见 on ②C (Issue #429, S81c; EVAL-013): drafted from the Book's latest 定稿 version, under one of two templates. */
+export interface EvaluationReadersReportProjection {
+  /** The 定稿 version a new 审稿意见 drafts from: the latest; `null` while there is none. */
+  readonly basis: null | { readonly recordId: string; readonly ordinal: number; readonly revisionLabel: string; readonly finalizedAt: string };
+  /** The house's 审稿意见 among its 范例, and what a plan says of them. */
+  readonly exemplars: { readonly count: number; readonly statement: string };
+  /** The Book's latest 审稿意见 Task, which the Task Drawer opens; `null` before the first is prepared. */
+  readonly task: null | {
+    readonly taskIntentId: string;
+    readonly template: ReadersReportTemplate;
+    readonly state: BaselineAnalysisProjection['state'];
+    readonly label: string;
+  };
+  readonly templates: ReadonlyArray<EvaluationReadersReportTemplateProjection>;
 }
 
 /** 开始评估 or 重新评估: alone, or from AI7's latest 初评 (Issue #429, S81b1). */
@@ -6590,7 +6802,8 @@ export interface QuickStartBaselineAnalysisResult {
 }
 
 /** Every analysis projection, discriminated on `kind`. */
-export type AnalysisProjection = BaselineAnalysisProjection | FactualReviewProjection | ReviewCategoryProjection | InitialEvaluationProjection;
+export type AnalysisProjection = BaselineAnalysisProjection | FactualReviewProjection | ReviewCategoryProjection | InitialEvaluationProjection |
+  ReadersReportProjection;
 
 export interface HistoricalRevisionProjection {
   mode: 'historical-revision';
@@ -8366,7 +8579,7 @@ export interface ServiceJobProjection {
    */
   kind: 'search' | 'replacement' | 'reimport-preparation' | 'reimport-resolution' | 'reimport-commit' |
     'task-authorization-preparation' | 'baseline-analysis-preparation' | 'review-run-preparation' | 'package-export' |
-    'initial-evaluation-preparation';
+    'initial-evaluation-preparation' | 'readers-report-preparation';
   state: 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
   progress: { completed: number; total: number; label: string };
   result: SearchSummaryProjection | ReplacementPreviewProjection | ReviewBeforeManuscriptReimportProjection |
@@ -8872,6 +9085,24 @@ export interface ServiceOperationMap {
     input: { bookId: string; taskIntentId: string; planEnvelopeDigest: string };
     output: EvaluationWorkspaceProjection;
   };
+  /**
+   * 起草审稿意见 (Issue #429, S81c): the reader's report kind's Task, drafted from the Book's latest 定稿 version under one
+   * template, prepared as one cooperative job. The completed job's result is 评估 with the prepared Task named.
+   */
+  prepareReadersReport: {
+    input: { bookId: string; template: ReadersReportTemplate };
+    output: ServiceJobProjection;
+  };
+  /** 开始任务 in the drawer's bar for 审稿意见. */
+  authorizeReadersReport: {
+    input: { bookId: string; taskIntentId: string; planEnvelopeDigest: string };
+    output: EvaluationWorkspaceProjection;
+  };
+  /** 打开草稿: one drafted 审稿意见 result made the template's draft document, once; 评估 then names it. */
+  createReadersReportDraft: {
+    input: { bookId: string; revisionId: string };
+    output: EvaluationWorkspaceProjection;
+  };
   /** ②A 分析反馈 (Issue #94, S38): one Result Set Revision's items with their latest judgments, and the Book's metric. */
   inspectAnalysisFeedback: {
     input: { bookId: string; revisionId: string };
@@ -9334,6 +9565,12 @@ export interface RendererApi {
   prepareInitialEvaluation(): Promise<ServiceJobProjection>;
   /** The Task Drawer bar's 开始任务 for AI7's 初评. */
   authorizeInitialEvaluation(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<EvaluationWorkspaceProjection>;
+  /** 起草审稿意见 (Issue #429, S81c): a `readers-report-preparation` job; its plan opens in the Task Drawer. */
+  prepareReadersReport(input: { template: ReadersReportTemplate }): Promise<ServiceJobProjection>;
+  /** The Task Drawer bar's 开始任务 for 审稿意见. */
+  authorizeReadersReport(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<EvaluationWorkspaceProjection>;
+  /** 打开草稿: the drafted result made the template's draft document; the renderer then opens it on the editing surface. */
+  createReadersReportDraft(input: { revisionId: string }): Promise<EvaluationWorkspaceProjection>;
   /** ②A 分析反馈 of the Book the window is showing (Issue #94, S38); the renderer never names the Book. */
   inspectAnalysisFeedback(input: { revisionId: string }): Promise<AnalysisFeedbackProjection>;
   recordAnalysisFeedback(input: RecordAnalysisFeedbackInput): Promise<AnalysisFeedbackProjection>;

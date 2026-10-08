@@ -1,0 +1,131 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-readers-report-authored",
+  "description": "审稿意见契约 v1 的人工撰写夹具：逐单元阅读 sample1（ADR 0043 收录的 Public SampleBook）后写成，回答「给作者的修改意见」模板下、从 J-11 第 14 版定稿评估（AI7 初评开始，读者与市场潜力调为 10 分，修改后再议）起草审稿意见时发出的八个单元请求与一次全书综合。每处段落都按其在单元消息中的位置引用它所依据的内容块，分为印证优点、显出问题与需要修改三类；全书综合只依据定稿的评估记录与这些段落写出总体评价、主要优点、主要问题、修改建议与结论五个部分，结论与编辑选定的「修改后再议」一致。本社暂无审稿意见范例，契约写明本次不参考范例。unitOrdinal 为 0 的条目回答全书综合与这次运行的运行反思。本夹具叠加在 sample1-evaluation-authored 之上：同一次启动既能运行基线分析与 AI7 初评，也能起草审稿意见；各自的请求摘要互不相同，叠加不改变任何条目的键。",
+  "basedOn": "sample1-evaluation-authored",
+  "provenance": "authored",
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "e3f7bb457e24519531fc8c74df707af00699866802fab7a83302df50a36da798",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.readers-report.unit-result/1\",\"unitOrdinal\":1,\"passages\":[{\"kind\":\"strength\",\"note\":\"开篇两句对仗的题辞立即确立全书的思辨气质。\",\"blockOrdinals\":[5,6]},{\"kind\":\"strength\",\"note\":\"写信又撕信的细节以动作写心事，含蓄而有张力。\",\"blockOrdinals\":[8,14]}]}",
+        "usage": {
+          "inputTokens": 2140,
+          "outputTokens": 160
+        }
+      }
+    },
+    {
+      "unitOrdinal": 2,
+      "requestDigest": "8e609c7cff5636f77f67517b711a2ee9afedb120397e75b6b6bc216b5351f310",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.readers-report.unit-result/1\",\"unitOrdinal\":2,\"passages\":[{\"kind\":\"strength\",\"note\":\"甲骨文来信与写信人早已去世的设定构成核心悬念。\",\"blockOrdinals\":[6,7]},{\"kind\":\"problem\",\"note\":\"打水漂一段个别比喻略显俗套。\",\"blockOrdinals\":[11]},{\"kind\":\"suggestion\",\"note\":\"打水漂一段的比喻可换成更贴切、更有地方色彩的说法。\",\"blockOrdinals\":[11]}]}",
+        "usage": {
+          "inputTokens": 2180,
+          "outputTokens": 210
+        }
+      }
+    },
+    {
+      "unitOrdinal": 3,
+      "requestDigest": "d7fa1db41feff1f0827a61a96aa031df203a34cbcb38fa0dc511a5afbcde1384",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.readers-report.unit-result/1\",\"unitOrdinal\":3,\"passages\":[{\"kind\":\"strength\",\"note\":\"邮递员递信的场景节奏紧凑，拆信时才揭示四个甲骨文字。\",\"blockOrdinals\":[7,8,11,15]}]}",
+        "usage": {
+          "inputTokens": 2220,
+          "outputTokens": 110
+        }
+      }
+    },
+    {
+      "unitOrdinal": 4,
+      "requestDigest": "74c38c978c4f5621ba4cb6543825577f9927756f898929bcff46a14fc0b838e6",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.readers-report.unit-result/1\",\"unitOrdinal\":4,\"passages\":[{\"kind\":\"strength\",\"note\":\"两位学者互相调侃，写出各自的性情。\",\"blockOrdinals\":[14,15,16]}]}",
+        "usage": {
+          "inputTokens": 2260,
+          "outputTokens": 110
+        }
+      }
+    },
+    {
+      "unitOrdinal": 5,
+      "requestDigest": "542e90fea2abc50081366e4baf97d6146becf9a8942e7c0ac72adfacdbcd435d",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.readers-report.unit-result/1\",\"unitOrdinal\":5,\"passages\":[{\"kind\":\"problem\",\"note\":\"个别句子成分残缺，介词之后缺少宾语。\",\"blockOrdinals\":[6]},{\"kind\":\"suggestion\",\"note\":\"逐句校读这一段，补足介词之后缺少的宾语。\",\"blockOrdinals\":[6]}]}",
+        "usage": {
+          "inputTokens": 2300,
+          "outputTokens": 160
+        }
+      }
+    },
+    {
+      "unitOrdinal": 6,
+      "requestDigest": "bb6cc5b54c893c696ce0e3dac3fc06bf8d8bc2b15568beb6a40da08429c2019b",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.readers-report.unit-result/1\",\"unitOrdinal\":6,\"passages\":[{\"kind\":\"problem\",\"note\":\"新省长与楚庄王的比附点到即止，学人与权力的关系还可以展开。\",\"blockOrdinals\":[3,4]}]}",
+        "usage": {
+          "inputTokens": 2340,
+          "outputTokens": 110
+        }
+      }
+    },
+    {
+      "unitOrdinal": 7,
+      "requestDigest": "950b5707b8cf4b7ad0ab39fde36dbceddbb3a11cd8c546d648fd203e0198b9f1",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.readers-report.unit-result/1\",\"unitOrdinal\":7,\"passages\":[{\"kind\":\"strength\",\"note\":\"翁婿对话点出学术与名利的冲突。\",\"blockOrdinals\":[16,17]},{\"kind\":\"suggestion\",\"note\":\"这里提出的考古疑问较多，后文宜逐一照应，免得读者失去线索。\",\"blockOrdinals\":[17]}]}",
+        "usage": {
+          "inputTokens": 2380,
+          "outputTokens": 160
+        }
+      }
+    },
+    {
+      "unitOrdinal": 8,
+      "requestDigest": "456b29634f4e02f83343ca57bbf93f7e4f91f09bd833aaa6129b4f69b926451b",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.readers-report.unit-result/1\",\"unitOrdinal\":8,\"passages\":[{\"kind\":\"strength\",\"note\":\"以放大镜细看来信收束本章，与章首撕信遥相呼应。\",\"blockOrdinals\":[6]}]}",
+        "usage": {
+          "inputTokens": 2420,
+          "outputTokens": 110
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "6be52650e6b11a90ae7dfaa06757b3b2d494836117ebaccc7a6f0e354ab76b3b",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.readers-report.synthesis-result/1\",\"overall\":\"这部书稿以一封甲骨文来信设置悬念，写学界中人的心事与人情，细节与意象运用纯熟，人物对白各有声口，整体达到出版要求。目前的问题主要在语言的细部：个别句子成分残缺，个别比喻落入俗套；学人与权力的主题在所读部分展开得还不够充分。\",\"strengths\":[\"以甲骨文来信设置核心悬念，开篇即抓住读者，章末的收束与开篇遥相呼应。\",\"写信又撕信、以放大镜细看来信等细节以动作写心事，含蓄而有张力。\",\"人物对白各有声口，两位学者之间的调侃写出各自的性情。\"],\"problems\":[\"个别句子成分残缺，例如介词之后缺少宾语，需要逐句校改。\",\"个别比喻略显俗套，与全书凝练的叙述语言不相称。\",\"学人与权力、学术与名利的主题点到即止，在所读部分展开得还不够。\"],\"suggestions\":[\"请逐句校读全稿，补足残缺的句子成分。\",\"打水漂一段的比喻可换成更贴切、更有地方色彩的说法。\",\"在后文照应前面提出的考古疑问，并让学人与权力的主题有更充分的展开。\"],\"conclusion\":\"结论为修改后再议：请按以上意见修改，修改稿交来后编辑部再作审读。\"}",
+        "usage": {
+          "inputTokens": 3200,
+          "outputTokens": 640
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "0d86d582db6813df67f9622e907825b3d7051b53b20826169344e4bf693b8260",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"下一次起草审稿意见可以维持当前的单元预算不变，本次没有任何阅读范围因预算而失败。\",\"basis\":\"账目中没有适配器失败或契约无效的缺口，计划内调整次数为 0。\"},{\"suggestion\":\"没有找到可引用段落的阅读范围较少，起草时可以照常读全书。\",\"basis\":\"账目按段落的类别分别计数。\"}]}",
+        "usage": {
+          "inputTokens": 900,
+          "outputTokens": 180
+        }
+      }
+    }
+  ]
+}

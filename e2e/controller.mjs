@@ -1151,6 +1151,13 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'initial-evaluation-adjust',
     'initial-evaluation-finalize',
     'initial-evaluation-calibration',
+    // Issue #429 (S81c): 审稿意见 drafted from 第 14 版定稿 through the Task Drawer, opened as a draft on the manuscript surface,
+    // saved as 版本 2, and written as DOCX.
+    'readers-report-offered',
+    'readers-report-drafted',
+    'readers-report-draft-open',
+    'readers-report-version',
+    'readers-report-docx',
     'decision-feedback-suggestions',
     'decision-feedback-dismiss',
     'decision-feedback-own-accord',

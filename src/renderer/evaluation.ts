@@ -6,9 +6,14 @@ import type {
   EvaluationRecordProjection,
   EvaluationRecordSummaryProjection,
   EvaluationWorkspaceProjection,
+  ProductionDocumentProjection,
+  ReadersReportTemplate,
   RendererApi,
   ServiceJobProjection,
 } from '../shared/protocol.js';
+import { READERS_REPORT_TEMPLATE_LABELS } from '../shared/protocol.js';
+import { mountManuscriptExport } from './manuscript-export.js';
+import { documentExportLabel } from './production-document-labels.js';
 import {
   EVALUATION_ADJUSTMENT_REASONS,
   evaluationItemAdjusted,
@@ -62,6 +67,14 @@ import {
   EVALUATION_VERDICT,
   EVALUATION_VERSIONS_HEADING,
   EVALUATION_WEAKNESSES,
+  READERS_REPORT_ACTIONS,
+  READERS_REPORT_HEADING,
+  READERS_REPORT_LEDE,
+  READERS_REPORT_STATUS,
+  readersReportBasisLine,
+  readersReportDraftLine,
+  readersReportDraftedLine,
+  readersReportTaskLine,
   evaluationBandLabel,
   evaluationComparisonLines,
   evaluationDiscardAndOpen,
@@ -89,7 +102,8 @@ import { localInstantLabel } from './plan-preview-labels.js';
  */
 export interface MountEvaluationOptions {
   readonly root: HTMLElement;
-  readonly api: Pick<RendererApi, 'inspectEvaluation' | 'startEvaluation' | 'saveEvaluation' | 'prepareInitialEvaluation'>;
+  readonly api: Pick<RendererApi, 'inspectEvaluation' | 'startEvaluation' | 'saveEvaluation' | 'prepareInitialEvaluation' | 'prepareReadersReport' |
+    'createReadersReportDraft' | 'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport'>;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly errorMessage: (error: unknown, fallback: string) => string;
   readonly technicalDetails: (key: string, ...rows: HTMLElement[]) => HTMLElement;
@@ -97,6 +111,12 @@ export interface MountEvaluationOptions {
   readonly awaitServiceJob: (initial: ServiceJobProjection, onProgress: (job: ServiceJobProjection) => void) => Promise<ServiceJobProjection>;
   /** Open AI7 初评's plan in the Task Drawer, whose bar starts it. */
   readonly openPlan: (taskIntentId: string) => void;
+  /** The route's Book, which 审稿意见's export card binds every answer to (Issue #429, S81c). */
+  readonly bookId: string;
+  /** Open 审稿意见's plan in the Task Drawer (Issue #429, S81c). */
+  readonly openReadersReportPlan: (taskIntentId: string) => void;
+  /** Open a 审稿意见 draft on the manuscript surface, as 交付物 opens a document. */
+  readonly openDraft: (draft: { typeId: string; typeLabel: string; document: ProductionDocumentProjection }) => Promise<void>;
 }
 
 /** The states in which AI7's 初评 is still under way or waiting: 评估 reads it again until it settles. */
@@ -152,6 +172,167 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
   let workspace: EvaluationWorkspaceProjection | null = null;
   let refusal: string | null = null;
   let poll: number | null = null;
+
+  // 审稿意见's DOCX export (Issue #429, S81c): ④ 导出's own card, drawn into one slot every paint of the 审稿意见 block takes
+  // back, so a card open across a repaint keeps its state.
+  const exportSlot = el('div', 'readers-report-export-slot');
+  const exporter = mountManuscriptExport({
+    root: exportSlot,
+    bookId: options.bookId,
+    api,
+    technicalDetails: (gridClass, ...rows) => technicalDetails(gridClass ?? '', ...rows),
+    setStatus,
+    errorMessage,
+    onChanged: () => undefined,
+    openerOf: (target) => target.kind === 'document'
+      ? root.querySelector<HTMLElement>(`.evaluation-readers-report li[data-document-id="${CSS.escape(target.documentId)}"] [data-readers-report-action="export"]`)
+      : null,
+  });
+
+  /**
+   * 审稿意见 (Issue #429, S81c; EVAL-013): the 定稿 version it drafts from, that the house has no 审稿意见 among its 范例 yet,
+   * the latest Task, and per template — 起草, its plan, its drafted result to open, or its draft with its versions and 导出….
+   */
+  const readersReportNode = (page: EvaluationWorkspaceProjection): HTMLElement => {
+    const report = page.readersReport;
+    const section = el('section', 'evaluation-readers-report');
+    section.dataset['readersReportState'] = report.task?.state ?? 'none';
+    const heading = el('h3', undefined, READERS_REPORT_HEADING);
+    heading.tabIndex = -1;
+    section.append(heading, el('p', 'field-note', READERS_REPORT_LEDE));
+    const basis = readersReportBasisLine(report.basis);
+    if (basis !== null) section.append(el('p', 'readers-report-basis', basis));
+    section.append(el('p', 'field-note readers-report-exemplars', `${report.exemplars.statement}。`));
+    const task = report.task;
+    if (task !== null) section.append(el('p', 'readers-report-task', readersReportTaskLine(task, READERS_REPORT_TEMPLATE_LABELS[task.template])));
+    const list = el('ul', 'readers-report-templates');
+    for (const entry of report.templates) {
+      const item = el('li');
+      item.dataset['template'] = entry.template;
+      item.append(el('span', 'readers-report-template', entry.label));
+      const row = el('div', 'button-row');
+      const own = task !== null && task.template === entry.template;
+      if (entry.draft !== null) {
+        const draft = entry.draft;
+        item.dataset['documentId'] = draft.document.documentId;
+        item.append(el('p', 'field-note readers-report-draft', readersReportDraftLine(draft)));
+        const open = action(READERS_REPORT_ACTIONS.openDraft, 'primary', 'open-draft', () => void openDraft(draft));
+        open.dataset['readersReportAction'] = 'open-draft';
+        open.disabled = busy;
+        row.append(open);
+        const latest = draft.document.versions[0];
+        if (latest !== undefined) {
+          const exportButton = action(READERS_REPORT_ACTIONS.exportDraft, 'secondary', 'export-draft', () => {
+            if (busy || exporter.busy()) return;
+            exporter.open({ kind: 'document', documentId: draft.document.documentId, revisionId: latest.revisionId },
+              documentExportLabel(draft.typeLabel, latest.label), exportButton);
+          });
+          exportButton.dataset['readersReportAction'] = 'export';
+          exportButton.disabled = busy || exporter.busy();
+          row.append(exportButton);
+        }
+      } else if (entry.drafted !== null) {
+        const drafted = entry.drafted;
+        item.append(el('p', 'field-note readers-report-drafted', readersReportDraftedLine(drafted)));
+        const create = action(READERS_REPORT_ACTIONS.createDraft, 'primary', 'create-draft', () => void createDraft(drafted.revisionId));
+        create.dataset['readersReportAction'] = 'create-draft';
+        create.disabled = busy;
+        row.append(create);
+      } else if (own && task.state === 'prepared') {
+        const open = action(READERS_REPORT_ACTIONS.openPlan, 'primary', 'open-readers-report-plan', () => options.openReadersReportPlan(task.taskIntentId));
+        open.dataset['readersReportAction'] = 'open-plan';
+        open.disabled = busy;
+        open.setAttribute('aria-controls', 'task-drawer');
+        row.append(open);
+      } else if (entry.prepare.allowed) {
+        const prepare = action(READERS_REPORT_ACTIONS.prepare, 'secondary', 'prepare-readers-report', () => void prepareReport(entry.template));
+        prepare.dataset['readersReportAction'] = 'prepare';
+        prepare.disabled = busy;
+        row.append(prepare);
+      } else {
+        item.append(el('p', 'field-note readers-report-reason', entry.prepare.reason));
+      }
+      if (own && task.state !== 'prepared') {
+        const open = action(READERS_REPORT_ACTIONS.openTask, 'quiet', 'open-readers-report-task', () => options.openReadersReportPlan(task.taskIntentId));
+        open.dataset['readersReportAction'] = 'open-task';
+        open.disabled = busy;
+        open.setAttribute('aria-controls', 'task-drawer');
+        row.append(open);
+      }
+      if (row.childElementCount > 0) item.append(row);
+      list.append(item);
+    }
+    section.append(list, exportSlot);
+    return section;
+  };
+
+  /** 起草: the Task's plan prepared as one cooperative job, then opened in the Task Drawer, whose bar starts it. */
+  const prepareReport = async (template: ReadersReportTemplate): Promise<void> => {
+    if (busy || workspace === null) return;
+    busy = true;
+    refusal = null;
+    setStatus(READERS_REPORT_STATUS.preparing, 'busy');
+    paint(null, true);
+    try {
+      const job = await api.prepareReadersReport({ template });
+      const completed = await options.awaitServiceJob(job, (next) => setStatus(next.progress.label, 'busy'));
+      busy = false;
+      if (completed.state === 'cancelled') {
+        setStatus(READERS_REPORT_STATUS.cancelled, 'success');
+        paint(`.evaluation-readers-report li[data-template="${template}"] [data-readers-report-action="prepare"]`, true);
+        return;
+      }
+      const result = completed.result;
+      if (completed.kind !== 'readers-report-preparation' || result === null || !('readersReport' in result) || result.bookId !== workspace?.bookId) {
+        throw new Error(READERS_REPORT_STATUS.failed);
+      }
+      workspace = { ...result, record: workspace.record };
+      setStatus(READERS_REPORT_STATUS.prepared, 'success');
+      paint(null, true);
+      const ref = result.readersReport.task?.taskIntentId ?? null;
+      if (ref !== null) options.openReadersReportPlan(ref);
+    } catch (error) {
+      busy = false;
+      refusal = errorMessage(error, READERS_REPORT_STATUS.failed);
+      setStatus(refusal, 'error');
+      paint('.evaluation-readers-report h3', true);
+    }
+  };
+
+  /** 打开草稿 of a drafted result: the draft document is made, then opened on the manuscript surface. */
+  const createDraft = async (revisionId: string): Promise<void> => {
+    if (busy || workspace === null) return;
+    busy = true;
+    refusal = null;
+    setStatus(READERS_REPORT_STATUS.creating, 'busy');
+    paint(null, true);
+    const template = workspace.readersReport.templates.find((entry) => entry.drafted?.revisionId === revisionId)?.template ?? null;
+    try {
+      const page = await api.createReadersReportDraft({ revisionId });
+      busy = false;
+      workspace = { ...page, record: workspace.record };
+      const draft = page.readersReport.templates.find((entry) => entry.template === template)?.draft ?? null;
+      paint(null, true);
+      if (draft === null) throw new Error(READERS_REPORT_STATUS.openFailed);
+      await options.openDraft(draft);
+    } catch (error) {
+      busy = false;
+      refusal = errorMessage(error, READERS_REPORT_STATUS.openFailed);
+      setStatus(refusal, 'error');
+      if (root.isConnected) paint('.evaluation-readers-report h3', true);
+    }
+  };
+
+  const openDraft = async (draft: { typeId: string; typeLabel: string; document: ProductionDocumentProjection }): Promise<void> => {
+    if (busy) return;
+    try {
+      await options.openDraft(draft);
+    } catch (error) {
+      refusal = errorMessage(error, READERS_REPORT_STATUS.openFailed);
+      setStatus(refusal, 'error');
+      if (root.isConnected) paint('.evaluation-readers-report h3', true);
+    }
+  };
 
   /**
    * AI7's 初评 (Issue #429, S81b1): its Task and what it can do now, and the latest that settled — each item's score with its
@@ -223,7 +404,8 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
 
   /** While AI7's 初评 is under way, 评估 reads it again — and keeps the form the editor is filling in as it is. */
   const follow = (): void => {
-    if (poll !== null || workspace === null || !INITIAL_UNDER_WAY.has(workspace.initial.task?.state ?? '')) return;
+    if (poll !== null || workspace === null ||
+      (!INITIAL_UNDER_WAY.has(workspace.initial.task?.state ?? '') && !INITIAL_UNDER_WAY.has(workspace.readersReport.task?.state ?? ''))) return;
     poll = window.setTimeout(() => {
       poll = null;
       if (!root.isConnected || busy || workspace === null) return;
@@ -311,6 +493,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       start.append(el('p', 'field-note evaluation-start-reason', workspace.start.reason));
     }
     parts.push(start);
+    parts.push(readersReportNode(workspace));
     if (refusal !== null) {
       const note = el('p', 'attention-note evaluation-refusal', refusal);
       note.setAttribute('role', 'alert');

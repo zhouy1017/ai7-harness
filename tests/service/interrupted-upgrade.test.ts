@@ -53,7 +53,13 @@ import { SCHEDULED_BACKUP_SCHEMA_SQL, initializeScheduledBackupSchema } from '..
 import { SERIES_SCHEMA_SQL, initializeSeriesSchema } from '../../src/service/series.js';
 import { SERIES_KNOWLEDGE_SCHEMA_SQL, initializeSeriesKnowledgeSchema } from '../../src/service/series-knowledge.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { ANALYSIS_LEDGER_REVISION_23_SQL, ANALYSIS_LEDGER_REVISION_58_SQL, INITIAL_EVALUATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import {
+  ANALYSIS_LEDGER_REVISION_23_SQL,
+  ANALYSIS_LEDGER_REVISION_58_SQL,
+  ANALYSIS_LEDGER_REVISION_59_SQL,
+  READERS_REPORT_SCHEMA_VERSION,
+} from '../../src/service/task-authorization.js';
+import { READERS_REPORT_SCHEMA_SQL, initializeReadersReportSchema } from '../../src/service/readers-reports.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 import { plantRevision34Relations } from '../support/clarifications.js';
 import { downgradeAnalysisRunStatesToRevision29 } from '../support/connectivity-wait.js';
@@ -143,10 +149,23 @@ interface Revision {
   readonly step: ((database: DatabaseSync) => void) | null;
   /** Take a store at this revision back to the one before, as the suites' own plants do. */
   readonly undo: (database: DatabaseSync) => void;
+  /** The revision before it, when that is not the one just below: revisions 60 and 61 are other slices'. */
+  readonly previous?: number;
 }
 
 // Newest first: a store is walked down one revision at a time.
 const REVISIONS: ReadonlyArray<Revision> = [
+  {
+    // Revision 62 (Issue #429, S81c) rebuilds the three kind-coupled relations and stamps its version in one transaction, so the
+    // one step an interruption can leave committed without the stamp is the two relations of 审稿意见.
+    revision: 62,
+    previous: 59,
+    step: initializeReadersReportSchema,
+    undo: (database) => {
+      drop(database, Object.keys(READERS_REPORT_SCHEMA_SQL).reverse());
+      downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_59_SQL);
+    },
+  },
   {
     // Revision 59 rebuilds the three kind-coupled relations and stamps its version in one transaction, so the one step an
     // interruption can leave committed without the stamp is the relation of the 初评 each Evaluation Record version began from.
@@ -323,30 +342,31 @@ const tables = (): string[] => {
 };
 
 describe('an upgrade interrupted before its version stamp', () => {
-  for (const { revision, step } of REVISIONS) {
+  for (const { revision, step, previous } of REVISIONS) {
+    const before = previous ?? revision - 1;
     if (step === null) continue;
     it(`is finished by the next open when revision ${revision}'s relations committed and its stamp did not`, async () => {
-      expect(await opened()).toBe(INITIAL_EVALUATION_SCHEMA_VERSION);
+      expect(await opened()).toBe(READERS_REPORT_SCHEMA_VERSION);
       const terminal = tables();
       // The plant is a store at the revision before, which opens and upgrades as one.
-      plant(revision - 1);
-      expect(await opened()).toBe(INITIAL_EVALUATION_SCHEMA_VERSION);
+      plant(before);
+      expect(await opened()).toBe(READERS_REPORT_SCHEMA_VERSION);
       expect(tables()).toEqual(terminal);
       // The step commits the revision's relations, and the process stops before the stamp.
-      plant(revision - 1);
+      plant(before);
       withDatabase((database) => {
         step(database);
-        expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(revision - 1);
+        expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(before);
       });
-      expect(await opened()).toBe(INITIAL_EVALUATION_SCHEMA_VERSION);
+      expect(await opened()).toBe(READERS_REPORT_SCHEMA_VERSION);
       expect(tables()).toEqual(terminal);
       // Once finished it opens as any store does.
-      expect(await opened()).toBe(INITIAL_EVALUATION_SCHEMA_VERSION);
+      expect(await opened()).toBe(READERS_REPORT_SCHEMA_VERSION);
     }, 120_000);
   }
 
   it('still refuses a store holding only some of a revision\'s relations', async () => {
-    expect(await opened()).toBe(INITIAL_EVALUATION_SCHEMA_VERSION);
+    expect(await opened()).toBe(READERS_REPORT_SCHEMA_VERSION);
     plant(36);
     withDatabase((database) => database.exec(PRODUCTION_DOCUMENT_SCHEMA_SQL.production_documents));
     const refused = await EditorialStore.open(roots.dataRoot, roots.codeRoot).then((store) => {
