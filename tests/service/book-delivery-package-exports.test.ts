@@ -9,7 +9,7 @@ import { BookDeliveryPackages, BOOK_DELIVERY_PACKAGE_WORDS } from '../../src/ser
 import { CooperativeJobOwner } from '../../src/service/cooperative-jobs.js';
 import { ManuscriptExportStore } from '../../src/service/manuscript-export.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { DATABASE_MERGE_SCHEMA_VERSION, PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { DIALOGUE_SCHEMA_VERSION, PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { PUBLICATION_FORBIDDEN_WORDS, type BookDeliveryPackageExportProjection } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx, type SourceSpan } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -493,6 +493,12 @@ describe('图书交付包 · 导出 (S67b)', () => {
     try {
       planted.exec('PRAGMA foreign_keys = OFF');
       planted.exec(`BEGIN IMMEDIATE;
+        DROP TABLE dialogue_conversions;
+        DROP TABLE dialogue_attempt_outcomes;
+        DROP TABLE dialogue_harness_spans;
+        DROP TABLE dialogue_execution_bindings;
+        DROP TABLE dialogue_attempts;
+        DROP TABLE dialogue_tasks;
         DROP TABLE database_merge_books;
         DROP TABLE database_merges;
         DROP TABLE database_replacements;
@@ -540,7 +546,7 @@ describe('图书交付包 · 导出 (S67b)', () => {
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_MERGE_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DIALOGUE_SCHEMA_VERSION);
       for (const table of ['book_delivery_package_exports', 'book_delivery_package_export_files']) {
         expect((after.prepare(`SELECT count(*) count FROM ${table}`).get() as { count: number }).count).toBe(0);
       }

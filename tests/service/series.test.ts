@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SERIES_SCHEMA_SQL, SERIES_TRIGGER_SQL, SeriesError, SeriesLedger, initializeSeriesSchema, seriesMembershipImpact } from '../../src/service/series.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { EVALUATION_CALIBRATION_SCHEMA_VERSION, DATABASE_MERGE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { EVALUATION_CALIBRATION_SCHEMA_VERSION, DIALOGUE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import {
   MAX_FRAME_BYTES,
   MAX_BOOK_SERIES_MEMBERSHIPS,
@@ -214,7 +214,7 @@ describe('书系 over the real store', () => {
     }
     const database = new DatabaseSync(databasePath());
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_MERGE_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DIALOGUE_SCHEMA_VERSION);
       for (const table of SERIES_TABLES) {
         expect(() => database.exec(`UPDATE ${table} SET recorded_at = recorded_at`)).toThrowError(/SERIES_LEDGER_IMMUTABLE|no such column/u);
         expect(() => database.exec(`DELETE FROM ${table}`)).toThrowError(/SERIES_LEDGER_IMMUTABLE/u);
@@ -340,7 +340,7 @@ describe('书系 over the real store', () => {
     const plant = new DatabaseSync(databasePath());
     let before: Array<{ name: string; sql: string }>;
     try {
-      plant.exec(`DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_conflicts; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; PRAGMA user_version = ${EVALUATION_CALIBRATION_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_conflicts; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; PRAGMA user_version = ${EVALUATION_CALIBRATION_SCHEMA_VERSION};`);
       before = schemaOf(plant);
     } finally {
       plant.close();
@@ -354,9 +354,9 @@ describe('书系 over the real store', () => {
     }
     const database = new DatabaseSync(databasePath(), { readOnly: true });
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_MERGE_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DIALOGUE_SCHEMA_VERSION);
       const after = schemaOf(database);
-      expect(after.filter((entry) => !/^(series|store_versions|database_export_|backup_preferences|scheduled_backup|database_replacements|database_merge)/u.test(entry.name))).toEqual(before!);
+      expect(after.filter((entry) => !/^(series|store_versions|database_export_|backup_preferences|scheduled_backup|database_replacements|database_merge|dialogue_)/u.test(entry.name))).toEqual(before!);
       expect(after.filter((entry) => SERIES_TABLES.includes(entry.name)).map((entry) => entry.sql))
         .toEqual(SERIES_TABLES.slice().sort().map((table) => SERIES_SCHEMA_SQL[table as keyof typeof SERIES_SCHEMA_SQL]));
       expect(counts()).toEqual({ series: 0, series_membership_changes: 0 });

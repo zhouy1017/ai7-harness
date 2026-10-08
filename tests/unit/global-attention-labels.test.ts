@@ -62,6 +62,7 @@ const STATES: ReadonlyArray<GlobalAttentionStateKey> = [
   'maintenance-pending', 'maintenance-waiting',
   'library-attribution-pending', 'learning-eligibility-pending', 'learning-eligibility-deferred',
   'learning-materials-pending', 'learning-materials-deferred',
+  'dialogue-answering', 'dialogue-answered', 'dialogue-stopped', 'dialogue-interrupted', 'dialogue-failed',
 ];
 
 function item(state: GlobalAttentionStateKey, overrides: Partial<GlobalAttentionItemProjection> = {}): GlobalAttentionItemProjection {
@@ -190,6 +191,12 @@ describe('each item', () => {
       // A Book's Learning Material (Issue #61, S26b).
       'learning-materials-pending': '学习准入待处理',
       'learning-materials-deferred': '学习准入待处理 · 稍后决定',
+      // A dialogue Task (Issue #52, S17a): away from the foreground only 等待回答 (DIALOG-010); DIALOG-012's words once incomplete.
+      'dialogue-answering': '等待回答',
+      'dialogue-answered': '已回答',
+      'dialogue-stopped': '回答已停止 · 内容不完整',
+      'dialogue-interrupted': '回答已中断 · 内容不完整',
+      'dialogue-failed': '回答未能完成 · 内容不完整',
     });
     for (const state of STATES) {
       expect(GLOBAL_ATTENTION_STATE_PILLS[state].shape).toMatch(/^(circle|ring|half|triangle|square|diamond|check|dash)$/u);
@@ -233,6 +240,8 @@ describe('each item', () => {
       'set-library-attribution': '定归属…',
       'set-learning-eligibility': '定学习准入…',
       'decide-learning-materials': '定学习准入…',
+      // A dialogue Task's own way to its dialogue (Issue #52, S17a; TASK-044).
+      'open-dialogue': '打开对话',
     });
     // The drawer's own words for the way on from a Run the ceiling stopped (Issue #51, S16a).
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['adjust-budget-redo']).toBe(TASK_BAR_ADJUST_BUDGET_REDO);
@@ -285,6 +294,11 @@ describe('each item', () => {
     expect(globalAttentionObjectLabel({ kind: 'learning-materials', pending: 2, deferred: 0 })).toBe('学习材料 · 2 条待定');
     expect(globalAttentionObjectLabel({ kind: 'learning-materials', pending: 2, deferred: 1 })).toBe('学习材料 · 2 条待定，1 条稍后决定');
     expect(globalAttentionObjectLabel({ kind: 'learning-materials', pending: 0, deferred: 1 })).toBe('学习材料 · 1 条稍后决定');
+    // Issue #52 (S17a): a dialogue Task by the editor's own question, cut short at 24 characters.
+    expect(globalAttentionObjectLabel({ kind: 'dialogue', question: '这段的叙述视角是否一致？' })).toBe('提问 · 「这段的叙述视角是否一致？」');
+    expect(globalAttentionObjectLabel({ kind: 'dialogue', question: `${'问'.repeat(30)}
+  ` })).toBe(`提问 · 「${'问'.repeat(24)}…」`);
+    expect(globalAttentionObjectLabel({ kind: 'dialogue', question: null })).toBe('提问 · 记录不在本机');
   });
 
   it('gives each state its reason, from the record\'s own facts', () => {
@@ -348,6 +362,9 @@ describe('each item', () => {
       'learning-materials-deferred': globalAttentionReason(item('learning-materials-deferred', {
         object: { kind: 'learning-materials', pending: 0, deferred: 1 }, nextStep: 'decide-learning-materials',
       })),
+      ...Object.fromEntries((['dialogue-answering', 'dialogue-answered', 'dialogue-stopped', 'dialogue-interrupted', 'dialogue-failed'] as const)
+        .map((state) => [state, globalAttentionReason(item(state, { object: { kind: 'dialogue', question: '这段的叙述视角是否一致？' }, nextStep: 'open-dialogue' }))])) as
+        Record<'dialogue-answering' | 'dialogue-answered' | 'dialogue-stopped' | 'dialogue-interrupted' | 'dialogue-failed', string>,
     };
     expect(reasons).toEqual({
       'import-outcome-uncertain': '本地证据目前无法证明这次原子提交已经完成或确定未提交；已阻止重试、放弃和清理。',
@@ -400,6 +417,12 @@ describe('each item', () => {
       'learning-eligibility-deferred': '学习准入记为稍后决定：决定之前，它不会用来学习，任务也还不能把它列进「允许参考」。',
       'learning-materials-pending': '你的反馈与改动里有可以用来学习的材料：学习准入策略还只是建议，没有你的决定，它们不会用来学习。',
       'learning-materials-deferred': '这些学习材料记为稍后决定：决定之前，它们不会用来学习。',
+      // Issue #52 (S17a; DIALOG-010, 012, 016): a dialogue Task in the 任务 panel, read in the background.
+      'dialogue-answering': '回答在后台继续；打开对话可以看到已经收到的完整内容。',
+      'dialogue-answered': '回答已完成；它只是生成的内容，不改稿件，需要时可以转为修改建议。',
+      'dialogue-stopped': '你停止了回答，只保留了完整的句子；可以继续回答或重新回答。',
+      'dialogue-interrupted': '回答被中断，只保留了完整的句子；可以继续回答或重新回答。',
+      'dialogue-failed': '回答没有完成；可以重新回答。',
     });
     const maintenance = (classification: 'correction' | 'reissue', nextStep: 'maintenance-link-proposal' | 'maintenance-link-publication' | 'maintenance-conclude') =>
       globalAttentionReason(item(classification === 'reissue' ? 'maintenance-waiting' : 'maintenance-pending', {

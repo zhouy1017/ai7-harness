@@ -24,6 +24,8 @@ import type {
   BookWorkbenchRoute,
   BookWorkOverviewProjection,
   ProposeSeriesKnowledgeInput,
+  AskAboutSelectionInput,
+  DialogueProjection,
   FidelityCategoryProjection,
   ContinueImportProjection,
   EditorialWorkspaceProfileProjection,
@@ -303,6 +305,9 @@ const taskDrawer = mountTaskDrawer({
   openTaskTarget: (target) => void leaveThen(() => openGlobalAttentionTarget(target)),
   openTaskResult: (entry, backToPanel) => openTaskResult(entry, backToPanel),
   startWholeBookTask: (bookId, input) => startWholeBookTask(bookId, input),
+  // 就这段提问… (Issue #52, S17a): 回到所选文字, and a 修改建议 made from an answer opened on the manuscript with its card.
+  dialogueJump: (bookId, target) => void jumpToManuscript(bookId, { manuscriptId: target.manuscriptId, blockId: target.blockId, markId: null }),
+  dialogueConverted: (dialogue, markId) => void jumpToManuscript(dialogue.bookId, { manuscriptId: dialogue.manuscriptId, blockId: dialogue.range.blockId, markId }),
 });
 
 /** 查看结果's floating window while it is open (Issue #423, S77a); any change of screen closes it. */
@@ -799,6 +804,13 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysis
       return;
     case 'learning-materials':
       await renderQualityLearning('learning', target.bookId);
+      return;
+    // A dialogue (Issue #52, S17a): the Book's 工作概览 with the dialogue in the foreground beside it.
+    case 'dialogue':
+      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
+        renderBookOverview(await window.ai7.getBookOverview({ bookId: route.bookId, historyCursor: null }));
+        taskDrawer.openDialogue(route.bookId, target.dialogueId, () => null);
+      });
       return;
   }
 }
@@ -8424,6 +8436,11 @@ function renderEditorWindow(
     ...(isDocument ? {} : {
       seriesOf: (after) => window.ai7.inspectBookSeries({ bookId: initialWindow.bookId, membershipsAfter: after }),
       proposeSeriesKnowledge: (input: ProposeSeriesKnowledgeInput) => window.ai7.proposeSeriesKnowledge(input),
+    }),
+    // 就这段提问… (Issue #52, S17a): the Book's manuscript only; its dialogue comes to the foreground in the side slot.
+    ...(isDocument ? {} : {
+      askAboutSelection: (input: AskAboutSelectionInput) => window.ai7.askAboutSelection(input),
+      onAsked: (dialogue: DialogueProjection) => taskDrawer.openDialogue(dialogue.bookId, dialogue.dialogueId, () => editorHost.querySelector<HTMLElement>('.ProseMirror')),
     }),
     // An Apply is an authoritative write like a replacement or an undo: the window is reloaded from the
     // service and must show exactly the manuscript state the Effect Receipt names.

@@ -1,6 +1,7 @@
 import type {
   BaselineAnalysisResultSetRevisionProjection,
   BookTaskItemProjection,
+  DialogueProjection,
   GlobalAttentionTarget,
   RendererApi,
   ReviewRunProjection,
@@ -28,6 +29,13 @@ import {
   taskResultRangeTitle,
   taskResultTaskLine,
 } from './task-panel-labels.js';
+import {
+  DIALOGUE_AUTHORITY_NOTE,
+  DIALOGUE_HISTORY_MISSING,
+  DIALOGUE_OPEN_LABEL,
+  DIALOGUE_STATE_LABELS,
+  dialogueIncompleteLine,
+} from './dialogue-labels.js';
 
 /**
  * 查看结果 (Issue #423, plan slice S77a; V2-UX-TASK-045): a finished Task's result in a floating window over the manuscript,
@@ -38,7 +46,7 @@ import {
 export interface TaskResultWindowOptions {
   /** The finished Task, as the 任务 panel lists it. */
   readonly entry: BookTaskItemProjection;
-  readonly api: Pick<RendererApi, 'inspectBaselineAnalysis' | 'inspectReviewWorkspace'>;
+  readonly api: Pick<RendererApi, 'inspectBaselineAnalysis' | 'inspectReviewWorkspace' | 'inspectDialogue'>;
   /**
    * While the manuscript is on screen, its text column and the pane it scrolls in: the window takes the column's width and
    * stands at the top of the pane. `null` elsewhere, where the window stands in the middle of the screen.
@@ -86,10 +94,12 @@ function unitBlockOf(unit: BaselineAnalysisResultSetRevisionProjection['units'][
 export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResultWindow {
   const { entry } = options;
   const isReview = entry.item.object.kind === 'review';
+  // A dialogue Task's 回答 (Issue #52, S17a; TASK-044): its question and latest answer, read from the Harness Session Ledger.
+  const isDialogue = entry.item.object.kind === 'dialogue';
   const section = el('section', 'task-result-window');
   section.setAttribute('role', 'dialog');
   section.dataset['taskResult'] = 'loading';
-  section.dataset['taskResultKind'] = isReview ? 'review' : 'analysis';
+  section.dataset['taskResultKind'] = isDialogue ? 'dialogue' : isReview ? 'review' : 'analysis';
   const bar = el('header', 'task-result-bar');
   const kind = el('span', 'task-result-kind', TASK_RESULT_KIND);
   const title = el('h3', 'task-result-title', globalAttentionObjectLabel(entry.item.object));
@@ -107,7 +117,7 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
   const body = el('div', 'task-result-body');
   body.append(el('p', 'field-note', TASK_RESULT_LOADING));
   const foot = el('footer', 'task-result-foot');
-  const open = el('button', 'secondary', isReview ? TASK_RESULT_OPEN.review : TASK_RESULT_OPEN.analysis);
+  const open = el('button', 'secondary', isDialogue ? DIALOGUE_OPEN_LABEL : isReview ? TASK_RESULT_OPEN.review : TASK_RESULT_OPEN.analysis);
   open.type = 'button';
   open.dataset['taskResultAction'] = 'open';
   foot.append(open, el('span', 'field-note task-result-note', TASK_RESULT_FOOT_NOTE));
@@ -235,11 +245,40 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
     body.replaceChildren(...parts);
   }
 
+  /** The question, the words it was asked about, and the latest answer as it settled — generated content, never authority. */
+  function showDialogue(dialogue: DialogueProjection): void {
+    const latest = dialogue.attempts.at(-1);
+    const quote = dialogue.selection === null ? DIALOGUE_HISTORY_MISSING : `「${dialogue.selection}」`;
+    const parts: HTMLElement[] = [meta(quote, DIALOGUE_AUTHORITY_NOTE)];
+    const place = el('p', 'task-result-dialogue-place');
+    place.append(jumpButton(dialogue.range.blockId, null));
+    parts.push(place);
+    if (latest !== undefined) {
+      const state = el('p', 'task-result-dialogue-state', DIALOGUE_STATE_LABELS[latest.state]);
+      state.dataset['dialogueState'] = latest.state;
+      parts.push(state);
+      const answer = el('div', 'task-result-dialogue-answer');
+      answer.dataset['dialogueAnswer'] = latest.attemptId;
+      if (latest.source === 'missing') answer.append(el('p', 'field-note', DIALOGUE_HISTORY_MISSING));
+      for (const fragment of latest.fragments) answer.append(el('span', `dialogue-fragment${fragment.breakAfter ? ' dialogue-fragment-break' : ''}`, fragment.text));
+      parts.push(answer);
+      const incomplete = dialogueIncompleteLine(latest);
+      if (incomplete !== null) parts.push(el('p', 'field-note', incomplete));
+    }
+    body.replaceChildren(...parts);
+  }
+
   async function load(): Promise<void> {
     const result = entry.result;
     try {
       if (result === null) throw new Error(TASK_RESULT_UNAVAILABLE);
-      if (result.kind === 'analysis-revision') {
+      if (result.kind === 'dialogue') {
+        const dialogue = await options.api.inspectDialogue({ dialogueId: result.dialogueId, afterFragment: 0 });
+        if (closed) return;
+        if (dialogue.dialogueId !== result.dialogueId) throw new Error(TASK_RESULT_UNAVAILABLE);
+        manuscriptId = dialogue.manuscriptId;
+        showDialogue(dialogue);
+      } else if (result.kind === 'analysis-revision') {
         const projection = await options.api.inspectBaselineAnalysis({ revisionId: result.revisionId });
         const revision = projection.inspectedRevision?.revision ?? projection.resultSetRevision;
         if (closed) return;
