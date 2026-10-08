@@ -3,7 +3,7 @@ import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSyn
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
-import { CAPTURED_PROCEDURE_SCOPE_SLOTS, CAPTURED_PROCEDURE_STATE_LABELS, MAX_CAPTURED_PROCEDURE_RUNS_SHOWN, MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_PAGE, MAX_LEARNING_LINEAGE_DECISIONS, MAX_LEARNING_REMEDIATION_ITEMS, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
+import { CAPTURED_PROCEDURE_SCOPE_SLOTS, CAPTURED_PROCEDURE_STATE_LABELS, MAX_CAPTURED_PROCEDURE_RUNS_SHOWN, MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_BOOK_CHOICES, MAX_LEARNING_AUDIT_PAGE, MAX_LEARNING_AUDIT_SERIES_CHOICES, MAX_LEARNING_LINEAGE_DECISIONS, MAX_LEARNING_REMEDIATION_ITEMS, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
   InspectSeriesKnowledgeReviewInput,
   ServiceOperationMap,
@@ -190,6 +190,7 @@ import type {
   LearningAuditBookProjection,
   LearningAuditInput,
   LearningAuditMaterialProjection,
+  LearningAuditChoicesProjection,
   LearningAuditProjection,
   LearningLineageProjection,
   LearningRemediationOutcomeProjection,
@@ -472,6 +473,7 @@ import {
   feedbackHistoryPage,
   feedbackReasonExcerpt,
   initializeLearningEligibilitySchema,
+  learningAuditChoices,
   learningAuditStanding,
   learningMaterialDigest,
   learningMaterialOrder,
@@ -7900,12 +7902,16 @@ export class EditorialStore {
    * 质量与学习 › 学习回溯 (Issue #62, plan slice S27a; LAUD-001, LAUD-002, LAUD-012): one page of the Learning Material that
    * matches the filters, Book by Book — Books by title, a Book's materials as 学习准入 orders them — each with where it
    * stands and what used it, at most `MAX_LEARNING_AUDIT_PAGE` an answer and half a frame. Every filter runs over every
-   * material before the page is cut. A read: product history, granting nothing.
+   * material before the page is cut, and an unknown Book or Series is refused rather than answered with an empty page. With
+   * every page come the filters' choices. A read: product history, granting nothing.
    */
   inspectLearningAudit(input: LearningAuditInput = {}): LearningAuditProjection {
     return this.#learningCall(() => {
       const after = input.after ?? null;
       requireStore(input.bookId == null || UUID_PATTERN.test(input.bookId), 'BOOK_INVALID', '图书标识无效。');
+      // A Book gone since it was chosen, a remembered filter's included, is refused as a missing Series is (Issue #677).
+      requireStore(input.bookId == null || this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(input.bookId) !== undefined,
+        'BOOK_NOT_FOUND', '图书不存在。');
       requireStore(after === null || (UUID_PATTERN.test(after.bookId) && after.bookTitle === safeTitle(after.bookTitle) &&
         !Number.isNaN(Date.parse(after.orderedAt)) && LEARNING_MATERIAL_KEY_PATTERN.test(after.materialKey)),
       'LEARNING_CURSOR_INVALID', '学习回溯列表位置无效。');
@@ -7969,8 +7975,29 @@ export class EditorialStore {
         nextCursor: more && last !== undefined
           ? { bookTitle: last.title, bookId: last.bookId, orderedAt: last.orderedAt, materialKey: last.material.materialKey }
           : null,
+        choices: this.#learningAuditChoices(input.bookId ?? null),
       };
     });
+  }
+
+  /**
+   * 学习回溯's filter choices (LAUD-002; Issue #677): the house's Books and Series by title, read one beyond each bound, and the
+   * Book the filter names. A damaged Series record leaves the Series out rather than failing the audit, which reads none.
+   */
+  #learningAuditChoices(chosenBookId: string | null): LearningAuditChoicesProjection {
+    const books = (this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id LIMIT ?')
+      .all(MAX_LEARNING_AUDIT_BOOK_CHOICES + 1) as SqlRow[]).map((row) => ({ bookId: asString(row.book_id), title: asString(row.title) }));
+    let series: Array<{ seriesId: string; title: string }> | null;
+    try {
+      series = this.#series.listAfter(null, MAX_LEARNING_AUDIT_SERIES_CHOICES + 1).map((entry) => ({ seriesId: entry.seriesId, title: entry.title }));
+    } catch (error) {
+      if (!(error instanceof SeriesError)) throw error;
+      series = null;
+    }
+    const chosen = chosenBookId === null
+      ? null
+      : this.#authority.prepare('SELECT book_id, title FROM books WHERE book_id = ?').get(chosenBookId) as SqlRow | undefined;
+    return learningAuditChoices(books, series, chosen == null ? null : { bookId: asString(chosen.book_id), title: asString(chosen.title) });
   }
 
   /** One Book's matching materials after the cursor, the next `limit` in order, and how many match in all. */
