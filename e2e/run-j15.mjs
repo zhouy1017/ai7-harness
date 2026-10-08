@@ -519,12 +519,16 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
   }
 }
 
-/** Exact `sample1` through the import flow, as a new Book with its first manuscript; the Book's identity. */
-async function importSample1(renderer, title, name) {
+/**
+ * Exact `sample1` through the import flow, as a new Book with its first manuscript; the Book's identity. The second import names
+ * the new Book as a distinct intended work, as J-09 does: the same source is already a Book here.
+ */
+async function importSample1(renderer, title, distinct, name) {
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
   await click(renderer, '导入稿件', `${name}-start`);
   await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, `${name}-target`);
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, `${name}-target-explicit`);
+  const target = distinct ? '新建图书（作为不同作品）' : '新建图书';
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label=${JSON.stringify(target)}]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, `${name}-target-explicit`);
   await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, `${name}-relationship`);
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, `${name}-relationship-explicit`);
   await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, `${name}-title-screen`);
@@ -1539,7 +1543,7 @@ async function main() {
     manager = await launch(SAMPLE1_PATH, ['--j04-model-adapter', REVIEW_FIXTURE_IDENTITY, '--j15-save-path', proposalPath]);
     renderer = await waitForRenderer(manager, 'capture-window');
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'capture-ready');
-    const sourceBook = await importSample1(renderer, CAPTURE_SOURCE_TITLE, 'capture-source-import');
+    const sourceBook = await importSample1(renderer, CAPTURE_SOURCE_TITLE, false, 'capture-source-import');
     await click(renderer, '返回图书列表', 'capture-source-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'capture-source-landing');
     await enableProfileForBook(renderer, sourceBook, 'capture-source-profile');
@@ -1654,7 +1658,7 @@ async function main() {
     manager = await launch(SAMPLE1_PATH, ['--j04-model-adapter', REVIEW_FIXTURE_IDENTITY, '--j15-save-path', proposalPath]);
     renderer = await waitForRenderer(manager, 'run-window');
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'run-ready');
-    const targetBook = await importSample1(renderer, CAPTURE_TARGET_TITLE, 'run-import');
+    const targetBook = await importSample1(renderer, CAPTURE_TARGET_TITLE, true, 'run-import');
     await click(renderer, '返回图书列表', 'run-import-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'run-import-landing');
     await enableProfileForBook(renderer, targetBook, 'run-profile');
