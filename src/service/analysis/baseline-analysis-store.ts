@@ -787,6 +787,11 @@ export class BaselineAnalysisStore {
     return this.#launch;
   }
 
+  /** Whether a preparation is in flight, which only this instance holds; the store keeps such a ledger (Issue #649). */
+  get preparing(): boolean {
+    return this.#work.size > 0;
+  }
+
   /**
    * Bind the trusted launch facts. The service entry calls this once, before it serves any frame, so
    * that the store never has to reach for a launch policy of its own; a `developer-live` scope

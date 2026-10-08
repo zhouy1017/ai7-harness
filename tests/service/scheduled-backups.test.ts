@@ -31,13 +31,31 @@ vi.mock('../../src/service/database-exports.js', async (importOriginal) => {
   };
   return { ...actual, writeDatabasePackage };
 });
+/** A backup just put at its name, before it is recorded; and a file the removal cannot take, as a scanner holding it would. */
+const placedBackup = vi.hoisted(() => ({ after: null as ((destination: string) => Promise<void>) | null }));
+const heldOpen = vi.hoisted(() => ({ path: null as string | null }));
+vi.mock('../../src/service/manuscript-export.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/service/manuscript-export.js')>();
+  const takeFreeName: typeof actual.takeFreeName = async (...args) => {
+    const taken = await actual.takeFreeName(...args);
+    if (taken === 'taken') await placedBackup.after?.(args[1]);
+    return taken;
+  };
+  return { ...actual, takeFreeName };
+});
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
   const opendir: typeof actual.opendir = async (...args) => {
     if (args[0] === payloadWalk.root) await payloadWalk.pause?.();
     return actual.opendir(...args);
   };
-  return { ...actual, opendir, default: { ...actual, opendir } };
+  const rm: typeof actual.rm = async (...args) => {
+    if (heldOpen.path !== null && args[0] === heldOpen.path) {
+      throw Object.assign(new Error('EBUSY: resource busy or locked, unlink'), { code: 'EBUSY', syscall: 'unlink' });
+    }
+    return actual.rm(...args);
+  };
+  return { ...actual, opendir, rm, default: { ...actual, opendir, rm } };
 });
 
 // Service-integration suite (L2) for 定期自动备份 (Issue #434, plan slice S86b; V2-UX-DSTO-018; ADR 0079 §1.4, §1.7) over the real
@@ -92,6 +110,11 @@ function code(error: unknown): unknown {
   return error instanceof StoreError ? error.code : error;
 }
 
+/** What a check came to: its answer, or what it threw — so a stop is told from every other failure (Issue #644). */
+function settled<T>(check: Promise<T>): Promise<T | unknown> {
+  return check.then((answer) => answer, (error: unknown) => error);
+}
+
 describe('定期自动备份 over the real store', () => {
   it.each([false, true])('queues a new enable decision after cancelled staging, superseded again=%s', async (superseded) => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
@@ -110,14 +133,14 @@ describe('定期自动备份 over the real store', () => {
     };
     try {
       await store.setScheduledBackup({ enabled: true, expectedOrdinal: 0 }, T);
-      const old = store.runScheduledBackupIfDue(T).catch(() => false);
+      const old = settled(store.runScheduledBackupIfDue(T));
       await until(() => signals.length === 1);
       await store.setScheduledBackup({ enabled: false, expectedOrdinal: 1 }, T);
       expect(signals[0]?.aborted).toBe(true);
       await store.setScheduledBackup({ enabled: true, expectedOrdinal: 2 }, T);
       if (superseded) await store.setScheduledBackup({ enabled: false, expectedOrdinal: 3 }, T);
       releaseFirst();
-      expect(await old).toBe(false);
+      expect(await old).toMatchObject({ name: 'AbortError' });
       if (superseded) {
         await store.runScheduledBackupIfDue(T);
         expect(signals.length).toBe(1);
@@ -151,7 +174,7 @@ describe('定期自动备份 over the real store', () => {
     payloadWalk.pause = async () => { walking = true; await held; };
     try {
       await store.setScheduledBackup({ enabled: true, expectedOrdinal: 0 }, T);
-      const old = store.runScheduledBackupIfDue(T).catch(() => false);
+      const old = settled(store.runScheduledBackupIfDue(T));
       const deadline = Date.now() + 30_000;
       while (!walking) {
         if (Date.now() > deadline) throw new Error('backup payload walk did not start');
@@ -160,13 +183,75 @@ describe('定期自动备份 over the real store', () => {
       const off = await store.setScheduledBackup({ enabled: false, expectedOrdinal: 1 }, T);
       expect([off.enabled, off.ordinal, off.backingUp]).toEqual([false, 2, false]);
       release();
-      expect(await old).toBe(false);
+      expect(await old).toMatchObject({ name: 'AbortError' });
       expect(store.inspectScheduledBackups(T)).toMatchObject({ enabled: false, total: 0, backingUp: false, lastFailure: null });
       expect(await readdir(`${roots.dataRoot}-backups`)).toEqual([]);
     } finally {
       release();
       payloadWalk.root = null;
       payloadWalk.pause = null;
+      await store.stopScheduledBackups();
+      store.close();
+    }
+  }, 60_000);
+
+  it('starts no queued check when the service stops while the switch, turned back on, waits for the withdrawn one (Issue #644)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const signals: Array<AbortSignal | undefined> = [];
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    packedBackup.pause = async (signal) => { signals.push(signal); await held; };
+    try {
+      await store.setScheduledBackup({ enabled: true, expectedOrdinal: 0 }, T);
+      const withdrawn = settled(store.runScheduledBackupIfDue(T));
+      const deadline = Date.now() + 30_000;
+      while (signals.length === 0) {
+        if (Date.now() > deadline) throw new Error('scheduled backup writer did not reach its gate');
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      await store.setScheduledBackup({ enabled: false, expectedOrdinal: 1 }, T);
+      await store.setScheduledBackup({ enabled: true, expectedOrdinal: 2 }, T);
+      // Asked again while the withdrawn check still runs: this answer waits for it, then would start a new one.
+      const queued = settled(store.runScheduledBackupIfDue(T));
+      const stopping = store.stopScheduledBackups();
+      release();
+      await stopping;
+      expect(await withdrawn).toMatchObject({ name: 'AbortError' });
+      expect(await queued).toBe(false);
+      expect(signals).toHaveLength(1);
+      expect(store.inspectScheduledBackups(T)).toMatchObject({ enabled: true, total: 0, backingUp: false, lastFailure: null });
+      expect(await readdir(`${roots.dataRoot}-backups`)).toEqual([]);
+    } finally {
+      release();
+      packedBackup.pause = null;
+      store.close();
+    }
+  }, 60_000);
+
+  it('records a withdrawn backup whose file could not be removed, so the next check neither fails nor makes another (Issue #644)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      await store.setScheduledBackup({ enabled: true, expectedOrdinal: 0 }, T);
+      // The editor turns the switch off the instant the backup is put at its name, and a scanner holds the file open.
+      placedBackup.after = async (destination) => {
+        placedBackup.after = null;
+        heldOpen.path = destination;
+        await store.setScheduledBackup({ enabled: false, expectedOrdinal: 1 }, T);
+      };
+      expect(await settled(store.runScheduledBackupIfDue(T))).toMatchObject({ name: 'AbortError' });
+      heldOpen.path = null;
+      // The file is a whole backup: it is listed, and so expires, as any other.
+      expect(await readdir(`${roots.dataRoot}-backups`)).toEqual([backupFileName(T)]);
+      expect(store.inspectScheduledBackups(T)).toMatchObject({ enabled: false, total: 1, lastFailure: null });
+      expect(store.inspectScheduledBackups(T).backups[0]).toMatchObject({ fileName: backupFileName(T), present: true });
+      // Turned back on at the same instant, the check finds the day's backup made.
+      await store.setScheduledBackup({ enabled: true, expectedOrdinal: 2 }, T);
+      expect(await store.runScheduledBackupIfDue(T)).toBe(false);
+      expect(store.inspectScheduledBackups(T)).toMatchObject({ enabled: true, total: 1, backingUp: false, lastFailure: null });
+      store.markCleanShutdown();
+    } finally {
+      placedBackup.after = null;
+      heldOpen.path = null;
       await store.stopScheduledBackups();
       store.close();
     }

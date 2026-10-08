@@ -105,6 +105,18 @@ function requireReplacement(condition: unknown, code: string, message: string): 
   if (!condition) throw new DatabaseReplacementError(code, message);
 }
 
+/**
+ * A preparation that ran out of space, as a refusal of its own rather than the file system's error (Issue #644): it holds the
+ * package's copy, what it extracts and the store's copy at once, and then writes the backup.
+ */
+function outOfSpace(error: unknown, kind: 'replace' | 'roll-back' | 'merge'): unknown {
+  const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+  if (code !== 'ENOSPC' && code !== 'EDQUOT') return error;
+  const what = kind === 'merge' ? '合并' : kind === 'roll-back' ? '回退' : '替换';
+  return new DatabaseReplacementError('DATABASE_REPLACEMENT_NO_SPACE',
+    `磁盘空间不足，没有准备这次${what}：准备时要同时放下所选文件的副本、解开的内容和${what}前的备份。腾出空间后再试；本机数据没有改动。`);
+}
+
 type SqlRow = Record<string, SQLOutputValue>;
 
 /** How many of a merge's titles its record names; the rest are counted. */
@@ -248,7 +260,9 @@ export async function writeAtomic(path: string, text: string): Promise<void> {
  * A small file's text, read within `maxBytes` through the one handle it is inspected by (Issue #434 review). That handle must
  * be a regular file, and at most one byte past the smaller of the bound and the size it reports is ever read, into a buffer of
  * that size: a file that grows, or is replaced by one larger or by something that is not a file, never takes more, and one
- * that changed as it was read is refused. Where the system has them, a link is not followed and nothing waits on a pipe.
+ * that holds more than its handle reported, or more than the bound, is refused. That is all the read itself detects (Issue
+ * #644): an edit that keeps the size, or a shrink, reads as whatever the handle then holds, which each caller checks as it
+ * parses. Where the system has them, a link is not followed and nothing waits on a pipe.
  * `null` when nothing is there; anything else that is not such a file throws.
  */
 export async function readSmallFile(path: string, maxBytes: number): Promise<string | null> {
@@ -269,7 +283,7 @@ export async function readSmallFile(path: string, maxBytes: number): Promise<str
       if (bytesRead === 0) return buffer.toString('utf8', 0, filled);
       filled += bytesRead;
     }
-    throw new Error('Larger than it may be, or changed as it was read.');
+    throw new Error('Larger than it may be, or larger than it was when opened.');
   } finally {
     await handle.close();
   }
@@ -869,8 +883,8 @@ export class DatabaseReplacements {
     const preview = this.#preview;
     requireReplacement(preview !== null && preview.previewId === previewId, 'DATABASE_IMPORT_PREVIEW_STALE', '这次预览已失效，请重新选择数据库文件。');
     requireReplacement(await readPendingReplacement(this.#dataRoot) === null, 'DATABASE_REPLACEMENT_PENDING', '已有一次替换在等待 AI7 重新启动；请先取消它。');
-    const { manifest, sha256 } = await extractReplacement(this.#dataRoot, preview.source, preview.sha256);
     try {
+      const { manifest, sha256 } = await extractReplacement(this.#dataRoot, preview.source, preview.sha256);
       const facts = this.#sources.facts();
       requireReplacement(importCompatibility(manifest, facts.dataVersion, facts.schemaRevision) === 'compatible',
         'DATABASE_IMPORT_INCOMPATIBLE', '这个数据库文件与本机 AI7 的数据版本不兼容，不能合并。');
@@ -915,7 +929,7 @@ export class DatabaseReplacements {
     } catch (error) {
       await discardReplacement(this.#dataRoot).catch(() => undefined);
       if (error instanceof DatabaseMergeError) throw new DatabaseReplacementError(error.code, error.message);
-      throw error;
+      throw outOfSpace(error, 'merge');
     }
     // A merge applies onto the data as it is at the next start, so what is saved meanwhile is kept (the Owner's reading 2):
     // nothing waits on it the way a replacement does.
@@ -925,11 +939,19 @@ export class DatabaseReplacements {
 
   /** The plan of merging the Books of the store at `path` into this one, each Book it would take handed to `merging`: a read of both. */
   #plan(path: string, merging?: (book: MergeBookPlan) => void): MergePlan {
-    this.#db.prepare('ATTACH DATABASE ? AS src').run(path);
+    // The package's store is supplied from outside and read before anything is confirmed (Issue #644): while it is attached,
+    // no function its schema names is trusted. The plan only reads, and nothing else runs on this connection meanwhile.
+    const trusted = Number((this.#db.prepare('PRAGMA trusted_schema').get() as SqlRow).trusted_schema) === 1;
+    this.#db.exec('PRAGMA trusted_schema = OFF');
     try {
-      return planMerge(this.#db, MAX_MERGE_BOOKS_LISTED, merging);
+      this.#db.prepare('ATTACH DATABASE ? AS src').run(path);
+      try {
+        return planMerge(this.#db, MAX_MERGE_BOOKS_LISTED, merging);
+      } finally {
+        this.#db.exec('DETACH DATABASE src');
+      }
     } finally {
-      this.#db.exec('DETACH DATABASE src');
+      if (trusted) this.#db.exec('PRAGMA trusted_schema = ON');
     }
   }
 
@@ -1140,8 +1162,8 @@ export class DatabaseReplacements {
    * the intent written last.
    */
   async #stage(kind: 'replace' | 'roll-back', source: string, expectedSha256: string, now: Date): Promise<void> {
-    const { manifest, sha256 } = await extractReplacement(this.#dataRoot, source, expectedSha256);
     try {
+      const { manifest, sha256 } = await extractReplacement(this.#dataRoot, source, expectedSha256);
       const packageMembersSha256 = await writeReplacementMembers(this.#dataRoot, manifest.members);
       const facts = this.#sources.facts();
       requireReplacement(importCompatibility(manifest, facts.dataVersion, facts.schemaRevision) === 'compatible',
@@ -1164,7 +1186,7 @@ export class DatabaseReplacements {
       });
     } catch (error) {
       await discardReplacement(this.#dataRoot).catch(() => undefined);
-      throw error;
+      throw outOfSpace(error, kind);
     }
   }
 
