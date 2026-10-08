@@ -13,6 +13,7 @@ import {
   LEARNING_REMEDIATION_LEFT_OUT,
   learningAuditBatchStop,
   learningAuditBookHeading,
+  LEARNING_AUDIT_SERIES_UNAVAILABLE,
   learningAuditChoicesCut,
   learningAuditMaterialName,
   learningAuditMaterialNames,
@@ -105,6 +106,8 @@ describe('学习回溯 words', () => {
 
   it('says a filter lists only the first of the house’s Books or Series, and a refusal not read again that the list may be out of date (Issue #677)', () => {
     expect(learningAuditChoicesCut('book', 1200)).toBe('图书筛选只列出按书名排序的前 1200 本图书。');
+    expect(learningAuditChoicesCut('book', 1000, 2)).toBe('图书筛选只列出按书名排序的前 1000 本图书，另有当前所选或列表里出现的 2 本。');
+    expect(LEARNING_AUDIT_SERIES_UNAVAILABLE).toBe('书系记录无法读取，书系筛选暂时只有「全部」；学习回溯照常可用。');
     expect(learningAuditChoicesCut('series', 500)).toBe('书系筛选只列出按名称排序的前 500 个书系。');
     expect(learningRemediationRereadFailed('预览之后，这些学习材料或它们的准入决定有了变化；请重新查看影响，再决定。'))
       .toBe('预览之后，这些学习材料或它们的准入决定有了变化；请重新查看影响，再决定。但学习回溯没能重新读取，列表可能还是之前的状态；请稍后重新打开。');

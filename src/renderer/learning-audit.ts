@@ -26,6 +26,7 @@ import {
   LEARNING_AUDIT_OPEN,
   LEARNING_AUDIT_SEARCH,
   LEARNING_AUDIT_STANDING_LABELS,
+  LEARNING_AUDIT_SERIES_UNAVAILABLE,
   LEARNING_AUDIT_STATUS,
   LEARNING_AUDIT_UNUSED,
   LEARNING_LINEAGE_BACK,
@@ -135,7 +136,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
    * The filters' choices as the last page answered them (LAUD-002; Issue #677): the house's Books and Series, and whether
    * either list was cut. The 图书 filter also keeps every Book a page has named, so a chosen Book stays offered.
    */
-  let filterChoices: LearningAuditChoicesProjection = { books: [], booksTruncated: false, series: [], seriesTruncated: false };
+  let filterChoices: LearningAuditChoicesProjection = { books: [], booksListed: 0, booksTruncated: false, series: [], seriesTruncated: false, seriesUnavailable: false };
   const knownBooks = new Map<string, string>();
   /** Each material's name on the shown page, told apart where two read alike (Issue #677). */
   let names = new Map<string, string>();
@@ -232,8 +233,8 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     names.get(material.materialKey) ?? learningAuditMaterialName(material, localInstantLabel);
 
   /** The note under a filter whose list was cut, which that filter names as its description. */
-  const cutNote = (filter: 'book' | 'series', listed: number): HTMLElement => {
-    const note = el('p', `field-note learning-audit-cut learning-audit-cut-${filter}`, learningAuditChoicesCut(filter, listed));
+  const cutNote = (filter: 'book' | 'series', text: string): HTMLElement => {
+    const note = el('p', `field-note learning-audit-cut learning-audit-cut-${filter}`, text);
     note.id = `learning-audit-cut-${filter}`;
     return note;
   };
@@ -250,7 +251,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     }
     control.value = chosen[filter];
     control.disabled = busy;
-    if ((filter === 'book' && filterChoices.booksTruncated) || (filter === 'series' && filterChoices.seriesTruncated)) {
+    if ((filter === 'book' && filterChoices.booksTruncated) || (filter === 'series' && (filterChoices.seriesTruncated || filterChoices.seriesUnavailable))) {
       control.setAttribute('aria-describedby', `learning-audit-cut-${filter}`);
     }
     control.addEventListener('change', () => {
@@ -348,8 +349,14 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     );
     parts.push(filters);
     // A house with more Books or Series than the filters list says so beside them (Issue #677).
-    if (filterChoices.booksTruncated) parts.push(cutNote('book', filterChoices.books.length));
-    if (filterChoices.seriesTruncated) parts.push(cutNote('series', filterChoices.series.length));
+    // The 图书 select offers every Book it knows: the first listed by title, the one chosen, and any a page named; the note
+    // counts both parts, so it never disagrees with the select.
+    if (filterChoices.booksTruncated) {
+      parts.push(cutNote('book', learningAuditChoicesCut('book', filterChoices.booksListed, Math.max(0, knownBooks.size - filterChoices.booksListed))));
+    }
+    // A damaged Series record leaves the 书系 filter with 全部 alone, and says so; the audit reads on (Issue #677).
+    if (filterChoices.seriesUnavailable) parts.push(cutNote('series', LEARNING_AUDIT_SERIES_UNAVAILABLE));
+    else if (filterChoices.seriesTruncated) parts.push(cutNote('series', learningAuditChoicesCut('series', filterChoices.series.length)));
     parts.push(el('p', 'field-note learning-audit-later', LEARNING_AUDIT_FILTERS_LATER));
     if (listRefusal !== null) {
       const alert = el('p', 'attention-note learning-audit-refusal', listRefusal);
@@ -467,7 +474,10 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       // the refusal stays above it — as the explorer does with its chain.
       const refusal = errorMessage(error, LEARNING_AUDIT_STATUS.failed);
       batch = null;
-      if (await request(chosen, pageAfter, '.learning-audit-refusal', refusal)) {
+      const reread = await request(chosen, pageAfter, '.learning-audit-refusal', refusal);
+      // The editor may have left 学习回溯 while it was read again: nothing more is said on another screen.
+      if (!root.isConnected) return;
+      if (reread) {
         setStatus(refusal, 'error');
         return;
       }
@@ -484,7 +494,9 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     batch = null;
     selection.clear();
     const message = learningRemediationOutcome(outcome.recorded.length, outcome.leftOut.length);
-    if (await request(chosen, pageAfter, '#learning-audit-query')) setStatus(message, 'success');
+    const reread = await request(chosen, pageAfter, '#learning-audit-query');
+    if (!root.isConnected) return;
+    if (reread) setStatus(message, 'success');
     else {
       paint('#learning-audit-query');
       setStatus(learningRemediationRereadFailed(message), 'error');

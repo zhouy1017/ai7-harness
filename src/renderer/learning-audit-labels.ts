@@ -27,14 +27,21 @@ export const LEARNING_AUDIT_FILTERS = {
   to: '截止日期',
 } as const;
 export const LEARNING_AUDIT_ALL = '全部';
-/** The filters LAUD-002 names that have nothing to filter yet, and why. */
-/** A filter that lists only the first of the house's Books or Series by title (Issue #677). */
-export function learningAuditChoicesCut(filter: 'book' | 'series', listed: number): string {
+/**
+ * A filter that lists only the first of the house's Books or Series by title (Issue #677). The 图书 filter also offers the
+ * Book chosen and every Book a page has named; `others` counts those beyond the first `listed`, so the note and the
+ * select always agree.
+ */
+export function learningAuditChoicesCut(filter: 'book' | 'series', listed: number, others = 0): string {
   return filter === 'book'
-    ? `图书筛选只列出按书名排序的前 ${listed} 本图书。`
+    ? `图书筛选只列出按书名排序的前 ${listed} 本图书${others > 0 ? `，另有当前所选或列表里出现的 ${others} 本` : ''}。`
     : `书系筛选只列出按名称排序的前 ${listed} 个书系。`;
 }
 
+/** The 书系 filter when the house's Series could not be read: the audit still reads, and the filter offers 全部 alone. */
+export const LEARNING_AUDIT_SERIES_UNAVAILABLE = '书系记录无法读取，书系筛选暂时只有「全部」；学习回溯照常可用。';
+
+/** The filters LAUD-002 names that have nothing to filter yet, and why. */
 export const LEARNING_AUDIT_FILTERS_LATER =
   '记忆候选、已启用记忆、后续使用和历史影响暂不能筛选：AI7 还没有从学习材料生成学习信号或记忆，也没有任务读取学习材料，这几项目前都是空的。';
 export const LEARNING_AUDIT_EMPTY = '还没有学习材料。你在修改建议、分析结果和审阅里写下的原因与改动，会在这里留下来源链。';
@@ -171,8 +178,8 @@ export function learningAuditMaterialName(
 
 /**
  * Each material's name on one page, by its key (Issue #677): `learningAuditMaterialName`, and where two or more read alike —
- * the same origin, the same minute, the same preset reason — each of them followed by its ordinal among them in page order,
- * so no two checkboxes or buttons share a name.
+ * the same origin, the same minute and the same last line, often the proposed or edited text — each of them followed by its
+ * ordinal among them in page order, so no two checkboxes or buttons share a name.
  */
 export function learningAuditMaterialNames(
   materials: ReadonlyArray<{ readonly materialKey: string; readonly originLabel: string; readonly recordedAt: string; readonly excerpt: ReadonlyArray<string> }>,

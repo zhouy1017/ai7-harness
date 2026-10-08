@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   LEARNING_AUDIT_BOOK_CHOICE_BYTES,
+  LEARNING_AUDIT_ENVELOPE_BYTES,
   LEARNING_AUDIT_SERIES_CHOICE_BYTES,
   learningAuditChoices,
 } from '../../src/service/learning-eligibility.js';
@@ -18,8 +19,10 @@ const wire = (value: unknown): number => Buffer.byteLength(JSON.stringify(value)
 
 describe('学习回溯 filter choices', () => {
   it('offers every Book and Series of a house within the bounds, in the order read, and says nothing was cut', () => {
-    expect(learningAuditChoices(books(3), series(2))).toEqual({ books: books(3), booksTruncated: false, series: series(2), seriesTruncated: false });
-    expect(learningAuditChoices([], [])).toEqual({ books: [], booksTruncated: false, series: [], seriesTruncated: false });
+    expect(learningAuditChoices(books(3), series(2)))
+      .toEqual({ books: books(3), booksListed: 3, booksTruncated: false, series: series(2), seriesTruncated: false, seriesUnavailable: false });
+    expect(learningAuditChoices([], []))
+      .toEqual({ books: [], booksListed: 0, booksTruncated: false, series: [], seriesTruncated: false, seriesUnavailable: false });
     // Exactly at the count bound is not cut.
     const atBound = learningAuditChoices(books(MAX_LEARNING_AUDIT_BOOK_CHOICES), series(MAX_LEARNING_AUDIT_SERIES_CHOICES));
     expect([atBound.books.length, atBound.booksTruncated, atBound.series.length, atBound.seriesTruncated])
@@ -47,7 +50,32 @@ describe('学习回溯 filter choices', () => {
     expect(long.seriesTruncated).toBe(true);
     expect(long.series.length).toBeLessThan(MAX_LEARNING_AUDIT_SERIES_CHOICES);
     expect(long.series.reduce((sum, entry) => sum + wire(entry) + 1, 0)).toBeLessThanOrEqual(LEARNING_AUDIT_SERIES_CHOICE_BYTES);
-    // At their fullest, both lists and the half frame a page may take still fit one frame with room for the envelope.
-    expect(wire(long) + MAX_FRAME_BYTES / 2 + 4_096).toBeLessThan(MAX_FRAME_BYTES);
+    // This example at its fullest stays within the two shares and the envelope allowance.
+    expect(wire(long)).toBeLessThanOrEqual(LEARNING_AUDIT_BOOK_CHOICE_BYTES + LEARNING_AUDIT_SERIES_CHOICE_BYTES + LEARNING_AUDIT_ENVELOPE_BYTES);
+  });
+
+  it('fits a frame by its bounds: the page’s half (its own slack within it), both shares and the envelope allowance', () => {
+    expect(LEARNING_AUDIT_BOOK_CHOICE_BYTES + LEARNING_AUDIT_SERIES_CHOICE_BYTES + MAX_FRAME_BYTES / 2 + LEARNING_AUDIT_ENVELOPE_BYTES)
+      .toBeLessThanOrEqual(MAX_FRAME_BYTES);
+    // The allowance holds the one chosen Book beyond the cut at the longest title a Book may carry, with room to spare.
+    expect(wire({ bookId: id(0), title: '书'.repeat(180) }) * 4).toBeLessThan(LEARNING_AUDIT_ENVELOPE_BYTES);
+  });
+
+  it('follows the cut list with the Book the filter names when it lies beyond it, and counts only the cut list as listed', () => {
+    const all = books(MAX_LEARNING_AUDIT_BOOK_CHOICES + 1);
+    const beyond = all.at(-1)!;
+    const chosen = learningAuditChoices(all, series(1), beyond);
+    expect(chosen.books.length).toBe(MAX_LEARNING_AUDIT_BOOK_CHOICES + 1);
+    expect(chosen.books.at(-1)).toEqual(beyond);
+    expect([chosen.booksListed, chosen.booksTruncated]).toEqual([MAX_LEARNING_AUDIT_BOOK_CHOICES, true]);
+    // A Book already listed is not listed twice.
+    const within = learningAuditChoices(all, series(1), all[3]!);
+    expect([within.books.length, within.booksListed]).toEqual([MAX_LEARNING_AUDIT_BOOK_CHOICES, MAX_LEARNING_AUDIT_BOOK_CHOICES]);
+    expect(learningAuditChoices(books(2), [], books(2)[1]!).books).toEqual(books(2));
+  });
+
+  it('offers no Series, and says they could not be read, when the house’s Series are unreadable', () => {
+    expect(learningAuditChoices(books(2), null))
+      .toEqual({ books: books(2), booksListed: 2, booksTruncated: false, series: [], seriesTruncated: false, seriesUnavailable: true });
   });
 });

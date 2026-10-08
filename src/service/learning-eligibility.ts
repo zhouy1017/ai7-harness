@@ -590,18 +590,34 @@ export class LearningEligibilityLedger {
 export const LEARNING_AUDIT_BOOK_CHOICE_BYTES = MAX_FRAME_BYTES / 4;
 /** The bytes its Series choices may take: a sixteenth. */
 export const LEARNING_AUDIT_SERIES_CHOICE_BYTES = MAX_FRAME_BYTES / 16;
+/**
+ * What an answer holds beyond the page's half (which keeps its own slack) and the two choice shares: the choices' keys, the
+ * one chosen Book beyond the cut — at most a 180-character title — and the response envelope. The four together fit a frame.
+ */
+export const LEARNING_AUDIT_ENVELOPE_BYTES = 16 * 1024;
 
 /**
  * 学习回溯's filter choices (LAUD-002; Issue #677) from the house's Books and Series in title order, read one beyond each
  * count bound: each list cut at its bound or its share of the frame, whichever comes first, and saying whether it was cut.
+ * The Book the filter names follows the cut list when it lies beyond it, so the 图书 filter always shows it; `series` is
+ * `null` when the Series could not be read, and the answer then offers none and says so.
  */
 export function learningAuditChoices(
   books: ReadonlyArray<{ readonly bookId: string; readonly title: string }>,
-  series: ReadonlyArray<{ readonly seriesId: string; readonly title: string }>,
+  series: ReadonlyArray<{ readonly seriesId: string; readonly title: string }> | null,
+  chosenBook: { readonly bookId: string; readonly title: string } | null = null,
 ): LearningAuditChoicesProjection {
   const bookChoices = weighedPage(books, MAX_LEARNING_AUDIT_BOOK_CHOICES, LEARNING_AUDIT_BOOK_CHOICE_BYTES);
-  const seriesChoices = weighedPage(series, MAX_LEARNING_AUDIT_SERIES_CHOICES, LEARNING_AUDIT_SERIES_CHOICE_BYTES);
-  return { books: bookChoices.page, booksTruncated: bookChoices.more, series: seriesChoices.page, seriesTruncated: seriesChoices.more };
+  const seriesChoices = weighedPage(series ?? [], MAX_LEARNING_AUDIT_SERIES_CHOICES, LEARNING_AUDIT_SERIES_CHOICE_BYTES);
+  const beyond = chosenBook !== null && !bookChoices.page.some((book) => book.bookId === chosenBook.bookId);
+  return {
+    books: beyond ? [...bookChoices.page, { bookId: chosenBook.bookId, title: chosenBook.title }] : bookChoices.page,
+    booksListed: bookChoices.page.length,
+    booksTruncated: bookChoices.more,
+    series: seriesChoices.page,
+    seriesTruncated: seriesChoices.more,
+    seriesUnavailable: series === null,
+  };
 }
 
 /** Where a material stands for learning now: its state, and for one decided, the choice it holds. */

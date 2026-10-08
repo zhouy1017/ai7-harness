@@ -97,10 +97,14 @@ describe('学习回溯 over the real store', () => {
       // The filters' choices come with the page (Issue #677): every Book of the house by title, and its Series.
       expect(all.choices).toEqual({
         books: [{ bookId: second.bookId, title: '回溯乙' }, { bookId: first.bookId, title: '回溯甲' }],
+        booksListed: 2,
         booksTruncated: false,
         series: [],
         seriesTruncated: false,
+        seriesUnavailable: false,
       });
+      // A Book the filter names that is already listed is not listed twice.
+      expect(store.inspectLearningAudit({ bookId: first.bookId }).choices).toEqual(all.choices);
       expect(all.books.map((book) => [book.title, book.authors, book.editors, book.materialCount, book.materials.map((material) => material.standing)])).toEqual([
         ['回溯乙', [], [], 1, ['pending']],
         ['回溯甲', ['周一'], ['郑三'], 3, ['book', 'house', 'pending']],
@@ -263,6 +267,73 @@ describe('学习回溯 over the real store', () => {
       reopened.markCleanShutdown();
     } finally {
       reopened.close();
+    }
+  });
+
+  it('cuts the 图书 choices at their share of the frame and still offers the Book the filter names beyond the cut (Issue #677)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      // Empty Books with the longest titles a Book may carry, so the quarter-frame share binds long before the count bound.
+      const created: string[] = [];
+      for (let index = 0; index < 240; index += 1) {
+        const creation = store.prepareBookCreation(`${String(index).padStart(3, '0')}${'书'.repeat(177)}`, null);
+        created.push(store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }).overview.book.bookId);
+      }
+      const all = store.inspectLearningAudit().choices;
+      expect(all.booksTruncated).toBe(true);
+      expect(all.booksListed).toBe(all.books.length);
+      expect(all.booksListed).toBeLessThan(240);
+      expect(all.books.map((book) => book.bookId)).toEqual(created.slice(0, all.booksListed));
+      // The last Book, beyond the cut, follows the cut list when the filter names it; the count listed by title is unchanged.
+      const last = created.at(-1)!;
+      const filtered = store.inspectLearningAudit({ bookId: last }).choices;
+      expect(filtered.books).toEqual([...all.books, { bookId: last, title: `239${'书'.repeat(177)}` }]);
+      expect([filtered.booksListed, filtered.booksTruncated]).toEqual([all.booksListed, true]);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
+
+  it('still reads with the 书系 choices left out, and says so, when a Series record is damaged (Issue #677)', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let seriesId: string;
+    try {
+      seriesId = store.createSeries({ title: '回溯损坏书系', note: '' }).seriesId;
+      expect(store.inspectLearningAudit().choices).toMatchObject({ series: [{ seriesId, title: '回溯损坏书系' }], seriesUnavailable: false });
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    // Rewrite the Series' name by hand: its record no longer matches it.
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      const trigger = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND name = 'series_no_update'").get()!;
+      db.exec('DROP TRIGGER series_no_update');
+      db.exec("UPDATE series SET title = '回溯改名书系', title_key = '回溯改名书系'");
+      db.exec(String(trigger.sql));
+    } finally {
+      db.close();
+    }
+    const damaged = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const code = (operation: () => unknown): unknown => {
+        try {
+          operation();
+        } catch (error) {
+          return (error as { code?: unknown }).code;
+        }
+        return 'no-error';
+      };
+      expect(code(() => damaged.inspectSeriesList())).toBe('SERIES_RECORD_INVALID');
+      const audit = damaged.inspectLearningAudit();
+      expect([audit.books, audit.nextCursor]).toEqual([[], null]);
+      expect(audit.choices).toEqual({ books: [], booksListed: 0, booksTruncated: false, series: [], seriesTruncated: false, seriesUnavailable: true });
+      // Filtering by the damaged Series itself is still refused.
+      expect(code(() => damaged.inspectLearningAudit({ seriesId: seriesId! }))).toBe('SERIES_RECORD_INVALID');
+      damaged.markCleanShutdown();
+    } finally {
+      damaged.close();
     }
   });
 

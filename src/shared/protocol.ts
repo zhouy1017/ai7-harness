@@ -6449,10 +6449,14 @@ export interface LearningAuditBookProjection {
  * whether the house holds more.
  */
 export interface LearningAuditChoicesProjection {
+  /** The first `booksListed` Books by title, then the Book the filter names when it lies beyond them. */
   readonly books: ReadonlyArray<{ readonly bookId: string; readonly title: string }>;
+  readonly booksListed: number;
   readonly booksTruncated: boolean;
   readonly series: ReadonlyArray<{ readonly seriesId: string; readonly title: string }>;
   readonly seriesTruncated: boolean;
+  /** The Series could not be read (a damaged record): the audit still answers, with no Series to choose. */
+  readonly seriesUnavailable: boolean;
 }
 
 /** 质量与学习 › 学习回溯: one page of the Books whose material matches, Book by Book (LAUD-001), and the filters' choices. A read. */

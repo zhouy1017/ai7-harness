@@ -7548,17 +7548,29 @@ export class EditorialStore {
         nextCursor: more && last !== undefined
           ? { bookTitle: last.title, bookId: last.bookId, orderedAt: last.orderedAt, materialKey: last.material.materialKey }
           : null,
-        choices: this.#learningAuditChoices(),
+        choices: this.#learningAuditChoices(input.bookId ?? null),
       };
     });
   }
 
-  /** 学习回溯's filter choices (LAUD-002; Issue #677): the house's Books and Series by title, read one beyond each bound. */
-  #learningAuditChoices(): LearningAuditChoicesProjection {
+  /**
+   * 学习回溯's filter choices (LAUD-002; Issue #677): the house's Books and Series by title, read one beyond each bound, and the
+   * Book the filter names. A damaged Series record leaves the Series out rather than failing the audit, which reads none.
+   */
+  #learningAuditChoices(chosenBookId: string | null): LearningAuditChoicesProjection {
     const books = (this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id LIMIT ?')
       .all(MAX_LEARNING_AUDIT_BOOK_CHOICES + 1) as SqlRow[]).map((row) => ({ bookId: asString(row.book_id), title: asString(row.title) }));
-    const series = this.#series.listAfter(null, MAX_LEARNING_AUDIT_SERIES_CHOICES + 1).map((entry) => ({ seriesId: entry.seriesId, title: entry.title }));
-    return learningAuditChoices(books, series);
+    let series: Array<{ seriesId: string; title: string }> | null;
+    try {
+      series = this.#series.listAfter(null, MAX_LEARNING_AUDIT_SERIES_CHOICES + 1).map((entry) => ({ seriesId: entry.seriesId, title: entry.title }));
+    } catch (error) {
+      if (!(error instanceof SeriesError)) throw error;
+      series = null;
+    }
+    const chosen = chosenBookId === null
+      ? null
+      : this.#authority.prepare('SELECT book_id, title FROM books WHERE book_id = ?').get(chosenBookId) as SqlRow | undefined;
+    return learningAuditChoices(books, series, chosen == null ? null : { bookId: asString(chosen.book_id), title: asString(chosen.title) });
   }
 
   /** One Book's matching materials after the cursor, the next `limit` in order, and how many match in all. */
