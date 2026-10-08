@@ -7588,25 +7588,34 @@ export class EditorialStore {
    * contract takes — and the version it is, never copied (the contract's bound refuses a copy).
    */
   #writingExemplars(bookId: string, typeId: string): Array<{ input: WritingExemplarInput; source: WritingExemplarSource }> {
-    const found: Array<{ input: WritingExemplarInput; source: WritingExemplarSource }> = [];
+    return this.#writingExemplarsByType(bookId, [typeId]).get(typeId) ?? [];
+  }
+
+  /** The same for several types in one pass over 范例's pages, which stops once every type holds its two. */
+  #writingExemplarsByType(bookId: string, typeIds: ReadonlyArray<string>): Map<string, Array<{ input: WritingExemplarInput; source: WritingExemplarSource }>> {
+    const found = new Map(typeIds.map((typeId) => [typeId, [] as Array<{ input: WritingExemplarInput; source: WritingExemplarSource }>]));
+    const full = (): boolean => [...found.values()].every((list) => list.length >= MAX_WRITING_EXEMPLARS);
     let after: ExemplarBookCursor | null = null;
     do {
       const page: ExemplarsProjection = this.inspectExemplars(after);
       for (const book of page.books) {
-        if (book.bookId === bookId || found.length >= MAX_WRITING_EXEMPLARS) continue;
-        const exemplar = book.exemplars.find((entry) => entry.typeId === typeId);
-        if (exemplar === undefined) continue;
-        const whole = (this.#authority.prepare('SELECT text FROM manuscript_block_versions WHERE revision_id = ? ORDER BY position')
-          .all(exemplar.revisionId) as SqlRow[]).map((row) => asString(row.text)).join('\n');
-        const words = writingWords(whole, MAX_WRITING_EXEMPLAR_GRAPHEMES);
-        if (words.length === 0) continue;
-        found.push({
-          input: { bookTitle: writingWords(book.bookTitle, 200), version: exemplar.version, text: words, excerpt: graphemeLength(whole.trim()) > MAX_WRITING_EXEMPLAR_GRAPHEMES },
-          source: { documentId: exemplar.documentId, revisionId: exemplar.revisionId },
-        });
+        if (book.bookId === bookId) continue;
+        for (const [typeId, list] of found) {
+          if (list.length >= MAX_WRITING_EXEMPLARS) continue;
+          const exemplar = book.exemplars.find((entry) => entry.typeId === typeId);
+          if (exemplar === undefined) continue;
+          const whole = (this.#authority.prepare('SELECT text FROM manuscript_block_versions WHERE revision_id = ? ORDER BY position')
+            .all(exemplar.revisionId) as SqlRow[]).map((row) => asString(row.text)).join('\n');
+          const words = writingWords(whole, MAX_WRITING_EXEMPLAR_GRAPHEMES);
+          if (words.length === 0) continue;
+          list.push({
+            input: { bookTitle: writingWords(book.bookTitle, 200), version: exemplar.version, text: words, excerpt: graphemeLength(whole.trim()) > MAX_WRITING_EXEMPLAR_GRAPHEMES },
+            source: { documentId: exemplar.documentId, revisionId: exemplar.revisionId },
+          });
+        }
       }
       after = page.nextCursor;
-    } while (after !== null && found.length < MAX_WRITING_EXEMPLARS);
+    } while (after !== null && !full());
     return found;
   }
 
@@ -7775,6 +7784,14 @@ export class EditorialStore {
       unavailable ??= `写作任务暂不可用：${error.message}`;
     }
     const documents = this.#documentCall(() => this.#productionDocuments.documents(bookId, blocks > 0));
+    // The house's 范例 of every type in one pass; a record that no longer reads says so, as any other part does.
+    let exemplarsByType = new Map<string, Array<{ input: WritingExemplarInput; source: WritingExemplarSource }>>();
+    try {
+      exemplarsByType = this.#writingExemplarsByType(bookId, documents.types.map((type) => type.typeId));
+    } catch (error) {
+      if (!(error instanceof StoreError)) throw error;
+      unavailable ??= `写作任务暂不可用：${error.message}`;
+    }
     const runState = latest?.projection.run?.state ?? null;
     const named = (list: ReadonlyArray<string>, none: string): string => (list.length === 0 ? none : list.join('、'));
     return {
@@ -7796,12 +7813,7 @@ export class EditorialStore {
         cost: WRITING_COST_BEFORE_PLAN,
       },
       types: documents.types.map((type): WritingTaskTypeProjection => {
-        let exemplars: WritingExemplarInput[] = [];
-        try {
-          exemplars = this.#writingExemplars(bookId, type.typeId).map((exemplar) => exemplar.input);
-        } catch (error) {
-          if (!(error instanceof StoreError)) throw error;
-        }
+        const exemplars: WritingExemplarInput[] = (exemplarsByType.get(type.typeId) ?? []).map((exemplar) => exemplar.input);
         const prepare: WritingTaskTypeProjection['prepare'] =
           unavailable !== null ? { allowed: false, reason: unavailable }
           : type.document !== null ? { allowed: false, reason: writingDocumentExists(type.label) }
