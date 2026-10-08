@@ -448,6 +448,9 @@ describe('what 工序与规则 answers stays within one frame (Issue #65 review)
       expect(listed.proposals).toHaveLength(50);
       expect([listed.proceduresTruncated, listed.proposalsTruncated]).toEqual([true, true]);
       expect(wireBytes(listed)).toBeLessThan(MAX_FRAME_BYTES);
+      // Summaries only: no versions in the list.
+      expect(Object.keys(listed.procedures[0]!).sort()).toEqual(['latestState', 'latestStateLabel', 'latestVersion', 'procedureId', 'runnable', 'title', 'versionCount']);
+      expect(Object.keys(listed.proposals[0]!).sort()).toEqual(['latestCreatedAt', 'latestVersion', 'proposalId', 'title', 'versionCount']);
       // Every version is reached a page at a time, each page within the frame.
       const walk = <T extends { versions: ReadonlyArray<{ version: number }>; versionsBefore: number | null }>(read: (before: number | null) => T): number[] => {
         const seen: number[] = [];

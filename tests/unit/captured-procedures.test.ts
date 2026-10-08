@@ -10,6 +10,7 @@ import {
   CAPTURE_NOTHING_SETTLED,
   CAPTURE_RUNNING,
   CapturedProcedures,
+  boundedPage,
   capturedProcedureDocument,
   capturedStepProblem,
   ceilingWiderThanSource,
@@ -203,6 +204,17 @@ function ledgerDatabase(): DatabaseSync {
   db.prepare('INSERT INTO review_runs VALUES (?)').run('33333333-3333-4333-8333-333333333333');
   return db;
 }
+
+describe('a page of versions (Issue #65 review)', () => {
+  it('takes at most its limit, stops at its byte budget, and always takes one while any remain', () => {
+    const items = [{ text: 'a'.repeat(90) }, { text: 'b'.repeat(90) }, { text: 'c'.repeat(90) }];
+    expect(boundedPage(items, 2)).toEqual(items.slice(0, 2));
+    expect(boundedPage(items, 5, 250)).toEqual(items.slice(0, 2));
+    expect(boundedPage(items, 5, 150)).toEqual(items.slice(0, 1));
+    expect(boundedPage(items, 5, 0)).toEqual(items.slice(0, 1));
+    expect(boundedPage([], 5, 0)).toEqual([]);
+  });
+});
 
 describe('the ledger', () => {
   const source = { sourceBookId: '11111111-1111-4111-8111-111111111111', sourceReviewRunId: '22222222-2222-4222-8222-222222222222', sourceRunOrdinal: 1 };

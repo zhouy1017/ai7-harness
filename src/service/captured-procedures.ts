@@ -525,13 +525,13 @@ export function procedurePinRefusal(db: DatabaseSync, reviewRunId: string): { co
 const VERSION_PAGE_BUDGET_BYTES = MAX_FRAME_BYTES - 64 * 1024;
 
 /** The newest of `items` that fit the budget, at most `limit`, and always one while any remain. */
-function boundedPage<T>(items: ReadonlyArray<T>, limit: number): T[] {
+export function boundedPage<T>(items: ReadonlyArray<T>, limit: number, budget: number = VERSION_PAGE_BUDGET_BYTES): T[] {
   const page: T[] = [];
   let spent = 0;
   for (const item of items) {
     if (page.length >= limit) break;
     const weight = Buffer.byteLength(JSON.stringify(item), 'utf8') + 1;
-    if (page.length > 0 && spent + weight > VERSION_PAGE_BUDGET_BYTES) break;
+    if (page.length > 0 && spent + weight > budget) break;
     page.push(item);
     spent += weight;
   }
