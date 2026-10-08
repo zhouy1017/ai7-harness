@@ -319,6 +319,12 @@ describe('学习补救影响预览, the pure reading', () => {
     };
     expect(learningRemediationPreview(book, items, (materialKey) => table.get(materialKey) ?? null).previewDigest).toBe(preview.previewDigest);
     expect(again((entry) => { (entry.projection as { decisions: number }).decisions = 2; })).not.toBe(preview.previewDigest);
+    // A chain that moved on and was read again at its new count is another preview, though every shown line reads the same.
+    const later = new Map(table);
+    later.set(key(1), { ...table.get(key(1))!, projection: { ...table.get(key(1))!.projection, decisions: 3 } });
+    const reread = learningRemediationPreview(book, [{ ...items[0]!, expectedDecisions: 3 }, items[1]!, items[2]!], (materialKey) => later.get(materialKey) ?? null);
+    expect([reread.included, reread.leftOut]).toEqual([preview.included, preview.leftOut]);
+    expect(reread.previewDigest).not.toBe(preview.previewDigest);
     expect(learningRemediationPreview({ ...book, bookId: randomUUID() }, items, (materialKey) => table.get(materialKey) ?? null).previewDigest).not.toBe(preview.previewDigest);
     expect(learningRemediationPreview(book, items.slice(0, 2), (materialKey) => table.get(materialKey) ?? null).previewDigest).not.toBe(preview.previewDigest);
     expect(learningRemediationPreview(book, [items[1]!, items[0]!, items[2]!], (materialKey) => table.get(materialKey) ?? null).previewDigest).not.toBe(preview.previewDigest);
