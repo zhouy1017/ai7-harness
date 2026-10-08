@@ -2271,9 +2271,16 @@ async function main() {
       cancellation.throwIfRequested();
       at(`launch-${launchScenario}-renderer-target`);
       // The trace says the target existed as soon as it is attached, before the renderer is ready (Issue #518).
-      return attachRendererTarget(browser, () => {
-        inFlight.target = true;
-      });
+      try {
+        return await attachRendererTarget(browser, () => {
+          inFlight.target = true;
+        });
+      } catch (error) {
+        // A launch whose product gave up on its startup and exited while J-01 watched it (Issue #675) leaves nothing to
+        // close, and the cleanup's refusal of a closed browser must not replace the check that named why.
+        if (error !== BROWSER_DISCONNECTED && browser?.isConnected() === false) browser = undefined;
+        throw error;
+      }
     };
     const closeProduct = async () => {
       at('window-close');
