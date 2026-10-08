@@ -449,6 +449,7 @@ export class ScheduledBackups {
     const partial = join(location, `.${randomUUID()}${DATABASE_PACKAGE_EXTENSION}.partial`);
     const createdAt = now.toISOString();
     let placed = false;
+    let recordPlaced: (() => void) | null = null;
     try {
       // What the backup holds is counted with its copy of the store, so the record says what the file holds (Issue #434 review).
       const written = await writeDatabasePackage(this.#db, this.#dataRoot, partial, () => ({
@@ -458,6 +459,26 @@ export class ScheduledBackups {
       }), { signal });
       const { facts } = written;
       const contents = facts.contents;
+      recordPlaced = () => {
+        const backupId = randomUUID();
+        const record = canonicalRecord({
+          schema: BACKUP_SCHEMA,
+          backupId,
+          fileName,
+          byteLength: written.bytes,
+          fileSha256: written.sha256,
+          dataVersion: facts.dataVersion,
+          schemaRevision: facts.schemaRevision,
+          softwareVersion: facts.softwareVersion,
+          contents,
+          createdAt,
+        });
+        this.#db.prepare(
+          `INSERT INTO scheduled_backups(backup_id, file_name, byte_length, file_sha256, data_version, schema_revision, software_version, contents_json, created_at, canonical_json, sha256)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(backupId, fileName, written.bytes, written.sha256, facts.dataVersion, facts.schemaRevision, facts.softwareVersion,
+          canonicalJson(contents), createdAt, record.json, record.digest);
+      };
       signal.throwIfAborted();
       // Only ever a new file (Issue #434 review): the name is taken at the instant the backup is put there, so a file that
       // appeared at it while the package was written is left as it is, as every export leaves one.
@@ -467,28 +488,20 @@ export class ScheduledBackups {
       requireBackup(taken === 'taken', 'SCHEDULED_BACKUP_PLACE_FAILED', '无法把备份放到备份位置。');
       placed = true;
       signal.throwIfAborted();
-      const backupId = randomUUID();
-      const record = canonicalRecord({
-        schema: BACKUP_SCHEMA,
-        backupId,
-        fileName,
-        byteLength: written.bytes,
-        fileSha256: written.sha256,
-        dataVersion: facts.dataVersion,
-        schemaRevision: facts.schemaRevision,
-        softwareVersion: facts.softwareVersion,
-        contents,
-        createdAt,
-      });
-      this.#db.prepare(
-        `INSERT INTO scheduled_backups(backup_id, file_name, byte_length, file_sha256, data_version, schema_revision, software_version, contents_json, created_at, canonical_json, sha256)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(backupId, fileName, written.bytes, written.sha256, facts.dataVersion, facts.schemaRevision, facts.softwareVersion,
-        canonicalJson(contents), createdAt, record.json, record.digest);
+      recordPlaced();
       placed = false;
     } catch (error) {
-      // A file under a backup's name that no record names would never be listed or removed (Issue #434 review).
-      if (placed) await rm(target, { force: true }).catch(() => undefined);
+      // A file under a backup's name that no record names would never be listed or removed (Issue #434 review). One the removal
+      // cannot take — a scanner holding the file just put there, say — is a whole backup: it is recorded instead, so it is
+      // listed and expires as any other, and the next check finds the day's backup made rather than a file at its name
+      // (Issue #644). Should the record fail as well — at shutdown the store is already closing — the file stays as it was.
+      if (placed && !(await rm(target, { force: true }).then(() => true, () => false))) {
+        try {
+          recordPlaced?.();
+        } catch {
+          // The record was what failed: nothing more can be done here.
+        }
+      }
       throw error;
     } finally {
       await rm(partial, { force: true }).catch(() => undefined);
