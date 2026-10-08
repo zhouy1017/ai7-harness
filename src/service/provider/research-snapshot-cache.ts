@@ -94,12 +94,14 @@ export class ResearchSnapshotCache {
 
   /** The intact snapshot of an identical call, or `null` — absent, unreadable, torn, and tampered entries all read as a miss. */
   async lookup(kind: ResearchSnapshot['kind'], origin: string, argumentsDigest: string): Promise<ResearchSnapshot | null> {
+    const path = this.entryPath(kind, origin, argumentsDigest);
     let raw: string;
     try {
-      raw = await readFile(this.entryPath(kind, origin, argumentsDigest), 'utf8');
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-      throw error;
+      raw = await readFile(path, 'utf8');
+    } catch {
+      // Absent, or unreadable however (a directory in its place, a permission, a lock): a miss, never a failure that
+      // holds every later Run; the next call answers live and its store replaces the entry.
+      return null;
     }
     let parsed: unknown;
     try {
@@ -119,7 +121,13 @@ export class ResearchSnapshotCache {
     const staging = `${path}.${randomUUID()}.tmp`;
     try {
       await writeFile(staging, `${JSON.stringify(snapshot)}\n`, 'utf8');
-      await rename(staging, path);
+      try {
+        await rename(staging, path);
+      } catch {
+        // Whatever occupies the entry's place and could not be read is replaced, once.
+        await rm(path, { recursive: true, force: true });
+        await rename(staging, path);
+      }
     } catch (error) {
       await rm(staging, { force: true });
       throw error;

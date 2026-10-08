@@ -1,5 +1,5 @@
 import type { EgressTicketBook, PublicSourceTicket } from './egress-gate.js';
-import { htmlToMarkdown } from './html-to-markdown.js';
+import { capText, htmlToMarkdown } from './html-to-markdown.js';
 import { toolArgumentsDigest, type PlatformToolsRule } from './platform-tools.js';
 import { PlatformToolHttpError, deadlineSignal, readBoundedBody, type PlatformToolFetch } from './platform-tool-http.js';
 
@@ -13,6 +13,13 @@ import { PlatformToolHttpError, deadlineSignal, readBoundedBody, type PlatformTo
  */
 
 export const WEBFETCH_USER_AGENT = 'AI7-Harness/1.0 (webfetch)';
+/**
+ * The characters of a fetched page's text that enter the model's context (the re-review of #671): the bound ADR 0080 §7.4
+ * sets for a search result before it enters the context, applied to the page after conversion. The 5 MiB cap bounds the
+ * bytes before conversion; this bounds what the model reads, and a cut text ends with an explicit truncation marker. The
+ * page's bytes are kept whole in the Research Snapshot Cache, so retention (S70) never reads the cut text.
+ */
+export const WEBFETCH_TEXT_MAX_CHARACTERS = 25_000;
 
 export class PublicSourceFetchError extends Error {
   constructor(readonly code: string, message: string) {
@@ -135,7 +142,9 @@ export async function sendPublicFetch(authorized: AuthorizedPublicFetch, input: 
     if (media === null) {
       return { url: ticket.url, status: response.status, contentType, charset: decoded.charset, bytes, text: null, failure: 'unsupported-content-type' };
     }
-    const text = media === 'html' ? htmlToMarkdown(decoded.text, ticket.url) : decoded.text;
+    const text = media === 'html'
+      ? htmlToMarkdown(decoded.text, ticket.url, { maxCharacters: WEBFETCH_TEXT_MAX_CHARACTERS })
+      : capText(decoded.text, WEBFETCH_TEXT_MAX_CHARACTERS);
     return { url: ticket.url, status: response.status, contentType, charset: decoded.charset, bytes, text, failure: null };
   } catch (error) {
     if (error instanceof PlatformToolHttpError) throw new PublicSourceFetchError(error.code, error.message);

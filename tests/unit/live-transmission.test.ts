@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -143,6 +143,24 @@ describe('platformToolCallOnce', () => {
     expect(cache.nextItemId('factual-review', 'S87')).toBe('S87/factual-review/1');
   });
 
+  it('records a sent call on the ledger even when its snapshot cannot be kept, and still hands back the answer', async () => {
+    const { cache } = await opened();
+    const failing = new ResearchSnapshotCache(root);
+    failing.store = async () => { throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' }); };
+    const bytes = new TextEncoder().encode('{"result":"x"}');
+    const item = { kind: 'search-call' as const, purpose: 'factual-review', argumentsDigest: 'e'.repeat(64), host: 'search.parallel.ai', origin: SEARCH_ORIGIN };
+    const settled = await platformToolCallOnce(cache, failing, item, {
+      authorize: () => null,
+      send: async () => ({ url: 'https://search.parallel.ai/mcp', status: 200, contentType: 'application/json', bytes, text: '结果' }),
+    });
+    expect(settled).toMatchObject({ replayed: false, kept: false, status: 200, snapshot: { text: '结果' } });
+    expect(cache.lines).toMatchObject([{ itemId: 'S87/factual-review/1', kind: 'search-call', outcome: 'transmitted' }]);
+    // The next reader of the ledger sees the item: it is never live again under the same id.
+    const reread = new ProviderResultCache(root);
+    await reread.open();
+    expect(reread.nextItemId('factual-review', 'S87')).toBe('S87/factual-review/2');
+  });
+
   it('keeps nothing from an unusable or failed call, and records it as failed', async () => {
     const { cache, snapshots } = await opened();
     const item = { kind: 'fetch' as const, purpose: 'factual-review', argumentsDigest: 'c'.repeat(64), host: 'example.org', origin: 'webfetch' };
@@ -183,6 +201,12 @@ describe('ResearchSnapshotCache', () => {
     await writeFile(path, JSON.stringify({ ...snapshot, text: 7 }), 'utf8');
     expect(await snapshots.lookup('fetch', 'webfetch', snapshot.argumentsDigest)).toBeNull();
     await writeFile(path, JSON.stringify({ ...snapshot, origin: 'other' }), 'utf8');
+    expect(await snapshots.lookup('fetch', 'webfetch', snapshot.argumentsDigest)).toBeNull();
+    await snapshots.store(snapshot);
+    expect(await snapshots.lookup('fetch', 'webfetch', snapshot.argumentsDigest)).toEqual(snapshot);
+    // An entry that cannot be read at all — here a directory in its place — is a miss too, and the next store replaces it.
+    await rm(path, { force: true });
+    await mkdir(join(path, 'occupant'), { recursive: true });
     expect(await snapshots.lookup('fetch', 'webfetch', snapshot.argumentsDigest)).toBeNull();
     await snapshots.store(snapshot);
     expect(await snapshots.lookup('fetch', 'webfetch', snapshot.argumentsDigest)).toEqual(snapshot);

@@ -12,10 +12,10 @@ import {
   type PublicSourceTicket,
   type SearchServiceTicket,
 } from '../../src/service/provider/egress-gate.js';
-import { decodeEntities, htmlToMarkdown } from '../../src/service/provider/html-to-markdown.js';
+import { LIST_INDENT_MAX_DEPTH, TRUNCATION_MARKER, capText, decodeEntities, htmlToMarkdown } from '../../src/service/provider/html-to-markdown.js';
 import { canonicalToolArguments, readPlatformToolsRule, type PlatformToolsRule } from '../../src/service/provider/platform-tools.js';
 import type { PlatformToolFetch, PlatformToolHttpInit } from '../../src/service/provider/platform-tool-http.js';
-import { authorizePublicFetch, declaredCharset, fetchPublicSource, sendPublicFetch } from '../../src/service/provider/public-source-fetch.js';
+import { WEBFETCH_TEXT_MAX_CHARACTERS, authorizePublicFetch, declaredCharset, fetchPublicSource, sendPublicFetch } from '../../src/service/provider/public-source-fetch.js';
 import {
   SEARCH_RESULT_MAX_CHARACTERS,
   SEARCH_SERVICE_TIMEOUT_MS,
@@ -313,6 +313,65 @@ describe('htmlToMarkdown on hostile markup', () => {
       expect(performance.now() - started).toBeLessThan(2_000);
     });
   }
+
+  it('indents nested lists at most eight levels, so the output stays linear in the input', () => {
+    for (const depth of [1_000, 20_000, 80_000]) {
+      const html = `${'<ul>'.repeat(depth)}${'<li>x'.repeat(depth)}`;
+      const markdown = htmlToMarkdown(html);
+      expect(markdown.length).toBeLessThanOrEqual(6 * html.length);
+    }
+    expect(htmlToMarkdown(`${'<ul>'.repeat(12)}<li>a<li>b`).split('\n')).toEqual(['- a', `${' '.repeat(2 * LIST_INDENT_MAX_DEPTH)}- b`]);
+    expect(htmlToMarkdown('<ul><li>a<ul><li>b</ul></ul>').split('\n')).toEqual(['- a', '', '  - b']);
+  });
+
+  it('cuts a converted page at its character bound with an explicit marker, however the page amplifies', () => {
+    const long = `<p>${'字'.repeat(40_000)}</p>`;
+    const cut = htmlToMarkdown(long, null, { maxCharacters: 25_000 });
+    expect(cut).toBe(`${'字'.repeat(25_000)}${TRUNCATION_MARKER}`);
+    expect(htmlToMarkdown('<p>短</p>', null, { maxCharacters: 25_000 })).toBe('短');
+    // A page built to amplify stops being read once its output passes the bound.
+    const amplifying = `${'<ul>'.repeat(200_000)}${'<li>x'.repeat(200_000)}`;
+    const started = performance.now();
+    const bounded = htmlToMarkdown(amplifying, null, { maxCharacters: 25_000 });
+    expect(performance.now() - started).toBeLessThan(2_000);
+    expect(bounded.endsWith(TRUNCATION_MARKER)).toBe(true);
+    expect(bounded.length).toBeLessThanOrEqual(25_000 + TRUNCATION_MARKER.length);
+    const listy = htmlToMarkdown(`<ul>${'<li>条目'.repeat(20_000)}`, null, { maxCharacters: 25_000 });
+    expect(listy.endsWith(TRUNCATION_MARKER)).toBe(true);
+    expect(listy.length).toBe(25_000 + TRUNCATION_MARKER.length);
+    expect(capText('a😀b', 2)).toBe(`a😀${TRUNCATION_MARKER}`);
+    expect(capText('ab', 2)).toBe('ab');
+  });
+
+  it('bounds the text a fetch hands the model at the search-result bound, keeping the page\'s bytes whole', async () => {
+    const rule = await v7Rule();
+    const book = new EgressTicketBook();
+    const decision = evaluatePublicSourceFetch({ arguments: webfetch }, binding(rule), scope, book) as { ticket: PublicSourceTicket };
+    const page = `<p>${'页'.repeat(WEBFETCH_TEXT_MAX_CHARACTERS + 5)}</p>`;
+    const outcome = await fetchPublicSource({
+      ticket: decision.ticket, book, rule, admitHost: () => () => undefined,
+      fetch: async () => new Response(page, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } }),
+    });
+    expect(WEBFETCH_TEXT_MAX_CHARACTERS).toBe(SEARCH_RESULT_MAX_CHARACTERS);
+    expect(outcome.text).toBe(`${'页'.repeat(WEBFETCH_TEXT_MAX_CHARACTERS)}${TRUNCATION_MARKER}`);
+    expect(outcome.bytes.byteLength).toBe(Buffer.byteLength(page));
+    // A plain-text page is held to the same bound.
+    const plain = evaluatePublicSourceFetch({ arguments: webfetch }, binding(rule), scope, book) as { ticket: PublicSourceTicket };
+    const text = await fetchPublicSource({
+      ticket: plain.ticket, book, rule, admitHost: () => () => undefined,
+      fetch: async () => new Response('文'.repeat(WEBFETCH_TEXT_MAX_CHARACTERS + 1), { status: 200, headers: { 'content-type': 'text/plain; charset=utf-8' } }),
+    });
+    expect(text.text).toBe(`${'文'.repeat(WEBFETCH_TEXT_MAX_CHARACTERS)}${TRUNCATION_MARKER}`);
+  });
+
+  it('stops reading a page once its output passes the bound', () => {
+    // Sixteen megabytes of markup after a first paragraph already past the bound: none of it is scanned.
+    const page = `<p>${'字'.repeat(60_000)}</p>${'<b>x</b>'.repeat(2_000_000)}`;
+    const started = performance.now();
+    const text = htmlToMarkdown(page, null, { maxCharacters: 25_000 });
+    expect(performance.now() - started).toBeLessThan(300);
+    expect(text).toBe(`${'字'.repeat(25_000)}${TRUNCATION_MARKER}`);
+  });
 
   it('keeps the text before an unclosed construct and drops what an unclosed comment hides', () => {
     expect(htmlToMarkdown('<p>正文</p><a')).toBe('正文\n\n<a');

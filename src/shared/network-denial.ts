@@ -115,7 +115,9 @@ function ipv6Groups(address: string): number[] | null {
 /**
  * Whether one resolved address is on the public network (ADR 0080 §7.3, the review of #671). Loopback, unspecified,
  * link-local (the cloud metadata endpoint 169.254.169.254 included), RFC 1918 and unique-local, CGNAT, multicast and
- * reserved ranges are not, nor is any IPv6 form that embeds one of them (IPv4-mapped, IPv4-compatible, NAT64).
+ * reserved ranges are not, nor is any IPv6 form that embeds one of them (IPv4-mapped, IPv4-compatible, NAT64, 6to4), nor
+ * the transition and special-purpose blocks whose embedding cannot be read off the address (Teredo and the rest of
+ * 2001::/23, IPv4-translated, local-use NAT64, site-local, discard-only).
  */
 export function isPublicAddress(address: string): boolean {
   const v4 = ipv4Octets(address);
@@ -126,10 +128,19 @@ export function isPublicAddress(address: string): boolean {
   const zeroPrefix = groups.slice(0, 5).every((group) => group === 0);
   if (zeroPrefix && groups[5] === 0xffff) return isPublicIpv4(embedded); // IPv4-mapped ::ffff:a.b.c.d
   if (zeroPrefix && groups[5] === 0) return false; // `::`, `::1`, and the deprecated IPv4-compatible ::a.b.c.d
+  if (groups.slice(0, 4).every((group) => group === 0) && groups[4] === 0xffff && groups[5] === 0) return false; // IPv4-translated ::ffff:0:0/96
+  if (groups[0] === 0x2002) {
+    // 6to4 2002::/16 carries its IPv4 address in bits 16–47: it is as public as that address.
+    return isPublicIpv4([(groups[1]! >> 8) & 0xff, groups[1]! & 0xff, (groups[2]! >> 8) & 0xff, groups[2]! & 0xff]);
+  }
+  if (groups[0] === 0x2001 && groups[1]! <= 0x01ff) return false; // 2001::/23 IETF protocol assignments, Teredo 2001::/32 among them
+  if (groups[0] === 0x64 && groups[1] === 0xff9b && groups[2] === 1) return false; // local-use NAT64 64:ff9b:1::/48
+  if (groups[0] === 0x100 && groups.slice(1, 4).every((group) => group === 0)) return false; // discard-only 100::/64
   if (groups[0] === 0x64 && groups[1] === 0xff9b && groups.slice(2, 6).every((group) => group === 0)) return isPublicIpv4(embedded); // NAT64
   const first = groups[0]!;
   if ((first & 0xfe00) === 0xfc00) return false; // unique local fc00::/7
   if ((first & 0xffc0) === 0xfe80) return false; // link-local fe80::/10
+  if ((first & 0xffc0) === 0xfec0) return false; // deprecated site-local fec0::/10
   if ((first & 0xff00) === 0xff00) return false; // multicast ff00::/8
   if (first === 0x2001 && groups[1] === 0x0db8) return false; // documentation
   return true;

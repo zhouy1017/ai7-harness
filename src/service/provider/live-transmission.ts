@@ -152,7 +152,7 @@ export async function platformToolCallOnce<Authorized>(
   item: PlatformToolCallItem,
   call: { authorize(): Authorized; send(authorized: Authorized): Promise<PlatformToolCallResult> },
   now: () => number = Date.now,
-): Promise<{ readonly snapshot: ResearchSnapshot | null; readonly status: number; readonly replayed: boolean }> {
+): Promise<{ readonly snapshot: ResearchSnapshot | null; readonly status: number; readonly replayed: boolean; readonly kept: boolean }> {
   const slice = item.slice ?? 'S87';
   const replayed = await snapshots.lookup(item.kind, item.origin, item.argumentsDigest);
   if (replayed !== null) {
@@ -161,7 +161,7 @@ export async function platformToolCallOnce<Authorized>(
       host: item.host, outcome: 'replayed', status: replayed.status, resultDigest: replayed.responseDigest,
       resultBytes: replayed.responseBytes, elapsedMs: 0, recordedAt: new Date().toISOString(),
     });
-    return { snapshot: replayed, status: replayed.status, replayed: true };
+    return { snapshot: replayed, status: replayed.status, replayed: true, kept: true };
   }
   const authorized = call.authorize();
   const itemId = cache.nextItemId(item.purpose, slice);
@@ -195,11 +195,22 @@ export async function platformToolCallOnce<Authorized>(
         text: result.text!,
       }
     : null;
-  if (snapshot !== null) await snapshots.store(snapshot);
+  // The ledger line first: a call that was sent is on the ledger whatever happens to its snapshot (ADR 0067 live-once).
   await cache.record({
     itemId, kind: item.kind, purpose: item.purpose, argumentsDigest: item.argumentsDigest, host: item.host,
     outcome: usable ? 'transmitted' : 'failed', status: result.status, resultDigest: responseDigest,
     resultBytes: result.bytes.byteLength, elapsedMs, recordedAt: new Date().toISOString(),
   });
-  return { snapshot, status: result.status, replayed: false };
+  // A snapshot that cannot be kept (a full disk, a refused rename) leaves the call sent and answered but not kept: the
+  // model still reads the answer, and only a later identical call misses the cache.
+  let kept = false;
+  if (snapshot !== null) {
+    try {
+      await snapshots.store(snapshot);
+      kept = true;
+    } catch {
+      kept = false;
+    }
+  }
+  return { snapshot, status: result.status, replayed: false, kept };
 }

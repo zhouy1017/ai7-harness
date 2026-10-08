@@ -43,9 +43,29 @@ function resolvedHref(href: string, baseUrl: string | null): string | null {
   }
 }
 
-/** Convert one HTML document to Markdown. `baseUrl` resolves relative links; without it only absolute links survive. */
-export function htmlToMarkdown(html: string, baseUrl: string | null = null): string {
+/**
+ * The deepest list nesting the output indents. Deeper items keep their marker at this depth: a page of `<ul>` after `<ul>`
+ * would otherwise make every item's indent as long as the nesting, and the output quadratic in the input (the re-review
+ * of #671).
+ */
+export const LIST_INDENT_MAX_DEPTH = 8;
+
+/** The marker that ends a converted text cut at its character bound. */
+export const TRUNCATION_MARKER = '\n\n（以下已截断：正文超过字符上限。）';
+
+/**
+ * Convert one HTML document to Markdown. `baseUrl` resolves relative links; without it only absolute links survive. With
+ * `maxCharacters`, the conversion stops once its output passes the bound and the text is cut there and ends with
+ * `TRUNCATION_MARKER`, so the output never grows past the bound whatever the page holds.
+ */
+export function htmlToMarkdown(html: string, baseUrl: string | null = null, options: { readonly maxCharacters?: number } = {}): string {
+  const budget = options.maxCharacters ?? Number.POSITIVE_INFINITY;
   const out: string[] = [];
+  let emitted = 0;
+  const emit = (piece: string): void => {
+    out.push(piece);
+    emitted += piece.length;
+  };
   const links: Array<string | null> = [];
   const lists: Array<{ ordered: boolean; next: number }> = [];
   let dropDepth = 0;
@@ -54,12 +74,18 @@ export function htmlToMarkdown(html: string, baseUrl: string | null = null): str
   const pushText = (raw: string): void => {
     if (dropDepth > 0 || raw.length === 0) return;
     const decoded = decodeEntities(raw);
-    out.push(preDepth > 0 ? decoded : decoded.replace(/\s+/gu, ' '));
+    emit(preDepth > 0 ? decoded : decoded.replace(/\s+/gu, ' '));
   };
   const block = (): void => {
-    out.push('\n\n');
+    emit('\n\n');
   };
+  let cut = false;
   for (const token of scanHtml(html)) {
+    // Past the bound nothing more is read: whitespace normalization only shortens, so a margin of one bound is enough.
+    if (emitted > budget * 2) {
+      cut = true;
+      break;
+    }
     if (token.kind === 'text') {
       pushText(token.text);
       continue;
@@ -80,21 +106,21 @@ export function htmlToMarkdown(html: string, baseUrl: string | null = null): str
     }
     if (/^h[1-6]$/u.test(name)) {
       block();
-      if (!closing) out.push(`${'#'.repeat(Number(name[1]))} `);
+      if (!closing) emit(`${'#'.repeat(Number(name[1]))} `);
       continue;
     }
     switch (name) {
       case 'br':
-        out.push('\n');
+        emit('\n');
         continue;
       case 'hr':
-        out.push('\n\n---\n\n');
+        emit('\n\n---\n\n');
         continue;
       case 'li':
         if (!closing) {
           const list = lists[lists.length - 1];
           const marker = list?.ordered === true ? `${list.next++}. ` : '- ';
-          out.push(`\n${'  '.repeat(Math.max(0, lists.length - 1))}${marker}`);
+          emit(`\n${'  '.repeat(Math.min(LIST_INDENT_MAX_DEPTH, Math.max(0, lists.length - 1)))}${marker}`);
         }
         continue;
       case 'ul':
@@ -106,53 +132,76 @@ export function htmlToMarkdown(html: string, baseUrl: string | null = null): str
       case 'a':
         if (closing) {
           const href = links.pop();
-          if (href !== undefined && href !== null) out.push(`](${href})`);
+          if (href !== undefined && href !== null) emit(`](${href})`);
         } else {
           const raw = attributeOf(tag, 'href');
           const href = raw === null ? null : resolvedHref(raw, baseUrl);
           links.push(href);
-          if (href !== null) out.push('[');
+          if (href !== null) emit('[');
         }
         continue;
       case 'strong':
       case 'b':
-        out.push('**');
+        emit('**');
         continue;
       case 'em':
       case 'i':
-        out.push('*');
+        emit('*');
         continue;
       case 'code':
-        if (preDepth === 0) out.push('`');
+        if (preDepth === 0) emit('`');
         continue;
       case 'pre':
         if (closing) {
           preDepth = Math.max(0, preDepth - 1);
-          out.push('\n```\n\n');
+          emit('\n```\n\n');
         } else {
           preDepth += 1;
-          out.push('\n\n```\n');
+          emit('\n\n```\n');
         }
         continue;
       case 'blockquote':
         block();
-        if (!closing) out.push('> ');
+        if (!closing) emit('> ');
         continue;
       case 'td':
       case 'th':
-        if (!closing) out.push(' | ');
+        if (!closing) emit(' | ');
         continue;
       default:
         if (BLOCK_ELEMENTS.has(name)) block();
         continue;
     }
   }
-  return out.join('')
+  const text = out.join('')
     .split('\n')
     .map((line) => trimTrailingBlanks(line).replace(/^[ \t]+(?=[^-\d ])/u, ''))
     .join('\n')
     .replace(/\n{3,}/gu, '\n\n')
     .trim();
+  // A conversion that stopped reading is cut even when what it kept is short: the model learns it read part of the page.
+  return cut ? `${codePointPrefix(text, budget)}${TRUNCATION_MARKER}` : capText(text, budget);
+}
+
+/** The first `maxCharacters` code points of a text, never cut inside a surrogate pair. */
+function codePointPrefix(text: string, maxCharacters: number): string {
+  let end = 0;
+  let points = 0;
+  while (end < text.length && points < maxCharacters) {
+    const code = text.charCodeAt(end);
+    end += code >= 0xd800 && code <= 0xdbff && end + 1 < text.length ? 2 : 1;
+    points += 1;
+  }
+  return text.slice(0, end);
+}
+
+/**
+ * A text cut at `maxCharacters` code points, ending with `TRUNCATION_MARKER` when anything was cut. The marker is outside
+ * the bound, so the model always learns that it read part of the source.
+ */
+export function capText(text: string, maxCharacters: number): string {
+  const prefix = codePointPrefix(text, maxCharacters);
+  return prefix.length === text.length ? text : `${prefix}${TRUNCATION_MARKER}`;
 }
 
 /** A line without its trailing spaces and tabs, by one backward walk (a `[ \t]+$` pattern backtracks over every run). */
