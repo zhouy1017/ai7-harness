@@ -1297,6 +1297,18 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'j14-scope-stop-keyboard-reflow-forced-colors',
     'exclusion-cancel',
     'knowledge-bounded-pages',
+    // Issue #65 (S30): 可复用工序 — captured from a finished Review Run, validated and enabled, run pinned in a second Book,
+    // stopped with its pin kept, and a 开发建议 written to a file; a restart; by keyboard, at 200% and under forced colours.
+    'capture-source-review',
+    'capture-source-set',
+    'capture-save',
+    'capture-developer-proposal',
+    'capture-validate-enable',
+    'capture-run-second-book',
+    'capture-stop',
+    'capture-proposal-file',
+    'capture-restart',
+    'j14-capture-keyboard-reflow-forced-colors',
     'zero-activity',
   ]),
 });

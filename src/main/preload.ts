@@ -258,6 +258,28 @@ const api: RendererApi = Object.freeze({
   inspectExemplars: (input?: ServiceOperationMap['inspectExemplars']['input']) =>
     invoke<ServiceOperationMap['inspectExemplars']['output']>(IPC_CHANNELS.inspectExemplars, input ?? { after: null }),
   inspectKnowledgeProcedures: () => invoke<ServiceOperationMap['inspectKnowledgeProcedures']['output']>(IPC_CHANNELS.inspectKnowledgeProcedures),
+  // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087).
+  inspectCapturedProcedures: () => invoke<ServiceOperationMap['inspectCapturedProcedures']['output']>(IPC_CHANNELS.inspectCapturedProcedures),
+  inspectCapturedProcedure: (input: Parameters<RendererApi['inspectCapturedProcedure']>[0]) =>
+    invoke<ServiceOperationMap['inspectCapturedProcedure']['output']>(IPC_CHANNELS.inspectCapturedProcedure, input),
+  inspectDeveloperProposal: (input: Parameters<RendererApi['inspectDeveloperProposal']>[0]) =>
+    invoke<ServiceOperationMap['inspectDeveloperProposal']['output']>(IPC_CHANNELS.inspectDeveloperProposal, input),
+  inspectProcedureCapture: (input: Parameters<RendererApi['inspectProcedureCapture']>[0]) =>
+    invoke<ServiceOperationMap['inspectProcedureCapture']['output']>(IPC_CHANNELS.inspectProcedureCapture, input),
+  saveCapturedProcedure: (input: Parameters<RendererApi['saveCapturedProcedure']>[0]) =>
+    invoke<ServiceOperationMap['saveCapturedProcedure']['output']>(IPC_CHANNELS.saveCapturedProcedure, input),
+  previewCapturedProcedureValidation: (input: Parameters<RendererApi['previewCapturedProcedureValidation']>[0]) =>
+    invoke<ServiceOperationMap['previewCapturedProcedureValidation']['output']>(IPC_CHANNELS.previewCapturedProcedureValidation, input),
+  enableCapturedProcedure: (input: Parameters<RendererApi['enableCapturedProcedure']>[0]) =>
+    invoke<ServiceOperationMap['enableCapturedProcedure']['output']>(IPC_CHANNELS.enableCapturedProcedure, input),
+  stopCapturedProcedure: (input: Parameters<RendererApi['stopCapturedProcedure']>[0]) =>
+    invoke<ServiceOperationMap['stopCapturedProcedure']['output']>(IPC_CHANNELS.stopCapturedProcedure, input),
+  inspectCapturedProcedureRun: (input: Parameters<RendererApi['inspectCapturedProcedureRun']>[0]) =>
+    invoke<ServiceOperationMap['inspectCapturedProcedureRun']['output']>(IPC_CHANNELS.inspectCapturedProcedureRun, input),
+  saveDeveloperProposal: (input: Parameters<RendererApi['saveDeveloperProposal']>[0]) =>
+    invoke<ServiceOperationMap['saveDeveloperProposal']['output']>(IPC_CHANNELS.saveDeveloperProposal, input),
+  saveDeveloperProposalFile: (input: Parameters<RendererApi['saveDeveloperProposalFile']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['saveDeveloperProposalFile']>>>(IPC_CHANNELS.saveDeveloperProposalFile, input),
   inspectLibraryMaterials: (input?: ServiceOperationMap['inspectLibraryMaterials']['input']) =>
     invoke<ServiceOperationMap['inspectLibraryMaterials']['output']>(IPC_CHANNELS.inspectLibraryMaterials, input ?? { after: null }),
   inspectLibraryMaterial: (input: ServiceOperationMap['inspectLibraryMaterial']['input']) =>

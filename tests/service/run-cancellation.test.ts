@@ -15,7 +15,7 @@ import {
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { EXPORT_LEDGER_SCHEMA_VERSION, CLARIFICATION_SCHEMA_VERSION, READERS_REPORT_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
+import { EXPORT_LEDGER_SCHEMA_VERSION, CLARIFICATION_SCHEMA_VERSION, CAPTURED_PROCEDURE_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { RUN_CONTROL_CANCELLING_REASON, RUN_CONTROL_REDO_REASON } from '../../src/service/task-plan.js';
 import { controlledUnitHold } from '../../src/service/unit-hold.js';
 import {
@@ -178,7 +178,7 @@ describe('schema revision 32 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(READERS_REPORT_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(CAPTURED_PROCEDURE_SCHEMA_VERSION);
       expect(runCancellationShape(database, 'analysis_run_states')).toBe('current');
       expect(runCancellationShape(database, 'analysis_task_outcomes')).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM analysis_run_states ORDER BY rowid').all()).toEqual(before.states);
@@ -221,7 +221,7 @@ describe('schema revision 32 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(READERS_REPORT_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(CAPTURED_PROCEDURE_SCHEMA_VERSION);
       expect(runCancellationShape(database, 'analysis_run_states')).toBe('current');
       expect(runCancellationShape(database, 'analysis_task_outcomes')).toBe('current');
     });
