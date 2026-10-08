@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner, DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS } from '../../src/service/analysis/execution.js';
@@ -350,7 +350,12 @@ async function ledgerLines(root: string): Promise<Array<Record<string, unknown>>
   return raw.split('\n').filter((line) => line.length > 0).map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
-describe('the developer-live scope over exact sample1 with a stub transport', () => {
+// Each case imports exact sample1 into a real store and runs a whole Run over it: on a busy background test guest that has
+// taken longer than vitest's 5 s default (and its hooks longer than 10 s), failing the Ladder's `service` layer with no
+// product cause. The bound only says when to give up; a case that hangs still fails.
+vi.setConfig({ hookTimeout: 60_000 });
+
+describe('the developer-live scope over exact sample1 with a stub transport', { timeout: 60_000 }, () => {
   it('freezes the v5 plan and transmits the full declared chain through the gate', async () => {
     const calls: StubCall[] = [];
     const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
