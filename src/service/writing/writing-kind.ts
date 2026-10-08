@@ -9,11 +9,12 @@ import {
   WRITING_UPDATE_MODES,
   type WritingResultProjection,
 } from '../../shared/protocol.js';
-import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
+import { AnalysisError, canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { countByClass, modeIndex, type AnalysisKindDefinition, type AnalysisModeDefinition } from '../analysis/kind-definition.js';
 import { PRE_ASSURANCE_SAMPLE, type ClosedUnitOutcome } from '../analysis/reducers.js';
 import { carryPositionalResult } from '../analysis/reused-result.js';
 import {
+  WRITING_EXEMPLAR_MOVED,
   WRITING_RESULT_SET_REVISION_SCHEMA,
   WRITING_SUCCESSOR_REVISION_SCHEMA,
   WRITING_SYNTHESIS_RESULT_SCHEMA,
@@ -95,6 +96,37 @@ export function writingSchemaDigest(promptContractDigest: string): string {
 
 function closedUnits(closed: ReadonlyArray<ClosedUnitOutcome<unknown>>): ClosedWritingUnit[] {
   return closed.map((outcome) => ({ unitOrdinal: outcome.unitOrdinal, result: outcome.result as WritingUnitResult }));
+}
+
+/**
+ * The writing kind as one recorded Task reads it when an exemplar it referenced no longer gives the text it pinned (#688
+ * re-review): the contract digest is the row's, since the contract cannot be composed again without that text, and every step
+ * that would build a request or read an answer refuses. Its records — outcome, revisions, drafts — read as any other's.
+ */
+export function writingRecordedKindDefinition(input: WritingContractInput, promptContractDigest: string): AnalysisKindDefinition {
+  const composed = writingKindDefinition(input);
+  const refuse = (): never => {
+    throw new AnalysisError('WRITING_EXEMPLAR_MOVED', WRITING_EXEMPLAR_MOVED);
+  };
+  const crossUnit = composed.crossUnit!;
+  const step = crossUnit.step!;
+  return {
+    ...composed,
+    promptContractDigest,
+    schemaDigest: writingSchemaDigest(promptContractDigest),
+    crossUnit: {
+      ...crossUnit,
+      promptContractDigest,
+      step: {
+        ...step,
+        buildMessage: refuse,
+        requestDigest: (closed) => writingSynthesisRequestDigest(promptContractDigest, writingPassageSetDigest(closedUnits(closed))),
+        parse: refuse,
+      },
+    },
+    buildUnitMessage: refuse,
+    requestDigest: (unitOrdinal, unitDigest) => writingRequestDigest(promptContractDigest, unitOrdinal, unitDigest),
+  };
 }
 
 export function writingKindDefinition(input: WritingContractInput): AnalysisKindDefinition {

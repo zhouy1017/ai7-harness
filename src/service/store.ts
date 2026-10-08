@@ -325,6 +325,7 @@ import {
   MAX_WRITING_SYNOPSIS_GRAPHEMES,
   WRITING_COST_BEFORE_PLAN,
   WRITING_DRAFT_PARSER_IDENTITY,
+  WRITING_EXEMPLAR_MOVED,
   WRITING_FIELD_CONTROL,
   WRITING_NEEDS_MANUSCRIPT,
   WRITING_NOT_DO,
@@ -332,7 +333,7 @@ import {
   WritingTaskError,
   WritingTasks,
   graphemeLength,
-  readWritingExemplar,
+  readWritingExemplarWords,
   writingExemplarDigest,
   initializeWritingTaskSchema,
   writingBlockLength,
@@ -343,7 +344,7 @@ import {
   type StoredWritingTask,
   type WritingExemplarSource,
 } from './writing-tasks.js';
-import { writingKindDefinition } from './writing/writing-kind.js';
+import { writingKindDefinition, writingRecordedKindDefinition } from './writing/writing-kind.js';
 import {
   writingExemplarLine,
   type WritingBookInput,
@@ -4064,6 +4065,8 @@ export class EditorialStore {
    */
   readonly #writingLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
   readonly #writingWork = new Map<string, BaselineAnalysisStore>();
+  /** Each writing Result Set Revision's type and whether it holds a draft — facts a revision never changes. Bounded. */
+  readonly #writingRevisionDrafts = new Map<string, { typeId: string; drafted: boolean }>();
   /**
    * The house's 范例 each Book's page last read, by type (#688 review): while a writing Task is under way the page is read on
    * every poll and no type can be drafted, so the scan is not repeated then. Bounded by the Books whose page was read.
@@ -7475,6 +7478,21 @@ export class EditorialStore {
     });
   }
 
+  /**
+   * The ledger one recorded Task reads on (#688 re-review): its contract's own, or — when an exemplar it referenced no longer
+   * gives the text it pinned — one that reads what the Task recorded under the row's contract digest and refuses to build any
+   * request, so its outcome and drafts stay readable and nothing of it is run again.
+   */
+  #writingLedgerOf(task: StoredWritingTask): BaselineAnalysisStore {
+    if (task.exemplarsReadable) return this.#writingLedger(task.input);
+    const definition = this.#analysisCall(() => writingRecordedKindDefinition(task.input, task.promptContractSha256));
+    return this.#writingLedgers.obtain(`${task.promptContractSha256}:recorded`, () => {
+      const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
+      ledger.bindLaunch(this.#baselineAnalysis.launch);
+      return ledger;
+    });
+  }
+
   #writingCall<T>(operation: () => T): T {
     this.#assertAvailable();
     try {
@@ -7491,12 +7509,12 @@ export class EditorialStore {
   #writingTaskOf(taskIntentId: string): { task: StoredWritingTask; ledger: BaselineAnalysisStore } | null {
     let task = this.#writingCall(() => this.#writingTasks.task(taskIntentId));
     if (task === null) return null;
-    let ledger = this.#writingLedger(task.input);
+    let ledger = this.#writingLedgerOf(task);
     const planContract = this.#writingCall(() => this.#writingTasks.planContract(taskIntentId));
     if (planContract !== null && planContract !== task.promptContractSha256) {
       task = this.#writingCall(() => this.#writingTasks.task(taskIntentId, planContract));
       requireStore(task !== null, 'WRITING_RECORD_INVALID', '写作任务的计划与它的记录不一致。');
-      ledger = this.#writingLedger(task.input);
+      ledger = this.#writingLedgerOf(task);
     }
     return { task, ledger };
   }
@@ -7613,10 +7631,18 @@ export class EditorialStore {
           if (list.length >= MAX_WRITING_EXEMPLARS) continue;
           const exemplar = book.exemplars.find((entry) => entry.typeId === typeId);
           if (exemplar === undefined) continue;
-          // Its words as the contract takes them, read from its own revision, and the reference that pins them.
-          const words = readWritingExemplar(this.#authority, exemplar.documentId, exemplar.revisionId);
+          // Its text as the contract takes it, read from its own revision, and the reference that pins it with the facts the
+          // plan names it by.
+          const words = readWritingExemplarWords(this.#authority, exemplar.revisionId);
           if (words === null) continue;
-          list.push({ input: words, source: { documentId: exemplar.documentId, revisionId: exemplar.revisionId, sha256: writingExemplarDigest(words) } });
+          const input: WritingExemplarInput = { bookTitle: writingWords(book.bookTitle, 200), version: exemplar.version, text: words.text, excerpt: words.excerpt };
+          list.push({
+            input,
+            source: {
+              documentId: exemplar.documentId, revisionId: exemplar.revisionId, bookId: book.bookId,
+              bookTitle: input.bookTitle, version: input.version, excerpt: input.excerpt, sha256: writingExemplarDigest(words.text),
+            },
+          });
         }
       }
       after = page.nextCursor;
@@ -7731,6 +7757,8 @@ export class EditorialStore {
     const latest = this.#latestWriting(bookId);
     requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT',
       '这项任务已不是这本书当前的任务；请从它所在的位置重新打开计划。');
+    // A Task whose exemplar no longer gives the text it pinned is never run on other words (#688 re-review).
+    requireStore(latest.task.exemplarsReadable, 'WRITING_EXEMPLAR_MOVED', WRITING_EXEMPLAR_MOVED);
     const authorized = this.#analysisCall(() => latest.ledger.authorize(bookId, taskIntentId, planEnvelopeDigest));
     return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger: latest.ledger };
   }
@@ -7744,7 +7772,7 @@ export class EditorialStore {
     this.#assertAvailable();
     const any = this.#writingCall(() => this.#writingTasks.anyTask());
     if (any === null) return { settled: 0 };
-    return { settled: this.#analysisCall(() => this.#writingLedger(any.input).reconcileStoppedRuns()).settled };
+    return { settled: this.#analysisCall(() => this.#writingLedgerOf(any).reconcileStoppedRuns()).settled };
   }
 
   /**
@@ -7754,10 +7782,17 @@ export class EditorialStore {
   #writingDrafted(bookId: string): Map<string, { revisionId: string; createdAt: string }> {
     const drafted = new Map<string, { revisionId: string; createdAt: string }>();
     for (const revision of this.#writingCall(() => this.#writingTasks.revisions(bookId))) {
-      const found = this.#writingTaskOf(revision.taskIntentId);
-      if (found === null || drafted.has(found.task.typeId)) continue;
-      const inspected = this.#analysisCall(() => found.ledger.inspect(bookId, undefined, revision.revisionId)) as WritingProjection;
-      if (inspected.inspectedRevision?.revision.writing.draft !== null) drafted.set(found.task.typeId, { revisionId: revision.revisionId, createdAt: revision.createdAt });
+      // Whether a revision holds a draft never changes, so each is read once while the store is open (#688 re-review).
+      let known = this.#writingRevisionDrafts.get(revision.revisionId);
+      if (known === undefined) {
+        const found = this.#writingTaskOf(revision.taskIntentId);
+        if (found === null) continue;
+        const inspected = this.#analysisCall(() => found.ledger.inspect(bookId, undefined, revision.revisionId)) as WritingProjection;
+        known = { typeId: found.task.typeId, drafted: inspected.inspectedRevision?.revision.writing.draft != null };
+        if (this.#writingRevisionDrafts.size >= 1024) this.#writingRevisionDrafts.clear();
+        this.#writingRevisionDrafts.set(revision.revisionId, known);
+      }
+      if (known.drafted && !drafted.has(known.typeId)) drafted.set(known.typeId, { revisionId: revision.revisionId, createdAt: revision.createdAt });
     }
     return drafted;
   }
@@ -7863,7 +7898,8 @@ export class EditorialStore {
         typeLabel: latest.task.input.type.label,
         state: latest.projection.state,
         label: writingTaskStateLabel(latest.projection),
-        refusal: this.#writingRefusal(latest.projection),
+        // A Task not yet run whose exemplar is no longer here says it cannot start; one that ran says why it wrote no draft.
+        refusal: !latest.task.exemplarsReadable && latest.projection.taskOutcome === null ? WRITING_EXEMPLAR_MOVED : this.#writingRefusal(latest.projection),
       },
       quickStart: { allowed: false, reason: WRITING_QUICK_START_REASON },
     };

@@ -7771,8 +7771,11 @@ export interface DatabaseImportBookProjection {
   readonly internalNumberCleared: boolean;
 }
 
-/** What stays behind when a package's Books merge: Series, 资料库 items, the 编辑工作区方案's enablement, a 内部编号 taken here. */
-export type DatabaseMergeNotice = 'series' | 'internal-number';
+/**
+ * What stays behind when a package's Books merge: Series, 资料库 items, the 编辑工作区方案's enablement, a 内部编号 taken here — and
+ * the 范例 of other Books a merging Book's writing Tasks referenced, when neither merges nor is here (Issue #432 re-review).
+ */
+export type DatabaseMergeNotice = 'series' | 'internal-number' | 'writing-exemplar';
 
 /**
  * Whether this AI7 can take a package's data: the same Data Version, and a schema revision it knows. A package from a newer

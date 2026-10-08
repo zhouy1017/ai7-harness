@@ -123,40 +123,42 @@ export function initializeWritingTaskSchema(db: DatabaseSync): void {
 }
 
 /**
- * One exemplar version a Task's contract read, by reference only (#688 review): which document, which delivered revision of it,
- * and the digest of the words the contract took from it. Another Book's text never enters this Book's rows: it is read again
- * from that immutable revision whenever the Task is read, and a Task whose exemplar no longer gives the same words is refused.
+ * One exemplar version a Task's contract read, by reference only (#688 review): which document and delivered revision, whose
+ * Book it is, the facts the plan names it by — the Book's title, the version, whether the contract took its opening — and the
+ * digest of the text the contract took. Another Book's text never enters this Book's rows: it is read again from that
+ * immutable revision when the Task needs it, and a Task whose exemplar no longer gives that text is not run again.
  */
 export interface WritingExemplarSource {
   readonly documentId: string;
   readonly revisionId: string;
+  readonly bookId: string;
+  readonly bookTitle: string;
+  readonly version: number;
+  readonly excerpt: boolean;
   readonly sha256: string;
 }
 
-/** The digest a reference pins: of the exemplar's words exactly as the contract takes them. */
-export function writingExemplarDigest(exemplar: WritingExemplarInput): string {
-  return sha256Hex(canonicalJson({ schema: 'ai7.writing-exemplar/1', bookTitle: exemplar.bookTitle, version: exemplar.version, text: exemplar.text, excerpt: exemplar.excerpt }));
+/** How a reference's digest is taken: of the exemplar's text alone, as the contract took it (#688 re-review). */
+export const WRITING_EXEMPLAR_TEXT_SCHEMA = 'ai7.writing-exemplar/1' as const;
+
+/** The digest a reference pins: of the text the contract took, never of the facts beside it. */
+export function writingExemplarDigest(text: string): string {
+  return sha256Hex(canonicalJson({ schema: WRITING_EXEMPLAR_TEXT_SCHEMA, text }));
 }
 
 /**
- * One exemplar's words as a writing contract takes them (S79b; KB-004), read from its own records: its Book's title, the
- * document version the revision is, and its blocks' words — the opening when longer than the contract takes. `null` when the
- * revision is not a document version here, or holds no words.
+ * One exemplar revision's text as a writing contract takes it (S79b; KB-004): its blocks' words — the opening when longer than
+ * the contract takes, which `excerpt` says. `null` when the revision holds no words here.
  */
-export function readWritingExemplar(db: DatabaseSync, documentId: string, revisionId: string): WritingExemplarInput | null {
-  const row = db.prepare(
-    `SELECT b.title, pv.version FROM production_documents pd
-     JOIN production_document_versions pv ON pv.document_id = pd.document_id AND pv.revision_id = ?
-     JOIN books b ON b.book_id = pd.book_id
-     WHERE pd.document_id = ?`,
-  ).get(revisionId, documentId) as SqlRow | undefined;
-  if (row === undefined || typeof row.title !== 'string') return null;
+export function readWritingExemplarWords(db: DatabaseSync, revisionId: string): { text: string; excerpt: boolean } | null {
   const whole = (db.prepare('SELECT text FROM manuscript_block_versions WHERE revision_id = ? ORDER BY position').all(revisionId) as SqlRow[])
     .map((block) => String(block.text)).join('\n');
   const words = writingWords(whole, MAX_EXEMPLAR_GRAPHEMES);
-  if (words.length === 0) return null;
-  return { bookTitle: writingWords(row.title, 200), version: Number(row.version), text: words, excerpt: graphemeLength(whole.trim()) > MAX_EXEMPLAR_GRAPHEMES };
+  return words.length === 0 ? null : { text: words, excerpt: graphemeLength(whole.trim()) > MAX_EXEMPLAR_GRAPHEMES };
 }
+
+/** The words a contract input holds for an exemplar no longer here: never sent, never compared, only named. */
+export const WRITING_EXEMPLAR_ABSENT_TEXT = '（这份范例已不在本机）' as const;
 
 /** One writing Task as its row holds it, verified. */
 export interface StoredWritingTask {
@@ -167,6 +169,12 @@ export interface StoredWritingTask {
   readonly evaluationRecordId: string | null;
   readonly baselineRevisionId: string | null;
   readonly exemplarSources: ReadonlyArray<WritingExemplarSource>;
+  /**
+   * Whether every exemplar still gives the text its reference pinned. When one does not, `input` names it with
+   * {@link WRITING_EXEMPLAR_ABSENT_TEXT} for its words, the row's contract digest cannot be computed again, and the Task is
+   * read as recorded — its outcome and drafts — but never authorized or run again (#688 re-review).
+   */
+  readonly exemplarsReadable: boolean;
   readonly input: WritingContractInput;
   readonly recordedAt: string;
 }
@@ -228,8 +236,7 @@ export const WRITING_SEND_CONSEQUENCE = '不发送任何内容：写作任务目
 /** 不会做 in the editor's words; the plan's technical half is in 查看技术详情. */
 export const WRITING_NOT_DO = '不改稿件；不照抄范例；不交付、不发送；草稿由你在稿件编辑面上修改后才用。' as const;
 export const WRITING_COST_BEFORE_PLAN = '先看计划后显示' as const;
-/** A Task whose exemplar no longer gives the words its reference pinned: the Run is refused rather than read other words. */
-export const WRITING_EXEMPLAR_MOVED = '写作任务参照的范例已经变化或不在本机，这一次起草不能再读取或开始。' as const;
+export { WRITING_EXEMPLAR_MOVED } from './writing/writing-contract.js';
 
 export function writingDocumentExists(typeLabel: string): string {
   return `这本书已经有「${typeLabel}」；请在交付物中打开它继续修改。`;
@@ -260,11 +267,46 @@ export function writingWords(value: string, most: number): string {
   return segments.length <= most ? words : segments.slice(0, most).join('').trim();
 }
 
+function isExemplarSource(source: unknown): source is WritingExemplarSource {
+  return isRecord(source) &&
+    typeof source.documentId === 'string' && UUID_PATTERN.test(source.documentId) &&
+    typeof source.revisionId === 'string' && UUID_PATTERN.test(source.revisionId) &&
+    typeof source.bookId === 'string' && UUID_PATTERN.test(source.bookId) &&
+    typeof source.bookTitle === 'string' && source.bookTitle.length > 0 &&
+    typeof source.version === 'number' && Number.isSafeInteger(source.version) && source.version >= 1 &&
+    typeof source.excerpt === 'boolean' &&
+    typeof source.sha256 === 'string' && /^[0-9a-f]{64}$/u.test(source.sha256);
+}
+
+function exemplarSourceOf(source: WritingExemplarSource): WritingExemplarSource {
+  return {
+    documentId: source.documentId, revisionId: source.revisionId, bookId: source.bookId,
+    bookTitle: source.bookTitle, version: source.version, excerpt: source.excerpt, sha256: source.sha256,
+  };
+}
+
 export class WritingTasks {
   readonly #db: DatabaseSync;
+  /**
+   * Each exemplar text a reference pinned, read once (#688 re-review): a revision's blocks never change while the store is
+   * open — a merge or a replacement is applied at the next open — so the text and its digest are not read again on every poll.
+   * `null` when the revision no longer gives the pinned text. Bounded.
+   */
+  readonly #exemplarWords = new Map<string, string | null>();
 
   constructor(db: DatabaseSync) {
     this.#db = db;
+  }
+
+  #pinnedWords(source: WritingExemplarSource): string | null {
+    const key = `${source.revisionId}:${source.sha256}`;
+    const known = this.#exemplarWords.get(key);
+    if (known !== undefined) return known;
+    const words = readWritingExemplarWords(this.#db, source.revisionId);
+    const pinned = words !== null && writingExemplarDigest(words.text) === source.sha256 ? words.text : null;
+    if (this.#exemplarWords.size >= 64) this.#exemplarWords.clear();
+    this.#exemplarWords.set(key, pinned);
+    return pinned;
   }
 
   #task(row: SqlRow): StoredWritingTask {
@@ -275,28 +317,27 @@ export class WritingTasks {
       stored.promptContractSha256 === row.prompt_contract_sha256 && stored.bookId === row.book_id && stored.typeId === row.type_id &&
       stored.evaluationRecordId === row.evaluation_record_id && stored.baselineRevisionId === row.baseline_revision_id &&
       stored.recordedAt === row.recorded_at && isRecord(stored.input) && isRecord(stored.input.type) && stored.input.type.typeId === row.type_id &&
-      Array.isArray(stored.exemplarSources) && stored.exemplarSources.every((source) => isRecord(source) &&
-        typeof source.documentId === 'string' && UUID_PATTERN.test(source.documentId) &&
-        typeof source.revisionId === 'string' && UUID_PATTERN.test(source.revisionId) &&
-        typeof source.sha256 === 'string' && /^[0-9a-f]{64}$/u.test(source.sha256)) &&
+      Array.isArray(stored.exemplarSources) && stored.exemplarSources.every(isExemplarSource) &&
       Array.isArray(stored.input.exemplars) && stored.input.exemplars.length === 0,
     'WRITING_RECORD_INVALID', CORRUPT);
-    // The exemplars' words come back from their own revisions, each the words its reference pinned.
-    const sources = (stored.exemplarSources as WritingExemplarSource[]).map((source) => ({ documentId: source.documentId, revisionId: source.revisionId, sha256: source.sha256 }));
-    const exemplars = sources.map((source) => {
-      const exemplar = readWritingExemplar(this.#db, source.documentId, source.revisionId);
-      requireWriting(exemplar !== null && writingExemplarDigest(exemplar) === source.sha256, 'WRITING_EXEMPLAR_MOVED', WRITING_EXEMPLAR_MOVED);
-      return exemplar;
-    });
+    const sources = (stored.exemplarSources as WritingExemplarSource[]).map(exemplarSourceOf);
+    // The exemplars' text comes back from their own revisions, each the text its reference pinned; the facts beside it are
+    // the reference's own.
+    const words = sources.map((source) => this.#pinnedWords(source));
+    const exemplarsReadable = words.every((entry) => entry !== null);
+    const exemplars = sources.map((source, index) => ({
+      bookTitle: source.bookTitle, version: source.version, excerpt: source.excerpt, text: words[index] ?? WRITING_EXEMPLAR_ABSENT_TEXT,
+    }));
     const input = { ...(stored.input as unknown as WritingContractInput), exemplars };
-    // The frozen input is the contract: its digest must be the one the row names.
+    // The frozen input is the contract: its digest must be the one the row names — checked whenever the exemplars' text is
+    // here to check it with. Without it the row's own digest above still holds it.
     let digest: string;
     try {
       digest = writingContractDigest(writingContract(input));
     } catch {
       throw new WritingTaskError('WRITING_RECORD_INVALID', CORRUPT);
     }
-    requireWriting(digest === row.prompt_contract_sha256, 'WRITING_RECORD_INVALID', CORRUPT);
+    requireWriting(!exemplarsReadable || digest === row.prompt_contract_sha256, 'WRITING_RECORD_INVALID', CORRUPT);
     return {
       taskIntentId: text(row.task_intent_id),
       promptContractSha256: text(row.prompt_contract_sha256),
@@ -305,6 +346,7 @@ export class WritingTasks {
       evaluationRecordId: nullableText(row.evaluation_record_id),
       baselineRevisionId: nullableText(row.baseline_revision_id),
       exemplarSources: sources,
+      exemplarsReadable,
       input,
       recordedAt: text(row.recorded_at),
     };
@@ -326,8 +368,14 @@ export class WritingTasks {
     requireWriting(UUID_PATTERN.test(input.taskIntentId) && UUID_PATTERN.test(input.bookId) &&
       (input.evaluationRecordId === null || UUID_PATTERN.test(input.evaluationRecordId)) &&
       (input.baselineRevisionId === null || UUID_PATTERN.test(input.baselineRevisionId)) &&
-      input.exemplarSources.length === input.contract.exemplars.length &&
-      input.exemplarSources.every((source, index) => source.sha256 === writingExemplarDigest(input.contract.exemplars[index]!)),
+      input.exemplarSources.length === input.contract.exemplars.length && input.exemplarSources.every(isExemplarSource) &&
+      // One exemplar per Book, as the house scan takes them: 不同图书 in the reference bound is told by count.
+      new Set(input.exemplarSources.map((source) => source.bookId)).size === input.exemplarSources.length &&
+      input.exemplarSources.every((source, index) => {
+        const exemplar = input.contract.exemplars[index]!;
+        return source.sha256 === writingExemplarDigest(exemplar.text) && source.bookTitle === exemplar.bookTitle &&
+          source.version === exemplar.version && source.excerpt === exemplar.excerpt;
+      }),
     'WRITING_INVALID', '写作任务参数无效。');
     const intent = this.#db.prepare('SELECT book_id, kind FROM analysis_task_intents WHERE task_intent_id = ?').get(input.taskIntentId) as SqlRow | undefined;
     requireWriting(intent !== undefined && intent.book_id === input.bookId && intent.kind === WRITING_KIND, 'WRITING_INVALID', '写作任务无效。');
@@ -343,7 +391,7 @@ export class WritingTasks {
       typeId: input.contract.type.typeId,
       evaluationRecordId: input.evaluationRecordId,
       baselineRevisionId: input.baselineRevisionId,
-      exemplarSources: input.exemplarSources.map((source) => ({ documentId: source.documentId, revisionId: source.revisionId, sha256: source.sha256 })),
+      exemplarSources: input.exemplarSources.map(exemplarSourceOf),
       // Another Book's words are referenced, never stored here: the exemplars travel as references only.
       input: { ...input.contract, exemplars: [] },
       recordedAt,

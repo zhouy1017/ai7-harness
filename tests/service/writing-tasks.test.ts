@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -79,7 +79,11 @@ interface Session {
 }
 
 async function openStore(fixture: ResolvedModelFixture): Promise<EditorialStore> {
-  return EditorialStore.open(roots.dataRoot, roots.codeRoot, {
+  return openAt(roots.dataRoot, fixture);
+}
+
+async function openAt(dataRoot: string, fixture: ResolvedModelFixture): Promise<EditorialStore> {
+  return EditorialStore.open(dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false,
     persistLegacyReviewedDraft: false,
     induceReimportProofTamper: false,
@@ -100,6 +104,14 @@ async function withSession(fixture: ResolvedModelFixture, body: (session: Sessio
     await owner.dispose();
     store.close();
   }
+}
+
+/** 导出数据库 of the store, into the input root. */
+async function exportedFrom(store: EditorialStore, name: string): Promise<string> {
+  const destination = join(roots.inputRoot, name);
+  const preparation = await store.prepareDatabaseExport(destination, true);
+  expect((await store.approveDatabaseExport(preparation.preparationId, true)).outcome).toBe('created');
+  return destination;
 }
 
 /** Exact sample1 as a Book the analysis path takes: the profile at Revision 2 and the connection's reference. */
@@ -270,11 +282,16 @@ describe('写作任务 over the real store on exact sample1', () => {
     });
   }, 300_000);
 
-  it('references the synopsis, the 定稿 evaluation with its market words and another Book\'s 范例 — and refuses a draft that copies the 范例', async () => {
+  it('references the synopsis, the 定稿 evaluation with its market words and another Book\'s 范例 — refuses a draft that copies the 范例, and merges without it', async () => {
     // One in-memory fixture over the baseline and 初评 fixtures, answered here for each writing contract the case asks.
     const base = await loadModelFixture(FIXTURES_ROOT, 'sample1-evaluation-authored');
     const entries = new Map<string, ModelFixtureEntry>(base.entries);
     const fixture: ResolvedModelFixture = { ...base, identity: 'sample1-writing-l2', lineage: [{ identity: 'sample1-writing-l2', sha256: 'e'.repeat(64) }], sha256: 'f'.repeat(64), entries };
+    const otherRoot = join(dirname(roots.dataRoot), 'other-data');
+    let third: WritingProjection | undefined;
+    let laterPackage = '';
+    let deliveredPackage = '';
+    let parts: { bookId: string; draftedRevision: string } | undefined;
     await withSession(fixture, async (session) => {
       const { store, owner } = session;
       // Another Book, set as a 发稿版本, delivers a 宣传文章 made from its source material: it stands in 范例.
@@ -287,6 +304,16 @@ describe('写作任务 over the real store on exact sample1', () => {
       await store.acknowledgeImportCompletion(commitId);
       const milestone = await store.saveMilestone(other.manuscriptId, other.branchId, '一审稿', 'stage-archive', null, '');
       store.designatePublicationVersion({ bookId: other.bookId, milestoneId: milestone.milestoneId, scope: '纸质版首印', basis: '三审通过' });
+      // Other data takes this Book now, before its 宣传文章 is made or delivered.
+      const earlierPackage = await exportedFrom(store, 'AI7 范例之前.ai7db');
+      const earlier = await openAt(otherRoot, fixture);
+      try {
+        const preview = await earlier.inspectDatabaseImport(earlierPackage);
+        await earlier.prepareDatabaseMerge(preview.previewId, new Date(2026, 8, 26, 10, 0, 0));
+        earlier.markCleanShutdown();
+      } finally {
+        earlier.close();
+      }
       const materialPath = join(roots.inputRoot, '宣传文章初稿.docx');
       await composeRevisedDocx(materialPath, { source: ADMITTED_BASELINE_DOCX, title: '宣传文章初稿', paragraphs: [{ runs: [{ text: { block: 21 } }] }, { runs: [{ text: { block: 22 } }] }] });
       const material = await store.stageSelectedManuscript(randomUUID(), materialPath);
@@ -301,6 +328,8 @@ describe('写作任务 over the real store on exact sample1', () => {
         recipient: { kind: 'publicity', custom: null }, note: '公众号首发',
       });
       const exemplarText = store.getManuscriptWindow(promotion.documentId, promotion.branchId, null).blocks.map((block) => block.text).join('\n');
+      // And data exported now holds the 范例 as delivered.
+      deliveredPackage = await exportedFrom(store, 'AI7 范例之后.ai7db');
 
       // This Book: its baseline analysis, and a 定稿 version begun from AI7's 初评 with its market section.
       const bookId = await sample1Book(store, '参照之书');
@@ -359,16 +388,19 @@ describe('写作任务 over the real store on exact sample1', () => {
       expect(refusedPage.types.find((type) => type.typeId === 'promotion-article')!.drafted!.revisionId).toBe(draftedRevision);
       expect(await refusal(() => store.createWritingDraft(bookId, refused.resultSetRevision!.revisionId))).toBe('WRITING_NOT_DRAFTED:这一次起草没有写出文档草稿，不能打开草稿。');
 
-      // A third attempt is prepared, then its 范例 moves under it (its Book renamed in the file): the Run is refused.
-      const third = prepare(store, bookId, { ...WRITING_REQUEST, requirements: '再写一版' });
-      const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      // A third attempt is prepared and not started; then the house's data is exported, the 范例 with it.
+      third = prepare(store, bookId, { ...WRITING_REQUEST, requirements: '再写一版' });
+      const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
       try {
         const rows = database.prepare('SELECT canonical_json FROM writing_tasks').all() as Array<{ canonical_json: string }>;
         expect(rows).toHaveLength(3);
         for (const row of rows) {
-          // Another Book's words are referenced, never stored in this Book's rows.
-          const task = JSON.parse(row.canonical_json) as { exemplarSources: Array<{ documentId: string; sha256: string }>; input: { exemplars: unknown[] } };
-          expect(task.exemplarSources).toEqual([{ documentId: promotion.documentId, revisionId: promotion.versions[0]!.revisionId, sha256: expect.stringMatching(/^[0-9a-f]{64}$/u) }]);
+          // Another Book's words are referenced, never stored in this Book's rows: the reference names it and pins its text.
+          const task = JSON.parse(row.canonical_json) as { exemplarSources: unknown[]; input: { exemplars: unknown[] } };
+          expect(task.exemplarSources).toEqual([{
+            documentId: promotion.documentId, revisionId: promotion.versions[0]!.revisionId, bookId: other.bookId,
+            bookTitle: '范例来源书', version: 1, excerpt: false, sha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
+          }]);
           expect(task.input.exemplars).toEqual([]);
           expect(row.canonical_json).not.toContain(copied);
         }
@@ -377,21 +409,76 @@ describe('写作任务 over the real store on exact sample1', () => {
         expect(recorded.evaluation_record_id).not.toBeNull();
         expect(recorded.baseline_revision_id).toBe(store.inspectBaselineAnalysis(bookId).resultSetRevision!.revisionId);
         // The ledgers are append-only.
-        expect(() => database.exec('UPDATE writing_tasks SET recorded_at = recorded_at')).toThrowError(/WRITING_TASK_LEDGER_IMMUTABLE/u);
-        database.prepare('UPDATE books SET title = ? WHERE book_id = ?').run('范例来源书（改）', other.bookId);
-        expect(await refusal(() => store.authorizeWriting(bookId, third.taskIntent!.taskIntentId, third.planEnvelope!.digest))).toBe(`WRITING_EXEMPLAR_MOVED:${WRITING_EXEMPLAR_MOVED}`);
-        const moved = store.inspectWritingTask(bookId);
-        expect(moved.unavailable).toBe(`写作任务暂不可用：${WRITING_EXEMPLAR_MOVED}`);
-        // With no Task under way the page reads the house's 范例 afresh, never the ones it read before.
-        expect(moved.types.find((type) => type.typeId === 'promotion-article')!.exemplars.statement).toBe('参照本社 1 份宣传文章范例（只参照，不照抄）：《范例来源书（改）》版本 1');
-        // The same words again, and the older draft opens: the Book's 宣传文章, made from the draft.
-        database.prepare('UPDATE books SET title = ? WHERE book_id = ?').run('范例来源书', other.bookId);
+        expect(() => database.exec('UPDATE writing_tasks SET recorded_at = recorded_at')).toThrowError(/readonly|WRITING_TASK_LEDGER_IMMUTABLE/u);
       } finally {
         database.close();
       }
-      expect(store.inspectWritingTask(bookId).unavailable).toBeNull();
-      expect(store.createWritingDraft(bookId, draftedRevision).document.origin.drafted).toBe(true);
+      laterPackage = await exportedFrom(store, 'AI7 写作之后.ai7db');
+      parts = { bookId, draftedRevision };
     });
+
+    // Merged into data that holds the 范例's Book from before it delivered its 宣传文章: the 范例 stays behind. The preview says
+    // so, the merge goes ahead, and 参照之书's writing goes on — its older draft opens, a new Task is prepared — while the Task
+    // that referenced the 范例 is not started again (the Commander's ruling, #688 re-review).
+    // No notice where the 范例 comes too: into empty data, both Books merge; into data that holds the 范例 as delivered, it is here.
+    const thirdRoot = join(dirname(roots.dataRoot), 'third-data');
+    let held = await openAt(thirdRoot, fixture);
+    try {
+      expect((await held.inspectDatabaseImport(laterPackage)).mergeNotices).toEqual([]);
+      const preview = await held.inspectDatabaseImport(deliveredPackage);
+      await held.prepareDatabaseMerge(preview.previewId, new Date(2026, 8, 26, 12, 0, 0));
+      held.markCleanShutdown();
+    } finally {
+      held.close();
+    }
+    held = await openAt(thirdRoot, fixture);
+    try {
+      const preview = await held.inspectDatabaseImport(laterPackage);
+      expect(preview.books.map((entry) => [entry.title, entry.status])).toEqual([['范例来源书', 'present'], ['参照之书', 'new']]);
+      expect(preview.mergeNotices).toEqual([]);
+      held.markCleanShutdown();
+    } finally {
+      held.close();
+    }
+
+    let target = await openAt(otherRoot, fixture);
+    let notices: ReadonlyArray<string> = [];
+    try {
+      const preview = await target.inspectDatabaseImport(laterPackage);
+      expect(preview.books.map((entry) => [entry.title, entry.status])).toEqual([['范例来源书', 'present'], ['参照之书', 'new']]);
+      notices = preview.mergeNotices;
+      await target.prepareDatabaseMerge(preview.previewId, new Date(2026, 8, 26, 11, 0, 0));
+      target.markCleanShutdown();
+    } finally {
+      target.close();
+    }
+    expect(notices).toEqual(['writing-exemplar']);
+    target = await openAt(otherRoot, fixture);
+    try {
+      expect(target.reconcileStoppedWritingRuns()).toEqual({ settled: 0 });
+      recordMissingCredentialConnection(target, 'L2 合并后的连接');
+      const merged = target.inspectWritingTask(parts!.bookId);
+      expect(merged.unavailable).toBeNull();
+      expect(merged.task).toMatchObject({ taskIntentId: third!.taskIntent!.taskIntentId, state: 'prepared', refusal: WRITING_EXEMPLAR_MOVED });
+      const promotionType = merged.types.find((type) => type.typeId === 'promotion-article')!;
+      expect(promotionType.prepare).toEqual({ allowed: true, mode: 'writing-again' });
+      expect(promotionType.drafted!.revisionId).toBe(parts!.draftedRevision);
+      expect(promotionType.exemplars.count).toBe(0);
+      // Its plan still reads as it was frozen (this data's own connection is another, which the plan says) and starting it is refused.
+      const plan = target.inspectTaskPlan({ bookId: parts!.bookId, kind: 'writing', ref: third!.taskIntent!.taskIntentId });
+      expect(plan.scope.reference[2]).toBe('参照本社 1 份宣传文章范例（只参照，不照抄）：《范例来源书》版本 1');
+      expect(target.inspectWriting(parts!.bookId)).toMatchObject({ planEnvelope: { digest: third!.planEnvelope!.digest } });
+      expect(await refusal(() => target.authorizeWriting(parts!.bookId, third!.taskIntent!.taskIntentId, third!.planEnvelope!.digest)))
+        .toBe(`WRITING_EXEMPLAR_MOVED:${WRITING_EXEMPLAR_MOVED}`);
+      // A new Task of another type is prepared, and the older draft opens as the Book's 宣传文章.
+      let progress = target.createWritingPreparationWork(parts!.bookId, { ...WRITING_REQUEST, typeId: 'news-release' }, launchPolicy);
+      while (!progress.done) progress = target.advanceWritingPreparationWork(progress.workId!);
+      expect(progress.projection).toMatchObject({ state: 'prepared' });
+      expect(target.createWritingDraft(parts!.bookId, parts!.draftedRevision).document.origin.drafted).toBe(true);
+      target.markCleanShutdown();
+    } finally {
+      target.close();
+    }
   }, 600_000);
 
   it('lets a preparation that failed go: its work is not found again', async () => {
