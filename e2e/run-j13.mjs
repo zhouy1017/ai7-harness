@@ -6,7 +6,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 // J-13 (Issue #63, plan slice S28a; V2-UX-SER-001 to SER-012): 书系 as a stable global destination. Three empty Books; 新建书系
 // with a name refused past its bound; one Series' 成员与共享范围; 加入书系 through the four-part Series Membership Impact Preview
@@ -49,7 +49,7 @@ const NO_KNOWLEDGE = `书系「${SERIES}」还没有纳入可用于一致性审�
 const CONSISTENCY_BASIS = `依据：书系「${SERIES}」的书系知识：地点「${PLACE}」第 2 版 · 工序：书系一致性检查（第 1 版） · 不使用搜索引擎`;
 const CREDENTIAL_CLEANUP_TIMEOUT_MS = 15_000;
 const FORCE_EXIT_TIMEOUT_MS = 5_000;
-const CREDENTIAL_CLEANUP_TIMEOUT = new Error('J-13/credential-cleanup-timeout');
+const CREDENTIAL_CLEANUP_TIMEOUT = journeyCheckFailure('J-13', 'credential-cleanup-timeout');
 let location = 'entry';
 
 function at(next) {
@@ -58,7 +58,7 @@ function at(next) {
 }
 function requireJourney(condition, name, detail) {
   if (condition) return;
-  const error = new Error(`J-13/${name}`);
+  const error = journeyCheckFailure('J-13', name);
   if (detail !== undefined) error.detail = detail;
   throw error;
 }
@@ -219,7 +219,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     metadata = await lstat(databasePath);
   } catch (error) {
     if (hasErrorCode(error, 'ENOENT')) return { kind: 'not-started' };
-    throw new Error('J-13/credential-cleanup-metadata');
+    throw journeyCheckFailure('J-13', 'credential-cleanup-metadata');
   }
   requireJourney(metadata.isFile() && !metadata.isSymbolicLink() && (await realpath(databasePath)) === databasePath,
     'credential-cleanup-metadata-file');
@@ -227,7 +227,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
   try {
     database = new DatabaseSync(databasePath, { readOnly: true });
   } catch {
-    throw new Error('J-13/credential-cleanup-metadata');
+    throw journeyCheckFailure('J-13', 'credential-cleanup-metadata');
   }
   try {
     database.exec('PRAGMA query_only = ON;');
@@ -254,7 +254,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
       : { kind: 'reference', credentialReference: row.credential_reference };
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('J-13/')) throw error;
-    throw new Error('J-13/credential-cleanup-metadata');
+    throw journeyCheckFailure('J-13', 'credential-cleanup-metadata');
   } finally {
     database.close();
   }
@@ -271,7 +271,7 @@ async function createLoopbackSentinel() {
   });
   server.on('error', () => { runtimeFault = true; });
   await new Promise((resolveListen, rejectListen) => {
-    server.once('error', () => rejectListen(new Error('J-13/loopback-listen')));
+    server.once('error', () => rejectListen(journeyCheckFailure('J-13', 'loopback-listen')));
     server.listen(0, '127.0.0.1', resolveListen);
   });
   const address = server.address();
@@ -304,7 +304,7 @@ async function createRendererManager(browser) {
     const completion = pending.get(key);
     if (!completion) return;
     pending.delete(key);
-    if (response.error) completion.reject(new Error('J-13/renderer-cdp-response'));
+    if (response.error) completion.reject(journeyCheckFailure('J-13', 'renderer-cdp-response'));
     else completion.resolve(response.result);
   });
   const attach = async (target) => {
@@ -316,7 +316,7 @@ async function createRendererManager(browser) {
       const response = new Promise((resolveResponse, rejectResponse) => {
         const timeout = setTimeout(() => {
           pending.delete(key);
-          rejectResponse(new Error('J-13/renderer-cdp-timeout'));
+          rejectResponse(journeyCheckFailure('J-13', 'renderer-cdp-timeout'));
         }, 60_000);
         timeout.unref();
         pending.set(key, {
@@ -353,7 +353,7 @@ async function waitFor(renderer, expression, name, timeout = 60_000) {
     if (await renderer.evaluate(`Boolean(${expression})`).catch(() => false)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  throw new Error(`J-13/${name}`);
+  throw journeyCheckFailure('J-13', name);
 }
 
 async function waitForRenderer(manager, name) {
@@ -363,7 +363,7 @@ async function waitForRenderer(manager, name) {
     if (renderers.length === 1) return renderers[0];
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  throw new Error(`J-13/${name}`);
+  throw journeyCheckFailure('J-13', name);
 }
 
 async function assertRenderer(renderer, expression, name) {
@@ -401,16 +401,17 @@ async function press(renderer, key) {
 
 const status = `(document.querySelector('#persistence-status')?.textContent ?? '')`;
 
-async function createEmptyBook(renderer, title) {
-  await click(renderer, '新建图书', `${title}-open`);
-  await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, `${title}-form`);
-  await fill(renderer, '#empty-book-title', title, `${title}-title`);
-  await click(renderer, '复核创建', `${title}-review`);
-  await waitFor(renderer, `document.querySelector('[data-screen="book-create-review"]')`, `${title}-review-ready`);
-  await click(renderer, '新建图书', `${title}-commit`);
-  await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-manuscript-state="empty"]')`, `${title}-created`, 120_000);
+/** Create an empty Book titled `title`; its checks are labelled by `name`, never by the title (Issue #652). */
+async function createEmptyBook(renderer, title, name) {
+  await click(renderer, '新建图书', `${name}-open`);
+  await waitFor(renderer, `document.querySelector('[data-screen="book-create"]')`, `${name}-form`);
+  await fill(renderer, '#empty-book-title', title, `${name}-title`);
+  await click(renderer, '复核创建', `${name}-review`);
+  await waitFor(renderer, `document.querySelector('[data-screen="book-create-review"]')`, `${name}-review-ready`);
+  await click(renderer, '新建图书', `${name}-commit`);
+  await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-manuscript-state="empty"]')`, `${name}-created`, 120_000);
   const bookId = await renderer.evaluate(`document.querySelector('.book-overview')?.dataset.bookId`);
-  requireJourney(UUID_PATTERN.test(bookId), `${title}-book-id`);
+  requireJourney(UUID_PATTERN.test(bookId), `${name}-book-id`);
   return bookId;
 }
 
@@ -501,7 +502,7 @@ async function readUntil(renderer, reader, predicate, name) {
     if (page !== null && predicate(page)) return page;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  const error = new Error(`J-13/${name}`);
+  const error = journeyCheckFailure('J-13', name);
   error.detail = page;
   throw error;
 }
@@ -633,7 +634,7 @@ async function openSelectionMenu(renderer, blockId, from, to, name) {
     await press(renderer, 'Escape');
     await new Promise((resolveWait) => setTimeout(resolveWait, 120));
   }
-  throw new Error(`J-13/${name}`);
+  throw journeyCheckFailure('J-13', name);
 }
 
 /** 书系知识 on the Series page as the editor reads it: items, candidates, the propose form, the review, and focus. */
@@ -745,7 +746,7 @@ async function main() {
       const ownedLoopback = loopback ?? (loopbackAcquisition === undefined ? undefined : await loopbackAcquisition.catch(() => undefined));
       await ownedLoopback?.close().catch(() => undefined);
       loopback = undefined;
-      if (credentialMutationReached && !credentialRemoved) throw failure ?? new Error('J-13/credential-cleanup-failed');
+      if (credentialMutationReached && !credentialRemoved) throw failure ?? journeyCheckFailure('J-13', 'credential-cleanup-failed');
       const ownedRoot = runRoot ?? (runRootAcquisition === undefined ? undefined : await runRootAcquisition.catch(() => undefined));
       if (ownedRoot !== undefined) {
         if (syntheticSecret !== undefined && dataRoot !== undefined) {
@@ -816,13 +817,13 @@ async function main() {
     const fetchRejected = await renderer.evaluate(`(async()=>{try{await fetch(${JSON.stringify(loopback.url)});return false}catch{return true}})()`);
     await renderer.send('Page.setBypassCSP', { enabled: false });
     requireJourney(fetchRejected === true && loopback.healthy() && loopback.observedRequests() === 0, 'offline-product');
-    const first = await createEmptyBook(renderer, FIRST);
+    const first = await createEmptyBook(renderer, FIRST, 'book-1');
     const firstNone = await readBookSeries(renderer, (side) => side.bookId === first, 'first-overview-series');
     requireJourney(firstNone.none === '不在任何书系中。' && firstNone.memberships.length === 0 && firstNone.summary === null, 'first-in-no-series', firstNone);
     await backToLibrary(renderer, 'first');
-    const second = await createEmptyBook(renderer, SECOND);
+    const second = await createEmptyBook(renderer, SECOND, 'book-2');
     await backToLibrary(renderer, 'second');
-    const outside = await createEmptyBook(renderer, OUTSIDE);
+    const outside = await createEmptyBook(renderer, OUTSIDE, 'book-3');
     await backToLibrary(renderer, 'outside');
 
     at('series-empty');
@@ -1437,7 +1438,7 @@ async function main() {
     const pageBooks = [];
     for (let index = 0; index < 51; index += 1) {
       // Creation binds this window to that Book. The real return action releases the route before the next creation.
-      pageBooks.push(await createEmptyBook(renderer, '分页图书' + String(index).padStart(3, '0')));
+      pageBooks.push(await createEmptyBook(renderer, '分页图书' + String(index).padStart(3, '0'), `page-book-${index}`));
       await backToLibrary(renderer, 'page-book-created');
     }
     requireJourney(pageBooks.length === 51 && new Set(pageBooks).size === 51 && pageBooks.every((id) => UUID_PATTERN.test(id)), 'page-books-created');

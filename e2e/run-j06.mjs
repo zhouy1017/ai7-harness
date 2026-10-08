@@ -5,7 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, composeAdmittedDocx } from './composed-docx.mjs';
-import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 // J-06 (Issue #57, plan slice S22; ADR 0085): 稿件冲突 of a single 修改建议. An editor types inside the words
 // a suggestion would replace; the suggestion says 原文已变, 接受并应用 is blocked, and 解决冲突… opens 稿件冲突
@@ -66,7 +66,7 @@ function at(next) {
 }
 function requireJourney(condition, name, detail) {
   if (condition) return;
-  const error = new Error(`J-06/${name}`);
+  const error = journeyCheckFailure('J-06', name);
   if (detail !== undefined) error.detail = detail;
   throw error;
 }
@@ -114,14 +114,14 @@ async function createLoopbackSentinel() {
   });
   server.on('error', () => { runtimeFault = true; });
   await new Promise((resolveListen, rejectListen) => {
-    server.once('error', () => rejectListen(new Error('J-06/loopback-listen')));
+    server.once('error', () => rejectListen(journeyCheckFailure('J-06', 'loopback-listen')));
     server.listen(0, '127.0.0.1', resolveListen);
   });
   const address = server.address();
   if (!(address !== null && typeof address === 'object' && address.address === '127.0.0.1' &&
       Number.isSafeInteger(address.port) && address.port > 0)) {
     await new Promise((resolveClose) => server.close(() => resolveClose()));
-    throw new Error('J-06/loopback-address');
+    throw journeyCheckFailure('J-06', 'loopback-address');
   }
   server.unref();
   return {
@@ -132,7 +132,7 @@ async function createLoopbackSentinel() {
       if (closed) return;
       closed = true;
       await new Promise((resolveClose, rejectClose) => {
-        server.close((error) => error ? rejectClose(new Error('J-06/loopback-close')) : resolveClose());
+        server.close((error) => error ? rejectClose(journeyCheckFailure('J-06', 'loopback-close')) : resolveClose());
       });
       requireJourney(!runtimeFault, 'loopback-runtime');
     },
@@ -162,13 +162,13 @@ async function attachRenderer(browser) {
     const completion = pending.get(response.id);
     if (!completion) return;
     pending.delete(response.id);
-    if (response.error) completion.reject(new Error('J-06/renderer-cdp-response'));
+    if (response.error) completion.reject(journeyCheckFailure('J-06', 'renderer-cdp-response'));
     else completion.resolve(response.result);
   });
   const send = async (method, params = {}) => {
     const id = nextId++;
     const response = new Promise((resolveResponse, rejectResponse) => {
-      const timeout = setTimeout(() => { pending.delete(id); rejectResponse(new Error('J-06/renderer-cdp-timeout')); }, 60_000);
+      const timeout = setTimeout(() => { pending.delete(id); rejectResponse(journeyCheckFailure('J-06', 'renderer-cdp-timeout')); }, 60_000);
       timeout.unref();
       pending.set(id, {
         resolve: (value) => { clearTimeout(timeout); resolveResponse(value); },
@@ -195,7 +195,7 @@ async function waitFor(renderer, expression, name, timeout = 60_000) {
     if (await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  throw new Error(`J-06/${name}`);
+  throw journeyCheckFailure('J-06', name);
 }
 async function assertRenderer(renderer, expression, name) {
   requireJourney(await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`), name);
@@ -372,7 +372,7 @@ async function rightClickUntil(renderer, prepare, target, ready, name) {
     await press(renderer, 'Escape');
     await new Promise((resolveWait) => setTimeout(resolveWait, 120));
   }
-  throw new Error(`J-06/${name}`);
+  throw journeyCheckFailure('J-06', name);
 }
 
 /** A 修改建议 over RANGE of a paragraph, made through the selection menu and its composer. */
@@ -418,7 +418,7 @@ async function openCard(renderer, markId, blockId, name) {
       await new Promise((resolveWait) => setTimeout(resolveWait, 50));
     }
   }
-  throw new Error(`J-06/${name}-card`);
+  throw journeyCheckFailure('J-06', `${name}-card`);
 }
 
 /** 解决冲突… on an open card, and 稿件冲突 on screen for that mark. */

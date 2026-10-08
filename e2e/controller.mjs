@@ -298,13 +298,12 @@ const J07_PACKAGE_EXPORT_ASSERTIONS = Object.freeze([
   'package-export-remaining-choose', 'package-export-remaining-prepared',
   'package-export-one-prepared-member', 'package-export-remaining-approve',
   'package-export-remaining-written', 'package-export-two-subset-receipts',
-  'package-export-folder-files', 'package-export-docx-publication',
+  'package-export-folder-files', 'package-export-docx-publication', 'package-export-docx-news-release',
   'package-export-manifest-words', 'package-export-not-in-export-records',
   'package-export-close', 'package-export-closed', 'package-export-without-forbidden-words',
 ]);
 const J07_PACKAGE_EXPORT_FAILURES = new Map([
   ...J07_PACKAGE_EXPORT_ASSERTIONS.map((name) => ['J-07/' + name, name]),
-  ['J-07/package-export-docx-document:news-release', 'package-export-docx-news-release'],
   ['J-07/renderer-evaluate', 'package-export-renderer-evaluate'],
 ]);
 const J07_PACKAGE_EXPORT_IO = Object.freeze({
@@ -1350,10 +1349,53 @@ export function isAdmittedLocation(journey, location) {
   return location === 'controller' || JOURNEY_LOCATIONS[journey]?.includes(location) === true;
 }
 
+// Issue #652: a stage holds many checks, so a failure also names the one that failed. The label is a code identifier a
+// runner passes to its own check helper, never text read from the page or the manuscript, and it is printed only when it
+// is exactly this shape.
+const JOURNEY_CHECK = Symbol('ai7.journeyCheck');
+const CONTENT_FREE_CHECK = /^[a-z0-9][a-z0-9-]{0,95}$/u;
+const CHECK_SEGMENT = '/check/';
+
+/** Whether a check label is a content-free code identifier: lower-case ASCII letters, digits and hyphens, at most 96. */
+export function isContentFreeCheckLabel(label) {
+  return typeof label === 'string' && CONTENT_FREE_CHECK.test(label);
+}
+
+/**
+ * The one way a runner builds the error a failed check throws: its message is `<journey>/<check>` exactly as before (with
+ * `:<failed,…>` when a multi-check wait names the members still false), and the check's label rides on the error for
+ * `reportJourneyFailure` to name.
+ */
+export function journeyCheckFailure(journey, check, options = {}) {
+  const label = String(check);
+  const failed = Array.isArray(options.failed) ? `:${options.failed.join(',')}` : '';
+  const message = `${journey}/${label}${failed}`;
+  const error = Object.hasOwn(options, 'cause') ? new Error(message, { cause: options.cause }) : new Error(message);
+  Object.defineProperty(error, JOURNEY_CHECK, { value: label, enumerable: false });
+  // The stack starts at the runner's own check, not here, so a debug failure.txt reads as it did before.
+  Error.captureStackTrace?.(error, journeyCheckFailure);
+  return error;
+}
+
+/** The content-free check label a failure carries, or `null` when it carries none or one of any other shape. */
+export function journeyCheckLabel(error) {
+  if (error === null || (typeof error !== 'object' && typeof error !== 'function')) return null;
+  const label = error[JOURNEY_CHECK];
+  return isContentFreeCheckLabel(label) ? label : null;
+}
+
+/** The extra stderr line a failure prints beside its location line, or `null` when it names no content-free check. */
+export function formatJourneyCheckLine(journey, location, error) {
+  const label = journeyCheckLabel(error);
+  return label === null ? null : `${journey}/${location}${CHECK_SEGMENT}${label}`;
+}
+
 export function reportJourneyFailure(journey, location, error) {
   const admitted = isAdmittedLocation(journey, location) ? location : 'controller';
   disconnectControllerChannel();
   console.error(`${journey}/${admitted}`);
+  const checkLine = formatJourneyCheckLine(journey, admitted, error);
+  if (checkLine !== null) console.error(checkLine);
   process.exitCode = 1;
   if (!localDebugEnabled()) return undefined;
   return writeDebugFailure(journey, location, error);
@@ -1786,6 +1828,21 @@ async function writeDebugFailure(journey, location, error) {
  */
 export function collectReadinessTrace(result, journey) {
   return readReadinessTrace(result.stderr, journey);
+}
+
+/**
+ * The check a failed Journey named (Issue #652), or `null`. It is read only for a failure `classifyJourneyResult` found
+ * in the child's own location line, and only from exactly one `<journey>/<location>/check/<label>` line at that same
+ * location whose label is content-free; anything else names no check.
+ */
+export function collectJourneyCheck(result, journey, failure) {
+  if (failure?.errorClass !== 'journey-failure') return null;
+  const prefix = `${journey}/${failure.location}${CHECK_SEGMENT}`;
+  const labels = result.stderr
+    .split(/\r?\n/u)
+    .filter((line) => line.startsWith(prefix))
+    .map((line) => line.slice(prefix.length));
+  return labels.length === 1 && isContentFreeCheckLabel(labels[0]) ? labels[0] : null;
 }
 
 /** Classify a finished journey process the same way the payload-safe diagnostic does. */
