@@ -1,10 +1,19 @@
+import type {
+  CapturedProcedureProjection,
+  CapturedProcedureRunProjection,
+  CapturedProcedureStopPreviewProjection,
+  RendererApi,
+  ReviewScopeKind,
+} from '../shared/protocol.js';
+
 /**
  * The 新建审阅 sheet's choice of a Captured Procedure version, kept honest while it loads (Issue #66, plan slice S31 review P2-1;
- * REUSE-054: the version the sheet shows is the version that enters the plan). Pure, so the unit suite reads it as the sheet does.
+ * REUSE-054: the version the sheet shows is the version that enters the plan), and `确认停用`'s confirmation of the preview on
+ * show. Pure, so the unit suite reads it as the sheet and the panel do.
  *
  * Each choice asks the service for its resolution; only the answer to the newest question may fill the sheet, and while any
  * question is open the sheet is loading: 先看计划 waits. A preparation also refuses when the version on show is not the one the
- * sheet holds.
+ * sheet holds. A choice whose answer fails keeps the choice the sheet held.
  */
 export class ProcedureChoiceRequests {
   #asked = 0;
@@ -48,4 +57,70 @@ export function procedurePreparationPin(
   if (resolved === null) return { pin: null, refusal: null };
   if (shownVersionId !== resolved.versionId) return { pin: null, refusal: SHEET_PROCEDURE_VERSION_MISMATCH };
   return { pin: { versionId: resolved.versionId, documentSha256: resolved.documentSha256 }, refusal: null };
+}
+
+/** The part of the 新建审阅 sheet a procedure choice fills: the procedure and its version, the categories ticked, the scope. */
+export interface ProcedureSheetChoice {
+  readonly procedure: CapturedProcedureRunProjection | null;
+  readonly categories: ReadonlySet<string>;
+  readonly scope: ReviewScopeKind | null;
+  readonly from: string | null;
+  readonly to: string | null;
+  readonly problem: string | null;
+}
+
+/** How a choice ended: returned to categories chosen by hand, answered by the service, or failed with why. */
+export type ProcedureChoiceOutcome =
+  | { readonly kind: 'cleared' }
+  | { readonly kind: 'answered'; readonly run: CapturedProcedureRunProjection }
+  | { readonly kind: 'failed'; readonly reason: string };
+
+/**
+ * What the sheet holds after a choice (ADR 0087 §4; Issue #66, S31). An answer fills it from the resolved version: its steps this
+ * Book can take ticked and every other category closed, the scope its slot. A failed choice changes nothing the sheet held — not
+ * the procedure, its version, the categories or the scope — and only says why (Issue #684): it never turns a pinned sheet into an
+ * unpinned one chosen by hand. Every answer is a new set, never the one held.
+ */
+export function procedureChoiceAfter(held: ProcedureSheetChoice, outcome: ProcedureChoiceOutcome): ProcedureSheetChoice {
+  if (outcome.kind === 'failed') return { ...held, categories: new Set(held.categories), problem: outcome.reason };
+  if (outcome.kind === 'cleared') return { ...held, procedure: null, categories: new Set(), problem: null };
+  const { run } = outcome;
+  if (run.resolved === null) return { ...held, procedure: run, categories: new Set(), problem: run.unavailableReason };
+  return {
+    procedure: run,
+    categories: new Set(run.resolved.steps.filter((step) => step.available).map((step) => step.categoryId)),
+    scope: run.resolved.scopeSlot,
+    from: null,
+    to: null,
+    problem: run.unavailableReason,
+  };
+}
+
+/** The selector focus returns to once a choice ends: the one the editor used, while the sheet still shows it. */
+export function procedureChoiceFocus(versionChoice: boolean, held: CapturedProcedureRunProjection | null): 'procedure' | 'procedure-version' {
+  return versionChoice && held?.resolved != null ? 'procedure-version' : 'procedure';
+}
+
+/** How `确认停用` ended: stopped, or refused as stale with the preview read again for the editor to look at first. */
+export type ProcedureStopConfirmation =
+  | { readonly kind: 'stopped'; readonly result: CapturedProcedureProjection }
+  | { readonly kind: 'reread'; readonly preview: CapturedProcedureStopPreviewProjection };
+
+export const PROCEDURE_STOP_PREVIEW_STALE_CODE = 'CAPTURED_PROCEDURE_STOP_PREVIEW_STALE' as const;
+
+/**
+ * `确认停用` (Issue #66, S31; REUSE-038, REUSE-041): confirms exactly the preview on show. When the Runs it touches moved since it
+ * was read, the service refuses it as stale and nothing is stopped: the preview is read again and returned, so the editor looks
+ * before stopping. Any other failure is the caller's to report.
+ */
+export async function confirmProcedureStop(
+  api: Pick<RendererApi, 'stopCapturedProcedure' | 'previewCapturedProcedureStop'>,
+  preview: Pick<CapturedProcedureStopPreviewProjection, 'procedureId' | 'versionId' | 'previewDigest'>,
+): Promise<ProcedureStopConfirmation> {
+  try {
+    return { kind: 'stopped', result: await api.stopCapturedProcedure({ procedureId: preview.procedureId, versionId: preview.versionId, previewDigest: preview.previewDigest }) };
+  } catch (error) {
+    if ((error as { code?: unknown } | null)?.code !== PROCEDURE_STOP_PREVIEW_STALE_CODE) throw error;
+    return { kind: 'reread', preview: await api.previewCapturedProcedureStop({ procedureId: preview.procedureId, versionId: preview.versionId }) };
+  }
 }
