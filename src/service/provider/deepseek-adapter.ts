@@ -1,4 +1,4 @@
-import type { GenerateOptions, LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm';
+import type { CallId, GenerateOptions, LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { canonicalJson, isRecord, sha256Hex } from '../analysis/canonical.js';
 import { AI7_FAILURE_CODES, type DshFailureCodes } from './classification.js';
 import type { CredentialBroker, CredentialSlotBinding } from './credential-broker.js';
@@ -18,7 +18,7 @@ import {
   type CapabilityEvidence,
   type ProviderModelProfile,
 } from './model-profile.js';
-import { messageText, type AssembledModelPayload } from './payload.js';
+import { assistantToolCalls, messageText, toolResultOf, type AssembledModelPayload } from './payload.js';
 import { normalizeModelResponse, type CanonicalModelResult } from './response-normalization.js';
 
 /**
@@ -238,10 +238,14 @@ function systemPromptOf(payload: AssembledModelPayload): string | null {
 function chatCompletionsBody(model: ProviderModelProfile, payload: AssembledModelPayload): string {
   const structuredOutput = model.capabilities.structuredOutput;
   if (structuredOutput !== 'none' && structuredOutput !== 'json-object') throw new Error('PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED');
+  const tools = payload.tools ?? [];
+  // Function tools travel only for a model whose profile declares `toolCalling: 'function'` with evidence (ADR 0080 §2);
+  // every other model refuses to assemble a payload that carries them, so nothing is sent (Issue #473).
+  const toolCalling = model.capabilities.toolCalling === 'function';
+  if (tools.length > 0 && !toolCalling) throw new Error('PROVIDER_TOOL_CALLING_UNSUPPORTED');
   const system = systemPromptOf(payload);
-  const messages = system === null
-    ? conversationMessages(payload)
-    : [{ role: 'system', content: system }, ...conversationMessages(payload)];
+  const conversation = toolCalling ? chatCompletionsConversation(payload) : conversationMessages(payload);
+  const messages = system === null ? conversation : [{ role: 'system', content: system }, ...conversation];
   return canonicalJson({
     model: model.model,
     messages,
@@ -253,7 +257,47 @@ function chatCompletionsBody(model: ProviderModelProfile, payload: AssembledMode
     // would have sent anyway plus this key, so the constraint can be added to or withdrawn from a
     // model without any other byte of the request changing.
     ...(structuredOutput === 'json-object' ? { response_format: { type: 'json_object' } } : {}),
+    // The same rule for tools: a payload without tools sends no `tools` key, so no request that carries none moves a byte.
+    ...(tools.length > 0 ? { tools: tools.map(chatCompletionsTool) } : {}),
   });
+}
+
+/** One function tool in the chat-completions spelling: `{ type: 'function', function: { name, description, parameters } }`. */
+function chatCompletionsTool(tool: unknown): { type: 'function'; function: { name: string; description: string; parameters: unknown } } {
+  if (!isRecord(tool) || typeof tool.name !== 'string' || typeof tool.description !== 'string' || !isRecord(tool.parameters)) {
+    throw new Error('PROVIDER_TOOL_SCHEMA_INVALID');
+  }
+  return { type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters } };
+}
+
+/**
+ * The chat-completions conversation of a tool-calling model (Issue #473): every text message exactly as
+ * `conversationMessages` writes it, an assistant tool-call message as `{ role: 'assistant', content, tool_calls }`, and a
+ * tool result as `{ role: 'tool', tool_call_id, content }`. Anything else refuses, as it does for every other model.
+ */
+function chatCompletionsConversation(payload: AssembledModelPayload): Array<Record<string, unknown>> {
+  const messages: Array<Record<string, unknown>> = [];
+  for (const message of payload.messages) {
+    const calls = assistantToolCalls(message);
+    if (calls !== null) {
+      messages.push({
+        role: 'assistant',
+        content: calls.text.length > 0 ? calls.text : null,
+        tool_calls: calls.calls.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments } })),
+      });
+      continue;
+    }
+    const result = toolResultOf(message);
+    if (result !== null) {
+      messages.push({ role: 'tool', tool_call_id: result.callId, content: result.text });
+      continue;
+    }
+    const text = messageText(message);
+    if (text === null) throw new Error('DEEPSEEK_REQUEST_NON_TEXT_CONTENT');
+    if (message.role !== 'user' && message.role !== 'assistant') throw new Error('DEEPSEEK_REQUEST_ROLE_INVALID');
+    messages.push({ role: message.role, content: text });
+  }
+  return messages;
 }
 
 /**
@@ -381,6 +425,11 @@ function providerRequestBody(
   model: ProviderModelProfile,
   payload: AssembledModelPayload,
 ): string {
+  // Function tools are spelled only for chat completions (Issue #473); every other shape refuses a payload carrying them
+  // rather than dropping them silently.
+  if ((payload.tools ?? []).length > 0 && model.capabilities.requestShape !== 'openai-chat-completions') {
+    throw new Error('PROVIDER_TOOL_CALLING_UNSUPPORTED');
+  }
   switch (model.capabilities.requestShape) {
     case 'openai-chat-completions': return chatCompletionsBody(model, payload);
     case 'anthropic-messages': return anthropicMessagesBody(profile, model, payload);
@@ -677,11 +726,34 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       yield fail(outcome.code, outcome.message, outcome.status);
       return;
     }
+    // A request for tools answers only a request that offered tools (Issue #473): to a request that carried none it is a
+    // response with no usable content, exactly as it read before tool calls were parsed at all.
+    if (outcome.kind === 'tool-calls' && (options.tools ?? []).length === 0) outcome = { kind: 'malformed', reason: 'answer-channel-absent' };
     this.#lastResult = outcome;
     // A response that matched no declared channel is this route's `INVALID_RESPONSE`, exactly as it
     // was before the channels were declared; the canonical result records which channel was missing.
     if (outcome.kind === 'malformed') {
       yield fail(AI7_FAILURE_CODES.INVALID_RESPONSE, '模型服务响应不含可用内容。', 200);
+      return;
+    }
+    if (outcome.kind === 'tool-calls') {
+      // The text the model wrote beside its calls, then each call as one assembled block, in order; the loop executes them.
+      let index = 0;
+      if (outcome.text.length > 0) {
+        yield { type: 'block-start', index, blockType: 'text' };
+        yield { type: 'text-delta', index, text: outcome.text };
+        yield { type: 'block-end', index, block: { type: 'text', text: outcome.text } };
+        index += 1;
+      }
+      for (const call of outcome.calls) {
+        const id = call.id as CallId;
+        yield { type: 'block-start', index, blockType: 'tool-call' };
+        yield { type: 'tool-call-delta', index, id, name: call.name, argumentsDelta: call.arguments };
+        yield { type: 'block-end', index, block: { type: 'tool-call', id, name: call.name, arguments: call.arguments } };
+        index += 1;
+      }
+      if (outcome.usage !== null) yield { type: 'usage', usage: { ...outcome.usage } };
+      yield { type: 'finish', reason: { kind: 'tool-calls' } };
       return;
     }
     // An empty answer streams exactly what it streamed before — the harness composition and every

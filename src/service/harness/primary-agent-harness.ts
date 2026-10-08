@@ -4,10 +4,18 @@ import type { AgentHandle } from '@deepseek-ai/dsh-agent';
 import type { GenerateOptions, LlmAdapter, LlmRuntime, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm';
 import type { SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session';
 import type { SessionInspection, SessionPersistenceRevision } from '@deepseek-ai/dsh-session-persistence';
+import type { ToolDefinition } from '@deepseek-ai/dsh-tools';
 import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { AI7_FAILURE_CODES, classifyModelFailure, type ClassifiedModelFailure, type DshFailureCodes } from '../provider/classification.js';
-import type { EgressDecision, ExecutionRoute, TransmitTicket } from '../provider/egress-gate.js';
-import type { AssembledModelPayload } from '../provider/payload.js';
+import { assistantToolCallDigest, type EgressDecision, type ExecutionRoute, type TransmitTicket } from '../provider/egress-gate.js';
+import { assistantToolCalls, type AssembledModelPayload } from '../provider/payload.js';
+import {
+  PLATFORM_TOOL_NAMES,
+  PLATFORM_TOOL_SCHEMAS,
+  PLATFORM_TOOL_SCHEMA_DIGEST,
+  toolSetEqualsPlatformSchemas,
+  type PlatformToolName,
+} from '../provider/platform-tools.js';
 import { HarnessSessionLogBackend } from './session-log.js';
 
 /**
@@ -36,7 +44,8 @@ export interface HarnessCompositionDescriptor {
   readonly packages: typeof HARNESS_PACKAGE_PINS;
   readonly services: typeof HARNESS_SERVICE_SET;
   readonly systemPrompt: { readonly includeHarnessIdentity: false; readonly includeRuntimeContext: false; readonly persona: ''; readonly completeSection: typeof PROMPT_SECTION_NAME };
-  readonly tools: { readonly mode: 'native'; readonly maxParallelSubCalls: 1; readonly registeredTools: 0 };
+  /** `registeredTools` is 0 on every composition but one that registers the two platform tools (Issue #473), where it is 2. */
+  readonly tools: { readonly mode: 'native'; readonly maxParallelSubCalls: 1; readonly registeredTools: 0 | 2 };
   readonly agentLoop: { readonly maxParallelToolCalls: 1; readonly configuredAgents: 0 };
   readonly subagents: false;
   readonly route: ExecutionRoute;
@@ -48,6 +57,12 @@ export interface HarnessCompositionDescriptor {
    * every frozen plan pins — exactly as it was.
    */
   readonly sessionLog?: { readonly package: { readonly '@deepseek-ai/dsh-session-persistence': typeof SESSION_LOG_PACKAGE_PIN }; readonly storage: 'agent-data-root-jsonl' };
+  /**
+   * Present only on a composition that registers AI7's platform tools (ADR 0080 §7.1, Issue #473): their names and the
+   * digest of their exact schemas. A composition without them — every composition a plan can freeze today, since no
+   * selected Provider Processing rule names them — keeps its descriptor and its digest byte-identical.
+   */
+  readonly platformTools?: { readonly names: typeof PLATFORM_TOOL_NAMES; readonly schemaDigest: string };
   /** SHA-256 over every field above in canonical JSON; the Execution Binding pins it. */
   readonly digest: string;
 }
@@ -58,14 +73,17 @@ export const SESSION_LOG_PACKAGE_PIN = '0.1.0-rc.6' as const;
 export interface CompositionOptions {
   /** The composition persists its Session log under the Agent Data Root. */
   readonly sessionLog?: boolean;
+  /** The composition registers the two platform tools (Issue #473); only for a Run whose rule names them and whose plan declares web search. */
+  readonly platformTools?: boolean;
 }
 
 export function describeComposition(route: ExecutionRoute, model: string, promptContractDigest: string, options: CompositionOptions = {}): HarnessCompositionDescriptor {
+  const withTools = options.platformTools === true;
   const body = {
     packages: HARNESS_PACKAGE_PINS,
     services: HARNESS_SERVICE_SET,
     systemPrompt: { includeHarnessIdentity: false as const, includeRuntimeContext: false as const, persona: '' as const, completeSection: PROMPT_SECTION_NAME },
-    tools: { mode: 'native' as const, maxParallelSubCalls: 1 as const, registeredTools: 0 as const },
+    tools: { mode: 'native' as const, maxParallelSubCalls: 1 as const, registeredTools: withTools ? (2 as const) : (0 as const) },
     agentLoop: { maxParallelToolCalls: 1 as const, configuredAgents: 0 as const },
     subagents: false as const,
     route,
@@ -74,9 +92,43 @@ export function describeComposition(route: ExecutionRoute, model: string, prompt
     ...(options.sessionLog === true
       ? { sessionLog: { package: { '@deepseek-ai/dsh-session-persistence': SESSION_LOG_PACKAGE_PIN }, storage: 'agent-data-root-jsonl' as const } }
       : {}),
+    ...(withTools ? { platformTools: { names: PLATFORM_TOOL_NAMES, schemaDigest: PLATFORM_TOOL_SCHEMA_DIGEST } } : {}),
   };
   return { ...body, digest: sha256Hex(canonicalJson(body)) };
 }
+
+/** One platform-tool call the harness hands its owner: the model's call id, the tool, and the arguments as the model sent them. */
+export interface PlatformToolExecution {
+  readonly callId: string;
+  readonly tool: PlatformToolName;
+  readonly arguments: unknown;
+  readonly signal: AbortSignal;
+}
+
+/**
+ * The owner of a composition's platform tools (Issue #473): it decides and performs each call — the Egress Gate's
+ * `call-search-service` or `fetch-public-source` ticket, the forwarder, the ledger and the Research Snapshot Cache — and
+ * admits every result the model will see. The harness only registers the two tools and routes their calls here.
+ */
+export interface PlatformToolOwner {
+  /** Perform one call; the text is what the model reads, the URL where its bytes came from (`null` for a refusal AI7 composed). */
+  execute(call: PlatformToolExecution): Promise<{ readonly text: string; readonly sourceUrl: string | null }>;
+  /**
+   * Admit the exact text the model will read for one call, immediately before DSH materializes it: the gate admits a tool
+   * result back into the payload only by this call id, URL, digest, and byte count.
+   */
+  admit(result: { readonly callId: string; readonly tool: PlatformToolName; readonly sourceUrl: string | null; readonly text: string }): void;
+  /** Accept one assistant tool-call message this attempt's adapter returned, by `assistantToolCallDigest`. */
+  acceptToolCallMessage(digest: string): void;
+}
+
+/** The value a platform tool's body returns: the text and its source URL (`''` for none), as DSH's lossless JSON carries it. */
+const PLATFORM_TOOL_OUTPUT_SCHEMA = {
+  type: 'object',
+  properties: { text: { type: 'string' }, sourceUrl: { type: 'string' } },
+  required: ['text', 'sourceUrl'],
+  additionalProperties: false,
+} as const;
 
 export type HarnessSignal =
   | { readonly kind: 'started'; readonly turn: number }
@@ -130,6 +182,12 @@ export interface HarnessExecutionRequest {
    * composition whose log stays in memory, as every analysis composition's does.
    */
   readonly sessionLogRoot?: string;
+  /**
+   * The owner of the two platform tools, present only for a Run whose binding's rule names them and whose plan declares
+   * web search (ADR 0080 §7.1, Issue #473). Absent — as on every Run today — the composition registers zero tools, and
+   * its descriptor and digest are unchanged.
+   */
+  readonly platformTools?: PlatformToolOwner;
 }
 
 export interface PrimaryAgentHarnessHandle {
@@ -186,7 +244,11 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     INVALID_CREDENTIAL_CODE: llm.INVALID_CREDENTIAL_CODE,
     CONTEXT_WINDOW_EXCEEDED_CODE: llm.CONTEXT_WINDOW_EXCEEDED_CODE,
   };
-  const composition = describeComposition(request.route, request.model, request.promptContractDigest, { sessionLog: request.sessionLogRoot !== undefined });
+  const toolOwner = request.platformTools ?? null;
+  const composition = describeComposition(request.route, request.model, request.promptContractDigest, {
+    sessionLog: request.sessionLogRoot !== undefined,
+    ...(toolOwner === null ? {} : { platformTools: true }),
+  });
   const context: Context = new cordis.Context();
   let bound = false;
   // The Interactive Answer Stream's reader for the turn in flight, if one streams (Issue #52, S17a).
@@ -201,6 +263,7 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     await context.plugin(llm.LlmRuntime);
     await context.plugin(prompt.SystemPrompt, { includeHarnessIdentity: false, includeRuntimeContext: false, persona: '' });
     await context.plugin(tools.ToolRuntime, { mode: 'native', maxParallelSubCalls: 1 });
+    if (toolOwner !== null) registerPlatformTools(context, toolOwner);
     await context.plugin(loop.AgentLoop, { maxParallelToolCalls: 1, agents: [] });
     context.systemPrompt.suppressRuntimeContext();
     context.systemPrompt.section({ name: PROMPT_SECTION_NAME, order: 0, text: request.systemPrompt, complete: true });
@@ -208,6 +271,11 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     // Each text delta the turn in flight streams, as DSH records it: never a business fact, only what the foreground
     // dialogue shows by complete fragment.
     context.on('session/event', (_session, event) => {
+      // An assistant message asking for platform tools is accepted for this attempt's history the moment DSH records it,
+      // before its calls run and before the next model call carries it back through the gate (Issue #473).
+      if (toolOwner !== null && event.type === 'assistant/message' && assistantToolCalls(event.data.message) !== null) {
+        toolOwner.acceptToolCallMessage(assistantToolCallDigest(event.data.message.content));
+      }
       if (streamReader === null || event.type !== 'assistant/chunk') return;
       const { chunk } = event.data;
       if (chunk.type === 'text-delta') streamReader(chunk.text);
@@ -220,9 +288,13 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
       return next();
     });
     const assembly = await context.systemPrompt.assemble();
+    // Zero tools, or exactly the two platform tool schemas when an owner was given: never anything in between or beyond.
+    const toolsExact = toolOwner === null
+      ? context.tools.schemas().length === 0 && assembly.tools.length === 0
+      : toolSetEqualsPlatformSchemas(context.tools.schemas()) && toolSetEqualsPlatformSchemas(assembly.tools);
     requireHarness(
       HARNESS_SERVICE_SET.every((name) => context.get(name) !== undefined) &&
-        context.tools.schemas().length === 0 && assembly.tools.length === 0 &&
+        toolsExact &&
         prompt.renderPrompt(assembly) === request.systemPrompt && prompt.renderContextSnapshot(assembly) === '' &&
         context.llm.listProviders().length === 1 && context.llm.listProviders()[0]?.id === request.route &&
         context.agentLoop.config.agents.length === 0 && context.agents.list().length === 0 && context.sessions.list().length === 0 &&
@@ -255,6 +327,12 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
           signals.push({ kind: 'started', turn: event.data.turn });
           break;
         case 'assistant/message': {
+          // A tool-call message is a step of the loop, not an answer: it counts its usage and is never a content candidate.
+          if (assistantToolCalls(event.data.message) !== null) {
+            signals.push({ kind: 'progress', label: '平台工具调用' });
+            if (event.data.usage !== undefined) signals.push({ kind: 'usage', usage: { ...event.data.usage } });
+            break;
+          }
           const text = event.data.message.content
             .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
             .map((block) => block.text)
@@ -377,6 +455,46 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
       return spans;
     },
   };
+}
+
+/**
+ * Register the two platform tools into the composition's `ToolRuntime` (ADR 0080 §7.1, Issue #473) with exactly the
+ * schemas `PLATFORM_TOOL_SCHEMAS` fixes — no `defineTool` projection stands between them and the bytes the gate compares.
+ * Each body hands its call to the owner; `finalizeContent`, which DSH runs exactly once for every outcome of a call —
+ * success, refusal, or a pipeline failure — immediately before materializing it, fixes the one text the model will read
+ * and has the owner admit it, so no result can reach the payload that the owner did not admit.
+ */
+function registerPlatformTools(context: Context, owner: PlatformToolOwner): void {
+  for (const schema of PLATFORM_TOOL_SCHEMAS) {
+    const tool = schema.name;
+    const definition: ToolDefinition = {
+      name: tool,
+      description: schema.description,
+      parameters: JSON.parse(JSON.stringify(schema.parameters)) as Record<string, unknown>,
+      output: {
+        schema: PLATFORM_TOOL_OUTPUT_SCHEMA as unknown as ToolDefinition['output']['schema'],
+        render: (_args, value) => [{ type: 'text', text: (value as { text: string }).text }],
+      },
+      async execute(args, exec) {
+        const outcome = await owner.execute({ callId: exec.callId, tool, arguments: args, signal: exec.signal });
+        return { text: outcome.text, sourceUrl: outcome.sourceUrl ?? '' };
+      },
+      finalizeContent(exec, result) {
+        let text: string;
+        let sourceUrl: string | null = null;
+        if (result.isError) {
+          text = `工具调用未完成：${result.error.message}`;
+        } else {
+          const value = result.value as { text?: unknown; sourceUrl?: unknown };
+          text = typeof value.text === 'string' ? value.text : '';
+          sourceUrl = typeof value.sourceUrl === 'string' && value.sourceUrl.length > 0 ? value.sourceUrl : null;
+        }
+        owner.admit({ callId: exec.callId, tool, sourceUrl, text });
+        return [{ type: 'text', text }];
+      },
+    };
+    context.tools.register(definition);
+  }
 }
 
 /**

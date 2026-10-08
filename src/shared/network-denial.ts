@@ -14,11 +14,11 @@ export const NETWORK_ALLOWANCE_INVALID_CODE = 'AI7_NETWORK_ALLOWANCE_INVALID';
 let networkDenialInstalled = false;
 
 /**
- * The one single-host allowance of the developer-live scope (ADR 0065, Issue #272). It is armed by
- * the service entry only under Provider Processing v5 and only before the denial is installed, so
- * the denial's own replacements consult it at call time: exactly the armed host and port may open a
- * TLS or TCP connection and resolve their name; every other primitive, host, and port stays denied,
- * and the global `fetch`, HTTP clients, servers, datagrams, and WebSockets are denied regardless.
+ * One host allowance of the developer-live scope (ADR 0065, Issue #272). The service entry arms the
+ * model endpoint's under Provider Processing v5, only before the denial is installed, so the denial's
+ * own replacements consult the armed set at call time: exactly an armed host and port may open a TLS
+ * or TCP connection and resolve its name; every other primitive, host, and port stays denied, and the
+ * global `fetch`, HTTP clients, servers, datagrams, and WebSockets are denied regardless.
  */
 export interface SingleHostAllowance {
   readonly host: string;
@@ -26,7 +26,34 @@ export interface SingleHostAllowance {
 }
 
 const HOSTNAME_SHAPE = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/u;
-let allowance: SingleHostAllowance | null = null;
+/**
+ * The policy-declared allowance set (ADR 0080 §7.3, Issue #473): the model endpoint first, then — only under a rule that
+ * names the platform tools — the rule's search-service host. Empty while every remote primitive is denied. Armed once,
+ * before the install, and never re-armed.
+ */
+let allowances: ReadonlyArray<SingleHostAllowance> = [];
+/**
+ * Whether per-ticket host admission is armed. A `webfetch` target is not a host the policy can list — it is bounded by
+ * citations, not by a host list (ADR 0079 §4.3) — so it is reached only while one `fetch-public-source` ticket holds it
+ * open. Armed before the install, only under a rule naming the platform tools; unarmed, no host can ever be admitted late.
+ */
+let perTicketAdmissionArmed = false;
+/** The one host a redeemed ticket holds open, or `null`. At most one at a time: `maxParallelToolCalls` is 1. */
+let ticketHost: SingleHostAllowance | null = null;
+
+function validatedTarget(target: SingleHostAllowance): SingleHostAllowance {
+  const host = target.host.toLowerCase();
+  if (!HOSTNAME_SHAPE.test(host) || !Number.isSafeInteger(target.port) || target.port < 1 || target.port > 65_535) {
+    throw new Error(NETWORK_ALLOWANCE_INVALID_CODE);
+  }
+  return { host, port: target.port };
+}
+
+/** Whether a host is a name the public network resolves, rather than an address literal or a loopback name. */
+function isPublicHostName(host: string): boolean {
+  const labels = host.split('.');
+  return labels.length >= 2 && !/^[0-9]+$/u.test(labels[labels.length - 1]!) && host !== 'localhost' && !host.endsWith('.localhost');
+}
 
 class OutboundNetworkDeniedError extends Error {
   readonly code = NETWORK_DENIED_CODE;
@@ -47,18 +74,62 @@ function denyFetch(): Promise<never> {
 
 /** Arm the single-host allowance. Must precede `installNodeNetworkDenial()`; a late or repeated arming fails closed. */
 export function armSingleHostAllowance(target: SingleHostAllowance): void {
-  if (networkDenialInstalled) throw new Error(NETWORK_ALLOWANCE_LATE_CODE);
-  if (allowance !== null) throw new Error(NETWORK_ALLOWANCE_INVALID_CODE);
-  const host = target.host.toLowerCase();
-  if (!HOSTNAME_SHAPE.test(host) || !Number.isSafeInteger(target.port) || target.port < 1 || target.port > 65_535) {
-    throw new Error(NETWORK_ALLOWANCE_INVALID_CODE);
-  }
-  allowance = { host, port: target.port };
+  armHostAllowanceSet([target]);
 }
 
-/** The armed allowance, or `null` when every remote primitive is denied. */
+/**
+ * Arm the policy-declared allowance set: the model endpoint host first, then each host the selected rule names. Must
+ * precede `installNodeNetworkDenial()`; a late, repeated, empty, or duplicated arming fails closed and arms nothing.
+ */
+export function armHostAllowanceSet(targets: ReadonlyArray<SingleHostAllowance>): void {
+  if (networkDenialInstalled) throw new Error(NETWORK_ALLOWANCE_LATE_CODE);
+  if (allowances.length > 0 || targets.length === 0) throw new Error(NETWORK_ALLOWANCE_INVALID_CODE);
+  const validated = targets.map(validatedTarget);
+  if (new Set(validated.map((target) => target.host)).size !== validated.length) throw new Error(NETWORK_ALLOWANCE_INVALID_CODE);
+  allowances = Object.freeze(validated);
+}
+
+/** The model endpoint's allowance — the first of the set — or `null` when every remote primitive is denied. */
 export function singleHostAllowance(): SingleHostAllowance | null {
-  return allowance;
+  return allowances[0] ?? null;
+}
+
+/** The whole armed allowance set, model endpoint first. */
+export function hostAllowanceSet(): ReadonlyArray<SingleHostAllowance> {
+  return allowances;
+}
+
+/** Arm per-ticket host admission for `webfetch`. Must precede the install; a late or repeated arming fails closed. */
+export function armPerTicketHostAdmission(): void {
+  if (networkDenialInstalled) throw new Error(NETWORK_ALLOWANCE_LATE_CODE);
+  if (perTicketAdmissionArmed) throw new Error(NETWORK_ALLOWANCE_INVALID_CODE);
+  perTicketAdmissionArmed = true;
+}
+
+/** Whether per-ticket host admission was armed. */
+export function perTicketHostAdmissionArmed(): boolean {
+  return perTicketAdmissionArmed;
+}
+
+/**
+ * Hold one public host open for the one fetch a redeemed `fetch-public-source` ticket authorizes, and return the release.
+ * Refused unless per-ticket admission was armed before the install, while another ticket holds a host, or for an address
+ * literal or loopback name. The release is idempotent and closes exactly the host it opened.
+ */
+export function admitTicketHost(target: SingleHostAllowance): () => void {
+  if (!perTicketAdmissionArmed || ticketHost !== null) throw new Error(NETWORK_ALLOWANCE_INVALID_CODE);
+  const validated = validatedTarget(target);
+  if (!isPublicHostName(validated.host)) throw new Error(NETWORK_ALLOWANCE_INVALID_CODE);
+  const held = validated;
+  ticketHost = held;
+  return () => {
+    if (ticketHost === held) ticketHost = null;
+  };
+}
+
+/** Every host and port a connection may address at this instant: the armed set, and the one ticket host if held. */
+function admittedTargets(): ReadonlyArray<SingleHostAllowance> {
+  return ticketHost === null ? allowances : [...allowances, ticketHost];
 }
 
 /** The host and port one `connect` call addresses, as `net`, `tls`, and `Socket.prototype.connect` accept them; IPC paths never resolve. */
@@ -80,17 +151,18 @@ export function connectionTargetOf(args: readonly unknown[]): { host: string; po
   return null;
 }
 
-/** Whether one connection request addresses exactly the armed host and port. */
+/** Whether one connection request addresses exactly an admitted host and its port. */
 export function allowanceAdmitsConnection(args: readonly unknown[]): boolean {
-  if (allowance === null) return false;
   const target = connectionTargetOf(args);
-  return target !== null && target.host === allowance.host && target.port === allowance.port;
+  return target !== null && admittedTargets().some((admitted) => target.host === admitted.host && target.port === admitted.port);
 }
 
-/** Whether one name lookup names exactly the armed host. */
+/** Whether one name lookup names exactly an admitted host. */
 export function allowanceAdmitsLookup(args: readonly unknown[]): boolean {
   const hostname = args[0];
-  return allowance !== null && typeof hostname === 'string' && hostname.toLowerCase() === allowance.host;
+  if (typeof hostname !== 'string') return false;
+  const name = hostname.toLowerCase();
+  return admittedTargets().some((admitted) => admitted.host === name);
 }
 
 function requireDenied(action: () => unknown): void {

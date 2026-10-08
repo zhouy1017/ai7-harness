@@ -8,11 +8,14 @@ import {
   NETWORK_ALLOWANCE_INVALID_CODE,
   NETWORK_ALLOWANCE_LATE_CODE,
   NETWORK_DENIED_CODE,
+  admitTicketHost,
   allowanceAdmitsConnection,
   allowanceAdmitsLookup,
   armSingleHostAllowance,
   connectionTargetOf,
+  hostAllowanceSet,
   installNodeNetworkDenial,
+  perTicketHostAdmissionArmed,
   singleHostAllowance,
 } from '../../src/shared/network-denial.js';
 
@@ -80,6 +83,14 @@ describe('armSingleHostAllowance', () => {
     expect(deniedCode(() => dnsPromises.resolve4('opencode.ai'))).toBe(NETWORK_DENIED_CODE);
     expect(deniedCode(() => http.request({ host: 'opencode.ai', port: 443 }))).toBe(NETWORK_DENIED_CODE);
     expect(deniedCode(() => net.createServer())).toBe(NETWORK_DENIED_CODE);
+  });
+
+  it('arms the set of one host and no per-ticket admission, so no host can be opened late (Issue #473)', () => {
+    expect(hostAllowanceSet()).toEqual([ALLOWED]);
+    expect(perTicketHostAdmissionArmed()).toBe(false);
+    expect(() => admitTicketHost({ host: 'example.org', port: 443 })).toThrowError(new RegExp(NETWORK_ALLOWANCE_INVALID_CODE, 'u'));
+    expect(allowanceAdmitsConnection([{ host: 'example.org', port: 443 }])).toBe(false);
+    expect(allowanceAdmitsConnection([{ host: 'search.parallel.ai', port: 443 }])).toBe(false);
   });
 
   it('keeps the global fetch denied even for the armed host; only a captured native fetch may reach it', async () => {

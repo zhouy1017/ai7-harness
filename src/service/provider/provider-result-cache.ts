@@ -21,9 +21,21 @@ import { isAbsolute, join } from 'node:path';
  */
 export const PROVIDER_LEDGER_FILE = 'ledger.jsonl';
 export const PROVIDER_CACHE_DIRECTORY = 'entries';
-/** The plan slice that owns every test item id this build can mint. */
+/** The plan slice that owns every model-call test item the analysis path mints; the default slice of `nextItemId`. */
 export const PROVIDER_TEST_ITEM_SLICE = 'S40';
-const ITEM_ID_PATTERN = /^S40\/[a-z0-9-]+\/[1-9][0-9]{0,5}$/u;
+/**
+ * Every plan slice a test item id may name (Issue #473, S87-f3a). S40 owns the analysis path's model calls and every line
+ * the ledger already carries; S87 owns the platform tools' search and fetch items (ADR 0080 §7.6); S17c owns the live
+ * dialogue's items (ADR 0088 §1.8). A slice outside this closed set is not a test item, so no id can be minted for it.
+ */
+export const PROVIDER_TEST_ITEM_SLICES = ['S40', 'S87', 'S17c'] as const;
+export type ProviderTestItemSlice = (typeof PROVIDER_TEST_ITEM_SLICES)[number];
+const ITEM_ID_PATTERN = /^(?:S40|S87|S17c)\/[a-z0-9-]+\/[1-9][0-9]{0,5}$/u;
+/**
+ * What one ledger line records the sending of. A line without `kind` is a model call: every line written before the
+ * platform tools existed reads that way, and a model-call line is still written without the field, byte for byte as before.
+ */
+export type ProviderTestItemKind = 'model-call' | 'search-call' | 'fetch';
 
 export interface ProviderUsageRecord {
   readonly inputTokens: number;
@@ -33,6 +45,8 @@ export interface ProviderUsageRecord {
 /** One append-only ledger line: what was asked for, under which item, and how it settled. */
 export interface ProviderLedgerLine {
   readonly itemId: string;
+  /** Absent on every model-call line, which is how the lines the ledger already carries keep reading. */
+  readonly kind?: 'model-call';
   readonly purpose: string;
   readonly model: string;
   readonly promptContractDigest: string;
@@ -51,6 +65,35 @@ export interface ProviderLedgerLine {
   /** A stale line no longer reserves its item id: the same item may run live again. */
   readonly stale?: boolean;
   readonly recordedAt: string;
+}
+
+/**
+ * One platform-tool line (ADR 0080 §7.6): a `websearch` call forwarded to the rule's search service, or a `webfetch` of
+ * one public source. It records the canonical-argument digest, the host, the result's digest and size, and the elapsed
+ * time — never the query, the page, or the result text.
+ */
+export interface ProviderToolLedgerLine {
+  readonly itemId: string;
+  readonly kind: 'search-call' | 'fetch';
+  readonly purpose: string;
+  /** SHA-256 over the tool name and its canonical arguments: the key the Research Snapshot Cache answers by. */
+  readonly argumentsDigest: string;
+  readonly host: string;
+  readonly outcome: 'transmitted' | 'replayed' | 'failed';
+  readonly status: number | null;
+  readonly resultDigest: string | null;
+  readonly resultBytes: number | null;
+  readonly elapsedMs: number | null;
+  readonly stale?: boolean;
+  readonly recordedAt: string;
+}
+
+/** Any one ledger line. */
+export type ProviderLedgerEntry = ProviderLedgerLine | ProviderToolLedgerLine;
+
+/** Whether one ledger line records a model call; a line without `kind` does. */
+export function isModelCallLine(line: ProviderLedgerEntry): line is ProviderLedgerLine {
+  return line.kind === undefined || line.kind === 'model-call';
 }
 
 /** One cached result: the exact request that produced it and the exact response it produced. */
@@ -94,7 +137,7 @@ export function usageOfResponse(body: unknown): ProviderUsageRecord | null {
 
 export class ProviderResultCache {
   readonly #root: string;
-  #lines: ProviderLedgerLine[] = [];
+  #lines: ProviderLedgerEntry[] = [];
   #opened = false;
 
   constructor(root: string) {
@@ -107,7 +150,7 @@ export class ProviderResultCache {
   }
 
   /** The ledger as it stands; read by the report and the tests, never logged or transmitted. */
-  get lines(): ReadonlyArray<ProviderLedgerLine> {
+  get lines(): ReadonlyArray<ProviderLedgerEntry> {
     return this.#lines;
   }
 
@@ -128,21 +171,25 @@ export class ProviderResultCache {
       } catch {
         throw new ProviderResultCacheError('PROVIDER_LEDGER_CORRUPT', 'Provider Test Ledger 含有无法解析的记录。');
       }
-      requireCache(parsed !== null && typeof parsed === 'object' && typeof (parsed as ProviderLedgerLine).itemId === 'string',
+      requireCache(parsed !== null && typeof parsed === 'object' && typeof (parsed as ProviderLedgerEntry).itemId === 'string',
         'PROVIDER_LEDGER_CORRUPT', 'Provider Test Ledger 记录缺少测试项标识。');
-      return parsed as ProviderLedgerLine;
+      const kind = (parsed as { kind?: unknown }).kind;
+      requireCache(kind === undefined || kind === 'model-call' || kind === 'search-call' || kind === 'fetch',
+        'PROVIDER_LEDGER_CORRUPT', 'Provider Test Ledger 记录的测试项类别无效。');
+      return parsed as ProviderLedgerEntry;
     });
     this.#opened = true;
   }
 
   /**
-   * The next unused test item id for one purpose: `S40/<purpose>/<n>` where `n` is one past the
-   * highest ordinal the ledger already carries for that purpose, stale lines included, so a retired
-   * item's number is never reused for a different request.
+   * The next unused test item id for one purpose: `<slice>/<purpose>/<n>` where `n` is one past the
+   * highest ordinal the ledger already carries for that slice and purpose, stale lines included, so a
+   * retired item's number is never reused for a different request. The slice is S40 unless named.
    */
-  nextItemId(purpose: string): string {
+  nextItemId(purpose: string, slice: ProviderTestItemSlice = PROVIDER_TEST_ITEM_SLICE): string {
     requireCache(/^[a-z0-9-]+$/u.test(purpose), 'PROVIDER_TEST_ITEM_INVALID', '测试项用途无效。');
-    const prefix = `${PROVIDER_TEST_ITEM_SLICE}/${purpose}/`;
+    requireCache((PROVIDER_TEST_ITEM_SLICES as ReadonlyArray<string>).includes(slice), 'PROVIDER_TEST_ITEM_INVALID', '测试项所属切片无效。');
+    const prefix = `${slice}/${purpose}/`;
     const highest = this.#lines.reduce((max, line) => {
       if (!line.itemId.startsWith(prefix)) return max;
       const ordinal = Number(line.itemId.slice(prefix.length));
@@ -188,18 +235,30 @@ export class ProviderResultCache {
   }
 
   /** Append one ledger line. The ledger records identities, counts, and timestamps — never content. */
-  async record(line: ProviderLedgerLine): Promise<void> {
+  async record(line: ProviderLedgerEntry): Promise<void> {
     requireCache(ITEM_ID_PATTERN.test(line.itemId), 'PROVIDER_TEST_ITEM_INVALID', '测试项标识不符合 <slice>/<purpose>/<n> 形式。');
     this.#lines = [...this.#lines, line];
     await appendFile(join(this.#root, PROVIDER_LEDGER_FILE), `${JSON.stringify(line)}\n`, 'utf8');
   }
 
-  /** How many live transmissions and cache replays the ledger has recorded, for the Run's report. */
+  /**
+   * How many live model transmissions and cache replays the ledger has recorded, for the Run's report. Platform-tool
+   * lines are counted by `toolCounts`, so a report's model-call counts never move because a tool ran.
+   */
   counts(): { transmitted: number; replayed: number; failed: number } {
-    return {
-      transmitted: this.#lines.filter((line) => line.outcome === 'transmitted').length,
-      replayed: this.#lines.filter((line) => line.outcome === 'replayed').length,
-      failed: this.#lines.filter((line) => line.outcome === 'failed').length,
-    };
+    return tally(this.#lines.filter(isModelCallLine));
   }
+
+  /** How many platform-tool calls of one kind the ledger has recorded. */
+  toolCounts(kind: 'search-call' | 'fetch'): { transmitted: number; replayed: number; failed: number } {
+    return tally(this.#lines.filter((line) => line.kind === kind));
+  }
+}
+
+function tally(lines: ReadonlyArray<ProviderLedgerEntry>): { transmitted: number; replayed: number; failed: number } {
+  return {
+    transmitted: lines.filter((line) => line.outcome === 'transmitted').length,
+    replayed: lines.filter((line) => line.outcome === 'replayed').length,
+    failed: lines.filter((line) => line.outcome === 'failed').length,
+  };
 }
