@@ -15,14 +15,16 @@ import {
 import { decodeEntities, htmlToMarkdown } from '../../src/service/provider/html-to-markdown.js';
 import { canonicalToolArguments, readPlatformToolsRule, type PlatformToolsRule } from '../../src/service/provider/platform-tools.js';
 import type { PlatformToolFetch, PlatformToolHttpInit } from '../../src/service/provider/platform-tool-http.js';
-import { declaredCharset, fetchPublicSource } from '../../src/service/provider/public-source-fetch.js';
+import { authorizePublicFetch, declaredCharset, fetchPublicSource, sendPublicFetch } from '../../src/service/provider/public-source-fetch.js';
 import {
   SEARCH_RESULT_MAX_CHARACTERS,
   SEARCH_SERVICE_TIMEOUT_MS,
+  authorizeSearchCall,
   capCharacters,
   forwardSearchCall,
   readSearchServiceAnswer,
   searchServiceRequest,
+  sendSearchCall,
 } from '../../src/service/provider/search-service.js';
 
 // The two platform-tool owners (ADR 0080 §7.1; Issue #473, S87-f3a) over stub transports only: no socket, no search
@@ -193,6 +195,30 @@ describe('the webfetch owner', () => {
     await expect(run()).rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
     expect(calls).toHaveLength(1);
     expect(released).toBe(1);
+  });
+});
+
+describe('authorized calls', () => {
+  it('send once each, and nothing an authorization did not produce', async () => {
+    const rule = await v7Rule();
+    const book = new EgressTicketBook();
+    const calls: StubCall[] = [];
+    const fetch = stub(() => new Response(JSON.stringify(SEARCH_ANSWER), { status: 200, headers: { 'content-type': 'application/json' } }), calls);
+    const search = evaluateSearchServiceCall({ host: rule.websearch.host, arguments: websearch, outboundDataCategory: 'public-or-synthetic' }, binding(rule), scope, book) as { ticket: SearchServiceTicket };
+    const authorized = authorizeSearchCall({ ticket: search.ticket, book, rule, arguments: websearch });
+    await sendSearchCall(authorized, fetch);
+    await expect(sendSearchCall(authorized, fetch)).rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
+    await expect(sendSearchCall({ request: authorized.request }, fetch)).rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
+    expect(calls).toHaveLength(1);
+    const page = evaluatePublicSourceFetch({ arguments: webfetch }, binding(rule), scope, book) as { ticket: PublicSourceTicket };
+    const fetchAuthorized = authorizePublicFetch({ ticket: page.ticket, book, rule });
+    const opened: string[] = [];
+    const send = { fetch: stub(() => new Response('x', { status: 200, headers: { 'content-type': 'text/plain' } }), calls), admitHost: ({ host }: { host: string }) => { opened.push(host); return () => undefined; } };
+    await sendPublicFetch(fetchAuthorized, send);
+    await expect(sendPublicFetch(fetchAuthorized, send)).rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
+    await expect(sendPublicFetch({ ...fetchAuthorized }, send)).rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
+    expect(calls).toHaveLength(2);
+    expect(opened).toEqual(['example.org']);
   });
 });
 

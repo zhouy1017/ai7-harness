@@ -207,6 +207,11 @@ describe('under a rule naming the platform tools (v7\'s block, selected by nothi
     refused(fetchLoop, { ...fetchScope, admittedToolResults: results(fetched), citationAdmits: () => false });
     refused(LOOP, { admittedToolResults: results(fetched) });
     refused(fetchLoop, { ...fetchScope, admittedToolResults: results(admitted()) });
+    // A record filed under the call's key but naming another tool is not that call's result either.
+    refused(LOOP, { admittedToolResults: new Map([[toolResultKey('call_1', 'websearch'), admitted({ tool: 'webfetch', sourceUrl: null })]]) });
+    // A call naming a tool the rule does not name is refused even before any result answers it.
+    const shellCall: AssembledContentBlock[] = [{ type: 'tool-call', id: 'call_7', name: 'shell', arguments: '{}' }];
+    refused([user(UNIT), toolCallMessage(shellCall), user(UNIT)], { acceptedToolCallDigests: new Set([assistantToolCallDigest(shellCall)]) });
     // A call id reused by a later call is refused, whatever the second call names.
     const reused: AssembledContentBlock[] = [{ type: 'tool-call', id: 'call_1', name: 'websearch', arguments: '{"query":"另一个"}' }];
     refused([user(UNIT), toolCallMessage(), toolResult(), toolCallMessage(reused), toolResult()],
