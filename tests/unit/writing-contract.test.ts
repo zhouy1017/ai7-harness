@@ -86,6 +86,18 @@ describe('Writing Contract v1 — the frozen input', () => {
     expect(bare.synthesisInstruction).toContain('- 梗概与人物：本书尚无基线分析，本次不参考梗概与人物');
     expect(bare.synthesisInstruction).toContain('- 评估：本书尚无定稿的评估，本次不参考评估结论与营销要点');
     expect(bare.synthesisInstruction).toContain('本社暂无其他图书的宣传文章范例，本次不参考范例。');
+    // An opening is said to be one, in the prompt and so in the contract.
+    const cut = writingContract(input({
+      synopsis: { text: '一位学者收到一封古怪的信。', excerpt: true, characters: [] },
+      exemplars: [{ bookTitle: '范例书', version: 2, text: EXEMPLAR, excerpt: true }],
+    }));
+    expect(cut.input.synopsis?.excerpt).toBe(true);
+    expect(cut.synthesisInstruction).toContain('- 梗概（节选开头）：一位学者收到一封古怪的信。');
+    expect(cut.synthesisInstruction).toContain(`《范例书》版本 2（节选开头）：${EXEMPLAR}`);
+    expect(writingContractDigest(cut)).not.toBe(writingContractDigest(writingContract(input({
+      synopsis: { text: '一位学者收到一封古怪的信。', excerpt: false, characters: [] },
+      exemplars: [{ bookTitle: '范例书', version: 2, text: EXEMPLAR, excerpt: true }],
+    }))));
     expect(writingTypeGuidance('house-own-type')).toBe('按这一类文档的通常写法组织标题与各部分，语气贴合所写的受众与渠道。');
     expect(writingExemplarLine('新闻稿', [])).toBe('本社暂无其他图书的新闻稿范例，本次不参考范例');
     expect(writingExemplarLine('新闻稿', [{ bookTitle: '甲书', version: 3 }, { bookTitle: '乙书', version: 1 }]))

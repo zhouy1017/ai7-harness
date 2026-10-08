@@ -210,6 +210,7 @@ describe('写作任务 over the real store on exact sample1', () => {
       const reviewed = await store.reviewManuscriptExport({ bookId, target, options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS } }, true);
       expect(reviewed.target).toMatchObject({ kind: 'document', document: { typeId: 'promotion-article', typeLabel: '宣传文章', versionLabel: '版本 1' } });
       expect(reviewed.restoration).toBe('regenerated');
+      expect(reviewed.fidelity.filter((row) => row.count > 0).map((row) => row.key)).toEqual([]);
       afterDraft = JSON.stringify(store.inspectWritingTask(bookId));
     });
     // A restart moves nothing.
