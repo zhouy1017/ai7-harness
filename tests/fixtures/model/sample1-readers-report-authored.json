@@ -9,7 +9,7 @@
   "entries": [
     {
       "unitOrdinal": 1,
-      "requestDigest": "e3f7bb457e24519531fc8c74df707af00699866802fab7a83302df50a36da798",
+      "requestDigest": "77d152e995913b399b1392c013675c2a66548f65c58642ed24d1abcd38998dc7",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.readers-report.unit-result/1\",\"unitOrdinal\":1,\"passages\":[{\"kind\":\"strength\",\"note\":\"开篇两句对仗的题辞立即确立全书的思辨气质。\",\"blockOrdinals\":[5,6]},{\"kind\":\"strength\",\"note\":\"写信又撕信的细节以动作写心事，含蓄而有张力。\",\"blockOrdinals\":[8,14]}]}",
@@ -21,7 +21,7 @@
     },
     {
       "unitOrdinal": 2,
-      "requestDigest": "8e609c7cff5636f77f67517b711a2ee9afedb120397e75b6b6bc216b5351f310",
+      "requestDigest": "be3843755893419faaefada92defe858c7566c74c616ea562d38d54dc6fe28ae",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.readers-report.unit-result/1\",\"unitOrdinal\":2,\"passages\":[{\"kind\":\"strength\",\"note\":\"甲骨文来信与写信人早已去世的设定构成核心悬念。\",\"blockOrdinals\":[6,7]},{\"kind\":\"problem\",\"note\":\"打水漂一段个别比喻略显俗套。\",\"blockOrdinals\":[11]},{\"kind\":\"suggestion\",\"note\":\"打水漂一段的比喻可换成更贴切、更有地方色彩的说法。\",\"blockOrdinals\":[11]}]}",
@@ -33,7 +33,7 @@
     },
     {
       "unitOrdinal": 3,
-      "requestDigest": "d7fa1db41feff1f0827a61a96aa031df203a34cbcb38fa0dc511a5afbcde1384",
+      "requestDigest": "41d2d524b2560cc2439cc0458e5f9dc06098dab0c94dd0f0509cb29a224197a0",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.readers-report.unit-result/1\",\"unitOrdinal\":3,\"passages\":[{\"kind\":\"strength\",\"note\":\"邮递员递信的场景节奏紧凑，拆信时才揭示四个甲骨文字。\",\"blockOrdinals\":[7,8,11,15]}]}",
@@ -45,7 +45,7 @@
     },
     {
       "unitOrdinal": 4,
-      "requestDigest": "74c38c978c4f5621ba4cb6543825577f9927756f898929bcff46a14fc0b838e6",
+      "requestDigest": "5ed2225b31de6295f768495f27e861c45ad63ac28987b8db20589accfb689db4",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.readers-report.unit-result/1\",\"unitOrdinal\":4,\"passages\":[{\"kind\":\"strength\",\"note\":\"两位学者互相调侃，写出各自的性情。\",\"blockOrdinals\":[14,15,16]}]}",
@@ -57,7 +57,7 @@
     },
     {
       "unitOrdinal": 5,
-      "requestDigest": "542e90fea2abc50081366e4baf97d6146becf9a8942e7c0ac72adfacdbcd435d",
+      "requestDigest": "4e26c61f32d4af5b597feaf1d9b8af8c923c8a29d3001659a30f778a045c95f4",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.readers-report.unit-result/1\",\"unitOrdinal\":5,\"passages\":[{\"kind\":\"problem\",\"note\":\"个别句子成分残缺，介词之后缺少宾语。\",\"blockOrdinals\":[6]},{\"kind\":\"suggestion\",\"note\":\"逐句校读这一段，补足介词之后缺少的宾语。\",\"blockOrdinals\":[6]}]}",
@@ -69,7 +69,7 @@
     },
     {
       "unitOrdinal": 6,
-      "requestDigest": "bb6cc5b54c893c696ce0e3dac3fc06bf8d8bc2b15568beb6a40da08429c2019b",
+      "requestDigest": "4f35256ec4feb73834a7cbb4daa36cf86c3a1f99c990d844763be309769d93cd",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.readers-report.unit-result/1\",\"unitOrdinal\":6,\"passages\":[{\"kind\":\"problem\",\"note\":\"新省长与楚庄王的比附点到即止，学人与权力的关系还可以展开。\",\"blockOrdinals\":[3,4]}]}",
@@ -81,7 +81,7 @@
     },
     {
       "unitOrdinal": 7,
-      "requestDigest": "950b5707b8cf4b7ad0ab39fde36dbceddbb3a11cd8c546d648fd203e0198b9f1",
+      "requestDigest": "a1298e3f8e950bd7dd4fca4a7315eff476e1666288b13bbf48e38baeb98d214b",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.readers-report.unit-result/1\",\"unitOrdinal\":7,\"passages\":[{\"kind\":\"strength\",\"note\":\"翁婿对话点出学术与名利的冲突。\",\"blockOrdinals\":[16,17]},{\"kind\":\"suggestion\",\"note\":\"这里提出的考古疑问较多，后文宜逐一照应，免得读者失去线索。\",\"blockOrdinals\":[17]}]}",
@@ -93,7 +93,7 @@
     },
     {
       "unitOrdinal": 8,
-      "requestDigest": "456b29634f4e02f83343ca57bbf93f7e4f91f09bd833aaa6129b4f69b926451b",
+      "requestDigest": "19f745f039ec534c226d9963dff6e21bcbdbac179eca6049c4846738b48042bc",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.readers-report.unit-result/1\",\"unitOrdinal\":8,\"passages\":[{\"kind\":\"strength\",\"note\":\"以放大镜细看来信收束本章，与章首撕信遥相呼应。\",\"blockOrdinals\":[6]}]}",
@@ -105,7 +105,7 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "6be52650e6b11a90ae7dfaa06757b3b2d494836117ebaccc7a6f0e354ab76b3b",
+      "requestDigest": "a3769af17630e9f325343044d6f0c2149099ce44014043f950e9cfd1d8b9f01f",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.readers-report.synthesis-result/1\",\"overall\":\"这部书稿以一封甲骨文来信设置悬念，写学界中人的心事与人情，细节与意象运用纯熟，人物对白各有声口，整体达到出版要求。目前的问题主要在语言的细部：个别句子成分残缺，个别比喻落入俗套；学人与权力的主题在所读部分展开得还不够充分。\",\"strengths\":[\"以甲骨文来信设置核心悬念，开篇即抓住读者，章末的收束与开篇遥相呼应。\",\"写信又撕信、以放大镜细看来信等细节以动作写心事，含蓄而有张力。\",\"人物对白各有声口，两位学者之间的调侃写出各自的性情。\"],\"problems\":[\"个别句子成分残缺，例如介词之后缺少宾语，需要逐句校改。\",\"个别比喻略显俗套，与全书凝练的叙述语言不相称。\",\"学人与权力、学术与名利的主题点到即止，在所读部分展开得还不够。\"],\"suggestions\":[\"请逐句校读全稿，补足残缺的句子成分。\",\"打水漂一段的比喻可换成更贴切、更有地方色彩的说法。\",\"在后文照应前面提出的考古疑问，并让学人与权力的主题有更充分的展开。\"],\"conclusion\":\"结论为修改后再议：请按以上意见修改，修改稿交来后编辑部再作审读。\"}",

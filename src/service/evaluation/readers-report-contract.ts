@@ -124,7 +124,8 @@ export interface ReadersReportSynthesisResult {
  * the contract does not list; `block-out-of-unit` a cited position past the unit's blocks.
  */
 export type ReadersReportUnitParseFailureCode = 'not-json' | 'schema-invalid' | 'unit-mismatch' | 'kind-unknown' | 'block-out-of-unit';
-export type ReadersReportSynthesisParseFailureCode = 'not-json' | 'schema-invalid';
+/** `conclusion-mismatch`: a 结论 that does not carry the conclusion the editor chose. */
+export type ReadersReportSynthesisParseFailureCode = 'not-json' | 'schema-invalid' | 'conclusion-mismatch';
 
 export type ReadersReportUnitParse =
   | { ok: true; result: ReadersReportUnitResult; canonicalJson: string; digest: string }
@@ -167,9 +168,20 @@ function score(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
+/** The record's own text: a line break is its own (`oneLine` reads it as `／`); no other control or separator character is. */
+const RECORD_CONTROL_CHARACTER = /[\p{Zl}\p{Zp}]|(?![\n])\p{Cc}/u;
+
 function text(value: unknown, maximum: number): value is string {
-  return typeof value === 'string' && value.isWellFormed() && value.trim().length > 0 && graphemeCount(value) <= maximum;
+  return typeof value === 'string' && value.isWellFormed() && value.trim().length > 0 && graphemeCount(value) <= maximum &&
+    !RECORD_CONTROL_CHARACTER.test(value);
 }
+
+/** A score or total as the record holds it: a finite number, never NaN or an infinity. */
+function finite(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+const SUFFICIENCIES: ReadonlyArray<InitialEvaluationSufficiency> = ['sufficient', 'fair', 'insufficient'];
 
 /** The contract input exactly as it freezes: a template it knows, a record of the closed shape, at most two exemplars. */
 function frozenInput(input: ReadersReportContractInput): ReadersReportContractInput {
@@ -180,14 +192,15 @@ function frozenInput(input: ReadersReportContractInput): ReadersReportContractIn
     Array.isArray(record.items) && record.items.length >= 1 && record.items.length <= 32 && Array.isArray(record.risks) &&
     Array.isArray(record.readiness) && Array.isArray(record.strengths) && Array.isArray(record.weaknesses) &&
     (record.verdict === null || text(record.verdict, 4_000)) && text(record.conclusion, 20) && isRecord(record.total) &&
-    typeof record.total.score === 'number' && typeof record.total.fullMarks === 'number',
+    finite(record.total.score) && finite(record.total.fullMarks),
   'READERS_REPORT_INPUT_INVALID', '审稿意见所依据的评估记录无效。');
   const items = record.items.map((given): ReadersReportRecordItem => {
     const item = given as ReadersReportRecordItem;
     requireAnalysis(isRecord(item) && text(item.label, 40) && Number.isSafeInteger(item.fullMarks) &&
-      (item.score === null || typeof item.score === 'number') && (item.notRated === null || text(item.notRated, 400)) &&
+      (item.score === null || finite(item.score)) && (item.notRated === null || text(item.notRated, 400)) &&
       (item.comment === null || text(item.comment, 4_000)) &&
-      (item.ai7 === null || (isRecord(item.ai7) && Array.isArray(item.ai7.evidence) &&
+      (item.ai7 === null || (isRecord(item.ai7) && (item.ai7.score === null || finite(item.ai7.score)) &&
+        SUFFICIENCIES.includes(item.ai7.sufficiency) && Array.isArray(item.ai7.evidence) &&
         item.ai7.evidence.every((entry) => isRecord(entry) && Number.isSafeInteger(entry.unitOrdinal) && text(entry.note, 400)))),
     'READERS_REPORT_INPUT_INVALID', '审稿意见所依据的评分项无效。');
     return {
@@ -289,7 +302,7 @@ function synthesisInstructionOf(input: ReadersReportContractInput): string {
     `以下是同一部书稿各已闭合阅读范围中可以引用的段落。依据系统提示中定稿的评估记录与这些段落，按「${READERS_REPORT_TEMPLATE_LABELS[input.template]}」模板写出审稿意见的五个部分：总体评价、主要优点、主要问题、修改建议、结论。`,
     TEMPLATE_GUIDANCE[input.template],
     ...exemplarLines,
-    '不重读稿件原文、不进行事实核查、不引用外部知识、不调用任何工具、不改写稿件。结论必须与评估记录中编辑选定的结论一致。',
+    `不重读稿件原文、不进行事实核查、不引用外部知识、不调用任何工具、不改写稿件。结论必须与评估记录中编辑选定的结论一致，并原样写出「${input.record.conclusion}」。`,
     '只输出一个 JSON 对象，不加说明文字，不加代码围栏。JSON 必须精确包含以下键，且不得多出任何键：',
     'schema（固定为 "ai7.readers-report.synthesis-result/1"）、overall、strengths、problems、suggestions、conclusion。',
     'overall（总体评价）与 conclusion（结论）各是一段话，分别不超过 600 与 300 字素；strengths（主要优点）、problems（主要问题）、suggestions（修改建议）是字符串数组，各 1 到 6 条，每条不超过 200 字素。每段话与每一条都只占一行。',
@@ -392,8 +405,11 @@ function sectionLines(value: unknown): value is string[] {
     value.every((entry) => line(entry, MAX_SECTION_LINE_GRAPHEMES));
 }
 
-/** Admit the synthesis: the five sections, each within its bound, and nothing else. */
-export function parseReadersReportSynthesis(text: string): ReadersReportSynthesisParse {
+/**
+ * Admit the synthesis: the five sections, each within its bound, and nothing else — and a 结论 that carries the conclusion the
+ * editor chose (`conclusion`, its label), since the draft never changes it.
+ */
+export function parseReadersReportSynthesis(text: string, conclusion: string): ReadersReportSynthesisParse {
   const parsed = parseJson(text);
   if (!parsed.ok) return { ok: false, code: 'not-json', detail: '模型输出不是 JSON。' };
   const value = parsed.value;
@@ -407,6 +423,9 @@ export function parseReadersReportSynthesis(text: string): ReadersReportSynthesi
   if (!sectionLines(value.problems)) return invalid('主要问题不符合审稿意见契约 v1。');
   if (!sectionLines(value.suggestions)) return invalid('修改建议不符合审稿意见契约 v1。');
   if (!line(value.conclusion, MAX_CONCLUSION_GRAPHEMES)) return invalid('结论缺失、含有控制字符或超出 300 字素边界。');
+  if (!value.conclusion.includes(conclusion)) {
+    return { ok: false, code: 'conclusion-mismatch', detail: `结论没有写出编辑选定的结论「${conclusion}」。` };
+  }
   return {
     ok: true,
     result: {

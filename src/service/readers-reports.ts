@@ -355,10 +355,19 @@ export class ReadersReports {
     return row === undefined ? null : text(row.task_intent_id);
   }
 
-  /** Any recorded 审稿意见 Task of any Book, the latest: what a reconciliation of the kind's Runs builds its ledger from. */
+  /**
+   * Any recorded 审稿意见 Task of any Book that still verifies, the latest first: what a reconciliation of the kind's Runs builds
+   * its ledger from. A damaged row is passed over — the reconciliation needs the kind, not that row.
+   */
   anyTask(): StoredReadersReportTask | null {
-    const row = this.#db.prepare('SELECT * FROM readers_report_tasks ORDER BY recorded_at DESC, rowid DESC LIMIT 1').get() as SqlRow | undefined;
-    return row === undefined ? null : this.#task(row);
+    for (const row of this.#db.prepare('SELECT * FROM readers_report_tasks ORDER BY recorded_at DESC, rowid DESC').iterate() as IterableIterator<SqlRow>) {
+      try {
+        return this.#task(row);
+      } catch (error) {
+        if (!(error instanceof ReadersReportError)) throw error;
+      }
+    }
+    return null;
   }
 
   /** The Book's 审稿意见 Result Set Revisions newest first, each with the Task that made it. */

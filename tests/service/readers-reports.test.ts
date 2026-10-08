@@ -191,7 +191,7 @@ describe('审稿意见 over the real store on exact sample1', () => {
       expect(documents.types.map((type) => [type.typeId, type.document])).toEqual([
         ['news-release', null], ['promotion-article', null], ['review-article', null], ['launch-materials', null], ['marketing-points', null],
       ]);
-      // Once per template; a draft is never delivered, nor made 从来源材料.
+      // Once per template, and a draft is never delivered.
       expect(await refusal(() => book.store.createReadersReportDraft(book.bookId, revision.revisionId)))
         .toBe('READERS_REPORT_DRAFT_EXISTS:这本书已经有「给作者的修改意见」的草稿；请打开它继续修改。');
       expect(await refusal(() => book.store.recordProductionDocumentDelivery({
@@ -199,6 +199,16 @@ describe('审稿意见 over the real store on exact sample1', () => {
         recipient: { kind: 'editorial', custom: null }, note: null,
       }))).toBe('READERS_REPORT_NOT_DELIVERABLE:审稿意见草稿不能在这里交付；它只在稿件编辑面上修改并导出。');
       expect((await refusal(() => book.store.createReadersReportPreparationWork(book.bookId, 'author', launchPolicy))).startsWith('READERS_REPORT_DRAFT_EXISTS:')).toBe(true);
+      // Nor is a 审稿意见 type made 从来源材料 or marked 本书不做 in 交付物, and 图书交付包 names no condition of it (Issue #662 review).
+      for (const typeId of ['readers-report-author', 'readers-report-editorial']) {
+        expect(await refusal(() => book.store.createProductionDocument({ bookId: book.bookId, typeId, sourceVersionId: randomUUID() })))
+          .toBe('PRODUCTION_DOCUMENT_TYPE_INVALID:这个文档类型不在本社的类型配置中。');
+        expect(await refusal(() => book.store.decideProductionDocumentType({ bookId: book.bookId, typeId, notForThisBook: true })))
+          .toBe('PRODUCTION_DOCUMENT_TYPE_INVALID:这个文档类型不在本社的类型配置中。');
+      }
+      const bundle = book.store.inspectBookDeliveryPackage(book.bookId);
+      expect(JSON.stringify(bundle)).not.toContain('readers-report');
+      expect(JSON.stringify(bundle)).not.toContain(draft.document.documentId);
 
       // Edited on the manuscript surface and 保存为版本: 版本 2.
       const first = window.blocks[2]!;

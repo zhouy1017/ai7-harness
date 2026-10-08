@@ -129,7 +129,8 @@ export function readersReportKindDefinition(input: ReadersReportContractInput): 
         notEnoughReason: '没有读完的阅读范围，全书综合未发起，AI7 没有写出审稿意见草稿。',
         buildMessage: (closed, totalUnits) => buildReadersReportSynthesisMessage(contract, closedUnits(closed), totalUnits),
         requestDigest: (closed) => readersReportSynthesisRequestDigest(promptContractDigest, readersReportPassageSetDigest(closedUnits(closed))),
-        parse: (text) => parseReadersReportSynthesis(text),
+        // The 结论 must carry the conclusion the editor chose: a draft that says another is refused whole, a gap.
+        parse: (text) => parseReadersReportSynthesis(text, contract.input.record.conclusion),
       },
     },
     crossUnitAbsentReason: '',
