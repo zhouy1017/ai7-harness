@@ -41,8 +41,11 @@ const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
 const SAMPLE1_BYTES = 29_550;
 const SAMPLE1_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
-/** The J-04 model adapter's base fixture: every unit, the reduction and the sample of exact `sample1` answered. */
-const FIXTURE_IDENTITY = 'sample1-baseline-happy';
+/**
+ * The J-04 model adapter's fixture: `sample1-baseline-happy` — every unit, the reduction and the sample of exact `sample1`
+ * answered — with the one dialogue question J-16 asks answered over it (Issue #52, S17a).
+ */
+const FIXTURE_IDENTITY = 'sample1-dialogue';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
@@ -537,6 +540,142 @@ async function cardAction(renderer, state, action, name) {
 const blockInView = (blockId) => `document.querySelector('[data-screen="editor"] .ProseMirror [data-block-id=${JSON.stringify(blockId)}]') !== null`;
 const CHIP = `document.querySelector('[data-screen="editor"] .return-chip-host [data-return-chip]')`;
 
+// ---- 就这段提问… (Issue #52, plan slice S17a): a selection, its question, and the dialogue as the editor reads it ---------
+
+/** The one question J-16 asks; `sample1-dialogue` answers it, and only it. */
+const DIALOGUE_QUESTION = '这段的叙述视角是否一致？';
+/** The fixture's three sentences, the second cut in two between its first two deltas, the third with no end mark. */
+const ANSWER_FIRST = '这段一直用第三人称限知视角叙述。';
+const ANSWER_SECOND = '人物的心理只写到主人公为止，没有越界。';
+const ANSWER_TAIL = '唯一可以斟酌的是末句的语气，略显突兀，可以改得更平缓些';
+const ANSWER_BROKEN = '人物的心理只写到';
+/** What the selected words become in the 修改建议 made of the answer: the Journey's own words. */
+const DIALOGUE_PROPOSAL = '〔依据回答改得更平缓的一句〕';
+
+/**
+ * A hand on the manuscript, as J-11 has one: put a selection into a block by offset, right-click the way a pointer does,
+ * and act on the floating Mark surface by its data attributes.
+ */
+const MARK_HELPERS = `(() => {
+  if (window.__j16) return true;
+  const editor = () => document.querySelector('[data-testid="manuscript-editor"]');
+  const block = (id) => editor()?.querySelector('[data-block-id="' + id + '"]') ?? null;
+  const durable = (root) => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) => node.parentElement?.closest('[data-mark-preview]') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+    });
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    return nodes;
+  };
+  const point = (root, offset) => {
+    let left = offset;
+    for (const node of durable(root)) {
+      if (left <= node.data.length) return [node, left];
+      left -= node.data.length;
+    }
+    return null;
+  };
+  const layer = () => document.querySelector('.editorial-mark-layer');
+  window.__j16 = {
+    place: (id, from, to) => {
+      const root = block(id);
+      if (!root) return false;
+      editor().focus();
+      const start = point(root, from);
+      const end = point(root, to);
+      if (!start || !end) return false;
+      const range = document.createRange();
+      range.setStart(start[0], start[1]);
+      range.setEnd(end[0], end[1]);
+      const selection = getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return selection.toString().length === to - from;
+    },
+    rightClick: (element) => {
+      if (!(element instanceof HTMLElement)) return false;
+      const rect = element.getBoundingClientRect();
+      const init = { bubbles: true, cancelable: true, button: 2, buttons: 2, clientX: rect.left + Math.min(10, rect.width / 2), clientY: rect.top + Math.min(24, rect.height / 2) };
+      element.dispatchEvent(new MouseEvent('mousedown', init));
+      element.dispatchEvent(new MouseEvent('mouseup', { ...init, buttons: 0 }));
+      element.dispatchEvent(new MouseEvent('contextmenu', { ...init, buttons: 0 }));
+      return true;
+    },
+    block,
+    menu: () => document.querySelector('.editorial-mark-menu-layer [data-mark-menu]'),
+    item: (action) => document.querySelector('.editorial-mark-menu-layer [data-mark-menu] [data-mark-action="' + action + '"]'),
+    card: () => layer()?.querySelector('[data-mark-card]') ?? null,
+    composer: () => layer()?.querySelector('[data-mark-composer]') ?? null,
+    act: (action) => {
+      const control = layer()?.querySelector('[data-mark-composer] [data-mark-action="' + action + '"]');
+      if (!(control instanceof HTMLButtonElement) || control.disabled) return false;
+      control.click();
+      return true;
+    },
+  };
+  return true;
+})()`;
+
+/** A menu opened with the pointer: the editor reads a selection a tick after the page sets it, so it is asked again until it shows. */
+async function openSelectionMenu(renderer, blockId, from, to, name) {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    await assertRenderer(renderer, `window.__j16.place(${JSON.stringify(blockId)}, ${from}, ${to})`, `${name}-place`);
+    await new Promise((resolveWait) => setTimeout(resolveWait, 80));
+    await assertRenderer(renderer, `window.__j16.rightClick(window.__j16.block(${JSON.stringify(blockId)}))`, `${name}-right-click`);
+    if (await renderer.evaluate(`window.__j16.menu()?.dataset.markMenu === 'selection' && window.__j16.menu().textContent.includes('已选 ${to - from} 字')`)) return;
+    await pressEscape(renderer);
+    await new Promise((resolveWait) => setTimeout(resolveWait, 120));
+  }
+  throw new Error(`J-16/${name}`);
+}
+
+/**
+ * The dialogue in the side slot as the editor reads it: the slot's view and title, the selected words and the question, each
+ * attempt's heading, state, fragments and incomplete line, and the actions with whether each can be pressed.
+ */
+const READ_DIALOGUE = `(() => {
+  const drawer = document.querySelector('#task-drawer');
+  const dialogue = drawer?.querySelector('.dialogue');
+  if (!(drawer instanceof HTMLElement) || drawer.hidden || drawer.dataset.taskDrawerView !== 'dialogue' || !(dialogue instanceof HTMLElement)) return null;
+  const text = (node) => node?.textContent ?? null;
+  return {
+    state: dialogue.dataset.dialogue ?? null,
+    dialogueId: dialogue.dataset.dialogueId ?? null,
+    title: text(drawer.querySelector('#task-drawer-title')),
+    selection: text(dialogue.querySelector('.dialogue-selection')),
+    question: text(dialogue.querySelector('.dialogue-question')),
+    attempts: Array.from(dialogue.querySelectorAll('section.dialogue-attempt')).map((attempt) => ({
+      kind: attempt.dataset.dialogueKind ?? null,
+      state: attempt.dataset.dialogueState ?? null,
+      heading: text(attempt.querySelector('.dialogue-attempt-heading')),
+      label: text(attempt.querySelector('[data-dialogue-state-label]')),
+      fragments: Array.from(attempt.querySelectorAll('[data-dialogue-fragment]')).map((fragment) => fragment.textContent),
+      answer: text(attempt.querySelector('.dialogue-answer')),
+      incomplete: text(attempt.querySelector('.dialogue-incomplete')),
+      converted: text(attempt.querySelector('.dialogue-converted')),
+    })),
+    actions: Array.from(dialogue.querySelectorAll('.dialogue-actions [data-dialogue-action]')).map((button) => [button.dataset.dialogueAction, button.textContent, button.disabled ? 'disabled' : 'enabled']),
+    note: text(dialogue.querySelector('.dialogue-authority')),
+  };
+})()`;
+
+async function waitForDialogue(renderer, check, name, timeout = 60_000) {
+  const deadline = Date.now() + timeout;
+  let last = null;
+  while (Date.now() < deadline) {
+    last = await renderer.evaluate(READ_DIALOGUE).catch(() => null);
+    if (last !== null && check(last)) return last;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+  }
+  requireJourney(false, name, last);
+}
+
+async function dialogueAction(renderer, action, name) {
+  await clickSelector(renderer, `#task-drawer .dialogue [data-dialogue-action=${JSON.stringify(action)}]`, name);
+}
+
 async function main() {
   parseJourney();
   let browser;
@@ -733,6 +872,9 @@ async function main() {
     electronExecutableForCleanup = executable;
     // Every Journey launch names the picker's file, the J-04 model adapter and J-16's unit hold; a cleanup launch none.
     const holdPath = resolve(runRoot, 'j16-unit-hold.txt');
+    // J-16's answer hold (Issue #52, S17a): how many text deltas a dialogue answer may stream before it waits.
+    const answerHoldPath = resolve(runRoot, 'j16-answer-hold.txt');
+    const writeAnswerHold = (count) => writeFile(answerHoldPath, String(count), 'utf8');
     // The J-04 adapter's fixture: the happy one until the fourth Book's launch (Issue #422, S76d).
     let adapterFixture = FIXTURE_IDENTITY;
     const launchArgs = ({ forCleanup }) => {
@@ -741,7 +883,7 @@ async function main() {
         '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
         resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid),
       ];
-      if (!forCleanup) args.push('--j16-picker-path', SAMPLE1_PATH, '--j04-model-adapter', adapterFixture, '--j10-unit-hold-path', holdPath);
+      if (!forCleanup) args.push('--j16-picker-path', SAMPLE1_PATH, '--j04-model-adapter', adapterFixture, '--j10-unit-hold-path', holdPath, '--j16-answer-hold-path', answerHoldPath);
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       return args;
     };
@@ -771,8 +913,9 @@ async function main() {
     await writeFile(holdPath, String(FIRST_HOLD), 'utf8');
     await launchForCleanup();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'product-ready');
-    // The 任务 panel is one read, and nothing holds a dialogue yet: dialogue Tasks, their answers and their streaming are S17's.
-    await assertRenderer(renderer, `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && typeof window.ai7.inspectBookTasks === 'function' && !Object.keys(window.ai7).some((key)=>/dialog|chat|conversation|stream/i.test(key))`, 'renderer-api-boundary');
+    // The 任务 panel is one read; a dialogue (Issue #52, S17a) is asked about a selection and read, stopped, answered again or
+    // converted by its own operations — no chat, conversation or stream is exposed to the renderer.
+    await assertRenderer(renderer, `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && typeof window.ai7.inspectBookTasks === 'function' && typeof window.ai7.askAboutSelection === 'function' && Object.keys(window.ai7).filter((key)=>/dialog/i.test(key)).sort().join(',') === 'continueDialogueAnswer,convertDialogueToChangeSuggestion,inspectDialogue,regenerateDialogueAnswer,stopDialogueAnswer' && !Object.keys(window.ai7).some((key)=>/chat|conversation|stream/i.test(key))`, 'renderer-api-boundary');
     await renderer.send('Page.setBypassCSP', { enabled: true });
     try {
       const fetchRejected = await renderer.evaluate(`(async()=>{try{await fetch(${JSON.stringify(loopback.url)});return false}catch{return true}})()`);
@@ -1109,6 +1252,144 @@ async function main() {
     await assertRenderer(renderer, `(() => { const card = document.querySelector('#task-drawer li.task-card'); const count = document.querySelector('#task-drawer .task-panel-count'); return card instanceof HTMLElement && getComputedStyle(card).borderLeftStyle === 'solid' && parseFloat(getComputedStyle(card).borderLeftWidth) >= 2 && count instanceof HTMLElement && getComputedStyle(count).borderTopStyle === 'solid'; })()`, 'panel-without-colour');
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
 
+    // ---- 就这段提问… (Issue #52, plan slice S17a; UI ADR 0014; DIALOG-001 to 016, TASK-044, TASK-046) ---------------------
+    at('dialogue-ask');
+    // The selection menu's 就这段提问… opens a small composer that says plainly what is sent; asking needs no plan and no
+    // 开始任务 (the Owner, 2026-10-07). The answer hold lets two deltas through: a whole sentence and half of the next.
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'dialogue-drawer-close');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true`, 'dialogue-drawer-closed');
+    await assertRenderer(renderer, MARK_HELPERS, 'dialogue-page-helpers');
+    const askBlock = await renderer.evaluate(`(() => { const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }); return Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).find((node) => { const head = (node.textContent ?? '').slice(0, 30); return head.length === 30 && Array.from(segmenter.segment(head)).length === 30 && node.querySelector('.editorial-mark') === null; })?.dataset.blockId ?? null; })()`);
+    requireJourney(/^blk_[0-9a-f]{24}$/.test(askBlock ?? ''), 'dialogue-block');
+    const selectedWords = await renderer.evaluate(`(window.__j16.block(${JSON.stringify(askBlock)})?.textContent ?? '').slice(2, 22)`);
+    requireJourney(typeof selectedWords === 'string' && selectedWords.length === 20, 'dialogue-selected-words');
+    await writeAnswerHold(2);
+    await openSelectionMenu(renderer, askBlock, 2, 22, 'dialogue-menu');
+    await assertRenderer(renderer, `(() => { const item = window.__j16.item('ask-on-selection'); return item instanceof HTMLButtonElement && !item.disabled && item.textContent.startsWith('就这段提问…') && item.textContent.includes('对话，不改稿件'); })()`, 'dialogue-menu-item');
+    await assertRenderer(renderer, `(() => { const item = window.__j16.item('ask-on-selection'); item.click(); return true; })()`, 'dialogue-menu-choose');
+    await waitFor(renderer, `window.__j16.composer()?.dataset.markComposer === 'ask-about-selection'`, 'dialogue-composer');
+    await assertRenderer(renderer, `(() => { const composer = window.__j16.composer(); return composer.getAttribute('aria-label') === '就这段提问' && composer.querySelector('.editorial-mark-quote')?.textContent === ${JSON.stringify(selectedWords)} && composer.querySelector('[data-mark-form-note]')?.textContent === '只发送所选文字和你的问题，不改稿件。' && composer.querySelector('[data-mark-action="submit"]')?.textContent === '提问'; })()`, 'dialogue-composer-words');
+
+    at('j14-dialogue-ime');
+    // The question is typed as the keyboard types it, its middle word through an input method's composition.
+    await assertRenderer(renderer, `(() => { const input = window.__j16.composer()?.querySelector('[data-mark-field="question"]'); if (!(input instanceof HTMLTextAreaElement)) return false; input.focus(); return document.activeElement === input && input.value === ''; })()`, 'dialogue-question-focus');
+    await renderer.send('Input.insertText', { text: '这段的叙述' });
+    await renderer.send('Input.imeSetComposition', { text: '视角', selectionStart: 2, selectionEnd: 2, replacementStart: 0, replacementEnd: 0 });
+    await renderer.send('Input.insertText', { text: '视角' });
+    await renderer.send('Input.insertText', { text: '是否一致？' });
+    await waitFor(renderer, `window.__j16.composer()?.querySelector('[data-mark-field="question"]')?.value === ${JSON.stringify(DIALOGUE_QUESTION)}`, 'dialogue-question-typed', 10_000);
+    await assertRenderer(renderer, `window.__j16.act('submit')`, 'dialogue-ask-submit');
+
+    at('dialogue-streaming-held');
+    // The dialogue comes to the foreground in the side slot. Held after two deltas, the first sentence shows and the second,
+    // cut in two, does not: nothing appears by token or with a broken tail (DIALOG-006).
+    const held = await waitForDialogue(renderer, (dialogue) => dialogue.state === 'ready' && dialogue.attempts.length === 1 && dialogue.attempts[0].fragments.length === 1, 'dialogue-held');
+    requireJourney(held.title === '对话' && held.selection === selectedWords && held.question === DIALOGUE_QUESTION &&
+      held.attempts[0].kind === 'ask' && held.attempts[0].state === 'answering' && held.attempts[0].heading === '第 1 次 · 回答' &&
+      held.attempts[0].label === '正在回答 · 内容尚未完成' && JSON.stringify(held.attempts[0].fragments) === JSON.stringify([ANSWER_FIRST]) &&
+      !held.attempts[0].answer.includes(ANSWER_BROKEN) && JSON.stringify(held.actions) === JSON.stringify([['stop', '停止回答', 'enabled']]) &&
+      held.note === '回答是生成的内容，只供参考：它不改稿件，也不是事实结论或修改建议。', 'dialogue-held-words', held);
+    const dialogueId = held.dialogueId;
+    requireJourney(UUID_PATTERN.test(dialogueId ?? ''), 'dialogue-identity');
+    const recorded = await renderer.evaluate(`window.ai7.inspectDialogue({ dialogueId: ${JSON.stringify(dialogueId)}, afterFragment: 0 })`);
+    requireJourney(recorded?.bookId === bookId && recorded.range.blockId === askBlock && recorded.range.fromGrapheme === 2 && recorded.range.toGrapheme === 22 &&
+      recorded.attempts.length === 1 && recorded.attempts[0].state === 'answering' && recorded.attempts[0].fragmentTotal === 1, 'dialogue-recorded', recorded);
+    const workingDigest = () => renderer.evaluate(`window.ai7.getManuscriptWindow({ manuscriptId: ${JSON.stringify(recorded.manuscriptId)}, branchId: ${JSON.stringify(recorded.branchId)}, cursor: null }).then((window) => window.workingDigest)`);
+    const digestBefore = await workingDigest();
+    requireJourney(/^[0-9a-f]{64}$/.test(digestBefore ?? ''), 'dialogue-working-digest');
+    // Held, it stays held: a moment later the same one fragment.
+    await new Promise((resolveWait) => setTimeout(resolveWait, 800));
+    const stillHeld = await renderer.evaluate(READ_DIALOGUE);
+    requireJourney(JSON.stringify(stillHeld?.attempts[0]?.fragments) === JSON.stringify([ANSWER_FIRST]), 'dialogue-still-held', stillHeld);
+
+    at('dialogue-background');
+    // `← 任务` puts the dialogue in the background: its card in 进行中 says only 等待回答 and offers 打开对话 (DIALOG-010). Two
+    // more deltas arrive meanwhile — the second sentence completes — and the panel shows nothing of them, nor moves focus.
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'dialogue-leave');
+    const background = await waitForPanel(renderer, (panel) => cardsOf(panel, 'running').some((card) => card.state === 'dialogue-answering'), 'dialogue-background-card');
+    const backgroundCard = cardsOf(background, 'running').find((card) => card.state === 'dialogue-answering');
+    requireJourney(backgroundCard.kind === '对话任务 · 就所选文字提问' && backgroundCard.title === `提问 · 「${DIALOGUE_QUESTION}」` && backgroundCard.pill === '等待回答' &&
+      backgroundCard.reason === '回答在后台继续；打开对话可以看到已经收到的完整内容。' &&
+      JSON.stringify(backgroundCard.actions) === JSON.stringify([['next', '打开对话', 'enabled']]), 'dialogue-background-words', backgroundCard);
+    await assertRenderer(renderer, `(() => { const title = document.querySelector('#task-drawer-title'); title.focus(); return document.activeElement === title; })()`, 'dialogue-background-focus');
+    await writeAnswerHold(4);
+    await waitFor(renderer, `window.ai7.inspectDialogue({ dialogueId: ${JSON.stringify(dialogueId)}, afterFragment: 0 }).then((dialogue) => dialogue.attempts[0].fragmentTotal === 2 && dialogue.attempts[0].state === 'answering')`, 'dialogue-background-arrived', 30_000);
+    await new Promise((resolveWait) => setTimeout(resolveWait, 600));
+    await assertRenderer(renderer, `document.activeElement === document.querySelector('#task-drawer-title') && document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'panel' && document.querySelector('#task-drawer .dialogue') === null && document.querySelectorAll('[data-dialogue-fragment]').length === 0`, 'dialogue-background-quiet');
+
+    at('dialogue-return');
+    // 打开对话 brings it back: every complete fragment received meanwhile, and the answer still in flight (DIALOG-011).
+    await cardAction(renderer, 'dialogue-answering', 'next', 'dialogue-open');
+    const returned = await waitForDialogue(renderer, (dialogue) => dialogue.state === 'ready' && dialogue.attempts[0]?.fragments.length === 2, 'dialogue-returned');
+    requireJourney(returned.dialogueId === dialogueId && returned.attempts[0].state === 'answering' &&
+      JSON.stringify(returned.attempts[0].fragments) === JSON.stringify([ANSWER_FIRST, ANSWER_SECOND]) && !returned.attempts[0].answer.includes('唯一可以斟酌'), 'dialogue-returned-words', returned);
+
+    at('dialogue-stop');
+    // 停止回答 keeps the complete fragments only, labelled incomplete; it cannot be made a 修改建议 (DIALOG-012, 013).
+    await dialogueAction(renderer, 'stop', 'dialogue-stop');
+    const stopped = await waitForDialogue(renderer, (dialogue) => dialogue.attempts[0]?.state === 'stopped', 'dialogue-stopped');
+    requireJourney(stopped.attempts[0].label === '回答已停止 · 内容不完整' && stopped.attempts[0].incomplete === '你停止了回答；只保留了完整的句子。' &&
+      JSON.stringify(stopped.attempts[0].fragments) === JSON.stringify([ANSWER_FIRST, ANSWER_SECOND]) &&
+      JSON.stringify(stopped.actions) === JSON.stringify([['continue', '继续回答', 'enabled'], ['regenerate', '重新回答', 'enabled'], ['convert', '转为修改建议', 'disabled']]), 'dialogue-stopped-words', stopped);
+    await assertRenderer(renderer, `document.querySelector('#task-drawer .dialogue [data-dialogue-action="convert"]')?.title === '内容不完整的回答不能转为修改建议。'`, 'dialogue-stopped-convert-why');
+
+    at('dialogue-regenerate');
+    // 重新回答 is a new attempt linked to the one before, asking the same question about the same words again (DIALOG-014).
+    await writeAnswerHold(99);
+    await dialogueAction(renderer, 'regenerate', 'dialogue-regenerate');
+    const regenerated = await waitForDialogue(renderer, (dialogue) => dialogue.attempts.length === 2 && dialogue.attempts[1].state === 'completed', 'dialogue-regenerated', 60_000);
+    requireJourney(regenerated.attempts[0].state === 'stopped' && JSON.stringify(regenerated.attempts[0].fragments) === JSON.stringify([ANSWER_FIRST, ANSWER_SECOND]) &&
+      regenerated.attempts[1].kind === 'regenerate' && regenerated.attempts[1].heading === '第 2 次 · 重新回答' && regenerated.attempts[1].label === '回答完成' &&
+      JSON.stringify(regenerated.attempts[1].fragments) === JSON.stringify([ANSWER_FIRST, ANSWER_SECOND, ANSWER_TAIL]) && regenerated.attempts[1].incomplete === null &&
+      JSON.stringify(regenerated.actions) === JSON.stringify([['continue', '继续回答', 'disabled'], ['regenerate', '重新回答', 'enabled'], ['convert', '转为修改建议', 'enabled']]), 'dialogue-regenerated-words', regenerated);
+    const attempts = await renderer.evaluate(`window.ai7.inspectDialogue({ dialogueId: ${JSON.stringify(dialogueId)}, afterFragment: 0 }).then((dialogue) => dialogue.attempts.map((attempt) => [attempt.ordinal, attempt.kind, attempt.state, attempt.source]))`);
+    requireJourney(JSON.stringify(attempts) === JSON.stringify([[1, 'ask', 'stopped', 'ledger'], [2, 'regenerate', 'completed', 'ledger']]), 'dialogue-attempts-linked', attempts);
+
+    at('dialogue-panel-answer');
+    // In 最近完成 the card says 已回答 and offers 回答 and 打开对话 (TASK-044); 回答 shows the latest answer in the window.
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'dialogue-to-panel');
+    const answeredPanel = await waitForPanel(renderer, (panel) => cardsOf(panel, 'recent')[0]?.state === 'dialogue-answered', 'dialogue-answered-card');
+    requireJourney(JSON.stringify(cardsOf(answeredPanel, 'recent')[0].actions) === JSON.stringify([['answer', '回答', 'enabled'], ['next', '打开对话', 'enabled']]) &&
+      cardsOf(answeredPanel, 'recent')[0].pill === '已回答', 'dialogue-answered-card-words', answeredPanel);
+    await cardAction(renderer, 'dialogue-answered', 'answer', 'dialogue-answer-open');
+    await waitFor(renderer, `(() => { const win = document.querySelector('.task-result-window'); return win?.dataset.taskResult === 'ready' && win.dataset.taskResultKind === 'dialogue' && win.querySelector('.task-result-dialogue-answer')?.textContent === ${JSON.stringify(ANSWER_FIRST + ANSWER_SECOND + ANSWER_TAIL)} && win.querySelector('[data-dialogue-state]')?.textContent === '回答完成'; })()`, 'dialogue-answer-window', 30_000);
+    await clickSelector(renderer, '.task-result-window [data-task-result-action="close"]', 'dialogue-answer-close');
+    await waitForPanel(renderer, (panel) => panel.state === 'ready', 'dialogue-answer-closed');
+
+    at('j14-dialogue-keyboard');
+    // Without a pointer: Enter on the card's 打开对话 opens the dialogue at its title, Tab reaches its actions with visible
+    // focus, and Escape closes the slot.
+    await assertRenderer(renderer, `(() => { const open = document.querySelector('#task-drawer li.task-card[data-task-state="dialogue-answered"] [data-task-action="next"]'); if (!(open instanceof HTMLButtonElement)) return false; open.focus(); return document.activeElement === open; })()`, 'dialogue-keyboard-focus');
+    await pressEnter(renderer);
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'dialogue' && document.activeElement === document.querySelector('#task-drawer-title') && document.querySelector('#task-drawer .dialogue')?.dataset.dialogue === 'ready'`, 'dialogue-keyboard-open', 10_000);
+    let reached = false;
+    for (let presses = 0; presses < 12 && !reached; presses += 1) {
+      await pressTab(renderer);
+      reached = await renderer.evaluate(`document.activeElement?.matches('#task-drawer .dialogue-actions [data-dialogue-action]:focus-visible') === true`);
+    }
+    requireJourney(reached, 'dialogue-keyboard-actions');
+    await pressEscape(renderer);
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true`, 'dialogue-keyboard-closed', 10_000);
+
+    at('j14-dialogue-zoom-200-reflow');
+    // At 200% the dialogue — its words, each attempt and its actions — reflows into the slot without sideways scroll.
+    await openPanel(renderer, 'dialogue-reflow');
+    await cardAction(renderer, 'dialogue-answered', 'next', 'dialogue-reflow-open');
+    await waitForDialogue(renderer, (dialogue) => dialogue.state === 'ready' && dialogue.attempts.length === 2, 'dialogue-reflow-ready');
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
+    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
+    await waitFor(renderer, `(() => { const root = document.documentElement; const parts = [...document.querySelectorAll('#task-drawer .dialogue, #task-drawer .dialogue-attempt, #task-drawer .dialogue-actions, #task-drawer .dialogue-context')]; return parts.length >= 5 && parts.every((part) => part.scrollWidth <= part.clientWidth + 2) && root.scrollWidth <= root.clientWidth + 2; })()`, 'dialogue-reflow-at-200', 10_000);
+    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
+
+    at('j14-dialogue-forced-colors');
+    // Without colour each answer keeps its left rule — heavier once incomplete — and its state in words.
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
+    await assertRenderer(renderer, `(() => { if (!matchMedia('(forced-colors: active)').matches) return false; const [first, second] = document.querySelectorAll('#task-drawer section.dialogue-attempt'); if (!(first instanceof HTMLElement) || !(second instanceof HTMLElement)) return false; const width = (node) => parseFloat(getComputedStyle(node).borderLeftWidth); return getComputedStyle(first).borderLeftStyle === 'solid' && width(first) > width(second) && width(second) >= 2 && first.querySelector('[data-dialogue-state-label]')?.textContent === '回答已停止 · 内容不完整'; })()`, 'dialogue-without-colour');
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
+    const dialogueBefore = await renderer.evaluate(`window.ai7.inspectDialogue({ dialogueId: ${JSON.stringify(dialogueId)}, afterFragment: 0 }).then((dialogue) => JSON.stringify(dialogue))`);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'dialogue-before-restart-close');
+
     at('restart-keeps-tasks');
     // A restart moves nothing the panel shows: the same Tasks in the same groups, and 查看结果 still opens the result.
     const tasksBefore = await renderer.evaluate(`window.ai7.inspectBookTasks().then((tasks) => JSON.stringify(tasks))`);
@@ -1120,10 +1401,49 @@ async function main() {
     await openPanel(renderer, 'restart');
     const tasksAfter = await renderer.evaluate(`window.ai7.inspectBookTasks().then((tasks) => JSON.stringify(tasks))`);
     requireJourney(typeof tasksBefore === 'string' && tasksAfter === tasksBefore, 'restart-tasks-unmoved');
-    await waitForPanel(renderer, (panel) => statesOf(panel, 'recent').join() === 'analysis-cancelled,analysis-completed', 'restart-panel');
+    await waitForPanel(renderer, (panel) => statesOf(panel, 'recent').join() === 'dialogue-answered,analysis-cancelled,analysis-completed', 'restart-panel');
     await cardAction(renderer, 'analysis-completed', 'result', 'restart-result-open');
     await waitFor(renderer, `document.querySelector('.task-result-window')?.dataset.taskResult === 'ready' && document.querySelectorAll('.task-result-window tr[data-task-result-unit]').length === ${SAMPLE1_UNITS}`, 'restart-result', 30_000);
     await clickSelector(renderer, '.task-result-window [data-task-result-action="close"]', 'restart-result-close');
+
+    at('dialogue-history-recovered');
+    // After the restart the dialogue is joined again from its records to the Harness Session Ledger, the DSH Session log
+    // under the Agent Data Root: both attempts, every fragment and each state exactly as before. AI7's own store holds no
+    // copy of the question or of any answer; the ledger's files hold them.
+    const dialogueAfter = await renderer.evaluate(`window.ai7.inspectDialogue({ dialogueId: ${JSON.stringify(dialogueId)}, afterFragment: 0 }).then((dialogue) => JSON.stringify(dialogue))`);
+    requireJourney(typeof dialogueBefore === 'string' && dialogueAfter === dialogueBefore, 'dialogue-history-unmoved');
+    await cardAction(renderer, 'dialogue-answered', 'next', 'dialogue-recovered-open');
+    const recoveredDialogue = await waitForDialogue(renderer, (dialogue) => dialogue.state === 'ready' && dialogue.attempts.length === 2, 'dialogue-recovered');
+    const shape = (dialogue) => JSON.stringify([dialogue.question, dialogue.selection, dialogue.attempts.map((attempt) => [attempt.kind, attempt.state, attempt.label, attempt.fragments, attempt.incomplete])]);
+    requireJourney(shape(recoveredDialogue) === shape(regenerated), 'dialogue-recovered-words', recoveredDialogue);
+    const storeBytes = [];
+    for (const name of ['ai7.sqlite', 'ai7.sqlite-wal']) {
+      const path = resolve(dataRoot, 'store', name);
+      if (existsSync(path)) storeBytes.push(await readFile(path));
+    }
+    requireJourney(storeBytes.length >= 1 && [DIALOGUE_QUESTION, ANSWER_FIRST, ANSWER_SECOND, ANSWER_TAIL].every((words) => storeBytes.every((bytes) => !bytes.includes(Buffer.from(words, 'utf8')))), 'dialogue-no-transcript-copy');
+    const ledgerFiles = (await readdir(resolve(dataRoot, 'harness-sessions'))).filter((name) => name.endsWith('.jsonl'));
+    requireJourney(ledgerFiles.length === 2, 'dialogue-ledger-sessions', ledgerFiles);
+    const ledgerText = (await Promise.all(ledgerFiles.map((name) => readFile(resolve(dataRoot, 'harness-sessions', name), 'utf8')))).join('\n');
+    requireJourney(ledgerText.includes(DIALOGUE_QUESTION) && ledgerText.includes(ANSWER_TAIL.slice(-12)), 'dialogue-ledger-holds-history');
+
+    at('dialogue-convert');
+    // 转为修改建议 on the completed answer (DIALOG-016): a 修改建议 on the selected words, from AI7 and the dialogue Task, which
+    // the editor still decides; the manuscript is exactly as it was.
+    await dialogueAction(renderer, 'convert', 'dialogue-convert-open');
+    await waitFor(renderer, `(() => { const form = document.querySelector('#task-drawer .dialogue-convert'); const proposed = form?.querySelector('textarea[name="proposedText"]'); const rationale = form?.querySelector('textarea[name="rationale"]'); return proposed instanceof HTMLTextAreaElement && document.activeElement === proposed && rationale?.value === ${JSON.stringify(`依据对话回答：${DIALOGUE_QUESTION}`)} && form.querySelector('.editorial-mark-quote')?.textContent === ${JSON.stringify(selectedWords)}; })()`, 'dialogue-convert-form', 10_000);
+    await assertRenderer(renderer, `(() => { const proposed = document.querySelector('#task-drawer .dialogue-convert textarea[name="proposedText"]'); proposed.value = ${JSON.stringify(DIALOGUE_PROPOSAL)}; proposed.dispatchEvent(new Event('input', { bubbles: true })); return proposed.value === ${JSON.stringify(DIALOGUE_PROPOSAL)}; })()`, 'dialogue-convert-write');
+    await clickSelector(renderer, '#task-drawer .dialogue-convert [data-dialogue-action="convert-submit"]', 'dialogue-convert-submit');
+    await waitFor(renderer, `(() => { const card = document.querySelector('.editorial-mark-layer [data-mark-card]'); return card instanceof HTMLElement && card.dataset.markKind === 'change-suggestion' && (card.querySelector('.editorial-mark-source')?.textContent ?? '').startsWith('AI7 · 任务「对话回答」'); })()`, 'dialogue-converted-card', 60_000);
+    const converted = await renderer.evaluate(`window.ai7.inspectDialogue({ dialogueId: ${JSON.stringify(dialogueId)}, afterFragment: 0 })`);
+    const markId = converted?.attempts?.[1]?.convertedMarkIds?.[0] ?? null;
+    requireJourney(UUID_PATTERN.test(markId ?? '') && converted.attempts[1].convertedMarkIds.length === 1 && converted.attempts[0].convertedMarkIds.length === 0, 'dialogue-conversion-recorded', converted);
+    const markCard = await renderer.evaluate(`window.ai7.getEditorialMarkCard({ manuscriptId: ${JSON.stringify(recorded.manuscriptId)}, branchId: ${JSON.stringify(recorded.branchId)}, markId: ${JSON.stringify(markId)} })`);
+    requireJourney(markCard?.kind === 'change-suggestion' && markCard.source?.kind === 'ai7' && markCard.source.origin === 'task' && markCard.source.label === '对话回答' &&
+      markCard.source.taskId === dialogueId && markCard.suggestion?.currentText === selectedWords && markCard.suggestion.proposedText === DIALOGUE_PROPOSAL &&
+      markCard.suggestion.decision === null && markCard.suggestion.application === null, 'dialogue-mark', markCard);
+    requireJourney((await workingDigest()) === digestBefore, 'dialogue-manuscript-unchanged');
+    await waitForDialogue(renderer, (dialogue) => dialogue.attempts[1]?.converted === '已从这次回答新建 1 条修改建议。', 'dialogue-converted-line');
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

@@ -493,15 +493,16 @@ async function main() {
     await press(renderer, 'Escape');
 
     at('selection-menu-groups');
-    // The three groups on a real selection; the task entries wait for the task surface and say so.
+    // The three groups on a real selection; 就这段提问… asks about it (Issue #52, S17a), and the other task entries wait for
+    // the task surface and say so.
     await openSelectionMenu(renderer, first, RANGES.highlight[0], RANGES.highlight[1], 'selection-menu-open');
-    await assertRenderer(renderer, `(() => { const enabled = (action) => window.__j05.item(action)?.disabled === false; const waiting = ['task-on-selection', 'ask-on-selection', 'preset-polish', 'preset-names', 'preset-continuity'].every((action) => window.__j05.item(action)?.disabled === true); const labels = Array.from(window.__j05.menu().querySelectorAll('[role="menuitem"]')).map((item) => item.firstElementChild?.nextElementSibling?.textContent ?? item.firstElementChild?.textContent); return enabled('cut') && enabled('copy') && enabled('paste') && enabled('paste-plain-text') && enabled('add-change-suggestion') && enabled('add-annotation') && enabled('add-editor-note') && enabled('add-highlight-1') && enabled('add-highlight-3') && waiting && window.__j05.menu().textContent.includes('就选区发起的任务尚未接通') && !labels.includes('加入任务范围') && !labels.includes('在稿件中搜索') && document.activeElement === window.__j05.item('cut'); })()`, 'selection-menu-groups');
+    await assertRenderer(renderer, `(() => { const enabled = (action) => window.__j05.item(action)?.disabled === false; const waiting = ['task-on-selection', 'preset-polish', 'preset-names', 'preset-continuity'].every((action) => window.__j05.item(action)?.disabled === true) && enabled('ask-on-selection'); const labels = Array.from(window.__j05.menu().querySelectorAll('[role="menuitem"]')).map((item) => item.firstElementChild?.nextElementSibling?.textContent ?? item.firstElementChild?.textContent); return enabled('cut') && enabled('copy') && enabled('paste') && enabled('paste-plain-text') && enabled('add-change-suggestion') && enabled('add-annotation') && enabled('add-editor-note') && enabled('add-highlight-1') && enabled('add-highlight-3') && waiting && window.__j05.menu().textContent.includes('就选区发起的任务尚未接通') && !labels.includes('加入任务范围') && !labels.includes('在稿件中搜索') && document.activeElement === window.__j05.item('cut'); })()`, 'selection-menu-groups');
 
     at('selection-menu-keys');
     await press(renderer, 'ArrowDown');
     await assertRenderer(renderer, `document.activeElement === window.__j05.item('copy')`, 'menu-arrow-moves');
     await press(renderer, 'End');
-    await assertRenderer(renderer, `document.activeElement === window.__j05.item('add-highlight-3')`, 'menu-end-skips-disabled');
+    await assertRenderer(renderer, `document.activeElement === window.__j05.item('ask-on-selection')`, 'menu-end-skips-disabled');
 
     at('mark-highlight');
     await chooseMenuItem(renderer, 'add-highlight-2', 'highlight-choose');

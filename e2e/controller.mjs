@@ -1206,7 +1206,23 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'j14-panel-keyboard',
     'j14-panel-zoom-200-reflow',
     'j14-panel-forced-colors',
+    // Issue #52 (S17a): 就这段提问… — a question about a selection answered by complete fragment in the foreground, in the
+    // background only 等待回答, stopped, answered again, read back from the Harness Session Ledger after a restart, and made
+    // a 修改建议 without the manuscript moving.
+    'dialogue-ask',
+    'j14-dialogue-ime',
+    'dialogue-streaming-held',
+    'dialogue-background',
+    'dialogue-return',
+    'dialogue-stop',
+    'dialogue-regenerate',
+    'dialogue-panel-answer',
+    'j14-dialogue-keyboard',
+    'j14-dialogue-zoom-200-reflow',
+    'j14-dialogue-forced-colors',
     'restart-keeps-tasks',
+    'dialogue-history-recovered',
+    'dialogue-convert',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',
