@@ -361,6 +361,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectDefaultExecutionRules':
     // 知识库 › 工序与规则's 工序 (Issue #427, S79d) are the house's, so the read names no Book.
     case 'inspectKnowledgeProcedures':
+    // 知识库 › 工序与规则's 可复用工序 and 开发建议 (Issue #65, S30) are the house's too.
+    case 'inspectCapturedProcedures':
     case 'inspectEvaluationProfiles':
     case 'shutdown': {
       requireInput(value.input, [], tentativeId);
@@ -1112,11 +1114,66 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'prepareReviewRun': {
-      const input = requireInput(value.input, ['bookId', 'categoryIds', 'scope'], tentativeId);
+      // A sheet pre-filled from a Captured Procedure (Issue #65, S30) names the exact version and digest it was filled from.
+      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure'], tentativeId);
       if (!validUuid(input.bookId) || !Array.isArray(input.categoryIds) || !validReviewCategoryIds(input.categoryIds, 1) ||
-          !validReviewRunScope(input.scope)) {
+          !validReviewRunScope(input.scope) ||
+          !optionalOrNull(input, 'capturedProcedure', (pin) => isRecord(pin) && hasExactKeys(pin, ['versionId', 'documentSha256']) &&
+            validUuid(pin.versionId) && isBoundedString(pin.documentSha256, 64) && HEX_DIGEST_PATTERN.test(pin.documentSha256))) {
         throw new ProtocolError(tentativeId);
       }
+      break;
+    }
+    // 可复用工序 (Issue #65, plan slice S30; ADR 0087): each names the route's Book where it reads one, and the version or
+    // procedure it acts on; the words an editor writes are bounded here and held to their grapheme bounds by the service.
+    case 'inspectProcedureCapture': {
+      const input = requireInput(value.input, ['bookId', 'reviewRunId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.reviewRunId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'saveCapturedProcedure': {
+      const input = requireInput(value.input, ['bookId', 'reviewRunId', 'categoryIds', 'scopeSlot', 'title', 'procedureId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.reviewRunId) || !Array.isArray(input.categoryIds) || !validReviewCategoryIds(input.categoryIds, 1) ||
+          (input.scopeSlot !== 'whole' && input.scopeSlot !== 'chapters') || !isBoundedString(input.title, 1024) ||
+          (input.procedureId !== null && !validUuid(input.procedureId))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'previewCapturedProcedureValidation': {
+      const input = requireInput(value.input, ['versionId'], tentativeId);
+      if (!validUuid(input.versionId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'enableCapturedProcedure': {
+      const input = requireInput(value.input, ['versionId', 'previewDigest'], tentativeId);
+      if (!validUuid(input.versionId) || !isBoundedString(input.previewDigest, 64) || !HEX_DIGEST_PATTERN.test(input.previewDigest)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'stopCapturedProcedure': {
+      const input = requireInput(value.input, ['procedureId', 'versionId'], tentativeId);
+      if (!validUuid(input.procedureId) || (input.versionId !== null && !validUuid(input.versionId))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'inspectCapturedProcedureRun': {
+      const input = requireInput(value.input, ['bookId', 'procedureId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.procedureId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'saveDeveloperProposal': {
+      const input = requireInput(value.input, ['proposalId', 'title', 'missingCapability', 'affectedProcedure', 'direction', 'pluginCandidate'], tentativeId);
+      if ((input.proposalId !== null && !validUuid(input.proposalId)) || !isBoundedString(input.title, 1024) ||
+          !isBoundedString(input.missingCapability, 32768) || !isBoundedString(input.affectedProcedure, 32768, true) ||
+          !isBoundedString(input.direction, 32768, true) || !isBoundedString(input.pluginCandidate, 32768, true)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'writeDeveloperProposalFile': {
+      const input = requireInput(value.input, ['proposalVersionId', 'destination'], tentativeId);
+      if (!validUuid(input.proposalVersionId) || !isBoundedString(input.destination, 4096)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'authorizeReviewRun': {

@@ -565,6 +565,25 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectExemplars(request.input.after) };
     case 'inspectKnowledgeProcedures':
       return { id: request.id, ok: true, op: request.op, result: await store.inspectKnowledgeProcedures() };
+    // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087): deterministic, provider-free; running one is an ordinary Review Run.
+    case 'inspectCapturedProcedures':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectCapturedProcedures() };
+    case 'inspectProcedureCapture':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectProcedureCapture(request.input.bookId, request.input.reviewRunId) };
+    case 'saveCapturedProcedure':
+      return { id: request.id, ok: true, op: request.op, result: store.saveCapturedProcedure(request.input) };
+    case 'previewCapturedProcedureValidation':
+      return { id: request.id, ok: true, op: request.op, result: store.previewCapturedProcedureValidation(request.input.versionId) };
+    case 'enableCapturedProcedure':
+      return { id: request.id, ok: true, op: request.op, result: store.enableCapturedProcedure(request.input.versionId, request.input.previewDigest) };
+    case 'stopCapturedProcedure':
+      return { id: request.id, ok: true, op: request.op, result: store.stopCapturedProcedure(request.input.procedureId, request.input.versionId) };
+    case 'inspectCapturedProcedureRun':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectCapturedProcedureRun(request.input.bookId, request.input.procedureId) };
+    case 'saveDeveloperProposal':
+      return { id: request.id, ok: true, op: request.op, result: store.saveDeveloperProposal(request.input) };
+    case 'writeDeveloperProposalFile':
+      return { id: request.id, ok: true, op: request.op, result: await store.writeDeveloperProposalFile(request.input.proposalVersionId, request.input.destination) };
     case 'inspectLibraryMaterials':
       return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterials(request.input.after) };
     case 'inspectLibraryMaterial':
@@ -715,7 +734,8 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: jobs.startReviewRunPreparation(request.input.bookId, request.input.categoryIds, request.input.scope, launchPolicy),
+        result: jobs.startReviewRunPreparation(request.input.bookId, request.input.categoryIds, request.input.scope, launchPolicy,
+          request.input.capturedProcedure ?? null),
       };
     case 'authorizeReviewRun':
       // The one approval, then the drive loop at once: an approved Run nobody drives reads `partial`, so
@@ -1274,11 +1294,13 @@ function parseArguments(argv: string[]): {
     (recoveryControlValue !== undefined &&
       (recoveryControl === undefined || process.env.AI7_E2E_JOURNEY !== 'J-08')) ||
     // The model adapter binds a Journey whose Runs execute: J-04's analysis, J-09's 运行中 and 最近完成, J-10's
-    // cancelled Run (Issue #422), J-16's 任务 panel (Issue #423), J-11's 分析反馈 (Issue #94) and J-13's 书系一致性 (Issue #64).
+    // cancelled Run (Issue #422), J-16's 任务 panel (Issue #423), J-11's 分析反馈 (Issue #94), J-13's 书系一致性 (Issue #64)
+    // and J-15's Review Runs a Captured Procedure is captured from and run as (Issue #65).
     (modelAdapterControlValue !== undefined &&
       (modelAdapterControl === undefined ||
         (process.env.AI7_E2E_JOURNEY !== 'J-04' && process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10' &&
-          process.env.AI7_E2E_JOURNEY !== 'J-16' && process.env.AI7_E2E_JOURNEY !== 'J-11' && process.env.AI7_E2E_JOURNEY !== 'J-13'))) ||
+          process.env.AI7_E2E_JOURNEY !== 'J-16' && process.env.AI7_E2E_JOURNEY !== 'J-11' && process.env.AI7_E2E_JOURNEY !== 'J-13' &&
+          process.env.AI7_E2E_JOURNEY !== 'J-15'))) ||
     (connectivityPath !== undefined && (process.env.AI7_E2E_JOURNEY !== 'J-04' || !isAbsolute(connectivityPath))) ||
     (unitHoldPath !== undefined && ((process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10' && process.env.AI7_E2E_JOURNEY !== 'J-16') ||
       !isAbsolute(unitHoldPath))) ||

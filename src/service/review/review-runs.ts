@@ -63,6 +63,14 @@ import type { PackageReviewRunReading } from '../book-delivery-packages.js';
 import type { EditorialMarkStore, ProducedEditorialMarkInput } from '../editorial-marks.js';
 import type { ReviewRunAttentionReading } from '../global-attention.js';
 import {
+  procedureCaptureSource,
+  procedurePinRefusal,
+  readReviewRunProcedurePin,
+  recordReviewRunProcedurePin,
+  type ProcedureCaptureStep,
+  type ReviewRunProcedurePinInput,
+} from '../captured-procedures.js';
+import {
   BUILTIN_REVIEW_CATEGORY_CONFIGURATION,
   houseGuidelineDocuments,
   reviewCategoryBasisStatement,
@@ -711,7 +719,18 @@ export interface ReviewRunPlanFacts {
 }
 
 export type ReviewRunPrepareInput =
-  | { phase: 'start'; bookId: string; categoryIds: ReadonlyArray<string>; scope: ReviewRunScopeRequest; launchPolicy: LaunchPolicyProjection }
+  | {
+    phase: 'start';
+    bookId: string;
+    categoryIds: ReadonlyArray<string>;
+    scope: ReviewRunScopeRequest;
+    launchPolicy: LaunchPolicyProjection;
+    /**
+     * The Captured Procedure version the sheet was pre-filled from (Issue #65, S30; ADR 0087 §4), already resolved and checked by
+     * its ledger: the Run records it as its pin, with the steps the Book could not take left out and said why.
+     */
+    procedure?: ReviewRunProcedurePinInput | null;
+  }
   | { phase: 'advance'; workId: string }
   | { phase: 'cancel'; workId: string }
   | { phase: 'cancel-all' };
@@ -740,6 +759,11 @@ interface PreparationWork {
   readonly scope: ResolvedReviewScope;
   readonly planned: ReadonlyArray<PlannedCategory>;
   readonly prepared: SnapshotCategory[];
+  /** The Captured Procedure pin the Run records when it is written (Issue #65, S30), with the steps it left out. */
+  readonly procedure: null | {
+    readonly pin: ReviewRunProcedurePinInput;
+    readonly leftOut: ReadonlyArray<{ categoryId: string; label: string; reason: string }>;
+  };
   index: number;
   /** The category ledger's own preparation in flight for `planned[index]`. */
   ledgerWorkId: string | null;
@@ -846,6 +870,9 @@ export class ReviewRunStore {
     const chapters = this.#chapterOptions(bookId, head);
     const scope = this.#resolveScope(input.scope, chapters);
     const baseline = this.#readBaseline(bookId);
+    const procedure = input.procedure === undefined || input.procedure === null
+      ? null
+      : this.#procedureSelection(bookId, head, configuration, baseline, scope, input.categoryIds, input.procedure);
     // Configuration order is the categories' position in the Run, whatever order they were ticked in.
     const planned = configuration.categories
       .filter((entry) => input.categoryIds.includes(entry.categoryId))
@@ -864,11 +891,50 @@ export class ReviewRunStore {
       scope,
       planned,
       prepared: [],
+      procedure,
       index: 0,
       ledgerWorkId: null,
     };
     this.#work.set(work.workId, work);
     return this.#advance(work);
+  }
+
+  /**
+   * A preparation from a Captured Procedure (Issue #65, S30; ADR 0087 §4): the scope is the version's slot, every category asked
+   * for is one of its steps, and every step not asked for is one this Book cannot take now — 书系一致性 for a Book in no
+   * Series, the leads without a baseline analysis — recorded with why. A step the Book could take is never quietly dropped,
+   * and nothing beyond its steps is ever added: the Run can do no more than choosing those categories by hand allows.
+   */
+  #procedureSelection(
+    bookId: string,
+    head: ManuscriptHead,
+    configuration: ReviewCategoryConfiguration,
+    baseline: BaselineReading,
+    scope: ResolvedReviewScope,
+    categoryIds: ReadonlyArray<string>,
+    pin: ReviewRunProcedurePinInput,
+  ): NonNullable<PreparationWork['procedure']> {
+    requireReview(scope.kind === pin.scope, 'REVIEW_PROCEDURE_SCOPE_INVALID',
+      `按可复用工序《${pin.title}》运行时，审阅范围要按它的设定选「${pin.scope === 'whole' ? '全书' : '选章'}」。`);
+    requireReview(categoryIds.every((categoryId) => pin.steps.includes(categoryId)), 'REVIEW_PROCEDURE_STEPS_INVALID',
+      `按可复用工序《${pin.title}》运行时，只能审阅它的步骤。`);
+    const leftOut: Array<{ categoryId: string; label: string; reason: string }> = [];
+    for (const categoryId of pin.steps) {
+      if (categoryIds.includes(categoryId)) continue;
+      const entry = configuration.categories.find((candidate) => candidate.categoryId === categoryId);
+      let reason: string | null;
+      if (entry === undefined) {
+        reason = '这一类已不在审阅配置中。';
+      } else {
+        const reading = this.#readCategory(bookId, head, entry, baseline, undefined);
+        const plan = reading.unavailableReason === null ? reviewCategoryScopePlan(entry.executor, entry.unavailableReason, scope, reading.facts) : null;
+        reason = reading.unavailableReason ?? (plan !== null && plan.kind === 'refused' ? plan.reason : null);
+      }
+      requireReview(reason !== null, 'REVIEW_PROCEDURE_STEP_SKIPPED',
+        `「${entry?.label ?? categoryId}」这本书现在可以审阅；按可复用工序运行时不能略过它。`);
+      leftOut.push({ categoryId, label: entry?.label ?? categoryId, reason });
+    }
+    return { pin, leftOut };
   }
 
   #advance(work: PreparationWork): ReviewRunPreparationProgress {
@@ -1002,6 +1068,11 @@ export class ReviewRunStore {
       ).run(reviewRunId, work.bookId, ordinal, head.manuscriptId, head.branchId, head.revisionId, head.journalSequence, head.workingDigest,
         work.scope.kind, work.scope.selectedRange?.startPosition ?? null, work.scope.selectedRange?.endPosition ?? null,
         snapshot.configuration.digest, createdAt, record.json, record.digest);
+      // The exact Captured Procedure version the Run was prepared from, pinned with it (Issue #65, S30; ADR 0087 §4).
+      if (work.procedure !== null) {
+        recordReviewRunProcedurePin(this.#db, reviewRunId, work.procedure.pin, work.prepared.map((category) => category.categoryId),
+          work.procedure.leftOut, createdAt);
+      }
     });
     return reviewRunId;
   }
@@ -1049,6 +1120,9 @@ export class ReviewRunStore {
       'REVIEW_PLAN_CHANGED', `「${category.entry.label}」的计划已经变化；请重新准备这次审阅。`);
       requireReview(!this.#seriesKnowledgeMoved(bookId, category), 'REVIEW_PLAN_CHANGED', seriesKnowledgeMovedReason(category.entry.label));
     }
+    // A Run prepared from a Captured Procedure version stopped since is prepared again, never authorized (ADR 0087 §5).
+    const stopped = procedurePinRefusal(this.#db, reviewRunId);
+    requireReview(stopped === null, 'REVIEW_PROCEDURE_STOPPED', stopped ?? '');
     requireReview(!slotBusy, EXECUTION_SLOT_BUSY, EXECUTION_SLOT_BUSY_REASON);
     const authorizedAt = new Date().toISOString();
     const record = canonicalRecord({
@@ -1150,6 +1224,8 @@ export class ReviewRunStore {
             staleReasons.push(seriesKnowledgeMovedReason(category.entry.label));
           }
         }
+        const stopped = procedurePinRefusal(this.#db, reviewRunId);
+        if (stopped !== null) staleReasons.push(stopped);
       }
     }
     const firstCheckpoint = categories.find((category) => category.checkpoint !== null)?.checkpoint ?? null;
@@ -1173,6 +1249,67 @@ export class ReviewRunStore {
       categories: categories.map(({ checkpoint: _checkpoint, ...category }) => category),
       staleReasons,
     };
+  }
+
+  // ---- 可复用工序 (Issue #65, plan slice S30; ADR 0087) -----------------------------------------------------
+
+  /**
+   * One Review Run of the Book as a capture's source (ADR 0087 §2): its label and scope, and what may be kept of it, read from
+   * the records as the Run itself is read, against the configuration as it applies now. A read.
+   */
+  captureSource(bookId: string, reviewRunId: string): {
+    readonly reviewRunId: string;
+    readonly ordinal: number;
+    readonly scopeKind: ReviewScopeKind;
+    readonly scopeLabel: string;
+    readonly unavailableReason: string | null;
+    readonly steps: ReadonlyArray<ProcedureCaptureStep>;
+  } {
+    const view = this.#runStateView(this.#runOfBook(bookId, reviewRunId));
+    const { unavailableReason, steps } = this.#captureOf(view);
+    return {
+      reviewRunId,
+      ordinal: view.snapshot.ordinal,
+      scopeKind: view.snapshot.scope.kind,
+      scopeLabel: view.snapshot.scope.label,
+      unavailableReason,
+      steps,
+    };
+  }
+
+  #captureOf(view: Omit<RunView, 'findings'>): ReturnType<typeof procedureCaptureSource> {
+    return procedureCaptureSource({
+      authorized: view.authorization !== null,
+      state: view.state,
+      canContinue: view.canContinue,
+      categories: view.categories.map((category) => ({ entry: category.category.entry, state: category.state, stateLabel: category.stateLabel })),
+    }, this.#configuration());
+  }
+
+  /** The configuration entries a Run snapshotted, in its order: what a Captured Procedure's ceiling is held to (ADR 0087 §3). */
+  snapshotEntries(reviewRunId: string): ReadonlyArray<ReviewCategoryConfigurationEntry> {
+    return this.#run(reviewRunId).categories.map((category) => category.entry);
+  }
+
+  /** A Run's ordinal, for naming it: 第 N 次. */
+  ordinalOf(reviewRunId: string): number {
+    return this.#run(reviewRunId).ordinal;
+  }
+
+  /**
+   * What each category of the configuration can do for one Book over one scope kind now, as the 新建审阅 sheet offers it: why
+   * it cannot, or `null` when it can (ADR 0087 §4). A read.
+   */
+  categoryAvailability(bookId: string, kind: ReviewScopeKind): ReadonlyMap<string, string | null> {
+    this.#requireBook(bookId);
+    const head = this.#head(bookId);
+    const baseline = head === null ? { revision: null, error: null } : this.#readBaseline(bookId);
+    const chapters = head === null ? { basis: 'outline' as const, chapters: [] } : this.#chapterOptions(bookId, head);
+    const readings = this.#forBook(bookId, this.#configuration()).categories.map((entry) => this.#readCategory(bookId, head, entry, baseline, undefined));
+    return new Map(readings.map((reading) => {
+      const scope = this.#workspaceCategory(reading, chapters).scopes[kind];
+      return [reading.entry.categoryId, scope.available ? null : scope.unavailableReason ?? '这一类暂不可用。'] as const;
+    }));
   }
 
   #snapshotOf(row: SqlRow): RunSnapshot {
@@ -2566,6 +2703,11 @@ export class ReviewRunStore {
         findingCounts: reviewFindingCounts(view.findings),
         report: reports.at(-1) ?? null,
         reportVersions: reports.map((report) => ({ reportId: report.reportId, version: report.version, generatedAt: report.generatedAt, digest: report.digest })),
+        procedure: readReviewRunProcedurePin(this.#db, snapshot.reviewRunId),
+        capture: (() => {
+          const reason = this.#captureOf(view).unavailableReason;
+          return { available: reason === null, unavailableReason: reason };
+        })(),
       },
       candidates: after === null ? matching : matching.filter((finding) => finding.ordinal > after),
     };
