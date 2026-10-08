@@ -14,6 +14,7 @@ import { BoundedStoreError, initializeManuscriptEntryPositionSchema } from '../.
 import { DATA_VERSION_SCHEMA_SQL, initializeDataVersionSchema } from '../../src/service/data-version.js';
 import { DATABASE_EXPORT_SCHEMA_SQL, initializeDatabaseExportSchema } from '../../src/service/database-exports.js';
 import { DATABASE_MERGE_SCHEMA_SQL, initializeDatabaseMergeSchema } from '../../src/service/database-merge.js';
+import { DIALOGUE_SCHEMA_SQL, initializeDialogueSchema } from '../../src/service/dialogue/dialogue-ledger.js';
 import { DATABASE_REPLACEMENT_SCHEMA_SQL, initializeDatabaseReplacementSchema } from '../../src/service/database-replacement.js';
 import { DECISION_FEEDBACK_SCHEMA_SQL, initializeDecisionFeedbackSchema } from '../../src/service/decision-feedback.js';
 import { initializeDefaultExecutionRuleSchema } from '../../src/service/default-execution-rules.js';
@@ -146,13 +147,18 @@ interface Revision {
   readonly undo: (database: DatabaseSync) => void;
 }
 
-// Newest first: a store is walked down one revision at a time. Revision 60 is taken by work in flight beside revision 61
-// (Issue #64, S29b), so a store before 61 is at 59.
+// Newest first: a store is walked down one revision at a time.
 const REVISIONS: ReadonlyArray<Revision> = [
+  // Revision 61 (Issue #64, S29b): the Series Retrieval Exclusions.
   {
     revision: 61,
     step: initializeSeriesRetrievalExclusionSchema,
     undo: (database) => drop(database, Object.keys(SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL).reverse()),
+  },
+  {
+    revision: 60,
+    step: initializeDialogueSchema,
+    undo: (database) => drop(database, Object.keys(DIALOGUE_SCHEMA_SQL).reverse()),
   },
   {
     // Revision 59 rebuilds the three kind-coupled relations and stamps its version in one transaction, so the one step an
@@ -332,8 +338,7 @@ const tables = (): string[] => {
 describe('an upgrade interrupted before its version stamp', () => {
   for (const { revision, step } of REVISIONS) {
     if (step === null) continue;
-    // The revision a store stands at before this one: 59 before 61, whose 60 is taken elsewhere (Issue #64, S29b).
-    const before = revision === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ? 59 : revision - 1;
+    const before = revision - 1;
     it(`is finished by the next open when revision ${revision}'s relations committed and its stamp did not`, async () => {
       expect(await opened()).toBe(SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION);
       const terminal = tables();

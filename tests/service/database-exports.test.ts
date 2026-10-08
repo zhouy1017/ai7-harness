@@ -371,7 +371,7 @@ describe('导出数据库 over the real store', () => {
         first.close();
         const plant = new DatabaseSync(join(other.dataRoot, 'store', 'ai7.sqlite'));
         try {
-          plant.exec(`DROP TABLE series_retrieval_exclusions; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; PRAGMA user_version = ${STORE_VERSION_SCHEMA_VERSION};`);
+          plant.exec(`DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; PRAGMA user_version = ${STORE_VERSION_SCHEMA_VERSION};`);
           downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
         } finally {
           plant.close();

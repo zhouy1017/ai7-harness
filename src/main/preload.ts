@@ -478,6 +478,18 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['inspectProductionDocuments']['output']>(IPC_CHANNELS.inspectProductionDocuments),
   inspectBookTasks: () =>
     invoke<ServiceOperationMap['inspectBookTasks']['output']>(IPC_CHANNELS.inspectBookTasks),
+  askAboutSelection: (input: Parameters<RendererApi['askAboutSelection']>[0]) =>
+    invoke<ServiceOperationMap['askAboutSelection']['output']>(IPC_CHANNELS.askAboutSelection, input),
+  inspectDialogue: (input: Parameters<RendererApi['inspectDialogue']>[0]) =>
+    invoke<ServiceOperationMap['inspectDialogue']['output']>(IPC_CHANNELS.inspectDialogue, input),
+  stopDialogueAnswer: (input: Parameters<RendererApi['stopDialogueAnswer']>[0]) =>
+    invoke<ServiceOperationMap['stopDialogueAnswer']['output']>(IPC_CHANNELS.stopDialogueAnswer, input),
+  continueDialogueAnswer: (input: Parameters<RendererApi['continueDialogueAnswer']>[0]) =>
+    invoke<ServiceOperationMap['continueDialogueAnswer']['output']>(IPC_CHANNELS.continueDialogueAnswer, input),
+  regenerateDialogueAnswer: (input: Parameters<RendererApi['regenerateDialogueAnswer']>[0]) =>
+    invoke<ServiceOperationMap['regenerateDialogueAnswer']['output']>(IPC_CHANNELS.regenerateDialogueAnswer, input),
+  convertDialogueToChangeSuggestion: (input: Parameters<RendererApi['convertDialogueToChangeSuggestion']>[0]) =>
+    invoke<ServiceOperationMap['convertDialogueToChangeSuggestion']['output']>(IPC_CHANNELS.convertDialogueToChangeSuggestion, input),
   inspectBookDeliveryPackage: () =>
     invoke<ServiceOperationMap['inspectBookDeliveryPackage']['output']>(IPC_CHANNELS.inspectBookDeliveryPackage),
   prepareBookDeliveryPackage: (input: Omit<ServiceOperationMap['prepareBookDeliveryPackage']['input'], 'bookId'>) =>

@@ -351,10 +351,17 @@ export const DATABASE_MERGE_SCHEMA_VERSION = 58;
  */
 export const INITIAL_EVALUATION_SCHEMA_VERSION = 59;
 /**
+ * The dialogue revision (Issue #52, S17a; UI ADR 0014; V2-UX-DIALOG-001 to 016): six additive, append-only relations owned by
+ * `dialogue/dialogue-ledger.ts` and created before this version is stamped — each dialogue Task, its attempts, and each
+ * attempt's Execution Binding, Harness Execution Span, outcome and conversions. No existing row changes. It follows revision 59
+ * (Issue #429, S81b1) and moves nothing of its ledger.
+ */
+export const DIALOGUE_SCHEMA_VERSION = 60;
+/**
  * The Series Retrieval Exclusion revision (Issue #64, S29b; V2-UX-SER-020 to SER-029; ADR 0037): one additive, append-only
  * relation owned by `series-exclusions.ts` and created before this version is stamped — each revision of an exclusion of
- * material from one Series' retrieval. No existing row changes. Revision 60 is taken by work in flight beside this one, so a
- * store here passes from 59 to 61. This is the terminal version.
+ * material from one Series' retrieval. No existing row changes. It follows revision 60 (Issue #52, S17a) and moves nothing
+ * of its relations. This is the terminal version.
  */
 export const SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION = 61;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -1738,6 +1745,15 @@ function migrateAnalysisLedgerToRevision59(db: DatabaseSync): void {
 }
 
 /**
+ * Revision 59 → 60 (Issue #52, S17a). Revision 60 adds `dialogue/dialogue-ledger.ts`'s relations, which `EditorialStore.open`
+ * creates before this runs, and moves nothing here: a revision-59 store's ledger is already the terminal one, so only the
+ * version moves.
+ */
+function advanceToTerminalRevision(db: DatabaseSync): void {
+  migrateInTransaction(db, `PRAGMA user_version = ${SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION};`, 'Terminal version');
+}
+
+/**
  * The rebuild revisions 20, 24 and 59 share. Each rebuilds the same three relations from their *current*
  * exact text, so whichever revision a store starts from, it lands on the terminal shapes — and the
  * terminal version, which the revisions between them moved without touching them — in this one transaction;
@@ -1814,16 +1830,16 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === EVALUATION_CALIBRATION_SCHEMA_VERSION || version === SERIES_SCHEMA_VERSION || version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
       version === STORE_VERSION_SCHEMA_VERSION || version === DATABASE_EXPORT_SCHEMA_VERSION || version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION || version === DATABASE_MERGE_SCHEMA_VERSION ||
-      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION || version === INITIAL_EVALUATION_SCHEMA_VERSION,
+      version === INITIAL_EVALUATION_SCHEMA_VERSION || version === DIALOGUE_SCHEMA_VERSION || version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
   if (version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
-  if (version === INITIAL_EVALUATION_SCHEMA_VERSION) {
-    // Revision 61 (Issue #64, S29b) adds no task-authorization or analysis relation: a revision-59 store's ledger is already
-    // the terminal one, so it is validated as that and nothing but the version moves.
+  if (version === INITIAL_EVALUATION_SCHEMA_VERSION || version === DIALOGUE_SCHEMA_VERSION) {
+    // Revisions 60 (Issue #52, S17a) and 61 (Issue #64, S29b) add no task-authorization or analysis relation, so a revision-59
+    // or revision-60 store carries the terminal ledger: it is validated as exactly that, and nothing but the version moves.
     validateJ03TaskAuthorizationSchema(db);
     validateAnalysisLedgerSchema(db);
-    return migrateInTransaction(db, `PRAGMA user_version = ${SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION};`, 'Terminal version');
+    return advanceToTerminalRevision(db);
   }
   // Revisions 30 to 32 widen the Run states, the Run Authorizations' origin and the Task Outcomes first, for every
   // store that has an analysis ledger: each revision from 15 up carries them as revision 15 created them or as an

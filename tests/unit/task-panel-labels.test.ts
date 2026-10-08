@@ -49,8 +49,8 @@ describe('the 任务 panel', () => {
     expect(labels.taskPanelMoreLine('recent', 10, 13)).toBe('只列出最近的 10 项。');
     expect(labels.taskPanelMoreLine('waiting', 50, 57)).toBe('共 57 项，这里列出 50 项。');
     expect(labels.TASK_PANEL_STATUS_LINES).toEqual({ loading: '正在读取这本书的任务…', unavailable: '无法读取这本书的任务。' });
-    expect(labels.TASK_PANEL_KIND_LABELS).toEqual({ analysis: '分析任务 · 不需要对话', review: '审阅任务 · 不需要对话' });
-    expect(labels.TASK_PANEL_ACTION_LABELS).toEqual({ pause: '暂停', resume: '续行', cancel: '取消任务', plan: '查看计划', result: '查看结果' });
+    expect(labels.TASK_PANEL_KIND_LABELS).toEqual({ analysis: '分析任务 · 不需要对话', review: '审阅任务 · 不需要对话', dialogue: '对话任务 · 就所选文字提问' });
+    expect(labels.TASK_PANEL_ACTION_LABELS).toEqual({ pause: '暂停', resume: '续行', cancel: '取消任务', plan: '查看计划', result: '查看结果', answer: '回答' });
   });
 
   it('lets a card act only as the drawer’s bar would, and opens everything else where it is decided', () => {

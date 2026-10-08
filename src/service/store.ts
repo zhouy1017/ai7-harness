@@ -3,7 +3,7 @@ import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSyn
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
-import { J03_TASK_GOAL, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
+import { J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
   InspectSeriesKnowledgeReviewInput,
   ServiceOperationMap,
@@ -11,6 +11,11 @@ import type {
   TaskPlanProjection,
   GlobalAttentionProjection,
   BookTasksProjection,
+  AskAboutSelectionInput,
+  ConvertDialogueToChangeSuggestionInput,
+  DialogueAttemptInput,
+  DialogueConversionProjection,
+  DialogueProjection,
   ApproveManuscriptExportInput,
   InspectManuscriptExportReceiptInput,
   StageManuscriptExportInput,
@@ -511,6 +516,22 @@ import {
 const NAMED_EXCLUSION_ENTRIES = 5;
 import { isRecord } from './analysis/canonical.js';
 import {
+  DIALOGUE_BASIS_QUOTE_CHARACTERS,
+  DIALOGUE_MARK_SOURCE_LABEL,
+  DialogueError,
+  DialogueLedger,
+  MAX_DIALOGUE_PROPOSAL_CHARACTERS,
+  initializeDialogueSchema,
+  type DialogueOutcome,
+  type DialogueTurnStart,
+  type StoredDialogueBinding,
+  type StoredDialogueTask,
+} from './dialogue/dialogue-ledger.js';
+import { dialogueProjection, harnessHistoryReader, keptText, resolveAttempts, type DialogueHistoryReader, type LiveAnswer } from './dialogue/dialogue-history.js';
+import { dialogueQuestion } from './dialogue/contract.js';
+import { HARNESS_SESSION_LOG_DIRECTORY, readHarnessSessionLog } from './harness/session-log.js';
+import type { DialogueTaskReading } from './global-attention.js';
+import {
   SeriesKnowledgeError,
   SeriesKnowledgeLedger,
   initializeSeriesKnowledgeSchema,
@@ -643,6 +664,7 @@ import {
   DATABASE_REPLACEMENT_SCHEMA_VERSION,
   DATABASE_MERGE_SCHEMA_VERSION,
   INITIAL_EVALUATION_SCHEMA_VERSION,
+  DIALOGUE_SCHEMA_VERSION,
   SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -1880,6 +1902,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       currentVersion === DATABASE_MERGE_SCHEMA_VERSION ||
       currentVersion === INITIAL_EVALUATION_SCHEMA_VERSION ||
+      currentVersion === DIALOGUE_SCHEMA_VERSION ||
       currentVersion === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
@@ -1936,6 +1959,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       currentVersion === DATABASE_MERGE_SCHEMA_VERSION ||
       currentVersion === INITIAL_EVALUATION_SCHEMA_VERSION ||
+      currentVersion === DIALOGUE_SCHEMA_VERSION ||
       currentVersion === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
@@ -2306,6 +2330,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       version === DATABASE_MERGE_SCHEMA_VERSION ||
       version === INITIAL_EVALUATION_SCHEMA_VERSION ||
+      version === DIALOGUE_SCHEMA_VERSION ||
       version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
@@ -2351,6 +2376,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       version === DATABASE_MERGE_SCHEMA_VERSION ||
       version === INITIAL_EVALUATION_SCHEMA_VERSION ||
+      version === DIALOGUE_SCHEMA_VERSION ||
       version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2488,6 +2514,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       version === DATABASE_MERGE_SCHEMA_VERSION ||
       version === INITIAL_EVALUATION_SCHEMA_VERSION ||
+      version === DIALOGUE_SCHEMA_VERSION ||
       version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
@@ -2532,6 +2559,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       version === DATABASE_MERGE_SCHEMA_VERSION ||
       version === INITIAL_EVALUATION_SCHEMA_VERSION ||
+      version === DIALOGUE_SCHEMA_VERSION ||
       version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
@@ -2871,6 +2899,7 @@ function validateModelServiceSchema(
       version >= DATABASE_REPLACEMENT_SCHEMA_VERSION,
       version >= DATABASE_MERGE_SCHEMA_VERSION,
       version >= INITIAL_EVALUATION_SCHEMA_VERSION,
+      version >= DIALOGUE_SCHEMA_VERSION,
       version >= SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
     );
   }
@@ -2943,6 +2972,7 @@ function initializeModelServiceSchema(
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       version === DATABASE_MERGE_SCHEMA_VERSION ||
       version === INITIAL_EVALUATION_SCHEMA_VERSION ||
+      version === DIALOGUE_SCHEMA_VERSION ||
       version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
@@ -2987,6 +3017,7 @@ function initializeModelServiceSchema(
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       version === DATABASE_MERGE_SCHEMA_VERSION ||
       version === INITIAL_EVALUATION_SCHEMA_VERSION ||
+      version === DIALOGUE_SCHEMA_VERSION ||
       version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
@@ -3859,6 +3890,9 @@ export class EditorialStore {
   readonly #evaluations: EvaluationRecords;
   /** ②A 分析反馈 (Issue #94, S38): the editor's judgments of analysis results. */
   readonly #analysisFeedback: AnalysisFeedbackLedger;
+  /** 就这段提问… (Issue #52, S17a): the dialogue Tasks, and the reader that joins them to the Harness Session Ledger. */
+  readonly #dialogues: DialogueLedger;
+  readonly #dialogueHistory: DialogueHistoryReader;
   readonly #productionDocuments: ProductionDocuments;
   /** Each Production Document's Deliverable Workflow (Issue #415, S66c). */
   readonly #documentWorkflow: ProductionDocumentWorkflow;
@@ -3922,6 +3956,8 @@ export class EditorialStore {
     this.#series = new SeriesLedger(authority);
     this.#seriesKnowledge = new SeriesKnowledgeLedger(authority);
     this.#seriesExclusions = new SeriesExclusionLedger(authority);
+    this.#dialogues = new DialogueLedger(authority);
+    this.#dialogueHistory = harnessHistoryReader(join(dataRoot, HARNESS_SESSION_LOG_DIRECTORY));
     this.#dataVersions = new DataVersionLedger(authority);
     this.#databaseExports = new DatabaseExports(authority, dataRoot, {
       facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION }),
@@ -4150,6 +4186,7 @@ export class EditorialStore {
       // (Issue #434, S86b) the scheduled backups; revision 57 (Issue #434, S86c) the replacements of the local data; and revision
       // 58 (Issue #434, S86d) the merges of a package's Books. Revision 59 (Issue #429, S81b1) adds the AI7 初评 each Evaluation
       // Record version began from, and `initializeTaskAuthorizationSchema` rebuilds the kind-coupled analysis relations for it;
+      // revision 60 (Issue #52, S17a) adds the dialogue Tasks.
       // revision 61 (Issue #64, S29b) the Series Retrieval Exclusions.
       initializeBookPeopleSchema(authority);
       initializeReviewGuidelineSchema(authority);
@@ -4167,6 +4204,7 @@ export class EditorialStore {
       initializeDatabaseReplacementSchema(authority);
       initializeDatabaseMergeSchema(authority);
       initializeEvaluationInitialDraftSchema(authority);
+      initializeDialogueSchema(authority);
       initializeSeriesRetrievalExclusionSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
@@ -6642,14 +6680,18 @@ export class EditorialStore {
       };
     }
     const row = one(this.#authority.prepare(
-      `SELECT m.mark_id, m.manuscript_id, m.branch_id, m.block_id, m.anchor_state, m.source_task_id, m.source_label
+      `SELECT m.mark_id, m.manuscript_id, m.branch_id, m.block_id, m.anchor_state, m.source_task_id, m.source_label,
+              EXISTS (SELECT 1 FROM dialogue_tasks t WHERE t.dialogue_id = m.source_task_id) AS from_dialogue
        FROM proposal_item_decisions d JOIN proposal_change_items i ON i.item_id = d.item_id
        JOIN editorial_marks m ON m.mark_id = i.mark_id WHERE d.decision_id = ? AND m.book_id = ?`,
     ).all(source.decisionId, bookId) as SqlRow[], 'LEARNING_MATERIAL_NOT_FOUND', '这份学习材料的来源记录不存在。');
     return {
       target: { kind: 'mark', bookId, manuscriptId: asString(row.manuscript_id), branchId: asString(row.branch_id),
         blockId: asString(row.block_id), markId: asString(row.mark_id), detached: row.anchor_state === 'detached' },
-      sourceTask: row.source_task_id === null ? null : { taskIntentId: asString(row.source_task_id), label: asString(row.source_label) },
+      // A 修改建议 made of a dialogue's answer (Issue #52, S17a) names the dialogue on its card, never as a Task Intent here.
+      sourceTask: row.source_task_id === null || row.from_dialogue === 1
+        ? null
+        : { taskIntentId: asString(row.source_task_id), label: asString(row.source_label) },
     };
   }
 
@@ -13035,7 +13077,7 @@ export class EditorialStore {
    * cancelled included — composed into 等你处理, 进行中 and 最近完成 by `global-attention.ts`. A read: nothing is written,
    * claimed or terminalized.
    */
-  inspectBookTasks(bookId: string, progress: ProgressReader, waitingFor: WaitingFor = 'admitting'): BookTasksProjection {
+  inspectBookTasks(bookId: string, progress: ProgressReader, waitingFor: WaitingFor = 'admitting', dialogueLive: (attemptId: string) => LiveAnswer | null = () => null): BookTasksProjection {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
     one(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').all(bookId) as SqlRow[], 'BOOK_NOT_FOUND', '图书不存在。');
@@ -13051,12 +13093,227 @@ export class EditorialStore {
           reviewRuns: review.latest,
           reviewCompletions: review.completed,
           waitingFor,
+          // Its dialogue Tasks (Issue #52, S17a; TASK-044), each read through the Harness Session Ledger.
+          dialogues: this.#dialogueCall(() => this.#dialogueTaskReadings(bookId, dialogueLive)),
         });
       } catch (error) {
         if (error instanceof GlobalAttentionError) throw new StoreError(error.code, error.message);
         throw error;
       }
     });
+  }
+
+  // ---- 就这段提问… (Issue #52, plan slice S17a; UI ADR 0014; V2-UX-DIALOG-001 to 016, TASK-044) ---------------------------
+
+  /** The Harness Session Ledger under the Agent Data Root: one JSONL file per technical Session (UI ADR 0014, ADR 0011). */
+  get harnessSessionLogRoot(): string {
+    return join(this.#dataRoot, HARNESS_SESSION_LOG_DIRECTORY);
+  }
+
+  /**
+   * 就这段提问… (the Owner, 2026-10-07: selecting words and asking is enough — no plan, no 开始任务): a dialogue Task on the
+   * exact words selected in the Book's manuscript, verified as a mark's range is, and its first attempt. Nothing is sent here;
+   * the execution owner sends the message this answers, which holds the selected words and the question and nothing else.
+   */
+  askAboutSelection(bookId: string, input: AskAboutSelectionInput, now: Date = new Date()): DialogueTurnStart {
+    return this.#dialogueCall(() => {
+      requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+      requireStore(typeof input === 'object' && input !== null && typeof input.selection === 'object' && input.selection !== null,
+        'DIALOGUE_SELECTION_INVALID', '所选文字无效。');
+      const question = dialogueQuestion(input.question);
+      const verified = this.#markCall(() => this.#editorialMarks.verifySpan(input.selection));
+      requireStore(verified.bookId === bookId, 'DIALOGUE_SELECTION_INVALID', '所选文字不在这本书的稿件中。');
+      requireStore(verified.text.length > 0 && input.selection.toGrapheme - input.selection.fromGrapheme <= MAX_DIALOGUE_SELECTION_GRAPHEMES,
+        'DIALOGUE_SELECTION_TOO_LONG', `所选文字最多 ${MAX_DIALOGUE_SELECTION_GRAPHEMES} 个字；请选短一些再提问。`);
+      const { task, attemptId } = this.#transaction(this.#authority, () => this.#dialogues.ask({
+        bookId,
+        manuscriptId: input.selection.manuscriptId,
+        branchId: input.selection.branchId,
+        revisionId: verified.revisionId,
+        journalSequence: verified.journalSequence,
+        blockId: input.selection.blockId,
+        fromGrapheme: input.selection.fromGrapheme,
+        toGrapheme: input.selection.toGrapheme,
+        blockDigest: input.selection.baseBlockDigest,
+        selectionSha256: sha256(verified.text),
+        questionSha256: sha256(question),
+        now,
+      }));
+      return { dialogueId: task.dialogueId, attemptId, message: { kind: 'ask', selection: verified.text, question, kept: null } };
+    });
+  }
+
+  /**
+   * 继续回答 or 重新回答 (DIALOG-014): a new traceable attempt after the latest, which `attemptId` must name. Its message is read
+   * back from the Harness Session Ledger — the words the dialogue's turns sent, under the digests its Task bound — so a new
+   * attempt sends exactly what was asked, and 继续回答 adds the complete fragments the stopped answer kept.
+   */
+  nextDialogueAttempt(bookId: string, input: DialogueAttemptInput, kind: 'continue' | 'regenerate', now: Date = new Date()): DialogueTurnStart {
+    return this.#dialogueCall(() => {
+      const task = this.#requireDialogueTask(bookId, input.dialogueId);
+      const resolved = resolveAttempts(this.#dialogues.attempts(task.dialogueId), this.#dialogueHistory, () => null);
+      const latest = resolved.attempts.at(-1);
+      requireStore(latest !== undefined && latest.attempt.attemptId === input.attemptId, 'DIALOGUE_STALE', '这段对话已有新的回答；请看最新的回答再操作。');
+      // An answer in flight is stopped first, whatever its log holds yet (DIALOG-014).
+      requireStore(latest.state !== 'answering', 'DIALOGUE_ANSWERING', '这个问题还在回答中；停止回答后才能继续或重新回答。');
+      const first = resolved.first;
+      requireStore(first !== null, 'DIALOGUE_HISTORY_MISSING', '这个问题的记录不在本机，不能继续或重新回答。');
+      requireStore(sha256(first.selection) === task.selectionSha256 && sha256(first.question) === task.questionSha256,
+        'DIALOGUE_RECORD_INVALID', '对话记录与它的问题不一致。');
+      const attemptId = this.#transaction(this.#authority, () => this.#dialogues.nextAttempt(task.dialogueId, kind, () => latest.fragments.length, now));
+      return {
+        dialogueId: task.dialogueId,
+        attemptId,
+        message: kind === 'continue'
+          ? { kind: 'continue', selection: first.selection, question: first.question, kept: keptText(latest) }
+          : { kind: 'ask', selection: first.selection, question: first.question, kept: null },
+      };
+    });
+  }
+
+  /** The answer in flight of a dialogue, which `attemptId` must name: what 停止回答 stops. */
+  answeringDialogueAttempt(bookId: string, input: DialogueAttemptInput): string {
+    return this.#dialogueCall(() => {
+      const task = this.#requireDialogueTask(bookId, input.dialogueId);
+      const latest = this.#dialogues.attempts(task.dialogueId).at(-1);
+      requireStore(latest !== undefined && latest.attemptId === input.attemptId, 'DIALOGUE_STALE', '这段对话已有新的回答；请看最新的回答再操作。');
+      requireStore(latest.outcome === null, 'DIALOGUE_NOT_ANSWERING', '这次回答已经结束。');
+      return latest.attemptId;
+    });
+  }
+
+  bindDialogueAttempt(attemptId: string, binding: StoredDialogueBinding): void {
+    this.#dialogueCall(() => this.#transaction(this.#authority, () => this.#dialogues.bind(attemptId, binding)));
+  }
+
+  openDialogueSpan(attemptId: string, harnessSessionId: string, startSeq: number, now: Date = new Date()): void {
+    this.#dialogueCall(() => this.#transaction(this.#authority, () => this.#dialogues.openSpan(attemptId, harnessSessionId, startSeq, now)));
+  }
+
+  settleDialogueAttempt(attemptId: string, outcome: DialogueOutcome, endSeq: number | null, causeCode: string | null, now: Date = new Date()): void {
+    this.#dialogueCall(() => this.#transaction(this.#authority, () => this.#dialogues.settle(attemptId, outcome, endSeq, causeCode, now)));
+  }
+
+  /**
+   * A dialogue as the editor reads it (DIALOG-009 to 016), joined again from its records to the Harness Session Ledger; the
+   * attempt answering now is read from what it has streamed (`live`). A read: nothing is written.
+   */
+  inspectDialogue(bookId: string, dialogueId: string, afterFragment: number, live: (attemptId: string) => LiveAnswer | null): DialogueProjection {
+    return this.#dialogueCall(() => {
+      requireStore(Number.isSafeInteger(afterFragment) && afterFragment >= 0, 'DIALOGUE_CURSOR_INVALID', '对话位置无效。');
+      const task = this.#requireDialogueTask(bookId, dialogueId);
+      return dialogueProjection(task, resolveAttempts(this.#dialogues.attempts(task.dialogueId), this.#dialogueHistory, live), afterFragment);
+    });
+  }
+
+  /**
+   * 转为修改建议 (DIALOG-016): a separate governed object — an AI7-produced 修改建议 on the dialogue's selected words, its origin
+   * the dialogue Task and its basis the completed answer — made by the editor's explicit action and never applied. An
+   * Incomplete Dialogue Answer is refused (DIALOG-013), and so are words the manuscript no longer holds at the range.
+   */
+  convertDialogueToChangeSuggestion(bookId: string, input: ConvertDialogueToChangeSuggestionInput, now: Date = new Date()): DialogueConversionProjection {
+    return this.#dialogueCall(() => {
+      const task = this.#requireDialogueTask(bookId, input.dialogueId);
+      const resolved = resolveAttempts(this.#dialogues.attempts(task.dialogueId), this.#dialogueHistory, () => null);
+      const latest = resolved.attempts.at(-1);
+      requireStore(latest !== undefined && latest.attempt.attemptId === input.attemptId, 'DIALOGUE_STALE', '这段对话已有新的回答；请看最新的回答再操作。');
+      requireStore(latest.state === 'completed' && latest.fragments.length > 0, 'DIALOGUE_INCOMPLETE', '内容不完整的回答不能转为修改建议。');
+      const first = resolved.first;
+      requireStore(first !== null && sha256(first.selection) === task.selectionSha256, 'DIALOGUE_HISTORY_MISSING', '这个问题的记录不在本机，不能转为修改建议。');
+      requireStore(typeof input.proposedText === 'string' && input.proposedText.trim().length > 0 && input.proposedText.length <= MAX_DIALOGUE_PROPOSAL_CHARACTERS,
+        'DIALOGUE_PROPOSAL_INVALID', `建议改为的文字要 1–${MAX_DIALOGUE_PROPOSAL_CHARACTERS} 个字。`);
+      requireStore(typeof input.rationale === 'string' && input.rationale.length <= MAX_DIALOGUE_PROPOSAL_CHARACTERS,
+        'DIALOGUE_PROPOSAL_INVALID', `理由最多 ${MAX_DIALOGUE_PROPOSAL_CHARACTERS} 个字。`);
+      const answer = keptText(latest);
+      const quote = [...answer].length > DIALOGUE_BASIS_QUOTE_CHARACTERS ? `${[...answer].slice(0, DIALOGUE_BASIS_QUOTE_CHARACTERS).join('')}…` : answer;
+      const markId = this.#markCall(() => this.#editorialMarks.createProducedMany([{
+        manuscriptId: task.manuscriptId,
+        branchId: task.branchId,
+        blockId: task.blockId,
+        fromGrapheme: task.fromGrapheme,
+        toGrapheme: task.toGrapheme,
+        pinnedText: first.selection,
+        kind: 'change-suggestion',
+        body: '',
+        proposedText: input.proposedText,
+        rationale: input.rationale,
+        atomicGroupId: null,
+        source: { kind: 'ai7', origin: 'task', label: DIALOGUE_MARK_SOURCE_LABEL, taskId: task.dialogueId },
+        basis: [{ label: `${DIALOGUE_MARK_SOURCE_LABEL} · 第 ${latest.attempt.ordinal} 次`, blockId: task.blockId, fromGrapheme: task.fromGrapheme, toGrapheme: task.toGrapheme, quote }],
+      }], ([created]) => {
+        requireStore(created !== null && created !== undefined, 'MARK_ANCHOR_CHANGED', '所选文字已不在当前稿件中；不能把这次回答转为修改建议。');
+        this.#dialogues.convert(latest.attempt.attemptId, created, now);
+        return created;
+      }));
+      return {
+        markId,
+        completionLabel: '已新建修改建议：它不会自动应用，是否接受由你决定。',
+        dialogue: dialogueProjection(task, resolveAttempts(this.#dialogues.attempts(task.dialogueId), this.#dialogueHistory, () => null), 0),
+      };
+    });
+  }
+
+  /**
+   * Startup reconciliation (DIALOG-012): an attempt this service's predecessor left answering has nothing streaming it now. It
+   * settles 回答中断 · 内容不完整 at once, its turn ending where the Harness Session Ledger's record of it ends, and nothing
+   * is retried or sent (DIALOG-014).
+   */
+  reconcileDialogueAttempts(now: Date = new Date()): number {
+    return this.#dialogueCall(() => {
+      const unsettled = this.#dialogues.unsettled();
+      for (const attempt of unsettled) {
+        let endSeq: number | null = null;
+        if (attempt.span !== null) {
+          const log = (() => {
+            try {
+              return readHarnessSessionLog(this.harnessSessionLogRoot, attempt.span.harnessSessionId);
+            } catch {
+              return null;
+            }
+          })();
+          if (log !== null && log.events.length > attempt.span.startSeq) endSeq = log.events.length - 1;
+        }
+        this.#transaction(this.#authority, () => this.#dialogues.settle(attempt.attemptId, 'interrupted', endSeq, 'SERVICE_STOPPED', now));
+      }
+      return unsettled.length;
+    });
+  }
+
+  /** The Book's dialogue Tasks as the 任务 panel reads them (TASK-044): each latest answer's state, from the ledger. */
+  #dialogueTaskReadings(bookId: string, live: (attemptId: string) => LiveAnswer | null): DialogueTaskReading[] {
+    const bookTitle = this.#evaluationBookTitle(bookId);
+    return this.#dialogues.tasksOf(bookId).map((task) => {
+      const resolved = resolveAttempts(this.#dialogues.attempts(task.dialogueId), this.#dialogueHistory, live);
+      const latest = resolved.attempts.at(-1)!;
+      return {
+        bookId,
+        bookTitle,
+        dialogueId: task.dialogueId,
+        question: resolved.first?.question ?? null,
+        state: latest.state,
+        answered: latest.fragments.length > 0,
+        attempts: resolved.attempts.length,
+        at: latest.attempt.outcome?.settledAt ?? latest.attempt.createdAt,
+      };
+    });
+  }
+
+  #requireDialogueTask(bookId: string, dialogueId: string): StoredDialogueTask {
+    requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+    requireStore(typeof dialogueId === 'string' && UUID_PATTERN.test(dialogueId), 'DIALOGUE_INVALID', '对话标识无效。');
+    const task = this.#dialogues.task(dialogueId);
+    requireStore(task !== null && task.bookId === bookId, 'DIALOGUE_NOT_FOUND', '这段对话不存在。');
+    return task;
+  }
+
+  #dialogueCall<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof DialogueError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
   }
 
   undoManuscript(manuscriptId: string, branchId: string, expectedWorkingDigest: string): DurableHistoryProjection {

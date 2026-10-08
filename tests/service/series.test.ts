@@ -341,7 +341,7 @@ describe('书系 over the real store', () => {
     const plant = new DatabaseSync(databasePath());
     let before: Array<{ name: string; sql: string }>;
     try {
-      plant.exec(`DROP TABLE series_retrieval_exclusions; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_conflicts; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; PRAGMA user_version = ${EVALUATION_CALIBRATION_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_conflicts; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; PRAGMA user_version = ${EVALUATION_CALIBRATION_SCHEMA_VERSION};`);
       before = schemaOf(plant);
       // Taken before the kind-coupled relations go back to revision 58: revision 59 rebuilds them to these exact shapes again.
       downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
@@ -359,7 +359,7 @@ describe('书系 over the real store', () => {
     try {
       expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION);
       const after = schemaOf(database);
-      expect(after.filter((entry) => !/^(series|store_versions|database_export_|backup_preferences|scheduled_backup|database_replacements|database_merge|evaluation_initial_drafts)/u.test(entry.name))).toEqual(before!);
+      expect(after.filter((entry) => !/^(series|store_versions|database_export_|backup_preferences|scheduled_backup|database_replacements|database_merge|evaluation_initial_drafts|dialogue_)/u.test(entry.name))).toEqual(before!);
       expect(after.filter((entry) => SERIES_TABLES.includes(entry.name)).map((entry) => entry.sql))
         .toEqual(SERIES_TABLES.slice().sort().map((table) => SERIES_SCHEMA_SQL[table as keyof typeof SERIES_SCHEMA_SQL]));
       expect(counts()).toEqual({ series: 0, series_membership_changes: 0 });

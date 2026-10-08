@@ -316,7 +316,7 @@ describe('⑥ 维护事项 (S68a)', () => {
     try {
       planted.exec('PRAGMA foreign_keys = OFF');
       planted.exec(`BEGIN IMMEDIATE;
-        DROP TABLE series_retrieval_exclusions; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books;
+        DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books;
         DROP TABLE database_merges;
         DROP TABLE database_replacements;
         DROP TABLE scheduled_backup_removals;

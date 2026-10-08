@@ -26,6 +26,7 @@ import {
   parseInitialEvaluationSynthesisMessageHeader,
   parseInitialEvaluationUnitMessageHeader,
 } from '../evaluation/initial-evaluation-contract.js';
+import { DIALOGUE_PROMPT_CONTRACT_DIGEST, dialogueRequestDigest, parseDialogueMessageHeader } from '../dialogue/contract.js';
 import { AI7_FAILURE_CODES, type DshFailureCodes } from './classification.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from './egress-gate.js';
 import { lastUserMessageText } from './payload.js';
@@ -85,6 +86,12 @@ import { fixtureEntryKey, resolveFixtureEntry, type ModelFixtureEntry, type Reso
  * minted per import, so a fixture generated from one import of a text cannot answer a fresh import
  * of the same text under a request digest; the content digest does not move with the identities, so
  * it can. Production and the J-04 Journey stay on request digests: the mode exists for `tests/`.
+ *
+ * An Interactive Editorial Dialogue turn (Issue #52, S17a) is recognized by the header only a dialogue message writes, and
+ * matched the same way under unit ordinal `0`: its request digest is a function of the frozen dialogue contract, whether the
+ * turn asks or goes on with a stopped answer, and the question — never the selected words, whose identities are the Book's.
+ * Its `answer-chunks` response streams one text delta per chunk, and a launch that names J-16's answer hold waits before a
+ * chunk the hold has not released yet, so the Journey can watch an answer in flight with a sentence cut in two.
  *
  * Structurally an `LlmAdapter`; the class is not extended so that no DSH runtime value is imported
  * before the service installs network denial.
@@ -160,6 +167,9 @@ export function substituteAssuranceSamplingRefPlaceholders(text: string, listedR
   return text.replace(SAMPLING_REF_PLACEHOLDER, (placeholder, index: string) => listedRefs[Number(index) - 1] ?? placeholder);
 }
 
+/** J-16's answer hold: awaited before a dialogue chunk with how many were streamed and whether the turn was interrupted. */
+export type AnswerHold = (chunksStreamed: number, interrupted: () => boolean) => Promise<void>;
+
 export class Ai7LocalDeterministicAdapter implements LlmAdapter {
   readonly #fixture: ResolvedModelFixture;
   readonly #promptContractDigest: string;
@@ -168,6 +178,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
   readonly #entries: ReadonlyMap<string, ModelFixtureEntry>;
   readonly #servedByKey = new Map<string, number>();
   readonly #attemptsBefore: ReadonlyMap<number, number>;
+  readonly #answerHold: AnswerHold | null;
   #served = 0;
 
   constructor(
@@ -181,12 +192,18 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
        * from there, so a retry made after the Run stopped is still that unit's second attempt.
        */
       readonly attemptsBefore?: ReadonlyMap<number, number>;
+      /**
+       * J-16's answer hold (Issue #52, S17a): awaited before each dialogue chunk with how many were already streamed; it
+       * resolves at once when the turn is interrupted.
+       */
+      readonly answerHold?: AnswerHold | null;
     } = {},
   ) {
     this.#fixture = fixture;
     this.#promptContractDigest = promptContractDigest;
     this.#codes = codes;
     this.#attemptsBefore = options.attemptsBefore ?? new Map();
+    this.#answerHold = options.answerHold ?? null;
     this.#resolveBy = options.resolveBy ?? 'request-digest';
     this.#entries = this.#resolveBy === 'content-digest' ? contentDigestEntries(fixture) : fixture.entries;
   }
@@ -194,6 +211,48 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
   /** Replayed requests so far; there is never a transmission count. */
   get servedRequests(): number {
     return this.#served;
+  }
+
+  /** One dialogue turn, answered from the fixture by its request key; an `answer-chunks` answer streams chunk by chunk. */
+  async *#dialogue(
+    header: { kind: 'ask' | 'continue'; questionDigest: string },
+    options: GenerateOptions,
+    failure: (code: string, message: string, status?: number) => StreamChunk,
+  ): AsyncIterable<StreamChunk> {
+    const requestDigest = dialogueRequestDigest(DIALOGUE_PROMPT_CONTRACT_DIGEST, header.kind, header.questionDigest);
+    const pairKey = fixtureEntryKey(0, requestDigest);
+    const attempt = (this.#servedByKey.get(pairKey) ?? 0) + 1;
+    this.#servedByKey.set(pairKey, attempt);
+    const entry = resolveFixtureEntry(this.#entries, 0, requestDigest, attempt);
+    if (entry === undefined) {
+      yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, `夹具 ${this.#fixture.identity} 没有这个提问（问题摘要 ${header.questionDigest}）的对应回答。`);
+      return;
+    }
+    const response = entry.response;
+    if (response.kind === 'adapter-failure' || response.kind === 'interrupted' || response.kind === 'quota-exceeded') {
+      yield response.kind === 'quota-exceeded'
+        ? failure(this.#codes.QUOTA_EXCEEDED_CODE, response.message, response.status)
+        : response.kind === 'interrupted'
+          ? failure(AI7_FAILURE_CODES.INTERRUPTED, response.message)
+          : failure(response.code, response.message, response.status ?? undefined);
+      return;
+    }
+    const chunks = response.kind === 'answer-chunks' ? response.chunks : [response.text];
+    const interrupted = (): boolean => options.signal?.aborted === true;
+    yield { type: 'block-start', index: 0, blockType: 'text' };
+    let streamed = '';
+    for (const [index, chunk] of chunks.entries()) {
+      if (this.#answerHold !== null) await this.#answerHold(index, interrupted);
+      if (interrupted()) {
+        yield failure(AI7_FAILURE_CODES.INTERRUPTED, '回答已停止。');
+        return;
+      }
+      streamed += chunk;
+      yield { type: 'text-delta', index: 0, text: chunk };
+    }
+    yield { type: 'block-end', index: 0, block: { type: 'text', text: streamed } };
+    yield { type: 'usage', usage: { inputTokens: response.usage.inputTokens, outputTokens: response.usage.outputTokens } };
+    yield { type: 'finish', reason: { kind: 'stop' } };
   }
 
   providerInfo(provider: string): LlmProviderInfo {
@@ -223,6 +282,11 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
       return;
     }
     const text = lastUserMessageText(options);
+    const dialogue = text === null ? null : parseDialogueMessageHeader(text);
+    if (dialogue !== null) {
+      yield* this.#dialogue(dialogue, options, failure);
+      return;
+    }
     // The headers are disjoint and are tried in turn, so a unit message of one analysis kind can never
     // be read as another kind's, as the reduction's, or as a sampling turn's. Which kind a request
     // belongs to is decided by its header alone; its request digest is then keyed by that kind's
@@ -305,6 +369,9 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
         yield { type: 'finish', reason: { kind: 'stop' } };
         return;
       }
+      case 'answer-chunks':
+        yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '分段回答只答复编辑对话。');
+        return;
       case 'adapter-failure':
         yield failure(response.code, response.message, response.status ?? undefined);
         return;

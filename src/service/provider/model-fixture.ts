@@ -32,6 +32,8 @@ export const FIXTURE_IDENTITY_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const MAX_FIXTURE_BYTES = 512 * 1024;
 const MAX_BASE_DEPTH = 4;
 const MAX_FIXTURE_ATTEMPT = 8;
+/** The most text deltas one dialogue answer streams. */
+const MAX_ANSWER_CHUNKS = 64;
 /** The keys an entry may carry beside the three it must; every other key is still refused. */
 const OPTIONAL_ENTRY_KEYS = ['attempt', 'contentDigest'] as const;
 /** The keys a fixture may carry beside the seven it must; every other key is still refused. */
@@ -49,6 +51,11 @@ const FIXTURE_PROVENANCE: readonly ModelFixtureProvenance[] = ['recorded', 'auth
 
 export type ModelFixtureResponse =
   | { readonly kind: 'unit-result'; readonly text: string; readonly usage: { readonly inputTokens: number; readonly outputTokens: number } }
+  /**
+   * An Interactive Editorial Dialogue answer (Issue #52, S17a): the text deltas the model streams, in order, so a test and
+   * J-16 see the answer arrive in pieces — a sentence cut between two of them included — and can hold it between two.
+   */
+  | { readonly kind: 'answer-chunks'; readonly chunks: ReadonlyArray<string>; readonly usage: { readonly inputTokens: number; readonly outputTokens: number } }
   | { readonly kind: 'adapter-failure'; readonly code: string; readonly message: string; readonly status: number | null }
   | { readonly kind: 'quota-exceeded'; readonly message: string; readonly status: number }
   | { readonly kind: 'interrupted'; readonly message: string };
@@ -125,6 +132,14 @@ function parseResponse(value: unknown): ModelFixtureResponse {
         Number.isSafeInteger(value.usage.inputTokens) && (value.usage.inputTokens as number) >= 0 &&
         Number.isSafeInteger(value.usage.outputTokens) && (value.usage.outputTokens as number) >= 0, '夹具 unit-result 响应无效。');
       return { kind: 'unit-result', text: value.text, usage: { inputTokens: value.usage.inputTokens as number, outputTokens: value.usage.outputTokens as number } };
+    }
+    case 'answer-chunks': {
+      requireFixture(hasExactKeys(value, ['kind', 'chunks', 'usage']) && Array.isArray(value.chunks) && value.chunks.length >= 1 &&
+        value.chunks.length <= MAX_ANSWER_CHUNKS && value.chunks.every((chunk) => wellFormed(chunk, 4 * 1024) && (chunk as string).length > 0) &&
+        isRecord(value.usage) && hasExactKeys(value.usage, ['inputTokens', 'outputTokens']) &&
+        Number.isSafeInteger(value.usage.inputTokens) && (value.usage.inputTokens as number) >= 0 &&
+        Number.isSafeInteger(value.usage.outputTokens) && (value.usage.outputTokens as number) >= 0, '夹具 answer-chunks 响应无效。');
+      return { kind: 'answer-chunks', chunks: [...value.chunks as string[]], usage: { inputTokens: value.usage.inputTokens as number, outputTokens: value.usage.outputTokens as number } };
     }
     case 'adapter-failure': {
       requireFixture(hasExactKeys(value, ['kind', 'code', 'message', 'status']) && wellFormed(value.code, 64) && (value.code as string).length > 0 &&
