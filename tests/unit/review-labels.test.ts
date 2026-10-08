@@ -119,6 +119,11 @@ describe('the words of the 审阅 destination', () => {
       'open-manuscript': '打开稿件',
       'open-review': '打开审阅',
       'view-plan': '查看计划',
+      // A Run a Series Retrieval Exclusion stopped (Issue #64, S29b; SER-024).
+      'scope-redo': '修改计划并重新授权',
+      'scope-cancel': '取消任务',
+      'scope-cancel-confirm': '确认取消任务',
+      'scope-cancel-keep': '不取消',
     });
     expect(reviewGenerateReportLabel(null)).toBe('生成报告');
     expect(reviewGenerateReportLabel(2)).toBe('生成新版本');

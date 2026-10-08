@@ -493,7 +493,7 @@ describe('书系知识 over the real store', () => {
       expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION);
       const after = schemaOf(database);
       // Revision 54's version ledger (Issue #433, S85a) returns with it, as the planted store lacked it too.
-      expect(after.filter((entry) => !/^(series_knowledge|store_versions|database_export_|backup_preferences|scheduled_backup|database_replacements|database_merge|evaluation_initial_drafts)/u.test(entry.name))).toEqual(before!);
+      expect(after.filter((entry) => !/^(series_knowledge|store_versions|database_export_|backup_preferences|scheduled_backup|database_replacements|database_merge|evaluation_initial_drafts|series_retrieval_exclusions)/u.test(entry.name))).toEqual(before!);
       expect(after.filter((entry) => TABLES.includes(entry.name)).map((entry) => entry.sql))
         .toEqual(TABLES.slice().sort().map((table) => SERIES_KNOWLEDGE_SCHEMA_SQL[table as keyof typeof SERIES_KNOWLEDGE_SCHEMA_SQL]));
       expect(counts()).toEqual({ series_knowledge_items: 0, series_knowledge_candidates: 0, series_knowledge_revisions: 0, series_knowledge_conflicts: 0, series_knowledge_promotions: 0 });
