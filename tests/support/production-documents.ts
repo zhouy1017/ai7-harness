@@ -3,8 +3,9 @@ import type { DatabaseSync } from 'node:sqlite';
 /**
  * The relations schema revisions 37 to 63 add (Issue #415, S66a to S66c; Issue #416, S67a and S67b; Issue #547; Issue #426,
  * S68a; Issue #431, S83; Issue #427, S79a and S79c; Issue #429, S81a and S81b1; Issue #94, S38; Issue #61, S26a and S26b; Issue #430, S82;
- * Issue #63, S28a and S28b; Issue #433, S85a; Issue #434, S86a to S86d; Issue #52, S17a; Issue #65, S30), in drop order: the Developer Capability Proposals' files and versions,
- * the Review Runs' procedure pins, the Captured Procedures' states, versions and identities (revision 63), the dialogue Tasks' conversions,
+ * Issue #63, S28a and S28b; Issue #433, S85a; Issue #434, S86a to S86d; Issue #52, S17a; Issue #64, S29b; Issue #429, S81c; Issue #65, S30), in drop order: the Developer Capability Proposals' files and versions,
+ * the Review Runs' procedure pins, the Captured Procedures' states, versions and identities (revision 63), the 审稿意见 drafts and Tasks
+ * (revision 62), the Series Retrieval Exclusions (revision 61), the dialogue Tasks' conversions,
  * outcomes, spans, bindings, attempts and the Tasks (revision 60), the AI7 初评 each Evaluation Record version began from (revision 59), the merges of a package's Books and the Books each took (revision 58), the replacements of the local data (revision 57), the scheduled backups (revision 56), the database exports (revision 55), the store's version records (revision 54), Series Knowledge's promotion decisions, revisions, candidates and items (revision 53),
  * the Series membership changes and the Series (revision 52), the house's evaluation
  * preferences and the 定价与首印 entries (revision 51), the Learning Eligibility decisions (revision 50), the Proposal Decisions' feedback (revision 49), the analysis feedback signals (revision 48), the Evaluation Records' entries and the records (revision 47), the 资料库 items' decisions and the items (revision 46),
@@ -26,6 +27,8 @@ export const PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER: ReadonlyArray<string> = [
   // 审稿意见 (revision 62; Issue #429, S81c): its drafts and Tasks.
   'readers_report_drafts',
   'readers_report_tasks',
+  // 书系检索排除 (revision 61; Issue #64, S29b): each revision of an exclusion (Issue #674).
+  'series_retrieval_exclusions',
   'dialogue_conversions',
   'dialogue_attempt_outcomes',
   'dialogue_harness_spans',
