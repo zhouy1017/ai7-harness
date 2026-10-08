@@ -33,7 +33,7 @@ export const EDITORIAL_REVIEW_KIND_GLOB = `${EDITORIAL_REVIEW_KIND_PREFIX}[a-z]*
  * Revision 24 (Issue #417) widens the same two once more, for one Result Set per Review Category:
  * the two literal kinds stand as they were, and the family joins them by pattern. Revision 59 (Issue
  * #429, S81b1) widens them for the evaluation kind, AI7's 初评, one literal kind more, and revision 62 (Issue #429, S81c) for
- * the reader's report kind, 审稿意见, one more; revision 65 (Issue #429, S81b2) for the evaluation rewrite kind, 按我的评分重写评语.
+ * the reader's report kind, 审稿意见, one more; revision 64 (Issue #429, S81b2) for the evaluation rewrite kind, 按我的评分重写评语.
  */
 export const ANALYSIS_RESULT_SET_SCHEMA_SQL = {
   analysis_result_sets: `CREATE TABLE analysis_result_sets (
@@ -73,7 +73,7 @@ export const ANALYSIS_RESULT_SET_SCHEMA_SQL = {
 
 /**
  * The two Result Set relations as revisions 62 and 63 carried them, kept only to validate such a store exactly before revision
- * 65 rebuilds them, and for the migration case.
+ * 64 rebuilds them, and for the migration case.
  */
 export const ANALYSIS_RESULT_SET_REVISION_62_SQL = {
   analysis_result_sets: `CREATE TABLE analysis_result_sets (

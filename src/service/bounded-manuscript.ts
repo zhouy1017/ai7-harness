@@ -2749,7 +2749,7 @@ function requireManuscriptReimportTargetSchema(
       // Revision 63 (Issue #65, S30) adds the Captured Procedures, their versions, states and pins, and the Developer Capability
       // Proposals with the files they were written to.
       ...(includeCapturedProcedureTables ? CAPTURED_PROCEDURE_SCHEMA_SQL : {}),
-      // Revision 65 (Issue #429, S81b2) adds which version and saved entry each 按我的评分重写评语 Task rewrites, and the decisions.
+      // Revision 64 (Issue #429, S81b2) adds which version and saved entry each 按我的评分重写评语 Task rewrites, and the decisions.
       ...(includeEvaluationRewriteTables ? EVALUATION_REWRITE_SCHEMA_SQL : {}),
     },
     // The partial index that keeps one primary Manuscript per Book stands with the rebuilt relation, whatever the version.

@@ -397,9 +397,9 @@ export const CAPTURED_PROCEDURE_SCHEMA_VERSION = 63;
  * evaluation rewrite kind — rebuilt exactly as revisions 20, 24, 59 and 62 rebuilt them, every row copied byte for byte — and
  * two additive, append-only relations owned by `evaluation-rewrites.ts` and created before this version is stamped record which
  * version and saved entry each rewrite Task rewrites, and the editor's one decision on each rewritten result. It follows
- * revision 63 (Issue #65, S30); revision 64 is another slice's. No existing row changes. This is the terminal version.
+ * revision 63 (Issue #65, S30). No existing row changes. This is the terminal version.
  */
-export const EVALUATION_REWRITE_SCHEMA_VERSION = 65;
+export const EVALUATION_REWRITE_SCHEMA_VERSION = 64;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
@@ -663,13 +663,13 @@ export const ANALYSIS_LEDGER_REVISION_23_SQL = {
   ) STRICT`,
 } as const;
 
-/** The three kind-coupled relations revisions 20, 24, 59, 62 and 65 rebuild, in the order the foreign keys read them. */
+/** The three kind-coupled relations revisions 20, 24, 59, 62 and 64 rebuild, in the order the foreign keys read them. */
 export const ANALYSIS_LEDGER_REVISION_20_TABLES = ['analysis_task_intents', 'analysis_result_sets', 'analysis_result_set_revisions'] as const;
 
 /**
  * The shapes revision 62 gave the three kind-coupled relations and revision 63 left alone: the reader's report kind beside the
  * others, no evaluation rewrite kind. They are kept only to validate a revision-62 or revision-63 store exactly before revision
- * 65 rebuilds the three with every row copied forward, and for the migration case.
+ * 64 rebuilds the three with every row copied forward, and for the migration case.
  */
 export const ANALYSIS_LEDGER_REVISION_62_SQL = {
   analysis_task_intents: `CREATE TABLE analysis_task_intents (
@@ -983,7 +983,7 @@ export const ANALYSIS_LEDGER_REVISION_16_SQL = {
  *
  * Revision 59 (Issue #429, S81b1) admits the evaluation kind — AI7's 初评 — beside them, as one literal kind with its own
  * contract version and its two modes, each with its fixed goal; every other arm is untouched. Revision 62 (Issue #429, S81c)
- * admits the reader's report kind — 审稿意见 — the same way, and revision 65 (Issue #429, S81b2) the evaluation rewrite kind —
+ * admits the reader's report kind — 审稿意见 — the same way, and revision 64 (Issue #429, S81b2) the evaluation rewrite kind —
  * 按我的评分重写评语.
  */
 export const ANALYSIS_LEDGER_SCHEMA_SQL = {
@@ -1638,8 +1638,8 @@ function validateRevision23AnalysisLedgerSchema(db: DatabaseSync): void {
 
 /**
  * The analysis relations as revisions 62 and 63 carried them, validated exactly — shapes, triggers, row digests and references —
- * before revision 65's forward copy rebuilds the three kind-coupled relations for the evaluation rewrite kind. Only those exact
- * shapes are read as revision 62: a store at 62 or 63 whose relations already read as revision 65's is not one AI7 wrote.
+ * before revision 64's forward copy rebuilds the three kind-coupled relations for the evaluation rewrite kind. Only those exact
+ * shapes are read as revision 62: a store at 62 or 63 whose relations already read as revision 64's is not one AI7 wrote.
  */
 function validateRevision62AnalysisLedgerSchema(db: DatabaseSync): void {
   requireExactObjects(db, 'table', { ...ANALYSIS_LEDGER_SCHEMA_SQL, ...ANALYSIS_LEDGER_REVISION_62_SQL }, '分析任务账本表（修订版 62）');
@@ -1927,8 +1927,8 @@ function migrateAnalysisLedgerToRevision62(db: DatabaseSync): void {
  * store at either carries the three kind-coupled relations as revision 62 left them. They are rebuilt exactly as before, for the
  * evaluation rewrite kind; no existing row changes, and nothing else is touched.
  */
-function migrateAnalysisLedgerToRevision65(db: DatabaseSync): void {
-  rebuildKindCoupledAnalysisRelations(db, 65);
+function migrateAnalysisLedgerToRevision64(db: DatabaseSync): void {
+  rebuildKindCoupledAnalysisRelations(db, 64);
 }
 
 /**
@@ -1937,7 +1937,7 @@ function migrateAnalysisLedgerToRevision65(db: DatabaseSync): void {
  * terminal version, which the revisions between them moved without touching them — in this one transaction;
  * `revision` names the rebuild only for the report of a rollback that itself failed.
  */
-function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24 | 59 | 62 | 65): void {
+function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24 | 59 | 62 | 64): void {
   const foreignKeysState = (): number => asNumber((db.prepare('PRAGMA foreign_keys').get() as SqlRow).foreign_keys);
   const restoreForeignKeys = foreignKeysState() === 1;
   db.exec('PRAGMA foreign_keys = OFF');
@@ -2017,11 +2017,11 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   if (version === EVALUATION_REWRITE_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
   if (version === READERS_REPORT_SCHEMA_VERSION || version === CAPTURED_PROCEDURE_SCHEMA_VERSION) {
     // Revision 63 (Issue #65, S30) adds no task-authorization or analysis relation: a revision-62 or revision-63 store carries
-    // the ledger revision 62 left, validated as exactly that, and revision 65's rebuild of the three kind-coupled relations
+    // the ledger revision 62 left, validated as exactly that, and revision 64's rebuild of the three kind-coupled relations
     // brings it to the terminal shape and stamps the terminal version.
     validateJ03TaskAuthorizationSchema(db);
     validateRevision62AnalysisLedgerSchema(db);
-    return migrateAnalysisLedgerToRevision65(db);
+    return migrateAnalysisLedgerToRevision64(db);
   }
   if (version === INITIAL_EVALUATION_SCHEMA_VERSION || version === DIALOGUE_SCHEMA_VERSION || version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION) {
     // Revisions 60 (Issue #52, S17a) and 61 (Issue #64, S29b) add no task-authorization or analysis relation: a revision-59,

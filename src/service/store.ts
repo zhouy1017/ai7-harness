@@ -256,6 +256,7 @@ import type {
   ReadersReportProjection,
   ReadersReportTemplate,
   EvaluationComparableProjection,
+  EvaluationPricingProjection,
   EvaluationMarketProjection,
   EvaluationRewriteDecision,
   EvaluationRewriteProjection,
@@ -274,6 +275,7 @@ import {
   EVALUATION_REWRITE_LIVE_UNAVAILABLE,
   EVALUATION_REWRITE_MODE_GOALS,
   MAX_EVALUATION_COMPARABLES,
+  MIN_SERIES_PREDICTION_BOOKS,
   READERS_REPORT_NO_EXEMPLAR,
   READERS_REPORT_TEMPLATE_LABELS,
   READERS_REPORT_TEMPLATES,
@@ -4359,7 +4361,7 @@ export class EditorialStore {
       // Revision 62 (Issue #429, S81c): which 定稿 version each 审稿意见 Task drafts from, and which result became a draft.
       initializeReadersReportSchema(authority);
       initializeCapturedProcedureSchema(authority);
-      // Revision 65 (Issue #429, S81b2): which version each 按我的评分重写评语 Task rewrites, and the editor's decisions.
+      // Revision 64 (Issue #429, S81b2): which version each 按我的评分重写评语 Task rewrites, and the editor's decisions.
       initializeEvaluationRewriteSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
@@ -7255,17 +7257,30 @@ export class EditorialStore {
 
   /**
    * The market section's house data for one Book (EVAL-009, EVAL-010): the 书系 it is in and their other Books as comparables
-   * tagged `书系`, and 定价与首印 — the prediction range over the house's published Books' actuals, shown only once 设置 › 评估校准与
-   * 预测's switch is on and enough Books carry actuals (the Owner's answer of 2026-10-07: 「按本社已出版同类书的实际数据统计」). The
-   * Book itself never counts toward its own range. No model reads any of it, and nothing here comes from the web.
+   * tagged `书系`, and 定价与首印 — the prediction range over the house's other published Books' actuals, shown only once 设置 ›
+   * 评估校准与预测's switch is on and at least the threshold of other Books carry actuals (the Owner's answer of 2026-10-07:
+   * 「按本社已出版同类书的实际数据统计」), with a 书系 range only over `MIN_SERIES_PREDICTION_BOOKS` or more. The Book itself never
+   * counts toward its own range or the gate it waits on. No model reads any of it, and nothing here comes from the web.
+   *
+   * It reads other Books' entries, so a damaged one anywhere must not take 评估 of this Book down (S81b2 review): a part that
+   * cannot be read this time says so — 暂时读不到本社数据 — and the rest of 评估, a save included, stands.
    */
   #evaluationMarket(bookId: string): EvaluationMarketProjection {
-    const memberships = this.#seriesCall(() => this.#series.seriesOf(bookId)).memberships;
+    let memberships: ReadonlyArray<{ seriesId: string; title: string }> = [];
     const others = new Map<string, string>();
-    for (const membership of memberships) {
-      for (const member of this.#seriesCall(() => [...this.#series.members(membership.seriesId)])) {
-        if (member.bookId !== bookId && !others.has(member.bookId)) others.set(member.bookId, membership.title);
+    let seriesUnreadable = false;
+    try {
+      memberships = this.#seriesCall(() => this.#series.seriesOf(bookId)).memberships;
+      for (const membership of memberships) {
+        for (const member of this.#seriesCall(() => [...this.#series.members(membership.seriesId)])) {
+          if (member.bookId !== bookId && !others.has(member.bookId)) others.set(member.bookId, membership.title);
+        }
       }
+    } catch (error) {
+      if (!(error instanceof StoreError)) throw error;
+      memberships = [];
+      others.clear();
+      seriesUnreadable = true;
     }
     const comparables: EvaluationComparableProjection[] = [];
     for (const [otherId, seriesTitle] of others) {
@@ -7276,25 +7291,45 @@ export class EditorialStore {
       if (row === undefined) continue;
       comparables.push({ bookId: otherId, title: asString(row.title), seriesTitle, published: asNumber(row.published) === 1, source: 'series' });
     }
-    const pricing = this.#calibrationCall(() => {
-      const preferences = this.#evaluationCalibration.preferences();
-      const booksWithActuals = this.#evaluationCalibration.booksWithActuals();
-      const available = predictionAvailable(booksWithActuals);
-      const shown = preferences.predictionEnabled && available;
-      const actuals = shown ? [...this.#evaluationCalibration.everyLatestActuals()].filter(([otherId]) => otherId !== bookId) : [];
-      return {
-        booksWithActuals,
-        threshold: PREDICTION_MIN_BOOKS_WITH_ACTUALS,
-        enabled: preferences.predictionEnabled,
-        available,
-        house: shown ? predictionRange(actuals.map(([, entry]) => entry)) : null,
-        series: shown ? predictionRange(actuals.filter(([otherId]) => others.has(otherId)).map(([, entry]) => entry)) : null,
-      };
-    });
+    const unread: EvaluationPricingProjection = {
+      booksWithActuals: 0, otherBooksWithActuals: 0, threshold: PREDICTION_MIN_BOOKS_WITH_ACTUALS, enabled: false, available: false, unreadable: true,
+      house: null, series: null, seriesBooksWithActuals: null, seriesMinimum: MIN_SERIES_PREDICTION_BOOKS,
+    };
+    let pricing = unread;
+    try {
+      pricing = this.#calibrationCall(() => {
+        const preferences = this.#evaluationCalibration.preferences();
+        const booksWithActuals = this.#evaluationCalibration.booksWithActuals();
+        const available = predictionAvailable(booksWithActuals);
+        const asked = preferences.predictionEnabled && available;
+        const actuals = asked ? [...this.#evaluationCalibration.everyLatestActuals()].filter(([otherId]) => otherId !== bookId) : [];
+        const otherBooksWithActuals = asked ? actuals.length
+          : booksWithActuals - (this.#evaluationCalibration.hasActuals(bookId) ? 1 : 0);
+        // The gate counts the Books the range rests on: the others, never this one.
+        const shown = asked && predictionAvailable(otherBooksWithActuals);
+        const inSeries = shown ? actuals.filter(([otherId]) => others.has(otherId)).map(([, entry]) => entry) : [];
+        return {
+          booksWithActuals,
+          otherBooksWithActuals,
+          threshold: PREDICTION_MIN_BOOKS_WITH_ACTUALS,
+          enabled: preferences.predictionEnabled,
+          available,
+          unreadable: false,
+          house: shown ? predictionRange(actuals.map(([, entry]) => entry)) : null,
+          series: shown && inSeries.length >= MIN_SERIES_PREDICTION_BOOKS ? predictionRange(inSeries) : null,
+          seriesBooksWithActuals: shown && memberships.length > 0 ? inSeries.length : null,
+          seriesMinimum: MIN_SERIES_PREDICTION_BOOKS,
+        };
+      });
+    } catch (error) {
+      if (!(error instanceof StoreError)) throw error;
+      pricing = unread;
+    }
     return {
       series: memberships.map((membership) => ({ seriesId: membership.seriesId, title: membership.title })),
       comparables,
       comparableCount: others.size,
+      seriesUnreadable,
       pricing,
     };
   }
@@ -7431,6 +7466,13 @@ export class EditorialStore {
     const latest = this.#latestEvaluationRewrite(bookId);
     requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT',
       '这项任务已不是这本书当前的任务；请从它所在的位置重新打开计划。');
+    // The version may have moved since the plan was prepared — saved again, or 定稿 — while the drawer stayed open: a Run then
+    // would only write words that can never be 采用 (S81b2 review). Refused here, before any Run is spent.
+    const version = this.#evaluationCall(() => this.#evaluations.rewritable(bookId, latest.task.recordId));
+    const refusal = evaluationRewriteRefusal(version);
+    requireStore(refusal === null, 'EVALUATION_REWRITE_UNAVAILABLE', refusal ?? '');
+    requireStore(version.entryOrdinal === latest.task.entryOrdinal && version.entrySha256 === latest.task.entrySha256, 'EVALUATION_REWRITE_STALE',
+      '这一版在准备重写之后又保存过：这份计划依据的是之前的分数；请按现在的评分重新准备重写。');
     const authorized = this.#analysisCall(() => latest.ledger.authorize(bookId, taskIntentId, planEnvelopeDigest));
     return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger: latest.ledger, recordId: latest.task.recordId };
   }
@@ -7447,32 +7489,72 @@ export class EditorialStore {
     return { settled: this.#analysisCall(() => this.#evaluationRewriteLedger(any.input).reconcileStoppedRuns()).settled };
   }
 
-  /** The newest rewritten result of one version, with its Task and words; `null` while the version has none. */
+  /** The newest rewritten result of one version, with its Task, words and what it read; `null` while the version has none. */
   #newestEvaluationRewrite(bookId: string, recordId: string): null | {
     revision: { revisionId: string; createdAt: string; taskIntentId: string };
     task: StoredEvaluationRewriteTask;
     words: NonNullable<NonNullable<EvaluationRewriteProjection['inspectedRevision']>['revision']['rewrite']['words']> | null;
+    observations: NonNullable<EvaluationRewriteProjection['inspectedRevision']>['revision']['rewrite']['observations'];
+    reading: { unitsTotal: number; unitsRead: number };
   } {
     for (const revision of this.#evaluationRewriteCall(() => this.#evaluationRewrites.revisions(bookId))) {
       const found = this.#evaluationRewriteTaskOf(revision.taskIntentId);
       if (found === null || found.task.recordId !== recordId) continue;
       const inspected = this.#analysisCall(() => found.ledger.inspect(bookId, undefined, revision.revisionId)) as EvaluationRewriteProjection;
-      return { revision, task: found.task, words: inspected.inspectedRevision?.revision.rewrite.words ?? null };
+      const read = inspected.inspectedRevision?.revision ?? null;
+      return {
+        revision,
+        task: found.task,
+        words: read?.rewrite.words ?? null,
+        observations: read?.rewrite.observations ?? [],
+        reading: { unitsTotal: read?.coverage.unitsTotal ?? 0, unitsRead: read?.coverage.unitsClosed ?? 0 },
+      };
     }
     return null;
   }
 
   /**
    * 按我的评分重写评语 on ②C for the version on show (EVAL-008): whether it can be asked, the Book's latest rewrite Task, the newest
-   * rewrite of this version still waiting for the editor — its words beside the version's own — and the version's last decision.
+   * rewrite of this version still waiting for the editor — its words beside the version's own, the notes they rest on, how much
+   * of the Book it read and what it set aside — and the version's last decision. Every rewrite row it reads is read under one
+   * guard: a damaged one makes the rewrite unavailable with why, never 评估 unreadable (S81b2 review).
    */
   #evaluationRewriteWorkspace(bookId: string, version: RewritableEvaluation | null): EvaluationRewriteWorkspaceProjection {
     let latest: { task: StoredEvaluationRewriteTask; ledger: BaselineAnalysisStore; projection: EvaluationRewriteProjection } | null = null;
     let unavailable: string | null = null;
+    let proposal: EvaluationRewriteWorkspaceProjection['proposal'] = null;
+    let decided: EvaluationRewriteWorkspaceProjection['decided'] = null;
     try {
       latest = this.#latestEvaluationRewrite(bookId);
+      if (version !== null) {
+        const newest = this.#newestEvaluationRewrite(bookId, version.recordId);
+        if (newest !== null && newest.words !== null && this.#evaluationRewriteCall(() => this.#evaluationRewrites.decisionOf(newest.revision.revisionId)) === null) {
+          const words = newest.words;
+          proposal = {
+            revisionId: newest.revision.revisionId,
+            createdAt: newest.revision.createdAt,
+            entryOrdinal: newest.task.entryOrdinal,
+            current: newest.task.entryOrdinal === version.entryOrdinal && newest.task.entrySha256 === version.entrySha256 && version.state !== 'finalized',
+            reading: newest.reading,
+            items: words.items.map((item) => ({
+              itemId: item.itemId,
+              before: version.content.items.find((entry) => entry.itemId === item.itemId)?.comment ?? null,
+              after: item.comment,
+              evidence: newest.observations.filter((observation) => observation.itemId === item.itemId)
+                .map((observation) => ({ unitOrdinal: observation.unitOrdinal, note: observation.note, blockIds: [...observation.blockIds] })),
+            })),
+            verdict: words.verdict === null ? null : { before: version.content.verdict, after: words.verdict },
+            withheld: words.withheld.map((entry) => entry.reason),
+          };
+        }
+        const last = this.#evaluationRewriteCall(() => this.#evaluationRewrites.latestDecision(version.recordId));
+        decided = last === null ? null : { decision: last.decision, entryOrdinal: last.entryOrdinal, decidedAt: last.recordedAt };
+      }
     } catch (error) {
       if (!(error instanceof StoreError)) throw error;
+      latest = null;
+      proposal = null;
+      decided = null;
       unavailable = `按我的评分重写评语暂不可用：${error.message}`;
     }
     const runState = latest?.projection.run?.state ?? null;
@@ -7484,28 +7566,6 @@ export class EditorialStore {
       state: latest.projection.state,
       label: evaluationRewriteTaskStateLabel(latest.projection),
     };
-    let proposal: EvaluationRewriteWorkspaceProjection['proposal'] = null;
-    let decided: EvaluationRewriteWorkspaceProjection['decided'] = null;
-    if (version !== null && unavailable === null) {
-      const newest = this.#newestEvaluationRewrite(bookId, version.recordId);
-      if (newest !== null && newest.words !== null && this.#evaluationRewriteCall(() => this.#evaluationRewrites.decisionOf(newest.revision.revisionId)) === null) {
-        const words = newest.words;
-        proposal = {
-          revisionId: newest.revision.revisionId,
-          createdAt: newest.revision.createdAt,
-          entryOrdinal: newest.task.entryOrdinal,
-          current: newest.task.entryOrdinal === version.entryOrdinal && newest.task.entrySha256 === version.entrySha256 && version.state !== 'finalized',
-          items: words.items.map((item) => ({
-            itemId: item.itemId,
-            before: version.content.items.find((entry) => entry.itemId === item.itemId)?.comment ?? null,
-            after: item.comment,
-          })),
-          verdict: { before: version.content.verdict, after: words.verdict },
-        };
-      }
-      const last = this.#evaluationRewriteCall(() => this.#evaluationRewrites.latestDecision(version.recordId));
-      decided = last === null ? null : { decision: last.decision, entryOrdinal: last.entryOrdinal, decidedAt: last.recordedAt };
-    }
     const refusal = version === null ? '先打开一版评估。' : evaluationRewriteRefusal(version);
     const prepare: EvaluationRewriteWorkspaceProjection['prepare'] =
       this.#baselineAnalysis.launch.live !== null ? { allowed: false, reason: EVALUATION_REWRITE_LIVE_UNAVAILABLE }
@@ -7541,7 +7601,9 @@ export class EditorialStore {
       requireStore(words !== null, 'EVALUATION_REWRITE_NOT_WRITTEN', '这一次重写没有写出评语，不能采用。');
       requireStore(this.#newestEvaluationRewrite(bookId, recordId)?.revision.revisionId === revisionId, 'EVALUATION_REWRITE_SUPERSEDED',
         '这一版评估后来又重写过：请看最新的重写。');
-      const entryOrdinal = this.#evaluations.applyRewrite(bookId, recordId, { entryOrdinal: found.task.entryOrdinal, entrySha256: found.task.entrySha256 }, words);
+      requireStore(words.items.length > 0 || words.verdict !== null, 'EVALUATION_REWRITE_NOT_WRITTEN', '这一次重写写出的评语都没有采用的条件，只能放弃。');
+      const entryOrdinal = this.#evaluations.applyRewrite(bookId, recordId, { entryOrdinal: found.task.entryOrdinal, entrySha256: found.task.entrySha256 }, words,
+        { taskIntentId: revision.taskIntentId, analysisRevisionId: revisionId });
       this.#evaluationRewrites.recordDecision({ analysisRevisionId: revisionId, bookId, recordId, taskIntentId: revision.taskIntentId, decision: 'accepted', entryOrdinal });
     }));
     return this.inspectEvaluation(bookId, recordId);

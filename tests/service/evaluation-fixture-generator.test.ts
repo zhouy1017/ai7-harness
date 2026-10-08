@@ -29,7 +29,7 @@ import { fixtureEntryKey, type ModelFixtureEntry, type ResolvedModelFixture } fr
 import type { LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
-import { AUTHORED_MARKET } from '../support/initial-evaluation-market.js';
+import { AUTHORED_MARKET_ANSWER } from '../support/initial-evaluation-market.js';
 
 const FIXTURE_IDENTITY = 'sample1-evaluation-authored';
 const FIXTURE_PATH = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url)), `${FIXTURE_IDENTITY}.json`);
@@ -87,8 +87,8 @@ export const AUTHORED_OBSERVATIONS: Readonly<Record<number, ReadonlyArray<Initia
   ],
 };
 
-/** The synthesis over those observations: a score in whole or half points within each item's 满分, and the rest. */
-export const AUTHORED_SYNTHESIS: InitialEvaluationSynthesisResult = {
+/** The synthesis over those observations as AI7 writes it: a score in whole or half points within each item's 满分, and the rest (its market section as the model answers, S81b2). */
+export const AUTHORED_SYNTHESIS: Omit<InitialEvaluationSynthesisResult, 'market'> & { market: typeof AUTHORED_MARKET_ANSWER } = {
   schema: INITIAL_EVALUATION_SYNTHESIS_RESULT_SCHEMA,
   items: [
     { itemId: 'literary-quality', score: 16.5, comment: '细节与意象运用纯熟，写景与写心相互映照，人物各有性情；个别比喻略显俗套。' },
@@ -102,7 +102,7 @@ export const AUTHORED_SYNTHESIS: InitialEvaluationSynthesisResult = {
   nextStep: '先校改残句与俗套的比喻，再补充目标读者与同类书的资料，以便判断市场潜力。',
   suggestedConclusion: 'revise',
   // The market section (Issue #429, S81b2; EVAL-009), from the observations above alone.
-  market: AUTHORED_MARKET,
+  market: AUTHORED_MARKET_ANSWER,
 };
 
 const REFLECTION_TEXT = JSON.stringify({

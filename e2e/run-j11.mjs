@@ -72,9 +72,9 @@ const THIRD = Object.freeze({ title: '评估旅程丙' });
 const FIXTURE_IDENTITY = 'sample1-evaluation-rewrite-authored';
 /** The market section as the authored 初评 writes it (Issue #429, S81b2; EVAL-009). */
 const MARKET_LISTS = [
-  ['readers', '目标读者 AI7 · 依据书稿', ['对考古、青铜器与古文字题材有兴趣的成年读者。', '关注学界人情、学术与名利之争的知识分子读者。']],
-  ['sellingPoints', '差异化卖点 AI7 · 依据书稿', ['以一封甲骨文来信开篇设下悬念，学术悬疑贯穿始终。', '学者之间的对白各具声口，写出学界中人的性情与分寸。']],
-  ['channels', '渠道与策略 AI7 · 依据书稿', ['可从书中的考古与青铜器话题切入，面向文史爱好者推介。', '以学术与名利的冲突为话题，组织书评与读书会讨论。']],
+  ['readers', '目标读者 AI7 · 据书稿题材推断', ['对考古、青铜器与古文字题材有兴趣的成年读者。', '关注学界人情、学术与名利之争的知识分子读者。']],
+  ['sellingPoints', '差异化卖点 AI7 · 据书稿题材推断', ['以一封甲骨文来信开篇设下悬念，学术悬疑贯穿始终。', '学者之间的对白各具声口，写出学界中人的性情与分寸。']],
+  ['channels', '渠道与策略 AI7 · 据书稿题材推断', ['可从书中的考古与青铜器话题切入，面向文史爱好者推介。', '以学术与名利的冲突为话题，组织书评与读书会讨论。']],
 ];
 const MARKET_OFFLINE = '未联网核查：市场部分只依据本书稿件与本社数据，没有检索外网，也没有对比他社图书或获奖作品。';
 const MARKET_AWARDS = '有参评文学奖的潜力，但确定性低。（依据：所读部分叙述凝练、意象运用纯熟，并触及学术与权力的主题；没有对比任何获奖作品。）';
@@ -463,6 +463,7 @@ const READ_EVALUATION = `(() => {
         none: section.querySelector('.evaluation-market-none')?.textContent ?? null,
         lists: Array.from(section.querySelectorAll('.evaluation-market-list'), (card) => [card.dataset.marketList, card.querySelector('h4')?.textContent ?? null,
           Array.from(card.querySelectorAll('li'), (line) => line.textContent)]),
+        withheld: Array.from(section.querySelectorAll('.evaluation-market-withheld'), (line) => line.textContent),
         comparables: Array.from(section.querySelectorAll('.evaluation-comparable-list li'), (line) => line.textContent),
         comparablesNone: section.querySelector('.evaluation-comparables-none')?.textContent ?? null,
         comparablesWeb: section.querySelector('.evaluation-comparables-web')?.textContent ?? null,
@@ -483,6 +484,9 @@ const READ_EVALUATION = `(() => {
         proposal: card === null ? null : {
           current: card.dataset.current ?? null,
           line: card.querySelector('.evaluation-rewrite-proposal-line')?.textContent ?? null,
+          reading: card.querySelector('.evaluation-rewrite-reading')?.textContent ?? null,
+          withheld: Array.from(card.querySelectorAll('.evaluation-rewrite-withheld'), (line) => line.textContent),
+          evidence: Array.from(card.querySelectorAll('.evaluation-rewrite-items dd'), (value) => value.querySelectorAll('.evaluation-rewrite-evidence li').length),
           pairs: Array.from(card.querySelectorAll('.evaluation-rewrite-items dd'), (value) => [value.dataset.itemId ?? null,
             value.querySelector('.evaluation-rewrite-before')?.textContent ?? null, value.querySelector('.evaluation-rewrite-after')?.textContent ?? null]),
           actions: Array.from(card.querySelectorAll('.evaluation-rewrite-actions button'), (button) => [button.dataset.evaluationAction, button.textContent, button.disabled]),
@@ -1845,7 +1849,7 @@ async function main() {
     // AI7's and as resting on the Book alone — 未联网核查 — no 书系 comparable for a Book in none and no other house's book, and the
     // 预测 · 低确定性 block: 市场回报 暂无法预测, 评奖可能性 with its in-book basis, and 定价与首印 waiting for thirty published Books.
     requireJourney(draft.market !== null && draft.market.ai7 === 'true' && draft.market.basis === MARKET_OFFLINE && draft.market.none === null &&
-      JSON.stringify(draft.market.lists) === JSON.stringify(MARKET_LISTS) &&
+      JSON.stringify(draft.market.lists) === JSON.stringify(MARKET_LISTS) && draft.market.withheld.length === 0 &&
       JSON.stringify(draft.market.comparables) === JSON.stringify([]) &&
       draft.market.comparablesNone === '这本书不在任何书系中，没有可以列出的同书系图书。' && draft.market.comparablesWeb === '外网检索尚未接通：不列他社同类书。' &&
       draft.market.prediction === '预测 · 低确定性 不是承诺' &&
@@ -2070,6 +2074,9 @@ async function main() {
     const waiting = await readEvaluation(renderer, (page) => page.rewrite?.proposal !== null && page.rewrite?.proposal !== undefined, 'evaluation-rewrite-proposal-read');
     requireJourney(waiting.rewrite.task === '按我的评分重写评语 · 第 15 版 · 已完成' && waiting.rewrite.proposal.current === 'true' &&
       waiting.rewrite.proposal.line === 'AI7 按你第 2 次保存的评分重写了评语，等你决定：采用后才记入这一版，分数不变。' &&
+      // How much it read, and each 评语's notes beside it (EVAL-006); nothing set aside.
+      waiting.rewrite.proposal.reading === 'AI7 这次重写读了全部 8 个阅读范围。' && waiting.rewrite.proposal.withheld.length === 0 &&
+      JSON.stringify(waiting.rewrite.proposal.evidence) === JSON.stringify([3, 2, 4, 3, 0, 0]) &&
       JSON.stringify(waiting.rewrite.proposal.pairs) === JSON.stringify([
         ...AI7_COMMENTS.map(([itemId, comment], index) => [itemId, `现在：${comment}`, `重写：${REWRITTEN_COMMENTS[index]}`]),
         [null, '现在：（还没有写）', `重写：${REWRITTEN_VERDICT}`],

@@ -9,7 +9,7 @@
   "entries": [
     {
       "unitOrdinal": 1,
-      "requestDigest": "239e32334164c7d95c2e4c911b1d2341d60e41774e2d6fd67f85e8958f1fc35d",
+      "requestDigest": "f4b683969e05943def3ac36345f1cc1ec561ac44f7c7011b09d807304d21d24b",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.evaluation-rewrite.unit-result/1\",\"unitOrdinal\":1,\"observations\":[{\"itemId\":\"literary-quality\",\"note\":\"对仗的题辞与写信又撕信的细节以动作写心事，支持较高的文学品质评价。\",\"blockOrdinals\":[5,6,8,14]},{\"itemId\":\"structure-and-coherence\",\"note\":\"开篇以写不成的信引出悬念，伏笔清楚，这是结构上的长处。\",\"blockOrdinals\":[13,14]},{\"itemId\":\"chinese-language\",\"note\":\"叙述语言凝练，长句中夹用俗语。\",\"blockOrdinals\":[10]}]}",
@@ -21,7 +21,7 @@
     },
     {
       "unitOrdinal": 2,
-      "requestDigest": "89a6ca5e70729ea8054fda311d27d305787c8c11018270eb3a114647f0a7a6e0",
+      "requestDigest": "6123b6899f263113c85215dd2b9b1558e0bb4dc4eb6ddb88a54fc8ed86f2aa4c",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.evaluation-rewrite.unit-result/1\",\"unitOrdinal\":2,\"observations\":[{\"itemId\":\"structure-and-coherence\",\"note\":\"甲骨文来信构成核心悬念，后文必须承接它，结构的成败系于此。\",\"blockOrdinals\":[6,7]},{\"itemId\":\"chinese-language\",\"note\":\"个别比喻略显俗套，语言分不宜再高。\",\"blockOrdinals\":[11]}]}",
@@ -33,7 +33,7 @@
     },
     {
       "unitOrdinal": 3,
-      "requestDigest": "c0db80096b66040e6f44ff4a74104e291ae4a3efd78217a219bce97f875c8964",
+      "requestDigest": "d99f276adf9b753dbb7ef3a78e94d8bbc9ac7a83dd54dc9217f9ee1dd8b5b579",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.evaluation-rewrite.unit-result/1\",\"unitOrdinal\":3,\"observations\":[{\"itemId\":\"literary-quality\",\"note\":\"春景与梦境交织，写景与写心相互映照。\",\"blockOrdinals\":[2,3]}]}",
@@ -45,7 +45,7 @@
     },
     {
       "unitOrdinal": 4,
-      "requestDigest": "4e8713b5a93ed0bf7321c875ddb36107a545808dd6249f929dc0c12a6af57e39",
+      "requestDigest": "c96a9abf42cbd5d024f89c1b520d6b050d9b0c5863cd4598d8f428153d7b6138",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.evaluation-rewrite.unit-result/1\",\"unitOrdinal\":4,\"observations\":[{\"itemId\":\"structure-and-coherence\",\"note\":\"第一章在揭示来信内容处收束，回应开篇。\",\"blockOrdinals\":[6,7,8]}]}",
@@ -57,7 +57,7 @@
     },
     {
       "unitOrdinal": 5,
-      "requestDigest": "0b7651b0394ad2618f2f51ca8426bae714b8b08ba20f5d99decf3cb22fe5ab38",
+      "requestDigest": "d37220bc40287cdd380bc072dac5da2f08554867aa36a6a502841de511a542f0",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.evaluation-rewrite.unit-result/1\",\"unitOrdinal\":5,\"observations\":[{\"itemId\":\"chinese-language\",\"note\":\"个别句子成分残缺，介词之后缺少宾语。\",\"blockOrdinals\":[6]}]}",
@@ -69,7 +69,7 @@
     },
     {
       "unitOrdinal": 6,
-      "requestDigest": "b384640fcbcfd12c4b7cf37e8a568f636a726f4aeccf8e889e2b9feabb6f8997",
+      "requestDigest": "e926345fb19a30d67f9edfce363251a57491591a67520c14d05e2721cb846a57",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.evaluation-rewrite.unit-result/1\",\"unitOrdinal\":6,\"observations\":[{\"itemId\":\"theme-and-context\",\"note\":\"新省长与楚庄王的比附点到即止，学人与权力的关系还可以展开。\",\"blockOrdinals\":[3,4]}]}",
@@ -81,7 +81,7 @@
     },
     {
       "unitOrdinal": 7,
-      "requestDigest": "55ef42e77e85420c487b2dddc3a56f9f307bcf14c7cf10a97532a771ae597d12",
+      "requestDigest": "354105948ca1eb068f7c174d1aa86f4a2ec06b4afdd08c651e3c128130aef7f5",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.evaluation-rewrite.unit-result/1\",\"unitOrdinal\":7,\"observations\":[{\"itemId\":\"structure-and-coherence\",\"note\":\"考古疑问在这里集中抛出，后文若不逐一照应，读者容易失去线索。\",\"blockOrdinals\":[17]},{\"itemId\":\"theme-and-context\",\"note\":\"翁婿对话把学术与名利的冲突摆上台面。\",\"blockOrdinals\":[16,17]}]}",
@@ -93,7 +93,7 @@
     },
     {
       "unitOrdinal": 8,
-      "requestDigest": "942a747b1d1663533722824768c5e4bf1799677757c267e058d63d4e44eef272",
+      "requestDigest": "43f8dad70d57f8a4805ad2a78b356e6aa9ec9e1760c3d92df9ba076921c5cc75",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.evaluation-rewrite.unit-result/1\",\"unitOrdinal\":8,\"observations\":[{\"itemId\":\"literary-quality\",\"note\":\"以放大镜细看来信收束本章，与章首撕信遥相呼应。\",\"blockOrdinals\":[6]}]}",
@@ -105,7 +105,7 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "89a271599dec32065b3018a1946fd282a57479c17406968b6f233898378042cd",
+      "requestDigest": "7e1d5e7e838b599785291b150116bddf3c53aeb99e6299f43f6b5c28d97a645e",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.evaluation-rewrite.synthesis-result/1\",\"items\":[{\"itemId\":\"literary-quality\",\"comment\":\"细节与意象运用纯熟，写信又撕信、放大镜细看来信等动作写出人物心事，写景与写心相互映照；个别比喻略显俗套。\"},{\"itemId\":\"theme-and-context\",\"comment\":\"触及学界与权力、学术与名利的关系，翁婿对话把冲突摆上台面；但比附点到即止，在所读部分展开得还不够。\"},{\"itemId\":\"structure-and-coherence\",\"comment\":\"以甲骨文来信设置核心悬念，开篇的伏笔与第一章的收束都清楚；但考古疑问在中段集中抛出，后文照应尚不充分，线索有失衡之虞，结构还不够稳。\"},{\"itemId\":\"chinese-language\",\"comment\":\"叙述凝练、对白自然，人物各有声口；个别句子成分残缺、比喻偶落俗套，需要逐句校改。\"},{\"itemId\":\"readers-and-market\",\"comment\":\"所读内容中没有关于目标读者与市场的依据，只能从题材推断读者面；这一项依据不足，评价从严。\"}],\"verdict\":\"这部书稿以一封甲骨文来信设置悬念，写学界中人的心事与人情，文学品质与语言总体较好；结构上考古疑问集中抛出、照应尚不充分，读者与市场一项依据不足，评价从严。\"}",

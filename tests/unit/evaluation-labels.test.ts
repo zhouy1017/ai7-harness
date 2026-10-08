@@ -38,6 +38,8 @@ import {
   EVALUATION_MARKET_OFFLINE,
   EVALUATION_PREDICTION_HEADING,
   EVALUATION_PRICING_BASIS,
+  EVALUATION_PRICING_UNREADABLE,
+  EVALUATION_COMPARABLES_UNREADABLE,
   EVALUATION_REWRITE_LEDE,
   evaluationComparableLine,
   evaluationComparablesMoreLine,
@@ -46,6 +48,7 @@ import {
   evaluationPricingRangeLine,
   evaluationRewriteDecidedLine,
   evaluationRewriteProposalLine,
+  evaluationRewriteReadingLine,
   evaluationRewriteTaskLine,
 } from '../../src/renderer/evaluation-labels.js';
 import { BUILTIN_EVALUATION_PROFILE, evaluationProfileDigest } from '../../src/service/evaluation-records.js';
@@ -243,26 +246,42 @@ describe('AI7 初评 words (Issue #429, S81b1; EVAL-001, EVAL-005 to EVAL-007)',
   it('says what 定价与首印 waits for, and once shown the ranges with the Books they rest on (S81b2)', () => {
     const range = { books: 29, priceFen: { low: 3800, median: 4500, high: 5200 }, firstPrint: { low: 2800, median: 13500, high: 4200 } };
     expect(evaluationPricingRangeLine('本社已发稿图书', range)).toBe('本社已发稿图书 29 本：定价 ¥38.00 – ¥52.00（中位数 ¥45.00） · 首印 2,800 – 4,200 册（中位数 13,500 册）');
-    const base = { booksWithActuals: 4, threshold: 30, enabled: false, available: false, house: null, series: null };
+    const base = {
+      booksWithActuals: 4, otherBooksWithActuals: 4, threshold: 30, enabled: false, available: false, unreadable: false,
+      house: null, series: null, seriesBooksWithActuals: null, seriesMinimum: 5,
+    };
     expect(evaluationPricingLines(base)).toEqual(['不预测。本社已录入定价与首印的已发稿图书 4 / 30 本；满 30 本后，可在「设置 › 评估校准与预测」里打开预测。']);
     expect(evaluationPricingLines({ ...base, enabled: true })).toEqual(['不预测。本社已录入定价与首印的已发稿图书 4 / 30 本；满 30 本后，可在「设置 › 评估校准与预测」里打开预测。']);
     expect(evaluationPricingLines({ ...base, booksWithActuals: 30, available: true })).toEqual(['不预测：「设置 › 评估校准与预测」里没有打开定价与首印预测（已录入实际数据的已发稿图书 30 本）。']);
-    expect(evaluationPricingLines({ ...base, booksWithActuals: 30, available: true, enabled: true })).toEqual(['不预测：除这本书以外，本社还没有录入实际数据的已发稿图书。']);
-    expect(evaluationPricingLines({ ...base, booksWithActuals: 30, available: true, enabled: true, house: range })).toEqual([
-      evaluationPricingRangeLine('本社已发稿图书', range), EVALUATION_PRICING_BASIS,
+    // The gate counts the other Books only: the Book itself making 30 shows no range over 29.
+    expect(evaluationPricingLines({ ...base, booksWithActuals: 30, otherBooksWithActuals: 29, available: true, enabled: true }))
+      .toEqual(['不预测：不计这本书，本社已录入定价与首印的已发稿图书 29 / 30 本；范围只依据其他图书，满 30 本后才给出。']);
+    const shown = { ...base, booksWithActuals: 31, otherBooksWithActuals: 30, available: true, enabled: true, house: range };
+    expect(evaluationPricingLines(shown)).toEqual([evaluationPricingRangeLine('本社已发稿图书', range), EVALUATION_PRICING_BASIS]);
+    // A 书系 range only over enough of its Books; below, the count and the house range alone.
+    expect(evaluationPricingLines({ ...shown, seriesBooksWithActuals: 3 })).toEqual([
+      '同书系已录入实际数据的已发稿图书 3 本，不足 5 本，不给出同书系的范围。', evaluationPricingRangeLine('本社已发稿图书', range), EVALUATION_PRICING_BASIS,
     ]);
-    const series = { ...range, books: 3 };
-    expect(evaluationPricingLines({ ...base, booksWithActuals: 30, available: true, enabled: true, house: range, series })).toEqual([
+    const series = { ...range, books: 5 };
+    expect(evaluationPricingLines({ ...shown, series, seriesBooksWithActuals: 5 })).toEqual([
       evaluationPricingRangeLine('同书系已发稿图书', series), evaluationPricingRangeLine('本社已发稿图书', range), EVALUATION_PRICING_BASIS,
     ]);
+    // House data that cannot be read this time is said as such.
+    expect(evaluationPricingLines({ ...shown, unreadable: true })).toEqual([EVALUATION_PRICING_UNREADABLE]);
+    expect(EVALUATION_PRICING_UNREADABLE).toContain('暂时读不到本社数据');
+    expect(EVALUATION_COMPARABLES_UNREADABLE).toContain('暂时读不到本社数据');
   });
 
   it('says what 按我的评分重写评语 does, waits for and decided (S81b2)', () => {
     expect(EVALUATION_REWRITE_LEDE).toContain('分数一个也不改，重写的评语要你采用后才记入这一版');
     expect(evaluationRewriteTaskLine({ taskIntentId: 't', recordId: 'r', recordOrdinal: 15, entryOrdinal: 2, state: 'settled', label: '已完成' }))
       .toBe('按我的评分重写评语 · 第 15 版 · 已完成');
-    expect(evaluationRewriteProposalLine({ revisionId: 'x', createdAt: 'y', entryOrdinal: 2, current: true, items: [], verdict: { before: null, after: '新。' } }))
+    const reading = { unitsTotal: 8, unitsRead: 8 };
+    expect(evaluationRewriteProposalLine({ revisionId: 'x', createdAt: 'y', entryOrdinal: 2, current: true, reading, items: [], verdict: { before: null, after: '新。' }, withheld: [] }))
       .toBe('AI7 按你第 2 次保存的评分重写了评语，等你决定：采用后才记入这一版，分数不变。');
+    // How much of the Book the rewrite read is said whenever it shows, and plainly when some ranges were not read.
+    expect(evaluationRewriteReadingLine(reading)).toBe('AI7 这次重写读了全部 8 个阅读范围。');
+    expect(evaluationRewriteReadingLine({ unitsTotal: 8, unitsRead: 6 })).toBe('AI7 这次重写只读到 6 / 8 个阅读范围：没读到的范围里的内容没有进入重写的评语。');
     expect(evaluationRewriteDecidedLine({ decision: 'accepted', entryOrdinal: 3, decidedAt: 'x' })).toBe('上一次重写的评语已采用（记为第 3 次保存），分数没有改动。');
     expect(evaluationRewriteDecidedLine({ decision: 'discarded', entryOrdinal: null, decidedAt: 'x' })).toBe('上一次重写的评语已放弃，评语保持原样。');
   });

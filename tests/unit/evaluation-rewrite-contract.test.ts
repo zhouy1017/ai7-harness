@@ -34,6 +34,7 @@ const INPUT: EvaluationRewriteContractInput = {
   strengths: ['悬念'],
   weaknesses: ['残句'],
   verdict: null,
+  conclusions: ['推荐出版', '修改后再议', '暂缓', '不推荐'],
 };
 const CONTRACT = evaluationRewriteContract(INPUT);
 const DIGEST = 'a'.repeat(64);
@@ -68,7 +69,7 @@ describe('the frozen version', () => {
     expect(CONTRACT.systemPrompt).toContain('  编辑调分的原因：自行输入（先不评）');
     expect(CONTRACT.systemPrompt).toContain('- 总评：（尚未写）');
     expect(CONTRACT.systemPrompt).toContain('只为编辑已打分的评分项记依据：literary-quality（文学品质与作者声音）、structure-and-coherence（结构、叙事逻辑与连贯）。');
-    expect(CONTRACT.synthesisInstruction).toContain('不改任何分数，也不在评语里写分数');
+    expect(CONTRACT.synthesisInstruction).toContain('不改任何分数，也不在评语或总评里写分数');
     expect(CONTRACT.synthesisInstruction).toContain('下列每个编辑已打分的评分项恰好一项：literary-quality、structure-and-coherence');
     // Another word is another contract; the same words are the same one.
     expect(evaluationRewriteContractDigest(evaluationRewriteContract({ ...INPUT }))).toBe(evaluationRewriteContractDigest(CONTRACT));
@@ -129,6 +130,7 @@ describe('the unit result and the synthesis', () => {
         { itemId: 'structure-and-coherence', comment: '悬念清楚，但中段照应不足。' },
       ],
       verdict: '总体较好，结构有待加强。',
+      withheld: [],
     });
     const code = (overrides: Record<string, unknown>): string => { const parsed = parseEvaluationRewriteSynthesis(synthesis(overrides), INPUT); return parsed.ok ? 'ok' : parsed.code; };
     const items = (JSON.parse(synthesis()) as { items: Array<Record<string, unknown>> }).items;
@@ -145,6 +147,29 @@ describe('the unit result and the synthesis', () => {
     expect(code({ verdict: '字'.repeat(600) })).toBe('ok');
     expect(code({ schema: 'ai7.evaluation-rewrite.synthesis-result/2' })).toBe('schema-invalid');
     expect(parseEvaluationRewriteSynthesis('否', INPUT)).toMatchObject({ ok: false, code: 'not-json' });
+  });
+
+  it('offers no 评语 or 总评 that states a score or names a conclusion, and keeps every other one (S81b2 review)', () => {
+    const items = (JSON.parse(synthesis()) as { items: Array<{ itemId: string; comment: string }> }).items;
+    const parse = (overrides: Record<string, unknown>) => {
+      const parsed = parseEvaluationRewriteSynthesis(synthesis(overrides), INPUT);
+      if (!parsed.ok) throw new Error(parsed.code);
+      return parsed.result;
+    };
+    // The instruction says so, with the profile's own conclusions.
+    expect(CONTRACT.synthesisInstruction).toContain('不选定结论，也不在评语或总评里写出「推荐出版」、「修改后再议」、「暂缓」、「不推荐」这些结论；写了分数或结论的那一段不会提供给编辑。');
+    // A score in one 评语: that one is set aside with why, the other and the 总评 stand.
+    const scored = parse({ items: [items[0], { ...items[1], comment: '本项可给 18 分，悬念清楚。' }] });
+    expect(scored.items).toEqual([items[0]]);
+    expect(scored.verdict).toBe('总体较好，结构有待加强。');
+    expect(scored.withheld).toEqual([{ itemId: 'literary-quality', reason: '「文学品质与作者声音」的重写评语写了分数，没有采用：分数只由你定。' }]);
+    // A conclusion in the 总评: the 总评 is set aside, every 评语 stands.
+    const concluded = parse({ verdict: '总体较好，建议推荐出版。' });
+    expect([concluded.items.length, concluded.verdict, concluded.withheld]).toEqual([2, null, [{ itemId: null, reason: '重写的总评写出了结论，没有采用：结论由你选。' }]]);
+    expect(parse({ verdict: '离满分尚远。' }).verdict).toBeNull();
+    expect(parse({ items: items.map((item) => ({ ...item, comment: '应给十三分。' })) }).items).toEqual([]);
+    // Words that only look like it stand: 十分, 部分, a share of the pages, a chapter.
+    expect(parse({ items: items.map((item) => ({ ...item, comment: '叙述十分凝练，部分章节约三分之一篇幅写考古，第3章最好。' })) }).withheld).toEqual([]);
   });
 
   it('builds its two messages under headers of its own, keyed by the frozen contract and what they read', () => {
@@ -186,7 +211,7 @@ describe('the unit result and the synthesis', () => {
     const parsed = parseEvaluationRewriteSynthesis(synthesis(), INPUT);
     const closed = reduceEvaluationRewrite({ manifest, outcomes, scoredItems: 2, synthesis: { state: 'closed', findings: [], requestDigest: DIGEST, usage: null, result: parsed.ok ? parsed.result : null } });
     expect(closed.rewrite.observations).toEqual([{ itemId: 'structure-and-coherence', unitOrdinal: 1, note: '照应不足。', blockIds: [first.blockIds[1], first.blockIds[2]] }]);
-    expect(closed.rewrite.words).toEqual({ items: parsed.ok ? parsed.result.items : [], verdict: '总体较好，结构有待加强。' });
+    expect(closed.rewrite.words).toEqual({ items: parsed.ok ? parsed.result.items : [], verdict: '总体较好，结构有待加强。', withheld: [] });
     expect(closed.reducerClosure.stages[2]).toEqual({ stage: 'book-synthesis', state: 'closed', inputCount: 3 });
     expect([closed.reducerClosure.state, closed.assurance.state]).toEqual(['closed', 'qualified']);
     const gap = reduceEvaluationRewrite({ manifest, outcomes, scoredItems: 2, synthesis: { state: 'gap', code: 'contract-invalid', reason: '不符合契约。', requestDigest: DIGEST } });
@@ -221,7 +246,7 @@ describe('when a rewrite can be asked, what it reads, and what 采用 changes', 
     ],
   };
   const profile = {
-    profileId: 'p', title: '审稿评估方案', version: '1', issuer: 'AI7', total: 60, bands: [], risks: [], conclusions: [], sha256: DIGEST,
+    profileId: 'p', title: '审稿评估方案', version: '1', issuer: 'AI7', total: 60, bands: [], risks: [], conclusions: [{ conclusion: 'recommend' as const, label: '推荐出版' }, { conclusion: 'revise' as const, label: '修改后再议' }, { conclusion: 'defer' as const, label: '暂缓' }, { conclusion: 'reject' as const, label: '不推荐' }], sha256: DIGEST,
     items: [
       { itemId: 'literary-quality', label: '文学品质与作者声音', fullMarks: 20 },
       { itemId: 'structure-and-coherence', label: '结构、叙事逻辑与连贯', fullMarks: 20 },
@@ -253,6 +278,7 @@ describe('when a rewrite can be asked, what it reads, and what 采用 changes', 
       strengths: ['悬念'],
       weaknesses: ['残句'],
       verdict: '旧的总评。',
+      conclusions: ['推荐出版', '修改后再议', '暂缓', '不推荐'],
     });
     expect(() => evaluationRewriteContractInput({ ...version, initial: null })).toThrow();
   });
@@ -268,6 +294,8 @@ describe('when a rewrite can be asked, what it reads, and what 采用 changes', 
       ['readers-and-market', null, '资料未齐。', null, null],
     ]);
     expect(taken.verdict).toBe('新的总评。');
+    // A 总评 set aside leaves the version's own.
+    expect(contentWithRewrite(content, { items: [], verdict: null }).verdict).toBe(content.verdict);
     expect([taken.risks, taken.readiness, taken.strengths, taken.weaknesses, taken.conclusion]).toEqual([content.risks, content.readiness, content.strengths, content.weaknesses, content.conclusion]);
   });
 });

@@ -115,7 +115,11 @@ export function reduceEvaluationRewrite(input: EvaluationRewriteReductionInput):
     gaps,
     rewrite: {
       observations,
-      words: synthesis === null ? null : { items: synthesis.items.map((item) => ({ itemId: item.itemId, comment: item.comment })), verdict: synthesis.verdict },
+      words: synthesis === null ? null : {
+        items: synthesis.items.map((item) => ({ itemId: item.itemId, comment: item.comment })),
+        verdict: synthesis.verdict,
+        withheld: synthesis.withheld.map((entry) => ({ itemId: entry.itemId, reason: entry.reason })),
+      },
       synthesis: synthesisState,
     },
   };

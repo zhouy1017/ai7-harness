@@ -81,6 +81,7 @@ import {
   EVALUATION_COMPARABLES_HEADING,
   EVALUATION_COMPARABLES_NO_SERIES,
   EVALUATION_COMPARABLES_NO_WEB,
+  EVALUATION_COMPARABLES_UNREADABLE,
   EVALUATION_MARKET_AI7,
   EVALUATION_MARKET_HEADING,
   EVALUATION_MARKET_LEDE,
@@ -107,6 +108,7 @@ import {
   evaluationPricingLines,
   evaluationRewriteDecidedLine,
   evaluationRewriteProposalLine,
+  evaluationRewriteReadingLine,
   evaluationRewriteTaskLine,
   evaluationBandLabel,
   evaluationComparisonLines,
@@ -465,11 +467,15 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         lists.append(card);
       }
       section.append(lists);
+      // What AI7 wrote but the page does not show, and why: a quantity it cannot support, or a part out of shape (S81b2).
+      for (const reason of market.withheld) section.append(el('p', 'field-note evaluation-market-withheld', reason));
     }
     // Comparable books from house data, each tagged with its source (EVAL-009); no other house's book while the web is not connected.
     const comparables = el('div', 'evaluation-comparables');
     comparables.append(el('h4', undefined, EVALUATION_COMPARABLES_HEADING));
-    if (page.market.comparables.length === 0) {
+    if (page.market.seriesUnreadable) {
+      comparables.append(el('p', 'field-note evaluation-comparables-none', EVALUATION_COMPARABLES_UNREADABLE));
+    } else if (page.market.comparables.length === 0) {
       comparables.append(el('p', 'field-note evaluation-comparables-none', page.market.series.length === 0 ? EVALUATION_COMPARABLES_NO_SERIES : EVALUATION_COMPARABLES_EMPTY_SERIES));
     } else {
       const list = el('ul', 'evaluation-comparable-list');
@@ -526,26 +532,45 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       card.dataset['revisionId'] = proposal.revisionId;
       card.dataset['current'] = String(proposal.current);
       card.append(el('p', 'evaluation-rewrite-proposal-line', evaluationRewriteProposalLine(proposal)));
+      const reading = el('p', 'field-note evaluation-rewrite-reading', evaluationRewriteReadingLine(proposal.reading));
+      reading.dataset['unitsRead'] = String(proposal.reading.unitsRead);
+      reading.dataset['unitsTotal'] = String(proposal.reading.unitsTotal);
+      card.append(reading);
       const list = el('dl', 'evaluation-rewrite-items');
-      const pair = (label: string, before: string | null, after: string, itemId: string | null): void => {
+      const pair = (label: string, before: string | null, after: string, itemId: string | null, evidence: NonNullable<typeof proposal>['items'][number]['evidence']): void => {
         const value = el('dd');
         if (itemId !== null) value.dataset['itemId'] = itemId;
         value.append(
           el('p', 'evaluation-rewrite-before', `${EVALUATION_REWRITE_BEFORE}：${before ?? EVALUATION_REWRITE_EMPTY}`),
           el('p', 'evaluation-rewrite-after', `${EVALUATION_REWRITE_AFTER}：${after}`),
         );
+        // What the rewritten 评语 rests on (EVAL-006): each note AI7 made toward the editor's score, with the range and blocks.
+        if (evidence.length > 0) {
+          const notes = el('details', 'evaluation-rewrite-evidence');
+          const lines = el('ul');
+          for (const entry of evidence) {
+            const line = el('li', undefined, evaluationAi7EvidenceLine(entry));
+            line.dataset['unitOrdinal'] = String(entry.unitOrdinal);
+            line.dataset['blockIds'] = entry.blockIds.join(' ');
+            lines.append(line);
+          }
+          notes.append(el('summary', undefined, evaluationAi7EvidenceSummary(evidence.length)), lines);
+          value.append(notes);
+        }
         list.append(el('dt', undefined, label), value);
       };
       for (const item of proposal.items) {
         const label = record.profile.items.find((entry) => entry.itemId === item.itemId)?.label ?? item.itemId;
-        pair(label, item.before, item.after, item.itemId);
+        pair(label, item.before, item.after, item.itemId, item.evidence);
       }
-      pair(EVALUATION_REWRITE_VERDICT, proposal.verdict.before, proposal.verdict.after, null);
+      if (proposal.verdict !== null) pair(EVALUATION_REWRITE_VERDICT, proposal.verdict.before, proposal.verdict.after, null, []);
       card.append(list);
+      // What AI7 wrote but does not offer, and why: a 评语 or the 总评 that stated a score or a conclusion.
+      for (const reason of proposal.withheld) card.append(el('p', 'field-note evaluation-rewrite-withheld', reason));
       if (!proposal.current) card.append(el('p', 'field-note evaluation-rewrite-stale', EVALUATION_REWRITE_STALE));
       const actions = el('div', 'button-row evaluation-rewrite-actions');
       const accept = action(EVALUATION_REWRITE_ACTIONS.accept, 'primary', 'rewrite-accept', () => void decideRewrite(proposal.revisionId, 'accept'));
-      accept.disabled = busy || !proposal.current;
+      accept.disabled = busy || !proposal.current || (proposal.items.length === 0 && proposal.verdict === null);
       const discard = action(EVALUATION_REWRITE_ACTIONS.discard, 'secondary', 'rewrite-discard', () => void decideRewrite(proposal.revisionId, 'discard'));
       discard.disabled = busy;
       actions.append(accept, discard);

@@ -14,7 +14,7 @@ import {
  *
  * The rewriting is the `evaluation-rewrite` analysis kind's (`evaluation/evaluation-rewrite-*.ts`), on the analysis ledger like
  * every kind; the version is `evaluation-records.ts`'s, and 采用 appends to it as a save does. What neither knows is the bridge,
- * and schema revision 65 owns it in two relations, ledgers like the others — a row is appended once and never rewritten or
+ * and schema revision 64 owns it in two relations, ledgers like the others — a row is appended once and never rewritten or
  * removed:
  *
  * - `evaluation_rewrite_tasks`: which version, at which saved entry (its ordinal and digest), one rewrite Task rewrites, with the
@@ -98,7 +98,7 @@ const DECISION_SCHEMA = 'ai7.evaluation-rewrite-decision/1';
 const CORRUPT = '评语重写记录已损坏。';
 const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'evaluation_rewrite_tasks'";
 
-/** Revision 65's relations, created once: a store that predates them gains two empty relations and nothing existing moves. */
+/** Revision 64's relations, created once: a store that predates them gains two empty relations and nothing existing moves. */
 export function initializeEvaluationRewriteSchema(db: DatabaseSync): void {
   if (db.prepare(TABLE_PRESENT).get() !== undefined) return;
   db.exec('BEGIN IMMEDIATE');
@@ -169,21 +169,23 @@ export function evaluationRewriteContractInput(version: RewritableEvaluation): E
     strengths: [...version.content.strengths],
     weaknesses: [...version.content.weaknesses],
     verdict: version.content.verdict,
+    conclusions: version.profile.conclusions.map((entry) => entry.label),
   };
 }
 
 /**
- * The version's content with a rewrite taken: each scored item's 评语 and the 总评 replaced by AI7's words, and nothing else
+ * The version's content with a rewrite taken: each scored item's 评语 and the 总评 replaced by AI7's words where it offered them, and nothing else
  * touched — every score, `不评`, adjustment, risk, line and the conclusion exactly as the entry holds them.
  */
-export function contentWithRewrite(content: EvaluationContent, words: { items: ReadonlyArray<{ itemId: string; comment: string }>; verdict: string }): EvaluationContent {
+export function contentWithRewrite(content: EvaluationContent, words: { items: ReadonlyArray<{ itemId: string; comment: string }>; verdict: string | null }): EvaluationContent {
   return {
     ...content,
     items: content.items.map((item) => {
       const rewritten = words.items.find((entry) => entry.itemId === item.itemId);
       return rewritten === undefined || item.score === null ? item : { ...item, comment: rewritten.comment };
     }),
-    verdict: words.verdict,
+    // A 总评 set aside (it stated a score or a conclusion) leaves the version's own.
+    verdict: words.verdict ?? content.verdict,
   };
 }
 

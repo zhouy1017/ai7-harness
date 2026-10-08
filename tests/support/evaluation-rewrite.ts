@@ -73,8 +73,8 @@ export const AUTHORED_REWRITE_OBSERVATIONS: Readonly<Record<number, ReadonlyArra
   ],
 };
 
-/** The rewritten words: each scored item's 评语 to the editor's score, and a 总评 that agrees with them — no number in any. */
-export const AUTHORED_REWRITE_WORDS: EvaluationRewriteSynthesisResult = {
+/** The rewritten words as AI7 writes them: each scored item's 评语 to the editor's score, and a 总评 that agrees with them — no number in any. */
+export const AUTHORED_REWRITE_WORDS: Omit<EvaluationRewriteSynthesisResult, 'verdict' | 'withheld'> & { readonly verdict: string } = {
   schema: EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA,
   items: [
     { itemId: 'literary-quality', comment: '细节与意象运用纯熟，写信又撕信、放大镜细看来信等动作写出人物心事，写景与写心相互映照；个别比喻略显俗套。' },

@@ -15,6 +15,7 @@ import {
   type EvaluationInitialDraftProjection,
   type EvaluationInitialProjection,
   type EvaluationMarketProjection,
+  MIN_SERIES_PREDICTION_BOOKS,
   type EvaluationProfileProjection,
   type EvaluationProfilesProjection,
   type EvaluationReadersReportProjection,
@@ -35,7 +36,7 @@ import {
   recommendationBlocked,
   validEvaluationScore,
 } from '../shared/evaluation-scoring.js';
-import { UUID_PATTERN, canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
+import { UUID_PATTERN, canonicalJson, canonicalRecord, hasExactKeys, isRecord, sha256Hex } from './analysis/canonical.js';
 import { graphemeCount } from './analysis/factual-review-contract.js';
 
 /**
@@ -407,6 +408,24 @@ interface StoredEntry {
   readonly content: EvaluationContent;
   readonly recordedAt: string;
   readonly sha256: string;
+  /**
+   * The rewrite this entry took its 评语 and 总评 from (S81b2; EVAL-008), when the editor 采用'd one: those words are AI7's,
+   * so a consumer of the editor's words — the learning of EVAL-011 — leaves them out. `null` for every other entry.
+   */
+  readonly rewrittenFrom: EvaluationRewriteProvenance | null;
+}
+
+/** Which rewrite an entry's words came from: its Task and the Result Set Revision that wrote them. */
+export interface EvaluationRewriteProvenance {
+  readonly taskIntentId: string;
+  readonly analysisRevisionId: string;
+}
+
+function rewriteProvenance(value: unknown): EvaluationRewriteProvenance | null {
+  return isRecord(value) && hasExactKeys(value, ['taskIntentId', 'analysisRevisionId']) && typeof value.taskIntentId === 'string' &&
+    UUID_PATTERN.test(value.taskIntentId) && typeof value.analysisRevisionId === 'string' && UUID_PATTERN.test(value.analysisRevisionId)
+    ? { taskIntentId: value.taskIntentId, analysisRevisionId: value.analysisRevisionId }
+    : null;
 }
 
 /** Where a new version binds: the Book's primary manuscript at its current revision, and whether edits wait in its journal. */
@@ -469,7 +488,11 @@ const NO_EXTRAS: EvaluationExtrasReader = {
     series: [],
     comparables: [],
     comparableCount: 0,
-    pricing: { booksWithActuals: 0, threshold: PREDICTION_MIN_BOOKS_WITH_ACTUALS, enabled: false, available: false, house: null, series: null },
+    seriesUnreadable: false,
+    pricing: {
+      booksWithActuals: 0, otherBooksWithActuals: 0, threshold: PREDICTION_MIN_BOOKS_WITH_ACTUALS, enabled: false, available: false, unreadable: false,
+      house: null, series: null, seriesBooksWithActuals: null, seriesMinimum: MIN_SERIES_PREDICTION_BOOKS,
+    },
   }),
   rewrite: () => ({ prepare: { allowed: false, reason: '按我的评分重写评语暂不可用。' }, task: null, proposal: null, decided: null }),
 };
@@ -573,7 +596,9 @@ export class EvaluationRecords {
       requireEvaluation(isRecord(entry) && (entry.schema === ENTRY_SCHEMA || entry.schema === ENTRY_SCHEMA_V1) &&
         entry.entryId === row.entry_id && entry.recordId === record.recordId &&
         entry.ordinal === count + 1 && integer(row.ordinal) === count + 1 && entry.kind === row.kind && entry.previousSha256 === previous &&
-        String(row.previous_sha256) === previous && entry.recordedAt === row.recorded_at && entry.actor === EVALUATION_ACTOR && isRecord(entry.content),
+        String(row.previous_sha256) === previous && entry.recordedAt === row.recorded_at && entry.actor === EVALUATION_ACTOR && isRecord(entry.content) &&
+        // Only an entry of the current shape may name the rewrite it took its words from, and then exactly.
+        (!Object.hasOwn(entry, 'rewrittenFrom') || (entry.schema === ENTRY_SCHEMA && rewriteProvenance(entry.rewrittenFrom) !== null)),
       'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
       previous = String(row.sha256);
       count += 1;
@@ -583,6 +608,7 @@ export class EvaluationRecords {
         content: contentOfEntry(entry.schema as typeof ENTRY_SCHEMA | typeof ENTRY_SCHEMA_V1, entry.content as Record<string, unknown>),
         recordedAt: String(row.recorded_at),
         sha256: String(row.sha256),
+        rewrittenFrom: rewriteProvenance(entry.rewrittenFrom),
       };
     }
     requireEvaluation(latest !== undefined, 'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
@@ -593,7 +619,8 @@ export class EvaluationRecords {
     for (const row of this.#db.prepare('SELECT * FROM evaluation_records WHERE book_id = ? ORDER BY ordinal').iterate(bookId)) yield this.#record(row);
   }
 
-  #append(record: StoredRecord, previous: string, ordinal: number, kind: StoredEntry['kind'], content: EvaluationContent): void {
+  #append(record: StoredRecord, previous: string, ordinal: number, kind: StoredEntry['kind'], content: EvaluationContent,
+    rewrittenFrom: EvaluationRewriteProvenance | null = null): void {
     const entryId = randomUUID();
     const recordedAt = new Date().toISOString();
     const entry = canonicalRecord({
@@ -606,6 +633,7 @@ export class EvaluationRecords {
       actor: EVALUATION_ACTOR,
       previousSha256: previous,
       recordedAt,
+      ...(rewrittenFrom === null ? {} : { rewrittenFrom: { taskIntentId: rewrittenFrom.taskIntentId, analysisRevisionId: rewrittenFrom.analysisRevisionId } }),
     });
     this.#db.prepare(
       'INSERT INTO evaluation_record_entries(entry_id, record_id, ordinal, kind, previous_sha256, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
@@ -863,7 +891,7 @@ export class EvaluationRecords {
    * `不评`, adjustment, risk and the conclusion are the entry's own. Returns the new entry's ordinal.
    */
   applyRewrite(bookId: string, recordId: string, read: { entryOrdinal: number; entrySha256: string },
-    words: { items: ReadonlyArray<{ itemId: string; comment: string }>; verdict: string }): number {
+    words: { items: ReadonlyArray<{ itemId: string; comment: string }>; verdict: string | null }, from: EvaluationRewriteProvenance): number {
     const version = this.rewritable(bookId, recordId);
     requireEvaluation(version.state !== 'finalized', 'EVALUATION_FINALIZED', `第 ${version.ordinal} 版已经定稿，不能再改；要改就重新评估。`);
     requireEvaluation(version.entryOrdinal === read.entryOrdinal && version.entrySha256 === read.entrySha256, 'EVALUATION_REWRITE_STALE',
@@ -876,7 +904,8 @@ export class EvaluationRecords {
       item.notRated === version.content.items[index]!.notRated), 'EVALUATION_REWRITE_INVALID', '重写不能改动分数。');
     requireEvaluation(!sameContent(checked, version.content), 'EVALUATION_UNCHANGED', '重写的评语与现在的评语相同，没有可以采用的变化。');
     const record = this.#record(this.#db.prepare('SELECT * FROM evaluation_records WHERE record_id = ?').get(recordId) as SqlRow);
-    this.#append(record, version.entrySha256, version.entryOrdinal + 1, 'draft', checked);
+    // The entry names the rewrite its words came from (S81b2 review): they are AI7's, and never learned as the editor's.
+    this.#append(record, version.entrySha256, version.entryOrdinal + 1, 'draft', checked, from);
     return version.entryOrdinal + 1;
   }
 

@@ -9,7 +9,7 @@
   "entries": [
     {
       "unitOrdinal": 1,
-      "requestDigest": "ef4ecd7f96237b18f766ef6a7c8389d7722984bb5bddb3bd9fc4681c1a303335",
+      "requestDigest": "47940f22f71b317026fa33626d9a9af89ff1c336873a1e9546fcde15730ac2a1",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.evaluation.unit-result/1\",\"unitOrdinal\":1,\"observations\":[{\"itemId\":\"literary-quality\",\"note\":\"开篇以两句对仗的题辞起笔，语义相反相成，立即确立全书的思辨气质。\",\"blockOrdinals\":[5,6]},{\"itemId\":\"literary-quality\",\"note\":\"写信又撕信的细节反复出现，以动作写心事，含蓄而有张力。\",\"blockOrdinals\":[8,14]},{\"itemId\":\"structure-and-coherence\",\"note\":\"以一封写不成的信引出两位弟子的悬念，并用八年前弟子被带走埋下伏笔。\",\"blockOrdinals\":[13,14]},{\"itemId\":\"chinese-language\",\"note\":\"叙述语言凝练，长句中夹用俗语，节奏从容。\",\"blockOrdinals\":[10]},{\"itemId\":\"theme-and-context\",\"note\":\"借七十小寿与“老省长”的评价，写学界与官场之间的人情往来。\",\"blockOrdinals\":[10,11]}]}",
@@ -21,7 +21,7 @@
     },
     {
       "unitOrdinal": 2,
-      "requestDigest": "86503e79970bd034b7079227c794ee523b25004ea113a30391f1895449f9dbaf",
+      "requestDigest": "b7d78d719fefd62537cc1329fa6bf20e5be532c9081604cf80f15eb91fd5db2a",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.evaluation.unit-result/1\",\"unitOrdinal\":2,\"observations\":[{\"itemId\":\"structure-and-coherence\",\"note\":\"甲骨文来信与写信人早已去世的设定构成核心悬念，推动后续情节。\",\"blockOrdinals\":[6,7]},{\"itemId\":\"literary-quality\",\"note\":\"收信地址写得极其具体，以细节制造诡异感。\",\"blockOrdinals\":[8,9]},{\"itemId\":\"chinese-language\",\"note\":\"打水漂一段写得生动，但个别比喻略显俗套。\",\"blockOrdinals\":[11]}]}",
@@ -33,7 +33,7 @@
     },
     {
       "unitOrdinal": 3,
-      "requestDigest": "eab1fce84060e18e281a10c65348de5f681f9d27be935c7e1c083545d983d23c",
+      "requestDigest": "23fea5adf5a7e056be0b62d901a8a79a1c4be2fb48ebb3081f58c94afd041a53",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.evaluation.unit-result/1\",\"unitOrdinal\":3,\"observations\":[{\"itemId\":\"literary-quality\",\"note\":\"东湖春景与甲骨文梦境交织，写景与写心相互映照。\",\"blockOrdinals\":[2,3]},{\"itemId\":\"structure-and-coherence\",\"note\":\"邮递员递信的场景节奏紧凑，对白推动情节，拆信时才揭示四个甲骨文字。\",\"blockOrdinals\":[7,8,11,15]},{\"itemId\":\"chinese-language\",\"note\":\"对白口语自然，人物各有声口。\",\"blockOrdinals\":[19]}]}",
@@ -45,7 +45,7 @@
     },
     {
       "unitOrdinal": 4,
-      "requestDigest": "e112d7b085fca9669ebaaa7dba5ca44f7c18bf43adbed3db9e7802f38b1ecc0e",
+      "requestDigest": "ff800063fe175f6b54495c52e3b6577ed34810efe2c7a61ff13ae00d31fe9b27",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.evaluation.unit-result/1\",\"unitOrdinal\":4,\"observations\":[{\"itemId\":\"structure-and-coherence\",\"note\":\"揭示信的内容与落款印章，回应开篇消失的弟子，第一章在此收束。\",\"blockOrdinals\":[6,7,8]},{\"itemId\":\"literary-quality\",\"note\":\"两位学者互相调侃的段落写出各自的性情。\",\"blockOrdinals\":[14,15,16]},{\"itemId\":\"chinese-language\",\"note\":\"第二章开头两句格言式短句与第一章的题辞呼应。\",\"blockOrdinals\":[10,11]}]}",
@@ -57,7 +57,7 @@
     },
     {
       "unitOrdinal": 5,
-      "requestDigest": "0ca42cb0cfb5a3baf76204aea47ff613d0edc19062a2fe317d65a56f6c0c1530",
+      "requestDigest": "2df9635eb8f8a7a35e9d230ceb8cb95eb2bc2993e16ae0e3855d927eca4f912b",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.evaluation.unit-result/1\",\"unitOrdinal\":5,\"observations\":[{\"itemId\":\"literary-quality\",\"note\":\"电话中三人斗嘴，人物关系在笑谈中显出亲疏。\",\"blockOrdinals\":[2,3,4]},{\"itemId\":\"chinese-language\",\"note\":\"个别句子成分残缺，介词之后缺少宾语，需要校改。\",\"blockOrdinals\":[6]},{\"itemId\":\"structure-and-coherence\",\"note\":\"宁波之行的安排在此敲定，为后文外出埋下线索。\",\"blockOrdinals\":[6,9]}]}",
@@ -69,7 +69,7 @@
     },
     {
       "unitOrdinal": 6,
-      "requestDigest": "9332f6c92b66b4a13815a038c46306548ef0e003a657619398af52ea19d8d014",
+      "requestDigest": "141f156d3252f81bbfe6636fd6970b539d865f1190baab3238018a76e83f6729",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.evaluation.unit-result/1\",\"unitOrdinal\":6,\"observations\":[{\"itemId\":\"theme-and-context\",\"note\":\"以新省长与楚庄王的比附引出史评，触及学人与权力的关系。\",\"blockOrdinals\":[3,4]},{\"itemId\":\"literary-quality\",\"note\":\"以越王勾践剑作比，写出话语的锋利。\",\"blockOrdinals\":[5]},{\"itemId\":\"structure-and-coherence\",\"note\":\"主人公决定暂不向女婿提及来信，人物关系的裂隙由此加深。\",\"blockOrdinals\":[8]}]}",
@@ -81,7 +81,7 @@
     },
     {
       "unitOrdinal": 7,
-      "requestDigest": "2503099a3d4393666b17fdc73bba2cc18f7f5b31bc783a3e69992045932dc998",
+      "requestDigest": "167d291ff9ca49bc006e8cf772422ab7adb1c0661b855abb0c9468c79413f46c",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.evaluation.unit-result/1\",\"unitOrdinal\":7,\"observations\":[{\"itemId\":\"literary-quality\",\"note\":\"放大镜察看尊盘照片的细节与家庭场景交替，节奏张弛有度。\",\"blockOrdinals\":[2,4]},{\"itemId\":\"theme-and-context\",\"note\":\"翁婿对话把“青铜重器成为当代重器”的说法摆上台面，点出学术与名利的冲突。\",\"blockOrdinals\":[16,17]},{\"itemId\":\"structure-and-coherence\",\"note\":\"悬而未决的考古问题被一一提出，扩展了故事的纵深。\",\"blockOrdinals\":[17]},{\"itemId\":\"chinese-language\",\"note\":\"家常对白生动，孩子的童言为紧张的气氛提供缓冲。\",\"blockOrdinals\":[7,8]}]}",
@@ -93,7 +93,7 @@
     },
     {
       "unitOrdinal": 8,
-      "requestDigest": "4ee823fc09d417523206ac64e72a5722bdd051ad78ca3684f9bf758ad092f8c5",
+      "requestDigest": "77d0d8f74f7118fb01f0de13dedca6ecaf7cd76b7069c0c419996c97522823ce",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.evaluation.unit-result/1\",\"unitOrdinal\":8,\"observations\":[{\"itemId\":\"literary-quality\",\"note\":\"入夜后家中声音渐次消失，以静写人物内心的不安。\",\"blockOrdinals\":[3,6]},{\"itemId\":\"structure-and-coherence\",\"note\":\"以放大镜细看来信收束本章，与章首撕信遥相呼应。\",\"blockOrdinals\":[6]},{\"itemId\":\"chinese-language\",\"note\":\"对称谓的交代简洁地写出家庭中的分寸。\",\"blockOrdinals\":[4]}]}",
@@ -105,7 +105,7 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "5794b4721f6b6cc3fc9204eea34f47465f54955f51ff254afc6f084caedab2a7",
+      "requestDigest": "12e4fb6dc1f5510fd35a373710070de9afbefafd5260ff369b70b6ee5edf727e",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.evaluation.synthesis-result/2\",\"items\":[{\"itemId\":\"literary-quality\",\"score\":16.5,\"comment\":\"细节与意象运用纯熟，写景与写心相互映照，人物各有性情；个别比喻略显俗套。\"},{\"itemId\":\"theme-and-context\",\"score\":15,\"comment\":\"触及学界与权力、学术与名利的关系，但在所读部分只在三个阅读范围中展开。\"},{\"itemId\":\"structure-and-coherence\",\"score\":15.5,\"comment\":\"以甲骨文来信设置核心悬念，伏笔与呼应清楚，章节收束有力。\"},{\"itemId\":\"chinese-language\",\"score\":14,\"comment\":\"叙述凝练、对白自然；个别句子成分残缺，需要逐句校改。\"},{\"itemId\":\"readers-and-market\",\"score\":12,\"comment\":\"所读内容中没有关于目标读者与市场的依据，这一项依据不足，分数只作参考。\"}],\"strengths\":[\"以甲骨文来信设置悬念，开篇即抓住读者。\",\"人物对白各具声口，学者间的调侃写出性情。\"],\"weaknesses\":[\"个别句子成分残缺，需要逐句校改。\",\"比喻偶有俗套，可以更贴切。\"],\"nextStep\":\"先校改残句与俗套的比喻，再补充目标读者与同类书的资料，以便判断市场潜力。\",\"suggestedConclusion\":\"revise\",\"market\":{\"readers\":[\"对考古、青铜器与古文字题材有兴趣的成年读者。\",\"关注学界人情、学术与名利之争的知识分子读者。\"],\"sellingPoints\":[\"以一封甲骨文来信开篇设下悬念，学术悬疑贯穿始终。\",\"学者之间的对白各具声口，写出学界中人的性情与分寸。\"],\"channels\":[\"可从书中的考古与青铜器话题切入，面向文史爱好者推介。\",\"以学术与名利的冲突为话题，组织书评与读书会讨论。\"],\"marketReturn\":null,\"awards\":{\"statement\":\"有参评文学奖的潜力，但确定性低。\",\"basis\":\"所读部分叙述凝练、意象运用纯熟，并触及学术与权力的主题；没有对比任何获奖作品。\"}}}",
