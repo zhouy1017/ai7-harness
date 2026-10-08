@@ -297,6 +297,7 @@ import {
   evaluationRewriteContractInput,
   evaluationRewriteRefusal,
   initializeEvaluationRewriteSchema,
+  rewriteProposalItems,
   type RewritableEvaluation,
   type StoredEvaluationRewriteTask,
 } from './evaluation-rewrites.js';
@@ -7723,13 +7724,8 @@ export class EditorialStore {
             entryOrdinal: newest.task.entryOrdinal,
             current: newest.task.entryOrdinal === version.entryOrdinal && newest.task.entrySha256 === version.entrySha256 && version.state !== 'finalized',
             reading: newest.reading,
-            items: words.items.map((item) => ({
-              itemId: item.itemId,
-              before: version.content.items.find((entry) => entry.itemId === item.itemId)?.comment ?? null,
-              after: item.comment,
-              evidence: newest.observations.filter((observation) => observation.itemId === item.itemId)
-                .map((observation) => ({ unitOrdinal: observation.unitOrdinal, note: observation.note, blockIds: [...observation.blockIds] })),
-            })),
+            // Each beside the version's own, with at most a frame's share of its notes and how many in all (Issue #689).
+            items: rewriteProposalItems(words.items, newest.observations, version.content),
             verdict: words.verdict === null ? null : { before: version.content.verdict, after: words.verdict },
             withheld: words.withheld.map((entry) => entry.reason),
           };

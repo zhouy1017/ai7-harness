@@ -490,3 +490,30 @@ AI7 初评 (Issue #429, S81b1) is service protocol version 93 and schema revisio
 - **Schema revision 64.** The three kind-coupled analysis relations are rebuilt once more, every row byte for byte, for the evaluation rewrite kind. A revision-62 or revision-63 store is validated exactly against `ANALYSIS_LEDGER_REVISION_62_SQL` before the rebuild; earlier stores rebuild straight to the terminal shapes. Two additive, append-only relations owned by `src/service/evaluation-rewrites.ts`: `evaluation_rewrite_tasks` (which version and saved entry, by ordinal and digest, a Task rewrites, with the frozen contract input; one row per Task and contract) and `evaluation_rewrite_decisions` (the editor's one decision per rewritten result, with the entry 采用 appended). Both are the Book's own when Books merge. Suites planting an older store drop them first.
 - **Ops.** `prepareEvaluationRewrite { recordId }` (an `evaluation-rewrite-preparation` job whose result is 评估 with that version on show), `authorizeEvaluationRewrite`, `decideEvaluationRewrite`, and `inspectTaskPlan` kind `evaluation-rewrite`; 评估's projection gains `market` and `rewrite`.
 - **Fixtures.** `sample1-evaluation-authored` was regenerated for the market section (`tests/support/initial-evaluation-market.ts`). `--j04-model-adapter sample1-evaluation-rewrite-authored` layers the authored rewrite fixture (J-11's 第 15 版: 结构、叙事逻辑与连贯 13 打分偏高, 读者与市场潜力 10 依据不足) over `sample1-readers-report-authored`. Its request digests depend on that version's words, which `tests/support/evaluation-rewrite.ts` reproduces; regenerate it after the contract, the profile, the fixtures under it or J-11's 第 15 版 words change with `AI7_REGENERATE_EVALUATION_REWRITE_FIXTURE=1 pnpm exec vitest run tests/service/evaluation-rewrite-fixture-generator.test.ts`.
+- **Follow-ups (Issue #689; protocol 102, no schema revision).** Protocol 102 follows #677's 101. Whatever lands after it renumbers its own protocol.
+  - *AI7's words, item by item.* An entry's `rewrittenFrom` now names the words in it that are AI7's: `{ items: [{ itemId, taskIntentId, analysisRevisionId, sha256 }], verdict: { taskIntentId, analysisRevisionId, sha256 } | null }`. The items are in the profile's order, and each `sha256` is the digest of AI7's words.
+    - 采用 marks a 评语 or the 总评 only when the rewrite changed it. Words it gives back unchanged keep whatever mark they had.
+    - Every later save marks the words that still stand exactly as a rewrite wrote them. This includes 定稿 and the first entry of the version that 重新评估 carries them into. The reader keeps every mark the version's chain holds, so a 评语 the editor edits is theirs, and putting AI7's words back makes it AI7's again.
+    - An entry whose words are all the editor's names none.
+    - The reader refuses an entry whose marks are not in this shape or whose digests are not the digests of the entry's own words.
+    - An entry written before reads its legacy `{ taskIntentId, analysisRevisionId }` as the words it changed from the entry before. An entry with no field after such an entry carries the words still standing.
+    - An EVAL-011 consumer leaves out exactly the words an entry names.
+    - One limit: development data written before Issue #689 can hold a version that 重新评估 began from a 定稿 with AI7's words. Its first entry names none, and the reader does not look across versions, so that version reads with no marks.
+  - *The quantity and score guards.* `claim-guards.ts` reads a line one numeral run at a time and looks a few characters either side of each run, so it stays linear in the line. Each exclusion applies only to the numeral that opens the ordinary word, and every claim the S81b2 guard caught is a must-claim test.
+    - A quantity is a numeral run before %, 倍 or 个百分点.
+    - 块 after any run but a lone 一 is a quantity (九块九, 两块钱 — not 这一块, 一块儿).
+    - 册 after any run is a quantity (首印五册), except the Book's own volumes, a small number after 全, 共, 分 or 下 (全十二册, 上下两册).
+    - 本 after an amount (a digit or 十/百/千/万/亿) is a quantity.
+    - 元 is a quantity, except after a Chinese numeral with no magnitude that opens 对/论/化/素 (二元对立, 一元论).
+    - 成 is a quantity, except after a run ending in 一 that opens a word (一成不变, 万一成功). So 七成年轻读者 and 三成本 are quantities.
+    - A number in 万 or 亿 with its coefficient is a quantity, but not 万一, 亿万, the adverb 千万 (不/别/要/小心/注意…), 十万火急, or the Book's own 二十万字.
+    - A bare figure after 首印, 起印, 印数, 印量, 定价, 售价 or 销量 is a quantity, across a few linking characters, unless a date or the Book's own count follows it (「销量将在2026年回升」). 第 before a run marks the Book's own ordinal.
+    - A score is digits before 分 (not 5分钟, 3分30秒, 第3分册), 满分, or a fraction over one of `scoreDenominators`: each item's 满分, the total, the total of the rated items (one 不评 makes 68/80 a score), 10 and 100. So 2/3 does not count.
+    - Chinese numerals before 分 are a score unless 分 opens another word (之, 钟, 天, 钱, 秒, 一, 册 follow it), or the words are 一分为二 or 入木三分, the adverb 十分, or 十二分 followed by more words (十二分的功夫). So 十八分的高分, 九分半 and 可评十五分为宜 count.
+    - A conclusion is any of the profile's labels anywhere in the line, 暂缓 and 不推荐 included.
+  - *评估 within one frame.* Each 初评 or rewrite on the page carries at most `MAX_EVALUATION_EVIDENCE_NOTES` (60) notes. That covers the version's 初评 snapshot, the latest 初评 and a waiting rewrite.
+    - The 60 are shared among the set's items, so the bound holds for up to 16 items. An item with fewer notes than its share keeps them all.
+    - The notes kept are spread over the ranges read: each range's first note, then its second, centred over the ranges when there are more ranges than room.
+    - Each item carries `evidenceCount`, and the summary then reads 「AI7 的依据（共 N 条，这里列出分布在各阅读范围的 M 条）」.
+    - The snapshot itself keeps every note.
+  - *A row that is not JSON.* The record, entry, 初评-snapshot, 定价与首印, preference, 书系, rewrite-Task, plan and decision readers parse through `parseStoredJson`. A row whose digest matches text that is not JSON is then the owner's own damaged-record error, which the guards catch.
