@@ -162,12 +162,17 @@ export class ReviewRunDriver {
           if (handOff !== null) await this.#dispatch(reviewRunId, categoryId, handOff);
           break;
         }
-        case 'dispatch':
+        case 'dispatch': {
           if (this.#stopping) return;
           await this.#place(reviewRunId, categoryId);
           if (this.#stopping) return;
-          await this.#dispatch(reviewRunId, categoryId, step);
+          // What the category needs is read again after the wait (Issue #64 review): a Run stopped meanwhile — a Series
+          // Retrieval Exclusion recorded, its start blocked — dispatches nothing, and the next step reads what was recorded.
+          const again = this.#steps.step(reviewRunId, categoryId);
+          if (again.kind !== 'dispatch' || again.runRecordId !== step.runRecordId) break;
+          await this.#dispatch(reviewRunId, categoryId, again);
           break;
+        }
       }
     }
   }

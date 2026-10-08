@@ -291,6 +291,8 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   database_replacements: 'house',
   database_merges: 'house',
   database_merge_books: 'house',
+  // A Series' retrieval exclusions are the house's, as its Series and their knowledge are (Issue #64, S29b).
+  series_retrieval_exclusions: 'house',
   // The search index over the working text, and its own relations.
   working_block_search: 'derived',
   working_block_search_config: 'derived',

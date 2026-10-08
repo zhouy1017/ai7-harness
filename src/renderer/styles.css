@@ -232,6 +232,12 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .review-category-basis { margin: .35rem 0 0; color: #4e564c; font-size: .9rem; }
 .review-authorize-note { margin: .9rem 0 0; font-weight: 800; }
 .review-continue .attention-note { margin-bottom: 0; }
+/* 书系检索范围已变化 · 需要重新确认计划 and 此结果使用的材料后来被排除 (S29b): the stop with its two ways on, and the marker beside a result. */
+.review-scope-stop { display: grid; gap: .4rem; margin-top: .6rem; }
+.review-scope-stop .attention-note, .review-scope-cancel-note { margin: 0; }
+.review-historical-marker { display: grid; gap: .2rem; margin-top: .6rem; padding: .5rem .8rem; border-left: 3px solid #b9774b; }
+.review-historical-marker p { margin: 0; overflow-wrap: anywhere; }
+.review-historical-marker-label { font-weight: 700; color: #7a4a26; }
 .review-progress { display: grid; gap: .45rem; margin: .55rem 0 0; padding-left: 1.4rem; }
 .review-progress > li { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; }
 .review-progress-label { font-weight: 800; }
@@ -683,6 +689,22 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .knowledge-review-conflicts { display: grid; gap: .4rem; min-width: 0; }
 .knowledge-review-conflicts ul { margin: 0; padding-left: 1.2rem; }
 .knowledge-dispositions [aria-pressed="true"] { outline: 2px solid #3f6f64; outline-offset: 2px; }
+/* 书系检索排除 (S29b): the exclusions in force, 添加检索排除… with its target and reason, the four-part preview, the records. */
+.series-exclusions { display: grid; gap: .6rem; min-width: 0; }
+.series-exclusions h3, .series-exclusions h4, .series-exclusions p { margin: 0; overflow-wrap: anywhere; }
+.series-exclusion-list, .series-exclusion-revisions { display: grid; gap: .6rem; margin: 0; padding: 0; list-style: none; }
+.series-exclusion, .series-exclusion-revision { display: grid; gap: .25rem; min-width: 0; padding: .5rem .8rem; border-left: 3px solid #b9774b; }
+.series-exclusion-revision { border-left-color: #c9d6d2; }
+.series-exclusion-line, .series-exclusion-revision-line { font-weight: 700; }
+.series-exclusion-chooser, .series-exclusion-change { display: grid; gap: .4rem; min-width: 0; margin: 0; padding: .8rem 1rem; border: 1px solid #ded9cd; border-radius: 12px; }
+.series-exclusion-kinds, .series-exclusion-targets { display: grid; gap: .3rem; min-width: 0; }
+.series-exclusion-kind, .series-exclusion-choice { display: flex; align-items: center; gap: .45rem; }
+.series-exclusion-choice input:disabled + span { color: #6f7569; }
+.series-exclusion-preview { display: grid; gap: .6rem; min-width: 0; padding: 1rem; border: 1px solid #c9d6d2; border-radius: 12px; background: #f7faf9; }
+.series-exclusion-preview-identity { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .3rem .8rem; margin: 0; }
+.series-exclusion-preview-identity dt { font-weight: 700; }
+.series-exclusion-preview-identity dd { margin: 0; overflow-wrap: anywhere; }
+.series-exclusion-history { display: grid; gap: .6rem; min-width: 0; }
 /* 设置 › 评估校准与预测 (S82): two switches with what each waits for, then each published Book's 定价与首印. */
 .evaluation-calibration { display: grid; gap: .8rem; }
 .calibration-section { display: grid; gap: .4rem; min-width: 0; padding: 1rem; border: 1px solid #ded9cd; border-radius: 12px; background: #fffdf8; }
@@ -1387,6 +1409,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .analysis-feedback-card, .analysis-feedback-card fieldset,
   .learning-book, .learning-card, .learning-choices, .feedback-book, .calibration-section,
   .series-create-form, .series-add-chooser, .series-preview, .knowledge-form, .knowledge-review, .knowledge-targets, .knowledge-reuse,
+  .series-exclusion, .series-exclusion-chooser, .series-exclusion-change, .series-exclusion-preview, .review-historical-marker,
   .task-plan-clarification, .task-plan-choice, .task-plan-choice-recommended, .task-plan-clarification-deferred, .task-plan-edit-ask-first,
   .task-plan-budget-form, .task-plan-budget-input {
     color: CanvasText;

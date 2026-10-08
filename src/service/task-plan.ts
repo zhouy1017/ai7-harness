@@ -21,7 +21,7 @@ import type {
   TaskPlanStartProjection,
   TaskPlanStepProjection,
 } from '../shared/protocol.js';
-import { BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_TASK_GOAL } from '../shared/protocol.js';
+import { BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_TASK_GOAL, SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL } from '../shared/protocol.js';
 import type { ClarificationFacts } from './analysis/clarifications.js';
 import { namedNonEffects } from './analysis/baseline-analysis-store.js';
 import type { ManifestBlockInput } from './analysis/coverage-manifest.js';
@@ -1330,6 +1330,11 @@ function reviewState(facts: ReviewRunPlanFacts): TaskPlanProjection['state'] {
       return { key: 'stopped', label: facts.canContinue ? '中途停止 · 可继续审阅' : '中途停止' };
     case 'failed':
       return { key: 'stopped', label: '运行失败' };
+    // A Series Retrieval Exclusion stopped it (Issue #64, S29b; SER-024), and the editor may then have cancelled it.
+    case 'scope-changed':
+      return { key: 'stopped', label: SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL };
+    case 'cancelled':
+      return { key: 'stopped', label: '已取消' };
   }
 }
 

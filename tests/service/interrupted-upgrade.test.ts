@@ -54,7 +54,8 @@ import { SCHEDULED_BACKUP_SCHEMA_SQL, initializeScheduledBackupSchema } from '..
 import { SERIES_SCHEMA_SQL, initializeSeriesSchema } from '../../src/service/series.js';
 import { SERIES_KNOWLEDGE_SCHEMA_SQL, initializeSeriesKnowledgeSchema } from '../../src/service/series-knowledge.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { ANALYSIS_LEDGER_REVISION_23_SQL, ANALYSIS_LEDGER_REVISION_58_SQL, DIALOGUE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { ANALYSIS_LEDGER_REVISION_23_SQL, ANALYSIS_LEDGER_REVISION_58_SQL, SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL, initializeSeriesRetrievalExclusionSchema } from '../../src/service/series-exclusions.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 import { plantRevision34Relations } from '../support/clarifications.js';
 import { downgradeAnalysisRunStatesToRevision29 } from '../support/connectivity-wait.js';
@@ -148,6 +149,12 @@ interface Revision {
 
 // Newest first: a store is walked down one revision at a time.
 const REVISIONS: ReadonlyArray<Revision> = [
+  // Revision 61 (Issue #64, S29b): the Series Retrieval Exclusions.
+  {
+    revision: 61,
+    step: initializeSeriesRetrievalExclusionSchema,
+    undo: (database) => drop(database, Object.keys(SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL).reverse()),
+  },
   {
     revision: 60,
     step: initializeDialogueSchema,
@@ -333,11 +340,11 @@ describe('an upgrade interrupted before its version stamp', () => {
     if (step === null) continue;
     const before = revision - 1;
     it(`is finished by the next open when revision ${revision}'s relations committed and its stamp did not`, async () => {
-      expect(await opened()).toBe(DIALOGUE_SCHEMA_VERSION);
+      expect(await opened()).toBe(SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION);
       const terminal = tables();
       // The plant is a store at the revision before, which opens and upgrades as one.
       plant(before);
-      expect(await opened()).toBe(DIALOGUE_SCHEMA_VERSION);
+      expect(await opened()).toBe(SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION);
       expect(tables()).toEqual(terminal);
       // The step commits the revision's relations, and the process stops before the stamp.
       plant(before);
@@ -345,15 +352,15 @@ describe('an upgrade interrupted before its version stamp', () => {
         step(database);
         expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(before);
       });
-      expect(await opened()).toBe(DIALOGUE_SCHEMA_VERSION);
+      expect(await opened()).toBe(SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION);
       expect(tables()).toEqual(terminal);
       // Once finished it opens as any store does.
-      expect(await opened()).toBe(DIALOGUE_SCHEMA_VERSION);
+      expect(await opened()).toBe(SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION);
     }, 120_000);
   }
 
   it('still refuses a store holding only some of a revision\'s relations', async () => {
-    expect(await opened()).toBe(DIALOGUE_SCHEMA_VERSION);
+    expect(await opened()).toBe(SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION);
     plant(36);
     withDatabase((database) => database.exec(PRODUCTION_DOCUMENT_SCHEMA_SQL.production_documents));
     const refused = await EditorialStore.open(roots.dataRoot, roots.codeRoot).then((store) => {

@@ -44,6 +44,8 @@ import {
   REVIEW_CHAPTER_TO,
   REVIEW_CONSEQUENCE_TERMS,
   REVIEW_CONTINUE_NOTE,
+  REVIEW_SCOPE_CANCEL_NOTE,
+  REVIEW_SCOPE_STOP_NOTE,
   REVIEW_CONVERT_NOTE,
   REVIEW_CONVERT_RATIONALE,
   REVIEW_CONVERT_TO,
@@ -163,7 +165,7 @@ export interface ReviewWorkspaceSurface {
 
 type ReviewApi = Pick<
   RendererApi,
-  'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'recordReviewFindingDisposition' |
+  'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'cancelReviewRun' | 'recordReviewFindingDisposition' |
   'generateReviewReport' | 'cancelServiceJob' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' |
   'updateEditorialMark' | 'getEditorialMarkCard' |
   'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport'
@@ -319,6 +321,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     capabilityFindingId: null,
   };
   let sheetState: SheetState | null = null;
+  /** The Run whose 取消任务 waits for its confirmation (Issue #64, S29b); `null` while none does. */
+  let scopeCancel: string | null = null;
   /** Redraws what follows from the sheet's choices in place; set while the sheet is open. */
   let sheetUpdate: () => void = () => undefined;
   /** A control a re-render has only just created and focus belongs on: a form's field once it opens, the strip once it is listed. */
@@ -640,6 +644,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         el('span', 'field-note review-run-counts', `${reviewCountsLine(summary.findingCounts)} · ${reviewRunReportLine(summary.reportVersion)}`),
         created,
       );
+      // 此结果使用的材料后来被排除 (Issue #64, S29b; SER-026), beside the Run in the list too.
+      if (summary.historicalMarker !== null) item.append(el('span', 'review-historical-marker-label review-run-marker', summary.historicalMarker));
       const open = actionButton('open-run', 'quiet', () => openRun(summary.reviewRunId));
       if (opened) open.disabled = true;
       item.append(open);
@@ -709,6 +715,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         resume.append(el('p', 'attention-note', REVIEW_CONTINUE_NOTE), actionButton('continue', 'primary', () => void continueRun(run)));
         section.append(resume);
       }
+      if (run.state === 'scope-changed') section.append(renderScopeStop(run));
+      if (run.historicalMarker !== null) section.append(historicalMarker(run.historicalMarker));
       section.append(renderResults(next, run), renderReport(run));
     }
     section.append(options.technicalDetails(
@@ -750,6 +758,59 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     actions.append(open, revise);
     section.append(actions);
     return section;
+  }
+
+  /**
+   * A Run a Series Retrieval Exclusion stopped (Issue #64, S29b; SER-024): why, and exactly 修改计划并重新授权 — the new-review
+   * sheet with the Run's own choices, whose plan leaves the excluded material out and is approved in the drawer as any other —
+   * and 取消任务, confirmed inline. Never 继续审阅.
+   */
+  function renderScopeStop(run: ReviewRunProjection): HTMLElement {
+    const box = el('div', 'review-scope-stop');
+    box.append(el('p', 'attention-note', REVIEW_SCOPE_STOP_NOTE));
+    const actions = el('div', 'button-row');
+    if (scopeCancel === run.reviewRunId) {
+      box.append(el('p', 'field-note review-scope-cancel-note', REVIEW_SCOPE_CANCEL_NOTE));
+      const confirm = actionButton('scope-cancel-confirm', 'primary', () => void cancelRun(run));
+      const keep = actionButton('scope-cancel-keep', 'secondary', () => {
+        scopeCancel = null;
+        if (projection !== null) renderCard(projection);
+        card?.querySelector<HTMLElement>('[data-review-action="scope-cancel"]')?.focus();
+      });
+      actions.append(confirm, keep);
+    } else {
+      const redo = actionButton('scope-redo', 'primary', () => openSheet(scopeRedoPrefill(run), redo));
+      const cancel = actionButton('scope-cancel', 'secondary', () => {
+        if (working) return;
+        scopeCancel = run.reviewRunId;
+        if (projection !== null) renderCard(projection);
+        card?.querySelector<HTMLElement>('[data-review-action="scope-cancel-confirm"]')?.focus();
+      });
+      actions.append(redo, cancel);
+    }
+    if (working) for (const button of actions.querySelectorAll('button')) button.disabled = true;
+    box.append(actions);
+    // Escape keeps the Run while its 取消任务 waits for a confirmation, focus back on 取消任务 (J-14).
+    box.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented || scopeCancel !== run.reviewRunId) return;
+      event.preventDefault();
+      box.querySelector<HTMLButtonElement>('[data-review-action="scope-cancel-keep"]')?.click();
+    });
+    return box;
+  }
+
+  /** The Run's own choices for 修改计划并重新授权: its categories that can be chosen now, and its scope. */
+  function scopeRedoPrefill(run: ReviewRunProjection): { categories: string[]; scope: ReviewScopeKind; from: string | null; to: string | null } {
+    const prefill = prefillOf(run);
+    const available = new Set((projection?.categories ?? []).filter((category) => category.available).map((category) => category.categoryId));
+    return { ...prefill, categories: prefill.categories.filter((categoryId) => available.has(categoryId)) };
+  }
+
+  /** The Historically Affected Result Marker (SER-026): beside the Run, its report and its findings, never in place of them. */
+  function historicalMarker(marker: NonNullable<ReviewRunProjection['historicalMarker']>): HTMLElement {
+    const box = el('div', 'review-historical-marker');
+    box.append(el('p', 'review-historical-marker-label', marker.label), el('p', 'field-note', marker.detail));
+    return box;
   }
 
   /** The choices a prepared Run was made from, for 返回修改. */
@@ -902,6 +963,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     for (const line of lines) article.append(el('p', 'review-finding-state', line));
     if (finding.status !== 'pending') article.append(el('p', 'review-finding-status-detail', finding.statusDetail));
     if (finding.ignoreReason !== null) article.append(el('p', 'review-finding-ignore-reason', reviewIgnoreReasonLine(finding.ignoreReason)));
+    if (finding.historicalMarker !== null) article.append(el('p', 'review-historical-marker-label review-finding-marker', finding.historicalMarker));
     article.append(renderFindingActions(run, finding));
     if (ui.capabilityFindingId === finding.findingId) article.append(capabilityNote());
     if (ui.ignore?.findingId === finding.findingId) article.append(renderIgnoreForm(run, finding, ui.ignore));
@@ -1095,6 +1157,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const section = el('section', 'review-report');
     section.dataset['reportVersion'] = run.report === null ? '' : String(run.report.version);
     section.append(el('h5', undefined, REVIEW_REPORT_HEADING), el('p', 'field-note', REVIEW_REPORT_NOTE));
+    // The report is never rewritten: the marker stands beside it (Issue #64, S29b; SER-026).
+    if (run.historicalMarker !== null) section.append(el('p', 'review-historical-marker-label review-report-marker', run.historicalMarker.label));
     if (run.reportVersions.length > 0) {
       const versions = el('ol', 'review-report-versions');
       for (const version of run.reportVersions) {
@@ -1447,6 +1511,15 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     await act(REVIEW_STATUS_LINES.continuing, REVIEW_STATUS_LINES.continueFailed, async () => {
       await api.continueReviewRun({ reviewRunId: run.reviewRunId });
       options.setStatus(REVIEW_STATUS_LINES.continued, 'success');
+    });
+  }
+
+  /** 取消任务 of a Run a Series Retrieval Exclusion stopped, once confirmed (Issue #64, S29b). */
+  async function cancelRun(run: ReviewRunProjection): Promise<void> {
+    await act(REVIEW_STATUS_LINES.cancelling, REVIEW_STATUS_LINES.cancelFailed, async () => {
+      await api.cancelReviewRun({ reviewRunId: run.reviewRunId });
+      scopeCancel = null;
+      options.setStatus(REVIEW_STATUS_LINES.cancelled, 'success');
     });
   }
 

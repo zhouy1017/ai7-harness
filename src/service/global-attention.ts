@@ -570,9 +570,10 @@ function reviewRunItem(reading: ReviewRunAttentionReading): GlobalAttentionItemP
       nextStep: 'continue-review', target, technical: reviewTechnical(reading, started),
     });
   }
-  if (reading.state === 'failed' || (reading.state === 'partial' && !reading.canContinue)) {
+  if (reading.state === 'failed' || reading.state === 'scope-changed' || (reading.state === 'partial' && !reading.canContinue)) {
     // Every category is finished and at least one never reached the manuscript: it failed, was interrupted,
-    // or could not start. Nothing can continue it; a new 审阅 is the way on.
+    // or could not start. Nothing can continue it; a new 审阅 is the way on. A Run a Series Retrieval Exclusion stopped
+    // (Issue #64, S29b) reads so too, its stopped category naming why; one the editor then cancelled asks nothing.
     const at = reading.lastEventAt ?? started;
     return item('exceptions', reading.state === 'failed' ? 'review-failed' : 'review-stopped', {
       itemId, blocked: false, at, book, object,

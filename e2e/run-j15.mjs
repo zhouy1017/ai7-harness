@@ -366,6 +366,7 @@ async function constructPredecessorV12(dataRoot, bookId) {
     database.exec(`
       PRAGMA foreign_keys = OFF;
       BEGIN IMMEDIATE;
+      DROP TABLE series_retrieval_exclusions;
       DROP TABLE dialogue_conversions;
       DROP TABLE dialogue_attempt_outcomes;
       DROP TABLE dialogue_harness_spans;

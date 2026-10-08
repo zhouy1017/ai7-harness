@@ -1275,6 +1275,20 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'consistency-review-run',
     'consistency-marks-on-manuscript',
     'consistency-member-reviewed',
+    // Issue #64 (S29b): 书系检索排除 — a held 书系一致性 Run, the four-part impact preview, the exclusion in force, the guard
+    // stopping the Run with its two ways on, the plan leaving the item out, the marker on the earlier result, 停止此排除
+    // restoring later reads only, and 取消任务.
+    'exclusion-held-run',
+    'exclusion-preview',
+    'exclusion-recorded',
+    'exclusion-held-run-stopped',
+    'exclusion-plan-leaves-out',
+    'exclusion-marker',
+    'j14-exclusions-keyboard',
+    'j14-exclusions-reflow-forced-colors',
+    'exclusion-ended',
+    'j14-scope-stop-keyboard-reflow-forced-colors',
+    'exclusion-cancel',
     'knowledge-bounded-pages',
     'zero-activity',
   ]),

@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 94 as const;
+export const SERVICE_PROTOCOL_VERSION = 95 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -146,6 +146,11 @@ export const IPC_CHANNELS = {
   inspectSeriesKnowledgeItems: 'ai7:j13:inspect-series-knowledge-items',
   inspectSeriesKnowledgeCandidates: 'ai7:j13:inspect-series-knowledge-candidates',
   inspectSeriesKnowledgeRevisions: 'ai7:j13:inspect-series-knowledge-revisions',
+  inspectSeriesExclusionTargets: 'ai7:j13:inspect-series-exclusion-targets',
+  inspectSeriesExclusionHistory: 'ai7:j13:inspect-series-exclusion-history',
+  previewSeriesExclusion: 'ai7:j13:preview-series-exclusion',
+  recordSeriesExclusion: 'ai7:j13:record-series-exclusion',
+  cancelReviewRun: 'ai7:j13:cancel-review-run',
   inspectDataVersion: 'ai7:j12:inspect-data-version',
   chooseDatabaseExportDestination: 'ai7:j12:choose-database-export-destination',
   approveDatabaseExport: 'ai7:j12:approve-database-export',
@@ -4054,8 +4059,10 @@ export const REVIEW_COVERAGE_STATE_LABELS = {
 /**
  * A Review Run as a whole. `partial` is a Run that stopped with some categories finished and others not
  * — after a restart, `canContinue` says whether 继续审阅 would pick up the categories never finished.
+ * `scope-changed` is a Run a Series Retrieval Exclusion stopped before a further read (Issue #64, S29b; SER-024): its only ways
+ * on are 修改计划并重新授权 and 取消任务; `cancelled` is such a Run the editor then cancelled.
  */
-export type ReviewRunState = 'prepared' | 'running' | 'settled' | 'partial' | 'failed';
+export type ReviewRunState = 'prepared' | 'running' | 'settled' | 'partial' | 'failed' | 'scope-changed' | 'cancelled';
 
 /**
  * One category inside a Review Run. `settled` means its findings are on the manuscript and actionable
@@ -4147,6 +4154,8 @@ export interface ReviewRunSummaryProjection {
   findingCounts: ReviewFindingCountsProjection;
   /** The latest 审阅报告 version; `null` before one is generated. */
   reportVersion: number | null;
+  /** `此结果使用的材料后来被排除` when a result of the Run used Series material later excluded (Issue #64, S29b; SER-026). */
+  historicalMarker: string | null;
 }
 
 /** What a category's Task plan freezes, as the plan screen states it before the one approval. */
@@ -4218,6 +4227,11 @@ export interface ReviewFindingProjection {
   markStatus: 'open' | 'resolved' | 'applied' | 'removed' | 'converted' | null;
   anchorState: 'exact' | 'drifted' | 'detached' | 'anchor-changed';
   ignoreReason: string | null;
+  /**
+   * `此结果使用的材料后来被排除` when the finding's category read Series material later excluded (Issue #64, S29b; SER-026):
+   * history, never a verdict on the finding, which stays exactly as it was.
+   */
+  historicalMarker: string | null;
 }
 
 /** The versioned 审阅报告 (REV-009) exactly as recorded, read back with the digest of its canonical JSON. */
@@ -4315,6 +4329,11 @@ export interface ReviewRunProjection {
   findingCounts: ReviewFindingCountsProjection;
   report: ReviewReportProjection | null;
   reportVersions: ReadonlyArray<{ reportId: string; version: number; generatedAt: string; digest: string }>;
+  /**
+   * The Historically Affected Result Marker (Issue #64, S29b; SER-026): the result the Run formed used Series material that was
+   * excluded afterwards. The Run, its findings and its reports are never rewritten; this says so beside them.
+   */
+  historicalMarker: null | { label: typeof HISTORICALLY_AFFECTED_RESULT_MARKER | typeof HISTORICAL_MARKER_UNVERIFIABLE; detail: string };
 }
 
 /**
@@ -4413,6 +4432,12 @@ export interface RecordReviewFindingDispositionInput {
 }
 
 export interface GenerateReviewReportInput {
+  bookId: string;
+  reviewRunId: string;
+}
+
+/** 取消任务 of a Review Run a Series Retrieval Exclusion stopped (Issue #64, S29b; SER-024). */
+export interface CancelReviewRunInput {
   bookId: string;
   reviewRunId: string;
 }
@@ -6131,6 +6156,8 @@ export interface SeriesProjection {
   readonly historyCount: number;
   readonly historyNext: SeriesHistoryCursor | null;
   readonly knowledge: SeriesKnowledgeProjection;
+  /** 书系检索排除 (Issue #64, S29b): the exclusions in force and their revisions, newest first. */
+  readonly exclusions: SeriesExclusionsProjection;
 }
 
 /** A further page of a Series' members (`更多成员…`). */
@@ -6543,6 +6570,179 @@ export interface SeriesMembershipChangeResultProjection {
   readonly completionLabel: string;
   /** The record the change made: the answer carries it alone, and the page reads the Series again (Issue #63 review). */
   readonly change: SeriesMembershipChangeProjection;
+}
+
+// ---- 书系检索排除 (Issue #64, plan slice S29b; V2-UX-SER-020 to SER-029; ADR 0037) --------------------------------------
+
+/**
+ * What a Series Retrieval Exclusion may name (SER-020): one exact Series Knowledge Item (its current and later revisions), one
+ * stable knowledge class (its items now and later), one member Book (the Series Knowledge taken from its manuscript, now and
+ * later), or one Source Version of a member Book — which no Series read reaches yet, so it is recorded and read by nothing.
+ */
+export const SERIES_EXCLUSION_TARGET_KINDS = ['knowledge-item', 'knowledge-class', 'book', 'source-version'] as const;
+export type SeriesExclusionTargetKind = (typeof SERIES_EXCLUSION_TARGET_KINDS)[number];
+export const SERIES_EXCLUSION_TARGET_KIND_LABELS: Readonly<Record<SeriesExclusionTargetKind, string>> = {
+  'knowledge-item': '书系知识条目',
+  'knowledge-class': '知识类别',
+  book: '成员图书',
+  'source-version': '来源版本',
+};
+/** `添加检索排除`, `修改检索排除` (its reason) and `停止此排除`: each appends one revision, never edits one. */
+export const SERIES_EXCLUSION_ACTIONS = ['add', 'change', 'end'] as const;
+export type SeriesExclusionAction = (typeof SERIES_EXCLUSION_ACTIONS)[number];
+export type SeriesExclusionActionLabel = '添加检索排除' | '修改检索排除' | '停止此排除';
+export const SERIES_EXCLUSION_ACTION_LABELS: Readonly<Record<SeriesExclusionAction, SeriesExclusionActionLabel>> = {
+  add: '添加检索排除',
+  change: '修改检索排除',
+  end: '停止此排除',
+};
+/** An exclusion's optional reason, in characters once NFC-normalized and trimmed. */
+export const MAX_SERIES_EXCLUSION_REASON_CHARACTERS = 200;
+/** How many exclusions one Series holds in force at once; every one is listed on its page. */
+export const MAX_SERIES_EXCLUSIONS = 100;
+export const MAX_SERIES_EXCLUSION_HISTORY_PAGE = 20;
+export const MAX_SERIES_EXCLUSION_TARGETS_PAGE = 50;
+/** The state an affected Run stops in, whose only ways on are `修改计划并重新授权` and `取消任务` (SER-024). */
+export const SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL = '书系检索范围已变化 · 需要重新确认计划' as const;
+/** The Historically Affected Result Marker (SER-026). */
+export const HISTORICALLY_AFFECTED_RESULT_MARKER = '此结果使用的材料后来被排除' as const;
+/** The marker where the exclusion ledger no longer reads (Issue #64 review): history that cannot be checked says so. */
+export const HISTORICAL_MARKER_UNVERIFIABLE = '此结果使用的材料是否后来被排除：无法核对' as const;
+
+/** What an exclusion names: an item, a class key, a Book or a Source Version identity. */
+export interface SeriesExclusionTargetInput {
+  readonly kind: SeriesExclusionTargetKind;
+  readonly id: string;
+}
+
+/** A target in the editor's words: what it is, and how it keeps applying (SER-021). */
+export interface SeriesExclusionTargetProjection {
+  readonly kind: SeriesExclusionTargetKind;
+  readonly id: string;
+  /** `书系知识条目「海边小城」（地点）`, `知识类别「地点」`, `成员图书《星河之三》`, `来源版本「….docx」（《…》）`. */
+  readonly label: string;
+  /** Continuing or fixed (SER-021): what later material it also covers, or that it covers this one alone. */
+  readonly continuing: string;
+  /** Whether any Series read reads this kind of material yet: never for a Source Version (SER-028), which none reaches. */
+  readonly read: boolean;
+}
+
+/** Where the next page of targets starts: after this one, in the kind's own order. */
+export interface SeriesExclusionTargetsCursor {
+  readonly key: string;
+  readonly id: string;
+}
+
+export interface InspectSeriesExclusionTargetsInput {
+  readonly seriesId: string;
+  readonly kind: SeriesExclusionTargetKind;
+  readonly after: SeriesExclusionTargetsCursor | null;
+}
+
+/** A page of what `添加检索排除…` may name, each saying whether an exclusion in force names it already. */
+export interface SeriesExclusionTargetsProjection {
+  readonly kind: SeriesExclusionTargetKind;
+  readonly targets: ReadonlyArray<SeriesExclusionTargetProjection & { readonly excluded: boolean }>;
+  readonly nextCursor: SeriesExclusionTargetsCursor | null;
+}
+
+/** One of the impact preview's four groups (SER-022): what changes, and what stays as it is. */
+export interface SeriesExclusionImpactGroupProjection {
+  readonly key: 'future-reads' | 'runs' | 'history' | 'unaffected';
+  readonly title: '今后的检索' | '已排队、已授权或正在运行的任务' | '已完成的历史' | '不受影响的授权';
+  readonly changes: ReadonlyArray<string>;
+  readonly unchanged: ReadonlyArray<string>;
+}
+
+/** One appended revision of an exclusion: what it did, why, who, when, and the impact it showed. */
+export interface SeriesExclusionRevisionProjection {
+  readonly revisionId: string;
+  readonly exclusionId: string;
+  readonly revision: number;
+  readonly action: SeriesExclusionAction;
+  readonly actionLabel: SeriesExclusionActionLabel;
+  readonly target: SeriesExclusionTargetProjection;
+  readonly reason: string;
+  readonly actor: '本机编辑';
+  readonly recordedAt: string;
+  readonly impact: ReadonlyArray<SeriesExclusionImpactGroupProjection>;
+}
+
+/** An exclusion in force now: its target, its reason, and since when it applies. */
+export interface SeriesExclusionProjection {
+  readonly exclusionId: string;
+  readonly target: SeriesExclusionTargetProjection;
+  readonly reason: string;
+  /** When its first revision took effect: the instant it was recorded. */
+  readonly effectiveSince: string;
+  readonly revision: number;
+}
+
+/** Where the next page of exclusion revisions starts: after this one, newest first. */
+export interface SeriesExclusionHistoryCursor {
+  readonly recordedAt: string;
+  readonly revisionId: string;
+}
+
+/** A Series' 检索排除: every exclusion in force, and its revisions newest first, a page at a time. */
+export interface SeriesExclusionsProjection {
+  readonly effective: ReadonlyArray<SeriesExclusionProjection>;
+  readonly history: ReadonlyArray<SeriesExclusionRevisionProjection>;
+  readonly historyCount: number;
+  readonly historyNext: SeriesExclusionHistoryCursor | null;
+}
+
+export interface InspectSeriesExclusionHistoryInput {
+  readonly seriesId: string;
+  readonly after: SeriesExclusionHistoryCursor;
+}
+
+export interface SeriesExclusionHistoryPageProjection {
+  readonly history: ReadonlyArray<SeriesExclusionRevisionProjection>;
+  readonly nextCursor: SeriesExclusionHistoryCursor | null;
+}
+
+/** `添加检索排除` names a target; `修改检索排除` and `停止此排除` name the exclusion they supersede. */
+export interface PreviewSeriesExclusionInput {
+  readonly seriesId: string;
+  readonly action: SeriesExclusionAction;
+  readonly exclusionId: string | null;
+  readonly target: SeriesExclusionTargetInput | null;
+  readonly reason: string;
+}
+
+/** 书系检索排除影响预览 (SER-021, SER-022): exact target, scope, effective time, reason and actor, then the four groups. */
+export interface SeriesExclusionPreviewProjection {
+  readonly seriesId: string;
+  readonly seriesTitle: string;
+  readonly action: SeriesExclusionAction;
+  readonly actionLabel: SeriesExclusionActionLabel;
+  readonly exclusionId: string | null;
+  readonly target: SeriesExclusionTargetProjection;
+  /** The reason as it would be recorded: empty when none is given. */
+  readonly reason: string;
+  /** `只限书系「…」的书系检索`: the one retrieval path it restricts (SER-029). */
+  readonly scope: string;
+  /** `记录后立即生效`: the exclusion is the current-read guard from the instant it is recorded (SER-023). */
+  readonly effectiveTime: string;
+  readonly actor: '本机编辑';
+  readonly groups: ReadonlyArray<SeriesExclusionImpactGroupProjection>;
+  /** What the commit names, so a preview the exclusions, the knowledge or the Runs moved past is refused. */
+  readonly previewDigest: string;
+}
+
+export interface RecordSeriesExclusionInput extends PreviewSeriesExclusionInput {
+  readonly previewDigest: string;
+}
+
+export interface SeriesExclusionResultProjection {
+  readonly exclusionId: string;
+  readonly revisionId: string;
+  readonly completionLabel: '书系检索排除已生效' | '检索排除已修改' | '已停止此排除';
+  /** How many authorized Runs it stopped at once, before their next read. */
+  readonly stoppedRuns: number;
+  /** The revision it appended: the answer carries it alone, and the page reads the Series again. */
+  readonly revision: SeriesExclusionRevisionProjection;
 }
 
 /**
@@ -9139,6 +9339,13 @@ export interface ServiceOperationMap {
   inspectSeriesKnowledgeCandidates: { input: { seriesId: string; after: SeriesKnowledgeCandidatesCursor | null }; output: SeriesKnowledgeCandidatesPageProjection };
   inspectSeriesKnowledgeConflicts: { input: { seriesId: string; itemId: string; revisionId: string; after: number }; output: SeriesKnowledgeConflictsProjection };
   inspectSeriesKnowledgeRevisions: { input: { seriesId: string; itemId: string; before: number | null }; output: SeriesKnowledgeRevisionsProjection };
+  // 书系检索排除 (Issue #64, S29b): the targets a Series may exclude, its revisions' further pages, the impact preview and the
+  // commit of one revision; and 取消任务 of a Review Run an exclusion stopped.
+  inspectSeriesExclusionTargets: { input: InspectSeriesExclusionTargetsInput; output: SeriesExclusionTargetsProjection };
+  inspectSeriesExclusionHistory: { input: InspectSeriesExclusionHistoryInput; output: SeriesExclusionHistoryPageProjection };
+  previewSeriesExclusion: { input: PreviewSeriesExclusionInput; output: SeriesExclusionPreviewProjection };
+  recordSeriesExclusion: { input: RecordSeriesExclusionInput; output: SeriesExclusionResultProjection };
+  cancelReviewRun: { input: CancelReviewRunInput; output: ReviewWorkspaceProjection };
   inspectDataVersion: { input: Record<string, never>; output: DataVersionProjection };
   /**
    * 导出数据库 (Issue #434, S86a): the destination the Save dialog answered becomes one preparation of the package, packed off
@@ -9537,6 +9744,12 @@ export interface RendererApi {
   inspectSeriesKnowledgeCandidates(input: { seriesId: string; after: SeriesKnowledgeCandidatesCursor | null }): Promise<SeriesKnowledgeCandidatesPageProjection>;
   inspectSeriesKnowledgeConflicts(input: { seriesId: string; itemId: string; revisionId: string; after: number }): Promise<SeriesKnowledgeConflictsProjection>;
   inspectSeriesKnowledgeRevisions(input: { seriesId: string; itemId: string; before: number | null }): Promise<SeriesKnowledgeRevisionsProjection>;
+  inspectSeriesExclusionTargets(input: InspectSeriesExclusionTargetsInput): Promise<SeriesExclusionTargetsProjection>;
+  inspectSeriesExclusionHistory(input: InspectSeriesExclusionHistoryInput): Promise<SeriesExclusionHistoryPageProjection>;
+  previewSeriesExclusion(input: PreviewSeriesExclusionInput): Promise<SeriesExclusionPreviewProjection>;
+  recordSeriesExclusion(input: RecordSeriesExclusionInput): Promise<SeriesExclusionResultProjection>;
+  /** 取消任务 of the current Book's Review Run a Series Retrieval Exclusion stopped (Issue #64, S29b). */
+  cancelReviewRun(input: Omit<CancelReviewRunInput, 'bookId'>): Promise<ReviewWorkspaceProjection>;
   inspectDataVersion(): Promise<DataVersionProjection>;
   /**
    * 导出数据库… (Issue #434, S86a): the platform's Save dialog, then the preparation of the package for the chosen file — begun,

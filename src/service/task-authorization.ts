@@ -354,9 +354,16 @@ export const INITIAL_EVALUATION_SCHEMA_VERSION = 59;
  * The dialogue revision (Issue #52, S17a; UI ADR 0014; V2-UX-DIALOG-001 to 016): six additive, append-only relations owned by
  * `dialogue/dialogue-ledger.ts` and created before this version is stamped — each dialogue Task, its attempts, and each
  * attempt's Execution Binding, Harness Execution Span, outcome and conversions. No existing row changes. It follows revision 59
- * (Issue #429, S81b1) and moves nothing of its ledger. This is the terminal version.
+ * (Issue #429, S81b1) and moves nothing of its ledger.
  */
 export const DIALOGUE_SCHEMA_VERSION = 60;
+/**
+ * The Series Retrieval Exclusion revision (Issue #64, S29b; V2-UX-SER-020 to SER-029; ADR 0037): one additive, append-only
+ * relation owned by `series-exclusions.ts` and created before this version is stamped — each revision of an exclusion of
+ * material from one Series' retrieval. No existing row changes. It follows revision 60 (Issue #52, S17a) and moves nothing
+ * of its relations. This is the terminal version.
+ */
+export const SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION = 61;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
@@ -1460,7 +1467,7 @@ function validateRevision16AnalysisLedgerSchema(db: DatabaseSync): void {
 
 export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
   const version = asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
-  requireTask(version === DIALOGUE_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
+  requireTask(version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
   validateJ03TaskAuthorizationSchema(db);
   validateAnalysisLedgerSchema(db);
 }
@@ -1671,7 +1678,7 @@ function migrateAnalysisLedgerToRevision17(db: DatabaseSync, from: typeof J04_BA
         db.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_delete`]!);
       }
       seedInitialPlanVersions(db);
-      db.exec(`PRAGMA user_version = ${DIALOGUE_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
       db.exec('COMMIT');
@@ -1738,12 +1745,12 @@ function migrateAnalysisLedgerToRevision59(db: DatabaseSync): void {
 }
 
 /**
- * Revision 59 → 60 (Issue #52, S17a). Revision 60 adds `dialogue/dialogue-ledger.ts`'s relations, which `EditorialStore.open`
- * creates before this runs, and moves nothing here: a revision-59 store's ledger is already the terminal one, so only the
- * version moves.
+ * Revision 59 or 60 → 61. Revision 60 (Issue #52, S17a) adds `dialogue/dialogue-ledger.ts`'s relations and revision 61 (Issue
+ * #64, S29b) `series-exclusions.ts`'s, both of which `EditorialStore.open` creates before this runs, and neither moves anything
+ * here: a revision-59 or revision-60 store's ledger is already the terminal one, so only the version moves.
  */
 function advanceToTerminalRevision(db: DatabaseSync): void {
-  migrateInTransaction(db, `PRAGMA user_version = ${DIALOGUE_SCHEMA_VERSION};`, 'Terminal version');
+  migrateInTransaction(db, `PRAGMA user_version = ${SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION};`, 'Terminal version');
 }
 
 /**
@@ -1768,7 +1775,7 @@ function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24
                   mode, predecessor_revision_id, selected_start_position, selected_end_position
            FROM temp.migrate_analysis_task_intents ORDER BY migrate_rowid`);
       rebuildResultSetRelations(db);
-      db.exec(`PRAGMA user_version = ${DIALOGUE_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
       db.exec('COMMIT');
@@ -1823,13 +1830,13 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === EVALUATION_CALIBRATION_SCHEMA_VERSION || version === SERIES_SCHEMA_VERSION || version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
       version === STORE_VERSION_SCHEMA_VERSION || version === DATABASE_EXPORT_SCHEMA_VERSION || version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION || version === DATABASE_MERGE_SCHEMA_VERSION ||
-      version === INITIAL_EVALUATION_SCHEMA_VERSION || version === DIALOGUE_SCHEMA_VERSION,
+      version === INITIAL_EVALUATION_SCHEMA_VERSION || version === DIALOGUE_SCHEMA_VERSION || version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
-  if (version === DIALOGUE_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
-  if (version === INITIAL_EVALUATION_SCHEMA_VERSION) {
-    // Revision 60 adds no task-authorization or analysis relation, so a revision-59 store carries the terminal ledger:
-    // it is validated as exactly that, and nothing but the version moves.
+  if (version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (version === INITIAL_EVALUATION_SCHEMA_VERSION || version === DIALOGUE_SCHEMA_VERSION) {
+    // Revisions 60 (Issue #52, S17a) and 61 (Issue #64, S29b) add no task-authorization or analysis relation, so a revision-59
+    // or revision-60 store carries the terminal ledger: it is validated as exactly that, and nothing but the version moves.
     validateJ03TaskAuthorizationSchema(db);
     validateAnalysisLedgerSchema(db);
     return advanceToTerminalRevision(db);
@@ -1905,7 +1912,7 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   }
   const analysisStatements = `${Object.values(ANALYSIS_LEDGER_SCHEMA_SQL).join(';\n')};
       ${Object.values(ANALYSIS_LEDGER_TRIGGER_SQL).join(';\n')};
-      PRAGMA user_version = ${DIALOGUE_SCHEMA_VERSION};`;
+      PRAGMA user_version = ${SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION};`;
   if (version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION) {
     validateJ03TaskAuthorizationSchema(db);
     return migrateInTransaction(db, analysisStatements, 'Analysis ledger');

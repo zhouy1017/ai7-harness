@@ -109,11 +109,11 @@ function serviceEnvironment(
   if (importControl) selected.AI7_E2E_JOURNEY = 'J-01';
   if (foregroundExecutionControl) selected.AI7_E2E_JOURNEY = 'J-03';
   if (recoveryControl) selected.AI7_E2E_JOURNEY = 'J-08';
-  // The model adapter binds J-04's Runs, J-09's (Issue #424), J-10's (Issue #422), J-16's (Issue #423) and J-11's (Issue #94);
-  // main admitted it for exactly one.
+  // The model adapter binds J-04's Runs, J-09's (Issue #424), J-10's (Issue #422), J-16's (Issue #423), J-11's (Issue #94) and J-13's,
+  // whose unit hold the service admits for J-13 only as itself (Issue #64, S29b); main admitted it for exactly one.
   if (modelAdapterControl) {
     const journey = process.env.AI7_E2E_JOURNEY;
-    selected.AI7_E2E_JOURNEY = journey === 'J-09' || journey === 'J-10' || journey === 'J-16' || journey === 'J-11' ? journey : 'J-04';
+    selected.AI7_E2E_JOURNEY = journey === 'J-09' || journey === 'J-10' || journey === 'J-16' || journey === 'J-11' || journey === 'J-13' ? journey : 'J-04';
   }
   const names =
     process.platform === 'win32'
@@ -135,7 +135,7 @@ function serviceEnvironment(
 
 function readinessIsExact(value: ServiceReadiness): boolean {
   return (
-    value.protocolVersion === 94 &&
+    value.protocolVersion === 95 &&
     value.state === 'ready' &&
     value.runtime.electron === '43.4.1' &&
     value.runtime.node === '24.18.1' &&

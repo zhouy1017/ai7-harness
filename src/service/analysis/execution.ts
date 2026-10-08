@@ -62,6 +62,7 @@ import {
   type GapUnitOutcome,
 } from './reducers.js';
 import { OUT_OF_SCOPE_GAP_REASON } from './reuse-plan.js';
+import { SERIES_SCOPE_STOP_SUMMARY } from '../series-exclusions.js';
 import {
   buildRunReportReflectionMessage,
   parseRunReportReflectionResult,
@@ -141,6 +142,13 @@ export interface ExecutionOwnerDependencies {
    * Absent in every launch.
    */
   readonly stageHold?: ((stage: 'cross-unit-reduction' | 'assurance-sampling') => Promise<void>) | null;
+  /**
+   * The current-read guard (Issue #64, S29b; V2-UX-SER-023, SER-028): asked before each reading range of a Run, and once more
+   * before what follows them, whether a Series Retrieval Exclusion in force now reaches the Series material the Run's plan froze.
+   * A non-`null` answer names what is excluded, and the Run stops there — its Plan Envelope and authorization predate the
+   * exclusion, and that never lets a further read go on. Absent, nothing is guarded: no Series material exists for the Run.
+   */
+  readonly readGuard?: ((runRecordId: string) => string | null) | null;
 }
 
 /**
@@ -286,6 +294,13 @@ const LIVE_INTERRUPTIONS = {
     summary: 'Provider Account Limit：模型服务账户限额结束了运行，部分结果集修订版已保留。',
     safeNextAction: '待模型服务账户限额窗口恢复后，通过分析更新操作发起新的授权运行；本次运行不会自动重试，也不会改用其它模型。',
   },
+  // A Series Retrieval Exclusion recorded while the Run read (Issue #64, S29b; SER-023 to SER-025): it stops before the next
+  // range, keeps what it read, and goes on only through a revised plan and a new authorization.
+  'series-retrieval-scope-changed': {
+    detail: '书系检索范围已变化：这次运行所依据的书系材料已排除在书系检索之外；已完成单元的结果与缺口均已保留，未再发起任何传输。',
+    summary: SERIES_SCOPE_STOP_SUMMARY,
+    safeNextAction: '修改计划并重新授权，或取消任务；这次运行不能续行、重试，也不会改用别的材料。',
+  },
 } as const;
 
 type LiveInterruption = keyof typeof LIVE_INTERRUPTIONS;
@@ -295,6 +310,8 @@ type LiveInterruption = keyof typeof LIVE_INTERRUPTIONS;
  * cannot go on — neither 续行 nor 重试 — so a new Task carries what it read under a ceiling raised or removed.
  */
 export const BUDGET_REACHED_NEXT_ACTION = '点「调整预算并重做」：在新任务的计划里提高或去掉预算上限，沿用这次已读完的阅读范围接着读其余的；这次运行不能续行或重试。' as const;
+/** A safe retry a Series Retrieval Exclusion stopped (Issue #64, S29b): the unit's first failure is its gap, nothing more is sent. */
+export const SAFE_RETRY_SCOPE_CHANGED = '书系检索范围已变化，没有再试一次' as const;
 /** A safe retry the spent ceiling stopped (Issue #51, S16a): the unit's first failure is its gap, and nothing more is sent. */
 export const SAFE_RETRY_BUDGET_REACHED = '任务运行预算已达上限，没有再试一次' as const;
 /**
@@ -1464,6 +1481,17 @@ export class BaselineAnalysisExecutionOwner {
        * (Issue #422, S76d) — once the editor answered 再试一次, and then the record names that answer. The record names the
        * first attempt's digests, and the retry's span names the record (Issue #286).
        */
+      /**
+       * The current-read guard (Issue #64, S29b; SER-023, SER-028), asked before every further transmission of this Run — a range,
+       * a retry, the reduction, the sample and the reflection: once an exclusion in force reaches what the plan froze, the Run
+       * stops there as the scope changed. A cancellation, or a stop already decided, outranks it.
+       */
+      const scopeChanged = (): boolean => {
+        if (active.cancelRequested || liveInterruption !== null || this.#deps.readGuard?.(facts.runRecordId) == null) return false;
+        liveInterruption = 'series-retrieval-scope-changed';
+        terminalClassification = 'interrupted';
+        return true;
+      };
       const safeRetry = async (
         unit: CoverageManifestUnitProjection,
         requestDigest: string,
@@ -1512,6 +1540,15 @@ export class BaselineAnalysisExecutionOwner {
           // 再试一次 once the ceiling is spent (Issue #51, S16a): the retry is not sent, and the Run stops as the ceiling reached
           // — once every other answer given is applied too, each as the editor chose. The ceiling is read before a pause or
           // AI7 stopping, as at every boundary (Issue #541): a retry it keeps back is never left for a pause to hide.
+          // 再试一次 once the scope changed (Issue #64, S29b): the retry is not sent, and the Run stops as the scope changed.
+          if (retry && (liveInterruption === 'series-retrieval-scope-changed' || scopeChanged())) {
+            waiting.delete(entry.unitOrdinal);
+            settleGap(w.unit, w.requestDigest, { unitOrdinal: w.unit.ordinal, attempts: w.attempts, wallMs: w.wallMs, usage: w.usage },
+              'adapter-failure', `${w.failure.reason}（${w.failure.code}）；${SAFE_RETRY_SCOPE_CHANGED}`);
+            keepSettled(w.unit, w.wallMs);
+            spent = true;
+            continue;
+          }
           if (retry && ceilingState() === 'reached') {
             waiting.delete(entry.unitOrdinal);
             settleGap(w.unit, w.requestDigest, { unitOrdinal: w.unit.ordinal, attempts: w.attempts, wallMs: w.wallMs, usage: w.usage },
@@ -1570,6 +1607,13 @@ export class BaselineAnalysisExecutionOwner {
         }
         // 取消任务 (CTRL-005): the Run stops at this unit boundary, and the unit before it has finished.
         if (active.cancelRequested) break;
+        // The current-read guard (Issue #64, S29b; SER-023): an exclusion recorded since the last range stops the Run before this
+        // one forms a request — before a pause or AI7 stopping, which would leave it to be continued past the exclusion.
+        // A scope stop decided anywhere since — a retry it kept back included — ends the ranges too (Issue #64 review).
+        if ((liveInterruption as LiveInterruption | null) === 'series-retrieval-scope-changed' || scopeChanged()) {
+          unitsEnded = true;
+          break;
+        }
         // The ceiling is evaluated before every dispatch, not only inside the gate: reaching it ends
         // the Run here, before the next unit forms a request at all — and before a pause or AI7 stopping is honoured,
         // which would leave a Run to be continued past what it may spend (Issue #51, S16a).
@@ -1636,6 +1680,11 @@ export class BaselineAnalysisExecutionOwner {
               active.progress.attemptState = null;
               continue;
             }
+            // An exclusion recorded while the first attempt was out keeps the retry back (Issue #64, S29b).
+            if (withheld === null && mode === 'automatic' && scopeChanged()) {
+              firstFailure = failed.failure;
+              withheld = SAFE_RETRY_SCOPE_CHANGED;
+            }
             if (withheld === null && mode === 'automatic') {
               firstFailure = failed.failure;
               attempt = await safeRetry(unit, requestDigest, failed.failure, attempt, null);
@@ -1670,6 +1719,9 @@ export class BaselineAnalysisExecutionOwner {
         if (answers === 'end') unitsEnded = true;
       }
       clock.close();
+      // What follows the ranges — the reduction, the sample, the reflection — reads the same material; an exclusion recorded while
+      // the last range was out stops the Run before any of it (Issue #64, S29b; SER-023).
+      scopeChanged();
       // 暂停, or AI7 stopping under a Run it can continue (Issue #422, S76b): the Run stops here keeping what it read —
       // no reduction, no revision, no outcome — and 续行 goes on from the next unit. A cancellation outranks both, and a
       // spent ceiling, an account limit, or a unit whose turn ended the Run — refused, cut off or ambiguous — still ends
@@ -1907,6 +1959,8 @@ export class BaselineAnalysisExecutionOwner {
         terminalClassification = 'cancelled';
         liveInterruption = null;
       }
+      // So does an exclusion recorded while it was out (Issue #64, S29b).
+      scopeChanged();
 
       // The one declared assurance sampling suboperation (ADR 0066), inside this Run's unchanged
       // envelope and Execution Binding: one admitted user message per anchor unit, one turn each, no
@@ -2028,7 +2082,9 @@ export class BaselineAnalysisExecutionOwner {
         report: buildRunReport(reportFacts, await this.#reflect({
           active, harness, runRecordId: facts.runRecordId, accounting: runReportAccounting(reportFacts),
           admittedUserMessages, acceptedOutputDigests, liveAdapter, accumulated, ceilingState, live, policy,
-          stopped: terminalClassification === 'interrupted' || terminalClassification === 'cancelled',
+          // An exclusion recorded since the revision was persisted keeps the reflection back too (Issue #64, S29b).
+          stopped: terminalClassification === 'interrupted' || terminalClassification === 'cancelled' ||
+            (!active.cancelRequested && this.#deps.readGuard?.(facts.runRecordId) != null),
         })),
       });
     } finally {
