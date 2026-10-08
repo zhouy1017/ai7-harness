@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
+import { describeComposition } from '../../src/service/harness/primary-agent-harness.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner, DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS } from '../../src/service/analysis/execution.js';
 import {
@@ -67,6 +68,8 @@ const FIXTURES_ROOT = resolve(fileURLToPath(new URL('../fixtures/model/', import
 /** Either bound form: an explicit launch total, or the policy's per-frozen-unit default (ADR 0070). */
 type Ceiling = DeveloperLiveCeiling;
 const CEILING: Ceiling = { kind: 'tokens', maxTotalTokens: 500_000 };
+/** The developer-live composition digest dev pinned before the platform tools (Issue #473): zero tools, no Session log. */
+const DEV_LIVE_COMPOSITION_DIGEST = '5dee37754ddb1ee8b20c04fe76fca80afbe99d632cd36e69e601f5dc64a30d98';
 /** What a developer-live launch binds when the form names no ceiling: 30,000 tokens per frozen unit. */
 const POLICY_DEFAULT_CEILING: Ceiling = {
   kind: 'tokens-per-frozen-unit',
@@ -391,6 +394,9 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
       expect(body.response_format).toEqual({ type: 'json_object' });
       expect(body).not.toHaveProperty('thinking');
       expect(body).not.toHaveProperty('reasoning_effort');
+      // Provider Processing v5's rule names no platform tools (Issue #473): no request offers the model a tool.
+      expect(body).not.toHaveProperty('tools');
+      expect(JSON.stringify(body.messages)).not.toContain('tool_calls');
       // The credential never enters the body or its digest.
       expect(call.body).not.toContain('placeholder-development-key');
     }
@@ -437,7 +443,13 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
       expect(JSON.stringify(line)).not.toContain('placeholder-development-key');
       expect(line).not.toHaveProperty('requestBody');
       expect(line).not.toHaveProperty('response');
+      // The shared once-only transmission writes the analysis path's model-call lines exactly as before (Issue #473).
+      expect(line).not.toHaveProperty('kind');
     }
+    // The frozen composition registers zero tools: its digest is the one every plan without platform tools pins, the
+    // literal dev froze before the platform tools existed (dev@29a9831a), so a change to the tool-less body moves it.
+    expect(settled.planEnvelope!.behaviorCompositionDigest).toBe(DEV_LIVE_COMPOSITION_DIGEST);
+    expect(describeComposition('opencode-go', 'deepseek-v4-flash', BASELINE_PROMPT_CONTRACT_DIGEST).digest).toBe(DEV_LIVE_COMPOSITION_DIGEST);
     await store.close();
   });
 

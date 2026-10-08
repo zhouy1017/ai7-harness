@@ -1746,7 +1746,16 @@ export interface ModelServiceConnectionProjection {
  * `fixture-recording` and `ordinary-production` stay unselectable from the source checkout.
  */
 export type TrustedOperationalScope = 'development-ci' | 'developer-live';
-export type ProviderProcessingVersion = 'v1' | 'v5';
+/**
+ * The `developer-live` Provider Processing versions a pin may name: v5, selected by active-policy-set v5, and v8, the
+ * platform-tools successor that will carry the dialogue rule too (ADR 0088 §3, Issue #473). v8 is admitted by the type so
+ * that its selection (S87-f3b, an Owner byte review) moves no union; nothing selects it, and every persisted row says v5.
+ * v7 is reviewed history that no active set will select.
+ */
+export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8';
+/** The active policy set versions a pin may name: v5, selected, and its successor v6 (S87-f3b), selected by nothing yet. */
+export type ActivePolicySetVersion = 'v5' | 'v6';
+export type ProviderProcessingVersion = 'v1' | DeveloperLiveProviderProcessingVersion;
 /** Exact Run Budget Ceiling state: `unset` under development-ci, an explicit total-token ceiling under developer-live. */
 export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: number };
 /**
@@ -1766,11 +1775,11 @@ export type CredentialSlotId = 'deepseek-api-key' | 'opencode-go';
 /** The Provider Processing pin a Provider Resolution Plan carries for its trusted scope. */
 export type ProviderProcessingPin =
   | { operationalScope: 'development-ci'; version: 'v1'; decision: 'deny'; authorizedLiveTransmissionCount: 0 }
-  | { operationalScope: 'developer-live'; version: 'v5'; decision: 'eligible-only'; authorizedLiveTransmissionCount: 'bounded-by-run' };
+  | { operationalScope: 'developer-live'; version: DeveloperLiveProviderProcessingVersion; decision: 'eligible-only'; authorizedLiveTransmissionCount: 'bounded-by-run' };
 /** The policy pin a Result Set Revision records; `liveTransmissions` is the policy's bound, never a usage count. */
 export type ResultSetPolicyPin =
-  | { operationalScope: 'development-ci'; providerProcessingVersion: 'v1'; activePolicySetVersion: 'v5'; liveTransmissions: 0 }
-  | { operationalScope: 'developer-live'; providerProcessingVersion: 'v5'; activePolicySetVersion: 'v5'; liveTransmissions: 'bounded-by-run' };
+  | { operationalScope: 'development-ci'; providerProcessingVersion: 'v1'; activePolicySetVersion: ActivePolicySetVersion; liveTransmissions: 0 }
+  | { operationalScope: 'developer-live'; providerProcessingVersion: DeveloperLiveProviderProcessingVersion; activePolicySetVersion: ActivePolicySetVersion; liveTransmissions: 'bounded-by-run' };
 
 /** The three launch-form arguments the built entry accepts beside `--data-root`; carried by argv only, never by an environment variable or setting. */
 export const TRUSTED_SCOPE_ARGUMENT = '--trusted-operational-scope';
@@ -1827,7 +1836,7 @@ export interface LaunchPolicyProjection {
   integrityState: 'verified' | 'denied';
   denialReason: string | null;
   operationalScope: TrustedOperationalScope | null;
-  activePolicySetVersion: 'v5' | null;
+  activePolicySetVersion: ActivePolicySetVersion | null;
   providerProcessing: {
     version: ProviderProcessingVersion | null;
     decision: 'deny' | 'eligible-only';
