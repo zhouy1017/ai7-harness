@@ -347,8 +347,9 @@ async function activateFocused(renderer, key) {
 // recorded. J-15 therefore owns that one credential and its cleanup, through the product while it answers and directly by its
 // reference as the last resort.
 const REVIEW_FIXTURE_IDENTITY = 'sample1-review-authored';
-const CAPTURE_SOURCE_TITLE = 'J15 工序来源';
-const CAPTURE_TARGET_TITLE = 'J15 工序运行';
+// Titled to sort before the other Books, so each stands on the library's first page (书库 orders by title).
+const CAPTURE_SOURCE_TITLE = 'J15 1 工序来源';
+const CAPTURE_TARGET_TITLE = 'J15 2 工序运行';
 const PROCEDURE_TITLE = '体例复核';
 const PROPOSAL_TITLE = '图注核对';
 const PROPOSAL_FILE_NAME = '开发建议.md';
