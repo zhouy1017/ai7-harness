@@ -4,6 +4,8 @@ import {
   FEEDBACK_HISTORY_SIGNALS,
   BASELINE_ANALYSIS_UPDATE_MODES,
   MAX_BLOCK_CODE_UNITS,
+  MAX_DIALOGUE_PROPOSAL_CHARACTERS,
+  MAX_DIALOGUE_QUESTION_CHARACTERS,
   MAX_EDIT_CODE_UNITS,
   MAX_EXPORT_DESTINATION_CODE_UNITS,
   MAX_MARK_BODY_CODE_UNITS,
@@ -1729,6 +1731,36 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // 交付 · 生产文档 (Issue #415). A house type by its identity, a material and a document by theirs, all within
     // the route's Book; whether they are that Book's is the store's to decide.
+    // 就这段提问… (Issue #52, S17a): the route's Book, the exact span as a mark names one, and the question within its bound;
+    // the dialogue's actions name the dialogue and the attempt the editor sees, a read the fragments it has shown.
+    case 'askAboutSelection': {
+      const input = requireInput(value.input, ['bookId', 'selection', 'question'], tentativeId);
+      if (!validUuid(input.bookId) || input.selection === null || !validKnowledgeSpan(input.selection) ||
+          !isBoundedString(input.question, 4 * MAX_DIALOGUE_QUESTION_CHARACTERS)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'inspectDialogue': {
+      const input = requireInput(value.input, ['bookId', 'dialogueId', 'afterFragment'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.dialogueId) || !isSafeInteger(input.afterFragment, 0)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'stopDialogueAnswer':
+    case 'continueDialogueAnswer':
+    case 'regenerateDialogueAnswer': {
+      const input = requireInput(value.input, ['bookId', 'dialogueId', 'attemptId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.dialogueId) || !validUuid(input.attemptId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'convertDialogueToChangeSuggestion': {
+      const input = requireInput(value.input, ['bookId', 'dialogueId', 'attemptId', 'proposedText', 'rationale'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.dialogueId) || !validUuid(input.attemptId) ||
+          !isBoundedString(input.proposedText, 2 * MAX_DIALOGUE_PROPOSAL_CHARACTERS) || !isBoundedString(input.rationale, 2 * MAX_DIALOGUE_PROPOSAL_CHARACTERS, true)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     case 'inspectBookTasks':
     case 'inspectProductionDocuments': {
       const input = requireInput(value.input, ['bookId'], tentativeId);

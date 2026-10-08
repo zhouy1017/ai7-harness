@@ -14,6 +14,7 @@ import { BoundedStoreError, initializeManuscriptEntryPositionSchema } from '../.
 import { DATA_VERSION_SCHEMA_SQL, initializeDataVersionSchema } from '../../src/service/data-version.js';
 import { DATABASE_EXPORT_SCHEMA_SQL, initializeDatabaseExportSchema } from '../../src/service/database-exports.js';
 import { DATABASE_MERGE_SCHEMA_SQL, initializeDatabaseMergeSchema } from '../../src/service/database-merge.js';
+import { DIALOGUE_SCHEMA_SQL, initializeDialogueSchema } from '../../src/service/dialogue/dialogue-ledger.js';
 import { DATABASE_REPLACEMENT_SCHEMA_SQL, initializeDatabaseReplacementSchema } from '../../src/service/database-replacement.js';
 import { DECISION_FEEDBACK_SCHEMA_SQL, initializeDecisionFeedbackSchema } from '../../src/service/decision-feedback.js';
 import { initializeDefaultExecutionRuleSchema } from '../../src/service/default-execution-rules.js';
@@ -53,7 +54,7 @@ import { SCHEDULED_BACKUP_SCHEMA_SQL, initializeScheduledBackupSchema } from '..
 import { SERIES_SCHEMA_SQL, initializeSeriesSchema } from '../../src/service/series.js';
 import { SERIES_KNOWLEDGE_SCHEMA_SQL, initializeSeriesKnowledgeSchema } from '../../src/service/series-knowledge.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { ANALYSIS_LEDGER_REVISION_23_SQL, ANALYSIS_LEDGER_REVISION_58_SQL, INITIAL_EVALUATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { ANALYSIS_LEDGER_REVISION_23_SQL, ANALYSIS_LEDGER_REVISION_58_SQL, DIALOGUE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 import { plantRevision34Relations } from '../support/clarifications.js';
 import { downgradeAnalysisRunStatesToRevision29 } from '../support/connectivity-wait.js';
@@ -147,6 +148,11 @@ interface Revision {
 
 // Newest first: a store is walked down one revision at a time.
 const REVISIONS: ReadonlyArray<Revision> = [
+  {
+    revision: 60,
+    step: initializeDialogueSchema,
+    undo: (database) => drop(database, Object.keys(DIALOGUE_SCHEMA_SQL).reverse()),
+  },
   {
     // Revision 59 rebuilds the three kind-coupled relations and stamps its version in one transaction, so the one step an
     // interruption can leave committed without the stamp is the relation of the 初评 each Evaluation Record version began from.
@@ -325,28 +331,29 @@ const tables = (): string[] => {
 describe('an upgrade interrupted before its version stamp', () => {
   for (const { revision, step } of REVISIONS) {
     if (step === null) continue;
+    const before = revision - 1;
     it(`is finished by the next open when revision ${revision}'s relations committed and its stamp did not`, async () => {
-      expect(await opened()).toBe(INITIAL_EVALUATION_SCHEMA_VERSION);
+      expect(await opened()).toBe(DIALOGUE_SCHEMA_VERSION);
       const terminal = tables();
       // The plant is a store at the revision before, which opens and upgrades as one.
-      plant(revision - 1);
-      expect(await opened()).toBe(INITIAL_EVALUATION_SCHEMA_VERSION);
+      plant(before);
+      expect(await opened()).toBe(DIALOGUE_SCHEMA_VERSION);
       expect(tables()).toEqual(terminal);
       // The step commits the revision's relations, and the process stops before the stamp.
-      plant(revision - 1);
+      plant(before);
       withDatabase((database) => {
         step(database);
-        expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(revision - 1);
+        expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(before);
       });
-      expect(await opened()).toBe(INITIAL_EVALUATION_SCHEMA_VERSION);
+      expect(await opened()).toBe(DIALOGUE_SCHEMA_VERSION);
       expect(tables()).toEqual(terminal);
       // Once finished it opens as any store does.
-      expect(await opened()).toBe(INITIAL_EVALUATION_SCHEMA_VERSION);
+      expect(await opened()).toBe(DIALOGUE_SCHEMA_VERSION);
     }, 120_000);
   }
 
   it('still refuses a store holding only some of a revision\'s relations', async () => {
-    expect(await opened()).toBe(INITIAL_EVALUATION_SCHEMA_VERSION);
+    expect(await opened()).toBe(DIALOGUE_SCHEMA_VERSION);
     plant(36);
     withDatabase((database) => database.exec(PRODUCTION_DOCUMENT_SCHEMA_SQL.production_documents));
     const refused = await EditorialStore.open(roots.dataRoot, roots.codeRoot).then((store) => {

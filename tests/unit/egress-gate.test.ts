@@ -66,6 +66,14 @@ describe('evaluateEgress', () => {
     expect(payloadDigest(payload())).toMatch(/^[0-9a-f]{64}$/);
   });
 
+  it('lets a dialogue excerpt of the editor\'s manuscript reach only the local deterministic route (Issue #52, S17a)', () => {
+    const excerpt = { ...binding(), outboundDataCategory: 'editor-selected-manuscript-excerpt' as const };
+    expect(evaluateEgress(payload(), excerpt, scope())).toEqual({ decision: 'transmit-local', payloadDigest: payloadDigest(payload()) });
+    const remote = { ...binding(DEEPSEEK_ROUTE), outboundDataCategory: 'editor-selected-manuscript-excerpt' as const };
+    const remotePayload = payload({ provider: DEEPSEEK_ROUTE, model: DEEPSEEK_MODEL, messages: [user(UNIT_1)] });
+    expect(evaluateEgress(remotePayload, remote, scope())).toMatchObject({ decision: 'refuse', reason: 'outbound-category-mismatch' });
+  });
+
   it('refuses an out-of-scope block in a user message and sends nothing', () => {
     const foreign = `分析单元 2/2 · 单元摘要 ${'2'.repeat(64)}\n[blk_${'f'.repeat(24)}] (paragraph) 越界段落。`;
     expect(evaluateEgress(payload({ messages: [user(UNIT_1), assistant(OUTPUT_1), user(foreign)] }), binding(), scope()))
