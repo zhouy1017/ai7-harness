@@ -44,3 +44,36 @@ export const BUILTIN_PRODUCTION_DOCUMENT_TYPES_DIGEST = sha256Hex(canonicalJson(
 export function productionDocumentType(typeId: string): ProductionDocumentTypeEntry | undefined {
   return BUILTIN_PRODUCTION_DOCUMENT_TYPES.types.find((entry) => entry.typeId === typeId);
 }
+
+/**
+ * The 审稿意见 drafts' document types (Issue #429, plan slice S81c; V2-UX-EVAL-013): one per V1 template. A draft is an
+ * Editorial Artifact edited on the Manuscript's surface exactly as a Production Document is, so it lives in the same block
+ * store and ledgers under a type of its own; but it is made from a finalized Evaluation Record in 评估, never 从来源材料创建,
+ * is no card of 交付物 and no condition of 图书交付包 (BUNDLE-001 names the finalized 审稿意见 apart from the documents), and a
+ * draft is never a delivery. Its own configuration, so the house's deliverable types and their digest stay as they were.
+ */
+export const READERS_REPORT_DOCUMENT_TYPES: ProductionDocumentTypeConfiguration = {
+  schema: PRODUCTION_DOCUMENT_TYPES_SCHEMA,
+  version: '1',
+  types: [
+    { typeId: 'readers-report-author', label: '审稿意见 · 给作者的修改意见' },
+    { typeId: 'readers-report-editorial', label: '审稿意见 · 给编辑部 / 选题会的审读报告' },
+  ],
+};
+
+export const READERS_REPORT_DOCUMENT_TYPES_DIGEST = sha256Hex(canonicalJson(READERS_REPORT_DOCUMENT_TYPES));
+
+/** The draft type of one template. */
+export function readersReportDocumentTypeId(template: 'author' | 'editorial'): string {
+  return template === 'author' ? 'readers-report-author' : 'readers-report-editorial';
+}
+
+/** A 审稿意见 draft's type, or `undefined` for any other identity. */
+export function readersReportDocumentType(typeId: string): ProductionDocumentTypeEntry | undefined {
+  return READERS_REPORT_DOCUMENT_TYPES.types.find((entry) => entry.typeId === typeId);
+}
+
+/** Any document's type as a surface names it: a house deliverable type, or a 审稿意见 draft's. */
+export function documentTypeLabel(typeId: string): string {
+  return (productionDocumentType(typeId) ?? readersReportDocumentType(typeId))?.label ?? typeId;
+}

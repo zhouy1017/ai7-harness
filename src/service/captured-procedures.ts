@@ -27,6 +27,7 @@ import {
   type DeveloperProposalSummaryProjection,
   type DeveloperProposalVersionProjection,
   type ReviewRunProcedureProjection,
+  type ReviewRunState,
   type SaveDeveloperProposalInput,
 } from '../shared/protocol.js';
 import { DIGEST_PATTERN, UUID_PATTERN, canonicalJson, canonicalRecord, hasExactKeys, isRecord, parseCanonicalJson, sha256Hex } from './analysis/canonical.js';
@@ -338,7 +339,7 @@ export function ceilingWiderThanSource(
 /** A Review Run as a capture reads it: its state, and each category with the entry it snapshotted and where it ended. */
 export interface CaptureSourceRun {
   readonly authorized: boolean;
-  readonly state: 'prepared' | 'running' | 'settled' | 'partial' | 'failed';
+  readonly state: ReviewRunState;
   readonly canContinue: boolean;
   readonly categories: ReadonlyArray<{ readonly entry: ReviewCategoryConfigurationEntry; readonly state: string; readonly stateLabel: string }>;
 }
@@ -346,6 +347,8 @@ export interface CaptureSourceRun {
 export const CAPTURE_NOT_STARTED = '这次审阅还没有开始；审阅完成后才能保存为可复用工序。' as const;
 export const CAPTURE_RUNNING = '这次审阅还在进行；审阅完成后才能保存为可复用工序。' as const;
 export const CAPTURE_CONTINUABLE = '这次审阅还有类别可以继续；继续审阅完成后才能保存为可复用工序。' as const;
+export const CAPTURE_CANCELLED = '这次审阅已取消，不能保存为可复用工序；从一次完成的审阅保存。' as const;
+export const CAPTURE_SCOPE_CHANGED = '这次审阅因书系检索排除停下，还没有完成；修改计划并重新授权、审阅完成后才能保存。' as const;
 export const CAPTURE_NOTHING_SETTLED = '这次审阅没有一类完成，没有可以保存的工序。' as const;
 export const CAPTURE_NOTHING_ELIGIBLE = '这次审阅完成的类别现在都不能再按原工序运行，没有可以保存的工序。' as const;
 
@@ -376,6 +379,10 @@ export function procedureCaptureSource(
     ? CAPTURE_NOT_STARTED
     : source.state === 'running'
       ? CAPTURE_RUNNING
+      : source.state === 'cancelled'
+        ? CAPTURE_CANCELLED
+        : source.state === 'scope-changed'
+          ? CAPTURE_SCOPE_CHANGED
       : source.canContinue
         ? CAPTURE_CONTINUABLE
         : !source.categories.some((category) => category.state === 'settled')

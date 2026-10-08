@@ -241,6 +241,9 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   evaluation_record_entries: 'owned',
   // The AI7 初评 each version began from (Issue #429, S81b1): the version's own, as its entries are.
   evaluation_initial_drafts: 'owned',
+  // 审稿意见 (Issue #429, S81c): which 定稿 version each Task drafts from, and which result became a draft — the Book's own.
+  readers_report_tasks: 'owned',
+  readers_report_drafts: 'owned',
   book_dimension_sets: 'owned',
   book_dimensions: 'owned',
   book_people_versions: 'owned',
@@ -300,6 +303,8 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   database_replacements: 'house',
   database_merges: 'house',
   database_merge_books: 'house',
+  // A Series' retrieval exclusions are the house's, as its Series and their knowledge are (Issue #64, S29b).
+  series_retrieval_exclusions: 'house',
   // The search index over the working text, and its own relations.
   working_block_search: 'derived',
   working_block_search_config: 'derived',

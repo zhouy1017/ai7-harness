@@ -16,7 +16,9 @@ import type { ReviewRunDriveStep, ReviewRunHandOff } from './review-runs.js';
  * store answers from the records alone — the category's events and its ledger Run — so a loop lost to
  * a restart is resumed by 继续审阅 exactly where it stopped: a category never started starts, one whose
  * Run finished is settled from that Run's record, one settled and not written is written, and one whose
- * Run the stopped service left executing is recorded interrupted.
+ * Run the stopped service left executing is recorded interrupted — the service's startup reconciliation has ended that
+ * ledger Run already (Issue #657), so only the category's own record is left to write. One whose ledger Run was only
+ * authorized, and never reached the owner, is dispatched: the startup leaves it for 继续审阅, the editor's own choice.
  *
  * The service entry constructs it beside the owner. On shutdown it must stop the driver before the
  * owner: `const stopped = driver.dispose(); await owner.dispose(); await stopped;` — the driver then
@@ -160,12 +162,17 @@ export class ReviewRunDriver {
           if (handOff !== null) await this.#dispatch(reviewRunId, categoryId, handOff);
           break;
         }
-        case 'dispatch':
+        case 'dispatch': {
           if (this.#stopping) return;
           await this.#place(reviewRunId, categoryId);
           if (this.#stopping) return;
-          await this.#dispatch(reviewRunId, categoryId, step);
+          // What the category needs is read again after the wait (Issue #64 review): a Run stopped meanwhile — a Series
+          // Retrieval Exclusion recorded, its start blocked — dispatches nothing, and the next step reads what was recorded.
+          const again = this.#steps.step(reviewRunId, categoryId);
+          if (again.kind !== 'dispatch' || again.runRecordId !== step.runRecordId) break;
+          await this.#dispatch(reviewRunId, categoryId, again);
           break;
+        }
       }
     }
   }

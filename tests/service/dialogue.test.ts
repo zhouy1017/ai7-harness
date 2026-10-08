@@ -11,7 +11,9 @@ import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.j
 import { HARNESS_SESSION_LOG_DIRECTORY } from '../../src/service/harness/session-log.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { CAPTURED_PROCEDURE_SCHEMA_VERSION, INITIAL_EVALUATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { ANALYSIS_LEDGER_REVISION_59_SQL, CAPTURED_PROCEDURE_SCHEMA_VERSION, INITIAL_EVALUATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { READERS_REPORT_SCHEMA_SQL } from '../../src/service/readers-reports.js';
+import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 import { CAPTURED_PROCEDURE_SCHEMA_SQL } from '../../src/service/captured-procedures.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type { DialogueProjection, DialogueSelectionInput } from '../../src/shared/protocol.js';
@@ -415,8 +417,13 @@ describe('就这段提问… over the real store and harness', () => {
     let database = new DatabaseSync(path);
     try {
       database.exec('PRAGMA foreign_keys = OFF');
-      for (const table of [...Object.keys(CAPTURED_PROCEDURE_SCHEMA_SQL).reverse(), ...Object.keys(DIALOGUE_SCHEMA_SQL).reverse()]) database.exec(`DROP TABLE ${table}`);
+      // A revision-59 store held neither the Captured Procedures (revision 63) nor 审稿意见's relations and the reader's report kind
+      // in its kind-coupled CHECKs (revision 62).
+      for (const table of Object.keys(CAPTURED_PROCEDURE_SCHEMA_SQL).reverse()) database.exec(`DROP TABLE ${table}`);
+      for (const table of Object.keys(READERS_REPORT_SCHEMA_SQL).reverse()) database.exec(`DROP TABLE ${table}`);
+      for (const table of Object.keys(DIALOGUE_SCHEMA_SQL).reverse()) database.exec(`DROP TABLE ${table}`);
       database.exec(`PRAGMA user_version = ${INITIAL_EVALUATION_SCHEMA_VERSION}`);
+      downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_59_SQL);
     } finally {
       database.close();
     }

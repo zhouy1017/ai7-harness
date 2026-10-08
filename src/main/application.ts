@@ -110,7 +110,8 @@ interface ManuscriptCapability {
 
 interface EditorResourceCapability {
   kind: 'job' | 'search' | 'preview';
-  operation: 'search' | 'replacement' | 'reimport' | 'task-authorization' | 'baseline-analysis' | 'review-run' | 'initial-evaluation';
+  operation: 'search' | 'replacement' | 'reimport' | 'task-authorization' | 'baseline-analysis' | 'review-run' | 'initial-evaluation' |
+    'readers-report';
   bookId: string;
   manuscriptId: string | null;
   branchId: string | null;
@@ -200,6 +201,7 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j07-folder-path' ||
           key === '--j04-save-path' ||
           key === '--j12-save-path' ||
+          key === '--j11-save-path' ||
           key === '--j13-save-path' ||
           key === '--j01-import-control' ||
           key === '--j03-foreground-execution-control' ||
@@ -308,10 +310,13 @@ function parseArguments(argv: string[]): LaunchArguments {
   requireDesktop(j07SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-07' && isAbsolute(j07SavePath)));
   requireDesktop(j04SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-04' && isAbsolute(j04SavePath)));
   requireDesktop(j12SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-12' && isAbsolute(j12SavePath)));
+  // J-11's for a 审稿意见 draft's DOCX (Issue #429, S81c).
+  const j11SavePath = values.get('--j11-save-path');
+  requireDesktop(j11SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-11' && isAbsolute(j11SavePath)));
   // J-13's for a 开发建议's 导出为文件… (Issue #65, S30).
   const j13SavePath = values.get('--j13-save-path');
   requireDesktop(j13SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-13' && isAbsolute(j13SavePath)));
-  const injectedSavePath = j07SavePath ?? j04SavePath ?? j12SavePath ?? j13SavePath;
+  const injectedSavePath = j07SavePath ?? j04SavePath ?? j12SavePath ?? j11SavePath ?? j13SavePath;
   const injectedFolderPath = values.get('--j07-folder-path');
   requireDesktop(injectedFolderPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-07' && isAbsolute(injectedFolderPath)));
   const importControlValue = values.get('--j01-import-control');
@@ -370,10 +375,13 @@ function parseArguments(argv: string[]): LaunchArguments {
   const connectivityPath = values.get('--j04-connectivity-path');
   requireDesktop(connectivityPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-04' && isAbsolute(connectivityPath)));
   // J-10's unit hold (Issue #422) is guarded the same way — J-10's own, J-16's to hold a Run in its 任务 panel (Issue
-  // #423), and J-09's to hold several Books' Runs at once (Issue #49), and absolute — and sits beside the adapter.
+  // #423), J-09's to hold several Books' Runs at once (Issue #49), J-11's to keep a Run under way while ②A's follower is held
+  // (#641), and J-13's to hold a 书系一致性 Run while an exclusion is recorded (Issue #64, S29b), and absolute — and sits
+  // beside the adapter.
   const unitHoldPath = values.get('--j10-unit-hold-path');
   requireDesktop(unitHoldPath === undefined ||
-    ((process.env.AI7_E2E_JOURNEY === 'J-09' || process.env.AI7_E2E_JOURNEY === 'J-10' || process.env.AI7_E2E_JOURNEY === 'J-16') && isAbsolute(unitHoldPath)));
+    ((process.env.AI7_E2E_JOURNEY === 'J-09' || process.env.AI7_E2E_JOURNEY === 'J-10' || process.env.AI7_E2E_JOURNEY === 'J-11' ||
+      process.env.AI7_E2E_JOURNEY === 'J-13' || process.env.AI7_E2E_JOURNEY === 'J-16') && isAbsolute(unitHoldPath)));
   // J-16's answer hold (Issue #52, S17a): J-16's own, absolute, beside the adapter — it holds a dialogue answer mid-stream.
   const answerHoldPath = values.get('--j16-answer-hold-path');
   requireDesktop(answerHoldPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-16' && isAbsolute(answerHoldPath)));
@@ -703,7 +711,9 @@ function registerRendererHandlers(
               ? 'review-run'
               : job.kind === 'initial-evaluation-preparation'
                 ? 'initial-evaluation'
-                : 'reimport';
+                : job.kind === 'readers-report-preparation'
+                  ? 'readers-report'
+                  : 'reimport';
   const resourceSeed = (
     capability: ManuscriptCapability | EditorResourceCapability,
     operation: EditorResourceCapability['operation'] = 'operation' in capability ? capability.operation : 'search',
@@ -774,7 +784,8 @@ function registerRendererHandlers(
         throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', '审阅计划准备结果不属于当前图书工作台。');
       }
     } else if (result !== null && 'recordCount' in result && 'initial' in result) {
-      if (actualOperation !== 'initial-evaluation' || result.bookId !== capability.bookId) {
+      // 评估 answers both AI7 初评's preparation and 审稿意见's (Issue #429, S81c).
+      if ((actualOperation !== 'initial-evaluation' && actualOperation !== 'readers-report') || result.bookId !== capability.bookId) {
         throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', 'AI7 初评准备结果不属于当前图书工作台。');
       }
     } else if (result !== null && 'taskIntent' in result) {
@@ -2998,6 +3009,65 @@ function registerRendererHandlers(
       });
     }),
   );
+  // 审稿意见 (Issue #429, S81c): drafted, started and opened within the route's Book, as 初评 is; the renderer names a template,
+  // a Task or a drafted result, never the Book, and every answer must be that Book's.
+  ipcMain.handle(IPC_CHANNELS.prepareReadersReport, (event, input: Parameters<RendererApi['prepareReadersReport']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object' && (input.template === 'author' || input.template === 'editorial'), 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const result = await service.call('prepareReadersReport', { bookId: route.bookId, template: input.template });
+        const prepared = result.result;
+        if (result.kind !== 'readers-report-preparation' ||
+            (prepared !== null && !('recordCount' in prepared && 'initial' in prepared && prepared.bookId === route.bookId))) {
+          throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '审稿意见准备结果类型无效或不属于当前图书工作台。');
+        }
+        rememberEditorResource(owned, 'job', result.jobId, {
+          operation: 'readers-report',
+          bookId: route.bookId,
+          manuscriptId: null,
+          branchId: null,
+        });
+        return result;
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.authorizeReadersReport, (event, input: Parameters<RendererApi['authorizeReadersReport']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const result = await service.call('authorizeReadersReport', {
+          bookId: route.bookId,
+          taskIntentId: input.taskIntentId,
+          planEnvelopeDigest: input.planEnvelopeDigest,
+        });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '评估不属于当前图书工作台。');
+        return result;
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.createReadersReportDraft, (event, input: Parameters<RendererApi['createReadersReportDraft']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object' && typeof input.revisionId === 'string', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const result = await service.call('createReadersReportDraft', { bookId: route.bookId, revisionId: input.revisionId });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '评估不属于当前图书工作台。');
+        return result;
+      });
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.saveEvaluation, (event, input: Parameters<RendererApi['saveEvaluation']>[0]) =>
     envelope(async () => {
       const owned = requireSender(event);
@@ -3416,6 +3486,47 @@ function registerRendererHandlers(
       return service.call('inspectSeriesKnowledgeRevisions', { seriesId: input.seriesId, itemId: input.itemId, before: input.before ?? null });
     }),
   );
+  // 书系检索排除 (Issue #64, S29b): house reads of a Series' targets and revisions, the impact preview, and the commit of one
+  // revision — serialized like every other effect, since it may stop an approved Run in the same transaction.
+  ipcMain.handle(IPC_CHANNELS.inspectSeriesExclusionTargets, (event, input: ServiceOperationMap['inspectSeriesExclusionTargets']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectSeriesExclusionTargets', { seriesId: input.seriesId, kind: input.kind, after: input.after ?? null });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectSeriesExclusionHistory, (event, input: ServiceOperationMap['inspectSeriesExclusionHistory']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectSeriesExclusionHistory', { seriesId: input.seriesId, after: input.after });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.previewSeriesExclusion, (event, input: ServiceOperationMap['previewSeriesExclusion']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('previewSeriesExclusion', {
+        seriesId: input.seriesId, action: input.action, exclusionId: input.exclusionId, target: input.target, reason: input.reason,
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.recordSeriesExclusion, (event, input: ServiceOperationMap['recordSeriesExclusion']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('recordSeriesExclusion', {
+          seriesId: input.seriesId, action: input.action, exclusionId: input.exclusionId, target: input.target, reason: input.reason,
+          previewDigest: input.previewDigest,
+        });
+      });
+    }),
+  );
   // 设置 › 数据与存储 › 版本 (Issue #433, S85a): a house read, bound to no Book route.
   ipcMain.handle(IPC_CHANNELS.inspectDataVersion, (event) =>
     envelope(async () => {
@@ -3614,6 +3725,22 @@ function registerRendererHandlers(
             reason: input.reason,
             bookId: route.bookId,
           });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          return requireReviewWorkspaceOfRoute(route, result, input.reviewRunId);
+        });
+      }),
+  );
+  // 取消任务 of the current Book's Review Run a Series Retrieval Exclusion stopped (Issue #64, S29b), bound to the window's route.
+  ipcMain.handle(
+    IPC_CHANNELS.cancelReviewRun,
+    (event, input: Omit<ServiceOperationMap['cancelReviewRun']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('cancelReviewRun', { reviewRunId: input.reviewRunId, bookId: route.bookId });
           requireCurrentRouteGeneration(owned, routeGeneration);
           return requireReviewWorkspaceOfRoute(route, result, input.reviewRunId);
         });

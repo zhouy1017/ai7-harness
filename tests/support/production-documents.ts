@@ -23,6 +23,9 @@ export const PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER: ReadonlyArray<string> = [
   'captured_procedure_states',
   'captured_procedure_versions',
   'captured_procedures',
+  // 审稿意见 (revision 62; Issue #429, S81c): its drafts and Tasks.
+  'readers_report_drafts',
+  'readers_report_tasks',
   'dialogue_conversions',
   'dialogue_attempt_outcomes',
   'dialogue_harness_spans',

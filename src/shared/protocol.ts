@@ -102,6 +102,9 @@ export const IPC_CHANNELS = {
   saveEvaluation: 'ai7:j11:save-evaluation',
   prepareInitialEvaluation: 'ai7:j11:prepare-initial-evaluation',
   authorizeInitialEvaluation: 'ai7:j11:authorize-initial-evaluation',
+  prepareReadersReport: 'ai7:j11:prepare-readers-report',
+  authorizeReadersReport: 'ai7:j11:authorize-readers-report',
+  createReadersReportDraft: 'ai7:j11:create-readers-report-draft',
   inspectAnalysisFeedback: 'ai7:j11:inspect-analysis-feedback',
   recordAnalysisFeedback: 'ai7:j11:record-analysis-feedback',
   readLibraryDecisionReason: 'ai7:j15:read-library-decision-reason',
@@ -157,6 +160,11 @@ export const IPC_CHANNELS = {
   inspectSeriesKnowledgeItems: 'ai7:j13:inspect-series-knowledge-items',
   inspectSeriesKnowledgeCandidates: 'ai7:j13:inspect-series-knowledge-candidates',
   inspectSeriesKnowledgeRevisions: 'ai7:j13:inspect-series-knowledge-revisions',
+  inspectSeriesExclusionTargets: 'ai7:j13:inspect-series-exclusion-targets',
+  inspectSeriesExclusionHistory: 'ai7:j13:inspect-series-exclusion-history',
+  previewSeriesExclusion: 'ai7:j13:preview-series-exclusion',
+  recordSeriesExclusion: 'ai7:j13:record-series-exclusion',
+  cancelReviewRun: 'ai7:j13:cancel-review-run',
   inspectDataVersion: 'ai7:j12:inspect-data-version',
   chooseDatabaseExportDestination: 'ai7:j12:choose-database-export-destination',
   approveDatabaseExport: 'ai7:j12:approve-database-export',
@@ -2458,6 +2466,9 @@ export const FACTUAL_REVIEW_ASSURANCE_STATEMENT =
 /** A review category's: findings are located, never decided — the editor disposes of each (V2-UX-REV-003). */
 export const REVIEW_CATEGORY_ASSURANCE_STATEMENT =
   '仅为模型按审阅依据列出的发现与其精确引文位置；是否采纳由编辑逐条决定，不构成事实判定、合规结论或稿件变更。' as const;
+/** 审稿意见 (Issue #429, S81c): a draft from the record and what was read, never a delivery (V2-UX-EVAL-013). */
+export const READERS_REPORT_ASSURANCE_STATEMENT =
+  '审稿意见是模型依据定稿的评估记录与所读稿件写成的草稿，由编辑在稿件编辑面上修改；它不会交付或发送，也不改变评估记录。' as const;
 /** AI7's 初评 (Issue #429, S81b1): scores to score against, never the editor's — the record keeps theirs (V2-UX-EVAL-006). */
 export const INITIAL_EVALUATION_ASSURANCE_STATEMENT =
   'AI7 初评是模型据所读稿件给出的初步分数与评语，只作编辑打分的参考；记录保存的是编辑的评分，结论由编辑选定。' as const;
@@ -2465,7 +2476,8 @@ export type AnalysisAssuranceStatement =
   | typeof BASELINE_ANALYSIS_ASSURANCE_STATEMENT
   | typeof FACTUAL_REVIEW_ASSURANCE_STATEMENT
   | typeof REVIEW_CATEGORY_ASSURANCE_STATEMENT
-  | typeof INITIAL_EVALUATION_ASSURANCE_STATEMENT;
+  | typeof INITIAL_EVALUATION_ASSURANCE_STATEMENT
+  | typeof READERS_REPORT_ASSURANCE_STATEMENT;
 
 export const BASELINE_ANALYSIS_KIND = 'baseline-manuscript-analysis' as const;
 export const BASELINE_ANALYSIS_CONTRACT_VERSION = 'ai7.baseline-manuscript-analysis/1' as const;
@@ -2559,6 +2571,60 @@ export const INITIAL_EVALUATION_MODE_MEANINGS = {
 } as const satisfies Record<InitialEvaluationTaskMode, string>;
 
 /**
+ * 审稿意见 (Issue #429, plan slice S81c; V2-UX-EVAL-013; editor-surfaces §5): the reader's report kind, on the same real path
+ * as the others, read under its own exact-versioned contract `ai7.readers-report/1`. It is drafted from one finalized
+ * Evaluation Record under one of the two V1 templates: each Analysis Unit is read for the passages the report can point to —
+ * what bears out a strength, shows a problem, or where a revision applies — each citing its blocks; one book-level synthesis
+ * then writes the five sections from the record and those passages. The draft is an Editorial Artifact the editor edits;
+ * nothing of it is delivered or sent.
+ */
+export const READERS_REPORT_KIND = 'readers-report' as const;
+export const READERS_REPORT_CONTRACT_VERSION = 'ai7.readers-report/1' as const;
+export const READERS_REPORT_EXPECTED_OUTCOME = '审稿意见草稿结果集修订版（审稿意见契约 v1）' as const;
+/** The first draft of a Book's 审稿意见, and every later one: the whole manuscript read again, nothing carried over. */
+export type ReadersReportTaskMode = 'readers-report-first' | 'readers-report-again';
+export const READERS_REPORT_TASK_MODES: readonly ReadersReportTaskMode[] = ['readers-report-first', 'readers-report-again'];
+export const READERS_REPORT_UPDATE_MODES: readonly ReadersReportTaskMode[] = ['readers-report-again'];
+export const READERS_REPORT_MODE_GOALS = {
+  'readers-report-first': '从定稿的评估记录起草审稿意见：逐单元找出可以引用的段落并引用内容块，再按所选模板写出总体评价、主要优点、主要问题、修改建议与结论，形成结果集修订版。',
+  'readers-report-again': '重新起草审稿意见：按当前覆盖清单重读每个分析单元，不沿用以前的结果，按所选模板重新写出五个部分，追加一个结果集修订版。',
+} as const satisfies Record<ReadersReportTaskMode, string>;
+export type ReadersReportGoal = (typeof READERS_REPORT_MODE_GOALS)[ReadersReportTaskMode];
+export const READERS_REPORT_MODE_LABELS = {
+  'readers-report-first': '起草审稿意见',
+  'readers-report-again': '重新起草审稿意见',
+} as const satisfies Record<ReadersReportTaskMode, string>;
+export const READERS_REPORT_MODE_MEANINGS = {
+  'readers-report-first': '对固定的任务输入修订版派生覆盖清单并逐单元执行审稿意见契约 v1，再做一次全书综合，形成首个结果集修订版。',
+  'readers-report-again': '绕过全部既有单元结果，按当前覆盖清单重读每个分析单元并重新做全书综合，追加一个结果集修订版。',
+} as const satisfies Record<ReadersReportTaskMode, string>;
+/** The two V1 templates (EVAL-013): for the author, or for the editorial board and its topic meeting. */
+export type ReadersReportTemplate = 'author' | 'editorial';
+export const READERS_REPORT_TEMPLATES: readonly ReadersReportTemplate[] = ['author', 'editorial'];
+export const READERS_REPORT_TEMPLATE_LABELS: Readonly<Record<ReadersReportTemplate, string>> = {
+  author: '给作者的修改意见',
+  editorial: '给编辑部 / 选题会的审读报告',
+};
+/** The five sections every 审稿意见 is structured in (EVAL-013), in their order. */
+export type ReadersReportSectionId = 'overall' | 'strengths' | 'problems' | 'suggestions' | 'conclusion';
+export const READERS_REPORT_SECTIONS: readonly ReadersReportSectionId[] = ['overall', 'strengths', 'problems', 'suggestions', 'conclusion'];
+export const READERS_REPORT_SECTION_LABELS: Readonly<Record<ReadersReportSectionId, string>> = {
+  overall: '总体评价',
+  strengths: '主要优点',
+  problems: '主要问题',
+  suggestions: '修改建议',
+  conclusion: '结论',
+};
+/**
+ * What the plan says when the house holds no 审稿意见 among its 范例 (the Owner's answer of 2026-10-07): the draft is written
+ * without one, and the plan says so.
+ */
+export const READERS_REPORT_NO_EXEMPLAR = '本社暂无审稿意见范例，本次不参考范例' as const;
+/** Under a live scope no Provider Processing policy names 审稿意见 yet: nothing is prepared or started there. */
+export const READERS_REPORT_LIVE_UNAVAILABLE =
+  '审稿意见暂不可用：当前的模型处理策略没有写明审稿意见可以发送给模型，在这个运行范围下不能准备或开始起草。' as const;
+
+/**
  * The review-category kind family (Issue #417, plan slice S69): one analysis kind per Review Category,
  * `editorial-review/<categoryId>`, all read under the one exact-versioned contract
  * `ai7.editorial-review/1`. The categories themselves are configuration (V2-UX-REV-002: a house may
@@ -2647,9 +2713,10 @@ export function reviewCategoryExpectedOutcome(label: string): string {
 }
 
 /** Every analysis kind a Book may hold, and every Task mode any of them declares. */
-export type AnalysisKindId = typeof BASELINE_ANALYSIS_KIND | typeof FACTUAL_REVIEW_KIND | ReviewCategoryKindId | typeof INITIAL_EVALUATION_KIND;
-export type AnalysisTaskMode = BaselineAnalysisTaskMode | FactualReviewTaskMode | ReviewCategoryTaskMode | InitialEvaluationTaskMode;
-export type AnalysisGoal = BaselineAnalysisGoal | FactualReviewGoal | ReviewCategoryGoal | InitialEvaluationGoal;
+export type AnalysisKindId = typeof BASELINE_ANALYSIS_KIND | typeof FACTUAL_REVIEW_KIND | ReviewCategoryKindId | typeof INITIAL_EVALUATION_KIND |
+  typeof READERS_REPORT_KIND;
+export type AnalysisTaskMode = BaselineAnalysisTaskMode | FactualReviewTaskMode | ReviewCategoryTaskMode | InitialEvaluationTaskMode | ReadersReportTaskMode;
+export type AnalysisGoal = BaselineAnalysisGoal | FactualReviewGoal | ReviewCategoryGoal | InitialEvaluationGoal | ReadersReportGoal;
 
 /** An explicit editor choice over exact block positions of the Task Input revision (inclusive). */
 export interface BaselineAnalysisSelectedRange {
@@ -4005,6 +4072,120 @@ export interface InitialEvaluationProjection extends Omit<
   inspectedRevision: null | { revision: InitialEvaluationResultSetRevisionProjection; current: boolean; readOnly: true };
 }
 
+// ---- 审稿意见 (Issue #429, plan slice S81c; V2-UX-EVAL-013) ------------------------------------------------------------
+
+/** What a passage the report can point to bears out: a strength, a problem, or where a revision applies. */
+export type ReadersReportPassageKind = 'strength' | 'problem' | 'suggestion';
+export const READERS_REPORT_PASSAGE_KINDS: readonly ReadersReportPassageKind[] = ['strength', 'problem', 'suggestion'];
+
+/** One passage AI7 noted in one reading range for the report, with the blocks it rests on. */
+export interface ReadersReportPassageProjection {
+  unitOrdinal: number;
+  kind: ReadersReportPassageKind;
+  note: string;
+  blockIds: ReadonlyArray<string>;
+}
+
+/** The five sections as the book-level synthesis wrote them: two paragraphs and three lists. */
+export interface ReadersReportSectionsProjection {
+  overall: string;
+  strengths: ReadonlyArray<string>;
+  problems: ReadonlyArray<string>;
+  suggestions: ReadonlyArray<string>;
+  conclusion: string;
+}
+
+/** The reader's report kind's own component of a Result Set Revision. */
+export interface ReadersReportResultProjection {
+  template: ReadersReportTemplate;
+  /** The house's 审稿意见 the draft was seeded with, and what the plan said of them. */
+  exemplars: { count: number; statement: string };
+  passages: ReadonlyArray<ReadersReportPassageProjection>;
+  /** `null` when the book-level synthesis did not close: AI7 then wrote no draft. */
+  sections: ReadersReportSectionsProjection | null;
+  synthesis: { state: 'closed' | 'gap' | 'not-run'; reason: string | null };
+}
+
+export interface ReadersReportRevisionUpdateProjection extends Omit<ReviewCategoryRevisionUpdateProjection, 'mode'> {
+  mode: ReadersReportTaskMode;
+}
+
+export type ReadersReportUnitProjection =
+  | {
+      unitOrdinal: number;
+      state: 'closed';
+      requestDigest: string;
+      responseDigest: string;
+      usage: { inputTokens: number; outputTokens: number } | null;
+      lineage: ReviewCategoryUnitLineage;
+      passages: ReadonlyArray<{ kind: ReadersReportPassageKind; note: string; blockOrdinals: ReadonlyArray<number> }>;
+    }
+  | { unitOrdinal: number; state: 'gap'; requestDigest: string; lineage: ReviewCategoryUnitLineage; gap: AnalysisGapProjection };
+
+export interface ReadersReportResultSetRevisionProjection extends Omit<
+  ReviewCategoryResultSetRevisionProjection,
+  'contractVersion' | 'update' | 'category' | 'findings' | 'excluded' | 'findingCounts' | 'units'
+> {
+  contractVersion: typeof READERS_REPORT_CONTRACT_VERSION;
+  update: ReadersReportRevisionUpdateProjection;
+  readersReport: ReadersReportResultProjection;
+  units: ReadonlyArray<ReadersReportUnitProjection>;
+}
+
+export interface ReadersReportUpdateProjection extends Omit<ReviewCategoryUpdateProjection, 'mode'> {
+  mode: 'readers-report-again';
+}
+
+export interface ReadersReportUpdateControlsProjection extends Omit<BaselineAnalysisUpdateControlsProjection, 'actions'> {
+  actions: { 'readers-report-again': Omit<ReviewCategoryUpdateActionProjection, 'mode'> & { mode: 'readers-report-again' } };
+}
+
+export interface ReadersReportHistoryEntryProjection extends Omit<BaselineAnalysisHistoryEntryProjection, 'mode' | 'contractVersion' | 'counts'> {
+  mode: ReadersReportTaskMode;
+  contractVersion: typeof READERS_REPORT_CONTRACT_VERSION;
+  counts: ReviewScopePlanCounts;
+}
+
+export interface ReadersReportHistoryProjection {
+  resultSetId: string;
+  kind: typeof READERS_REPORT_KIND;
+  createdAt: string;
+  latestOrdinal: number;
+  entries: ReadonlyArray<ReadersReportHistoryEntryProjection>;
+}
+
+/** The reader's report kind's Task projection: a member of the analysis projection union, discriminated on `kind`. */
+export interface ReadersReportProjection extends Omit<
+  BaselineAnalysisProjection,
+  'kind' | 'contractVersion' | 'taskIntent' | 'executionPlan' | 'resultSetRevision' | 'update' | 'updateControls' | 'history' | 'inspectedRevision'
+> {
+  kind: typeof READERS_REPORT_KIND;
+  contractVersion: typeof READERS_REPORT_CONTRACT_VERSION;
+  taskIntent: null | {
+    taskIntentId: string;
+    goal: ReadersReportGoal;
+    expectedOutcome: typeof READERS_REPORT_EXPECTED_OUTCOME;
+    createdAt: string;
+    mode: ReadersReportTaskMode;
+    modeLabel: string;
+  };
+  executionPlan: null | {
+    steps: ReadonlyArray<string>;
+    effects: readonly [];
+    unitCount: number;
+    recomputedUnitCount?: number;
+    reusedUnitCount?: number;
+    unreviewedUnitCount?: number;
+    reducerStages: readonly ['unit-validation', 'cross-unit-reduction', 'book-synthesis'];
+    stopCondition: string;
+  };
+  resultSetRevision: null | ReadersReportResultSetRevisionProjection;
+  update: null | ReadersReportUpdateProjection;
+  updateControls: null | ReadersReportUpdateControlsProjection;
+  history: null | ReadersReportHistoryProjection;
+  inspectedRevision: null | { revision: ReadersReportResultSetRevisionProjection; current: boolean; readOnly: true };
+}
+
 // ---- 审阅记录 Review Runs (Issue #417, plan slice S69) ---------------------------------------------
 
 /**
@@ -4065,8 +4246,10 @@ export const REVIEW_COVERAGE_STATE_LABELS = {
 /**
  * A Review Run as a whole. `partial` is a Run that stopped with some categories finished and others not
  * — after a restart, `canContinue` says whether 继续审阅 would pick up the categories never finished.
+ * `scope-changed` is a Run a Series Retrieval Exclusion stopped before a further read (Issue #64, S29b; SER-024): its only ways
+ * on are 修改计划并重新授权 and 取消任务; `cancelled` is such a Run the editor then cancelled.
  */
-export type ReviewRunState = 'prepared' | 'running' | 'settled' | 'partial' | 'failed';
+export type ReviewRunState = 'prepared' | 'running' | 'settled' | 'partial' | 'failed' | 'scope-changed' | 'cancelled';
 
 /**
  * One category inside a Review Run. `settled` means its findings are on the manuscript and actionable
@@ -4158,6 +4341,8 @@ export interface ReviewRunSummaryProjection {
   findingCounts: ReviewFindingCountsProjection;
   /** The latest 审阅报告 version; `null` before one is generated. */
   reportVersion: number | null;
+  /** `此结果使用的材料后来被排除` when a result of the Run used Series material later excluded (Issue #64, S29b; SER-026). */
+  historicalMarker: string | null;
 }
 
 /** What a category's Task plan freezes, as the plan screen states it before the one approval. */
@@ -4229,6 +4414,11 @@ export interface ReviewFindingProjection {
   markStatus: 'open' | 'resolved' | 'applied' | 'removed' | 'converted' | null;
   anchorState: 'exact' | 'drifted' | 'detached' | 'anchor-changed';
   ignoreReason: string | null;
+  /**
+   * `此结果使用的材料后来被排除` when the finding's category read Series material later excluded (Issue #64, S29b; SER-026):
+   * history, never a verdict on the finding, which stays exactly as it was.
+   */
+  historicalMarker: string | null;
 }
 
 /** The versioned 审阅报告 (REV-009) exactly as recorded, read back with the digest of its canonical JSON. */
@@ -4326,6 +4516,11 @@ export interface ReviewRunProjection {
   findingCounts: ReviewFindingCountsProjection;
   report: ReviewReportProjection | null;
   reportVersions: ReadonlyArray<{ reportId: string; version: number; generatedAt: string; digest: string }>;
+  /**
+   * The Historically Affected Result Marker (Issue #64, S29b; SER-026): the result the Run formed used Series material that was
+   * excluded afterwards. The Run, its findings and its reports are never rewritten; this says so beside them.
+   */
+  historicalMarker: null | { label: typeof HISTORICALLY_AFFECTED_RESULT_MARKER | typeof HISTORICAL_MARKER_UNVERIFIABLE; detail: string };
   /** The Captured Procedure version the Run was prepared from, pinned (Issue #65, S30; ADR 0087 §4); `null` for one chosen by hand. */
   procedure: ReviewRunProcedureProjection | null;
   /** Whether `将以上工序保存为可复用工序` is offered on this Run, and why not (ADR 0087 §2). */
@@ -4437,6 +4632,12 @@ export interface GenerateReviewReportInput {
   reviewRunId: string;
 }
 
+/** 取消任务 of a Review Run a Series Retrieval Exclusion stopped (Issue #64, S29b; SER-024). */
+export interface CancelReviewRunInput {
+  bookId: string;
+  reviewRunId: string;
+}
+
 /** 查看任务 on a Mark Card: which Review Run a produced mark came from, asked within the route's Book. */
 export interface InspectReviewFindingOfMarkInput {
   bookId: string;
@@ -4472,8 +4673,8 @@ export interface ReviewFindingOfMarkProjection {
  * slice that brings its ledger; nothing here is an authority record of its own. AI7's 初评 (Issue #429, S81b1) joins them
  * with its own ledger.
  */
-export type TaskPlanKind = 'fixed-task' | 'baseline-analysis' | 'review-run' | 'initial-evaluation';
-export const TASK_PLAN_KINDS: readonly TaskPlanKind[] = ['fixed-task', 'baseline-analysis', 'review-run', 'initial-evaluation'];
+export type TaskPlanKind = 'fixed-task' | 'baseline-analysis' | 'review-run' | 'initial-evaluation' | 'readers-report';
+export const TASK_PLAN_KINDS: readonly TaskPlanKind[] = ['fixed-task', 'baseline-analysis', 'review-run', 'initial-evaluation', 'readers-report'];
 
 /** Which plan the drawer reads. The Book is always the route's; the renderer never names it. */
 export interface InspectTaskPlanInput {
@@ -5754,6 +5955,42 @@ export interface EvaluationWorkspaceProjection {
     | { readonly allowed: false; readonly reason: string };
   /** AI7's 初评 of the Book (Issue #429, S81b1). */
   readonly initial: EvaluationInitialProjection;
+  /** 审稿意见 of the Book (Issue #429, S81c). */
+  readonly readersReport: EvaluationReadersReportProjection;
+}
+
+/** One template's 审稿意见 on ②C (Issue #429, S81c; EVAL-013): whether it can be drafted, its result, and its draft. */
+export interface EvaluationReadersReportTemplateProjection {
+  readonly template: ReadersReportTemplate;
+  readonly label: string;
+  /** 起草, or why it cannot be drafted now. */
+  readonly prepare: { readonly allowed: true; readonly mode: ReadersReportTaskMode } | { readonly allowed: false; readonly reason: string };
+  /** The latest result of this template whose draft has not been opened yet: 打开草稿 makes it the draft document. */
+  readonly drafted: null | { readonly revisionId: string; readonly recordOrdinal: number; readonly createdAt: string };
+  /** The template's draft, once made: an Editorial Artifact edited on the manuscript surface, a draft and never a delivery. */
+  readonly draft: null | {
+    readonly typeId: string;
+    readonly typeLabel: string;
+    /** The 定稿 version it was drafted from. */
+    readonly recordOrdinal: number;
+    readonly document: ProductionDocumentProjection;
+  };
+}
+
+/** 审稿意见 on ②C (Issue #429, S81c; EVAL-013): drafted from the Book's latest 定稿 version, under one of two templates. */
+export interface EvaluationReadersReportProjection {
+  /** The 定稿 version a new 审稿意见 drafts from: the latest; `null` while there is none. */
+  readonly basis: null | { readonly recordId: string; readonly ordinal: number; readonly revisionLabel: string; readonly finalizedAt: string };
+  /** The house's 审稿意见 among its 范例, and what a plan says of them. */
+  readonly exemplars: { readonly count: number; readonly statement: string };
+  /** The Book's latest 审稿意见 Task, which the Task Drawer opens; `null` before the first is prepared. */
+  readonly task: null | {
+    readonly taskIntentId: string;
+    readonly template: ReadersReportTemplate;
+    readonly state: BaselineAnalysisProjection['state'];
+    readonly label: string;
+  };
+  readonly templates: ReadonlyArray<EvaluationReadersReportTemplateProjection>;
 }
 
 /** 开始评估 or 重新评估: alone, or from AI7's latest 初评 (Issue #429, S81b1). */
@@ -6474,6 +6711,8 @@ export interface SeriesProjection {
   readonly historyCount: number;
   readonly historyNext: SeriesHistoryCursor | null;
   readonly knowledge: SeriesKnowledgeProjection;
+  /** 书系检索排除 (Issue #64, S29b): the exclusions in force and their revisions, newest first. */
+  readonly exclusions: SeriesExclusionsProjection;
 }
 
 /** A further page of a Series' members (`更多成员…`). */
@@ -6888,6 +7127,179 @@ export interface SeriesMembershipChangeResultProjection {
   readonly change: SeriesMembershipChangeProjection;
 }
 
+// ---- 书系检索排除 (Issue #64, plan slice S29b; V2-UX-SER-020 to SER-029; ADR 0037) --------------------------------------
+
+/**
+ * What a Series Retrieval Exclusion may name (SER-020): one exact Series Knowledge Item (its current and later revisions), one
+ * stable knowledge class (its items now and later), one member Book (the Series Knowledge taken from its manuscript, now and
+ * later), or one Source Version of a member Book — which no Series read reaches yet, so it is recorded and read by nothing.
+ */
+export const SERIES_EXCLUSION_TARGET_KINDS = ['knowledge-item', 'knowledge-class', 'book', 'source-version'] as const;
+export type SeriesExclusionTargetKind = (typeof SERIES_EXCLUSION_TARGET_KINDS)[number];
+export const SERIES_EXCLUSION_TARGET_KIND_LABELS: Readonly<Record<SeriesExclusionTargetKind, string>> = {
+  'knowledge-item': '书系知识条目',
+  'knowledge-class': '知识类别',
+  book: '成员图书',
+  'source-version': '来源版本',
+};
+/** `添加检索排除`, `修改检索排除` (its reason) and `停止此排除`: each appends one revision, never edits one. */
+export const SERIES_EXCLUSION_ACTIONS = ['add', 'change', 'end'] as const;
+export type SeriesExclusionAction = (typeof SERIES_EXCLUSION_ACTIONS)[number];
+export type SeriesExclusionActionLabel = '添加检索排除' | '修改检索排除' | '停止此排除';
+export const SERIES_EXCLUSION_ACTION_LABELS: Readonly<Record<SeriesExclusionAction, SeriesExclusionActionLabel>> = {
+  add: '添加检索排除',
+  change: '修改检索排除',
+  end: '停止此排除',
+};
+/** An exclusion's optional reason, in characters once NFC-normalized and trimmed. */
+export const MAX_SERIES_EXCLUSION_REASON_CHARACTERS = 200;
+/** How many exclusions one Series holds in force at once; every one is listed on its page. */
+export const MAX_SERIES_EXCLUSIONS = 100;
+export const MAX_SERIES_EXCLUSION_HISTORY_PAGE = 20;
+export const MAX_SERIES_EXCLUSION_TARGETS_PAGE = 50;
+/** The state an affected Run stops in, whose only ways on are `修改计划并重新授权` and `取消任务` (SER-024). */
+export const SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL = '书系检索范围已变化 · 需要重新确认计划' as const;
+/** The Historically Affected Result Marker (SER-026). */
+export const HISTORICALLY_AFFECTED_RESULT_MARKER = '此结果使用的材料后来被排除' as const;
+/** The marker where the exclusion ledger no longer reads (Issue #64 review): history that cannot be checked says so. */
+export const HISTORICAL_MARKER_UNVERIFIABLE = '此结果使用的材料是否后来被排除：无法核对' as const;
+
+/** What an exclusion names: an item, a class key, a Book or a Source Version identity. */
+export interface SeriesExclusionTargetInput {
+  readonly kind: SeriesExclusionTargetKind;
+  readonly id: string;
+}
+
+/** A target in the editor's words: what it is, and how it keeps applying (SER-021). */
+export interface SeriesExclusionTargetProjection {
+  readonly kind: SeriesExclusionTargetKind;
+  readonly id: string;
+  /** `书系知识条目「海边小城」（地点）`, `知识类别「地点」`, `成员图书《星河之三》`, `来源版本「….docx」（《…》）`. */
+  readonly label: string;
+  /** Continuing or fixed (SER-021): what later material it also covers, or that it covers this one alone. */
+  readonly continuing: string;
+  /** Whether any Series read reads this kind of material yet: never for a Source Version (SER-028), which none reaches. */
+  readonly read: boolean;
+}
+
+/** Where the next page of targets starts: after this one, in the kind's own order. */
+export interface SeriesExclusionTargetsCursor {
+  readonly key: string;
+  readonly id: string;
+}
+
+export interface InspectSeriesExclusionTargetsInput {
+  readonly seriesId: string;
+  readonly kind: SeriesExclusionTargetKind;
+  readonly after: SeriesExclusionTargetsCursor | null;
+}
+
+/** A page of what `添加检索排除…` may name, each saying whether an exclusion in force names it already. */
+export interface SeriesExclusionTargetsProjection {
+  readonly kind: SeriesExclusionTargetKind;
+  readonly targets: ReadonlyArray<SeriesExclusionTargetProjection & { readonly excluded: boolean }>;
+  readonly nextCursor: SeriesExclusionTargetsCursor | null;
+}
+
+/** One of the impact preview's four groups (SER-022): what changes, and what stays as it is. */
+export interface SeriesExclusionImpactGroupProjection {
+  readonly key: 'future-reads' | 'runs' | 'history' | 'unaffected';
+  readonly title: '今后的检索' | '已排队、已授权或正在运行的任务' | '已完成的历史' | '不受影响的授权';
+  readonly changes: ReadonlyArray<string>;
+  readonly unchanged: ReadonlyArray<string>;
+}
+
+/** One appended revision of an exclusion: what it did, why, who, when, and the impact it showed. */
+export interface SeriesExclusionRevisionProjection {
+  readonly revisionId: string;
+  readonly exclusionId: string;
+  readonly revision: number;
+  readonly action: SeriesExclusionAction;
+  readonly actionLabel: SeriesExclusionActionLabel;
+  readonly target: SeriesExclusionTargetProjection;
+  readonly reason: string;
+  readonly actor: '本机编辑';
+  readonly recordedAt: string;
+  readonly impact: ReadonlyArray<SeriesExclusionImpactGroupProjection>;
+}
+
+/** An exclusion in force now: its target, its reason, and since when it applies. */
+export interface SeriesExclusionProjection {
+  readonly exclusionId: string;
+  readonly target: SeriesExclusionTargetProjection;
+  readonly reason: string;
+  /** When its first revision took effect: the instant it was recorded. */
+  readonly effectiveSince: string;
+  readonly revision: number;
+}
+
+/** Where the next page of exclusion revisions starts: after this one, newest first. */
+export interface SeriesExclusionHistoryCursor {
+  readonly recordedAt: string;
+  readonly revisionId: string;
+}
+
+/** A Series' 检索排除: every exclusion in force, and its revisions newest first, a page at a time. */
+export interface SeriesExclusionsProjection {
+  readonly effective: ReadonlyArray<SeriesExclusionProjection>;
+  readonly history: ReadonlyArray<SeriesExclusionRevisionProjection>;
+  readonly historyCount: number;
+  readonly historyNext: SeriesExclusionHistoryCursor | null;
+}
+
+export interface InspectSeriesExclusionHistoryInput {
+  readonly seriesId: string;
+  readonly after: SeriesExclusionHistoryCursor;
+}
+
+export interface SeriesExclusionHistoryPageProjection {
+  readonly history: ReadonlyArray<SeriesExclusionRevisionProjection>;
+  readonly nextCursor: SeriesExclusionHistoryCursor | null;
+}
+
+/** `添加检索排除` names a target; `修改检索排除` and `停止此排除` name the exclusion they supersede. */
+export interface PreviewSeriesExclusionInput {
+  readonly seriesId: string;
+  readonly action: SeriesExclusionAction;
+  readonly exclusionId: string | null;
+  readonly target: SeriesExclusionTargetInput | null;
+  readonly reason: string;
+}
+
+/** 书系检索排除影响预览 (SER-021, SER-022): exact target, scope, effective time, reason and actor, then the four groups. */
+export interface SeriesExclusionPreviewProjection {
+  readonly seriesId: string;
+  readonly seriesTitle: string;
+  readonly action: SeriesExclusionAction;
+  readonly actionLabel: SeriesExclusionActionLabel;
+  readonly exclusionId: string | null;
+  readonly target: SeriesExclusionTargetProjection;
+  /** The reason as it would be recorded: empty when none is given. */
+  readonly reason: string;
+  /** `只限书系「…」的书系检索`: the one retrieval path it restricts (SER-029). */
+  readonly scope: string;
+  /** `记录后立即生效`: the exclusion is the current-read guard from the instant it is recorded (SER-023). */
+  readonly effectiveTime: string;
+  readonly actor: '本机编辑';
+  readonly groups: ReadonlyArray<SeriesExclusionImpactGroupProjection>;
+  /** What the commit names, so a preview the exclusions, the knowledge or the Runs moved past is refused. */
+  readonly previewDigest: string;
+}
+
+export interface RecordSeriesExclusionInput extends PreviewSeriesExclusionInput {
+  readonly previewDigest: string;
+}
+
+export interface SeriesExclusionResultProjection {
+  readonly exclusionId: string;
+  readonly revisionId: string;
+  readonly completionLabel: '书系检索排除已生效' | '检索排除已修改' | '已停止此排除';
+  /** How many authorized Runs it stopped at once, before their next read. */
+  readonly stoppedRuns: number;
+  /** The revision it appended: the answer carries it alone, and the page reads the Series again. */
+  readonly revision: SeriesExclusionRevisionProjection;
+}
+
 /**
  * A Book's side of 书系 (SER-009): the Series it is in now, by name — at most `MAX_BOOK_SERIES_MEMBERSHIPS`, with how many in
  * all — and the first page of its membership changes, newest first, with how many there are and where the next page starts.
@@ -6939,7 +7351,8 @@ export interface QuickStartBaselineAnalysisResult {
 }
 
 /** Every analysis projection, discriminated on `kind`. */
-export type AnalysisProjection = BaselineAnalysisProjection | FactualReviewProjection | ReviewCategoryProjection | InitialEvaluationProjection;
+export type AnalysisProjection = BaselineAnalysisProjection | FactualReviewProjection | ReviewCategoryProjection | InitialEvaluationProjection |
+  ReadersReportProjection;
 
 export interface HistoricalRevisionProjection {
   mode: 'historical-revision';
@@ -8829,7 +9242,7 @@ export interface ServiceJobProjection {
    */
   kind: 'search' | 'replacement' | 'reimport-preparation' | 'reimport-resolution' | 'reimport-commit' |
     'task-authorization-preparation' | 'baseline-analysis-preparation' | 'review-run-preparation' | 'package-export' |
-    'initial-evaluation-preparation';
+    'initial-evaluation-preparation' | 'readers-report-preparation';
   state: 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
   progress: { completed: number; total: number; label: string };
   result: SearchSummaryProjection | ReplacementPreviewProjection | ReviewBeforeManuscriptReimportProjection |
@@ -9359,6 +9772,24 @@ export interface ServiceOperationMap {
     input: { bookId: string; taskIntentId: string; planEnvelopeDigest: string };
     output: EvaluationWorkspaceProjection;
   };
+  /**
+   * 起草审稿意见 (Issue #429, S81c): the reader's report kind's Task, drafted from the Book's latest 定稿 version under one
+   * template, prepared as one cooperative job. The completed job's result is 评估 with the prepared Task named.
+   */
+  prepareReadersReport: {
+    input: { bookId: string; template: ReadersReportTemplate };
+    output: ServiceJobProjection;
+  };
+  /** 开始任务 in the drawer's bar for 审稿意见. */
+  authorizeReadersReport: {
+    input: { bookId: string; taskIntentId: string; planEnvelopeDigest: string };
+    output: EvaluationWorkspaceProjection;
+  };
+  /** 打开草稿: one drafted 审稿意见 result made the template's draft document, once; 评估 then names it. */
+  createReadersReportDraft: {
+    input: { bookId: string; revisionId: string };
+    output: EvaluationWorkspaceProjection;
+  };
   /** ②A 分析反馈 (Issue #94, S38): one Result Set Revision's items with their latest judgments, and the Book's metric. */
   inspectAnalysisFeedback: {
     input: { bookId: string; revisionId: string };
@@ -9506,6 +9937,13 @@ export interface ServiceOperationMap {
   inspectSeriesKnowledgeCandidates: { input: { seriesId: string; after: SeriesKnowledgeCandidatesCursor | null }; output: SeriesKnowledgeCandidatesPageProjection };
   inspectSeriesKnowledgeConflicts: { input: { seriesId: string; itemId: string; revisionId: string; after: number }; output: SeriesKnowledgeConflictsProjection };
   inspectSeriesKnowledgeRevisions: { input: { seriesId: string; itemId: string; before: number | null }; output: SeriesKnowledgeRevisionsProjection };
+  // 书系检索排除 (Issue #64, S29b): the targets a Series may exclude, its revisions' further pages, the impact preview and the
+  // commit of one revision; and 取消任务 of a Review Run an exclusion stopped.
+  inspectSeriesExclusionTargets: { input: InspectSeriesExclusionTargetsInput; output: SeriesExclusionTargetsProjection };
+  inspectSeriesExclusionHistory: { input: InspectSeriesExclusionHistoryInput; output: SeriesExclusionHistoryPageProjection };
+  previewSeriesExclusion: { input: PreviewSeriesExclusionInput; output: SeriesExclusionPreviewProjection };
+  recordSeriesExclusion: { input: RecordSeriesExclusionInput; output: SeriesExclusionResultProjection };
+  cancelReviewRun: { input: CancelReviewRunInput; output: ReviewWorkspaceProjection };
   inspectDataVersion: { input: Record<string, never>; output: DataVersionProjection };
   /**
    * 导出数据库 (Issue #434, S86a): the destination the Save dialog answered becomes one preparation of the package, packed off
@@ -9851,6 +10289,12 @@ export interface RendererApi {
   prepareInitialEvaluation(): Promise<ServiceJobProjection>;
   /** The Task Drawer bar's 开始任务 for AI7's 初评. */
   authorizeInitialEvaluation(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<EvaluationWorkspaceProjection>;
+  /** 起草审稿意见 (Issue #429, S81c): a `readers-report-preparation` job; its plan opens in the Task Drawer. */
+  prepareReadersReport(input: { template: ReadersReportTemplate }): Promise<ServiceJobProjection>;
+  /** The Task Drawer bar's 开始任务 for 审稿意见. */
+  authorizeReadersReport(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<EvaluationWorkspaceProjection>;
+  /** 打开草稿: the drafted result made the template's draft document; the renderer then opens it on the editing surface. */
+  createReadersReportDraft(input: { revisionId: string }): Promise<EvaluationWorkspaceProjection>;
   /** ②A 分析反馈 of the Book the window is showing (Issue #94, S38); the renderer never names the Book. */
   inspectAnalysisFeedback(input: { revisionId: string }): Promise<AnalysisFeedbackProjection>;
   recordAnalysisFeedback(input: RecordAnalysisFeedbackInput): Promise<AnalysisFeedbackProjection>;
@@ -9919,6 +10363,12 @@ export interface RendererApi {
   inspectSeriesKnowledgeCandidates(input: { seriesId: string; after: SeriesKnowledgeCandidatesCursor | null }): Promise<SeriesKnowledgeCandidatesPageProjection>;
   inspectSeriesKnowledgeConflicts(input: { seriesId: string; itemId: string; revisionId: string; after: number }): Promise<SeriesKnowledgeConflictsProjection>;
   inspectSeriesKnowledgeRevisions(input: { seriesId: string; itemId: string; before: number | null }): Promise<SeriesKnowledgeRevisionsProjection>;
+  inspectSeriesExclusionTargets(input: InspectSeriesExclusionTargetsInput): Promise<SeriesExclusionTargetsProjection>;
+  inspectSeriesExclusionHistory(input: InspectSeriesExclusionHistoryInput): Promise<SeriesExclusionHistoryPageProjection>;
+  previewSeriesExclusion(input: PreviewSeriesExclusionInput): Promise<SeriesExclusionPreviewProjection>;
+  recordSeriesExclusion(input: RecordSeriesExclusionInput): Promise<SeriesExclusionResultProjection>;
+  /** 取消任务 of the current Book's Review Run a Series Retrieval Exclusion stopped (Issue #64, S29b). */
+  cancelReviewRun(input: Omit<CancelReviewRunInput, 'bookId'>): Promise<ReviewWorkspaceProjection>;
   inspectDataVersion(): Promise<DataVersionProjection>;
   /**
    * 导出数据库… (Issue #434, S86a): the platform's Save dialog, then the preparation of the package for the chosen file — begun,

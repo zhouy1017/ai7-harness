@@ -1,12 +1,11 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { spawn } from 'node:child_process';
-import { lstat, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises';
+import { lstat, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createServer } from 'node:http';
-import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
@@ -19,10 +18,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
-const CREDENTIAL_CLEANUP_TIMEOUT_MS = 15_000;
-const FORCE_EXIT_TIMEOUT_MS = 5_000;
 const BROWSER_CLOSE_TIMEOUT = journeyCheckFailure('J-03', 'browser-close-timeout');
-const CREDENTIAL_CLEANUP_TIMEOUT = journeyCheckFailure('J-03', 'credential-cleanup-timeout');
 let location = 'entry';
 let runnerLifecycleIncomplete = false;
 
@@ -84,165 +80,6 @@ async function awaitFixedOperation(operation, timeoutMs, timeoutError) {
     ]);
   } finally {
     clearTimeout(timeout);
-  }
-}
-
-async function assertSecretsAbsentFromDataRoot(root, secrets) {
-  const needles = secrets.flatMap((secret) => {
-    const digest = createHash('sha256').update(secret, 'utf8').digest();
-    return [
-      Buffer.from(secret, 'utf8'),
-      Buffer.from(secret, 'utf16le'),
-      digest,
-      Buffer.from(digest.toString('hex'), 'utf8'),
-      Buffer.from(digest.toString('base64'), 'utf8'),
-      Buffer.from(digest.toString('base64url'), 'utf8'),
-    ];
-  });
-  const visit = async (directory) => {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      const path = resolve(directory, entry.name);
-      const metadata = await lstat(path);
-      requireJourney(!metadata.isSymbolicLink(), 'cleanup-data-symlink');
-      if (metadata.isDirectory()) await visit(path);
-      else if (metadata.isFile()) {
-        const bytes = await readFile(path);
-        requireJourney(!needles.some((needle) => bytes.includes(needle)), 'secret-absent-from-product-data');
-      }
-    }
-  };
-  await visit(root);
-}
-
-const CREDENTIAL_CLEANUP_SCRIPT = `
-let input = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', (chunk) => {
-  input += chunk;
-  if (input.length > 128) process.exit(2);
-});
-process.stdin.once('end', async () => {
-  try {
-    const value = JSON.parse(input);
-    if (value === null || typeof value !== 'object' ||
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.credentialReference)) {
-      process.exit(2);
-    }
-    const { pathToFileURL } = require('node:url');
-    const { resolve } = require('node:path');
-    const denial = await import(pathToFileURL(resolve('dist/shared/network-denial.mjs')).href);
-    denial.installNodeNetworkDenial();
-    const { AsyncEntry } = require('@napi-rs/keyring');
-    const removed = await new AsyncEntry(
-      'io.github.zhouy1017.ai7.model-service',
-      'credential-reference:' + value.credentialReference,
-    ).deleteCredential();
-    process.exit(removed === true ? 0 : 3);
-  } catch {
-    process.exit(4);
-  }
-});
-`;
-
-async function removeSyntheticCredentialWithElectron(executable, credentialReference) {
-  requireJourney(isAbsolute(executable), 'credential-direct-cleanup-executable');
-  requireJourney(UUID_PATTERN.test(credentialReference), 'credential-direct-cleanup-reference');
-  requireJourney(
-    process.env.NAPI_RS_NATIVE_LIBRARY_PATH === undefined && process.env.NAPI_RS_FORCE_WASI === undefined,
-    'credential-direct-cleanup-override',
-  );
-  const child = spawn(executable, ['-e', CREDENTIAL_CLEANUP_SCRIPT], {
-    cwd: ROOT,
-    env: { ...productEnvironment(executable), ELECTRON_RUN_AS_NODE: '1' },
-    stdio: ['pipe', 'ignore', 'ignore'],
-    windowsHide: true,
-  });
-  child.stdin.on('error', () => undefined);
-  const terminal = new Promise((resolveTerminal, rejectTerminal) => {
-    child.once('error', rejectTerminal);
-    child.once('exit', (code, signal) => resolveTerminal({ code, signal }));
-  });
-  terminal.catch(() => undefined);
-  child.stdin.end(JSON.stringify({ credentialReference }));
-  let result;
-  try {
-    result = await awaitFixedOperation(terminal, CREDENTIAL_CLEANUP_TIMEOUT_MS, CREDENTIAL_CLEANUP_TIMEOUT);
-  } catch (error) {
-    try { child.kill('SIGKILL'); } catch {
-      // The bounded terminal observation below remains authoritative.
-    }
-    try {
-      await awaitFixedOperation(terminal, FORCE_EXIT_TIMEOUT_MS, CREDENTIAL_CLEANUP_TIMEOUT);
-    } catch {
-      child.unref();
-    }
-    throw error;
-  }
-  requireJourney(result.code === 0 && result.signal === null, 'credential-direct-cleanup-unconfirmed');
-}
-
-function hasErrorCode(error, code) {
-  return error !== null && typeof error === 'object' && 'code' in error && error.code === code;
-}
-
-async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
-  requireJourney(dataRoot === resolve(runRoot, 'data') && inside(runRoot, dataRoot), 'credential-cleanup-metadata-root');
-  const databasePath = resolve(dataRoot, 'store', 'ai7.sqlite');
-  let metadata;
-  try {
-    metadata = await lstat(databasePath);
-  } catch (error) {
-    if (hasErrorCode(error, 'ENOENT')) return { kind: 'not-started' };
-    throw journeyCheckFailure('J-03', 'credential-cleanup-metadata');
-  }
-  requireJourney(metadata.isFile() && !metadata.isSymbolicLink() && (await realpath(databasePath)) === databasePath,
-    'credential-cleanup-metadata-file');
-  let database;
-  try {
-    database = new DatabaseSync(databasePath, { readOnly: true });
-  } catch {
-    throw journeyCheckFailure('J-03', 'credential-cleanup-metadata');
-  }
-  try {
-    database.exec('PRAGMA query_only = ON;');
-    // Synchronized delta with Issues #467, #407, #408, #417, #414, #57, #410, #411, #413, #502, #421, #422 (twice), #412, #415 (twice) and #416: schema revision 21
-    // added the manuscript entry-position relation, revision 22 the editorial-mark relations, revision 23 the
-    // manuscript-effect relations, revision 24 rebuilt the three kind-coupled analysis relations for the
-    // review-category kind family, revision 25 added the Publication Version relations, revision 26 the
-    // proposal-conflict relations, revision 27 the import-retention relations, revision 28 the staged
-    // imported marks, revision 29 the export ledger, revision 30 widens the Run states for Connectivity Wait,
-    // revision 31 adds the default-execution-rule ledger, revision 32 widens the Run states and the Task Outcomes
-    // for 取消任务, revision 33 widens the Run states again and adds the unit checkpoints for 暂停 and 续行, revision 34
-    // widens the Plan Revisions for 更新计划, revision 35 widens the Run states once more and adds the Clarification
-    // Requests and answers, revision 36 adds the chapter-level reimport rows, revision 37 rebuilds `manuscripts` for
-    // Production Documents beside their ledgers, revision 38 adds their Delivery Records and revision 39 the Book's
-    // 图书交付包 versions, so this pin moves with the terminal version the service stamps
-    // (`BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION`).
-    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 63, 'credential-cleanup-metadata-version');
-    const rows = database.prepare(
-      `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
-              approved_fallback_chain, credential_slot, credential_reference, credential_operation_state
-       FROM model_service_connections LIMIT 2`,
-    ).all();
-    requireJourney(rows.length <= 1, 'credential-cleanup-metadata-cardinality');
-    if (rows.length === 0) return { kind: 'not-started' };
-    const row = rows[0];
-    requireJourney(
-      row.connection_id === 'main-editorial-deepseek-v4-pro' && row.role_id === 'main-editorial' &&
-      row.provider_id === 'deepseek-open-platform' && row.model_id === 'deepseek-v4-pro' &&
-      row.adapter_revision === 1 && row.configuration_revision === 1 && row.approved_fallback_chain === '[]' &&
-      row.credential_slot === 'deepseek-api-key' && typeof row.credential_reference === 'string' &&
-      UUID_PATTERN.test(row.credential_reference) && ['ready', 'missing', 'needs-attention'].includes(row.credential_operation_state),
-      'credential-cleanup-metadata-binding',
-    );
-    return row.credential_operation_state === 'missing'
-      ? { kind: 'removed' }
-      : { kind: 'reference', credentialReference: row.credential_reference };
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith('J-03/')) throw error;
-    throw journeyCheckFailure('J-03', 'credential-cleanup-metadata');
-  } finally {
-    database.close();
   }
 }
 
@@ -644,7 +481,7 @@ async function main() {
         if (browserCloseRejected) throw cleanupFailure ?? journeyCheckFailure('J-03', 'browser-cleanup-failed');
         if (closedForFallback && credentialReferenceForCleanup === undefined && dataRoot !== undefined && runRoot !== undefined) {
           try {
-            const recovered = await recoverSyntheticCredentialCleanupState(dataRoot, runRoot);
+            const recovered = await recoverSyntheticCredentialCleanupState('J-03', dataRoot, runRoot);
             if (recovered.kind === 'not-started' || recovered.kind === 'removed') credentialRemoved = true;
             else credentialReferenceForCleanup = recovered.credentialReference;
           } catch (error) {
@@ -654,7 +491,7 @@ async function main() {
         if (closedForFallback && !credentialRemoved && credentialReferenceForCleanup !== undefined) {
           try {
             requireJourney(electronExecutableForCleanup !== undefined, 'credential-direct-cleanup-executable');
-            await removeSyntheticCredentialWithElectron(electronExecutableForCleanup, credentialReferenceForCleanup);
+            await removeSyntheticCredentialWithElectron('J-03', electronExecutableForCleanup, productEnvironment(electronExecutableForCleanup), credentialReferenceForCleanup);
             credentialRemoved = true;
           } catch (error) {
             credentialCleanupFailure ??= error;
@@ -674,7 +511,7 @@ async function main() {
     const ownedRoot = runRoot ?? (runRootAcquisition === undefined ? undefined : await runRootAcquisition.catch(() => undefined));
     if (ownedRoot !== undefined) {
       if (syntheticSecret !== undefined && dataRoot !== undefined) {
-        try { await assertSecretsAbsentFromDataRoot(dataRoot, [syntheticSecret]); } catch (error) { cleanupFailure ??= error; }
+        try { await assertSecretsAbsentFromDataRoot('J-03', dataRoot, [syntheticSecret]); } catch (error) { cleanupFailure ??= error; }
       }
       try {
         requireJourney(tempParent !== undefined && dirname(ownedRoot) === tempParent && basename(ownedRoot).startsWith('ai7-j03-e2e-') && (await realpath(ownedRoot)) === ownedRoot, 'cleanup-target');

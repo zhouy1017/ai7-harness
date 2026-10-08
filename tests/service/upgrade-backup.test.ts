@@ -106,7 +106,7 @@ async function storeBeforeUpgrade(): Promise<void> {
   }
   const plant = new DatabaseSync(storePath());
   try {
-    plant.exec(`DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; PRAGMA user_version = ${DATABASE_MERGE_SCHEMA_VERSION};`);
+    plant.exec(`DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; PRAGMA user_version = ${DATABASE_MERGE_SCHEMA_VERSION};`);
     downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
   } finally {
     plant.close();
@@ -548,6 +548,16 @@ describe('升级前备份 over the real store', () => {
       expect(upgradesOf(store)).toEqual([[software, 3, 4, [CHANGE]], ['0.0.10', 1, 3, ['定时备份', '替换记录']]]);
       expect(store.inspectDataVersion().upgrades[0]!.rollback).toMatchObject({
         softwareVersion: '0.0.9', dataVersion: 1, backupFileName: 'AI7 升级前备份 2026-09-26 09-00-00.ai7db', backupPresent: false,
+      });
+      // No AI7 imports the middle state this backup holds — 0.0.10 stopped short of it — so the backup names only who made
+      // it, this AI7, as provenance, not 0.0.10 beside a Data Version 0.0.10 never reached whole (Issue #644).
+      const backupPath = join(backups(), store.inspectDataVersion().upgrades[0]!.backupFileName);
+      const backedUp = unzipSync(await readFile(backupPath));
+      expect(parseCanonicalJson(strFromU8(backedUp['manifest.json']!))).toMatchObject({ softwareVersion: software, dataVersion: 3 });
+      // Nor does this AI7 import it: its preview reads the maker and an older Data Version, which it does not take. Going
+      // back is to the earlier complete backup the record names.
+      expect(await store.inspectDatabaseImport(backupPath)).toMatchObject({
+        origin: 'pre-upgrade-backup', softwareVersion: software, dataVersion: 3, localDataVersion: 4, compatibility: 'older-data-version',
       });
       store.markCleanShutdown();
     } finally {

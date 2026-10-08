@@ -372,6 +372,9 @@ async function constructPredecessorV12(dataRoot, bookId) {
       DROP TABLE captured_procedure_states;
       DROP TABLE captured_procedure_versions;
       DROP TABLE captured_procedures;
+      DROP TABLE readers_report_drafts;
+      DROP TABLE readers_report_tasks;
+      DROP TABLE series_retrieval_exclusions;
       DROP TABLE dialogue_conversions;
       DROP TABLE dialogue_attempt_outcomes;
       DROP TABLE dialogue_harness_spans;

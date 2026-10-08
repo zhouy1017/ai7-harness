@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
+import { RECONCILED_INTERRUPTED_DETAIL, RECONCILED_QUEUED_DETAIL } from '../../src/service/analysis/baseline-analysis-store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -285,6 +286,61 @@ describe('factual review over the real store on exact sample1', () => {
       reopened.markCleanShutdown();
     } finally {
       reopened.close();
+    }
+  }, 300_000);
+
+  it('settles at the next start a factual Run a stopped AI7 left under way or waiting, so the Book can check facts again (Issue #657)', async () => {
+    await requireExactSample1(roots.codeRoot);
+    let bookId = '';
+    const setup = await openWithRoute(factualFixture);
+    try {
+      const imported = await importSample1Book(setup, roots.codeRoot, 'L2 sample1 事实核查中断');
+      bookId = imported.bookId;
+      await pinEditorialWorkspaceProfileRevision2(setup, bookId);
+      recordMissingCredentialConnection(setup, 'L2 主编辑连接');
+      setup.markCleanShutdown();
+    } finally {
+      setup.close();
+    }
+    for (const planted of ['authorized', 'admitted', 'executing', 'pausing'] as const) {
+      const first = await openWithRoute(factualFixture);
+      let runRecordId: string;
+      try {
+        let progress = first.createFactualReviewPreparationWork(bookId, FACTUAL_REVIEW_TASK_GOAL, launchPolicy);
+        while (!progress.done) progress = first.advanceFactualReviewPreparationWork(progress.workId!);
+        const prepared = progress.projection!;
+        // AI7 closes with the Run waiting for a place, admitted, reading, or asked to pause: nothing executes it any more.
+        runRecordId = first.authorizeFactualReview(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
+        const ledger = first.factualReviewLedger;
+        if (planted !== 'authorized') ledger.recordRunState(runRecordId, 'admitted', { detail: 'planted' });
+        if (planted === 'executing' || planted === 'pausing') ledger.recordRunState(runRecordId, 'executing', { detail: 'planted' });
+        if (planted === 'pausing') ledger.recordRunState(runRecordId, 'pausing', { detail: 'planted' });
+        expect(ledger.currentRunState(runRecordId)).toBe(planted);
+      } finally {
+        first.close();
+      }
+      const second = await openWithRoute(factualFixture);
+      try {
+        // Unreconciled, the Run reads as under way for good, and no other factual Task can be prepared.
+        expect(second.factualReviewLedger.currentRunState(runRecordId)).toBe(planted);
+        expect(() => second.createFactualReviewPreparationWork(bookId, FACTUAL_REVIEW_TASK_GOAL, launchPolicy)).toThrow();
+        expect(second.reconcileStoppedFactualReviewRuns()).toEqual({ settled: 1 });
+        const settled = second.inspectFactualReview(bookId);
+        if (planted === 'authorized') {
+          // It never began: blocked before dispatch with why, no outcome.
+          expect(settled.run).toMatchObject({ runRecordId, state: 'blocked-before-dispatch', blockedReasons: [RECONCILED_QUEUED_DETAIL] });
+          expect(settled.taskOutcome).toBeNull();
+        } else {
+          // This kind cannot resume: 已中断 with its outcome, no revision — never 可续行 or 已暂停.
+          expect(settled.run).toMatchObject({ runRecordId, state: 'interrupted' });
+          expect(settled.taskOutcome).toMatchObject({ classification: 'interrupted', resultSetRevisionId: null, safeNextAction: RECONCILED_INTERRUPTED_DETAIL });
+        }
+        // A second reconciliation settles nothing more.
+        expect(second.reconcileStoppedFactualReviewRuns()).toEqual({ settled: 0 });
+        second.markCleanShutdown();
+      } finally {
+        second.close();
+      }
     }
   }, 300_000);
 });

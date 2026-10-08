@@ -26,6 +26,7 @@ import {
   BUILTIN_PRODUCTION_DOCUMENT_TYPES,
   BUILTIN_PRODUCTION_DOCUMENT_TYPES_DIGEST,
   productionDocumentType,
+  type ProductionDocumentTypeConfiguration,
 } from './production-document-types.js';
 
 /**
@@ -432,7 +433,10 @@ export class ProductionDocuments {
     };
   }
 
-  /** Append a document's ledger row, in the transaction that made its block-store rows. */
+  /**
+   * Append a document's ledger row, in the transaction that made its block-store rows. A 审稿意见 draft (Issue #429, S81c)
+   * names its own type configuration and digest; every other document the house's.
+   */
   record(input: {
     documentId: string;
     bookId: string;
@@ -440,13 +444,18 @@ export class ProductionDocuments {
     originSourceVersionId: string;
     parserIdentity: string;
     createdAt: string;
+  }, configuration: { readonly types: ProductionDocumentTypeConfiguration; readonly digest: string } = {
+    types: BUILTIN_PRODUCTION_DOCUMENT_TYPES,
+    digest: BUILTIN_PRODUCTION_DOCUMENT_TYPES_DIGEST,
   }): void {
+    requireDocument(configuration.types.types.some((type) => type.typeId === input.typeId), 'PRODUCTION_DOCUMENT_TYPE_INVALID',
+      '这个文档类型不在本社的类型配置中。');
     const recordDigest = sha256Hex(canonicalJson({
       schema: 'ai7.production-document/1',
       documentId: input.documentId,
       bookId: input.bookId,
       typeId: input.typeId,
-      typeConfiguration: { version: BUILTIN_PRODUCTION_DOCUMENT_TYPES.version, digest: BUILTIN_PRODUCTION_DOCUMENT_TYPES_DIGEST },
+      typeConfiguration: { version: configuration.types.version, digest: configuration.digest },
       originSourceVersionId: input.originSourceVersionId,
       parserIdentity: input.parserIdentity,
       createdAt: input.createdAt,
@@ -456,8 +465,8 @@ export class ProductionDocuments {
          document_id, book_id, type_id, type_configuration_version, type_configuration_digest,
          origin_source_version_id, parser_identity, record_digest, created_at
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(input.documentId, input.bookId, input.typeId, BUILTIN_PRODUCTION_DOCUMENT_TYPES.version,
-      BUILTIN_PRODUCTION_DOCUMENT_TYPES_DIGEST, input.originSourceVersionId, input.parserIdentity, recordDigest, input.createdAt);
+    ).run(input.documentId, input.bookId, input.typeId, configuration.types.version,
+      configuration.digest, input.originSourceVersionId, input.parserIdentity, recordDigest, input.createdAt);
   }
 
   /**

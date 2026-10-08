@@ -64,6 +64,7 @@ import {
   type ServiceRequest,
   type TaskPlanKind,
 } from '../shared/protocol.js';
+import { SERIES_EXCLUSION_ACTIONS, SERIES_EXCLUSION_TARGET_KINDS, type SeriesExclusionAction, type SeriesExclusionTargetKind } from '../shared/protocol.js';
 import { CONFLICT_RESOLUTIONS, type ConflictResolution } from '../shared/conflict-units.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -764,6 +765,19 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
       break;
     }
+    // 起草审稿意见 (Issue #429, S81c): the route's Book and one of the two templates; the 定稿 version is the service's to find.
+    case 'prepareReadersReport': {
+      const input = requireInput(value.input, ['bookId', 'template'], tentativeId);
+      if (!validUuid(input.bookId) || (input.template !== 'author' && input.template !== 'editorial')) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 打开草稿: one drafted result of the route's Book's 审稿意见.
+    case 'createReadersReportDraft': {
+      const input = requireInput(value.input, ['bookId', 'revisionId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.revisionId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'authorizeReadersReport':
     case 'authorizeInitialEvaluation': {
       const input = requireInput(value.input, ['bookId', 'taskIntentId', 'planEnvelopeDigest'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.taskIntentId) || !isBoundedString(input.planEnvelopeDigest, 64) ||
@@ -1040,6 +1054,42 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (!validUuid(input.seriesId) || !validUuid(input.itemId) || !(input.before === null || isSafeInteger(input.before, 1))) throw new ProtocolError(tentativeId);
       break;
     }
+    // 书系检索排除 (Issue #64, S29b): a page of one kind's targets after one of them; a page of revisions after one; and an exclusion
+    // revision with its preview — an action, the exclusion it supersedes or the target it adds, a line of reason — and the
+    // digest of the preview the editor saw.
+    case 'inspectSeriesExclusionTargets': {
+      const input = requireInput(value.input, ['seriesId', 'kind', 'after'], tentativeId);
+      const after = input.after;
+      if (!validUuid(input.seriesId) || !SERIES_EXCLUSION_TARGET_KINDS.includes(input.kind as SeriesExclusionTargetKind) ||
+          !(after === null || (isRecord(after) && hasExactKeys(after, ['key', 'id']) && isBoundedString(after.key, 400) && isBoundedString(after.id, 64)))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'inspectSeriesExclusionHistory': {
+      const input = requireInput(value.input, ['seriesId', 'after'], tentativeId);
+      const after = input.after;
+      if (!validUuid(input.seriesId) || !isRecord(after) || !hasExactKeys(after, ['recordedAt', 'revisionId']) ||
+          !isBoundedString(after.recordedAt, 40) || !CURSOR_INSTANT.test(after.recordedAt) || !validUuid(after.revisionId)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'previewSeriesExclusion':
+    case 'recordSeriesExclusion': {
+      const record = value.op === 'recordSeriesExclusion';
+      const input = requireInput(value.input, ['seriesId', 'action', 'exclusionId', 'target', 'reason', ...(record ? ['previewDigest'] : [])], tentativeId);
+      const target = input.target;
+      if (!validUuid(input.seriesId) || !SERIES_EXCLUSION_ACTIONS.includes(input.action as SeriesExclusionAction) ||
+          !(input.exclusionId === null || validUuid(input.exclusionId)) ||
+          !(target === null || (isRecord(target) && hasExactKeys(target, ['kind', 'id']) &&
+            SERIES_EXCLUSION_TARGET_KINDS.includes(target.kind as SeriesExclusionTargetKind) && isBoundedString(target.id, 64))) ||
+          !isBoundedString(input.reason, 2_000, true) ||
+          (record && (!isBoundedString(input.previewDigest, 64) || !HEX_DIGEST_PATTERN.test(input.previewDigest)))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     // 质量与学习 › 学习准入 (Issue #61, S26b): every Book's Learning Material, or one Book's.
     case 'inspectLearningMaterials': {
       const input = requireInput(value.input, ['bookId', 'after'], tentativeId);
@@ -1200,6 +1250,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'continueReviewRun':
+    case 'cancelReviewRun':
     case 'generateReviewReport': {
       const input = requireInput(value.input, ['bookId', 'reviewRunId'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.reviewRunId)) throw new ProtocolError(tentativeId);

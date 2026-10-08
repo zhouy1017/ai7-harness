@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, type SQLInputValue, type StatementResultingChanges } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LaunchBinding } from '../../src/service/analysis/baseline-analysis-store.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
@@ -409,7 +409,7 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
     // A revision-44 store never held the relation: planted by dropping it, it gains it again empty.
     const plant = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      plant.exec(`DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_conflicts; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; DROP TABLE learning_eligibility_decisions; DROP TABLE proposal_decision_feedback; DROP TABLE analysis_feedback_signals; DROP TABLE evaluation_record_entries; DROP TABLE evaluation_records; DROP TABLE library_material_decisions; DROP TABLE library_materials; DROP TABLE review_guideline_versions; PRAGMA user_version = ${BOOK_PEOPLE_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_conflicts; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; DROP TABLE learning_eligibility_decisions; DROP TABLE proposal_decision_feedback; DROP TABLE analysis_feedback_signals; DROP TABLE evaluation_record_entries; DROP TABLE evaluation_records; DROP TABLE library_material_decisions; DROP TABLE library_materials; DROP TABLE review_guideline_versions; PRAGMA user_version = ${BOOK_PEOPLE_SCHEMA_VERSION};`);
       downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
     } finally {
       plant.close();
@@ -511,6 +511,41 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
       expect(after.olderVersionBooks.map((book) => book.bookTitle))
         .toEqual(Array.from({ length: MAX_GUIDELINE_OLDER_BOOKS_SHOWN }, (_, index) => `L2 书 ${String(index + 1).padStart(2, '0')}`));
     } finally {
+      await close(session);
+    }
+  }, 300_000);
+
+  it('counts the usage it reads in one transaction, not one per row (Issue #644)', async () => {
+    await requireExactSample1(roots.codeRoot);
+    const session = await openStore();
+    const inserts: boolean[] = [];
+    const prepare = DatabaseSync.prototype.prepare;
+    const spy = vi.spyOn(DatabaseSync.prototype, 'prepare').mockImplementation(function (this: DatabaseSync, sql: string) {
+      const statement = prepare.call(this, sql);
+      if (/INTO temp\.guideline_/u.test(sql)) {
+        const run = statement.run.bind(statement) as (...values: SQLInputValue[]) => StatementResultingChanges;
+        statement.run = ((...values: SQLInputValue[]) => {
+          inserts.push(this.isTransaction);
+          return run(...values);
+        }) as typeof statement.run;
+      }
+      return statement;
+    });
+    try {
+      const { store, driver } = session;
+      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+      const { bookId } = await importSample1Book(store, roots.codeRoot, 'L2 用量');
+      await pinEditorialWorkspaceProfileRevision2(store, bookId);
+      const run = prepareReview(store, bookId);
+      approve(store, bookId, run);
+      await driver.drive(run.reviewRunId);
+      inserts.length = 0;
+      expect(typosDocument(store.inspectReviewGuidelines()).versions[0]!.usedByCount).toBe(1);
+      // The built-in documents' own versions and the one Run's use of each: every insert inside the one transaction.
+      expect(inserts.length).toBeGreaterThan(1);
+      expect(inserts.every((open) => open)).toBe(true);
+    } finally {
+      spy.mockRestore();
       await close(session);
     }
   }, 300_000);

@@ -1,13 +1,12 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { lstat, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
-import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // J-11 (Issue #431, plan slice S83): a Book's 作者, 责编 and 相关人 — the attribution dimensions later feedback and learning
 // records name. Two empty Books are created through 新建图书, so this Journey reads no manuscript and composes no input:
@@ -39,6 +38,11 @@ import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFai
 // 待我处理 then says; Enter and Escape reach the card without a pointer; it reflows at 200% and keeps its borders without
 // colour; and a restart moves nothing.
 //
+// Since #429 (S81c) J-11 also drafts a 审稿意见 from 评估旅程丙's 第 14 版定稿: 给作者的修改意见 is prepared into the Task Drawer,
+// whose plan says the house has no 审稿意见 among its 范例 and drafts without one; its Run ends on the J-04 adapter's authored
+// fixture; 打开草稿 opens the draft on the manuscript surface with its five sections; an edit is saved as 版本 2; and 导出… writes it
+// as DOCX through the system's Save dialog, which this launch's control answers for.
+//
 // Since #61 (S26c) 质量与学习 opens from the landing at 反馈历史, the passive history of the same Book's feedback: newest
 // first, each entry's verdict and reason as it stands and nothing pending; filtered by 来源, and — once the Book's 作者 and
 // 责编 are set on its 工作概览 — by them; each opening the exact record it came from.
@@ -53,10 +57,17 @@ const PEOPLE_NOTE = '作者与责编用于标注和查找这本书，也是之�
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
 const THIRD = Object.freeze({ title: '评估旅程丙' });
 /**
- * The J-04 model adapter's fixture: AI7 初评's authored units and synthesis of exact `sample1` (Issue #429, S81b1), layered over
- * the base fixture that answers every unit, the reduction and the sample of the baseline analysis (Issue #94).
+ * The J-04 model adapter's fixture: 审稿意见's authored units and five sections from 第 14 版定稿 (Issue #429, S81c), layered over
+ * AI7 初评's authored units and synthesis of exact `sample1` (S81b1), layered in turn over the base fixture that answers every
+ * unit, the reduction and the sample of the baseline analysis (Issue #94).
  */
-const FIXTURE_IDENTITY = 'sample1-evaluation-authored';
+const FIXTURE_IDENTITY = 'sample1-readers-report-authored';
+/** What a 审稿意见 says when the house holds no 审稿意见 among its 范例 (the Owner's answer of 2026-10-07). */
+const NO_EXEMPLAR = '本社暂无审稿意见范例，本次不参考范例';
+/** The Journey's own edit of the draft, and the file its DOCX is written to (Issue #429, S81c). */
+const DRAFT_EDIT = '（旅程修订）';
+const DRAFT_FILE = '评估旅程丙 · 审稿意见 · 给作者的修改意见 · 版本 2.docx';
+const READERS_REPORT_HEADINGS = ['总体评价', '主要优点', '主要问题', '修改建议', '结论'];
 /** AI7 初评's scores and lines as the authored fixture gives them, item by item (Issue #429, S81b1). */
 const AI7_ITEM_LINES = [
   ['literary-quality', 'sufficient', '文学品质与作者声音：AI7 初评 16.5 / 20 · 依据充分度 充分（引用 19 个段落，分布在 8 个阅读范围）'],
@@ -81,10 +92,7 @@ const THIRD_PEOPLE = Object.freeze({ authors: '冯五', editors: '郑三', later
 const LEARNING_BASIS = '学习准入策略还在「仅建议」阶段：没有批准任何可以自动纳入的材料或范围，所以每一条都由你决定。';
 const LEARNING_INFLUENCE = '纳入以后，它只可能在所选范围内帮 AI7 以后的建议更接近你的判断：不会改动稿件或它来自的记录，不会自动生效为规则，不会启用记忆，也不会被发送出去。';
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
-const CREDENTIAL_CLEANUP_TIMEOUT_MS = 15_000;
-const FORCE_EXIT_TIMEOUT_MS = 5_000;
 const BROWSER_CLOSE_TIMEOUT = journeyCheckFailure('J-11', 'browser-close-timeout');
-const CREDENTIAL_CLEANUP_TIMEOUT = journeyCheckFailure('J-11', 'credential-cleanup-timeout');
 let location = 'entry';
 let electronExecutable;
 let runnerLifecycleIncomplete = false;
@@ -143,156 +151,6 @@ async function awaitFixedOperation(operation, timeoutMs, timeoutError) {
     ]);
   } finally {
     clearTimeout(timeout);
-  }
-}
-
-// ---- the one synthetic credential, and its cleanup (J-03 and J-04's ownership, as J-16 carries it) ------------------
-
-async function assertSecretsAbsentFromDataRoot(root, secrets) {
-  const needles = secrets.flatMap((secret) => {
-    const digest = createHash('sha256').update(secret, 'utf8').digest();
-    return [
-      Buffer.from(secret, 'utf8'),
-      Buffer.from(secret, 'utf16le'),
-      digest,
-      Buffer.from(digest.toString('hex'), 'utf8'),
-      Buffer.from(digest.toString('base64'), 'utf8'),
-      Buffer.from(digest.toString('base64url'), 'utf8'),
-    ];
-  });
-  const visit = async (directory) => {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      const path = resolve(directory, entry.name);
-      const metadata = await lstat(path);
-      requireJourney(!metadata.isSymbolicLink(), 'cleanup-data-symlink');
-      if (metadata.isDirectory()) await visit(path);
-      else if (metadata.isFile()) {
-        const bytes = await readFile(path);
-        requireJourney(!needles.some((needle) => bytes.includes(needle)), 'secret-absent-from-product-data');
-      }
-    }
-  };
-  await visit(root);
-}
-
-const CREDENTIAL_CLEANUP_SCRIPT = `
-let input = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', (chunk) => {
-  input += chunk;
-  if (input.length > 128) process.exit(2);
-});
-process.stdin.once('end', async () => {
-  try {
-    const value = JSON.parse(input);
-    if (value === null || typeof value !== 'object' ||
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.credentialReference)) {
-      process.exit(2);
-    }
-    const { pathToFileURL } = require('node:url');
-    const { resolve } = require('node:path');
-    const denial = await import(pathToFileURL(resolve('dist/shared/network-denial.mjs')).href);
-    denial.installNodeNetworkDenial();
-    const { AsyncEntry } = require('@napi-rs/keyring');
-    const removed = await new AsyncEntry(
-      'io.github.zhouy1017.ai7.model-service',
-      'credential-reference:' + value.credentialReference,
-    ).deleteCredential();
-    process.exit(removed === true ? 0 : 3);
-  } catch {
-    process.exit(4);
-  }
-});
-`;
-
-async function removeSyntheticCredentialWithElectron(executable, credentialReference) {
-  requireJourney(isAbsolute(executable), 'credential-direct-cleanup-executable');
-  requireJourney(UUID_PATTERN.test(credentialReference), 'credential-direct-cleanup-reference');
-  requireJourney(
-    process.env.NAPI_RS_NATIVE_LIBRARY_PATH === undefined && process.env.NAPI_RS_FORCE_WASI === undefined,
-    'credential-direct-cleanup-override',
-  );
-  const child = spawn(executable, ['-e', CREDENTIAL_CLEANUP_SCRIPT], {
-    cwd: ROOT,
-    env: { ...productEnvironment(executable), ELECTRON_RUN_AS_NODE: '1' },
-    stdio: ['pipe', 'ignore', 'ignore'],
-    windowsHide: true,
-  });
-  child.stdin.on('error', () => undefined);
-  const terminal = new Promise((resolveTerminal, rejectTerminal) => {
-    child.once('error', rejectTerminal);
-    child.once('exit', (code, signal) => resolveTerminal({ code, signal }));
-  });
-  terminal.catch(() => undefined);
-  child.stdin.end(JSON.stringify({ credentialReference }));
-  let result;
-  try {
-    result = await awaitFixedOperation(terminal, CREDENTIAL_CLEANUP_TIMEOUT_MS, CREDENTIAL_CLEANUP_TIMEOUT);
-  } catch (error) {
-    try { child.kill('SIGKILL'); } catch {
-      // The bounded terminal observation below remains authoritative.
-    }
-    try {
-      await awaitFixedOperation(terminal, FORCE_EXIT_TIMEOUT_MS, CREDENTIAL_CLEANUP_TIMEOUT);
-    } catch {
-      child.unref();
-    }
-    throw error;
-  }
-  requireJourney(result.code === 0 && result.signal === null, 'credential-direct-cleanup-unconfirmed');
-}
-
-function hasErrorCode(error, code) {
-  return error !== null && typeof error === 'object' && 'code' in error && error.code === code;
-}
-
-async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
-  requireJourney(dataRoot === resolve(runRoot, 'data') && inside(runRoot, dataRoot), 'credential-cleanup-metadata-root');
-  const databasePath = resolve(dataRoot, 'store', 'ai7.sqlite');
-  let metadata;
-  try {
-    metadata = await lstat(databasePath);
-  } catch (error) {
-    if (hasErrorCode(error, 'ENOENT')) return { kind: 'not-started' };
-    throw journeyCheckFailure('J-11', 'credential-cleanup-metadata');
-  }
-  requireJourney(metadata.isFile() && !metadata.isSymbolicLink() && (await realpath(databasePath)) === databasePath,
-    'credential-cleanup-metadata-file');
-  let database;
-  try {
-    database = new DatabaseSync(databasePath, { readOnly: true });
-  } catch {
-    throw journeyCheckFailure('J-11', 'credential-cleanup-metadata');
-  }
-  try {
-    database.exec('PRAGMA query_only = ON;');
-    // The terminal version the service stamps, as J-16 reads it: the 分析反馈 revision since Issue #94 (S38), and after it
-    // this pin moves with whatever revision a later slice takes.
-    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 63, 'credential-cleanup-metadata-version');
-    const rows = database.prepare(
-      `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
-              approved_fallback_chain, credential_slot, credential_reference, credential_operation_state
-       FROM model_service_connections LIMIT 2`,
-    ).all();
-    requireJourney(rows.length <= 1, 'credential-cleanup-metadata-cardinality');
-    if (rows.length === 0) return { kind: 'not-started' };
-    const row = rows[0];
-    requireJourney(
-      row.connection_id === 'main-editorial-deepseek-v4-pro' && row.role_id === 'main-editorial' &&
-      row.provider_id === 'deepseek-open-platform' && row.model_id === 'deepseek-v4-pro' &&
-      row.adapter_revision === 1 && row.configuration_revision === 1 && row.approved_fallback_chain === '[]' &&
-      row.credential_slot === 'deepseek-api-key' && typeof row.credential_reference === 'string' &&
-      UUID_PATTERN.test(row.credential_reference) && ['ready', 'missing', 'needs-attention'].includes(row.credential_operation_state),
-      'credential-cleanup-metadata-binding',
-    );
-    return row.credential_operation_state === 'missing'
-      ? { kind: 'removed' }
-      : { kind: 'reference', credentialReference: row.credential_reference };
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith('J-11/')) throw error;
-    throw journeyCheckFailure('J-11', 'credential-cleanup-metadata');
-  } finally {
-    database.close();
   }
 }
 
@@ -1085,7 +943,7 @@ async function main() {
         if (browserCloseRejected) throw cleanupFailure ?? journeyCheckFailure('J-11', 'browser-cleanup-failed');
         if (closedForFallback && credentialReferenceForCleanup === undefined && dataRoot !== undefined && runRoot !== undefined) {
           try {
-            const recovered = await recoverSyntheticCredentialCleanupState(dataRoot, runRoot);
+            const recovered = await recoverSyntheticCredentialCleanupState('J-11', dataRoot, runRoot);
             if (recovered.kind === 'not-started' || recovered.kind === 'removed') credentialRemoved = true;
             else credentialReferenceForCleanup = recovered.credentialReference;
           } catch (error) {
@@ -1095,7 +953,7 @@ async function main() {
         if (closedForFallback && !credentialRemoved && credentialReferenceForCleanup !== undefined) {
           try {
             requireJourney(electronExecutableForCleanup !== undefined, 'credential-direct-cleanup-executable');
-            await removeSyntheticCredentialWithElectron(electronExecutableForCleanup, credentialReferenceForCleanup);
+            await removeSyntheticCredentialWithElectron('J-11', electronExecutableForCleanup, productEnvironment(electronExecutableForCleanup), credentialReferenceForCleanup);
             credentialRemoved = true;
           } catch (error) {
             credentialCleanupFailure ??= error;
@@ -1115,7 +973,7 @@ async function main() {
     const ownedRoot = runRoot ?? (runRootAcquisition === undefined ? undefined : await runRootAcquisition.catch(() => undefined));
     if (ownedRoot !== undefined) {
       if (syntheticSecret !== undefined && dataRoot !== undefined) {
-        try { await assertSecretsAbsentFromDataRoot(dataRoot, [syntheticSecret]); } catch (error) { cleanupFailure ??= error; }
+        try { await assertSecretsAbsentFromDataRoot('J-11', dataRoot, [syntheticSecret]); } catch (error) { cleanupFailure ??= error; }
       }
       try {
         requireJourney(tempParent !== undefined && dirname(ownedRoot) === tempParent && basename(ownedRoot).startsWith('ai7-j11-e2e-') && (await realpath(ownedRoot)) === ownedRoot, 'cleanup-target');
@@ -1152,12 +1010,17 @@ async function main() {
     cancellation.throwIfRequested();
     runRootAcquisition = mkdtemp(join(tempParent, 'ai7-j11-e2e-'));
     runRoot = await runRootAcquisition;
+    // 审稿意见's DOCX is written here through the Save dialog's launch control (Issue #429, S81c).
+    const draftExportsRoot = resolve(runRoot, 'exports');
+    const draftExportPath = resolve(draftExportsRoot, DRAFT_FILE);
     cancellation.throwIfRequested();
     requireJourney(dirname(runRoot) === tempParent && basename(runRoot).startsWith('ai7-j11-e2e-'), 'temp-root');
     dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const executable = electronExecutable();
     electronExecutableForCleanup = executable;
+    // J-10's unit hold, admitted under J-11 (#641): absent until feedback-pending-submit writes it, so nothing before is held.
+    const unitHoldPath = resolve(runRoot, 'j11-unit-hold.txt');
     const sample1Bytes = await readFile(SAMPLE1_PATH);
     const sample1 = { sha256: createHash('sha256').update(sample1Bytes).digest('hex'), bytes: sample1Bytes.length };
     const launch = async ({ forCleanup = false } = {}) => {
@@ -1167,8 +1030,11 @@ async function main() {
         resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid),
       ];
       // J-11's picker imports the manuscript its 评估 evaluates (Issue #429, S81a): one choice per window. The J-04 model
-      // adapter runs the baseline 分析反馈 judges (Issue #94, S38). A cleanup launch names neither.
-      if (!forCleanup) args.push('--j11-picker-path', SAMPLE1_PATH, '--j04-model-adapter', FIXTURE_IDENTITY);
+      // adapter runs the baseline 分析反馈 judges (Issue #94, S38), and J-10's unit hold keeps one Run in flight (#641). A
+      // cleanup launch names none of them.
+      if (!forCleanup) {
+        args.push('--j11-picker-path', SAMPLE1_PATH, '--j04-model-adapter', FIXTURE_IDENTITY, '--j10-unit-hold-path', unitHoldPath, '--j11-save-path', draftExportPath);
+      }
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       if (!forCleanup) cancellation.throwIfRequested();
       const acquisition = chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args, env: productEnvironment(executable), timeout: 60_000 });
@@ -1868,6 +1734,122 @@ async function main() {
     await clickSelector(renderer, '.editor-shell [data-work-destination="evaluation"]', 'initial-evaluation-back-open');
     await readEvaluation(renderer, (page) => page.state === 'ready' && page.record?.heading === '第 14 版 · 定稿', 'initial-evaluation-back-ready');
 
+    // ---- 审稿意见 (Issue #429, plan slice S81c; V2-UX-EVAL-013) --------------------------------------------------------------
+    at('readers-report-offered');
+    // ②C drafts a 审稿意见 from the latest 定稿 version under one of the two templates, and says the house has no 审稿意见 among
+    // its 范例 to seed it: the draft is written without one.
+    const READ_REPORT = `(() => {
+      const section = document.querySelector('[data-screen="book-evaluation"] .evaluation-readers-report');
+      if (!(section instanceof HTMLElement)) return null;
+      return {
+        state: section.dataset.readersReportState ?? null,
+        basis: section.querySelector('.readers-report-basis')?.textContent ?? null,
+        exemplars: section.querySelector('.readers-report-exemplars')?.textContent ?? null,
+        task: section.querySelector('.readers-report-task')?.textContent ?? null,
+        templates: Array.from(section.querySelectorAll('ul.readers-report-templates > li'), (entry) => [
+          entry.dataset.template, entry.querySelector('.readers-report-template')?.textContent ?? null,
+          entry.querySelector('.readers-report-draft, .readers-report-drafted, .readers-report-reason')?.textContent ?? null,
+          Array.from(entry.querySelectorAll('button'), (button) => [button.dataset.readersReportAction, button.textContent, button.disabled]),
+        ]),
+      };
+    })()`;
+    const readReport = async (predicate, name) => {
+      const deadline = Date.now() + 120_000;
+      let page = null;
+      while (Date.now() < deadline) {
+        page = await renderer.evaluate(READ_REPORT).catch(() => null);
+        if (page !== null && predicate(page)) return page;
+        await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+      }
+      const error = journeyCheckFailure('J-11', name);
+      error.detail = page;
+      throw error;
+    };
+    const reportOffered = await readReport((page) => page.templates.length === 2, 'readers-report-offered-read');
+    requireJourney(reportOffered.basis === '依据第 14 版定稿（评估的是修订版 r1）' && reportOffered.exemplars === `${NO_EXEMPLAR}。` && reportOffered.task === null &&
+      JSON.stringify(reportOffered.templates) === JSON.stringify([
+        ['author', '给作者的修改意见', null, [['prepare', '起草', false]]],
+        ['editorial', '给编辑部 / 选题会的审读报告', null, [['prepare', '起草', false]]],
+      ]), 'readers-report-offered-words', reportOffered);
+    await clickSelector(renderer, '[data-screen="book-evaluation"] .evaluation-readers-report li[data-template="author"] [data-readers-report-action="prepare"]', 'readers-report-prepare');
+    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer === 'open' && drawer.dataset.taskPlanKind === 'readers-report' && drawer.dataset.taskPlanStart === 'ready' && drawer.querySelector('[data-task-drawer-control="start"]')?.disabled === false; })()`, 'readers-report-plan', 120_000);
+    // The plan in the editor's words: the 定稿 version and template it drafts from, no exemplar, its two steps, and that it writes
+    // no marketing points and delivers nothing; no button of the drawer carries 授权.
+    const reportPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'readers-report', ref: document.querySelector('#task-drawer').dataset.taskPlanRef })
+      .then((plan) => JSON.stringify([plan.goal.sentence, plan.scope.reference, plan.steps.map((step) => step.label),
+        plan.notDo.editorial.includes('不写营销要点：营销要点由交付物中的写作任务生成'), plan.notDo.editorial.includes('不交付、不发送：草稿在稿件编辑面上由你修改')]))`);
+    requireJourney(reportPlan === JSON.stringify([
+      '从第 14 版定稿的评估起草审稿意见「给作者的修改意见」：总体评价、主要优点、主要问题、修改建议与结论',
+      ['评估记录第 14 版定稿（审稿评估方案 第 1 版）：各项得分与评语、主要优点与问题、风险与结论', NO_EXEMPLAR],
+      ['逐章读取，找出可以引用的段落', '按模板写出审稿意见'], true, true,
+    ]), 'readers-report-plan-words', reportPlan);
+    await assertRenderer(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return (drawer?.textContent ?? '').includes(${JSON.stringify(NO_EXEMPLAR)}) && Array.from(drawer.querySelectorAll('button'), (button) => button.textContent).every((label) => !label.includes('授权')); })()`, 'readers-report-plan-shown');
+    const preparedReport = await readReport((page) => page.state === 'prepared', 'readers-report-prepared');
+    requireJourney(preparedReport.task === '审稿意见「给作者的修改意见」 · 尚未开始' &&
+      JSON.stringify(preparedReport.templates[0][3]) === JSON.stringify([['open-plan', '查看计划并开始', false]]), 'readers-report-prepared-words', preparedReport);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'readers-report-run');
+    const endedReport = await readReport((page) => ['settled', 'failed', 'interrupted'].includes(page.state), 'readers-report-ended');
+    requireJourney(endedReport.state === 'settled', 'readers-report-settled', endedReport);
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState === 'settled'`, 'readers-report-drawer-settled', 30_000);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'readers-report-drawer-close');
+    await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'readers-report-drawer-closed');
+
+    at('readers-report-drafted');
+    // AI7's draft waits to be opened; the other template can still be drafted; the 定稿 version it drafted from is unchanged.
+    const draftedReport = await readReport((page) => page.templates[0]?.[2] !== null, 'readers-report-drafted-read');
+    requireJourney(draftedReport.task === '审稿意见「给作者的修改意见」 · 已完成' && JSON.stringify(draftedReport.templates) === JSON.stringify([
+      ['author', '给作者的修改意见', 'AI7 已写出草稿 · 依据第 14 版定稿 · 打开后在稿件编辑面上修改', [['create-draft', '打开草稿', false], ['open-task', '查看任务', false]]],
+      ['editorial', '给编辑部 / 选题会的审读报告', null, [['prepare', '起草', false]]],
+    ]), 'readers-report-drafted-words', draftedReport);
+    const recordUnmoved = await renderer.evaluate(`window.ai7.inspectEvaluation({ recordId: null }).then((page) => JSON.stringify([page.record.ordinal, page.record.state, page.record.entries, page.recordCount]))`);
+    requireJourney(recordUnmoved === JSON.stringify([14, 'finalized', 3, 14]), 'readers-report-record-unmoved', recordUnmoved);
+
+    at('readers-report-draft-open');
+    // 打开草稿: the draft on the manuscript surface, named by its type and 版本 1, its five sections under its title, with the
+    // 工作流程 column beside it as every document has.
+    await clickSelector(renderer, '[data-screen="book-evaluation"] .evaluation-readers-report li[data-template="author"] [data-readers-report-action="create-draft"]', 'readers-report-create-draft');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"][data-document-type-id="readers-report-author"] .editor-toolbar h2')?.textContent === '审稿意见 · 给作者的修改意见 · 版本 1' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]') !== null`, 'readers-report-draft-surface', 120_000);
+    const draftBlocks = await renderer.evaluate(`JSON.stringify(Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]'), (block) => block.textContent ?? ''))`);
+    const draftTexts = JSON.parse(draftBlocks);
+    requireJourney(draftTexts[0] === '《评估旅程丙》审稿意见 · 给作者的修改意见' &&
+      JSON.stringify(draftTexts.filter((text) => READERS_REPORT_HEADINGS.includes(text))) === JSON.stringify(READERS_REPORT_HEADINGS) &&
+      draftTexts.length > READERS_REPORT_HEADINGS.length + 5, 'readers-report-draft-sections', draftTexts.length);
+    await assertRenderer(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] aside.document-lens') instanceof HTMLElement`, 'readers-report-draft-lens');
+
+    at('readers-report-version');
+    // An edit in the draft's own journal, then 保存为版本: 版本 2.
+    await assertRenderer(renderer, `(() => { const block = document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')[2]; if (!(block instanceof HTMLElement)) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText', false, ${JSON.stringify(DRAFT_EDIT)}); return block.textContent?.endsWith(${JSON.stringify(DRAFT_EDIT)}); })()`, 'readers-report-edit');
+    await waitFor(renderer, `Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '保存当前编辑' && !button.disabled)`, 'readers-report-edit-save-ready');
+    await click(renderer, '保存当前编辑', 'readers-report-edit-save');
+    await waitFor(renderer, `${status}.includes('已写入修订日志')`, 'readers-report-edit-durable');
+    await clickSelector(renderer, '.editor-shell[data-deliverable="production-document"] [data-document-action="saveVersion"]', 'readers-report-save-version');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] .editor-toolbar h2')?.textContent === '审稿意见 · 给作者的修改意见 · 版本 2' && ${status} === '已保存为版本 2'`, 'readers-report-version-saved', 120_000);
+
+    at('readers-report-docx');
+    // Back in 评估 the draft names 版本 2, and 导出… writes it as DOCX through the Save dialog: the card's review, the place it
+    // returned, and 按上述方式导出 — nothing written before that.
+    await click(renderer, '返回图书工作概览', 'readers-report-overview');
+    await waitFor(renderer, `document.querySelector('.book-evaluation-summary [data-evaluation-action="open"]')`, 'readers-report-overview-ready', 60_000);
+    await clickSelector(renderer, '.book-evaluation-summary [data-evaluation-action="open"]', 'readers-report-evaluation');
+    const versioned = await readReport((page) => (page.templates[0]?.[2] ?? '').startsWith('草稿 · 版本 2'), 'readers-report-versioned');
+    requireJourney(JSON.stringify(versioned.templates[0]) === JSON.stringify(['author', '给作者的修改意见', '草稿 · 版本 2 · 依据第 14 版定稿',
+      [['open-draft', '打开草稿', false], ['export', '导出…', false], ['open-task', '查看任务', false]]]) &&
+      JSON.stringify(versioned.templates[1][3]) === JSON.stringify([['prepare', '起草', false]]), 'readers-report-versioned-words', versioned);
+    await mkdir(draftExportsRoot, { recursive: true });
+    await clickSelector(renderer, '[data-screen="book-evaluation"] .evaluation-readers-report li[data-template="author"] [data-readers-report-action="export"]', 'readers-report-export-open');
+    const draftCard = `document.querySelector('[data-screen="book-evaluation"] .readers-report-export-slot > section.manuscript-export')`;
+    await waitFor(renderer, `(() => { const choose = ${draftCard}?.querySelector('[data-export-action="choose"]'); return choose instanceof HTMLButtonElement && !choose.disabled && choose.textContent === '选择保存位置…'; })()`, 'readers-report-export-reviewed', 120_000);
+    requireJourney(!existsSync(draftExportPath), 'readers-report-export-nothing-before');
+    await clickSelector(renderer, '[data-screen="book-evaluation"] .readers-report-export-slot > section.manuscript-export [data-export-action="choose"]', 'readers-report-export-choose');
+    await waitFor(renderer, `${draftCard}?.dataset.exportPhase === 'prepared' && ${draftCard}.querySelector('.export-destination-line')?.textContent === ${JSON.stringify(`${draftExportPath}（新建文件）`)}`, 'readers-report-export-prepared', 120_000);
+    requireJourney(!existsSync(draftExportPath), 'readers-report-export-nothing-before-approval');
+    await clickSelector(renderer, '[data-screen="book-evaluation"] .readers-report-export-slot > section.manuscript-export [data-export-action="approve"]', 'readers-report-export-approve');
+    await waitFor(renderer, `${draftCard}?.dataset.exportPhase === 'done' && ${draftCard}.querySelector('.export-receipt')?.dataset.exportOutcome === 'created'`, 'readers-report-export-written', 120_000);
+    const writtenDraft = await readFile(draftExportPath);
+    requireJourney(writtenDraft.length > 0 && writtenDraft.subarray(0, 2).toString('latin1') === 'PK' &&
+      JSON.stringify(await readdir(draftExportsRoot)) === JSON.stringify([DRAFT_FILE]), 'readers-report-docx-written', writtenDraft.length);
+    await clickSelector(renderer, '[data-screen="book-evaluation"] .readers-report-export-slot > section.manuscript-export [data-export-action="close"]', 'readers-report-export-close');
+
     // ---- 就地反馈轻问 after a Proposal Decision (Issue #61, plan slice S26a; FDBK-001 to FDBK-007, PDEC-009, MARK-005) -------
     at('decision-feedback-suggestions');
     // Two 修改建议 of the Journey's own words on the same manuscript, made through the selection menu as J-05 makes them.
@@ -2470,6 +2452,10 @@ async function main() {
     await click(renderer, '重新分析全书', 'feedback-pending-mode');
     await clickSelector(renderer, '[data-analysis-action="reanalyze-book"]', 'feedback-pending-prepare');
     await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'feedback-pending-plan-ready');
+    // ②A arms its 250 ms follower only when a draw finds the Run under way. Unheld, the J-04 adapter's Run can end before
+    // the card's first read after 开始任务 answers on a slow runner, leaving no follower to hold (#641). J-10's unit hold
+    // keeps the Run's first unit in flight until the follower is held; nothing else in the stage waits on the hold.
+    await writeFile(unitHoldPath, '0', 'utf8');
     await assertRenderer(renderer, `(() => {
       const original=window.setTimeout;
       const held={original,timers:[],release:null}; window.__j11HeldFeedbackFollow=held;
@@ -2485,7 +2471,8 @@ async function main() {
       document.querySelector('#task-drawer [data-task-drawer-control="start"]').click();
       return true;
     })()`, 'feedback-pending-hold-follow');
-    await waitFor(renderer, `typeof window.__j11HeldFeedbackFollow?.release==='function'`, 'feedback-pending-follow-held');
+    await waitFor(renderer, `typeof window.__j11HeldFeedbackFollow?.release==='function' && ['admitted','executing'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState)`, 'feedback-pending-follow-held', 60_000);
+    await rm(unitHoldPath, { force: true });
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'feedback-pending-close-plan');
     await clickSelector(renderer, '#analysis-tab-synopsis', 'feedback-pending-synopsis');
     await waitFor(renderer, `document.querySelector(${JSON.stringify(`${feedbackItem('synopsis')} [data-analysis-action="open-feedback"]`)})?.disabled===false`, 'feedback-pending-card-ready');

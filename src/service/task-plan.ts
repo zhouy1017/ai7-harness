@@ -5,6 +5,8 @@ import type {
   BaselineAnalysisProjection,
   InitialEvaluationProjection,
   InitialEvaluationTaskMode,
+  ReadersReportProjection,
+  ReadersReportTemplate,
   BaselineAnalysisSelectedRange,
   PlanRevisionDiffEntryProjection,
   PlanRevisionDiffValue,
@@ -21,7 +23,7 @@ import type {
   TaskPlanStartProjection,
   TaskPlanStepProjection,
 } from '../shared/protocol.js';
-import { BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_TASK_GOAL } from '../shared/protocol.js';
+import { BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_TASK_GOAL, READERS_REPORT_TEMPLATE_LABELS, SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL } from '../shared/protocol.js';
 import type { ClarificationFacts } from './analysis/clarifications.js';
 import { namedNonEffects } from './analysis/baseline-analysis-store.js';
 import type { ManifestBlockInput } from './analysis/coverage-manifest.js';
@@ -912,6 +914,164 @@ export function initialEvaluationPlan(input: {
   };
 }
 
+// ---- 审稿意见 (Issue #429, plan slice S81c) ----------------------------------------------------------------------------
+
+/** An analysis Task's state in the drawer's own words, for 评估's 审稿意见 beside the drawer. */
+export function readersReportTaskStateLabel(projection: ReadersReportProjection): string {
+  return baselineState(projection as unknown as BaselineAnalysisProjection).label;
+}
+
+const READERS_REPORT_NO_RULE = '审稿意见还不能设为快速开始默认：每次起草都先看计划，再开始。';
+
+/**
+ * The plan of the Book's 审稿意见 Task (EVAL-013): the reader's report kind's ledger read in the editor's words, as 初评's plan
+ * is. It names the 定稿 version and the template it drafts from and — in `参考` — the house's 审稿意见 among its 范例, or that
+ * there is none (「本社暂无审稿意见范例，本次不参考范例」, the Owner's answer of 2026-10-07). Its steps are what the kind
+ * does — read each range for passages the report can point to, then write the five sections — and what it makes is a draft
+ * the editor edits on the manuscript surface: never a change of the record, never a delivery. It is started from the bar and
+ * takes no edits, rules, pause or redo: a changed plan is drafted again from 评估.
+ */
+export function readersReportPlan(input: {
+  projection: ReadersReportProjection;
+  bookTitle: string;
+  blocks: ReadonlyArray<ManifestBlockInput>;
+  task: { template: ReadersReportTemplate; recordOrdinal: number; profile: { title: string; version: string }; exemplars: string };
+}): TaskPlanProjection {
+  const { projection, bookTitle, blocks, task } = input;
+  const intent = projection.taskIntent;
+  const checkpoint = projection.checkpoint;
+  const manifest = projection.coverageManifest;
+  const provider = projection.providerResolutionPlan;
+  const plan = projection.executionPlan;
+  const envelope = projection.planEnvelope;
+  const version = projection.planVersion;
+  requirePlan(intent !== null && checkpoint !== null && manifest !== null && provider !== null && plan !== null &&
+    envelope !== null && version !== null, '审稿意见还没有准备计划。');
+  const reading = readRange(blocks, null);
+  const units = manifest.units.length;
+  const route = provider.executionRoute;
+  const remote = provider.remoteBinding;
+  const live = route.kind === 'opencode-go';
+  const ceiling = provider.runBudgetCeiling;
+  const revision = projection.planRevision;
+  const boundary = envelope.boundary;
+  const state = baselineState(projection as unknown as BaselineAnalysisProjection);
+  const needsModelConnection = route.kind === 'opencode-go';
+  const start: TaskPlanStartProjection = projection.authorization !== null
+    ? startedBar(needsModelConnection)
+    : !projection.actions.canAuthorize
+      ? { readiness: 'changed', needsModelConnection, planEnvelopeDigest: null, categoryDigests: [], reconfirm: null }
+      : { readiness: route.kind === 'none' ? 'no-route' : 'ready', needsModelConnection, planEnvelopeDigest: envelope.digest, categoryDigests: [], reconfirm: null };
+  const templateLabel = READERS_REPORT_TEMPLATE_LABELS[task.template];
+  const basis = `第 ${task.recordOrdinal} 版定稿`;
+  return {
+    bookId: projection.bookId,
+    kind: 'readers-report',
+    ref: intent.taskIntentId,
+    state: revision !== null && projection.authorization === null ? { key: 'changed', label: '计划已变化' } : state,
+    planVersion: version.ordinal,
+    goal: {
+      sentence: `从${basis}的评估起草审稿意见「${templateLabel}」：总体评价、主要优点、主要问题、修改建议与结论`,
+      chips: { book: bookTitle, position: '全书', selectedGraphemes: reading.graphemes, taskInputRevision: checkpoint.revisionLabel, procedure: `${task.profile.title} 第 ${task.profile.version} 版 · ${basis}` },
+      savedForEdits: checkpoint.createdForDirtyJournal,
+    },
+    scope: {
+      process: `《${bookTitle}》全书 · ${groupedCount(reading.graphemes)} 字 · ${units} 个阅读范围`,
+      reference: [
+        `评估记录${basis}（${task.profile.title} 第 ${task.profile.version} 版）：各项得分与评语、主要优点与问题、风险与结论`,
+        task.exemplars,
+      ],
+      send: live ? `全书各阅读范围的稿件正文（${units} 个）与定稿的评估记录，以及汇总时各处段落的说明` : '不发送任何内容',
+      notRead: NOT_READ,
+    },
+    steps: [
+      { id: 'units', label: '逐章读取，找出可以引用的段落', result: '每处段落引用它所在的内容块', removable: false, removed: false },
+      { id: 'reduction', label: '按模板写出审稿意见', result: '总体评价、主要优点、主要问题、修改建议、结论', removable: false, removed: false },
+    ],
+    participation: { during: boundary !== null && boundary.participation.expected ? boundary.participation.statement : NO_PARTICIPATION, after: '在「评估」中打开草稿，在稿件编辑面上修改，保存为版本后可导出为 DOCX' },
+    service: {
+      role: roleLabel(provider.role),
+      provider: live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`,
+      decision: live
+        ? `开发者实时（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}）：实时传输受运行边界约束`
+        : route.kind === 'none'
+          ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
+          : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`,
+      send: live ? `所读范围内的稿件正文与评估记录发往 ${route.kind} · ${route.model}` : NOTHING_SENT,
+      sendCategory: outboundLabel(provider.outboundDataCategory),
+      usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : NO_USAGE,
+      usageIsCeiling: ceiling !== 'unset',
+      duration: DURATION_UNKNOWN,
+      budgetCeiling: budgetCeilingLabel(ceiling),
+      accountLimit: ACCOUNT_LIMIT_UNKNOWN,
+    },
+    outcomes: [
+      `审稿意见草稿「${templateLabel}」：总体评价、主要优点、主要问题、修改建议与结论`,
+      '这次运行的运行报告',
+    ],
+    notDo: {
+      editorial: [
+        ...EDITORIAL_NOT_DO,
+        '不改评估记录：分数、评语与结论照录你定稿的',
+        '不写营销要点：营销要点由交付物中的写作任务生成',
+        '不交付、不发送：草稿在稿件编辑面上由你修改',
+        '不读这本书以外的内容',
+      ],
+      technical: [...projection.namedNonEffects],
+    },
+    boundary: {
+      adaptable: boundary === null ? [] : boundary.adaptable.map((entry) => ({
+        id: entry.adaptationClass,
+        label: PLAN_EDIT_ADAPTATION_LABELS[entry.adaptationClass] ?? SAFE_RETRY_ADAPTATION,
+        removable: false,
+        removed: false,
+        movable: false,
+        askFirst: false,
+      })),
+      askFirst: [...LOCKED_BOUNDARY],
+    },
+    edit: NOT_EDITABLE,
+    drift: revision === null ? null : {
+      reasons: ['计划冻结之后，它的关键内容已经变化；原计划不能再开始。'],
+      entries: revision.diff.map((entry) => driftEntry(entry, blocks)),
+      resolution: '请在「评估」里重新起草审稿意见。',
+    },
+    technical: [
+      { key: 'task-intent', label: '任务意图', value: intent.taskIntentId },
+      { key: 'mode', label: '更新方式', value: `${intent.modeLabel} · ${intent.mode}` },
+      { key: 'goal', label: '固定任务目标', value: intent.goal },
+      { key: 'expected-outcome', label: '预期结果类别', value: intent.expectedOutcome },
+      { key: 'template', label: '审稿意见模板', value: `${templateLabel} · ${task.template}` },
+      { key: 'task-input-revision', label: '任务输入修订版', value: `${checkpoint.revisionLabel} · ${checkpoint.revisionId} · ${checkpoint.revisionDigest}` },
+      { key: 'coverage-manifest', label: '覆盖清单', value: `${units} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个内容块 · ${manifest.totalGraphemes} 字素 · ${manifest.digest}` },
+      { key: 'execution-route', label: '执行路由', value: route.kind === 'none'
+        ? `none · ${route.reason}`
+        : route.kind === 'opencode-go' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
+      { key: 'provider-processing', label: '模型服务数据处理策略', value: pinReading(remote.providerProcessing) },
+      { key: 'run-budget-ceiling', label: '任务运行预算上限', value: ceiling === 'unset' ? 'unset' : `${ceiling.maxTotalTokens} tokens` },
+      { key: 'execution-steps', label: '计划步骤（记录）', value: plan.steps.join(' → ') },
+      { key: 'reducer-stages', label: '归约阶段', value: plan.reducerStages.join(' → ') },
+      { key: 'stop-condition', label: '停止条件', value: plan.stopCondition },
+      { key: 'prompt-contract', label: '提示契约摘要', value: envelope.promptContractDigest },
+      { key: 'dispatch', label: '派发状态', value: envelope.summary },
+      { key: 'plan-envelope', label: '计划权限边界', value: envelope.digest },
+      ...(projection.authorization === null ? [] : [
+        { key: 'authorization', label: '运行授权', value: `${projection.authorization.authorizationId} · ${projection.authorization.origin} · ${projection.authorization.authority} · ${projection.authorization.authorizedAt}` },
+      ]),
+      ...(projection.run === null ? [] : [
+        { key: 'run-record', label: '运行记录', value: `${projection.run.runRecordId} · ${projection.run.state} · ${projection.run.recordedAt}` },
+      ]),
+    ],
+    start,
+    defaultRule: noDefaultRule(READERS_REPORT_NO_RULE),
+    runControl: null,
+    redo: null,
+    reprepare: null,
+    clarifications: [],
+    budgetStop: null,
+  };
+}
+
 /** What the Run read before the Run Budget Ceiling stopped it (Issue #51, S16a; MODEL-016); `null` for any other Run. */
 function baselineBudgetStop(projection: BaselineAnalysisProjection): TaskPlanProjection['budgetStop'] {
   const stop = projection.run?.state === 'interrupted' ? projection.taskOutcome?.stop ?? null : null;
@@ -1330,6 +1490,11 @@ function reviewState(facts: ReviewRunPlanFacts): TaskPlanProjection['state'] {
       return { key: 'stopped', label: facts.canContinue ? '中途停止 · 可继续审阅' : '中途停止' };
     case 'failed':
       return { key: 'stopped', label: '运行失败' };
+    // A Series Retrieval Exclusion stopped it (Issue #64, S29b; SER-024), and the editor may then have cancelled it.
+    case 'scope-changed':
+      return { key: 'stopped', label: SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL };
+    case 'cancelled':
+      return { key: 'stopped', label: '已取消' };
   }
 }
 

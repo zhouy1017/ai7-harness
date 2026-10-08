@@ -55,7 +55,14 @@ import { SCHEDULED_BACKUP_SCHEMA_SQL, initializeScheduledBackupSchema } from '..
 import { SERIES_SCHEMA_SQL, initializeSeriesSchema } from '../../src/service/series.js';
 import { SERIES_KNOWLEDGE_SCHEMA_SQL, initializeSeriesKnowledgeSchema } from '../../src/service/series-knowledge.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { ANALYSIS_LEDGER_REVISION_23_SQL, ANALYSIS_LEDGER_REVISION_58_SQL, CAPTURED_PROCEDURE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import {
+  ANALYSIS_LEDGER_REVISION_23_SQL,
+  ANALYSIS_LEDGER_REVISION_58_SQL,
+  ANALYSIS_LEDGER_REVISION_59_SQL,
+  CAPTURED_PROCEDURE_SCHEMA_VERSION,
+} from '../../src/service/task-authorization.js';
+import { READERS_REPORT_SCHEMA_SQL, initializeReadersReportSchema } from '../../src/service/readers-reports.js';
+import { SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL, initializeSeriesRetrievalExclusionSchema } from '../../src/service/series-exclusions.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 import { plantRevision34Relations } from '../support/clarifications.js';
 import { downgradeAnalysisRunStatesToRevision29 } from '../support/connectivity-wait.js';
@@ -150,10 +157,27 @@ interface Revision {
 // Newest first: a store is walked down one revision at a time.
 const REVISIONS: ReadonlyArray<Revision> = [
   {
-    // Revisions 61 and 62 are other slices' (Issue #65, S30): a revision-60 store is the one revision 63 starts from.
+    // Revision 63 (Issue #65, S30): the Captured Procedures and the Developer Capability Proposals, created before the stamp.
     revision: 63,
     step: initializeCapturedProcedureSchema,
     undo: (database) => drop(database, Object.keys(CAPTURED_PROCEDURE_SCHEMA_SQL).reverse()),
+  },
+  {
+    // Revision 62 (Issue #429, S81c) rebuilds the three kind-coupled relations and stamps its version in one transaction, so the
+    // one step an interruption can leave committed without the stamp is the two relations of 审稿意见. Revisions 60 and 61 left
+    // the kind-coupled relations as revision 59 shaped them.
+    revision: 62,
+    step: initializeReadersReportSchema,
+    undo: (database) => {
+      drop(database, Object.keys(READERS_REPORT_SCHEMA_SQL).reverse());
+      downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_59_SQL);
+    },
+  },
+  // Revision 61 (Issue #64, S29b): the Series Retrieval Exclusions.
+  {
+    revision: 61,
+    step: initializeSeriesRetrievalExclusionSchema,
+    undo: (database) => drop(database, Object.keys(SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL).reverse()),
   },
   {
     revision: 60,
@@ -338,8 +362,7 @@ const tables = (): string[] => {
 describe('an upgrade interrupted before its version stamp', () => {
   for (const { revision, step } of REVISIONS) {
     if (step === null) continue;
-    // The revision before: 60 for revision 63, whose 61 and 62 are other slices' (Issue #65, S30).
-    const before = revision === 63 ? 60 : revision - 1;
+    const before = revision - 1;
     it(`is finished by the next open when revision ${revision}'s relations committed and its stamp did not`, async () => {
       expect(await opened()).toBe(CAPTURED_PROCEDURE_SCHEMA_VERSION);
       const terminal = tables();

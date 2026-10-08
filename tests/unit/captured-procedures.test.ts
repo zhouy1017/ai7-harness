@@ -4,7 +4,9 @@ import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.j
 import {
   CAPTURED_PROCEDURE_SCHEMA_SQL,
   CAPTURED_PROCEDURE_TRIGGER_SQL,
+  CAPTURE_CANCELLED,
   CAPTURE_CONTINUABLE,
+  CAPTURE_SCOPE_CHANGED,
   CAPTURE_NOT_STARTED,
   CAPTURE_NOTHING_ELIGIBLE,
   CAPTURE_NOTHING_SETTLED,
@@ -161,11 +163,13 @@ describe('what a capture may keep (ADR 0087 §2; REUSE-019)', () => {
 
   it('offers only a Run authorized and finished, with nothing left to continue', () => {
     const settled = [category(STYLE, 'settled')];
-    const read = (state: 'prepared' | 'running' | 'settled' | 'partial' | 'failed', authorized = true, canContinue = false, categories = settled) =>
+    const read = (state: 'prepared' | 'running' | 'settled' | 'partial' | 'failed' | 'cancelled' | 'scope-changed', authorized = true, canContinue = false, categories = settled) =>
       procedureCaptureSource({ authorized, state, canContinue, categories }, BUILTIN_REVIEW_CATEGORY_CONFIGURATION).unavailableReason;
     expect(read('prepared', false)).toBe(CAPTURE_NOT_STARTED);
     expect(read('settled', false)).toBe(CAPTURE_NOT_STARTED);
     expect(read('running')).toBe(CAPTURE_RUNNING);
+    expect(read('cancelled')).toBe(CAPTURE_CANCELLED);
+    expect(read('scope-changed')).toBe(CAPTURE_SCOPE_CHANGED);
     expect(read('partial', true, true)).toBe(CAPTURE_CONTINUABLE);
     expect(read('failed', true, false, [category(STYLE, 'failed', '运行失败')])).toBe(CAPTURE_NOTHING_SETTLED);
     expect(read('settled')).toBeNull();

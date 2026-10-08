@@ -482,7 +482,7 @@ async function openTaskRunSurface(plan: TaskPlanProjection): Promise<void> {
   try {
     if (plan.kind === 'baseline-analysis') renderBookAnalysis(plan.bookId, plan.goal.chips.book);
     else if (plan.kind === 'review-run') renderBookReview(plan.bookId, plan.goal.chips.book, { reviewRunId: plan.ref, findingId: null });
-    else if (plan.kind === 'initial-evaluation') renderBookEvaluation(plan.bookId, plan.goal.chips.book);
+    else if (plan.kind === 'initial-evaluation' || plan.kind === 'readers-report') renderBookEvaluation(plan.bookId, plan.goal.chips.book);
     else renderBookOverview(await window.ai7.getBookOverview({ bookId: plan.bookId, historyCursor: null }));
   } catch (error) {
     setStatus(rendererErrorMessage(error, '无法打开运行所在的页面。'), 'error');
@@ -2316,6 +2316,13 @@ function renderBookEvaluation(bookId: string, bookTitle: string): void {
     awaitServiceJob,
     // AI7 初评's plan opens in the Task Drawer beside 评估 (Issue #429, S81b1), and its bar starts it.
     openPlan: (ref) => openTaskPlan(bookId, 'initial-evaluation', ref),
+    // 审稿意见 (Issue #429, S81c): its plan in the drawer likewise, and its draft on the manuscript surface as 交付物 opens one.
+    bookId,
+    openReadersReportPlan: (ref) => openTaskPlan(bookId, 'readers-report', ref),
+    openDraft: async (draft) => {
+      const opened = await window.ai7.getManuscriptWindow({ manuscriptId: draft.document.documentId, branchId: draft.document.branchId, cursor: null });
+      renderEditorWindow(opened, bookTitle, undefined, undefined, undefined, undefined, { typeId: draft.typeId, typeLabel: draft.typeLabel, document: draft.document });
+    },
   });
   const actions = element('div', 'button-row workbench-actions');
   const openManuscript = button(DELIVERABLES_DESTINATION_ACTIONS[0], 'primary', async () => {
@@ -2341,7 +2348,7 @@ function renderBookEvaluation(bookId: string, bookTitle: string): void {
   actions.append(openManuscript, openOverview);
   content.append(actions);
   replaceScreen('book-evaluation', content);
-  taskSurfaceRefresh = { 'initial-evaluation': () => surface.refresh() };
+  taskSurfaceRefresh = { 'initial-evaluation': () => surface.refresh(), 'readers-report': () => surface.refresh() };
   setStatus(EVALUATION_STATUS.loading, 'busy');
   void surface.load().then(
     () => {
@@ -6852,7 +6859,7 @@ async function awaitServiceJob(
   const requireMonotonicReimportProgress = (next: ServiceJobProjection): void => {
     if (next.kind !== 'reimport-preparation' && next.kind !== 'reimport-resolution' && next.kind !== 'reimport-commit' &&
         next.kind !== 'task-authorization-preparation' && next.kind !== 'baseline-analysis-preparation' &&
-        next.kind !== 'review-run-preparation' && next.kind !== 'initial-evaluation-preparation') return;
+        next.kind !== 'review-run-preparation' && next.kind !== 'initial-evaluation-preparation' && next.kind !== 'readers-report-preparation') return;
     if (!Number.isSafeInteger(next.progress.completed) || !Number.isSafeInteger(next.progress.total) ||
       next.progress.completed < previousReimportProgress || next.progress.completed > next.progress.total ||
       next.progress.total <= 0 ||
@@ -6880,8 +6887,20 @@ async function awaitServiceJob(
 async function documentContextOf(window_: ManuscriptWindowProjection): Promise<ProductionDocumentContext> {
   const documents = await window.ai7.inspectProductionDocuments();
   const type = documents.types.find((entry) => entry.document?.documentId === window_.manuscriptId);
-  if (documents.bookId !== window_.bookId || type === undefined || type.document === null) throw new Error('这份生产文档已不在这本书的交付物中。');
-  return { typeId: type.typeId, typeLabel: type.label, document: type.document };
+  if (documents.bookId === window_.bookId && type !== undefined && type.document !== null) {
+    return { typeId: type.typeId, typeLabel: type.label, document: type.document };
+  }
+  // A 审稿意见 draft (Issue #429, S81c) is no card of 交付物: 评估 names it, and it is drawn exactly as a document is.
+  const draft = await readersReportDraftOf(window_.manuscriptId);
+  if (draft === null) throw new Error('这份生产文档已不在这本书的交付物中。');
+  return draft;
+}
+
+/** A 审稿意见 draft of the route's Book, as 评估 reads it, by its document identity; `null` for any other. */
+async function readersReportDraftOf(documentId: string): Promise<ProductionDocumentContext | null> {
+  const page = await window.ai7.inspectEvaluation({ recordId: null });
+  const draft = page.readersReport.templates.find((entry) => entry.draft?.document.documentId === documentId)?.draft ?? null;
+  return draft === null ? null : { typeId: draft.typeId, typeLabel: draft.typeLabel, document: draft.document };
 }
 
 /**
@@ -7314,7 +7333,11 @@ function renderEditorWindow(
   // The document's workflow moves by the editor's commands in its lens (Issue #415, S66c); a refused move reads it again.
   const documentLens = productionDocument === undefined ? undefined : renderDocumentLens(productionDocument, {
     move: async (input) => (await window.ai7.transitionProductionDocumentPhase({ documentId: productionDocument.document.documentId, ...input })).document,
-    read: async () => (await window.ai7.inspectProductionDocuments()).types.find((type) => type.typeId === productionDocument.typeId)?.document ?? null,
+    read: async () => {
+      const documents = await window.ai7.inspectProductionDocuments();
+      return documents.types.find((type) => type.typeId === productionDocument.typeId)?.document ??
+        (await readersReportDraftOf(productionDocument.document.documentId))?.document ?? null;
+    },
     setStatus,
     errorMessage: rendererErrorMessage,
   });

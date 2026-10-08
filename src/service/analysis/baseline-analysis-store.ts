@@ -787,6 +787,11 @@ export class BaselineAnalysisStore {
     return this.#launch;
   }
 
+  /** Whether a preparation is in flight, which only this instance holds; the store keeps such a ledger (Issue #649). */
+  get preparing(): boolean {
+    return this.#work.size > 0;
+  }
+
   /**
    * Bind the trusted launch facts. The service entry calls this once, before it serves any frame, so
    * that the store never has to reach for a launch policy of its own; a `developer-live` scope
@@ -3346,7 +3351,13 @@ export class BaselineAnalysisStore {
    * 0034). A Run left cancelling is named for the execution owner, which finishes the cancellation. A kind with no 续行
    * (every kind but the baseline) ends a Run left admitted, executing or pausing `interrupted` instead, with its outcome.
    */
-  reconcileStoppedRuns(): { settled: number; cancelling: ReadonlyArray<string>; answered: ReadonlyArray<string> } {
+  reconcileStoppedRuns(options: {
+    /**
+     * A start left `authorized` that another owner takes on by the editor's own choice, and that this reconciliation so
+     * leaves as it is: a Review Run's category, which 继续审阅 dispatches (Issue #657 review).
+     */
+    readonly leaveAuthorized?: (runRecordId: string) => boolean;
+  } = {}): { settled: number; cancelling: ReadonlyArray<string>; answered: ReadonlyArray<string> } {
     const rows = this.#db.prepare(
       `SELECT r.run_record_id,
               (SELECT s.state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1) last_state
@@ -3380,7 +3391,7 @@ export class BaselineAnalysisStore {
         cancelling.push(runRecordId);
       } else if (state === 'awaiting-clarification' && this.clarificationsOf(runRecordId).every((entry) => entry.answer !== null)) {
         answered.push(runRecordId);
-      } else if (state === 'authorized') {
+      } else if (state === 'authorized' && options.leaveAuthorized?.(runRecordId) !== true) {
         // A start the governor had not admitted yet (Issue #49, S14) — or one a service stopped on between its
         // authorization and its admission — never began: blocked with why, it waits for the editor, not for a place.
         this.recordRunState(runRecordId, 'blocked-before-dispatch', { detail: RECONCILED_QUEUED_DETAIL, reasons: [RECONCILED_QUEUED_DETAIL], reconciled: true });
