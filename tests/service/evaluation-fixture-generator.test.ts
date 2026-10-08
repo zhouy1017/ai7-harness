@@ -29,6 +29,7 @@ import { fixtureEntryKey, type ModelFixtureEntry, type ResolvedModelFixture } fr
 import type { LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
+import { AUTHORED_MARKET } from '../support/initial-evaluation-market.js';
 
 const FIXTURE_IDENTITY = 'sample1-evaluation-authored';
 const FIXTURE_PATH = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url)), `${FIXTURE_IDENTITY}.json`);
@@ -100,18 +101,8 @@ export const AUTHORED_SYNTHESIS: InitialEvaluationSynthesisResult = {
   weaknesses: ['个别句子成分残缺，需要逐句校改。', '比喻偶有俗套，可以更贴切。'],
   nextStep: '先校改残句与俗套的比喻，再补充目标读者与同类书的资料，以便判断市场潜力。',
   suggestedConclusion: 'revise',
-  // The market section (Issue #429, S81b2; EVAL-009): only what the observations above say of the Book itself — no sales figure,
-  // no other house's book, no award record — so 市场回报 is 暂无法预测 and 评奖可能性 states its in-book basis.
-  market: {
-    readers: ['对考古、青铜器与古文字题材有兴趣的成年读者。', '关注学界人情、学术与名利之争的知识分子读者。'],
-    sellingPoints: ['以一封甲骨文来信开篇设下悬念，学术悬疑贯穿始终。', '学者之间的对白各具声口，写出学界中人的性情与分寸。'],
-    channels: ['可从书中的考古与青铜器话题切入，面向文史爱好者推介。', '以学术与名利的冲突为话题，组织书评与读书会讨论。'],
-    marketReturn: null,
-    awards: {
-      statement: '有参评文学奖的潜力，但确定性低。',
-      basis: '所读部分叙述凝练、意象运用纯熟，并触及学术与权力的主题；没有对比任何获奖作品。',
-    },
-  },
+  // The market section (Issue #429, S81b2; EVAL-009), from the observations above alone.
+  market: AUTHORED_MARKET,
 };
 
 const REFLECTION_TEXT = JSON.stringify({

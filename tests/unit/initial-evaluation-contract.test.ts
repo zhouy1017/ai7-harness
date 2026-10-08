@@ -133,6 +133,40 @@ describe('the book-level synthesis', () => {
     expect(parseInitialEvaluationSynthesis('否', PROFILE)).toMatchObject({ ok: false, code: 'not-json' });
   });
 
+  it('admits the market section from the Book alone: three bounded lists and two predictions, each a statement with its basis or none (S81b2)', () => {
+    const ok = parseInitialEvaluationSynthesis(synthesis(), PROFILE);
+    expect(ok.ok && ok.result.market).toEqual({
+      readers: ['文史爱好者。'], sellingPoints: ['甲骨文悬念。'], channels: ['读书会。'],
+      marketReturn: null, awards: { statement: '有参评潜力，确定性低。', basis: '主题与语言。' },
+    });
+    const market = (change: Record<string, unknown>): string => {
+      const base = (JSON.parse(synthesis()) as { market: Record<string, unknown> }).market;
+      const parsed = parseInitialEvaluationSynthesis(synthesis({ market: { ...base, ...change } }), PROFILE);
+      return parsed.ok ? 'ok' : `${parsed.code}:${parsed.detail}`;
+    };
+    // A prediction with a figure in it claims what the Book cannot support, whatever the digits look like.
+    expect(market({ marketReturn: { statement: '首年销量约 8000 册。', basis: '题材。' } })).toBe('prediction-unfounded:市场回报的预测含有数字：只依据所读书稿，不能给出销量、印数或概率。');
+    expect(market({ awards: { statement: '获奖概率约３成。', basis: '主题。' } })).toBe('prediction-unfounded:评奖可能性的预测含有数字：只依据所读书稿，不能给出销量、印数或概率。');
+    // A figure in the basis is the Book's own (a chapter, a year in it), and stands.
+    expect(market({ awards: { statement: '有一定潜力。', basis: '第 3 章写得最好。' } })).toBe('ok');
+    expect(market({ marketReturn: { statement: '销路平稳。', basis: '题材。' }, awards: null })).toBe('ok');
+    expect(market({ marketReturn: { statement: '销路平稳。' } })).toBe('schema-invalid:市场回报的预测不符合评估契约 v1。');
+    expect(market({ awards: { statement: '有潜力。', basis: '题材。', odds: 'low' } })).toBe('schema-invalid:评奖可能性的预测不符合评估契约 v1。');
+    expect(market({ awards: { statement: '字'.repeat(151), basis: '题材。' } })).toBe('schema-invalid:评奖可能性的预测不符合评估契约 v1。');
+    expect(market({ awards: { statement: '有潜力。', basis: '字'.repeat(201) } })).toBe('schema-invalid:评奖可能性的预测不符合评估契约 v1。');
+    expect(market({ awards: { statement: '有潜力。', basis: '题材\n语言。' } })).toBe('schema-invalid:评奖可能性的预测不符合评估契约 v1。');
+    expect(market({ readers: ['一', '二', '三', '四', '五', '六'] })).toBe('schema-invalid:市场部分不符合评估契约 v1。');
+    expect(market({ channels: ['字'.repeat(101)] })).toBe('schema-invalid:市场部分不符合评估契约 v1。');
+    expect(market({ sellingPoints: [] })).toBe('ok');
+    expect(market({ comparables: [] })).toBe('schema-invalid:市场部分不符合评估契约 v1。');
+    const { market: _market, ...withoutMarket } = JSON.parse(synthesis()) as Record<string, unknown>;
+    expect(parseInitialEvaluationSynthesis(JSON.stringify(withoutMarket), PROFILE)).toMatchObject({ ok: false, code: 'schema-invalid' });
+    expect(parseInitialEvaluationSynthesis(synthesis({ market: null }), PROFILE)).toMatchObject({ ok: false, code: 'schema-invalid' });
+    // The instruction says so: no web, no figure, 暂无法预测 where the Book cannot tell.
+    expect(CONTRACT.synthesisInstruction).toContain('没有联网检索，不得声称参考了销量、获奖记录、其他出版社的图书或任何外部数据');
+    expect(CONTRACT.synthesisInstruction).toContain('界面会显示「暂无法预测」');
+  });
+
   it('reads the observations alone, under its own header and a digest no unit request shares', () => {
     const closed = [
       { unitOrdinal: 2, result: { schema: INITIAL_EVALUATION_UNIT_RESULT_SCHEMA, unitOrdinal: 2, observations: [{ itemId: 'literary-quality', note: '甲。', blockOrdinals: [1, 2] }] } },
@@ -209,10 +243,12 @@ describe('the reducer and the shared rules', () => {
     expect(closed.reducerClosure.state).toBe('closed');
     expect(closed.assurance.state).toBe('limited');
     expect(closed.evaluation.synthesis).toEqual({ state: 'closed', reason: null });
+    // The market section is the synthesis's own (S81b2), and none without it.
+    expect(closed.evaluation.market).toEqual(parsed.ok ? parsed.result.market : 'unparsed');
 
     const gap = reduceInitialEvaluation({ profile: PROFILE, manifest, outcomes: [outcomes[0]!], synthesis: { state: 'gap', code: 'contract-invalid', reason: '全书综合结果不符合契约 v1。', requestDigest: DIGEST } });
     expect(gap.evaluation.items.every((item) => item.score === null && item.comment === null)).toBe(true);
-    expect([gap.evaluation.suggestedConclusion, gap.evaluation.strengths, gap.evaluation.nextStep]).toEqual([null, [], null]);
+    expect([gap.evaluation.suggestedConclusion, gap.evaluation.strengths, gap.evaluation.nextStep, gap.evaluation.market]).toEqual([null, [], null, null]);
     expect(gap.evaluation.synthesis).toEqual({ state: 'gap', reason: '全书综合结果不符合契约 v1。' });
     expect(gap.reducerClosure.stages.map((stage) => [stage.stage, stage.state])).toEqual([
       ['unit-validation', 'closed-with-gaps'], ['cross-unit-reduction', 'closed-with-gaps'], ['book-synthesis', 'closed-with-gaps'],

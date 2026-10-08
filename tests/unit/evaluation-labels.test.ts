@@ -35,6 +35,18 @@ import {
   evaluationTotalLine,
   evaluationUnsavedLine,
   evaluationVersionLine,
+  EVALUATION_MARKET_OFFLINE,
+  EVALUATION_PREDICTION_HEADING,
+  EVALUATION_PRICING_BASIS,
+  EVALUATION_REWRITE_LEDE,
+  evaluationComparableLine,
+  evaluationComparablesMoreLine,
+  evaluationPredictionLine,
+  evaluationPricingLines,
+  evaluationPricingRangeLine,
+  evaluationRewriteDecidedLine,
+  evaluationRewriteProposalLine,
+  evaluationRewriteTaskLine,
 } from '../../src/renderer/evaluation-labels.js';
 import { BUILTIN_EVALUATION_PROFILE, evaluationProfileDigest } from '../../src/service/evaluation-records.js';
 import { evaluationBand, evaluationTotal, finalizationNeedsScore, provisionalEvaluationScore, recommendationBlocked, validEvaluationScore } from '../../src/shared/evaluation-scoring.js';
@@ -215,5 +227,43 @@ describe('AI7 初评 words (Issue #429, S81b1; EVAL-001, EVAL-005 to EVAL-007)',
     expect(evaluationAi7UnreadLine({ unitsTotal: 8, unreadUnits: [] })).toBeNull();
     expect(evaluationAi7UnreadLine({ unitsTotal: 8, unreadUnits: [3, 5] }))
       .toBe('AI7 这次没有读到 2 / 8 个阅读范围（第 3、5 个）：这些范围里的内容没有进入它的分数和评语。');
+  });
+
+  it('says the market section rests on the Book and house data, tags comparables, and says 暂无法预测 where AI7 could not tell (S81b2)', () => {
+    expect(EVALUATION_MARKET_OFFLINE).toBe('未联网核查：市场部分只依据本书稿件与本社数据，没有检索外网，也没有对比他社图书或获奖作品。');
+    expect(EVALUATION_PREDICTION_HEADING).toBe('预测 · 低确定性');
+    expect(evaluationComparableLine({ bookId: 'b', title: '星河之二', seriesTitle: '星河', published: true, source: 'series' })).toBe('《星河之二》 · 同书系「星河」 · 已发稿');
+    expect(evaluationComparableLine({ bookId: 'b', title: '星河之三', seriesTitle: '星河', published: false, source: 'series' })).toBe('《星河之三》 · 同书系「星河」 · 尚未发稿');
+    expect(evaluationComparablesMoreLine({ comparables: [], comparableCount: 0 })).toBeNull();
+    expect(evaluationComparablesMoreLine({ comparables: Array(10).fill({}), comparableCount: 12 })).toBe('另有 2 本同书系图书没有列出。');
+    expect(evaluationPredictionLine(null)).toBe('暂无法预测');
+    expect(evaluationPredictionLine({ statement: '有潜力。', basis: '主题与语言' })).toBe('有潜力。（依据：主题与语言）');
+  });
+
+  it('says what 定价与首印 waits for, and once shown the ranges with the Books they rest on (S81b2)', () => {
+    const range = { books: 29, priceFen: { low: 3800, median: 4500, high: 5200 }, firstPrint: { low: 2800, median: 13500, high: 4200 } };
+    expect(evaluationPricingRangeLine('本社已发稿图书', range)).toBe('本社已发稿图书 29 本：定价 ¥38.00 – ¥52.00（中位数 ¥45.00） · 首印 2,800 – 4,200 册（中位数 13,500 册）');
+    const base = { booksWithActuals: 4, threshold: 30, enabled: false, available: false, house: null, series: null };
+    expect(evaluationPricingLines(base)).toEqual(['不预测。本社已录入定价与首印的已发稿图书 4 / 30 本；满 30 本后，可在「设置 › 评估校准与预测」里打开预测。']);
+    expect(evaluationPricingLines({ ...base, enabled: true })).toEqual(['不预测。本社已录入定价与首印的已发稿图书 4 / 30 本；满 30 本后，可在「设置 › 评估校准与预测」里打开预测。']);
+    expect(evaluationPricingLines({ ...base, booksWithActuals: 30, available: true })).toEqual(['不预测：「设置 › 评估校准与预测」里没有打开定价与首印预测（已录入实际数据的已发稿图书 30 本）。']);
+    expect(evaluationPricingLines({ ...base, booksWithActuals: 30, available: true, enabled: true })).toEqual(['不预测：除这本书以外，本社还没有录入实际数据的已发稿图书。']);
+    expect(evaluationPricingLines({ ...base, booksWithActuals: 30, available: true, enabled: true, house: range })).toEqual([
+      evaluationPricingRangeLine('本社已发稿图书', range), EVALUATION_PRICING_BASIS,
+    ]);
+    const series = { ...range, books: 3 };
+    expect(evaluationPricingLines({ ...base, booksWithActuals: 30, available: true, enabled: true, house: range, series })).toEqual([
+      evaluationPricingRangeLine('同书系已发稿图书', series), evaluationPricingRangeLine('本社已发稿图书', range), EVALUATION_PRICING_BASIS,
+    ]);
+  });
+
+  it('says what 按我的评分重写评语 does, waits for and decided (S81b2)', () => {
+    expect(EVALUATION_REWRITE_LEDE).toContain('分数一个也不改，重写的评语要你采用后才记入这一版');
+    expect(evaluationRewriteTaskLine({ taskIntentId: 't', recordId: 'r', recordOrdinal: 15, entryOrdinal: 2, state: 'settled', label: '已完成' }))
+      .toBe('按我的评分重写评语 · 第 15 版 · 已完成');
+    expect(evaluationRewriteProposalLine({ revisionId: 'x', createdAt: 'y', entryOrdinal: 2, current: true, items: [], verdict: { before: null, after: '新。' } }))
+      .toBe('AI7 按你第 2 次保存的评分重写了评语，等你决定：采用后才记入这一版，分数不变。');
+    expect(evaluationRewriteDecidedLine({ decision: 'accepted', entryOrdinal: 3, decidedAt: 'x' })).toBe('上一次重写的评语已采用（记为第 3 次保存），分数没有改动。');
+    expect(evaluationRewriteDecidedLine({ decision: 'discarded', entryOrdinal: null, decidedAt: 'x' })).toBe('上一次重写的评语已放弃，评语保持原样。');
   });
 });

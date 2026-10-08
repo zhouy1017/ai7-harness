@@ -44,7 +44,7 @@ import { graphemeCount } from './analysis/factual-review-contract.js';
  * and snapshots the profile; the editor scores each item out of its 满分 — a whole or half point, or `不评` with a reason —
  * rates the two risk items, lists what is still missing, and chooses the conclusion, which `推荐出版` waits on while a `高`
  * risk is unreviewed. `定稿` closes the version with the actor and the time; `重新评估` begins the next, seeded from it and
- * compared with it item by item. The market block and 审稿意见 arrive with the later S81 slices.
+ * compared with it item by item. 审稿意见, the market section and 按我的评分重写评语 belong to the later S81 slices, below.
  *
  * Schema revision 47 owns two relations, ledgers like the others: each version's record, and its entries — one chain per
  * version, every save appending the editor's whole content, the last one `finalized` — appended once and never rewritten.
