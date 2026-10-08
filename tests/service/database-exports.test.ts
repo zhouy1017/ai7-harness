@@ -6,9 +6,24 @@ import { DatabaseSync } from 'node:sqlite';
 import { strFromU8, unzipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/canonical.js';
-import { DATABASE_EXPORT_TRIGGER_SQL, copyStore, databasePackageSources, writeDatabasePackage, type DatabasePackageBounds } from '../../src/service/database-exports.js';
+import {
+  DATABASE_EXPORT_TRIGGER_SQL,
+  copyStore,
+  databasePackageSources,
+  openPackageStore,
+  verifyCopiedPayloads,
+  writeDatabasePackage,
+  type DatabaseExportError,
+  type DatabasePackageBounds,
+  type DatabasePackageMember,
+} from '../../src/service/database-exports.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { DIALOGUE_SCHEMA_VERSION, STORE_VERSION_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
+import {
+  ANALYSIS_LEDGER_REVISION_58_SQL,
+  DATABASE_EXPORT_SCHEMA_VERSION,
+  DIALOGUE_SCHEMA_VERSION,
+  STORE_VERSION_SCHEMA_VERSION,
+} from '../../src/service/task-authorization.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
@@ -721,5 +736,123 @@ describe('the database package (Issue #434 review)', () => {
     // Directories are bounded on their own: a fourth is one too many for three, with room for every file.
     expect(await refused({ members: 100, directories: 3 })).toBe('DATABASE_PACKAGE_TOO_LARGE');
     expect(await refused({ members: 100, directories: 4 })).toBe('no-error');
+  });
+});
+
+describe('the payload check of a package, for every kind of file it carries (Issue #644)', () => {
+  /** A store holding one file of each kind besides a manuscript's: a recovery snapshot, a 资料库 original and the profile. */
+  async function storeOfEveryKind(): Promise<void> {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const path = join(roots.inputRoot, `${randomUUID()}.docx`);
+      await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '每种文件', paragraphs: [{ runs: [{ text: { block: 21 } }] }] });
+      const staged = await store.stageSelectedManuscript(randomUUID(), path);
+      const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+        { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, false);
+      const commitId = randomUUID();
+      const { bookId, manuscriptId, branchId } = await store.commitNewBookImport({
+        draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest!, commitId,
+      });
+      await store.acknowledgeImportCompletion(commitId);
+      const window = store.getManuscriptWindow(manuscriptId, branchId, null);
+      const block = window.blocks.find((candidate) => candidate.kind === 'paragraph')!;
+      // An edit still in the journal, then a milestone over it: the store keeps a recovery snapshot of the working text.
+      store.flushJournalEdit({
+        clientEditId: randomUUID(), manuscriptId, branchId, baseRevisionId: window.revisionId, blockId: block.blockId,
+        windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: block.digest, expectedJournalSequence: window.journalSequence,
+        fromGrapheme: 0, toGrapheme: 0, insertText: '导出前',
+      });
+      await store.saveMilestone(manuscriptId, branchId, '一审稿', 'stage-archive', null, '');
+      const material = join(roots.inputRoot, `资料-${randomUUID()}.txt`);
+      await writeFile(material, 'AI7 自己写的一份资料。');
+      const preview = await store.previewLibraryMaterial(material);
+      await store.addLibraryMaterial({ previewId: preview.previewId, title: '资料', kind: 'book' });
+      await store.installEditorialWorkspaceProfile(bookId);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }
+
+  /** Every file the data root holds besides the store, as a package would list it. */
+  async function membersOf(): Promise<DatabasePackageMember[]> {
+    const members: DatabasePackageMember[] = [];
+    for (const source of await databasePackageSources(roots.dataRoot)) {
+      const bytes = await readFile(source.path);
+      members.push({ path: source.member, bytes: bytes.byteLength, sha256: digest(bytes) });
+    }
+    return members;
+  }
+
+  const storePath = (): string => join(roots.dataRoot, 'store', 'ai7.sqlite');
+  const refusedWith = (promise: Promise<void>): Promise<unknown> =>
+    promise.then(() => 'no-error', (error: unknown) => ({ code: (error as DatabaseExportError).code, message: (error as Error).message }));
+
+  it.each([
+    ['recovery-objects/', '恢复快照'],
+    ['library-objects/', '资料库原件'],
+    ['native-artifacts/', '编辑工作区方案'],
+  ] as const)('names a %s file packed with another digest or size as damaged while the store holds it, else as incomplete', async (prefix, label) => {
+    await storeOfEveryKind();
+    const members = await membersOf();
+    const index = members.findIndex((member) => member.path.startsWith(prefix));
+    expect(index).toBeGreaterThanOrEqual(0);
+    const live = new DatabaseSync(storePath(), { readOnly: true });
+    try {
+      expect(await refusedWith(verifyCopiedPayloads(storePath(), members, DIALOGUE_SCHEMA_VERSION, undefined, live))).toBe('no-error');
+      const target = members[index]!;
+      const otherDigest = target.sha256 === 'f'.repeat(64) ? '0'.repeat(64) : 'f'.repeat(64);
+      for (const changed of [{ ...target, sha256: otherDigest }, { ...target, bytes: target.bytes + 1 }]) {
+        const packed = members.map((member, at) => (at === index ? changed : member));
+        const damaged = await refusedWith(verifyCopiedPayloads(storePath(), packed, DIALOGUE_SCHEMA_VERSION, undefined, live));
+        expect(damaged).toMatchObject({ code: 'DATABASE_SOURCE_DAMAGED' });
+        expect((damaged as { message: string }).message).toContain(`${label} 1 个`);
+        // Without the live store to tell the two apart, it is a package that did not come out whole.
+        expect(await refusedWith(verifyCopiedPayloads(storePath(), packed, DIALOGUE_SCHEMA_VERSION)))
+          .toMatchObject({ code: 'DATABASE_PACKAGE_INCOMPLETE' });
+      }
+    } finally {
+      live.close();
+    }
+  }, 180_000);
+
+  it.each(['content_objects', 'recovery_snapshots', 'library_materials', 'native_artifact_installations'])(
+    'refuses a copy at revision 55 or later that lacks %s, and reads one before revision 55 without it', async (missing) => {
+      const path = join(roots.inputRoot, `${missing}.sqlite`);
+      const copy = new DatabaseSync(path);
+      try {
+        const columns: Record<string, string> = {
+          content_objects: 'object_digest TEXT, relative_key TEXT, byte_length INTEGER',
+          recovery_snapshots: 'object_digest TEXT, manifest_digest TEXT, object_relative_key TEXT, byte_length INTEGER',
+          library_materials: 'material_id TEXT, object_sha256 TEXT, recorded_at TEXT, canonical_json TEXT, sha256 TEXT',
+          native_artifact_installations: 'retained_key TEXT, content_sha256 TEXT, byte_length INTEGER',
+        };
+        for (const [table, definition] of Object.entries(columns)) if (table !== missing) copy.exec(`CREATE TABLE ${table} (${definition})`);
+      } finally {
+        copy.close();
+      }
+      expect(await refusedWith(verifyCopiedPayloads(path, [], DATABASE_EXPORT_SCHEMA_VERSION))).toMatchObject({ code: 'DATABASE_PACKAGE_INCOMPLETE' });
+      expect(await refusedWith(verifyCopiedPayloads(path, [], DATABASE_EXPORT_SCHEMA_VERSION - 1))).toBe('no-error');
+    });
+
+  it('opens a package-supplied store read-only and trusting no function its schema names', () => {
+    const path = join(roots.inputRoot, 'supplied.sqlite');
+    new DatabaseSync(path).close();
+    // A connection trusts its schema unless told otherwise.
+    const plain = new DatabaseSync(path, { readOnly: true });
+    try {
+      expect(plain.prepare('PRAGMA trusted_schema').get()).toMatchObject({ trusted_schema: 1 });
+    } finally {
+      plain.close();
+    }
+    // Defensive mode is asked for explicitly too, though this Node already defaults to it, so nothing here can tell it
+    // apart; the flag stays for a runtime that does not.
+    const opened = openPackageStore(path);
+    try {
+      expect(opened.prepare('PRAGMA trusted_schema').get()).toMatchObject({ trusted_schema: 0 });
+      expect(() => opened.exec('CREATE TABLE written (value TEXT)')).toThrow();
+    } finally {
+      opened.close();
+    }
   });
 });
