@@ -33,7 +33,15 @@ export type MalformedReason =
   | 'answer-channel-absent'
   | 'content-absent'
   | 'output-absent'
-  | 'candidate-absent';
+  | 'candidate-absent'
+  | 'tool-calls-malformed';
+
+/** One function call a tool-calling model asked for (Issue #473): the provider's call id, the name, and the raw JSON arguments. */
+export interface CanonicalToolCall {
+  readonly id: string;
+  readonly name: string;
+  readonly arguments: string;
+}
 
 /**
  * One response, normalized. `empty-answer` carries whether the declared reasoning channel had
@@ -43,6 +51,11 @@ export type MalformedReason =
 export type CanonicalModelResult =
   | { readonly kind: 'answer'; readonly text: string; readonly reasoningText: string | null; readonly usage: ModelUsage | null }
   | { readonly kind: 'empty-answer'; readonly reasoningPresent: boolean; readonly usage: ModelUsage | null }
+  /**
+   * The model asked for tools rather than answering (Issue #473). Read only for a profile that declares
+   * `toolCalling: 'function'`; for every other profile a `tool_calls` field is not a channel and is never read.
+   */
+  | { readonly kind: 'tool-calls'; readonly text: string; readonly calls: ReadonlyArray<CanonicalToolCall>; readonly reasoningText: string | null; readonly usage: ModelUsage | null }
   | { readonly kind: 'malformed'; readonly reason: MalformedReason };
 
 function nonNegativeInteger(value: unknown): number | null {
@@ -129,10 +142,16 @@ function isBlockOfType(block: unknown, type: string): block is Record<string, un
 /**
  * The chat-completions reading: one choice, one message, the answer a string on it.
  */
-function normalizeMessageContentString(profile: ProviderModelProfile, body: unknown): CanonicalModelResult {
+function normalizeMessageContentString(profile: ProviderModelProfile, body: unknown, options: NormalizeOptions): CanonicalModelResult {
   if (!isRecord(body) || !Array.isArray(body.choices)) return { kind: 'malformed', reason: 'response-not-a-record' };
   const choice: unknown = body.choices[0];
   if (body.choices.length === 0 || !isRecord(choice)) return { kind: 'malformed', reason: 'choice-absent' };
+  // `tool_calls` is a channel only when the request offered tools to a function-calling model: to every other request the
+  // response reads exactly as it always has, its `content` an answer and its calls nothing.
+  if (options.toolCallsOffered === true && profile.capabilities.toolCalling === 'function' && isRecord(choice.message) &&
+      Array.isArray(choice.message.tool_calls) && choice.message.tool_calls.length > 0) {
+    return toolCallsOf(profile, body, choice.message);
+  }
   if (!isRecord(choice.message) || typeof choice.message.content !== 'string') {
     return { kind: 'malformed', reason: 'answer-channel-absent' };
   }
@@ -143,6 +162,32 @@ function normalizeMessageContentString(profile: ProviderModelProfile, body: unkn
     : null;
   if (choice.message.content.length === 0) return { kind: 'empty-answer', reasoningPresent: reasoning !== null, usage };
   return { kind: 'answer', text: choice.message.content, reasoningText: reasoning, usage };
+}
+
+/**
+ * The chat-completions tool-call reading (Issue #473): every entry of `message.tool_calls` must be a `function` call with a
+ * string id, name, and arguments, or the whole response is `tool-calls-malformed` — a partly readable request for tools is
+ * not a request AI7 can answer. `content` beside the calls may be a string or `null`.
+ */
+function toolCallsOf(profile: ProviderModelProfile, body: Record<string, unknown>, message: Record<string, unknown>): CanonicalModelResult {
+  const calls: CanonicalToolCall[] = [];
+  for (const entry of message.tool_calls as unknown[]) {
+    if (!isRecord(entry) || entry.type !== 'function' || typeof entry.id !== 'string' || entry.id.length === 0 || !isRecord(entry.function) ||
+        typeof entry.function.name !== 'string' || typeof entry.function.arguments !== 'string') {
+      return { kind: 'malformed', reason: 'tool-calls-malformed' };
+    }
+    // Two calls under one id would let one result answer both.
+    if (calls.some((call) => call.id === entry.id)) return { kind: 'malformed', reason: 'tool-calls-malformed' };
+    calls.push({ id: entry.id, name: entry.function.name, arguments: entry.function.arguments });
+  }
+  if (message.content !== null && message.content !== undefined && typeof message.content !== 'string') {
+    return { kind: 'malformed', reason: 'tool-calls-malformed' };
+  }
+  // Whatever reasoning the model wrote beside its calls is kept, declared channel or not: a thinking-mode tool loop hands
+  // it back with the calls (the review of #671; the §7.7 live item confirms the gateway's requirement). It is never read
+  // as an answer.
+  const reasoning = typeof message.reasoning_content === 'string' && message.reasoning_content.length > 0 ? message.reasoning_content : null;
+  return { kind: 'tool-calls', text: typeof message.content === 'string' ? message.content : '', calls, reasoningText: reasoning, usage: usageOf(body) };
 }
 
 /**
@@ -244,10 +289,15 @@ function normalizeCandidateParts(profile: ProviderModelProfile, body: unknown): 
  * The shape is chosen by the declared answer channel and by nothing else — no route, no model id, no
  * endpoint — which is what keeps a second vendor's response shape a row in the profile table.
  */
-export function normalizeModelResponse(profile: ProviderModelProfile, body: unknown): CanonicalModelResult {
+export function normalizeModelResponse(profile: ProviderModelProfile, body: unknown, options: NormalizeOptions = {}): CanonicalModelResult {
   if (profile.capabilities.answerChannel === 'none') return { kind: 'malformed', reason: 'answer-channel-not-declared' };
   if (profile.capabilities.answerChannel === 'content-text-blocks') return normalizeContentBlocks(profile, body);
   if (profile.capabilities.answerChannel === 'output-message-text') return normalizeOutputItems(profile, body);
   if (profile.capabilities.answerChannel === 'candidate-parts-text') return normalizeCandidateParts(profile, body);
-  return normalizeMessageContentString(profile, body);
+  return normalizeMessageContentString(profile, body, options);
+}
+
+/** What the request a response answers offered: tools, or not (Issue #473). Absent, as for every replay, it offered none. */
+export interface NormalizeOptions {
+  readonly toolCallsOffered?: boolean;
 }

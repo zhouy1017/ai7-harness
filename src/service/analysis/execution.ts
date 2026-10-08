@@ -6,7 +6,8 @@ import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/prote
 import type { DeveloperLiveRuntime } from '../launch-policy.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
 import { evaluateRunBudgetCeiling, totalTokens, type ClassifiedModelFailure, type RunBudgetCeiling, type UsageFacts } from '../provider/classification.js';
-import { DeepSeekOpenAiCompatibleAdapter, OPENCODE_GO_ROUTE_PROFILE, isProviderAccountLimit, type ProviderRouteProfile } from '../provider/deepseek-adapter.js';
+import { DeepSeekOpenAiCompatibleAdapter, OPENCODE_GO_ROUTE_PROFILE } from '../provider/deepseek-adapter.js';
+import { transmitOnce } from '../provider/live-transmission.js';
 import { OPENCODE_GO_V4_FLASH_PROFILE } from '../provider/model-profile.js';
 import {
   LOCAL_DETERMINISTIC_MODEL,
@@ -19,7 +20,7 @@ import {
 } from '../provider/egress-gate.js';
 import { Ai7LocalDeterministicAdapter } from '../provider/local-deterministic-adapter.js';
 import type { ResolvedModelFixture } from '../provider/model-fixture.js';
-import { ProviderResultCache, providerRequestDigest, usageOfResponse } from '../provider/provider-result-cache.js';
+import { ProviderResultCache } from '../provider/provider-result-cache.js';
 import {
   assuranceSamplingTurns,
   buildAssuranceSamplingMessage,
@@ -1078,7 +1079,7 @@ export class BaselineAnalysisExecutionOwner {
           // replays without transmitting, and a live call happens at most once per test item. The
           // bound route profile travels with the call, so the cache step reads a limit the way this
           // route declares limits are read rather than by knowing which route it is serving.
-          transport: (url, init) => transmitOnce(cache!, live, testItemPurpose, promptContractDigest, OPENCODE_GO_ROUTE_PROFILE, model, url, init),
+          transport: (url, init) => transmitOnce(cache!, live.nativeFetch, { purpose: testItemPurpose, promptContractDigest }, OPENCODE_GO_ROUTE_PROFILE, model, url, init),
         });
         return liveAdapter.instance;
       },
@@ -2523,94 +2524,6 @@ export function runReportUnitRows(
       gapCode: record.closed.state === 'gap' ? record.closed.gap.code : null,
     };
   });
-}
-
-/**
- * One live call, at most once. The request digest is taken over the canonical body the adapter
- * assembled — the same bytes the gate admitted, and the only part of the request that ever reaches
- * the cache, since the headers carry the credential. An identical request replays from the cache and
- * transmits nothing; otherwise the call claims a fresh test item id, transmits once, and records the
- * result under it. A refused item id fails the turn rather than transmitting anyway.
- */
-async function transmitOnce(
-  cache: ProviderResultCache,
-  live: DeveloperLiveRuntime,
-  purpose: string,
-  promptContractDigest: string,
-  profile: ProviderRouteProfile,
-  model: string,
-  url: string,
-  init: { method: 'POST'; headers: Record<string, string>; body: string; signal?: AbortSignal },
-): Promise<{ status: number; json(): Promise<unknown> }> {
-  const requestDigest = providerRequestDigest(init.body);
-  const replayed = await cache.lookup(model, requestDigest);
-  if (replayed !== null) {
-    await cache.record({
-      itemId: cache.nextItemId(purpose),
-      purpose,
-      model,
-      promptContractDigest,
-      requestDigest,
-      outcome: 'replayed',
-      status: replayed.status,
-      usage: replayed.usage,
-      recordedAt: new Date().toISOString(),
-    });
-    return { status: replayed.status, json: () => Promise.resolve(replayed.response) };
-  }
-  const itemId = cache.nextItemId(purpose);
-  cache.claimItem(itemId);
-  const transmittedAt = new Date().toISOString();
-  let response: { status: number; json(): Promise<unknown> };
-  try {
-    response = await live.nativeFetch(url, init);
-  } catch (error) {
-    await cache.record({
-      itemId, purpose, model, promptContractDigest, requestDigest,
-      outcome: 'failed', status: null, usage: null, recordedAt: new Date().toISOString(),
-    });
-    throw error;
-  }
-  let body: unknown = null;
-  try {
-    body = await response.json();
-  } catch {
-    body = null;
-  }
-  const usage = usageOfResponse(body);
-  // Only a result worth replaying is cached: a limit or a server error must be asked again later.
-  if (response.status === 200) {
-    await cache.store({ model, requestDigest, requestBody: init.body, status: response.status, response: body, usage, transmittedAt });
-  }
-  const accountLimit = isProviderAccountLimit(profile, response.status, body);
-  const resetWindow = accountLimit ? providerResetWindow(body) : null;
-  await cache.record({
-    itemId,
-    purpose,
-    model,
-    promptContractDigest,
-    requestDigest,
-    outcome: response.status === 200 ? 'transmitted' : 'failed',
-    status: response.status,
-    usage,
-    ...(accountLimit ? { classification: 'quota-exhausted' as const } : {}),
-    ...(resetWindow === null ? {} : { resetWindow }),
-    recordedAt: new Date().toISOString(),
-  });
-  return { status: response.status, json: () => Promise.resolve(body) };
-}
-
-/** The reset window a limit response stated, when it stated one; recorded in the ledger, never guessed. */
-function providerResetWindow(body: unknown): string | null {
-  if (body === null || typeof body !== 'object') return null;
-  const error = (body as { error?: unknown }).error;
-  if (error === null || typeof error !== 'object') return null;
-  for (const key of ['reset_at', 'resets_at', 'reset', 'retry_after']) {
-    const value = (error as Record<string, unknown>)[key];
-    if (typeof value === 'string' && value.length > 0) return value;
-    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
-  }
-  return null;
 }
 
 function requireCompositionMatch(actual: string, planned: string): void {
