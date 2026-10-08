@@ -63,7 +63,7 @@ describe('the store version the metadata fallback reads', () => {
 
 describe('every Journey uses the one shared cleanup', () => {
   const runners = readdirSync(E2E).filter((file) => /^run-j\d\d\.mjs$/u.test(file) || file === 'package-export-readiness.mjs');
-  const users = ['run-j03.mjs', 'run-j04.mjs', 'run-j09.mjs', 'run-j10.mjs', 'run-j11.mjs', 'run-j12.mjs', 'run-j13.mjs', 'run-j16.mjs'];
+  const users = ['run-j03.mjs', 'run-j04.mjs', 'run-j07.mjs', 'run-j09.mjs', 'run-j10.mjs', 'run-j11.mjs', 'run-j12.mjs', 'run-j13.mjs', 'run-j16.mjs'];
 
   it('no runner keeps its own copy of the cleanup or a store version pin of its own', () => {
     for (const file of runners) {
