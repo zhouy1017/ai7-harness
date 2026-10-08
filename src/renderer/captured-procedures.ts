@@ -44,6 +44,7 @@ import {
   procedureStopAfterLine,
   procedureStopHeading,
   procedureStopMoreLine,
+  procedureStopMoreVersionsLine,
   procedureStopRunLine,
   procedureStopVersionLine,
   procedureStoppedLine,
@@ -121,7 +122,8 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     return node;
   };
 
-  async function act(busyLine: string, failure: string, body: () => Promise<void>, focus?: string): Promise<void> {
+  /** `focus` is read once the action ends, so an action may choose where focus goes by how it ended. */
+  async function act(busyLine: string, failure: string, body: () => Promise<void>, focus?: string | (() => string)): Promise<void> {
     busy = true;
     options.setStatus(busyLine, 'busy');
     try {
@@ -131,7 +133,7 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     } finally {
       busy = false;
     }
-    await load(focus);
+    await load(typeof focus === 'function' ? focus() : focus);
   }
 
   async function load(focus?: string): Promise<void> {
@@ -247,8 +249,9 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     // 最新可用 (Issue #66, S31; REUSE-043): the version a new use resolves to now.
     if (latestEligible) {
       const latest = el('span', 'status-pill captured-procedure-latest-eligible', PROCEDURE_LATEST_ELIGIBLE);
-      latest.title = PROCEDURE_LATEST_ELIGIBLE_NOTE;
-      line.append(' ', latest);
+      // Its meaning in words a keyboard, touch or screen-reader user reaches too (S31 review P3-6), not only in a tooltip.
+      const note = el('span', 'captured-procedure-latest-eligible-note', `（${PROCEDURE_LATEST_ELIGIBLE_NOTE}）`);
+      line.append(' ', latest, note);
     }
     line.append(el('span', undefined, ` 《${version.title}》${procedureVersionLine(version).replace(` · ${version.stateLabel}`, '')}`));
     item.append(line);
@@ -365,8 +368,12 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
   function stopPanel(preview: CapturedProcedureStopPreviewProjection): HTMLElement {
     const panel = el('section', 'captured-procedure-stop');
     panel.dataset['stopAfter'] = preview.afterVersion === null ? '' : String(preview.afterVersion);
+    panel.dataset['stopVersionCount'] = String(preview.versionCount);
     const heading = el('h5', undefined, procedureStopHeading(preview));
     heading.tabIndex = -1;
+    // The section is named by its heading (S31 review P3-6).
+    heading.id = `procedure-stop-${preview.procedureId}-${preview.versionId ?? 'all'}`;
+    panel.setAttribute('aria-labelledby', heading.id);
     panel.append(heading);
     const runList = (runs: CapturedProcedureStopPreviewProjection['versions'][number]['prepared'], count: number, kind: string): HTMLElement => {
       const list = el('ul', `captured-procedure-stop-runs captured-procedure-stop-${kind}`);
@@ -389,24 +396,35 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
       if (version.activeCount > 0) entry.append(el('h6', undefined, PROCEDURE_STOP_ACTIVE_HEADING), runList(version.active, version.activeCount, 'active'));
       versions.append(entry);
     }
+    // Versions beyond what one frame holds are stopped too, and counted (S31 review P2-2).
+    if (preview.versionCount > preview.versions.length) {
+      versions.append(el('li', 'field-note captured-procedure-stop-more', procedureStopMoreVersionsLine(preview.versions.length, preview.versionCount)));
+    }
     panel.append(versions, el('p', 'field-note captured-procedure-stop-after', procedureStopAfterLine(preview.afterVersion)),
       el('p', 'field-note captured-procedure-stop-kept', PROCEDURE_STOP_KEPT));
     const card = `[data-procedure-id="${preview.procedureId}"]`;
     const back = preview.versionId === null ? `${card} [data-procedure-action="stop-all"]` : `[data-version-id="${preview.versionId}"] [data-procedure-action="stop"]`;
     const actions = el('div', 'button-row');
     actions.append(
-      button(PROCEDURE_ACTIONS.confirmStop, 'primary', 'confirm-stop', () => act('正在停用…', '无法停用。', async () => {
-        try {
-          const result = await api.stopCapturedProcedure({ procedureId: preview.procedureId, versionId: preview.versionId, previewDigest: preview.previewDigest });
-          open.stop = null;
-          options.setStatus(procedureStoppedLine(result.title, preview.versions.length), 'success');
-        } catch (error) {
-          // The Runs it touches moved since it was read: read it again, and let the editor look before stopping.
-          if ((error as { code?: unknown } | null)?.code !== 'CAPTURED_PROCEDURE_STOP_PREVIEW_STALE') throw error;
-          open.stop = await api.previewCapturedProcedureStop({ procedureId: preview.procedureId, versionId: preview.versionId });
-          options.setStatus(PROCEDURE_STOP_STALE, 'error');
-        }
-      }, preview.versionId === null ? `${card} h4` : `[data-version-id="${preview.versionId}"]`)),
+      button(PROCEDURE_ACTIONS.confirmStop, 'primary', 'confirm-stop', () => {
+        let stale = false;
+        return act('正在停用…', '无法停用。', async () => {
+          try {
+            const result = await api.stopCapturedProcedure({ procedureId: preview.procedureId, versionId: preview.versionId, previewDigest: preview.previewDigest });
+            open.stop = null;
+            options.setStatus(procedureStoppedLine(result.title, preview.versionCount), 'success');
+          } catch (error) {
+            // The Runs it touches moved since it was read: read it again, and let the editor look before stopping.
+            if ((error as { code?: unknown } | null)?.code !== 'CAPTURED_PROCEDURE_STOP_PREVIEW_STALE') throw error;
+            open.stop = await api.previewCapturedProcedureStop({ procedureId: preview.procedureId, versionId: preview.versionId });
+            stale = true;
+            options.setStatus(PROCEDURE_STOP_STALE, 'error');
+          }
+        }, () => stale
+          // Back on the preview read again, at its heading (S31 review P3-6).
+          ? `#${CSS.escape(`procedure-stop-${preview.procedureId}-${preview.versionId ?? 'all'}`)}`
+          : preview.versionId === null ? `${card} h4` : `[data-version-id="${preview.versionId}"]`);
+      }),
       button(PROCEDURE_ACTIONS.cancel, 'quiet', 'cancel-stop', async () => {
         open.stop = null;
         await load(back);

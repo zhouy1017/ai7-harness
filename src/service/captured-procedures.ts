@@ -512,6 +512,11 @@ export function readReviewRunProcedurePin(db: DatabaseSync, reviewRunId: string)
   };
 }
 
+/** Whether one Captured Procedure version has been stopped (Issue #66, S31): final, whoever stopped it. */
+export function capturedVersionStopped(db: DatabaseSync, versionId: string): boolean {
+  return db.prepare("SELECT 1 FROM captured_procedure_states WHERE version_id = ? AND state = 'stopped'").get(versionId) !== undefined;
+}
+
 /**
  * Why a prepared Run pinned to a Captured Procedure version cannot be authorized; `null` when nothing stands in the way. A
  * stopped version is final (ADR 0087 §5); a version this house does not hold — the Book was merged in from another (Issue #65
@@ -734,11 +739,41 @@ export class CapturedProcedures {
     this.#appendState(versionId, 'stopped', { previewDigest }, now);
   }
 
-  /** Every Review Run that pinned one version, oldest first (Issue #66, S31): what its `停用…` preview weighs. */
+  /** Every Review Run that pinned one version, oldest first (Issue #66, S31). */
   pinnedRunIds(versionId: string): string[] {
     // A pin is written with its Run, so the order it was recorded in is the order the Runs were prepared in.
     return (this.#db.prepare('SELECT review_run_id FROM review_run_procedure_pins WHERE version_id = ? ORDER BY recorded_at, review_run_id')
       .all(versionId) as SqlRow[]).map((row) => text(row.review_run_id));
+  }
+
+  /**
+   * The Review Runs pinned to one version that its `停用…` preview has to weigh, oldest first (Issue #66, S31 review P3-10): a
+   * superset of those still prepared or still going, read in one query so the preview never derives the state of a Run that
+   * finished long ago. A prepared Run counts only while it is its Book's newest — no other can be approved — and an approved
+   * Run only while one of its categories has no terminal last event (materialized, failed, interrupted or refused) yet.
+   */
+  liveCandidateRunIds(versionId: string): string[] {
+    return (this.#db.prepare(
+      `SELECT p.review_run_id FROM review_run_procedure_pins p JOIN review_runs r ON r.review_run_id = p.review_run_id
+       WHERE p.version_id = ? AND (
+         (NOT EXISTS (SELECT 1 FROM review_run_authorizations a WHERE a.review_run_id = r.review_run_id)
+           AND r.ordinal = (SELECT max(o.ordinal) FROM review_runs o WHERE o.book_id = r.book_id))
+         OR (EXISTS (SELECT 1 FROM review_run_authorizations a WHERE a.review_run_id = r.review_run_id)
+           AND (SELECT count(*) FROM review_run_category_events e
+                WHERE e.review_run_id = r.review_run_id AND e.state IN ('materialized', 'failed', 'interrupted', 'refused')
+                  AND e.sequence = (SELECT max(f.sequence) FROM review_run_category_events f WHERE f.review_run_id = e.review_run_id AND f.category_id = e.category_id))
+               < json_array_length(r.canonical_json, '$.categories'))
+       ) ORDER BY p.recorded_at, p.review_run_id`,
+    ).all(versionId) as SqlRow[]).map((row) => text(row.review_run_id));
+  }
+
+  /** How many Review Runs pinned to one version were approved — ran, or began to — and how many were only prepared (S31 review P3-3). */
+  pinCounts(versionId: string): { ran: number; prepared: number } {
+    const row = this.#db.prepare(
+      `SELECT count(a.review_run_id) ran, count(*) - count(a.review_run_id) prepared FROM review_run_procedure_pins p
+       LEFT JOIN review_run_authorizations a ON a.review_run_id = p.review_run_id WHERE p.version_id = ?`,
+    ).get(versionId) as SqlRow;
+    return { ran: integer(row.ran), prepared: integer(row.prepared) };
   }
 
   #appendState(versionId: string, state: 'enabled' | 'validation-failed' | 'stopped', facts: Readonly<Record<string, unknown>>, now: Date): void {
@@ -808,7 +843,8 @@ export class CapturedProcedures {
       'SELECT * FROM captured_procedure_versions WHERE procedure_id = ? AND (? IS NULL OR version < ?) ORDER BY version DESC LIMIT ?',
     ).all(procedureId, before, before, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE) as SqlRow[]).map((row): CapturedProcedureVersionProjection => {
       const stored = this.#versionOf(row);
-      const { count, runs } = this.runsOf(stored.versionId);
+      const { runs } = this.runsOf(stored.versionId);
+      const counts = this.pinCounts(stored.versionId);
       return {
         versionId: stored.versionId,
         procedureId: stored.procedureId,
@@ -827,7 +863,8 @@ export class CapturedProcedures {
           reviewRunId: stored.sourceReviewRunId,
           runLabel: `第 ${runOrdinal(stored.sourceReviewRunId)} 次审阅`,
         },
-        runCount: count,
+        runCount: counts.ran,
+        preparedRunCount: counts.prepared,
         runs: runs.map((run) => ({
           bookId: run.bookId, bookTitle: run.bookTitle, reviewRunId: run.reviewRunId, label: `第 ${run.ordinal} 次`, createdAt: run.createdAt,
           stateLabel: runStateLabel(run.reviewRunId),

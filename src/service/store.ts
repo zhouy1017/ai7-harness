@@ -3,7 +3,7 @@ import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSyn
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
-import { CAPTURED_PROCEDURE_SCOPE_SLOTS, CAPTURED_PROCEDURE_STATE_LABELS, MAX_CAPTURED_PROCEDURE_RUNS_SHOWN, MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_PAGE, MAX_LEARNING_LINEAGE_DECISIONS, MAX_LEARNING_REMEDIATION_ITEMS, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
+import { CAPTURED_PROCEDURE_SCOPE_SLOTS, CAPTURED_PROCEDURE_STATE_LABELS, MAX_CAPTURED_PROCEDURE_RUNS_SHOWN, MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_PAGE, MAX_LEARNING_LINEAGE_DECISIONS, MAX_LEARNING_REMEDIATION_ITEMS, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
   InspectSeriesKnowledgeReviewInput,
   ServiceOperationMap,
@@ -611,6 +611,7 @@ import {
   ceilingWiderThanSource,
   developerProposalFileText,
   houseExecutor,
+  boundedPage,
   initializeCapturedProcedureSchema,
   resolveProcedureVersions,
   validCapturedProcedureTitle,
@@ -6509,10 +6510,10 @@ export class EditorialStore {
    * resolves to afterwards. Its digest is what `stopCapturedProcedure` confirms. A read.
    */
   previewCapturedProcedureStop(procedureId: string, versionId: string | null): CapturedProcedureStopPreviewProjection {
-    return this.#procedureCall(() => this.#capturedStopPreview(procedureId, versionId));
+    return this.#procedureCall(() => this.#capturedStopPreview(procedureId, versionId).projection);
   }
 
-  #capturedStopPreview(procedureId: string, versionId: string | null): CapturedProcedureStopPreviewProjection {
+  #capturedStopPreview(procedureId: string, versionId: string | null): { projection: CapturedProcedureStopPreviewProjection; stoppingIds: string[] } {
     requireStore(typeof procedureId === 'string' && UUID_PATTERN.test(procedureId), 'CAPTURED_PROCEDURE_INVALID', '可复用工序标识无效。');
     requireStore(versionId === null || (typeof versionId === 'string' && UUID_PATTERN.test(versionId)), 'CAPTURED_PROCEDURE_INVALID', '可复用工序的版本标识无效。');
     const versions = this.#capturedProcedures.versions(procedureId);
@@ -6527,64 +6528,69 @@ export class EditorialStore {
     const link = (reviewRunId: string, status: { bookId: string; ordinal: number; stateLabel: string }): CapturedProcedureStopRunProjection => ({
       bookId: status.bookId, bookTitle: this.#evaluationBookTitle(status.bookId), reviewRunId, label: `第 ${status.ordinal} 次`, stateLabel: status.stateLabel,
     });
-    const previewVersions = stopping.map((stored) => {
+    // Every version it takes, each with every Run it touches: the digest binds all of them, the answer shows what one frame holds.
+    const weighed = stopping.map((stored) => {
       const prepared: CapturedProcedureStopRunProjection[] = [];
       const active: CapturedProcedureStopRunProjection[] = [];
-      const runIds = this.#capturedProcedures.pinnedRunIds(stored.versionId);
-      for (const reviewRunId of runIds) {
+      for (const reviewRunId of this.#capturedProcedures.liveCandidateRunIds(stored.versionId)) {
         const status = this.#reviewRuns.runStatus(reviewRunId);
         // Prepared and still its Book's newest: its approval would be refused once the version is stopped (ADR 0087 §5).
         if (!status.authorized && status.newestOfBook) prepared.push(link(reviewRunId, status));
         // Approved and not finished — running, or with 继续审阅 left: it goes on under the version it was approved with.
         else if (status.authorized && (status.state === 'running' || status.canContinue)) active.push(link(reviewRunId, status));
       }
-      return {
-        versionId: stored.versionId,
-        version: stored.version,
-        stateLabel: CAPTURED_PROCEDURE_STATE_LABELS[stored.state],
-        runCount: runIds.length,
-        prepared: prepared.slice(-MAX_CAPTURED_PROCEDURE_RUNS_SHOWN).reverse(),
-        preparedCount: prepared.length,
-        active: active.slice(-MAX_CAPTURED_PROCEDURE_RUNS_SHOWN).reverse(),
-        activeCount: active.length,
-      };
+      return { stored, prepared, active };
     });
+    const previewVersions = weighed.map(({ stored, prepared, active }) => ({
+      versionId: stored.versionId,
+      version: stored.version,
+      stateLabel: CAPTURED_PROCEDURE_STATE_LABELS[stored.state],
+      runCount: this.#capturedProcedures.pinCounts(stored.versionId).ran,
+      prepared: prepared.slice(-MAX_CAPTURED_PROCEDURE_RUNS_SHOWN).reverse(),
+      preparedCount: prepared.length,
+      active: active.slice(-MAX_CAPTURED_PROCEDURE_RUNS_SHOWN).reverse(),
+      activeCount: active.length,
+    }));
     const after = resolveProcedureVersions(this.#resolvableVersions(versions), new Set(stopping.map((stored) => stored.versionId))).eligible[0] ?? null;
     const previewDigest = sha256(canonicalJson({
       procedureId,
       versionId,
-      versions: previewVersions.map((version) => ({
-        versionId: version.versionId,
-        stateLabel: version.stateLabel,
-        prepared: version.prepared.map((run) => run.reviewRunId),
-        preparedCount: version.preparedCount,
-        active: version.active.map((run) => run.reviewRunId),
-        activeCount: version.activeCount,
+      versions: weighed.map(({ stored, prepared, active }) => ({
+        versionId: stored.versionId,
+        state: stored.state,
+        prepared: prepared.map((run) => run.reviewRunId),
+        active: active.map((run) => run.reviewRunId),
       })),
       afterVersionId: after?.versionId ?? null,
     }));
     return {
-      procedureId,
-      title: versions[0]!.document.title,
-      versionId,
-      versions: previewVersions,
-      afterVersion: after?.version ?? null,
-      previewDigest,
+      stoppingIds: stopping.map((stored) => stored.versionId),
+      projection: {
+        procedureId,
+        title: versions[0]!.document.title,
+        versionId,
+        // As many of the newest as one frame holds, at most a page (S31 review P2-2); the rest are counted.
+        versions: boundedPage(previewVersions, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE),
+        versionCount: previewVersions.length,
+        afterVersion: after?.version ?? null,
+        previewDigest,
+      },
     };
   }
 
   /**
-   * `停用` (ADR 0087 §5): one version, or — with `versionId` \`null\` — every version not stopped yet, confirming exactly the
-   * `停用…` preview the editor read, by its digest (Issue #66, S31). Final for each: a stopped version is never resolved again and
-   * stays as its own Historical Version Stub, and every Run that pinned it keeps naming it. Nothing is deleted or blocked.
+   * `停用` (ADR 0087 §5): one version, or — with `versionId` `null` — every version not stopped yet, confirming exactly the
+   * `停用…` preview the editor read, by its digest, checked inside the write (Issue #66, S31). Final for each: a stopped version
+   * is never resolved again and stays as its own Historical Version Stub, and every Run that pinned it keeps naming it. Nothing
+   * is deleted or blocked.
    */
   stopCapturedProcedure(procedureId: string, versionId: string | null, previewDigest: string, now: Date = new Date()): CapturedProcedureProjection {
     return this.#procedureCall(() => {
-      const preview = this.#capturedStopPreview(procedureId, versionId);
-      requireStore(typeof previewDigest === 'string' && preview.previewDigest === previewDigest, 'CAPTURED_PROCEDURE_STOP_PREVIEW_STALE',
-        '停用的影响在你查看之后有了变化；请重新查看再停用。');
       this.#transaction(this.#authority, () => {
-        for (const version of preview.versions) this.#capturedProcedures.stop(version.versionId, previewDigest, now);
+        const preview = this.#capturedStopPreview(procedureId, versionId);
+        requireStore(typeof previewDigest === 'string' && preview.projection.previewDigest === previewDigest, 'CAPTURED_PROCEDURE_STOP_PREVIEW_STALE',
+          '停用的影响在你查看之后有了变化；请重新查看再停用。');
+        for (const stopping of preview.stoppingIds) this.#capturedProcedures.stop(stopping, previewDigest, now);
       });
       return this.#capturedProcedureProjection(procedureId);
     });

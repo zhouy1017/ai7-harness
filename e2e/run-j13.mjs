@@ -1904,7 +1904,9 @@ async function main() {
     requireJourney(latestSheet.latestEligible === 'true' && JSON.stringify(latestSheet.options) === JSON.stringify(['第 2 版（最新可用）', '第 1 版']) &&
       latestSheet.chosen === 0 && latestSheet.versionDisabled === false && JSON.stringify(latestSheet.checked) === JSON.stringify(['style-and-format', 'literary-expression']) &&
       latestSheet.lines[0] === `按《${PROCEDURE_TITLE}》第 2 版：体例与格式 → 文学性与表达改进；范围「全书」。类别已按它选好，计划照常先看。`, 'exact-latest-words', latestSheet);
-    await assertRenderer(renderer, `(() => { const select=document.querySelector('dialog.review-sheet [data-review-field="procedure-version"]'); if(!(select instanceof HTMLSelectElement)||select.disabled)return false; select.selectedIndex=1; select.dispatchEvent(new Event('change',{bubbles:true})); return true; })()`, 'exact-choose-version');
+    await assertRenderer(renderer, `(() => { const select=document.querySelector('dialog.review-sheet [data-review-field="procedure-version"]'); if(!(select instanceof HTMLSelectElement)||select.disabled)return false; select.selectedIndex=1; select.dispatchEvent(new Event('change',{bubbles:true})); const prepare=document.querySelector('dialog.review-sheet [data-review-action="prepare"]'); return prepare instanceof HTMLButtonElement && prepare.disabled && select.disabled && document.querySelector('.review-sheet-procedure')?.dataset.procedureLoading==='true'; })()`, 'exact-choose-version');
+    // While the chosen version loads, 先看计划 and the selectors wait: nothing is prepared from the version on show before its
+    // answer fills the sheet (S31 review P2-1).
     const olderSheet = await readUntil(renderer, READ_SHEET_PROCEDURE, (read) => read?.version === '1', 'exact-older-filled');
     requireJourney(olderSheet.latestEligible === 'false' && olderSheet.chosen === 1 && JSON.stringify(olderSheet.checked) === JSON.stringify(['style-and-format']) &&
       olderSheet.lines.includes('你选了第 1 版；最新可用的是第 2 版。'), 'exact-older-words', olderSheet);
@@ -1928,7 +1930,7 @@ async function main() {
     await clickSelector(renderer, `[data-procedure-id="${procedureId}"] [data-procedure-action="versions"]`, 'stop-versions');
     const beforeStop = await readProcedures(renderer, (page) => page.procedures[0]?.versions[1]?.runLinks.length === 2, 'stop-listed');
     const versionOne = beforeStop.procedures[0].versions[1];
-    requireJourney(versionOne.version === '1' && versionOne.runs === '按这一版运行过 2 次审阅' &&
+    requireJourney(versionOne.version === '1' && versionOne.runs === '按这一版运行过 1 次；另有 1 次已准备、未开始' &&
       versionOne.runLinks[0][0] === exactRun.reviewRunId && versionOne.runLinks[0][1].startsWith(`《${CAPTURE_TARGET_TITLE}》第 2 次审阅 · 计划已冻结 · 待授权 · `) &&
       versionOne.runLinks[1][0] === ran.reviewRunId, 'stop-runs-before', versionOne);
     await clickSelector(renderer, `[data-procedure-id="${procedureId}"] [data-version="1"] [data-procedure-action="stop"]`, 'stop-version');
@@ -1943,7 +1945,7 @@ async function main() {
     const stopped = await readProcedures(renderer, (page) => page.procedures[0]?.versions[1]?.state === 'stopped', 'stop-stopped');
     const [stoppedTwo, stoppedOne] = stopped.procedures[0].versions;
     requireJourney(stopped.procedures[0].runnable === 'true' && stopped.procedures[0].run && stoppedOne.pill === '已停用' && stoppedOne.pillBorder === 'dotted' &&
-      stoppedOne.actions.length === 0 && stoppedOne.stop === null && stoppedOne.runs === '按这一版运行过 2 次审阅' && stoppedTwo.latestEligible === 'true' &&
+      stoppedOne.actions.length === 0 && stoppedOne.stop === null && stoppedOne.runs === '按这一版运行过 1 次；另有 1 次已准备、未开始' && stoppedTwo.latestEligible === 'true' &&
       stoppedTwo.state === 'enabled', 'stop-card', stopped.procedures[0]);
     await waitFor(renderer, `${status}===${JSON.stringify(`已停用《${PROCEDURE_TITLE}》的这一版；按它运行过的审阅仍然记着它。`)}`, 'stop-status', 10_000);
     await clickSelector(renderer, `[data-version="1"] button.captured-procedure-run-link[data-review-run-id="${ran.reviewRunId}"]`, 'stop-open-linked-run');
@@ -1958,7 +1960,7 @@ async function main() {
     await readProcedures(renderer, (page) => page.procedures[0]?.run === true, 'stop-all-listed');
     await clickSelector(renderer, `[data-procedure-id="${procedureId}"] [data-procedure-action="stop-all"]`, 'stop-all-open');
     const allPreview = (await readProcedures(renderer, (page) => page.procedures[0]?.stopAll !== null, 'stop-all-preview')).procedures[0].stopAll;
-    requireJourney(allPreview.heading === `停用《${PROCEDURE_TITLE}》的全部 1 个版本` && allPreview.after === '' && JSON.stringify(allPreview.versions) === JSON.stringify([['2', '0', '0']]) &&
+    requireJourney(allPreview.heading === `停用《${PROCEDURE_TITLE}》尚未停用的 1 个版本` && allPreview.after === '' && JSON.stringify(allPreview.versions) === JSON.stringify([['2', '0', '0']]) &&
       allPreview.afterLine === '停用后，这个工序没有可以运行的版本；要再用它，请从一次新的审阅重新保存。', 'stop-all-words', allPreview);
     await clickSelector(renderer, `[data-procedure-id="${procedureId}"] > .captured-procedure-stop [data-procedure-action="confirm-stop"]`, 'stop-all-confirm');
     const allStopped = await readProcedures(renderer, (page) => page.procedures[0]?.runnable === 'false', 'stop-all-stopped');
@@ -1994,7 +1996,7 @@ async function main() {
       const proposal = await window.ai7.inspectDeveloperProposal({ proposalId: list.proposals[0].proposalId, before: null });
       return [list.procedures.length, procedure.runnable, procedure.versions.map((version) => [version.version, version.state, version.runCount]), proposal.versions[0].fileCount];
     })()`);
-    requireJourney(JSON.stringify(keptOnRestart) === JSON.stringify([1, false, [[2, 'stopped', 0], [1, 'stopped', 2]], 1]), 'capture-restart-kept', keptOnRestart);
+    requireJourney(JSON.stringify(keptOnRestart) === JSON.stringify([1, false, [[2, 'stopped', 0], [1, 'stopped', 1]], 1]), 'capture-restart-kept', keptOnRestart);
 
     at('j14-capture-keyboard-reflow-forced-colors');
     // Without a pointer: Tab reaches 修改… with its focus visible, and Enter opens the next version's form with focus on its title.

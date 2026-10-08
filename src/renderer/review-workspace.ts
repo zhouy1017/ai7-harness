@@ -24,6 +24,7 @@ import {
 import { reportExportLabel } from '../shared/report-wording.js';
 import { applyOnce } from './manuscript-apply.js';
 import { openProcedureCapture } from './procedure-capture.js';
+import { ProcedureChoiceRequests, procedurePreparationPin } from './procedure-choice.js';
 import {
   CAPTURE_ACTION,
   SHEET_PROCEDURE_LABEL,
@@ -263,6 +264,8 @@ interface SheetState {
   procedures: ReadonlyArray<CapturedProcedureSummaryProjection>;
   /** The Captured Procedure the sheet was filled from, resolved for this Book; `null` for categories chosen by hand. */
   procedure: CapturedProcedureRunProjection | null;
+  /** Its choices in flight (Issue #66, S31 review P2-1): only the newest answer fills the sheet, and 先看计划 waits for it. */
+  readonly requests: ProcedureChoiceRequests;
 }
 
 const NO_FILTERS: Filters = { categoryId: null, severity: null, status: null, chapterBlockId: null };
@@ -1624,6 +1627,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       prepared: false,
       procedures,
       procedure: null,
+      requests: new ProcedureChoiceRequests(),
     };
     renderSheet(projection, sheetState);
     sheet.showModal();
@@ -1641,15 +1645,21 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
    */
   async function chooseProcedure(state: SheetState, procedureId: string, versionId: string | null = null): Promise<void> {
     if (projection === null || sheetState !== state) return;
+    const ticket = state.requests.ask();
     if (procedureId === '') {
+      state.requests.settle(ticket);
       state.procedure = null;
       state.categories.clear();
       state.problem = null;
     } else {
       options.setStatus('正在读取所选的可复用工序…', 'busy');
+      // Loading: 先看计划 and both selects wait, so nothing is prepared from the choice on screen before its answer.
+      sheetUpdate();
       try {
         const run = await api.inspectCapturedProcedureRun({ procedureId, versionId });
-        if (sheetState !== state || destroyed) return;
+        // A later choice superseded this one: its answer, not this, fills the sheet.
+        if (sheetState !== state || destroyed || !state.requests.current(ticket)) return;
+        state.requests.settle(ticket);
         state.procedure = run;
         state.categories.clear();
         state.problem = run.unavailableReason;
@@ -1661,7 +1671,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         }
         options.setStatus(run.resolved === null ? run.unavailableReason ?? '' : `已按《${run.title}》第 ${run.resolved.version} 版选好类别。`);
       } catch (error) {
-        if (sheetState !== state || destroyed) return;
+        if (sheetState !== state || destroyed || !state.requests.current(ticket)) return;
+        state.requests.settle(ticket);
         state.procedure = null;
         state.problem = options.errorMessage(error, '无法读取所选的可复用工序。');
       }
@@ -1833,6 +1844,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     function updateSheet(): void {
       const preparing = state.job !== null;
       const filled = state.procedure?.resolved ?? null;
+      const loading = state.requests.loading;
+      procedureField.dataset['procedureLoading'] = String(loading);
       for (const { input, label, reason, entry } of categoryInputs.values()) {
         const scopeAvailability = state.scope === null ? null : entry.scopes[state.scope];
         const step = filled?.steps.find((candidate) => candidate.categoryId === entry.categoryId) ?? null;
@@ -1858,8 +1871,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         }
       }
       for (const [kind, input] of scopeInputs) input.disabled = !workspace.scopeOptions[kind].available || preparing || (filled !== null && kind !== filled.scopeSlot);
-      procedureSelect.disabled = preparing || state.procedures.length === 0;
-      versionSelect.disabled = preparing || versionSelect.options.length < 2;
+      procedureSelect.disabled = preparing || loading || state.procedures.length === 0;
+      versionSelect.disabled = preparing || loading || versionSelect.options.length < 2;
       range.hidden = state.scope !== 'chapters';
       fromSelect.disabled = state.scope !== 'chapters' || preparing;
       toSelect.disabled = state.scope !== 'chapters' || preparing;
@@ -1871,7 +1884,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       problem.hidden = state.problem === null;
       progress.hidden = state.job === null;
       progress.textContent = state.job === null ? '' : reviewPreparationLine(state.job.progress);
-      prepare.disabled = preparing;
+      prepare.disabled = preparing || loading;
       close.disabled = preparing;
       cancelPreparation.hidden = !preparing;
       cancelPreparation.disabled = !preparing;
@@ -1893,6 +1906,15 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
   async function prepareRun(state: SheetState): Promise<void> {
     if (destroyed || state.job !== null || projection === null) return;
+    // The version on show is the version pinned, and never while a choice is still loading (S31 review P2-1; REUSE-054).
+    const resolved = state.procedure?.resolved ?? null;
+    const shown = resolved === null ? null : sheet.querySelector<HTMLSelectElement>('[data-review-field="procedure-version"]')?.value ?? null;
+    const choice = procedurePreparationPin(resolved, shown, state.requests.loading);
+    if (choice.refusal !== null) {
+      state.problem = choice.refusal;
+      sheetUpdate();
+      return;
+    }
     const categoryIds = projection.categories.filter((entry) => state.categories.has(entry.categoryId)).map((entry) => entry.categoryId);
     const { from, to } = chaptersOf(state);
     state.problem = categoryIds.length === 0 ? REVIEW_PICK_CATEGORY
@@ -1912,11 +1934,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     };
     options.setStatus(REVIEW_STATUS_LINES.preparing, 'busy');
     try {
-      const resolved = state.procedure?.resolved ?? null;
       const initial = await api.prepareReviewRun({
         categoryIds,
         scope,
-        ...(resolved === null ? {} : { capturedProcedure: { versionId: resolved.versionId, documentSha256: resolved.documentSha256 } }),
+        ...(choice.pin === null ? {} : { capturedProcedure: choice.pin }),
       });
       state.job = initial;
       sheetUpdate();

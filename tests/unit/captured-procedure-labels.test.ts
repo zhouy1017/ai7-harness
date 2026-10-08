@@ -9,7 +9,9 @@ import {
   procedureGuidelineLine,
   procedureRunLinkLine,
   procedureStopAfterLine,
+  procedureRunsLine,
   procedureStopHeading,
+  procedureStopMoreVersionsLine,
   procedureStopMoreLine,
   procedureStopRunLine,
   procedureStopVersionLine,
@@ -98,9 +100,15 @@ describe('知识库 and the Run', () => {
   it('reads 停用…\'s preview in words: the Runs it touches, what a new use takes afterwards (Issue #66, S31)', () => {
     const run = { bookId: 'b', bookTitle: '工序运行之书', reviewRunId: 'r', label: '第 2 次', stateLabel: '计划已冻结 · 待授权' };
     const version = { versionId: 'v', version: 1, stateLabel: '已启用', runCount: 2, prepared: [run], preparedCount: 1, active: [], activeCount: 0 };
-    expect(procedureStopHeading({ title: '体例复核', versionId: 'v', versions: [version] })).toBe('停用《体例复核》第 1 版');
-    expect(procedureStopHeading({ title: '体例复核', versionId: null, versions: [version, { ...version, version: 2 }] })).toBe('停用《体例复核》的全部 2 个版本');
-    expect(procedureStopVersionLine(version)).toBe('第 1 版 · 已启用 · 按它运行过 2 次审阅，停用后仍然记着它');
+    expect(procedureStopHeading({ title: '体例复核', versionId: 'v', versions: [version], versionCount: 1 })).toBe('停用《体例复核》第 1 版');
+    // 全部停用 counts every version it takes, also those beyond the page it lists (S31 review P2-2, P3-7).
+    expect(procedureStopHeading({ title: '体例复核', versionId: null, versions: [version, { ...version, version: 2 }], versionCount: 7 })).toBe('停用《体例复核》尚未停用的 7 个版本');
+    expect(procedureStopMoreVersionsLine(5, 7)).toBe('另有 2 个较早的版本一并停用，未逐一列出。');
+    expect(procedureStopVersionLine(version)).toBe('第 1 版 · 已启用 · 按它运行过 2 次，停用后仍然记着它');
+    // Runs that ran are counted apart from Runs only prepared (S31 review P3-3).
+    expect(procedureRunsLine({ runCount: 1, preparedRunCount: 0 })).toBe('按这一版运行过 1 次');
+    expect(procedureRunsLine({ runCount: 1, preparedRunCount: 2 })).toBe('按这一版运行过 1 次；另有 2 次已准备、未开始');
+    expect(procedureRunsLine({ runCount: 0, preparedRunCount: 1 })).toBe('还没有审阅按这一版运行过；另有 1 次已准备、未开始');
     expect(procedureStopVersionLine({ ...version, runCount: 0 })).toBe('第 1 版 · 已启用 · 还没有审阅按它运行过');
     expect(procedureStopRunLine(run)).toBe('《工序运行之书》第 2 次审阅 · 计划已冻结 · 待授权');
     expect(procedureStopMoreLine(10, 13)).toBe('另有 3 次，未逐一列出。');

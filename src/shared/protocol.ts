@@ -5483,7 +5483,10 @@ export interface CapturedProcedureVersionProjection {
   readonly validationProblems: ReadonlyArray<string>;
   /** The local provenance outside the digest (REUSE-015): the Review Run it was captured from. */
   readonly source: { readonly bookId: string; readonly bookTitle: string; readonly reviewRunId: string; readonly runLabel: string };
+  /** The Review Runs approved under it — ran, or began to (Issue #66, S31 review P3-3). */
   readonly runCount: number;
+  /** The Review Runs prepared from it and never approved; each is linked with its state like the others. */
+  readonly preparedRunCount: number;
   readonly runs: ReadonlyArray<CapturedProcedureRunLinkProjection>;
   readonly technical: { readonly documentSha256: string; readonly previousDocumentSha256: string | null };
 }
@@ -5644,7 +5647,7 @@ export interface CapturedProcedureStopVersionProjection {
   readonly versionId: string;
   readonly version: number;
   readonly stateLabel: string;
-  /** Every Review Run that pinned it: each keeps naming it after the 停用 (REUSE-040). */
+  /** The Review Runs approved under it — ran, or began to: each keeps naming it after the 停用 (REUSE-040). */
   readonly runCount: number;
   /** Prepared from it and not yet approved, still the newest of their Book: they cannot be approved after it and are prepared again. */
   readonly prepared: ReadonlyArray<CapturedProcedureStopRunProjection>;
@@ -5664,7 +5667,9 @@ export interface CapturedProcedureStopPreviewProjection {
   readonly title: string;
   /** `null` for 全部停用. */
   readonly versionId: string | null;
+  /** The newest versions it takes, as many as one frame holds (S31 review P2-2); `versionCount` counts them all. */
   readonly versions: ReadonlyArray<CapturedProcedureStopVersionProjection>;
+  readonly versionCount: number;
   /** The version a new use resolves to afterwards; `null` when none will be runnable. */
   readonly afterVersion: number | null;
   readonly previewDigest: string;

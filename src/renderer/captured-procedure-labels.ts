@@ -155,8 +155,13 @@ export function procedureSourceLine(version: Pick<CapturedProcedureVersionProjec
   return `来自《${version.source.bookTitle}》${version.source.runLabel}`;
 }
 
-export function procedureRunsLine(version: Pick<CapturedProcedureVersionProjection, 'runCount'>): string {
-  return version.runCount === 0 ? '还没有审阅按这一版运行过' : `按这一版运行过 ${version.runCount} 次审阅`;
+/**
+ * How many Review Runs ran under a version — approved, so they ran or began to — and, apart, how many were prepared from it
+ * and never approved (Issue #66, S31 review P3-3).
+ */
+export function procedureRunsLine(version: Pick<CapturedProcedureVersionProjection, 'runCount' | 'preparedRunCount'>): string {
+  const ran = version.runCount === 0 ? '还没有审阅按这一版运行过' : `按这一版运行过 ${version.runCount} 次`;
+  return version.preparedRunCount === 0 ? ran : `${ran}；另有 ${version.preparedRunCount} 次已准备、未开始`;
 }
 
 /** One Review Run a version ran (REUSE-031): an exact link, with where it stands now (Issue #66, S31). */
@@ -175,15 +180,20 @@ export const PROCEDURE_STOP_ACTIVE_HEADING = '已开始的审阅不受影响，�
 export const PROCEDURE_STOP_KEPT = '不会删除任何东西：这一版的内容、摘要与来源记录都保留为历史版本，按它运行过的审阅仍然记着它。' as const;
 
 /** The preview's heading: one version, or every version not stopped yet. */
-export function procedureStopHeading(preview: Pick<CapturedProcedureStopPreviewProjection, 'title' | 'versionId' | 'versions'>): string {
+export function procedureStopHeading(preview: Pick<CapturedProcedureStopPreviewProjection, 'title' | 'versionId' | 'versions' | 'versionCount'>): string {
   return preview.versionId === null
-    ? `停用《${preview.title}》的全部 ${preview.versions.length} 个版本`
+    ? `停用《${preview.title}》尚未停用的 ${preview.versionCount} 个版本`
     : `停用《${preview.title}》第 ${preview.versions[0]?.version ?? ''} 版`;
+}
+
+/** Versions the preview takes but does not list, beyond what one frame holds (S31 review P2-2). */
+export function procedureStopMoreVersionsLine(shown: number, count: number): string {
+  return `另有 ${count - shown} 个较早的版本一并停用，未逐一列出。`;
 }
 
 /** One version the 停用 takes: where it stands, and the history that keeps naming it. */
 export function procedureStopVersionLine(version: CapturedProcedureStopPreviewProjection['versions'][number]): string {
-  return `第 ${version.version} 版 · ${version.stateLabel} · ${version.runCount === 0 ? '还没有审阅按它运行过' : `按它运行过 ${version.runCount} 次审阅，停用后仍然记着它`}`;
+  return `第 ${version.version} 版 · ${version.stateLabel} · ${version.runCount === 0 ? '还没有审阅按它运行过' : `按它运行过 ${version.runCount} 次，停用后仍然记着它`}`;
 }
 
 export function procedureStopRunLine(run: CapturedProcedureStopRunProjection): string {
