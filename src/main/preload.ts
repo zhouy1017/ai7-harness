@@ -260,6 +260,10 @@ const api: RendererApi = Object.freeze({
   inspectKnowledgeProcedures: () => invoke<ServiceOperationMap['inspectKnowledgeProcedures']['output']>(IPC_CHANNELS.inspectKnowledgeProcedures),
   // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087).
   inspectCapturedProcedures: () => invoke<ServiceOperationMap['inspectCapturedProcedures']['output']>(IPC_CHANNELS.inspectCapturedProcedures),
+  inspectCapturedProcedure: (input: Parameters<RendererApi['inspectCapturedProcedure']>[0]) =>
+    invoke<ServiceOperationMap['inspectCapturedProcedure']['output']>(IPC_CHANNELS.inspectCapturedProcedure, input),
+  inspectDeveloperProposal: (input: Parameters<RendererApi['inspectDeveloperProposal']>[0]) =>
+    invoke<ServiceOperationMap['inspectDeveloperProposal']['output']>(IPC_CHANNELS.inspectDeveloperProposal, input),
   inspectProcedureCapture: (input: Parameters<RendererApi['inspectProcedureCapture']>[0]) =>
     invoke<ServiceOperationMap['inspectProcedureCapture']['output']>(IPC_CHANNELS.inspectProcedureCapture, input),
   saveCapturedProcedure: (input: Parameters<RendererApi['saveCapturedProcedure']>[0]) =>

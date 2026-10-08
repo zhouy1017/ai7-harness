@@ -3,10 +3,12 @@ import {
   type BookSummaryCursor,
   type BookSummaryProjection,
   type CapturedProcedureProjection,
+  type CapturedProcedureSummaryProjection,
   type CapturedProceduresProjection,
   type CapturedProcedureValidationProjection,
   type CapturedProcedureVersionProjection,
   type DeveloperProposalProjection,
+  type DeveloperProposalSummaryProjection,
   type DeveloperProposalVersionProjection,
   type RendererApi,
 } from '../shared/protocol.js';
@@ -49,7 +51,7 @@ import {
  * 查看技术详情.
  */
 type ProceduresApi = Pick<RendererApi,
-  'inspectCapturedProcedures' | 'previewCapturedProcedureValidation' | 'enableCapturedProcedure' | 'stopCapturedProcedure' |
+  'inspectCapturedProcedures' | 'inspectCapturedProcedure' | 'inspectDeveloperProposal' | 'previewCapturedProcedureValidation' | 'enableCapturedProcedure' | 'stopCapturedProcedure' |
   'saveDeveloperProposal' | 'saveDeveloperProposalFile' | 'listBooks'>;
 
 export interface MountCapturedProceduresOptions {
@@ -80,6 +82,12 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
   const open: { validation: CapturedProcedureValidationProjection | null; runFor: string | null; reviseFor: string | null } = {
     validation: null, runFor: null, reviseFor: null,
   };
+  /**
+   * The procedures and proposals whose versions are open, each at the page shown: `null` for the newest page, otherwise the
+   * version number it starts below (Issue #65 review: the list carries summaries; versions are read a page at a time).
+   */
+  const procedurePages = new Map<string, number | null>();
+  const proposalPages = new Map<string, number | null>();
   let books: ReadonlyArray<BookSummaryProjection> | null = null;
   let busy = false;
 
@@ -110,36 +118,73 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
 
   async function load(focus?: string): Promise<void> {
     const projection = await api.inspectCapturedProcedures();
+    const listedProcedures = new Set(projection.procedures.map((procedure) => procedure.procedureId));
+    const listedProposals = new Set(projection.proposals.map((proposal) => proposal.proposalId));
+    for (const id of procedurePages.keys()) if (!listedProcedures.has(id)) procedurePages.delete(id);
+    for (const id of proposalPages.keys()) if (!listedProposals.has(id)) proposalPages.delete(id);
+    const procedureVersions = new Map(await Promise.all(Array.from(procedurePages, async ([procedureId, before]) =>
+      [procedureId, await api.inspectCapturedProcedure({ procedureId, before })] as const)));
+    const proposalVersions = new Map(await Promise.all(Array.from(proposalPages, async ([proposalId, before]) =>
+      [proposalId, await api.inspectDeveloperProposal({ proposalId, before })] as const)));
     if (!host.isConnected) return;
-    paint(projection);
+    paint(projection, procedureVersions, proposalVersions);
     if (focus !== undefined) host.querySelector<HTMLElement>(focus)?.focus();
   }
 
-  function paint(projection: CapturedProceduresProjection): void {
+  function paint(
+    projection: CapturedProceduresProjection,
+    procedureVersions: ReadonlyMap<string, CapturedProcedureProjection>,
+    proposalVersions: ReadonlyMap<string, DeveloperProposalProjection>,
+  ): void {
     const procedures = el('section', 'knowledge-captured-procedures');
     procedures.dataset['procedureCount'] = String(projection.procedures.length);
     procedures.append(el('h3', undefined, PROCEDURES_SECTION_HEADING), el('p', 'field-note', PROCEDURES_SECTION_NOTE));
     if (projection.procedures.length === 0) procedures.append(el('p', 'field-note captured-procedures-empty', PROCEDURES_EMPTY));
-    for (const procedure of projection.procedures) procedures.append(procedureCard(procedure));
+    for (const procedure of projection.procedures) procedures.append(procedureCard(procedure, procedureVersions.get(procedure.procedureId) ?? null));
     if (projection.proceduresTruncated) procedures.append(el('p', 'field-note', '只列出最近的可复用工序。'));
     const proposals = el('section', 'knowledge-developer-proposals');
     proposals.dataset['proposalCount'] = String(projection.proposals.length);
     proposals.append(el('h3', undefined, PROPOSALS_SECTION_HEADING), el('p', 'field-note', PROPOSALS_SECTION_NOTE));
     if (projection.proposals.length === 0) proposals.append(el('p', 'field-note developer-proposals-empty', PROPOSALS_EMPTY));
-    for (const proposal of projection.proposals) proposals.append(proposalCard(proposal));
+    for (const proposal of projection.proposals) proposals.append(proposalCard(proposal, proposalVersions.get(proposal.proposalId) ?? null));
     if (projection.proposalsTruncated) proposals.append(el('p', 'field-note', '只列出最近的开发建议。'));
     host.replaceChildren(procedures, proposals);
   }
 
   // ---- 可复用工序 ----------------------------------------------------------------------------------------
 
-  function procedureCard(procedure: CapturedProcedureProjection): HTMLElement {
+  /** A paging row: `更早的版本` below the page shown, and `回到最新版本` once off the newest. */
+  function pagingRow(kind: 'procedure' | 'proposal', id: string, shownBefore: number | null, nextBefore: number | null): HTMLElement | null {
+    if (shownBefore === null && nextBefore === null) return null;
+    const pages = kind === 'procedure' ? procedurePages : proposalPages;
+    const card = kind === 'procedure' ? `[data-procedure-id="${id}"]` : `[data-proposal-id="${id}"]`;
+    const row = el('div', 'button-row captured-procedure-paging');
+    if (nextBefore !== null) {
+      row.append(button('更早的版本', 'quiet', `${kind}-versions-older`, async () => {
+        pages.set(id, nextBefore);
+        await load(`${card} h4`);
+      }));
+    }
+    if (shownBefore !== null) {
+      row.append(button('回到最新版本', 'quiet', `${kind}-versions-latest`, async () => {
+        pages.set(id, null);
+        await load(`${card} h4`);
+      }));
+    }
+    return row;
+  }
+
+  function procedureCard(procedure: CapturedProcedureSummaryProjection, page: CapturedProcedureProjection | null): HTMLElement {
     const card = el('article', 'captured-procedure');
     card.dataset['procedureId'] = procedure.procedureId;
     card.dataset['procedureRunnable'] = String(procedure.runnable);
+    card.dataset['procedureLatestState'] = procedure.latestState;
     const heading = el('h4', undefined, `《${procedure.title}》`);
     heading.tabIndex = -1;
-    card.append(heading);
+    const latest = el('p', 'captured-procedure-latest');
+    latest.append(el('span', `status-pill captured-procedure-state-${procedure.latestState}`, procedure.latestStateLabel),
+      el('span', undefined, ` 最新为第 ${procedure.latestVersion} 版 · 共 ${procedure.versionCount} 版`));
+    card.append(heading, latest);
     const actions = el('div', 'button-row captured-procedure-actions');
     if (procedure.runnable) {
       actions.append(button(PROCEDURE_ACTIONS.run, 'primary', 'run', async () => {
@@ -148,22 +193,32 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
         await load(`[data-procedure-id="${procedure.procedureId}"] [data-procedure-field="run-book"]`);
       }));
     }
-    if (procedure.versions.some((version) => version.state !== 'stopped') && procedure.versionCount > 1) {
+    if (procedure.versionCount > 1 && (procedure.runnable || procedure.latestState !== 'stopped')) {
       actions.append(button(PROCEDURE_ACTIONS.stopAll, 'quiet', 'stop-all', () => act('正在停用全部版本…', '无法停用。', async () => {
         const result = await api.stopCapturedProcedure({ procedureId: procedure.procedureId, versionId: null });
         options.setStatus(procedureStoppedLine(result.title, result.versionCount), 'success');
       }, `[data-procedure-id="${procedure.procedureId}"] h4`)));
     }
-    if (actions.childElementCount > 0) card.append(actions);
+    const toggle = button(page === null ? `查看各版本（${procedure.versionCount}）` : '收起各版本', 'quiet', 'versions', async () => {
+      if (procedurePages.has(procedure.procedureId)) procedurePages.delete(procedure.procedureId);
+      else procedurePages.set(procedure.procedureId, null);
+      await load(`[data-procedure-id="${procedure.procedureId}"] [data-procedure-action="versions"]`);
+    });
+    toggle.setAttribute('aria-expanded', String(page !== null));
+    actions.append(toggle);
+    card.append(actions);
     if (open.runFor === procedure.procedureId) card.append(runChooser(procedure));
-    const versions = el('ol', 'captured-procedure-versions');
-    for (const version of procedure.versions) versions.append(versionItem(procedure, version));
-    card.append(versions);
-    if (procedure.versionCount > procedure.versions.length) card.append(el('p', 'field-note', `共 ${procedure.versionCount} 版，只列出最近的 ${procedure.versions.length} 版。`));
+    if (page !== null) {
+      const versions = el('ol', 'captured-procedure-versions');
+      for (const version of page.versions) versions.append(versionItem(procedure, version));
+      card.append(versions);
+      const paging = pagingRow('procedure', procedure.procedureId, procedurePages.get(procedure.procedureId) ?? null, page.versionsBefore);
+      if (paging !== null) card.append(paging);
+    }
     return card;
   }
 
-  function versionItem(procedure: CapturedProcedureProjection, version: CapturedProcedureVersionProjection): HTMLElement {
+  function versionItem(procedure: CapturedProcedureSummaryProjection, version: CapturedProcedureVersionProjection): HTMLElement {
     const item = el('li', 'captured-procedure-version');
     item.dataset['versionId'] = version.versionId;
     item.dataset['version'] = String(version.version);
@@ -261,7 +316,7 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
   }
 
   /** 运行此工序…: which Book's 审阅 it opens in; only a Book with a manuscript can be reviewed. */
-  function runChooser(procedure: CapturedProcedureProjection): HTMLElement {
+  function runChooser(procedure: CapturedProcedureSummaryProjection): HTMLElement {
     const panel = el('div', 'captured-procedure-run');
     const label = el('label', 'review-field');
     const select = el('select');
@@ -294,24 +349,38 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
 
   // ---- 开发建议 ------------------------------------------------------------------------------------------
 
-  function proposalCard(proposal: DeveloperProposalProjection): HTMLElement {
+  function proposalCard(proposal: DeveloperProposalSummaryProjection, page: DeveloperProposalProjection | null): HTMLElement {
     const card = el('article', 'developer-proposal');
     card.dataset['proposalId'] = proposal.proposalId;
-    card.dataset['proposalVersions'] = String(proposal.versions.length);
+    card.dataset['proposalVersions'] = String(proposal.versionCount);
     const heading = el('h4', undefined, `《${proposal.title}》`);
     heading.tabIndex = -1;
-    card.append(heading);
-    const latest = proposal.versions[0]!;
-    const versions = el('ol', 'developer-proposal-versions');
-    for (const version of proposal.versions) versions.append(proposalVersionItem(version, version === latest));
-    card.append(versions);
+    card.append(heading, el('p', 'field-note developer-proposal-latest',
+      `最新为第 ${proposal.latestVersion} 版 · 记录于 ${options.localInstantLabel(proposal.latestCreatedAt)}`));
     const actions = el('div', 'button-row developer-proposal-actions');
+    const toggle = button(page === null ? `查看各版本（${proposal.versionCount}）` : '收起各版本', 'quiet', 'proposal-versions', async () => {
+      if (proposalPages.has(proposal.proposalId)) proposalPages.delete(proposal.proposalId);
+      else proposalPages.set(proposal.proposalId, null);
+      await load(`[data-proposal-id="${proposal.proposalId}"] [data-procedure-action="proposal-versions"]`);
+    });
+    toggle.setAttribute('aria-expanded', String(page !== null));
+    // 修改… starts from the newest version, so it opens the newest page.
     actions.append(button(PROCEDURE_ACTIONS.proposalRevise, 'quiet', 'revise-proposal', async () => {
       open.reviseFor = open.reviseFor === proposal.proposalId ? null : proposal.proposalId;
+      if (open.reviseFor !== null) proposalPages.set(proposal.proposalId, null);
       await load(`[data-proposal-id="${proposal.proposalId}"] [data-proposal-field="title"]`);
-    }));
+    }), toggle);
     card.append(actions);
-    if (open.reviseFor === proposal.proposalId) card.append(reviseForm(proposal, latest));
+    if (page !== null) {
+      const shownBefore = proposalPages.get(proposal.proposalId) ?? null;
+      const versions = el('ol', 'developer-proposal-versions');
+      for (const version of page.versions) versions.append(proposalVersionItem(version, version.version === proposal.latestVersion));
+      card.append(versions);
+      const paging = pagingRow('proposal', proposal.proposalId, shownBefore, page.versionsBefore);
+      if (paging !== null) card.append(paging);
+      const latest = page.versions[0];
+      if (open.reviseFor === proposal.proposalId && shownBefore === null && latest !== undefined) card.append(reviseForm(page, latest));
+    }
     return card;
   }
 
@@ -319,7 +388,7 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     const item = el('li', 'developer-proposal-version');
     item.dataset['proposalVersionId'] = version.proposalVersionId;
     item.dataset['proposalVersion'] = String(version.version);
-    item.dataset['proposalFiles'] = String(version.files.length);
+    item.dataset['proposalFiles'] = String(version.fileCount);
     item.append(el('p', 'developer-proposal-version-line', proposalVersionLine(version, options.localInstantLabel(version.createdAt))));
     if (latest) {
       const fields = el('dl', 'developer-proposal-fields');
@@ -342,7 +411,7 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
   }
 
   /** 修改…: the next version, never the one recorded (REUSE-066). */
-  function reviseForm(proposal: DeveloperProposalProjection, latest: DeveloperProposalVersionProjection): HTMLElement {
+  function reviseForm(proposal: DeveloperProposalSummaryProjection, latest: DeveloperProposalVersionProjection): HTMLElement {
     const form = el('form', 'developer-proposal-form');
     form.noValidate = true;
     const field = (key: 'title' | 'missingCapability' | 'affectedProcedure' | 'direction' | 'pluginCandidate', multiline: boolean): HTMLInputElement | HTMLTextAreaElement => {

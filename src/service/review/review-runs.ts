@@ -1113,6 +1113,10 @@ export class ReviewRunStore {
     const latest = this.#db.prepare('SELECT review_run_id FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC LIMIT 1').get(bookId) as SqlRow;
     requireReview(text(latest.review_run_id) === reviewRunId, 'REVIEW_RUN_SUPERSEDED', '这次审阅的计划已被之后准备的一次取代；请授权最新的一次。');
     requireReview(!this.#bookIsDriving(bookId), 'REVIEW_RUN_ACTIVE', RUN_ACTIVE_REASON);
+    // A Run prepared from a Captured Procedure version stopped since (ADR 0087 §5), or one this house does not hold (Issue #65
+    // review), is prepared again, never authorized — whatever its plans say.
+    const procedure = procedurePinRefusal(this.#db, reviewRunId);
+    requireReview(procedure === null, procedure?.code ?? 'REVIEW_PROCEDURE_STOPPED', procedure?.message ?? '');
     for (const category of tasks) {
       const projection = this.#ledgers.ledgerOf(category.entry).inspect(bookId);
       requireReview(projection.taskIntent?.taskIntentId === category.task!.taskIntentId && projection.state === 'prepared' &&
@@ -1120,9 +1124,6 @@ export class ReviewRunStore {
       'REVIEW_PLAN_CHANGED', `「${category.entry.label}」的计划已经变化；请重新准备这次审阅。`);
       requireReview(!this.#seriesKnowledgeMoved(bookId, category), 'REVIEW_PLAN_CHANGED', seriesKnowledgeMovedReason(category.entry.label));
     }
-    // A Run prepared from a Captured Procedure version stopped since is prepared again, never authorized (ADR 0087 §5).
-    const stopped = procedurePinRefusal(this.#db, reviewRunId);
-    requireReview(stopped === null, 'REVIEW_PROCEDURE_STOPPED', stopped ?? '');
     requireReview(!slotBusy, EXECUTION_SLOT_BUSY, EXECUTION_SLOT_BUSY_REASON);
     const authorizedAt = new Date().toISOString();
     const record = canonicalRecord({
@@ -1209,6 +1210,8 @@ export class ReviewRunStore {
       if (text(latest.review_run_id) !== reviewRunId) {
         staleReasons.push('这次审阅的计划已被之后准备的一次取代；请授权最新的一次。');
       } else {
+        const procedure = procedurePinRefusal(this.#db, reviewRunId);
+        if (procedure !== null) staleReasons.push(procedure.message);
         for (const category of snapshot.categories) {
           if (category.task === null) continue;
           let current: AnalysisProjection | null = null;
@@ -1224,8 +1227,6 @@ export class ReviewRunStore {
             staleReasons.push(seriesKnowledgeMovedReason(category.entry.label));
           }
         }
-        const stopped = procedurePinRefusal(this.#db, reviewRunId);
-        if (stopped !== null) staleReasons.push(stopped);
       }
     }
     const firstCheckpoint = categories.find((category) => category.checkpoint !== null)?.checkpoint ?? null;

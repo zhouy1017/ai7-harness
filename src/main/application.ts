@@ -60,6 +60,7 @@ import {
   type ServiceOperationMap,
   type TrustedLaunchForm,
 } from '../shared/protocol.js';
+import { developerProposalFileName } from '../shared/developer-proposal.js';
 import { ServiceCallError, ServiceClient } from './service-client.js';
 import { openProtectedSecretStore, type ProtectedSecretStore } from './protected-secret-store.js';
 import {
@@ -199,7 +200,7 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j07-folder-path' ||
           key === '--j04-save-path' ||
           key === '--j12-save-path' ||
-          key === '--j15-save-path' ||
+          key === '--j13-save-path' ||
           key === '--j01-import-control' ||
           key === '--j03-foreground-execution-control' ||
           key === '--j08-recovery-control' ||
@@ -307,10 +308,10 @@ function parseArguments(argv: string[]): LaunchArguments {
   requireDesktop(j07SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-07' && isAbsolute(j07SavePath)));
   requireDesktop(j04SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-04' && isAbsolute(j04SavePath)));
   requireDesktop(j12SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-12' && isAbsolute(j12SavePath)));
-  // J-15's for a 开发建议's 导出为文件… (Issue #65, S30).
-  const j15SavePath = values.get('--j15-save-path');
-  requireDesktop(j15SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-15' && isAbsolute(j15SavePath)));
-  const injectedSavePath = j07SavePath ?? j04SavePath ?? j12SavePath ?? j15SavePath;
+  // J-13's for a 开发建议's 导出为文件… (Issue #65, S30).
+  const j13SavePath = values.get('--j13-save-path');
+  requireDesktop(j13SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-13' && isAbsolute(j13SavePath)));
+  const injectedSavePath = j07SavePath ?? j04SavePath ?? j12SavePath ?? j13SavePath;
   const injectedFolderPath = values.get('--j07-folder-path');
   requireDesktop(injectedFolderPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-07' && isAbsolute(injectedFolderPath)));
   const importControlValue = values.get('--j01-import-control');
@@ -355,13 +356,12 @@ function parseArguments(argv: string[]): LaunchArguments {
     recoveryControlValue === undefined || (process.env.AI7_E2E_JOURNEY === 'J-08' && recoveryControl !== undefined),
   );
   // The model adapter binds a Journey whose Runs execute: J-04's analysis, J-09's 运行中 and 最近完成 (Issue #424),
-  // J-10's cancelled Run (Issue #422), J-16's 任务 panel (Issue #423), J-11's 分析反馈 (Issue #94), J-13's 书系一致性
-  // (Issue #64), and J-15's Review Runs a Captured Procedure is captured from and run as (Issue #65).
+  // J-10's cancelled Run (Issue #422), J-16's 任务 panel (Issue #423), J-11's 分析反馈 (Issue #94), and J-13's 书系一致性
+  // (Issue #64) and the Review Runs a Captured Procedure is captured from and run as (Issue #65).
   requireDesktop(
     modelAdapterControlValue === undefined ||
       ((process.env.AI7_E2E_JOURNEY === 'J-04' || process.env.AI7_E2E_JOURNEY === 'J-09' || process.env.AI7_E2E_JOURNEY === 'J-10' ||
-        process.env.AI7_E2E_JOURNEY === 'J-16' || process.env.AI7_E2E_JOURNEY === 'J-11' || process.env.AI7_E2E_JOURNEY === 'J-13' ||
-        process.env.AI7_E2E_JOURNEY === 'J-15') &&
+        process.env.AI7_E2E_JOURNEY === 'J-16' || process.env.AI7_E2E_JOURNEY === 'J-11' || process.env.AI7_E2E_JOURNEY === 'J-13') &&
         modelAdapterControl !== undefined),
   );
   requireDesktop([importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl].filter(Boolean).length <= 1);
@@ -1260,7 +1260,7 @@ function registerRendererHandlers(
 
   /**
    * 导出为文件… of a 开发建议 (Issue #65, S30; ADR 0087 §6): the platform's own Save dialog, which owns an existing file's
-   * replace-or-rename choice, offering the proposal's own file name in the documents folder. J-15 alone may answer it once with
+   * replace-or-rename choice, offering the proposal's own file name in the documents folder. J-13 alone may answer it once with
    * a launch control instead; `undefined` is a cancelled dialog. The proposal holds no Book material.
    */
   const chooseDeveloperProposalFile = async (owned: OwnedRendererWindow, suggestedFileName: string): Promise<string | undefined> => {
@@ -2754,6 +2754,22 @@ function registerRendererHandlers(
       return service.call('inspectCapturedProcedures', {});
     }),
   );
+  ipcMain.handle(IPC_CHANNELS.inspectCapturedProcedure, (event, input: Parameters<RendererApi['inspectCapturedProcedure']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectCapturedProcedure', { procedureId: input.procedureId, before: input.before });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectDeveloperProposal, (event, input: Parameters<RendererApi['inspectDeveloperProposal']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectDeveloperProposal', { proposalId: input.proposalId, before: input.before });
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.inspectProcedureCapture, (event, input: Parameters<RendererApi['inspectProcedureCapture']>[0]) =>
     envelope(async () => {
       const owned = requireSender(event);
@@ -2853,11 +2869,9 @@ function registerRendererHandlers(
       requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
       return serializeEffect(async (): Promise<Awaited<ReturnType<RendererApi['saveDeveloperProposalFile']>>> => {
         requireAuthority();
-        const listed = await service.call('inspectCapturedProcedures', {});
-        const version = listed.proposals.flatMap((proposal) => proposal.versions).find((candidate) => candidate.proposalVersionId === input.proposalVersionId);
-        if (version === undefined) throw new ServiceCallError('DEVELOPER_PROPOSAL_NOT_FOUND', '这一版开发建议不存在。');
-        const safe = version.title.replace(/[\\/:*?"<>|\u0000-\u001f]/gu, '_').slice(0, 80);
-        const destination = await chooseDeveloperProposalFile(owned, `开发建议 ${safe} 第 ${version.version} 版.md`);
+        // The one version, read alone, names the file — never a listing that a long history could outgrow (Issue #65 review).
+        const version = await service.call('inspectDeveloperProposalVersion', { proposalVersionId: input.proposalVersionId });
+        const destination = await chooseDeveloperProposalFile(owned, developerProposalFileName(version));
         if (destination === undefined) return { outcome: 'cancelled' };
         const proposal = await service.call('writeDeveloperProposalFile', { proposalVersionId: input.proposalVersionId, destination });
         return { outcome: 'saved', fileName: basename(destination), proposal };

@@ -198,8 +198,8 @@ export function procedureStoppedLine(title: string, versions: number): string {
   return versions === 1 ? `已停用《${title}》的这一版；按它运行过的审阅仍然记着它。` : `已停用《${title}》的全部版本；按它们运行过的审阅仍然记着它们。`;
 }
 
-export function proposalVersionLine(version: Pick<DeveloperProposalVersionProjection, 'version' | 'files'>, at: string): string {
-  return `第 ${version.version} 版 · 记录于 ${at} · ${version.files.length === 0 ? '还没有导出' : `导出过 ${version.files.length} 次`}`;
+export function proposalVersionLine(version: Pick<DeveloperProposalVersionProjection, 'version' | 'fileCount'>, at: string): string {
+  return `第 ${version.version} 版 · 记录于 ${at} · ${version.fileCount === 0 ? '还没有导出' : `导出过 ${version.fileCount} 次`}`;
 }
 
 export function proposalFileSavedLine(fileName: string): string {
@@ -229,7 +229,8 @@ export function sheetProcedureLines(run: CapturedProcedureRunProjection): string
 
 /** The pin a Run shows (ADR 0087 §4): never moved by a later version or a 停用. */
 export function runProcedureLine(procedure: ReviewRunProcedureProjection): string {
-  return `按可复用工序《${procedure.title}》第 ${procedure.version} 版${procedure.stopped ? '（这一版已停用；这次审阅仍记着它）' : ''}`;
+  const note = procedure.missing ? '（本机没有这一版；这次审阅仍记着它）' : procedure.stopped ? '（这一版已停用；这次审阅仍记着它）' : '';
+  return `按可复用工序《${procedure.title}》第 ${procedure.version} 版${note}`;
 }
 
 export function runProcedureLeftOutLine(entry: ReviewRunProcedureProjection['leftOut'][number]): string {

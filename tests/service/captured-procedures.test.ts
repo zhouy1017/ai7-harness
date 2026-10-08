@@ -1,10 +1,11 @@
 import { readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { CAPTURED_PROCEDURE_SCHEMA_SQL } from '../../src/service/captured-procedures.js';
+import { mergeBooks } from '../../src/service/database-merge.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import type { BaselineAnalysisStore } from '../../src/service/analysis/baseline-analysis-store.js';
@@ -12,7 +13,7 @@ import { ReviewRunDriver, type ReviewRunExecutionOwner } from '../../src/service
 import { LEADS_ABSENT_REASON } from '../../src/service/review/review-scope.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { CAPTURED_PROCEDURE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
-import { BASELINE_ANALYSIS_TASK_GOAL, type LaunchPolicyProjection, type ReviewRunProjection, type ReviewRunScopeRequest } from '../../src/shared/protocol.js';
+import { BASELINE_ANALYSIS_TASK_GOAL, MAX_FRAME_BYTES, type LaunchPolicyProjection, type ReviewRunProjection, type ReviewRunScopeRequest } from '../../src/shared/protocol.js';
 import { LITERARY_EXPRESSION, STYLE_AND_FORMAT } from '../support/review-categories.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -73,9 +74,9 @@ class RefusingFirstDispatch implements ReviewRunExecutionOwner {
   }
 }
 
-async function open(wrap?: (inner: BaselineAnalysisExecutionOwner) => ReviewRunExecutionOwner): Promise<Session> {
+async function open(wrap?: (inner: BaselineAnalysisExecutionOwner) => ReviewRunExecutionOwner, dataRoot: string = roots.dataRoot): Promise<Session> {
   const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored');
-  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
+  const store = await EditorialStore.open(dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false,
     persistLegacyReviewedDraft: false,
     induceReimportProofTamper: false,
@@ -240,7 +241,7 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       expect(refusal(() => prepare(session, source, [STYLE], WHOLE, pin))).toBe('REVIEW_PROCEDURE_STEP_SKIPPED');
       const pinned = prepare(session, target, [STYLE], WHOLE, pin);
       expect(pinned.procedure).toEqual({
-        procedureId: saved.procedureId, versionId: first!.versionId, version: 1, title: '线索与体例复核', documentSha256: pin.documentSha256, stopped: false,
+        procedureId: saved.procedureId, versionId: first!.versionId, version: 1, title: '线索与体例复核', documentSha256: pin.documentSha256, stopped: false, missing: false,
         leftOut: [{ categoryId: PLOT, label: '情节逻辑与前后一致', reason: LEADS_ABSENT_REASON }],
       });
       // The ordinary path: its plan, the one approval, the drive.
@@ -255,7 +256,8 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       expect(second.title).toBe('体例与表达复核');
       // An unvalidated newer version is never resolved: the run still takes version 1 (REUSE-044).
       expect(store.inspectCapturedProcedureRun(target, saved.procedureId).resolved!.version).toBe(1);
-      expect(store.inspectCapturedProcedures().procedures[0]!.versions[1]).toMatchObject({ runCount: 1, runs: [{ bookId: target, bookTitle: 'L2 第二本书', label: '第 1 次' }] });
+      expect(store.inspectCapturedProcedures().procedures[0]).toMatchObject({ versionCount: 2, latestVersion: 2, latestState: 'pending-validation', runnable: true });
+      expect(store.inspectCapturedProcedure(saved.procedureId, null).versions[1]).toMatchObject({ runCount: 1, runs: [{ bookId: target, bookTitle: 'L2 第二本书', label: '第 1 次' }] });
 
       // A Run prepared from version 1 and not yet authorized when version 1 is stopped is prepared again, never authorized.
       const waiting = prepare(session, target, [STYLE], WHOLE, pin);
@@ -391,17 +393,130 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       const destination = join(roots.inputRoot, '开发建议.md');
       const written = await store.writeDeveloperProposalFile(revised.versions[0]!.proposalVersionId, destination);
       expect(written.versions[0]!.files).toEqual([{ fileName: '开发建议.md', writtenAt: expect.any(String) }]);
+      expect(written.versions[0]!.fileCount).toBe(1);
+      expect(store.inspectDeveloperProposalVersion(revised.versions[0]!.proposalVersionId)).toMatchObject({ version: 2, pluginCandidate: '图片说明读取插件', fileCount: 1 });
       const text = readFileSync(destination, 'utf8');
       expect(text.startsWith('# 开发建议：图注核对\n')).toBe(true);
       expect(text.includes('图片说明读取插件')).toBe(true);
       expect(text.includes('AI7 不会发送这份开发建议')).toBe(true);
       expect(text.includes(revised.versions[0]!.technical.sha256)).toBe(true);
-      expect(store.inspectCapturedProcedures().proposals[0]!.versions[0]!.files).toHaveLength(1);
+      expect(store.inspectCapturedProcedures().proposals[0]).toMatchObject({ title: '图注核对', versionCount: 2, latestVersion: 2 });
+      expect(store.inspectDeveloperProposal(proposal.proposalId, 2).versions.map((version) => version.version)).toEqual([1]);
       await expect(store.writeDeveloperProposalFile(revised.versions[0]!.proposalVersionId, 'relative.md')).rejects.toMatchObject({ code: 'DEVELOPER_PROPOSAL_DESTINATION_INVALID' });
     } finally {
       await close(session);
     }
   });
+});
+
+const wireBytes = (value: unknown): number => Buffer.byteLength(JSON.stringify(value), 'utf8');
+
+describe('what 工序与规则 answers stays within one frame (Issue #65 review)', () => {
+  it('lists summaries, pages long version histories by bytes, and answers every save within the frame', async () => {
+    const session = await open();
+    try {
+      const { store } = session;
+      const source = await importBook(session, 'L2 有界');
+      const finished = await authorizeAndDrive(session, source, prepare(session, source, [STYLE]));
+      // The longest a title may be: 21 family emoji, 231 UTF-16 code units, 21 graphemes.
+      const title = (index: number): string => `${'👨‍👩‍👧‍👦'.repeat(20)}${String.fromCodePoint(0x4e00 + index)}`;
+      let first = '';
+      for (let index = 0; index < 51; index += 1) {
+        const saved = store.saveCapturedProcedure({ bookId: source, reviewRunId: finished.reviewRunId, categoryIds: [STYLE], scopeSlot: 'whole', title: title(index), procedureId: null });
+        first ||= saved.procedureId;
+        expect(wireBytes(saved)).toBeLessThan(MAX_FRAME_BYTES);
+      }
+      for (let version = 2; version <= 30; version += 1) {
+        const next = store.saveCapturedProcedure({ bookId: source, reviewRunId: finished.reviewRunId, categoryIds: [STYLE], scopeSlot: 'chapters', title: title(99), procedureId: first });
+        expect(wireBytes(next)).toBeLessThan(MAX_FRAME_BYTES);
+      }
+      // A field as long as either bound allows: 363 family emoji, 3,993 code units and about 9 KB each.
+      const long = '👨‍👩‍👧‍👦'.repeat(363);
+      let proposalId: string | null = null;
+      for (let version = 1; version <= 25; version += 1) {
+        const saved = store.saveDeveloperProposal({ proposalId, title: title(version), missingCapability: long, affectedProcedure: long, direction: long, pluginCandidate: long });
+        proposalId = saved.proposalId;
+        expect(wireBytes(saved)).toBeLessThan(MAX_FRAME_BYTES);
+      }
+      expect(() => store.saveDeveloperProposal({ proposalId: null, title: '过长', missingCapability: `${long}字字字字字字字字`, affectedProcedure: '', direction: '', pluginCandidate: '' }))
+        .toThrowError('请写明缺少的能力');
+      for (let index = 0; index < 51; index += 1) {
+        store.saveDeveloperProposal({ proposalId: null, title: title(index), missingCapability: long, affectedProcedure: '', direction: '', pluginCandidate: '' });
+      }
+      const listed = store.inspectCapturedProcedures();
+      expect(listed.procedures).toHaveLength(50);
+      expect(listed.proposals).toHaveLength(50);
+      expect([listed.proceduresTruncated, listed.proposalsTruncated]).toEqual([true, true]);
+      expect(wireBytes(listed)).toBeLessThan(MAX_FRAME_BYTES);
+      // Every version is reached a page at a time, each page within the frame.
+      const walk = <T extends { versions: ReadonlyArray<{ version: number }>; versionsBefore: number | null }>(read: (before: number | null) => T): number[] => {
+        const seen: number[] = [];
+        let before: number | null = null;
+        do {
+          const page = read(before);
+          expect(wireBytes(page)).toBeLessThan(MAX_FRAME_BYTES);
+          expect(page.versions.length).toBeGreaterThan(0);
+          seen.push(...page.versions.map((version) => version.version));
+          before = page.versionsBefore;
+        } while (before !== null);
+        return seen;
+      };
+      expect(walk((before) => store.inspectCapturedProcedure(first, before))).toEqual(Array.from({ length: 30 }, (_, index) => 30 - index));
+      expect(walk((before) => store.inspectDeveloperProposal(proposalId!, before))).toEqual(Array.from({ length: 25 }, (_, index) => 25 - index));
+    } finally {
+      await close(session);
+    }
+  }, 300_000);
+});
+
+describe('a Book merged from another house (Issue #65 review)', () => {
+  it('brings the pins of its Review Runs by value, and refuses to authorize a prepared Run pinned to a version this house lacks', async () => {
+    const otherRoot = join(dirname(roots.dataRoot), 'other-data');
+    let target = '';
+    let finishedPinned = '';
+    let waitingPinned = '';
+    const session = await open();
+    try {
+      const { store } = session;
+      const source = await importBook(session, 'L2 来源');
+      const finished = await authorizeAndDrive(session, source, prepare(session, source, [STYLE]));
+      const saved = store.saveCapturedProcedure({ bookId: source, reviewRunId: finished.reviewRunId, categoryIds: [STYLE], scopeSlot: 'whole', title: '体例复核', procedureId: null });
+      const versionId = saved.versions[0]!.versionId;
+      store.enableCapturedProcedure(versionId, store.previewCapturedProcedureValidation(versionId).previewDigest);
+      target = await importBook(session, 'L2 合并出去', false);
+      const resolved = store.inspectCapturedProcedureRun(target, saved.procedureId).resolved!;
+      const pin = { versionId: resolved.versionId, documentSha256: resolved.documentSha256 };
+      finishedPinned = (await authorizeAndDrive(session, target, prepare(session, target, [STYLE], WHOLE, pin))).reviewRunId;
+      waitingPinned = prepare(session, target, [STYLE], WHOLE, pin).reviewRunId;
+    } finally {
+      await close(session);
+    }
+    (await EditorialStore.open(otherRoot, roots.codeRoot)).close();
+    const db = new DatabaseSync(join(otherRoot, 'store', 'ai7.sqlite'));
+    try {
+      db.prepare('ATTACH DATABASE ? AS src').run(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      mergeBooks(db, [target], { source: roots.dataRoot, target: otherRoot });
+      db.exec('DETACH DATABASE src');
+    } finally {
+      db.close();
+    }
+    const merged = await open(undefined, otherRoot);
+    try {
+      const { store } = merged;
+      // The house's procedures stayed behind; the Book's Runs keep naming what they were prepared from.
+      expect(store.inspectCapturedProcedures().procedures).toEqual([]);
+      expect(store.inspectReviewWorkspace(target, finishedPinned).run!.procedure).toMatchObject({ title: '体例复核', version: 1, missing: true, stopped: false });
+      const waiting = store.inspectReviewWorkspace(target, waitingPinned).run!;
+      expect(waiting.procedure!.missing).toBe(true);
+      expect(refusal(() => store.authorizeReviewRun(target, waitingPinned, approvals(waiting)))).toBe('REVIEW_PROCEDURE_MISSING');
+      // Prepared again by hand — this house's own connection set up — it is an ordinary Review Run.
+      recordMissingCredentialConnection(store, 'L2 本机连接');
+      const again = prepare(merged, target, [STYLE]);
+      expect(again.procedure).toBeNull();
+    } finally {
+      await close(merged);
+    }
+  }, 300_000);
 });
 
 describe('revision 63', () => {

@@ -5,19 +5,26 @@ import {
   CAPTURED_PROCEDURE_SCOPE_SLOTS,
   CAPTURED_PROCEDURE_STATE_LABELS,
   MAX_CAPTURED_PROCEDURE_RUNS_SHOWN,
+  MAX_CAPTURED_PROCEDURE_TITLE_CHARACTERS,
   MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES,
-  MAX_CAPTURED_PROCEDURE_VERSIONS_SHOWN,
+  MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE,
   MAX_CAPTURED_PROCEDURES_SHOWN,
+  MAX_DEVELOPER_PROPOSAL_FIELD_CHARACTERS,
   MAX_DEVELOPER_PROPOSAL_FIELD_GRAPHEMES,
+  MAX_DEVELOPER_PROPOSAL_FILES_SHOWN,
   MAX_DEVELOPER_PROPOSAL_TITLE_GRAPHEMES,
+  MAX_DEVELOPER_PROPOSAL_VERSIONS_PAGE,
+  MAX_FRAME_BYTES,
   type CapturedProcedureDocument,
   type CapturedProcedureProjection,
+  type CapturedProcedureSummaryProjection,
   type CapturedProcedureScopeSlot,
   type CapturedProcedureState,
   type CapturedProcedureStepDocument,
   type CapturedProcedureStepProjection,
   type CapturedProcedureVersionProjection,
   type DeveloperProposalProjection,
+  type DeveloperProposalSummaryProjection,
   type DeveloperProposalVersionProjection,
   type ReviewRunProcedureProjection,
   type SaveDeveloperProposalInput,
@@ -191,7 +198,7 @@ export function callsModel(executor: string): boolean {
 
 export function validCapturedProcedureTitle(title: unknown): title is string {
   return typeof title === 'string' && title.isWellFormed() && title.trim().length > 0 && title === title.trim() &&
-    graphemeCount(title) <= MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES && !/[\u0000-\u001f\u007f]/u.test(title);
+    title.length <= MAX_CAPTURED_PROCEDURE_TITLE_CHARACTERS && graphemeCount(title) <= MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES && !/[\u0000-\u001f\u007f]/u.test(title);
 }
 
 /**
@@ -482,6 +489,8 @@ export function readReviewRunProcedurePin(db: DatabaseSync, reviewRunId: string)
     record.documentSha256 === text(row.document_sha256) && typeof record.title === 'string' && Array.isArray(record.leftOut),
   'CAPTURED_PROCEDURE_RECORD_INVALID', '审阅所依据的可复用工序记录已损坏。');
   const stopped = db.prepare("SELECT 1 FROM captured_procedure_states WHERE version_id = ? AND state = 'stopped'").get(text(row.version_id)) !== undefined;
+  // A Book merged in from another house brings its pins and none of that house's procedures (Issue #65 review).
+  const present = db.prepare('SELECT document_sha256 FROM captured_procedure_versions WHERE version_id = ?').get(text(row.version_id)) as SqlRow | undefined;
   return {
     procedureId: text(row.procedure_id),
     versionId: text(row.version_id),
@@ -489,18 +498,44 @@ export function readReviewRunProcedurePin(db: DatabaseSync, reviewRunId: string)
     title: record.title,
     documentSha256: text(row.document_sha256),
     stopped,
+    missing: present === undefined || text(present.document_sha256) !== text(row.document_sha256),
     leftOut: (record.leftOut as Array<{ categoryId: string; label: string; reason: string }>).map((entry) => ({
       categoryId: entry.categoryId, label: entry.label, reason: entry.reason,
     })),
   };
 }
 
-/** Why a prepared Run pinned to a stopped version cannot be authorized (ADR 0087 §5); `null` when nothing stands in the way. */
-export function procedurePinRefusal(db: DatabaseSync, reviewRunId: string): string | null {
+/**
+ * Why a prepared Run pinned to a Captured Procedure version cannot be authorized; `null` when nothing stands in the way. A
+ * stopped version is final (ADR 0087 §5); a version this house does not hold — the Book was merged in from another (Issue #65
+ * review) — is refused the same way: the Run is prepared again, by hand or from a procedure this house has.
+ */
+export function procedurePinRefusal(db: DatabaseSync, reviewRunId: string): { code: string; message: string } | null {
   const pin = readReviewRunProcedurePin(db, reviewRunId);
-  return pin !== null && pin.stopped
-    ? `这次审阅按可复用工序《${pin.title}》第 ${pin.version} 版准备，这一版已停用；请重新准备这次审阅。`
+  if (pin === null) return null;
+  if (pin.missing) {
+    return { code: 'REVIEW_PROCEDURE_MISSING', message: `这次审阅按可复用工序《${pin.title}》第 ${pin.version} 版准备，本机没有这一版；请重新准备这次审阅。` };
+  }
+  return pin.stopped
+    ? { code: 'REVIEW_PROCEDURE_STOPPED', message: `这次审阅按可复用工序《${pin.title}》第 ${pin.version} 版准备，这一版已停用；请重新准备这次审阅。` }
     : null;
+}
+
+/** Room kept beside a page of versions for the rest of its answer and its envelope. */
+const VERSION_PAGE_BUDGET_BYTES = MAX_FRAME_BYTES - 64 * 1024;
+
+/** The newest of `items` that fit the budget, at most `limit`, and always one while any remain. */
+function boundedPage<T>(items: ReadonlyArray<T>, limit: number): T[] {
+  const page: T[] = [];
+  let spent = 0;
+  for (const item of items) {
+    if (page.length >= limit) break;
+    const weight = Buffer.byteLength(JSON.stringify(item), 'utf8') + 1;
+    if (page.length > 0 && spent + weight > VERSION_PAGE_BUDGET_BYTES) break;
+    page.push(item);
+    spent += weight;
+  }
+  return page;
 }
 
 /** What one step reads as in the editor's words: its category's label and its 工序's title, from the configuration. */
@@ -671,11 +706,39 @@ export class CapturedProcedures {
     return { count, runs };
   }
 
-  /** One procedure as 工序与规则 reads it: its versions newest first, each with its state, use and provenance. */
-  projection(procedureId: string, words: StepWords, bookTitle: (bookId: string) => string, runOrdinal: (reviewRunId: string) => number): CapturedProcedureProjection {
+  /** One procedure as 工序与规则's list names it: its newest version's title and state, its count, and whether it runs. */
+  summary(procedureId: string): CapturedProcedureSummaryProjection {
     const versions = this.versions(procedureId);
     requireProcedure(versions.length > 0, 'CAPTURED_PROCEDURE_NOT_FOUND', '这个可复用工序不存在。');
-    const shown = versions.slice(0, MAX_CAPTURED_PROCEDURE_VERSIONS_SHOWN).map((stored): CapturedProcedureVersionProjection => {
+    const latest = versions[0]!;
+    return {
+      procedureId,
+      title: latest.document.title,
+      versionCount: versions.length,
+      latestVersion: latest.version,
+      latestState: latest.state,
+      latestStateLabel: CAPTURED_PROCEDURE_STATE_LABELS[latest.state],
+      runnable: versions.some((stored) => stored.state === 'enabled'),
+    };
+  }
+
+  /**
+   * One procedure with a page of its versions, newest first, below `before` when it is given: at most
+   * `MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE`, each with its state, use and provenance, and no more than one frame holds.
+   */
+  projection(
+    procedureId: string,
+    words: StepWords,
+    bookTitle: (bookId: string) => string,
+    runOrdinal: (reviewRunId: string) => number,
+    before: number | null = null,
+  ): CapturedProcedureProjection {
+    requireProcedure(before === null || (Number.isSafeInteger(before) && before >= 1), 'CAPTURED_PROCEDURE_INVALID', '版本位置无效。');
+    const summary = this.summary(procedureId);
+    const candidates = (this.#db.prepare(
+      'SELECT * FROM captured_procedure_versions WHERE procedure_id = ? AND (? IS NULL OR version < ?) ORDER BY version DESC LIMIT ?',
+    ).all(procedureId, before, before, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE) as SqlRow[]).map((row): CapturedProcedureVersionProjection => {
+      const stored = this.#versionOf(row);
       const { count, runs } = this.runsOf(stored.versionId);
       return {
         versionId: stored.versionId,
@@ -700,13 +763,9 @@ export class CapturedProcedures {
         technical: { documentSha256: stored.documentSha256, previousDocumentSha256: stored.previousDocumentSha256 },
       };
     });
-    return {
-      procedureId,
-      title: versions[0]!.document.title,
-      versionCount: versions.length,
-      versions: shown,
-      runnable: versions.some((stored) => stored.state === 'enabled'),
-    };
+    const versions = boundedPage(candidates, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE);
+    const last = versions.at(-1);
+    return { ...summary, versions, versionsBefore: last === undefined || last.version === 1 ? null : last.version };
   }
 
   // ---- Developer Capability Proposals (ADR 0087 §6; REUSE-063, REUSE-064) ------------------------------------
@@ -768,8 +827,9 @@ export class CapturedProcedures {
     requireProcedure(record.schema === PROPOSAL_SCHEMA && record.proposalVersionId === proposalVersionId && record.proposalId === text(row.proposal_id) &&
       record.version === integer(row.version) && ['title', 'missingCapability', 'affectedProcedure', 'direction', 'pluginCandidate'].every((key) => typeof record[key] === 'string'),
     'CAPTURED_PROCEDURE_RECORD_INVALID', '开发建议的记录已损坏。');
-    const files = (this.#db.prepare('SELECT file_name, written_at FROM developer_capability_proposal_exports WHERE proposal_version_id = ? ORDER BY written_at DESC, export_id')
-      .all(proposalVersionId) as SqlRow[]).map((file) => ({ fileName: text(file.file_name), writtenAt: text(file.written_at) }));
+    const files = (this.#db.prepare('SELECT file_name, written_at FROM developer_capability_proposal_exports WHERE proposal_version_id = ? ORDER BY written_at DESC, export_id LIMIT ?')
+      .all(proposalVersionId, MAX_DEVELOPER_PROPOSAL_FILES_SHOWN) as SqlRow[]).map((file) => ({ fileName: text(file.file_name), writtenAt: text(file.written_at) }));
+    const fileCount = integer((this.#db.prepare('SELECT count(*) n FROM developer_capability_proposal_exports WHERE proposal_version_id = ?').get(proposalVersionId) as SqlRow).n);
     return {
       proposalVersionId,
       proposalId: text(row.proposal_id),
@@ -781,30 +841,43 @@ export class CapturedProcedures {
       pluginCandidate: record.pluginCandidate as string,
       createdAt: text(row.created_at),
       files,
+      fileCount,
       technical: { sha256: text(row.sha256) },
       canonical: text(row.canonical_json),
     };
   }
 
-  /** One proposal, its versions newest first. */
-  proposal(proposalId: string): DeveloperProposalProjection {
+  /** One proposal as 工序与规则's list names it: its newest version's title, its count, and when it was last changed. */
+  proposalSummary(proposalId: string): DeveloperProposalSummaryProjection {
     requireProcedure(typeof proposalId === 'string' && UUID_PATTERN.test(proposalId), 'DEVELOPER_PROPOSAL_INVALID', '开发建议标识无效。');
-    const versions = (this.#db.prepare('SELECT * FROM developer_capability_proposals WHERE proposal_id = ? ORDER BY version DESC LIMIT ?')
-      .all(proposalId, MAX_CAPTURED_PROCEDURE_VERSIONS_SHOWN) as SqlRow[]).map((row) => {
+    const row = this.#db.prepare('SELECT * FROM developer_capability_proposals WHERE proposal_id = ? ORDER BY version DESC LIMIT 1').get(proposalId) as SqlRow | undefined;
+    requireProcedure(row !== undefined, 'DEVELOPER_PROPOSAL_NOT_FOUND', '这条开发建议不存在。');
+    const latest = this.#proposalVersionOf(row);
+    return { proposalId, title: latest.title, versionCount: latest.version, latestVersion: latest.version, latestCreatedAt: latest.createdAt };
+  }
+
+  /** One proposal with a page of its versions, newest first, below `before` when it is given, no more than one frame holds. */
+  proposal(proposalId: string, before: number | null = null): DeveloperProposalProjection {
+    requireProcedure(before === null || (Number.isSafeInteger(before) && before >= 1), 'DEVELOPER_PROPOSAL_INVALID', '版本位置无效。');
+    const summary = this.proposalSummary(proposalId);
+    const candidates = (this.#db.prepare(
+      'SELECT * FROM developer_capability_proposals WHERE proposal_id = ? AND (? IS NULL OR version < ?) ORDER BY version DESC LIMIT ?',
+    ).all(proposalId, before, before, MAX_DEVELOPER_PROPOSAL_VERSIONS_PAGE) as SqlRow[]).map((row) => {
       const { canonical: _canonical, ...version } = this.#proposalVersionOf(row);
       return version;
     });
-    requireProcedure(versions.length > 0, 'DEVELOPER_PROPOSAL_NOT_FOUND', '这条开发建议不存在。');
-    return { proposalId, title: versions[0]!.title, versions };
+    const versions = boundedPage(candidates, MAX_DEVELOPER_PROPOSAL_VERSIONS_PAGE);
+    const last = versions.at(-1);
+    return { ...summary, versions, versionsBefore: last === undefined || last.version === 1 ? null : last.version };
   }
 
-  /** The proposals newest first, at most `MAX_CAPTURED_PROCEDURES_SHOWN`. */
-  proposals(): { proposals: DeveloperProposalProjection[]; truncated: boolean } {
+  /** The proposals newest first, at most `MAX_CAPTURED_PROCEDURES_SHOWN`, as summaries. */
+  proposals(): { proposals: DeveloperProposalSummaryProjection[]; truncated: boolean } {
     const rows = this.#db.prepare(
       'SELECT proposal_id, max(created_at) latest FROM developer_capability_proposals GROUP BY proposal_id ORDER BY latest DESC, proposal_id LIMIT ?',
     ).all(MAX_CAPTURED_PROCEDURES_SHOWN + 1) as SqlRow[];
     return {
-      proposals: rows.slice(0, MAX_CAPTURED_PROCEDURES_SHOWN).map((row) => this.proposal(text(row.proposal_id))),
+      proposals: rows.slice(0, MAX_CAPTURED_PROCEDURES_SHOWN).map((row) => this.proposalSummary(text(row.proposal_id))),
       truncated: rows.length > MAX_CAPTURED_PROCEDURES_SHOWN,
     };
   }
@@ -827,7 +900,7 @@ export class CapturedProcedures {
 }
 
 function proposalField(value: unknown, required: boolean): boolean {
-  return typeof value === 'string' && value.isWellFormed() && (!required || value.trim().length > 0) &&
+  return typeof value === 'string' && value.isWellFormed() && (!required || value.trim().length > 0) && value.length <= MAX_DEVELOPER_PROPOSAL_FIELD_CHARACTERS &&
     graphemeCount(value) <= MAX_DEVELOPER_PROPOSAL_FIELD_GRAPHEMES && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value);
 }
 
@@ -869,15 +942,4 @@ export function developerProposalFileText(version: DeveloperProposalVersionProje
     `记录摘要（SHA-256）：${version.technical.sha256}`,
     '',
   ].join('\n');
-}
-
-/** The file name a proposal version is offered under: its title, made safe for every file system. */
-export function developerProposalFileName(version: Pick<DeveloperProposalVersionProjection, 'title' | 'version'>): string {
-  const safe = version.title.replace(/[\\/:*?"<>|\u0000-\u001f]/gu, '_').slice(0, 80);
-  return `开发建议 ${safe} 第 ${version.version} 版.md`;
-}
-
-/** The ordinal Captured Procedure state a version's canonical record names, for a test or a reader that has only the rows. */
-export function capturedProcedureVersionLabel(title: string, version: number): string {
-  return `《${title}》第 ${version} 版`;
 }

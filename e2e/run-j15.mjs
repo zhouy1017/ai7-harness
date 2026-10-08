@@ -1,6 +1,5 @@
-import { createHash, randomBytes } from 'node:crypto';
-import { spawn } from 'node:child_process';
-import { lstat, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { lstat, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -338,338 +337,6 @@ async function activateFocused(renderer, key) {
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...released });
 }
 
-
-// ---- 可复用工序 (Issue #65, plan slice S30; ADR 0087) ----------------------------------------------------------------------
-// The capture branch needs a finished Review Run, so it imports the admitted Public SampleBook `sample1` (ADR 0043) through the
-// picker into two Books and runs the review categories on the J-04 model adapter over the authored fixture — the local
-// deterministic route, no Provider. Its prerequisites are the product's own, as J-13 makes them: the 方案 enabled for each Book,
-// and one Main Editorial Role connection whose synthetic credential is saved and removed again, so only its reference is
-// recorded. J-15 therefore owns that one credential and its cleanup, through the product while it answers and directly by its
-// reference as the last resort.
-const REVIEW_FIXTURE_IDENTITY = 'sample1-review-authored';
-// Titled to sort before the other Books, so each stands on the library's first page (书库 orders by title).
-const CAPTURE_SOURCE_TITLE = 'J15 1 工序来源';
-const CAPTURE_TARGET_TITLE = 'J15 2 工序运行';
-const PROCEDURE_TITLE = '体例复核';
-const PROPOSAL_TITLE = '图注核对';
-const PROPOSAL_FILE_NAME = '开发建议.md';
-const SAMPLE1_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
-const CREDENTIAL_CLEANUP_TIMEOUT_MS = 15_000;
-const FORCE_EXIT_TIMEOUT_MS = 5_000;
-const CREDENTIAL_CLEANUP_TIMEOUT = journeyCheckFailure('J-15', 'credential-cleanup-timeout');
-
-async function awaitFixedOperation(operation, timeoutMs, timeoutError) {
-  operation.catch(() => undefined);
-  let timeout;
-  try {
-    return await Promise.race([
-      operation,
-      new Promise((_, reject) => {
-        timeout = setTimeout(() => reject(timeoutError), timeoutMs);
-      }),
-    ]);
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-async function assertSecretsAbsentFromDataRoot(root, secrets) {
-  const needles = secrets.flatMap((secret) => {
-    const digest = createHash('sha256').update(secret, 'utf8').digest();
-    return [
-      Buffer.from(secret, 'utf8'),
-      Buffer.from(secret, 'utf16le'),
-      digest,
-      Buffer.from(digest.toString('hex'), 'utf8'),
-      Buffer.from(digest.toString('base64'), 'utf8'),
-      Buffer.from(digest.toString('base64url'), 'utf8'),
-    ];
-  });
-  const visit = async (directory) => {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      const path = resolve(directory, entry.name);
-      const metadata = await lstat(path);
-      requireJourney(!metadata.isSymbolicLink(), 'cleanup-data-symlink');
-      if (metadata.isDirectory()) await visit(path);
-      else if (metadata.isFile()) {
-        const bytes = await readFile(path);
-        requireJourney(!needles.some((needle) => bytes.includes(needle)), 'secret-absent-from-product-data');
-      }
-    }
-  };
-  await visit(root);
-}
-
-const CREDENTIAL_CLEANUP_SCRIPT = `
-let input = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', (chunk) => {
-  input += chunk;
-  if (input.length > 128) process.exit(2);
-});
-process.stdin.once('end', async () => {
-  try {
-    const value = JSON.parse(input);
-    if (value === null || typeof value !== 'object' ||
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.credentialReference)) {
-      process.exit(2);
-    }
-    const { pathToFileURL } = require('node:url');
-    const { resolve } = require('node:path');
-    const denial = await import(pathToFileURL(resolve('dist/shared/network-denial.mjs')).href);
-    denial.installNodeNetworkDenial();
-    const { AsyncEntry } = require('@napi-rs/keyring');
-    const removed = await new AsyncEntry(
-      'io.github.zhouy1017.ai7.model-service',
-      'credential-reference:' + value.credentialReference,
-    ).deleteCredential();
-    process.exit(removed === true ? 0 : 3);
-  } catch {
-    process.exit(4);
-  }
-});
-`;
-
-async function removeSyntheticCredentialWithElectron(executable, credentialReference) {
-  requireJourney(isAbsolute(executable), 'credential-direct-cleanup-executable');
-  requireJourney(UUID_PATTERN.test(credentialReference), 'credential-direct-cleanup-reference');
-  requireJourney(
-    process.env.NAPI_RS_NATIVE_LIBRARY_PATH === undefined && process.env.NAPI_RS_FORCE_WASI === undefined,
-    'credential-direct-cleanup-override',
-  );
-  const child = spawn(executable, ['-e', CREDENTIAL_CLEANUP_SCRIPT], {
-    cwd: ROOT,
-    env: { ...productEnvironment(executable), ELECTRON_RUN_AS_NODE: '1' },
-    stdio: ['pipe', 'ignore', 'ignore'],
-    windowsHide: true,
-  });
-  child.stdin.on('error', () => undefined);
-  const terminal = new Promise((resolveTerminal, rejectTerminal) => {
-    child.once('error', rejectTerminal);
-    child.once('exit', (code, signal) => resolveTerminal({ code, signal }));
-  });
-  terminal.catch(() => undefined);
-  child.stdin.end(JSON.stringify({ credentialReference }));
-  let result;
-  try {
-    result = await awaitFixedOperation(terminal, CREDENTIAL_CLEANUP_TIMEOUT_MS, CREDENTIAL_CLEANUP_TIMEOUT);
-  } catch (error) {
-    try { child.kill('SIGKILL'); } catch {
-      // The bounded terminal observation below remains authoritative.
-    }
-    try {
-      await awaitFixedOperation(terminal, FORCE_EXIT_TIMEOUT_MS, CREDENTIAL_CLEANUP_TIMEOUT);
-    } catch {
-      child.unref();
-    }
-    throw error;
-  }
-  requireJourney(result.code === 0 && result.signal === null, 'credential-direct-cleanup-unconfirmed');
-}
-
-function hasErrorCode(error, code) {
-  return error !== null && typeof error === 'object' && 'code' in error && error.code === code;
-}
-
-async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
-  requireJourney(dataRoot === resolve(runRoot, 'data') && inside(runRoot, dataRoot), 'credential-cleanup-metadata-root');
-  const databasePath = resolve(dataRoot, 'store', 'ai7.sqlite');
-  let metadata;
-  try {
-    metadata = await lstat(databasePath);
-  } catch (error) {
-    if (hasErrorCode(error, 'ENOENT')) return { kind: 'not-started' };
-    throw journeyCheckFailure('J-15', 'credential-cleanup-metadata');
-  }
-  requireJourney(metadata.isFile() && !metadata.isSymbolicLink() && (await realpath(databasePath)) === databasePath,
-    'credential-cleanup-metadata-file');
-  let database;
-  try {
-    database = new DatabaseSync(databasePath, { readOnly: true });
-  } catch {
-    throw journeyCheckFailure('J-15', 'credential-cleanup-metadata');
-  }
-  try {
-    database.exec('PRAGMA query_only = ON;');
-    // The terminal version the service stamps, as J-13 reads it; this pin moves with whatever revision a later slice takes.
-    requireJourney(database.prepare('PRAGMA user_version').get()?.user_version === 63, 'credential-cleanup-metadata-version');
-    const rows = database.prepare(
-      `SELECT connection_id, role_id, provider_id, model_id, adapter_revision, configuration_revision,
-              approved_fallback_chain, credential_slot, credential_reference, credential_operation_state
-       FROM model_service_connections LIMIT 2`,
-    ).all();
-    requireJourney(rows.length <= 1, 'credential-cleanup-metadata-cardinality');
-    if (rows.length === 0) return { kind: 'not-started' };
-    const row = rows[0];
-    requireJourney(
-      row.connection_id === 'main-editorial-deepseek-v4-pro' && row.role_id === 'main-editorial' &&
-      row.provider_id === 'deepseek-open-platform' && row.model_id === 'deepseek-v4-pro' &&
-      row.adapter_revision === 1 && row.configuration_revision === 1 && row.approved_fallback_chain === '[]' &&
-      row.credential_slot === 'deepseek-api-key' && typeof row.credential_reference === 'string' &&
-      UUID_PATTERN.test(row.credential_reference) && ['ready', 'missing', 'needs-attention'].includes(row.credential_operation_state),
-      'credential-cleanup-metadata-binding',
-    );
-    return row.credential_operation_state === 'missing'
-      ? { kind: 'removed' }
-      : { kind: 'reference', credentialReference: row.credential_reference };
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith('J-15/')) throw error;
-    throw journeyCheckFailure('J-15', 'credential-cleanup-metadata');
-  } finally {
-    database.close();
-  }
-}
-
-/**
- * Exact `sample1` through the import flow, as a new Book with its first manuscript; the Book's identity. The second import names
- * the new Book as a distinct intended work, as J-09 does: the same source is already a Book here.
- */
-async function importSample1(renderer, title, distinct, name) {
-  await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
-  await click(renderer, '导入稿件', `${name}-start`);
-  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, `${name}-target`);
-  const target = distinct ? '新建图书（作为不同作品）' : '新建图书';
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label=${JSON.stringify(target)}]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, `${name}-target-explicit`);
-  await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, `${name}-relationship`);
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, `${name}-relationship-explicit`);
-  await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, `${name}-title-screen`);
-  await assertRenderer(renderer, `document.querySelector('[data-source-sha256]')?.textContent===${JSON.stringify(SAMPLE1_SHA256)}`, `${name}-exact-source`);
-  await fill(renderer, '#book-title', title, `${name}-title`);
-  await click(renderer, '确认书名并复核', `${name}-review`);
-  await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, `${name}-review-ready`);
-  await waitFor(renderer, `!document.querySelector('#accept-import-degradation')&&Array.from(document.querySelectorAll('button')).some((button)=>button.textContent==='新建图书并导入稿件'&&!button.disabled)`, `${name}-review-clean`);
-  await click(renderer, '新建图书并导入稿件', `${name}-commit`);
-  await waitFor(renderer, `document.querySelector('[data-screen="imported"] .book-overview[data-manuscript-state="populated"]')`, `${name}-completed`, 180_000);
-  await waitFor(renderer, `document.documentElement.dataset.ai7ImportCompletionAcknowledged==='true'`, `${name}-acknowledged`, 180_000);
-  const bookId = await renderer.evaluate(`document.querySelector('.book-overview')?.dataset.bookId ?? null`);
-  requireJourney(UUID_PATTERN.test(bookId ?? ''), `${name}-book-identity`);
-  return bookId;
-}
-
-/** A Book's ②B 审阅 from the library: its manuscript first, then 工作 › 审阅, as the editor reaches it. */
-async function openBookReview(renderer, bookId, name) {
-  await clickBook(renderer, bookId, `${name}-book`);
-  await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookId)}]')`, `${name}-manuscript`, 120_000);
-  await assertRenderer(renderer, `(() => { const button=document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"] button[data-work-destination="review"]'); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, `${name}-entry`);
-  await waitFor(renderer, `document.querySelector('[data-screen="book-review"] .book-review .review-workspace-card')`, `${name}-card`, 60_000);
-}
-
-/** From ②B 审阅 back to 书库: its 工作概览, then the library. */
-async function leaveReviewToLibrary(renderer, name) {
-  await click(renderer, '工作概览', `${name}-overview`);
-  await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview')`, `${name}-overview-ready`);
-  await click(renderer, '返回图书列表', `${name}-library`);
-  await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
-}
-
-/** The 方案 enabled for one Book on its 工作概览, as every Book a Review Run executes for has it. */
-async function enableProfileForBook(renderer, bookId, name) {
-  await clickBook(renderer, bookId, `${name}-book`);
-  await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookId)}]')`, `${name}-manuscript`, 120_000);
-  await click(renderer, '返回图书工作概览', `${name}-overview`);
-  await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, `${name}-enable-ready`);
-  await click(renderer, '审阅并为本图书启用 Revision 2', `${name}-enable`);
-  await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, `${name}-enabled`, 60_000);
-  await click(renderer, '返回图书列表', `${name}-library`);
-  await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
-}
-
-/** Prepare a Review Run on the open 审阅 sheet, start it from the drawer, and wait for it to settle; its projection. */
-async function startPreparedReview(renderer, name) {
-  await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, `${name}-prepared`, 180_000);
-  const prepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
-  requireJourney(prepared?.state === 'prepared' && UUID_PATTERN.test(prepared.reviewRunId ?? ''), `${name}-prepared-run`);
-  await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(prepared.reviewRunId)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='ready'`, `${name}-drawer`);
-  await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', `${name}-start`);
-  await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, `${name}-settled`, 300_000);
-  await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', `${name}-drawer-close`);
-  await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, `${name}-drawer-closed`);
-  return (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
-}
-
-/** The capture sheet as an editor reads it. */
-const READ_CAPTURE = `(() => {
-  const dialog = document.querySelector('dialog.procedure-capture');
-  if (!(dialog instanceof HTMLDialogElement) || !dialog.open) return null;
-  return {
-    kind: dialog.dataset.captureKind ?? null,
-    kept: dialog.dataset.captureKept ?? null,
-    steps: Array.from(dialog.querySelectorAll('[data-capture-step]'), (label) => [label.dataset.captureStep, label.dataset.captureEligible, label.querySelector('input')?.checked ?? null, label.querySelector('.procedure-capture-step-text')?.textContent ?? null]),
-    kinds: Array.from(dialog.querySelectorAll('[data-capture-kind]'), (label) => [label.dataset.captureKind, label.querySelector('input')?.disabled ?? null, label.querySelector('input')?.checked ?? null]),
-    why: dialog.querySelector('.procedure-capture-why p')?.textContent ?? null,
-    extract: Array.from(dialog.querySelectorAll('.procedure-capture-extract li'), (item) => item.textContent),
-    notSaved: Array.from(dialog.querySelectorAll('.procedure-capture-not-saved li'), (item) => item.textContent),
-    procedureShown: !dialog.querySelector('.procedure-capture-procedure')?.hidden,
-    proposalShown: !dialog.querySelector('.procedure-capture-proposal')?.hidden,
-    affected: dialog.querySelector('[data-capture-field="affected-procedure"]')?.value ?? null,
-    focused: document.activeElement === dialog.querySelector('h3'),
-  };
-})()`;
-
-/** 知识库 › 工序与规则's 可复用工序 and 开发建议 as an editor reads them. */
-const READ_PROCEDURES = `(() => {
-  const procedures = document.querySelector('.knowledge-captured-procedures');
-  const proposals = document.querySelector('.knowledge-developer-proposals');
-  if (!(procedures instanceof HTMLElement) || !(proposals instanceof HTMLElement)) return null;
-  return {
-    count: procedures.dataset.procedureCount ?? null,
-    proposalCount: proposals.dataset.proposalCount ?? null,
-    procedures: Array.from(procedures.querySelectorAll('article.captured-procedure'), (card) => ({
-      id: card.dataset.procedureId,
-      runnable: card.dataset.procedureRunnable,
-      title: card.querySelector('h4')?.textContent ?? null,
-      versions: Array.from(card.querySelectorAll('li.captured-procedure-version'), (item) => {
-        const pill = item.querySelector('.status-pill');
-        return {
-          version: item.dataset.version, state: item.dataset.versionState, pill: pill?.textContent ?? null,
-          pillBorder: pill instanceof HTMLElement ? getComputedStyle(pill).borderTopStyle : null,
-          steps: Array.from(item.querySelectorAll('.captured-procedure-steps li'), (step) => step.textContent),
-          source: item.querySelector('.captured-procedure-source')?.textContent ?? null,
-          runs: item.querySelector('.captured-procedure-runs')?.textContent ?? null,
-          validation: item.querySelector('.captured-procedure-validation')?.dataset.validationPasses ?? null,
-          guidelines: Array.from(item.querySelectorAll('.captured-procedure-guideline'), (line) => line.textContent),
-          actions: Array.from(item.querySelectorAll('.captured-procedure-version-actions [data-procedure-action]'), (button) => button.dataset.procedureAction),
-        };
-      }),
-      run: card.querySelector('[data-procedure-action="run"]') instanceof HTMLButtonElement,
-    })),
-    proposals: Array.from(proposals.querySelectorAll('article.developer-proposal'), (card) => ({
-      title: card.querySelector('h4')?.textContent ?? null,
-      versions: Array.from(card.querySelectorAll('li.developer-proposal-version'), (item) => [item.dataset.proposalVersion, item.dataset.proposalFiles]),
-    })),
-  };
-})()`;
-async function readProcedures(renderer, predicate, name) {
-  const deadline = Date.now() + 60_000;
-  let page = null;
-  while (Date.now() < deadline) {
-    page = await renderer.evaluate(READ_PROCEDURES).catch(() => null);
-    if (page !== null && predicate(page)) return page;
-    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
-  }
-  const error = journeyCheckFailure('J-15', name);
-  error.detail = page;
-  throw error;
-}
-async function readCapture(renderer, predicate, name) {
-  const deadline = Date.now() + 60_000;
-  let page = null;
-  while (Date.now() < deadline) {
-    page = await renderer.evaluate(READ_CAPTURE).catch(() => null);
-    if (page !== null && predicate(page)) return page;
-    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
-  }
-  const error = journeyCheckFailure('J-15', name);
-  error.detail = page;
-  throw error;
-}
-async function openProcedures(renderer, name) {
-  await click(renderer, '知识库', `${name}-knowledge`);
-  await readKnowledge(renderer, (page) => page.guidelines === 'ready', `${name}-knowledge-ready`);
-  await click(renderer, '工序与规则', `${name}-rules`);
-}
-const STATUS_TEXT = `(document.querySelector('#persistence-status')?.textContent ?? '')`;
-
 async function requireRetainedCarrier(dataRoot) {
   let current = dataRoot;
   for (const segment of ['native-artifacts', 'sha256', PROFILE_DIGEST.slice(0, 2), PROFILE_DIGEST]) {
@@ -849,17 +516,8 @@ async function main() {
   let runRoot;
   let runRootAcquisition;
   let tempParent;
-  let dataRoot;
-  let electronExecutableForCleanup;
   let cleanupPromise;
   let finalCleanupRequested = false;
-  // 可复用工序's Review Runs need a Main Editorial Role connection (Issue #65, S30), so J-15 owns the one synthetic credential
-  // and its cleanup as J-13 does: through the product while it answers, and directly by its reference as the last resort.
-  let credentialRenderer;
-  let credentialMutationReached = false;
-  let credentialRemoved = false;
-  let credentialReferenceForCleanup;
-  let syntheticSecret;
   const closeBrowser = async () => {
     let owned = browser;
     if (owned === undefined && browserAcquisition !== undefined) owned = await browserAcquisition.catch(() => undefined);
@@ -867,56 +525,18 @@ async function main() {
     browser = undefined;
     browserAcquisition = undefined;
   };
-  const READ_CONNECTION = `window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection??null)`;
-  const removeCredentialThroughProduct = async () => {
-    if (credentialRenderer === undefined || browser === undefined || !browser.isConnected()) return;
-    const state = await credentialRenderer.evaluate(READ_CONNECTION);
-    if (UUID_PATTERN.test(state?.credentialReference ?? '')) credentialReferenceForCleanup = state.credentialReference;
-    if (state === null || state.credentialOperationState === 'missing') {
-      credentialRemoved = true;
-      return;
-    }
-    await credentialRenderer.evaluate(`window.ai7.removeModelServiceCredential()`);
-    const after = await credentialRenderer.evaluate(READ_CONNECTION);
-    credentialRemoved = after === null || after.credentialOperationState === 'missing';
-  };
   const cleanup = () => {
     cleanupPromise ??= (async () => {
-      let failure;
-      if (credentialMutationReached && !credentialRemoved) {
-        try { await removeCredentialThroughProduct(); } catch (error) { failure ??= error; }
-      }
       await closeBrowser();
-      if (credentialMutationReached && !credentialRemoved) {
-        try {
-          if (credentialReferenceForCleanup === undefined && dataRoot !== undefined && runRoot !== undefined) {
-            const recovered = await recoverSyntheticCredentialCleanupState(dataRoot, runRoot);
-            if (recovered.kind === 'not-started' || recovered.kind === 'removed') credentialRemoved = true;
-            else credentialReferenceForCleanup = recovered.credentialReference;
-          }
-          if (!credentialRemoved && credentialReferenceForCleanup !== undefined) {
-            requireJourney(electronExecutableForCleanup !== undefined, 'credential-direct-cleanup-executable');
-            await removeSyntheticCredentialWithElectron(electronExecutableForCleanup, credentialReferenceForCleanup);
-            credentialRemoved = true;
-          }
-        } catch (error) {
-          failure ??= error;
-        }
-      }
       const ownedLoopback = loopback ?? (loopbackAcquisition === undefined ? undefined : await loopbackAcquisition.catch(() => undefined));
       await ownedLoopback?.close().catch(() => undefined);
       loopback = undefined;
-      if (credentialMutationReached && !credentialRemoved) throw failure ?? journeyCheckFailure('J-15', 'credential-cleanup-failed');
       const ownedRoot = runRoot ?? (runRootAcquisition === undefined ? undefined : await runRootAcquisition.catch(() => undefined));
       if (ownedRoot !== undefined) {
-        if (syntheticSecret !== undefined && dataRoot !== undefined) {
-          try { await assertSecretsAbsentFromDataRoot(dataRoot, [syntheticSecret]); } catch (error) { failure ??= error; }
-        }
         requireJourney(tempParent !== undefined && dirname(ownedRoot) === tempParent && basename(ownedRoot).startsWith('ai7-j15-e2e-') && (await realpath(ownedRoot)) === ownedRoot, 'cleanup-target');
         await rm(ownedRoot, { recursive: true, force: true });
         runRoot = undefined;
       }
-      if (failure !== undefined) throw failure;
     })();
     return cleanupPromise;
   };
@@ -942,14 +562,12 @@ async function main() {
     runRootAcquisition = mkdtemp(join(tempParent, 'ai7-j15-e2e-'));
     runRoot = await runRootAcquisition;
     requireJourney(dirname(runRoot) === tempParent && basename(runRoot).startsWith('ai7-j15-e2e-'), 'temp-root');
-    dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
+    const dataRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'data'), checkout);
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const executable = electronExecutable();
-    electronExecutableForCleanup = executable;
     const guidelinePath = resolve(runRoot, HOUSE_GUIDELINE_NAME);
     await writeFile(guidelinePath, HOUSE_GUIDELINE, 'utf8');
-    // `extra` carries the capture branch's launch controls (Issue #65, S30): the J-04 model adapter and the Save dialog's answer.
-    const launch = async (pickerPath = guidelinePath, extra = []) => {
+    const launch = async (pickerPath = guidelinePath) => {
       const args = [
         '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
         '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
@@ -957,7 +575,6 @@ async function main() {
         // J-15's picker serves 导入新版本 of a review guideline document (Issue #427, S79a), and in the window relaunched after
         // it 放入资料… (Issue #427, S79c): one choice per window.
         '--j15-picker-path', pickerPath,
-        ...extra,
       ];
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       cancellation.throwIfRequested();
@@ -1347,6 +964,12 @@ async function main() {
       /^[0-9a-f]{64}$/u.test(technical.get('权限侧车 SHA-256') ?? '') && procedures.technical.length === 5 + 9 &&
       procedures.technical.slice(5).every(([, procedureId]) => /^ai7-review-procedure\//u.test(procedureId ?? '')),
     'knowledge-procedures-list', procedures);
+    // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087) sit apart from the built-in 工序, empty here and saying how one is made;
+    // capturing, validating, running and stopping one is J-13's, which runs Review Runs (Issue #65 review).
+    await waitFor(renderer, `document.querySelector('.knowledge-captured-procedures')?.dataset.procedureCount==='0' && document.querySelector('.knowledge-developer-proposals')?.dataset.proposalCount==='0'`, 'knowledge-captured-painted');
+    const captured = await renderer.evaluate(`[document.querySelector('.knowledge-captured-procedures .captured-procedures-empty')?.textContent ?? null, document.querySelector('.knowledge-developer-proposals .developer-proposals-empty')?.textContent ?? null, document.querySelectorAll('[data-procedure-action]').length]`);
+    requireJourney(JSON.stringify(captured) === JSON.stringify(['还没有可复用工序。在一次完成的审阅里点「将以上工序保存为可复用工序」就能保存。', '还没有开发建议。', 0]),
+      'knowledge-captured-empty', captured);
 
     // ---- 知识库 › 资料库 (Issue #427, plan slice S79c; editor-surfaces §8.4, V2-UX-KB-007, ATTN-009, LEARN-004 to LEARN-007) ----
     at('knowledge-library-add');
@@ -1534,232 +1157,6 @@ async function main() {
     await waitFor(renderer, `document.querySelectorAll('.library-attribution-chooser [data-library-choice^="book:"]').length===20 && document.querySelector('.library-attribution-chooser [data-library-choice="${picked}"]')?.checked===true`, 'library-books-first-retained');
     await clickSelector(renderer, '[data-library-action="confirm-attribution"]', 'library-books-commit');
     await readLibrary(renderer, (page) => page.cards[0]?.attribution === 'book' && page.cards[0].chooser === null, 'library-books-committed');
-
-    // ---- 可复用工序 (Issue #65, plan slice S30; ADR 0087; V2-UX-REUSE-001 to 020, 029 to 031, 063 to 066, KB-010) ---------
-    at('capture-prerequisites');
-    // A window whose picker serves exact sample1 and whose service binds the J-04 model adapter over the authored review
-    // fixture, and whose Save dialog answers the 开发建议's 导出为文件… once.
-    const proposalPath = resolve(runRoot, PROPOSAL_FILE_NAME);
-    await closeBrowser();
-    manager = await launch(SAMPLE1_PATH, ['--j04-model-adapter', REVIEW_FIXTURE_IDENTITY, '--j15-save-path', proposalPath]);
-    renderer = await waitForRenderer(manager, 'capture-window');
-    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'capture-ready');
-    const sourceBook = await importSample1(renderer, CAPTURE_SOURCE_TITLE, false, 'capture-source-import');
-    await click(renderer, '返回图书列表', 'capture-source-library');
-    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'capture-source-landing');
-    await enableProfileForBook(renderer, sourceBook, 'capture-source-profile');
-    await click(renderer, '模型服务', 'capture-model-open');
-    await waitFor(renderer, `document.querySelector('[data-screen="model-service"] [data-model-role="main-editorial"]')`, 'capture-model-ready');
-    cancellation.throwIfRequested();
-    syntheticSecret = randomBytes(48).toString('base64url');
-    credentialRenderer = renderer;
-    await fill(renderer, '#main-editorial-connection-name', 'J-15 主编辑连接', 'capture-model-name');
-    await fill(renderer, '#main-editorial-credential', syntheticSecret, 'capture-model-secret');
-    cancellation.throwIfRequested();
-    credentialMutationReached = true;
-    await click(renderer, '保护并保存', 'capture-model-save');
-    at('model-credential-saved');
-    await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='available' && document.querySelector('[data-credential-state="ready"]')`, 'capture-model-saved');
-    const readyConnection = await renderer.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection)`);
-    requireJourney(UUID_PATTERN.test(readyConnection?.credentialReference ?? '') && readyConnection?.credentialOperationState === 'ready', 'capture-model-ready-reference');
-    credentialReferenceForCleanup = readyConnection.credentialReference;
-    await click(renderer, '移除', 'capture-model-remove');
-    at('model-credential-removed');
-    await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'capture-model-removed');
-    credentialRemoved = true;
-    await click(renderer, '返回', 'capture-model-back');
-    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'capture-model-landing');
-
-    at('capture-source-review');
-    // A Review Run of 体例与格式 and 文学性与表达改进 over the whole book, approved in the drawer and run to the end; a Run
-    // chosen by hand pins no procedure, and once finished it offers the capture beside its report.
-    await openBookReview(renderer, sourceBook, 'capture-source-review');
-    await clickSelector(renderer, '[data-review-action="new-review"]', 'capture-source-new-review');
-    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('[data-review-field="procedure"]')`, 'capture-source-sheet');
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for (const id of ['style-and-format','literary-expression']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'capture-source-prepare');
-    const sourceRun = await startPreparedReview(renderer, 'capture-source-run');
-    requireJourney(sourceRun?.state === 'settled' && sourceRun.procedure === null && sourceRun.capture?.available === true &&
-      JSON.stringify(sourceRun.categories.map((category) => [category.categoryId, category.state])) === JSON.stringify([['style-and-format', 'settled'], ['literary-expression', 'settled']]),
-    'capture-source-settled', { state: sourceRun?.state, capture: sourceRun?.capture });
-
-    at('capture-source-set');
-    // 将以上工序保存为可复用工序: the source set — both categories, each kept — the classification it recommends and why, what
-    // extraction keeps and what it never saves. Removing a step changes what it keeps; nothing can be added or reordered.
-    await clickSelector(renderer, 'section.review-report [data-review-action="capture"]', 'capture-open');
-    const sheet = await readCapture(renderer, (read) => read.steps.length === 2 && read.focused, 'capture-sheet');
-    requireJourney(JSON.stringify(sheet.steps.map(([id, eligible, checked]) => [id, eligible, checked])) === JSON.stringify([['style-and-format', 'true', true], ['literary-expression', 'true', true]]) &&
-      sheet.steps[0][3] === '体例与格式 · 体例与格式审阅工序（第 1 版） · 输出批注 · 调用模型 · 不使用搜索引擎' &&
-      JSON.stringify(sheet.kinds) === JSON.stringify([['captured-procedure', false, true], ['developer-proposal', false, false], ['skill-draft', true, false], ['workflow-draft', true, false], ['default-rule', true, false]]) &&
-      sheet.kind === 'captured-procedure' && sheet.procedureShown && !sheet.proposalShown && sheet.notSaved.length === 6 &&
-      sheet.notSaved[0] === '稿件文字、书名与这本书的身份、章节与书系' && (sheet.why ?? '').startsWith('这次审阅的每一步都是 AI7 已有的审阅类别') &&
-      sheet.extract[1] === '步骤（按顺序）：体例与格式 → 文学性与表达改进' && sheet.extract[2] === '参数：审阅范围「全书」',
-    'capture-sheet-words', sheet);
-    await clickSelector(renderer, 'dialog.procedure-capture input[name="capture-step"][value="literary-expression"]', 'capture-remove-step');
-    await fill(renderer, 'dialog.procedure-capture [data-capture-field="title"]', PROCEDURE_TITLE, 'capture-title');
-    const trimmed = await readCapture(renderer, (read) => read.kept === 'style-and-format', 'capture-step-removed');
-    requireJourney(trimmed.extract[0] === `用途：《${PROCEDURE_TITLE}》` && trimmed.extract[1] === '步骤（按顺序）：体例与格式' &&
-      trimmed.extract[3] === '输出：批注', 'capture-extract-words', trimmed.extract);
-
-    at('capture-save');
-    // 保存为可复用工序: version 1, 待验证 — nothing runs, and the document holds nothing of the Book.
-    await clickSelector(renderer, 'dialog.procedure-capture [data-capture-action="save"]', 'capture-save');
-    await waitFor(renderer, `!document.querySelector('dialog.procedure-capture') && ${STATUS_TEXT}===${JSON.stringify(`已保存《${PROCEDURE_TITLE}》第 1 版 · 待验证；在知识库「工序与规则」里验证并启用后才能运行。`)}`, 'capture-saved');
-    const savedProcedures = await renderer.evaluate(`window.ai7.inspectCapturedProcedures()`);
-    const procedureId = savedProcedures?.procedures?.[0]?.procedureId;
-    requireJourney(savedProcedures?.procedures?.length === 1 && UUID_PATTERN.test(procedureId ?? '') &&
-      savedProcedures.procedures[0].versions[0].state === 'pending-validation' && savedProcedures.procedures[0].versions[0].source.bookId === sourceBook &&
-      JSON.stringify(savedProcedures.procedures[0].versions[0].steps.map((step) => step.categoryId)) === JSON.stringify(['style-and-format']),
-    'capture-saved-service', savedProcedures?.procedures?.[0]?.versions?.[0]);
-    const storedDocument = (() => {
-      const database = new DatabaseSync(resolve(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
-      try { return database.prepare('SELECT document_json FROM captured_procedure_versions').all().map((row) => row.document_json); } finally { database.close(); }
-    })();
-    requireJourney(storedDocument.length === 1 && !storedDocument[0].includes(sourceBook) && !storedDocument[0].includes(CAPTURE_SOURCE_TITLE) &&
-      !storedDocument[0].includes(sourceRun.reviewRunId) && JSON.parse(storedDocument[0]).schema === 'ai7.captured-procedure/1', 'capture-document-holds-no-book');
-
-    at('capture-developer-proposal');
-    // The same capture as a 开发建议: kept only here, its affected 工序 named by the steps, never sent.
-    await clickSelector(renderer, 'section.review-report [data-review-action="capture"]', 'proposal-open');
-    await readCapture(renderer, (read) => read.focused, 'proposal-sheet');
-    await clickSelector(renderer, 'dialog.procedure-capture input[name="capture-kind"][value="developer-proposal"]', 'proposal-kind');
-    const proposalSheet = await readCapture(renderer, (read) => read.kind === 'developer-proposal', 'proposal-kind-chosen');
-    requireJourney(proposalSheet.proposalShown && !proposalSheet.procedureShown && proposalSheet.affected === '体例与格式、文学性与表达改进', 'proposal-sheet-words', proposalSheet);
-    await fill(renderer, 'dialog.procedure-capture [data-capture-field="proposal-title"]', PROPOSAL_TITLE, 'proposal-title');
-    await fill(renderer, 'dialog.procedure-capture [data-capture-field="missing-capability"]', '核对图注与正文图号是否一致。', 'proposal-capability');
-    await clickSelector(renderer, 'dialog.procedure-capture [data-capture-action="save"]', 'proposal-save');
-    await waitFor(renderer, `!document.querySelector('dialog.procedure-capture') && ${STATUS_TEXT}===${JSON.stringify(`已保存开发建议《${PROPOSAL_TITLE}》第 1 版；只记在本机，AI7 不会发送它。`)}`, 'proposal-saved');
-
-    at('capture-validate-enable');
-    // 知识库 › 工序与规则 lists it apart from the built-in 工序: version 1 待验证, dashed. 验证并启用… previews it — today's
-    // guideline the same as the source Run's — and 确认启用 makes it 已启用, solid, runnable.
-    await leaveReviewToLibrary(renderer, 'validate-leave');
-    await openProcedures(renderer, 'validate');
-    const pending = await readProcedures(renderer, (page) => page.count === '1' && page.proposalCount === '1', 'validate-listed');
-    requireJourney(pending.procedures[0].title === `《${PROCEDURE_TITLE}》` && pending.procedures[0].runnable === 'false' && !pending.procedures[0].run &&
-      pending.procedures[0].versions[0].state === 'pending-validation' && pending.procedures[0].versions[0].pill === '待验证' &&
-      pending.procedures[0].versions[0].pillBorder === 'dashed' && pending.procedures[0].versions[0].source.startsWith(`来自《${CAPTURE_SOURCE_TITLE}》第 1 次审阅`) &&
-      JSON.stringify(pending.procedures[0].versions[0].actions) === JSON.stringify(['validate', 'stop']) &&
-      pending.proposals[0].title === `《${PROPOSAL_TITLE}》` && JSON.stringify(pending.proposals[0].versions) === JSON.stringify([['1', '0']]),
-    'validate-pending', pending);
-    await clickSelector(renderer, `[data-procedure-id="${procedureId}"] [data-version="1"] [data-procedure-action="validate"]`, 'validate-open');
-    const validationPreview = await readProcedures(renderer, (page) => page.procedures[0]?.versions[0]?.validation === 'true', 'validate-preview');
-    requireJourney(JSON.stringify(validationPreview.procedures[0].versions[0].guidelines) === JSON.stringify(["体例条款（AI7 内置默认）第 1 版 · 与来源审阅相同"]), "validate-preview-words", validationPreview.procedures[0].versions[0]);
-    await waitFor(renderer, `document.activeElement === document.querySelector('.captured-procedure-validation h5')`, 'validate-preview-focused', 10_000);
-    await clickSelector(renderer, '.captured-procedure-validation [data-procedure-action="confirm-enable"]', 'validate-confirm');
-    const enabled = await readProcedures(renderer, (page) => page.procedures[0]?.versions[0]?.state === 'enabled', 'validate-enabled');
-    requireJourney(enabled.procedures[0].runnable === 'true' && enabled.procedures[0].run && enabled.procedures[0].versions[0].pill === '已启用' &&
-      enabled.procedures[0].versions[0].pillBorder === 'solid' && enabled.procedures[0].versions[0].validation === null, 'validate-enabled-card', enabled.procedures[0]);
-    await waitFor(renderer, `${STATUS_TEXT}===${JSON.stringify(`已启用《${PROCEDURE_TITLE}》第 1 版；在一本书的新建审阅里可以按它运行。`)}`, 'validate-enabled-status', 10_000);
-
-    at('capture-run-second-book');
-    // A second Book from sample1 (the picker serves one choice per window, so a new window), its 方案 enabled. 运行此工序… in
-    // 知识库 opens its 审阅 with 新建审阅 filled from version 1 — 体例与格式, the whole book — and the ordinary plan and
-    // 开始任务 run it; the Run pins version 1.
-    await closeBrowser();
-    manager = await launch(SAMPLE1_PATH, ['--j04-model-adapter', REVIEW_FIXTURE_IDENTITY, '--j15-save-path', proposalPath]);
-    renderer = await waitForRenderer(manager, 'run-window');
-    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'run-ready');
-    const targetBook = await importSample1(renderer, CAPTURE_TARGET_TITLE, true, 'run-import');
-    await click(renderer, '返回图书列表', 'run-import-library');
-    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'run-import-landing');
-    await enableProfileForBook(renderer, targetBook, 'run-profile');
-    await openProcedures(renderer, 'run');
-    await readProcedures(renderer, (page) => page.procedures[0]?.run === true, 'run-listed');
-    await clickSelector(renderer, `[data-procedure-id="${procedureId}"] [data-procedure-action="run"]`, 'run-open');
-    await waitFor(renderer, `document.querySelector('[data-procedure-field="run-book"]')`, 'run-chooser');
-    await assertRenderer(renderer, `(() => { const select=document.querySelector('[data-procedure-field="run-book"]'); if(!(select instanceof HTMLSelectElement))return false; const values=Array.from(select.options, (option)=>option.value); if(!values.includes(${JSON.stringify(targetBook)}) || !values.includes(${JSON.stringify(sourceBook)}) || values.length!==2)return false; select.value=${JSON.stringify(targetBook)}; select.dispatchEvent(new Event('change',{bubbles:true})); return true; })()`, 'run-choose-book');
-    await clickSelector(renderer, '[data-procedure-action="open-run"]', 'run-open-review');
-    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('.review-sheet-procedure')?.dataset.procedureVersion==='1'`, 'run-sheet-filled', 60_000);
-    const filled = await renderer.evaluate(`(() => {
-      const sheet=document.querySelector('dialog.review-sheet');
-      return {
-        procedure: sheet.querySelector('[data-review-field="procedure"]')?.value ?? null,
-        checked: Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), (input) => input.value),
-        enabled: Array.from(sheet.querySelectorAll('input[name="review-category"]:not(:disabled)'), (input) => input.value),
-        scope: sheet.querySelector('input[name="review-scope"]:checked')?.value ?? null,
-        lines: Array.from(sheet.querySelectorAll('.review-sheet-procedure-line'), (line) => line.textContent),
-        book: document.querySelector('.book-review')?.dataset.bookId ?? null,
-      };
-    })()`);
-    requireJourney(filled.procedure === procedureId && JSON.stringify(filled.checked) === JSON.stringify(['style-and-format']) && filled.enabled.length === 0 &&
-      filled.scope === 'whole' && filled.book === targetBook &&
-      JSON.stringify(filled.lines) === JSON.stringify([`按《${PROCEDURE_TITLE}》第 1 版：体例与格式；范围「全书」。类别已按它选好，计划照常先看。`]), 'run-sheet-words', filled);
-    await clickSelector(renderer, 'dialog.review-sheet [data-review-action="prepare"]', 'run-prepare');
-    const ran = await startPreparedReview(renderer, 'run-review');
-    requireJourney(ran?.state === 'settled' && JSON.stringify(ran.categories.map((category) => category.categoryId)) === JSON.stringify(['style-and-format']) &&
-      ran.procedure?.procedureId === procedureId && ran.procedure.version === 1 && ran.procedure.stopped === false && ran.procedure.leftOut.length === 0,
-    'run-pinned', ran?.procedure);
-    await assertRenderer(renderer, `document.querySelector('.review-procedure-pin .review-procedure-line')?.textContent===${JSON.stringify(`按可复用工序《${PROCEDURE_TITLE}》第 1 版`)}`, 'run-pin-shown');
-
-    at('capture-stop');
-    // 停用 is final for version 1: it is never offered to run again, and the Run that pinned it keeps naming it.
-    await leaveReviewToLibrary(renderer, 'stop-leave');
-    await openProcedures(renderer, 'stop');
-    const beforeStop = await readProcedures(renderer, (page) => page.procedures[0]?.versions[0]?.state === 'enabled', 'stop-listed');
-    requireJourney(beforeStop.procedures[0].versions[0].runs === '按这一版运行过 1 次审阅', 'stop-runs-before', beforeStop.procedures[0].versions[0]);
-    await clickSelector(renderer, `[data-procedure-id="${procedureId}"] [data-version="1"] [data-procedure-action="stop"]`, 'stop-version');
-    const stopped = await readProcedures(renderer, (page) => page.procedures[0]?.versions[0]?.state === 'stopped', 'stop-stopped');
-    requireJourney(stopped.procedures[0].runnable === 'false' && !stopped.procedures[0].run && stopped.procedures[0].versions[0].pill === '已停用' &&
-      stopped.procedures[0].versions[0].pillBorder === 'dotted' && stopped.procedures[0].versions[0].actions.length === 0 &&
-      stopped.procedures[0].versions[0].runs === '按这一版运行过 1 次审阅', 'stop-card', stopped.procedures[0]);
-    await click(renderer, '返回', 'stop-back');
-    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'stop-back-landing');
-    await openBookReview(renderer, targetBook, 'stop-review');
-    await waitFor(renderer, `document.querySelector('.review-procedure-pin')?.dataset.procedureStopped==='true'`, 'stop-pin-kept', 30_000);
-    await leaveReviewToLibrary(renderer, 'stop-review-leave');
-
-    at('capture-proposal-file');
-    // 导出为文件…: the platform Save dialog (this window's launch control answers it once); the file is the proposal in words
-    // with its digest, and only its name is recorded. Nothing of either Book is in it.
-    await openProcedures(renderer, 'proposal-file');
-    await readProcedures(renderer, (page) => page.proposals.length === 1, 'proposal-file-listed');
-    await clickSelector(renderer, '.developer-proposal [data-procedure-action="proposal-file"]', 'proposal-file-save');
-    await waitFor(renderer, `${STATUS_TEXT}===${JSON.stringify(`已导出为文件「${PROPOSAL_FILE_NAME}」；AI7 不会发送它。`)}`, 'proposal-file-status', 30_000);
-    const proposalFile = await readFile(proposalPath, 'utf8');
-    requireJourney(proposalFile.startsWith(`# 开发建议：${PROPOSAL_TITLE}\n`) && proposalFile.includes('核对图注与正文图号是否一致。') &&
-      proposalFile.includes('AI7 不会发送这份开发建议') && !proposalFile.includes(CAPTURE_SOURCE_TITLE) && !proposalFile.includes(sourceBook),
-    'proposal-file-content');
-    await readProcedures(renderer, (page) => JSON.stringify(page.proposals[0]?.versions) === JSON.stringify([['1', '1']]), 'proposal-file-recorded');
-
-    at('capture-restart');
-    // A restart keeps every version, its state and use, and the proposal's file record.
-    await closeBrowser();
-    manager = await launch();
-    renderer = await waitForRenderer(manager, 'capture-restart-window');
-    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'capture-restart-ready');
-    await openProcedures(renderer, 'capture-restart');
-    const restartedProcedures = await readProcedures(renderer, (page) => page.count === '1', 'capture-restart-listed');
-    requireJourney(restartedProcedures.procedures[0].versions[0].state === 'stopped' && restartedProcedures.procedures[0].versions[0].runs === '按这一版运行过 1 次审阅' &&
-      JSON.stringify(restartedProcedures.proposals[0].versions) === JSON.stringify([['1', '1']]), 'capture-restart-kept', restartedProcedures);
-
-    at('j14-capture-keyboard-reflow-forced-colors');
-    // Without a pointer: Tab reaches 修改… with its focus visible, and Enter opens the next version's form with focus on its title.
-    await renderer.evaluate(`(() => { const active=document.activeElement; if(active instanceof HTMLElement)active.blur(); return true; })()`);
-    let reached = false;
-    for (let count = 0; count < 120 && !reached; count += 1) {
-      await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab' });
-      await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab' });
-      reached = await renderer.evaluate(`document.activeElement?.dataset.procedureAction==='revise-proposal' && document.activeElement.matches(':focus-visible')`).catch(() => false);
-    }
-    requireJourney(reached, 'capture-keyboard-focus');
-    await activateFocused(renderer, 'Enter');
-    await waitFor(renderer, `document.activeElement === document.querySelector('.developer-proposal-form [data-proposal-field="title"]')`, 'capture-keyboard-form', 10_000);
-    await clickSelector(renderer, '.developer-proposal-form [data-procedure-action="cancel-proposal"]', 'capture-keyboard-cancel');
-    await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
-    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
-    await waitFor(renderer, `(() => { const root=document.documentElement; const parts=[...document.querySelectorAll('article.captured-procedure, article.developer-proposal, li.captured-procedure-version')]; return parts.length===3 && parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2) && root.scrollWidth<=root.clientWidth+2; })()`, 'capture-reflow', 10_000);
-    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
-    await assertRenderer(renderer, `(() => {
-      if (!matchMedia('(forced-colors: active)').matches) return false;
-      const card = document.querySelector('article.captured-procedure');
-      const proposal = document.querySelector('article.developer-proposal');
-      const pill = document.querySelector('.captured-procedure-state-stopped');
-      return card instanceof HTMLElement && getComputedStyle(card).borderTopStyle === 'solid' && proposal instanceof HTMLElement &&
-        getComputedStyle(proposal).borderTopStyle === 'solid' && pill instanceof HTMLElement && getComputedStyle(pill).borderTopStyle === 'dotted';
-    })()`, 'capture-forced-colors');
-    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
-    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
-    await renderer.send('Emulation.clearDeviceMetricsOverride');
 
     at('zero-activity');
     await assertRenderer(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && !Object.keys(window.ai7).some((key)=>/provider|session/i.test(key))`, 'exact-service-readiness-remained-zero');

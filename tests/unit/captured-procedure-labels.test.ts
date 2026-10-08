@@ -72,9 +72,10 @@ describe('知识库 and the Run', () => {
   });
 
   it('names the pin a Run keeps, stopped or not', () => {
-    const pin = { procedureId: 'p', versionId: 'v', version: 1, title: '体例复核', documentSha256: 'd', stopped: false, leftOut: [] };
+    const pin = { procedureId: 'p', versionId: 'v', version: 1, title: '体例复核', documentSha256: 'd', stopped: false, missing: false, leftOut: [] };
     expect(runProcedureLine(pin)).toBe('按可复用工序《体例复核》第 1 版');
     expect(runProcedureLine({ ...pin, stopped: true })).toBe('按可复用工序《体例复核》第 1 版（这一版已停用；这次审阅仍记着它）');
+    expect(runProcedureLine({ ...pin, missing: true })).toBe('按可复用工序《体例复核》第 1 版（本机没有这一版；这次审阅仍记着它）');
     expect(runProcedureLeftOutLine({ categoryId: 'plot-consistency', label: '情节逻辑与前后一致', reason: '还没有基线分析。' })).toBe('未运行「情节逻辑与前后一致」：还没有基线分析。');
   });
 });

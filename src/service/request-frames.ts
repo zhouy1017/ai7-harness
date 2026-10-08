@@ -1140,6 +1140,18 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'inspectCapturedProcedure':
+    case 'inspectDeveloperProposal': {
+      const key = op === 'inspectCapturedProcedure' ? 'procedureId' : 'proposalId';
+      const input = requireInput(value.input, [key, 'before'], tentativeId);
+      if (!validUuid(input[key]) || (input.before !== null && !isSafeInteger(input.before, 1))) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'inspectDeveloperProposalVersion': {
+      const input = requireInput(value.input, ['proposalVersionId'], tentativeId);
+      if (!validUuid(input.proposalVersionId)) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'previewCapturedProcedureValidation': {
       const input = requireInput(value.input, ['versionId'], tentativeId);
       if (!validUuid(input.versionId)) throw new ProtocolError(tentativeId);

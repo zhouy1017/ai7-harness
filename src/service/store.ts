@@ -21,6 +21,7 @@ import type {
   CapturedProcedureRunProjection,
   CapturedProcedureValidationProjection,
   DeveloperProposalProjection,
+  DeveloperProposalVersionProjection,
   ProcedureCaptureProjection,
   SaveCapturedProcedureInput,
   SaveDeveloperProposalInput,
@@ -6108,9 +6109,9 @@ export class EditorialStore {
     };
   }
 
-  #capturedProcedureProjection(procedureId: string): CapturedProcedureProjection {
+  #capturedProcedureProjection(procedureId: string, before: number | null = null): CapturedProcedureProjection {
     return this.#capturedProcedures.projection(procedureId, this.#capturedStepWords(), (bookId) => this.#evaluationBookTitle(bookId),
-      (reviewRunId) => this.#reviewRuns.ordinalOf(reviewRunId));
+      (reviewRunId) => this.#reviewRuns.ordinalOf(reviewRunId), before);
   }
 
   /** 知识库 › 工序与规则's 可复用工序, apart from the built-in 工序, and the 开发建议 (ADR 0087 §5, §6). A read. */
@@ -6119,11 +6120,34 @@ export class EditorialStore {
       const { ids, truncated } = this.#capturedProcedures.procedureIds();
       const proposals = this.#capturedProcedures.proposals();
       return {
-        procedures: ids.map((procedureId) => this.#capturedProcedureProjection(procedureId)),
+        procedures: ids.map((procedureId) => this.#capturedProcedures.summary(procedureId)),
         proceduresTruncated: truncated,
         proposals: proposals.proposals,
         proposalsTruncated: proposals.truncated,
       };
+    });
+  }
+
+  /** One Captured Procedure with a page of its versions, newest first, below `before` when it is given (Issue #65 review). */
+  inspectCapturedProcedure(procedureId: string, before: number | null): CapturedProcedureProjection {
+    return this.#procedureCall(() => {
+      requireStore(typeof procedureId === 'string' && UUID_PATTERN.test(procedureId), 'CAPTURED_PROCEDURE_INVALID', '可复用工序标识无效。');
+      return this.#capturedProcedureProjection(procedureId, before);
+    });
+  }
+
+  /** One 开发建议 with a page of its versions, newest first, below `before` when it is given (Issue #65 review). */
+  inspectDeveloperProposal(proposalId: string, before: number | null): DeveloperProposalProjection {
+    return this.#procedureCall(() => this.#capturedProcedures.proposal(proposalId, before));
+  }
+
+  /** One 开发建议 version alone: what 导出为文件… names and writes. */
+  inspectDeveloperProposalVersion(proposalVersionId: string): DeveloperProposalVersionProjection {
+    return this.#procedureCall(() => {
+      const version = this.#capturedProcedures.proposalVersion(proposalVersionId);
+      requireStore(version !== null, 'DEVELOPER_PROPOSAL_NOT_FOUND', '这一版开发建议不存在。');
+      const { canonical: _canonical, ...projection } = version;
+      return projection;
     });
   }
 

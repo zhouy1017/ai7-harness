@@ -13,7 +13,6 @@ import {
   capturedProcedureDocument,
   capturedStepProblem,
   ceilingWiderThanSource,
-  developerProposalFileName,
   developerProposalFileText,
   isCapturedProcedureDocument,
   procedureCaptureSource,
@@ -29,6 +28,7 @@ import {
   type ReviewCategoryConfiguration,
   type ReviewCategoryConfigurationEntry,
 } from '../../src/service/review/category-configuration.js';
+import { developerProposalFileName } from '../../src/shared/developer-proposal.js';
 
 // Unit suite (L1) for the Captured Procedure's document, validation and ledger (Issue #65, plan slice S30; ADR 0087): what a
 // version may hold, what makes a capture or a step ineligible, what 验证并启用… checks, and that the ledger appends only — a
@@ -246,14 +246,22 @@ describe('the ledger', () => {
       steps: ['style-and-format', 'plot-consistency'],
     }, ['style-and-format'], [{ categoryId: 'plot-consistency', label: '情节逻辑与前后一致', reason: '没有基线分析。' }], '2026-10-08T00:00:00.000Z');
     expect(readReviewRunProcedurePin(db, run)).toEqual({
-      procedureId: version.procedureId, versionId: version.versionId, version: 1, title: '体例', documentSha256: version.documentSha256, stopped: false,
+      procedureId: version.procedureId, versionId: version.versionId, version: 1, title: '体例', documentSha256: version.documentSha256, stopped: false, missing: false,
       leftOut: [{ categoryId: 'plot-consistency', label: '情节逻辑与前后一致', reason: '没有基线分析。' }],
     });
     expect(procedurePinRefusal(db, run)).toBeNull();
     expect(readReviewRunProcedurePin(db, '22222222-2222-4222-8222-222222222222')).toBeNull();
     ledger.stop(version.versionId);
     expect(readReviewRunProcedurePin(db, run)!.stopped).toBe(true);
-    expect(procedurePinRefusal(db, run)).toBe('这次审阅按可复用工序《体例》第 1 版准备，这一版已停用；请重新准备这次审阅。');
+    expect(procedurePinRefusal(db, run)).toEqual({ code: 'REVIEW_PROCEDURE_STOPPED', message: '这次审阅按可复用工序《体例》第 1 版准备，这一版已停用；请重新准备这次审阅。' });
+    // A pin naming a version this house never held — a Book merged in from another — reads as missing and is refused.
+    const merged = '22222222-2222-4222-8222-222222222222';
+    recordReviewRunProcedurePin(db, merged, {
+      procedureId: '55555555-5555-4555-8555-555555555555', versionId: '66666666-6666-4666-8666-666666666666', version: 3, title: '别处的工序',
+      documentSha256: 'e'.repeat(64), scope: 'whole', steps: ['style-and-format'],
+    }, ['style-and-format'], [], '2026-10-08T00:00:00.000Z');
+    expect(readReviewRunProcedurePin(db, merged)).toMatchObject({ missing: true, stopped: false });
+    expect(procedurePinRefusal(db, merged)).toEqual({ code: 'REVIEW_PROCEDURE_MISSING', message: '这次审阅按可复用工序《别处的工序》第 3 版准备，本机没有这一版；请重新准备这次审阅。' });
     db.close();
   });
 
@@ -263,6 +271,10 @@ describe('the ledger', () => {
     const proposalId = ledger.saveProposal({ proposalId: null, title: '图注/核对', missingCapability: '核对图注。', affectedProcedure: '', direction: '读图片说明。', pluginCandidate: '' });
     const version = ledger.proposal(proposalId).versions[0]!;
     expect(developerProposalFileName(version)).toBe('开发建议 图注_核对 第 1 版.md');
+    // Cut by grapheme: a family emoji is kept whole or not at all, never split into a lone surrogate.
+    const long = developerProposalFileName({ title: '👨‍👩‍👧‍👦'.repeat(50), version: 2 });
+    expect(long).toBe(`开发建议 ${'👨‍👩‍👧‍👦'.repeat(40)} 第 2 版.md`);
+    expect(long.isWellFormed()).toBe(true);
     const text = developerProposalFileText(version);
     expect(text).toContain('# 开发建议：图注/核对');
     expect(text).toContain('## 涉及的工序\n\n（未填写）');

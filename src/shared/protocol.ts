@@ -81,6 +81,8 @@ export const IPC_CHANNELS = {
   inspectExemplars: 'ai7:j07:inspect-exemplars',
   inspectKnowledgeProcedures: 'ai7:j15:inspect-knowledge-procedures',
   inspectCapturedProcedures: 'ai7:j15:inspect-captured-procedures',
+  inspectCapturedProcedure: 'ai7:j15:inspect-captured-procedure',
+  inspectDeveloperProposal: 'ai7:j15:inspect-developer-proposal',
   inspectProcedureCapture: 'ai7:j15:inspect-procedure-capture',
   saveCapturedProcedure: 'ai7:j15:save-captured-procedure',
   previewCapturedProcedureValidation: 'ai7:j15:preview-captured-procedure-validation',
@@ -5131,12 +5133,19 @@ export const CAPTURED_PROCEDURE_SCOPE_LABELS = {
   whole: '全书',
   chapters: '选定章节',
 } as const satisfies Record<CapturedProcedureScopeSlot, string>;
-/** The editor's title of a Captured Procedure: a label, never given to a model. */
+/** The editor's title of a Captured Procedure: a label, never given to a model — in graphemes, and in UTF-16 code units. */
 export const MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES = 60;
-/** What one answer of 工序与规则 lists: the newest procedures, each with its newest versions, each naming its newest Runs. */
+export const MAX_CAPTURED_PROCEDURE_TITLE_CHARACTERS = 240;
+/**
+ * What one answer of 工序与规则 carries (Issue #65 review): the newest procedures and proposals as summaries; one procedure's or
+ * proposal's versions a page at a time, newest first, each page also held to a byte budget so it always fits one frame; each
+ * version naming its newest Runs or files and how many there are.
+ */
 export const MAX_CAPTURED_PROCEDURES_SHOWN = 50;
-export const MAX_CAPTURED_PROCEDURE_VERSIONS_SHOWN = 20;
+export const MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE = 5;
+export const MAX_DEVELOPER_PROPOSAL_VERSIONS_PAGE = 3;
 export const MAX_CAPTURED_PROCEDURE_RUNS_SHOWN = 10;
+export const MAX_DEVELOPER_PROPOSAL_FILES_SHOWN = 10;
 
 /** A version's state (KB-010): 待验证 until `验证并启用…` succeeds, 已启用 after, 已停用 for good once stopped (ADR 0087 §3, §5). */
 export type CapturedProcedureState = 'pending-validation' | 'enabled' | 'stopped';
@@ -5262,15 +5271,24 @@ export interface CapturedProcedureVersionProjection {
   readonly technical: { readonly documentSha256: string; readonly previousDocumentSha256: string | null };
 }
 
-export interface CapturedProcedureProjection {
+/** A Captured Procedure as 工序与规则's list names it: its newest title and state, how many versions it has, whether it runs. */
+export interface CapturedProcedureSummaryProjection {
   readonly procedureId: string;
   /** Its newest version's title. */
   readonly title: string;
   readonly versionCount: number;
-  /** Newest first, at most `MAX_CAPTURED_PROCEDURE_VERSIONS_SHOWN`. */
-  readonly versions: ReadonlyArray<CapturedProcedureVersionProjection>;
+  readonly latestVersion: number;
+  readonly latestState: CapturedProcedureState;
+  readonly latestStateLabel: string;
   /** Whether `运行此工序…` is offered: one of its versions is 已启用. */
   readonly runnable: boolean;
+}
+
+/** One Captured Procedure with one page of its versions, newest first; `versionsBefore` reads the next older page. */
+export interface CapturedProcedureProjection extends CapturedProcedureSummaryProjection {
+  readonly versions: ReadonlyArray<CapturedProcedureVersionProjection>;
+  /** The version number the next older page starts below; `null` when this page reaches version 1. */
+  readonly versionsBefore: number | null;
 }
 
 /** One version of a Developer Capability Proposal (REUSE-063, REUSE-064): no Book material, sent nowhere. */
@@ -5284,22 +5302,35 @@ export interface DeveloperProposalVersionProjection {
   readonly direction: string;
   readonly pluginCandidate: string;
   readonly createdAt: string;
-  /** The files it was written to through the Save dialog, newest first: the file's name only, never where. */
+  /** The newest files it was written to through the Save dialog, at most `MAX_DEVELOPER_PROPOSAL_FILES_SHOWN`: the name only, never where. */
   readonly files: ReadonlyArray<{ readonly fileName: string; readonly writtenAt: string }>;
+  readonly fileCount: number;
   readonly technical: { readonly sha256: string };
 }
 
-export interface DeveloperProposalProjection {
+export interface DeveloperProposalSummaryProjection {
   readonly proposalId: string;
+  /** Its newest version's title. */
   readonly title: string;
-  readonly versions: ReadonlyArray<DeveloperProposalVersionProjection>;
+  readonly versionCount: number;
+  readonly latestVersion: number;
+  readonly latestCreatedAt: string;
 }
 
-/** 知识库 › 工序与规则's 可复用工序 and 开发建议, apart from the built-in 工序 (ADR 0087 §5, REUSE-029, REUSE-030). */
+/** One proposal with one page of its versions, newest first; `versionsBefore` reads the next older page. */
+export interface DeveloperProposalProjection extends DeveloperProposalSummaryProjection {
+  readonly versions: ReadonlyArray<DeveloperProposalVersionProjection>;
+  readonly versionsBefore: number | null;
+}
+
+/**
+ * 知识库 › 工序与规则's 可复用工序 and 开发建议, apart from the built-in 工序 (ADR 0087 §5, REUSE-029, REUSE-030): summaries only,
+ * so the list always fits one frame; each one's versions are read a page at a time.
+ */
 export interface CapturedProceduresProjection {
-  readonly procedures: ReadonlyArray<CapturedProcedureProjection>;
+  readonly procedures: ReadonlyArray<CapturedProcedureSummaryProjection>;
   readonly proceduresTruncated: boolean;
-  readonly proposals: ReadonlyArray<DeveloperProposalProjection>;
+  readonly proposals: ReadonlyArray<DeveloperProposalSummaryProjection>;
   readonly proposalsTruncated: boolean;
 }
 
@@ -5376,11 +5407,18 @@ export interface ReviewRunProcedureProjection {
   readonly documentSha256: string;
   /** The version was stopped since: a Run not yet authorized cannot be (ADR 0087 §5). */
   readonly stopped: boolean;
+  /**
+   * This house has no such version — the Book was merged in from another (Issue #65 review): the Run keeps naming what it was
+   * prepared from, and one not yet authorized cannot be, as with a stopped version.
+   */
+  readonly missing: boolean;
   readonly leftOut: ReadonlyArray<{ readonly categoryId: string; readonly label: string; readonly reason: string }>;
 }
 
 export const MAX_DEVELOPER_PROPOSAL_TITLE_GRAPHEMES = 60;
+/** Each field of a 开发建议, in graphemes and in UTF-16 code units: a page of versions then always fits one frame. */
 export const MAX_DEVELOPER_PROPOSAL_FIELD_GRAPHEMES = 2000;
+export const MAX_DEVELOPER_PROPOSAL_FIELD_CHARACTERS = 4000;
 
 export interface SaveCapturedProcedureInput {
   bookId: string;
@@ -9237,6 +9275,12 @@ export interface ServiceOperationMap {
   };
   /** 知识库 › 工序与规则's 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087 §5, §6): names no Book. */
   inspectCapturedProcedures: { input: Record<string, never>; output: CapturedProceduresProjection };
+  /** One Captured Procedure with a page of its versions, newest first, below `before` when it is given. */
+  inspectCapturedProcedure: { input: { procedureId: string; before: number | null }; output: CapturedProcedureProjection };
+  /** One 开发建议 with a page of its versions, newest first, below `before` when it is given. */
+  inspectDeveloperProposal: { input: { proposalId: string; before: number | null }; output: DeveloperProposalProjection };
+  /** One 开发建议 version alone: what 导出为文件… names and writes. Main reads it; the renderer never does. */
+  inspectDeveloperProposalVersion: { input: { proposalVersionId: string }; output: DeveloperProposalVersionProjection };
   /** The capture's source set, extraction and classification for one finished Review Run of the Book (ADR 0087 §2). */
   inspectProcedureCapture: { input: { bookId: string; reviewRunId: string }; output: ProcedureCaptureProjection };
   /** 保存为可复用工序: version 1 `待验证`, or a next version of an existing Captured Procedure (ADR 0087 §2). */
@@ -9774,6 +9818,8 @@ export interface RendererApi {
   inspectKnowledgeProcedures(): Promise<KnowledgeProceduresProjection>;
   /** 知识库 › 工序与规则's 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087): names no Book. */
   inspectCapturedProcedures(): Promise<CapturedProceduresProjection>;
+  inspectCapturedProcedure(input: { procedureId: string; before: number | null }): Promise<CapturedProcedureProjection>;
+  inspectDeveloperProposal(input: { proposalId: string; before: number | null }): Promise<DeveloperProposalProjection>;
   /** The current Book's finished Review Run as a capture's source (ADR 0087 §2). */
   inspectProcedureCapture(input: { reviewRunId: string }): Promise<ProcedureCaptureProjection>;
   saveCapturedProcedure(input: Omit<SaveCapturedProcedureInput, 'bookId'>): Promise<CapturedProcedureProjection>;

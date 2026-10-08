@@ -14,7 +14,7 @@ import {
   type ReviewRunProjection,
   type ReviewRunScopeRequest,
   type ReviewScopeKind,
-  type CapturedProcedureProjection,
+  type CapturedProcedureSummaryProjection,
   type CapturedProcedureRunProjection,
   type ReviewWorkspaceCategoryProjection,
   type ReviewWorkspaceProjection,
@@ -256,7 +256,7 @@ interface SheetState {
   /** The plan is on screen: focus goes to it instead of back to the opener. */
   prepared: boolean;
   /** The enabled Captured Procedures 按已保存的工序 offers (Issue #65, S30), read when the sheet opens. */
-  procedures: ReadonlyArray<CapturedProcedureProjection>;
+  procedures: ReadonlyArray<CapturedProcedureSummaryProjection>;
   /** The Captured Procedure the sheet was filled from, resolved for this Book; `null` for categories chosen by hand. */
   procedure: CapturedProcedureRunProjection | null;
 }
@@ -735,6 +735,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       pin.dataset['procedureVersionId'] = run.procedure.versionId;
       pin.dataset['procedureVersion'] = String(run.procedure.version);
       pin.dataset['procedureStopped'] = String(run.procedure.stopped);
+      pin.dataset['procedureMissing'] = String(run.procedure.missing);
       pin.append(el('p', 'field-note review-procedure-line', runProcedureLine(run.procedure)));
       for (const entry of run.procedure.leftOut) pin.append(el('p', 'field-note review-procedure-left-out', runProcedureLeftOutLine(entry)));
       section.append(pin);
@@ -1529,7 +1530,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     sheetOpening = true;
     // 按已保存的工序 (Issue #65, S30): the house's enabled Captured Procedures, read as the sheet opens. A sheet that cannot
     // read them still opens, offering none.
-    let procedures: ReadonlyArray<CapturedProcedureProjection> = [];
+    let procedures: ReadonlyArray<CapturedProcedureSummaryProjection> = [];
     try {
       procedures = (await api.inspectCapturedProcedures()).procedures.filter((procedure) => procedure.runnable);
     } catch {
