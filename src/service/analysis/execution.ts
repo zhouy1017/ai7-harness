@@ -1609,7 +1609,8 @@ export class BaselineAnalysisExecutionOwner {
         if (active.cancelRequested) break;
         // The current-read guard (Issue #64, S29b; SER-023): an exclusion recorded since the last range stops the Run before this
         // one forms a request — before a pause or AI7 stopping, which would leave it to be continued past the exclusion.
-        if (scopeChanged()) {
+        // A scope stop decided anywhere since — a retry it kept back included — ends the ranges too (Issue #64 review).
+        if ((liveInterruption as LiveInterruption | null) === 'series-retrieval-scope-changed' || scopeChanged()) {
           unitsEnded = true;
           break;
         }

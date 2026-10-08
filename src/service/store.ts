@@ -4186,8 +4186,7 @@ export class EditorialStore {
       // (Issue #434, S86b) the scheduled backups; revision 57 (Issue #434, S86c) the replacements of the local data; and revision
       // 58 (Issue #434, S86d) the merges of a package's Books. Revision 59 (Issue #429, S81b1) adds the AI7 初评 each Evaluation
       // Record version began from, and `initializeTaskAuthorizationSchema` rebuilds the kind-coupled analysis relations for it;
-      // revision 60 (Issue #52, S17a) adds the dialogue Tasks.
-      // revision 61 (Issue #64, S29b) the Series Retrieval Exclusions.
+      // revision 60 (Issue #52, S17a) adds the dialogue Tasks, and revision 61 (Issue #64, S29b) the Series Retrieval Exclusions.
       initializeBookPeopleSchema(authority);
       initializeReviewGuidelineSchema(authority);
       initializeLibraryMaterialSchema(authority);

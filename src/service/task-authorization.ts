@@ -1745,9 +1745,9 @@ function migrateAnalysisLedgerToRevision59(db: DatabaseSync): void {
 }
 
 /**
- * Revision 59 → 60 (Issue #52, S17a). Revision 60 adds `dialogue/dialogue-ledger.ts`'s relations, which `EditorialStore.open`
- * creates before this runs, and moves nothing here: a revision-59 store's ledger is already the terminal one, so only the
- * version moves.
+ * Revision 59 or 60 → 61. Revision 60 (Issue #52, S17a) adds `dialogue/dialogue-ledger.ts`'s relations and revision 61 (Issue
+ * #64, S29b) `series-exclusions.ts`'s, both of which `EditorialStore.open` creates before this runs, and neither moves anything
+ * here: a revision-59 or revision-60 store's ledger is already the terminal one, so only the version moves.
  */
 function advanceToTerminalRevision(db: DatabaseSync): void {
   migrateInTransaction(db, `PRAGMA user_version = ${SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION};`, 'Terminal version');

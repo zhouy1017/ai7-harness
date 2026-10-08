@@ -629,6 +629,36 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     }
   }, 300_000);
 
+  it('ends the ranges once the current-read guard keeps a safe retry back, and sends no range after it (Issue #64 review)', async () => {
+    await requireExactSample1(roots.codeRoot);
+    const transient = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-transient-retry');
+    const store = await openWithRoute(roots.dataRoot, transient);
+    // The guard answers nothing for the five range checks, and turns from the sixth call on — unit 5's retry check.
+    let calls = 0;
+    const owner = new BaselineAnalysisExecutionOwner({
+      ledger: store.baselineAnalysisLedger, launchPolicy, fixture: transient, secretResolver: fakeSecretResolver(),
+      readGuard: () => (++calls >= 6 ? '书系知识条目「海边小城」（地点）' : null),
+    });
+    try {
+      const bookId = (await importSample1Book(store, roots.codeRoot, 'L2 sample1 检索排除挡住重试')).bookId;
+      await pinEditorialWorkspaceProfileRevision2(store, bookId);
+      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+      const prepared = prepare(store, bookId);
+      const authorized = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+      owner.admitAndDispatch(authorized.dispatchRunRecordId!);
+      const settled = await settle(owner, store, bookId);
+      expect(settled.run?.state).toBe('interrupted');
+      // Units 1 to 5 once each: the retry was kept back, and no range after unit 5 was sent.
+      expect(settled.run!.attempt!.spans.map((span) => [span.unitOrdinal, span.attemptIndex])).toEqual([[1, 1], [2, 1], [3, 1], [4, 1], [5, 1]]);
+      expect(settled.run!.adaptations).toEqual([]);
+      expect([settled.taskOutcome?.classification, settled.taskOutcome?.safeNextAction]).toEqual(['interrupted', '修改计划并重新授权，或取消任务；这次运行不能续行、重试，也不会改用别的材料。']);
+      store.markCleanShutdown();
+    } finally {
+      await owner.dispose();
+      store.close();
+    }
+  }, 300_000);
+
   it('retries a retry-safe unit failure once inside the unchanged envelope and records the Plan Adaptation', async () => {
     await requireExactSample1(roots.codeRoot);
     const transient = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-transient-retry');
