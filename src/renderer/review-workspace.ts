@@ -29,6 +29,8 @@ import {
   SHEET_PROCEDURE_LABEL,
   SHEET_PROCEDURE_NONE,
   SHEET_PROCEDURE_NONE_ENABLED,
+  SHEET_PROCEDURE_VERSION_LABEL,
+  sheetProcedureVersionOption,
   runProcedureLeftOutLine,
   runProcedureLine,
   sheetProcedureLines,
@@ -1633,10 +1635,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   }
 
   /**
-   * Fill the sheet from one Captured Procedure (ADR 0087 §4): the newest enabled version that validates, its steps this Book can
-   * take ticked and every other category closed, the scope its slot. `''` returns the sheet to categories chosen by hand.
+   * Fill the sheet from one Captured Procedure (ADR 0087 §4): the newest enabled version that validates — or, with `versionId`,
+   * the exact eligible version the editor chose instead (Issue #66, S31; REUSE-054) — its steps this Book can take ticked and
+   * every other category closed, the scope its slot. `''` returns the sheet to categories chosen by hand.
    */
-  async function chooseProcedure(state: SheetState, procedureId: string): Promise<void> {
+  async function chooseProcedure(state: SheetState, procedureId: string, versionId: string | null = null): Promise<void> {
     if (projection === null || sheetState !== state) return;
     if (procedureId === '') {
       state.procedure = null;
@@ -1645,7 +1648,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     } else {
       options.setStatus('正在读取所选的可复用工序…', 'busy');
       try {
-        const run = await api.inspectCapturedProcedureRun({ procedureId });
+        const run = await api.inspectCapturedProcedureRun({ procedureId, versionId });
         if (sheetState !== state || destroyed) return;
         state.procedure = run;
         state.categories.clear();
@@ -1664,7 +1667,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       }
     }
     renderSheet(projection, state);
-    sheet.querySelector<HTMLElement>('[data-review-field="procedure"]')?.focus();
+    sheet.querySelector<HTMLElement>(versionId === null ? '[data-review-field="procedure"]' : '[data-review-field="procedure-version"]')?.focus();
   }
 
   function renderSheet(workspace: ReviewWorkspaceProjection, state: SheetState): void {
@@ -1678,6 +1681,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const procedureField = el('div', 'review-sheet-procedure');
     const procedureLabel = el('label', 'review-field');
     const procedureSelect = el('select');
+    const versionSelect = el('select');
     procedureSelect.dataset['reviewField'] = 'procedure';
     procedureSelect.append(new Option(SHEET_PROCEDURE_NONE, ''));
     for (const procedure of state.procedures) procedureSelect.append(new Option(`《${procedure.title}》`, procedure.procedureId));
@@ -1692,6 +1696,16 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (state.procedure.resolved !== null) {
         procedureField.dataset['procedureVersionId'] = state.procedure.resolved.versionId;
         procedureField.dataset['procedureVersion'] = String(state.procedure.resolved.version);
+        procedureField.dataset['procedureLatestEligible'] = String(state.procedure.resolved.latestEligible);
+        // The exact version (Issue #66, S31; REUSE-054): the latest eligible by default, any other eligible one by choice.
+        const versionLabel = el('label', 'review-field');
+        versionSelect.dataset['reviewField'] = 'procedure-version';
+        const procedureId = state.procedure.procedureId;
+        state.procedure.eligibleVersions.forEach((version, index) => versionSelect.append(new Option(sheetProcedureVersionOption(version.version, index === 0), version.versionId)));
+        versionSelect.value = state.procedure.resolved.versionId;
+        versionSelect.addEventListener('change', () => void chooseProcedure(state, procedureId, versionSelect.value));
+        versionLabel.append(el('span', undefined, SHEET_PROCEDURE_VERSION_LABEL), versionSelect);
+        procedureField.append(versionLabel);
       }
       for (const line of sheetProcedureLines(state.procedure)) procedureField.append(el('p', 'field-note review-sheet-procedure-line', line));
     }
@@ -1845,6 +1859,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       }
       for (const [kind, input] of scopeInputs) input.disabled = !workspace.scopeOptions[kind].available || preparing || (filled !== null && kind !== filled.scopeSlot);
       procedureSelect.disabled = preparing || state.procedures.length === 0;
+      versionSelect.disabled = preparing || versionSelect.options.length < 2;
       range.hidden = state.scope !== 'chapters';
       fromSelect.disabled = state.scope !== 'chapters' || preparing;
       toSelect.disabled = state.scope !== 'chapters' || preparing;

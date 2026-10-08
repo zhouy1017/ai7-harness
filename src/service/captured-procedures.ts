@@ -528,6 +528,55 @@ export function procedurePinRefusal(db: DatabaseSync, reviewRunId: string): { co
     : null;
 }
 
+// ---- Latest Eligible Version Resolution (Issue #66, plan slice S31; UI ADR 0013; REUSE-043 to REUSE-045, REUSE-054) --------
+
+/** One version as resolution weighs it: its state, and — for an 已启用 one — the first reason it no longer validates. */
+export interface ResolvableVersion {
+  readonly versionId: string;
+  readonly version: number;
+  readonly state: CapturedProcedureState;
+  /** Whether the last `验证并启用…` failed, for a version still waiting. */
+  readonly failedValidation: boolean;
+  /** For an 已启用 version: why it no longer validates, `null` when it does. Ignored for any other state. */
+  readonly problem: string | null;
+}
+
+export const PASSED_OVER_STOPPED = '这一版已停用。' as const;
+export const PASSED_OVER_PENDING = '这一版还没有验证并启用。' as const;
+export const PASSED_OVER_FAILED = '这一版上次验证没有通过，仍是「待验证」。' as const;
+
+/** Whether one version may be resolved or chosen for a new use: 已启用 and still validating (REUSE-044). */
+export function versionEligible(version: ResolvableVersion): boolean {
+  return version.state === 'enabled' && version.problem === null;
+}
+
+/** Why one version is not eligible, in the editor's words; `null` when it is. */
+export function versionIneligibleReason(version: ResolvableVersion): string | null {
+  if (version.state === 'stopped') return PASSED_OVER_STOPPED;
+  if (version.state === 'pending-validation') return version.failedValidation ? PASSED_OVER_FAILED : PASSED_OVER_PENDING;
+  return version.problem;
+}
+
+/**
+ * Latest Eligible Version Resolution over one procedure's versions, in any order (REUSE-043, REUSE-044): the eligible versions
+ * newest first — the first is the one a new unpinned use takes — and every version newer than it, passed over with why. With no
+ * eligible version every version is passed over. `excluded` versions are weighed as stopped: what a 停用 would leave.
+ */
+export function resolveProcedureVersions(
+  versions: ReadonlyArray<ResolvableVersion>,
+  excluded: ReadonlySet<string> = new Set(),
+): { eligible: ResolvableVersion[]; passedOver: Array<{ version: number; reason: string }> } {
+  const weighed = [...versions]
+    .map((version) => excluded.has(version.versionId) ? { ...version, state: 'stopped' as const } : version)
+    .sort((left, right) => right.version - left.version);
+  const eligible = weighed.filter(versionEligible);
+  const latest = eligible[0]?.version ?? 0;
+  const passedOver = weighed
+    .filter((version) => version.version > latest)
+    .map((version) => ({ version: version.version, reason: versionIneligibleReason(version) ?? '' }));
+  return { eligible, passedOver };
+}
+
 /** Room kept beside a page of versions for the rest of its answer and its envelope. */
 const VERSION_PAGE_BUDGET_BYTES = MAX_FRAME_BYTES - 64 * 1024;
 
@@ -674,12 +723,22 @@ export class CapturedProcedures {
     return this.version(versionId)!;
   }
 
-  /** `停用` (ADR 0087 §5): final for the version, which is never resolved again and stays as its own Historical Version Stub. */
-  stop(versionId: string, now: Date = new Date()): void {
+  /**
+   * `停用` (ADR 0087 §5): final for the version, which is never resolved again and stays as its own Historical Version Stub. The
+   * state records the digest of the `停用…` preview the editor confirmed (Issue #66, S31).
+   */
+  stop(versionId: string, previewDigest: string, now: Date = new Date()): void {
     const current = this.version(versionId);
     requireProcedure(current !== null, 'CAPTURED_PROCEDURE_NOT_FOUND', '这一版可复用工序不存在。');
     if (current.state === 'stopped') return;
-    this.#appendState(versionId, 'stopped', {}, now);
+    this.#appendState(versionId, 'stopped', { previewDigest }, now);
+  }
+
+  /** Every Review Run that pinned one version, oldest first (Issue #66, S31): what its `停用…` preview weighs. */
+  pinnedRunIds(versionId: string): string[] {
+    // A pin is written with its Run, so the order it was recorded in is the order the Runs were prepared in.
+    return (this.#db.prepare('SELECT review_run_id FROM review_run_procedure_pins WHERE version_id = ? ORDER BY recorded_at, review_run_id')
+      .all(versionId) as SqlRow[]).map((row) => text(row.review_run_id));
   }
 
   #appendState(versionId: string, state: 'enabled' | 'validation-failed' | 'stopped', facts: Readonly<Record<string, unknown>>, now: Date): void {
@@ -738,6 +797,9 @@ export class CapturedProcedures {
     words: StepWords,
     bookTitle: (bookId: string) => string,
     runOrdinal: (reviewRunId: string) => number,
+    // Where each linked Run stands now, and the version a new use resolves to (Issue #66, S31; REUSE-031, REUSE-043).
+    runStateLabel: (reviewRunId: string) => string,
+    latestEligibleVersionId: string | null,
     before: number | null = null,
   ): CapturedProcedureProjection {
     requireProcedure(before === null || (Number.isSafeInteger(before) && before >= 1), 'CAPTURED_PROCEDURE_INVALID', '版本位置无效。');
@@ -766,13 +828,16 @@ export class CapturedProcedures {
           runLabel: `第 ${runOrdinal(stored.sourceReviewRunId)} 次审阅`,
         },
         runCount: count,
-        runs: runs.map((run) => ({ bookId: run.bookId, bookTitle: run.bookTitle, reviewRunId: run.reviewRunId, label: `第 ${run.ordinal} 次`, createdAt: run.createdAt })),
+        runs: runs.map((run) => ({
+          bookId: run.bookId, bookTitle: run.bookTitle, reviewRunId: run.reviewRunId, label: `第 ${run.ordinal} 次`, createdAt: run.createdAt,
+          stateLabel: runStateLabel(run.reviewRunId),
+        })),
         technical: { documentSha256: stored.documentSha256, previousDocumentSha256: stored.previousDocumentSha256 },
       };
     });
     const versions = boundedPage(candidates, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE);
     const last = versions.at(-1);
-    return { ...summary, versions, versionsBefore: last === undefined || last.version === 1 ? null : last.version };
+    return { ...summary, latestEligibleVersionId, versions, versionsBefore: last === undefined || last.version === 1 ? null : last.version };
   }
 
   // ---- Developer Capability Proposals (ADR 0087 §6; REUSE-063, REUSE-064) ------------------------------------

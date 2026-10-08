@@ -1331,6 +1331,28 @@ export class ReviewRunStore {
   }
 
   /**
+   * Where one Run stands, as a Captured Procedure version's linked work and its `停用…` preview name it (Issue #66, S31): its
+   * state and words, whether it was approved, whether 继续审阅 is left, and whether it is still its Book's newest Run — the only
+   * one a prepared Run's approval may name. A read.
+   */
+  runStatus(reviewRunId: string): {
+    bookId: string; ordinal: number; state: ReviewRunState; stateLabel: string; authorized: boolean; canContinue: boolean; newestOfBook: boolean;
+  } {
+    const snapshot = this.#run(reviewRunId);
+    const view = this.#runStateView(snapshot);
+    const newest = this.#db.prepare('SELECT review_run_id FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC LIMIT 1').get(snapshot.bookId) as SqlRow;
+    return {
+      bookId: snapshot.bookId,
+      ordinal: snapshot.ordinal,
+      state: view.state,
+      stateLabel: reviewRunStateLabel(view.state, view.canContinue),
+      authorized: view.authorization !== null,
+      canContinue: view.canContinue,
+      newestOfBook: text(newest.review_run_id) === reviewRunId,
+    };
+  }
+
+  /**
    * What each category of the configuration can do for one Book over one scope kind now, as the 新建审阅 sheet offers it: why
    * it cannot, or `null` when it can (ADR 0087 §4). A read.
    */

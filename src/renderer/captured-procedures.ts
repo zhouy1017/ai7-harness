@@ -3,6 +3,7 @@ import {
   type BookSummaryCursor,
   type BookSummaryProjection,
   type CapturedProcedureProjection,
+  type CapturedProcedureStopPreviewProjection,
   type CapturedProcedureSummaryProjection,
   type CapturedProceduresProjection,
   type CapturedProcedureValidationProjection,
@@ -17,9 +18,15 @@ import {
   PROCEDURES_SECTION_HEADING,
   PROCEDURES_SECTION_NOTE,
   PROCEDURE_ACTIONS,
+  PROCEDURE_LATEST_ELIGIBLE,
+  PROCEDURE_LATEST_ELIGIBLE_NOTE,
   PROCEDURE_RUN_BOOK_LABEL,
   PROCEDURE_RUN_NOTE,
+  PROCEDURE_STOP_ACTIVE_HEADING,
+  PROCEDURE_STOP_KEPT,
   PROCEDURE_STOP_NOTE,
+  PROCEDURE_STOP_PREPARED_HEADING,
+  PROCEDURE_STOP_STALE,
   PROCEDURE_UNAVAILABLE_LINES,
   PROPOSALS_EMPTY,
   PROPOSALS_SECTION_HEADING,
@@ -34,6 +41,11 @@ import {
   procedureRunLinkLine,
   procedureRunsLine,
   procedureSourceLine,
+  procedureStopAfterLine,
+  procedureStopHeading,
+  procedureStopMoreLine,
+  procedureStopRunLine,
+  procedureStopVersionLine,
   procedureStoppedLine,
   procedureValidationFailedLine,
   procedureValidationResult,
@@ -51,7 +63,7 @@ import {
  * 查看技术详情.
  */
 type ProceduresApi = Pick<RendererApi,
-  'inspectCapturedProcedures' | 'inspectCapturedProcedure' | 'inspectDeveloperProposal' | 'previewCapturedProcedureValidation' | 'enableCapturedProcedure' | 'stopCapturedProcedure' |
+  'inspectCapturedProcedures' | 'inspectCapturedProcedure' | 'inspectDeveloperProposal' | 'previewCapturedProcedureValidation' | 'enableCapturedProcedure' | 'previewCapturedProcedureStop' | 'stopCapturedProcedure' |
   'saveDeveloperProposal' | 'saveDeveloperProposalFile' | 'listBooks'>;
 
 export interface MountCapturedProceduresOptions {
@@ -63,6 +75,8 @@ export interface MountCapturedProceduresOptions {
   localInstantLabel(instant: string): string;
   /** 运行此工序…: the Book's 审阅, its 新建审阅 sheet filled from the procedure. */
   openRun(book: { bookId: string; title: string }, procedureId: string): Promise<void>;
+  /** A Review Run a version ran (Issue #66, S31; REUSE-031): its Book's 审阅, opened on that exact Run. */
+  openReviewRun(book: { bookId: string; title: string }, reviewRunId: string): Promise<void>;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -79,9 +93,13 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
   const host = el('div', 'captured-procedures-host');
   root.append(host);
   /** The panel open now, kept across a re-read: the version being validated, the Book chooser, the proposal being revised. */
-  const open: { validation: CapturedProcedureValidationProjection | null; runFor: string | null; reviseFor: string | null } = {
-    validation: null, runFor: null, reviseFor: null,
-  };
+  const open: {
+    validation: CapturedProcedureValidationProjection | null;
+    /** `停用…`'s preview on show (Issue #66, S31): of one version, or of the whole procedure. */
+    stop: CapturedProcedureStopPreviewProjection | null;
+    runFor: string | null;
+    reviseFor: string | null;
+  } = { validation: null, stop: null, runFor: null, reviseFor: null };
   /**
    * The procedures and proposals whose versions are open, each at the page shown: `null` for the newest page, otherwise the
    * version number it starts below (Issue #65 review: the list carries summaries; versions are read a page at a time).
@@ -194,10 +212,8 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
       }));
     }
     if (procedure.versionCount > 1 && (procedure.runnable || procedure.latestState !== 'stopped')) {
-      actions.append(button(PROCEDURE_ACTIONS.stopAll, 'quiet', 'stop-all', () => act('正在停用全部版本…', '无法停用。', async () => {
-        const result = await api.stopCapturedProcedure({ procedureId: procedure.procedureId, versionId: null });
-        options.setStatus(procedureStoppedLine(result.title, result.versionCount), 'success');
-      }, `[data-procedure-id="${procedure.procedureId}"] h4`)));
+      actions.append(button(PROCEDURE_ACTIONS.stopAll, 'quiet', 'stop-all', () => openStop(procedure.procedureId, null,
+        `[data-procedure-id="${procedure.procedureId}"] > .captured-procedure-stop h5`)));
     }
     const toggle = button(page === null ? `查看各版本（${procedure.versionCount}）` : '收起各版本', 'quiet', 'versions', async () => {
       if (procedurePages.has(procedure.procedureId)) procedurePages.delete(procedure.procedureId);
@@ -208,9 +224,10 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     actions.append(toggle);
     card.append(actions);
     if (open.runFor === procedure.procedureId) card.append(runChooser(procedure));
+    if (open.stop?.procedureId === procedure.procedureId && open.stop.versionId === null) card.append(stopPanel(open.stop));
     if (page !== null) {
       const versions = el('ol', 'captured-procedure-versions');
-      for (const version of page.versions) versions.append(versionItem(procedure, version));
+      for (const version of page.versions) versions.append(versionItem(procedure, version, page.latestEligibleVersionId === version.versionId));
       card.append(versions);
       const paging = pagingRow('procedure', procedure.procedureId, procedurePages.get(procedure.procedureId) ?? null, page.versionsBefore);
       if (paging !== null) card.append(paging);
@@ -218,23 +235,41 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     return card;
   }
 
-  function versionItem(procedure: CapturedProcedureSummaryProjection, version: CapturedProcedureVersionProjection): HTMLElement {
+  function versionItem(procedure: CapturedProcedureSummaryProjection, version: CapturedProcedureVersionProjection, latestEligible: boolean): HTMLElement {
     const item = el('li', 'captured-procedure-version');
     item.dataset['versionId'] = version.versionId;
     item.dataset['version'] = String(version.version);
     item.dataset['versionState'] = version.state;
+    item.dataset['latestEligible'] = String(latestEligible);
     const pill = el('span', `status-pill captured-procedure-state-${version.state}`, version.stateLabel);
     const line = el('p', 'captured-procedure-version-line');
-    line.append(pill, el('span', undefined, ` 《${version.title}》${procedureVersionLine(version).replace(` · ${version.stateLabel}`, '')}`));
+    line.append(pill);
+    // 最新可用 (Issue #66, S31; REUSE-043): the version a new use resolves to now.
+    if (latestEligible) {
+      const latest = el('span', 'status-pill captured-procedure-latest-eligible', PROCEDURE_LATEST_ELIGIBLE);
+      latest.title = PROCEDURE_LATEST_ELIGIBLE_NOTE;
+      line.append(' ', latest);
+    }
+    line.append(el('span', undefined, ` 《${version.title}》${procedureVersionLine(version).replace(` · ${version.stateLabel}`, '')}`));
     item.append(line);
     const steps = el('ol', 'captured-procedure-steps');
     for (const step of version.steps) steps.append(el('li', undefined, captureStepLine(step)));
     item.append(steps, el('p', 'field-note captured-procedure-source', `${procedureSourceLine(version)} · 保存于 ${options.localInstantLabel(version.createdAt)}`));
     const runs = el('p', 'field-note captured-procedure-runs', procedureRunsLine(version));
     item.append(runs);
+    // 关联工作 (Issue #66, S31; REUSE-031): each Run an exact link to that Run in its Book's 审阅, never a copy of what it found.
     if (version.runs.length > 0) {
       const list = el('ul', 'captured-procedure-run-links');
-      for (const run of version.runs) list.append(el('li', undefined, procedureRunLinkLine(run, options.localInstantLabel(run.createdAt))));
+      for (const run of version.runs) {
+        const entry = el('li');
+        const link = button(procedureRunLinkLine(run, options.localInstantLabel(run.createdAt)), 'quiet', 'open-version-run', async () => {
+          await options.openReviewRun({ bookId: run.bookId, title: run.bookTitle }, run.reviewRunId);
+        });
+        link.classList.add('captured-procedure-run-link');
+        link.dataset['reviewRunId'] = run.reviewRunId;
+        entry.append(link);
+        list.append(entry);
+      }
       item.append(list);
     }
     for (const problem of version.validationProblems) item.append(el('p', 'attention-note captured-procedure-problem', problem));
@@ -247,11 +282,8 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
       }, `[data-version-id="${version.versionId}"] .captured-procedure-validation h5`)));
     }
     if (version.state !== 'stopped') {
-      const stop = button(PROCEDURE_ACTIONS.stop, 'quiet', 'stop', () => act('正在停用…', '无法停用这一版。', async () => {
-        const result = await api.stopCapturedProcedure({ procedureId: procedure.procedureId, versionId: version.versionId });
-        if (open.validation?.versionId === version.versionId) open.validation = null;
-        options.setStatus(procedureStoppedLine(result.title, 1), 'success');
-      }, `[data-version-id="${version.versionId}"]`));
+      const stop = button(PROCEDURE_ACTIONS.stop, 'quiet', 'stop', () => openStop(procedure.procedureId, version.versionId,
+        `[data-version-id="${version.versionId}"] .captured-procedure-stop h5`));
       const why = el('small', 'field-note', PROCEDURE_STOP_NOTE);
       why.id = `procedure-stop-${version.versionId}`;
       stop.setAttribute('aria-describedby', why.id);
@@ -259,6 +291,7 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     }
     if (actions.childElementCount > 0) item.append(actions);
     if (open.validation?.versionId === version.versionId) item.append(validationPanel(open.validation));
+    if (open.stop !== null && open.stop.versionId === version.versionId) item.append(stopPanel(open.stop));
     item.tabIndex = -1;
     item.append(options.technicalDetails('captured-procedure-facts',
       el('dt', undefined, '可复用工序'), el('dd', 'technical-identity', procedure.procedureId),
@@ -309,6 +342,74 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
       button(PROCEDURE_ACTIONS.cancel, 'quiet', 'cancel-enable', async () => {
         open.validation = null;
         await load(`[data-version-id="${preview.versionId}"] [data-procedure-action="validate"]`);
+      }),
+    );
+    panel.append(actions);
+    return panel;
+  }
+
+  /** `停用…` (Issue #66, S31): read the preview first; nothing is stopped until `确认停用`. */
+  async function openStop(procedureId: string, versionId: string | null, focus: string): Promise<void> {
+    await act('正在查看停用的影响…', '无法查看停用的影响。', async () => {
+      open.stop = await api.previewCapturedProcedureStop({ procedureId, versionId });
+      open.validation = null;
+      options.setStatus(procedureStopAfterLine(open.stop.afterVersion));
+    }, focus);
+  }
+
+  /**
+   * `停用…`'s preview (Issue #66, S31; REUSE-038, REUSE-040, REUSE-041): each version it takes with the history that keeps naming
+   * it, the prepared Runs that are prepared again, the approved ones that go on, what a new use takes afterwards, and that nothing
+   * is deleted. `确认停用` confirms exactly this preview; one that moved meanwhile is read again.
+   */
+  function stopPanel(preview: CapturedProcedureStopPreviewProjection): HTMLElement {
+    const panel = el('section', 'captured-procedure-stop');
+    panel.dataset['stopAfter'] = preview.afterVersion === null ? '' : String(preview.afterVersion);
+    const heading = el('h5', undefined, procedureStopHeading(preview));
+    heading.tabIndex = -1;
+    panel.append(heading);
+    const runList = (runs: CapturedProcedureStopPreviewProjection['versions'][number]['prepared'], count: number, kind: string): HTMLElement => {
+      const list = el('ul', `captured-procedure-stop-runs captured-procedure-stop-${kind}`);
+      for (const run of runs) {
+        const entry = el('li', undefined, procedureStopRunLine(run));
+        entry.dataset['reviewRunId'] = run.reviewRunId;
+        list.append(entry);
+      }
+      if (count > runs.length) list.append(el('li', 'field-note', procedureStopMoreLine(runs.length, count)));
+      return list;
+    };
+    const versions = el('ul', 'captured-procedure-stop-versions');
+    for (const version of preview.versions) {
+      const entry = el('li');
+      entry.dataset['stopVersion'] = String(version.version);
+      entry.dataset['stopPrepared'] = String(version.preparedCount);
+      entry.dataset['stopActive'] = String(version.activeCount);
+      entry.append(el('p', undefined, procedureStopVersionLine(version)));
+      if (version.preparedCount > 0) entry.append(el('h6', undefined, PROCEDURE_STOP_PREPARED_HEADING), runList(version.prepared, version.preparedCount, 'prepared'));
+      if (version.activeCount > 0) entry.append(el('h6', undefined, PROCEDURE_STOP_ACTIVE_HEADING), runList(version.active, version.activeCount, 'active'));
+      versions.append(entry);
+    }
+    panel.append(versions, el('p', 'field-note captured-procedure-stop-after', procedureStopAfterLine(preview.afterVersion)),
+      el('p', 'field-note captured-procedure-stop-kept', PROCEDURE_STOP_KEPT));
+    const card = `[data-procedure-id="${preview.procedureId}"]`;
+    const back = preview.versionId === null ? `${card} [data-procedure-action="stop-all"]` : `[data-version-id="${preview.versionId}"] [data-procedure-action="stop"]`;
+    const actions = el('div', 'button-row');
+    actions.append(
+      button(PROCEDURE_ACTIONS.confirmStop, 'primary', 'confirm-stop', () => act('正在停用…', '无法停用。', async () => {
+        try {
+          const result = await api.stopCapturedProcedure({ procedureId: preview.procedureId, versionId: preview.versionId, previewDigest: preview.previewDigest });
+          open.stop = null;
+          options.setStatus(procedureStoppedLine(result.title, preview.versions.length), 'success');
+        } catch (error) {
+          // The Runs it touches moved since it was read: read it again, and let the editor look before stopping.
+          if ((error as { code?: unknown } | null)?.code !== 'CAPTURED_PROCEDURE_STOP_PREVIEW_STALE') throw error;
+          open.stop = await api.previewCapturedProcedureStop({ procedureId: preview.procedureId, versionId: preview.versionId });
+          options.setStatus(PROCEDURE_STOP_STALE, 'error');
+        }
+      }, preview.versionId === null ? `${card} h4` : `[data-version-id="${preview.versionId}"]`)),
+      button(PROCEDURE_ACTIONS.cancel, 'quiet', 'cancel-stop', async () => {
+        open.stop = null;
+        await load(back);
       }),
     );
     panel.append(actions);

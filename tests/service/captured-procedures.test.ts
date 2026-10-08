@@ -261,7 +261,7 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
 
       // A Run prepared from version 1 and not yet authorized when version 1 is stopped is prepared again, never authorized.
       const waiting = prepare(session, target, [STYLE], WHOLE, pin);
-      const stopped = store.stopCapturedProcedure(saved.procedureId, first!.versionId);
+      const stopped = store.stopCapturedProcedure(saved.procedureId, first!.versionId, store.previewCapturedProcedureStop(saved.procedureId, first!.versionId).previewDigest);
       expect(stopped.versions.map((version) => [version.version, version.state])).toEqual([[2, 'pending-validation'], [1, 'stopped']]);
       expect(stopped.runnable).toBe(false);
       expect(refusal(() => store.authorizeReviewRun(target, waiting.reviewRunId, approvals(waiting)))).toBe('REVIEW_PROCEDURE_STOPPED');
@@ -275,7 +275,8 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       });
       expect(refusal(() => prepare(session, target, [STYLE], WHOLE, pin))).toBe('REVIEW_PROCEDURE_STALE');
       // 停用 for all of them stops version 2 too, and nothing is deleted.
-      expect(store.stopCapturedProcedure(saved.procedureId, null).versions.map((version) => version.state)).toEqual(['stopped', 'stopped']);
+      expect(store.stopCapturedProcedure(saved.procedureId, null, store.previewCapturedProcedureStop(saved.procedureId, null).previewDigest).versions
+        .map((version) => version.state)).toEqual(['stopped', 'stopped']);
       const check = database();
       try {
         expect((check.prepare('SELECT count(*) n FROM captured_procedure_versions').get() as { n: number }).n).toBe(2);
@@ -410,6 +411,111 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
 });
 
 const wireBytes = (value: unknown): number => Buffer.byteLength(JSON.stringify(value), 'utf8');
+
+describe('exact procedure versions (Issue #66, plan slice S31; UI ADR 0013; REUSE-031, REUSE-038 to REUSE-045, REUSE-054)', () => {
+  it('resolves the latest eligible version, lets the editor pin an older eligible one, and previews a 停用 before it is confirmed', async () => {
+    const session = await open();
+    try {
+      const { store } = session;
+      const source = await importBook(session, 'L2 版本来源');
+      const finished = await authorizeAndDrive(session, source, prepare(session, source, [STYLE, LITERARY]));
+      const enable = (versionId: string): void => {
+        store.enableCapturedProcedure(versionId, store.previewCapturedProcedureValidation(versionId).previewDigest);
+      };
+      const one = store.saveCapturedProcedure({ bookId: source, reviewRunId: finished.reviewRunId, categoryIds: [STYLE], scopeSlot: 'whole', title: '体例复核', procedureId: null });
+      const procedureId = one.procedureId;
+      const v1 = one.versions[0]!.versionId;
+      enable(v1);
+      const v2 = store.saveCapturedProcedure({ bookId: source, reviewRunId: finished.reviewRunId, categoryIds: [STYLE, LITERARY], scopeSlot: 'whole', title: '体例复核', procedureId }).versions[0]!.versionId;
+      enable(v2);
+      // A third version waits for validation: never resolved, and said so (REUSE-044).
+      const v3 = store.saveCapturedProcedure({ bookId: source, reviewRunId: finished.reviewRunId, categoryIds: [LITERARY], scopeSlot: 'whole', title: '体例复核', procedureId }).versions[0]!.versionId;
+      const target = await importBook(session, 'L2 版本目标', false);
+
+      // The latest eligible version by default, every eligible one offered, the newer one passed over with why.
+      const latest = store.inspectCapturedProcedureRun(target, procedureId);
+      expect(latest.resolved).toMatchObject({ versionId: v2, version: 2, latestEligible: true });
+      expect(latest.eligibleVersions).toEqual([{ versionId: v2, version: 2 }, { versionId: v1, version: 1 }]);
+      expect(latest.passedOver).toEqual([{ version: 3, reason: '这一版还没有验证并启用。' }]);
+      expect(store.inspectCapturedProcedure(procedureId, null).latestEligibleVersionId).toBe(v2);
+      // The older eligible version chosen instead (REUSE-054); a version that is not eligible cannot be.
+      const older = store.inspectCapturedProcedureRun(target, procedureId, v1);
+      expect(older.resolved).toMatchObject({ versionId: v1, version: 1, latestEligible: false });
+      expect(older.resolved!.steps.map((step) => step.categoryId)).toEqual([STYLE]);
+      expect(refusal(() => store.inspectCapturedProcedureRun(target, procedureId, v3))).toBe('REVIEW_PROCEDURE_VERSION_INELIGIBLE');
+      expect(refusal(() => store.inspectCapturedProcedureRun(target, procedureId, '00000000-0000-4000-8000-000000000000'))).toBe('CAPTURED_PROCEDURE_NOT_FOUND');
+
+      // The Run pins exactly the version chosen, and a finished Run names it among the version's linked work with where it stands.
+      const pinOne = { versionId: v1, documentSha256: older.resolved!.documentSha256 };
+      const ranOne = await authorizeAndDrive(session, target, prepare(session, target, [STYLE], WHOLE, pinOne));
+      expect(ranOne.procedure).toMatchObject({ versionId: v1, version: 1 });
+      const page = store.inspectCapturedProcedure(procedureId, null);
+      expect(page.versions.find((version) => version.versionId === v1)!.runs).toEqual([
+        { bookId: target, bookTitle: 'L2 版本目标', reviewRunId: ranOne.reviewRunId, label: '第 1 次', createdAt: expect.any(String), stateLabel: '已完成' },
+      ]);
+      // A choice of version 1 is still a choice of exactly version 1: version 2's digest under its identity is refused.
+      expect(refusal(() => prepare(session, target, [STYLE], WHOLE, { versionId: v1, documentSha256: latest.resolved!.documentSha256 }))).toBe('REVIEW_PROCEDURE_STALE');
+      const waiting = prepare(session, target, [STYLE], WHOLE, pinOne);
+      expect(waiting.procedure).toMatchObject({ versionId: v1, stopped: false });
+
+      // 停用… of version 1 names the prepared Run as one prepared again, keeps the finished one, and says version 2 runs afterwards.
+      const preview = store.previewCapturedProcedureStop(procedureId, v1);
+      expect(preview).toMatchObject({ procedureId, title: '体例复核', versionId: v1, afterVersion: 2 });
+      expect(preview.versions).toEqual([{
+        versionId: v1, version: 1, stateLabel: '已启用', runCount: 2, preparedCount: 1, activeCount: 0, active: [],
+        prepared: [{ bookId: target, bookTitle: 'L2 版本目标', reviewRunId: waiting.reviewRunId, label: '第 2 次', stateLabel: '计划已冻结 · 待授权' }],
+      }]);
+      // A preview that moved — another Run prepared from version 1 since — is refused, and nothing is stopped.
+      const newer = prepare(session, target, [STYLE], WHOLE, pinOne);
+      expect(refusal(() => store.stopCapturedProcedure(procedureId, v1, preview.previewDigest))).toBe('CAPTURED_PROCEDURE_STOP_PREVIEW_STALE');
+      expect(store.inspectCapturedProcedure(procedureId, null).versions.find((version) => version.versionId === v1)!.state).toBe('enabled');
+      // The superseded prepared Run can never be approved anyway: only the Book's newest is named.
+      const again = store.previewCapturedProcedureStop(procedureId, v1);
+      expect(again.versions[0]!.prepared.map((run) => run.reviewRunId)).toEqual([newer.reviewRunId]);
+      expect(again.previewDigest).not.toBe(preview.previewDigest);
+      const stopped = store.stopCapturedProcedure(procedureId, v1, again.previewDigest);
+      expect(stopped.versions.map((version) => [version.version, version.state])).toEqual([[3, 'pending-validation'], [2, 'enabled'], [1, 'stopped']]);
+      expect(stopped.latestEligibleVersionId).toBe(v2);
+      expect(refusal(() => store.authorizeReviewRun(target, newer.reviewRunId, approvals(newer)))).toBe('REVIEW_PROCEDURE_STOPPED');
+      expect(store.inspectReviewWorkspace(target, ranOne.reviewRunId).run!.procedure).toMatchObject({ versionId: v1, stopped: true });
+      // A stopped version is no longer offered, cannot be chosen, and is said when newer than the latest eligible.
+      expect(store.inspectCapturedProcedureRun(target, procedureId).eligibleVersions.map((version) => version.version)).toEqual([2]);
+      expect(refusal(() => store.inspectCapturedProcedureRun(target, procedureId, v1))).toBe('REVIEW_PROCEDURE_VERSION_INELIGIBLE');
+      expect(refusal(() => store.previewCapturedProcedureStop(procedureId, v1))).toBe('CAPTURED_PROCEDURE_STOPPED');
+
+      // An approved Run that is still running goes on under its version: the preview says so and the 停用 does not move it.
+      const pinTwo = { versionId: v2, documentSha256: latest.resolved!.documentSha256 };
+      const runningTwo = prepare(session, target, [STYLE, LITERARY], WHOLE, pinTwo);
+      store.authorizeReviewRun(target, runningTwo.reviewRunId, approvals(runningTwo));
+      const driving = session.driver.drive(runningTwo.reviewRunId);
+      const whileRunning = store.previewCapturedProcedureStop(procedureId, null);
+      expect(whileRunning.versions.map((version) => version.version)).toEqual([3, 2]);
+      expect(whileRunning.afterVersion).toBeNull();
+      const two = whileRunning.versions.find((version) => version.version === 2)!;
+      expect([two.preparedCount, two.activeCount, two.active.map((run) => run.reviewRunId)]).toEqual([0, 1, [runningTwo.reviewRunId]]);
+      expect(two.active[0]!.stateLabel).toBe('正在审阅');
+      store.stopCapturedProcedure(procedureId, null, whileRunning.previewDigest);
+      await driving;
+      const finishedTwo = store.inspectReviewWorkspace(target, runningTwo.reviewRunId).run!;
+      expect(finishedTwo.state).toBe('settled');
+      expect(finishedTwo.procedure).toMatchObject({ versionId: v2, stopped: true });
+      expect(refusal(() => store.previewCapturedProcedureStop(procedureId, null))).toBe('CAPTURED_PROCEDURE_STOPPED');
+      expect(store.inspectCapturedProcedure(procedureId, null).latestEligibleVersionId).toBeNull();
+      // Nothing was deleted, and each 停用 records the preview it confirmed.
+      const db = database();
+      try {
+        expect((db.prepare('SELECT count(*) n FROM captured_procedure_versions').get() as { n: number }).n).toBe(3);
+        const states = db.prepare("SELECT canonical_json FROM captured_procedure_states WHERE state = 'stopped' ORDER BY recorded_at").all() as Array<{ canonical_json: string }>;
+        expect(states.map((row) => (JSON.parse(row.canonical_json) as { previewDigest: string }).previewDigest))
+          .toEqual([again.previewDigest, whileRunning.previewDigest, whileRunning.previewDigest]);
+      } finally {
+        db.close();
+      }
+    } finally {
+      await close(session);
+    }
+  }, 300_000);
+});
 
 describe('what 工序与规则 answers stays within one frame (Issue #65 review)', () => {
   it('lists summaries, pages long version histories by bytes, and answers every save within the frame', async () => {

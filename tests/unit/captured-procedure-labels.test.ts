@@ -7,10 +7,17 @@ import {
   captureStepLine,
   procedureCeilingLines,
   procedureGuidelineLine,
+  procedureRunLinkLine,
+  procedureStopAfterLine,
+  procedureStopHeading,
+  procedureStopMoreLine,
+  procedureStopRunLine,
+  procedureStopVersionLine,
   procedureVersionLine,
   runProcedureLeftOutLine,
   runProcedureLine,
   sheetProcedureLines,
+  sheetProcedureVersionOption,
 } from '../../src/renderer/captured-procedure-labels.js';
 
 // Unit suite (L1) for 可复用工序's words (Issue #65, plan slice S30; ADR 0087; REUSE-010, REUSE-013): professional purpose first,
@@ -56,8 +63,9 @@ describe('知识库 and the Run', () => {
   it('fills the sheet in words: the version, the steps left out and why, and guideline differences', () => {
     expect(sheetProcedureLines({
       bookId: 'b', procedureId: 'p', title: '体例复核', passedOver: [{ version: 3, reason: '工序已更新。' }], unavailableReason: null,
+      eligibleVersions: [{ versionId: 'v', version: 2 }],
       resolved: {
-        versionId: 'v', version: 2, documentSha256: 'd', scopeSlot: 'whole',
+        versionId: 'v', version: 2, latestEligible: true, documentSha256: 'd', scopeSlot: 'whole',
         steps: [{ categoryId: 'style-and-format', label: '体例与格式', available: true, unavailableReason: null },
           { categoryId: 'plot-consistency', label: '情节逻辑与前后一致', available: false, unavailableReason: '还没有基线分析。' }],
         guidelineChanges: [{ categoryId: 'style-and-format', label: '体例与格式', title: '体例条款', sourceVersion: '1', version: '2' }],
@@ -68,7 +76,37 @@ describe('知识库 and the Run', () => {
       '「体例与格式」按今天的《体例条款》第 2 版，来源审阅用的是第 1 版',
       '没有用第 3 版：工序已更新。',
     ]);
-    expect(sheetProcedureLines({ bookId: 'b', procedureId: 'p', title: 'x', passedOver: [], unavailableReason: '还没有启用。', resolved: null })).toEqual(['还没有启用。']);
+    expect(sheetProcedureLines({ bookId: 'b', procedureId: 'p', title: 'x', passedOver: [], eligibleVersions: [], unavailableReason: '还没有启用。', resolved: null }))
+      .toEqual(['还没有启用。']);
+  });
+
+  it('says when the editor chose an older eligible version than the latest (Issue #66, S31; REUSE-054)', () => {
+    const resolved = { versionId: 'v1', version: 1, latestEligible: false, documentSha256: 'd', scopeSlot: 'whole' as const,
+      steps: [{ categoryId: 'style-and-format', label: '体例与格式', available: true, unavailableReason: null }], guidelineChanges: [] };
+    expect(sheetProcedureLines({
+      bookId: 'b', procedureId: 'p', title: '体例复核', passedOver: [{ version: 3, reason: '这一版已停用。' }], unavailableReason: null,
+      eligibleVersions: [{ versionId: 'v2', version: 2 }, { versionId: 'v1', version: 1 }], resolved,
+    })).toEqual([
+      '按《体例复核》第 1 版：体例与格式；范围「全书」。类别已按它选好，计划照常先看。',
+      '你选了第 1 版；最新可用的是第 2 版。',
+      '没有用第 3 版：这一版已停用。',
+    ]);
+    expect(sheetProcedureVersionOption(2, true)).toBe('第 2 版（最新可用）');
+    expect(sheetProcedureVersionOption(1, false)).toBe('第 1 版');
+  });
+
+  it('reads 停用…\'s preview in words: the Runs it touches, what a new use takes afterwards (Issue #66, S31)', () => {
+    const run = { bookId: 'b', bookTitle: '工序运行之书', reviewRunId: 'r', label: '第 2 次', stateLabel: '计划已冻结 · 待授权' };
+    const version = { versionId: 'v', version: 1, stateLabel: '已启用', runCount: 2, prepared: [run], preparedCount: 1, active: [], activeCount: 0 };
+    expect(procedureStopHeading({ title: '体例复核', versionId: 'v', versions: [version] })).toBe('停用《体例复核》第 1 版');
+    expect(procedureStopHeading({ title: '体例复核', versionId: null, versions: [version, { ...version, version: 2 }] })).toBe('停用《体例复核》的全部 2 个版本');
+    expect(procedureStopVersionLine(version)).toBe('第 1 版 · 已启用 · 按它运行过 2 次审阅，停用后仍然记着它');
+    expect(procedureStopVersionLine({ ...version, runCount: 0 })).toBe('第 1 版 · 已启用 · 还没有审阅按它运行过');
+    expect(procedureStopRunLine(run)).toBe('《工序运行之书》第 2 次审阅 · 计划已冻结 · 待授权');
+    expect(procedureStopMoreLine(10, 13)).toBe('另有 3 次，未逐一列出。');
+    expect(procedureStopAfterLine(2)).toBe('停用后，新建审阅按这个工序运行时用第 2 版。');
+    expect(procedureStopAfterLine(null)).toBe('停用后，这个工序没有可以运行的版本；要再用它，请从一次新的审阅重新保存。');
+    expect(procedureRunLinkLine({ bookTitle: '工序运行之书', label: '第 1 次', stateLabel: '已完成' }, '10月9日')).toBe('《工序运行之书》第 1 次审阅 · 已完成 · 10月9日');
   });
 
   it('names the pin a Run keeps, stopped or not', () => {
