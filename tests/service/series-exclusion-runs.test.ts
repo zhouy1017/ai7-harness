@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +8,7 @@ import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-poli
 import { BaselineAnalysisExecutionOwner, type UnitHold } from '../../src/service/analysis/execution.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
+import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { SERIES_RETRIEVAL_EXCLUSION_TRIGGER_SQL, SERIES_SCOPE_STOP_SUMMARY, SeriesExclusionLedger, seriesExclusionImpact, seriesExclusionTarget } from '../../src/service/series-exclusions.js';
 import {
   HISTORICALLY_AFFECTED_RESULT_MARKER,
@@ -240,6 +242,63 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
       // Startup reconciliation settles what is left, and moves nothing of this Run.
       store.reconcileStoppedReviewCategoryRuns();
       expect([lastState(), run(store, bookId, approved.reviewRunId).state]).toEqual(['blocked-before-dispatch', 'scope-changed']);
+    });
+  }, 300_000);
+
+  it('blocks every category start the stopped Run left authorized, on the stop and on its cancellation (Issue #64 review)', async () => {
+    await withSession(async ({ store, seriesId }, bookId) => {
+      const itemId = itemOf(store, seriesId);
+      const lastState = (runRecordId: string): string => {
+        const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+        try {
+          return (db.prepare('SELECT state FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC LIMIT 1').get(runRecordId) as { state: string }).state;
+        } finally {
+          db.close();
+        }
+      };
+      const prepareBoth = (): ReviewRunProjection => {
+        let progress = store.createReviewRunPreparationWork(bookId, ['typos-and-usage', 'series-consistency'], WHOLE, launchPolicy);
+        while (!progress.done) progress = store.advanceReviewRunPreparationWork(progress.workId!);
+        const prepared = progress.projection!.run!;
+        store.authorizeReviewRun(bookId, prepared.reviewRunId, prepared.categories.map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.planEnvelopeDigest! })));
+        return prepared;
+      };
+
+      // The stop: 错别字与规范用语 left authorized and undispatched — as #661 leaves one for 继续审阅, or EXECUTION_BUSY parks
+      // one — and 书系一致性 stopped as the exclusion is recorded. Both starts are blocked in the stop's transaction.
+      const stopped = prepareBoth();
+      const typos = store.reviewRunDriveSteps.start(stopped.reviewRunId, 'typos-and-usage')!;
+      expect(lastState(typos.runRecordId)).toBe('authorized');
+      const { result } = exclude(store, seriesId, 'add', { target: { kind: 'knowledge-item', id: itemId } });
+      expect(result.stoppedRuns).toBe(1);
+      expect(lastState(typos.runRecordId)).toBe('blocked-before-dispatch');
+      expect(run(store, bookId, stopped.reviewRunId).state).toBe('scope-changed');
+      expect(store.reviewRunDriveSteps.step(stopped.reviewRunId, 'typos-and-usage').kind).toBe('done');
+      exclude(store, seriesId, 'end', { exclusionId: result.exclusionId });
+
+      // The cancel: a stop recorded as a build before this fix left it — the stopped category's event alone — beside a start
+      // of 错别字 left authorized. 取消任务 ends that start too, in its own transaction.
+      const cancelled = prepareBoth();
+      const pending = store.reviewRunDriveSteps.start(cancelled.reviewRunId, 'typos-and-usage')!;
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try {
+        const eventId = randomUUID();
+        const recordedAt = new Date().toISOString();
+        const detail = '书系检索范围已变化 · 需要重新确认计划：较早的版本记下的停止。';
+        const record = canonicalRecord({
+          schema: 'ai7.review.category-event/1', eventId, reviewRunId: cancelled.reviewRunId, categoryId: 'series-consistency', sequence: 1,
+          state: 'refused', detail, runRecordId: null, resultSetRevisionId: null, recordedAt, code: 'SERIES_RETRIEVAL_SCOPE_CHANGED',
+        });
+        db.prepare(`INSERT INTO review_run_category_events(event_id, review_run_id, category_id, sequence, state, detail, run_record_id,
+          result_set_revision_id, recorded_at, canonical_json, sha256) VALUES (?, ?, 'series-consistency', 1, 'refused', ?, NULL, NULL, ?, ?, ?)`)
+          .run(eventId, cancelled.reviewRunId, detail, recordedAt, record.json, record.digest);
+      } finally {
+        db.close();
+      }
+      expect([run(store, bookId, cancelled.reviewRunId).state, lastState(pending.runRecordId)]).toEqual(['scope-changed', 'authorized']);
+      const cancelledRun = store.cancelReviewRun(bookId, cancelled.reviewRunId).run!;
+      expect([cancelledRun.state, cancelledRun.categories.map((category) => category.stateLabel)]).toEqual(['cancelled', ['已取消', '已取消']]);
+      expect(lastState(pending.runRecordId)).toBe('blocked-before-dispatch');
     });
   }, 300_000);
 

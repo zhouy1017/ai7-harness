@@ -1374,7 +1374,11 @@ export class ReviewRunStore {
     // exclusion in force now reaches it. The Run's approval predates the exclusion, and that never lets the read go on.
     const excluded = this.#excludedTargets(category, snapshot.createdAt);
     if (excluded.length > 0) {
-      this.#recordEvent(reviewRunId, categoryId, 'refused', seriesScopeStopDetail(excluded), { extra: { code: SERIES_RETRIEVAL_SCOPE_CHANGED } });
+      const detail = seriesScopeStopDetail(excluded);
+      transact(this.#db, () => {
+        this.#recordEvent(reviewRunId, categoryId, 'refused', detail, { extra: { code: SERIES_RETRIEVAL_SCOPE_CHANGED } });
+        this.#blockUndispatchedStarts(snapshot, detail);
+      });
       return null;
     }
     const ledger = this.#ledgers.ledgerOf(category.entry);
@@ -1461,6 +1465,7 @@ export class ReviewRunStore {
         const scope = outcomeSummary?.startsWith(SERIES_SCOPE_STOP_SUMMARY) === true;
         this.#recordEvent(reviewRunId, categoryId, 'interrupted', outcomeSummary ?? '运行已中断。',
           { runRecordId, ...(scope ? { extra: { code: SERIES_RETRIEVAL_SCOPE_CHANGED } } : {}) });
+        if (scope) this.#blockUndispatchedStarts(this.#run(reviewRunId), SERIES_SCOPE_STOP_SUMMARY);
       } else if (state === 'blocked-before-dispatch') {
         const last = this.#db.prepare('SELECT canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC LIMIT 1')
           .get(runRecordId) as SqlRow;
@@ -2264,18 +2269,28 @@ export class ReviewRunStore {
     if (excluded.length === 0) return false;
     const detail = seriesScopeStopDetail(excluded);
     transact(this.#db, () => {
-      // A category Run an earlier hand-off authorized and never got to the owner sent nothing: it is blocked before dispatch
-      // with the stop's words, never left authorized for 继续审阅 or startup reconciliation to take on (Issue #64 review).
       const runRecordId = category.task === null ? null : this.#runRecordOf(category.task.taskIntentId);
-      if (runRecordId !== null) {
-        const ledger = this.#ledgers.ledgerOf(category.entry);
-        if (ledger.currentRunState(runRecordId) === 'authorized') {
-          ledger.recordRunState(runRecordId, 'blocked-before-dispatch', { detail, reasons: [detail] });
-        }
-      }
       this.#recordEvent(reviewRunId, categoryId, 'refused', detail, { runRecordId, extra: { code: SERIES_RETRIEVAL_SCOPE_CHANGED } });
+      this.#blockUndispatchedStarts(snapshot, detail);
     });
     return true;
+  }
+
+  /**
+   * Every category start of a stopped Run that an earlier hand-off authorized and never got to the owner — the one the stop
+   * reached, one #661 left for 继续审阅, one parked after `EXECUTION_BUSY` — sent nothing. Each is blocked before dispatch in
+   * the stop's words, inside the stop's own transaction, so none stays authorized and reads as queued for its kind's next
+   * Task (Issue #64 review): the stopped Run is never driven again to take it on.
+   */
+  #blockUndispatchedStarts(snapshot: RunSnapshot, detail: string): void {
+    for (const category of snapshot.categories) {
+      if (category.task === null) continue;
+      const runRecordId = this.#runRecordOf(category.task.taskIntentId);
+      if (runRecordId === null) continue;
+      if (this.#events(snapshot.reviewRunId, category.categoryId).some((event) => event.state === 'dispatched')) continue;
+      const ledger = this.#ledgers.ledgerOf(category.entry);
+      if (ledger.currentRunState(runRecordId) === 'authorized') ledger.recordRunState(runRecordId, 'blocked-before-dispatch', { detail, reasons: [detail] });
+    }
   }
 
   /**
@@ -2320,6 +2335,8 @@ export class ReviewRunStore {
           this.#recordEvent(reviewRunId, category.categoryId, 'refused', CANCELLED_DETAIL, { extra: { code: REVIEW_RUN_CANCELLED } });
         }
       }
+      // Whatever start the stop left authorized ends with the cancellation too (Issue #64 review).
+      this.#blockUndispatchedStarts(snapshot, CANCELLED_DETAIL);
     });
   }
 
