@@ -1503,7 +1503,10 @@ async function main() {
     );
     await click(primary, '按上述方式导出', 'database-export-approve');
     await waitFor(primary, `document.querySelector('.database-export-prepared')?.dataset.outcome === 'created'`, 'database-export-created');
-    await assertRenderer(primary, `document.querySelector('.database-export-outcome')?.textContent === '已导出到所选位置：已新建「AI7 数据库.ai7db」。' && document.querySelector('.database-export')?.dataset.databaseExports === '1'`, 'database-export-outcome-words');
+    // The outcome line is drawn with the outcome; 导出记录 and its count follow one read later, and only then are the export's
+    // controls released and focus moved to 导出数据库…. On a slow runner the one-shot check landed between the two (#656), and a
+    // switch turned before the release would lose its focus to 导出数据库…, so the stage waits, bounded, for all of it.
+    await waitFor(primary, `document.querySelector('.database-export-outcome')?.textContent === '已导出到所选位置：已新建「AI7 数据库.ai7db」。' && document.querySelector('.database-export')?.dataset.databaseExports === '1' && document.querySelector('.database-export-records summary') !== null && document.querySelector('.database-export [data-database-export-action="choose"]')?.disabled === false && document.activeElement === document.querySelector('.database-export [data-database-export-action="choose"]')`, 'database-export-outcome-words', 30_000);
     // 定期自动备份 (Issue #434, S86b; DSTO-018): off by default; turned on, it backs up at once into the fixed location beside
     // the data; turned off, it keeps what it made.
     const backupLocation = `${dataRoot}-backups`;
