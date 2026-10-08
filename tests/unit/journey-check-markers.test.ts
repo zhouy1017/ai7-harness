@@ -203,7 +203,7 @@ describe('the controller reads the check a failed child named', () => {
 });
 
 describe('every runner builds its failures the one shared way', () => {
-  const runners = [...readdirSync(E2E).filter((file) => /^run-j\d\d\.mjs$/u.test(file)), 'package-export-readiness.mjs'];
+  const runners = [...readdirSync(E2E).filter((file) => /^run-j\d\d\.mjs$/u.test(file)), 'package-export-readiness.mjs', 'credential-cleanup.mjs'];
 
   it('no runner builds a Journey failure by hand', () => {
     for (const file of runners) {

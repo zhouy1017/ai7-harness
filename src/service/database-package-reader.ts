@@ -2,7 +2,6 @@ import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { basename } from 'node:path';
 import { lstat, open, rm, type FileHandle } from 'node:fs/promises';
-import { DatabaseSync } from 'node:sqlite';
 import { ensureCanonicalDataDirectory, inspectCanonicalDataFile } from '../shared/data-root.js';
 import { EXPORT_STAGING_DIRECTORY } from './manuscript-export.js';
 import { Inflate, strFromU8 } from 'fflate';
@@ -13,6 +12,7 @@ import {
   DATABASE_PACKAGE_MANIFEST_MEMBER,
   DATABASE_PACKAGE_SCHEMA,
   DATABASE_PACKAGE_STORE_MEMBER,
+  openPackageStore,
   verifyCopiedPayloads,
   type DatabasePackageMember,
   type DatabasePackageOrigin,
@@ -353,7 +353,7 @@ export async function verifyDatabasePackage(
       await visit?.end();
     }
     try {
-      const database = new DatabaseSync(sqlitePath!, { readOnly: true });
+      const database = openPackageStore(sqlitePath!);
       try {
         requireIntact(database.prepare('PRAGMA user_version').get()?.user_version === manifest.schemaRevision);
       } finally { database.close(); }
