@@ -15,9 +15,12 @@ import {
   PASSED_OVER_FAILED,
   PASSED_OVER_PENDING,
   PASSED_OVER_STOPPED,
+  PROCEDURE_STEP_NOT_CHOSEN,
   boundedPage,
   capturedProcedureDocument,
   capturedStepProblem,
+  capturedStepProjections,
+  chosenApartSteps,
   ceilingWiderThanSource,
   developerProposalFileText,
   isCapturedProcedureDocument,
@@ -27,6 +30,7 @@ import {
   readReviewRunProcedurePin,
   recordReviewRunProcedurePin,
   resolveProcedureVersions,
+  stepRequirement,
   validCapturedProcedureTitle,
   versionEligible,
   versionIneligibleReason,
@@ -266,12 +270,16 @@ describe('the ledger', () => {
     const run = '33333333-3333-4333-8333-333333333333';
     recordReviewRunProcedurePin(db, run, {
       procedureId: version.procedureId, versionId: version.versionId, version: 1, title: '体例', documentSha256: version.documentSha256, scope: 'whole',
-      steps: ['style-and-format', 'plot-consistency'],
-    }, ['style-and-format'], [{ categoryId: 'plot-consistency', label: '情节逻辑与前后一致', reason: '没有基线分析。' }], '2026-10-08T00:00:00.000Z');
+      steps: ['style-and-format', 'plot-consistency'], chosenApart: [],
+    }, ['style-and-format'], [{ categoryId: 'plot-consistency', label: '情节逻辑与前后一致', reason: '没有基线分析。', byChoice: false }], '2026-10-08T00:00:00.000Z');
     expect(readReviewRunProcedurePin(db, run)).toEqual({
       procedureId: version.procedureId, versionId: version.versionId, version: 1, title: '体例', documentSha256: version.documentSha256, stopped: false, missing: false,
-      leftOut: [{ categoryId: 'plot-consistency', label: '情节逻辑与前后一致', reason: '没有基线分析。' }],
+      leftOut: [{ categoryId: 'plot-consistency', label: '情节逻辑与前后一致', reason: '没有基线分析。', byChoice: false }],
     });
+    // Nothing left out by choice: the record is written as before S31b, `/1` with no `byChoice` (S31b review P3-8).
+    const written = db.prepare('SELECT canonical_json FROM review_run_procedure_pins WHERE review_run_id = ?').get(run) as { canonical_json: string };
+    expect(JSON.parse(written.canonical_json)).toMatchObject({ schema: 'ai7.review.procedure-pin/1', leftOut: [{ categoryId: 'plot-consistency', label: '情节逻辑与前后一致', reason: '没有基线分析。' }] });
+    expect(written.canonical_json.includes('byChoice')).toBe(false);
     expect(procedurePinRefusal(db, run)).toBeNull();
     expect(readReviewRunProcedurePin(db, '22222222-2222-4222-8222-222222222222')).toBeNull();
     ledger.stop(version.versionId, 'f'.repeat(64));
@@ -281,7 +289,7 @@ describe('the ledger', () => {
     const merged = '22222222-2222-4222-8222-222222222222';
     recordReviewRunProcedurePin(db, merged, {
       procedureId: '55555555-5555-4555-8555-555555555555', versionId: '66666666-6666-4666-8666-666666666666', version: 3, title: '别处的工序',
-      documentSha256: 'e'.repeat(64), scope: 'whole', steps: ['style-and-format'],
+      documentSha256: 'e'.repeat(64), scope: 'whole', steps: ['style-and-format'], chosenApart: [],
     }, ['style-and-format'], [], '2026-10-08T00:00:00.000Z');
     expect(readReviewRunProcedurePin(db, merged)).toMatchObject({ missing: true, stopped: false });
     expect(procedurePinRefusal(db, merged)).toEqual({ code: 'REVIEW_PROCEDURE_MISSING', message: '这次审阅按可复用工序《别处的工序》第 3 版准备，本机没有这一版；请重新准备这次审阅。' });
@@ -352,13 +360,72 @@ describe('Latest Eligible Version Resolution (UI ADR 0013; REUSE-043, REUSE-044)
   });
 });
 
+describe('Series material chosen apart and what a step needs of a Book (Issue #66, S31b)', () => {
+  it('names what a Book must have for each step, from the executor the document holds (REUSE-048)', () => {
+    expect([stepRequirement('series-knowledge'), stepRequirement('baseline-leads'), stepRequirement('review-category-contract'), stepRequirement('factual-review-kind')])
+      .toEqual(['series', 'baseline-analysis', null, null]);
+    const document = capturedProcedureDocument('全面', [STYLE, PLOT, SERIES], 'whole');
+    expect(chosenApartSteps(document)).toEqual(['series-consistency']);
+    expect(chosenApartSteps(capturedProcedureDocument('体例', [STYLE, PLOT], 'whole'))).toEqual([]);
+    const words = (categoryId: string) => ({ label: categoryId, procedureTitle: categoryId });
+    expect(capturedStepProjections(document, words).map((step) => [step.categoryId, step.requirement]))
+      .toEqual([['style-and-format', null], ['plot-consistency', 'baseline-analysis'], ['series-consistency', 'series']]);
+  });
+
+  it('records a step the editor did not choose apart from one the Book could not take, and reads an older pin as neither chosen', () => {
+    const db = ledgerDatabase();
+    const ledger = new CapturedProcedures(db);
+    const version = ledger.save({ procedureId: null, document: capturedProcedureDocument('全面', [STYLE, SERIES], 'whole'),
+      sourceBookId: '11111111-1111-4111-8111-111111111111', sourceReviewRunId: '22222222-2222-4222-8222-222222222222', sourceRunOrdinal: 1 });
+    const pin = { procedureId: version.procedureId, versionId: version.versionId, version: 1, title: '全面', documentSha256: version.documentSha256,
+      scope: 'whole' as const, steps: ['style-and-format', 'series-consistency'], chosenApart: ['series-consistency'] };
+    const run = '33333333-3333-4333-8333-333333333333';
+    recordReviewRunProcedurePin(db, run, pin, ['style-and-format'],
+      [{ categoryId: 'series-consistency', label: '书系一致性', reason: PROCEDURE_STEP_NOT_CHOSEN, byChoice: true }], '2026-10-09T00:00:00.000Z');
+    expect(readReviewRunProcedurePin(db, run)!.leftOut).toEqual([{ categoryId: 'series-consistency', label: '书系一致性', reason: PROCEDURE_STEP_NOT_CHOSEN, byChoice: true }]);
+    const stored = db.prepare('SELECT canonical_json FROM review_run_procedure_pins WHERE review_run_id = ?').get(run) as { canonical_json: string };
+    expect(JSON.parse(stored.canonical_json)).toMatchObject({ schema: 'ai7.review.procedure-pin/2', ran: ['style-and-format'] });
+    // A pin written before S31b (`/1`) left out only what its Book could not take.
+    const older = '22222222-2222-4222-8222-222222222222';
+    const legacy = (leftOut: unknown) => canonicalJson({ schema: 'ai7.review.procedure-pin/1', reviewRunId: older, procedureId: version.procedureId, versionId: version.versionId,
+      version: 1, title: '全面', documentSha256: version.documentSha256, scope: 'whole', ran: ['style-and-format'], leftOut, recordedAt: '2026-10-01T00:00:00.000Z' });
+    const v1 = legacy([{ categoryId: 'series-consistency', label: '书系一致性', reason: '这本书不在任何书系中。' }]);
+    db.prepare('INSERT INTO review_run_procedure_pins(review_run_id, procedure_id, version_id, version, document_sha256, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(older, version.procedureId, version.versionId, 1, version.documentSha256, '2026-10-01T00:00:00.000Z', v1, sha256Hex(v1));
+    expect(readReviewRunProcedurePin(db, older)!.leftOut).toEqual([{ categoryId: 'series-consistency', label: '书系一致性', reason: '这本书不在任何书系中。', byChoice: false }]);
+    db.close();
+  });
+
+  it('refuses a pin whose left-out steps do not hold to its schema', () => {
+    const run = '33333333-3333-4333-8333-333333333333';
+    for (const [schema, leftOut] of [
+      ['ai7.review.procedure-pin/2', [{ categoryId: 'series-consistency', label: '书系一致性', reason: 'x' }]],
+      ['ai7.review.procedure-pin/2', [{ categoryId: 'series-consistency', label: '书系一致性', reason: 'x', byChoice: 'yes' }]],
+      ['ai7.review.procedure-pin/1', [{ categoryId: 'series-consistency', label: '书系一致性', reason: 'x', byChoice: true }]],
+      ['ai7.review.procedure-pin/2', [{ categoryId: 1, label: '书系一致性', reason: 'x', byChoice: true }]],
+      ['ai7.review.procedure-pin/2', [{ categoryId: 'series-consistency', label: 2, reason: 'x', byChoice: true }]],
+      ['ai7.review.procedure-pin/2', [{ categoryId: 'series-consistency', label: '书系一致性', reason: null, byChoice: true }]],
+      ['ai7.review.procedure-pin/2', ['series-consistency']],
+      ['ai7.review.procedure-pin/3', []],
+    ] as const) {
+      const db = ledgerDatabase();
+      const json = canonicalJson({ schema, reviewRunId: run, procedureId: '55555555-5555-4555-8555-555555555555', versionId: '66666666-6666-4666-8666-666666666666',
+        version: 1, title: '全面', documentSha256: 'e'.repeat(64), scope: 'whole', ran: [], leftOut, recordedAt: '2026-10-01T00:00:00.000Z' });
+      db.prepare('INSERT INTO review_run_procedure_pins(review_run_id, procedure_id, version_id, version, document_sha256, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(run, '55555555-5555-4555-8555-555555555555', '66666666-6666-4666-8666-666666666666', 1, 'e'.repeat(64), '2026-10-01T00:00:00.000Z', json, sha256Hex(json));
+      expect(() => readReviewRunProcedurePin(db, run)).toThrowError('审阅所依据的可复用工序记录已损坏。');
+      db.close();
+    }
+  });
+});
+
 describe('a 停用 in the ledger (Issue #66, S31)', () => {
   it('records the digest of the preview it confirmed, and lists the Runs that pinned a version in the order they were prepared', () => {
     const db = ledgerDatabase();
     const ledger = new CapturedProcedures(db);
     const version = ledger.save({ procedureId: null, document: capturedProcedureDocument('体例', [STYLE], 'whole'),
       sourceBookId: '11111111-1111-4111-8111-111111111111', sourceReviewRunId: '22222222-2222-4222-8222-222222222222', sourceRunOrdinal: 1 });
-    const pin = { procedureId: version.procedureId, versionId: version.versionId, version: 1, title: '体例', documentSha256: version.documentSha256, scope: 'whole' as const, steps: ['style-and-format'] };
+    const pin = { procedureId: version.procedureId, versionId: version.versionId, version: 1, title: '体例', documentSha256: version.documentSha256, scope: 'whole' as const, steps: ['style-and-format'], chosenApart: [] };
     recordReviewRunProcedurePin(db, '33333333-3333-4333-8333-333333333333', pin, ['style-and-format'], [], '2026-10-08T00:00:00.000Z');
     recordReviewRunProcedurePin(db, '22222222-2222-4222-8222-222222222222', pin, ['style-and-format'], [], '2026-10-09T00:00:00.000Z');
     expect(ledger.pinnedRunIds(version.versionId)).toEqual(['33333333-3333-4333-8333-333333333333', '22222222-2222-4222-8222-222222222222']);

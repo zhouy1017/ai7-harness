@@ -542,6 +542,9 @@ const REVIEW_FIXTURE_IDENTITY = 'sample1-review-authored';
 const CAPTURE_TARGET_TITLE = '工序运行之书';
 const PROCEDURE_TITLE = '体例复核';
 const PROPOSAL_TITLE = '图注核对';
+/** The procedure saved from the member's 书系一致性 Review Run (Issue #66, S31b): its one step reads Series material. */
+const SERIES_PROCEDURE_TITLE = '书系复核';
+const SERIES_NOT_IN_SERIES = '这本书不在任何书系中';
 const PROPOSAL_FILE_NAME = '开发建议.md';
 
 /** A Book from 书库 by 查找, into its manuscript. */
@@ -644,6 +647,8 @@ const READ_PROCEDURES = `(() => {
           return { text: note.textContent, visible: box.width > 1 && box.height > 1 && getComputedStyle(note).visibility === 'visible' };
         })(),
         runLinks: Array.from(item.querySelectorAll('button.captured-procedure-run-link'), (link) => [link.dataset.reviewRunId, link.textContent]),
+        // What a Book must have for the version to run there (Issue #66, S31b; REUSE-048).
+        requirement: item.querySelector('.captured-procedure-requirement')?.textContent ?? null,
         stop: readStop(item.querySelector(':scope > .captured-procedure-stop')),
       })),
       stopAll: readStop(card.querySelector(':scope > .captured-procedure-stop')),
@@ -1987,6 +1992,90 @@ async function main() {
     await click(renderer, '返回', 'stop-all-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'stop-all-landing');
 
+    // ---- Series material chosen apart, and how a procedure fits a Book (Issue #66, plan slice S31b; REUSE-046, REUSE-048 to
+    // REUSE-050, REUSE-053) --------------------------------------------------------------------------------------------------
+    at('procedure-series-capture');
+    // The member's first Review Run — 书系一致性 alone, settled — saved as 《书系复核》 and enabled; its version row says what a
+    // Book must have for it to run there: a Series, whose material is chosen apart at each run.
+    await openBookReview(renderer, MEMBER, member, 'series-procedure-review');
+    await clickSelector(renderer, 'ol.review-runs li[data-review-run="1"] [data-review-action="open-run"]', 'series-procedure-first-run');
+    await waitFor(renderer, `document.querySelector('section.review-run')?.dataset.reviewRunState==='settled' && document.querySelector('ol.review-runs li[data-review-run="1"]')?.getAttribute('aria-current')==='true'`, 'series-procedure-first-open', 60_000);
+    await clickSelector(renderer, 'section.review-report [data-review-action="capture"]', 'series-procedure-capture');
+    const seriesCapture = await readCapture(renderer, (read) => read.steps.length === 1 && read.focused, 'series-procedure-sheet');
+    requireJourney(JSON.stringify(seriesCapture.steps.map(([id, eligible, checked]) => [id, eligible, checked])) === JSON.stringify([['series-consistency', 'true', true]]),
+      'series-procedure-source-set', seriesCapture.steps);
+    await fill(renderer, 'dialog.procedure-capture [data-capture-field="title"]', SERIES_PROCEDURE_TITLE, 'series-procedure-title');
+    await clickSelector(renderer, 'dialog.procedure-capture [data-capture-action="save"]', 'series-procedure-save');
+    await waitFor(renderer, `!document.querySelector('dialog.procedure-capture') && ${status}===${JSON.stringify(`已保存《${SERIES_PROCEDURE_TITLE}》第 1 版 · 待验证；在知识库「工序与规则」里验证并启用后才能运行。`)}`, 'series-procedure-saved');
+    const seriesProcedureId = (await renderer.evaluate(`window.ai7.inspectCapturedProcedures()`))?.procedures?.find((entry) => entry.title === SERIES_PROCEDURE_TITLE)?.procedureId;
+    requireJourney(UUID_PATTERN.test(seriesProcedureId ?? '') && seriesProcedureId !== procedureId, 'series-procedure-saved-service');
+    await leaveReviewToLibrary(renderer, 'series-procedure-leave');
+    await openProcedures(renderer, 'series-procedure-validate');
+    await clickSelector(renderer, `[data-procedure-id="${seriesProcedureId}"] [data-procedure-action="versions"]`, 'series-procedure-versions');
+    const seriesCard = (page) => page.procedures.find((card) => card.id === seriesProcedureId);
+    const seriesPending = await readProcedures(renderer, (page) => seriesCard(page)?.versions.length === 1, 'series-procedure-listed');
+    requireJourney(seriesCard(seriesPending).versions[0].requirement === '适用条件：「书系一致性」要这本书在一个书系里，书系资料在每次运行时另行选择。',
+      'series-procedure-requirement', seriesCard(seriesPending).versions[0]);
+    await clickSelector(renderer, `[data-procedure-id="${seriesProcedureId}"] [data-version="1"] [data-procedure-action="validate"]`, 'series-procedure-validate');
+    await readProcedures(renderer, (page) => seriesCard(page)?.versions[0]?.validation === 'true', 'series-procedure-preview');
+    await clickSelector(renderer, '.captured-procedure-validation [data-procedure-action="confirm-enable"]', 'series-procedure-confirm');
+    await readProcedures(renderer, (page) => seriesCard(page)?.versions[0]?.state === 'enabled' && seriesCard(page)?.run === true, 'series-procedure-enabled');
+    await click(renderer, '返回', 'series-procedure-back');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'series-procedure-landing');
+
+    at('procedure-series-chosen-apart');
+    // The member's 新建审阅 offers 《书系复核》 with how it fits this Book; filled from it, 书系一致性 stays unticked and open —
+    // Series material is chosen apart at each run, never by the procedure — so 先看计划 prepares nothing until the editor ticks
+    // it. Ticked, the Run is prepared from version 1 with nothing left out.
+    await openBookReview(renderer, MEMBER, member, 'series-sheet-review');
+    await clickSelector(renderer, '[data-review-action="new-review"]', 'series-sheet-new-review');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('[data-review-field="procedure"]')`, 'series-sheet');
+    const READ_OFFERED = `Array.from(document.querySelectorAll('dialog.review-sheet [data-review-field="procedure"] option'), (option) => [option.value, option.textContent, option.dataset.procedureFit ?? null])`;
+    const offeredHere = await renderer.evaluate(READ_OFFERED);
+    // 《体例复核》's versions are all stopped: it is offered nowhere.
+    requireJourney(JSON.stringify(offeredHere) === JSON.stringify([['', '不按工序（自己选类别）', null],
+      [seriesProcedureId, `《${SERIES_PROCEDURE_TITLE}》第 1 版 · 这本书能运行全部 1 步；「书系一致性」要你另行勾选`, 'all']]), 'series-sheet-offered', offeredHere);
+    await assertRenderer(renderer, `(() => { const select=document.querySelector('dialog.review-sheet [data-review-field="procedure"]'); if(!(select instanceof HTMLSelectElement)||select.disabled)return false; select.value=${JSON.stringify(seriesProcedureId)}; select.dispatchEvent(new Event('change',{bubbles:true})); return true; })()`, 'series-sheet-choose');
+    const seriesSheet = await readUntil(renderer, READ_SHEET_PROCEDURE, (read) => read?.version === '1', 'series-sheet-filled');
+    // The status says what the sheet ticked — nothing, here — in the sheet's own words (S31b review P3-5).
+    await waitFor(renderer, `${status}===${JSON.stringify(`已读取《${SERIES_PROCEDURE_TITLE}》第 1 版：要运行的类别由你勾选。`)}`, 'series-sheet-status', 10_000);
+    const READ_SERIES_BOX = `(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=sheet?.querySelector('input[name="review-category"][value="series-consistency"]'); return box instanceof HTMLInputElement ? { checked: box.checked, disabled: box.disabled, apart: box.closest('label')?.dataset.procedureChosenApart ?? null, open: Array.from(sheet.querySelectorAll('input[name="review-category"]:not(:disabled)'), (input) => input.value) } : null; })()`;
+    const seriesBox = await renderer.evaluate(READ_SERIES_BOX);
+    requireJourney(JSON.stringify(seriesSheet.checked) === JSON.stringify([]) && seriesBox?.checked === false && seriesBox.disabled === false && seriesBox.apart === 'true' &&
+      JSON.stringify(seriesBox.open) === JSON.stringify(['series-consistency']) &&
+      JSON.stringify(seriesSheet.lines) === JSON.stringify([
+        `按《${SERIES_PROCEDURE_TITLE}》第 1 版：书系一致性；范围「全书」。要运行的类别由你勾选，计划照常先看。`,
+        '「书系一致性」要读这本书所在书系的资料，不会替你选上：要用就勾选它；不选，这次审阅会记下是你没有选。',
+      ]), 'series-sheet-chosen-apart', { sheet: seriesSheet, box: seriesBox });
+    // Left unticked, nothing is prepared: the sheet says to choose a category.
+    await clickSelector(renderer, 'dialog.review-sheet [data-review-action="prepare"]', 'series-sheet-prepare-empty');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet .review-sheet-problem')?.textContent==='请至少选择一个审阅类别。' && document.querySelector('dialog.review-sheet')?.open===true`, 'series-sheet-nothing-chosen');
+    await clickSelector(renderer, 'dialog.review-sheet input[name="review-category"][value="series-consistency"]', 'series-sheet-tick');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet input[name="review-category"][value="series-consistency"]')?.checked===true`, 'series-sheet-ticked');
+    await clickSelector(renderer, 'dialog.review-sheet [data-review-action="prepare"]', 'series-sheet-prepare');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, 'series-prepared', 180_000);
+    const seriesRun = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
+    requireJourney(seriesRun?.state === 'prepared' && seriesRun.procedure?.procedureId === seriesProcedureId && seriesRun.procedure.version === 1 &&
+      JSON.stringify(seriesRun.procedure.leftOut) === JSON.stringify([]) &&
+      JSON.stringify(seriesRun.categories.map((category) => category.categoryId)) === JSON.stringify(['series-consistency']), 'series-pinned', seriesRun?.procedure);
+    await waitFor(renderer, `document.querySelector('.review-procedure-pin .review-procedure-line')?.textContent===${JSON.stringify(`按可复用工序《${SERIES_PROCEDURE_TITLE}》第 1 版`)} && document.querySelectorAll('.review-procedure-pin .review-procedure-left-out').length===0`, 'series-pin-shown', 30_000);
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(seriesRun.reviewRunId)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='ready'`, 'series-drawer');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'series-drawer-close');
+    await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'series-drawer-closed');
+    await leaveReviewToLibrary(renderer, 'series-sheet-leave');
+
+    at('procedure-series-mismatch');
+    // 工序运行之书 is in no Series: 《书系复核》 is still offered — manual choice is never ruled out — with why it cannot run here.
+    await openBookReview(renderer, CAPTURE_TARGET_TITLE, targetBook, 'series-mismatch-review');
+    await clickSelector(renderer, '[data-review-action="new-review"]', 'series-mismatch-new-review');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('[data-review-field="procedure"]')`, 'series-mismatch-sheet');
+    const offeredThere = await renderer.evaluate(READ_OFFERED);
+    requireJourney(JSON.stringify(offeredThere) === JSON.stringify([['', '不按工序（自己选类别）', null],
+      [seriesProcedureId, `《${SERIES_PROCEDURE_TITLE}》第 1 版 · 这本书现在不能运行（「书系一致性」：${SERIES_NOT_IN_SERIES}）`, 'none']]), 'series-mismatch-offered', offeredThere);
+    await clickSelector(renderer, 'dialog.review-sheet [data-review-action="close-sheet"]', 'series-mismatch-close');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open!==true`, 'series-mismatch-closed');
+    await leaveReviewToLibrary(renderer, 'series-mismatch-leave');
+
     at('capture-proposal-file');
     // 导出为文件…: the platform Save dialog (this window's launch control answers it once); the file is the proposal in words
     // with its digest, and only its name is recorded. Nothing of either Book is in it.
@@ -2014,7 +2103,7 @@ async function main() {
       const proposal = await window.ai7.inspectDeveloperProposal({ proposalId: list.proposals[0].proposalId, before: null });
       return [list.procedures.length, procedure.runnable, procedure.versions.map((version) => [version.version, version.state, version.runCount]), proposal.versions[0].fileCount];
     })()`);
-    requireJourney(JSON.stringify(keptOnRestart) === JSON.stringify([1, false, [[2, 'stopped', 0], [1, 'stopped', 1]], 1]), 'capture-restart-kept', keptOnRestart);
+    requireJourney(JSON.stringify(keptOnRestart) === JSON.stringify([2, false, [[2, 'stopped', 0], [1, 'stopped', 1]], 1]), 'capture-restart-kept', keptOnRestart);
 
     at('j14-capture-keyboard-reflow-forced-colors');
     // Without a pointer: Tab reaches 修改… with its focus visible, and Enter opens the next version's form with focus on its title.
@@ -2031,7 +2120,7 @@ async function main() {
     await waitFor(renderer, `document.activeElement === document.querySelector('.developer-proposal-form [data-proposal-field="title"]')`, 'capture-keyboard-form', 10_000);
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
-    await waitFor(renderer, `(() => { const root=document.documentElement; const parts=[...document.querySelectorAll('article.captured-procedure, article.developer-proposal, li.developer-proposal-version, form.developer-proposal-form')]; return parts.length===4 && parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2) && root.scrollWidth<=root.clientWidth+2; })()`, 'capture-reflow', 10_000);
+    await waitFor(renderer, `(() => { const root=document.documentElement; const parts=[...document.querySelectorAll('article.captured-procedure, article.developer-proposal, li.developer-proposal-version, form.developer-proposal-form')]; return parts.length===5 && parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2) && root.scrollWidth<=root.clientWidth+2; })()`, 'capture-reflow', 10_000);
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
     await assertRenderer(renderer, `(() => {
       if (!matchMedia('(forced-colors: active)').matches) return false;

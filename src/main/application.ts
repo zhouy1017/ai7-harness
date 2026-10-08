@@ -111,7 +111,7 @@ interface ManuscriptCapability {
 interface EditorResourceCapability {
   kind: 'job' | 'search' | 'preview';
   operation: 'search' | 'replacement' | 'reimport' | 'task-authorization' | 'baseline-analysis' | 'review-run' | 'initial-evaluation' |
-    'readers-report' | 'evaluation-rewrite';
+    'readers-report' | 'evaluation-rewrite' | 'writing';
   bookId: string;
   manuscriptId: string | null;
   branchId: string | null;
@@ -362,11 +362,12 @@ function parseArguments(argv: string[]): LaunchArguments {
   );
   // The model adapter binds a Journey whose Runs execute: J-04's analysis, J-09's 运行中 and 最近完成 (Issue #424),
   // J-10's cancelled Run (Issue #422), J-16's 任务 panel (Issue #423), J-11's 分析反馈 (Issue #94), and J-13's 书系一致性
-  // (Issue #64) and the Review Runs a Captured Procedure is captured from and run as (Issue #65).
+  // (Issue #64) and the Review Runs a Captured Procedure is captured from and run as (Issue #65), and J-07's 写作任务 (Issue #432).
   requireDesktop(
     modelAdapterControlValue === undefined ||
       ((process.env.AI7_E2E_JOURNEY === 'J-04' || process.env.AI7_E2E_JOURNEY === 'J-09' || process.env.AI7_E2E_JOURNEY === 'J-10' ||
-        process.env.AI7_E2E_JOURNEY === 'J-16' || process.env.AI7_E2E_JOURNEY === 'J-11' || process.env.AI7_E2E_JOURNEY === 'J-13') &&
+        process.env.AI7_E2E_JOURNEY === 'J-16' || process.env.AI7_E2E_JOURNEY === 'J-11' || process.env.AI7_E2E_JOURNEY === 'J-13' ||
+        process.env.AI7_E2E_JOURNEY === 'J-07') &&
         modelAdapterControl !== undefined),
   );
   requireDesktop([importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl].filter(Boolean).length <= 1);
@@ -715,7 +716,9 @@ function registerRendererHandlers(
                   ? 'readers-report'
                   : job.kind === 'evaluation-rewrite-preparation'
                     ? 'evaluation-rewrite'
-                    : 'reimport';
+                    : job.kind === 'writing-preparation'
+                      ? 'writing'
+                      : 'reimport';
   const resourceSeed = (
     capability: ManuscriptCapability | EditorResourceCapability,
     operation: EditorResourceCapability['operation'] = 'operation' in capability ? capability.operation : 'search',
@@ -794,6 +797,11 @@ function registerRendererHandlers(
     } else if (result !== null && 'taskIntent' in result) {
       if (actualOperation !== 'task-authorization' || result.bookId !== capability.bookId) {
         throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', '任务授权准备结果不属于当前图书工作台。');
+      }
+    } else if (result !== null && 'consequences' in result && 'quickStart' in result) {
+      // 新建文档 · 写作任务 answers a writing Task's preparation (Issue #432, S84a).
+      if (actualOperation !== 'writing' || result.bookId !== capability.bookId) {
+        throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', '写作任务准备结果不属于当前图书工作台。');
       }
     } else if (result !== null) {
       throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', '后台编辑操作返回了不适用的结果类型。');
@@ -2867,6 +2875,20 @@ function registerRendererHandlers(
       return result;
     }),
   );
+  // 按已保存的工序 (Issue #66, S31b): the house's enabled procedures as each applies to the route's Book, which the renderer never names.
+  ipcMain.handle(IPC_CHANNELS.inspectCapturedProcedureApplicability, (event) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const routeGeneration = owned.routeGeneration;
+      const routeRequestSequence = owned.routeRequestSequence;
+      const result = await service.call('inspectCapturedProcedureApplicability', { bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+      if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '工序的适用情况不属于当前图书工作台。');
+      return result;
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.saveDeveloperProposal, (event, input: Parameters<RendererApi['saveDeveloperProposal']>[0]) =>
     envelope(async () => {
       requireSender(event);
@@ -3136,6 +3158,85 @@ function registerRendererHandlers(
         const result = await service.call('createReadersReportDraft', { bookId: route.bookId, revisionId: input.revisionId });
         requireCurrentRouteGeneration(owned, routeGeneration);
         if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '评估不属于当前图书工作台。');
+        return result;
+      });
+    }),
+  );
+  // 写作任务 (Issue #432, S84a): read, prepared, started and opened within the route's Book, as 审稿意见 is; the renderer names a
+  // house type and its own words, a Task or a drafted result, never the Book, and every answer must be that Book's.
+  ipcMain.handle(IPC_CHANNELS.inspectWritingTask, (event) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const routeGeneration = owned.routeGeneration;
+      const routeRequestSequence = owned.routeRequestSequence;
+      const result = await service.call('inspectWritingTask', { bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+      if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '写作任务不属于当前图书工作台。');
+      return result;
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.prepareWritingTask, (event, input: Parameters<RendererApi['prepareWritingTask']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object' && typeof input.typeId === 'string' && typeof input.audience === 'string' &&
+        typeof input.channel === 'string' && (input.requirements === null || typeof input.requirements === 'string'), 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const result = await service.call('prepareWritingTask', {
+          bookId: route.bookId,
+          typeId: input.typeId,
+          audience: input.audience,
+          channel: input.channel,
+          requirements: input.requirements,
+        });
+        const prepared = result.result;
+        if (result.kind !== 'writing-preparation' ||
+            (prepared !== null && !('consequences' in prepared && 'quickStart' in prepared && prepared.bookId === route.bookId))) {
+          throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '写作任务准备结果类型无效或不属于当前图书工作台。');
+        }
+        rememberEditorResource(owned, 'job', result.jobId, {
+          operation: 'writing',
+          bookId: route.bookId,
+          manuscriptId: null,
+          branchId: null,
+        });
+        return result;
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.authorizeWritingTask, (event, input: Parameters<RendererApi['authorizeWritingTask']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const result = await service.call('authorizeWritingTask', {
+          bookId: route.bookId,
+          taskIntentId: input.taskIntentId,
+          planEnvelopeDigest: input.planEnvelopeDigest,
+        });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '写作任务不属于当前图书工作台。');
+        return result;
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.createWritingDraft, (event, input: Parameters<RendererApi['createWritingDraft']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object' && typeof input.revisionId === 'string', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const result = await service.call('createWritingDraft', { bookId: route.bookId, revisionId: input.revisionId });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        if (result.writing.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '写作任务不属于当前图书工作台。');
         return result;
       });
     }),

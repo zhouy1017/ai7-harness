@@ -247,6 +247,10 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   // 按我的评分重写评语 (Issue #429, S81b2): which version each rewrite Task rewrites, and the editor's decisions — the Book's own.
   evaluation_rewrite_tasks: 'owned',
   evaluation_rewrite_decisions: 'owned',
+  // 写作任务 (Issue #432, S84a): which type and reference set each writing Task drafts from, and which result became a
+  // document — the Book's own.
+  writing_tasks: 'owned',
+  writing_drafts: 'owned',
   book_dimension_sets: 'owned',
   book_dimensions: 'owned',
   book_people_versions: 'owned',
@@ -318,7 +322,7 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
 };
 
 /** What stays behind when a Book merges, said to the editor. */
-export type MergeNotice = 'series' | 'internal-number';
+export type MergeNotice = 'series' | 'internal-number' | 'writing-exemplar';
 
 const EXCLUSION_NOTICES: Readonly<Record<string, { notice: MergeNotice; bookColumn: string }>> = {
   series_membership_changes: { notice: 'series', bookColumn: 'book_id' },
@@ -425,6 +429,24 @@ export interface MergeBookPlan {
   readonly internalNumberCleared: boolean;
 }
 
+/**
+ * Whether a merging Book's writing Tasks referenced a 范例 that will not be here (Issue #432 re-review; the Commander's ruling):
+ * the 范例 of a Book that does not merge, whose delivered revision this store does not hold. A writing Task keeps its 范例 by
+ * reference, never its text, so such a Task merges with its outcome and drafts readable and is not started again; the merge
+ * goes ahead and says so.
+ */
+function writingExemplarLeftBehind(db: DatabaseSync): boolean {
+  if (!tableExists(db, 'src', 'writing_tasks')) return false;
+  const merging = `SELECT b.book_id FROM src.books b WHERE ${MERGING_BOOK}`;
+  return db.prepare(
+    `SELECT 1 FROM src.writing_tasks t, json_each(t.canonical_json, '$.exemplarSources') e
+     WHERE t.book_id IN (${merging})
+       AND json_extract(e.value, '$.bookId') NOT IN (${merging})
+       AND NOT EXISTS (SELECT 1 FROM main.manuscript_block_versions v WHERE v.revision_id = json_extract(e.value, '$.revisionId'))
+     LIMIT 1`,
+  ).get() !== undefined;
+}
+
 /** At most this many of a package's Books are listed in a preview or a waiting merge; the rest are counted (Issue #434 review). */
 export const MAX_MERGE_BOOKS_LISTED = 50;
 
@@ -488,6 +510,7 @@ export function planMerge(db: DatabaseSync, listed = MAX_MERGE_BOOKS_LISTED, mer
     if (found !== undefined) notices.add(notice);
   }
   if (numberCleared) notices.add('internal-number');
+  if (counts.new + counts.sameTitle > 0 && writingExemplarLeftBehind(db)) notices.add('writing-exemplar');
   const refusal = counts.new + counts.sameTitle === 0 ? null : libraryRefusal(db, `SELECT b.book_id FROM src.books b WHERE ${MERGING_BOOK}`);
   return { books, counts, notices: [...notices].sort(), refusal };
 }

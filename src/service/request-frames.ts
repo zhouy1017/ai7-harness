@@ -795,6 +795,29 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    // 新建文档 · 写作任务 (Issue #432, S84a): the route's Book.
+    case 'inspectWritingTask': {
+      const input = requireInput(value.input, ['bookId'], tentativeId);
+      if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 先看计划 of a writing Task: the route's Book, a house type by its identity, and the editor's words, each a bounded string
+    // the store holds to its own bounds; the reference set is the service's to read.
+    case 'prepareWritingTask': {
+      const input = requireInput(value.input, ['bookId', 'typeId', 'audience', 'channel', 'requirements'], tentativeId);
+      if (!validUuid(input.bookId) || !isBoundedString(input.typeId, 64) || !isBoundedString(input.audience, 1_000, true) ||
+          !isBoundedString(input.channel, 1_000, true) || !(input.requirements === null || isBoundedString(input.requirements, 4_000))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    // 打开草稿: one drafted result of the route's Book's writing Task.
+    case 'createWritingDraft': {
+      const input = requireInput(value.input, ['bookId', 'revisionId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.revisionId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'authorizeWritingTask':
     case 'authorizeEvaluationRewrite':
     case 'authorizeReadersReport':
     case 'authorizeInitialEvaluation': {
@@ -1295,6 +1318,12 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (!validUuid(input.bookId) || !validUuid(input.procedureId) || (input.versionId !== null && !validUuid(input.versionId))) {
         throw new ProtocolError(tentativeId);
       }
+      break;
+    }
+    case 'inspectCapturedProcedureApplicability': {
+      // The house's enabled procedures as each applies to the route's Book (Issue #66, S31b).
+      const input = requireInput(value.input, ['bookId'], tentativeId);
+      if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'saveDeveloperProposal': {

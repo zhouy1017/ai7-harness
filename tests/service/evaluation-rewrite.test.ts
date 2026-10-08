@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { RECONCILED_INTERRUPTED_DETAIL, RECONCILED_QUEUED_DETAIL } from '../../src/service/analysis/baseline-analysis-store.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { runReportUsageReconciles } from '../../src/service/analysis/run-report.js';
-import { EVALUATION_INITIAL_DRAFT_TRIGGER_SQL } from '../../src/service/evaluation-records.js';
+import { canonicalRecord, sha256Hex } from '../../src/service/analysis/canonical.js';
+import { EVALUATION_INITIAL_DRAFT_TRIGGER_SQL, EVALUATION_RECORD_TRIGGER_SQL } from '../../src/service/evaluation-records.js';
 import { EVALUATION_REWRITE_SCHEMA_SQL, EVALUATION_REWRITE_TRIGGER_SQL } from '../../src/service/evaluation-rewrites.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { fixtureEntryKey, loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -21,7 +22,7 @@ import {
   ANALYSIS_LEDGER_REVISION_62_SQL,
   ANALYSIS_LEDGER_SCHEMA_SQL,
   CAPTURED_PROCEDURE_SCHEMA_VERSION,
-  EVALUATION_REWRITE_SCHEMA_VERSION,
+  WRITING_TASK_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import {
   EVALUATION_REWRITE_ASSURANCE_STATEMENT,
@@ -120,6 +121,23 @@ async function rewrite(book: Book, recordId: string): Promise<string> {
 
 const scoresOf = (content: EvaluationContent): Array<[string, number | null, string | null]> =>
   content.items.map((item) => [item.itemId, item.score, item.notRated]);
+
+/** Each entry's record of AI7's words in it, oldest first, as the store holds it; `null` for an entry that names none. */
+function rewrittenFrom(recordId: string): unknown[] {
+  const reader = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+  try {
+    return (reader.prepare('SELECT canonical_json FROM evaluation_record_entries WHERE record_id = ? ORDER BY ordinal').all(recordId) as Array<{ canonical_json: string }>)
+      .map((row) => (JSON.parse(row.canonical_json) as { rewrittenFrom?: unknown }).rewrittenFrom ?? null);
+  } finally {
+    reader.close();
+  }
+}
+
+/** AI7's authored words in an entry: these items' 评语, and the 总评 when `verdict`, all from one rewrite, each with its digest. */
+const wordsOf = (itemIds: ReadonlyArray<string>, from: { taskIntentId: string; analysisRevisionId: string }, verdict: boolean): unknown => ({
+  items: itemIds.map((itemId) => ({ itemId, ...from, sha256: sha256Hex(AUTHORED_REWRITE_WORDS.items.find((item) => item.itemId === itemId)!.comment) })),
+  verdict: verdict ? { ...from, sha256: sha256Hex(AUTHORED_REWRITE_WORDS.verdict) } : null,
+});
 
 describe('the market section and 按我的评分重写评语 over the real store on exact sample1', () => {
   it('snapshots AI7\'s market words with a version begun from its 初评, and lists the 书系 house data beside them', async () => {
@@ -225,6 +243,7 @@ describe('the market section and 按我的评分重写评语 over the real store
         itemId: item.itemId, before: adjusted.content.items.find((entry) => entry.itemId === item.itemId)!.comment, after: item.comment,
         evidence: revision.rewrite.observations.filter((observation) => observation.itemId === item.itemId)
           .map((observation) => ({ unitOrdinal: observation.unitOrdinal, note: observation.note, blockIds: observation.blockIds })),
+        evidenceCount: revision.rewrite.observations.filter((observation) => observation.itemId === item.itemId).length,
       })));
       expect(proposal.items.map((item) => item.evidence.length)).toEqual([3, 2, 4, 3, 0]);
       expect(proposal.verdict).toEqual({ before: null, after: AUTHORED_REWRITE_WORDS.verdict });
@@ -249,16 +268,89 @@ describe('the market section and 按我的评分重写评语 over the real store
       expect([record.content.risks, record.content.readiness, record.content.strengths, record.content.weaknesses, record.content.conclusion])
         .toEqual([adjusted.content.risks, adjusted.content.readiness, adjusted.content.strengths, adjusted.content.weaknesses, adjusted.content.conclusion]);
       expect(accepted.rewrite).toMatchObject({ proposal: null, decided: { decision: 'accepted', entryOrdinal: 3 } });
-      // The entry names the rewrite its words came from: they are AI7's, never to be learned as the editor's (EVAL-011).
-      const reader = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
-      try {
-        const entries = (reader.prepare('SELECT canonical_json FROM evaluation_record_entries WHERE record_id = ? ORDER BY ordinal').all(adjusted.recordId) as Array<{ canonical_json: string }>)
-          .map((row) => JSON.parse(row.canonical_json) as { rewrittenFrom?: unknown });
-        expect(entries.map((entry) => entry.rewrittenFrom ?? null)).toEqual([null, null, { taskIntentId: againTask, analysisRevisionId: again.revisionId }]);
-      } finally {
-        reader.close();
-      }
+      // The entry names, item by item, the words that are AI7's and the rewrite they came from: never to be learned as the
+      // editor's (EVAL-011; Issue #689).
+      const from = { taskIntentId: againTask, analysisRevisionId: again.revisionId };
+      expect(rewrittenFrom(adjusted.recordId)).toEqual([null, null, wordsOf(AUTHORED_REWRITE_WORDS.items.map((item) => item.itemId), from, true)]);
     });
+  }, 300_000);
+
+  it('marks AI7\'s words item by item on every later save until the editor changes them, 定稿 and the next version included (Issue #689)', async () => {
+    let bookId = '';
+    let recordId = '';
+    let from = { taskIntentId: '', analysisRevisionId: '' };
+    await withBook(async (book) => {
+      bookId = book.bookId;
+      await runInitialEvaluationToEnd(book.store, book.owner, book.bookId, launchPolicy);
+      finalizeAsJ11(book.store, book.bookId);
+      const record = beginRewriteAsJ11(book.store, book.bookId);
+      recordId = record.recordId;
+      const taskIntentId = await rewrite(book, record.recordId);
+      const proposal = book.store.inspectEvaluation(book.bookId, record.recordId).rewrite.proposal!;
+      book.store.decideEvaluationRewrite(book.bookId, proposal.revisionId, 'accept');
+      from = { taskIntentId, analysisRevisionId: proposal.revisionId };
+    });
+    const itemIds = AUTHORED_REWRITE_WORDS.items.map((item) => item.itemId);
+    expect(rewrittenFrom(recordId)).toEqual([null, null, wordsOf(itemIds, from, true)]);
+    // The 采用 entry as an entry written before Issue #689 recorded it: only the rewrite it took.
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      const row = database.prepare('SELECT entry_id, canonical_json FROM evaluation_record_entries WHERE record_id = ? AND ordinal = 3').get(recordId) as { entry_id: string; canonical_json: string };
+      const legacy = canonicalRecord({ ...(JSON.parse(row.canonical_json) as Record<string, unknown>), rewrittenFrom: from });
+      database.exec('DROP TRIGGER evaluation_record_entries_no_update');
+      database.prepare('UPDATE evaluation_record_entries SET canonical_json = ?, sha256 = ? WHERE entry_id = ?').run(legacy.json, legacy.digest, row.entry_id);
+      database.exec(EVALUATION_RECORD_TRIGGER_SQL.evaluation_record_entries_no_update!);
+    } finally {
+      database.close();
+    }
+    const store = await openStore();
+    try {
+      const accepted = store.inspectEvaluation(bookId, recordId).record!;
+      expect(accepted.entries).toBe(3);
+      // The editor rewrites the first 评语 in their own words: the other four and the 总评 stay AI7's.
+      const edited = store.saveEvaluation({
+        bookId, recordId, expectedEntries: 3, finalize: false,
+        content: { ...accepted.content, items: accepted.content.items.map((item, index) => (index === 0 ? { ...item, comment: '编辑自己写的评语。' } : item)) },
+      }).record!;
+      // A save that changes neither keeps both; 定稿 with the editor's own 总评 leaves the four 评语.
+      const kept = store.saveEvaluation({ bookId, recordId, expectedEntries: 4, finalize: false, content: { ...edited.content, conclusion: 'revise' } }).record!;
+      store.saveEvaluation({ bookId, recordId, expectedEntries: 5, finalize: true, content: { ...kept.content, verdict: '编辑自己写的总评。' } });
+      expect(rewrittenFrom(recordId)).toEqual([
+        null, null, from, wordsOf(itemIds.slice(1), from, true), wordsOf(itemIds.slice(1), from, true), wordsOf(itemIds.slice(1), from, false),
+      ]);
+      // 重新评估 carries the 定稿's words into the next version, and AI7's with them; the editor's change makes one theirs.
+      const next = store.startEvaluation(bookId).record!;
+      expect(rewrittenFrom(next.recordId)).toEqual([wordsOf(itemIds.slice(1), from, false)]);
+      store.saveEvaluation({
+        bookId, recordId: next.recordId, expectedEntries: 1, finalize: false,
+        content: { ...next.content, items: next.content.items.map((item) => ({ ...item, comment: `${item.comment ?? ''}（编辑补充）` })) },
+      });
+      expect(rewrittenFrom(next.recordId)).toEqual([wordsOf(itemIds.slice(1), from, false), null]);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    // An entry that marks an item the version does not hold is not one AI7 wrote.
+    const tampered = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      const row = tampered.prepare('SELECT entry_id, canonical_json FROM evaluation_record_entries WHERE record_id = ? AND ordinal = 6').get(recordId) as { entry_id: string; canonical_json: string };
+      const forged = canonicalRecord({
+        ...(JSON.parse(row.canonical_json) as Record<string, unknown>),
+        rewrittenFrom: { items: [{ itemId: 'no-such-item', ...from, sha256: sha256Hex('AI7') }], verdict: null },
+      });
+      tampered.exec('DROP TRIGGER evaluation_record_entries_no_update');
+      tampered.prepare('UPDATE evaluation_record_entries SET canonical_json = ?, sha256 = ? WHERE entry_id = ?').run(forged.json, forged.digest, row.entry_id);
+      tampered.exec(EVALUATION_RECORD_TRIGGER_SQL.evaluation_record_entries_no_update!);
+    } finally {
+      tampered.close();
+    }
+    const refused = await openStore();
+    try {
+      expect(await refusal(() => refused.inspectEvaluation(bookId, recordId))).toBe('EVALUATION_RECORD_INVALID:评估记录已损坏。');
+      refused.markCleanShutdown();
+    } finally {
+      refused.close();
+    }
   }, 300_000);
 
   it('takes no rewrite into a version that moved since, and none of a version that is 定稿, begun alone, or unknown', async () => {
@@ -474,9 +566,28 @@ describe('the market section and 按我的评分重写评语 over the real store
     } finally {
       damaged.close();
     }
+    // The same decision as text that is not JSON under a digest forged to match (Issue #689): read as damaged all the same,
+    // never an error past the guard.
+    const forged = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      forged.exec('DROP TRIGGER evaluation_rewrite_decisions_no_update');
+      forged.prepare('UPDATE evaluation_rewrite_decisions SET canonical_json = ?, sha256 = ?').run('{"schema":', createHash('sha256').update('{"schema":').digest('hex'));
+      forged.exec(EVALUATION_REWRITE_TRIGGER_SQL.evaluation_rewrite_decisions_no_update!);
+    } finally {
+      forged.close();
+    }
+    const unparsable = await openStore();
+    try {
+      const page = unparsable.inspectEvaluation(bookId, recordId);
+      expect(page.record!.recordId).toBe(recordId);
+      expect(page.rewrite).toMatchObject({ prepare: { allowed: false, reason: '按我的评分重写评语暂不可用：评语重写记录已损坏。' }, proposal: null, decided: null });
+      unparsable.markCleanShutdown();
+    } finally {
+      unparsable.close();
+    }
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EVALUATION_REWRITE_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
       for (const table of Object.keys(EVALUATION_REWRITE_SCHEMA_SQL)) {
         expect(() => database.exec(`UPDATE ${table} SET recorded_at = recorded_at`)).toThrowError(/EVALUATION_REWRITE_LEDGER_IMMUTABLE/u);
         expect(() => database.exec(`DELETE FROM ${table}`)).toThrowError(/EVALUATION_REWRITE_LEDGER_IMMUTABLE/u);
@@ -555,8 +666,8 @@ describe('the market section and 按我的评分重写评语 over the real store
     const plant = new DatabaseSync(path);
     let before: string;
     try {
-      // Revision 63 exactly: the three relations as revision 62 left them, and no relation of revision 64.
-      plant.exec(`DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; PRAGMA user_version = ${CAPTURED_PROCEDURE_SCHEMA_VERSION};`);
+      // Revision 63 exactly: the three relations as revision 62 left them, and no relation of revision 65.
+      plant.exec(`DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; PRAGMA user_version = ${CAPTURED_PROCEDURE_SCHEMA_VERSION};`);
       downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_62_SQL);
       before = rows(plant);
       expect(() => plant.exec(`INSERT INTO analysis_result_sets(result_set_id, book_id, kind, created_at, canonical_json, sha256)
@@ -572,7 +683,7 @@ describe('the market section and 按我的评分重写评语 over the real store
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EVALUATION_REWRITE_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
       expect(rows(after)).toBe(before!);
       for (const table of KIND_COUPLED_ANALYSIS_RELATIONS) {
         expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(ANALYSIS_LEDGER_SCHEMA_SQL[table]);
@@ -588,7 +699,7 @@ describe('the market section and 按我的评分重写评语 over the real store
     const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const plant = new DatabaseSync(path);
     try {
-      plant.exec(`DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; PRAGMA user_version = ${CAPTURED_PROCEDURE_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; PRAGMA user_version = ${CAPTURED_PROCEDURE_SCHEMA_VERSION};`);
     } finally {
       plant.close();
     }

@@ -48,6 +48,7 @@ export const DATABASE_MERGE_NOTHING = '这个文件里的图书本机都已经�
 export const DATABASE_MERGE_NOTICE_LINES: Readonly<Record<DatabaseMergeNotice, string>> = {
   series: '书系关系与书系知识不随图书合并。',
   'internal-number': '内部编号已被本机其他图书使用的，合并后不带内部编号。',
+  'writing-exemplar': '写作任务参照的其他图书的范例不随图书合并：这些起草的结果和草稿照常可看、可打开，但不能再开始，需要时重新准备。',
 };
 export const DATABASE_IMPORT_STATUS_LINES = {
   choosing: '正在打开系统的文件对话框…',

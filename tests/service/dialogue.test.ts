@@ -11,7 +11,7 @@ import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.j
 import { HARNESS_SESSION_LOG_DIRECTORY } from '../../src/service/harness/session-log.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { ANALYSIS_LEDGER_REVISION_59_SQL, EVALUATION_REWRITE_SCHEMA_VERSION, INITIAL_EVALUATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { ANALYSIS_LEDGER_REVISION_59_SQL, WRITING_TASK_SCHEMA_VERSION, INITIAL_EVALUATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { READERS_REPORT_SCHEMA_SQL } from '../../src/service/readers-reports.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 import { CAPTURED_PROCEDURE_SCHEMA_SQL } from '../../src/service/captured-procedures.js';
@@ -448,7 +448,7 @@ describe('就这段提问… over the real store and harness', () => {
     }
     database = new DatabaseSync(path);
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EVALUATION_REWRITE_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
       expect(() => database.prepare('UPDATE dialogue_tasks SET asked_at = asked_at').run()).toThrowError(/DIALOGUE_LEDGER_IMMUTABLE/u);
       expect(() => database.prepare('DELETE FROM dialogue_attempt_outcomes').run()).toThrowError(/DIALOGUE_LEDGER_IMMUTABLE/u);
       // A row altered by hand does not read.

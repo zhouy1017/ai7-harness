@@ -977,6 +977,17 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'documents-restart',
     'knowledge-exemplars',
     'publication-actuals',
+    // Issue #432 (S84a): 新建文档 · 写作任务 — a second Book's prerequisites, the sheet, the plan, the Run, the draft opened as the
+    // Book's 宣传文章 in its 起草 phase, and its card.
+    'writing-book',
+    'writing-prerequisites',
+    'model-credential-saved',
+    'model-credential-removed',
+    'writing-sheet',
+    'writing-plan',
+    'writing-run',
+    'writing-draft',
+    'writing-card',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',
@@ -1333,6 +1344,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'procedure-exact-version',
     'capture-stop',
     'procedure-stop-all',
+    // Issue #66 (S31b): a 书系一致性 procedure whose Series step the editor chooses apart, and how it fits a Book in no Series.
+    'procedure-series-capture',
+    'procedure-series-chosen-apart',
+    'procedure-series-mismatch',
     'capture-proposal-file',
     'capture-restart',
     'j14-capture-keyboard-reflow-forced-colors',

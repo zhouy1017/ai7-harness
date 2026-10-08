@@ -14,6 +14,7 @@ import {
   type ProductionDocumentTypeProjection,
   type PublicationVersionProjection,
   type RendererApi,
+  type ServiceJobProjection,
 } from '../shared/protocol.js';
 import {
   DELIVERABLES_LEDE,
@@ -104,6 +105,7 @@ import {
 import { mountBookDeliveryPackage } from './book-delivery-package.js';
 import { mountMaintenance } from './maintenance-cases.js';
 import { renderWorkflowCardSummary } from './production-document-workflow.js';
+import { mountWritingTask } from './writing-task.js';
 
 /**
  * ⑥ 交付物 as far as plan slice S65 reaches (Issue #414; editor-surfaces §9, V2-UX-MILE-008, PUB-002 to
@@ -123,6 +125,8 @@ export interface DeliverablesSurface {
   start(): void;
   /** Let nothing still in flight paint again: the screen is being replaced. */
   destroy(): void;
+  /** 新建文档 · 写作任务 reads again (Issue #432, S84a): the Task Drawer's bar started or recorded its Task. */
+  refreshWriting(): void;
 }
 
 type DeliverablesApi = Pick<RendererApi, 'inspectDeliverables' | 'inspectProductionDocuments' | 'inspectBookDeliveryPackage' |
@@ -130,7 +134,8 @@ type DeliverablesApi = Pick<RendererApi, 'inspectDeliverables' | 'inspectProduct
   'approveBookDeliveryPackageExport' | 'cancelBookDeliveryPackageExport' | 'designatePublicationVersion' | 'reviewManuscriptExport' |
   'inspectMaintenanceCase' | 'listMaintenanceCases' | 'recordMaintenanceCase' | 'appendMaintenanceCaseRevision' | 'saveMaintenanceErrata' |
   'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
-  'createProductionDocument' | 'decideProductionDocumentType' | 'recordProductionDocumentDelivery'>;
+  'createProductionDocument' | 'decideProductionDocumentType' | 'recordProductionDocumentDelivery' |
+  'inspectWritingTask' | 'prepareWritingTask' | 'createWritingDraft'>;
 
 export interface MountDeliverablesOptions {
   /** The destination's panel: the surface appends its heading and its host, and the caller its persistent actions after them. */
@@ -140,6 +145,8 @@ export interface MountDeliverablesOptions {
   api: DeliverablesApi;
   /** A 维护事项 to open in place once 交付物 is read (Issue #426, S68b): 待我处理's way back to it. */
   openCase?: { caseId: string; publicationVersionId: string };
+  /** A 图书交付包 version to bring into view once the package is read (Issue #66, S31b review P3-4): a procedure version's link. */
+  focusPackageVersionId?: string;
   /** A 维护事项 step moved what 待我处理 lists: the header's number is read again (Issue #426, S68b). */
   attentionChanged?(): void;
   technicalDetails(gridClass: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement;
@@ -152,6 +159,9 @@ export interface MountDeliverablesOptions {
   openReview(): void;
   /** 录入定价与首印… (Issue #430, S82): the destination is left for 设置 › 评估校准与预测, with this Book's entry open. */
   openActuals?(bookId: string): void;
+  /** 新建文档 · 写作任务 (Issue #432, S84a): a preparation job followed to its end, and the Task's plan in the Task Drawer. */
+  awaitServiceJob(job: ServiceJobProjection, onProgress: (job: ServiceJobProjection) => void): Promise<ServiceJobProjection>;
+  openWritingPlan(taskIntentId: string): void;
 }
 
 /** 从来源材料创建…'s inline form while it is open: the type it creates and the material chosen, if any. */
@@ -250,7 +260,9 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
   const documentsSlot = el('div', 'deliverables-documents-slot');
   // 图书交付包 (Issue #416) comes last, the Book-level total of the other two, in a slot of its own.
   const packageSlot = el('div', 'deliverables-package-slot');
-  host.append(blockSlot, exportSlot, documentsSlot, packageSlot);
+  // 新建文档 · 写作任务 (Issue #432, S84a) stands with 交付 · 生产文档: a draft becomes one of its documents.
+  const writingSlot = el('div', 'deliverables-writing-slot');
+  host.append(blockSlot, exportSlot, documentsSlot, writingSlot, packageSlot);
   options.root.append(
     el('p', 'section-label', DELIVERABLES_SECTION_LABEL),
     el('h2', undefined, options.bookTitle),
@@ -293,10 +305,25 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
         : `ol.milestone-list > li[data-milestone-id="${CSS.escape(target.milestoneId)}"] [data-export-action="open"]`) ?? null,
   });
 
+  const writing = mountWritingTask({
+    root: writingSlot,
+    api,
+    setStatus: options.setStatus,
+    errorMessage: options.errorMessage,
+    awaitServiceJob: options.awaitServiceJob,
+    openPlan: options.openWritingPlan,
+    openDocument: (document, type) => options.openDocument(document, type),
+    documentsChanged: () => {
+      refreshDocuments();
+      bundle.refresh();
+    },
+  });
+
   const bundle = mountBookDeliveryPackage({
     root: packageSlot,
     bookId,
     api,
+    ...(options.focusPackageVersionId === undefined ? {} : { focusVersionId: options.focusPackageVersionId }),
     technicalDetails: options.technicalDetails,
     setStatus: options.setStatus,
     errorMessage: options.errorMessage,
@@ -1319,6 +1346,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     start: () => {
       refresh();
       refreshDocuments();
+      writing.refresh();
       bundle.refresh();
     },
     destroy: () => {
@@ -1326,8 +1354,10 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       generation += 1;
       documentsGeneration += 1;
       exporter.destroy();
+      writing.destroy();
       bundle.destroy();
       maintenance.destroy();
     },
+    refreshWriting: () => writing.refresh(),
   };
 }

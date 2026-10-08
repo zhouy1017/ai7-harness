@@ -1,8 +1,11 @@
 import {
   CAPTURED_PROCEDURE_SCOPE_LABELS,
+  type CapturedProcedureApplicabilityEntryProjection,
   type CapturedProcedureDocument,
   type CapturedProcedureGuidelineProjection,
+  type CapturedProcedurePackageLinkProjection,
   type CapturedProcedureRunProjection,
+  type CapturedProcedureRunStepProjection,
   type CapturedProcedureScopeSlot,
   type CapturedProcedureStepProjection,
   type CapturedProcedureStopPreviewProjection,
@@ -169,6 +172,27 @@ export function procedureRunLinkLine(run: { bookTitle: string; label: string; st
   return `《${run.bookTitle}》${run.label}审阅 · ${run.stateLabel} · ${at}`;
 }
 
+/**
+ * What a Book must have for a version to run there (Issue #66, plan slice S31b; REUSE-048's declared abstract requirements),
+ * said once under the version's steps: nothing beyond a manuscript, or each step's own condition.
+ */
+export function procedureRequirementLine(steps: ReadonlyArray<Pick<CapturedProcedureStepProjection, 'label' | 'requirement'>>): string {
+  const conditions = steps.flatMap((step) => step.requirement === 'series'
+    ? [`「${step.label}」要这本书在一个书系里，书系资料在每次运行时另行选择`]
+    : step.requirement === 'baseline-analysis' ? [`「${step.label}」要这本书已有基线分析`] : []);
+  return conditions.length === 0 ? '适用于：任何一本有稿件的书。' : `适用条件：${conditions.join('；')}。`;
+}
+
+/** The 图书交付包 versions that hold a report of a Run under a version (Issue #66, S31b; REUSE-031): how many. */
+export function procedurePackagesLine(shown: number, count: number): string {
+  return shown === count ? `按这一版运行的审阅，报告收入了 ${count} 个图书交付包版本` : `按这一版运行的审阅，报告收入了 ${count} 个图书交付包版本；列出最新的 ${shown} 个`;
+}
+
+/** One 图书交付包 version as an exact link (REUSE-031): it opens that Book's 交付物, where the version is listed. */
+export function procedurePackageLinkLine(link: Pick<CapturedProcedurePackageLinkProjection, 'bookTitle' | 'version'>, at: string): string {
+  return `《${link.bookTitle}》图书交付包 v${link.version} · 准备于 ${at}`;
+}
+
 /** The mark on the version a new use resolves to now (Issue #66, S31; REUSE-043; interaction-spec `最新可用`). */
 export const PROCEDURE_LATEST_ELIGIBLE = '最新可用' as const;
 export const PROCEDURE_LATEST_ELIGIBLE_NOTE = '新建审阅按这个工序运行时，默认用这一版。' as const;
@@ -272,12 +296,56 @@ export function sheetProcedureVersionOption(version: number, latest: boolean): s
   return `第 ${version} 版${latest ? '（最新可用）' : ''}`;
 }
 
+/**
+ * One enabled procedure as 按已保存的工序 offers it on this Book (Issue #66, plan slice S31b; REUSE-046, REUSE-053, REUSE-054):
+ * the one version a new use takes and how much of it this Book can take, with the first reason a step is left out. A
+ * mismatch is said; nothing is recommended, and nothing is ruled out.
+ */
+export function sheetProcedureOption(entry: CapturedProcedureApplicabilityEntryProjection): string {
+  const title = `《${entry.title}》`;
+  if (entry.latestEligible === null) return `${title} · 现在没有可以运行的版本`;
+  const head = `${title}第 ${entry.latestEligible.version} 版`;
+  const first = entry.leftOut[0];
+  // Its first clause only: the whole reason is said beside the step once the procedure is chosen.
+  const why = first === undefined ? '' : `（「${first.label}」：${first.reason.split(/[；。]/u)[0]}）`;
+  const fit = entry.fit === 'all'
+    ? `这本书能运行全部 ${entry.stepCount} 步`
+    : entry.fit === 'none' ? `这本书现在不能运行${why}` : `这本书能运行 ${entry.stepCount} 步中的 ${entry.availableCount} 步${why}`;
+  const apart = entry.chosenApart.length === 0 ? '' : `；${entry.chosenApart.map((label) => `「${label}」`).join('、')}要你另行勾选`;
+  return `${head} · ${fit}${apart}`;
+}
+
+/** A Series step on a filled sheet (Issue #66, S31b; REUSE-049, REUSE-050): left for the editor to choose, and why. */
+export function sheetChosenApartLine(label: string): string {
+  return `「${label}」要读这本书所在书系的资料，不会替你选上：要用就勾选它；不选，这次审阅会记下是你没有选。`;
+}
+
+/**
+ * What a filled sheet ticked (S31b): every step this Book can take, or — Series steps being the editor's to choose (REUSE-050)
+ * — the rest of them, or none, when every step it can take is the editor's, or when it can take none.
+ */
+function filledWords(steps: ReadonlyArray<Pick<CapturedProcedureRunStepProjection, 'available' | 'chosenApart'>>): string {
+  const apart = steps.some((step) => step.available && step.chosenApart);
+  const ticked = steps.some((step) => step.available && !step.chosenApart);
+  if (!apart) return ticked ? '类别已按它选好' : '这本书现在一步也不能运行';
+  return ticked ? '其余类别已按它选好' : '要运行的类别由你勾选';
+}
+
+/** The status once a choice filled the sheet (S31b review P3-5): what it ticked, in the same words as the sheet's own line. */
+export function sheetProcedureChosenStatus(run: CapturedProcedureRunProjection): string {
+  if (run.resolved === null) return run.unavailableReason ?? '';
+  return `已读取《${run.title}》第 ${run.resolved.version} 版：${filledWords(run.resolved.steps)}。`;
+}
+
 /** What the sheet says once a Captured Procedure filled it (ADR 0087 §4; REUSE-054): the exact version, and what it leaves out. */
 export function sheetProcedureLines(run: CapturedProcedureRunProjection): string[] {
   if (run.resolved === null) return [run.unavailableReason ?? ''];
   const resolved = run.resolved;
-  const lines = [`按《${run.title}》第 ${resolved.version} 版：${resolved.steps.map((step) => step.label).join(' → ')}；范围「${CAPTURED_PROCEDURE_SCOPE_LABELS[resolved.scopeSlot]}」。类别已按它选好，计划照常先看。`];
-  for (const step of resolved.steps) if (!step.available) lines.push(`不运行「${step.label}」：${step.unavailableReason ?? ''}`);
+  const lines = [`按《${run.title}》第 ${resolved.version} 版：${resolved.steps.map((step) => step.label).join(' → ')}；范围「${CAPTURED_PROCEDURE_SCOPE_LABELS[resolved.scopeSlot]}」。${filledWords(resolved.steps)}，计划照常先看。`];
+  for (const step of resolved.steps) {
+    if (!step.available) lines.push(`不运行「${step.label}」：${step.unavailableReason ?? ''}`);
+    else if (step.chosenApart) lines.push(sheetChosenApartLine(step.label));
+  }
   for (const change of resolved.guidelineChanges) {
     lines.push(change.sourceVersion === null
       ? `「${change.label}」按今天的《${change.title}》第 ${change.version} 版`
@@ -296,6 +364,18 @@ export function runProcedureLine(procedure: ReviewRunProcedureProjection): strin
   return `按可复用工序《${procedure.title}》第 ${procedure.version} 版${note}`;
 }
 
+/** A step the Run left out (ADR 0087 §4): one its Book could not take, or — by choice — a Series step the editor did not choose (S31b). */
 export function runProcedureLeftOutLine(entry: ReviewRunProcedureProjection['leftOut'][number]): string {
-  return `未运行「${entry.label}」：${entry.reason}`;
+  return `${entry.byChoice ? '未选' : '未运行'}「${entry.label}」：${entry.reason}`;
+}
+
+/**
+ * One left-out step as the Run's pin shows it (S31b review P3-2): its line, and the data the line carries — the category, and
+ * whether the editor left it out by choice — told apart from a step the Book could not take.
+ */
+export function runProcedureLeftOutView(entry: ReviewRunProcedureProjection['leftOut'][number]): {
+  readonly text: string;
+  readonly data: { readonly procedureLeftOutCategory: string; readonly procedureLeftOutByChoice: 'true' | 'false' };
+} {
+  return { text: runProcedureLeftOutLine(entry), data: { procedureLeftOutCategory: entry.categoryId, procedureLeftOutByChoice: entry.byChoice ? 'true' : 'false' } };
 }

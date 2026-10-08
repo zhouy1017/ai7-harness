@@ -587,7 +587,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .captured-procedure-versions, .developer-proposal-versions { display: grid; gap: .7rem; margin: 0; padding-left: 0; list-style: none; }
 .captured-procedure-version, .developer-proposal-version { display: grid; gap: .35rem; min-width: 0; padding: .7rem; border: 1px solid #e4dfd3; border-radius: 9px; background: white; }
 .captured-procedure-steps { display: grid; gap: .2rem; margin: 0; padding-left: 1.4rem; }
-.captured-procedure-run-links { margin: 0; padding-left: 1.2rem; }
+.captured-procedure-run-links, .captured-procedure-package-links { margin: 0; padding-left: 1.2rem; }
 .captured-procedure-state-enabled { border: 1px solid currentColor; }
 .captured-procedure-state-pending-validation { border: 1px dashed currentColor; }
 .captured-procedure-state-stopped { border: 1px dotted currentColor; }
@@ -598,7 +598,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .captured-procedure-run select, .review-sheet-procedure select { max-width: 100%; }
 /* 最新可用, 停用…'s preview and a version's linked Runs (Issue #66, S31). */
 .captured-procedure-latest-eligible { border: 2px solid currentColor; font-weight: 600; }
-.captured-procedure-run-link { max-width: 100%; text-align: left; white-space: normal; overflow-wrap: anywhere; }
+.captured-procedure-run-link, .captured-procedure-package-link { max-width: 100%; text-align: left; white-space: normal; overflow-wrap: anywhere; }
 .captured-procedure-stop { display: grid; gap: .45rem; padding: .8rem; border: 2px solid #8a4b2a; border-radius: 10px; background: #fbf5ef; }
 .captured-procedure-stop h5, .captured-procedure-stop h6 { margin: 0; }
 .captured-procedure-stop ul { margin: 0; padding-left: 1.3rem; }
@@ -623,6 +623,9 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .procedure-capture-actions { margin-top: 1rem; }
 .review-sheet-procedure { display: grid; gap: .3rem; margin-top: .8rem; padding: .7rem; border: 1px solid #d5dcd9; border-radius: 9px; background: #f4f9f7; }
 .review-sheet-procedure p { margin: 0; }
+/* A procedure's option says how it fits this Book (S31b): long, so the selector stays within the sheet and the text wraps in the list. */
+.review-sheet-procedure > .review-field { min-width: 0; }
+.review-sheet-procedure select { width: 100%; min-width: 0; }
 .review-procedure-pin { display: grid; gap: .2rem; padding: .5rem .7rem; border-left: 3px solid #416458; }
 .review-procedure-pin p { margin: 0; }
 /* 知识库 (Issue #427, S79a): its seven classes as tabs, and 审阅规范文件's cards. */
@@ -866,6 +869,19 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .document-create { margin-top: .6rem; }
 .document-create fieldset { min-width: 0; margin: 0; padding: .55rem .6rem; border: 1px solid #d5dcd9; border-radius: 8px; }
 .document-create .choice-row { display: flex; gap: .45rem; align-items: flex-start; margin-top: .35rem; }
+/* 新建文档 · 写作任务 (Issue #432, S84a): the sheet in place under 交付 · 生产文档 — types, references, the editor's words, four rows. */
+.writing-task { margin-top: 1.3rem; padding: 1.15rem 1.25rem; border: 1px solid #c9d6d2; border-radius: 12px; background: #f4f9f7; overflow-wrap: anywhere; }
+.writing-task h3, .writing-task h4 { margin: 0; }
+.writing-task > p, .writing-task > .button-row { margin: .45rem 0 0; }
+.writing-drafted { margin: .6rem 0 0; padding: 0; list-style: none; }
+.writing-drafted > li { padding: .55rem .7rem; border: 1px solid #d5dcd9; border-radius: 9px; background: #fffdf8; }
+.writing-sheet { margin-top: .6rem; display: grid; gap: .55rem; }
+.writing-sheet fieldset { min-width: 0; margin: 0; padding: .55rem .6rem; border: 1px solid #d5dcd9; border-radius: 8px; }
+.writing-type { display: flex; flex-wrap: wrap; gap: .45rem; align-items: baseline; margin-top: .35rem; }
+.writing-references, .writing-consequences { display: grid; grid-template-columns: minmax(0, 8rem) minmax(0, 1fr); gap: .3rem .7rem; margin: 0; }
+.writing-references dd, .writing-consequences dd { margin: 0; }
+.writing-field { display: grid; gap: .25rem; }
+.writing-field input, .writing-field textarea { max-width: 100%; box-sizing: border-box; }
 /* 交付 (Issue #415, S66b): the delivery form and the Delivery Records inside a document's card. */
 .document-delivery { margin-top: .6rem; }
 .document-delivery h5, .document-deliveries-section h5 { margin: .6rem 0 0; font-size: .95rem; }
@@ -1465,6 +1481,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .publication-designate, .publication-milestone-option, .publication-designate-summary, .publication-statement,
   .book-deliverables-summary, .milestone-section .milestone-purpose-option,
   .deliverables-documents, .production-document-card, .document-create fieldset, .document-lens, .document-version-current,
+  .writing-task, .writing-drafted > li, .writing-sheet fieldset,
   .document-phase, .phase-pill, .phase-chip, .document-phase-form fieldset,
   .document-delivery fieldset, .delivery-statement,
   .deliverables-package, .package-current-mark, .package-export, .package-export-result, .package-export-list > li,

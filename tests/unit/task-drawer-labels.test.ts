@@ -356,8 +356,8 @@ describe('the authorization bar (S74a)', () => {
       'needs-connection': '模型未连接：这份计划要发送到模型服务，所需的凭据还没有就绪；连接好之后才能开始',
       offline: '离线：这份计划要连到模型服务，而这台设备现在没有网络。联网后开始任务会先记录这次授权，联网后自动开始；在此之前不会发送任何内容',
     });
-    expect(TASK_BAR_OUTCOMES).toEqual({ 'fixed-task': '一条运行记录（不派发）', 'baseline-analysis': '一份基线分析', 'review-run': '审阅发现与审阅报告', 'initial-evaluation': 'AI7 初评', 'readers-report': '审稿意见草稿', 'evaluation-rewrite': '按你的评分重写的评语（待你采用）' });
-    expect(TASK_BAR_RUN_LINKS).toEqual({ 'fixed-task': '查看运行记录', 'baseline-analysis': '查看运行', 'review-run': '查看审阅', 'initial-evaluation': '查看评估', 'readers-report': '查看评估', 'evaluation-rewrite': '查看评估' });
+    expect(TASK_BAR_OUTCOMES).toEqual({ 'fixed-task': '一条运行记录（不派发）', 'baseline-analysis': '一份基线分析', 'review-run': '审阅发现与审阅报告', 'initial-evaluation': 'AI7 初评', 'readers-report': '审稿意见草稿', 'evaluation-rewrite': '按你的评分重写的评语（待你采用）', writing: '文档草稿（打开后处于「起草」阶段）' });
+    expect(TASK_BAR_RUN_LINKS).toEqual({ 'fixed-task': '查看运行记录', 'baseline-analysis': '查看运行', 'review-run': '查看审阅', 'initial-evaluation': '查看评估', 'readers-report': '查看评估', 'evaluation-rewrite': '查看评估', writing: '查看交付物' });
   });
 
   it('sums the plan up in one line: 书 · 范围 · 计划版本 · 模型角色 · 预算上限 · 产出 · 不改稿 (AUTH-001)', () => {
@@ -387,6 +387,17 @@ describe('the authorization bar (S74a)', () => {
     const noRoute = taskBarView(barOf({ readiness: 'no-route' }));
     expect(noRoute.note).toBe(TASK_BAR_NOTES['no-route']);
     expect(action(noRoute, 'start')?.disabledReason).toBeNull();
+  });
+
+  it('says why a plan can never be started, beside a disabled 开始任务, and offers nothing that starts it (Issue #432 re-review)', () => {
+    const reason = '这次起草参照的范例已不在本机，不能再开始；可以用「新建文档…」重新准备。';
+    const view = taskBarView(barOf({ readiness: 'unavailable', planEnvelopeDigest: null, unavailableReason: reason }));
+    expect(names(view)).toEqual(['start']);
+    expect(action(view, 'start')?.disabledReason).toBe(reason);
+    expect(view.note).toBe(reason);
+    expect(view.statement).toBeNull();
+    // A plan that names no reason of its own still says it cannot start.
+    expect(taskBarView(barOf({ readiness: 'unavailable', planEnvelopeDigest: null })).note).toBe('这份计划不能再开始。');
   });
 
   it('keeps 开始任务 disabled with the reason and offers 去设置连接 while the model is not connected (MODEL-008)', () => {
