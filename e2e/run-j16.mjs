@@ -217,6 +217,28 @@ async function click(renderer, label, name) {
 async function clickSelector(renderer, selector, name) {
   await assertRenderer(renderer, `(() => { const button = document.querySelector(${JSON.stringify(selector)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
 }
+/**
+ * Wait until the open manuscript's Position Rail has drawn a marker of `kind` (Issue #690). The rail reads its places from
+ * the service once the editor has mounted, so a manuscript just opened shows its text before its markers: a hosted runner
+ * clicked a marker of a replacement editor whose rail had not answered yet. A timeout names what was still missing — the
+ * rail's track, its first drawing, any mark on it, or a marker of this kind.
+ */
+async function waitForRailMarker(renderer, kind, name, timeout = 60_000) {
+  const marker = JSON.stringify(`.rail-marker[data-rail-kind="${kind}"]`);
+  const read = `(() => { const track = document.querySelector('[data-screen="editor"] .rail-track'); if (!(track instanceof HTMLElement)) return 'track'; if (track.dataset.railJournal === undefined) return 'drawing'; if (track.querySelector(${marker}) instanceof HTMLButtonElement) return 'ready'; return Number(track.dataset.railMarks) > 0 ? 'kind' : 'marks'; })()`;
+  const deadline = Date.now() + timeout;
+  let missing = null;
+  while (Date.now() < deadline) {
+    missing = await renderer.evaluate(read).catch(() => null);
+    if (missing === 'ready') return;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  if (missing === 'track') requireJourney(false, `${name}-track-missing`);
+  if (missing === 'drawing') requireJourney(false, `${name}-not-drawn`);
+  if (missing === 'marks') requireJourney(false, `${name}-no-marks`);
+  if (missing === 'kind') requireJourney(false, `${name}-kind-missing`);
+  requireJourney(false, `${name}-unreadable`);
+}
 async function fill(renderer, selector, value, name) {
   await assertRenderer(renderer, `(() => { const input = document.querySelector(${JSON.stringify(selector)}); if (!(input instanceof HTMLInputElement)) return false; input.value = ${JSON.stringify(value)}; input.dispatchEvent(new Event('input', { bubbles: true })); return input.value === ${JSON.stringify(value)}; })()`, name);
 }
@@ -992,7 +1014,7 @@ async function main() {
       else at('chip-return-late-completion');
       throw error;
     }
-    await waitFor(renderer, `document.querySelector('.rail-marker[data-rail-kind="annotation"]') !== null`, 'mark-rail-ready');
+    await waitForRailMarker(renderer, 'annotation', 'mark-rail-ready');
     // A storage failure must refuse the jump, rather than lose the editor's way back.
     await renderer.evaluate(`(() => {
       globalThis.__j16Transaction = IDBDatabase.prototype.transaction;
@@ -1027,6 +1049,8 @@ async function main() {
     await waitFor(renderer, `${blockInView(chip.blockId)} && ${CHIP} !== null`, 'mark-rail-replacement-editor');
     await renderer.evaluate(`(() => { globalThis.__j16ReleaseReturn(); delete globalThis.__j16ReleaseReturn; return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))); })()`);
     await assertRenderer(renderer, `${blockInView(chip.blockId)}`, 'mark-rail-old-click-cannot-move-replacement');
+    // The replacement editor's rail is drawn from its own read of the service, after its text: wait for its marker.
+    await waitForRailMarker(renderer, 'annotation', 'mark-rail-replacement-ready');
     await clickSelector(renderer, '.rail-marker[data-rail-kind="annotation"]', 'mark-rail-jump');
     await waitFor(renderer, `${blockInView(railTarget)} && ${CHIP}?.dataset.returnChip === ${JSON.stringify(chip.blockId)}`, 'mark-rail-return-chip', 60_000);
     await clickSelector(renderer, '[data-screen="editor"] .return-chip-host [data-return-chip]', 'mark-rail-return');
