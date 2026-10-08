@@ -89,6 +89,8 @@ export const IPC_CHANNELS = {
   inspectEvaluation: 'ai7:j11:inspect-evaluation',
   startEvaluation: 'ai7:j11:start-evaluation',
   saveEvaluation: 'ai7:j11:save-evaluation',
+  prepareInitialEvaluation: 'ai7:j11:prepare-initial-evaluation',
+  authorizeInitialEvaluation: 'ai7:j11:authorize-initial-evaluation',
   inspectAnalysisFeedback: 'ai7:j11:inspect-analysis-feedback',
   recordAnalysisFeedback: 'ai7:j11:record-analysis-feedback',
   readLibraryDecisionReason: 'ai7:j15:read-library-decision-reason',
@@ -2445,10 +2447,14 @@ export const FACTUAL_REVIEW_ASSURANCE_STATEMENT =
 /** A review category's: findings are located, never decided — the editor disposes of each (V2-UX-REV-003). */
 export const REVIEW_CATEGORY_ASSURANCE_STATEMENT =
   '仅为模型按审阅依据列出的发现与其精确引文位置；是否采纳由编辑逐条决定，不构成事实判定、合规结论或稿件变更。' as const;
+/** AI7's 初评 (Issue #429, S81b1): scores to score against, never the editor's — the record keeps theirs (V2-UX-EVAL-006). */
+export const INITIAL_EVALUATION_ASSURANCE_STATEMENT =
+  'AI7 初评是模型据所读稿件给出的初步分数与评语，只作编辑打分的参考；记录保存的是编辑的评分，结论由编辑选定。' as const;
 export type AnalysisAssuranceStatement =
   | typeof BASELINE_ANALYSIS_ASSURANCE_STATEMENT
   | typeof FACTUAL_REVIEW_ASSURANCE_STATEMENT
-  | typeof REVIEW_CATEGORY_ASSURANCE_STATEMENT;
+  | typeof REVIEW_CATEGORY_ASSURANCE_STATEMENT
+  | typeof INITIAL_EVALUATION_ASSURANCE_STATEMENT;
 
 export const BASELINE_ANALYSIS_KIND = 'baseline-manuscript-analysis' as const;
 export const BASELINE_ANALYSIS_CONTRACT_VERSION = 'ai7.baseline-manuscript-analysis/1' as const;
@@ -2512,6 +2518,34 @@ export const FACTUAL_REVIEW_MODE_MEANINGS = {
   'whole-manuscript': '对固定的任务输入修订版派生覆盖清单并逐单元执行事实核查契约 v1，列出可核查断言并按内容块文本确定性校验每条引文。',
   range: '仅对所选内容块范围内的分析单元执行事实核查契约 v1，其余单元不进入本次运行。',
 } as const satisfies Record<FactualReviewTaskMode, string>;
+
+/**
+ * AI7 初评 (Issue #429, plan slice S81b1; V2-UX-EVAL-001, EVAL-005 to EVAL-007): the evaluation kind, on the same real path
+ * as the others, read under its own exact-versioned contract `ai7.evaluation/1`. Each Analysis Unit is read for what bears on
+ * each scored item of the house Evaluation Profile, every observation citing the blocks it rests on; one book-level synthesis
+ * then scores each item in half points within its 满分, with a comment, and states the strengths, the weaknesses, a next step
+ * and the conclusion it would suggest. The scores are AI7's draft beside the editor's; the record keeps the editor's.
+ */
+export const INITIAL_EVALUATION_KIND = 'evaluation' as const;
+export const INITIAL_EVALUATION_CONTRACT_VERSION = 'ai7.evaluation/1' as const;
+export const INITIAL_EVALUATION_EXPECTED_OUTCOME = 'AI7 初评结果集修订版（评估契约 v1）' as const;
+/** The first 初评 of a Book, and every later one: the whole manuscript read again, nothing carried over. */
+export type InitialEvaluationTaskMode = 'evaluation-first' | 'evaluation-again';
+export const INITIAL_EVALUATION_TASK_MODES: readonly InitialEvaluationTaskMode[] = ['evaluation-first', 'evaluation-again'];
+export const INITIAL_EVALUATION_UPDATE_MODES: readonly InitialEvaluationTaskMode[] = ['evaluation-again'];
+export const INITIAL_EVALUATION_MODE_GOALS = {
+  'evaluation-first': '按本社评估方案对当前书稿做 AI7 初评：逐单元记下各评分项的依据并引用内容块，再就全书给出各项初评分数与评语，形成结果集修订版。',
+  'evaluation-again': '重新做 AI7 初评：按当前覆盖清单重读每个分析单元，不沿用以前的结果，就全书重新给出各项初评分数与评语，追加一个结果集修订版。',
+} as const satisfies Record<InitialEvaluationTaskMode, string>;
+export type InitialEvaluationGoal = (typeof INITIAL_EVALUATION_MODE_GOALS)[InitialEvaluationTaskMode];
+export const INITIAL_EVALUATION_MODE_LABELS = {
+  'evaluation-first': 'AI7 初评',
+  'evaluation-again': '重新初评',
+} as const satisfies Record<InitialEvaluationTaskMode, string>;
+export const INITIAL_EVALUATION_MODE_MEANINGS = {
+  'evaluation-first': '对固定的任务输入修订版派生覆盖清单并逐单元执行评估契约 v1，再做一次全书综合，形成首个结果集修订版。',
+  'evaluation-again': '绕过全部既有单元结果，按当前覆盖清单重读每个分析单元并重新做全书综合，追加一个结果集修订版。',
+} as const satisfies Record<InitialEvaluationTaskMode, string>;
 
 /**
  * The review-category kind family (Issue #417, plan slice S69): one analysis kind per Review Category,
@@ -2602,9 +2636,9 @@ export function reviewCategoryExpectedOutcome(label: string): string {
 }
 
 /** Every analysis kind a Book may hold, and every Task mode any of them declares. */
-export type AnalysisKindId = typeof BASELINE_ANALYSIS_KIND | typeof FACTUAL_REVIEW_KIND | ReviewCategoryKindId;
-export type AnalysisTaskMode = BaselineAnalysisTaskMode | FactualReviewTaskMode | ReviewCategoryTaskMode;
-export type AnalysisGoal = BaselineAnalysisGoal | FactualReviewGoal | ReviewCategoryGoal;
+export type AnalysisKindId = typeof BASELINE_ANALYSIS_KIND | typeof FACTUAL_REVIEW_KIND | ReviewCategoryKindId | typeof INITIAL_EVALUATION_KIND;
+export type AnalysisTaskMode = BaselineAnalysisTaskMode | FactualReviewTaskMode | ReviewCategoryTaskMode | InitialEvaluationTaskMode;
+export type AnalysisGoal = BaselineAnalysisGoal | FactualReviewGoal | ReviewCategoryGoal | InitialEvaluationGoal;
 
 /** An explicit editor choice over exact block positions of the Task Input revision (inclusive). */
 export interface BaselineAnalysisSelectedRange {
@@ -3840,6 +3874,126 @@ export interface ReviewCategoryTaskRequest {
   selectedRange: BaselineAnalysisSelectedRange | null;
 }
 
+// ---- AI7 初评 (Issue #429, plan slice S81b1; V2-UX-EVAL-001, EVAL-005 to EVAL-007) -------------------------------------
+
+/** 依据充分度 of one item (EVAL-005), derived from what AI7 cited for it: `充分`, `一般` or `不足`. */
+export type InitialEvaluationSufficiency = 'sufficient' | 'fair' | 'insufficient';
+
+/** One thing AI7 noted about one scored item in one reading range, with the blocks it rests on. */
+export interface InitialEvaluationObservationProjection {
+  itemId: string;
+  unitOrdinal: number;
+  note: string;
+  blockIds: ReadonlyArray<string>;
+}
+
+/** AI7's 初评 of one scored item: its score in half points within the item's 满分, its comment, and what it rests on. */
+export interface InitialEvaluationItemProjection {
+  itemId: string;
+  /** `null` when the book-level synthesis did not close: AI7 then scores nothing. */
+  score: number | null;
+  comment: string | null;
+  sufficiency: InitialEvaluationSufficiency;
+  /** Distinct blocks cited for the item across the Book, and the reading ranges they fall in. */
+  citedBlocks: number;
+  unitsCited: number;
+  observations: ReadonlyArray<InitialEvaluationObservationProjection>;
+}
+
+/** The evaluation kind's own component of a Result Set Revision. */
+export interface InitialEvaluationResultProjection {
+  /** The house Evaluation Profile the contract was frozen under. */
+  profile: { profileId: string; version: string; sha256: string };
+  items: ReadonlyArray<InitialEvaluationItemProjection>;
+  strengths: ReadonlyArray<string>;
+  weaknesses: ReadonlyArray<string>;
+  nextStep: string | null;
+  /** The conclusion AI7 would suggest; shown as AI7's, never chosen for the editor (EVAL-007). */
+  suggestedConclusion: EvaluationConclusion | null;
+  /** Whether the one book-level synthesis closed, and why not. */
+  synthesis: { state: 'closed' | 'gap' | 'not-run'; reason: string | null };
+}
+
+export interface InitialEvaluationRevisionUpdateProjection extends Omit<ReviewCategoryRevisionUpdateProjection, 'mode'> {
+  mode: InitialEvaluationTaskMode;
+}
+
+export type InitialEvaluationUnitProjection =
+  | {
+      unitOrdinal: number;
+      state: 'closed';
+      requestDigest: string;
+      responseDigest: string;
+      usage: { inputTokens: number; outputTokens: number } | null;
+      lineage: ReviewCategoryUnitLineage;
+      observations: ReadonlyArray<{ itemId: string; note: string; blockOrdinals: ReadonlyArray<number> }>;
+    }
+  | { unitOrdinal: number; state: 'gap'; requestDigest: string; lineage: ReviewCategoryUnitLineage; gap: AnalysisGapProjection };
+
+export interface InitialEvaluationResultSetRevisionProjection extends Omit<
+  ReviewCategoryResultSetRevisionProjection,
+  'contractVersion' | 'update' | 'category' | 'findings' | 'excluded' | 'findingCounts' | 'units'
+> {
+  contractVersion: typeof INITIAL_EVALUATION_CONTRACT_VERSION;
+  update: InitialEvaluationRevisionUpdateProjection;
+  evaluation: InitialEvaluationResultProjection;
+  units: ReadonlyArray<InitialEvaluationUnitProjection>;
+}
+
+export interface InitialEvaluationUpdateProjection extends Omit<ReviewCategoryUpdateProjection, 'mode'> {
+  mode: 'evaluation-again';
+}
+
+export interface InitialEvaluationUpdateControlsProjection extends Omit<BaselineAnalysisUpdateControlsProjection, 'actions'> {
+  actions: { 'evaluation-again': Omit<ReviewCategoryUpdateActionProjection, 'mode'> & { mode: 'evaluation-again' } };
+}
+
+export interface InitialEvaluationHistoryEntryProjection extends Omit<BaselineAnalysisHistoryEntryProjection, 'mode' | 'contractVersion' | 'counts'> {
+  mode: InitialEvaluationTaskMode;
+  contractVersion: typeof INITIAL_EVALUATION_CONTRACT_VERSION;
+  counts: ReviewScopePlanCounts;
+}
+
+export interface InitialEvaluationHistoryProjection {
+  resultSetId: string;
+  kind: typeof INITIAL_EVALUATION_KIND;
+  createdAt: string;
+  latestOrdinal: number;
+  entries: ReadonlyArray<InitialEvaluationHistoryEntryProjection>;
+}
+
+/** The evaluation kind's Task projection: a member of the analysis projection union, discriminated on `kind`. */
+export interface InitialEvaluationProjection extends Omit<
+  BaselineAnalysisProjection,
+  'kind' | 'contractVersion' | 'taskIntent' | 'executionPlan' | 'resultSetRevision' | 'update' | 'updateControls' | 'history' | 'inspectedRevision'
+> {
+  kind: typeof INITIAL_EVALUATION_KIND;
+  contractVersion: typeof INITIAL_EVALUATION_CONTRACT_VERSION;
+  taskIntent: null | {
+    taskIntentId: string;
+    goal: InitialEvaluationGoal;
+    expectedOutcome: typeof INITIAL_EVALUATION_EXPECTED_OUTCOME;
+    createdAt: string;
+    mode: InitialEvaluationTaskMode;
+    modeLabel: string;
+  };
+  executionPlan: null | {
+    steps: ReadonlyArray<string>;
+    effects: readonly [];
+    unitCount: number;
+    recomputedUnitCount?: number;
+    reusedUnitCount?: number;
+    unreviewedUnitCount?: number;
+    reducerStages: readonly ['unit-validation', 'cross-unit-reduction', 'book-synthesis'];
+    stopCondition: string;
+  };
+  resultSetRevision: null | InitialEvaluationResultSetRevisionProjection;
+  update: null | InitialEvaluationUpdateProjection;
+  updateControls: null | InitialEvaluationUpdateControlsProjection;
+  history: null | InitialEvaluationHistoryProjection;
+  inspectedRevision: null | { revision: InitialEvaluationResultSetRevisionProjection; current: boolean; readOnly: true };
+}
+
 // ---- 审阅记录 Review Runs (Issue #417, plan slice S69) ---------------------------------------------
 
 /**
@@ -4295,10 +4449,11 @@ export interface ReviewFindingOfMarkProjection {
 /**
  * The Task kinds the Task Drawer shows a plan for: the three that hold a plan today (S72 D1) — J-03's
  * fixed task, the baseline analysis, and a Review Run. A kind with no ledger of its own arrives with the
- * slice that brings its ledger; nothing here is an authority record of its own.
+ * slice that brings its ledger; nothing here is an authority record of its own. AI7's 初评 (Issue #429, S81b1) joins them
+ * with its own ledger.
  */
-export type TaskPlanKind = 'fixed-task' | 'baseline-analysis' | 'review-run';
-export const TASK_PLAN_KINDS: readonly TaskPlanKind[] = ['fixed-task', 'baseline-analysis', 'review-run'];
+export type TaskPlanKind = 'fixed-task' | 'baseline-analysis' | 'review-run' | 'initial-evaluation';
+export const TASK_PLAN_KINDS: readonly TaskPlanKind[] = ['fixed-task', 'baseline-analysis', 'review-run', 'initial-evaluation'];
 
 /** Which plan the drawer reads. The Book is always the route's; the renderer never names it. */
 export interface InspectTaskPlanInput {
@@ -5099,6 +5254,11 @@ export interface EvaluationContent {
     /** `不评`, with its reason (EVAL-005). */
     readonly notRated: string | null;
     readonly comment: string | null;
+    /**
+     * Why the editor's score departs from AI7's 初评 (EVAL-006), when the version began from it and the two differ; `null`
+     * otherwise. Absent from a version saved before AI7's 初评 existed, which reads as `null`.
+     */
+    readonly adjustment?: EvaluationAdjustment | null;
   }>;
   readonly risks: ReadonlyArray<{
     readonly riskId: string;
@@ -5117,6 +5277,14 @@ export interface EvaluationContent {
   readonly conclusion: EvaluationConclusion | null;
 }
 
+/** The reasons the editor picked for departing from AI7's score, none preselected; `own` with the editor's words in `note`. */
+export type EvaluationAdjustmentReasonId = 'too-high' | 'too-low' | 'insufficient-basis' | 'missed-aspect' | 'own';
+export const MAX_EVALUATION_ADJUSTMENT_NOTE_GRAPHEMES = 200;
+export interface EvaluationAdjustment {
+  readonly reasons: ReadonlyArray<EvaluationAdjustmentReasonId>;
+  readonly note: string | null;
+}
+
 /** The total out of the 满分 still rated, and how many items are left `不评` or unscored. */
 export interface EvaluationTotalProjection {
   readonly score: number;
@@ -5125,11 +5293,68 @@ export interface EvaluationTotalProjection {
   readonly unscored: number;
 }
 
+/**
+ * AI7's 初评 as one version of the record keeps it (EVAL-001, EVAL-005 to EVAL-007): what the version began from, snapshotted
+ * when it began, so AI7's score stands beside the editor's for as long as the version does.
+ */
+/** One thing AI7 noted toward an item while it read one range (EVAL-006): its words, and the blocks it cited there. */
+export interface EvaluationInitialEvidenceProjection {
+  readonly unitOrdinal: number;
+  readonly note: string;
+  readonly blockIds: ReadonlyArray<string>;
+}
+
+export interface EvaluationInitialDraftProjection {
+  /** The Result Set Revision of AI7's 初评, its number, and the manuscript revision it read. */
+  readonly revisionId: string;
+  readonly ordinal: number;
+  readonly revisionLabel: string;
+  readonly createdAt: string;
+  readonly items: ReadonlyArray<{
+    readonly itemId: string;
+    readonly score: number | null;
+    readonly comment: string | null;
+    readonly sufficiency: InitialEvaluationSufficiency;
+    readonly citedBlocks: number;
+    readonly unitsCited: number;
+    /** What AI7 noted toward the item, range by range: the evidence its score rests on (EVAL-006). */
+    readonly evidence: ReadonlyArray<EvaluationInitialEvidenceProjection>;
+  }>;
+  /** How many ranges the 初评 meant to read, and the ones it did not — a 初评 that completed with gaps says which. */
+  readonly unitsTotal: number;
+  readonly unreadUnits: ReadonlyArray<number>;
+  readonly total: EvaluationTotalProjection;
+  readonly strengths: ReadonlyArray<string>;
+  readonly weaknesses: ReadonlyArray<string>;
+  readonly nextStep: string | null;
+  readonly suggestedConclusion: EvaluationConclusion | null;
+  /** Every item scored: the book-level synthesis closed. */
+  readonly complete: boolean;
+}
+
+/** AI7's 初评 on ②C: its Task, whether one can be prepared now, and the latest that settled. */
+export interface EvaluationInitialProjection {
+  /** The Book's latest 初评 Task, which the Task Drawer opens; `null` before the first is prepared. */
+  readonly task: null | {
+    readonly taskIntentId: string;
+    readonly state: BaselineAnalysisProjection['state'];
+    /** The Task's state in the editor's words. */
+    readonly label: string;
+  };
+  /** 准备 AI7 初评, or why it cannot be prepared now. */
+  readonly prepare: { readonly allowed: true; readonly mode: InitialEvaluationTaskMode } | { readonly allowed: false; readonly reason: string };
+  /** The latest 初评 that settled, and whether it read the manuscript as it stands now. */
+  readonly latest: null | (EvaluationInitialDraftProjection & { readonly current: boolean });
+}
+
 export interface EvaluationRecordSummaryProjection {
   readonly recordId: string;
   readonly ordinal: number;
-  /** `editing` is the editor's calibration; `finalized` is 定稿 (EVAL-001). AI7's draft state arrives with its 初评. */
-  readonly state: 'editing' | 'finalized';
+  /**
+   * The three states of EVAL-001: `draft` is a version begun from AI7's 初评 that the editor has not saved yet, `editing` the
+   * editor's calibration, `finalized` 定稿.
+   */
+  readonly state: 'draft' | 'editing' | 'finalized';
   readonly revisionLabel: string;
   readonly total: EvaluationTotalProjection;
   readonly conclusion: EvaluationConclusion | null;
@@ -5160,6 +5385,8 @@ export interface EvaluationRecordProjection extends EvaluationRecordSummaryProje
   /** `推荐出版` waits for a person's review of every `高` risk (EVAL-004). */
   readonly recommendationBlocked: boolean;
   readonly comparison: EvaluationComparisonProjection | null;
+  /** AI7's 初评 this version began from, beside the editor's scores (EVAL-006); `null` for a version the editor began alone. */
+  readonly initial: EvaluationInitialDraftProjection | null;
 }
 
 /** ②C 评估 of one Book: its versions newest first, the one on show, and whether a version can begin. */
@@ -5175,8 +5402,20 @@ export interface EvaluationWorkspaceProjection {
   readonly recordsBefore: number | null;
   readonly recordsNext: number | null;
   readonly record: EvaluationRecordProjection | null;
-  /** `开始评估` or `重新评估`, or why neither can begin now. */
-  readonly start: { readonly allowed: true; readonly kind: 'first' | 'again' } | { readonly allowed: false; readonly reason: string };
+  /**
+   * `开始评估` or `重新评估`, or why neither can begin now; `fromInitial` names AI7's latest 初评 when a version can begin from it
+   * — the 初评 settled and read the manuscript as it stands now.
+   */
+  readonly start:
+    | { readonly allowed: true; readonly kind: 'first' | 'again'; readonly fromInitial: null | { readonly revisionId: string; readonly ordinal: number } }
+    | { readonly allowed: false; readonly reason: string };
+  /** AI7's 初评 of the Book (Issue #429, S81b1). */
+  readonly initial: EvaluationInitialProjection;
+}
+
+/** 开始评估 or 重新评估: alone, or from AI7's latest 初评 (Issue #429, S81b1). */
+export interface StartEvaluationInput {
+  readonly fromInitial: boolean;
 }
 
 // ---- ②A 分析反馈 (Issue #94, plan slice S38; V2-UX-ANALYSIS-023, ANALYSIS-024, FDBK-005 to FDBK-008) -------------------
@@ -5512,15 +5751,23 @@ export interface InspectEvaluationCalibrationInput {
 }
 export interface EvaluationCalibrationProjection {
   readonly calibration: {
-    /** The editor's adjustments of AI7's starting scores; AI7's 初评 arrives with S81b, so there are none yet. */
+    /**
+     * The editor's adjustments of AI7's starting scores, counted per Book (§8.6 「10 本调分记录」; Issue #429, S81b1): a Book counts
+     * once when one of its 定稿 versions began from AI7's 初评 and changed at least one of its scores.
+     */
     readonly adjustments: number;
     /**
-     * Whether AI7 gives 初评 scores the editor can adjust at all (Issue #430 review): not before S81b. Until then the page says
-     * so, whatever the count.
+     * Whether AI7 gives 初评 scores the editor can adjust at all (Issue #430 review): since S81b1 it does. Before then the page
+     * said so, whatever the count.
      */
     readonly initialScoresConnected: boolean;
     readonly threshold: number;
     readonly enabled: boolean;
+    /**
+     * Whether the house offset calibration applies has been computed (Issue #429 review): not yet in any build. `active` is
+     * never true without it, so the page never says 「已生效」 while AI7's starting scores are left as they are.
+     */
+    readonly offsetComputed: boolean;
     readonly active: boolean;
   };
   readonly prediction: {
@@ -6349,7 +6596,7 @@ export interface QuickStartBaselineAnalysisResult {
 }
 
 /** Every analysis projection, discriminated on `kind`. */
-export type AnalysisProjection = BaselineAnalysisProjection | FactualReviewProjection | ReviewCategoryProjection;
+export type AnalysisProjection = BaselineAnalysisProjection | FactualReviewProjection | ReviewCategoryProjection | InitialEvaluationProjection;
 
 export interface HistoricalRevisionProjection {
   mode: 'historical-revision';
@@ -8238,11 +8485,13 @@ export interface ServiceJobProjection {
    * job's result is the 审阅 workspace with the prepared Run open.
    */
   kind: 'search' | 'replacement' | 'reimport-preparation' | 'reimport-resolution' | 'reimport-commit' |
-    'task-authorization-preparation' | 'baseline-analysis-preparation' | 'review-run-preparation' | 'package-export';
+    'task-authorization-preparation' | 'baseline-analysis-preparation' | 'review-run-preparation' | 'package-export' |
+    'initial-evaluation-preparation';
   state: 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
   progress: { completed: number; total: number; label: string };
   result: SearchSummaryProjection | ReplacementPreviewProjection | ReviewBeforeManuscriptReimportProjection |
-    ManuscriptReimportCommitProjection | TaskAuthorizationProjection | BaselineAnalysisProjection | ReviewWorkspaceProjection | BookDeliveryPackageExportResultProjection | null;
+    ManuscriptReimportCommitProjection | TaskAuthorizationProjection | BaselineAnalysisProjection | ReviewWorkspaceProjection | BookDeliveryPackageExportResultProjection |
+    EvaluationWorkspaceProjection | null;
   failure: null | { code: string; message: string };
 }
 
@@ -8720,14 +8969,27 @@ export interface ServiceOperationMap {
     input: { bookId: string; recordId: string | null; recordsBefore?: number | null };
     output: EvaluationWorkspaceProjection;
   };
-  /** 开始评估 or 重新评估: a new version bound to the manuscript's current revision. */
+  /** 开始评估 or 重新评估: a new version bound to the manuscript's current revision, alone or from AI7's latest 初评. */
   startEvaluation: {
-    input: { bookId: string };
+    input: { bookId: string } & StartEvaluationInput;
     output: EvaluationWorkspaceProjection;
   };
   /** 保存评估 or 定稿: the editor's content appended to the version's chain, refused when the chain moved since it was read. */
   saveEvaluation: {
     input: { bookId: string; recordId: string; expectedEntries: number; content: EvaluationContent; finalize: boolean };
+    output: EvaluationWorkspaceProjection;
+  };
+  /**
+   * 准备 AI7 初评 (Issue #429, S81b1): the evaluation kind's Task prepared as one cooperative job — the first 初评, or 重新初评
+   * once one settled. The completed job's result is 评估 with the prepared Task named, whose plan the Task Drawer opens.
+   */
+  prepareInitialEvaluation: {
+    input: { bookId: string };
+    output: ServiceJobProjection;
+  };
+  /** 开始任务 in the drawer's bar: the Run Authorization and the Run, admitted at once or waiting for a place. */
+  authorizeInitialEvaluation: {
+    input: { bookId: string; taskIntentId: string; planEnvelopeDigest: string };
     output: EvaluationWorkspaceProjection;
   };
   /** ②A 分析反馈 (Issue #94, S38): one Result Set Revision's items with their latest judgments, and the Book's metric. */
@@ -9200,8 +9462,13 @@ export interface RendererApi {
   inspectEvaluationProfiles(): Promise<EvaluationProfilesProjection>;
   /** ②C 评估 of the Book the window is showing (Issue #429, S81a); the renderer never names the Book. */
   inspectEvaluation(input: { recordId: string | null; recordsBefore?: number | null }): Promise<EvaluationWorkspaceProjection>;
-  startEvaluation(): Promise<EvaluationWorkspaceProjection>;
+  /** Begins the next version — from AI7's latest 初评 when `fromInitial` (Issue #429, S81b1). */
+  startEvaluation(input?: StartEvaluationInput): Promise<EvaluationWorkspaceProjection>;
   saveEvaluation(input: { recordId: string; expectedEntries: number; content: EvaluationContent; finalize: boolean }): Promise<EvaluationWorkspaceProjection>;
+  /** 准备 AI7 初评: an `initial-evaluation-preparation` job, followed with `pollServiceJob`; its plan opens in the Task Drawer. */
+  prepareInitialEvaluation(): Promise<ServiceJobProjection>;
+  /** The Task Drawer bar's 开始任务 for AI7's 初评. */
+  authorizeInitialEvaluation(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<EvaluationWorkspaceProjection>;
   /** ②A 分析反馈 of the Book the window is showing (Issue #94, S38); the renderer never names the Book. */
   inspectAnalysisFeedback(input: { revisionId: string }): Promise<AnalysisFeedbackProjection>;
   recordAnalysisFeedback(input: RecordAnalysisFeedbackInput): Promise<AnalysisFeedbackProjection>;

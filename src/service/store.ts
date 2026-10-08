@@ -232,6 +232,8 @@ import type {
   TaskPlanDefaultRuleProjection,
   FactualReviewGoal,
   FactualReviewProjection,
+  EvaluationInitialProjection,
+  InitialEvaluationProjection,
   ReviewCategoryGoal,
   ReviewCategoryProjection,
   ReviewCategoryTaskRequest,
@@ -239,9 +241,13 @@ import type {
   ReviewRunScopeRequest,
   ReviewWorkspaceProjection,
 } from '../shared/protocol.js';
+import { INITIAL_EVALUATION_MODE_GOALS } from '../shared/protocol.js';
+import { INITIAL_EVALUATION_LIVE_UNAVAILABLE, initialEvaluationKindDefinition } from './evaluation/initial-evaluation-kind.js';
 import {
   AnalysisError,
   BaselineAnalysisStore,
+  activeRunReason,
+  runIsActive,
   type AnalysisPreparationResult,
   type BaselineAnalysisPreparationResult,
   type BaselineAnalysisRouteFacts,
@@ -292,6 +298,8 @@ import {
 import { ALWAYS_ONLINE, type TaskPlanConnectivity } from './connectivity.js';
 import {
   baselineAnalysisPlan,
+  initialEvaluationPlan,
+  analysisTaskStateLabel,
   defaultRuleBindingRows,
   fixedTaskPlan,
   noDefaultRule,
@@ -371,7 +379,15 @@ import { MaintenanceCaseError, MaintenanceCases, initializeMaintenanceCaseSchema
 import { BookPeople, BookPeopleError, initializeBookPeopleSchema } from './book-people.js';
 import { ReviewGuidelineError, ReviewGuidelineLedger, initializeReviewGuidelineSchema, readGuidelineFile } from './review-guidelines.js';
 import { LibraryMaterialError, LibraryMaterialLedger, initializeLibraryMaterialSchema, libraryMaterialTitle } from './library-materials.js';
-import { EvaluationError, EvaluationRecords, initializeEvaluationRecordSchema } from './evaluation-records.js';
+import {
+  BUILTIN_EVALUATION_PROFILE,
+  EvaluationError,
+  EvaluationRecords,
+  evaluationProfileDigest,
+  initializeEvaluationInitialDraftSchema,
+  initializeEvaluationRecordSchema,
+  type InitialEvaluationFacts,
+} from './evaluation-records.js';
 import { AnalysisFeedbackError, AnalysisFeedbackLedger, analysisFeedbackItems, initializeAnalysisFeedbackSchema } from './analysis-feedback.js';
 import { DecisionFeedbackError, DecisionFeedbackLedger, initializeDecisionFeedbackSchema } from './decision-feedback.js';
 import {
@@ -406,7 +422,13 @@ import {
   type StoredMembershipChange,
   type StoredSeries,
 } from './series.js';
-import { CALIBRATION_MIN_ADJUSTMENTS, PREDICTION_MIN_BOOKS_WITH_ACTUALS, calibrationActive, predictionAvailable } from '../shared/evaluation-calibration.js';
+import {
+  CALIBRATION_MIN_ADJUSTMENTS,
+  CALIBRATION_OFFSET_COMPUTED,
+  PREDICTION_MIN_BOOKS_WITH_ACTUALS,
+  calibrationActive,
+  predictionAvailable,
+} from '../shared/evaluation-calibration.js';
 import {
   MAX_FEEDBACK_HISTORY_ENTRIES,
   MAX_SERIES_CANDIDATE_QUERY_CHARACTERS,
@@ -600,6 +622,7 @@ import {
   SCHEDULED_BACKUP_SCHEMA_VERSION,
   DATABASE_REPLACEMENT_SCHEMA_VERSION,
   DATABASE_MERGE_SCHEMA_VERSION,
+  INITIAL_EVALUATION_SCHEMA_VERSION,
   DIALOGUE_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -1836,6 +1859,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       currentVersion === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       currentVersion === DATABASE_MERGE_SCHEMA_VERSION ||
+      currentVersion === INITIAL_EVALUATION_SCHEMA_VERSION ||
       currentVersion === DIALOGUE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
@@ -1891,6 +1915,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       currentVersion === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       currentVersion === DATABASE_MERGE_SCHEMA_VERSION ||
+      currentVersion === INITIAL_EVALUATION_SCHEMA_VERSION ||
       currentVersion === DIALOGUE_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
@@ -2260,6 +2285,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       version === DATABASE_MERGE_SCHEMA_VERSION ||
+      version === INITIAL_EVALUATION_SCHEMA_VERSION ||
       version === DIALOGUE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
@@ -2304,6 +2330,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       version === DATABASE_MERGE_SCHEMA_VERSION ||
+      version === INITIAL_EVALUATION_SCHEMA_VERSION ||
       version === DIALOGUE_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2440,6 +2467,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       version === DATABASE_MERGE_SCHEMA_VERSION ||
+      version === INITIAL_EVALUATION_SCHEMA_VERSION ||
       version === DIALOGUE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
@@ -2483,6 +2511,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       version === DATABASE_MERGE_SCHEMA_VERSION ||
+      version === INITIAL_EVALUATION_SCHEMA_VERSION ||
       version === DIALOGUE_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
@@ -2821,6 +2850,7 @@ function validateModelServiceSchema(
       version >= SCHEDULED_BACKUP_SCHEMA_VERSION,
       version >= DATABASE_REPLACEMENT_SCHEMA_VERSION,
       version >= DATABASE_MERGE_SCHEMA_VERSION,
+      version >= INITIAL_EVALUATION_SCHEMA_VERSION,
       version >= DIALOGUE_SCHEMA_VERSION,
     );
   }
@@ -2892,6 +2922,7 @@ function initializeModelServiceSchema(
       version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       version === DATABASE_MERGE_SCHEMA_VERSION ||
+      version === INITIAL_EVALUATION_SCHEMA_VERSION ||
       version === DIALOGUE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
@@ -2935,6 +2966,7 @@ function initializeModelServiceSchema(
       version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
       version === DATABASE_MERGE_SCHEMA_VERSION ||
+      version === INITIAL_EVALUATION_SCHEMA_VERSION ||
       version === DIALOGUE_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
@@ -3769,6 +3801,8 @@ export class EditorialStore {
   readonly #taskAuthorization: TaskAuthorizationStore;
   readonly #baselineAnalysis: BaselineAnalysisStore;
   readonly #factualReview: BaselineAnalysisStore;
+  /** AI7 初评 (Issue #429, S81b1): the evaluation kind's own ledger over the same Book database. */
+  readonly #initialEvaluation: BaselineAnalysisStore;
   /** One ledger per review-category kind and frozen category contract, made when first asked for (Issue #417). */
   readonly #reviewCategoryLedgers = new Map<string, BaselineAnalysisStore>();
   /** The kind definition of each configured category a Review Run snapshotted, by its contract input. */
@@ -3840,6 +3874,7 @@ export class EditorialStore {
     taskAuthorization: TaskAuthorizationStore,
     baselineAnalysis: BaselineAnalysisStore,
     factualReview: BaselineAnalysisStore,
+    initialEvaluation: BaselineAnalysisStore,
     workflowProfile: BuiltInWorkflowProfile,
     lifetimeId: string,
     control: StoreControl,
@@ -3856,6 +3891,7 @@ export class EditorialStore {
     this.#taskAuthorization = taskAuthorization;
     this.#baselineAnalysis = baselineAnalysis;
     this.#factualReview = factualReview;
+    this.#initialEvaluation = initialEvaluation;
     this.#editorialMarks = new EditorialMarkStore(authority);
     this.#rules = new DefaultExecutionRuleLedger(authority);
     this.#manuscriptApply = new ManuscriptApplyStore(authority, boundedAuthority, this.#editorialMarks, lifetimeId);
@@ -3891,7 +3927,10 @@ export class EditorialStore {
         opened.close();
       },
     });
-    this.#evaluations = new EvaluationRecords(authority, { current: (bookId) => this.#evaluationManuscript(bookId) });
+    this.#evaluations = new EvaluationRecords(authority, { current: (bookId) => this.#evaluationManuscript(bookId) }, {
+      latest: (bookId) => this.#initialEvaluationFacts(bookId),
+      task: (bookId) => this.#initialEvaluationTask(bookId),
+    });
     this.#analysisFeedback = new AnalysisFeedbackLedger(authority);
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
       ledgerOf: (entry) => this.#reviewLedgerOf(entry),
@@ -4090,8 +4129,10 @@ export class EditorialStore {
       // and the house's evaluation preferences; revision 52 (Issue #63, S28a) the house's Series and their membership changes,
       // and revision 53 (Issue #63, S28b) Series Knowledge: candidates, items, revisions and promotion decisions; revision 54
       // (Issue #433, S85a) the versions that opened the store; revision 55 (Issue #434, S86a) the database exports; revision 56
-      // (Issue #434, S86b) the scheduled backups; revision 57 (Issue #434, S86c) the replacements of the local data; revision
-      // 58 (Issue #434, S86d) the merges of a package's Books; and revision 60 (Issue #52, S17a) the dialogue Tasks.
+      // (Issue #434, S86b) the scheduled backups; revision 57 (Issue #434, S86c) the replacements of the local data; and revision
+      // 58 (Issue #434, S86d) the merges of a package's Books. Revision 59 (Issue #429, S81b1) adds the AI7 初评 each Evaluation
+      // Record version began from, and `initializeTaskAuthorizationSchema` rebuilds the kind-coupled analysis relations for it;
+      // revision 60 (Issue #52, S17a) adds the dialogue Tasks.
       initializeBookPeopleSchema(authority);
       initializeReviewGuidelineSchema(authority);
       initializeLibraryMaterialSchema(authority);
@@ -4107,6 +4148,7 @@ export class EditorialStore {
       initializeScheduledBackupSchema(authority);
       initializeDatabaseReplacementSchema(authority);
       initializeDatabaseMergeSchema(authority);
+      initializeEvaluationInitialDraftSchema(authority);
       initializeDialogueSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
@@ -4131,6 +4173,9 @@ export class EditorialStore {
         new TaskAuthorizationStore(authority, boundedAuthority),
         new BaselineAnalysisStore(authority, boundedAuthority, control.baselineAnalysisRoute),
         new BaselineAnalysisStore(authority, boundedAuthority, control.baselineAnalysisRoute, factualReviewKindDefinition()),
+        // AI7 初评 (Issue #429, S81b1): the evaluation kind under the profile a new 评估 version snapshots.
+        new BaselineAnalysisStore(authority, boundedAuthority, control.baselineAnalysisRoute,
+          initialEvaluationKindDefinition({ ...BUILTIN_EVALUATION_PROFILE, sha256: evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE) })),
         workflowProfile,
         lifetimeId,
         control,
@@ -4564,6 +4609,17 @@ export class EditorialStore {
       const plan = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, defaultRule, clarifications, ...(stopped === null ? {} : { stopped }) }));
       return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
+    if (input.kind === 'initial-evaluation') {
+      // AI7 初评 (Issue #429, S81b1): the evaluation kind's latest Task, read as the baseline's is.
+      const projection = this.inspectInitialEvaluation(input.bookId, progress);
+      const checkpoint = projection.checkpoint;
+      requireStore(projection.taskIntent !== null && checkpoint !== null, 'TASK_PLAN_UNAVAILABLE', 'AI7 初评还没有准备计划。');
+      current(projection.taskIntent.taskIntentId);
+      const blocks = this.#analysisCall(() => this.#initialEvaluation.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
+      const profile = this.#evaluations.profile();
+      const plan = this.#taskPlanCall(() => initialEvaluationPlan({ projection, bookTitle, blocks, profile }));
+      return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+    }
     const reviewRunId = input.ref;
     requireStore(reviewRunId !== null, 'TASK_PLAN_INVALID', '审阅的计划要指明是哪一次审阅。');
     const facts = this.#reviewCall(() => this.#reviewRuns.planFacts(input.bookId, reviewRunId));
@@ -4752,6 +4808,16 @@ export class EditorialStore {
   reconcileStoppedBaselineAnalysisRuns(): { settled: number; cancelling: ReadonlyArray<string>; answered: ReadonlyArray<string> } {
     this.#assertAvailable();
     return this.#analysisCall(() => this.#baselineAnalysis.reconcileStoppedRuns());
+  }
+
+  /**
+   * Startup reconciliation of the evaluation kind's ledger (Issue #429 review, P1): a 初评 left admitted or executing has nothing
+   * running it and cannot resume, so it ends 已中断 with its outcome; a start the governor had not admitted is blocked before
+   * dispatch with why. Either way 评估 offers 重新初评 at once instead of reading a Run under way for good.
+   */
+  reconcileStoppedInitialEvaluationRuns(): { settled: number } {
+    this.#assertAvailable();
+    return { settled: this.#analysisCall(() => this.#initialEvaluation.reconcileStoppedRuns()).settled };
   }
 
   /**
@@ -5054,6 +5120,7 @@ export class EditorialStore {
     this.#reviewRuns.prepare({ phase: 'cancel-all' });
     this.#baselineAnalysis.prepare({ phase: 'cancel-all' });
     this.#factualReview.prepare({ phase: 'cancel-all' });
+    this.#initialEvaluation.prepare({ phase: 'cancel-all' });
     for (const ledger of this.#reviewCategoryLedgers.values()) ledger.prepare({ phase: 'cancel-all' });
     for (const workId of Array.from(this.#reimportPreparationWork.keys())) {
       this.cancelManuscriptReimportPreparationWork(workId);
@@ -6081,13 +6148,136 @@ export class EditorialStore {
     return this.#evaluationCall(() => this.#evaluations.workspace(bookId, this.#evaluationBookTitle(bookId), recordId, recordsBefore));
   }
 
-  /** 开始评估 or 重新评估: a new version bound to the manuscript's current revision, and the page with it on show. */
-  startEvaluation(bookId: string): EvaluationWorkspaceProjection {
+  /**
+   * 开始评估 or 重新评估: a new version bound to the manuscript's current revision, and the page with it on show — begun from
+   * AI7's latest 初评 when `fromInitial` (Issue #429, S81b1).
+   */
+  startEvaluation(bookId: string, fromInitial = false): EvaluationWorkspaceProjection {
     return this.#evaluationCall(() => {
       const title = this.#evaluationBookTitle(bookId);
-      const recordId = this.#transaction(this.#authority, () => this.#evaluations.start(bookId));
+      const recordId = this.#transaction(this.#authority, () => this.#evaluations.start(bookId, fromInitial));
       return this.#evaluations.workspace(bookId, title, recordId);
     });
+  }
+
+  // ---- AI7 初评 (Issue #429, plan slice S81b1; V2-UX-EVAL-001, EVAL-005 to EVAL-007) ----------------------------------------
+
+  /** The evaluation kind's append-only ledger, which its execution owner writes through; service-internal. */
+  get initialEvaluationLedger(): BaselineAnalysisStore {
+    this.#assertAvailable();
+    return this.#initialEvaluation;
+  }
+
+  /** The Book's AI7 初评 Task, latest Result Set Revision and history, as the evaluation kind's ledger holds them. */
+  inspectInitialEvaluation(bookId: string, progress?: ProgressReader, revisionId: string | null = null): InitialEvaluationProjection {
+    return this.#analysisCall(() => this.#initialEvaluation.inspect(bookId, progress, revisionId)) as InitialEvaluationProjection;
+  }
+
+  /**
+   * 准备 AI7 初评: the evaluation kind's Task in the mode that applies — the first 初评, or 重新初评 once one settled — whose
+   * goal is the kind's own fixed text. The preparation is a cooperative job; its plan opens in the Task Drawer.
+   */
+  createInitialEvaluationPreparationWork(bookId: string, launchPolicy: LaunchPolicyProjection): AnalysisPreparationResult<InitialEvaluationProjection> {
+    this.#requireInitialEvaluationScope();
+    const current = this.inspectInitialEvaluation(bookId);
+    const mode = current.resultSetRevision === null ? 'evaluation-first' : 'evaluation-again';
+    const result = this.#analysisCall(() => this.#initialEvaluation.prepare({
+      phase: 'start',
+      bookId,
+      goal: INITIAL_EVALUATION_MODE_GOALS[mode],
+      update: mode === 'evaluation-first' ? null : { mode, selectedRange: null },
+      reconfirm: false,
+      launchPolicy,
+    }));
+    return { ...result, projection: result.projection as InitialEvaluationProjection | null };
+  }
+
+  advanceInitialEvaluationPreparationWork(workId: string): AnalysisPreparationResult<InitialEvaluationProjection> {
+    const result = this.#analysisCall(() => this.#initialEvaluation.prepare({ phase: 'advance', workId }));
+    return { ...result, projection: result.projection as InitialEvaluationProjection | null };
+  }
+
+  cancelInitialEvaluationPreparationWork(workId: string): boolean {
+    this.#analysisCall(() => this.#initialEvaluation.prepare({ phase: 'cancel', workId }));
+    return true;
+  }
+
+  /** 开始任务 in the drawer's bar: the standard-direct Run Authorization and the Run; the caller hands the Run to the owner. */
+  authorizeInitialEvaluation(bookId: string, taskIntentId: string, planEnvelopeDigest: string): { dispatchRunRecordId: string | null } {
+    this.#requireInitialEvaluationScope();
+    const authorized = this.#analysisCall(() => this.#initialEvaluation.authorize(bookId, taskIntentId, planEnvelopeDigest));
+    return { dispatchRunRecordId: authorized.dispatchRunRecordId };
+  }
+
+  /**
+   * 初评 runs only where its book-level synthesis may be sent (Issue #429 review, P2): under a live scope the active policy does
+   * not name it, so nothing is prepared or started there, and 评估 says why. The provider-free scope is unaffected.
+   */
+  #requireInitialEvaluationScope(): void {
+    this.#assertAvailable();
+    if (this.#initialEvaluation.launch.live !== null) throw new StoreError('EVALUATION_INITIAL_UNAVAILABLE', INITIAL_EVALUATION_LIVE_UNAVAILABLE);
+  }
+
+  /** AI7's latest settled 初评 as 评估 snapshots it; `null` while there is none, or the Book cannot be evaluated by AI7 at all. */
+  #initialEvaluationFacts(bookId: string): InitialEvaluationFacts | null {
+    let projection: InitialEvaluationProjection;
+    try {
+      projection = this.#initialEvaluation.inspect(bookId) as InitialEvaluationProjection;
+    } catch (error) {
+      if (error instanceof AnalysisError) return null;
+      throw error;
+    }
+    const revision = projection.resultSetRevision;
+    if (revision === null) return null;
+    const evaluation = revision.evaluation;
+    const items = evaluation.items.map((item) => ({
+      itemId: item.itemId, score: item.score, comment: item.comment, sufficiency: item.sufficiency, citedBlocks: item.citedBlocks, unitsCited: item.unitsCited,
+      // AI7's evidence for the item (EVAL-006), kept with the draft a version begins from so the record shows what each score rests on.
+      evidence: item.observations.map((observation) => ({ unitOrdinal: observation.unitOrdinal, note: observation.note, blockIds: [...observation.blockIds] })),
+    }));
+    return {
+      draft: {
+        revisionId: revision.revisionId,
+        ordinal: revision.ordinal,
+        revisionLabel: revision.manuscriptPin.revisionLabel,
+        createdAt: revision.createdAt,
+        items,
+        strengths: [...evaluation.strengths],
+        weaknesses: [...evaluation.weaknesses],
+        nextStep: evaluation.nextStep,
+        suggestedConclusion: evaluation.suggestedConclusion,
+        complete: evaluation.synthesis.state === 'closed' && items.every((item) => item.score !== null),
+        // A 初评 that completed with gaps scored without these ranges; every version begun from it says so.
+        unitsTotal: revision.coverage.unitsTotal,
+        unreadUnits: [...new Set(revision.gaps.map((gap) => gap.unitOrdinal))].sort((left, right) => left - right),
+      },
+      manuscriptRevisionId: revision.manuscriptPin.revisionId,
+      current: revision.freshness.state === 'current',
+      profileSha256: evaluation.profile.sha256,
+    };
+  }
+
+  /**
+   * The Book's 初评 Task as 评估 offers it: the latest Task the drawer opens, and whether one can be prepared now — not while a
+   * Run of it is under way or waiting, and not for a Book AI7 cannot read, which says why.
+   */
+  #initialEvaluationTask(bookId: string): Pick<EvaluationInitialProjection, 'task' | 'prepare'> {
+    let projection: InitialEvaluationProjection;
+    try {
+      projection = this.#initialEvaluation.inspect(bookId) as InitialEvaluationProjection;
+    } catch (error) {
+      if (error instanceof AnalysisError) return { task: null, prepare: { allowed: false, reason: `AI7 初评暂不可用：${error.message}` } };
+      throw error;
+    }
+    const runState = projection.run?.state ?? null;
+    return {
+      task: projection.taskIntent === null ? null : { taskIntentId: projection.taskIntent.taskIntentId, state: projection.state, label: analysisTaskStateLabel(projection) },
+      prepare: this.#initialEvaluation.launch.live !== null
+        ? { allowed: false, reason: INITIAL_EVALUATION_LIVE_UNAVAILABLE }
+        : runIsActive(runState)
+        ? { allowed: false, reason: activeRunReason(runState) }
+        : { allowed: true, mode: projection.resultSetRevision === null ? 'evaluation-first' : 'evaluation-again' },
+    };
   }
 
   /** 保存评估 or 定稿: the editor's content appended to the version's chain, and the page as it now reads. */
@@ -11113,8 +11303,9 @@ export class EditorialStore {
     requireStore(focusBookId === null || UUID_PATTERN.test(focusBookId), 'BOOK_INVALID', '图书标识无效。');
     const preferences = this.#evaluationCalibration.preferences();
     const booksWithActuals = this.#evaluationCalibration.booksWithActuals();
-    // AI7's 初评 arrives with S81b; no score exists for the editor to adjust yet.
-    const adjustments = 0;
+    // The Books whose editor adjusted AI7's 初评 in a 定稿 version, each counted once (Issue #429, S81b1; §8.6 「10 本调分记录」).
+    // The calibration itself — the offset it would apply to AI7's starting scores — is not computed yet: it waits for its slice.
+    const adjustments = this.#evaluations.adjustedBooks();
     const where = 'EXISTS (SELECT 1 FROM publication_versions p WHERE p.book_id = b.book_id)';
     const rows = (after === null
       ? this.#authority.prepare(`SELECT b.book_id, b.title FROM books b WHERE ${where} ORDER BY b.title, b.book_id LIMIT ?`).all(MAX_EVALUATION_CALIBRATION_BOOKS + 1)
@@ -11132,10 +11323,11 @@ export class EditorialStore {
     return {
       calibration: {
         adjustments,
-        initialScoresConnected: false,
+        initialScoresConnected: true,
         threshold: CALIBRATION_MIN_ADJUSTMENTS,
         enabled: preferences.calibrationEnabled,
-        active: calibrationActive(adjustments, preferences.calibrationEnabled),
+        offsetComputed: CALIBRATION_OFFSET_COMPUTED,
+        active: calibrationActive(adjustments, preferences.calibrationEnabled, CALIBRATION_OFFSET_COMPUTED),
       },
       prediction: {
         booksWithActuals,

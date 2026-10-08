@@ -1144,6 +1144,13 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'j14-feedback-reflow-forced-colors',
     'feedback-silence-is-not-approval',
     'feedback-restart',
+    // Issue #429 (S81b1): AI7 初评 from ②C through the Task Drawer, a version begun from its draft, an adjustment with its reason,
+    // 定稿, and 设置 › 评估校准与预测 counting the Book once.
+    'initial-evaluation-start',
+    'initial-evaluation-draft',
+    'initial-evaluation-adjust',
+    'initial-evaluation-finalize',
+    'initial-evaluation-calibration',
     'decision-feedback-suggestions',
     'decision-feedback-dismiss',
     'decision-feedback-own-accord',

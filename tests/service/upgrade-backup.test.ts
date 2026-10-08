@@ -8,9 +8,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/canonical.js';
 import { DATA_VERSION_TRIGGER_SQL, DataVersionLedger, PRE_UPGRADE_BACKUP_NAME, type ClassifiedSchemaRevision, type DataVersionUpgrade } from '../../src/service/data-version.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { DATABASE_MERGE_SCHEMA_VERSION, DATABASE_REPLACEMENT_SCHEMA_VERSION, DIALOGUE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { DIALOGUE_SCHEMA_VERSION, DATABASE_MERGE_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { backUpBeforeUpgrade, preUpgradeBackupFileName, writePendingUpgrade } from '../../src/service/upgrade-backup.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for 升级前备份 (Issue #433, plan slice S85b; V2-UX-DSTO-016; ADR 0079 §1.1, §1.3, §1.4) over the
 // real store. Nothing is frozen before the first packaged release, so no revision is breaking yet: the suite opens a store with
@@ -30,16 +31,17 @@ afterEach(async () => {
   await roots.dispose();
 });
 
-const CHANGE = '导入记录同时记下合并';
+/** The terminal revision's change as the classification names it: revision 60, the dialogue Tasks (Issue #52). */
+const CHANGE = '记录就所选文字的提问与回答';
 const BREAKING: ReadonlyArray<ClassifiedSchemaRevision> = [{ revision: DIALOGUE_SCHEMA_VERSION, class: 'breaking', change: CHANGE }];
-/** Revisions 58 and 60 both breaking: Data Version 1 at revision 57, 2 at 58 and 3 at 60. */
+/** Revisions 58 and 60 both breaking: Data Version 1 at revision 57, 2 at 58 and 59, and 3 at 60. */
 const BOTH: ReadonlyArray<ClassifiedSchemaRevision> = [
   { revision: DATABASE_MERGE_SCHEMA_VERSION, class: 'breaking', change: '替换记录' },
   { revision: DIALOGUE_SCHEMA_VERSION, class: 'breaking', change: CHANGE },
 ];
-/** Revisions 57, 58 and 60 all breaking: Data Version 1 at revision 56, 2 at 57, 3 at 58 and 4 at 60. */
+/** Revisions 57, 58 and 60 all breaking: Data Version 1 at revision 56, 2 at 57, 3 at 58 and 59, and 4 at 60. */
 const THREE: ReadonlyArray<ClassifiedSchemaRevision> = [
-  { revision: DATABASE_REPLACEMENT_SCHEMA_VERSION, class: 'breaking', change: '定时备份' },
+  { revision: DATABASE_MERGE_SCHEMA_VERSION - 1, class: 'breaking', change: '定时备份' },
   ...BOTH,
 ];
 
@@ -52,7 +54,7 @@ function madeUpgrade(fromDataVersion: number, fromSchemaRevision: number, fromSo
 }
 
 /** 0.0.10's upgrade, under BOTH: from Data Version 1 at revision 57 to 2 at 58. */
-const THEIRS = madeUpgrade(1, DATABASE_REPLACEMENT_SCHEMA_VERSION, '0.0.9', ['替换记录'], '09-00-00');
+const THEIRS = madeUpgrade(1, DATABASE_MERGE_SCHEMA_VERSION - 1, '0.0.9', ['替换记录'], '09-00-00');
 const THEIR_TARGET = { softwareVersion: '0.0.10', dataVersion: 2, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION };
 
 const storePath = (): string => join(roots.dataRoot, 'store', 'ai7.sqlite');
@@ -104,7 +106,8 @@ async function storeBeforeUpgrade(): Promise<void> {
   }
   const plant = new DatabaseSync(storePath());
   try {
-    plant.exec(`DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; PRAGMA user_version = ${DATABASE_MERGE_SCHEMA_VERSION};`);
+    plant.exec(`DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; PRAGMA user_version = ${DATABASE_MERGE_SCHEMA_VERSION};`);
+    downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
   } finally {
     plant.close();
   }
@@ -447,10 +450,10 @@ describe('升级前备份 over the real store', () => {
     await storeBeforeUpgrade();
     // Under THREE, 0.0.9 brought the data from Data Version 1 to 2 and 0.0.10 from 2 to 3. Neither recorded its upgrade, and
     // the note 0.0.10 left carries 0.0.9's on.
-    const first = madeUpgrade(1, DATABASE_REPLACEMENT_SCHEMA_VERSION - 1, '0.0.8', ['定时备份'], '08-00-00');
-    const second = madeUpgrade(2, DATABASE_REPLACEMENT_SCHEMA_VERSION, '0.0.9', ['替换记录'], '09-00-00');
+    const first = madeUpgrade(1, DATABASE_MERGE_SCHEMA_VERSION - 2, '0.0.8', ['定时备份'], '08-00-00');
+    const second = madeUpgrade(2, DATABASE_MERGE_SCHEMA_VERSION - 1, '0.0.9', ['替换记录'], '09-00-00');
     await writePendingUpgrade(roots.dataRoot, second, { softwareVersion: '0.0.10', dataVersion: 3, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION }, [
-      { softwareVersion: '0.0.9', dataVersion: 2, schemaRevision: DATABASE_REPLACEMENT_SCHEMA_VERSION, upgrade: first },
+      { softwareVersion: '0.0.9', dataVersion: 2, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION - 1, upgrade: first },
     ]);
     // This software's own open stops too, after its migration: its note carries both on with its own.
     expect(code(await refusal(open(THREE, 'before-record')))).toBe('E2E_CONTROL_INTERRUPTED');
@@ -538,7 +541,7 @@ describe('升级前备份 over the real store', () => {
     await storeBeforeUpgrade();
     // Under THREE, 0.0.10 set out to bring the data from Data Version 1 at revision 56 to 4 at 60, and stopped at revision 58,
     // at Data Version 3, before recording anything.
-    await writePendingUpgrade(roots.dataRoot, madeUpgrade(1, DATABASE_REPLACEMENT_SCHEMA_VERSION - 1, '0.0.9', ['定时备份', '替换记录', CHANGE], '09-00-00'),
+    await writePendingUpgrade(roots.dataRoot, madeUpgrade(1, DATABASE_MERGE_SCHEMA_VERSION - 2, '0.0.9', ['定时备份', '替换记录', CHANGE], '09-00-00'),
       { softwareVersion: '0.0.10', dataVersion: 4, schemaRevision: DIALOGUE_SCHEMA_VERSION });
     const store = await open(THREE);
     try {
@@ -575,7 +578,7 @@ describe('升级前备份 over the real store', () => {
     const software = await packageVersion();
     await storeBeforeUpgrade();
     // Under BREAKING, 0.0.10 set out from revision 57 and stopped at 58, still at Data Version 1: it raised nothing.
-    await writePendingUpgrade(roots.dataRoot, madeUpgrade(1, DATABASE_REPLACEMENT_SCHEMA_VERSION, '0.0.9', [CHANGE], '09-00-00'),
+    await writePendingUpgrade(roots.dataRoot, madeUpgrade(1, DATABASE_MERGE_SCHEMA_VERSION - 1, '0.0.9', [CHANGE], '09-00-00'),
       { softwareVersion: '0.0.10', dataVersion: 2, schemaRevision: DIALOGUE_SCHEMA_VERSION });
     const store = await open(BREAKING);
     try {
@@ -605,7 +608,7 @@ describe('升级前备份 over the real store', () => {
     // Sixteen carried on, each as large as an upgrade can be, and a seventeenth to carry: 0.0.10's own, which brought the data
     // from revision 57 to 58 and was never recorded.
     const longest = `9999.9999.9999-${'a'.repeat(32)}+${'b'.repeat(32)}`;
-    const largest = madeUpgrade(1, DATABASE_REPLACEMENT_SCHEMA_VERSION, longest, Array.from({ length: 20 }, () => String.fromCharCode(1).repeat(200)), '09-00-00');
+    const largest = madeUpgrade(1, DATABASE_MERGE_SCHEMA_VERSION - 1, longest, Array.from({ length: 20 }, () => String.fromCharCode(1).repeat(200)), '09-00-00');
     const target = { softwareVersion: longest, dataVersion: 2, schemaRevision: DATABASE_MERGE_SCHEMA_VERSION };
     await writePendingUpgrade(roots.dataRoot, largest, target, Array.from({ length: 16 }, () => ({ ...target, upgrade: largest })));
     expect((await stat(note())).size).toBeGreaterThan(256 * 1024);

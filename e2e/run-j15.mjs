@@ -372,6 +372,7 @@ async function constructPredecessorV12(dataRoot, bookId) {
       DROP TABLE dialogue_execution_bindings;
       DROP TABLE dialogue_attempts;
       DROP TABLE dialogue_tasks;
+      DROP TABLE evaluation_initial_drafts;
       DROP TABLE database_merge_books;
       DROP TABLE database_merges;
       DROP TABLE database_replacements;

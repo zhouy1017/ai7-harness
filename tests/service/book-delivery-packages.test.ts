@@ -9,10 +9,11 @@ import {
   type PackageReviewRunReading,
 } from '../../src/service/book-delivery-packages.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { DIALOGUE_SCHEMA_VERSION, PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { DIALOGUE_SCHEMA_VERSION, PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { PUBLICATION_FORBIDDEN_WORDS, type BookDeliveryPackageProjection } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx, type SourceSpan } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for 图书交付包 (Issue #416, plan slice S67a; V2-UX-BUNDLE-001 to 005, DPKG-007, DPKG-008)
 // over the real `EditorialStore` on a temporary Agent Data Root. The manuscript and the draft a document starts from are
@@ -269,13 +270,7 @@ describe('图书交付包 (S67a)', () => {
     try {
       planted.exec('PRAGMA foreign_keys = OFF');
       planted.exec(`BEGIN IMMEDIATE;
-        DROP TABLE dialogue_conversions;
-        DROP TABLE dialogue_attempt_outcomes;
-        DROP TABLE dialogue_harness_spans;
-        DROP TABLE dialogue_execution_bindings;
-        DROP TABLE dialogue_attempts;
-        DROP TABLE dialogue_tasks;
-        DROP TABLE database_merge_books;
+        DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books;
         DROP TABLE database_merges;
         DROP TABLE database_replacements;
         DROP TABLE scheduled_backup_removals;
@@ -313,6 +308,7 @@ describe('图书交付包 (S67a)', () => {
         DROP TABLE book_delivery_package_versions;
         PRAGMA user_version = ${PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION};
         COMMIT;`);
+      downgradeKindCoupledRelations(planted, ANALYSIS_LEDGER_REVISION_58_SQL);
       planted.exec('PRAGMA foreign_keys = ON');
     } finally {
       planted.close();

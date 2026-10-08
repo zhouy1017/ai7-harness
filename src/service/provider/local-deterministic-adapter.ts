@@ -20,6 +20,12 @@ import {
   runReportReflectionRequestDigest,
 } from '../analysis/run-report-contract.js';
 import { parseReviewCategoryUnitMessageHeader, reviewCategoryRequestDigest } from '../review/review-category-contract.js';
+import {
+  initialEvaluationRequestDigest,
+  initialEvaluationSynthesisRequestDigest,
+  parseInitialEvaluationSynthesisMessageHeader,
+  parseInitialEvaluationUnitMessageHeader,
+} from '../evaluation/initial-evaluation-contract.js';
 import { DIALOGUE_PROMPT_CONTRACT_DIGEST, dialogueRequestDigest, parseDialogueMessageHeader } from '../dialogue/contract.js';
 import { AI7_FAILURE_CODES, type DshFailureCodes } from './classification.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from './egress-gate.js';
@@ -286,18 +292,22 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     // belongs to is decided by its header alone; its request digest is then keyed by that kind's
     // contract digest, which the adapter was constructed with.
     const crossUnit = text === null ? null : parseCrossUnitMessageHeader(text);
-    const sampling = text === null || crossUnit !== null ? null : parseAssuranceSamplingMessageHeader(text);
-    const reflection = text === null || crossUnit !== null || sampling !== null
+    // AI7 初评's book-level synthesis (Issue #429, S81b1) is answered as the reduction is, under ordinal `0`, keyed by the
+    // observations its header names under the evaluation contract this adapter was built with.
+    const synthesis = text === null || crossUnit !== null ? null : parseInitialEvaluationSynthesisMessageHeader(text);
+    const sampling = text === null || crossUnit !== null || synthesis !== null ? null : parseAssuranceSamplingMessageHeader(text);
+    const reflection = text === null || crossUnit !== null || synthesis !== null || sampling !== null
       ? null
       : parseRunReportReflectionMessageHeader(text);
-    const named = crossUnit !== null || sampling !== null || reflection !== null;
+    const named = crossUnit !== null || synthesis !== null || sampling !== null || reflection !== null;
     // A review-category unit is a unit like the two others, and its header additionally names the
-    // category, which its request digest carries as well.
+    // category, which its request digest carries as well. An evaluation unit is one too, under its own header.
     const review = text === null || named ? null : parseReviewCategoryUnitMessageHeader(text);
+    const evaluation = text === null || named || review !== null ? null : parseInitialEvaluationUnitMessageHeader(text);
     const header = text === null || named
       ? null
-      : review ?? parseUnitMessageHeader(text) ?? parseFactualReviewUnitMessageHeader(text);
-    if (crossUnit === null && sampling === null && reflection === null && header === null) {
+      : review ?? evaluation ?? parseUnitMessageHeader(text) ?? parseFactualReviewUnitMessageHeader(text);
+    if (!named && header === null) {
       yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '请求不含可识别的分析单元消息头。');
       return;
     }
@@ -305,18 +315,22 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     // names, a sampling turn's, keyed by the anchor unit and the findings its header names, or the Run
     // Report reflection's, keyed by the Run's own accounting. None can collide, because each digest is
     // taken over its own frozen contract digest as well as its own key set.
-    const ordinal = crossUnit === null && sampling === null && reflection === null ? header!.ordinal : 0;
+    const ordinal = named ? 0 : header!.ordinal;
     const expectedDigest = crossUnit !== null
       ? crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, crossUnit.unitSetDigest)
-      : sampling !== null
-        ? assuranceSamplingRequestDigest(ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, sampling.unitOrdinal, sampling.unitDigest, sampling.sampleDigest)
-        : reflection !== null
-          ? runReportReflectionRequestDigest(RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, reflection.accountingDigest)
-          : this.#resolveBy === 'content-digest'
-            ? unitContentDigest(ownBlockTextsOf(text!))
-            : review !== null
-              ? reviewCategoryRequestDigest(this.#promptContractDigest, review.categoryId, review.ordinal, review.unitDigest)
-              : unitRequestDigest(this.#promptContractDigest, header!.ordinal, header!.unitDigest);
+      : synthesis !== null
+        ? initialEvaluationSynthesisRequestDigest(this.#promptContractDigest, synthesis.setDigest)
+        : sampling !== null
+          ? assuranceSamplingRequestDigest(ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, sampling.unitOrdinal, sampling.unitDigest, sampling.sampleDigest)
+          : reflection !== null
+            ? runReportReflectionRequestDigest(RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, reflection.accountingDigest)
+            : this.#resolveBy === 'content-digest'
+              ? unitContentDigest(ownBlockTextsOf(text!))
+              : review !== null
+                ? reviewCategoryRequestDigest(this.#promptContractDigest, review.categoryId, review.ordinal, review.unitDigest)
+                : evaluation !== null
+                  ? initialEvaluationRequestDigest(this.#promptContractDigest, evaluation.ordinal, evaluation.unitDigest)
+                  : unitRequestDigest(this.#promptContractDigest, header!.ordinal, header!.unitDigest);
     const pairKey = fixtureEntryKey(ordinal, expectedDigest);
     const attempt = (this.#servedByKey.get(pairKey) ?? (ordinal > 0 ? this.#attemptsBefore.get(ordinal) ?? 0 : 0)) + 1;
     this.#servedByKey.set(pairKey, attempt);
@@ -324,6 +338,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     if (entry === undefined) {
       const label =!named && this.#resolveBy === 'content-digest' ? '内容摘要' : '请求摘要';
       const subject = crossUnit !== null ? '跨单元归纳'
+        : synthesis !== null ? 'AI7 初评的全书综合'
         : sampling !== null ? `单元 ${sampling.unitOrdinal} 的保证抽样`
           : reflection !== null ? '运行反思'
             : `单元 ${ordinal}`;
@@ -340,7 +355,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
         // because the factual kind mints a `findingId` per import and a fixture cannot know one. A
         // reflection response needs no placeholder at all: it names no finding and no block, because
         // its request carried neither.
-        const replay = reflection !== null
+        const replay = reflection !== null || synthesis !== null
           ? response.text
           : sampling !== null
             ? substituteAssuranceSamplingRefPlaceholders(response.text, parseAssuranceSamplingListedRefs(text!))

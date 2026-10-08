@@ -481,6 +481,7 @@ async function openTaskRunSurface(plan: TaskPlanProjection): Promise<void> {
   try {
     if (plan.kind === 'baseline-analysis') renderBookAnalysis(plan.bookId, plan.goal.chips.book);
     else if (plan.kind === 'review-run') renderBookReview(plan.bookId, plan.goal.chips.book, { reviewRunId: plan.ref, findingId: null });
+    else if (plan.kind === 'initial-evaluation') renderBookEvaluation(plan.bookId, plan.goal.chips.book);
     else renderBookOverview(await window.ai7.getBookOverview({ bookId: plan.bookId, historyCursor: null }));
   } catch (error) {
     setStatus(rendererErrorMessage(error, '无法打开运行所在的页面。'), 'error');
@@ -2303,7 +2304,16 @@ function renderBookEvaluation(bookId: string, bookTitle: string): void {
     element('p', 'field-note', EVALUATION_LEDE),
     host,
   );
-  const surface = mountEvaluation({ root: host, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, technicalDetails });
+  const surface = mountEvaluation({
+    root: host,
+    api: window.ai7,
+    setStatus,
+    errorMessage: rendererErrorMessage,
+    technicalDetails,
+    awaitServiceJob,
+    // AI7 初评's plan opens in the Task Drawer beside 评估 (Issue #429, S81b1), and its bar starts it.
+    openPlan: (ref) => openTaskPlan(bookId, 'initial-evaluation', ref),
+  });
   const actions = element('div', 'button-row workbench-actions');
   const openManuscript = button(DELIVERABLES_DESTINATION_ACTIONS[0], 'primary', async () => {
     openManuscript.disabled = true;
@@ -2328,6 +2338,7 @@ function renderBookEvaluation(bookId: string, bookTitle: string): void {
   actions.append(openManuscript, openOverview);
   content.append(actions);
   replaceScreen('book-evaluation', content);
+  taskSurfaceRefresh = { 'initial-evaluation': () => surface.refresh() };
   setStatus(EVALUATION_STATUS.loading, 'busy');
   void surface.load().then(
     () => {
@@ -6816,7 +6827,7 @@ async function awaitServiceJob(
   const requireMonotonicReimportProgress = (next: ServiceJobProjection): void => {
     if (next.kind !== 'reimport-preparation' && next.kind !== 'reimport-resolution' && next.kind !== 'reimport-commit' &&
         next.kind !== 'task-authorization-preparation' && next.kind !== 'baseline-analysis-preparation' &&
-        next.kind !== 'review-run-preparation') return;
+        next.kind !== 'review-run-preparation' && next.kind !== 'initial-evaluation-preparation') return;
     if (!Number.isSafeInteger(next.progress.completed) || !Number.isSafeInteger(next.progress.total) ||
       next.progress.completed < previousReimportProgress || next.progress.completed > next.progress.total ||
       next.progress.total <= 0 ||

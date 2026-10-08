@@ -192,6 +192,7 @@ type DrawerApi = Pick<
   | 'authorizeTaskAuthorization'
   | 'authorizeBaselineAnalysis'
   | 'authorizeReviewRun'
+  | 'authorizeInitialEvaluation'
   | 'prepareBaselineAnalysis'
   | 'startBaselineAnalysisWhenOnline'
   | 'cancelWaitingBaselineAnalysis'
@@ -1508,6 +1509,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         const planEnvelopeDigest = current.start.planEnvelopeDigest;
         if (planEnvelopeDigest === null) throw new Error(TASK_BAR_START_FAILED);
         if (current.kind === 'fixed-task') await api.authorizeTaskAuthorization({ taskIntentId: current.ref, planEnvelopeDigest });
+        // AI7 初评 (Issue #429, S81b1) starts into the same governor as the baseline analysis.
+        else if (current.kind === 'initial-evaluation') queued = (await api.authorizeInitialEvaluation({ taskIntentId: current.ref, planEnvelopeDigest })).initial.task?.state === 'queued';
         else queued = (await api.authorizeBaselineAnalysis({ taskIntentId: current.ref, planEnvelopeDigest })).state === 'queued';
       }
       // The status line names the event, never a state the Run will leave (V2-UX-LIVE-004): the bar shows the state. A

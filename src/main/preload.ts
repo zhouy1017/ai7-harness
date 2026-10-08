@@ -273,9 +273,13 @@ const api: RendererApi = Object.freeze({
   inspectEvaluationProfiles: () => invoke<ServiceOperationMap['inspectEvaluationProfiles']['output']>(IPC_CHANNELS.inspectEvaluationProfiles),
   inspectEvaluation: (input: { recordId: string | null; recordsBefore?: number | null }) =>
     invoke<ServiceOperationMap['inspectEvaluation']['output']>(IPC_CHANNELS.inspectEvaluation, input),
-  startEvaluation: () => invoke<ServiceOperationMap['startEvaluation']['output']>(IPC_CHANNELS.startEvaluation),
+  startEvaluation: (input?: { fromInitial: boolean }) =>
+    invoke<ServiceOperationMap['startEvaluation']['output']>(IPC_CHANNELS.startEvaluation, input),
   saveEvaluation: (input: Omit<ServiceOperationMap['saveEvaluation']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['saveEvaluation']['output']>(IPC_CHANNELS.saveEvaluation, input),
+  prepareInitialEvaluation: () => invoke<ServiceOperationMap['prepareInitialEvaluation']['output']>(IPC_CHANNELS.prepareInitialEvaluation),
+  authorizeInitialEvaluation: (input: Omit<ServiceOperationMap['authorizeInitialEvaluation']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['authorizeInitialEvaluation']['output']>(IPC_CHANNELS.authorizeInitialEvaluation, input),
   inspectAnalysisFeedback: (input: { revisionId: string }) =>
     invoke<ServiceOperationMap['inspectAnalysisFeedback']['output']>(IPC_CHANNELS.inspectAnalysisFeedback, input),
   recordAnalysisFeedback: (input: Omit<ServiceOperationMap['recordAnalysisFeedback']['input'], 'bookId'>) =>

@@ -15,7 +15,7 @@ import {
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { EXPORT_LEDGER_SCHEMA_VERSION, CLARIFICATION_SCHEMA_VERSION, DIALOGUE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { EXPORT_LEDGER_SCHEMA_VERSION, CLARIFICATION_SCHEMA_VERSION, DIALOGUE_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { RUN_CONTROL_CANCELLING_REASON, RUN_CONTROL_REDO_REASON } from '../../src/service/task-plan.js';
 import { controlledUnitHold } from '../../src/service/unit-hold.js';
 import {
@@ -32,6 +32,7 @@ import { PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-
 import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for 取消任务 (Issue #422, plan slice S76a): the real store on a temporary Agent
 // Data Root, exact `sample1` imported through the supported path, J-04's deterministic route, and no Provider,
@@ -158,6 +159,7 @@ describe('schema revision 32 over the real store', () => {
     const before = withDatabase(false, (database) => {
       plantRevision31Relations(database);
       database.exec(`PRAGMA user_version = 31`);
+      downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
       expect(runCancellationShape(database, 'analysis_run_states')).toBe('revision-31');
       expect(runCancellationShape(database, 'analysis_task_outcomes')).toBe('revision-31');
       return {
@@ -185,8 +187,9 @@ describe('schema revision 32 over the real store', () => {
       // Revision 33 (S76b) then adds its checkpoint relation, empty.
       expect([...after.keys()]).toEqual([...before.truth.keys(), ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER].sort());
       for (const relation of RUN_CHECKPOINT_RELATIONS_DROP_ORDER) expect(after.get(relation)?.content).toMatch(/^0:/);
+      // Revision 59 rebuilds the three kind-coupled analysis relations for the evaluation kind (Issue #429), every row kept.
       expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name))
-        .toEqual(['analysis_run_states', 'analysis_task_outcomes']);
+        .toEqual(['analysis_result_set_revisions', 'analysis_result_sets', 'analysis_run_states', 'analysis_task_intents', 'analysis_task_outcomes']);
       expect([...before.truth].filter(([name, was]) => after.get(name)!.content !== was.content).map(([name]) => name)).toEqual(['service_lifetimes']);
       for (const table of ['analysis_run_states', 'analysis_task_outcomes']) {
         expect(database.prepare("SELECT name FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = ? ORDER BY name").all(table))
@@ -209,6 +212,7 @@ describe('schema revision 32 over the real store', () => {
       plantRevision30Relations(database);
       plantRevision31Relations(database);
       database.exec(`PRAGMA user_version = ${EXPORT_LEDGER_SCHEMA_VERSION}`);
+      downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
     });
     const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
@@ -241,6 +245,7 @@ describe('schema revision 32 over the real store', () => {
         PRAGMA user_version = 31;
         COMMIT;
         PRAGMA foreign_keys = ON;`);
+      downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
       expect(runCancellationShape(database, 'analysis_task_outcomes')).toBe('other');
     });
     await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow();

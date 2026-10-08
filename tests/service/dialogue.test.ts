@@ -11,7 +11,7 @@ import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.j
 import { HARNESS_SESSION_LOG_DIRECTORY } from '../../src/service/harness/session-log.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { DATABASE_MERGE_SCHEMA_VERSION, DIALOGUE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { DIALOGUE_SCHEMA_VERSION, INITIAL_EVALUATION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type { DialogueProjection, DialogueSelectionInput } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -22,7 +22,7 @@ import { importSample1Book, requireExactSample1 } from '../support/sample1-basel
 // complete fragment with a sentence cut in two held back; 停止回答 keeping only complete fragments; 重新回答 and 继续回答 as
 // new attempts linked to the one before; the history read back from the Harness Session Ledger after a restart, with no
 // answer text in any AI7 table; an answer AI7 closed under settled 回答中断 at the next start; 转为修改建议 of a completed
-// answer, refused for an incomplete one, leaving the manuscript as it was; and revision 60 added to a revision-58 store.
+// answer, refused for an incomplete one, leaving the manuscript as it was; and revision 60 added to a revision-59 store.
 
 const FIXTURES_ROOT = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url)));
 const QUESTION = '这段的叙述视角是否一致？';
@@ -407,7 +407,7 @@ describe('就这段提问… over the real store and harness', () => {
     }
   });
 
-  it('adds revision 60 to a revision-58 store, and keeps its relations append-only and verified', async () => {
+  it('adds revision 60 to a revision-59 store, and keeps its relations append-only and verified', async () => {
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     store.close();
     const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
@@ -415,7 +415,7 @@ describe('就这段提问… over the real store and harness', () => {
     try {
       database.exec('PRAGMA foreign_keys = OFF');
       for (const table of Object.keys(DIALOGUE_SCHEMA_SQL).reverse()) database.exec(`DROP TABLE ${table}`);
-      database.exec(`PRAGMA user_version = ${DATABASE_MERGE_SCHEMA_VERSION}`);
+      database.exec(`PRAGMA user_version = ${INITIAL_EVALUATION_SCHEMA_VERSION}`);
     } finally {
       database.close();
     }
