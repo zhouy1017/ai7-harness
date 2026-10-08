@@ -59,6 +59,7 @@ const ITEM_LABEL = `书系知识条目「${PLACE}」（地点）`;
 const EXCLUSION_REASON = '地名写法待与第一部核对';
 const SCOPE_CHANGED = '书系检索范围已变化 · 需要重新确认计划';
 const MARKER = '此结果使用的材料后来被排除';
+const CAPTURE_CANCELLED = '这次审阅已取消，不能保存为可复用工序；从一次完成的审阅保存。';
 const EXCLUDED_REASON = `书系「${SERIES}」可用于一致性审阅的书系知识都已排除在书系检索之外；停止排除或纳入其他书系知识后才能选。`;
 const CONSISTENCY_BASIS = `依据：书系「${SERIES}」的书系知识：地点「${PLACE}」第 2 版 · 工序：书系一致性检查（第 1 版） · 不使用搜索引擎`;
 let location = 'entry';
@@ -1468,6 +1469,11 @@ async function main() {
     await waitFor(renderer, `document.activeElement === document.querySelector('[data-review-action="scope-cancel-confirm"]')`, 'exclusion-cancel-confirm-focus');
     await clickSelector(renderer, '[data-review-action="scope-cancel-confirm"]', 'exclusion-cancel-confirm');
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='cancelled' && document.querySelector('.review-scope-stop') === null && document.querySelector('[data-review-action="continue"]') === null`, 'exclusion-cancelled');
+    // A cancelled Run is not a finished one: it offers no 保存为可复用工序 (Issue #674), and says why wherever the control shows.
+    const cancelledRun = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
+    requireJourney(cancelledRun?.reviewRunId === heldRun.reviewRunId && cancelledRun.capture?.available === false && cancelledRun.capture.unavailableReason === CAPTURE_CANCELLED,
+      'exclusion-cancel-capture-unavailable', cancelledRun?.capture);
+    await assertRenderer(renderer, `(() => { const control = document.querySelector('[data-review-action="capture"]'); if (control === null) return true; const why = document.getElementById(control.getAttribute('aria-describedby') ?? ''); return control instanceof HTMLButtonElement && control.disabled && why?.textContent === ${JSON.stringify(CAPTURE_CANCELLED)}; })()`, 'exclusion-cancel-no-capture');
     await assertRenderer(renderer, `document.querySelector('ol.review-runs li[data-review-run="1"] .review-run-marker')?.textContent === ${JSON.stringify(MARKER)}`, 'exclusion-marker-kept');
     await leaveMemberReview();
     await openSeries(renderer, seriesId, 'exclusion-back-series');
@@ -1747,9 +1753,10 @@ async function main() {
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('[data-review-field="procedure"]')`, 'capture-source-sheet');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for (const id of ['style-and-format','literary-expression']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'capture-source-prepare');
     const sourceRun = await startPreparedReview(renderer, 'capture-source-run');
-    requireJourney(sourceRun?.state === 'settled' && sourceRun.procedure === null && sourceRun.capture?.available === true &&
+    // The member's 第 3 次审阅, after 书系一致性's two: the capture names it by those words, so the Journey pins it by its ordinal here.
+    requireJourney(sourceRun?.state === 'settled' && sourceRun.ordinal === 3 && sourceRun.procedure === null && sourceRun.capture?.available === true &&
       JSON.stringify(sourceRun.categories.map((category) => [category.categoryId, category.state])) === JSON.stringify([['style-and-format', 'settled'], ['literary-expression', 'settled']]),
-    'capture-source-settled', { state: sourceRun?.state, capture: sourceRun?.capture });
+    'capture-source-settled', { state: sourceRun?.state, ordinal: sourceRun?.ordinal, capture: sourceRun?.capture });
 
     at('capture-source-set');
     // 将以上工序保存为可复用工序: the source set — both categories, each kept — the classification it recommends and why, what
@@ -1778,7 +1785,9 @@ async function main() {
     requireJourney(savedProcedures?.procedures?.length === 1 && UUID_PATTERN.test(procedureId ?? '') && savedProcedures.procedures[0].latestState === 'pending-validation',
       'capture-saved-service', savedProcedures?.procedures?.[0]);
     const savedVersion = (await renderer.evaluate(`window.ai7.inspectCapturedProcedure({ procedureId: ${JSON.stringify(procedureId)}, before: null })`))?.versions?.[0];
-    requireJourney(savedVersion?.source?.bookId === member && JSON.stringify(savedVersion.steps.map((step) => step.categoryId)) === JSON.stringify(['style-and-format']),
+    // Its source is the Run this stage ran, by identity, not only by the words that name it.
+    requireJourney(savedVersion?.source?.bookId === member && savedVersion.source.reviewRunId === sourceRun.reviewRunId &&
+      JSON.stringify(savedVersion.steps.map((step) => step.categoryId)) === JSON.stringify(['style-and-format']),
       'capture-saved-version', savedVersion);
     const storedDocument = (() => {
       const database = new DatabaseSync(resolve(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
