@@ -1748,6 +1748,14 @@ describe('decodeRequest rejects malformed frames', () => {
     }
   });
 
+  it('accepts the applicability read naming exactly one Book (Issue #66, S31b)', () => {
+    const request = { id: randomUUID(), op: 'inspectCapturedProcedureApplicability', input: { bookId: randomUUID() } };
+    expect(decodeRequest(frameOf(request))).toEqual(request);
+    for (const input of [{}, { bookId: 'book' }, { bookId: null }, { bookId: randomUUID(), procedureId: randomUUID() }]) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op: 'inspectCapturedProcedureApplicability', input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
   it('accepts 知识库 › 资料库: the read naming nothing, a preview by absolute path, an arrival, and a decision of a closed shape (Issue #427, S79c)', () => {
     const materialId = randomUUID();
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [

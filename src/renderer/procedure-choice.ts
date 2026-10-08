@@ -1,6 +1,7 @@
 import type {
   CapturedProcedureProjection,
   CapturedProcedureRunProjection,
+  CapturedProcedureRunStepProjection,
   CapturedProcedureStopPreviewProjection,
   RendererApi,
   ReviewScopeKind,
@@ -77,7 +78,8 @@ export type ProcedureChoiceOutcome =
 
 /**
  * What the sheet holds after a choice (ADR 0087 §4; Issue #66, S31). An answer fills it from the resolved version: its steps this
- * Book can take ticked and every other category closed, the scope its slot. A failed choice changes nothing the sheet held — not
+ * Book can take ticked — except a Series step, which the editor chooses apart at each run and which starts unticked (S31b;
+ * REUSE-049, REUSE-050) — and every other category closed, the scope its slot. A failed choice changes nothing the sheet held — not
  * the procedure, its version, the categories or the scope — and only says why (Issue #684): it never turns a pinned sheet into an
  * unpinned one chosen by hand. Every answer is a new set, never the one held.
  */
@@ -88,12 +90,21 @@ export function procedureChoiceAfter(held: ProcedureSheetChoice, outcome: Proced
   if (run.resolved === null) return { ...held, procedure: run, categories: new Set(), problem: run.unavailableReason };
   return {
     procedure: run,
-    categories: new Set(run.resolved.steps.filter((step) => step.available).map((step) => step.categoryId)),
+    categories: new Set(run.resolved.steps.filter((step) => step.available && !step.chosenApart).map((step) => step.categoryId)),
     scope: run.resolved.scopeSlot,
     from: null,
     to: null,
     problem: run.unavailableReason,
   };
+}
+
+/**
+ * Whether a category's box on a filled sheet is the editor's to tick (Issue #66, S31b): only a Series step this Book can take,
+ * chosen apart at each run (REUSE-050). Every other step's box is the procedure's — neither added to nor dropped here (ADR 0087
+ * §4) — and a category outside the procedure stays closed. A sheet chosen by hand (`filled` false) leaves every box open.
+ */
+export function procedureCategoryOpen(filled: boolean, step: Pick<CapturedProcedureRunStepProjection, 'available' | 'chosenApart'> | null): boolean {
+  return !filled || (step !== null && step.available && step.chosenApart);
 }
 
 /** The selector focus returns to once a choice ends: the one the editor used, while the sheet still shows it. */

@@ -38,6 +38,9 @@ import {
   procedureCeilingLines,
   procedureEnabledLine,
   procedureGuidelineLine,
+  procedurePackageLinkLine,
+  procedurePackagesLine,
+  procedureRequirementLine,
   procedureRunLinkLine,
   procedureRunsLine,
   procedureSourceLine,
@@ -79,6 +82,8 @@ export interface MountCapturedProceduresOptions {
   openRun(book: { bookId: string; title: string }, procedureId: string): Promise<void>;
   /** A Review Run a version ran (Issue #66, S31; REUSE-031): its Book's 审阅, opened on that exact Run. */
   openReviewRun(book: { bookId: string; title: string }, reviewRunId: string): Promise<void>;
+  /** A 图书交付包 version holding such a Run's report (Issue #66, S31b; REUSE-031): its Book's 交付物, with that version focused. */
+  openDeliverables(book: { bookId: string; title: string }, packageVersionId: string): Promise<void>;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -256,7 +261,9 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     if (latestEligible) item.append(el('p', 'field-note captured-procedure-latest-eligible-note', PROCEDURE_LATEST_ELIGIBLE_NOTE));
     const steps = el('ol', 'captured-procedure-steps');
     for (const step of version.steps) steps.append(el('li', undefined, captureStepLine(step)));
-    item.append(steps, el('p', 'field-note captured-procedure-source', `${procedureSourceLine(version)} · 保存于 ${options.localInstantLabel(version.createdAt)}`));
+    // What a Book must have for this version to run there (Issue #66, S31b; REUSE-048): the 新建审阅 sheet says how it fits each Book.
+    const requirement = el('p', 'field-note captured-procedure-requirement', procedureRequirementLine(version.steps));
+    item.append(steps, requirement, el('p', 'field-note captured-procedure-source', `${procedureSourceLine(version)} · 保存于 ${options.localInstantLabel(version.createdAt)}`));
     const runs = el('p', 'field-note captured-procedure-runs', procedureRunsLine(version));
     item.append(runs);
     // 关联工作 (Issue #66, S31; REUSE-031): each Run an exact link to that Run in its Book's 审阅, never a copy of what it found.
@@ -270,6 +277,23 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
         link.classList.add('captured-procedure-run-link');
         link.dataset['reviewRunId'] = run.reviewRunId;
         entry.append(link);
+        list.append(entry);
+      }
+      item.append(list);
+    }
+    // 关联交付 (Issue #66, S31b; REUSE-031): each 图书交付包 version holding a report of a Run under this version, an exact link
+    // to its Book's 交付物 — never a copy of what it holds.
+    if (version.packageCount > 0) {
+      item.append(el('p', 'field-note captured-procedure-packages', procedurePackagesLine(version.packages.length, version.packageCount)));
+      const list = el('ul', 'captured-procedure-package-links');
+      for (const link of version.packages) {
+        const entry = el('li');
+        const open = button(procedurePackageLinkLine(link, options.localInstantLabel(link.preparedAt)), 'quiet', 'open-version-package', async () => {
+          await options.openDeliverables({ bookId: link.bookId, title: link.bookTitle }, link.packageVersionId);
+        });
+        open.classList.add('captured-procedure-package-link');
+        open.dataset['packageVersionId'] = link.packageVersionId;
+        entry.append(open);
         list.append(entry);
       }
       item.append(list);

@@ -140,6 +140,8 @@ export interface MountDeliverablesOptions {
   api: DeliverablesApi;
   /** A 维护事项 to open in place once 交付物 is read (Issue #426, S68b): 待我处理's way back to it. */
   openCase?: { caseId: string; publicationVersionId: string };
+  /** A 图书交付包 version to bring into view once the package is read (Issue #66, S31b review P3-4): a procedure version's link. */
+  focusPackageVersionId?: string;
   /** A 维护事项 step moved what 待我处理 lists: the header's number is read again (Issue #426, S68b). */
   attentionChanged?(): void;
   technicalDetails(gridClass: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement;
@@ -297,6 +299,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     root: packageSlot,
     bookId,
     api,
+    ...(options.focusPackageVersionId === undefined ? {} : { focusVersionId: options.focusPackageVersionId }),
     technicalDetails: options.technicalDetails,
     setStatus: options.setStatus,
     errorMessage: options.errorMessage,

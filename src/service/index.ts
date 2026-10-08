@@ -586,6 +586,8 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.previewCapturedProcedureStop(request.input.procedureId, request.input.versionId) };
     case 'stopCapturedProcedure':
       return { id: request.id, ok: true, op: request.op, result: store.stopCapturedProcedure(request.input.procedureId, request.input.versionId, request.input.previewDigest) };
+    case 'inspectCapturedProcedureApplicability':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectCapturedProcedureApplicability(request.input.bookId) };
     case 'inspectCapturedProcedureRun':
       return { id: request.id, ok: true, op: request.op, result: store.inspectCapturedProcedureRun(request.input.bookId, request.input.procedureId, request.input.versionId) };
     case 'saveDeveloperProposal':

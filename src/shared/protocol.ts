@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 102 as const;
+export const SERVICE_PROTOCOL_VERSION = 103 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -90,6 +90,7 @@ export const IPC_CHANNELS = {
   previewCapturedProcedureStop: 'ai7:j15:preview-captured-procedure-stop',
   stopCapturedProcedure: 'ai7:j15:stop-captured-procedure',
   inspectCapturedProcedureRun: 'ai7:j15:inspect-captured-procedure-run',
+  inspectCapturedProcedureApplicability: 'ai7:j15:inspect-captured-procedure-applicability',
   saveDeveloperProposal: 'ai7:j15:save-developer-proposal',
   saveDeveloperProposalFile: 'ai7:j15:save-developer-proposal-file',
   inspectLibraryMaterials: 'ai7:j15:inspect-library-materials',
@@ -5540,6 +5541,8 @@ export const MAX_CAPTURED_PROCEDURES_SHOWN = 50;
 export const MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE = 5;
 export const MAX_DEVELOPER_PROPOSAL_VERSIONS_PAGE = 3;
 export const MAX_CAPTURED_PROCEDURE_RUNS_SHOWN = 10;
+/** The 图书交付包 versions one version row links, newest first (Issue #66, S31b; REUSE-031). */
+export const MAX_CAPTURED_PROCEDURE_PACKAGES_SHOWN = 10;
 export const MAX_DEVELOPER_PROPOSAL_FILES_SHOWN = 10;
 
 /** A version's state (KB-010): 待验证 until `验证并启用…` succeeds, 已启用 after, 已停用 for good once stopped (ADR 0087 §3, §5). */
@@ -5625,6 +5628,13 @@ export interface ProcedureCaptureProjection {
   readonly procedures: ReadonlyArray<{ readonly procedureId: string; readonly title: string; readonly latestVersion: number }>;
 }
 
+/**
+ * What a Book must have for one step to run there (Issue #66, plan slice S31b; REUSE-048's declared abstract requirements):
+ * `series` — the Book is in a Series, and its Series material is chosen apart at each run (REUSE-050); `baseline-analysis` —
+ * the Book has a baseline analysis whose leads the step turns into 批注. A step with neither runs on any Book with a manuscript.
+ */
+export type CapturedProcedureStepRequirement = 'series' | 'baseline-analysis';
+
 /** One step of a saved version, in the editor's words and with the facts the document holds. */
 export interface CapturedProcedureStepProjection {
   readonly categoryId: string;
@@ -5634,6 +5644,20 @@ export interface CapturedProcedureStepProjection {
   readonly output: ReviewCategoryOutputKind;
   readonly model: boolean;
   readonly searchEngine: boolean;
+  /** What a Book must have for this step to run there, from the executor the document names (S31b); `null` for none. */
+  readonly requirement: CapturedProcedureStepRequirement | null;
+}
+
+/**
+ * A 图书交付包 version that holds the report of a Review Run pinned to one Captured Procedure version (Issue #66, S31b;
+ * REUSE-031): an exact link through the Run, never a copy of what the package holds.
+ */
+export interface CapturedProcedurePackageLinkProjection {
+  readonly bookId: string;
+  readonly bookTitle: string;
+  readonly packageVersionId: string;
+  readonly version: number;
+  readonly preparedAt: string;
 }
 
 /** A Review Run that pinned one version (REUSE-031): an exact link, never a copy of what it found. */
@@ -5668,6 +5692,12 @@ export interface CapturedProcedureVersionProjection {
   /** The Review Runs prepared from it and never approved; each is linked with its state like the others. */
   readonly preparedRunCount: number;
   readonly runs: ReadonlyArray<CapturedProcedureRunLinkProjection>;
+  /**
+   * The 图书交付包 versions that hold a report of a Review Run pinned to it, newest first, at most
+   * `MAX_CAPTURED_PROCEDURE_PACKAGES_SHOWN` (Issue #66, S31b; REUSE-031); `packageCount` counts them all.
+   */
+  readonly packages: ReadonlyArray<CapturedProcedurePackageLinkProjection>;
+  readonly packageCount: number;
   readonly technical: { readonly documentSha256: string; readonly previousDocumentSha256: string | null };
 }
 
@@ -5778,6 +5808,11 @@ export interface CapturedProcedureRunStepProjection {
   readonly label: string;
   readonly available: boolean;
   readonly unavailableReason: string | null;
+  /**
+   * The step reads Series material (Issue #66, S31b; REUSE-049, REUSE-050): the sheet never ticks it for the editor, who
+   * chooses it at each run; left unticked, the Run records it as left out by choice.
+   */
+  readonly chosenApart: boolean;
 }
 
 /**
@@ -5869,7 +5904,39 @@ export interface ReviewRunProcedureProjection {
    * prepared from, and one not yet authorized cannot be, as with a stopped version.
    */
   readonly missing: boolean;
-  readonly leftOut: ReadonlyArray<{ readonly categoryId: string; readonly label: string; readonly reason: string }>;
+  /** The steps the Run left out, with why; `byChoice` for a step the Book could take that the editor did not choose (S31b). */
+  readonly leftOut: ReadonlyArray<{ readonly categoryId: string; readonly label: string; readonly reason: string; readonly byChoice: boolean }>;
+}
+
+/** How much of one procedure's latest eligible version one Book can take now (Issue #66, S31b). */
+export type CapturedProcedureFit = 'all' | 'partial' | 'none' | 'no-version';
+
+/**
+ * One enabled Captured Procedure as it applies to one Book (Issue #66, plan slice S31b; REUSE-046, REUSE-053, REUSE-054): the
+ * one version a new use takes — the latest eligible — and how many of its steps this Book can take now, with why each other is
+ * left out. Deterministic and provider-free. It names no procedure as a recommendation (ADR 0087 §4): every enabled procedure
+ * stays open to manual selection, and a mismatch is said, never a prohibition.
+ */
+export interface CapturedProcedureApplicabilityEntryProjection {
+  readonly procedureId: string;
+  readonly title: string;
+  /** The version a new use takes now; `null` when none of its enabled versions still validates. */
+  readonly latestEligible: null | { readonly versionId: string; readonly version: number };
+  readonly fit: CapturedProcedureFit;
+  readonly stepCount: number;
+  /** Steps this Book can take now, the Series steps the editor chooses apart among them. */
+  readonly availableCount: number;
+  /** The labels of the steps this Book can take that the editor chooses apart at each run (REUSE-050). */
+  readonly chosenApart: ReadonlyArray<string>;
+  /** The steps this Book cannot take now, with why. */
+  readonly leftOut: ReadonlyArray<{ readonly label: string; readonly reason: string }>;
+}
+
+/** 按已保存的工序 on one Book's 新建审阅 (Issue #66, S31b): the house's enabled Captured Procedures, as each applies to it. */
+export interface CapturedProcedureApplicabilityProjection {
+  readonly bookId: string;
+  readonly procedures: ReadonlyArray<CapturedProcedureApplicabilityEntryProjection>;
+  readonly truncated: boolean;
 }
 
 export const MAX_DEVELOPER_PROPOSAL_TITLE_GRAPHEMES = 60;
@@ -10294,6 +10361,8 @@ export interface ServiceOperationMap {
    * eligible version the editor chose instead (Issue #66, S31; REUSE-043 to REUSE-045, REUSE-054).
    */
   inspectCapturedProcedureRun: { input: { bookId: string; procedureId: string; versionId: string | null }; output: CapturedProcedureRunProjection };
+  /** The house's enabled Captured Procedures as each applies to one Book: its latest eligible version and its steps there (S31b). */
+  inspectCapturedProcedureApplicability: { input: { bookId: string }; output: CapturedProcedureApplicabilityProjection };
   /** 保存开发建议: a new Developer Capability Proposal, or its next version (ADR 0087 §6). */
   saveDeveloperProposal: { input: SaveDeveloperProposalInput; output: DeveloperProposalProjection };
   /** 导出为文件…: the proposal version written to the file the editor chose through the Save dialog (ADR 0087 §6). */
@@ -10880,6 +10949,8 @@ export interface RendererApi {
   stopCapturedProcedure(input: { procedureId: string; versionId: string | null; previewDigest: string }): Promise<CapturedProcedureProjection>;
   /** For the current Book's 新建审阅 sheet: the latest eligible version, or the exact eligible one chosen (`versionId`). */
   inspectCapturedProcedureRun(input: { procedureId: string; versionId?: string | null }): Promise<CapturedProcedureRunProjection>;
+  /** The house's enabled Captured Procedures as each applies to the route's Book (Issue #66, S31b): the sheet's 按已保存的工序. */
+  inspectCapturedProcedureApplicability(): Promise<CapturedProcedureApplicabilityProjection>;
   saveDeveloperProposal(input: SaveDeveloperProposalInput): Promise<DeveloperProposalProjection>;
   /** 导出为文件…: the platform Save dialog, then the file; nothing is written or recorded when the dialog is cancelled. */
   saveDeveloperProposalFile(input: { proposalVersionId: string }): Promise<SaveDeveloperProposalFileOutcome>;

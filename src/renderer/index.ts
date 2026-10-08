@@ -2365,7 +2365,7 @@ function renderBookEvaluation(bookId: string, bookTitle: string): void {
   );
 }
 
-function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { caseId: string; publicationVersionId: string }): void {
+function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { caseId: string; publicationVersionId: string }, focusPackageVersionId?: string): void {
   const content = panel();
   content.classList.add('book-deliverables');
   content.dataset['bookId'] = bookId;
@@ -2376,6 +2376,8 @@ function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { 
     api: window.ai7,
     // 维护事项待处理 opens its case in place (Issue #426, S68b), and a step of a case reads the header's number again.
     ...(openCase === undefined ? {} : { openCase }),
+    // A procedure version's link to one 图书交付包 version (Issue #66, S31b review P3-4): that version in view and focused.
+    ...(focusPackageVersionId === undefined ? {} : { focusPackageVersionId }),
     attentionChanged: () => globalAttentionReader.refresh(),
     technicalDetails,
     setStatus,
@@ -4986,6 +4988,16 @@ function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjecti
             renderBookReview(route.bookId, route.bookTitle, { reviewRunId, findingId: null }));
         } catch (error) {
           setStatus(rendererErrorMessage(error, '无法打开这次审阅。'), 'error');
+        }
+      },
+      // A 图书交付包 version holding the report of such a Run (Issue #66, S31b; REUSE-031): its Book's 交付物.
+      openDeliverables: async (book, packageVersionId) => {
+        setStatus('正在打开这本书的交付物…', 'busy');
+        try {
+          await requestBookWorkbenchRoute({ kind: 'book', bookId: book.bookId }, async (route) =>
+            renderBookDeliverables(route.bookId, route.bookTitle, undefined, packageVersionId));
+        } catch (error) {
+          setStatus(rendererErrorMessage(error, '无法打开这本书的交付物。'), 'error');
         }
       },
     });

@@ -4,6 +4,7 @@ import {
   CAPTURED_PROCEDURE_SCHEMA,
   CAPTURED_PROCEDURE_SCOPE_SLOTS,
   CAPTURED_PROCEDURE_STATE_LABELS,
+  MAX_CAPTURED_PROCEDURE_PACKAGES_SHOWN,
   MAX_CAPTURED_PROCEDURE_RUNS_SHOWN,
   MAX_CAPTURED_PROCEDURE_TITLE_CHARACTERS,
   MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES,
@@ -16,12 +17,14 @@ import {
   MAX_DEVELOPER_PROPOSAL_VERSIONS_PAGE,
   MAX_FRAME_BYTES,
   type CapturedProcedureDocument,
+  type CapturedProcedurePackageLinkProjection,
   type CapturedProcedureProjection,
   type CapturedProcedureSummaryProjection,
   type CapturedProcedureScopeSlot,
   type CapturedProcedureState,
   type CapturedProcedureStepDocument,
   type CapturedProcedureStepProjection,
+  type CapturedProcedureStepRequirement,
   type CapturedProcedureVersionProjection,
   type DeveloperProposalProjection,
   type DeveloperProposalSummaryProjection,
@@ -191,6 +194,23 @@ export function initializeCapturedProcedureSchema(db: DatabaseSync): void {
 export function houseExecutor(entry: ReviewCategoryConfigurationEntry): string {
   return entry.seriesKnowledge !== undefined ? 'series-knowledge' : entry.executor;
 }
+
+/**
+ * What a Book must have for a step naming `executor` to run there (Issue #66, S31b; REUSE-048): a Series for 书系一致性, whose
+ * material the editor chooses apart at each run (REUSE-050), and a baseline analysis for the leads; nothing for any other.
+ */
+export function stepRequirement(executor: string): CapturedProcedureStepRequirement | null {
+  if (executor === 'series-knowledge') return 'series';
+  return executor === 'baseline-leads' ? 'baseline-analysis' : null;
+}
+
+/** The steps of a document whose Series material the editor chooses apart at each run (Issue #66, S31b; REUSE-049, REUSE-050). */
+export function chosenApartSteps(document: CapturedProcedureDocument): string[] {
+  return document.authorityCeiling.steps.filter((step) => stepRequirement(step.executor) === 'series').map((step) => step.categoryId);
+}
+
+/** Why a Run left out a Series step its Book could take: the editor did not choose it (Issue #66, S31b; REUSE-050). */
+export const PROCEDURE_STEP_NOT_CHOSEN = '书系资料要在每次运行时另行选择，这次你没有选它。' as const;
 
 /** Whether a category calls a model: every executor but the model-free leads (REV-011). */
 export function callsModel(executor: string): boolean {
@@ -403,7 +423,13 @@ type SqlRow = Record<string, SQLOutputValue>;
 const IDENTITY_SCHEMA = 'ai7.captured-procedure.identity/1' as const;
 const VERSION_SCHEMA = 'ai7.captured-procedure.version/1' as const;
 const STATE_SCHEMA = 'ai7.captured-procedure.state/1' as const;
-const PIN_SCHEMA = 'ai7.review.procedure-pin/1' as const;
+/**
+ * A pin that left a step out by the editor's choice is written as `/2`, each step left out saying whether it was (Issue #66,
+ * S31b). Every other pin is written as `/1`, exactly as before S31b — every step it left out was one its Book could not take —
+ * so a build from before reads it still (S31b review P3-8).
+ */
+const PIN_SCHEMA_V1 = 'ai7.review.procedure-pin/1' as const;
+const PIN_SCHEMA = 'ai7.review.procedure-pin/2' as const;
 const PROPOSAL_SCHEMA = 'ai7.developer-capability-proposal/1' as const;
 const PROPOSAL_EXPORT_SCHEMA = 'ai7.developer-capability-proposal.export/1' as const;
 const ACTOR = '本机编辑' as const;
@@ -457,6 +483,16 @@ export interface ReviewRunProcedurePinInput {
   readonly scope: CapturedProcedureScopeSlot;
   /** The steps of the version, in their order. */
   readonly steps: ReadonlyArray<string>;
+  /** Its steps whose Series material the editor chooses apart at each run, and may leave out (Issue #66, S31b; REUSE-050). */
+  readonly chosenApart: ReadonlyArray<string>;
+}
+
+/** A step a Run prepared from a version left out, with why: one its Book could not take, or one the editor did not choose. */
+export interface ProcedureLeftOutStep {
+  readonly categoryId: string;
+  readonly label: string;
+  readonly reason: string;
+  readonly byChoice: boolean;
 }
 
 /** Record a Review Run's pin, in the caller's transaction — the one that writes the Run (ADR 0087 §4). */
@@ -465,11 +501,12 @@ export function recordReviewRunProcedurePin(
   reviewRunId: string,
   pin: ReviewRunProcedurePinInput,
   ran: ReadonlyArray<string>,
-  leftOut: ReadonlyArray<{ categoryId: string; label: string; reason: string }>,
+  leftOut: ReadonlyArray<ProcedureLeftOutStep>,
   recordedAt: string,
 ): void {
+  const byChoice = leftOut.some((entry) => entry.byChoice);
   const record = canonicalRecord({
-    schema: PIN_SCHEMA,
+    schema: byChoice ? PIN_SCHEMA : PIN_SCHEMA_V1,
     reviewRunId,
     procedureId: pin.procedureId,
     versionId: pin.versionId,
@@ -478,7 +515,9 @@ export function recordReviewRunProcedurePin(
     documentSha256: pin.documentSha256,
     scope: pin.scope,
     ran,
-    leftOut,
+    leftOut: leftOut.map((entry) => byChoice
+      ? { categoryId: entry.categoryId, label: entry.label, reason: entry.reason, byChoice: entry.byChoice }
+      : { categoryId: entry.categoryId, label: entry.label, reason: entry.reason }),
     recordedAt,
   });
   db.prepare(
@@ -492,8 +531,11 @@ export function readReviewRunProcedurePin(db: DatabaseSync, reviewRunId: string)
   const row = db.prepare('SELECT * FROM review_run_procedure_pins WHERE review_run_id = ?').get(reviewRunId) as SqlRow | undefined;
   if (row === undefined) return null;
   const record = recordOf(row);
-  requireProcedure(record.schema === PIN_SCHEMA && record.reviewRunId === reviewRunId && record.versionId === text(row.version_id) &&
-    record.documentSha256 === text(row.document_sha256) && typeof record.title === 'string' && Array.isArray(record.leftOut),
+  const current = record.schema === PIN_SCHEMA;
+  requireProcedure((current || record.schema === PIN_SCHEMA_V1) && record.reviewRunId === reviewRunId && record.versionId === text(row.version_id) &&
+    record.documentSha256 === text(row.document_sha256) && typeof record.title === 'string' && Array.isArray(record.leftOut) &&
+    (record.leftOut as unknown[]).every((entry) => isRecord(entry) && typeof entry.categoryId === 'string' && typeof entry.label === 'string' &&
+      typeof entry.reason === 'string' && (current ? typeof entry.byChoice === 'boolean' : !('byChoice' in entry))),
   'CAPTURED_PROCEDURE_RECORD_INVALID', '审阅所依据的可复用工序记录已损坏。');
   const stopped = db.prepare("SELECT 1 FROM captured_procedure_states WHERE version_id = ? AND state = 'stopped'").get(text(row.version_id)) !== undefined;
   // A Book merged in from another house brings its pins and none of that house's procedures (Issue #65 review).
@@ -506,8 +548,9 @@ export function readReviewRunProcedurePin(db: DatabaseSync, reviewRunId: string)
     documentSha256: text(row.document_sha256),
     stopped,
     missing: present === undefined || text(present.document_sha256) !== text(row.document_sha256),
-    leftOut: (record.leftOut as Array<{ categoryId: string; label: string; reason: string }>).map((entry) => ({
-      categoryId: entry.categoryId, label: entry.label, reason: entry.reason,
+    // A `/1` pin left out only what its Book could not take.
+    leftOut: (record.leftOut as Array<{ categoryId: string; label: string; reason: string; byChoice?: boolean }>).map((entry) => ({
+      categoryId: entry.categoryId, label: entry.label, reason: entry.reason, byChoice: entry.byChoice === true,
     })),
   };
 }
@@ -601,6 +644,12 @@ export function boundedPage<T>(items: ReadonlyArray<T>, limit: number, budget: n
 
 /** What one step reads as in the editor's words: its category's label and its 工序's title, from the configuration. */
 export type StepWords = (categoryId: string) => { label: string; procedureTitle: string };
+
+/**
+ * The 图书交付包 versions holding a report of any of `reviewRunIds`, newest first, at most `limit`, and how many there are in
+ * all (Issue #66, S31b; REUSE-031). The store reads them from the package ledger.
+ */
+export type LinkedPackages = (reviewRunIds: ReadonlyArray<string>, limit: number) => { packages: CapturedProcedurePackageLinkProjection[]; total: number };
 
 export class CapturedProcedures {
   readonly #db: DatabaseSync;
@@ -837,6 +886,8 @@ export class CapturedProcedures {
     runStateLabel: (reviewRunId: string) => string,
     latestEligibleVersionId: string | null,
     before: number | null = null,
+    // The packages that hold a report of a Run pinned to a version (Issue #66, S31b; REUSE-031).
+    linkedPackages: LinkedPackages = () => ({ packages: [], total: 0 }),
   ): CapturedProcedureProjection {
     requireProcedure(before === null || (Number.isSafeInteger(before) && before >= 1), 'CAPTURED_PROCEDURE_INVALID', '版本位置无效。');
     const summary = this.summary(procedureId);
@@ -846,6 +897,7 @@ export class CapturedProcedures {
       const stored = this.#versionOf(row);
       const runs = this.runsOf(stored.versionId);
       const counts = this.pinCounts(stored.versionId);
+      const packages = linkedPackages(this.pinnedRunIds(stored.versionId), MAX_CAPTURED_PROCEDURE_PACKAGES_SHOWN);
       return {
         versionId: stored.versionId,
         procedureId: stored.procedureId,
@@ -870,6 +922,8 @@ export class CapturedProcedures {
           bookId: run.bookId, bookTitle: run.bookTitle, reviewRunId: run.reviewRunId, label: `第 ${run.ordinal} 次`, createdAt: run.createdAt,
           stateLabel: runStateLabel(run.reviewRunId),
         })),
+        packages: packages.packages,
+        packageCount: packages.total,
         technical: { documentSha256: stored.documentSha256, previousDocumentSha256: stored.previousDocumentSha256 },
       };
     });
@@ -1014,10 +1068,11 @@ function proposalField(value: unknown, required: boolean): boolean {
     graphemeCount(value) <= MAX_DEVELOPER_PROPOSAL_FIELD_GRAPHEMES && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value);
 }
 
-/** A version's steps in the editor's words. */
+/** A version's steps in the editor's words, each with what a Book must have for it to run there (S31b). */
 export function capturedStepProjections(document: CapturedProcedureDocument, words: StepWords): CapturedProcedureStepProjection[] {
   return document.steps.map((step) => {
     const named = words(step.categoryId);
+    const executor = document.authorityCeiling.steps.find((ceiling) => ceiling.categoryId === step.categoryId)?.executor ?? '';
     return {
       categoryId: step.categoryId,
       label: named.label,
@@ -1026,6 +1081,7 @@ export function capturedStepProjections(document: CapturedProcedureDocument, wor
       output: step.output,
       model: step.model,
       searchEngine: step.searchEngine,
+      requirement: stepRequirement(executor),
     };
   });
 }

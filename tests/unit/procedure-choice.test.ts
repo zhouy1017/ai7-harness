@@ -11,6 +11,7 @@ import {
   SHEET_PROCEDURE_LOADING,
   SHEET_PROCEDURE_VERSION_MISMATCH,
   confirmProcedureStop,
+  procedureCategoryOpen,
   procedureChoiceAfter,
   procedureChoiceFocus,
   procedurePreparationPin,
@@ -86,7 +87,9 @@ function runAt(version: typeof V1, number: number, steps: ReadonlyArray<[string,
       latestEligible: number === 2,
       documentSha256: version.documentSha256,
       scopeSlot,
-      steps: steps.map(([categoryId, available]): CapturedProcedureRunStepProjection => ({ categoryId, label: categoryId, available, unavailableReason: available ? null : '本书不适用。' })),
+      steps: steps.map(([categoryId, available]): CapturedProcedureRunStepProjection => ({
+        categoryId, label: categoryId, available, unavailableReason: available ? null : '本书不适用。', chosenApart: categoryId === 'series-consistency',
+      })),
       guidelineChanges: [],
     },
     passedOver: [],
@@ -128,6 +131,26 @@ describe('what a choice leaves in the sheet (Issue #684)', () => {
     expect(after.procedure).toBe(older);
     expect([...after.categories]).toEqual(['style-and-format']);
     expect([after.scope, after.from, after.to, after.problem]).toEqual(['whole', null, null, null]);
+  });
+
+  it('leaves a Series step this Book can take unticked for the editor to choose (Issue #66, S31b; REUSE-049, REUSE-050)', () => {
+    const byHand: ProcedureSheetChoice = { procedure: null, categories: new Set(), scope: null, from: null, to: null, problem: null };
+    const series = runAt(V1, 1, [['style-and-format', true], ['series-consistency', true]], 'whole');
+    expect([...procedureChoiceAfter(byHand, { kind: 'answered', run: series }).categories]).toEqual(['style-and-format']);
+    // Alone, the Series step leaves nothing ticked: the editor ticks it, or prepares nothing.
+    const alone = runAt(V1, 1, [['series-consistency', true]], 'whole');
+    expect([...procedureChoiceAfter(byHand, { kind: 'answered', run: alone }).categories]).toEqual([]);
+  });
+
+  it('opens on a filled sheet only the box of a Series step this Book can take (Issue #66, S31b)', () => {
+    // Chosen by hand: every box is the editor's.
+    expect(procedureCategoryOpen(false, null)).toBe(true);
+    expect(procedureCategoryOpen(false, { available: true, chosenApart: false })).toBe(true);
+    // Filled: the procedure's steps are its own, a category outside it closed, a Series step the editor's.
+    expect(procedureCategoryOpen(true, null)).toBe(false);
+    expect(procedureCategoryOpen(true, { available: true, chosenApart: false })).toBe(false);
+    expect(procedureCategoryOpen(true, { available: true, chosenApart: true })).toBe(true);
+    expect(procedureCategoryOpen(true, { available: false, chosenApart: true })).toBe(false);
   });
 
   it('holds an answer that cannot run with nothing ticked and its reason, leaving the scope as it was', () => {
