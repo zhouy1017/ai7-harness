@@ -82,8 +82,8 @@ export interface MountCapturedProceduresOptions {
   openRun(book: { bookId: string; title: string }, procedureId: string): Promise<void>;
   /** A Review Run a version ran (Issue #66, S31; REUSE-031): its Book's 审阅, opened on that exact Run. */
   openReviewRun(book: { bookId: string; title: string }, reviewRunId: string): Promise<void>;
-  /** A 图书交付包 version holding such a Run's report (Issue #66, S31b; REUSE-031): its Book's 交付物, where it is listed. */
-  openDeliverables(book: { bookId: string; title: string }): Promise<void>;
+  /** A 图书交付包 version holding such a Run's report (Issue #66, S31b; REUSE-031): its Book's 交付物, with that version focused. */
+  openDeliverables(book: { bookId: string; title: string }, packageVersionId: string): Promise<void>;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -289,7 +289,7 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
       for (const link of version.packages) {
         const entry = el('li');
         const open = button(procedurePackageLinkLine(link, options.localInstantLabel(link.preparedAt)), 'quiet', 'open-version-package', async () => {
-          await options.openDeliverables({ bookId: link.bookId, title: link.bookTitle });
+          await options.openDeliverables({ bookId: link.bookId, title: link.bookTitle }, link.packageVersionId);
         });
         open.classList.add('captured-procedure-package-link');
         open.dataset['packageVersionId'] = link.packageVersionId;

@@ -5,6 +5,7 @@ import {
   type CapturedProcedureGuidelineProjection,
   type CapturedProcedurePackageLinkProjection,
   type CapturedProcedureRunProjection,
+  type CapturedProcedureRunStepProjection,
   type CapturedProcedureScopeSlot,
   type CapturedProcedureStepProjection,
   type CapturedProcedureStopPreviewProjection,
@@ -319,15 +320,28 @@ export function sheetChosenApartLine(label: string): string {
   return `「${label}」要读这本书所在书系的资料，不会替你选上：要用就勾选它；不选，这次审阅会记下是你没有选。`;
 }
 
+/**
+ * What a filled sheet ticked (S31b): every step this Book can take, or — Series steps being the editor's to choose (REUSE-050)
+ * — the rest of them, or none, when every step it can take is the editor's, or when it can take none.
+ */
+function filledWords(steps: ReadonlyArray<Pick<CapturedProcedureRunStepProjection, 'available' | 'chosenApart'>>): string {
+  const apart = steps.some((step) => step.available && step.chosenApart);
+  const ticked = steps.some((step) => step.available && !step.chosenApart);
+  if (!apart) return ticked ? '类别已按它选好' : '这本书现在一步也不能运行';
+  return ticked ? '其余类别已按它选好' : '要运行的类别由你勾选';
+}
+
+/** The status once a choice filled the sheet (S31b review P3-5): what it ticked, in the same words as the sheet's own line. */
+export function sheetProcedureChosenStatus(run: CapturedProcedureRunProjection): string {
+  if (run.resolved === null) return run.unavailableReason ?? '';
+  return `已读取《${run.title}》第 ${run.resolved.version} 版：${filledWords(run.resolved.steps)}。`;
+}
+
 /** What the sheet says once a Captured Procedure filled it (ADR 0087 §4; REUSE-054): the exact version, and what it leaves out. */
 export function sheetProcedureLines(run: CapturedProcedureRunProjection): string[] {
   if (run.resolved === null) return [run.unavailableReason ?? ''];
   const resolved = run.resolved;
-  // Series steps are left for the editor (S31b): the line says what the procedure ticked, and what it left to them.
-  const apart = resolved.steps.some((step) => step.available && step.chosenApart);
-  const ticked = resolved.steps.some((step) => step.available && !step.chosenApart);
-  const filled = !apart ? '类别已按它选好' : ticked ? '其余类别已按它选好' : '要运行的类别由你勾选';
-  const lines = [`按《${run.title}》第 ${resolved.version} 版：${resolved.steps.map((step) => step.label).join(' → ')}；范围「${CAPTURED_PROCEDURE_SCOPE_LABELS[resolved.scopeSlot]}」。${filled}，计划照常先看。`];
+  const lines = [`按《${run.title}》第 ${resolved.version} 版：${resolved.steps.map((step) => step.label).join(' → ')}；范围「${CAPTURED_PROCEDURE_SCOPE_LABELS[resolved.scopeSlot]}」。${filledWords(resolved.steps)}，计划照常先看。`];
   for (const step of resolved.steps) {
     if (!step.available) lines.push(`不运行「${step.label}」：${step.unavailableReason ?? ''}`);
     else if (step.chosenApart) lines.push(sheetChosenApartLine(step.label));
@@ -353,4 +367,15 @@ export function runProcedureLine(procedure: ReviewRunProcedureProjection): strin
 /** A step the Run left out (ADR 0087 §4): one its Book could not take, or — by choice — a Series step the editor did not choose (S31b). */
 export function runProcedureLeftOutLine(entry: ReviewRunProcedureProjection['leftOut'][number]): string {
   return `${entry.byChoice ? '未选' : '未运行'}「${entry.label}」：${entry.reason}`;
+}
+
+/**
+ * One left-out step as the Run's pin shows it (S31b review P3-2): its line, and the data the line carries — the category, and
+ * whether the editor left it out by choice — told apart from a step the Book could not take.
+ */
+export function runProcedureLeftOutView(entry: ReviewRunProcedureProjection['leftOut'][number]): {
+  readonly text: string;
+  readonly data: { readonly procedureLeftOutCategory: string; readonly procedureLeftOutByChoice: 'true' | 'false' };
+} {
+  return { text: runProcedureLeftOutLine(entry), data: { procedureLeftOutCategory: entry.categoryId, procedureLeftOutByChoice: entry.byChoice ? 'true' : 'false' } };
 }

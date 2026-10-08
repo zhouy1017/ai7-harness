@@ -513,24 +513,38 @@ export class BookDeliveryPackages {
 
   /**
    * The frozen versions that hold a report of any of `reviewRunIds`, newest first, at most `limit`, and how many there are in
-   * all (Issue #66, S31b; REUSE-031): what a Captured Procedure version's row links through the Runs pinned to it. Only the
-   * packages of those Runs' Books are read, each verified against its digests.
+   * all (Issue #66, S31b; REUSE-031): what a Captured Procedure version's row links through the Runs pinned to it. The
+   * database finds and counts the versions whose frozen content names such a Run — a record that is not JSON names none — so
+   * no other package is read; only the rows returned are verified against their digests. A returned row that fails its
+   * verification is left unlinked but still counted: a damaged package never fails the version page, nor the answer to a
+   * 停用 already committed (S31b review P3-1).
    */
   holdingReviewRuns(reviewRunIds: ReadonlyArray<string>, limit: number): { packages: Array<{ bookId: string; packageVersionId: string; version: number; preparedAt: string }>; total: number } {
     const wanted = new Set(reviewRunIds);
     if (wanted.size === 0) return { packages: [], total: 0 };
-    const held: Array<{ bookId: string; packageVersionId: string; version: number; preparedAt: string }> = [];
+    const runs = JSON.stringify([...wanted]);
+    const holds = `CASE WHEN json_valid(v.canonical_json) THEN EXISTS (
+         SELECT 1 FROM json_each(v.canonical_json, '$.content.reviewReports') report
+         WHERE json_extract(report.value, '$.reviewRunId') IN (SELECT value FROM json_each(?1))) ELSE 0 END`;
+    const books = 'v.book_id IN (SELECT r.book_id FROM review_runs r WHERE r.review_run_id IN (SELECT value FROM json_each(?1)))';
+    const total = (this.#db.prepare(`SELECT count(*) n FROM book_delivery_package_versions v WHERE ${books} AND ${holds}`).get(runs) as SqlRow).n;
     const rows = this.#db.prepare(
-      `SELECT v.* FROM book_delivery_package_versions v
-       WHERE v.book_id IN (SELECT r.book_id FROM review_runs r WHERE r.review_run_id IN (SELECT value FROM json_each(?)))
-       ORDER BY v.prepared_at DESC, v.package_version_id`,
-    ).iterate(JSON.stringify([...wanted])) as Iterable<SqlRow>;
+      `SELECT v.* FROM book_delivery_package_versions v WHERE ${books} AND ${holds}
+       ORDER BY v.prepared_at DESC, v.version DESC, v.package_version_id LIMIT ?2`,
+    ).all(runs, limit) as SqlRow[];
+    const held: Array<{ bookId: string; packageVersionId: string; version: number; preparedAt: string }> = [];
     for (const row of rows) {
-      const { record } = verifiedVersion(row);
-      if (!record.content.reviewReports.some((report) => wanted.has(report.reviewRunId))) continue;
+      let record: PackageVersionRecord;
+      try {
+        // Whatever way a record is damaged — its digest, its schema, its content — it is not one this page can name.
+        record = verifiedVersion(row).record;
+      } catch {
+        continue;
+      }
+      if (!Array.isArray(record.content.reviewReports) || !record.content.reviewReports.some((report) => wanted.has(report.reviewRunId))) continue;
       held.push({ bookId: record.bookId, packageVersionId: record.packageVersionId, version: record.version, preparedAt: record.preparedAt });
     }
-    return { packages: held.slice(0, limit), total: held.length };
+    return { packages: held, total: integer(total) };
   }
 
   /** One frozen version of this Book's package, its record verified against its digest, or `null` when it is none of it. */

@@ -2037,6 +2037,8 @@ async function main() {
       [seriesProcedureId, `《${SERIES_PROCEDURE_TITLE}》第 1 版 · 这本书能运行全部 1 步；「书系一致性」要你另行勾选`, 'all']]), 'series-sheet-offered', offeredHere);
     await assertRenderer(renderer, `(() => { const select=document.querySelector('dialog.review-sheet [data-review-field="procedure"]'); if(!(select instanceof HTMLSelectElement)||select.disabled)return false; select.value=${JSON.stringify(seriesProcedureId)}; select.dispatchEvent(new Event('change',{bubbles:true})); return true; })()`, 'series-sheet-choose');
     const seriesSheet = await readUntil(renderer, READ_SHEET_PROCEDURE, (read) => read?.version === '1', 'series-sheet-filled');
+    // The status says what the sheet ticked — nothing, here — in the sheet's own words (S31b review P3-5).
+    await waitFor(renderer, `${status}===${JSON.stringify(`已读取《${SERIES_PROCEDURE_TITLE}》第 1 版：要运行的类别由你勾选。`)}`, 'series-sheet-status', 10_000);
     const READ_SERIES_BOX = `(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=sheet?.querySelector('input[name="review-category"][value="series-consistency"]'); return box instanceof HTMLInputElement ? { checked: box.checked, disabled: box.disabled, apart: box.closest('label')?.dataset.procedureChosenApart ?? null, open: Array.from(sheet.querySelectorAll('input[name="review-category"]:not(:disabled)'), (input) => input.value) } : null; })()`;
     const seriesBox = await renderer.evaluate(READ_SERIES_BOX);
     requireJourney(JSON.stringify(seriesSheet.checked) === JSON.stringify([]) && seriesBox?.checked === false && seriesBox.disabled === false && seriesBox.apart === 'true' &&

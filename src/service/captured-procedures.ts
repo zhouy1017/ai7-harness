@@ -424,8 +424,9 @@ const IDENTITY_SCHEMA = 'ai7.captured-procedure.identity/1' as const;
 const VERSION_SCHEMA = 'ai7.captured-procedure.version/1' as const;
 const STATE_SCHEMA = 'ai7.captured-procedure.state/1' as const;
 /**
- * A pin is written as `/2`: each step left out says whether the editor chose to leave it out (Issue #66, S31b). A `/1` pin,
- * written before, left out only steps its Book could not take.
+ * A pin that left a step out by the editor's choice is written as `/2`, each step left out saying whether it was (Issue #66,
+ * S31b). Every other pin is written as `/1`, exactly as before S31b — every step it left out was one its Book could not take —
+ * so a build from before reads it still (S31b review P3-8).
  */
 const PIN_SCHEMA_V1 = 'ai7.review.procedure-pin/1' as const;
 const PIN_SCHEMA = 'ai7.review.procedure-pin/2' as const;
@@ -503,8 +504,9 @@ export function recordReviewRunProcedurePin(
   leftOut: ReadonlyArray<ProcedureLeftOutStep>,
   recordedAt: string,
 ): void {
+  const byChoice = leftOut.some((entry) => entry.byChoice);
   const record = canonicalRecord({
-    schema: PIN_SCHEMA,
+    schema: byChoice ? PIN_SCHEMA : PIN_SCHEMA_V1,
     reviewRunId,
     procedureId: pin.procedureId,
     versionId: pin.versionId,
@@ -513,7 +515,9 @@ export function recordReviewRunProcedurePin(
     documentSha256: pin.documentSha256,
     scope: pin.scope,
     ran,
-    leftOut: leftOut.map((entry) => ({ categoryId: entry.categoryId, label: entry.label, reason: entry.reason, byChoice: entry.byChoice })),
+    leftOut: leftOut.map((entry) => byChoice
+      ? { categoryId: entry.categoryId, label: entry.label, reason: entry.reason, byChoice: entry.byChoice }
+      : { categoryId: entry.categoryId, label: entry.label, reason: entry.reason }),
     recordedAt,
   });
   db.prepare(

@@ -20,8 +20,10 @@ import {
   procedureStopVersionLine,
   procedureVersionLine,
   runProcedureLeftOutLine,
+  runProcedureLeftOutView,
   runProcedureLine,
   sheetChosenApartLine,
+  sheetProcedureChosenStatus,
   sheetProcedureLines,
   sheetProcedureOption,
   sheetProcedureVersionOption,
@@ -132,6 +134,15 @@ describe('知识库 and the Run', () => {
     // A Series step the editor did not choose is told apart from one the Book could not take (Issue #66, S31b; REUSE-050).
     expect(runProcedureLeftOutLine({ categoryId: 'series-consistency', label: '书系一致性', reason: '书系资料要在每次运行时另行选择，这次你没有选它。', byChoice: true }))
       .toBe('未选「书系一致性」：书系资料要在每次运行时另行选择，这次你没有选它。');
+    // The line on the Run's pin carries its category and whether it was left out by choice (S31b review P3-2).
+    expect(runProcedureLeftOutView({ categoryId: 'series-consistency', label: '书系一致性', reason: '书系资料要在每次运行时另行选择，这次你没有选它。', byChoice: true })).toEqual({
+      text: '未选「书系一致性」：书系资料要在每次运行时另行选择，这次你没有选它。',
+      data: { procedureLeftOutCategory: 'series-consistency', procedureLeftOutByChoice: 'true' },
+    });
+    expect(runProcedureLeftOutView({ categoryId: 'plot-consistency', label: '情节逻辑与前后一致', reason: '还没有基线分析。', byChoice: false })).toEqual({
+      text: '未运行「情节逻辑与前后一致」：还没有基线分析。',
+      data: { procedureLeftOutCategory: 'plot-consistency', procedureLeftOutByChoice: 'false' },
+    });
   });
 });
 
@@ -150,6 +161,14 @@ describe('Series material chosen apart, applicability and linked packages (Issue
     // A procedure of the Series step alone ticks nothing: the editor ticks it, or runs nothing.
     expect(sheetProcedureLines({ ...run, resolved: { ...run.resolved, steps: [steps[1]!] } })[0])
       .toBe('按《书系复核》第 1 版：书系一致性；范围「全书」。要运行的类别由你勾选，计划照常先看。');
+    // The status says what the sheet ticked, in the sheet's own words (S31b review P3-5).
+    expect(sheetProcedureChosenStatus(run)).toBe('已读取《书系复核》第 1 版：其余类别已按它选好。');
+    expect(sheetProcedureChosenStatus({ ...run, resolved: { ...run.resolved, steps: [steps[1]!] } })).toBe('已读取《书系复核》第 1 版：要运行的类别由你勾选。');
+    expect(sheetProcedureChosenStatus({ ...run, resolved: { ...run.resolved, steps: [steps[0]!] } })).toBe('已读取《书系复核》第 1 版：类别已按它选好。');
+    const none = { ...run, resolved: { ...run.resolved, steps: [{ ...steps[0]!, available: false, unavailableReason: '还没有基线分析。' }] } };
+    expect(sheetProcedureChosenStatus(none)).toBe('已读取《书系复核》第 1 版：这本书现在一步也不能运行。');
+    expect(sheetProcedureLines(none)[0]).toBe('按《书系复核》第 1 版：体例与格式；范围「全书」。这本书现在一步也不能运行，计划照常先看。');
+    expect(sheetProcedureChosenStatus({ ...run, resolved: null, unavailableReason: '还没有启用。' })).toBe('还没有启用。');
     // A Series step this Book cannot take is said as left out, never as a choice.
     const outside = { ...run, resolved: { ...run.resolved, steps: [steps[0]!, { ...steps[1]!, available: false, unavailableReason: '这本书不在任何书系中。' }] } };
     expect(sheetProcedureLines(outside)).toEqual([

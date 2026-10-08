@@ -20,6 +20,7 @@ import type {
   CapturedProceduresProjection,
   CapturedProcedureApplicabilityEntryProjection,
   CapturedProcedureApplicabilityProjection,
+  CapturedProcedureScopeSlot,
   CapturedProcedureRunProjection,
   CapturedProcedureStopPreviewProjection,
   CapturedProcedureStopRunProjection,
@@ -6688,10 +6689,19 @@ export class EditorialStore {
     });
   }
 
-  #capturedRunResolution(bookId: string, procedureId: string, versionId: string | null): { projection: CapturedProcedureRunProjection; ineligible: string | null } {
+  /**
+   * One procedure resolved for one Book. `read` lets a caller that weighs many procedures for the same Book (S31b review P3-3)
+   * pass the versions it already read and share the Book's category availability, which depends only on the scope slot.
+   */
+  #capturedRunResolution(
+    bookId: string,
+    procedureId: string,
+    versionId: string | null,
+    read: { versions?: ReadonlyArray<StoredCapturedVersion>; availability?: Map<CapturedProcedureScopeSlot, ReadonlyMap<string, string | null>> } = {},
+  ): { projection: CapturedProcedureRunProjection; ineligible: string | null } {
     requireStore(typeof bookId === 'string' && UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
     requireStore(versionId === null || (typeof versionId === 'string' && UUID_PATTERN.test(versionId)), 'CAPTURED_PROCEDURE_INVALID', '可复用工序的版本标识无效。');
-    const versions = this.#capturedProcedures.versions(procedureId);
+    const versions = read.versions ?? this.#capturedProcedures.versions(procedureId);
     requireStore(versions.length > 0, 'CAPTURED_PROCEDURE_NOT_FOUND', '这个可复用工序不存在。');
     const resolvable = this.#resolvableVersions(versions);
     const { eligible, passedOver } = resolveProcedureVersions(resolvable);
@@ -6723,7 +6733,12 @@ export class EditorialStore {
     }
     const stored = versions.find((candidate) => candidate.versionId === chosen.versionId)!;
     const validation = this.#capturedValidation(stored);
-    const availability = this.#reviewRuns.categoryAvailability(bookId, stored.document.parameters.scope);
+    const slot = stored.document.parameters.scope;
+    let availability = read.availability?.get(slot);
+    if (availability === undefined) {
+      availability = this.#reviewRuns.categoryAvailability(bookId, slot);
+      read.availability?.set(slot, availability);
+    }
     const chosenApart = chosenApartSteps(stored.document);
     return {
       ineligible: null,
@@ -6791,10 +6806,12 @@ export class EditorialStore {
       requireStore(typeof bookId === 'string' && UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
       const { ids, truncated } = this.#capturedProcedures.procedureIds();
       const procedures: CapturedProcedureApplicabilityEntryProjection[] = [];
+      // The Book's category availability once per scope slot, and each procedure's versions read once (S31b review P3-3).
+      const availability = new Map<CapturedProcedureScopeSlot, ReadonlyMap<string, string | null>>();
       for (const procedureId of ids) {
-        const summary = this.#capturedProcedures.summary(procedureId);
-        if (!summary.runnable) continue;
-        const { projection } = this.#capturedRunResolution(bookId, procedureId, null);
+        const versions = this.#capturedProcedures.versions(procedureId);
+        if (!versions.some((stored) => stored.state === 'enabled')) continue;
+        const { projection } = this.#capturedRunResolution(bookId, procedureId, null, { versions, availability });
         const resolved = projection.resolved;
         if (resolved === null) {
           procedures.push({ procedureId, title: projection.title, latestEligible: null, fit: 'no-version', stepCount: 0, availableCount: 0, chosenApart: [], leftOut: [] });

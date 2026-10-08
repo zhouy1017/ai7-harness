@@ -5,6 +5,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
+import { sha256Hex } from '../../src/service/analysis/canonical.js';
+import { BookDeliveryPackages } from '../../src/service/book-delivery-packages.js';
 import { CAPTURED_PROCEDURE_SCHEMA_SQL, PROCEDURE_STEP_NOT_CHOSEN } from '../../src/service/captured-procedures.js';
 import { mergeBooks } from '../../src/service/database-merge.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
@@ -732,6 +734,10 @@ describe('what 工序与规则 answers stays within one frame (Issue #65 review)
       expect(listed.procedures).toHaveLength(50);
       expect(listed.proposals).toHaveLength(50);
       expect([listed.proceduresTruncated, listed.proposalsTruncated]).toEqual([true, true]);
+      // 按已保存的工序 weighs the same newest page and says it is cut; none of these is enabled, so none is offered (S31b review P3-2).
+      const offered = store.inspectCapturedProcedureApplicability(source);
+      expect([offered.procedures, offered.truncated]).toEqual([[], true]);
+      expect(wireBytes(offered)).toBeLessThan(MAX_FRAME_BYTES);
       expect(wireBytes(listed)).toBeLessThan(MAX_FRAME_BYTES);
       // Summaries only: no versions in the list.
       expect(Object.keys(listed.procedures[0]!).sort()).toEqual(['latestState', 'latestStateLabel', 'latestVersion', 'procedureId', 'runnable', 'title', 'versionCount']);
@@ -924,6 +930,46 @@ describe('Series material chosen apart, and how each procedure fits a Book (Issu
   });
 });
 
+describe('a procedure whose enabled versions no longer run (Issue #66, S31b review P3-2)', () => {
+  it('is still offered on 新建审阅, with no version, and says why when chosen', async () => {
+    const session = await open();
+    try {
+      const { store } = session;
+      const source = await importBook(session, 'L2 不再可用');
+      const finished = await authorizeAndDrive(session, source, prepare(session, source, [STYLE]));
+      const saved = store.saveCapturedProcedure({ bookId: source, reviewRunId: finished.reviewRunId, categoryIds: [STYLE], scopeSlot: 'whole', title: '体例复核', procedureId: null });
+      const versionId = saved.versions[0]!.versionId;
+      store.enableCapturedProcedure(versionId, store.previewCapturedProcedureValidation(versionId).previewDigest);
+      // The enabled version's document now names a 工序 version the configuration no longer has, its digests kept whole: it
+      // reads as a version, still 已启用, and no longer validates.
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try {
+        db.exec('DROP TRIGGER captured_procedure_versions_no_update');
+        const row = db.prepare('SELECT document_json, document_sha256, canonical_json FROM captured_procedure_versions WHERE version_id = ?').get(versionId) as
+          { document_json: string; document_sha256: string; canonical_json: string };
+        const document = row.document_json.replace('"procedureId":"ai7-review-procedure/style-and-format","version":"1"', '"procedureId":"ai7-review-procedure/style-and-format","version":"9"');
+        expect(document).not.toBe(row.document_json);
+        const documentSha256 = sha256Hex(document);
+        const record = row.canonical_json.replace(row.document_sha256, documentSha256);
+        db.prepare('UPDATE captured_procedure_versions SET document_json = ?, document_sha256 = ?, canonical_json = ?, sha256 = ? WHERE version_id = ?')
+          .run(document, documentSha256, record, sha256Hex(record), versionId);
+      } finally {
+        db.close();
+      }
+      expect(store.inspectCapturedProcedure(saved.procedureId, null)).toMatchObject({ runnable: true, latestEligibleVersionId: null, versions: [{ state: 'enabled' }] });
+      expect(store.inspectCapturedProcedureApplicability(source)).toEqual({
+        bookId: source, truncated: false,
+        procedures: [{ procedureId: saved.procedureId, title: '体例复核', latestEligible: null, fit: 'no-version', stepCount: 0, availableCount: 0, chosenApart: [], leftOut: [] }],
+      });
+      expect(store.inspectCapturedProcedureRun(source, saved.procedureId)).toMatchObject({
+        resolved: null, unavailableReason: '这个工序启用的各版现在都不能按原样运行；请从一次新的审阅重新保存。',
+      });
+    } finally {
+      await close(session);
+    }
+  });
+});
+
 describe('a version linked to the 图书交付包 that holds its Runs\' reports (Issue #66, plan slice S31b; REUSE-031)', () => {
   it('links each package version holding a report of a Run pinned to the version, and no other', async () => {
     const session = await open();
@@ -951,7 +997,7 @@ describe('a version linked to the 图书交付包 that holds its Runs\' reports 
       }
       const unpinned = store.inspectBookDeliveryPackage(book.bookId);
       expect(unpinned.ready).toBe(true);
-      store.prepareBookDeliveryPackage({ bookId: book.bookId, purpose: '交出版社存档', expectedContentDigest: unpinned.content.digest });
+      const firstPackage = store.prepareBookDeliveryPackage({ bookId: book.bookId, purpose: '交出版社存档', expectedContentDigest: unpinned.content.digest }).package.versions[0]!;
       // Same Book, but no report of a Run pinned to version 1: nothing is linked.
       expect(store.inspectCapturedProcedure(saved.procedureId, null).versions[1]!.packages).toEqual([]);
 
@@ -970,6 +1016,53 @@ describe('a version linked to the 图书交付包 that holds its Runs\' reports 
       expect(versions[1]!.packageCount).toBe(1);
       expect([versions[0]!.version, versions[0]!.packageCount, versions[0]!.packages]).toEqual([2, 0, []]);
       expect(second.versions[0]!.packages).toEqual([]);
+
+      // A third package version holds both reports too: newest first, and the total counted past what one call lists (S31b
+      // review P3-2).
+      const third = store.prepareBookDeliveryPackage({ bookId: book.bookId, purpose: '交发行部', expectedContentDigest: bundle.content.digest });
+      expect(third.version).toBe(3);
+      const thirdPackage = third.package.versions[0]!;
+      const linked = store.inspectCapturedProcedure(saved.procedureId, null).versions[1]!;
+      expect([linked.packages.map((link) => link.version), linked.packageCount]).toEqual([[3, 2], 2]);
+      const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
+      // Package versions prepared in the same instant are still listed newest version first.
+      const tie = new DatabaseSync(path);
+      try {
+        tie.exec('DROP TRIGGER book_delivery_package_versions_no_update');
+        tie.prepare("UPDATE book_delivery_package_versions SET prepared_at = '2026-10-09T00:00:00.000Z' WHERE book_id = ?").run(book.bookId);
+      } finally {
+        tie.close();
+      }
+      expect(store.inspectCapturedProcedure(saved.procedureId, null).versions[1]!.packages.map((link) => link.version)).toEqual([3, 2]);
+      const reader = new DatabaseSync(path, { readOnly: true });
+      try {
+        const packages = new BookDeliveryPackages(reader, { publication: () => null, documents: () => [], reviewRuns: () => [] });
+        expect(packages.holdingReviewRuns([pinned.reviewRunId], 1)).toEqual({
+          packages: [{ bookId: book.bookId, packageVersionId: thirdPackage.packageVersionId, version: 3, preparedAt: thirdPackage.preparedAt }], total: 2,
+        });
+        expect(packages.holdingReviewRuns([source.reviewRunId], 10).packages.map((link) => link.version)).toEqual([3, 2, 1]);
+        expect(packages.holdingReviewRuns([], 10)).toEqual({ packages: [], total: 0 });
+      } finally {
+        reader.close();
+      }
+
+      // A damaged package fails nothing (S31b review P3-1): v1, holding no pinned Run's report, no longer even JSON, and v3, which
+      // holds one, altered behind its digest. The page still reads — v3 counted but not linked — and a 停用 confirmed after
+      // the damage answers with what it did.
+      const writer = new DatabaseSync(path);
+      try {
+        writer.exec('DROP TRIGGER IF EXISTS book_delivery_package_versions_no_update');
+        writer.prepare("UPDATE book_delivery_package_versions SET canonical_json = '{' WHERE package_version_id = ?").run(firstPackage.packageVersionId);
+        writer.prepare("UPDATE book_delivery_package_versions SET canonical_json = replace(canonical_json, '交发行部', '改过的用途') WHERE package_version_id = ?")
+          .run(thirdPackage.packageVersionId);
+      } finally {
+        writer.close();
+      }
+      const damaged = store.inspectCapturedProcedure(saved.procedureId, null).versions[1]!;
+      expect([damaged.packages.map((link) => link.version), damaged.packageCount]).toEqual([[2], 2]);
+      const stopped = store.stopCapturedProcedure(saved.procedureId, first.versionId, store.previewCapturedProcedureStop(saved.procedureId, first.versionId).previewDigest);
+      expect(stopped.versions.map((version) => [version.version, version.state])).toEqual([[2, 'pending-validation'], [1, 'stopped']]);
+      expect(stopped.versions[1]!.packages.map((link) => link.version)).toEqual([2]);
     } finally {
       await close(session);
     }

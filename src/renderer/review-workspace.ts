@@ -38,9 +38,10 @@ import {
   SHEET_PROCEDURE_NONE,
   SHEET_PROCEDURE_NONE_ENABLED,
   SHEET_PROCEDURE_VERSION_LABEL,
+  sheetProcedureChosenStatus,
   sheetProcedureOption,
   sheetProcedureVersionOption,
-  runProcedureLeftOutLine,
+  runProcedureLeftOutView,
   runProcedureLine,
   sheetProcedureLines,
 } from './captured-procedure-labels.js';
@@ -757,10 +758,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       pin.dataset['procedureMissing'] = String(run.procedure.missing);
       pin.append(el('p', 'field-note review-procedure-line', runProcedureLine(run.procedure)));
       for (const entry of run.procedure.leftOut) {
-        const line = el('p', 'field-note review-procedure-left-out', runProcedureLeftOutLine(entry));
         // A Series step the editor did not choose (S31b; REUSE-050), told apart from one the Book could not take.
-        line.dataset['procedureLeftOutCategory'] = entry.categoryId;
-        line.dataset['procedureLeftOutByChoice'] = String(entry.byChoice);
+        const view = runProcedureLeftOutView(entry);
+        const line = el('p', 'field-note review-procedure-left-out', view.text);
+        Object.assign(line.dataset, view.data);
         pin.append(line);
       }
       section.append(pin);
@@ -1672,7 +1673,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         // A later choice superseded this one: its answer, not this, fills the sheet.
         if (sheetState !== state || destroyed || !state.requests.current(ticket)) return;
         outcome = { kind: 'answered', run };
-        options.setStatus(run.resolved === null ? run.unavailableReason ?? '' : `已按《${run.title}》第 ${run.resolved.version} 版选好类别。`);
+        options.setStatus(sheetProcedureChosenStatus(run));
       } catch (error) {
         if (sheetState !== state || destroyed || !state.requests.current(ticket)) return;
         // The choice the sheet held stays, its version and categories with it, and the reason is shown (Issue #684).

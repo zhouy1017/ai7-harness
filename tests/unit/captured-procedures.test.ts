@@ -276,6 +276,10 @@ describe('the ledger', () => {
       procedureId: version.procedureId, versionId: version.versionId, version: 1, title: '体例', documentSha256: version.documentSha256, stopped: false, missing: false,
       leftOut: [{ categoryId: 'plot-consistency', label: '情节逻辑与前后一致', reason: '没有基线分析。', byChoice: false }],
     });
+    // Nothing left out by choice: the record is written as before S31b, `/1` with no `byChoice` (S31b review P3-8).
+    const written = db.prepare('SELECT canonical_json FROM review_run_procedure_pins WHERE review_run_id = ?').get(run) as { canonical_json: string };
+    expect(JSON.parse(written.canonical_json)).toMatchObject({ schema: 'ai7.review.procedure-pin/1', leftOut: [{ categoryId: 'plot-consistency', label: '情节逻辑与前后一致', reason: '没有基线分析。' }] });
+    expect(written.canonical_json.includes('byChoice')).toBe(false);
     expect(procedurePinRefusal(db, run)).toBeNull();
     expect(readReviewRunProcedurePin(db, '22222222-2222-4222-8222-222222222222')).toBeNull();
     ledger.stop(version.versionId, 'f'.repeat(64));
