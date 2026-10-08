@@ -12,8 +12,14 @@ import type {
   EvaluationRecordSummaryProjection,
   EvaluationTotalProjection,
   EvaluationWorkspaceProjection,
+  EvaluationMarketProjection,
+  EvaluationPredictionRangeProjection,
+  EvaluationPricingProjection,
+  EvaluationRewriteWorkspaceProjection,
+  InitialEvaluationPredictionProjection,
 } from '../shared/protocol.js';
-import { evaluationBand, provisionalEvaluationScore, type EvaluationRiskLevel } from '../shared/evaluation-scoring.js';
+import { formatPriceFen } from '../shared/evaluation-calibration.js';
+import { EVALUATION_ADJUSTMENT_REASON_WORDS, evaluationBand, provisionalEvaluationScore, type EvaluationRiskLevel } from '../shared/evaluation-scoring.js';
 
 /**
  * ②C 评估's words (Issue #429, plan slice S81a; editor-surfaces §5, V2-UX-EVAL-001 to EVAL-005, EVAL-007, EVAL-012): the
@@ -202,13 +208,7 @@ export const EVALUATION_START_FROM_INITIAL = '从 AI7 初评开始';
 export const EVALUATION_AI7_SUFFICIENCY: Readonly<Record<InitialEvaluationSufficiency, string>> = { sufficient: '充分', fair: '一般', insufficient: '不足' };
 export const EVALUATION_AI7_SUGGESTED = 'AI7 建议';
 export const EVALUATION_ADJUSTMENT_LEGEND = '调分原因（可多选，不预先勾选）';
-export const EVALUATION_ADJUSTMENT_REASON_LABELS: Readonly<Record<EvaluationAdjustmentReasonId, string>> = {
-  'too-high': '打分偏高',
-  'too-low': '打分偏低',
-  'insufficient-basis': '依据不足',
-  'missed-aspect': '未考虑某方面',
-  own: '自行输入',
-};
+export const EVALUATION_ADJUSTMENT_REASON_LABELS: Readonly<Record<EvaluationAdjustmentReasonId, string>> = EVALUATION_ADJUSTMENT_REASON_WORDS;
 export const EVALUATION_ADJUSTMENT_NOTE = '自行输入的原因';
 export const EVALUATION_AI7_STATUS = {
   preparing: '正在准备 AI7 初评的任务计划…',
@@ -311,4 +311,139 @@ export function readersReportDraftedLine(drafted: NonNullable<EvaluationReadersR
 export function readersReportDraftLine(draft: NonNullable<EvaluationReadersReportProjection['templates'][number]['draft']>): string {
   const latest = draft.document.versions[0]?.label ?? '版本 1';
   return `草稿 · ${latest} · 依据第 ${draft.recordOrdinal} 版定稿${draft.document.changedSinceVersion ? ' · 有修改尚未保存为版本' : ''}`;
+}
+
+// ---- 市场 (Issue #429, plan slice S81b2; V2-UX-EVAL-009, EVAL-010) ------------------------------------------------------
+
+export const EVALUATION_MARKET_HEADING = '市场定位与策略';
+export const EVALUATION_MARKET_LEDE = '「读者与市场潜力」一项的展开：目标读者、卖点与渠道是 AI7 从所读书稿的题材与写法推断的，不是书稿里写明的；可比图书与定价首印来自本社数据。';
+/** The market section's basis while web search is not connected (ADR 0080 §7: 未联网核查). */
+export const EVALUATION_MARKET_OFFLINE = '未联网核查：市场部分只依据本书稿件与本社数据，没有检索外网，也没有对比他社图书或获奖作品。';
+export const EVALUATION_MARKET_LISTS = { readers: '目标读者', sellingPoints: '差异化卖点', channels: '渠道与策略' } as const;
+/** Said beside AI7's market words: whose they are, and what they rest on. */
+export const EVALUATION_MARKET_AI7 = 'AI7 · 据书稿题材推断';
+export const EVALUATION_MARKET_NONE_ALONE = '这一版不是从 AI7 初评开始的：没有 AI7 写的目标读者、卖点与渠道。';
+export const EVALUATION_MARKET_NONE_INITIAL = '这一版开始时的 AI7 初评没有写出市场部分。';
+export const EVALUATION_COMPARABLES_HEADING = '可比图书';
+export const EVALUATION_COMPARABLE_SOURCE_SERIES = '书系';
+export const EVALUATION_COMPARABLES_NO_SERIES = '这本书不在任何书系中，没有可以列出的同书系图书。';
+export const EVALUATION_COMPARABLES_EMPTY_SERIES = '这本书所在的书系里还没有别的图书。';
+export const EVALUATION_COMPARABLES_NO_WEB = '外网检索尚未接通：不列他社同类书。';
+export const EVALUATION_PREDICTION_HEADING = '预测 · 低确定性';
+export const EVALUATION_PREDICTION_NOT_PROMISE = '不是承诺';
+export const EVALUATION_PREDICTION_LABELS = { marketReturn: '市场回报', awards: '评奖可能性', pricing: '定价与首印' } as const;
+/** EVAL-009: a prediction AI7 could not ground in what it read. */
+export const EVALUATION_PREDICTION_NONE = '暂无法预测';
+/** House data that could not be read this time (S81b2 review): said as such, and 评估 stays readable. */
+export const EVALUATION_PRICING_UNREADABLE = '暂时读不到本社数据：定价与首印的记录这次没有读出来，不预测。';
+export const EVALUATION_COMPARABLES_UNREADABLE = '暂时读不到本社数据：书系的记录这次没有读出来，不列可比图书。';
+/** What 定价与首印's range rests on, whenever it shows (EVAL-010; the Owner's answer of 2026-10-07). */
+export const EVALUATION_PRICING_BASIS = '依据：本社已发稿图书录入的实际定价与首印，取中间一半图书的范围和中位数；不含这本书，没有用模型，也没有检索外网。';
+
+/** One comparable Book (EVAL-009): its title, its 书系, and whether it is published; the source tag is drawn beside it. */
+export function evaluationComparableLine(comparable: EvaluationMarketProjection['comparables'][number]): string {
+  return `《${comparable.title}》 · 同书系「${comparable.seriesTitle}」 · ${comparable.published ? '已发稿' : '尚未发稿'}`;
+}
+
+/** How many comparables are not listed, when there are more than the section lists; `null` otherwise. */
+export function evaluationComparablesMoreLine(market: Pick<EvaluationMarketProjection, 'comparables' | 'comparableCount'>): string | null {
+  const more = market.comparableCount - market.comparables.length;
+  return more > 0 ? `另有 ${more} 本同书系图书没有列出。` : null;
+}
+
+/** One of AI7's two predictions (EVAL-009): its statement with its basis, or 暂无法预测. */
+export function evaluationPredictionLine(prediction: InitialEvaluationPredictionProjection | null): string {
+  return prediction === null ? EVALUATION_PREDICTION_NONE : `${prediction.statement}（依据：${prediction.basis}）`;
+}
+
+function figure(value: number): string {
+  return value.toLocaleString('zh-CN');
+}
+
+/** One 定价与首印 range: the middle half and the median, and how many Books it rests on. */
+export function evaluationPricingRangeLine(scope: string, range: EvaluationPredictionRangeProjection): string {
+  const price = `定价 ${formatPriceFen(range.priceFen.low)} – ${formatPriceFen(range.priceFen.high)}（中位数 ${formatPriceFen(range.priceFen.median)}）`;
+  const print = `首印 ${figure(range.firstPrint.low)} – ${figure(range.firstPrint.high)} 册（中位数 ${figure(range.firstPrint.median)} 册）`;
+  return `${scope} ${range.books} 本：${price} · ${print}`;
+}
+
+/**
+ * 定价与首印 in the prediction block (EVAL-010, EVAL-014): the ranges once 设置's switch is on and enough other Books carry
+ * actuals — the Book's own 书系 first where enough of its Books do — or what the prediction waits for.
+ */
+export function evaluationPricingLines(pricing: EvaluationPricingProjection): string[] {
+  if (pricing.unreadable) return [EVALUATION_PRICING_UNREADABLE];
+  if (!pricing.available) {
+    return [`不预测。本社已录入定价与首印的已发稿图书 ${pricing.booksWithActuals} / ${pricing.threshold} 本；满 ${pricing.threshold} 本后，可在「设置 › 评估校准与预测」里打开预测。`];
+  }
+  if (!pricing.enabled) {
+    return [`不预测：「设置 › 评估校准与预测」里没有打开定价与首印预测（已录入实际数据的已发稿图书 ${pricing.booksWithActuals} 本）。`];
+  }
+  if (pricing.house === null) {
+    return [`不预测：不计这本书，本社已录入定价与首印的已发稿图书 ${pricing.otherBooksWithActuals} / ${pricing.threshold} 本；范围只依据其他图书，满 ${pricing.threshold} 本后才给出。`];
+  }
+  const lines: string[] = [];
+  if (pricing.series !== null) lines.push(evaluationPricingRangeLine('同书系已发稿图书', pricing.series));
+  else if (pricing.seriesBooksWithActuals !== null) {
+    lines.push(`同书系已录入实际数据的已发稿图书 ${pricing.seriesBooksWithActuals} 本，不足 ${pricing.seriesMinimum} 本，不给出同书系的范围。`);
+  }
+  lines.push(evaluationPricingRangeLine('本社已发稿图书', pricing.house));
+  return [...lines, EVALUATION_PRICING_BASIS];
+}
+
+// ---- 按我的评分重写评语 (Issue #429, plan slice S81b2; V2-UX-EVAL-008) ---------------------------------------------------
+
+export const EVALUATION_REWRITE_HEADING = '按我的评分重写评语';
+export const EVALUATION_REWRITE_LEDE = '你改过 AI7 的分数后，AI7 可以按你保存的分数和调分原因重写各项评语与总评；分数一个也不改，重写的评语要你采用后才记入这一版。';
+export const EVALUATION_REWRITE_ACTIONS = {
+  prepare: '按我的评分重写评语',
+  openPlan: '查看计划并开始',
+  openTask: '查看任务',
+  accept: '采用重写',
+  discard: '放弃',
+} as const;
+export const EVALUATION_REWRITE_STATUS = {
+  preparing: '正在准备评语重写的任务计划…',
+  prepared: '评语重写的任务计划已准备：在任务计划里看过再开始。',
+  cancelled: '评语重写的任务计划准备已取消。',
+  failed: '无法按你的评分重写评语。',
+  unsaved: '先保存评估，再按你的评分重写评语：重写只读已保存的分数与评语。',
+  unsavedAccept: '这一版有未保存的修改：先保存或放弃这些修改，再采用重写的评语。',
+  accepting: '正在采用重写的评语…',
+  accepted: '已采用重写的评语：各项分数没有改动。',
+  discarding: '正在放弃重写的评语…',
+  discarded: '已放弃这一次重写，评语保持原样。',
+  decideFailed: '无法处理重写的评语。',
+} as const;
+export const EVALUATION_REWRITE_VERDICT = '总评';
+export const EVALUATION_REWRITE_BEFORE = '现在';
+export const EVALUATION_REWRITE_AFTER = '重写';
+export const EVALUATION_REWRITE_EMPTY = '（还没有写）';
+export const EVALUATION_REWRITE_STALE = '这一版在重写之后又保存过：重写依据的是之前的分数，不能采用；可以放弃它，再按现在的评分重写。';
+
+/** The Book's latest rewrite Task in one line: the version it rewrites, and its state as the drawer names it. */
+export function evaluationRewriteTaskLine(task: NonNullable<EvaluationRewriteWorkspaceProjection['task']>): string {
+  return `${EVALUATION_REWRITE_HEADING} · 第 ${task.recordOrdinal} 版 · ${task.label}`;
+}
+
+/** The proposal waiting for the editor: which save it was written from. */
+export function evaluationRewriteProposalLine(proposal: NonNullable<EvaluationRewriteWorkspaceProjection['proposal']>): string {
+  return `AI7 按你第 ${proposal.entryOrdinal} 次保存的评分重写了评语，等你决定：采用后才记入这一版，分数不变。`;
+}
+
+/**
+ * How much of the Book the rewrite read (S81b2 review): its notes, and so its words, rest on the ranges read alone — said
+ * whenever a proposal shows, and plainly when some were not read.
+ */
+export function evaluationRewriteReadingLine(reading: NonNullable<EvaluationRewriteWorkspaceProjection['proposal']>['reading']): string {
+  return reading.unitsRead < reading.unitsTotal
+    ? `AI7 这次重写只读到 ${reading.unitsRead} / ${reading.unitsTotal} 个阅读范围：没读到的范围里的内容没有进入重写的评语。`
+    : `AI7 这次重写读了全部 ${reading.unitsTotal} 个阅读范围。`;
+}
+
+/** The version's last decision on a rewrite. */
+export function evaluationRewriteDecidedLine(decided: NonNullable<EvaluationRewriteWorkspaceProjection['decided']>): string {
+  return decided.decision === 'accepted'
+    ? `上一次重写的评语已采用（记为第 ${decided.entryOrdinal} 次保存），分数没有改动。`
+    : '上一次重写的评语已放弃，评语保持原样。';
 }

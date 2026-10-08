@@ -47,6 +47,13 @@ const synthesis = (overrides: Record<string, unknown> = {}): string => JSON.stri
   weaknesses: ['残句'],
   nextStep: '先校改残句。',
   suggestedConclusion: 'revise',
+  market: {
+    readers: ['文史爱好者。'],
+    sellingPoints: ['甲骨文悬念。'],
+    channels: ['读书会。'],
+    marketReturn: null,
+    awards: { statement: '有参评潜力，确定性低。', basis: '主题与语言。' },
+  },
   ...overrides,
 });
 
@@ -126,6 +133,64 @@ describe('the book-level synthesis', () => {
     expect(parseInitialEvaluationSynthesis('否', PROFILE)).toMatchObject({ ok: false, code: 'not-json' });
   });
 
+  it('admits the market section from the Book alone: three bounded lists and two predictions, each a statement with its basis or none (S81b2)', () => {
+    const ok = parseInitialEvaluationSynthesis(synthesis(), PROFILE);
+    expect(ok.ok && ok.result.market).toEqual({
+      readers: ['文史爱好者。'], sellingPoints: ['甲骨文悬念。'], channels: ['读书会。'],
+      marketReturn: null, awards: { statement: '有参评潜力，确定性低。', basis: '主题与语言。' }, withheld: [],
+    });
+    // The instruction says so: no web, no quantity, 暂无法预测 where the Book cannot tell.
+    expect(CONTRACT.synthesisInstruction).toContain('没有联网检索，不得声称参考了销量、获奖记录、其他出版社的图书或任何外部数据');
+    expect(CONTRACT.synthesisInstruction).toContain('界面会显示「暂无法预测」');
+  });
+
+  it('sets aside only the market part that cannot be used, with its reason, and never the scores beside it (S81b2)', () => {
+    const market = (change: Record<string, unknown>): Record<string, unknown> | null => {
+      const base = (JSON.parse(synthesis()) as { market: Record<string, unknown> }).market;
+      const parsed = parseInitialEvaluationSynthesis(synthesis({ market: { ...base, ...change } }), PROFILE);
+      expect(parsed.ok && parsed.result.items.map((item) => item.score)).toEqual([16.5, 15, 15.5, 14, 12]);
+      return parsed.ok ? parsed.result.market as unknown as Record<string, unknown> : null;
+    };
+    const QUANTITY_REASON = '没有采用：只依据所读书稿，不能给出销量、印数、定价或概率。';
+    // A figure that is the Book's own — a chapter, a decade, a count of channels — is no quantity claim, in either part.
+    expect(market({ awards: { statement: '第3章的冲突最适合做营销话题。', basis: '第 3 章写得最好。' } })).toMatchObject({ awards: { statement: '第3章的冲突最适合做营销话题。' }, withheld: [] });
+    expect(market({ readers: ['对80年代背景感兴趣的读者。'], channels: ['适合2-3个渠道并行。'] })).toMatchObject({ readers: ['对80年代背景感兴趣的读者。'], channels: ['适合2-3个渠道并行。'], withheld: [] });
+    // A quantity — in Arabic, full-width or Chinese numerals, in the statement or the basis — sets that prediction aside alone.
+    expect(market({ marketReturn: { statement: '首年销量约八千册。', basis: '题材。' } })).toMatchObject({
+      marketReturn: null, awards: { statement: '有参评潜力，确定性低。' }, withheld: [`AI7 写出的市场回报预测给出了数量，${QUANTITY_REASON}`],
+    });
+    expect(market({ awards: { statement: '获奖可能约有三成。', basis: '主题。' } })).toMatchObject({ awards: null, withheld: [`AI7 写出的评奖可能性预测给出了数量，${QUANTITY_REASON}`] });
+    expect(market({ awards: { statement: '有一定潜力。', basis: '据开卷数据同类书年销5万册。' } })).toMatchObject({ awards: null });
+    expect(market({ awards: { statement: '获奖概率不高。', basis: '主题。' } })).toMatchObject({ awards: null });
+    expect(market({ marketReturn: { statement: '可卖到百分之六十。', basis: '题材。' } })).toMatchObject({ marketReturn: null });
+    expect(market({ marketReturn: { statement: '定价约４５元。', basis: '题材。' } })).toMatchObject({ marketReturn: null });
+    // A list line with a quantity is set aside, the rest of the list stays.
+    expect(market({ readers: ['文史爱好者。', '约占读者三成的学生。'] })).toMatchObject({
+      readers: ['文史爱好者。'], withheld: [`AI7 写出的目标读者有 1 条给出了数量，${QUANTITY_REASON}`],
+    });
+    // A part out of shape reads as not written: that list empty, that prediction 暂无法预测.
+    expect(market({ marketReturn: { statement: '销路平稳。' } })).toMatchObject({ marketReturn: null, withheld: ['AI7 写出的市场回报预测不合格式，没有采用。'] });
+    expect(market({ awards: { statement: '有潜力。', basis: '题材。', odds: 'low' } })).toMatchObject({ awards: null, withheld: ['AI7 写出的评奖可能性预测不合格式，没有采用。'] });
+    expect(market({ awards: { statement: '字'.repeat(151), basis: '题材。' } })).toMatchObject({ awards: null });
+    expect(market({ awards: { statement: '有潜力。', basis: '字'.repeat(201) } })).toMatchObject({ awards: null });
+    expect(market({ awards: { statement: '有潜力。', basis: '题材\n语言。' } })).toMatchObject({ awards: null });
+    expect(market({ readers: ['一', '二', '三', '四', '五', '六'] })).toMatchObject({ readers: [], sellingPoints: ['甲骨文悬念。'], withheld: ['AI7 写出的目标读者不合格式，没有采用。'] });
+    expect(market({ channels: ['字'.repeat(101)] })).toMatchObject({ channels: [], withheld: ['AI7 写出的渠道与策略不合格式，没有采用。'] });
+    expect(market({ sellingPoints: [] })).toMatchObject({ sellingPoints: [], withheld: [] });
+    const outOfShape = { readers: [], sellingPoints: [], channels: [], marketReturn: null, awards: null, withheld: ['AI7 写出的市场部分不合格式，没有采用。'] };
+    expect(market({ comparables: [] })).toEqual(outOfShape);
+    // A market section that is not an object reads as out of shape; one never written reads as none — the scores stand either way.
+    const scored = (text: string) => {
+      const parsed = parseInitialEvaluationSynthesis(text, PROFILE);
+      expect(parsed.ok && parsed.result.items.map((item) => item.score)).toEqual([16.5, 15, 15.5, 14, 12]);
+      return parsed.ok ? parsed.result.market : 'refused';
+    };
+    expect(scored(synthesis({ market: null }))).toEqual(outOfShape);
+    expect(scored(synthesis({ market: '市场' }))).toEqual(outOfShape);
+    const { market: _market, ...withoutMarket } = JSON.parse(synthesis()) as Record<string, unknown>;
+    expect(scored(JSON.stringify(withoutMarket))).toBeNull();
+  });
+
   it('reads the observations alone, under its own header and a digest no unit request shares', () => {
     const closed = [
       { unitOrdinal: 2, result: { schema: INITIAL_EVALUATION_UNIT_RESULT_SCHEMA, unitOrdinal: 2, observations: [{ itemId: 'literary-quality', note: '甲。', blockOrdinals: [1, 2] }] } },
@@ -202,10 +267,12 @@ describe('the reducer and the shared rules', () => {
     expect(closed.reducerClosure.state).toBe('closed');
     expect(closed.assurance.state).toBe('limited');
     expect(closed.evaluation.synthesis).toEqual({ state: 'closed', reason: null });
+    // The market section is the synthesis's own (S81b2), and none without it.
+    expect(closed.evaluation.market).toEqual(parsed.ok ? parsed.result.market : 'unparsed');
 
     const gap = reduceInitialEvaluation({ profile: PROFILE, manifest, outcomes: [outcomes[0]!], synthesis: { state: 'gap', code: 'contract-invalid', reason: '全书综合结果不符合契约 v1。', requestDigest: DIGEST } });
     expect(gap.evaluation.items.every((item) => item.score === null && item.comment === null)).toBe(true);
-    expect([gap.evaluation.suggestedConclusion, gap.evaluation.strengths, gap.evaluation.nextStep]).toEqual([null, [], null]);
+    expect([gap.evaluation.suggestedConclusion, gap.evaluation.strengths, gap.evaluation.nextStep, gap.evaluation.market]).toEqual([null, [], null, null]);
     expect(gap.evaluation.synthesis).toEqual({ state: 'gap', reason: '全书综合结果不符合契约 v1。' });
     expect(gap.reducerClosure.stages.map((stage) => [stage.stage, stage.state])).toEqual([
       ['unit-validation', 'closed-with-gaps'], ['cross-unit-reduction', 'closed-with-gaps'], ['book-synthesis', 'closed-with-gaps'],

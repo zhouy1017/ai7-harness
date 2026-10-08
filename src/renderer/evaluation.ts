@@ -5,6 +5,7 @@ import type {
   EvaluationContent,
   EvaluationRecordProjection,
   EvaluationRecordSummaryProjection,
+  EvaluationRewriteDecision,
   EvaluationWorkspaceProjection,
   ProductionDocumentProjection,
   ReadersReportTemplate,
@@ -75,6 +76,40 @@ import {
   readersReportDraftLine,
   readersReportDraftedLine,
   readersReportTaskLine,
+  EVALUATION_COMPARABLE_SOURCE_SERIES,
+  EVALUATION_COMPARABLES_EMPTY_SERIES,
+  EVALUATION_COMPARABLES_HEADING,
+  EVALUATION_COMPARABLES_NO_SERIES,
+  EVALUATION_COMPARABLES_NO_WEB,
+  EVALUATION_COMPARABLES_UNREADABLE,
+  EVALUATION_MARKET_AI7,
+  EVALUATION_MARKET_HEADING,
+  EVALUATION_MARKET_LEDE,
+  EVALUATION_MARKET_LISTS,
+  EVALUATION_MARKET_NONE_ALONE,
+  EVALUATION_MARKET_NONE_INITIAL,
+  EVALUATION_MARKET_OFFLINE,
+  EVALUATION_PREDICTION_HEADING,
+  EVALUATION_PREDICTION_LABELS,
+  EVALUATION_PREDICTION_NONE,
+  EVALUATION_PREDICTION_NOT_PROMISE,
+  EVALUATION_REWRITE_ACTIONS,
+  EVALUATION_REWRITE_AFTER,
+  EVALUATION_REWRITE_BEFORE,
+  EVALUATION_REWRITE_EMPTY,
+  EVALUATION_REWRITE_HEADING,
+  EVALUATION_REWRITE_LEDE,
+  EVALUATION_REWRITE_STALE,
+  EVALUATION_REWRITE_STATUS,
+  EVALUATION_REWRITE_VERDICT,
+  evaluationComparableLine,
+  evaluationComparablesMoreLine,
+  evaluationPredictionLine,
+  evaluationPricingLines,
+  evaluationRewriteDecidedLine,
+  evaluationRewriteProposalLine,
+  evaluationRewriteReadingLine,
+  evaluationRewriteTaskLine,
   evaluationBandLabel,
   evaluationComparisonLines,
   evaluationDiscardAndOpen,
@@ -103,7 +138,7 @@ import { localInstantLabel } from './plan-preview-labels.js';
 export interface MountEvaluationOptions {
   readonly root: HTMLElement;
   readonly api: Pick<RendererApi, 'inspectEvaluation' | 'startEvaluation' | 'saveEvaluation' | 'prepareInitialEvaluation' | 'prepareReadersReport' |
-    'createReadersReportDraft' | 'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport'>;
+    'createReadersReportDraft' | 'prepareEvaluationRewrite' | 'decideEvaluationRewrite' | 'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport'>;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly errorMessage: (error: unknown, fallback: string) => string;
   readonly technicalDetails: (key: string, ...rows: HTMLElement[]) => HTMLElement;
@@ -115,6 +150,8 @@ export interface MountEvaluationOptions {
   readonly bookId: string;
   /** Open 审稿意见's plan in the Task Drawer (Issue #429, S81c). */
   readonly openReadersReportPlan: (taskIntentId: string) => void;
+  /** Open 按我的评分重写评语's plan in the Task Drawer (Issue #429, S81b2). */
+  readonly openRewritePlan: (taskIntentId: string) => void;
   /** Open a 审稿意见 draft on the manuscript surface, as 交付物 opens a document. */
   readonly openDraft: (draft: { typeId: string; typeLabel: string; document: ProductionDocumentProjection }) => Promise<void>;
 }
@@ -402,10 +439,254 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     return section;
   };
 
+  /**
+   * The market section of the version on show (Issue #429, S81b2; EVAL-009, EVAL-010): AI7's 目标读者, 差异化卖点 and 渠道与策略
+   * from the 初评 the version began from, marked as AI7's and resting on the Book alone; the 书系 comparables tagged `书系`; and
+   * the `预测 · 低确定性` block — 市场回报 and 评奖可能性 as AI7 wrote them or `暂无法预测`, and 定价与首印 from house data, or what
+   * it waits for. Nothing here is chosen for the editor, and nothing claims the web.
+   */
+  const marketNode = (page: EvaluationWorkspaceProjection, record: EvaluationRecordProjection): HTMLElement => {
+    const section = el('section', 'evaluation-market');
+    const heading = el('h3', undefined, EVALUATION_MARKET_HEADING);
+    heading.tabIndex = -1;
+    section.append(heading, el('p', 'field-note', EVALUATION_MARKET_LEDE), el('p', 'field-note evaluation-market-basis', EVALUATION_MARKET_OFFLINE));
+    const market = record.initial?.market ?? null;
+    section.dataset['marketAi7'] = String(market !== null);
+    if (market === null) {
+      section.append(el('p', 'field-note evaluation-market-none', record.initial === null ? EVALUATION_MARKET_NONE_ALONE : EVALUATION_MARKET_NONE_INITIAL));
+    } else {
+      const lists = el('div', 'evaluation-market-lists');
+      for (const key of ['readers', 'sellingPoints', 'channels'] as const) {
+        const card = el('div', 'evaluation-market-list');
+        card.dataset['marketList'] = key;
+        const title = el('h4', undefined, EVALUATION_MARKET_LISTS[key]);
+        title.append(' ', el('span', 'status-pill evaluation-market-ai7', EVALUATION_MARKET_AI7));
+        const list = el('ul');
+        for (const line of market[key]) list.append(el('li', undefined, line));
+        card.append(title, list);
+        lists.append(card);
+      }
+      section.append(lists);
+      // What AI7 wrote but the page does not show, and why: a quantity it cannot support, or a part out of shape (S81b2).
+      for (const reason of market.withheld) section.append(el('p', 'field-note evaluation-market-withheld', reason));
+    }
+    // Comparable books from house data, each tagged with its source (EVAL-009); no other house's book while the web is not connected.
+    const comparables = el('div', 'evaluation-comparables');
+    comparables.append(el('h4', undefined, EVALUATION_COMPARABLES_HEADING));
+    if (page.market.seriesUnreadable) {
+      comparables.append(el('p', 'field-note evaluation-comparables-none', EVALUATION_COMPARABLES_UNREADABLE));
+    } else if (page.market.comparables.length === 0) {
+      comparables.append(el('p', 'field-note evaluation-comparables-none', page.market.series.length === 0 ? EVALUATION_COMPARABLES_NO_SERIES : EVALUATION_COMPARABLES_EMPTY_SERIES));
+    } else {
+      const list = el('ul', 'evaluation-comparable-list');
+      for (const comparable of page.market.comparables) {
+        const item = el('li', undefined, evaluationComparableLine(comparable));
+        item.dataset['bookId'] = comparable.bookId;
+        item.dataset['source'] = comparable.source;
+        item.append(' ', el('span', 'status-pill evaluation-comparable-source', EVALUATION_COMPARABLE_SOURCE_SERIES));
+        list.append(item);
+      }
+      comparables.append(list);
+      const more = evaluationComparablesMoreLine(page.market);
+      if (more !== null) comparables.append(el('p', 'field-note', more));
+    }
+    comparables.append(el('p', 'field-note evaluation-comparables-web', EVALUATION_COMPARABLES_NO_WEB));
+    section.append(comparables);
+    // 预测 · 低确定性 (EVAL-009, EVAL-010): a block of its own, never a promise.
+    const prediction = el('div', 'evaluation-prediction');
+    const title = el('h4', undefined, EVALUATION_PREDICTION_HEADING);
+    title.append(' ', el('span', 'status-pill evaluation-prediction-pill', EVALUATION_PREDICTION_NOT_PROMISE));
+    const rows = el('dl', 'evaluation-prediction-rows');
+    const row = (key: keyof typeof EVALUATION_PREDICTION_LABELS, lines: ReadonlyArray<string>): void => {
+      const term = el('dt', undefined, EVALUATION_PREDICTION_LABELS[key]);
+      const value = el('dd');
+      value.dataset['prediction'] = key;
+      for (const line of lines) value.append(el('p', undefined, line));
+      rows.append(term, value);
+    };
+    row('marketReturn', [market === null ? EVALUATION_PREDICTION_NONE : evaluationPredictionLine(market.marketReturn)]);
+    row('awards', [market === null ? EVALUATION_PREDICTION_NONE : evaluationPredictionLine(market.awards)]);
+    row('pricing', evaluationPricingLines(page.market.pricing));
+    prediction.append(title, rows);
+    section.append(prediction);
+    return section;
+  };
+
+  /**
+   * 按我的评分重写评语 of the version on show (Issue #429, S81b2; EVAL-008): the action — or why it cannot be asked now — the Book's
+   * latest rewrite Task, and the rewrite waiting for the editor: each item's 评语 and the 总评 as they stand beside AI7's rewritten
+   * words, with 采用重写 and 放弃. Nothing is written into the version until the editor 采用 it, and no score ever moves.
+   */
+  const rewriteNode = (page: EvaluationWorkspaceProjection, record: EvaluationRecordProjection): HTMLElement => {
+    const rewrite = page.rewrite;
+    const section = el('section', 'evaluation-rewrite');
+    section.dataset['rewriteState'] = rewrite.task?.state ?? 'none';
+    const heading = el('h3', undefined, EVALUATION_REWRITE_HEADING);
+    heading.tabIndex = -1;
+    section.append(heading, el('p', 'field-note', EVALUATION_REWRITE_LEDE));
+    const task = rewrite.task !== null && rewrite.task.recordId === record.recordId ? rewrite.task : null;
+    if (task !== null) section.append(el('p', 'evaluation-rewrite-task', evaluationRewriteTaskLine(task)));
+    const proposal = rewrite.proposal;
+    if (proposal !== null) {
+      const card = el('div', 'evaluation-rewrite-proposal');
+      card.dataset['revisionId'] = proposal.revisionId;
+      card.dataset['current'] = String(proposal.current);
+      card.append(el('p', 'evaluation-rewrite-proposal-line', evaluationRewriteProposalLine(proposal)));
+      const reading = el('p', 'field-note evaluation-rewrite-reading', evaluationRewriteReadingLine(proposal.reading));
+      reading.dataset['unitsRead'] = String(proposal.reading.unitsRead);
+      reading.dataset['unitsTotal'] = String(proposal.reading.unitsTotal);
+      card.append(reading);
+      const list = el('dl', 'evaluation-rewrite-items');
+      const pair = (label: string, before: string | null, after: string, itemId: string | null, evidence: NonNullable<typeof proposal>['items'][number]['evidence']): void => {
+        const value = el('dd');
+        if (itemId !== null) value.dataset['itemId'] = itemId;
+        value.append(
+          el('p', 'evaluation-rewrite-before', `${EVALUATION_REWRITE_BEFORE}：${before ?? EVALUATION_REWRITE_EMPTY}`),
+          el('p', 'evaluation-rewrite-after', `${EVALUATION_REWRITE_AFTER}：${after}`),
+        );
+        // What the rewritten 评语 rests on (EVAL-006): each note AI7 made toward the editor's score, with the range and blocks.
+        if (evidence.length > 0) {
+          const notes = el('details', 'evaluation-rewrite-evidence');
+          const lines = el('ul');
+          for (const entry of evidence) {
+            const line = el('li', undefined, evaluationAi7EvidenceLine(entry));
+            line.dataset['unitOrdinal'] = String(entry.unitOrdinal);
+            line.dataset['blockIds'] = entry.blockIds.join(' ');
+            lines.append(line);
+          }
+          notes.append(el('summary', undefined, evaluationAi7EvidenceSummary(evidence.length)), lines);
+          value.append(notes);
+        }
+        list.append(el('dt', undefined, label), value);
+      };
+      for (const item of proposal.items) {
+        const label = record.profile.items.find((entry) => entry.itemId === item.itemId)?.label ?? item.itemId;
+        pair(label, item.before, item.after, item.itemId, item.evidence);
+      }
+      if (proposal.verdict !== null) pair(EVALUATION_REWRITE_VERDICT, proposal.verdict.before, proposal.verdict.after, null, []);
+      card.append(list);
+      // What AI7 wrote but does not offer, and why: a 评语 or the 总评 that stated a score or a conclusion.
+      for (const reason of proposal.withheld) card.append(el('p', 'field-note evaluation-rewrite-withheld', reason));
+      if (!proposal.current) card.append(el('p', 'field-note evaluation-rewrite-stale', EVALUATION_REWRITE_STALE));
+      const actions = el('div', 'button-row evaluation-rewrite-actions');
+      const accept = action(EVALUATION_REWRITE_ACTIONS.accept, 'primary', 'rewrite-accept', () => void decideRewrite(proposal.revisionId, 'accept'));
+      accept.disabled = busy || !proposal.current || (proposal.items.length === 0 && proposal.verdict === null);
+      const discard = action(EVALUATION_REWRITE_ACTIONS.discard, 'secondary', 'rewrite-discard', () => void decideRewrite(proposal.revisionId, 'discard'));
+      discard.disabled = busy;
+      actions.append(accept, discard);
+      card.append(actions);
+      section.append(card);
+    } else if (rewrite.decided !== null) {
+      section.append(el('p', 'field-note evaluation-rewrite-decided', evaluationRewriteDecidedLine(rewrite.decided)));
+    }
+    const row = el('div', 'button-row evaluation-rewrite-start');
+    if (task !== null && task.state === 'prepared') {
+      const open = action(EVALUATION_REWRITE_ACTIONS.openPlan, 'primary', 'open-rewrite-plan', () => options.openRewritePlan(task.taskIntentId));
+      open.disabled = busy;
+      open.setAttribute('aria-controls', 'task-drawer');
+      row.append(open);
+    } else {
+      if (rewrite.prepare.allowed) {
+        const prepare = action(EVALUATION_REWRITE_ACTIONS.prepare, proposal === null ? 'primary' : 'secondary', 'prepare-rewrite', () => void prepareRewrite(record));
+        prepare.disabled = busy;
+        row.append(prepare);
+      } else {
+        row.append(el('p', 'field-note evaluation-rewrite-reason', rewrite.prepare.reason));
+      }
+      if (task !== null) {
+        const open = action(EVALUATION_REWRITE_ACTIONS.openTask, 'quiet', 'open-rewrite-task', () => options.openRewritePlan(task.taskIntentId));
+        open.disabled = busy;
+        open.setAttribute('aria-controls', 'task-drawer');
+        row.append(open);
+      }
+    }
+    section.append(row);
+    return section;
+  };
+
+  /**
+   * 按我的评分重写评语: the Task's plan prepared as one cooperative job over the version's saved entry, then opened in the Task
+   * Drawer, whose bar starts it. Unsaved edits are saved first by the editor: a rewrite reads only what is saved.
+   */
+  const prepareRewrite = async (record: EvaluationRecordProjection): Promise<void> => {
+    if (busy || workspace === null) return;
+    if (unsaved()) {
+      refusal = EVALUATION_REWRITE_STATUS.unsaved;
+      setStatus(refusal, 'error');
+      paint('.evaluation-rewrite h3', true);
+      return;
+    }
+    busy = true;
+    refusal = null;
+    setStatus(EVALUATION_REWRITE_STATUS.preparing, 'busy');
+    paint(null, true);
+    try {
+      const job = await api.prepareEvaluationRewrite({ recordId: record.recordId });
+      const completed = await options.awaitServiceJob(job, (next) => setStatus(next.progress.label, 'busy'));
+      busy = false;
+      if (completed.state === 'cancelled') {
+        setStatus(EVALUATION_REWRITE_STATUS.cancelled, 'success');
+        paint('[data-evaluation-action="prepare-rewrite"]', true);
+        return;
+      }
+      const result = completed.result;
+      if (completed.kind !== 'evaluation-rewrite-preparation' || result === null || !('rewrite' in result) || result.bookId !== workspace?.bookId) {
+        throw new Error(EVALUATION_REWRITE_STATUS.failed);
+      }
+      workspace = { ...result, record: workspace.record };
+      setStatus(EVALUATION_REWRITE_STATUS.prepared, 'success');
+      paint(null, true);
+      const ref = result.rewrite.task?.taskIntentId ?? null;
+      if (ref !== null) options.openRewritePlan(ref);
+    } catch (error) {
+      busy = false;
+      refusal = errorMessage(error, EVALUATION_REWRITE_STATUS.failed);
+      setStatus(refusal, 'error');
+      paint('.evaluation-rewrite h3', true);
+    }
+  };
+
+  /**
+   * 采用重写 or 放弃 (EVAL-008). 采用 records AI7's words as a new entry of the version and draws the form anew from it — refused
+   * while the form holds unsaved edits, which the new entry would otherwise drop; 放弃 keeps the form as it is.
+   */
+  const decideRewrite = async (revisionId: string, decision: EvaluationRewriteDecision): Promise<void> => {
+    if (busy || workspace === null) return;
+    if (decision === 'accept' && unsaved()) {
+      refusal = EVALUATION_REWRITE_STATUS.unsavedAccept;
+      setStatus(refusal, 'error');
+      paint('.evaluation-rewrite h3', true);
+      return;
+    }
+    busy = true;
+    refusal = null;
+    setStatus(decision === 'accept' ? EVALUATION_REWRITE_STATUS.accepting : EVALUATION_REWRITE_STATUS.discarding, 'busy');
+    paint(null, true);
+    try {
+      const page = await api.decideEvaluationRewrite({ revisionId, decision });
+      busy = false;
+      if (decision === 'accept') {
+        workspace = page;
+        setStatus(EVALUATION_REWRITE_STATUS.accepted, 'success');
+        paint('.evaluation-record h3');
+      } else {
+        workspace = { ...page, record: workspace.record };
+        setStatus(EVALUATION_REWRITE_STATUS.discarded, 'success');
+        paint('.evaluation-rewrite h3', true);
+      }
+    } catch (error) {
+      busy = false;
+      refusal = errorMessage(error, EVALUATION_REWRITE_STATUS.decideFailed);
+      setStatus(refusal, 'error');
+      paint('.evaluation-rewrite h3', true);
+    }
+  };
+
   /** While AI7's 初评 is under way, 评估 reads it again — and keeps the form the editor is filling in as it is. */
   const follow = (): void => {
     if (poll !== null || workspace === null ||
-      (!INITIAL_UNDER_WAY.has(workspace.initial.task?.state ?? '') && !INITIAL_UNDER_WAY.has(workspace.readersReport.task?.state ?? ''))) return;
+      (!INITIAL_UNDER_WAY.has(workspace.initial.task?.state ?? '') && !INITIAL_UNDER_WAY.has(workspace.readersReport.task?.state ?? '') &&
+        !INITIAL_UNDER_WAY.has(workspace.rewrite.task?.state ?? ''))) return;
     poll = window.setTimeout(() => {
       poll = null;
       if (!root.isConnected || busy || workspace === null) return;
@@ -494,19 +775,24 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     }
     parts.push(start);
     parts.push(readersReportNode(workspace));
+    // 按我的评分重写评语 sits just above the version it rewrites (Issue #429, S81b2; EVAL-008).
+    if (workspace.record !== null) parts.push(rewriteNode(workspace, workspace.record));
     if (refusal !== null) {
       const note = el('p', 'attention-note evaluation-refusal', refusal);
       note.setAttribute('role', 'alert');
       parts.push(note);
     }
+    // The market section follows the version it belongs to (Issue #429, S81b2; EVAL-009, EVAL-010).
+    const after: HTMLElement[] = workspace.record === null ? [] : [marketNode(workspace, workspace.record)];
     if (keptForm !== null && workspace.record !== null && keptForm.parentElement === root) {
       // The form the editor is filling in never leaves the page — a 初评 read again while they type keeps their focus and
       // their place — and everything around it is drawn anew.
       for (const child of Array.from(root.children)) if (child !== keptForm) child.remove();
       keptForm.before(...parts);
+      keptForm.after(...after);
     } else {
       if (workspace.record !== null) parts.push(keptForm ?? recordNode(workspace.record));
-      root.replaceChildren(...parts);
+      root.replaceChildren(...parts, ...after);
     }
     if (keptForm !== null && workspace.record !== null) refresh(keptForm, workspace.record);
     if (focus !== null) root.querySelector<HTMLElement>(focus)?.focus();

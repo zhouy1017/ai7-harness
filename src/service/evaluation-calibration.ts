@@ -156,6 +156,24 @@ export class EvaluationCalibrationLedger {
     return before;
   }
 
+  /**
+   * Every Book's latest actuals, each chain verified (Issue #429, S81b2): what 定价与首印's prediction range is computed over —
+   * the same Books the switch counts, each once, at what the editor last entered for it.
+   */
+  everyLatestActuals(): Map<string, StoredActuals> {
+    const books = new Map<string, StoredActuals>();
+    for (const row of this.#db.prepare('SELECT DISTINCT book_id FROM publication_actuals ORDER BY book_id').all() as SqlRow[]) {
+      const latest = this.latestActuals(String(row.book_id));
+      if (latest !== null) books.set(String(row.book_id), latest);
+    }
+    return books;
+  }
+
+  /** Whether this Book carries any actuals: it is left out of the Books its own prediction counts (S81b2). */
+  hasActuals(bookId: string): boolean {
+    return this.#db.prepare('SELECT 1 FROM publication_actuals WHERE book_id = ? LIMIT 1').get(bookId) !== undefined;
+  }
+
   /** How many Books carry any actuals: what the prediction switch waits on (EVAL-010). */
   booksWithActuals(): number {
     return Number((this.#db.prepare('SELECT count(DISTINCT book_id) count FROM publication_actuals').get() as SqlRow).count);
