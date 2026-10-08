@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { EditorialStore } from '../../src/service/store.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx, type ComposedManuscriptRequest } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -94,4 +96,40 @@ describe('定价与首印 in the market section over the real store', () => {
       store.close();
     }
   }, 600_000);
+
+  it('shows no range while fewer than thirty published Books carry actuals, even with a switch recorded on', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let bookId: string;
+    try {
+      const book = await importBook(store, false);
+      bookId = book.bookId;
+      const other = await importBook(store, true);
+      await publishWithActuals(store, other, 4500, 3000);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    // A switch on that no build of this product records below the threshold: the range still waits for thirty Books.
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      const preferenceId = randomUUID();
+      const recordedAt = new Date().toISOString();
+      const record = canonicalRecord({
+        schema: 'ai7.evaluation-preferences/1', preferenceId, ordinal: 1, predictionEnabled: true, calibrationEnabled: true,
+        thresholds: { calibrationAdjustments: 10, predictionBooks: 30 }, supersedes: null, actor: '本机编辑', recordedAt,
+      });
+      database.prepare(`INSERT INTO evaluation_preferences(preference_id, ordinal, prediction_enabled, calibration_enabled, supersedes_preference_id, recorded_at, canonical_json, sha256)
+        VALUES (?, 1, 1, 1, NULL, ?, ?, ?)`).run(preferenceId, recordedAt, record.json, record.digest);
+    } finally {
+      database.close();
+    }
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(reopened.inspectEvaluation(bookId!, null).market.pricing)
+        .toEqual({ booksWithActuals: 1, threshold: 30, enabled: true, available: false, house: null, series: null });
+      reopened.markCleanShutdown();
+    } finally {
+      reopened.close();
+    }
+  }, 300_000);
 });
