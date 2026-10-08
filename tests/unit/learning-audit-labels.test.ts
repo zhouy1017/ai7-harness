@@ -13,12 +13,16 @@ import {
   LEARNING_REMEDIATION_LEFT_OUT,
   learningAuditBatchStop,
   learningAuditBookHeading,
+  learningAuditMaterialName,
+  learningAuditOpenLabel,
+  learningAuditSelectLabel,
   learningLineageDecisionLine,
   learningLineageDecisionStatus,
   learningRemediationCompleted,
   learningRemediationFuture,
   learningRemediationLeftOutLine,
   learningRemediationOutcome,
+  learningRemediationRereadFailed,
 } from '../../src/renderer/learning-audit-labels.js';
 import { LEARNING_AUDIT_STANDINGS } from '../../src/shared/protocol.js';
 
@@ -50,15 +54,24 @@ describe('学习回溯 words', () => {
 
   it('states the remediation preview in its four groups, and each item left out with why', () => {
     expect(LEARNING_REMEDIATION_GROUPS.map((entry) => entry.label)).toEqual(['未来使用', '正在运行', '候选或已启用记忆', '已完成历史']);
-    expect(learningRemediationFuture(2, 'book', '回溯之书')).toBe('2 条学习材料今后不再用于学习（原来是仅纳入《回溯之书》）；它们会显示为明确排除。');
+    expect(learningRemediationFuture(2, 'book', '回溯之书')).toBe('2 条学习材料今后不再可用于学习（原来是仅纳入《回溯之书》）；它们会显示为明确排除。');
     expect(learningRemediationFuture(1, 'house', '回溯之书')).toContain('原来是纳入出版社经验');
     expect(learningRemediationFuture(0, null, '回溯之书')).toBe('所选材料中没有可以停止今后使用的。');
     expect(learningRemediationCompleted(3)).toContain('此前的 3 个准入决定，都原样保留');
     expect(Object.keys(LEARNING_REMEDIATION_LEFT_OUT).sort()).toEqual(['changed', 'different-kind', 'different-scope', 'duplicate', 'not-found', 'not-included']);
-    expect(learningRemediationLeftOutLine({ originLabel: '修改建议 · 拒绝', reason: 'changed' })).toBe('修改建议 · 拒绝：在你选中之后改过，不在本次之列');
-    expect(learningRemediationLeftOutLine({ originLabel: null, reason: 'not-found' })).toBe('一条学习材料：已经不在学习材料之列，不在本次之列');
+    expect(learningRemediationLeftOutLine({ name: '修改建议 · 拒绝 · 本地 T · 你的原因：甲', reason: 'changed' })).toBe('修改建议 · 拒绝 · 本地 T · 你的原因：甲：在你选中之后改过，不在本次之列');
+    expect(learningRemediationLeftOutLine({ name: null, reason: 'not-found' })).toBe('一条学习材料：已经不在学习材料之列，不在本次之列');
     expect(learningRemediationOutcome(1, 0)).toBe('已停止今后使用 1 条学习材料。');
     expect(learningRemediationOutcome(1, 1)).toBe('已停止今后使用 1 条学习材料；另有 1 条未处理。');
     expect(learningAuditBatchStop(2)).toBe('停止今后使用所选 2 条…');
+    expect(learningRemediationRereadFailed('已停止今后使用 1 条学习材料。')).toBe('已停止今后使用 1 条学习材料。但学习回溯没能重新读取，列表可能还是之前的状态；请稍后重新打开。');
+  });
+
+  it('names each material by its origin, time and own last line, so rows sharing an origin are told apart', () => {
+    const instant = (iso: string) => `本地 ${iso}`;
+    const name = learningAuditMaterialName({ originLabel: '修改建议 · 拒绝', recordedAt: 'T', excerpt: ['原文：甲', '你的原因：篇幅'] }, instant);
+    expect(name).toBe('修改建议 · 拒绝 · 本地 T · 你的原因：篇幅');
+    expect(learningAuditMaterialName({ originLabel: '审阅 · 错别字', recordedAt: 'T', excerpt: [] }, instant)).toBe('审阅 · 错别字 · 本地 T');
+    expect([learningAuditSelectLabel(name), learningAuditOpenLabel(name)]).toEqual([`选择：${name}`, `查看来源链：${name}`]);
   });
 });

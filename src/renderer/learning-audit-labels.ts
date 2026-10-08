@@ -124,7 +124,7 @@ export const LEARNING_REMEDIATION_MEMORY = '没有由它们生成的记忆候选
 export function learningRemediationFuture(count: number, scope: 'book' | 'house' | null, bookTitle: string): string {
   if (count === 0 || scope === null) return '所选材料中没有可以停止今后使用的。';
   const was = scope === 'book' ? `仅纳入《${bookTitle}》` : '纳入出版社经验';
-  return `${count} 条学习材料今后不再用于学习（原来是${was}）；它们会显示为明确排除。`;
+  return `${count} 条学习材料今后不再可用于学习（原来是${was}）；它们会显示为明确排除。`;
 }
 
 export function learningRemediationCompleted(decisionsKept: number): string {
@@ -140,9 +140,24 @@ export const LEARNING_REMEDIATION_LEFT_OUT: Readonly<Record<LearningRemediationL
   'not-found': '已经不在学习材料之列',
 };
 
-/** One material left out of the batch, named with why (LAUD-011). */
-export function learningRemediationLeftOutLine(entry: { readonly originLabel: string | null; readonly reason: LearningRemediationLeftOut }): string {
-  return `${entry.originLabel ?? '一条学习材料'}：${LEARNING_REMEDIATION_LEFT_OUT[entry.reason]}，不在本次之列`;
+/** One material left out of the batch, named with why (LAUD-011): by its row's name, else its origin, else generically. */
+export function learningRemediationLeftOutLine(entry: { readonly name: string | null; readonly reason: LearningRemediationLeftOut }): string {
+  return `${entry.name ?? '一条学习材料'}：${LEARNING_REMEDIATION_LEFT_OUT[entry.reason]}，不在本次之列`;
+}
+
+/** The materials a preview includes, listed by name above its groups (LAUD-010). */
+export const LEARNING_REMEDIATION_INCLUDED = '本次停止今后使用：';
+
+/**
+ * A material's name where many share an origin (`修改建议 · 拒绝`): its origin, when it was recorded, and its own last line —
+ * the editor's reason or judgment — so a checkbox, a button and a left-out line each say which one (J-14, LAUD-011).
+ */
+export function learningAuditMaterialName(
+  material: { readonly originLabel: string; readonly recordedAt: string; readonly excerpt: ReadonlyArray<string> },
+  instant: (iso: string) => string,
+): string {
+  const last = material.excerpt.at(-1);
+  return `${material.originLabel} · ${instant(material.recordedAt)}${last === undefined ? '' : ` · ${last}`}`;
 }
 
 export function learningRemediationOutcome(recorded: number, leftOut: number): string {
@@ -151,8 +166,12 @@ export function learningRemediationOutcome(recorded: number, leftOut: number): s
 
 // ---- batch selection (LAUD-010, LAUD-011) ---------------------------------------------------------------------------------
 
-export function learningAuditSelectLabel(originLabel: string): string {
-  return `选择：${originLabel}`;
+export function learningAuditSelectLabel(name: string): string {
+  return `选择：${name}`;
+}
+
+export function learningAuditOpenLabel(name: string): string {
+  return `查看来源链：${name}`;
 }
 
 export function learningAuditSelected(count: number): string {
@@ -183,3 +202,8 @@ export const LEARNING_AUDIT_STATUS = {
   reincludeFailed: '无法记录这个决定。',
   invalidDates: '请填写有效日期，截止日期不能早于起始日期。',
 } as const;
+
+/** A batch recorded, and the list then not read again: the record stands, and the page says it may be out of date. */
+export function learningRemediationRereadFailed(outcome: string): string {
+  return `${outcome}但学习回溯没能重新读取，列表可能还是之前的状态；请稍后重新打开。`;
+}

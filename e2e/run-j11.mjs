@@ -828,6 +828,8 @@ const READ_AUDIT = `(() => {
     later: root.querySelector('.learning-audit-later')?.textContent ?? null,
     none: root.querySelector('.learning-audit-none')?.textContent ?? null,
     books: Array.from(root.querySelectorAll('.learning-audit-book'), (book) => book.querySelector('h3')?.textContent ?? null),
+    bookOptions: Array.from(root.querySelectorAll('#learning-audit-filter-book option'), (option) => option.textContent),
+    standingFilter: root.querySelector('#learning-audit-filter-standing')?.value ?? null,
     rows: Array.from(root.querySelectorAll('li.learning-audit-material'), (item) => [item.dataset.materialKey ?? null, item.dataset.learningStanding ?? null,
       item.querySelector('.learning-audit-standing')?.textContent ?? null, item.querySelector('.learning-audit-use')?.textContent ?? null,
       item.querySelector('.learning-audit-select') !== null]),
@@ -851,6 +853,7 @@ const READ_AUDIT = `(() => {
       refusal: lineage.querySelector(':scope > .learning-audit-refusal')?.textContent ?? null,
     },
     preview: preview === null ? null : {
+      included: Array.from(preview.querySelectorAll('.learning-remediation-included li'), (line) => line.textContent),
       groups: Array.from(preview.querySelectorAll('.learning-remediation-group'), (group) => [group.dataset.remediationGroup, group.dataset.remediationCount,
         group.querySelector('h5')?.textContent ?? null, group.querySelector('p')?.textContent ?? null]),
       leftOut: Array.from(preview.querySelectorAll('.learning-remediation-left-out li'), (line) => [line.dataset.leftOutReason, line.textContent]),
@@ -2481,7 +2484,9 @@ async function main() {
     requireJourney(auditAll.note === '学习回溯只是记录：每条学习材料从哪里来、准入怎样决定、后来影响了什么。停止今后使用不会删除任何历史，这里也不授予任何权限。' &&
       auditAll.later === AUDIT_LATER && auditAll.books.length === 1 && auditAll.books[0].startsWith(`《${THIRD.title}》 · `) &&
       auditAll.rows.every(([, , , use]) => use === '尚未被任何任务使用') &&
-      auditAll.rows.every(([, standing, , , selectable]) => selectable === (standing === 'book' || standing === 'house')), 'learning-audit-all-words', auditAll);
+      auditAll.rows.every(([, standing, , , selectable]) => selectable === (standing === 'book' || standing === 'house')) &&
+      // The 图书 filter offers every Book of the house, those with no material on this page among them (LAUD-002).
+      [`《${FIRST.title}》`, `《${SECOND.title}》`, `《${THIRD.title}》`].every((title) => auditAll.bookOptions.includes(title)), 'learning-audit-all-words', auditAll);
     await choose(renderer, '#learning-audit-filter-standing', 'book', 'learning-audit-filter-book');
     const auditBook = await readAudit(renderer, (page) => page.rows.length === 3 && page.rows.every(([, standing]) => standing === 'book'), 'learning-audit-book-only');
     requireJourney(auditBook.books[0] === `《${THIRD.title}》 · 3 条` && JSON.stringify(auditBook.rows.map(([key, , pill]) => [key, pill])) ===
@@ -2522,11 +2527,12 @@ async function main() {
     await clickSelector(renderer, '.learning-lineage [data-learning-audit-action="stop"]', 'learning-audit-stop');
     const stopPreview = await readAudit(renderer, (page) => page.preview !== null, 'learning-audit-preview');
     requireJourney(JSON.stringify(stopPreview.preview.groups) === JSON.stringify([
-      ['future', '1', '未来使用 · 1', `1 条学习材料今后不再用于学习（原来是仅纳入《${THIRD.title}》）；它们会显示为明确排除。`],
+      ['future', '1', '未来使用 · 1', `1 条学习材料今后不再可用于学习（原来是仅纳入《${THIRD.title}》）；它们会显示为明确排除。`],
       ['running', '0', '正在运行 · 0', '没有正在运行的任务使用它们：AI7 现在还没有读取学习材料的任务。'],
       ['memory', '0', '候选或已启用记忆 · 0', '没有由它们生成的记忆候选或已启用记忆：AI7 还没有生成这些。'],
       ['completed', '0', '已完成历史 · 0', '没有已完成的任务用过它们，因此没有结果需要标记；它们来自的反馈与改动，以及此前的 1 个准入决定，都原样保留。'],
     ]) && stopPreview.preview.leftOut.length === 0 && stopPreview.preview.confirm === true &&
+      stopPreview.preview.included.length === 1 && stopPreview.preview.included[0].startsWith('修改建议 · 拒绝 · ') && stopPreview.preview.included[0].endsWith(' · 你的原因：分页原因0') &&
       JSON.stringify(stopPreview.focus) === JSON.stringify([auditFirst, 'H4', true]), 'learning-audit-preview-words', stopPreview);
     const unrecorded = await renderer.evaluate(`window.ai7.inspectLearningLineage({ bookId: ${JSON.stringify(thirdId)}, materialKey: ${JSON.stringify(auditFirst)} }).then((read) => read.decisions.length)`);
     requireJourney(unrecorded === 1, 'learning-audit-preview-records-nothing', unrecorded);
@@ -2557,8 +2563,9 @@ async function main() {
     const reflected = await readLearning(renderer, (page) => page.card !== null, 'learning-audit-eligibility-read');
     requireJourney((reflected.card.facts.decision ?? '').startsWith('明确排除 · '), 'learning-audit-eligibility-words', reflected.card);
     await pressEscape(renderer);
+    // The audit's filters and page are this window's view state: back on its tab, 准入状态 still reads 仅纳入当前图书.
     await clickSelector(renderer, '#quality-tab-audit', 'learning-audit-back-to-audit');
-    await readAudit(renderer, (page) => page.view === 'list' && page.rows.length === 40, 'learning-audit-back-ready');
+    await readAudit(renderer, (page) => page.view === 'list' && page.standingFilter === 'book' && page.rows.length === 2, 'learning-audit-back-ready');
 
     at('learning-audit-batch');
     // Two of the Book's included materials selected together; one moves before the preview. The preview names it as
@@ -2575,8 +2582,11 @@ async function main() {
     requireJourney(drifted === 'house', 'learning-audit-drifted', drifted);
     await clickSelector(renderer, '.learning-audit-batch [data-learning-audit-action="batch-stop"]', 'learning-audit-batch-stop');
     const batchPreview = await readAudit(renderer, (page) => page.preview !== null, 'learning-audit-batch-preview');
-    requireJourney(batchPreview.preview.groups[0][1] === '1' &&
-      JSON.stringify(batchPreview.preview.leftOut) === JSON.stringify([['changed', '修改建议 · 拒绝：在你选中之后改过，不在本次之列']]) &&
+    // Each is named by its own line, so the one left out and the one included are told apart though both are 修改建议 · 拒绝.
+    requireJourney(batchPreview.preview.groups[0][1] === '1' && batchPreview.preview.included.length === 1 &&
+      batchPreview.preview.included[0].endsWith(' · 你的原因：分页原因1') && batchPreview.preview.leftOut.length === 1 &&
+      batchPreview.preview.leftOut[0][0] === 'changed' && batchPreview.preview.leftOut[0][1].startsWith('修改建议 · 拒绝 · ') &&
+      batchPreview.preview.leftOut[0][1].endsWith(' · 你的原因：分页原因2：在你选中之后改过，不在本次之列') &&
       batchPreview.preview.confirm === true, 'learning-audit-batch-preview-words', batchPreview.preview);
     await clickSelector(renderer, '.learning-remediation-preview [data-learning-audit-action="confirm"]', 'learning-audit-batch-confirm');
     await waitFor(renderer, `${status} === '已停止今后使用 1 条学习材料；另有 1 条未处理。'`, 'learning-audit-batch-status');

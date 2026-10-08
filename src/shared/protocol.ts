@@ -5826,7 +5826,10 @@ export interface LearningLineageDecisionProjection {
   readonly superseded: boolean;
   /** Whether it was made on the material as it reads now; one made on an earlier version binds it no longer. */
   readonly currentVersion: boolean;
-  /** Where it was made: 学习准入, or 学习回溯's 停止今后使用 against the preview named. */
+  /**
+   * Whether it is a 停止今后使用 recorded in 学习回溯 against a preview (`learning-audit`) or any other decision
+   * (`learning-eligibility`) — a 重新纳入 made in 学习回溯 included, since it is an ordinary decision and records no origin.
+   */
   readonly via: 'learning-eligibility' | 'learning-audit';
   /** The Book's 作者 and 责编 it was attributed to; `null` for none recorded. */
   readonly attribution: null | { readonly peopleVersion: number; readonly authors: ReadonlyArray<string>; readonly editors: ReadonlyArray<string> };

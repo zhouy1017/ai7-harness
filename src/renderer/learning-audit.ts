@@ -1,4 +1,5 @@
 import type {
+  BookSummaryCursor,
   LearningAuditBookProjection,
   LearningAuditInput,
   LearningAuditMaterialProjection,
@@ -8,6 +9,7 @@ import type {
   LearningRemediationItemInput,
   LearningRemediationPreviewProjection,
   RendererApi,
+  SeriesListCursor,
   SeriesSummaryProjection,
 } from '../shared/protocol.js';
 import { LEARNING_AUDIT_STANDINGS, LEARNING_MATERIAL_KINDS } from '../shared/protocol.js';
@@ -47,6 +49,8 @@ import {
   LEARNING_REMEDIATION_RUNNING,
   learningAuditBatchStop,
   learningAuditBookHeading,
+  learningAuditMaterialName,
+  learningAuditOpenLabel,
   learningAuditSelectLabel,
   learningAuditSelected,
   learningLineageDecisionLine,
@@ -57,6 +61,8 @@ import {
   learningRemediationFuture,
   learningRemediationLeftOutLine,
   learningRemediationOutcome,
+  learningRemediationRereadFailed,
+  LEARNING_REMEDIATION_INCLUDED,
 } from './learning-audit-labels.js';
 import {
   LEARNING_CHOICES,
@@ -81,7 +87,7 @@ import { localInstantLabel } from './plan-preview-labels.js';
 export interface MountLearningAuditOptions {
   readonly root: HTMLElement;
   readonly api: Pick<RendererApi, 'inspectLearningAudit' | 'inspectLearningLineage' | 'previewLearningRemediation' | 'recordLearningRemediation' |
-    'decideLearningMaterial' | 'inspectSeriesList'>;
+    'decideLearningMaterial' | 'inspectSeriesList' | 'listBooks'>;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly errorMessage: (error: unknown, fallback: string) => string;
 }
@@ -111,20 +117,31 @@ type Panel =
 const itemOf = (material: { readonly materialKey: string; readonly digest: string; readonly decisions: number }): LearningRemediationItemInput =>
   ({ materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: material.decisions });
 
+/**
+ * The audit's local view state (interaction-spec, Learning Audit rules): the filters and the page they were read at, kept in
+ * this window across 质量与学习's tabs and other screens. It is not Learning Audit authority and does not outlive a restart.
+ */
+let remembered: { readonly chosen: Readonly<Record<Filter, string>>; readonly pageAfter: LearningMaterialCursor | null } | null = null;
+
+/** The most pages of Books or Series the filters' choices read: a bound on a house far larger than any yet seen. */
+const MAX_CHOICE_PAGES = 100;
+
 export function mountLearningAudit(options: MountLearningAuditOptions): { load(): Promise<void> } {
   const { root, api, setStatus, errorMessage } = options;
   root.classList.add('learning-audit');
   let projection: LearningAuditProjection | null = null;
-  /** The filters as the editor set them; `''` is 全部. They outlive the explorer and a repaint, never the page. */
+  /** The filters as the editor set them; `''` is 全部. */
   let chosen: Record<Filter, string> = { query: '', book: '', series: '', kind: '', standing: '', from: '', to: '' };
   /** The cursor the shown page was read from: `null` for the first. */
   let pageAfter: LearningMaterialCursor | null = null;
   let series: ReadonlyArray<SeriesSummaryProjection> = [];
+  /** Every Book of the house, for the 图书 filter (LAUD-002), with any a page names besides. */
   const knownBooks = new Map<string, string>();
   let busy = false;
   const selection = new Map<string, Selected>();
   let batch: Extract<Panel, { kind: 'preview' }> | null = null;
-  let batchRefusal: string | null = null;
+  /** A batch refusal kept above the re-read list, so the editor sees why the preview closed. */
+  let listRefusal: string | null = null;
   /** The explorer open, if any: its material, what it read, the panel open beneath it, and a refusal to show. */
   let lineage: { readonly bookId: string; readonly materialKey: string; projection: LearningLineageProjection; panel: Panel; refusal: string | null } | null = null;
   /** A record made in the explorer: the list reads its page again on the way back. */
@@ -152,29 +169,35 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     };
   };
 
-  /** Reads one page for the filters; on success the page, filters and cursor are the shown ones and the selection clears. */
-  const request = async (filters: Record<Filter, string>, after: LearningMaterialCursor | null, focus: string | null): Promise<void> => {
-    if (busy) return;
+  /**
+   * Reads one page for the filters; on success the page, filters and cursor are the shown ones, the selection clears, and it
+   * answers `true`. A failed read keeps the page that was shown, says so in the status, and answers `false`.
+   */
+  const request = async (filters: Record<Filter, string>, after: LearningMaterialCursor | null, focus: string | null, refusal: string | null = null): Promise<boolean> => {
+    if (busy) return false;
     const input = inputOf(filters, after);
     if (input === null) {
       setStatus(LEARNING_AUDIT_STATUS.invalidDates, 'error');
       paint(focus);
-      return;
+      return false;
     }
     busy = true;
     paint(null);
     setStatus(LEARNING_AUDIT_STATUS.loading, 'busy');
+    let read = false;
     try {
       const page = await api.inspectLearningAudit(input);
-      if (!root.isConnected) return;
+      if (!root.isConnected) return false;
       projection = page;
       chosen = { ...filters };
       pageAfter = after;
+      remembered = { chosen: { ...filters }, pageAfter: after };
       for (const book of page.books) knownBooks.set(book.bookId, book.title);
       selection.clear();
       batch = null;
-      batchRefusal = null;
+      listRefusal = refusal;
       listStale = false;
+      read = true;
       setStatus(LEARNING_AUDIT_STATUS.opened);
     } catch (error) {
       if (projection === null) {
@@ -186,6 +209,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       busy = false;
       if (root.isConnected) paint(focus);
     }
+    return read;
   };
 
   const paint = (focus: string | null): void => {
@@ -275,16 +299,17 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       if (busy) return;
       selection.clear();
       batch = null;
-      batchRefusal = null;
       paint('#learning-audit-query');
     });
     clear.disabled = busy;
     row.append(stop, clear);
     section.append(row);
     if (!homogeneous()) section.append(el('p', 'field-note learning-audit-mismatch', LEARNING_AUDIT_BATCH_MISMATCH));
-    if (batch !== null) section.append(previewNode(batch, batchRefusal, () => {
+    if (batch !== null) section.append(previewNode(batch, null, (materialKey) => {
+      const entry = selection.get(materialKey);
+      return entry === undefined ? null : learningAuditMaterialName(entry.material, localInstantLabel);
+    }, () => {
       batch = null;
-      batchRefusal = null;
       paint('[data-learning-audit-action="batch-stop"]');
     }, () => void confirmBatch()));
     return section;
@@ -303,6 +328,12 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       dateFilter('from'), dateFilter('to'),
     );
     parts.push(filters, el('p', 'field-note learning-audit-later', LEARNING_AUDIT_FILTERS_LATER));
+    if (listRefusal !== null) {
+      const alert = el('p', 'attention-note learning-audit-refusal', listRefusal);
+      alert.setAttribute('role', 'alert');
+      alert.tabIndex = -1;
+      parts.push(alert);
+    }
     if (selection.size > 0) parts.push(batchNode());
     root.dataset['learningAuditBooks'] = String(projection.books.length);
     root.dataset['learningAuditView'] = 'list';
@@ -352,7 +383,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       check.type = 'checkbox';
       check.checked = selection.has(material.materialKey);
       check.disabled = busy || batch !== null;
-      check.setAttribute('aria-label', learningAuditSelectLabel(material.originLabel));
+      check.setAttribute('aria-label', learningAuditSelectLabel(learningAuditMaterialName(material, localInstantLabel)));
       check.addEventListener('change', () => {
         if (busy || batch !== null) return;
         if (check.checked) selection.set(material.materialKey, { bookId: book.bookId, material });
@@ -370,7 +401,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     if (reason !== undefined) item.append(el('p', 'learning-audit-excerpt', reason));
     item.append(el('p', 'field-note learning-audit-use', LEARNING_AUDIT_UNUSED));
     const open = action(LEARNING_AUDIT_OPEN, 'quiet', 'open', () => void openLineage(book.bookId, material.materialKey));
-    open.setAttribute('aria-label', `${LEARNING_AUDIT_OPEN.replace('…', '')}：${material.originLabel}`);
+    open.setAttribute('aria-label', learningAuditOpenLabel(learningAuditMaterialName(material, localInstantLabel)));
     open.disabled = busy || batch !== null;
     item.append(open);
     return item;
@@ -381,7 +412,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     const entries = [...selection.values()];
     const items = entries.map((entry) => itemOf(entry.material));
     busy = true;
-    batchRefusal = null;
+    listRefusal = null;
     paint(null);
     setStatus(LEARNING_AUDIT_STATUS.previewing, 'busy');
     try {
@@ -401,28 +432,47 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     if (busy || batch === null) return;
     const { preview, items } = batch;
     busy = true;
-    batchRefusal = null;
     paint(null);
     setStatus(LEARNING_AUDIT_STATUS.recording, 'busy');
+    let outcome: Awaited<ReturnType<typeof api.recordLearningRemediation>>;
     try {
-      const outcome = await api.recordLearningRemediation({ bookId: preview.bookId, items, previewDigest: preview.previewDigest });
-      if (!root.isConnected) return;
-      busy = false;
-      const message = learningRemediationOutcome(outcome.recorded.length, outcome.leftOut.length);
-      await request(chosen, pageAfter, '#learning-audit-query');
-      setStatus(message, 'success');
+      outcome = await api.recordLearningRemediation({ bookId: preview.bookId, items, previewDigest: preview.previewDigest });
     } catch (error) {
       busy = false;
       if (!root.isConnected) return;
-      batchRefusal = errorMessage(error, LEARNING_AUDIT_STATUS.failed);
-      paint('.learning-remediation-preview [data-learning-audit-action="confirm"]');
-      setStatus(batchRefusal, 'error');
+      // The preview is known stale or refused: it closes, the page is read again so every row shows where it stands now, and
+      // the refusal stays above it — as the explorer does with its chain.
+      const refusal = errorMessage(error, LEARNING_AUDIT_STATUS.failed);
+      batch = null;
+      if (!(await request(chosen, pageAfter, '.learning-audit-refusal', refusal))) {
+        listRefusal = refusal;
+        paint('.learning-audit-refusal');
+      }
+      setStatus(refusal, 'error');
+      return;
+    }
+    busy = false;
+    if (!root.isConnected) return;
+    // The record stands whatever the read after it does: the preview and the selection it was made of close first.
+    batch = null;
+    selection.clear();
+    const message = learningRemediationOutcome(outcome.recorded.length, outcome.leftOut.length);
+    if (await request(chosen, pageAfter, '#learning-audit-query')) setStatus(message, 'success');
+    else {
+      paint('#learning-audit-query');
+      setStatus(learningRemediationRereadFailed(message), 'error');
     }
   };
 
   // ---- 学习补救影响预览 ------------------------------------------------------------------------------------------------
 
-  const previewNode = (panel: Extract<Panel, { kind: 'preview' }>, refusal: string | null, cancel: () => void, confirm: () => void): HTMLElement => {
+  const previewNode = (
+    panel: Extract<Panel, { kind: 'preview' }>,
+    refusal: string | null,
+    nameOf: (materialKey: string) => string | null,
+    cancel: () => void,
+    confirm: () => void,
+  ): HTMLElement => {
     const { preview } = panel;
     const section = el('section', 'learning-remediation-preview');
     section.setAttribute('aria-label', LEARNING_REMEDIATION_HEADING);
@@ -430,6 +480,11 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     const heading = el('h4', undefined, LEARNING_REMEDIATION_HEADING);
     heading.tabIndex = -1;
     section.append(heading);
+    if (preview.included.length > 0) {
+      const included = el('ul', 'learning-remediation-included');
+      for (const entry of preview.included) included.append(el('li', undefined, nameOf(entry.materialKey) ?? entry.originLabel));
+      section.append(el('p', 'field-note', LEARNING_REMEDIATION_INCLUDED), included);
+    }
     const texts: Record<(typeof LEARNING_REMEDIATION_GROUPS)[number]['group'], string> = {
       future: learningRemediationFuture(preview.groups.future, preview.scope, preview.bookTitle),
       running: LEARNING_REMEDIATION_RUNNING,
@@ -449,7 +504,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     if (preview.leftOut.length > 0) {
       const list = el('ul', 'learning-remediation-left-out');
       for (const entry of preview.leftOut) {
-        const line = el('li', undefined, learningRemediationLeftOutLine(entry));
+        const line = el('li', undefined, learningRemediationLeftOutLine({ name: nameOf(entry.materialKey) ?? entry.originLabel, reason: entry.reason }));
         line.dataset['leftOutReason'] = entry.reason;
         list.append(line);
       }
@@ -697,7 +752,10 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     leave.disabled = busy;
     actions.append(leave);
     section.append(actions);
-    if (open.panel?.kind === 'preview') section.append(previewNode(open.panel, null, closePanel, () => void confirmOne()));
+    if (open.panel?.kind === 'preview') {
+      const name = learningAuditMaterialName(material, localInstantLabel);
+      section.append(previewNode(open.panel, null, (materialKey) => (materialKey === material.materialKey ? name : null), closePanel, () => void confirmOne()));
+    }
     if (open.panel?.kind === 'reinclude') section.append(reincludeNode(open, open.panel));
     if (open.refusal !== null) {
       const alert = el('p', 'attention-note learning-audit-refusal', open.refusal);
@@ -735,15 +793,43 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented || lineage !== null || batch === null || busy) return;
     event.preventDefault();
     batch = null;
-    batchRefusal = null;
     paint('[data-learning-audit-action="batch-stop"]');
   });
 
   return {
     async load(): Promise<void> {
       root.replaceChildren(el('p', 'field-note', LEARNING_AUDIT_STATUS.loading));
-      // The Series filter's choices are the house's first page of Series; one that cannot be read leaves the filter at 全部.
-      try { series = (await api.inspectSeriesList({ after: null })).series; } catch { series = []; }
+      // The filters' choices are every Book and every Series of the house (LAUD-002), read page by page once on opening; a
+      // list that cannot be read leaves its filter with what it has, and every filter still offers 全部.
+      try {
+        let after: BookSummaryCursor | null = null;
+        for (let page = 0; page < MAX_CHOICE_PAGES; page += 1) {
+          const books = await api.listBooks({ after });
+          for (const book of books.items) knownBooks.set(book.bookId, book.title);
+          if (books.nextCursor === null) break;
+          after = books.nextCursor;
+        }
+      } catch { /* the Books read so far stay offered */ }
+      try {
+        const all: SeriesSummaryProjection[] = [];
+        let after: SeriesListCursor | null = null;
+        for (let page = 0; page < MAX_CHOICE_PAGES; page += 1) {
+          const read = await api.inspectSeriesList({ after });
+          all.push(...read.series);
+          if (read.nextCursor === null) break;
+          after = read.nextCursor;
+        }
+        series = all;
+      } catch { series = []; }
+      // The view state this window kept from an earlier visit, if any: the filters and the page they were read at.
+      // A kept Series or Book may be gone since; the page then opens unfiltered at its start.
+      const kept = remembered;
+      if (kept !== null) {
+        try {
+          if (await request({ ...kept.chosen }, kept.pageAfter, null)) return;
+        } catch { /* read afresh below */ }
+        remembered = null;
+      }
       await request(chosen, null, null);
     },
   };
