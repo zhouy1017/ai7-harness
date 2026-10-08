@@ -6,7 +6,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeExportAdmittedDocx, readExportedDocx } from './composed-docx.mjs';
-import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect } from './controller.mjs';
 import { openRemainingPackageExport } from './package-export-readiness.mjs';
 
 // J-07 (Issue #414, plan slice S65): ⑥ 发稿. An editor saves Milestone Versions of the manuscript — each
@@ -166,7 +166,7 @@ function at(next) {
 }
 function requireJourney(condition, name, detail) {
   if (condition) return;
-  const error = new Error(`J-07/${name}`);
+  const error = journeyCheckFailure('J-07', name);
   if (detail !== undefined) error.detail = detail;
   throw error;
 }
@@ -214,14 +214,14 @@ async function createLoopbackSentinel() {
   });
   server.on('error', () => { runtimeFault = true; });
   await new Promise((resolveListen, rejectListen) => {
-    server.once('error', () => rejectListen(new Error('J-07/loopback-listen')));
+    server.once('error', () => rejectListen(journeyCheckFailure('J-07', 'loopback-listen')));
     server.listen(0, '127.0.0.1', resolveListen);
   });
   const address = server.address();
   if (!(address !== null && typeof address === 'object' && address.address === '127.0.0.1' &&
       Number.isSafeInteger(address.port) && address.port > 0)) {
     await new Promise((resolveClose) => server.close(() => resolveClose()));
-    throw new Error('J-07/loopback-address');
+    throw journeyCheckFailure('J-07', 'loopback-address');
   }
   server.unref();
   return {
@@ -232,7 +232,7 @@ async function createLoopbackSentinel() {
       if (closed) return;
       closed = true;
       await new Promise((resolveClose, rejectClose) => {
-        server.close((error) => error ? rejectClose(new Error('J-07/loopback-close')) : resolveClose());
+        server.close((error) => error ? rejectClose(journeyCheckFailure('J-07', 'loopback-close')) : resolveClose());
       });
       requireJourney(!runtimeFault, 'loopback-runtime');
     },
@@ -262,13 +262,13 @@ async function attachRenderer(browser) {
     const completion = pending.get(response.id);
     if (!completion) return;
     pending.delete(response.id);
-    if (response.error) completion.reject(new Error('J-07/renderer-cdp-response'));
+    if (response.error) completion.reject(journeyCheckFailure('J-07', 'renderer-cdp-response'));
     else completion.resolve(response.result);
   });
   const send = async (method, params = {}) => {
     const id = nextId++;
     const response = new Promise((resolveResponse, rejectResponse) => {
-      const timeout = setTimeout(() => { pending.delete(id); rejectResponse(new Error('J-07/renderer-cdp-timeout')); }, 60_000);
+      const timeout = setTimeout(() => { pending.delete(id); rejectResponse(journeyCheckFailure('J-07', 'renderer-cdp-timeout')); }, 60_000);
       timeout.unref();
       pending.set(id, {
         resolve: (value) => { clearTimeout(timeout); resolveResponse(value); },
@@ -295,7 +295,7 @@ async function waitFor(renderer, expression, name, timeout = 60_000) {
     if (await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  throw new Error(`J-07/${name}`);
+  throw journeyCheckFailure('J-07', name);
 }
 async function assertRenderer(renderer, expression, name) {
   requireJourney(await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`), name);
@@ -484,7 +484,7 @@ async function openSelectionMenu(renderer, position, from, to, name) {
     await press(renderer, 'Escape');
     await new Promise((resolveWait) => setTimeout(resolveWait, 120));
   }
-  throw new Error(`J-07/${name}`);
+  throw journeyCheckFailure('J-07', name);
 }
 
 /** Press a control of the open export card by its action, refusing one that is missing or disabled. */
@@ -737,7 +737,7 @@ async function readCalibration(renderer, predicate, name) {
     if (page !== null && predicate(page)) return page;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  const error = new Error(`J-07/${name}`);
+  const error = journeyCheckFailure('J-07', name);
   error.detail = page;
   throw error;
 }
@@ -1355,9 +1355,9 @@ async function main() {
     await assertRenderer(renderer, `window.__j07.exportCard().querySelector('h4')?.textContent === '导出 · 当前修订版 r3' && window.__j07.exportCard().querySelector('.export-saved-line') === null`, 'export-keyboard-nothing-to-save');
     await press(renderer, 'Tab');
     await waitFor(renderer, `(() => { const summary = window.__j07.exportCard()?.querySelector('details.export-fallback-formats > summary'); return document.activeElement === summary && summary.textContent === '备用格式' && summary.matches(':focus-visible') && summary.parentElement.open === false; })()`, 'export-keyboard-fallback-formats-reached', 10_000);
-    for (const key of ['includeAnnotations', 'includeSuggestions', 'includeEditorNotes']) {
+    for (const [key, name] of [['includeAnnotations', 'annotations'], ['includeSuggestions', 'suggestions'], ['includeEditorNotes', 'editor-notes']]) {
       await press(renderer, 'Tab');
-      await waitFor(renderer, `document.activeElement === window.__j07.exportOption(${JSON.stringify(key)}) && document.activeElement.matches(':focus-visible')`, `export-keyboard-${key}-reached`, 10_000);
+      await waitFor(renderer, `document.activeElement === window.__j07.exportOption(${JSON.stringify(key)}) && document.activeElement.matches(':focus-visible')`, `export-keyboard-${name}-reached`, 10_000);
     }
     await pressSpace(renderer);
     await waitFor(renderer, `(() => { const box = window.__j07.exportOption('includeEditorNotes'); return window.__j07.exportCard()?.dataset.exportPhase === 'ready' && box?.checked === true && document.activeElement === box && window.__j07.exportRows().includes('editor-notes:preserved:1') && !window.__j07.exportRows().some((row) => row.includes(':excluded:')); })()`, 'export-keyboard-space-includes-the-note', 60_000);
@@ -1885,9 +1885,10 @@ async function main() {
     // files — the 发稿版本's revision and the 新闻稿's delivered 版本 3 as DOCX, and the 交付包清单 in the package's own
     // words — v2's history says so, and 交付物's export records and the package itself stay as they were.
     const packageFiles = [
-      ['publication', 'docx', `稿件 · 发稿版本「${FIRST.label}」 · r1`, `001 ${EXCERPT.title} · ${FIRST.label}.docx`],
-      ['document:news-release', 'docx', '新闻稿 · 版本 3', `002 ${EXCERPT.title} · 新闻稿 · 版本 3.docx`],
-      ['manifest', 'markdown', '交付包清单', PACKAGE_MANIFEST_FILE],
+      // The fifth field names the file in a check label (Issue #652); the key itself carries a colon.
+      ['publication', 'docx', `稿件 · 发稿版本「${FIRST.label}」 · r1`, `001 ${EXCERPT.title} · ${FIRST.label}.docx`, 'publication'],
+      ['document:news-release', 'docx', '新闻稿 · 版本 3', `002 ${EXCERPT.title} · 新闻稿 · 版本 3.docx`, 'news-release'],
+      ['manifest', 'markdown', '交付包清单', PACKAGE_MANIFEST_FILE, 'manifest'],
     ];
     const firstMembers = packageFiles.filter(([key]) => key !== 'document:news-release');
     const packageFileLines = (outcome, words, members = packageFiles) => members.map(([key, format, label, fileName]) =>
@@ -1994,10 +1995,10 @@ async function main() {
     // The folder holds exactly the three files; each DOCX is a package, and the 交付包清单 is the version's own words, byte
     // for byte, as the package and its Delivery Records answer them.
     requireJourney(JSON.stringify((await readdir(packageFolder)).sort()) === JSON.stringify(packageFiles.map(([, , , fileName]) => fileName).sort()), 'package-export-folder-files');
-    for (const [key, format, , fileName] of packageFiles) {
+    for (const [, format, , fileName, name] of packageFiles) {
       if (format !== 'docx') continue;
       const bytes = await readFile(resolve(packageFolder, fileName));
-      requireJourney(bytes.byteLength > 1_000 && bytes.subarray(0, 2).toString('latin1') === 'PK', `package-export-docx-${key}`);
+      requireJourney(bytes.byteLength > 1_000 && bytes.subarray(0, 2).toString('latin1') === 'PK', `package-export-docx-${name}`);
     }
     const manifestInputs = await renderer.evaluate(`Promise.all([window.ai7.inspectBookDeliveryPackage(), window.ai7.inspectProductionDocuments()]).then(([bundle, documents]) => ({
       version: bundle.versions[0], included: bundle.content.included, limitations: bundle.content.limitations, statement: bundle.statement,

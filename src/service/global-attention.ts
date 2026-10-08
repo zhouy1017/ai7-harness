@@ -29,7 +29,6 @@ import {
 import type { ProgressReader, RunProgress } from './analysis/baseline-analysis-store.js';
 import type { WaitingFor } from './task-plan.js';
 import type { LibraryMaterialAttentionReading } from './library-materials.js';
-import { REVIEW_RUN_CATEGORY_STATE_LABELS } from './review/review-run-state.js';
 import type { LiveAnswer } from './dialogue/dialogue-history.js';
 
 /**
@@ -175,6 +174,8 @@ export interface ReviewRunAttentionReading {
     readonly categoryId: string;
     readonly label: string;
     readonly state: ReviewRunCategoryState;
+    /** Its state in words; 等待运行名额 while it waits for a place of the governor (Issue #632). */
+    readonly stateLabel: string;
     /** The category has no terminal event yet: 继续审阅 would take it up. */
     readonly pending: boolean;
     readonly detail: string | null;
@@ -532,7 +533,7 @@ function analysisOutcomeItem(reading: AnalysisOutcomeAttentionReading): GlobalAt
 const STOPPED_CATEGORY_STATES: ReadonlySet<ReviewRunCategoryState> = new Set(['failed', 'interrupted', 'refused']);
 
 function categoryFact(category: ReviewRunAttentionReading['categories'][number]): GlobalAttentionFactsProjection['categories'][number] {
-  return { label: category.label, state: category.state, stateLabel: REVIEW_RUN_CATEGORY_STATE_LABELS[category.state], detail: category.detail };
+  return { label: category.label, state: category.state, stateLabel: category.stateLabel, detail: category.detail };
 }
 
 function reviewTechnical(reading: ReviewRunAttentionReading, at: string): GlobalAttentionItemProjection['technical'] {

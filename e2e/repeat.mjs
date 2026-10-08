@@ -1,6 +1,7 @@
 import { rm } from 'node:fs/promises';
 import {
   classifyJourneyResult,
+  collectJourneyCheck,
   collectReadinessTrace,
   debugArtifactLabel,
   isAdmittedJourney,
@@ -47,6 +48,8 @@ if (localDebugRefused()) {
     if (failed) {
       const failure = classifyJourneyResult(result, journey);
       console.error(`LOCAL_REPEAT/${journey}/${iteration}/fail/${failure.location}/${failure.errorClass}/${seconds}s`);
+      const check = collectJourneyCheck(result, journey, failure);
+      if (check !== null) console.error(`LOCAL_REPEAT/${journey}/${iteration}/fail/${failure.location}/check/${check}`);
       const readiness = collectReadinessTrace(result, journey);
       if (readiness !== null) console.error(`LOCAL_REPEAT/${journey}/${iteration}/readiness/${readiness}`);
       console.error(`LOCAL_REPEAT/${journey}/artifacts/${result.artifactRoot ? debugArtifactLabel(result.artifactRoot) : '(none)'}`);

@@ -131,7 +131,8 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   // A Run in Connectivity Wait (Issue #502), in the drawer's words for what it waits for: never 运行中, never 已暂停.
   'analysis-waiting-network': '等待网络',
   'analysis-waiting-connection': '需要处理模型连接',
-  'analysis-waiting-slot': '等待运行名额',
+  // Not in the capacity queue (Issue #632): the drawer's own words for it, never 等待运行名额.
+  'analysis-waiting-slot': '已联网 · 名额已满',
   // The drawer's own word for it (Issue #539): nothing runs yet.
   'analysis-waiting-admission': '正在排队',
   // A start waiting on the governor for a place (Issue #49, S14; CONC-007), in the drawer's words for it.
@@ -382,7 +383,8 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
     case 'analysis-waiting-connection':
       return '模型连接缺少凭据：到设置连接模型服务后，任务会在联网时开始。';
     case 'analysis-waiting-slot':
-      return '运行名额已满：正在运行的任务结束后，这项任务在联网时开始。';
+      // It holds no place in the queue of starts waiting for one, and says so (Issue #632).
+      return '已经联网，但运行名额已满：有名额空出时，AI7 先核对计划再开始；之后开始的任务可能先开始。现在什么都没有运行。';
     case 'analysis-waiting-capacity':
       return '运行名额已满：正在运行的任务结束后，这项任务自动开始；在此之前什么都没有发送。';
     case 'analysis-waiting-admission':

@@ -293,6 +293,50 @@ class GatedOwner implements ReviewRunExecutionOwner {
   }
 }
 
+/**
+ * The one owner with every place of its governor taken by other Books' Runs until the suite frees one (Issue #632): the loop's
+ * first wait for a place holds there.
+ */
+class PlacesTakenOwner implements ReviewRunExecutionOwner {
+  readonly #inner: BaselineAnalysisExecutionOwner;
+  readonly reached: Promise<void>;
+  readonly #freed: Promise<void>;
+  #reach: () => void = () => {};
+  #free: () => void = () => {};
+  #taken = true;
+
+  constructor(inner: BaselineAnalysisExecutionOwner) {
+    this.#inner = inner;
+    this.reached = new Promise((resolve) => { this.#reach = resolve; });
+    this.#freed = new Promise((resolve) => { this.#free = resolve; });
+  }
+
+  get busy(): boolean {
+    return this.#taken || this.#inner.busy;
+  }
+
+  admitAndDispatch(runRecordId: string, ledger: BaselineAnalysisStore): void {
+    this.#inner.admitAndDispatch(runRecordId, ledger);
+  }
+
+  async whenPlaceFree(): Promise<void> {
+    if (this.#taken) {
+      this.#reach();
+      await this.#freed;
+    }
+    return this.#inner.whenPlaceFree();
+  }
+
+  whenDone(runRecordId: string): Promise<void> {
+    return this.#inner.whenDone(runRecordId);
+  }
+
+  free(): void {
+    this.#taken = false;
+    this.#free();
+  }
+}
+
 function eventTrail(reviewRunId: string): Array<[string, string]> {
   const db = database();
   try {
@@ -707,6 +751,38 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(eventTrail(reviewRunId)).toHaveLength(6);
     } finally {
       await close(second);
+    }
+  }, 300_000);
+
+  it('names a category that waits for a place of the governor 等待运行名额, and drops it once the category has one (Issue #632)', async () => {
+    let taken = null as PlacesTakenOwner | null;
+    const session = await open('sample1-review-authored', (inner) => { taken = new PlacesTakenOwner(inner); return taken; });
+    try {
+      const book = await importBook(session);
+      const prepared = prepare(session, book, [TYPOS, STYLE], WHOLE);
+      session.store.authorizeReviewRun(book.bookId, prepared.reviewRunId, approvals(prepared));
+      const loop = session.driver.drive(prepared.reviewRunId);
+      await taken!.reached;
+      const waiting = workspace(session, book, prepared.reviewRunId).run!;
+      expect(waiting.state).toBe('running');
+      expect(waiting.categories.map((category) => [category.state, category.stateLabel, category.detail])).toEqual([
+        ['waiting', '等待运行名额', '运行名额已满：等待运行名额的任务先开始，有名额空出时这一类接着审；在此之前这一类什么都没有发送。'],
+        ['waiting', '等待审阅', null],
+      ]);
+      // 待我处理 names the same wait for the category the Run is at.
+      const attention = session.store.inspectGlobalAttention(() => null, true);
+      const item = attention.groups.flatMap((group) => group.items).find((entry) => entry.itemId === `review:${prepared.reviewRunId}`)!;
+      expect(item.state).toBe('review-running');
+      expect(item.facts.categories.map((category) => category.stateLabel)).toEqual(['等待运行名额']);
+      taken!.free();
+      await loop;
+      const finished = workspace(session, book, prepared.reviewRunId).run!;
+      expect(finished.state).toBe('settled');
+      expect(finished.categories.map((category) => category.stateLabel)).toEqual(['已完成 · 发现可处理', '已完成 · 发现可处理']);
+    } finally {
+      // A failed expectation must not leave the loop waiting for a place forever: shutdown waits for it.
+      (taken as PlacesTakenOwner | null)?.free();
+      await close(session);
     }
   }, 300_000);
 

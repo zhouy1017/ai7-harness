@@ -366,6 +366,25 @@ export class SeriesKnowledgeLedger {
   }
 
   /**
+   * The items of a Series whose current revision was taken in under one of `scopes`, by name, each verified with its revisions
+   * (Issue #64, S29a review). The scope is filtered in SQL on the newest revision's promotion, so a reader that stops early —
+   * 书系一致性 stops once its clauses pass what one review carries — verifies only the items it reads.
+   */
+  *itemsCurrentlyFor(seriesId: string, scopes: ReadonlyArray<SeriesKnowledgeReuseScope>): IterableIterator<StoredItem> {
+    const wanted = new Set<string>(scopes);
+    const rows = this.#db.prepare(`SELECT i.* FROM series_knowledge_items i
+      WHERE i.series_id = ? AND (SELECT p.reuse_scope FROM series_knowledge_revisions r JOIN series_knowledge_promotions p ON p.revision_id = r.revision_id
+        WHERE r.item_id = i.item_id ORDER BY r.ordinal DESC LIMIT 1) IN (SELECT value FROM json_each(?))
+      ORDER BY i.subject, i.item_id`).iterate(seriesId, JSON.stringify([...wanted])) as IterableIterator<SqlRow>;
+    for (const row of rows) {
+      const item = this.#item(row);
+      // The verified chain must agree with what the filter read; a disagreement is a record that no longer reads.
+      requireKnowledge(wanted.has(item.current.reuseScope), 'SERIES_KNOWLEDGE_RECORD_INVALID', INVALID);
+      yield item;
+    }
+  }
+
+  /**
    * Up to `limit` items of a Series by name after the one named, narrowed to names holding the words when there are any — a
    * page of 书系知识 (Issue #63 review) — each verified with its revisions.
    */

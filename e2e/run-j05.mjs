@@ -5,7 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, composeAdmittedDocx } from './composed-docx.mjs';
-import { attachProductOutput, installJourneyCancellationCleanup, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 // J-05, first slice (Issue #407): Editorial Marks on the manuscript. An editor marks exact text with a
 // highlight, a 批注, a 备注 and a 修改建议, reads each on its Mark Card with its source, previews a
@@ -50,7 +50,7 @@ function at(next) {
 }
 function requireJourney(condition, name, detail) {
   if (condition) return;
-  const error = new Error(`J-05/${name}`);
+  const error = journeyCheckFailure('J-05', name);
   if (detail !== undefined) error.detail = detail;
   throw error;
 }
@@ -97,14 +97,14 @@ async function createLoopbackSentinel() {
   });
   server.on('error', () => { runtimeFault = true; });
   await new Promise((resolveListen, rejectListen) => {
-    server.once('error', () => rejectListen(new Error('J-05/loopback-listen')));
+    server.once('error', () => rejectListen(journeyCheckFailure('J-05', 'loopback-listen')));
     server.listen(0, '127.0.0.1', resolveListen);
   });
   const address = server.address();
   if (!(address !== null && typeof address === 'object' && address.address === '127.0.0.1' &&
       Number.isSafeInteger(address.port) && address.port > 0)) {
     await new Promise((resolveClose) => server.close(() => resolveClose()));
-    throw new Error('J-05/loopback-address');
+    throw journeyCheckFailure('J-05', 'loopback-address');
   }
   server.unref();
   return {
@@ -115,7 +115,7 @@ async function createLoopbackSentinel() {
       if (closed) return;
       closed = true;
       await new Promise((resolveClose, rejectClose) => {
-        server.close((error) => error ? rejectClose(new Error('J-05/loopback-close')) : resolveClose());
+        server.close((error) => error ? rejectClose(journeyCheckFailure('J-05', 'loopback-close')) : resolveClose());
       });
       requireJourney(!runtimeFault, 'loopback-runtime');
     },
@@ -145,13 +145,13 @@ async function attachRenderer(browser) {
     const completion = pending.get(response.id);
     if (!completion) return;
     pending.delete(response.id);
-    if (response.error) completion.reject(new Error('J-05/renderer-cdp-response'));
+    if (response.error) completion.reject(journeyCheckFailure('J-05', 'renderer-cdp-response'));
     else completion.resolve(response.result);
   });
   const send = async (method, params = {}) => {
     const id = nextId++;
     const response = new Promise((resolveResponse, rejectResponse) => {
-      const timeout = setTimeout(() => { pending.delete(id); rejectResponse(new Error('J-05/renderer-cdp-timeout')); }, 60_000);
+      const timeout = setTimeout(() => { pending.delete(id); rejectResponse(journeyCheckFailure('J-05', 'renderer-cdp-timeout')); }, 60_000);
       timeout.unref();
       pending.set(id, {
         resolve: (value) => { clearTimeout(timeout); resolveResponse(value); },
@@ -178,7 +178,7 @@ async function waitFor(renderer, expression, name, timeout = 60_000) {
     if (await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  throw new Error(`J-05/${name}`);
+  throw journeyCheckFailure('J-05', name);
 }
 async function assertRenderer(renderer, expression, name) {
   requireJourney(await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`), name);
@@ -326,7 +326,7 @@ async function rightClickUntil(renderer, prepare, target, ready, name) {
     await press(renderer, 'Escape');
     await new Promise((resolveWait) => setTimeout(resolveWait, 120));
   }
-  throw new Error(`J-05/${name}`);
+  throw journeyCheckFailure('J-05', name);
 }
 
 async function openSelectionMenu(renderer, blockId, from, to, name) {
@@ -359,7 +359,7 @@ async function openMarkCard(renderer, kind, blockId, name) {
       await new Promise((resolveWait) => setTimeout(resolveWait, 50));
     }
   }
-  throw new Error(`J-05/${name}-card`);
+  throw journeyCheckFailure('J-05', `${name}-card`);
 }
 
 async function openMarkMenu(renderer, kind, blockId, name) {

@@ -14,6 +14,7 @@ import {
   type ReviewRunAttentionReading,
 } from '../../src/service/global-attention.js';
 import type { RunProgress } from '../../src/service/analysis/baseline-analysis-store.js';
+import { REVIEW_RUN_CATEGORY_STATE_LABELS } from '../../src/service/review/review-run-state.js';
 import {
   GLOBAL_ATTENTION_GROUP_KEYS,
   GLOBAL_ATTENTION_GROUP_LIMIT,
@@ -105,7 +106,7 @@ function outcome(title: string, recordedAt: string, overrides: Partial<AnalysisO
 }
 
 function category(label: string, state: ReviewRunAttentionReading['categories'][number]['state'], pending: boolean, detail: string | null = null): ReviewRunAttentionReading['categories'][number] {
-  return { categoryId: label, label, state, pending, detail, progress: null };
+  return { categoryId: label, label, state, stateLabel: REVIEW_RUN_CATEGORY_STATE_LABELS[state], pending, detail, progress: null };
 }
 
 function reviewRun(title: string, overrides: Partial<ReviewRunAttentionReading> = {}): ReviewRunAttentionReading {

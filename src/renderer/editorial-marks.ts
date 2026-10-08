@@ -149,12 +149,14 @@ interface FormConfig {
   cancel(): void;
 }
 
-interface MenuItem {
+export interface MenuItem {
   action: string;
   label: string;
   hint?: string;
   disabledReason?: string;
   swatch?: PersonalHighlightColor;
+  /** The Series an entry of the 书系 group speaks for: its entries share one action, so a redraw keeps focus by this (Issue #642). */
+  seriesId?: string;
   run?(): void;
   /**
    * An item shown disabled with its reason until this answers what it does; `null` keeps it disabled.
@@ -163,7 +165,7 @@ interface MenuItem {
   resolve?(): Promise<(() => void) | null>;
 }
 
-interface MenuGroup {
+export interface MenuGroup {
   label: string;
   note?: string;
   items: ReadonlyArray<MenuItem>;
@@ -200,6 +202,62 @@ export function menuPlacement(
   };
 }
 
+type SeriesChoice = { readonly seriesId: string; readonly title: string };
+
+/**
+ * The selection menu's 书系 group (Issue #63, S28b): one entry per Series the Book is in, then the chooser. A Book in no
+ * Series has no group, and neither has one whose Series are not known yet: a group drawn before the editor's first read
+ * answers would flash a chooser on a Book in no Series (Issue #642 review). The menu is drawn again once that read answers.
+ */
+export function seriesKnowledgeMenuGroup(
+  membership: ReadonlyArray<SeriesChoice> | null,
+  why: string | undefined,
+  act: { compose(series: SeriesChoice): void; choose(): void },
+): MenuGroup | null {
+  if (membership === null || membership.length === 0) return null;
+  return {
+    label: KNOWLEDGE_MENU_GROUP,
+    note: why ?? KNOWLEDGE_MENU_NOTE,
+    items: [...membership.map((series): MenuItem => ({
+      action: 'propose-series-knowledge',
+      label: knowledgeMenuLabel(series.title),
+      seriesId: series.seriesId,
+      ...(why ? { disabledReason: why } : { run: () => act.compose(series) }),
+    })), {
+      action: 'choose-knowledge-series', label: '选择书系并提议知识…',
+      ...(why ? { disabledReason: why } : { run: () => act.choose() }),
+    }],
+  };
+}
+
+/** Whether two readings of the Book's Series draw the same 书系 group: not known yet and in none both draw nothing. */
+export function sameSeriesGroup(a: ReadonlyArray<SeriesChoice> | null, b: ReadonlyArray<SeriesChoice> | null): boolean {
+  const left = a ?? [];
+  const right = b ?? [];
+  return left.length === right.length && left.every((series, index) => series.seriesId === right[index]!.seriesId && series.title === right[index]!.title);
+}
+
+/**
+ * The Book's Series as the editor last read them (Issue #63, S28b; #642): `null` until the first read answers. Membership can
+ * change while the editor is open — 加入书系 from another window — so each selection menu reads it again. Only the latest
+ * read's answer counts, and a read that fails leaves the last answer standing.
+ */
+export function seriesMembership(
+  read: () => Promise<{ readonly memberships: ReadonlyArray<SeriesChoice> }>,
+  alive: () => boolean = () => true,
+): { current(): ReadonlyArray<SeriesChoice> | null; refresh(): Promise<void> } {
+  let current: ReadonlyArray<SeriesChoice> | null = null;
+  let asked = 0;
+  return {
+    current: () => current,
+    async refresh(): Promise<void> {
+      const mine = ++asked;
+      const page = await read().catch(() => null);
+      if (page !== null && alive() && mine === asked) current = page.memberships;
+    },
+  };
+}
+
 export function mountEditorialMarks(options: MountOptions): EditorialMarksSurface {
   const { editor, api } = options;
   const layer = el('div', 'editorial-mark-layer');
@@ -222,12 +280,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   let promptFor: { readonly markId: string; readonly decisionId: string; readonly mode: 'prompt' | 'add' | 'revise' } | null = null;
   let collapsedBeforeContextClick = true;
   let working = false;
-  /** The Series the Book is in, as last read: the next menu offers each (Issue #63, S28b). */
-  let inSeries: ReadonlyArray<{ readonly seriesId: string; readonly title: string }> = [];
-  const readSeries = (): void => {
-    void options.seriesOf?.(null).then((page) => { if (!destroyed) inSeries = page.memberships; }, () => undefined);
-  };
-  readSeries();
+  /** The Series the Book is in (Issue #63, S28b): each selection menu reads them again and is drawn again when they moved (#642). */
+  const seriesOf = options.seriesOf;
+  const inSeries = seriesOf === undefined ? null : seriesMembership(() => seriesOf(null), () => !destroyed);
+  void inSeries?.refresh();
   let closedAt: { top: number } | undefined;
 
   const binding = (): { manuscriptId: string; branchId: string; windowStartBlockId: string } => {
@@ -1167,6 +1223,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         control.type = 'button';
         control.setAttribute('role', 'menuitem');
         control.dataset['markAction'] = item.action;
+        if (item.seriesId !== undefined) control.dataset['seriesId'] = item.seriesId;
         if (item.swatch !== undefined) {
           control.dataset['markColor'] = String(item.swatch);
           control.append(el('span', 'editorial-mark-swatch'));
@@ -1377,12 +1434,15 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     await load(null);
   };
 
-  const showSelectionMenu = (at: { x: number; y: number }): void => {
+  const showSelectionMenu = (at: { x: number; y: number }, reread = true): void => {
     const range = editor.selectedRange();
     const markable = range.kind === 'range' || range.kind === 'unsettled';
     const why = markable ? undefined : selectionMenuReason(range.kind);
     const selected = range.kind === 'range' ? `已选 ${range.toGrapheme - range.fromGrapheme} 字` : range.kind === 'none' ? '未选中文字' : '已选中文字';
     const needsSelection = range.kind === 'none' ? '先选中文字' : undefined;
+    const shown = inSeries?.current() ?? null;
+    const knowledge = inSeries === null || options.proposeSeriesKnowledge === undefined ? null
+      : seriesKnowledgeMenuGroup(shown, why, { compose: (series) => void composeKnowledge(series), choose: () => void chooseKnowledgeSeries() });
     showMenu('selection', '稿件右键菜单', [
       {
         label: `文字处理 · ${selected}`,
@@ -1417,21 +1477,26 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         ],
       },
       aiTaskGroup(range.kind === 'range' ? undefined : why ?? selectionMenuReason(range.kind)),
-      // 书系 (Issue #63, S28b): only for a Book in a Series, one entry per Series.
-      ...(options.seriesOf === undefined || options.proposeSeriesKnowledge === undefined || inSeries.length === 0 ? [] : [{
-        label: KNOWLEDGE_MENU_GROUP,
-        note: why ?? KNOWLEDGE_MENU_NOTE,
-        items: [...inSeries.map((series): MenuItem => ({
-          action: 'propose-series-knowledge',
-          label: knowledgeMenuLabel(series.title),
-          ...(why ? { disabledReason: why } : { run: () => void composeKnowledge(series) }),
-        })), {
-          action: 'choose-knowledge-series', label: '选择书系并提议知识…',
-          ...(why ? { disabledReason: why } : { run: () => void chooseKnowledgeSeries() }),
-        }],
-      }]),
+      ...(knowledge === null ? [] : [knowledge]),
     ], at);
-    readSeries();
+    if (!reread || inSeries === null) return;
+    const drawn = menu;
+    const series = inSeries;
+    void series.refresh().then(() => {
+      if (drawn === undefined || menu !== drawn || sameSeriesGroup(shown, series.current())) return;
+      // The answer differs from what this menu shows: draw it again from the corner it stands at — it moves only if it no
+      // longer fits the window — keeping the item the editor is on, a 书系 entry by its Series (Issue #642 review).
+      const active = document.activeElement;
+      const on = active instanceof HTMLElement && drawn.contains(active) ? active : null;
+      const corner = { x: Number.parseFloat(drawn.style.left), y: Number.parseFloat(drawn.style.top) };
+      showSelectionMenu(Number.isFinite(corner.x) && Number.isFinite(corner.y) ? corner : at, false);
+      const seriesId = on?.dataset['seriesId'];
+      const action = on?.dataset['markAction'];
+      const target = seriesId !== undefined
+        ? menu?.querySelector<HTMLButtonElement>(`[data-series-id="${CSS.escape(seriesId)}"]:not(:disabled)`)
+        : action === undefined ? null : menu?.querySelector<HTMLButtonElement>(`[data-mark-action="${CSS.escape(action)}"]:not(:disabled)`);
+      target?.focus({ preventScroll: true });
+    });
   };
 
   const showMarkMenu = (mark: EditorialMarkAnchorProjection, at: { x: number; y: number }): void => {

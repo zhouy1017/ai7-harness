@@ -247,11 +247,12 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
       expect(freshProcedures.procedures.map((procedure) => [procedure.title, procedure.state, procedure.reviewRuns])).toEqual([
         ['错别字与规范用语审阅工序', 'enabled', 0], ['体例与格式审阅工序', 'enabled', 0], ['线索转批注', 'enabled', 0], ['断言列举与引文定位', 'enabled', 0],
         ['引用风险点标注', 'enabled', 0], ['出版风险点标注', 'enabled', 0], ['文学性与表达改进工序', 'enabled', 0],
-        ['书系一致性检查', 'unavailable', 0], ['跨交付物一致性检查', 'unavailable', 0],
+        ['书系一致性检查', 'enabled', 0], ['跨交付物一致性检查', 'unavailable', 0],
       ]);
-      // The two not connected yet say why of the house, never of one Book.
+      // The one not connected yet says why of the house, never of one Book; 书系一致性检查 runs for each Book over its Series
+      // Knowledge (Issue #64, S29a).
       expect(freshProcedures.procedures.filter((procedure) => procedure.state === 'unavailable').map((procedure) => procedure.unavailableReason))
-        .toEqual(['书系知识还没有接通。', '生产文档之间的一致性核对还没有接通。']);
+        .toEqual(['生产文档之间的一致性核对还没有接通。']);
       expect(freshProcedures.artifacts).toEqual([{
         title: '本社方案', revision: null, state: 'available-to-install', enabledBooks: 0,
         technical: {

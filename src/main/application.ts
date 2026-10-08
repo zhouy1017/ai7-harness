@@ -351,11 +351,12 @@ function parseArguments(argv: string[]): LaunchArguments {
     recoveryControlValue === undefined || (process.env.AI7_E2E_JOURNEY === 'J-08' && recoveryControl !== undefined),
   );
   // The model adapter binds a Journey whose Runs execute: J-04's analysis, J-09's 运行中 and 最近完成 (Issue #424),
-  // J-10's cancelled Run (Issue #422), J-16's 任务 panel (Issue #423), and J-11's 分析反馈 (Issue #94).
+  // J-10's cancelled Run (Issue #422), J-16's 任务 panel (Issue #423), J-11's 分析反馈 (Issue #94), and J-13's 书系一致性
+  // (Issue #64).
   requireDesktop(
     modelAdapterControlValue === undefined ||
       ((process.env.AI7_E2E_JOURNEY === 'J-04' || process.env.AI7_E2E_JOURNEY === 'J-09' || process.env.AI7_E2E_JOURNEY === 'J-10' ||
-        process.env.AI7_E2E_JOURNEY === 'J-16' || process.env.AI7_E2E_JOURNEY === 'J-11') &&
+        process.env.AI7_E2E_JOURNEY === 'J-16' || process.env.AI7_E2E_JOURNEY === 'J-11' || process.env.AI7_E2E_JOURNEY === 'J-13') &&
         modelAdapterControl !== undefined),
   );
   requireDesktop([importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl].filter(Boolean).length <= 1);

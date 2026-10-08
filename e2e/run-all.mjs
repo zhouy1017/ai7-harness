@@ -1,6 +1,7 @@
 import {
   ADMITTED_JOURNEYS,
   classifyJourneyResult,
+  collectJourneyCheck,
   collectReadinessTrace,
   collectJourneyDisclosures,
   normalizePnpmArgs,
@@ -35,6 +36,9 @@ if (args.length !== 0) {
       // failure names where it stopped. Failure path only: a passing run's output is unchanged.
       const failure = classifyJourneyResult(result, journey);
       console.error(`LOCAL_COMPLETION/${journey}/fail/${failure.location}/${failure.errorClass}`);
+      // Issue #652: which check in that stage failed, as the child named it: a content-free label, never page text.
+      const check = collectJourneyCheck(result, journey, failure);
+      if (check !== null) console.error(`LOCAL_COMPLETION/${journey}/fail/${failure.location}/check/${check}`);
       const readiness = collectReadinessTrace(result, journey);
       if (readiness !== null) console.error(`LOCAL_COMPLETION/${journey}/readiness/${readiness}`);
       process.exitCode = result.code || 1;
