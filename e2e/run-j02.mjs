@@ -29,11 +29,14 @@ const MILESTONE_RECOVERY_SNAPSHOT_TIMEOUT = 10 * 60_000;
 // Since #690 these long waits — staging, the commit and its acknowledgement — are bounded by the import's progress, read
 // from the store every few seconds, rather than by a wall clock: one that shows no change for IMPORT_STALL has stopped, and
 // one still moving is waited for up to the product's own deadline for the request, src/main/service-client.ts
-// LONG_REQUEST_TIMEOUT_MS, past which the product stops its service itself. Hosted Windows runners have spent more than the
+// LONG_REQUEST_TIMEOUT_MS, past which the product stops its service itself. The commit's write transaction shows the
+// store no change while it works, so it is bounded by that deadline alone. Hosted Windows runners have spent more than the
 // former fixed 8 min on staging (#621, 2026-10-08) and more than 300 s on the commit (2026-10-09).
 const PRODUCT_LONG_REQUEST_TIMEOUT = 10 * 60_000;
 const IMPORT_WAIT_MARGIN = 30_000;
 const IMPORT_SAMPLE_INTERVAL = 5_000;
+// The commit's re-parse can finish within a few seconds on a fast host, so the commit wait reads the store every second.
+const IMPORT_COMMIT_SAMPLE_INTERVAL = 1_000;
 const IMPORT_STALL = 3 * 60_000;
 // The product's own startup readiness deadline, src/main/service-client.ts STARTUP_READY_TIMEOUT_MS.
 const PRODUCT_STARTUP_READY_TIMEOUT = 2 * 60_000;
@@ -500,9 +503,11 @@ function importStagePhase(dataRoot) {
 
 /**
  * How far the import has come, as the store the service writes shows it (#621, #690): the drafts staged, the blocks a parse
- * has committed so far (staging's own, or the commit's re-parse of the same file), the imports committed, and the bytes of
- * the store and its write-ahead log, which a long transaction grows as it writes. Counts and sizes only; `null` when the
- * store could not be read at that moment.
+ * has committed so far (staging's own, or the commit's re-parse of the same file), the commit attempts prepared (one is
+ * written once the commit's re-parse has proven the file, just before its write transaction), the imports committed, and
+ * the bytes of the store and its write-ahead log. Counts and sizes only; `null` when the store could not be read at that
+ * moment. The commit's write is one transaction: until it commits, none of these need change, since the main file grows
+ * only at a checkpoint and the log is reused from its start rather than grown.
  */
 function importProgress(dataRoot) {
   const size = (name) => {
@@ -519,6 +524,7 @@ function importProgress(dataRoot) {
     return {
       drafts: count('SELECT count(*) AS total FROM import_drafts'),
       blocks: count('SELECT count(*) AS total FROM import_ingest_blocks'),
+      attempts: count('SELECT count(*) AS total FROM import_commit_attempts'),
       commits: count('SELECT count(*) AS total FROM import_commits'),
       bytes: size('ai7.sqlite') + size('ai7.sqlite-wal'),
     };
@@ -532,12 +538,14 @@ function importProgress(dataRoot) {
 /**
  * Wait for one of the import's long steps by its progress rather than by a wall clock (#621, #690). `expression` reads the
  * renderer as `done`, `refused` (the product answered without reaching the next screen) or `waiting`. While it waits, the
- * store is read every few seconds, and any change in what it shows counts as the import moving. The wait ends `stalled` once
+ * store is read every `interval`, and any change in what it shows counts as the import moving. The wait ends `stalled` once
  * the store has shown no change for IMPORT_STALL, and `progressing` only at the product's own deadline for the request,
  * past which the product stops its service itself: a slow runner whose import keeps moving is waited for, and one that
- * stopped is named quickly. The outcome carries the last reading and the most blocks any reading showed.
+ * stopped is named quickly. Once `quietPhase(progress)` has been seen — a phase that shows no change while it works, the
+ * commit's single write transaction — the stall rule no longer applies, and the product's deadline ends the wait as
+ * `quiet`. The outcome carries the last reading, the most blocks any reading showed, and whether the quiet phase was seen.
  */
-async function watchImportStep(renderer, dataRoot, expression) {
+async function watchImportStep(renderer, dataRoot, expression, { interval = IMPORT_SAMPLE_INTERVAL, quietPhase = () => false } = {}) {
   const started = Date.now();
   const deadline = started + PRODUCT_LONG_REQUEST_TIMEOUT + IMPORT_WAIT_MARGIN;
   let sampledAt = 0;
@@ -545,19 +553,21 @@ async function watchImportStep(renderer, dataRoot, expression) {
   let progressedAt = started;
   let progress = null;
   let mostBlocks = 0;
+  let quiet = false;
   const sample = () => {
     progress = importProgress(dataRoot);
     sampledAt = Date.now();
     if (progress === null) return;
     mostBlocks = Math.max(mostBlocks, progress.blocks);
-    const next = `${progress.drafts}/${progress.blocks}/${progress.commits}/${progress.bytes}`;
+    if (!quiet && quietPhase(progress)) quiet = true;
+    const next = `${progress.drafts}/${progress.blocks}/${progress.attempts}/${progress.commits}/${progress.bytes}`;
     if (next !== signature) {
       signature = next;
       progressedAt = sampledAt;
     }
   };
   const ended = (outcome) => {
-    const result = { outcome, progress, mostBlocks, quietMs: Date.now() - progressedAt, elapsedMs: Date.now() - started };
+    const result = { outcome, progress, mostBlocks, quiet, quietMs: Date.now() - progressedAt, elapsedMs: Date.now() - started };
     if (localDebugEnabled()) recordDebugDetail('J-02', `import step ${diagnosticLocation} ended ${JSON.stringify(result)}`);
     return result;
   };
@@ -569,9 +579,9 @@ async function watchImportStep(renderer, dataRoot, expression) {
       sample();
       return ended('refused');
     }
-    if (Date.now() - sampledAt >= IMPORT_SAMPLE_INTERVAL) sample();
-    if (Date.now() - progressedAt >= IMPORT_STALL) return ended('stalled');
-    if (Date.now() >= deadline) return ended('progressing');
+    if (Date.now() - sampledAt >= interval) sample();
+    if (!quiet && Date.now() - progressedAt >= IMPORT_STALL) return ended('stalled');
+    if (Date.now() >= deadline) return ended(quiet ? 'quiet' : 'progressing');
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
 }
@@ -597,7 +607,7 @@ async function waitForStagedTarget(renderer, dataRoot) {
   const stood = importStagePhase(dataRoot);
   at(`import-stage-${stood.phase}`);
   const tenths = parsedTenths(stood.phase === 'screen' ? BLOCK_COUNT : watched.mostBlocks);
-  requireJourney(watched.outcome !== 'refused', 'stage-target-refused');
+  requireJourney(watched.outcome !== 'refused', `stage-target-refused-at-${Number(tenths)}-tenths`);
   requireJourney(stood.phase !== 'screen', 'stage-target-staged-not-shown');
   requireJourney(watched.outcome !== 'progressing', `stage-target-progressing-at-${Number(tenths)}-tenths`);
   requireJourney(false, `stage-target-stalled-at-${Number(tenths)}-tenths`);
@@ -605,9 +615,12 @@ async function waitForStagedTarget(renderer, dataRoot) {
 
 /**
  * Wait for the commit's `imported` screen, then for its completion to be acknowledged (#690). The commit re-parses the
- * staged file to prove it unchanged, then writes the Book and its manuscript in one transaction. A check names how far it
- * had come: `preparing` (no block re-parsed yet), `revalidating-<n>-tenths`, `writing` (the re-parse done, the transaction
- * under way), or `committed` with the screen not shown.
+ * staged file to prove it unchanged, prepares its attempt, then writes the Book and its manuscript in one transaction that
+ * shows the store no change until it commits. So the stall rule holds only until the attempt is prepared: after that the
+ * write is bounded by the product's own deadline, and reaching it is `quiet`, not `stalled`. The store is read every second
+ * here, so a quick re-parse is still seen. A check names how far the commit had come: `preparing` (nothing re-parsed yet),
+ * `revalidating-<n>-tenths`, `writing` (the attempt prepared, the transaction under way), or `committed` with the screen
+ * not shown.
  */
 async function waitForImportCommitted(renderer, dataRoot) {
   const commitButton = JSON.stringify('新建图书并导入稿件');
@@ -615,15 +628,16 @@ async function waitForImportCommitted(renderer, dataRoot) {
     renderer,
     dataRoot,
     `(() => { const state = document.querySelector('#screen')?.dataset.screen; if (state === 'imported') return 'done'; if (state !== 'review') return 'refused'; const commit = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === ${commitButton}); return commit instanceof HTMLButtonElement && !commit.disabled ? 'refused' : 'waiting'; })()`,
+    { interval: IMPORT_COMMIT_SAMPLE_INTERVAL, quietPhase: (progress) => progress.attempts > 0 },
   );
   if (committed.outcome !== 'done') {
     const progress = committed.progress;
     requireJourney(progress === null || progress.commits === 0, 'imported-committed-not-shown');
-    const outcome = committed.outcome === 'refused' ? 'refused' : committed.outcome === 'stalled' ? 'stalled' : 'progressing';
-    if (progress !== null && progress.blocks > 0) {
-      requireJourney(false, `imported-${outcome}-at-revalidating-${Number(parsedTenths(progress.blocks))}-tenths`);
-    }
-    requireJourney(committed.mostBlocks === 0, `imported-${outcome}-at-writing`);
+    const outcome = committed.outcome === 'refused'
+      ? 'refused'
+      : committed.outcome === 'stalled' ? 'stalled' : committed.outcome === 'quiet' ? 'quiet' : 'progressing';
+    requireJourney(!committed.quiet, `imported-${outcome}-at-writing`);
+    requireJourney(committed.mostBlocks === 0, `imported-${outcome}-at-revalidating-${Number(parsedTenths(committed.mostBlocks))}-tenths`);
     requireJourney(false, `imported-${outcome}-at-preparing`);
   }
   const acknowledged = await watchImportStep(
