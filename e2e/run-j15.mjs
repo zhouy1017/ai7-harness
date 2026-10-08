@@ -915,8 +915,9 @@ async function main() {
     await waitFor(renderer, `(() => { const area=document.querySelector(${JSON.stringify(`${cardSelector} .guideline-versions`)}); return area?.querySelector('[data-guideline-version-row="8"]') && area.querySelectorAll('.guideline-version-list li').length===5 && document.activeElement===area.querySelector('summary'); })()`, 'knowledge-versions-latest-focus');
 
     at('knowledge-procedures');
-    // 工序与规则 (Issue #427, S79d): the nine review 工序 by what each does — seven 已启用 drawn solid, the two whose basis does
-    // not exist yet 尚未接通 drawn dashed, with why said of the house — none used by a review in this Journey, and the 方案
+    // 工序与规则 (Issue #427, S79d): the nine review 工序 by what each does — eight 已启用 drawn solid (书系一致性检查 since
+    // Issue #64, S29a), the one whose basis does not exist yet 尚未接通 drawn dashed, with why said of the house — none used by
+    // a review in this Journey, and the 方案
     // in the house's words, 本社方案 v2, installed and enabled for the one Book that enabled it. Both layers (LAYER-008): the
     // words carry no identifier, and 查看技术详情, closed, holds the carrier's and the 权限侧车's identities and each 工序's id.
     await click(renderer, '工序与规则', 'knowledge-procedures-tab');
@@ -940,9 +941,9 @@ async function main() {
       };
     })()`);
     const technical = new Map(procedures?.technical ?? []);
-    requireJourney(JSON.stringify(procedures?.states) === JSON.stringify([...Array(7).fill(['enabled', '已启用', '0', 'solid']), ['unavailable', '尚未接通', '0', 'dashed'], ['unavailable', '尚未接通', '0', 'dashed']]) &&
+    requireJourney(JSON.stringify(procedures?.states) === JSON.stringify([...Array(8).fill(['enabled', '已启用', '0', 'solid']), ['unavailable', '尚未接通', '0', 'dashed']]) &&
       procedures.first === '已启用 错别字与规范用语审阅工序 · 第 1 版 · 内置 · 用于「错别字与规范用语」 · 还没有审阅用过' &&
-      JSON.stringify(procedures.reasons) === JSON.stringify([' · 书系知识还没有接通。', ' · 生产文档之间的一致性核对还没有接通。']) &&
+      JSON.stringify(procedures.reasons) === JSON.stringify([' · 生产文档之间的一致性核对还没有接通。']) &&
       procedures.artifact === '本社方案 v2 · 已安装 · 已为 1 本书启用' && procedures.identifierInWords === false &&
       procedures.detailsOpen === false && procedures.summary === '查看技术详情' &&
       technical.get('原生载体身份') === '@ai7/editorial-workspace-profile' && technical.get('原生载体版本') === '1.0.0' &&
