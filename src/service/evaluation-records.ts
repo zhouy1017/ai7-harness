@@ -6,9 +6,14 @@ import {
   MAX_EVALUATION_LINE_GRAPHEMES,
   MAX_EVALUATION_LINES,
   MAX_EVALUATION_RISK_STATEMENT_GRAPHEMES,
+  MAX_EVALUATION_ADJUSTMENT_NOTE_GRAPHEMES,
   MAX_EVALUATION_VERDICT_GRAPHEMES,
+  type EvaluationAdjustment,
+  type EvaluationAdjustmentReasonId,
   type EvaluationComparisonProjection,
   type EvaluationContent,
+  type EvaluationInitialDraftProjection,
+  type EvaluationInitialProjection,
   type EvaluationProfileProjection,
   type EvaluationProfilesProjection,
   type EvaluationRecordProjection,
@@ -16,7 +21,15 @@ import {
   type EvaluationTotalProjection,
   type EvaluationWorkspaceProjection,
 } from '../shared/protocol.js';
-import { EVALUATION_FINALIZE_NEEDS_SCORE, evaluationTotal, finalizationNeedsScore, recommendationBlocked, validEvaluationScore } from '../shared/evaluation-scoring.js';
+import {
+  EVALUATION_ADJUSTMENT_REASONS,
+  EVALUATION_FINALIZE_NEEDS_SCORE,
+  evaluationItemAdjusted,
+  evaluationTotal,
+  finalizationNeedsScore,
+  recommendationBlocked,
+  validEvaluationScore,
+} from '../shared/evaluation-scoring.js';
 import { UUID_PATTERN, canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
 import { graphemeCount } from './analysis/factual-review-contract.js';
 
@@ -26,10 +39,16 @@ import { graphemeCount } from './analysis/factual-review-contract.js';
  * and snapshots the profile; the editor scores each item out of its 满分 — a whole or half point, or `不评` with a reason —
  * rates the two risk items, lists what is still missing, and chooses the conclusion, which `推荐出版` waits on while a `高`
  * risk is unreviewed. `定稿` closes the version with the actor and the time; `重新评估` begins the next, seeded from it and
- * compared with it item by item. AI7's own 初评, the market block and 审稿意见 arrive with the later S81 slices.
+ * compared with it item by item. The market block and 审稿意见 arrive with the later S81 slices.
  *
  * Schema revision 47 owns two relations, ledgers like the others: each version's record, and its entries — one chain per
  * version, every save appending the editor's whole content, the last one `finalized` — appended once and never rewritten.
+ *
+ * AI7's 初评 (S81b1; EVAL-001, EVAL-005 to EVAL-007, EVAL-011): a version may begin from AI7's latest 初评 instead, its scores
+ * and comments the editor's starting point and kept beside them — revision 59's relation snapshots it with the version. The
+ * record keeps the editor's scores; where one departs from AI7's, the editor may say why (entry content v2 carries it), and a
+ * Book with such a departure in a 定稿 version counts once toward calibration. AI7 drafts no risk level and chooses no
+ * conclusion: its suggestion is shown as AI7's.
  */
 
 export const EVALUATION_RECORD_SCHEMA_SQL = {
@@ -84,6 +103,41 @@ export const EVALUATION_RECORD_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArr
   evaluation_record_entries: ['record_id>evaluation_records.record_id:NO ACTION/NO ACTION/NONE'],
 };
 
+/**
+ * Revision 59 (Issue #429, S81b1; EVAL-001, EVAL-006): the AI7 初评 a version began from, one row per such version, written
+ * with the version and never again — the scores, comments and 依据充分度 of AI7's Result Set Revision snapshotted, so AI7's
+ * score stands beside the editor's for as long as the version does.
+ */
+export const EVALUATION_INITIAL_DRAFT_SCHEMA_SQL = {
+  evaluation_initial_drafts: `CREATE TABLE evaluation_initial_drafts (
+  record_id TEXT PRIMARY KEY REFERENCES evaluation_records(record_id),
+  analysis_revision_id TEXT NOT NULL REFERENCES analysis_result_set_revisions(revision_id),
+  recorded_at TEXT NOT NULL,
+  canonical_json TEXT NOT NULL,
+  sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)
+) STRICT`,
+} as const;
+
+export const EVALUATION_INITIAL_DRAFT_TRIGGER_SQL: Readonly<Record<string, string>> = {
+  evaluation_initial_drafts_no_update: `CREATE TRIGGER evaluation_initial_drafts_no_update
+    BEFORE UPDATE ON evaluation_initial_drafts
+    BEGIN
+      SELECT RAISE(ABORT, 'EVALUATION_LEDGER_IMMUTABLE');
+    END`,
+  evaluation_initial_drafts_no_delete: `CREATE TRIGGER evaluation_initial_drafts_no_delete
+    BEFORE DELETE ON evaluation_initial_drafts
+    BEGIN
+      SELECT RAISE(ABORT, 'EVALUATION_LEDGER_IMMUTABLE');
+    END`,
+};
+
+export const EVALUATION_INITIAL_DRAFT_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
+  evaluation_initial_drafts: [
+    'analysis_revision_id>analysis_result_set_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+    'record_id>evaluation_records.record_id:NO ACTION/NO ACTION/NONE',
+  ],
+};
+
 export class EvaluationError extends Error {
   constructor(readonly code: string, message: string) {
     super(message);
@@ -99,7 +153,11 @@ type SqlRow = Record<string, SQLOutputValue>;
 type Profile = Omit<EvaluationProfileProjection, 'sha256'>;
 
 const RECORD_SCHEMA = 'ai7.evaluation-record/1';
-const ENTRY_SCHEMA = 'ai7.evaluation-entry/1';
+/** Entries written before S81b1: no item carries an adjustment, and each reads as having none. */
+const ENTRY_SCHEMA_V1 = 'ai7.evaluation-entry/1';
+/** Every entry written since S81b1: each item carries its adjustment of AI7's 初评, or `null`. */
+const ENTRY_SCHEMA = 'ai7.evaluation-entry/2';
+const INITIAL_DRAFT_SCHEMA = 'ai7.evaluation-initial-draft/1';
 const PROFILE_SCHEMA = 'ai7.evaluation-profile/1';
 /** Who scores and finalizes, as the other editor records of this device name it. */
 export const EVALUATION_ACTOR = '本机编辑' as const;
@@ -168,10 +226,26 @@ export function initializeEvaluationRecordSchema(db: DatabaseSync): void {
   }
 }
 
+/** Revision 59's relation, created once: a store that predates it gains one empty relation and nothing existing moves. */
+export function initializeEvaluationInitialDraftSchema(db: DatabaseSync): void {
+  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'evaluation_initial_drafts'").get() !== undefined) return;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const sql of Object.values(EVALUATION_INITIAL_DRAFT_SCHEMA_SQL)) db.exec(sql);
+    for (const sql of Object.values(EVALUATION_INITIAL_DRAFT_TRIGGER_SQL)) db.exec(sql);
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (rollbackError) {
+      throw new AggregateError([error, rollbackError], 'Evaluation initial draft schema rollback failed.');
+    }
+    throw error;
+  }
+}
+
 /** A version's empty content: every item unscored, every risk unrated, nothing listed, no conclusion. */
 export function emptyEvaluationContent(profile: Pick<Profile, 'items' | 'risks'>): EvaluationContent {
   return {
-    items: profile.items.map((item) => ({ itemId: item.itemId, score: null, notRated: null, comment: null })),
+    items: profile.items.map((item) => ({ itemId: item.itemId, score: null, notRated: null, comment: null, adjustment: null })),
     risks: profile.risks.map((risk) => ({ riskId: risk.riskId, level: null, statement: null, reviewed: false })),
     readiness: [],
     strengths: [],
@@ -200,11 +274,39 @@ function lines(value: unknown, what: string): string[] {
 }
 
 /**
+ * Why the editor departs from AI7's score of one item (EVAL-006), held to its closed shape: reasons from the five, each once,
+ * `自行输入` with the editor's words and words only with it. Kept only where the editor's score differs from AI7's — a reason
+ * for a score that agrees with AI7 says nothing, and nothing picked is no adjustment at all.
+ */
+function adjustmentOf(value: unknown, adjusted: boolean, label: string): EvaluationAdjustment | null {
+  if (value === undefined || value === null || !adjusted) return null;
+  requireEvaluation(isRecord(value) && Array.isArray(value.reasons), 'EVALUATION_CONTENT_INVALID', '调分原因无效。');
+  const reasons = value.reasons as unknown[];
+  requireEvaluation(reasons.every((reason) => EVALUATION_ADJUSTMENT_REASONS.includes(reason as EvaluationAdjustmentReasonId)) &&
+    new Set(reasons).size === reasons.length, 'EVALUATION_CONTENT_INVALID', '调分原因无效。');
+  const note = text(value.note ?? null, MAX_EVALUATION_ADJUSTMENT_NOTE_GRAPHEMES, 'EVALUATION_ADJUSTMENT_TOO_LONG',
+    `调分原因要在 ${MAX_EVALUATION_ADJUSTMENT_NOTE_GRAPHEMES} 字以内。`, false);
+  const own = reasons.includes('own');
+  requireEvaluation(!own || note !== null, 'EVALUATION_ADJUSTMENT_NOTE', `「${label}」选了「自行输入」，要写明原因。`);
+  requireEvaluation(own || note === null, 'EVALUATION_CONTENT_INVALID', '只有选「自行输入」时才写原因。');
+  if (reasons.length === 0) return null;
+  // The five in their own order, whatever order the editor ticked them in.
+  return { reasons: EVALUATION_ADJUSTMENT_REASONS.filter((reason) => reasons.includes(reason)), note };
+}
+
+/**
  * The editor's content held to the profile it scores under: exactly its items and risks, each score a whole or half point
  * within its 满分, `不评` only with a reason, `推荐出版` never while a `高` risk is unreviewed — and, to finalize, every item
  * scored or `不评` and at least one scored (Issue #638), every risk rated with a statement, and a conclusion chosen.
+ * `initialScores` are AI7's, for a version begun from its 初评: an item whose score departs from AI7's keeps the reasons the
+ * editor gave.
  */
-export function evaluationContent(input: unknown, profile: Pick<Profile, 'items' | 'risks'>, finalize: boolean): EvaluationContent {
+export function evaluationContent(
+  input: unknown,
+  profile: Pick<Profile, 'items' | 'risks'>,
+  finalize: boolean,
+  initialScores: ReadonlyMap<string, number | null> | null = null,
+): EvaluationContent {
   requireEvaluation(isRecord(input) && Array.isArray(input.items) && Array.isArray(input.risks), 'EVALUATION_CONTENT_INVALID', '评估内容无效。');
   const givenItems = input.items as unknown[];
   const givenRisks = input.risks as unknown[];
@@ -221,7 +323,10 @@ export function evaluationContent(input: unknown, profile: Pick<Profile, 'items'
     requireEvaluation(notRated === null || score === null, 'EVALUATION_CONTENT_INVALID', `「${item.label}」不评时不能有得分。`);
     requireEvaluation(!finalize || score !== null || notRated !== null, 'EVALUATION_ITEM_UNSCORED', `定稿前，「${item.label}」要打分或写明不评的理由。`);
     const comment = text(given.comment, MAX_EVALUATION_COMMENT_GRAPHEMES, 'EVALUATION_COMMENT_TOO_LONG', `评语要在 ${MAX_EVALUATION_COMMENT_GRAPHEMES} 字以内。`, true);
-    return { itemId: item.itemId, score: score as number | null, notRated, comment };
+    const adjusted = initialScores !== null &&
+      evaluationItemAdjusted({ score: score as number | null, notRated: notRated !== null }, initialScores.get(item.itemId) ?? null);
+    const adjustment = adjustmentOf(given.adjustment, adjusted, item.label);
+    return { itemId: item.itemId, score: score as number | null, notRated, comment, adjustment };
   });
   // Every item 不评 scores nothing, and such a version is not finalized (Issue #638; the Owner's answer of 2026-10-07).
   requireEvaluation(!finalize || !finalizationNeedsScore(items.map((item) => ({ score: item.score, notRated: item.notRated !== null }))),
@@ -293,6 +398,28 @@ export interface EvaluationManuscriptReader {
   current(bookId: string): { manuscriptId: string; revisionId: string; revisionLabel: string; uncheckpointed: boolean } | null;
 }
 
+/** AI7's latest settled 初评 of a Book (S81b1), as the analysis ledger of the evaluation kind holds it. */
+export interface InitialEvaluationFacts {
+  readonly draft: Omit<EvaluationInitialDraftProjection, 'total'>;
+  /** The manuscript revision the 初评 read, and whether that is the Book's working text now. */
+  readonly manuscriptRevisionId: string;
+  readonly current: boolean;
+  /** The profile the 初评's contract was frozen under. */
+  readonly profileSha256: string;
+}
+
+/** What 评估 reads of AI7's 初评: its latest settled result, and its Task as the Task Drawer opens it. */
+export interface InitialEvaluationReader {
+  latest(bookId: string): InitialEvaluationFacts | null;
+  task(bookId: string): Pick<EvaluationInitialProjection, 'task' | 'prepare'>;
+}
+
+/** A Book whose 初评 is not wired: nothing settled, nothing to prepare. The store wires the real one. */
+const NO_INITIAL_EVALUATION: InitialEvaluationReader = {
+  latest: () => null,
+  task: () => ({ task: null, prepare: { allowed: false, reason: 'AI7 初评暂不可用。' } }),
+};
+
 function integer(value: SQLOutputValue | undefined): number {
   return typeof value === 'bigint' ? Number(value) : Number(value);
 }
@@ -301,13 +428,35 @@ function sameContent(a: EvaluationContent, b: EvaluationContent): boolean {
   return canonicalJson(a) === canonicalJson(b);
 }
 
+/**
+ * An entry's content as its schema wrote it (Issue #429 review): a `/2` entry names every item's adjustment, `null` included,
+ * and one that leaves the key out is not one AI7 wrote; a `/1` entry, written before S81b1, names none, and each reads as
+ * having none to carry.
+ */
+function contentOfEntry(schema: typeof ENTRY_SCHEMA | typeof ENTRY_SCHEMA_V1, content: Record<string, unknown>): EvaluationContent {
+  requireEvaluation(Array.isArray(content.items) && content.items.every((item) => isRecord(item) &&
+    Object.hasOwn(item, 'adjustment') === (schema === ENTRY_SCHEMA)), 'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
+  const read = content as unknown as EvaluationContent;
+  return schema === ENTRY_SCHEMA ? read : { ...read, items: read.items.map((item) => ({ ...item, adjustment: null })) };
+}
+
+function totalOfScores(profile: Pick<Profile, 'items'>, items: ReadonlyArray<{ readonly itemId: string; readonly score: number | null }>): EvaluationTotalProjection {
+  return evaluationTotal(profile.items.map((item) => ({
+    fullMarks: item.fullMarks,
+    score: items.find((entry) => entry.itemId === item.itemId)?.score ?? null,
+    notRated: false,
+  })));
+}
+
 export class EvaluationRecords {
   readonly #db: DatabaseSync;
   readonly #manuscripts: EvaluationManuscriptReader;
+  readonly #initial: InitialEvaluationReader;
 
-  constructor(db: DatabaseSync, manuscripts: EvaluationManuscriptReader) {
+  constructor(db: DatabaseSync, manuscripts: EvaluationManuscriptReader, initial: InitialEvaluationReader = NO_INITIAL_EVALUATION) {
     this.#db = db;
     this.#manuscripts = manuscripts;
+    this.#initial = initial;
   }
 
   /** The profile a new version snapshots: AI7's built-in one until a house's own is managed in 知识库. */
@@ -351,7 +500,8 @@ export class EvaluationRecords {
       const json = String(row.canonical_json);
       requireEvaluation(sha256Hex(json) === String(row.sha256), 'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
       const entry = JSON.parse(json) as unknown;
-      requireEvaluation(isRecord(entry) && entry.schema === ENTRY_SCHEMA && entry.entryId === row.entry_id && entry.recordId === record.recordId &&
+      requireEvaluation(isRecord(entry) && (entry.schema === ENTRY_SCHEMA || entry.schema === ENTRY_SCHEMA_V1) &&
+        entry.entryId === row.entry_id && entry.recordId === record.recordId &&
         entry.ordinal === count + 1 && integer(row.ordinal) === count + 1 && entry.kind === row.kind && entry.previousSha256 === previous &&
         String(row.previous_sha256) === previous && entry.recordedAt === row.recorded_at && entry.actor === EVALUATION_ACTOR && isRecord(entry.content),
       'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
@@ -360,7 +510,7 @@ export class EvaluationRecords {
       latest = {
         ordinal: count,
         kind: entry.kind as StoredEntry['kind'],
-        content: entry.content as unknown as EvaluationContent,
+        content: contentOfEntry(entry.schema as typeof ENTRY_SCHEMA | typeof ENTRY_SCHEMA_V1, entry.content as Record<string, unknown>),
         recordedAt: String(row.recorded_at),
         sha256: String(row.sha256),
       };
@@ -393,11 +543,26 @@ export class EvaluationRecords {
   }
 
   /**
+   * The AI7 初评 a version may begin from now (S81b1): the latest that settled with every item scored, read from the Book's
+   * text as it stands, under the profile a new version snapshots; otherwise why not, in the editor's words.
+   */
+  #startableInitial(bookId: string, profileSha256: string, manuscriptRevisionId: string): { facts: InitialEvaluationFacts } | { reason: string } {
+    const latest = this.#initial.latest(bookId);
+    if (latest === null) return { reason: '这本书还没有完成的 AI7 初评。' };
+    if (!latest.draft.complete) return { reason: '最近一次 AI7 初评没有给出全部评分项的分数；请重新初评。' };
+    if (!latest.current || latest.manuscriptRevisionId !== manuscriptRevisionId) return { reason: '稿件在最近一次 AI7 初评之后改过；请重新初评，再从初评开始。' };
+    if (latest.profileSha256 !== profileSha256) return { reason: '评估方案在最近一次 AI7 初评之后变了；请重新初评。' };
+    return { facts: latest };
+  }
+
+  /**
    * 开始评估 or 重新评估 (EVAL-001, EVAL-012), inside the caller's transaction: a new version bound to the manuscript's current
    * revision under the profile that applies now — empty the first time, seeded from the last 定稿 after — refused while the
-   * Book has no manuscript or a version is still being scored.
+   * Book has no manuscript or a version is still being scored. `fromInitial` begins it from AI7's latest 初评 (S81b1): AI7's
+   * scores, comments, strengths and weaknesses are the editor's starting point and are snapshotted beside the version; risks
+   * and what is still missing carry from the last 定稿, as 重新评估 carries them, and no conclusion is chosen.
    */
-  start(bookId: string): string {
+  start(bookId: string, fromInitial = false): string {
     const manuscript = this.#manuscripts.current(bookId);
     requireEvaluation(manuscript !== null, 'EVALUATION_NO_MANUSCRIPT', '这本书还没有稿件，没有可以评估的内容。');
     let last: StoredRecord | undefined;
@@ -408,9 +573,26 @@ export class EvaluationRecords {
       `第 ${last?.ordinal ?? 0} 版还没有定稿；定稿后才能重新评估。`);
     const profile = this.profile();
     const { sha256: profileSha256, ...snapshot } = profile;
-    const seed = last === undefined
+    const carried = last === undefined
       ? emptyEvaluationContent(snapshot)
       : this.#reseed(lastEntry!.content, snapshot);
+    let initial: InitialEvaluationFacts | null = null;
+    if (fromInitial) {
+      const startable = this.#startableInitial(bookId, profileSha256, manuscript.revisionId);
+      requireEvaluation('facts' in startable, 'EVALUATION_INITIAL_UNAVAILABLE', 'reason' in startable ? startable.reason : '');
+      initial = startable.facts;
+    }
+    const seed: EvaluationContent = initial === null ? carried : {
+      ...carried,
+      items: carried.items.map((item) => {
+        const ai7 = initial!.draft.items.find((entry) => entry.itemId === item.itemId);
+        return { itemId: item.itemId, score: ai7?.score ?? null, notRated: null, comment: ai7?.comment ?? null, adjustment: null };
+      }),
+      strengths: initial.draft.strengths.slice(0, MAX_EVALUATION_LINES),
+      weaknesses: initial.draft.weaknesses.slice(0, MAX_EVALUATION_LINES),
+      verdict: null,
+      conclusion: null,
+    };
     const recordId = randomUUID();
     const ordinal = count + 1;
     const createdAt = new Date().toISOString();
@@ -432,8 +614,64 @@ export class EvaluationRecords {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(recordId, bookId, ordinal, manuscript.manuscriptId, manuscript.revisionId, last?.recordId ?? null, profileSha256, createdAt, record.json, record.digest);
     const stored = this.#record(this.#db.prepare('SELECT * FROM evaluation_records WHERE record_id = ?').get(recordId) as SqlRow);
+    if (initial !== null) {
+      const recordedAt = new Date().toISOString();
+      const draft = canonicalRecord({
+        schema: INITIAL_DRAFT_SCHEMA,
+        recordId,
+        analysisRevisionId: initial.draft.revisionId,
+        draft: initial.draft,
+        profileSha256,
+        recordedAt,
+      });
+      this.#db.prepare('INSERT INTO evaluation_initial_drafts(record_id, analysis_revision_id, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?)')
+        .run(recordId, initial.draft.revisionId, recordedAt, draft.json, draft.digest);
+    }
     this.#append(stored, stored.sha256, 1, 'draft', seed);
     return recordId;
+  }
+
+  /** The AI7 初评 one version began from, verified against its row; `null` for a version the editor began alone. */
+  #initialDraft(record: StoredRecord): EvaluationInitialDraftProjection | null {
+    const row = this.#db.prepare('SELECT * FROM evaluation_initial_drafts WHERE record_id = ?').get(record.recordId) as SqlRow | undefined;
+    if (row === undefined) return null;
+    const json = String(row.canonical_json);
+    requireEvaluation(sha256Hex(json) === String(row.sha256), 'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
+    const stored = JSON.parse(json) as unknown;
+    requireEvaluation(isRecord(stored) && stored.schema === INITIAL_DRAFT_SCHEMA && stored.recordId === record.recordId &&
+      stored.analysisRevisionId === row.analysis_revision_id && stored.recordedAt === row.recorded_at &&
+      stored.profileSha256 === record.profile.sha256 && isRecord(stored.draft) && stored.draft.revisionId === row.analysis_revision_id,
+    'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
+    const draft = stored.draft as unknown as Omit<EvaluationInitialDraftProjection, 'total'>;
+    return { ...draft, total: totalOfScores(record.profile, draft.items) };
+  }
+
+  /** AI7's scores of a version begun from its 初评, by item; `null` for any other. */
+  static #initialScores(draft: EvaluationInitialDraftProjection | null): ReadonlyMap<string, number | null> | null {
+    return draft === null ? null : new Map(draft.items.map((item) => [item.itemId, item.score] as const));
+  }
+
+  /**
+   * The Books whose editor adjusted AI7's 初评 (EVAL-011; Issue #429, S81b1), counted per Book as 设置 counts them (§8.6 「10 本
+   * 调分记录」): a Book counts once when one of its 定稿 versions began from AI7's 初评 and kept at least one score that departs
+   * from AI7's. A version still being scored has adjusted nothing yet.
+   */
+  adjustedBooks(): number {
+    const books = new Set<string>();
+    const rows = this.#db.prepare(
+      'SELECT r.* FROM evaluation_records r JOIN evaluation_initial_drafts d ON d.record_id = r.record_id ORDER BY r.book_id, r.ordinal',
+    ).all() as SqlRow[];
+    for (const row of rows) {
+      const record = this.#record(row);
+      if (books.has(record.bookId)) continue;
+      const latest = this.#entries(record).latest;
+      if (latest.kind !== 'finalized') continue;
+      const scores = EvaluationRecords.#initialScores(this.#initialDraft(record))!;
+      if (latest.content.items.some((item) => evaluationItemAdjusted({ score: item.score, notRated: item.notRated !== null }, scores.get(item.itemId) ?? null))) {
+        books.add(record.bookId);
+      }
+    }
+    return books.size;
   }
 
   /**
@@ -451,7 +689,8 @@ export class EvaluationRecords {
       conclusion: null,
       items: empty.items.map((item, index) => {
         const carried = items.get(item.itemId);
-        return carried === undefined || (carried.score !== null && !validEvaluationScore(carried.score, to.items[index]!.fullMarks)) ? item : { ...carried };
+        // An adjustment explains a departure from the 初评 the earlier version began from; this version has its own start.
+        return carried === undefined || (carried.score !== null && !validEvaluationScore(carried.score, to.items[index]!.fullMarks)) ? item : { ...carried, adjustment: null };
       }),
       risks: empty.risks.map((risk) => {
         const carried = risks.get(risk.riskId);
@@ -476,16 +715,17 @@ export class EvaluationRecords {
     requireEvaluation(last.kind !== 'finalized', 'EVALUATION_FINALIZED', `第 ${record.ordinal} 版已经定稿，不能再改；要改就重新评估。`);
     requireEvaluation(entries.count === expectedEntries, 'EVALUATION_MOVED', '这一版评估刚在另一个窗口保存过；请看过最新的再改。');
     const { sha256: _digest, ...profile } = record.profile;
-    const checked = evaluationContent(content, profile, finalize);
+    const checked = evaluationContent(content, profile, finalize, EvaluationRecords.#initialScores(this.#initialDraft(record)));
     requireEvaluation(finalize || !sameContent(checked, last.content), 'EVALUATION_UNCHANGED', '评估没有变化。');
     this.#append(record, last.sha256, entries.count + 1, finalize ? 'finalized' : 'draft', checked);
   }
 
-  #summary(record: StoredRecord, last: StoredEntry): EvaluationRecordSummaryProjection {
+  /** EVAL-001's three states: AI7's draft until the editor saves the version begun from it, then the editor's, then 定稿. */
+  #summary(record: StoredRecord, last: StoredEntry, fromInitial: boolean): EvaluationRecordSummaryProjection {
     return {
       recordId: record.recordId,
       ordinal: record.ordinal,
-      state: last.kind === 'finalized' ? 'finalized' : 'editing',
+      state: last.kind === 'finalized' ? 'finalized' : fromInitial && last.ordinal === 1 ? 'draft' : 'editing',
       revisionLabel: record.revisionLabel,
       total: totalOf(record.profile, last.content),
       conclusion: last.content.conclusion,
@@ -523,13 +763,16 @@ export class EvaluationRecords {
     let count = 0;
     let open: { record: StoredRecord; count: number; latest: StoredEntry } | undefined;
     let shown: typeof open;
+    const begunFromInitial = new Set((this.#db.prepare(
+      'SELECT d.record_id FROM evaluation_initial_drafts d JOIN evaluation_records r ON r.record_id = d.record_id WHERE r.book_id = ?',
+    ).all(bookId) as SqlRow[]).map((row) => String(row.record_id)));
     for (const record of this.#records(bookId)) {
       const chain = { record, ...this.#entries(record) };
       count += 1;
       open = chain;
       if (recordId === null || record.recordId === recordId) shown = chain;
       if (before === null || record.ordinal < before) {
-        summaries.push(this.#summary(record, chain.latest));
+        summaries.push(this.#summary(record, chain.latest, begunFromInitial.has(record.recordId)));
         if (summaries.length > 10) summaries.shift();
       }
     }
@@ -541,8 +784,9 @@ export class EvaluationRecords {
         .get(shown.record.previousRecordId, bookId);
       const previousRecord = previousRow === undefined ? undefined : this.#record(previousRow);
       const previous = previousRecord === undefined ? undefined : { record: previousRecord, latest: this.#entries(previousRecord).latest };
+      const initial = this.#initialDraft(shown.record);
       record = {
-        ...this.#summary(shown.record, last),
+        ...this.#summary(shown.record, last, initial !== null),
         revisionId: shown.record.revisionId,
         uncheckpointed: shown.record.uncheckpointed,
         profile: shown.record.profile,
@@ -552,25 +796,38 @@ export class EvaluationRecords {
         finalized: last.kind === 'finalized' ? { actor: EVALUATION_ACTOR, at: last.recordedAt } : null,
         recommendationBlocked: recommendationBlocked(last.content.risks),
         comparison: this.#comparison(previous, { record: shown.record, content: last.content }),
+        initial,
       };
     }
     const manuscript = this.#manuscripts.current(bookId);
+    const profile = this.profile();
+    const startable = manuscript === null ? null : this.#startableInitial(bookId, profile.sha256, manuscript.revisionId);
     const start: EvaluationWorkspaceProjection['start'] = manuscript === null
       ? { allowed: false, reason: '这本书还没有稿件，没有可以评估的内容。' }
       : open !== undefined && open.latest.kind !== 'finalized'
         ? { allowed: false, reason: `第 ${open.record.ordinal} 版还没有定稿；定稿后才能重新评估。` }
-        : { allowed: true, kind: open === undefined ? 'first' : 'again' };
+        : {
+            allowed: true,
+            kind: open === undefined ? 'first' : 'again',
+            fromInitial: startable !== null && 'facts' in startable ? { revisionId: startable.facts.draft.revisionId, ordinal: startable.facts.draft.ordinal } : null,
+          };
+    const latestInitial = this.#initial.latest(bookId);
+    const initialTask = this.#initial.task(bookId);
     return {
       bookId,
       bookTitle,
       manuscript: manuscript === null ? null : { revisionId: manuscript.revisionId, revisionLabel: manuscript.revisionLabel, uncheckpointed: manuscript.uncheckpointed },
-      profile: this.profile(),
+      profile,
       records: summaries.reverse(),
       recordCount: count,
       recordsBefore: before,
       recordsNext: (summaries.at(-1)?.ordinal ?? 1) > 1 ? summaries.at(-1)!.ordinal : null,
       record,
       start,
+      initial: {
+        ...initialTask,
+        latest: latestInitial === null ? null : { ...latestInitial.draft, total: totalOfScores(profile, latestInitial.draft.items), current: latestInitial.current },
+      },
     };
   }
 

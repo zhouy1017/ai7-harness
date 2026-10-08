@@ -59,6 +59,7 @@ import {
 // the deterministic function of the frozen prompt contract and a synthetic all-zero unit digest.
 
 import { FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST, factualReviewRequestDigest } from '../../src/service/analysis/factual-review-contract.js';
+import { initialEvaluationRequestDigest, initialEvaluationSynthesisRequestDigest } from '../../src/service/evaluation/initial-evaluation-contract.js';
 
 const FIXTURES_ROOT = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url)));
 const codes = { QUOTA_EXCEEDED_CODE, INVALID_CREDENTIAL_CODE, CONTEXT_WINDOW_EXCEEDED_CODE };
@@ -284,6 +285,32 @@ describe('model fixture loading', () => {
     expect((await collect(baselineBound.stream(request(factualHeader)))).at(-1))
       .toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.FIXTURE_MISMATCH } } });
     expect((await collect(baselineBound.stream(request()))).at(-1))
+      .toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.FIXTURE_MISMATCH } } });
+  });
+
+  // Issue #429 (S81b1): AI7 初评's units and its one synthesis are answered under the evaluation contract the adapter holds,
+  // the synthesis under ordinal 0 like the baseline's reduction, its text replayed as it stands.
+  it('answers an evaluation unit and its synthesis under the evaluation contract digest, and neither under another', async () => {
+    const contractDigest = 'c'.repeat(64);
+    const setDigest = 'd'.repeat(64);
+    const unitDigest = initialEvaluationRequestDigest(contractDigest, 1, ZERO_UNIT_DIGEST);
+    const synthesisDigest = initialEvaluationSynthesisRequestDigest(contractDigest, setDigest);
+    await writeFile(join(root, 'evaluation.json'), fixture('evaluation', null, [
+      entry(1, 'unit-answer', unitDigest),
+      entry(0, 'synthesis-answer {{block:1}}', synthesisDigest),
+    ]));
+    const resolved = await loadModelFixture(root, 'evaluation');
+    const adapter = new Ai7LocalDeterministicAdapter(resolved, contractDigest, codes);
+    const unitHeader = `评估单元 1/1 · 单元摘要 ${ZERO_UNIT_DIGEST}`;
+    expect((await collect(adapter.stream(request(unitHeader)))).find((chunk) => chunk.type === 'block-end'))
+      .toMatchObject({ block: { text: 'unit-answer' } });
+    expect((await collect(adapter.stream(request(`评估综合 3/8 · 依据摘要 ${setDigest}`)))).find((chunk) => chunk.type === 'block-end'))
+      .toMatchObject({ block: { text: 'synthesis-answer {{block:1}}' } });
+    const mismatch = await collect(adapter.stream(request(`评估综合 3/8 · 依据摘要 ${'e'.repeat(64)}`)));
+    expect(mismatch.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.FIXTURE_MISMATCH,
+      message: '夹具 evaluation 没有AI7 初评的全书综合在当前请求摘要下的对应响应。' } } });
+    const otherContract = new Ai7LocalDeterministicAdapter(resolved, BASELINE_PROMPT_CONTRACT_DIGEST, codes);
+    expect((await collect(otherContract.stream(request(unitHeader)))).at(-1))
       .toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.FIXTURE_MISMATCH } } });
   });
 

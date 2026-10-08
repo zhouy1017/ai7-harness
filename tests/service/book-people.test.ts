@@ -4,9 +4,10 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BOOK_PEOPLE_ROLE_LISTS, BOOK_PEOPLE_TRIGGER_SQL, BUILTIN_BOOK_PEOPLE_ROLES } from '../../src/service/book-people.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { DATABASE_MERGE_SCHEMA_VERSION, MAINTENANCE_CASE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { INITIAL_EVALUATION_SCHEMA_VERSION, MAINTENANCE_CASE_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx, type ComposedManuscriptRequest } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for 作者 · 责编 · 相关人 (Issue #431, plan slice S83; V2-UX-BOOK-006) over the real
 // `EditorialStore` on a temporary Agent Data Root. The manuscripts are composed from the one admitted SampleBook under
@@ -199,7 +200,7 @@ describe('作者 · 责编 · 相关人 (S83)', () => {
     const planted = new DatabaseSync(path);
     try {
       planted.exec(`BEGIN IMMEDIATE;
-        DROP TABLE database_merge_books;
+        DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books;
         DROP TABLE database_merges;
         DROP TABLE database_replacements;
         DROP TABLE scheduled_backup_removals;
@@ -228,6 +229,7 @@ describe('作者 · 责编 · 相关人 (S83)', () => {
         DROP TABLE book_people_versions;
         PRAGMA user_version = ${MAINTENANCE_CASE_SCHEMA_VERSION};
         COMMIT;`);
+      downgradeKindCoupledRelations(planted, ANALYSIS_LEDGER_REVISION_58_SQL);
     } finally {
       planted.close();
     }
@@ -240,7 +242,7 @@ describe('作者 · 责编 · 相关人 (S83)', () => {
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(DATABASE_MERGE_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(INITIAL_EVALUATION_SCHEMA_VERSION);
       expect((after.prepare('SELECT count(*) count FROM book_people_versions').get() as { count: number }).count).toBe(0);
     } finally {
       after.close();

@@ -14,8 +14,10 @@ export const CALIBRATION_PAGE_LEDE = '这里的两个开关只影响 AI7 的初�
 export const CALIBRATION_HEADING = '校准';
 /** What calibration touches, and what it never does (EVAL-011). */
 export const CALIBRATION_SCOPE = '校准只调整 AI7 给出的初评分数，不改你的评分，也不改风险项。';
-/** Why there is nothing to count yet: AI7's 初评 arrives with S81b (Issue #429). */
+/** Why there is nothing to count, for a service that gives no AI7 初评 scores to adjust (`initialScoresConnected` false). */
 export const CALIBRATION_WAITING = 'AI7 初评尚未接通：你改过 AI7 的初评分数后，调分记录才开始累积。';
+/** Past the threshold, before any build computes the offset: nothing is adjusted yet, and the page says so. */
+export const CALIBRATION_NOT_COMPUTED = '已满数，但校准还没有计算：AI7 的初评分数暂不调整';
 export const CALIBRATION_SWITCH = '启用校准';
 export const PREDICTION_HEADING = '定价与首印预测';
 /** What turning it on would add (EVAL-014). */
@@ -41,11 +43,17 @@ export const CALIBRATION_STATUS = {
   failed: '无法保存。',
 } as const;
 
-/** Calibration's progress toward its threshold, and whether it applies (EVAL-011, EVAL-014). */
+/**
+ * Calibration's progress toward its threshold, and whether it applies (EVAL-011, EVAL-014). Past the threshold with no offset
+ * computed it says exactly that (Issue #429 review): AI7's starting scores are left as they are, never said to be calibrated.
+ */
 export function calibrationProgressLine(calibration: Pick<EvaluationCalibrationProjection['calibration'], 'adjustments' | 'threshold' | 'enabled' | 'active'>): string {
   const progress = `调分记录 ${calibration.adjustments} / ${calibration.threshold} 本`;
   if (!calibration.enabled) return `${progress} · 已关闭`;
-  return calibration.active ? `${progress} · 已生效` : `${progress} · 满 ${calibration.threshold} 本后生效`;
+  if (calibration.active) return `${progress} · 已生效`;
+  return calibration.adjustments >= calibration.threshold
+    ? `${progress} · ${CALIBRATION_NOT_COMPUTED}`
+    : `${progress} · 满 ${calibration.threshold} 本后生效`;
 }
 
 /** The prediction switch's state, and what it waits for until it may be turned on (EVAL-010). */

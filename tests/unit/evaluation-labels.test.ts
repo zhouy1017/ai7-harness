@@ -1,6 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
+  EVALUATION_ADJUSTMENT_LEGEND,
+  EVALUATION_ADJUSTMENT_REASON_LABELS,
+  EVALUATION_AI7_LEDE,
   EVALUATION_AI7_PENDING,
+  EVALUATION_AI7_PREPARE,
+  EVALUATION_STATE_LABELS,
+  evaluationAi7ConclusionLine,
+  evaluationAi7ItemLine,
+  evaluationAi7LatestLine,
+  evaluationAi7RecordLine,
+  evaluationAi7SufficiencyLine,
+  evaluationAi7TaskLine,
+  evaluationAi7EvidenceLine,
+  evaluationAi7EvidenceSummary,
+  evaluationAi7UnreadLine,
   EVALUATION_FINALIZE_NEEDS_SCORE,
   EVALUATION_LEDE,
   EVALUATION_RECOMMEND_BLOCKED,
@@ -106,7 +120,7 @@ describe('评估 arithmetic', () => {
 describe('评估 words', () => {
   it('says the total, each item, the revision and 定稿 in the editor\'s words, never a weight', () => {
     expect(EVALUATION_LEDE).toContain('只看满分与得分');
-    expect(EVALUATION_AI7_PENDING).toBe('AI7 初评尚未接通：这一版由你打分。');
+    expect(EVALUATION_AI7_PENDING).toBe('这一版不是从 AI7 初评开始的：由你打分。');
     expect([evaluationScore(18), evaluationScore(16.5)]).toEqual(['18', '16.5']);
     expect(evaluationTotalLine(PROFILE, { score: 66.5, fullMarks: 80, notRated: 1, unscored: 0 })).toBe('总分 66.5 / 80 · 优秀（1 项不评）');
     expect(evaluationTotalLine(PROFILE, { score: 34, fullMarks: 100, notRated: 0, unscored: 3 })).toBe('总分 34 / 100 · 还有 3 项没有打分');
@@ -160,5 +174,46 @@ describe('评估 words', () => {
     // The default profile divides the 100 evenly over its five items (EVAL-002, EVAL-003).
     expect(PROFILE.items.map((item) => item.fullMarks).reduce((sum, value) => sum + value, 0)).toBe(PROFILE.total);
     expect(new Set(PROFILE.items.map((item) => item.fullMarks)).size).toBe(1);
+  });
+});
+
+describe('AI7 初评 words (Issue #429, S81b1; EVAL-001, EVAL-005 to EVAL-007)', () => {
+  const draftItem = { score: 16.5, sufficiency: 'sufficient' as const, citedBlocks: 9, unitsCited: 8 };
+  it('says AI7\'s score beside the editor\'s with how well it stands, and never as the editor\'s', () => {
+    expect(evaluationAi7ItemLine(draftItem, 20)).toBe('AI7 初评 16.5 / 20 · 依据充分度 充分（引用 9 个段落，分布在 8 个阅读范围）');
+    expect(evaluationAi7ItemLine({ ...draftItem, score: null, sufficiency: 'insufficient', citedBlocks: 0, unitsCited: 0 }, 20))
+      .toBe('AI7 初评 没有给出分数 · 依据充分度 不足（没有引用内容块）');
+    expect(evaluationAi7SufficiencyLine({ sufficiency: 'fair', citedBlocks: 2, unitsCited: 1 })).toBe('依据充分度 一般（引用 2 个段落，分布在 1 个阅读范围）');
+    expect(evaluationAi7RecordLine({ ordinal: 2, revisionLabel: 'r3' })).toBe('这一版从 AI7 第 2 次初评开始（读的是修订版 r3）：AI7 的分数列在每一项旁边，记录保存的是你的评分。');
+    expect(EVALUATION_AI7_LEDE).toContain('记录保存的是你的评分，结论由你选定');
+    expect(EVALUATION_STATE_LABELS).toEqual({ draft: 'AI7 初稿', editing: '编辑评分中', finalized: '定稿' });
+  });
+
+  it('marks AI7\'s suggested conclusion as AI7\'s, and names the five adjustment reasons unticked', () => {
+    expect(evaluationAi7ConclusionLine(PROFILE, 'revise')).toBe('AI7 建议的结论：修改后再议（由你选定）');
+    expect(evaluationAi7ConclusionLine(PROFILE, null)).toBe('AI7 没有给出建议结论。');
+    expect(Object.values(EVALUATION_ADJUSTMENT_REASON_LABELS)).toEqual(['打分偏高', '打分偏低', '依据不足', '未考虑某方面', '自行输入']);
+    expect(EVALUATION_ADJUSTMENT_LEGEND).toBe('调分原因（可多选，不预先勾选）');
+  });
+
+  it('says the Task and the latest 初评 in one line each, and when the manuscript moved past it', () => {
+    expect(evaluationAi7TaskLine({ taskIntentId: 'x', state: 'executing', label: '运行中' })).toBe('AI7 初评 · 运行中');
+    const latest = {
+      revisionId: 'r', ordinal: 1, revisionLabel: 'r1', createdAt: '2026-10-07T00:00:00.000Z', items: [], strengths: [], weaknesses: [], nextStep: null,
+      suggestedConclusion: null, complete: true, current: true, total: { score: 73, fullMarks: 100, notRated: 0, unscored: 0 },
+      unitsTotal: 8, unreadUnits: [],
+    };
+    expect(evaluationAi7LatestLine(PROFILE, latest)).toBe('第 1 次初评 · 读的是修订版 r1 · 总分 73 / 100 · 优秀');
+    expect(evaluationAi7LatestLine(PROFILE, { ...latest, current: false })).toBe('第 1 次初评 · 读的是修订版 r1 · 总分 73 / 100 · 优秀（稿件此后改过：重新初评后才能从初评开始）');
+    expect(evaluationAi7LatestLine(PROFILE, { ...latest, complete: false })).toBe('第 1 次初评 · 读的是修订版 r1 · 全书综合没有给出分数');
+    expect(EVALUATION_AI7_PREPARE).toEqual({ 'evaluation-first': '准备 AI7 初评', 'evaluation-again': '重新初评' });
+  });
+
+  it('shows AI7\'s evidence range by range, and says which ranges a 初评 that completed with gaps never read', () => {
+    expect(evaluationAi7EvidenceSummary(3)).toBe('AI7 的依据（3 条）');
+    expect(evaluationAi7EvidenceLine({ unitOrdinal: 2, note: '冲突在第二章升级' })).toBe('阅读范围 2：冲突在第二章升级');
+    expect(evaluationAi7UnreadLine({ unitsTotal: 8, unreadUnits: [] })).toBeNull();
+    expect(evaluationAi7UnreadLine({ unitsTotal: 8, unreadUnits: [3, 5] }))
+      .toBe('AI7 这次没有读到 2 / 8 个阅读范围（第 3、5 个）：这些范围里的内容没有进入它的分数和评语。');
   });
 });
