@@ -17,6 +17,7 @@ import { RESOLVE_CONFLICT_LABEL } from './editorial-mark-labels.js';
 import { PROPOSAL_CONFLICT_CLASSIFICATION, REVERSAL_CONFLICT_LINE } from './proposal-conflict-labels.js';
 import { MAINTENANCE_CLASSIFICATION_LABELS, MAINTENANCE_NEXT_STEP_LABELS } from '../shared/maintenance-wording.js';
 import { LIBRARY_ATTRIBUTE, LIBRARY_ELIGIBILITY, LIBRARY_HOUSE, LIBRARY_KIND_LABELS, LIBRARY_NO_ATTRIBUTION } from './knowledge-base-labels.js';
+import { DIALOGUE_CARD_REASONS, DIALOGUE_OPEN_LABEL, DIALOGUE_STATE_LABELS, DIALOGUE_WAITING_LABEL, dialogueQuestionLine } from './dialogue-labels.js';
 
 /**
  * Every word of 待我处理 (Issue #424, plan slice S78; editor-surfaces §8.1, V2-UX-ATTN-001 to 009, IA-007,
@@ -159,6 +160,13 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   // A Book's Learning Material (Issue #61, S26b; LEARN-002): the words of the spec's attention item.
   'learning-materials-pending': '学习准入待处理',
   'learning-materials-deferred': '学习准入待处理 · 稍后决定',
+  // A dialogue Task (Issue #52, S17a): away from the foreground dialogue an answer in flight is only 等待回答 (DIALOG-010);
+  // a stopped or interrupted one is labelled incomplete in DIALOG-012's words.
+  'dialogue-answering': DIALOGUE_WAITING_LABEL,
+  'dialogue-answered': '已回答',
+  'dialogue-stopped': DIALOGUE_STATE_LABELS.stopped,
+  'dialogue-interrupted': DIALOGUE_STATE_LABELS.interrupted,
+  'dialogue-failed': DIALOGUE_STATE_LABELS.failed,
 };
 
 /** The state pill's tone and shape: words and a shape, never colour alone. */
@@ -206,6 +214,11 @@ export const GLOBAL_ATTENTION_STATE_PILLS: Readonly<Record<GlobalAttentionStateK
   'learning-eligibility-deferred': { tone: 'attention', shape: 'triangle' },
   'learning-materials-pending': { tone: 'attention', shape: 'triangle' },
   'learning-materials-deferred': { tone: 'attention', shape: 'triangle' },
+  'dialogue-answering': { tone: 'neutral', shape: 'ring' },
+  'dialogue-answered': { tone: 'good', shape: 'check' },
+  'dialogue-stopped': { tone: 'attention', shape: 'half' },
+  'dialogue-interrupted': { tone: 'attention', shape: 'half' },
+  'dialogue-failed': { tone: 'blocked', shape: 'square' },
 };
 
 /**
@@ -243,6 +256,7 @@ export const GLOBAL_ATTENTION_NEXT_STEP_LABELS: Readonly<Record<GlobalAttentionN
   'set-library-attribution': LIBRARY_ATTRIBUTE,
   'set-learning-eligibility': LIBRARY_ELIGIBILITY,
   'decide-learning-materials': '定学习准入…',
+  'open-dialogue': DIALOGUE_OPEN_LABEL,
 };
 /** The two scopes a question can have (CLAR-004), in the card's own words. */
 export const GLOBAL_ATTENTION_CLARIFICATION_WAITING = '任务等待你的说明';
@@ -300,6 +314,8 @@ export function globalAttentionObjectLabel(object: GlobalAttentionObjectProjecti
     case 'learning-materials':
       // Only what there is: a Book whose material was all left for later says no 0 条待定 (Issue #61 review).
       return `学习材料 · ${[...(object.pending > 0 ? [`${object.pending} 条待定`] : []), ...(object.deferred > 0 ? [`${object.deferred} 条稍后决定`] : [])].join('，')}`;
+    case 'dialogue':
+      return dialogueQuestionLine(object.question);
   }
 }
 
@@ -436,6 +452,13 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
       return '你的反馈与改动里有可以用来学习的材料：学习准入策略还只是建议，没有你的决定，它们不会用来学习。';
     case 'learning-materials-deferred':
       return '这些学习材料记为稍后决定：决定之前，它们不会用来学习。';
+    // A dialogue Task (Issue #52, S17a; DIALOG-010, 012, 016).
+    case 'dialogue-answering':
+    case 'dialogue-answered':
+    case 'dialogue-stopped':
+    case 'dialogue-interrupted':
+    case 'dialogue-failed':
+      return DIALOGUE_CARD_REASONS[item.state];
   }
 }
 

@@ -203,6 +203,15 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   review_reports: 'owned',
   quality_signals: 'owned',
   learning_eligibility_decisions: 'owned',
+  // Its dialogue Tasks (Issue #52, S17a): what was asked, bound to its selection, and each attempt's binding, span and outcome.
+  // The Harness Session Ledger the spans join to is a file per Session beside the store; a merged Book's dialogues read
+  // their history only where that ledger holds it.
+  dialogue_tasks: 'owned',
+  dialogue_attempts: 'owned',
+  dialogue_execution_bindings: 'owned',
+  dialogue_harness_spans: 'owned',
+  dialogue_attempt_outcomes: 'owned',
+  dialogue_conversions: 'owned',
   // Its deliverables, publication and people.
   publication_versions: 'owned',
   publication_events: 'owned',

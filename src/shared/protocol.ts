@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 91 as const;
+export const SERVICE_PROTOCOL_VERSION = 94 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -202,6 +202,12 @@ export const IPC_CHANNELS = {
   transitionProductionDocumentPhase: 'ai7:j07:transition-production-document-phase',
   inspectGlobalAttention: 'ai7:j09:inspect-global-attention',
   inspectBookTasks: 'ai7:j16:inspect-book-tasks',
+  askAboutSelection: 'ai7:j16:ask-about-selection',
+  inspectDialogue: 'ai7:j16:inspect-dialogue',
+  stopDialogueAnswer: 'ai7:j16:stop-dialogue-answer',
+  continueDialogueAnswer: 'ai7:j16:continue-dialogue-answer',
+  regenerateDialogueAnswer: 'ai7:j16:regenerate-dialogue-answer',
+  convertDialogueToChangeSuggestion: 'ai7:j16:convert-dialogue-to-change-suggestion',
   reviewManuscriptExport: 'ai7:j07:review-manuscript-export',
   chooseManuscriptExportDestination: 'ai7:j07:choose-manuscript-export-destination',
   approveManuscriptExport: 'ai7:j07:approve-manuscript-export',
@@ -7661,7 +7667,14 @@ export type GlobalAttentionStateKey =
   // A Book's Learning Material waiting for the editor (Issue #61, S26b; LEARN-002, ATTN-009): one item per Book, while any
   // material waits for a decision or changed since it had one, or else while any was left for later.
   | 'learning-materials-pending'
-  | 'learning-materials-deferred';
+  | 'learning-materials-deferred'
+  // A dialogue Task of the Book (Issue #52, S17a; TASK-044, DIALOG-010, 012): only the 任务 panel lists it. Away from the
+  // foreground dialogue an answer in flight reads `等待回答` and nothing more; settled, it is answered or incomplete.
+  | 'dialogue-answering'
+  | 'dialogue-answered'
+  | 'dialogue-stopped'
+  | 'dialogue-interrupted'
+  | 'dialogue-failed';
 
 /**
  * The closed map of safe next steps (V2-UX-ATTN-007): each is an action the item's own record offers, in
@@ -7693,12 +7706,14 @@ export type GlobalAttentionNextStep =
   | 'set-library-attribution'
   | 'set-learning-eligibility'
   // A Book's Learning Material in 质量与学习 (Issue #61, S26b).
-  | 'decide-learning-materials';
+  | 'decide-learning-materials'
+  // A dialogue Task's 打开对话 (Issue #52, S17a; TASK-044).
+  | 'open-dialogue';
 export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
   'view-run', 'view-review', 'reconfirm-plan', 'continue-review', 'return-to-recovery', 'retry-abandon-cleanup', 'await-local-check',
   'resolve-conflict', 'answer-clarification', 'adjust-budget-redo', 'resolve-model-service', 'reprepare', 'redo', 'view-plan',
   'maintenance-link-proposal', 'maintenance-link-publication', 'maintenance-write-errata', 'maintenance-conclude',
-  'set-library-attribution', 'set-learning-eligibility', 'decide-learning-materials',
+  'set-library-attribution', 'set-learning-eligibility', 'decide-learning-materials', 'open-dialogue',
 ];
 
 /**
@@ -7719,7 +7734,9 @@ export type GlobalAttentionTarget =
   // 知识库 › 资料库 with the item's card (Issue #427, S79c).
   | { kind: 'library-material'; materialId: string }
   // 质量与学习 › 学习准入 with the Book's materials (Issue #61, S26b).
-  | { kind: 'learning-materials'; bookId: string };
+  | { kind: 'learning-materials'; bookId: string }
+  // The dialogue in the side slot, in the foreground (Issue #52, S17a).
+  | { kind: 'dialogue'; bookId: string; dialogueId: string };
 
 /** The Active Work Object of one item, in its record's own terms (V2-UX-ATTN-007). */
 export type GlobalAttentionObjectProjection =
@@ -7732,7 +7749,10 @@ export type GlobalAttentionObjectProjection =
   // A 资料库 item (Issue #427, S79c): its title and kind, and where it belongs so far — a Book, the house, or not yet decided.
   | { kind: 'library-material'; title: string; materialKind: LibraryMaterialKind; scope: 'none' | 'book' | 'house' }
   // A Book's Learning Material (Issue #61, S26b): how many wait for a decision, and how many were left for later.
-  | { kind: 'learning-materials'; pending: number; deferred: number };
+  | { kind: 'learning-materials'; pending: number; deferred: number }
+  // A dialogue Task (Issue #52, S17a): the editor's own question, as the Harness Session Ledger holds it — `null` when it
+  // holds no turn of it here.
+  | { kind: 'dialogue'; question: string | null };
 
 /** The record facts an item's reason is told from: identities, counts and states, never manuscript text. */
 export interface GlobalAttentionFactsProjection {
@@ -7803,7 +7823,9 @@ export const BOOK_TASK_RECENT_LIMIT = 10;
 /** What a finished Task's `查看结果` opens (V2-UX-TASK-045): the result it formed, read as its own screen reads it. */
 export type BookTaskResultRef =
   | { kind: 'analysis-revision'; revisionId: string }
-  | { kind: 'review-run'; reviewRunId: string };
+  | { kind: 'review-run'; reviewRunId: string }
+  // A dialogue Task's `回答` (Issue #52, S17a; TASK-044): its latest answer, read from the Harness Session Ledger.
+  | { kind: 'dialogue'; dialogueId: string };
 
 /** One Task of the Book as the panel shows it: 待我处理's item for it, and the result `查看结果` opens. */
 export interface BookTaskItemProjection {
@@ -7830,6 +7852,104 @@ export interface BookTasksProjection {
   groups: ReadonlyArray<BookTaskGroupProjection>;
   /** A Run of this Book is in flight, a Review Run is being driven, or a Run waits to start: the panel follows it. */
   running: boolean;
+}
+
+// ---- 就这段提问… (Issue #52, plan slice S17a; UI ADR 0014; V2-UX-DIALOG-001 to 016, TASK-044, TASK-046) ---------------
+
+/** The longest question the editor may ask, in characters. */
+export const MAX_DIALOGUE_QUESTION_CHARACTERS = 500;
+/** The longest 建议改为 or 理由 a 转为修改建议 takes, in characters. */
+export const MAX_DIALOGUE_PROPOSAL_CHARACTERS = 4_000;
+/** The longest selection a dialogue may be asked about, in graphemes. */
+export const MAX_DIALOGUE_SELECTION_GRAPHEMES = 2_000;
+
+/** The exact words of that Book's manuscript the question is about, as the editor selected them (one block). */
+export type DialogueSelectionInput = SeriesKnowledgeSpanInput;
+
+export interface AskAboutSelectionInput {
+  readonly selection: DialogueSelectionInput;
+  readonly question: string;
+}
+
+export interface InspectDialogueInput {
+  readonly dialogueId: string;
+  /** How many of the latest answer's fragments the reader has already shown. */
+  readonly afterFragment: number;
+}
+
+/** One action on a dialogue's latest answer: the attempt the editor sees, so an action on a stale one is refused. */
+export interface DialogueAttemptInput {
+  readonly dialogueId: string;
+  readonly attemptId: string;
+}
+
+export interface ConvertDialogueToChangeSuggestionInput extends DialogueAttemptInput {
+  /** What the selected words would become, taken from the answer by the editor. */
+  readonly proposedText: string;
+  /** Why, in the editor's words; the dialogue is the basis either way. */
+  readonly rationale: string;
+}
+
+export type DialogueAttemptKind = 'ask' | 'continue' | 'regenerate';
+/** An answer in flight, settled whole, or — stopped, interrupted or failed — an Incomplete Dialogue Answer (DIALOG-012). */
+export type DialogueAnswerState = 'answering' | 'completed' | 'stopped' | 'interrupted' | 'failed';
+
+/** One complete semantic fragment of an answer (DIALOG-006): a whole sentence, list item or row, never a broken tail. */
+export interface DialogueFragmentProjection {
+  readonly text: string;
+  /** A line break follows it: the next fragment starts a new paragraph, item or row. */
+  readonly breakAfter: boolean;
+}
+
+export interface DialogueAttemptProjection {
+  readonly attemptId: string;
+  readonly ordinal: number;
+  readonly kind: DialogueAttemptKind;
+  readonly state: DialogueAnswerState;
+  /**
+   * The answer's complete fragments from `fragmentsFrom` on — every one, for an attempt that is not the latest. A 继续回答
+   * carries what the answer it went on from kept, then its own.
+   */
+  readonly fragments: ReadonlyArray<DialogueFragmentProjection>;
+  readonly fragmentsFrom: number;
+  readonly fragmentTotal: number;
+  /**
+   * Where the answer was read: `live` while it streams, `ledger` from the Harness Session Ledger, `missing` when that ledger
+   * holds no record of it here — a Book merged from another computer's data, or a record that does not read.
+   */
+  readonly source: 'live' | 'ledger' | 'missing';
+  /** The known cause of an interruption or a failure, as a code; `null` otherwise. */
+  readonly causeCode: string | null;
+  readonly startedAt: string;
+  readonly settledAt: string | null;
+  /** The 修改建议 made from this answer with 转为修改建议. */
+  readonly convertedMarkIds: ReadonlyArray<string>;
+}
+
+/**
+ * One Interactive Editorial Dialogue (DIALOG-001, 015): bound to one exact Book, manuscript branch and selected range. Its
+ * question, the selected words as they were sent and every answer are read from the Harness Session Ledger each time; AI7's
+ * own records hold only identities, digests, spans and states. Nothing it says is manuscript text, a factual conclusion or
+ * a Proposal (DIALOG-016).
+ */
+export interface DialogueProjection {
+  readonly dialogueId: string;
+  readonly bookId: string;
+  readonly manuscriptId: string;
+  readonly branchId: string;
+  /** `null` when the Harness Session Ledger holds no turn of this dialogue here. */
+  readonly question: string | null;
+  readonly selection: string | null;
+  readonly range: { readonly blockId: string; readonly fromGrapheme: number; readonly toGrapheme: number };
+  readonly askedAt: string;
+  readonly attempts: ReadonlyArray<DialogueAttemptProjection>;
+  readonly actions: { readonly stop: boolean; readonly continue: boolean; readonly regenerate: boolean; readonly convert: boolean };
+}
+
+export interface DialogueConversionProjection {
+  readonly markId: string;
+  readonly completionLabel: string;
+  readonly dialogue: DialogueProjection;
 }
 
 // ---- ④ 导出 · DOCX (Issue #413, plan slice S64; editor-surfaces §7 导出, V2-UX-EXP-001 to EXP-024) ------
@@ -8891,6 +9011,21 @@ export interface ServiceOperationMap {
   inspectGlobalAttention: { input: Record<string, never>; output: GlobalAttentionProjection };
   /** The Book's 任务 panel (Issue #423, plan slice S77a): a read of that Book's Tasks in the three groups. */
   inspectBookTasks: { input: { bookId: string }; output: BookTasksProjection };
+  /**
+   * 就这段提问… (Issue #52, S17a): a dialogue Task on the exact selected words of that Book's manuscript and the editor's
+   * question, its first answer started at once — only the selected words and the question are sent, and nothing changes.
+   */
+  askAboutSelection: { input: AskAboutSelectionInput & { bookId: string }; output: DialogueProjection };
+  /** The dialogue as it stands: a read, the latest answer's fragments from `afterFragment` on. */
+  inspectDialogue: { input: InspectDialogueInput & { bookId: string }; output: DialogueProjection };
+  /** 停止回答: the answer in flight keeps only its complete fragments, labelled incomplete. */
+  stopDialogueAnswer: { input: DialogueAttemptInput & { bookId: string }; output: DialogueProjection };
+  /** 继续回答: a new attempt going on from what a stopped or interrupted answer kept. */
+  continueDialogueAnswer: { input: DialogueAttemptInput & { bookId: string }; output: DialogueProjection };
+  /** 重新回答: a new attempt asking the same question about the same words again. */
+  regenerateDialogueAnswer: { input: DialogueAttemptInput & { bookId: string }; output: DialogueProjection };
+  /** 转为修改建议: an AI7-produced 修改建议 on the dialogue's selected words, from a completed answer; never applied. */
+  convertDialogueToChangeSuggestion: { input: ConvertDialogueToChangeSuggestionInput & { bookId: string }; output: DialogueConversionProjection };
   reviewManuscriptExport: { input: ReviewManuscriptExportInput; output: ManuscriptExportReviewProjection };
   prepareManuscriptExport: { input: PrepareManuscriptExportInput; output: ManuscriptExportPreparationProjection };
   approveManuscriptExport: { input: ApproveManuscriptExportInput; output: ManuscriptExportReceiptProjection };
@@ -9223,6 +9358,13 @@ export interface RendererApi {
   inspectGlobalAttention(): Promise<GlobalAttentionProjection>;
   /** The 任务 panel of the Book this window shows (Issue #423, S77a): a read; it holds and grants nothing. */
   inspectBookTasks(): Promise<BookTasksProjection>;
+  /** 就这段提问… on the Book this window shows (Issue #52, S17a): only the selected words and the question are sent. */
+  askAboutSelection(input: AskAboutSelectionInput): Promise<DialogueProjection>;
+  inspectDialogue(input: InspectDialogueInput): Promise<DialogueProjection>;
+  stopDialogueAnswer(input: DialogueAttemptInput): Promise<DialogueProjection>;
+  continueDialogueAnswer(input: DialogueAttemptInput): Promise<DialogueProjection>;
+  regenerateDialogueAnswer(input: DialogueAttemptInput): Promise<DialogueProjection>;
+  convertDialogueToChangeSuggestion(input: ConvertDialogueToChangeSuggestionInput): Promise<DialogueConversionProjection>;
   /**
    * ④ 导出 (Issue #413): the Export Fidelity Review of one exact version of that Book's Manuscript. A current
    * revision with unsaved edits is saved as a revision first.

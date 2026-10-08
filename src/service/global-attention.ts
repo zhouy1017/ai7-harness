@@ -30,6 +30,7 @@ import type { ProgressReader, RunProgress } from './analysis/baseline-analysis-s
 import type { WaitingFor } from './task-plan.js';
 import type { LibraryMaterialAttentionReading } from './library-materials.js';
 import { REVIEW_RUN_CATEGORY_STATE_LABELS } from './review/review-run-state.js';
+import type { LiveAnswer } from './dialogue/dialogue-history.js';
 
 /**
  * 待我处理 (Issue #424, plan slice S78; editor-surfaces §8.1, V2-UX-ATTN-001 to 009, IA-007): the one place
@@ -761,6 +762,50 @@ export interface BookTaskReadings {
   readonly reviewRuns: ReadonlyArray<ReviewRunAttentionReading>;
   readonly reviewCompletions: ReadonlyArray<ReviewRunAttentionReading>;
   readonly waitingFor: WaitingFor;
+  /** The Book's dialogue Tasks (Issue #52, S17a), each read as its latest answer stands. */
+  readonly dialogues?: ReadonlyArray<DialogueTaskReading>;
+}
+
+/**
+ * One dialogue Task as the 任务 panel reads it (Issue #52, S17a; TASK-044): its question from the Harness Session Ledger,
+ * and its latest answer's state — answering, completed, or an Incomplete Dialogue Answer — and since when.
+ */
+export interface DialogueTaskReading {
+  readonly bookId: string;
+  readonly bookTitle: string;
+  readonly dialogueId: string;
+  readonly question: string | null;
+  readonly state: 'answering' | 'completed' | 'stopped' | 'interrupted' | 'failed';
+  /** Whether the latest answer holds any complete fragment, which `回答` opens. */
+  readonly answered: boolean;
+  readonly attempts: number;
+  readonly at: string;
+}
+
+const DIALOGUE_STATES: Readonly<Record<DialogueTaskReading['state'], GlobalAttentionStateKey>> = {
+  answering: 'dialogue-answering',
+  completed: 'dialogue-answered',
+  stopped: 'dialogue-stopped',
+  interrupted: 'dialogue-interrupted',
+  failed: 'dialogue-failed',
+};
+
+/** A dialogue Task's card (TASK-044): in 进行中 while it answers, in 最近完成 once settled; it stops no other work. */
+function dialogueTaskItem(reading: DialogueTaskReading): GlobalAttentionItemProjection {
+  return item(reading.state === 'answering' ? 'active' : 'recent', DIALOGUE_STATES[reading.state], {
+    itemId: `dialogue:${reading.dialogueId}`,
+    blocked: false,
+    at: reading.at,
+    book: { bookId: reading.bookId, title: reading.bookTitle },
+    object: { kind: 'dialogue', question: reading.question },
+    nextStep: 'open-dialogue',
+    target: { kind: 'dialogue', bookId: reading.bookId, dialogueId: reading.dialogueId },
+    technical: [
+      { key: 'dialogue', label: '对话', value: reading.dialogueId },
+      { key: 'dialogue-attempts', label: '回答次数', value: String(reading.attempts) },
+      { key: 'state-at', label: '状态开始时间', value: reading.at },
+    ],
+  });
 }
 
 /** 等你处理 holds 待我处理's two counted groups for the Book's Tasks; 进行中 its 运行中与已暂停; 最近完成 its own. */
@@ -866,6 +911,13 @@ export function composeBookTasks(readings: BookTaskReadings): BookTasksProjectio
   for (const reading of own(readings.reviewCompletions).filter((reading) => reading.state === 'settled')) {
     entries.push({ item: reviewCompletionItem(reading), result: { kind: 'review-run', reviewRunId: reading.reviewRunId } });
   }
+  // A dialogue Task's 回答 opens its latest answer once that answer settled with something to read (TASK-044).
+  for (const reading of own(readings.dialogues ?? [])) {
+    entries.push({
+      item: dialogueTaskItem(reading),
+      result: reading.state !== 'answering' && reading.answered ? { kind: 'dialogue', dialogueId: reading.dialogueId } : null,
+    });
+  }
   // One record is one entry: a Review Run read both as the Book's latest and as a completion is listed once.
   const unique = Array.from(new Map(entries.map((entry) => [`${entry.item.group}\n${entry.item.itemId}`, entry] as const)).values());
   const groups = BOOK_TASK_GROUP_KEYS.map((key) => {
@@ -881,7 +933,8 @@ export function composeBookTasks(readings: BookTaskReadings): BookTasksProjectio
     bookId: readings.bookId,
     groups,
     running: own(readings.analysisTasks).some((reading) => reading.run !== null && followedRun(reading.run)) ||
-      own(readings.reviewRuns).some((reading) => reading.state === 'running'),
+      own(readings.reviewRuns).some((reading) => reading.state === 'running') ||
+      own(readings.dialogues ?? []).some((reading) => reading.state === 'answering'),
   };
 }
 
@@ -889,13 +942,14 @@ export function composeBookTasks(readings: BookTaskReadings): BookTasksProjectio
 export async function readBookTasks(
   store: {
     waitingBaselineAnalysisRuns(bookId: string | null): ReadonlyArray<unknown>;
-    inspectBookTasks(bookId: string, progress: ProgressReader, waitingFor: WaitingFor): BookTasksProjection;
+    inspectBookTasks(bookId: string, progress: ProgressReader, waitingFor: WaitingFor, dialogueLive?: (attemptId: string) => LiveAnswer | null): BookTasksProjection;
   },
   bookId: string,
   progress: ProgressReader,
   read: () => Promise<WaitingFor>,
+  dialogueLive: (attemptId: string) => LiveAnswer | null = () => null,
 ): Promise<BookTasksProjection> {
-  return store.inspectBookTasks(bookId, progress, await attentionWaitingFor(store.waitingBaselineAnalysisRuns(bookId).length > 0, read));
+  return store.inspectBookTasks(bookId, progress, await attentionWaitingFor(store.waitingBaselineAnalysisRuns(bookId).length > 0, read), dialogueLive);
 }
 
 // ---- the import and recovery relations, read as they stand -----------------------------------------------
