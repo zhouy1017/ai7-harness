@@ -840,8 +840,9 @@ async function main() {
     requireJourney(/^blk_[0-9a-f]{24}$/.test(blockId ?? ''), 'knowledge-markable-paragraph');
     const quote = await renderer.evaluate(`(window.__j13.block(${JSON.stringify(blockId)})?.textContent ?? '').slice(2, 8)`);
     await openSelectionMenu(renderer, blockId, 2, 8, 'knowledge-menu');
-    const menu = await renderer.evaluate(`(() => { const groups = Array.from(window.__j13.menu().querySelectorAll('[role="group"]'), (group) => group.getAttribute('aria-label')); const item = window.__j13.item('propose-series-knowledge'); return [groups, item?.textContent ?? null, item instanceof HTMLButtonElement && !item.disabled]; })()`);
-    requireJourney(JSON.stringify(menu[0]?.slice(-1)) === JSON.stringify(['书系']) && menu[1] === `提议为书系「${SERIES}」的知识…` && menu[2] === true, 'knowledge-menu-words', menu);
+    // The menu has its 书系 group once the editor's first read of the Book's Series answers, and is drawn again then
+    // (Issue #642): wait for it rather than read the menu once.
+    await waitFor(renderer, `(() => { const menu = window.__j13.menu(); if (!(menu instanceof HTMLElement)) return false; const groups = Array.from(menu.querySelectorAll('[role="group"]'), (group) => group.getAttribute('aria-label')); const item = window.__j13.item('propose-series-knowledge'); return groups.at(-1) === '书系' && item instanceof HTMLButtonElement && !item.disabled && item.textContent === ${JSON.stringify(`提议为书系「${SERIES}」的知识…`)}; })()`, 'knowledge-menu-words', 15_000);
     await assertRenderer(renderer, `(() => { const item = window.__j13.item('propose-series-knowledge'); if (!(item instanceof HTMLButtonElement) || item.disabled) return false; item.click(); return true; })()`, 'knowledge-menu-choose');
     await waitFor(renderer, `window.__j13.composer()?.dataset.markComposer === 'propose-series-knowledge'`, 'knowledge-composer');
     const composer = await renderer.evaluate(`(() => { const box = window.__j13.composer(); const field = (name) => box.querySelector('[data-mark-field="' + name + '"]'); return [box.querySelector('[data-mark-quote]')?.textContent ?? null, field('subject')?.value ?? null, field('knowledgeClass')?.value ?? null, Array.from(field('knowledgeClass')?.options ?? [], (option) => option.textContent), field('body')?.value ?? null]; })()`);
