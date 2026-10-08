@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
   MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
-  CLARIFICATION_SCHEMA_VERSION, SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
+  CLARIFICATION_SCHEMA_VERSION, SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_23_SQL,
 } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type {
@@ -19,7 +19,7 @@ import {
   composeManuscriptDocx,
   type ComposedManuscriptRequest,
 } from '../support/composed-fixture.js';
-import { downgradeKindCoupledRelationsToRevision23 } from '../support/analysis-ledger-revisions.js';
+import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 import { REVIEW_RUN_RELATIONS_DROP_ORDER } from '../support/review-categories.js';
 import { PUBLICATION_VERSION_RELATIONS_DROP_ORDER } from '../support/publication-versions.js';
 import { PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER } from '../support/proposal-conflicts.js';
@@ -539,7 +539,7 @@ describe('Editorial Marks on a manuscript', () => {
     try {
       // A revision-21 store carried the three kind-coupled analysis relations as revision 20 left them;
       // revision 24 (Issue #417) validates exactly that before it rebuilds them.
-      downgradeKindCoupledRelationsToRevision23(downgrade);
+      downgradeKindCoupledRelations(downgrade, ANALYSIS_LEDGER_REVISION_23_SQL);
       downgrade.exec(`BEGIN IMMEDIATE;
         ${MARK_RELATIONS.map((relation) => `DROP TABLE ${relation};`).join('\n')}
         PRAGMA user_version = ${MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION};

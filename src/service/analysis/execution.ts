@@ -360,7 +360,7 @@ export function crossUnitEmptyAnswerGapReason(reasoningPresent: boolean): string
     : '跨单元归纳未闭合：模型的答案通道与推理通道都为空。各单元结果不受影响；如反复出现，请检查模型服务状态。';
 }
 
-export function unparsableCrossUnitAnswerGapReason(code: CrossUnitResultParseFailureCode, detail: string, answerText: string): string {
+export function unparsableCrossUnitAnswerGapReason(code: CrossUnitResultParseFailureCode | string, detail: string, answerText: string): string {
   return `跨单元归纳结果不符合契约 v1（${code}）：${detail}模型返回了 ${[...answerText].length} 个字符，其中没有可解析的跨单元结果。各单元结果不受影响。`;
 }
 
@@ -1816,35 +1816,45 @@ export class BaselineAnalysisExecutionOwner {
         .filter((outcome): outcome is ClosedUnitOutcome<BaselineUnitResult> => outcome.state === 'closed')
         .sort((left, right) => left.unitOrdinal - right.unitOrdinal);
       let crossUnit: CrossUnitOutcome = CROSS_UNIT_NOT_RUN;
+      // A kind's own book-level step (Issue #429, S81b1) takes the same path under its own name, message, digest and parser;
+      // the baseline kind declares none, and every word and digest of its reduction is the one it always had.
+      const step = definition.crossUnit?.step ?? null;
+      const named = (text: string): string => (step === null ? text : text.replaceAll('跨单元归纳', step.label));
       if (definition.crossUnit === null) {
         // A kind that declares no cross-unit contract never forms the request, never counts a turn,
         // and says so exactly. The baseline path below is unchanged, request counts included.
         crossUnit = { state: 'not-run', reason: definition.crossUnitAbsentReason };
       } else if (terminalClassification === 'cancelled') {
-        crossUnit = { state: 'not-run', reason: CROSS_UNIT_CANCELLED };
+        crossUnit = { state: 'not-run', reason: named(CROSS_UNIT_CANCELLED) };
       } else if ((terminalClassification === 'interrupted' || active.interrupted)
         // Every range settled and the ceiling spent — by the last range, or with a question, AI7 stopping or a retry the
         // ceiling kept back — is the ceiling stopping the reduction, and is said so below (Issue #51, S16a).
         && !(liveInterruption === 'run-budget-ceiling-reached' && active.progress.unitsSettled === submittedUnits.length)) {
-        crossUnit = { state: 'not-run', reason: '运行在单元阶段结束前停止，跨单元归纳未发起。' };
-      } else if (closedOutcomes.length >= 2) {
-        const requestDigest = crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, unitSetDigest(closedOutcomes));
+        crossUnit = { state: 'not-run', reason: named('运行在单元阶段结束前停止，跨单元归纳未发起。') };
+      } else if (closedOutcomes.length < (step?.minimumClosedUnits ?? 2)) {
+        if (step !== null) crossUnit = { state: 'not-run', reason: step.notEnoughReason };
+      } else {
+        const requestDigest = step === null
+          ? crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, unitSetDigest(closedOutcomes))
+          : step.requestDigest(closedOutcomes);
         const gap = (code: Extract<CrossUnitOutcome, { state: 'gap' }>['code'], reason: string): CrossUnitOutcome =>
           ({ state: 'gap', code, reason, requestDigest });
-        if (live !== null && policy.providerProcessing.crossUnitReductionAllowed !== true) {
+        if (live !== null && (step !== null || policy.providerProcessing.crossUnitReductionAllowed !== true)) {
           // The reduction is a transmission the active Provider Processing policy does not name, so it
-          // never forms a request at all. The verified v5 document names it; a projection that does not
-          // is exactly the policy-bounded case this guard exists for.
-          crossUnit = gap('policy-bounded', '跨单元归纳未派发：当前 Provider Processing 策略仅授权单元数内的传输');
+          // never forms a request at all. The verified v5 document names the baseline's reduction; a
+          // projection that does not is exactly the policy-bounded case this guard exists for. Another
+          // kind's book-level step is a transmission no policy names yet (Issue #429 review): under a live
+          // scope it is never sent under the baseline's term, whatever that term reads.
+          crossUnit = gap('policy-bounded', named('跨单元归纳未派发：当前 Provider Processing 策略仅授权单元数内的传输'));
         } else if (ceilingState() === 'reached') {
           // The ceiling is evaluated before this dispatch exactly as before a unit's, so a Run that has
           // spent its bound ends here rather than spending one more turn to discover it — and ends as the
           // ceiling reached, with every unit it read kept (Issue #51, S16a; MODEL-016).
-          crossUnit = gap('run-budget-ceiling-reached', CROSS_UNIT_BUDGET_REACHED);
+          crossUnit = gap('run-budget-ceiling-reached', named(CROSS_UNIT_BUDGET_REACHED));
           liveInterruption = 'run-budget-ceiling-reached';
           terminalClassification = 'interrupted';
         } else {
-          const message = buildCrossUnitMessage(closedOutcomes, manifest.units.length);
+          const message = step === null ? buildCrossUnitMessage(closedOutcomes, manifest.units.length) : step.buildMessage(closedOutcomes, manifest.units.length);
           // The same set the gate reads: exactly one further user message becomes admissible, and every
           // other refusal — route, model, system prompt, tools, prior outputs — is untouched.
           admittedUserMessages.add(message);
@@ -1872,7 +1882,12 @@ export class BaselineAnalysisExecutionOwner {
           if (turn.terminal === 'completed' && candidate?.kind === 'contentCandidate') {
             acceptedOutputDigests.add(candidate.digest);
             if (canonical?.kind === 'empty-answer') {
-              crossUnit = gap('contract-invalid', crossUnitEmptyAnswerGapReason(canonical.reasoningPresent));
+              crossUnit = gap('contract-invalid', named(crossUnitEmptyAnswerGapReason(canonical.reasoningPresent)));
+            } else if (step !== null) {
+              const parsed = step.parse(candidate.text, closedOutcomes);
+              crossUnit = parsed.ok
+                ? { state: 'closed', findings: [], requestDigest, usage: crossUnitUsage, result: parsed.result }
+                : gap('contract-invalid', named(unparsableCrossUnitAnswerGapReason(parsed.code, parsed.detail, candidate.text)));
             } else {
               const parsed = parseCrossUnitResult(candidate.text, {
                 closedOrdinals: closedOutcomes.map((outcome) => outcome.unitOrdinal),
@@ -1883,7 +1898,7 @@ export class BaselineAnalysisExecutionOwner {
                 : gap('contract-invalid', unparsableCrossUnitAnswerGapReason(parsed.code, parsed.detail, candidate.text));
             }
           } else if (turn.terminal === 'completed') {
-            crossUnit = gap('contract-invalid', '跨单元归纳的技术回合完成但没有模型输出。');
+            crossUnit = gap('contract-invalid', named('跨单元归纳的技术回合完成但没有模型输出。'));
           } else if (turn.terminal === 'failed') {
             const failure = turn.signals.find((signal) => signal.kind === 'failed');
             // No safe retry here: one attempt, and a retry-safe failure is a gap like any other.
@@ -1895,7 +1910,7 @@ export class BaselineAnalysisExecutionOwner {
           } else {
             const failure = turn.signals.find((signal) => signal.kind === 'interrupted');
             const egress = failure?.kind === 'interrupted' && failure.failure.failureClass === 'egress-refused';
-            crossUnit = gap(egress ? 'egress-refused' : 'interrupted', failure?.kind === 'interrupted' ? failure.failure.reason : '跨单元归纳被中断。');
+            crossUnit = gap(egress ? 'egress-refused' : 'interrupted', failure?.kind === 'interrupted' ? failure.failure.reason : named('跨单元归纳被中断。'));
           }
         }
       }

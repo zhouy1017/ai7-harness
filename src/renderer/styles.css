@@ -620,6 +620,19 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .evaluation-profile { display: grid; gap: .45rem; min-width: 0; padding: 1rem; border: 1px solid #ded9cd; border-radius: 12px; background: #fffdf8; }
 .evaluation-profile h3, .evaluation-profile h4, .evaluation-profile p { margin: 0; overflow-wrap: anywhere; }
 .evaluation-profile ul { display: grid; gap: .25rem; margin: 0; padding-left: 1.2rem; overflow-wrap: anywhere; }
+/* AI7 初评 (Issue #429, S81b1): its own block above the versions, AI7's score beside each item, and 调分原因 while they differ. */
+.evaluation-initial { display: grid; gap: .45rem; min-width: 0; padding: 1rem; border: 1px solid #ded9cd; border-radius: 12px; background: #f6f8f2; }
+.evaluation-initial h3, .evaluation-initial p, .evaluation-initial dl { margin: 0; overflow-wrap: anywhere; }
+.evaluation-initial ul { display: grid; gap: .25rem; margin: 0; padding-left: 1.2rem; overflow-wrap: anywhere; }
+.evaluation-initial-lists { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .2rem .8rem; }
+.evaluation-initial-lists dd { margin: 0; }
+.evaluation-item-ai7 { font-weight: 600; color: #2c463b; }
+.evaluation-item-ai7-evidence { min-width: 0; color: #3f4a44; overflow-wrap: anywhere; }
+.evaluation-item-ai7-evidence ul { display: grid; gap: .2rem; margin: .3rem 0 0; padding-left: 1.2rem; }
+.evaluation-adjustment { display: grid; gap: .4rem; min-width: 0; margin: 0; padding: .5rem .7rem; border: 1px dashed #b9b2a2; border-radius: 8px; }
+.evaluation-adjustment[hidden] { display: none; }
+.evaluation-adjustment-reasons { display: flex; flex-wrap: wrap; gap: .4rem .9rem; }
+.evaluation-ai7-suggested { margin-left: .4rem; }
 /* ②A 分析反馈 (S38): the card opens under the item it judges, inside the list, never a modal; the Book's tally under the synopsis. */
 .analysis-feedback { display: grid; gap: .35rem; margin: .3rem 0 .5rem; min-width: 0; }
 .analysis-feedback-line { margin: 0; color: #3f4a44; overflow-wrap: anywhere; }
@@ -1370,6 +1383,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .task-plan-default-rule-confirm, .default-rule-card, .guideline-card, .guideline-preview, .exemplar-book, .task-plan-activity, .task-bar-cancel-impact,
   .library-material, .library-preview, .library-chooser, .library-chooser fieldset, .library-kinds,
   .evaluation-record, .evaluation-item, .evaluation-risk, .evaluation-conclusion, .evaluation-comparison, .evaluation-profile,
+  .evaluation-initial, .evaluation-adjustment,
   .analysis-feedback-card, .analysis-feedback-card fieldset,
   .learning-book, .learning-card, .learning-choices, .feedback-book, .calibration-section,
   .series-create-form, .series-add-chooser, .series-preview, .knowledge-form, .knowledge-review, .knowledge-targets, .knowledge-reuse,

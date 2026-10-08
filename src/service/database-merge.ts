@@ -226,6 +226,8 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   maintenance_errata_versions: 'owned',
   evaluation_records: 'owned',
   evaluation_record_entries: 'owned',
+  // The AI7 初评 each version began from (Issue #429, S81b1): the version's own, as its entries are.
+  evaluation_initial_drafts: 'owned',
   book_dimension_sets: 'owned',
   book_dimensions: 'owned',
   book_people_versions: 'owned',

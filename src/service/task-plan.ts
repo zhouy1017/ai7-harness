@@ -3,6 +3,8 @@ import type {
   BaselineAnalysisPlanRevisionProjection,
   DefaultExecutionRuleBinding,
   BaselineAnalysisProjection,
+  InitialEvaluationProjection,
+  InitialEvaluationTaskMode,
   BaselineAnalysisSelectedRange,
   PlanRevisionDiffEntryProjection,
   PlanRevisionDiffValue,
@@ -757,6 +759,156 @@ function baselineReprepare(projection: BaselineAnalysisProjection): TaskPlanRepr
   return {
     reason: run.blockedReasons === null || run.blockedReasons.length === 0 ? PLAN_MOVED_LABEL : run.blockedReasons.join(' '),
     prepare: { goal: update === null ? BASELINE_ANALYSIS_TASK_GOAL : BASELINE_ANALYSIS_MODE_GOALS[update.mode], update },
+  };
+}
+
+// ---- AI7 初评 (Issue #429, plan slice S81b1) -----------------------------------------------------------------------
+
+/** An analysis Task's state in the drawer's own words, for a surface that names it beside the drawer (评估's AI7 初评). */
+export function analysisTaskStateLabel(projection: InitialEvaluationProjection): string {
+  return baselineState(projection as unknown as BaselineAnalysisProjection).label;
+}
+
+const INITIAL_EVALUATION_NO_RULE = 'AI7 初评还不能设为快速开始默认：每次初评都先看计划，再开始。';
+const INITIAL_EVALUATION_GOAL_SENTENCES: Readonly<Record<InitialEvaluationTaskMode, string>> = {
+  'evaluation-first': '按本社评估方案为这本书做 AI7 初评：各评分项的初评分数与评语，供你打分时参考',
+  'evaluation-again': '重新做 AI7 初评：按当前稿件重读全书，重新给出各评分项的初评分数与评语',
+};
+
+/**
+ * The plan of the Book's AI7 初评 Task: the evaluation kind's ledger read in the editor's words, as the baseline plan is. Its
+ * steps are what the kind does — read each range for the evidence of each scored item, then score the items — and what it
+ * makes is AI7's draft beside the editor's scores, which the record never takes for the editor's. It is started from the bar
+ * and takes no edits, rules, pause or redo in this slice: a changed plan is prepared again from 评估.
+ */
+export function initialEvaluationPlan(input: {
+  projection: InitialEvaluationProjection;
+  bookTitle: string;
+  blocks: ReadonlyArray<ManifestBlockInput>;
+  profile: { title: string; version: string; items: ReadonlyArray<{ label: string; fullMarks: number }> };
+}): TaskPlanProjection {
+  const { projection, bookTitle, blocks, profile } = input;
+  const intent = projection.taskIntent;
+  const checkpoint = projection.checkpoint;
+  const manifest = projection.coverageManifest;
+  const provider = projection.providerResolutionPlan;
+  const plan = projection.executionPlan;
+  const envelope = projection.planEnvelope;
+  const version = projection.planVersion;
+  requirePlan(intent !== null && checkpoint !== null && manifest !== null && provider !== null && plan !== null &&
+    envelope !== null && version !== null, 'AI7 初评还没有准备计划。');
+  const reading = readRange(blocks, null);
+  const units = manifest.units.length;
+  const route = provider.executionRoute;
+  const remote = provider.remoteBinding;
+  const live = route.kind === 'opencode-go';
+  const ceiling = provider.runBudgetCeiling;
+  const revision = projection.planRevision;
+  const boundary = envelope.boundary;
+  // The baseline's state reading is the ledger's and not the kind's: every state of the one Run record reads the same.
+  const state = baselineState(projection as unknown as BaselineAnalysisProjection);
+  const needsModelConnection = route.kind === 'opencode-go';
+  const start: TaskPlanStartProjection = projection.authorization !== null
+    ? startedBar(needsModelConnection)
+    : !projection.actions.canAuthorize
+      ? { readiness: 'changed', needsModelConnection, planEnvelopeDigest: null, categoryDigests: [], reconfirm: null }
+      : { readiness: route.kind === 'none' ? 'no-route' : 'ready', needsModelConnection, planEnvelopeDigest: envelope.digest, categoryDigests: [], reconfirm: null };
+  const items = profile.items.map((item) => `${item.label}（满分 ${item.fullMarks}）`).join('、');
+  return {
+    bookId: projection.bookId,
+    kind: 'initial-evaluation',
+    ref: intent.taskIntentId,
+    state: revision !== null && projection.authorization === null ? { key: 'changed', label: '计划已变化' } : state,
+    planVersion: version.ordinal,
+    goal: {
+      sentence: INITIAL_EVALUATION_GOAL_SENTENCES[intent.mode],
+      chips: { book: bookTitle, position: '全书', selectedGraphemes: reading.graphemes, taskInputRevision: checkpoint.revisionLabel, procedure: `${profile.title} 第 ${profile.version} 版` },
+      savedForEdits: checkpoint.createdForDirtyJournal,
+    },
+    scope: {
+      process: `《${bookTitle}》全书 · ${groupedCount(reading.graphemes)} 字 · ${units} 个阅读范围`,
+      reference: [`${profile.title}（第 ${profile.version} 版）：${items}`],
+      send: live ? `全书各阅读范围的稿件正文（${units} 个），以及汇总时各项依据的说明` : '不发送任何内容',
+      notRead: NOT_READ,
+    },
+    steps: [
+      { id: 'units', label: '逐章读取，记下各评分项的依据', result: '每条依据引用它所在的段落', removable: false, removed: false },
+      { id: 'reduction', label: '全书综合', result: '各评分项的初评分数与评语，主要优点、主要问题、下一步建议与建议结论', removable: false, removed: false },
+    ],
+    participation: { during: boundary !== null && boundary.participation.expected ? boundary.participation.statement : NO_PARTICIPATION, after: '在「评估」中从 AI7 初评开始新的一版，再按你的判断定分' },
+    service: {
+      role: roleLabel(provider.role),
+      provider: live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`,
+      decision: live
+        ? `开发者实时（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}）：实时传输受运行边界约束`
+        : route.kind === 'none'
+          ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
+          : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`,
+      send: live ? `所读范围内的稿件正文发往 ${route.kind} · ${route.model}` : NOTHING_SENT,
+      sendCategory: outboundLabel(provider.outboundDataCategory),
+      usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : NO_USAGE,
+      usageIsCeiling: ceiling !== 'unset',
+      duration: DURATION_UNKNOWN,
+      budgetCeiling: budgetCeilingLabel(ceiling),
+      accountLimit: ACCOUNT_LIMIT_UNKNOWN,
+    },
+    outcomes: [
+      'AI7 初评：各评分项的初评分数、评语与依据充分度',
+      '这次运行的运行报告',
+    ],
+    notDo: {
+      editorial: [...EDITORIAL_NOT_DO, '不替你打分：评估记录保存的是你的评分', '不选结论：建议结论只标明是 AI7 的', '不评风险项', '不读这本书以外的内容'],
+      technical: [...projection.namedNonEffects],
+    },
+    boundary: {
+      adaptable: boundary === null ? [] : boundary.adaptable.map((entry) => ({
+        id: entry.adaptationClass,
+        label: PLAN_EDIT_ADAPTATION_LABELS[entry.adaptationClass] ?? SAFE_RETRY_ADAPTATION,
+        removable: false,
+        removed: false,
+        movable: false,
+        askFirst: false,
+      })),
+      askFirst: [...LOCKED_BOUNDARY],
+    },
+    edit: NOT_EDITABLE,
+    drift: revision === null ? null : {
+      reasons: ['计划冻结之后，它的关键内容已经变化；原计划不能再开始。'],
+      entries: revision.diff.map((entry) => driftEntry(entry, blocks)),
+      resolution: '请在「评估」里重新准备 AI7 初评。',
+    },
+    technical: [
+      { key: 'task-intent', label: '任务意图', value: intent.taskIntentId },
+      { key: 'mode', label: '更新方式', value: `${intent.modeLabel} · ${intent.mode}` },
+      { key: 'goal', label: '固定任务目标', value: intent.goal },
+      { key: 'expected-outcome', label: '预期结果类别', value: intent.expectedOutcome },
+      { key: 'task-input-revision', label: '任务输入修订版', value: `${checkpoint.revisionLabel} · ${checkpoint.revisionId} · ${checkpoint.revisionDigest}` },
+      { key: 'coverage-manifest', label: '覆盖清单', value: `${units} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个内容块 · ${manifest.totalGraphemes} 字素 · ${manifest.digest}` },
+      { key: 'execution-route', label: '执行路由', value: route.kind === 'none'
+        ? `none · ${route.reason}`
+        : route.kind === 'opencode-go' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
+      { key: 'provider-processing', label: '模型服务数据处理策略', value: pinReading(remote.providerProcessing) },
+      { key: 'run-budget-ceiling', label: '任务运行预算上限', value: ceiling === 'unset' ? 'unset' : `${ceiling.maxTotalTokens} tokens` },
+      { key: 'execution-steps', label: '计划步骤（记录）', value: plan.steps.join(' → ') },
+      { key: 'reducer-stages', label: '归约阶段', value: plan.reducerStages.join(' → ') },
+      { key: 'stop-condition', label: '停止条件', value: plan.stopCondition },
+      { key: 'prompt-contract', label: '提示契约摘要', value: envelope.promptContractDigest },
+      { key: 'dispatch', label: '派发状态', value: envelope.summary },
+      { key: 'plan-envelope', label: '计划权限边界', value: envelope.digest },
+      ...(projection.authorization === null ? [] : [
+        { key: 'authorization', label: '运行授权', value: `${projection.authorization.authorizationId} · ${projection.authorization.origin} · ${projection.authorization.authority} · ${projection.authorization.authorizedAt}` },
+      ]),
+      ...(projection.run === null ? [] : [
+        { key: 'run-record', label: '运行记录', value: `${projection.run.runRecordId} · ${projection.run.state} · ${projection.run.recordedAt}` },
+      ]),
+    ],
+    start,
+    defaultRule: noDefaultRule(INITIAL_EVALUATION_NO_RULE),
+    runControl: null,
+    redo: null,
+    reprepare: null,
+    clarifications: [],
+    budgetStop: null,
   };
 }
 

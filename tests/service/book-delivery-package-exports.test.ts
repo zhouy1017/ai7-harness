@@ -9,10 +9,11 @@ import { BookDeliveryPackages, BOOK_DELIVERY_PACKAGE_WORDS } from '../../src/ser
 import { CooperativeJobOwner } from '../../src/service/cooperative-jobs.js';
 import { ManuscriptExportStore } from '../../src/service/manuscript-export.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION, PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION, PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { PUBLICATION_FORBIDDEN_WORDS, type BookDeliveryPackageExportProjection } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx, type SourceSpan } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for the export of a 图书交付包 version (Issue #416, plan slice S67b; V2-UX-BUNDLE-004,
 // DPKG-011, DPKG-013, DPKG-014, EXP-010 to EXP-022) over the real `EditorialStore` on a temporary Agent Data Root. The
@@ -493,7 +494,7 @@ describe('图书交付包 · 导出 (S67b)', () => {
     try {
       planted.exec('PRAGMA foreign_keys = OFF');
       planted.exec(`BEGIN IMMEDIATE;
-        DROP TABLE series_retrieval_exclusions; DROP TABLE database_merge_books;
+        DROP TABLE series_retrieval_exclusions; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books;
         DROP TABLE database_merges;
         DROP TABLE database_replacements;
         DROP TABLE scheduled_backup_removals;
@@ -528,6 +529,7 @@ describe('图书交付包 · 导出 (S67b)', () => {
         DROP TABLE book_delivery_package_exports;
         PRAGMA user_version = ${PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION};
         COMMIT;`);
+      downgradeKindCoupledRelations(planted, ANALYSIS_LEDGER_REVISION_58_SQL);
       planted.exec('PRAGMA foreign_keys = ON');
     } finally {
       planted.close();

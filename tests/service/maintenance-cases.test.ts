@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MAINTENANCE_CASE_SCHEMA_SQL } from '../../src/service/maintenance-cases.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION, PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION, PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import {
   MAINTENANCE_CONCLUDED,
   MAINTENANCE_FORBIDDEN_COMPLETIONS,
@@ -15,6 +15,7 @@ import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import { PUBLICATION_FORBIDDEN_WORDS, type MaintenanceCaseResultProjection } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx, type ComposedManuscriptRequest } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for ⑥ 维护事项 (Issue #426, plan slice S68a; V2-UX-MAINT-001 to 011, ADR 0040) over the
 // real `EditorialStore` on a temporary Agent Data Root. The manuscript is composed from the one admitted SampleBook; the
@@ -315,7 +316,7 @@ describe('⑥ 维护事项 (S68a)', () => {
     try {
       planted.exec('PRAGMA foreign_keys = OFF');
       planted.exec(`BEGIN IMMEDIATE;
-        DROP TABLE series_retrieval_exclusions; DROP TABLE database_merge_books;
+        DROP TABLE series_retrieval_exclusions; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books;
         DROP TABLE database_merges;
         DROP TABLE database_replacements;
         DROP TABLE scheduled_backup_removals;
@@ -347,6 +348,7 @@ describe('⑥ 维护事项 (S68a)', () => {
         DROP TABLE maintenance_cases;
         PRAGMA user_version = ${PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION};
         COMMIT;`);
+      downgradeKindCoupledRelations(planted, ANALYSIS_LEDGER_REVISION_58_SQL);
       planted.exec('PRAGMA foreign_keys = ON');
     } finally {
       planted.close();

@@ -27,6 +27,8 @@ import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import { J03_TASK_GOAL } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
+import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for merging a Book (Issue #434, plan slice S86d; V2-UX-DSTO-017; ADR 0079 §1.5) over two real
 // stores: a Book with a manuscript and its history, an edit, a mark, a milestone, a 发稿版本, a Production Document delivered
@@ -656,7 +658,8 @@ describe('what a merge refuses, puts back and brings forward', () => {
     const packagePath = join(roots.inputRoot, 'AI7 旧版数据库.ai7db');
     const db = new DatabaseSync(older);
     try {
-      db.exec('DROP TABLE series_retrieval_exclusions; DROP TABLE database_merge_books; DROP TABLE database_merges; PRAGMA user_version = 57;');
+      db.exec('DROP TABLE series_retrieval_exclusions; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; PRAGMA user_version = 57;');
+      downgradeKindCoupledRelations(db, ANALYSIS_LEDGER_REVISION_58_SQL);
       await writeDatabasePackage(db, roots.dataRoot, packagePath, () => ({
         dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 57, createdAt: T.toISOString(), origin: 'database-export',
         contents: { books: 1, sourceVersions: 1, libraryMaterials: 0, series: 0 },

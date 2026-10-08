@@ -8,7 +8,7 @@ import { ASSURANCE_SAMPLING_REMOVED, NO_PLAN_EDITS, SAFE_RETRY_WITHHELD, planEdi
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { CLARIFICATION_SCHEMA_VERSION, SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { CLARIFICATION_SCHEMA_VERSION, SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { SET_RULE_EDITED } from '../../src/service/default-execution-rules.js';
 import { PLAN_EDIT_DRIFT_REASON, PLAN_EDIT_STARTED_REASON } from '../../src/service/task-plan.js';
 import {
@@ -24,6 +24,7 @@ import { PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-
 import { planRevisionsShapeAt33, plantRevision33Relations } from '../support/plan-edits.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
 // Service-integration suite (L2) for the editable plan (Issue #419, plan slice S73; V2-UX-PLAN-009, PLAN-011): the real
 // store on a temporary Agent Data Root, exact `sample1` imported through the supported path, J-04's deterministic
@@ -146,6 +147,7 @@ describe('schema revision 34 over the real store', () => {
     const before = withDatabase(false, (database) => {
       plantRevision33Relations(database);
       database.exec('PRAGMA user_version = 33');
+      downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
       expect(planRevisionsShapeAt33(database)).toBe('revision-33');
       return { revisions: database.prepare('SELECT rowid, * FROM analysis_plan_revisions ORDER BY rowid').all() as Row[], truth: relationTruth(database) };
     });
@@ -164,7 +166,8 @@ describe('schema revision 34 over the real store', () => {
       // Revision 35's relations arrive empty on the way (Issue #422, S76d).
       expect([...after.keys()]).toEqual([...before.truth.keys(), ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER].sort());
       for (const relation of CLARIFICATION_RELATIONS_DROP_ORDER) expect(after.get(relation)?.content).toMatch(/^0:/);
-      expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name)).toEqual(['analysis_plan_revisions']);
+      // Revision 59 rebuilds the three kind-coupled analysis relations for the evaluation kind (Issue #429), every row kept.
+      expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name)).toEqual(['analysis_plan_revisions', 'analysis_result_set_revisions', 'analysis_result_sets', 'analysis_task_intents']);
       expect([...before.truth].filter(([name, was]) => after.get(name)!.content !== was.content).map(([name]) => name)).toEqual(['service_lifetimes']);
       // Still a ledger: nothing rewrites or removes a Plan Revision.
       expect(database.prepare("SELECT name FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = 'analysis_plan_revisions' ORDER BY name").all())

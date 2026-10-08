@@ -19,7 +19,12 @@ import { DECISION_FEEDBACK_SCHEMA_SQL, initializeDecisionFeedbackSchema } from '
 import { initializeDefaultExecutionRuleSchema } from '../../src/service/default-execution-rules.js';
 import { EDITORIAL_MARK_SCHEMA_SQL, initializeEditorialMarkSchema } from '../../src/service/editorial-marks.js';
 import { EVALUATION_CALIBRATION_SCHEMA_SQL, initializeEvaluationCalibrationSchema } from '../../src/service/evaluation-calibration.js';
-import { EVALUATION_RECORD_SCHEMA_SQL, initializeEvaluationRecordSchema } from '../../src/service/evaluation-records.js';
+import {
+  EVALUATION_INITIAL_DRAFT_SCHEMA_SQL,
+  EVALUATION_RECORD_SCHEMA_SQL,
+  initializeEvaluationInitialDraftSchema,
+  initializeEvaluationRecordSchema,
+} from '../../src/service/evaluation-records.js';
 import { IMPORT_FIDELITY_CATEGORIES_REVISION_26_SQL, initializeImportRetentionSchema } from '../../src/service/import-retention.js';
 import { initializeImportedMarkSchema } from '../../src/service/imported-marks.js';
 import { LEARNING_ELIGIBILITY_SCHEMA_SQL, initializeLearningEligibilitySchema } from '../../src/service/learning-eligibility.js';
@@ -48,9 +53,9 @@ import { SCHEDULED_BACKUP_SCHEMA_SQL, initializeScheduledBackupSchema } from '..
 import { SERIES_SCHEMA_SQL, initializeSeriesSchema } from '../../src/service/series.js';
 import { SERIES_KNOWLEDGE_SCHEMA_SQL, initializeSeriesKnowledgeSchema } from '../../src/service/series-knowledge.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { ANALYSIS_LEDGER_REVISION_23_SQL, ANALYSIS_LEDGER_REVISION_58_SQL, SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL, initializeSeriesRetrievalExclusionSchema } from '../../src/service/series-exclusions.js';
-import { downgradeKindCoupledRelationsToRevision23 } from '../support/analysis-ledger-revisions.js';
+import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 import { plantRevision34Relations } from '../support/clarifications.js';
 import { downgradeAnalysisRunStatesToRevision29 } from '../support/connectivity-wait.js';
 import { plantRevision30Relations } from '../support/default-execution-rules.js';
@@ -141,13 +146,23 @@ interface Revision {
   readonly undo: (database: DatabaseSync) => void;
 }
 
-// Newest first: a store is walked down one revision at a time. Revisions 59 and 60 are taken by work in flight beside
-// revision 61 (Issue #64, S29b), so a store before 61 is at 58.
+// Newest first: a store is walked down one revision at a time. Revision 60 is taken by work in flight beside revision 61
+// (Issue #64, S29b), so a store before 61 is at 59.
 const REVISIONS: ReadonlyArray<Revision> = [
   {
     revision: 61,
     step: initializeSeriesRetrievalExclusionSchema,
     undo: (database) => drop(database, Object.keys(SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL).reverse()),
+  },
+  {
+    // Revision 59 rebuilds the three kind-coupled relations and stamps its version in one transaction, so the one step an
+    // interruption can leave committed without the stamp is the relation of the 初评 each Evaluation Record version began from.
+    revision: 59,
+    step: initializeEvaluationInitialDraftSchema,
+    undo: (database) => {
+      drop(database, Object.keys(EVALUATION_INITIAL_DRAFT_SCHEMA_SQL).reverse());
+      downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
+    },
   },
   {
     revision: 58,
@@ -279,7 +294,7 @@ const REVISIONS: ReadonlyArray<Revision> = [
     step: initializeReviewRunSchema,
     undo: (database) => {
       drop(database, REVIEW_RUN_RELATIONS_DROP_ORDER);
-      downgradeKindCoupledRelationsToRevision23(database);
+      downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_23_SQL);
     },
   },
   {
@@ -317,8 +332,8 @@ const tables = (): string[] => {
 describe('an upgrade interrupted before its version stamp', () => {
   for (const { revision, step } of REVISIONS) {
     if (step === null) continue;
-    // The revision a store stands at before this one: 58 before 61, whose 59 and 60 are taken elsewhere (Issue #64, S29b).
-    const before = revision === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ? 58 : revision - 1;
+    // The revision a store stands at before this one: 59 before 61, whose 60 is taken elsewhere (Issue #64, S29b).
+    const before = revision === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ? 59 : revision - 1;
     it(`is finished by the next open when revision ${revision}'s relations committed and its stamp did not`, async () => {
       expect(await opened()).toBe(SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION);
       const terminal = tables();
