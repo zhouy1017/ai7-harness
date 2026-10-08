@@ -790,6 +790,12 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
     if (working) for (const button of actions.querySelectorAll('button')) button.disabled = true;
     box.append(actions);
+    // Escape keeps the Run while its 取消任务 waits for a confirmation, focus back on 取消任务 (J-14).
+    box.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented || scopeCancel !== run.reviewRunId) return;
+      event.preventDefault();
+      box.querySelector<HTMLButtonElement>('[data-review-action="scope-cancel-keep"]')?.click();
+    });
     return box;
   }
 

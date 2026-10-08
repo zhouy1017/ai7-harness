@@ -1396,6 +1396,43 @@ async function main() {
     // 停止此排除 after its own preview: later reads may read the item again, the member may choose 书系一致性 again — and the Run
     // the exclusion stopped stays stopped, its authorization never restored.
     await openSeries(renderer, seriesId, 'exclusion-end-series');
+
+    at('j14-exclusions-keyboard');
+    // Without a pointer (Issue #64 review): Enter on 添加检索排除… opens the chooser at its first kind and Escape closes it back
+    // onto the opener; Enter on 停止此排除… shows the preview with focus on its heading, and Escape closes it back onto the
+    // exclusion's own 停止此排除…. Nothing is recorded.
+    await assertRenderer(renderer, `(() => { const open=document.querySelector('[data-exclusion-action="add-open"]'); if(!(open instanceof HTMLButtonElement)||open.disabled)return false; open.focus(); return document.activeElement===open; })()`, 'exclusion-keyboard-opener');
+    await press(renderer, 'Enter');
+    await waitFor(renderer, `document.activeElement?.getAttribute('name') === 'series-exclusion-kind' && document.querySelector('.series-exclusion-chooser') !== null`, 'exclusion-keyboard-chooser', 10_000);
+    await press(renderer, 'Escape');
+    await waitFor(renderer, `document.querySelector('.series-exclusion-chooser') === null && document.activeElement?.dataset.exclusionAction === 'add-open'`, 'exclusion-keyboard-chooser-escaped', 10_000);
+    await assertRenderer(renderer, `(() => { const end=document.querySelector('li.series-exclusion [data-exclusion-action="end-open"]'); if(!(end instanceof HTMLButtonElement)||end.disabled)return false; end.focus(); return document.activeElement===end; })()`, 'exclusion-keyboard-end-focus');
+    await press(renderer, 'Enter');
+    await waitFor(renderer, `document.querySelector('.series-exclusion-preview')?.dataset.previewAction==='end' && document.activeElement === document.querySelector('.series-exclusion-preview-heading')`, 'exclusion-keyboard-preview', 10_000);
+    await press(renderer, 'Escape');
+    await waitFor(renderer, `document.querySelector('.series-exclusion-preview') === null && document.activeElement?.dataset.exclusionAction === 'end-open' && document.querySelector('.series-exclusions')?.dataset.exclusionsEffective === '1'`, 'exclusion-keyboard-preview-escaped', 10_000);
+
+    at('j14-exclusions-reflow-forced-colors');
+    // At 200% the exclusion list, its preview and its records wrap within the width; under forced colours the preview keeps its
+    // border and the exclusion its rule.
+    await clickSelector(renderer, 'li.series-exclusion [data-exclusion-action="end-open"]', 'exclusion-reflow-preview-open');
+    await waitFor(renderer, `document.querySelector('.series-exclusion-preview')?.dataset.previewAction==='end'`, 'exclusion-reflow-preview');
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
+    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
+    await waitFor(renderer, `(() => { const parts=[document.querySelector('.series-exclusion-preview'), document.querySelector('ul.series-exclusion-list'), document.querySelector('ol.series-exclusion-revisions')]; return parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2); })()`, 'exclusion-reflow-200', 10_000);
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
+    await assertRenderer(renderer, `(() => {
+      if (!matchMedia('(forced-colors: active)').matches) return false;
+      const preview = document.querySelector('.series-exclusion-preview');
+      const exclusion = document.querySelector('li.series-exclusion');
+      return preview instanceof HTMLElement && getComputedStyle(preview).borderTopStyle === 'solid' &&
+        exclusion instanceof HTMLElement && getComputedStyle(exclusion).borderLeftStyle === 'solid';
+    })()`, 'exclusion-forced-colors');
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
+    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
+    await clickSelector(renderer, '[data-exclusion-action="preview-cancel"]', 'exclusion-reflow-cancel');
+    await waitFor(renderer, `document.querySelector('.series-exclusion-preview') === null && document.querySelector('.series-exclusions')?.dataset.exclusionsEffective === '1'`, 'exclusion-reflow-cancelled');
     await clickSelector(renderer, 'li.series-exclusion [data-exclusion-action="end-open"]', 'exclusion-end-open');
     await waitFor(renderer, `document.querySelector('.series-exclusion-preview')?.dataset.previewAction==='end' && document.querySelector('.series-exclusion-preview [data-exclusion-action="commit"]')?.textContent==='停止此排除'`, 'exclusion-end-previewed');
     await assertRenderer(renderer, `Array.from(document.querySelectorAll('.series-exclusion-preview [data-impact-group="runs"] .series-impact-unchanged li'), (line) => line.textContent).includes('因这条排除停下的任务不会自动恢复，旧的授权和来源范围也不会恢复；要继续，需修改计划并重新授权。')`, 'exclusion-end-preview-words');
@@ -1406,6 +1443,23 @@ async function main() {
     await leaveSeries(renderer, 'exclusion-ended-leave');
     await openMemberReview();
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='scope-changed'`, 'exclusion-still-stopped');
+
+    at('j14-scope-stop-keyboard-reflow-forced-colors');
+    // The stopped Run without a pointer (Issue #64 review): Enter on 取消任务 moves focus to 确认取消任务, and Escape keeps the Run,
+    // focus back on 取消任务. At 200% the stop and the marker wrap within the width; under forced colours the marker keeps its rule.
+    await assertRenderer(renderer, `(() => { const cancel=document.querySelector('[data-review-action="scope-cancel"]'); if(!(cancel instanceof HTMLButtonElement)||cancel.disabled)return false; cancel.focus(); return document.activeElement===cancel; })()`, 'scope-keyboard-focus');
+    await press(renderer, 'Enter');
+    await waitFor(renderer, `document.activeElement?.dataset.reviewAction === 'scope-cancel-confirm'`, 'scope-keyboard-confirm', 10_000);
+    await press(renderer, 'Escape');
+    await waitFor(renderer, `document.activeElement?.dataset.reviewAction === 'scope-cancel' && document.querySelector('[data-review-action="scope-cancel-confirm"]') === null && document.querySelector('.review-workspace-card')?.dataset.reviewState==='scope-changed'`, 'scope-keyboard-kept', 10_000);
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
+    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
+    await waitFor(renderer, `(() => { const stop=document.querySelector('.review-scope-stop'); const marker=document.querySelector('ol.review-runs li[data-review-run="1"]'); return stop instanceof HTMLElement && stop.scrollWidth<=stop.clientWidth+2 && marker instanceof HTMLElement && marker.scrollWidth<=marker.clientWidth+2; })()`, 'scope-reflow-200', 10_000);
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
+    await assertRenderer(renderer, `(() => { if (!matchMedia('(forced-colors: active)').matches) return false; const parts = [document.querySelector('.review-scope-stop .attention-note'), document.querySelector('ol.review-runs li[data-review-run="1"] .review-run-marker')]; return parts.every((part) => part instanceof HTMLElement && part.offsetHeight > 0 && getComputedStyle(part).color !== getComputedStyle(part).backgroundColor); })()`, 'scope-forced-colors');
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
+    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
+    await renderer.send('Emulation.clearDeviceMetricsOverride');
 
     at('exclusion-cancel');
     // 取消任务, confirmed inline: the Run reads 已取消 and offers nothing more; the marked result stays marked.

@@ -475,6 +475,7 @@ import {
   initializeSeriesRetrievalExclusionSchema,
   isSeriesExclusionAction,
   isSeriesExclusionTargetKind,
+  coveringExclusions,
   seriesExclusionCovers,
   seriesExclusionImpact,
   seriesExclusionPreviewDigest,
@@ -11854,10 +11855,19 @@ export class EditorialStore {
     const governing = createHash('sha256');
     const itemsNamed: string[] = [];
     let itemCount = 0;
+    // 停止此排除 reopens only what no other exclusion in force still reaches (Issue #64 review).
+    const others = prior === null ? [] : effective.filter((entry) => entry.exclusionId !== prior!.exclusionId);
+    const stillNamed: string[] = [];
+    let stillCount = 0;
     for (const item of this.#seriesKnowledge.items(series.seriesId)) {
-      if (!covers({ seriesId: series.seriesId, itemId: item.itemId, knowledgeClass: item.knowledgeClass, sourceBookId: item.current.provenance?.bookId ?? null })) continue;
+      const material = { seriesId: series.seriesId, itemId: item.itemId, knowledgeClass: item.knowledgeClass, sourceBookId: item.current.provenance?.bookId ?? null };
+      if (!covers(material)) continue;
       itemCount += 1;
       if (itemsNamed.length < NAMED_EXCLUSION_ENTRIES) itemsNamed.push(`「${item.subject}」`);
+      if (coveringExclusions(others, material).length > 0) {
+        stillCount += 1;
+        if (stillNamed.length < NAMED_EXCLUSION_ENTRIES) stillNamed.push(`「${item.subject}」`);
+      }
       governing.update(canonicalJson({ kind: 'item', itemId: item.itemId, revisionId: item.current.revisionId }));
       governing.update('\n');
     }
@@ -11867,7 +11877,9 @@ export class EditorialStore {
     }
     const reach = input.action === 'add' ? this.#reviewRuns.seriesExclusionReach(covers) : { active: [], prepared: 0, completed: [] };
     governing.update(canonicalJson({ kind: 'runs', active: reach.active, prepared: reach.prepared, completed: reach.completed }));
-    const routes = (runs: ReadonlyArray<{ readonly route: string }>): string[] => [...new Set(runs.map((run) => run.route))];
+    // One entry per Review Run, even where two Books share a title (Issue #64 review).
+    const routes = (runs: ReadonlyArray<{ readonly reviewRunId: string; readonly route: string }>): string[] =>
+      [...new Map(runs.map((run) => [run.reviewRunId, run.route] as const)).values()];
     const runRoutes = routes(reach.active);
     const completedRoutes = routes(reach.completed);
     const groups = seriesExclusionImpact(input.action, {
@@ -11877,6 +11889,8 @@ export class EditorialStore {
       priorReason: prior?.current.reason ?? null,
       itemsNamed,
       itemCount,
+      stillNamed,
+      stillCount,
       runsNamed: runRoutes.slice(0, NAMED_EXCLUSION_ENTRIES),
       runCount: runRoutes.length,
       preparedCount: reach.prepared,

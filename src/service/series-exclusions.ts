@@ -161,7 +161,7 @@ function isTarget(value: unknown): value is SeriesExclusionTargetProjection {
  * 取消任务 goes on from it.
  */
 export function seriesScopeStopDetail(targets: ReadonlyArray<string>): string {
-  return `${SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL}：这一类所依据的${targets.join('、')}已排除在书系检索之外，它在读取前停下，没有发送任何内容。只能修改计划并重新授权，或取消任务。`;
+  return `${SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL}：这一类所依据的${targets.join('、')}在这次审阅准备之后被排除在书系检索之外，它在读取前停下，没有发送任何内容。只能修改计划并重新授权，或取消任务。`;
 }
 
 /**
@@ -172,7 +172,7 @@ export const SERIES_SCOPE_STOP_SUMMARY = `${SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL
 
 /** Why a prepared plan's one approval is refused: what it would read is excluded now (SER-023). */
 export function seriesScopeChangedReason(label: string, targets: ReadonlyArray<string>): string {
-  return `「${label}」：${SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL}——它所依据的${targets.join('、')}已排除在书系检索之外；请重新准备这次审阅。`;
+  return `「${label}」：${SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL}——它所依据的${targets.join('、')}在这次审阅准备之后被排除在书系检索之外；请重新准备这次审阅。`;
 }
 
 /** The four groups of 书系检索排除影响预览, in the order SER-022 fixes. */
@@ -200,6 +200,9 @@ export interface SeriesExclusionImpactFacts {
   /** The Series Knowledge Items the target reaches now, by label — at most a few named — and how many in all. */
   readonly itemsNamed: ReadonlyArray<string>;
   readonly itemCount: number;
+  /** For `停止此排除`: those of the items another exclusion in force still reaches, by label, and how many in all. */
+  readonly stillNamed?: ReadonlyArray<string>;
+  readonly stillCount?: number;
   /** Authorized Runs whose next read the exclusion stops, by route — at most a few named — and how many in all. */
   readonly runsNamed: ReadonlyArray<string>;
   readonly runCount: number;
@@ -267,11 +270,25 @@ export function seriesExclusionImpact(action: SeriesExclusionAction, facts: Seri
     ];
   }
   return [
-    group('future-reads', [`以后的书系检索重新可以读取${target}；要用到它，仍要重新准备计划并授权。`, items], []),
+    endFutureReads(facts, target, items),
     group('runs', [], ['因这条排除停下的任务不会自动恢复，旧的授权和来源范围也不会恢复；要继续，需修改计划并重新授权。']),
     group('history', [], [`已标上「${HISTORICALLY_AFFECTED_RESULT_MARKER}」的结果保留这个标记；以前的排除记录都保留。`]),
     group('unaffected', [], UNAFFECTED),
   ];
+}
+
+/**
+ * What `停止此排除` reopens (Issue #64 review): only the items no other exclusion in force still reaches, and it says which those
+ * are rather than that reads resume.
+ */
+function endFutureReads(facts: SeriesExclusionImpactFacts, target: string, items: string): SeriesExclusionImpactGroupProjection {
+  const stillCount = facts.stillCount ?? 0;
+  if (facts.itemCount === 0) return group('future-reads', [`以后的书系检索重新可以读取${target}；要用到它，仍要重新准备计划并授权。`, items], []);
+  const reopened = facts.itemCount - stillCount;
+  const still = stillCount === 0 ? [] : [`${stillCount} 个条目仍被其他在生效的检索排除覆盖，以后的书系检索仍然不读取它们：${named(facts.stillNamed ?? [], stillCount)}。`];
+  return group('future-reads', reopened === 0
+    ? [`这条排除停止；它涉及的书系知识条目仍被其他在生效的检索排除覆盖，以后的书系检索仍然不读取它们。`]
+    : [`以后的书系检索重新可以读取${target}涉及的 ${reopened} 个书系知识条目；要用到它们，仍要重新准备计划并授权。`], still);
 }
 
 /** The digest a preview carries: the revision it would append, the chain it follows, what governs it, and every line it shows. */

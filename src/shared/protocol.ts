@@ -4327,7 +4327,7 @@ export interface ReviewRunProjection {
    * The Historically Affected Result Marker (Issue #64, S29b; SER-026): the result the Run formed used Series material that was
    * excluded afterwards. The Run, its findings and its reports are never rewritten; this says so beside them.
    */
-  historicalMarker: null | { label: typeof HISTORICALLY_AFFECTED_RESULT_MARKER; detail: string };
+  historicalMarker: null | { label: typeof HISTORICALLY_AFFECTED_RESULT_MARKER | typeof HISTORICAL_MARKER_UNVERIFIABLE; detail: string };
 }
 
 /**
@@ -6600,6 +6600,8 @@ export const MAX_SERIES_EXCLUSION_TARGETS_PAGE = 50;
 export const SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL = '书系检索范围已变化 · 需要重新确认计划' as const;
 /** The Historically Affected Result Marker (SER-026). */
 export const HISTORICALLY_AFFECTED_RESULT_MARKER = '此结果使用的材料后来被排除' as const;
+/** The marker where the exclusion ledger no longer reads (Issue #64 review): history that cannot be checked says so. */
+export const HISTORICAL_MARKER_UNVERIFIABLE = '此结果使用的材料是否后来被排除：无法核对' as const;
 
 /** What an exclusion names: an item, a class key, a Book or a Source Version identity. */
 export interface SeriesExclusionTargetInput {

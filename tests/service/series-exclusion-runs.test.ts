@@ -7,9 +7,10 @@ import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-poli
 import { BaselineAnalysisExecutionOwner, type UnitHold } from '../../src/service/analysis/execution.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
-import { SERIES_SCOPE_STOP_SUMMARY, SeriesExclusionLedger, seriesExclusionImpact, seriesExclusionTarget } from '../../src/service/series-exclusions.js';
+import { SERIES_RETRIEVAL_EXCLUSION_TRIGGER_SQL, SERIES_SCOPE_STOP_SUMMARY, SeriesExclusionLedger, seriesExclusionImpact, seriesExclusionTarget } from '../../src/service/series-exclusions.js';
 import {
   HISTORICALLY_AFFECTED_RESULT_MARKER,
+  HISTORICAL_MARKER_UNVERIFIABLE,
   SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL,
   type LaunchPolicyProjection,
   type ReviewRunProjection,
@@ -159,9 +160,9 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
       const stopped = run(store, bookId, approved.reviewRunId);
       expect([stopped.state, stopped.stateLabel, stopped.canContinue]).toEqual(['scope-changed', SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL, false]);
       expect([stopped.categories[0]!.state, stopped.categories[0]!.stateLabel]).toEqual(['refused', SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL]);
-      expect(stopped.categories[0]!.detail).toContain(`${ITEM_LABEL}已排除在书系检索之外`);
-      // Driving it reads nothing: the drive loop starts no category of a stopped Run.
-      await driver.continue(approved.reviewRunId);
+      expect(stopped.categories[0]!.detail).toContain(`${ITEM_LABEL}在这次审阅准备之后被排除在书系检索之外`);
+      // It is never driven again: the drive loop refuses a stopped Run.
+      expect(() => driver.continue(approved.reviewRunId)).toThrowError(/只能修改计划并重新授权，或取消任务/u);
       expect(run(store, bookId, approved.reviewRunId).state).toBe('scope-changed');
       expect(store.inspectTaskPlan({ bookId, kind: 'review-run', ref: approved.reviewRunId }).state).toEqual({ key: 'stopped', label: SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL });
 
@@ -209,7 +210,45 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
       const stopped = run(store, bookId, approved.reviewRunId);
       expect([stopped.state, stopped.categories[0]!.state, stopped.categories[0]!.stateLabel, stopped.findings.length])
         .toEqual(['scope-changed', 'refused', SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL, 0]);
-      expect(stopped.categories[0]!.detail).toContain(`${ITEM_LABEL}已排除在书系检索之外，它在读取前停下，没有发送任何内容。`);
+      expect(stopped.categories[0]!.detail).toContain(`${ITEM_LABEL}在这次审阅准备之后被排除在书系检索之外，它在读取前停下，没有发送任何内容。`);
+    });
+  }, 300_000);
+
+  it('never lets a plan prepared before an exclusion be approved after the exclusion ends (Issue #64 review)', async () => {
+    await withSession(async ({ store, seriesId }, bookId) => {
+      const itemId = itemOf(store, seriesId);
+      const prepared = prepare(store, bookId);
+      const { result } = exclude(store, seriesId, 'add', { target: { kind: 'knowledge-item', id: itemId } });
+      exclude(store, seriesId, 'end', { exclusionId: result.exclusionId });
+      // Nothing is in force, yet the plan was made before an exclusion that reached what it pinned: it is prepared again.
+      expect(store.inspectSeries(seriesId).exclusions.effective).toEqual([]);
+      const reason = `「书系一致性」：${SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL}——它所依据的${ITEM_LABEL}在这次审阅准备之后被排除在书系检索之外；请重新准备这次审阅。`;
+      expect(refusal(() => approve(store, bookId, prepared))).toBe(`SERIES_RETRIEVAL_SCOPE_CHANGED:${reason}`);
+      expect(store.inspectTaskPlan({ bookId, kind: 'review-run', ref: prepared.reviewRunId }).start.readiness).toBe('changed');
+      // Prepared again after it ended, the plan reads the item, is approved, and its result carries no marker.
+      const again = prepare(store, bookId);
+      approve(store, bookId, again);
+      expect(run(store, bookId, again.reviewRunId).state).toBe('partial');
+    });
+  }, 300_000);
+
+  it('says it cannot check the history when an exclusion record no longer reads, and 审阅 still opens (Issue #64 review)', async () => {
+    await withSession(async ({ store, driver, seriesId }, bookId) => {
+      const done = prepare(store, bookId);
+      approve(store, bookId, done);
+      await driver.drive(done.reviewRunId);
+      exclude(store, seriesId, 'add', { target: { kind: 'knowledge-class', id: 'characters' }, reason: '人物另审' });
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try {
+        db.exec('DROP TRIGGER series_retrieval_exclusions_no_update');
+        db.exec("UPDATE series_retrieval_exclusions SET reason = '改过'");
+        db.exec(SERIES_RETRIEVAL_EXCLUSION_TRIGGER_SQL.series_retrieval_exclusions_no_update!);
+      } finally {
+        db.close();
+      }
+      const opened = run(store, bookId, done.reviewRunId);
+      expect([opened.state, opened.historicalMarker?.label, opened.findings.every((finding) => finding.historicalMarker === HISTORICAL_MARKER_UNVERIFIABLE)])
+        .toEqual(['settled', HISTORICAL_MARKER_UNVERIFIABLE, true]);
     });
   }, 300_000);
 
@@ -217,7 +256,7 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
     await withSession(async ({ store, seriesId }, bookId) => {
       const prepared = prepare(store, bookId);
       exclude(store, seriesId, 'add', { target: { kind: 'knowledge-class', id: 'places' } });
-      const reason = `「书系一致性」：${SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL}——它所依据的知识类别「地点」已排除在书系检索之外；请重新准备这次审阅。`;
+      const reason = `「书系一致性」：${SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL}——它所依据的知识类别「地点」在这次审阅准备之后被排除在书系检索之外；请重新准备这次审阅。`;
       expect(refusal(() => approve(store, bookId, prepared))).toBe(`SERIES_RETRIEVAL_SCOPE_CHANGED:${reason}`);
       const plan = store.inspectTaskPlan({ bookId, kind: 'review-run', ref: prepared.reviewRunId });
       expect(plan.start.readiness).toBe('changed');
@@ -264,7 +303,7 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
       } finally {
         db.close();
       }
-      await driver.continue(reviewing.reviewRunId);
+      expect(() => driver.continue(reviewing.reviewRunId)).toThrowError(/只能修改计划并重新授权，或取消任务/u);
       expect(run(store, bookId, reviewing.reviewRunId).state).toBe('scope-changed');
     }, held.hold);
   }, 300_000);

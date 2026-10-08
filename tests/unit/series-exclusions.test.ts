@@ -126,6 +126,12 @@ describe('书系检索排除影响预览', () => {
     const end = seriesExclusionImpact('end', facts());
     expect(end[1]!.unchanged).toEqual(['因这条排除停下的任务不会自动恢复，旧的授权和来源范围也不会恢复；要继续，需修改计划并重新授权。']);
     expect(end[2]!.unchanged[0]).toContain('保留这个标记');
+    // It reopens only what no other exclusion in force still reaches (Issue #64 review).
+    const partly = seriesExclusionImpact('end', facts({ itemCount: 3, itemsNamed: ['「甲」', '「乙」', '「丙」'], stillCount: 1, stillNamed: ['「乙」'] }));
+    expect([partly[0]!.changes, partly[0]!.unchanged]).toEqual([
+      ['以后的书系检索重新可以读取书系知识条目「海边小城」（地点）涉及的 2 个书系知识条目；要用到它们，仍要重新准备计划并授权。'],
+      ['1 个条目仍被其他在生效的检索排除覆盖，以后的书系检索仍然不读取它们：「乙」。'],
+    ]);
   });
 
   it('digests every line it shows, the chain it follows and what governs it', () => {
@@ -158,8 +164,8 @@ describe('a stop for an exclusion, as a Review Run reads it', () => {
   });
 
   it('says what was excluded and what is left to do', () => {
-    expect(seriesScopeStopDetail(['知识类别「地点」'])).toBe(`${SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL}：这一类所依据的知识类别「地点」已排除在书系检索之外，它在读取前停下，没有发送任何内容。只能修改计划并重新授权，或取消任务。`);
-    expect(seriesScopeChangedReason('书系一致性', ['甲', '乙'])).toBe(`「书系一致性」：${SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL}——它所依据的甲、乙已排除在书系检索之外；请重新准备这次审阅。`);
+    expect(seriesScopeStopDetail(['知识类别「地点」'])).toBe(`${SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL}：这一类所依据的知识类别「地点」在这次审阅准备之后被排除在书系检索之外，它在读取前停下，没有发送任何内容。只能修改计划并重新授权，或取消任务。`);
+    expect(seriesScopeChangedReason('书系一致性', ['甲', '乙'])).toBe(`「书系一致性」：${SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL}——它所依据的甲、乙在这次审阅准备之后被排除在书系检索之外；请重新准备这次审阅。`);
   });
 
   it('tells a review left with nothing because of exclusions from one that never had knowledge', () => {

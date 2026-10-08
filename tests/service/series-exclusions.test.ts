@@ -241,6 +241,13 @@ describe('书系检索排除 over the real store', () => {
       expect(readable(store, member.bookId)).toEqual(['人物「林默」', '正典设定「灯塔」']);
       takeInNewItem(store, seriesId, { subject: '渔村', knowledgeClass: 'places', content: '渔村在第三部改名。', reuseScope: 'series-tasks' });
       expect(readable(store, member.bookId)).toEqual(['人物「林默」', '正典设定「灯塔」']);
+      // Ending the item's own exclusion reopens nothing while its class is still excluded, and the preview says so (Issue #64 review).
+      const itemExclusion = store.inspectSeries(seriesId).exclusions.effective.find((entry) => entry.target.kind === 'knowledge-item')!;
+      const ending = store.previewSeriesExclusion(request(seriesId, 'end', { exclusionId: itemExclusion.exclusionId }));
+      expect([ending.groups[0]!.changes, ending.groups[0]!.unchanged]).toEqual([
+        ['这条排除停止；它涉及的书系知识条目仍被其他在生效的检索排除覆盖，以后的书系检索仍然不读取它们。'],
+        ['1 个条目仍被其他在生效的检索排除覆盖，以后的书系检索仍然不读取它们：「海边小城」。'],
+      ]);
       // A member Book reaches the knowledge taken from its manuscript, and not the editor's own words.
       exclude(store, seriesId, 'add', { target: { kind: 'book', id: other.bookId } });
       expect(readable(store, member.bookId)).toEqual(['人物「林默」']);

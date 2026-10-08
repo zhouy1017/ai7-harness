@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   HISTORICALLY_AFFECTED_RESULT_MARKER,
+  HISTORICAL_MARKER_UNVERIFIABLE,
   SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL,
   MAX_FRAME_BYTES,
   MAX_REVIEW_FINDING_REASON_CHARACTERS,
@@ -94,6 +95,7 @@ import {
 } from './review-run-state.js';
 import {
   SERIES_SCOPE_STOP_SUMMARY,
+  SeriesExclusionError,
   SeriesExclusionLedger,
   coveringExclusions,
   excludedAfter,
@@ -414,6 +416,8 @@ const FAILED_UNRECORDED_DETAIL = '这一类的运行失败了；继续审阅时�
 /** A category not yet begun when the Run stopped for a Series Retrieval Exclusion (Issue #64, S29b): it waits for the editor. */
 const STOPPED_UNSTARTED_DETAIL = '这次审阅已停下，这一类没有开始；修改计划并重新授权后在新的一次审阅里进行。' as const;
 /** 取消任务 of a stopped Review Run, as each category it ends records (Issue #64, S29b). */
+/** What a stale reason names when the exclusion ledger no longer reads (Issue #64 review). */
+const UNREADABLE_EXCLUSIONS = '无法读取的书系检索排除记录' as const;
 const CANCELLED_DETAIL = '已取消任务：这次审阅不再继续；已经写到稿件上的发现和已形成的结果都保持原样。' as const;
 export const HOUSE_GUIDELINE_NOT_TRANSMITTABLE = 'REVIEW_GUIDELINE_NOT_TRANSMITTABLE' as const;
 
@@ -682,8 +686,8 @@ interface RunView {
   readonly findings: ReadonlyArray<FindingView>;
   readonly state: ReviewRunState;
   readonly canContinue: boolean;
-  /** The categories whose result used Series material excluded afterwards (Issue #64, S29b; SER-026). */
-  readonly historicallyAffected: ReadonlySet<string>;
+  /** The categories whose result used Series material excluded afterwards, each with its marker (Issue #64, S29b; SER-026). */
+  readonly historicallyAffected: ReadonlyMap<string, string>;
 }
 
 /**
@@ -1069,8 +1073,9 @@ export class ReviewRunStore {
       requireReview(projection.taskIntent?.taskIntentId === category.task!.taskIntentId && projection.state === 'prepared' &&
         projection.actions.canAuthorize && projection.planEnvelope?.digest === category.task!.planEnvelopeDigest,
       'REVIEW_PLAN_CHANGED', `「${category.entry.label}」的计划已经变化；请重新准备这次审阅。`);
-      // An exclusion in force now refuses the approval in its own words before any other move is named (Issue #64, S29b; SER-023).
-      const excluded = this.#excludedTargets(category);
+      // An exclusion in force now, or one recorded since the plan was prepared even if ended since, refuses the approval in its
+      // own words before any other move is named (Issue #64, S29b; SER-023, SER-027).
+      const excluded = this.#excludedTargets(category, snapshot.createdAt);
       requireReview(excluded.length === 0, SERIES_RETRIEVAL_SCOPE_CHANGED, seriesScopeChangedReason(category.entry.label, excluded));
       requireReview(!this.#seriesKnowledgeMoved(bookId, category), 'REVIEW_PLAN_CHANGED', seriesKnowledgeMovedReason(category.entry.label));
     }
@@ -1171,8 +1176,8 @@ export class ReviewRunStore {
           if (current === null || current.taskIntent?.taskIntentId !== category.task.taskIntentId || current.state !== 'prepared' ||
               !current.actions.canAuthorize || current.planEnvelope?.digest !== category.task.planEnvelopeDigest) {
             staleReasons.push(`「${category.entry.label}」的计划已经变化；请重新准备这次审阅。`);
-          } else if (this.#excludedTargets(category).length > 0) {
-            staleReasons.push(seriesScopeChangedReason(category.entry.label, this.#excludedTargets(category)));
+          } else if (this.#unverifiedTargets(category, snapshot.createdAt) !== null) {
+            staleReasons.push(seriesScopeChangedReason(category.entry.label, this.#unverifiedTargets(category, snapshot.createdAt)!));
           } else if (this.#seriesKnowledgeMoved(bookId, category)) {
             staleReasons.push(seriesKnowledgeMovedReason(category.entry.label));
           }
@@ -1293,6 +1298,10 @@ export class ReviewRunStore {
     requireReview(this.#authorizationOf(reviewRunId) !== null, 'REVIEW_RUN_NOT_AUTHORIZED', '这次审阅尚未授权。');
     requireReview(!this.#driving.has(reviewRunId), 'REVIEW_RUN_ACTIVE', '这次审阅已在进行。');
     requireReview(!this.#bookIsDriving(snapshot.bookId), 'REVIEW_RUN_ACTIVE', RUN_ACTIVE_REASON);
+    // A Run a Series Retrieval Exclusion stopped, or the editor then cancelled, is never driven again (Issue #64, S29b; SER-024).
+    const stop = this.#stoppedFor(reviewRunId);
+    requireReview(stop === null, 'REVIEW_RUN_STOPPED',
+      stop === 'cancelled' ? '这次审阅已取消；不能继续审阅。' : `这次审阅显示「${SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL}」；只能修改计划并重新授权，或取消任务。`);
     this.#driving.set(reviewRunId, snapshot.bookId);
     return snapshot.categories.map((category) => category.categoryId);
   }
@@ -1361,7 +1370,7 @@ export class ReviewRunStore {
     if ((last !== null && TERMINAL_CATEGORY_EVENTS.has(last)) || (last === null && this.#stoppedFor(reviewRunId) !== null)) return null;
     // The current-read guard (Issue #64, S29b; SER-023, SER-024): the Series Knowledge the plan froze is read again only if no
     // exclusion in force now reaches it. The Run's approval predates the exclusion, and that never lets the read go on.
-    const excluded = this.#excludedTargets(category);
+    const excluded = this.#excludedTargets(category, snapshot.createdAt);
     if (excluded.length > 0) {
       this.#recordEvent(reviewRunId, categoryId, 'refused', seriesScopeStopDetail(excluded), { extra: { code: SERIES_RETRIEVAL_SCOPE_CHANGED } });
       return null;
@@ -2089,24 +2098,41 @@ export class ReviewRunStore {
   }
 
   /**
-   * The current-read guard over one category (SER-023): the targets of the exclusions in force now that reach any Series
-   * Knowledge it pinned, by label — empty when none does, and for every category that reads no Series material.
+   * The current-read guard over one category (SER-023, SER-027): the targets of the exclusions that reach any Series Knowledge
+   * it pinned and are in force now, or were in force at any moment after `since` — the Run's own making — even if ended since,
+   * by label. Empty when none does, and for every category that reads no Series material. Ending an exclusion never lets a
+   * Run made before it read on.
    */
-  #excludedTargets(category: SnapshotCategory): string[] {
+  #excludedTargets(category: SnapshotCategory, since: string): string[] {
     const materials = this.#pinnedMaterial(category);
     if (materials.length === 0) return [];
     const ledger = new SeriesExclusionLedger(this.#db);
-    const effective = new Map<string, StoredExclusion[]>();
+    const chains = new Map<string, StoredExclusion[]>();
     const labels = new Set<string>();
     for (const material of materials) {
-      let inForce = effective.get(material.seriesId);
-      if (inForce === undefined) {
-        inForce = ledger.effective(material.seriesId);
-        effective.set(material.seriesId, inForce);
+      let series = chains.get(material.seriesId);
+      if (series === undefined) {
+        series = ledger.chains(material.seriesId);
+        chains.set(material.seriesId, series);
       }
-      for (const exclusion of coveringExclusions(inForce, material)) labels.add(exclusion.target.label);
+      for (const exclusion of coveringExclusions(series, material)) labels.add(exclusion.target.label);
+      for (const chain of series) if (excludedAfter([chain], material, since)) labels.add(chain.target.label);
     }
     return [...labels];
+  }
+
+  /**
+   * `#excludedTargets` for a read that must not fail (Issue #64 review): what reaches the category, an unreadable record named
+   * as such, or `null` when nothing does.
+   */
+  #unverifiedTargets(category: SnapshotCategory, since: string): string[] | null {
+    try {
+      const labels = this.#excludedTargets(category, since);
+      return labels.length === 0 ? null : labels;
+    } catch (error) {
+      if (error instanceof SeriesExclusionError || error instanceof ReviewRunError) return [UNREADABLE_EXCLUSIONS];
+      throw error;
+    }
   }
 
   /** What stopped a Run for good, from its categories' events: an exclusion, the editor's 取消任务 after it, or nothing. */
@@ -2140,7 +2166,8 @@ export class ReviewRunStore {
       `SELECT r.*, b.title book_title,
          (SELECT max(r2.ordinal) FROM review_runs r2 WHERE r2.book_id = r.book_id) latest_ordinal
        FROM review_runs r JOIN books b ON b.book_id = r.book_id
-       WHERE EXISTS (SELECT 1 FROM json_each(r.canonical_json, '$.categories') c WHERE json_type(c.value, '$.entry.seriesKnowledge') = 'object')
+       WHERE instr(r.canonical_json, '"seriesKnowledge"') > 0
+         AND EXISTS (SELECT 1 FROM json_each(r.canonical_json, '$.categories') c WHERE json_type(c.value, '$.entry.seriesKnowledge') = 'object')
        ORDER BY r.created_at, r.review_run_id`,
     ).all() as SqlRow[];
     for (const row of rows) {
@@ -2152,7 +2179,8 @@ export class ReviewRunStore {
         if (!this.#pinnedMaterial(category).some(covers)) continue;
         const events = this.#events(snapshot.reviewRunId, category.categoryId);
         const last = events.at(-1)?.state ?? null;
-        if (events.some((event) => event.state === 'materialized')) completed.push({ reviewRunId: snapshot.reviewRunId, route });
+        // A result formed — written to the manuscript or waiting to be — used the material (Issue #64 review).
+        if (events.some((event) => event.state === 'materialized' || event.state === 'settled')) completed.push({ reviewRunId: snapshot.reviewRunId, route });
         else if (!authorized) {
           if (integer(row.ordinal) === integer(row.latest_ordinal)) prepared += 1;
         } else if (stopped === null && (last === null || last === 'dispatched')) {
@@ -2169,9 +2197,9 @@ export class ReviewRunStore {
    * Inside the caller's transaction, beside the exclusion's own revision.
    */
   stopForSeriesScope(reviewRunId: string, categoryId: string): boolean {
-    const { category } = this.#category(reviewRunId, categoryId);
+    const { snapshot, category } = this.#category(reviewRunId, categoryId);
     if (this.#events(reviewRunId, categoryId).length > 0 || this.#stoppedFor(reviewRunId) !== null) return false;
-    const excluded = this.#excludedTargets(category);
+    const excluded = this.#excludedTargets(category, snapshot.createdAt);
     if (excluded.length === 0) return false;
     this.#recordEvent(reviewRunId, categoryId, 'refused', seriesScopeStopDetail(excluded), { extra: { code: SERIES_RETRIEVAL_SCOPE_CHANGED } });
     return true;
@@ -2183,18 +2211,21 @@ export class ReviewRunStore {
    * `null` when none does — and for every Run that is not a Review Run category's.
    */
   seriesReadGuard(runRecordId: string): string | null {
+    // The Run's Task first, then only the Review Runs whose record names it (Issue #64 review): asked before every range.
+    const task = this.#db.prepare('SELECT task_intent_id FROM analysis_run_records WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
+    if (task === undefined) return null;
+    const taskIntentId = text(task.task_intent_id);
     const row = this.#db.prepare(
-      `SELECT r.canonical_json, r.sha256, r.review_run_id, r.book_id, r.ordinal, c.value category_json FROM analysis_run_records a
-       JOIN review_runs r ON 1 = 1
-       JOIN json_each(r.canonical_json, '$.categories') c ON json_extract(c.value, '$.task.taskIntentId') = a.task_intent_id
-       WHERE a.run_record_id = ? AND json_type(c.value, '$.entry.seriesKnowledge') = 'object'`,
-    ).get(runRecordId) as SqlRow | undefined;
+      `SELECT r.canonical_json, r.sha256, r.review_run_id, r.book_id, r.ordinal, c.value category_json FROM review_runs r
+       JOIN json_each(r.canonical_json, '$.categories') c ON json_extract(c.value, '$.task.taskIntentId') = ?
+       WHERE instr(r.canonical_json, ?) > 0 AND json_type(c.value, '$.entry.seriesKnowledge') = 'object'`,
+    ).get(taskIntentId, taskIntentId) as SqlRow | undefined;
     if (row === undefined) return null;
     const snapshot = this.#snapshotOf(row);
     const categoryId = (JSON.parse(text(row.category_json)) as { categoryId?: unknown }).categoryId;
     const category = snapshot.categories.find((candidate) => candidate.categoryId === categoryId);
     if (category === undefined) return null;
-    const excluded = this.#excludedTargets(category);
+    const excluded = this.#excludedTargets(category, snapshot.createdAt);
     return excluded.length === 0 ? null : excluded.join('、');
   }
 
@@ -2224,25 +2255,35 @@ export class ReviewRunStore {
    * on the manuscript, and a revision that was ever in force — not one that ended it — was recorded after the Run was made.
    * From the append-only ledger alone, so the marker never goes away.
    */
-  #historicallyAffected(snapshot: RunSnapshot, chains: Map<string, StoredExclusion[]>): Set<string> {
-    const affected = new Set<string>();
+  #historicallyAffected(snapshot: RunSnapshot, chains: Map<string, StoredExclusion[]>): Map<string, string> {
+    const affected = new Map<string, string>();
     for (const category of snapshot.categories) {
-      const materials = this.#pinnedMaterial(category);
-      if (materials.length === 0) continue;
+      if (category.entry.seriesKnowledge === undefined) continue;
       const materialized = this.#db.prepare(
         "SELECT 1 FROM review_run_category_events WHERE review_run_id = ? AND category_id = ? AND state = 'materialized'",
       ).get(snapshot.reviewRunId, category.categoryId) !== undefined;
       if (!materialized) continue;
-      for (const material of materials) {
-        let series = chains.get(material.seriesId);
-        if (series === undefined) {
-          series = new SeriesExclusionLedger(this.#db).chains(material.seriesId);
-          chains.set(material.seriesId, series);
+      // The material was used from the category's dispatch on (Issue #64 review): an exclusion after that marks the result.
+      const dispatched = this.#db.prepare(
+        "SELECT min(recorded_at) at FROM review_run_category_events WHERE review_run_id = ? AND category_id = ? AND state = 'dispatched'",
+      ).get(snapshot.reviewRunId, category.categoryId) as SqlRow;
+      const usedFrom = nullableText(dispatched.at) ?? snapshot.createdAt;
+      try {
+        for (const material of this.#pinnedMaterial(category)) {
+          let series = chains.get(material.seriesId);
+          if (series === undefined) {
+            series = new SeriesExclusionLedger(this.#db).chains(material.seriesId);
+            chains.set(material.seriesId, series);
+          }
+          if (excludedAfter(series, material, usedFrom)) {
+            affected.set(category.categoryId, HISTORICALLY_AFFECTED_RESULT_MARKER);
+            break;
+          }
         }
-        if (excludedAfter(series, material, snapshot.createdAt)) {
-          affected.add(category.categoryId);
-          break;
-        }
+      } catch (error) {
+        // A record that no longer reads says so on the result, and never takes 审阅 down with it (Issue #64 review).
+        if (!(error instanceof SeriesExclusionError || error instanceof ReviewRunError)) throw error;
+        affected.set(category.categoryId, HISTORICAL_MARKER_UNVERIFIABLE);
       }
     }
     return affected;
@@ -2680,7 +2721,7 @@ export class ReviewRunStore {
       stateLabel: reviewRunStateLabel(view.state, view.canContinue),
       findingCounts: reviewFindingCounts(view.findings),
       reportVersion: reports.latest === null ? null : integer(reports.latest),
-      historicalMarker: view.historicallyAffected.size === 0 ? null : HISTORICALLY_AFFECTED_RESULT_MARKER,
+      historicalMarker: [...view.historicallyAffected.values()][0] ?? null,
     };
   }
 
@@ -2764,7 +2805,7 @@ export class ReviewRunStore {
         markStatus: finding.markStatus,
         anchorState: finding.anchorState,
         ignoreReason: finding.ignoreReason,
-        historicalMarker: view.historicallyAffected.has(finding.categoryId) ? HISTORICALLY_AFFECTED_RESULT_MARKER : null,
+        historicalMarker: view.historicallyAffected.get(finding.categoryId) ?? null,
       };
     });
     // The four filters are a view (FIND-003): they choose which findings this answer carries and change
@@ -2795,10 +2836,13 @@ export class ReviewRunStore {
         findingCounts: reviewFindingCounts(view.findings),
         report: reports.at(-1) ?? null,
         reportVersions: reports.map((report) => ({ reportId: report.reportId, version: report.version, generatedAt: report.generatedAt, digest: report.digest })),
-        historicalMarker: view.historicallyAffected.size === 0 ? null : {
-          label: HISTORICALLY_AFFECTED_RESULT_MARKER,
-          detail: `${snapshot.categories.filter((category) => view.historicallyAffected.has(category.categoryId)).map((category) => `「${category.entry.label}」`).join('、')}所依据的书系材料在这次审阅之后被排除在书系检索之外。这次审阅的结果、发现和报告都保持原样；这个标记不表示结果有错。`,
-        },
+        historicalMarker: view.historicallyAffected.size === 0 ? null : (() => {
+          const named = snapshot.categories.filter((category) => view.historicallyAffected.has(category.categoryId)).map((category) => `「${category.entry.label}」`).join('、');
+          const unverifiable = [...view.historicallyAffected.values()].every((label) => label === HISTORICAL_MARKER_UNVERIFIABLE);
+          return unverifiable
+            ? { label: HISTORICAL_MARKER_UNVERIFIABLE, detail: `${named}所依据的书系材料有没有在这次审阅之后被排除，书系检索排除记录无法读取，无法核对。这次审阅的结果、发现和报告都保持原样。` }
+            : { label: HISTORICALLY_AFFECTED_RESULT_MARKER, detail: `${named}所依据的书系材料在这次审阅之后被排除在书系检索之外。这次审阅的结果、发现和报告都保持原样；这个标记不表示结果有错。` };
+        })(),
       },
       candidates: after === null ? matching : matching.filter((finding) => finding.ordinal > after),
     };
