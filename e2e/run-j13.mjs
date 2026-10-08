@@ -49,7 +49,7 @@ const NO_KNOWLEDGE = `书系「${SERIES}」还没有纳入可用于一致性审�
 const CONSISTENCY_BASIS = `依据：书系「${SERIES}」的书系知识：地点「${PLACE}」第 2 版 · 工序：书系一致性检查（第 1 版） · 不使用搜索引擎`;
 const CREDENTIAL_CLEANUP_TIMEOUT_MS = 15_000;
 const FORCE_EXIT_TIMEOUT_MS = 5_000;
-const CREDENTIAL_CLEANUP_TIMEOUT = new Error('J-13/credential-cleanup-timeout');
+const CREDENTIAL_CLEANUP_TIMEOUT = journeyCheckFailure('J-13', 'credential-cleanup-timeout');
 let location = 'entry';
 
 function at(next) {
@@ -219,7 +219,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
     metadata = await lstat(databasePath);
   } catch (error) {
     if (hasErrorCode(error, 'ENOENT')) return { kind: 'not-started' };
-    throw new Error('J-13/credential-cleanup-metadata');
+    throw journeyCheckFailure('J-13', 'credential-cleanup-metadata');
   }
   requireJourney(metadata.isFile() && !metadata.isSymbolicLink() && (await realpath(databasePath)) === databasePath,
     'credential-cleanup-metadata-file');
@@ -227,7 +227,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
   try {
     database = new DatabaseSync(databasePath, { readOnly: true });
   } catch {
-    throw new Error('J-13/credential-cleanup-metadata');
+    throw journeyCheckFailure('J-13', 'credential-cleanup-metadata');
   }
   try {
     database.exec('PRAGMA query_only = ON;');
@@ -254,7 +254,7 @@ async function recoverSyntheticCredentialCleanupState(dataRoot, runRoot) {
       : { kind: 'reference', credentialReference: row.credential_reference };
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('J-13/')) throw error;
-    throw new Error('J-13/credential-cleanup-metadata');
+    throw journeyCheckFailure('J-13', 'credential-cleanup-metadata');
   } finally {
     database.close();
   }
@@ -746,7 +746,7 @@ async function main() {
       const ownedLoopback = loopback ?? (loopbackAcquisition === undefined ? undefined : await loopbackAcquisition.catch(() => undefined));
       await ownedLoopback?.close().catch(() => undefined);
       loopback = undefined;
-      if (credentialMutationReached && !credentialRemoved) throw failure ?? new Error('J-13/credential-cleanup-failed');
+      if (credentialMutationReached && !credentialRemoved) throw failure ?? journeyCheckFailure('J-13', 'credential-cleanup-failed');
       const ownedRoot = runRoot ?? (runRootAcquisition === undefined ? undefined : await runRootAcquisition.catch(() => undefined));
       if (ownedRoot !== undefined) {
         if (syntheticSecret !== undefined && dataRoot !== undefined) {
