@@ -12,7 +12,11 @@
  * the cost stays linear in the line however its numerals fall. Each exclusion is scoped to the numeral that opens the
  * ordinary word — 这一块, 二元对立, 一成不变, 万一, 亿万读者, 千万不要, 十万火急, 全十二册, 入木三分, 十二分的, 一分为二, 三分之一,
  * a fraction such as 2/3 — so the same unit after any other numeral is still a claim: 「九块九」, 「49元」, 「七成年轻读者」,
- * 「十八分的高分」.
+ * 「十八分的高分」. And each is scoped to the word itself, by what follows the unit, so a claim that begins the same way is
+ * still one (Issue #696): 「一块五」, 「一成人会买」, 「十五分一项」, 「十八分之多」.
+ *
+ * They are heuristics over one line, not a parse of it: the claims a review found escaping them are must-claim tests, and an
+ * ordinary word they must leave alone is a must-pass test, but neither list is every claim or every word.
  */
 
 const CHINESE_NUMERALS = new Set('〇零一二三四五六七八九十百千万亿两几');
@@ -72,8 +76,11 @@ const QUANTITY_WORDS = ['百分之', '概率', '几率'];
 const ALWAYS_UNITS = ['个百分点', '%', '％', '倍'];
 /** 元 after a Chinese numeral that opens a word instead of a price: 二元对立, 一元论. Never after digits or a magnitude. */
 const YUAN_WORDS = new Set('对论化素');
-/** 成 after 一 that opens a word instead of a share: 一成不变, 万一成功. Never after any other numeral (七成年轻读者). */
-const CHENG_WORDS = new Set('不功为长熟就绩果立本员型形年人事交分色全了');
+/**
+ * 成 after 一 that opens a word instead of a share: 一成不变, 万一成功. Never after any other numeral (七成年轻读者), and never
+ * 人 or 年, which follow a share as readily as they make 成人 and 成年 (「仅一成人会买」, 「一成年轻读者」; Issue #696).
+ */
+const CHENG_WORDS = new Set('不功为长熟就绩果立本员型形事交分色全了');
 /** 千万 the adverb — 千万不要, 千万别, 千万小心, 千万注意 — rather than ten million. */
 const QIANWAN_ADVERB = new Set('不别要莫勿记小注留务当谨');
 /** What before a small numeral and 册 names the Book's own volumes: 「全十二册」, 「共三册」, 「分两册」, 「上下两册」. */
@@ -117,8 +124,9 @@ function runStatesQuantity(chars: ReadonlyArray<string>, run: NumeralRun): boole
   if (ALWAYS_UNITS.some((entry) => startsWith(chars, at, entry))) return true;
   // 本 counts copies only after an amount: 「首印八千本」, 「3000本」 — not 「一本小说」, 「两本书」.
   if (unit === '本' && amount) return true;
-  // 块 is yuan after any numeral but a lone 一: 「九块九」, 「两块钱」 — not 「这一块」, 「一块儿」.
-  if (unit === '块' && word !== '一') return true;
+  // 块 is yuan after any numeral but a lone 一: 「九块九」, 「两块钱」 — not 「这一块」, 「一块儿」; after 一 too when 钱 or a
+  // numeral follows it, 「一块钱一本」, 「一块五」, but not 「一块一块地」 (Issue #696).
+  if (unit === '块' && (word !== '一' || after === '钱' || (isQuantityNumeral(after) && !(after === '一' && chars[at + 2] === '块')))) return true;
   // 册 counts copies after any numeral, 「首印五册」, but the Book's own volumes are no claim: 「全十二册」, 「上下两册」.
   if (unit === '册' && !(VOLUME_WORDS.has(before!) && !digit && !own.some((char) => char !== '十' && MAGNITUDES.has(char)))) return true;
   // 元 is a price unless a Chinese numeral opens a word: 「49元对标同类」 is one, 二元对立 and 一元论 are not.
@@ -154,10 +162,10 @@ export function claimsQuantity(text: string): boolean {
 
 /** The Chinese numerals a score is written with. */
 const SCORE_NUMERALS = new Set('零一二三四五六七八九十两');
-/** 分 after digits that is a fraction, a time or a volume, not points: 3分之1, 5分钟, 3分册. */
-const NOT_POINTS_AFTER_DIGITS = new Set('之钟册');
-/** 分 after Chinese numerals that opens another word: 三分之一, 一分钟, 三分天下, 一分钱, 一分一秒. */
-const NOT_POINTS_AFTER_CHINESE = new Set('之钟天钱秒一册');
+/** 分 after digits that is a time or a volume, not points: 5分钟, 3分册. 之 is checked on its own: a fraction, 3分之1. */
+const NOT_POINTS_AFTER_DIGITS = new Set('钟册');
+/** 分 after Chinese numerals that opens another word: 一分钟, 三分天下, 一分钱. 之 and 一 are checked on their own: 三分之一, 一分一毫. */
+const NOT_POINTS_AFTER_CHINESE = new Set('钟天钱秒册');
 const isDecimalPoint = (char: string | undefined): boolean => char === '.' || char === '．';
 const isTerminal = (char: string | undefined): boolean => char === undefined || SPACE.test(char) || PUNCTUATION.test(char);
 
@@ -184,6 +192,13 @@ function digitsAt(chars: ReadonlyArray<string>, start: number): { end: number; w
   return { end, whole };
 }
 
+/**
+ * Whether 分 at `at` opens a fraction — 之 and then a numeral, 「3分之1」, 「三分之一」 — rather than points: 「十八分之多」 is a
+ * score (Issue #696).
+ */
+const fraction = (chars: ReadonlyArray<string>, at: number): boolean =>
+  chars[at + 1] === '之' && (isDigit(chars[at + 2]) || SCORE_NUMERALS.has(chars[at + 2]!));
+
 /** Whether 分 at `at`, after a run of digits, is a time: 「3分30秒」. */
 function minutesAndSeconds(chars: ReadonlyArray<string>, at: number): boolean {
   let end = at + 1;
@@ -194,12 +209,13 @@ function minutesAndSeconds(chars: ReadonlyArray<string>, at: number): boolean {
 
 /**
  * The denominators a score in a rewritten line is written over (Issue #689 review): each item's 满分, the total of every item and
- * of the rated ones — a version with an item 不评 shows its total over the rest — and the rescaled 10 and 100.
+ * of the rated ones — a version with an item 不评 shows its total over the rest — and the rescaled 5, 10 and 100: 「4.5/5」, 「4/5」
+ * (Issue #696).
  */
 export function scoreDenominators(items: ReadonlyArray<{ readonly fullMarks: number; readonly notRated: string | null }>): number[] {
   const all = items.reduce((sum, item) => sum + item.fullMarks, 0);
   const rated = items.reduce((sum, item) => sum + (item.notRated === null ? item.fullMarks : 0), 0);
-  return [...new Set([...items.map((item) => item.fullMarks), all, rated, 10, 100])];
+  return [...new Set([...items.map((item) => item.fullMarks), all, rated, 5, 10, 100])];
 }
 
 /**
@@ -217,7 +233,8 @@ export function claimsScore(text: string, fullMarks: ReadonlyArray<number>): boo
     if (isDigit(char) && !isDigit(chars[index - 1]) && !isDecimalPoint(chars[index - 1])) {
       const numerator = digitsAt(chars, index);
       const at = skipSpace(chars, numerator.end);
-      if (chars[at] === '分' && chars[index - 1] !== '第' && !NOT_POINTS_AFTER_DIGITS.has(chars[at + 1]!) && !minutesAndSeconds(chars, at)) return true;
+      if (chars[at] === '分' && chars[index - 1] !== '第' && !NOT_POINTS_AFTER_DIGITS.has(chars[at + 1]!) && !fraction(chars, at) &&
+        !minutesAndSeconds(chars, at)) return true;
       if (chars[at] === '/' || chars[at] === '／') {
         const from = skipSpace(chars, at + 1);
         if (isDigit(chars[from])) {
@@ -245,7 +262,9 @@ export function claimsScore(text: string, fullMarks: ReadonlyArray<number>): boo
 function claimsChineseScore(chars: ReadonlyArray<string>, start: number, end: number): boolean {
   const run = chars.slice(start, end).join('');
   const after = chars[end + 1];
-  if (NOT_POINTS_AFTER_CHINESE.has(after!)) return false;
+  if (NOT_POINTS_AFTER_CHINESE.has(after!) || fraction(chars, end)) return false;
+  // 一 after 分 opens a word only in 一分一秒 and 一分一毫 or after 一 itself: 「十五分一项」 is a score (Issue #696).
+  if (after === '一' && (run === '一' || chars[end + 2] === '秒')) return false;
   if (run === '一' && after === '为') return false;
   if (chars[start - 2] === '入' && chars[start - 1] === '木') return false;
   // The adverbs: 十分 always — 「十分凝练」, 「真是十分！」 — and 十二分 before more words, 「十二分的功夫」.

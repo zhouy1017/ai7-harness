@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { graphemeCount } from '../../src/service/analysis/factual-review-contract.js';
 import {
   BUILTIN_EVALUATION_PROFILE,
+  EvaluationError,
   EvaluationRecords,
   evaluationProfileDigest,
   initializeEvaluationInitialDraftSchema,
@@ -10,7 +12,11 @@ import {
   type InitialEvaluationFacts,
 } from '../../src/service/evaluation-records.js';
 import { boundedEvidence, evidenceShares, rewriteProposalItems } from '../../src/service/evaluation-rewrites.js';
-import { MAX_UNIT_OBSERVATIONS as MAX_INITIAL_UNIT_OBSERVATIONS } from '../../src/service/evaluation/initial-evaluation-contract.js';
+import {
+  MAX_EVALUATION_BYTES_PER_GRAPHEME,
+  MAX_UNIT_OBSERVATIONS as MAX_INITIAL_UNIT_OBSERVATIONS,
+  withinEvaluationBytes,
+} from '../../src/service/evaluation/initial-evaluation-contract.js';
 import { MAX_UNIT_OBSERVATIONS as MAX_REWRITE_UNIT_OBSERVATIONS, MAX_OBSERVATION_BLOCKS } from '../../src/service/evaluation/evaluation-rewrite-contract.js';
 import {
   MAX_EVALUATION_EVIDENCE_NOTES,
@@ -45,7 +51,11 @@ afterEach(() => {
   db.close();
 });
 
-const words = (length: number, seed: number): string => Array.from({ length }, (_, index) => String.fromCodePoint(0x4e00 + ((seed * 31 + index) % 20_000))).join('');
+/**
+ * Words of 4-byte graphemes, each its own character of CJK Extension B: the most bytes a line within its graphemes may take,
+ * since every line 评估 shows is also bounded at `MAX_EVALUATION_BYTES_PER_GRAPHEME` bytes a grapheme (Issue #696).
+ */
+const words = (length: number, seed: number): string => Array.from({ length }, (_, index) => String.fromCodePoint(0x20000 + ((seed * 31 + index) % 20_000))).join('');
 const blocks = (seed: number): string[] => Array.from({ length: MAX_OBSERVATION_BLOCKS }, (_, index) => `blk_${(seed * 8 + index).toString(16).padStart(24, '0')}`);
 
 /** A profile of sixteen items, the built-in one's bands, risks and conclusions with them. */
@@ -84,6 +94,38 @@ const MARKET: EvaluationMarketProjection = {
 };
 
 describe('评估 on a long Book stays within one frame (Issue #689)', () => {
+  it('bounds every line in bytes as well as graphemes, so a line of 4-byte graphemes at its bound is the most any line takes (Issue #696)', () => {
+    const longest = words(300, 1);
+    expect(graphemeCount(longest)).toBe(300);
+    expect(Buffer.byteLength(JSON.stringify(longest), 'utf8') - 2).toBe(MAX_EVALUATION_BYTES_PER_GRAPHEME * 300);
+    expect(withinEvaluationBytes(longest, 300)).toBe(true);
+    expect(withinEvaluationBytes(`${longest}字`, 300)).toBe(false);
+    // One grapheme is no bound on bytes: one letter may carry any number of combining marks. Quotes and backslashes count as
+    // their JSON spells them.
+    const heavy = `评${String.fromCodePoint(0x301).repeat(200)}`;
+    expect(graphemeCount(heavy)).toBe(1);
+    expect(withinEvaluationBytes(heavy, 100)).toBe(false);
+    expect(withinEvaluationBytes(heavy, 101)).toBe(true);
+    expect(withinEvaluationBytes('"'.repeat(3), 1)).toBe(false);
+    expect(withinEvaluationBytes('"'.repeat(2), 1)).toBe(true);
+    // The editor's own words are bounded the same way when saved.
+    const bookId = randomUUID();
+    const records = new EvaluationRecords(db, { current: () => ({ manuscriptId: randomUUID(), revisionId: randomUUID(), revisionLabel: 'r1', uncheckpointed: false }) });
+    const recordId = records.start(bookId);
+    const version = records.rewritable(bookId, recordId);
+    const withVerdict = (verdict: string) => ({ ...version.content, verdict });
+    let code = 'none';
+    try {
+      records.save(bookId, recordId, version.entryOrdinal, withVerdict(`评${String.fromCodePoint(0x301).repeat(20_000)}`), false);
+    } catch (error) {
+      if (!(error instanceof EvaluationError)) throw error;
+      code = error.code;
+    }
+    expect(code).toBe('EVALUATION_VERDICT_TOO_LONG');
+    records.save(bookId, recordId, version.entryOrdinal, withVerdict(words(100, 2)), false);
+    expect(records.rewritable(bookId, recordId).content.verdict).toBe(words(100, 2));
+  });
+
   it('spreads the notes it keeps over the ranges read, the last as much as the first, and says how many there are', () => {
     const evidence = notes(MAX_INITIAL_UNIT_OBSERVATIONS).filter((note) => note.itemId === ITEMS[0]);
     const bounded = boundedEvidence(evidence, 12);

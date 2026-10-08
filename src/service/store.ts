@@ -4221,6 +4221,17 @@ export class EditorialStore {
       // The market section's house data and 按我的评分重写评语 of the version on show (Issue #429, S81b2).
       market: (bookId) => this.#evaluationMarket(bookId),
       rewrite: (bookId, version) => this.#evaluationRewriteWorkspace(bookId, version),
+    }, {
+      // A mark a version's entry records is tied to the 采用 that appended it (Issue #696): a damaged decision row makes that
+      // version unreadable, as a damaged entry does.
+      adoptedAt: (recordId, entryOrdinal) => {
+        try {
+          return this.#evaluationRewrites.adoptionAt(recordId, entryOrdinal);
+        } catch (error) {
+          if (error instanceof EvaluationRewriteError) throw new EvaluationError('EVALUATION_RECORD_INVALID', '评估记录已损坏。');
+          throw error;
+        }
+      },
     });
     this.#analysisFeedback = new AnalysisFeedbackLedger(authority);
     this.#capturedProcedures = new CapturedProcedures(authority);

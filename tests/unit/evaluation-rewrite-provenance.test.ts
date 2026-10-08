@@ -17,21 +17,30 @@ import type { EvaluationContent } from '../../src/shared/protocol.js';
 // database: 采用 marks only the words a rewrite changed, each with the digest of AI7's words; every later save keeps the mark
 // while the words stand as AI7 wrote them, an edit puts it aside and putting the words back restores it; two 采用 leave words of
 // both; an entry written before Issue #689 is read as the words it changed, and an entry after it that names none as the
-// words still standing; and a mark that does not match its entry is refused. The words are the suite's own.
+// words still standing; and a mark that does not match its entry is refused. Every mark an item has held is kept, so the words
+// of an earlier 采用 pasted back after a later one read as AI7's; and a mark set the chain could not have written — one that
+// drops a mark still standing, or names a rewrite not 采用'd on that entry — is refused (Issue #696). The decisions are the
+// suite's own map, as the store's evaluation rewrite owner holds them. The words are the suite's own.
 
 const ITEMS = BUILTIN_EVALUATION_PROFILE.items.map((item) => item.itemId);
 const A = { taskIntentId: randomUUID(), analysisRevisionId: randomUUID() };
 const B = { taskIntentId: randomUUID(), analysisRevisionId: randomUUID() };
+/** A rewrite no 采用 took. */
+const C = { taskIntentId: randomUUID(), analysisRevisionId: randomUUID() };
 
 let db: DatabaseSync;
 let records: EvaluationRecords;
 let bookId: string;
+/** Which rewrite each 采用 appended which entry with, by `recordId:ordinal`. */
+let adoptions: Map<string, typeof A>;
 
 beforeEach(() => {
   db = new DatabaseSync(':memory:', { enableForeignKeyConstraints: false });
   initializeEvaluationRecordSchema(db);
   initializeEvaluationInitialDraftSchema(db);
-  records = new EvaluationRecords(db, { current: () => ({ manuscriptId: randomUUID(), revisionId: randomUUID(), revisionLabel: 'r1', uncheckpointed: false }) });
+  adoptions = new Map();
+  records = new EvaluationRecords(db, { current: () => ({ manuscriptId: randomUUID(), revisionId: randomUUID(), revisionLabel: 'r1', uncheckpointed: false }) },
+    undefined, undefined, undefined, { adoptedAt: (recordId, ordinal) => adoptions.get(`${recordId}:${ordinal}`) ?? null });
   bookId = randomUUID();
 });
 
@@ -59,7 +68,8 @@ function save(recordId: string, change: (content: EvaluationContent) => Evaluati
 
 function adopt(recordId: string, items: ReadonlyArray<{ itemId: string; comment: string }>, verdict: string | null, from: typeof A): void {
   const version = latest(recordId);
-  records.applyRewrite(bookId, recordId, { entryOrdinal: version.entryOrdinal, entrySha256: version.entrySha256 }, { items, verdict }, from);
+  const ordinal = records.applyRewrite(bookId, recordId, { entryOrdinal: version.entryOrdinal, entrySha256: version.entrySha256 }, { items, verdict }, from);
+  adoptions.set(`${recordId}:${ordinal}`, from);
 }
 
 const withComment = (content: EvaluationContent, index: number, comment: string): EvaluationContent =>
@@ -160,5 +170,91 @@ describe('AI7\'s words in an evaluation entry, item by item (Issue #689)', () =>
     expect(refused(() => latest(recordId))).toBe('EVALUATION_RECORD_INVALID');
     forge(recordId, 3, (entry) => ({ ...entry, content: { ...(entry.content as Record<string, unknown>), verdict: 'AI7 的总评。' }, rewrittenFrom: good }));
     expect(refused(() => latest(recordId))).toBe('none');
+  });
+
+  it('keeps every mark an item has held: an earlier 采用\'s words pasted back after a later one read as AI7\'s (Issue #696)', () => {
+    const recordId = records.start(bookId);
+    save(recordId, () => own());
+    adopt(recordId, [{ itemId: ITEMS[0]!, comment: 'R1 的评语一。' }], null, A);
+    save(recordId, (content) => withComment(content, 0, '编辑的评语一。'));
+    expect(marks(recordId).at(-1)).toBeNull();
+    adopt(recordId, [{ itemId: ITEMS[0]!, comment: 'R2 的评语一。' }], 'R2 的总评。', B);
+    const second = { items: [mark(ITEMS[0]!, B, 'R2 的评语一。')], verdict: verdictMark(B, 'R2 的总评。') };
+    expect(marks(recordId).at(-1)).toEqual(second);
+    // The editor pastes R1's words back over R2's: they are R1's, though R2's 采用 came after; and R2's back are R2's.
+    const first = { items: [mark(ITEMS[0]!, A, 'R1 的评语一。')], verdict: verdictMark(B, 'R2 的总评。') };
+    save(recordId, (content) => withComment(content, 0, 'R1 的评语一。'));
+    expect(marks(recordId).at(-1)).toEqual(first);
+    save(recordId, (content) => withComment(content, 0, 'R2 的评语一。'));
+    expect(marks(recordId).at(-1)).toEqual(second);
+    // 定稿 and 重新评估: R1's words, set aside in the version before, are still AI7's when pasted back in the next.
+    save(recordId, (content) => ({ ...content, conclusion: 'revise' }), true);
+    const next = records.start(bookId);
+    expect(marks(next)).toEqual([second]);
+    save(next, (content) => withComment(content, 0, 'R1 的评语一。'));
+    expect(marks(next).at(-1)).toEqual(first);
+    // Two rewrites that wrote the same words: the later one names them.
+    save(next, (content) => withComment(content, 0, '编辑的评语一。'));
+    const r3 = { taskIntentId: randomUUID(), analysisRevisionId: randomUUID() };
+    adopt(next, [{ itemId: ITEMS[0]!, comment: 'R1 的评语一。' }], null, r3);
+    save(next, (content) => ({ ...content, conclusion: 'revise' }));
+    expect(marks(next).at(-1)).toEqual({ items: [mark(ITEMS[0]!, r3, 'R1 的评语一。')], verdict: verdictMark(B, 'R2 的总评。') });
+  });
+
+  it('refuses a mark set its chain could not have written: one that drops a mark still standing, or names a rewrite not 采用\'d there (Issue #696)', () => {
+    const recordId = records.start(bookId);
+    save(recordId, () => own());
+    adopt(recordId, [{ itemId: ITEMS[0]!, comment: 'AI7 的评语一。' }, { itemId: ITEMS[2]!, comment: 'AI7 的评语三。' }], 'AI7 的总评。', A);
+    const first = mark(ITEMS[0]!, A, 'AI7 的评语一。');
+    const third = mark(ITEMS[2]!, A, 'AI7 的评语三。');
+    const adopted = { items: [first, third], verdict: verdictMark(A, 'AI7 的总评。') };
+    expect(marks(recordId).at(-1)).toEqual(adopted);
+    const refusedWith = (ordinal: number, rewrittenFrom: unknown, of = recordId): string => {
+      forge(of, ordinal, (entry) => ({ ...entry, rewrittenFrom }));
+      return refused(() => latest(of));
+    };
+    // The 采用 entry: another rewrite's mark, this rewrite's over words it did not change, or a subset of what it wrote.
+    for (const [what, rewrittenFrom] of [
+      ['a rewrite this entry\'s 采用 did not take', { ...adopted, items: [mark(ITEMS[0]!, C, 'AI7 的评语一。'), third] }],
+      ['a 总评 of a rewrite never 采用\'d', { ...adopted, verdict: verdictMark(C, 'AI7 的总评。') }],
+      ['this rewrite over the editor\'s own words', { ...adopted, items: [first, mark(ITEMS[1]!, A, '编辑的评语 2。'), third] }],
+      ['an entry written before Issue #689 naming a rewrite this 采用 did not take', C],
+    ] as const) {
+      expect(refusedWith(3, rewrittenFrom), what).toBe('EVALUATION_RECORD_INVALID');
+    }
+    expect(refusedWith(3, A)).toBe('none');
+    expect(refusedWith(3, adopted)).toBe('none');
+    // Without the decision that took it, the 采用 entry names a rewrite nothing took.
+    adoptions.delete(`${recordId}:3`);
+    expect(refused(() => latest(recordId))).toBe('EVALUATION_RECORD_INVALID');
+    adoptions.set(`${recordId}:3`, A);
+
+    // A plain save after it: every mark still standing, and only marks the chain holds.
+    save(recordId, (content) => ({ ...content, conclusion: 'revise' }));
+    expect(marks(recordId).at(-1)).toEqual(adopted);
+    for (const [what, rewrittenFrom] of [
+      ['a subset that drops a 评语 still standing', { ...adopted, items: [first] }],
+      ['a subset that drops the 总评 still standing', { ...adopted, verdict: null }],
+      ['a rewrite never 采用\'d', { ...adopted, items: [first, mark(ITEMS[1]!, C, '编辑的评语 2。'), third] }],
+      ['the 采用\'d rewrite over words it never wrote', { ...adopted, items: [first, mark(ITEMS[1]!, A, '编辑的评语 2。'), third] }],
+    ] as const) {
+      expect(refusedWith(4, rewrittenFrom), what).toBe('EVALUATION_RECORD_INVALID');
+    }
+    expect(refusedWith(4, adopted)).toBe('none');
+
+    // The next version's first entry carries the 定稿's marks: none dropped, none the chain before never held.
+    save(recordId, (content) => content, true);
+    const next = records.start(bookId);
+    expect(marks(next)).toEqual([adopted]);
+    for (const [what, rewrittenFrom] of [
+      ['a carried mark dropped', { ...adopted, items: [third] }],
+      ['a mark the version before never held', { ...adopted, items: [first, mark(ITEMS[1]!, A, '编辑的评语 2。'), third] }],
+    ] as const) {
+      expect(refusedWith(1, rewrittenFrom, next), what).toBe('EVALUATION_RECORD_INVALID');
+    }
+    // A first entry that names none reads the marks carried into it: AI7's words stay AI7's across 重新评估.
+    forge(next, 1, ({ rewrittenFrom: _words, ...entry }) => entry);
+    save(next, (content) => ({ ...content, conclusion: 'revise' }));
+    expect(marks(next)).toEqual([null, adopted]);
   });
 });
