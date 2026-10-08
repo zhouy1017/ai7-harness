@@ -269,26 +269,42 @@ function productEnvironment(executable) {
   return selected;
 }
 
+/** The service's startup step as a check label's word: one of the fixed steps the trace admits, or `none`. */
+function serviceStepWord(step) {
+  switch (step) {
+    case 'spawned': return 'spawned';
+    case 'process': return 'process';
+    case 'store': return 'store';
+    case 'owners': return 'owners';
+    case 'serving': return 'serving';
+    case 'stopped': return 'stopped';
+    default: return 'none';
+  }
+}
+
 /**
  * The launch's renderer target did not appear within J-01's budget: fail, naming why from the launch's trace (Issue #675).
  * Main makes the window only once its service is ready, so a launch still at `service-ready` cannot have a target yet; it
  * is watched until the product's own service deadline has passed, never to let it pass, only to say whether the service
- * then became ready (`-slow`), or the product gave up on it (`-stalled`), or neither (`-unbounded`). Otherwise the check
- * says the product failed or exited, that main was making the window, or that it had said it was ready.
+ * then became ready (`-slow`), the product gave up on it (`-stalled`), it exited (`-exited`) or neither (`-unbounded`),
+ * each `-at-<step>` the service's own startup had reached when the budget passed. Otherwise the check says the product
+ * failed or exited, that main was making the window, or that it had said it was ready.
  */
 async function rendererTargetMissing() {
   let trace = launchTraceNow();
   const waitingForService = (current) => current?.last === 'service-ready' && current.failed === null && current.exited === null;
   if (waitingForService(trace)) {
+    // Where the service's own startup stood when J-01's budget passed, which the check names whatever follows.
+    const stood = serviceStepWord(trace.service);
     const bound = launchInFlight.startedAt + trace.lastAt + PRODUCT_SERVICE_READY_TIMEOUT_MS + PRODUCT_SERVICE_READY_MARGIN_MS;
     while (waitingForService(trace) && Date.now() < bound) {
       await new Promise((settle) => setTimeout(settle, 250));
       trace = launchTraceNow();
     }
-    requireJourney(trace.failed !== 'service-ready', 'renderer-target-service-start-stalled');
-    requireJourney(trace.failed !== null || trace.exited !== null || trace.last === 'service-ready', 'renderer-target-service-start-slow');
-    requireJourney(trace.failed !== null || trace.exited === null, 'renderer-target-service-start-exited');
-    requireJourney(trace.failed !== null, 'renderer-target-service-start-unbounded');
+    requireJourney(trace.failed !== 'service-ready', `renderer-target-service-start-stalled-at-${stood}`);
+    requireJourney(trace.failed !== null || trace.exited !== null || trace.last === 'service-ready', `renderer-target-service-start-slow-at-${stood}`);
+    requireJourney(trace.failed !== null || trace.exited === null, `renderer-target-service-start-exited-at-${stood}`);
+    requireJourney(trace.failed !== null, `renderer-target-service-start-unbounded-at-${stood}`);
   }
   requireJourney(trace === null || trace.failed === null, 'renderer-target-startup-failed');
   requireJourney(trace === null || trace.exited === null, 'renderer-target-product-exited');
