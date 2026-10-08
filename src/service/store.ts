@@ -3,7 +3,7 @@ import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSyn
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
-import { J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
+import { CAPTURED_PROCEDURE_SCOPE_SLOTS, MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
   InspectSeriesKnowledgeReviewInput,
   ServiceOperationMap,
@@ -16,6 +16,15 @@ import type {
   DialogueAttemptInput,
   DialogueConversionProjection,
   DialogueProjection,
+  CapturedProcedureProjection,
+  CapturedProceduresProjection,
+  CapturedProcedureRunProjection,
+  CapturedProcedureValidationProjection,
+  DeveloperProposalProjection,
+  DeveloperProposalVersionProjection,
+  ProcedureCaptureProjection,
+  SaveCapturedProcedureInput,
+  SaveDeveloperProposalInput,
   ApproveManuscriptExportInput,
   InspectManuscriptExportReceiptInput,
   StageManuscriptExportInput,
@@ -580,6 +589,22 @@ import {
 import { readExemplars } from './exemplars.js';
 import { readKnowledgeProcedures } from './knowledge-procedures.js';
 import {
+  CapturedProcedureError,
+  CapturedProcedures,
+  callsModel,
+  capturedProcedureDocument,
+  capturedStepProblem,
+  capturedStepProjections,
+  ceilingWiderThanSource,
+  developerProposalFileText,
+  houseExecutor,
+  initializeCapturedProcedureSchema,
+  validCapturedProcedureTitle,
+  type ReviewRunProcedurePinInput,
+  type StepWords,
+  type StoredCapturedVersion,
+} from './captured-procedures.js';
+import {
   ProductionDocumentOriginError,
   initializeProductionDocumentOriginSchema,
   recordProductionDocumentOrigin,
@@ -699,6 +724,7 @@ import {
   DIALOGUE_SCHEMA_VERSION,
   SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
   READERS_REPORT_SCHEMA_VERSION,
+  CAPTURED_PROCEDURE_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1937,7 +1963,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === INITIAL_EVALUATION_SCHEMA_VERSION ||
       currentVersion === DIALOGUE_SCHEMA_VERSION ||
       currentVersion === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
-      currentVersion === READERS_REPORT_SCHEMA_VERSION,
+      currentVersion === READERS_REPORT_SCHEMA_VERSION ||
+      currentVersion === CAPTURED_PROCEDURE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -1995,7 +2022,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === INITIAL_EVALUATION_SCHEMA_VERSION ||
       currentVersion === DIALOGUE_SCHEMA_VERSION ||
       currentVersion === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
-      currentVersion === READERS_REPORT_SCHEMA_VERSION
+      currentVersion === READERS_REPORT_SCHEMA_VERSION ||
+      currentVersion === CAPTURED_PROCEDURE_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2367,7 +2395,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === INITIAL_EVALUATION_SCHEMA_VERSION ||
       version === DIALOGUE_SCHEMA_VERSION ||
       version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
-      version === READERS_REPORT_SCHEMA_VERSION,
+      version === READERS_REPORT_SCHEMA_VERSION ||
+      version === CAPTURED_PROCEDURE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2414,7 +2443,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === INITIAL_EVALUATION_SCHEMA_VERSION ||
       version === DIALOGUE_SCHEMA_VERSION ||
       version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
-      version === READERS_REPORT_SCHEMA_VERSION) return;
+      version === READERS_REPORT_SCHEMA_VERSION ||
+      version === CAPTURED_PROCEDURE_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2553,7 +2583,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === INITIAL_EVALUATION_SCHEMA_VERSION ||
       version === DIALOGUE_SCHEMA_VERSION ||
       version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
-      version === READERS_REPORT_SCHEMA_VERSION,
+      version === READERS_REPORT_SCHEMA_VERSION ||
+      version === CAPTURED_PROCEDURE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2599,7 +2630,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === INITIAL_EVALUATION_SCHEMA_VERSION ||
       version === DIALOGUE_SCHEMA_VERSION ||
       version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
-      version === READERS_REPORT_SCHEMA_VERSION) return;
+      version === READERS_REPORT_SCHEMA_VERSION ||
+      version === CAPTURED_PROCEDURE_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -2892,7 +2924,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== READERS_REPORT_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== CAPTURED_PROCEDURE_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -2941,6 +2973,7 @@ function validateModelServiceSchema(
       version >= DIALOGUE_SCHEMA_VERSION,
       version >= SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
       version >= READERS_REPORT_SCHEMA_VERSION,
+      version >= CAPTURED_PROCEDURE_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -3014,7 +3047,8 @@ function initializeModelServiceSchema(
       version === INITIAL_EVALUATION_SCHEMA_VERSION ||
       version === DIALOGUE_SCHEMA_VERSION ||
       version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
-      version === READERS_REPORT_SCHEMA_VERSION,
+      version === READERS_REPORT_SCHEMA_VERSION ||
+      version === CAPTURED_PROCEDURE_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3060,7 +3094,8 @@ function initializeModelServiceSchema(
       version === INITIAL_EVALUATION_SCHEMA_VERSION ||
       version === DIALOGUE_SCHEMA_VERSION ||
       version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
-      version === READERS_REPORT_SCHEMA_VERSION) {
+      version === READERS_REPORT_SCHEMA_VERSION ||
+      version === CAPTURED_PROCEDURE_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3916,6 +3951,8 @@ export class EditorialStore {
   readonly #editorialMarks: EditorialMarkStore;
   readonly #manuscriptApply: ManuscriptApplyStore;
   readonly #reviewRuns: ReviewRunStore;
+  /** 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087): the house's Captured Procedures and Developer Capability Proposals. */
+  readonly #capturedProcedures: CapturedProcedures;
   readonly #publicationVersions: PublicationVersionStore;
   readonly #maintenanceCases: MaintenanceCases;
   readonly #bookPeople: BookPeople;
@@ -4015,13 +4052,13 @@ export class EditorialStore {
     this.#dialogueHistory = harnessHistoryReader(join(dataRoot, HARNESS_SESSION_LOG_DIRECTORY));
     this.#dataVersions = new DataVersionLedger(authority);
     this.#databaseExports = new DatabaseExports(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: READERS_REPORT_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: CAPTURED_PROCEDURE_SCHEMA_VERSION }),
     });
     this.#scheduledBackups = new ScheduledBackups(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: READERS_REPORT_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: CAPTURED_PROCEDURE_SCHEMA_VERSION }),
     });
     this.#databaseReplacements = new DatabaseReplacements(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: READERS_REPORT_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: CAPTURED_PROCEDURE_SCHEMA_VERSION }),
       // A package's data opens as a store of its own, with no launch control: brought to this revision and checked whole.
       openPackage: async (root) => {
         const opened = await EditorialStore.open(root, this.#codeRoot, {
@@ -4044,6 +4081,7 @@ export class EditorialStore {
       workspace: (bookId, basis, unreadable) => this.#readersReportWorkspace(bookId, basis, unreadable),
     });
     this.#analysisFeedback = new AnalysisFeedbackLedger(authority);
+    this.#capturedProcedures = new CapturedProcedures(authority);
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
       ledgerOf: (entry) => this.#reviewLedgerOf(entry),
       baseline: () => this.#baselineAnalysis,
@@ -4170,7 +4208,7 @@ export class EditorialStore {
       // the backup location before anything migrates it, and a backup that cannot be made opens nothing.
       const classes = control.schemaRevisionClasses ?? SCHEMA_REVISION_CLASSES;
       const { upgrade, earlier } = await backUpBeforeUpgrade(authority, dataRoot, {
-        terminalRevision: READERS_REPORT_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
+        terminalRevision: CAPTURED_PROCEDURE_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
       }).catch((error: unknown) => {
         if (error instanceof DataVersionError) throw new StoreError(error.code, error.message);
         throw error;
@@ -4245,6 +4283,7 @@ export class EditorialStore {
       // 58 (Issue #434, S86d) the merges of a package's Books. Revision 59 (Issue #429, S81b1) adds the AI7 初评 each Evaluation
       // Record version began from, and `initializeTaskAuthorizationSchema` rebuilds the kind-coupled analysis relations for it;
       // revision 60 (Issue #52, S17a) adds the dialogue Tasks, and revision 61 (Issue #64, S29b) the Series Retrieval Exclusions.
+      // Revision 63 (Issue #65, S30) adds the Captured Procedures and the Developer Capability Proposals.
       initializeBookPeopleSchema(authority);
       initializeReviewGuidelineSchema(authority);
       initializeLibraryMaterialSchema(authority);
@@ -4265,6 +4304,7 @@ export class EditorialStore {
       initializeSeriesRetrievalExclusionSchema(authority);
       // Revision 62 (Issue #429, S81c): which 定稿 version each 审稿意见 Task drafts from, and which result became a draft.
       initializeReadersReportSchema(authority);
+      initializeCapturedProcedureSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -4312,7 +4352,7 @@ export class EditorialStore {
       // Every store records the versions that open it (Issue #433, S85a; DSTO-016): a new record only when one changed.
       store.#softwareVersion = softwareVersion;
       store.#codeRoot = codeRoot;
-      store.#dataVersion = dataVersionAt(READERS_REPORT_SCHEMA_VERSION, classes);
+      store.#dataVersion = dataVersionAt(CAPTURED_PROCEDURE_SCHEMA_VERSION, classes);
       if (control.interruptUpgradeAt === 'before-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在记录版本之前停止。');
       // The open that raised the Data Version records the upgrade it made with the backup (S85b), and only then clears the note
       // that let an open stopped before this record it (Issue #433 review).
@@ -4320,7 +4360,7 @@ export class EditorialStore {
         // Upgrades other opens made and never recorded go first, oldest first, as those opens would have recorded them; one a
         // record already holds is not recorded again (Issue #433 review).
         for (const carried of earlier) store.#dataVersions.recordCarried(carried);
-        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: READERS_REPORT_SCHEMA_VERSION, upgrade });
+        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: CAPTURED_PROCEDURE_SCHEMA_VERSION, upgrade });
       }));
       if (control.interruptUpgradeAt === 'after-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在清除升级记录之前停止。');
       await completeUpgrade(dataRoot).catch(() => undefined);
@@ -4563,8 +4603,11 @@ export class EditorialStore {
     categoryIds: ReadonlyArray<string>,
     scope: ReviewRunScopeRequest,
     launchPolicy: LaunchPolicyProjection,
+    // The Captured Procedure version the sheet was pre-filled from (Issue #65, S30; ADR 0087 §4): pinned by the Run.
+    capturedProcedure: { versionId: string; documentSha256: string } | null = null,
   ): AnalysisPreparationResult<ReviewWorkspaceProjection> {
-    return this.#reviewPreparation(() => this.#reviewRuns.prepare({ phase: 'start', bookId, categoryIds, scope, launchPolicy }));
+    const procedure = capturedProcedure === null ? null : this.#procedureCall(() => this.#capturedProcedurePin(bookId, capturedProcedure));
+    return this.#reviewPreparation(() => this.#reviewRuns.prepare({ phase: 'start', bookId, categoryIds, scope, launchPolicy, procedure }));
   }
 
   advanceReviewRunPreparationWork(workId: string): AnalysisPreparationResult<ReviewWorkspaceProjection> {
@@ -6210,6 +6253,371 @@ export class EditorialStore {
       documents: (bookId) => this.#productionDocuments.deliveryReadings(bookId),
       people: (bookId) => this.#peopleCall(() => this.#bookPeople.current(bookId)),
     }, after)));
+  }
+
+  // ---- 可复用工序 (Issue #65, plan slice S30; ADR 0087; V2-UX-REUSE-001 to 020, 029 to 031, 038 to 054, 063 to 066) -----------
+
+  /** Each step's words from the configuration as it applies now; a category no longer there keeps its identity as its label. */
+  #capturedStepWords(): StepWords {
+    const configuration = this.#reviewGuidelines.configuration();
+    return (categoryId) => {
+      const entry = configuration.categories.find((candidate) => candidate.categoryId === categoryId);
+      return { label: entry?.label ?? categoryId, procedureTitle: entry?.procedure.title ?? categoryId };
+    };
+  }
+
+  #capturedProcedureProjection(procedureId: string, before: number | null = null): CapturedProcedureProjection {
+    return this.#capturedProcedures.projection(procedureId, this.#capturedStepWords(), (bookId) => this.#evaluationBookTitle(bookId),
+      (reviewRunId) => this.#reviewRuns.ordinalOf(reviewRunId), before);
+  }
+
+  /** 知识库 › 工序与规则's 可复用工序, apart from the built-in 工序, and the 开发建议 (ADR 0087 §5, §6). A read. */
+  inspectCapturedProcedures(): CapturedProceduresProjection {
+    return this.#procedureCall(() => {
+      const { ids, truncated } = this.#capturedProcedures.procedureIds();
+      const proposals = this.#capturedProcedures.proposals();
+      return {
+        procedures: ids.map((procedureId) => this.#capturedProcedures.summary(procedureId)),
+        proceduresTruncated: truncated,
+        proposals: proposals.proposals,
+        proposalsTruncated: proposals.truncated,
+      };
+    });
+  }
+
+  /** One Captured Procedure with a page of its versions, newest first, below `before` when it is given (Issue #65 review). */
+  inspectCapturedProcedure(procedureId: string, before: number | null): CapturedProcedureProjection {
+    return this.#procedureCall(() => {
+      requireStore(typeof procedureId === 'string' && UUID_PATTERN.test(procedureId), 'CAPTURED_PROCEDURE_INVALID', '可复用工序标识无效。');
+      return this.#capturedProcedureProjection(procedureId, before);
+    });
+  }
+
+  /** One 开发建议 with a page of its versions, newest first, below `before` when it is given (Issue #65 review). */
+  inspectDeveloperProposal(proposalId: string, before: number | null): DeveloperProposalProjection {
+    return this.#procedureCall(() => this.#capturedProcedures.proposal(proposalId, before));
+  }
+
+  /** One 开发建议 version alone: what 导出为文件… names and writes. */
+  inspectDeveloperProposalVersion(proposalVersionId: string): DeveloperProposalVersionProjection {
+    return this.#procedureCall(() => {
+      const version = this.#capturedProcedures.proposalVersion(proposalVersionId);
+      requireStore(version !== null, 'DEVELOPER_PROPOSAL_NOT_FOUND', '这一版开发建议不存在。');
+      const { canonical: _canonical, ...projection } = version;
+      return projection;
+    });
+  }
+
+  /**
+   * `将以上工序保存为可复用工序` on one Review Run of the Book (ADR 0087 §2; REUSE-002, REUSE-011 to REUSE-019): its source set —
+   * every category, which may be kept and why not — the scope slot it suggests, the deterministic classification, and the
+   * procedures a next version may join. A read: closing it creates nothing (REUSE-020).
+   */
+  inspectProcedureCapture(bookId: string, reviewRunId: string): ProcedureCaptureProjection {
+    return this.#procedureCall(() => {
+      const source = this.#reviewRuns.captureSource(bookId, reviewRunId);
+      const { ids } = this.#capturedProcedures.procedureIds();
+      return {
+        bookId,
+        reviewRunId,
+        runLabel: `第 ${source.ordinal} 次审阅`,
+        available: source.unavailableReason === null,
+        unavailableReason: source.unavailableReason,
+        steps: source.steps.map(({ entry, eligible, excludedReason }) => ({
+          categoryId: entry.categoryId,
+          label: entry.label,
+          procedureTitle: entry.procedure.title,
+          procedureVersion: entry.procedure.version,
+          output: entry.output,
+          model: callsModel(houseExecutor(entry)),
+          searchEngine: entry.searchEngine,
+          eligible,
+          excludedReason,
+        })),
+        scopeSlot: source.scopeKind === 'whole' ? 'whole' : 'chapters',
+        sourceScopeLabel: source.scopeLabel,
+        // A finished Review Run is review work the existing executors already perform: a Captured Procedure. Anything that needs
+        // new code is a Developer Capability Proposal; the native Skill and Workflow drafts and a Default Execution Rule over a
+        // Captured Procedure stay deferred (ADR 0087 §1, §6).
+        classification: {
+          recommended: 'captured-procedure',
+          alternatives: [
+            { kind: 'developer-proposal', available: true },
+            { kind: 'skill-draft', available: false },
+            { kind: 'workflow-draft', available: false },
+            { kind: 'default-rule', available: false },
+          ],
+        },
+        procedures: ids.map((procedureId) => {
+          const latest = this.#capturedProcedures.versions(procedureId)[0]!;
+          return { procedureId, title: latest.document.title, latestVersion: latest.version };
+        }),
+      };
+    });
+  }
+
+  /**
+   * 保存为可复用工序 (ADR 0087 §2): the kept steps of a finished Review Run, in the configuration's order, saved as version 1 of a
+   * new Captured Procedure or the next version of an existing one, 待验证. Its document holds nothing of the Book; the Run is
+   * named only in the local provenance outside its digest.
+   */
+  saveCapturedProcedure(input: SaveCapturedProcedureInput, now: Date = new Date()): CapturedProcedureProjection {
+    return this.#procedureCall(() => {
+      requireStore(typeof input === 'object' && input !== null &&
+        Array.isArray(input.categoryIds) && input.categoryIds.length >= 1 && new Set(input.categoryIds).size === input.categoryIds.length &&
+        input.categoryIds.every((categoryId) => typeof categoryId === 'string'),
+      'CAPTURED_PROCEDURE_STEPS_INVALID', '请至少保留一个步骤，且不要重复。');
+      requireStore((CAPTURED_PROCEDURE_SCOPE_SLOTS as readonly string[]).includes(input.scopeSlot), 'CAPTURED_PROCEDURE_INVALID', '审阅范围的设定无效。');
+      requireStore(validCapturedProcedureTitle(input.title), 'CAPTURED_PROCEDURE_TITLE_INVALID',
+        `请给这个工序起一个名字（1–${MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES} 个字，前后不留空格）。`);
+      const source = this.#reviewRuns.captureSource(input.bookId, input.reviewRunId);
+      requireStore(source.unavailableReason === null, 'CAPTURED_PROCEDURE_SOURCE_INELIGIBLE', source.unavailableReason ?? '');
+      for (const categoryId of input.categoryIds) {
+        const step = source.steps.find((candidate) => candidate.entry.categoryId === categoryId);
+        requireStore(step !== undefined, 'CAPTURED_PROCEDURE_STEPS_INVALID', '要保存的步骤不在这次审阅中。');
+        requireStore(step.eligible, 'CAPTURED_PROCEDURE_STEP_INELIGIBLE', `「${step.entry.label}」不能保存：${step.excludedReason ?? ''}`);
+      }
+      // The steps keep the configuration's order — the Run's own — whatever order they were named in (ADR 0087 §2).
+      const entries = source.steps.filter((step) => input.categoryIds.includes(step.entry.categoryId)).map((step) => step.entry);
+      const document = capturedProcedureDocument(input.title, entries, input.scopeSlot);
+      const stored = this.#transaction(this.#authority, () => this.#capturedProcedures.save({
+        procedureId: input.procedureId,
+        document,
+        sourceBookId: input.bookId,
+        sourceReviewRunId: input.reviewRunId,
+        sourceRunOrdinal: source.ordinal,
+      }, now));
+      return this.#capturedProcedureProjection(stored.procedureId);
+    });
+  }
+
+  /**
+   * `验证并启用…`'s preview of one version (ADR 0087 §3), deterministic and provider-free: each step with its 工序 and version,
+   * its output, its model and search-engine use, the guideline versions a run would apply today against the source Run's, the
+   * scope slot, the Authority Ceiling, and every problem — a step that no longer resolves at the same 工序 version, or a ceiling
+   * wider than the source Run's. Its digest is what enabling confirms.
+   */
+  #capturedValidation(stored: StoredCapturedVersion): CapturedProcedureValidationProjection {
+    const configuration = this.#reviewGuidelines.configuration();
+    const sourceEntries = this.#reviewRuns.snapshotEntries(stored.sourceReviewRunId);
+    const words = this.#capturedStepWords();
+    const steps = stored.document.steps.map((step, index) => {
+      const entry = configuration.categories.find((candidate) => candidate.categoryId === step.categoryId);
+      const source = sourceEntries.find((candidate) => candidate.categoryId === step.categoryId);
+      // 书系一致性's documents are each Book's Series Knowledge, read when it runs; the house's guideline documents are compared.
+      const guidelines = entry === undefined || houseExecutor(entry) === 'series-knowledge' ? [] : entry.guidelineDocuments.map((document) => ({
+        title: document.title,
+        issuer: document.issuer,
+        version: document.version,
+        sourceVersion: source?.guidelineDocuments.find((candidate) => candidate.documentId === document.documentId)?.version ?? null,
+      }));
+      return {
+        ...capturedStepProjections(stored.document, words)[index]!,
+        guidelines,
+        problem: capturedStepProblem(stored.document, index, configuration),
+      };
+    });
+    const problems = [
+      ...steps.flatMap((step) => step.problem === null ? [] : [step.problem]),
+      ...ceilingWiderThanSource(stored.document, sourceEntries),
+    ];
+    const previewDigest = sha256(canonicalJson({
+      versionId: stored.versionId,
+      documentSha256: stored.documentSha256,
+      steps: steps.map((step) => ({ categoryId: step.categoryId, guidelines: step.guidelines, problem: step.problem })),
+      problems,
+    }));
+    return {
+      versionId: stored.versionId,
+      procedureId: stored.procedureId,
+      version: stored.version,
+      title: stored.document.title,
+      state: stored.state,
+      steps,
+      scopeSlot: stored.document.parameters.scope,
+      ceiling: stored.document.authorityCeiling,
+      problems,
+      passes: problems.length === 0,
+      previewDigest,
+    };
+  }
+
+  #requireCapturedVersion(versionId: string): StoredCapturedVersion {
+    requireStore(typeof versionId === 'string' && UUID_PATTERN.test(versionId), 'CAPTURED_PROCEDURE_INVALID', '可复用工序的版本标识无效。');
+    const stored = this.#capturedProcedures.version(versionId);
+    requireStore(stored !== null, 'CAPTURED_PROCEDURE_NOT_FOUND', '这一版可复用工序不存在。');
+    return stored;
+  }
+
+  previewCapturedProcedureValidation(versionId: string): CapturedProcedureValidationProjection {
+    return this.#procedureCall(() => this.#capturedValidation(this.#requireCapturedVersion(versionId)));
+  }
+
+  /**
+   * Confirm `验证并启用…` (ADR 0087 §3): exactly the preview the editor saw, by its digest. A version that passes is `已启用`; one
+   * that does not keeps `待验证` with its reasons recorded. Nothing is planned, prepared or run.
+   */
+  enableCapturedProcedure(versionId: string, previewDigest: string, now: Date = new Date()): CapturedProcedureProjection {
+    return this.#procedureCall(() => {
+      const stored = this.#requireCapturedVersion(versionId);
+      const preview = this.#capturedValidation(stored);
+      requireStore(typeof previewDigest === 'string' && preview.previewDigest === previewDigest, 'CAPTURED_PROCEDURE_PREVIEW_STALE',
+        '验证的结果在你查看之后有了变化；请重新查看再启用。');
+      this.#transaction(this.#authority, () => this.#capturedProcedures.recordValidation(versionId, preview.problems, preview.previewDigest, now));
+      return this.#capturedProcedureProjection(stored.procedureId);
+    });
+  }
+
+  /**
+   * `停用` (ADR 0087 §5): one version, or — with `versionId` \`null\` — every version not stopped yet. Final for each: a stopped
+   * version is never resolved again and stays as its own Historical Version Stub, and every Run that pinned it keeps naming it.
+   */
+  stopCapturedProcedure(procedureId: string, versionId: string | null, now: Date = new Date()): CapturedProcedureProjection {
+    return this.#procedureCall(() => {
+      const versions = this.#capturedProcedures.versions(procedureId);
+      requireStore(versions.length > 0, 'CAPTURED_PROCEDURE_NOT_FOUND', '这个可复用工序不存在。');
+      const stopping = versionId === null ? versions.filter((stored) => stored.state !== 'stopped') : versions.filter((stored) => stored.versionId === versionId);
+      requireStore(versionId === null || stopping.length === 1, 'CAPTURED_PROCEDURE_NOT_FOUND', '这一版可复用工序不存在。');
+      this.#transaction(this.#authority, () => { for (const stored of stopping) this.#capturedProcedures.stop(stored.versionId, now); });
+      return this.#capturedProcedureProjection(procedureId);
+    });
+  }
+
+  /**
+   * `运行此工序…` / `按已保存的工序` for one Book (ADR 0087 §4; UI ADR 0013, REUSE-043 to REUSE-045): the newest `已启用`
+   * version that still validates — a newer one that no longer does is passed over and said so — with its steps as this Book can
+   * take them and where today's guideline versions differ from the source Run's. A read: the ordinary 新建审阅 sheet prepares.
+   */
+  inspectCapturedProcedureRun(bookId: string, procedureId: string): CapturedProcedureRunProjection {
+    return this.#procedureCall(() => {
+      requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+      const versions = this.#capturedProcedures.versions(procedureId);
+      requireStore(versions.length > 0, 'CAPTURED_PROCEDURE_NOT_FOUND', '这个可复用工序不存在。');
+      const passedOver: Array<{ version: number; reason: string }> = [];
+      let resolved: { stored: StoredCapturedVersion; validation: CapturedProcedureValidationProjection } | null = null;
+      for (const stored of versions) {
+        if (stored.state !== 'enabled') continue;
+        const validation = this.#capturedValidation(stored);
+        if (!validation.passes) {
+          passedOver.push({ version: stored.version, reason: validation.problems[0]! });
+          continue;
+        }
+        resolved = { stored, validation };
+        break;
+      }
+      const title = versions[0]!.document.title;
+      if (resolved === null) {
+        return {
+          bookId,
+          procedureId,
+          title,
+          resolved: null,
+          passedOver,
+          unavailableReason: passedOver.length > 0
+            ? '这个工序启用的各版现在都不能按原样运行；请从一次新的审阅重新保存。'
+            : '这个工序还没有启用的版本；先在知识库「工序与规则」里验证并启用。',
+        };
+      }
+      const { stored, validation } = resolved;
+      const availability = this.#reviewRuns.categoryAvailability(bookId, stored.document.parameters.scope);
+      return {
+        bookId,
+        procedureId,
+        title,
+        resolved: {
+          versionId: stored.versionId,
+          version: stored.version,
+          documentSha256: stored.documentSha256,
+          scopeSlot: stored.document.parameters.scope,
+          steps: validation.steps.map((step) => {
+            const reason = availability.has(step.categoryId) ? availability.get(step.categoryId)! : '这一类已不在审阅配置中。';
+            return { categoryId: step.categoryId, label: step.label, available: reason === null, unavailableReason: reason };
+          }),
+          guidelineChanges: validation.steps.flatMap((step) => step.guidelines
+            .filter((guideline) => guideline.sourceVersion !== guideline.version)
+            .map((guideline) => ({ categoryId: step.categoryId, label: step.label, title: guideline.title, sourceVersion: guideline.sourceVersion, version: guideline.version }))),
+        },
+        passedOver,
+        unavailableReason: null,
+      };
+    });
+  }
+
+  /**
+   * The pin a preparation from a Captured Procedure carries (ADR 0087 §4): only exactly the version and digest the sheet was
+   * pre-filled from, and only while it is still the one this Book resolves — a version stopped, a newer one enabled, or one that
+   * no longer validates since makes the editor choose it again.
+   */
+  #capturedProcedurePin(bookId: string, chosen: { versionId: string; documentSha256: string }): ReviewRunProcedurePinInput {
+    requireStore(typeof chosen === 'object' && chosen !== null && typeof chosen.versionId === 'string' && UUID_PATTERN.test(chosen.versionId) &&
+      typeof chosen.documentSha256 === 'string' && /^[0-9a-f]{64}$/u.test(chosen.documentSha256), 'REVIEW_PROCEDURE_INVALID', '所选的可复用工序无效。');
+    const stored = this.#requireCapturedVersion(chosen.versionId);
+    const run = this.inspectCapturedProcedureRun(bookId, stored.procedureId);
+    requireStore(run.resolved !== null && run.resolved.versionId === chosen.versionId && run.resolved.documentSha256 === chosen.documentSha256,
+      'REVIEW_PROCEDURE_STALE', `可复用工序《${stored.document.title}》在你选择之后有了变化；请重新选择它。`);
+    return {
+      procedureId: stored.procedureId,
+      versionId: stored.versionId,
+      version: stored.version,
+      title: stored.document.title,
+      documentSha256: stored.documentSha256,
+      scope: stored.document.parameters.scope,
+      steps: stored.document.steps.map((step) => step.categoryId),
+    };
+  }
+
+  /** 保存开发建议 (ADR 0087 §6; REUSE-063, REUSE-064): a new Developer Capability Proposal, or its next version. Sent nowhere. */
+  saveDeveloperProposal(input: SaveDeveloperProposalInput, now: Date = new Date()): DeveloperProposalProjection {
+    return this.#procedureCall(() => {
+      const proposalId = this.#transaction(this.#authority, () => this.#capturedProcedures.saveProposal(input, now));
+      return this.#capturedProcedures.proposal(proposalId);
+    });
+  }
+
+  /**
+   * 导出为文件… (ADR 0087 §6): one proposal version written as Markdown to the file the editor chose through the platform Save
+   * dialog — beside it first, synced, then renamed onto the name — and the file's name, digest and length recorded. It holds no
+   * Book material, so it is not an External Export Policy target, and AI7 sends it nowhere.
+   */
+  async writeDeveloperProposalFile(proposalVersionId: string, destination: string, now: Date = new Date()): Promise<DeveloperProposalProjection> {
+    this.#assertAvailable();
+    const version = this.#procedureCall(() => this.#capturedProcedures.proposalVersion(proposalVersionId));
+    requireStore(version !== null, 'DEVELOPER_PROPOSAL_NOT_FOUND', '这一版开发建议不存在。');
+    requireStore(typeof destination === 'string' && destination.isWellFormed() && isAbsolute(destination) && basename(destination).length > 0 &&
+      basename(destination).length <= 255, 'DEVELOPER_PROPOSAL_DESTINATION_INVALID', '保存位置无效。');
+    const existing = await lstat(destination).catch(() => null);
+    requireStore(existing === null || existing.isFile(), 'DEVELOPER_PROPOSAL_DESTINATION_INVALID', '保存位置不是一个文件。');
+    const bytes = new TextEncoder().encode(developerProposalFileText(version));
+    const partial = join(resolve(destination, '..'), `.${randomUUID()}.ai7-partial`);
+    try {
+      const handle = await open(partial, 'wx');
+      try {
+        await handle.writeFile(bytes);
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      await rename(partial, destination);
+    } catch (error) {
+      await rm(partial, { force: true }).catch(() => undefined);
+      if (error instanceof StoreError) throw error;
+      throw new StoreError('DEVELOPER_PROPOSAL_WRITE_FAILED', '无法把开发建议写到所选位置。');
+    }
+    return this.#procedureCall(() => {
+      this.#transaction(this.#authority, () => this.#capturedProcedures.recordProposalFile(proposalVersionId, basename(destination), bytes, now));
+      return this.#capturedProcedures.proposal(version.proposalId);
+    });
+  }
+
+  #procedureCall<T>(operation: () => T): T {
+    return this.#reviewCall(() => {
+      try {
+        return operation();
+      } catch (error) {
+        if (error instanceof CapturedProcedureError) throw new StoreError(error.code, error.message);
+        throw error;
+      }
+    });
   }
 
   /**

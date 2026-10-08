@@ -366,6 +366,12 @@ async function constructPredecessorV12(dataRoot, bookId) {
     database.exec(`
       PRAGMA foreign_keys = OFF;
       BEGIN IMMEDIATE;
+      DROP TABLE developer_capability_proposal_exports;
+      DROP TABLE developer_capability_proposals;
+      DROP TABLE review_run_procedure_pins;
+      DROP TABLE captured_procedure_states;
+      DROP TABLE captured_procedure_versions;
+      DROP TABLE captured_procedures;
       DROP TABLE readers_report_drafts;
       DROP TABLE readers_report_tasks;
       DROP TABLE series_retrieval_exclusions;
@@ -961,6 +967,12 @@ async function main() {
       /^[0-9a-f]{64}$/u.test(technical.get('权限侧车 SHA-256') ?? '') && procedures.technical.length === 5 + 9 &&
       procedures.technical.slice(5).every(([, procedureId]) => /^ai7-review-procedure\//u.test(procedureId ?? '')),
     'knowledge-procedures-list', procedures);
+    // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087) sit apart from the built-in 工序, empty here and saying how one is made;
+    // capturing, validating, running and stopping one is J-13's, which runs Review Runs (Issue #65 review).
+    await waitFor(renderer, `document.querySelector('.knowledge-captured-procedures')?.dataset.procedureCount==='0' && document.querySelector('.knowledge-developer-proposals')?.dataset.proposalCount==='0'`, 'knowledge-captured-painted');
+    const captured = await renderer.evaluate(`[document.querySelector('.knowledge-captured-procedures .captured-procedures-empty')?.textContent ?? null, document.querySelector('.knowledge-developer-proposals .developer-proposals-empty')?.textContent ?? null, document.querySelectorAll('[data-procedure-action]').length]`);
+    requireJourney(JSON.stringify(captured) === JSON.stringify(['还没有可复用工序。在一次完成的审阅里点「将以上工序保存为可复用工序」就能保存。', '还没有开发建议。', 0]),
+      'knowledge-captured-empty', captured);
 
     // ---- 知识库 › 资料库 (Issue #427, plan slice S79c; editor-surfaces §8.4, V2-UX-KB-007, ATTN-009, LEARN-004 to LEARN-007) ----
     at('knowledge-library-add');

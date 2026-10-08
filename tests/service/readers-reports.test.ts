@@ -15,7 +15,7 @@ import {
   ANALYSIS_LEDGER_REVISION_59_SQL,
   ANALYSIS_LEDGER_SCHEMA_SQL,
   INITIAL_EVALUATION_SCHEMA_VERSION,
-  READERS_REPORT_SCHEMA_VERSION,
+  CAPTURED_PROCEDURE_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import {
   DEFAULT_MANUSCRIPT_EXPORT_OPTIONS,
@@ -302,7 +302,7 @@ describe('审稿意见 over the real store on exact sample1', () => {
     let before: string;
     try {
       // Revision 59 exactly: the three relations as revision 59 left them, and no relation of revision 62.
-      plant.exec(`DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; PRAGMA user_version = ${INITIAL_EVALUATION_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; PRAGMA user_version = ${INITIAL_EVALUATION_SCHEMA_VERSION};`);
       downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_59_SQL);
       before = rows(plant);
       expect(() => plant.exec(`INSERT INTO analysis_result_sets(result_set_id, book_id, kind, created_at, canonical_json, sha256)
@@ -318,7 +318,7 @@ describe('审稿意见 over the real store on exact sample1', () => {
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(READERS_REPORT_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(CAPTURED_PROCEDURE_SCHEMA_VERSION);
       expect(rows(after)).toBe(before!);
       for (const table of KIND_COUPLED_ANALYSIS_RELATIONS) {
         expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(ANALYSIS_LEDGER_SCHEMA_SQL[table]);

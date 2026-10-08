@@ -289,8 +289,12 @@ The user-invoked presentation flow that turns selected prior editorial work into
 _Avoid_: macro recording, DSH Plugin installation, automatic artifact activation
 
 **Reusable Procedure Classification Preview** (`可复用工序分类预览`):
-The compact pre-save explanation that recommends exactly one of Default Execution Rule, native DSH Skill draft/revision, Workflow Profile Draft or Developer Capability Proposal and permits correction where the underlying object boundary remains valid.
+The compact pre-save explanation that recommends exactly one of Default Execution Rule, native DSH Skill draft/revision, Workflow Profile Draft, Captured Procedure or Developer Capability Proposal and permits correction where the underlying object boundary remains valid. A completed Review Run is recommended as a Captured Procedure ([ADR 0087](../adr/0087-make-a-captured-procedure-runnable-through-the-review-run-path.md) §1).
 _Avoid_: saved asset, generic template type, authority decision
+
+**Captured Procedure** (`可复用工序`):
+An AI7-owned, versioned, digest-pinned procedure document (`ai7.captured-procedure/1`) captured from a completed Review Run: its title, its ordered review-category steps with each 工序 version, output kind and model and search-engine use, one scope parameter and its Authority Ceiling — nothing of the Book. It runs only as an ordinary Review Run after `验证并启用`, pinned to the exact version; it is not a DSH Skill or an instruction carrier ([ADR 0087](../adr/0087-make-a-captured-procedure-runnable-through-the-review-run-path.md)).
+_Avoid_: Skill, macro, recipe, template, automatic procedure
 
 **Procedure Capture Source Set** (`工序捕获来源集合`):
 The exact user-selected completed Run or ordered completed user-visible editorial steps from which reusable structure may be extracted, excluding hidden Harness activity and unsuccessful instance outcomes by default.

@@ -14,6 +14,8 @@ import {
   type ReviewRunProjection,
   type ReviewRunScopeRequest,
   type ReviewScopeKind,
+  type CapturedProcedureSummaryProjection,
+  type CapturedProcedureRunProjection,
   type ReviewWorkspaceCategoryProjection,
   type ReviewWorkspaceProjection,
   type RendererApi,
@@ -21,6 +23,16 @@ import {
 } from '../shared/protocol.js';
 import { reportExportLabel } from '../shared/report-wording.js';
 import { applyOnce } from './manuscript-apply.js';
+import { openProcedureCapture } from './procedure-capture.js';
+import {
+  CAPTURE_ACTION,
+  SHEET_PROCEDURE_LABEL,
+  SHEET_PROCEDURE_NONE,
+  SHEET_PROCEDURE_NONE_ENABLED,
+  runProcedureLeftOutLine,
+  runProcedureLine,
+  sheetProcedureLines,
+} from './captured-procedure-labels.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 import { mountManuscriptExport } from './manuscript-export.js';
 import { EXPORT_ACTION_LABELS, exportOpenAccessibleName } from './manuscript-export-labels.js';
@@ -168,7 +180,9 @@ type ReviewApi = Pick<
   'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'cancelReviewRun' | 'recordReviewFindingDisposition' |
   'generateReviewReport' | 'cancelServiceJob' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' |
   'updateEditorialMark' | 'getEditorialMarkCard' |
-  'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport'
+  'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
+  // 可复用工序 (Issue #65, S30; ADR 0087): capture from a finished Run, and 按已保存的工序 on 新建审阅.
+  'inspectProcedureCapture' | 'saveCapturedProcedure' | 'saveDeveloperProposal' | 'inspectCapturedProcedures' | 'inspectCapturedProcedureRun'
 >;
 
 export interface MountReviewWorkspaceOptions {
@@ -177,6 +191,8 @@ export interface MountReviewWorkspaceOptions {
   bookId: string;
   bookTitle: string;
   focus: ReviewFocus | null;
+  /** 运行此工序… from 知识库 (Issue #65, S30): the Captured Procedure the 新建审阅 sheet opens filled from, once the Book is read. */
+  procedureId?: string | null;
   api: ReviewApi;
   awaitServiceJob(initial: ServiceJobProjection, onProgress: (job: ServiceJobProjection) => void): Promise<ServiceJobProjection>;
   technicalDetails(gridClass: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement;
@@ -241,6 +257,10 @@ interface SheetState {
   readonly openerKey: string | null;
   /** The plan is on screen: focus goes to it instead of back to the opener. */
   prepared: boolean;
+  /** The enabled Captured Procedures 按已保存的工序 offers (Issue #65, S30), read when the sheet opens. */
+  procedures: ReadonlyArray<CapturedProcedureSummaryProjection>;
+  /** The Captured Procedure the sheet was filled from, resolved for this Book; `null` for categories chosen by hand. */
+  procedure: CapturedProcedureRunProjection | null;
 }
 
 const NO_FILTERS: Filters = { categoryId: null, severity: null, status: null, chapterBlockId: null };
@@ -309,6 +329,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   let focusFindingId: string | null = options.focus?.findingId ?? null;
   let focusPages = 0;
   let focusRunHeading = false;
+  let pendingProcedureId: string | null = options.procedureId ?? null;
   const query: { reviewRunId: string | null; filters: Filters; pages: number } = {
     reviewRunId: options.focus?.reviewRunId ?? null,
     filters: { ...NO_FILTERS },
@@ -323,6 +344,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   let sheetState: SheetState | null = null;
   /** The Run whose 取消任务 waits for its confirmation (Issue #64, S29b); `null` while none does. */
   let scopeCancel: string | null = null;
+  let sheetOpening = false;
   /** Redraws what follows from the sheet's choices in place; set while the sheet is open. */
   let sheetUpdate: () => void = () => undefined;
   /** A control a re-render has only just created and focus belongs on: a form's field once it opens, the strip once it is listed. */
@@ -438,6 +460,13 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     updateLive(previous, next);
     if (next.run?.state === 'running') schedulePoll();
     followFocus(next);
+    // 运行此工序… from 知识库: the sheet opens filled from the procedure once this Book's workspace is on screen.
+    if (pendingProcedureId !== null && card !== undefined) {
+      const procedureId = pendingProcedureId;
+      pendingProcedureId = null;
+      const opener = card.querySelector<HTMLElement>('[data-review-action="new-review"]');
+      if (opener !== null && next.newReview.available) void openSheet(null, opener, procedureId);
+    }
   }
 
   function renderUnavailable(error: unknown): void {
@@ -603,7 +632,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         if (changed !== undefined && !changed.available) {
           act.append(el('span', 'field-note', changed.unavailableReason ?? ''));
         } else {
-          const rereview = actionButton('rereview-changed', 'secondary', () => openSheet({ categories: [row.categoryId], scope: 'changed', from: null, to: null }, rereview));
+          const rereview = actionButton('rereview-changed', 'secondary', () => void openSheet({ categories: [row.categoryId], scope: 'changed', from: null, to: null }, rereview));
           rereview.dataset['reviewCategory'] = row.categoryId;
           if (!next.newReview.available || working) {
             rereview.disabled = true;
@@ -658,7 +687,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
   function renderNewReview(next: ReviewWorkspaceProjection, reasonId: string): HTMLElement {
     const row = el('div', 'button-row review-new-actions');
-    const start = actionButton('new-review', 'primary', () => openSheet(null, start));
+    const start = actionButton('new-review', 'primary', () => void openSheet(null, start));
     row.append(start);
     if (!next.newReview.available) {
       start.disabled = true;
@@ -706,6 +735,17 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       meta.append(authorized);
     }
     section.append(heading, meta);
+    // The Captured Procedure version the Run was prepared from (ADR 0087 §4), and the steps it left out for this Book.
+    if (run.procedure !== null) {
+      const pin = el('div', 'review-procedure-pin');
+      pin.dataset['procedureVersionId'] = run.procedure.versionId;
+      pin.dataset['procedureVersion'] = String(run.procedure.version);
+      pin.dataset['procedureStopped'] = String(run.procedure.stopped);
+      pin.dataset['procedureMissing'] = String(run.procedure.missing);
+      pin.append(el('p', 'field-note review-procedure-line', runProcedureLine(run.procedure)));
+      for (const entry of run.procedure.leftOut) pin.append(el('p', 'field-note review-procedure-left-out', runProcedureLeftOutLine(entry)));
+      section.append(pin);
+    }
     if (run.state === 'prepared') {
       section.append(renderPlan(run));
     } else {
@@ -724,6 +764,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       el('dt', undefined, '审阅记录'), el('dd', 'technical-identity', `${run.reviewRunId} · ${run.label}`),
       el('dt', undefined, '稿件 pin'), el('dd', 'technical-identity', `${run.manuscript.revisionLabel} · ${run.manuscript.revisionId} · 修订日志序号 ${run.manuscript.journalSequence} · ${run.manuscript.workingDigest}`),
       el('dt', undefined, '审阅配置摘要'), el('dd', 'technical-identity', run.configurationDigest),
+      ...(run.procedure === null ? [] : [
+        el('dt', undefined, '可复用工序'), el('dd', 'technical-identity', `${run.procedure.procedureId} · ${run.procedure.versionId} · ${run.procedure.documentSha256}`),
+      ]),
       el('dt', undefined, '各类别的任务与计划'),
       el('dd', 'technical-identity', run.categories.map((category) => `${category.label} · ${category.taskIntentId ?? '无任务'} · ${category.planEnvelopeDigest ?? '无计划'}`).join('；')),
     ));
@@ -750,7 +793,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const open = actionButton('view-plan', 'primary', () => options.openPlan(run.reviewRunId), TASK_PLAN_OPEN_START);
     open.dataset['taskPlanOpen'] = 'review-run';
     open.setAttribute('aria-controls', 'task-drawer');
-    const revise = actionButton('revise', 'secondary', () => openSheet(prefillOf(run), revise));
+    const revise = actionButton('revise', 'secondary', () => void openSheet(prefillOf(run), revise));
     if (working) {
       open.disabled = true;
       revise.disabled = true;
@@ -1177,6 +1220,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         ? unavailableAction('generate-report', REVIEW_REPORT_WAIT_RUNNING, label)
         : actionButton('generate-report', 'secondary', () => void generateReport(run), label),
       report === null ? unavailableAction('export', REVIEW_EXPORT_NEEDS_REPORT, EXPORT_ACTION_LABELS.open) : exportReportAction(run, report),
+      // 将以上工序保存为可复用工序 (Issue #65, S30; ADR 0087 §2): on a finished Run only, and why not otherwise.
+      run.capture.available
+        ? captureAction(run)
+        : unavailableAction('capture', run.capture.unavailableReason ?? '', CAPTURE_ACTION),
     );
     if (working) for (const button of actions.querySelectorAll('button')) button.disabled = true;
     section.append(actions);
@@ -1184,6 +1231,21 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     if (run.report === null) section.append(el('p', 'field-note', REVIEW_REPORT_NONE));
     else section.append(renderReportRecord(run.report));
     return section;
+  }
+
+  function captureAction(run: ReviewRunProjection): HTMLButtonElement {
+    const control = actionButton('capture', 'secondary', () => {
+      if (destroyed || working) return;
+      void openProcedureCapture({
+        host,
+        api,
+        reviewRunId: run.reviewRunId,
+        opener: control,
+        setStatus: options.setStatus,
+        errorMessage: options.errorMessage,
+      });
+    }, CAPTURE_ACTION);
+    return control;
   }
 
   /** 导出… of the report version on show, named for a screen reader by that version. */
@@ -1532,8 +1594,23 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
   // ---- 新建审阅 ------------------------------------------------------------------------------------
 
-  function openSheet(prefill: { categories: string[]; scope: ReviewScopeKind | null; from: string | null; to: string | null } | null, opener: HTMLElement): void {
-    if (destroyed || projection === null || sheet.open || working) return;
+  async function openSheet(
+    prefill: { categories: string[]; scope: ReviewScopeKind | null; from: string | null; to: string | null } | null,
+    opener: HTMLElement,
+    procedureId: string | null = null,
+  ): Promise<void> {
+    if (destroyed || projection === null || sheet.open || working || sheetOpening) return;
+    sheetOpening = true;
+    // 按已保存的工序 (Issue #65, S30): the house's enabled Captured Procedures, read as the sheet opens. A sheet that cannot
+    // read them still opens, offering none.
+    let procedures: ReadonlyArray<CapturedProcedureSummaryProjection> = [];
+    try {
+      procedures = (await api.inspectCapturedProcedures()).procedures.filter((procedure) => procedure.runnable);
+    } catch {
+      procedures = [];
+    }
+    sheetOpening = false;
+    if (destroyed || projection === null || sheet.open) return;
     sheetState = {
       categories: new Set(prefill?.categories ?? []),
       scope: prefill?.scope ?? null,
@@ -1543,10 +1620,51 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       problem: null,
       openerKey: focusKeyOf(opener),
       prepared: false,
+      procedures,
+      procedure: null,
     };
     renderSheet(projection, sheetState);
     sheet.showModal();
+    if (procedureId !== null) {
+      await chooseProcedure(sheetState, procedureId);
+      return;
+    }
     sheet.querySelector<HTMLElement>('input:not(:disabled), button:not(:disabled)')?.focus();
+  }
+
+  /**
+   * Fill the sheet from one Captured Procedure (ADR 0087 §4): the newest enabled version that validates, its steps this Book can
+   * take ticked and every other category closed, the scope its slot. `''` returns the sheet to categories chosen by hand.
+   */
+  async function chooseProcedure(state: SheetState, procedureId: string): Promise<void> {
+    if (projection === null || sheetState !== state) return;
+    if (procedureId === '') {
+      state.procedure = null;
+      state.categories.clear();
+      state.problem = null;
+    } else {
+      options.setStatus('正在读取所选的可复用工序…', 'busy');
+      try {
+        const run = await api.inspectCapturedProcedureRun({ procedureId });
+        if (sheetState !== state || destroyed) return;
+        state.procedure = run;
+        state.categories.clear();
+        state.problem = run.unavailableReason;
+        if (run.resolved !== null) {
+          for (const step of run.resolved.steps) if (step.available) state.categories.add(step.categoryId);
+          state.scope = run.resolved.scopeSlot;
+          state.from = null;
+          state.to = null;
+        }
+        options.setStatus(run.resolved === null ? run.unavailableReason ?? '' : `已按《${run.title}》第 ${run.resolved.version} 版选好类别。`);
+      } catch (error) {
+        if (sheetState !== state || destroyed) return;
+        state.procedure = null;
+        state.problem = options.errorMessage(error, '无法读取所选的可复用工序。');
+      }
+    }
+    renderSheet(projection, state);
+    sheet.querySelector<HTMLElement>('[data-review-field="procedure"]')?.focus();
   }
 
   function renderSheet(workspace: ReviewWorkspaceProjection, state: SheetState): void {
@@ -1555,6 +1673,29 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const title = el('h3', undefined, REVIEW_SHEET_TITLE);
     title.id = sheetTitleId;
     form.append(title, el('p', 'field-note', REVIEW_SHEET_NOTE));
+
+    // 按已保存的工序 (Issue #65, S30; ADR 0087 §4): fills the categories and the scope; the plan is still read before 开始审阅.
+    const procedureField = el('div', 'review-sheet-procedure');
+    const procedureLabel = el('label', 'review-field');
+    const procedureSelect = el('select');
+    procedureSelect.dataset['reviewField'] = 'procedure';
+    procedureSelect.append(new Option(SHEET_PROCEDURE_NONE, ''));
+    for (const procedure of state.procedures) procedureSelect.append(new Option(`《${procedure.title}》`, procedure.procedureId));
+    procedureSelect.value = state.procedure?.procedureId ?? '';
+    procedureSelect.disabled = state.procedures.length === 0;
+    procedureSelect.addEventListener('change', () => void chooseProcedure(state, procedureSelect.value));
+    procedureLabel.append(el('span', undefined, SHEET_PROCEDURE_LABEL), procedureSelect);
+    procedureField.append(procedureLabel);
+    if (state.procedures.length === 0) procedureField.append(el('p', 'field-note', SHEET_PROCEDURE_NONE_ENABLED));
+    if (state.procedure !== null) {
+      procedureField.dataset['procedureId'] = state.procedure.procedureId;
+      if (state.procedure.resolved !== null) {
+        procedureField.dataset['procedureVersionId'] = state.procedure.resolved.versionId;
+        procedureField.dataset['procedureVersion'] = String(state.procedure.resolved.version);
+      }
+      for (const line of sheetProcedureLines(state.procedure)) procedureField.append(el('p', 'field-note review-sheet-procedure-line', line));
+    }
+    form.append(procedureField);
 
     const categories = el('fieldset', 'review-category-options');
     categories.append(el('legend', undefined, REVIEW_CATEGORY_LEGEND));
@@ -1677,14 +1818,21 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     // Everything that follows from the choices, redrawn in place so a choice never moves the focus.
     function updateSheet(): void {
       const preparing = state.job !== null;
+      const filled = state.procedure?.resolved ?? null;
       for (const { input, label, reason, entry } of categoryInputs.values()) {
         const scopeAvailability = state.scope === null ? null : entry.scopes[state.scope];
-        const why = !entry.available ? entry.unavailableReason : scopeAvailability !== null && !scopeAvailability.available ? scopeAvailability.unavailableReason : null;
+        const step = filled?.steps.find((candidate) => candidate.categoryId === entry.categoryId) ?? null;
+        const why = filled !== null && step === null
+          ? '不在所选的可复用工序里。'
+          : step !== null && !step.available
+            ? step.unavailableReason
+            : !entry.available ? entry.unavailableReason : scopeAvailability !== null && !scopeAvailability.available ? scopeAvailability.unavailableReason : null;
         if (why !== null && input.checked) {
           input.checked = false;
           state.categories.delete(entry.categoryId);
         }
-        input.disabled = why !== null || preparing;
+        // A filled sheet's categories are the procedure's: neither added to nor dropped here (ADR 0087 §4).
+        input.disabled = why !== null || preparing || filled !== null;
         reason.textContent = why ?? '';
         reason.hidden = why === null;
         if (why === null) {
@@ -1695,7 +1843,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
           input.dataset['unavailableReason'] = why;
         }
       }
-      for (const [kind, input] of scopeInputs) input.disabled = !workspace.scopeOptions[kind].available || preparing;
+      for (const [kind, input] of scopeInputs) input.disabled = !workspace.scopeOptions[kind].available || preparing || (filled !== null && kind !== filled.scopeSlot);
+      procedureSelect.disabled = preparing || state.procedures.length === 0;
       range.hidden = state.scope !== 'chapters';
       fromSelect.disabled = state.scope !== 'chapters' || preparing;
       toSelect.disabled = state.scope !== 'chapters' || preparing;
@@ -1748,7 +1897,12 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     };
     options.setStatus(REVIEW_STATUS_LINES.preparing, 'busy');
     try {
-      const initial = await api.prepareReviewRun({ categoryIds, scope });
+      const resolved = state.procedure?.resolved ?? null;
+      const initial = await api.prepareReviewRun({
+        categoryIds,
+        scope,
+        ...(resolved === null ? {} : { capturedProcedure: { versionId: resolved.versionId, documentSha256: resolved.documentSha256 } }),
+      });
       state.job = initial;
       sheetUpdate();
       const completed = await options.awaitServiceJob(initial, (job) => {

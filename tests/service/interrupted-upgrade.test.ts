@@ -15,6 +15,7 @@ import { DATA_VERSION_SCHEMA_SQL, initializeDataVersionSchema } from '../../src/
 import { DATABASE_EXPORT_SCHEMA_SQL, initializeDatabaseExportSchema } from '../../src/service/database-exports.js';
 import { DATABASE_MERGE_SCHEMA_SQL, initializeDatabaseMergeSchema } from '../../src/service/database-merge.js';
 import { DIALOGUE_SCHEMA_SQL, initializeDialogueSchema } from '../../src/service/dialogue/dialogue-ledger.js';
+import { CAPTURED_PROCEDURE_SCHEMA_SQL, initializeCapturedProcedureSchema } from '../../src/service/captured-procedures.js';
 import { DATABASE_REPLACEMENT_SCHEMA_SQL, initializeDatabaseReplacementSchema } from '../../src/service/database-replacement.js';
 import { DECISION_FEEDBACK_SCHEMA_SQL, initializeDecisionFeedbackSchema } from '../../src/service/decision-feedback.js';
 import { initializeDefaultExecutionRuleSchema } from '../../src/service/default-execution-rules.js';
@@ -58,7 +59,7 @@ import {
   ANALYSIS_LEDGER_REVISION_23_SQL,
   ANALYSIS_LEDGER_REVISION_58_SQL,
   ANALYSIS_LEDGER_REVISION_59_SQL,
-  READERS_REPORT_SCHEMA_VERSION,
+  CAPTURED_PROCEDURE_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import { READERS_REPORT_SCHEMA_SQL, initializeReadersReportSchema } from '../../src/service/readers-reports.js';
 import { SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL, initializeSeriesRetrievalExclusionSchema } from '../../src/service/series-exclusions.js';
@@ -155,6 +156,12 @@ interface Revision {
 
 // Newest first: a store is walked down one revision at a time.
 const REVISIONS: ReadonlyArray<Revision> = [
+  {
+    // Revision 63 (Issue #65, S30): the Captured Procedures and the Developer Capability Proposals, created before the stamp.
+    revision: 63,
+    step: initializeCapturedProcedureSchema,
+    undo: (database) => drop(database, Object.keys(CAPTURED_PROCEDURE_SCHEMA_SQL).reverse()),
+  },
   {
     // Revision 62 (Issue #429, S81c) rebuilds the three kind-coupled relations and stamps its version in one transaction, so the
     // one step an interruption can leave committed without the stamp is the two relations of 审稿意见. Revisions 60 and 61 left
@@ -357,11 +364,11 @@ describe('an upgrade interrupted before its version stamp', () => {
     if (step === null) continue;
     const before = revision - 1;
     it(`is finished by the next open when revision ${revision}'s relations committed and its stamp did not`, async () => {
-      expect(await opened()).toBe(READERS_REPORT_SCHEMA_VERSION);
+      expect(await opened()).toBe(CAPTURED_PROCEDURE_SCHEMA_VERSION);
       const terminal = tables();
       // The plant is a store at the revision before, which opens and upgrades as one.
       plant(before);
-      expect(await opened()).toBe(READERS_REPORT_SCHEMA_VERSION);
+      expect(await opened()).toBe(CAPTURED_PROCEDURE_SCHEMA_VERSION);
       expect(tables()).toEqual(terminal);
       // The step commits the revision's relations, and the process stops before the stamp.
       plant(before);
@@ -369,15 +376,15 @@ describe('an upgrade interrupted before its version stamp', () => {
         step(database);
         expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(before);
       });
-      expect(await opened()).toBe(READERS_REPORT_SCHEMA_VERSION);
+      expect(await opened()).toBe(CAPTURED_PROCEDURE_SCHEMA_VERSION);
       expect(tables()).toEqual(terminal);
       // Once finished it opens as any store does.
-      expect(await opened()).toBe(READERS_REPORT_SCHEMA_VERSION);
+      expect(await opened()).toBe(CAPTURED_PROCEDURE_SCHEMA_VERSION);
     }, 120_000);
   }
 
   it('still refuses a store holding only some of a revision\'s relations', async () => {
-    expect(await opened()).toBe(READERS_REPORT_SCHEMA_VERSION);
+    expect(await opened()).toBe(CAPTURED_PROCEDURE_SCHEMA_VERSION);
     plant(36);
     withDatabase((database) => database.exec(PRODUCTION_DOCUMENT_SCHEMA_SQL.production_documents));
     const refused = await EditorialStore.open(roots.dataRoot, roots.codeRoot).then((store) => {

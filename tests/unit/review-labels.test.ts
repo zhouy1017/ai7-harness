@@ -124,6 +124,7 @@ describe('the words of the 审阅 destination', () => {
       'scope-cancel': '取消任务',
       'scope-cancel-confirm': '确认取消任务',
       'scope-cancel-keep': '不取消',
+      capture: '将以上工序保存为可复用工序',
     });
     expect(reviewGenerateReportLabel(null)).toBe('生成报告');
     expect(reviewGenerateReportLabel(2)).toBe('生成新版本');

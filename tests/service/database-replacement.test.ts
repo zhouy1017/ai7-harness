@@ -17,7 +17,7 @@ import {
   type ReplacementIntent,
 } from '../../src/service/database-replacement.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { ANALYSIS_LEDGER_REVISION_58_SQL, READERS_REPORT_SCHEMA_VERSION, SCHEDULED_BACKUP_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { ANALYSIS_LEDGER_REVISION_58_SQL, CAPTURED_PROCEDURE_SCHEMA_VERSION, SCHEDULED_BACKUP_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { MAX_DATABASE_REPLACEMENTS_LISTED } from '../../src/shared/protocol.js';
@@ -269,7 +269,7 @@ describe('导入数据库 over the real store', () => {
         origin: 'database-export',
         dataVersion: 1,
         localDataVersion: 1,
-        schemaRevision: READERS_REPORT_SCHEMA_VERSION,
+        schemaRevision: CAPTURED_PROCEDURE_SCHEMA_VERSION,
         compatibility: 'compatible',
         contents: { books: 1, sourceVersions: 0, libraryMaterials: 0, series: 0 },
       });
@@ -290,7 +290,7 @@ describe('导入数据库 over the real store', () => {
       replacementId = waiting.pending!.replacementId;
       const backup = unzipSync(await readFile(join(backups(), preReplaceBackupFileName(T))));
       expect(parseCanonicalJson(strFromU8(backup['manifest.json']!))).toMatchObject({
-        origin: 'pre-replace-backup', dataVersion: 1, schemaRevision: READERS_REPORT_SCHEMA_VERSION, credentials: 'excluded',
+        origin: 'pre-replace-backup', dataVersion: 1, schemaRevision: CAPTURED_PROCEDURE_SCHEMA_VERSION, credentials: 'excluded',
         contents: { books: 2 },
       });
       expect((await readdir(backups())).filter((name) => name.includes('.partial'))).toEqual([]);
@@ -407,8 +407,8 @@ describe('导入数据库 over the real store', () => {
       expect(await refusal(() => store.inspectDatabaseImport('relative.ai7db'))).toBe('DATABASE_IMPORT_SOURCE_INVALID');
       // A package from a newer Data Version, or from a newer AI7, is previewed and refused.
       for (const [name, dataVersion, revision, compatibility] of [
-        ['新数据版本.ai7db', 2, READERS_REPORT_SCHEMA_VERSION, 'newer-data-version'],
-        ['新软件.ai7db', 1, READERS_REPORT_SCHEMA_VERSION + 1, 'newer-schema'],
+        ['新数据版本.ai7db', 2, CAPTURED_PROCEDURE_SCHEMA_VERSION, 'newer-data-version'],
+        ['新软件.ai7db', 1, CAPTURED_PROCEDURE_SCHEMA_VERSION + 1, 'newer-schema'],
       ] as const) {
         const preview = await store.inspectDatabaseImport(await handmade(name, dataVersion, revision));
         expect(preview.compatibility).toBe(compatibility);
@@ -502,7 +502,7 @@ describe('导入数据库 over the real store', () => {
     // A revision-56 store gains the empty ledger, and nothing else moves.
     database = new DatabaseSync(path);
     try {
-      database.exec(`DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; PRAGMA user_version = ${SCHEDULED_BACKUP_SCHEMA_VERSION};`);
+      database.exec(`DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; PRAGMA user_version = ${SCHEDULED_BACKUP_SCHEMA_VERSION};`);
       downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
     } finally {
       database.close();
@@ -516,7 +516,7 @@ describe('导入数据库 over the real store', () => {
     }
     database = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(READERS_REPORT_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(CAPTURED_PROCEDURE_SCHEMA_VERSION);
     } finally {
       database.close();
     }

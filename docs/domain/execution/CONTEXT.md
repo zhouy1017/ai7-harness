@@ -215,7 +215,7 @@ _中文_: 构件更新规则
 _Avoid_: automatic upstream update, Plugin update channel, standing expansion authority
 
 **Authority Ceiling**:
-The maximum capabilities, eligible scope kinds, Model Role needs, and Effect classes AI7 permits one exact native DSH artifact revision to request; it is AI7-owned metadata, not a native-artifact claim or current Run authority.
+The maximum capabilities, eligible scope kinds, Model Role needs, and Effect classes AI7 permits one exact native DSH artifact revision — or one Captured Procedure version: its steps, their executors, output kinds, model and search-engine use, and the current-Book Run Source Scope ([ADR 0087](../../adr/0087-make-a-captured-procedure-runnable-through-the-review-run-path.md) §4) — to request; it is AI7-owned metadata, not a native-artifact claim or current Run authority.
 _中文_: 权限上限
 _Avoid_: Capability Grant, Run Authorization, standing permission
 
