@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { RECONCILED_INTERRUPTED_DETAIL, RECONCILED_QUEUED_DETAIL } from '../../src/service/analysis/baseline-analysis-store.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { runReportUsageReconciles } from '../../src/service/analysis/run-report.js';
-import { canonicalRecord } from '../../src/service/analysis/canonical.js';
+import { canonicalRecord, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { EVALUATION_INITIAL_DRAFT_TRIGGER_SQL, EVALUATION_RECORD_TRIGGER_SQL } from '../../src/service/evaluation-records.js';
 import { EVALUATION_REWRITE_SCHEMA_SQL, EVALUATION_REWRITE_TRIGGER_SQL } from '../../src/service/evaluation-rewrites.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
@@ -133,9 +133,11 @@ function rewrittenFrom(recordId: string): unknown[] {
   }
 }
 
-/** AI7's words in an entry: these items' 评语, and the 总评 when `verdict`, all from one rewrite. */
-const wordsOf = (itemIds: ReadonlyArray<string>, from: { taskIntentId: string; analysisRevisionId: string }, verdict: boolean): unknown =>
-  ({ items: itemIds.map((itemId) => ({ itemId, ...from })), verdict: verdict ? from : null });
+/** AI7's authored words in an entry: these items' 评语, and the 总评 when `verdict`, all from one rewrite, each with its digest. */
+const wordsOf = (itemIds: ReadonlyArray<string>, from: { taskIntentId: string; analysisRevisionId: string }, verdict: boolean): unknown => ({
+  items: itemIds.map((itemId) => ({ itemId, ...from, sha256: sha256Hex(AUTHORED_REWRITE_WORDS.items.find((item) => item.itemId === itemId)!.comment) })),
+  verdict: verdict ? { ...from, sha256: sha256Hex(AUTHORED_REWRITE_WORDS.verdict) } : null,
+});
 
 describe('the market section and 按我的评分重写评语 over the real store on exact sample1', () => {
   it('snapshots AI7\'s market words with a version begun from its 初评, and lists the 书系 house data beside them', async () => {
@@ -332,7 +334,10 @@ describe('the market section and 按我的评分重写评语 over the real store
     const tampered = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
       const row = tampered.prepare('SELECT entry_id, canonical_json FROM evaluation_record_entries WHERE record_id = ? AND ordinal = 6').get(recordId) as { entry_id: string; canonical_json: string };
-      const forged = canonicalRecord({ ...(JSON.parse(row.canonical_json) as Record<string, unknown>), rewrittenFrom: wordsOf(['no-such-item'], from, false) });
+      const forged = canonicalRecord({
+        ...(JSON.parse(row.canonical_json) as Record<string, unknown>),
+        rewrittenFrom: { items: [{ itemId: 'no-such-item', ...from, sha256: sha256Hex('AI7') }], verdict: null },
+      });
       tampered.exec('DROP TRIGGER evaluation_record_entries_no_update');
       tampered.prepare('UPDATE evaluation_record_entries SET canonical_json = ?, sha256 = ? WHERE entry_id = ?').run(forged.json, forged.digest, row.entry_id);
       tampered.exec(EVALUATION_RECORD_TRIGGER_SQL.evaluation_record_entries_no_update!);

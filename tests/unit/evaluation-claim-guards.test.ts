@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { BUILTIN_EVALUATION_PROFILE } from '../../src/service/evaluation-records.js';
-import { claimsConclusion, claimsQuantity, claimsScore } from '../../src/service/evaluation/claim-guards.js';
+import { claimsConclusion, claimsQuantity, claimsScore, scoreDenominators } from '../../src/service/evaluation/claim-guards.js';
 
-/** The built-in profile's 满分 and its total: the denominators a score is written over. */
-const FULL_MARKS = [...BUILTIN_EVALUATION_PROFILE.items.map((item) => item.fullMarks), BUILTIN_EVALUATION_PROFILE.total];
+/** The built-in profile's denominators with every item rated: each 满分, the total, 10 and 100. */
+const FULL_MARKS = scoreDenominators(BUILTIN_EVALUATION_PROFILE.items.map((item) => ({ fullMarks: item.fullMarks, notRated: null })));
 /** The house's own conclusion labels, as the rewrite contract freezes them. */
 const CONCLUSIONS = BUILTIN_EVALUATION_PROFILE.conclusions.map((entry) => entry.label);
 
@@ -31,7 +31,20 @@ describe('what AI7\'s evaluation words may not claim (Issue #429, S81b2)', () =>
 
   it('passes the ordinary words a numeral opens — 这一块, 二元对立, 一成不变, 万一成功, 亿万读者, 千万不要 (Issue #689)', () => {
     for (const text of ['这一块的读者最稳定。', '书里的二元对立很鲜明。', '叙事并非一成不变。', '万一成功，会带动同类书。', '面向亿万读者的大众题材。',
-      '千万不要把它当作通俗读物推广。', '千万别低估学术读者。', '全书约二十万字。', '十万余字的篇幅适合通勤阅读。', '一元论的视角。']) {
+      '千万不要把它当作通俗读物推广。', '千万别低估学术读者。', '全书约二十万字。', '十万余字的篇幅适合通勤阅读。', '一元论的视角。', '一块儿推荐给读书会。']) {
+      expect(claimsQuantity(text), text).toBe(false);
+    }
+  });
+
+  it('still finds each claim the guard caught before, the same unit after any other numeral (Issue #689 review)', () => {
+    for (const text of ['七成年轻读者会买。', '其中两成为女性读者。', '近三成人群。', '三成就能回本。', '三成本。', '九块九。', '售价九块九。', '五块钱一本。', '两块钱。',
+      '卖三块。', '首印五册。', '20元对比同类书偏低。', '49元对标同类。']) {
+      expect(claimsQuantity(text), text).toBe(true);
+    }
+  });
+
+  it('passes a year after a figure word, 千万 the adverb, 十万火急 and the Book\'s own volumes (Issue #689 review)', () => {
+    for (const text of ['销量预计将在2026年回升。', '千万小心定位。', '千万注意渠道。', '十万火急的叙事节奏。', '全十二册的规模。', '全书共三册。']) {
       expect(claimsQuantity(text), text).toBe(false);
     }
   });
@@ -46,6 +59,24 @@ describe('what AI7\'s evaluation words may not claim (Issue #429, S81b2)', () =>
     }
   });
 
+  it('still finds each score the guard caught before, whatever follows 分, and over the rated total, 10 or 100 (Issue #689 review)', () => {
+    for (const text of ['可以给十八分的。', '十八分的高分。', '八十五分的水平。', '打十八分吧。', '十八分是合理的。', '给六分就够。', '可评十五分为宜。', '两分的差距。', '九分半。',
+      '8.5/10。', '85/100。']) {
+      expect(claimsScore(text, FULL_MARKS), text).toBe(true);
+    }
+    // A version with an item 不评 shows its total over the rated items: 68 / 80 is a score of it.
+    const rated = scoreDenominators(BUILTIN_EVALUATION_PROFILE.items.map((item, index) => ({ fullMarks: item.fullMarks, notRated: index === 4 ? '资料不足' : null })));
+    expect(rated).toEqual([20, 100, 80, 10]);
+    expect(claimsScore('68/80。', rated)).toBe(true);
+    expect(claimsScore('68/80。', FULL_MARKS)).toBe(false);
+  });
+
+  it('passes 十分, a time and a volume (Issue #689 review)', () => {
+    for (const text of ['十分。', '真是十分！', '开场3分30秒的长镜头。', '第3分册。', '一分钱也不多花。', '一分一秒都不浪费。']) {
+      expect(claimsScore(text, FULL_MARKS), text).toBe(false);
+    }
+  });
+
   it('passes 入木三分, 十二分的, 一分为二 and a fraction that is no score such as 2/3 (Issue #689)', () => {
     for (const text of ['人物刻画入木三分。', '作者对史料下了十二分的功夫。', '十二分投入地写考古现场。', '把问题一分为二地看。', '约2/3的篇幅写考古。', '前 1 / 3 节奏偏慢。',
       '三分天下的格局写得清楚。']) {
@@ -54,6 +85,7 @@ describe('what AI7\'s evaluation words may not claim (Issue #429, S81b2)', () =>
     // A fraction over a 满分 the profile does not have is no score either; over one it has, it is.
     expect(claimsScore('13 / 20', [10, 50])).toBe(false);
     expect(claimsScore('7 / 10', [10, 50])).toBe(true);
+    expect(claimsScore('2 / 3', FULL_MARKS)).toBe(false);
   });
 
   it('finds a conclusion by the house\'s own labels — 推荐出版, 修改后再议, 暂缓, 不推荐 — wherever it stands in the line', () => {

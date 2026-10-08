@@ -200,9 +200,10 @@ export function contentWithRewrite(content: EvaluationContent, words: { items: R
 /**
  * At most `limit` of AI7's notes toward one item, for 评估's page (Issue #689): a long Book's every note would outgrow the
  * frame. Beyond the limit the notes kept are spread over the ranges read — each range's first note, then each one's second —
- * and, where a round has more ranges than room, evenly over them; they are shown in reading order, with how many there are.
+ * and, where a round has more ranges than room, evenly over them, the last ranges as much as the first; they are shown in
+ * reading order, with how many there are.
  */
-export function boundedEvidence<T extends { readonly unitOrdinal: number }>(evidence: ReadonlyArray<T>, limit: number = MAX_EVALUATION_EVIDENCE_NOTES): { evidence: T[]; evidenceCount: number } {
+export function boundedEvidence<T extends { readonly unitOrdinal: number }>(evidence: ReadonlyArray<T>, limit: number): { evidence: T[]; evidenceCount: number } {
   if (evidence.length <= limit) return { evidence: [...evidence], evidenceCount: evidence.length };
   const seen = new Map<number, number>();
   const rounds: number[][] = [];
@@ -216,10 +217,38 @@ export function boundedEvidence<T extends { readonly unitOrdinal: number }>(evid
     const room = limit - kept.length;
     if (room <= 0) break;
     if (round.length <= room) kept.push(...round);
-    else for (let pick = 0; pick < room; pick += 1) kept.push(round[Math.floor((pick * round.length) / room)]!);
+    else for (let pick = 0; pick < room; pick += 1) kept.push(round[Math.floor(((pick + 0.5) * round.length) / room)]!);
   }
   kept.sort((left, right) => left - right);
   return { evidence: kept.map((index) => evidence[index]!), evidenceCount: evidence.length };
+}
+
+/**
+ * How many of each item's notes one 初评 or rewrite carries on 评估's page (Issue #689 review): `budget` notes shared among its
+ * items however many the profile has — an item with fewer notes than its share keeps them all and leaves the rest to the
+ * others, filled a note at a time in the profile's order.
+ */
+export function evidenceShares(counts: ReadonlyArray<number>, budget: number = MAX_EVALUATION_EVIDENCE_NOTES): number[] {
+  const shares = counts.map(() => 0);
+  let left = budget;
+  let open = counts.flatMap((count, index) => (count > 0 ? [index] : []));
+  while (left > 0 && open.length > 0) {
+    const share = Math.max(1, Math.floor(left / open.length));
+    for (const index of open) {
+      const give = Math.min(share, counts[index]! - shares[index]!, left);
+      shares[index]! += give;
+      left -= give;
+      if (left === 0) break;
+    }
+    open = open.filter((index) => shares[index]! < counts[index]!);
+  }
+  return shares;
+}
+
+/** Each item's notes as one 初评 or rewrite carries them on 评估's page: its share of the budget, with how many in all. */
+export function boundedEvidenceSet<T extends { readonly unitOrdinal: number }>(lists: ReadonlyArray<ReadonlyArray<T>>): Array<{ evidence: T[]; evidenceCount: number }> {
+  const shares = evidenceShares(lists.map((list) => list.length));
+  return lists.map((list, index) => boundedEvidence(list, shares[index]!));
 }
 
 /**
@@ -231,12 +260,13 @@ export function rewriteProposalItems(
   observations: ReadonlyArray<{ readonly itemId: string; readonly unitOrdinal: number; readonly note: string; readonly blockIds: ReadonlyArray<string> }>,
   content: EvaluationContent,
 ): NonNullable<EvaluationRewriteWorkspaceProjection['proposal']>['items'] {
-  return words.map((item) => ({
+  const evidence = boundedEvidenceSet(words.map((item) => observations.filter((observation) => observation.itemId === item.itemId)
+    .map((observation) => ({ unitOrdinal: observation.unitOrdinal, note: observation.note, blockIds: [...observation.blockIds] }))));
+  return words.map((item, index) => ({
     itemId: item.itemId,
     before: content.items.find((entry) => entry.itemId === item.itemId)?.comment ?? null,
     after: item.comment,
-    ...boundedEvidence(observations.filter((observation) => observation.itemId === item.itemId)
-      .map((observation) => ({ unitOrdinal: observation.unitOrdinal, note: observation.note, blockIds: [...observation.blockIds] }))),
+    ...evidence[index]!,
   }));
 }
 

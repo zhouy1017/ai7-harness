@@ -26,7 +26,7 @@ import {
   type EvaluationWorkspaceProjection,
 } from '../shared/protocol.js';
 import { PREDICTION_MIN_BOOKS_WITH_ACTUALS } from '../shared/evaluation-calibration.js';
-import { boundedEvidence, contentWithRewrite, type RewritableEvaluation } from './evaluation-rewrites.js';
+import { boundedEvidenceSet, contentWithRewrite, type RewritableEvaluation } from './evaluation-rewrites.js';
 import {
   EVALUATION_ADJUSTMENT_REASONS,
   EVALUATION_FINALIZE_NEEDS_SCORE,
@@ -36,7 +36,7 @@ import {
   recommendationBlocked,
   validEvaluationScore,
 } from '../shared/evaluation-scoring.js';
-import { UUID_PATTERN, canonicalJson, canonicalRecord, hasExactKeys, isRecord, parseStoredJson, sha256Hex } from './analysis/canonical.js';
+import { DIGEST_PATTERN, UUID_PATTERN, canonicalJson, canonicalRecord, hasExactKeys, isRecord, parseStoredJson, sha256Hex } from './analysis/canonical.js';
 import { graphemeCount } from './analysis/factual-review-contract.js';
 
 /**
@@ -411,11 +411,17 @@ interface StoredEntry {
   readonly recordedAt: string;
   readonly sha256: string;
   /**
-   * The 评语 and the 总评 of this entry that are still AI7's words (S81b2; EVAL-008; Issue #689): what a 采用'd rewrite wrote,
-   * carried forward on every later save until the editor changes that item's words, so a consumer of the editor's words — the
-   * learning of EVAL-011 — leaves exactly these out. `null` for an entry whose words are all the editor's.
+   * The 评语 and the 总评 of this entry that are AI7's words (S81b2; EVAL-008; Issue #689): what a 采用'd rewrite wrote, for as
+   * long as the words stand as it wrote them, so a consumer of the editor's words — the learning of EVAL-011 — leaves exactly
+   * these out. `null` for an entry whose words are all the editor's.
    */
   readonly rewrittenFrom: EvaluationRewrittenWords | null;
+  /**
+   * Every mark the version's chain holds up to this entry, the latest for each item and for the 总评, whether its words stand
+   * now or not: an item the editor edits and then puts back as AI7 wrote it is AI7's again (Issue #689 review). Never recorded;
+   * read from the chain.
+   */
+  readonly rewriteMarks: EvaluationRewrittenWords | null;
 }
 
 /** Which rewrite an entry's words came from: its Task and the Result Set Revision that wrote them. */
@@ -424,58 +430,86 @@ export interface EvaluationRewriteProvenance {
   readonly analysisRevisionId: string;
 }
 
-/**
- * The words of one entry that are AI7's (Issue #689): each item whose 评语 stands as a rewrite wrote it, and the 总评 when it
- * does, each with the rewrite it came from — two 采用 may leave words of both. An entry records it as `rewrittenFrom
- * { items: [{ itemId, taskIntentId, analysisRevisionId }], verdict }`, the items in the profile's order; an entry written
- * before carried only the 采用 entry's `{ taskIntentId, analysisRevisionId }`, read as the words that entry changed.
- */
-export interface EvaluationRewrittenWords {
-  readonly items: ReadonlyArray<EvaluationRewriteProvenance & { readonly itemId: string }>;
-  readonly verdict: EvaluationRewriteProvenance | null;
+/** One rewrite's words in an entry: which rewrite wrote them, and the digest of the words it wrote. */
+export interface EvaluationRewriteMark extends EvaluationRewriteProvenance {
+  readonly sha256: string;
 }
 
-function rewriteProvenance(value: unknown, keys: ReadonlyArray<string> = ['taskIntentId', 'analysisRevisionId']): EvaluationRewriteProvenance | null {
-  return isRecord(value) && hasExactKeys(value, keys) && typeof value.taskIntentId === 'string' &&
+/**
+ * The words of one entry that are AI7's (Issue #689): each item whose 评语 stands as a rewrite wrote it, and the 总评 when it
+ * does, each with the rewrite it came from and the digest of its words — two 采用 may leave words of both. An entry records
+ * it as `rewrittenFrom { items: [{ itemId, taskIntentId, analysisRevisionId, sha256 }], verdict }`, the items in the profile's
+ * order, every digest that of the entry's own words; an entry written before carried only the 采用 entry's
+ * `{ taskIntentId, analysisRevisionId }`, read as the words that entry changed.
+ */
+export interface EvaluationRewrittenWords {
+  readonly items: ReadonlyArray<EvaluationRewriteMark & { readonly itemId: string }>;
+  readonly verdict: EvaluationRewriteMark | null;
+}
+
+function rewriteProvenance(value: unknown): EvaluationRewriteProvenance | null {
+  return isRecord(value) && hasExactKeys(value, ['taskIntentId', 'analysisRevisionId']) && typeof value.taskIntentId === 'string' &&
     UUID_PATTERN.test(value.taskIntentId) && typeof value.analysisRevisionId === 'string' && UUID_PATTERN.test(value.analysisRevisionId)
     ? { taskIntentId: value.taskIntentId, analysisRevisionId: value.analysisRevisionId }
     : null;
 }
 
-const noWords = (items: EvaluationRewrittenWords['items'], verdict: EvaluationRewriteProvenance | null): EvaluationRewrittenWords | null =>
-  items.length === 0 && verdict === null ? null : { items, verdict };
-
-/**
- * AI7's words carried from one entry to the next (Issue #689): an item's stay AI7's while its 评语 is unchanged, the 总评 while
- * it is; the editor's change to either makes those words theirs. Read by item identity, so a next version's first entry,
- * carried from the last 定稿, keeps them as well.
- */
-export function carryRewrittenWords(words: EvaluationRewrittenWords | null, before: EvaluationContent | undefined, after: EvaluationContent): EvaluationRewrittenWords | null {
-  if (words === null || before === undefined) return null;
-  const items = after.items.flatMap((item) => {
-    const marked = words.items.find((entry) => entry.itemId === item.itemId);
-    const was = before.items.find((entry) => entry.itemId === item.itemId);
-    return marked !== undefined && was !== undefined && item.comment !== null && item.comment === was.comment ? [marked] : [];
-  });
-  return noWords(items, words.verdict !== null && after.verdict !== null && after.verdict === before.verdict ? words.verdict : null);
+/** A recorded mark of the given keys besides its rewrite and digest, or `null` when it is not one. */
+function rewriteMark(value: unknown, keys: ReadonlyArray<string>): EvaluationRewriteMark | null {
+  if (!isRecord(value) || !hasExactKeys(value, [...keys, 'taskIntentId', 'analysisRevisionId', 'sha256'])) return null;
+  const { sha256, ...rest } = value;
+  for (const key of keys) delete rest[key];
+  const from = rewriteProvenance(rest);
+  return from === null || typeof sha256 !== 'string' || !DIGEST_PATTERN.test(sha256) ? null : { ...from, sha256 };
 }
 
-/** An entry's recorded AI7 words, verified against its own content: `undefined` when they are not a shape this owner writes. */
+const noWords = (items: EvaluationRewrittenWords['items'], verdict: EvaluationRewriteMark | null): EvaluationRewrittenWords | null =>
+  items.length === 0 && verdict === null ? null : { items, verdict };
+
+const wordsDigest = (words: string | null): string | null => (words === null ? null : sha256Hex(words));
+
+/**
+ * The words of one entry that are AI7's, by the marks its chain holds (Issue #689): an item's 评语 while it stands exactly as
+ * the rewrite wrote it, the 总评 likewise — an edit makes them the editor's, and putting AI7's words back makes them AI7's again.
+ * Read by item identity, so a next version's first entry, carried from the last 定稿, keeps them as well.
+ */
+export function rewrittenWordsIn(marks: EvaluationRewrittenWords | null, content: EvaluationContent): EvaluationRewrittenWords | null {
+  if (marks === null) return null;
+  const items = content.items.flatMap((item) => {
+    const mark = marks.items.find((entry) => entry.itemId === item.itemId);
+    return mark !== undefined && wordsDigest(item.comment) === mark.sha256 ? [mark] : [];
+  });
+  return noWords(items, marks.verdict !== null && wordsDigest(content.verdict) === marks.verdict.sha256 ? marks.verdict : null);
+}
+
+/** The marks a chain holds after one more entry: that entry's own, and the earlier ones for every other item. */
+function mergedMarks(known: EvaluationRewrittenWords | null, words: EvaluationRewrittenWords | null): EvaluationRewrittenWords | null {
+  if (known === null) return words;
+  if (words === null) return known;
+  const items = new Map(known.items.map((item) => [item.itemId, item] as const));
+  for (const item of words.items) items.set(item.itemId, item);
+  return noWords([...items.values()], words.verdict ?? known.verdict);
+}
+
+/**
+ * An entry's recorded AI7 words, verified against its own content: each digest must be that of the entry's own words.
+ * `undefined` when they are not a shape this owner writes or do not match.
+ */
 function storedRewrittenWords(value: unknown, content: EvaluationContent): EvaluationRewrittenWords | null | undefined {
   if (!isRecord(value) || !hasExactKeys(value, ['items', 'verdict']) || !Array.isArray(value.items)) return undefined;
-  const items: Array<EvaluationRewriteProvenance & { itemId: string }> = [];
+  const items: Array<EvaluationRewriteMark & { itemId: string }> = [];
   let after = -1;
   for (const candidate of value.items as unknown[]) {
-    const from = rewriteProvenance(candidate, ['itemId', 'taskIntentId', 'analysisRevisionId']);
-    if (from === null || !isRecord(candidate)) return undefined;
-    // Each item once, in the profile's order, and only one whose 评语 stands.
+    const mark = rewriteMark(candidate, ['itemId']);
+    if (mark === null || !isRecord(candidate)) return undefined;
+    // Each item once, in the profile's order, and only one whose 评语 stands as the mark says.
     const index = content.items.findIndex((item) => item.itemId === candidate.itemId);
-    if (index <= after || content.items[index]!.comment === null) return undefined;
+    if (index <= after || wordsDigest(content.items[index]!.comment) !== mark.sha256) return undefined;
     after = index;
-    items.push({ itemId: content.items[index]!.itemId, ...from });
+    items.push({ itemId: content.items[index]!.itemId, ...mark });
   }
-  const verdict = value.verdict === null ? null : rewriteProvenance(value.verdict);
-  if ((value.verdict !== null && verdict === null) || (verdict !== null && content.verdict === null)) return undefined;
+  const verdict = value.verdict === null ? null : rewriteMark(value.verdict, []);
+  if ((value.verdict !== null && verdict === null) || (verdict !== null && wordsDigest(content.verdict) !== verdict.sha256)) return undefined;
   const words = noWords(items, verdict);
   return words === null ? undefined : words;
 }
@@ -484,23 +518,29 @@ function storedRewrittenWords(value: unknown, content: EvaluationContent): Evalu
 function legacyRewrittenWords(from: EvaluationRewriteProvenance, before: EvaluationContent | undefined, after: EvaluationContent): EvaluationRewrittenWords | null {
   const items = after.items.flatMap((item) => {
     const was = before?.items.find((entry) => entry.itemId === item.itemId);
-    return item.comment !== null && item.comment !== was?.comment ? [{ itemId: item.itemId, ...from }] : [];
+    return item.comment !== null && item.comment !== was?.comment ? [{ itemId: item.itemId, ...from, sha256: sha256Hex(item.comment) }] : [];
   });
-  return noWords(items, after.verdict !== null && after.verdict !== before?.verdict ? from : null);
+  return noWords(items, after.verdict !== null && after.verdict !== before?.verdict ? { ...from, sha256: sha256Hex(after.verdict) } : null);
 }
 
 /**
- * AI7's words after one 采用 (Issue #689): each 评语 the rewrite replaced and the 总评 when it offered one name this rewrite;
- * the rest keep what they carried.
+ * AI7's words after one 采用 (Issue #689): each 评语 the rewrite replaced with other words, and the 总评 when it offered other
+ * words, name this rewrite; a 评语 or 总评 it gave back unchanged is whoever's it was (Issue #689 review), and the rest keep
+ * the marks they carry.
  */
-function adoptedRewrittenWords(carried: EvaluationRewrittenWords | null, rewritten: ReadonlySet<string>, verdict: boolean, before: EvaluationContent,
+function adoptedRewrittenWords(known: EvaluationRewrittenWords | null, rewritten: ReadonlySet<string>, verdict: boolean, before: EvaluationContent,
   after: EvaluationContent, from: EvaluationRewriteProvenance): EvaluationRewrittenWords | null {
+  const carried = rewrittenWordsIn(known, after);
   const items = after.items.flatMap((item, index) => {
-    if (rewritten.has(item.itemId) && before.items[index]!.score !== null && item.comment !== null) return [{ itemId: item.itemId, ...from }];
+    const was = before.items[index]!;
+    if (rewritten.has(item.itemId) && was.score !== null && item.comment !== null && item.comment !== was.comment) {
+      return [{ itemId: item.itemId, ...from, sha256: sha256Hex(item.comment) }];
+    }
     const kept = carried?.items.find((entry) => entry.itemId === item.itemId);
     return kept === undefined ? [] : [kept];
   });
-  return noWords(items, verdict && after.verdict !== null ? from : carried?.verdict ?? null);
+  const offered = verdict && after.verdict !== null && after.verdict !== before.verdict;
+  return noWords(items, offered ? { ...from, sha256: sha256Hex(after.verdict!) } : carried?.verdict ?? null);
 }
 
 /**
@@ -513,7 +553,8 @@ export type EvaluationInitialDraft = Omit<EvaluationInitialDraftProjection, 'ite
 
 /** AI7's 初评 as 评估 shows it: each item's notes bounded, with their count. */
 function initialDraftProjection<T extends EvaluationInitialDraft>(draft: T): Omit<T, 'items'> & Pick<EvaluationInitialDraftProjection, 'items'> {
-  return { ...draft, items: draft.items.map((item) => ({ ...item, ...boundedEvidence(item.evidence) })) };
+  const evidence = boundedEvidenceSet(draft.items.map((item) => item.evidence));
+  return { ...draft, items: draft.items.map((item, index) => ({ ...item, ...evidence[index]! })) };
 }
 
 /** Where a new version binds: the Book's primary manuscript at its current revision, and whether edits wait in its journal. */
@@ -690,11 +731,11 @@ export class EvaluationRecords {
       'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
       const content = contentOfEntry(entry.schema as typeof ENTRY_SCHEMA | typeof ENTRY_SCHEMA_V1, entry.content as Record<string, unknown>);
       // AI7's words in it: as it records them, verified against its content; as an entry written before Issue #689 named its
-      // rewrite, the words it changed; and in an entry that names none, the ones the entry before carried and this one left
-      // unchanged — none, in a chain written since, which records every carried word.
+      // rewrite, the words it changed; and in an entry that names none, the ones the chain's marks still match — none, in a
+      // chain written since, which records every one.
       let rewrittenFrom: EvaluationRewrittenWords | null;
       if (!Object.hasOwn(entry, 'rewrittenFrom')) {
-        rewrittenFrom = carryRewrittenWords(latest?.rewrittenFrom ?? null, latest?.content, content);
+        rewrittenFrom = rewrittenWordsIn(latest?.rewriteMarks ?? null, content);
       } else {
         const legacy = rewriteProvenance(entry.rewrittenFrom);
         const stored = legacy === null ? storedRewrittenWords(entry.rewrittenFrom, content) : legacyRewrittenWords(legacy, latest?.content, content);
@@ -710,6 +751,7 @@ export class EvaluationRecords {
         recordedAt: String(row.recorded_at),
         sha256: String(row.sha256),
         rewrittenFrom,
+        rewriteMarks: mergedMarks(latest?.rewriteMarks ?? null, rewrittenFrom),
       };
     }
     requireEvaluation(latest !== undefined, 'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
@@ -737,8 +779,11 @@ export class EvaluationRecords {
       // AI7's words in this entry, item by item (Issue #689): a consumer of the editor's words leaves exactly these out.
       ...(rewritten === null ? {} : {
         rewrittenFrom: {
-          items: rewritten.items.map((item) => ({ itemId: item.itemId, taskIntentId: item.taskIntentId, analysisRevisionId: item.analysisRevisionId })),
-          verdict: rewritten.verdict === null ? null : { taskIntentId: rewritten.verdict.taskIntentId, analysisRevisionId: rewritten.verdict.analysisRevisionId },
+          items: rewritten.items.map((item) => ({
+            itemId: item.itemId, taskIntentId: item.taskIntentId, analysisRevisionId: item.analysisRevisionId, sha256: item.sha256,
+          })),
+          verdict: rewritten.verdict === null ? null
+            : { taskIntentId: rewritten.verdict.taskIntentId, analysisRevisionId: rewritten.verdict.analysisRevisionId, sha256: rewritten.verdict.sha256 },
         },
       }),
     });
@@ -833,7 +878,7 @@ export class EvaluationRecords {
         .run(recordId, initial.draft.revisionId, recordedAt, draft.json, draft.digest);
     }
     // A 评语 or 总评 carried unchanged from the last 定稿 is still AI7's where it was (Issue #689).
-    this.#append(stored, stored.sha256, 1, 'draft', seed, carryRewrittenWords(lastEntry?.rewrittenFrom ?? null, lastEntry?.content, seed));
+    this.#append(stored, stored.sha256, 1, 'draft', seed, rewrittenWordsIn(lastEntry?.rewriteMarks ?? null, seed));
     return recordId;
   }
 
@@ -963,8 +1008,8 @@ export class EvaluationRecords {
     const { sha256: _digest, ...profile } = record.profile;
     const checked = evaluationContent(content, profile, finalize, EvaluationRecords.#initialScores(this.#initialDraft(record)));
     requireEvaluation(finalize || !sameContent(checked, last.content), 'EVALUATION_UNCHANGED', '评估没有变化。');
-    // AI7's words the editor left as they were stay marked as AI7's, 定稿 included (Issue #689).
-    this.#append(record, last.sha256, entries.count + 1, finalize ? 'finalized' : 'draft', checked, carryRewrittenWords(last.rewrittenFrom, last.content, checked));
+    // AI7's words that stand as AI7 wrote them stay marked as AI7's, 定稿 included (Issue #689).
+    this.#append(record, last.sha256, entries.count + 1, finalize ? 'finalized' : 'draft', checked, rewrittenWordsIn(last.rewriteMarks, checked));
   }
 
   #rewritableOf(record: StoredRecord, chain: { count: number; latest: StoredEntry }, initial: EvaluationInitialDraft | null): RewritableEvaluation {
@@ -1016,8 +1061,7 @@ export class EvaluationRecords {
     // The entry names, item by item, the words that are AI7's (S81b2 review; Issue #689): this rewrite's, and those an earlier
     // 采用 left that the editor has not changed since. They are never learned as the editor's.
     const last = this.#entries(record).latest;
-    const rewritten = adoptedRewrittenWords(carryRewrittenWords(last.rewrittenFrom, last.content, checked), new Set(words.items.map((item) => item.itemId)),
-      words.verdict !== null, version.content, checked, from);
+    const rewritten = adoptedRewrittenWords(last.rewriteMarks, new Set(words.items.map((item) => item.itemId)), words.verdict !== null, version.content, checked, from);
     this.#append(record, version.entrySha256, version.entryOrdinal + 1, 'draft', checked, rewritten);
     return version.entryOrdinal + 1;
   }
