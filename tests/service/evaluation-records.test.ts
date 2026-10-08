@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { BUILTIN_EVALUATION_PROFILE, EVALUATION_RECORD_TRIGGER_SQL, emptyEvaluationContent } from '../../src/service/evaluation-records.js';
+import { BUILTIN_EVALUATION_PROFILE, EVALUATION_RECORD_TRIGGER_SQL, emptyEvaluationContent, evaluationContent } from '../../src/service/evaluation-records.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { DATABASE_MERGE_SCHEMA_VERSION, LIBRARY_MATERIAL_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import type { EvaluationContent, EvaluationWorkspaceProjection } from '../../src/shared/protocol.js';
@@ -126,8 +126,9 @@ describe('②C 评估 over the real store', () => {
       const save = (expectedEntries: number, content: EvaluationContent, finalize = false): EvaluationWorkspaceProjection =>
         store.saveEvaluation({ bookId: book.bookId, recordId: first.recordId, expectedEntries, content, finalize });
       // The scale: whole or half points within 满分; 不评 only with its reason.
-      expect(await refusal(() => save(1, scored([20.5])))).toBe('EVALUATION_SCORE_INVALID:「文学品质与作者声音」的得分要在 0 到 20 之间，可以有半分。');
-      expect(await refusal(() => save(1, scored([7.25])))).toBe('EVALUATION_SCORE_INVALID:「文学品质与作者声音」的得分要在 0 到 20 之间，可以有半分。');
+      // The page's words for the scale (Issue #638 review): 按整分或半分填写.
+      expect(await refusal(() => save(1, scored([20.5])))).toBe('EVALUATION_SCORE_INVALID:「文学品质与作者声音」的得分要在 0 到 20 之间，按整分或半分填写。');
+      expect(await refusal(() => save(1, scored([7.25])))).toBe('EVALUATION_SCORE_INVALID:「文学品质与作者声音」的得分要在 0 到 20 之间，按整分或半分填写。');
       expect(await refusal(() => save(1, scored([null, null, null, null, '   '])))).toBe('EVALUATION_NOT_RATED_REASON:「读者与市场潜力」不评时要写明理由。');
       // 推荐出版 waits while a 高 risk is unreviewed.
       expect(await refusal(() => save(1, scored([18, 16.5, 15, 17, '市场资料不足'], { risks: RISKS('high'), conclusion: 'recommend' }))))
@@ -159,6 +160,11 @@ describe('②C 评估 over the real store', () => {
         }
       }
       expect(await refusal(() => save(2, scored([18, 16.5, 15, 17, 12], { risks: RISKS('low') }), true))).toBe('EVALUATION_CONCLUSION_REQUIRED:定稿前要选定结论。');
+      // Every item 不评 leaves nothing scored: such a version cannot be finalized (Issue #638; the Owner's answer of 2026-10-07),
+      // though it may still be saved as a draft. The refusal appends nothing.
+      const nothingScored = scored(['资料不足', '资料不足', '资料不足', '资料不足', '资料不足'], { risks: RISKS('low'), conclusion: 'defer' });
+      expect(await refusal(() => save(2, nothingScored, true))).toBe('EVALUATION_NOTHING_SCORED:至少要给一项打分才能定稿。');
+      expect(evaluationContent(nothingScored, BUILTIN_EVALUATION_PROFILE, false).items.every((item) => item.notRated === '资料不足')).toBe(true);
 
       // Reviewed by a person, 推荐出版 is open; 定稿 closes the version with the actor and the time.
       const finalized = save(2, { ...saved.content, risks: RISKS('high', true), conclusion: 'recommend' }, true).record!;
