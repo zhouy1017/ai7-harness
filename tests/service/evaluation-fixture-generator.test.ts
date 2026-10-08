@@ -29,6 +29,7 @@ import { fixtureEntryKey, type ModelFixtureEntry, type ResolvedModelFixture } fr
 import type { LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
+import { AUTHORED_MARKET_ANSWER } from '../support/initial-evaluation-market.js';
 
 const FIXTURE_IDENTITY = 'sample1-evaluation-authored';
 const FIXTURE_PATH = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url)), `${FIXTURE_IDENTITY}.json`);
@@ -86,8 +87,8 @@ export const AUTHORED_OBSERVATIONS: Readonly<Record<number, ReadonlyArray<Initia
   ],
 };
 
-/** The synthesis over those observations: a score in whole or half points within each item's 满分, and the rest. */
-export const AUTHORED_SYNTHESIS: InitialEvaluationSynthesisResult = {
+/** The synthesis over those observations as AI7 writes it: a score in whole or half points within each item's 满分, and the rest (its market section as the model answers, S81b2). */
+export const AUTHORED_SYNTHESIS: Omit<InitialEvaluationSynthesisResult, 'market'> & { market: typeof AUTHORED_MARKET_ANSWER } = {
   schema: INITIAL_EVALUATION_SYNTHESIS_RESULT_SCHEMA,
   items: [
     { itemId: 'literary-quality', score: 16.5, comment: '细节与意象运用纯熟，写景与写心相互映照，人物各有性情；个别比喻略显俗套。' },
@@ -100,6 +101,8 @@ export const AUTHORED_SYNTHESIS: InitialEvaluationSynthesisResult = {
   weaknesses: ['个别句子成分残缺，需要逐句校改。', '比喻偶有俗套，可以更贴切。'],
   nextStep: '先校改残句与俗套的比喻，再补充目标读者与同类书的资料，以便判断市场潜力。',
   suggestedConclusion: 'revise',
+  // The market section (Issue #429, S81b2; EVAL-009), from the observations above alone.
+  market: AUTHORED_MARKET_ANSWER,
 };
 
 const REFLECTION_TEXT = JSON.stringify({
@@ -222,7 +225,7 @@ it.runIf(process.env['AI7_REGENERATE_EVALUATION_FIXTURE'] === '1')('generates th
   const body = {
     schema: 'ai7.model-fixture/1',
     identity: FIXTURE_IDENTITY,
-    description: '评估契约 v1 的人工撰写夹具：逐单元阅读 sample1（ADR 0043 收录的 Public SampleBook）后写成，回答内置评估方案（审稿评估方案第 1 版）下 AI7 初评发出的八个单元请求与一次全书综合。每条依据都按其在单元消息中的位置引用它所依据的内容块；「读者与市场潜力」在所读内容中没有任何依据，「主题、价值与社会文化语境」只在三个阅读范围中有依据，用来证明依据充分度的三档。全书综合只依据这些依据给出五个评分项的整数或半分初评分数、评语、主要优点、主要问题、下一步建议与建议结论「修改后再议」。unitOrdinal 为 0 的条目回答全书综合与这次运行的运行反思。本夹具叠加在 sample1-baseline-happy 之上：同一次启动既能运行基线分析，也能运行 AI7 初评；两者的请求摘要互不相同，叠加不改变任何条目的键。',
+    description: '评估契约 v1 的人工撰写夹具：逐单元阅读 sample1（ADR 0043 收录的 Public SampleBook）后写成，回答内置评估方案（审稿评估方案第 1 版）下 AI7 初评发出的八个单元请求与一次全书综合。每条依据都按其在单元消息中的位置引用它所依据的内容块；「读者与市场潜力」在所读内容中没有任何依据，「主题、价值与社会文化语境」只在三个阅读范围中有依据，用来证明依据充分度的三档。全书综合只依据这些依据给出五个评分项的整数或半分初评分数、评语、主要优点、主要问题、下一步建议与建议结论「修改后再议」，并写出市场部分：目标读者、差异化卖点、渠道与策略各两条，市场回报暂无法预测，评奖可能性只说明它在书稿内的依据。unitOrdinal 为 0 的条目回答全书综合与这次运行的运行反思。本夹具叠加在 sample1-baseline-happy 之上：同一次启动既能运行基线分析，也能运行 AI7 初评；两者的请求摘要互不相同，叠加不改变任何条目的键。',
     basedOn: 'sample1-baseline-happy',
     provenance: 'authored',
     provider: 'ai7-local-deterministic',

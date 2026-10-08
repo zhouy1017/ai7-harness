@@ -12,7 +12,7 @@ import type { BaselineAnalysisStore } from '../../src/service/analysis/baseline-
 import { ReviewRunDriver, type ReviewRunExecutionOwner } from '../../src/service/review/review-run-driver.js';
 import { LEADS_ABSENT_REASON } from '../../src/service/review/review-scope.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { CAPTURED_PROCEDURE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { EVALUATION_REWRITE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { BASELINE_ANALYSIS_TASK_GOAL, MAX_FRAME_BYTES, type LaunchPolicyProjection, type ReviewRunProjection, type ReviewRunScopeRequest } from '../../src/shared/protocol.js';
 import { LITERARY_EXPRESSION, STYLE_AND_FORMAT } from '../support/review-categories.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
@@ -280,7 +280,7 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       const check = database();
       try {
         expect((check.prepare('SELECT count(*) n FROM captured_procedure_versions').get() as { n: number }).n).toBe(2);
-        expect((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(CAPTURED_PROCEDURE_SCHEMA_VERSION);
+        expect((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(EVALUATION_REWRITE_SCHEMA_VERSION);
       } finally {
         check.close();
       }
