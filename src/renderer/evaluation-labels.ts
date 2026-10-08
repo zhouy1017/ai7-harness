@@ -242,9 +242,12 @@ export function evaluationAi7ItemLine(item: Pick<EvaluationInitialDraftProjectio
   return `AI7 初评 ${score} · ${evaluationAi7SufficiencyLine(item)}`;
 }
 
-/** AI7's evidence for one item (EVAL-006): how many notes, and each as the range it came from and AI7's words. */
-export function evaluationAi7EvidenceSummary(count: number): string {
-  return `AI7 的依据（${count} 条）`;
+/**
+ * AI7's evidence for one item (EVAL-006): how many notes, and each as the range it came from and AI7's words. A long Book's
+ * notes are cut to a few spread over the ranges (Issue #689), and the summary then says how many there are in all.
+ */
+export function evaluationAi7EvidenceSummary(shown: number, count: number = shown): string {
+  return shown >= count ? `AI7 的依据（${count} 条）` : `AI7 的依据（共 ${count} 条，这里列出分布在各阅读范围的 ${shown} 条）`;
 }
 
 export function evaluationAi7EvidenceLine(entry: Pick<EvaluationInitialDraftProjection['items'][number]['evidence'][number], 'unitOrdinal' | 'note'>): string {

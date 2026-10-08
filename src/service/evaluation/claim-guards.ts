@@ -7,30 +7,255 @@
  *   in the Book supports one and web search is not connected (ADR 0080 §7). A figure that is the Book's own, a chapter or a
  *   decade (「第3章」, 「80年代」), is no quantity claim.
  * - A rewritten 评语 or 总评 may not state a score or choose a conclusion: the numbers and the conclusion are the editor's.
+ *
+ * Both read a line once, numeral run by numeral run, and look only a few characters to either side of each run (Issue #689):
+ * the cost stays linear in the line however its numerals fall. Each exclusion is scoped to the numeral that opens the
+ * ordinary word — 这一块, 二元对立, 一成不变, 万一, 亿万读者, 千万不要, 十万火急, 全十二册, 入木三分, 十二分的, 一分为二, 三分之一,
+ * a fraction such as 2/3 — so the same unit after any other numeral is still a claim: 「九块九」, 「49元」, 「七成年轻读者」,
+ * 「十八分的高分」.
  */
 
-/** A numeral: Arabic or full-width digits, or the Chinese numerals and counting words a quantity is written with. */
-const NUMERAL = '[\\p{Nd}〇零一二三四五六七八九十百千万亿两几]';
-/** A numeral run followed by a unit a quantity is stated in, `百分之…`, or odds. */
-const QUANTITY = new RegExp(`${NUMERAL}[\\p{Nd}〇零一二三四五六七八九十百千万亿两几.,，．]*\\s*(?:万|亿|册|元|块|成|%|％|倍|个百分点)|百分之|概率|几率`, 'u');
+const CHINESE_NUMERALS = new Set('〇零一二三四五六七八九十百千万亿两几');
+/** The numerals that multiply rather than count: a run of these alone names no amount. */
+const MAGNITUDES = new Set('十百千万亿');
+/** A thousands separator or a decimal point, read as part of a number only between two numerals. */
+const SEPARATORS = new Set('.,，．');
+const DIGIT = /^\p{Nd}$/u;
+const SPACE = /^\s$/u;
+const PUNCTUATION = /^\p{P}$/u;
+
+const isDigit = (char: string | undefined): boolean => char !== undefined && DIGIT.test(char);
+const isQuantityNumeral = (char: string | undefined): boolean => char !== undefined && (isDigit(char) || CHINESE_NUMERALS.has(char));
+
+/** One maximal run of numerals in a line, as indexes into its characters: `[start, end)`. */
+interface NumeralRun {
+  readonly start: number;
+  readonly end: number;
+}
+
+/** Each maximal run of the given numerals, a separator kept only between two of them; every character is visited once. */
+function* numeralRuns(chars: ReadonlyArray<string>, isNumeral: (char: string | undefined) => boolean): Generator<NumeralRun> {
+  let index = 0;
+  while (index < chars.length) {
+    if (!isNumeral(chars[index])) {
+      index += 1;
+      continue;
+    }
+    const start = index;
+    index += 1;
+    for (;;) {
+      if (isNumeral(chars[index])) index += 1;
+      else if (SEPARATORS.has(chars[index]!) && isNumeral(chars[index + 1])) index += 2;
+      else break;
+    }
+    yield { start, end: index };
+  }
+}
+
+/** The first index at or after `index` that is not white space. */
+function skipSpace(chars: ReadonlyArray<string>, index: number): number {
+  let at = index;
+  while (at < chars.length && SPACE.test(chars[at]!)) at += 1;
+  return at;
+}
+
+const startsWith = (chars: ReadonlyArray<string>, at: number, word: string): boolean => {
+  const wanted = Array.from(word);
+  return wanted.every((char, offset) => chars[at + offset] === char);
+};
+
+// ---- quantities in market words ----------------------------------------------------------------------------------
+
+/** Odds and a percentage written out in words: a claim wherever they stand. */
+const QUANTITY_WORDS = ['百分之', '概率', '几率'];
+/** The units a number before them always states a quantity in. */
+const ALWAYS_UNITS = ['个百分点', '%', '％', '倍'];
+/** 元 after a Chinese numeral that opens a word instead of a price: 二元对立, 一元论. Never after digits or a magnitude. */
+const YUAN_WORDS = new Set('对论化素');
+/** 成 after 一 that opens a word instead of a share: 一成不变, 万一成功. Never after any other numeral (七成年轻读者). */
+const CHENG_WORDS = new Set('不功为长熟就绩果立本员型形年人事交分色全了');
+/** 千万 the adverb — 千万不要, 千万别, 千万小心, 千万注意 — rather than ten million. */
+const QIANWAN_ADVERB = new Set('不别要莫勿记小注留务当谨');
+/** What before a small numeral and 册 names the Book's own volumes: 「全十二册」, 「共三册」, 「分两册」, 「上下两册」. */
+const VOLUME_WORDS = new Set('全共分下');
+/** Words a run of magnitudes opens instead of an amount: 十万火急. */
+const MAGNITUDE_IDIOMS: Readonly<Record<string, string>> = { 十万: '火急' };
+/** The words a bare figure after which is a print run, a price or sales: 「首印3000」, 「定价39」. */
+const FIGURE_WORDS = ['首印', '起印', '印数', '印量', '定价', '售价', '销量'];
+/** What may stand between such a word and its figure: 「首印数量约 3,000」, 「定价为 ¥39」. */
+const FIGURE_LINKS = new Set('约为是达：:在近超过逾仅可预计估大概有将能至少多数量定于¥￥$');
+const MAX_FIGURE_LINKS = 6;
+/** What after a bare figure makes it a date or the Book's own count, never sales: 「2026年」, 「12章」, 「3版」. */
+const NOT_FIGURE_UNITS = new Set('年月日号章节页岁字版次期届');
+
+/** Whether the figure starting at `start` follows one of the figure words, across at most a few linking characters. */
+function followsFigureWord(chars: ReadonlyArray<string>, start: number): boolean {
+  let at = start;
+  for (let links = 0; links <= MAX_FIGURE_LINKS; links += 1) {
+    if (FIGURE_WORDS.some((word) => at >= word.length && startsWith(chars, at - word.length, word))) return true;
+    const before = chars[at - 1];
+    if (before === undefined || !(FIGURE_LINKS.has(before) || SPACE.test(before))) return false;
+    at -= 1;
+  }
+  return false;
+}
+
+/** Whether one numeral run, with what stands right after it and right before it, states a quantity. */
+function runStatesQuantity(chars: ReadonlyArray<string>, run: NumeralRun): boolean {
+  // The Book's own ordinal: 第3章, 第十二本.
+  const before = chars[run.start - 1];
+  if (before === '第') return false;
+  const own = chars.slice(run.start, run.end);
+  const word = own.join('');
+  const digit = own.some(isDigit);
+  const magnitude = own.some((char) => MAGNITUDES.has(char));
+  // An amount: a digit, or a counting numeral before a magnitude (八千, 三万) — not 一 or 两 alone, which open words.
+  const amount = digit || magnitude;
+  const at = skipSpace(chars, run.end);
+  const unit = chars[at];
+  const after = chars[at + 1];
+  if (ALWAYS_UNITS.some((entry) => startsWith(chars, at, entry))) return true;
+  // 本 counts copies only after an amount: 「首印八千本」, 「3000本」 — not 「一本小说」, 「两本书」.
+  if (unit === '本' && amount) return true;
+  // 块 is yuan after any numeral but a lone 一: 「九块九」, 「两块钱」 — not 「这一块」, 「一块儿」.
+  if (unit === '块' && word !== '一') return true;
+  // 册 counts copies after any numeral, 「首印五册」, but the Book's own volumes are no claim: 「全十二册」, 「上下两册」.
+  if (unit === '册' && !(VOLUME_WORDS.has(before!) && !digit && !own.some((char) => char !== '十' && MAGNITUDES.has(char)))) return true;
+  // 元 is a price unless a Chinese numeral opens a word: 「49元对标同类」 is one, 二元对立 and 一元论 are not.
+  if (unit === '元' && !(YUAN_WORDS.has(after!) && !amount)) return true;
+  // 成 is a share unless 一 opens a word: 「七成年轻读者」, 「三成本」 are shares; 一成不变, 万一成功 are not.
+  if (unit === '成' && !(CHENG_WORDS.has(after!) && own.at(-1) === '一')) return true;
+  // A number in 万 or 亿 with its coefficient: 5万, 三万, 十万, 百万 — not 万一, 亿万读者, the adverb 千万, 十万火急, and not
+  // the Book's own length, 「二十万字」 or 「十万余字」.
+  const last = own.at(-1);
+  if (last === '万' || last === '亿') {
+    if (word === '万' || word === '亿' || word === '亿万' || word === '万万') return false;
+    if (word === '千万' && QIANWAN_ADVERB.has(unit!)) return false;
+    const idiom = MAGNITUDE_IDIOMS[word];
+    if (idiom !== undefined && startsWith(chars, at, idiom)) return false;
+    if (unit === '字' || ((unit === '余' || unit === '多') && after === '字')) return false;
+    return true;
+  }
+  // A bare figure after 首印, 定价, 销量 or 印数 — not a year or the Book's own count after it: 「销量将在2026年回升」.
+  return amount && !NOT_FIGURE_UNITS.has(unit!) && followsFigureWord(chars, run.start);
+}
 
 /** Whether one line of market text states a quantity nothing read in the Book can support. */
 export function claimsQuantity(text: string): boolean {
-  return QUANTITY.test(text);
+  if (QUANTITY_WORDS.some((entry) => text.includes(entry))) return true;
+  const chars = Array.from(text);
+  for (const run of numeralRuns(chars, isQuantityNumeral)) {
+    if (runStatesQuantity(chars, run)) return true;
+  }
+  return false;
+}
+
+// ---- scores in rewritten words -----------------------------------------------------------------------------------
+
+/** The Chinese numerals a score is written with. */
+const SCORE_NUMERALS = new Set('零一二三四五六七八九十两');
+/** 分 after digits that is a fraction, a time or a volume, not points: 3分之1, 5分钟, 3分册. */
+const NOT_POINTS_AFTER_DIGITS = new Set('之钟册');
+/** 分 after Chinese numerals that opens another word: 三分之一, 一分钟, 三分天下, 一分钱, 一分一秒. */
+const NOT_POINTS_AFTER_CHINESE = new Set('之钟天钱秒一册');
+const isDecimalPoint = (char: string | undefined): boolean => char === '.' || char === '．';
+const isTerminal = (char: string | undefined): boolean => char === undefined || SPACE.test(char) || PUNCTUATION.test(char);
+
+/** The value of a run of ASCII or full-width digits; `NaN` for any other script. */
+function digitsValue(chars: ReadonlyArray<string>): number {
+  let value = 0;
+  for (const char of chars) {
+    const code = char.codePointAt(0)!;
+    const digit = code >= 0x30 && code <= 0x39 ? code - 0x30 : code >= 0xff10 && code <= 0xff19 ? code - 0xff10 : Number.NaN;
+    value = value * 10 + digit;
+  }
+  return value;
+}
+
+/** The digits run starting at `start`, with one decimal part: its end and its whole-number value. */
+function digitsAt(chars: ReadonlyArray<string>, start: number): { end: number; whole: ReadonlyArray<string> } {
+  let end = start;
+  while (isDigit(chars[end])) end += 1;
+  const whole = chars.slice(start, end);
+  if (isDecimalPoint(chars[end]) && isDigit(chars[end + 1])) {
+    end += 1;
+    while (isDigit(chars[end])) end += 1;
+  }
+  return { end, whole };
+}
+
+/** Whether 分 at `at`, after a run of digits, is a time: 「3分30秒」. */
+function minutesAndSeconds(chars: ReadonlyArray<string>, at: number): boolean {
+  let end = at + 1;
+  if (!isDigit(chars[end])) return false;
+  while (isDigit(chars[end])) end += 1;
+  return chars[end] === '秒';
 }
 
 /**
- * A score in a 评语: digits before 分 (「18分」, 「16.5 分」), a fraction against 满分 (「13 / 20」), the word 满分, or Chinese
- * numerals before 分 — but not the adverb 十分, the word 部分, a fraction 「三分之一」 or minutes 「5分钟」.
+ * The denominators a score in a rewritten line is written over (Issue #689 review): each item's 满分, the total of every item and
+ * of the rated ones — a version with an item 不评 shows its total over the rest — and the rescaled 10 and 100.
  */
-const SCORE = /[\p{Nd}]+(?:[.．][\p{Nd}]+)?\s*分(?![之钟])|[\p{Nd}]+\s*[/／]\s*[\p{Nd}]+|满分|(?<![零一二三四五六七八九十两部])(?!十分)[零一二三四五六七八九十两]+分(?![之钟])/u;
-
-/** Whether one rewritten line states a score. */
-export function claimsScore(text: string): boolean {
-  return SCORE.test(text);
+export function scoreDenominators(items: ReadonlyArray<{ readonly fullMarks: number; readonly notRated: string | null }>): number[] {
+  const all = items.reduce((sum, item) => sum + item.fullMarks, 0);
+  const rated = items.reduce((sum, item) => sum + (item.notRated === null ? item.fullMarks : 0), 0);
+  return [...new Set([...items.map((item) => item.fullMarks), all, rated, 10, 100])];
 }
 
-/** Whether one rewritten line names one of the conclusions — the editor's to choose. */
+/**
+ * Whether one rewritten line states a score: digits before 分 (「18分」, 「16.5 分」), a fraction over one of `fullMarks`
+ * (「13 / 20」, 「68/80」, 「8.5/10」, never 「2/3」), the word 满分, or Chinese numerals before 分 (「十八分的高分」, 「九分半」) —
+ * not where 分 opens another word (三分之一, 一分钟, 三分天下, 一分钱), 一分为二, 入木三分, the adverb 十分, 十二分 before more words
+ * (「十二分的功夫」), a time 「3分30秒」 or 第3分册. `fullMarks` are the denominators a score is written over.
+ */
+export function claimsScore(text: string, fullMarks: ReadonlyArray<number>): boolean {
+  if (text.includes('满分')) return true;
+  const chars = Array.from(text);
+  let index = 0;
+  while (index < chars.length) {
+    const char = chars[index]!;
+    if (isDigit(char) && !isDigit(chars[index - 1]) && !isDecimalPoint(chars[index - 1])) {
+      const numerator = digitsAt(chars, index);
+      const at = skipSpace(chars, numerator.end);
+      if (chars[at] === '分' && chars[index - 1] !== '第' && !NOT_POINTS_AFTER_DIGITS.has(chars[at + 1]!) && !minutesAndSeconds(chars, at)) return true;
+      if (chars[at] === '/' || chars[at] === '／') {
+        const from = skipSpace(chars, at + 1);
+        if (isDigit(chars[from])) {
+          const denominator = digitsAt(chars, from);
+          const value = digitsValue(denominator.whole);
+          if (Number.isNaN(value) || fullMarks.includes(value)) return true;
+        }
+      }
+      index = numerator.end;
+      continue;
+    }
+    if (SCORE_NUMERALS.has(char) && !SCORE_NUMERALS.has(chars[index - 1]!)) {
+      let end = index;
+      while (SCORE_NUMERALS.has(chars[end]!)) end += 1;
+      if (chars[end] === '分' && claimsChineseScore(chars, index, end)) return true;
+      index = end;
+      continue;
+    }
+    index += 1;
+  }
+  return false;
+}
+
+/** Whether Chinese numerals `[start, end)` before 分 at `end` state a score. */
+function claimsChineseScore(chars: ReadonlyArray<string>, start: number, end: number): boolean {
+  const run = chars.slice(start, end).join('');
+  const after = chars[end + 1];
+  if (NOT_POINTS_AFTER_CHINESE.has(after!)) return false;
+  if (run === '一' && after === '为') return false;
+  if (chars[start - 2] === '入' && chars[start - 1] === '木') return false;
+  // The adverbs: 十分 always — 「十分凝练」, 「真是十分！」 — and 十二分 before more words, 「十二分的功夫」.
+  if (run === '十') return false;
+  if (run === '十二' && !isTerminal(after)) return false;
+  if (chars[start - 1] === '第') return false;
+  return true;
+}
+
+/** Whether one rewritten line names one of the conclusions — the editor's to choose — anywhere in it: 「建议暂缓」, 「不推荐」. */
 export function claimsConclusion(text: string, conclusions: ReadonlyArray<string>): boolean {
   return conclusions.some((label) => label.length > 0 && text.includes(label));
 }
