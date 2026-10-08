@@ -27,6 +27,20 @@ export const LEARNING_AUDIT_FILTERS = {
   to: '截止日期',
 } as const;
 export const LEARNING_AUDIT_ALL = '全部';
+/**
+ * A filter that lists only the first of the house's Books or Series by title (Issue #677). The 图书 filter also offers the
+ * Book chosen and every Book a page has named; `others` counts those beyond the first `listed`, so the note and the
+ * select always agree.
+ */
+export function learningAuditChoicesCut(filter: 'book' | 'series', listed: number, others = 0): string {
+  return filter === 'book'
+    ? `图书筛选只列出按书名排序的前 ${listed} 本图书${others > 0 ? `，另有当前所选或列表里出现的 ${others} 本` : ''}。`
+    : `书系筛选只列出按名称排序的前 ${listed} 个书系。`;
+}
+
+/** The 书系 filter when the house's Series could not be read: the audit still reads, and the filter offers 全部 alone. */
+export const LEARNING_AUDIT_SERIES_UNAVAILABLE = '书系记录无法读取，书系筛选暂时只有「全部」；学习回溯照常可用。';
+
 /** The filters LAUD-002 names that have nothing to filter yet, and why. */
 export const LEARNING_AUDIT_FILTERS_LATER =
   '记忆候选、已启用记忆、后续使用和历史影响暂不能筛选：AI7 还没有从学习材料生成学习信号或记忆，也没有任务读取学习材料，这几项目前都是空的。';
@@ -149,8 +163,10 @@ export function learningRemediationLeftOutLine(entry: { readonly name: string | 
 export const LEARNING_REMEDIATION_INCLUDED = '本次停止今后使用：';
 
 /**
- * A material's name where many share an origin (`修改建议 · 拒绝`): its origin, when it was recorded, and its own last line —
- * the editor's reason or judgment — so a checkbox, a button and a left-out line each say which one (J-14, LAUD-011).
+ * A material's name where many share an origin (`修改建议 · 拒绝`): its origin, when it was recorded, and its excerpt's last
+ * line — often the proposed or edited text, sometimes the editor's reason or judgment — so a checkbox, a button and a
+ * left-out line each say which one (J-14, LAUD-011). Two materials can still read alike; `learningAuditMaterialNames` tells
+ * them apart on a page.
  */
 export function learningAuditMaterialName(
   material: { readonly originLabel: string; readonly recordedAt: string; readonly excerpt: ReadonlyArray<string> },
@@ -158,6 +174,32 @@ export function learningAuditMaterialName(
 ): string {
   const last = material.excerpt.at(-1);
   return `${material.originLabel} · ${instant(material.recordedAt)}${last === undefined ? '' : ` · ${last}`}`;
+}
+
+/**
+ * Each material's name on one page, by its key (Issue #677): `learningAuditMaterialName`, and where two or more read alike —
+ * the same origin, the same minute and the same last line, often the proposed or edited text — each of them followed by its
+ * ordinal among them in page order, so no two checkboxes or buttons share a name.
+ */
+export function learningAuditMaterialNames(
+  materials: ReadonlyArray<{ readonly materialKey: string; readonly originLabel: string; readonly recordedAt: string; readonly excerpt: ReadonlyArray<string> }>,
+  instant: (iso: string) => string,
+): Map<string, string> {
+  const bases = materials.map((material) => [material.materialKey, learningAuditMaterialName(material, instant)] as const);
+  const totals = new Map<string, number>();
+  for (const [, base] of bases) totals.set(base, (totals.get(base) ?? 0) + 1);
+  const seen = new Map<string, number>();
+  const names = new Map<string, string>();
+  for (const [key, base] of bases) {
+    if (totals.get(base) === 1) {
+      names.set(key, base);
+      continue;
+    }
+    const ordinal = (seen.get(base) ?? 0) + 1;
+    seen.set(base, ordinal);
+    names.set(key, `${base}（第 ${ordinal} 条）`);
+  }
+  return names;
 }
 
 export function learningRemediationOutcome(recorded: number, leftOut: number): string {
@@ -203,7 +245,10 @@ export const LEARNING_AUDIT_STATUS = {
   invalidDates: '请填写有效日期，截止日期不能早于起始日期。',
 } as const;
 
-/** A batch recorded, and the list then not read again: the record stands, and the page says it may be out of date. */
+/**
+ * A batch recorded or refused, and the list then not read again: what happened stands, and the page says it may be out of
+ * date (Issue #677: a refusal says so too).
+ */
 export function learningRemediationRereadFailed(outcome: string): string {
   return `${outcome}但学习回溯没能重新读取，列表可能还是之前的状态；请稍后重新打开。`;
 }

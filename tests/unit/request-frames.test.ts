@@ -1725,6 +1725,49 @@ describe('decodeRequest rejects malformed frames', () => {
     }
   });
 
+  it('accepts 可复用工序的确切版本: a run read of the latest or one exact version, 停用… of one version or all, and 停用 by its preview digest (Issue #66, S31)', () => {
+    const bookId = randomUUID();
+    const procedureId = randomUUID();
+    const versionId = randomUUID();
+    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+      { op: 'inspectCapturedProcedureRun', input: { bookId, procedureId, versionId: null } },
+      { op: 'inspectCapturedProcedureRun', input: { bookId, procedureId, versionId } },
+      { op: 'previewCapturedProcedureStop', input: { procedureId, versionId } },
+      { op: 'previewCapturedProcedureStop', input: { procedureId, versionId: null } },
+      { op: 'stopCapturedProcedure', input: { procedureId, versionId, previewDigest: 'a'.repeat(64) } },
+      { op: 'stopCapturedProcedure', input: { procedureId, versionId: null, previewDigest: '0123456789abcdef'.repeat(4) } },
+    ];
+    for (const { op, input } of inputs) {
+      const request = { id: randomUUID(), op, input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    for (const [op, input] of [
+      // The run read names its version, or `null` for the latest; never left out, never a number or a non-UUID.
+      ['inspectCapturedProcedureRun', { bookId, procedureId }],
+      ['inspectCapturedProcedureRun', { bookId, procedureId, versionId: 2 }],
+      ['inspectCapturedProcedureRun', { bookId, procedureId, versionId: 'version-2' }],
+      ['inspectCapturedProcedureRun', { bookId: 'book', procedureId, versionId: null }],
+      ['inspectCapturedProcedureRun', { bookId, procedureId: 'procedure', versionId: null }],
+      ['inspectCapturedProcedureRun', { bookId, procedureId, versionId: null, before: null }],
+      // 停用… is a read: it carries no digest, and names one version or `null` for all.
+      ['previewCapturedProcedureStop', { procedureId, versionId, previewDigest: 'a'.repeat(64) }],
+      ['previewCapturedProcedureStop', { procedureId }],
+      ['previewCapturedProcedureStop', { procedureId: 'procedure', versionId: null }],
+      ['previewCapturedProcedureStop', { procedureId, versionId: 'version' }],
+      // 停用 confirms exactly one preview: 64 lowercase hex characters, never left out.
+      ['stopCapturedProcedure', { procedureId, versionId }],
+      ['stopCapturedProcedure', { procedureId, versionId, previewDigest: 'A'.repeat(64) }],
+      ['stopCapturedProcedure', { procedureId, versionId, previewDigest: 'a'.repeat(63) }],
+      ['stopCapturedProcedure', { procedureId, versionId, previewDigest: 'a'.repeat(65) }],
+      ['stopCapturedProcedure', { procedureId, versionId, previewDigest: 'g'.repeat(64) }],
+      ['stopCapturedProcedure', { procedureId, versionId, previewDigest: null }],
+      ['stopCapturedProcedure', { procedureId: 'procedure', versionId, previewDigest: 'a'.repeat(64) }],
+      ['stopCapturedProcedure', { procedureId, versionId: 'version', previewDigest: 'a'.repeat(64) }],
+    ] as const) {
+      expect(rejectionFor(frameOf({ id: randomUUID(), op, input }))).toBeInstanceOf(ProtocolError);
+    }
+  });
+
   it('accepts 知识库 › 资料库: the read naming nothing, a preview by absolute path, an arrival, and a decision of a closed shape (Issue #427, S79c)', () => {
     const materialId = randomUUID();
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [

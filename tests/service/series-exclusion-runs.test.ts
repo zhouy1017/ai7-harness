@@ -411,14 +411,21 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
       // 错别字与规范用语 runs to its end; as 书系一致性 waits for its place, the exclusion is recorded and stops the Run there.
       let places = 0;
       let atStop: string[][] = [];
+      // The driver records a throw inside this hook as a category failure, so the hook keeps what happened and the test
+      // asserts it once the drive is over: a failing exclusion is then named here, not lost behind the Run-state check.
+      let hookOutcome: { stoppedRuns: number } | { error: string } | null = null;
       const stopping: ReviewRunExecutionOwner = {
         admitAndDispatch: (runRecordId, ledger) => owner.admitAndDispatch(runRecordId, ledger),
         whenDone: (runRecordId) => owner.whenDone(runRecordId),
         whenPlaceFree: async () => {
           places += 1;
           if (places === 2) {
-            atStop = run(store, bookId, prepared.reviewRunId).categories.map((category) => [category.categoryId, category.state]);
-            expect(exclude(store, seriesId, 'add', { target: { kind: 'knowledge-item', id: itemId } }).result.stoppedRuns).toBe(1);
+            try {
+              atStop = run(store, bookId, prepared.reviewRunId).categories.map((category) => [category.categoryId, category.state]);
+              hookOutcome = { stoppedRuns: exclude(store, seriesId, 'add', { target: { kind: 'knowledge-item', id: itemId } }).result.stoppedRuns };
+            } catch (error) {
+              hookOutcome = { error: error instanceof Error ? `${error.name}: ${error.message}` : String(error) };
+            }
           }
           return owner.whenPlaceFree();
         },
@@ -429,6 +436,7 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
       } finally {
         await driver.dispose();
       }
+      expect(hookOutcome).toEqual({ stoppedRuns: 1 });
       expect(atStop[0]).toEqual(['typos-and-usage', 'settled']);
       const stopped = run(store, bookId, prepared.reviewRunId);
       expect([stopped.state, stopped.canContinue, stopped.categories.map((category) => [category.categoryId, category.state])])

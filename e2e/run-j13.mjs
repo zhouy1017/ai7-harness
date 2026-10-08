@@ -637,6 +637,12 @@ const READ_PROCEDURES = `(() => {
         actions: Array.from(item.querySelectorAll('.captured-procedure-version-actions [data-procedure-action]'), (button) => button.dataset.procedureAction),
         latestEligible: item.dataset.latestEligible ?? null,
         eligiblePill: item.querySelector('.captured-procedure-latest-eligible')?.textContent ?? null,
+        eligibleNote: (() => {
+          const note = item.querySelector(':scope > .captured-procedure-latest-eligible-note');
+          if (!(note instanceof HTMLElement)) return null;
+          const box = note.getBoundingClientRect();
+          return { text: note.textContent, visible: box.width > 1 && box.height > 1 && getComputedStyle(note).visibility === 'visible' };
+        })(),
         runLinks: Array.from(item.querySelectorAll('button.captured-procedure-run-link'), (link) => [link.dataset.reviewRunId, link.textContent]),
         stop: readStop(item.querySelector(':scope > .captured-procedure-stop')),
       })),
@@ -1898,6 +1904,9 @@ async function main() {
     const enabledTwo = await readProcedures(renderer, (page) => page.procedures[0]?.versions[0]?.state === 'enabled', 'version-two-enabled');
     requireJourney(JSON.stringify(enabledTwo.procedures[0].versions.map((version) => [version.version, version.state, version.latestEligible, version.eligiblePill])) ===
       JSON.stringify([['2', 'enabled', 'true', '最新可用'], ['1', 'enabled', 'false', null]]) && enabledTwo.procedures[0].versions[1].runLinks.length === 1 &&
+      // 最新可用's meaning is a visible field note, for sighted users as much as for a screen reader (Issue #684).
+      JSON.stringify(enabledTwo.procedures[0].versions.map((version) => version.eligibleNote)) ===
+        JSON.stringify([{ text: '新建审阅按这个工序运行时，默认用这一版。', visible: true }, null]) &&
       enabledTwo.procedures[0].versions[1].runLinks[0][1].startsWith(`《${CAPTURE_TARGET_TITLE}》第 1 次审阅 · 已完成 · `), 'version-two-latest-eligible', enabledTwo.procedures[0].versions);
 
     at('procedure-exact-version');
