@@ -1,4 +1,4 @@
-import { createWriteStream, existsSync } from 'node:fs';
+import { createWriteStream, existsSync, statSync } from 'node:fs';
 import { lstat, mkdtemp, opendir, realpath, rm, stat } from 'node:fs/promises';
 import { once } from 'node:events';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -25,14 +25,16 @@ const OVERLAP_QUERY = '哈哈';
 const EXCLUSION_TEXT = '边界排除校验';
 const EXPECTED_EXCLUSION_MATCHES = 1_001;
 const MILESTONE_RECOVERY_SNAPSHOT_TIMEOUT = 10 * 60_000;
-// Staging parses and snapshots the whole ten-million-character file. A hosted Windows runner usually
-// finishes the entire Journey in three to five minutes, and on 2026-09-19 one spent more than the
-// former 240 s on this wait alone; the bound exists to end a hang, so it sits well clear of a slow night.
-const IMPORT_STAGE_TIMEOUT = 8 * 60_000;
-// While it waits for the target screen, the stage reads how many blocks the parse has committed this often, and a parse
-// that gained none for this long when the bound passed is named stalled rather than slow (#690).
-const IMPORT_STAGE_SAMPLE_INTERVAL = 5_000;
-const IMPORT_STAGE_STALL = 60_000;
+// Staging parses and snapshots the whole ten-million-character file, and the commit re-parses it and writes it whole.
+// Since #690 these long waits — staging, the commit and its acknowledgement — are bounded by the import's progress, read
+// from the store every few seconds, rather than by a wall clock: one that shows no change for IMPORT_STALL has stopped, and
+// one still moving is waited for up to the product's own deadline for the request, src/main/service-client.ts
+// LONG_REQUEST_TIMEOUT_MS, past which the product stops its service itself. Hosted Windows runners have spent more than the
+// former fixed 8 min on staging (#621, 2026-10-08) and more than 300 s on the commit (2026-10-09).
+const PRODUCT_LONG_REQUEST_TIMEOUT = 10 * 60_000;
+const IMPORT_WAIT_MARGIN = 30_000;
+const IMPORT_SAMPLE_INTERVAL = 5_000;
+const IMPORT_STALL = 3 * 60_000;
 // The product's own startup readiness deadline, src/main/service-client.ts STARTUP_READY_TIMEOUT_MS.
 const PRODUCT_STARTUP_READY_TIMEOUT = 2 * 60_000;
 // Margin for the renderer paint and the landing screen's service IPC, which follow the main process's readiness signal.
@@ -497,51 +499,141 @@ function importStagePhase(dataRoot) {
 }
 
 /**
- * Wait for the target screen staging leads to (#621, #690). The service parses the file into blocks it commits in batches,
- * so the store is read every few seconds while the screen is awaited, and the time of the last block it gained is kept. A
- * staging the product refused ends the wait at once on its error screen. When the bound passes, the stage names where
- * staging stood (`import-stage-<phase>`) and the check says whether it was still moving — `progressing`, a slow runner — or
- * had gained no block for a minute — `stalled` — with how far the parse had come, in tenths, or that the draft was staged
+ * How far the import has come, as the store the service writes shows it (#621, #690): the drafts staged, the blocks a parse
+ * has committed so far (staging's own, or the commit's re-parse of the same file), the imports committed, and the bytes of
+ * the store and its write-ahead log, which a long transaction grows as it writes. Counts and sizes only; `null` when the
+ * store could not be read at that moment.
+ */
+function importProgress(dataRoot) {
+  const size = (name) => {
+    try {
+      return statSync(join(dataRoot, 'store', name)).size;
+    } catch {
+      return 0;
+    }
+  };
+  let database;
+  try {
+    database = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    const count = (sql) => Number(database.prepare(sql).get()?.total ?? 0);
+    return {
+      drafts: count('SELECT count(*) AS total FROM import_drafts'),
+      blocks: count('SELECT count(*) AS total FROM import_ingest_blocks'),
+      commits: count('SELECT count(*) AS total FROM import_commits'),
+      bytes: size('ai7.sqlite') + size('ai7.sqlite-wal'),
+    };
+  } catch {
+    return null;
+  } finally {
+    database?.close();
+  }
+}
+
+/**
+ * Wait for one of the import's long steps by its progress rather than by a wall clock (#621, #690). `expression` reads the
+ * renderer as `done`, `refused` (the product answered without reaching the next screen) or `waiting`. While it waits, the
+ * store is read every few seconds, and any change in what it shows counts as the import moving. The wait ends `stalled` once
+ * the store has shown no change for IMPORT_STALL, and `progressing` only at the product's own deadline for the request,
+ * past which the product stops its service itself: a slow runner whose import keeps moving is waited for, and one that
+ * stopped is named quickly. The outcome carries the last reading and the most blocks any reading showed.
+ */
+async function watchImportStep(renderer, dataRoot, expression) {
+  const started = Date.now();
+  const deadline = started + PRODUCT_LONG_REQUEST_TIMEOUT + IMPORT_WAIT_MARGIN;
+  let sampledAt = 0;
+  let signature = null;
+  let progressedAt = started;
+  let progress = null;
+  let mostBlocks = 0;
+  const sample = () => {
+    progress = importProgress(dataRoot);
+    sampledAt = Date.now();
+    if (progress === null) return;
+    mostBlocks = Math.max(mostBlocks, progress.blocks);
+    const next = `${progress.drafts}/${progress.blocks}/${progress.commits}/${progress.bytes}`;
+    if (next !== signature) {
+      signature = next;
+      progressedAt = sampledAt;
+    }
+  };
+  const ended = (outcome) => {
+    const result = { outcome, progress, mostBlocks, quietMs: Date.now() - progressedAt, elapsedMs: Date.now() - started };
+    if (localDebugEnabled()) recordDebugDetail('J-02', `import step ${diagnosticLocation} ended ${JSON.stringify(result)}`);
+    return result;
+  };
+  sample();
+  for (;;) {
+    const state = await renderer.evaluate(expression);
+    if (state === 'done') return ended('done');
+    if (state === 'refused') {
+      sample();
+      return ended('refused');
+    }
+    if (Date.now() - sampledAt >= IMPORT_SAMPLE_INTERVAL) sample();
+    if (Date.now() - progressedAt >= IMPORT_STALL) return ended('stalled');
+    if (Date.now() >= deadline) return ended('progressing');
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+}
+
+/** The tenths of the file a parse had committed, for a check label. */
+function parsedTenths(blocks) {
+  return Math.min(10, Math.floor((blocks ?? 0) * 10 / BLOCK_COUNT));
+}
+
+/**
+ * Wait for the target screen staging leads to. A staging the product refused ends the wait on its error screen. Otherwise
+ * the stage names where staging stood (`import-stage-<phase>`) and the check says whether it was refused, had stalled or
+ * was still moving at the product's own deadline, with how far the parse had come in tenths, or that the draft was staged
  * and the screen never shown. Only fixed words and a count leave the run.
  */
 async function waitForStagedTarget(renderer, dataRoot) {
-  const started = Date.now();
-  const deadline = started + IMPORT_STAGE_TIMEOUT;
-  let sampledAt = 0;
-  let blocks = 0;
-  let progressedAt = started;
-  const sample = () => {
-    const stood = importStagePhase(dataRoot);
-    sampledAt = Date.now();
-    const reached = stood.phase === 'screen' ? BLOCK_COUNT : stood.blocks;
-    if (reached !== null && reached > blocks) {
-      blocks = reached;
-      progressedAt = sampledAt;
-    }
-    return stood;
-  };
-  while (Date.now() < deadline) {
-    const screen = await renderer.evaluate(
-      `document.querySelector('[data-screen="target"]') ? 'target' : document.querySelector('[data-screen="error"]') ? 'error' : 'waiting'`,
-    );
-    if (screen === 'target') return;
-    if (screen === 'error') {
-      at(`import-stage-${sample().phase}`);
-      requireJourney(false, 'stage-target-refused');
-    }
-    if (Date.now() - sampledAt >= IMPORT_STAGE_SAMPLE_INTERVAL) sample();
-    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
-  }
-  const stood = sample();
-  const quiet = Date.now() - progressedAt;
-  const tenths = Math.min(10, Math.floor(blocks * 10 / BLOCK_COUNT));
-  if (localDebugEnabled()) {
-    recordDebugDetail('J-02', `import stage at the bound ${JSON.stringify({ ...stood, blocks, quietMs: quiet, elapsedMs: Date.now() - started })}`);
-  }
+  const watched = await watchImportStep(
+    renderer,
+    dataRoot,
+    `document.querySelector('[data-screen="target"]') ? 'done' : document.querySelector('[data-screen="error"]') ? 'refused' : 'waiting'`,
+  );
+  if (watched.outcome === 'done') return;
+  const stood = importStagePhase(dataRoot);
   at(`import-stage-${stood.phase}`);
+  const tenths = parsedTenths(stood.phase === 'screen' ? BLOCK_COUNT : watched.mostBlocks);
+  requireJourney(watched.outcome !== 'refused', 'stage-target-refused');
   requireJourney(stood.phase !== 'screen', 'stage-target-staged-not-shown');
-  requireJourney(quiet >= IMPORT_STAGE_STALL, `stage-target-progressing-at-${Number(tenths)}-tenths`);
+  requireJourney(watched.outcome !== 'progressing', `stage-target-progressing-at-${Number(tenths)}-tenths`);
   requireJourney(false, `stage-target-stalled-at-${Number(tenths)}-tenths`);
+}
+
+/**
+ * Wait for the commit's `imported` screen, then for its completion to be acknowledged (#690). The commit re-parses the
+ * staged file to prove it unchanged, then writes the Book and its manuscript in one transaction. A check names how far it
+ * had come: `preparing` (no block re-parsed yet), `revalidating-<n>-tenths`, `writing` (the re-parse done, the transaction
+ * under way), or `committed` with the screen not shown.
+ */
+async function waitForImportCommitted(renderer, dataRoot) {
+  const commitButton = JSON.stringify('新建图书并导入稿件');
+  const committed = await watchImportStep(
+    renderer,
+    dataRoot,
+    `(() => { const state = document.querySelector('#screen')?.dataset.screen; if (state === 'imported') return 'done'; if (state !== 'review') return 'refused'; const commit = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === ${commitButton}); return commit instanceof HTMLButtonElement && !commit.disabled ? 'refused' : 'waiting'; })()`,
+  );
+  if (committed.outcome !== 'done') {
+    const progress = committed.progress;
+    requireJourney(progress === null || progress.commits === 0, 'imported-committed-not-shown');
+    const outcome = committed.outcome === 'refused' ? 'refused' : committed.outcome === 'stalled' ? 'stalled' : 'progressing';
+    if (progress !== null && progress.blocks > 0) {
+      requireJourney(false, `imported-${outcome}-at-revalidating-${Number(parsedTenths(progress.blocks))}-tenths`);
+    }
+    requireJourney(committed.mostBlocks === 0, `imported-${outcome}-at-writing`);
+    requireJourney(false, `imported-${outcome}-at-preparing`);
+  }
+  const acknowledged = await watchImportStep(
+    renderer,
+    dataRoot,
+    `(() => { if (document.querySelector('#screen')?.dataset.screen !== 'imported') return 'refused'; const open = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '打开稿件'); return document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true' && open instanceof HTMLButtonElement && !open.disabled ? 'done' : 'waiting'; })()`,
+  );
+  if (acknowledged.outcome === 'refused') requireJourney(false, 'completion-acknowledged-before-open-refused');
+  if (acknowledged.outcome === 'stalled') requireJourney(false, 'completion-acknowledged-before-open-stalled');
+  requireJourney(acknowledged.outcome === 'done', 'completion-acknowledged-before-open-progressing');
 }
 
 async function importAndOpen(renderer, dataRoot) {
@@ -566,13 +658,7 @@ async function importAndOpen(renderer, dataRoot) {
   await assertRenderer(renderer, `!document.querySelector('#accept-import-degradation') && Array.from(document.querySelectorAll('[data-fidelity-category]')).every((row) => row.dataset.fidelityCategory === 'round-trip-export' || row.querySelector('.status-preserved'))`, 'clean-fidelity');
   at('import-commit');
   await clickButton(renderer, '新建图书并导入稿件', 'commit-click');
-  await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'imported', 300_000);
-  await waitFor(
-    renderer,
-    `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true' && !Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '打开稿件')?.disabled`,
-    'completion-acknowledged-before-open',
-    300_000,
-  );
+  await waitForImportCommitted(renderer, dataRoot);
   at('import-editor-open');
   await clickButton(renderer, '打开稿件', 'editor-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'editor');
