@@ -644,6 +644,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         el('span', 'field-note review-run-counts', `${reviewCountsLine(summary.findingCounts)} · ${reviewRunReportLine(summary.reportVersion)}`),
         created,
       );
+      // 此结果使用的材料后来被排除 (Issue #64, S29b; SER-026), beside the Run in the list too.
+      if (summary.historicalMarker !== null) item.append(el('span', 'review-historical-marker-label review-run-marker', summary.historicalMarker));
       const open = actionButton('open-run', 'quiet', () => openRun(summary.reviewRunId));
       if (opened) open.disabled = true;
       item.append(open);

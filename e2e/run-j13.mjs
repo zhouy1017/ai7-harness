@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { lstat, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises';
+import { lstat, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -46,6 +46,12 @@ const EDITOR_WORDS = '三部曲里海边小城的地名，以第一部的写法�
 const KNOWLEDGE_NOTE = '书系知识只有经过纳入审阅才会成为书系可以选用的知识；候选项不会被任何任务读取，纳入也不会授权读取、发送或改动稿件。';
 const FIXTURE_IDENTITY = 'sample1-series-consistency-authored';
 const NO_KNOWLEDGE = `书系「${SERIES}」还没有纳入可用于一致性审阅的书系知识；在书系中纳入后才能选。`;
+// 书系检索排除 (Issue #64, S29b).
+const ITEM_LABEL = `书系知识条目「${PLACE}」（地点）`;
+const EXCLUSION_REASON = '地名写法待与第一部核对';
+const SCOPE_CHANGED = '书系检索范围已变化 · 需要重新确认计划';
+const MARKER = '此结果使用的材料后来被排除';
+const EXCLUDED_REASON = `书系「${SERIES}」可用于一致性审阅的书系知识都已排除在书系检索之外；停止排除或纳入其他书系知识后才能选。`;
 const CONSISTENCY_BASIS = `依据：书系「${SERIES}」的书系知识：地点「${PLACE}」第 2 版 · 工序：书系一致性检查（第 1 版） · 不使用搜索引擎`;
 const CREDENTIAL_CLEANUP_TIMEOUT_MS = 15_000;
 const FORCE_EXIT_TIMEOUT_MS = 5_000;
@@ -789,6 +795,9 @@ async function main() {
     const sample1Bytes = await readFile(SAMPLE1_PATH);
     const sample1 = { sha256: createHash('sha256').update(sample1Bytes).digest('hex'), bytes: sample1Bytes.length };
     requireJourney(sample1.sha256 === 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' && sample1.bytes === 29_550, 'exact-sample1');
+    // A 书系一致性 Run's first reading range is held through this file while an exclusion is recorded (Issue #64, S29b); absent,
+    // it holds nothing, so every other launch runs as before.
+    const holdPath = resolve(runRoot, 'j13-unit-hold.txt');
     const launch = async () => {
       const args = [
         '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
@@ -798,6 +807,7 @@ async function main() {
         '--j13-picker-path', SAMPLE1_PATH,
         // Its 书系一致性 Review Run executes on the J-04 model adapter (Issue #64, S29a).
         '--j04-model-adapter', FIXTURE_IDENTITY,
+        '--j10-unit-hold-path', holdPath,
       ];
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       cancellation.throwIfRequested();
@@ -1283,6 +1293,129 @@ async function main() {
     const reviewedRow = await readSeries(renderer, (read) => read.members.some(([id]) => id === member), 'consistency-reviewed-row');
     const reviewedLine = reviewedRow.members.find(([id]) => id === member)?.[5] ?? '';
     requireJourney(reviewedLine.startsWith('审阅于 ') && reviewedLine.endsWith(' · 可以审阅'), 'consistency-member-reviewed-line', reviewedLine);
+
+    // ---- 书系检索排除 (Issue #64, plan slice S29b; V2-UX-SER-020 to SER-027) ---------------------------------------------
+    at('exclusion-held-run');
+    // A second 书系一致性 Review Run, its first reading range held in flight by the unit hold, so the exclusion is recorded
+    // while the Run reads.
+    await writeFile(holdPath, '0', 'utf8');
+    await leaveSeries(renderer, 'exclusion-series-leave');
+    const openMemberReview = async () => {
+      await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(member)}]`, 'exclusion-review-book');
+      await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(member)}]')`, 'exclusion-review-manuscript', 120_000);
+      await assertRenderer(renderer, `(() => { const group=document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]'); const button=group?.querySelector('button[data-work-destination="review"]'); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, 'exclusion-review-entry');
+      await waitFor(renderer, `document.querySelector('[data-screen="book-review"] .book-review .review-workspace-card')`, 'exclusion-review-card');
+    };
+    const leaveMemberReview = async () => {
+      await assertRenderer(renderer, `(() => { const open = Array.from(document.querySelectorAll('[data-screen="book-review"] .workbench-actions button')).find((button) => button.textContent === '工作概览'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'exclusion-review-overview');
+      await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview')?.dataset.bookId===${JSON.stringify(member)}`, 'exclusion-review-overview-ready');
+      await backToLibrary(renderer, 'exclusion-review-library');
+    };
+    await openMemberReview();
+    await clickSelector(renderer, '[data-review-action="new-review"]', 'exclusion-new-review');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'exclusion-sheet-open');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=sheet.querySelector('input[name="review-category"][value="series-consistency"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'exclusion-prepare');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, 'exclusion-prepared', 120_000);
+    const heldRun = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
+    requireJourney(heldRun?.state === 'prepared' && heldRun.ordinal === 2 && UUID_PATTERN.test(heldRun.reviewRunId), 'exclusion-prepared-run', heldRun?.state);
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(heldRun.reviewRunId)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='ready'`, 'exclusion-drawer');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'exclusion-start');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='running' && document.querySelector('ol.review-progress li[data-review-category="series-consistency"]')?.dataset.categoryState==='running'`, 'exclusion-running', 120_000);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'exclusion-drawer-close');
+    await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'exclusion-drawer-closed');
+    await leaveMemberReview();
+
+    at('exclusion-preview');
+    // 添加检索排除…: the item, a reason, and 书系检索排除影响预览 — exact target, scope, effective time, how far it reaches, reason
+    // and actor, then four groups naming the Run reading now and the result that used the item. Nothing is recorded yet.
+    await openSeries(renderer, seriesId, 'exclusion-series');
+    await waitFor(renderer, `document.querySelector('.series-exclusions')?.dataset.exclusionsEffective==='0'`, 'exclusion-section');
+    await clickSelector(renderer, '[data-exclusion-action="add-open"]', 'exclusion-add-open');
+    await clickSelector(renderer, 'input[name="series-exclusion-kind"][value="knowledge-item"]', 'exclusion-kind');
+    await waitFor(renderer, `document.querySelector('input[name="series-exclusion-target"][value=${JSON.stringify(itemId)}]') instanceof HTMLInputElement`, 'exclusion-targets');
+    await clickSelector(renderer, `input[name="series-exclusion-target"][value=${JSON.stringify(itemId)}]`, 'exclusion-target');
+    await fill(renderer, '#series-exclusion-reason', EXCLUSION_REASON, 'exclusion-reason');
+    await clickSelector(renderer, '[data-exclusion-action="preview"]', 'exclusion-preview-open');
+    await waitFor(renderer, `document.querySelector('.series-exclusion-preview')?.dataset.previewAction==='add' && document.activeElement === document.querySelector('.series-exclusion-preview-heading')`, 'exclusion-previewed');
+    const exclusionPreview = await renderer.evaluate(`(() => { const box=document.querySelector('.series-exclusion-preview'); return {
+      rows: Array.from(box.querySelectorAll('.series-exclusion-preview-identity dt'), (term) => [term.textContent, term.nextElementSibling?.textContent ?? null]),
+      groups: Array.from(box.querySelectorAll(':scope > .series-impact-group'), (group) => [group.dataset.impactGroup, group.querySelector('h5')?.textContent ?? null,
+        Array.from(group.querySelectorAll('.series-impact-changes li'), (line) => line.textContent)]),
+      commit: box.querySelector('[data-exclusion-action="commit"]')?.textContent ?? null,
+    }; })()`);
+    requireJourney(JSON.stringify(exclusionPreview?.rows) === JSON.stringify([
+      ['对象', ITEM_LABEL], ['范围', `只限书系「${SERIES}」的书系检索`], ['生效时间', '记录后立即生效'], ['持续范围', '这个条目现在和以后的修订版都一并排除。'],
+      ['理由', EXCLUSION_REASON], ['操作人', '本机编辑'],
+    ]), 'exclusion-preview-rows', exclusionPreview?.rows);
+    requireJourney(JSON.stringify(exclusionPreview?.groups.map((group) => [group[0], group[1]])) === JSON.stringify([
+      ['future-reads', '今后的检索'], ['runs', '已排队、已授权或正在运行的任务'], ['history', '已完成的历史'], ['unaffected', '不受影响的授权'],
+    ]) && exclusionPreview.groups[1][2][0] === `1 个已授权或正在运行的任务会在下一次读取前停下，显示「书系检索范围已变化 · 需要重新确认计划」：《${MEMBER}》第 2 次审阅。` &&
+      exclusionPreview.groups[2][2][0] === `1 个已完成的结果用过这些材料，会标上「${MARKER}」：《${MEMBER}》第 1 次审阅。` && exclusionPreview.commit === '添加检索排除',
+    'exclusion-preview-groups', exclusionPreview?.groups);
+    requireJourney((await renderer.evaluate(`window.ai7.inspectSeries({ seriesId: ${JSON.stringify(seriesId)} })`))?.exclusions.effective.length === 0, 'exclusion-preview-records-nothing');
+
+    at('exclusion-recorded');
+    // 添加检索排除: in force at once, listed with its reason, and the member can no longer choose 书系一致性 — the plan it would make
+    // leaves the item out, and with it everything there was to read.
+    await clickSelector(renderer, '[data-exclusion-action="commit"]', 'exclusion-commit');
+    await waitFor(renderer, `document.querySelector('.series-exclusions')?.dataset.exclusionsEffective==='1' && document.querySelector('li.series-exclusion')?.dataset.targetId===${JSON.stringify(itemId)}`, 'exclusion-listed');
+    await assertRenderer(renderer, `(document.querySelector('li.series-exclusion .series-exclusion-reason')?.textContent ?? '') === ${JSON.stringify(`理由：${EXCLUSION_REASON}`)} && document.querySelectorAll('ol.series-exclusion-revisions > li').length === 1`, 'exclusion-listed-words');
+    const excludedRow = await readSeries(renderer, (read) => read.members.some(([id]) => id === member), 'exclusion-member-row');
+    requireJourney((excludedRow.members.find(([id]) => id === member)?.[5] ?? '').endsWith(`暂不能审阅：${EXCLUDED_REASON}`), 'exclusion-member-unavailable', excludedRow.members);
+
+    at('exclusion-held-run-stopped');
+    // The held range is let go; before the next one the current-read guard stops the Run, which offers exactly 修改计划并重新授权
+    // and 取消任务 — never 继续审阅.
+    await writeFile(holdPath, 'release', 'utf8');
+    await leaveSeries(renderer, 'exclusion-stopped-leave');
+    await openMemberReview();
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='scope-changed'`, 'exclusion-stopped', 120_000);
+    const stoppedRun = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
+    requireJourney(stoppedRun?.reviewRunId === heldRun.reviewRunId && stoppedRun.stateLabel === SCOPE_CHANGED && stoppedRun.canContinue === false &&
+      stoppedRun.categories[0]?.state === 'interrupted' && stoppedRun.categories[0]?.stateLabel === SCOPE_CHANGED && stoppedRun.findings.length === 0,
+    'exclusion-stopped-run', { state: stoppedRun?.state, categories: stoppedRun?.categories?.map((category) => [category.state, category.stateLabel]) });
+    await assertRenderer(renderer, `document.querySelector('[data-review-action="continue"]') === null && document.querySelector('.review-scope-stop [data-review-action="scope-redo"]')?.textContent === '修改计划并重新授权' && document.querySelector('.review-scope-stop [data-review-action="scope-cancel"]')?.textContent === '取消任务'`, 'exclusion-stopped-actions');
+
+    at('exclusion-plan-leaves-out');
+    // 修改计划并重新授权 opens 新建审阅 with the Run's own choices; the plan it would make leaves the excluded item out, and here
+    // that is every item, so 书系一致性 cannot be chosen and says why.
+    await clickSelector(renderer, '[data-review-action="scope-redo"]', 'exclusion-redo');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'exclusion-redo-sheet');
+    await assertRenderer(renderer, `(() => { const box=document.querySelector('dialog.review-sheet input[name="review-category"][value="series-consistency"]'); return box instanceof HTMLInputElement && box.disabled && !box.checked && box.dataset.unavailableReason === ${JSON.stringify(EXCLUDED_REASON)}; })()`, 'exclusion-redo-unavailable');
+    await clickSelector(renderer, 'dialog.review-sheet [data-review-action="close-sheet"]', 'exclusion-redo-close');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open!==true`, 'exclusion-redo-closed');
+
+    at('exclusion-marker');
+    // The first Run's result used the item: it is marked beside the Run, its report and each finding, and nothing is rewritten.
+    await clickSelector(renderer, 'ol.review-runs li[data-review-run="1"] [data-review-action="open-run"]', 'exclusion-open-first');
+    await waitFor(renderer, `document.querySelector('section.review-run')?.dataset.reviewRunState==='settled' && document.querySelectorAll('article.review-finding').length===3`, 'exclusion-first-open');
+    await assertRenderer(renderer, `document.querySelector('section.review-run .review-historical-marker .review-historical-marker-label')?.textContent === ${JSON.stringify(MARKER)} && document.querySelector('.review-report-marker')?.textContent === ${JSON.stringify(MARKER)} && Array.from(document.querySelectorAll('article.review-finding .review-finding-marker')).every((line) => line.textContent === ${JSON.stringify(MARKER)}) && document.querySelectorAll('article.review-finding .review-finding-marker').length === 3 && document.querySelector('ol.review-runs li[data-review-run="1"] .review-run-marker')?.textContent === ${JSON.stringify(MARKER)}`, 'exclusion-marker-shown');
+    await leaveMemberReview();
+
+    at('exclusion-ended');
+    // 停止此排除 after its own preview: later reads may read the item again, the member may choose 书系一致性 again — and the Run
+    // the exclusion stopped stays stopped, its authorization never restored.
+    await openSeries(renderer, seriesId, 'exclusion-end-series');
+    await clickSelector(renderer, 'li.series-exclusion [data-exclusion-action="end-open"]', 'exclusion-end-open');
+    await waitFor(renderer, `document.querySelector('.series-exclusion-preview')?.dataset.previewAction==='end' && document.querySelector('.series-exclusion-preview [data-exclusion-action="commit"]')?.textContent==='停止此排除'`, 'exclusion-end-previewed');
+    await assertRenderer(renderer, `Array.from(document.querySelectorAll('.series-exclusion-preview [data-impact-group="runs"] .series-impact-unchanged li'), (line) => line.textContent).includes('因这条排除停下的任务不会自动恢复，旧的授权和来源范围也不会恢复；要继续，需修改计划并重新授权。')`, 'exclusion-end-preview-words');
+    await clickSelector(renderer, '.series-exclusion-preview [data-exclusion-action="commit"]', 'exclusion-end-commit');
+    await waitFor(renderer, `document.querySelector('.series-exclusions')?.dataset.exclusionsEffective==='0' && document.querySelectorAll('ol.series-exclusion-revisions > li').length === 2`, 'exclusion-ended-listed');
+    const endedRow = await readSeries(renderer, (read) => (read.members.find(([id]) => id === member)?.[5] ?? '').endsWith(' · 可以审阅'), 'exclusion-member-available');
+    requireJourney(endedRow.members.some(([id]) => id === member), 'exclusion-member-row-again');
+    await leaveSeries(renderer, 'exclusion-ended-leave');
+    await openMemberReview();
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='scope-changed'`, 'exclusion-still-stopped');
+
+    at('exclusion-cancel');
+    // 取消任务, confirmed inline: the Run reads 已取消 and offers nothing more; the marked result stays marked.
+    await clickSelector(renderer, '[data-review-action="scope-cancel"]', 'exclusion-cancel-open');
+    await waitFor(renderer, `document.activeElement === document.querySelector('[data-review-action="scope-cancel-confirm"]')`, 'exclusion-cancel-confirm-focus');
+    await clickSelector(renderer, '[data-review-action="scope-cancel-confirm"]', 'exclusion-cancel-confirm');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='cancelled' && document.querySelector('.review-scope-stop') === null && document.querySelector('[data-review-action="continue"]') === null`, 'exclusion-cancelled');
+    await assertRenderer(renderer, `document.querySelector('ol.review-runs li[data-review-run="1"] .review-run-marker')?.textContent === ${JSON.stringify(MARKER)}`, 'exclusion-marker-kept');
+    await leaveMemberReview();
+    await openSeries(renderer, seriesId, 'exclusion-back-series');
 
     at('knowledge-bounded-pages');
     const pagesSeeded = await renderer.evaluate(`(async () => {
