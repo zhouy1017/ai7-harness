@@ -2,6 +2,8 @@
 status: accepted
 ---
 
+> Amended by [ADR 0088](./0088-carry-the-editorial-dialogue-under-developer-live.md): the scope also carries one user-initiated editorial dialogue turn, without a Plan Envelope, Run Authorization or Run Budget Ceiling, on the terms that record states; its rule lands in the platform-tools revision of S87-f3. The Inputs clause below is a development and testing rule — `ordinary-production` transmits the editor's own manuscripts under its own policy — and a tester's edits of `sample1` may be sent.
+
 # Admit a developer-live Provider Processing scope
 
 On 2026-09-06 the Owner decided that prompt contracts and the analysis pipeline must be tuned on real model output before any recording, and that the existing `fixture-recording` scope is the wrong instrument for that purpose: it exists to freeze one reviewed fixture, it allows one call, and every contract change invalidates what it recorded. This decision extends [ADR 0046](./0046-separate-provider-processing-by-operational-scope.md) with a fourth trusted operational scope. It changes no production default, no Model Role binding outside the development interval, and none of the recording rules of [ADR 0044](./0044-use-sample1-as-compatibility-and-recording-baseline.md).
