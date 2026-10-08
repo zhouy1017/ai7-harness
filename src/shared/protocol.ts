@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 101 as const;
+export const SERVICE_PROTOCOL_VERSION = 104 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -6097,6 +6097,13 @@ export interface EvaluationTotalProjection {
  * AI7's 初评 as one version of the record keeps it (EVAL-001, EVAL-005 to EVAL-007): what the version began from, snapshotted
  * when it began, so AI7's score stands beside the editor's for as long as the version does.
  */
+/**
+ * The most of AI7's notes 评估 carries for one item, of a 初评 or a rewrite (Issue #689): a long Book's notes, every range's,
+ * would outgrow the frame. Beyond it the notes shown are spread over the ranges read — each range's first, then its second —
+ * and the item says how many there are in all.
+ */
+export const MAX_EVALUATION_EVIDENCE_NOTES = 12;
+
 /** One thing AI7 noted toward an item while it read one range (EVAL-006): its words, and the blocks it cited there. */
 export interface EvaluationInitialEvidenceProjection {
   readonly unitOrdinal: number;
@@ -6117,8 +6124,13 @@ export interface EvaluationInitialDraftProjection {
     readonly sufficiency: InitialEvaluationSufficiency;
     readonly citedBlocks: number;
     readonly unitsCited: number;
-    /** What AI7 noted toward the item, range by range: the evidence its score rests on (EVAL-006). */
+    /**
+     * What AI7 noted toward the item, range by range: the evidence its score rests on (EVAL-006) — at most
+     * `MAX_EVALUATION_EVIDENCE_NOTES` of them, spread over the ranges (Issue #689).
+     */
     readonly evidence: ReadonlyArray<EvaluationInitialEvidenceProjection>;
+    /** How many notes AI7 made toward the item in all; more than `evidence` holds when it was cut. */
+    readonly evidenceCount: number;
   }>;
   /** How many ranges the 初评 meant to read, and the ones it did not — a 初评 that completed with gaps says which. */
   readonly unitsTotal: number;
@@ -6323,7 +6335,9 @@ export interface EvaluationRewriteWorkspaceProjection {
       readonly itemId: string;
       readonly before: string | null;
       readonly after: string;
+      /** At most `MAX_EVALUATION_EVIDENCE_NOTES`, spread over the ranges (Issue #689); `evidenceCount` says how many in all. */
       readonly evidence: ReadonlyArray<{ readonly unitOrdinal: number; readonly note: string; readonly blockIds: ReadonlyArray<string> }>;
+      readonly evidenceCount: number;
     }>;
     /** The 总评 offered beside the version's own; `null` when it was set aside. */
     readonly verdict: null | { readonly before: string | null; readonly after: string };

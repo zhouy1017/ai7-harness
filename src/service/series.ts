@@ -10,7 +10,7 @@ import {
   type SeriesMembershipChangeKind,
   type SeriesHistoryCursor,
 } from '../shared/protocol.js';
-import { canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
+import { canonicalJson, canonicalRecord, isRecord, parseStoredJson, sha256Hex } from './analysis/canonical.js';
 
 /**
  * 书系 (Issue #63, plan slice S28a; V2-UX-SER-001 to SER-012; ADR 0002, ADR 0036). A Series is an explicitly related group of
@@ -308,7 +308,7 @@ export class SeriesLedger {
   #series(row: SqlRow): StoredSeries {
     const json = String(row.canonical_json);
     requireSeries(sha256Hex(json) === String(row.sha256), 'SERIES_RECORD_INVALID', INVALID);
-    const record = JSON.parse(json) as unknown;
+    const record = parseStoredJson(json, () => new SeriesError('SERIES_RECORD_INVALID', INVALID));
     requireSeries(isRecord(record) && record.schema === SERIES_SCHEMA && record.seriesId === row.series_id && record.title === row.title &&
       titleKey(String(row.title)) === row.title_key && record.note === row.note && record.createdAt === row.created_at && record.actor === ACTOR,
     'SERIES_RECORD_INVALID', INVALID);
@@ -366,7 +366,7 @@ export class SeriesLedger {
       if (before?.seriesId !== row.series_id || before?.bookId !== row.book_id) before = null;
       const json = String(row.canonical_json);
       requireSeries(sha256Hex(json) === String(row.sha256), 'SERIES_RECORD_INVALID', INVALID);
-      const record = JSON.parse(json) as unknown;
+      const record = parseStoredJson(json, () => new SeriesError('SERIES_RECORD_INVALID', INVALID));
       const ordinal = Number(row.ordinal);
       const kind = row.kind === 'add' ? 'add' : 'remove';
       requireSeries(isRecord(record) && record.schema === CHANGE_SCHEMA && record.changeId === row.change_id && record.seriesId === row.series_id &&

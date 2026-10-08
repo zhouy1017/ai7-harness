@@ -55,7 +55,19 @@ export function parseCanonicalJson(json: string): unknown {
   return parsed;
 }
 
-export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+/**
+ * Parse a stored row's JSON, a parse failure thrown as the owner's own error (Issue #689): a row whose digest matches text that
+ * is not JSON is a damaged row like any other, so the guards that catch the owner's errors catch it too.
+ */
+export function parseStoredJson(json: string, invalid: () => Error): unknown {
+  try {
+    return JSON.parse(json) as unknown;
+  } catch {
+    throw invalid();
+  }
+}
+
+export const UUID_PATTERN =/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 export const BLOCK_ID_PATTERN = /^blk_[0-9a-f]{24}$/;
 

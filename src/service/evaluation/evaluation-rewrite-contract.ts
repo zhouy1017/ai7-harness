@@ -361,9 +361,12 @@ export function parseEvaluationRewriteSynthesis(value: string, input: Pick<Evalu
   const missing = scored.find((item) => !byId.has(item.itemId));
   if (missing !== undefined) return { ok: false, code: 'items-incomplete', detail: `没有给出评分项 ${missing.itemId} 的评语。` };
   if (!line(result.verdict, MAX_REWRITTEN_VERDICT_GRAPHEMES)) return invalid('总评缺失、含有控制字符或超出 600 字素边界。');
-  // The numbers and the conclusion are the editor's: a 评语 or the 总评 that states either is set aside, alone, with why.
+  // The numbers and the conclusion are the editor's: a 评语 or the 总评 that states either is set aside, alone, with why. A
+  // fraction reads as a score over one of the profile's 满分 or its total, never as 「2/3」 (Issue #689).
+  const fullMarks = input.items.map((item) => item.fullMarks);
+  fullMarks.push(fullMarks.reduce((sum, marks) => sum + marks, 0));
   const claim = (words: string): string | null =>
-    claimsScore(words) ? '写了分数，没有采用：分数只由你定。' : claimsConclusion(words, input.conclusions) ? '写出了结论，没有采用：结论由你选。' : null;
+    claimsScore(words, fullMarks) ?'写了分数，没有采用：分数只由你定。' : claimsConclusion(words, input.conclusions) ? '写出了结论，没有采用：结论由你选。' : null;
   const withheld: Array<{ itemId: string | null; reason: string }> = [];
   const items: Array<{ itemId: string; comment: string }> = [];
   for (const item of scored) {
