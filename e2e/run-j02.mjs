@@ -29,6 +29,10 @@ const MILESTONE_RECOVERY_SNAPSHOT_TIMEOUT = 10 * 60_000;
 // finishes the entire Journey in three to five minutes, and on 2026-09-19 one spent more than the
 // former 240 s on this wait alone; the bound exists to end a hang, so it sits well clear of a slow night.
 const IMPORT_STAGE_TIMEOUT = 8 * 60_000;
+// While it waits for the target screen, the stage reads how many blocks the parse has committed this often, and a parse
+// that gained none for this long when the bound passed is named stalled rather than slow (#690).
+const IMPORT_STAGE_SAMPLE_INTERVAL = 5_000;
+const IMPORT_STAGE_STALL = 60_000;
 // The product's own startup readiness deadline, src/main/service-client.ts STARTUP_READY_TIMEOUT_MS.
 const PRODUCT_STARTUP_READY_TIMEOUT = 2 * 60_000;
 // Margin for the renderer paint and the landing screen's service IPC, which follow the main process's readiness signal.
@@ -492,6 +496,54 @@ function importStagePhase(dataRoot) {
   }
 }
 
+/**
+ * Wait for the target screen staging leads to (#621, #690). The service parses the file into blocks it commits in batches,
+ * so the store is read every few seconds while the screen is awaited, and the time of the last block it gained is kept. A
+ * staging the product refused ends the wait at once on its error screen. When the bound passes, the stage names where
+ * staging stood (`import-stage-<phase>`) and the check says whether it was still moving — `progressing`, a slow runner — or
+ * had gained no block for a minute — `stalled` — with how far the parse had come, in tenths, or that the draft was staged
+ * and the screen never shown. Only fixed words and a count leave the run.
+ */
+async function waitForStagedTarget(renderer, dataRoot) {
+  const started = Date.now();
+  const deadline = started + IMPORT_STAGE_TIMEOUT;
+  let sampledAt = 0;
+  let blocks = 0;
+  let progressedAt = started;
+  const sample = () => {
+    const stood = importStagePhase(dataRoot);
+    sampledAt = Date.now();
+    const reached = stood.phase === 'screen' ? BLOCK_COUNT : stood.blocks;
+    if (reached !== null && reached > blocks) {
+      blocks = reached;
+      progressedAt = sampledAt;
+    }
+    return stood;
+  };
+  while (Date.now() < deadline) {
+    const screen = await renderer.evaluate(
+      `document.querySelector('[data-screen="target"]') ? 'target' : document.querySelector('[data-screen="error"]') ? 'error' : 'waiting'`,
+    );
+    if (screen === 'target') return;
+    if (screen === 'error') {
+      at(`import-stage-${sample().phase}`);
+      requireJourney(false, 'stage-target-refused');
+    }
+    if (Date.now() - sampledAt >= IMPORT_STAGE_SAMPLE_INTERVAL) sample();
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  const stood = sample();
+  const quiet = Date.now() - progressedAt;
+  const tenths = Math.min(10, Math.floor(blocks * 10 / BLOCK_COUNT));
+  if (localDebugEnabled()) {
+    recordDebugDetail('J-02', `import stage at the bound ${JSON.stringify({ ...stood, blocks, quietMs: quiet, elapsedMs: Date.now() - started })}`);
+  }
+  at(`import-stage-${stood.phase}`);
+  requireJourney(stood.phase !== 'screen', 'stage-target-staged-not-shown');
+  requireJourney(quiet >= IMPORT_STAGE_STALL, `stage-target-progressing-at-${Number(tenths)}-tenths`);
+  requireJourney(false, `stage-target-stalled-at-${Number(tenths)}-tenths`);
+}
+
 async function importAndOpen(renderer, dataRoot) {
   at('renderer-ready');
   await waitForRendererReady(renderer);
@@ -502,16 +554,7 @@ async function importAndOpen(renderer, dataRoot) {
   // (the queue run of 2026-09-19 lost 240 s here on Windows). Each wait now has its own stage (#474).
   at('import-stage');
   await clickButton(renderer, '导入稿件', 'stage-click');
-  try {
-    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'stage-target', IMPORT_STAGE_TIMEOUT);
-  } catch (error) {
-    if (!(error instanceof Error) || error.message !== 'J-02/stage-target') throw error;
-    // A hosted run prints only the location (#621), so the stage names where staging stood when its bound passed.
-    const stood = importStagePhase(dataRoot);
-    if (localDebugEnabled()) recordDebugDetail('J-02', `import stage at the bound ${JSON.stringify(stood)}`);
-    at(`import-stage-${stood.phase}`);
-    throw error;
-  }
+  await waitForStagedTarget(renderer, dataRoot);
   await assertRenderer(renderer, `document.querySelector('.source-card')?.textContent.includes('${BLOCK_COUNT} 个可编辑内容块')`, 'exact-block-count');
   await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[aria-label="新建图书"]'); if (!radio) return false; radio.click(); return true; })()`, 'target-select');
   await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!radio || radio.checked) return false; radio.click(); return true; })()`, 'relationship-select');
