@@ -1972,19 +1972,21 @@ function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24
 }
 
 /**
- * Forward-only: a revision-13 store gains the J-03 relations and the analysis relations in one
- * transaction; a revision-14 store gains only the analysis relations and keeps every J-03 row
- * untouched; a revision-15 or revision-16 store has its rebuilt relations copied forward with every
- * row's canonical JSON and digest preserved and its frozen plans seeded as plan version 1; a
- * revision-17 or revision-18 store has the three kind-coupled relations rebuilt; a revision-19 store
- * is validated whole as revision 19 left it and has them rebuilt; a revision-20, revision-21,
- * revision-22 or revision-23 store is validated whole as revision 20 left it and has them rebuilt
- * again, for the review-category kind family; a revision-24 to revision-58 store is validated whole as revision 24 left the
- * three and has them rebuilt once more, for the evaluation and reader's report kinds; a revision-59 store is validated whole
- * as revision 59 left them and has them rebuilt for the reader's report kind; a revision-62 or revision-63 store is validated
- * whole as revision 62 left them and has them rebuilt for the evaluation rewrite kind. Before any of that, every store with an analysis
- * ledger has its Run states, its Run Authorizations' origin and its Task Outcomes widened for revisions 30 to 33. Every path
- * lands on the terminal version.
+ * Forward-only. The newest stores are checked exactly and never widened: a revision-64 store is validated as the terminal
+ * ledger; a revision-62 or revision-63 store is validated whole as revision 62 left the ledger and has the three kind-coupled
+ * relations rebuilt for the evaluation rewrite kind; a revision-59, revision-60 or revision-61 store is validated whole as
+ * revision 59 left the ledger and has them rebuilt to the terminal shape. A store stamped 59 to 61 that holds an older text
+ * of a widened relation is refused (Issue #672).
+ *
+ * Every older store with an analysis ledger first has its Run states, its Run Authorizations' origin, its Task Outcomes and
+ * its Plan Revisions widened for revisions 30 to 35, and then: a revision-13 store gains the J-03 relations and the analysis
+ * relations in one transaction; a revision-14 store gains only the analysis relations and keeps every J-03 row untouched; a
+ * revision-15 or revision-16 store has its rebuilt relations copied forward with every row's canonical JSON and digest
+ * preserved and its frozen plans seeded as plan version 1; a revision-17 or revision-18 store has the three kind-coupled
+ * relations rebuilt; a revision-19 store is validated whole as revision 19 left it and has them rebuilt; a revision-20 to
+ * revision-23 store is validated whole as revision 20 left it and has them rebuilt again, for the review-category kind
+ * family; a revision-24 to revision-58 store is validated whole as revision 24 left the three and has them rebuilt once
+ * more, to the terminal shape. Every path lands on the terminal version.
  */
 export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   const version = asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
