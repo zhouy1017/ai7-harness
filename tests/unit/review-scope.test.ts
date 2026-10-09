@@ -3,11 +3,13 @@ import {
   FACTUAL_AGAIN_REASON,
   FACTUAL_CHANGED_REASON,
   FACTUAL_CHAPTERS_REASON,
+  FACTUAL_SELECTION_REASON,
   LEADS_ABSENT_REASON,
   LEADS_CHANGED_REASON,
   NEVER_REVIEWED_REASON,
   NOTHING_CHANGED_REASON,
   NO_CHAPTERS_REASON,
+  SELECTION_BASE_REASON,
   SELECTION_UNAVAILABLE_REASON,
   chapterOfPosition,
   chapterOptionsFromOutline,
@@ -45,10 +47,28 @@ describe('the scope a category reads', () => {
     expect(contract({ kind: 'chapters', selectedRange: null }, NEVER)).toEqual({ kind: 'refused', reason: NO_CHAPTERS_REASON });
   });
 
-  it('never offers the current selection yet, for any category', () => {
+  it('reads the selection 就这段发起任务… hands over as a range, and refuses a 当前选区 with no selection, for any category (Issue #423, S77b)', () => {
+    const contract = (facts: ReviewCategoryLedgerFacts) => reviewCategoryScopePlan('review-category-contract', null, SELECTION, facts);
+    expect(contract(NEVER)).toEqual({ kind: 'task', mode: 'review-first-range', selectedRange: { startPosition: 3, endPosition: 3 } });
+    expect(contract(CURRENT)).toEqual({ kind: 'task', mode: 'review-range', selectedRange: { startPosition: 3, endPosition: 3 } });
+    expect(reviewCategoryScopePlan('baseline-leads', null, SELECTION, NEVER)).toEqual({ kind: 'leads', selectedRange: { startPosition: 3, endPosition: 3 } });
+    expect(reviewCategoryScopePlan('baseline-leads', null, SELECTION, { ...NEVER, baselineRevision: false })).toEqual({ kind: 'refused', reason: LEADS_ABSENT_REASON });
+    expect(reviewCategoryScopePlan('factual-review-kind', null, SELECTION, NEVER)).toEqual({ kind: 'refused', reason: FACTUAL_SELECTION_REASON });
+    expect(reviewCategoryScopePlan('series-knowledge', '加入书系后才能选。', SELECTION, NEVER)).toEqual({ kind: 'refused', reason: '加入书系后才能选。' });
     for (const executor of ['review-category-contract', 'baseline-leads', 'factual-review-kind'] as const) {
-      expect(reviewCategoryScopePlan(executor, null, SELECTION, CURRENT)).toEqual({ kind: 'refused', reason: SELECTION_UNAVAILABLE_REASON });
+      expect(reviewCategoryScopePlan(executor, null, { kind: 'selection', selectedRange: null }, CURRENT)).toEqual({ kind: 'refused', reason: SELECTION_UNAVAILABLE_REASON });
     }
+    expect(SELECTION_UNAVAILABLE_REASON).toBe('在稿件里选中文字，右键「就这段发起任务…」审阅所选文字。');
+    expect(FACTUAL_SELECTION_REASON).toBe('事实核查暂只能核查全书；就所选文字核查随事实核查的更新方式接入。');
+    expect(reviewScopeLabel(SELECTION)).toBe('当前选区 · 内容块 3–3');
+    // A category the ledger holds a revision of, from 当前选区 Runs only, has reviewed no chapter (Issue #423 review, P1-3).
+    expect(reviewCategoryScopePlan('review-category-contract', null, CHANGED, { ...STALE, reviewed: false })).toEqual({ kind: 'refused', reason: NEVER_REVIEWED_REASON });
+    expect(reviewCategoryScopePlan('review-category-contract', null, CHANGED, { ...STALE, reviewed: true })).toEqual({ kind: 'task', mode: 'review-sync', selectedRange: null });
+    expect(reviewCategoryScopePlan('review-category-contract', null, WHOLE, { ...STALE, reviewed: false })).toEqual({ kind: 'task', mode: 'review-again', selectedRange: null });
+    // Nor is a 当前选区 Run's revision the base it measures from (final review P1-4); a whole review still is offered.
+    expect(reviewCategoryScopePlan('review-category-contract', null, CHANGED, { ...STALE, reviewed: true, selectionBase: true })).toEqual({ kind: 'refused', reason: SELECTION_BASE_REASON });
+    expect(reviewCategoryScopePlan('review-category-contract', null, WHOLE, { ...STALE, reviewed: true, selectionBase: true })).toEqual({ kind: 'task', mode: 'review-again', selectedRange: null });
+    expect(SELECTION_BASE_REASON).toBe('这一类最近一次只审了所选段落，不能据它只审改动过的章；请先审全书或所选各章。');
   });
 
   it('reads the leads for the whole manuscript or the chosen chapters, only once the baseline has a revision', () => {
