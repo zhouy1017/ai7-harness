@@ -138,8 +138,10 @@ export function authorizeSearchCall(input: {
   const { ticket } = input;
   if (ticket.argumentsDigest !== toolArgumentsDigest(input.arguments)) throw ticketRefused();
   const rule = redeemEgressTicket(input.book, ticket);
-  if (rule === null || rule.websearch.host !== ticket.host) throw ticketRefused();
+  if (rule === null) throw ticketRefused();
   const request = searchServiceRequest(rule, input.arguments.query);
+  // The gate issues into a book only under the book's own rule, so this holds by construction; it is kept as the forwarder's
+  // own statement that a ticket sends to exactly its host.
   if (new URL(request.url).hostname !== ticket.host) throw ticketRefused();
   const authorized = Object.freeze({ request });
   authorizedSearchCalls.add(authorized);

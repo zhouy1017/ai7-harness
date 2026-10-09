@@ -179,6 +179,11 @@ describe('per-ticket host admission', () => {
     expect(allowanceAdmitsConnection([{ host: 'example.net', port: 443 }])).toBe(true);
     second();
     expect(allowanceAdmitsConnection([{ host: 'example.net', port: 443 }])).toBe(false);
+    // Nor does it close a later hold of the same ticket id: a release closes exactly the hold it opened.
+    const reopened = admitTicketHost({ host: 'example.net', port: 443, ticketId: 'stale-1' });
+    first();
+    expect(allowanceAdmitsConnection([{ host: 'example.net', port: 443 }])).toBe(true);
+    reopened();
     // The global fetch stays denied whatever is admitted: only the captured native fetch reaches a host.
     const held = admitTicketHost({ host: 'example.org', port: 443, ticketId: 'ticket-3' });
     return expect(fetch('https://example.org/')).rejects.toMatchObject({ code: NETWORK_DENIED_CODE }).finally(held);

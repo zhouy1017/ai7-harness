@@ -442,4 +442,18 @@ describe('only the gate\'s tickets send, under the gate\'s rule, while their bin
     expect(admissions).toEqual([{ host: 'example.org', port: 443, ticketId: page.ticketId }]);
     expect(calls.map((call) => call.url)).toEqual(['https://search.example.net/mcp', CITED]);
   });
+
+  it('issues no ticket over a rule other than the one the book was opened with', async () => {
+    const rule = await v7Rule();
+    const moved = { ...rule, websearch: { ...rule.websearch, host: 'search.example.net' } };
+    // The book holds the rule its binding was opened with; a binding claiming another rule under the same digest is not
+    // that binding, so neither decision issues into the book.
+    const book = EgressTicketBook.open(binding(rule), scope);
+    expect(evaluateSearchServiceCall({ arguments: websearch }, binding(moved), scope, book)).toMatchObject({ decision: 'refuse', reason: 'ticket-book-foreign' });
+    expect(evaluatePublicSourceFetch({ arguments: webfetch }, binding(moved), scope, book)).toMatchObject({ decision: 'refuse', reason: 'ticket-book-foreign' });
+    // An equal rule in another object is the same rule.
+    expect(evaluateSearchServiceCall({ arguments: websearch }, binding(JSON.parse(JSON.stringify(rule)) as PlatformToolsRule), scope, book))
+      .toMatchObject({ decision: 'call-search-service' });
+    expect(book.outstanding).toBe(1);
+  });
 });

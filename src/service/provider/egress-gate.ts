@@ -478,9 +478,10 @@ function platformToolPreconditions(binding: EgressBindingFacts, scope: EgressAtt
   if (rule === null) {
     return refuseTool('platform-tools-not-named', '执行绑定的处理规则未命名平台工具；未发送任何内容。');
   }
-  // A ticket goes only into a book the gate opened for exactly this binding.
+  // A ticket goes only into a book the gate opened for exactly this binding and its rule: the rule a forwarder builds from
+  // at redemption is the book's, so a decision over any other rule would name a host the request never goes to.
   const state = ticketBooks.get(book);
-  if (state === undefined || state.bindingDigest !== binding.bindingDigest) {
+  if (state === undefined || state.bindingDigest !== binding.bindingDigest || canonicalJson(state.rule) !== canonicalJson(rule)) {
     return refuseTool('ticket-book-foreign', '票据簿不是出口闸门为本执行绑定开立的；未发送任何内容。');
   }
   // Derived from the binding, never passed in by the call: the query's category is the binding's (ADR 0080 §7.2).
