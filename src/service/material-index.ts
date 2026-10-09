@@ -234,10 +234,19 @@ export class MaterialIndexAborted extends Error {
   }
 }
 
+/** The one refusal every converter and the parser give a file that holds no text at all (#725 review, P2-1). */
+const NO_TEXT_REFUSAL = /文件没有可转换为稿件的文本内容|所选文件为空|DOCX contains no editable text blocks|empty DOCX/u;
+
 function docxRefusal(error: unknown): MaterialIndexReason | null {
   if (!(error instanceof Error) || !error.message.startsWith('DOCX_REJECTED:')) return null;
+  if (NO_TEXT_REFUSAL.test(error.message)) return 'empty';
   if (error.message.includes('changed during staging')) return 'original-changed';
   return /exceed|bound|too many|ratio|large/iu.test(error.message) ? 'over-bound' : 'unreadable';
+}
+
+/** Why a converter refused the file: no text in it, or anything else. */
+function conversionRefusal(error: unknown): MaterialIndexReason {
+  return error instanceof Error && NO_TEXT_REFUSAL.test(error.message) ? 'empty' : 'unreadable';
 }
 
 /**
@@ -277,8 +286,8 @@ export async function extractMaterialText(input: MaterialExtractionInput): Promi
     let docx: Uint8Array;
     try {
       docx = input.format === 'DOC' ? (await convertDocManuscript(bytes)).docx : convertTextManuscript(bytes, { format: input.format as 'TXT' | 'MD' }).docx;
-    } catch {
-      return { state: 'failed', reason: 'unreadable', converter };
+    } catch (error) {
+      return { state: 'failed', reason: conversionRefusal(error), converter };
     }
     if (aborted()) throw new MaterialIndexAborted();
     const directory = await ensureCanonicalDataDirectory(input.dataRoot, MATERIAL_INDEX_WORK_DIRECTORY);

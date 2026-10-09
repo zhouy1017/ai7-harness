@@ -7,6 +7,7 @@ import { LIBRARY_OBJECT_DIRECTORY } from '../../src/service/library-materials.js
 import { MATERIAL_INDEXER_IDENTITY, MATERIAL_INDEX_TRIGGER_SQL, MATERIAL_INDEX_WORK_DIRECTORY } from '../../src/service/material-index.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { MATERIAL_INDEX_SCHEMA_VERSION, WRITING_TASK_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { buildManuscriptPackage } from '../../src/service/text-manuscript.js';
 import { MAX_FRAME_BYTES, MAX_MATERIAL_SEGMENTS_PAGE, type LibraryMaterialKind, type LibraryMaterialProjection } from '../../src/shared/protocol.js';
 import { sample1Path } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -161,6 +162,8 @@ describe('资料索引 over the real store', () => {
       const pdf = await put(store, file('scan.pdf', '%PDF-1.4\n% synthetic test bytes, not a real document\n'), '扫描件');
       const page = await put(store, file('page.html', '<!doctype html><html><body><p>网页</p></body></html>'), '网页', 'web');
       const blank = await put(store, file('blank.txt', '   \n\n  \n'), '空白');
+      // A Word file AI7 itself would write for no paragraphs at all: the parser finds no text block in it.
+      const hollow = await put(store, file('hollow.docx', buildManuscriptPackage([])), '空文档');
       store.startMaterialIndexing();
       await store.settleMaterialIndexing();
 
@@ -189,13 +192,14 @@ describe('资料索引 over the real store', () => {
       expect(store.inspectLibraryMaterial(page.materialId).index).toMatchObject({
         state: 'unsupported', reason: 'format-unsupported', layers: { text: 'unsupported', recognition: 'not-needed', segments: 'unsupported' },
       });
-      expect(store.inspectLibraryMaterial(blank.materialId).index).toMatchObject({ state: 'failed', layers: { text: 'failed' } });
-      expect(['unreadable', 'empty']).toContain(store.inspectLibraryMaterial(blank.materialId).index.reason);
+      // No text at all is said as that (#725 review, P2-1), never as a file that could not be read.
+      expect(store.inspectLibraryMaterial(blank.materialId).index).toMatchObject({ state: 'failed', reason: 'empty', layers: { text: 'failed' } });
+      expect(store.inspectLibraryMaterial(hollow.materialId).index).toMatchObject({ state: 'failed', reason: 'empty', layers: { text: 'failed' } });
       expect(await refusal(() => store.inspectLibraryMaterialSegments({ materialId: pdf.materialId, from: 1 }))).toBe('MATERIAL_INDEX_NO_TEXT');
 
       const outcomes = store.inspectGlobalAttention(() => null, false).groups.flatMap((group) => group.items)
         .filter((item) => item.object.kind === 'library-index').map((item) => item.object.kind === 'library-index' ? [item.object.title, item.object.outcome] : null).sort();
-      expect(outcomes).toEqual([['Field notes', 'complete'], ['中文笔记', 'complete'], ['扫描件', 'unsupported'], ['空白', 'failed'], ['网页', 'unsupported']]);
+      expect(outcomes).toEqual([['Field notes', 'complete'], ['中文笔记', 'complete'], ['扫描件', 'unsupported'], ['空文档', 'failed'], ['空白', 'failed'], ['网页', 'unsupported']]);
       store.markCleanShutdown();
     } finally {
       store.close();
@@ -211,6 +215,43 @@ describe('资料索引 over the real store', () => {
       store.startMaterialIndexing();
       await store.settleMaterialIndexing();
       expect(store.inspectLibraryMaterial(added.materialId).index).toMatchObject({ state: 'failed', reason: 'original-changed', layers: { text: 'failed', segments: 'failed' } });
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 120_000);
+
+  it('holds a build back when a replacement freezes the data after its extraction began, and builds it at the next start', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let materialId: string;
+    try {
+      // A package of this very data, to replace it with: what 替换本机全部数据 would be given.
+      const destination = join(roots.inputRoot, 'same.ai7db');
+      const preparation = await store.prepareDatabaseExport(destination, true);
+      expect((await store.approveDatabaseExport(preparation.preparationId, true)).outcome).toBe('created');
+      const preview = await store.inspectDatabaseImport(destination);
+      materialId = (await put(store, file('late.txt', '第一句。第二句。'), '迟到')).materialId;
+      // The build passes its first check and awaits the original; the replacement freezes the data synchronously meanwhile
+      // (#725 review, P2-2): the gate the service applies before a replacement does not count the builder as running work.
+      store.startMaterialIndexing();
+      const preparing = store.prepareDatabaseReplacement(preview.previewId, new Date());
+      expect(store.replacementFrozen()).toBe(true);
+      await store.settleMaterialIndexing();
+      // Nothing was recorded: a write after the backup would be lost with the data the replacement replaces.
+      expect(store.inspectLibraryMaterial(materialId).index.state).toBe('queued');
+      const pending = (await preparing).pending;
+      expect(pending).not.toBeNull();
+      await store.cancelDatabaseReplacement(pending!.replacementId);
+      expect(store.replacementFrozen()).toBe(false);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      store.startMaterialIndexing();
+      await store.settleMaterialIndexing();
+      expect(store.inspectLibraryMaterial(materialId).index.state).toBe('complete');
       store.markCleanShutdown();
     } finally {
       store.close();

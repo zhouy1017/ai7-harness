@@ -26,6 +26,8 @@ describe('the sentence anchors of a paragraph', () => {
     expect(sentences('（括号里的话。）接着说')).toEqual(['（括号里的话。）', '接着说']);
     expect(sentences('等一等……再说吧？！好')).toEqual(['等一等……', '再说吧？！', '好']);
     expect(sentences('《书名》很好。」')).toEqual(['《书名》很好。」']);
+    // The full-width period ends a sentence as the ideographic full stop does (#725 review, P2-4).
+    expect(sentences('全角句点．下一句')).toEqual(['全角句点．', '下一句']);
   });
 
   it('keeps a Latin full stop inside a number or a word, and ends at one before white space or the end', () => {
@@ -160,6 +162,9 @@ describe('the ledger over a minimal store', () => {
       layers: { text: 'deferred', recognition: 'deferred', segments: 'deferred', translation: 'deferred', vectors: 'deferred' },
     });
     expect(() => ledger.page(MATERIAL, '资料', 1)).toThrowError(/没有提取出可分段的文字/u);
+    // A plan cannot pin an item whose text was never read, whoever may list it (#725 review, P2-3).
+    expect(() => ledger.referencePin(MATERIAL, BOOK, () => true)).toThrowError(MaterialIndexError);
+    expect(() => ledger.referencePin(MATERIAL, BOOK, () => true)).toThrowError(/没有提取出可分段的文字/u);
     expect((db.prepare('SELECT count(*) count FROM material_index_segments').get() as { count: number }).count).toBe(0);
     expect(ledger.completions('2000-01-01T00:00:00.000Z', 5).map((entry) => entry.state)).toEqual(['unsupported']);
     expect(ledger.completions('2999-01-01T00:00:00.000Z', 5)).toEqual([]);
