@@ -6,12 +6,8 @@ import { BASELINE_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/cont
 import { AI7_FAILURE_CODES, RETRY_SAFE_FAILURE_TABLE, classifyModelFailure, evaluateRunBudgetCeiling, isRetrySafeFailure } from '../../src/service/provider/classification.js';
 import { CredentialBroker, type CredentialSlotBinding } from '../../src/service/provider/credential-broker.js';
 import {
-  DEEPSEEK_ENDPOINT,
   DEEPSEEK_ROUTE_PROFILE,
   DeepSeekOpenAiCompatibleAdapter,
-  OPENCODE_GO_ENDPOINT,
-  OPENCODE_GO_MESSAGES_ROUTE_PROFILE,
-  OPENCODE_GO_RESPONSES_ROUTE_PROFILE,
   OPENCODE_GO_ROUTE_PROFILE,
   OPENCODE_GO_SESSION_HEADER,
   OPENCODE_GO_USER_AGENT,
@@ -31,16 +27,27 @@ import {
   type ProviderModelProfile,
 } from '../../src/service/provider/model-profile.js';
 import { normalizeModelResponse } from '../../src/service/provider/response-normalization.js';
+import { GENERATED_MODEL_PROFILES } from '../../src/service/provider/provider-profiles.generated.js';
 import {
   DEEPSEEK_MODEL,
   DEEPSEEK_ROUTE,
-  OPENCODE_GO_MESSAGES_ROUTE,
   OPENCODE_GO_MODEL,
-  OPENCODE_GO_RESPONSES_ROUTE,
   OPENCODE_GO_ROUTE,
   type TransmitTicket,
 } from '../../src/service/provider/egress-gate.js';
 import { NETWORK_DENIED_CODE, installNodeNetworkDenial } from '../../src/shared/network-denial.js';
+import { CONFIGURED_ROUTE_IDS } from '../../src/shared/provider-configuration.generated.js';
+
+/*
+ * The endpoints and routes the provider documents declare (`config/providers/`), pinned here as the bytes they must
+ * stay: moving them into configuration (Issue #435) is proven to move nothing by these literals and the two frozen digests.
+ */
+const DEEPSEEK_ENDPOINT = 'https://api.deepseek.com/chat/completions';
+const OPENCODE_GO_ENDPOINT = 'https://opencode.ai/zen/go/v1/chat/completions';
+const OPENCODE_GO_MESSAGES_ROUTE = 'opencode-go-messages' as const;
+const OPENCODE_GO_RESPONSES_ROUTE = 'opencode-go-responses' as const;
+const OPENCODE_GO_MESSAGES_ROUTE_PROFILE = PROVIDER_ROUTE_PROFILES[OPENCODE_GO_MESSAGES_ROUTE];
+const OPENCODE_GO_RESPONSES_ROUTE_PROFILE = PROVIDER_ROUTE_PROFILES[OPENCODE_GO_RESPONSES_ROUTE];
 
 // The remote path is complete but never transmits under v1. Every credential here is a placeholder
 // supplied by a fake resolver; no real secret, socket, or Provider is involved.
@@ -160,8 +167,9 @@ describe('provider route generalization', () => {
   }
 
   it('keys every remote route by how it is reached, and never by a model', () => {
-    expect(Object.keys(PROVIDER_ROUTE_PROFILES).sort())
-      .toEqual(['deepseek-open-platform', 'opencode-go', 'opencode-go-messages', 'opencode-go-responses']);
+    // Every route a provider document declares, and nothing else; the four that predate the documents among them.
+    expect(Object.keys(PROVIDER_ROUTE_PROFILES).sort()).toEqual([...CONFIGURED_ROUTE_IDS].sort());
+    expect(Object.keys(PROVIDER_ROUTE_PROFILES)).toEqual(expect.arrayContaining(['deepseek-open-platform', 'opencode-go', 'opencode-go-messages', 'opencode-go-responses']));
     expect(DEEPSEEK_ROUTE_PROFILE).toMatchObject({
       route: DEEPSEEK_ROUTE, endpoint: DEEPSEEK_ENDPOINT,
       credentialSlot: 'deepseek-api-key', dshAttribution: true, sessionHeader: false,
@@ -299,7 +307,11 @@ describe('model capability profiles', () => {
   });
 
   it('keys every model by route and model, so one model id behind two routes is two profiles', () => {
-    expect(Object.keys(PROVIDER_MODEL_PROFILES).sort()).toEqual([
+    // The rows of the four routes that predate the provider documents, unchanged by moving into them,
+    // and the one row the DeepSeek official document adds (`deepseek-flash`, inert).
+    const PREDATING_ROUTE = /^(deepseek-open-platform|opencode-go|opencode-go-messages|opencode-go-responses)\//u;
+    expect(Object.keys(PROVIDER_MODEL_PROFILES).filter((key) => PREDATING_ROUTE.test(key)).sort()).toEqual([
+      'deepseek-open-platform/deepseek-flash',
       'deepseek-open-platform/deepseek-v4-pro',
       // The same plan's `/messages` models, keyed by the second route that reaches them (S54b).
       'opencode-go-messages/minimax-m2.5', 'opencode-go-messages/minimax-m2.7', 'opencode-go-messages/minimax-m3',
@@ -350,7 +362,8 @@ describe('model capability profiles', () => {
     // model cannot enlarge the active set: a new row arrives inert or the count moves and this fails.
     expect(Object.values(PROVIDER_MODEL_PROFILES).filter((profile) => profile.capabilities.answerChannel !== 'none'))
       .toEqual([DEEPSEEK_V4_PRO_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE]);
-    expect(Object.keys(PROVIDER_MODEL_PROFILES)).toHaveLength(18);
+    // Every generated row is in the table once: building it dropped nothing.
+    expect(Object.keys(PROVIDER_MODEL_PROFILES)).toHaveLength(GENERATED_MODEL_PROFILES.length);
   });
 
   it('declares structured output exactly where one live item observed it accepted, and nowhere else', () => {
@@ -412,8 +425,9 @@ describe('model capability profiles', () => {
   });
 
   it('declares every model but the two active ones inert, whichever path reaches it', () => {
+    // The OpenCode Go plan's rows; every other document's rows are pinned inert in provider-configuration.test.ts.
     const inert = Object.values(PROVIDER_MODEL_PROFILES)
-      .filter((profile) => profile.key !== DEEPSEEK_V4_PRO_PROFILE.key && profile.key !== OPENCODE_GO_V4_FLASH_PROFILE.key);
+      .filter((profile) => profile.route.startsWith('opencode-go') && profile.key !== OPENCODE_GO_V4_FLASH_PROFILE.key);
     // #310's third model, the eight the documentation pair admitted on chat completions (S54a), the
     // five it admits on `/messages` (S54b), and the two on `/responses` (S54c).
     expect(inert).toHaveLength(16);

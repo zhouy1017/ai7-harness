@@ -31,6 +31,20 @@ if (typeCheck.status !== 0) {
   process.exit(typeCheck.status ?? 1);
 }
 
+// ADR 0073 §2: the provider configuration's generated files must be exactly what the documents under
+// `config/providers/` generate. A reviewer reads the document diff, and this rung is why that is enough.
+const providerConfiguration = spawnSync(process.execPath, [resolve(ROOT, 'tools', 'generate-provider-configuration.mjs'), '--check'], {
+  cwd: ROOT,
+  env: ENV,
+  stdio: 'inherit',
+  windowsHide: true,
+});
+
+if (providerConfiguration.error || providerConfiguration.status !== 0) {
+  console.error('CHECK/provider-configuration-stale');
+  process.exit(1);
+}
+
 const enumerated = spawnSync('git', ['ls-files', '-z', '--', 'e2e/*.mjs', 'tools/*.mjs'], {
   cwd: ROOT,
   env: ENV,

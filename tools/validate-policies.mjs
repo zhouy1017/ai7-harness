@@ -59,6 +59,11 @@ function jsonType(value) {
 }
 
 function matchesType(schemaType, data) {
+  // A type list admits a value any one of its members admits (Draft-7 `type` as an array); the
+  // provider configuration schema uses it for the nullable integers and strings it declares.
+  if (Array.isArray(schemaType)) {
+    return schemaType.some((member) => matchesType(member, data));
+  }
   if (schemaType === 'integer') {
     return jsonType(data) === 'number' && Number.isInteger(data);
   }
@@ -131,6 +136,10 @@ function validateNode(schema, data, schemaPath, rootSchema) {
         validateNode(properties[key], data[key], `${schemaPath}/properties/${key}`, rootSchema);
       } else if (schema.additionalProperties === false) {
         throw new Error(`Unexpected property "${key}" at ${schemaPath}.`);
+      } else if (isPlainObject(schema.additionalProperties)) {
+        // The object form: every property `properties` does not name must satisfy this schema. No policy schema
+        // uses it; the provider configuration schema does, for its keyed evidence records.
+        validateNode(schema.additionalProperties, data[key], `${schemaPath}/additionalProperties`, rootSchema);
       }
     }
   }

@@ -1,4 +1,5 @@
 import { CREDENTIAL_REFERENCE_PATTERN } from '../../shared/protected-secret-identity.js';
+import { CONFIGURED_CREDENTIAL_SLOTS } from '../../shared/provider-configuration.generated.js';
 import { DIGEST_PATTERN } from '../analysis/canonical.js';
 import type { CredentialSlot, TransmitTicket } from './egress-gate.js';
 
@@ -30,8 +31,12 @@ export class CredentialBrokerError extends Error {
   }
 }
 
-/** The closed slot set: the production connection's key and the developer-live route's development credential. */
-const CREDENTIAL_SLOTS: ReadonlySet<CredentialSlot> = new Set<CredentialSlot>(['deepseek-api-key', 'opencode-go']);
+/**
+ * The closed slot set: one slot per configured provider, generated from the provider documents (ADR 0073 §4), so a slot
+ * cannot exist without a reviewed document. A slot is a place a value may be released to, never a permission to release:
+ * release still needs the gate's `transmit-remote` ticket for the exact binding.
+ */
+const CREDENTIAL_SLOTS: ReadonlySet<CredentialSlot> = new Set<CredentialSlot>(CONFIGURED_CREDENTIAL_SLOTS);
 
 function requireBinding(binding: CredentialSlotBinding): void {
   if (!DIGEST_PATTERN.test(binding.bindingDigest) || binding.modelRole !== 'Main Editorial Role' ||
