@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "providerId": "alibaba-model-studio",
+  "displayName": "阿里云百炼 Qwen",
+  "credential": {
+    "slot": "alibaba-model-studio",
+    "developmentCredentialReference": "41bfff73-4c97-44b2-a88c-ef51b208d589",
+    "headerForm": "authorization-bearer",
+    "anthropicVersion": null,
+    "headerEvidence": "model-studio-docs"
+  },
+  "evidence": {
+    "model-studio-docs": {
+      "kind": "vendor-documentation",
+      "source": "Alibaba Cloud Model Studio documentation, help.aliyun.com/zh/model-studio and alibabacloud.com/help/en/model-studio — OpenAI-compatible calling, models",
+      "readOn": "2026-09-10",
+      "note": "OpenAI-compatible mode under `/compatible-mode/v1`, `Authorization: Bearer`, region-bound keys; the model page prints `qwen3.8-max`, `qwen3.7-plus`, `qwen3.8-flash`; per-model context windows were not read (ADR 0080 §3)."
+    },
+    "model-studio-search-docs": {
+      "kind": "vendor-documentation",
+      "source": "Alibaba Cloud Model Studio documentation, web search (联网搜索), help.aliyun.com/zh/model-studio",
+      "readOn": "2026-09-10",
+      "note": "Search is the request parameter `enable_search: true`, not a tool, and the OpenAI-compatible protocol does not return the search sources (「以上 enable_source、enable_citation、citation_format 参数仅支持 DashScope 调用方式」); ADR 0080 §2 does not list it among provider search tools."
+    },
+    "unverified": { "kind": "unverified" }
+  },
+  "routes": [
+    {
+      "routeId": "alibaba-model-studio",
+      "displayName": "阿里云百炼 · Chat Completions",
+      "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+      "requestShape": "openai-chat-completions",
+      "requestShapeEvidence": "model-studio-docs",
+      "limitPolicy": "rate-limit-retryable",
+      "dshAttribution": false,
+      "sessionHeader": false,
+      "maxOutputTokens": null,
+      "routeCapabilities": {
+        "webSearchTool": { "value": "none", "evidence": "model-studio-search-docs" }
+      },
+      "models": [
+        { "modelId": "qwen3.8-max", "displayName": "Qwen3.8 Max", "context": { "tokens": null, "evidence": "unverified" } },
+        { "modelId": "qwen3.7-plus", "displayName": "Qwen3.7 Plus", "context": { "tokens": null, "evidence": "unverified" } },
+        { "modelId": "qwen3.8-flash", "displayName": "Qwen3.8 Flash", "context": { "tokens": null, "evidence": "unverified" } }
+      ]
+    }
+  ],
+  "openQuestions": [
+    "The documentation records a migration to a per-workspace host, `https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`, and says the `dashscope.aliyuncs.com` host still works. A workspace id is an account fact a document cannot carry, so this document names the documented host that still works; moving to the workspace host is the Owner's decision with the first live item.",
+    "Structured output is documented (`json_object`; `json_schema` on the 3.7/3.8 series) but stays absent until a live item establishes it on this route."
+  ]
+}

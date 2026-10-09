@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "providerId": "openai-platform",
+  "displayName": "OpenAI 官方",
+  "credential": {
+    "slot": "openai-platform",
+    "developmentCredentialReference": "c8c4e0f8-27dd-45ad-8c60-580a5d58b799",
+    "headerForm": "authorization-bearer",
+    "anthropicVersion": null,
+    "headerEvidence": "openai-api-docs"
+  },
+  "evidence": {
+    "openai-api-docs": {
+      "kind": "vendor-documentation",
+      "source": "OpenAI API documentation, developers.openai.com/api/docs (platform.openai.com/docs redirects there) — Responses API, models",
+      "readOn": "2026-09-10",
+      "note": "Endpoint `https://api.openai.com/v1/responses`, `Authorization: Bearer`; models `gpt-6-astra`, `gpt-5.6-sol` (alias `gpt-5.6`), `gpt-5.6-terra`, `gpt-5.6-luna`, each 1.05M context / 128K output (ADR 0080 §3)."
+    },
+    "openai-web-search-tool": {
+      "kind": "vendor-documentation",
+      "source": "OpenAI API documentation, web search tool guide and models page, developers.openai.com/api/docs",
+      "readOn": "2026-09-10",
+      "note": "Server-side in the Responses API — `\"tools\": [{\"type\": \"web_search\"}]` — with `url_citation` annotations and a `sources` list; the models page lists Web search in every flagship's tools row (ADR 0080 §3)."
+    }
+  },
+  "routes": [
+    {
+      "routeId": "openai-platform",
+      "displayName": "OpenAI 官方 · Responses",
+      "endpoint": "https://api.openai.com/v1/responses",
+      "requestShape": "openai-responses",
+      "requestShapeEvidence": "openai-api-docs",
+      "limitPolicy": "rate-limit-retryable",
+      "dshAttribution": false,
+      "sessionHeader": false,
+      "maxOutputTokens": null,
+      "routeCapabilities": {
+        "webSearchTool": { "value": "provider-tool", "evidence": "openai-web-search-tool" }
+      },
+      "note": "`max_output_tokens` is optional on this shape and nothing has established a per-turn bound, so the route names none.",
+      "models": [
+        { "modelId": "gpt-6-astra", "displayName": "GPT-6 Astra", "context": { "tokens": 1050000, "evidence": "openai-api-docs" } },
+        { "modelId": "gpt-5.6-sol", "displayName": "GPT-5.6 Sol", "context": { "tokens": 1050000, "evidence": "openai-api-docs" } },
+        { "modelId": "gpt-5.6-terra", "displayName": "GPT-5.6 Terra", "context": { "tokens": 1050000, "evidence": "openai-api-docs" } },
+        { "modelId": "gpt-5.6-luna", "displayName": "GPT-5.6 Luna", "context": { "tokens": 1050000, "evidence": "openai-api-docs" } }
+      ]
+    }
+  ],
+  "openQuestions": [
+    "Structured outputs (`text.format` with `json_schema`) and `reasoning.effort` are documented but not implemented by the adapter's Responses assembly, so both stay absent; whether structured outputs are GA is not stated on the pages read."
+  ]
+}

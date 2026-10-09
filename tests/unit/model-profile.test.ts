@@ -6,6 +6,7 @@ import {
   PROVIDER_MODEL_PROFILES,
   modelProfileFor,
 } from '../../src/service/provider/model-profile.js';
+import { GENERATED_MODEL_PROFILES } from '../../src/service/provider/provider-profiles.generated.js';
 
 // ADR 0080 §2/§7.8 step 1: the profile set gains `toolCalling` and `webSearchTool`, each with
 // evidence, on every declared profile. This slice is inert — nothing consumes the fields yet — so
@@ -61,16 +62,22 @@ describe('model capability profiles: toolCalling and webSearchTool (ADR 0080 §2
       expect(typeof profile.evidence.toolCalling.kind, profile.key).toBe('string');
       expect(typeof profile.evidence.webSearchTool.kind, profile.key).toBe('string');
     }
-    // The table's size is unchanged: this slice is inert and declares no new profile (ADR 0080 §7.8 step 1).
-    expect(Object.keys(PROVIDER_MODEL_PROFILES)).toHaveLength(18);
+    // Every row the provider documents declare is checked, none dropped (Issue #435).
+    expect(Object.keys(PROVIDER_MODEL_PROFILES)).toHaveLength(GENERATED_MODEL_PROFILES.length);
   });
 
-  it('declares no profile with webSearchTool: provider-tool, because this slice adds no such evidence', () => {
-    // Every reading ADR 0080 §3 records for the routes this table declares (DeepSeek official,
-    // OpenCode Go/Zen) finds no server-side search tool; a future provider document may change this,
-    // never a declaration made without a vendor page behind it.
+  it('declares webSearchTool: provider-tool only where a vendor page documents a search tool on the shape the route speaks', () => {
+    // ADR 0080 §2 names the provider tools; §3 records each reading. DeepSeek official, both OpenCode
+    // gateways, Qwen (a request parameter, not a tool), MiniMax (no tool on chat completions) and Gemini
+    // (documented on a shape this route does not speak) declare none.
+    const searching = new Set<string>();
     for (const profile of Object.values(PROVIDER_MODEL_PROFILES)) {
-      expect(profile.capabilities.webSearchTool, profile.key).toBe('none');
+      if (profile.capabilities.webSearchTool !== 'provider-tool') continue;
+      searching.add(profile.route);
+      expect(profile.evidence.webSearchTool, profile.key).toMatchObject({ kind: 'vendor-documentation' });
     }
+    expect([...searching].sort()).toEqual([
+      'anthropic-claude', 'baidu-qianfan', 'moonshot-kimi', 'openai-platform', 'tencent-hunyuan', 'xiaomi-mimo', 'zhipu-glm',
+    ]);
   });
 });

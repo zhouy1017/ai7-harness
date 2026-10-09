@@ -1,0 +1,632 @@
+{
+  "schemaVersion": 1,
+  "providerId": "opencode-zen",
+  "displayName": "OpenCode Zen",
+  "credential": {
+    "slot": "opencode-zen",
+    "developmentCredentialReference": "faecf1c0-7946-4de0-87b7-abd84f0e1883",
+    "headerForm": "authorization-bearer",
+    "anthropicVersion": null,
+    "headerEvidence": "zen-page"
+  },
+  "evidence": {
+    "zen-page": {
+      "kind": "vendor-documentation",
+      "source": "OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples",
+      "readOn": "2026-10-09",
+      "note": "The Endpoints table prints each model's id and its endpoint under `https://opencode.ai/zen/v1/`; the API examples send `Authorization: Bearer $OPENCODE_API_KEY`. Zen is pay-as-you-go: charged per request against credits, with auto-reload and monthly spending limits."
+    },
+    "gateway-no-search-tool": {
+      "kind": "vendor-documentation",
+      "source": "OpenCode Go https://opencode.ai/docs/go/ · Zen https://opencode.ai/docs/zen/ · Tools https://opencode.ai/docs/tools/",
+      "readOn": "2026-09-11",
+      "note": "Neither gateway page mentions tools, web search or web fetch; `websearch` / `webfetch` are client-side tools of the opencode agent, not of the gateway wire API (ADR 0080 §3, §5.2)."
+    },
+    "unverified": {
+      "kind": "unverified"
+    }
+  },
+  "routes": [
+    {
+      "routeId": "opencode-zen",
+      "displayName": "OpenCode Zen · Chat Completions",
+      "endpoint": "https://opencode.ai/zen/v1/chat/completions",
+      "requestShape": "openai-chat-completions",
+      "requestShapeEvidence": "zen-page",
+      "limitPolicy": "account-limit-terminal",
+      "dshAttribution": false,
+      "sessionHeader": false,
+      "maxOutputTokens": null,
+      "routeCapabilities": {
+        "webSearchTool": {
+          "value": "none",
+          "evidence": "gateway-no-search-tool"
+        }
+      },
+      "note": "The Zen page's `chat/completions` rows. A spend limit on this gateway ends the Run, as on the Go plan.",
+      "models": [
+        {
+          "modelId": "qwen3.8-max",
+          "displayName": "Qwen3.8 Max（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "deepseek-v4.1-flash",
+          "displayName": "DeepSeek V4.1 Flash（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "deepseek-v4-pro",
+          "displayName": "DeepSeek V4 Pro（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "deepseek-v4-flash",
+          "displayName": "DeepSeek V4 Flash（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "deepseek-v4-flash-vision-exp",
+          "displayName": "DeepSeek V4 Flash Vision Exp（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "minimax-m3",
+          "displayName": "MiniMax M3（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "minimax-m2.7",
+          "displayName": "MiniMax M2.7（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "minimax-m2.5",
+          "displayName": "MiniMax M2.5（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "glm-5.3-flash",
+          "displayName": "GLM 5.3 Flash（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "glm-5.3",
+          "displayName": "GLM 5.3（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "glm-5.2",
+          "displayName": "GLM 5.2（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "glm-5.1",
+          "displayName": "GLM 5.1（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "glm-5",
+          "displayName": "GLM 5（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "kimi-k2.5",
+          "displayName": "Kimi K2.5（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "kimi-k2.6",
+          "displayName": "Kimi K2.6（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "kimi-k2.7-code",
+          "displayName": "Kimi K2.7 Code（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "kimi-k3",
+          "displayName": "Kimi K3（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "mistral-large-4",
+          "displayName": "Mistral Large 4（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        }
+      ]
+    },
+    {
+      "routeId": "opencode-zen-messages",
+      "displayName": "OpenCode Zen · Messages",
+      "endpoint": "https://opencode.ai/zen/v1/messages",
+      "requestShape": "anthropic-messages",
+      "requestShapeEvidence": "zen-page",
+      "limitPolicy": "account-limit-terminal",
+      "dshAttribution": false,
+      "sessionHeader": false,
+      "maxOutputTokens": 32768,
+      "routeCapabilities": {
+        "webSearchTool": {
+          "value": "none",
+          "evidence": "gateway-no-search-tool"
+        }
+      },
+      "note": "The Zen page's `/messages` rows. The shape requires a per-turn output cap; the route declares the same 32,768 as the Go `/messages` route, for the same reason.",
+      "models": [
+        {
+          "modelId": "claude-fable-5-1",
+          "displayName": "Claude Fable 5.1（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "claude-fable-5",
+          "displayName": "Claude Fable 5（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "claude-opus-5-5",
+          "displayName": "Claude Opus 5.5（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "claude-opus-5",
+          "displayName": "Claude Opus 5（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "claude-opus-4-8",
+          "displayName": "Claude Opus 4.8（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "claude-opus-4-7",
+          "displayName": "Claude Opus 4.7（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "claude-opus-4-6",
+          "displayName": "Claude Opus 4.6（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "claude-opus-4-5",
+          "displayName": "Claude Opus 4.5（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "claude-sonnet-5-5",
+          "displayName": "Claude Sonnet 5.5（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "claude-sonnet-5",
+          "displayName": "Claude Sonnet 5（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "claude-sonnet-4-6",
+          "displayName": "Claude Sonnet 4.6（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "claude-sonnet-4-5",
+          "displayName": "Claude Sonnet 4.5（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "claude-haiku-5-5",
+          "displayName": "Claude Haiku 5.5（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "claude-haiku-4-5",
+          "displayName": "Claude Haiku 4.5（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "qwen3.8-flash",
+          "displayName": "Qwen3.8 Flash（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "qwen3.7-max",
+          "displayName": "Qwen3.7 Max（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "qwen3.7-plus",
+          "displayName": "Qwen3.7 Plus（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "qwen3.6-plus",
+          "displayName": "Qwen3.6 Plus（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "qwen3.5-plus",
+          "displayName": "Qwen3.5 Plus（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        }
+      ]
+    },
+    {
+      "routeId": "opencode-zen-responses",
+      "displayName": "OpenCode Zen · Responses",
+      "endpoint": "https://opencode.ai/zen/v1/responses",
+      "requestShape": "openai-responses",
+      "requestShapeEvidence": "zen-page",
+      "limitPolicy": "account-limit-terminal",
+      "dshAttribution": false,
+      "sessionHeader": false,
+      "maxOutputTokens": null,
+      "routeCapabilities": {
+        "webSearchTool": {
+          "value": "none",
+          "evidence": "gateway-no-search-tool"
+        }
+      },
+      "note": "The Zen page's `/responses` rows. `max_output_tokens` is optional on this shape, so the route names none.",
+      "models": [
+        {
+          "modelId": "gpt-6-astra",
+          "displayName": "GPT 6 Astra（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "gpt-6-sol",
+          "displayName": "GPT 6 Sol（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "gpt-6.1-sol",
+          "displayName": "GPT 6.1 Sol（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "gpt-6-luna",
+          "displayName": "GPT 6 Luna（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "gpt-5.6-sol",
+          "displayName": "GPT 5.6 Sol（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "gpt-5.6-terra",
+          "displayName": "GPT 5.6 Terra（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "gpt-5.6-luna",
+          "displayName": "GPT 5.6 Luna（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "gpt-5.5",
+          "displayName": "GPT 5.5（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "gpt-5.5-pro",
+          "displayName": "GPT 5.5 Pro（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "gpt-5.4",
+          "displayName": "GPT 5.4（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "gpt-5.4-pro",
+          "displayName": "GPT 5.4 Pro（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "gpt-5.4-mini",
+          "displayName": "GPT 5.4 Mini（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "gpt-5.4-nano",
+          "displayName": "GPT 5.4 Nano（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "gpt-5.3-codex",
+          "displayName": "GPT 5.3 Codex（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "gpt-5.3-codex-spark",
+          "displayName": "GPT 5.3 Codex Spark（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "gpt-5.2",
+          "displayName": "GPT 5.2（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "gpt-5.2-codex",
+          "displayName": "GPT 5.2 Codex（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "gpt-5.1",
+          "displayName": "GPT 5.1（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "gpt-5.1-codex",
+          "displayName": "GPT 5.1 Codex（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "gpt-5.1-codex-max",
+          "displayName": "GPT 5.1 Codex Max（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "gpt-5.1-codex-mini",
+          "displayName": "GPT 5.1 Codex Mini（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "gpt-5",
+          "displayName": "GPT 5（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "gpt-5-codex",
+          "displayName": "GPT 5 Codex（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "gpt-5-nano",
+          "displayName": "GPT 5 Nano（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "grok-4.7",
+          "displayName": "Grok 4.7（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "grok-4.6",
+          "displayName": "Grok 4.6（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "grok-4.5",
+          "displayName": "Grok 4.5（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "grok-build-0.1",
+          "displayName": "Grok Build 0.1（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "muse-spark-1.3",
+          "displayName": "Muse Spark 1.3（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        },
+        {
+          "modelId": "muse-spark-1.2",
+          "displayName": "Muse Spark 1.2（OpenCode Zen）",
+          "context": {
+            "tokens": null,
+            "evidence": "unverified"
+          }
+        }
+      ]
+    }
+  ],
+  "openQuestions": [
+    "The Zen page's Gemini rows are reached at `https://opencode.ai/zen/v1/models/<id>`; whether that path takes the `:generateContent` request the implemented shape appends is not stated, so no route is declared for them.",
+    "Excluded from this reading: every limited-time free model the page lists (the `-free` ids and Big Pickle), because a trial that ends is not a supported model, and the Jev rows on `/systemone`, which is not a chat shape.",
+    "The page names no session header for Zen, so no route sends one; whether any model accepts a request at all is settled only by a named live test item under ADR 0067."
+  ]
+}

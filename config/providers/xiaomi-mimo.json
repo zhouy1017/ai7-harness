@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "providerId": "xiaomi-mimo",
+  "displayName": "小米 MiMo",
+  "credential": {
+    "slot": "xiaomi-mimo",
+    "developmentCredentialReference": "e03b8ea8-2a10-4c60-909e-82a5976e2810",
+    "headerForm": "authorization-bearer",
+    "anthropicVersion": null,
+    "headerEvidence": "mimo-docs"
+  },
+  "evidence": {
+    "mimo-docs": {
+      "kind": "vendor-documentation",
+      "source": "Xiaomi MiMo API documentation, mimo.mi.com — OpenAI-compatible chat completions, models",
+      "readOn": "2026-09-11",
+      "note": "`https://api.xiaomimimo.com/v1/chat/completions` with an `api-key:` header, a Bearer form also listed; `mimo-v2.5-pro` and `mimo-v2.5` at 1M context, up to 128K output, both listing \"Function Call\" and \"Web Search\" (ADR 0080 §3)."
+    },
+    "mimo-search-docs": {
+      "kind": "vendor-documentation",
+      "source": "Xiaomi MiMo API documentation, web search tool, mimo.mi.com",
+      "readOn": "2026-09-11",
+      "note": "A chat-completions tool `{\"type\": \"web_search\", …}`, activated in the vendor's console before use, returning `url_citation` annotations; other API protocols 「are not supported for the time being」 for it."
+    }
+  },
+  "routes": [
+    {
+      "routeId": "xiaomi-mimo",
+      "displayName": "小米 MiMo · Chat Completions",
+      "endpoint": "https://api.xiaomimimo.com/v1/chat/completions",
+      "requestShape": "openai-chat-completions",
+      "requestShapeEvidence": "mimo-docs",
+      "limitPolicy": "rate-limit-retryable",
+      "dshAttribution": false,
+      "sessionHeader": false,
+      "maxOutputTokens": null,
+      "routeCapabilities": {
+        "toolCalling": { "value": "function", "evidence": "mimo-docs" },
+        "webSearchTool": { "value": "provider-tool", "evidence": "mimo-search-docs" }
+      },
+      "note": "The adapter sends the Bearer form, which the page lists beside `api-key:`.",
+      "models": [
+        { "modelId": "mimo-v2.5-pro", "displayName": "MiMo-V2.5-Pro", "context": { "tokens": 1000000, "evidence": "mimo-docs" } },
+        { "modelId": "mimo-v2.5", "displayName": "MiMo-V2.5", "context": { "tokens": 1000000, "evidence": "mimo-docs" } }
+      ]
+    }
+  ],
+  "openQuestions": [
+    "The search tool must be activated in the vendor's console before use; that is an account step, not configuration.",
+    "Structured output is `json_object` only and stays absent until a live item establishes it."
+  ]
+}

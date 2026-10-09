@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "providerId": "moonshot-kimi",
+  "displayName": "月之暗面 Kimi",
+  "credential": {
+    "slot": "moonshot-kimi",
+    "developmentCredentialReference": "a6a309a9-7cd5-4cd2-ae31-ba421182af35",
+    "headerForm": "authorization-bearer",
+    "anthropicVersion": null,
+    "headerEvidence": "kimi-platform-docs"
+  },
+  "evidence": {
+    "kimi-platform-docs": {
+      "kind": "vendor-documentation",
+      "source": "Kimi platform documentation, platform.kimi.com/docs (platform.moonshot.cn redirects there)",
+      "readOn": "2026-09-10",
+      "note": "`https://api.moonshot.cn/v1` (`/v1/chat/completions`), `Authorization: Bearer`; `kimi-k3` (1M context), `kimi-k2.7-code` / `kimi-k2.6` (256K); the `moonshot-v1-*` line retired 2026-08-31 (ADR 0080 §3)."
+    },
+    "kimi-search-docs": {
+      "kind": "vendor-documentation",
+      "source": "Kimi platform documentation, `$web_search` builtin function, platform.kimi.com/docs",
+      "readOn": "2026-09-10",
+      "note": "「`$web_search`（`builtin_function` 类型）是 Kimi 内置的联网搜索工具函数」, with a per-search call fee beside the tokens."
+    }
+  },
+  "routes": [
+    {
+      "routeId": "moonshot-kimi",
+      "displayName": "月之暗面 Kimi · Chat Completions",
+      "endpoint": "https://api.moonshot.cn/v1/chat/completions",
+      "requestShape": "openai-chat-completions",
+      "requestShapeEvidence": "kimi-platform-docs",
+      "limitPolicy": "rate-limit-retryable",
+      "dshAttribution": false,
+      "sessionHeader": false,
+      "maxOutputTokens": null,
+      "routeCapabilities": {
+        "webSearchTool": { "value": "provider-tool", "evidence": "kimi-search-docs" }
+      },
+      "models": [
+        { "modelId": "kimi-k3", "displayName": "Kimi K3", "context": { "tokens": 1000000, "evidence": "kimi-platform-docs" } },
+        { "modelId": "kimi-k2.7-code", "displayName": "Kimi K2.7 Code", "context": { "tokens": 256000, "evidence": "kimi-platform-docs" } },
+        { "modelId": "kimi-k2.6", "displayName": "Kimi K2.6", "context": { "tokens": 256000, "evidence": "kimi-platform-docs" } }
+      ]
+    }
+  ],
+  "openQuestions": [
+    "Structured output (`json_object`, `json_schema`) is documented but stays absent until a live item establishes it; `kimi-k3` always reasons, and its reasoning channel is not yet read."
+  ]
+}

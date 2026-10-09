@@ -294,6 +294,22 @@ async function findRenderer(manager, expression, name) {
   throw journeyCheckFailure('J-12', name);
 }
 
+/**
+ * The names of every configured provider and route a Model Role cannot bind (ADR 0073 §3), read from the checked-in
+ * provider documents: everything but the production connection's DeepSeek official document, which the role card names.
+ */
+async function configuredUnboundProviderNames() {
+  const directory = resolve(ROOT, 'config', 'providers');
+  const names = new Set();
+  for (const file of (await readdir(directory)).filter((name) => name.endsWith('.json') && !name.endsWith('.schema.json')).sort()) {
+    const document = JSON.parse(await readFile(join(directory, file), 'utf8'));
+    if (document.providerId === 'deepseek-open-platform') continue;
+    names.add(document.displayName);
+    for (const route of document.routes) names.add(route.displayName);
+  }
+  return [...names];
+}
+
 async function assertRenderer(renderer, expression, name) {
   requireJourney(await renderer.evaluate(`Boolean(${expression})`), name);
 }
@@ -1215,6 +1231,15 @@ async function main() {
         integrity.textContent.includes('零次实时传输') &&
         document.body.textContent.includes('公开发布许可：不存在');
     })()`, 'four-role-first-policy-semantics');
+    // ADR 0073 §3 and V2-UX-MSET-007 (Issue #435): a configured provider appears as a connection only when a Model Role
+    // can bind to it, and no provider document makes one bindable, so no configured provider but the production
+    // connection's is named on this screen.
+    const unboundProviderNames = await configuredUnboundProviderNames();
+    requireJourney(unboundProviderNames.length > 0, 'model-service-configured-providers-read');
+    await assertRenderer(primary, `(() => {
+      const text=document.querySelector('[data-screen="model-service"]')?.textContent??'';
+      return ${JSON.stringify(unboundProviderNames)}.every((name)=>!text.includes(name));
+    })()`, 'model-service-unbound-provider-absent');
     await tabUntil(primary, `document.activeElement?.id==='main-editorial-connection-name' && document.activeElement.matches(':focus-visible')`, 'model-settings-keyboard-connection');
     await dispatchTab(primary);
     await assertRenderer(primary, `document.activeElement?.id==='main-editorial-credential' && document.activeElement.matches(':focus-visible')`, 'model-settings-keyboard-credential');

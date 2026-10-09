@@ -4,21 +4,18 @@ import { AI7_FAILURE_CODES, type DshFailureCodes } from './classification.js';
 import type { CredentialBroker, CredentialSlotBinding } from './credential-broker.js';
 import {
   DEEPSEEK_ROUTE,
-  OPENCODE_GO_MESSAGES_ROUTE,
-  OPENCODE_GO_RESPONSES_ROUTE,
   OPENCODE_GO_ROUTE,
   type CredentialSlot,
   type RemoteExecutionRoute,
   type TransmitTicket,
 } from './egress-gate.js';
 import {
-  ADR_0067_DOCUMENTATION,
   DEEPSEEK_V4_PRO_PROFILE,
-  PRODUCTION_BASELINE,
   type CapabilityEvidence,
   type ProviderModelProfile,
 } from './model-profile.js';
 import { assistantToolCalls, messageText, toolResultOf, type AssembledModelPayload } from './payload.js';
+import { GENERATED_ROUTE_PROFILES } from './provider-profiles.generated.js';
 import { normalizeModelResponse, type CanonicalModelResult, type NormalizeOptions } from './response-normalization.js';
 
 /**
@@ -27,41 +24,26 @@ import { normalizeModelResponse, type CanonicalModelResult, type NormalizeOption
  * slot, header policy, limit reading, output cap — says how to reach a model, and a **model profile**
  * (`./model-profile.ts`) says how to speak to one. They are separate because one route serves many
  * models, so a model's capabilities cannot hang off the route that carries it.
- * `deepseek-open-platform` is the unchanged production route
- * (`POST https://api.deepseek.com/chat/completions`, model `deepseek-v4-pro`, thinking enabled at
- * high reasoning effort). `opencode-go` is the developer-live route of Provider Processing v5
- * (`POST https://opencode.ai/zen/go/v1/chat/completions`, bare model id `deepseek-v4-flash`, a
- * standard chat-completions body with no DeepSeek-specific parameters, and the technical Session id
- * in `x-opencode-session` for the gateway's prompt cache). `opencode-go-messages` and
- * `opencode-go-responses` are the same plan's Anthropic-compatible and OpenAI-compatible paths,
- * declared and inert: no model on either can read a response, and no Provider Resolution Plan may
- * bind them (`ExecutionRoute` in `./egress-gate.ts`). The fourth shape, `google-generate-content`,
- * has no route at all: Gemini is served by no path of this gateway, so the shape is assembled only
- * for a profile that declares it, and the route its own endpoint needs waits for the credential slot
- * of plan slot 1c.10.
+ * Every route profile is generated from the provider documents under `config/providers/` (ADR 0073
+ * §2, Issue #435): the endpoint, the credential slot and its header form, the limit reading and the
+ * output cap are configuration, never constants of this module. `deepseek-open-platform` is the
+ * unchanged production route (model `deepseek-v4-pro`, thinking enabled at high reasoning effort).
+ * `opencode-go` is the developer-live route of Provider Processing v5 (bare model id
+ * `deepseek-v4-flash`, a standard chat-completions body with no DeepSeek-specific parameters, and the
+ * technical Session id in `x-opencode-session` for the gateway's prompt cache). Every other
+ * configured route — the Go plan's `/messages` and `/responses` paths and every provider document's
+ * route — is declared and inert: no Provider Resolution Plan may bind it (`ExecutionRoute` in
+ * `./egress-gate.ts`) until a Provider Processing revision names its exact binding.
  *
  * No route exposes provider-native tools. The adapter assembles a deterministic request from the
  * frozen prompt contract, records the request digest, and transmits only after a `transmit-remote`
- * decision the gate issued for the same binding. The credential enters only the `authorization`
- * header inside the broker's release callback; the assembled request and its digest never contain it.
+ * decision the gate issued for the same binding. The credential enters only the one header the route's
+ * declared form names, inside the broker's release callback; the assembled request and its digest
+ * never contain it.
  */
 export const DEEPSEEK_ADAPTER_REVISION = 1 as const;
 export const DEEPSEEK_CONFIGURATION_REVISION = 1 as const;
-export const DEEPSEEK_ENDPOINT = 'https://api.deepseek.com/chat/completions' as const;
 export const DEEPSEEK_REASONING_EFFORT = 'high' as const;
-/** The OpenCode Go chat-completions endpoint of the developer-live route (verified 2026-09-06). */
-export const OPENCODE_GO_ENDPOINT = 'https://opencode.ai/zen/go/v1/chat/completions' as const;
-/** The same plan's Anthropic-compatible path, which the Go page documents for its Qwen and MiniMax models. */
-export const OPENCODE_GO_MESSAGES_ENDPOINT = 'https://opencode.ai/zen/go/v1/messages' as const;
-/** The same plan's OpenAI-compatible path, which the Go page documents for its GPT and Grok models. */
-export const OPENCODE_GO_RESPONSES_ENDPOINT = 'https://opencode.ai/zen/go/v1/responses' as const;
-/**
- * The per-turn output cap `opencode-go-messages` declares, because its shape requires the request to
- * name one. The largest unit output observed to date is 24,225 tokens, so this leaves headroom above
- * anything a unit has actually produced; it bounds one turn and nothing more, the Run Budget Ceiling
- * being the authority over the Run.
- */
-export const OPENCODE_GO_MESSAGES_MAX_OUTPUT_TOKENS = 32_768 as const;
 /** The opaque per-request Session header the gateway uses for prompt caching; it carries the Session id and nothing else. */
 export const OPENCODE_GO_SESSION_HEADER = 'x-opencode-session' as const;
 /** The specific User-Agent the developer-live route sends: the product and the trusted scope, no host or user detail. */
@@ -102,6 +84,15 @@ export interface ProviderRouteProfile {
    */
   readonly maxOutputTokens: number | null;
   /**
+   * The header the credential travels in, as the vendor documents it (ADR 0073 §2): `authorization:
+   * Bearer` for every route before this field existed, `x-api-key` beside `anthropic-version` for
+   * Anthropic's own endpoint, `x-goog-api-key` for Google's. The credential enters exactly this one
+   * header inside the broker's release callback and no other.
+   */
+  readonly credentialHeader: CredentialHeaderForm;
+  /** The `anthropic-version` value the `x-api-key` form travels with, and `null` for every other form. Not a secret. */
+  readonly anthropicVersion: string | null;
+  /**
    * How this route's credential header form was established. A model profile says the provenance of
    * every capability it declares; a route says the provenance of the one fact that decides whether a
    * credential reaches the endpoint at all, so that a new route cannot be added without stating where
@@ -111,84 +102,20 @@ export interface ProviderRouteProfile {
   readonly displayName: string;
 }
 
-export const DEEPSEEK_ROUTE_PROFILE: ProviderRouteProfile = {
-  route: DEEPSEEK_ROUTE,
-  endpoint: DEEPSEEK_ENDPOINT,
-  credentialSlot: 'deepseek-api-key',
-  limitPolicy: 'rate-limit-retryable',
-  dshAttribution: true,
-  sessionHeader: false,
-  // Chat completions names no output cap, so this route sends no such field and its bytes cannot move.
-  maxOutputTokens: null,
-  // `authorization: Bearer` is what adapter revision 1 has always sent on this route.
-  credentialHeaderEvidence: PRODUCTION_BASELINE,
-  displayName: 'DeepSeek 开放平台（官方）',
-};
-
-export const OPENCODE_GO_ROUTE_PROFILE: ProviderRouteProfile = {
-  route: OPENCODE_GO_ROUTE,
-  endpoint: OPENCODE_GO_ENDPOINT,
-  credentialSlot: 'opencode-go',
-  limitPolicy: 'account-limit-terminal',
-  dshAttribution: false,
-  sessionHeader: true,
-  maxOutputTokens: null,
-  credentialHeaderEvidence: ADR_0067_DOCUMENTATION,
-  displayName: 'OpenCode Go（开发者实时）',
-};
+/** The three credential header forms ADR 0073 §2 names. */
+export type CredentialHeaderForm = 'authorization-bearer' | 'x-api-key' | 'x-goog-api-key';
 
 /**
- * The same gateway, the same account, and the same credential slot reached over its
- * Anthropic-compatible path. It is a second route rather than a second model of the first because a
- * route is how a model is reached, and both the endpoint and the request shape differ; the credential
- * slot does not, which is why declaring it moves no credential boundary.
- *
- * Every model on it is inert. The header form is the one ADR 0067 records for the gateway —
- * `authorization: Bearer`, which is what this adapter sends — rather than the `x-api-key` and
- * `anthropic-version` pair Claude's own endpoint documents: the Go page documents no header for this
- * path, so the route says where its form came from and waits for a live item to observe it.
+ * Every route the provider documents declare, generated (ADR 0073 §2). The documents carry what each
+ * route's comment here used to say: why the production route alone sends DSH attribution, why the Go
+ * plan reads a 429 as its account limit, why `/messages` declares 32,768 and `/responses` no cap.
  */
-export const OPENCODE_GO_MESSAGES_ROUTE_PROFILE: ProviderRouteProfile = {
-  route: OPENCODE_GO_MESSAGES_ROUTE,
-  endpoint: OPENCODE_GO_MESSAGES_ENDPOINT,
-  credentialSlot: 'opencode-go',
-  limitPolicy: 'account-limit-terminal',
-  dshAttribution: false,
-  sessionHeader: true,
-  maxOutputTokens: OPENCODE_GO_MESSAGES_MAX_OUTPUT_TOKENS,
-  credentialHeaderEvidence: ADR_0067_DOCUMENTATION,
-  displayName: 'OpenCode Go · Messages（开发者实时）',
-};
+export const PROVIDER_ROUTE_PROFILES: Readonly<Record<RemoteExecutionRoute, ProviderRouteProfile>> = GENERATED_ROUTE_PROFILES;
 
-/**
- * The same gateway again, over its OpenAI-compatible path, and a third route for the same reason the
- * second one is one: the endpoint and the request shape differ, the credential slot does not.
- *
- * It declares no output cap, and that is a statement rather than an omission. The shape leaves
- * `max_output_tokens` optional, nothing has established a per-turn bound for the models this path
- * serves, and an optional field is not one the request must name — so the route says `null` and the
- * assembler sends nothing, exactly as the two chat-completions routes do.
- */
-export const OPENCODE_GO_RESPONSES_ROUTE_PROFILE: ProviderRouteProfile = {
-  route: OPENCODE_GO_RESPONSES_ROUTE,
-  endpoint: OPENCODE_GO_RESPONSES_ENDPOINT,
-  credentialSlot: 'opencode-go',
-  limitPolicy: 'account-limit-terminal',
-  dshAttribution: false,
-  sessionHeader: true,
-  maxOutputTokens: null,
-  // The Go page documents no header for this path either, so the reading ADR 0067 recorded for the
-  // gateway stands for it, and the route waits for a live item exactly as the `/messages` one does.
-  credentialHeaderEvidence: ADR_0067_DOCUMENTATION,
-  displayName: 'OpenCode Go · Responses（开发者实时）',
-};
-
-export const PROVIDER_ROUTE_PROFILES: Readonly<Record<RemoteExecutionRoute, ProviderRouteProfile>> = {
-  [DEEPSEEK_ROUTE]: DEEPSEEK_ROUTE_PROFILE,
-  [OPENCODE_GO_ROUTE]: OPENCODE_GO_ROUTE_PROFILE,
-  [OPENCODE_GO_MESSAGES_ROUTE]: OPENCODE_GO_MESSAGES_ROUTE_PROFILE,
-  [OPENCODE_GO_RESPONSES_ROUTE]: OPENCODE_GO_RESPONSES_ROUTE_PROFILE,
-};
+/** The production connection's route, as `config/providers/deepseek-open-platform.json` declares it. */
+export const DEEPSEEK_ROUTE_PROFILE: ProviderRouteProfile = PROVIDER_ROUTE_PROFILES[DEEPSEEK_ROUTE];
+/** Provider Processing v5's developer-live route, as `config/providers/opencode-go.json` declares it. */
+export const OPENCODE_GO_ROUTE_PROFILE: ProviderRouteProfile = PROVIDER_ROUTE_PROFILES[OPENCODE_GO_ROUTE];
 
 export interface DeepSeekRequestAssembly {
   readonly url: string;
@@ -385,8 +312,9 @@ function openaiResponsesBody(
  * The model id is not in the body: this shape addresses it in the URL, which `providerRequestUrl`
  * derives. The credential is not here either, and unlike the three shapes before it this endpoint
  * takes it in `x-goog-api-key` rather than `authorization: Bearer`
- * (`https://ai.google.dev/gemini-api/docs/api-key`, read the same day). That form is recorded for the
- * route of plan slot 1c.10 and is not implemented: no route here reaches this shape.
+ * (`https://ai.google.dev/gemini-api/docs/api-key`, read the same day). The `google-gemini` provider
+ * document declares that form, and `credentialHeaders` sends it; the route is inert and binds nothing
+ * until the shape review its document records.
  *
  * Structured output and reasoning control refuse, as they do on the two shapes before it. This shape
  * spells them `generationConfig.responseMimeType: 'application/json'` with `responseSchema`, and
@@ -486,6 +414,9 @@ export function assembleProviderRequest(
       accept: 'application/json',
       ...(profile.dshAttribution ? context.attribution : {}),
       ...(profile.sessionHeader ? { [OPENCODE_GO_SESSION_HEADER]: context.sessionId!, 'user-agent': OPENCODE_GO_USER_AGENT } : {}),
+      // Only the `x-api-key` form names a version beside the key; every other route sends no such header,
+      // so no request of a route that predates the field moves a header.
+      ...(profile.anthropicVersion === null ? {} : { 'anthropic-version': profile.anthropicVersion }),
     },
     body,
     requestDigest: sha256Hex(body),
@@ -504,6 +435,19 @@ export function assembleDeepSeekRequest(
 
 export function authorizationHeader(secret: string): Readonly<Record<string, string>> {
   return { authorization: `Bearer ${secret}` };
+}
+
+/**
+ * The one header the credential travels in, by the route's declared form (ADR 0073 §2). Called only
+ * inside the broker's release callback; nothing it returns is assembled, digested, logged or kept.
+ */
+export function credentialHeaders(profile: ProviderRouteProfile, secret: string): Readonly<Record<string, string>> {
+  switch (profile.credentialHeader) {
+    case 'authorization-bearer': return authorizationHeader(secret);
+    case 'x-api-key': return { 'x-api-key': secret };
+    case 'x-goog-api-key': return { 'x-goog-api-key': secret };
+    default: throw new Error('PROVIDER_CREDENTIAL_HEADER_UNSUPPORTED');
+  }
 }
 
 /**
@@ -707,7 +651,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
         const transport = this.#deps.transport ?? ((url, init) => fetch(url, init));
         const response = await transport(assembly.url, {
           method: assembly.method,
-          headers: { ...assembly.headers, ...authorizationHeader(secret) },
+          headers: { ...assembly.headers, ...credentialHeaders(this.#profile, secret) },
           body: assembly.body,
           ...(options.signal === undefined ? {} : { signal: options.signal }),
         });

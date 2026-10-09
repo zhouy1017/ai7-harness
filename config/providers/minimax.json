@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "providerId": "minimax",
+  "displayName": "MiniMax",
+  "credential": {
+    "slot": "minimax",
+    "developmentCredentialReference": "3250a08e-e2ba-40aa-93b4-04290ac96deb",
+    "headerForm": "authorization-bearer",
+    "anthropicVersion": null,
+    "headerEvidence": "minimax-platform-docs"
+  },
+  "evidence": {
+    "minimax-platform-docs": {
+      "kind": "vendor-documentation",
+      "source": "MiniMax platform documentation, platform.minimaxi.com/docs",
+      "readOn": "2026-09-10",
+      "note": "`https://api.minimax.cn/v1` (`/v1/chat/completions`), `Authorization: Bearer`; `MiniMax-M3` (「1M 超长上下文」), `MiniMax-M2.7`, `MiniMax-M2.5` (ADR 0080 §3)."
+    },
+    "minimax-search-docs": {
+      "kind": "vendor-documentation",
+      "source": "MiniMax platform documentation, server tools, platform.minimaxi.com/docs",
+      "readOn": "2026-09-10",
+      "note": "Web search is documented only on the Anthropic Messages API (`web_search_20250305`) and the Responses API (`web_search`); the pages describe no chat-completions web search, which is the shape this route speaks."
+    },
+    "unverified": { "kind": "unverified" }
+  },
+  "routes": [
+    {
+      "routeId": "minimax",
+      "displayName": "MiniMax · Chat Completions",
+      "endpoint": "https://api.minimax.cn/v1/chat/completions",
+      "requestShape": "openai-chat-completions",
+      "requestShapeEvidence": "minimax-platform-docs",
+      "limitPolicy": "rate-limit-retryable",
+      "dshAttribution": false,
+      "sessionHeader": false,
+      "maxOutputTokens": null,
+      "routeCapabilities": {
+        "webSearchTool": { "value": "none", "evidence": "minimax-search-docs" }
+      },
+      "models": [
+        { "modelId": "MiniMax-M3", "displayName": "MiniMax M3", "context": { "tokens": 1000000, "evidence": "minimax-platform-docs" } },
+        { "modelId": "MiniMax-M2.7", "displayName": "MiniMax M2.7", "context": { "tokens": null, "evidence": "unverified" } },
+        { "modelId": "MiniMax-M2.5", "displayName": "MiniMax M2.5", "context": { "tokens": null, "evidence": "unverified" } }
+      ]
+    }
+  ],
+  "openQuestions": [
+    "Structured output is not documented — no `response_format` appears in the chat schema or the guides read (ADR 0080 §3).",
+    "MiniMax's provider search tool lives on its Anthropic-compatible `/anthropic/v1/messages` and Responses-style `/v1/responses` paths; a route on either is a later document revision, with its own reading."
+  ]
+}

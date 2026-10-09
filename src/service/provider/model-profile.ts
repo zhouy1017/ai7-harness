@@ -1,12 +1,11 @@
 import {
   DEEPSEEK_MODEL,
   DEEPSEEK_ROUTE,
-  OPENCODE_GO_MESSAGES_ROUTE,
   OPENCODE_GO_MODEL,
-  OPENCODE_GO_RESPONSES_ROUTE,
   OPENCODE_GO_ROUTE,
   type RemoteExecutionRoute,
 } from './egress-gate.js';
+import { GENERATED_MODEL_PROFILES } from './provider-profiles.generated.js';
 
 /**
  * What one model can be asked to do, declared rather than inferred (Issue #310).
@@ -23,8 +22,10 @@ import {
  * JSON-object guarantee that was never requested of the gateway, let alone verified, and it failed
  * three of eight units on the first live Run (#307, #306).
  *
- * Adding a model is adding data here. If a new model needs a change in the adapter's control flow,
- * the missing fact belongs in this table instead.
+ * Adding a model is adding data — since ADR 0073 (Issue #435, S55a) a row of a provider document
+ * under `config/providers/`, from which `tools/generate-provider-configuration.mjs` generates
+ * `./provider-profiles.generated.ts`; no profile is written here by hand. If a new model needs a
+ * change in the adapter's control flow, the missing fact belongs in the document instead.
  */
 
 /**
@@ -34,8 +35,8 @@ import {
  * S54c. What a profile declares is still what it gets: the adapter reads this field and nothing else.
  *
  * `google-generate-content` is the fourth and the first that no route of this gateway serves: Gemini
- * is on no OpenCode Go path, so the shape is assembled and read against test-local profiles until a
- * route with the credential slot its own endpoint needs arrives (plan slot 1c.10).
+ * is on no OpenCode Go path, and the route its own endpoint needs is the `google-gemini` provider
+ * document's (Issue #435), declared and inert until the shape review that document records.
  */
 export type RequestShape =
   | 'openai-chat-completions'
@@ -149,6 +150,18 @@ export interface ProviderModelProfile {
   readonly displayName: string;
   readonly capabilities: ModelCapabilities;
   readonly evidence: CapabilityEvidenceRecord;
+  /**
+   * The declared context size (ADR 0080 §2): the tokens the vendor page states for the model — an
+   * input limit where the page states one apart from the window — with the page and the day, or
+   * `null` where no page read states one. It is a declaration Provider Preflight may compare a plan's
+   * largest transmission with; nothing reads it yet, and it moves no request byte.
+   */
+  readonly context: ModelContext;
+}
+
+export interface ModelContext {
+  readonly tokens: number | null;
+  readonly evidence: CapabilityEvidence;
 }
 
 export function modelProfileKey(route: RemoteExecutionRoute, model: string): ModelProfileKey {
@@ -156,367 +169,39 @@ export function modelProfileKey(route: RemoteExecutionRoute, model: string): Mod
 }
 
 /**
- * ADR 0067's facts about the Go gateway, read from the OpenCode documentation on the date it records.
- * Exported because a route states the provenance of its credential header form from the same reading.
+ * Every declared profile, from the provider documents. A key appears once: the generator refuses a
+ * duplicate model on a route and a duplicate route across documents, so building the table cannot
+ * silently drop a row.
  */
-export const ADR_0067_DOCUMENTATION: CapabilityEvidence = {
-  kind: 'vendor-documentation',
-  source: 'ADR 0067 · OpenCode Go documentation',
-  readOn: '2026-09-06',
-};
-
-/** The eight test items of the first live Run, `S40/smoke/1` of 2026-09-07, recorded on #307. */
-const FIRST_LIVE_RUN: CapabilityEvidence = {
-  kind: 'live-test-item',
-  itemIds: ['S40/first-baseline/1', 'S40/first-baseline/2', 'S40/first-baseline/3', 'S40/first-baseline/4',
-    'S40/first-baseline/5', 'S40/first-baseline/6', 'S40/first-baseline/7', 'S40/first-baseline/8'],
-  observedOn: '2026-09-07',
-};
-
-/**
- * The one live test item that put a format constraint on this gateway, `S40/reanalyze-range/1` of
- * 2026-09-08, recorded on #306. One item, one response, one capability: it is evidence that the
- * field is accepted, and evidence of nothing else.
- */
-const JSON_OBJECT_LIVE_ITEM: CapabilityEvidence = {
-  kind: 'live-test-item',
-  itemIds: ['S40/reanalyze-range/1'],
-  observedOn: '2026-09-08',
-};
-
-/**
- * The documentation pair the OpenCode Go plan's models are declared from, read on 2026-09-08: the Go
- * page for which path the gateway serves each model on, the Zen model table for the exact id it
- * answers to. It is one record rather than two because a model needs both facts to be declarable at
- * all — a path without an id cannot be keyed, and an id without a path cannot be assembled — and one
- * constant rather than a copy per profile because both paths are a single reading of one pair of
- * pages.
- *
- * Where the two pages disagree, the Go page decides and the disagreement is recorded rather than
- * resolved: it is the page that describes this plan, and only a live item can settle which path a
- * model actually answers on.
- */
-const OPENCODE_GO_PLAN_DOCUMENTATION: CapabilityEvidence = {
-  kind: 'vendor-documentation',
-  source: 'OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/',
-  readOn: '2026-09-08',
-};
-
-/**
- * The same reading of the same pair, plus the source the third shape's own contract came from. The
- * vendor's platform reference page refuses an unauthenticated fetch, so the shape is read from the
- * published SDK instead, named by the exact commit that was read rather than by a moving branch.
- *
- * A `/responses` row therefore names three sources for the one capability it declares — which path
- * the gateway serves the model on, which id it answers to, and what the shape on that path is —
- * because that is what establishing it took.
- */
-const OPENCODE_GO_RESPONSES_DOCUMENTATION: CapabilityEvidence = {
-  kind: 'vendor-documentation',
-  source: 'OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/' +
-    ' · OpenAI Node SDK src/resources/responses/responses.ts@eecbebe294be7e657c99a34eb104a6a4b507335c',
-  readOn: '2026-09-08',
-};
-
-export const PRODUCTION_BASELINE: CapabilityEvidence = { kind: 'frozen-request-baseline', since: 'adapter revision 1' };
-const UNVERIFIED: CapabilityEvidence = { kind: 'unverified' };
-
-/**
- * DeepSeek official's Tool Calls guide, read 2026-09-11 (ADR 0080 §2, §3): it documents function
- * tools with `strict` JSON-schema parameters and states "From DeepSeek-V3.2, the API supports tool
- * use in the thinking mode." The `tool_choice` values and the thinking-mode round-trip rules are not
- * on that page and remain for the first live item to establish.
- */
-const DEEPSEEK_TOOL_CALLS_DOCUMENTATION: CapabilityEvidence = {
-  kind: 'vendor-documentation',
-  source: 'DeepSeek official Tool Calls guide, api-docs.deepseek.com/guides/tool_calls',
-  readOn: '2026-09-11',
-};
-
-/**
- * DeepSeek official's own pages, read 2026-09-10 (ADR 0080 §3), affirmatively documenting no search
- * tool: the Tool Calls guide admits only `"type": "function"` ("the model itself does not execute
- * specific functions"), the Chat Completions reference states "Currently, only functions are
- * supported as a tool", and the Responses API guide marks `web_search` `Ignored`.
- */
-const DEEPSEEK_NO_WEB_SEARCH_DOCUMENTATION: CapabilityEvidence = {
-  kind: 'vendor-documentation',
-  source: 'DeepSeek official — Tool Calls guide, Chat Completions reference, Responses API guide (api-docs.deepseek.com)',
-  readOn: '2026-09-10',
-};
-
-/**
- * The OpenCode Go / Zen documentation and source, read 2026-09-10 and 2026-09-11 (ADR 0080 §3):
- * neither gateway page prints a capability table or mentions tools, web search or web fetch anywhere,
- * and the source (`anomalyco/opencode`, `packages/opencode/src/tool/{websearch,webfetch,mcp-websearch}.ts`)
- * shows `websearch` / `webfetch` are client-side tools of the opencode agent, not of the gateway wire
- * API. The gateway wire API therefore carries no search tool for any model reached through it,
- * whichever of the three paths reaches it.
- */
-const OPENCODE_GATEWAY_NO_SEARCH_TOOL_DOCUMENTATION: CapabilityEvidence = {
-  kind: 'vendor-documentation',
-  source: 'OpenCode Go https://opencode.ai/docs/go/ · Zen https://opencode.ai/docs/zen/ · Tools https://opencode.ai/docs/tools/',
-  readOn: '2026-09-11',
-};
-
-/**
- * The production model. Its request side is exactly what adapter revision 1 has always sent; its
- * response side has never been observed, because no Run has ever transmitted on this route, so every
- * read-side capability is declared absent.
- */
-export const DEEPSEEK_V4_PRO_PROFILE: ProviderModelProfile = {
-  key: modelProfileKey(DEEPSEEK_ROUTE, DEEPSEEK_MODEL),
-  route: DEEPSEEK_ROUTE,
-  model: DEEPSEEK_MODEL,
-  displayName: 'DeepSeek V4 Pro High',
-  capabilities: {
-    requestShape: 'openai-chat-completions',
-    reasoningControl: 'deepseek-thinking',
-    structuredOutput: 'none',
-    answerChannel: 'message-content-string',
-    reasoningChannel: 'none',
-    usageAttribution: 'unknown',
-    toolCalling: 'function',
-    webSearchTool: 'none',
-  },
-  evidence: {
-    requestShape: PRODUCTION_BASELINE,
-    reasoningControl: PRODUCTION_BASELINE,
-    structuredOutput: UNVERIFIED,
-    answerChannel: PRODUCTION_BASELINE,
-    reasoningChannel: UNVERIFIED,
-    usageAttribution: UNVERIFIED,
-    toolCalling: DEEPSEEK_TOOL_CALLS_DOCUMENTATION,
-    webSearchTool: DEEPSEEK_NO_WEB_SEARCH_DOCUMENTATION,
-  },
-};
-
-/**
- * The developer-live model. Its two read-side capabilities beyond the answer channel come from the
- * first live Run's eight test items, whose responses live in the ADR 0067 Provider Result Cache
- * outside every checkout. It sends no DeepSeek-specific parameter: the gateway's acceptance of one
- * is unverified, and this table's rule is to declare that as absence rather than to assume it.
- *
- * It is the one profile that requires a JSON answer, and test item `S40/reanalyze-range/1` of
- * 2026-09-08 is exactly why. That item established two things: the gateway accepted
- * `response_format: {"type":"json_object"}` on this route without error — nothing in the response
- * named the field, or the prompt's JSON-mode precondition — and the very unit that had returned an
- * empty answer channel on the first live Run returned a JSON object the unit contract parsed.
- *
- * It established nothing further. One item is one response, so it does not show that the constraint
- * is honoured on every response: an empty answer and an unparsable answer remain outcomes the
- * execution owner reads and reports, not cases this declaration rules out.
- */
-export const OPENCODE_GO_V4_FLASH_PROFILE: ProviderModelProfile = {
-  key: modelProfileKey(OPENCODE_GO_ROUTE, OPENCODE_GO_MODEL),
-  route: OPENCODE_GO_ROUTE,
-  model: OPENCODE_GO_MODEL,
-  displayName: 'DeepSeek V4 Flash',
-  capabilities: {
-    requestShape: 'openai-chat-completions',
-    reasoningControl: 'none',
-    structuredOutput: 'json-object',
-    answerChannel: 'message-content-string',
-    reasoningChannel: 'message-reasoning-content',
-    usageAttribution: 'includes-reasoning',
-    // ADR 0080 §2: the Owner's own session observed a well-formed client tool call through this
-    // gateway on the Anthropic shape, but that observation is not yet a recorded live-test item, so
-    // this stays `none` until an item repeats it on the record.
-    toolCalling: 'none',
-    webSearchTool: 'none',
-  },
-  evidence: {
-    requestShape: ADR_0067_DOCUMENTATION,
-    reasoningControl: UNVERIFIED,
-    structuredOutput: JSON_OBJECT_LIVE_ITEM,
-    answerChannel: FIRST_LIVE_RUN,
-    reasoningChannel: FIRST_LIVE_RUN,
-    usageAttribution: FIRST_LIVE_RUN,
-    toolCalling: UNVERIFIED,
-    webSearchTool: OPENCODE_GATEWAY_NO_SEARCH_TOOL_DOCUMENTATION,
-  },
-};
-
-/**
- * A third model the same gateway serves, declared and left inactive: no binding references it, and
- * the adapter needed no branch to accommodate it. It exists to demonstrate the property this slice
- * bought — adding a model is adding data — and to show why the key is composite, since the same
- * model id behind the production route is a different profile with different capabilities.
- */
-export const OPENCODE_GO_V4_PRO_PROFILE: ProviderModelProfile = {
-  key: modelProfileKey(OPENCODE_GO_ROUTE, DEEPSEEK_MODEL),
-  route: OPENCODE_GO_ROUTE,
-  model: DEEPSEEK_MODEL,
-  displayName: 'DeepSeek V4 Pro（OpenCode Go）',
-  capabilities: {
-    requestShape: 'openai-chat-completions',
-    reasoningControl: 'none',
-    structuredOutput: 'none',
-    answerChannel: 'none',
-    reasoningChannel: 'none',
-    usageAttribution: 'unknown',
-    toolCalling: 'none',
-    webSearchTool: 'none',
-  },
-  evidence: {
-    requestShape: ADR_0067_DOCUMENTATION,
-    reasoningControl: UNVERIFIED,
-    structuredOutput: UNVERIFIED,
-    answerChannel: UNVERIFIED,
-    reasoningChannel: UNVERIFIED,
-    usageAttribution: UNVERIFIED,
-    toolCalling: UNVERIFIED,
-    webSearchTool: OPENCODE_GATEWAY_NO_SEARCH_TOOL_DOCUMENTATION,
-  },
-};
-
-/** One path of the OpenCode Go plan: the route that reaches it and the shape it is spoken to in. */
-interface OpenCodeGoPath {
-  readonly route: RemoteExecutionRoute;
-  readonly requestShape: RequestShape;
-  /**
-   * What established the shape of this path, carried by the path because it differs between them:
-   * two of the three are read from the documentation pair alone, and the third needed the vendor's
-   * SDK beside it. A row states the provenance it actually has, not the one its neighbours have.
-   */
-  readonly documentation: CapabilityEvidence;
-}
-
-const GO_CHAT_COMPLETIONS: OpenCodeGoPath = {
-  route: OPENCODE_GO_ROUTE,
-  requestShape: 'openai-chat-completions',
-  documentation: OPENCODE_GO_PLAN_DOCUMENTATION,
-};
-const GO_MESSAGES: OpenCodeGoPath = {
-  route: OPENCODE_GO_MESSAGES_ROUTE,
-  requestShape: 'anthropic-messages',
-  documentation: OPENCODE_GO_PLAN_DOCUMENTATION,
-};
-const GO_RESPONSES: OpenCodeGoPath = {
-  route: OPENCODE_GO_RESPONSES_ROUTE,
-  requestShape: 'openai-responses',
-  documentation: OPENCODE_GO_RESPONSES_DOCUMENTATION,
-};
-
-/**
- * One more model of the same gateway, declared exactly as the profile above declares its own: the
- * documentation pair establishes which path it is reached on and under which id, and nothing
- * establishes anything else, so every other capability is absent and says why. The shape is a
- * function rather than thirteen more copies of the literal above because they differ only in a path,
- * an id, and a printed name: inert becomes a property of the construction, not of thirteen chances to
- * restate it. `answerChannel: 'none'` is the whole of what makes a row inert — a profile that
- * declares no answer channel cannot read any response — and only a live test item may ever move one
- * of these values, never a declaration.
- *
- * The path is a parameter because that is exactly what a second and a third request shape cost this
- * table: a model on `/messages` or `/responses` is the same row with three of its fields — the
- * route, the shape, and what established the shape — read from somewhere else.
- */
-function inertOpenCodeGoModel(path: OpenCodeGoPath, model: string, productName: string): ProviderModelProfile {
-  return {
-    key: modelProfileKey(path.route, model),
-    route: path.route,
-    model,
-    displayName: `${productName}（OpenCode Go）`,
-    capabilities: {
-      requestShape: path.requestShape,
-      reasoningControl: 'none',
-      structuredOutput: 'none',
-      answerChannel: 'none',
-      reasoningChannel: 'none',
-      usageAttribution: 'unknown',
-      toolCalling: 'none',
-      webSearchTool: 'none',
-    },
-    evidence: {
-      requestShape: path.documentation,
-      reasoningControl: UNVERIFIED,
-      structuredOutput: UNVERIFIED,
-      answerChannel: UNVERIFIED,
-      reasoningChannel: UNVERIFIED,
-      usageAttribution: UNVERIFIED,
-      toolCalling: UNVERIFIED,
-      webSearchTool: OPENCODE_GATEWAY_NO_SEARCH_TOOL_DOCUMENTATION,
-    },
-  };
-}
-
-/*
- * Every remaining model the documentation pair admits on `chat/completions`: the Go page places it
- * there **and** the Zen model table states its id verbatim. Both facts or no row, because an id the
- * documentation does not print is a guess, and a guess is the failure this table exists to prevent.
- * None of them is exported: nothing above the provider layer may name one, and a profile no module
- * can import is a profile no binding can reach.
- *
- * Named by the documentation and deliberately absent:
- * - LongCat-2.0, Hy4 preview, Hy3, Omen Alpha, MiMo-V2.5, MiMo-V2.5-Pro — the Go page names the
- *   product, the Zen table states no id for it, so there is nothing to key a row by.
- * - Qwen3.8 Flash — the Go page places it on `/messages`, but the Zen table states no id for it.
- */
-const OPENCODE_GO_GLM_5_3_FLASH_PROFILE = inertOpenCodeGoModel(GO_CHAT_COMPLETIONS, 'glm-5.3-flash', 'GLM-5.3-Flash');
-const OPENCODE_GO_GLM_5_3_PROFILE = inertOpenCodeGoModel(GO_CHAT_COMPLETIONS, 'glm-5.3', 'GLM-5.3');
-const OPENCODE_GO_GLM_5_2_PROFILE = inertOpenCodeGoModel(GO_CHAT_COMPLETIONS, 'glm-5.2', 'GLM-5.2');
-const OPENCODE_GO_GLM_5_1_PROFILE = inertOpenCodeGoModel(GO_CHAT_COMPLETIONS, 'glm-5.1', 'GLM-5.1');
-const OPENCODE_GO_KIMI_K3_PROFILE = inertOpenCodeGoModel(GO_CHAT_COMPLETIONS, 'kimi-k3', 'Kimi K3');
-const OPENCODE_GO_KIMI_K2_7_CODE_PROFILE = inertOpenCodeGoModel(GO_CHAT_COMPLETIONS, 'kimi-k2.7-code', 'Kimi K2.7 Code');
-const OPENCODE_GO_KIMI_K2_6_PROFILE = inertOpenCodeGoModel(GO_CHAT_COMPLETIONS, 'kimi-k2.6', 'Kimi K2.6');
-const OPENCODE_GO_V4_FLASH_VISION_EXP_PROFILE = inertOpenCodeGoModel(GO_CHAT_COMPLETIONS, 'deepseek-v4-flash-vision-exp', 'DeepSeek V4 Flash Vision Exp');
-
-/*
- * The same admitted-set rule applied to the plan's `/messages` path, which the `anthropic-messages`
- * shape now makes declarable. Every row is inert exactly as the rows above are: the request shape is
- * established, and everything a response would have taught is not.
- *
- * MiniMax is here on a disagreement, not on agreement. The Go page places it on `/messages`; the Zen
- * table places it on `chat/completions`. The Go page decides, because it is the page that describes
- * this plan, and the disagreement is recorded here rather than resolved: the first live item on one
- * of these ids settles it, and until then declaring the wrong path costs nothing, since no profile
- * on this route can read a response at all.
- */
-const OPENCODE_GO_QWEN_3_7_PLUS_PROFILE = inertOpenCodeGoModel(GO_MESSAGES, 'qwen3.7-plus', 'Qwen3.7 Plus');
-const OPENCODE_GO_QWEN_3_6_PLUS_PROFILE = inertOpenCodeGoModel(GO_MESSAGES, 'qwen3.6-plus', 'Qwen3.6 Plus');
-const OPENCODE_GO_MINIMAX_M3_PROFILE = inertOpenCodeGoModel(GO_MESSAGES, 'minimax-m3', 'MiniMax M3');
-const OPENCODE_GO_MINIMAX_M2_7_PROFILE = inertOpenCodeGoModel(GO_MESSAGES, 'minimax-m2.7', 'MiniMax M2.7');
-const OPENCODE_GO_MINIMAX_M2_5_PROFILE = inertOpenCodeGoModel(GO_MESSAGES, 'minimax-m2.5', 'MiniMax M2.5');
-
-/*
- * The same admitted-set rule applied to the plan's `/responses` path, which the `openai-responses`
- * shape now makes declarable. The Go page places four products there; the Zen model table states an
- * id verbatim for two of them, and those two are the rows.
- *
- * Named by the documentation and deliberately absent:
- * - Muse Spark 1.3 / 1.2 — the two pages disagree on the id itself, not on the path: the Go page
- *   prints `muse-spark-1.3-contributor` and `muse-spark-1.2-contributor`, the Zen table prints
- *   `muse-spark-1.3` and `muse-spark-1.2`. No id is stated by both, so there is none to key a row
- *   by, and picking one would be the guess this table exists to prevent.
- * - The Zen table's further `/responses` rows — the GPT 5.x family, Grok 4.5, Grok Build — are Zen
- *   rather than the Go plan, and this table declares the plan the credential slot reaches.
- */
-const OPENCODE_GO_GROK_4_6_PROFILE = inertOpenCodeGoModel(GO_RESPONSES, 'grok-4.6', 'Grok 4.6');
-const OPENCODE_GO_GPT_5_6_LUNA_PROFILE = inertOpenCodeGoModel(GO_RESPONSES, 'gpt-5.6-luna', 'GPT 5.6 Luna');
-
-export const PROVIDER_MODEL_PROFILES: Readonly<Record<ModelProfileKey, ProviderModelProfile>> = {
-  [DEEPSEEK_V4_PRO_PROFILE.key]: DEEPSEEK_V4_PRO_PROFILE,
-  [OPENCODE_GO_V4_FLASH_PROFILE.key]: OPENCODE_GO_V4_FLASH_PROFILE,
-  [OPENCODE_GO_V4_PRO_PROFILE.key]: OPENCODE_GO_V4_PRO_PROFILE,
-  [OPENCODE_GO_GLM_5_3_FLASH_PROFILE.key]: OPENCODE_GO_GLM_5_3_FLASH_PROFILE,
-  [OPENCODE_GO_GLM_5_3_PROFILE.key]: OPENCODE_GO_GLM_5_3_PROFILE,
-  [OPENCODE_GO_GLM_5_2_PROFILE.key]: OPENCODE_GO_GLM_5_2_PROFILE,
-  [OPENCODE_GO_GLM_5_1_PROFILE.key]: OPENCODE_GO_GLM_5_1_PROFILE,
-  [OPENCODE_GO_KIMI_K3_PROFILE.key]: OPENCODE_GO_KIMI_K3_PROFILE,
-  [OPENCODE_GO_KIMI_K2_7_CODE_PROFILE.key]: OPENCODE_GO_KIMI_K2_7_CODE_PROFILE,
-  [OPENCODE_GO_KIMI_K2_6_PROFILE.key]: OPENCODE_GO_KIMI_K2_6_PROFILE,
-  [OPENCODE_GO_V4_FLASH_VISION_EXP_PROFILE.key]: OPENCODE_GO_V4_FLASH_VISION_EXP_PROFILE,
-  [OPENCODE_GO_QWEN_3_7_PLUS_PROFILE.key]: OPENCODE_GO_QWEN_3_7_PLUS_PROFILE,
-  [OPENCODE_GO_QWEN_3_6_PLUS_PROFILE.key]: OPENCODE_GO_QWEN_3_6_PLUS_PROFILE,
-  [OPENCODE_GO_MINIMAX_M3_PROFILE.key]: OPENCODE_GO_MINIMAX_M3_PROFILE,
-  [OPENCODE_GO_MINIMAX_M2_7_PROFILE.key]: OPENCODE_GO_MINIMAX_M2_7_PROFILE,
-  [OPENCODE_GO_MINIMAX_M2_5_PROFILE.key]: OPENCODE_GO_MINIMAX_M2_5_PROFILE,
-  [OPENCODE_GO_GROK_4_6_PROFILE.key]: OPENCODE_GO_GROK_4_6_PROFILE,
-  [OPENCODE_GO_GPT_5_6_LUNA_PROFILE.key]: OPENCODE_GO_GPT_5_6_LUNA_PROFILE,
-};
+export const PROVIDER_MODEL_PROFILES: Readonly<Record<ModelProfileKey, ProviderModelProfile>> = Object.freeze(
+  Object.fromEntries(GENERATED_MODEL_PROFILES.map((profile) => [profile.key, profile])),
+);
 
 /** The declared profile for one route and model, or `null` when nothing has declared that pair. */
 export function modelProfileFor(route: RemoteExecutionRoute, model: string): ProviderModelProfile | null {
   return PROVIDER_MODEL_PROFILES[modelProfileKey(route, model)] ?? null;
 }
+
+function declaredProfile(route: RemoteExecutionRoute, model: string): ProviderModelProfile {
+  const profile = modelProfileFor(route, model);
+  if (profile === null) throw new Error('PROVIDER_MODEL_PROFILE_UNDECLARED');
+  return profile;
+}
+
+/**
+ * The production model, as `config/providers/deepseek-open-platform.json` declares it. Its request
+ * side is exactly what adapter revision 1 has always sent; its response side has never been observed.
+ * Which route and model production binds is the egress gate's pair (#452's gate share, S87-f3b), not
+ * this table's.
+ */
+export const DEEPSEEK_V4_PRO_PROFILE: ProviderModelProfile = declaredProfile(DEEPSEEK_ROUTE, DEEPSEEK_MODEL);
+
+/** The developer-live model of Provider Processing v5, as `config/providers/opencode-go.json` declares it. */
+export const OPENCODE_GO_V4_FLASH_PROFILE: ProviderModelProfile = declaredProfile(OPENCODE_GO_ROUTE, OPENCODE_GO_MODEL);
+
+/**
+ * The production model's id behind the developer-live gateway: a different profile with different
+ * capabilities, which is why the key is composite. Declared and inert; no binding references it.
+ */
+export const OPENCODE_GO_V4_PRO_PROFILE: ProviderModelProfile = declaredProfile(OPENCODE_GO_ROUTE, DEEPSEEK_MODEL);
+

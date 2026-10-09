@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "providerId": "tencent-hunyuan",
+  "displayName": "腾讯混元",
+  "credential": {
+    "slot": "tencent-hunyuan",
+    "developmentCredentialReference": "ed50a5e5-47d7-4477-bac6-6eb0237f3327",
+    "headerForm": "authorization-bearer",
+    "anthropicVersion": null,
+    "headerEvidence": "tokenhub-docs"
+  },
+  "evidence": {
+    "tokenhub-docs": {
+      "kind": "vendor-documentation",
+      "source": "Tencent Cloud documentation, TokenHub calling overview and models, cloud.tencent.com/document",
+      "readOn": "2026-09-10",
+      "note": "TokenHub `https://tokenhub.tencentmaas.com/v1` (Guangzhou), `Authorization: Bearer`; `hy4-preview` 1M context / 960k input / 64k output, `hy3` 256k / 192k input / 128k output (ADR 0080 §3)."
+    },
+    "tokenhub-search-docs": {
+      "kind": "vendor-documentation",
+      "source": "Tencent Cloud documentation, TokenHub web search (`web_search_options`), cloud.tencent.com/document",
+      "readOn": "2026-09-10",
+      "note": "`\"web_search_options\": { \"enable\": true }` with sources returned via `search_results`; 「模型会自主判断是否需要搜索、搜索什么关键词，并基于搜索结果生成回答。」"
+    }
+  },
+  "routes": [
+    {
+      "routeId": "tencent-hunyuan",
+      "displayName": "腾讯混元 TokenHub · Chat Completions",
+      "endpoint": "https://tokenhub.tencentmaas.com/v1/chat/completions",
+      "requestShape": "openai-chat-completions",
+      "requestShapeEvidence": "tokenhub-docs",
+      "limitPolicy": "rate-limit-retryable",
+      "dshAttribution": false,
+      "sessionHeader": false,
+      "maxOutputTokens": null,
+      "routeCapabilities": {
+        "webSearchTool": { "value": "provider-tool", "evidence": "tokenhub-search-docs" }
+      },
+      "note": "Context is the input limit the page states separately from the window.",
+      "models": [
+        { "modelId": "hy4-preview", "displayName": "HY4 Preview", "context": { "tokens": 960000, "evidence": "tokenhub-docs" } },
+        { "modelId": "hy3", "displayName": "HY3", "context": { "tokens": 192000, "evidence": "tokenhub-docs" } }
+      ]
+    }
+  ],
+  "openQuestions": [
+    "Structured output is not stated on any first-party page read, and TokenHub states only that 「标准协议中的个别字段可能被忽略或降级」; Hunyuan cannot carry a row whose contract parses JSON until a page or a named live item establishes it (ADR 0080 §3).",
+    "The legacy OpenAI-compatible host `https://api.hunyuan.cloud.tencent.com/v1/` is documented as migrating to TokenHub, so this document names TokenHub."
+  ]
+}

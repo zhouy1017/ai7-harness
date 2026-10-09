@@ -59,6 +59,11 @@ function jsonType(value) {
 }
 
 function matchesType(schemaType, data) {
+  // A type list admits a value any one of its members admits (Draft-7 `type` as an array); the
+  // provider configuration schema uses it for the nullable integers and strings it declares.
+  if (Array.isArray(schemaType)) {
+    return schemaType.some((member) => matchesType(member, data));
+  }
   if (schemaType === 'integer') {
     return jsonType(data) === 'number' && Number.isInteger(data);
   }

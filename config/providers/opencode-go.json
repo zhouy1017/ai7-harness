@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 1,
+  "providerId": "opencode-go",
+  "displayName": "OpenCode Go",
+  "credential": {
+    "slot": "opencode-go",
+    "developmentCredentialReference": "a7c0de00-5040-4f27-9e13-6b1f2c8d4a55",
+    "headerForm": "authorization-bearer",
+    "anthropicVersion": null,
+    "headerEvidence": "adr-0067-go-docs"
+  },
+  "evidence": {
+    "adr-0067-go-docs": {
+      "kind": "vendor-documentation",
+      "source": "ADR 0067 · OpenCode Go documentation",
+      "readOn": "2026-09-06",
+      "note": "ADR 0067's facts about the Go gateway. The gateway pages name no header form for any path; the form is the one ADR 0067 records, and the `/messages` and `/responses` paths wait for a live item to observe it."
+    },
+    "first-live-run": {
+      "kind": "live-test-item",
+      "itemIds": ["S40/first-baseline/1", "S40/first-baseline/2", "S40/first-baseline/3", "S40/first-baseline/4", "S40/first-baseline/5", "S40/first-baseline/6", "S40/first-baseline/7", "S40/first-baseline/8"],
+      "observedOn": "2026-09-07",
+      "note": "The eight test items of the first live Run, `S40/smoke/1` of 2026-09-07, recorded on #307; their responses live in the ADR 0067 Provider Result Cache outside every checkout."
+    },
+    "json-object-live-item": {
+      "kind": "live-test-item",
+      "itemIds": ["S40/reanalyze-range/1"],
+      "observedOn": "2026-09-08",
+      "note": "The one live item that put a format constraint on this gateway (#306): the gateway accepted `response_format: {\"type\":\"json_object\"}` and the unit that had answered empty returned a JSON object. One item is one response; it shows the field is accepted, not that the constraint is honoured on every response."
+    },
+    "go-plan-docs": {
+      "kind": "vendor-documentation",
+      "source": "OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/",
+      "readOn": "2026-09-08",
+      "note": "The Go page for which path the gateway serves each model on, the Zen model table for the exact id it answers to: both facts or no row. Where the pages disagree the Go page decides and the disagreement is recorded."
+    },
+    "go-responses-docs": {
+      "kind": "vendor-documentation",
+      "source": "OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/ · OpenAI Node SDK src/resources/responses/responses.ts@eecbebe294be7e657c99a34eb104a6a4b507335c",
+      "readOn": "2026-09-08",
+      "note": "The same pair, plus the source the Responses shape's own contract came from: the vendor's platform reference refuses an unauthenticated fetch, so the shape is read from the published SDK at an exact commit."
+    },
+    "gateway-no-search-tool": {
+      "kind": "vendor-documentation",
+      "source": "OpenCode Go https://opencode.ai/docs/go/ · Zen https://opencode.ai/docs/zen/ · Tools https://opencode.ai/docs/tools/",
+      "readOn": "2026-09-11",
+      "note": "Neither gateway page prints a capability table or mentions tools, web search or web fetch; the opencode source shows `websearch` / `webfetch` are client-side tools of the opencode agent, not of the gateway wire API (ADR 0080 §3, §5.2)."
+    },
+    "unverified": { "kind": "unverified" }
+  },
+  "routes": [
+    {
+      "routeId": "opencode-go",
+      "displayName": "OpenCode Go（开发者实时）",
+      "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+      "requestShape": "openai-chat-completions",
+      "requestShapeEvidence": "go-plan-docs",
+      "limitPolicy": "account-limit-terminal",
+      "dshAttribution": false,
+      "sessionHeader": true,
+      "maxOutputTokens": null,
+      "routeCapabilities": {
+        "webSearchTool": { "value": "none", "evidence": "gateway-no-search-tool" }
+      },
+      "note": "The developer-live route of Provider Processing v5 (ADR 0065, ADR 0067). On this gateway a 429, a 402 or a body naming the usage limit is the development account's limit, so it ends the Run. The Session header carries the technical Session id for the gateway's prompt cache. Named by the documentation and deliberately absent, because the Zen table states no id for them: LongCat-2.0, Hy4 preview, Hy3, Omen Alpha, MiMo-V2.5, MiMo-V2.5-Pro.",
+      "models": [
+        {
+          "modelId": "deepseek-v4-flash",
+          "displayName": "DeepSeek V4 Flash",
+          "capabilities": {
+            "requestShape": { "value": "openai-chat-completions", "evidence": "adr-0067-go-docs" },
+            "structuredOutput": { "value": "json-object", "evidence": "json-object-live-item" },
+            "answerChannel": { "value": "message-content-string", "evidence": "first-live-run" },
+            "reasoningChannel": { "value": "message-reasoning-content", "evidence": "first-live-run" },
+            "usageAttribution": { "value": "includes-reasoning", "evidence": "first-live-run" }
+          },
+          "context": { "tokens": null, "evidence": "unverified" },
+          "note": "The developer-live model, the one profile that requires a JSON answer. It sends no DeepSeek-specific parameter. Its toolCalling stays none: the Owner's own session observed a client tool call through this gateway (ADR 0080 §5.3), which is not yet a recorded live-test item."
+        },
+        {
+          "modelId": "deepseek-v4-pro",
+          "displayName": "DeepSeek V4 Pro（OpenCode Go）",
+          "capabilities": {
+            "requestShape": { "value": "openai-chat-completions", "evidence": "adr-0067-go-docs" }
+          },
+          "context": { "tokens": null, "evidence": "unverified" },
+          "note": "The same model id as the production route's, behind a different route: a different profile, and no capability carries across."
+        },
+        { "modelId": "glm-5.3-flash", "displayName": "GLM-5.3-Flash（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
+        { "modelId": "glm-5.3", "displayName": "GLM-5.3（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
+        { "modelId": "glm-5.2", "displayName": "GLM-5.2（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
+        { "modelId": "glm-5.1", "displayName": "GLM-5.1（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
+        { "modelId": "kimi-k3", "displayName": "Kimi K3（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
+        { "modelId": "kimi-k2.7-code", "displayName": "Kimi K2.7 Code（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
+        { "modelId": "kimi-k2.6", "displayName": "Kimi K2.6（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
+        { "modelId": "deepseek-v4-flash-vision-exp", "displayName": "DeepSeek V4 Flash Vision Exp（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } }
+      ]
+    },
+    {
+      "routeId": "opencode-go-messages",
+      "displayName": "OpenCode Go · Messages（开发者实时）",
+      "endpoint": "https://opencode.ai/zen/go/v1/messages",
+      "requestShape": "anthropic-messages",
+      "requestShapeEvidence": "go-plan-docs",
+      "limitPolicy": "account-limit-terminal",
+      "dshAttribution": false,
+      "sessionHeader": true,
+      "maxOutputTokens": 32768,
+      "routeCapabilities": {
+        "webSearchTool": { "value": "none", "evidence": "gateway-no-search-tool" }
+      },
+      "note": "The same plan, account and credential slot over the Anthropic-compatible path. The shape requires a per-turn output cap; 32,768 leaves headroom above the largest unit output observed to date (24,225 tokens) and bounds one turn only, the Run Budget Ceiling being the authority over the Run. MiniMax is here on a disagreement: the Go page places it on `/messages`, the Zen table on `chat/completions`; the Go page decides until a live item settles it. Qwen3.8 Flash is absent: the Go page places it here but the Zen table stated no id for it on 2026-09-08.",
+      "models": [
+        { "modelId": "qwen3.7-plus", "displayName": "Qwen3.7 Plus（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
+        { "modelId": "qwen3.6-plus", "displayName": "Qwen3.6 Plus（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
+        { "modelId": "minimax-m3", "displayName": "MiniMax M3（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
+        { "modelId": "minimax-m2.7", "displayName": "MiniMax M2.7（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
+        { "modelId": "minimax-m2.5", "displayName": "MiniMax M2.5（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } }
+      ]
+    },
+    {
+      "routeId": "opencode-go-responses",
+      "displayName": "OpenCode Go · Responses（开发者实时）",
+      "endpoint": "https://opencode.ai/zen/go/v1/responses",
+      "requestShape": "openai-responses",
+      "requestShapeEvidence": "go-responses-docs",
+      "limitPolicy": "account-limit-terminal",
+      "dshAttribution": false,
+      "sessionHeader": true,
+      "maxOutputTokens": null,
+      "routeCapabilities": {
+        "webSearchTool": { "value": "none", "evidence": "gateway-no-search-tool" }
+      },
+      "note": "The same plan over the OpenAI-compatible Responses path. `max_output_tokens` is optional on this shape and nothing has established a per-turn bound for these models, so the route names none. Muse Spark 1.3 / 1.2 are absent: the Go page prints `muse-spark-1.3-contributor` / `muse-spark-1.2-contributor`, the Zen table `muse-spark-1.3` / `muse-spark-1.2`, so no id is stated by both. The Zen table's further `/responses` rows are Zen rather than the Go plan.",
+      "models": [
+        { "modelId": "grok-4.6", "displayName": "Grok 4.6（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } },
+        { "modelId": "gpt-5.6-luna", "displayName": "GPT 5.6 Luna（OpenCode Go）", "context": { "tokens": null, "evidence": "unverified" } }
+      ]
+    }
+  ],
+  "openQuestions": [
+    "Whether any inert model on the three paths accepts a request at all, and which path MiniMax actually answers on, is settled only by a named live test item under ADR 0067."
+  ]
+}

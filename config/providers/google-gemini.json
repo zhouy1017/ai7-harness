@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "providerId": "google-gemini",
+  "displayName": "Gemini 官方",
+  "credential": {
+    "slot": "google-gemini",
+    "developmentCredentialReference": "65691f57-e3e2-49be-8fb0-cfad51dedaf3",
+    "headerForm": "x-goog-api-key",
+    "anthropicVersion": null,
+    "headerEvidence": "gemini-api-key-page"
+  },
+  "evidence": {
+    "gemini-api-key-page": {
+      "kind": "vendor-documentation",
+      "source": "Gemini API documentation, https://ai.google.dev/gemini-api/docs/api-key",
+      "readOn": "2026-09-08",
+      "note": "The endpoint takes the key in `x-goog-api-key`, as ADR 0073 §5 names and the S54d assembly recorded."
+    },
+    "generate-content-contract": {
+      "kind": "vendor-documentation",
+      "source": "https://ai.google.dev/api/generate-content · googleapis/js-genai src/types.ts@3e1d923ef914812c1d209aa2e5461a717d03a081",
+      "readOn": "2026-09-08",
+      "note": "The `:generateContent` request the implemented shape assembles (S54d): `POST .../{model=models/*}:generateContent` with `{ systemInstruction?, contents, generationConfig? }`."
+    },
+    "gemini-models-page": {
+      "kind": "vendor-documentation",
+      "source": "Gemini API documentation, models, ai.google.dev/gemini-api/docs",
+      "readOn": "2026-09-10",
+      "note": "`gemini-3.8-flash`, `gemini-3.1-pro-preview` and `gemini-2.5-pro`, each 1,048,576 context / 65,536 output (ADR 0080 §3)."
+    }
+  },
+  "routes": [
+    {
+      "routeId": "google-gemini",
+      "displayName": "Gemini 官方 · generateContent",
+      "endpoint": "https://generativelanguage.googleapis.com/v1beta/models",
+      "requestShape": "google-generate-content",
+      "requestShapeEvidence": "generate-content-contract",
+      "limitPolicy": "rate-limit-retryable",
+      "dshAttribution": false,
+      "sessionHeader": false,
+      "maxOutputTokens": null,
+      "note": "The endpoint is the models collection: the shape addresses the model in the path and appends `:generateContent`. `generationConfig` is optional, so the route names no cap and sends no such key.",
+      "models": [
+        {
+          "modelId": "gemini-3.8-flash",
+          "displayName": "Gemini 3.8 Flash",
+          "capabilities": { "requestShape": { "value": "google-generate-content", "evidence": "gemini-models-page" } },
+          "context": { "tokens": 1048576, "evidence": "gemini-models-page" }
+        },
+        {
+          "modelId": "gemini-3.1-pro-preview",
+          "displayName": "Gemini 3.1 Pro Preview",
+          "capabilities": { "requestShape": { "value": "google-generate-content", "evidence": "gemini-models-page" } },
+          "context": { "tokens": 1048576, "evidence": "gemini-models-page" }
+        },
+        {
+          "modelId": "gemini-2.5-pro",
+          "displayName": "Gemini 2.5 Pro",
+          "capabilities": { "requestShape": { "value": "google-generate-content", "evidence": "gemini-models-page" } },
+          "context": { "tokens": 1048576, "evidence": "gemini-models-page" }
+        }
+      ]
+    }
+  ],
+  "openQuestions": [
+    "A shape discrepancy, recorded rather than resolved (ADR 0080 §3): the pages read on 2026-09-10 describe an Interactions-style API (`https://generativelanguage.googleapis.com/v1beta/interactions`, `response_format`, typed `steps`), while the implemented `google-generate-content` shape assembles the older `:generateContent` request, which the vendor documentation no longer states. This document binds nothing until a shape review establishes which API the endpoint serves today, and no Gemini binding carries a web-search-enabled rule before it.",
+    "Grounding with Google Search (`google_search`) is documented on the Interactions-style pages; it is declared absent here because the shape it is documented on is not the one this route speaks."
+  ]
+}

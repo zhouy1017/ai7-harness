@@ -7,6 +7,7 @@ import {
   PROTECTED_SECRET_SERVICE_NAME,
   protectedSecretEntryName,
 } from '../../src/shared/protected-secret-identity.js';
+import { CONFIGURED_CREDENTIAL_SLOTS, CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../src/shared/provider-configuration.generated.js';
 
 // The helper is the only reader of the Owner's key file. Nothing here supplies, reads, or writes a
 // real credential: the tests exercise argument parsing, the CI refusal, and the duplicated identity
@@ -42,13 +43,23 @@ function fakeCarrier(password: string | undefined) {
 
 // @ts-expect-error tools/*.mjs carry no declarations; the helper is exercised as the plain module it is.
 const helper = (await import('../../tools/enroll-dev-credential.mjs')) as unknown as Helper;
+// @ts-expect-error tools/*.mjs carry no declarations; the generated slot list is read as the plain module it is.
+const SLOT_LIST = ((await import('../../tools/provider-credential-slots.generated.mjs')) as unknown as {
+  DEVELOPMENT_CREDENTIAL_SLOTS: ReadonlyArray<readonly [string, string]>;
+}).DEVELOPMENT_CREDENTIAL_SLOTS;
 const ABSOLUTE = process.platform === 'win32' ? 'C:\\keys\\opencode.key.txt' : '/keys/opencode.key.txt';
 
 describe('enrol-dev-credential identity', () => {
-  it('duplicates the two keyring identity literals exactly as the owning module declares them', async () => {
+  it('duplicates the keyring service name and reads the generated slot list the TypeScript configuration declares', async () => {
     const source = await readFile(HELPER_PATH, 'utf8');
     expect(source).toContain(`const PROTECTED_SECRET_SERVICE_NAME = '${PROTECTED_SECRET_SERVICE_NAME}';`);
-    expect(source).toContain(`const DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE = '${DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE}';`);
+    expect(source).toContain("import { DEVELOPMENT_CREDENTIAL_SLOTS } from './provider-credential-slots.generated.mjs';");
+    // The plain-ESM slot list and the TypeScript configuration are generated from the same documents
+    // and say the same thing: every configured slot, each under its document's development reference.
+    expect(new Map(SLOT_LIST)).toEqual(new Map(Object.entries(CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES)));
+    expect(SLOT_LIST.map(([slot]) => slot)).toEqual([...CONFIGURED_CREDENTIAL_SLOTS]);
+    expect(new Map(SLOT_LIST).get('opencode-go')).toBe(DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE);
+    for (const [, reference] of SLOT_LIST) expect(CREDENTIAL_REFERENCE_PATTERN.test(reference)).toBe(true);
     // The helper composes the same entry name the store writes and the resolver reads.
     expect(source).toContain('`credential-reference:${credentialReference}`');
     expect(protectedSecretEntryName(DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE))
@@ -65,7 +76,7 @@ describe('enrol-dev-credential identity', () => {
 });
 
 describe('parseEnrollmentArguments', () => {
-  it('accepts exactly the store form and the check form for the one admitted slot', () => {
+  it('accepts exactly the store form and the check form for the developer-live slot', () => {
     expect(helper.parseEnrollmentArguments(['--slot', 'opencode-go', '--from-file', ABSOLUTE])).toEqual({
       mode: 'store', slot: 'opencode-go', credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE, fromFile: ABSOLUTE,
     });
@@ -75,10 +86,18 @@ describe('parseEnrollmentArguments', () => {
     expect(helper.parseEnrollmentArguments(['--check', '--slot', 'opencode-go']).mode).toBe('check');
   });
 
-  it('refuses another slot, a mixed mode, a missing file, a repeat, and an unknown argument', () => {
+  it('admits every configured slot under the reference its document fixes, and only those', () => {
+    for (const [slot, reference] of SLOT_LIST) {
+      expect(helper.parseEnrollmentArguments(['--slot', slot, '--check'])).toEqual({ mode: 'check', slot, credentialReference: reference, fromFile: null });
+    }
+    // A slot no document declares is refused exactly as a malformed argument is.
+    expect(() => helper.parseEnrollmentArguments(['--slot', 'bytedance-doubao', '--check'])).toThrowError(/AI7_ENROLLMENT_INVALID/u);
+  });
+
+  it('refuses an unconfigured slot, a mixed mode, a missing file, a repeat, and an unknown argument', () => {
     for (const argv of [
       [],
-      ['--slot', 'deepseek-api-key', '--from-file', ABSOLUTE],
+      ['--slot', 'unconfigured-provider', '--from-file', ABSOLUTE],
       ['--slot', 'opencode-go'],
       ['--slot', 'opencode-go', '--from-file', ABSOLUTE, '--check'],
       ['--slot', 'opencode-go', '--slot', 'opencode-go', '--from-file', ABSOLUTE],

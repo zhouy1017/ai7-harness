@@ -26,6 +26,7 @@ import type {
   TaskPlanStepProjection,
 } from '../shared/protocol.js';
 import { BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_TASK_GOAL, READERS_REPORT_TEMPLATE_LABELS, SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL } from '../shared/protocol.js';
+import { CONFIGURED_PROVIDER_LABELS } from '../shared/provider-configuration.generated.js';
 import type { ClarificationFacts } from './analysis/clarifications.js';
 import { namedNonEffects } from './analysis/baseline-analysis-store.js';
 import type { ManifestBlockInput } from './analysis/coverage-manifest.js';
@@ -107,12 +108,8 @@ export const ACCOUNT_LIMIT_STATE = { key: 'account-limit', label: '模型服务�
 const EDITORIAL_NOT_DO = ['不会直接修改稿件', '不导出或发布', '不存里程碑版本'] as const;
 
 const ROLE_LABELS: Readonly<Record<string, string>> = { 'Main Editorial Role': '主编辑角色' };
-const PROVIDER_LABELS: Readonly<Record<string, string>> = {
-  'deepseek-open-platform': 'DeepSeek 开放平台',
-  'opencode-go': 'OpenCode Go',
-  'opencode-go-messages': 'OpenCode Go',
-  'opencode-go-responses': 'OpenCode Go',
-};
+/** The provider's name beside a model id, by route: the provider documents' display names (ADR 0073 §2), never a hand-written switch. */
+const PROVIDER_LABELS: Readonly<Record<string, string>> = CONFIGURED_PROVIDER_LABELS;
 const OUTBOUND_LABELS: Readonly<Record<string, string>> = { 'public-or-synthetic': '公开或合成材料' };
 
 /** A count with its thousands grouped, the same text on every host: the projection never reads a locale. */

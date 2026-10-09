@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "providerId": "baidu-qianfan",
+  "displayName": "百度文心（千帆）",
+  "credential": {
+    "slot": "baidu-qianfan",
+    "developmentCredentialReference": "9d31099e-30cc-4cf0-b9cd-90887462f653",
+    "headerForm": "authorization-bearer",
+    "anthropicVersion": null,
+    "headerEvidence": "qianfan-docs"
+  },
+  "evidence": {
+    "qianfan-docs": {
+      "kind": "vendor-documentation",
+      "source": "Baidu AI Cloud Qianfan documentation, cloud.baidu.com/doc/qianfan-*",
+      "readOn": "2026-09-10",
+      "note": "`https://qianfan.baidubce.com/v2` (`/v2/chat/completions`), `Authorization: Bearer bce-v3/…`; 「同时接口协议兼容OPENAI的SDK」; `ERNIE-5.1` / `ERNIE-5.0` / `ERNIE-4.5-Turbo-128K` at 128k context (ADR 0080 §3, §5.1)."
+    },
+    "qianfan-search-docs": {
+      "kind": "vendor-documentation",
+      "source": "Baidu AI Cloud Qianfan documentation, `web_search` on `/v2/chat/completions`, cloud.baidu.com/doc/qianfan-*",
+      "readOn": "2026-09-10",
+      "note": "A `web_search` object — 「搜索增强的选项」, default off — with `enable`, `enable_citation`, `enable_trace`, `search_mode` and `search_number`."
+    }
+  },
+  "routes": [
+    {
+      "routeId": "baidu-qianfan",
+      "displayName": "百度千帆 · Chat Completions",
+      "endpoint": "https://qianfan.baidubce.com/v2/chat/completions",
+      "requestShape": "openai-chat-completions",
+      "requestShapeEvidence": "qianfan-docs",
+      "limitPolicy": "rate-limit-retryable",
+      "dshAttribution": false,
+      "sessionHeader": false,
+      "maxOutputTokens": null,
+      "routeCapabilities": {
+        "webSearchTool": { "value": "provider-tool", "evidence": "qianfan-search-docs" }
+      },
+      "note": "The model ids are written as the reading printed them; the resold `DeepSeek-V4-Pro` is not declared, because a resold model is the other provider's.",
+      "models": [
+        { "modelId": "ERNIE-5.1", "displayName": "ERNIE 5.1", "context": { "tokens": 128000, "evidence": "qianfan-docs" } },
+        { "modelId": "ERNIE-5.0", "displayName": "ERNIE 5.0", "context": { "tokens": 128000, "evidence": "qianfan-docs" } },
+        { "modelId": "ERNIE-4.5-Turbo-128K", "displayName": "ERNIE 4.5 Turbo 128K", "context": { "tokens": 128000, "evidence": "qianfan-docs" } }
+      ]
+    }
+  ],
+  "openQuestions": [
+    "Whether the v2 endpoint answers to the ids exactly as printed (case included) is settled by the first live item, not assumed.",
+    "Structured output (`json_object`, `json_schema`; not ERNIE X1 Turbo) is documented but stays absent until a live item establishes it."
+  ]
+}

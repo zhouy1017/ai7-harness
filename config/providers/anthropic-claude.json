@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "providerId": "anthropic-claude",
+  "displayName": "Claude 官方",
+  "credential": {
+    "slot": "anthropic-claude",
+    "developmentCredentialReference": "a7eb2fde-89f4-4f45-9f24-3e8d0719201e",
+    "headerForm": "x-api-key",
+    "anthropicVersion": "2023-06-01",
+    "headerEvidence": "claude-platform-docs"
+  },
+  "evidence": {
+    "claude-platform-docs": {
+      "kind": "vendor-documentation",
+      "source": "Claude Platform documentation, platform.claude.com (docs.claude.com redirects there) — Messages API, models overview",
+      "readOn": "2026-09-10",
+      "note": "Endpoint `https://api.anthropic.com/v1/messages`, `x-api-key` with `anthropic-version: 2023-06-01`; models `claude-opus-5`, `claude-fable-5-1`, `claude-sonnet-5` (1M context / 128K output) and `claude-haiku-4-5` (200K / 64K) (ADR 0080 §3)."
+    },
+    "claude-web-search-tool": {
+      "kind": "vendor-documentation",
+      "source": "Claude Platform documentation, web search tool, platform.claude.com",
+      "readOn": "2026-09-10",
+      "note": "A server-side tool executed on Anthropic's infrastructure: `web_search_20250305`, `web_search_20260209`, `web_search_20260318`, $10 per 1,000 searches; the page names no per-model support list (ADR 0080 §3)."
+    }
+  },
+  "routes": [
+    {
+      "routeId": "anthropic-claude",
+      "displayName": "Claude 官方 · Messages",
+      "endpoint": "https://api.anthropic.com/v1/messages",
+      "requestShape": "anthropic-messages",
+      "requestShapeEvidence": "claude-platform-docs",
+      "limitPolicy": "rate-limit-retryable",
+      "dshAttribution": false,
+      "sessionHeader": false,
+      "maxOutputTokens": 32768,
+      "routeCapabilities": {
+        "webSearchTool": { "value": "provider-tool", "evidence": "claude-web-search-tool" }
+      },
+      "note": "The shape requires a per-turn output cap; the route declares the same 32,768 as the OpenCode Go `/messages` route for the same reason — headroom above the largest unit output observed (24,225 tokens), one turn only — and below every listed model's output limit.",
+      "models": [
+        { "modelId": "claude-opus-5", "displayName": "Claude Opus 5", "context": { "tokens": 1000000, "evidence": "claude-platform-docs" } },
+        { "modelId": "claude-fable-5-1", "displayName": "Claude Fable 5.1", "context": { "tokens": 1000000, "evidence": "claude-platform-docs" } },
+        { "modelId": "claude-sonnet-5", "displayName": "Claude Sonnet 5", "context": { "tokens": 1000000, "evidence": "claude-platform-docs" } },
+        { "modelId": "claude-haiku-4-5", "displayName": "Claude Haiku 4.5", "context": { "tokens": 200000, "evidence": "claude-platform-docs" } }
+      ]
+    }
+  ],
+  "openQuestions": [
+    "The Claude 5 family rejects `thinking.type: \"enabled\"` and takes `thinking: {type: \"adaptive\"}` with `output_config.effort`; structured outputs are GA through `output_config.format`. Neither spelling is implemented by the adapter, so both stay absent until a slice implements and a live item establishes them."
+  ]
+}
