@@ -26,7 +26,7 @@ import {
   ANALYSIS_LEDGER_SCHEMA_SQL,
   ANALYSIS_LEDGER_TRIGGER_SQL,
   INITIAL_EVALUATION_SCHEMA_VERSION,
-  WRITING_TASK_SCHEMA_VERSION,
+  BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
   DIALOGUE_SCHEMA_VERSION,
   SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
@@ -373,7 +373,7 @@ describe('审稿意见 over the real store on exact sample1', () => {
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
       expect(rows(after)).toBe(before!);
       for (const table of KIND_COUPLED_ANALYSIS_RELATIONS) {
         expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(ANALYSIS_LEDGER_SCHEMA_SQL[table]);
@@ -386,13 +386,14 @@ describe('审稿意见 over the real store on exact sample1', () => {
 
   // A store stamped 59, 60 or 61 holds the four relations revisions 30 to 35 widened in their widened text: revision 59 came long
   // after. One that holds an older text was not written by AI7, so it is refused before any widening, not quietly widened
-  // (Issue #672) — whichever of the four it is.
+  // (Issue #672) — whichever of the four it is. The Run Authorizations are refused by revision 66's widening (Issue #95, S39),
+  // which from revision 59 on admits only the text revisions 31 to 65 carried, before the revision-59 check reads them.
   it.each([
-    [INITIAL_EVALUATION_SCHEMA_VERSION, 'analysis_run_authorizations', ANALYSIS_LEDGER_REVISION_30_SQL.analysis_run_authorizations],
-    [INITIAL_EVALUATION_SCHEMA_VERSION, 'analysis_plan_revisions', ANALYSIS_LEDGER_REVISION_33_SQL.analysis_plan_revisions],
-    [DIALOGUE_SCHEMA_VERSION, 'analysis_run_states', ANALYSIS_LEDGER_REVISION_29_SQL.analysis_run_states],
-    [SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION, 'analysis_task_outcomes', ANALYSIS_LEDGER_REVISION_31_SQL.analysis_task_outcomes],
-  ] as const)('refuses a store stamped %i whose %s holds an older text, rather than widening it', async (version, table, olderSql) => {
+    [INITIAL_EVALUATION_SCHEMA_VERSION, 'analysis_run_authorizations', ANALYSIS_LEDGER_REVISION_30_SQL.analysis_run_authorizations, '分析任务账本表'],
+    [INITIAL_EVALUATION_SCHEMA_VERSION, 'analysis_plan_revisions', ANALYSIS_LEDGER_REVISION_33_SQL.analysis_plan_revisions, '分析任务账本表（修订版 59）'],
+    [DIALOGUE_SCHEMA_VERSION, 'analysis_run_states', ANALYSIS_LEDGER_REVISION_29_SQL.analysis_run_states, '分析任务账本表（修订版 59）'],
+    [SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION, 'analysis_task_outcomes', ANALYSIS_LEDGER_REVISION_31_SQL.analysis_task_outcomes, '分析任务账本表（修订版 59）'],
+  ] as const)('refuses a store stamped %i whose %s holds an older text, rather than widening it', async (version, table, olderSql, label) => {
     const first = await openStore();
     try {
       first.markCleanShutdown();
@@ -408,7 +409,7 @@ describe('审稿意见 over the real store on exact sample1', () => {
     } finally {
       plant.close();
     }
-    await expect(openStore()).rejects.toThrowError(`分析任务账本表（修订版 59） ${table} 结构不兼容。`);
+    await expect(openStore()).rejects.toThrowError(`${label} ${table} 结构不兼容。`);
     const after = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
     try {
       // Nothing moved: the version stands and the relation keeps the text it was found in.

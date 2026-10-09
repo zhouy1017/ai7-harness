@@ -409,9 +409,17 @@ export const EVALUATION_REWRITE_SCHEMA_VERSION = 64;
  * kind — rebuilt exactly as revisions 20, 24, 59, 62 and 64 rebuilt them, every row copied byte for byte — and two additive,
  * append-only relations owned by `writing-tasks.ts` and created before this version is stamped record which house type, words
  * of the editor and reference set each writing Task drafts from, and which document each drafted result became. It follows
- * revision 64 (Issue #429, S81b2). No existing row changes. This is the terminal version.
+ * revision 64 (Issue #429, S81b2). No existing row changes.
  */
 export const WRITING_TASK_SCHEMA_VERSION = 65;
+/**
+ * The 后台分析登记 revision (Issue #95, S39; ADR 0048; V2-UX-ANALYSIS-016 to 021): three additive, append-only relations owned by
+ * `background-analysis-enrollments.ts` and created before this version is stamped — each Book's Background Analysis Enrollment,
+ * its versions and its states — and the Run Authorizations' origin widened to admit `background-analysis-enrollment`, rebuilt
+ * exactly as revision 31 widened it, every row copied byte for byte. It follows revision 65 (Issue #432, S84a). No existing row
+ * changes. This is the terminal version.
+ */
+export const BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION = 66;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
@@ -909,6 +917,23 @@ export const ANALYSIS_LEDGER_REVISION_30_SQL = {
 } as const;
 
 /**
+ * The one relation revision 66 widens, exactly as revisions 31 to 65 carried it — a Run was authorized from its plan or by
+ * 快速开始 before 后台分析登记 (Issue #95, S39). Kept to recognise a store that still holds it, which the widening rebuilds once.
+ */
+export const ANALYSIS_LEDGER_REVISION_65_SQL = {
+  analysis_run_authorizations: `CREATE TABLE analysis_run_authorizations (
+    authorization_id TEXT PRIMARY KEY,
+    task_intent_id TEXT NOT NULL UNIQUE REFERENCES analysis_task_intents(task_intent_id),
+    plan_envelope_sha256 TEXT NOT NULL CHECK(length(plan_envelope_sha256) = 64),
+    origin TEXT NOT NULL CHECK(origin IN ('standard-direct', 'default-execution-rule')),
+    authority TEXT NOT NULL CHECK(authority IN ('standard-direct-dispatch', 'record-only-no-dispatch')),
+    authorized_at TEXT NOT NULL,
+    canonical_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)
+  ) STRICT`,
+} as const;
+
+/**
  * The Run states as revision 32 left them for 取消任务 (Issue #422), before revision 33 widened them for 暂停 and
  * 续行 (S76b). Kept to recognise a store that still holds them, which the widening rebuilds once.
  */
@@ -1157,7 +1182,7 @@ export const ANALYSIS_LEDGER_SCHEMA_SQL = {
     authorization_id TEXT PRIMARY KEY,
     task_intent_id TEXT NOT NULL UNIQUE REFERENCES analysis_task_intents(task_intent_id),
     plan_envelope_sha256 TEXT NOT NULL CHECK(length(plan_envelope_sha256) = 64),
-    origin TEXT NOT NULL CHECK(origin IN ('standard-direct', 'default-execution-rule')),
+    origin TEXT NOT NULL CHECK(origin IN ('standard-direct', 'default-execution-rule', 'background-analysis-enrollment')),
     authority TEXT NOT NULL CHECK(authority IN ('standard-direct-dispatch', 'record-only-no-dispatch')),
     authorized_at TEXT NOT NULL,
     canonical_json TEXT NOT NULL,
@@ -1683,7 +1708,7 @@ function validateRevision16AnalysisLedgerSchema(db: DatabaseSync): void {
 
 export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
   const version = asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
-  requireTask(version === WRITING_TASK_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
+  requireTask(version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
   validateJ03TaskAuthorizationSchema(db);
   validateAnalysisLedgerSchema(db);
 }
@@ -1830,7 +1855,7 @@ function widenAnalysisRelation(
   table: 'analysis_run_states' | 'analysis_run_authorizations' | 'analysis_task_outcomes' | 'analysis_plan_revisions',
   priorSqls: readonly string[],
   columns: string,
-  revision: 30 | 31 | 32 | 33 | 34 | 35,
+  revision: 30 | 31 | 32 | 33 | 34 | 35 | 66,
 ): void {
   const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as SqlRow | undefined;
   if (row === undefined) return;
@@ -1933,7 +1958,7 @@ function migrateAnalysisLedgerToRevision17(db: DatabaseSync, from: typeof J04_BA
         db.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_delete`]!);
       }
       seedInitialPlanVersions(db);
-      db.exec(`PRAGMA user_version = ${WRITING_TASK_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
       db.exec('COMMIT');
@@ -2021,6 +2046,15 @@ function migrateAnalysisLedgerToRevision64(db: DatabaseSync): void {
  * Revision 64 → 65 (Issue #432, S84a): the three kind-coupled relations as revision 64 left them are rebuilt exactly as before,
  * for the writing kind; no existing row changes, and nothing else is touched.
  */
+/**
+ * Revision 65 → 66 (Issue #95, S39). Revision 66 adds `background-analysis-enrollments.ts`'s relations, which `EditorialStore.open`
+ * creates before this runs, and widens the Run Authorizations' origin, which `initializeTaskAuthorizationSchema` has just done:
+ * only the version moves here.
+ */
+function advanceToTerminalRevision(db: DatabaseSync): void {
+  migrateInTransaction(db, `PRAGMA user_version = ${BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION};`, 'Terminal version');
+}
+
 function migrateAnalysisLedgerToRevision65(db: DatabaseSync): void {
   rebuildKindCoupledAnalysisRelations(db, 65);
 }
@@ -2047,7 +2081,7 @@ function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24
                   mode, predecessor_revision_id, selected_start_position, selected_end_position
            FROM temp.migrate_analysis_task_intents ORDER BY migrate_rowid`);
       rebuildResultSetRelations(db);
-      db.exec(`PRAGMA user_version = ${WRITING_TASK_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
       db.exec('COMMIT');
@@ -2109,10 +2143,24 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION || version === DATABASE_MERGE_SCHEMA_VERSION ||
       version === INITIAL_EVALUATION_SCHEMA_VERSION || version === DIALOGUE_SCHEMA_VERSION || version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       version === READERS_REPORT_SCHEMA_VERSION || version === CAPTURED_PROCEDURE_SCHEMA_VERSION || version === EVALUATION_REWRITE_SCHEMA_VERSION ||
-      version === WRITING_TASK_SCHEMA_VERSION,
+      version === WRITING_TASK_SCHEMA_VERSION || version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
-  if (version === WRITING_TASK_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  // Revision 66 (Issue #95, S39) widens the Run Authorizations' origin for 后台分析登记 first. A store at revision 59 to 65 holds
+  // exactly the text revisions 31 to 65 carried — revision 59 and after are checked exactly, so a store stamped 59 or later that
+  // holds an older text is refused here rather than widened (Issue #672); an older store is widened from either prior text below.
+  if (version >= INITIAL_EVALUATION_SCHEMA_VERSION) {
+    widenAnalysisRelation(db, 'analysis_run_authorizations', [ANALYSIS_LEDGER_REVISION_65_SQL.analysis_run_authorizations],
+      'authorization_id, task_intent_id, plan_envelope_sha256, origin, authority, authorized_at, canonical_json, sha256', 66);
+  }
+  if (version === WRITING_TASK_SCHEMA_VERSION) {
+    // Revision 66 adds no other task-authorization or analysis relation: the widened revision-65 ledger is the terminal one,
+    // validated as exactly that, and only the version moves.
+    validateJ03TaskAuthorizationSchema(db);
+    validateAnalysisLedgerSchema(db);
+    return advanceToTerminalRevision(db);
+  }
   if (version === EVALUATION_REWRITE_SCHEMA_VERSION) {
     // A revision-64 store carries the ledger revision 64 left, validated as exactly that, and revision 65's rebuild of the three
     // kind-coupled relations brings it to the terminal shape and stamps the terminal version.
@@ -2148,8 +2196,10 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
     [ANALYSIS_LEDGER_REVISION_34_SQL.analysis_run_states, ANALYSIS_LEDGER_REVISION_32_SQL.analysis_run_states,
       ANALYSIS_LEDGER_REVISION_31_SQL.analysis_run_states, ANALYSIS_LEDGER_REVISION_29_SQL.analysis_run_states],
     'run_record_id, sequence, state, recorded_at, canonical_json, sha256', 35);
-  widenAnalysisRelation(db, 'analysis_run_authorizations', [ANALYSIS_LEDGER_REVISION_30_SQL.analysis_run_authorizations],
-    'authorization_id, task_intent_id, plan_envelope_sha256, origin, authority, authorized_at, canonical_json, sha256', 31);
+  // Revision 66 (Issue #95, S39) widens the origin once more, for 后台分析登记, from revision 31's text or revision 30's.
+  widenAnalysisRelation(db, 'analysis_run_authorizations',
+    [ANALYSIS_LEDGER_REVISION_65_SQL.analysis_run_authorizations, ANALYSIS_LEDGER_REVISION_30_SQL.analysis_run_authorizations],
+    'authorization_id, task_intent_id, plan_envelope_sha256, origin, authority, authorized_at, canonical_json, sha256', 66);
   widenAnalysisRelation(db, 'analysis_task_outcomes', [ANALYSIS_LEDGER_REVISION_31_SQL.analysis_task_outcomes],
     'outcome_id, task_intent_id, run_record_id, classification, result_set_revision_id, recorded_at, canonical_json, sha256', 32);
   // Revision 34 (Issue #419): the Plan Revisions gain `plan-edit`. A store before revision 17 has none yet, and
@@ -2211,7 +2261,7 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   }
   const analysisStatements = `${Object.values(ANALYSIS_LEDGER_SCHEMA_SQL).join(';\n')};
       ${Object.values(ANALYSIS_LEDGER_TRIGGER_SQL).join(';\n')};
-      PRAGMA user_version = ${WRITING_TASK_SCHEMA_VERSION};`;
+      PRAGMA user_version = ${BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION};`;
   if (version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION) {
     validateJ03TaskAuthorizationSchema(db);
     return migrateInTransaction(db, analysisStatements, 'Analysis ledger');

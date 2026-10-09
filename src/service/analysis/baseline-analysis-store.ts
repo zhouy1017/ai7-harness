@@ -576,24 +576,41 @@ function asNumber(value: unknown): number {
 }
 
 /**
- * Who started the Task, as its Run Authorization records it (Issue #421): `standard-direct` from its plan, or
- * `default-execution-rule` — 快速开始 under a 默认执行规则 — with the rule version the authorization names.
+ * Who started the Task, as its Run Authorization records it (Issue #421): `standard-direct` from its plan,
+ * `default-execution-rule` — 快速开始 under a 默认执行规则 — with the rule version the authorization names, or
+ * `background-analysis-enrollment` — AI7 by itself under the Book's 后台分析登记 (Issue #95, S39) — with the enrollment version.
  */
-function authorizationOrigin(row: SqlRow): { origin: 'standard-direct' | 'default-execution-rule'; ruleVersionId: string | null } {
+function authorizationOrigin(row: SqlRow): {
+  origin: 'standard-direct' | 'default-execution-rule' | 'background-analysis-enrollment';
+  ruleVersionId: string | null;
+  enrollmentVersionId: string | null;
+} {
   const origin = asString(row.origin);
-  if (origin === 'standard-direct') return { origin, ruleVersionId: null };
+  if (origin === 'standard-direct') return { origin, ruleVersionId: null, enrollmentVersionId: null };
   const record = parseCanonicalJson(asString(row.canonical_json));
+  if (origin === 'background-analysis-enrollment') {
+    requireAnalysis(isRecord(record) && record.origin === origin && typeof record.enrollmentVersionId === 'string' &&
+      UUID_PATTERN.test(record.enrollmentVersionId) && record.ruleVersionId === undefined,
+    'ANALYSIS_RECORD_INVALID', '运行授权的来源记录无效。');
+    return { origin, ruleVersionId: null, enrollmentVersionId: record.enrollmentVersionId };
+  }
   requireAnalysis(origin === 'default-execution-rule' && isRecord(record) && record.origin === origin &&
     typeof record.ruleVersionId === 'string' && UUID_PATTERN.test(record.ruleVersionId),
   'ANALYSIS_RECORD_INVALID', '运行授权的来源记录无效。');
-  return { origin, ruleVersionId: record.ruleVersionId };
+  return { origin, ruleVersionId: record.ruleVersionId, enrollmentVersionId: null };
 }
 
-/** How a Run is authorized: from its plan, or by 快速开始 under one version of a 默认执行规则 (Issue #421). */
+/**
+ * How a Run is authorized: from its plan, by 快速开始 under one version of a 默认执行规则 (Issue #421), or by AI7 itself under one
+ * version of the Book's 后台分析登记 (Issue #95, S39).
+ */
 export type AnalysisAuthorizationOrigin =
   | { readonly kind: 'standard-direct' }
-  | { readonly kind: 'default-execution-rule'; readonly ruleVersionId: string };
+  | { readonly kind: 'default-execution-rule'; readonly ruleVersionId: string }
+  | { readonly kind: 'background-analysis-enrollment'; readonly enrollmentVersionId: string };
 const STANDARD_DIRECT: AnalysisAuthorizationOrigin = { kind: 'standard-direct' };
+/** What a Run AI7 started under the Book's 后台分析登记 records when it is authorized (Issue #95, S39). */
+export const BACKGROUND_AUTHORIZED_DETAIL = '后台分析按登记记录了运行授权。';
 
 function transact<T>(db: DatabaseSync, body: () => T): T {
   db.exec('BEGIN IMMEDIATE');
@@ -1519,6 +1536,27 @@ export class BaselineAnalysisStore {
    * developer-live (Provider Processing v5 to v7: `matchingActiveDefaultExecutionRuleAllowed: false`), so this is
    * read only outside it, where the ceiling depends on no unit count.
    */
+  /**
+   * Where the Book's primary manuscript stands now (Issue #95, S39): its revision, journal and working digest — what a
+   * `prospective` Background Analysis Enrollment compares with the text it was made against — and when its last confirmed edit
+   * since that revision was made durable, which the Enrollment's quiet period counts from; `null` when none was.
+   */
+  workingPointOf(bookId: string): { revisionId: string; journalSequence: number; workingDigest: string; lastEditAt: string | null } {
+    requireAnalysis(UUID_PATTERN.test(bookId), 'ANALYSIS_BOOK_INVALID', '图书标识无效。');
+    const manuscript = this.#db.prepare("SELECT manuscript_id FROM manuscripts WHERE book_id = ? AND role = 'primary'").get(bookId) as SqlRow | undefined;
+    requireAnalysis(manuscript !== undefined, 'ANALYSIS_RECORD_INVALID', '无法读取当前稿件工作状态。');
+    const head = this.#workingHead(asString(manuscript.manuscript_id), bookId);
+    const last = this.#db.prepare(
+      'SELECT max(durable_at) last FROM edit_journal_entries WHERE branch_id = ? AND base_revision_id = ? AND sequence <= ?',
+    ).get(head.branchId, head.currentRevisionId, head.currentJournalSequence) as SqlRow;
+    return {
+      revisionId: head.currentRevisionId,
+      journalSequence: head.currentJournalSequence,
+      workingDigest: head.currentWorkingDigest,
+      lastEditAt: head.currentJournalSequence === 0 || last.last === null ? null : asString(last.last),
+    };
+  }
+
   currentRuleFacts(bookId: string, mode: AnalysisTaskMode): MaterialPlanInputsProjection {
     requireAnalysis(UUID_PATTERN.test(bookId) && this.#launch.live === null && !this.#definition.mode(mode).rangeBound,
       'ANALYSIS_RULE_FACTS_INVALID', '无法读取默认执行规则所需的当前事实。');
@@ -2861,7 +2899,7 @@ export class BaselineAnalysisStore {
     origin: AnalysisAuthorizationOrigin = STANDARD_DIRECT,
   ): { projection: AnalysisProjection; dispatchRunRecordId: string | null } {
     requireAnalysis(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest) &&
-      (origin.kind === 'standard-direct' || (start === 'now' && UUID_PATTERN.test(origin.ruleVersionId))),
+      (origin.kind === 'standard-direct' || (start === 'now' && UUID_PATTERN.test(origin.kind === 'default-execution-rule' ? origin.ruleVersionId : origin.enrollmentVersionId))),
     'ANALYSIS_AUTHORIZATION_INVALID', '任务运行授权参数无效。');
     const prepared = this.inspect(bookId);
     requireAnalysis(prepared.taskIntent?.taskIntentId === taskIntentId && prepared.planEnvelope !== null && prepared.planVersion !== null,
@@ -2895,6 +2933,7 @@ export class BaselineAnalysisStore {
       taskIntentId,
       authority,
       ...(origin.kind === 'default-execution-rule' ? { ruleVersionId: origin.ruleVersionId } : {}),
+      ...(origin.kind === 'background-analysis-enrollment' ? { enrollmentVersionId: origin.enrollmentVersionId } : {}),
     });
     const run = canonicalRecord({ runRecordId, authorizationId, taskIntentId, recordedAt: instant });
     transact(this.#db, () => {
@@ -2907,7 +2946,9 @@ export class BaselineAnalysisStore {
       ).run(runRecordId, taskIntentId, authorizationId, instant, run.json, run.digest);
       this.#insertRunState(runRecordId, 1, 'authorized', origin.kind === 'standard-direct'
         ? { detail: '标准直接运行授权已记录。' }
-        : { detail: '快速开始按默认执行规则记录了运行授权。', ruleVersionId: origin.ruleVersionId }, instant);
+        : origin.kind === 'default-execution-rule'
+          ? { detail: '快速开始按默认执行规则记录了运行授权。', ruleVersionId: origin.ruleVersionId }
+          : { detail: BACKGROUND_AUTHORIZED_DETAIL, enrollmentVersionId: origin.enrollmentVersionId }, instant);
       if (!dispatchAllowed) {
         const reasons = blockedReasons(this.#launch.live);
         this.#insertRunState(runRecordId, 2, 'blocked-before-dispatch', { detail: reasons.join(' '), reasons }, instant);

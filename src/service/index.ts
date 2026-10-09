@@ -42,6 +42,7 @@ import { REPLACEMENT_WAITING_MESSAGE, replacementBlockedBy, takenWhileReplacemen
 import type { BaselineAnalysisExecutionOwner } from './analysis/execution.js';
 import type { LaunchBinding } from './analysis/baseline-analysis-store.js';
 import type { ReviewRunDriver } from './review/review-run-driver.js';
+import type { BackgroundAnalysisDispatcher } from './background-analysis.js';
 
 async function* readFrames(): AsyncGenerator<Uint8Array> {
   const header = Buffer.allocUnsafe(4);
@@ -169,6 +170,7 @@ async function dispatch(
   importControl: J01ImportControl | undefined,
   launchPolicy: LaunchPolicyProjection,
   connectivity: ConnectivityContext,
+  background: BackgroundAnalysisDispatcher,
 ): Promise<ServiceSuccessResponse> {
   const analysisProgress = (runRecordId: string) => analysisExecution.progressFor(runRecordId);
   // 替换本机全部数据 waits for AI7's next start (Issue #434 review): until then nothing is written, so no change made meanwhile
@@ -833,6 +835,17 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.recordAnalysisFeedback(request.input) };
     case 'deactivateDefaultExecutionRule':
       return { id: request.id, ok: true, op: request.op, result: store.deactivateDefaultExecutionRule(request.input.ruleId) };
+    // 后台分析登记 (Issue #95, plan slice S39; ADR 0048): read with what it would do now; `登记` and `撤销登记` are the editor's
+    // two decisions, and the dispatcher looks at once after either, so a backfill starts without waiting for the next tick.
+    case 'inspectBackgroundAnalysisEnrollment':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectBackgroundAnalysisEnrollment(request.input.bookId, background.runtime()) };
+    case 'enrollBackgroundAnalysis': {
+      const result = store.enrollBackgroundAnalysis(request.input.bookId, request.input.disclosureDigest, request.input.startingPoint, background.runtime());
+      background.nudge();
+      return { id: request.id, ok: true, op: request.op, result };
+    }
+    case 'revokeBackgroundAnalysisEnrollment':
+      return { id: request.id, ok: true, op: request.op, result: store.revokeBackgroundAnalysisEnrollment(request.input.bookId, request.input.enrollmentId, background.runtime()) };
     // 审阅 (Issue #417, plan slice S69). Every answer that shows a Run reads the one owner's progress, so
     // a category executing now carries its Measured Run Progress.
     case 'inspectReviewWorkspace':
@@ -1491,6 +1504,7 @@ async function run(): Promise<void> {
     { createKeyringSecretResolver },
     { ReviewRunDriver },
     { DialogueExecutionOwner },
+    { BackgroundAnalysisDispatcher: BackgroundAnalysisDispatcherClass },
   ] =
     await Promise.all([
       import('./store.js'),
@@ -1502,6 +1516,7 @@ async function run(): Promise<void> {
       import('./provider/keyring-secret-resolver.js'),
       import('./review/review-run-driver.js'),
       import('./dialogue/dialogue-execution.js'),
+      import('./background-analysis.js'),
     ]);
   StoreErrorClass = StoreError;
   let stopping = false;
@@ -1525,6 +1540,7 @@ async function run(): Promise<void> {
   let dialogues: DialogueExecutionOwner | undefined;
   let preflightTimer: NodeJS.Timeout | undefined;
   let backupTimer: NodeJS.Timeout | undefined;
+  let background: BackgroundAnalysisDispatcher | undefined;
   try {
     const codeRoot = fileURLToPath(new URL('../', import.meta.url));
     const launchPolicy = await resolveSourceCheckoutLaunchPolicy(codeRoot, launchForm.trustedOperationalScope);
@@ -1701,6 +1717,11 @@ async function run(): Promise<void> {
     void openStore.runScheduledBackupIfDue().catch(() => undefined);
     backupTimer = setInterval(() => void openStore.runScheduledBackupIfDue().catch(() => undefined), BACKUP_CHECK_INTERVAL_MS);
     backupTimer.unref();
+    // 后台分析登记 (Issue #95, S39; ADR 0048): the one standing origin of a Run AI7 starts by itself. It looks once the service
+    // is active and then every few seconds; a Book it cannot start now is looked at again then, so nothing it would start
+    // waits in a queue of its own — and after a restart it starts only what an Enrollment in force matches anew.
+    background = new BackgroundAnalysisDispatcherClass({ store: openStore, execution: owner, launchPolicy });
+    background.start();
     reachServiceStartup('serving');
     for await (const frame of readFrames()) {
       let request: ServiceRequest;
@@ -1713,7 +1734,7 @@ async function run(): Promise<void> {
       }
       let response: ServiceResponse;
       try {
-        response = await dispatch(store, harness, jobs, analysisExecution, reviewRuns, dialogues, request, importControl, launchPolicy, connectivity);
+        response = await dispatch(store, harness, jobs, analysisExecution, reviewRuns, dialogues, request, importControl, launchPolicy, connectivity, background);
       } catch (error) {
         if (error instanceof StoreFatalError) {
           stop();
@@ -1756,6 +1777,8 @@ async function run(): Promise<void> {
       const backupsStopped = store?.stopScheduledBackups();
       // A database export under way stops as 取消导出 stops it, and leaves no package it was writing (Issue #434 review).
       const exportsStopped = store?.stopDatabaseExports();
+      // The dispatcher starts nothing more: a preparation it has under way stops at its next step.
+      await background?.dispose();
       await jobs?.dispose();
       // A dialogue answering is interrupted and settles 回答中断 while the store is still open (Issue #52, S17a).
       await dialogues?.dispose();

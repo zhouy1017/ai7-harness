@@ -3,7 +3,7 @@ import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSyn
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
-import { CAPTURED_PROCEDURE_SCOPE_SLOTS, CAPTURED_PROCEDURE_STATE_LABELS, MAX_CAPTURED_PROCEDURE_RUNS_SHOWN, MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_BOOK_CHOICES, MAX_LEARNING_AUDIT_PAGE, MAX_LEARNING_AUDIT_SERIES_CHOICES, MAX_LEARNING_LINEAGE_DECISIONS, MAX_LEARNING_REMEDIATION_ITEMS, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
+import { BASELINE_ANALYSIS_MODE_LABELS, CAPTURED_PROCEDURE_SCOPE_SLOTS, CAPTURED_PROCEDURE_STATE_LABELS, MAX_CAPTURED_PROCEDURE_RUNS_SHOWN, MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_BOOK_CHOICES, MAX_LEARNING_AUDIT_PAGE, MAX_LEARNING_AUDIT_SERIES_CHOICES, MAX_LEARNING_LINEAGE_DECISIONS, MAX_LEARNING_REMEDIATION_ITEMS, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
   InspectSeriesKnowledgeReviewInput,
   ServiceOperationMap,
@@ -253,6 +253,9 @@ import type {
   MaterialPlanInputsProjection,
   DefaultExecutionRuleProjection,
   DefaultExecutionRuleReference,
+  BackgroundAnalysisEnrollmentProjection,
+  BackgroundAnalysisStartingPoint,
+  DefaultExecutionRuleBinding,
   DefaultExecutionRulesProjection,
   TaskPlanDefaultRuleProjection,
   FactualReviewGoal,
@@ -502,6 +505,30 @@ import {
   type DefaultExecutionRuleRecord,
 } from './default-execution-rules.js';
 import { initializeRunCheckpointSchema } from './analysis/run-checkpoints.js';
+import {
+  BACKGROUND_ANALYSIS_NOT_GRANTED,
+  BACKGROUND_DEVELOPER_LIVE,
+  BACKGROUND_NO_ROUTE,
+  BACKGROUND_REVOKED,
+  BACKGROUND_ANALYSIS_STATEMENT,
+  BACKGROUND_ANALYSIS_WHAT,
+  BACKGROUND_ENROLL_DEVELOPER_LIVE,
+  BACKGROUND_ENROLL_STALE,
+  BACKGROUND_FACTS_UNREADABLE,
+  BACKGROUND_REVOKE_CONSEQUENCES,
+  BACKGROUND_STARTING_POINT_LABELS,
+  BACKGROUND_STARTING_POINT_NOTES,
+  BACKGROUND_STATE_LABELS,
+  BackgroundAnalysisEnrollmentError,
+  BackgroundAnalysisEnrollmentLedger,
+  backgroundAnalysisDecision,
+  backgroundAnalysisWhen,
+  backgroundDriftReason,
+  backgroundEnrollmentName,
+  initializeBackgroundAnalysisEnrollmentSchema,
+  type BackgroundAnalysisDecision,
+  type BackgroundAnalysisEnrollmentRecord,
+} from './background-analysis-enrollments.js';
 import { initializeClarificationSchema } from './analysis/clarifications.js';
 import { initializeReimportGroupSchema } from './reimport-group-ledger.js';
 import { initializeProductionDocumentDeliverySchema, initializeProductionDocumentSchema } from './production-document-ledger.js';
@@ -833,6 +860,7 @@ import {
   CAPTURED_PROCEDURE_SCHEMA_VERSION,
   EVALUATION_REWRITE_SCHEMA_VERSION,
   WRITING_TASK_SCHEMA_VERSION,
+  BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -2074,7 +2102,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === READERS_REPORT_SCHEMA_VERSION ||
       currentVersion === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
       currentVersion === EVALUATION_REWRITE_SCHEMA_VERSION ||
-      currentVersion === WRITING_TASK_SCHEMA_VERSION,
+      currentVersion === WRITING_TASK_SCHEMA_VERSION ||
+      currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2135,7 +2164,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === READERS_REPORT_SCHEMA_VERSION ||
       currentVersion === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
       currentVersion === EVALUATION_REWRITE_SCHEMA_VERSION ||
-      currentVersion === WRITING_TASK_SCHEMA_VERSION
+      currentVersion === WRITING_TASK_SCHEMA_VERSION ||
+      currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2510,7 +2540,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === READERS_REPORT_SCHEMA_VERSION ||
       version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
       version === EVALUATION_REWRITE_SCHEMA_VERSION ||
-      version === WRITING_TASK_SCHEMA_VERSION,
+      version === WRITING_TASK_SCHEMA_VERSION ||
+      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2560,7 +2591,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === READERS_REPORT_SCHEMA_VERSION ||
       version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
       version === EVALUATION_REWRITE_SCHEMA_VERSION ||
-      version === WRITING_TASK_SCHEMA_VERSION) return;
+      version === WRITING_TASK_SCHEMA_VERSION ||
+      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2702,7 +2734,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === READERS_REPORT_SCHEMA_VERSION ||
       version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
       version === EVALUATION_REWRITE_SCHEMA_VERSION ||
-      version === WRITING_TASK_SCHEMA_VERSION,
+      version === WRITING_TASK_SCHEMA_VERSION ||
+      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2751,7 +2784,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === READERS_REPORT_SCHEMA_VERSION ||
       version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
       version === EVALUATION_REWRITE_SCHEMA_VERSION ||
-      version === WRITING_TASK_SCHEMA_VERSION) return;
+      version === WRITING_TASK_SCHEMA_VERSION ||
+      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -3044,7 +3078,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== WRITING_TASK_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -3096,6 +3130,7 @@ function validateModelServiceSchema(
       version >= CAPTURED_PROCEDURE_SCHEMA_VERSION,
       version >= EVALUATION_REWRITE_SCHEMA_VERSION,
       version >= WRITING_TASK_SCHEMA_VERSION,
+      version >= BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -3172,7 +3207,8 @@ function initializeModelServiceSchema(
       version === READERS_REPORT_SCHEMA_VERSION ||
       version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
       version === EVALUATION_REWRITE_SCHEMA_VERSION ||
-      version === WRITING_TASK_SCHEMA_VERSION,
+      version === WRITING_TASK_SCHEMA_VERSION ||
+      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3221,7 +3257,8 @@ function initializeModelServiceSchema(
       version === READERS_REPORT_SCHEMA_VERSION ||
       version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
       version === EVALUATION_REWRITE_SCHEMA_VERSION ||
-      version === WRITING_TASK_SCHEMA_VERSION) {
+      version === WRITING_TASK_SCHEMA_VERSION ||
+      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -4050,6 +4087,17 @@ function analysisItemLabel(revision: BaselineAnalysisResultSetRevisionProjection
   }
 }
 
+/**
+ * What the 后台分析登记 dispatcher knows beside the store's records (Issue #95, S39): whether this launch has a route that
+ * executes a Run, whether the governor has a place free, the clock, and the quiet period the manuscript must stand still for.
+ */
+export interface BackgroundAnalysisRuntime {
+  readonly routeExecutable: boolean;
+  readonly placeFree: boolean;
+  readonly now: number;
+  readonly quietMs: number;
+}
+
 export class EditorialStore {
   readonly #dataRoot: string;
   readonly #objectsRoot: string;
@@ -4140,6 +4188,7 @@ export class EditorialStore {
   readonly #proposalConflicts: ProposalConflictStore;
   /** 默认执行规则 (Issue #421): the rules 快速开始 starts a Task under. */
   readonly #rules: DefaultExecutionRuleLedger;
+  readonly #enrollments: BackgroundAnalysisEnrollmentLedger;
   readonly #workflowProfile: BuiltInWorkflowProfile;
   readonly #lifetimeId: string;
   readonly #control: StoreControl;
@@ -4185,6 +4234,7 @@ export class EditorialStore {
     this.#initialEvaluation = initialEvaluation;
     this.#editorialMarks = new EditorialMarkStore(authority);
     this.#rules = new DefaultExecutionRuleLedger(authority);
+    this.#enrollments = new BackgroundAnalysisEnrollmentLedger(authority);
     this.#manuscriptApply = new ManuscriptApplyStore(authority, boundedAuthority, this.#editorialMarks, lifetimeId);
     // 知识库 › 审阅规范文件 (Issue #427, S79a): a Review Run prepared now applies each guideline document at its latest version.
     this.#reviewGuidelines = new ReviewGuidelineLedger(authority);
@@ -4198,13 +4248,13 @@ export class EditorialStore {
     this.#dialogueHistory = harnessHistoryReader(join(dataRoot, HARNESS_SESSION_LOG_DIRECTORY));
     this.#dataVersions = new DataVersionLedger(authority);
     this.#databaseExports = new DatabaseExports(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: WRITING_TASK_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION }),
     });
     this.#scheduledBackups = new ScheduledBackups(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: WRITING_TASK_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION }),
     });
     this.#databaseReplacements = new DatabaseReplacements(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: WRITING_TASK_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION }),
       // A package's data opens as a store of its own, with no launch control: brought to this revision and checked whole.
       openPackage: async (root) => {
         const opened = await EditorialStore.open(root, this.#codeRoot, {
@@ -4372,7 +4422,7 @@ export class EditorialStore {
       // the backup location before anything migrates it, and a backup that cannot be made opens nothing.
       const classes = control.schemaRevisionClasses ?? SCHEMA_REVISION_CLASSES;
       const { upgrade, earlier } = await backUpBeforeUpgrade(authority, dataRoot, {
-        terminalRevision: WRITING_TASK_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
+        terminalRevision: BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
       }).catch((error: unknown) => {
         if (error instanceof DataVersionError) throw new StoreError(error.code, error.message);
         throw error;
@@ -4473,6 +4523,9 @@ export class EditorialStore {
       initializeEvaluationRewriteSchema(authority);
       // Revision 65 (Issue #432, S84a): which type and reference set each writing Task drafts from, and which result became a document.
       initializeWritingTaskSchema(authority);
+      // Revision 66 (Issue #95, S39): each Book's 后台分析登记; `initializeTaskAuthorizationSchema` widens the Run Authorizations'
+      // origin for it and stamps the version.
+      initializeBackgroundAnalysisEnrollmentSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -4520,7 +4573,7 @@ export class EditorialStore {
       // Every store records the versions that open it (Issue #433, S85a; DSTO-016): a new record only when one changed.
       store.#softwareVersion = softwareVersion;
       store.#codeRoot = codeRoot;
-      store.#dataVersion = dataVersionAt(WRITING_TASK_SCHEMA_VERSION, classes);
+      store.#dataVersion = dataVersionAt(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, classes);
       if (control.interruptUpgradeAt === 'before-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在记录版本之前停止。');
       // The open that raised the Data Version records the upgrade it made with the backup (S85b), and only then clears the note
       // that let an open stopped before this record it (Issue #433 review).
@@ -4528,7 +4581,7 @@ export class EditorialStore {
         // Upgrades other opens made and never recorded go first, oldest first, as those opens would have recorded them; one a
         // record already holds is not recorded again (Issue #433 review).
         for (const carried of earlier) store.#dataVersions.recordCarried(carried);
-        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: WRITING_TASK_SCHEMA_VERSION, upgrade });
+        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, upgrade });
       }));
       if (control.interruptUpgradeAt === 'after-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在清除升级记录之前停止。');
       await completeUpgrade(dataRoot).catch(() => undefined);
@@ -5531,6 +5584,263 @@ export class EditorialStore {
       sourcePlanEnvelopeDigest: record.version.sourcePlanEnvelopeDigest,
       binding: record.version.binding,
     };
+  }
+
+  // ---- 后台分析登记 (Issue #95, plan slice S39; ADR 0048; V2-UX-ANALYSIS-016 to 021) ------------------------------------
+
+  /**
+   * ②A's 后台分析: the Book's Enrollment, what it would do now and why, the Runs it started, and `登记…`'s disclosure — everything
+   * the Enrollment would bind, read from the Book's own facts, before the editor chooses where it starts. Reading writes nothing.
+   */
+  inspectBackgroundAnalysisEnrollment(bookId: string, runtime: BackgroundAnalysisRuntime): BackgroundAnalysisEnrollmentProjection {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(bookId), 'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台分析登记的参数无效。');
+    const book = this.#authority.prepare('SELECT title FROM books WHERE book_id = ?').get(bookId) as SqlRow | undefined;
+    requireStore(book !== undefined, 'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '这本书不存在。');
+    const title = asString(book.title);
+    const record = this.#enrollmentCall(() => this.#enrollments.forBook(bookId));
+    const next = this.#analysisCall(() => this.#backgroundDecision(bookId, record, runtime));
+    const state = record === null ? 'none' : record.state;
+    const live = this.#baselineAnalysis.launch.live !== null;
+    const binding = this.#enrollmentBinding(bookId);
+    const nextOrdinal = record === null ? 1 : record.version.ordinal + 1;
+    const reason = state === 'active'
+      ? '这本书已经登记了后台分析；要改，请先撤销登记再重新登记。'
+      : live ? BACKGROUND_ENROLL_DEVELOPER_LIVE : binding === null ? BACKGROUND_FACTS_UNREADABLE : null;
+    const scope = `《${title}》这一本书`;
+    const when = backgroundAnalysisWhen(runtime.quietMs);
+    const binds = binding === null ? [] : defaultRuleBindingRows(binding, DEFAULT_EXECUTION_RULE_PROCEDURES['baseline-analysis']);
+    const startingPoints = (['prospective', 'backfill'] as const).map((value) => ({
+      value, label: BACKGROUND_STARTING_POINT_LABELS[value], note: BACKGROUND_STARTING_POINT_NOTES[value],
+    }));
+    // The digest of exactly what the disclosure shows: a `登记` that names another is refused as stale.
+    const disclosureDigest = reason !== null ? null : sha256(canonicalJson({
+      schema: 'ai7.background-analysis-enrollment.disclosure/1', bookId, ordinal: nextOrdinal, scope, what: BACKGROUND_ANALYSIS_WHAT, when,
+      binding, startingPoints, notGranted: BACKGROUND_ANALYSIS_NOT_GRANTED,
+    }));
+    const started = this.#authority.prepare(
+      `SELECT a.task_intent_id, a.authorized_at, a.canonical_json, t.mode FROM analysis_run_authorizations a
+       JOIN analysis_task_intents t ON t.task_intent_id = a.task_intent_id
+       WHERE t.book_id = ? AND a.origin = 'background-analysis-enrollment'
+       ORDER BY a.authorized_at DESC, a.rowid DESC`,
+    ).all(bookId) as SqlRow[];
+    const startedRuns = started.slice(0, 10).map((row) => {
+      const authorization = JSON.parse(asString(row.canonical_json)) as { enrollmentVersionId?: unknown };
+      const versionId = typeof authorization.enrollmentVersionId === 'string' ? authorization.enrollmentVersionId : null;
+      // A Book merged in from another house keeps naming a version this house never held: it reads without an ordinal.
+      const found = versionId === null ? null : this.#enrollmentCall(() => this.#enrollments.version(versionId));
+      const mode = asString(row.mode);
+      return {
+        taskIntentId: asString(row.task_intent_id),
+        modeLabel: (BASELINE_ANALYSIS_MODE_LABELS as Readonly<Record<string, string>>)[mode] ?? mode,
+        enrollmentOrdinal: found !== null && found.enrollment.bookId === bookId ? found.version.ordinal : null,
+        authorizedAt: asString(row.authorized_at),
+      };
+    });
+    return {
+      bookId,
+      bookTitle: title,
+      state,
+      stateLabel: BACKGROUND_STATE_LABELS[state],
+      statement: BACKGROUND_ANALYSIS_STATEMENT,
+      enrollment: record === null ? null : {
+        enrollmentId: record.enrollmentId,
+        enrollmentVersionId: record.version.enrollmentVersionId,
+        ordinal: record.version.ordinal,
+        name: backgroundEnrollmentName(record.version.ordinal),
+        startingPoint: record.version.startingPoint,
+        startingPointLabel: BACKGROUND_STARTING_POINT_LABELS[record.version.startingPoint],
+        enrolledBy: '本机编辑',
+        enrolledAt: record.version.createdAt,
+        stateRecordedAt: record.stateRecordedAt,
+        binds: defaultRuleBindingRows(record.version.binding, DEFAULT_EXECUTION_RULE_PROCEDURES['baseline-analysis']),
+      },
+      history: this.#enrollmentCall(() => this.#enrollments.history(bookId)).map((entry) => ({ ...entry, stateLabel: BACKGROUND_STATE_LABELS[entry.state] })),
+      next: { kind: next.kind, reason: next.reason },
+      startedRuns,
+      startedRunCount: started.length,
+      offer: {
+        canEnroll: reason === null,
+        reason,
+        disclosureDigest,
+        scope,
+        what: BACKGROUND_ANALYSIS_WHAT,
+        when,
+        binds,
+        startingPoints,
+        notGranted: BACKGROUND_ANALYSIS_NOT_GRANTED,
+      },
+      revoke: { canRevoke: state === 'active', consequences: BACKGROUND_REVOKE_CONSEQUENCES },
+    };
+  }
+
+  /**
+   * `登记` (ADR 0048; V2-UX-ANALYSIS-017): a separate, explicit decision of the editor, bound to the disclosure they confirmed
+   * by its digest and to the starting point they chose. Nothing else — setting up a model service, importing, enabling a
+   * profile, a rule, a Session or a Run that succeeded — ever makes one. The same confirmation made twice answers as once.
+   */
+  enrollBackgroundAnalysis(
+    bookId: string,
+    disclosureDigest: string,
+    startingPoint: BackgroundAnalysisStartingPoint,
+    runtime: BackgroundAnalysisRuntime,
+  ): BackgroundAnalysisEnrollmentProjection {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(bookId) && DIGEST_PATTERN.test(disclosureDigest) && (startingPoint === 'prospective' || startingPoint === 'backfill'),
+      'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台分析登记的参数无效。');
+    const current = this.#enrollmentCall(() => this.#enrollments.forBook(bookId));
+    if (current !== null && current.state === 'active' && current.version.disclosureDigest === disclosureDigest &&
+        current.version.startingPoint === startingPoint) {
+      return this.inspectBackgroundAnalysisEnrollment(bookId, runtime);
+    }
+    const shown = this.inspectBackgroundAnalysisEnrollment(bookId, runtime);
+    requireStore(shown.offer.canEnroll, 'BACKGROUND_ANALYSIS_ENROLLMENT_UNAVAILABLE', shown.offer.reason ?? BACKGROUND_ENROLL_STALE);
+    requireStore(shown.offer.disclosureDigest === disclosureDigest, 'BACKGROUND_ANALYSIS_ENROLLMENT_STALE', BACKGROUND_ENROLL_STALE);
+    const binding = this.#enrollmentBinding(bookId);
+    requireStore(binding !== null, 'BACKGROUND_ANALYSIS_ENROLLMENT_UNAVAILABLE', BACKGROUND_FACTS_UNREADABLE);
+    const point = this.#analysisCall(() => this.#baselineAnalysis.workingPointOf(bookId));
+    this.#enrollmentCall(() => this.#enrollments.enroll({
+      bookId,
+      startingPoint,
+      binding,
+      enrolledAt: { revisionId: point.revisionId, journalSequence: point.journalSequence, workingDigest: point.workingDigest },
+      disclosureDigest,
+    }));
+    return this.inspectBackgroundAnalysisEnrollment(bookId, runtime);
+  }
+
+  /**
+   * `撤销登记`: a state appended to the Book's Enrollment. No new Run starts under it; a Run it started goes on as the editor's
+   * to pause or cancel, and its results, records and what it sent stay as they are.
+   */
+  revokeBackgroundAnalysisEnrollment(bookId: string, enrollmentId: string, runtime: BackgroundAnalysisRuntime): BackgroundAnalysisEnrollmentProjection {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(enrollmentId), 'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台分析登记的参数无效。');
+    const current = this.#enrollmentCall(() => this.#enrollments.forBook(bookId));
+    requireStore(current !== null && current.enrollmentId === enrollmentId, 'BACKGROUND_ANALYSIS_ENROLLMENT_NOT_FOUND', '这份后台分析登记不属于这本书。');
+    this.#enrollmentCall(() => this.#enrollments.revoke(enrollmentId));
+    return this.inspectBackgroundAnalysisEnrollment(bookId, runtime);
+  }
+
+  /** The Books whose Enrollment is in force, in the order they were enrolled: what the dispatcher looks at. */
+  backgroundAnalysisBooks(): ReadonlyArray<string> {
+    this.#assertAvailable();
+    return this.#enrollmentCall(() => this.#enrollments.active()).map((record) => record.bookId);
+  }
+
+  /** What the Book's Enrollment would do now, and the version it would name: the dispatcher's one question. */
+  backgroundAnalysisDecisionFor(bookId: string, runtime: BackgroundAnalysisRuntime): { decision: BackgroundAnalysisDecision; enrollmentVersionId: string | null } {
+    this.#assertAvailable();
+    const record = this.#enrollmentCall(() => this.#enrollments.forBook(bookId));
+    const decision = this.#analysisCall(() => this.#backgroundDecision(bookId, record, runtime));
+    return { decision, enrollmentVersionId: record !== null && record.state === 'active' ? record.version.enrollmentVersionId : null };
+  }
+
+  /**
+   * The dispatcher's start of the Task it has just prepared exactly as 先看计划 prepares it (ADR 0048; ADR 0046): recorded as
+   * 开始任务 would record it, its Run Authorization's origin `background-analysis-enrollment` naming the enrollment version.
+   * Anything that would make the start differ from what the Enrollment binds — it was revoked or changed, developer-live, the
+   * plan's mode, its key content, what it binds, or a route this launch cannot execute — records nothing and says why, and the
+   * prepared plan stays for the editor.
+   */
+  startEnrolledBaselineAnalysis(
+    bookId: string,
+    taskIntentId: string,
+    planEnvelopeDigest: string,
+    enrollmentVersionId: string,
+    mode: 'first-baseline' | 'sync-current',
+    runtime: BackgroundAnalysisRuntime,
+  ): { dispatchRunRecordId: string | null; reason: string | null } {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest) && UUID_PATTERN.test(enrollmentVersionId) &&
+      (mode === 'first-baseline' || mode === 'sync-current'), 'BACKGROUND_ANALYSIS_START_INVALID', '后台分析的参数无效。');
+    const record = this.#enrollmentCall(() => this.#enrollments.forBook(bookId));
+    if (record === null || record.state !== 'active' || record.version.enrollmentVersionId !== enrollmentVersionId) {
+      return { dispatchRunRecordId: null, reason: BACKGROUND_REVOKED };
+    }
+    if (this.#baselineAnalysis.launch.live !== null) return { dispatchRunRecordId: null, reason: BACKGROUND_DEVELOPER_LIVE };
+    if (!runtime.routeExecutable) return { dispatchRunRecordId: null, reason: BACKGROUND_NO_ROUTE };
+    const projection = this.#analysisCall(() => this.#baselineAnalysis.inspect(bookId)) as BaselineAnalysisProjection;
+    const intent = projection.taskIntent;
+    const envelope = projection.planEnvelope;
+    const version = projection.planVersion;
+    requireStore(intent !== null && intent.taskIntentId === taskIntentId && envelope?.digest === planEnvelopeDigest && version !== null,
+      'ANALYSIS_AUTHORIZATION_STALE', '任务计划已经变化；无法记录该授权。');
+    if (projection.authorization !== null) {
+      // The same start made twice answers as the first did; a Task started any other way is not started again.
+      requireStore(projection.authorization.origin === 'background-analysis-enrollment' && projection.authorization.enrollmentVersionId === enrollmentVersionId,
+        'ANALYSIS_AUTHORIZATION_STALE', '这项任务已经开始了。');
+      return { dispatchRunRecordId: null, reason: null };
+    }
+    requireStore(intent.mode === mode, 'BACKGROUND_ANALYSIS_START_INVALID', '后台分析只做首次基线分析或同步到当前稿件。');
+    if (projection.planRevision !== null) return { dispatchRunRecordId: null, reason: QUICK_START_PLAN_CHANGED };
+    const drift = defaultExecutionRuleDrift(record.version.binding, version.materialInputs);
+    if (drift.length > 0) return { dispatchRunRecordId: null, reason: backgroundDriftReason(drift) };
+    if (!envelope.dispatchAllowed) return { dispatchRunRecordId: null, reason: BACKGROUND_NO_ROUTE };
+    const authorized = this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest, 'now',
+      { kind: 'background-analysis-enrollment', enrollmentVersionId }));
+    return { dispatchRunRecordId: authorized.dispatchRunRecordId, reason: null };
+  }
+
+  /** What the Book's Enrollment binds, read from its facts now; `null` under developer-live or when they cannot be read. */
+  #enrollmentBinding(bookId: string): DefaultExecutionRuleBinding | null {
+    if (this.#baselineAnalysis.launch.live !== null) return null;
+    try {
+      return defaultExecutionRuleBindingOf(this.#baselineAnalysis.currentRuleFacts(bookId, 'first-baseline'));
+    } catch (error) {
+      if (error instanceof AnalysisError) return null;
+      throw error;
+    }
+  }
+
+  /** Every fact the decision weighs, read from the Book's records and this launch, in `backgroundAnalysisDecision`'s order. */
+  #backgroundDecision(bookId: string, record: BackgroundAnalysisEnrollmentRecord | null, runtime: BackgroundAnalysisRuntime): BackgroundAnalysisDecision {
+    const developerLive = this.#baselineAnalysis.launch.live !== null;
+    const quiet = { developerLive, routeExecutable: runtime.routeExecutable, placeFree: runtime.placeFree, quietMs: runtime.quietMs };
+    if (record === null || record.state === 'revoked' || developerLive || !runtime.routeExecutable) {
+      return backgroundAnalysisDecision({
+        ...quiet, enrollment: record?.state ?? null, drift: [], taskUnfinished: null, analysis: 'current', startingPoint: 'backfill',
+        movedSinceEnrollment: false, sinceLastEditMs: null, attemptedAtThisText: false,
+      });
+    }
+    let drift: ReadonlyArray<string> | null;
+    try {
+      drift = defaultExecutionRuleDrift(record.version.binding, this.#baselineAnalysis.currentRuleFacts(bookId, 'first-baseline'));
+    } catch (error) {
+      if (!(error instanceof AnalysisError)) throw error;
+      drift = null;
+    }
+    const projection = this.#baselineAnalysis.inspect(bookId) as BaselineAnalysisProjection;
+    const point = this.#baselineAnalysis.workingPointOf(bookId);
+    const latest = projection.resultSetRevision;
+    const analysis = latest === null ? 'absent' : latest.freshness.state === 'current' ? 'current' : 'stale';
+    const taskUnfinished = runIsActive(projection.run?.state ?? null)
+      ? 'run'
+      : projection.taskIntent !== null && projection.planEnvelope !== null && projection.authorization === null ? 'prepared' : null;
+    const attemptedAtThisText = projection.authorization?.origin === 'background-analysis-enrollment' && projection.checkpoint !== null &&
+      projection.checkpoint.revisionDigest === point.workingDigest;
+    return backgroundAnalysisDecision({
+      ...quiet,
+      enrollment: 'active',
+      drift,
+      taskUnfinished,
+      analysis,
+      startingPoint: record.version.startingPoint,
+      movedSinceEnrollment: point.workingDigest !== record.version.enrolledAt.workingDigest,
+      sinceLastEditMs: point.lastEditAt === null ? null : Math.max(0, runtime.now - Date.parse(point.lastEditAt)),
+      attemptedAtThisText,
+    });
+  }
+
+  #enrollmentCall<T>(operation: () => T): T {
+    this.#assertAvailable();
+    try {
+      return operation();
+    } catch (error) {
+      if (error instanceof BackgroundAnalysisEnrollmentError) throw new StoreError(error.code, error.message);
+      if (error instanceof AnalysisError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
   }
 
   #ruleCall<T>(operation: () => T): T {

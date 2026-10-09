@@ -89,6 +89,7 @@ import { mountLearningAudit } from './learning-audit.js';
 import { LEARNING_AUDIT_HEADING, LEARNING_AUDIT_STATUS } from './learning-audit-labels.js';
 import { mountEvaluationCalibration } from './evaluation-calibration.js';
 import { mountBookSeries, mountSeries, mountSeriesList } from './series.js';
+import { mountBackgroundAnalysis } from './background-analysis.js';
 import {
   DATA_VERSION_DATA,
   DATA_VERSION_HEADING,
@@ -2107,7 +2108,11 @@ function renderBookAnalysis(bookId: string, bookTitle: string, target?: JudgedAn
     }
   });
   actions.append(openManuscript, openOverview);
-  content.append(host, actions);
+  // 后台分析 (Issue #95, S39): the Book's Background Analysis Enrollment, beside the analysis it may start and outside the card,
+  // so the card's own follow-ups never redraw it.
+  const backgroundHost = element('section');
+  backgroundHost.dataset['bookId'] = bookId;
+  content.append(host, backgroundHost, actions);
   replaceScreen('book-analysis', content);
   setStatus('分析已打开');
   const inspect = (first: boolean): void => {
@@ -2142,6 +2147,8 @@ function renderBookAnalysis(bookId: string, bookTitle: string, target?: JudgedAn
   // The item a 反馈历史 entry judged opens on its own tab (Issue #61 review), the tab the card is drawn with.
   if (judged !== undefined) analysisTabChoice.set(bookId, judged.dimension);
   inspect(true);
+  // A Run the Enrollment started is the card's to show: it reads again once one is recorded, never stealing focus.
+  mountBackgroundAnalysis({ root: backgroundHost, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, onRunStarted: () => inspect(false) });
 }
 
 /** The item of ②A a 反馈历史 entry judged: its revision, its place, and the tab it sits on. */
