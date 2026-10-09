@@ -655,8 +655,11 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'knowledge-library-add',
     'knowledge-library-attention',
     'knowledge-library-decide',
+    // 资料索引 (Issue #428, S80a).
+    'knowledge-library-index',
     'j14-library-reflow-forced-colors',
     'knowledge-library-bounded-readers',
+    'knowledge-library-index-translation',
     'zero-activity',
   ]),
   'J-03': Object.freeze([

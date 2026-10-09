@@ -122,6 +122,7 @@ export const IPC_CHANNELS = {
   inspectAnalysisFeedback: 'ai7:j11:inspect-analysis-feedback',
   recordAnalysisFeedback: 'ai7:j11:record-analysis-feedback',
   readLibraryDecisionReason: 'ai7:j15:read-library-decision-reason',
+  inspectLibraryMaterialSegments: 'ai7:j15:inspect-library-material-segments',
   inspectReviewWorkspace: 'ai7:j04:inspect-review-workspace',
   prepareReviewRun: 'ai7:j04:prepare-review-run',
   authorizeReviewRun: 'ai7:j04:authorize-review-run',
@@ -6052,7 +6053,10 @@ export interface CapturedProcedureVersionProjection {
   readonly runs: ReadonlyArray<CapturedProcedureRunLinkProjection>;
   /**
    * The 图书交付包 versions that hold a report of a Review Run pinned to it, newest first, at most
-   * `MAX_CAPTURED_PROCEDURE_PACKAGES_SHOWN` (Issue #66, S31b; REUSE-031); `packageCount` counts them all.
+   * `MAX_CAPTURED_PROCEDURE_PACKAGES_SHOWN` (Issue #66, S31b; REUSE-031); `packageCount` counts them all. The service reads
+   * exactly the newest `min(packageCount, MAX_CAPTURED_PROCEDURE_PACKAGES_SHOWN)` rows and lists those whose digests hold, and
+   * the renderer derives how many of the read rows could not be read as that minimum less `packages.length` (Issue #697; #705
+   * item 5): a service that reads fewer or pages the links changes this contract, not only its own call.
    */
   readonly packages: ReadonlyArray<CapturedProcedurePackageLinkProjection>;
   readonly packageCount: number;
@@ -6425,6 +6429,89 @@ export interface LibraryMaterialProjection {
   readonly decisionCount: number;
   /** The latest of them, oldest first, at most `MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN`. */
   readonly decisions: ReadonlyArray<LibraryMaterialDecisionProjection>;
+  /** Its Material Index, layer by layer, as it stands on this machine (Issue #428, S80a; KB-009). */
+  readonly index: MaterialIndexProjection;
+}
+
+// ---- ⑤ 资料库 · 资料索引 (Issue #428, plan slice S80a; editor-surfaces §8.4, V2-UX-KB-009, ATTN-009) -------------------
+
+/**
+ * Where an item's Material Index stands: waiting for its turn or being built on this machine, or built — every layer
+ * read, or some layers not readable for its format, or not readable at all for the reason given.
+ */
+export type MaterialIndexState = 'queued' | 'indexing' | 'complete' | 'unsupported' | 'failed';
+
+/**
+ * Why a layer could not be read (S80a): the format needs a local dependency the Owner has not admitted (PDF text and
+ * recognition), AI7 reads no text of this format yet, the text crossed the local reading bounds, the file could not be
+ * read, the kept original no longer matches its record, or the file holds no text.
+ */
+export type MaterialIndexReason = 'needs-local-dependency' | 'format-unsupported' | 'over-bound' | 'unreadable' | 'original-changed' | 'empty';
+
+/**
+ * One layer's state, in the five layers of KB-009 and the two parts its text layer names (recognition, Source
+ * Translation). `deferred` is a layer this build of AI7 does not provide: similarity vectors and recognition need a local
+ * dependency the Owner has not admitted, and machine Source Translation needs a Model Role.
+ */
+export type MaterialIndexLayerState = 'complete' | 'pending' | 'unsupported' | 'failed' | 'deferred' | 'not-needed';
+
+/** The language the extracted text is mostly in: Chinese, another language, or no letters at all. */
+export type MaterialIndexLanguage = 'zh' | 'other' | 'none';
+
+export interface MaterialIndexProjection {
+  readonly state: MaterialIndexState;
+  /** Why the text could not be read; `null` while it is waiting, or once it was read. */
+  readonly reason: MaterialIndexReason | null;
+  /** When the index was built; `null` before. */
+  readonly builtAt: string | null;
+  /** The index record's digest: the version a Task that lists the item pins (KB-002); `null` before it is built. */
+  readonly digest: string | null;
+  readonly layers: {
+    readonly original: MaterialIndexLayerState;
+    readonly metadata: MaterialIndexLayerState;
+    readonly text: MaterialIndexLayerState;
+    readonly recognition: MaterialIndexLayerState;
+    readonly translation: MaterialIndexLayerState;
+    readonly segments: MaterialIndexLayerState;
+    readonly vectors: MaterialIndexLayerState;
+  };
+  /** What the metadata layer read of the file: its own title when it names one, the language, and the counts. */
+  readonly metadata: null | {
+    readonly documentTitle: string | null;
+    readonly language: MaterialIndexLanguage | null;
+    readonly paragraphs: number;
+    readonly headings: number;
+    readonly sentences: number;
+    readonly characters: number;
+  };
+}
+
+/** The paragraphs one answer of 查看分段 carries at most: one frame holds them at the paragraph bound. */
+export const MAX_MATERIAL_SEGMENTS_PAGE = 16;
+
+/**
+ * One page of an item's segments (KB-009): each paragraph with its kind and its sentences as ranges of its text, so every
+ * sentence is citable by its position anchor — 第 n 段第 m 句. These formats carry no page numbers, and the anchors say so by
+ * being positions.
+ */
+export interface MaterialSegmentsPageProjection {
+  readonly materialId: string;
+  readonly title: string;
+  /** The index record the page was read from. */
+  readonly indexDigest: string;
+  /** How many paragraphs the index holds. */
+  readonly total: number;
+  /** The first paragraph's ordinal on this page, 1-based. */
+  readonly from: number;
+  readonly segments: ReadonlyArray<{
+    readonly ordinal: number;
+    readonly kind: 'title' | 'heading' | 'paragraph';
+    readonly text: string;
+    /** Each sentence as `[start, end)` in UTF-16 code units of `text`, in order. */
+    readonly sentences: ReadonlyArray<readonly [number, number]>;
+  }>;
+  readonly next: number | null;
+  readonly previous: number | null;
 }
 
 /** One page of 资料库. An attribution names its Book from 书库's own pages (`listBooks`), never from this answer. */
@@ -9694,6 +9781,8 @@ export type GlobalAttentionStateKey =
   // material waits for a decision or changed since it had one, or else while any was left for later.
   | 'learning-materials-pending'
   | 'learning-materials-deferred'
+  // 索引完成 (Issue #428, S80a; ATTN-009): a 资料库 item's Material Index built on this machine, in 最近完成.
+  | 'indexing-completed'
   // A dialogue Task of the Book (Issue #52, S17a; TASK-044, DIALOG-010, 012): only the 任务 panel lists it. Away from the
   // foreground dialogue an answer in flight reads `等待回答` and nothing more; settled, it is answered or incomplete.
   | 'dialogue-answering'
@@ -9733,13 +9822,15 @@ export type GlobalAttentionNextStep =
   | 'set-learning-eligibility'
   // A Book's Learning Material in 质量与学习 (Issue #61, S26b).
   | 'decide-learning-materials'
+  // 查看索引: the item's card in 资料库, its index layers and 查看分段 (Issue #428, S80a).
+  | 'view-material-index'
   // A dialogue Task's 打开对话 (Issue #52, S17a; TASK-044).
   | 'open-dialogue';
 export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
   'view-run', 'view-review', 'reconfirm-plan', 'continue-review', 'return-to-recovery', 'retry-abandon-cleanup', 'await-local-check',
   'resolve-conflict', 'answer-clarification', 'adjust-budget-redo', 'resolve-model-service', 'reprepare', 'redo', 'view-plan',
   'maintenance-link-proposal', 'maintenance-link-publication', 'maintenance-write-errata', 'maintenance-conclude',
-  'set-library-attribution', 'set-learning-eligibility', 'decide-learning-materials', 'open-dialogue',
+  'set-library-attribution', 'set-learning-eligibility', 'decide-learning-materials', 'open-dialogue', 'view-material-index',
 ];
 
 /**
@@ -9775,6 +9866,8 @@ export type GlobalAttentionObjectProjection =
   | { kind: 'maintenance'; classification: MaintenanceClassification; ordinal: number; publicationOrdinal: number }
   // A 资料库 item (Issue #427, S79c): its title and kind, and where it belongs so far — a Book, the house, or not yet decided.
   | { kind: 'library-material'; title: string; materialKind: LibraryMaterialKind; scope: 'none' | 'book' | 'house' }
+  // A 资料库 item whose Material Index was built (Issue #428, S80a): its title and kind, where it belongs, and how the build went.
+  | { kind: 'library-index'; title: string; materialKind: LibraryMaterialKind; scope: 'none' | 'book' | 'house'; outcome: 'complete' | 'unsupported' | 'failed' }
   // A Book's Learning Material (Issue #61, S26b): how many wait for a decision, and how many were left for later.
   | { kind: 'learning-materials'; pending: number; deferred: number }
   // A dialogue Task (Issue #52, S17a): the editor's own question, as the Harness Session Ledger holds it — `null` when it
@@ -10774,6 +10867,11 @@ export interface ServiceOperationMap {
     input: { materialId: string; ordinal: number; offset: number };
     output: LibraryDecisionReasonPage;
   };
+  /** 查看分段 (Issue #428, S80a): one page of an item's indexed paragraphs and sentence anchors, from the paragraph named. */
+  inspectLibraryMaterialSegments: {
+    input: { materialId: string; from: number };
+    output: MaterialSegmentsPageProjection;
+  };
   /** 放入资料…: the absolute path main's picker returned, read as it would arrive; nothing is kept. */
   previewLibraryMaterial: {
     input: { path: string };
@@ -11394,6 +11492,8 @@ export interface RendererApi {
   /** One 资料库 item, by its identity. */
   inspectLibraryMaterial(input: { materialId: string }): Promise<LibraryMaterialProjection>;
   readLibraryDecisionReason(input: ServiceOperationMap['readLibraryDecisionReason']['input']): Promise<LibraryDecisionReasonPage>;
+  /** 查看分段: one page of the item's segments, read-only. */
+  inspectLibraryMaterialSegments(input: ServiceOperationMap['inspectLibraryMaterialSegments']['input']): Promise<MaterialSegmentsPageProjection>;
   /** 放入资料…: the native picker, then the file as it would arrive; `null` when the picker was cancelled. */
   previewLibraryMaterial(): Promise<LibraryMaterialPreviewProjection | null>;
   addLibraryMaterial(input: { previewId: string; title: string; kind: LibraryMaterialKind }): Promise<LibraryMaterialProjection>;

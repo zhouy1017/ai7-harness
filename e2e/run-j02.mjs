@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
+import { measureCpuShares } from './readiness-trace.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const CHARACTER_COUNT = 10_000_000;
@@ -586,6 +587,26 @@ async function watchImportStep(renderer, dataRoot, expression, { interval = IMPO
   }
 }
 
+/** A share of CPU as a check label's word: under `low` is `idle`, under `high` is `some`, and the rest is `busy`. */
+function cpuShareWord(share, low, high) {
+  if (share < low) return 'idle';
+  if (share < high) return 'some';
+  return 'busy';
+}
+
+/**
+ * How busy the product and the host were as an import step passed its bound, over five seconds, for a check label (#621):
+ * `product-<word>` is the product's processes as a share of one core (under 0.1 idle, under 0.8 some), and `host-<word>`
+ * every process on the host as a share of all its cores (under a quarter idle, under three quarters some). A product
+ * working while its import stands still is slow; an idle one beside a busy host is starved by something else; both idle is
+ * a product waiting on something. `cpu-unsampled` when the host's processes could not be read.
+ */
+async function importCpuWords() {
+  const shares = await measureCpuShares(process.pid);
+  if (shares === null) return 'cpu-unsampled';
+  return `product-${cpuShareWord(shares.product, 0.1, 0.8)}-host-${cpuShareWord(shares.host, 0.25, 0.75)}`;
+}
+
 /** The tenths of the file a parse had committed, for a check label. */
 function parsedTenths(blocks) {
   return Math.min(10, Math.floor((blocks ?? 0) * 10 / BLOCK_COUNT));
@@ -609,8 +630,9 @@ async function waitForStagedTarget(renderer, dataRoot) {
   const tenths = parsedTenths(stood.phase === 'screen' ? BLOCK_COUNT : watched.mostBlocks);
   requireJourney(watched.outcome !== 'refused', `stage-target-refused-at-${Number(tenths)}-tenths`);
   requireJourney(stood.phase !== 'screen', 'stage-target-staged-not-shown');
-  requireJourney(watched.outcome !== 'progressing', `stage-target-progressing-at-${Number(tenths)}-tenths`);
-  requireJourney(false, `stage-target-stalled-at-${Number(tenths)}-tenths`);
+  const cpu = await importCpuWords();
+  requireJourney(watched.outcome !== 'progressing', `stage-target-progressing-at-${Number(tenths)}-tenths-${cpu}`);
+  requireJourney(false, `stage-target-stalled-at-${Number(tenths)}-tenths-${cpu}`);
 }
 
 /**
@@ -636,18 +658,25 @@ async function waitForImportCommitted(renderer, dataRoot) {
     const outcome = committed.outcome === 'refused'
       ? 'refused'
       : committed.outcome === 'stalled' ? 'stalled' : committed.outcome === 'quiet' ? 'quiet' : 'progressing';
-    requireJourney(!committed.quiet, `imported-${outcome}-at-writing`);
-    requireJourney(committed.mostBlocks === 0, `imported-${outcome}-at-revalidating-${Number(parsedTenths(committed.mostBlocks))}-tenths`);
-    requireJourney(false, `imported-${outcome}-at-preparing`);
+    requireJourney(outcome !== 'refused' || !committed.quiet, 'imported-refused-at-writing');
+    requireJourney(outcome !== 'refused' || committed.mostBlocks === 0, `imported-refused-at-revalidating-${Number(parsedTenths(committed.mostBlocks))}-tenths`);
+    requireJourney(outcome !== 'refused', 'imported-refused-at-preparing');
+    // A commit that ran out of its bound also says how busy the product and the host were then (#621).
+    const cpu = await importCpuWords();
+    requireJourney(!committed.quiet, `imported-${outcome}-at-writing-${cpu}`);
+    requireJourney(committed.mostBlocks === 0, `imported-${outcome}-at-revalidating-${Number(parsedTenths(committed.mostBlocks))}-tenths-${cpu}`);
+    requireJourney(false, `imported-${outcome}-at-preparing-${cpu}`);
   }
   const acknowledged = await watchImportStep(
     renderer,
     dataRoot,
     `(() => { if (document.querySelector('#screen')?.dataset.screen !== 'imported') return 'refused'; const open = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '打开稿件'); return document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true' && open instanceof HTMLButtonElement && !open.disabled ? 'done' : 'waiting'; })()`,
   );
+  if (acknowledged.outcome === 'done') return;
   if (acknowledged.outcome === 'refused') requireJourney(false, 'completion-acknowledged-before-open-refused');
-  if (acknowledged.outcome === 'stalled') requireJourney(false, 'completion-acknowledged-before-open-stalled');
-  requireJourney(acknowledged.outcome === 'done', 'completion-acknowledged-before-open-progressing');
+  const cpu = await importCpuWords();
+  if (acknowledged.outcome === 'stalled') requireJourney(false, `completion-acknowledged-before-open-stalled-${cpu}`);
+  requireJourney(false, `completion-acknowledged-before-open-progressing-${cpu}`);
 }
 
 async function importAndOpen(renderer, dataRoot) {

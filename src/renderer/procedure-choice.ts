@@ -6,6 +6,7 @@ import type {
   RendererApi,
   ReviewScopeKind,
 } from '../shared/protocol.js';
+import { sheetProcedureChosenStatus } from './captured-procedure-labels.js';
 
 /**
  * The 新建审阅 sheet's choice of a Captured Procedure version, kept honest while it loads (Issue #66, plan slice S31 review P2-1;
@@ -156,6 +157,37 @@ export function procedureChoiceStatus(outcome: ProcedureChoiceOutcome, chosen: (
   if (outcome.kind === 'cleared') return null;
   if (outcome.kind === 'failed' || outcome.run.resolved === null) return '';
   return chosen(outcome.run);
+}
+
+/** The sheet's state a choice settles into: what it fills, and the choices it keeps count of. */
+export interface ProcedureSheetSettling extends ProcedureSheetTarget {
+  readonly requests: Pick<ProcedureChoiceRequests, 'settle'>;
+}
+
+/**
+ * A choice ending, as the sheet composes it (Issue #691; #705 item 3): its ticket settled, the outcome copied back into the
+ * sheet's own state, then what the sheet does with it — the status bar's line (`null` to leave the bar as it is) and the
+ * selector focus returns to. The sheet then only draws itself, says the status and moves the focus, so this one function is the
+ * composition the unit suite reads.
+ */
+export function settleProcedureChoice(
+  state: ProcedureSheetSettling,
+  ticket: number,
+  outcome: ProcedureChoiceOutcome,
+  versionChoice: boolean,
+): { readonly status: string | null; readonly focus: 'procedure' | 'procedure-version' } {
+  state.requests.settle(ticket);
+  copyProcedureChoice(state, procedureChoiceAfter(state, outcome));
+  return { status: procedureChoiceStatus(outcome, sheetProcedureChosenStatus), focus: procedureChoiceFocus(versionChoice, state.procedure) };
+}
+
+/**
+ * What the status bar says as the sheet closes (Issue #705 item 2): a choice still loading set 「正在读取…」 and its answer, arriving
+ * at a closed sheet, fills nothing and says nothing, so the line is cleared here; with no choice loading the bar is left as it is
+ * (`null`).
+ */
+export function procedureSheetCloseStatus(requests: Pick<ProcedureChoiceRequests, 'loading'>): string | null {
+  return requests.loading ? '' : null;
 }
 
 /** How `确认停用` ended: stopped, or refused as stale with the preview read again for the editor to look at first. */

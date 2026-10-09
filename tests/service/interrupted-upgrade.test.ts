@@ -62,10 +62,12 @@ import {
   ANALYSIS_LEDGER_REVISION_62_SQL,
   ANALYSIS_LEDGER_REVISION_64_SQL,
   BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
+  MATERIAL_INDEX_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import { EVALUATION_REWRITE_SCHEMA_SQL, initializeEvaluationRewriteSchema } from '../../src/service/evaluation-rewrites.js';
 import { WRITING_TASK_SCHEMA_SQL, initializeWritingTaskSchema } from '../../src/service/writing-tasks.js';
 import { BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL, initializeBackgroundAnalysisEnrollmentSchema } from '../../src/service/background-analysis-enrollments.js';
+import { MATERIAL_INDEX_SCHEMA_SQL, initializeMaterialIndexSchema } from '../../src/service/material-index.js';
 import { READERS_REPORT_SCHEMA_SQL, initializeReadersReportSchema } from '../../src/service/readers-reports.js';
 import { SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL, initializeSeriesRetrievalExclusionSchema } from '../../src/service/series-exclusions.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
@@ -161,6 +163,12 @@ interface Revision {
 
 // Newest first: a store is walked down one revision at a time.
 const REVISIONS: ReadonlyArray<Revision> = [
+  {
+    // Revision 67 (Issue #428, S80a): each 资料库 item's Material Index build and its segments, created before the stamp.
+    revision: 67,
+    step: initializeMaterialIndexSchema,
+    undo: (database) => drop(database, Object.keys(MATERIAL_INDEX_SCHEMA_SQL).reverse()),
+  },
   {
     // Revision 66 (Issue #95, S39): each Book's 后台分析登记, created before the stamp, and the Run Authorizations' origin widened
     // for it — a widening the next open performs again from revision 65's text.
@@ -401,11 +409,11 @@ describe('an upgrade interrupted before its version stamp', () => {
     if (step === null) continue;
     const before = revision - 1;
     it(`is finished by the next open when revision ${revision}'s relations committed and its stamp did not`, async () => {
-      expect(await opened()).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
+      expect(await opened()).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
       const terminal = tables();
       // The plant is a store at the revision before, which opens and upgrades as one.
       plant(before);
-      expect(await opened()).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
+      expect(await opened()).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
       expect(tables()).toEqual(terminal);
       // The step commits the revision's relations, and the process stops before the stamp.
       plant(before);
@@ -413,15 +421,15 @@ describe('an upgrade interrupted before its version stamp', () => {
         step(database);
         expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(before);
       });
-      expect(await opened()).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
+      expect(await opened()).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
       expect(tables()).toEqual(terminal);
       // Once finished it opens as any store does.
-      expect(await opened()).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
+      expect(await opened()).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
     }, 120_000);
   }
 
   it('still refuses a store holding only some of a revision\'s relations', async () => {
-    expect(await opened()).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
+    expect(await opened()).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
     plant(36);
     withDatabase((database) => database.exec(PRODUCTION_DOCUMENT_SCHEMA_SQL.production_documents));
     const refused = await EditorialStore.open(roots.dataRoot, roots.codeRoot).then((store) => {
