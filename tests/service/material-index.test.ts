@@ -1,0 +1,364 @@
+import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { LIBRARY_OBJECT_DIRECTORY } from '../../src/service/library-materials.js';
+import { MATERIAL_INDEXER_IDENTITY, MATERIAL_INDEX_TRIGGER_SQL, MATERIAL_INDEX_WORK_DIRECTORY } from '../../src/service/material-index.js';
+import { EditorialStore, StoreError } from '../../src/service/store.js';
+import { BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, MATERIAL_INDEX_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { buildManuscriptPackage } from '../../src/service/text-manuscript.js';
+import { MAX_FRAME_BYTES, MAX_MATERIAL_SEGMENTS_PAGE, type LibraryMaterialKind, type LibraryMaterialProjection } from '../../src/shared/protocol.js';
+import { sample1Path } from '../support/sample1-baseline.js';
+import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+
+// Service-integration suite (L2) for ⑤ 资料库 · 资料索引 (Issue #428, plan slice S80a; editor-surfaces §8.4, V2-UX-KB-009,
+// ATTN-009) over the real store on a temporary Agent Data Root. The collected book is exact `sample1` — an admitted Public
+// SampleBook — and every other file is the suite's own synthetic words, never a manuscript. The Owner's option 乙
+// (2026-10-09) builds four layers — original, metadata, extracted text, sentence-anchored segments — and states similarity
+// vectors, recognition and machine 来源译文 as not provided. A Task reads the index read-only, only within its plan boundary.
+
+let roots: ServiceTestRoots;
+
+beforeEach(async () => {
+  roots = await createServiceTestRoots('ai7-service-material-index-');
+});
+
+afterEach(async () => {
+  await roots.dispose();
+});
+
+async function refusal(operation: () => unknown): Promise<string> {
+  try {
+    await operation();
+  } catch (error) {
+    if (error instanceof StoreError) return error.code;
+    throw error;
+  }
+  return 'no-error';
+}
+
+function emptyBook(store: EditorialStore, title: string): string {
+  const creation = store.prepareBookCreation(title, null);
+  return store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }).overview.book.bookId;
+}
+
+function file(name: string, content: string | Uint8Array): string {
+  const directory = join(roots.inputRoot, 'library-index');
+  mkdirSync(directory, { recursive: true });
+  const path = join(directory, name);
+  writeFileSync(path, content);
+  return path;
+}
+
+async function put(store: EditorialStore, path: string, title: string, kind: LibraryMaterialKind = 'document'): Promise<LibraryMaterialProjection> {
+  const preview = await store.previewLibraryMaterial(path);
+  return store.addLibraryMaterial({ previewId: preview.previewId, title, kind });
+}
+
+const storePath = (): string => join(roots.dataRoot, 'store', 'ai7.sqlite');
+
+/** What another connection sees change: SQLite's data version moves whenever any other connection commits. */
+function watcher(): { changed(): boolean; close(): void } {
+  const database = new DatabaseSync(storePath(), { readOnly: true });
+  const version = (): number => (database.prepare('PRAGMA data_version').get() as { data_version: number }).data_version;
+  const before = version();
+  return { changed: () => version() !== before, close: () => database.close() };
+}
+
+const CHINESE = '第一章 春\n\n她推开窗。风从河上吹来，带着潮湿的气味！他问：“你还记得吗？”\n\n第二段只有一句话\n\n圆周率约等于3.14。最后一句……';
+
+describe('资料索引 over the real store', () => {
+  it('builds the four layers of a collected book on this machine, pages its sentence anchors, and says 索引完成', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const added = await put(store, sample1Path(roots.codeRoot), '样书一', 'book');
+      // A store that does not serve builds nothing by itself: the item waits, every layer but the original pending, the
+      // deferred ones not provided from the start.
+      expect(added.index).toEqual({
+        state: 'queued', reason: null, builtAt: null, digest: null, metadata: null,
+        layers: { original: 'complete', metadata: 'pending', text: 'pending', recognition: 'not-needed', translation: 'pending', segments: 'pending', vectors: 'deferred' },
+      });
+      expect(await refusal(() => store.inspectLibraryMaterialSegments({ materialId: added.materialId, from: 1 }))).toBe('MATERIAL_INDEX_NOT_READY');
+
+      store.startMaterialIndexing();
+      await store.settleMaterialIndexing();
+      const built = store.inspectLibraryMaterial(added.materialId).index;
+      expect(built.state).toBe('complete');
+      expect(built.reason).toBeNull();
+      expect(built.layers).toEqual({ original: 'complete', metadata: 'complete', text: 'complete', recognition: 'not-needed', translation: 'not-needed', segments: 'complete', vectors: 'deferred' });
+      expect(built.metadata!.language).toBe('zh');
+      expect(built.metadata!.paragraphs).toBeGreaterThan(MAX_MATERIAL_SEGMENTS_PAGE);
+      expect(built.metadata!.sentences).toBeGreaterThanOrEqual(built.metadata!.paragraphs);
+      expect(built.metadata!.characters).toBeGreaterThan(built.metadata!.paragraphs);
+      expect(built.digest).toMatch(/^[0-9a-f]{64}$/u);
+
+      // 查看分段: a page at a time, every sentence a range of its paragraph, in order, without white space around it.
+      const first = store.inspectLibraryMaterialSegments({ materialId: added.materialId, from: 1 });
+      expect([first.from, first.total, first.segments.length, first.previous, first.next, first.indexDigest, first.title])
+        .toEqual([1, built.metadata!.paragraphs, MAX_MATERIAL_SEGMENTS_PAGE, null, MAX_MATERIAL_SEGMENTS_PAGE + 1, built.digest, '样书一']);
+      let sentences = 0;
+      let ordinal = 0;
+      for (let from: number | null = 1; from !== null;) {
+        const page = store.inspectLibraryMaterialSegments({ materialId: added.materialId, from });
+        expect(Buffer.byteLength(JSON.stringify(page))).toBeLessThan(MAX_FRAME_BYTES);
+        for (const segment of page.segments) {
+          expect(segment.ordinal).toBe(++ordinal);
+          let end = 0;
+          for (const [start, stop] of segment.sentences) {
+            expect(start).toBeGreaterThanOrEqual(end);
+            expect(stop).toBeGreaterThan(start);
+            expect(segment.text.slice(start, stop).trim()).toBe(segment.text.slice(start, stop));
+            end = stop;
+          }
+          sentences += segment.sentences.length;
+        }
+        expect(page.previous).toBe(from === 1 ? null : Math.max(1, from - MAX_MATERIAL_SEGMENTS_PAGE));
+        from = page.next;
+      }
+      expect([ordinal, sentences]).toEqual([built.metadata!.paragraphs, built.metadata!.sentences]);
+      expect(await refusal(() => store.inspectLibraryMaterialSegments({ materialId: added.materialId, from: ordinal + 1 }))).toBe('MATERIAL_INDEX_CURSOR_INVALID');
+
+      // 索引完成 is a 最近完成 item (ATTN-009): counted nowhere, naming the item and where it belongs, opening its card.
+      const attention = store.inspectGlobalAttention(() => null, false);
+      const recent = attention.groups.find((group) => group.key === 'recent')!.items.filter((item) => item.object.kind === 'library-index');
+      expect(recent.map((item) => [item.state, item.itemId, item.object, item.nextStep, item.target, item.book.title])).toEqual([[
+        'indexing-completed', `library-index:${added.materialId}`,
+        { kind: 'library-index', title: '样书一', materialKind: 'book', scope: 'none', outcome: 'complete' },
+        'view-material-index', { kind: 'library-material', materialId: added.materialId }, null,
+      ]]);
+      // The item still waits for its attribution: 索引完成 asks nothing and the count is the decision's alone.
+      expect(attention.actionableCount).toBe(1);
+
+      // The ledger is append-only and the build is the current indexer's.
+      const database = new DatabaseSync(storePath());
+      try {
+        expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
+        expect(database.prepare('SELECT indexer, state, segment_count FROM material_index_builds').all())
+          .toEqual([{ indexer: MATERIAL_INDEXER_IDENTITY, state: 'complete', segment_count: built.metadata!.paragraphs }]);
+        for (const table of ['material_index_builds', 'material_index_segments']) {
+          expect(() => database.exec(`UPDATE ${table} SET canonical_json = canonical_json`)).toThrowError(/MATERIAL_INDEX_LEDGER_IMMUTABLE/u);
+          expect(() => database.exec(`DELETE FROM ${table}`)).toThrowError(/MATERIAL_INDEX_LEDGER_IMMUTABLE/u);
+        }
+        expect(Object.keys(MATERIAL_INDEX_TRIGGER_SQL)).toHaveLength(4);
+      } finally {
+        database.close();
+      }
+      // Built once: asking again builds nothing more.
+      store.startMaterialIndexing();
+      await store.settleMaterialIndexing();
+      expect(store.inspectLibraryMaterial(added.materialId).index).toEqual(built);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 120_000);
+
+  it('reads plain text and Markdown, states 来源译文 by the language, and names what it cannot read and why', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const chinese = await put(store, file('中文笔记.txt', CHINESE), '中文笔记');
+      const english = await put(store, file('notes.md', '# Field notes\n\nThe river rose at dawn. Nobody slept.\n\nA second paragraph, with pi near 3.14 inside it.\n'), 'Field notes');
+      const pdf = await put(store, file('scan.pdf', '%PDF-1.4\n% synthetic test bytes, not a real document\n'), '扫描件');
+      const page = await put(store, file('page.html', '<!doctype html><html><body><p>网页</p></body></html>'), '网页', 'web');
+      const blank = await put(store, file('blank.txt', '   \n\n  \n'), '空白');
+      // A Word file AI7 itself would write for no paragraphs at all: the parser finds no text block in it.
+      const hollow = await put(store, file('hollow.docx', buildManuscriptPackage([])), '空文档');
+      store.startMaterialIndexing();
+      await store.settleMaterialIndexing();
+
+      const zh = store.inspectLibraryMaterial(chinese.materialId).index;
+      expect([zh.state, zh.metadata, zh.layers.translation]).toEqual(['complete',
+        { documentTitle: null, language: 'zh', paragraphs: 4, headings: 0, sentences: 7, characters: zh.metadata!.characters }, 'not-needed']);
+      const segments = store.inspectLibraryMaterialSegments({ materialId: chinese.materialId, from: 1 }).segments;
+      expect(segments.map((segment) => segment.sentences.map(([start, end]) => segment.text.slice(start, end)))).toEqual([
+        ['第一章 春'],
+        ['她推开窗。', '风从河上吹来，带着潮湿的气味！', '他问：“你还记得吗？”'],
+        ['第二段只有一句话'],
+        ['圆周率约等于3.14。', '最后一句……'],
+      ]);
+
+      const en = store.inspectLibraryMaterial(english.materialId).index;
+      // Non-Chinese text: its 来源译文 needs a Model Role and is not provided — never a fabricated translation.
+      expect([en.state, en.metadata!.language, en.metadata!.headings, en.layers.translation, en.layers.segments]).toEqual(['complete', 'other', 1, 'deferred', 'complete']);
+      expect(store.inspectLibraryMaterialSegments({ materialId: english.materialId, from: 1 }).segments.map((segment) => segment.sentences.length)).toEqual([1, 2, 1]);
+
+      // A PDF's text and recognition need a local dependency the Owner has not admitted; a web page is a format AI7 does not
+      // read yet; a file with no text has none. Each is a build that says so, and the original and metadata stand.
+      expect(store.inspectLibraryMaterial(pdf.materialId).index).toMatchObject({
+        state: 'unsupported', reason: 'needs-local-dependency',
+        layers: { original: 'complete', metadata: 'complete', text: 'deferred', recognition: 'deferred', translation: 'deferred', segments: 'deferred', vectors: 'deferred' },
+      });
+      expect(store.inspectLibraryMaterial(page.materialId).index).toMatchObject({
+        state: 'unsupported', reason: 'format-unsupported', layers: { text: 'unsupported', recognition: 'not-needed', segments: 'unsupported' },
+      });
+      // No text at all is said as that (#725 review, P2-1), never as a file that could not be read.
+      expect(store.inspectLibraryMaterial(blank.materialId).index).toMatchObject({ state: 'failed', reason: 'empty', layers: { text: 'failed' } });
+      expect(store.inspectLibraryMaterial(hollow.materialId).index).toMatchObject({ state: 'failed', reason: 'empty', layers: { text: 'failed' } });
+      expect(await refusal(() => store.inspectLibraryMaterialSegments({ materialId: pdf.materialId, from: 1 }))).toBe('MATERIAL_INDEX_NO_TEXT');
+
+      const outcomes = store.inspectGlobalAttention(() => null, false).groups.flatMap((group) => group.items)
+        .filter((item) => item.object.kind === 'library-index').map((item) => item.object.kind === 'library-index' ? [item.object.title, item.object.outcome] : null).sort();
+      expect(outcomes).toEqual([['Field notes', 'complete'], ['中文笔记', 'complete'], ['扫描件', 'unsupported'], ['空文档', 'failed'], ['空白', 'failed'], ['网页', 'unsupported']]);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 120_000);
+
+  it('refuses to read an original that no longer matches its arrival, and records that as the reason', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const added = await put(store, file('改过.txt', CHINESE), '改过');
+      const kept = join(roots.dataRoot, LIBRARY_OBJECT_DIRECTORY, 'sha256', added.source.sha256.slice(0, 2), `${added.source.sha256}.txt`);
+      writeFileSync(kept, CHINESE.replace('春', '夏'));
+      store.startMaterialIndexing();
+      await store.settleMaterialIndexing();
+      expect(store.inspectLibraryMaterial(added.materialId).index).toMatchObject({ state: 'failed', reason: 'original-changed', layers: { text: 'failed', segments: 'failed' } });
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 120_000);
+
+  it('holds a build back when a replacement freezes the data after its extraction began, and builds it at the next start', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let materialId: string;
+    try {
+      // A package of this very data, to replace it with: what 替换本机全部数据 would be given.
+      const destination = join(roots.inputRoot, 'same.ai7db');
+      const preparation = await store.prepareDatabaseExport(destination, true);
+      expect((await store.approveDatabaseExport(preparation.preparationId, true)).outcome).toBe('created');
+      const preview = await store.inspectDatabaseImport(destination);
+      materialId = (await put(store, file('late.txt', '第一句。第二句。'), '迟到')).materialId;
+      // The build passes its first check and awaits the original; the replacement freezes the data synchronously meanwhile
+      // (#725 review, P2-2): the gate the service applies before a replacement does not count the builder as running work.
+      store.startMaterialIndexing();
+      const preparing = store.prepareDatabaseReplacement(preview.previewId, new Date());
+      expect(store.replacementFrozen()).toBe(true);
+      await store.settleMaterialIndexing();
+      // Nothing was recorded: a write after the backup would be lost with the data the replacement replaces.
+      expect(store.inspectLibraryMaterial(materialId).index.state).toBe('queued');
+      const pending = (await preparing).pending;
+      expect(pending).not.toBeNull();
+      await store.cancelDatabaseReplacement(pending!.replacementId);
+      expect(store.replacementFrozen()).toBe(false);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      store.startMaterialIndexing();
+      await store.settleMaterialIndexing();
+      expect(store.inspectLibraryMaterial(materialId).index.state).toBe('complete');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 120_000);
+
+  it('lets a Task read the index only within its plan boundary, read-only, at the version its plan pinned', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const bookA = emptyBook(store, '索引之书甲');
+      const bookB = emptyBook(store, '索引之书乙');
+      const listed = await put(store, file('参考.txt', CHINESE), '参考');
+      const unlisted = await put(store, file('另一份.txt', `${CHINESE}\n\n另一份资料。`), '另一份');
+      store.startMaterialIndexing();
+      await store.settleMaterialIndexing();
+
+      // Indexed, but no Task may list it before the editor decides where it belongs and its Learning Eligibility (KB-007).
+      expect(await refusal(() => store.pinMaterialReference(bookA, listed.materialId))).toBe('MATERIAL_REFERENCE_UNAVAILABLE');
+      store.decideLibraryMaterial({ materialId: listed.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId: bookA } } });
+      expect(await refusal(() => store.pinMaterialReference(bookA, listed.materialId))).toBe('MATERIAL_REFERENCE_UNAVAILABLE');
+      store.decideLibraryMaterial({ materialId: listed.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+      // Another Book's Tasks may not list an item that belongs to this one.
+      expect(await refusal(() => store.pinMaterialReference(bookB, listed.materialId))).toBe('MATERIAL_REFERENCE_UNAVAILABLE');
+      const pin = store.pinMaterialReference(bookA, listed.materialId);
+      expect(pin).toEqual({ materialId: listed.materialId, indexDigest: store.inspectLibraryMaterial(listed.materialId).index.digest });
+
+      const watch = watcher();
+      try {
+        const reading = store.readMaterialIndexForTask({ bookId: bookA, references: [pin] }, listed.materialId, 1);
+        expect([reading.total, reading.next, reading.indexDigest]).toEqual([4, null, pin.indexDigest]);
+        expect(reading.segments[1]!.sentences).toEqual([
+          { ordinal: 1, text: '她推开窗。', citation: '《参考》第 2 段第 1 句' },
+          { ordinal: 2, text: '风从河上吹来，带着潮湿的气味！', citation: '《参考》第 2 段第 2 句' },
+          { ordinal: 3, text: '他问：“你还记得吗？”', citation: '《参考》第 2 段第 3 句' },
+        ]);
+        // Outside the boundary: an item the plan does not list, another Book's plan, a moved version.
+        expect(await refusal(() => store.readMaterialIndexForTask({ bookId: bookA, references: [pin] }, unlisted.materialId, 1))).toBe('MATERIAL_OUTSIDE_PLAN');
+        expect(await refusal(() => store.readMaterialIndexForTask({ bookId: bookB, references: [pin] }, listed.materialId, 1))).toBe('MATERIAL_REFERENCE_UNAVAILABLE');
+        expect(await refusal(() => store.readMaterialIndexForTask({ bookId: bookA, references: [{ ...pin, indexDigest: 'f'.repeat(64) }] }, listed.materialId, 1)))
+          .toBe('MATERIAL_INDEX_MOVED');
+        expect(await refusal(() => store.readMaterialIndexForTask({ bookId: bookA, references: [pin] }, listed.materialId, 5))).toBe('MATERIAL_INDEX_CURSOR_INVALID');
+        // Reading committed nothing at all.
+        expect(watch.changed()).toBe(false);
+      } finally {
+        watch.close();
+      }
+      // An eligibility left for later takes the item out of every plan's reach at once.
+      store.decideLibraryMaterial({ materialId: listed.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+      expect(await refusal(() => store.readMaterialIndexForTask({ bookId: bookA, references: [pin] }, listed.materialId, 1))).toBe('MATERIAL_REFERENCE_UNAVAILABLE');
+      // An item of the house may be listed by any Book's Tasks.
+      store.decideLibraryMaterial({ materialId: unlisted.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'house' } } });
+      store.decideLibraryMaterial({ materialId: unlisted.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'excluded', reason: null } });
+      const house = store.pinMaterialReference(bookB, unlisted.materialId);
+      expect(store.readMaterialIndexForTask({ bookId: bookB, references: [house] }, unlisted.materialId, 1).total).toBe(5);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 120_000);
+
+  it('builds at the next start what a closing service stopped, what came before revision 67, and removes stray working copies', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let materialId: string;
+    try {
+      materialId = (await put(store, file('早到.txt', CHINESE), '早到')).materialId;
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    // A revision-66 store: the item arrived before the index existed.
+    const plant = new DatabaseSync(storePath());
+    try {
+      plant.exec(`DROP TABLE material_index_segments; DROP TABLE material_index_builds; PRAGMA user_version = ${BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION};`);
+    } finally {
+      plant.close();
+    }
+    const work = join(roots.dataRoot, MATERIAL_INDEX_WORK_DIRECTORY);
+    mkdirSync(work, { recursive: true });
+    writeFileSync(join(work, `.work-${randomUUID()}.docx`), 'left behind');
+    writeFileSync(join(work, 'keep-me.txt'), 'not a working copy');
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(readdirSync(work)).toEqual(['keep-me.txt']);
+      expect(store.inspectLibraryMaterial(materialId).index.state).toBe('queued');
+      // Stopped as the service closes: the build under way records nothing.
+      store.startMaterialIndexing();
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const database = new DatabaseSync(storePath(), { readOnly: true });
+      try {
+        expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
+        expect((database.prepare('SELECT count(*) count FROM material_index_builds').get() as { count: number }).count).toBeLessThanOrEqual(1);
+      } finally {
+        database.close();
+      }
+      store.startMaterialIndexing();
+      await store.settleMaterialIndexing();
+      expect(store.inspectLibraryMaterial(materialId).index.state).toBe('complete');
+      expect(existsSync(work) ? readdirSync(work) : []).toEqual(['keep-me.txt']);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    expect(readFileSync(join(work, 'keep-me.txt'), 'utf8')).toBe('not a working copy');
+  }, 120_000);
+});
