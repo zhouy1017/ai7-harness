@@ -3041,18 +3041,20 @@ function validateSourceImportRecordTruth(db: DatabaseSync): void {
     '不创建发稿版本、公开发布许可或公开发布事实',
     '不导出、不发送、不交付、不发布',
   ] as const;
-  // A working representation read through a converter exists from revision 19 (ADR 0072 §3); this check also reads stores
-  // at earlier revisions, which have no such column and no such representation.
+  // A working representation read through a converter, and the converter's identity beside it, exist from revision 19
+  // (ADR 0072 §2); this check also reads stores at earlier revisions, which have neither column and no such representation.
   const sourceColumns = new Set(
     (db.prepare('PRAGMA table_xinfo(source_versions)').all() as SqlRow[]).map((column) => asString(column.name)),
   );
   const workingObject = sourceColumns.has('working_object_digest') ? 'sv.working_object_digest' : 'NULL';
+  const converterColumn = sourceColumns.has('converter_identity') ? 'sv.converter_identity' : 'NULL';
   const rows = db.prepare(
     `SELECT sir.source_import_record_id, sir.commit_id, sir.book_id, sir.source_version_id,
             sir.provenance_id, sir.target_kind, sir.source_version_disposition,
             sir.retained_boundary_json, sir.named_non_effects_json, sir.record_digest, sir.imported_at,
             sv.object_digest, sv.source_digest, sv.content_digest, sv.structure_digest,
-            sv.parser_identity, sv.format, ${workingObject} working_object_digest, co.byte_length,
+            sv.parser_identity, sv.format, ${workingObject} working_object_digest, ${converterColumn} converter_identity,
+            co.byte_length,
             sp.acquisition_path, sp.locality, sp.sanitized_identity,
             sp.parser_identity provenance_parser_identity, sp.recorded_at,
             ic.operation_kind, ic.committed_at, d.state draft_state,
@@ -3108,10 +3110,27 @@ function validateSourceImportRecordTruth(db: DatabaseSync): void {
     // Parsed exactly when it is a DOCX or was read through its converter, as the store writes a Source Version and as
     // `validateStagedDraftInventory` holds a draft to (Issue #583): an unparsed DOCX, a parsed PDF, RTF, ODT or unknown
     // file, or a parsed file with no working representation is none the store wrote.
+    const format = asString(row.format);
+    const workingObjectDigest = row.working_object_digest === null ? null : asString(row.working_object_digest);
+    const converterIdentity = row.converter_identity === null ? null : asString(row.converter_identity);
     requireBounded(
-      (parserIdentity !== null) === (asString(row.format) === 'DOCX' || row.working_object_digest !== null),
+      (parserIdentity !== null) === (format === 'DOCX' || workingObjectDigest !== null),
       'SCHEMA_INVALID',
       '来源版本的格式与是否解析不一致。',
+    );
+    // The conversion columns hold as the store reads them back (`store.ts`, `readConversionColumns`; Issue #583): the
+    // working representation and its converter's identity are set together or null together, and set only on a format
+    // the product reads through a converter. A DOCX given a working object, or a converted TXT, MD or DOC with no
+    // converter named, would otherwise open and fail its first read as STORE_CORRUPT.
+    requireBounded(
+      (workingObjectDigest === null) === (converterIdentity === null),
+      'SCHEMA_INVALID',
+      '来源版本的转换记录不完整。',
+    );
+    requireBounded(
+      workingObjectDigest === null || format === 'TXT' || format === 'MD' || format === 'DOC',
+      'SCHEMA_INVALID',
+      '来源版本的格式不能带有转换记录。',
     );
     const recordDigest = sha256(canonicalJson({
       schema: 'ai7.source-import-record/1',
