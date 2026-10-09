@@ -3055,12 +3055,14 @@ function registerRendererHandlers(
   ipcMain.handle(IPC_CHANNELS.startEvaluation, (event, input?: Parameters<RendererApi['startEvaluation']>[0]) =>
     envelope(async () => {
       const owned = requireSender(event);
-      requireDesktop(input === undefined || input === null || (typeof input === 'object' && typeof input.fromInitial === 'boolean'), 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireDesktop(input === undefined || input === null || (typeof input === 'object' && typeof input.fromInitial === 'boolean' &&
+        (input.skipDamaged === undefined || typeof input.skipDamaged === 'boolean')), 'AI7_RENDERER_BOUNDARY_INVALID');
       return serializeEffect(async () => {
         requireAuthority();
         const route = requireCurrentBookRoute(owned);
         const routeGeneration = owned.routeGeneration;
-        const result = await service.call('startEvaluation', { bookId: route.bookId, fromInitial: input?.fromInitial === true });
+        // Skipping a latest version that cannot be read (Issue #726) is said explicitly, never assumed.
+        const result = await service.call('startEvaluation', { bookId: route.bookId, fromInitial: input?.fromInitial === true, skipDamaged: input?.skipDamaged === true });
         requireCurrentRouteGeneration(owned, routeGeneration);
         if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '评估不属于当前图书工作台。');
         return result;

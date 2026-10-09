@@ -113,7 +113,7 @@ describe('设置 › 评估校准与预测 over the real store', () => {
     try {
       // Before any Book: calibration waits on adjustments the editor cannot make yet, the prediction is closed, nothing listed.
       expect(store.inspectEvaluationCalibration()).toEqual({
-        calibration: { adjustments: 0, unreadableBooks: 0, initialScoresConnected: true, threshold: 10, enabled: true, offsetComputed: false, active: false },
+        calibration: { adjustments: 0, unreadableBooks: 0, initialScoresConnected: true, threshold: 10, enabled: true, active: false, offset: null },
         prediction: { booksWithActuals: 0, threshold: 30, enabled: false, available: false },
         preferenceEntries: 0,
         books: [],
@@ -244,7 +244,7 @@ describe('设置 › 评估校准与预测 over the real store', () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       const off = store.setEvaluationPreferences({ expectedEntries: 0, predictionEnabled: false, calibrationEnabled: false });
-      expect([off.calibration, off.preferenceEntries]).toEqual([{ adjustments: 0, unreadableBooks: 0, initialScoresConnected: true, threshold: 10, enabled: false, offsetComputed: false, active: false }, 1]);
+      expect([off.calibration, off.preferenceEntries]).toEqual([{ adjustments: 0, unreadableBooks: 0, initialScoresConnected: true, threshold: 10, enabled: false, active: false, offset: null }, 1]);
       expect(refusal(() => store.setEvaluationPreferences({ expectedEntries: 0, predictionEnabled: false, calibrationEnabled: true })))
         .toBe('PREFERENCES_MOVED:评估设置刚被改过；请看过现在的设置再改。');
       expect(refusal(() => store.setEvaluationPreferences({ expectedEntries: 1, predictionEnabled: false, calibrationEnabled: false })))

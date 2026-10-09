@@ -12,6 +12,9 @@ import {
   ACTUALS_PRINT_LABEL,
   ACTUALS_SAVE,
   CALIBRATION_HEADING,
+  CALIBRATION_METHOD,
+  CALIBRATION_OFF_EFFECT,
+  CALIBRATION_OFFSET_WAITING,
   CALIBRATION_SCOPE,
   CALIBRATION_STATUS,
   CALIBRATION_SWITCH,
@@ -20,6 +23,8 @@ import {
   PREDICTION_HEADING,
   PREDICTION_SWITCH,
   actualsBookLine,
+  calibrationBasisLine,
+  calibrationOffsetLine,
   calibrationProgressLine,
   calibrationUnreadableLine,
   predictionProgressLine,
@@ -106,14 +111,34 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
     const calibrationSection = el('section', 'calibration-section calibration-calibration');
     const calibrationSwitch = switchNode('calibration', CALIBRATION_SWITCH, calibration.enabled, false, (on) =>
       void savePreferences({ predictionEnabled: prediction.enabled, calibrationEnabled: on }, 'calibration'));
+    // The house offset as computed now (EVAL-011a): its basis and each item's offset past the gate, or what it waits for.
+    const offsetNode = el('div', 'calibration-offset');
+    offsetNode.dataset['calibrationOffset'] = calibration.offset === null ? 'waiting' : 'computed';
+    if (calibration.offset === null) {
+      offsetNode.append(el('p', 'field-note calibration-offset-waiting', CALIBRATION_OFFSET_WAITING));
+    } else {
+      offsetNode.append(el('p', 'field-note calibration-offset-basis', calibrationBasisLine(calibration.offset)));
+      const list = el('ul', 'calibration-offset-list');
+      for (const item of calibration.offset.items) {
+        const line = el('li', undefined, calibrationOffsetLine(item));
+        line.dataset['itemId'] = item.itemId;
+        line.dataset['offset'] = item.offset === null ? '' : String(item.offset);
+        list.append(line);
+      }
+      offsetNode.append(list);
+    }
     calibrationSection.append(
       el('h3', undefined, CALIBRATION_HEADING),
       el('p', 'calibration-progress', calibrationProgressLine(calibration)),
       ...(calibrationUnreadableLine(calibration.unreadableBooks) === null ? []
         : [el('p', 'field-note calibration-unreadable', calibrationUnreadableLine(calibration.unreadableBooks)!)]),
       el('p', 'field-note', CALIBRATION_SCOPE),
+      el('p', 'field-note calibration-method', CALIBRATION_METHOD),
       // Said while AI7 gives no 初评 to adjust (Issue #430 review), not by the count: after S81b a count below ten is progress.
       ...(!calibration.initialScoresConnected ? [el('p', 'field-note calibration-waiting', CALIBRATION_WAITING)] : []),
+      offsetNode,
+      // Off: new versions start from the raw 初评, and the switch stays reversible (EVAL-011).
+      ...(calibration.enabled ? [] : [el('p', 'field-note calibration-off-effect', CALIBRATION_OFF_EFFECT)]),
       calibrationSwitch,
     );
     refusalFor('calibration', calibrationSection);

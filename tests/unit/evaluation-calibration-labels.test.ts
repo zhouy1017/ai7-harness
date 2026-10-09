@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
   ACTUALS_EMPTY,
+  CALIBRATION_METHOD,
+  CALIBRATION_OFF_EFFECT,
+  CALIBRATION_OFFSET_WAITING,
   CALIBRATION_PAGE_LEDE,
   CALIBRATION_SCOPE,
   CALIBRATION_WAITING,
   PREDICTION_ADDS,
   actualsBookLine,
   actualsLine,
+  calibrationBasisLine,
+  calibrationOffsetLine,
   calibrationProgressLine,
   calibrationUnreadableLine,
   predictionProgressLine,
@@ -16,12 +21,15 @@ import {
   MAX_FIRST_PRINT,
   MAX_PRICE_FEN,
   PREDICTION_MIN_BOOKS_WITH_ACTUALS,
-  CALIBRATION_OFFSET_COMPUTED,
+  calibratedScore,
   calibrationActive,
+  calibrationOffset,
+  formatCalibrationOffset,
   formatPriceFen,
   parseFirstPrint,
   parsePriceYuan,
   predictionAvailable,
+  roundToHalfPoint,
 } from '../../src/shared/evaluation-calibration.js';
 
 // Unit suite for 设置 › 评估校准与预测 (Issue #430, plan slice S82; V2-UX-EVAL-010, EVAL-011, EVAL-014; ADR 0076 §7): the two
@@ -42,14 +50,47 @@ describe('评估校准与预测 thresholds', () => {
   });
 
   it('applies calibration only at ten adjustments, and never while the editor has turned it off', () => {
-    expect(calibrationActive(0, true, true)).toBe(false);
-    expect(calibrationActive(9, true, true)).toBe(false);
-    expect(calibrationActive(10, true, true)).toBe(true);
-    expect(calibrationActive(10, false, true)).toBe(false);
-    expect(calibrationActive(40, false, true)).toBe(false);
-    // No offset, no calibration: however many adjustments, nothing reads as applied (Issue #429 review).
-    expect(calibrationActive(10, true, false)).toBe(false);
-    expect(calibrationActive(40, true, CALIBRATION_OFFSET_COMPUTED)).toBe(false);
+    expect(calibrationActive(0, true)).toBe(false);
+    expect(calibrationActive(9, true)).toBe(false);
+    expect(calibrationActive(10, true)).toBe(true);
+    expect(calibrationActive(10, false)).toBe(false);
+    expect(calibrationActive(40, false)).toBe(false);
+  });
+});
+
+describe('the house offset (EVAL-011a)', () => {
+  it('is the mean of the Books\' differences to the half point, a quarter rounding away from zero, and nothing over no Book', () => {
+    expect(calibrationOffset([])).toBeNull();
+    expect(calibrationOffset([-2, -2, -2])).toBe(-2);
+    expect(calibrationOffset([1, 0, 0, 0])).toBe(0.5);
+    expect(calibrationOffset([1, 0, 0, 0, 0])).toBe(0);
+    expect(calibrationOffset([0.5, 0.5, 0, 0])).toBe(0.5);
+    expect(calibrationOffset([-0.5, -0.5, 0, 0])).toBe(-0.5);
+    expect(calibrationOffset([-1, 0, 0, 0, 0])).toBe(0);
+    expect(calibrationOffset([0.3, 0.3, 0.3])).toBe(0.5);
+    expect(calibrationOffset([-0.3, -0.3, -0.3])).toBe(-0.5);
+    // Never −0.
+    expect(Object.is(calibrationOffset([-0.1, 0.1]), 0)).toBe(true);
+    expect(roundToHalfPoint(1.74)).toBe(1.5);
+    expect(roundToHalfPoint(1.75)).toBe(2);
+    expect(roundToHalfPoint(-1.75)).toBe(-2);
+  });
+
+  it('keeps an adjusted starting score within 0 and the item\'s 满分', () => {
+    expect(calibratedScore(12, -2, 20)).toBe(10);
+    expect(calibratedScore(16.5, 0.5, 20)).toBe(17);
+    expect(calibratedScore(19.5, 1, 20)).toBe(20);
+    expect(calibratedScore(20, 3.5, 20)).toBe(20);
+    expect(calibratedScore(0.5, -1, 20)).toBe(0);
+    expect(calibratedScore(0, -2, 20)).toBe(0);
+  });
+
+  it('states an offset with its sign', () => {
+    expect(formatCalibrationOffset(0)).toBe('0');
+    expect(formatCalibrationOffset(1.5)).toBe('+1.5');
+    expect(formatCalibrationOffset(2)).toBe('+2');
+    expect(formatCalibrationOffset(-0.5)).toBe('−0.5');
+    expect(formatCalibrationOffset(-3)).toBe('−3');
   });
 });
 
@@ -104,9 +145,25 @@ describe('评估校准与预测 words', () => {
     expect(calibrationUnreadableLine(2)).toBe('另有 2 本书的评估记录已损坏，未计入调分记录。');
     expect(calibrationProgressLine({ adjustments: 3, threshold: 10, enabled: false, active: false })).toBe('调分记录 3 / 10 本 · 已关闭');
     expect(calibrationProgressLine({ adjustments: 12, threshold: 10, enabled: true, active: true })).toBe('调分记录 12 / 10 本 · 已生效');
-    expect(calibrationProgressLine({ adjustments: 10, threshold: 10, enabled: true, active: false }))
-      .toBe('调分记录 10 / 10 本 · 已满数，但校准还没有计算：AI7 的初评分数暂不调整');
+    expect(calibrationProgressLine({ adjustments: 10, threshold: 10, enabled: true, active: true })).toBe('调分记录 10 / 10 本 · 已生效');
     expect(calibrationProgressLine({ adjustments: 9, threshold: 10, enabled: true, active: false })).toBe('调分记录 9 / 10 本 · 满 10 本后生效');
+  });
+
+  it('discloses the house offset\'s method, its basis and each item\'s offset, or what it waits for, and what off does (EVAL-011a)', () => {
+    expect(CALIBRATION_METHOD).toContain('你的定稿分数减去 AI7 初评分数的平均值');
+    expect(CALIBRATION_METHOD).toContain('取到半分');
+    expect(CALIBRATION_METHOD).toContain('不另存');
+    expect(CALIBRATION_OFFSET_WAITING).toBe('校准偏移尚未计算：满 10 本调分记录后，按上述方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。');
+    expect(CALIBRATION_OFF_EFFECT).toBe('校准已关闭：新版本从 AI7 初评开始时直接用 AI7 的原始分数；可以随时再打开，关闭和打开都有记录。');
+    expect(calibrationBasisLine({ basisBooks: 10, items: [] })).toBe('校准依据：10 本书的定稿评估；各评分项的偏移如下（正数表示你的定稿分数通常高于 AI7 初评）。');
+    expect(calibrationOffsetLine({ itemId: 'readers-and-market', label: '读者与市场潜力', fullMarks: 20, offset: -2, books: 10 }))
+      .toBe('读者与市场潜力：−2（依据 10 本书，满分 20，调整后不超出 0 到 20）');
+    expect(calibrationOffsetLine({ itemId: 'literary-quality', label: '文学品质与作者声音', fullMarks: 20, offset: 0.5, books: 10 }))
+      .toBe('文学品质与作者声音：+0.5（依据 10 本书，满分 20，调整后不超出 0 到 20）');
+    expect(calibrationOffsetLine({ itemId: 'chinese-language', label: '中文语言与表达', fullMarks: 20, offset: 0, books: 9 }))
+      .toBe('中文语言与表达：0（依据 9 本书，满分 20，调整后不超出 0 到 20）');
+    expect(calibrationOffsetLine({ itemId: 'theme-and-context', label: '主题、价值与社会文化语境', fullMarks: 20, offset: null, books: 0 }))
+      .toBe('主题、价值与社会文化语境：暂无数据（没有书同时有你的定稿分数和 AI7 初评分数）');
   });
 
   it('states what the prediction switch waits for until it may be turned on, then whether it is on', () => {

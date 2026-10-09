@@ -720,7 +720,7 @@ async function dispatch(
     case 'inspectEvaluation':
       return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluation(request.input.bookId, request.input.recordId, request.input.recordsBefore) };
     case 'startEvaluation':
-      return { id: request.id, ok: true, op: request.op, result: store.startEvaluation(request.input.bookId, request.input.fromInitial) };
+      return { id: request.id, ok: true, op: request.op, result: store.startEvaluation(request.input.bookId, request.input.fromInitial, request.input.skipDamaged) };
     case 'saveEvaluation':
       return { id: request.id, ok: true, op: request.op, result: store.saveEvaluation(request.input) };
     // AI7 初评 (Issue #429, S81b1): prepared as a cooperative job whose plan the Task Drawer opens, and started from its bar

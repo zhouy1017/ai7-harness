@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 109 as const;
+export const SERVICE_PROTOCOL_VERSION = 111 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -6624,10 +6624,33 @@ export interface EvaluationRecordProjection extends EvaluationRecordSummaryProje
   /** AI7's 初评 this version began from, beside the editor's scores (EVAL-006); `null` for a version the editor began alone. */
   readonly initial: EvaluationInitialDraftProjection | null;
   /**
+   * The house calibration applied to AI7's starting scores when this version began from its 初评 (EVAL-011; Issue #429,
+   * EVAL-011a): recorded with the version, as it was then. `null` for a version begun alone, or from the raw 初评 — below the
+   * gate, or with calibration turned off. `initial.items[].score` keeps AI7's raw score either way.
+   */
+  readonly calibration: EvaluationInitialCalibrationProjection | null;
+  /**
    * Why which of this version's words are AI7's could not all be checked (Issue #702 review): the version before could not be
    * read, or the 采用 records cannot be read now. The words the version marks stay AI7's. `null` when every mark was checked.
    */
   readonly ai7WordsNotice: string | null;
+  /**
+   * The versions this one skipped when it began (Issue #726): the ordinals of the Book's versions after the one it was seeded
+   * from that could not be read then, oldest first. Empty for a version that followed the one before it.
+   */
+  readonly skippedRecords: ReadonlyArray<number>;
+  /** The ordinal of the version this one was seeded from — the one it compares with — or `null` when it began empty. */
+  readonly seededFrom: number | null;
+}
+
+/**
+ * The house calibration a version begun from AI7's 初评 recorded (EVAL-011; Issue #429, EVAL-011a): how many Books' 定稿
+ * evaluations the offsets rested on, and each item whose starting score it moved — AI7's raw score, the offset, and the
+ * starting score after it, clamped to [0, 满分]. An item whose offset was 0, or which AI7 did not score, is not listed.
+ */
+export interface EvaluationInitialCalibrationProjection {
+  readonly basisBooks: number;
+  readonly items: ReadonlyArray<{ readonly itemId: string; readonly raw: number; readonly offset: number; readonly adjusted: number }>;
 }
 
 /** ②C 评估 of one Book: its versions newest first, the one on show, and whether a version can begin. */
@@ -6647,10 +6670,17 @@ export interface EvaluationWorkspaceProjection {
   readonly record: EvaluationRecordProjection | null;
   /**
    * `开始评估` or `重新评估`, or why neither can begin now; `fromInitial` names AI7's latest 初评 when a version can begin from it
-   * — the 初评 settled and read the manuscript as it stands now.
+   * — the 初评 settled and read the manuscript as it stands now. `skipDamaged` is set while the Book's latest version cannot
+   * be read (Issue #726): the next version then skips every version after `seedOrdinal` — the latest readable 定稿, or `null`
+   * when none reads and the version begins empty — and `startEvaluation` must say so (`StartEvaluationInput.skipDamaged`).
    */
   readonly start:
-    | { readonly allowed: true; readonly kind: 'first' | 'again'; readonly fromInitial: null | { readonly revisionId: string; readonly ordinal: number } }
+    | {
+        readonly allowed: true;
+        readonly kind: 'first' | 'again';
+        readonly fromInitial: null | { readonly revisionId: string; readonly ordinal: number };
+        readonly skipDamaged: null | { readonly skipped: ReadonlyArray<number>; readonly seedOrdinal: number | null };
+      }
     | { readonly allowed: false; readonly reason: string };
   /** AI7's 初评 of the Book (Issue #429, S81b1). */
   readonly initial: EvaluationInitialProjection;
@@ -6808,9 +6838,14 @@ export interface EvaluationReadersReportProjection {
   readonly templates: ReadonlyArray<EvaluationReadersReportTemplateProjection>;
 }
 
-/** 开始评估 or 重新评估: alone, or from AI7's latest 初评 (Issue #429, S81b1). */
+/**
+ * 开始评估 or 重新评估: alone, or from AI7's latest 初评 (Issue #429, S81b1). `skipDamaged` says the editor saw that the latest
+ * version cannot be read and chose to skip it (Issue #726): without it a damaged latest still refuses, and with it a latest
+ * that reads after all refuses too, so no version is skipped that the editor did not see skipped.
+ */
 export interface StartEvaluationInput {
   readonly fromInitial: boolean;
+  readonly skipDamaged: boolean;
 }
 
 // ---- ②A 分析反馈 (Issue #94, plan slice S38; V2-UX-ANALYSIS-023, ANALYSIS-024, FDBK-005 to FDBK-008) -------------------
@@ -7352,12 +7387,18 @@ export interface EvaluationCalibrationProjection {
     readonly initialScoresConnected: boolean;
     readonly threshold: number;
     readonly enabled: boolean;
-    /**
-     * Whether the house offset calibration applies has been computed (Issue #429 review): not yet in any build. `active` is
-     * never true without it, so the page never says 「已生效」 while AI7's starting scores are left as they are.
-     */
-    readonly offsetComputed: boolean;
+    /** Whether the house offset applies to AI7's starting scores now: past the gate, with calibration not turned off. */
     readonly active: boolean;
+    /**
+     * The house offset as computed now (EVAL-011; Issue #429, EVAL-011a), recomputed at every read and never stored: `null`
+     * below the gate. Past it, the Books whose latest 定稿 version begun from AI7's 初评 gives the basis — one value per
+     * Book — and each profile item's offset to the half point, `null` for an item no Book scored both ways. The offset is
+     * computed while the switch is off too, so turning it back on applies what the house's evaluations say now.
+     */
+    readonly offset: null | {
+      readonly basisBooks: number;
+      readonly items: ReadonlyArray<{ readonly itemId: string; readonly label: string; readonly fullMarks: number; readonly offset: number | null; readonly books: number }>;
+    };
   };
   readonly prediction: {
     readonly booksWithActuals: number;
