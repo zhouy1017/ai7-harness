@@ -22,6 +22,7 @@ import {
   WRITING_TYPE_LEGEND,
   writingDraftedLine,
   writingFieldTooLong,
+  writingOpenTaskTone,
   writingTaskLine,
 } from './writing-task-labels.js';
 
@@ -153,7 +154,8 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       // Why the Task wrote no draft — a copy of an exemplar refused — said beside its line, with nothing offered to open.
       const refusal = task.refusal === null ? null : el('p', 'field-note writing-task-refusal', task.refusal);
       const row = el('div', 'button-row');
-      const open = action(WRITING_ACTIONS.openTask, task.state === 'prepared' ? 'primary' : 'quiet', 'open-task', () => options.openPlan(task.taskIntentId));
+      // The next step only for a Task that can start: one whose 范例 is gone, or that wrote no draft, is looked at, not started (#698).
+      const open = action(WRITING_ACTIONS.openTask, writingOpenTaskTone(task), 'open-task', () => options.openPlan(task.taskIntentId));
       open.setAttribute('aria-controls', 'task-drawer');
       open.disabled = busy;
       row.append(open);

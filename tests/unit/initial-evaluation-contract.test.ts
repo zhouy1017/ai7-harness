@@ -129,6 +129,9 @@ describe('the book-level synthesis', () => {
     expect(code({ suggestedConclusion: null, nextStep: null })).toBe('ok');
     expect(code({ strengths: ['一', '二', '三', '四', '五', '六'] })).toBe('schema-invalid');
     expect(code({ weaknesses: ['字'.repeat(101)] })).toBe('schema-invalid');
+    // Within its graphemes but past its bytes (Issue #696); 4-byte graphemes at the bound are within both.
+    expect(code({ weaknesses: [`字${String.fromCodePoint(0x301).repeat(200)}`] })).toBe('schema-invalid');
+    expect(code({ weaknesses: [String.fromCodePoint(0x20000).repeat(100)] })).toBe('ok');
     expect(code({ risks: [] })).toBe('schema-invalid');
     expect(parseInitialEvaluationSynthesis('否', PROFILE)).toMatchObject({ ok: false, code: 'not-json' });
   });

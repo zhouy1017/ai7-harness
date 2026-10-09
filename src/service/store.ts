@@ -350,7 +350,9 @@ import {
 } from './writing-tasks.js';
 import { writingKindDefinition, writingRecordedKindDefinition } from './writing/writing-kind.js';
 import {
+  WRITING_COPY_RULES,
   writingExemplarLine,
+  type WritingCopyRules,
   type WritingBookInput,
   type WritingContractInput,
   type WritingEvaluationInput,
@@ -4221,6 +4223,18 @@ export class EditorialStore {
       // The market section's house data and 按我的评分重写评语 of the version on show (Issue #429, S81b2).
       market: (bookId) => this.#evaluationMarket(bookId),
       rewrite: (bookId, version) => this.#evaluationRewriteWorkspace(bookId, version),
+    }, {
+      // A mark a version's entry records is tied to the 采用 that appended it (Issue #696). A damaged decision row never makes
+      // 评估 unreadable (Issue #702 review): the record keeps the marks it holds and says their source cannot be checked, and
+      // 按我的评分重写评语 says it is unavailable, as before.
+      adoptionsOf: (recordId) => {
+        try {
+          return this.#evaluationRewrites.adoptionsOf(recordId);
+        } catch (error) {
+          if (error instanceof EvaluationRewriteError) return null;
+          throw error;
+        }
+      },
     });
     this.#analysisFeedback = new AnalysisFeedbackLedger(authority);
     this.#capturedProcedures = new CapturedProcedures(authority);
@@ -4958,7 +4972,7 @@ export class EditorialStore {
       requireStore(latest !== null && projection !== null && projection.taskIntent !== null && checkpoint !== null, 'TASK_PLAN_UNAVAILABLE', '写作任务还没有准备计划。');
       current(projection.taskIntent.taskIntentId);
       const blocks = this.#analysisCall(() => latest.ledger.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
-      const plan = this.#taskPlanCall(() => writingPlan({ projection, bookTitle, blocks, input: latest.task.input, exemplarsHere: latest.task.exemplarsReadable }));
+      const plan = this.#taskPlanCall(() => writingPlan({ projection, bookTitle, blocks, input: latest.task.input, exemplarsHere: latest.task.exemplarsReadable, copyRules: latest.task.copyRules }));
       return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     if (input.kind === 'initial-evaluation') {
@@ -7534,8 +7548,8 @@ export class EditorialStore {
    * The writing ledger of one frozen contract — a house type, the editor's words and one reference set — made when first asked
    * for and kept while it prepares, as 审稿意见's is. It takes the launch the baseline ledger was bound to.
    */
-  #writingLedger(input: WritingContractInput): BaselineAnalysisStore {
-    const definition = this.#analysisCall(() => writingKindDefinition(input));
+  #writingLedger(input: WritingContractInput, rules: WritingCopyRules = WRITING_COPY_RULES): BaselineAnalysisStore {
+    const definition = this.#analysisCall(() => writingKindDefinition(input, rules));
     return this.#writingLedgers.obtain(definition.promptContractDigest, () => {
       const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
       ledger.bindLaunch(this.#baselineAnalysis.launch);
@@ -7549,8 +7563,9 @@ export class EditorialStore {
    * request, so its outcome and drafts stay readable and nothing of it is run again.
    */
   #writingLedgerOf(task: StoredWritingTask): BaselineAnalysisStore {
-    if (task.exemplarsReadable) return this.#writingLedger(task.input);
-    const definition = this.#analysisCall(() => writingRecordedKindDefinition(task.input, task.promptContractSha256));
+    // A Task recorded under `/1` is run and judged under `/1` (#704 P2-2).
+    if (task.exemplarsReadable) return this.#writingLedger(task.input, task.copyRules);
+    const definition = this.#analysisCall(() => writingRecordedKindDefinition(task.input, task.promptContractSha256, task.copyRules));
     return this.#writingLedgers.obtain(`${task.promptContractSha256}:recorded`, () => {
       const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
       ledger.bindLaunch(this.#baselineAnalysis.launch);
@@ -7962,7 +7977,7 @@ export class EditorialStore {
         typeId: latest.task.typeId,
         typeLabel: latest.task.input.type.label,
         state: latest.projection.state,
-        label: writingTaskStateLabel(latest.projection),
+        label: writingTaskStateLabel(latest.projection, latest.task.exemplarsReadable),
         // A Task not yet run whose exemplar is no longer here says it cannot start; one that ran says why it wrote no draft.
         refusal: !latest.task.exemplarsReadable && latest.projection.taskOutcome === null ? WRITING_EXEMPLAR_MOVED : this.#writingRefusal(latest.projection),
       },
@@ -8363,6 +8378,8 @@ export class EditorialStore {
           };
         }
         const last = this.#evaluationRewriteCall(() => this.#evaluationRewrites.latestDecision(version.recordId));
+        // Every 采用 of the version, read under the same guard: a damaged one makes the rewrite unavailable (Issue #702 review).
+        this.#evaluationRewriteCall(() => this.#evaluationRewrites.adoptionsOf(version.recordId));
         decided = last === null ? null : { decision: last.decision, entryOrdinal: last.entryOrdinal, decidedAt: last.recordedAt };
       }
     } catch (error) {
@@ -13677,7 +13694,7 @@ export class EditorialStore {
     const booksWithActuals = this.#evaluationCalibration.booksWithActuals();
     // The Books whose editor adjusted AI7's 初评 in a 定稿 version, each counted once (Issue #429, S81b1; §8.6 「10 本调分记录」).
     // The calibration itself — the offset it would apply to AI7's starting scores — is not computed yet: it waits for its slice.
-    const adjustments = this.#evaluations.adjustedBooks();
+    const { books: adjustments, unreadable: unreadableBooks } = this.#evaluations.adjustedBooks();
     const where = 'EXISTS (SELECT 1 FROM publication_versions p WHERE p.book_id = b.book_id)';
     const rows = (after === null
       ? this.#authority.prepare(`SELECT b.book_id, b.title FROM books b WHERE ${where} ORDER BY b.title, b.book_id LIMIT ?`).all(MAX_EVALUATION_CALIBRATION_BOOKS + 1)
@@ -13695,6 +13712,7 @@ export class EditorialStore {
     return {
       calibration: {
         adjustments,
+        unreadableBooks,
         initialScoresConnected: true,
         threshold: CALIBRATION_MIN_ADJUSTMENTS,
         enabled: preferences.calibrationEnabled,
@@ -13719,7 +13737,7 @@ export class EditorialStore {
     try {
       return operation();
     } catch (error) {
-      if (error instanceof EvaluationCalibrationError) throw new StoreError(error.code, error.message);
+      if (error instanceof EvaluationCalibrationError || error instanceof EvaluationError) throw new StoreError(error.code, error.message);
       throw error;
     }
   }

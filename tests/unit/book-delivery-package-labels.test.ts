@@ -138,3 +138,25 @@ describe('the words of 图书交付包', () => {
     }
   });
 });
+
+describe('the version a Captured Procedure version link focuses (Issue #66, S31b review P3-4; Issue #697)', () => {
+  const versions = [{ packageVersionId: 'v3' }, { packageVersionId: 'v2' }, { packageVersionId: 'v1' }];
+
+  it('focuses exactly the version the link names, on the first read only', () => {
+    const focus = new labels.LinkedPackageVersionFocus('v2');
+    expect(focus.take(versions)).toBe('v2');
+    // A later read — a refresh, a prepared version — keeps focus where the editor is.
+    expect(focus.take(versions)).toBeNull();
+  });
+
+  it('focuses no version when the listed page does not hold the one named, nor later when it does', () => {
+    const focus = new labels.LinkedPackageVersionFocus('v9');
+    expect(focus.take(versions)).toBeNull();
+    expect(focus.take([...versions, { packageVersionId: 'v9' }])).toBeNull();
+  });
+
+  it('focuses no version when the card was opened without a link', () => {
+    expect(new labels.LinkedPackageVersionFocus(null).take(versions)).toBeNull();
+    expect(new labels.LinkedPackageVersionFocus('v1').take([])).toBeNull();
+  });
+});

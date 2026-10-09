@@ -29,7 +29,10 @@ import {
   procedureCategoryOpen,
   procedureChoiceAfter,
   procedureChoiceFocus,
+  procedureChoiceSelection,
+  procedureChoiceStatus,
   procedurePreparationPin,
+  copyProcedureChoice,
   type ProcedureChoiceOutcome,
 } from './procedure-choice.js';
 import {
@@ -1675,23 +1678,18 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         // A later choice superseded this one: its answer, not this, fills the sheet.
         if (sheetState !== state || destroyed || !state.requests.current(ticket)) return;
         outcome = { kind: 'answered', run };
-        options.setStatus(sheetProcedureChosenStatus(run));
       } catch (error) {
         if (sheetState !== state || destroyed || !state.requests.current(ticket)) return;
         // The choice the sheet held stays, its version and categories with it, and the reason is shown (Issue #684).
         outcome = { kind: 'failed', reason: options.errorMessage(error, '无法读取所选的可复用工序。') };
-        options.setStatus(outcome.reason, 'error');
       }
     }
     state.requests.settle(ticket);
     const next = procedureChoiceAfter(state, outcome);
-    state.procedure = next.procedure;
-    state.categories.clear();
-    for (const categoryId of next.categories) state.categories.add(categoryId);
-    state.scope = next.scope;
-    state.from = next.from;
-    state.to = next.to;
-    state.problem = next.problem;
+    copyProcedureChoice(state, next);
+    // A reason is announced once, on the sheet's alert line; the status bar never repeats it (Issue #691).
+    const status = procedureChoiceStatus(outcome, sheetProcedureChosenStatus);
+    if (status !== null) options.setStatus(status);
     renderSheet(projection, state);
     // Back on the selector the editor used, while the sheet still shows it.
     sheet.querySelector<HTMLElement>(`[data-review-field="${procedureChoiceFocus(versionId !== null, state.procedure)}"]`)?.focus();
@@ -1717,7 +1715,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       option.dataset['procedureFit'] = procedure.fit;
       procedureSelect.append(option);
     }
-    procedureSelect.value = state.procedure?.procedureId ?? '';
+    // The values the selectors show come from the procedure the sheet holds, so a failed choice puts back the editor's own (Issue #691).
+    const selection = procedureChoiceSelection(state.procedure);
+    procedureSelect.value = selection.procedureId;
     procedureSelect.disabled = state.procedures.length === 0;
     procedureSelect.addEventListener('change', () => void chooseProcedure(state, procedureSelect.value));
     procedureLabel.append(el('span', undefined, SHEET_PROCEDURE_LABEL), procedureSelect);
@@ -1734,7 +1734,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         versionSelect.dataset['reviewField'] = 'procedure-version';
         const procedureId = state.procedure.procedureId;
         state.procedure.eligibleVersions.forEach((version, index) => versionSelect.append(new Option(sheetProcedureVersionOption(version.version, index === 0), version.versionId)));
-        versionSelect.value = state.procedure.resolved.versionId;
+        versionSelect.value = selection.versionId ?? '';
         versionSelect.addEventListener('change', () => void chooseProcedure(state, procedureId, versionSelect.value));
         versionLabel.append(el('span', undefined, SHEET_PROCEDURE_VERSION_LABEL), versionSelect);
         procedureField.append(versionLabel);

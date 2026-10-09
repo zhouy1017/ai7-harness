@@ -112,6 +112,52 @@ export function procedureChoiceFocus(versionChoice: boolean, held: CapturedProce
   return versionChoice && held?.resolved != null ? 'procedure-version' : 'procedure';
 }
 
+/**
+ * What the two selectors show for the procedure the sheet holds: its id (`''` for categories chosen by hand) and its resolved
+ * version, `null` when there is none to choose. The sheet draws its selectors from this, so a failed choice — which keeps the
+ * procedure it held — puts back the values the editor had before choosing (Issue #691).
+ */
+export function procedureChoiceSelection(held: CapturedProcedureRunProjection | null): { readonly procedureId: string; readonly versionId: string | null } {
+  return { procedureId: held?.procedureId ?? '', versionId: held?.resolved?.versionId ?? null };
+}
+
+/** The sheet's own state a choice fills: the same category set, cleared and refilled, so nothing else holding it goes stale. */
+export interface ProcedureSheetTarget {
+  procedure: CapturedProcedureRunProjection | null;
+  readonly categories: Set<string>;
+  scope: ReviewScopeKind | null;
+  from: string | null;
+  to: string | null;
+  problem: string | null;
+}
+
+/**
+ * Copies what a choice leaves (`procedureChoiceAfter`) back into the sheet's state, in place (Issue #691) — safely even when
+ * `next` carries the sheet's own set.
+ */
+export function copyProcedureChoice(target: ProcedureSheetTarget, next: ProcedureSheetChoice): void {
+  target.procedure = next.procedure;
+  const categories = [...next.categories];
+  target.categories.clear();
+  for (const categoryId of categories) target.categories.add(categoryId);
+  target.scope = next.scope;
+  target.from = next.from;
+  target.to = next.to;
+  target.problem = next.problem;
+}
+
+/**
+ * The status bar's line once a choice ends, replacing 「正在读取…」 (Issue #691). A reason the sheet shows on its alert line is
+ * announced there, once: the status bar then says nothing more, rather than the same reason again — a failed choice, and an answer
+ * that cannot run. An answer that fills the sheet says which version it read (`chosen`); a cleared choice read nothing and leaves
+ * the bar as it is (`null`).
+ */
+export function procedureChoiceStatus(outcome: ProcedureChoiceOutcome, chosen: (run: CapturedProcedureRunProjection) => string): string | null {
+  if (outcome.kind === 'cleared') return null;
+  if (outcome.kind === 'failed' || outcome.run.resolved === null) return '';
+  return chosen(outcome.run);
+}
+
 /** How `确认停用` ended: stopped, or refused as stale with the preview read again for the editor to look at first. */
 export type ProcedureStopConfirmation =
   | { readonly kind: 'stopped'; readonly result: CapturedProcedureProjection }
