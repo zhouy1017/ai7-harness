@@ -22,7 +22,7 @@ import {
   ANALYSIS_LEDGER_REVISION_62_SQL,
   ANALYSIS_LEDGER_SCHEMA_SQL,
   CAPTURED_PROCEDURE_SCHEMA_VERSION,
-  WRITING_TASK_SCHEMA_VERSION,
+  BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import {
   EVALUATION_REWRITE_ASSURANCE_STATEMENT,
@@ -655,7 +655,7 @@ describe('the market section and 按我的评分重写评语 over the real store
     }
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
       for (const table of Object.keys(EVALUATION_REWRITE_SCHEMA_SQL)) {
         expect(() => database.exec(`UPDATE ${table} SET recorded_at = recorded_at`)).toThrowError(/EVALUATION_REWRITE_LEDGER_IMMUTABLE/u);
         expect(() => database.exec(`DELETE FROM ${table}`)).toThrowError(/EVALUATION_REWRITE_LEDGER_IMMUTABLE/u);
@@ -751,7 +751,7 @@ describe('the market section and 按我的评分重写评语 over the real store
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
       expect(rows(after)).toBe(before!);
       for (const table of KIND_COUPLED_ANALYSIS_RELATIONS) {
         expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(ANALYSIS_LEDGER_SCHEMA_SQL[table]);

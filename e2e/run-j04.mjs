@@ -65,6 +65,10 @@ const CHANGE_SUGGESTION_APPLY_MEMBERS = ['applyChangeSuggestion', 'applyChangeSu
 // no Provider, session or scheduler: a local file the system dialog chose, approved per file.
 // Synchronized delta with Issue #416 (S67b): a 图书交付包 version's export adds three — the same ledger's files in a folder
 // the system dialog chose, approved per file.
+// Synchronized delta with Issue #95 (S39): 后台分析登记's three members — its read, 登记 and 撤销登记. They read, record or revoke
+// the editor's standing decision for the route's Book; 登记 also asks the service's dispatcher to look at once, and every Run
+// it may start is its own exact Task, plan and Run Authorization. J-09 proves them; here the Book has none and no Run of it.
+const ENROLLMENT_MEMBERS = ['inspectBackgroundAnalysisEnrollment', 'enrollBackgroundAnalysis', 'revokeBackgroundAnalysisEnrollment'];
 const EXPORT_MEMBERS = [
   'reviewManuscriptExport', 'chooseManuscriptExportDestination', 'approveManuscriptExport', 'revealManuscriptExport',
   'reviewBookDeliveryPackageExport', 'chooseBookDeliveryPackageExportFolder', 'approveBookDeliveryPackageExport', 'cancelBookDeliveryPackageExport',
@@ -3009,7 +3013,9 @@ async function main() {
     // the surfaces that raise a Task — the plan authorizes nothing (PLAN-007). Synchronized delta with Issue
     // #420: its only start is its own bar's, and no card anywhere carries one. Since #502 the Run that waited for
     // the network settled a seventh Result Set Revision before 审阅, so the card ends there.
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.analysisState==='settled' && card.dataset.resultRevisionOrdinal==='8' && ${ONLY_ANALYSIS_ACTIONS} && !document.querySelector('[data-analysis-action="prepare"], [data-analysis-action="authorize"]') && !document.querySelector('#task-drawer [data-analysis-action], #task-drawer [data-review-action], #task-drawer [data-task-authorization-action]') && !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress|effect|enrol|apply|export/i.test(key) && ![...${JSON.stringify(CHANGE_SUGGESTION_APPLY_MEMBERS)}, ...${JSON.stringify(EXPORT_MEMBERS)}].includes(key)); })()`, 'no-execution-surface');
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.analysisState==='settled' && card.dataset.resultRevisionOrdinal==='8' && ${ONLY_ANALYSIS_ACTIONS} && !document.querySelector('[data-analysis-action="prepare"], [data-analysis-action="authorize"]') && !document.querySelector('#task-drawer [data-analysis-action], #task-drawer [data-review-action], #task-drawer [data-task-authorization-action]') && !Object.keys(window.ai7).some((key)=>/provider|session|scheduler|payload|egress|effect|enrol|apply|export/i.test(key) && ![...${JSON.stringify(CHANGE_SUGGESTION_APPLY_MEMBERS)}, ...${JSON.stringify(EXPORT_MEMBERS)}, ...${JSON.stringify(ENROLLMENT_MEMBERS)}].includes(key)); })()`, 'no-execution-surface');
+    // The old `/enrol/` guard's intent kept (#713 review, P3-9): this Book was never enrolled, and nothing was started by an Enrollment.
+    await assertRenderer(renderer, `window.ai7.inspectBackgroundAnalysisEnrollment().then((enrollment) => enrollment.state === 'none' && enrollment.enrollment === null && enrollment.startedRunCount === 0 && enrollment.historyCount === 0)`, 'no-background-enrollment');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-network-provider-session');
   } finally {
     finalCleanupRequested = true;

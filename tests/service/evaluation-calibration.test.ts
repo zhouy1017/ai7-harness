@@ -10,7 +10,7 @@ import {
   initializeEvaluationCalibrationSchema,
 } from '../../src/service/evaluation-calibration.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { WRITING_TASK_SCHEMA_VERSION, LEARNING_ELIGIBILITY_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
+import { BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, LEARNING_ELIGIBILITY_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { MAX_FIRST_PRINT, MAX_PRICE_FEN } from '../../src/shared/evaluation-calibration.js';
 import { PUBLICATION_FORBIDDEN_WORDS, type DesignatePublicationVersionInput, type EvaluationCalibrationProjection } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx, type ComposedManuscriptRequest } from '../support/composed-fixture.js';
@@ -208,7 +208,7 @@ describe('设置 › 评估校准与预测 over the real store', () => {
     }
     const database = new DatabaseSync(databasePath());
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
       const records = (database.prepare('SELECT canonical_json FROM publication_actuals ORDER BY ordinal').all() as Array<{ canonical_json: string }>)
         .map((row) => JSON.parse(row.canonical_json) as { schema: string; priceFen: number; publicationOrdinal: number; supersedes: string | null; actor: string });
       expect(records).toHaveLength(67);
@@ -394,7 +394,7 @@ describe('设置 › 评估校准与预测 over the real store', () => {
     }
     const database = new DatabaseSync(databasePath(), { readOnly: true });
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
       const after = tablesOf(database);
       // Revision 52's Series relations (Issue #63, S28a) return with it, as the planted store lacked them too.
       expect(after.filter((entry) => !/^(publication_actuals|evaluation_preferences|series|store_versions|database_export_|backup_preferences|scheduled_backup|database_replacements|database_merge|evaluation_initial_drafts|dialogue_|readers_report_|captured_procedure|review_run_procedure_pins|developer_capability_proposal|evaluation_rewrite_|writing_)/u.test(entry.name))).toEqual(before!);

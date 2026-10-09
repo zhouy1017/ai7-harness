@@ -21,7 +21,7 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
   ANALYSIS_LEDGER_REVISION_58_SQL,
   DATABASE_EXPORT_SCHEMA_VERSION,
-  WRITING_TASK_SCHEMA_VERSION,
+  BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
   STORE_VERSION_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
@@ -221,7 +221,7 @@ describe('导出数据库 over the real store', () => {
         schema: 'ai7.database-package/1',
         dataVersion: 1,
         softwareVersion: version,
-        schemaRevision: WRITING_TASK_SCHEMA_VERSION,
+        schemaRevision: BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
         origin: 'database-export',
         credentials: 'excluded',
         contents: { books: 1, sourceVersions: 1, libraryMaterials: 0, series: 0 },
@@ -236,7 +236,7 @@ describe('导出数据库 over the real store', () => {
       writeFileSync(copyPath, packaged['store/ai7.sqlite']!);
       const copy = new DatabaseSync(copyPath, { readOnly: true });
       try {
-        expect((copy.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
+        expect((copy.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
         expect((copy.prepare('SELECT count(*) count FROM books').get() as { count: number }).count).toBe(1);
       } finally {
         copy.close();
@@ -400,7 +400,7 @@ describe('导出数据库 over the real store', () => {
         }
         const check = new DatabaseSync(join(other.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
         try {
-          expect((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
+          expect((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
         } finally {
           check.close();
         }
@@ -799,16 +799,16 @@ describe('the payload check of a package, for every kind of file it carries (Iss
     expect(index).toBeGreaterThanOrEqual(0);
     const live = new DatabaseSync(storePath(), { readOnly: true });
     try {
-      expect(await refusedWith(verifyCopiedPayloads(storePath(), members, WRITING_TASK_SCHEMA_VERSION, undefined, live))).toBe('no-error');
+      expect(await refusedWith(verifyCopiedPayloads(storePath(), members, BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, undefined, live))).toBe('no-error');
       const target = members[index]!;
       const otherDigest = target.sha256 === 'f'.repeat(64) ? '0'.repeat(64) : 'f'.repeat(64);
       for (const changed of [{ ...target, sha256: otherDigest }, { ...target, bytes: target.bytes + 1 }]) {
         const packed = members.map((member, at) => (at === index ? changed : member));
-        const damaged = await refusedWith(verifyCopiedPayloads(storePath(), packed, WRITING_TASK_SCHEMA_VERSION, undefined, live));
+        const damaged = await refusedWith(verifyCopiedPayloads(storePath(), packed, BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, undefined, live));
         expect(damaged).toMatchObject({ code: 'DATABASE_SOURCE_DAMAGED' });
         expect((damaged as { message: string }).message).toContain(`${label} 1 个`);
         // Without the live store to tell the two apart, it is a package that did not come out whole.
-        expect(await refusedWith(verifyCopiedPayloads(storePath(), packed, WRITING_TASK_SCHEMA_VERSION)))
+        expect(await refusedWith(verifyCopiedPayloads(storePath(), packed, BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION)))
           .toMatchObject({ code: 'DATABASE_PACKAGE_INCOMPLETE' });
       }
     } finally {

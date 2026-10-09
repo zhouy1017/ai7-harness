@@ -304,8 +304,12 @@ interface ManuscriptCheckpointBinding {
 type CheckpointPurpose = typeof TASK_INPUT_CHECKPOINT_PURPOSE | 'Reimport Safety / 重新导入安全固定点' | 'Export Input / 导出输入' | 'Document Version / 文档版本';
 
 interface CheckpointOwner {
-  createManuscriptCheckpointWork(manuscriptId: string, branchId: string, purpose: typeof TASK_INPUT_CHECKPOINT_PURPOSE):
-    { workId: string | null; total: number; checkpoint: ManuscriptCheckpointBinding | null };
+  createManuscriptCheckpointWork(
+    manuscriptId: string,
+    branchId: string,
+    purpose: typeof TASK_INPUT_CHECKPOINT_PURPOSE,
+    options?: { preemptible?: boolean },
+  ): { workId: string | null; total: number; checkpoint: ManuscriptCheckpointBinding | null };
   advanceManuscriptCheckpointWork(workId: string):
     { done: boolean; completed: number; total: number; checkpoint: ManuscriptCheckpointBinding | null };
   finalizeManuscriptCheckpointWork(
@@ -318,9 +322,26 @@ interface CheckpointOwner {
 interface PreparationWork {
   workId: string;
   taskIntentId: string;
+  bookId: string;
   checkpointWorkId: string;
   launchPolicy: LaunchPolicyProjection;
   total: number;
+  /** The 后台分析登记 dispatcher's (Issue #95, S39): any preparation the editor starts on the Book stops it first. */
+  background: boolean;
+  /** The dispatcher's Task Intent, not yet written: it is written only as the plan freezes (#713 re-review, P2-1). */
+  pendingIntent: PendingIntent | null;
+}
+
+/** A Task Intent as `prepare` decided it, before it is written. */
+interface PendingIntent {
+  readonly taskIntentId: string;
+  readonly bookId: string;
+  readonly goal: string;
+  readonly mode: AnalysisTaskMode;
+  readonly redoOf: string | null;
+  readonly preparedByEnrollmentVersionId: string | null;
+  readonly predecessor: { readonly revisionId: string; readonly digest: string } | null;
+  readonly selectedRange: BaselineAnalysisSelectedRange | null;
 }
 
 /** The facts one `analysis_task_intents` row carries, with the canonical record they were read from. */
@@ -337,6 +358,8 @@ interface IntentFacts {
   readonly expectedOutcome: string;
   /** 改计划重做 (Issue #422, S76c; CONT-013): the cancelled Run this Task redoes; `null` for any other Task. */
   readonly redoOfRunRecordId: string | null;
+  /** The 后台分析登记 version whose dispatcher created this Task Intent (Issue #95, S39); `null` for every Task the editor asked for. */
+  readonly preparedByEnrollmentVersionId: string | null;
 }
 
 /**
@@ -423,6 +446,12 @@ export type BaselineAnalysisPrepareInput =
     launchPolicy: LaunchPolicyProjection;
     /** 改计划重做 (Issue #422, S76c): the cancelled Run of the Book's latest Task this new Task redoes. */
     redoOf?: string | null;
+    /**
+     * The 后台分析登记 dispatcher's preparation (Issue #95, S39; the Commander's ruling on #713, P1-2): always a new Task Intent of
+     * its own, marked with the enrollment version, never one the editor asked for; refused while any preparation of the Book is
+     * under way or the editor's own Task is prepared and not started; its checkpoint gives way to any other the Book asks for.
+     */
+    background?: { enrollmentVersionId: string };
   }
   | { phase: 'advance'; workId: string }
   | { phase: 'cancel'; workId: string }
@@ -603,24 +632,41 @@ function asNumber(value: unknown): number {
 }
 
 /**
- * Who started the Task, as its Run Authorization records it (Issue #421): `standard-direct` from its plan, or
- * `default-execution-rule` — 快速开始 under a 默认执行规则 — with the rule version the authorization names.
+ * Who started the Task, as its Run Authorization records it (Issue #421): `standard-direct` from its plan,
+ * `default-execution-rule` — 快速开始 under a 默认执行规则 — with the rule version the authorization names, or
+ * `background-analysis-enrollment` — AI7 by itself under the Book's 后台分析登记 (Issue #95, S39) — with the enrollment version.
  */
-function authorizationOrigin(row: SqlRow): { origin: 'standard-direct' | 'default-execution-rule'; ruleVersionId: string | null } {
+function authorizationOrigin(row: SqlRow): {
+  origin: 'standard-direct' | 'default-execution-rule' | 'background-analysis-enrollment';
+  ruleVersionId: string | null;
+  enrollmentVersionId: string | null;
+} {
   const origin = asString(row.origin);
-  if (origin === 'standard-direct') return { origin, ruleVersionId: null };
+  if (origin === 'standard-direct') return { origin, ruleVersionId: null, enrollmentVersionId: null };
   const record = parseCanonicalJson(asString(row.canonical_json));
+  if (origin === 'background-analysis-enrollment') {
+    requireAnalysis(isRecord(record) && record.origin === origin && typeof record.enrollmentVersionId === 'string' &&
+      UUID_PATTERN.test(record.enrollmentVersionId) && record.ruleVersionId === undefined,
+    'ANALYSIS_RECORD_INVALID', '运行授权的来源记录无效。');
+    return { origin, ruleVersionId: null, enrollmentVersionId: record.enrollmentVersionId };
+  }
   requireAnalysis(origin === 'default-execution-rule' && isRecord(record) && record.origin === origin &&
     typeof record.ruleVersionId === 'string' && UUID_PATTERN.test(record.ruleVersionId),
   'ANALYSIS_RECORD_INVALID', '运行授权的来源记录无效。');
-  return { origin, ruleVersionId: record.ruleVersionId };
+  return { origin, ruleVersionId: record.ruleVersionId, enrollmentVersionId: null };
 }
 
-/** How a Run is authorized: from its plan, or by 快速开始 under one version of a 默认执行规则 (Issue #421). */
+/**
+ * How a Run is authorized: from its plan, by 快速开始 under one version of a 默认执行规则 (Issue #421), or by AI7 itself under one
+ * version of the Book's 后台分析登记 (Issue #95, S39).
+ */
 export type AnalysisAuthorizationOrigin =
   | { readonly kind: 'standard-direct' }
-  | { readonly kind: 'default-execution-rule'; readonly ruleVersionId: string };
+  | { readonly kind: 'default-execution-rule'; readonly ruleVersionId: string }
+  | { readonly kind: 'background-analysis-enrollment'; readonly enrollmentVersionId: string };
 const STANDARD_DIRECT: AnalysisAuthorizationOrigin = { kind: 'standard-direct' };
+/** What a Run AI7 started under the Book's 后台分析登记 records when it is authorized (Issue #95, S39). */
+export const BACKGROUND_AUTHORIZED_DETAIL = '后台分析按登记记录了运行授权。';
 
 function transact<T>(db: DatabaseSync, body: () => T): T {
   db.exec('BEGIN IMMEDIATE');
@@ -883,6 +929,8 @@ export class BaselineAnalysisStore {
         redoOf: intent.redoOfRunRecordId === null
           ? null
           : { runRecordId: intent.redoOfRunRecordId, taskIntentId: this.#redoneTaskIntentId(intent.redoOfRunRecordId) },
+        // A Task the 后台分析登记 dispatcher prepared says so (Issue #95, S39): it is never shown as one the editor asked for.
+        ...(intent.preparedByEnrollmentVersionId === null ? {} : { preparedByEnrollmentVersionId: intent.preparedByEnrollmentVersionId }),
       }),
     };
     const revisionRows = this.#revisionRows(bookId);
@@ -1553,6 +1601,100 @@ export class BaselineAnalysisStore {
   }
 
   /**
+   * Where the Book's primary manuscript stands now (Issue #95, S39): its branch, revision, journal and working digest — what a
+   * `prospective` Background Analysis Enrollment compares with the text it was made against — and when the last confirmed edit
+   * of the branch was made durable, whatever revision it was made on, so a checkpoint any Task takes never clears the
+   * Enrollment's quiet period (#713 review, P2-1); `null` when the branch was never edited.
+   */
+  workingPointOf(bookId: string): { branchId: string; revisionId: string; journalSequence: number; workingDigest: string; lastEditAt: string | null } {
+    requireAnalysis(UUID_PATTERN.test(bookId), 'ANALYSIS_BOOK_INVALID', '图书标识无效。');
+    const manuscript = this.#db.prepare("SELECT manuscript_id FROM manuscripts WHERE book_id = ? AND role = 'primary'").get(bookId) as SqlRow | undefined;
+    requireAnalysis(manuscript !== undefined, 'ANALYSIS_RECORD_INVALID', '无法读取当前稿件工作状态。');
+    const head = this.#workingHead(asString(manuscript.manuscript_id), bookId);
+    const last = this.#db.prepare('SELECT max(durable_at) last FROM edit_journal_entries WHERE branch_id = ?').get(head.branchId) as SqlRow;
+    return {
+      branchId: head.branchId,
+      revisionId: head.currentRevisionId,
+      journalSequence: head.currentJournalSequence,
+      workingDigest: head.currentWorkingDigest,
+      lastEditAt: last.last === null ? null : asString(last.last),
+    };
+  }
+
+  /**
+   * The Book's latest Task the editor asked for — not one the 后台分析登记 dispatcher prepared (Issue #95, S39) — with when it was
+   * made and the working text its Task Input checkpoint pinned, if it has one; `null` when the editor never asked for one.
+   */
+  latestEditorTaskOf(bookId: string): { taskIntentId: string; createdAt: string; checkpointDigest: string | null } | null {
+    requireAnalysis(UUID_PATTERN.test(bookId), 'ANALYSIS_BOOK_INVALID', '图书标识无效。');
+    // One row, found by the record's own mark (#713 re-review, P3-3): never a walk over the Tasks the dispatcher made since.
+    const row = this.#db.prepare(
+      `SELECT * FROM analysis_task_intents WHERE book_id = ? AND kind = ?
+         AND json_extract(canonical_json, '$.preparedByEnrollmentVersionId') IS NULL
+       ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+    ).get(bookId, this.#definition.kind) as SqlRow | undefined;
+    if (row === undefined) return null;
+    const intent = this.#intentFacts(row);
+    requireAnalysis(intent.preparedByEnrollmentVersionId === null, 'ANALYSIS_RECORD_INVALID', '任务意图记录无效。');
+    const checkpoint = this.#db.prepare('SELECT revision_digest FROM analysis_task_input_checkpoints WHERE task_intent_id = ?')
+      .get(intent.taskIntentId) as SqlRow | undefined;
+    return { taskIntentId: intent.taskIntentId, createdAt: intent.createdAt, checkpointDigest: checkpoint === undefined ? null : asString(checkpoint.revision_digest) };
+  }
+
+  /**
+   * The Book's latest Task as the 后台分析登记 dispatcher weighs it, read without building a projection (#713 re-review, P3-3):
+   * whose it is, the text its checkpoint pinned, whether its plan froze, whether it was authorized, and its Run's last state.
+   */
+  latestTaskFactsOf(bookId: string): null | {
+    preparedByEnrollment: boolean; checkpointDigest: string | null; planned: boolean; authorized: boolean; runState: BaselineAnalysisRunState | null;
+  } {
+    const row = this.#latestIntentRow(bookId);
+    if (row === undefined) return null;
+    const intent = this.#intentFacts(row);
+    const checkpoint = this.#db.prepare('SELECT revision_digest FROM analysis_task_input_checkpoints WHERE task_intent_id = ?')
+      .get(intent.taskIntentId) as SqlRow | undefined;
+    const planned = this.#db.prepare('SELECT 1 FROM analysis_plan_versions WHERE task_intent_id = ? LIMIT 1').get(intent.taskIntentId) !== undefined;
+    const authorized = this.#db.prepare('SELECT 1 FROM analysis_run_authorizations WHERE task_intent_id = ?').get(intent.taskIntentId) !== undefined;
+    const state = this.#db.prepare(
+      `SELECT s.state FROM analysis_run_records r JOIN analysis_run_states s ON s.run_record_id = r.run_record_id
+       WHERE r.task_intent_id = ? ORDER BY s.sequence DESC LIMIT 1`,
+    ).get(intent.taskIntentId) as SqlRow | undefined;
+    return {
+      preparedByEnrollment: intent.preparedByEnrollmentVersionId !== null,
+      checkpointDigest: checkpoint === undefined ? null : asString(checkpoint.revision_digest),
+      planned,
+      authorized,
+      runState: state === undefined ? null : asString(state.state) as BaselineAnalysisRunState,
+    };
+  }
+
+  /**
+   * Whether the Book's latest Result Set Revision is current with the working text, read from its pin alone (#713 re-review,
+   * P3-3): the same comparison `#freshness` makes for the latest revision, with no projection built.
+   */
+  analysisFreshnessOf(bookId: string): 'absent' | 'current' | 'stale' {
+    const latest = this.#db.prepare(
+      `SELECT r.manuscript_revision_id, r.manuscript_revision_digest FROM analysis_result_set_revisions r
+       JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
+       WHERE s.book_id = ? AND s.kind = ? ORDER BY r.ordinal DESC LIMIT 1`,
+    ).get(bookId, this.#definition.kind) as SqlRow | undefined;
+    if (latest === undefined) return 'absent';
+    const point = this.workingPointOf(bookId);
+    return point.revisionId === asString(latest.manuscript_revision_id) && point.workingDigest === asString(latest.manuscript_revision_digest)
+      ? 'current' : 'stale';
+  }
+
+  /** Whether any preparation of the Book is under way on this ledger (Issue #95, S39): the editor's or the dispatcher's. */
+  preparationInFlight(bookId: string): boolean {
+    return Array.from(this.#work.values()).some((work) => work.bookId === bookId);
+  }
+
+  /** Whether a preparation of the Book other than `workId` is under way: the dispatcher's own is never counted against it. */
+  preparationInFlightBesides(bookId: string, workId: string | null): boolean {
+    return Array.from(this.#work.values()).some((work) => work.bookId === bookId && work.workId !== workId);
+  }
+
+  /**
    * The facts a 默认执行规则 binds, as the Book's durable state reads now (Issue #421): the re-derivation Reconnect
    * Preflight compares a waiting Run's plan with, for an update of the whole Book. No rule is ever used under
    * developer-live (Provider Processing v5 to v7: `matchingActiveDefaultExecutionRuleAllowed: false`), so this is
@@ -1900,7 +2042,9 @@ export class BaselineAnalysisStore {
     requireAnalysis(goal === this.#definition.mode(mode).goal, 'ANALYSIS_RECORD_INVALID', '任务意图的目标与更新方式不一致。');
     const record = parseCanonicalJson(asString(row.canonical_json));
     requireAnalysis(isRecord(record) && record.taskIntentId === row.task_intent_id && typeof record.expectedOutcome === 'string' &&
-      (record.redoOfRunRecordId === undefined || (typeof record.redoOfRunRecordId === 'string' && UUID_PATTERN.test(record.redoOfRunRecordId))),
+      (record.redoOfRunRecordId === undefined || (typeof record.redoOfRunRecordId === 'string' && UUID_PATTERN.test(record.redoOfRunRecordId))) &&
+      (record.preparedByEnrollmentVersionId === undefined ||
+        (typeof record.preparedByEnrollmentVersionId === 'string' && UUID_PATTERN.test(record.preparedByEnrollmentVersionId) && record.redoOfRunRecordId === undefined)),
     'ANALYSIS_RECORD_INVALID', '任务意图记录无效。');
     const start = row.selected_start_position;
     const end = row.selected_end_position;
@@ -1915,6 +2059,7 @@ export class BaselineAnalysisStore {
       record,
       expectedOutcome: record.expectedOutcome,
       redoOfRunRecordId: record.redoOfRunRecordId === undefined ? null : record.redoOfRunRecordId as string,
+      preparedByEnrollmentVersionId: record.preparedByEnrollmentVersionId === undefined ? null : record.preparedByEnrollmentVersionId as string,
     };
   }
 
@@ -2590,6 +2735,18 @@ export class BaselineAnalysisStore {
     requireAnalysis(update === null || firstRange || this.#definition.updateModes.includes(mode), 'ANALYSIS_UPDATE_MODE_UNAVAILABLE', '本分析种类没有该更新方式。');
     requireAnalysis(input.goal === this.#definition.mode(mode).goal, 'ANALYSIS_GOAL_INVALID', '任务目标与所选更新方式的固定目标不一致。');
     this.#requireDeniedPolicy(input.launchPolicy);
+    const background = input.background ?? null;
+    if (background === null) {
+      // Any preparation the editor starts on the Book stops the 后台分析登记 dispatcher's first (Issue #95, S39; #713 review, P1-2):
+      // AI7 never holds the Book's checkpoint against the editor, and its Task Intent is never one the editor's reuses.
+      for (const work of Array.from(this.#work.values())) {
+        if (work.background && work.bookId === input.bookId) this.prepare({ phase: 'cancel', workId: work.workId });
+      }
+    } else {
+      requireAnalysis(UUID_PATTERN.test(background.enrollmentVersionId) && input.redoOf == null && !input.reconfirm,
+        'ANALYSIS_BACKGROUND_INVALID', '后台分析的准备参数无效。');
+      requireAnalysis(!this.preparationInFlight(input.bookId), 'ANALYSIS_PREPARATION_IN_FLIGHT', '这本书正在准备一项任务；后台分析不接手。');
+    }
     const existing = this.inspect(input.bookId);
     requireAnalysis(!runIsActive(existing.run?.state ?? null), 'ANALYSIS_TASK_ACTIVE', activeRunReason(existing.run?.state ?? null));
     const latest = existing.resultSetRevision;
@@ -2658,6 +2815,10 @@ export class BaselineAnalysisStore {
     }
     const binding = this.#binding(input.bookId);
     const latestIntent = existing.taskIntent === null ? null : this.#intentFacts(this.#latestIntentRow(input.bookId)!);
+    // The dispatcher never steps in beside the editor's own plan, prepared and not started (#713 review, P1-2).
+    requireAnalysis(background === null || latestIntent === null || latestIntent.preparedByEnrollmentVersionId !== null ||
+      existing.planEnvelope === null || existing.authorization !== null,
+    'ANALYSIS_TASK_PREPARED', '这本书有一份你准备好但还没开始的计划；后台分析不接手。');
     // The same Task: the latest intent, no Run yet, the same update mode and the same predecessor. A
     // prepared one is revised in place (Issue #48); an interrupted preparation is resumed only for the
     // same request; anything else is a new Task Intent.
@@ -2672,7 +2833,10 @@ export class BaselineAnalysisStore {
     const contractCurrent = existing.planEnvelope === null || existing.planEnvelope.promptContractDigest === this.#definition.promptContractDigest;
     // Nor is a Task whose frozen scope plan the chain no longer derives (#711 review P3-4): 重新准备 makes it anew.
     const planDerives = existing.coverageManifest === null || existing.authorization !== null || this.#frozenPlanDerives(existing.update, existing.coverageManifest);
-    const sameTask = latestIntent !== null && existing.run === null && latestIntent.mode === mode &&
+    // A Task the 后台分析登记 dispatcher prepared is never the editor's to revise or resume, and the dispatcher never takes up any
+    // Task Intent but the one it creates now (#713 review, P1-2): each side's preparation is a Task of its own.
+    const sameTask = background === null && latestIntent !== null && latestIntent.preparedByEnrollmentVersionId === null &&
+      existing.run === null && latestIntent.mode === mode &&
       latestIntent.predecessorRevisionId === (latest?.revisionId ?? null) && (input.reconfirm || checkpointCurrent) && contractCurrent && planDerives;
     if (sameTask && existing.checkpoint !== null) {
       return { done: true, workId: null, completed: 1, total: 1, projection: this.#revisePreparedPlan(input.bookId, latestIntent, existing, selectedRange, input.reconfirm) };
@@ -2680,48 +2844,68 @@ export class BaselineAnalysisStore {
     requireAnalysis(!input.reconfirm, 'ANALYSIS_PLAN_REVISION_ABSENT', '当前没有已冻结且待重新确认的计划。');
     const reusable = sameTask && sameRange(latestIntent.selectedRange, selectedRange);
     const taskIntentId = reusable ? latestIntent.taskIntentId : randomUUID();
-    if (!reusable) {
-      const createdAt = new Date().toISOString();
-      const initial = this.#isInitial(mode);
-      const base = {
-        bookId: input.bookId,
-        contractVersion: this.#definition.contractVersion,
-        createdAt,
-        expectedOutcome: this.#definition.expectedOutcome,
-        goal: input.goal,
-        kind: this.#definition.kind,
-        taskIntentId,
-        ...(redoOf === null ? {} : { redoOfRunRecordId: redoOf }),
-      };
-      // A whole first Task's record is the base alone, as it has been since revision 15. Every Task that
-      // carries a plan also states its mode, its predecessor and its range — and a range-bound first
-      // Task states that it has no predecessor rather than leaving the fact to the reader.
-      const intent = canonicalRecord(!this.#carriesPlan(mode) ? base : {
-        ...base,
-        mode,
-        predecessorRevisionId: initial ? null : latest!.revisionId,
-        predecessorRevisionDigest: initial ? null : latest!.digest,
-        selectedRange,
-      });
-      this.#db.prepare(
-        `INSERT INTO analysis_task_intents(
-           task_intent_id, book_id, kind, contract_version, goal, created_at, canonical_json, sha256,
-           mode, predecessor_revision_id, selected_start_position, selected_end_position
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(taskIntentId, input.bookId, this.#definition.kind, this.#definition.contractVersion, input.goal, createdAt, intent.json, intent.digest,
-        mode, initial ? null : latest!.revisionId, selectedRange?.startPosition ?? null, selectedRange?.endPosition ?? null);
-    }
+    const initial = this.#isInitial(mode);
+    // What the Task Intent records, written as it is made — or, for the 后台分析登记 dispatcher's, only in the transaction that
+    // freezes its plan (the Commander's ruling on #713, re-review P2-1): a background preparation that stops leaves no Task Intent
+    // at all, so it never stands as the Book's latest Task in front of the editor's.
+    const pendingIntent: PendingIntent | null = reusable ? null : {
+      taskIntentId, bookId: input.bookId, goal: input.goal, mode, redoOf,
+      preparedByEnrollmentVersionId: background?.enrollmentVersionId ?? null,
+      predecessor: initial ? null : { revisionId: latest!.revisionId, digest: latest!.digest },
+      selectedRange,
+    };
+    if (pendingIntent !== null && background === null) this.#insertIntent(pendingIntent);
     const active = Array.from(this.#work.values()).find((work) => work.taskIntentId === taskIntentId);
     if (active !== undefined) return { done: false, workId: active.workId, completed: 0, total: active.total, projection: null };
-    const checkpoint = this.#checkpointOwner.createManuscriptCheckpointWork(binding.manuscriptId, binding.branchId, TASK_INPUT_CHECKPOINT_PURPOSE);
+    const checkpoint = this.#checkpointOwner.createManuscriptCheckpointWork(binding.manuscriptId, binding.branchId, TASK_INPUT_CHECKPOINT_PURPOSE,
+      { preemptible: background !== null });
     if (checkpoint.workId === null) {
       requireAnalysis(checkpoint.checkpoint !== null, 'ANALYSIS_CHECKPOINT_INVALID', '任务输入固定点缺失。');
-      transact(this.#db, () => this.#persistPrepared(taskIntentId, checkpoint.checkpoint!, TASK_INPUT_CHECKPOINT_PURPOSE, input.launchPolicy));
+      transact(this.#db, () => {
+        if (pendingIntent !== null && background !== null) this.#insertIntent(pendingIntent);
+        this.#persistPrepared(taskIntentId, checkpoint.checkpoint!, TASK_INPUT_CHECKPOINT_PURPOSE, input.launchPolicy);
+      });
       return { done: true, workId: null, completed: 1, total: 1, projection: this.inspect(input.bookId) };
     }
     const workId = randomUUID();
-    this.#work.set(workId, { workId, taskIntentId, checkpointWorkId: checkpoint.workId, launchPolicy: structuredClone(input.launchPolicy), total: checkpoint.total });
+    this.#work.set(workId, {
+      workId, taskIntentId, bookId: input.bookId, checkpointWorkId: checkpoint.workId, launchPolicy: structuredClone(input.launchPolicy),
+      total: checkpoint.total, background: background !== null, pendingIntent: background === null ? null : pendingIntent,
+    });
     return { done: false, workId, completed: 0, total: checkpoint.total, projection: null };
+  }
+
+  /** One Task Intent row, its record made at the moment it is written. */
+  #insertIntent(intent: PendingIntent): void {
+    const createdAt = new Date().toISOString();
+    const base = {
+      bookId: intent.bookId,
+      contractVersion: this.#definition.contractVersion,
+      createdAt,
+      expectedOutcome: this.#definition.expectedOutcome,
+      goal: intent.goal,
+      kind: this.#definition.kind,
+      taskIntentId: intent.taskIntentId,
+      ...(intent.redoOf === null ? {} : { redoOfRunRecordId: intent.redoOf }),
+      ...(intent.preparedByEnrollmentVersionId === null ? {} : { preparedByEnrollmentVersionId: intent.preparedByEnrollmentVersionId }),
+    };
+    // A whole first Task's record is the base alone, as it has been since revision 15. Every Task that
+    // carries a plan also states its mode, its predecessor and its range — and a range-bound first
+    // Task states that it has no predecessor rather than leaving the fact to the reader.
+    const record = canonicalRecord(!this.#carriesPlan(intent.mode) ? base : {
+      ...base,
+      mode: intent.mode,
+      predecessorRevisionId: intent.predecessor?.revisionId ?? null,
+      predecessorRevisionDigest: intent.predecessor?.digest ?? null,
+      selectedRange: intent.selectedRange,
+    });
+    this.#db.prepare(
+      `INSERT INTO analysis_task_intents(
+         task_intent_id, book_id, kind, contract_version, goal, created_at, canonical_json, sha256,
+         mode, predecessor_revision_id, selected_start_position, selected_end_position
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(intent.taskIntentId, intent.bookId, this.#definition.kind, this.#definition.contractVersion, intent.goal, createdAt, record.json, record.digest,
+      intent.mode, intent.predecessor?.revisionId ?? null, intent.selectedRange?.startPosition ?? null, intent.selectedRange?.endPosition ?? null);
   }
 
   #advance(workId: string): BaselineAnalysisPreparationResult {
@@ -2732,7 +2916,11 @@ export class BaselineAnalysisStore {
     if (!progress.done) return { done: false, workId, completed: progress.completed, total: progress.total, projection: null };
     this.#checkpointOwner.finalizeManuscriptCheckpointWork(
       work.checkpointWorkId,
-      (checkpoint, purpose) => this.#persistPrepared(work.taskIntentId, checkpoint, purpose, work.launchPolicy),
+      (checkpoint, purpose) => {
+        // The dispatcher's Task Intent is written here, in the transaction that freezes its plan, and nowhere earlier.
+        if (work.pendingIntent !== null) this.#insertIntent(work.pendingIntent);
+        this.#persistPrepared(work.taskIntentId, checkpoint, purpose, work.launchPolicy);
+      },
     );
     this.#work.delete(workId);
     const intent = this.#db.prepare('SELECT book_id FROM analysis_task_intents WHERE task_intent_id = ?').get(work.taskIntentId) as SqlRow;
@@ -3018,7 +3206,7 @@ export class BaselineAnalysisStore {
     origin: AnalysisAuthorizationOrigin = STANDARD_DIRECT,
   ): { projection: AnalysisProjection; dispatchRunRecordId: string | null } {
     requireAnalysis(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest) &&
-      (origin.kind === 'standard-direct' || (start === 'now' && UUID_PATTERN.test(origin.ruleVersionId))),
+      (origin.kind === 'standard-direct' || (start === 'now' && UUID_PATTERN.test(origin.kind === 'default-execution-rule' ? origin.ruleVersionId : origin.enrollmentVersionId))),
     'ANALYSIS_AUTHORIZATION_INVALID', '任务运行授权参数无效。');
     const prepared = this.inspect(bookId);
     requireAnalysis(prepared.taskIntent?.taskIntentId === taskIntentId && prepared.planEnvelope !== null && prepared.planVersion !== null,
@@ -3053,6 +3241,7 @@ export class BaselineAnalysisStore {
       taskIntentId,
       authority,
       ...(origin.kind === 'default-execution-rule' ? { ruleVersionId: origin.ruleVersionId } : {}),
+      ...(origin.kind === 'background-analysis-enrollment' ? { enrollmentVersionId: origin.enrollmentVersionId } : {}),
     });
     const run = canonicalRecord({ runRecordId, authorizationId, taskIntentId, recordedAt: instant });
     transact(this.#db, () => {
@@ -3065,7 +3254,9 @@ export class BaselineAnalysisStore {
       ).run(runRecordId, taskIntentId, authorizationId, instant, run.json, run.digest);
       this.#insertRunState(runRecordId, 1, 'authorized', origin.kind === 'standard-direct'
         ? { detail: '标准直接运行授权已记录。' }
-        : { detail: '快速开始按默认执行规则记录了运行授权。', ruleVersionId: origin.ruleVersionId }, instant);
+        : origin.kind === 'default-execution-rule'
+          ? { detail: '快速开始按默认执行规则记录了运行授权。', ruleVersionId: origin.ruleVersionId }
+          : { detail: BACKGROUND_AUTHORIZED_DETAIL, enrollmentVersionId: origin.enrollmentVersionId }, instant);
       if (!dispatchAllowed) {
         const reasons = blockedReasons(this.#launch.live);
         this.#insertRunState(runRecordId, 2, 'blocked-before-dispatch', { detail: reasons.join(' '), reasons }, instant);

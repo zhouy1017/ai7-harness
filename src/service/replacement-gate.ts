@@ -25,6 +25,8 @@ export interface RunningWork {
   readonly reviewRunsDriving: boolean;
   readonly jobsBusy: boolean;
   readonly exportRunning: boolean;
+  /** A 后台分析登记 pass is under way (Issue #95, S39; #713 review, P2-3): it could still write a Task, a plan and a Run. */
+  readonly backgroundBusy: boolean;
 }
 
 /**
@@ -32,7 +34,7 @@ export interface RunningWork {
  * running wrote after the backup would be lost with the data the replacement replaces.
  */
 export function replacementBlockedBy(work: RunningWork): string | null {
-  return !work.runsIdle || work.reviewRunsDriving || work.jobsBusy || work.exportRunning
+  return !work.runsIdle || work.reviewRunsDriving || work.jobsBusy || work.exportRunning || work.backgroundBusy
     ? '还有任务或处理在进行；请等它们结束，或先暂停或取消，再替换本机数据。'
     : null;
 }

@@ -448,6 +448,14 @@ export class BaselineAnalysisExecutionOwner {
   }
 
   /**
+   * Whether this launch has a route that executes a Run at all (Issue #95, S39): the developer-live route, or the J-04 model
+   * adapter's local deterministic one. Without either every start is blocked before dispatch, so 后台分析登记 starts nothing.
+   */
+  get routeExecutable(): boolean {
+    return !this.#disposed && ((this.#deps.developerLive ?? null) !== null || this.#deps.fixture !== null);
+  }
+
+  /**
    * Whether the governor has no place now (Issue #49, S14): as many Runs execute as it holds. A start then waits in
    * its queue (`admitOrQueue`); a quick start, a Review Run's approval and a 续行 wait for a place with their reasons.
    */
