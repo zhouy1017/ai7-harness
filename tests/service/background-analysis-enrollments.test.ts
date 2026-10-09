@@ -463,8 +463,12 @@ describe('后台分析登记 over the real store on exact sample1', () => {
       const book = await analysedBook(store, owner, 'L2 sample1 编辑取消');
       edit(store, book, '〔改动〕');
       enroll(store, book.bookId, 'backfill');
-      // The editor starts 同步到当前稿件 and cancels it while it waits.
+      // The editor starts 同步到当前稿件 and cancels it while it waits. The Enrollment never starts the editor's plan, even of its mode.
       const own = prepare(store, book.bookId, 'sync-current');
+      const version = store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime()).enrollment!.enrollmentVersionId;
+      expect(await refusal(() => store.startEnrolledBaselineAnalysis(book.bookId, own.taskIntent!.taskIntentId, own.planEnvelope!.digest, version,
+        'sync-current', runtime()))).toBe('BACKGROUND_ANALYSIS_START_INVALID');
+      expect(backgroundOrigins()).toBe(0);
       store.authorizeBaselineAnalysis(book.bookId, own.taskIntent!.taskIntentId, own.planEnvelope!.digest);
       store.cancelWaitingBaselineAnalysis(book.bookId, own.taskIntent!.taskIntentId);
       expect(store.backgroundAnalysisDecisionFor(book.bookId, runtime()).decision).toEqual({ kind: 'none', reason: BACKGROUND_EDITOR_TASK });
@@ -592,6 +596,9 @@ describe('后台分析登记 over the real store on exact sample1', () => {
         const started = store.createBaselineAnalysisPreparationWork(book.bookId, BASELINE_ANALYSIS_MODE_GOALS[mode], { mode, selectedRange: null }, launchPolicy);
         expect(started.done).toBe(false);
         expect(store.backgroundAnalysisDecisionFor(book.bookId, runtime()).decision).toEqual({ kind: 'wait', reason: BACKGROUND_PREPARATION_IN_FLIGHT });
+        const enrolledVersion = store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime()).enrollment!.enrollmentVersionId;
+        expect(await refusal(() => store.createBackgroundBaselineAnalysisPreparationWork(book.bookId, 'sync-current', enrolledVersion, launchPolicy)))
+          .toBe('ANALYSIS_PREPARATION_IN_FLIGHT');
         const intentsBefore = withDatabase(true, (database) => (database.prepare('SELECT count(*) n FROM analysis_task_intents WHERE book_id = ?').get(book.bookId) as Row).n);
         await pass(dispatcherOf(store, owner, { now: Date.now() + 2 * QUIET_MS }), owner);
         expect(withDatabase(true, (database) => (database.prepare('SELECT count(*) n FROM analysis_task_intents WHERE book_id = ?').get(book.bookId) as Row).n))
@@ -610,6 +617,33 @@ describe('后台分析登记 over the real store on exact sample1', () => {
     }
   }, 300_000);
 
+  it('never takes up a Task Intent the editor left behind: a preparation they cancelled stays theirs (P1-2)', async () => {
+    const store = await openWithRoute();
+    const owner = ownerOf(store);
+    try {
+      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+      const book = await analysedBook(store, owner, 'L2 sample1 编辑取消准备');
+      enroll(store, book.bookId, 'prospective');
+      edit(store, book, '〔改动〕');
+      // The editor clicks 先看计划 for 同步到当前稿件 and cancels it while its checkpoint is built: their Task Intent stays, planless.
+      const started = store.createBaselineAnalysisPreparationWork(book.bookId, BASELINE_ANALYSIS_MODE_GOALS['sync-current'], { mode: 'sync-current', selectedRange: null }, launchPolicy);
+      expect(started.done).toBe(false);
+      store.cancelBaselineAnalysisPreparationWork(started.workId!);
+      const orphan = store.inspectBaselineAnalysis(book.bookId, () => null).taskIntent!.taskIntentId;
+      // Even a preparation the editor cancelled is their latest Task: the Enrollment waits for an edit made after it.
+      expect(store.backgroundAnalysisDecisionFor(book.bookId, runtime()).decision).toEqual({ kind: 'none', reason: BACKGROUND_EDITOR_TASK });
+      edit(store, book, '〔取消之后的改动〕');
+      await pass(dispatcherOf(store, owner, { now: Date.now() + 2 * QUIET_MS }), owner);
+      const after = store.inspectBaselineAnalysis(book.bookId, () => null);
+      expect(after.taskIntent!.taskIntentId).not.toBe(orphan);
+      expect([after.authorization?.origin, after.taskIntent!.preparedByEnrollmentVersionId !== undefined, after.state]).toEqual(['background-analysis-enrollment', true, 'settled']);
+      store.markCleanShutdown();
+    } finally {
+      await owner.dispose();
+      store.close();
+    }
+  }, 300_000);
+
   it('gives way to a preparation the editor starts while its own is in flight, in the same mode or another (P1-2)', async () => {
     const store = await openWithRoute();
     const owner = ownerOf(store);
@@ -621,16 +655,19 @@ describe('后台分析登记 over the real store on exact sample1', () => {
         edit(store, book, '〔改动〕');
         let editorsWork: ReturnType<EditorialStore['createBaselineAnalysisPreparationWork']> | null = null;
         let backgroundIntent: string | null = null;
+        let backgroundLeftAtOnce = false;
         const dispatcher = dispatcherOf(store, owner, { now: Date.now() + 2 * QUIET_MS }, {
           yieldStep: async () => {
             if (editorsWork !== null) return;
             backgroundIntent = store.inspectBaselineAnalysis(book.bookId, () => null).taskIntent!.taskIntentId;
-            // The editor clicks 先看计划 while the background checkpoint is being built.
+            // The editor clicks 先看计划 while the background checkpoint is being built: the background preparation stops at once.
             editorsWork = store.createBaselineAnalysisPreparationWork(book.bookId, BASELINE_ANALYSIS_MODE_GOALS[mode], { mode, selectedRange: null }, launchPolicy);
+            backgroundLeftAtOnce = !store.baselineAnalysisLedger.preparationInFlightBesides(book.bookId, editorsWork.workId);
           },
         });
         await pass(dispatcher, owner);
         expect(editorsWork).not.toBeNull();
+        expect(backgroundLeftAtOnce).toBe(true);
         let progress = editorsWork!;
         while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
         const theirs = store.inspectBaselineAnalysis(book.bookId, () => null);
@@ -640,6 +677,40 @@ describe('后台分析登记 over the real store on exact sample1', () => {
         expect(store.baselineAnalysisLedger.preparationInFlight(book.bookId)).toBe(false);
       }
       expect(backgroundOrigins()).toBe(0);
+      store.markCleanShutdown();
+    } finally {
+      await owner.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it('its checkpoint gives way to one another kind of Task asks for, which goes ahead at once (P1-2)', async () => {
+    const store = await openWithRoute();
+    const owner = ownerOf(store);
+    try {
+      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+      const book = await analysedBook(store, owner, 'L2 sample1 固定点让开');
+      enroll(store, book.bookId, 'prospective');
+      edit(store, book, '〔改动〕');
+      let j03: ReturnType<EditorialStore['createTaskAuthorizationPreparationWork']> | null = null;
+      let refused: unknown = null;
+      const dispatcher = dispatcherOf(store, owner, { now: Date.now() + 2 * QUIET_MS }, {
+        yieldStep: async () => {
+          if (j03 !== null || refused !== null) return;
+          // The editor asks J-03's preparation of the same Book while the background checkpoint is being built.
+          try {
+            j03 = store.createTaskAuthorizationPreparationWork(book.bookId, J03_TASK_GOAL, launchPolicy);
+          } catch (error) {
+            refused = error;
+          }
+        },
+      });
+      await pass(dispatcher, owner);
+      expect(refused).toBeNull();
+      let progress = j03!;
+      while (!progress.done) progress = store.advanceTaskAuthorizationPreparationWork(progress.workId!);
+      expect(backgroundOrigins()).toBe(0);
+      expect(store.baselineAnalysisLedger.preparationInFlight(book.bookId)).toBe(false);
       store.markCleanShutdown();
     } finally {
       await owner.dispose();
@@ -717,6 +788,8 @@ describe('后台分析登记 over the real store on exact sample1', () => {
       await pass(dispatcherOf(reopened, reowner, { now: Date.now() + 2 * QUIET_MS }), reowner);
       expect(reopened.inspectBaselineAnalysis(soundBook, () => null).authorization?.origin).toBe('background-analysis-enrollment');
       expect(reopened.inspectBaselineAnalysis(damagedBook, () => null).taskIntent).toBeNull();
+      // The ledger's own list of Enrollments in force leaves the damaged one out rather than failing for every Book.
+      expect(withDatabase(true, (database) => new BackgroundAnalysisEnrollmentLedger(database).active().map((record) => record.bookId))).toEqual([soundBook]);
     } finally {
       await reowner.dispose();
       reopened.close();
