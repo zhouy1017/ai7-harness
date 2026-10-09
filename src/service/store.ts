@@ -350,7 +350,9 @@ import {
 } from './writing-tasks.js';
 import { writingKindDefinition, writingRecordedKindDefinition } from './writing/writing-kind.js';
 import {
+  WRITING_COPY_RULES,
   writingExemplarLine,
+  type WritingCopyRules,
   type WritingBookInput,
   type WritingContractInput,
   type WritingEvaluationInput,
@@ -4970,7 +4972,7 @@ export class EditorialStore {
       requireStore(latest !== null && projection !== null && projection.taskIntent !== null && checkpoint !== null, 'TASK_PLAN_UNAVAILABLE', '写作任务还没有准备计划。');
       current(projection.taskIntent.taskIntentId);
       const blocks = this.#analysisCall(() => latest.ledger.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
-      const plan = this.#taskPlanCall(() => writingPlan({ projection, bookTitle, blocks, input: latest.task.input, exemplarsHere: latest.task.exemplarsReadable }));
+      const plan = this.#taskPlanCall(() => writingPlan({ projection, bookTitle, blocks, input: latest.task.input, exemplarsHere: latest.task.exemplarsReadable, copyRules: latest.task.copyRules }));
       return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     if (input.kind === 'initial-evaluation') {
@@ -7546,8 +7548,8 @@ export class EditorialStore {
    * The writing ledger of one frozen contract — a house type, the editor's words and one reference set — made when first asked
    * for and kept while it prepares, as 审稿意见's is. It takes the launch the baseline ledger was bound to.
    */
-  #writingLedger(input: WritingContractInput): BaselineAnalysisStore {
-    const definition = this.#analysisCall(() => writingKindDefinition(input));
+  #writingLedger(input: WritingContractInput, rules: WritingCopyRules = WRITING_COPY_RULES): BaselineAnalysisStore {
+    const definition = this.#analysisCall(() => writingKindDefinition(input, rules));
     return this.#writingLedgers.obtain(definition.promptContractDigest, () => {
       const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
       ledger.bindLaunch(this.#baselineAnalysis.launch);
@@ -7561,8 +7563,9 @@ export class EditorialStore {
    * request, so its outcome and drafts stay readable and nothing of it is run again.
    */
   #writingLedgerOf(task: StoredWritingTask): BaselineAnalysisStore {
-    if (task.exemplarsReadable) return this.#writingLedger(task.input);
-    const definition = this.#analysisCall(() => writingRecordedKindDefinition(task.input, task.promptContractSha256));
+    // A Task recorded under `/1` is run and judged under `/1` (#704 P2-2).
+    if (task.exemplarsReadable) return this.#writingLedger(task.input, task.copyRules);
+    const definition = this.#analysisCall(() => writingRecordedKindDefinition(task.input, task.promptContractSha256, task.copyRules));
     return this.#writingLedgers.obtain(`${task.promptContractSha256}:recorded`, () => {
       const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
       ledger.bindLaunch(this.#baselineAnalysis.launch);
@@ -7974,7 +7977,7 @@ export class EditorialStore {
         typeId: latest.task.typeId,
         typeLabel: latest.task.input.type.label,
         state: latest.projection.state,
-        label: writingTaskStateLabel(latest.projection),
+        label: writingTaskStateLabel(latest.projection, latest.task.exemplarsReadable),
         // A Task not yet run whose exemplar is no longer here says it cannot start; one that ran says why it wrote no draft.
         refusal: !latest.task.exemplarsReadable && latest.projection.taskOutcome === null ? WRITING_EXEMPLAR_MOVED : this.#writingRefusal(latest.projection),
       },

@@ -7,8 +7,10 @@ import {
   MAX_EXEMPLAR_GRAPHEMES,
   MAX_SYNOPSIS_GRAPHEMES,
   MAX_WRITING_EXEMPLARS,
+  WRITING_COPY_RULES,
   writingContract,
   writingContractDigest,
+  type WritingCopyRules,
   type WritingContractInput,
   type WritingExemplarInput,
 } from './writing/writing-contract.js';
@@ -176,6 +178,11 @@ export interface StoredWritingTask {
    */
   readonly exemplarsReadable: boolean;
   readonly input: WritingContractInput;
+  /**
+   * The copy rules its frozen contract carries (the Commander's ruling on #704 P2-2): `2` for a row that says so, `1` for a row
+   * recorded before #698, which names none. Its draft is judged, and its plan worded, under these.
+   */
+  readonly copyRules: WritingCopyRules;
   readonly recordedAt: string;
 }
 
@@ -318,8 +325,11 @@ export class WritingTasks {
       stored.evaluationRecordId === row.evaluation_record_id && stored.baselineRevisionId === row.baseline_revision_id &&
       stored.recordedAt === row.recorded_at && isRecord(stored.input) && isRecord(stored.input.type) && stored.input.type.typeId === row.type_id &&
       Array.isArray(stored.exemplarSources) && stored.exemplarSources.every(isExemplarSource) &&
-      Array.isArray(stored.input.exemplars) && stored.input.exemplars.length === 0,
+      Array.isArray(stored.input.exemplars) && stored.input.exemplars.length === 0 &&
+      (stored.copyRules === undefined || stored.copyRules === 2),
     'WRITING_RECORD_INVALID', CORRUPT);
+    // A row recorded before #698 names no copy rules: its contract is `/1`, and so is the bound that judges it.
+    const copyRules: WritingCopyRules = stored.copyRules === 2 ? 2 : 1;
     const sources = (stored.exemplarSources as WritingExemplarSource[]).map(exemplarSourceOf);
     // The exemplars' text comes back from their own revisions, each the text its reference pinned; the facts beside it are
     // the reference's own.
@@ -333,7 +343,7 @@ export class WritingTasks {
     // here to check it with. Without it the row's own digest above still holds it.
     let digest: string;
     try {
-      digest = writingContractDigest(writingContract(input));
+      digest = writingContractDigest(writingContract(input, copyRules));
     } catch {
       throw new WritingTaskError('WRITING_RECORD_INVALID', CORRUPT);
     }
@@ -348,6 +358,7 @@ export class WritingTasks {
       exemplarSources: sources,
       exemplarsReadable,
       input,
+      copyRules,
       recordedAt: text(row.recorded_at),
     };
   }
@@ -394,6 +405,8 @@ export class WritingTasks {
       exemplarSources: input.exemplarSources.map(exemplarSourceOf),
       // Another Book's words are referenced, never stored here: the exemplars travel as references only.
       input: { ...input.contract, exemplars: [] },
+      // The copy rules its contract carries (#704 P2-2): every Task recorded now is `/2`.
+      copyRules: WRITING_COPY_RULES,
       recordedAt,
     });
     this.#db.prepare(
