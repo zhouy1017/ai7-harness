@@ -54,6 +54,18 @@ export const MAX_PREDICTION_STATEMENT_GRAPHEMES = 150;
 export const MAX_PREDICTION_BASIS_GRAPHEMES = 200;
 /** A line of the frozen prompt and of the model's free text is one line: no control character may break it or hide in it. */
 const CONTROL_CHARACTER = /[\p{Cc}\p{Zl}\p{Zp}]/u;
+/**
+ * The most bytes a line of 评估's text may take in its JSON per grapheme of its bound (Issue #696). A grapheme is not bounded
+ * in bytes — one letter may carry any number of combining marks — so every line 评估 shows is bounded in both: within its
+ * graphemes, and within this many bytes for each of them, as its JSON spells it. A line of 4-byte characters at its grapheme
+ * bound is then the most bytes any line can take, and 评估's frame is proved at that.
+ */
+export const MAX_EVALUATION_BYTES_PER_GRAPHEME = 4;
+
+/** Whether a line's JSON takes at most `MAX_EVALUATION_BYTES_PER_GRAPHEME` bytes for each grapheme of its bound. */
+export function withinEvaluationBytes(value: string, maximumGraphemes: number): boolean {
+  return Buffer.byteLength(JSON.stringify(value), 'utf8') - 2 <= MAX_EVALUATION_BYTES_PER_GRAPHEME * maximumGraphemes;
+}
 const ITEM_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 
 /** What the contract freezes of the house Evaluation Profile: its identity and its scored items with their 满分. */
@@ -119,7 +131,7 @@ const SYNTHESIS_NO_OBSERVATION = '- （各阅读范围都没有记下这一项�
 
 function line(value: unknown, maximumGraphemes: number): value is string {
   return typeof value === 'string' && value.isWellFormed() && value.trim().length > 0 && value === value.trim() &&
-    !CONTROL_CHARACTER.test(value) && graphemeCount(value) <= maximumGraphemes;
+    !CONTROL_CHARACTER.test(value) && graphemeCount(value) <= maximumGraphemes && withinEvaluationBytes(value, maximumGraphemes);
 }
 
 /** The profile exactly as the contract freezes it: every item named once, a 满分 the scale can score, the four conclusions. */

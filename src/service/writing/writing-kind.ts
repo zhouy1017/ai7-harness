@@ -31,7 +31,9 @@ import {
   writingPassageSetDigest,
   writingRequestDigest,
   writingSynthesisRequestDigest,
+  WRITING_COPY_RULES,
   type ClosedWritingUnit,
+  type WritingCopyRules,
   type WritingContractInput,
   type WritingUnitResult,
 } from './writing-contract.js';
@@ -103,8 +105,8 @@ function closedUnits(closed: ReadonlyArray<ClosedUnitOutcome<unknown>>): ClosedW
  * re-review): the contract digest is the row's, since the contract cannot be composed again without that text, and every step
  * that would build a request or read an answer refuses. Its records — outcome, revisions, drafts — read as any other's.
  */
-export function writingRecordedKindDefinition(input: WritingContractInput, promptContractDigest: string): AnalysisKindDefinition {
-  const composed = writingKindDefinition(input);
+export function writingRecordedKindDefinition(input: WritingContractInput, promptContractDigest: string, rules: WritingCopyRules): AnalysisKindDefinition {
+  const composed = writingKindDefinition(input, rules);
   const refuse = (): never => {
     throw new AnalysisError('WRITING_EXEMPLAR_MOVED', WRITING_EXEMPLAR_MOVED);
   };
@@ -129,8 +131,12 @@ export function writingRecordedKindDefinition(input: WritingContractInput, promp
   };
 }
 
-export function writingKindDefinition(input: WritingContractInput): AnalysisKindDefinition {
-  const contract = writingContract(input);
+/**
+ * The writing kind of one frozen contract, under the copy rules it was recorded with: `/2` for every Task prepared now, `/1` for
+ * a Task recorded under #688's contract, which its parse keeps judging under `/1`'s sizes (the Commander's ruling on #704 P2-2).
+ */
+export function writingKindDefinition(input: WritingContractInput, rules: WritingCopyRules = WRITING_COPY_RULES): AnalysisKindDefinition {
+  const contract = writingContract(input, rules);
   const promptContractDigest = writingContractDigest(contract);
   const frozen = contract.input;
   const exemplars = { count: frozen.exemplars.length, statement: writingExemplarLine(frozen.type.label, frozen.exemplars) };
@@ -164,7 +170,7 @@ export function writingKindDefinition(input: WritingContractInput): AnalysisKind
         buildMessage: (closed, totalUnits) => buildWritingSynthesisMessage(contract, closedUnits(closed), totalUnits),
         requestDigest: (closed) => writingSynthesisRequestDigest(promptContractDigest, writingPassageSetDigest(closedUnits(closed))),
         // A draft that copies an exemplar is refused whole, a gap: AI7 then writes no draft (KB-004).
-        parse: (text) => parseWritingSynthesis(text, frozen),
+        parse: (text) => parseWritingSynthesis(text, contract),
         refusalReason: (code, detail) => (code === 'exemplar-copied' ? `${WRITING_EXEMPLAR_REFUSAL_PREFIX}${detail}` : null),
         // The draft is the Task's result: a Run that wrote none completed with gaps, never 已完成.
         requiredForCompletion: true,

@@ -180,7 +180,7 @@ describe('写作任务 over the real store on exact sample1', () => {
         '你写的受众「喜欢历史与悬疑小说的读者」、渠道「出版社微信公众号」',
       ]);
       expect(plan.steps.map((step) => step.label)).toEqual(['逐章读取，找出文档可以取用的看点、人物与主题', '依据参考材料写出「宣传文章」']);
-      expect(plan.notDo.editorial).toContain('不照抄范例：与范例有连续 12 个字以上相同的草稿不予采用');
+      expect(plan.notDo.editorial).toContain('不照抄范例：与范例有连续 12 个字以上相同（跨标点时 16 个字；英文为 8 个词，跨标点时 11 个词）的草稿不予采用');
       expect(plan.start.readiness).toBe('ready');
       expect(plan.defaultRule).toMatchObject({ canSet: true, reason: null, planEnvelopeDigest: prepared.planEnvelope!.digest, current: null, startedBy: null });
       expect(store.inspectWritingTask(bookId).task).toMatchObject({ taskIntentId: prepared.taskIntent!.taskIntentId, typeId: 'promotion-article', typeLabel: '宣传文章', state: 'prepared' });
@@ -370,7 +370,7 @@ describe('写作任务 over the real store on exact sample1', () => {
       // Drafted again, and this time copying the 范例: refused whole — a gap with its own reason, never 已完成, nothing to open.
       const copying = prepare(store, bookId, { ...WRITING_REQUEST, requirements: '篇幅一千字以内' });
       expect(copying.taskIntent!.mode).toBe('writing-again');
-      const copied = Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(exemplarText), ({ segment }) => segment).slice(0, 16).join('');
+      const copied = Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(exemplarText), ({ segment }) => segment).slice(0, 40).join('');
       answerWriting(entries, copying, {
         ...AUTHORED_WRITING_DRAFT,
         sections: [...AUTHORED_WRITING_DRAFT.sections, { heading: '范例里的一段', paragraphs: [`正如范例所写：${copied}。`] }],
@@ -379,7 +379,7 @@ describe('写作任务 over the real store on exact sample1', () => {
       answerWritingReflection(entries, refused.taskOutcome!.report!.accountingDigest);
       expect(refused.resultSetRevision!.writing.draft).toBeNull();
       expect(refused.resultSetRevision!.writing.synthesis.state).toBe('gap');
-      expect(refused.resultSetRevision!.writing.synthesis.reason).toMatch(new RegExp(`^${WRITING_EXEMPLAR_REFUSAL_PREFIX}草稿与范例《范例来源书》版本 1 有连续 12 个字以上相同；范例只参照，不复制，这份草稿不予采用。$`, 'u'));
+      expect(refused.resultSetRevision!.writing.synthesis.reason).toMatch(new RegExp(`^${WRITING_EXEMPLAR_REFUSAL_PREFIX}草稿与范例《范例来源书》版本 1 有(?:连续 12|跨标点连续 16) 个字以上相同；范例只参照，不复制，这份草稿不予采用。$`, 'u'));
       expect(refused.resultSetRevision!.writing.synthesis.reason).not.toContain('没有可解析');
       expect(refused.taskOutcome!.classification).toBe('completed-with-gaps');
       expect(refused.taskOutcome!.safeNextAction).not.toContain('打开草稿');
@@ -464,6 +464,8 @@ describe('写作任务 over the real store on exact sample1', () => {
       const merged = target.inspectWritingTask(parts!.bookId);
       expect(merged.unavailable).toBeNull();
       expect(merged.task).toMatchObject({ taskIntentId: third!.taskIntent!.taskIntentId, state: 'prepared', refusal: WRITING_EXEMPLAR_MOVED });
+      // 交付物 says what the drawer says (Issue #698): it cannot start, not 尚未开始.
+      expect(merged.task!.label).toBe(WRITING_EXEMPLAR_GONE_LABEL);
       const promotionType = merged.types.find((type) => type.typeId === 'promotion-article')!;
       expect(promotionType.prepare).toEqual({ allowed: true, mode: 'writing-again' });
       expect(promotionType.drafted!.revisionId).toBe(parts!.draftedRevision);
@@ -542,6 +544,34 @@ describe('写作任务 over the real store on exact sample1', () => {
     }
     await withSession(fixture, async ({ store }) => {
       // The frozen words no longer give the contract the row names: the Task is unreadable, and the page says so.
+      expect(store.inspectWritingTask(bookId).unavailable).toBe('写作任务暂不可用：写作任务记录已损坏。');
+    });
+  }, 300_000);
+
+  it('reads a Task under the copy rules its row names: `/2` now, `/1` for a row naming none (#704 P2-2)', async () => {
+    const fixture = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
+    let bookId = '';
+    await withSession(fixture, async ({ store }) => {
+      bookId = await sample1Book(store, WRITING_BOOK_TITLE);
+      prepare(store, bookId);
+      expect(store.inspectWritingTask(bookId).unavailable).toBeNull();
+    });
+    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    const database = new DatabaseSync(path);
+    try {
+      const row = database.prepare('SELECT task_intent_id, canonical_json FROM writing_tasks').get() as { task_intent_id: string; canonical_json: string };
+      expect(row.canonical_json).toContain('"copyRules":2');
+      // A row naming no rules is read as `/1`: its contract is composed under `/1`, which is not the `/2` contract it names.
+      const changed = row.canonical_json.replace('"copyRules":2,', '');
+      database.exec('DROP TRIGGER writing_tasks_no_update');
+      const { createHash } = await import('node:crypto');
+      database.prepare('UPDATE writing_tasks SET canonical_json = ?, sha256 = ? WHERE task_intent_id = ?')
+        .run(changed, createHash('sha256').update(changed).digest('hex'), row.task_intent_id);
+      database.exec(WRITING_TASK_TRIGGER_SQL.writing_tasks_no_update!);
+    } finally {
+      database.close();
+    }
+    await withSession(fixture, async ({ store }) => {
       expect(store.inspectWritingTask(bookId).unavailable).toBe('写作任务暂不可用：写作任务记录已损坏。');
     });
   }, 300_000);

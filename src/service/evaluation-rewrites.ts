@@ -474,6 +474,21 @@ export class EvaluationRewrites {
     return row === undefined ? null : this.#decision(row);
   }
 
+  /**
+   * Each entry of one version a 采用 appended, by ordinal, with the rewrite it took (Issue #696), as the record reads the marks
+   * that name them: every accepted decision of the version, each verified, in one read.
+   */
+  adoptionsOf(recordId: string): Map<number, { taskIntentId: string; analysisRevisionId: string }> {
+    const adopted = new Map<number, { taskIntentId: string; analysisRevisionId: string }>();
+    for (const row of this.#db.prepare("SELECT * FROM evaluation_rewrite_decisions WHERE record_id = ? AND decision = 'accepted'").all(recordId) as SqlRow[]) {
+      const decision = this.#decision(row);
+      // One 采用 appends one entry: a second on the same entry is no row this owner wrote.
+      requireRewrite(decision.entryOrdinal !== null && !adopted.has(decision.entryOrdinal), 'EVALUATION_REWRITE_RECORD_INVALID', CORRUPT);
+      adopted.set(decision.entryOrdinal, { taskIntentId: decision.taskIntentId, analysisRevisionId: decision.analysisRevisionId });
+    }
+    return adopted;
+  }
+
   /** The editor's decision on one rewritten result, in the caller's transaction: once — a second is refused. */
   recordDecision(input: Omit<StoredEvaluationRewriteDecision, 'recordedAt'>): void {
     requireRewrite(this.decisionOf(input.analysisRevisionId) === null, 'EVALUATION_REWRITE_DECIDED', '这一次重写已经处理过了。');

@@ -74,6 +74,14 @@ export function writingTaskLine(task: NonNullable<WritingTaskProjection['task']>
   return `写作任务「${task.typeLabel}」：${task.label}`;
 }
 
+/**
+ * How 查看任务 stands beside the Task (Issue #698): the page's next step — primary — only for a prepared Task nothing refuses;
+ * quiet for one whose 范例 is no longer here, which can never start, and for every other state.
+ */
+export function writingOpenTaskTone(task: Pick<NonNullable<WritingTaskProjection['task']>, 'state' | 'refusal'>): 'primary' | 'quiet' {
+  return task.state === 'prepared' && task.refusal === null ? 'primary' : 'quiet';
+}
+
 /** A drafted result not yet made a document: its type and when AI7 wrote it. */
 export function writingDraftedLine(typeLabel: string, at: string): string {
   return `「${typeLabel}」的草稿已写好（${at}）；打开后成为这本书的${typeLabel}，处于「起草」阶段。`;

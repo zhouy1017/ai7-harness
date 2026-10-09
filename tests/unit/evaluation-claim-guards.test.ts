@@ -88,6 +88,64 @@ describe('what AI7\'s evaluation words may not claim (Issue #429, S81b2)', () =>
     expect(claimsScore('2 / 3', FULL_MARKS)).toBe(false);
   });
 
+  it('finds each claim that escaped the Issue #689 guard, and still passes the words it must (Issue #696)', () => {
+    // 一 before 块 is yuan when 钱 or a numeral follows; 成 after 一 is a share before 人 and 年.
+    for (const text of ['一块五。', '售价一块五。', '一块钱一本。', '仅一成人会买。', '一成年轻读者会买。', '只有一成人群感兴趣。']) {
+      expect(claimsQuantity(text), text).toBe(true);
+    }
+    for (const text of ['叙事并非一成不变。', '第十二册。', '全十二册的规模。', '2026年3月出版。', '这一块的读者最稳定。', '一块儿推荐给读书会。', '一块一块地拼出真相。',
+      '成年读者。', '万一成功，会带动同类书。']) {
+      expect(claimsQuantity(text), text).toBe(false);
+    }
+    // 一 after 分 is a score but in 一分一秒 and 一分一毫; 之 after 分 is a score unless a numeral follows; 5 is a denominator.
+    for (const text of ['十五分一项。', '每项给十五分一项一项看。', '十八分之多。', '18分之多。', '4.5/5。', '4/5。', '4 ／ 5 的评价。']) {
+      expect(claimsScore(text, FULL_MARKS), text).toBe(true);
+    }
+    for (const text of ['约三分之一的篇幅写考古。', '3分之1的篇幅。', '一分一秒都不浪费。', '开场十五分一秒的长镜头。', '一分一毫都不差。', '一成不变的叙事。', '2026年3月的版本。', '第十二册最好。']) {
+      expect(claimsScore(text, FULL_MARKS), text).toBe(false);
+    }
+  });
+
+  it('reads the review\'s residuals: 一块多 and 一块左右 are prices, 万一 · 统一 · 唯一 open no share, and x/5 is a score only as one (Issue #702 review)', () => {
+    for (const text of ['一块多一本。', '售价一块左右。', '一块多钱。']) {
+      expect(claimsQuantity(text), text).toBe(true);
+    }
+    for (const text of ['万一成年读者不买账。', '统一成人物视角来写。', '唯一成年的角色。', '这一块多数读者不熟。', '单一成分的叙事。', '每一块都写得扎实。']) {
+      expect(claimsQuantity(text), text).toBe(false);
+    }
+    // 一成 after any other word is still a share.
+    for (const text of ['仅一成人会买。', '只有一成年轻读者。', '近一成人群。']) {
+      expect(claimsQuantity(text), text).toBe(true);
+    }
+    for (const text of ['4.5/5。', '4/5。', '可以打 4/5。', '4/5分。', '4/5星的作品。', '4 ／ 5 的评价。', '评分约 3/5 左右。']) {
+      expect(claimsScore(text, FULL_MARKS), text).toBe(true);
+    }
+    for (const text of ['前1/5节奏拖沓。', '约4/5的读者会喜欢。', '后 1 / 5 写考古。', '9/5 的比例。', '比例是9/5。']) {
+      expect(claimsScore(text, FULL_MARKS), text).toBe(false);
+    }
+    // A profile whose 满分 is 5 reads every fraction over 5 as a score.
+    expect(claimsScore('前1/5节奏拖沓。', [5, 25])).toBe(true);
+  });
+
+  it('reads the re-review\'s residuals: 一块 together is no price, 订单一成 is a share, and 4/5颗星 or 4/5的高分 is a score (Issue #702 re-review)', () => {
+    for (const text of ['把两条线索放在一块多有意思。', '和他们一块多聊聊。', '放在一块左右为难。', '其中一块多数读者会跳过。']) {
+      expect(claimsQuantity(text), text).toBe(false);
+    }
+    for (const text of ['一块多一本。', '一块多钱。', '售价一块左右。', '一块左右的价格。', '订单一成来自线上。', '下单一成以上。', '名单一成是新读者。']) {
+      expect(claimsQuantity(text), text).toBe(true);
+    }
+    for (const text of ['单一成分的叙事。', '单一成年人物的视角。', '统一成人物视角来写。']) {
+      expect(claimsQuantity(text), text).toBe(false);
+    }
+    for (const text of ['4/5颗星。', '4/5 颗星。', '4/5的高分。', '只拿到2/5的低分。']) {
+      expect(claimsScore(text, FULL_MARKS), text).toBe(true);
+    }
+    // A fraction over 5 with no score named and words after it may pass: 「3/5 左右」, 「4/5颗粒」.
+    for (const text of ['3/5 左右的篇幅', '4/5颗粒感。']) {
+      expect(claimsScore(text, FULL_MARKS), text).toBe(false);
+    }
+  });
+
   it('finds a conclusion by the house\'s own labels — 推荐出版, 修改后再议, 暂缓, 不推荐 — wherever it stands in the line', () => {
     expect(CONCLUSIONS).toEqual(['推荐出版', '修改后再议', '暂缓', '不推荐']);
     for (const text of ['建议推荐出版。', '可以修改后再议。', '建议暂缓。', '目前暂缓出版为宜。', '不推荐。', '编辑部不推荐这部书稿。', '总体不推荐出版。']) {
@@ -100,7 +158,9 @@ describe('what AI7\'s evaluation words may not claim (Issue #429, S81b2)', () =>
   });
 
   it('reads a line in time linear in its length, however its numerals fall', () => {
-    for (const text of ['一'.repeat(200_000), '1'.repeat(200_000), '1/'.repeat(100_000), '千万'.repeat(100_000), '1,'.repeat(100_000), '首印'.repeat(100_000)]) {
+    for (const text of ['一'.repeat(200_000), '1'.repeat(200_000), '1/'.repeat(100_000), '千万'.repeat(100_000), '1,'.repeat(100_000), '首印'.repeat(100_000),
+      '一块'.repeat(100_000), '一成'.repeat(100_000), '十分之'.repeat(70_000), '十五分一'.repeat(50_000), '4/5'.repeat(70_000), '1/5的'.repeat(50_000),
+      '统一成'.repeat(70_000), '一块左'.repeat(70_000), '订单一成'.repeat(50_000), '4/5颗'.repeat(50_000), '一块多'.repeat(70_000)]) {
       const started = performance.now();
       claimsQuantity(text);
       claimsScore(text, FULL_MARKS);

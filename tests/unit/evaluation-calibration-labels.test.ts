@@ -8,6 +8,7 @@ import {
   actualsBookLine,
   actualsLine,
   calibrationProgressLine,
+  calibrationUnreadableLine,
   predictionProgressLine,
 } from '../../src/renderer/evaluation-calibration-labels.js';
 import {
@@ -98,6 +99,9 @@ describe('定价与首印 as the editor types them', () => {
 describe('评估校准与预测 words', () => {
   it('states calibration\'s progress toward its threshold, and whether it is off, waiting or applying', () => {
     expect(calibrationProgressLine({ adjustments: 0, threshold: 10, enabled: true, active: false })).toBe('调分记录 0 / 10 本 · 满 10 本后生效');
+    // Books left out because their records are damaged are named, never silently missing (Issue #702 review).
+    expect(calibrationUnreadableLine(0)).toBeNull();
+    expect(calibrationUnreadableLine(2)).toBe('另有 2 本书的评估记录已损坏，未计入调分记录。');
     expect(calibrationProgressLine({ adjustments: 3, threshold: 10, enabled: false, active: false })).toBe('调分记录 3 / 10 本 · 已关闭');
     expect(calibrationProgressLine({ adjustments: 12, threshold: 10, enabled: true, active: true })).toBe('调分记录 12 / 10 本 · 已生效');
     expect(calibrationProgressLine({ adjustments: 10, threshold: 10, enabled: true, active: false }))

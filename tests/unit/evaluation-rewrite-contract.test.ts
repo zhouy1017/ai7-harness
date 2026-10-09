@@ -145,6 +145,10 @@ describe('the unit result and the synthesis', () => {
     expect(code({ verdict: '' })).toBe('schema-invalid');
     expect(code({ verdict: '字'.repeat(601) })).toBe('schema-invalid');
     expect(code({ verdict: '字'.repeat(600) })).toBe('ok');
+    // Within its graphemes but past its bytes (Issue #696): one letter carrying a thousand combining marks, a 4-byte one at the bound.
+    expect(code({ verdict: `字${String.fromCodePoint(0x301).repeat(1_200)}` })).toBe('schema-invalid');
+    expect(code({ items: items.map((item) => ({ ...item, comment: `字${String.fromCodePoint(0x301).repeat(600)}` })) })).toBe('schema-invalid');
+    expect(code({ verdict: String.fromCodePoint(0x20000).repeat(600) })).toBe('ok');
     expect(code({ schema: 'ai7.evaluation-rewrite.synthesis-result/2' })).toBe('schema-invalid');
     expect(parseEvaluationRewriteSynthesis('否', INPUT)).toMatchObject({ ok: false, code: 'not-json' });
   });
