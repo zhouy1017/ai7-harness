@@ -97,7 +97,7 @@ import {
   sha256Hex,
 } from './canonical.js';
 import { unitRequestDigest } from './contract.js';
-import { deriveCoverageManifest, manifestCoversEveryBlock, manifestDigestIsExact, type ManifestBlockInput } from './coverage-manifest.js';
+import { deriveCoverageManifest, manifestCoversEveryBlock, manifestDigestIsExact, unitContentKeys, type ManifestBlockInput } from './coverage-manifest.js';
 import { TASK_INPUT_CHECKPOINT_PURPOSE } from './identity.js';
 import type { AnalysisKindDefinition, AnalysisReductionResult } from './kind-definition.js';
 import {
@@ -2259,13 +2259,91 @@ export class BaselineAnalysisStore {
   #planPredecessor(row: SqlRow): ReusePlanPredecessor | ScopePlanPredecessor {
     const facts = this.#predecessorFacts(row);
     if (this.#definition.outOfScope !== 'leave-unreviewed') return facts;
+    const unreviewedUnitOrdinals = this.#unreviewedOrdinals(facts.revisionId);
+    return {
+      ...facts,
+      schemaDigest: asString(this.#revisionBody(row).schemaDigest),
+      unreviewedUnitOrdinals,
+      changedUnreadUnitOrdinals: [...this.#changedUnread(row, facts, unreviewedUnitOrdinals).keys()].sort((left, right) => left - right),
+    };
+  }
+
+  /**
+   * The blocks a range Run left unread although they changed since the category last read them (Issue #709): in each such
+   * unit of the latest revision, with its overlap context, the blocks whose words, as that revision pinned the manuscript,
+   * differ from the Manuscript Revision of the reading revision — or were not in it. Empty for a kind that never leaves a
+   * unit unreviewed, and while nothing a range Run left unread has changed.
+   */
+  unreadChangedBlockIds(bookId: string): ReadonlySet<string> {
+    const changed = new Set<string>();
+    if (this.#definition.outOfScope !== 'leave-unreviewed') return changed;
+    const row = this.#revisionRows(bookId).at(-1);
+    if (row === undefined) return changed;
+    const facts = this.#predecessorFacts(row);
+    const anchors = this.#changedUnread(row, facts, this.#unreviewedOrdinals(facts.revisionId));
+    const version = this.#db.prepare('SELECT digest FROM manuscript_block_versions WHERE revision_id = ? AND block_id = ?');
+    const pinned = asString(row.manuscript_revision_id);
+    for (const [ordinal, anchor] of anchors) {
+      const unit = facts.manifest.units.find((candidate) => candidate.ordinal === ordinal)!;
+      // Its overlap context too: the unit's content key reads it, so a change there alone is a change of the unit.
+      for (const blockId of [...unit.overlapBlockIds, ...unit.blockIds]) {
+        const now = version.get(pinned, blockId) as SqlRow | undefined;
+        const then = version.get(anchor, blockId) as SqlRow | undefined;
+        if (now !== undefined && (then === undefined || then.digest !== now.digest)) changed.add(blockId);
+      }
+    }
+    return changed;
+  }
+
+  /** A revision's `out-of-scope` gaps: the units its Run was never asked to read. */
+  #unreviewedOrdinals(revisionId: string): number[] {
     const gapRows = this.#db.prepare("SELECT unit_ordinal, canonical_json FROM analysis_unit_results WHERE revision_id = ? AND state = 'gap' ORDER BY unit_ordinal")
-      .all(facts.revisionId) as SqlRow[];
-    const unreviewedUnitOrdinals = gapRows.filter((unit) => {
+      .all(revisionId) as SqlRow[];
+    return gapRows.filter((unit) => {
       const record = parseCanonicalJson(asString(unit.canonical_json));
       return isRecord(record) && isRecord(record.gap) && record.gap.code === 'out-of-scope';
     }).map((unit) => asNumber(unit.unit_ordinal));
-    return { ...facts, schemaDigest: asString(this.#revisionBody(row).schemaDigest), unreviewedUnitOrdinals };
+  }
+
+  /**
+   * Which of a revision's unreviewed units changed since the category last read them (Issue #709), so that `changed` is
+   * measured per unit from the latest revision that read it rather than from the latest revision alone. A unit stays
+   * unchanged-and-unread only while every earlier revision of the chain left that very content unreviewed too, back to the
+   * chain's first Run — a first range review, which no Run read before. As soon as an earlier revision did not leave it
+   * unreviewed (it read the unit, or the content was not there yet), the content arrived after that revision read its
+   * place, and a range Run since left it unread: it has changed. Everything is read from the immutable revision rows, so
+   * preparation and execution derive the same answer. Each changed unit maps to the Manuscript Revision that earlier
+   * revision pinned: the manuscript as the category last read the unit's place.
+   */
+  #changedUnread(row: SqlRow, facts: ReusePlanPredecessor, unreviewed: ReadonlyArray<number>): Map<number, string> {
+    const changed = new Map<number, string>();
+    if (unreviewed.length === 0) return changed;
+    const unread = new Set(unreviewed);
+    const keys = unitContentKeys(facts.manifest);
+    const pending = new Map<string, number[]>();
+    facts.manifest.units.forEach((unit, index) => {
+      if (unread.has(unit.ordinal)) pending.set(keys[index]!, [...(pending.get(keys[index]!) ?? []), unit.ordinal]);
+    });
+    let current = row;
+    while (pending.size > 0) {
+      const intent = this.#db.prepare('SELECT predecessor_revision_id FROM analysis_task_intents WHERE task_intent_id = ?')
+        .get(asString(current.task_intent_id)) as SqlRow | undefined;
+      requireAnalysis(intent !== undefined, 'ANALYSIS_RECORD_INVALID', '结果集修订版的任务意图缺失。');
+      // The chain's first Run: what it left unread, no Run of this category has read.
+      if (intent.predecessor_revision_id === null) break;
+      const prior = this.#revisionRowById(asString(intent.predecessor_revision_id));
+      const priorFacts = this.#predecessorFacts(prior);
+      const priorUnread = new Set(this.#unreviewedOrdinals(priorFacts.revisionId));
+      const priorKeys = unitContentKeys(priorFacts.manifest);
+      const stillUnread = new Set(priorFacts.manifest.units.flatMap((unit, index) => priorUnread.has(unit.ordinal) ? [priorKeys[index]!] : []));
+      for (const [key, ordinals] of [...pending]) {
+        if (stillUnread.has(key)) continue;
+        for (const ordinal of ordinals) changed.set(ordinal, asString(prior.manuscript_revision_id));
+        pending.delete(key);
+      }
+      current = prior;
+    }
+    return changed;
   }
 
   #revisionRowById(revisionId: string): SqlRow {
@@ -2388,8 +2466,10 @@ export class BaselineAnalysisStore {
     const actions = Object.fromEntries(this.#definition.updateModes.map((mode) => {
       const definition = this.#definition.mode(mode);
       if (definition.recompute === 'changed') {
-        const stale = freshness === 'stale';
-        return [mode, action(mode, stale, stale ? null : changedModeUnavailableReason(definition.label), stale ? expected(mode, null) : null)];
+        // Something changed since the latest revision, or since the category last read a unit a range Run then left
+        // unread (Issue #709): the latest revision being current says nothing about an edit made before it outside its range.
+        const changed = freshness === 'stale' || ('changedUnreadUnitOrdinals' in predecessor && (predecessor.changedUnreadUnitOrdinals?.length ?? 0) > 0);
+        return [mode, action(mode, changed, changed ? null : changedModeUnavailableReason(definition.label), changed ? expected(mode, null) : null)];
       }
       if (definition.recompute === 'selected-range') return [mode, { ...action(mode, true, null, null), options: options(mode) }];
       return [mode, action(mode, true, null, expected(mode, null))];

@@ -44,6 +44,9 @@ describe('the scope a category reads', () => {
     expect(contract(CHANGED, NEVER)).toEqual({ kind: 'refused', reason: NEVER_REVIEWED_REASON });
     expect(contract(CHANGED, CURRENT)).toEqual({ kind: 'refused', reason: '账本自己的原因' });
     expect(contract(CHANGED, { ...CURRENT, syncUnavailableReason: null })).toEqual({ kind: 'refused', reason: NOTHING_CHANGED_REASON });
+    // A current revision whose 选章 left an earlier edit unread still has something changed to read (Issue #709).
+    expect(contract(CHANGED, { ...CURRENT, unreadChanges: true })).toEqual({ kind: 'task', mode: 'review-sync', selectedRange: null });
+    expect(contract(CHANGED, { ...CURRENT, unreadChanges: false })).toEqual({ kind: 'refused', reason: '账本自己的原因' });
     expect(contract({ kind: 'chapters', selectedRange: null }, NEVER)).toEqual({ kind: 'refused', reason: NO_CHAPTERS_REASON });
   });
 
