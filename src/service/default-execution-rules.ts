@@ -2,11 +2,15 @@ import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   DEFAULT_EXECUTION_RULE_PATTERNS,
+  type BaselineDefaultExecutionRulePattern,
   type DefaultExecutionRuleBinding,
+  type DefaultExecutionRuleKind,
   type DefaultExecutionRulePattern,
   type DefaultExecutionRuleReference,
   type MaterialPlanInputsProjection,
+  type WritingDefaultExecutionRulePattern,
 } from '../shared/protocol.js';
+import { productionDocumentType } from './production-document-types.js';
 import { DIGEST_PATTERN, UUID_PATTERN, canonicalRecord, isRecord, parseCanonicalJson, sha256Hex } from './analysis/canonical.js';
 import { diffMaterialPlanInputs } from './analysis/plan-boundary.js';
 import { DRIFT_FIELD_LABELS } from './task-plan.js';
@@ -24,7 +28,8 @@ import { DRIFT_FIELD_LABELS } from './task-plan.js';
  * A rule is never a standing authorization. It starts nothing by itself (TASK-028): each Run it starts is a
  * newly user-initiated Task with its own Intent, plan, envelope and Run Authorization, whose origin is
  * `default-execution-rule` and which names the rule version. The kind and pattern are admitted by shape here
- * and by name in code, so widening what a rule may cover needs no schema revision.
+ * and by name in code, so widening what a rule may cover needs no schema revision: the writing Task's rule (Issue #432,
+ * plan slice S84b) is one more pattern, `writing`, of the `writing` kind, held in the same three relations.
  */
 
 export const DEFAULT_EXECUTION_RULE_SCHEMA_SQL = {
@@ -127,24 +132,70 @@ export function initializeDefaultExecutionRuleSchema(db: DatabaseSync): void {
 
 // ---- the ledger ------------------------------------------------------------------------------------------
 
-/** The one Task kind a rule covers today (S75 D3), named as the analysis ledger names it. */
-export const DEFAULT_EXECUTION_RULE_KIND = 'baseline-analysis' as const;
+/**
+ * A writing rule's pattern (S84b): `writing:<typeId>`, one per house type of a Book. A rule covers only the type of the plan
+ * it was set from (Commander ruling on #701: TASK-026, no widened source); the type is bound in the rule's own identity, so
+ * no relation moves.
+ */
+const WRITING_RULE_PATTERN = /^writing:([a-z][a-z0-9-]{0,63})$/u;
+
+export function writingRulePattern(typeId: string): WritingDefaultExecutionRulePattern {
+  return `writing:${typeId}`;
+}
+
+/** The house type a writing rule's pattern covers; `null` for a baseline pattern. */
+export function writingRuleTypeId(pattern: string): string | null {
+  return WRITING_RULE_PATTERN.exec(pattern)?.[1] ?? null;
+}
+
+/** Whether a Task mode — or a writing rule's pattern — is one a rule may cover (S75 D3, S84b). */
+export function isDefaultExecutionRulePattern(mode: string): mode is DefaultExecutionRulePattern {
+  return (DEFAULT_EXECUTION_RULE_PATTERNS as readonly string[]).includes(mode) || WRITING_RULE_PATTERN.test(mode);
+}
+
+/**
+ * The Task kind a pattern's rule covers, named as the analysis ledger names it: the baseline analysis's two updates of the
+ * whole Book (S75 D3), and the writing Task of one house type (S84b).
+ */
+export function defaultExecutionRuleKind(pattern: DefaultExecutionRulePattern): DefaultExecutionRuleKind {
+  return writingRuleTypeId(pattern) === null ? 'baseline-analysis' : 'writing';
+}
 const RULE_SCHEMA = 'ai7.default-execution-rule/1' as const;
 const VERSION_SCHEMA = 'ai7.default-execution-rule.version/1' as const;
 const STATE_SCHEMA = 'ai7.default-execution-rule.state/1' as const;
 const ACTOR = '本机编辑' as const;
 
-/** The quick start each pattern gives, in the words ②A's button carries. */
-export const DEFAULT_EXECUTION_RULE_QUICK_LABELS: Readonly<Record<DefaultExecutionRulePattern, string>> = {
+/** The quick start each baseline pattern gives, in the words ②A's button carries; the rule is named by it too. */
+export const DEFAULT_EXECUTION_RULE_QUICK_LABELS: Readonly<Record<BaselineDefaultExecutionRulePattern, string>> = {
   'sync-current': '开始同步',
   'reanalyze-book': '开始全部重来',
+};
+
+/** A house type's label, or its identity when the house's configuration no longer holds it. */
+function writingTypeLabel(typeId: string): string {
+  return productionDocumentType(typeId)?.label ?? typeId;
+}
+
+/**
+ * What a rule of the pattern is called: ②A's by its button (S75 D8); a writing rule by the Task and its type, since the sheet's
+ * button is the generic 快速开始 — `写作任务 · 宣传文章`.
+ */
+export function defaultExecutionRuleTitle(pattern: DefaultExecutionRulePattern): string {
+  const typeId = writingRuleTypeId(pattern);
+  return typeId === null ? DEFAULT_EXECUTION_RULE_QUICK_LABELS[pattern as BaselineDefaultExecutionRulePattern] : `写作任务 · ${writingTypeLabel(typeId)}`;
+}
+
+/** The 工序 a rule binds, as the confirmation's and 工序与规则's `工序` row names it. */
+export const DEFAULT_EXECUTION_RULE_PROCEDURES: Readonly<Record<DefaultExecutionRuleKind, string>> = {
+  'baseline-analysis': '基线分析',
+  writing: '写作任务',
 };
 
 /** One rule as the ledger holds it: the version in force — or the last one, once turned off — and its state. */
 export interface DefaultExecutionRuleRecord {
   ruleId: string;
   bookId: string;
-  taskKind: typeof DEFAULT_EXECUTION_RULE_KIND;
+  taskKind: DefaultExecutionRuleKind;
   pattern: DefaultExecutionRulePattern;
   createdAt: string;
   state: 'active' | 'deactivated';
@@ -161,9 +212,9 @@ export interface DefaultExecutionRuleVersionRecord {
   createdAt: string;
 }
 
-/** `开始同步 · 第 2 版`. */
+/** `开始同步 · 第 2 版`, `写作任务 · 宣传文章 · 第 1 版`. */
 export function defaultExecutionRuleName(pattern: DefaultExecutionRulePattern, ordinal: number): string {
-  return `${DEFAULT_EXECUTION_RULE_QUICK_LABELS[pattern]} · 第 ${ordinal} 版`;
+  return `${defaultExecutionRuleTitle(pattern)} · 第 ${ordinal} 版`;
 }
 
 export function defaultExecutionRuleReference(
@@ -271,7 +322,7 @@ export class DefaultExecutionRuleLedger {
     binding: DefaultExecutionRuleBinding;
   }): DefaultExecutionRuleRecord {
     requireRule(UUID_PATTERN.test(input.bookId) && UUID_PATTERN.test(input.sourceTaskIntentId) &&
-      DIGEST_PATTERN.test(input.sourcePlanEnvelopeDigest) && DEFAULT_EXECUTION_RULE_PATTERNS.includes(input.pattern) && isBinding(input.binding),
+      DIGEST_PATTERN.test(input.sourcePlanEnvelopeDigest) && isDefaultExecutionRulePattern(input.pattern) && isBinding(input.binding),
     'DEFAULT_EXECUTION_RULE_INVALID', '默认执行规则的参数无效。');
     return transact(this.#db, () => {
       const now = new Date().toISOString();
@@ -280,14 +331,15 @@ export class DefaultExecutionRuleLedger {
       if (current !== null && current.state === 'active' && current.version.sourcePlanEnvelopeDigest === input.sourcePlanEnvelopeDigest) return current;
       if (ruleId === null) {
         ruleId = randomUUID();
+        const taskKind = defaultExecutionRuleKind(input.pattern);
         const rule = canonicalRecord({
-          schema: RULE_SCHEMA, ruleId, bookId: input.bookId, taskKind: DEFAULT_EXECUTION_RULE_KIND, taskPattern: input.pattern,
+          schema: RULE_SCHEMA, ruleId, bookId: input.bookId, taskKind, taskPattern: input.pattern,
           applicability: 'book', createdAt: now,
         });
         this.#db.prepare(
           `INSERT INTO default_execution_rules(rule_id, book_id, task_kind, task_pattern, created_at, canonical_json, sha256)
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        ).run(ruleId, input.bookId, DEFAULT_EXECUTION_RULE_KIND, input.pattern, now, rule.json, rule.digest);
+        ).run(ruleId, input.bookId, taskKind, input.pattern, now, rule.json, rule.digest);
       }
       const ruleVersionId = randomUUID();
       const ordinal = current === null ? 1 : current.version.ordinal + 1;
@@ -346,7 +398,7 @@ export class DefaultExecutionRuleLedger {
 
   #ruleId(bookId: string, pattern: DefaultExecutionRulePattern): string | null {
     const row = this.#db.prepare('SELECT rule_id FROM default_execution_rules WHERE book_id = ? AND task_kind = ? AND task_pattern = ?')
-      .get(bookId, DEFAULT_EXECUTION_RULE_KIND, pattern) as SqlRow | undefined;
+      .get(bookId, defaultExecutionRuleKind(pattern), pattern) as SqlRow | undefined;
     return row === undefined ? null : text(row.rule_id);
   }
 
@@ -382,9 +434,11 @@ export class DefaultExecutionRuleLedger {
     const bookId = text(row.book_id);
     const pattern = text(row.task_pattern);
     const createdAt = text(row.created_at);
-    requireRule(text(row.task_kind) === DEFAULT_EXECUTION_RULE_KIND && (DEFAULT_EXECUTION_RULE_PATTERNS as readonly string[]).includes(pattern),
+    // A pattern is held only under its own kind: a row pairing them otherwise is not one this ledger wrote.
+    requireRule(isDefaultExecutionRulePattern(pattern) && text(row.task_kind) === defaultExecutionRuleKind(pattern),
       'DEFAULT_EXECUTION_RULE_RECORD_INVALID', '默认执行规则记录无效。');
-    requireRecord(row, { schema: RULE_SCHEMA, ruleId, bookId, taskKind: DEFAULT_EXECUTION_RULE_KIND, taskPattern: pattern, applicability: 'book', createdAt });
+    const taskKind = defaultExecutionRuleKind(pattern);
+    requireRecord(row, { schema: RULE_SCHEMA, ruleId, bookId, taskKind, taskPattern: pattern, applicability: 'book', createdAt });
     const stateRow = this.#db.prepare('SELECT * FROM default_execution_rule_states WHERE rule_id = ? ORDER BY sequence DESC LIMIT 1').get(ruleId) as SqlRow | undefined;
     // A rule, its first version and its first state are written in one transaction: a rule without a state is not one this ledger wrote.
     requireRule(stateRow !== undefined, 'DEFAULT_EXECUTION_RULE_RECORD_INVALID', '默认执行规则缺少状态记录。');
@@ -399,7 +453,7 @@ export class DefaultExecutionRuleLedger {
       .get(ruleVersionId, ruleId) as SqlRow | undefined;
     requireRule(versionRow !== undefined, 'DEFAULT_EXECUTION_RULE_RECORD_INVALID', '默认执行规则状态指向的版本不存在。');
     return {
-      ruleId, bookId, taskKind: DEFAULT_EXECUTION_RULE_KIND, pattern: pattern as DefaultExecutionRulePattern, createdAt,
+      ruleId, bookId, taskKind, pattern, createdAt,
       state, stateRecordedAt, version: this.#versionOf(versionRow),
     };
   }
@@ -407,25 +461,51 @@ export class DefaultExecutionRuleLedger {
 
 // ---- words -----------------------------------------------------------------------------------------------
 
-/** Whether a Task mode is one a rule may cover (S75 D3). */
-export function isDefaultExecutionRulePattern(mode: string): mode is DefaultExecutionRulePattern {
-  return (DEFAULT_EXECUTION_RULE_PATTERNS as readonly string[]).includes(mode);
-}
-
 /** 知识库 › 工序与规则's statement (TASK-028): a rule is not a standing authorization. */
 export const DEFAULT_EXECUTION_RULES_STATEMENT =
   '默认执行规则只在你点快速开始时使用：它不会自己开始任何任务；每次开始都会留下那一次的计划和运行授权，并写明按哪一版规则开始。';
 
+/** What 快速开始 does under a baseline rule once the plan is prepared and matches. */
+const BASELINE_RULE_DOES: Readonly<Record<BaselineDefaultExecutionRulePattern, string>> = {
+  'sync-current': '只重新分析改动过的部分，其余沿用',
+  'reanalyze-book': '把整本书重新分析一遍',
+};
+
 /** What 快速开始 does under a rule of the pattern. */
 export function defaultExecutionRuleDoes(pattern: DefaultExecutionRulePattern): string {
-  const what = pattern === 'sync-current' ? '只重新分析改动过的部分，其余沿用' : '把整本书重新分析一遍';
-  return `点「${DEFAULT_EXECUTION_RULE_QUICK_LABELS[pattern]}」后，AI7 先准备计划：计划与这条规则一致时直接开始，${what}；有任何不同都停在计划上，等你看过再开始。`;
+  const typeId = writingRuleTypeId(pattern);
+  const after = '有任何不同都停在计划上，等你看过再开始。';
+  if (typeId === null) {
+    const baseline = pattern as BaselineDefaultExecutionRulePattern;
+    return `点「${DEFAULT_EXECUTION_RULE_QUICK_LABELS[baseline]}」后，AI7 先准备计划：计划与这条规则一致时直接开始，${BASELINE_RULE_DOES[baseline]}；${after}`;
+  }
+  const label = writingTypeLabel(typeId);
+  return `在「交付物」的新建文档里选「${label}」再点「快速开始」后，AI7 先准备计划：计划与这条规则一致时直接开始，按你写的受众和渠道起草这本书的${label}，范例只参照、不复制；${after}`;
 }
 
 // ②A's quick start, before anything is prepared.
 export const QUICK_START_RANGE_REASON = '重新分析所选范围每次都要先选范围，没有快速开始；请先看计划。';
 export function quickStartNoRuleReason(pattern: DefaultExecutionRulePattern): string {
-  return `这本书还没有「${DEFAULT_EXECUTION_RULE_QUICK_LABELS[pattern]}」的默认执行规则：先看计划，可以在完整计划里设为快速开始默认。`;
+  return `这本书还没有「${defaultExecutionRuleTitle(pattern)}」的默认执行规则：先看计划，可以在完整计划里设为快速开始默认。`;
+}
+/**
+ * A writing rule covers only the type of the plan it was set from (Commander ruling on #701: TASK-026, no widened source): a
+ * quick start of another type stops at its plan.
+ */
+export function writingRuleOtherTypeReason(ruleName: string, ruleTypeLabel: string, typeLabel: string): string {
+  return `默认执行规则「${ruleName}」是按「${ruleTypeLabel}」的计划设定的，不用于「${typeLabel}」；请看过这份计划后再开始，也可以把这份计划设为「${typeLabel}」的快速开始默认。`;
+}
+/**
+ * What a writing rule covers, as its confirmation and 工序与规则 name it (#701 re-review P2-1): `新建文档「宣传文章」` — the one house
+ * type the rule starts; `null` for a baseline rule, whose pattern is its whole scope.
+ */
+export function defaultExecutionRuleCovers(pattern: DefaultExecutionRulePattern): string | null {
+  const typeId = writingRuleTypeId(pattern);
+  return typeId === null ? null : `新建文档「${writingTypeLabel(typeId)}」`;
+}
+export function writingRuleTypeLabel(pattern: DefaultExecutionRulePattern): string {
+  const typeId = writingRuleTypeId(pattern);
+  return typeId === null ? '' : writingTypeLabel(typeId);
 }
 /** Provider Processing v5 to v7: `matchingActiveDefaultExecutionRuleAllowed: false` under developer-live. */
 export const QUICK_START_DEVELOPER_LIVE = '开发者实时模式下不用默认执行规则：每次都先看计划，再开始任务。';
@@ -440,6 +520,8 @@ export const QUICK_START_RULE_CHANGED = '这条默认执行规则刚刚停用或
 export const QUICK_START_PLAN_CHANGED = '计划的关键内容已变化，这次没有按规则开始；请查看计划修订并重新确认计划。';
 export const QUICK_START_NEEDS_CONNECTION = '模型未连接：这份计划要发送到模型服务，所需的凭据还没有就绪；连接好之后再开始。';
 export const QUICK_START_OFFLINE = '离线：这份计划要连到模型服务，而这台设备现在没有网络；可以在计划里选择联网后开始任务。';
+/** The same for a kind whose bar has no 联网后开始任务 — the writing Task's (#701 review P3-3). */
+export const QUICK_START_OFFLINE_LATER = '离线：这份计划要连到模型服务，而这台设备现在没有网络；联网后再开始。';
 export const QUICK_START_SLOT_BUSY = '运行名额已满：正在运行的任务结束后再开始。';
 export const QUICK_START_NOT_READY = '这份计划现在不能开始；请看过计划后再开始。';
 

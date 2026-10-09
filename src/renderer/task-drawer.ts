@@ -70,7 +70,7 @@ import {
   TASK_PLAN_DEFAULT_RULE_CONFIRM,
   TASK_PLAN_DEFAULT_RULE_FAILED,
   TASK_PLAN_DEFAULT_RULE_HEADING,
-  TASK_PLAN_DEFAULT_RULE_LEAD,
+  taskPlanDefaultRuleLead,
   TASK_PLAN_VIEW_RULES,
   taskPlanDefaultRuleCurrent,
   taskPlanDefaultRuleSet,
@@ -900,7 +900,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const no = control(TASK_PLAN_DEFAULT_RULE_CANCEL, 'quiet', 'default-rule-cancel');
     const actions = el('div', 'button-row');
     actions.append(yes, no);
-    confirm.append(el('h4', undefined, TASK_PLAN_DEFAULT_RULE_HEADING), el('p', undefined, TASK_PLAN_DEFAULT_RULE_LEAD), binds, actions);
+    confirm.append(el('h4', undefined, TASK_PLAN_DEFAULT_RULE_HEADING), el('p', undefined, taskPlanDefaultRuleLead(next.kind)), binds, actions);
     const show = (shown: boolean): void => {
       ruleConfirmShown = shown;
       confirm.hidden = !shown;

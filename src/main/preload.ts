@@ -324,6 +324,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['prepareWritingTask']['output']>(IPC_CHANNELS.prepareWritingTask, input),
   authorizeWritingTask: (input: Omit<ServiceOperationMap['authorizeWritingTask']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['authorizeWritingTask']['output']>(IPC_CHANNELS.authorizeWritingTask, input),
+  quickStartWritingTask: (input: Omit<ServiceOperationMap['quickStartWritingTask']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['quickStartWritingTask']['output']>(IPC_CHANNELS.quickStartWritingTask, input),
   createWritingDraft: (input: Omit<ServiceOperationMap['createWritingDraft']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['createWritingDraft']['output']>(IPC_CHANNELS.createWritingDraft, input),
   inspectAnalysisFeedback: (input: { revisionId: string }) =>

@@ -151,15 +151,21 @@ export const REVIEW_RUN_NO_RULE = '审阅还不能设为快速开始默认：每
  * What a rule set from a plan binds, in the editor's words: the confirmation of `设为快速开始默认…` lists exactly
  * these rows, and 知识库 › 工序与规则 lists them again for the rule in force.
  */
-export function defaultRuleBindingRows(binding: DefaultExecutionRuleBinding): ReadonlyArray<{ label: string; value: string }> {
+export function defaultRuleBindingRows(
+  binding: DefaultExecutionRuleBinding,
+  procedure = '基线分析',
+  /** What a writing rule covers — its one house type (#701 re-review P2-1) — listed last; a baseline rule lists none. */
+  covers: string | null = null,
+): ReadonlyArray<{ label: string; value: string }> {
   const provider = binding.providerBinding;
   const pin = binding.artifactPin;
   return [
     { label: '模型服务', value: `${providerLabel(provider.providerId)} · ${provider.modelId}（凭据引用 ${provider.credentialReference}）` },
-    { label: '工序', value: `基线分析 · ${pin.identity} ${pin.version}（方案修订 ${pin.sidecarRevision}）` },
+    { label: '工序', value: `${procedure} · ${pin.identity} ${pin.version}（方案修订 ${pin.sidecarRevision}）` },
     { label: '预算上限', value: budgetCeilingLabel(binding.runBudgetCeiling) },
     { label: '发送内容类别', value: outboundLabel(binding.outboundDataCategory) },
     { label: '会得到', value: binding.expectedOutcome },
+    ...(covers === null ? [] : [{ label: '适用于', value: covers }]),
   ];
 }
 
@@ -1162,8 +1168,8 @@ export function writingTaskStateLabel(projection: WritingProjection, exemplarsHe
 }
 export const WRITING_EXEMPLAR_GONE_SUFFIX = '——这些范例已不在本机，这次起草不能再开始' as const;
 
-/** 快速开始 of a writing Task waits for its 默认执行规则 (S84b): until then the plan says so where the rule would be set. */
-export const WRITING_NO_RULE = '写作任务还不能设为快速开始默认：写作任务的默认执行规则随下一步提供；每次起草都先看计划，再开始。';
+/** A writing plan read without the store's rule facts (S84b): the store always gives them, so only a plan read alone says this. */
+export const WRITING_NO_RULE = '这份写作计划现在不能设为快速开始默认；请从「交付物」重新打开计划。';
 
 /**
  * What a writing Task references, in the plan's words (DELIV-007): each part of its frozen reference set as it is there, or
@@ -1194,8 +1200,9 @@ export function writingReferenceLines(input: WritingContractInput, exemplarsHere
  * It names the house type, the editor's words and — in `参考` — each part of the reference set or that the Book has none, the
  * house's 范例 of the type among them, referenced and never copied. Its steps are what the kind does — read each range for what
  * the document can draw on, then write it — and what it makes is a draft that becomes the type's document in its 起草 phase
- * once the editor opens it: never a delivery. It is started from the bar and takes no edits, rules, pause or redo in this
- * slice: a changed plan is drafted again from 交付物.
+ * once the editor opens it: never a delivery. It is started from the bar — or by 快速开始 under the Book's writing 默认执行规则,
+ * which `设为快速开始默认…` sets from it (S84b; `defaultRule`) — and takes no edits, pause or redo: a changed plan is drafted
+ * again from 交付物.
  */
 export function writingPlan(input: {
   projection: WritingProjection;
@@ -1204,6 +1211,8 @@ export function writingPlan(input: {
   input: WritingContractInput;
   /** Whether every 范例 the Task referenced still gives the text it pinned; when not, the plan can never be started. */
   exemplarsHere?: boolean;
+  /** `设为快速开始默认…` for this plan, and the rule its Task was started under (S84b), as the store reads them. */
+  defaultRule?: TaskPlanDefaultRuleProjection;
   /** The copy rules the Task's frozen contract carries (#704 P2-2): the 不会做 line names those, not today's. */
   copyRules?: WritingCopyRules;
 }): TaskPlanProjection {
@@ -1340,7 +1349,7 @@ export function writingPlan(input: {
       ]),
     ],
     start,
-    defaultRule: noDefaultRule(WRITING_NO_RULE),
+    defaultRule: input.defaultRule ?? noDefaultRule(WRITING_NO_RULE),
     runControl: null,
     redo: null,
     reprepare: null,

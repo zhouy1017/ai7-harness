@@ -798,7 +798,7 @@ function registerRendererHandlers(
       if (actualOperation !== 'task-authorization' || result.bookId !== capability.bookId) {
         throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', '任务授权准备结果不属于当前图书工作台。');
       }
-    } else if (result !== null && 'consequences' in result && 'quickStart' in result) {
+    } else if (result !== null && 'consequences' in result && 'types' in result) {
       // 新建文档 · 写作任务 answers a writing Task's preparation (Issue #432, S84a).
       if (actualOperation !== 'writing' || result.bookId !== capability.bookId) {
         throw new ServiceCallError('AI7_EDITOR_CAPABILITY_INVALID', '写作任务准备结果不属于当前图书工作台。');
@@ -3194,7 +3194,7 @@ function registerRendererHandlers(
         });
         const prepared = result.result;
         if (result.kind !== 'writing-preparation' ||
-            (prepared !== null && !('consequences' in prepared && 'quickStart' in prepared && prepared.bookId === route.bookId))) {
+            (prepared !== null && !('consequences' in prepared && 'types' in prepared && prepared.bookId === route.bookId))) {
           throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '写作任务准备结果类型无效或不属于当前图书工作台。');
         }
         rememberEditorResource(owned, 'job', result.jobId, {
@@ -3222,6 +3222,28 @@ function registerRendererHandlers(
         });
         requireCurrentRouteGeneration(owned, routeGeneration);
         if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '写作任务不属于当前图书工作台。');
+        return result;
+      });
+    }),
+  );
+  // 快速开始 of a writing Task (Issue #432, S84b): the Task just prepared within the route's Book, its exact plan and the rule
+  // version the editor started under; the answer must be that Book's.
+  ipcMain.handle(IPC_CHANNELS.quickStartWritingTask, (event, input: Parameters<RendererApi['quickStartWritingTask']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const result = await service.call('quickStartWritingTask', {
+          bookId: route.bookId,
+          taskIntentId: input.taskIntentId,
+          planEnvelopeDigest: input.planEnvelopeDigest,
+          ruleVersionId: input.ruleVersionId,
+        });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        if (result.projection.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '快速开始的结果不属于当前图书工作台。');
         return result;
       });
     }),

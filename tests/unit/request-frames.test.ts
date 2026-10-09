@@ -1233,6 +1233,8 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'prepareWritingTask', input: { bookId, typeId: 'news-release', audience: '', channel: '', requirements: '一千字以内' } },
       { op: 'authorizeWritingTask', input: { bookId, taskIntentId: recordId, planEnvelopeDigest: 'c'.repeat(64) } },
       { op: 'createWritingDraft', input: { bookId, revisionId: recordId } },
+      // 快速开始 of a writing Task (S84b): the Task just prepared, its exact plan, and the rule version.
+      { op: 'quickStartWritingTask', input: { bookId, taskIntentId: recordId, planEnvelopeDigest: 'c'.repeat(64), ruleVersionId: bookId } },
     ];
     for (const { op, input } of inputs) {
       const request = { id: randomUUID(), op, input };
@@ -1271,6 +1273,10 @@ describe('decodeRequest rejects malformed frames', () => {
       ['authorizeWritingTask', { bookId, taskIntentId: recordId, planEnvelopeDigest: 'c'.repeat(65) }],
       ['createWritingDraft', { bookId, revisionId: 'revision' }],
       ['createWritingDraft', { bookId }],
+      ['quickStartWritingTask', { bookId, taskIntentId: recordId, planEnvelopeDigest: 'c'.repeat(64) }],
+      ['quickStartWritingTask', { bookId, taskIntentId: recordId, planEnvelopeDigest: 'c'.repeat(64), ruleVersionId: 'rule' }],
+      ['quickStartWritingTask', { bookId, taskIntentId: recordId, planEnvelopeDigest: 'C'.repeat(64), ruleVersionId: bookId }],
+      ['quickStartWritingTask', { bookId: 'book', taskIntentId: recordId, planEnvelopeDigest: 'c'.repeat(64), ruleVersionId: bookId }],
       ['saveEvaluation', { bookId, recordId, expectedEntries: 1, finalize: false,
         content: { ...content, items: [{ itemId: 'x', score: 18, notRated: null, comment: null, adjustment: { reasons: ['too-strict'], note: null } }] } }],
       ['saveEvaluation', { bookId, recordId, expectedEntries: 1, finalize: false,
