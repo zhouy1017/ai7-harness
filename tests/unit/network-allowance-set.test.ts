@@ -2,7 +2,8 @@ import dns from 'node:dns';
 import dnsPromises from 'node:dns/promises';
 import net from 'node:net';
 import tls from 'node:tls';
-import { describe, expect, it } from 'vitest';
+import { EventEmitter } from 'node:events';
+import { describe, expect, it, vi } from 'vitest';
 import {
   NETWORK_ALLOWANCE_INVALID_CODE,
   NETWORK_ALLOWANCE_LATE_CODE,
@@ -12,6 +13,7 @@ import {
   allowanceAdmitsLookup,
   armHostAllowanceSet,
   armPerTicketHostAdmission,
+  guardedConnect,
   guardedLookup,
   guardedLookupPromise,
   isPublicAddress,
@@ -20,6 +22,7 @@ import {
   installNodeNetworkDenial,
   perTicketHostAdmissionArmed,
   singleHostAllowance,
+  ticketHostHolds,
 } from '../../src/shared/network-denial.js';
 
 // The policy-declared allowance set and per-ticket host admission (ADR 0080 §7.3; Issue #473, S87-f3a), proven without a
@@ -41,7 +44,7 @@ function deniedCode(action: () => unknown): unknown {
 
 describe('the allowance set', () => {
   it('arms once before the install, validates every host, and refuses a late, empty, or duplicated set', () => {
-    expect(() => admitTicketHost({ host: 'example.org', port: 443 })).toThrowError(invalid);
+    expect(() => admitTicketHost({ host: 'example.org', port: 443, ticketId: 'ticket-1' })).toThrowError(invalid);
     expect(() => armHostAllowanceSet([])).toThrowError(invalid);
     expect(() => armHostAllowanceSet([MODEL, { host: 'OpenCode.ai', port: 443 }])).toThrowError(invalid);
     expect(() => armHostAllowanceSet([MODEL, { host: 'not a host', port: 443 }])).toThrowError(invalid);
@@ -72,12 +75,13 @@ describe('the allowance set', () => {
 
 describe('per-ticket host admission', () => {
   it('holds one public host open for one ticket and closes it on release', () => {
-    const release = admitTicketHost({ host: 'Example.org', port: 443 });
+    const release = admitTicketHost({ host: 'Example.org', port: 443, ticketId: 'ticket-a' });
     expect(allowanceAdmitsConnection([{ host: 'example.org', port: 443 }])).toBe(true);
     expect(allowanceAdmitsLookup(['example.org'])).toBe(true);
     expect(allowanceAdmitsConnection([{ host: 'example.org', port: 80 }])).toBe(false);
-    // One at a time: maxParallelToolCalls is 1, and a second ticket waits for the first to release.
-    expect(() => admitTicketHost({ host: 'example.com', port: 443 })).toThrowError(invalid);
+    // A ticket opens its host once at a time, and a ticket names itself.
+    expect(() => admitTicketHost({ host: 'example.com', port: 443, ticketId: 'ticket-a' })).toThrowError(invalid);
+    expect(() => admitTicketHost({ host: 'example.com', port: 443, ticketId: '' })).toThrowError(invalid);
     expect(allowanceAdmitsConnection([{ host: 'example.com', port: 443 }])).toBe(false);
     release();
     expect(allowanceAdmitsConnection([{ host: 'example.org', port: 443 }])).toBe(false);
@@ -98,7 +102,7 @@ describe('per-ticket host admission', () => {
     const lookup = guardedLookup(stub as (...args: unknown[]) => unknown);
     const ask = (hostname: string, options: unknown = {}): Promise<{ error: Error | null; address?: unknown }> =>
       new Promise((resolveAnswer) => { lookup(hostname, options, (error: Error | null, address?: unknown) => resolveAnswer({ error, address })); });
-    const release = admitTicketHost({ host: 'example.org', port: 443 });
+    const release = admitTicketHost({ host: 'example.org', port: 443, ticketId: 'ticket-2' });
     try {
       answers['example.org'] = '93.184.215.14';
       expect(await ask('example.org')).toEqual({ error: null, address: '93.184.215.14' });
@@ -158,7 +162,7 @@ describe('per-ticket host admission', () => {
   it('never admits a name in a zone only a local or private resolver answers', () => {
     for (const host of ['localhost', 'a.localhost', 'printer.local', 'metadata.google.internal', 'router.home.arpa', 'nas.lan', 'single']) {
       expect([host, isPublicHostName(host)]).toEqual([host, false]);
-      expect(() => admitTicketHost({ host, port: 443 })).toThrowError(invalid);
+      expect(() => admitTicketHost({ host, port: 443, ticketId: `ticket-${host}` })).toThrowError(invalid);
     }
     expect(isPublicHostName('example.org')).toBe(true);
     expect(isPublicHostName('127.0.0.1.nip.io')).toBe(true); // a public name: its answer is what the lookup vets
@@ -166,17 +170,123 @@ describe('per-ticket host admission', () => {
 
   it('never opens an address literal or a loopback name, and a stale release closes nothing it did not open', () => {
     for (const host of ['127.0.0.1', '10.0.0.1', 'localhost', 'a.localhost', 'single']) {
-      expect(() => admitTicketHost({ host, port: 443 })).toThrowError(invalid);
+      expect(() => admitTicketHost({ host, port: 443, ticketId: `ticket-${host}` })).toThrowError(invalid);
     }
-    const first = admitTicketHost({ host: 'example.org', port: 443 });
+    const first = admitTicketHost({ host: 'example.org', port: 443, ticketId: 'stale-1' });
     first();
-    const second = admitTicketHost({ host: 'example.net', port: 443 });
+    const second = admitTicketHost({ host: 'example.net', port: 443, ticketId: 'stale-2' });
     first();
     expect(allowanceAdmitsConnection([{ host: 'example.net', port: 443 }])).toBe(true);
     second();
     expect(allowanceAdmitsConnection([{ host: 'example.net', port: 443 }])).toBe(false);
     // The global fetch stays denied whatever is admitted: only the captured native fetch reaches a host.
-    const held = admitTicketHost({ host: 'example.org', port: 443 });
+    const held = admitTicketHost({ host: 'example.org', port: 443, ticketId: 'ticket-3' });
     return expect(fetch('https://example.org/')).rejects.toMatchObject({ code: NETWORK_DENIED_CODE }).finally(held);
+  });
+});
+
+describe('per-ticket admission is the ticket\'s, and no pooled socket outlives it (#676)', () => {
+  /** A stand-in for a socket: it records whether it was destroyed and closes as a socket does. */
+  class FakeSocket extends EventEmitter {
+    destroyed = false;
+
+    destroy(): this {
+      if (!this.destroyed) {
+        this.destroyed = true;
+        this.emit('close');
+      }
+      return this;
+    }
+  }
+
+  /** A connect primitive the gate wraps, as `net.connect` and `tls.connect` are: it returns a fresh socket. */
+  function connector(): { connect: (...args: unknown[]) => unknown; opened: FakeSocket[] } {
+    const opened: FakeSocket[] = [];
+    return {
+      opened,
+      connect: guardedConnect(() => {
+        const socket = new FakeSocket();
+        opened.push(socket);
+        return socket;
+      }),
+    };
+  }
+
+  it('lets two tickets hold hosts side by side, each release closing only its own', () => {
+    const a = admitTicketHost({ host: 'example.org', port: 443, ticketId: 'run-a' });
+    const b = admitTicketHost({ host: 'example.net', port: 443, ticketId: 'run-b' });
+    expect(ticketHostHolds()).toBe(2);
+    expect(allowanceAdmitsConnection([{ host: 'example.org', port: 443 }])).toBe(true);
+    expect(allowanceAdmitsConnection([{ host: 'example.net', port: 443 }])).toBe(true);
+    expect(allowanceAdmitsLookup(['example.net'])).toBe(true);
+    a();
+    expect(allowanceAdmitsConnection([{ host: 'example.org', port: 443 }])).toBe(false);
+    expect(allowanceAdmitsConnection([{ host: 'example.net', port: 443 }])).toBe(true);
+    // A second release of the first ticket closes nothing the second holds.
+    a();
+    expect(allowanceAdmitsConnection([{ host: 'example.net', port: 443 }])).toBe(true);
+    b();
+    expect(ticketHostHolds()).toBe(0);
+    expect(allowanceAdmitsLookup(['example.net'])).toBe(false);
+  });
+
+  it('closes every socket opened to a ticket host when the last ticket holding it releases it', () => {
+    const { connect, opened } = connector();
+    const first = admitTicketHost({ host: 'example.org', port: 443, ticketId: 'pool-1' });
+    const second = admitTicketHost({ host: 'example.org', port: 443, ticketId: 'pool-2' });
+    const other = admitTicketHost({ host: 'example.net', port: 443, ticketId: 'pool-3' });
+    connect({ host: 'example.org', port: 443 });
+    connect({ host: 'example.org', port: 443 });
+    connect({ host: 'example.net', port: 443 });
+    expect(opened).toHaveLength(3);
+    // One ticket's release leaves a host another ticket still holds open, sockets and all.
+    first();
+    expect(opened.map((socket) => socket.destroyed)).toEqual([false, false, false]);
+    second();
+    expect(opened.map((socket) => socket.destroyed)).toEqual([true, true, false]);
+    // A kept-alive socket is gone, and no new one opens without a ticket.
+    expect(deniedCode(() => connect({ host: 'example.org', port: 443 }))).toBe(NETWORK_DENIED_CODE);
+    expect(opened).toHaveLength(3);
+    other();
+    expect(opened[2]!.destroyed).toBe(true);
+  });
+
+  it('tracks the receiver of a prototype connect, forgets a socket that closed, and leaves the policy\'s own hosts alone', () => {
+    const socket = new FakeSocket();
+    const prototypeConnect = guardedConnect(function (this: unknown) { return this; });
+    const held = admitTicketHost({ host: 'example.org', port: 443, ticketId: 'proto-1' });
+    prototypeConnect.call(socket, { host: 'example.org', port: 443 });
+    const early = new FakeSocket();
+    prototypeConnect.call(early, { host: 'example.org', port: 443 });
+    early.destroy();
+    const destroy = vi.spyOn(early, 'destroy');
+    // A ticket on an armed allowance host opens nothing the policy did not already: its sockets are not the ticket's.
+    const search = new FakeSocket();
+    const alsoSearch = admitTicketHost({ host: 'search.parallel.ai', port: 443, ticketId: 'proto-2' });
+    prototypeConnect.call(search, { host: 'search.parallel.ai', port: 443 });
+    held();
+    alsoSearch();
+    expect(socket.destroyed).toBe(true);
+    expect(destroy).not.toHaveBeenCalled();
+    expect(search.destroyed).toBe(false);
+  });
+
+  it('refuses a connect to a ticket host whose result could never be closed', () => {
+    const held = admitTicketHost({ host: 'example.org', port: 443, ticketId: 'opaque-1' });
+    try {
+      const opaque = guardedConnect(() => 'not a socket');
+      expect(deniedCode(() => opaque.call(undefined, { host: 'example.org', port: 443 }))).toBe(NETWORK_DENIED_CODE);
+      // The policy's own hosts are not tracked, whatever the primitive returns.
+      expect(opaque.call(undefined, { host: 'opencode.ai', port: 443 })).toBe('not a socket');
+    } finally {
+      held();
+    }
+  });
+
+  it('installed the tracking gate on every connect primitive', () => {
+    expect(net.connect.name).toBe('gatedConnect');
+    expect(net.createConnection.name).toBe('gatedConnect');
+    expect(net.Socket.prototype.connect.name).toBe('gatedConnect');
+    expect(tls.connect.name).toBe('gatedConnect');
   });
 });

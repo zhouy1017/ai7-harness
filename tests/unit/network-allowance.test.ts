@@ -88,7 +88,7 @@ describe('armSingleHostAllowance', () => {
   it('arms the set of one host and no per-ticket admission, so no host can be opened late (Issue #473)', () => {
     expect(hostAllowanceSet()).toEqual([ALLOWED]);
     expect(perTicketHostAdmissionArmed()).toBe(false);
-    expect(() => admitTicketHost({ host: 'example.org', port: 443 })).toThrowError(new RegExp(NETWORK_ALLOWANCE_INVALID_CODE, 'u'));
+    expect(() => admitTicketHost({ host: 'example.org', port: 443, ticketId: 'ticket-1' })).toThrowError(new RegExp(NETWORK_ALLOWANCE_INVALID_CODE, 'u'));
     expect(allowanceAdmitsConnection([{ host: 'example.org', port: 443 }])).toBe(false);
     expect(allowanceAdmitsConnection([{ host: 'search.parallel.ai', port: 443 }])).toBe(false);
   });

@@ -152,7 +152,7 @@ export type EgressRefusalReason =
   | 'run-budget-ceiling-unset'
   | 'run-budget-ceiling-reached'
   | 'platform-tools-not-named'
-  | 'search-host-mismatch'
+  | 'ticket-book-foreign'
   | 'circuit-breaker-tripped'
   | 'fetch-target-invalid'
   | 'fetch-target-not-cited';
@@ -199,38 +199,81 @@ export type SearchServiceDecision = { readonly decision: 'call-search-service'; 
 export type PublicSourceDecision = { readonly decision: 'fetch-public-source'; readonly ticket: PublicSourceTicket } | PlatformToolRefusal;
 export type PlatformToolEgressDecision = SearchServiceDecision | PublicSourceDecision;
 
+/** What the gate keeps for one ticket book: the binding it was opened for, that binding's rule, and its unredeemed tickets. */
+interface TicketBookState {
+  readonly bindingDigest: string;
+  readonly rule: PlatformToolsRule;
+  readonly currentBindingDigest: () => string | null;
+  /** Each unredeemed ticket by id, as the exact frozen object the gate issued. */
+  readonly outstanding: Map<string, PlatformToolTicket>;
+}
+
+/** Every book the gate opened (#676): a book is the gate's only when it is here, and the state lives nowhere else. */
+const ticketBooks = new WeakMap<EgressTicketBook, TicketBookState>();
+/** The key only `EgressTicketBook.open` holds: a book constructed any other way throws before it holds anything. */
+const TICKET_BOOK_KEY: unique symbol = Symbol('egress-ticket-book');
+
 /**
- * The single-use tickets of one attempt's platform-tool decisions. Only the gate's two decision functions issue into it;
- * a forwarder redeems the exact ticket it was handed before it sends a byte, and a ticket redeems once — a second
- * redemption, a forged ticket, or one altered after issue is refused.
+ * The single-use tickets of one attempt's platform-tool decisions (ADR 0080 §7.2; #676). Only the gate opens a book — for
+ * one binding whose rule names the platform tools — and only the gate's two decision functions issue into it: the book has
+ * no method that issues, and its state is held by this module, not by the object. A forwarder redeems through
+ * `redeemEgressTicket` the exact ticket it was handed before it sends a byte; a ticket redeems once, only from the book
+ * that issued it, and only while the binding it was issued for is still the attempt's current binding.
  */
 export class EgressTicketBook {
-  readonly #outstanding = new Map<string, string>();
-
-  /** @internal Issued only by `evaluateSearchServiceCall` and `evaluatePublicSourceFetch`. */
-  issue<T extends PlatformToolTicket>(body: Omit<T, 'ticketId'>): T {
-    const ticket = Object.freeze({ ...body, ticketId: randomUUID() }) as T;
-    this.#outstanding.set(ticket.ticketId, canonicalJson(ticket));
-    return ticket;
+  private constructor(key: typeof TICKET_BOOK_KEY, state: TicketBookState) {
+    if (key !== TICKET_BOOK_KEY) throw new Error('EGRESS_TICKET_BOOK_NOT_OPENED_BY_GATE');
+    ticketBooks.set(this, state);
   }
 
-  /** Admit one ticket exactly once; `false` for a ticket this book never issued, one already redeemed, or one altered. */
-  redeem(ticket: PlatformToolTicket): boolean {
-    const issued = this.#outstanding.get(ticket.ticketId);
-    if (issued === undefined || issued !== canonicalJson(ticket)) return false;
-    this.#outstanding.delete(ticket.ticketId);
-    return true;
+  /**
+   * Open the ticket book of one attempt: for this binding, whose rule must name the platform tools under developer-live, and
+   * this scope, whose current binding every redemption re-reads. Under Provider Processing v5 no rule names them, so no
+   * book can be opened at all.
+   */
+  static open(binding: EgressBindingFacts, scope: Pick<EgressAttemptScope, 'currentBindingDigest'>): EgressTicketBook {
+    const rule = platformToolsOf(binding);
+    if (rule === null || !DIGEST_PATTERN.test(binding.bindingDigest)) throw new Error('PLATFORM_TOOLS_NOT_NAMED');
+    return new EgressTicketBook(TICKET_BOOK_KEY, {
+      bindingDigest: binding.bindingDigest,
+      rule,
+      currentBindingDigest: scope.currentBindingDigest,
+      outstanding: new Map(),
+    });
   }
 
   /** Withdraw an issued ticket unredeemed — the call was answered from the Research Snapshot Cache and sends nothing. */
   revoke(ticket: PlatformToolTicket): void {
-    if (this.#outstanding.get(ticket.ticketId) === canonicalJson(ticket)) this.#outstanding.delete(ticket.ticketId);
+    const state = ticketBooks.get(this);
+    if (state !== undefined && state.outstanding.get(ticket.ticketId) === ticket) state.outstanding.delete(ticket.ticketId);
   }
 
   /** How many issued tickets have not been redeemed. */
   get outstanding(): number {
-    return this.#outstanding.size;
+    return ticketBooks.get(this)?.outstanding.size ?? 0;
   }
+}
+
+/** Issue one ticket into a book the gate opened. Module-private: the two decision functions are its only callers. */
+function issueTicket<T extends PlatformToolTicket>(state: TicketBookState, body: Omit<T, 'ticketId'>): T {
+  const ticket = Object.freeze({ ...body, ticketId: randomUUID() }) as T;
+  state.outstanding.set(ticket.ticketId, ticket);
+  return ticket;
+}
+
+/**
+ * Redeem one ticket exactly once (#676), and return the rule of the binding it was issued under — the only rule a forwarder
+ * may build its request from. `null` — and nothing may be sent — for a book the gate did not open, a ticket this book did
+ * not issue (a copy of an issued ticket included), one already redeemed or revoked, or one whose binding is no longer the
+ * attempt's current binding; a ticket refused for a stale binding is spent and never redeems later.
+ */
+export function redeemEgressTicket(book: EgressTicketBook, ticket: PlatformToolTicket): PlatformToolsRule | null {
+  const state = ticketBooks.get(book);
+  if (state === undefined) return null;
+  if (state.outstanding.get(ticket.ticketId) !== ticket) return null;
+  state.outstanding.delete(ticket.ticketId);
+  if (ticket.bindingDigest !== state.bindingDigest || state.currentBindingDigest() !== state.bindingDigest) return null;
+  return state.rule;
 }
 
 export type EgressDecision =
@@ -411,8 +454,20 @@ function refuseTool(reason: EgressRefusalReason, detail: string): PlatformToolRe
   return { decision: 'refuse', reason, detail };
 }
 
-/** The preconditions both platform-tool decisions share; the refusal, or the rule they may proceed under. */
-function platformToolPreconditions(binding: EgressBindingFacts, scope: EgressAttemptScope): PlatformToolRefusal | PlatformToolsRule {
+/**
+ * The one outbound category a platform-tool call may carry (ADR 0080 §7.2 and its Question 2): a query or a fetched URL is
+ * written by a model that read only the binding's admitted material, so its category is the binding's own — and the
+ * platform tools exist only for a binding of public or synthetic material.
+ */
+const PLATFORM_TOOL_OUTBOUND_CATEGORY: OutboundDataCategory = 'public-or-synthetic';
+
+/**
+ * The preconditions both platform-tool decisions share; the refusal, or what they may proceed under. Everything is read
+ * from the binding, its selected rule, the scope, and the gate's own book — nothing from the call — so no caller can make a
+ * narrowing compare a value with itself (#676).
+ */
+function platformToolPreconditions(binding: EgressBindingFacts, scope: EgressAttemptScope, book: EgressTicketBook):
+  PlatformToolRefusal | { readonly rule: PlatformToolsRule; readonly state: TicketBookState } {
   if (!DIGEST_PATTERN.test(binding.bindingDigest) || scope.currentBindingDigest() !== binding.bindingDigest) {
     return refuseTool('binding-stale', '执行绑定已不是当前绑定；未发送任何内容。');
   }
@@ -423,6 +478,15 @@ function platformToolPreconditions(binding: EgressBindingFacts, scope: EgressAtt
   if (rule === null) {
     return refuseTool('platform-tools-not-named', '执行绑定的处理规则未命名平台工具；未发送任何内容。');
   }
+  // A ticket goes only into a book the gate opened for exactly this binding.
+  const state = ticketBooks.get(book);
+  if (state === undefined || state.bindingDigest !== binding.bindingDigest) {
+    return refuseTool('ticket-book-foreign', '票据簿不是出口闸门为本执行绑定开立的；未发送任何内容。');
+  }
+  // Derived from the binding, never passed in by the call: the query's category is the binding's (ADR 0080 §7.2).
+  if (binding.outboundDataCategory !== PLATFORM_TOOL_OUTBOUND_CATEGORY) {
+    return refuseTool('outbound-category-mismatch', '平台工具只承载公开或合成材料，执行绑定的外发数据类别不是；未发送任何内容。');
+  }
   if ((scope.breakerState?.() ?? 'intact') === 'tripped') {
     return refuseTool('circuit-breaker-tripped', '本单元的工具往返已触发熔断；未发送任何内容。');
   }
@@ -431,34 +495,30 @@ function platformToolPreconditions(binding: EgressBindingFacts, scope: EgressAtt
     return refuseTool('run-budget-ceiling-unset', '平台工具要求非 unset 的任务运行预算上限；未发送任何内容。');
   }
   if (ceiling === 'reached') return refuseTool('run-budget-ceiling-reached', '任务运行预算上限已达到；未发送任何内容。');
-  return rule;
+  return { rule, state };
 }
 
 /**
  * The `call-search-service` decision (ADR 0080 §7.2), beside `transmit-remote`: one model-emitted `websearch` call may be
- * forwarded only to the host the binding's rule names, only with the binding's own outbound category, only while the
- * unit's breaker is intact and the Run's ceiling holds. One decision is one single-use ticket; the forwarder sends with the
- * `fetch` the service captured before installing network denial. A binding whose rule names no platform tools — every
- * binding under Provider Processing v5 — is refused before anything else is read.
+ * forwarded only to the host the binding's rule names, only with the binding's own outbound category — which must be
+ * public or synthetic — only while the unit's breaker is intact and the Run's ceiling holds. The call brings only its
+ * arguments: the host and the category are derived here from the selected rule and the binding (#676), never taken from
+ * the caller. One decision is one single-use ticket in the gate's own book; the forwarder sends with the `fetch` the service
+ * captured before installing network denial. A binding whose rule names no platform tools — every binding under Provider
+ * Processing v5 — is refused before anything else is read.
  */
 export function evaluateSearchServiceCall(
-  request: { readonly host: string; readonly arguments: Extract<PlatformToolArguments, { tool: 'websearch' }>; readonly outboundDataCategory: OutboundDataCategory },
+  request: { readonly arguments: Extract<PlatformToolArguments, { tool: 'websearch' }> },
   binding: EgressBindingFacts,
   scope: EgressAttemptScope,
   book: EgressTicketBook,
 ): SearchServiceDecision {
-  const rule = platformToolPreconditions(binding, scope);
-  if ('decision' in rule) return rule;
-  if (request.host.toLowerCase() !== rule.websearch.host) {
-    return refuseTool('search-host-mismatch', '搜索服务主机与处理规则命名的主机不一致；未发送任何内容。');
-  }
-  if (request.outboundDataCategory !== binding.outboundDataCategory) {
-    return refuseTool('outbound-category-mismatch', '搜索查询的外发数据类别与执行绑定不一致；未发送任何内容。');
-  }
-  const ticket = book.issue<SearchServiceTicket>({
+  const admitted = platformToolPreconditions(binding, scope, book);
+  if ('decision' in admitted) return admitted;
+  const ticket = issueTicket<SearchServiceTicket>(admitted.state, {
     decision: 'call-search-service',
     bindingDigest: binding.bindingDigest,
-    host: rule.websearch.host,
+    host: admitted.rule.websearch.host,
     argumentsDigest: toolArgumentsDigest(request.arguments),
   });
   return { decision: 'call-search-service', ticket };
@@ -467,8 +527,8 @@ export function evaluateSearchServiceCall(
 /**
  * The `fetch-public-source` decision (ADR 0074 §3) as `webfetch` rides it (ADR 0080 §7.2): one canonical public `https`
  * URL the model cited or the search returned — bounded by citations, not by a host list — under a rule naming the platform
- * tools, while the breaker is intact and the ceiling holds. One decision is one single-use ticket, and the ticket is the
- * only thing per-ticket host admission opens a host for.
+ * tools, for a public or synthetic binding, while the breaker is intact and the ceiling holds. One decision is one
+ * single-use ticket in the gate's own book, and the ticket is the only thing per-ticket host admission opens a host for.
  */
 export function evaluatePublicSourceFetch(
   request: { readonly arguments: Extract<PlatformToolArguments, { tool: 'webfetch' }> },
@@ -476,8 +536,8 @@ export function evaluatePublicSourceFetch(
   scope: EgressAttemptScope,
   book: EgressTicketBook,
 ): PublicSourceDecision {
-  const rule = platformToolPreconditions(binding, scope);
-  if ('decision' in rule) return rule;
+  const admitted = platformToolPreconditions(binding, scope, book);
+  if ('decision' in admitted) return admitted;
   const url = canonicalPublicUrl(request.arguments.url);
   if (url === null || url !== request.arguments.url) {
     return refuseTool('fetch-target-invalid', '取回地址不是规范的公开 https 地址；未发送任何内容。');
@@ -485,7 +545,7 @@ export function evaluatePublicSourceFetch(
   if (!(scope.citationAdmits?.(url) ?? false)) {
     return refuseTool('fetch-target-not-cited', '取回地址不是本次尝试引用或搜索返回的来源；未发送任何内容。');
   }
-  const ticket = book.issue<PublicSourceTicket>({
+  const ticket = issueTicket<PublicSourceTicket>(admitted.state, {
     decision: 'fetch-public-source',
     bindingDigest: binding.bindingDigest,
     url,
