@@ -1,5 +1,6 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
+import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
 export const SERVICE_PROTOCOL_VERSION = 109 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
@@ -1785,10 +1786,10 @@ export type DeveloperLiveCeiling =
   | { readonly kind: 'tokens-per-frozen-unit'; readonly tokensPerFrozenUnit: number };
 /** The execution route an analysis Run binds: the in-process deterministic adapter or the developer-live OpenCode Go route. */
 export type ExecutionRouteId = 'ai7-local-deterministic' | 'opencode-go';
-/** A remote Provider route a Provider Resolution Plan may name. */
-export type RemoteProviderId = 'deepseek-open-platform' | 'opencode-go' | 'opencode-go-messages' | 'opencode-go-responses';
-/** A logical credential slot of the Main Editorial Role. */
-export type CredentialSlotId = 'deepseek-api-key' | 'opencode-go';
+/** A remote Provider route a Provider Resolution Plan may name: a route a provider document declares (ADR 0073 §2). */
+export type RemoteProviderId = ConfiguredRouteId;
+/** A logical credential slot of the Main Editorial Role: one per configured provider (ADR 0073 §4). */
+export type CredentialSlotId = ConfiguredCredentialSlot;
 /** The Provider Processing pin a Provider Resolution Plan carries for its trusted scope. */
 export type ProviderProcessingPin =
   | { operationalScope: 'development-ci'; version: 'v1'; decision: 'deny'; authorizedLiveTransmissionCount: 0 }
@@ -4752,6 +4753,10 @@ export interface ReviewCoverageRowProjection {
   lastReviewedRevisionLabel: string | null;
   /** Blocks added, removed or changed since that review; `null` before any. */
   changedBlocks: number | null;
+  /**
+   * Why the category cannot run, on an `unavailable` row; on a reviewed one (Issue #709), what could not be checked: an
+   * earlier review record the walk for unread changes could not read. `null` otherwise.
+   */
   unavailableReason: string | null;
 }
 

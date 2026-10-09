@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { ConfiguredCredentialSlot, ConfiguredRouteId } from '../../shared/provider-configuration.generated.js';
 import { DIGEST_PATTERN, canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { assistantToolCalls, messageText, toolResultOf, type AssembledContentBlock, type AssembledModelPayload } from './payload.js';
 import {
@@ -22,39 +23,37 @@ import {
  */
 export const LOCAL_DETERMINISTIC_ROUTE = 'ai7-local-deterministic' as const;
 export const LOCAL_DETERMINISTIC_MODEL = 'ai7-deterministic-fixture' as const;
-export const DEEPSEEK_ROUTE = 'deepseek-open-platform' as const;
+/*
+ * The two bindings this gate admits today: the production connection's pair and Provider Processing
+ * v5's developer-live pair. Which pairs are bindable is the policy's statement, not the provider
+ * documents' (ADR 0073 §3), and moving these four from source constants to a read of the policy's
+ * pinned binding is #452's gate share (S87-f3b). Until then each route is checked against the
+ * configured set, so a document that renamed or dropped one fails `check` here instead of leaving a
+ * binding to a route no document declares.
+ */
+export const DEEPSEEK_ROUTE = 'deepseek-open-platform' as const satisfies ConfiguredRouteId;
 export const DEEPSEEK_MODEL = 'deepseek-v4-pro' as const;
 /** The developer-live route of Provider Processing v5 (ADR 0065, ADR 0067): OpenCode Go with the bare model id. */
-export const OPENCODE_GO_ROUTE = 'opencode-go' as const;
+export const OPENCODE_GO_ROUTE = 'opencode-go' as const satisfies ConfiguredRouteId;
 export const OPENCODE_GO_MODEL = 'deepseek-v4-flash' as const;
-/**
- * The same OpenCode Go plan reached over its Anthropic-compatible `/messages` path (ADR 0067). A
- * second route because the endpoint and the request shape differ; the same credential slot because
- * the credential does not, so declaring it moves no credential boundary.
- */
-export const OPENCODE_GO_MESSAGES_ROUTE = 'opencode-go-messages' as const;
-/**
- * The same plan reached over its OpenAI-compatible `/responses` path (ADR 0067), which the Go page
- * documents for its GPT and Grok models. A third route for the reason the second one exists: the
- * endpoint and the request shape differ, and the credential does not.
- */
-export const OPENCODE_GO_RESPONSES_ROUTE = 'opencode-go-responses' as const;
 
 /**
- * Every route a Provider Resolution Plan may bind. Neither `opencode-go-messages` nor
- * `opencode-go-responses` is here: no Run may bind a route whose every model is inert, and this gate
- * is the place that enforces it, so this union is a narrower statement than `RemoteExecutionRoute`
- * rather than a superset of it.
+ * Every route a Provider Resolution Plan may bind. No configured route beyond these two is here —
+ * not the OpenCode Go plan's `/messages` and `/responses` paths, nor any route a provider document
+ * declares: a declared format is a claim about the request shape, and a route becomes bindable only
+ * when a Provider Processing revision names its exact binding (ADR 0073 §3). This gate is the place
+ * that enforces it, so this union is a narrower statement than `RemoteExecutionRoute` rather than a
+ * superset of it.
  */
 export type ExecutionRoute = typeof LOCAL_DETERMINISTIC_ROUTE | typeof DEEPSEEK_ROUTE | typeof OPENCODE_GO_ROUTE;
-/** Every remote route a profile may be declared for, bindable or not; all of them are served by the same adapter. */
-export type RemoteExecutionRoute =
-  | typeof DEEPSEEK_ROUTE
-  | typeof OPENCODE_GO_ROUTE
-  | typeof OPENCODE_GO_MESSAGES_ROUTE
-  | typeof OPENCODE_GO_RESPONSES_ROUTE;
-/** The logical credential slots of the Main Editorial Role: one per remote route. */
-export type CredentialSlot = 'deepseek-api-key' | 'opencode-go';
+/**
+ * Every remote route a profile may be declared for, bindable or not; all of them are served by the same adapter. The
+ * members are the routes the provider documents under `config/providers/` declare (ADR 0073 §2): a closed union,
+ * extended by generation from reviewed documents and never by hand.
+ */
+export type RemoteExecutionRoute = ConfiguredRouteId;
+/** The logical credential slots of the Main Editorial Role: one per configured provider (ADR 0073 §4), from the same documents. */
+export type CredentialSlot = ConfiguredCredentialSlot;
 
 /**
  * The trusted scope's Provider Processing pin, as the gate sees it. v1 denies every remote route; v5

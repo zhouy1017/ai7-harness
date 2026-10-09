@@ -3,7 +3,15 @@ import { describe, expect, it } from 'vitest';
 import { AnalysisError } from '../../src/service/analysis/canonical.js';
 import { deriveCoverageManifest, unitContentKeys, type ManifestBlockInput } from '../../src/service/analysis/coverage-manifest.js';
 import { BASELINE_ANALYSIS_CONTRACT_VERSION } from '../../src/service/analysis/identity.js';
-import { deriveReusePlan, requireSelectedRange, reusePlanRecord, selectedRangeClosure, type ReusePlanPredecessor } from '../../src/service/analysis/reuse-plan.js';
+import {
+  deriveReusePlan,
+  deriveScopePlan,
+  requireSelectedRange,
+  reusePlanRecord,
+  selectedRangeClosure,
+  type ReusePlanPredecessor,
+  type ScopePlanPredecessor,
+} from '../../src/service/analysis/reuse-plan.js';
 import type { CoverageManifestProjection } from '../../src/shared/protocol.js';
 
 // Synthetic blocks only. The reuse plan must be content-exact and position-independent: a unit
@@ -147,5 +155,44 @@ describe('deriveReusePlan', () => {
     expect(() => requireSelectedRange(null, 6)).toThrowError(AnalysisError);
     expect(() => deriveReusePlan({ mode: 'sync-current', selectedRange: { startPosition: 1, endPosition: 1 }, manifest: base, predecessor: predecessorOf(base) })).toThrowError(AnalysisError);
     expect(() => deriveReusePlan({ mode: 'reanalyze-range', selectedRange: null, manifest: base, predecessor: predecessorOf(base) })).toThrowError(AnalysisError);
+  });
+});
+
+describe('deriveScopePlan', () => {
+  const scopePredecessor = (manifest: CoverageManifestProjection, unreviewed: number[], changedUnread?: number[]): ScopePlanPredecessor => ({
+    ...predecessorOf(manifest, unreviewed),
+    contractVersion: 'ai7.editorial-review/1',
+    schemaDigest: 'd'.repeat(64),
+    unreviewedUnitOrdinals: unreviewed,
+    ...(changedUnread === undefined ? {} : { changedUnreadUnitOrdinals: changedUnread }),
+  });
+  const plan = (predecessor: ScopePlanPredecessor, recompute: 'changed' | 'selected-range', selectedRange: { startPosition: number; endPosition: number } | null = null) =>
+    deriveScopePlan({
+      kind: 'review-category', contractVersion: 'ai7.editorial-review/1', schemaDigest: 'd'.repeat(64),
+      mode: recompute === 'changed' ? 'review-sync' : 'review-range', recompute, selectedRange, manifest: manifestOf(baseBlocks), predecessor,
+    } as unknown as Parameters<typeof deriveScopePlan>[0]);
+  const rows = (derived: ReturnType<typeof deriveScopePlan>) => derived.units.map((unit) => [unit.unitOrdinal, unit.disposition, unit.reason]);
+
+  it('leaves a unit no Run has read unreviewed under `changed`, and reads one a range Run left unread after it changed (Issue #709)', () => {
+    const base = manifestOf(baseBlocks);
+    const never = plan(scopePredecessor(base, [2]), 'changed');
+    expect(rows(never)).toEqual([[1, 'reused', 'compatible'], [2, 'unreviewed', 'out-of-scope'], [3, 'reused', 'compatible']]);
+    expect(rows(plan(scopePredecessor(base, [2], []), 'changed'))).toEqual(rows(never));
+    const changed = plan(scopePredecessor(base, [2], [2]), 'changed');
+    expect(rows(changed)).toEqual([[1, 'reused', 'compatible'], [2, 'recomputed', 'no-compatible-predecessor'], [3, 'reused', 'compatible']]);
+    expect(changed.counts).toMatchObject({ reused: 2, recomputed: 1, unreviewed: 0 });
+    // A range Run never widens to it: outside the range, it stays unreviewed.
+    const range = plan(scopePredecessor(base, [2], [2]), 'selected-range', { startPosition: 5, endPosition: 6 });
+    expect(range.units.find((unit) => unit.unitOrdinal === 2)).toMatchObject({ disposition: 'unreviewed', reason: 'out-of-scope' });
+    const repeated = manifestOf(['1', '2', '3'].flatMap((section) => [block('H', Number(section) * 2 - 1, 'heading', 0, 1), block('p', Number(section) * 2, 'paragraph', 700)]));
+    // Words that stand unread in one place and changed-unread in another are read: the change wins over the carry.
+    expect(new Set(unitContentKeys(repeated)).size).toBe(1);
+    const twice = deriveScopePlan({
+      kind: 'review-category', contractVersion: 'ai7.editorial-review/1', schemaDigest: 'd'.repeat(64), mode: 'review-sync', recompute: 'changed',
+      selectedRange: null, manifest: repeated, predecessor: scopePredecessor(repeated, [1, 2, 3], [3]),
+    } as unknown as Parameters<typeof deriveScopePlan>[0]);
+    expect(twice.counts).toMatchObject({ recomputed: 3, unreviewed: 0 });
+    // Only a unit left unreviewed can have been left unread.
+    expect(() => plan(scopePredecessor(base, [2], [3]), 'changed')).toThrowError(AnalysisError);
   });
 });

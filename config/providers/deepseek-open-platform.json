@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "providerId": "deepseek-open-platform",
+  "displayName": "DeepSeek 开放平台",
+  "credential": {
+    "slot": "deepseek-api-key",
+    "developmentCredentialReference": null,
+    "headerForm": "authorization-bearer",
+    "anthropicVersion": null,
+    "headerEvidence": "production-baseline"
+  },
+  "evidence": {
+    "production-baseline": {
+      "kind": "frozen-request-baseline",
+      "since": "adapter revision 1",
+      "note": "The production route's request-side values predate the profile table, are pinned byte for byte by the adapter suite, and have never been transmitted live. `authorization: Bearer` is what adapter revision 1 has always sent on this route."
+    },
+    "tool-calls-guide": {
+      "kind": "vendor-documentation",
+      "source": "DeepSeek official Tool Calls guide, api-docs.deepseek.com/guides/tool_calls",
+      "readOn": "2026-09-11",
+      "note": "Documents function tools with `strict` JSON-schema parameters and states \"From DeepSeek-V3.2, the API supports tool use in the thinking mode.\" The `tool_choice` values and the thinking-mode round-trip rules are not on that page and remain for the first live item (ADR 0080 §2)."
+    },
+    "no-web-search": {
+      "kind": "vendor-documentation",
+      "source": "DeepSeek official — Tool Calls guide, Chat Completions reference, Responses API guide (api-docs.deepseek.com)",
+      "readOn": "2026-09-10",
+      "note": "The Tool Calls guide admits only `\"type\": \"function\"`, the Chat Completions reference states \"Currently, only functions are supported as a tool\", and the Responses API guide marks `web_search` `Ignored` (ADR 0080 §3)."
+    },
+    "models-and-pricing": {
+      "kind": "vendor-documentation",
+      "source": "DeepSeek official API documentation, models and pricing pages (api-docs.deepseek.com), as ADR 0080 §3 records them",
+      "readOn": "2026-09-10",
+      "note": "Prints `deepseek-flash` (DeepSeek-V4.1-Flash) and `deepseek-v4-pro` (DeepSeek-V4-Pro-0813), each with a 1M context."
+    }
+  },
+  "routes": [
+    {
+      "routeId": "deepseek-open-platform",
+      "displayName": "DeepSeek 开放平台（官方）",
+      "endpoint": "https://api.deepseek.com/chat/completions",
+      "requestShape": "openai-chat-completions",
+      "requestShapeEvidence": "production-baseline",
+      "limitPolicy": "rate-limit-retryable",
+      "limitPolicyEvidence": "production-baseline",
+      "dshAttribution": true,
+      "dshAttributionEvidence": "production-baseline",
+      "sessionHeader": false,
+      "sessionHeaderEvidence": "production-baseline",
+      "maxOutputTokens": null,
+      "routeCapabilities": {
+        "webSearchTool": { "value": "none", "evidence": "no-web-search" }
+      },
+      "note": "The production connection's route, unchanged: the one route that sends the DSH attribution headers and reads a 429 as a retryable rate limit. Chat completions names no output cap, so the route sends no such field.",
+      "models": [
+        {
+          "modelId": "deepseek-v4-pro",
+          "displayName": "DeepSeek V4 Pro High",
+          "capabilities": {
+            "reasoningControl": { "value": "deepseek-thinking", "evidence": "production-baseline" },
+            "answerChannel": { "value": "message-content-string", "evidence": "production-baseline" },
+            "toolCalling": { "value": "function", "evidence": "tool-calls-guide" }
+          },
+          "context": { "tokens": 1000000, "evidence": "models-and-pricing" },
+          "note": "The production model. Its request side is exactly what adapter revision 1 has always sent; its response side has never been observed, so every other read-side capability is absent. By the vendor's notice, from 12:00 Beijing time on 2026-09-14 requests for this id are routed to V4.1 Flash (ADR 0080 §3); the id is not moved here (ADR 0080 §5.3)."
+        },
+        {
+          "modelId": "deepseek-flash",
+          "displayName": "DeepSeek V4.1 Flash",
+          "capabilities": {
+            "requestShape": { "value": "openai-chat-completions", "evidence": "models-and-pricing" }
+          },
+          "context": { "tokens": 1000000, "evidence": "models-and-pricing" },
+          "note": "Declared and inert: the vendor's current id for V4.1 Flash, so the rename its notice forces is a policy-byte review rather than a source edit. No binding names it."
+        }
+      ]
+    }
+  ],
+  "openQuestions": [
+    "Every read-side capability of the production route — answer channel beyond the request baseline, structured output, reasoning channel, usage attribution — must be established by vendor documentation or a named live test item before the first production Run (ADR 0080 §4)."
+  ]
+}

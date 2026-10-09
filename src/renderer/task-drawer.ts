@@ -121,6 +121,7 @@ import {
   TASK_PLAN_SERVICE_TERMS,
   TASK_PLAN_STATE_PILLS,
   TASK_PLAN_TECHNICAL_NOT_DO,
+  TASK_BAR_START_WHEN_ONLINE_OPERATIONS,
   taskBarView,
   taskDrawerModeOf,
   taskPlanChips,
@@ -1543,12 +1544,14 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   async function startWhenOnline(): Promise<void> {
     const current = plan;
     const asked = request;
-    if (current === null || current.kind !== 'baseline-analysis' || !beginWork()) return;
+    // The operation the bar offered the control by (#710 review P3-1): a kind without one never shows it.
+    const operation = current === null ? null : TASK_BAR_START_WHEN_ONLINE_OPERATIONS[current.kind];
+    if (current === null || operation === null || !beginWork()) return;
     options.setStatus('正在记录授权…', 'busy');
     try {
       const planEnvelopeDigest = current.start.planEnvelopeDigest;
       if (planEnvelopeDigest === null) throw new Error(TASK_BAR_START_FAILED);
-      await api.startBaselineAnalysisWhenOnline({ taskIntentId: current.ref, planEnvelopeDigest });
+      await api[operation]({ taskIntentId: current.ref, planEnvelopeDigest });
       options.setStatus('已记录授权 · 联网后开始', 'success');
       focusBar = true;
       options.onRecorded(current.kind, current.bookId, current.ref);

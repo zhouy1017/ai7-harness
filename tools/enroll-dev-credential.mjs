@@ -1,9 +1,16 @@
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DEVELOPMENT_CREDENTIAL_SLOTS } from './provider-credential-slots.generated.mjs';
 
 /**
- * The developer-host enrollment helper for the `opencode-go` development credential (ADR 0067).
+ * The developer-host enrollment helper for the development credentials (ADR 0067, ADR 0073 §4).
+ *
+ * **Only `opencode-go` enrolment is authorized** (ADR 0067). The helper accepts every slot a provider
+ * document fixes a development Credential Reference for, because ADR 0073 §4 makes its slot list
+ * generated from the documents; but such a slot is a place for a key, not a permission to enrol one.
+ * ADR 0073 §5 authorizes no credential and ADR 0080 §5 defers keys (「先支持后添加key」): no other
+ * slot is enrolled until a record names it.
  *
  * It is the only thing that ever reads the Owner's key file, and it exists so that no agent, prompt,
  * log, or repository file has to. It writes the value straight into the OS Protected Secret Store
@@ -20,17 +27,19 @@ import { fileURLToPath } from 'node:url';
  * be performed — carrier unresolvable, unsupported platform or architecture, a native-carrier
  * override, or a CI host — and never means the credential is missing; the missing case is `absent`,
  * exit 0. `unavailable` exits non-zero. The helper refuses to run under CI, refuses a native-carrier
- * override, and refuses any slot but `opencode-go`, so it cannot become a general secret-writing tool.
+ * override, and refuses any slot no provider document declares, so it cannot become a general
+ * secret-writing tool: its slot list is generated from `config/providers/` (ADR 0073 §4), one slot per
+ * configured provider, each under the development Credential Reference its document fixes.
  *
- * The two keyring identity literals below are deliberately duplicated from
+ * The keyring service name below is deliberately duplicated from
  * `src/shared/protected-secret-identity.ts`: this file is plain ESM run by `node` directly, before
- * and outside any TypeScript build, so it cannot import them. `tests/unit/enroll-dev-credential.test.ts`
- * pins the duplicates equal to the owning module's constants.
+ * and outside any TypeScript build, so it cannot import it. The slot list is the generated plain-ESM
+ * twin of the TypeScript configuration. `tests/unit/enroll-dev-credential.test.ts` pins both equal to
+ * the owning modules.
  */
 const PROTECTED_SECRET_SERVICE_NAME = 'io.github.zhouy1017.ai7.model-service';
-const DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE = 'a7c0de00-5040-4f27-9e13-6b1f2c8d4a55';
 
-const SLOTS = new Map([['opencode-go', DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE]]);
+const SLOTS = new Map(DEVELOPMENT_CREDENTIAL_SLOTS);
 const MAX_SECRET_BYTES = 16_384;
 
 class EnrollmentError extends Error {}
