@@ -134,7 +134,7 @@ describe('what AI7\'s evaluation words may not claim (Issue #429, S81b2)', () =>
     for (const text of ['一块多一本。', '一块多钱。', '售价一块左右。', '一块左右的价格。', '订单一成来自线上。', '下单一成以上。', '名单一成是新读者。']) {
       expect(claimsQuantity(text), text).toBe(true);
     }
-    for (const text of ['单一成分的叙事。', '统一成人物视角来写。']) {
+    for (const text of ['单一成分的叙事。', '单一成年人物的视角。', '统一成人物视角来写。']) {
       expect(claimsQuantity(text), text).toBe(false);
     }
     for (const text of ['4/5颗星。', '4/5 颗星。', '4/5的高分。', '只拿到2/5的低分。']) {
