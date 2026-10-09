@@ -1499,6 +1499,13 @@ async function main() {
     // then says the paragraph is gone, in its own words; nothing moves — no window is loaded and no 回到 chip appears.
     const removedPosition = Number(position);
     requireJourney(Number.isInteger(removedPosition) && removedPosition >= 1 && removedPosition <= SAMPLE1_BLOCKS, 'selection-task-gone-position', position);
+    // A standing 回到 chip — the unused return an earlier jump left — is used now, while every paragraph it could name still stands
+    // (a reimport re-identifies rewritten paragraphs), so the checks after the reimport tell a return place kept by the refused
+    // jump from none (review P3-A).
+    if (await renderer.evaluate(`${CHIP} !== null`)) {
+      await clickSelector(renderer, '[data-screen="editor"] .return-chip-host [data-return-chip]', 'selection-task-gone-chip-use');
+      await waitFor(renderer, `${CHIP} === null && (document.querySelector('#persistence-status')?.textContent ?? '').startsWith('已回到')`, 'selection-task-gone-chip-used', 60_000);
+    }
     const composedInputs = resolve(runRoot, 'composed-inputs');
     await mkdir(composedInputs, { recursive: true });
     const withoutParagraph = resolve(composedInputs, 'sample1-without-paragraph.docx');
@@ -1562,13 +1569,8 @@ async function main() {
     const goneCode = await renderer.evaluate(`window.ai7.getManuscriptWindowAt({ manuscriptId: ${JSON.stringify(goneAnchor?.manuscriptId ?? '')}, branchId: ${JSON.stringify(goneAnchor?.branchId ?? '')}, target: { kind: 'block', blockId: ${JSON.stringify(taskBlock)} } }).then(() => 'present', (error) => error?.code ?? 'unknown')`);
     requireJourney(goneCode === 'WINDOW_NOT_FOUND', 'selection-task-gone-paragraph-gone', goneCode);
     await assertRenderer(renderer, MARK_HELPERS, 'selection-task-gone-helpers');
-    // A standing 回到 chip — the unused return an earlier jump left — is used first, so the checks below tell a return place kept
-    // by the refused jump from none (review P3-A): the chip must be absent and the return store must hold no entry for this
-    // manuscript, read from the page by the exact key `preserveReturnPlace` writes.
-    if (await renderer.evaluate(`${CHIP} !== null`)) {
-      await clickSelector(renderer, '[data-screen="editor"] .return-chip-host [data-return-chip]', 'selection-task-gone-chip-use');
-      await waitFor(renderer, `${CHIP} === null && (document.querySelector('#persistence-status')?.textContent ?? '').startsWith('已回到')`, 'selection-task-gone-chip-used', 60_000);
-    }
+    // No chip stands and the return store holds no entry for this manuscript — read from the page by the exact key
+    // `preserveReturnPlace` writes — before the click, so what the click leaves is the refused jump's alone (review P3-A).
     const READ_RETURN_ENTRY = `new Promise((settle) => { let open; try { open = indexedDB.open('ai7-reading-return', 1); } catch { settle('error'); return; } open.onerror = () => settle('error'); open.onupgradeneeded = () => open.result.createObjectStore('returns'); open.onsuccess = () => { const db = open.result; let entry; let tx; try { tx = db.transaction('returns', 'readonly'); } catch { db.close(); settle('error'); return; } const get = tx.objectStore('returns').get(${JSON.stringify(`${goneAnchor?.manuscriptId ?? ''}\n${goneAnchor?.branchId ?? ''}`)}); get.onsuccess = () => { entry = get.result; }; tx.oncomplete = () => { db.close(); settle(entry === undefined ? null : (entry?.blockId ?? 'malformed')); }; tx.onerror = () => { db.close(); settle('error'); }; }; })`;
     requireJourney(await renderer.evaluate(`${CHIP} === null`), 'selection-task-gone-no-chip-before');
     const returnBefore = await renderer.evaluate(READ_RETURN_ENTRY);
