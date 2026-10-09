@@ -307,8 +307,11 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
       // A repeat of the same quick start answers as the first did, and dispatches nothing.
       expect(await store.quickStartWritingTask(bookId, taskIntentId, digest, rule.ruleVersionId, ONLINE()))
         .toEqual({ outcome: 'started', reasons: [], dispatchRunRecordId: null, ledger: null });
-      // The record set is the one 开始任务 writes: one authorization and one Run per Task, the rule only named in it.
+      // The record set is the one 开始任务 writes: one authorization and one Run per Task, the rule only named in it. The Task
+      // is prepared exactly as 先看计划 prepares one, so its contract carries today's copy rules (#704: copyRules 2).
       withDatabase(true, (database) => {
+        const task = database.prepare('SELECT canonical_json FROM writing_tasks WHERE task_intent_id = ?').get(taskIntentId) as { canonical_json: string };
+        expect((JSON.parse(task.canonical_json) as { copyRules?: number }).copyRules).toBe(2);
         const origins = database.prepare('SELECT origin FROM analysis_run_authorizations ORDER BY rowid').all() as Row[];
         expect(origins.map((row) => row.origin)).toEqual(['standard-direct', 'default-execution-rule']);
         expect((database.prepare('SELECT count(*) total FROM default_execution_rule_versions').get() as { total: number }).total).toBe(1);
