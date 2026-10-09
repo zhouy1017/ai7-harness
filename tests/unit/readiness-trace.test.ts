@@ -27,6 +27,9 @@ const trace = (await import(new URL('../../e2e/readiness-trace.mjs', import.meta
   summarizeProductProcesses(rows: ReadonlyArray<ProcessRow>, pid: number, runtimeRoot: string, platform?: string): ProcessSample;
   sampleProductProcesses(pid: number, executable: string): Promise<ProcessSample | null>;
   classifyBrowserLaunchMiss(trace: Record<string, unknown> | null, sample: ProcessSample | null): Record<string, unknown>;
+  cpuShares(before: ReadonlyArray<ProcessRow>, after: ReadonlyArray<ProcessRow>, rootPid: number, windowMs: number, cores: number, listingPid?: number | null): { product: number; host: number };
+  measureCpuShares(rootPid: number, windowMs?: number): Promise<{ product: number; host: number } | null>;
+  listHostProcessesWithListing(platform?: string): Promise<{ rows: Array<ProcessRow>; listingPid: number | null } | null>;
 };
 interface ProcessRow { pid: number; ppid: number; cpuSeconds: number | null; path: string | null }
 interface ProcessSample { alive: boolean; cpuSeconds: number | null; helpers: number; prior: number }
@@ -253,6 +256,90 @@ describe('the readiness trace (Issue #518)', () => {
       { pid: 6500, ppid: 1, cpuSeconds: 2, path: 'C:\\r\\.runtime\\electron\\electron.exe' },
     ]);
     expect(trace.summarizeProductProcesses(windows, 7000, 'C:\\r\\.runtime\\electron', 'win32')).toEqual({ alive: true, cpuSeconds: 0.5, helpers: 1, prior: 1 });
+  });
+
+  it('says how busy the product and the host were over a window, from two listings (#621)', () => {
+    const before = [
+      { pid: 0, ppid: 0, cpuSeconds: 1_000, path: null },
+      { pid: 10, ppid: 1, cpuSeconds: 5, path: 'node' },
+      { pid: 20, ppid: 10, cpuSeconds: 2, path: 'electron' },
+      { pid: 21, ppid: 20, cpuSeconds: 1, path: 'electron' },
+      { pid: 30, ppid: 1, cpuSeconds: 50, path: 'scanner' },
+      { pid: 40, ppid: 1, cpuSeconds: 9, path: 'ended' },
+    ];
+    const after = [
+      { pid: 0, ppid: 0, cpuSeconds: 1_100, path: null },
+      { pid: 10, ppid: 1, cpuSeconds: 5.5, path: 'node' },
+      { pid: 20, ppid: 10, cpuSeconds: 6, path: 'electron' },
+      { pid: 21, ppid: 20, cpuSeconds: 1, path: 'electron' },
+      { pid: 22, ppid: 21, cpuSeconds: 1, path: 'electron' },
+      { pid: 30, ppid: 1, cpuSeconds: 58.5, path: 'scanner' },
+      { pid: 31, ppid: 1, cpuSeconds: null, path: 'unreadable' },
+    ];
+    // Over 5 s: the product (20, 21 and the new 22, not the Journey itself) used 5 s, one core; the host 14 s of 4 cores.
+    const shares = trace.cpuShares(before, after, 10, 5_000, 4);
+    expect(shares.product).toBeCloseTo(1);
+    expect(shares.host).toBeCloseTo(0.7);
+    expect(trace.cpuShares(after, after, 10, 5_000, 4)).toEqual({ product: 0, host: 0 });
+    // The sampler's own listing process (review P2-1): a transient child of the Journey, in the second listing only, with
+    // the few tenths of a second a hosted Windows listing costs, and a child of its own. Named, it counts for neither share;
+    // unnamed, it would lift an idle product over the 0.1 `idle` bound on its own.
+    const listing = [
+      ...after,
+      { pid: 99, ppid: 10, cpuSeconds: 0.6, path: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe' },
+      { pid: 100, ppid: 99, cpuSeconds: 0.1, path: 'conhost' },
+    ];
+    const named = trace.cpuShares(before, listing, 10, 5_000, 4, 99);
+    expect(named.product).toBeCloseTo(1);
+    expect(named.host).toBeCloseTo(0.7);
+    const unnamed = trace.cpuShares(before, listing, 10, 5_000, 4);
+    expect(unnamed.product).toBeCloseTo(1.14);
+    const idle = before.map((row) => ({ ...row }));
+    expect(trace.cpuShares(idle, [...idle, { pid: 99, ppid: 10, cpuSeconds: 0.6, path: 'powershell.exe' }], 10, 5_000, 4, 99).product).toBe(0);
+    expect(trace.cpuShares(idle, [...idle, { pid: 99, ppid: 10, cpuSeconds: 0.6, path: 'powershell.exe' }], 10, 5_000, 4).product).toBeCloseTo(0.12);
+  });
+
+  it('names the listing process, which is in its own listing as a child of this one (review P2-1)', async () => {
+    const listing = await trace.listHostProcessesWithListing();
+    expect(listing).not.toBeNull();
+    expect(typeof listing!.listingPid).toBe('number');
+    const own = listing!.rows.find((row) => row.pid === listing!.listingPid);
+    expect(own).toBeDefined();
+    expect(own!.ppid).toBe(process.pid);
+  }, 30_000);
+
+  it('measures a real busy process below this one (#621)', async () => {
+    const child = spawn(process.execPath, ['-e', 'const end = Date.now() + 20_000; while (Date.now() < end);'], { stdio: 'ignore' });
+    try {
+      await new Promise((settle) => child.once('spawn', settle));
+      const shares = await trace.measureCpuShares(process.pid, 1_500);
+      expect(shares).not.toBeNull();
+      expect(shares!.product).toBeGreaterThan(0.3);
+      expect(shares!.host).toBeGreaterThan(0);
+    } finally {
+      child.kill();
+    }
+  }, 30_000);
+
+  it('has J-02 name how busy the product and the host were when an import step ran out of its bound (#621)', async () => {
+    const source = readFileSync(join(ROOT, 'e2e', 'run-j02.mjs'), 'utf8').replace(/\r\n/gu, '\n');
+    const start = source.indexOf('function cpuShareWord(');
+    const end = source.indexOf('\n}\n', source.indexOf('async function importCpuWords(')) + 3;
+    const words = (shares: { product: number; host: number } | null) =>
+      (new Function('measureCpuShares', `${source.slice(start, end)}\nreturn importCpuWords();`) as (measure: () => Promise<unknown>) => Promise<string>)(
+        async () => shares,
+      );
+    expect(await words({ product: 0.05, host: 0.9 })).toBe('product-idle-host-busy');
+    expect(await words({ product: 0.5, host: 0.3 })).toBe('product-some-host-some');
+    expect(await words({ product: 1.2, host: 0.1 })).toBe('product-busy-host-idle');
+    expect(await words(null)).toBe('cpu-unsampled');
+    for (const label of ['stage-target-progressing-at-${Number(tenths)}-tenths-${cpu}', 'stage-target-stalled-at-${Number(tenths)}-tenths-${cpu}',
+      'imported-${outcome}-at-writing-${cpu}', 'imported-${outcome}-at-preparing-${cpu}', 'completion-acknowledged-before-open-stalled-${cpu}',
+      'completion-acknowledged-before-open-progressing-${cpu}']) {
+      expect(source).toContain(label);
+    }
+    // The longest label it can print still fits a check label.
+    expect('imported-progressing-at-revalidating-10-tenths-product-busy-host-busy').toMatch(/^[a-z0-9][a-z0-9-]{0,95}$/u);
   });
 
   it('samples a real process on this host', async () => {
