@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { sheetProcedureChosenStatus } from '../../src/renderer/captured-procedure-labels.js';
 import type {
   CapturedProcedureProjection,
   CapturedProcedureRunProjection,
@@ -11,11 +12,16 @@ import {
   SHEET_PROCEDURE_LOADING,
   SHEET_PROCEDURE_VERSION_MISMATCH,
   confirmProcedureStop,
+  copyProcedureChoice,
   procedureCategoryOpen,
   procedureChoiceAfter,
   procedureChoiceFocus,
+  procedureChoiceSelection,
+  procedureChoiceStatus,
   procedurePreparationPin,
+  type ProcedureChoiceOutcome,
   type ProcedureSheetChoice,
+  type ProcedureSheetTarget,
 } from '../../src/renderer/procedure-choice.js';
 
 // Unit suite (L1) for the 新建审阅 sheet's version choice (Issue #66, plan slice S31 review P2-1; REUSE-054): the version on show
@@ -174,6 +180,89 @@ describe('what a choice leaves in the sheet (Issue #684)', () => {
     // Without a resolved version there is no version selector to return to.
     expect(procedureChoiceFocus(true, { ...pinned.procedure!, resolved: null })).toBe('procedure');
     expect(procedureChoiceFocus(true, null)).toBe('procedure');
+  });
+});
+
+describe('a choice settling into the sheet, as the sheet wires it (Issue #691)', () => {
+  const v2 = runAt(V2, 2, [['style-and-format', true], ['literary-expression', true]], 'whole');
+
+  /** The sheet's own state, pinned to v2: what `chooseProcedure` copies an outcome back into. */
+  function pinnedSheet(): ProcedureSheetTarget {
+    return { procedure: v2, categories: new Set(['style-and-format', 'literary-expression']), scope: 'whole', from: null, to: null, problem: null };
+  }
+
+  /** The sheet's steps once a choice ends, in its order: the copy-back, the status line, the selectors, the focus. */
+  function settle(sheet: ProcedureSheetTarget, outcome: ProcedureChoiceOutcome, versionChoice: boolean) {
+    const next = procedureChoiceAfter(sheet, outcome);
+    copyProcedureChoice(sheet, next);
+    return {
+      status: procedureChoiceStatus(outcome, sheetProcedureChosenStatus),
+      selection: procedureChoiceSelection(sheet.procedure),
+      focus: procedureChoiceFocus(versionChoice, sheet.procedure),
+    };
+  }
+
+  it('keeps a pinned sheet whole when a version choice fails: its own set refilled, its selectors put back, focus on the version', () => {
+    const sheet = pinnedSheet();
+    const categories = sheet.categories;
+    const reason = '这一版已停用，不能再选。';
+    const settled = settle(sheet, { kind: 'failed', reason }, true);
+    expect(sheet.procedure).toBe(v2);
+    expect(sheet.categories).toBe(categories);
+    expect([...sheet.categories]).toEqual(['style-and-format', 'literary-expression']);
+    expect([sheet.scope, sheet.from, sheet.to, sheet.problem]).toEqual(['whole', null, null, reason]);
+    // The selectors show what the editor had before choosing: v2, not the version that failed.
+    expect(settled.selection).toEqual({ procedureId: PROCEDURE_ID, versionId: V2.versionId });
+    expect(settled.focus).toBe('procedure-version');
+    // The reason is on the sheet's alert line; the status bar only drops 「正在读取…」 and never repeats it.
+    expect(settled.status).toBe('');
+  });
+
+  it('keeps a sheet chosen by hand when a procedure choice fails: its selector back on 不按工序, focus on it', () => {
+    const sheet: ProcedureSheetTarget = { procedure: null, categories: new Set(['plot-consistency']), scope: 'chapters', from: 'a', to: 'b', problem: null };
+    const settled = settle(sheet, { kind: 'failed', reason: '无法读取所选的可复用工序。' }, false);
+    expect([...sheet.categories]).toEqual(['plot-consistency']);
+    expect([sheet.scope, sheet.from, sheet.to, sheet.problem]).toEqual(['chapters', 'a', 'b', '无法读取所选的可复用工序。']);
+    expect(settled).toEqual({ status: '', selection: { procedureId: '', versionId: null }, focus: 'procedure' });
+  });
+
+  it('announces an answer that cannot run once, on the sheet, and says which version an answer that fills the sheet read', () => {
+    const unavailable: CapturedProcedureRunProjection = { ...v2, resolved: null, eligibleVersions: [], unavailableReason: '没有可运行的版本。' };
+    const blocked = pinnedSheet();
+    const settledBlocked = settle(blocked, { kind: 'answered', run: unavailable }, false);
+    expect(blocked.problem).toBe('没有可运行的版本。');
+    expect(settledBlocked).toEqual({ status: '', selection: { procedureId: PROCEDURE_ID, versionId: null }, focus: 'procedure' });
+
+    const older = runAt(V1, 1, [['style-and-format', true]], 'whole');
+    const filled = pinnedSheet();
+    const settledFilled = settle(filled, { kind: 'answered', run: older }, true);
+    expect([...filled.categories]).toEqual(['style-and-format']);
+    expect(filled.problem).toBeNull();
+    expect(settledFilled.status).toBe(sheetProcedureChosenStatus(older));
+    expect(settledFilled.status).toContain('第 1 版');
+    expect(settledFilled.selection).toEqual({ procedureId: PROCEDURE_ID, versionId: V1.versionId });
+    expect(settledFilled.focus).toBe('procedure-version');
+  });
+
+  it('moves a sheet chosen by hand onto the answer: its scope the slot, its chapters dropped', () => {
+    const sheet: ProcedureSheetTarget = { procedure: null, categories: new Set(['plot-consistency']), scope: 'chapters', from: 'a', to: 'b', problem: '旧的' };
+    const settled = settle(sheet, { kind: 'answered', run: v2 }, false);
+    expect(sheet.procedure).toBe(v2);
+    expect([...sheet.categories]).toEqual(['style-and-format', 'literary-expression']);
+    expect([sheet.scope, sheet.from, sheet.to, sheet.problem]).toEqual(['whole', null, null, null]);
+    expect(settled.selection).toEqual({ procedureId: PROCEDURE_ID, versionId: V2.versionId });
+  });
+
+  it('copies back safely when the outcome carries the sheet set itself', () => {
+    const sheet = pinnedSheet();
+    copyProcedureChoice(sheet, { ...sheet });
+    expect([...sheet.categories]).toEqual(['style-and-format', 'literary-expression']);
+  });
+
+  it('says nothing new when the procedure is cleared, which reads nothing', () => {
+    const sheet = pinnedSheet();
+    expect(settle(sheet, { kind: 'cleared' }, false)).toEqual({ status: null, selection: { procedureId: '', versionId: null }, focus: 'procedure' });
+    expect([...sheet.categories]).toEqual([]);
   });
 });
 
