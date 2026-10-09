@@ -1237,15 +1237,16 @@ async function main() {
 
     at('concurrent-apply-effect');
     // While 丙's Run holds its third range in flight, the editor accepts and applies a 修改建议 on 丙's manuscript — a Controlled
-    // Apply Effect committed beside the Run (Issue #632; ADR 0021): the write lands at once, as one journal entry; the Run goes
-    // on, its own; and the screen and the Book stay 丙's.
+    // Apply Effect committed beside the Run (Issue #632; ADR 0021): the write lands at once, as one journal entry after the
+    // suggestion's own; the Run goes on, its own; and the screen and the Book stay 丙's.
     await runHeldAt(renderer, bookC, 2, 'apply-c-held');
     await assertRenderer(renderer, MARK_HELPERS, 'apply-c-helpers');
     const workC = await renderer.evaluate(`window.ai7.listPriorWork().then((entries) => { const work = entries.find((entry) => entry.bookTitle === ${JSON.stringify(THIRD.title)}); return work ? { manuscriptId: work.manuscriptId, branchId: work.branchId } : null; })`);
     requireJourney(workC !== null && UUID_PATTERN.test(workC.manuscriptId) && UUID_PATTERN.test(workC.branchId), 'apply-c-work');
     const READ_WINDOW_C = `window.ai7.getManuscriptWindowAt({ manuscriptId: ${JSON.stringify(workC.manuscriptId)}, branchId: ${JSON.stringify(workC.branchId)}, target: { kind: 'start' } })`;
-    const beforeApply = await renderer.evaluate(`${READ_WINDOW_C}.then((page) => ({ revisionId: page.revisionId, journalSequence: page.journalSequence }))`);
-    requireJourney(UUID_PATTERN.test(beforeApply?.revisionId ?? '') && Number.isSafeInteger(beforeApply.journalSequence), 'apply-c-before', beforeApply);
+    // The manuscript as the Run was authorized on it: the revision 丙's partial revision must pin, whatever the editor writes now.
+    const beforeMark = await renderer.evaluate(`${READ_WINDOW_C}.then((page) => ({ revisionId: page.revisionId, journalSequence: page.journalSequence }))`);
+    requireJourney(UUID_PATTERN.test(beforeMark?.revisionId ?? '') && Number.isSafeInteger(beforeMark.journalSequence), 'apply-c-before', beforeMark);
     // A paragraph whose first 80 code units are 80 graphemes, so the range below is in graphemes.
     const markable = await renderer.evaluate(`(() => { const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }); return Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).find((node) => { const head = (node.textContent ?? '').slice(0, 80); return head.length === 80 && Array.from(segmenter.segment(head)).length === 80; })?.dataset.blockId ?? null; })()`);
     requireJourney(typeof markable === 'string' && /^blk_[0-9a-f]{24}$/.test(markable), 'apply-c-paragraph');
@@ -1254,12 +1255,15 @@ async function main() {
     await waitFor(renderer, `window.__j09.composer()?.dataset.markComposer === 'create-change-suggestion'`, 'apply-c-composer');
     await assertRenderer(renderer, `window.__j09.write('proposedText', ${JSON.stringify(APPLIED_TEXT)}) && window.__j09.act('submit')`, 'apply-c-submit');
     await waitFor(renderer, `window.__j09.mark('change-suggestion', ${JSON.stringify(markable)}).length > 0 && window.__j09.composer() === null`, 'apply-c-drawn');
+    // The suggestion is a journal entry of its own and writes no text; the Apply is one more, and writes the words (J-05's reading).
+    const beforeAccept = await renderer.evaluate(`${READ_WINDOW_C}.then((page) => ({ journalSequence: page.journalSequence, applied: page.blocks.find((block) => block.blockId === ${JSON.stringify(markable)})?.text.includes(${JSON.stringify(APPLIED_TEXT)}) === true }))`);
+    requireJourney(Number.isSafeInteger(beforeAccept?.journalSequence) && beforeAccept.applied === false, 'apply-c-suggestion-wrote-no-text', beforeAccept);
     await openMarkCard(renderer, 'change-suggestion', markable, 'apply-c-card');
     await assertRenderer(renderer, `window.__j09.act('accept-and-apply')`, 'apply-c-accept');
     await waitFor(renderer, `window.__j09.card()?.querySelector('[data-mark-state]')?.textContent === '已应用' && window.__j09.markText('change-suggestion', ${JSON.stringify(markable)}) === ${JSON.stringify(APPLIED_TEXT)} && window.__j09.status().includes('已应用这条修改建议')`, 'apply-c-applied', 30_000);
     const afterApply = await renderer.evaluate(`${READ_WINDOW_C}.then((page) => ({ revisionId: page.revisionId, journalSequence: page.journalSequence, applied: page.blocks.find((block) => block.blockId === ${JSON.stringify(markable)})?.text.includes(${JSON.stringify(APPLIED_TEXT)}) === true }))`);
-    requireJourney(afterApply.journalSequence === beforeApply.journalSequence + 1 && afterApply.applied === true && afterApply.revisionId !== beforeApply.revisionId,
-      'apply-c-wrote-once', { before: beforeApply.journalSequence, after: afterApply.journalSequence, applied: afterApply.applied });
+    requireJourney(afterApply.journalSequence === beforeAccept.journalSequence + 1 && afterApply.applied === true,
+      'apply-c-wrote-once', { beforeMark: beforeMark.journalSequence, beforeAccept: beforeAccept.journalSequence, after: afterApply.journalSequence, applied: afterApply.applied });
     // 丙's Run is still its own and still executing with its range in flight; the editor is still in 丙's manuscript.
     const heldThroughApply = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const focusApplied = await renderer.evaluate(FOCUS_STATE);
@@ -1293,11 +1297,11 @@ async function main() {
       cancelledC.resultSetRevision.provenance?.runRecordId === runC && cancelledC.run.attempt?.spans?.length === 3,
     'concurrent-c-own-partial-revision', { state: cancelledC?.state, closed: cancelledC?.resultSetRevision?.coverage?.unitsClosed, spans: cancelledC?.run?.attempt?.spans?.length });
     // The Apply Effect committed beside the Run stands (Issue #632): 丙's partial revision pins the manuscript revision the Run
-    // was authorized on, not the edited one, and the cancellation wrote nothing to the manuscript the editor changed.
+    // was authorized on, and the cancellation wrote nothing to the manuscript the editor changed — same journal entry, same words.
     const afterCancel = await renderer.evaluate(`${READ_WINDOW_C}.then((page) => ({ revisionId: page.revisionId, journalSequence: page.journalSequence, applied: page.blocks.find((block) => block.blockId === ${JSON.stringify(markable)})?.text.includes(${JSON.stringify(APPLIED_TEXT)}) === true }))`);
-    requireJourney(cancelledC.resultSetRevision.manuscriptPin?.revisionId === beforeApply.revisionId && afterCancel.revisionId === afterApply.revisionId &&
+    requireJourney(cancelledC.resultSetRevision.manuscriptPin?.revisionId === beforeMark.revisionId && afterCancel.revisionId === afterApply.revisionId &&
       afterCancel.journalSequence === afterApply.journalSequence && afterCancel.applied === true,
-    'concurrent-c-apply-effect-kept', { pinnedBefore: cancelledC.resultSetRevision.manuscriptPin?.revisionId === beforeApply.revisionId, journal: [afterApply.journalSequence, afterCancel.journalSequence], applied: afterCancel.applied });
+    'concurrent-c-apply-effect-kept', { pinnedAsAuthorized: cancelledC.resultSetRevision.manuscriptPin?.revisionId === beforeMark.revisionId, journal: [afterApply.journalSequence, afterCancel.journalSequence], applied: afterCancel.applied });
     const settledAll = await waitForItems(renderer, (answer) => answer.items.some((item) => item.group === 'recent' && item.bookId === bookB && item.itemId !== completionItem.itemId) &&
       !answer.items.some((item) => item.group === 'active' && item.bookId === bookB) &&
       answer.items.some((item) => item.group === 'active' && item.bookId === bookA && item.state === 'analysis-paused'), 'concurrent-b-completed');
