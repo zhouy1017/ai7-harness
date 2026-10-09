@@ -209,5 +209,17 @@ describe('deriveScopePlan', () => {
     ]);
     // 只审改动过的章 retries it as it retries any predecessor gap, and leaves the never-read unit as it is.
     expect(rows(plan(failed, 'changed'))).toEqual([[1, 'unreviewed', 'out-of-scope'], [2, 'recomputed', 'predecessor-gap'], [3, 'reused', 'compatible']]);
+    // Edited after its read failed, the unit is carried no further, by design (Issue #727 item 4): its new content key
+    // matches neither a closed nor a failed predecessor unit, so a range Run elsewhere labels it out of scope — the walk
+    // then flags it changed, and 只审改动过的章 reads it as a unit with no compatible predecessor. The 「缺口」 label drops;
+    // the promise to read it again holds.
+    const edited = manifestOf(baseBlocks.map((entry, index) => index === 2 ? { ...entry, digest: 'e'.repeat(64) } : entry));
+    const derive = (recompute: 'changed' | 'selected-range', selectedRange: { startPosition: number; endPosition: number } | null) => deriveScopePlan({
+      kind: 'review-category', contractVersion: 'ai7.editorial-review/1', schemaDigest: 'd'.repeat(64),
+      mode: recompute === 'changed' ? 'review-sync' : 'review-range', recompute, selectedRange, manifest: edited, predecessor: failed,
+    } as unknown as Parameters<typeof deriveScopePlan>[0]);
+    expect(rows(derive('selected-range', { startPosition: 5, endPosition: 6 })))
+      .toEqual([[1, 'unreviewed', 'out-of-scope'], [2, 'unreviewed', 'out-of-scope'], [3, 'recomputed', 'bypassed-selected-range']]);
+    expect(rows(derive('changed', null))).toEqual([[1, 'unreviewed', 'out-of-scope'], [2, 'recomputed', 'no-compatible-predecessor'], [3, 'reused', 'compatible']]);
   });
 });

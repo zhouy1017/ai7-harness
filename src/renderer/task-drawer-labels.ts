@@ -7,6 +7,7 @@ import type {
   TaskPlanStartReadiness,
   TaskPlanStateKey,
 } from '../shared/protocol.js';
+import { OFFLINE_START_LATER } from '../shared/offline-wording.js';
 import { RUN_BUDGET_CEILING_PATTERN } from '../shared/protocol.js';
 import { RUN_LIVENESS_STAGE_LABELS, attemptStateLabel, elapsedLabel, localInstantLabel, runStepIsStale } from './plan-preview-labels.js';
 import type { ReviewPill } from './review-labels.js';
@@ -406,8 +407,8 @@ export function taskBarContinuationNote(unitsSettled: number | null, unitsTotal:
 
 /** A Review Run cannot wait yet (Issue #502): offline, its start is shown disabled with this reason. */
 export const TASK_BAR_REVIEW_OFFLINE = '离线：审阅要连到模型服务，而这台设备现在没有网络；联网后再开始审阅';
-/** The same for every other kind that cannot wait (Issue #706): writing, 评估, 审稿意见 and 按评分重写. */
-export const TASK_BAR_OFFLINE_LATER = '离线：这份计划要连到模型服务，而这台设备现在没有网络；联网后再开始';
+/** The same for every other kind that cannot wait (Issue #706): writing, 评估, 审稿意见 and 按评分重写 — the shared sentence (#714). */
+export const TASK_BAR_OFFLINE_LATER = OFFLINE_START_LATER;
 
 /** A renderer operation that records a Run Authorization whose Run waits in Connectivity Wait. */
 export type StartWhenOnlineOperation = Extract<keyof RendererApi, `${string}WhenOnline`>;
