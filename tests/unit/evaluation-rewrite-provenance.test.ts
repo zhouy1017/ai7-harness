@@ -469,7 +469,9 @@ describe('AI7\'s words in an evaluation entry, item by item (Issue #689)', () =>
     save(v2, (content) => ({ ...content, conclusion: 'defer' }), true);
     const v3 = records.start(bookId);
     save(v3, (content) => withComment(content, 1, '第三版的评语。'));
-    damage(v3, 2);
+    // A 采用 on v3 of rewrite B over the second item, before v3 is damaged whole.
+    adopt(v3, [{ itemId: ITEMS[1]!, comment: 'R2 的评语二。' }], null, B);
+    damage(v3, 1);
     // Without saying so, the start is refused as before; saying so while the latest reads is refused too (nothing to skip).
     expect(refused(() => records.start(bookId))).toBe('EVALUATION_RECORD_INVALID');
     // Saying so: v4 is seeded from v2's 定稿, follows v2, names v3 as skipped, and compares with v2.
@@ -482,6 +484,19 @@ describe('AI7\'s words in an evaluation entry, item by item (Issue #689)', () =>
     // v2's mark over A's words, which still stand, is carried into v4 and checked against v2's chain: nothing is unchecked.
     expect(records.ai7Words(bookId, v4)).toEqual({ items: [mark(ITEMS[0]!, A, 'AI7 的评语一。')], verdict: null });
     expect(marks(v4).at(-1)).toEqual({ items: [mark(ITEMS[0]!, A, 'AI7 的评语一。')], verdict: null });
+    // The skipped v3 is a gap, not a predecessor whose marks are held: B's words pasted back into v4 carry no mark from v2's chain,
+    // and a recorded mark naming B is admitted only through B's acceptance on this Book over those very words (Issue #708's
+    // rule after a version that cannot be read) — checked, so nothing is named — never because v3 held it.
+    save(v4, (content) => withComment(content, 1, 'R2 的评语二。'));
+    expect(marks(v4).at(-1)).toEqual({ items: [mark(ITEMS[0]!, A, 'AI7 的评语一。')], verdict: null });
+    forge(v4, 2, (entry) => ({ ...entry, rewrittenFrom: { items: [mark(ITEMS[0]!, A, 'AI7 的评语一。'), mark(ITEMS[1]!, B, 'R2 的评语二。')], verdict: null } }));
+    expect(refused(() => latest(v4))).toBe('none');
+    expect(records.ai7Words(bookId, v4)).toEqual({ items: [mark(ITEMS[0]!, A, 'AI7 的评语一。'), mark(ITEMS[1]!, B, 'R2 的评语二。')], verdict: null });
+    expect(records.workspace(bookId, '书', v4).record!.ai7WordsNotice).toBeNull();
+    // A mark naming a rewrite nobody accepted is refused as ever.
+    forge(v4, 2, (entry) => ({ ...entry, rewrittenFrom: { items: [mark(ITEMS[0]!, A, 'AI7 的评语一。'), mark(ITEMS[1]!, C, 'R2 的评语二。')], verdict: null } }));
+    expect(refused(() => latest(v4))).toBe('EVALUATION_RECORD_INVALID');
+    forge(v4, 2, (entry) => ({ ...entry, rewrittenFrom: { items: [mark(ITEMS[0]!, A, 'AI7 的评语一。'), mark(ITEMS[1]!, B, 'R2 的评语二。')], verdict: null } }));
     // The gap: nothing of v3's is held by v4, and a later version of the Book goes on as any other. While v4 reads, a start
     // that says it skips is refused before anything else — there is nothing to skip.
     expect(refused(() => records.start(bookId, false, true))).toBe('EVALUATION_MOVED');
