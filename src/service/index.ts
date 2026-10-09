@@ -569,6 +569,8 @@ async function dispatch(
     // 知识库 › 范例 (Issue #427, S79b).
     case 'inspectExemplars':
       return { id: request.id, ok: true, op: request.op, result: store.inspectExemplars(request.input.after) };
+    case 'admitReadersReportExemplar':
+      return { id: request.id, ok: true, op: request.op, result: store.admitReadersReportExemplar(request.input) };
     case 'inspectKnowledgeProcedures':
       return { id: request.id, ok: true, op: request.op, result: await store.inspectKnowledgeProcedures() };
     // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087): deterministic, provider-free; running one is an ordinary Review Run.

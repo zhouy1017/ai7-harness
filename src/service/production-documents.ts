@@ -147,6 +147,21 @@ export class ProductionDocuments {
     };
   }
 
+  /**
+   * Every saved version of one document, newest first (Issue #429): what 图书交付包 and 范例 pin a 审稿意见 by — the latest version
+   * saved by an instant, or the latest of all. A read of the version ledger alone.
+   */
+  versionsOf(row: ProductionDocumentRow): Array<{ version: number; revisionId: string; revisionDigest: string; recordedAt: string }> {
+    return (this.#db.prepare(
+      'SELECT version, revision_id, revision_digest, recorded_at FROM production_document_versions WHERE document_id = ? ORDER BY version DESC',
+    ).all(row.documentId) as SqlRow[]).map((version) => ({
+      version: integer(version.version),
+      revisionId: text(version.revision_id),
+      revisionDigest: text(version.revision_digest),
+      recordedAt: text(version.recorded_at),
+    }));
+  }
+
   /** One document as it stands: its versions newest first and whether its working text moved past the latest. */
   document(row: ProductionDocumentRow): ProductionDocumentProjection {
     const state = this.#db.prepare(

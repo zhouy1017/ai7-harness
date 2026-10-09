@@ -9,6 +9,7 @@ import type {
   DefaultExecutionRuleReference,
   DefaultExecutionRulesProjection,
   EvaluationProfilesProjection,
+  ExemplarBookProjection,
   ExemplarsProjection,
   KnowledgeProceduresProjection,
   QuickStartBaselineAnalysisResult,
@@ -147,6 +148,9 @@ import {
   EXEMPLARS_MORE,
   EXEMPLARS_NONE_DELIVERED,
   EXEMPLARS_STATUS,
+  EXEMPLAR_READERS_REPORT_ADMIT,
+  EXEMPLAR_READERS_REPORT_STATUS,
+  readersReportExemplarLine,
   exemplarAttribution,
   exemplarDesignation,
   exemplarLine,
@@ -4891,6 +4895,7 @@ function renderExemplars(root: HTMLElement, projection: ExemplarsProjection): vo
         items.append(item);
       }
       if (book.exemplars.length > 0) card.append(items);
+      card.append(readersReportExemplars(book));
       list.append(card);
     }
     root.dataset['exemplarBooks'] = String(list.children.length);
@@ -4936,6 +4941,51 @@ function renderExemplars(root: HTMLElement, projection: ExemplarsProjection): vo
   more.addEventListener('click', () => { if (cursor !== null) void turn(cursor); });
   firstPage.addEventListener('click', () => void turn(null));
   root.append(list, moreRow, ...EXEMPLARS_LATER.map((line) => element('p', 'field-note exemplars-later', line)));
+}
+
+/**
+ * A published Book's 审稿意见 as 范例 offers them (Issue #429; KB-006): one line per template with a draft, at the version 图书交付包
+ * pins, each with `归入范例（仅本社）` until the editor admits that exact version. Admitting replaces only this list, from the Book
+ * the service answers with, and focus lands on the line admitted.
+ */
+function readersReportExemplars(book: ExemplarBookProjection): HTMLElement {
+  const items = element('ul', 'exemplar-readers-reports');
+  items.dataset['readersReports'] = String(book.readersReports.length);
+  for (const entry of book.readersReports) {
+    const item = element('li', undefined, readersReportExemplarLine(entry, localInstantLabel));
+    item.dataset['exemplarDocument'] = entry.documentId;
+    item.dataset['exemplarType'] = entry.typeId;
+    item.dataset['exemplarVersion'] = String(entry.version);
+    item.dataset['exemplarAdmission'] = entry.admission.state;
+    item.tabIndex = -1;
+    if (entry.admission.state !== 'admitted') {
+      const admit = element('button', 'button quiet', EXEMPLAR_READERS_REPORT_ADMIT);
+      admit.type = 'button';
+      admit.dataset['exemplarAction'] = 'admit';
+      admit.dataset['exemplarTemplate'] = entry.template;
+      admit.addEventListener('click', async () => {
+        admit.disabled = true;
+        setStatus(EXEMPLAR_READERS_REPORT_STATUS.admitting, 'busy');
+        try {
+          const next = await window.ai7.admitReadersReportExemplar({
+            bookId: book.bookId, template: entry.template, revisionDigest: entry.revisionDigest, expectedDecisions: entry.admission.decisions,
+          });
+          if (!items.isConnected) return;
+          const replaced = readersReportExemplars(next);
+          items.replaceWith(replaced);
+          setStatus(EXEMPLAR_READERS_REPORT_STATUS.admitted, 'success');
+          replaced.querySelector<HTMLElement>(`li[data-exemplar-type="${entry.typeId}"]`)?.focus();
+        } catch (error) {
+          if (!items.isConnected) return;
+          admit.disabled = false;
+          setStatus(rendererErrorMessage(error, EXEMPLAR_READERS_REPORT_STATUS.failed), 'error');
+        }
+      });
+      item.append(' ', admit);
+    }
+    items.append(item);
+  }
+  return items;
 }
 
 /**
