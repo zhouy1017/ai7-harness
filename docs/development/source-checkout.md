@@ -520,7 +520,14 @@ AI7 初评 (Issue #429, S81b1) is service protocol version 93 and schema revisio
 
 就这段发起任务… (Issue #423, plan slice S77b; V2-UX-TASK-001, TASK-044, TASK-046) is service protocol version 107, with no schema revision. `prepareReviewRun` now takes the scope `selection`, naming the first and the last block of the selection in `fromChapterBlockId` and `toChapterBlockId` — the frame's shape is unchanged — resolved against the working manuscript and read by every category as 选章 is (事实核查 refuses it with its reason); 新建审阅's own `scopeOptions.selection` stays unavailable, since the sheet holds no selection. A Review Run's 待我处理 and 任务 item object carries `onSelection: true` for such a Run. It follows #702's protocol 105 and #701's 106.
 
-- **What a selection Run marks.** The Run snapshot keeps the selection's block identities in its canonical JSON, with no schema change. Findings and leads are marked only on those paragraphs. The rest of the reading ranges' findings are counted in the category's line 「所选范围外另有 N 处，未标记」, and are not stored as marks.
+- **What a selection Run marks.** The Run snapshot keeps the selection's block identities in its canonical JSON, with no schema change.
+  - Findings and leads are marked only on those paragraphs. A lead is anchored on the first of its sides the selection holds.
+  - The rest of the reading ranges' findings are counted in the category's line 「所选范围外另有 N 处，未标记」 and in the event's `outsideSelectionCount`. They are not stored as marks.
+  - Unplaceable quotes are said as 「所读范围内另有 N 条…」.
+  - A later Run that reuses those ranges puts on the manuscript every finding of a reused unit that no Review Run of the Book ever recorded for the category. This is the review's option (a). Option (b) needed an `anchor` CHECK change.
+  - A selection Run gives no coverage: the matrix reads only 书, 章 and 改动过的章 Runs.
+- **重新确认计划 and 重新准备 of a range Task.** Both are refused when the working manuscript no longer holds, at the plan's positions, the blocks the Task Input revision held there.
+- **The manuscript window on screen.** It is read again in place when a Review Run of its Book, started from the drawer, settles.
 - **Starting a selection Run.** A Run whose paragraphs were removed or reordered before it starts is refused, through the plan's drift reasons and the approval (`REVIEW_PLAN_CHANGED`).
 - **What the projection carries.** `ReviewRunProjection.scope.selection` names the first and last paragraph, so 返回修改 asks for the same ones again. The sheet refuses 当前选区 locally when it holds none.
 - **重新分析这段.** `BaselineAnalysisUpdateRequest.selectedBlocks` names the paragraphs by block identity, with `selectedRange: null`. The analysis ledger resolves it against the working manuscript as the Task is prepared.

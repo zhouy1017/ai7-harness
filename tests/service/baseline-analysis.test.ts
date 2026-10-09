@@ -915,6 +915,21 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(plan.steps[0]!.label).toBe('逐章读取（重新读取 内容块 15–43，沿用其余 6 个阅读范围）');
       expect(plan.notDo.editorial).toContain('不重新读取内容块 15–43以外的正文');
       expect(plan.notDo.editorial).not.toContain('不重新读取所选范围以外的正文');
+      // 重新确认计划 names the range by position, as the plan froze it: once another block stands at 20, it is refused rather than
+      // read the neighbour (Issue #423 review, P3-4). Written beside the open store, as a structural change would leave it.
+      const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try {
+        database.exec('PRAGMA foreign_keys = OFF');
+        const twentyOne = store.baselineAnalysisLedger.readWorkingBlocks(branchId).find((block) => block.position === 21)!;
+        const move = database.prepare('UPDATE working_blocks SET position = ? WHERE branch_id = ? AND block_id = ?');
+        move.run(100020, branchId, twenty.blockId);
+        move.run(20, branchId, twentyOne.blockId);
+        move.run(21, branchId, twenty.blockId);
+      } finally {
+        database.close();
+      }
+      expect(() => store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_MODE_GOALS['reanalyze-range'],
+        { mode: 'reanalyze-range', selectedRange: { startPosition: 20, endPosition: 20 } }, launchPolicy, true)).toThrowError(/所选范围的段落在准备之后已移动或删除/u);
       store.markCleanShutdown();
     } finally {
       await owner.dispose();

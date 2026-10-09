@@ -29,7 +29,7 @@ import {
   SELECTION_TOO_LONG_REASON,
   SELECTION_UNAVAILABLE_REASON,
 } from '../../src/service/review/review-scope.js';
-import { selectionOutsideLine } from '../../src/service/review/review-runs.js';
+import { selectionExcludedLine, selectionOutsideLine } from '../../src/service/review/review-runs.js';
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
   DEFAULT_MANUSCRIPT_EXPORT_OPTIONS,
@@ -666,7 +666,20 @@ describe('a Review Run over the real store on exact sample1', () => {
       const recomputed = revision.resultSetRevision!.lineage.filter((unit) => unit.kind === 'recomputed').map((unit) => revision.coverageManifest!.units[unit.unitOrdinal - 1]!);
       expect(recomputed.map((unit) => [unit.startPosition, unit.endPosition])).toEqual([[16, 25], [26, 43]]);
       expect(empty.findings).toEqual([]);
-      expect(empty.categories[0]!.detail).toBe('已形成 0 条发现：0 条在稿件上；另有 2 条未能定位引文，列在排除附录中；所选范围外另有 2 处，未标记。');
+      expect(empty.categories[0]!.detail).toBe('已形成 0 条发现：0 条在稿件上；所读范围内另有 2 条未能定位引文，列在排除附录中；所选范围外另有 2 处，未标记。');
+      expect(selectionExcludedLine(2)).toBe('所读范围内另有 2 条未能定位引文，列在排除附录中');
+      // The count is in the event's record as a number, and a selection Run gives no category coverage (P3-3, P1-2).
+      const materialized = (reviewRunId: string): Record<string, unknown> => {
+        const db = database();
+        try {
+          const row = db.prepare("SELECT canonical_json FROM review_run_category_events WHERE review_run_id = ? AND state = 'materialized'").get(reviewRunId) as { canonical_json: string };
+          return JSON.parse(row.canonical_json) as Record<string, unknown>;
+        } finally {
+          db.close();
+        }
+      };
+      expect(JSON.stringify(materialized(first.reviewRunId))).toContain('"outsideSelectionCount":2');
+      expect(workspace(session, book).coverage.find((row) => row.categoryId === TYPOS)).toMatchObject({ state: 'never', lastRunOrdinal: null });
       expect(selectionOutsideLine(2)).toBe('所选范围外另有 2 处，未标记');
       expect(card(first.reviewRunId)).toEqual({ kind: 'review', ordinal: 1, onSelection: true });
       const marksBefore = (): number => {
@@ -682,17 +695,46 @@ describe('a Review Run over the real store on exact sample1', () => {
       // On 内容块 21 it reads the same ranges again and marks the one finding on that paragraph, leaving 15 unmarked.
       const second = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], on(twentyOne.blockId, twentyOne.blockId)));
       expect(second.findings.map((finding) => [finding.blockId, finding.blockPosition, finding.markId !== null])).toEqual([[twentyOne.blockId, 21, true]]);
-      expect(second.categories[0]!.detail).toBe('已形成 1 条发现：1 条在稿件上；另有 2 条未能定位引文，列在排除附录中；所选范围外另有 1 处，未标记。');
+      expect(second.categories[0]!.detail).toBe('已形成 1 条发现：1 条在稿件上；所读范围内另有 2 条未能定位引文，列在排除附录中；所选范围外另有 1 处，未标记。');
       expect(marksBefore()).toBe(1);
 
       // The leads on 内容块 29 alone, by the paragraph's identity.
       const leads = await authorizeAndDrive(session, book, prepare(session, book, [PLOT], on(twentyNine.blockId, twentyNine.blockId)));
       expect(leads.findings.map((finding) => [finding.categoryId, finding.blockId, finding.blockPosition])).toEqual([[PLOT, twentyNine.blockId, 29]]);
 
+      // A lead names 内容块 28 only as a later side — four of sample1's do, beside 2 or 3 — and 28 alone is selected: each is
+      // anchored on 28, the side the selection holds (P3-2).
+      const twentyEight = at(28);
+      const sides = await authorizeAndDrive(session, book, prepare(session, book, [PLOT], on(twentyEight.blockId, twentyEight.blockId)));
+      expect(sides.findings.map((finding) => [finding.blockId, finding.blockPosition, finding.markId !== null])).toEqual(Array(4).fill([twentyEight.blockId, 28, true]));
+
       // A Run over the whole manuscript names no selection.
       const whole = prepare(session, book, [STYLE], WHOLE);
       expect(whole.scope.selection).toBeNull();
-      expect(card(whole.reviewRunId)).toEqual({ kind: 'review', ordinal: 4 });
+      expect(card(whole.reviewRunId)).toEqual({ kind: 'review', ordinal: 5 });
+    });
+  }, 300_000);
+
+  it('marks what a 当前选区 Run left off when a later 只审改动过的章 reuses its ranges, and counts no coverage from it (Issue #423 review, P1-2)', async () => {
+    await withBook('sample1-review-authored', async (session, book) => {
+      const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
+      const twenty = blocks.find((block) => block.position === 20)!;
+      const selection = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], { kind: 'selection', fromChapterBlockId: twenty.blockId, toChapterBlockId: twenty.blockId }));
+      expect(selection.findings).toEqual([]);
+      expect(workspace(session, book).coverage.find((row) => row.categoryId === TYPOS)).toMatchObject({ state: 'never' });
+      // The editor writes in 内容块 1, and reviews only what changed: unit 1 is read again, 16–25 and 26–43 are reused — and the
+      // typos the selection Run found on 15 and 21 and left off are put on the manuscript now, with 10's.
+      appendToFirstBlock(session, book);
+      const changed = prepare(session, book, [TYPOS], CHANGED);
+      expect(changed.categories[0]!.plan).toMatchObject({ recomputed: 1, reused: 2 });
+      const synced = await authorizeAndDrive(session, book, changed);
+      expect(synced.findings.map((finding) => [finding.blockPosition, finding.markId !== null]).sort((left, right) => Number(left[0]) - Number(right[0])))
+        .toEqual([[10, true], [15, true], [21, true]]);
+      expect(workspace(session, book).coverage.find((row) => row.categoryId === TYPOS)).toMatchObject({ state: 'current', lastRunOrdinal: 2 });
+      // A later whole review marks nothing twice: every finding it reuses or reads again names the mark already there.
+      const again = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
+      const marked = new Map(synced.findings.map((finding) => [finding.quote, finding.markId] as const));
+      expect(again.findings.filter((finding) => marked.has(finding.quote)).every((finding) => finding.markId === marked.get(finding.quote))).toBe(true);
     });
   }, 300_000);
 

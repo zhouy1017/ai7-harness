@@ -134,6 +134,8 @@ const SIDECAR_DIGEST = '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d
 const SUCCESSOR_BEHAVIOR ='每次更新都是新的用户发起任务，经准备 → 计划预览 → 标准直接授权 → 执行后，在同一结果集上追加下一序号的不可变后继修订版；前一修订版不被改写，且始终可在修订历史中按其原始稿件 pin 查看。' as const;
 /** 重新分析这段's paragraphs are no longer in the working manuscript, or out of order (Issue #423 review, P3-3). */
 const SELECTED_BLOCKS_GONE = '所选文字所在的段落已不在当前稿件中，或先后颠倒；请重新选择。' as const;
+/** A range Task's paragraphs no longer stand at the positions its plan names (Issue #423 review, P3-4). */
+const SELECTED_RANGE_MOVED = '所选范围的段落在准备之后已移动或删除；请重新选择范围，再准备这项任务。' as const;
 const ACTIVE_RUN_REASON = '当前已有分析任务在调度或执行中；在其结束前不能准备新的更新任务。' as const;
 /** A Run in Connectivity Wait blocks a new Task too, but it is not running: it waits to start once online (OFF-005, OFF-006). */
 const WAITING_RUN_REASON = '有一项分析任务在等待联网后开始；它开始并结束之前，或在任务抽屉里取消它之前，不能准备新的更新任务。' as const;
@@ -2481,6 +2483,12 @@ export class BaselineAnalysisStore {
       (input.reconfirm
         ? blocked === null
         : blocked !== null && blocked.state === 'blocked-before-dispatch' && blocked.blockedBy === 'plan-moved');
+    // 重新确认计划 and 重新准备 of a range Task name its range by position, as the plan froze it (Issue #423 review, P3-4). Its
+    // paragraphs are the ones those positions held at the Task Input revision; once the working manuscript holds other blocks
+    // there, the same positions would read the neighbours, so the Task is chosen again instead.
+    if ((input.reconfirm || asked) && update !== null && update.selectedRange !== null && existing.checkpoint !== null) {
+      requireAnalysis(this.#rangeStillHolds(input.bookId, existing.checkpoint, update.selectedRange), 'ANALYSIS_SELECTED_RANGE_MOVED', SELECTED_RANGE_MOVED);
+    }
     let selectedRange: BaselineAnalysisSelectedRange | null = null;
     if (update === null) {
       requireAnalysis(latest === null, 'ANALYSIS_FIRST_BASELINE_EXISTS', '本图书已存在结果集修订版；请使用分析更新操作追加后继修订版。');
@@ -3682,6 +3690,17 @@ export class BaselineAnalysisStore {
    * 重新分析这段 names its paragraphs by block identity (Issue #423 review, P3-3): resolved here, as the Task is prepared, to the
    * range they hold in the working manuscript the Task Input checkpoint is about to pin. Every other request is as it came.
    */
+  /** Whether the working manuscript holds, at `range`, the blocks the Task Input revision held there (P3-4). */
+  #rangeStillHolds(bookId: string, checkpoint: { readonly manuscriptId: string; readonly revisionId: string }, range: BaselineAnalysisSelectedRange): boolean {
+    const pinned = this.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId);
+    const working = new Map(this.readWorkingBlocks(this.#binding(bookId).branchId).map((block) => [block.position, block.blockId] as const));
+    for (let position = range.startPosition; position <= range.endPosition; position += 1) {
+      const blockId = pinned.find((block) => block.position === position)?.blockId;
+      if (blockId === undefined || working.get(position) !== blockId) return false;
+    }
+    return true;
+  }
+
   #resolveSelectedBlocks(bookId: string, update: BaselineAnalysisUpdateRequest | AnalysisModeRequest | null): AnalysisModeRequest | null {
     const blocks = update !== null && 'selectedBlocks' in update ? update.selectedBlocks ?? null : null;
     if (update === null || blocks === null) return update === null ? null : { mode: update.mode, selectedRange: update.selectedRange };

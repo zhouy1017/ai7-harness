@@ -302,7 +302,10 @@ const taskDrawer = mountTaskDrawer({
   setStatus,
   awaitServiceJob,
   onOpen: () => closeNavigation?.(),
-  onRecorded: (kind) => taskSurfaceRefresh[kind]?.(),
+  onRecorded: (kind, bookId) => {
+    taskSurfaceRefresh[kind]?.();
+    if (kind === 'review-run') followReviewMarks(bookId);
+  },
   openRunSurface: (plan) => void leaveThen(() => openTaskRunSurface(plan)),
   openConnectionSettings: () => void renderModelServiceSettings(),
   openRules: () => void renderKnowledgeBase('rules'),
@@ -478,7 +481,38 @@ let manuscriptOnScreen: null | {
   readonly branchId: string;
   readingPlace(): ReadingPlace | null;
   jump(target: { blockId: string; markId: string | null }): Promise<void>;
+  /** Read the window on screen again in place, so marks made meanwhile appear (Issue #423 review, P2-6). */
+  refreshMarks(): Promise<void>;
 } = null;
+
+/**
+ * A Review Run of the Book whose manuscript is on screen was started from the drawer (Issue #423 review, P2-6): its categories are
+ * followed until the Run leaves 进行中, and the manuscript window is then read again so the marks it made are where the editor
+ * is. One follower at a time; leaving the manuscript ends it.
+ */
+let reviewMarksFollower = 0;
+function followReviewMarks(bookId: string): void {
+  const showing = manuscriptOnScreen;
+  if (showing === null || showing.bookId !== bookId) return;
+  const mine = ++reviewMarksFollower;
+  const deadline = Date.now() + 30 * 60_000;
+  const step = (): void => {
+    if (mine !== reviewMarksFollower || manuscriptOnScreen !== showing || Date.now() > deadline) return;
+    void window.ai7.inspectReviewWorkspace({ reviewRunId: null }).then(
+      (workspace) => {
+        if (mine !== reviewMarksFollower || manuscriptOnScreen !== showing) return;
+        const state = workspace.run?.state ?? null;
+        if (state === 'running' || state === 'prepared') {
+          window.setTimeout(step, 1_000);
+          return;
+        }
+        void showing.refreshMarks().catch(() => undefined);
+      },
+      () => window.setTimeout(step, 2_000),
+    );
+  };
+  step();
+}
 
 /** A jump from another screen — 审阅's 回到原文, ②A's 回到稿件范围, a result's 跳到 — leaves the way back to where the editor last read. */
 async function leaveReturnChip(bookId: string, manuscriptId: string, branchId: string): Promise<void> {
@@ -7724,7 +7758,12 @@ function renderEditorWindow(
       next.workingDigest !== expected.workingDigest
     )) throw new Error('权威写入确认与刷新窗口不一致。');
     windowLoadCause = 'authoritative';
-    if (!editor.loadWindow(next, continuity)) throw new Error('权威窗口已返回，但编辑器未能安全装载。');
+    try {
+      if (!editor.loadWindow(next, continuity)) throw new Error('权威窗口已返回，但编辑器未能安全装载。');
+    } finally {
+      // A load refused or thrown names nothing it did not do (Issue #423 review, P3-6).
+      windowLoadCause = 'unnamed';
+    }
     currentWindow = next;
     updateWindowChrome();
   }
@@ -7853,9 +7892,14 @@ function renderEditorWindow(
         target: navigation.target,
       });
       windowLoadCause = `navigation-${navigation.target.kind}`;
-      const loaded = navigation.preserveOffWindowContinuity && navigation.continuity
-        ? editor.loadNavigationWindow(next, navigation.continuity)
-        : editor.loadWindow(next, navigation.continuity);
+      let loaded: boolean;
+      try {
+        loaded = navigation.preserveOffWindowContinuity && navigation.continuity
+          ? editor.loadNavigationWindow(next, navigation.continuity)
+          : editor.loadWindow(next, navigation.continuity);
+      } finally {
+        windowLoadCause = 'unnamed';
+      }
       if (!loaded) return false;
       currentWindow = next;
       updateWindowChrome();
@@ -7980,6 +8024,29 @@ function renderEditorWindow(
     manuscriptId: initialWindow.manuscriptId,
     branchId: initialWindow.branchId,
     readingPlace,
+    // A 审阅 of this Book settled (Issue #423 review, P2-6): the window on screen is read again, in place, so its marks — the ones
+    // a 审阅这段 started here made on this paragraph — appear where the editor is. Nothing is read while the editor is busy
+    // or holding words not yet written; an open composer stays (it is re-anchored).
+    refreshMarks: async () => {
+      if (!editor || authoritativeMutationBusy() || edgeNavigation || editor.isComposing()) return;
+      if (!(await settleLocalEdit()) || !editor) return;
+      const binding = editor.currentWindow();
+      const first = binding.blocks[0];
+      if (first === undefined) return;
+      const continuity = editor.captureContinuity();
+      const next = await window.ai7.getManuscriptWindowAt({ manuscriptId: binding.manuscriptId, branchId: binding.branchId, target: { kind: 'window-start', blockId: first.blockId } });
+      if (!editor || editor.currentWindow() !== binding) return;
+      windowLoadCause = 'review-settled';
+      let loaded: boolean;
+      try {
+        loaded = editor.loadWindow(next, continuity);
+      } finally {
+        windowLoadCause = 'unnamed';
+      }
+      if (!loaded) return;
+      currentWindow = next;
+      updateWindowChrome();
+    },
     jump: async (target) => {
       const here = readingPlace();
       if (here !== null && here.blockId !== target.blockId) {
@@ -8566,7 +8633,6 @@ function renderEditorWindow(
       editorialMarks?.reanchor();
       const loads = [...(editorHost.dataset['windowLoads'] ?? '').split(',').filter((entry) => entry.length > 0), windowLoadCause].slice(-12);
       editorHost.dataset['windowLoads'] = loads.join(',');
-      windowLoadCause = 'unnamed';
     },
   });
   // Typing moves every place behind the caret a little; the rail is read again once the typing rests,

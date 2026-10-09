@@ -347,6 +347,11 @@ export function selectionOutsideLine(count: number): string {
   return `所选范围外另有 ${count} 处，未标记`;
 }
 
+/** A 当前选区 Run's unplaceable quotes carry no paragraph, so its line names the reading ranges they came from (P3-1). */
+export function selectionExcludedLine(count: number): string {
+  return `所读范围内另有 ${count} 条未能定位引文，列在排除附录中`;
+}
+
 /**
  * The seven relations and their ledger triggers. Created once and never rebuilt: a store that predates
  * them gains seven empty relations and nothing existing moves. Like revisions 21 to 23 this runs before
@@ -1793,8 +1798,15 @@ export class ReviewRunStore {
     // A Run's findings are the ones of the units it read. A unit it reused is an earlier Run's reading,
     // and a unit it left out of scope was not read at all.
     const recomputed = new Set(revision.lineage.filter((unit) => unit.kind === 'recomputed').map((unit) => unit.unitOrdinal));
-    const read = (finding: { unitOrdinal: number; mergedFrom: ReadonlyArray<{ unitOrdinal: number }> }): boolean =>
-      recomputed.has(finding.unitOrdinal) || finding.mergedFrom.some((merged) => recomputed.has(merged.unitOrdinal));
+    // A reused unit's findings were put on the manuscript by the Run that read it — unless that Run read it on a 当前选区 and left
+    // them off (Issue #423 review, P1-2). So a finding of a reused unit that no Review Run of this Book ever recorded for this
+    // category is this Run's to put on the manuscript; one recorded before — marked, ignored, or with its words changed — is not.
+    const recorded = new Set((this.#db.prepare(
+      `SELECT DISTINCT f.kind_ref FROM review_findings f JOIN review_runs r ON r.review_run_id = f.review_run_id
+       WHERE r.book_id = ? AND f.category_id = ?`,
+    ).all(snapshot.bookId, category.categoryId) as SqlRow[]).map((row) => text(row.kind_ref)));
+    const read = (finding: { findingId: string; unitOrdinal: number; mergedFrom: ReadonlyArray<{ unitOrdinal: number }> }): boolean =>
+      recomputed.has(finding.unitOrdinal) || finding.mergedFrom.some((merged) => recomputed.has(merged.unitOrdinal)) || !recorded.has(finding.findingId);
     const pinned = (blockId: string, fromGrapheme: number, toGrapheme: number): string => {
       const blockText = blocks.get(blockId);
       requireReview(blockText !== undefined, 'REVIEW_RECORD_INVALID', '发现所在的内容块不在该修订版中。');
@@ -1854,6 +1866,7 @@ export class ReviewRunStore {
       resultSetRevisionId: settled.resultSetRevisionId,
       excludedCount,
       outsideSelection: outside,
+      selection: selected !== null,
       adapterPin: { route: revision.adapterPin.route, model: revision.adapterPin.model, fixtureIdentity: revision.adapterPin.fixtureIdentity, fixtureSha256: revision.adapterPin.fixtureSha256 },
     });
   }
@@ -1895,16 +1908,18 @@ export class ReviewRunStore {
     const selected = selectionBlocks(snapshot);
     const findings: MaterializedFinding[] = [];
     let excludedCount = 0;
+    const outside = 0;
     for (const lead of reviewLeadsOf(revision)) {
-      const anchor = lead.ranges[0];
+      // On a 当前选区 a lead whose sides include the selected paragraph is anchored there, on the first such side, so a 前后一致
+      // lead naming the paragraph second is not lost (Issue #423 review, P3-2); a lead naming none of it is not this Run's.
+      const anchor = selected === null ? lead.ranges[0] : lead.ranges.find((range) => selected.has(range.blockId));
       const block = anchor === undefined ? undefined : blocks.get(anchor.blockId);
+      if (selected !== null && anchor === undefined) continue;
       if (anchor === undefined || block === undefined) {
         excludedCount += 1;
         continue;
       }
-      if (selected !== null) {
-        if (!selected.has(anchor.blockId)) continue;
-      } else if (range !== null) {
+      if (selected === null && range !== null) {
         const position = working.get(anchor.blockId);
         if (position === undefined || position < range.startPosition || position > range.endPosition) continue;
       }
@@ -1947,7 +1962,8 @@ export class ReviewRunStore {
       runRecordId: null,
       resultSetRevisionId: revision.revisionId,
       excludedCount,
-      outsideSelection: 0,
+      outsideSelection: outside,
+      selection: selected !== null,
       adapterPin: { route: revision.adapterPin.route, model: revision.adapterPin.model, fixtureIdentity: revision.adapterPin.fixtureIdentity, fixtureSha256: revision.adapterPin.fixtureSha256 },
     });
   }
@@ -1971,6 +1987,8 @@ export class ReviewRunStore {
       excludedCount: number;
       /** Findings of a 当前选区 Run's reading ranges that lie outside the selected paragraphs: counted, not marked. */
       outsideSelection: number;
+      /** A 当前选区 Run: its unplaceable quotes belong to the reading ranges, which its line says (P3-1). */
+      selection: boolean;
       adapterPin: { route: string; model: string; fixtureIdentity: string | null; fixtureSha256: string | null };
     },
   ): void {
@@ -2045,7 +2063,9 @@ export class ReviewRunStore {
         const detail = [
           `已形成 ${findings.length} 条发现：${marked} 条在稿件上`,
           ...(changed > 0 ? [`${changed} 条原文已变，未能标出`] : []),
-          ...(source.excludedCount > 0 ? [`另有 ${source.excludedCount} 条未能定位引文，列在排除附录中`] : []),
+          ...(source.excludedCount > 0
+            ? [source.selection ? selectionExcludedLine(source.excludedCount) : `另有 ${source.excludedCount} 条未能定位引文，列在排除附录中`]
+            : []),
           ...(source.outsideSelection > 0 ? [selectionOutsideLine(source.outsideSelection)] : []),
         ].join('；') + '。';
         this.#recordEvent(reviewRunId, category.categoryId, 'materialized', detail, {
@@ -2057,6 +2077,8 @@ export class ReviewRunStore {
             carriedCount: carried.filter((markId) => markId !== null).length,
             anchorChangedCount: changed,
             excludedCount: source.excludedCount,
+            // A 当前选区 Run's findings left off the manuscript, as a number the record answers by itself (P3-3).
+            ...(source.selection ? { outsideSelectionCount: source.outsideSelection } : {}),
             adapterPin: source.adapterPin,
           },
         });
@@ -2758,7 +2780,7 @@ export class ReviewRunStore {
     for (const row of this.#db.prepare(
       `SELECT e.category_id, e.result_set_revision_id, r.ordinal FROM review_run_category_events e
        JOIN review_runs r ON r.review_run_id = e.review_run_id
-       WHERE r.book_id = ? AND e.state = 'materialized' ORDER BY r.ordinal, e.sequence`,
+       WHERE r.book_id = ? AND e.state = 'materialized' AND r.scope_kind <> 'selection' ORDER BY r.ordinal, e.sequence`,
     ).all(bookId) as SqlRow[]) {
       latest.set(text(row.category_id), { ordinal: integer(row.ordinal), revisionId: text(row.result_set_revision_id) });
     }

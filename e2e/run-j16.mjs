@@ -1328,7 +1328,6 @@ async function main() {
     const leadAnchors = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then((analysis) => { const revision = analysis.resultSetRevision; if (revision === null) return []; const first = (ranges) => ranges?.[0]?.blockId ?? null; const anchors = [...revision.conflicts.map((conflict) => first(conflict.sourceRanges)), ...revision.crossUnitFindings.map((finding) => first(finding.sides.flatMap((side) => side.sourceRanges))), ...[...revision.sections.flatMap((section) => section.unresolved), ...revision.synthesis.unresolved].map((item) => first(item.sourceRanges))].filter((blockId) => blockId !== null); const units = analysis.coverageManifest?.units ?? []; return [...new Set(anchors)].map((blockId) => ({ blockId, unit: units.find((unit) => unit.blockIds.includes(blockId))?.ordinal ?? null })).filter((anchor) => anchor.unit !== null); })`);
     requireJourney(Array.isArray(leadAnchors) && leadAnchors.length > 0, 'selection-task-lead-anchors', leadAnchors);
     let taskBlock = null;
-    let taskUnit = null;
     for (const anchor of leadAnchors.slice(0, 6)) {
       await clickSelector(renderer, '[data-edge-entry="analysis"]', 'selection-task-analysis-open');
       await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .baseline-analysis-card')`, 'selection-task-analysis-screen', 60_000);
@@ -1342,7 +1341,6 @@ async function main() {
       const fits = await renderer.evaluate(`(() => { const node = window.__j16.block(${JSON.stringify(anchor.blockId)}); if (!(node instanceof HTMLElement)) return false; const head = (node.textContent ?? '').slice(0, 10); return head.length >= 4 && Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(head)).length === head.length; })()`);
       if (fits) {
         taskBlock = anchor.blockId;
-        taskUnit = anchor.unit;
         break;
       }
     }
@@ -1411,14 +1409,10 @@ async function main() {
     const reviewedFindings = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({ reviewRunId: ${JSON.stringify(selectionRun.reviewRunId)} }).then((workspace) => workspace.run.findings.map((finding) => [finding.blockId, finding.markId !== null]))`);
     requireJourney(Array.isArray(reviewedFindings) && reviewedFindings.length > 0 && reviewedFindings.every(([blockId, marked]) => blockId === taskBlock && marked), 'selection-task-review-in-paragraph', reviewedFindings);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'selection-task-review-close');
-    // The manuscript on screen read its marks before the 审阅 made this one; opened again at the paragraph, it shows it.
-    await clickSelector(renderer, '[data-edge-entry="analysis"]', 'selection-task-reopen-analysis');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .baseline-analysis-card')`, 'selection-task-reopen-analysis-screen', 60_000);
-    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] button[data-analysis-tab="chapters"]') instanceof HTMLButtonElement`, 'selection-task-reopen-chapters-ready', 60_000);
-    await clickSelector(renderer, '[data-screen="book-analysis"] button[data-analysis-tab="chapters"]', 'selection-task-reopen-chapters');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] li.analysis-unit[data-analysis-unit="${taskUnit}"] [data-analysis-action="return-to-range"]') instanceof HTMLButtonElement`, 'selection-task-reopen-return-ready', 60_000);
-    await clickSelector(renderer, `[data-screen="book-analysis"] li.analysis-unit[data-analysis-unit="${taskUnit}"] [data-analysis-action="return-to-range"]`, 'selection-task-reopen-return');
+    // The manuscript on screen reads its window again in place once the 审阅 settles (review P2-6): the lead's mark is on the
+    // paragraph the editor started from, without leaving it, and the editor names that load.
     await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true && document.querySelector(${JSON.stringify(`[data-screen="editor"] [data-block-id="${taskBlock}"] .editorial-mark[data-mark-source="ai7"]`)}) !== null`, 'selection-task-lead-marked', 60_000);
+    requireJourney((await windowLoads()).split(',').includes('review-settled'), 'selection-task-review-settled-load', await windowLoads());
     await assertRenderer(renderer, MARK_HELPERS, 'selection-task-mark-helpers');
 
     at('selection-task-from-mark');
@@ -1439,12 +1433,24 @@ async function main() {
       }
     }
     requireJourney(markMenu, 'selection-task-mark-menu');
-    const loadsBefore = await windowLoads();
     await assertRenderer(renderer, `(() => { window.__j16.item('task-on-selection').click(); return true; })()`, 'selection-task-mark-choose');
     await waitFor(renderer, `window.__j16.composer()?.dataset.markComposer === 'task-on-selection' && window.__j16.composer().querySelector('.editorial-mark-quote')?.textContent === ${JSON.stringify(markWords)}`, 'selection-task-mark-composer', 30_000);
+    // With 重新分析这段 chosen, a real window load — 全稿位置 asked for the window the editor is on — keeps the composer below its
+    // paragraph, with its choice and its words (review P2-5); the load is named in `data-window-loads`.
+    await assertRenderer(renderer, `(() => { const select = window.__j16.composer()?.querySelector('select[data-mark-field="procedure"]'); if (!(select instanceof HTMLSelectElement)) return false; select.value = 'reanalyze-range'; select.dispatchEvent(new Event('change', { bubbles: true })); return select.value === 'reanalyze-range'; })()`, 'selection-task-mark-choose-procedure');
+    const loadsBefore = await windowLoads();
+    await assertRenderer(renderer, `(() => { const rail = document.querySelector('[data-screen="editor"] input#manuscript-position'); if (!(rail instanceof HTMLInputElement)) return false; rail.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`, 'selection-task-rail-load');
+    await waitFor(renderer, `(document.querySelector('[data-screen="editor"] [data-window-loads]')?.dataset.windowLoads ?? '') !== ${JSON.stringify(loadsBefore)}`, 'selection-task-load-happened', 30_000);
+    const loadsAfter = await windowLoads();
+    const kept = await renderer.evaluate(`(() => { const composer = window.__j16.composer(); const block = window.__j16.block(${JSON.stringify(taskBlock)}); if (composer === null || block === null) return null; return { kind: composer.dataset.markComposer, choice: composer.querySelector('select[data-mark-field="procedure"]')?.value ?? null, quote: composer.querySelector('.editorial-mark-quote')?.textContent ?? null, below: composer.getBoundingClientRect().top >= block.getBoundingClientRect().bottom - 1 }; })()`);
+    requireJourney(loadsAfter.split(',').at(-1) === 'navigation-proportion' && loadsAfter.split(',').length === Math.min(12, loadsBefore.split(',').filter((entry) => entry.length > 0).length + 1) &&
+      kept?.kind === 'task-on-selection' && kept.choice === 'reanalyze-range' && kept.quote === markWords && kept.below === true,
+    'selection-task-composer-survives-load', { loadsBefore, loadsAfter, kept });
+    // With the composer open, the pane scrolled to its end pages nothing: no window is loaded while a composer is open or asked for.
+    await assertRenderer(renderer, `(() => { const pane = document.querySelector('[data-screen="editor"] .editor-window'); if (!(pane instanceof HTMLElement)) return false; pane.scrollTop = pane.scrollHeight; pane.dispatchEvent(new Event('scroll')); return true; })()`, 'selection-task-pane-edge');
     await new Promise((resolveWait) => setTimeout(resolveWait, 1_500));
-    const survived = await renderer.evaluate(`window.__j16.composer()?.dataset.markComposer === 'task-on-selection'`);
-    requireJourney(survived === true, 'selection-task-composer-survives', { loadsBefore, loadsAfter: await windowLoads() });
+    requireJourney((await windowLoads()) === loadsAfter && await renderer.evaluate(`window.__j16.composer()?.dataset.markComposer === 'task-on-selection'`) === true,
+      'selection-task-no-paging-under-composer', { loadsAfter, now: await windowLoads() });
 
     at('selection-task-reanalyze');
     // 重新分析这段 prepares an analysis update over that paragraph, named by its block identity, its plan opened in the slot naming

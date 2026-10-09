@@ -305,10 +305,13 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   let floating: HTMLElement | undefined;
   let floatingBlockId: string | undefined;
   /**
-   * A composer asked for and not on screen yet (Issue #423 review, P2-3): from the menu's choice, through the settled selection and
-   * any read it waits on, to `openComposer`. Paging at the pane's edge waits for it, as it waits for an open composer.
+   * Composers asked for and not on screen yet (Issue #423 review, P2-3, P3-8): from the menu's choice, through the settled selection
+   * every composer waits on and any read after it, to `openComposer`. Paging at the pane's edge waits while any is, as it waits for
+   * an open composer. A count, since one asking can hold the selection's wait inside its own.
    */
-  let composerPending = false;
+  let composersPending = 0;
+  /** The open composer's own refresh after a window load (P3-7): the 就这段发起任务 composer's context line. */
+  let floatingRefresh: (() => void) | undefined;
   let openCardId: string | undefined;
   /**
    * The one reason row open on the card (Issue #61, S26a): the prompt a decision just recorded asks once, or the editor's
@@ -347,6 +350,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   };
 
   const closeFloating = (): void => {
+    floatingRefresh = undefined;
     if (floating !== undefined) {
       floating.remove();
       // Where the pane rests once the card's height is gone. The mark lapses two frames on, past the
@@ -517,7 +521,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   }, '标记未能添加。');
 
   const settledRange = async (): Promise<Extract<ReturnType<BoundedEditor['selectedRange']>, { kind: 'range' }> | null> => {
-    await editor.flush();
+    composersPending += 1;
+    try {
+      await editor.flush();
+    } finally {
+      composersPending -= 1;
+    }
     const range = editor.selectedRange();
     if (range.kind === 'range') return range;
     options.setStatus(selectionMenuReason(range.kind), 'error');
@@ -1355,11 +1364,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
    */
   const composeTask = async (): Promise<void> => {
     if (refuseWhileBusy() || options.startTaskOnSelection === undefined) return;
-    composerPending = true;
+    composersPending += 1;
     try {
       await composeTaskNow(options.startTaskOnSelection);
     } finally {
-      composerPending = false;
+      composersPending -= 1;
     }
   };
   const composeTaskNow = async (start: NonNullable<MountOptions['startTaskOnSelection']>): Promise<void> => {
@@ -1411,7 +1420,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           options.setStatus(SELECTION_TASK_STATUS.pickFirst, 'error');
           return;
         }
-        // The paragraph is named by its block identity; the service finds where it stands as the Task is prepared (P3-3).
+        // Words typed in the manuscript while the composer was open are written first, so the Task Input checkpoint pins the text
+        // on screen (Issue #423 review, P3-5); the paragraph is named by its block identity, which the service resolves (P3-3).
+        await editor.flush();
         if (await start.prepare(choice, { blockId: range.blockId }) && !destroyed) closeFloating();
       },
       cancel: () => {
@@ -1419,6 +1430,20 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         editor.focus();
       },
     });
+    // After a window load keeps this composer, its context line names the revision and journal position the window now stands at.
+    floatingRefresh = () => {
+      const hint = floating?.querySelector<HTMLElement>('[data-mark-field="procedure"]')?.closest('label')?.querySelector('small');
+      const now = editor.currentWindow();
+      const at = now.blocks.find((block) => block.blockId === range.blockId)?.position ?? null;
+      if (hint === null || hint === undefined || at === null) return;
+      hint.textContent = selectionTaskContextLine({
+        bookTitle: start.bookTitle,
+        revisionLabel: now.revisionLabel,
+        journalSequence: now.journalSequence,
+        graphemes: range.toGrapheme - range.fromGrapheme,
+        position: at,
+      });
+    };
   };
 
   /**
@@ -1428,13 +1453,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   const composeQuestion = async (): Promise<void> => {
     if (refuseWhileBusy() || options.askAboutSelection === undefined) return;
     const ask = options.askAboutSelection;
-    composerPending = true;
-    let range: Awaited<ReturnType<typeof settledRange>>;
-    try {
-      range = await settledRange();
-    } finally {
-      composerPending = false;
-    }
+    const range = await settledRange();
     if (range === null) return;
     openComposer(range.blockId, {
       id: 'ask-about-selection',
@@ -1808,6 +1827,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       const blockId = floatingBlockId;
       if (floating.dataset['markComposer'] !== undefined && blockId !== undefined && blockElement(blockId) !== null) {
         placeBelowBlock(floating, blockId);
+        floatingRefresh?.();
         return;
       }
       const composer = floating.dataset['markComposer'] !== undefined;
@@ -1815,7 +1835,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       if (composer) options.setStatus(COMPOSER_LEFT_WINDOW, 'error');
     },
     openMark: (markId) => openCard(markId),
-    ownsScroll: () => composerPending || floating !== undefined || (closedAt !== undefined && options.scroll.scrollTop === closedAt.top),
+    ownsScroll: () => composersPending > 0 || floating !== undefined || (closedAt !== undefined && options.scroll.scrollTop === closedAt.top),
     destroy: () => {
       destroyed = true;
       reflow.disconnect();
