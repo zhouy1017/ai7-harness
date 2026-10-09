@@ -454,17 +454,34 @@ export interface EvaluationChainMarks {
   readonly verdict: ReadonlyArray<EvaluationRewriteMark>;
 }
 
-/** What the versions before leave a version's chain: their marks, or that one of them could not be read. */
+/**
+ * What the versions before leave a version's chain: their marks; whether the version just before could not be read
+ * (`unreadable`); and whether any version before could not, so the marks may be missing some it held (`incomplete`, Issue
+ * #702 re-review) — a mark of an unreadable version pasted back two versions later is then kept as recorded, never refused.
+ */
 interface Carried {
   readonly marks: EvaluationChainMarks | null;
   readonly unreadable: boolean;
+  readonly incomplete: boolean;
 }
-const NOTHING_CARRIED: Carried = { marks: null, unreadable: false };
-const CARRIED_UNREADABLE: Carried = { marks: null, unreadable: true };
+const NOTHING_CARRIED: Carried = { marks: null, unreadable: false, incomplete: false };
+const CARRIED_UNREADABLE: Carried = { marks: null, unreadable: true, incomplete: true };
 
-/** What 评估 says when a version's AI7 marks could not all be checked; the words stay AI7's, the safe side for EVAL-011. */
-export const EVALUATION_CARRIED_MARKS_UNREADABLE = '上一版评估记录已损坏：从上一版沿用的 AI7 评语标注无法核对，这些评语仍按 AI7 所写处理。';
-export const EVALUATION_ADOPTIONS_UNREADABLE = '评语重写的采用记录暂时读不到：这一版 AI7 评语标注的来源无法核对，这些评语仍按 AI7 所写处理。';
+/** Which of a version's words are AI7's, named as the editor sees them: 「「文学品质与作者声音」的评语和总评」. */
+function ai7WordsNamed(words: EvaluationRewrittenWords, profile: Pick<Profile, 'items'>): string {
+  const items = words.items.map((item) => `「${profile.items.find((entry) => entry.itemId === item.itemId)?.label ?? item.itemId}」`);
+  const comments = items.length === 0 ? '' : `${items.join('、')}的评语`;
+  return words.verdict === null ? comments : comments === '' ? '总评' : `${comments}和总评`;
+}
+
+/**
+ * What 评估 says when a version's AI7 marks could not all be checked (Issue #702 review): only while its latest entry has AI7
+ * words, naming them. The words stay AI7's, the safe side for EVAL-011.
+ */
+export const evaluationCarriedMarksNotice = (named: string): string =>
+  `较早的评估版本记录已损坏，AI7 评语标注无法与它核对：${named}仍按 AI7 所写处理。`;
+export const evaluationAdoptionsNotice = (named: string): string =>
+  `评语重写的采用记录已损坏，AI7 评语标注的来源无法核对：${named}仍按 AI7 所写处理。`;
 
 /** Which 采用 appended which entry of a version (Issue #696): the evaluation rewrite owner's decisions, read by the record. */
 export interface EvaluationAdoptionReader {
@@ -881,7 +898,7 @@ export class EvaluationRecords {
   #leaves(record: StoredRecord, carried: Carried, known: Map<string, Carried>): Carried {
     let left: Carried;
     try {
-      left = { marks: this.#chain(record, carried).latest.rewriteMarks, unreadable: false };
+      left = { marks: this.#chain(record, carried).latest.rewriteMarks, unreadable: false, incomplete: carried.incomplete };
     } catch (error) {
       if (!(error instanceof EvaluationError)) throw error;
       left = CARRIED_UNREADABLE;
@@ -893,8 +910,9 @@ export class EvaluationRecords {
   /** One version's entries as `#chain` reads them, with what the versions before it leave it; refused when it cannot be read. */
   #entries(record: StoredRecord, known: Map<string, Carried> = new Map()): Chain {
     try {
-      const chain = this.#chain(record, this.#carriedInto(record, known));
-      known.set(record.recordId, { marks: chain.latest.rewriteMarks, unreadable: false });
+      const carried = this.#carriedInto(record, known);
+      const chain = this.#chain(record, carried);
+      known.set(record.recordId, { marks: chain.latest.rewriteMarks, unreadable: false, incomplete: carried.incomplete });
       return chain;
     } catch (error) {
       if (error instanceof EvaluationError) known.set(record.recordId, CARRIED_UNREADABLE);
@@ -955,7 +973,8 @@ export class EvaluationRecords {
           rewrittenFrom = legacyRewrittenWords(legacy, latest?.content, content, standing);
         } else {
           const stored = storedRewrittenWords(entry.rewrittenFrom, content);
-          const lenient = !adoption.known || (latest === undefined && carried.unreadable);
+          // Of unknown source, or perhaps held by a version that cannot be read: kept as recorded, their digests checked.
+          const lenient = !adoption.known || carried.incomplete;
           requireEvaluation(stored !== undefined && stored !== null && newMarksAdmitted(stored, marks, content, latest?.content, adoption, lenient) &&
             // The entry a 采用 appended names that rewrite at least once (Issue #702 review).
             (!adoption.known || adoption.from === null ||
@@ -978,7 +997,10 @@ export class EvaluationRecords {
       };
     }
     requireEvaluation(latest !== undefined, 'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
-    const notice = carried.unreadable ? EVALUATION_CARRIED_MARKS_UNREADABLE : adoptionsUsed ? EVALUATION_ADOPTIONS_UNREADABLE : null;
+    const words = latest.rewrittenFrom;
+    const notice = words === null ? null
+      : carried.incomplete ? evaluationCarriedMarksNotice(ai7WordsNamed(words, record.profile))
+      : adoptionsUsed ? evaluationAdoptionsNotice(ai7WordsNamed(words, record.profile)) : null;
     return { count, latest, notice };
   }
 
@@ -1201,10 +1223,12 @@ export class EvaluationRecords {
   /**
    * The Books whose editor adjusted AI7's 初评 (EVAL-011; Issue #429, S81b1), counted per Book as 设置 counts them (§8.6 「10 本
    * 调分记录」): a Book counts once when one of its 定稿 versions began from AI7's 初评 and kept at least one score that departs
-   * from AI7's. A version still being scored has adjusted nothing yet.
+   * from AI7's. A version still being scored has adjusted nothing yet. A version that cannot be read counts for nothing, and
+   * `unreadable` says how many Books were left out for it, never failing 设置 for the whole house (Issue #702 review).
    */
-  adjustedBooks(): number {
+  adjustedBooks(): { books: number; unreadable: number } {
     const books = new Set<string>();
+    const damaged = new Set<string>();
     const rows = this.#db.prepare(
       'SELECT r.* FROM evaluation_records r JOIN evaluation_initial_drafts d ON d.record_id = r.record_id ORDER BY r.book_id, r.ordinal',
     ).all() as SqlRow[];
@@ -1212,7 +1236,6 @@ export class EvaluationRecords {
     const known = new Map<string, Carried>();
     for (const row of rows) {
       if (books.has(String(row.book_id))) continue;
-      // A version that cannot be read counts for nothing, and never fails 设置 for the whole house (Issue #702 review).
       try {
         const record = this.#record(row);
         const latest = this.#entries(record, known).latest;
@@ -1223,9 +1246,10 @@ export class EvaluationRecords {
         }
       } catch (error) {
         if (!(error instanceof EvaluationError)) throw error;
+        damaged.add(String(row.book_id));
       }
     }
-    return books.size;
+    return { books: books.size, unreadable: [...damaged].filter((bookId) => !books.has(bookId)).length };
   }
 
   /**
@@ -1398,6 +1422,7 @@ export class EvaluationRecords {
     let lastDamage: EvaluationError | null = null;
     let basisFound: { record: StoredRecord; chain: Chain } | null = null;
     let basisDamage: EvaluationError | null = null;
+    let oldestReadable: number | null = null;
     const begunFromInitial = new Set((this.#db.prepare(
       'SELECT d.record_id FROM evaluation_initial_drafts d JOIN evaluation_records r ON r.record_id = d.record_id WHERE r.book_id = ?',
     ).all(bookId) as SqlRow[]).map((row) => String(row.record_id)));
@@ -1412,6 +1437,7 @@ export class EvaluationRecords {
         continue;
       }
       lastDamage = null;
+      oldestReadable ??= read.ordinal;
       const { record } = read.version;
       const chain = { record, ...read.version.chain };
       if (chain.latest.kind === 'finalized') {
@@ -1487,7 +1513,8 @@ export class EvaluationRecords {
       records: summaries.reverse(),
       recordCount: count,
       recordsBefore: before,
-      recordsNext: (summaries.at(-1)?.ordinal ?? 1) > 1 ? summaries.at(-1)!.ordinal : null,
+      // An earlier page only while a readable version lies before this one: never a page of unreadable ones alone.
+      recordsNext: (summaries.at(-1)?.ordinal ?? 1) > (oldestReadable ?? 1) ? summaries.at(-1)!.ordinal : null,
       unreadableRecords,
       record,
       start,

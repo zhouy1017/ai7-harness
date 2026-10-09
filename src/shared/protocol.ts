@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 109 as const;
+export const SERVICE_PROTOCOL_VERSION = 105 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -7218,6 +7218,8 @@ export interface EvaluationCalibrationProjection {
      * once when one of its 定稿 versions began from AI7's 初评 and changed at least one of its scores.
      */
     readonly adjustments: number;
+    /** The Books left out of `adjustments` because a version of theirs begun from AI7's 初评 cannot be read (Issue #702 review). */
+    readonly unreadableBooks: number;
     /**
      * Whether AI7 gives 初评 scores the editor can adjust at all (Issue #430 review): since S81b1 it does. Before then the page
      * said so, whatever the count.

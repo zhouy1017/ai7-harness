@@ -7,7 +7,7 @@ import { RECONCILED_INTERRUPTED_DETAIL, RECONCILED_QUEUED_DETAIL } from '../../s
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { runReportUsageReconciles } from '../../src/service/analysis/run-report.js';
 import { canonicalRecord, sha256Hex } from '../../src/service/analysis/canonical.js';
-import { EVALUATION_ADOPTIONS_UNREADABLE, EVALUATION_INITIAL_DRAFT_TRIGGER_SQL, EVALUATION_RECORD_TRIGGER_SQL } from '../../src/service/evaluation-records.js';
+import { EVALUATION_INITIAL_DRAFT_TRIGGER_SQL, EVALUATION_RECORD_TRIGGER_SQL } from '../../src/service/evaluation-records.js';
 import { EVALUATION_REWRITE_SCHEMA_SQL, EVALUATION_REWRITE_TRIGGER_SQL } from '../../src/service/evaluation-rewrites.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { fixtureEntryKey, loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -386,7 +386,8 @@ describe('the market section and 按我的评分重写评语 over the real store
     const damaged = await openStore();
     try {
       const page = damaged.inspectEvaluation(bookId, recordId);
-      expect(page.record).toMatchObject({ recordId, entries: 3, ai7WordsNotice: EVALUATION_ADOPTIONS_UNREADABLE });
+      expect(page.record).toMatchObject({ recordId, entries: 3 });
+      expect(page.record!.ai7WordsNotice).toMatch(/^评语重写的采用记录已损坏，AI7 评语标注的来源无法核对：「.+」的评语.*仍按 AI7 所写处理。$/u);
       expect(page.rewrite.prepare).toEqual({ allowed: false, reason: '按我的评分重写评语暂不可用：评语重写记录已损坏。' });
       damaged.markCleanShutdown();
     } finally {
@@ -405,7 +406,7 @@ describe('the market section and 按我的评分重写评语 over the real store
     const settings = await openStore();
     try {
       expect(adjustedBefore).toBe(1);
-      expect(settings.inspectEvaluationCalibration().calibration.adjustments).toBe(0);
+      expect(settings.inspectEvaluationCalibration().calibration).toMatchObject({ adjustments: 0, unreadableBooks: 1 });
       expect(await refusal(() => settings.inspectEvaluation(bookId, firstId))).toBe('EVALUATION_RECORD_INVALID:评估记录已损坏。');
       const later = settings.inspectEvaluation(bookId, recordId);
       expect(later.unreadableRecords).toEqual([firstOrdinal]);

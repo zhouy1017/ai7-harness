@@ -127,6 +127,25 @@ describe('what AI7\'s evaluation words may not claim (Issue #429, S81b2)', () =>
     expect(claimsScore('前1/5节奏拖沓。', [5, 25])).toBe(true);
   });
 
+  it('reads the re-review\'s residuals: 一块 together is no price, 订单一成 is a share, and 4/5颗星 or 4/5的高分 is a score (Issue #702 re-review)', () => {
+    for (const text of ['把两条线索放在一块多有意思。', '和他们一块多聊聊。', '放在一块左右为难。', '其中一块多数读者会跳过。']) {
+      expect(claimsQuantity(text), text).toBe(false);
+    }
+    for (const text of ['一块多一本。', '一块多钱。', '售价一块左右。', '一块左右的价格。', '订单一成来自线上。', '下单一成以上。', '名单一成是新读者。']) {
+      expect(claimsQuantity(text), text).toBe(true);
+    }
+    for (const text of ['单一成分的叙事。', '统一成人物视角来写。']) {
+      expect(claimsQuantity(text), text).toBe(false);
+    }
+    for (const text of ['4/5颗星。', '4/5 颗星。', '4/5的高分。', '只拿到2/5的低分。']) {
+      expect(claimsScore(text, FULL_MARKS), text).toBe(true);
+    }
+    // A fraction over 5 with no score named and words after it may pass: 「3/5 左右」, 「4/5颗粒」.
+    for (const text of ['3/5 左右的篇幅', '4/5颗粒感。']) {
+      expect(claimsScore(text, FULL_MARKS), text).toBe(false);
+    }
+  });
+
   it('finds a conclusion by the house\'s own labels — 推荐出版, 修改后再议, 暂缓, 不推荐 — wherever it stands in the line', () => {
     expect(CONCLUSIONS).toEqual(['推荐出版', '修改后再议', '暂缓', '不推荐']);
     for (const text of ['建议推荐出版。', '可以修改后再议。', '建议暂缓。', '目前暂缓出版为宜。', '不推荐。', '编辑部不推荐这部书稿。', '总体不推荐出版。']) {
@@ -141,7 +160,7 @@ describe('what AI7\'s evaluation words may not claim (Issue #429, S81b2)', () =>
   it('reads a line in time linear in its length, however its numerals fall', () => {
     for (const text of ['一'.repeat(200_000), '1'.repeat(200_000), '1/'.repeat(100_000), '千万'.repeat(100_000), '1,'.repeat(100_000), '首印'.repeat(100_000),
       '一块'.repeat(100_000), '一成'.repeat(100_000), '十分之'.repeat(70_000), '十五分一'.repeat(50_000), '4/5'.repeat(70_000), '1/5的'.repeat(50_000),
-      '统一成'.repeat(70_000), '一块左'.repeat(70_000)]) {
+      '统一成'.repeat(70_000), '一块左'.repeat(70_000), '订单一成'.repeat(50_000), '4/5颗'.repeat(50_000), '一块多'.repeat(70_000)]) {
       const started = performance.now();
       claimsQuantity(text);
       claimsScore(text, FULL_MARKS);

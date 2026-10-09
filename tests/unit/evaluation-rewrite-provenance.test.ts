@@ -4,12 +4,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalRecord, sha256Hex } from '../../src/service/analysis/canonical.js';
 import {
   BUILTIN_EVALUATION_PROFILE,
-  EVALUATION_ADOPTIONS_UNREADABLE,
-  EVALUATION_CARRIED_MARKS_UNREADABLE,
   EVALUATION_RECORD_TRIGGER_SQL,
   EvaluationError,
   EvaluationRecords,
   emptyEvaluationContent,
+  evaluationAdoptionsNotice,
+  evaluationCarriedMarksNotice,
   initializeEvaluationInitialDraftSchema,
   initializeEvaluationRecordSchema,
 } from '../../src/service/evaluation-records.js';
@@ -27,6 +27,8 @@ import type { EvaluationContent } from '../../src/shared/protocol.js';
 // marks as recorded and say so. The words are the suite's own.
 
 const ITEMS = BUILTIN_EVALUATION_PROFILE.items.map((item) => item.itemId);
+/** How a notice names the first item's 评语. */
+const FIRST = `「${BUILTIN_EVALUATION_PROFILE.items[0]!.label}」的评语`;
 const A = { taskIntentId: randomUUID(), analysisRevisionId: randomUUID() };
 const B = { taskIntentId: randomUUID(), analysisRevisionId: randomUUID() };
 /** A rewrite no 采用 took. */
@@ -101,6 +103,13 @@ function forge(recordId: string, ordinal: number, change: (entry: Record<string,
   const forged = canonicalRecord(change(JSON.parse(row.canonical_json) as Record<string, unknown>));
   db.exec('DROP TRIGGER evaluation_record_entries_no_update');
   db.prepare('UPDATE evaluation_record_entries SET canonical_json = ?, sha256 = ? WHERE entry_id = ?').run(forged.json, forged.digest, row.entry_id);
+  db.exec(EVALUATION_RECORD_TRIGGER_SQL.evaluation_record_entries_no_update!);
+}
+
+/** One entry's digest no longer that of its row: the version cannot be read. */
+function damage(recordId: string, ordinal: number): void {
+  db.exec('DROP TRIGGER evaluation_record_entries_no_update');
+  db.prepare('UPDATE evaluation_record_entries SET sha256 = ? WHERE record_id = ? AND ordinal = ?').run(sha256Hex(randomUUID()), recordId, ordinal);
   db.exec(EVALUATION_RECORD_TRIGGER_SQL.evaluation_record_entries_no_update!);
 }
 
@@ -329,7 +338,8 @@ describe('AI7\'s words in an evaluation entry, item by item (Issue #689)', () =>
     expect(records.workspace(bookId, '书', recordId).record!.ai7WordsNotice).toBeNull();
     decisionsReadable = false;
     const page = records.workspace(bookId, '书', recordId);
-    expect(page.record!.ai7WordsNotice).toBe(EVALUATION_ADOPTIONS_UNREADABLE);
+    expect(page.record!.ai7WordsNotice).toBe(evaluationAdoptionsNotice(`${FIRST}和总评`));
+    expect(page.record!.ai7WordsNotice).toBe(`评语重写的采用记录已损坏，AI7 评语标注的来源无法核对：${FIRST}和总评仍按 AI7 所写处理。`);
     expect(records.ai7Words(bookId, recordId)).toEqual(adopted);
     // A mark of a rewrite nothing took is kept, its source unknown, rather than refusing 评估; its digest is still checked.
     forge(recordId, 3, (entry) => ({ ...entry, rewrittenFrom: { ...adopted, items: [mark(ITEMS[0]!, C, 'AI7 的评语一。')] } }));
@@ -337,6 +347,10 @@ describe('AI7\'s words in an evaluation entry, item by item (Issue #689)', () =>
     forge(recordId, 3, (entry) => ({ ...entry, rewrittenFrom: { ...adopted, items: [mark(ITEMS[0]!, A, '别的话。')] } }));
     expect(refused(() => latest(recordId))).toBe('EVALUATION_RECORD_INVALID');
     forge(recordId, 3, (entry) => ({ ...entry, rewrittenFrom: adopted }));
+    // Once the editor's own words stand everywhere, there is nothing to name: no notice (Issue #702 re-review).
+    save(recordId, (content) => ({ ...withComment(content, 0, '编辑的评语一。'), verdict: '编辑的总评。' }));
+    expect(records.ai7Words(bookId, recordId)).toBeNull();
+    expect(records.workspace(bookId, '书', recordId).record!.ai7WordsNotice).toBeNull();
     decisionsReadable = true;
     expect(records.workspace(bookId, '书', recordId).record!.ai7WordsNotice).toBeNull();
   });
@@ -360,11 +374,13 @@ describe('AI7\'s words in an evaluation entry, item by item (Issue #689)', () =>
     expect(records.ai7Words(bookId, v2)).toEqual(carried);
     const page = records.workspace(bookId, '书', v2);
     expect(page.unreadableRecords).toEqual([1]);
-    expect(page.record!.ai7WordsNotice).toBe(EVALUATION_CARRIED_MARKS_UNREADABLE);
+    expect(page.record!.ai7WordsNotice).toBe(evaluationCarriedMarksNotice(FIRST));
     expect(page.records.map((summary) => summary.ordinal)).toEqual([3, 2]);
+    // Every older version is unreadable: no 「更早」 page to open (Issue #702 re-review).
+    expect(page.recordsNext).toBeNull();
     expect(page.record!.comparison).toBeNull();
-    // v3 reads v2 as it stands: nothing unchecked there, and the per-version operations go on.
-    expect(records.workspace(bookId, '书', null).record!.ai7WordsNotice).toBeNull();
+    // v3 reads after v2, its marks still uncheckable against v1, and the per-version operations go on.
+    expect(records.workspace(bookId, '书', null).record!.ai7WordsNotice).toBe(evaluationCarriedMarksNotice(FIRST));
     save(v3, (content) => ({ ...content, conclusion: 'revise' }));
     expect(records.finalizedOf(bookId, v2)).not.toBeNull();
     expect(records.latestFinalized(bookId)?.recordId).toBe(v2);
@@ -380,6 +396,67 @@ describe('AI7\'s words in an evaluation entry, item by item (Issue #689)', () =>
     expect(refused(() => records.latestFinalized(bookId))).toBe('EVALUATION_RECORD_INVALID');
   });
 
+  it('keeps a version readable when it pastes back words of a version that cannot be read, however far back (Issue #702 re-review)', () => {
+    // v1: 采用 R1 on item 1, edited away, 定稿. v2 pastes R1's words back: the writer marks them from v1's marks. Then v1 is damaged.
+    const v1 = records.start(bookId);
+    save(v1, () => own());
+    adopt(v1, [{ itemId: ITEMS[0]!, comment: 'R1 的评语一。' }], null, A);
+    save(v1, (content) => withComment(content, 0, '编辑的评语一。'));
+    save(v1, (content) => ({ ...content, conclusion: 'revise' }), true);
+    const v2 = records.start(bookId);
+    save(v2, (content) => withComment(content, 0, 'R1 的评语一。'));
+    const pasted = { items: [mark(ITEMS[0]!, A, 'R1 的评语一。')], verdict: null };
+    expect(marks(v2)).toEqual([null, pasted]);
+    damage(v1, 1);
+    expect(refused(() => latest(v2))).toBe('none');
+    expect(records.ai7Words(bookId, v2)).toEqual(pasted);
+    const page = records.workspace(bookId, '书', null);
+    expect(page.unreadableRecords).toEqual([1]);
+    expect(page.record).toMatchObject({ ordinal: 2, ai7WordsNotice: evaluationCarriedMarksNotice(FIRST) });
+    save(v2, (content) => ({ ...content, conclusion: 'revise' }), true);
+    expect(records.latestFinalized(bookId)?.recordId).toBe(v2);
+    // A forged mark still has its digest checked, and a mark of an editor's own words names a rewrite only as an over-mark.
+    forge(v2, 2, (entry) => ({ ...entry, rewrittenFrom: { items: [mark(ITEMS[0]!, A, '别的话。')], verdict: null } }));
+    expect(refused(() => latest(v2))).toBe('EVALUATION_RECORD_INVALID');
+  });
+
+  it('keeps a version readable when it pastes back words of a version two before that cannot be read (Issue #702 re-review)', () => {
+    // v0 held R1, edited away; v1 never had R1's words; v2 pastes them back; then v0 is damaged.
+    const v0 = records.start(bookId);
+    save(v0, () => own());
+    adopt(v0, [{ itemId: ITEMS[0]!, comment: 'R1 的评语一。' }], null, A);
+    save(v0, (content) => withComment(content, 0, '编辑的评语一。'));
+    save(v0, (content) => ({ ...content, conclusion: 'revise' }), true);
+    const v1 = records.start(bookId);
+    save(v1, (content) => ({ ...content, conclusion: 'reject' }), true);
+    const v2 = records.start(bookId);
+    save(v2, (content) => withComment(content, 0, 'R1 的评语一。'));
+    const pasted = { items: [mark(ITEMS[0]!, A, 'R1 的评语一。')], verdict: null };
+    expect(marks(v2).at(-1)).toEqual(pasted);
+    damage(v0, 1);
+    expect(refused(() => latest(v1))).toBe('none');
+    expect(refused(() => latest(v2))).toBe('none');
+    expect(records.ai7Words(bookId, v2)).toEqual(pasted);
+    const page = records.workspace(bookId, '书', null);
+    expect(page.unreadableRecords).toEqual([1]);
+    expect(page.records.map((summary) => summary.ordinal)).toEqual([3, 2]);
+    expect(page.record!.ai7WordsNotice).toBe(evaluationCarriedMarksNotice(FIRST));
+    // v1 holds no AI7 words: no notice there.
+    expect(records.workspace(bookId, '书', v1).record!.ai7WordsNotice).toBeNull();
+    save(v2, (content) => ({ ...content, conclusion: 'revise' }));
+  });
+
+  it('names no unchecked marks for a Book that never had AI7\'s words, its first version damaged (Issue #702 re-review)', () => {
+    const v1 = records.start(bookId);
+    save(v1, () => own());
+    save(v1, (content) => ({ ...content, conclusion: 'revise' }), true);
+    const v2 = records.start(bookId);
+    save(v2, (content) => withComment(content, 0, '别的。'));
+    damage(v1, 1);
+    const page = records.workspace(bookId, '书', null);
+    expect(page).toMatchObject({ unreadableRecords: [1], record: { ordinal: 2, ai7WordsNotice: null } });
+  });
+
   it('counts adjusted Books without failing the house on one Book\'s damage (Issue #702 review)', () => {
     const recordId = records.start(bookId);
     save(recordId, () => own());
@@ -389,6 +466,6 @@ describe('AI7\'s words in an evaluation entry, item by item (Issue #689)', () =>
     db.exec('DROP TRIGGER evaluation_record_entries_no_update');
     db.prepare("UPDATE evaluation_record_entries SET sha256 = ? WHERE record_id = ? AND ordinal = 1").run('0'.repeat(64), recordId);
     db.exec(EVALUATION_RECORD_TRIGGER_SQL.evaluation_record_entries_no_update!);
-    expect(records.adjustedBooks()).toBe(0);
+    expect(records.adjustedBooks()).toEqual({ books: 0, unreadable: 1 });
   });
 });

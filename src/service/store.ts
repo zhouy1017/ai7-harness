@@ -13691,7 +13691,7 @@ export class EditorialStore {
     const booksWithActuals = this.#evaluationCalibration.booksWithActuals();
     // The Books whose editor adjusted AI7's 初评 in a 定稿 version, each counted once (Issue #429, S81b1; §8.6 「10 本调分记录」).
     // The calibration itself — the offset it would apply to AI7's starting scores — is not computed yet: it waits for its slice.
-    const adjustments = this.#evaluations.adjustedBooks();
+    const { books: adjustments, unreadable: unreadableBooks } = this.#evaluations.adjustedBooks();
     const where = 'EXISTS (SELECT 1 FROM publication_versions p WHERE p.book_id = b.book_id)';
     const rows = (after === null
       ? this.#authority.prepare(`SELECT b.book_id, b.title FROM books b WHERE ${where} ORDER BY b.title, b.book_id LIMIT ?`).all(MAX_EVALUATION_CALIBRATION_BOOKS + 1)
@@ -13709,6 +13709,7 @@ export class EditorialStore {
     return {
       calibration: {
         adjustments,
+        unreadableBooks,
         initialScoresConnected: true,
         threshold: CALIBRATION_MIN_ADJUSTMENTS,
         enabled: preferences.calibrationEnabled,

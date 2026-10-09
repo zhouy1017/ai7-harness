@@ -86,6 +86,10 @@ const CHENG_WORDS = new Set('不功为长熟就绩果立本员型形事交分色
  * 唯一成年, 单一成分 (Issue #702 review). 万一 is a numeral run of its own and reads the same way.
  */
 const YI_WORD_HEADS = new Set('统唯单同归专划逐');
+/** What before 单 makes it the end of a word — 订单, 名单, 下单 — so 一成 after it is a share again (Issue #702 re-review). */
+const DAN_WORD_STARTS = new Set('订名清菜账下买保报简传开');
+/** What after 一块多 or 一块左右 keeps it a price: 钱, a count, the end of the line — not 「放在一块多有意思」 (Issue #702 re-review). */
+const PRICE_AFTER_ROUGHLY = new Set('钱一本的');
 /** What before a lone 一 makes 一块 a piece rather than a yuan: 这一块, 每一块, 另一块 (Issue #702 review). */
 const YI_KUAI_PIECE = new Set('这那哪每另同整');
 /** 千万 the adverb — 千万不要, 千万别, 千万小心, 千万注意 — rather than ten million. */
@@ -114,6 +118,9 @@ function followsFigureWord(chars: ReadonlyArray<string>, start: number): boolean
   return false;
 }
 
+/** Whether what stands at `at` keeps 一块多 or 一块左右 a price: 钱, a count, 的 or the line's end. */
+const priceFollows = (chars: ReadonlyArray<string>, at: number): boolean => PRICE_AFTER_ROUGHLY.has(chars[at]!) || isTerminal(chars[at]);
+
 /** Whether one numeral run, with what stands right after it and right before it, states a quantity. */
 function runStatesQuantity(chars: ReadonlyArray<string>, run: NumeralRun): boolean {
   // The Book's own ordinal: 第3章, 第十二本.
@@ -131,10 +138,11 @@ function runStatesQuantity(chars: ReadonlyArray<string>, run: NumeralRun): boole
   if (ALWAYS_UNITS.some((entry) => startsWith(chars, at, entry))) return true;
   // 本 counts copies only after an amount: 「首印八千本」, 「3000本」 — not 「一本小说」, 「两本书」.
   if (unit === '本' && amount) return true;
-  // 块 is yuan after any numeral but a lone 一: 「九块九」, 「两块钱」 — not 「这一块」, 「一块儿」; after 一 too when 钱, a numeral,
-  // 多 or 左右 follows it, 「一块钱一本」, 「一块五」, 「一块多一本」, 「一块左右」 (Issue #696, Issue #702 review), but not
-  // 「一块一块地」 nor after 这, 每 or 另: 「这一块多数读者」.
-  if (unit === '块' && (word !== '一' || (!YI_KUAI_PIECE.has(before!) && (after === '钱' || after === '多' || startsWith(chars, at + 1, '左右') ||
+  // 块 is yuan after any numeral but a lone 一: 「九块九」, 「两块钱」 — not 「这一块」, 「一块儿」; after 一 too when 钱 or a numeral
+  // follows it, 「一块钱一本」, 「一块五」, or 多 or 左右 and then 钱, a count or the line's end, 「一块多一本」, 「一块左右。」 (Issue
+  // #696, Issue #702 review) — but not 「一块一块地」, 「放在一块多有意思」, nor after 这, 每 or 另: 「这一块多数读者」.
+  if (unit === '块' && (word !== '一' || (!YI_KUAI_PIECE.has(before!) && (after === '钱' ||
+    (after === '多' && priceFollows(chars, at + 2)) || (startsWith(chars, at + 1, '左右') && priceFollows(chars, at + 3)) ||
     (isQuantityNumeral(after) && !(after === '一' && chars[at + 2] === '块')))))) return true;
   // 册 counts copies after any numeral, 「首印五册」, but the Book's own volumes are no claim: 「全十二册」, 「上下两册」.
   if (unit === '册' && !(VOLUME_WORDS.has(before!) && !digit && !own.some((char) => char !== '十' && MAGNITUDES.has(char)))) return true;
@@ -142,7 +150,8 @@ function runStatesQuantity(chars: ReadonlyArray<string>, run: NumeralRun): boole
   if (unit === '元' && !(YUAN_WORDS.has(after!) && !amount)) return true;
   // 成 is a share unless 一 opens a word: 「七成年轻读者」, 「三成本」 are shares; 一成不变, 万一成功 are not.
   // 一 that ends a word — 万一, 统一, 唯一 — is no share before 成: 「万一成年读者不买账」, 「统一成人物视角」 (Issue #702 review).
-  if (unit === '成' && (word === '万一' || (word === '一' && YI_WORD_HEADS.has(before!)))) return false;
+  // 单 ends a word of its own before 一 — 订单一成, 下单一成 — and then the 成 is a share again.
+  if (unit === '成' && (word === '万一' || (word === '一' && YI_WORD_HEADS.has(before!) && !(before === '单' && DAN_WORD_STARTS.has(chars[run.start - 2]!))))) return false;
   if (unit === '成' && !(CHENG_WORDS.has(after!) && own.at(-1) === '一')) return true;
   // A number in 万 or 亿 with its coefficient: 5万, 三万, 十万, 百万 — not 万一, 亿万读者, the adverb 千万, 十万火急, and not
   // the Book's own length, 「二十万字」 or 「十万余字」.
@@ -211,7 +220,7 @@ const fraction = (chars: ReadonlyArray<string>, at: number): boolean =>
   chars[at + 1] === '之' && (isDigit(chars[at + 2]) || SCORE_NUMERALS.has(chars[at + 2]!));
 
 /** Words that make a line about a score: a fraction over 5 in it is one (Issue #702 review). */
-const SCORE_CONTEXT = ['评分', '打分', '得分', '分数', '给分', '评价', '星级'];
+const SCORE_CONTEXT = ['评分', '打分', '得分', '分数', '给分', '评价', '星级', '高分', '低分'];
 /** The rescaled 5: a denominator only for a score in its context, never for 「前1/5」 or 「约4/5的读者」. */
 const RESCALED_FIVE = 5;
 
@@ -224,7 +233,7 @@ function scoreOverFive(chars: ReadonlyArray<string>, numerator: { end: number; w
   if (digitsValue(numerator.whole) > RESCALED_FIVE) return false;
   if (numerator.end > start + numerator.whole.length) return true;
   const next = chars[skipSpace(chars, denominatorEnd)];
-  return isTerminal(next) || next === '分' || next === '星' || context();
+  return isTerminal(next) || next === '分' || next === '星' || (next === '颗' && chars[skipSpace(chars, denominatorEnd) + 1] === '星') || context();
 }
 
 /** Whether 分 at `at`, after a run of digits, is a time: 「3分30秒」. */
