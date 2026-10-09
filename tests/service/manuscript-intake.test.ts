@@ -7,7 +7,7 @@ import { EditorialStore } from '../../src/service/store.js';
 import {
   MANUSCRIPT_INTAKE_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
-  CLARIFICATION_SCHEMA_VERSION, BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
+  CLARIFICATION_SCHEMA_VERSION, MATERIAL_INDEX_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import type { SourceFormat } from '../../src/shared/protocol.js';
 import { LOCAL_ONLY_DOC, localOnlyAvailable, localOnlyPath } from '../support/local-only-manuscripts.js';
@@ -414,6 +414,77 @@ describe('multi-format intake over the real store', () => {
       return null;
     }, (error: unknown) => error);
     expect([(opened as { code?: unknown } | null)?.code, opened instanceof Error ? opened.message : null]).toEqual(['SCHEMA_INVALID', '来源版本的格式与是否解析不一致。']);
+  }, 120_000);
+
+  /** Opens the store at the test's data root and returns its refusal as `[code, message]`, or `[null, null]` when it opened. */
+  async function openRefusal(): Promise<[unknown, string | null]> {
+    const opened = await EditorialStore.open(roots.dataRoot, roots.codeRoot).then((reopened) => {
+      reopened.close();
+      return null;
+    }, (error: unknown) => error);
+    return [(opened as { code?: unknown } | null)?.code ?? null, opened instanceof Error ? opened.message : null];
+  }
+
+  it('refuses at open a converted Source Version that no longer names its converter (Issue #583)', async () => {
+    const textPath = join(roots.inputRoot, '来源说明.txt');
+    await writeFile(textPath, '第一段说明。\n\n第二段说明。\n');
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect((await commitSourceOnlyNewBook(store, textPath, '来源材料 TXT')).format).toBe('TXT');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    // The working representation stays and its converter goes: the format still says the TXT was parsed, so the format
+    // check passes, but no Source Version the store writes holds one of the two conversion columns without the other.
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      database.exec("UPDATE source_versions SET converter_identity = NULL WHERE format = 'TXT'");
+    } finally {
+      database.close();
+    }
+    expect(await openRefusal()).toEqual(['SCHEMA_INVALID', '来源版本的转换记录不完整。']);
+  }, 120_000);
+
+  it('refuses at open an unparsed Source Version that names a converter without a working representation (Issue #583)', async () => {
+    const pdfPath = join(roots.inputRoot, '固定版式样例.pdf');
+    await writeFile(pdfPath, syntheticPdfBytes());
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect((await commitSourceOnlyNewBook(store, pdfPath, '来源材料 PDF')).format).toBe('PDF');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    // A converter named on a row with nothing converted: unparsed with no working object, so the format check passes,
+    // but the two conversion columns are set together or null together.
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      database.exec("UPDATE source_versions SET converter_identity = 'ai7.test-converter/1' WHERE format = 'PDF'");
+    } finally {
+      database.close();
+    }
+    expect(await openRefusal()).toEqual(['SCHEMA_INVALID', '来源版本的转换记录不完整。']);
+  }, 120_000);
+
+  it('refuses at open a DOCX Source Version given a working representation (Issue #583)', async () => {
+    await requireExactSample1(roots.codeRoot);
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect((await commitSourceOnlyNewBook(store, sample1Path(roots.codeRoot), '来源材料 DOCX')).format).toBe('DOCX');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    // Both conversion columns set, together, on a format the product reads natively: the DOCX is parsed either way, so
+    // the format check passes, but the store converts only TXT, MD and DOC.
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      database.exec("UPDATE source_versions SET working_object_digest = object_digest, converter_identity = 'ai7.test-converter/1' WHERE format = 'DOCX'");
+    } finally {
+      database.close();
+    }
+    expect(await openRefusal()).toEqual(['SCHEMA_INVALID', '来源版本的格式不能带有转换记录。']);
   }, 120_000);
 
   it('keeps refusing a hostile archive instead of retaining it', async () => {
@@ -965,7 +1036,7 @@ describe('schema revision 18 over the real store', () => {
     const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
       expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
-        .toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
+        .toBe(MATERIAL_INDEX_SCHEMA_VERSION);
       // Every row is the row it was: the parsed DOCX keeps its digests, its parser, and its format.
       expect(tableRows(after, 'source_versions', REVISION_17_SOURCE_VERSION_COLUMNS)).toEqual(sourceVersionsBefore);
       expect(tableRows(after, 'source_provenance', REVISION_17_PROVENANCE_COLUMNS)).toEqual(provenanceBefore);
@@ -1096,7 +1167,7 @@ describe('schema revision 19 over the real store', () => {
     const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
       expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
-        .toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
+        .toBe(MATERIAL_INDEX_SCHEMA_VERSION);
       // Every row is the row it was; a DOCX read natively gains two columns and fills neither.
       expect(tableRows(after, 'source_versions', REVISION_18_SOURCE_VERSION_COLUMNS)).toEqual(sourceVersionsBefore);
       expect(tableRows(after, 'import_drafts', `${REVISION_17_DRAFT_COLUMNS}, source_format`)).toEqual(draftsBefore);

@@ -417,9 +417,15 @@ export const WRITING_TASK_SCHEMA_VERSION = 65;
  * `background-analysis-enrollments.ts` and created before this version is stamped — each Book's Background Analysis Enrollment,
  * its versions and its states — and the Run Authorizations' origin widened to admit `background-analysis-enrollment`, rebuilt
  * exactly as revision 31 widened it, every row copied byte for byte. It follows revision 65 (Issue #432, S84a). No existing row
- * changes. This is the terminal version.
+ * changes.
  */
 export const BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION = 66;
+/**
+ * The 资料索引 revision (Issue #428, S80a; V2-UX-KB-009): two additive, append-only relations owned by `material-index.ts` and
+ * created before this version is stamped — each 资料库 item's Material Index build and the segments of a complete one. No
+ * existing row changes. It follows revision 66 (Issue #95, S39) and moves nothing of its relations. This is the terminal version.
+ */
+export const MATERIAL_INDEX_SCHEMA_VERSION = 67;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
@@ -1708,7 +1714,7 @@ function validateRevision16AnalysisLedgerSchema(db: DatabaseSync): void {
 
 export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
   const version = asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
-  requireTask(version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
+  requireTask(version === MATERIAL_INDEX_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
   validateJ03TaskAuthorizationSchema(db);
   validateAnalysisLedgerSchema(db);
 }
@@ -1984,7 +1990,7 @@ function migrateAnalysisLedgerToRevision17(db: DatabaseSync, from: typeof J04_BA
         db.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_delete`]!);
       }
       seedInitialPlanVersions(db);
-      db.exec(`PRAGMA user_version = ${BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${MATERIAL_INDEX_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
       db.exec('COMMIT');
@@ -2069,20 +2075,21 @@ function migrateAnalysisLedgerToRevision64(db: DatabaseSync): void {
 }
 
 /**
- * Revision 65 → 66 (Issue #95, S39). Revision 66 adds `background-analysis-enrollments.ts`'s relations, which `EditorialStore.open`
- * creates before this runs, and widens the Run Authorizations' origin, which `initializeTaskAuthorizationSchema` has just done:
- * only the version moves here.
- */
-function advanceToTerminalRevision(db: DatabaseSync): void {
-  migrateInTransaction(db, `PRAGMA user_version = ${BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION};`, 'Terminal version');
-}
-
-/**
  * Revision 64 → 65 (Issue #432, S84a): the three kind-coupled relations as revision 64 left them are rebuilt exactly as before,
  * for the writing kind; no existing row changes, and nothing else is touched.
  */
 function migrateAnalysisLedgerToRevision65(db: DatabaseSync): void {
   rebuildKindCoupledAnalysisRelations(db, 65);
+}
+
+/**
+ * Revision 66 → 67 (Issue #428, S80a), and revision 65 → 67 once revision 66 (Issue #95, S39) has widened the Run
+ * Authorizations' origin, which `initializeTaskAuthorizationSchema` has just done. Revision 66 adds
+ * `background-analysis-enrollments.ts`'s relations and revision 67 `material-index.ts`'s, both of which `EditorialStore.open`
+ * creates before this runs, and neither moves anything here: the ledger is already the terminal one, so only the version moves.
+ */
+function advanceToTerminalRevision(db: DatabaseSync): void {
+  migrateInTransaction(db, `PRAGMA user_version = ${MATERIAL_INDEX_SCHEMA_VERSION};`, 'Terminal version');
 }
 
 /**
@@ -2107,7 +2114,7 @@ function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24
                   mode, predecessor_revision_id, selected_start_position, selected_end_position
            FROM temp.migrate_analysis_task_intents ORDER BY migrate_rowid`);
       rebuildResultSetRelations(db);
-      db.exec(`PRAGMA user_version = ${BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${MATERIAL_INDEX_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
       db.exec('COMMIT');
@@ -2126,8 +2133,9 @@ function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24
 }
 
 /**
- * Forward-only. The newest stores are checked exactly and never widened: a revision-65 store is validated as the terminal
- * ledger; a revision-64 store is validated whole as revision 64 left the ledger and has the three kind-coupled relations
+ * Forward-only. The newest stores are checked exactly and never widened: a revision-67 store is validated as the terminal
+ * ledger; a revision-66 store carries it too and only has its version moved; a revision-65 store has its Run Authorizations'
+ * origin widened for revision 66 and its version moved; a revision-64 store is validated whole as revision 64 left the ledger and has the three kind-coupled relations
  * rebuilt for the writing kind; a revision-62 or revision-63 store is validated whole as revision 62 left the ledger and has
  * them rebuilt for the evaluation rewrite and writing kinds at once; a revision-59, revision-60 or revision-61 store is
  * validated whole as revision 59 left the ledger and has them rebuilt to the terminal shape. A store stamped 59 to 61 that
@@ -2169,10 +2177,18 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION || version === DATABASE_MERGE_SCHEMA_VERSION ||
       version === INITIAL_EVALUATION_SCHEMA_VERSION || version === DIALOGUE_SCHEMA_VERSION || version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       version === READERS_REPORT_SCHEMA_VERSION || version === CAPTURED_PROCEDURE_SCHEMA_VERSION || version === EVALUATION_REWRITE_SCHEMA_VERSION ||
-      version === WRITING_TASK_SCHEMA_VERSION || version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
+      version === WRITING_TASK_SCHEMA_VERSION || version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
+      version === MATERIAL_INDEX_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
-  if (version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (version === MATERIAL_INDEX_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION) {
+    // Revision 67 (Issue #428, S80a) adds no task-authorization or analysis relation, so a revision-66 store carries the terminal
+    // ledger: it is validated as exactly that, and nothing but the version moves.
+    validateJ03TaskAuthorizationSchema(db);
+    validateAnalysisLedgerSchema(db);
+    return advanceToTerminalRevision(db);
+  }
   if (version >= INITIAL_EVALUATION_SCHEMA_VERSION) {
     // A store at revision 59 to 65 is validated exactly as its revision left it first — its Run Authorizations in the text
     // revisions 31 to 65 carried, or already widened by an upgrade that stopped before its stamp (Issue #596) — and only then
@@ -2186,8 +2202,8 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
     else validateRevision59AnalysisLedgerSchema(db, asFound);
     widenAnalysisRelation(db, 'analysis_run_authorizations', [ANALYSIS_LEDGER_REVISION_65_SQL.analysis_run_authorizations],
       'authorization_id, task_intent_id, plan_envelope_sha256, origin, authority, authorized_at, canonical_json, sha256', 66);
-    // Revision 66 adds no other task-authorization or analysis relation: a revision-65 store's widened ledger is the terminal
-    // one, and only the version moves.
+    // Revisions 66 and 67 add no other task-authorization or analysis relation: a revision-65 store's widened ledger is the
+    // terminal one, and only the version moves — to 67.
     if (version === WRITING_TASK_SCHEMA_VERSION) return advanceToTerminalRevision(db);
     // A revision-64 store has revision 65's rebuild of the three kind-coupled relations left to make.
     if (version === EVALUATION_REWRITE_SCHEMA_VERSION) return migrateAnalysisLedgerToRevision65(db);
@@ -2272,7 +2288,7 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   }
   const analysisStatements = `${Object.values(ANALYSIS_LEDGER_SCHEMA_SQL).join(';\n')};
       ${Object.values(ANALYSIS_LEDGER_TRIGGER_SQL).join(';\n')};
-      PRAGMA user_version = ${BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION};`;
+      PRAGMA user_version = ${MATERIAL_INDEX_SCHEMA_VERSION};`;
   if (version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION) {
     validateJ03TaskAuthorizationSchema(db);
     return migrateInTransaction(db, analysisStatements, 'Analysis ledger');
