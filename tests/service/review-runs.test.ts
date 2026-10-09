@@ -30,7 +30,8 @@ import {
   SELECTION_TOO_LONG_REASON,
   SELECTION_UNAVAILABLE_REASON,
 } from '../../src/service/review/review-scope.js';
-import { selectionExcludedLine, selectionOutsideLine } from '../../src/service/review/review-runs.js';
+import { selectionExcludedLine, selectionOutsideLine, UNREAD_WALK_CUT_NOTE } from '../../src/service/review/review-runs.js';
+import { ANALYSIS_LEDGER_TRIGGER_SQL } from '../../src/service/task-authorization.js';
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
   DEFAULT_MANUSCRIPT_EXPORT_OPTIONS,
@@ -215,6 +216,12 @@ function appendToBlockAt(session: Session, book: Book, position: number, words: 
     windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: block.digest, expectedJournalSequence: window.journalSequence,
     fromGrapheme: target.graphemes, toGrapheme: target.graphemes, insertText: words,
   });
+}
+
+/** 选章 of the one chapter that starts at `position`. */
+function chapterScope(session: Session, book: Book, position: number): ReviewRunScopeRequest {
+  const chosen = workspace(session, book).scopeOptions.chapters.chapters.find((entry) => entry.position === position)!;
+  return { kind: 'chapters', fromChapterBlockId: chosen.blockId, toChapterBlockId: chosen.blockId };
 }
 
 function appendToFirstBlock(session: Session, book: Book): void {
@@ -792,6 +799,208 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(row()).toMatchObject({ state: 'current' });
       appendToFirstBlock(session, book);
       expect(workspace(session, book).categories.find((category) => category.categoryId === TYPOS)!.scopes.changed).toEqual({ available: true, unavailableReason: null });
+    });
+  }, 300_000);
+
+  it('measures 只审改动过的章 per chapter from the latest Run that read it: an edit a 选章 left unread is read, never carried as unchanged (Issue #709)', async () => {
+    await withBook('sample1-review-authored', async (session, book) => {
+      // sample1's eight chapters are its eight units: 1–15, 16–25, 26–43, 44–59, 60–68, 69–75, 76–92 and 93–97.
+      const chapter = (position: number): ReviewRunScopeRequest => {
+        const chosen = workspace(session, book).scopeOptions.chapters.chapters.find((entry) => entry.position === position)!;
+        return { kind: 'chapters', fromChapterBlockId: chosen.blockId, toChapterBlockId: chosen.blockId };
+      };
+      const row = () => workspace(session, book).coverage.find((entry) => entry.categoryId === TYPOS)!;
+      const changedScope = () => workspace(session, book).categories.find((category) => category.categoryId === TYPOS)!.scopes.changed;
+      const reusePlan = () => session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE)).update!.reusePlan!;
+      await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
+      // Chapter A (16–25) is edited inside, then a 选章 of chapter B (44–59) reads B and the chapter its context runs into.
+      appendToBlockAt(session, book, 20, '的的');
+      const chosen = prepare(session, book, [TYPOS], chapter(44));
+      expect(chosen.categories[0]!.plan).toMatchObject({ recomputed: 2, reused: 5, unreviewed: 1 });
+      expect(await authorizeAndDrive(session, book, chosen)).toMatchObject({ state: 'settled' });
+      // The 选章's revision is current, and still chapter A's edit was never read: the category needs reviewing, the edited
+      // block is counted, and 只审改动过的章 is offered for it.
+      expect(row()).toMatchObject({ state: 'needs-review', lastRunOrdinal: 2, changedBlocks: 1 });
+      expect(changedScope()).toEqual({ available: true, unavailableReason: null });
+      // Chapter C (76–92) is edited too: 只审改动过的章 reads A and C, and reuses every other chapter.
+      appendToBlockAt(session, book, 80, '的的');
+      expect(row()).toMatchObject({ state: 'needs-review', changedBlocks: 2 });
+      const synced = prepare(session, book, [TYPOS], CHANGED);
+      expect(synced.categories[0]).toMatchObject({ modeLabel: '只审改动过的章', plan: { recomputed: 2, reused: 6, unreviewed: 0 } });
+      expect(reusePlan().units.filter((unit) => unit.disposition === 'recomputed').map((unit) => [unit.startPosition, unit.reason]))
+        .toEqual([[16, 'no-compatible-predecessor'], [76, 'no-compatible-predecessor']]);
+      expect(await authorizeAndDrive(session, book, synced)).toMatchObject({ state: 'settled' });
+      expect(row()).toMatchObject({ state: 'current', lastRunOrdinal: 3, changedBlocks: 0 });
+      expect(changedScope().available).toBe(false);
+    });
+  }, 300_000);
+
+  it('finds the Run that last read an edited chapter however many 选章 left it unread since, and reads it with nothing edited after them (Issue #709)', async () => {
+    await withBook('sample1-review-authored', async (session, book) => {
+      const chapter = (position: number): ReviewRunScopeRequest => {
+        const chosen = workspace(session, book).scopeOptions.chapters.chapters.find((entry) => entry.position === position)!;
+        return { kind: 'chapters', fromChapterBlockId: chosen.blockId, toChapterBlockId: chosen.blockId };
+      };
+      const reusePlan = () => session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE)).update!.reusePlan!;
+      await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
+      appendToBlockAt(session, book, 20, '的的');
+      await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], chapter(44)));
+      await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], chapter(76)));
+      // The latest revision is current; 只审改动过的章 still reads chapter 16–25, whose edit the whole review is the last to have read.
+      expect(workspace(session, book).coverage.find((entry) => entry.categoryId === TYPOS)).toMatchObject({ state: 'needs-review', changedBlocks: 1 });
+      const synced = prepare(session, book, [TYPOS], CHANGED);
+      expect(synced.categories[0]!.plan).toMatchObject({ recomputed: 1, reused: 7, unreviewed: 0 });
+      expect(reusePlan().units.filter((unit) => unit.disposition === 'recomputed').map((unit) => unit.startPosition)).toEqual([16]);
+      expect(await authorizeAndDrive(session, book, synced)).toMatchObject({ state: 'settled' });
+      expect(workspace(session, book).coverage.find((entry) => entry.categoryId === TYPOS)).toMatchObject({ state: 'current', changedBlocks: 0 });
+    });
+  }, 300_000);
+
+  it('reads 需复审 for exactly what 只审改动过的章 reads again, and counts no read that failed or ran under another contract (#711 review P2-1)', async () => {
+    await withBook('sample1-review-authored', async (session, book) => {
+      const row = () => workspace(session, book).coverage.find((entry) => entry.categoryId === TYPOS)!;
+      const changedScope = () => workspace(session, book).categories.find((category) => category.categoryId === TYPOS)!.scopes.changed;
+      // A read that failed: edited before the category's first review, chapter 16–25 is not one the fixture answers, so 审阅全书
+      // leaves it a failed gap; a 选章 elsewhere then leaves it unread. No Run has read it, and nothing changed since: the
+      // matrix reads 当前 with no changed block, and 只审改动过的章 is not offered — the two never disagree.
+      appendToBlockAt(session, book, 20, '的的');
+      expect(await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE))).toMatchObject({ state: 'settled' });
+      expect(session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE)).resultSetRevision!.gaps
+        .map((gap) => [gap.startPosition, gap.code])).toEqual([[16, 'adapter-failure']]);
+      await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], chapterScope(session, book, 44)));
+      expect(row()).toMatchObject({ state: 'current', lastRunOrdinal: 2, changedBlocks: 0, unavailableReason: null });
+      expect(changedScope().available).toBe(false);
+      // Edited once more after that, it changed since the 全书 that failed it — measured past the failure, from where its place
+      // was last read with other words: both sides say so.
+      appendToBlockAt(session, book, 21, '的的');
+      expect(row()).toMatchObject({ state: 'needs-review', changedBlocks: 1 });
+      expect(changedScope()).toEqual({ available: true, unavailableReason: null });
+    });
+  }, 300_000);
+
+  it('counts no read made under another category contract: a 选章 after a new 规范文件 version leaves the rest unread, not changed (#711 review P2-1)', async () => {
+    await withBook('sample1-review-authored', async (session, book) => {
+      const row = () => workspace(session, book).coverage.find((entry) => entry.categoryId === TYPOS)!;
+      await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
+      const path = join(roots.inputRoot, '本社文字规范.txt');
+      await writeFile(path, ['本社文字规范', '', '1. 指出错字、别字、多字与漏字，给出改正后的文字。', '2. 指出成分残缺与搭配不当，给出通顺的改法。'].join('\n'));
+      const preview = await session.store.previewReviewGuidelineVersion('ai7-builtin/typos-and-usage', path);
+      session.store.importReviewGuidelineVersion(preview.previewId);
+      // The 选章 runs under the new contract: nothing the 全书 read under the old one is reused, so every other chapter is left
+      // unread — and none of them changed. The matrix reads 当前, and 只审改动过的章 is not offered.
+      const chosen = prepare(session, book, [TYPOS], chapterScope(session, book, 44));
+      expect(chosen.categories[0]!.plan).toMatchObject({ reused: 0, unreviewed: 6 });
+      await authorizeAndDrive(session, book, chosen);
+      expect(row()).toMatchObject({ state: 'current', lastRunOrdinal: 2, changedBlocks: 0 });
+      expect(workspace(session, book).categories.find((category) => category.categoryId === TYPOS)!.scopes.changed.available).toBe(false);
+    });
+  }, 300_000);
+
+  it('reads an edited chapter no Run has read, across a 选章: never-read chapters stay unreviewed only until they are edited (#711 review P3-2)', async () => {
+    await withBook('sample1-review-authored', async (session, book) => {
+      const row = () => workspace(session, book).coverage.find((entry) => entry.categoryId === TYPOS)!;
+      await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], chapterScope(session, book, 44)));
+      appendToBlockAt(session, book, 20, '的的');
+      await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], chapterScope(session, book, 76)));
+      expect(row()).toMatchObject({ state: 'needs-review', changedBlocks: 1 });
+      prepare(session, book, [TYPOS], CHANGED);
+      const plan = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE)).update!.reusePlan!;
+      expect(plan.units.filter((unit) => unit.disposition === 'recomputed').map((unit) => unit.startPosition)).toEqual([16]);
+      expect(plan.units.filter((unit) => unit.disposition === 'unreviewed').map((unit) => unit.startPosition)).toEqual([1, 26, 69]);
+    });
+  }, 300_000);
+
+  it('walks the chain once per latest revision, however often the 审阅 screen reads it, and shares that walk between plan, gate and matrix (#711 review P2-2)', async () => {
+    await withBook('sample1-review-authored', async (session, book) => {
+      const ledger = session.store.reviewCategoryLedger(reviewCategoryKindDefinition(TYPOS_AND_USAGE));
+      await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
+      appendToBlockAt(session, book, 20, '的的');
+      for (const position of [44, 76, 44, 76]) await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], chapterScope(session, book, position)));
+      const before = ledger.unreadWalksComputed;
+      // The first read after the last Run walks once — the plan's gate and the matrix both read that one walk ...
+      expect(workspace(session, book).coverage.find((entry) => entry.categoryId === TYPOS)).toMatchObject({ state: 'needs-review', changedBlocks: 1 });
+      expect(ledger.unreadWalksComputed - before).toBeLessThanOrEqual(1);
+      const walked = ledger.unreadWalksComputed;
+      // ... and the poll's reads walk no more.
+      for (let read = 0; read < 10; read += 1) workspace(session, book);
+      session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
+      expect(ledger.unreadWalksComputed).toBe(walked);
+      // A new revision is walked once more.
+      appendToBlockAt(session, book, 80, '的的');
+      await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], CHANGED));
+      for (let read = 0; read < 5; read += 1) workspace(session, book);
+      expect(ledger.unreadWalksComputed - walked).toBe(1);
+    });
+  }, 300_000);
+
+  it('stops the walk at an earlier record it cannot read and says so, keeps the category, and asks a plan that no longer derives to be prepared again (#711 review P3-3, P3-4)', async () => {
+    const first = await open('sample1-review-authored');
+    let book: Book;
+    let reviewRunId: string;
+    try {
+      book = await importBook(first);
+      await authorizeAndDrive(first, book, prepare(first, book, [TYPOS], WHOLE));
+      appendToBlockAt(first, book, 20, '的的');
+      await authorizeAndDrive(first, book, prepare(first, book, [TYPOS], chapterScope(first, book, 44)));
+      // 只审改动过的章 prepared after an edit at 80, not yet approved: it reads chapters 16–25 and 76–92 again.
+      appendToBlockAt(first, book, 80, '的的');
+      const synced = prepare(first, book, [TYPOS], CHANGED);
+      expect(synced.categories[0]!.plan).toMatchObject({ recomputed: 2, unreviewed: 0 });
+      reviewRunId = synced.reviewRunId;
+    } finally {
+      await close(first);
+    }
+    // The 全书's revision record is damaged beside the closed store: its coverage manifest no longer matches the digest it names.
+    const db = database();
+    try {
+      db.exec('DROP TRIGGER analysis_result_set_revisions_no_update');
+      expect(db.prepare(`UPDATE analysis_result_set_revisions SET coverage_manifest_sha256 = ? WHERE ordinal = 1 AND result_set_id IN (
+        SELECT result_set_id FROM analysis_result_sets WHERE kind = ?)`).run('f'.repeat(64), reviewCategoryKindDefinition(TYPOS_AND_USAGE).kind).changes).toBe(1);
+      db.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_result_set_revisions_no_update']!);
+    } finally {
+      db.close();
+    }
+    const second = await open('sample1-review-authored');
+    try {
+      const read = workspace(second, book!);
+      // The category stays on the screen; the walk stops at the record it cannot read, leaves what it had not settled
+      // unread, and the row says what could not be checked.
+      expect(read.categories.find((category) => category.categoryId === TYPOS)).toMatchObject({ available: true, unavailableReason: null });
+      expect(read.coverage.find((entry) => entry.categoryId === TYPOS)).toMatchObject({ state: 'needs-review', changedBlocks: 1, unavailableReason: UNREAD_WALK_CUT_NOTE });
+      // The plan prepared before no longer derives: it is never approved, and says to prepare again.
+      expect(second.store.inspectReviewCategory(book!.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE)).actions.canAuthorize).toBe(false);
+      const stale = workspace(second, book!, reviewRunId!).run!;
+      expect(storeMessage(() => second.store.authorizeReviewRun(book!.bookId, reviewRunId!, approvals(stale))))
+        .toBe('「错别字与规范用语」的计划已经变化；请重新准备这次审阅。');
+      // Prepared again, with nothing else moved, it is a new Task over the chain as it now reads — chapter 76–92 alone — and
+      // its plan can be approved.
+      const again = prepare(second, book!, [TYPOS], CHANGED);
+      expect(again.categories[0]!.taskIntentId).not.toBe(stale.categories[0]!.taskIntentId);
+      expect(again.categories[0]!.plan).toMatchObject({ recomputed: 1 });
+      expect(second.store.inspectReviewCategory(book!.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE)).actions.canAuthorize).toBe(true);
+    } finally {
+      await close(second);
+    }
+  }, 300_000);
+
+  it('leaves a chapter no Run has read unreviewed under 只审改动过的章, through any number of 选章 (Issue #709)', async () => {
+    await withBook('sample1-review-authored', async (session, book) => {
+      const chapter = (position: number): ReviewRunScopeRequest => {
+        const chosen = workspace(session, book).scopeOptions.chapters.chapters.find((entry) => entry.position === position)!;
+        return { kind: 'chapters', fromChapterBlockId: chosen.blockId, toChapterBlockId: chosen.blockId };
+      };
+      const row = () => workspace(session, book).coverage.find((entry) => entry.categoryId === TYPOS)!;
+      const reusePlan = () => session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE)).update!.reusePlan!;
+      // Two 选章, the first starting the category: 44–59 with 60–68, then 76–92 with 93–97. Chapters 1–43 and 69–75 were never read.
+      await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], chapter(44)));
+      await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], chapter(76)));
+      expect(row()).toMatchObject({ state: 'current', changedBlocks: 0 });
+      // An edit in a chapter a 选章 read: 只审改动过的章 reads that chapter alone and widens to no chapter nobody asked about.
+      appendToBlockAt(session, book, 80, '的的');
+      expect(row()).toMatchObject({ state: 'needs-review', changedBlocks: 1 });
+      const synced = prepare(session, book, [TYPOS], CHANGED);
+      expect(synced.categories[0]!.plan).toMatchObject({ recomputed: 1, reused: 3, unreviewed: 4 });
+      expect(reusePlan().units.filter((unit) => unit.disposition === 'unreviewed').map((unit) => unit.startPosition)).toEqual([1, 16, 26, 69]);
     });
   }, 300_000);
 

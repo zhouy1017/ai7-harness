@@ -83,6 +83,12 @@ export interface ReviewCategoryLedgerFacts {
   readonly selectionBase?: boolean;
   /** The latest revision's freshness is `stale`: the manuscript changed since it was read. */
   readonly stale: boolean;
+  /**
+   * The latest revision left unread a unit that changed since the category last read it (Issue #709): an edit made outside
+   * the chapters a 选章 Run chose, before it ran. 只审改动过的章 reads it, however current the latest revision is. Absent reads
+   * as none.
+   */
+  readonly unreadChanges?: boolean;
   /** Why `review-sync` is not offered, in the ledger's own words, when it is not. */
   readonly syncUnavailableReason: string | null;
   /** For the leads: whether the baseline analysis holds a revision to take them from. */
@@ -92,7 +98,8 @@ export interface ReviewCategoryLedgerFacts {
 /**
  * The mode each scope reads for one category (B6):
  * - 全书 is the category's first whole review, or a review again once it has one;
- * - 只审改动过的章 is a sync, offered once the category has reviewed and the manuscript moved since;
+ * - 只审改动过的章 is a sync, offered once the category has reviewed and the manuscript moved since — since the latest revision,
+ *   or, for a unit a 选章 left unread, since the latest revision that read it (Issue #709);
  * - 选章 is a first range review, or a range review once the category has one;
  * - 当前选区 reads as 选章 does, over the blocks the selection names (Issue #423, S77b) — never wider than the block range,
  *   save the overlap closure every range review reads.
@@ -121,7 +128,7 @@ export function reviewCategoryScopePlan(
   if (scope.kind === 'changed') {
     if (!(facts.reviewed ?? facts.hasRevision)) return { kind: 'refused', reason: NEVER_REVIEWED_REASON };
     if (facts.selectionBase === true) return { kind: 'refused', reason: SELECTION_BASE_REASON };
-    return facts.stale
+    return facts.stale || facts.unreadChanges === true
       ? { kind: 'task', mode: 'review-sync', selectedRange: null }
       : { kind: 'refused', reason: facts.syncUnavailableReason ?? NOTHING_CHANGED_REASON };
   }

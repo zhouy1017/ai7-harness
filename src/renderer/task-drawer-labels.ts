@@ -1,4 +1,5 @@
 import type {
+  RendererApi,
   RunBudgetCeilingState,
   TaskPlanKind,
   TaskPlanProjection,
@@ -408,20 +409,30 @@ export const TASK_BAR_REVIEW_OFFLINE = '离线：审阅要连到模型服务，�
 /** The same for every other kind that cannot wait (Issue #706): writing, 评估, 审稿意见 and 按评分重写. */
 export const TASK_BAR_OFFLINE_LATER = '离线：这份计划要连到模型服务，而这台设备现在没有网络；联网后再开始';
 
+/** A renderer operation that records a Run Authorization whose Run waits in Connectivity Wait. */
+export type StartWhenOnlineOperation = Extract<keyof RendererApi, `${string}WhenOnline`>;
+
 /**
- * Which kinds have a Connectivity Wait (Issue #706): 联网后开始任务 is the baseline analysis Task's own (Issue #502,
- * S74b) — the only kind the service records waiting. Every other kind, offline, shows 开始任务 disabled with why,
- * never a control that does nothing. A kind is listed here, so a new kind has to say which it is.
+ * The operation each kind's 联网后开始任务 records (Issue #706; #710 review P3-1), or `null` for a kind with no Connectivity
+ * Wait: 联网后开始任务 is the baseline analysis Task's own (Issue #502, S74b) — the only kind the service records waiting.
+ * The bar shows the control, and the drawer's click calls the operation, from this one map, so a kind can never be offered
+ * a control its click would drop. Every other kind, offline, shows 开始任务 disabled with why. A kind is listed here, so a
+ * new kind has to say which it is.
  */
-export const TASK_BAR_WAITS_FOR_CONNECTIVITY: Readonly<Record<TaskPlanKind, boolean>> = {
-  'fixed-task': false,
-  'baseline-analysis': true,
-  'review-run': false,
-  'initial-evaluation': false,
-  'readers-report': false,
-  'evaluation-rewrite': false,
-  writing: false,
+export const TASK_BAR_START_WHEN_ONLINE_OPERATIONS: Readonly<Record<TaskPlanKind, StartWhenOnlineOperation | null>> = {
+  'fixed-task': null,
+  'baseline-analysis': 'startBaselineAnalysisWhenOnline',
+  'review-run': null,
+  'initial-evaluation': null,
+  'readers-report': null,
+  'evaluation-rewrite': null,
+  writing: null,
 };
+
+/** Which kinds have a Connectivity Wait (Issue #706): those {@link TASK_BAR_START_WHEN_ONLINE_OPERATIONS} names an operation for. */
+export const TASK_BAR_WAITS_FOR_CONNECTIVITY: Readonly<Record<TaskPlanKind, boolean>> = Object.fromEntries(
+  (Object.keys(TASK_BAR_START_WHEN_ONLINE_OPERATIONS) as TaskPlanKind[]).map((kind) => [kind, TASK_BAR_START_WHEN_ONLINE_OPERATIONS[kind] !== null]),
+) as Record<TaskPlanKind, boolean>;
 
 /** Why a kind without a Connectivity Wait does not start while offline. */
 export function taskBarOfflineReason(kind: TaskPlanKind): string {

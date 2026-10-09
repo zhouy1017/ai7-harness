@@ -178,7 +178,11 @@ export function reusePlanRecord(plan: AnalysisReusePlanProjection | ReviewScopeP
  * `changed` means changed. A unit whose content key matches a predecessor unit that was itself left
  * unreviewed has not changed since the predecessor saw it; it was never reviewed, and `只审改动过的章`
  * leaves it that way rather than quietly widening to every chapter nobody has asked about yet. A unit
- * whose predecessor failed is still retried, exactly as the baseline retries a predecessor gap.
+ * whose predecessor failed is still retried, exactly as the baseline retries a predecessor gap. And
+ * `changed` is measured per unit from the latest revision that read it (Issue #709): a unit a range Run
+ * left unreviewed after its words changed — since an earlier Run read its place, or since they stood
+ * unread there — is read again, never carried as unchanged because the range Run saw it last
+ * (`changedUnreadUnitOrdinals`).
  *
  * Compatibility binds the frozen category contract, not only the contract version. Every category is
  * read under the one version `ai7.editorial-review/1`, and what a category's units were actually read
@@ -196,6 +200,15 @@ export interface ScopePlanPredecessor extends ReusePlanPredecessor {
   readonly schemaDigest: string;
   /** The predecessor units that were left unreviewed rather than lost: `out-of-scope` gaps. */
   readonly unreviewedUnitOrdinals: ReadonlyArray<number>;
+  /**
+   * Of {@link unreviewedUnitOrdinals}, the units left unreviewed although they changed since the category last read them
+   * (Issue #709): a range Run — 选章 or 当前选区 — leaves every unit outside its range unreviewed, the unit an edit outside the
+   * chosen chapters changed as well as the chapter nobody has asked about yet. `changed` is measured per unit from the latest
+   * revision that read it (`walkUnreadChanges`), so these are read again. A unit whose words no Run of the chain has read —
+   * a read that failed, or ran under another category contract, is no read — stays unreviewed until it is edited. Absent
+   * reads as none.
+   */
+  readonly changedUnreadUnitOrdinals?: ReadonlyArray<number>;
 }
 
 export interface ScopePlanInput {
@@ -230,12 +243,16 @@ export function deriveScopePlan(input: ScopePlanInput): ReviewScopePlanProjectio
   const closedByKey = new Map<string, number[]>();
   const failedKeys = new Set<string>();
   const unreviewedKeys = new Set<string>();
+  const changedUnreadKeys = new Set<string>();
   if (predecessor !== null) {
     const unreviewed = new Set(predecessor.unreviewedUnitOrdinals);
+    const changedUnread = new Set(predecessor.changedUnreadUnitOrdinals ?? []);
+    requireAnalysis([...changedUnread].every((ordinal) => unreviewed.has(ordinal)), 'ANALYSIS_RECORD_INVALID', '前一修订版的未读改动不在其未审单元之中。');
     const predecessorKeys = unitContentKeys(predecessor.manifest);
     predecessor.manifest.units.forEach((unit, index) => {
       const key = predecessorKeys[index]!;
       if (states.get(unit.ordinal) === 'closed') closedByKey.set(key, [...(closedByKey.get(key) ?? []), unit.ordinal]);
+      else if (changedUnread.has(unit.ordinal)) changedUnreadKeys.add(key);
       else if (unreviewed.has(unit.ordinal)) unreviewedKeys.add(key);
       else failedKeys.add(key);
     });
@@ -260,8 +277,9 @@ export function deriveScopePlan(input: ScopePlanInput): ReviewScopePlanProjectio
       return { ...base, disposition: 'reused', reason: 'compatible', reusedFrom: { revisionId: predecessor!.revisionId, revisionOrdinal: predecessor!.ordinal, unitOrdinal: candidate } };
     }
     // Outside a range, nothing without a reusable result is read. Under `changed`, neither is a unit
-    // the predecessor saw with this very content and left unreviewed: it has not changed.
-    if (rangeBound || (unreviewedKeys.has(contentKey) && !failedKeys.has(contentKey))) {
+    // the predecessor saw with this very content and left unreviewed: it has not changed — unless it
+    // changed since the category last read it, and only a range Run since left it unread (Issue #709).
+    if (rangeBound || (unreviewedKeys.has(contentKey) && !failedKeys.has(contentKey) && !changedUnreadKeys.has(contentKey))) {
       return { ...base, disposition: 'unreviewed', reason: 'out-of-scope', reusedFrom: null };
     }
     const reason: ReviewScopePlanUnitProjection['reason'] = !contractCompatible ? 'contract-version-mismatch'
