@@ -27,9 +27,10 @@ import { DEVELOPMENT_CREDENTIAL_SLOTS } from './provider-credential-slots.genera
  * be performed — carrier unresolvable, unsupported platform or architecture, a native-carrier
  * override, or a CI host — and never means the credential is missing; the missing case is `absent`,
  * exit 0. `unavailable` exits non-zero. The helper refuses to run under CI, refuses a native-carrier
- * override, and refuses any slot no provider document declares, so it cannot become a general
+ * override, and refuses any slot whose provider document fixes no development Credential Reference
+ * (the production connection's `deepseek-api-key` among them), so it cannot become a general
  * secret-writing tool: its slot list is generated from `config/providers/` (ADR 0073 §4), one slot per
- * configured provider, each under the development Credential Reference its document fixes.
+ * configured provider whose document fixes a development Credential Reference, each under that reference.
  *
  * The keyring service name below is deliberately duplicated from
  * `src/shared/protected-secret-identity.ts`: this file is plain ESM run by `node` directly, before
