@@ -18,6 +18,7 @@ import {
   TASK_BAR_REVIEW_OFFLINE,
   TASK_BAR_OFFLINE_LATER,
   TASK_BAR_WAITS_FOR_CONNECTIVITY,
+  TASK_BAR_START_WHEN_ONLINE_OPERATIONS,
   TASK_BAR_SAVE_DRAFT_ONLY,
   TASK_BAR_QUEUED_NOTE,
   TASK_BAR_QUEUED_STATUS,
@@ -469,6 +470,15 @@ describe('the authorization bar (S74a)', () => {
     expect(Object.keys(TASK_BAR_WAITS_FOR_CONNECTIVITY).sort()).toEqual([...TASK_PLAN_KINDS].sort());
     expect(TASK_PLAN_KINDS.filter((kind) => TASK_BAR_WAITS_FOR_CONNECTIVITY[kind])).toEqual(['baseline-analysis']);
     expect(Object.keys(IPC_CHANNELS).filter((channel) => /WhenOnline$/.test(channel))).toEqual(['startBaselineAnalysisWhenOnline']);
+    // The bar and the drawer's click read one map (#710 review P3-1): a kind waits exactly when it names an operation, and
+    // every operation named is one the service has.
+    expect(Object.keys(TASK_BAR_START_WHEN_ONLINE_OPERATIONS).sort()).toEqual([...TASK_PLAN_KINDS].sort());
+    for (const kind of TASK_PLAN_KINDS) {
+      const operation = TASK_BAR_START_WHEN_ONLINE_OPERATIONS[kind];
+      expect(TASK_BAR_WAITS_FOR_CONNECTIVITY[kind], kind).toBe(operation !== null);
+      if (operation !== null) expect(Object.keys(IPC_CHANNELS), kind).toContain(operation);
+    }
+    expect(TASK_BAR_START_WHEN_ONLINE_OPERATIONS['baseline-analysis']).toBe('startBaselineAnalysisWhenOnline');
     for (const kind of TASK_PLAN_KINDS) {
       const view = taskBarView(barOf({ readiness: 'offline' }, { kind, state: { key: 'offline', label: '离线' } }));
       if (TASK_BAR_WAITS_FOR_CONNECTIVITY[kind]) {
