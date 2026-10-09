@@ -22,6 +22,7 @@ import {
   type LibraryMaterialProjection,
   type LibraryMaterialsProjection,
   type LibraryMaterialSourceProjection,
+  type MaterialIndexProjection,
 } from '../shared/protocol.js';
 import { ensureCanonicalDataDirectory, inspectCanonicalDataFile } from '../shared/data-root.js';
 import { UUID_PATTERN, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
@@ -33,7 +34,8 @@ import { MANUSCRIPT_FORMAT_HEAD_BYTES, identifyManuscriptFormat } from './manusc
  * documents and web captures an editor collected. A chosen file arrives whole into the Agent Data Root, never read beyond the
  * window that identifies its format; the editor then decides where it belongs — one Book or the house — and its Learning
  * Eligibility. Nothing is inferred: both start undecided, a Task can list the item under 允许参考 only once both are decided,
- * and an item still waiting for either is an attention item in 等待你的决定. The five-layer index is built later (S80).
+ * and an item still waiting for either is an attention item in 等待你的决定. Its Material Index is `material-index.ts`'s
+ * (Issue #428, S80a), and each card carries it.
  *
  * Schema revision 46 owns two relations, ledgers like the others: each item's arrival record, and its decisions — one chain
  * per item, each decision chained by digest to the one before and the first to the arrival record, appended once and never
@@ -351,14 +353,84 @@ function standing(decisions: Iterable<StoredDecision>): Standing & { count: numb
   return { attribution, eligibility, eligibilityReset, count, last, recent };
 }
 
+/** What the Material Index reads of one kept original (Issue #428, S80a): where it is and what its arrival recorded. */
+export interface LibraryMaterialOriginal {
+  readonly materialId: string;
+  /** The arrival record's digest. */
+  readonly sha256: string;
+  readonly title: string;
+  readonly kind: LibraryMaterialKind;
+  readonly source: LibraryMaterialSourceProjection;
+  /** The original's key under `LIBRARY_OBJECT_DIRECTORY`. */
+  readonly objectKey: string;
+}
+
+/** Where an item belongs now, as 待我处理 names it: no attribution yet, one Book, or the house. */
+export interface LibraryMaterialPlace {
+  readonly title: string;
+  readonly kind: LibraryMaterialKind;
+  readonly scope: 'none' | 'book' | 'house';
+  readonly book: { readonly bookId: string; readonly title: string } | null;
+}
+
+/** The Material Index of an item as its card shows it; the store answers it, a ledger read alone says it waits. */
+export type LibraryMaterialIndexReader = (material: LibraryMaterialOriginal) => MaterialIndexProjection;
+
+const UNBUILT_INDEX: MaterialIndexProjection = {
+  state: 'queued', reason: null, builtAt: null, digest: null, metadata: null,
+  layers: { original: 'complete', metadata: 'pending', text: 'pending', recognition: 'not-needed', translation: 'pending', segments: 'pending', vectors: 'deferred' },
+};
+
 export class LibraryMaterialLedger {
   readonly #db: DatabaseSync;
   readonly #dataRoot: string;
   readonly #previews = new Map<string, Preview>();
+  readonly #indexOf: LibraryMaterialIndexReader;
 
-  constructor(db: DatabaseSync, dataRoot: string) {
+  constructor(db: DatabaseSync, dataRoot: string, indexOf: LibraryMaterialIndexReader = () => UNBUILT_INDEX) {
     this.#db = db;
     this.#dataRoot = dataRoot;
+    this.#indexOf = indexOf;
+  }
+
+  #original(material: StoredMaterial): LibraryMaterialOriginal {
+    return { materialId: material.materialId, sha256: material.sha256, title: material.title, kind: material.kind, source: material.source, objectKey: material.objectKey };
+  }
+
+  #row(materialId: string): StoredMaterial {
+    requireLibrary(UUID_PATTERN.test(materialId), 'LIBRARY_MATERIAL_INVALID', '资料标识无效。');
+    const row = this.#db.prepare('SELECT * FROM library_materials WHERE material_id = ?').get(materialId) as SqlRow | undefined;
+    requireLibrary(row !== undefined, 'LIBRARY_MATERIAL_NOT_FOUND', '资料库里没有这份资料。');
+    return this.#material(row);
+  }
+
+  /** One kept original as the Material Index reads it (Issue #428, S80a), verified as every read of the record is. */
+  original(materialId: string): LibraryMaterialOriginal {
+    return this.#original(this.#row(materialId));
+  }
+
+  /** Where an item belongs now (Issue #428, S80a): what 待我处理's 索引完成 names beside it. */
+  place(materialId: string): LibraryMaterialPlace {
+    const material = this.#row(materialId);
+    const now = standing(this.#decisions(material));
+    return {
+      title: material.title,
+      kind: material.kind,
+      scope: now.attribution === null ? 'none' : now.attribution.scope,
+      book: now.attribution?.scope === 'book' ? { bookId: now.attribution.bookId, title: this.#bookTitle(now.attribution.bookId) } : null,
+    };
+  }
+
+  /**
+   * Whether this Book's Tasks may list the item under 允许参考 (KB-007; Issue #428, S80a): attributed to this Book or to the
+   * house, with a Learning Eligibility decided under that attribution and not left for later. An item of another Book, or one
+   * still waiting for either decision, is not.
+   */
+  available(materialId: string, bookId: string): boolean {
+    const material = this.#row(materialId);
+    const now = standing(this.#decisions(material));
+    if (now.attribution === null || now.eligibility === null || now.eligibility.choice === 'deferred') return false;
+    return now.attribution.scope === 'house' || now.attribution.bookId === bookId;
   }
 
   /** Every item, oldest first, each verified: its digest and its record's agreement with its row. */
@@ -711,6 +783,7 @@ export class LibraryMaterialLedger {
       eligibilityReset: now.eligibilityReset,
       reference,
       decisionCount: now.count,
+      index: this.#indexOf(this.#original(material)),
       decisions: now.recent.map((entry): LibraryMaterialDecisionProjection => ({
         ordinal: entry.ordinal,
         recordedAt: entry.recordedAt,
