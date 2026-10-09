@@ -429,6 +429,16 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    // 归入范例 of one 审稿意见 (Issue #429): the Book, one of the two templates, the exact version seen, and the admissions seen.
+    case 'admitReadersReportExemplar': {
+      const input = requireInput(value.input, ['bookId', 'template', 'revisionDigest', 'expectedDecisions'], tentativeId);
+      if (!validUuid(input.bookId) || (input.template !== 'author' && input.template !== 'editorial') ||
+          !isBoundedString(input.revisionDigest, 64) || !HEX_DIGEST_PATTERN.test(input.revisionDigest) ||
+          !Number.isSafeInteger(input.expectedDecisions) || (input.expectedDecisions as number) < 0) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     case 'listBooks': {
       const input = requireInputWithOptional(value.input, ['after'], ['filter'], tentativeId);
       const after = input.after;

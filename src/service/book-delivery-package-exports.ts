@@ -21,15 +21,17 @@ import {
 } from '../shared/protocol.js';
 import { reportExportLabel } from '../shared/report-wording.js';
 import { DIGEST_PATTERN, UUID_PATTERN, canonicalRecord, isRecord, parseCanonicalJson, sha256Hex } from './analysis/canonical.js';
-import { BOOK_DELIVERY_PACKAGE_STATEMENT, BOOK_DELIVERY_PACKAGE_WORDS, type PackageVersionRecord } from './book-delivery-packages.js';
-import { ExportLedgerError, type ExportTargetInput, type ManuscriptExportStore, type PackageManifest } from './manuscript-export.js';
-import { productionDocumentType } from './production-document-types.js';
+import { BOOK_DELIVERY_PACKAGE_STATEMENT, BOOK_DELIVERY_PACKAGE_WORDS, evaluationRecordLabel, type PackageVersionRecord } from './book-delivery-packages.js';
+import type { FinalizedEvaluation } from './evaluation-records.js';
+import { ExportLedgerError, type ExportTargetInput, type ManuscriptExportStore, type PackageManifest, type PackageMemberKind } from './manuscript-export.js';
+import { documentTypeLabel, productionDocumentType, readersReportDocumentTypeId } from './production-document-types.js';
 
 /**
  * 图书交付包's export (Issue #416, plan slice S67b; V2-UX-BUNDLE-004, DPKG-011, DPKG-013, DPKG-014, EXP-010 to EXP-022). One
  * frozen package version is written into a folder the editor chooses: the Publication Version's revision, the delivered
- * version of every included Production Document and every review report, each as DOCX, and the package's own 交付包清单
- * in Markdown. Every file is an ordinary export of S64's ledger — its preparation, its approval and its receipt — so it is
+ * version of every included Production Document and every review report, each as DOCX, the 定稿 评估记录 the version pinned
+ * as Markdown written from the record's own finalized words (Issue #429), each 审稿意见 at the version pinned as DOCX, and the
+ * package's own 交付包清单 in Markdown. Every file is an ordinary export of S64's ledger — its preparation, its approval and its receipt — so it is
  * atomic on its own, receipted on its own, and never retried by itself. The package never changes: an export is linked to
  * the exact version it wrote, and a changed folder or a second export is a new export, never a new package version.
  *
@@ -161,9 +163,11 @@ const FILE_SCHEMA = 'ai7.book-delivery-package-export-file/1';
 const REVIEW_SCHEMA = 'ai7.book-delivery-package-export-review/1';
 const INVALID_FILE_NAME_CHARACTERS = /[\\/:*?"<>|\u0000-\u001F]/gu;
 
-/** What the package owner hands its export: a version's record, verified. */
+/** What the package owner hands its export: a version's record, verified; and the 定稿 评估记录 a version pinned (Issue #429). */
 export interface BookDeliveryPackageExportSources {
   record(bookId: string, packageVersionId: string): { record: PackageVersionRecord; digest: string } | null;
+  /** One exact 定稿 version of the Book's Evaluation Record, or `null` when it is not one. */
+  finalizedEvaluation?(bookId: string, recordId: string): FinalizedEvaluation | null;
 }
 
 /** One file of a version's export as the review planned it. */
@@ -390,15 +394,26 @@ export class BookDeliveryPackageExports {
 
   /**
    * One version's 交付包清单 (D2): what it holds, each document's Delivery Records, what it leaves out and why, in the words
-   * of the package itself. It is written from the version's record alone, so its words never change.
+   * of the package itself. It is written from the version's record alone, so its words never change. Or (Issue #429) the
+   * version's 评估记录 member: the 定稿 version it pinned, written from that version's finalized words, which never change
+   * either — a record whose finalized entry is no longer the one pinned is refused rather than written.
    */
-  manifest(bookId: string, packageVersionId: string): PackageManifest | null {
+  manifest(bookId: string, packageVersionId: string, member: PackageMemberKind = 'manifest'): PackageManifest | null {
     const found = this.#sources.record(bookId, packageVersionId);
     if (found === null) return null;
     const { record } = found;
     const { versionLabel, revisionId } = versionOf(record);
     const book = this.#db.prepare('SELECT title FROM books WHERE book_id = ?').get(bookId) as SqlRow | undefined;
     requirePackageExport(book !== undefined, 'BOOK_NOT_FOUND', '图书不存在。');
+    if (member === 'evaluation-record') {
+      const pinned = record.content.evaluation ?? null;
+      requirePackageExport(pinned !== null, 'BOOK_DELIVERY_PACKAGE_EXPORT_NOT_FOUND', '这一版交付包没有评估记录。');
+      const finalized = this.#sources.finalizedEvaluation?.(bookId, pinned.recordId) ?? null;
+      requirePackageExport(finalized !== null && finalized.entrySha256 === pinned.entrySha256 && finalized.ordinal === pinned.ordinal,
+        'BOOK_DELIVERY_PACKAGE_EXPORT_RECORD_INVALID', '交付包记下的定稿评估记录已不是这一版。');
+      const markdown = evaluationRecordMarkdown(text(book.title), finalized);
+      return { member, versionLabel, markdown, digest: sha256Hex(markdown), revisionId, fileLabel: evaluationRecordLabel(finalized.ordinal) };
+    }
     const lines: string[] = [
       `# ${text(book.title)} · 图书交付包 v${record.version}`,
       '',
@@ -431,6 +446,14 @@ export class BookDeliveryPackageExports {
     for (const report of record.content.reviewReports) {
       lines.push(`- ${reportExportLabel(this.#runLabel(report.reportId), report.version)}`);
     }
+    // The 定稿 评估记录 and each 审稿意见 the version pinned (Issue #429); a `/1` record names neither, and says so below.
+    const evaluation = record.content.evaluation ?? null;
+    const readersReports = record.content.readersReports ?? [];
+    if (evaluation !== null) lines.push(`- ${evaluationRecordLabel(evaluation.ordinal)}（定稿于 ${evaluation.finalizedAt}）`);
+    for (const report of readersReports) {
+      const pin = report.pin === 'designation' ? BOOK_DELIVERY_PACKAGE_WORDS.readersReportPinned : BOOK_DELIVERY_PACKAGE_WORDS.readersReportLater;
+      lines.push(`- ${documentTypeLabel(readersReportDocumentTypeId(report.template))} · 版本 ${report.version}（${pin}）`);
+    }
     if (deliveries.length > 0) lines.push('', '## 交付记录', ...deliveries);
     const notForThisBook = record.content.documents
       .filter((entry) => entry.disposition === 'not-for-this-book')
@@ -443,6 +466,11 @@ export class BookDeliveryPackageExports {
       `- ${BOOK_DELIVERY_PACKAGE_WORDS.libraryOriginals}`,
       `- ${BOOK_DELIVERY_PACKAGE_WORDS.intermediateRevisions}：${BOOK_DELIVERY_PACKAGE_WORDS.intermediateRevisionsDetail}`,
       ...(notForThisBook.length === 0 ? [] : [`- ${BOOK_DELIVERY_PACKAGE_WORDS.notForThisBook}：${notForThisBook.join('、')}`]),
+      // Only a `/2` version examined these two records (Issue #429); a `/1` version's frozen 说明 line already explains itself.
+      ...(record.content.schema === 'ai7.book-delivery-package-content/2' && evaluation === null
+        ? [`- ${BOOK_DELIVERY_PACKAGE_WORDS.evaluationRecord}：${BOOK_DELIVERY_PACKAGE_WORDS.evaluationMissing}`] : []),
+      ...(record.content.schema === 'ai7.book-delivery-package-content/2' && readersReports.length === 0
+        ? [`- ${BOOK_DELIVERY_PACKAGE_WORDS.readersReport}：${BOOK_DELIVERY_PACKAGE_WORDS.readersReportMissing}`] : []),
       '',
       '## 说明',
       '',
@@ -451,7 +479,7 @@ export class BookDeliveryPackageExports {
       '',
     );
     const markdown = lines.join('\n');
-    return { versionLabel, markdown, digest: sha256Hex(markdown), revisionId };
+    return { member: 'manifest', versionLabel, markdown, digest: sha256Hex(markdown), revisionId, fileLabel: BOOK_DELIVERY_PACKAGE_EXPORT_WORDS.manifest };
   }
 
   /** One version's label and the revision its 发稿版本 names, from its frozen record alone: an export's files read by it. */
@@ -482,6 +510,13 @@ export class BookDeliveryPackageExports {
       for (const report of record.content.reviewReports) {
         yield { key: `report:${report.reportId}`, target: { kind: 'report', reportId: report.reportId }, format: 'docx' };
       }
+      // The 定稿 评估记录 as the package owner's Markdown, and each 审稿意见 at its pinned version as a document's DOCX (Issue #429).
+      if (record.content.evaluation != null) {
+        yield { key: 'evaluation-record', target: { kind: 'package-manifest', packageVersionId, member: 'evaluation-record' }, format: 'markdown' };
+      }
+      for (const report of record.content.readersReports ?? []) {
+        yield { key: `readers-report:${report.template}`, target: { kind: 'document', documentId: report.documentId, revisionId: report.revisionId }, format: 'docx' };
+      }
       yield { key: 'manifest', target: { kind: 'package-manifest', packageVersionId }, format: 'markdown' };
     }
     const files: PlannedFile[] = [];
@@ -498,10 +533,16 @@ export class BookDeliveryPackageExports {
         requirePackageExport(frozen !== undefined && frozen.version === review.target.report.version, 'BOOK_DELIVERY_PACKAGE_EXPORT_CHANGED',
           '交付包记下的审阅报告已不是这一版，请重新查看导出。');
       }
+      // A 审稿意见 is written at the version the package pinned, by its digest: another version of it is another package.
+      if (item.key.startsWith('readers-report:')) {
+        const pinned = (record.content.readersReports ?? []).find((report) => `readers-report:${report.template}` === item.key);
+        requirePackageExport(pinned !== undefined && review.target.document?.documentId === pinned.documentId && review.target.revisionId === pinned.revisionId &&
+          review.technical.revisionDigest === pinned.revisionDigest, 'BOOK_DELIVERY_PACKAGE_EXPORT_CHANGED', '交付包记下的审稿意见已不是这一版，请重新查看导出。');
+      }
       files.push({
         key: item.key,
-        label: labelOf(review.target, item.key),
-        fileName: memberFileName(review.suggestedFileName, item.format === 'markdown' ? null : ordinal),
+        label: labelOf(review.target, item.key, record),
+        fileName: memberFileName(review.suggestedFileName, item.key === 'manifest' ? null : ordinal),
         format: item.format,
         restoration: review.restoration,
         restorationLine: review.restorationLine,
@@ -613,8 +654,9 @@ function versionOf(record: PackageVersionRecord): { versionLabel: string; revisi
 }
 
 /** What a file holds, in the editor's words, from the target its review resolved. */
-function labelOf(target: BookDeliveryPackageExportReviewTarget, key: string): string {
+function labelOf(target: BookDeliveryPackageExportReviewTarget, key: string, record: PackageVersionRecord): string {
   if (key === 'manifest') return BOOK_DELIVERY_PACKAGE_EXPORT_WORDS.manifest;
+  if (key === 'evaluation-record') return evaluationRecordLabel(record.content.evaluation?.ordinal ?? 0);
   if (target.report !== null) return reportExportLabel(target.report.runLabel, target.report.version);
   if (target.document !== null) return `${target.document.typeLabel} · ${target.document.versionLabel}`;
   return `稿件 · 发稿版本「${target.milestoneLabel ?? ''}」 · ${target.revisionLabel}`;
@@ -622,7 +664,73 @@ function labelOf(target: BookDeliveryPackageExportReviewTarget, key: string): st
 
 type BookDeliveryPackageExportReviewTarget = Awaited<ReturnType<ManuscriptExportStore['reviewPackageFile']>>['target'];
 
-/** Stable across pages without retaining the names of every earlier member. The sole Markdown manifest keeps its name. */
+const RISK_LEVEL_WORDS = { low: '低', medium: '中', high: '高' } as const;
+
+/** One score as the record shows it: a whole or half point, never a weight or a percentage (ADR 0076 §7). */
+function scoreWords(score: number): string {
+  return Number.isInteger(score) ? String(score) : score.toFixed(1);
+}
+
+/**
+ * The 定稿 评估记录 a package version pinned, as its Markdown member (Issue #429; BUNDLE-001): the version's finalized words —
+ * 满分 / 得分 and the comment of each item, or 不评 with its reason; the total; each risk's level and statement; what is still
+ * missing; the strengths, the weaknesses, the 总评 and the editor's conclusion — with the record's identity and the digest of
+ * the entry that finalized it. Nothing here is a weight or a percentage.
+ */
+export function evaluationRecordMarkdown(bookTitle: string, finalized: FinalizedEvaluation): string {
+  const { profile, content, total } = finalized;
+  const conclusion = profile.conclusions.find((entry) => entry.conclusion === content.conclusion)?.label ?? '未选';
+  const list = (lines: ReadonlyArray<string>, none: string): string[] => (lines.length === 0 ? [`- ${none}`] : lines.map((line) => `- ${line}`));
+  const lines: string[] = [
+    `# ${bookTitle} · ${evaluationRecordLabel(finalized.ordinal)}`,
+    '',
+    `- 评估方案：${profile.title} 第 ${profile.version} 版（${profile.issuer}）`,
+    `- 评估的稿件版本：${finalized.revisionLabel}`,
+    `- 定稿于：${finalized.finalizedAt}`,
+    `- 定稿记录摘要：${finalized.entrySha256}`,
+    '',
+    '## 评分',
+    '',
+    ...profile.items.map((item, index) => {
+      const own = content.items[index];
+      if (own === undefined || own.score === null) return `- ${item.label}：不评（${own?.notRated ?? '未说明原因'}）· 满分 ${item.fullMarks}`;
+      return `- ${item.label}：得分 ${scoreWords(own.score)} / 满分 ${item.fullMarks}${own.comment === null || own.comment === '' ? '' : `；评语：${own.comment}`}`;
+    }),
+    `- 总分：${scoreWords(total.score)} / ${total.fullMarks}${total.notRated > 0 ? `（${total.notRated} 项不评）` : ''}`,
+    '',
+    '## 风险项',
+    '',
+    ...profile.risks.map((risk, index) => {
+      const own = content.risks[index];
+      const level = own?.level == null ? '未评' : RISK_LEVEL_WORDS[own.level];
+      return `- ${risk.label}：${level}${own?.statement == null || own.statement === '' ? '' : `；${own.statement}`}`;
+    }),
+    '',
+    '## 就绪清单',
+    '',
+    ...list(content.readiness, '无'),
+    '',
+    '## 主要优点',
+    '',
+    ...list(content.strengths, '未填写'),
+    '',
+    '## 主要问题',
+    '',
+    ...list(content.weaknesses, '未填写'),
+    '',
+    '## 总评',
+    '',
+    content.verdict === null || content.verdict === '' ? '未填写' : content.verdict,
+    '',
+    '## 结论',
+    '',
+    conclusion,
+    '',
+  ];
+  return lines.join('\n');
+}
+
+/** Stable across pages without retaining the names of every earlier member. The sole 交付包清单 keeps its name. */
 function memberFileName(name: string, ordinal: number | null): string {
   const safe = name.normalize('NFC').replace(INVALID_FILE_NAME_CHARACTERS, '_');
   return ordinal === null ? safe : `${String(ordinal).padStart(3, '0')} ${safe}`;

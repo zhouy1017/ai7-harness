@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
@@ -16,7 +16,7 @@ import { WRITING_TASK_SCHEMA_SQL } from '../../src/service/writing-tasks.js';
 import { DIALOGUE_SCHEMA_SQL } from '../../src/service/dialogue/dialogue-ledger.js';
 import { SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL } from '../../src/service/series-exclusions.js';
 import type { ReadersReportContractInput } from '../../src/service/evaluation/readers-report-contract.js';
-import { EditorialStore, REVIEW_CATEGORY_CACHE_CAPACITY, StoreError } from '../../src/service/store.js';
+import { EditorialStore, REVIEW_CATEGORY_CACHE_CAPACITY, StoreError, boundedGraphemes } from '../../src/service/store.js';
 import {
   ANALYSIS_LEDGER_REVISION_29_SQL,
   ANALYSIS_LEDGER_REVISION_30_SQL,
@@ -126,6 +126,7 @@ async function draftReport(book: Book, template: 'author' | 'editorial'): Promis
 }
 
 const { schema: _schema, ...SECTIONS } = AUTHORED_SECTIONS;
+const ALL = { includeAnnotations: true, includeSuggestions: true } as const;
 
 /** The three revisions that carry the analysis ledger exactly as revision 59 left it, each with the relations it held. */
 const REVISIONS_BEFORE_62 = [INITIAL_EVALUATION_SCHEMA_VERSION, DIALOGUE_SCHEMA_VERSION, SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION] as const;
@@ -255,7 +256,8 @@ describe('审稿意见 over the real store on exact sample1', () => {
         recipient: { kind: 'editorial', custom: null }, note: null,
       }))).toBe('READERS_REPORT_NOT_DELIVERABLE:审稿意见草稿不能在这里交付；它只在稿件编辑面上修改并导出。');
       expect((await refusal(() => book.store.createReadersReportPreparationWork(book.bookId, 'author', launchPolicy))).startsWith('READERS_REPORT_DRAFT_EXISTS:')).toBe(true);
-      // Nor is a 审稿意见 type made 从来源材料 or marked 本书不做 in 交付物, and 图书交付包 names no condition of it (Issue #662 review).
+      // Nor is a 审稿意见 type made 从来源材料 or marked 本书不做 in 交付物, and 图书交付包 names no condition of it (Issue #662 review):
+      // since Issue #429 the package names the draft as a member — while the Book has no 发稿版本, at its latest version.
       for (const typeId of ['readers-report-author', 'readers-report-editorial']) {
         expect(await refusal(() => book.store.createProductionDocument({ bookId: book.bookId, typeId, sourceVersionId: randomUUID() })))
           .toBe('PRODUCTION_DOCUMENT_TYPE_INVALID:这个文档类型不在本社的类型配置中。');
@@ -263,8 +265,12 @@ describe('审稿意见 over the real store on exact sample1', () => {
           .toBe('PRODUCTION_DOCUMENT_TYPE_INVALID:这个文档类型不在本社的类型配置中。');
       }
       const bundle = book.store.inspectBookDeliveryPackage(book.bookId);
-      expect(JSON.stringify(bundle)).not.toContain('readers-report');
-      expect(JSON.stringify(bundle)).not.toContain(draft.document.documentId);
+      expect(bundle.conditions.map((condition) => condition.key)).toEqual(['publication', 'document', 'document', 'document', 'document', 'document', 'work-records']);
+      expect(bundle.content.included.filter((item) => item.kind === 'readers-report'))
+        .toEqual([{ kind: 'readers-report', label: '审稿意见 · 给作者的修改意见 · 版本 1', detail: '发稿版本设定后才起草，按准备时的最新一版' }]);
+      // Nor does 范例 admit it while the Book has no 发稿版本 in force.
+      expect(await refusal(() => book.store.admitReadersReportExemplar({ bookId: book.bookId, template: 'author', revisionDigest: draft.document.versions[0]!.revisionDigest, expectedDecisions: 0 })))
+        .toBe('EXEMPLAR_NEEDS_PUBLICATION:这本书没有在用的发稿版本，审稿意见还不能归入范例。');
 
       // Edited on the manuscript surface and 保存为版本: 版本 2.
       const first = window.blocks[2]!;
@@ -294,6 +300,164 @@ describe('审稿意见 over the real store on exact sample1', () => {
       await parseDocx(destination, 'written.docx', (block) => written.push(block));
       const after = book.store.getManuscriptWindow(draft.document.documentId, draft.document.branchId, null);
       expect(written.map((block) => block.digest)).toEqual(after.blocks.map((block) => block.digest));
+    });
+  }, 300_000);
+
+  it('joins the 图书交付包 at 设为发稿版本时的最新一版 beside the 定稿 评估记录, exports both with receipts, and is admitted into 范例 under 仅本社 (Issue #429)', async () => {
+    await withBook(async (book) => {
+      const { bookId } = book;
+      await runInitialEvaluationToEnd(book.store, book.owner, bookId, launchPolicy);
+      const finalized = finalizeAsJ11(book.store, bookId);
+      await draftReport(book, 'author');
+      const settled = book.store.inspectReadersReport(bookId)!;
+      const draft = book.store.createReadersReportDraft(bookId, settled.resultSetRevision!.revisionId).readersReport.templates[0]!.draft!.document;
+      const save = async (text: string) => {
+        const window = book.store.getManuscriptWindow(draft.documentId, draft.branchId, null);
+        const first = window.blocks[2]!;
+        book.store.flushJournalEdit({
+          clientEditId: randomUUID(), manuscriptId: draft.documentId, branchId: draft.branchId, baseRevisionId: window.revisionId,
+          blockId: first.blockId, windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: first.digest,
+          expectedJournalSequence: window.journalSequence, fromGrapheme: 0, toGrapheme: 0, insertText: text,
+        });
+        return (await book.store.saveProductionDocumentVersion({ bookId, documentId: draft.documentId, branchId: draft.branchId })).document!.versions[0]!;
+      };
+      // 版本 2 saved before the designation, 版本 3 after it: the package and 范例 pin 版本 2, 设为发稿版本时的最新一版.
+      const version2 = await save('（发稿前）');
+      const milestone = await book.store.saveMilestone(book.manuscriptId, book.branchId, '三审稿', 'stage-archive', null, '');
+      book.store.designatePublicationVersion({ bookId, milestoneId: milestone.milestoneId, scope: '纸质版首印', basis: '三审通过' });
+      const version3 = await save('（发稿后）');
+      expect([version2.label, version3.label]).toEqual(['版本 2', '版本 3']);
+      for (const typeId of ['news-release', 'promotion-article', 'review-article', 'launch-materials', 'marketing-points']) {
+        book.store.decideProductionDocumentType({ bookId, typeId, notForThisBook: true });
+      }
+      const bundle = book.store.inspectBookDeliveryPackage(bookId);
+      expect([bundle.ready, bundle.unmet]).toEqual([true, []]);
+      expect(bundle.content.included.filter((item) => item.kind !== 'publication')).toEqual([
+        { kind: 'evaluation-record', label: '评估记录 · 第 2 版定稿', detail: `评估方案「${finalized.profile.title}」 第 ${finalized.profile.version} 版 · 定稿于 ${finalized.finalized!.at}` },
+        { kind: 'readers-report', label: '审稿意见 · 给作者的修改意见 · 版本 2', detail: '设为发稿版本时的最新一版' },
+      ]);
+      expect(bundle.content.excluded.map((item) => item.kind)).not.toContain('evaluation-record');
+      expect(bundle.content.excluded.map((item) => item.kind)).not.toContain('readers-report');
+      expect(bundle.content.limitations).toEqual(['审稿意见 · 给作者的修改意见：设为发稿版本后又有修改，本包按设为发稿版本时的最新一版（版本 2）。']);
+      const prepared = book.store.prepareBookDeliveryPackage({ bookId, purpose: '交出版社存档', expectedContentDigest: bundle.content.digest });
+      const version = prepared.package.versions[0]!;
+      expect(version.summary).toBe(`${bundle.content.included[0]!.label} · 生产文档 0 份 · 本书不做 5 类 · 审阅报告 0 份 · 评估记录 1 份 · 审稿意见 1 份`);
+      // A later save moves nothing: the member is pinned, and the package reads as it did.
+      await save('（再改）');
+      expect(book.store.inspectBookDeliveryPackage(bookId)).toMatchObject({ changedSinceLatest: false, content: { digest: bundle.content.digest } });
+
+      // The export writes the 定稿 评估记录 from its own finalized words and the 审稿意见 at 版本 2, each with its receipt.
+      const review = await book.store.reviewBookDeliveryPackageExport({ bookId, packageVersionId: version.packageVersionId, options: ALL }, true);
+      expect(review.files.map((file) => [file.key, file.label, file.format, file.fileName])).toEqual([
+        ['publication', `稿件 · ${bundle.content.included[0]!.label}`, 'docx', '001 审稿意见之书 · 三审稿.docx'],
+        ['evaluation-record', '评估记录 · 第 2 版定稿', 'markdown', '002 审稿意见之书 · 评估记录 · 第 2 版定稿.md'],
+        ['readers-report:author', '审稿意见 · 给作者的修改意见 · 版本 2', 'docx', '003 审稿意见之书 · 审稿意见 · 给作者的修改意见 · 版本 2.docx'],
+        ['manifest', '交付包清单', 'markdown', '交付包清单.md'],
+      ]);
+      expect(review.files[1]).toMatchObject({ fidelity: [], degraded: false, restorationLine: '评估记录按这一版交付包记下的定稿版本写出。' });
+      const folder = join(roots.inputRoot, '交付包导出');
+      await mkdir(folder, { recursive: true });
+      const chosen = await book.store.prepareBookDeliveryPackageExport({
+        bookId, packageVersionId: version.packageVersionId, options: ALL, memberKeys: review.files.map((file) => file.key), reviewDigest: review.reviewDigest, folder,
+      }, true);
+      const exported = await book.store.approveBookDeliveryPackageExport({ bookId, exportId: chosen.exportId }, true);
+      expect([exported.export.state, exported.export.summary]).toEqual(['exported', '已导出到所选位置 · 4 个文件']);
+      expect(exported.export.files.map((file) => [file.key, file.outcome])).toEqual([
+        ['publication', 'created'], ['evaluation-record', 'created'], ['readers-report:author', 'created'], ['manifest', 'created'],
+      ]);
+      const record = await readFile(join(folder, review.files[1]!.fileName), 'utf8');
+      expect(record.split('\n').slice(0, 8)).toEqual([
+        '# 审稿意见之书 · 评估记录 · 第 2 版定稿', '',
+        `- 评估方案：${finalized.profile.title} 第 ${finalized.profile.version} 版（${finalized.profile.issuer}）`,
+        '- 评估的稿件版本：r1', `- 定稿于：${finalized.finalized!.at}`, expect.stringMatching(/^- 定稿记录摘要：[0-9a-f]{64}$/u), '', '## 评分',
+      ]);
+      expect(record).toContain('- 总分：71 / 100\n');
+      expect(record).toContain('## 结论\n\n修改后再议');
+      expect(record).not.toMatch(/%|权重|百分/u);
+      const written: ParsedDocxBlock[] = [];
+      await parseDocx(join(folder, review.files[2]!.fileName), 'written.docx', (block) => written.push(block));
+      const words = written.map((block) => block.text).join('\n');
+      expect(words).toContain('（发稿前）');
+      expect(words).not.toContain('（发稿后）');
+      const manifest = await readFile(join(folder, '交付包清单.md'), 'utf8');
+      expect(manifest).toContain(`- 评估记录 · 第 2 版定稿（定稿于 ${finalized.finalized!.at}）`);
+      expect(manifest).toContain('- 审稿意见 · 给作者的修改意见 · 版本 2（设为发稿版本时的最新一版）');
+      expect(manifest).not.toContain('本书没有');
+
+      // 范例 offers the same version under 仅本社, and only the editor admits it — at exactly that version, once.
+      const offered = book.store.inspectExemplars(null).books[0]!;
+      expect(offered.bookId).toBe(bookId);
+      expect(offered.readersReports).toEqual([{
+        template: 'author', typeId: 'readers-report-author', typeLabel: '审稿意见 · 给作者的修改意见', documentId: draft.documentId, version: 2,
+        revisionId: version2.revisionId, revisionDigest: version2.revisionDigest, savedAt: version2.createdAt, pin: 'designation', eligibility: 'house-only',
+        admission: { state: 'offered', admittedAt: null, decisions: 0 },
+      }]);
+      const admit = (template: 'author' | 'editorial', revisionDigest: string, expectedDecisions: number) =>
+        book.store.admitReadersReportExemplar({ bookId, template, revisionDigest, expectedDecisions });
+      expect(await refusal(() => admit('editorial', version2.revisionDigest, 0))).toBe('EXEMPLAR_READERS_REPORT_NOT_FOUND:这本书没有这一模板的审稿意见。');
+      expect(await refusal(() => admit('author', version3.revisionDigest, 0))).toBe('EXEMPLAR_READERS_REPORT_CHANGED:要归入的审稿意见已不是现在的这一版；请看过现在的再定。');
+      expect(await refusal(() => admit('author', version2.revisionDigest, 1))).toBe('LEARNING_ELIGIBILITY_MOVED:这条材料的学习准入刚被改过；请看过现在的决定再定。');
+      // Its own draft takes no 范例: before the admission the plan says so, and after it a Book's own 审稿意见 never seeds itself.
+      expect(book.store.inspectEvaluation(bookId, null).readersReport.exemplars).toEqual({ count: 0, statement: READERS_REPORT_NO_EXEMPLAR });
+      const admitted = admit('author', version2.revisionDigest, 0);
+      expect(admitted.readersReports[0]!.admission).toMatchObject({ state: 'admitted', decisions: 1 });
+      expect(admitted.readersReports[0]!.admission.admittedAt).not.toBeNull();
+      expect(book.store.inspectExemplars(null).books[0]!.readersReports).toEqual(admitted.readersReports);
+      expect(await refusal(() => admit('author', version2.revisionDigest, 1))).toBe('LEARNING_ELIGIBILITY_UNCHANGED:学习准入没有变化。');
+      expect(book.store.inspectEvaluation(bookId, null).readersReport.exemplars).toEqual({ count: 0, statement: READERS_REPORT_NO_EXEMPLAR });
+      // Another Book's 审稿意见 would now draft with it as its one 范例.
+      const other = await importSample1Book(book.store, roots.codeRoot, '另一本书');
+      expect(book.store.inspectEvaluation(other.bookId, null).readersReport.exemplars)
+        .toEqual({ count: 1, statement: '参考本社 1 份审稿意见范例：《审稿意见之书 · 审稿意见 · 给作者的修改意见》' });
+      // Another 发稿版本 moves the pin to the version latest at the new designation (版本 4, 再改): the admission of 版本 2 reads
+      // 这一版尚未归入, and the other Book takes no 范例 from a version the editor never admitted.
+      const again = await book.store.saveMilestone(book.manuscriptId, book.branchId, '付印稿', 'stage-archive', null, '');
+      book.store.designatePublicationVersion({ bookId, milestoneId: again.milestoneId, scope: '纸质版首印', basis: '付印' });
+      const latestVersion = book.store.inspectEvaluation(bookId, null).readersReport.templates[0]!.draft!.document.versions[0]!;
+      expect(latestVersion.label).toBe('版本 4');
+      expect(book.store.inspectExemplars(null).books[0]!.readersReports[0]).toMatchObject({
+        version: 4, revisionDigest: latestVersion.revisionDigest, pin: 'designation', admission: { state: 'superseded', admittedAt: null, decisions: 1 },
+      });
+      expect(book.store.inspectEvaluation(other.bookId, null).readersReport.exemplars).toEqual({ count: 0, statement: READERS_REPORT_NO_EXEMPLAR });
+    });
+  }, 300_000);
+
+  it('seeds a draft with at most two admitted 审稿意见, by Book title, each its opening past the contract\'s bound (Issue #429)', async () => {
+    await withBook(async (book) => {
+      // Three Books drafted first — before any admission, so each contract asks the fixture the same question — then each
+      // designated and admitted; the fourth reads exactly two 范例 in `b.title COLLATE BINARY` order: 丙 (U+4E19), 乙 (U+4E59), never 审 (U+5BA1).
+      const drafted: Array<Book & { revisionDigest: string }> = [];
+      for (const title of [null, '丙书', '乙书']) {
+        let current: Book = book;
+        if (title !== null) {
+          const imported = await importSample1Book(book.store, roots.codeRoot, title);
+          await pinEditorialWorkspaceProfileRevision2(book.store, imported.bookId);
+          current = { ...book, bookId: imported.bookId, manuscriptId: imported.manuscriptId, branchId: imported.branchId };
+        }
+        await runInitialEvaluationToEnd(book.store, book.owner, current.bookId, launchPolicy);
+        finalizeAsJ11(book.store, current.bookId);
+        await draftReport(current, 'author');
+        const settled = book.store.inspectReadersReport(current.bookId)!;
+        const draft = book.store.createReadersReportDraft(current.bookId, settled.resultSetRevision!.revisionId).readersReport.templates[0]!.draft!.document;
+        drafted.push({ ...current, revisionDigest: draft.versions[0]!.revisionDigest });
+      }
+      for (const entry of drafted) {
+        const milestone = await book.store.saveMilestone(entry.manuscriptId, entry.branchId, '三审稿', 'stage-archive', null, '');
+        book.store.designatePublicationVersion({ bookId: entry.bookId, milestoneId: milestone.milestoneId, scope: '纸质版首印', basis: '三审通过' });
+        expect(book.store.admitReadersReportExemplar({ bookId: entry.bookId, template: 'author', revisionDigest: entry.revisionDigest, expectedDecisions: 0 })
+          .readersReports[0]!.admission.state).toBe('admitted');
+      }
+      const fourth = await importSample1Book(book.store, roots.codeRoot, '丁书');
+      expect(book.store.inspectEvaluation(fourth.bookId, null).readersReport.exemplars).toEqual({
+        count: 2, statement: '参考本社 2 份审稿意见范例：《丙书 · 审稿意见 · 给作者的修改意见》、《乙书 · 审稿意见 · 给作者的修改意见》',
+      });
+      // Each admitting Book still takes none of its own, and the two the fourth takes are the other two Books' when it is 审稿意见之书.
+      expect(book.store.inspectEvaluation(book.bookId, null).readersReport.exemplars).toEqual({
+        count: 2, statement: '参考本社 2 份审稿意见范例：《丙书 · 审稿意见 · 给作者的修改意见》、《乙书 · 审稿意见 · 给作者的修改意见》',
+      });
+      // The opening a 范例 hands the contract: whole graphemes, never a split combining mark, cut at the bound.
+      expect(boundedGraphemes(`${'a\u0301'.repeat(3)}bcd`, 4)).toBe(`${'a\u0301'.repeat(3)}b`);
+      expect(boundedGraphemes('短', 4_000)).toBe('短');
     });
   }, 300_000);
 

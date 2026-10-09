@@ -966,6 +966,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'document-changed-since-delivery',
     'document-redeliver',
     // Issue #416 (S67a): 图书交付包 — its conditions and routes, what it holds, v1, an unchanged repeat and v2.
+    // Issue #429: a 定稿 评估记录 made through 评估's operations, so the package has one to name.
+    'package-evaluation',
     'package-conditions',
     'package-not-for-this-book',
     'package-prepare',

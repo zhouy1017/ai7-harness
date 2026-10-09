@@ -74,6 +74,9 @@ import type {
   AnalysisFeedbackProjection,
   RecordAnalysisFeedbackInput,
   ExemplarsProjection,
+  ExemplarBookProjection,
+  ReadersReportExemplarProjection,
+  AdmitReadersReportExemplarInput,
   KnowledgeProceduresProjection,
   ReviewGuidelinesPage,
   AppendMaintenanceCaseRevisionInput,
@@ -316,7 +319,13 @@ import {
   type StoredEvaluationRewriteDecision,
   type StoredEvaluationRewriteTask,
 } from './evaluation-rewrites.js';
-import { readersReportExemplarLine, type ReadersReportContractInput } from './evaluation/readers-report-contract.js';
+import {
+  MAX_EXEMPLAR_GRAPHEMES,
+  MAX_READERS_REPORT_EXEMPLARS,
+  readersReportExemplarLine,
+  type ReadersReportContractInput,
+  type ReadersReportExemplarInput,
+} from './evaluation/readers-report-contract.js';
 import {
   READERS_REPORT_NEEDS_FINALIZED,
   ReadersReportError,
@@ -546,7 +555,13 @@ import {
 import { initializeClarificationSchema } from './analysis/clarifications.js';
 import { initializeReimportGroupSchema } from './reimport-group-ledger.js';
 import { initializeProductionDocumentDeliverySchema, initializeProductionDocumentSchema } from './production-document-ledger.js';
-import { BookDeliveryPackageError, BookDeliveryPackages, initializeBookDeliveryPackageSchema } from './book-delivery-packages.js';
+import {
+  BOOK_DELIVERY_PACKAGE_WORDS,
+  BookDeliveryPackageError,
+  BookDeliveryPackages,
+  initializeBookDeliveryPackageSchema,
+  type PackageReadersReportReading,
+} from './book-delivery-packages.js';
 import { MaintenanceCaseError, MaintenanceCases, initializeMaintenanceCaseSchema } from './maintenance-cases.js';
 import { BookPeople, BookPeopleError, initializeBookPeopleSchema } from './book-people.js';
 import { ReviewGuidelineError, ReviewGuidelineLedger, initializeReviewGuidelineSchema, readGuidelineFile } from './review-guidelines.js';
@@ -739,7 +754,7 @@ import {
   type StoredProvenance,
   type StoredRevision,
 } from './series-knowledge.js';
-import { readExemplars } from './exemplars.js';
+import { readExemplarBook, readExemplars, type ExemplarSources } from './exemplars.js';
 import { readKnowledgeProcedures } from './knowledge-procedures.js';
 import {
   CapturedProcedureError,
@@ -1549,6 +1564,21 @@ function asString(value: SQLOutputValue | undefined, code = 'STORE_CORRUPT'): st
 function asNumber(value: SQLOutputValue | undefined, code = 'STORE_CORRUPT'): number {
   requireStore(typeof value === 'number' && Number.isSafeInteger(value), code, '持久化数字无效。');
   return value;
+}
+
+/** The material key of one template's 审稿意见 offered into 范例 (Issue #429), on the Learning Eligibility ledger of S26b. */
+const READERS_REPORT_EXEMPLAR_KEY_PREFIX = 'readers-report-exemplar:';
+
+/** The opening of `value` within `max` graphemes (Issue #429): what a 审稿意见 范例 hands a contract when it is longer than the contract takes. */
+export function boundedGraphemes(value: string, max: number): string {
+  let count = 0;
+  let opening = '';
+  for (const { segment } of new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(value)) {
+    if (count === max) break;
+    opening += segment;
+    count += 1;
+  }
+  return opening;
 }
 
 function safeTitle(input: string): string {
@@ -3422,6 +3452,12 @@ interface StoreControl {
    * are recorded, or just after, before the upgrade's note is cleared. The service entry never sets it.
    */
   interruptUpgradeAt?: 'before-record' | 'after-record';
+  /**
+   * The suites record a new writing Task under these copy rules (#707): `1` composes its contract, its plan and its row as the
+   * software before #698 did — a row naming no rules — so a genuine `/1` Task is driven through the store's authorize, run and
+   * parse wiring. The service entry never sets it; absent, every Task is `/2`.
+   */
+  writingCopyRules?: WritingCopyRules;
 }
 
 function continuationNotice(access: OriginalFileAccessProjection): string {
@@ -4365,7 +4401,7 @@ export class EditorialStore {
       dataRoot,
       checkpointOwner: boundedAuthority,
       // A package export's 交付包清单 (Issue #416, S67b), written by the package's export from the version's own record.
-      packageManifest: (bookId, packageVersionId) => this.#packageExports.manifest(bookId, packageVersionId),
+      packageManifest: (bookId, packageVersionId, member) => this.#packageExports.manifest(bookId, packageVersionId, member),
       packageVersion: (bookId, packageVersionId) => this.#packageExports.version(bookId, packageVersionId),
     });
     // 交付物 lists a Book's approved exports beside its 发稿 (Issue #413), read from the export ledger. Its Production
@@ -4405,10 +4441,27 @@ export class EditorialStore {
       documents: (bookId) => this.#productionDocuments.packageReadings(bookId),
       reviewRuns: (bookId) => this.#reviewRuns.packageReadings(bookId),
       exportHistory: (bookId, packageVersionId) => this.#packageExports.history(bookId, packageVersionId),
+      // The Book's latest 定稿 评估记录 and its 审稿意见 at the version 设为发稿版本时的最新一版 (Issue #429; BUNDLE-001). Versions that
+      // cannot be read leave the package without an 评估记录 and say so, rather than fail the whole read.
+      evaluation: (bookId) => {
+        try {
+          const finalized = this.#evaluations.latestFinalized(bookId);
+          return finalized === null ? null : {
+            kind: 'finalized', recordId: finalized.recordId, ordinal: finalized.ordinal, entrySha256: finalized.entrySha256,
+            finalizedAt: finalized.finalizedAt, profileTitle: finalized.profile.title, profileVersion: finalized.profile.version,
+          };
+        } catch (error) {
+          if (error instanceof EvaluationError) return { kind: 'unreadable', reason: error.message };
+          throw error;
+        }
+      },
+      readersReports: (bookId, designatedAt) => this.#readersReportPins(bookId, designatedAt),
     });
-    // Its export (Issue #416, S67b) writes each file through the export ledger and links them to the exact version.
+    // Its export (Issue #416, S67b) writes each file through the export ledger and links them to the exact version; the 评估记录
+    // member (Issue #429) is written from the 定稿 version the package pinned.
     this.#packageExports = new BookDeliveryPackageExports(authority, this.#manuscriptExport, {
       record: (bookId, packageVersionId) => this.#bookDeliveryPackages.record(bookId, packageVersionId),
+      finalizedEvaluation: (bookId, recordId) => this.#evaluationCall(() => this.#evaluations.finalizedOf(bookId, recordId)),
     });
     this.#proposalConflicts = new ProposalConflictStore(authority, this.#editorialMarks);
     this.#workflowProfile = workflowProfile;
@@ -7022,12 +7075,124 @@ export class EditorialStore {
     if (after !== null) {
       requireStore(UUID_PATTERN.test(after.bookId) && after.title === safeTitle(after.title), 'EXEMPLAR_CURSOR_INVALID', '范例列表位置无效。');
     }
-    return this.#documentCall(() => this.#publicationCall(() => readExemplars({
+    return this.#documentCall(() => this.#publicationCall(() => readExemplars(this.#exemplarSources(), after)));
+  }
+
+  #exemplarSources(): ExemplarSources {
+    return {
       books: (cursor, limit) => this.#publicationVersions.designatedBooks(cursor, limit),
       archive: (bookId) => this.#publicationVersions.exemplarArchive(bookId),
       documents: (bookId) => this.#productionDocuments.deliveryReadings(bookId),
       people: (bookId) => this.#peopleCall(() => this.#bookPeople.current(bookId)),
-    }, after)));
+      readersReports: (bookId, designation) => this.#readersReportExemplarsOf(bookId, designation),
+    };
+  }
+
+  // ---- 审稿意见 in 图书交付包 and 范例 (Issue #429, S81c remainder; BUNDLE-001, KB-006) --------------------------------------------
+
+  /**
+   * Each template's 审稿意见 draft at the version 图书交付包 and 范例 pin: the latest version saved by the designation's instant
+   * (`设为发稿版本时的最新一版`), or, for a draft that came after it — or while the Book has no 发稿版本 in force — the latest saved
+   * now. A read of the drafts' records and the documents' version ledger; nothing is written.
+   */
+  #readersReportPins(bookId: string, designatedAt: string | null): PackageReadersReportReading[] {
+    const drafts = this.#readersReportCall(() => this.#readersReports.drafts(bookId));
+    return READERS_REPORT_TEMPLATES.flatMap((template): PackageReadersReportReading[] => {
+      const stored = drafts.find((draft) => draft.template === template);
+      if (stored === undefined) return [];
+      const row = this.#documentCall(() => this.#productionDocuments.documentById(bookId, stored.documentId));
+      if (row === undefined) return [];
+      const versions = this.#documentCall(() => this.#productionDocuments.versionsOf(row));
+      const byDesignation = designatedAt === null ? undefined : versions.find((version) => version.recordedAt <= designatedAt);
+      const pinned = byDesignation ?? versions[0];
+      if (pinned === undefined) return [];
+      const typeId = readersReportDocumentTypeId(template);
+      return [{
+        template,
+        typeId,
+        typeLabel: readersReportDocumentType(typeId)!.label,
+        documentId: row.documentId,
+        version: pinned.version,
+        revisionId: pinned.revisionId,
+        revisionDigest: pinned.revisionDigest,
+        savedAt: pinned.recordedAt,
+        pin: byDesignation === undefined ? 'later' : 'designation',
+        laterVersions: versions[0] !== pinned,
+      }];
+    });
+  }
+
+  /** The Learning Material one pinned 审稿意见 is on the ledger of S26b: its key names the template, its content the exact version. */
+  #readersReportExemplarCandidate(pin: PackageReadersReportReading): LearningMaterialCandidate {
+    return {
+      source: { kind: 'readers-report-exemplar', documentId: pin.documentId, revisionId: pin.revisionId },
+      materialKey: `${READERS_REPORT_EXEMPLAR_KEY_PREFIX}${pin.template}`,
+      kind: 'readers-report-exemplar',
+      originLabel: `${pin.typeLabel} · 版本 ${pin.version}`,
+      recordedAt: pin.savedAt,
+      orderedAt: pin.savedAt,
+      content: { documentId: pin.documentId, revisionId: pin.revisionId, revisionDigest: pin.revisionDigest, version: pin.version },
+      excerpt: [],
+      rationale: BOOK_DELIVERY_PACKAGE_WORDS.readersReportPinned,
+    };
+  }
+
+  /** The Book's 审稿意见 as 范例 offers them: each pinned against the designation given, with where the editor's admission stands. */
+  #readersReportExemplarsOf(bookId: string, designation: { readonly createdAt: string; readonly withdrawnAt: string | null }): ReadersReportExemplarProjection[] {
+    return this.#readersReportPins(bookId, designation.withdrawnAt === null ? designation.createdAt : null).map((pin) => {
+      const candidate = this.#readersReportExemplarCandidate(pin);
+      const latest = this.#learningCall(() => this.#learningEligibility.history(bookId, candidate.materialKey)).at(-1) ?? null;
+      const admitted = latest !== null && latest.choice === 'house' && latest.materialDigest === learningMaterialDigest(candidate);
+      return {
+        template: pin.template,
+        typeId: pin.typeId,
+        typeLabel: pin.typeLabel,
+        documentId: pin.documentId,
+        version: pin.version,
+        revisionId: pin.revisionId,
+        revisionDigest: pin.revisionDigest,
+        savedAt: pin.savedAt,
+        pin: pin.pin,
+        eligibility: 'house-only',
+        admission: {
+          state: latest === null ? 'offered' : admitted ? 'admitted' : 'superseded',
+          admittedAt: admitted ? latest.recordedAt : null,
+          decisions: latest?.ordinal ?? 0,
+        },
+      };
+    });
+  }
+
+  /**
+   * 知识库 › 范例 › 归入范例 (Issue #429; KB-006): the editor admits one Book's 审稿意见, at exactly the version offered, under 仅本社 —
+   * a Learning Eligibility decision (`house`) on the material that names that version, attributed to the Book's people as every
+   * decision is (S26b). Refused for a Book without a 发稿版本 in force, for a version no longer the one offered, or against
+   * admissions the editor has not seen. It changes no draft and no package; the answer is the Book as 范例 reads it now.
+   */
+  admitReadersReportExemplar(input: AdmitReadersReportExemplarInput): ExemplarBookProjection {
+    requireStore(UUID_PATTERN.test(input.bookId), 'BOOK_INVALID', '图书标识无效。');
+    requireStore(READERS_REPORT_TEMPLATES.includes(input.template), 'READERS_REPORT_INVALID', '审稿意见参数无效。');
+    const title = this.#evaluationBookTitle(input.bookId);
+    const current = this.#publicationCall(() => this.#publicationVersions.current(input.bookId));
+    requireStore(current !== null && !current.withdrawn, 'EXEMPLAR_NEEDS_PUBLICATION', '这本书没有在用的发稿版本，审稿意见还不能归入范例。');
+    const pin = this.#readersReportPins(input.bookId, current.projection.createdAt).find((entry) => entry.template === input.template);
+    requireStore(pin !== undefined, 'EXEMPLAR_READERS_REPORT_NOT_FOUND', '这本书没有这一模板的审稿意见。');
+    requireStore(pin.revisionDigest === input.revisionDigest, 'EXEMPLAR_READERS_REPORT_CHANGED', '要归入的审稿意见已不是现在的这一版；请看过现在的再定。');
+    const candidate = this.#readersReportExemplarCandidate(pin);
+    this.#learningCall(() => {
+      this.#transaction(this.#authority, () => {
+        const people = this.#bookPeople.current(input.bookId);
+        this.#learningEligibility.decide({
+          bookId: input.bookId,
+          candidate,
+          expectedDecisions: input.expectedDecisions,
+          choice: 'house',
+          note: null,
+          attribution: { peopleVersion: people.version, authors: people.authors, editors: people.editors },
+        });
+      });
+    });
+    return this.#documentCall(() => this.#publicationCall(() => readExemplarBook(this.#exemplarSources(), { bookId: input.bookId, title })));
   }
 
   // ---- 可复用工序 (Issue #65, plan slice S30; ADR 0087; V2-UX-REUSE-001 to 020, 029 to 031, 038 to 054, 063 to 066) -----------
@@ -7991,12 +8156,36 @@ export class EditorialStore {
   }
 
   /**
-   * The house's 审稿意见 among its 范例 that seed a draft. None can be there yet: a draft is never delivered in this slice, and
-   * only delivered documents come into 范例 — so every plan says 「本社暂无审稿意见范例，本次不参考范例」 and the draft is written
-   * without one (the Owner's answer of 2026-10-07).
+   * The house's 审稿意见 among its 范例 that seed a draft (EVAL-013): those the editor admitted into 范例 (Issue #429,
+   * `admitReadersReportExemplar`) of other Books — each still at the version admitted, its Book's 发稿版本 still in force — by
+   * Book title, at most `MAX_READERS_REPORT_EXEMPLARS`; each is its Book's title with the template, and the pinned version's own
+   * words, their opening when longer than the contract takes. A Book's own 审稿意见 never seeds its own draft. Before any
+   * admission every plan says 「本社暂无审稿意见范例，本次不参考范例」 and the draft is written without one.
    */
-  #readersReportExemplars(): [] {
-    return [];
+  #readersReportExemplars(bookId: string): ReadersReportExemplarInput[] {
+    const rows = this.#authority.prepare(
+      `SELECT DISTINCT d.book_id, d.material_key, b.title FROM learning_eligibility_decisions d JOIN books b ON b.book_id = d.book_id
+       WHERE d.material_key LIKE ? AND d.book_id <> ? ORDER BY b.title COLLATE BINARY, d.book_id, d.material_key`,
+    ).all(`${READERS_REPORT_EXEMPLAR_KEY_PREFIX}%`, bookId) as SqlRow[];
+    const exemplars: ReadersReportExemplarInput[] = [];
+    for (const row of rows) {
+      if (exemplars.length === MAX_READERS_REPORT_EXEMPLARS) break;
+      const otherBookId = asString(row.book_id);
+      const template = asString(row.material_key).slice(READERS_REPORT_EXEMPLAR_KEY_PREFIX.length) as ReadersReportTemplate;
+      if (!READERS_REPORT_TEMPLATES.includes(template)) continue;
+      const current = this.#publicationCall(() => this.#publicationVersions.current(otherBookId));
+      if (current === null || current.withdrawn) continue;
+      const pin = this.#readersReportPins(otherBookId, current.projection.createdAt).find((entry) => entry.template === template);
+      if (pin === undefined) continue;
+      const candidate = this.#readersReportExemplarCandidate(pin);
+      const latest = this.#learningCall(() => this.#learningEligibility.history(otherBookId, candidate.materialKey)).at(-1);
+      if (latest === undefined || latest.choice !== 'house' || latest.materialDigest !== learningMaterialDigest(candidate)) continue;
+      const words = (this.#authority.prepare('SELECT text FROM manuscript_block_versions WHERE revision_id = ? ORDER BY position').all(pin.revisionId) as SqlRow[])
+        .map((block) => asString(block.text).replace(/\r\n?/gu, '\n').replace(/[\t\f\v]/gu, ' ').trim()).filter((line) => line.length > 0).join('\n');
+      if (words.length === 0) continue;
+      exemplars.push({ title: boundedGraphemes(`${asString(row.title)} · ${pin.typeLabel}`, 200), text: boundedGraphemes(words, MAX_EXEMPLAR_GRAPHEMES) });
+    }
+    return exemplars;
   }
 
   /**
@@ -8011,7 +8200,7 @@ export class EditorialStore {
     requireStore(basis !== null, 'READERS_REPORT_NEEDS_FINALIZED', READERS_REPORT_NEEDS_FINALIZED);
     requireStore(this.#documentCall(() => this.#productionDocuments.documentOfType(bookId, readersReportDocumentTypeId(template))) === undefined,
       'READERS_REPORT_DRAFT_EXISTS', `这本书已经有「${READERS_REPORT_TEMPLATE_LABELS[template]}」的草稿；请打开它继续修改。`);
-    const input = this.#readersReportCall(() => readersReportContractInput(template, basis, this.#readersReportExemplars()));
+    const input = this.#readersReportCall(() => readersReportContractInput(template, basis, this.#readersReportExemplars(bookId)));
     const ledger = this.readersReportLedger(input);
     const latest = this.#latestReadersReport(bookId);
     const mode = latest === null || latest.projection.resultSetRevision === null ? 'readers-report-first' : 'readers-report-again';
@@ -8080,7 +8269,7 @@ export class EditorialStore {
    * drafted, its newest result not yet opened, and its draft document.
    */
   #readersReportWorkspace(bookId: string, basis: FinalizedEvaluation | null, unreadable: string | null): EvaluationReadersReportProjection {
-    const exemplars = this.#readersReportExemplars();
+    const exemplars = this.#readersReportExemplars(bookId);
     let latest: { task: StoredReadersReportTask; ledger: BaselineAnalysisStore; projection: ReadersReportProjection } | null = null;
     let unavailable: string | null = unreadable;
     try {
@@ -8474,7 +8663,9 @@ export class EditorialStore {
       evaluation: evaluation?.input ?? null,
       exemplars: exemplars.map((exemplar) => exemplar.input),
     };
-    const ledger = this.#writingLedger(input);
+    // `/2` for every Task prepared by the product; the suites may prepare one under `/1`, as software before #698 did (#707).
+    const copyRules = this.#control.writingCopyRules ?? WRITING_COPY_RULES;
+    const ledger = this.#writingLedger(input, copyRules);
     const mode = latest === null || latest.projection.resultSetRevision === null ? 'writing-first' : 'writing-again';
     const result = this.#analysisCall(() => ledger.prepare({
       phase: 'start',
@@ -8495,6 +8686,7 @@ export class EditorialStore {
       exemplarSources: exemplars.map((exemplar) => exemplar.source),
       contract: input,
       promptContractSha256: ledger.definition.promptContractDigest,
+      copyRules,
     })));
     if (result.workId !== null) this.#writingWork.set(result.workId, ledger);
     return { ...result, projection: result.projection as WritingProjection | null };
@@ -9896,6 +10088,8 @@ export class EditorialStore {
         sourceTask: category.task === null ? null : { taskIntentId: category.task.taskIntentId, label: `${category.label} · ${category.task.modeLabel}` },
       };
     }
+    // A 审稿意见 offered into 范例 (Issue #429) is admitted from 范例 and has no card here.
+    requireStore(source.kind === 'decision', 'LEARNING_MATERIAL_NOT_FOUND', '这份学习材料不在学习准入之列。');
     const row = one(this.#authority.prepare(
       `SELECT m.mark_id, m.manuscript_id, m.branch_id, m.block_id, m.anchor_state, m.source_task_id, m.source_label,
               EXISTS (SELECT 1 FROM dialogue_tasks t WHERE t.dialogue_id = m.source_task_id) AS from_dialogue

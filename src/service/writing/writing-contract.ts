@@ -543,13 +543,31 @@ const SEGMENTER = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });
 const IDENTIFIER_UNIT = '\uE000';
 
 /**
- * One text as the bound compares it: a stream of units — characters, or Latin-script words — each with whether a soft break
- * (punctuation, a number, an identifier, a space between clauses) stands right before it, whether a hard stop does (text of
- * another script, which no word window may span), and whether it is an identifier no one writes (an ISBN, a URL, a code).
+ * What a soft break is, so a refusal can name the ones a run was copied across (#707): in the characters, punctuation, a space
+ * between two clauses or a Latin-script word; in the words, punctuation, a number or an identifier.
+ */
+export type CopyBreak = 'punctuation' | 'space' | 'latin-word' | 'number' | 'identifier';
+/** The soft breaks before one unit, as bits of one mask, in the order the refusal names them. */
+const BREAKS: ReadonlyArray<CopyBreak> = ['punctuation', 'space', 'latin-word', 'number', 'identifier'];
+const BREAK_PUNCTUATION = 1;
+const BREAK_SPACE = 2;
+const BREAK_LATIN_WORD = 4;
+const BREAK_NUMBER = 8;
+const BREAK_IDENTIFIER = 16;
+/** The breaks of one mask, by name, in their fixed order. */
+function breakNames(mask: number): CopyBreak[] {
+  return BREAKS.filter((_, bit) => (mask & (1 << bit)) !== 0);
+}
+
+/**
+ * One text as the bound compares it: a stream of units — characters, or Latin-script words — each with which soft breaks
+ * (punctuation, a number, an identifier, a space between clauses) stand right before it as a mask, `0` for none, whether a hard
+ * stop does (text of another script, which no word window may span), and whether it is an identifier no one writes (an ISBN, a
+ * URL, a code).
  */
 interface CopyStream {
   readonly units: ReadonlyArray<string>;
-  readonly breakBefore: ReadonlyArray<boolean>;
+  readonly breakBefore: ReadonlyArray<number>;
   readonly hardBefore: ReadonlyArray<boolean>;
   readonly identifier: ReadonlyArray<boolean>;
 }
@@ -579,6 +597,12 @@ function addressLike(core: string): boolean {
   return labels.length >= 2 && labels.every((label) => /^[0-9A-Za-z-]+$/u.test(label)) && /^[A-Za-z]{2,24}$/u.test(labels.at(-1)!);
 }
 
+/**
+ * An ISBN-10 whose check digit is X, hyphenated or not (#707): its X is a Latin letter, which would otherwise go to the words and
+ * leave nine digits, one short of the ISBN-like run {@link markNumbers} marks. Recognised whole before the streams are split.
+ */
+const ISBN10_X = /^\d(?:-?\d){8}-?[Xx]$/u;
+
 /** A Latin-script word as the word stream compares it: without its accents, lower-cased, a curly apostrophe read as straight. */
 function wordKey(token: string): string {
   return token.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/[\u2018\u2019]/gu, "'");
@@ -593,10 +617,12 @@ function wordKey(token: string): string {
  * - characters: everything else that is a word — CJK and other scripts, and the digits of a number — compatibility-normalized
  *   and without spaces, punctuation or symbols. A Latin word in it is weighed on words instead, and leaves a soft break where it
  *   stood (#704 P3-1); so does punctuation, and a space between two clauses of non-ASCII text (#704 P3-3). A line break — a
- *   part's or a paragraph's edge — is no break: a copy cut there is still a copy.
+ *   part's or a paragraph's edge — is no break: a copy cut there is still a copy; nor is whitespace beside one — a paragraph's
+ *   indentation, a trailing space — which is the edge's own and no space between clauses (#707).
  *
- * An identifier — a URL, an e-mail address, a domain, or a code of letters and digits — is no one's words: it leaves one marked
- * unit in the characters, and a soft break between words. ISBN-like numbers are marked by {@link markNumbers}.
+ * An identifier — a URL, an e-mail address, a domain, a code of letters and digits, or an ISBN-10 ending in X (#707) — is no
+ * one's words: it leaves one marked unit in the characters, and a soft break between words. ISBN-like numbers of digits alone
+ * are marked by {@link markNumbers}.
  */
 function copyStreams(value: string): { characters: CopyStream; words: CopyStream } {
   const points = Array.from(value.normalize('NFKC'));
@@ -613,47 +639,53 @@ function copyStreams(value: string): { characters: CopyStream; words: CopyStream
     let last = end;
     while (first < last && !/^[0-9A-Za-z]$/u.test(points[first]!)) first += 1;
     while (last > first && !/^[0-9A-Za-z]$/u.test(points[last - 1]!)) last -= 1;
-    if (first < last && addressLike(points.slice(first, last).join(''))) addressEnd[first] = last;
+    if (first < last) {
+      const core = points.slice(first, last).join('');
+      if (addressLike(core) || ISBN10_X.test(core)) addressEnd[first] = last;
+    }
     index = end;
   }
 
   const words: string[] = [];
-  const wordBreaks: boolean[] = [];
+  const wordBreaks: number[] = [];
   const wordHard: boolean[] = [];
-  let wordSoft = false;
+  let wordSoft = 0;
   let wordStop = false;
   const pushWord = (word: string): void => {
     words.push(word);
     wordBreaks.push(wordSoft);
     wordHard.push(wordStop);
-    wordSoft = false;
+    wordSoft = 0;
     wordStop = false;
   };
 
   let kept = '';
-  const keptBreak: boolean[] = [];
+  const keptBreak: number[] = [];
   const keptIdentifier: boolean[] = [];
-  let soft = false;
+  let soft = 0;
   let space = false;
+  let afterLineBreak = false;
   let previousNonAscii = false;
   const keep = (unit: string, identifier: boolean): void => {
     const nonAscii = unit.codePointAt(0)! > 0x7f;
-    const broken = soft || (space && previousNonAscii && nonAscii);
+    const broken = soft | (space && previousNonAscii && nonAscii ? BREAK_SPACE : 0);
     kept += unit;
     for (let at = 0; at < unit.length; at += 1) {
-      keptBreak.push(at === 0 && broken);
+      keptBreak.push(at === 0 ? broken : 0);
       keptIdentifier.push(identifier);
     }
-    soft = false;
+    soft = 0;
     space = false;
     previousNonAscii = nonAscii;
   };
 
   for (let index = 0; index < points.length;) {
     const point = points[index]!;
+    const whitespace = /\s/u.test(point);
+    if (!whitespace) afterLineBreak = false;
     if (addressEnd[index]! >= 0) {
       keep(IDENTIFIER_UNIT, true);
-      wordSoft = true;
+      wordSoft |= BREAK_IDENTIFIER;
       index = addressEnd[index]!;
       continue;
     }
@@ -666,22 +698,26 @@ function copyStreams(value: string): { characters: CopyStream; words: CopyStream
       const digits = token.some((character) => digit(character));
       if (letters && digits) {
         keep(IDENTIFIER_UNIT, true);
-        wordSoft = true;
+        wordSoft |= BREAK_IDENTIFIER;
       } else if (digits) {
         for (const character of token) if (digit(character)) keep(character, false);
-        wordSoft = true;
+        wordSoft |= BREAK_NUMBER;
       } else {
         pushWord(wordKey(token.join('')));
-        soft = true;
+        soft |= BREAK_LATIN_WORD;
       }
       index = tail;
       continue;
     }
-    if (/\s/u.test(point)) {
-      if (!LINE_BREAK.test(point)) space = true;
+    if (whitespace) {
+      // Whitespace beside a line break is the edge's own: a paragraph's indentation or a trailing space breaks nothing (#707).
+      if (LINE_BREAK.test(point)) {
+        space = false;
+        afterLineBreak = true;
+      } else if (!afterLineBreak) space = true;
     } else if (PUNCTUATION.test(point)) {
-      soft = true;
-      wordSoft = true;
+      soft |= BREAK_PUNCTUATION;
+      wordSoft |= BREAK_PUNCTUATION;
     } else if (!NOT_WORD.test(point)) {
       // Another script's character: the characters' own, a hard stop for the words.
       keep(point, false);
@@ -691,14 +727,14 @@ function copyStreams(value: string): { characters: CopyStream; words: CopyStream
   }
 
   const units: string[] = [];
-  const breakBefore: boolean[] = [];
+  const breakBefore: number[] = [];
   const identifier: boolean[] = [];
   for (const { segment, index: start } of SEGMENTER.segment(kept)) {
     units.push(segment);
-    let broken = false;
+    let broken = 0;
     let marked = false;
     for (let unit = start; unit < start + segment.length; unit += 1) {
-      broken ||= keptBreak[unit]!;
+      broken |= keptBreak[unit]!;
       marked ||= keptIdentifier[unit]!;
     }
     breakBefore.push(broken);
@@ -728,11 +764,22 @@ function markNumbers(characters: ReadonlyArray<string>, identifier: ReadonlyArra
   return marked;
 }
 
-/** Running counts of a stream's marks, so each window is decided in constant time. */
-function before(marks: ReadonlyArray<boolean>): number[] {
+/** Running counts of a stream's marks — a boolean, or a break mask that is `0` for none — so each window is decided in constant time. */
+function before(marks: ReadonlyArray<boolean | number>): number[] {
   const counts = [0];
   for (let index = 0; index < marks.length; index += 1) counts.push(counts[index]! + (marks[index] ? 1 : 0));
   return counts;
+}
+
+/** For each `size`-unit window, the soft breaks standing anywhere inside it — before any unit but its first — as one mask. */
+function breaksInside(stream: CopyStream, size: number): number[] {
+  // Running counts per break, so the pass stays linear in the stream.
+  const counts = BREAKS.map((_, bit) => before(stream.breakBefore.map((mask) => (mask & (1 << bit)) !== 0)));
+  const inside: number[] = [];
+  for (let first = 0; first + size <= stream.units.length; first += 1) {
+    inside.push(counts.reduce((mask, count, bit) => (count[first + size]! - count[first + 1]! > 0 ? mask | (1 << bit) : mask), 0));
+  }
+  return inside;
 }
 
 /** The `size`-unit window starting at each position of a stream: characters joined as they are, words with a space. */
@@ -743,7 +790,7 @@ function windowKeys(stream: CopyStream, size: number, words: boolean): string[] 
 }
 
 /** For each `size`-unit window, whether one of the marks stands anywhere inside it — before any unit but its first. */
-function marksInside(stream: CopyStream, marks: ReadonlyArray<boolean>, size: number): boolean[] {
+function marksInside(stream: CopyStream, marks: ReadonlyArray<boolean | number>, size: number): boolean[] {
   const counts = before(marks);
   const inside: boolean[] = [];
   for (let first = 0; first + size <= stream.units.length; first += 1) inside.push(counts[first + size]! - counts[first + 1]! > 0);
@@ -786,11 +833,12 @@ function ownWordsOf(input: WritingContractInput): string[] {
 export type ExemplarCopyUnit = 'character' | 'word';
 
 /**
- * How a draft copied an exemplar: a verbatim run of `run` units; a near copy whose distinct shingles it shares at the threshold
- * or above; or one span of the draft whose shingles it shares at the span threshold or above — each in characters or in words.
+ * How a draft copied an exemplar: a verbatim run of `run` units — with the soft breaks it was copied across, when it was a run
+ * across them under `/2` (#707); a near copy whose distinct shingles it shares at the threshold or above; or one span of the draft
+ * whose shingles it shares at the span threshold or above — each in characters or in words.
  */
 export type ExemplarCopy =
-  | { exemplar: number; kind: 'verbatim'; unit: ExemplarCopyUnit; run: number }
+  | { exemplar: number; kind: 'verbatim'; unit: ExemplarCopyUnit; run: number; breaks?: ReadonlyArray<CopyBreak> }
   | { exemplar: number; kind: 'near'; unit: ExemplarCopyUnit; share: number }
   | { exemplar: number; kind: 'span'; unit: ExemplarCopyUnit; share: number };
 
@@ -840,9 +888,10 @@ function streamWindows(stream: CopyStream, rules: StreamRules): StreamWindows {
 /** What the draft holds in one stream, and which of its windows may count against an exemplar. */
 interface DraftStream {
   readonly rules: StreamRules;
-  /** Runs that may count, each with whether punctuation stands inside it. */
+  /** Runs that may count, each with whether a soft break stands inside it. */
   readonly within: ReadonlyArray<{ key: string; crosses: boolean }>;
-  readonly across: ReadonlyArray<string>;
+  /** Runs across soft breaks that may count, each with the breaks inside it as a mask (#707: the refusal names them). */
+  readonly across: ReadonlyArray<{ key: string; breaks: number }>;
   readonly shingleKeys: ReadonlyArray<string>;
   readonly countable: ReadonlyArray<boolean>;
   /** For each span-sized window, whether it spans no hard stop. */
@@ -923,6 +972,7 @@ export function exemplarCopied(draft: WritingDraftWordsProjection, input: Writin
     const withinCrosses = marksInside(stream, stream.breakBefore, rules.within);
     const acrossKeys = windowKeys(stream, rules.across, words);
     const acrossAllowed = countableWindows(stream, rules.across, words);
+    const acrossBreaks = breaksInside(stream, rules.across);
     const shingleKeys = windowKeys(stream, rules.shingle, words);
     const shingleAllowed = countableWindows(stream, rules.shingle, words);
     // A word shingle that spans a hard stop is no shingle; every character shingle weighs, numbers among them.
@@ -930,7 +980,7 @@ export function exemplarCopied(draft: WritingDraftWordsProjection, input: Writin
     const draftStream: DraftStream = {
       rules,
       within: withinKeys.flatMap((key, at) => (withinAllowed[at] && !ownSets.withinAny.has(key) && !shared((entry) => entry.withinAny, key) ? [{ key, crosses: withinCrosses[at]! }] : [])),
-      across: acrossKeys.filter((key, at) => acrossAllowed[at] && !ownSets.across.has(key) && !shared((entry) => entry.across, key)),
+      across: acrossKeys.flatMap((key, at) => (acrossAllowed[at] && !ownSets.across.has(key) && !shared((entry) => entry.across, key) ? [{ key, breaks: acrossBreaks[at]! }] : [])),
       shingleKeys,
       countable: shingleKeys.map((key, at) => shingleAllowed[at]! && !ownSets.shingles.has(key) && !shared((entry) => entry.shingles, key)),
       spans: words ? countableWindows(stream, rules.span, true) : windowKeys(stream, rules.span, false).map(() => true),
@@ -945,7 +995,9 @@ export function exemplarCopied(draft: WritingDraftWordsProjection, input: Writin
     for (const { draft: stream, exemplars } of streams) {
       const exemplar = exemplars[index]!;
       if (stream.within.some((run) => !run.crosses && exemplar.within.has(run.key))) return { exemplar: index, kind: 'verbatim', unit: stream.rules.unit, run: stream.rules.within };
-      if (stream.across.some((run) => exemplar.across.has(run))) return { exemplar: index, kind: 'verbatim', unit: stream.rules.unit, run: stream.rules.across };
+      // The first run across soft breaks, with the breaks inside it: the refusal names the ones it was copied across (#707).
+      const across = stream.across.find((run) => exemplar.across.has(run.key));
+      if (across !== undefined) return { exemplar: index, kind: 'verbatim', unit: stream.rules.unit, run: stream.rules.across, breaks: breakNames(across.breaks) };
     }
   }
   const distinct = streams.reduce((sum, { draft: stream }) => sum + stream.distinct, 0);
@@ -1108,17 +1160,26 @@ export function parseWritingUnitResult(value: string, expected: { unitOrdinal: n
   return { ok: true, result: unit, canonicalJson: canonical, digest: sha256Hex(canonical) };
 }
 
-/** What a refused draft is told: which exemplar it copied, and how, in the sizes of the rules that judged it. */
+/** A soft break as the refusal names it (#707). */
+const BREAK_NAMES: Readonly<Record<CopyBreak, string>> = { punctuation: '标点', space: '空格', 'latin-word': '外文词', number: '数字', identifier: '编号' };
+
+/**
+ * What a refused draft is told: which exemplar it copied, and how, in the sizes of the rules that judged it. A run copied across
+ * soft breaks names the breaks it crossed — 标点, 空格, an 外文词, a 数字 or an 编号 — and Latin-script words are 外文词, whatever
+ * the language (#707).
+ */
 export function exemplarCopyDetail(copied: ExemplarCopy, input: WritingContractInput, sizes: WritingCopySizes = WRITING_COPY_SIZES): string {
   const exemplar = input.exemplars[copied.exemplar]!;
   const words = copied.unit === 'word' && sizes.rules === 2;
-  const across = copied.kind === 'verbatim' && sizes.rules === 2 && copied.run === (words ? sizes.copyWordsAcross : sizes.copyWindowAcross);
+  const across = copied.kind === 'verbatim' && sizes.rules === 2 && copied.breaks !== undefined && copied.breaks.length > 0
+    ? `跨${copied.breaks.map((name) => BREAK_NAMES[name]).join('、')}`
+    : '';
   const shingle = words ? `${sizes.wordShingle} 词片段` : `${sizes.shingle} 字片段`;
   const how = copied.kind === 'verbatim'
-    ? `有${across ? '跨标点' : ''}连续 ${copied.run} 个${words ? '英文词' : '字'}以上相同`
+    ? `有${across}连续 ${copied.run} 个${words ? '外文词' : '字'}以上相同`
     : copied.kind === 'near'
       ? `的 ${shingle}重合达 ${Math.floor(copied.share * 100)}%（不少于 ${sizes.shingleShare * 100}% 即算照抄）`
-      : `在草稿的一段 ${words ? `${sizes.wordSpan} 个英文词` : `${sizes.span} 字`}中，${shingle}重合达 ${Math.floor(copied.share * 100)}%（不少于 ${sizes.spanShare * 100}% 即算照抄）`;
+      : `在草稿的一段 ${words ? `${sizes.wordSpan} 个外文词` : `${sizes.span} 字`}中，${shingle}重合达 ${Math.floor(copied.share * 100)}%（不少于 ${sizes.spanShare * 100}% 即算照抄）`;
   return `草稿与范例《${exemplar.bookTitle}》版本 ${exemplar.version} ${how}；范例只参照，不复制，这份草稿不予采用。`;
 }
 
