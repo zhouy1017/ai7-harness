@@ -13,7 +13,7 @@ import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
-import { DECISION_FEEDBACK_SCHEMA_VERSION, WRITING_TASK_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
+import { DECISION_FEEDBACK_SCHEMA_VERSION, BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE } from '../../src/shared/protocol.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type {
@@ -275,7 +275,7 @@ describe('学习准入 over the real store', () => {
     }
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
       const records = (database.prepare('SELECT canonical_json FROM learning_eligibility_decisions ORDER BY recorded_at').all() as Array<{ canonical_json: string }>)
         .map((row) => JSON.parse(row.canonical_json) as { attribution: unknown; basis: unknown; choice: string });
       expect(records).toHaveLength(68);
@@ -345,7 +345,7 @@ describe('学习准入 over the real store', () => {
     }
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
       expect((database.prepare('SELECT count(*) count FROM learning_eligibility_decisions').get() as { count: number }).count).toBe(0);
     } finally {
       database.close();

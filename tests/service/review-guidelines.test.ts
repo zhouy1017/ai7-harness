@@ -20,7 +20,7 @@ import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { REVIEW_GUIDELINE_TRIGGER_SQL } from '../../src/service/review-guidelines.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { BOOK_PEOPLE_SCHEMA_VERSION, WRITING_TASK_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
+import { BOOK_PEOPLE_SCHEMA_VERSION, BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { buildManuscriptPackage } from '../../src/service/text-manuscript.js';
 import {
   MAX_GUIDELINE_OLDER_BOOKS_SHOWN,
@@ -424,7 +424,7 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
     }
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
       expect(() => database.exec("UPDATE review_guideline_versions SET recorded_at = recorded_at")).toThrowError(/REVIEW_GUIDELINE_LEDGER_IMMUTABLE/u);
       expect(() => database.exec('DELETE FROM review_guideline_versions')).toThrowError(/REVIEW_GUIDELINE_LEDGER_IMMUTABLE/u);
       // A later build that rewords a built-in clause moves the digest of AI7's version 1; the house's version still reads,

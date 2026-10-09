@@ -18,6 +18,10 @@ import type { DatabaseSync } from 'node:sqlite';
  * validation accepts, exactly as a store an earlier build planted after this one would hold them.
  */
 export const PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER: ReadonlyArray<string> = [
+  // 后台分析登记 (revision 66; Issue #95, S39): each Enrollment's states, versions and the Enrollment.
+  'background_analysis_enrollment_states',
+  'background_analysis_enrollment_versions',
+  'background_analysis_enrollments',
   // 写作任务 (revision 65; Issue #432, S84a): its drafts, which name documents, and its Tasks.
   'writing_drafts',
   'writing_tasks',

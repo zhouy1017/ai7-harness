@@ -104,7 +104,9 @@ describe('a forged-digest row that is not JSON reads as damaged, in the owner\'s
     db.prepare("INSERT INTO evaluation_record_entries(entry_id, record_id, ordinal, kind, previous_sha256, recorded_at, canonical_json, sha256) VALUES (?, ?, 2, 'draft', ?, ?, ?, ?)")
       .run(randomUUID(), recordId, first.sha256, NOW, NOT_JSON, DIGEST);
     expect(thrown(() => records.rewritable(bookId, recordId))).toBe('EvaluationError:EVALUATION_RECORD_INVALID');
-    expect(thrown(() => records.workspace(bookId, '书', recordId))).toBe('EvaluationError:EVALUATION_RECORD_INVALID');
+    // 评估 names it and refuses only 重新评估, which needs it (Issue #708).
+    expect(records.workspace(bookId, '书', recordId)).toMatchObject({ unreadableRecords: [1], record: null, start: { allowed: false } });
+    expect(thrown(() => records.start(bookId))).toBe('EvaluationError:EVALUATION_RECORD_INVALID');
     // A version whose own record is not JSON, and one whose 初评 snapshot is not.
     const other = randomUUID();
     const recordJson = `${NOT_JSON} `;

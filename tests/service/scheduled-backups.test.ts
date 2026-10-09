@@ -16,7 +16,7 @@ import {
   initializeScheduledBackupSchema,
 } from '../../src/service/scheduled-backups.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { DATABASE_EXPORT_SCHEMA_VERSION, WRITING_TASK_SCHEMA_VERSION, SCHEDULED_BACKUP_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
+import { DATABASE_EXPORT_SCHEMA_VERSION, BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, SCHEDULED_BACKUP_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
@@ -279,7 +279,7 @@ describe('定期自动备份 over the real store', () => {
       expect(made.backups[0]).toMatchObject({ fileName: backupFileName(T), createdAt: T.toISOString(), expiresAt: at(14 * DAY).toISOString(), present: true });
       const packaged = unzipSync(await readFile(join(location, backupFileName(T))));
       expect(parseCanonicalJson(strFromU8(packaged['manifest.json']!))).toMatchObject({
-        schema: 'ai7.database-package/1', origin: 'scheduled-backup', dataVersion: 1, schemaRevision: WRITING_TASK_SCHEMA_VERSION, credentials: 'excluded',
+        schema: 'ai7.database-package/1', origin: 'scheduled-backup', dataVersion: 1, schemaRevision: BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, credentials: 'excluded',
       });
       expect((await readdir(location)).filter((name) => name.includes('.partial'))).toEqual([]);
 
@@ -455,7 +455,7 @@ describe('定期自动备份 over the real store', () => {
       }
       const check = new DatabaseSync(join(other.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
       try {
-        expect((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
+        expect((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
       } finally {
         check.close();
       }
@@ -554,7 +554,7 @@ describe('定期自动备份 over the real store', () => {
     const createdAt = at(-15 * DAY).toISOString();
     const planted = {
       schema: 'ai7.scheduled-backup/1', backupId, fileName: '../input/victim.txt', byteLength: bytes.byteLength,
-      fileSha256: createHash('sha256').update(bytes).digest('hex'), dataVersion: 1, schemaRevision: WRITING_TASK_SCHEMA_VERSION,
+      fileSha256: createHash('sha256').update(bytes).digest('hex'), dataVersion: 1, schemaRevision: BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
       softwareVersion: '0.1.0', contents, createdAt,
     };
     const record = canonicalRecord(planted);
@@ -564,7 +564,7 @@ describe('定期自动备份 over the real store', () => {
         plant.prepare(
           `INSERT INTO scheduled_backups(backup_id, file_name, byte_length, file_sha256, data_version, schema_revision, software_version, contents_json, created_at, canonical_json, sha256)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(backupId, planted.fileName, planted.byteLength, planted.fileSha256, 1, WRITING_TASK_SCHEMA_VERSION, '0.1.0',
+        ).run(backupId, planted.fileName, planted.byteLength, planted.fileSha256, 1, BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, '0.1.0',
           JSON.stringify(contents), createdAt, record.json, record.digest);
       };
       // The relation refuses the name itself…

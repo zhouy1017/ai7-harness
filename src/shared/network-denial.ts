@@ -38,8 +38,38 @@ let allowances: ReadonlyArray<SingleHostAllowance> = [];
  * open. Armed before the install, only under a rule naming the platform tools; unarmed, no host can ever be admitted late.
  */
 let perTicketAdmissionArmed = false;
-/** The one host a redeemed ticket holds open, or `null`. At most one at a time: `maxParallelToolCalls` is 1. */
-let ticketHost: SingleHostAllowance | null = null;
+/**
+ * The hosts redeemed tickets hold open, by ticket id (#676). Admission belongs to the ticket, not to the process: two
+ * concurrent live Runs each hold their own ticket — the same host or different ones — and a release closes only its own.
+ * A host stays reachable while any ticket holds it.
+ */
+const ticketHolds = new Map<string, SingleHostAllowance>();
+
+/** The part of a socket the release needs: closing it, and hearing that it closed. */
+interface TicketSocket {
+  destroy(): unknown;
+  once(event: 'close', listener: () => void): unknown;
+}
+
+/**
+ * Every socket opened to a ticket-held host and port, by `host:port`. A keep-alive pool would keep a socket to a page's host
+ * past the fetch that opened it, where a later request could reuse it without any connect, lookup, or ticket; so the moment
+ * the last ticket holding that host releases it, every socket opened to it is destroyed (#676).
+ */
+const ticketSockets = new Map<string, Set<TicketSocket>>();
+
+function targetKey(target: SingleHostAllowance): string {
+  return `${target.host}:${target.port}`;
+}
+
+function heldByTicket(target: SingleHostAllowance): boolean {
+  for (const held of ticketHolds.values()) if (held.host === target.host && held.port === target.port) return true;
+  return false;
+}
+
+function armedAllowanceFor(target: SingleHostAllowance): boolean {
+  return allowances.some((admitted) => admitted.host === target.host && admitted.port === target.port);
+}
 
 function validatedTarget(target: SingleHostAllowance): SingleHostAllowance {
   const host = target.host.toLowerCase();
@@ -162,9 +192,12 @@ function lookupAnswerPublic(address: unknown): boolean {
   return addresses !== null && addresses.length > 0 && addresses.every(isPublicAddress);
 }
 
-/** Whether one lookup names the host a ticket holds open, whose answer must be vetted before any connect uses it. */
+/** Whether one lookup names a host a ticket holds open, whose answer must be vetted before any connect uses it. */
 function namesTicketHost(args: readonly unknown[]): boolean {
-  return ticketHost !== null && typeof args[0] === 'string' && args[0].toLowerCase() === ticketHost.host;
+  if (typeof args[0] !== 'string') return false;
+  const name = args[0].toLowerCase();
+  for (const held of ticketHolds.values()) if (held.host === name) return true;
+  return false;
 }
 
 /**
@@ -265,25 +298,86 @@ export function perTicketHostAdmissionArmed(): boolean {
   return perTicketAdmissionArmed;
 }
 
+/** One ticket's admission: the public host and port it opens, and the id of the ticket that opens it. */
+export interface TicketHostTarget extends SingleHostAllowance {
+  readonly ticketId: string;
+}
+
 /**
- * Hold one public host open for the one fetch a redeemed `fetch-public-source` ticket authorizes, and return the release.
- * Refused unless per-ticket admission was armed before the install, while another ticket holds a host, or for an address
- * literal or loopback name. The release is idempotent and closes exactly the host it opened.
+ * Hold one public host open for the one fetch a redeemed `fetch-public-source` ticket authorizes, and return the release
+ * (#676). The admission is that ticket's own: other tickets — another live Run's included — hold theirs beside it, and a
+ * ticket opens a host once at a time. Refused unless per-ticket admission was armed before the install, for a ticket that
+ * already holds a host, or for an address literal or loopback name. The release is idempotent and closes exactly the hold it
+ * opened; when no ticket still holds that host and port, every socket opened to it is destroyed, so no pooled connection
+ * outlives the last ticket that admitted it.
  */
-export function admitTicketHost(target: SingleHostAllowance): () => void {
-  if (!perTicketAdmissionArmed || ticketHost !== null) throw new Error(NETWORK_ALLOWANCE_INVALID_CODE);
+export function admitTicketHost(target: TicketHostTarget): () => void {
+  if (!perTicketAdmissionArmed || typeof target.ticketId !== 'string' || target.ticketId.length === 0 || ticketHolds.has(target.ticketId)) {
+    throw new Error(NETWORK_ALLOWANCE_INVALID_CODE);
+  }
   const validated = validatedTarget(target);
   if (!isPublicHostName(validated.host)) throw new Error(NETWORK_ALLOWANCE_INVALID_CODE);
+  const { ticketId } = target;
   const held = validated;
-  ticketHost = held;
+  ticketHolds.set(ticketId, held);
   return () => {
-    if (ticketHost === held) ticketHost = null;
+    if (ticketHolds.get(ticketId) !== held) return;
+    ticketHolds.delete(ticketId);
+    if (heldByTicket(held)) return;
+    const key = targetKey(held);
+    const sockets = ticketSockets.get(key);
+    ticketSockets.delete(key);
+    for (const socket of sockets ?? []) socket.destroy();
   };
 }
 
-/** Every host and port a connection may address at this instant: the armed set, and the one ticket host if held. */
+/** How many tickets hold a host open at this instant. */
+export function ticketHostHolds(): number {
+  return ticketHolds.size;
+}
+
+/** Every host and port a connection may address at this instant: the armed set, and every host a ticket holds. */
 function admittedTargets(): ReadonlyArray<SingleHostAllowance> {
-  return ticketHost === null ? allowances : [...allowances, ticketHost];
+  return ticketHolds.size === 0 ? allowances : [...allowances, ...ticketHolds.values()];
+}
+
+function isTicketSocket(value: unknown): value is TicketSocket {
+  return value !== null && typeof value === 'object' && typeof (value as TicketSocket).destroy === 'function' &&
+    typeof (value as TicketSocket).once === 'function';
+}
+
+/**
+ * Remember a socket one admitted connect opened to a ticket-held host (#676), until it closes. A connect to an armed
+ * allowance is the policy's own host and is not a ticket's. A connect whose result cannot be closed is not let through:
+ * it is refused rather than left open past its ticket.
+ */
+function trackTicketSocket(args: readonly unknown[], socket: unknown): void {
+  const target = connectionTargetOf(args);
+  if (target === null || armedAllowanceFor(target) || !heldByTicket(target)) return;
+  if (!isTicketSocket(socket)) denyNetwork();
+  const key = targetKey(target);
+  const sockets = ticketSockets.get(key) ?? new Set<TicketSocket>();
+  if (sockets.has(socket)) return;
+  sockets.add(socket);
+  ticketSockets.set(key, sockets);
+  socket.once('close', () => {
+    sockets.delete(socket);
+    if (sockets.size === 0 && ticketSockets.get(key) === sockets) ticketSockets.delete(key);
+  });
+}
+
+/**
+ * The gate on a connect primitive, given the original (exported so a test can hand it a stub socket factory): an
+ * unadmitted target is denied before any socket exists, and a socket opened to a ticket-held host is tracked so that the
+ * ticket's release closes it. `Socket.prototype.connect` returns its receiver, which is the socket tracked.
+ */
+export function guardedConnect(original: (...args: unknown[]) => unknown): (...args: unknown[]) => unknown {
+  return function gatedConnect(this: unknown, ...args: unknown[]): unknown {
+    if (!allowanceAdmitsConnection(args)) return denyNetwork();
+    const result = Reflect.apply(original, this, args);
+    trackTicketSocket(args, isTicketSocket(result) ? result : this);
+    return result;
+  };
 }
 
 /** The host and port one `connect` call addresses, as `net`, `tls`, and `Socket.prototype.connect` accept them; IPC paths never resolve. */
@@ -309,11 +403,11 @@ export function connectionTargetOf(args: readonly unknown[]): { host: string; po
 export function allowanceAdmitsConnection(args: readonly unknown[]): boolean {
   const target = connectionTargetOf(args);
   if (target === null) return false;
-  if (allowances.some((admitted) => target.host === admitted.host && target.port === admitted.port)) return true;
+  if (armedAllowanceFor(target)) return true;
   // A ticket host is reached only through the gated `dns.lookup`, whose answer is vetted: a connect that brings its own
   // `lookup` would resolve the name past that check, so it is denied.
   const options = args[0] !== null && typeof args[0] === 'object' ? (args[0] as Record<string, unknown>) : null;
-  return ticketHost !== null && target.host === ticketHost.host && target.port === ticketHost.port && options?.['lookup'] === undefined;
+  return heldByTicket(target) && options?.['lookup'] === undefined;
 }
 
 /** Whether one name lookup names exactly an admitted host. */
@@ -352,15 +446,11 @@ function replaceCallable(
   Object.defineProperty(target, key, { ...descriptor, configurable: false, writable: false, value });
 }
 
-/** Replace a primitive with a gate that forwards to the original only for an admitted call and denies everything else. */
-function gateCallable(target: object, key: PropertyKey, admits: (args: readonly unknown[]) => boolean, required = true): void {
+/** Replace a connect primitive with `guardedConnect` over the original: an admitted call forwards, everything else is denied. */
+function gateConnect(target: object, key: PropertyKey, required = true): void {
   const descriptor = requireDescriptor(target, key, required);
   if (!descriptor) return;
-  const original = descriptor.value as (...args: unknown[]) => unknown;
-  const gated = function gatedNetworkPrimitive(this: unknown, ...args: unknown[]): unknown {
-    if (admits(args)) return Reflect.apply(original, this, args);
-    return denyNetwork();
-  };
+  const gated = guardedConnect(descriptor.value as (...args: unknown[]) => unknown);
   Object.defineProperty(target, key, { ...descriptor, configurable: false, writable: false, value: gated });
 }
 
@@ -396,14 +486,14 @@ export function installNodeNetworkDenial(): void {
   replaceCallable(http2, 'connect');
   replaceCallable(http2, 'createServer');
   replaceCallable(http2, 'createSecureServer');
-  gateCallable(net, 'connect', allowanceAdmitsConnection);
-  gateCallable(net, 'createConnection', allowanceAdmitsConnection);
+  gateConnect(net, 'connect');
+  gateConnect(net, 'createConnection');
   replaceCallable(net, 'createServer');
-  gateCallable(net.Socket.prototype, 'connect', allowanceAdmitsConnection);
+  gateConnect(net.Socket.prototype, 'connect');
   replaceCallable(net.Server.prototype, 'listen');
-  gateCallable(tls, 'connect', allowanceAdmitsConnection);
+  gateConnect(tls, 'connect');
   replaceCallable(tls, 'createServer');
-  gateCallable(tls.TLSSocket.prototype, 'connect', allowanceAdmitsConnection, false);
+  gateConnect(tls.TLSSocket.prototype, 'connect', false);
   replaceCallable(dgram, 'createSocket');
   replaceCallable(dgram.Socket.prototype, 'bind');
   replaceCallable(dgram.Socket.prototype, 'connect');
