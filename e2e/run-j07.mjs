@@ -1876,6 +1876,21 @@ async function main() {
       deliveries: [[2, '版本 3', 'custom', DELIVERY_CUSTOM, null, null], [1, '版本 2', 'publicity', '宣传部', DELIVERY_NOTE, 'created']],
     }), 'redeliver-service-agrees', redelivered);
 
+    at('package-evaluation');
+    // 评估 定稿 (Issue #429, S81a; BUNDLE-001): the Book's first Evaluation Record is scored and finalized through 评估's own
+    // operations — five scores, both risks 低 with a statement, 修改后再议 — so the package has a 定稿 评估记录 to name. The Book
+    // has no 审稿意见, which the package lists under 不包含 with the reason; the drafting itself is J-11's.
+    const evaluationStart = await renderer.evaluate(`window.ai7.startEvaluation({ fromInitial: false }).then((page) => ({ recordId: page.record.recordId, entries: page.record.entries, content: page.record.content }))`);
+    requireJourney(typeof evaluationStart?.recordId === 'string' && evaluationStart.content?.items?.length === 5 && evaluationStart.content.risks?.length === 2, 'package-evaluation-started', evaluationStart);
+    const evaluationContent = {
+      ...evaluationStart.content,
+      items: evaluationStart.content.items.map((item, index) => ({ ...item, score: [16, 15, 17, 14, 12][index] })),
+      risks: evaluationStart.content.risks.map((risk) => ({ ...risk, level: 'low', statement: '已核对，未发现未解决的问题。', reviewed: false })),
+      conclusion: 'revise',
+    };
+    const evaluationFinalized = await renderer.evaluate(`window.ai7.saveEvaluation(${JSON.stringify({ recordId: evaluationStart.recordId, expectedEntries: evaluationStart.entries, content: evaluationContent, finalize: true })}).then((page) => ({ state: page.record.state, ordinal: page.record.ordinal }))`);
+    requireJourney(evaluationFinalized?.state === 'finalized' && evaluationFinalized.ordinal === 1, 'package-evaluation-finalized', evaluationFinalized);
+
     at('package-conditions');
     // 图书交付包 (Issue #416, S67a; BUNDLE-001 to 005): the last block of 交付物 says what a package is and is not and
     // lists its conditions — the 发稿版本 set, with 自发稿版本后有修改 beside it; the 新闻稿 delivered; the four other
@@ -1915,11 +1930,12 @@ async function main() {
       const bundle = window.__j07.pkg();
       const lines = (selector) => Array.from(bundle.querySelectorAll(selector)).map((item) => item.dataset.itemKind + ':' + item.querySelector('.package-item-label')?.textContent);
       const limitations = Array.from(bundle.querySelectorAll('ul.package-limitations > li')).map((item) => item.textContent);
-      return JSON.stringify(lines('ul.package-included > li')) === ${JSON.stringify(JSON.stringify([`publication:发稿版本「${FIRST.label}」 · r1`, 'document:新闻稿 · 版本 3']))} &&
+      return JSON.stringify(lines('ul.package-included > li')) === ${JSON.stringify(JSON.stringify([`publication:发稿版本「${FIRST.label}」 · r1`, 'document:新闻稿 · 版本 3', 'evaluation-record:评估记录 · 第 1 版定稿']))} &&
         JSON.stringify(lines('ul.package-excluded > li')) === ${JSON.stringify(JSON.stringify([
-          ...['宣传文章', '评论文章', '发布会材料', '营销要点'].map((label) => `not-for-this-book:${label}`), 'exclusion:备注', 'exclusion:资料库原件', 'exclusion:中间修订版',
+          ...['宣传文章', '评论文章', '发布会材料', '营销要点'].map((label) => `not-for-this-book:${label}`), 'readers-report:审稿意见', 'exclusion:备注', 'exclusion:资料库原件', 'exclusion:中间修订版',
         ]))} &&
-        JSON.stringify(limitations) === ${JSON.stringify(JSON.stringify(['稿件：自发稿版本后有修改，本包按发稿版本。', '评估记录与定稿的审稿意见：AI7 尚未提供这两类记录，本包不含。']))} &&
+        bundle.querySelector('ul.package-excluded > li[data-item-kind="readers-report"] .package-item-detail')?.textContent === '本书没有审稿意见' &&
+        JSON.stringify(limitations) === ${JSON.stringify(JSON.stringify(['稿件：自发稿版本后有修改，本包按发稿版本。']))} &&
         bundle.querySelector('[data-package-action="prepare"]').disabled && window.__j07.packageReason() === '先写明交付包用途。';
     })()`, 'package-preview-lists-what-it-holds');
 
@@ -1936,7 +1952,7 @@ async function main() {
       return v1.dataset.packageCurrent === 'true' && (line?.textContent ?? '').startsWith('v1 · 图书交付包已准备 · 暂无导出记录') &&
         line.querySelector('.package-current-mark')?.textContent === '当前' && document.activeElement === line &&
         (v1.querySelector('.package-version-meta')?.textContent ?? '').startsWith(${JSON.stringify(`用途：${PACKAGE_PURPOSE} · `)}) &&
-        v1.querySelector('.package-version-summary')?.textContent === ${JSON.stringify(`发稿版本「${FIRST.label}」 · r1 · 生产文档 1 份 · 本书不做 4 类 · 审阅报告 0 份`)} &&
+        v1.querySelector('.package-version-summary')?.textContent === ${JSON.stringify(`发稿版本「${FIRST.label}」 · r1 · 生产文档 1 份 · 本书不做 4 类 · 审阅报告 0 份 · 评估记录 1 份 · 审稿意见 0 份`)} &&
         window.__j07.pkg().dataset.packageChanged === 'false';
     })()`, 'package-v1-listed');
     requireJourney(JSON.stringify((await readdir(exportsRoot)).sort()) === exportsBefore, 'package-writes-no-file');
@@ -1959,13 +1975,14 @@ async function main() {
     at('package-export');
     // 导出… of v2 (Issue #416, S67b; BUNDLE-004, EXP-010 to EXP-022) lists the files it writes and binds nothing until a
     // folder is chosen; 选择位置… answers the folder dialog with the run's own empty folder and prepares every file there,
-    // writing none; 按上述方式导出 writes them one by one, each with its receipt. The folder then holds exactly the three
-    // files — the 发稿版本's revision and the 新闻稿's delivered 版本 3 as DOCX, and the 交付包清单 in the package's own
-    // words — v2's history says so, and 交付物's export records and the package itself stay as they were.
+    // writing none; 按上述方式导出 writes them one by one, each with its receipt. The folder then holds exactly the four
+    // files — the 发稿版本's revision and the 新闻稿's delivered 版本 3 as DOCX, the 定稿 评估记录 (Issue #429) and the 交付包清单
+    // in the package's own words — v2's history says so, and 交付物's export records and the package itself stay as they were.
     const packageFiles = [
       // The fifth field names the file in a check label (Issue #652); the key itself carries a colon.
       ['publication', 'docx', `稿件 · 发稿版本「${FIRST.label}」 · r1`, `001 ${EXCERPT.title} · ${FIRST.label}.docx`, 'publication'],
       ['document:news-release', 'docx', '新闻稿 · 版本 3', `002 ${EXCERPT.title} · 新闻稿 · 版本 3.docx`, 'news-release'],
+      ['evaluation-record', 'markdown', '评估记录 · 第 1 版定稿', `003 ${EXCERPT.title} · 评估记录 · 第 1 版定稿.md`, 'evaluation-record'],
       ['manifest', 'markdown', '交付包清单', PACKAGE_MANIFEST_FILE, 'manifest'],
     ];
     const firstMembers = packageFiles.filter(([key]) => key !== 'document:news-release');
@@ -2037,19 +2054,19 @@ async function main() {
     })()`, 'package-export-bound-to-the-folder');
     requireJourney((await readdir(packageFolder)).length === 0, 'package-export-prepared-writes-nothing');
     await clickSelector(renderer, packageAction('export-approve'), 'package-export-approve');
-    await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'done' && window.__j07.status() === '已导出到所选位置 · 2 个文件'`, 'package-export-written', 60_000);
+    await waitFor(renderer, `window.__j07.packageExport()?.dataset.packageExportPhase === 'done' && window.__j07.status() === '已导出到所选位置 · 3 个文件'`, 'package-export-written', 60_000);
     await assertRenderer(renderer, `(() => {
       const panel = window.__j07.packageExport();
       const result = panel.querySelector('.package-export-result');
       const [v2, v1] = window.__j07.packageVersions();
       const history = Array.from(v2.querySelectorAll('ol.package-export-list > li'));
-      return result?.dataset.packageExportState === 'exported' && result.querySelector('.package-export-summary')?.textContent === '已导出到所选位置 · 2 个文件' &&
+      return result?.dataset.packageExportState === 'exported' && result.querySelector('.package-export-summary')?.textContent === '已导出到所选位置 · 3 个文件' &&
         result.querySelector('.package-export-stopped') === null &&
         JSON.stringify(window.__j07.packageExportFiles()) === ${JSON.stringify(JSON.stringify(packageFileLines('created', '已导出到所选位置', firstMembers)))} &&
         document.activeElement === result.querySelector('[data-package-action="export-reveal"]') && panel.querySelector('[data-package-action="export-choose"]') === null &&
         (v2.querySelector('.package-version-line')?.textContent ?? '').startsWith('v2 · 图书交付包已准备 · 已导出 1 次') &&
         history.length === 1 && history[0].dataset.packageExportState === 'exported' &&
-        (history[0].querySelector('.package-export-line')?.textContent ?? '').startsWith('已导出到所选位置 · 2 个文件 · ') &&
+        (history[0].querySelector('.package-export-line')?.textContent ?? '').startsWith('已导出到所选位置 · 3 个文件 · ') &&
         history[0].querySelector('.package-export-folder')?.textContent === ${JSON.stringify(packageFolder)} &&
         history[0].querySelector('[data-package-action="reveal-export"]')?.textContent === '在文件夹中显示' &&
         v1.querySelector('ol.package-export-list') === null && (v1.querySelector('.package-version-line')?.textContent ?? '').startsWith('v1 · 图书交付包已准备 · 暂无导出记录') &&
@@ -2078,6 +2095,11 @@ async function main() {
       const bytes = await readFile(resolve(packageFolder, fileName));
       requireJourney(bytes.byteLength > 1_000 && bytes.subarray(0, 2).toString('latin1') === 'PK', `package-export-docx-${name}`);
     }
+    // The 评估记录 file is the 定稿 version's own words (Issue #429): its heading, scores as 得分 / 满分, the conclusion, and no weight
+    // or percentage anywhere.
+    const evaluationFile = await readFile(resolve(packageFolder, packageFiles[2][3]), 'utf8');
+    requireJourney(evaluationFile.startsWith(`# ${EXCERPT.title} · 评估记录 · 第 1 版定稿\n\n- 评估方案：`) && evaluationFile.includes('\n## 评分\n') &&
+      evaluationFile.includes('- 总分：74 / 100\n') && evaluationFile.endsWith('\n## 结论\n\n修改后再议\n') && !/%|百分|权重/u.test(evaluationFile), 'package-export-evaluation-record-words');
     const manifestInputs = await renderer.evaluate(`Promise.all([window.ai7.inspectBookDeliveryPackage(), window.ai7.inspectProductionDocuments()]).then(([bundle, documents]) => ({
       version: bundle.versions[0], included: bundle.content.included, limitations: bundle.content.limitations, statement: bundle.statement,
       deliveries: documents.types.find((type) => type.typeId === 'news-release').document.deliveries,
@@ -2086,18 +2108,20 @@ async function main() {
       `# ${EXCERPT.title} · 图书交付包 v2`, '',
       `- 用途：${PACKAGE_PURPOSE_2}`, `- 准备于：${manifestInputs.version.preparedAt}`, `- 内容摘要：${manifestInputs.version.technical.contentDigest}`, '',
       '## 包含', '',
-      `- 稿件 · ${manifestInputs.included[0].label}（${manifestInputs.included[0].detail}）`, `- ${manifestInputs.included[1].label}`, '',
+      `- 稿件 · ${manifestInputs.included[0].label}（${manifestInputs.included[0].detail}）`, `- ${manifestInputs.included[1].label}`,
+      `- ${manifestInputs.included[2].label}（定稿于 ${manifestInputs.included[2].detail.split(' · 定稿于 ')[1]}）`, '',
       '## 交付记录', '', '### 新闻稿', '',
       ...manifestInputs.deliveries.map((delivery) =>
         `- 第 ${delivery.ordinal} 次交付 · ${delivery.recipient.label} · ${delivery.versionLabel} · ${delivery.recordedAt}${delivery.note === null ? '' : `（备注：${delivery.note}）`}`),
       '',
       '## 不包含', '',
-      '- 备注：稿件与文档上的备注只供编辑自己参考', '- 资料库原件', '- 中间修订版：稿件只含发稿版本，文档只含交付过的版本', '- 本书不做：宣传文章、评论文章、发布会材料、营销要点', '',
+      '- 备注：稿件与文档上的备注只供编辑自己参考', '- 资料库原件', '- 中间修订版：稿件只含发稿版本，文档只含交付过的版本', '- 本书不做：宣传文章、评论文章、发布会材料、营销要点',
+      '- 审稿意见：本书没有审稿意见', '',
       '## 说明', '',
       ...manifestInputs.limitations.map((line) => `- ${line}`), `- ${manifestInputs.statement}`, '',
     ].join('\n');
     const manifest = await readFile(resolve(packageFolder, PACKAGE_MANIFEST_FILE));
-    requireJourney(manifestInputs.included.length === 2 && manifestInputs.deliveries.length === 2 &&
+    requireJourney(manifestInputs.included.length === 3 && manifestInputs.included[2].kind === 'evaluation-record' && manifestInputs.deliveries.length === 2 &&
       createHash('sha256').update(manifest).digest('hex') === createHash('sha256').update(expectedManifest, 'utf8').digest('hex'), 'package-export-manifest-words');
     requireJourney(await renderer.evaluate(`window.ai7.inspectDeliverables().then((answer) => JSON.stringify(answer.exports))`) === recordsBefore, 'package-export-not-in-export-records');
     // 完成 closes the card; focus returns to v2's 导出….
@@ -2355,6 +2379,8 @@ async function main() {
       bookId: card.dataset.bookId, title: card.querySelector('h3')?.textContent ?? null, attribution: card.querySelector('.exemplar-attribution')?.textContent ?? null,
       designation: card.querySelector('.exemplar-designation')?.textContent ?? null, more: document.querySelector('.exemplars-more')?.hidden ?? null,
       items: Array.from(card.querySelectorAll('.exemplar-items li'), (item) => [item.dataset.exemplarType, item.dataset.exemplarVersion, item.textContent]),
+      readersReports: card.querySelectorAll('.exemplar-readers-reports li').length,
+      later: Array.from(document.querySelectorAll('.knowledge-panel .exemplars-later'), (line) => line.textContent),
     }))`);
     const exemplarBook = exemplars?.books?.[0];
     const exemplarNews = exemplarBook?.exemplars?.find((exemplar) => exemplar.typeId === 'news-release');
@@ -2367,7 +2393,10 @@ async function main() {
       exemplarPage[0].attribution === '作者：未填写 · 责编：未填写' && exemplarPage[0].items.length === exemplarBook.exemplars.length &&
       exemplarPage[0].items[0][0] === 'news-release' && exemplarPage[0].items[0][1] === String(exemplarNews.version) &&
       exemplarPage[0].items[0][2].startsWith(`新闻稿 · 版本 ${exemplarNews.version} · 交付给`) &&
-      exemplarPage[0].items[0][2].includes(` · 学习准入：仅本社 · 此前还交付过版本 ${exemplarNews.earlierVersions[0]}`),
+      exemplarPage[0].items[0][2].includes(` · 学习准入：仅本社 · 此前还交付过版本 ${exemplarNews.earlierVersions[0]}`) &&
+      // This Book has no 审稿意见 (Issue #429): 范例 offers none, and says only that earlier Books' exemplars are still to come.
+      exemplarBook.readersReports.length === 0 && exemplarPage[0].readersReports === 0 &&
+      JSON.stringify(exemplarPage[0].later) === JSON.stringify(['以前出版的书的范例由编辑导入并标明图书、作者、责编：尚未提供。']),
     'exemplars-news-release', { service: exemplars?.books?.map((entry) => entry.exemplars.map((exemplar) => [exemplar.typeId, exemplar.version, exemplar.earlierVersions])), page: exemplarPage });
 
     at('publication-actuals');
@@ -2566,7 +2595,7 @@ async function main() {
     await clickSelector(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-action="plan"]', 'writing-plan-open');
     await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer === 'open' && drawer.dataset.taskPlanKind === 'writing' && drawer.dataset.taskPlanStart === 'ready' && drawer.querySelector('[data-task-drawer-control="start"]')?.disabled === false; })()`, 'writing-plan-ready', 120_000);
     const writingPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'writing', ref: document.querySelector('#task-drawer').dataset.taskPlanRef })
-      .then((plan) => JSON.stringify([plan.goal.sentence, plan.scope.reference, plan.steps.map((step) => step.label), plan.notDo.editorial.includes('不照抄范例：与范例有连续 12 个字以上相同（跨标点时 16 个字；英文为 8 个词，跨标点时 11 个词）的草稿不予采用')]))`);
+      .then((plan) => JSON.stringify([plan.goal.sentence, plan.scope.reference, plan.steps.map((step) => step.label), plan.notDo.editorial.includes('不照抄范例：与范例有连续 12 个字以上相同（跨标点、空格或外文词时 16 个字；拉丁字母文字为 8 个词，跨标点、数字或编号时 11 个词）的草稿不予采用')]))`);
     requireJourney(writingPlan === JSON.stringify([
       `为《${WRITING_TITLE}》起草「宣传文章」：受众「${WRITING_REQUEST.audience}」，渠道「${WRITING_REQUEST.channel}」`,
       ['本书尚无基线分析，本次不参考梗概与人物', '本书尚无定稿的评估，本次不参考评估结论与营销要点', '本社暂无其他图书的宣传文章范例，本次不参考范例',

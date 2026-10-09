@@ -12,6 +12,7 @@ import type {
   KnowledgeProcedureProjection,
   ExemplarBookProjection,
   ExemplarProjection,
+  ReadersReportExemplarProjection,
   ReviewGuidelineDocumentProjection,
   ReviewGuidelineMergedVersionProjection,
   ReviewGuidelinePreviewProjection,
@@ -202,10 +203,40 @@ export const EXEMPLARS_STATUS = {
 } as const;
 /** What 范例 does not hold yet, said once below the Books. */
 export const EXEMPLARS_LATER = [
-  '审稿意见随「评估与审稿意见」到来后，也会在设为发稿版本时归入。',
   '以前出版的书的范例由编辑导入并标明图书、作者、责编：尚未提供。',
 ] as const;
 export const EXEMPLAR_ELIGIBILITY_LABELS: Readonly<Record<ExemplarProjection['eligibility'], string>> = { 'house-only': '仅本社' };
+
+// ---- 审稿意见 offered into 范例 (Issue #429, S81c remainder; KB-006) --------------------------------------------------------
+
+/** Which version of a 审稿意见 is offered: the one 图书交付包 pins. */
+export const EXEMPLAR_READERS_REPORT_PINS: Readonly<Record<ReadersReportExemplarProjection['pin'], string>> = {
+  designation: '设为发稿版本时的最新一版',
+  later: '发稿版本设定后才起草，按现在的最新一版',
+};
+/** The one action on an offered 审稿意见: the editor admits it, under the eligibility it comes with. */
+export const EXEMPLAR_READERS_REPORT_ADMIT = '归入范例（仅本社）';
+export const EXEMPLAR_READERS_REPORT_STATUS = {
+  admitting: '正在归入范例…',
+  admitted: '审稿意见已归入范例',
+  failed: '无法归入范例。',
+} as const;
+
+/** Where an offered 审稿意见's admission stands, in words: not yet, this version, or an earlier version. */
+export function readersReportExemplarAdmission(admission: ReadersReportExemplarProjection['admission'], instant: (iso: string) => string): string {
+  if (admission.state === 'admitted' && admission.admittedAt !== null) return `已归入于 ${instant(admission.admittedAt)}`;
+  if (admission.state === 'superseded') return '此前归入的是另一版；这一版尚未归入';
+  return '尚未归入：由你决定是否归入范例';
+}
+
+/**
+ * One offered 审稿意见's line: its template and version, when that version was saved, why it is the version offered, its
+ * eligibility, and where its admission stands.
+ */
+export function readersReportExemplarLine(entry: ReadersReportExemplarProjection, instant: (iso: string) => string): string {
+  return `${entry.typeLabel} · 版本 ${entry.version} · 保存于 ${instant(entry.savedAt)} · ${EXEMPLAR_READERS_REPORT_PINS[entry.pin]}` +
+    ` · 学习准入：${EXEMPLAR_ELIGIBILITY_LABELS[entry.eligibility]} · ${readersReportExemplarAdmission(entry.admission, instant)}`;
+}
 
 /** Who a published Book is attributed to, as its 人员 read now. */
 export function exemplarAttribution(book: Pick<ExemplarBookProjection, 'authors' | 'editors'>): string {

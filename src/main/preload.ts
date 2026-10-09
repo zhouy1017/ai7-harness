@@ -263,6 +263,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['importReviewGuidelineVersion']['output']>(IPC_CHANNELS.importReviewGuidelineVersion, input),
   inspectExemplars: (input?: ServiceOperationMap['inspectExemplars']['input']) =>
     invoke<ServiceOperationMap['inspectExemplars']['output']>(IPC_CHANNELS.inspectExemplars, input ?? { after: null }),
+  admitReadersReportExemplar: (input: ServiceOperationMap['admitReadersReportExemplar']['input']) =>
+    invoke<ServiceOperationMap['admitReadersReportExemplar']['output']>(IPC_CHANNELS.admitReadersReportExemplar, input),
   inspectKnowledgeProcedures: () => invoke<ServiceOperationMap['inspectKnowledgeProcedures']['output']>(IPC_CHANNELS.inspectKnowledgeProcedures),
   // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087).
   inspectCapturedProcedures: () => invoke<ServiceOperationMap['inspectCapturedProcedures']['output']>(IPC_CHANNELS.inspectCapturedProcedures),

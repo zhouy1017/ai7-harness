@@ -10,6 +10,8 @@ import {
   BOOK_DELIVERY_PACKAGE_REFUSALS,
   BOOK_DELIVERY_PACKAGE_STATEMENT,
   BOOK_DELIVERY_PACKAGE_WORDS,
+  evaluationRecordLabel,
+  evaluationUnreadableDetail,
   bookDeliveryPackageNotReady,
 } from '../../src/service/book-delivery-packages.js';
 import { PUBLICATION_FORBIDDEN_WORDS } from '../../src/shared/protocol.js';
@@ -63,8 +65,16 @@ describe('the words of 图书交付包', () => {
       libraryOriginals: '资料库原件',
       intermediateRevisions: '中间修订版',
       intermediateRevisionsDetail: '稿件只含发稿版本，文档只含交付过的版本',
-      unavailableRecords: '评估记录与定稿的审稿意见：AI7 尚未提供这两类记录，本包不含。',
+      evaluationRecord: '评估记录',
+      evaluationMissing: '本书没有定稿评估记录',
+      readersReport: '审稿意见',
+      readersReportMissing: '本书没有审稿意见',
+      readersReportPinned: '设为发稿版本时的最新一版',
+      readersReportLater: '发稿版本设定后才起草，按准备时的最新一版',
     });
+    // The two records a package names since Issue #429, and how a Book without them reads (BUNDLE-001).
+    expect(evaluationRecordLabel(2)).toBe('评估记录 · 第 2 版定稿');
+    expect(evaluationUnreadableDetail('评估记录已损坏。')).toBe('评估记录无法读取：评估记录已损坏。');
     expect(BOOK_DELIVERY_PACKAGE_REFUSALS).toEqual({
       changed: '图书交付包的内容在查看后又有变化，请看过新的内容再准备。',
       purpose: '请写明交付包用途（1–80 个字）。',

@@ -2836,6 +2836,22 @@ function registerRendererHandlers(
       return service.call('inspectExemplars', { after: input?.after ?? null });
     }),
   );
+  // 归入范例 of one 审稿意见 (Issue #429): a write on the Learning Eligibility ledger, serialized like every other effect.
+  ipcMain.handle(IPC_CHANNELS.admitReadersReportExemplar, (event, input: ServiceOperationMap['admitReadersReportExemplar']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('admitReadersReportExemplar', {
+          bookId: input.bookId,
+          template: input.template,
+          revisionDigest: input.revisionDigest,
+          expectedDecisions: input.expectedDecisions,
+        });
+      });
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.inspectKnowledgeProcedures, (event) =>
     envelope(async () => {
       requireSender(event);

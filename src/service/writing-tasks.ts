@@ -7,7 +7,6 @@ import {
   MAX_EXEMPLAR_GRAPHEMES,
   MAX_SYNOPSIS_GRAPHEMES,
   MAX_WRITING_EXEMPLARS,
-  WRITING_COPY_RULES,
   writingContract,
   writingContractDigest,
   type WritingCopyRules,
@@ -375,6 +374,8 @@ export class WritingTasks {
     exemplarSources: ReadonlyArray<WritingExemplarSource>;
     contract: WritingContractInput;
     promptContractSha256: string;
+    /** The copy rules the contract was composed under: `/2` for every Task the product records; `/1` only for the suites (#707). */
+    copyRules: WritingCopyRules;
   }): void {
     requireWriting(UUID_PATTERN.test(input.taskIntentId) && UUID_PATTERN.test(input.bookId) &&
       (input.evaluationRecordId === null || UUID_PATTERN.test(input.evaluationRecordId)) &&
@@ -405,8 +406,9 @@ export class WritingTasks {
       exemplarSources: input.exemplarSources.map(exemplarSourceOf),
       // Another Book's words are referenced, never stored here: the exemplars travel as references only.
       input: { ...input.contract, exemplars: [] },
-      // The copy rules its contract carries (#704 P2-2): every Task recorded now is `/2`.
-      copyRules: WRITING_COPY_RULES,
+      // The copy rules its contract carries (#704 P2-2): every Task the product records is `/2`. A `/1` row names none, in the
+      // shape the software before #698 wrote, which `#task` reads as `/1` (#707).
+      ...(input.copyRules === 2 ? { copyRules: input.copyRules } : {}),
       recordedAt,
     });
     this.#db.prepare(

@@ -12,6 +12,7 @@ import {
   type BookDeliveryPackageItemProjection,
   type BookDeliveryPackageProjection,
   type BookDeliveryPackageVersionProjection,
+  type ReadersReportTemplate,
   type ReviewRunState,
 } from '../shared/protocol.js';
 import { maintenanceWithdrawnLine } from '../shared/maintenance-wording.js';
@@ -22,8 +23,12 @@ import { BUILTIN_PRODUCTION_DOCUMENT_TYPES, BUILTIN_PRODUCTION_DOCUMENT_TYPES_DI
 /**
  * 图书交付包 (Issue #416, plan slice S67a; V2-UX-BUNDLE-001 to 005, DPKG-001 to 015 as DPKG-015 binds them to the Book;
  * editor-surfaces §9; ADR 0077 §6). The Book-level total of its finished work: the Manuscript's Publication Version,
- * the latest delivered version of every Production Document not marked 本书不做, and the review reports, with each
- * document's Delivery Records. A condition table says what is still missing and where to go; `准备图书交付包` freezes
+ * the latest delivered version of every Production Document not marked 本书不做, the review reports, with each
+ * document's Delivery Records, and — since Issue #429 (S81c remainder) — the Book's 定稿 评估记录 current at the freeze, by its
+ * record and the digest of the entry that finalized it, and each template's 审稿意见 at the version 设为发稿版本时的最新一版 (a
+ * draft that came after the designation at the version latest when the package is read), each pinned by its digest. Neither
+ * is a condition: a Book without one lists it under 不包含 with the reason, and nothing is copied — the package names the
+ * records and the export writes them (`book-delivery-package-exports.ts`). A condition table says what is still missing and where to go; `准备图书交付包` freezes
  * exactly the content the editor saw, with the purpose they wrote, as the package's next version — v1, v2 … — each
  * naming the one before it. Preparing chooses no destination, writes no file and changes no record: a package is
  * neither 发稿 nor 交付 and proves neither (BUNDLE-005, DPKG-010). Its export is S67b's.
@@ -123,8 +128,25 @@ export const BOOK_DELIVERY_PACKAGE_WORDS = {
   libraryOriginals: '资料库原件',
   intermediateRevisions: '中间修订版',
   intermediateRevisionsDetail: '稿件只含发稿版本，文档只含交付过的版本',
-  unavailableRecords: '评估记录与定稿的审稿意见：AI7 尚未提供这两类记录，本包不含。',
+  evaluationRecord: '评估记录',
+  evaluationMissing: '本书没有定稿评估记录',
+  readersReport: '审稿意见',
+  readersReportMissing: '本书没有审稿意见',
+  /** The 审稿意见 version the package pins (Issue #429): the one latest when the 发稿版本 was designated. */
+  readersReportPinned: '设为发稿版本时的最新一版',
+  /** A draft that came after the designation has no such version: the package takes the latest when it is read. */
+  readersReportLater: '发稿版本设定后才起草，按准备时的最新一版',
 } as const;
+
+/** `评估记录 · 第 2 版定稿`: the 定稿 version a package names. */
+export function evaluationRecordLabel(ordinal: number): string {
+  return `评估记录 · 第 ${ordinal} 版定稿`;
+}
+
+/** `评估记录无法读取：…` when the Book's versions cannot be read: the package says so, and holds none. */
+export function evaluationUnreadableDetail(reason: string): string {
+  return `评估记录无法读取：${reason}`;
+}
 
 export const BOOK_DELIVERY_PACKAGE_REFUSALS = {
   changed: '图书交付包的内容在查看后又有变化，请看过新的内容再准备。',
@@ -191,10 +213,33 @@ export interface PackageReviewRunReading {
   report: null | { reportId: string; version: number; digest: string; generatedAt: string };
 }
 
+/** The Book's latest 定稿 Evaluation Record version (Issue #429), as the package names it, or why its versions cannot be read. */
+export type PackageEvaluationReading =
+  | { kind: 'finalized'; recordId: string; ordinal: number; entrySha256: string; finalizedAt: string; profileTitle: string; profileVersion: string }
+  | { kind: 'unreadable'; reason: string };
+
+/** One template's 审稿意见 at the version the package pins (Issue #429), and whether the draft was saved again after it. */
+export interface PackageReadersReportReading {
+  template: ReadersReportTemplate;
+  typeId: string;
+  typeLabel: string;
+  documentId: string;
+  version: number;
+  revisionId: string;
+  revisionDigest: string;
+  savedAt: string;
+  pin: 'designation' | 'later';
+  laterVersions: boolean;
+}
+
 export interface BookDeliveryPackageSources {
   publication(bookId: string): PackagePublicationReading | null;
   documents(bookId: string): ReadonlyArray<PackageDocumentReading>;
   reviewRuns(bookId: string): ReadonlyArray<PackageReviewRunReading>;
+  /** The Book's latest 定稿 评估记录 (Issue #429), `null` while none is. */
+  evaluation?(bookId: string): PackageEvaluationReading | null;
+  /** Each template's 审稿意见 pinned at the designation given, or at the read when there is none (Issue #429). */
+  readersReports?(bookId: string, designatedAt: string | null): ReadonlyArray<PackageReadersReportReading>;
   /** Each version's exports newest first, as far as they are listed, and how many there were (Issue #416, S67b). */
   exportHistory?(bookId: string, packageVersionId: string): { exports: BookDeliveryPackageExportSummaryProjection[]; total: number };
 }
@@ -223,7 +268,8 @@ const integer = (value: SQLOutputValue | undefined): number => {
 
 /** What a package holds apart from its purpose: exactly what `contentDigest` names. Its export reads it (Issue #416, S67b). */
 export interface PackageContent {
-  schema: 'ai7.book-delivery-package-content/1';
+  /** `/2` since Issue #429 names the 评估记录 and the 审稿意见; a `/1` record, read back, names none of either. */
+  schema: 'ai7.book-delivery-package-content/1' | 'ai7.book-delivery-package-content/2';
   bookId: string;
   publication: null | Omit<PackagePublicationReading, 'changedSince' | 'withdrawn'>;
   documents: ReadonlyArray<
@@ -231,6 +277,10 @@ export interface PackageContent {
     | { typeId: string; disposition: 'not-for-this-book' }
   >;
   reviewReports: ReadonlyArray<{ reviewRunId: string; reportId: string; version: number; digest: string }>;
+  /** The 定稿 评估记录 current at the freeze, by record and finalized entry (Issue #429); absent in a `/1` record. */
+  evaluation?: null | { recordId: string; ordinal: number; entrySha256: string; finalizedAt: string };
+  /** Each template's 审稿意见 at the version pinned, by its digest (Issue #429); absent in a `/1` record. */
+  readersReports?: ReadonlyArray<{ template: ReadersReportTemplate; documentId: string; version: number; revisionId: string; revisionDigest: string; pin: 'designation' | 'later' }>;
   exclusions: ReadonlyArray<string>;
   limitations: ReadonlyArray<string>;
   typeConfiguration: { version: string; digest: string };
@@ -459,17 +509,44 @@ export class BookDeliveryPackages {
     });
     // The newest reports first in the preview, as far as it lists them; the content holds every one.
     included.push(...reportItems.reverse().slice(0, MAX_BOOK_DELIVERY_PACKAGE_REPORTS_LISTED));
-    limitations.push(...reviewLimitations);
+
+    // 评估记录 and 审稿意见 (Issue #429; BUNDLE-001): the 定稿 version current now, and each template's 审稿意见 at the version
+    // 设为发稿版本时的最新一版. Neither is a condition (BUNDLE-002 names none): a Book without one lists it under 不包含, with why.
+    const evaluation = this.#sources.evaluation?.(bookId) ?? null;
+    const readersReports = this.#sources.readersReports?.(bookId, publication === null ? null : this.#designatedAt(publication.publicationVersionId)) ?? [];
+    const recordLimitations: string[] = [];
+    if (evaluation?.kind === 'finalized') {
+      included.push({ kind: 'evaluation-record', label: evaluationRecordLabel(evaluation.ordinal), detail: `评估方案「${evaluation.profileTitle}」 第 ${evaluation.profileVersion} 版 · 定稿于 ${evaluation.finalizedAt}` });
+    } else {
+      excluded.push({
+        kind: 'evaluation-record',
+        label: BOOK_DELIVERY_PACKAGE_WORDS.evaluationRecord,
+        detail: evaluation === null ? BOOK_DELIVERY_PACKAGE_WORDS.evaluationMissing : evaluationUnreadableDetail(evaluation.reason),
+      });
+    }
+    for (const report of readersReports) {
+      included.push({
+        kind: 'readers-report',
+        label: `${report.typeLabel} · 版本 ${report.version}`,
+        detail: report.pin === 'designation' ? BOOK_DELIVERY_PACKAGE_WORDS.readersReportPinned : BOOK_DELIVERY_PACKAGE_WORDS.readersReportLater,
+      });
+      if (report.pin === 'designation' && report.laterVersions) {
+        recordLimitations.push(`${report.typeLabel}：设为发稿版本后又有修改，本包按${BOOK_DELIVERY_PACKAGE_WORDS.readersReportPinned}（版本 ${report.version}）。`);
+      }
+    }
+    if (readersReports.length === 0) {
+      excluded.push({ kind: 'readers-report', label: BOOK_DELIVERY_PACKAGE_WORDS.readersReport, detail: BOOK_DELIVERY_PACKAGE_WORDS.readersReportMissing });
+    }
+    limitations.push(...recordLimitations, ...reviewLimitations);
 
     excluded.push(
       { kind: 'exclusion', label: BOOK_DELIVERY_PACKAGE_WORDS.editorNotes, detail: BOOK_DELIVERY_PACKAGE_WORDS.editorNotesDetail },
       { kind: 'exclusion', label: BOOK_DELIVERY_PACKAGE_WORDS.libraryOriginals, detail: null },
       { kind: 'exclusion', label: BOOK_DELIVERY_PACKAGE_WORDS.intermediateRevisions, detail: BOOK_DELIVERY_PACKAGE_WORDS.intermediateRevisionsDetail },
     );
-    limitations.push(BOOK_DELIVERY_PACKAGE_WORDS.unavailableRecords);
 
     const content: PackageContent = {
-      schema: 'ai7.book-delivery-package-content/1',
+      schema: 'ai7.book-delivery-package-content/2',
       bookId,
       publication: publication === null ? null : {
         publicationVersionId: publication.publicationVersionId,
@@ -484,6 +561,12 @@ export class BookDeliveryPackages {
       },
       documents,
       reviewReports: reports,
+      evaluation: evaluation?.kind === 'finalized'
+        ? { recordId: evaluation.recordId, ordinal: evaluation.ordinal, entrySha256: evaluation.entrySha256, finalizedAt: evaluation.finalizedAt }
+        : null,
+      readersReports: readersReports.map((report) => ({
+        template: report.template, documentId: report.documentId, version: report.version, revisionId: report.revisionId, revisionDigest: report.revisionDigest, pin: report.pin,
+      })),
       exclusions: ['editor-notes', 'library-originals', 'intermediate-revisions'],
       limitations,
       typeConfiguration: { version: BUILTIN_PRODUCTION_DOCUMENT_TYPES.version, digest: BUILTIN_PRODUCTION_DOCUMENT_TYPES_DIGEST },
@@ -500,15 +583,20 @@ export class BookDeliveryPackages {
         included,
         includedTruncated: reportItems.length > MAX_BOOK_DELIVERY_PACKAGE_REPORTS_LISTED,
         excluded,
-        // The Manuscript's and the documents' lines, the newest Runs' as far as the preview lists them, and the fixed one.
+        // The Manuscript's, the documents' and the 审稿意见's lines, and the newest Runs' as far as the preview lists them.
         limitations: [
-          ...limitations.slice(0, limitations.length - reviewLimitations.length - 1),
+          ...limitations.slice(0, limitations.length - reviewLimitations.length),
           ...reviewLimitations.slice(-MAX_BOOK_DELIVERY_PACKAGE_REPORTS_LISTED),
-          BOOK_DELIVERY_PACKAGE_WORDS.unavailableRecords,
         ],
         limitationsTruncated: reviewLimitations.length > MAX_BOOK_DELIVERY_PACKAGE_REPORTS_LISTED,
       },
     };
+  }
+
+  /** When a designation was made, from its own row: the instant the 审稿意见 pin reads against (Issue #429). */
+  #designatedAt(publicationVersionId: string): string | null {
+    const row = this.#db.prepare('SELECT created_at FROM publication_versions WHERE publication_version_id = ?').get(publicationVersionId) as SqlRow | undefined;
+    return row === undefined ? null : text(row.created_at);
   }
 
   /**
@@ -577,6 +665,8 @@ export class BookDeliveryPackages {
         `生产文档 ${includedDocuments} 份`,
         `本书不做 ${notForThisBook} 类`,
         `审阅报告 ${record.content.reviewReports.length} 份`,
+        `评估记录 ${record.content.evaluation == null ? 0 : 1} 份`,
+        `审稿意见 ${(record.content.readersReports ?? []).length} 份`,
       ].join(' · '),
       exportHistoryLabel: history === undefined || history.total === 0
         ? BOOK_DELIVERY_PACKAGE_WORDS.exportHistoryNone
@@ -597,6 +687,7 @@ function verifiedVersion(row: SqlRow): { record: PackageVersionRecord; digest: s
   requirePackage(
     record.schema === 'ai7.book-delivery-package/1' && record.packageVersionId === text(row.package_version_id) &&
       record.version === integer(row.version) && record.contentDigest === text(row.content_sha256) &&
+      (record.content.schema === 'ai7.book-delivery-package-content/1' || record.content.schema === 'ai7.book-delivery-package-content/2') &&
       canonicalRecord(record.content).digest === record.contentDigest,
     'BOOK_DELIVERY_PACKAGE_RECORD_INVALID',
     '图书交付包记录无效。',

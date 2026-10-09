@@ -25,8 +25,10 @@ import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState
 // baseline and 丙's execute at once, and 乙's range update, started while both places are taken, waits as 等待运行名额 —
 // recorded, nothing sent — in the Task Drawer, on ②A and in 待我处理, which lists the three by Book and counts none.
 // 暂停 on 甲 hands its place to 乙, whose Run starts in the background while the editor's caret stays in 丙's
-// manuscript; 取消任务 on 丙 keeps what it read as 丙's own partial revision; and each Run's revision, attempt and
-// record stay its own Book's.
+// manuscript; the editor then accepts and applies a 修改建议 on 丙 while its Run holds a range in flight — a Controlled
+// Apply Effect committed beside the Run (Issue #632); 取消任务 on 丙 keeps what it read as 丙's own partial revision,
+// pinned to the manuscript revision the Run was authorized on, with the applied words standing; and each Run's
+// revision, attempt and record stay its own Book's.
 //
 // 后台分析登记 (Issue #95, plan slice S39; ADR 0048; V2-UX-ANALYSIS-016 to 021) follows: on 乙's ②A, `登记后台分析…` opens its
 // disclosure first — scope, analysis, when it starts, what it binds and never does — with no starting point chosen; Escape
@@ -50,6 +52,9 @@ const FIRST = Object.freeze({ title: '待我处理旅程甲' });
 const SECOND = Object.freeze({ title: '待我处理旅程乙' });
 const THIRD = Object.freeze({ title: '待我处理旅程丙' });
 const SAMPLE1_UNITS = 8;
+/** The 修改建议 the editor applies on 丙 while its Run holds a range in flight (Issue #632): six graphemes, replaced by synthetic words. */
+const APPLY_RANGE = Object.freeze([20, 26]);
+const APPLIED_TEXT = '〔并行应用〕';
 const GROUP_ORDER = Object.freeze(['exceptions', 'decisions', 'active', 'recent']);
 const GROUP_LABELS = Object.freeze(['异常与结果待确认', '等待你的决定', '运行中与已暂停', '最近完成']);
 // The screen's own words (`src/renderer/global-attention-labels.ts`), pinned there by its unit suite.
@@ -277,6 +282,132 @@ async function pressEnter(renderer) {
   const enter = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 };
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...enter, text: '\r', unmodifiedText: '\r' });
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...enter });
+}
+async function press(renderer, key, modifiers = 0) {
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key, modifiers });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key, modifiers });
+}
+
+// ---- a hand on the manuscript (Issue #632): J-05's page helpers, as far as one 修改建议 and its 接受并应用 need ---------
+
+/**
+ * Read a block's durable text (a preview's words are not the manuscript's), put a selection into it by offset, right-click an
+ * element the way a pointer does, and act on the floating Mark surface by its data attributes — J-05's `__j05`, here `__j09`.
+ */
+const MARK_HELPERS = `(() => {
+  if (window.__j09) return true;
+  const editor = () => document.querySelector('[data-testid="manuscript-editor"]');
+  const block = (id) => editor()?.querySelector('[data-block-id="' + id + '"]') ?? null;
+  const durable = (root) => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) => node.parentElement?.closest('[data-mark-preview]') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+    });
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    return nodes;
+  };
+  const point = (root, offset) => {
+    let left = offset;
+    for (const node of durable(root)) {
+      if (left <= node.data.length) return [node, left];
+      left -= node.data.length;
+    }
+    return null;
+  };
+  const layer = () => document.querySelector('.editorial-mark-layer');
+  window.__j09 = {
+    text: (id) => { const root = block(id); return root ? durable(root).map((node) => node.data).join('') : null; },
+    place: (id, from, to) => {
+      const root = block(id);
+      if (!root) return false;
+      editor().focus();
+      const start = point(root, from);
+      const end = point(root, to);
+      if (!start || !end) return false;
+      const range = document.createRange();
+      range.setStart(start[0], start[1]);
+      range.setEnd(end[0], end[1]);
+      const selection = getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return selection.toString().length === to - from;
+    },
+    rightClick: (element) => {
+      if (!(element instanceof HTMLElement)) return false;
+      const rect = element.getBoundingClientRect();
+      const init = { bubbles: true, cancelable: true, button: 2, buttons: 2, clientX: rect.left + Math.min(10, rect.width / 2), clientY: rect.top + Math.min(24, rect.height / 2) };
+      element.dispatchEvent(new MouseEvent('mousedown', init));
+      element.dispatchEvent(new MouseEvent('mouseup', { ...init, buttons: 0 }));
+      element.dispatchEvent(new MouseEvent('contextmenu', { ...init, buttons: 0 }));
+      return true;
+    },
+    block,
+    mark: (kind, id) => Array.from(block(id)?.querySelectorAll('.editorial-mark[data-mark-kind="' + kind + '"]') ?? []),
+    markText: (kind, id) => window.__j09.mark(kind, id).map((node) => durable(node).map((part) => part.data).join('')).join(''),
+    menu: () => document.querySelector('.editorial-mark-menu-layer [data-mark-menu]'),
+    item: (action) => document.querySelector('.editorial-mark-menu-layer [data-mark-menu] [data-mark-action="' + action + '"]'),
+    card: () => layer()?.querySelector('[data-mark-card]') ?? null,
+    composer: () => layer()?.querySelector('[data-mark-composer]') ?? null,
+    act: (action) => {
+      const control = layer()?.querySelector('[data-mark-card] [data-mark-action="' + action + '"], [data-mark-composer] [data-mark-action="' + action + '"]');
+      if (!(control instanceof HTMLButtonElement) || control.disabled) return false;
+      control.click();
+      return true;
+    },
+    write: (field, value) => {
+      const input = layer()?.querySelector('[data-mark-field="' + field + '"]');
+      if (!(input instanceof HTMLTextAreaElement)) return false;
+      input.value = value;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    },
+    status: () => document.querySelector('#persistence-status')?.textContent ?? '',
+  };
+  return true;
+})()`;
+
+/**
+ * Open a menu with the pointer. The editor reads a selection a tick after the page sets it, and a slow runner makes that tick
+ * long, so the menu is asked for again until it shows what was prepared (J-05's way).
+ */
+async function rightClickUntil(renderer, prepare, target, ready, name) {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    await assertRenderer(renderer, prepare, `${name}-prepare`);
+    await new Promise((resolveWait) => setTimeout(resolveWait, 80));
+    await assertRenderer(renderer, `window.__j09.rightClick(${target})`, `${name}-right-click`);
+    if (await renderer.evaluate(`Boolean(${ready})`)) return;
+    await press(renderer, 'Escape');
+    await new Promise((resolveWait) => setTimeout(resolveWait, 120));
+  }
+  throw journeyCheckFailure('J-09', name);
+}
+async function openSelectionMenu(renderer, blockId, from, to, name) {
+  await rightClickUntil(
+    renderer,
+    `window.__j09.place(${JSON.stringify(blockId)}, ${from}, ${to})`,
+    `window.__j09.block(${JSON.stringify(blockId)})`,
+    `window.__j09.menu()?.dataset.markMenu === 'selection' && window.__j09.menu().textContent.includes('已选 ${to - from} 字')`,
+    name,
+  );
+}
+async function chooseMenuItem(renderer, action, name) {
+  await assertRenderer(renderer, `(() => { const item = window.__j09.item(${JSON.stringify(action)}); if (!(item instanceof HTMLButtonElement) || item.disabled) return false; item.click(); return true; })()`, name);
+}
+/** A pointer puts the caret down before its click arrives and the editor reads it a tick later: a page click is asked again until it has. */
+async function openMarkCard(renderer, kind, blockId, name) {
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    await assertRenderer(renderer, `window.__j09.mark(${JSON.stringify(kind)}, ${JSON.stringify(blockId)}).length > 0 && window.__j09.place(${JSON.stringify(blockId)}, 0, 0)`, `${name}-caret`);
+    await new Promise((resolveWait) => setTimeout(resolveWait, 80));
+    await assertRenderer(renderer, `window.__j09.mark(${JSON.stringify(kind)}, ${JSON.stringify(blockId)})[0].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })) || true`, `${name}-click`);
+    const settle = Date.now() + 1_500;
+    while (Date.now() < settle) {
+      if (await renderer.evaluate(`window.__j09.card()?.dataset.markKind === ${JSON.stringify(kind)}`)) return;
+      await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+    }
+  }
+  throw journeyCheckFailure('J-09', `${name}-card`);
 }
 
 // ---- the product's own ways to the records J-09 needs ----------------------------------------------------
@@ -1104,6 +1235,43 @@ async function main() {
     const routeAfter = await renderer.evaluate(`window.ai7.getBookWorkbenchRoute()`);
     requireJourney(JSON.stringify(focusAfter) === JSON.stringify(focusBefore) && routeAfter?.bookId === bookC, 'background-run-steals-nothing', { before: focusBefore, after: focusAfter, route: routeAfter?.bookId === bookC });
 
+    at('concurrent-apply-effect');
+    // While 丙's Run holds its third range in flight, the editor accepts and applies a 修改建议 on 丙's manuscript — a Controlled
+    // Apply Effect committed beside the Run (Issue #632; ADR 0021): the write lands at once, as one journal entry after the
+    // suggestion's own; the Run goes on, its own; and the screen and the Book stay 丙's.
+    await runHeldAt(renderer, bookC, 2, 'apply-c-held');
+    await assertRenderer(renderer, MARK_HELPERS, 'apply-c-helpers');
+    const workC = await renderer.evaluate(`window.ai7.listPriorWork().then((entries) => { const work = entries.find((entry) => entry.bookTitle === ${JSON.stringify(THIRD.title)}); return work ? { manuscriptId: work.manuscriptId, branchId: work.branchId } : null; })`);
+    requireJourney(workC !== null && UUID_PATTERN.test(workC.manuscriptId) && UUID_PATTERN.test(workC.branchId), 'apply-c-work');
+    const READ_WINDOW_C = `window.ai7.getManuscriptWindowAt({ manuscriptId: ${JSON.stringify(workC.manuscriptId)}, branchId: ${JSON.stringify(workC.branchId)}, target: { kind: 'start' } })`;
+    // The manuscript as the Run was authorized on it: the revision 丙's partial revision must pin, whatever the editor writes now.
+    const beforeMark = await renderer.evaluate(`${READ_WINDOW_C}.then((page) => ({ revisionId: page.revisionId, journalSequence: page.journalSequence }))`);
+    requireJourney(UUID_PATTERN.test(beforeMark?.revisionId ?? '') && Number.isSafeInteger(beforeMark.journalSequence), 'apply-c-before', beforeMark);
+    // A paragraph whose first 80 code units are 80 graphemes, so the range below is in graphemes.
+    const markable = await renderer.evaluate(`(() => { const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }); return Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).find((node) => { const head = (node.textContent ?? '').slice(0, 80); return head.length === 80 && Array.from(segmenter.segment(head)).length === 80; })?.dataset.blockId ?? null; })()`);
+    requireJourney(typeof markable === 'string' && /^blk_[0-9a-f]{24}$/.test(markable), 'apply-c-paragraph');
+    await openSelectionMenu(renderer, markable, APPLY_RANGE[0], APPLY_RANGE[1], 'apply-c-menu');
+    await chooseMenuItem(renderer, 'add-change-suggestion', 'apply-c-choose');
+    await waitFor(renderer, `window.__j09.composer()?.dataset.markComposer === 'create-change-suggestion'`, 'apply-c-composer');
+    await assertRenderer(renderer, `window.__j09.write('proposedText', ${JSON.stringify(APPLIED_TEXT)}) && window.__j09.act('submit')`, 'apply-c-submit');
+    await waitFor(renderer, `window.__j09.mark('change-suggestion', ${JSON.stringify(markable)}).length > 0 && window.__j09.composer() === null`, 'apply-c-drawn');
+    // The suggestion is a journal entry of its own and writes no text; the Apply is one more, and writes the words (J-05's reading).
+    const beforeAccept = await renderer.evaluate(`${READ_WINDOW_C}.then((page) => ({ journalSequence: page.journalSequence, applied: page.blocks.find((block) => block.blockId === ${JSON.stringify(markable)})?.text.includes(${JSON.stringify(APPLIED_TEXT)}) === true }))`);
+    requireJourney(Number.isSafeInteger(beforeAccept?.journalSequence) && beforeAccept.applied === false, 'apply-c-suggestion-wrote-no-text', beforeAccept);
+    await openMarkCard(renderer, 'change-suggestion', markable, 'apply-c-card');
+    await assertRenderer(renderer, `window.__j09.act('accept-and-apply')`, 'apply-c-accept');
+    await waitFor(renderer, `window.__j09.card()?.querySelector('[data-mark-state]')?.textContent === '已应用' && window.__j09.markText('change-suggestion', ${JSON.stringify(markable)}) === ${JSON.stringify(APPLIED_TEXT)} && window.__j09.status().includes('已应用这条修改建议')`, 'apply-c-applied', 30_000);
+    const afterApply = await renderer.evaluate(`${READ_WINDOW_C}.then((page) => ({ revisionId: page.revisionId, journalSequence: page.journalSequence, applied: page.blocks.find((block) => block.blockId === ${JSON.stringify(markable)})?.text.includes(${JSON.stringify(APPLIED_TEXT)}) === true }))`);
+    requireJourney(afterApply.journalSequence === beforeAccept.journalSequence + 1 && afterApply.applied === true,
+      'apply-c-wrote-once', { beforeMark: beforeMark.journalSequence, beforeAccept: beforeAccept.journalSequence, after: afterApply.journalSequence, applied: afterApply.applied });
+    // 丙's Run is still its own and still executing with its range in flight; the editor is still in 丙's manuscript.
+    const heldThroughApply = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const focusApplied = await renderer.evaluate(FOCUS_STATE);
+    requireJourney(heldThroughApply?.bookId === bookC && heldThroughApply.run?.runRecordId === runC && heldThroughApply.run.state === 'executing' &&
+      heldThroughApply.run.progress?.unitsSettled === 2 && focusApplied?.screen === 'editor' && focusApplied.book === bookC,
+    'apply-c-run-unmoved', { run: heldThroughApply?.run?.state, settled: heldThroughApply?.run?.progress?.unitsSettled, focus: focusApplied });
+    await press(renderer, 'Escape');
+
     at('concurrent-cancel');
     // 取消任务 on 丙, from its own plan: its range in flight finishes, it stops there, and what it read forms 丙's own
     // partial revision — while 乙 runs to its end beside it.
@@ -1128,6 +1296,12 @@ async function main() {
       cancelledC.resultSetRevision.coverage?.unitsClosed === 3 && cancelledC.resultSetRevision.manuscriptPin?.bookId === bookC &&
       cancelledC.resultSetRevision.provenance?.runRecordId === runC && cancelledC.run.attempt?.spans?.length === 3,
     'concurrent-c-own-partial-revision', { state: cancelledC?.state, closed: cancelledC?.resultSetRevision?.coverage?.unitsClosed, spans: cancelledC?.run?.attempt?.spans?.length });
+    // The Apply Effect committed beside the Run stands (Issue #632): 丙's partial revision pins the manuscript revision the Run
+    // was authorized on, and the cancellation wrote nothing to the manuscript the editor changed — same journal entry, same words.
+    const afterCancel = await renderer.evaluate(`${READ_WINDOW_C}.then((page) => ({ revisionId: page.revisionId, journalSequence: page.journalSequence, applied: page.blocks.find((block) => block.blockId === ${JSON.stringify(markable)})?.text.includes(${JSON.stringify(APPLIED_TEXT)}) === true }))`);
+    requireJourney(cancelledC.resultSetRevision.manuscriptPin?.revisionId === beforeMark.revisionId && afterCancel.revisionId === afterApply.revisionId &&
+      afterCancel.journalSequence === afterApply.journalSequence && afterCancel.applied === true,
+    'concurrent-c-apply-effect-kept', { pinnedAsAuthorized: cancelledC.resultSetRevision.manuscriptPin?.revisionId === beforeMark.revisionId, journal: [afterApply.journalSequence, afterCancel.journalSequence], applied: afterCancel.applied });
     const settledAll = await waitForItems(renderer, (answer) => answer.items.some((item) => item.group === 'recent' && item.bookId === bookB && item.itemId !== completionItem.itemId) &&
       !answer.items.some((item) => item.group === 'active' && item.bookId === bookB) &&
       answer.items.some((item) => item.group === 'active' && item.bookId === bookA && item.state === 'analysis-paused'), 'concurrent-b-completed');

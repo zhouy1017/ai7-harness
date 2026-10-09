@@ -290,10 +290,19 @@ const MANIFEST_INPUT_SCHEMA = 'ai7.export.package-manifest-input/1' as const;
 /** The writer of a package export's 交付包清单 (Issue #416, S67b): its owner's Markdown, written as it stands. */
 const MANIFEST_WRITER_IDENTITY = 'ai7-package-manifest/1';
 export const PACKAGE_MANIFEST_FILE_NAME = '交付包清单.md';
-const PACKAGE_MANIFEST_LINES = {
-  restoration: '交付包清单按这一版交付包冻结的内容写出。',
-  format: '交付包清单是 Markdown 文字文件：列出这一版交付包的文件、交付记录、不包含的内容和说明。',
-} as const;
+const PACKAGE_MEMBER_LINES: Readonly<Record<PackageMemberKind, { restoration: string; format: string }>> = {
+  manifest: {
+    restoration: '交付包清单按这一版交付包冻结的内容写出。',
+    format: '交付包清单是 Markdown 文字文件：列出这一版交付包的文件、交付记录、不包含的内容和说明。',
+  },
+  // The 定稿 评估记录 the version pinned (Issue #429): written from the record's own finalized words, never changed by a later version.
+  'evaluation-record': {
+    restoration: '评估记录按这一版交付包记下的定稿版本写出。',
+    format: '评估记录是 Markdown 文字文件：列出定稿版本的各项得分与评语、风险项、就绪清单、优点、问题、总评与结论。',
+  },
+};
+/** The writer of a package export's 评估记录 member (Issue #429): its owner's Markdown of the 定稿 version, written as it stands. */
+const PACKAGE_RECORD_WRITER_IDENTITY = 'ai7-package-evaluation-record/1';
 const REVIEW_REPORT_SCHEMA = 'ai7.review.report/1' as const;
 const POLICY = { id: 'external-export-policy', version: 'v2' } as const;
 const INVALID_FILE_NAME_CHARACTERS = /[\\/:*?"<>|\u0000-\u001F]/gu;
@@ -316,27 +325,40 @@ export interface ManuscriptExportEnvironment {
   /** The Agent Data Root, canonical: no export is ever written inside it (V2-UX-EXP-014). */
   dataRoot: string;
   checkpointOwner: ExportCheckpointOwner;
-  /** One frozen package version's 交付包清单, as the package's owner writes it (Issue #416, S67b); `null` when it is none of the Book's. */
-  packageManifest?(bookId: string, packageVersionId: string): PackageManifest | null;
+  /**
+   * One frozen package version's 交付包清单, as the package's owner writes it (Issue #416, S67b), or another Markdown member of
+   * the version the owner writes from its record — the 评估记录 it pinned (Issue #429); `null` when it is none of the Book's.
+   */
+  packageManifest?(bookId: string, packageVersionId: string, member: PackageMemberKind): PackageManifest | null;
   /** One frozen package version's label and the revision it binds, from its record alone; `null` when it is none of the Book's. */
   packageVersion?(bookId: string, packageVersionId: string): { versionLabel: string; revisionId: string } | null;
 }
 
-/** A target only the service names (Issue #416, S67b): the 交付包清单 of one frozen 图书交付包 version. */
+/**
+ * The Markdown members of a 图书交付包 version the package's owner writes from the version's own record: its 交付包清单 (Issue
+ * #416, S67b), and the 定稿 评估记录 it pinned (Issue #429, BUNDLE-001). Each is a file of the version's export and nothing else.
+ */
+export type PackageMemberKind = 'manifest' | 'evaluation-record';
+
+/** A target only the service names (Issue #416, S67b): a Markdown member of one frozen 图书交付包 version; absent, the 交付包清单. */
 export interface PackageManifestTargetInput {
   kind: 'package-manifest';
   packageVersionId: string;
+  member?: PackageMemberKind;
 }
 
 /** Any target a file of an export can be written from: the renderer's own, or a package's manifest. */
 export type ExportTargetInput = ManuscriptExportTargetInput | PackageManifestTargetInput;
 
-/** A package version's 交付包清单: its words, their digest, and the Publication Version revision the package binds. */
+/** A package version's Markdown member: its words, their digest, the Publication Version revision the package binds, and its file's label. */
 export interface PackageManifest {
+  member: PackageMemberKind;
   versionLabel: string;
   markdown: string;
   digest: string;
   revisionId: string;
+  /** What the file is called apart from the Book (`评估记录 · 第 2 版定稿`); the 交付包清单 keeps its fixed name. */
+  fileLabel: string;
 }
 
 /** One exact version to export, resolved against the Book's primary Manuscript. */
@@ -359,8 +381,8 @@ interface ResolvedTarget {
   report: ResolvedReport | null;
   /** One version of a Production Document (Issue #415, S66b); `null` for any other target. */
   document: { documentId: string; typeId: string; typeLabel: string; versionLabel: string } | null;
-  /** One package version's 交付包清单 (Issue #416, S67b); `null` for any other target. */
-  manifest: { packageVersionId: string; versionLabel: string; markdown: string } | null;
+  /** One package version's Markdown member — its 交付包清单 (Issue #416, S67b) or its 评估记录 (Issue #429); `null` for any other target. */
+  manifest: { packageVersionId: string; versionLabel: string; markdown: string; member: PackageMemberKind; fileLabel: string } | null;
 }
 
 interface ResolvedReport {
@@ -432,8 +454,8 @@ function requireOptions(value: unknown): ManuscriptExportOptions {
 }
 
 /** The writer of one target in one format: a report's own, or the manuscript's. */
-function writerOf(target: { report: unknown; manifest: unknown }, format: ManuscriptExportFormat): string {
-  if (target.manifest !== null) return MANIFEST_WRITER_IDENTITY;
+function writerOf(target: { report: unknown; manifest: { member: PackageMemberKind } | null }, format: ManuscriptExportFormat): string {
+  if (target.manifest !== null) return target.manifest.member === 'manifest' ? MANIFEST_WRITER_IDENTITY : PACKAGE_RECORD_WRITER_IDENTITY;
   return target.report === null ? FORMAT_WRITERS[format] : REPORT_EXPORT_WRITER_IDENTITIES[format];
 }
 
@@ -944,7 +966,12 @@ export class ManuscriptExportStore {
       milestoneLabel: resolved.milestoneLabel,
       ...(resolved.report === null ? {} : { reportDigest: resolved.report.digest }),
       ...(resolved.document === null ? {} : { documentId: resolved.document.documentId, documentVersionDigest: resolved.revisionDigest }),
-      ...(resolved.manifest === null ? {} : { packageVersionId: resolved.manifest.packageVersionId, manifestDigest: resolved.revisionDigest }),
+      ...(resolved.manifest === null ? {} : {
+        packageVersionId: resolved.manifest.packageVersionId,
+        manifestDigest: resolved.revisionDigest,
+        // The 交付包清单 is the member a record before Issue #429 named by naming none; any other member is named.
+        ...(resolved.manifest.member === 'manifest' ? {} : { packageMember: resolved.manifest.member }),
+      }),
       format,
       options,
       fidelitySha256: sha256Hex(fidelityJson),
@@ -1243,7 +1270,7 @@ export class ManuscriptExportStore {
    * review the editor read was of another version.
    */
   async #resolve(bookId: string, target: ExportTargetInput, save: boolean): Promise<ResolvedTarget> {
-    if (target.kind === 'package-manifest') return this.#manifestTarget(bookId, target.packageVersionId);
+    if (target.kind === 'package-manifest') return this.#manifestTarget(bookId, target.packageVersionId, target.member ?? 'manifest');
     if (target.kind === 'report') return this.#reportTarget(bookId, target.reportId);
     if (target.kind === 'document') return this.#documentTarget(bookId, target.documentId, target.revisionId);
     let head = this.#head(bookId);
@@ -1350,16 +1377,17 @@ export class ManuscriptExportStore {
    * record. A version is never rewritten, so the words and their digest stay exact; the ledger's revision columns stay
    * empty for it, and the package version travels as the target itself.
    */
-  #manifestTarget(bookId: string, packageVersionId: string): ResolvedTarget {
-    const manifest = this.#environment.packageManifest?.(bookId, packageVersionId) ?? null;
+  #manifestTarget(bookId: string, packageVersionId: string, member: PackageMemberKind): ResolvedTarget {
+    const manifest = this.#environment.packageManifest?.(bookId, packageVersionId, member) ?? null;
     requireExport(manifest !== null, 'EXPORT_TARGET_NOT_FOUND', '所选交付包版本不属于这本书。');
-    requireExport(sha256Hex(manifest.markdown) === manifest.digest && DIGEST_PATTERN.test(manifest.digest), 'EXPORT_RECORD_INVALID', '交付包清单与其摘要不一致。');
+    requireExport(manifest.member === member && sha256Hex(manifest.markdown) === manifest.digest && DIGEST_PATTERN.test(manifest.digest),
+      'EXPORT_RECORD_INVALID', '交付包记录与其摘要不一致。');
     const head = this.#head(bookId);
     return {
       kind: 'manifest', targetKind: 'book-delivery-package-version', targetId: packageVersionId, milestoneId: null, milestoneLabel: null,
       revisionId: manifest.revisionId, revisionLabel: manifest.versionLabel, revisionDigest: manifest.digest,
       manuscriptId: head.manuscriptId, branchId: head.branchId, bookTitle: head.bookTitle, savedForExport: false, report: null,
-      document: null, manifest: { packageVersionId, versionLabel: manifest.versionLabel, markdown: manifest.markdown },
+      document: null, manifest: { packageVersionId, versionLabel: manifest.versionLabel, markdown: manifest.markdown, member, fileLabel: manifest.fileLabel },
     };
   }
 
@@ -1385,7 +1413,7 @@ export class ManuscriptExportStore {
 
   /** The version a preparation froze, read again exactly: a current revision stays that revision. */
   #preparedTarget(bookId: string, row: SqlRow): ResolvedTarget {
-    if (text(row.target_kind) === 'book-delivery-package-version') return this.#manifestTarget(bookId, text(row.target_id));
+    if (text(row.target_kind) === 'book-delivery-package-version') return this.#manifestTarget(bookId, text(row.target_id), this.#storedManifest(row).member);
     if (text(row.target_kind) === 'report') return this.#reportTarget(bookId, text(row.target_id));
     if (text(row.target_kind) === 'production-document-version') return this.#documentOfRevision(bookId, text(row.target_id));
     const head = this.#head(bookId);
@@ -1428,13 +1456,14 @@ export class ManuscriptExportStore {
   /** Everything the file is written from: the version's blocks, its source, the mapping and the marks on it. */
   async #plan(bookId: string, target: ResolvedTarget, options: ManuscriptExportOptions, format: ManuscriptExportFormat): Promise<ExportPlan> {
     if (target.manifest !== null) {
-      // A package's 交付包清单 is its owner's Markdown, written as it stands: no block, no mark, no file of the manuscript.
-      requireExport(format === 'markdown', 'EXPORT_FORMAT_INVALID', '交付包清单只写成 Markdown 文件。');
+      // A package's 交付包清单, or its 评估记录 (Issue #429), is its owner's Markdown, written as it stands: no block, no mark, no file of the manuscript.
+      requireExport(format === 'markdown', 'EXPORT_FORMAT_INVALID', '交付包的清单与记录只写成 Markdown 文件。');
       const inputDigest = canonicalRecord({
         schema: MANIFEST_INPUT_SCHEMA,
-        writer: MANIFEST_WRITER_IDENTITY,
+        writer: writerOf(target, format),
         packageVersionId: target.manifest.packageVersionId,
         digest: target.revisionDigest,
+        ...(target.manifest.member === 'manifest' ? {} : { member: target.manifest.member }),
       }).digest;
       return { kind: 'manifest', markdown: target.manifest.markdown, inputDigest, sourceVersionId: null };
     }
@@ -1674,7 +1703,7 @@ export class ManuscriptExportStore {
     // #500, S64b); only a DOCX restores from the original, or says why it cannot.
     const report = target.report;
     const restorationLine = target.manifest !== null
-      ? PACKAGE_MANIFEST_LINES.restoration
+      ? PACKAGE_MEMBER_LINES[target.manifest.member].restoration
       : report !== null
       ? reportRestorationLine(report.version)
       : format !== 'docx'
@@ -1694,10 +1723,12 @@ export class ManuscriptExportStore {
       options,
       restoration: rendered.restoration,
       restorationLine,
-      formatLine: target.manifest !== null ? PACKAGE_MANIFEST_LINES.format : report === null ? FORMAT_LINES[format] : REPORT_FORMAT_LINES[format],
+      formatLine: target.manifest !== null ? PACKAGE_MEMBER_LINES[target.manifest.member].format : report === null ? FORMAT_LINES[format] : REPORT_FORMAT_LINES[format],
       fidelity,
       degraded: rendered.degraded,
-      suggestedFileName: target.manifest !== null ? PACKAGE_MANIFEST_FILE_NAME : suggestedExportFileName(
+      suggestedFileName: target.manifest !== null
+        ? target.manifest.member === 'manifest' ? PACKAGE_MANIFEST_FILE_NAME : suggestedExportFileName(target.bookTitle, target.manifest.fileLabel, format)
+        : suggestedExportFileName(
         target.bookTitle,
         report !== null ? reportExportLabel(report.runLabel, report.version)
           : target.document !== null ? target.document.versionLabel : target.milestoneLabel ?? target.revisionLabel,
@@ -1778,7 +1809,11 @@ export class ManuscriptExportStore {
       milestoneLabel,
       ...(report?.report == null ? {} : { reportDigest: report.revisionDigest }),
       ...(report?.document == null ? {} : { documentId: report.document.documentId, documentVersionDigest: report.revisionDigest }),
-      ...(manifest === null ? {} : { packageVersionId: manifest.packageVersionId, manifestDigest: manifest.digest }),
+      ...(manifest === null ? {} : {
+        packageVersionId: manifest.packageVersionId,
+        manifestDigest: manifest.digest,
+        ...(manifest.member === 'manifest' ? {} : { packageMember: manifest.member }),
+      }),
       format: text(row.format),
       options,
       fidelitySha256: sha256Hex(fidelityJson),
@@ -1841,15 +1876,17 @@ export class ManuscriptExportStore {
    * only an approval writes it again, where a difference is a changed payload. The record's own digest is checked with the
    * rest of it.
    */
-  #storedManifest(row: SqlRow): { packageVersionId: string; versionLabel: string; revisionId: string; digest: string } {
+  #storedManifest(row: SqlRow): { packageVersionId: string; versionLabel: string; revisionId: string; digest: string; member: PackageMemberKind } {
     const packageVersionId = text(row.target_id);
     const record = parseCanonicalJson(text(row.canonical_json));
     const digest = isRecord(record) ? record.manifestDigest : undefined;
-    requireExport(isRecord(record) && record.packageVersionId === packageVersionId && typeof digest === 'string' && DIGEST_PATTERN.test(digest),
-      'EXPORT_RECORD_INVALID', '交付包清单的导出准备无效。');
+    // A preparation made before Issue #429 names no member: it is the 交付包清单.
+    const member = isRecord(record) && record.packageMember !== undefined ? record.packageMember : 'manifest';
+    requireExport(isRecord(record) && record.packageVersionId === packageVersionId && typeof digest === 'string' && DIGEST_PATTERN.test(digest) &&
+      (member === 'manifest' || member === 'evaluation-record'), 'EXPORT_RECORD_INVALID', '交付包清单的导出准备无效。');
     const version = this.#environment.packageVersion?.(text(row.book_id), packageVersionId) ?? null;
     requireExport(version !== null, 'EXPORT_RECORD_INVALID', '导出所属的交付包版本不存在。');
-    return { packageVersionId, versionLabel: version.versionLabel, revisionId: version.revisionId, digest };
+    return { packageVersionId, versionLabel: version.versionLabel, revisionId: version.revisionId, digest, member };
   }
 
   #receiptProjection(preparationRow: SqlRow, outcome: SqlRow): ManuscriptExportReceiptProjection {
