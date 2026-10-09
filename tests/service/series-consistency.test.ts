@@ -50,6 +50,7 @@ const LIVE: LaunchBinding = {
     credentialSlot: 'opencode-go',
     credentialReference: randomUUID(),
     runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 240_000 },
+    platformTools: null, toolCalling: 'none',
   },
 };
 const WITHHELD = `这一类以书系「${J13_SERIES_TITLE}」的书系知识审阅；开发者实时模式下，本社的书系知识在获准发给模型之前不会发出，这一类暂不能开始。`;

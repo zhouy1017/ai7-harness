@@ -128,6 +128,7 @@ describe('a Task\'s range reads as its latest plan version (Issue #288 甲)', ()
         credentialSlot: 'opencode-go',
         credentialReference: randomUUID(),
         runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 240_000 },
+        platformTools: null, toolCalling: 'none',
       },
     });
     const offline = (): void => store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null });

@@ -489,6 +489,7 @@ describe('暂停 and 续行 over the real store', () => {
           credentialSlot: 'opencode-go',
           credentialReference: randomUUID(),
           runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 240_000 },
+          platformTools: null, toolCalling: 'none',
         },
       });
       const moved = await store.inspectTaskPlanWithConnection(input, async () => null, ONLINE, () => null);

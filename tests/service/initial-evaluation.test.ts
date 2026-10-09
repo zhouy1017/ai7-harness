@@ -378,6 +378,7 @@ describe('AI7 初评 over the real store on exact sample1', () => {
           credentialSlot: 'opencode-go',
           credentialReference: randomUUID(),
           runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 100_000 },
+          platformTools: null, toolCalling: 'none',
         },
       });
       try {

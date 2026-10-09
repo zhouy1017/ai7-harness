@@ -123,6 +123,10 @@ function liveBinding(ceiling: Ceiling) {
       credentialSlot: DEVELOPER_LIVE_POLICY_BINDING.credentialSlot,
       credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
       runBudgetCeiling: ceiling,
+      // What the service entry binds under v8 (Issue #473): the rule's tools, and the flash profile's own `toolCalling`
+      // (`none`), so the baseline kind — which declares no web search anyway — freezes the tool-less composition.
+      platformTools: launchPolicy.providerProcessing.platformTools ?? null,
+      toolCalling: 'none' as const,
     },
   };
 }

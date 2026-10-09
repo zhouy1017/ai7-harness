@@ -47,6 +47,7 @@ const LIVE_LAUNCH = {
     credentialSlot: 'opencode-go',
     credentialReference: '00000000-0000-4000-8000-000000000000',
     runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 240_000 },
+    platformTools: null, toolCalling: 'none',
   },
 } as const;
 

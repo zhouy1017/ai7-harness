@@ -739,11 +739,11 @@ export interface LaunchBinding {
      * The platform tools the verified document's analysis rule names (ADR 0080 §7.5; `null` under a rule naming none), and
      * the bound model's declared `toolCalling` (Issue #473, S87-f3b). With the kind's own `webSearch` declaration these
      * decide whether a frozen plan's composition registers the tools — the same three facts the execution owner reads, so
-     * the composition digest the plan pins is the one the Run executes under. Absent, a launch names no tools and declares
-     * none, and every composition freezes exactly as it did before the tools existed.
+     * the composition digest the plan pins is the one the Run executes under. Both are required: a caller that left them
+     * out would freeze tool-less plans every Run refuses once the bound profile declares function calling (#742 review).
      */
-    readonly platformTools?: PlatformToolsRule | null;
-    readonly toolCalling?: ToolCalling;
+    readonly platformTools: PlatformToolsRule | null;
+    readonly toolCalling: ToolCalling;
   } | null;
 }
 
@@ -3097,7 +3097,7 @@ export class BaselineAnalysisStore {
     const composition = live === null
       ? describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, promptContractDigest)
       : describeComposition(live.route, live.model, promptContractDigest, {
-          platformTools: platformToolsRegistered({ rule: live.platformTools ?? null, kindDeclaresWebSearch: this.#definition.webSearch === true, toolCalling: live.toolCalling ?? 'none' }),
+          platformTools: platformToolsRegistered({ rule: live.platformTools, kindDeclaresWebSearch: this.#definition.webSearch === true, toolCalling: live.toolCalling }),
         });
     const providerPlan = {
       role: 'Main Editorial Role',

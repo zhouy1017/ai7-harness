@@ -1,6 +1,5 @@
 import { consumeReturnPlace, preserveReturnPlace, readReturnPlace, type ReadingPlace } from './reading-return.js';
 import type {
-  AnalysisGapProjection,
   AnalysisReusePlanCounts,
   AnalysisReusePlanProjection,
   BaselineAnalysisPlanRevisionProjection,
@@ -66,6 +65,7 @@ import type {
 } from '../shared/protocol.js';
 import {
   ANALYSIS_GAP_CODE_LABELS,
+  analysisGapLead,
   BASELINE_ANALYSIS_TASK_GOAL,
   J03_TASK_GOAL,
   MAX_BOOK_SUMMARY_FILTER_CHARACTERS,
@@ -736,14 +736,6 @@ function button(label: string, className: 'primary' | 'secondary' | 'quiet', act
  * behavior: opening or closing it reads nothing, writes nothing, and settles no decision
  * (V2-UX-LAYER-007), so no surface needs its own toggle state.
  */
-/**
- * How a unit's gap leads in ②A: the disclosed state 联网核查未完成 by its own name (Issue #473, S87-f3b; ADR 0080 §7.4), and
- * every other gap as 尚未分析, the lead J-04 has always read for a range the Run did not read.
- */
-function gapLead(code: AnalysisGapProjection['code']): string {
-  return code === 'web-verification-incomplete' ? ANALYSIS_GAP_CODE_LABELS[code] : '尚未分析';
-}
-
 function technicalDetails(gridClass: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement {
   const disclosure = element('details', 'technical-details');
   const values = element('dl', gridClass);
@@ -3366,7 +3358,7 @@ function renderBaselineAnalysisOverview(
     } else {
       // 联网核查未完成 (Issue #473, S87-f3b; ADR 0080 §7.4) is a disclosed state the unit ended in, named as itself; every
       // other gap is a range the Run did not read, said as it always was.
-      item.append(element('p', 'attention-note', `${gapLead(unit.gap.code)}：${unit.gap.reason}`));
+      item.append(element('p', 'attention-note', `${analysisGapLead(unit.gap.code)}：${unit.gap.reason}`));
       if (unit.gap.blockIds[0] !== undefined) item.append(returnButton(unit.gap.blockIds[0]));
     }
     item.append(technicalDetails(

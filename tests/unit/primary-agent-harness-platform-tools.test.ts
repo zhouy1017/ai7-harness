@@ -19,7 +19,7 @@ import { installNodeNetworkDenial } from '../../src/shared/network-denial.js';
 // The platform tools end to end inside the real pinned DSH composition (ADR 0080 §7; Issue #473, S87-f3a): the harness
 // registers the two tools only for an owner, the owner decides each call through the Egress Gate and forwards it once
 // over a stub transport, and the gate admits the result back into the next model call by call id, URL, digest, and byte
-// count. The rule is v7's block, which no active set selects; under the selected v5 the owner cannot be constructed at
+// count. The rule is v7's block (v8 carries it byte for byte); under the predecessor v5 the owner cannot be constructed at
 // all, and a composition without it registers zero tools with the digest every frozen plan pins.
 
 installNodeNetworkDenial();
@@ -116,7 +116,7 @@ describe('the platform tools inside the composition', () => {
     expect(withTools.digest).not.toBe(plain.digest);
   });
 
-  it('cannot be given an owner under the selected v5, whose rule names no platform tools', async () => {
+  it('cannot be given an owner under the predecessor v5, whose rule names no platform tools', async () => {
     const v5 = bindingOf(await ruleOf('v5'), 'b'.repeat(64));
     const cache = new ProviderResultCache(root);
     expect(() => new PlatformToolSession({

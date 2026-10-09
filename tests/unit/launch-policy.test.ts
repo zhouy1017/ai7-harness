@@ -322,6 +322,34 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     await expect(v8PolicyWithRule(1, { ruleId: 'developer-live-dialogue' }).then(verifyDeveloperLivePolicy)).rejects.toThrow('LAUNCH_POLICY_INVALID');
   });
 
+  it('reads the execution mode of both rules and the dialogue rule\'s cap byte exactly (#742 review, P3-4)', async () => {
+    // Human-attended on a developer host, never CI, hosted, scheduled or background — for the analysis rule and the
+    // dialogue rule alike: a document admitting a scheduled or background dispatch under either is unreadable.
+    for (const index of [0, 1] as const) {
+      for (const key of ['scheduledAllowed', 'backgroundAllowed', 'ciAllowed', 'hostedAllowed']) {
+        const moved = await policyOf(V8_PATH);
+        (moved.decision.providerAllowRules[index]!.executionMode as Record<string, unknown>)[key] = true;
+        expect(() => verifyDeveloperLivePolicy(moved), `${index}/${key}`).toThrow('LAUNCH_POLICY_INVALID');
+      }
+      for (const key of ['humanAttended', 'developerHostOnly']) {
+        const moved = await policyOf(V8_PATH);
+        (moved.decision.providerAllowRules[index]!.executionMode as Record<string, unknown>)[key] = false;
+        expect(() => verifyDeveloperLivePolicy(moved), `${index}/${key}`).toThrow('LAUNCH_POLICY_INVALID');
+      }
+    }
+    // The per-attempt output cap (ADR 0088 §1.6) is `null` or a positive whole token count — the Owner's byte, read as such.
+    for (const cap of [4_000, 1, 200_000]) {
+      const capped = await policyOf(V8_PATH);
+      (capped.decision.providerAllowRules[1]!.authorizationPreconditions as Record<string, unknown>)['perAttemptOutputCapTokens'] = cap;
+      expect(verifyDeveloperLivePolicy(capped).webSearchToolAllowed).toBe(true);
+    }
+    for (const cap of [0, -1, 1.5, '4000', true, undefined, {}, Number.MAX_SAFE_INTEGER + 1]) {
+      const moved = await policyOf(V8_PATH);
+      (moved.decision.providerAllowRules[1]!.authorizationPreconditions as Record<string, unknown>)['perAttemptOutputCapTokens'] = cap;
+      expect(() => verifyDeveloperLivePolicy(moved), String(cap)).toThrow('LAUNCH_POLICY_INVALID');
+    }
+  });
+
   it('denies the scopes the source checkout cannot select and any unknown scope', async () => {
     await placeValidCheckout();
     for (const scope of ['fixture-recording', 'ordinary-production', 'production', 'DEVELOPER-LIVE', '']) {

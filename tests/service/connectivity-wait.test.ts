@@ -400,6 +400,7 @@ describe('联网后开始任务 and Connectivity Wait over the real store', () =
           credentialSlot: 'opencode-go',
           credentialReference: randomUUID(),
           runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 240_000 },
+          platformTools: null, toolCalling: 'none',
         },
       });
       const changed = store.baselineAnalysisPreflightDrift(runRecordId);

@@ -1900,6 +1900,14 @@ export const ANALYSIS_GAP_CODE_LABELS: Readonly<Record<AnalysisGapProjection['co
   'web-verification-incomplete': WEB_VERIFICATION_INCOMPLETE,
 });
 
+/**
+ * How a unit's gap leads in ②A: the disclosed state 联网核查未完成 by its own name (ADR 0080 §7.4), and every other gap as
+ * 尚未分析 — the lead J-04 has always read for a range the Run did not read.
+ */
+export function analysisGapLead(code: AnalysisGapProjection['code']): string {
+  return code === 'web-verification-incomplete' ? ANALYSIS_GAP_CODE_LABELS[code] : '尚未分析';
+}
+
 export interface LaunchPolicyProjection {
   integrityState: 'verified' | 'denied';
   denialReason: string | null;

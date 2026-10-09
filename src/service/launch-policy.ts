@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { LAUNCH_SELECTABLE_SCOPES, isTrustedOperationalScope, type DeveloperLiveCeiling, type LaunchPolicyProjection, type PlatformToolsProjection, type TrustedLaunchForm, type TrustedOperationalScope } from '../shared/protocol.js';
+import { armHostAllowanceSet, armPerTicketHostAdmission, type SingleHostAllowance } from '../shared/network-denial.js';
 import { readPlatformToolsRule } from './provider/platform-tools.js';
 
 /**
@@ -254,6 +255,9 @@ export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
   requirePolicy(isRecord(rule) && rule['ruleId'] === DEVELOPER_LIVE_POLICY_BINDING.ruleId && rule['policyResult'] === 'eligible-only');
   const dialogueRule: unknown = decision['providerAllowRules'][1];
   requirePolicy(isRecord(dialogueRule) && dialogueRule['ruleId'] === DEVELOPER_LIVE_POLICY_BINDING.dialogueRuleId && dialogueRule['policyResult'] === 'eligible-only');
+  // Human-attended on a developer host, and never CI, hosted, scheduled or background (ADR 0065; ADR 0079 §2): the
+  // execution mode is read for both rules, so a document that admitted a scheduled or background dispatch is unreadable.
+  requirePolicy(isAttendedDeveloperHostMode(rule['executionMode']));
   // The house-people redaction rule (ADR 0079 §4.4): the identity of the house's people never leaves,
   // while the author's information and the house name may.
   const redaction = rule['redaction'];
@@ -360,8 +364,7 @@ function verifyDialogueRule(
       origin['backgroundAnalysisEnrollmentAllowed'] === false &&
       origin['idleScheduledImportTriggeredOrCrossRunDispatchAllowed'] === false,
   );
-  const mode = rule['executionMode'];
-  requirePolicy(isRecord(mode) && mode['humanAttended'] === true && mode['developerHostOnly'] === true && mode['ciAllowed'] === false && mode['hostedAllowed'] === false && mode['backgroundAllowed'] === false);
+  requirePolicy(isAttendedDeveloperHostMode(rule['executionMode']));
   const categories = rule['allowedOutboundDataCategories'];
   requirePolicy(Array.isArray(categories) && categories.length === 1 && categories[0] === 'editor-selected-manuscript-excerpt');
   // Carried unchanged from the analysis rule (§1.5): the same bytes, compared field by field rather than by trust.
@@ -400,6 +403,10 @@ function verifyDialogueRule(
       preconditions['runAuthorizationRequired'] === false &&
       preconditions['runBudgetCeilingApplies'] === false &&
       preconditions['costBound'] === 'one-bounded-payload-per-attempt' &&
+      // The per-attempt output cap is the Owner's byte (§1.6): `null` for none, or a positive whole token count; any
+      // other value — a string, zero, a negative or fractional number — is a document this launch cannot read.
+      (preconditions['perAttemptOutputCapTokens'] === null ||
+        (Number.isSafeInteger(preconditions['perAttemptOutputCapTokens']) && (preconditions['perAttemptOutputCapTokens'] as number) > 0)) &&
       preconditions['finalProviderPayloadEgressGateRequired'] === true &&
       preconditions['frozenBeforeTransmission'] === true,
   );
@@ -414,6 +421,37 @@ function verifyDialogueRule(
       capture['harnessSessionLedgerUnderAgentDataRootIsTheOnlyPersistence'] === true &&
       capture['ai7RelationLogOrDiagnosticHoldsQuestionOrAnswer'] === false,
   );
+}
+
+/** The execution mode both v8 rules declare (ADR 0065): human-attended on a developer host, never CI, hosted, scheduled or background. */
+function isAttendedDeveloperHostMode(mode: unknown): boolean {
+  return isRecord(mode) &&
+    mode['humanAttended'] === true &&
+    mode['developerHostOnly'] === true &&
+    mode['ciAllowed'] === false &&
+    mode['hostedAllowed'] === false &&
+    mode['scheduledAllowed'] === false &&
+    mode['backgroundAllowed'] === false;
+}
+
+/**
+ * Arm the network-denial allowances a launch form calls for, before the denial is installed (ADR 0080 §7.3; settlement l):
+ * nothing under `development-ci`, where every remote primitive stays denied; under `developer-live` the policy-declared
+ * set — the model endpoint host and port first, then the one search host the selected rule's `platformTools` names — and
+ * per-ticket host admission for `webfetch`. Both hosts are the pins the launch policy verifies against the Provider
+ * Processing v8 bytes before anything executes; a document naming another host is unreadable, and then nothing transmits.
+ * Returns what it armed, so the service entry and its test read the same answer.
+ */
+export function armLaunchNetworkAllowances(form: Pick<TrustedLaunchForm, 'trustedOperationalScope'>): ReadonlyArray<SingleHostAllowance> {
+  if (form.trustedOperationalScope !== 'developer-live') return [];
+  const endpoint = new URL(DEVELOPER_LIVE_POLICY_BINDING.endpoint);
+  const set: ReadonlyArray<SingleHostAllowance> = [
+    { host: endpoint.hostname, port: endpoint.port === '' ? 443 : Number(endpoint.port) },
+    { host: DEVELOPER_LIVE_POLICY_BINDING.websearchHost, port: 443 },
+  ];
+  armHostAllowanceSet(set);
+  armPerTicketHostAdmission();
+  return set;
 }
 
 /**
