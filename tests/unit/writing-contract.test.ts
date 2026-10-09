@@ -188,10 +188,62 @@ describe('Writing Contract v1 — the reference bound (KB-004)', () => {
     // Punctuation inside a run raises it to sixteen: fifteen characters across it pass, seventeen are a copy.
     expect(exemplarCopied(draft(`${FRESH}一位老学者——与一封「神秘」来信的故事`), input())).toBeNull();
     expect(exemplarCopied(draft(`${FRESH}讲述一位老学者——与一封「神秘」来信的故事`), input()))
-      .toEqual({ exemplar: 0, kind: 'verbatim', unit: 'character', run: EXEMPLAR_COPY_WINDOW_ACROSS });
+      .toEqual({ exemplar: 0, kind: 'verbatim', unit: 'character', run: EXEMPLAR_COPY_WINDOW_ACROSS, breaks: ['punctuation'] });
     // Fullwidth digits read as the exemplar's own digits.
     const numbered = input({ exemplars: [{ bookTitle: '范例书', version: 1, text: '首印一万二千册于2026年发行完毕后加印', excerpt: false }] });
     expect(exemplarCopied(draft('首印一万二千册于２０２６年发行完毕'), numbered)).toEqual(verbatim());
+  });
+
+  it('reads whitespace beside a line break as the paragraph edge\'s own, never as a space between clauses (#707)', () => {
+    // An exemplar whose second paragraph is indented with U+3000, and one whose first ends in a trailing space: the fourteen
+    // characters across the edge are a copy, as they are across a bare line break.
+    const across = '老学者收到一封神秘来信的故事';
+    const edge = (first: string, second: string) => input({ exemplars: [{ bookTitle: '范例书', version: 1, text: `${synthetic(30, 0x5000)}${first}\n${second}${synthetic(30, 0x5800)}`, excerpt: false }] });
+    expect(exemplarCopied(draft(`${FRESH}${across}`), edge('老学者收到一封', '神秘来信的故事'))).toEqual(verbatim());
+    expect(exemplarCopied(draft(`${FRESH}${across}`), edge('老学者收到一封', '　　神秘来信的故事'))).toEqual(verbatim());
+    expect(exemplarCopied(draft(`${FRESH}${across}`), edge('老学者收到一封 ', '神秘来信的故事'))).toEqual(verbatim());
+    expect(exemplarCopied(draft(`${FRESH}${across}`), edge('老学者收到一封　', '  神秘来信的故事'))).toEqual(verbatim());
+    // The same in the draft: an indented paragraph of the draft is still one text with the one before it.
+    expect(exemplarCopied({ title: '标题', sections: [{ heading: '一', paragraphs: [`${FRESH}老学者收到一封`, '　　神秘来信的故事'] }] }, input({ exemplars: [{ bookTitle: '范例书', version: 1, text: across, excerpt: false }] }))).toEqual(verbatim());
+    // A space between two clauses on one line is still a soft break: the same fourteen characters across it are no run of twelve.
+    expect(exemplarCopied(draft(`${FRESH}${across}`), edge('老学者收到一封 神秘来信的故事', ''))).toBeNull();
+  });
+
+  it('leaves an ISBN-10 ending in X, as `/1` did (#707)', () => {
+    // Under `/2` the X went to the words and the nine digits before it fell short of the ISBN-like run, so the sixteen characters
+    // around the number were a copy across an 外文词.
+    const isbn = input({ exemplars: [{ bookTitle: '范例书', version: 1, text: '统一书号：7-5321-3456-X，定价三十八元，全国各地新华书店经销。', excerpt: false }] });
+    expect(exemplarCopied(draft(`${FRESH}统一书号：7-5321-3456-X，定价三十八元`), isbn)).toBeNull();
+    expect(exemplarCopied(draft(`${FRESH}统一书号：753213456X，定价三十八元`), isbn)).toBeNull();
+    expect(exemplarCopied(draft(`${FRESH}统一书号：7-5321-3456-X，定价三十八元`), isbn, WRITING_COPY_SIZES_V1)).toBeNull();
+    // A lower-case x is the same check digit; nine digits and a letter that is no X are a code, and no one's either.
+    expect(exemplarCopied(draft(`${FRESH}统一书号：7-5321-3456-x，定价三十八元`), isbn)).toBeNull();
+    // …while the words around it stay someone's: sixteen characters across the comma are a copy.
+    expect(exemplarCopied(draft(`${FRESH}定价三十八元，全国各地新华书店经销。`), isbn))
+      .toEqual({ exemplar: 0, kind: 'verbatim', unit: 'character', run: EXEMPLAR_COPY_WINDOW_ACROSS, breaks: ['punctuation'] });
+  });
+
+  it('names the breaks a run was copied across: 标点, 空格, an 外文词, a 数字 or an 编号 (#707)', () => {
+    const detail = (text: string, given: WritingContractInput) => { const parsed = parse(synthesis([text]), given); return parsed.ok ? 'ok' : parsed.detail; };
+    const sixteen = (middle: string) => `一位老学者与一封${middle}神秘来信的故事讲完`;
+    const one = (text: string) => input({ exemplars: [{ bookTitle: '范例书', version: 1, text, excerpt: false }] });
+    expect(exemplarCopied(draft(`${FRESH}${sixteen(' ')}`), one(sixteen(' '))))
+      .toEqual({ exemplar: 0, kind: 'verbatim', unit: 'character', run: EXEMPLAR_COPY_WINDOW_ACROSS, breaks: ['space'] });
+    expect(detail(`${FRESH}${sixteen(' ')}`, one(sixteen(' ')))).toBe(`草稿与范例《范例书》版本 1 有跨空格连续 ${EXEMPLAR_COPY_WINDOW_ACROSS} 个字以上相同；范例只参照，不复制，这份草稿不予采用。`);
+    expect(exemplarCopied(draft(`${FRESH}${sixteen('Letter')}`), one(sixteen('Letter'))))
+      .toEqual({ exemplar: 0, kind: 'verbatim', unit: 'character', run: EXEMPLAR_COPY_WINDOW_ACROSS, breaks: ['latin-word'] });
+    expect(detail(`${FRESH}${sixteen('，又一 Letter ')}`, one(sixteen('，又一 Letter ')))).toBe(`草稿与范例《范例书》版本 1 有跨标点、空格、外文词连续 ${EXEMPLAR_COPY_WINDOW_ACROSS} 个字以上相同；范例只参照，不复制，这份草稿不予采用。`);
+    // 「family farm was sold in 1987 and the orchard was cut down」: five words and six across a number, no eight within.
+    const words = 'the family farm was sold in 1987 and the orchard was cut down for timber';
+    const copyingWords = 'Their family farm was sold in 1987 and the orchard was cut down.';
+    expect(exemplarCopied(draft(copyingWords), one(words))).toEqual({ exemplar: 0, kind: 'verbatim', unit: 'word', run: EXEMPLAR_COPY_WORDS_ACROSS, breaks: ['number'] });
+    expect(detail(copyingWords, one(words))).toBe(`草稿与范例《范例书》版本 1 有跨数字连续 ${EXEMPLAR_COPY_WORDS_ACROSS} 个外文词以上相同；范例只参照，不复制，这份草稿不予采用。`);
+    // 「big family farm, lot AB2026CX, was sold and the orchard was cut」: three, one and seven words across punctuation and a code.
+    const coded = 'the big family farm, lot AB2026CX, was sold and the orchard was cut down for timber';
+    expect(detail('Their big family farm, lot AB2026CX, was sold and the orchard was cut.', one(coded)))
+      .toBe(`草稿与范例《范例书》版本 1 有跨标点、编号连续 ${EXEMPLAR_COPY_WORDS_ACROSS} 个外文词以上相同；范例只参照，不复制，这份草稿不予采用。`);
+    // A run within punctuation names no break, under `/2` as under `/1`.
+    expect(detail(EXEMPLAR, input())).toBe(`草稿与范例《范例书》版本 2 有连续 ${EXEMPLAR_COPY_WINDOW} 个字以上相同；范例只参照，不复制，这份草稿不予采用。`);
   });
 
   it('(a) compares the draft as one stream: a copy split across paragraphs, a heading or the title is still a copy', () => {
@@ -319,7 +371,7 @@ describe('Writing Contract v1 — the reference bound on realistic prose (#698)'
 
   it('refuses the same praise copied on past it: sixteen characters across punctuation', () => {
     const copying = draft(OWN_ZH, '这部作品讲述了一位乡村教师的半生经历。书中人物形象鲜明，情节跌宕起伏，语言质朴而有力量。');
-    expect(exemplarCopied(copying, one(CHINESE))).toEqual({ exemplar: 0, kind: 'verbatim', unit: 'character', run: EXEMPLAR_COPY_WINDOW_ACROSS });
+    expect(exemplarCopied(copying, one(CHINESE))).toEqual({ exemplar: 0, kind: 'verbatim', unit: 'character', run: EXEMPLAR_COPY_WINDOW_ACROSS, breaks: ['punctuation'] });
     const parsed = parse(synthesis(copying.sections[0]!.paragraphs), one(CHINESE));
     expect(parsed.ok ? '' : parsed.detail).toBe(`草稿与范例《远山》版本 1 有跨标点连续 ${EXEMPLAR_COPY_WINDOW_ACROSS} 个字以上相同；范例只参照，不复制，这份草稿不予采用。`);
   });
@@ -341,16 +393,16 @@ describe('Writing Contract v1 — the reference bound on realistic prose (#698)'
     const copying = draft(OWN_EN, 'This novel follows one family over many years and asks what we owe to the land that raised us.');
     expect(exemplarCopied(copying, one(ENGLISH, 'Distant Hills'))).toEqual({ exemplar: 0, kind: 'verbatim', unit: 'word', run: EXEMPLAR_COPY_WORDS });
     const parsed = parse(synthesis(copying.sections[0]!.paragraphs), one(ENGLISH, 'Distant Hills'));
-    expect(parsed.ok ? '' : parsed.detail).toBe(`草稿与范例《Distant Hills》版本 1 有连续 ${EXEMPLAR_COPY_WORDS} 个英文词以上相同；范例只参照，不复制，这份草稿不予采用。`);
+    expect(parsed.ok ? '' : parsed.detail).toBe(`草稿与范例《Distant Hills》版本 1 有连续 ${EXEMPLAR_COPY_WORDS} 个外文词以上相同；范例只参照，不复制，这份草稿不予采用。`);
     // Inside a Chinese draft, too.
     expect(exemplarCopied(draft(`这本书追问：what we owe to the land that raised us。`), one(ENGLISH))).toMatchObject({ kind: 'verbatim', unit: 'word' });
   });
 
   it('refuses English copied across punctuation from eleven words', () => {
     const copying = draft(OWN_EN, 'Told in alternating voices, it follows the family through drought, war and peace.');
-    expect(exemplarCopied(copying, one(ENGLISH))).toEqual({ exemplar: 0, kind: 'verbatim', unit: 'word', run: EXEMPLAR_COPY_WORDS_ACROSS });
+    expect(exemplarCopied(copying, one(ENGLISH))).toEqual({ exemplar: 0, kind: 'verbatim', unit: 'word', run: EXEMPLAR_COPY_WORDS_ACROSS, breaks: ['punctuation'] });
     const parsed = parse(synthesis(copying.sections[0]!.paragraphs), one(ENGLISH));
-    expect(parsed.ok ? '' : parsed.detail).toBe(`草稿与范例《远山》版本 1 有跨标点连续 ${EXEMPLAR_COPY_WORDS_ACROSS} 个英文词以上相同；范例只参照，不复制，这份草稿不予采用。`);
+    expect(parsed.ok ? '' : parsed.detail).toBe(`草稿与范例《远山》版本 1 有跨标点连续 ${EXEMPLAR_COPY_WORDS_ACROSS} 个外文词以上相同；范例只参照，不复制，这份草稿不予采用。`);
   });
 
   it('reads a hyphenated word as one word, and a curly apostrophe as a straight one', () => {
@@ -386,7 +438,7 @@ describe('Writing Contract v1 — the reference bound on realistic prose (#698)'
     expect(exemplarCopied(draft(PAD, '书中写道：and asks what we owe to the land that raised us。'), one('It asks what we owe to the land that raised us.')))
       .toEqual({ exemplar: 0, kind: 'verbatim', unit: 'word', run: EXEMPLAR_COPY_WORDS });
     expect(exemplarCopied(draft(PAD, '英文简介：Set in a quiet coastal town。The novel follows a retired 教师。'), one('Set in a quiet coastal town。The novel follows a retired teacher who receives a letter.')))
-      .toEqual({ exemplar: 0, kind: 'verbatim', unit: 'word', run: EXEMPLAR_COPY_WORDS_ACROSS });
+      .toEqual({ exemplar: 0, kind: 'verbatim', unit: 'word', run: EXEMPLAR_COPY_WORDS_ACROSS, breaks: ['punctuation'] });
   });
 
   it('weighs a Latin-script name or phrase inside Chinese text on its words, and only the Chinese on characters (#704 P3-1)', () => {
@@ -413,7 +465,7 @@ describe('Writing Contract v1 — the reference bound on realistic prose (#698)'
     expect(exemplarCopied(draft(`${OWN_EN} Their family farm was sold in 1987 and the old orchard was cut down.`), exemplar)).toBeNull();
     // …and words copied on across it are a copy from eleven.
     expect(exemplarCopied(draft(`${OWN_EN} Their family farm was sold in 1987 and the orchard was cut down.`), exemplar))
-      .toEqual({ exemplar: 0, kind: 'verbatim', unit: 'word', run: EXEMPLAR_COPY_WORDS_ACROSS });
+      .toEqual({ exemplar: 0, kind: 'verbatim', unit: 'word', run: EXEMPLAR_COPY_WORDS_ACROSS, breaks: ['number'] });
   });
 
   // Synthetic English: distinct letter-only words, `count` of them from `from` on.
@@ -447,7 +499,7 @@ describe('Writing Contract v1 — the reference bound on realistic prose (#698)'
     expect(copied).toMatchObject({ exemplar: 0, kind: 'span', unit: 'word' });
     const sections = [long.slice(0, 90), editedWords(source.slice(0, 95), 7), long.slice(90, 180)].map((words, index) => ({ heading: `Part ${index + 1}`, paragraphs: paragraphs(words) }));
     const parsed = parse(JSON.stringify({ schema: WRITING_SYNTHESIS_RESULT_SCHEMA, title: '标题', sections }), exemplar);
-    expect(parsed.ok ? '' : parsed.detail).toMatch(new RegExp(`^草稿与范例《远山》版本 1 在草稿的一段 ${EXEMPLAR_WORD_SPAN} 个英文词中，${EXEMPLAR_WORD_SHINGLE} 词片段重合达 \\d+%（不少于 30% 即算照抄）；范例只参照，不复制，这份草稿不予采用。$`, 'u'));
+    expect(parsed.ok ? '' : parsed.detail).toMatch(new RegExp(`^草稿与范例《远山》版本 1 在草稿的一段 ${EXEMPLAR_WORD_SPAN} 个外文词中，${EXEMPLAR_WORD_SHINGLE} 词片段重合达 \\d+%（不少于 30% 即算照抄）；范例只参照，不复制，这份草稿不予采用。$`, 'u'));
     // A word span never spans Chinese text (#704 P2-1): under Chinese headings the copied section's 95 words hold no 130-word span.
     const chinese = sections.map((section, index) => ({ ...section, heading: `第${index + 1}部分` }));
     expect(exemplarCopied({ title: '标题', sections: chinese }, exemplar)).toBeNull();
@@ -483,7 +535,7 @@ describe('Writing Contract v1 — the span rule\'s floor inside a long draft (#6
   });
 
   it('catches a punctuated copy edited every 17 characters as verbatim, sixteen across punctuation', () => {
-    expect(exemplarCopied(across(17, 60), exemplar)).toEqual({ exemplar: 0, kind: 'verbatim', unit: 'character', run: EXEMPLAR_COPY_WINDOW_ACROSS });
+    expect(exemplarCopied(across(17, 60), exemplar)).toEqual({ exemplar: 0, kind: 'verbatim', unit: 'character', run: EXEMPLAR_COPY_WINDOW_ACROSS, breaks: ['punctuation'] });
   });
 
   it('lets a 120-character paragraph edited every ten characters pass, as the doc says', () => {
@@ -574,7 +626,7 @@ describe('the copy rules a frozen contract carries (the Commander\'s ruling on #
 
   it('words the plan\'s 不会做 line in the Task\'s own rules', () => {
     expect(writingCopyNotDo(1)).toBe('不照抄范例：与范例有连续 12 个字以上相同的草稿不予采用');
-    expect(writingCopyNotDo(2)).toBe('不照抄范例：与范例有连续 12 个字以上相同（跨标点时 16 个字；英文为 8 个词，跨标点时 11 个词）的草稿不予采用');
+    expect(writingCopyNotDo(2)).toBe('不照抄范例：与范例有连续 12 个字以上相同（跨标点、空格或外文词时 16 个字；拉丁字母文字为 8 个词，跨标点、数字或编号时 11 个词）的草稿不予采用');
   });
 });
 
