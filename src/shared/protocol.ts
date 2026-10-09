@@ -6045,7 +6045,10 @@ export interface CapturedProcedureVersionProjection {
   readonly runs: ReadonlyArray<CapturedProcedureRunLinkProjection>;
   /**
    * The 图书交付包 versions that hold a report of a Review Run pinned to it, newest first, at most
-   * `MAX_CAPTURED_PROCEDURE_PACKAGES_SHOWN` (Issue #66, S31b; REUSE-031); `packageCount` counts them all.
+   * `MAX_CAPTURED_PROCEDURE_PACKAGES_SHOWN` (Issue #66, S31b; REUSE-031); `packageCount` counts them all. The service reads
+   * exactly the newest `min(packageCount, MAX_CAPTURED_PROCEDURE_PACKAGES_SHOWN)` rows and lists those whose digests hold, and
+   * the renderer derives how many of the read rows could not be read as that minimum less `packages.length` (Issue #697; #705
+   * item 5): a service that reads fewer or pages the links changes this contract, not only its own call.
    */
   readonly packages: ReadonlyArray<CapturedProcedurePackageLinkProjection>;
   readonly packageCount: number;

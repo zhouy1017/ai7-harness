@@ -188,7 +188,7 @@ export function procedureRequirementLine(steps: ReadonlyArray<Pick<CapturedProce
  * The 图书交付包 versions that hold a report of a Run under a version (Issue #66, S31b; REUSE-031): how many, and which are
  * listed. The service reads the newest `limit` of the `count` and lists those that pass their digests, so fewer listed than
  * read means some of the newest are damaged: the line then says how many could not be read and lists the rest, never calling
- * an older one 「最新的」 (Issue #697).
+ * an older one 「最新的」 (Issue #697). One damaged row read alone is worded by itself, without 「都」 (Issue #705 item 4).
  */
 export function procedurePackagesLine(shown: number, count: number, limit: number = MAX_CAPTURED_PROCEDURE_PACKAGES_SHOWN): string {
   const head = `按这一版运行的审阅，报告收入了 ${count} 个图书交付包版本`;
@@ -196,7 +196,8 @@ export function procedurePackagesLine(shown: number, count: number, limit: numbe
   const unreadable = read - shown;
   if (unreadable <= 0) return shown === count ? head : `${head}；列出最新的 ${shown} 个`;
   const among = read === count ? `这 ${count} 个` : `最新的 ${read} 个`;
-  return shown === 0 ? `${head}；${among}都无法读取，未列出` : `${head}；${among}里有 ${unreadable} 个无法读取，列出其余 ${shown} 个`;
+  if (shown === 0) return `${head}；${among}${read === 1 ? '' : '都'}无法读取，未列出`;
+  return `${head}；${among}里有 ${unreadable} 个无法读取，列出其余 ${shown} 个`;
 }
 
 /** One 图书交付包 version as an exact link (REUSE-031): it opens that Book's 交付物, where the version is listed. */
