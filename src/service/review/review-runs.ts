@@ -641,9 +641,19 @@ interface CategoryReading {
   readonly facts: ReviewCategoryLedgerFacts;
   /** The category ledger's projection of its latest Task, when it could be read. */
   readonly projection: AnalysisProjection | null;
-  /** The blocks a range Run left unread after they changed since the category read them (Issue #709); absent reads as none. */
-  readonly unreadChangedBlockIds?: ReadonlySet<string>;
+  /** What a range Run left unread after it changed since the category read it (Issue #709); absent reads as none. */
+  readonly unread?: UnreadChanges;
 }
+
+/** The ledger's one unread-changes fact (Issue #709): the units, the blocks that make them changed, and any cut in the walk. */
+type UnreadChanges = ReturnType<BaselineAnalysisStore['unreadChanges']>;
+const NO_UNREAD_CHANGES: UnreadChanges = { units: 0, blockIds: new Set(), cut: null };
+
+/**
+ * Said beside a category whose walk back through its revisions stopped short (#711 review P3-3): an earlier revision could
+ * not be read, so what it read is not known, and a chapter read before it and changed since is not re-read by 只审改动过的章.
+ */
+export const UNREAD_WALK_CUT_NOTE = '这一类有较早的审阅记录无法核对：在它之前读过、之后又改动的章，只审改动过的章不会重读；需要时请审全书或所选各章。' as const;
 
 /** A located finding ready to be written with the mark it becomes. */
 interface MaterializedFinding {
@@ -2728,11 +2738,11 @@ export class ReviewRunStore {
        WHERE e.result_set_revision_id = ? AND e.category_id = ? AND r.scope_kind = 'selection' LIMIT 1`,
     ).get(revision.revisionId, entry.categoryId) !== undefined;
     // What a 选章 left unread after it changed since the category read it (Issue #709): measured per unit, from the latest
-    // revision that read it.
-    let unreadChangedBlockIds: ReadonlySet<string> = new Set();
+    // revision that read it — the one walk the ledger keeps per revision, which its plan and gate read too (#711 review).
+    let unread: UnreadChanges = NO_UNREAD_CHANGES;
     if (revision !== null) {
       try {
-        unreadChangedBlockIds = this.#ledgers.ledgerOf(entry).unreadChangedBlockIds(bookId);
+        unread = this.#ledgers.ledgerOf(entry).unreadChanges(bookId);
       } catch (error) {
         if (error instanceof AnalysisError) return { entry, unavailableReason: error.message, facts: none, projection: null };
         throw error;
@@ -2743,7 +2753,7 @@ export class ReviewRunStore {
       reviewed,
       selectionBase,
       stale: revision !== null && revision.freshness.state === 'stale',
-      unreadChanges: unreadChangedBlockIds.size > 0,
+      unreadChanges: unread.units > 0,
       syncUnavailableReason: actions?.['review-sync']?.unavailableReason ?? null,
       baselineRevision: baseline.revision !== null,
     };
@@ -2752,7 +2762,7 @@ export class ReviewRunStore {
       unavailableReason: entry.executor === 'factual-review-kind' && revision !== null ? FACTUAL_AGAIN_REASON : null,
       facts,
       projection,
-      unreadChangedBlockIds,
+      unread,
     };
   }
 
@@ -2847,33 +2857,35 @@ export class ReviewRunStore {
       const pinnedRevisionId = text(pin.manuscript_revision_id);
       const fresh = pinnedRevisionId === head.revisionId && text(pin.manuscript_revision_digest) === head.workingDigest;
       // An edit a 选章 left unread is still to review, however current its revision (Issue #709).
-      const unread = reading.unreadChangedBlockIds ?? new Set<string>();
-      const current = fresh && unread.size === 0 && (entry.executor !== 'baseline-leads' || baseline.revision?.revisionId === last.revisionId);
+      // The gate's own fact (#711 review P2-1): a unit 只审改动过的章 would read again keeps the row at 需复审, and its blocks
+      // are counted.
+      const unread = reading.unread ?? NO_UNREAD_CHANGES;
+      const current = fresh && unread.units === 0 && (entry.executor !== 'baseline-leads' || baseline.revision?.revisionId === last.revisionId);
       return row(current ? 'current' : 'needs-review', {
         lastRunOrdinal: last.ordinal,
         lastReviewedRevisionLabel: text(pin.revision_label),
-        changedBlocks: fresh && unread.size === 0 ? 0 : this.#changedBlocks(head, pinnedRevisionId, unread),
+        changedBlocks: fresh && unread.units === 0 ? 0 : this.#changedBlocks(head, pinnedRevisionId, unread.blockIds),
+        unavailableReason: unread.cut === null ? null : UNREAD_WALK_CUT_NOTE,
       });
     });
   }
 
   /** Blocks added, removed or changed between a Manuscript Revision and the working manuscript now. */
   /**
-   * Blocks added, removed or changed between a Manuscript Revision and the working manuscript now — and, counted once with
-   * them, the blocks still in it that a 选章 left unread after they changed since the category read them (Issue #709).
+   * Blocks added, removed or changed between a Manuscript Revision and the working manuscript now — and, each counted once
+   * with them, the blocks that make a unit a 选章 left unread changed since the category read it (Issue #709): changed,
+   * added, removed from its place or reordered within it.
    */
   #changedBlocks(head: ManuscriptHead, revisionId: string, unread: ReadonlySet<string>): number {
     const changed = new Set((this.#db.prepare(
       `SELECT wb.block_id FROM working_blocks wb WHERE wb.branch_id = ? AND NOT EXISTS (
-         SELECT 1 FROM manuscript_block_versions v WHERE v.revision_id = ? AND v.block_id = wb.block_id AND v.digest = wb.digest)`,
-    ).all(head.branchId, revisionId) as SqlRow[]).map((row) => text(row.block_id)));
-    const present = this.#db.prepare('SELECT 1 FROM working_blocks WHERE branch_id = ? AND block_id = ?');
-    for (const blockId of unread) if (present.get(head.branchId, blockId) !== undefined) changed.add(blockId);
-    const removed = this.#db.prepare(
-      `SELECT count(*) removed FROM manuscript_block_versions v WHERE v.revision_id = ? AND NOT EXISTS (
+         SELECT 1 FROM manuscript_block_versions v WHERE v.revision_id = ? AND v.block_id = wb.block_id AND v.digest = wb.digest)
+       UNION
+       SELECT v.block_id FROM manuscript_block_versions v WHERE v.revision_id = ? AND NOT EXISTS (
          SELECT 1 FROM working_blocks wb WHERE wb.branch_id = ? AND wb.block_id = v.block_id)`,
-    ).get(revisionId, head.branchId) as SqlRow;
-    return changed.size + integer(removed.removed);
+    ).all(head.branchId, revisionId, revisionId, head.branchId) as SqlRow[]).map((row) => text(row.block_id)));
+    for (const blockId of unread) changed.add(blockId);
+    return changed.size;
   }
 
   /** Everything a Run reads as: its categories' states, its findings with their derived status, its own state. */

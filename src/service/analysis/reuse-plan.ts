@@ -180,8 +180,9 @@ export function reusePlanRecord(plan: AnalysisReusePlanProjection | ReviewScopeP
  * leaves it that way rather than quietly widening to every chapter nobody has asked about yet. A unit
  * whose predecessor failed is still retried, exactly as the baseline retries a predecessor gap. And
  * `changed` is measured per unit from the latest revision that read it (Issue #709): a unit a range Run
- * left unreviewed after it changed since an earlier Run read it is read again, never carried as
- * unchanged because the range Run saw it last (`changedUnreadUnitOrdinals`).
+ * left unreviewed after its words changed — since an earlier Run read its place, or since they stood
+ * unread there — is read again, never carried as unchanged because the range Run saw it last
+ * (`changedUnreadUnitOrdinals`).
  *
  * Compatibility binds the frozen category contract, not only the contract version. Every category is
  * read under the one version `ai7.editorial-review/1`, and what a category's units were actually read
@@ -203,8 +204,9 @@ export interface ScopePlanPredecessor extends ReusePlanPredecessor {
    * Of {@link unreviewedUnitOrdinals}, the units left unreviewed although they changed since the category last read them
    * (Issue #709): a range Run — 选章 or 当前选区 — leaves every unit outside its range unreviewed, the unit an edit outside the
    * chosen chapters changed as well as the chapter nobody has asked about yet. `changed` is measured per unit from the latest
-   * revision that read it, so these are read again; only a unit whose content no Run of the chain has read is left as it was.
-   * Absent reads as none.
+   * revision that read it (`walkUnreadChanges`), so these are read again. A unit whose words no Run of the chain has read —
+   * a read that failed, or ran under another category contract, is no read — stays unreviewed until it is edited. Absent
+   * reads as none.
    */
   readonly changedUnreadUnitOrdinals?: ReadonlyArray<number>;
 }

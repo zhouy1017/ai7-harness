@@ -4728,6 +4728,10 @@ export interface ReviewCoverageRowProjection {
   lastReviewedRevisionLabel: string | null;
   /** Blocks added, removed or changed since that review; `null` before any. */
   changedBlocks: number | null;
+  /**
+   * Why the category cannot run, on an `unavailable` row; on a reviewed one (Issue #709), what could not be checked: an
+   * earlier review record the walk for unread changes could not read. `null` otherwise.
+   */
   unavailableReason: string | null;
 }
 

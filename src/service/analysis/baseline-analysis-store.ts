@@ -97,7 +97,8 @@ import {
   sha256Hex,
 } from './canonical.js';
 import { unitRequestDigest } from './contract.js';
-import { deriveCoverageManifest, manifestCoversEveryBlock, manifestDigestIsExact, unitContentKeys, type ManifestBlockInput } from './coverage-manifest.js';
+import { deriveCoverageManifest, manifestCoversEveryBlock, manifestDigestIsExact, type ManifestBlockInput } from './coverage-manifest.js';
+import { walkUnreadChanges, type ChainRevision, type UnreadWalk, type UnreadWalkCut } from './unread-changes.js';
 import { TASK_INPUT_CHECKPOINT_PURPOSE } from './identity.js';
 import type { AnalysisKindDefinition, AnalysisReductionResult } from './kind-definition.js';
 import {
@@ -151,6 +152,19 @@ const CONNECTIVITY_WAIT_DETAIL = '已记录授权；联网并通过重新联网�
  * closes the sentence, so the baseline kind reads `…后才可同步到当前稿件。` exactly as it always has and
  * a review category names its own action.
  */
+/** A frozen reuse plan the chain no longer derives (#711 review P3-4): at dispatch, and before authorization. */
+export const REUSE_PLAN_DRIFT_REASON = '重新推导的复用计划与冻结计划不一致；未开始执行，请重新准备。' as const;
+export const REUSE_PLAN_DRIFT_AUTHORIZE_REASON = '重新推导的复用计划与冻结计划不一致；无法授权，请重新准备。' as const;
+
+/** The most revisions one ledger keeps a walk, or a walk's reading, of: the oldest is let go first. */
+const UNREAD_WALK_CACHE_CAPACITY = 256;
+
+function remember<T>(cache: Map<string, T>, key: string, value: T): void {
+  cache.delete(key);
+  cache.set(key, value);
+  if (cache.size > UNREAD_WALK_CACHE_CAPACITY) cache.delete(cache.keys().next().value!);
+}
+
 function changedModeUnavailableReason(label: string): string {
   return `结果集修订版仍绑定当前稿件；只有在已确认编辑使精确修订版新鲜度为“已过期”后才可${label}。`;
 }
@@ -760,6 +774,14 @@ export class BaselineAnalysisStore {
   readonly #route: BaselineAnalysisRouteFacts | null;
   readonly #definition: AnalysisKindDefinition;
   readonly #work = new Map<string, PreparationWork>();
+  /**
+   * The unread-changes walk of each latest revision, and each revision as the walk reads it (Issue #709; #711 review P2-2).
+   * Revisions are immutable once written, so both are kept by revision id: a read — the 审阅 screen's poll among them —
+   * walks the chain once per latest revision, and the plan, the gate and the coverage matrix share that one answer.
+   */
+  readonly #unreadWalks = new Map<string, UnreadWalk>();
+  readonly #chainRevisions = new Map<string, { readonly revision: ChainRevision; readonly predecessorRevisionId: string | null } | 'unreadable'>();
+  #unreadWalksComputed = 0;
   #launch: LaunchBinding = DEVELOPMENT_CI_LAUNCH;
 
   constructor(
@@ -911,6 +933,9 @@ export class BaselineAnalysisStore {
     const planned = this.#carriesPlan(intent.mode);
     const reusePlan = planned ? plan['reuse-plan'] as AnalysisPlanRecord : null;
     const update = planned ? this.#updateProjection(intent, reusePlan, digests['reuse-plan'] ?? null, revision) : null;
+    // A frozen scope plan the chain no longer derives (#711 review P3-4) — one prepared before a release changed how it
+    // derives — is never authorized: the Task reads as changed, and preparing again makes a new one.
+    const planDerives = authorization !== undefined || this.#frozenPlanDerives(update, manifest);
     // Drift detection (Issue #48): before authorization the material inputs are re-derived from durable
     // state and compared with the frozen version; a stored pending Plan Revision takes precedence over a
     // live difference. After authorization the bound plan is final for its Run and nothing is compared.
@@ -1033,7 +1058,7 @@ export class BaselineAnalysisStore {
         // analysed can (Issue #422, S76c).
         canPrepare: this.#definition.kind === BASELINE_ANALYSIS_KIND && revision === null && run !== null &&
           (run.state === 'cancelled' || run.state === 'failed' || run.state === 'interrupted' || run.state === 'blocked-before-dispatch'),
-        canAuthorize: authorization === undefined && (update === null || update.predecessorCurrent) && planRevision === null,
+        canAuthorize: authorization === undefined && (update === null || update.predecessorCurrent) && planRevision === null && planDerives,
         canReconfirmPlan,
       },
       namedNonEffects: namedNonEffects(this.#launch.live, manifest.units.length),
@@ -2264,35 +2289,102 @@ export class BaselineAnalysisStore {
       ...facts,
       schemaDigest: asString(this.#revisionBody(row).schemaDigest),
       unreviewedUnitOrdinals,
-      changedUnreadUnitOrdinals: [...this.#changedUnread(row, facts, unreviewedUnitOrdinals).keys()].sort((left, right) => left - right),
+      changedUnreadUnitOrdinals: [...this.#unreadWalk(row).changed.keys()].sort((left, right) => left - right),
     };
   }
 
   /**
-   * The blocks a range Run left unread although they changed since the category last read them (Issue #709): in each such
-   * unit of the latest revision, with its overlap context, the blocks whose words, as that revision pinned the manuscript,
-   * differ from the Manuscript Revision of the reading revision — or were not in it. Empty for a kind that never leaves a
-   * unit unreviewed, and while nothing a range Run left unread has changed.
+   * The units the latest revision left unread although they changed since the category last read them (Issue #709), the
+   * blocks that make them changed, and where the walk stopped short, if it did: the one fact 只审改动过的章's plan and gate
+   * and the coverage matrix all read. Nothing for a kind that never leaves a unit unreviewed, or a Book with no revision.
    */
-  unreadChangedBlockIds(bookId: string): ReadonlySet<string> {
-    const changed = new Set<string>();
-    if (this.#definition.outOfScope !== 'leave-unreviewed') return changed;
+  unreadChanges(bookId: string): { readonly units: number; readonly blockIds: ReadonlySet<string>; readonly cut: UnreadWalkCut } {
+    const none = { units: 0, blockIds: new Set<string>(), cut: null };
+    if (this.#definition.outOfScope !== 'leave-unreviewed') return none;
     const row = this.#revisionRows(bookId).at(-1);
-    if (row === undefined) return changed;
-    const facts = this.#predecessorFacts(row);
-    const anchors = this.#changedUnread(row, facts, this.#unreviewedOrdinals(facts.revisionId));
-    const version = this.#db.prepare('SELECT digest FROM manuscript_block_versions WHERE revision_id = ? AND block_id = ?');
-    const pinned = asString(row.manuscript_revision_id);
-    for (const [ordinal, anchor] of anchors) {
-      const unit = facts.manifest.units.find((candidate) => candidate.ordinal === ordinal)!;
-      // Its overlap context too: the unit's content key reads it, so a change there alone is a change of the unit.
-      for (const blockId of [...unit.overlapBlockIds, ...unit.blockIds]) {
-        const now = version.get(pinned, blockId) as SqlRow | undefined;
-        const then = version.get(anchor, blockId) as SqlRow | undefined;
-        if (now !== undefined && (then === undefined || then.digest !== now.digest)) changed.add(blockId);
-      }
+    if (row === undefined) return none;
+    const walk = this.#unreadWalk(row);
+    return { units: walk.changed.size, blockIds: walk.blockIds, cut: walk.cut };
+  }
+
+  /**
+   * Whether a Task's frozen scope plan still derives, byte for byte, from the chain as it stands (#711 review P3-4). Only a
+   * kind that leaves units unreviewed is asked: its plan reads the walk, whose rule a release may change under a prepared
+   * Task; the baseline's reuse plan never moves. A plan that no longer derives would be refused at dispatch, so it is
+   * refused before it is authorized instead, with 请重新准备.
+   */
+  #frozenPlanDerives(update: AnalysisProjection['update'], manifest: CoverageManifestProjection): boolean {
+    if (this.#definition.outOfScope !== 'leave-unreviewed' || update === null || update.reusePlan === null || update.predecessor === null ||
+        !update.predecessorCurrent) return true;
+    try {
+      const predecessor = this.#planPredecessor(this.#revisionRowById(update.predecessor.revisionId));
+      return reusePlanRecord(this.#derivePlan(update.mode, update.reusePlan.selectedRange, manifest, predecessor)).digest === update.reusePlanDigest;
+    } catch (error) {
+      if (error instanceof AnalysisError) return false;
+      throw error;
     }
-    return changed;
+  }
+
+  /** How many walks this ledger has computed: each latest revision is walked once, however often it is read. */
+  get unreadWalksComputed(): number {
+    return this.#unreadWalksComputed;
+  }
+
+  /** The walk of one latest revision, computed once (see {@link walkUnreadChanges}). */
+  #unreadWalk(row: SqlRow): UnreadWalk {
+    const revisionId = asString(row.revision_id);
+    const kept = this.#unreadWalks.get(revisionId);
+    if (kept !== undefined) return kept;
+    const latest = this.#chainRevision(row);
+    requireAnalysis(latest !== 'unreadable', 'ANALYSIS_RECORD_INVALID', '结果集修订版记录无效。');
+    const walk = walkUnreadChanges(latest.revision, (revision) => {
+      const facts = revision.revisionId === latest.revision.revisionId ? latest : this.#chainRevisions.get(revision.revisionId);
+      if (facts === undefined || facts === 'unreadable') return 'unreadable';
+      if (facts.predecessorRevisionId === null) return null;
+      let prior: SqlRow;
+      try {
+        prior = this.#revisionRowById(facts.predecessorRevisionId);
+      } catch (error) {
+        if (error instanceof AnalysisError) return 'unreadable';
+        throw error;
+      }
+      const read = this.#chainRevision(prior);
+      return read === 'unreadable' ? 'unreadable' : read.revision;
+    });
+    this.#unreadWalksComputed += 1;
+    remember(this.#unreadWalks, revisionId, walk);
+    return walk;
+  }
+
+  /** One revision as the walk reads it, and the revision it followed; `'unreadable'` when its records cannot be read. */
+  #chainRevision(row: SqlRow): { readonly revision: ChainRevision; readonly predecessorRevisionId: string | null } | 'unreadable' {
+    const revisionId = asString(row.revision_id);
+    const kept = this.#chainRevisions.get(revisionId);
+    if (kept !== undefined) return kept;
+    let read: { readonly revision: ChainRevision; readonly predecessorRevisionId: string | null } | 'unreadable';
+    try {
+      const facts = this.#predecessorFacts(row);
+      const outOfScope = new Set(this.#unreviewedOrdinals(revisionId));
+      const intent = this.#db.prepare('SELECT predecessor_revision_id FROM analysis_task_intents WHERE task_intent_id = ?')
+        .get(asString(row.task_intent_id)) as SqlRow | undefined;
+      requireAnalysis(intent !== undefined, 'ANALYSIS_RECORD_INVALID', '结果集修订版的任务意图缺失。');
+      read = {
+        revision: {
+          revisionId,
+          ordinal: facts.ordinal,
+          contract: `${facts.contractVersion}\n${asString(this.#revisionBody(row).schemaDigest)}`,
+          manifest: facts.manifest,
+          units: new Map(facts.unitStates.map((unit) => [unit.unitOrdinal,
+            unit.state === 'closed' ? 'closed' : outOfScope.has(unit.unitOrdinal) ? 'out-of-scope' : 'failed'] as const)),
+        },
+        predecessorRevisionId: intent.predecessor_revision_id === null ? null : asString(intent.predecessor_revision_id),
+      };
+    } catch (error) {
+      if (!(error instanceof AnalysisError)) throw error;
+      read = 'unreadable';
+    }
+    remember(this.#chainRevisions, revisionId, read);
+    return read;
   }
 
   /** A revision's `out-of-scope` gaps: the units its Run was never asked to read. */
@@ -2303,47 +2395,6 @@ export class BaselineAnalysisStore {
       const record = parseCanonicalJson(asString(unit.canonical_json));
       return isRecord(record) && isRecord(record.gap) && record.gap.code === 'out-of-scope';
     }).map((unit) => asNumber(unit.unit_ordinal));
-  }
-
-  /**
-   * Which of a revision's unreviewed units changed since the category last read them (Issue #709), so that `changed` is
-   * measured per unit from the latest revision that read it rather than from the latest revision alone. A unit stays
-   * unchanged-and-unread only while every earlier revision of the chain left that very content unreviewed too, back to the
-   * chain's first Run — a first range review, which no Run read before. As soon as an earlier revision did not leave it
-   * unreviewed (it read the unit, or the content was not there yet), the content arrived after that revision read its
-   * place, and a range Run since left it unread: it has changed. Everything is read from the immutable revision rows, so
-   * preparation and execution derive the same answer. Each changed unit maps to the Manuscript Revision that earlier
-   * revision pinned: the manuscript as the category last read the unit's place.
-   */
-  #changedUnread(row: SqlRow, facts: ReusePlanPredecessor, unreviewed: ReadonlyArray<number>): Map<number, string> {
-    const changed = new Map<number, string>();
-    if (unreviewed.length === 0) return changed;
-    const unread = new Set(unreviewed);
-    const keys = unitContentKeys(facts.manifest);
-    const pending = new Map<string, number[]>();
-    facts.manifest.units.forEach((unit, index) => {
-      if (unread.has(unit.ordinal)) pending.set(keys[index]!, [...(pending.get(keys[index]!) ?? []), unit.ordinal]);
-    });
-    let current = row;
-    while (pending.size > 0) {
-      const intent = this.#db.prepare('SELECT predecessor_revision_id FROM analysis_task_intents WHERE task_intent_id = ?')
-        .get(asString(current.task_intent_id)) as SqlRow | undefined;
-      requireAnalysis(intent !== undefined, 'ANALYSIS_RECORD_INVALID', '结果集修订版的任务意图缺失。');
-      // The chain's first Run: what it left unread, no Run of this category has read.
-      if (intent.predecessor_revision_id === null) break;
-      const prior = this.#revisionRowById(asString(intent.predecessor_revision_id));
-      const priorFacts = this.#predecessorFacts(prior);
-      const priorUnread = new Set(this.#unreviewedOrdinals(priorFacts.revisionId));
-      const priorKeys = unitContentKeys(priorFacts.manifest);
-      const stillUnread = new Set(priorFacts.manifest.units.flatMap((unit, index) => priorUnread.has(unit.ordinal) ? [priorKeys[index]!] : []));
-      for (const [key, ordinals] of [...pending]) {
-        if (stillUnread.has(key)) continue;
-        for (const ordinal of ordinals) changed.set(ordinal, asString(prior.manuscript_revision_id));
-        pending.delete(key);
-      }
-      current = prior;
-    }
-    return changed;
   }
 
   #revisionRowById(revisionId: string): SqlRow {
@@ -2605,8 +2656,10 @@ export class BaselineAnalysisStore {
     // imported anew since (Issue #427 review): its plan could never execute under this contract, so the preparation is a
     // new Task Intent under the contract that applies now.
     const contractCurrent = existing.planEnvelope === null || existing.planEnvelope.promptContractDigest === this.#definition.promptContractDigest;
+    // Nor is a Task whose frozen scope plan the chain no longer derives (#711 review P3-4): 重新准备 makes it anew.
+    const planDerives = existing.coverageManifest === null || existing.authorization !== null || this.#frozenPlanDerives(existing.update, existing.coverageManifest);
     const sameTask = latestIntent !== null && existing.run === null && latestIntent.mode === mode &&
-      latestIntent.predecessorRevisionId === (latest?.revisionId ?? null) && (input.reconfirm || checkpointCurrent) && contractCurrent;
+      latestIntent.predecessorRevisionId === (latest?.revisionId ?? null) && (input.reconfirm || checkpointCurrent) && contractCurrent && planDerives;
     if (sameTask && existing.checkpoint !== null) {
       return { done: true, workId: null, completed: 1, total: 1, projection: this.#revisePreparedPlan(input.bookId, latestIntent, existing, selectedRange, input.reconfirm) };
     }
@@ -2970,6 +3023,7 @@ export class BaselineAnalysisStore {
     // An update Task is re-verified against the Result Set: its predecessor must still be the latest revision.
     requireAnalysis(prepared.update === null || prepared.update.predecessorCurrent,
       'ANALYSIS_PREDECESSOR_DRIFT', '该任务的前一修订版已不再是结果集的最新修订版；无法授权。请基于最新修订版重新准备更新。');
+    requireAnalysis(prepared.actions.canAuthorize, 'ANALYSIS_REUSE_PLAN_DRIFT', REUSE_PLAN_DRIFT_AUTHORIZE_REASON);
     const dispatchAllowed = prepared.planEnvelope.dispatchAllowed;
     requireAnalysis(start === 'now' || dispatchAllowed, 'ANALYSIS_START_WHEN_ONLINE_INVALID', '这份计划没有可执行的路由，不能联网后开始。');
     const authorizationId = randomUUID();
@@ -3705,7 +3759,7 @@ export class BaselineAnalysisStore {
       const rederived = this.#derivePlan(intent.mode, stored.selectedRange, manifest, predecessor);
       const record = reusePlanRecord(rederived);
       requireAnalysis(record.digest === digests['reuse-plan'] && canonicalJson(stored) === record.json && envelope.reusePlanDigest === record.digest,
-        'ANALYSIS_REUSE_PLAN_DRIFT', '重新推导的复用计划与冻结计划不一致；未开始执行。');
+        'ANALYSIS_REUSE_PLAN_DRIFT', REUSE_PLAN_DRIFT_REASON);
       update = {
         mode: intent.mode,
         selectedRange: stored.selectedRange,

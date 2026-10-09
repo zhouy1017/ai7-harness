@@ -668,6 +668,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       } else if (row.state === 'unavailable' && row.unavailableReason !== null) {
         act.append(el('span', 'field-note', row.unavailableReason));
       }
+      // A reviewed category whose earlier records could not all be checked says so (Issue #709).
+      if (row.state !== 'unavailable' && row.unavailableReason !== null) act.append(el('span', 'field-note', row.unavailableReason));
       tr.append(name, state, last, changes, act);
       body.append(tr);
     }
