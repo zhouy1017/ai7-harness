@@ -18,7 +18,7 @@ import {
   IMPORTED_MARKS_REJECTED_BLOCKS,
 } from './composed-docx.mjs';
 import { attachProductOutput, awaitWithinDeadline, createJ01CompletionLocation, discloseJourneySkip, installJourneyCancellationCleanup, journeyCheckFailure, LOCAL_ONLY_DOC, localDebugEnabled, localManuscriptAvailable, localManuscriptPath, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
-import { classifyRendererTargetMiss, createLaunchTrace, formatReadinessTrace, readBrowserLog, waitingForService } from './readiness-trace.mjs';
+import { classifyBrowserLaunchMiss, classifyRendererTargetMiss, createLaunchTrace, formatReadinessTrace, readBrowserLog, sampleProductProcesses, waitingForService } from './readiness-trace.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const PRODUCT_RENDERER_URL = pathToFileURL(resolve(ROOT, 'dist', 'renderer', 'index.html')).href;
@@ -45,6 +45,10 @@ const PRODUCT_READY_TIMEOUT_MS = 60_000;
 // Five seconds past the launch's own timeout, so Playwright states why a launch failed before this
 // outer race gives up on it — the relationship this pair has always had.
 const BROWSER_LAUNCH_TIMEOUT_MS = PRODUCT_READY_TIMEOUT_MS + 5_000;
+// How long before the launch's own timeout — when Playwright stops the product — a launch still not acquired has its
+// processes sampled, so a miss can say what the product was doing (Issue #675). Listing a hosted Windows runner's
+// processes takes a few seconds.
+const LAUNCH_SAMPLE_LEAD_MS = 6_000;
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
 // The product's own deadline for its service to become ready, src/main/service-client.ts STARTUP_READY_TIMEOUT_MS, and the
 // margin for main to say it failed and exit after it. A launch whose renderer target misses J-01's budget while main still
@@ -295,6 +299,56 @@ function serviceStepWord(step) {
     case 'stopped': return 'stopped';
     default: return 'none';
   }
+}
+
+/** Every startup step main says, as a check label's words (src/main/index.ts and application.ts). */
+const LAUNCH_STEP_WORDS = Object.freeze([
+  'network-denial',
+  'application-import',
+  'runtime',
+  'arguments',
+  'data-root',
+  'shell-root',
+  'single-instance',
+  'single-instance-lock',
+  'electron-ready',
+  'service-ready',
+  'renderer-first-paint',
+  'readiness-signal',
+]);
+
+/** How far a launch never acquired came, as a check label's word: before main's first step, or at the last step it said. */
+function launchStepWord(miss) {
+  for (const step of LAUNCH_STEP_WORDS) if (miss.outcome === 'at-step' && miss.step === step) return `at-${step}`;
+  return 'before-main';
+}
+
+/** What the sample before the launch's timeout found of its main process's CPU, as a check label's word. */
+function launchCpuWord(cpu) {
+  switch (cpu) {
+    case 'idle': return 'idle';
+    case 'some': return 'some';
+    case 'busy': return 'busy';
+    default: return 'unknown';
+  }
+}
+
+/**
+ * The launch's browser was never acquired: the check label names why (Issue #675) — `browser-launch-not-spawned`,
+ * `-startup-failed` or `-product-exited`, or else how far main came (`-before-main` or `-at-<step>`) and what the sample
+ * found: `-unsampled`, `-gone`, or `-cpu-<idle|some|busy|unknown>-helpers-<n>-prior-<n>`.
+ */
+function browserLaunchMissLabel(miss) {
+  switch (miss.outcome) {
+    case 'not-spawned': return 'browser-launch-not-spawned';
+    case 'startup-failed': return 'browser-launch-startup-failed';
+    case 'product-exited': return 'browser-launch-product-exited';
+    default: break;
+  }
+  const where = launchStepWord(miss);
+  if (miss.sampled === 'gone') return `browser-launch-${where}-gone`;
+  if (miss.sampled !== 'alive') return `browser-launch-${where}-unsampled`;
+  return `browser-launch-${where}-cpu-${launchCpuWord(miss.cpu)}-helpers-${Number(miss.helpers)}-prior-${Number(miss.prior)}`;
 }
 
 /**
@@ -2280,13 +2334,22 @@ async function main() {
         }),
       ]);
       browserAcquisition = acquisition;
+      // A launch not acquired just before its own timeout has its processes sampled while they are still there (Issue
+      // #675): a miss then says whether main ever ran its script, how far it came, and what its processes were doing.
+      let launchSample;
+      const sampleTimer = setTimeout(() => {
+        const pid = Number(launchTraceNow()?.pid ?? Number.NaN);
+        launchSample = Number.isSafeInteger(pid) ? sampleProductProcesses(pid, executable).catch(() => null) : Promise.resolve(null);
+      }, PRODUCT_READY_TIMEOUT_MS - LAUNCH_SAMPLE_LEAD_MS);
       try {
         browser = await acquisition;
         attachProductOutput('J-01', browser, launchScenario);
       } catch (error) {
         if (isBrowserLaunchTimeout(error)) browserLifecycleIncomplete = true;
-        throw error;
+        const sample = launchSample === undefined ? null : await launchSample;
+        throw journeyCheckFailure('J-01', browserLaunchMissLabel(classifyBrowserLaunchMiss(launchTraceNow(), sample)), { cause: error });
       } finally {
+        clearTimeout(sampleTimer);
         clearTimeout(launchTimeout);
         if (browserAcquisition === acquisition) browserAcquisition = undefined;
       }
