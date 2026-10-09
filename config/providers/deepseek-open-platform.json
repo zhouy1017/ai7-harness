@@ -4,7 +4,7 @@
   "displayName": "DeepSeek 开放平台",
   "credential": {
     "slot": "deepseek-api-key",
-    "developmentCredentialReference": "bfe759bd-8900-433b-9a2e-635e0c385c46",
+    "developmentCredentialReference": null,
     "headerForm": "authorization-bearer",
     "anthropicVersion": null,
     "headerEvidence": "production-baseline"
@@ -42,8 +42,11 @@
       "requestShape": "openai-chat-completions",
       "requestShapeEvidence": "production-baseline",
       "limitPolicy": "rate-limit-retryable",
+      "limitPolicyEvidence": "production-baseline",
       "dshAttribution": true,
+      "dshAttributionEvidence": "production-baseline",
       "sessionHeader": false,
+      "sessionHeaderEvidence": "production-baseline",
       "maxOutputTokens": null,
       "routeCapabilities": {
         "webSearchTool": { "value": "none", "evidence": "no-web-search" }

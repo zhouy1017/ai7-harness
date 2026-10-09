@@ -104,6 +104,44 @@ const SHAPE_RULES = Object.freeze({
 /** Route ids the product owns itself and no document may take. */
 const RESERVED_ROUTE_IDS = new Set(['ai7-local-deterministic']);
 
+/**
+ * The evidence a document may cite that no page can supply, by the provider that carries it: the live test items the
+ * ADR 0067 Provider Test Ledger holds — the nine transmissions of this product's history (PROGRESS › What exists) — and
+ * the production route's frozen request baseline. The ledger itself lives outside every checkout, so this list is its
+ * reviewed mirror: a new live item is added here, in the same pull request that records it, and nowhere else. Without
+ * it a document alone could make a model readable by naming an item nobody sent.
+ */
+export const RECORDED_EVIDENCE = Object.freeze({
+  liveTestItems: Object.freeze({
+    'opencode-go': Object.freeze([
+      'S40/first-baseline/1', 'S40/first-baseline/2', 'S40/first-baseline/3', 'S40/first-baseline/4',
+      'S40/first-baseline/5', 'S40/first-baseline/6', 'S40/first-baseline/7', 'S40/first-baseline/8',
+      'S40/reanalyze-range/1',
+    ]),
+  }),
+  frozenRequestBaselines: Object.freeze({ 'deepseek-open-platform': Object.freeze(['adapter revision 1']) }),
+});
+
+/**
+ * Provider-specific behaviour still spelled by the adapter rather than by configuration, and the providers it may be
+ * declared for: DeepSeek's `thinking` / `reasoning_effort` pair and the DSH attribution headers belong to the production
+ * route, and the `x-opencode-session` header with its developer-live User-Agent to the OpenCode gateways. Until the
+ * header names and parameters are configuration (#452), a document of any other provider may not switch them on.
+ */
+const DEEPSEEK_ONLY_PROVIDERS = new Set(['deepseek-open-platform']);
+const OPENCODE_GATEWAY_PROVIDERS = new Set(['opencode-go', 'opencode-zen']);
+
+/** Host names an endpoint may never use, whatever the schema's pattern admits. */
+const LOCAL_HOST = /(^|\.)(localhost|local|internal|lan|home|arpa)$/u;
+const IPV4_HOST = /^\d{1,3}(\.\d{1,3}){3}$/u;
+
+/** A calendar day, not only its shape: `2023-13-45` is refused. */
+function isCalendarDay(text) {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(text)) return false;
+  const day = new Date(`${text}T00:00:00Z`);
+  return !Number.isNaN(day.getTime()) && day.toISOString().slice(0, 10) === text;
+}
+
 export class ProviderConfigurationError extends Error {
   constructor(message) {
     super(message);
@@ -167,7 +205,20 @@ export function resolveProviderConfiguration({ schema, documents }) {
     const cited = new Set();
     const evidence = {};
     for (const [key, record] of Object.entries(data.evidence)) {
-      evidence[key] = evidenceRecord(record, `${file} evidence ${key}`);
+      const where = `${file} evidence ${key}`;
+      evidence[key] = evidenceRecord(record, where);
+      for (const day of [record.readOn, record.observedOn]) {
+        if (day !== undefined) refuse(isCalendarDay(day), `PROVIDER_CONFIGURATION/evidence-day: ${where} (${day} is not a calendar day)`);
+      }
+      if (record.kind === 'live-test-item') {
+        const held = RECORDED_EVIDENCE.liveTestItems[data.providerId] ?? [];
+        refuse(record.itemIds.every((id) => held.includes(id)),
+          `PROVIDER_CONFIGURATION/live-item-unrecorded: ${where} (an item the Provider Test Ledger does not hold for ${data.providerId})`);
+      }
+      if (record.kind === 'frozen-request-baseline') {
+        const held = RECORDED_EVIDENCE.frozenRequestBaselines[data.providerId] ?? [];
+        refuse(held.includes(record.since), `PROVIDER_CONFIGURATION/baseline-unrecorded: ${where} (no frozen request baseline of ${data.providerId} is ${record.since})`);
+      }
     }
     const cite = (key, where) => {
       refuse(Object.hasOwn(evidence, key), `PROVIDER_CONFIGURATION/evidence-unknown: ${file} ${where} cites ${key}`);
@@ -178,12 +229,14 @@ export function resolveProviderConfiguration({ schema, documents }) {
     const credential = data.credential;
     refuse(!slots.has(credential.slot), `PROVIDER_CONFIGURATION/slot-duplicate: ${file} ${credential.slot}`);
     slots.add(credential.slot);
-    refuse(!references.has(credential.developmentCredentialReference), `PROVIDER_CONFIGURATION/reference-duplicate: ${file}`);
-    references.add(credential.developmentCredentialReference);
+    if (credential.developmentCredentialReference !== null) {
+      refuse(!references.has(credential.developmentCredentialReference), `PROVIDER_CONFIGURATION/reference-duplicate: ${file}`);
+      references.add(credential.developmentCredentialReference);
+    }
     refuse((credential.headerForm === 'x-api-key') === (typeof credential.anthropicVersion === 'string'),
       `PROVIDER_CONFIGURATION/anthropic-version: ${file} (the x-api-key form and only it carries anthropicVersion)`);
     if (typeof credential.anthropicVersion === 'string') {
-      refuse(/^\d{4}-\d{2}-\d{2}$/.test(credential.anthropicVersion), `PROVIDER_CONFIGURATION/anthropic-version: ${file}`);
+      refuse(isCalendarDay(credential.anthropicVersion), `PROVIDER_CONFIGURATION/anthropic-version: ${file} (${credential.anthropicVersion} is not a calendar day)`);
     }
     const headerEvidence = cite(credential.headerEvidence, 'credential.headerEvidence');
     refuse(headerEvidence.kind !== 'unverified', `PROVIDER_CONFIGURATION/header-unverified: ${file} (a header form states where it came from)`);
@@ -202,6 +255,16 @@ export function resolveProviderConfiguration({ schema, documents }) {
         `PROVIDER_CONFIGURATION/output-cap: ${where} (${route.requestShape} requires a per-turn output cap)`);
       const routeShapeEvidence = cite(route.requestShapeEvidence, `${route.routeId}.requestShapeEvidence`);
       refuse(routeShapeEvidence.kind !== 'unverified', `PROVIDER_CONFIGURATION/shape-unverified: ${where}`);
+      const host = new URL(route.endpoint).hostname;
+      refuse(!LOCAL_HOST.test(host) && !IPV4_HOST.test(host) && host.includes('.'),
+        `PROVIDER_CONFIGURATION/endpoint-host: ${where} (${host} is a local, internal or literal address)`);
+      const limitEvidence = cite(route.limitPolicyEvidence, `${route.routeId}.limitPolicyEvidence`);
+      const attributionEvidence = cite(route.dshAttributionEvidence, `${route.routeId}.dshAttributionEvidence`);
+      const sessionEvidence = cite(route.sessionHeaderEvidence, `${route.routeId}.sessionHeaderEvidence`);
+      refuse(!route.dshAttribution || (DEEPSEEK_ONLY_PROVIDERS.has(data.providerId) && attributionEvidence.kind !== 'unverified'),
+        `PROVIDER_CONFIGURATION/dsh-attribution: ${where} (only the production route sends the DSH attribution headers, on its baseline)`);
+      refuse(!route.sessionHeader || (OPENCODE_GATEWAY_PROVIDERS.has(data.providerId) && sessionEvidence.kind === 'vendor-documentation'),
+        `PROVIDER_CONFIGURATION/session-header: ${where} (the OpenCode session header is sent only on a gateway route whose page documents it)`);
       const modelIds = new Set();
       const models = route.models.map((model) => {
         const modelWhere = `${where} model ${model.modelId}`;
@@ -237,6 +300,8 @@ export function resolveProviderConfiguration({ schema, documents }) {
           capabilities[capability] = entry.value;
           capabilityEvidence[capability] = record;
         }
+        refuse(capabilities.reasoningControl !== 'deepseek-thinking' || DEEPSEEK_ONLY_PROVIDERS.has(data.providerId),
+          `PROVIDER_CONFIGURATION/deepseek-thinking: ${modelWhere} (DeepSeek's thinking parameters are sent to DeepSeek official alone)`);
         refuse(capabilities.answerChannel === 'none' || capabilities.answerChannel === shape.answerChannel,
           `PROVIDER_CONFIGURATION/answer-channel: ${modelWhere} (${route.requestShape} answers on ${shape.answerChannel})`);
         refuse(capabilities.reasoningChannel === 'none' || capabilities.reasoningChannel === shape.reasoningChannel,
@@ -274,6 +339,7 @@ export function resolveProviderConfiguration({ schema, documents }) {
           displayName: route.displayName,
         },
         requestShape: route.requestShape,
+        routeEvidence: { limitPolicy: limitEvidence, dshAttribution: attributionEvidence, sessionHeader: sessionEvidence },
         note: route.note ?? null,
         models,
       });
@@ -341,6 +407,7 @@ function renderValue(value, indent, named = new Map()) {
 function renderShared({ providers }) {
   const routes = providers.flatMap((provider) => provider.routes.map((route) => ({ id: route.profile.route, label: provider.displayName })));
   const slots = providers.map((provider) => provider.credential);
+  const developmentSlots = slots.filter((slot) => slot.developmentCredentialReference !== null);
   return [
     ...HEADER('Shared by the protocol, the service and the renderer: identifiers and labels only.'),
     '',
@@ -361,12 +428,20 @@ function renderShared({ providers }) {
     ...routes.map((route) => `  ${literal(route.id)}: ${literal(route.label)},`),
     '};',
     '',
+    '/** The slots whose document fixes a development Credential Reference; the production connection\'s slot has none. */',
+    'export const CONFIGURED_DEVELOPMENT_SLOTS = [',
+    ...developmentSlots.map((slot) => `  ${literal(slot.slot)},`),
+    '] as const;',
+    'export type ConfiguredDevelopmentSlot = (typeof CONFIGURED_DEVELOPMENT_SLOTS)[number];',
+    '',
     '/**',
-    ' * The fixed development Credential Reference of each slot (ADR 0067, ADR 0073 §4): the Protected Secret Store entry the',
-    ' * enrollment helper writes under on a developer host. A reference names a store entry and is not a secret.',
+    ' * The fixed development Credential Reference of each such slot (ADR 0067, ADR 0073 §4): the Protected Secret Store entry the',
+    ' * enrollment helper writes under on a developer host. A reference names a store entry and is not a secret, and it is a',
+    ' * place for a key, not a permission to enrol one: only `opencode-go` enrolment is authorized (ADR 0067; ADR 0073 §5',
+    ' * authorizes no credential).',
     ' */',
-    'export const CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES: Readonly<Record<ConfiguredCredentialSlot, string>> = {',
-    ...slots.map((slot) => `  ${literal(slot.slot)}: ${literal(slot.developmentCredentialReference)},`),
+    'export const CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES: Readonly<Record<ConfiguredDevelopmentSlot, string>> = {',
+    ...developmentSlots.map((slot) => `  ${literal(slot.slot)}: ${literal(slot.developmentCredentialReference)},`),
     '};',
     '',
   ].join('\n');
@@ -413,9 +488,15 @@ function renderSlots({ providers }) {
   return [
     ...HEADER('The enrollment helper is plain ESM run before any build, so it reads this list rather than the TypeScript module.'),
     '',
-    '/** [slot, development Credential Reference], one per configured provider (ADR 0073 §4). */',
+    '/**',
+    ' * [slot, development Credential Reference], one per configured provider whose document fixes one (ADR 0073 §4). A slot',
+    ' * here is a place for a key, not a permission to enrol one: only `opencode-go` enrolment is authorized (ADR 0067), and',
+    ' * every other slot waits for a record that names it (ADR 0073 §5 authorizes no credential; ADR 0080 §5 「先支持后添加key」).',
+    ' */',
     'export const DEVELOPMENT_CREDENTIAL_SLOTS = Object.freeze([',
-    ...providers.map((provider) => `  Object.freeze([${literal(provider.credential.slot)}, ${literal(provider.credential.developmentCredentialReference)}]),`),
+    ...providers
+      .filter((provider) => provider.credential.developmentCredentialReference !== null)
+      .map((provider) => `  Object.freeze([${literal(provider.credential.slot)}, ${literal(provider.credential.developmentCredentialReference)}]),`),
     ']);',
     '',
   ].join('\n');
@@ -477,7 +558,9 @@ function renderSupport({ providers }) {
       lines.push(`| Endpoint | \`${route.profile.endpoint}\` |`);
       lines.push(`| Request shape | \`${route.requestShape}\` |`);
       lines.push(`| Display name | ${cell(route.profile.displayName)} |`);
-      lines.push(`| Limit reading | \`${route.profile.limitPolicy}\` |`);
+      lines.push(`| Limit reading | \`${route.profile.limitPolicy}\` — ${describeEvidence(route.routeEvidence.limitPolicy)} |`);
+      lines.push(`| DSH attribution headers | ${route.profile.dshAttribution ? 'sent' : 'not sent'} — ${describeEvidence(route.routeEvidence.dshAttribution)} |`);
+      lines.push(`| OpenCode session header | ${route.profile.sessionHeader ? 'sent' : 'not sent'} — ${describeEvidence(route.routeEvidence.sessionHeader)} |`);
       lines.push(`| Per-turn output cap | ${route.profile.maxOutputTokens === null ? 'none' : grouped(route.profile.maxOutputTokens)} |`);
       lines.push('');
       if (route.note !== null) lines.push(route.note, '');
@@ -532,14 +615,17 @@ function renderSupport({ providers }) {
   lines.push('## Credential slots', '');
   lines.push('| Slot | Serves | Development Credential Reference |', '| --- | --- | --- |');
   for (const provider of providers) {
-    lines.push(`| \`${provider.credential.slot}\` | ${provider.routes.map((route) => `\`${route.profile.route}\``).join(', ')} | \`${provider.credential.developmentCredentialReference}\` |`);
+    const reference = provider.credential.developmentCredentialReference;
+    lines.push(`| \`${provider.credential.slot}\` | ${provider.routes.map((route) => `\`${route.profile.route}\``).join(', ')} | ${reference === null ? 'none (the production connection\'s reference is per connection row)' : `\`${reference}\``} |`);
   }
   lines.push('');
-  lines.push('A credential slot is a logical slot of the Main Editorial Role, one per configured provider; the Credential Broker\'s closed set and `tools/enroll-dev-credential.mjs`\'s slot list are generated from the documents, so a slot cannot exist without a reviewed document. A developer enrolls a key for a slot only as ADR 0067 established for `opencode-go`: from an untracked key file the enrollment helper alone reads, into the Protected Secret Store under the slot\'s development Credential Reference. A Credential Reference names a store entry and is not a secret. See [ADR 0067](../adr/0067-authorize-the-opencode-go-development-credential-with-live-once-testing.md) for the live-once ledger and the Provider Result Cache.');
+  lines.push('**Only `opencode-go` enrolment is authorized** (ADR 0067). Every other slot is a place for a key, not a permission to enrol one: ADR 0073 §5 authorizes no credential and ADR 0080 §5 defers keys (「先支持后添加key」), so a slot is enrolled only once a record names it.');
+  lines.push('');
+  lines.push('A credential slot is a logical slot of the Main Editorial Role, one per configured provider; the Credential Broker\'s closed set and `tools/enroll-dev-credential.mjs`\'s slot list are generated from the documents, so a slot cannot exist without a reviewed document. Enrolment, where a record authorizes it, is the one way ADR 0067 established for `opencode-go`: from an untracked key file the enrollment helper alone reads, into the Protected Secret Store under the slot\'s development Credential Reference. A Credential Reference names a store entry and is not a secret. See [ADR 0067](../adr/0067-authorize-the-opencode-go-development-credential-with-live-once-testing.md) for the live-once ledger and the Provider Result Cache.');
   lines.push('');
   lines.push('## How a provider is added');
   lines.push('');
-  lines.push('Write or edit one document under `config/providers/`, run `node tools/generate-provider-configuration.mjs`, and commit the document with the four generated files. A model is a row: it is admitted only when the vendor\'s documentation places it on a path and states its id verbatim, and an unverified capability is declared absent (Issue #310). The generator refuses a capability the request shape does not implement, a header form the shape is not spoken with, an anthropic-messages route without a per-turn output cap, a duplicate route, slot or Credential Reference, and an evidence record nothing cites. Nothing a document says authorizes a transmission: a route becomes bindable only through a Provider Processing policy revision (ADR 0073 §3). See Issue #310, Issue #321, Issue #322 and Issue #435.');
+  lines.push('Write or edit one document under `config/providers/`, run `node tools/generate-provider-configuration.mjs`, and commit the document with the four generated files. A model is a row: it is admitted only when the vendor\'s documentation places it on a path and states its id verbatim, and an unverified capability is declared absent (Issue #310). The generator refuses a capability the request shape does not implement, a header form the shape is not spoken with, an anthropic-messages route without a per-turn output cap, a duplicate route, slot or Credential Reference, an evidence record nothing cites or whose fields or days are malformed, an endpoint on a local, internal, literal or dotless host, a live test item or frozen request baseline the Provider Test Ledger does not hold for that provider (`RECORDED_EVIDENCE` in the generator mirrors it), DeepSeek\'s thinking parameters or the DSH attribution headers outside DeepSeek official, and the OpenCode session header outside an OpenCode gateway route whose page documents it. Nothing a document says authorizes a transmission: a route becomes bindable only through a Provider Processing policy revision (ADR 0073 §3). See Issue #310, Issue #321, Issue #322 and Issue #435.');
   lines.push('');
   return lines.join('\n');
 }

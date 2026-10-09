@@ -20,8 +20,9 @@
       "kind": "vendor-documentation",
       "source": "Kimi platform documentation, `$web_search` builtin function, platform.kimi.com/docs",
       "readOn": "2026-09-10",
-      "note": "「`$web_search`（`builtin_function` 类型）是 Kimi 内置的联网搜索工具函数」, with a per-search call fee beside the tokens."
-    }
+      "note": "「`$web_search`（`builtin_function` 类型）是 Kimi 内置的联网搜索工具函数」, with a per-search call fee beside the tokens; recommended with `kimi-k3`, and `kimi-k2.6` also searches with thinking on (ADR 0080 §3)."
+    },
+    "unverified": { "kind": "unverified" }
   },
   "routes": [
     {
@@ -31,20 +32,32 @@
       "requestShape": "openai-chat-completions",
       "requestShapeEvidence": "kimi-platform-docs",
       "limitPolicy": "rate-limit-retryable",
+      "limitPolicyEvidence": "unverified",
       "dshAttribution": false,
+      "dshAttributionEvidence": "unverified",
       "sessionHeader": false,
+      "sessionHeaderEvidence": "unverified",
       "maxOutputTokens": null,
-      "routeCapabilities": {
-        "webSearchTool": { "value": "provider-tool", "evidence": "kimi-search-docs" }
-      },
+      "note": "The search tool is declared per model, for exactly the two the reading names: recommended with `kimi-k3`, and `kimi-k2.6` also searches with thinking on. No page read says `kimi-k2.7-code` searches, so its search tool is absent (ADR 0080 §3: nothing is assumed from a neighbouring row).",
       "models": [
-        { "modelId": "kimi-k3", "displayName": "Kimi K3", "context": { "tokens": 1000000, "evidence": "kimi-platform-docs" } },
+        {
+          "modelId": "kimi-k3",
+          "displayName": "Kimi K3",
+          "capabilities": { "webSearchTool": { "value": "provider-tool", "evidence": "kimi-search-docs" } },
+          "context": { "tokens": 1000000, "evidence": "kimi-platform-docs" }
+        },
         { "modelId": "kimi-k2.7-code", "displayName": "Kimi K2.7 Code", "context": { "tokens": 256000, "evidence": "kimi-platform-docs" } },
-        { "modelId": "kimi-k2.6", "displayName": "Kimi K2.6", "context": { "tokens": 256000, "evidence": "kimi-platform-docs" } }
+        {
+          "modelId": "kimi-k2.6",
+          "displayName": "Kimi K2.6",
+          "capabilities": { "webSearchTool": { "value": "provider-tool", "evidence": "kimi-search-docs" } },
+          "context": { "tokens": 256000, "evidence": "kimi-platform-docs" }
+        }
       ]
     }
   ],
   "openQuestions": [
+    "The limit reading is not established: no page read states the shape of this endpoint's rate-limit or account-limit response, so a 429 is read as a retryable rate limit (`rate-limit-retryable`, `unverified`) until a page or a named live item says otherwise.",
     "Structured output (`json_object`, `json_schema`) is documented but stays absent until a live item establishes it; `kimi-k3` always reasons, and its reasoning channel is not yet read."
   ]
 }

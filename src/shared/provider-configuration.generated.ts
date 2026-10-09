@@ -63,15 +63,33 @@ export const CONFIGURED_PROVIDER_LABELS: Readonly<Record<ConfiguredRouteId, stri
   'zhipu-glm': '智谱 GLM',
 };
 
+/** The slots whose document fixes a development Credential Reference; the production connection's slot has none. */
+export const CONFIGURED_DEVELOPMENT_SLOTS = [
+  'alibaba-model-studio',
+  'anthropic-claude',
+  'baidu-qianfan',
+  'google-gemini',
+  'minimax',
+  'moonshot-kimi',
+  'openai-platform',
+  'opencode-go',
+  'opencode-zen',
+  'tencent-hunyuan',
+  'xiaomi-mimo',
+  'zhipu-glm',
+] as const;
+export type ConfiguredDevelopmentSlot = (typeof CONFIGURED_DEVELOPMENT_SLOTS)[number];
+
 /**
- * The fixed development Credential Reference of each slot (ADR 0067, ADR 0073 §4): the Protected Secret Store entry the
- * enrollment helper writes under on a developer host. A reference names a store entry and is not a secret.
+ * The fixed development Credential Reference of each such slot (ADR 0067, ADR 0073 §4): the Protected Secret Store entry the
+ * enrollment helper writes under on a developer host. A reference names a store entry and is not a secret, and it is a
+ * place for a key, not a permission to enrol one: only `opencode-go` enrolment is authorized (ADR 0067; ADR 0073 §5
+ * authorizes no credential).
  */
-export const CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES: Readonly<Record<ConfiguredCredentialSlot, string>> = {
+export const CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES: Readonly<Record<ConfiguredDevelopmentSlot, string>> = {
   'alibaba-model-studio': '41bfff73-4c97-44b2-a88c-ef51b208d589',
   'anthropic-claude': 'a7eb2fde-89f4-4f45-9f24-3e8d0719201e',
   'baidu-qianfan': '9d31099e-30cc-4cf0-b9cd-90887462f653',
-  'deepseek-api-key': 'bfe759bd-8900-433b-9a2e-635e0c385c46',
   'google-gemini': '65691f57-e3e2-49be-8fb0-cfad51dedaf3',
   'minimax': '3250a08e-e2ba-40aa-93b4-04290ac96deb',
   'moonshot-kimi': 'a6a309a9-7cd5-4cd2-ae31-ba421182af35',

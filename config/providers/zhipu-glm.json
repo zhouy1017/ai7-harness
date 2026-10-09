@@ -20,8 +20,9 @@
       "kind": "vendor-documentation",
       "source": "Zhipu documentation, web search tool on chat completions, docs.bigmodel.cn",
       "readOn": "2026-09-10",
-      "note": "A chat-completions tool `\"type\": \"web_search\"` with `search_engine`, `count` 1–50 and recency filters; no model allowlist is printed."
-    }
+      "note": "A chat-completions tool `\"type\": \"web_search\"` with `search_engine`, `count` 1–50 and recency filters; no model allowlist is printed and the page names no model restriction, so the tool is read as route-wide, every model on the route."
+    },
+    "unverified": { "kind": "unverified" }
   },
   "routes": [
     {
@@ -31,8 +32,11 @@
       "requestShape": "openai-chat-completions",
       "requestShapeEvidence": "bigmodel-docs",
       "limitPolicy": "rate-limit-retryable",
+      "limitPolicyEvidence": "unverified",
       "dshAttribution": false,
+      "dshAttributionEvidence": "unverified",
       "sessionHeader": false,
+      "sessionHeaderEvidence": "unverified",
       "maxOutputTokens": null,
       "routeCapabilities": {
         "webSearchTool": { "value": "provider-tool", "evidence": "bigmodel-search-docs" }
@@ -46,6 +50,7 @@
     }
   ],
   "openQuestions": [
+    "The limit reading is not established: no page read states the shape of this endpoint's rate-limit or account-limit response, so a 429 is read as a retryable rate limit (`rate-limit-retryable`, `unverified`) until a page or a named live item says otherwise.",
     "The international host `https://api.z.ai/api/paas/v4/` serves the same protocol; which region the house binds is the Owner's decision with the first live item.",
     "Structured output is `text` and `json_object` only (`json_schema` is absent from the reference) and stays absent until a live item establishes it on this route."
   ]

@@ -89,7 +89,8 @@
       "properties": {
         "slot": { "$ref": "#/definitions/identifier" },
         "developmentCredentialReference": {
-          "type": "string",
+          "description": "The Protected Secret Store entry the enrollment helper writes under on a developer host, or null where no development reference is read by anything (the production connection's slot, whose reference is per connection row). A reference is a place for a key, never a permission to enrol one: only `opencode-go` enrolment is authorized (ADR 0067).",
+          "type": ["string", "null"],
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
         },
         "headerForm": { "enum": ["authorization-bearer", "x-api-key", "x-goog-api-key"] },
@@ -150,19 +151,32 @@
       "description": "One endpoint and the one request shape it speaks. A provider reached over several paths (a gateway) declares one route per path, all on the provider's one credential slot.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["routeId", "displayName", "endpoint", "requestShape", "requestShapeEvidence", "limitPolicy", "dshAttribution", "sessionHeader", "maxOutputTokens", "models"],
+      "required": ["routeId", "displayName", "endpoint", "requestShape", "requestShapeEvidence", "limitPolicy", "limitPolicyEvidence", "dshAttribution", "dshAttributionEvidence", "sessionHeader", "sessionHeaderEvidence", "maxOutputTokens", "models"],
       "properties": {
         "routeId": { "$ref": "#/definitions/identifier" },
         "displayName": { "$ref": "#/definitions/label" },
         "endpoint": {
           "type": "string",
-          "pattern": "^https://[a-z0-9.-]+(/[A-Za-z0-9._~-]+)*/?$"
+          "description": "https only, no port, userinfo, query or fragment; the host is DNS labels joined by dots, at least two, the last beginning with a letter (so no IP literal and no dotless host). The generator also refuses local and internal names.",
+          "pattern": "^https://([a-z0-9]([a-z0-9-]*[a-z0-9])?\\.)+[a-z]([a-z0-9-]*[a-z0-9])?(/[A-Za-z0-9._~-]+)*/?$"
         },
         "requestShape": { "enum": ["openai-chat-completions", "anthropic-messages", "openai-responses", "google-generate-content"] },
         "requestShapeEvidence": { "$ref": "#/definitions/evidenceKey" },
         "limitPolicy": { "enum": ["rate-limit-retryable", "account-limit-terminal"] },
+        "limitPolicyEvidence": {
+          "description": "How the limit reading was established; `unverified` where no page states the endpoint's limit shape, recorded as such on the support page.",
+          "$ref": "#/definitions/evidenceKey"
+        },
         "dshAttribution": { "type": "boolean" },
+        "dshAttributionEvidence": {
+          "description": "Why the route does or does not send the DSH attribution headers; true only on the production route, on its frozen request baseline.",
+          "$ref": "#/definitions/evidenceKey"
+        },
         "sessionHeader": { "type": "boolean" },
+        "sessionHeaderEvidence": {
+          "description": "The page that documents the OpenCode session header; true only on an OpenCode gateway route, until the header name is configuration (#452).",
+          "$ref": "#/definitions/evidenceKey"
+        },
         "maxOutputTokens": { "type": ["integer", "null"], "minimum": 1 },
         "routeCapabilities": {
           "description": "Capabilities declared for every model on the route; a model's own declaration of the same capability replaces it.",

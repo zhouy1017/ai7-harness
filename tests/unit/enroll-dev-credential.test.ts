@@ -7,7 +7,7 @@ import {
   PROTECTED_SECRET_SERVICE_NAME,
   protectedSecretEntryName,
 } from '../../src/shared/protected-secret-identity.js';
-import { CONFIGURED_CREDENTIAL_SLOTS, CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../src/shared/provider-configuration.generated.js';
+import { CONFIGURED_CREDENTIAL_SLOTS, CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES, CONFIGURED_DEVELOPMENT_SLOTS } from '../../src/shared/provider-configuration.generated.js';
 
 // The helper is the only reader of the Owner's key file. Nothing here supplies, reads, or writes a
 // real credential: the tests exercise argument parsing, the CI refusal, and the duplicated identity
@@ -57,7 +57,12 @@ describe('enrol-dev-credential identity', () => {
     // The plain-ESM slot list and the TypeScript configuration are generated from the same documents
     // and say the same thing: every configured slot, each under its document's development reference.
     expect(new Map(SLOT_LIST)).toEqual(new Map(Object.entries(CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES)));
-    expect(SLOT_LIST.map(([slot]) => slot)).toEqual([...CONFIGURED_CREDENTIAL_SLOTS]);
+    expect(SLOT_LIST.map(([slot]) => slot)).toEqual([...CONFIGURED_DEVELOPMENT_SLOTS]);
+    // The production connection's slot has no development reference: its reference is per connection row.
+    expect(CONFIGURED_CREDENTIAL_SLOTS).toContain('deepseek-api-key');
+    expect(SLOT_LIST.map(([slot]) => slot)).not.toContain('deepseek-api-key');
+    // The helper says, where it is read, that only opencode-go enrolment is authorized.
+    expect(source).toContain('**Only `opencode-go` enrolment is authorized** (ADR 0067)');
     expect(new Map(SLOT_LIST).get('opencode-go')).toBe(DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE);
     for (const [, reference] of SLOT_LIST) expect(CREDENTIAL_REFERENCE_PATTERN.test(reference)).toBe(true);
     // The helper composes the same entry name the store writes and the resolver reads.
@@ -90,8 +95,10 @@ describe('parseEnrollmentArguments', () => {
     for (const [slot, reference] of SLOT_LIST) {
       expect(helper.parseEnrollmentArguments(['--slot', slot, '--check'])).toEqual({ mode: 'check', slot, credentialReference: reference, fromFile: null });
     }
-    // A slot no document declares is refused exactly as a malformed argument is.
+    // A slot no document declares, and the production slot that has no development reference, are refused exactly
+    // as a malformed argument is.
     expect(() => helper.parseEnrollmentArguments(['--slot', 'bytedance-doubao', '--check'])).toThrowError(/AI7_ENROLLMENT_INVALID/u);
+    expect(() => helper.parseEnrollmentArguments(['--slot', 'deepseek-api-key', '--check'])).toThrowError(/AI7_ENROLLMENT_INVALID/u);
   });
 
   it('refuses an unconfigured slot, a mixed mode, a missing file, a repeat, and an unknown argument', () => {

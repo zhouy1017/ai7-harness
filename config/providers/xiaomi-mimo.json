@@ -21,7 +21,8 @@
       "source": "Xiaomi MiMo API documentation, web search tool, mimo.mi.com",
       "readOn": "2026-09-11",
       "note": "A chat-completions tool `{\"type\": \"web_search\", …}`, activated in the vendor's console before use, returning `url_citation` annotations; other API protocols 「are not supported for the time being」 for it."
-    }
+    },
+    "unverified": { "kind": "unverified" }
   },
   "routes": [
     {
@@ -31,8 +32,11 @@
       "requestShape": "openai-chat-completions",
       "requestShapeEvidence": "mimo-docs",
       "limitPolicy": "rate-limit-retryable",
+      "limitPolicyEvidence": "unverified",
       "dshAttribution": false,
+      "dshAttributionEvidence": "unverified",
       "sessionHeader": false,
+      "sessionHeaderEvidence": "unverified",
       "maxOutputTokens": null,
       "routeCapabilities": {
         "toolCalling": { "value": "function", "evidence": "mimo-docs" },
@@ -46,6 +50,7 @@
     }
   ],
   "openQuestions": [
+    "The limit reading is not established: no page read states the shape of this endpoint's rate-limit or account-limit response, so a 429 is read as a retryable rate limit (`rate-limit-retryable`, `unverified`) until a page or a named live item says otherwise.",
     "The search tool must be activated in the vendor's console before use; that is an account step, not configuration.",
     "Structured output is `json_object` only and stays absent until a live item establishes it."
   ]

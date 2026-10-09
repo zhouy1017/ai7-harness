@@ -2,12 +2,15 @@
 // edit the provider documents and run `node tools/generate-provider-configuration.mjs`; `check` fails when
 // this file is not what the documents generate. The enrollment helper is plain ESM run before any build, so it reads this list rather than the TypeScript module.
 
-/** [slot, development Credential Reference], one per configured provider (ADR 0073 §4). */
+/**
+ * [slot, development Credential Reference], one per configured provider whose document fixes one (ADR 0073 §4). A slot
+ * here is a place for a key, not a permission to enrol one: only `opencode-go` enrolment is authorized (ADR 0067), and
+ * every other slot waits for a record that names it (ADR 0073 §5 authorizes no credential; ADR 0080 §5 「先支持后添加key」).
+ */
 export const DEVELOPMENT_CREDENTIAL_SLOTS = Object.freeze([
   Object.freeze(['alibaba-model-studio', '41bfff73-4c97-44b2-a88c-ef51b208d589']),
   Object.freeze(['anthropic-claude', 'a7eb2fde-89f4-4f45-9f24-3e8d0719201e']),
   Object.freeze(['baidu-qianfan', '9d31099e-30cc-4cf0-b9cd-90887462f653']),
-  Object.freeze(['deepseek-api-key', 'bfe759bd-8900-433b-9a2e-635e0c385c46']),
   Object.freeze(['google-gemini', '65691f57-e3e2-49be-8fb0-cfad51dedaf3']),
   Object.freeze(['minimax', '3250a08e-e2ba-40aa-93b4-04290ac96deb']),
   Object.freeze(['moonshot-kimi', 'a6a309a9-7cd5-4cd2-ae31-ba421182af35']),

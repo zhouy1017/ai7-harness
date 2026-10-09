@@ -4,8 +4,13 @@ import { fileURLToPath } from 'node:url';
 import { DEVELOPMENT_CREDENTIAL_SLOTS } from './provider-credential-slots.generated.mjs';
 
 /**
- * The developer-host enrollment helper for the development credentials: `opencode-go` (ADR 0067),
- * and every other configured provider's slot the same one way (ADR 0073 §4).
+ * The developer-host enrollment helper for the development credentials (ADR 0067, ADR 0073 §4).
+ *
+ * **Only `opencode-go` enrolment is authorized** (ADR 0067). The helper accepts every slot a provider
+ * document fixes a development Credential Reference for, because ADR 0073 §4 makes its slot list
+ * generated from the documents; but such a slot is a place for a key, not a permission to enrol one.
+ * ADR 0073 §5 authorizes no credential and ADR 0080 §5 defers keys (「先支持后添加key」): no other
+ * slot is enrolled until a record names it.
  *
  * It is the only thing that ever reads the Owner's key file, and it exists so that no agent, prompt,
  * log, or repository file has to. It writes the value straight into the OS Protected Secret Store

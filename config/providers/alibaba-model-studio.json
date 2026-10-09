@@ -32,8 +32,11 @@
       "requestShape": "openai-chat-completions",
       "requestShapeEvidence": "model-studio-docs",
       "limitPolicy": "rate-limit-retryable",
+      "limitPolicyEvidence": "unverified",
       "dshAttribution": false,
+      "dshAttributionEvidence": "unverified",
       "sessionHeader": false,
+      "sessionHeaderEvidence": "unverified",
       "maxOutputTokens": null,
       "routeCapabilities": {
         "webSearchTool": { "value": "none", "evidence": "model-studio-search-docs" }
@@ -46,6 +49,7 @@
     }
   ],
   "openQuestions": [
+    "The limit reading is not established: no page read states the shape of this endpoint's rate-limit or account-limit response, so a 429 is read as a retryable rate limit (`rate-limit-retryable`, `unverified`) until a page or a named live item says otherwise.",
     "The documentation records a migration to a per-workspace host, `https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`, and says the `dashscope.aliyuncs.com` host still works. A workspace id is an account fact a document cannot carry, so this document names the documented host that still works; moving to the workspace host is the Owner's decision with the first live item.",
     "Structured output is documented (`json_object`; `json_schema` on the 3.7/3.8 series) but stays absent until a live item establishes it on this route."
   ]

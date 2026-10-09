@@ -76,6 +76,11 @@ describe('model capability profiles: toolCalling and webSearchTool (ADR 0080 §2
       searching.add(profile.route);
       expect(profile.evidence.webSearchTool, profile.key).toMatchObject({ kind: 'vendor-documentation' });
     }
+    // Kimi's reading names two models, so the third carries no search tool: nothing is assumed from a neighbouring row.
+    expect(PROVIDER_MODEL_PROFILES['moonshot-kimi/kimi-k3']!.capabilities.webSearchTool).toBe('provider-tool');
+    expect(PROVIDER_MODEL_PROFILES['moonshot-kimi/kimi-k2.6']!.capabilities.webSearchTool).toBe('provider-tool');
+    expect(PROVIDER_MODEL_PROFILES['moonshot-kimi/kimi-k2.7-code']!.capabilities.webSearchTool).toBe('none');
+    expect(PROVIDER_MODEL_PROFILES['moonshot-kimi/kimi-k2.7-code']!.evidence.webSearchTool).toEqual({ kind: 'unverified' });
     expect([...searching].sort()).toEqual([
       'anthropic-claude', 'baidu-qianfan', 'moonshot-kimi', 'openai-platform', 'tencent-hunyuan', 'xiaomi-mimo', 'zhipu-glm',
     ]);

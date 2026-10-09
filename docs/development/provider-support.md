@@ -27,7 +27,9 @@ A capability a document does not declare is absent with `unverified` evidence. A
 | Endpoint | `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions` |
 | Request shape | `openai-chat-completions` |
 | Display name | 阿里云百炼 · Chat Completions |
-| Limit reading | `rate-limit-retryable` |
+| Limit reading | `rate-limit-retryable` — `unverified` |
+| DSH attribution headers | not sent — `unverified` |
+| OpenCode session header | not sent — `unverified` |
 | Per-turn output cap | none |
 
 | Model id | Display name | Context | Tool calling | Web search tool |
@@ -48,6 +50,7 @@ Readings:
 
 Open:
 
+- The limit reading is not established: no page read states the shape of this endpoint's rate-limit or account-limit response, so a 429 is read as a retryable rate limit (`rate-limit-retryable`, `unverified`) until a page or a named live item says otherwise.
 - The documentation records a migration to a per-workspace host, `https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`, and says the `dashscope.aliyuncs.com` host still works. A workspace id is an account fact a document cannot carry, so this document names the documented host that still works; moving to the workspace host is the Owner's decision with the first live item.
 - Structured output is documented (`json_object`; `json_schema` on the 3.7/3.8 series) but stays absent until a live item establishes it on this route.
 
@@ -66,7 +69,9 @@ Open:
 | Endpoint | `https://api.anthropic.com/v1/messages` |
 | Request shape | `anthropic-messages` |
 | Display name | Claude 官方 · Messages |
-| Limit reading | `rate-limit-retryable` |
+| Limit reading | `rate-limit-retryable` — `unverified` |
+| DSH attribution headers | not sent — `unverified` |
+| OpenCode session header | not sent — `unverified` |
 | Per-turn output cap | 32,768 |
 
 The shape requires a per-turn output cap; the route declares the same 32,768 as the OpenCode Go `/messages` route for the same reason — headroom above the largest unit output observed (24,225 tokens), one turn only — and below every listed model's output limit.
@@ -88,10 +93,11 @@ Inert: 4 of 4 (no declared answer channel). Established:
 Readings:
 
 - `claude-platform-docs` — `vendor-documentation`, Claude Platform documentation, platform.claude.com (docs.claude.com redirects there) — Messages API, models overview, read 2026-09-10. Endpoint `https://api.anthropic.com/v1/messages`, `x-api-key` with `anthropic-version: 2023-06-01`; models `claude-opus-5`, `claude-fable-5-1`, `claude-sonnet-5` (1M context / 128K output) and `claude-haiku-4-5` (200K / 64K) (ADR 0080 §3).
-- `claude-web-search-tool` — `vendor-documentation`, Claude Platform documentation, web search tool, platform.claude.com, read 2026-09-10. A server-side tool executed on Anthropic's infrastructure: `web_search_20250305`, `web_search_20260209`, `web_search_20260318`, $10 per 1,000 searches; the page names no per-model support list (ADR 0080 §3).
+- `claude-web-search-tool` — `vendor-documentation`, Claude Platform documentation, web search tool, platform.claude.com, read 2026-09-10. A server-side tool executed on Anthropic's infrastructure: `web_search_20250305`, `web_search_20260209`, `web_search_20260318`, $10 per 1,000 searches; the page names no per-model support list and no model restriction, so the tool is read as route-wide, every model on the route (ADR 0080 §3).
 
 Open:
 
+- The limit reading is not established: no page read states the shape of this endpoint's rate-limit or account-limit response, so a 429 is read as a retryable rate limit (`rate-limit-retryable`, `unverified`) until a page or a named live item says otherwise.
 - The Claude 5 family rejects `thinking.type: "enabled"` and takes `thinking: {type: "adaptive"}` with `output_config.effort`; structured outputs are GA through `output_config.format`. Neither spelling is implemented by the adapter, so both stay absent until a slice implements and a live item establishes them.
 
 ## 百度文心（千帆）
@@ -109,7 +115,9 @@ Open:
 | Endpoint | `https://qianfan.baidubce.com/v2/chat/completions` |
 | Request shape | `openai-chat-completions` |
 | Display name | 百度千帆 · Chat Completions |
-| Limit reading | `rate-limit-retryable` |
+| Limit reading | `rate-limit-retryable` — `unverified` |
+| DSH attribution headers | not sent — `unverified` |
+| OpenCode session header | not sent — `unverified` |
 | Per-turn output cap | none |
 
 The model ids are written as the reading printed them; the resold `DeepSeek-V4-Pro` is not declared, because a resold model is the other provider's.
@@ -129,10 +137,11 @@ Inert: 3 of 3 (no declared answer channel). Established:
 Readings:
 
 - `qianfan-docs` — `vendor-documentation`, Baidu AI Cloud Qianfan documentation, cloud.baidu.com/doc/qianfan-*, read 2026-09-10. `https://qianfan.baidubce.com/v2` (`/v2/chat/completions`), `Authorization: Bearer bce-v3/…`; 「同时接口协议兼容OPENAI的SDK」; `ERNIE-5.1` / `ERNIE-5.0` / `ERNIE-4.5-Turbo-128K` at 128k context (ADR 0080 §3, §5.1).
-- `qianfan-search-docs` — `vendor-documentation`, Baidu AI Cloud Qianfan documentation, `web_search` on `/v2/chat/completions`, cloud.baidu.com/doc/qianfan-*, read 2026-09-10. A `web_search` object — 「搜索增强的选项」, default off — with `enable`, `enable_citation`, `enable_trace`, `search_mode` and `search_number`.
+- `qianfan-search-docs` — `vendor-documentation`, Baidu AI Cloud Qianfan documentation, `web_search` on `/v2/chat/completions`, cloud.baidu.com/doc/qianfan-*, read 2026-09-10. A `web_search` object — 「搜索增强的选项」, default off — with `enable`, `enable_citation`, `enable_trace`, `search_mode` and `search_number`. The page names no model restriction on the object itself (only `search_mode` is refused by the ERNIE series), so the tool is read as route-wide, every model on the route.
 
 Open:
 
+- The limit reading is not established: no page read states the shape of this endpoint's rate-limit or account-limit response, so a 429 is read as a retryable rate limit (`rate-limit-retryable`, `unverified`) until a page or a named live item says otherwise.
 - Whether the v2 endpoint answers to the ids exactly as printed (case included) is settled by the first live item, not assumed.
 - Structured output (`json_object`, `json_schema`; not ERNIE X1 Turbo) is documented but stays absent until a live item establishes it.
 
@@ -151,7 +160,9 @@ Open:
 | Endpoint | `https://api.deepseek.com/chat/completions` |
 | Request shape | `openai-chat-completions` |
 | Display name | DeepSeek 开放平台（官方） |
-| Limit reading | `rate-limit-retryable` |
+| Limit reading | `rate-limit-retryable` — `frozen-request-baseline`, since adapter revision 1 |
+| DSH attribution headers | sent — `frozen-request-baseline`, since adapter revision 1 |
+| OpenCode session header | not sent — `frozen-request-baseline`, since adapter revision 1 |
 | Per-turn output cap | none |
 
 The production connection's route, unchanged: the one route that sends the DSH attribution headers and reads a 429 as a retryable rate limit. Chat completions names no output cap, so the route sends no such field.
@@ -199,7 +210,9 @@ Open:
 | Endpoint | `https://generativelanguage.googleapis.com/v1beta/models` |
 | Request shape | `google-generate-content` |
 | Display name | Gemini 官方 · generateContent |
-| Limit reading | `rate-limit-retryable` |
+| Limit reading | `rate-limit-retryable` — `unverified` |
+| DSH attribution headers | not sent — `unverified` |
+| OpenCode session header | not sent — `unverified` |
 | Per-turn output cap | none |
 
 The endpoint is the models collection: the shape addresses the model in the path and appends `:generateContent`. `generationConfig` is optional, so the route names no cap and sends no such key.
@@ -223,6 +236,7 @@ Readings:
 
 Open:
 
+- The limit reading is not established: no page read states the shape of this endpoint's rate-limit or account-limit response, so a 429 is read as a retryable rate limit (`rate-limit-retryable`, `unverified`) until a page or a named live item says otherwise.
 - A shape discrepancy, recorded rather than resolved (ADR 0080 §3): the pages read on 2026-09-10 describe an Interactions-style API (`https://generativelanguage.googleapis.com/v1beta/interactions`, `response_format`, typed `steps`), while the implemented `google-generate-content` shape assembles the older `:generateContent` request, which the vendor documentation no longer states. This document binds nothing until a shape review establishes which API the endpoint serves today, and no Gemini binding carries a web-search-enabled rule before it.
 - Grounding with Google Search (`google_search`) is documented on the Interactions-style pages; it is declared absent here because the shape it is documented on is not the one this route speaks.
 
@@ -241,7 +255,9 @@ Open:
 | Endpoint | `https://api.minimax.cn/v1/chat/completions` |
 | Request shape | `openai-chat-completions` |
 | Display name | MiniMax · Chat Completions |
-| Limit reading | `rate-limit-retryable` |
+| Limit reading | `rate-limit-retryable` — `unverified` |
+| DSH attribution headers | not sent — `unverified` |
+| OpenCode session header | not sent — `unverified` |
 | Per-turn output cap | none |
 
 | Model id | Display name | Context | Tool calling | Web search tool |
@@ -263,6 +279,7 @@ Readings:
 
 Open:
 
+- The limit reading is not established: no page read states the shape of this endpoint's rate-limit or account-limit response, so a 429 is read as a retryable rate limit (`rate-limit-retryable`, `unverified`) until a page or a named live item says otherwise.
 - Structured output is not documented — no `response_format` appears in the chat schema or the guides read (ADR 0080 §3).
 - MiniMax's provider search tool lives on its Anthropic-compatible `/anthropic/v1/messages` and Responses-style `/v1/responses` paths; a route on either is a later document revision, with its own reading.
 
@@ -281,29 +298,34 @@ Open:
 | Endpoint | `https://api.moonshot.cn/v1/chat/completions` |
 | Request shape | `openai-chat-completions` |
 | Display name | 月之暗面 Kimi · Chat Completions |
-| Limit reading | `rate-limit-retryable` |
+| Limit reading | `rate-limit-retryable` — `unverified` |
+| DSH attribution headers | not sent — `unverified` |
+| OpenCode session header | not sent — `unverified` |
 | Per-turn output cap | none |
+
+The search tool is declared per model, for exactly the two the reading names: recommended with `kimi-k3`, and `kimi-k2.6` also searches with thinking on. No page read says `kimi-k2.7-code` searches, so its search tool is absent (ADR 0080 §3: nothing is assumed from a neighbouring row).
 
 | Model id | Display name | Context | Tool calling | Web search tool |
 | --- | --- | --- | --- | --- |
 | `kimi-k3` | Kimi K3 | 1,000,000 | `none` | `provider-tool` |
-| `kimi-k2.7-code` | Kimi K2.7 Code | 256,000 | `none` | `provider-tool` |
+| `kimi-k2.7-code` | Kimi K2.7 Code | 256,000 | `none` | `none` |
 | `kimi-k2.6` | Kimi K2.6 | 256,000 | `none` | `provider-tool` |
 
 Inert: 3 of 3 (no declared answer channel). Established:
 
 - every model · `requestShape: openai-chat-completions` — `vendor-documentation`, Kimi platform documentation, platform.kimi.com/docs (platform.moonshot.cn redirects there), read 2026-09-10
-- every model · `webSearchTool: provider-tool` — `vendor-documentation`, Kimi platform documentation, `$web_search` builtin function, platform.kimi.com/docs, read 2026-09-10
+- `kimi-k3`, `kimi-k2.6` · `webSearchTool: provider-tool` — `vendor-documentation`, Kimi platform documentation, `$web_search` builtin function, platform.kimi.com/docs, read 2026-09-10
 - `kimi-k3` · context 1,000,000 — `vendor-documentation`, Kimi platform documentation, platform.kimi.com/docs (platform.moonshot.cn redirects there), read 2026-09-10
 - `kimi-k2.7-code`, `kimi-k2.6` · context 256,000 — `vendor-documentation`, Kimi platform documentation, platform.kimi.com/docs (platform.moonshot.cn redirects there), read 2026-09-10
 
 Readings:
 
 - `kimi-platform-docs` — `vendor-documentation`, Kimi platform documentation, platform.kimi.com/docs (platform.moonshot.cn redirects there), read 2026-09-10. `https://api.moonshot.cn/v1` (`/v1/chat/completions`), `Authorization: Bearer`; `kimi-k3` (1M context), `kimi-k2.7-code` / `kimi-k2.6` (256K); the `moonshot-v1-*` line retired 2026-08-31 (ADR 0080 §3).
-- `kimi-search-docs` — `vendor-documentation`, Kimi platform documentation, `$web_search` builtin function, platform.kimi.com/docs, read 2026-09-10. 「`$web_search`（`builtin_function` 类型）是 Kimi 内置的联网搜索工具函数」, with a per-search call fee beside the tokens.
+- `kimi-search-docs` — `vendor-documentation`, Kimi platform documentation, `$web_search` builtin function, platform.kimi.com/docs, read 2026-09-10. 「`$web_search`（`builtin_function` 类型）是 Kimi 内置的联网搜索工具函数」, with a per-search call fee beside the tokens; recommended with `kimi-k3`, and `kimi-k2.6` also searches with thinking on (ADR 0080 §3).
 
 Open:
 
+- The limit reading is not established: no page read states the shape of this endpoint's rate-limit or account-limit response, so a 429 is read as a retryable rate limit (`rate-limit-retryable`, `unverified`) until a page or a named live item says otherwise.
 - Structured output (`json_object`, `json_schema`) is documented but stays absent until a live item establishes it; `kimi-k3` always reasons, and its reasoning channel is not yet read.
 
 ## OpenAI 官方
@@ -321,7 +343,9 @@ Open:
 | Endpoint | `https://api.openai.com/v1/responses` |
 | Request shape | `openai-responses` |
 | Display name | OpenAI 官方 · Responses |
-| Limit reading | `rate-limit-retryable` |
+| Limit reading | `rate-limit-retryable` — `unverified` |
+| DSH attribution headers | not sent — `unverified` |
+| OpenCode session header | not sent — `unverified` |
 | Per-turn output cap | none |
 
 `max_output_tokens` is optional on this shape and nothing has established a per-turn bound, so the route names none.
@@ -346,6 +370,7 @@ Readings:
 
 Open:
 
+- The limit reading is not established: no page read states the shape of this endpoint's rate-limit or account-limit response, so a 429 is read as a retryable rate limit (`rate-limit-retryable`, `unverified`) until a page or a named live item says otherwise.
 - Structured outputs (`text.format` with `json_schema`) and `reasoning.effort` are documented but not implemented by the adapter's Responses assembly, so both stay absent; whether structured outputs are GA is not stated on the pages read.
 
 ## OpenCode Go
@@ -363,7 +388,9 @@ Open:
 | Endpoint | `https://opencode.ai/zen/go/v1/chat/completions` |
 | Request shape | `openai-chat-completions` |
 | Display name | OpenCode Go（开发者实时） |
-| Limit reading | `account-limit-terminal` |
+| Limit reading | `account-limit-terminal` — `vendor-documentation`, ADR 0067 · OpenCode Go documentation, read 2026-09-06 |
+| DSH attribution headers | not sent — `vendor-documentation`, ADR 0067 · OpenCode Go documentation, read 2026-09-06 |
+| OpenCode session header | sent — `vendor-documentation`, OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/, read 2026-09-08 |
 | Per-turn output cap | none |
 
 The developer-live route of Provider Processing v5 (ADR 0065, ADR 0067). On this gateway a 429, a 402 or a body naming the usage limit is the development account's limit, so it ends the Run. The Session header carries the technical Session id for the gateway's prompt cache. Named by the documentation and deliberately absent, because the Zen table states no id for them: LongCat-2.0, Hy4 preview, Hy3, Omen Alpha, MiMo-V2.5, MiMo-V2.5-Pro.
@@ -400,7 +427,9 @@ Inert: 9 of 10 (no declared answer channel). Established:
 | Endpoint | `https://opencode.ai/zen/go/v1/messages` |
 | Request shape | `anthropic-messages` |
 | Display name | OpenCode Go · Messages（开发者实时） |
-| Limit reading | `account-limit-terminal` |
+| Limit reading | `account-limit-terminal` — `vendor-documentation`, ADR 0067 · OpenCode Go documentation, read 2026-09-06 |
+| DSH attribution headers | not sent — `vendor-documentation`, ADR 0067 · OpenCode Go documentation, read 2026-09-06 |
+| OpenCode session header | sent — `vendor-documentation`, OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/, read 2026-09-08 |
 | Per-turn output cap | 32,768 |
 
 The same plan, account and credential slot over the Anthropic-compatible path. The shape requires a per-turn output cap; 32,768 leaves headroom above the largest unit output observed to date (24,225 tokens) and bounds one turn only, the Run Budget Ceiling being the authority over the Run. MiniMax is here on a disagreement: the Go page places it on `/messages`, the Zen table on `chat/completions`; the Go page decides until a live item settles it. Qwen3.8 Flash is absent: the Go page places it here but the Zen table stated no id for it on 2026-09-08.
@@ -425,7 +454,9 @@ Inert: 5 of 5 (no declared answer channel). Established:
 | Endpoint | `https://opencode.ai/zen/go/v1/responses` |
 | Request shape | `openai-responses` |
 | Display name | OpenCode Go · Responses（开发者实时） |
-| Limit reading | `account-limit-terminal` |
+| Limit reading | `account-limit-terminal` — `vendor-documentation`, ADR 0067 · OpenCode Go documentation, read 2026-09-06 |
+| DSH attribution headers | not sent — `vendor-documentation`, ADR 0067 · OpenCode Go documentation, read 2026-09-06 |
+| OpenCode session header | sent — `vendor-documentation`, OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/, read 2026-09-08 |
 | Per-turn output cap | none |
 
 The same plan over the OpenAI-compatible Responses path. `max_output_tokens` is optional on this shape and nothing has established a per-turn bound for these models, so the route names none. Muse Spark 1.3 / 1.2 are absent: the Go page prints `muse-spark-1.3-contributor` / `muse-spark-1.2-contributor`, the Zen table `muse-spark-1.3` / `muse-spark-1.2`, so no id is stated by both. The Zen table's further `/responses` rows are Zen rather than the Go plan.
@@ -468,7 +499,9 @@ Open:
 | Endpoint | `https://opencode.ai/zen/v1/chat/completions` |
 | Request shape | `openai-chat-completions` |
 | Display name | OpenCode Zen · Chat Completions |
-| Limit reading | `account-limit-terminal` |
+| Limit reading | `account-limit-terminal` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09 |
+| DSH attribution headers | not sent — `unverified` |
+| OpenCode session header | not sent — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09 |
 | Per-turn output cap | none |
 
 The Zen page's `chat/completions` rows. A spend limit on this gateway ends the Run, as on the Go plan.
@@ -497,7 +530,7 @@ The Zen page's `chat/completions` rows. A spend limit on this gateway ends the R
 Inert: 18 of 18 (no declared answer channel). Established:
 
 - every model · `requestShape: openai-chat-completions` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09
-- every model · `webSearchTool: none` — `vendor-documentation`, OpenCode Go https://opencode.ai/docs/go/ · Zen https://opencode.ai/docs/zen/ · Tools https://opencode.ai/docs/tools/, read 2026-09-11
+- every model · `webSearchTool: none` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09
 
 ### `opencode-zen-messages`
 
@@ -506,7 +539,9 @@ Inert: 18 of 18 (no declared answer channel). Established:
 | Endpoint | `https://opencode.ai/zen/v1/messages` |
 | Request shape | `anthropic-messages` |
 | Display name | OpenCode Zen · Messages |
-| Limit reading | `account-limit-terminal` |
+| Limit reading | `account-limit-terminal` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09 |
+| DSH attribution headers | not sent — `unverified` |
+| OpenCode session header | not sent — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09 |
 | Per-turn output cap | 32,768 |
 
 The Zen page's `/messages` rows. The shape requires a per-turn output cap; the route declares the same 32,768 as the Go `/messages` route, for the same reason.
@@ -536,7 +571,7 @@ The Zen page's `/messages` rows. The shape requires a per-turn output cap; the r
 Inert: 19 of 19 (no declared answer channel). Established:
 
 - every model · `requestShape: anthropic-messages` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09
-- every model · `webSearchTool: none` — `vendor-documentation`, OpenCode Go https://opencode.ai/docs/go/ · Zen https://opencode.ai/docs/zen/ · Tools https://opencode.ai/docs/tools/, read 2026-09-11
+- every model · `webSearchTool: none` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09
 
 ### `opencode-zen-responses`
 
@@ -545,7 +580,9 @@ Inert: 19 of 19 (no declared answer channel). Established:
 | Endpoint | `https://opencode.ai/zen/v1/responses` |
 | Request shape | `openai-responses` |
 | Display name | OpenCode Zen · Responses |
-| Limit reading | `account-limit-terminal` |
+| Limit reading | `account-limit-terminal` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09 |
+| DSH attribution headers | not sent — `unverified` |
+| OpenCode session header | not sent — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09 |
 | Per-turn output cap | none |
 
 The Zen page's `/responses` rows. `max_output_tokens` is optional on this shape, so the route names none.
@@ -586,12 +623,11 @@ The Zen page's `/responses` rows. `max_output_tokens` is optional on this shape,
 Inert: 30 of 30 (no declared answer channel). Established:
 
 - every model · `requestShape: openai-responses` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09
-- every model · `webSearchTool: none` — `vendor-documentation`, OpenCode Go https://opencode.ai/docs/go/ · Zen https://opencode.ai/docs/zen/ · Tools https://opencode.ai/docs/tools/, read 2026-09-11
+- every model · `webSearchTool: none` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09
 
 Readings:
 
-- `zen-page` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09. The Endpoints table prints each model's id and its endpoint under `https://opencode.ai/zen/v1/`; the API examples send `Authorization: Bearer $OPENCODE_API_KEY`. Zen is pay-as-you-go: charged per request against credits, with auto-reload and monthly spending limits.
-- `gateway-no-search-tool` — `vendor-documentation`, OpenCode Go https://opencode.ai/docs/go/ · Zen https://opencode.ai/docs/zen/ · Tools https://opencode.ai/docs/tools/, read 2026-09-11. Neither gateway page mentions tools, web search or web fetch; `websearch` / `webfetch` are client-side tools of the opencode agent, not of the gateway wire API (ADR 0080 §3, §5.2).
+- `zen-page` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09. The Endpoints table prints each model's id and its endpoint under `https://opencode.ai/zen/v1/`; the API examples send `Authorization: Bearer $OPENCODE_API_KEY`. Zen is pay-as-you-go: charged per request against credits, with auto-reload and a monthly usage limit per workspace and member beyond which Zen is not used — the account limit the route reads a limit-shaped response as, the response's own shape being undocumented. The page names no session header, and mentions no tool, web search or web fetch anywhere: the gateway wire API carries no search tool of its own, as the 2026-09-11 reading of the Go, Zen and Tools pages found (ADR 0080 §3, §5.2).
 
 Open:
 
@@ -614,7 +650,9 @@ Open:
 | Endpoint | `https://tokenhub.tencentmaas.com/v1/chat/completions` |
 | Request shape | `openai-chat-completions` |
 | Display name | 腾讯混元 TokenHub · Chat Completions |
-| Limit reading | `rate-limit-retryable` |
+| Limit reading | `rate-limit-retryable` — `unverified` |
+| DSH attribution headers | not sent — `unverified` |
+| OpenCode session header | not sent — `unverified` |
 | Per-turn output cap | none |
 
 Context is the input limit the page states separately from the window.
@@ -634,10 +672,11 @@ Inert: 2 of 2 (no declared answer channel). Established:
 Readings:
 
 - `tokenhub-docs` — `vendor-documentation`, Tencent Cloud documentation, TokenHub calling overview and models, cloud.tencent.com/document, read 2026-09-10. TokenHub `https://tokenhub.tencentmaas.com/v1` (Guangzhou), `Authorization: Bearer`; `hy4-preview` 1M context / 960k input / 64k output, `hy3` 256k / 192k input / 128k output (ADR 0080 §3).
-- `tokenhub-search-docs` — `vendor-documentation`, Tencent Cloud documentation, TokenHub web search (`web_search_options`), cloud.tencent.com/document, read 2026-09-10. `"web_search_options": { "enable": true }` with sources returned via `search_results`; 「模型会自主判断是否需要搜索、搜索什么关键词，并基于搜索结果生成回答。」
+- `tokenhub-search-docs` — `vendor-documentation`, Tencent Cloud documentation, TokenHub web search (`web_search_options`), cloud.tencent.com/document, read 2026-09-10. `"web_search_options": { "enable": true }` with sources returned via `search_results`; 「模型会自主判断是否需要搜索、搜索什么关键词，并基于搜索结果生成回答。」 The page names no model restriction, so the option is read as route-wide, every model on the route.
 
 Open:
 
+- The limit reading is not established: no page read states the shape of this endpoint's rate-limit or account-limit response, so a 429 is read as a retryable rate limit (`rate-limit-retryable`, `unverified`) until a page or a named live item says otherwise.
 - Structured output is not stated on any first-party page read, and TokenHub states only that 「标准协议中的个别字段可能被忽略或降级」; Hunyuan cannot carry a row whose contract parses JSON until a page or a named live item establishes it (ADR 0080 §3).
 - The legacy OpenAI-compatible host `https://api.hunyuan.cloud.tencent.com/v1/` is documented as migrating to TokenHub, so this document names TokenHub.
 
@@ -656,7 +695,9 @@ Open:
 | Endpoint | `https://api.xiaomimimo.com/v1/chat/completions` |
 | Request shape | `openai-chat-completions` |
 | Display name | 小米 MiMo · Chat Completions |
-| Limit reading | `rate-limit-retryable` |
+| Limit reading | `rate-limit-retryable` — `unverified` |
+| DSH attribution headers | not sent — `unverified` |
+| OpenCode session header | not sent — `unverified` |
 | Per-turn output cap | none |
 
 The adapter sends the Bearer form, which the page lists beside `api-key:`.
@@ -680,6 +721,7 @@ Readings:
 
 Open:
 
+- The limit reading is not established: no page read states the shape of this endpoint's rate-limit or account-limit response, so a 429 is read as a retryable rate limit (`rate-limit-retryable`, `unverified`) until a page or a named live item says otherwise.
 - The search tool must be activated in the vendor's console before use; that is an account step, not configuration.
 - Structured output is `json_object` only and stays absent until a live item establishes it.
 
@@ -698,7 +740,9 @@ Open:
 | Endpoint | `https://open.bigmodel.cn/api/paas/v4/chat/completions` |
 | Request shape | `openai-chat-completions` |
 | Display name | 智谱 GLM · Chat Completions |
-| Limit reading | `rate-limit-retryable` |
+| Limit reading | `rate-limit-retryable` — `unverified` |
+| DSH attribution headers | not sent — `unverified` |
+| OpenCode session header | not sent — `unverified` |
 | Per-turn output cap | none |
 
 | Model id | Display name | Context | Tool calling | Web search tool |
@@ -718,10 +762,11 @@ Inert: 4 of 4 (no declared answer channel). Established:
 Readings:
 
 - `bigmodel-docs` — `vendor-documentation`, Zhipu documentation, docs.bigmodel.cn and docs.z.ai — OpenAI chat protocol, models, read 2026-09-10. China `https://open.bigmodel.cn/api/paas/v4` (the OpenAI chat protocol), `Authorization: Bearer`; `glm-5.3` (「支持 1M 上下文窗口」), `glm-5.3-flash` (1M), `glm-5.2` (1M), `glm-4.6` (200K) (ADR 0080 §3).
-- `bigmodel-search-docs` — `vendor-documentation`, Zhipu documentation, web search tool on chat completions, docs.bigmodel.cn, read 2026-09-10. A chat-completions tool `"type": "web_search"` with `search_engine`, `count` 1–50 and recency filters; no model allowlist is printed.
+- `bigmodel-search-docs` — `vendor-documentation`, Zhipu documentation, web search tool on chat completions, docs.bigmodel.cn, read 2026-09-10. A chat-completions tool `"type": "web_search"` with `search_engine`, `count` 1–50 and recency filters; no model allowlist is printed and the page names no model restriction, so the tool is read as route-wide, every model on the route.
 
 Open:
 
+- The limit reading is not established: no page read states the shape of this endpoint's rate-limit or account-limit response, so a 429 is read as a retryable rate limit (`rate-limit-retryable`, `unverified`) until a page or a named live item says otherwise.
 - The international host `https://api.z.ai/api/paas/v4/` serves the same protocol; which region the house binds is the Owner's decision with the first live item.
 - Structured output is `text` and `json_object` only (`json_schema` is absent from the reference) and stays absent until a live item establishes it on this route.
 
@@ -737,7 +782,7 @@ Open:
 | `alibaba-model-studio` | `alibaba-model-studio` | `41bfff73-4c97-44b2-a88c-ef51b208d589` |
 | `anthropic-claude` | `anthropic-claude` | `a7eb2fde-89f4-4f45-9f24-3e8d0719201e` |
 | `baidu-qianfan` | `baidu-qianfan` | `9d31099e-30cc-4cf0-b9cd-90887462f653` |
-| `deepseek-api-key` | `deepseek-open-platform` | `bfe759bd-8900-433b-9a2e-635e0c385c46` |
+| `deepseek-api-key` | `deepseek-open-platform` | none (the production connection's reference is per connection row) |
 | `google-gemini` | `google-gemini` | `65691f57-e3e2-49be-8fb0-cfad51dedaf3` |
 | `minimax` | `minimax` | `3250a08e-e2ba-40aa-93b4-04290ac96deb` |
 | `moonshot-kimi` | `moonshot-kimi` | `a6a309a9-7cd5-4cd2-ae31-ba421182af35` |
@@ -748,8 +793,10 @@ Open:
 | `xiaomi-mimo` | `xiaomi-mimo` | `e03b8ea8-2a10-4c60-909e-82a5976e2810` |
 | `zhipu-glm` | `zhipu-glm` | `1bfa4e14-ce91-4666-bc69-eb72709379f0` |
 
-A credential slot is a logical slot of the Main Editorial Role, one per configured provider; the Credential Broker's closed set and `tools/enroll-dev-credential.mjs`'s slot list are generated from the documents, so a slot cannot exist without a reviewed document. A developer enrolls a key for a slot only as ADR 0067 established for `opencode-go`: from an untracked key file the enrollment helper alone reads, into the Protected Secret Store under the slot's development Credential Reference. A Credential Reference names a store entry and is not a secret. See [ADR 0067](../adr/0067-authorize-the-opencode-go-development-credential-with-live-once-testing.md) for the live-once ledger and the Provider Result Cache.
+**Only `opencode-go` enrolment is authorized** (ADR 0067). Every other slot is a place for a key, not a permission to enrol one: ADR 0073 §5 authorizes no credential and ADR 0080 §5 defers keys (「先支持后添加key」), so a slot is enrolled only once a record names it.
+
+A credential slot is a logical slot of the Main Editorial Role, one per configured provider; the Credential Broker's closed set and `tools/enroll-dev-credential.mjs`'s slot list are generated from the documents, so a slot cannot exist without a reviewed document. Enrolment, where a record authorizes it, is the one way ADR 0067 established for `opencode-go`: from an untracked key file the enrollment helper alone reads, into the Protected Secret Store under the slot's development Credential Reference. A Credential Reference names a store entry and is not a secret. See [ADR 0067](../adr/0067-authorize-the-opencode-go-development-credential-with-live-once-testing.md) for the live-once ledger and the Provider Result Cache.
 
 ## How a provider is added
 
-Write or edit one document under `config/providers/`, run `node tools/generate-provider-configuration.mjs`, and commit the document with the four generated files. A model is a row: it is admitted only when the vendor's documentation places it on a path and states its id verbatim, and an unverified capability is declared absent (Issue #310). The generator refuses a capability the request shape does not implement, a header form the shape is not spoken with, an anthropic-messages route without a per-turn output cap, a duplicate route, slot or Credential Reference, and an evidence record nothing cites. Nothing a document says authorizes a transmission: a route becomes bindable only through a Provider Processing policy revision (ADR 0073 §3). See Issue #310, Issue #321, Issue #322 and Issue #435.
+Write or edit one document under `config/providers/`, run `node tools/generate-provider-configuration.mjs`, and commit the document with the four generated files. A model is a row: it is admitted only when the vendor's documentation places it on a path and states its id verbatim, and an unverified capability is declared absent (Issue #310). The generator refuses a capability the request shape does not implement, a header form the shape is not spoken with, an anthropic-messages route without a per-turn output cap, a duplicate route, slot or Credential Reference, an evidence record nothing cites or whose fields or days are malformed, an endpoint on a local, internal, literal or dotless host, a live test item or frozen request baseline the Provider Test Ledger does not hold for that provider (`RECORDED_EVIDENCE` in the generator mirrors it), DeepSeek's thinking parameters or the DSH attribution headers outside DeepSeek official, and the OpenCode session header outside an OpenCode gateway route whose page documents it. Nothing a document says authorizes a transmission: a route becomes bindable only through a Provider Processing policy revision (ADR 0073 §3). See Issue #310, Issue #321, Issue #322 and Issue #435.

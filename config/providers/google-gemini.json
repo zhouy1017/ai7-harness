@@ -27,7 +27,8 @@
       "source": "Gemini API documentation, models, ai.google.dev/gemini-api/docs",
       "readOn": "2026-09-10",
       "note": "`gemini-3.8-flash`, `gemini-3.1-pro-preview` and `gemini-2.5-pro`, each 1,048,576 context / 65,536 output (ADR 0080 §3)."
-    }
+    },
+    "unverified": { "kind": "unverified" }
   },
   "routes": [
     {
@@ -37,8 +38,11 @@
       "requestShape": "google-generate-content",
       "requestShapeEvidence": "generate-content-contract",
       "limitPolicy": "rate-limit-retryable",
+      "limitPolicyEvidence": "unverified",
       "dshAttribution": false,
+      "dshAttributionEvidence": "unverified",
       "sessionHeader": false,
+      "sessionHeaderEvidence": "unverified",
       "maxOutputTokens": null,
       "note": "The endpoint is the models collection: the shape addresses the model in the path and appends `:generateContent`. `generationConfig` is optional, so the route names no cap and sends no such key.",
       "models": [
@@ -64,6 +68,7 @@
     }
   ],
   "openQuestions": [
+    "The limit reading is not established: no page read states the shape of this endpoint's rate-limit or account-limit response, so a 429 is read as a retryable rate limit (`rate-limit-retryable`, `unverified`) until a page or a named live item says otherwise.",
     "A shape discrepancy, recorded rather than resolved (ADR 0080 §3): the pages read on 2026-09-10 describe an Interactions-style API (`https://generativelanguage.googleapis.com/v1beta/interactions`, `response_format`, typed `steps`), while the implemented `google-generate-content` shape assembles the older `:generateContent` request, which the vendor documentation no longer states. This document binds nothing until a shape review establishes which API the endpoint serves today, and no Gemini binding carries a web-search-enabled rule before it.",
     "Grounding with Google Search (`google_search`) is documented on the Interactions-style pages; it is declared absent here because the shape it is documented on is not the one this route speaks."
   ]

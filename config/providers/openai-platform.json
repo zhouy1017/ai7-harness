@@ -21,7 +21,8 @@
       "source": "OpenAI API documentation, web search tool guide and models page, developers.openai.com/api/docs",
       "readOn": "2026-09-10",
       "note": "Server-side in the Responses API — `\"tools\": [{\"type\": \"web_search\"}]` — with `url_citation` annotations and a `sources` list; the models page lists Web search in every flagship's tools row (ADR 0080 §3)."
-    }
+    },
+    "unverified": { "kind": "unverified" }
   },
   "routes": [
     {
@@ -31,8 +32,11 @@
       "requestShape": "openai-responses",
       "requestShapeEvidence": "openai-api-docs",
       "limitPolicy": "rate-limit-retryable",
+      "limitPolicyEvidence": "unverified",
       "dshAttribution": false,
+      "dshAttributionEvidence": "unverified",
       "sessionHeader": false,
+      "sessionHeaderEvidence": "unverified",
       "maxOutputTokens": null,
       "routeCapabilities": {
         "webSearchTool": { "value": "provider-tool", "evidence": "openai-web-search-tool" }
@@ -47,6 +51,7 @@
     }
   ],
   "openQuestions": [
+    "The limit reading is not established: no page read states the shape of this endpoint's rate-limit or account-limit response, so a 429 is read as a retryable rate limit (`rate-limit-retryable`, `unverified`) until a page or a named live item says otherwise.",
     "Structured outputs (`text.format` with `json_schema`) and `reasoning.effort` are documented but not implemented by the adapter's Responses assembly, so both stay absent; whether structured outputs are GA is not stated on the pages read."
   ]
 }

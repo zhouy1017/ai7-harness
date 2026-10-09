@@ -32,8 +32,11 @@
       "requestShape": "openai-chat-completions",
       "requestShapeEvidence": "minimax-platform-docs",
       "limitPolicy": "rate-limit-retryable",
+      "limitPolicyEvidence": "unverified",
       "dshAttribution": false,
+      "dshAttributionEvidence": "unverified",
       "sessionHeader": false,
+      "sessionHeaderEvidence": "unverified",
       "maxOutputTokens": null,
       "routeCapabilities": {
         "webSearchTool": { "value": "none", "evidence": "minimax-search-docs" }
@@ -46,6 +49,7 @@
     }
   ],
   "openQuestions": [
+    "The limit reading is not established: no page read states the shape of this endpoint's rate-limit or account-limit response, so a 429 is read as a retryable rate limit (`rate-limit-retryable`, `unverified`) until a page or a named live item says otherwise.",
     "Structured output is not documented — no `response_format` appears in the chat schema or the guides read (ADR 0080 §3).",
     "MiniMax's provider search tool lives on its Anthropic-compatible `/anthropic/v1/messages` and Responses-style `/v1/responses` paths; a route on either is a later document revision, with its own reading."
   ]

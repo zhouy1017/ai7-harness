@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { CONTEXT_WINDOW_EXCEEDED_CODE, INVALID_CREDENTIAL_CODE, QUOTA_EXCEEDED_CODE } from '@deepseek-ai/dsh-llm';
+import { CONTEXT_WINDOW_EXCEEDED_CODE, INVALID_CREDENTIAL_CODE, QUOTA_EXCEEDED_CODE, attributionHeaders } from '@deepseek-ai/dsh-llm';
+import { DEVELOPER_LIVE_POLICY_BINDING } from '../../src/service/launch-policy.js';
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { BASELINE_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/contract.js';
 import { CredentialBroker, type CredentialSlotBinding } from '../../src/service/provider/credential-broker.js';
@@ -31,6 +32,7 @@ import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/p
 import {
   CONFIGURED_CREDENTIAL_SLOTS,
   CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES,
+  CONFIGURED_DEVELOPMENT_SLOTS,
   CONFIGURED_PROVIDER_LABELS,
   CONFIGURED_ROUTE_IDS,
 } from '../../src/shared/provider-configuration.generated.js';
@@ -165,6 +167,50 @@ describe('provider documents and the generator (ADR 0073 §2)', () => {
       ['shape-capability', (input) => { route(documentOf(input, 'anthropic-claude')).models[0].capabilities = { structuredOutput: { value: 'json-object', evidence: 'claude-platform-docs' } }; }],
       ['shape-capability', (input) => { route(documentOf(input, 'openai-platform')).models[0].capabilities = { toolCalling: { value: 'function', evidence: 'openai-api-docs' } }; }],
       ['context-evidence', (input) => { route(documentOf(input, 'minimax')).models[1].context = { tokens: 200000, evidence: 'unverified' }; }],
+      // The evidence records themselves are schema-checked (the object form of `additionalProperties`).
+      ['schema', (input) => { (documentOf(input, 'minimax').evidence as any)['minimax-platform-docs'].readOn = 'yesterday'; }],
+      ['schema', (input) => { (documentOf(input, 'minimax').evidence as any)['minimax-platform-docs'].source = ''; }],
+      ['schema', (input) => { (documentOf(input, 'minimax').evidence as any)['minimax-platform-docs'].source = 42; }],
+      ['schema', (input) => { (documentOf(input, 'opencode-go').evidence as any)['first-live-run'].itemIds = 'S40/first-baseline/1'; }],
+      ['schema', (input) => { (documentOf(input, 'opencode-go').evidence as any)['first-live-run'].observedOn = 'some day'; }],
+      ['schema', (input) => { (documentOf(input, 'minimax').evidence as any)['minimax-platform-docs'].kind = 'vendor-docs'; }],
+      ['schema', (input) => { (documentOf(input, 'minimax').evidence as any)['minimax-platform-docs'].note = ''; }],
+      ['evidence-day', (input) => { (documentOf(input, 'minimax').evidence as any)['minimax-platform-docs'].readOn = '2026-02-30'; }],
+      // Endpoint hosts: no local, internal, literal or dotless address, on a new route or a bound one.
+      ...['https://localhost/v1/chat/completions', 'https://127.0.0.1/v1', 'https://169.254.169.254/latest', 'https://intranet/x',
+        'https://../x', 'https://-/x', 'https://api.minimax.cn:8443/v1', 'https://user@api.minimax.cn/v1', 'https://api.minimax.cn/v1?x=1']
+        .map((endpoint): [string, (input: ReturnType<typeof freshInput>) => void] => ['schema', (input) => { route(documentOf(input, 'minimax')).endpoint = endpoint; }]),
+      ['schema', (input) => { route(documentOf(input, 'opencode-go')).endpoint = 'https://10.0.0.1/v1/chat/completions'; }],
+      ['endpoint-host', (input) => { route(documentOf(input, 'minimax')).endpoint = 'https://api.localhost/v1/chat/completions'; }],
+      ['endpoint-host', (input) => { route(documentOf(input, 'minimax')).endpoint = 'https://gateway.local/v1/chat/completions'; }],
+      ['endpoint-host', (input) => { route(documentOf(input, 'minimax')).endpoint = 'https://minimax.internal/v1/chat/completions'; }],
+      ['anthropic-version', (input) => { (documentOf(input, 'anthropic-claude').credential as any).anthropicVersion = '2023-13-45'; }],
+      // Evidence no page can supply is admitted only where the Provider Test Ledger holds it.
+      ['live-item-unrecorded', (input) => {
+        (documentOf(input, 'minimax').evidence as any)['invented'] = { kind: 'live-test-item', itemIds: ['NOPE/1'], observedOn: '2026-10-09' };
+        route(documentOf(input, 'minimax')).models[0].capabilities = { answerChannel: { value: 'message-content-string', evidence: 'invented' } };
+      }],
+      ['live-item-unrecorded', (input) => { (documentOf(input, 'opencode-go').evidence as any)['first-live-run'].itemIds = ['S40/first-baseline/9']; }],
+      ['live-item-unrecorded', (input) => {
+        (documentOf(input, 'minimax').evidence as any)['borrowed'] = { kind: 'live-test-item', itemIds: ['S40/first-baseline/1'], observedOn: '2026-09-07' };
+        route(documentOf(input, 'minimax')).models[0].capabilities = { answerChannel: { value: 'message-content-string', evidence: 'borrowed' } };
+      }],
+      ['baseline-unrecorded', (input) => { (documentOf(input, 'deepseek-open-platform').evidence as any)['production-baseline'].since = 'adapter revision 2'; }],
+      ['baseline-unrecorded', (input) => {
+        (documentOf(input, 'minimax').evidence as any)['baseline'] = { kind: 'frozen-request-baseline', since: 'adapter revision 1' };
+        route(documentOf(input, 'minimax')).models[0].capabilities = { answerChannel: { value: 'message-content-string', evidence: 'baseline' } };
+      }],
+      // DeepSeek's thinking parameters, the DSH attribution headers and the OpenCode session header stay where they belong.
+      ['deepseek-thinking', (input) => { route(documentOf(input, 'minimax')).models[0].capabilities = { reasoningControl: { value: 'deepseek-thinking', evidence: 'minimax-platform-docs' } }; }],
+      ['dsh-attribution', (input) => { Object.assign(route(documentOf(input, 'minimax')), { dshAttribution: true, dshAttributionEvidence: 'minimax-platform-docs' }); }],
+      ['dsh-attribution', (input) => {
+        (documentOf(input, 'deepseek-open-platform').evidence as any)['unverified'] = { kind: 'unverified' };
+        route(documentOf(input, 'deepseek-open-platform')).dshAttributionEvidence = 'unverified';
+      }],
+      ['session-header', (input) => { Object.assign(route(documentOf(input, 'minimax')), { sessionHeader: true, sessionHeaderEvidence: 'minimax-platform-docs' }); }],
+      ['session-header', (input) => { Object.assign(route(documentOf(input, 'opencode-zen')), { sessionHeader: true, sessionHeaderEvidence: 'unverified' }); }],
+      ['evidence-unknown', (input) => { route(documentOf(input, 'minimax')).limitPolicyEvidence = 'nobody-read-this'; }],
+      ['schema', (input) => { delete route(documentOf(input, 'minimax')).sessionHeaderEvidence; }],
       ['route-duplicate', (input) => {
         const copy = structuredClone(documentOf(input, 'minimax'));
         copy.providerId = 'ai7-local-deterministic';
@@ -188,8 +234,10 @@ describe('the generated configuration (ADR 0073 §3, §4)', () => {
   it('declares the closed unions from the documents: every route profiled, labelled and on a configured slot', () => {
     expect(Object.keys(GENERATED_ROUTE_PROFILES)).toEqual([...CONFIGURED_ROUTE_IDS]);
     expect(Object.keys(CONFIGURED_PROVIDER_LABELS)).toEqual([...CONFIGURED_ROUTE_IDS]);
-    expect(Object.keys(CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES)).toEqual([...CONFIGURED_CREDENTIAL_SLOTS]);
-    expect(new Set(Object.values(CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES)).size).toBe(CONFIGURED_CREDENTIAL_SLOTS.length);
+    expect(Object.keys(CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES)).toEqual([...CONFIGURED_DEVELOPMENT_SLOTS]);
+    expect(new Set(Object.values(CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES)).size).toBe(CONFIGURED_DEVELOPMENT_SLOTS.length);
+    // Every development slot is a configured slot; the production connection's slot has no development reference.
+    expect(CONFIGURED_CREDENTIAL_SLOTS.filter((slot) => !(CONFIGURED_DEVELOPMENT_SLOTS as readonly string[]).includes(slot))).toEqual(['deepseek-api-key']);
     for (const profile of Object.values(PROVIDER_ROUTE_PROFILES)) {
       expect(CONFIGURED_CREDENTIAL_SLOTS, profile.route).toContain(profile.credentialSlot);
       expect(profile.credentialHeaderEvidence.kind, profile.route).not.toBe('unverified');
@@ -220,6 +268,13 @@ describe('the generated configuration (ADR 0073 §3, §4)', () => {
       credentialHeaderEvidence: { kind: 'vendor-documentation', source: 'ADR 0067 · OpenCode Go documentation', readOn: '2026-09-06' },
       displayName: 'OpenCode Go（开发者实时）',
     });
+    // The developer-live binding the policy pins and the route the document declares are one binding: an endpoint, slot
+    // or model edit to `opencode-go.json` that the policy does not also say fails here (the adapter sends to the
+    // document's endpoint; the frozen plan and the network allowance use the policy's).
+    expect(OPENCODE_GO_ROUTE_PROFILE.route).toBe(DEVELOPER_LIVE_POLICY_BINDING.route);
+    expect(OPENCODE_GO_ROUTE_PROFILE.endpoint).toBe(DEVELOPER_LIVE_POLICY_BINDING.endpoint);
+    expect(OPENCODE_GO_ROUTE_PROFILE.credentialSlot).toBe(DEVELOPER_LIVE_POLICY_BINDING.credentialSlot);
+    expect(modelProfileFor(DEVELOPER_LIVE_POLICY_BINDING.route, DEVELOPER_LIVE_POLICY_BINDING.model)).toBe(OPENCODE_GO_V4_FLASH_PROFILE);
     expect(DEEPSEEK_V4_PRO_PROFILE.context).toEqual({ tokens: 1_000_000, evidence: expect.objectContaining({ kind: 'vendor-documentation', readOn: '2026-09-10' }) });
     expect(OPENCODE_GO_V4_FLASH_PROFILE.context).toEqual({ tokens: null, evidence: { kind: 'unverified' } });
   });
@@ -270,7 +325,7 @@ describe('credential header forms (ADR 0073 §2)', () => {
       broker: new CredentialBroker({ resolve: async () => SECRET }),
       slotBinding,
       tickets: { take: () => { const current = ticket; ticket = null; return current; } },
-      attribution: () => ({}),
+      attribution: () => attributionHeaders(),
       promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
       codes,
       transport,
@@ -309,6 +364,21 @@ describe('credential header forms (ADR 0073 §2)', () => {
       expect(call.headers.authorization, routeId).toBe(`Bearer ${SECRET}`);
       expect(call.headers, routeId).not.toHaveProperty('x-api-key');
       expect(call.headers, routeId).not.toHaveProperty('anthropic-version');
+    }
+    // The exact header set each route that predates the documents transmits — any header a new form adds, on any of
+    // the four, fails here. The production route alone carries the DSH attribution headers; the Go paths the session pair.
+    const attribution = Object.keys(attributionHeaders());
+    expect(attribution.length).toBeGreaterThan(0);
+    const exact: Array<[RemoteExecutionRoute, string, string[]]> = [
+      [DEEPSEEK_ROUTE, 'deepseek-v4-pro', ['accept', 'authorization', 'content-type', ...attribution]],
+      [OPENCODE_GO_ROUTE, 'deepseek-v4-flash', ['accept', 'authorization', 'content-type', 'user-agent', 'x-opencode-session']],
+      ['opencode-go-messages', 'qwen3.7-plus', ['accept', 'authorization', 'content-type', 'user-agent', 'x-opencode-session']],
+      ['opencode-go-responses', 'grok-4.6', ['accept', 'authorization', 'content-type', 'user-agent', 'x-opencode-session']],
+    ];
+    for (const [routeId, modelId, keys] of exact) {
+      const call = await transmitOnce(routeId, modelId);
+      expect(Object.keys(call.headers).sort(), routeId).toEqual([...keys].sort());
+      expect(call.headers.authorization, routeId).toBe(`Bearer ${SECRET}`);
     }
     expect(credentialHeaders(DEEPSEEK_ROUTE_PROFILE, SECRET)).toEqual({ authorization: `Bearer ${SECRET}` });
     expect(() => credentialHeaders({ ...DEEPSEEK_ROUTE_PROFILE, credentialHeader: 'cookie' as never }, SECRET)).toThrowError('PROVIDER_CREDENTIAL_HEADER_UNSUPPORTED');

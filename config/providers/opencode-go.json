@@ -56,8 +56,11 @@
       "requestShape": "openai-chat-completions",
       "requestShapeEvidence": "go-plan-docs",
       "limitPolicy": "account-limit-terminal",
+      "limitPolicyEvidence": "adr-0067-go-docs",
       "dshAttribution": false,
+      "dshAttributionEvidence": "adr-0067-go-docs",
       "sessionHeader": true,
+      "sessionHeaderEvidence": "go-plan-docs",
       "maxOutputTokens": null,
       "routeCapabilities": {
         "webSearchTool": { "value": "none", "evidence": "gateway-no-search-tool" }
@@ -103,8 +106,11 @@
       "requestShape": "anthropic-messages",
       "requestShapeEvidence": "go-plan-docs",
       "limitPolicy": "account-limit-terminal",
+      "limitPolicyEvidence": "adr-0067-go-docs",
       "dshAttribution": false,
+      "dshAttributionEvidence": "adr-0067-go-docs",
       "sessionHeader": true,
+      "sessionHeaderEvidence": "go-plan-docs",
       "maxOutputTokens": 32768,
       "routeCapabilities": {
         "webSearchTool": { "value": "none", "evidence": "gateway-no-search-tool" }
@@ -125,8 +131,11 @@
       "requestShape": "openai-responses",
       "requestShapeEvidence": "go-responses-docs",
       "limitPolicy": "account-limit-terminal",
+      "limitPolicyEvidence": "adr-0067-go-docs",
       "dshAttribution": false,
+      "dshAttributionEvidence": "adr-0067-go-docs",
       "sessionHeader": true,
+      "sessionHeaderEvidence": "go-plan-docs",
       "maxOutputTokens": null,
       "routeCapabilities": {
         "webSearchTool": { "value": "none", "evidence": "gateway-no-search-tool" }
