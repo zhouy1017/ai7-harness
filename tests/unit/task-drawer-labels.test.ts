@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TaskPlanProjection, TaskPlanStartProjection, TaskPlanStateKey } from '../../src/shared/protocol.js';
+import { IPC_CHANNELS, TASK_PLAN_KINDS } from '../../src/shared/protocol.js';
 import {
   TASK_BAR_CANCEL_FAILED,
   TASK_BAR_CANCEL_WAIT,
@@ -15,6 +16,8 @@ import {
   TASK_BAR_SAVE_DRAFT,
   TASK_BAR_SAVED,
   TASK_BAR_REVIEW_OFFLINE,
+  TASK_BAR_OFFLINE_LATER,
+  TASK_BAR_WAITS_FOR_CONNECTIVITY,
   TASK_BAR_SAVE_DRAFT_ONLY,
   TASK_BAR_QUEUED_NOTE,
   TASK_BAR_QUEUED_STATUS,
@@ -458,6 +461,28 @@ describe('the authorization bar (S74a)', () => {
     expect(action(view, 'start')?.disabledReason).toBe(TASK_BAR_REVIEW_OFFLINE);
     expect(view.note).toBe(TASK_BAR_REVIEW_OFFLINE);
     expect(names(view)).not.toContain('start-when-online');
+  });
+
+  it('offers 联网后开始任务 only for a kind the service can record waiting, and never a dead control (Issue #706)', () => {
+    expect(TASK_BAR_OFFLINE_LATER).toBe('离线：这份计划要连到模型服务，而这台设备现在没有网络；联网后再开始');
+    // Every kind says whether it waits, and the kinds that do are exactly those with a when-online operation.
+    expect(Object.keys(TASK_BAR_WAITS_FOR_CONNECTIVITY).sort()).toEqual([...TASK_PLAN_KINDS].sort());
+    expect(TASK_PLAN_KINDS.filter((kind) => TASK_BAR_WAITS_FOR_CONNECTIVITY[kind])).toEqual(['baseline-analysis']);
+    expect(Object.keys(IPC_CHANNELS).filter((channel) => /WhenOnline$/.test(channel))).toEqual(['startBaselineAnalysisWhenOnline']);
+    for (const kind of TASK_PLAN_KINDS) {
+      const view = taskBarView(barOf({ readiness: 'offline' }, { kind, state: { key: 'offline', label: '离线' } }));
+      if (TASK_BAR_WAITS_FOR_CONNECTIVITY[kind]) {
+        expect(action(view, 'start-when-online')?.disabledReason, kind).toBeNull();
+        expect(names(view), kind).not.toContain('start');
+        continue;
+      }
+      // No wait path: no 联网后开始任务, and 开始任务 says why it cannot start, beside 返回修改 and the draft.
+      expect(names(view), kind).toEqual(['start', 'revise', 'save-draft']);
+      const reason = action(view, 'start')?.disabledReason;
+      expect(reason, kind).toBe(kind === 'review-run' ? TASK_BAR_REVIEW_OFFLINE : TASK_BAR_OFFLINE_LATER);
+      expect(view.note, kind).toBe(reason);
+      expect(view.statement, kind).toBe(TASK_BAR_STATEMENT);
+    }
   });
 
   it('shows what a waiting Run waits for, its direct 取消, and 去设置连接 only when the connection is what it waits for (AUTH-007, OFF-006, OFF-009, OFF-010)', () => {

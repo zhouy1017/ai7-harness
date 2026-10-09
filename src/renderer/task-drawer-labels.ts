@@ -405,6 +405,28 @@ export function taskBarContinuationNote(unitsSettled: number | null, unitsTotal:
 
 /** A Review Run cannot wait yet (Issue #502): offline, its start is shown disabled with this reason. */
 export const TASK_BAR_REVIEW_OFFLINE = '离线：审阅要连到模型服务，而这台设备现在没有网络；联网后再开始审阅';
+/** The same for every other kind that cannot wait (Issue #706): writing, 评估, 审稿意见 and 按评分重写. */
+export const TASK_BAR_OFFLINE_LATER = '离线：这份计划要连到模型服务，而这台设备现在没有网络；联网后再开始';
+
+/**
+ * Which kinds have a Connectivity Wait (Issue #706): 联网后开始任务 is the baseline analysis Task's own (Issue #502,
+ * S74b) — the only kind the service records waiting. Every other kind, offline, shows 开始任务 disabled with why,
+ * never a control that does nothing. A kind is listed here, so a new kind has to say which it is.
+ */
+export const TASK_BAR_WAITS_FOR_CONNECTIVITY: Readonly<Record<TaskPlanKind, boolean>> = {
+  'fixed-task': false,
+  'baseline-analysis': true,
+  'review-run': false,
+  'initial-evaluation': false,
+  'readers-report': false,
+  'evaluation-rewrite': false,
+  writing: false,
+};
+
+/** Why a kind without a Connectivity Wait does not start while offline. */
+export function taskBarOfflineReason(kind: TaskPlanKind): string {
+  return kind === 'review-run' ? TASK_BAR_REVIEW_OFFLINE : TASK_BAR_OFFLINE_LATER;
+}
 
 /**
  * The one sentence a pre-start state adds beside the actions: J-03's fixed Task is only ever recorded (ADR
@@ -728,15 +750,17 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
   }
   if (readiness === 'offline') {
     // 离线 (§6; AUTH-002, OFF-004): the one start this state offers records the Run and it waits; the draft
-    // action sits beside it in OFF-004's words, and neither is preselected. A Review Run cannot wait yet.
-    if (plan.kind === 'review-run') {
+    // action sits beside it in OFF-004's words, and neither is preselected. A kind without a Connectivity Wait
+    // (Issue #706) shows 开始任务 disabled with why instead.
+    if (!TASK_BAR_WAITS_FOR_CONNECTIVITY[plan.kind]) {
+      const reason = taskBarOfflineReason(plan.kind);
       return {
         readiness,
         summary,
         statement: TASK_BAR_STATEMENT,
-        note: TASK_BAR_REVIEW_OFFLINE,
+        note: reason,
         status: null,
-        actions: [{ name: 'start', label: TASK_BAR_START, tone: 'primary', disabledReason: TASK_BAR_REVIEW_OFFLINE }, revise, SAVE_DRAFT],
+        actions: [{ name: 'start', label: TASK_BAR_START, tone: 'primary', disabledReason: reason }, revise, SAVE_DRAFT],
       };
     }
     return {
