@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -365,6 +365,17 @@ describe('recorded evidence and the Provider Test Ledger (Issue #715, ADR 0067)'
     expect(support).toContain('| adapter revision 1 | `deepseek-open-platform` | `deepseek-v4-pro` | #310 |');
     expect(support).toContain('--ledger <cache root>');
     expect(readFileSync(`${ROOT}src/service/provider/provider-profiles.generated.ts`, 'utf8')).not.toContain(generator.RECORDED_EVIDENCE_FILE);
+    // Everything that reads `config/providers/*.json` reads a provider document (J-12's `configuredUnboundProviderNames`
+    // among them), so the record and its schema live in their own subdirectory and every `.json` directly under the
+    // providers directory is a document or the document schema.
+    const providersDirectory = join(ROOT, 'config', 'providers');
+    for (const file of readdirSync(providersDirectory).filter((name) => name.endsWith('.json') && !name.endsWith('.schema.json'))) {
+      const document = JSON.parse(readFileSync(join(providersDirectory, file), 'utf8')) as { providerId?: string; displayName?: string; routes?: unknown[] };
+      expect(typeof document.providerId, file).toBe('string');
+      expect(typeof document.displayName, file).toBe('string');
+      expect(Array.isArray(document.routes), file).toBe(true);
+    }
+    expect(readdirSync(join(providersDirectory, 'recorded-evidence')).sort()).toEqual(['recorded-evidence.json', 'recorded-evidence.v1.schema.json']);
     // A recorded item nobody cites yet is a fact about the ledger, not a document error, as long as its row is declared.
     expect(refusalAfter((input) => { input.recordedEvidence.data.liveTestItems.push({ itemId: 'S99/spare/1', route: 'opencode-go', model: 'glm-5.3', observedOn: '2026-10-09', issue: '#715' }); })).toBeNull();
   });

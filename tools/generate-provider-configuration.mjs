@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validatePolicyDocument } from './validate-policies.mjs';
@@ -36,8 +36,11 @@ export const SCHEMA_FILE = 'provider-configuration.v1.schema.json';
  * and the production route's frozen request baseline with the models whose bytes it pins. The ledger itself lives
  * outside every checkout and CI has none, so this record is its reviewed mirror: a new live item is added here, in the
  * pull request that records it, and `--ledger` compares the two on a developer host. Without it a document alone could
- * make a model readable by naming an item nobody sent, or by borrowing one sent to another row.
+ * make a model readable by naming an item nobody sent, or by borrowing one sent to another row. The record and its
+ * schema live in their own subdirectory because everything that reads `config/providers/*.json` (J-12 among them)
+ * reads a provider document, and the record is not one.
  */
+export const RECORDED_EVIDENCE_DIRECTORY = 'recorded-evidence';
 export const RECORDED_EVIDENCE_FILE = 'recorded-evidence.json';
 export const RECORDED_EVIDENCE_SCHEMA_FILE = 'recorded-evidence.v1.schema.json';
 export const OUTPUT_PATHS = Object.freeze({
@@ -152,24 +155,26 @@ function refuse(condition, message) {
 }
 
 /**
- * Every `<id>.json` beside the schemas, sorted by file name, parsed; the document schema and the recorded evidence
- * (with its own schema) are returned apart.
+ * Every `<id>.json` beside the schema, sorted by file name, parsed; the schema itself is returned apart, and so is the
+ * recorded evidence with its own schema, read from the `recorded-evidence/` subdirectory.
  */
 export function readProviderDocuments(directory = resolve(ROOT, PROVIDERS_DIRECTORY)) {
   const names = readdirSync(directory).filter((name) => name.endsWith('.json')).sort();
   refuse(names.includes(SCHEMA_FILE), `PROVIDER_CONFIGURATION/schema-absent: ${SCHEMA_FILE}`);
-  for (const name of [RECORDED_EVIDENCE_FILE, RECORDED_EVIDENCE_SCHEMA_FILE]) {
-    refuse(names.includes(name), `PROVIDER_CONFIGURATION/recorded-evidence-absent: ${name}`);
-  }
   const read = (name) => JSON.parse(readFileSync(resolve(directory, name), 'utf8'));
-  const apart = new Set([SCHEMA_FILE, RECORDED_EVIDENCE_FILE, RECORDED_EVIDENCE_SCHEMA_FILE]);
   const documents = names
-    .filter((name) => !apart.has(name))
+    .filter((name) => name !== SCHEMA_FILE)
     .map((file) => {
       refuse(!file.endsWith('.schema.json'), `PROVIDER_CONFIGURATION/unknown-schema: ${file}`);
       return { file, data: read(file) };
     });
-  return { schema: read(SCHEMA_FILE), documents, recordedEvidence: { schema: read(RECORDED_EVIDENCE_SCHEMA_FILE), data: read(RECORDED_EVIDENCE_FILE) } };
+  const recordedEvidence = {};
+  for (const [key, name] of [['schema', RECORDED_EVIDENCE_SCHEMA_FILE], ['data', RECORDED_EVIDENCE_FILE]]) {
+    const path = resolve(directory, RECORDED_EVIDENCE_DIRECTORY, name);
+    refuse(existsSync(path), `PROVIDER_CONFIGURATION/recorded-evidence-absent: ${RECORDED_EVIDENCE_DIRECTORY}/${name}`);
+    recordedEvidence[key] = JSON.parse(readFileSync(path, 'utf8'));
+  }
+  return { schema: read(SCHEMA_FILE), documents, recordedEvidence };
 }
 
 /**
@@ -741,7 +746,7 @@ function renderSupport({ providers, recordedEvidence }) {
   lines.push('A credential slot is a logical slot of the Main Editorial Role, one per configured provider; the Credential Broker\'s closed set and `tools/enroll-dev-credential.mjs`\'s slot list are generated from the documents, so a slot cannot exist without a reviewed document. Enrolment, where a record authorizes it, is the one way ADR 0067 established for `opencode-go`: from an untracked key file the enrollment helper alone reads, into the Protected Secret Store under the slot\'s development Credential Reference. A Credential Reference names a store entry and is not a secret. See [ADR 0067](../adr/0067-authorize-the-opencode-go-development-credential-with-live-once-testing.md) for the live-once ledger and the Provider Result Cache.');
   lines.push('');
   lines.push('## Recorded evidence', '');
-  lines.push(`The evidence no page can supply — the live test items the ADR 0067 Provider Test Ledger holds and the production route's frozen request baseline — is recorded row by row in [\`config/providers/${RECORDED_EVIDENCE_FILE}\`](../../config/providers/${RECORDED_EVIDENCE_FILE}), validated by [\`${RECORDED_EVIDENCE_SCHEMA_FILE}\`](../../config/providers/${RECORDED_EVIDENCE_SCHEMA_FILE}). A document cites an item or a baseline only from the row it was observed on: a route for its route-wide facts only when every item was sent on that route, a model only when every item was sent to that model on that route. The ledger itself lives outside every checkout and CI has none, so the record is its reviewed mirror: the pull request that records a new live item adds it here and runs \`node tools/generate-provider-configuration.mjs --ledger <cache root>\` on the developer host, which compares the record with the ledger's transmitted, non-stale model-call lines by item, model and UTC day and prints every difference. CI never runs it.`);
+  lines.push(`The evidence no page can supply — the live test items the ADR 0067 Provider Test Ledger holds and the production route's frozen request baseline — is recorded row by row in [\`config/providers/${RECORDED_EVIDENCE_DIRECTORY}/${RECORDED_EVIDENCE_FILE}\`](../../config/providers/${RECORDED_EVIDENCE_DIRECTORY}/${RECORDED_EVIDENCE_FILE}), validated by [\`${RECORDED_EVIDENCE_SCHEMA_FILE}\`](../../config/providers/${RECORDED_EVIDENCE_DIRECTORY}/${RECORDED_EVIDENCE_SCHEMA_FILE}) (its own subdirectory, because the record is not a provider document and everything that reads \`config/providers/*.json\` reads one). A document cites an item or a baseline only from the row it was observed on: a route for its route-wide facts only when every item was sent on that route, a model only when every item was sent to that model on that route. The ledger itself lives outside every checkout and CI has none, so the record is its reviewed mirror: the pull request that records a new live item adds it here and runs \`node tools/generate-provider-configuration.mjs --ledger <cache root>\` on the developer host, which compares the record with the ledger's transmitted, non-stale model-call lines by item, model and UTC day and prints every difference. CI never runs it.`);
   lines.push('');
   lines.push('| Item | Route | Model | Observed | Stated on |', '| --- | --- | --- | --- | --- |');
   for (const item of recordedEvidence.liveTestItems) {
