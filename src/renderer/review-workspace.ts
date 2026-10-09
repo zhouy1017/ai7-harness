@@ -261,8 +261,16 @@ interface BatchStrip {
   capability: boolean;
 }
 
+/** The paragraphs a 当前选区 Run named (Issue #423 review, P2-4): 返回修改 asks for the same ones again. */
+type SheetSelection = { readonly fromBlockId: string; readonly toBlockId: string };
+
 interface SheetState {
   readonly categories: Set<string>;
+  /**
+   * The selection the sheet holds: a 当前选区 Run's paragraphs, kept for 返回修改 and 修改计划并重新授权 (P2-4). The sheet holds no
+   * selection of its own; without one, 当前选区 stays unavailable and is refused here, before anything is sent.
+   */
+  readonly selection: SheetSelection | null;
   scope: ReviewScopeKind | null;
   from: string | null;
   to: string | null;
@@ -866,7 +874,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   }
 
   /** The Run's own choices for 修改计划并重新授权: its categories that can be chosen now, and its scope. */
-  function scopeRedoPrefill(run: ReviewRunProjection): { categories: string[]; scope: ReviewScopeKind; from: string | null; to: string | null } {
+  function scopeRedoPrefill(run: ReviewRunProjection): ReviewRunPrefill {
     const prefill = prefillOf(run);
     const available = new Set((projection?.categories ?? []).filter((category) => category.available).map((category) => category.categoryId));
     return { ...prefill, categories: prefill.categories.filter((categoryId) => available.has(categoryId)) };
@@ -880,15 +888,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   }
 
   /** The choices a prepared Run was made from, for 返回修改. */
-  function prefillOf(run: ReviewRunProjection): { categories: string[]; scope: ReviewScopeKind; from: string | null; to: string | null } {
-    const chapters = projection?.scopeOptions.chapters.chapters ?? [];
-    const range = run.scope.selectedRange;
-    return {
-      categories: run.categories.map((category) => category.categoryId),
-      scope: run.scope.kind,
-      from: run.scope.kind === 'chapters' && range !== null ? chapters.find((chapter) => chapter.position === range.startPosition)?.blockId ?? null : null,
-      to: run.scope.kind === 'chapters' && range !== null ? chapters.find((chapter) => chapter.endPosition === range.endPosition)?.blockId ?? null : null,
-    };
+  function prefillOf(run: ReviewRunProjection): ReviewRunPrefill {
+    return reviewRunPrefill(run, projection?.scopeOptions.chapters.chapters ?? []);
   }
 
   function progressList(run: ReviewRunProjection): HTMLElement {
@@ -1618,7 +1619,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   // ---- 新建审阅 ------------------------------------------------------------------------------------
 
   async function openSheet(
-    prefill: { categories: string[]; scope: ReviewScopeKind | null; from: string | null; to: string | null } | null,
+    prefill: { categories: string[]; scope: ReviewScopeKind | null; from: string | null; to: string | null; selection?: SheetSelection | null } | null,
     opener: HTMLElement,
     procedureId: string | null = null,
   ): Promise<void> {
@@ -1636,6 +1637,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     if (destroyed || projection === null || sheet.open) return;
     sheetState = {
       categories: new Set(prefill?.categories ?? []),
+      selection: prefill?.selection ?? null,
       scope: prefill?.scope ?? null,
       from: prefill?.from ?? null,
       to: prefill?.to ?? null,
@@ -1776,7 +1778,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     scopes.append(el('legend', undefined, REVIEW_SCOPE_LEGEND));
     const scopeInputs = new Map<ReviewScopeKind, HTMLInputElement>();
     for (const kind of REVIEW_SCOPE_KINDS) {
-      const availability = workspace.scopeOptions[kind];
+      const availability = scopeAvailability(workspace, state, kind);
       const label = el('label', 'review-scope-option');
       label.dataset['reviewScopeOption'] = kind;
       const input = el('input');
@@ -1892,7 +1894,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
           input.dataset['unavailableReason'] = why;
         }
       }
-      for (const [kind, input] of scopeInputs) input.disabled = !workspace.scopeOptions[kind].available || preparing || (filled !== null && kind !== filled.scopeSlot);
+      for (const [kind, input] of scopeInputs) input.disabled = !scopeAvailability(workspace, state, kind).available || preparing || (filled !== null && kind !== filled.scopeSlot);
       procedureSelect.disabled = preparing || loading || state.procedures.length === 0;
       versionSelect.disabled = preparing || loading || versionSelect.options.length < 2;
       range.hidden = state.scope !== 'chapters';
@@ -1918,6 +1920,12 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     updateSheet();
   }
 
+  /** A scope as the sheet offers it: 当前选区 once it holds a Run's selection, every other as the workspace says (P2-4). */
+  function scopeAvailability(workspace: ReviewWorkspaceProjection, state: SheetState, kind: ReviewScopeKind): { available: boolean; unavailableReason: string | null } {
+    if (kind === 'selection' && state.selection !== null) return { available: true, unavailableReason: null };
+    return workspace.scopeOptions[kind];
+  }
+
   function chaptersOf(state: SheetState): { from: ReviewChapterOptionProjection | null; to: ReviewChapterOptionProjection | null } {
     const chapters = projection?.scopeOptions.chapters.chapters ?? [];
     return {
@@ -1939,21 +1947,20 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
     const categoryIds = projection.categories.filter((entry) => state.categories.has(entry.categoryId)).map((entry) => entry.categoryId);
     const { from, to } = chaptersOf(state);
-    state.problem = categoryIds.length === 0 ? REVIEW_PICK_CATEGORY
-      : state.scope === null ? REVIEW_PICK_SCOPE
-        : state.scope === 'chapters' && (from === null || to === null) ? REVIEW_PICK_CHAPTERS
-          : state.scope === 'chapters' && from !== null && to !== null && to.position < from.position ? REVIEW_CHAPTERS_REVERSED
-            : null;
-    if (state.problem !== null || state.scope === null) {
+    const asked = reviewSheetScope({
+      scope: state.scope,
+      from,
+      to,
+      selection: state.selection,
+      selectionReason: projection.scopeOptions.selection.unavailableReason,
+    });
+    state.problem = categoryIds.length === 0 ? REVIEW_PICK_CATEGORY : 'problem' in asked ? asked.problem : null;
+    if (state.problem !== null || !('request' in asked)) {
       // The problem line is an alert, so it is heard where the editor stands; focus stays on 先看计划.
       sheetUpdate();
       return;
     }
-    const scope: ReviewRunScopeRequest = {
-      kind: state.scope,
-      fromChapterBlockId: state.scope === 'chapters' ? from!.blockId : null,
-      toChapterBlockId: state.scope === 'chapters' ? to!.blockId : null,
-    };
+    const scope = asked.request;
     options.setStatus(REVIEW_STATUS_LINES.preparing, 'busy');
     try {
       const initial = await api.prepareReviewRun({
@@ -2045,5 +2052,56 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (sheet.open) sheet.close();
       exporter.destroy();
     },
+  };
+}
+
+/**
+ * What 先看计划 asks a Review Run to read, or why it asks nothing (Issue #423 review, P2-4): 选章 names its two chapters, 当前选区
+ * the paragraphs the sheet holds from a Run — and with none held it is refused here, never sent as a frame the boundary rejects.
+ */
+export function reviewSheetScope(input: {
+  readonly scope: ReviewScopeKind | null;
+  readonly from: Pick<ReviewChapterOptionProjection, 'blockId' | 'position'> | null;
+  readonly to: Pick<ReviewChapterOptionProjection, 'blockId' | 'position'> | null;
+  readonly selection: { readonly fromBlockId: string; readonly toBlockId: string } | null;
+  readonly selectionReason: string | null;
+}): { readonly problem: string } | { readonly request: ReviewRunScopeRequest } {
+  const { scope, from, to, selection } = input;
+  if (scope === null) return { problem: REVIEW_PICK_SCOPE };
+  if (scope === 'chapters') {
+    if (from === null || to === null) return { problem: REVIEW_PICK_CHAPTERS };
+    if (to.position < from.position) return { problem: REVIEW_CHAPTERS_REVERSED };
+    return { request: { kind: 'chapters', fromChapterBlockId: from.blockId, toChapterBlockId: to.blockId } };
+  }
+  if (scope === 'selection') {
+    if (selection === null) return { problem: input.selectionReason ?? REVIEW_PICK_SCOPE };
+    return { request: { kind: 'selection', fromChapterBlockId: selection.fromBlockId, toChapterBlockId: selection.toBlockId } };
+  }
+  return { request: { kind: scope, fromChapterBlockId: null, toChapterBlockId: null } };
+}
+
+export type ReviewRunPrefill = {
+  categories: string[];
+  scope: ReviewScopeKind;
+  from: string | null;
+  to: string | null;
+  selection: { readonly fromBlockId: string; readonly toBlockId: string } | null;
+};
+
+/**
+ * The choices a Run was made from, for 返回修改 and 修改计划并重新授权: its categories and scope — 选章 by its two chapters, and
+ * 当前选区 by the paragraphs the Run kept (Issue #423 review, P2-4), which the sheet then holds.
+ */
+export function reviewRunPrefill(
+  run: Pick<ReviewRunProjection, 'categories' | 'scope'>,
+  chapters: ReadonlyArray<Pick<ReviewChapterOptionProjection, 'blockId' | 'position' | 'endPosition'>>,
+): ReviewRunPrefill {
+  const range = run.scope.selectedRange;
+  return {
+    categories: run.categories.map((category) => category.categoryId),
+    scope: run.scope.kind,
+    from: run.scope.kind === 'chapters' && range !== null ? chapters.find((chapter) => chapter.position === range.startPosition)?.blockId ?? null : null,
+    to: run.scope.kind === 'chapters' && range !== null ? chapters.find((chapter) => chapter.endPosition === range.endPosition)?.blockId ?? null : null,
+    selection: run.scope.kind === 'selection' ? run.scope.selection : null,
   };
 }

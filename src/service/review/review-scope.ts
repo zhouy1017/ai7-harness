@@ -14,9 +14,21 @@ import type { ReviewCategoryExecutor } from './category-configuration.js';
  * unit suite all read the same answer.
  */
 
-/** 当前选区 needs a selection handed over from the manuscript, which reaches 审阅 with the Task surface. */
-export const SELECTION_UNAVAILABLE_REASON = '从稿件里选中文字后发起（随任务面接入）' as const;
+/**
+ * 当前选区 needs a selection handed over from the manuscript (Issue #423, S77b): the selection menu's 就这段发起任务… hands it
+ * over; 新建审阅 holds none of its own.
+ */
+export const SELECTION_UNAVAILABLE_REASON = '在稿件里选中文字，右键「就这段发起任务…」审阅所选文字。' as const;
+/** The selection handed over no longer stands in the working manuscript, or its two ends are out of order. */
+export const SELECTION_GONE_REASON = '所选文字已不在当前稿件中，或先后颠倒；请重新选择。' as const;
+/** The paragraphs a prepared 当前选区 Run names were removed or reordered before it started (Issue #423 review, P2-2). */
+export const SELECTION_MOVED_REASON = '所选文字所在的段落在准备之后已删除或调换了次序；请在稿件里重新选中文字，再就这段发起任务。' as const;
+/** The most paragraphs one 当前选区 names: a longer stretch is a chapter's work, which 选章 does. */
+export const MAX_SELECTION_BLOCKS = 64;
+export const SELECTION_TOO_LONG_REASON = `所选文字跨越超过 ${MAX_SELECTION_BLOCKS} 个段落；请改用选章。` as const;
 export const NEVER_REVIEWED_REASON = '这一类还没有审阅过，没有“改动过的章”可比；请先审全书或所选各章。' as const;
+/** The latest review of the category was of a selected paragraph only (P1-4): a chapter or whole review comes first. */
+export const SELECTION_BASE_REASON = '这一类最近一次只审了所选段落，不能据它只审改动过的章；请先审全书或所选各章。' as const;
 export const NOTHING_CHANGED_REASON = '稿件在这一类上次审阅之后没有改动；没有需要只审的章。' as const;
 export const LEADS_ABSENT_REASON = '先完成基线分析，才有前后不一致的线索。' as const;
 export const LEADS_CHANGED_REASON = '线索来自基线分析的全书结果，不按改动过的章筛选；请选全书或所选各章。' as const;
@@ -29,6 +41,7 @@ export const NO_CHAPTERS_REASON = '这份稿件还没有可选的章：它既没
 export const FACTUAL_AGAIN_REASON = '这本书已完成过一次全书事实核查；再次核查随事实核查的更新方式接入。' as const;
 export const FACTUAL_CHAPTERS_REASON = '事实核查暂只能核查全书；按章核查随事实核查的更新方式接入。' as const;
 export const FACTUAL_CHANGED_REASON = '事实核查暂只能核查全书；只审改动过的章随事实核查的更新方式接入。' as const;
+export const FACTUAL_SELECTION_REASON = '事实核查暂只能核查全书；就所选文字核查随事实核查的更新方式接入。' as const;
 
 /** One contiguous block range, inclusive, over the working manuscript's positions. */
 export type ReviewBlockRange = BaselineAnalysisSelectedRange;
@@ -36,8 +49,16 @@ export type ReviewBlockRange = BaselineAnalysisSelectedRange;
 /** A scope once its chapters are resolved to one contiguous block range. */
 export interface ResolvedReviewScope {
   readonly kind: ReviewScopeKind;
-  /** The block range of 选章 and 当前选区; `null` for the whole manuscript and for the changed chapters. */
+  /**
+   * The block range of 选章 and 当前选区; `null` for the whole manuscript and for the changed chapters — and for a 当前选区 no
+   * selection was handed over to, which no category can read.
+   */
   readonly selectedRange: ReviewBlockRange | null;
+  /**
+   * The paragraphs 当前选区 names, by block identity, in manuscript order (Issue #423 review, P1-1, P2-2): a Run on a selection
+   * marks findings on these blocks only, and does not start once one of them is gone or out of order. `undefined` elsewhere.
+   */
+  readonly blockIds?: ReadonlyArray<string>;
 }
 
 /** What a scope asks of one category. */
@@ -49,6 +70,17 @@ export type ReviewCategoryScopePlan =
 /** The facts of one category's ledger a scope reads: whether it has reviewed, and whether that is stale. */
 export interface ReviewCategoryLedgerFacts {
   readonly hasRevision: boolean;
+  /**
+   * A Run of the whole manuscript, chosen chapters or changed chapters put this category on the manuscript (Issue #423 review,
+   * P1-3). A 当前选区 Run leaves a revision in the ledger but reviews no chapter, so it never makes 只审改动过的章 available.
+   * Absent reads as `hasRevision`.
+   */
+  readonly reviewed?: boolean;
+  /**
+   * The category's latest revision is a 当前选区 Run's (Issue #423 final review, P1-4). Its ranges outside the selection were never
+   * read, so it is no base for 只审改动过的章: what changed since the last chapter review would be carried as unchanged.
+   */
+  readonly selectionBase?: boolean;
   /** The latest revision's freshness is `stale`: the manuscript changed since it was read. */
   readonly stale: boolean;
   /** Why `review-sync` is not offered, in the ledger's own words, when it is not. */
@@ -62,7 +94,8 @@ export interface ReviewCategoryLedgerFacts {
  * - 全书 is the category's first whole review, or a review again once it has one;
  * - 只审改动过的章 is a sync, offered once the category has reviewed and the manuscript moved since;
  * - 选章 is a first range review, or a range review once the category has one;
- * - 当前选区 is not offered yet.
+ * - 当前选区 reads as 选章 does, over the blocks the selection names (Issue #423, S77b) — never wider than the block range,
+ *   save the overlap closure every range review reads.
  * The leads read no mode at all, and 事实核查 reads only its whole first Task.
  */
 export function reviewCategoryScopePlan(
@@ -72,20 +105,22 @@ export function reviewCategoryScopePlan(
   facts: ReviewCategoryLedgerFacts,
 ): ReviewCategoryScopePlan {
   if (executor === 'unavailable' || executor === 'series-knowledge') return { kind: 'refused', reason: unavailableReason ?? '这一类暂不可用。' };
-  if (scope.kind === 'selection') return { kind: 'refused', reason: SELECTION_UNAVAILABLE_REASON };
+  if (scope.kind === 'selection' && scope.selectedRange === null) return { kind: 'refused', reason: SELECTION_UNAVAILABLE_REASON };
   if (executor === 'baseline-leads') {
     if (!facts.baselineRevision) return { kind: 'refused', reason: LEADS_ABSENT_REASON };
     if (scope.kind === 'changed') return { kind: 'refused', reason: LEADS_CHANGED_REASON };
-    return { kind: 'leads', selectedRange: scope.kind === 'chapters' ? scope.selectedRange : null };
+    return { kind: 'leads', selectedRange: scope.kind === 'chapters' || scope.kind === 'selection' ? scope.selectedRange : null };
   }
   if (executor === 'factual-review-kind') {
     if (scope.kind === 'chapters') return { kind: 'refused', reason: FACTUAL_CHAPTERS_REASON };
+    if (scope.kind === 'selection') return { kind: 'refused', reason: FACTUAL_SELECTION_REASON };
     if (scope.kind === 'changed') return { kind: 'refused', reason: FACTUAL_CHANGED_REASON };
     return facts.hasRevision ? { kind: 'refused', reason: FACTUAL_AGAIN_REASON } : { kind: 'task', mode: 'whole-manuscript', selectedRange: null };
   }
   if (scope.kind === 'whole') return { kind: 'task', mode: facts.hasRevision ? 'review-again' : 'review-first', selectedRange: null };
   if (scope.kind === 'changed') {
-    if (!facts.hasRevision) return { kind: 'refused', reason: NEVER_REVIEWED_REASON };
+    if (!(facts.reviewed ?? facts.hasRevision)) return { kind: 'refused', reason: NEVER_REVIEWED_REASON };
+    if (facts.selectionBase === true) return { kind: 'refused', reason: SELECTION_BASE_REASON };
     return facts.stale
       ? { kind: 'task', mode: 'review-sync', selectedRange: null }
       : { kind: 'refused', reason: facts.syncUnavailableReason ?? NOTHING_CHANGED_REASON };
@@ -171,7 +206,7 @@ export function chapterOfPosition(chapters: ReadonlyArray<ReviewChapterOptionPro
  * How a scope reads in a record: its label, and for 选章 the block range it resolved to. A chapter's
  * title is manuscript text, so the durable label names positions only.
  */
-export function reviewScopeLabel(scope: ResolvedReviewScope): string {
+export function reviewScopeLabel(scope: Pick<ResolvedReviewScope, 'kind' | 'selectedRange'>): string {
   return scope.selectedRange === null
     ? REVIEW_SCOPE_LABELS[scope.kind]
     : `${REVIEW_SCOPE_LABELS[scope.kind]} · 内容块 ${scope.selectedRange.startPosition}–${scope.selectedRange.endPosition}`;

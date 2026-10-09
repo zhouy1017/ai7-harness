@@ -25,6 +25,7 @@ import {
   type ProposalConflictKind,
   type ReviewRunCategoryState,
   type ReviewRunState,
+  type ReviewScopeKind,
 } from '../shared/protocol.js';
 import type { ProgressReader, RunProgress } from './analysis/baseline-analysis-store.js';
 import type { WaitingFor } from './task-plan.js';
@@ -166,6 +167,8 @@ export interface ReviewRunAttentionReading {
   readonly bookTitle: string;
   readonly reviewRunId: string;
   readonly ordinal: number;
+  /** What the Run reads (Issue #423, S77b): a Run on the selection 就这段发起任务… handed over says so on its card. */
+  readonly scopeKind?: ReviewScopeKind;
   readonly createdAt: string;
   readonly authorizedAt: string | null;
   readonly state: ReviewRunState;
@@ -544,10 +547,15 @@ function reviewTechnical(reading: ReviewRunAttentionReading, at: string): Global
   ];
 }
 
+/** A Review Run as the thing an item is about: its ordinal, and — for one on a selection (Issue #423, S77b) — that it is. */
+function reviewObject(reading: ReviewRunAttentionReading): GlobalAttentionObjectProjection {
+  return reading.scopeKind === 'selection' ? { kind: 'review', ordinal: reading.ordinal, onSelection: true } : { kind: 'review', ordinal: reading.ordinal };
+}
+
 /** The Book's latest Review Run's item, if its state asks for one; a Run that reached the manuscript is 最近完成's. */
 function reviewRunItem(reading: ReviewRunAttentionReading): GlobalAttentionItemProjection | null {
   const book = { bookId: reading.bookId, title: reading.bookTitle };
-  const object: GlobalAttentionObjectProjection = { kind: 'review', ordinal: reading.ordinal };
+  const object = reviewObject(reading);
   const target: GlobalAttentionTarget = { kind: 'review', bookId: reading.bookId, reviewRunId: reading.reviewRunId };
   const itemId = `review:${reading.reviewRunId}`;
   const started = reading.authorizedAt ?? reading.createdAt;
@@ -591,7 +599,7 @@ function reviewCompletionItem(reading: ReviewRunAttentionReading): GlobalAttenti
     blocked: false,
     at,
     book: { bookId: reading.bookId, title: reading.bookTitle },
-    object: { kind: 'review', ordinal: reading.ordinal },
+    object: reviewObject(reading),
     facts: { categories: reading.categories.map(categoryFact) },
     nextStep: 'view-review',
     target: { kind: 'review', bookId: reading.bookId, reviewRunId: reading.reviewRunId },
@@ -842,7 +850,7 @@ function preparedReviewItem(reading: ReviewRunAttentionReading): GlobalAttention
     blocked: false,
     at: reading.createdAt,
     book: { bookId: reading.bookId, title: reading.bookTitle },
-    object: { kind: 'review', ordinal: reading.ordinal },
+    object: reviewObject(reading),
     facts: { categories: reading.categories.map(categoryFact) },
     nextStep: 'view-plan',
     target: { kind: 'review-plan', bookId: reading.bookId, reviewRunId: reading.reviewRunId },
