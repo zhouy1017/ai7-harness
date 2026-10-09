@@ -514,10 +514,11 @@ export class BookDeliveryPackages {
   /**
    * The frozen versions that hold a report of any of `reviewRunIds`, newest first, at most `limit`, and how many there are in
    * all (Issue #66, S31b; REUSE-031): what a Captured Procedure version's row links through the Runs pinned to it. The
-   * database finds and counts the versions whose frozen content names such a Run — a record that is not JSON names none — so
-   * no other package is read; only the rows returned are verified against their digests. A returned row that fails its
-   * verification is left unlinked but still counted: a damaged package never fails the version page, nor the answer to a
-   * 停用 already committed (S31b review P3-1).
+   * database finds and counts the versions whose frozen content names such a Run — a record that is not JSON names none, nor
+   * does a report entry, or a `reviewReports`, that is not an object (Issue #697) — so no other package is read; only the rows
+   * returned are verified against their digests. A returned row that fails its verification is left unlinked but still
+   * counted. A package damaged in these ways — not JSON, a string where a report should be, altered behind its digest — fails
+   * neither the version page nor the answer to a 停用 already committed (S31b review P3-1; Issue #697).
    */
   holdingReviewRuns(reviewRunIds: ReadonlyArray<string>, limit: number): { packages: Array<{ bookId: string; packageVersionId: string; version: number; preparedAt: string }>; total: number } {
     const wanted = new Set(reviewRunIds);
@@ -525,7 +526,7 @@ export class BookDeliveryPackages {
     const runs = JSON.stringify([...wanted]);
     const holds = `CASE WHEN json_valid(v.canonical_json) THEN EXISTS (
          SELECT 1 FROM json_each(v.canonical_json, '$.content.reviewReports') report
-         WHERE json_extract(report.value, '$.reviewRunId') IN (SELECT value FROM json_each(?1))) ELSE 0 END`;
+         WHERE json_extract(CASE WHEN report.type = 'object' THEN report.value END, '$.reviewRunId') IN (SELECT value FROM json_each(?1))) ELSE 0 END`;
     const books = 'v.book_id IN (SELECT r.book_id FROM review_runs r WHERE r.review_run_id IN (SELECT value FROM json_each(?1)))';
     const total = (this.#db.prepare(`SELECT count(*) n FROM book_delivery_package_versions v WHERE ${books} AND ${holds}`).get(runs) as SqlRow).n;
     const rows = this.#db.prepare(

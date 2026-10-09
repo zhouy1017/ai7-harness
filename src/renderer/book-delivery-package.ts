@@ -16,6 +16,7 @@ import {
   type RendererApi,
 } from '../shared/protocol.js';
 import {
+  LinkedPackageVersionFocus,
   PACKAGE_CONDITION_STATE,
   PACKAGE_CONDITIONS_HEADING,
   PACKAGE_CURRENT_MARK,
@@ -160,7 +161,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
   let section: HTMLElement | undefined;
   let exporting: ExportState | null = null;
   let exportTicket = 0;
-  let pendingVersionFocus = options.focusVersionId ?? null;
+  const linkedFocus = new LinkedPackageVersionFocus(options.focusVersionId ?? null);
 
   const exportWorking = (): boolean =>
     exporting !== null && (exporting.phase === 'reviewing' || exporting.phase === 'choosing' || exporting.phase === 'writing');
@@ -174,8 +175,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       (next) => {
         if (destroyed || ticket !== generation || !options.root.isConnected || next.bookId !== bookId) return;
         projection = next;
-        const focusVersion = pendingVersionFocus;
-        pendingVersionFocus = null;
+        const focusVersion = linkedFocus.take(next.versions);
         draw(focusVersion === null ? 'keep' : { packageVersion: focusVersion });
       },
       (error) => {
