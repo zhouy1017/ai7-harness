@@ -7,6 +7,7 @@ import {
   type LibraryMaterialKind,
   type LibraryMaterialPreviewProjection,
   type LibraryMaterialProjection,
+  type MaterialSegmentsPageProjection,
   type RendererApi,
 } from '../shared/protocol.js';
 import {
@@ -49,6 +50,19 @@ import {
   libraryPreviewHeading,
   libraryReferenceLine,
   librarySourceLine,
+  MATERIAL_INDEX_BOUNDARY,
+  MATERIAL_INDEX_LAYERS,
+  MATERIAL_INDEX_LAYER_TERMS,
+  MATERIAL_INDEX_TERM,
+  MATERIAL_SEGMENTS_CLOSE,
+  MATERIAL_SEGMENTS_FAILED,
+  MATERIAL_SEGMENTS_NEXT,
+  MATERIAL_SEGMENTS_OPEN,
+  MATERIAL_SEGMENTS_PREVIOUS,
+  materialAnchorLabel,
+  materialIndexLayerLine,
+  materialIndexStateLine,
+  materialSegmentsHeading,
 } from './knowledge-base-labels.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 
@@ -63,11 +77,16 @@ import { localInstantLabel } from './plan-preview-labels.js';
  * Nothing here is read whole (Issue #427 review): the items come twenty at a time, newest first, with `更多资料…`; an arrival
  * or a decision answers with its one item; the item 待我处理 opened is read by itself when it is not on the first page, and
  * shown first; and 定归属 names its Books from 书库's own pages, with `更多图书…`.
+ *
+ * Each card carries its Material Index (Issue #428, S80a; KB-009): every layer's state in words — the ones this build does
+ * not provide as 「未提供（需要本地依赖）」 — and, once the text was read, `查看分段` pages its paragraphs with every sentence's
+ * position anchor. While an index waits or is being built its item alone is read again, every second, and only the card's index
+ * is drawn again, until it is built.
  */
 export interface MountLibraryMaterialsOptions {
   readonly root: HTMLElement;
   readonly api: Pick<RendererApi, 'inspectLibraryMaterials' | 'inspectLibraryMaterial' | 'previewLibraryMaterial' | 'addLibraryMaterial' |
-    'decideLibraryMaterial' | 'listBooks' | 'readLibraryDecisionReason'>;
+    'decideLibraryMaterial' | 'listBooks' | 'readLibraryDecisionReason' | 'inspectLibraryMaterialSegments'>;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly errorMessage: (error: unknown, fallback: string) => string;
   readonly technicalDetails: (key: string, ...rows: HTMLElement[]) => HTMLElement;
@@ -111,6 +130,9 @@ function choice(name: string, value: string, label: string, checked: boolean, di
   return wrapper;
 }
 
+/** How long a card whose index waits or is being built waits before it is read again. */
+const INDEX_POLL_MS = 1_000;
+
 export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { load(): Promise<void> } {
   const { root, api, setStatus, errorMessage, technicalDetails } = options;
   root.classList.add('library-materials');
@@ -131,6 +153,8 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
   let chooser: Chooser | null = null;
   /** A refusal, beside the item it concerns, or at the top for an arrival. */
   let refusal: { materialId: string | null; message: string } | null = null;
+  /** The next read of the cards whose index waits or is being built. */
+  let pollTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** Every item on the page: the pinned one first, then the pages read, each once. */
   const shown = (): LibraryMaterialProjection[] =>
@@ -172,7 +196,37 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     }
     root.replaceChildren(...parts);
     if (focus !== null) root.querySelector<HTMLElement>(focus)?.focus();
+    schedulePoll();
   };
+
+  /** The indexes still waiting or being built, read again card by card until each is built; nothing else is repainted. */
+  const schedulePoll = (): void => {
+    if (pollTimer !== null || !shown().some((material) => material.index.state === 'queued' || material.index.state === 'indexing')) return;
+    pollTimer = setTimeout(() => void poll(), INDEX_POLL_MS);
+  };
+
+  const poll = async (): Promise<void> => {
+    pollTimer = null;
+    if (!root.isConnected) return;
+    for (const material of shown().filter((entry) => entry.index.state === 'queued' || entry.index.state === 'indexing')) {
+      let next: LibraryMaterialProjection;
+      try {
+        next = await api.inspectLibraryMaterial({ materialId: material.materialId });
+      } catch {
+        continue;
+      }
+      if (!root.isConnected) return;
+      const now = shown().find((entry) => entry.materialId === next.materialId);
+      if (now === undefined || (now.index.state === next.index.state && now.index.digest === next.index.digest)) continue;
+      replace(next);
+      // Only the index of the card whose index moved is drawn again: nothing the editor is in — a focused heading, an open
+      // choice, a note being read — is touched.
+      const section = root.querySelector<HTMLElement>(`article.library-material[data-material-id="${next.materialId}"] > section.material-index`);
+      section?.replaceWith(indexSection(next));
+    }
+    schedulePoll();
+  };
+
 
   const alert = (message: string): HTMLElement => {
     const note = el('p', 'attention-note library-refusal', message);
@@ -279,6 +333,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     if (material.eligibility?.reasonHasMore) node.append(reasonReader(material.materialId, material.eligibility.ordinal));
     if (material.eligibilityReset) node.append(el('p', 'attention-note library-reset', LIBRARY_ELIGIBILITY_RESET));
     node.append(el('p', `library-reference library-reference-${material.reference.state}`, libraryReferenceLine(material)));
+    node.append(indexSection(material));
     if (refusal?.materialId === material.materialId) node.append(alert(refusal.message));
     if (chooser?.materialId === material.materialId) {
       node.append(chooser.kind === 'attribution' ? attributionChooser(material, chooser) : eligibilityChooser(material, chooser));
@@ -314,6 +369,91 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       el('dt', undefined, '记录摘要'), el('dd', 'technical-identity', material.digest)));
     node.append(history);
     return node;
+  };
+
+  /** 资料索引 (KB-009): the index as a whole, then each layer in its order, in words; deferred layers say so. */
+  const indexSection = (material: LibraryMaterialProjection): HTMLElement => {
+    const { index } = material;
+    const section = el('section', 'material-index');
+    section.dataset['indexState'] = index.state;
+    const heading = el('div', 'material-index-heading');
+    heading.append(el('h4', undefined, MATERIAL_INDEX_TERM), el('span', 'status-pill material-index-state', materialIndexStateLine(index)));
+    const layers = el('dl', 'material-index-layers');
+    for (const layer of MATERIAL_INDEX_LAYERS) {
+      const line = el('dd', 'material-index-layer', materialIndexLayerLine(index, layer));
+      line.dataset['indexLayer'] = layer;
+      line.dataset['layerState'] = index.layers[layer];
+      layers.append(el('dt', undefined, MATERIAL_INDEX_LAYER_TERMS[layer]), line);
+    }
+    section.append(heading, layers, el('p', 'field-note material-index-boundary', MATERIAL_INDEX_BOUNDARY));
+    if (index.state === 'complete') section.append(segmentsReader(material));
+    if (index.digest !== null) {
+      section.append(technicalDetails('material-index-facts', el('dt', undefined, '资料索引摘要'), el('dd', 'technical-identity', index.digest)));
+    }
+    return section;
+  };
+
+  /** 查看分段 (KB-009): a page of paragraphs at a time, every sentence with its position anchor; read-only. */
+  const segmentsReader = (material: LibraryMaterialProjection): HTMLElement => {
+    const section = el('section', 'material-segments');
+    const open = action(MATERIAL_SEGMENTS_OPEN, 'quiet', 'segments', () => void read(1));
+    section.append(open);
+    let loading = false;
+    const show = (page: MaterialSegmentsPageProjection): void => {
+      const heading = el('h5', 'material-segments-heading', materialSegmentsHeading(page));
+      heading.tabIndex = -1;
+      const list = el('ol', 'material-segment-list');
+      list.start = page.from;
+      for (const segment of page.segments) {
+        const item = el('li', `material-segment material-segment-${segment.kind}`);
+        item.dataset['segmentOrdinal'] = String(segment.ordinal);
+        segment.sentences.forEach(([start, end], index) => {
+          const sentence = el('span', 'material-sentence');
+          sentence.dataset['anchor'] = `${segment.ordinal}.${index + 1}`;
+          const label = materialAnchorLabel(segment.ordinal, index + 1);
+          const anchor = el('span', 'material-anchor', `${segment.ordinal}·${index + 1}`);
+          anchor.title = label;
+          anchor.setAttribute('aria-label', label);
+          sentence.append(anchor, document.createTextNode(segment.text.slice(start, end)));
+          item.append(sentence, document.createTextNode(' '));
+        });
+        list.append(item);
+      }
+      const row = el('div', 'button-row');
+      if (page.previous !== null) row.append(action(MATERIAL_SEGMENTS_PREVIOUS, 'quiet', 'segments-previous', () => void read(page.previous!)));
+      if (page.next !== null) row.append(action(MATERIAL_SEGMENTS_NEXT, 'quiet', 'segments-next', () => void read(page.next!)));
+      row.append(action(MATERIAL_SEGMENTS_CLOSE, 'quiet', 'segments-close', () => {
+        section.replaceChildren(open);
+        delete section.dataset['segmentsFrom'];
+        delete section.dataset['segmentsTotal'];
+        open.disabled = false;
+        open.focus();
+      }));
+      section.replaceChildren(heading, list, row);
+      section.dataset['segmentsFrom'] = String(page.from);
+      section.dataset['segmentsTotal'] = String(page.total);
+      heading.focus();
+    };
+    const read = async (from: number): Promise<void> => {
+      if (loading) return;
+      loading = true;
+      const controls = [...section.querySelectorAll('button')];
+      for (const button of controls) button.disabled = true;
+      try {
+        const page = await api.inspectLibraryMaterialSegments({ materialId: material.materialId, from });
+        if (!section.isConnected) return;
+        show(page);
+      } catch (error) {
+        if (!section.isConnected) return;
+        section.querySelector('[role="alert"]')?.remove();
+        section.append(alert(errorMessage(error, MATERIAL_SEGMENTS_FAILED)));
+        for (const button of controls) button.disabled = false;
+        controls[0]?.focus();
+      } finally {
+        loading = false;
+      }
+    };
+    return section;
   };
 
   const chooserActions = (section: HTMLElement, material: LibraryMaterialProjection, label: string, name: string, run: () => void): HTMLButtonElement => {

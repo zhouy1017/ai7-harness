@@ -27,12 +27,10 @@ import { openProcedureCapture } from './procedure-capture.js';
 import {
   ProcedureChoiceRequests,
   procedureCategoryOpen,
-  procedureChoiceAfter,
-  procedureChoiceFocus,
   procedureChoiceSelection,
-  procedureChoiceStatus,
+  procedureSheetCloseStatus,
+  settleProcedureChoice,
   procedurePreparationPin,
-  copyProcedureChoice,
   type ProcedureChoiceOutcome,
 } from './procedure-choice.js';
 import {
@@ -41,7 +39,6 @@ import {
   SHEET_PROCEDURE_NONE,
   SHEET_PROCEDURE_NONE_ENABLED,
   SHEET_PROCEDURE_VERSION_LABEL,
-  sheetProcedureChosenStatus,
   sheetProcedureOption,
   sheetProcedureVersionOption,
   runProcedureLeftOutView,
@@ -1478,9 +1475,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       options.setStatus(REVIEW_STATUS_LINES.converted, 'success');
     }, (error) => {
       if (capabilityRefusal(finding)(error)) return true;
-      form.problem = options.errorMessage(error, REVIEW_STATUS_LINES.convertFailed);
+      announceReasonOnce(form, options.errorMessage(error, REVIEW_STATUS_LINES.convertFailed), options.setStatus);
       pendingFocus = { findingId: finding.findingId, field: 'convert-to' };
-      options.setStatus(form.problem, 'error');
       return true;
     });
   }
@@ -1510,9 +1506,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       ui.ignore = null;
       options.setStatus(REVIEW_STATUS_LINES.ignored, 'success');
     }, (error) => {
-      form.problem = options.errorMessage(error, REVIEW_STATUS_LINES.ignoreFailed);
+      announceReasonOnce(form, options.errorMessage(error, REVIEW_STATUS_LINES.ignoreFailed), options.setStatus);
       pendingFocus = { findingId: finding.findingId, field: 'ignore-reason' };
-      options.setStatus(form.problem, 'error');
       return true;
     });
   }
@@ -1687,15 +1682,13 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         outcome = { kind: 'failed', reason: options.errorMessage(error, '无法读取所选的可复用工序。') };
       }
     }
-    state.requests.settle(ticket);
-    const next = procedureChoiceAfter(state, outcome);
-    copyProcedureChoice(state, next);
-    // A reason is announced once, on the sheet's alert line; the status bar never repeats it (Issue #691).
-    const status = procedureChoiceStatus(outcome, sheetProcedureChosenStatus);
-    if (status !== null) options.setStatus(status);
+    // The choice settles into the sheet in one composed step (Issue #705 item 3): a reason is announced once, on the sheet's alert
+    // line, and the status bar never repeats it (Issue #691).
+    const settled = settleProcedureChoice(state, ticket, outcome, versionId !== null);
+    if (settled.status !== null) options.setStatus(settled.status);
     renderSheet(projection, state);
     // Back on the selector the editor used, while the sheet still shows it.
-    sheet.querySelector<HTMLElement>(`[data-review-field="${procedureChoiceFocus(versionId !== null, state.procedure)}"]`)?.focus();
+    sheet.querySelector<HTMLElement>(`[data-review-field="${settled.focus}"]`)?.focus();
   }
 
   function renderSheet(workspace: ReviewWorkspaceProjection, state: SheetState): void {
@@ -2019,9 +2012,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     } catch (error) {
       if (destroyed) return;
       state.job = null;
-      state.problem = options.errorMessage(error, REVIEW_STATUS_LINES.preparationFailed);
+      announceReasonOnce(state, options.errorMessage(error, REVIEW_STATUS_LINES.preparationFailed), options.setStatus);
       sheetUpdate();
-      options.setStatus(state.problem, 'error');
     }
   }
 
@@ -2050,7 +2042,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     sheetState = null;
     sheet.replaceChildren();
     sheetUpdate = () => undefined;
-    if (destroyed || state === null || state.prepared) return;
+    if (destroyed || state === null) return;
+    // A choice still loading as the sheet closes would leave 「正在读取…」 on the status bar (Issue #705 item 2).
+    const closing = procedureSheetCloseStatus(state.requests);
+    if (closing !== null) options.setStatus(closing);
+    if (state.prepared) return;
     const opener = card === undefined ? undefined : Array.from(card.querySelectorAll<HTMLElement>('button'))
       .find((candidate) => focusKeyOf(candidate) === state.openerKey && !(candidate as HTMLButtonElement).disabled);
     (opener ?? card?.querySelector<HTMLElement>('[data-review-action="new-review"]:not(:disabled)'))?.focus();
@@ -2067,6 +2063,16 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       exporter.destroy();
     },
   };
+}
+
+/**
+ * A failure whose reason the surface shows on an alert line where the editor stands — the 新建审阅 sheet's, or an inline form's — is
+ * announced there, once (Issue #691; #705 item 1): the reason goes on that line, and the status bar only drops its busy line,
+ * never repeating the reason. The caller draws the line.
+ */
+export function announceReasonOnce(line: { problem: string | null }, reason: string, setStatus: (message: string) => void): void {
+  line.problem = reason;
+  setStatus('');
 }
 
 /**
