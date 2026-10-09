@@ -218,6 +218,7 @@ import {
   type GlobalAttentionSurface,
 } from './global-attention.js';
 import { GLOBAL_ATTENTION_ACTIONS, GLOBAL_ATTENTION_STATUS_LINES } from './global-attention-labels.js';
+import { SELECTION_TASK_STATUS, selectionTaskChoices, type SelectionTaskChoice, type SelectionTaskChoices } from './selection-task-labels.js';
 import { mountEditorialMarks, type EditorialMarksSurface } from './editorial-marks.js';
 import { mountPositionRail, type PositionRail } from './position-rail.js';
 import { mountReviewWorkspace, type ReviewFocus, type ReviewWorkspaceSurface } from './review-workspace.js';
@@ -395,6 +396,66 @@ async function startWholeBookTask(
   } catch (error) {
     setStatus(rendererErrorMessage(error, TASK_PANEL_COMPOSE_STATUS.failed), 'error');
     return null;
+  }
+}
+
+/**
+ * 就这段发起任务… (Issue #423, S77b; TASK-001, TASK-046): what the selected words' paragraph can start now — read from ②A's and
+ * ②B's own projections, so the composer offers exactly what they would — and nothing when neither can be read.
+ */
+async function selectionTaskOffer(): Promise<SelectionTaskChoices> {
+  const [analysis, workspace] = await Promise.all([
+    window.ai7.inspectBaselineAnalysis().then((value) => value, () => null),
+    window.ai7.inspectReviewWorkspace({ reviewRunId: null }).then((value) => value, () => null),
+  ]);
+  if (analysis === null && workspace === null) throw new Error(SELECTION_TASK_STATUS.unreadable);
+  return selectionTaskChoices(analysis, workspace);
+}
+
+/**
+ * The chosen Task prepared on that one paragraph, exactly as ②A's 先看计划 or ②B's 新建审阅 prepares a range Task, and its plan
+ * opened beside the manuscript, where it is started (TASK-004): 重新分析这段 over the paragraph's block, or 审阅这段 in one
+ * category over 当前选区. Answers whether the plan is open.
+ */
+async function prepareSelectionTask(
+  bookId: string,
+  choice: SelectionTaskChoice,
+  anchor: { readonly blockId: string; readonly position: number },
+  returnFocus: () => HTMLElement | null,
+): Promise<boolean> {
+  if (choice.kind === 'reanalyze') {
+    const next = await startWholeBookTask(bookId, {
+      goal: choice.goal,
+      update: { mode: 'reanalyze-range', selectedRange: { startPosition: anchor.position, endPosition: anchor.position } },
+      quick: null,
+    });
+    if (next === null) return false;
+    taskDrawer.open({ bookId, kind: 'baseline-analysis', ref: next.ref }, returnFocus, next.note);
+    return true;
+  }
+  if (!(await settleScreen())) return false;
+  setStatus(SELECTION_TASK_STATUS.preparing, 'busy');
+  try {
+    const initial = await window.ai7.prepareReviewRun({
+      categoryIds: [choice.categoryId],
+      scope: { kind: 'selection', fromChapterBlockId: anchor.blockId, toChapterBlockId: anchor.blockId },
+    });
+    const completed = await awaitServiceJob(initial, (job) => setStatus(job.progress.label, job.state === 'failed' ? 'error' : 'busy'));
+    if (completed.state === 'cancelled') {
+      setStatus(SELECTION_TASK_STATUS.cancelled, 'success');
+      return false;
+    }
+    const result = completed.result;
+    if (completed.kind !== 'review-run-preparation' || result === null || !('scopeOptions' in result) || result.bookId !== bookId || result.run === null) {
+      throw new Error(SELECTION_TASK_STATUS.failed);
+    }
+    taskSurfaceRefresh['review-run']?.();
+    setStatus(SELECTION_TASK_STATUS.prepared, 'success');
+    taskDrawer.open({ bookId, kind: 'review-run', ref: result.run.reviewRunId }, returnFocus);
+    return true;
+  } catch (error) {
+    setStatus(rendererErrorMessage(error, SELECTION_TASK_STATUS.failed), 'error');
+    return false;
   }
 }
 
@@ -8538,6 +8599,12 @@ function renderEditorWindow(
     ...(isDocument ? {} : {
       askAboutSelection: (input: AskAboutSelectionInput) => window.ai7.askAboutSelection(input),
       onAsked: (dialogue: DialogueProjection) => taskDrawer.openDialogue(dialogue.bookId, dialogue.dialogueId, () => editorHost.querySelector<HTMLElement>('.ProseMirror')),
+      // 就这段发起任务… (Issue #423, S77b): the Book's manuscript only; the prepared Task's plan opens in the side slot.
+      startTaskOnSelection: {
+        choices: selectionTaskOffer,
+        prepare: (choice: SelectionTaskChoice, anchor: { readonly blockId: string; readonly position: number }) =>
+          prepareSelectionTask(initialWindow.bookId, choice, anchor, () => editorHost.querySelector<HTMLElement>('.ProseMirror')),
+      },
     }),
     // An Apply is an authoritative write like a replacement or an undo: the window is reloaded from the
     // service and must show exactly the manuscript state the Effect Receipt names.

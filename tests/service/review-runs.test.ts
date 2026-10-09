@@ -19,9 +19,11 @@ import { reviewLeadsOf } from '../../src/service/review/review-leads.js';
 import {
   FACTUAL_AGAIN_REASON,
   FACTUAL_CHAPTERS_REASON,
+  FACTUAL_SELECTION_REASON,
   LEADS_ABSENT_REASON,
   LEADS_CHANGED_REASON,
   NEVER_REVIEWED_REASON,
+  SELECTION_GONE_REASON,
   SELECTION_UNAVAILABLE_REASON,
 } from '../../src/service/review/review-scope.js';
 import {
@@ -54,6 +56,7 @@ const FIXTURES_ROOT = resolve(fileURLToPath(new URL('../fixtures/model/', import
 const J04_EDIT_SUFFIX = '，J-04 结果集形成后的确认编辑';
 const WHOLE: ReviewRunScopeRequest = { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null };
 const CHANGED: ReviewRunScopeRequest = { kind: 'changed', fromChapterBlockId: null, toChapterBlockId: null };
+/** 当前选区 with no selection handed over: a frame the boundary refuses, and the store too when it is reached directly. */
 const SELECTION: ReviewRunScopeRequest = { kind: 'selection', fromChapterBlockId: null, toChapterBlockId: null };
 const TYPOS = TYPOS_AND_USAGE.categoryId;
 const STYLE = STYLE_AND_FORMAT.categoryId;
@@ -607,6 +610,55 @@ describe('a Review Run over the real store on exact sample1', () => {
     });
   }, 300_000);
 
+  it('reads 当前选区 — the paragraph 就这段发起任务… hands over — and nothing a range review would not, and its card says so (Issue #423, S77b)', async () => {
+    await withBook('sample1-review-authored', async (session, book) => {
+      await runBaseline(session, book);
+      const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
+      const paragraph = blocks.find((block) => block.position >= 20 && block.kind === 'paragraph')!;
+      const on = (from: string, to: string): ReviewRunScopeRequest => ({ kind: 'selection', fromChapterBlockId: from, toChapterBlockId: to });
+      // Every category that reads a range can read the selection; 事实核查 says why it cannot.
+      const facts = workspace(session, book).categories.find((category) => category.categoryId === FACTUAL)!;
+      expect(facts.scopes.selection).toEqual({ available: false, unavailableReason: FACTUAL_SELECTION_REASON });
+      expect(storeMessage(() => session.store.createReviewRunPreparationWork(book.bookId, [FACTUAL], on(paragraph.blockId, paragraph.blockId), launchPolicy)))
+        .toContain(FACTUAL_SELECTION_REASON);
+      // A block the manuscript does not hold, and two ends out of order, are refused before anything is prepared.
+      const later = blocks.find((block) => block.position === paragraph.position + 1)!;
+      expect(storeMessage(() => session.store.createReviewRunPreparationWork(book.bookId, [TYPOS], on(`blk_${'0'.repeat(24)}`, paragraph.blockId), launchPolicy)))
+        .toBe(SELECTION_GONE_REASON);
+      expect(storeCode(() => session.store.createReviewRunPreparationWork(book.bookId, [TYPOS], on(later.blockId, paragraph.blockId), launchPolicy)))
+        .toBe('REVIEW_SCOPE_INVALID');
+      expect(workspace(session, book).runs).toEqual([]);
+
+      const prepared = prepare(session, book, [TYPOS, PLOT], on(paragraph.blockId, paragraph.blockId));
+      expect(prepared.scope).toEqual({
+        kind: 'selection',
+        label: `当前选区 · 内容块 ${paragraph.position}–${paragraph.position}`,
+        selectedRange: { startPosition: paragraph.position, endPosition: paragraph.position },
+      });
+      expect(prepared.categories.find((category) => category.categoryId === TYPOS)).toMatchObject({ modeLabel: '所选范围审阅' });
+      // Its card in the Book's 任务 panel, prepared and not started, names the selection.
+      const card = (): unknown => session.store.inspectBookTasks(book.bookId, () => null).groups.flatMap((group) => group.items)
+        .find((entry) => entry.item.itemId === `review:${prepared.reviewRunId}`)?.item.object;
+      expect(card()).toEqual({ kind: 'review', ordinal: 1, onSelection: true });
+
+      const run = await authorizeAndDrive(session, book, prepared);
+      expect(run.state).toBe('settled');
+      // Only the reading range the paragraph falls in was read — 内容块 16–25 of sample1 — with the next one, whose overlap context
+      // comes from it, as every range review reads; every finding of the category is there.
+      const revision = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
+      const recomputed = revision.resultSetRevision!.lineage.filter((unit) => unit.kind === 'recomputed').map((unit) => revision.coverageManifest!.units[unit.unitOrdinal - 1]!);
+      expect(recomputed.map((unit) => [unit.startPosition, unit.endPosition])).toEqual([[16, 25], [26, 43]]);
+      const read = new Set(recomputed.flatMap((unit) => [...unit.overlapBlockIds, ...unit.blockIds]));
+      expect(run.findings.filter((finding) => finding.categoryId === TYPOS).every((finding) => read.has(finding.blockId))).toBe(true);
+      expect(run.findings.filter((finding) => finding.categoryId === PLOT).every((finding) => finding.blockPosition === paragraph.position)).toBe(true);
+      expect(card()).toEqual({ kind: 'review', ordinal: 1, onSelection: true });
+      // A Run over the whole manuscript names no selection.
+      const whole = prepare(session, book, [STYLE], WHOLE);
+      expect(session.store.inspectBookTasks(book.bookId, () => null).groups.flatMap((group) => group.items)
+        .find((entry) => entry.item.itemId === `review:${whole.reviewRunId}`)?.item.object).toEqual({ kind: 'review', ordinal: 2 });
+    });
+  }, 300_000);
+
   it('reviews only what changed, names the marks it already made again, and moves the coverage matrix with the manuscript', async () => {
     await withBook('sample1-review-authored', async (session, book) => {
       const first = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
@@ -620,9 +672,12 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(scopes(TYPOS).changed).toEqual({ available: true, unavailableReason: null });
       expect(scopes(STYLE).changed).toEqual({ available: false, unavailableReason: NEVER_REVIEWED_REASON });
       expect(scopes(PLOT).changed).toEqual({ available: false, unavailableReason: LEADS_ABSENT_REASON });
-      expect(scopes(TYPOS).selection).toEqual({ available: false, unavailableReason: SELECTION_UNAVAILABLE_REASON });
+      // A selection 就这段发起任务… hands over (Issue #423, S77b) reads as 选章 does; the sheet itself holds none.
+      expect(scopes(TYPOS).selection).toEqual({ available: true, unavailableReason: null });
+      expect(scopes(PLOT).selection).toEqual({ available: false, unavailableReason: LEADS_ABSENT_REASON });
+      expect(edited.scopeOptions.selection).toEqual({ available: false, unavailableReason: SELECTION_UNAVAILABLE_REASON });
       expect(storeMessage(() => session.store.createReviewRunPreparationWork(book.bookId, [STYLE], CHANGED, launchPolicy))).toContain(NEVER_REVIEWED_REASON);
-      expect(storeCode(() => session.store.createReviewRunPreparationWork(book.bookId, [TYPOS], SELECTION, launchPolicy))).toBe('REVIEW_SCOPE_UNAVAILABLE');
+      expect(storeCode(() => session.store.createReviewRunPreparationWork(book.bookId, [TYPOS], SELECTION, launchPolicy))).toBe('REVIEW_SCOPE_INVALID');
 
       const prepared = prepare(session, book, [TYPOS], CHANGED);
       expect(prepared.categories[0]).toMatchObject({ modeLabel: '只审改动过的章', plan: { recomputed: 1, reused: 7 } });

@@ -14,8 +14,13 @@ import type { ReviewCategoryExecutor } from './category-configuration.js';
  * unit suite all read the same answer.
  */
 
-/** 当前选区 needs a selection handed over from the manuscript, which reaches 审阅 with the Task surface. */
-export const SELECTION_UNAVAILABLE_REASON = '从稿件里选中文字后发起（随任务面接入）' as const;
+/**
+ * 当前选区 needs a selection handed over from the manuscript (Issue #423, S77b): the selection menu's 就这段发起任务… hands it
+ * over; 新建审阅 holds none of its own.
+ */
+export const SELECTION_UNAVAILABLE_REASON = '在稿件里选中文字，右键「就这段发起任务…」审阅所选文字。' as const;
+/** The selection handed over no longer stands in the working manuscript, or its two ends are out of order. */
+export const SELECTION_GONE_REASON = '所选文字已不在当前稿件中，或先后颠倒；请重新选择。' as const;
 export const NEVER_REVIEWED_REASON = '这一类还没有审阅过，没有“改动过的章”可比；请先审全书或所选各章。' as const;
 export const NOTHING_CHANGED_REASON = '稿件在这一类上次审阅之后没有改动；没有需要只审的章。' as const;
 export const LEADS_ABSENT_REASON = '先完成基线分析，才有前后不一致的线索。' as const;
@@ -29,6 +34,7 @@ export const NO_CHAPTERS_REASON = '这份稿件还没有可选的章：它既没
 export const FACTUAL_AGAIN_REASON = '这本书已完成过一次全书事实核查；再次核查随事实核查的更新方式接入。' as const;
 export const FACTUAL_CHAPTERS_REASON = '事实核查暂只能核查全书；按章核查随事实核查的更新方式接入。' as const;
 export const FACTUAL_CHANGED_REASON = '事实核查暂只能核查全书；只审改动过的章随事实核查的更新方式接入。' as const;
+export const FACTUAL_SELECTION_REASON = '事实核查暂只能核查全书；就所选文字核查随事实核查的更新方式接入。' as const;
 
 /** One contiguous block range, inclusive, over the working manuscript's positions. */
 export type ReviewBlockRange = BaselineAnalysisSelectedRange;
@@ -36,7 +42,10 @@ export type ReviewBlockRange = BaselineAnalysisSelectedRange;
 /** A scope once its chapters are resolved to one contiguous block range. */
 export interface ResolvedReviewScope {
   readonly kind: ReviewScopeKind;
-  /** The block range of 选章 and 当前选区; `null` for the whole manuscript and for the changed chapters. */
+  /**
+   * The block range of 选章 and 当前选区; `null` for the whole manuscript and for the changed chapters — and for a 当前选区 no
+   * selection was handed over to, which no category can read.
+   */
   readonly selectedRange: ReviewBlockRange | null;
 }
 
@@ -62,7 +71,8 @@ export interface ReviewCategoryLedgerFacts {
  * - 全书 is the category's first whole review, or a review again once it has one;
  * - 只审改动过的章 is a sync, offered once the category has reviewed and the manuscript moved since;
  * - 选章 is a first range review, or a range review once the category has one;
- * - 当前选区 is not offered yet.
+ * - 当前选区 reads as 选章 does, over the blocks the selection names (Issue #423, S77b) — never wider than the block range,
+ *   save the overlap closure every range review reads.
  * The leads read no mode at all, and 事实核查 reads only its whole first Task.
  */
 export function reviewCategoryScopePlan(
@@ -72,14 +82,15 @@ export function reviewCategoryScopePlan(
   facts: ReviewCategoryLedgerFacts,
 ): ReviewCategoryScopePlan {
   if (executor === 'unavailable' || executor === 'series-knowledge') return { kind: 'refused', reason: unavailableReason ?? '这一类暂不可用。' };
-  if (scope.kind === 'selection') return { kind: 'refused', reason: SELECTION_UNAVAILABLE_REASON };
+  if (scope.kind === 'selection' && scope.selectedRange === null) return { kind: 'refused', reason: SELECTION_UNAVAILABLE_REASON };
   if (executor === 'baseline-leads') {
     if (!facts.baselineRevision) return { kind: 'refused', reason: LEADS_ABSENT_REASON };
     if (scope.kind === 'changed') return { kind: 'refused', reason: LEADS_CHANGED_REASON };
-    return { kind: 'leads', selectedRange: scope.kind === 'chapters' ? scope.selectedRange : null };
+    return { kind: 'leads', selectedRange: scope.kind === 'chapters' || scope.kind === 'selection' ? scope.selectedRange : null };
   }
   if (executor === 'factual-review-kind') {
     if (scope.kind === 'chapters') return { kind: 'refused', reason: FACTUAL_CHAPTERS_REASON };
+    if (scope.kind === 'selection') return { kind: 'refused', reason: FACTUAL_SELECTION_REASON };
     if (scope.kind === 'changed') return { kind: 'refused', reason: FACTUAL_CHANGED_REASON };
     return facts.hasRevision ? { kind: 'refused', reason: FACTUAL_AGAIN_REASON } : { kind: 'task', mode: 'whole-manuscript', selectedRange: null };
   }

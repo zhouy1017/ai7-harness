@@ -258,8 +258,8 @@ describe('decodeRequest accepts well-formed frames', () => {
       { op: 'prepareReviewRun', input: { bookId, categoryIds: ['typos-and-usage'], scope: WHOLE_SCOPE } },
       { op: 'prepareReviewRun', input: { bookId, categoryIds: ['typos-and-usage', 'plot-consistency'], scope: { kind: 'chapters', fromChapterBlockId: CHAPTER_BLOCK, toChapterBlockId: `blk_${'2'.repeat(24)}` } } },
       { op: 'prepareReviewRun', input: { bookId, categoryIds: ['literary-expression'], scope: { kind: 'changed', fromChapterBlockId: null, toChapterBlockId: null } } },
-      // 当前选区 is a well-formed request; the store is the one to say why it cannot be read yet.
-      { op: 'prepareReviewRun', input: { bookId, categoryIds: ['style-and-format'], scope: { kind: 'selection', fromChapterBlockId: null, toChapterBlockId: null } } },
+      // 当前选区 names its first and last block (Issue #423, S77b); the store says whether they stand in the manuscript.
+      { op: 'prepareReviewRun', input: { bookId, categoryIds: ['style-and-format'], scope: { kind: 'selection', fromChapterBlockId: CHAPTER_BLOCK, toChapterBlockId: CHAPTER_BLOCK } } },
       // A Run of the leads alone has no Task, so its one approval names no plan.
       { op: 'authorizeReviewRun', input: { bookId, reviewRunId, planDigests: [] } },
       {

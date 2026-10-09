@@ -238,11 +238,14 @@ function validReviewCategoryIds(values: readonly unknown[], minimum: number): bo
     values.every((value) => isReviewCategoryId(value)) && new Set(values).size === values.length;
 }
 
-/** 选章 names its first and last chapter by each chapter's first block; every other scope names neither. */
+/**
+ * 选章 names its first and last chapter by each chapter's first block, and 当前选区 its first and last block (Issue #423,
+ * S77b); every other scope names neither.
+ */
 function validReviewRunScope(value: unknown): boolean {
   if (!isRecord(value) || !hasExactKeys(value, ['kind', 'fromChapterBlockId', 'toChapterBlockId']) ||
       !REVIEW_SCOPE_KINDS.includes(value.kind as ReviewScopeKind)) return false;
-  return value.kind === 'chapters'
+  return value.kind === 'chapters' || value.kind === 'selection'
     ? isBoundedString(value.fromChapterBlockId, 28) && MARK_BLOCK_PATTERN.test(value.fromChapterBlockId) &&
       isBoundedString(value.toChapterBlockId, 28) && MARK_BLOCK_PATTERN.test(value.toChapterBlockId)
     : value.fromChapterBlockId === null && value.toChapterBlockId === null;

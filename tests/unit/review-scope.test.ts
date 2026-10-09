@@ -3,6 +3,7 @@ import {
   FACTUAL_AGAIN_REASON,
   FACTUAL_CHANGED_REASON,
   FACTUAL_CHAPTERS_REASON,
+  FACTUAL_SELECTION_REASON,
   LEADS_ABSENT_REASON,
   LEADS_CHANGED_REASON,
   NEVER_REVIEWED_REASON,
@@ -45,10 +46,20 @@ describe('the scope a category reads', () => {
     expect(contract({ kind: 'chapters', selectedRange: null }, NEVER)).toEqual({ kind: 'refused', reason: NO_CHAPTERS_REASON });
   });
 
-  it('never offers the current selection yet, for any category', () => {
+  it('reads the selection 就这段发起任务… hands over as a range, and refuses a 当前选区 with no selection, for any category (Issue #423, S77b)', () => {
+    const contract = (facts: ReviewCategoryLedgerFacts) => reviewCategoryScopePlan('review-category-contract', null, SELECTION, facts);
+    expect(contract(NEVER)).toEqual({ kind: 'task', mode: 'review-first-range', selectedRange: { startPosition: 3, endPosition: 3 } });
+    expect(contract(CURRENT)).toEqual({ kind: 'task', mode: 'review-range', selectedRange: { startPosition: 3, endPosition: 3 } });
+    expect(reviewCategoryScopePlan('baseline-leads', null, SELECTION, NEVER)).toEqual({ kind: 'leads', selectedRange: { startPosition: 3, endPosition: 3 } });
+    expect(reviewCategoryScopePlan('baseline-leads', null, SELECTION, { ...NEVER, baselineRevision: false })).toEqual({ kind: 'refused', reason: LEADS_ABSENT_REASON });
+    expect(reviewCategoryScopePlan('factual-review-kind', null, SELECTION, NEVER)).toEqual({ kind: 'refused', reason: FACTUAL_SELECTION_REASON });
+    expect(reviewCategoryScopePlan('series-knowledge', '加入书系后才能选。', SELECTION, NEVER)).toEqual({ kind: 'refused', reason: '加入书系后才能选。' });
     for (const executor of ['review-category-contract', 'baseline-leads', 'factual-review-kind'] as const) {
-      expect(reviewCategoryScopePlan(executor, null, SELECTION, CURRENT)).toEqual({ kind: 'refused', reason: SELECTION_UNAVAILABLE_REASON });
+      expect(reviewCategoryScopePlan(executor, null, { kind: 'selection', selectedRange: null }, CURRENT)).toEqual({ kind: 'refused', reason: SELECTION_UNAVAILABLE_REASON });
     }
+    expect(SELECTION_UNAVAILABLE_REASON).toBe('在稿件里选中文字，右键「就这段发起任务…」审阅所选文字。');
+    expect(FACTUAL_SELECTION_REASON).toBe('事实核查暂只能核查全书；就所选文字核查随事实核查的更新方式接入。');
+    expect(reviewScopeLabel(SELECTION)).toBe('当前选区 · 内容块 3–3');
   });
 
   it('reads the leads for the whole manuscript or the chosen chapters, only once the baseline has a revision', () => {

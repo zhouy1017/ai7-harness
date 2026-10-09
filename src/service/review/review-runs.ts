@@ -121,6 +121,7 @@ import {
   FACTUAL_AGAIN_REASON,
   LEADS_ABSENT_REASON,
   NO_CHAPTERS_REASON,
+  SELECTION_GONE_REASON,
   SELECTION_UNAVAILABLE_REASON,
   chapterOfPosition,
   chapterOptionsFromOutline,
@@ -898,7 +899,7 @@ export class ReviewRunStore {
       requireReview(configuration.categories.some((entry) => entry.categoryId === categoryId), 'REVIEW_CATEGORY_UNKNOWN', '没有这个审阅类别。');
     }
     const chapters = this.#chapterOptions(bookId, head);
-    const scope = this.#resolveScope(input.scope, chapters);
+    const scope = this.#resolveScope(input.scope, chapters, head);
     const baseline = this.#readBaseline(bookId);
     const procedure = input.procedure === undefined || input.procedure === null
       ? null
@@ -2276,11 +2277,12 @@ export class ReviewRunStore {
     }
   }
 
-  #resolveScope(request: ReviewRunScopeRequest, chapters: ChapterOptions): ResolvedReviewScope {
+  #resolveScope(request: ReviewRunScopeRequest, chapters: ChapterOptions, head: ManuscriptHead): ResolvedReviewScope {
     requireReview(isRecord(request) && hasExactKeys(request, ['kind', 'fromChapterBlockId', 'toChapterBlockId']) &&
       REVIEW_SCOPE_KINDS.includes(request.kind), 'REVIEW_SCOPE_INVALID', '审阅范围无效。');
+    if (request.kind === 'selection') return this.#resolveSelection(request, head);
     if (request.kind !== 'chapters') {
-      requireReview(request.fromChapterBlockId === null && request.toChapterBlockId === null, 'REVIEW_SCOPE_INVALID', '只有选章可以指明章。');
+      requireReview(request.fromChapterBlockId === null && request.toChapterBlockId === null, 'REVIEW_SCOPE_INVALID', '只有选章和当前选区可以指明内容块。');
       return { kind: request.kind, selectedRange: null };
     }
     requireReview(typeof request.fromChapterBlockId === 'string' && BLOCK_ID_PATTERN.test(request.fromChapterBlockId) &&
@@ -2289,6 +2291,24 @@ export class ReviewRunStore {
     const range = resolveChapterRange(chapters.chapters, request.fromChapterBlockId, request.toChapterBlockId);
     requireReview(range !== null, 'REVIEW_SCOPE_INVALID', '所选的章不在当前稿件中，或先后颠倒；请重新选择。');
     return { kind: 'chapters', selectedRange: range };
+  }
+
+  /**
+   * 当前选区 (Issue #423, S77b; V2-UX-REV-001, TASK-001): the selection 就这段发起任务… hands over, named by the block identity of
+   * its first and last block in the two fields 选章 names its chapters by. Each must stand in the working manuscript now, in
+   * order; the range is those blocks' positions, nothing around them.
+   */
+  #resolveSelection(request: ReviewRunScopeRequest, head: ManuscriptHead): ResolvedReviewScope {
+    requireReview(typeof request.fromChapterBlockId === 'string' && BLOCK_ID_PATTERN.test(request.fromChapterBlockId) &&
+      typeof request.toChapterBlockId === 'string' && BLOCK_ID_PATTERN.test(request.toChapterBlockId), 'REVIEW_SCOPE_INVALID', SELECTION_UNAVAILABLE_REASON);
+    const position = (blockId: string): number | null => {
+      const row = this.#db.prepare('SELECT position FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(head.branchId, blockId) as SqlRow | undefined;
+      return row === undefined ? null : integer(row.position);
+    };
+    const from = position(request.fromChapterBlockId);
+    const to = position(request.toChapterBlockId);
+    requireReview(from !== null && to !== null && from <= to, 'REVIEW_SCOPE_INVALID', SELECTION_GONE_REASON);
+    return { kind: 'selection', selectedRange: { startPosition: from, endPosition: to } };
   }
 
   #readBaseline(bookId: string): BaselineReading {
@@ -2613,7 +2633,9 @@ export class ReviewRunStore {
     const first = chapters.chapters[0];
     const scope = (kind: ReviewScopeKind): ReviewAvailabilityProjection => {
       if (reading.unavailableReason !== null) return { available: false, unavailableReason: reading.unavailableReason };
-      const selectedRange = kind === 'chapters' && first !== undefined ? { startPosition: first.position, endPosition: first.endPosition } : null;
+      // 当前选区 is offered for any one paragraph a selection names (Issue #423, S77b): its first stands in for every one.
+      const selectedRange = kind === 'chapters' && first !== undefined ? { startPosition: first.position, endPosition: first.endPosition }
+        : kind === 'selection' ? { startPosition: 1, endPosition: 1 } : null;
       const plan = reviewCategoryScopePlan(entry.executor, entry.unavailableReason, { kind, selectedRange }, reading.facts);
       return plan.kind === 'refused' ? { available: false, unavailableReason: plan.reason } : { available: true, unavailableReason: null };
     };
@@ -2648,7 +2670,7 @@ export class ReviewRunStore {
         ? { available: true, unavailableReason: null, basis: chapters.basis, chapters: chapters.chapters }
         : { available: false, unavailableReason: NO_CHAPTERS_REASON, basis: chapters.basis, chapters: [] },
       changed: { available: true, unavailableReason: null },
-      // A selection is handed over from the manuscript, which reaches 审阅 with the Task surface.
+      // A selection is handed over from the manuscript by 就这段发起任务… (Issue #423, S77b); the sheet holds none of its own.
       selection: { available: false, unavailableReason: SELECTION_UNAVAILABLE_REASON },
     };
   }
@@ -2835,6 +2857,7 @@ export class ReviewRunStore {
         bookTitle: text(row.book_title),
         reviewRunId: view.snapshot.reviewRunId,
         ordinal: view.snapshot.ordinal,
+        scopeKind: view.snapshot.scope.kind,
         createdAt: view.snapshot.createdAt,
         authorizedAt: view.authorization?.authorizedAt ?? null,
         state: view.state,

@@ -33,6 +33,10 @@ import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState
 // scroll; under forced colours the window keeps its edge, a card its left rule and a count its outline. A restart moves
 // nothing the panel shows.
 //
+// Since S77b the selection menu's 就这段发起任务… opens a composer anchored to the paragraph, offering the Tasks that read a range:
+// 审阅这段 in 情节逻辑与前后一致 is prepared on 当前选区, waits in 等你处理 as 审阅 · 第 1 次 · 所选文字, runs from its plan
+// and settles on that paragraph; 重新分析这段 prepares an analysis update over that one block and waits.
+//
 // The runner writes J-16's unit-hold file, and reads the service's projections through `window.ai7` only to cross-check
 // what the panel shows — never as the oracle of what it says.
 
@@ -1313,6 +1317,93 @@ async function main() {
       markCard.suggestion.decision === null && markCard.suggestion.application === null, 'dialogue-mark', markCard);
     requireJourney((await workingDigest()) === digestBefore, 'dialogue-manuscript-unchanged');
     await waitForDialogue(renderer, (dialogue) => dialogue.attempts[1]?.converted === '已从这次回答新建 1 条修改建议。', 'dialogue-converted-line');
+
+    // ---- 就这段发起任务… (Issue #423, plan slice S77b; TASK-001 to 004, TASK-044, TASK-046) -------------------------------
+    at('selection-task-menu');
+    // On a selection in another paragraph the menu's 就这段发起任务… acts; the house's 常用工序 wait, and the group says why.
+    await assertRenderer(renderer, `(() => { document.querySelector('#task-drawer [data-task-drawer-control="close"]')?.click(); return true; })()`, 'selection-task-drawer-close');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true`, 'selection-task-drawer-closed');
+    await assertRenderer(renderer, MARK_HELPERS, 'selection-task-helpers');
+    const taskBlock = await renderer.evaluate(`(() => { const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }); return Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).find((node) => { const head = (node.textContent ?? '').slice(0, 30); return node.dataset.blockId !== ${JSON.stringify(askBlock)} && head.length === 30 && Array.from(segmenter.segment(head)).length === 30 && node.querySelector('.editorial-mark') === null; })?.dataset.blockId ?? null; })()`);
+    requireJourney(/^blk_[0-9a-f]{24}$/.test(taskBlock ?? ''), 'selection-task-block');
+    const taskWords = await renderer.evaluate(`(window.__j16.block(${JSON.stringify(taskBlock)})?.textContent ?? '').slice(2, 12)`);
+    requireJourney(typeof taskWords === 'string' && taskWords.length === 10, 'selection-task-words');
+    const paragraphText = () => renderer.evaluate(`window.__j16.block(${JSON.stringify(taskBlock)})?.textContent ?? null`);
+    const paragraphBefore = await paragraphText();
+    await openSelectionMenu(renderer, taskBlock, 2, 12, 'selection-task-open-menu');
+    await assertRenderer(renderer, `(() => { const item = window.__j16.item('task-on-selection'); const presets = ['preset-polish', 'preset-names', 'preset-continuity'].map((action) => window.__j16.item(action)); return item instanceof HTMLButtonElement && !item.disabled && item.textContent.startsWith('就这段发起任务…') && presets.every((preset) => preset instanceof HTMLButtonElement && preset.disabled) && window.__j16.menu().textContent.includes('本社常用工序就选区运行尚未接通'); })()`, 'selection-task-menu-items');
+    await assertRenderer(renderer, `(() => { window.__j16.item('task-on-selection').click(); return true; })()`, 'selection-task-choose');
+
+    at('selection-task-composer');
+    // The composer is anchored to the paragraph and holds only it: the selected words, how many and where, the Tasks that
+    // read a range now — 重新分析这段 and 审阅这段 in each category that can — and what is handed over, before 准备任务.
+    await waitFor(renderer, `window.__j16.composer()?.dataset.markComposer === 'task-on-selection'`, 'selection-task-composer-open', 30_000);
+    const composer = await renderer.evaluate(`(() => { const composer = window.__j16.composer(); const select = composer?.querySelector('select[data-mark-field="procedure"]'); return composer === null || !(select instanceof HTMLSelectElement) ? null : { label: composer.getAttribute('aria-label'), quote: composer.querySelector('.editorial-mark-quote')?.textContent ?? null, field: select.closest('label')?.firstElementChild?.textContent ?? null, hint: select.closest('label')?.querySelector('small')?.textContent ?? null, options: Array.from(select.options).map((option) => [option.value, option.textContent]), chosen: select.value, note: composer.querySelector('[data-mark-form-note]')?.textContent ?? null, submit: composer.querySelector('[data-mark-action="submit"]')?.textContent ?? null }; })()`);
+    const position = /^已选 10 字 · 第 (\d+) 个内容块$/.exec(composer?.hint ?? '')?.[1] ?? null;
+    const offered = new Map(composer?.options ?? []);
+    requireJourney(composer?.label === '就这段发起任务' && composer.quote === taskWords && composer.field === '工序' && position !== null && composer.chosen === '' &&
+      offered.get('') === '请选择' && offered.get('reanalyze-range') === '重新分析这段' && offered.get('review:plot-consistency') === '审阅这段 · 「情节逻辑与前后一致」' &&
+      !offered.has('review:factual-review') && composer.submit === '准备任务' &&
+      composer.note === '只把所选文字所在的这一段交给任务，按包含它的阅读范围读取，计划里写明读哪些范围，不会扩大到全书。准备任务先打开计划，由你开始；就选区发起的任务没有快速开始。',
+    'selection-task-composer-words', composer);
+    // Nothing is prepared before a Task is chosen.
+    await assertRenderer(renderer, `window.__j16.act('submit')`, 'selection-task-submit-empty');
+    await waitFor(renderer, `window.__j16.composer()?.querySelector('.editorial-mark-problem')?.textContent === '请填写「工序」。' && document.querySelector('#task-drawer')?.hidden === true`, 'selection-task-pick-first', 10_000);
+
+    at('selection-task-review-prepare');
+    // 审阅这段 · 「情节逻辑与前后一致」: 准备任务 prepares a 审阅 of 当前选区 — that one paragraph — and its plan opens in the side
+    // slot beside the manuscript, which is unchanged; the composer closes.
+    await assertRenderer(renderer, `(() => { const select = window.__j16.composer()?.querySelector('select[data-mark-field="procedure"]'); if (!(select instanceof HTMLSelectElement)) return false; select.value = 'review:plot-consistency'; select.dispatchEvent(new Event('change', { bubbles: true })); return select.value === 'review:plot-consistency'; })()`, 'selection-task-review-choose');
+    await assertRenderer(renderer, `window.__j16.act('submit')`, 'selection-task-review-submit');
+    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawerView === 'plan' && drawer.dataset.taskPlanKind === 'review-run' && drawer.dataset.taskPlanStart === 'ready' && window.__j16.composer() === null && (drawer.textContent ?? '').includes('按 1 类审阅所选文字：情节逻辑与前后一致'); })()`, 'selection-task-review-plan', 120_000);
+    const selectionRun = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({ reviewRunId: null }).then((workspace) => workspace.run === null ? null : { reviewRunId: workspace.run.reviewRunId, state: workspace.run.state, scope: workspace.run.scope, categories: workspace.run.categories.map((category) => category.categoryId) })`);
+    requireJourney(UUID_PATTERN.test(selectionRun?.reviewRunId ?? '') && selectionRun.state === 'prepared' && JSON.stringify(selectionRun.categories) === JSON.stringify(['plot-consistency']) &&
+      JSON.stringify(selectionRun.scope) === JSON.stringify({ kind: 'selection', label: `当前选区 · 内容块 ${position}–${position}`, selectedRange: { startPosition: Number(position), endPosition: Number(position) } }),
+    'selection-task-review-recorded', selectionRun);
+    requireJourney((await paragraphText()) === paragraphBefore, 'selection-task-manuscript-unchanged');
+
+    at('selection-task-review-card');
+    // `← 任务`: the 审阅 waits in 等你处理 and its card names the selection it reads.
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'selection-task-review-back');
+    const selectionPanel = await waitForPanel(renderer, (panel) => statesOf(panel, 'waiting').includes('review-prepared'), 'selection-task-review-waiting');
+    const selectionCard = cardsOf(selectionPanel, 'waiting').find((card) => card.state === 'review-prepared');
+    requireJourney(selectionCard.kind === '审阅任务 · 不需要对话' && selectionCard.title === '审阅 · 第 1 次 · 所选文字' && selectionCard.pill === '计划已准备 · 等你开始' &&
+      JSON.stringify(selectionCard.actions) === JSON.stringify([['next', '查看计划并开始', 'enabled']]), 'selection-task-review-card-words', selectionCard);
+
+    at('selection-task-review-run');
+    // Started from its plan, the 审阅 reads the baseline's leads in that paragraph alone, sends nothing, and stands in 最近完成
+    // with 查看结果 under the same name.
+    await cardAction(renderer, 'review-prepared', 'next', 'selection-task-review-open-plan');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'plan' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled === false`, 'selection-task-review-plan-ready', 60_000);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'selection-task-review-start');
+    await waitFor(renderer, `window.ai7.inspectReviewWorkspace({ reviewRunId: ${JSON.stringify(selectionRun.reviewRunId)} }).then((workspace) => workspace.run?.state === 'settled')`, 'selection-task-review-settled', 120_000);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'selection-task-review-done-back');
+    const reviewedPanel = await waitForPanel(renderer, (panel) => cardsOf(panel, 'recent')[0]?.state === 'review-completed', 'selection-task-review-completed', 60_000);
+    const reviewedCard = cardsOf(reviewedPanel, 'recent')[0];
+    requireJourney(reviewedCard.title === '审阅 · 第 1 次 · 所选文字' && JSON.stringify(reviewedCard.actions) === JSON.stringify([['result', '查看结果', 'enabled']]), 'selection-task-review-completed-words', reviewedCard);
+    const reviewedFindings = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({ reviewRunId: ${JSON.stringify(selectionRun.reviewRunId)} }).then((workspace) => workspace.run.findings.map((finding) => finding.blockId))`);
+    requireJourney(Array.isArray(reviewedFindings) && reviewedFindings.every((blockId) => blockId === taskBlock), 'selection-task-review-in-paragraph', reviewedFindings);
+
+    at('selection-task-reanalyze');
+    // 重新分析这段 on the same words prepares an analysis update over that paragraph's block, its plan opened in the slot; it
+    // waits in 等你处理 as 基线分析 · 重新分析所选范围, and nothing starts behind the editor's back.
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'selection-task-reanalyze-close');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true`, 'selection-task-reanalyze-closed');
+    await openSelectionMenu(renderer, taskBlock, 2, 12, 'selection-task-reanalyze-menu');
+    await assertRenderer(renderer, `(() => { window.__j16.item('task-on-selection').click(); return true; })()`, 'selection-task-reanalyze-choose');
+    await waitFor(renderer, `window.__j16.composer()?.querySelector('select[data-mark-field="procedure"] option[value="reanalyze-range"]') !== null`, 'selection-task-reanalyze-composer', 30_000);
+    await assertRenderer(renderer, `(() => { const select = window.__j16.composer().querySelector('select[data-mark-field="procedure"]'); select.value = 'reanalyze-range'; select.dispatchEvent(new Event('change', { bubbles: true })); return window.__j16.act('submit'); })()`, 'selection-task-reanalyze-submit');
+    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawerView === 'plan' && drawer.dataset.taskPlanKind === 'baseline-analysis' && drawer.dataset.taskPlanStart === 'ready' && window.__j16.composer() === null; })()`, 'selection-task-reanalyze-plan', 120_000);
+    const rangeTask = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then((analysis) => ({ mode: analysis.taskIntent?.mode ?? null, run: analysis.run, update: analysis.update === null ? null : { mode: analysis.update.mode, selectedRange: analysis.update.selectedRange } }))`);
+    requireJourney(rangeTask?.mode === 'reanalyze-range' && rangeTask.run === null &&
+      JSON.stringify(rangeTask.update) === JSON.stringify({ mode: 'reanalyze-range', selectedRange: { startPosition: Number(position), endPosition: Number(position) } }), 'selection-task-reanalyze-recorded', rangeTask);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'selection-task-reanalyze-back');
+    const rangePanel = await waitForPanel(renderer, (panel) => statesOf(panel, 'waiting').includes('analysis-prepared'), 'selection-task-reanalyze-waiting');
+    const rangeCard = cardsOf(rangePanel, 'waiting').find((card) => card.state === 'analysis-prepared');
+    requireJourney(rangeCard.title === '基线分析 · 重新分析所选范围' && JSON.stringify(rangeCard.actions) === JSON.stringify([['next', '查看计划并开始', 'enabled']]) &&
+      statesOf(rangePanel, 'running').length === 0, 'selection-task-reanalyze-card', rangePanel);
+    requireJourney((await paragraphText()) === paragraphBefore, 'selection-task-reanalyze-manuscript-unchanged');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'selection-task-panel-close');
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

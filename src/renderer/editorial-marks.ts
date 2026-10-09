@@ -60,6 +60,18 @@ import {
 } from './editorial-mark-labels.js';
 import { applyOnce } from './manuscript-apply.js';
 import { REVIEW_VIEW_TASK_ABSENT, REVIEW_VIEW_TASK_RESOLVING } from './review-labels.js';
+import {
+  SELECTION_PRESET_REASON,
+  SELECTION_TASK_FIELD,
+  SELECTION_TASK_MENU_LABEL,
+  SELECTION_TASK_NOTE,
+  SELECTION_TASK_PREPARE,
+  SELECTION_TASK_STATUS,
+  SELECTION_TASK_TITLE,
+  selectionTaskContextLine,
+  type SelectionTaskChoice,
+  type SelectionTaskChoices,
+} from './selection-task-labels.js';
 
 /**
  * The Editorial Mark surface of the manuscript (Issue #407; editor-surfaces.md §1 标记系统 and 右键菜单;
@@ -115,6 +127,15 @@ interface MountOptions {
   askAboutSelection?(input: AskAboutSelectionInput): Promise<DialogueProjection>;
   /** The question was asked: its dialogue comes to the foreground beside the manuscript. */
   onAsked?(dialogue: DialogueProjection): void;
+  /**
+   * 就这段发起任务… (Issue #423, S77b; TASK-001, TASK-046): the Tasks the selected words' paragraph can start now, and the one
+   * the editor chose prepared on that paragraph — its plan opened beside the manuscript. `prepare` answers whether the plan was
+   * prepared. Without it (a Production Document) the item stays disabled with its reason.
+   */
+  startTaskOnSelection?: {
+    choices(): Promise<SelectionTaskChoices>;
+    prepare(choice: SelectionTaskChoice, anchor: { readonly blockId: string; readonly position: number }): Promise<boolean>;
+  };
   busy(): boolean;
   /** The set of marks changed: whatever counts them elsewhere on the surface reads again. */
   marksChanged?(): void;
@@ -129,7 +150,7 @@ interface MountOptions {
 }
 
 interface FormField {
-  name: 'body' | 'proposedText' | 'rationale' | 'reason' | 'subject' | 'knowledgeClass' | 'question';
+  name: 'body' | 'proposedText' | 'rationale' | 'reason' | 'subject' | 'knowledgeClass' | 'question' | 'procedure';
   label: string;
   value: string;
   required: boolean;
@@ -420,7 +441,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     form.append(problem, row);
     form.addEventListener('submit', (event) => {
       event.preventDefault();
-      const values = { body: '', proposedText: '', rationale: '', reason: '', subject: '', knowledgeClass: '', question: '' };
+      const values = { body: '', proposedText: '', rationale: '', reason: '', subject: '', knowledgeClass: '', question: '', procedure: '' };
       for (const [name, input] of inputs) values[name] = input.value;
       const missing = config.fields.find((field) => field.required && values[field.name].trim().length === 0);
       if (missing) {
@@ -1285,24 +1306,96 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     controls.find((control) => !control.disabled)?.focus({ preventScroll: true });
   };
 
-  // The 任务 panel is connected (Issue #423, S77a); a Task started on a selection is not yet. 就这段提问… is (Issue #52, S17a).
-  const AI7_TASK_REASON = '就选区发起的任务尚未接通';
+  // 就这段提问… (Issue #52, S17a) and 就这段发起任务… (Issue #423, S77b) are connected; the house's 常用工序 on a selection are not.
+  // A Production Document's manuscript offers neither Task (its surface passes no way to start one).
+  const AI7_TASK_REASON = '稿件这里不能发起任务';
   const VIEW_TASK_REASON = '这条标记的来源任务还不能从这里打开';
+  const taskOnSelection = (selectionReason: string | undefined, run: () => void): MenuItem => ({
+    action: 'task-on-selection',
+    label: SELECTION_TASK_MENU_LABEL,
+    ...(options.startTaskOnSelection === undefined ? { disabledReason: AI7_TASK_REASON }
+      : selectionReason !== undefined ? { disabledReason: selectionReason } : { run }),
+  });
   const aiTaskGroup = (selectionReason: string | undefined): MenuGroup => ({
     label: 'AI7 任务',
-    note: AI7_TASK_REASON,
+    note: SELECTION_PRESET_REASON,
     items: [
-      { action: 'task-on-selection', label: '就这段发起任务…', disabledReason: AI7_TASK_REASON },
+      taskOnSelection(selectionReason, () => void composeTask()),
       {
         action: 'ask-on-selection', label: DIALOGUE_MENU_LABEL, hint: DIALOGUE_MENU_HINT,
         ...(options.askAboutSelection === undefined ? { disabledReason: AI7_TASK_REASON }
           : selectionReason !== undefined ? { disabledReason: selectionReason } : { run: () => void composeQuestion() }),
       },
-      { action: 'preset-polish', label: '润色这段', hint: '常用工序 · 生成修改建议', disabledReason: AI7_TASK_REASON },
-      { action: 'preset-names', label: '核查人名与称谓一致', hint: '常用工序 · 生成批注 / 建议', disabledReason: AI7_TASK_REASON },
-      { action: 'preset-continuity', label: '检查与前文的连贯', hint: '常用工序 · 生成批注', disabledReason: AI7_TASK_REASON },
+      { action: 'preset-polish', label: '润色这段', hint: '常用工序 · 生成修改建议', disabledReason: SELECTION_PRESET_REASON },
+      { action: 'preset-names', label: '核查人名与称谓一致', hint: '常用工序 · 生成批注 / 建议', disabledReason: SELECTION_PRESET_REASON },
+      { action: 'preset-continuity', label: '检查与前文的连贯', hint: '常用工序 · 生成批注', disabledReason: SELECTION_PRESET_REASON },
     ],
   });
+
+  /**
+   * 就这段发起任务… (Issue #423, S77b; TASK-001 to 003, TASK-046): the composer anchored to the selected words' paragraph, which
+   * it carries and nothing else, offering the Tasks that read a range now. 准备任务 prepares the chosen one on that paragraph
+   * and its plan opens beside the manuscript, where it is started — or not.
+   */
+  const composeTask = async (): Promise<void> => {
+    if (refuseWhileBusy() || options.startTaskOnSelection === undefined) return;
+    const start = options.startTaskOnSelection;
+    const range = await settledRange();
+    if (range === null || destroyed) return;
+    options.setStatus(SELECTION_TASK_STATUS.reading, 'busy');
+    let offered: SelectionTaskChoices;
+    try {
+      offered = await start.choices();
+    } catch (error) {
+      options.setStatus(options.errorMessage(error, SELECTION_TASK_STATUS.unreadable), 'error');
+      return;
+    }
+    if (destroyed) return;
+    if (offered.refusal !== null || offered.choices.length === 0) {
+      options.setStatus(offered.refusal ?? SELECTION_TASK_STATUS.unreadable, 'error');
+      return;
+    }
+    const position = editor.currentWindow().blocks.find((block) => block.blockId === range.blockId)?.position ?? null;
+    if (position === null) {
+      options.setStatus(SELECTION_TASK_STATUS.gone, 'error');
+      return;
+    }
+    options.setStatus(SELECTION_TASK_STATUS.choose);
+    openComposer(range.blockId, {
+      id: 'task-on-selection',
+      title: SELECTION_TASK_TITLE,
+      quote: range.text,
+      fields: [{
+        name: 'procedure',
+        label: SELECTION_TASK_FIELD,
+        value: '',
+        required: true,
+        hint: selectionTaskContextLine(range.toGrapheme - range.fromGrapheme, position),
+        options: offered.choices.map((choice) => ({ value: choice.value, label: choice.label })),
+      }],
+      submitLabel: SELECTION_TASK_PREPARE,
+      note: SELECTION_TASK_NOTE,
+      submit: async (values) => {
+        const choice = offered.choices.find((candidate) => candidate.value === values.procedure);
+        if (choice === undefined) {
+          options.setStatus(SELECTION_TASK_STATUS.pickFirst, 'error');
+          return;
+        }
+        // The paragraph is named by where it stands once the journal is settled: words typed above it move it.
+        await editor.flush();
+        const at = editor.currentWindow().blocks.find((block) => block.blockId === range.blockId)?.position ?? null;
+        if (at === null) {
+          options.setStatus(SELECTION_TASK_STATUS.gone, 'error');
+          return;
+        }
+        if (await start.prepare(choice, { blockId: range.blockId, position: at }) && !destroyed) closeFloating();
+      },
+      cancel: () => {
+        closeFloating();
+        editor.focus();
+      },
+    });
+  };
 
   /**
    * 就这段提问… (Issue #52, S17a; TASK-046; the Owner, 2026-10-07): the question about the exact selected words, asked at once.
@@ -1530,7 +1623,15 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       label: '这段文字',
       items: [
         { action: 'copy-marked-text', label: '复制这段', run: () => copyMarkedText(mark) },
-        { action: 'task-on-selection', label: '就这段发起任务…', disabledReason: AI7_TASK_REASON },
+        // The marked words are the selection the composer carries (Issue #423, S77b).
+        taskOnSelection(undefined, () => {
+          close();
+          if (!editor.selectRange(mark.blockId, mark.fromGrapheme, mark.toGrapheme)) {
+            options.setStatus('请先等待当前写入完成，再就这段发起任务。', 'error');
+            return;
+          }
+          void composeTask();
+        }),
       ],
     };
     const title = `${MARK_KIND_LABELS[mark.kind]}${mark.sourceKind === 'ai7' ? ' · AI7' : mark.sourceKind === 'imported-author' ? ' · 导入文件的作者' : ' · 你'}`;

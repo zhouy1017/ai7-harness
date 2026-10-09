@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 104 as const;
+export const SERVICE_PROTOCOL_VERSION = 106 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -4631,7 +4631,9 @@ export const REVIEW_SCOPE_LABELS = {
 
 /**
  * What an editor asks a Review Run to read. 选章 names the first and the last chapter of one contiguous
- * run by the block identity of each chapter's first block; every other scope names neither.
+ * run by the block identity of each chapter's first block; 当前选区 (Issue #423, S77b) names the first and
+ * the last block of the selection 就这段发起任务… hands over, in the same two fields; every other scope
+ * names neither.
  */
 export interface ReviewRunScopeRequest {
   kind: ReviewScopeKind;
@@ -9628,7 +9630,8 @@ export type GlobalAttentionObjectProjection =
   | { kind: 'recovery'; branchName: string }
   | { kind: 'manuscript-conflict'; conflictKind: ProposalConflictKind }
   | { kind: 'analysis'; mode: BaselineAnalysisTaskMode }
-  | { kind: 'review'; ordinal: number }
+  // A Review Run; `onSelection` for one that reads only the selection 就这段发起任务… handed over (Issue #423, S77b).
+  | { kind: 'review'; ordinal: number; onSelection?: true }
   | { kind: 'maintenance'; classification: MaintenanceClassification; ordinal: number; publicationOrdinal: number }
   // A 资料库 item (Issue #427, S79c): its title and kind, and where it belongs so far — a Book, the house, or not yet decided.
   | { kind: 'library-material'; title: string; materialKind: LibraryMaterialKind; scope: 'none' | 'book' | 'house' }
