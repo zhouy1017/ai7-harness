@@ -1,0 +1,86 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AI7 recorded provider evidence, version 1 (ADR 0067, ADR 0073 §2)",
+  "description": "The evidence no vendor page can supply, recorded row by row: every live test item the ADR 0067 Provider Test Ledger holds, with the exact route and model it was sent to, and every frozen request baseline, with the route and the models whose request bytes it pins. A provider document may cite an item or a baseline only from the row recorded here. The ledger itself lives outside every checkout and CI has none, so this record is its reviewed mirror: a new live item is added here in the pull request that records it, and on a developer host `node tools/generate-provider-configuration.mjs --ledger <cache root>` compares the record with the ledger's transmitted lines.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "liveTestItems", "frozenRequestBaselines"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "liveTestItems": {
+      "description": "One entry per transmitted, non-stale model-call line of the ledger; the item id is the ledger's.",
+      "type": "array",
+      "items": { "$ref": "#/definitions/liveTestItem" }
+    },
+    "frozenRequestBaselines": {
+      "description": "One entry per frozen request baseline a document may cite; a baseline is pinned by a test suite and has never been transmitted.",
+      "type": "array",
+      "items": { "$ref": "#/definitions/frozenRequestBaseline" }
+    }
+  },
+  "definitions": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "modelId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "day": {
+      "type": "string",
+      "pattern": "^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"
+    },
+    "issue": {
+      "description": "The GitHub Issue on which the item or the baseline was stated.",
+      "type": "string",
+      "pattern": "^#[1-9][0-9]*$"
+    },
+    "liveTestItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["itemId", "route", "model", "observedOn", "issue"],
+      "properties": {
+        "itemId": {
+          "description": "The ledger's test item id, `<slice>/<purpose>/<n>`.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9]+/[a-z0-9-]+/[1-9][0-9]{0,5}$"
+        },
+        "route": {
+          "description": "The configured route the item was transmitted on; the ledger line names the model and this record names the path.",
+          "$ref": "#/definitions/identifier"
+        },
+        "model": {
+          "description": "The model id the ledger line carries.",
+          "$ref": "#/definitions/modelId"
+        },
+        "observedOn": {
+          "description": "The UTC day of the ledger line's `recordedAt`.",
+          "$ref": "#/definitions/day"
+        },
+        "issue": { "$ref": "#/definitions/issue" }
+      }
+    },
+    "frozenRequestBaseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["since", "route", "models", "issue"],
+      "properties": {
+        "since": {
+          "description": "What the request bytes have been pinned by, as the documents cite it.",
+          "type": "string",
+          "pattern": "^\\S(.*\\S)?$"
+        },
+        "route": { "$ref": "#/definitions/identifier" },
+        "models": {
+          "description": "The models on that route whose request bytes the baseline pins.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/modelId" }
+        },
+        "issue": { "$ref": "#/definitions/issue" }
+      }
+    }
+  }
+}
