@@ -373,11 +373,16 @@ async function search(renderer, field, text, name, keyboard = false) {
 }
 
 /** Exact `sample1` through the import flow, as a new Book with its first manuscript; the Book's identity. */
-async function importSample1(renderer, title, sample1, name) {
+/**
+ * Import exact sample1 as a new Book through the product's own wizard. Once a Book already holds this very file, the wizard
+ * names the new-Book choice 「新建图书（作为不同作品）」 (an identity finding, as J-01 proves): `distinct` picks that label.
+ */
+async function importSample1(renderer, title, sample1, name, distinct = false) {
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
   await click(renderer, '导入稿件', `${name}-start`);
   await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, `${name}-target`);
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, `${name}-target-explicit`);
+  const targetLabel = distinct ? '新建图书（作为不同作品）' : '新建图书';
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector(${JSON.stringify(`input[aria-label="${targetLabel}"]`)}); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, `${name}-target-explicit`);
   await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, `${name}-relationship`);
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, `${name}-relationship-explicit`);
   await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, `${name}-title-screen`);
@@ -3072,7 +3077,8 @@ async function main() {
     for (let index = 1; index <= 9; index += 1) {
       const name = `calibration-book-${index}`;
       await toLanding(name);
-      calibrationBookId = await importSample1(renderer, `校准样书${index}`, sample1, name);
+      // The house already holds exact sample1 as 评估旅程丙: the wizard offers 新建图书（作为不同作品）, chosen explicitly like any target.
+      calibrationBookId = await importSample1(renderer, `校准样书${index}`, sample1, name, true);
       await waitFor(renderer, `document.querySelector('.book-evaluation-summary')?.dataset.evaluationState === 'empty'`, `${name}-summary`);
       await clickSelector(renderer, '.book-evaluation-summary [data-evaluation-action="open"]', `${name}-open`);
       await readEvaluation(renderer, (page) => page.state === 'ready' && page.initial?.state === 'none', `${name}-ready`);
