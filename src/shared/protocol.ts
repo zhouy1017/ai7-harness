@@ -7484,6 +7484,11 @@ export interface EvaluationCalibrationProjection {
      */
     readonly offset: null | {
       readonly basisBooks: number;
+      /**
+       * Of `adjustments`, the Books that give the basis nothing: a version of theirs begun from AI7's 初评 cannot be read, so
+       * which of their 定稿 is the latest is unknown. Said on the page beside the basis, so the two counts never disagree unexplained.
+       */
+      readonly booksWithoutBasis: number;
       readonly items: ReadonlyArray<{ readonly itemId: string; readonly label: string; readonly fullMarks: number; readonly offset: number | null; readonly books: number }>;
     };
   };

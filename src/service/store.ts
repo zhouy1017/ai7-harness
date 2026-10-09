@@ -14611,6 +14611,7 @@ export class EditorialStore {
         active: calibrationActive(adjustments, preferences.calibrationEnabled),
         offset: house.offsets === null ? null : {
           basisBooks: house.basisBooks,
+          booksWithoutBasis: house.booksWithoutBasis,
           items: profileItems.map((item) => ({
             itemId: item.itemId, label: item.label, fullMarks: item.fullMarks,
             offset: house.offsets!.get(item.itemId)?.offset ?? null, books: house.offsets!.get(item.itemId)?.books ?? 0,

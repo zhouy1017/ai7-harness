@@ -65,6 +65,7 @@ import {
   evaluationSkipDamagedLine,
   evaluationSkippedRecordsLine,
   evaluationStartLabel,
+  evaluationStartingScore,
   EVALUATION_STATUS,
   EVALUATION_STAY,
   EVALUATION_STRENGTHS,
@@ -1114,9 +1115,12 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     return node;
   };
 
-  /** AI7's score of one item in the version on show; `null` when the version began without AI7's 初评 or AI7 gave none. */
-  const ai7ScoreOf = (record: EvaluationRecordProjection, itemId: string): number | null =>
-    record.initial?.items.find((entry) => entry.itemId === itemId)?.score ?? null;
+  /**
+   * The score one item started at in the version on show — AI7's score after the house calibration where it moved it, else
+   * AI7's raw score (EVAL-011a; the service reads departures against the same start) — `null` when the version began without
+   * AI7's 初评 or AI7 gave none.
+   */
+  const ai7ScoreOf = (record: EvaluationRecordProjection, itemId: string): number | null => evaluationStartingScore(record, itemId);
 
   /** The reasons ticked for one item, kept only while the editor's score departs from AI7's. */
   const adjustmentOf = (set: HTMLElement, record: EvaluationRecordProjection, itemId: string, score: number | null, notRated: boolean): EvaluationAdjustment | null => {

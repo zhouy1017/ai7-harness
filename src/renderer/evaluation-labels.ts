@@ -293,6 +293,15 @@ export function evaluationAi7CalibrationLine(calibration: EvaluationInitialCalib
 }
 
 /**
+ * The score one item started at in a version begun from AI7's 初评 (EVAL-011a): AI7's score after the house calibration where
+ * it moved the item, else AI7's raw score; `null` for a version begun alone or an item AI7 did not score. The service reads the
+ * editor's departures — where 调分原因 is offered and what counts toward 调分记录 — against exactly this start, so the page must too.
+ */
+export function evaluationStartingScore(record: Pick<EvaluationRecordProjection, 'initial' | 'calibration'>, itemId: string): number | null {
+  return record.calibration?.items.find((entry) => entry.itemId === itemId)?.adjusted ?? record.initial?.items.find((entry) => entry.itemId === itemId)?.score ?? null;
+}
+
+/**
  * AI7's evidence for one item (EVAL-006): how many notes, and each as the range it came from and AI7's words. A long Book's
  * notes are cut to a few spread over the ranges (Issue #689), and the summary then says how many there are in all.
  */

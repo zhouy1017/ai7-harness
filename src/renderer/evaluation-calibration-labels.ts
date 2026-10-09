@@ -24,8 +24,15 @@ export const CALIBRATION_OFFSET_WAITING = '校准偏移尚未计算：满 10 本
 /** With the switch off: what a new version does instead, and that the switch can be turned on again. */
 export const CALIBRATION_OFF_EFFECT = '校准已关闭：新版本从 AI7 初评开始时直接用 AI7 的原始分数；可以随时再打开，关闭和打开都有记录。';
 /** The heading of the per-item offsets, with the Books they rest on. */
-export function calibrationBasisLine(offset: NonNullable<EvaluationCalibrationProjection['calibration']['offset']>): string {
+export function calibrationBasisLine(offset: Pick<NonNullable<EvaluationCalibrationProjection['calibration']['offset']>, 'basisBooks'>): string {
   return `校准依据：${offset.basisBooks} 本书的定稿评估；各评分项的偏移如下（正数表示你的定稿分数通常高于 AI7 初评）。`;
+}
+/**
+ * Why the basis may hold fewer Books than 调分记录 counts: a Book with a from-初评 version that cannot be read counts toward the
+ * gate but gives the basis nothing; `null` when every counted Book is in the basis.
+ */
+export function calibrationWithoutBasisLine(offset: Pick<NonNullable<EvaluationCalibrationProjection['calibration']['offset']>, 'booksWithoutBasis'>): string | null {
+  return offset.booksWithoutBasis === 0 ? null : `其中 ${offset.booksWithoutBasis} 本书有从 AI7 初评开始的版本已损坏，不计入校准依据。`;
 }
 /** One item's offset: `+1.5`, `−0.5`, `0`, or that no Book gives it a value, with the Books it rests on. */
 export function calibrationOffsetLine(item: NonNullable<EvaluationCalibrationProjection['calibration']['offset']>['items'][number]): string {

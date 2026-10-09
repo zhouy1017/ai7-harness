@@ -159,7 +159,7 @@ describe('the house calibration offset (EVAL-011a)', () => {
       finalizeFromInitial(bookId, { [READERS]: 10, [CHINESE]: 20, ...(index % 2 === 1 ? { [LITERARY]: 17 } : {}), ...(index === 1 ? { [THEME]: 'not-rated' as const } : {}) });
     }
     // Nine Books: the gate is not passed, so no offset exists and a tenth version starts from the raw 初评.
-    expect(records.calibration()).toMatchObject({ adjustments: 9, unreadable: 0, basisBooks: 9, offsets: null });
+    expect(records.calibration()).toMatchObject({ adjustments: 9, unreadable: 0, basisBooks: 9, booksWithoutBasis: 0, offsets: null });
     const tenth = randomUUID();
     const rawStart = records.start(tenth, true);
     const rawPage = records.workspace(tenth, '书', rawStart);
@@ -256,8 +256,35 @@ describe('the house calibration offset (EVAL-011a)', () => {
       .run('0'.repeat(64), books[1]!);
     db.exec(EVALUATION_RECORD_TRIGGER_SQL.evaluation_record_entries_no_update!);
     // Nine adjusted Books remain: below the gate again, the damaged Book named, and the basis without it.
-    expect(records.calibration()).toEqual({ adjustments: 9, unreadable: 1, basisBooks: 9, offsets: null });
+    expect(records.calibration()).toEqual({ adjustments: 9, unreadable: 1, basisBooks: 9, booksWithoutBasis: 0, offsets: null });
     const next = randomUUID();
     expect(records.workspace(next, '书', records.start(next, true)).record).toMatchObject({ calibration: null });
+  });
+
+  it('keeps the gate and the basis apart: an agreeing Book joins the basis, a Book with no value is left out, and a damaged adjusted Book counts for the gate alone (P3-1, P3-2)', () => {
+    const books = tenBooks();
+    expect(records.calibration()).toMatchObject({ adjustments: 10, basisBooks: 10, booksWithoutBasis: 0 });
+    // An eleventh Book that keeps every score the version started it at — the calibrated start, past the gate: no adjustment
+    // (it departs from nothing it was offered), yet a value for every item, raw-relative — in the basis, and the offsets hold.
+    const agreeing = randomUUID();
+    finalizeFromInitial(agreeing);
+    expect(records.calibration()).toMatchObject({ adjustments: 10, basisBooks: 11, booksWithoutBasis: 0 });
+    // 文学品质: five +0.5 and the eleventh's +0.5 → 3 / 11 ≈ 0.27 → 0.5; 中文语言: eleven +6 → 6; 读者: eleven −2 → −2.
+    expect(offsetsOf()).toEqual({ [LITERARY]: [0.5, 11], [THEME]: [0, 10], [ITEMS[2]!]: [0, 11], [CHINESE]: [6, 11], [READERS]: [-2, 11] });
+    // A twelfth Book whose AI7 初评 scored no item gives no item a value: the editor's scores depart from nothing (no adjustment),
+    // and the Book is not in the basis — it is neither counted nor silently counted as a Book of zeros.
+    const silent = randomUUID();
+    rawOf.set(silent, [null, null, null, null, null]);
+    finalizeFromInitial(silent, Object.fromEntries(ITEMS.map((itemId) => [itemId, 15])));
+    expect(records.calibration()).toMatchObject({ adjustments: 10, basisBooks: 11, booksWithoutBasis: 0 });
+    // The first Book is evaluated from AI7's 初评 again; that later version is damaged: the Book still counts for the gate through
+    // its readable 定稿, gives the basis nothing, and 设置 can say so — the two counts never disagree unexplained.
+    const again = records.start(books[0]!, true);
+    db.exec('DROP TRIGGER evaluation_record_entries_no_update');
+    db.prepare('UPDATE evaluation_record_entries SET sha256 = ? WHERE record_id = ? AND ordinal = 1').run('0'.repeat(64), again);
+    db.exec(EVALUATION_RECORD_TRIGGER_SQL.evaluation_record_entries_no_update!);
+    expect(records.calibration()).toMatchObject({ adjustments: 10, unreadable: 0, basisBooks: 10, booksWithoutBasis: 1 });
+    // Without the first Book: four +0.5 and the eleventh's over ten → 0.25 → 0.5; ten +6 → 6; ten −2 → −2; 主题 now over ten.
+    expect(offsetsOf()).toEqual({ [LITERARY]: [0.5, 10], [THEME]: [0, 10], [ITEMS[2]!]: [0, 10], [CHINESE]: [6, 10], [READERS]: [-2, 10] });
   });
 });

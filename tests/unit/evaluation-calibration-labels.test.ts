@@ -14,6 +14,7 @@ import {
   calibrationOffsetLine,
   calibrationProgressLine,
   calibrationUnreadableLine,
+  calibrationWithoutBasisLine,
   predictionProgressLine,
 } from '../../src/renderer/evaluation-calibration-labels.js';
 import {
@@ -155,7 +156,11 @@ describe('评估校准与预测 words', () => {
     expect(CALIBRATION_METHOD).toContain('不另存');
     expect(CALIBRATION_OFFSET_WAITING).toBe('校准偏移尚未计算：满 10 本调分记录后，按上述方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。');
     expect(CALIBRATION_OFF_EFFECT).toBe('校准已关闭：新版本从 AI7 初评开始时直接用 AI7 的原始分数；可以随时再打开，关闭和打开都有记录。');
-    expect(calibrationBasisLine({ basisBooks: 10, items: [] })).toBe('校准依据：10 本书的定稿评估；各评分项的偏移如下（正数表示你的定稿分数通常高于 AI7 初评）。');
+    expect(calibrationBasisLine({ basisBooks: 10 })).toBe('校准依据：10 本书的定稿评估；各评分项的偏移如下（正数表示你的定稿分数通常高于 AI7 初评）。');
+    // Why the basis can be fewer Books than 调分记录 counts (P3-1): said only when it is.
+    expect(calibrationWithoutBasisLine({ booksWithoutBasis: 0 })).toBeNull();
+    expect(calibrationWithoutBasisLine({ booksWithoutBasis: 1 })).toBe('其中 1 本书有从 AI7 初评开始的版本已损坏，不计入校准依据。');
+    expect(calibrationWithoutBasisLine({ booksWithoutBasis: 3 })).toBe('其中 3 本书有从 AI7 初评开始的版本已损坏，不计入校准依据。');
     expect(calibrationOffsetLine({ itemId: 'readers-and-market', label: '读者与市场潜力', fullMarks: 20, offset: -2, books: 10 }))
       .toBe('读者与市场潜力：−2（依据 10 本书，满分 20，调整后不超出 0 到 20）');
     expect(calibrationOffsetLine({ itemId: 'literary-quality', label: '文学品质与作者声音', fullMarks: 20, offset: 0.5, books: 10 }))

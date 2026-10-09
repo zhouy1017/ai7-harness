@@ -873,6 +873,8 @@ export interface HouseCalibration {
   readonly unreadable: number;
   /** The Books whose latest 定稿 version begun from AI7's 初评 gives the basis: one value per Book and item. */
   readonly basisBooks: number;
+  /** Of `adjustments`, the Books that give the basis nothing because a version of theirs begun from AI7's 初评 cannot be read. */
+  readonly booksWithoutBasis: number;
   /** Each item's offset to the half point with the Books it rests on, by item; `null` below the gate. */
   readonly offsets: ReadonlyMap<string, { readonly offset: number | null; readonly books: number }> | null;
 }
@@ -1629,8 +1631,10 @@ export class EvaluationRecords {
           const raw = snapshot.draft.items.find((entry) => entry.itemId === item.itemId)?.score ?? null;
           if (item.score !== null && item.notRated === null && raw !== null) differences.set(item.itemId, item.score - raw);
         }
-        // Versions read oldest first: the Book's latest 定稿 begun from AI7's 初评 is the one that stands.
-        basis.set(bookId, differences);
+        // Versions read oldest first: the Book's latest 定稿 begun from AI7's 初评 is the one that stands — and a Book whose latest
+        // gives no item a value (AI7 scored none, or every scored item 不评) is not in the basis at all.
+        if (differences.size > 0) basis.set(bookId, differences);
+        else basis.delete(bookId);
       } catch (error) {
         if (!(error instanceof EvaluationError)) throw error;
         damaged.add(bookId);
@@ -1638,6 +1642,8 @@ export class EvaluationRecords {
     }
     for (const bookId of damaged) basis.delete(bookId);
     const adjustments = adjusted.size;
+    // The Books that count toward the gate but give the basis nothing because a version of theirs cannot be read (P3-1).
+    const booksWithoutBasis = [...damaged].filter((bookId) => adjusted.has(bookId)).length;
     let offsets: Map<string, { offset: number | null; books: number }> | null = null;
     if (adjustments >= CALIBRATION_MIN_ADJUSTMENTS) {
       const byItem = new Map<string, number[]>();
@@ -1650,7 +1656,7 @@ export class EvaluationRecords {
       }
       offsets = new Map([...byItem].map(([itemId, differences]) => [itemId, { offset: calibrationOffset(differences), books: differences.length }] as const));
     }
-    return { adjustments, unreadable: [...damaged].filter((bookId) => !adjusted.has(bookId)).length, basisBooks: basis.size, offsets };
+    return { adjustments, unreadable: [...damaged].filter((bookId) => !adjusted.has(bookId)).length, basisBooks: basis.size, booksWithoutBasis, offsets };
   }
 
   /**

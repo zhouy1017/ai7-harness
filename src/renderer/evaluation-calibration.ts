@@ -27,6 +27,7 @@ import {
   calibrationOffsetLine,
   calibrationProgressLine,
   calibrationUnreadableLine,
+  calibrationWithoutBasisLine,
   predictionProgressLine,
 } from './evaluation-calibration-labels.js';
 
@@ -118,6 +119,9 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
       offsetNode.append(el('p', 'field-note calibration-offset-waiting', CALIBRATION_OFFSET_WAITING));
     } else {
       offsetNode.append(el('p', 'field-note calibration-offset-basis', calibrationBasisLine(calibration.offset)));
+      // Why the basis may be fewer Books than 调分记录 counts (a damaged from-初评 version): said beside the two counts.
+      const withoutBasis = calibrationWithoutBasisLine(calibration.offset);
+      if (withoutBasis !== null) offsetNode.append(el('p', 'field-note calibration-offset-without-basis', withoutBasis));
       const list = el('ul', 'calibration-offset-list');
       for (const item of calibration.offset.items) {
         const line = el('li', undefined, calibrationOffsetLine(item));

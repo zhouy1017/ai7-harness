@@ -783,6 +783,6 @@ describe('AI7\'s words in an evaluation entry, item by item (Issue #689)', () =>
     db.exec('DROP TRIGGER evaluation_record_entries_no_update');
     db.prepare("UPDATE evaluation_record_entries SET sha256 = ? WHERE record_id = ? AND ordinal = 1").run('0'.repeat(64), recordId);
     db.exec(EVALUATION_RECORD_TRIGGER_SQL.evaluation_record_entries_no_update!);
-    expect(records.calibration()).toEqual({ adjustments: 0, unreadable: 1, basisBooks: 0, offsets: null });
+    expect(records.calibration()).toEqual({ adjustments: 0, unreadable: 1, basisBooks: 0, booksWithoutBasis: 0, offsets: null });
   });
 });
