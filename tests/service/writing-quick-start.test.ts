@@ -4,17 +4,21 @@ import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
+import type { BaselineAnalysisStore } from '../../src/service/analysis/baseline-analysis-store.js';
 import type { Connectivity, TaskPlanConnectivity } from '../../src/service/connectivity.js';
 import {
   DefaultExecutionRuleLedger,
   QUICK_START_DEVELOPER_LIVE,
-  QUICK_START_OFFLINE,
+  QUICK_START_OFFLINE_LATER,
+  QUICK_START_PLAN_CHANGED,
   QUICK_START_RULE_CHANGED,
   QUICK_START_SLOT_BUSY,
   SET_RULE_DEVELOPER_LIVE,
   quickStartNoRuleReason,
   ruleDriftReason,
   setRuleAlreadyReason,
+  writingRuleOtherTypeReason,
+  writingRulePattern,
 } from '../../src/service/default-execution-rules.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
@@ -119,43 +123,56 @@ async function refusal(operation: () => unknown): Promise<string> {
 async function sample1Book(store: EditorialStore, title: string): Promise<string> {
   const imported = await importSample1Book(store, roots.codeRoot, title);
   await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
-  recordMissingCredentialConnection(store, 'L2 主编辑连接');
+  // The house's one connection, saved once.
+  if (store.getModelServiceConnection() === null) recordMissingCredentialConnection(store, 'L2 主编辑连接');
   return imported.bookId;
 }
 
 /** 先看计划 of one writing Task to its frozen plan. */
-function prepare(store: EditorialStore, bookId: string): WritingProjection {
-  let progress = store.createWritingPreparationWork(bookId, WRITING_REQUEST, launchPolicy);
+function prepare(store: EditorialStore, bookId: string, request: Parameters<EditorialStore['createWritingPreparationWork']>[1] = WRITING_REQUEST): WritingProjection {
+  let progress = store.createWritingPreparationWork(bookId, request, launchPolicy);
   while (!progress.done) progress = store.advanceWritingPreparationWork(progress.workId!);
   return progress.projection!;
 }
 
 /** 开始任务 from the bar, and the Run to its end. */
-async function runFromBar(session: Session, bookId: string, prepared: WritingProjection): Promise<WritingProjection> {
+async function runFromBar(session: Session, bookId: string, prepared: WritingProjection): Promise<{ settled: WritingProjection; ledger: BaselineAnalysisStore }> {
   const authorized = session.store.authorizeWriting(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
   expect(session.owner.admitOrQueue(authorized.dispatchRunRecordId!, authorized.ledger)).toBe('admitted');
   await session.owner.whenIdle();
-  return session.store.inspectWriting(bookId)!;
+  return { settled: session.store.inspectWriting(bookId)!, ledger: authorized.ledger };
 }
 
-/** A Book whose first 宣传文章 was drafted from its plan, and the writing rule set from that settled plan. */
+const PROMOTION = writingRulePattern('promotion-article');
+/** A 新闻稿 in other words: another house type, and the editor's own audience, channel and requirements. */
+const NEWS_REQUEST = { typeId: 'news-release', audience: '关注本社新书的媒体记者', channel: '新闻通稿邮件', requirements: '三百字以内' } as const;
+
+/** One house type's 快速开始 as the sheet reads it. */
+function quickOf(store: EditorialStore, bookId: string, typeId = 'promotion-article') {
+  return store.inspectWritingTask(bookId).types.find((type) => type.typeId === typeId)!.quickStart;
+}
+
+/** A Book whose first 宣传文章 was drafted from its plan, and the 宣传文章 rule set from that settled plan. */
 async function ruledBook(session: Session, title: string) {
   const { store } = session;
   const bookId = await sample1Book(store, title);
   const first = prepare(store, bookId);
-  expect((await runFromBar(session, bookId, first)).state).toBe('settled');
+  const { settled, ledger } = await runFromBar(session, bookId, first);
+  expect(settled.state).toBe('settled');
   const rule = store.setDefaultExecutionRule(bookId, first.taskIntent!.taskIntentId, first.planEnvelope!.digest);
-  return { bookId, first, rule, reference: { ruleId: rule.ruleId, ruleVersionId: rule.ruleVersionId, ordinal: rule.ordinal, name: rule.name } };
+  return { bookId, first, rule, ledger, reference: { ruleId: rule.ruleId, ruleVersionId: rule.ruleVersionId, ordinal: rule.ordinal, name: rule.name } };
 }
 
-describe('the writing 默认执行规则 (S84b; AUTH-009, TASK-019)', () => {
-  it('is set from a viewed writing plan, binds what a baseline rule binds, and names the writing Task', async () => {
+const fell = (reason: string) => ({ outcome: 'fell-back', reasons: [reason], dispatchRunRecordId: null, ledger: null });
+
+describe('the writing 默认执行规则 of one house type (S84b; AUTH-009, TASK-019; #701 review P2-1)', () => {
+  it('is set from a viewed writing plan for its type, binds what a baseline rule binds, and is named by the Task and the type', async () => {
     await withSession(async (session) => {
       const { store } = session;
       const bookId = await sample1Book(store, WRITING_BOOK_TITLE);
-      // Before any rule the sheet names none, and says how one is set.
-      expect(store.inspectWritingTask(bookId).quickStart).toEqual({ available: false, reason: quickStartNoRuleReason('writing'), rule: null });
-      expect(quickStartNoRuleReason('writing')).toBe('这本书还没有「写作任务」的默认执行规则：先看计划，可以在完整计划里设为快速开始默认。');
+      // Before any rule each type names none, and says how one is set.
+      expect(quickOf(store, bookId)).toEqual({ available: false, reason: quickStartNoRuleReason(PROMOTION), rule: null });
+      expect(quickStartNoRuleReason(PROMOTION)).toBe('这本书还没有「写作任务 · 宣传文章」的默认执行规则：先看计划，可以在完整计划里设为快速开始默认。');
       const plan = prepare(store, bookId);
       const taskIntentId = plan.taskIntent!.taskIntentId;
       const digest = plan.planEnvelope!.digest;
@@ -176,9 +193,9 @@ describe('the writing 默认执行规则 (S84b; AUTH-009, TASK-019)', () => {
 
       const rule = store.setDefaultExecutionRule(bookId, taskIntentId, digest);
       expect(rule).toMatchObject({
-        bookId, bookTitle: WRITING_BOOK_TITLE, taskKind: 'writing', pattern: 'writing', ordinal: 1, name: '写作任务 · 第 1 版',
+        bookId, bookTitle: WRITING_BOOK_TITLE, taskKind: 'writing', pattern: PROMOTION, ordinal: 1, name: '写作任务 · 宣传文章 · 第 1 版',
         state: 'active', stateLabel: '使用中', setBy: '本机编辑', sourceTaskIntentId: taskIntentId, sourcePlanEnvelopeDigest: digest,
-        does: '在「交付物」的新建文档里点「快速开始」后，AI7 先准备计划：计划与这条规则一致时直接开始，按你在新建文档里选的类型、写的受众和渠道起草文档，范例只参照、不复制；有任何不同都停在计划上，等你看过再开始。',
+        does: '在「交付物」的新建文档里选「宣传文章」再点「快速开始」后，AI7 先准备计划：计划与这条规则一致时直接开始，按你写的受众和渠道起草这本书的宣传文章，范例只参照、不复制；有任何不同都停在计划上，等你看过再开始。',
       });
       expect(rule.binds).toEqual(offered.binds);
       expect(rule.binding).toEqual({
@@ -188,47 +205,58 @@ describe('the writing 默认执行规则 (S84b; AUTH-009, TASK-019)', () => {
       // The same plan set again is the same rule, with no new version; the plan says it set the rule in force.
       expect(store.setDefaultExecutionRule(bookId, taskIntentId, digest)).toEqual(rule);
       const shown = store.inspectTaskPlan({ bookId, kind: 'writing', ref: taskIntentId }).defaultRule;
-      expect(shown).toMatchObject({ canSet: false, reason: setRuleAlreadyReason('写作任务 · 第 1 版'), planEnvelopeDigest: null,
+      expect(shown).toMatchObject({ canSet: false, reason: setRuleAlreadyReason('写作任务 · 宣传文章 · 第 1 版'), planEnvelopeDigest: null,
         current: { ruleId: rule.ruleId, ordinal: 1, state: 'active', fromThisPlan: true } });
       expect(store.inspectDefaultExecutionRules().rules).toEqual([rule]);
       // A stale plan never sets one.
       expect(await refusal(() => store.setDefaultExecutionRule(bookId, taskIntentId, 'e'.repeat(64))))
         .toBe('DEFAULT_EXECUTION_RULE_STALE:这份计划已经变化；请重新打开计划后再设为快速开始默认。');
-      // A prepared Task does not hold the Book — another preparation replaces it — so the sheet's quick start is on offer.
-      expect(store.inspectWritingTask(bookId).quickStart).toEqual({
-        available: true, reason: null, rule: { ruleId: rule.ruleId, ruleVersionId: rule.ruleVersionId, ordinal: 1, name: '写作任务 · 第 1 版' },
+      // A prepared Task does not hold the Book — another preparation replaces it — so the 宣传文章's quick start is on offer, and
+      // only the 宣传文章's: every other type still has none.
+      expect(quickOf(store, bookId)).toEqual({
+        available: true, reason: null, rule: { ruleId: rule.ruleId, ruleVersionId: rule.ruleVersionId, ordinal: 1, name: '写作任务 · 宣传文章 · 第 1 版' },
       });
+      for (const type of store.inspectWritingTask(bookId).types.filter((entry) => entry.typeId !== 'promotion-article')) {
+        expect(type.quickStart).toEqual({ available: false, reason: quickStartNoRuleReason(writingRulePattern(type.typeId)), rule: null });
+      }
       withDatabase(true, (database) => {
         expect(database.prepare('SELECT task_kind, task_pattern FROM default_execution_rules').all())
-          .toEqual([{ task_kind: 'writing', task_pattern: 'writing' }]);
+          .toEqual([{ task_kind: 'writing', task_pattern: 'writing:promotion-article' }]);
       });
     });
   }, 300_000);
 
-  it('keeps one Book\'s writing rule apart from its baseline rules, and reads a pattern under another kind as damaged', async () => {
+  it('keeps one rule per type, apart from the baseline rules, and reads a pattern under another kind as damaged', async () => {
     await withSession(async ({ store }) => {
       const bookId = await sample1Book(store, '写作规则分开');
-      const plan = prepare(store, bookId);
-      const writing = store.setDefaultExecutionRule(bookId, plan.taskIntent!.taskIntentId, plan.planEnvelope!.digest);
+      const promotionPlan = prepare(store, bookId);
+      const promotion = store.setDefaultExecutionRule(bookId, promotionPlan.taskIntent!.taskIntentId, promotionPlan.planEnvelope!.digest);
+      // A 新闻稿's plan sets the 新闻稿's own rule; the 宣传文章's stays as it was.
+      const newsPlan = prepare(store, bookId, NEWS_REQUEST);
+      const news = store.setDefaultExecutionRule(bookId, newsPlan.taskIntent!.taskIntentId, newsPlan.planEnvelope!.digest);
+      expect(news).toMatchObject({ pattern: 'writing:news-release', ordinal: 1, name: '写作任务 · 新闻稿 · 第 1 版', state: 'active' });
+      expect(news.ruleId).not.toBe(promotion.ruleId);
       const baseline = withDatabase(false, (database) => new DefaultExecutionRuleLedger(database).set({
-        bookId, pattern: 'sync-current', sourceTaskIntentId: plan.taskIntent!.taskIntentId, sourcePlanEnvelopeDigest: 'd'.repeat(64),
-        binding: writing.binding,
+        bookId, pattern: 'sync-current', sourceTaskIntentId: promotionPlan.taskIntent!.taskIntentId, sourcePlanEnvelopeDigest: 'd'.repeat(64),
+        binding: promotion.binding,
       }));
       expect(baseline).toMatchObject({ taskKind: 'baseline-analysis', pattern: 'sync-current' });
-      expect(baseline.ruleId).not.toBe(writing.ruleId);
       const rules = store.inspectDefaultExecutionRules().rules;
-      expect(rules.map((rule) => [rule.taskKind, rule.pattern, rule.name])).toEqual([
-        ['writing', 'writing', '写作任务 · 第 1 版'], ['baseline-analysis', 'sync-current', '开始同步 · 第 1 版'],
+      expect(rules.map((rule) => [rule.taskKind, rule.pattern, rule.name, rule.state])).toEqual([
+        ['writing', 'writing:promotion-article', '写作任务 · 宣传文章 · 第 1 版', 'active'],
+        ['writing', 'writing:news-release', '写作任务 · 新闻稿 · 第 1 版', 'active'],
+        ['baseline-analysis', 'sync-current', '开始同步 · 第 1 版', 'active'],
       ]);
-      expect(rules[1]!.binds.find((row) => row.label === '工序')!.value.startsWith('基线分析 · ')).toBe(true);
-      expect(store.inspectWritingTask(bookId).quickStart.rule?.ruleId).toBe(writing.ruleId);
+      expect(rules[2]!.binds.find((row) => row.label === '工序')!.value.startsWith('基线分析 · ')).toBe(true);
+      expect(quickOf(store, bookId).rule?.ruleId).toBe(promotion.ruleId);
+      expect(quickOf(store, bookId, 'news-release').rule?.ruleId).toBe(news.ruleId);
       // A writing pattern held under the baseline kind is not a row this ledger wrote.
       withDatabase(false, (database) => {
         database.exec('PRAGMA foreign_keys = OFF');
         database.exec('DROP TRIGGER default_execution_rules_no_update');
-        database.prepare("UPDATE default_execution_rules SET task_kind = 'baseline-analysis' WHERE rule_id = ?").run(writing.ruleId);
+        database.prepare("UPDATE default_execution_rules SET task_kind = 'baseline-analysis' WHERE rule_id = ?").run(promotion.ruleId);
         const ledger = new DefaultExecutionRuleLedger(database);
-        expect(ledger.forPattern(bookId, 'writing')).toBeNull();
+        expect(ledger.forPattern(bookId, PROMOTION)).toBeNull();
         expect(() => ledger.list()).toThrow('默认执行规则记录无效。');
       });
     });
@@ -236,12 +264,12 @@ describe('the writing 默认执行规则 (S84b; AUTH-009, TASK-019)', () => {
 });
 
 describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TASK-028)', () => {
-  it('starts the prepared Task exactly as 开始任务 would, naming the rule version, and runs it to its end', async () => {
+  it('starts the prepared Task of the rule\'s type exactly as 开始任务 would, naming the rule version, and runs it to its end', async () => {
     await withSession(async (session) => {
       const { store, owner } = session;
       const { bookId, rule, reference } = await ruledBook(session, WRITING_BOOK_TITLE);
-      // The settled Task frees the Book: the sheet's quick start is on offer under the rule.
-      expect(store.inspectWritingTask(bookId).quickStart).toEqual({ available: true, reason: null, rule: reference });
+      // The settled Task frees the Book: the 宣传文章's quick start is on offer under its rule.
+      expect(quickOf(store, bookId)).toEqual({ available: true, reason: null, rule: reference });
 
       const again = prepare(store, bookId);
       expect(again.taskIntent!.mode).toBe('writing-again');
@@ -255,8 +283,8 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
       expect(quick.ledger).not.toBeNull();
       const recorded = store.inspectWriting(bookId)!;
       expect(recorded.authorization).toMatchObject({ origin: 'default-execution-rule', ruleVersionId: rule.ruleVersionId, authority: 'standard-direct-dispatch', planEnvelopeDigest: digest });
-      // While it runs the sheet's quick start waits for it.
-      expect(store.inspectWritingTask(bookId).quickStart).toMatchObject({ available: false, rule: reference });
+      // While it runs, every type's quick start waits for it.
+      expect(quickOf(store, bookId)).toMatchObject({ available: false, rule: reference });
       expect(owner.admitOrQueue(quick.dispatchRunRecordId!, quick.ledger!)).toBe('admitted');
       await owner.whenIdle();
       const settled = store.inspectWriting(bookId)!;
@@ -276,14 +304,39 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
         expect(origins.map((row) => row.origin)).toEqual(['standard-direct', 'default-execution-rule']);
         expect((database.prepare('SELECT count(*) total FROM default_execution_rule_versions').get() as { total: number }).total).toBe(1);
       });
-      // The newest draft opens as before.
+      // The newest draft opens as before; the 宣传文章 now has its document, so its quick start says why it waits.
       const drafted = store.inspectWritingTask(bookId).types.find((type) => type.typeId === 'promotion-article')!.drafted;
       expect(drafted?.revisionId).toBe(settled.resultSetRevision!.revisionId);
       expect(store.createWritingDraft(bookId, drafted!.revisionId).typeId).toBe('promotion-article');
+      expect(quickOf(store, bookId)).toEqual({ available: false, reason: '这本书已经有「宣传文章」；请在交付物中打开它继续修改。', rule: reference });
     });
   }, 300_000);
 
-  it('stops at the plan, recording nothing, when offline, when not connected, when the slot is busy, or when the rule changed or was turned off', async () => {
+  it('never starts another house type under a type\'s rule: it stops at that plan with why, recording nothing (TASK-026)', async () => {
+    await withSession(async (session) => {
+      const { store } = session;
+      const { bookId, rule } = await ruledBook(session, '写作别的类型');
+      // The 新闻稿 has no rule of its own: its sheet offers none, whatever the 宣传文章's.
+      expect(quickOf(store, bookId, 'news-release')).toEqual({ available: false, reason: quickStartNoRuleReason('writing:news-release'), rule: null });
+      // Asked anyway, with the 宣传文章's rule version and other words, the 新闻稿 stops at its plan.
+      const news = prepare(store, bookId, NEWS_REQUEST);
+      const quick = await store.quickStartWritingTask(bookId, news.taskIntent!.taskIntentId, news.planEnvelope!.digest, rule.ruleVersionId, ONLINE());
+      expect(quick).toEqual(fell(writingRuleOtherTypeReason('写作任务 · 宣传文章 · 第 1 版', '宣传文章', '新闻稿')));
+      expect(quick.reasons[0]).toBe('默认执行规则「写作任务 · 宣传文章 · 第 1 版」是按「宣传文章」的计划设定的，不用于「新闻稿」；请看过这份计划后再开始，也可以把它设为「新闻稿」的快速开始默认。');
+      const unchanged = store.inspectWriting(bookId)!;
+      expect(unchanged.authorization).toBeNull();
+      expect(unchanged.state).toBe('prepared');
+      // A rule of another Book is no rule here at all.
+      const elsewhere = await sample1Book(store, '另一本写作书');
+      const elsewherePlan = prepare(store, elsewhere);
+      const elsewhereRule = store.setDefaultExecutionRule(elsewhere, elsewherePlan.taskIntent!.taskIntentId, elsewherePlan.planEnvelope!.digest);
+      const promotion = prepare(store, bookId);
+      expect(await store.quickStartWritingTask(bookId, promotion.taskIntent!.taskIntentId, promotion.planEnvelope!.digest, elsewhereRule.ruleVersionId, ONLINE()))
+        .toEqual(fell(QUICK_START_RULE_CHANGED));
+    });
+  }, 300_000);
+
+  it('stops at the plan, recording nothing, when offline, when the slot is busy, or when the rule changed or was turned off', async () => {
     await withSession(async (session) => {
       const { store } = session;
       const { bookId, rule, reference } = await ruledBook(session, '写作快速开始退回');
@@ -292,8 +345,8 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
       const digest = plan.planEnvelope!.digest;
       const state = { connectivity: 'offline' as Connectivity, busy: false };
       const runtime = { credentialReadiness: async () => null, connectivity: reader(state) };
-      const fell = (reason: string) => ({ outcome: 'fell-back', reasons: [reason], dispatchRunRecordId: null, ledger: null });
-      expect(await store.quickStartWritingTask(bookId, taskIntentId, digest, rule.ruleVersionId, runtime)).toEqual(fell(QUICK_START_OFFLINE));
+      // Offline: the writing bar has no 联网后开始任务, so the reason says to start once online (#701 review P3-3).
+      expect(await store.quickStartWritingTask(bookId, taskIntentId, digest, rule.ruleVersionId, runtime)).toEqual(fell(QUICK_START_OFFLINE_LATER));
       state.connectivity = 'online';
       state.busy = true;
       expect(await store.quickStartWritingTask(bookId, taskIntentId, digest, rule.ruleVersionId, runtime)).toEqual(fell(QUICK_START_SLOT_BUSY));
@@ -308,7 +361,7 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
       // Turned off: the sheet says there is none in force, and a quick start made before stops at the plan.
       const off = store.deactivateDefaultExecutionRule(rule.ruleId);
       expect(off).toMatchObject({ state: 'deactivated', taskKind: 'writing' });
-      expect(store.inspectWritingTask(bookId).quickStart).toEqual({ available: false, reason: quickStartNoRuleReason('writing'), rule: null });
+      expect(quickOf(store, bookId)).toEqual({ available: false, reason: quickStartNoRuleReason(PROMOTION), rule: null });
       expect(await store.quickStartWritingTask(bookId, taskIntentId, digest, rule.ruleVersionId, runtime)).toEqual(fell(QUICK_START_RULE_CHANGED));
       // Nothing was recorded: the plan stands prepared, and the bar still starts it.
       const unchanged = store.inspectWriting(bookId)!;
@@ -316,12 +369,26 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
       expect(unchanged.state).toBe('prepared');
       // Set again from the plan now on show: the rule's second version is in force.
       const second = store.setDefaultExecutionRule(bookId, taskIntentId, digest);
-      expect(second).toMatchObject({ ruleId: rule.ruleId, ordinal: 2, name: '写作任务 · 第 2 版', state: 'active' });
+      expect(second).toMatchObject({ ruleId: rule.ruleId, ordinal: 2, name: '写作任务 · 宣传文章 · 第 2 版', state: 'active' });
       expect(reference.ordinal).toBe(1);
       // A Task started from its bar is never started by a quick start after it.
       await runFromBar(session, bookId, plan);
       expect(await refusal(() => store.quickStartWritingTask(bookId, taskIntentId, digest, second.ruleVersionId, runtime)))
         .toBe('ANALYSIS_AUTHORIZATION_STALE:这项任务已经开始了。');
+    });
+  }, 300_000);
+
+  it('stops at a plan whose key content changed after it froze, with that reason rather than an error', async () => {
+    await withSession(async (session) => {
+      const { store } = session;
+      const { bookId, rule } = await ruledBook(session, '写作计划已变');
+      const plan = prepare(store, bookId);
+      // The connection is bound to another credential reference after the plan froze: the plan is revised and stays at its bar.
+      withDatabase(false, (database) => database.prepare('UPDATE model_service_connections SET credential_reference = ?').run(randomUUID()));
+      expect(store.inspectWriting(bookId)!.planRevision).not.toBeNull();
+      expect(await store.quickStartWritingTask(bookId, plan.taskIntent!.taskIntentId, plan.planEnvelope!.digest, rule.ruleVersionId, ONLINE()))
+        .toEqual(fell(QUICK_START_PLAN_CHANGED));
+      expect(store.inspectWriting(bookId)!.authorization).toBeNull();
     });
   }, 300_000);
 
@@ -332,21 +399,38 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
       // The rule's next version binds another credential reference, as a rule set under another connection would.
       const other = withDatabase(false, (database) => {
         const ledger = new DefaultExecutionRuleLedger(database);
-        const current = ledger.activeFor(bookId, 'writing')!;
+        const current = ledger.activeFor(bookId, PROMOTION)!;
         return ledger.set({
-          bookId, pattern: 'writing', sourceTaskIntentId: first.taskIntent!.taskIntentId, sourcePlanEnvelopeDigest: 'f'.repeat(64),
+          bookId, pattern: PROMOTION, sourceTaskIntentId: first.taskIntent!.taskIntentId, sourcePlanEnvelopeDigest: 'f'.repeat(64),
           binding: { ...current.version.binding, providerBinding: { ...current.version.binding.providerBinding, credentialReference: randomUUID() } },
         });
       });
-      const reason = ruleDriftReason('写作任务 · 第 2 版', ['模型服务 · 连接']);
-      expect(reason).toBe('默认执行规则「写作任务 · 第 2 版」定下的「模型服务 · 连接」已经变化，不能按规则直接开始；请看过计划后再开始，也可以把新的计划设为快速开始默认。');
-      expect(store.inspectWritingTask(bookId).quickStart).toEqual({
-        available: false, reason, rule: { ruleId: other.ruleId, ruleVersionId: other.version.ruleVersionId, ordinal: 2, name: '写作任务 · 第 2 版' },
+      const reason = ruleDriftReason('写作任务 · 宣传文章 · 第 2 版', ['模型服务 · 连接']);
+      expect(reason).toBe('默认执行规则「写作任务 · 宣传文章 · 第 2 版」定下的「模型服务 · 连接」已经变化，不能按规则直接开始；请看过计划后再开始，也可以把新的计划设为快速开始默认。');
+      expect(quickOf(store, bookId)).toEqual({
+        available: false, reason, rule: { ruleId: other.ruleId, ruleVersionId: other.version.ruleVersionId, ordinal: 2, name: '写作任务 · 宣传文章 · 第 2 版' },
       });
       const plan = prepare(store, bookId);
       expect(await store.quickStartWritingTask(bookId, plan.taskIntent!.taskIntentId, plan.planEnvelope!.digest, other.version.ruleVersionId, ONLINE()))
-        .toEqual({ outcome: 'fell-back', reasons: [reason], dispatchRunRecordId: null, ledger: null });
+        .toEqual(fell(reason));
       expect(store.inspectWriting(bookId)!.authorization).toBeNull();
+    });
+  }, 300_000);
+
+  it('reads a writing Task\'s authorization that names a rule of another kind as damaged', async () => {
+    await withSession(async (session) => {
+      const { store } = session;
+      const { bookId, first, ledger } = await ruledBook(session, '写作授权指错规则');
+      // A baseline rule of this Book, and a writing Task whose authorization names it: not one any quick start could record.
+      const baseline = withDatabase(false, (database) => new DefaultExecutionRuleLedger(database).set({
+        bookId, pattern: 'sync-current', sourceTaskIntentId: first.taskIntent!.taskIntentId, sourcePlanEnvelopeDigest: 'c'.repeat(64),
+        binding: store.inspectDefaultExecutionRules().rules[0]!.binding,
+      }));
+      const again = prepare(store, bookId);
+      ledger.authorize(bookId, again.taskIntent!.taskIntentId, again.planEnvelope!.digest, 'now',
+        { kind: 'default-execution-rule', ruleVersionId: baseline.version.ruleVersionId });
+      expect(await refusal(() => store.inspectTaskPlan({ bookId, kind: 'writing', ref: again.taskIntent!.taskIntentId })))
+        .toBe('ANALYSIS_RECORD_INVALID:运行授权指向的默认执行规则不存在。');
     });
   }, 300_000);
 
@@ -360,10 +444,10 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
       try {
         const page = store.inspectWritingTask(bookId);
         expect(page.unavailable).toBe(WRITING_LIVE_UNAVAILABLE);
-        expect(page.quickStart).toEqual({ available: false, reason: QUICK_START_DEVELOPER_LIVE, rule: reference });
+        expect(quickOf(store, bookId)).toEqual({ available: false, reason: QUICK_START_DEVELOPER_LIVE, rule: reference });
         expect(await store.quickStartWritingTask(bookId, plan.taskIntent!.taskIntentId, plan.planEnvelope!.digest, rule.ruleVersionId,
           { credentialReadiness: async () => 'present', connectivity: reader({ connectivity: 'online', busy: false }) }))
-          .toEqual({ outcome: 'fell-back', reasons: [QUICK_START_DEVELOPER_LIVE], dispatchRunRecordId: null, ledger: null });
+          .toEqual(fell(QUICK_START_DEVELOPER_LIVE));
         // Nor is a rule set there, from a plan frozen before: the drawer says why, and the service refuses.
         expect(store.inspectTaskPlan({ bookId, kind: 'writing', ref: plan.taskIntent!.taskIntentId }).defaultRule)
           .toMatchObject({ canSet: false, reason: SET_RULE_DEVELOPER_LIVE, planEnvelopeDigest: null });

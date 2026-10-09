@@ -250,6 +250,7 @@ import type {
   BaselineAnalysisUpdateMode,
   BaselineAnalysisUpdateRequest,
   DefaultExecutionRulePattern,
+  MaterialPlanInputsProjection,
   DefaultExecutionRuleProjection,
   DefaultExecutionRuleReference,
   DefaultExecutionRulesProjection,
@@ -462,7 +463,7 @@ import {
 import { ExportLedgerError, ManuscriptExportStore, initializeExportLedgerSchema } from './manuscript-export.js';
 import {
   DEFAULT_EXECUTION_RULES_STATEMENT,
-  DEFAULT_EXECUTION_RULE_KINDS,
+  QUICK_START_OFFLINE_LATER,
   DEFAULT_EXECUTION_RULE_PROCEDURES,
   DefaultExecutionRuleError,
   DefaultExecutionRuleLedger,
@@ -484,6 +485,10 @@ import {
   SET_RULE_RANGE,
   defaultExecutionRuleBindingOf,
   defaultExecutionRuleDoes,
+  defaultExecutionRuleKind,
+  writingRuleOtherTypeReason,
+  writingRulePattern,
+  writingRuleTypeLabel,
   defaultExecutionRuleDrift,
   defaultExecutionRuleReference,
   initializeDefaultExecutionRuleSchema,
@@ -5376,7 +5381,7 @@ export class EditorialStore {
       reason,
       planEnvelopeDigest: reason === null ? envelope.digest : null,
       current,
-      binds: defaultRuleBindingRows(defaultExecutionRuleBindingOf(version.materialInputs), DEFAULT_EXECUTION_RULE_PROCEDURES[DEFAULT_EXECUTION_RULE_KINDS[pattern]]),
+      binds: defaultRuleBindingRows(defaultExecutionRuleBindingOf(version.materialInputs), DEFAULT_EXECUTION_RULE_PROCEDURES[defaultExecutionRuleKind(pattern)]),
       startedBy,
     };
   }
@@ -7910,8 +7915,8 @@ export class EditorialStore {
   /**
    * 新建文档 · 写作任务 on ⑥ 交付物 (DELIV-007): what every draft references — each part said as it stands, or that the Book has
    * none — the four consequence rows, each house type with whether a writing Task may draft it now and its 范例, the newest
-   * drafted result not yet made a document, the Book's latest writing Task with the plan it froze, and whether 快速开始 starts
-   * one under the Book's writing 默认执行规则 (S84b), or why not.
+   * drafted result not yet made a document, the Book's latest writing Task with the plan it froze, and for each type whether
+   * 快速开始 starts one under that type's writing 默认执行规则 (S84b), or why not.
    */
   inspectWritingTask(bookId: string): WritingTaskProjection {
     this.#assertAvailable();
@@ -7961,6 +7966,9 @@ export class EditorialStore {
       }
     }
     const named = (list: ReadonlyArray<string>, none: string): string => (list.length === 0 ? none : list.join('、'));
+    // What each type's 快速开始 compares its rule with, read once and only when some type has one.
+    let ruleFacts: { facts: MaterialPlanInputsProjection } | { reason: string } | null = null;
+    const facts = () => (ruleFacts ??= this.#writingRuleFacts(bookId, latest));
     return {
       bookId,
       unavailable,
@@ -7993,6 +8001,7 @@ export class EditorialStore {
           prepare,
           exemplars: { count: exemplars.length, statement: writingExemplarLine(type.label, exemplars) },
           drafted: type.document === null ? drafted.get(type.typeId) ?? null : null,
+          quickStart: this.#writingQuickStart(bookId, type.typeId, prepare, facts),
         };
       }),
       task: latest === null || latest.projection.taskIntent === null ? null : {
@@ -8005,16 +8014,17 @@ export class EditorialStore {
         refusal: !latest.task.exemplarsReadable && latest.projection.taskOutcome === null ? WRITING_EXEMPLAR_MOVED : this.#writingRefusal(latest.projection),
         planEnvelopeDigest: latest.projection.planEnvelope?.digest ?? null,
       },
-      quickStart: this.#writingQuickStart(bookId, unavailable, latest, runState),
     };
   }
 
   // ---- 快速开始 of a writing Task under its 默认执行规则 (Issue #432, plan slice S84b; S75 D1–D9) ------------------------------
 
   /**
-   * The drawer's `设为快速开始默认…` on a writing plan (AUTH-009, TASK-019; S84b), and the rule its Task was started under. One
-   * rule per Book covers every writing Task, whatever its house type and words — they are each Task's own, as a range is — so a
-   * plan of any type may set it, on the same terms as a baseline plan; a Task whose 范例 is no longer here, never started, cannot.
+   * The drawer's `设为快速开始默认…` on a writing plan (AUTH-009, TASK-019; S84b), and the rule its Task was started under. A
+   * writing rule covers only the house type of the plan it is set from (Commander ruling on #701: TASK-026, no widened source),
+   * so each type of a Book has its own; the editor's audience, channel and requirements are each Task's own, as a range is. A
+   * plan may set its type's rule on the same terms as a baseline plan; never under a live scope, nor from a Task whose 范例 is no
+   * longer here, never started.
    */
   #writingDefaultRule(projection: WritingProjection, task: StoredWritingTask): TaskPlanDefaultRuleProjection {
     const envelope = projection.planEnvelope;
@@ -8024,13 +8034,13 @@ export class EditorialStore {
     // A writing Task runs nowhere under a live scope (S84a), so no rule is set there, from whatever plan was frozen before.
     const kindReason = this.#baselineAnalysis.launch.live !== null ? SET_RULE_DEVELOPER_LIVE
       : !task.exemplarsReadable && projection.authorization === null ? WRITING_EXEMPLAR_MOVED : null;
-    return this.#ruleOffer(projection.bookId, 'writing', { planEnvelope: envelope, planVersion: version, planRevision: projection.planRevision }, kindReason, startedBy);
+    return this.#ruleOffer(projection.bookId, writingRulePattern(task.typeId), { planEnvelope: envelope, planVersion: version, planRevision: projection.planRevision }, kindReason, startedBy);
   }
 
   /**
    * `设为快速开始默认…` for the Book's writing plan on show (S84b): which must still be the Book's latest writing Task's, unchanged,
-   * and one a rule may come from. It sets the Book's writing rule, or the rule's next version; the plan that set the rule in
-   * force, set again, answers with the rule as it is. The standard authorization never sets one.
+   * and one a rule may come from. It sets the rule of the plan's house type, or that rule's next version; the plan that set the
+   * rule in force, set again, answers with the rule as it is. The standard authorization never sets one.
    */
   #setWritingDefaultRule(bookId: string, taskIntentId: string, planEnvelopeDigest: string): DefaultExecutionRuleProjection {
     const latest = this.#latestWriting(bookId);
@@ -8038,15 +8048,16 @@ export class EditorialStore {
     requireStore(latest !== null && projection !== null && projection.taskIntent?.taskIntentId === taskIntentId &&
       projection.planEnvelope?.digest === planEnvelopeDigest && projection.planVersion !== null,
     'DEFAULT_EXECUTION_RULE_STALE', '这份计划已经变化；请重新打开计划后再设为快速开始默认。');
+    const pattern = writingRulePattern(latest.task.typeId);
     const offer = this.#writingDefaultRule(projection, latest.task);
     if (offer.current !== null && offer.current.state === 'active' && offer.current.fromThisPlan) {
-      const same = this.#ruleCall(() => this.#rules.activeFor(bookId, 'writing'));
+      const same = this.#ruleCall(() => this.#rules.activeFor(bookId, pattern));
       if (same !== null) return this.#ruleProjection(same);
     }
     requireStore(offer.canSet, 'DEFAULT_EXECUTION_RULE_UNAVAILABLE', offer.reason ?? QUICK_START_NOT_READY);
     const record = this.#ruleCall(() => this.#rules.set({
       bookId,
-      pattern: 'writing',
+      pattern,
       sourceTaskIntentId: taskIntentId,
       sourcePlanEnvelopeDigest: planEnvelopeDigest,
       binding: defaultExecutionRuleBindingOf(projection.planVersion!.materialInputs),
@@ -8055,38 +8066,47 @@ export class EditorialStore {
   }
 
   /**
-   * 新建文档's 快速开始 (TASK-017, TASK-019; S84b): offered only while the Book has a writing rule in force, this launch may use
-   * one, a writing Task can be prepared now, and what the rule binds is what the Book's durable state reads now. Anything else
-   * is shown, disabled, with its reason; a rule never widens what a Run may do. The rule binds no house type or words, so the
-   * type the editor picks is held to the page's own terms, as 先看计划 is.
+   * What every type's 快速开始 compares a rule with (S84b): the facts a rule binds as the Book's durable state reads them now, on
+   * the latest writing Task's ledger — a rule comes only from a writing plan, so a Book with one has a Task — or why they cannot
+   * be read. Read once per page, and only when some type has a rule.
+   */
+  #writingRuleFacts(bookId: string, latest: { ledger: BaselineAnalysisStore } | null): { facts: MaterialPlanInputsProjection } | { reason: string } {
+    if (latest === null) return { reason: QUICK_START_NOT_READY };
+    try {
+      return { facts: latest.ledger.currentRuleFacts(bookId, 'writing-first') };
+    } catch (error) {
+      if (error instanceof AnalysisError) return { reason: error.message };
+      throw error;
+    }
+  }
+
+  /**
+   * 新建文档's 快速开始 of one house type (TASK-017, TASK-019; S84b): offered only while that type's writing rule is in force, this
+   * launch may use one, the type can be drafted now, and what the rule binds is what the Book's durable state reads now.
+   * Anything else is shown, disabled, with its reason; a rule never widens what a Run may do.
    */
   #writingQuickStart(
     bookId: string,
-    unavailable: string | null,
-    latest: { task: StoredWritingTask; ledger: BaselineAnalysisStore; projection: WritingProjection } | null,
-    runState: BaselineAnalysisRunState | null,
+    typeId: string,
+    prepare: WritingTaskTypeProjection['prepare'],
+    facts: () => { facts: MaterialPlanInputsProjection } | { reason: string },
   ): BaselineAnalysisQuickStartProjection {
+    const pattern = writingRulePattern(typeId);
     let rule: DefaultExecutionRuleRecord | null;
     try {
-      rule = this.#ruleCall(() => this.#rules.activeFor(bookId, 'writing'));
+      rule = this.#ruleCall(() => this.#rules.activeFor(bookId, pattern));
     } catch (error) {
       if (!(error instanceof StoreError)) throw error;
       return { available: false, reason: `快速开始暂不可用：${error.message}`, rule: null };
     }
-    if (rule === null) return { available: false, reason: quickStartNoRuleReason('writing'), rule: null };
+    if (rule === null) return { available: false, reason: quickStartNoRuleReason(pattern), rule: null };
     const reference = defaultExecutionRuleReference(rule, rule.version);
     if (this.#baselineAnalysis.launch.live !== null) return { available: false, reason: QUICK_START_DEVELOPER_LIVE, rule: reference };
-    if (unavailable !== null) return { available: false, reason: unavailable, rule: reference };
-    if (runIsActive(runState)) return { available: false, reason: activeRunReason(runState), rule: reference };
-    // The facts are read on a writing ledger, the latest Task's: a rule comes only from a writing plan, so the Book has one.
-    if (latest === null) return { available: false, reason: QUICK_START_NOT_READY, rule: reference };
-    let drift: ReadonlyArray<string>;
-    try {
-      drift = defaultExecutionRuleDrift(rule.version.binding, latest.ledger.currentRuleFacts(bookId, 'writing-first'));
-    } catch (error) {
-      if (error instanceof AnalysisError) return { available: false, reason: error.message, rule: reference };
-      throw error;
-    }
+    // The page's own terms first — no manuscript, a document of the type, 本书不做, a Run under way — as 先看计划 is held to them.
+    if (!prepare.allowed) return { available: false, reason: prepare.reason, rule: reference };
+    const read = facts();
+    if ('reason' in read) return { available: false, reason: read.reason, rule: reference };
+    const drift = defaultExecutionRuleDrift(rule.version.binding, read.facts);
     if (drift.length > 0) return { available: false, reason: ruleDriftReason(reference.name, drift), rule: reference };
     return { available: true, reason: null, rule: reference };
   }
@@ -8094,9 +8114,10 @@ export class EditorialStore {
   /**
    * 快速开始 of a writing Task (TASK-017, TASK-020, TASK-026; S84b): the Task the caller has just prepared exactly as 先看计划
    * prepares it is started exactly as 开始任务 would start it, on the ledger of its plan's contract, its authorization naming
-   * the writing rule version the editor started under. Whatever would make the start differ from the rule — the rule changed
-   * or was turned off, developer-live, a 范例 no longer here, the plan's key content or what the rule binds moved, the model
-   * service not connected, no network, a busy slot — leaves the Task at its plan with the reason, and nothing is recorded.
+   * the writing rule version the editor started under. Whatever would make the start differ from the rule — a rule of another
+   * house type, the rule changed or was turned off, developer-live, a 范例 no longer here, the plan's key content or what the
+   * rule binds moved, the model service not connected, no network, a busy slot — leaves the Task at its plan with the reason,
+   * and nothing is recorded.
    */
   async quickStartWritingTask(
     bookId: string,
@@ -8122,7 +8143,14 @@ export class EditorialStore {
       return { outcome: 'started', reasons: [], dispatchRunRecordId: null, ledger: null };
     }
     const fellBack = (reason: string) => ({ outcome: 'fell-back' as const, reasons: [reason], dispatchRunRecordId: null, ledger: null });
-    const rule = this.#ruleCall(() => this.#rules.activeFor(bookId, 'writing'));
+    const pattern = writingRulePattern(latest.task.typeId);
+    // A rule of this Book's other house type never starts this one (TASK-026: no widened source).
+    const named = this.#ruleCall(() => this.#rules.version(ruleVersionId));
+    if (named !== null && named.rule.bookId === bookId && named.rule.taskKind === 'writing' && named.rule.pattern !== pattern) {
+      return fellBack(writingRuleOtherTypeReason(defaultExecutionRuleReference(named.rule, named.version).name, writingRuleTypeLabel(named.rule.pattern),
+        latest.task.input.type.label));
+    }
+    const rule = this.#ruleCall(() => this.#rules.activeFor(bookId, pattern));
     if (rule === null || rule.version.ruleVersionId !== ruleVersionId) return fellBack(QUICK_START_RULE_CHANGED);
     if (this.#baselineAnalysis.launch.live !== null) return fellBack(QUICK_START_DEVELOPER_LIVE);
     if (!latest.task.exemplarsReadable) return fellBack(WRITING_EXEMPLAR_MOVED);
@@ -8136,7 +8164,8 @@ export class EditorialStore {
       case 'needs-connection':
         return fellBack(QUICK_START_NEEDS_CONNECTION);
       case 'offline':
-        return fellBack(QUICK_START_OFFLINE);
+        // The writing bar has no 联网后开始任务 (#701 review P3-3): the reason says to start once online.
+        return fellBack(QUICK_START_OFFLINE_LATER);
       default:
         return fellBack(QUICK_START_NOT_READY);
     }

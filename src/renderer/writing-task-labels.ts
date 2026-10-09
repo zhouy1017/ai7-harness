@@ -39,10 +39,18 @@ export const WRITING_STATUS = {
   failed: '写作任务的计划没有准备出来。',
   creating: '正在打开草稿…',
   quickFailed: '快速开始没有开始任务；计划已准备，可在任务计划里开始。',
+  quickNoPlan: '这份计划还没有冻结，没有按规则开始；请看过计划后再开始。',
   openFailed: '草稿没有打开。',
   unavailable: '新建文档 · 写作任务暂不可用。',
 } as const;
 
+/** A writing rule covers one house type (#701 review P2-1): until one is chosen there is nothing to say of 快速开始. */
+export const WRITING_QUICK_PICK_TYPE = '选好类型后显示：快速开始按这一类文档的默认执行规则开始。';
+/** A quick start whose call failed: the service's words, if any, then where the plan stands (#701 review P3-5). */
+export function writingQuickFailed(detail: string): string {
+  const said = detail.trim().replace(/[。；]+$/u, '');
+  return said.length === 0 ? WRITING_STATUS.quickFailed : `${said}。${WRITING_STATUS.quickFailed}`;
+}
 /** 快速开始 on offer (Issue #432, S84b; S75 D5): the rule it starts under, and that a plan unlike it stops for the editor. */
 export function writingQuickNote(ruleName: string): string {
   return `按默认执行规则「${ruleName}」：先准备计划，与规则一致时直接开始；有任何不同都会停在计划上。`;

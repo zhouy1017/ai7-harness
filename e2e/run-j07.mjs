@@ -54,9 +54,12 @@ const WRITING_REQUEST = Object.freeze({ typeId: 'promotion-article', audience: '
 const WRITING_TYPES = Object.freeze([['news-release', '新闻稿'], ['promotion-article', '宣传文章'], ['review-article', '评论文章'], ['launch-materials', '发布会材料'], ['marketing-points', '营销要点']]);
 const WRITING_SEND = '不发送任何内容：写作任务目前只在不连接模型服务的运行范围内起草。';
 const WRITING_NOT_DO = '不改稿件；不照抄范例；不交付、不发送；草稿由你在稿件编辑面上修改后才用。';
-// Issue #432 (S84b): 快速开始 under the Book's writing 默认执行规则 — none at first, then the one set from the settled plan.
-const WRITING_QUICK_START_REASON = '这本书还没有「写作任务」的默认执行规则：先看计划，可以在完整计划里设为快速开始默认。';
-const WRITING_RULE_NAME = '写作任务 · 第 1 版';
+// Issue #432 (S84b): 快速开始 under the 宣传文章's writing 默认执行规则 — a rule covers one house type (#701 review P2-1): none at
+// first, then the one set from the settled plan.
+const WRITING_QUICK_PICK_TYPE = '选好类型后显示：快速开始按这一类文档的默认执行规则开始。';
+const WRITING_QUICK_START_REASON = '这本书还没有「写作任务 · 宣传文章」的默认执行规则：先看计划，可以在完整计划里设为快速开始默认。';
+const WRITING_RULE_PATTERN = 'writing:promotion-article';
+const WRITING_RULE_NAME = '写作任务 · 宣传文章 · 第 1 版';
 const WRITING_QUICK_NOTE = `按默认执行规则「${WRITING_RULE_NAME}」：先准备计划，与规则一致时直接开始；有任何不同都会停在计划上。`;
 const WRITING_RULE_LEAD = '以后在「交付物」的新建文档里用快速开始起草这本书的文档时，AI7 会先按你选的类型和写的受众、渠道准备计划：计划与下面这些一致时直接开始，不再停下来等你确认；有任何不同都会停在计划上，等你看过再开始。规则不会自己开始任何任务。';
 const READ_CONNECTION = `window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection??null)`;
@@ -2547,12 +2550,13 @@ async function main() {
         `《${WRITING_TITLE}》 · 作者：未填写 · 责编：未填写 · 书系：不在任何书系中`,
       ]) &&
       JSON.stringify(writingSheet.consequences) === JSON.stringify(['会读取', '当前稿件的全部 97 个内容块，以及上面列出的参考材料', '会发送', WRITING_SEND, '不会做', WRITING_NOT_DO, '费用', '先看计划后显示']) &&
-      JSON.stringify(writingSheet.quick) === JSON.stringify([true, WRITING_QUICK_START_REASON]), 'writing-sheet-words', writingSheet);
+      JSON.stringify(writingSheet.quick) === JSON.stringify([true, WRITING_QUICK_PICK_TYPE]), 'writing-sheet-words', writingSheet);
     // 先看计划 with no type chosen asks for one; choosing 宣传文章 names its 范例 — none in this house.
     await clickSelector(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-action="plan"]', 'writing-plan-unchosen');
     await readWriting((page) => page.problem === '请选择一类文档。', 'writing-pick-type');
     await assertRenderer(renderer, `(() => { const radio = document.querySelector('[data-screen="book-deliverables"] .writing-task input[name="writing-type"][value=${JSON.stringify(WRITING_REQUEST.typeId)}]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'writing-type-choose');
-    await readWriting((page) => page.references[2] === '本社暂无其他图书的宣传文章范例，本次不参考范例' && page.problem === null, 'writing-type-chosen');
+    await readWriting((page) => page.references[2] === '本社暂无其他图书的宣传文章范例，本次不参考范例' && page.problem === null &&
+      JSON.stringify(page.quick) === JSON.stringify([true, WRITING_QUICK_START_REASON]), 'writing-type-chosen');
     await fill(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-field="audience"]', WRITING_REQUEST.audience, 'writing-audience');
     await fill(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-field="channel"]', WRITING_REQUEST.channel, 'writing-channel');
 
@@ -2586,7 +2590,7 @@ async function main() {
     // sets it. The drawer then names the rule beside the action.
     await assertRenderer(renderer, `(() => { const full = document.querySelector('#task-drawer [data-task-drawer-control="mode-full"]'); if (!(full instanceof HTMLButtonElement)) return false; if (full.getAttribute('aria-pressed') !== 'true') full.click(); return true; })()`, 'writing-rule-full');
     await waitFor(renderer, `document.querySelector('#task-drawer [data-task-plan-default-rule="offered"] [data-task-drawer-control="default-rule"]')?.disabled === false`, 'writing-rule-offered');
-    const writingRulesBefore = await renderer.evaluate(`window.ai7.inspectDefaultExecutionRules().then((page) => page.rules.filter((rule) => rule.pattern === 'writing').length)`);
+    const writingRulesBefore = await renderer.evaluate(`window.ai7.inspectDefaultExecutionRules().then((page) => page.rules.filter((rule) => rule.taskKind === 'writing').length)`);
     requireJourney(writingRulesBefore === 0, 'writing-rule-none', writingRulesBefore);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="default-rule"]', 'writing-rule-open');
     const writingConfirm = await renderer.evaluate(`(() => { const confirm = document.querySelector('#task-drawer .task-plan-default-rule-confirm'); if (!(confirm instanceof HTMLElement) || confirm.hidden) return null; return JSON.stringify([confirm.querySelector(':scope > p')?.textContent ?? null, Array.from(confirm.querySelectorAll('[data-default-rule-bind]'), (node) => [node.dataset.defaultRuleBind ?? null, node.textContent ?? ''])]); })()`);
@@ -2596,8 +2600,11 @@ async function main() {
       confirmRead[1][1][1].startsWith('写作任务 · ') && confirmRead[1][2][1] === '未设置任务预算上限', 'writing-rule-confirm', writingConfirm);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="default-rule-confirm"]', 'writing-rule-set');
     await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-default-rule-current')?.textContent === ${JSON.stringify(`这本书的默认执行规则：${WRITING_RULE_NAME}（使用中，由这份计划设定）`)}`, 'writing-rule-set-shown');
-    const writingRules = await renderer.evaluate(`window.ai7.inspectDefaultExecutionRules().then((page) => JSON.stringify(page.rules.filter((rule) => rule.pattern === 'writing').map((rule) => [rule.name, rule.taskKind, rule.state, rule.bookTitle])))`);
-    requireJourney(writingRules === JSON.stringify([[WRITING_RULE_NAME, 'writing', 'active', WRITING_TITLE]]), 'writing-rule-record', writingRules);
+    const writingRules = await renderer.evaluate(`window.ai7.inspectDefaultExecutionRules().then((page) => JSON.stringify(page.rules.filter((rule) => rule.taskKind === 'writing').map((rule) => [rule.name, rule.pattern, rule.state, rule.bookTitle])))`);
+    requireJourney(writingRules === JSON.stringify([[WRITING_RULE_NAME, WRITING_RULE_PATTERN, 'active', WRITING_TITLE]]), 'writing-rule-record', writingRules);
+    // The Task the rule came from: the quick start's Task is another.
+    const writingFirstRef = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanRef ?? null`);
+    requireJourney(typeof writingFirstRef === 'string' && writingFirstRef.length > 0, 'writing-rule-source-ref', writingFirstRef);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'writing-drawer-close');
     await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'writing-drawer-closed');
 
@@ -2606,13 +2613,17 @@ async function main() {
     // 宣传文章 is still free: drafting it again with the same words prepares the Task as 先看计划 does and starts it at once under
     // the rule. The drawer opens on the Run with the quiet notice naming the rule, and its authorization names that version.
     await clickSelector(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-action="new"]', 'writing-quick-new');
-    const quickSheet = await readWriting((page) => page.open, 'writing-quick-sheet');
-    requireJourney(JSON.stringify(quickSheet.quick) === JSON.stringify([false, WRITING_QUICK_NOTE]), 'writing-quick-offered', quickSheet);
+    // A rule covers one type, so the sheet speaks of it once the 宣传文章 is chosen; the page is read until the rule's offer shows.
+    await readWriting((page) => page.open && JSON.stringify(page.quick) === JSON.stringify([true, WRITING_QUICK_PICK_TYPE]), 'writing-quick-sheet');
     await assertRenderer(renderer, `(() => { const radio = document.querySelector('[data-screen="book-deliverables"] .writing-task input[name="writing-type"][value=${JSON.stringify(WRITING_REQUEST.typeId)}]'); if (!(radio instanceof HTMLInputElement) || radio.disabled) return false; radio.click(); return radio.checked; })()`, 'writing-quick-type');
+    await readWriting((page) => page.open && JSON.stringify(page.quick) === JSON.stringify([false, WRITING_QUICK_NOTE]), 'writing-quick-offered');
     await fill(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-field="audience"]', WRITING_REQUEST.audience, 'writing-quick-audience');
     await fill(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-field="channel"]', WRITING_REQUEST.channel, 'writing-quick-channel');
     await clickSelector(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-action="quick"]', 'writing-quick-click');
-    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer === 'open' && drawer.dataset.taskPlanKind === 'writing' && drawer.querySelector('.task-plan-quick-started')?.textContent === ${JSON.stringify(`已按默认执行规则「${WRITING_RULE_NAME}」快速开始 · 查看规则`)}; })()`, 'writing-quick-drawer', 120_000);
+    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer === 'open' && drawer.dataset.taskPlanKind === 'writing' && drawer.dataset.taskPlanRef !== ${JSON.stringify(writingFirstRef)} && drawer.querySelector('.task-plan-quick-started')?.textContent === ${JSON.stringify(`已按默认执行规则「${WRITING_RULE_NAME}」快速开始 · 查看规则`)}; })()`, 'writing-quick-drawer', 120_000);
+    // The drawer is on the new Task, which the page painted before opening it, so the page's state is that Task's: read until the
+    // drawer, too, says it settled.
+    await waitFor(renderer, `['settled', 'failed', 'interrupted'].includes(document.querySelector('#task-drawer')?.dataset.taskPlanState ?? '')`, 'writing-quick-drawer-ended', 120_000);
     const quickEnded = await readWriting((page) => ['settled', 'failed', 'interrupted'].includes(page.state), 'writing-quick-ended');
     requireJourney(quickEnded.state === 'settled' && !quickEnded.open, 'writing-quick-settled', quickEnded);
     const quickPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'writing', ref: document.querySelector('#task-drawer').dataset.taskPlanRef })

@@ -24,6 +24,8 @@ import {
   WRITING_TYPE_LEGEND,
   writingDraftedLine,
   writingFieldTooLong,
+  WRITING_QUICK_PICK_TYPE,
+  writingQuickFailed,
   writingQuickNote,
   writingQuickStarted,
   writingQuickStarting,
@@ -284,15 +286,18 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     const plan = action(WRITING_ACTIONS.plan, 'primary', 'plan', () => void prepare(null));
     plan.disabled = busy || page.unavailable !== null;
     plan.setAttribute('aria-controls', 'task-drawer');
-    // 快速开始 is the Book's writing 默认执行规则's to give (S84b): with one in force that matches, it prepares and starts under it.
-    const rule = page.quickStart.available ? page.quickStart.rule : null;
+    // 快速开始 is the chosen type's writing 默认执行规则's to give (S84b): a rule covers only the type it was set from, so the
+    // type is chosen first; with that type's rule in force and matching, it prepares and starts under it.
+    const offer = chosen?.quickStart ?? null;
+    const rule = offer !== null && offer.available ? offer.rule : null;
     const quick = action(WRITING_ACTIONS.quick, 'secondary', 'quick', () => {
       if (rule !== null) void prepare(rule);
     });
     quick.disabled = busy || rule === null || page.unavailable !== null;
     quick.setAttribute('aria-controls', 'task-drawer');
-    if (page.quickStart.rule !== null) quick.dataset['ruleVersionId'] = page.quickStart.rule.ruleVersionId;
-    const quickReason = el('p', 'field-note writing-quick-reason', rule !== null ? writingQuickNote(rule.name) : page.quickStart.reason ?? '');
+    if (offer?.rule != null) quick.dataset['ruleVersionId'] = offer.rule.ruleVersionId;
+    const quickReason = el('p', 'field-note writing-quick-reason',
+      rule !== null ? writingQuickNote(rule.name) : offer === null ? WRITING_QUICK_PICK_TYPE : offer.reason ?? '');
     quickReason.dataset['quickStart'] = rule !== null ? 'available' : 'unavailable';
     quickReason.id = uid('quick');
     quick.setAttribute('aria-describedby', quickReason.id);
@@ -346,17 +351,25 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
         return;
       }
       const result = completed.result;
-      if (completed.kind !== 'writing-preparation' || result === null || !('quickStart' in result) || result.bookId !== projection?.bookId) {
+      if (completed.kind !== 'writing-preparation' || result === null || !('consequences' in result && 'types' in result) || result.bookId !== projection?.bookId) {
         throw new Error(WRITING_STATUS.failed);
       }
       projection = result;
       sheet = null;
       const ref = result.task?.taskIntentId ?? null;
       const planEnvelopeDigest = result.task?.planEnvelopeDigest ?? null;
-      if (rule === null || ref === null || planEnvelopeDigest === null) {
+      if (rule === null || ref === null) {
         options.setStatus(WRITING_STATUS.prepared, 'success');
         paint(null);
         if (ref !== null) options.openPlan(ref);
+        return;
+      }
+      if (planEnvelopeDigest === null) {
+        // A quick start whose preparation froze no plan stops at it, and says so (#701 review P3-5).
+        const note = taskPlanQuickStartFellBack([WRITING_STATUS.quickNoPlan]);
+        options.setStatus(note);
+        paint(null);
+        options.openPlan(ref, note);
         return;
       }
       await quickStart(ref, planEnvelopeDigest, rule);
@@ -381,7 +394,8 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       busy = false;
       if (destroyed) return;
       // The plan stands prepared: the bar starts it as usual.
-      options.setStatus(options.errorMessage(error, WRITING_STATUS.quickFailed), 'error');
+      // The service's own words, then where the plan stands (#701 review P3-5).
+      options.setStatus(writingQuickFailed(options.errorMessage(error, '')), 'error');
       paint(null);
       options.openPlan(ref);
       return;

@@ -5014,7 +5014,7 @@ function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjecti
   }
   panelNode.append(element('p', 'field-note', projection.statement));
   if (projection.rules.length === 0) {
-    panelNode.append(element('p', 'field-note default-rule-empty', '还没有默认执行规则。在分析的完整计划里点「设为快速开始默认…」就能设定。'));
+    panelNode.append(element('p', 'field-note default-rule-empty', '还没有默认执行规则。在分析或写作任务的完整计划里点「设为快速开始默认…」就能设定。'));
   }
   const list = element('div', 'default-rule-list');
   for (const rule of projection.rules) {

@@ -27,9 +27,11 @@ import { graphemeLength, writingDraftBlocks, writingWords } from '../../src/serv
 import {
   WRITING_CONSEQUENCE_TERMS,
   WRITING_REFERENCE_TERMS,
+  WRITING_QUICK_PICK_TYPE,
   WRITING_STATUS,
   writingDraftedLine,
   writingFieldTooLong,
+  writingQuickFailed,
   writingQuickNote,
   writingQuickStarted,
   writingQuickStarting,
@@ -345,5 +347,10 @@ describe('the draft and the page\'s words', () => {
     expect(writingQuickStarted('写作任务 · 第 1 版', false)).toBe('已按默认执行规则「写作任务 · 第 1 版」开始写作任务。');
     expect(writingQuickStarted('写作任务 · 第 1 版', true)).toBe('已按默认执行规则「写作任务 · 第 1 版」记下这项写作任务；当前启动没有可执行的路由，派发前已阻止。');
     expect(WRITING_STATUS.quickFailed).toBe('快速开始没有开始任务；计划已准备，可在任务计划里开始。');
+    // A failed call keeps where the plan stands after the service's words (#701 review P3-5).
+    expect(writingQuickFailed('任务计划已经变化；无法记录该授权。')).toBe('任务计划已经变化；无法记录该授权。快速开始没有开始任务；计划已准备，可在任务计划里开始。');
+    expect(writingQuickFailed('  ')).toBe(WRITING_STATUS.quickFailed);
+    expect(WRITING_STATUS.quickNoPlan).toBe('这份计划还没有冻结，没有按规则开始；请看过计划后再开始。');
+    expect(WRITING_QUICK_PICK_TYPE).toBe('选好类型后显示：快速开始按这一类文档的默认执行规则开始。');
   });
 });

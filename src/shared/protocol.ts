@@ -4551,12 +4551,20 @@ export interface WritingTaskTypeProjection {
   readonly exemplars: { readonly count: number; readonly statement: string };
   /** The newest drafted result of this type whose document has not been made yet: 打开草稿 makes it the document. */
   readonly drafted: null | { readonly revisionId: string; readonly createdAt: string };
+  /**
+   * 快速开始 of this type (Issue #432, S84b; S75 D5, D6): offered only while the Book has this type's writing 默认执行规则 in
+   * force that still matches the Book's facts, this launch may use one, and the type can be drafted now. A rule covers only the
+   * type of the plan it was set from (Commander ruling on #701: TASK-026, no widened source). One activation prepares the Task
+   * exactly as 先看计划 does and starts it exactly as 开始任务 would, its authorization naming the rule version; whatever would
+   * make the start differ from the rule stops at the plan with the reason. Without a rule it is shown, disabled, with why.
+   */
+  readonly quickStart: BaselineAnalysisQuickStartProjection;
 }
 
 /**
  * 新建文档 · 写作任务 on ⑥ 交付物 (Issue #432, S84a; V2-UX-DELIV-007): the house types, what every draft references — each
- * line saying what is there or that there is none — the four consequence rows, the Book's latest writing Task, and whether
- * 快速开始 starts one under the Book's writing 默认执行规则 (S84b), or why not.
+ * line saying what is there or that there is none — the four consequence rows, the Book's latest writing Task, and for each
+ * type whether 快速开始 starts one under that type's writing 默认执行规则 (S84b), or why not.
  */
 export interface WritingTaskProjection {
   readonly bookId: string;
@@ -4585,13 +4593,6 @@ export interface WritingTaskProjection {
     /** The Plan Envelope the Task froze — the exact plan a 快速开始 starts (S84b) — or `null` while none is frozen. */
     readonly planEnvelopeDigest: string | null;
   };
-  /**
-   * 快速开始 (Issue #432, S84b; S75 D5, D6): offered only while the Book has a writing 默认执行规则 in force that still matches the
-   * Book's facts, this launch may use one, and a writing Task can be prepared now. One activation prepares the Task exactly as
-   * 先看计划 does and starts it exactly as 开始任务 would, its authorization naming the rule version; whatever would make the
-   * start differ from the rule stops at the plan with the reason. Without a rule it is shown, disabled, with why.
-   */
-  readonly quickStart: BaselineAnalysisQuickStartProjection;
 }
 
 /** What one 快速开始 of a writing Task did: started it under the rule, or stopped at its plan with the reasons (S84b). */
@@ -5450,10 +5451,15 @@ export interface TaskPlanRedoProjection {
 /**
  * 默认执行规则 (Issue #421, plan slice S75; V2-UX-TASK-017, TASK-019, TASK-020, TASK-028, AUTH-009): the task
  * patterns a rule may cover — the baseline analysis's two updates of the whole Book, which ask for no range, and
- * (Issue #432, S84b) the writing Task of 新建文档, whose house type and words are each Task's own as a range is.
+ * (Issue #432, S84b) the writing Task of 新建文档 of one house type, `writing:<typeId>`: a rule covers only the type of the
+ * plan it was set from (Commander ruling on #701: TASK-026, no widened source), while the editor's audience, channel and
+ * requirements are each Task's own, as a range is.
  */
-export type DefaultExecutionRulePattern = 'sync-current' | 'reanalyze-book' | 'writing';
-export const DEFAULT_EXECUTION_RULE_PATTERNS: readonly DefaultExecutionRulePattern[] = ['sync-current', 'reanalyze-book', 'writing'];
+export type BaselineDefaultExecutionRulePattern = 'sync-current' | 'reanalyze-book';
+export type WritingDefaultExecutionRulePattern = `writing:${string}`;
+export type DefaultExecutionRulePattern = BaselineDefaultExecutionRulePattern | WritingDefaultExecutionRulePattern;
+/** The baseline's two patterns; a writing pattern is one per house type. */
+export const DEFAULT_EXECUTION_RULE_PATTERNS: readonly BaselineDefaultExecutionRulePattern[] = ['sync-current', 'reanalyze-book'];
 /** The analysis kind each pattern's Tasks are of, as the analysis ledger names it. */
 export type DefaultExecutionRuleKind = 'baseline-analysis' | 'writing';
 
