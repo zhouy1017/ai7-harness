@@ -8,7 +8,9 @@ import { BOOK_DELIVERY_PACKAGE_EXPORT_STATEMENT } from '../../src/service/book-d
 import { BookDeliveryPackages, BOOK_DELIVERY_PACKAGE_WORDS } from '../../src/service/book-delivery-packages.js';
 import { CooperativeJobOwner } from '../../src/service/cooperative-jobs.js';
 import { ManuscriptExportStore } from '../../src/service/manuscript-export.js';
+import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
+import type { EvaluationContent } from '../../src/shared/protocol.js';
 import { MATERIAL_INDEX_SCHEMA_VERSION, PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { PUBLICATION_FORBIDDEN_WORDS, type BookDeliveryPackageExportProjection } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx, type SourceSpan } from '../support/composed-fixture.js';
@@ -351,6 +353,69 @@ describe('图书交付包 · 导出 (S67b)', () => {
     const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       expect(JSON.stringify(reopened.inspectBookDeliveryPackage(bookId!))).toBe(before!);
+      reopened.markCleanShutdown();
+    } finally {
+      reopened.close();
+    }
+  }, 240_000);
+
+  it('refuses to write a 评估记录 whose pinned finalized entry is not the version\'s, and writes nothing (Issue #429)', async () => {
+    let bookId: string;
+    let v1: { packageVersionId: string; packageId: string; publicationVersionId: string; purpose: string; preparedAt: string; content: Record<string, unknown> };
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const prepared = await preparedPackage(store);
+      bookId = prepared.bookId;
+      // A 定稿 评估记录 scored by hand — the package made after it pins the version by its finalized entry.
+      const started = store.startEvaluation(bookId).record!;
+      const content: EvaluationContent = {
+        ...started.content,
+        items: started.content.items.map((item, index) => ({ ...item, score: [16, 15, 17, 14, 12][index]! })),
+        risks: started.content.risks.map((risk) => ({ ...risk, level: 'low' as const, statement: '已核对。', reviewed: false })),
+        conclusion: 'revise',
+      };
+      store.saveEvaluation({ bookId, recordId: started.recordId, expectedEntries: 1, content, finalize: true });
+      const bundle = store.inspectBookDeliveryPackage(bookId);
+      expect(bundle.content.included.map((item) => item.kind)).toContain('evaluation-record');
+      const made = store.prepareBookDeliveryPackage({ bookId, purpose: '交出版社存档', expectedContentDigest: bundle.content.digest });
+      expect(made).toMatchObject({ outcome: 'prepared', version: 2 });
+      const version = made.package.versions[0]!;
+      const review = await store.reviewBookDeliveryPackageExport({ bookId, packageVersionId: version.packageVersionId, options: ALL }, true);
+      expect(review.files.map((file) => file.key)).toEqual(['publication', 'document:news-release', 'evaluation-record', 'manifest']);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    // A v3 planted behind the ledger: v2's content, but naming a finalized entry the version never had.
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    let plantedId: string;
+    try {
+      const row = database.prepare('SELECT * FROM book_delivery_package_versions WHERE book_id = ? AND version = 2').get(bookId!) as Record<string, string | number>;
+      const record = JSON.parse(String(row.canonical_json)) as typeof v1 & { version: number; priorVersionId: string | null; contentDigest: string; schema: string; bookId: string; actor: string };
+      v1 = record;
+      const content = { ...record.content, evaluation: { ...(record.content.evaluation as Record<string, unknown>), entrySha256: 'f'.repeat(64) } };
+      const contentDigest = canonicalRecord(content).digest;
+      plantedId = randomUUID();
+      const planted = canonicalRecord({
+        ...record, packageVersionId: plantedId, version: 3, priorVersionId: record.packageVersionId, content, contentDigest, preparedAt: new Date().toISOString(),
+      });
+      database.prepare(
+        `INSERT INTO book_delivery_package_versions(package_version_id, package_id, book_id, version, prior_version_id, purpose, publication_version_id, content_sha256, actor, prepared_at, canonical_json, sha256)
+         VALUES (?, ?, ?, 3, ?, ?, ?, ?, '本机编辑', ?, ?, ?)`,
+      ).run(plantedId, String(row.package_id), bookId!, record.packageVersionId, String(row.purpose), String(row.publication_version_id), contentDigest,
+        (JSON.parse(planted.json) as { preparedAt: string }).preparedAt, planted.json, planted.digest);
+    } finally {
+      database.close();
+    }
+    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(reopened.inspectBookDeliveryPackage(bookId!).versions[0]!.version).toBe(3);
+      expect(await code(() => reopened.reviewBookDeliveryPackageExport({ bookId: bookId!, packageVersionId: plantedId!, options: ALL }, true)))
+        .toBe('BOOK_DELIVERY_PACKAGE_EXPORT_RECORD_INVALID');
+      expect([await count('export_preparations'), await count('book_delivery_package_exports')]).toEqual([0, 0]);
+      // v2, whose pin is the version's own finalized entry, still reviews.
+      expect((await reopened.reviewBookDeliveryPackageExport({ bookId: bookId!, packageVersionId: v1.packageVersionId, options: ALL }, true)).files.map((file) => file.key))
+        .toContain('evaluation-record');
       reopened.markCleanShutdown();
     } finally {
       reopened.close();

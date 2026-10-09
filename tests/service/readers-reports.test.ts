@@ -16,7 +16,7 @@ import { WRITING_TASK_SCHEMA_SQL } from '../../src/service/writing-tasks.js';
 import { DIALOGUE_SCHEMA_SQL } from '../../src/service/dialogue/dialogue-ledger.js';
 import { SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL } from '../../src/service/series-exclusions.js';
 import type { ReadersReportContractInput } from '../../src/service/evaluation/readers-report-contract.js';
-import { EditorialStore, REVIEW_CATEGORY_CACHE_CAPACITY, StoreError } from '../../src/service/store.js';
+import { EditorialStore, REVIEW_CATEGORY_CACHE_CAPACITY, StoreError, boundedGraphemes } from '../../src/service/store.js';
 import {
   ANALYSIS_LEDGER_REVISION_29_SQL,
   ANALYSIS_LEDGER_REVISION_30_SQL,
@@ -268,6 +268,9 @@ describe('审稿意见 over the real store on exact sample1', () => {
       expect(bundle.conditions.map((condition) => condition.key)).toEqual(['publication', 'document', 'document', 'document', 'document', 'document', 'work-records']);
       expect(bundle.content.included.filter((item) => item.kind === 'readers-report'))
         .toEqual([{ kind: 'readers-report', label: '审稿意见 · 给作者的修改意见 · 版本 1', detail: '发稿版本设定后才起草，按准备时的最新一版' }]);
+      // Nor does 范例 admit it while the Book has no 发稿版本 in force.
+      expect(await refusal(() => book.store.admitReadersReportExemplar({ bookId: book.bookId, template: 'author', revisionDigest: draft.document.versions[0]!.revisionDigest, expectedDecisions: 0 })))
+        .toBe('EXEMPLAR_NEEDS_PUBLICATION:这本书没有在用的发稿版本，审稿意见还不能归入范例。');
 
       // Edited on the manuscript surface and 保存为版本: 版本 2.
       const first = window.blocks[2]!;
@@ -406,6 +409,55 @@ describe('审稿意见 over the real store on exact sample1', () => {
       const other = await importSample1Book(book.store, roots.codeRoot, '另一本书');
       expect(book.store.inspectEvaluation(other.bookId, null).readersReport.exemplars)
         .toEqual({ count: 1, statement: '参考本社 1 份审稿意见范例：《审稿意见之书 · 审稿意见 · 给作者的修改意见》' });
+      // Another 发稿版本 moves the pin to the version latest at the new designation (版本 4, 再改): the admission of 版本 2 reads
+      // 这一版尚未归入, and the other Book takes no 范例 from a version the editor never admitted.
+      const again = await book.store.saveMilestone(book.manuscriptId, book.branchId, '付印稿', 'stage-archive', null, '');
+      book.store.designatePublicationVersion({ bookId, milestoneId: again.milestoneId, scope: '纸质版首印', basis: '付印' });
+      const latestVersion = book.store.inspectEvaluation(bookId, null).readersReport.templates[0]!.draft!.document.versions[0]!;
+      expect(latestVersion.label).toBe('版本 4');
+      expect(book.store.inspectExemplars(null).books[0]!.readersReports[0]).toMatchObject({
+        version: 4, revisionDigest: latestVersion.revisionDigest, pin: 'designation', admission: { state: 'superseded', admittedAt: null, decisions: 1 },
+      });
+      expect(book.store.inspectEvaluation(other.bookId, null).readersReport.exemplars).toEqual({ count: 0, statement: READERS_REPORT_NO_EXEMPLAR });
+    });
+  }, 300_000);
+
+  it('seeds a draft with at most two admitted 审稿意见, by Book title, each its opening past the contract\'s bound (Issue #429)', async () => {
+    await withBook(async (book) => {
+      // Three Books drafted first — before any admission, so each contract asks the fixture the same question — then each
+      // designated and admitted; the fourth reads exactly two 范例 in `b.title COLLATE BINARY` order: 丙 (U+4E19), 乙 (U+4E59), never 审 (U+5BA1).
+      const drafted: Array<Book & { revisionDigest: string }> = [];
+      for (const title of [null, '丙书', '乙书']) {
+        let current: Book = book;
+        if (title !== null) {
+          const imported = await importSample1Book(book.store, roots.codeRoot, title);
+          await pinEditorialWorkspaceProfileRevision2(book.store, imported.bookId);
+          current = { ...book, bookId: imported.bookId, manuscriptId: imported.manuscriptId, branchId: imported.branchId };
+        }
+        await runInitialEvaluationToEnd(book.store, book.owner, current.bookId, launchPolicy);
+        finalizeAsJ11(book.store, current.bookId);
+        await draftReport(current, 'author');
+        const settled = book.store.inspectReadersReport(current.bookId)!;
+        const draft = book.store.createReadersReportDraft(current.bookId, settled.resultSetRevision!.revisionId).readersReport.templates[0]!.draft!.document;
+        drafted.push({ ...current, revisionDigest: draft.versions[0]!.revisionDigest });
+      }
+      for (const entry of drafted) {
+        const milestone = await book.store.saveMilestone(entry.manuscriptId, entry.branchId, '三审稿', 'stage-archive', null, '');
+        book.store.designatePublicationVersion({ bookId: entry.bookId, milestoneId: milestone.milestoneId, scope: '纸质版首印', basis: '三审通过' });
+        expect(book.store.admitReadersReportExemplar({ bookId: entry.bookId, template: 'author', revisionDigest: entry.revisionDigest, expectedDecisions: 0 })
+          .readersReports[0]!.admission.state).toBe('admitted');
+      }
+      const fourth = await importSample1Book(book.store, roots.codeRoot, '丁书');
+      expect(book.store.inspectEvaluation(fourth.bookId, null).readersReport.exemplars).toEqual({
+        count: 2, statement: '参考本社 2 份审稿意见范例：《丙书 · 审稿意见 · 给作者的修改意见》、《乙书 · 审稿意见 · 给作者的修改意见》',
+      });
+      // Each admitting Book still takes none of its own, and the two the fourth takes are the other two Books' when it is 审稿意见之书.
+      expect(book.store.inspectEvaluation(book.bookId, null).readersReport.exemplars).toEqual({
+        count: 2, statement: '参考本社 2 份审稿意见范例：《丙书 · 审稿意见 · 给作者的修改意见》、《乙书 · 审稿意见 · 给作者的修改意见》',
+      });
+      // The opening a 范例 hands the contract: whole graphemes, never a split combining mark, cut at the bound.
+      expect(boundedGraphemes(`${'a\u0301'.repeat(3)}bcd`, 4)).toBe(`${'a\u0301'.repeat(3)}b`);
+      expect(boundedGraphemes('短', 4_000)).toBe('短');
     });
   }, 300_000);
 

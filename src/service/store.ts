@@ -1570,7 +1570,7 @@ function asNumber(value: SQLOutputValue | undefined, code = 'STORE_CORRUPT'): nu
 const READERS_REPORT_EXEMPLAR_KEY_PREFIX = 'readers-report-exemplar:';
 
 /** The opening of `value` within `max` graphemes (Issue #429): what a 审稿意见 范例 hands a contract when it is longer than the contract takes. */
-function boundedGraphemes(value: string, max: number): string {
+export function boundedGraphemes(value: string, max: number): string {
   let count = 0;
   let opening = '';
   for (const { segment } of new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(value)) {

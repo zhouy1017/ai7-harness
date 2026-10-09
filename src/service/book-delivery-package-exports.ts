@@ -466,8 +466,11 @@ export class BookDeliveryPackageExports {
       `- ${BOOK_DELIVERY_PACKAGE_WORDS.libraryOriginals}`,
       `- ${BOOK_DELIVERY_PACKAGE_WORDS.intermediateRevisions}：${BOOK_DELIVERY_PACKAGE_WORDS.intermediateRevisionsDetail}`,
       ...(notForThisBook.length === 0 ? [] : [`- ${BOOK_DELIVERY_PACKAGE_WORDS.notForThisBook}：${notForThisBook.join('、')}`]),
-      ...(evaluation === null ? [`- ${BOOK_DELIVERY_PACKAGE_WORDS.evaluationRecord}：${BOOK_DELIVERY_PACKAGE_WORDS.evaluationMissing}`] : []),
-      ...(readersReports.length === 0 ? [`- ${BOOK_DELIVERY_PACKAGE_WORDS.readersReport}：${BOOK_DELIVERY_PACKAGE_WORDS.readersReportMissing}`] : []),
+      // Only a `/2` version examined these two records (Issue #429); a `/1` version's frozen 说明 line already explains itself.
+      ...(record.content.schema === 'ai7.book-delivery-package-content/2' && evaluation === null
+        ? [`- ${BOOK_DELIVERY_PACKAGE_WORDS.evaluationRecord}：${BOOK_DELIVERY_PACKAGE_WORDS.evaluationMissing}`] : []),
+      ...(record.content.schema === 'ai7.book-delivery-package-content/2' && readersReports.length === 0
+        ? [`- ${BOOK_DELIVERY_PACKAGE_WORDS.readersReport}：${BOOK_DELIVERY_PACKAGE_WORDS.readersReportMissing}`] : []),
       '',
       '## 说明',
       '',
@@ -703,7 +706,7 @@ export function evaluationRecordMarkdown(bookTitle: string, finalized: Finalized
       return `- ${risk.label}：${level}${own?.statement == null || own.statement === '' ? '' : `；${own.statement}`}`;
     }),
     '',
-    '## 距离可出版还差什么',
+    '## 就绪清单',
     '',
     ...list(content.readiness, '无'),
     '',
