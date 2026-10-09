@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SeriesKnowledgeLedger, SERIES_KNOWLEDGE_PAGE_BYTES, SERIES_KNOWLEDGE_SCHEMA_SQL, SERIES_KNOWLEDGE_TRIGGER_SQL } from '../../src/service/series-knowledge.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { WRITING_TASK_SCHEMA_VERSION, SERIES_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
+import { BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, SERIES_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import {
   MAX_FRAME_BYTES,
@@ -438,7 +438,7 @@ describe('书系知识 over the real store', () => {
     }
     const database = new DatabaseSync(databasePath());
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
       for (const table of TABLES) expect(() => database.exec(`DELETE FROM ${table}`)).toThrowError(/SERIES_KNOWLEDGE_LEDGER_IMMUTABLE/u);
       expect(() => database.exec("UPDATE series_knowledge_revisions SET content = '改过'")).toThrowError(/SERIES_KNOWLEDGE_LEDGER_IMMUTABLE/u);
       database.exec('DROP TRIGGER series_knowledge_revisions_no_update');
@@ -490,7 +490,7 @@ describe('书系知识 over the real store', () => {
     }
     const database = new DatabaseSync(databasePath(), { readOnly: true });
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
       const after = schemaOf(database);
       // Revision 54's version ledger (Issue #433, S85a) returns with it, as the planted store lacked it too.
       expect(after.filter((entry) => !/^(series_knowledge|store_versions|database_export_|backup_preferences|scheduled_backup|database_replacements|database_merge|evaluation_initial_drafts|dialogue_|series_retrieval_exclusions|readers_report_|captured_procedure|review_run_procedure_pins|developer_capability_proposal|evaluation_rewrite_|writing_)/u.test(entry.name))).toEqual(before!);

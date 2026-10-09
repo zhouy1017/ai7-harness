@@ -8,7 +8,7 @@ import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execu
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { WRITING_TASK_SCHEMA_VERSION, EVALUATION_RECORD_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
+import { BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, EVALUATION_RECORD_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
   type AnalysisFeedbackProjection,
@@ -206,7 +206,7 @@ describe('②A 分析反馈 over the real store', () => {
     }
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
       expect(() => database.exec('UPDATE analysis_feedback_signals SET judgment = judgment')).toThrowError(/ANALYSIS_FEEDBACK_LEDGER_IMMUTABLE/u);
       expect(() => database.exec('DELETE FROM analysis_feedback_signals')).toThrowError(/ANALYSIS_FEEDBACK_LEDGER_IMMUTABLE/u);
       // Rewritten by hand behind the triggers' back, the signal no longer reads, and the page says so rather than guess.
@@ -246,7 +246,7 @@ describe('②A 分析反馈 over the real store', () => {
     }
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
       expect((database.prepare('SELECT count(*) count FROM analysis_feedback_signals').get() as { count: number }).count).toBe(0);
     } finally {
       database.close();

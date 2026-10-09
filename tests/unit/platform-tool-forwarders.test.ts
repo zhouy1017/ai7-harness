@@ -107,26 +107,26 @@ describe('the websearch forwarder', () => {
 
   it('sends exactly once under a redeemed ticket, and nothing without one', async () => {
     const rule = await v7Rule();
-    const book = new EgressTicketBook();
+    const book = EgressTicketBook.open(binding(rule), scope);
     const calls: StubCall[] = [];
     const fetch = stub(() => new Response(JSON.stringify(SEARCH_ANSWER), { status: 200, headers: { 'content-type': 'application/json' } }), calls);
-    const decision = evaluateSearchServiceCall({ host: rule.websearch.host, arguments: websearch, outboundDataCategory: 'public-or-synthetic' }, binding(rule), scope, book);
+    const decision = evaluateSearchServiceCall({ arguments: websearch }, binding(rule), scope, book);
     const ticket = (decision as { ticket: SearchServiceTicket }).ticket;
-    // A ticket for another query, a forged one, or one from another book sends nothing.
+    // A ticket for another query, a copy of it, one from another book, or a book the gate did not open sends nothing.
     const other = canonicalToolArguments('websearch', { query: '别的查询' }) as typeof websearch;
-    await expect(forwardSearchCall({ ticket, book, rule, arguments: other, fetch })).rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
-    await expect(forwardSearchCall({ ticket, book: new EgressTicketBook(), rule, arguments: websearch, fetch })).rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
-    // A ticket decided under one rule's host never reaches the host another rule names.
-    const moved = { ...rule, websearch: { ...rule.websearch, host: 'search.example.net' } };
-    await expect(forwardSearchCall({ ticket, book, rule: moved, arguments: websearch, fetch })).rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
+    await expect(forwardSearchCall({ ticket, book, arguments: other, fetch })).rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
+    await expect(forwardSearchCall({ ticket: { ...ticket }, book, arguments: websearch, fetch })).rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
+    await expect(forwardSearchCall({ ticket, book: EgressTicketBook.open(binding(rule), scope), arguments: websearch, fetch })).rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
+    const lookalike = { redeem: () => true, revoke: () => undefined, outstanding: 1 } as unknown as EgressTicketBook;
+    await expect(forwardSearchCall({ ticket, book: lookalike, arguments: websearch, fetch })).rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
     expect(calls).toHaveLength(0);
-    const outcome = await forwardSearchCall({ ticket, book, rule, arguments: websearch, fetch });
+    const outcome = await forwardSearchCall({ ticket, book, arguments: websearch, fetch });
     expect(outcome).toMatchObject({ url: 'https://search.parallel.ai/mcp', status: 200, text: SEARCH_ANSWER.result.content[0]!.text });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.init).toMatchObject({ method: 'POST', redirect: 'manual' });
     expect(calls[0]!.init.headers).not.toHaveProperty('authorization');
     // The same ticket never sends twice.
-    await expect(forwardSearchCall({ ticket, book, rule, arguments: websearch, fetch })).rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
+    await expect(forwardSearchCall({ ticket, book, arguments: websearch, fetch })).rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
     expect(calls).toHaveLength(1);
   });
 });
@@ -134,13 +134,13 @@ describe('the websearch forwarder', () => {
 describe('the webfetch owner', () => {
   async function fetchWith(respond: (url: string) => Response, rule?: PlatformToolsRule): Promise<{ outcome: Awaited<ReturnType<typeof fetchPublicSource>>; admitted: string[]; released: number; calls: StubCall[] }> {
     const effective = rule ?? await v7Rule();
-    const book = new EgressTicketBook();
+    const book = EgressTicketBook.open(binding(effective), scope);
     const decision = evaluatePublicSourceFetch({ arguments: webfetch }, binding(effective), scope, book) as { ticket: PublicSourceTicket };
     const admitted: string[] = [];
     let released = 0;
     const calls: StubCall[] = [];
     const outcome = await fetchPublicSource({
-      ticket: decision.ticket, book, rule: effective, fetch: stub(respond, calls),
+      ticket: decision.ticket, book, fetch: stub(respond, calls),
       admitHost: ({ host }) => { admitted.push(host); return () => { released += 1; }; },
     });
     return { outcome, admitted, released, calls };
@@ -180,12 +180,12 @@ describe('the webfetch owner', () => {
   it('refuses a page past the rule\'s byte cap and sends nothing without a redeemable ticket', async () => {
     const rule = await v7Rule();
     const small = { ...rule, webfetch: { ...rule.webfetch, maxBytes: 8 } };
-    const book = new EgressTicketBook();
+    const book = EgressTicketBook.open(binding(small), scope);
     const decision = evaluatePublicSourceFetch({ arguments: webfetch }, binding(small), scope, book) as { ticket: PublicSourceTicket };
     let released = 0;
     const calls: StubCall[] = [];
     const run = (): ReturnType<typeof fetchPublicSource> => fetchPublicSource({
-      ticket: decision.ticket, book, rule: small,
+      ticket: decision.ticket, book,
       fetch: stub(() => new Response('0123456789', { status: 200, headers: { 'content-type': 'text/plain' } }), calls),
       admitHost: () => () => { released += 1; },
     });
@@ -201,17 +201,17 @@ describe('the webfetch owner', () => {
 describe('authorized calls', () => {
   it('send once each, and nothing an authorization did not produce', async () => {
     const rule = await v7Rule();
-    const book = new EgressTicketBook();
+    const book = EgressTicketBook.open(binding(rule), scope);
     const calls: StubCall[] = [];
     const fetch = stub(() => new Response(JSON.stringify(SEARCH_ANSWER), { status: 200, headers: { 'content-type': 'application/json' } }), calls);
-    const search = evaluateSearchServiceCall({ host: rule.websearch.host, arguments: websearch, outboundDataCategory: 'public-or-synthetic' }, binding(rule), scope, book) as { ticket: SearchServiceTicket };
-    const authorized = authorizeSearchCall({ ticket: search.ticket, book, rule, arguments: websearch });
+    const search = evaluateSearchServiceCall({ arguments: websearch }, binding(rule), scope, book) as { ticket: SearchServiceTicket };
+    const authorized = authorizeSearchCall({ ticket: search.ticket, book, arguments: websearch });
     await sendSearchCall(authorized, fetch);
     await expect(sendSearchCall(authorized, fetch)).rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
     await expect(sendSearchCall({ request: authorized.request }, fetch)).rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
     expect(calls).toHaveLength(1);
     const page = evaluatePublicSourceFetch({ arguments: webfetch }, binding(rule), scope, book) as { ticket: PublicSourceTicket };
-    const fetchAuthorized = authorizePublicFetch({ ticket: page.ticket, book, rule });
+    const fetchAuthorized = authorizePublicFetch({ ticket: page.ticket, book });
     const opened: string[] = [];
     const send = { fetch: stub(() => new Response('x', { status: 200, headers: { 'content-type': 'text/plain' } }), calls), admitHost: ({ host }: { host: string }) => { opened.push(host); return () => undefined; } };
     await sendPublicFetch(fetchAuthorized, send);
@@ -240,10 +240,10 @@ describe('the forwarders\' bounds', () => {
   it('gives a search 25 seconds and not one more', async () => {
     vi.useFakeTimers();
     const rule = await v7Rule();
-    const book = new EgressTicketBook();
+    const book = EgressTicketBook.open(binding(rule), scope);
     const seen = { aborted: false };
-    const decision = evaluateSearchServiceCall({ host: rule.websearch.host, arguments: websearch, outboundDataCategory: 'public-or-synthetic' }, binding(rule), scope, book);
-    const pending = forwardSearchCall({ ticket: (decision as { ticket: SearchServiceTicket }).ticket, book, rule, arguments: websearch, fetch: hanging(seen) });
+    const decision = evaluateSearchServiceCall({ arguments: websearch }, binding(rule), scope, book);
+    const pending = forwardSearchCall({ ticket: (decision as { ticket: SearchServiceTicket }).ticket, book, arguments: websearch, fetch: hanging(seen) });
     const settled = pending.catch((error: unknown) => error);
     await vi.advanceTimersByTimeAsync(SEARCH_SERVICE_TIMEOUT_MS - 1);
     expect(seen.aborted).toBe(false);
@@ -254,11 +254,11 @@ describe('the forwarders\' bounds', () => {
   it('gives a fetch the rule\'s seconds and not one more, releasing its host', async () => {
     vi.useFakeTimers();
     const rule = await v7Rule();
-    const book = new EgressTicketBook();
+    const book = EgressTicketBook.open(binding(rule), scope);
     const seen = { aborted: false };
     let released = 0;
     const decision = evaluatePublicSourceFetch({ arguments: webfetch }, binding(rule), scope, book) as { ticket: PublicSourceTicket };
-    const settled = fetchPublicSource({ ticket: decision.ticket, book, rule, fetch: hanging(seen), admitHost: () => () => { released += 1; } })
+    const settled = fetchPublicSource({ ticket: decision.ticket, book, fetch: hanging(seen), admitHost: () => () => { released += 1; } })
       .catch((error: unknown) => error);
     await vi.advanceTimersByTimeAsync(rule.webfetch.timeoutSeconds * 1000 - 1);
     expect(seen.aborted).toBe(false);
@@ -270,7 +270,7 @@ describe('the forwarders\' bounds', () => {
   it('cancels an endless body the moment it passes the cap, pulling nothing after', async () => {
     const rule = await v7Rule();
     const small = { ...rule, webfetch: { ...rule.webfetch, maxBytes: 10 } };
-    const book = new EgressTicketBook();
+    const book = EgressTicketBook.open(binding(small), scope);
     const decision = evaluatePublicSourceFetch({ arguments: webfetch }, binding(small), scope, book) as { ticket: PublicSourceTicket };
     let pulls = 0;
     let cancelled = false;
@@ -284,7 +284,7 @@ describe('the forwarders\' bounds', () => {
       },
     }, { highWaterMark: 0 });
     await expect(fetchPublicSource({
-      ticket: decision.ticket, book, rule: small, admitHost: () => () => undefined,
+      ticket: decision.ticket, book, admitHost: () => () => undefined,
       fetch: async () => new Response(endless, { status: 200, headers: { 'content-type': 'text/plain' } }),
     })).rejects.toMatchObject({ code: 'PLATFORM_TOOL_BODY_TOO_LARGE' });
     expect(cancelled).toBe(true);
@@ -345,11 +345,11 @@ describe('htmlToMarkdown on hostile markup', () => {
 
   it('bounds the text a fetch hands the model at the search-result bound, keeping the page\'s bytes whole', async () => {
     const rule = await v7Rule();
-    const book = new EgressTicketBook();
+    const book = EgressTicketBook.open(binding(rule), scope);
     const decision = evaluatePublicSourceFetch({ arguments: webfetch }, binding(rule), scope, book) as { ticket: PublicSourceTicket };
     const page = `<p>${'页'.repeat(WEBFETCH_TEXT_MAX_CHARACTERS + 5)}</p>`;
     const outcome = await fetchPublicSource({
-      ticket: decision.ticket, book, rule, admitHost: () => () => undefined,
+      ticket: decision.ticket, book, admitHost: () => () => undefined,
       fetch: async () => new Response(page, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } }),
     });
     expect(WEBFETCH_TEXT_MAX_CHARACTERS).toBe(SEARCH_RESULT_MAX_CHARACTERS);
@@ -358,7 +358,7 @@ describe('htmlToMarkdown on hostile markup', () => {
     // A plain-text page is held to the same bound.
     const plain = evaluatePublicSourceFetch({ arguments: webfetch }, binding(rule), scope, book) as { ticket: PublicSourceTicket };
     const text = await fetchPublicSource({
-      ticket: plain.ticket, book, rule, admitHost: () => () => undefined,
+      ticket: plain.ticket, book, admitHost: () => () => undefined,
       fetch: async () => new Response('文'.repeat(WEBFETCH_TEXT_MAX_CHARACTERS + 1), { status: 200, headers: { 'content-type': 'text/plain; charset=utf-8' } }),
     });
     expect(text.text).toBe(`${'文'.repeat(WEBFETCH_TEXT_MAX_CHARACTERS)}${TRUNCATION_MARKER}`);
@@ -400,5 +400,60 @@ describe('htmlToMarkdown', () => {
     expect(markdown).not.toContain('note');
     expect(markdown).not.toContain('p{}');
     expect(decodeEntities('&lt;&gt;&amp;&quot;&#39;&bogus;&#0;')).toBe('<>&"\'&bogus;&#0;');
+  });
+});
+
+describe('only the gate\'s tickets send, under the gate\'s rule, while their binding is current (#676)', () => {
+  it('refuses both forwarders once the binding the ticket was issued under is no longer current', async () => {
+    const rule = await v7Rule();
+    let current: string | null = 'c'.repeat(64);
+    const book = EgressTicketBook.open(binding(rule), { currentBindingDigest: () => current });
+    const calls: StubCall[] = [];
+    const fetch = stub(() => new Response(JSON.stringify(SEARCH_ANSWER), { status: 200, headers: { 'content-type': 'application/json' } }), calls);
+    const search = (evaluateSearchServiceCall({ arguments: websearch }, binding(rule), scope, book) as { ticket: SearchServiceTicket }).ticket;
+    const page = (evaluatePublicSourceFetch({ arguments: webfetch }, binding(rule), scope, book) as { ticket: PublicSourceTicket }).ticket;
+    current = 'd'.repeat(64);
+    let opened = 0;
+    await expect(forwardSearchCall({ ticket: search, book, arguments: websearch, fetch })).rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
+    await expect(fetchPublicSource({ ticket: page, book, fetch, admitHost: () => { opened += 1; return () => undefined; } }))
+      .rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
+    // Refused for a stale binding, a ticket is spent: the binding coming back does not revive it.
+    current = 'c'.repeat(64);
+    await expect(forwardSearchCall({ ticket: search, book, arguments: websearch, fetch })).rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
+    expect(calls).toHaveLength(0);
+    expect(opened).toBe(0);
+  });
+
+  it('builds the request and the bounds from the rule the gate returns, and opens the host under the ticket\'s own id', async () => {
+    const rule = await v7Rule();
+    // The binding's rule names another host and a smaller page: that is what the forwarders use, whatever else exists.
+    const moved = { ...rule, websearch: { ...rule.websearch, host: 'search.example.net' }, webfetch: { ...rule.webfetch, maxBytes: 4 } };
+    const book = EgressTicketBook.open(binding(moved), scope);
+    const calls: StubCall[] = [];
+    const search = (evaluateSearchServiceCall({ arguments: websearch }, binding(moved), scope, book) as { ticket: SearchServiceTicket }).ticket;
+    const outcome = await forwardSearchCall({ ticket: search, book, arguments: websearch,
+      fetch: stub(() => new Response(JSON.stringify(SEARCH_ANSWER), { status: 200, headers: { 'content-type': 'application/json' } }), calls) });
+    expect(outcome.url).toBe('https://search.example.net/mcp');
+    const page = (evaluatePublicSourceFetch({ arguments: webfetch }, binding(moved), scope, book) as { ticket: PublicSourceTicket }).ticket;
+    const admissions: Array<{ host: string; port: number; ticketId: string }> = [];
+    await expect(fetchPublicSource({ ticket: page, book, admitHost: (target) => { admissions.push({ ...target }); return () => undefined; },
+      fetch: stub(() => new Response('0123456789', { status: 200, headers: { 'content-type': 'text/plain' } }), calls) }))
+      .rejects.toMatchObject({ code: 'PLATFORM_TOOL_BODY_TOO_LARGE' });
+    expect(admissions).toEqual([{ host: 'example.org', port: 443, ticketId: page.ticketId }]);
+    expect(calls.map((call) => call.url)).toEqual(['https://search.example.net/mcp', CITED]);
+  });
+
+  it('issues no ticket over a rule other than the one the book was opened with', async () => {
+    const rule = await v7Rule();
+    const moved = { ...rule, websearch: { ...rule.websearch, host: 'search.example.net' } };
+    // The book holds the rule its binding was opened with; a binding claiming another rule under the same digest is not
+    // that binding, so neither decision issues into the book.
+    const book = EgressTicketBook.open(binding(rule), scope);
+    expect(evaluateSearchServiceCall({ arguments: websearch }, binding(moved), scope, book)).toMatchObject({ decision: 'refuse', reason: 'ticket-book-foreign' });
+    expect(evaluatePublicSourceFetch({ arguments: webfetch }, binding(moved), scope, book)).toMatchObject({ decision: 'refuse', reason: 'ticket-book-foreign' });
+    // An equal rule in another object is the same rule.
+    expect(evaluateSearchServiceCall({ arguments: websearch }, binding(JSON.parse(JSON.stringify(rule)) as PlatformToolsRule), scope, book))
+      .toMatchObject({ decision: 'call-search-service' });
+    expect(book.outstanding).toBe(1);
   });
 });

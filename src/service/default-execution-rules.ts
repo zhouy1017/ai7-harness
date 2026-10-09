@@ -246,7 +246,8 @@ export function defaultExecutionRuleDrift(binding: DefaultExecutionRuleBinding, 
     .map((entry) => DRIFT_FIELD_LABELS[entry.field] ?? entry.label);
 }
 
-function isBinding(value: unknown): value is DefaultExecutionRuleBinding {
+/** Whether a stored value is exactly a binding a rule — or a Background Analysis Enrollment (Issue #95, S39) — holds. */
+export function isDefaultExecutionRuleBinding(value: unknown): value is DefaultExecutionRuleBinding {
   if (!isRecord(value) || !isRecord(value.providerBinding) || !isRecord(value.artifactPin)) return false;
   const provider = value.providerBinding;
   const pin = value.artifactPin;
@@ -322,7 +323,7 @@ export class DefaultExecutionRuleLedger {
     binding: DefaultExecutionRuleBinding;
   }): DefaultExecutionRuleRecord {
     requireRule(UUID_PATTERN.test(input.bookId) && UUID_PATTERN.test(input.sourceTaskIntentId) &&
-      DIGEST_PATTERN.test(input.sourcePlanEnvelopeDigest) && isDefaultExecutionRulePattern(input.pattern) && isBinding(input.binding),
+      DIGEST_PATTERN.test(input.sourcePlanEnvelopeDigest) && isDefaultExecutionRulePattern(input.pattern) && isDefaultExecutionRuleBinding(input.binding),
     'DEFAULT_EXECUTION_RULE_INVALID', '默认执行规则的参数无效。');
     return transact(this.#db, () => {
       const now = new Date().toISOString();
@@ -423,7 +424,7 @@ export class DefaultExecutionRuleLedger {
       actor: text(row.actor), createdAt,
     });
     const binding = record.binding;
-    requireRule(isBinding(binding), 'DEFAULT_EXECUTION_RULE_RECORD_INVALID', '默认执行规则记录的绑定无效。');
+    requireRule(isDefaultExecutionRuleBinding(binding), 'DEFAULT_EXECUTION_RULE_RECORD_INVALID', '默认执行规则记录的绑定无效。');
     return { ruleVersionId, ordinal, sourceTaskIntentId, sourcePlanEnvelopeDigest, binding, createdAt };
   }
 

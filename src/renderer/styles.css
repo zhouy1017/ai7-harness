@@ -1637,3 +1637,18 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   max-height: 18rem;
   overflow: auto;
 }
+
+/* 后台分析 (Issue #95, S39): the Book's Background Analysis Enrollment beside its analysis. */
+.background-analysis { display: grid; gap: .6rem; margin-top: 1rem; }
+.background-analysis p { margin: 0; overflow-wrap: anywhere; }
+.background-analysis-heading { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
+.background-analysis-heading h3 { margin: 0; }
+.background-analysis-rows { display: grid; grid-template-columns: minmax(6rem, max-content) 1fr; gap: .3rem .8rem; margin: 0; }
+.background-analysis-rows dd { margin: 0; overflow-wrap: anywhere; }
+.background-analysis-started, .background-analysis-history ol { display: grid; gap: .3rem; margin: 0; padding-left: 1.4rem; }
+.background-analysis-disclosure, .background-analysis-revoke { display: grid; gap: .6rem; border-left: 3px solid currentColor; padding-left: .8rem; }
+.background-analysis-disclosure h4, .background-analysis-revoke h4, .background-analysis-disclosure h5 { margin: 0; }
+.background-analysis-starting-points { display: grid; gap: .4rem; border: 1px solid currentColor; padding: .6rem .8rem; }
+.background-analysis-starting-point { display: grid; grid-template-columns: auto 1fr; gap: .1rem .5rem; align-items: baseline; }
+.background-analysis-starting-point .field-note { grid-column: 2; }
+@media (max-width: 40rem) { .background-analysis-rows { grid-template-columns: 1fr; } }

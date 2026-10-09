@@ -31,6 +31,7 @@ import {
   SELECTION_UNAVAILABLE_REASON,
 } from '../../src/service/review/review-scope.js';
 import { selectionExcludedLine, selectionOutsideLine, UNREAD_WALK_CUT_NOTE } from '../../src/service/review/review-runs.js';
+import { CARRIED_GAP_REASON } from '../../src/service/analysis/reuse-plan.js';
 import { ANALYSIS_LEDGER_TRIGGER_SQL } from '../../src/service/task-authorization.js';
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
@@ -856,25 +857,41 @@ describe('a Review Run over the real store on exact sample1', () => {
     });
   }, 300_000);
 
-  it('reads 需复审 for exactly what 只审改动过的章 reads again, and counts no read that failed or ran under another contract (#711 review P2-1)', async () => {
+  it('reads 需复审 for exactly what 只审改动过的章 reads again, and keeps a failed read a gap across a later 选章, which 只审改动过的章 retries (#711 review P2-1; Issue #716)', async () => {
     await withBook('sample1-review-authored', async (session, book) => {
       const row = () => workspace(session, book).coverage.find((entry) => entry.categoryId === TYPOS)!;
       const changedScope = () => workspace(session, book).categories.find((category) => category.categoryId === TYPOS)!.scopes.changed;
+      const inspect = () => session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
+      const gaps = () => inspect().resultSetRevision!.gaps.map((gap) => [gap.startPosition, gap.code, gap.reason]);
       // A read that failed: edited before the category's first review, chapter 16–25 is not one the fixture answers, so 审阅全书
-      // leaves it a failed gap; a 选章 elsewhere then leaves it unread. No Run has read it, and nothing changed since: the
-      // matrix reads 当前 with no changed block, and 只审改动过的章 is not offered — the two never disagree.
+      // leaves it a failed gap.
       appendToBlockAt(session, book, 20, '的的');
       expect(await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE))).toMatchObject({ state: 'settled' });
-      expect(session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE)).resultSetRevision!.gaps
-        .map((gap) => [gap.startPosition, gap.code])).toEqual([[16, 'adapter-failure']]);
-      await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], chapterScope(session, book, 44)));
-      expect(row()).toMatchObject({ state: 'current', lastRunOrdinal: 2, changedBlocks: 0, unavailableReason: null });
-      expect(changedScope().available).toBe(false);
-      // Edited once more after that, it changed since the 全书 that failed it — measured past the failure, from where its place
-      // was last read with other words: both sides say so.
-      appendToBlockAt(session, book, 21, '的的');
+      expect(gaps().map(([position, code]) => [position, code])).toEqual([[16, 'adapter-failure']]);
+      // A 选章 elsewhere, and another after it, carry it as the gap it is — never relabelled out of scope — so coverage keeps
+      // 「1 处缺口」. Nothing changed since: the matrix reads 当前 with no changed block, and 只审改动过的章 is not offered.
+      for (const position of [44, 76]) {
+        const chosen = prepare(session, book, [TYPOS], chapterScope(session, book, position));
+        expect(chosen.categories[0]!.plan).toMatchObject({ unreviewed: 1 });
+        expect(inspect().update!.reusePlan!.units.filter((unit) => unit.disposition === 'unreviewed').map((unit) => [unit.startPosition, unit.reason]))
+          .toEqual([[16, 'predecessor-gap']]);
+        await authorizeAndDrive(session, book, chosen);
+        expect(gaps()).toEqual([[16, 'not-attempted', CARRIED_GAP_REASON]]);
+        expect(inspect().resultSetRevision!.coverage).toMatchObject({ gapCount: 1, label: expect.stringContaining('1 处缺口') });
+        expect(row()).toMatchObject({ state: 'current', changedBlocks: 0, unavailableReason: null });
+        expect(changedScope().available).toBe(false);
+      }
+      // An edit in another chapter makes the latest revision stale — that, not the walk, is what moves the row to 需复审 — and
+      // 只审改动过的章 then retries the carried gap the way it retries any predecessor gap, beside the edited chapter.
+      appendToBlockAt(session, book, 80, '的的');
       expect(row()).toMatchObject({ state: 'needs-review', changedBlocks: 1 });
       expect(changedScope()).toEqual({ available: true, unavailableReason: null });
+      const synced = prepare(session, book, [TYPOS], CHANGED);
+      expect(inspect().update!.reusePlan!.units.filter((unit) => unit.disposition === 'recomputed').map((unit) => [unit.startPosition, unit.reason]))
+        .toEqual([[16, 'predecessor-gap'], [76, 'no-compatible-predecessor']]);
+      await authorizeAndDrive(session, book, synced);
+      // Both were read: the fixture answers neither edited chapter, so each is a read that failed, not a carry.
+      expect(gaps().map(([position, code]) => [position, code])).toEqual([[16, 'adapter-failure'], [76, 'adapter-failure']]);
     });
   }, 300_000);
 

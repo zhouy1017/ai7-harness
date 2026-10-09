@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { DEFAULT_EXECUTION_RULE_SCHEMA_SQL } from '../../src/service/default-execution-rules.js';
-import { ANALYSIS_LEDGER_REVISION_30_SQL } from '../../src/service/task-authorization.js';
+import { ANALYSIS_LEDGER_REVISION_30_SQL, ANALYSIS_LEDGER_REVISION_65_SQL, ANALYSIS_LEDGER_SCHEMA_SQL } from '../../src/service/task-authorization.js';
 import { CLARIFICATION_RELATIONS_DROP_ORDER } from './clarifications.js';
 import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from './reimport-groups.js';
 import { PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from './production-documents.js';
@@ -20,6 +20,19 @@ export const DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER: ReadonlyArray<string> 
  * admitted — every origin `standard-direct`. The caller sets the version.
  */
 export function downgradeAnalysisRunAuthorizationsToRevision30(database: DatabaseSync): void {
+  downgradeAnalysisRunAuthorizations(database, ANALYSIS_LEDGER_REVISION_30_SQL.analysis_run_authorizations);
+}
+
+/**
+ * Plant `analysis_run_authorizations` as schema revisions 31 to 65 carried it (Issue #95, S39): the relation is rebuilt from
+ * the frozen revision-65 text with every row copied, rowid included. The rows must be ones revision 65 admitted — no origin
+ * `background-analysis-enrollment`. The caller sets the version.
+ */
+export function downgradeAnalysisRunAuthorizationsToRevision65(database: DatabaseSync): void {
+  downgradeAnalysisRunAuthorizations(database, ANALYSIS_LEDGER_REVISION_65_SQL.analysis_run_authorizations);
+}
+
+function downgradeAnalysisRunAuthorizations(database: DatabaseSync, sql: string): void {
   const columns = (database.prepare("SELECT name FROM pragma_table_info('analysis_run_authorizations') ORDER BY cid").all() as { name: string }[])
     .map((column) => column.name)
     .join(', ');
@@ -32,7 +45,7 @@ export function downgradeAnalysisRunAuthorizationsToRevision30(database: Databas
     try {
       database.exec(`CREATE TEMP TABLE plant_analysis_run_authorizations AS SELECT rowid AS plant_rowid, * FROM analysis_run_authorizations;
         DROP TABLE analysis_run_authorizations;
-        ${ANALYSIS_LEDGER_REVISION_30_SQL.analysis_run_authorizations};
+        ${sql};
         INSERT INTO analysis_run_authorizations(rowid, ${columns}) SELECT plant_rowid, ${columns} FROM temp.plant_analysis_run_authorizations ORDER BY plant_rowid;
         DROP TABLE temp.plant_analysis_run_authorizations;`);
       for (const sql of attached) database.exec(sql);
@@ -68,11 +81,12 @@ export function plantRevision30Relations(database: DatabaseSync): void {
   downgradeAnalysisRunAuthorizationsToRevision30(database);
 }
 
-/** Which of its two shapes the Run Authorization relation holds: revision 30's, or the current widened one. */
-export function analysisRunAuthorizationsShape(database: DatabaseSync): 'revision-30' | 'current' | 'other' {
+/** Which of its shapes the Run Authorization relation holds: revision 30's, revision 65's, or the current widened one. */
+export function analysisRunAuthorizationsShape(database: DatabaseSync): 'revision-30' | 'revision-65' | 'current' | 'other' {
   const row = database.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'analysis_run_authorizations'").get() as { sql: string } | undefined;
   const normalized = (value: string): string => value.trim().replace(/\s+/gu, ' ');
   if (row === undefined) return 'other';
   if (normalized(row.sql) === normalized(ANALYSIS_LEDGER_REVISION_30_SQL.analysis_run_authorizations)) return 'revision-30';
-  return /origin IN \('standard-direct', 'default-execution-rule'\)/u.test(row.sql) ? 'current' : 'other';
+  if (normalized(row.sql) === normalized(ANALYSIS_LEDGER_REVISION_65_SQL.analysis_run_authorizations)) return 'revision-65';
+  return normalized(row.sql) === normalized(ANALYSIS_LEDGER_SCHEMA_SQL.analysis_run_authorizations) ? 'current' : 'other';
 }

@@ -12,7 +12,7 @@ import {
   ANALYSIS_LEDGER_REVISION_64_SQL,
   ANALYSIS_LEDGER_SCHEMA_SQL,
   EVALUATION_REWRITE_SCHEMA_VERSION,
-  WRITING_TASK_SCHEMA_VERSION,
+  BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import { WRITING_EXEMPLAR_GONE_LABEL, WRITING_EXEMPLAR_GONE_SUFFIX, WRITING_NOT_DRAFTED_LABEL } from '../../src/service/task-plan.js';
 import { quickStartNoRuleReason, writingRulePattern } from '../../src/service/default-execution-rules.js';
@@ -606,7 +606,7 @@ describe('写作任务 over the real store on exact sample1', () => {
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
       expect(rows(after)).toBe(before!);
       for (const table of KIND_COUPLED_ANALYSIS_RELATIONS) {
         expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(ANALYSIS_LEDGER_SCHEMA_SQL[table]);

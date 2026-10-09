@@ -146,6 +146,32 @@ describe('what AI7\'s evaluation words may not claim (Issue #429, S81b2)', () =>
     }
   });
 
+  it('reads the #702 residuals: 一块多 before 点 or a particle is a price, 单一成 is a share after any word 单 ends, and 高分子 names no score (Issue #708)', () => {
+    for (const text of ['卖一块多吧', '一块多点儿。', '一块多点', '一块多点钱', '一块多点吧。', '定一块左右吧。', '一块多呢？', '售价一块多啊']) {
+      expect(claimsQuantity(text), text).toBe(true);
+    }
+    // 点 that opens 点菜 or 点评 is no price (#720 review).
+    for (const text of ['咱们一块多点菜。', '大家一块多点评几句。', '一块多点东西']) {
+      expect(claimsQuantity(text), text).toBe(false);
+    }
+    // 单 ends a word outside any list: the share after it is still one.
+    for (const text of ['退单一成。', '接单一成来自老客户。', '提单一成以上。', '订单一成来自线上。', '下单一成以上。', '名单一成是新读者。', '保单一成续保。']) {
+      expect(claimsQuantity(text), text).toBe(true);
+    }
+    // 单 opens 单一 at the line's start, after punctuation or a space, or after a word's end: no share.
+    for (const text of ['单一成年人物的视角。', '视角单一，单一成年人物写得多。', '叙事 单一成年读者会厌倦。', '视角过于单一成年读者会厌倦。',
+      '人物较为单一成年读者不买账。', '结构的单一成年读者也看得出。', '单一成分的叙事。', '统一成人物视角来写。', '把两条线索放在一块多有意思。', '和他们一块多聊聊。']) {
+      expect(claimsQuantity(text), text).toBe(false);
+    }
+    // 高分 and 低分 name a score only where 分 does not begin another word.
+    for (const text of ['涉及高分子材料的 4/5 章节。', '低分辨率插图占 3/5 篇幅。', '高分贝的配乐写了 2/5 篇幅。', '提高分段的合理性，前 1/5 拖沓。']) {
+      expect(claimsScore(text, FULL_MARKS), text).toBe(false);
+    }
+    for (const text of ['4/5的高分。', '只拿到2/5的低分。', '高分作品，可评 4/5 左右。', '低分 2/5 左右。']) {
+      expect(claimsScore(text, FULL_MARKS), text).toBe(true);
+    }
+  });
+
   it('finds a conclusion by the house\'s own labels — 推荐出版, 修改后再议, 暂缓, 不推荐 — wherever it stands in the line', () => {
     expect(CONCLUSIONS).toEqual(['推荐出版', '修改后再议', '暂缓', '不推荐']);
     for (const text of ['建议推荐出版。', '可以修改后再议。', '建议暂缓。', '目前暂缓出版为宜。', '不推荐。', '编辑部不推荐这部书稿。', '总体不推荐出版。']) {
@@ -160,7 +186,8 @@ describe('what AI7\'s evaluation words may not claim (Issue #429, S81b2)', () =>
   it('reads a line in time linear in its length, however its numerals fall', () => {
     for (const text of ['一'.repeat(200_000), '1'.repeat(200_000), '1/'.repeat(100_000), '千万'.repeat(100_000), '1,'.repeat(100_000), '首印'.repeat(100_000),
       '一块'.repeat(100_000), '一成'.repeat(100_000), '十分之'.repeat(70_000), '十五分一'.repeat(50_000), '4/5'.repeat(70_000), '1/5的'.repeat(50_000),
-      '统一成'.repeat(70_000), '一块左'.repeat(70_000), '订单一成'.repeat(50_000), '4/5颗'.repeat(50_000), '一块多'.repeat(70_000)]) {
+      '统一成'.repeat(70_000), '一块左'.repeat(70_000), '订单一成'.repeat(50_000), '4/5颗'.repeat(50_000), '一块多'.repeat(70_000),
+      '退单一成'.repeat(50_000), '一块多吧'.repeat(50_000), '高分子4/5'.repeat(30_000), '的单一成'.repeat(50_000), '一块多点'.repeat(50_000)]) {
       const started = performance.now();
       claimsQuantity(text);
       claimsScore(text, FULL_MARKS);

@@ -489,6 +489,20 @@ export class EvaluationRewrites {
     return adopted;
   }
 
+  /**
+   * Each version's decisions as their recorded digests, by record, in one read (Issue #708): what the evaluation record checks a
+   * reading it kept against. Nothing is parsed, so it never fails on a damaged row; that row's digest still tells it apart.
+   */
+  decisionStamps(bookId: string): Map<string, string> {
+    const stamps = new Map<string, string>();
+    for (const row of this.#db.prepare('SELECT record_id, sha256 FROM evaluation_rewrite_decisions WHERE book_id = ? ORDER BY record_id, analysis_revision_id')
+      .all(bookId) as SqlRow[]) {
+      const recordId = String(row.record_id);
+      stamps.set(recordId, `${stamps.get(recordId) ?? ''}${String(row.sha256)},`);
+    }
+    return stamps;
+  }
+
   /** The editor's decision on one rewritten result, in the caller's transaction: once — a second is refused. */
   recordDecision(input: Omit<StoredEvaluationRewriteDecision, 'recordedAt'>): void {
     requireRewrite(this.decisionOf(input.analysisRevisionId) === null, 'EVALUATION_REWRITE_DECIDED', '这一次重写已经处理过了。');

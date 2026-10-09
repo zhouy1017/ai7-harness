@@ -15,7 +15,7 @@ import {
   ANALYSIS_LEDGER_REVISION_58_SQL,
   ANALYSIS_LEDGER_SCHEMA_SQL,
   DATABASE_MERGE_SCHEMA_VERSION,
-  WRITING_TASK_SCHEMA_VERSION,
+  BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import {
   INITIAL_EVALUATION_ASSURANCE_STATEMENT,
@@ -258,7 +258,7 @@ describe('AI7 初评 over the real store on exact sample1', () => {
     // The snapshot is immutable, as the rest of the record is.
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
       expect(() => database.exec('UPDATE evaluation_initial_drafts SET canonical_json = canonical_json')).toThrowError(/EVALUATION_LEDGER_IMMUTABLE/u);
       expect(() => database.exec('DELETE FROM evaluation_initial_drafts')).toThrowError(/EVALUATION_LEDGER_IMMUTABLE/u);
       database.exec('DROP TRIGGER evaluation_initial_drafts_no_update');
@@ -424,7 +424,7 @@ describe('AI7 初评 over the real store on exact sample1', () => {
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
       expect(rows(after)).toBe(before!);
       for (const table of KIND_COUPLED_ANALYSIS_RELATIONS) {
         expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(ANALYSIS_LEDGER_SCHEMA_SQL[table]);
@@ -462,7 +462,8 @@ describe('AI7 初评 over the real store on exact sample1', () => {
     const read = async (): Promise<string> => {
       const reopened = await openStore();
       try {
-        const answer = await refusal(() => reopened.inspectEvaluation(bookId, recordId));
+        // A version that cannot be read is named on the page, which still opens (Issue #708).
+        const answer = reopened.inspectEvaluation(bookId, recordId).unreadableRecords.length === 0 ? 'no-error' : 'unreadable';
         if (answer === 'no-error') {
           // An entry written before S81b1 names no adjustment, and each item reads as having none.
           expect(reopened.inspectEvaluation(bookId, recordId).record!.content.items.map((item) => item.adjustment)).toEqual([null, null, null, null, null]);
@@ -479,7 +480,7 @@ describe('AI7 初评 over the real store on exact sample1', () => {
     expect(await read()).toBe('no-error');
     // Schema 2 with one item's adjustment left out is refused.
     rewrite((json) => json.replace('"adjustment":null,', ''));
-    expect(await read()).toBe('EVALUATION_RECORD_INVALID:评估记录已损坏。');
+    expect(await read()).toBe('unreadable');
   }, 300_000);
 
   it('refuses a store stamped revision 58 whose kind-coupled relations already read as revision 59\'s', async () => {

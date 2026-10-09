@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DECISION_FEEDBACK_TRIGGER_SQL } from '../../src/service/decision-feedback.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { ANALYSIS_FEEDBACK_SCHEMA_VERSION, WRITING_TASK_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
+import { ANALYSIS_FEEDBACK_SCHEMA_VERSION, BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type {
   CreateEditorialMarkInput,
@@ -176,7 +176,7 @@ describe('the reason after a Proposal Decision', () => {
     }
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
       expect((database.prepare('SELECT count(*) count FROM proposal_decision_feedback').get() as { count: number }).count).toBe(68);
       expect((database.prepare("SELECT group_concat(reason, '|') reasons FROM (SELECT reason FROM proposal_decision_reasons ORDER BY reason)").get() as { reasons: string }).reasons)
         .toBe('更贴近作者的语气|证据不足');
@@ -220,7 +220,7 @@ describe('the reason after a Proposal Decision', () => {
     }
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
       expect((database.prepare('SELECT count(*) count FROM proposal_decision_feedback').get() as { count: number }).count).toBe(0);
     } finally {
       database.close();

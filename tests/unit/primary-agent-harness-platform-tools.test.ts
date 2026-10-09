@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { CallId, GenerateOptions, LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { BASELINE_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/contract.js';
-import { describeComposition, prepareExecution } from '../../src/service/harness/primary-agent-harness.js';
+import { describeComposition, prepareExecution, type HarnessTurnOutcome } from '../../src/service/harness/primary-agent-harness.js';
+import { AI7_FAILURE_CODES, classifyModelFailure, isRetrySafeFailure } from '../../src/service/provider/classification.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE, evaluateEgress, type EgressBindingFacts } from '../../src/service/provider/egress-gate.js';
 import { PLATFORM_TOOL_SCHEMAS, PLATFORM_TOOL_SCHEMA_DIGEST, PlatformToolBreaker, readPlatformToolsRule, type PlatformToolsRule } from '../../src/service/provider/platform-tools.js';
 import type { PlatformToolFetch } from '../../src/service/provider/platform-tool-http.js';
@@ -265,11 +266,19 @@ describe('the platform tools inside the composition', () => {
       expect(decisions).toEqual(['transmit-local', 'transmit-local', 'refuse:circuit-breaker-tripped']);
       expect(model.requests).toHaveLength(2);
       expect(sent).toBe(1);
-      expect(outcome.terminal).toBe('interrupted');
-      expect(outcome.signals.at(-1)).toMatchObject({ kind: 'interrupted', failure: { code: 'AI7_EGRESS_REFUSED' } });
+      // The breaker is its own refusal (#676): the turn fails with a distinct code that no retry table names, and the
+      // session reads it as the unit ending with 联网核查未完成 — the unit only, never retried.
+      expect(outcome.terminal).toBe('failed');
+      expect(outcome.signals.at(-1)).toEqual({
+        kind: 'failed',
+        failure: expect.objectContaining({ code: 'AI7_PLATFORM_TOOL_BREAKER_TRIPPED', failureClass: 'platform-tool-breaker-tripped', retrySafe: false }),
+      });
       expect(session.unitDisclosure).toBe('联网核查未完成');
+      expect(session.unitEnd(outcome)).toEqual({ reason: 'circuit-breaker-tripped', disclosure: '联网核查未完成', retry: 'never', settles: 'unit-only' });
       session.startUnit();
       expect(session.unitDisclosure).toBeNull();
+      // Read after the next unit starts, the same turn is no longer this unit's breaker end.
+      expect(session.unitEnd(outcome)).toBeNull();
     } finally {
       await handle.finish();
     }
@@ -362,5 +371,116 @@ describe('the platform tools inside the composition', () => {
     await tight.execute({ callId: 'd1', tool: 'websearch', arguments: { query: '狂人日记' }, signal });
     expect(await tight.execute({ callId: 'd2', tool: 'websearch', arguments: { query: '新青年' }, signal })).toEqual({ text: expect.stringContaining('联网核查未完成'), sourceUrl: null });
     expect(tight.breakerState).toBe('tripped');
+  });
+});
+
+describe('the session reads its decisions from the binding and its breaker end from the turn (#676)', () => {
+  const codes = { QUOTA_EXCEEDED_CODE: 'QUOTA', INVALID_CREDENTIAL_CODE: 'CREDENTIAL', CONTEXT_WINDOW_EXCEEDED_CODE: 'CONTEXT' };
+  const turn = (terminal: HarnessTurnOutcome['terminal'], code?: string): Pick<HarnessTurnOutcome, 'terminal' | 'signals'> => ({
+    terminal,
+    signals: code === undefined
+      ? [{ kind: 'completed' }]
+      : [{ kind: terminal === 'interrupted' ? 'interrupted' : 'failed', failure: classifyModelFailure({ code, message: 'x' }, codes) } as HarnessTurnOutcome['signals'][number]],
+  });
+
+  it('refuses both tools for a binding that is not public or synthetic, sending and recording nothing', async () => {
+    const rule = (await ruleOf('v7'))!;
+    const bindingDigest = 'b'.repeat(64);
+    const binding: EgressBindingFacts = { ...bindingOf(rule, bindingDigest), outboundDataCategory: 'editor-selected-manuscript-excerpt' };
+    const cache = new ProviderResultCache(root);
+    await cache.open();
+    const snapshots = new ResearchSnapshotCache(root);
+    await snapshots.open();
+    let sent = 0;
+    const session = new PlatformToolSession({
+      binding,
+      scope: { currentBindingDigest: () => bindingDigest, acceptedOutputDigests: new Set(), ceilingState: () => 'within' },
+      fetch: async () => { sent += 1; throw new Error('never'); },
+      admitHost: () => { throw new Error('never'); },
+      cache,
+      snapshots,
+      purpose: 'factual-review',
+    });
+    session.cite('https://example.org/source');
+    const signal = new AbortController().signal;
+    session.startUnit();
+    expect(await session.execute({ callId: 'c1', tool: 'websearch', arguments: { query: '狂人日记' }, signal }))
+      .toEqual({ text: expect.stringContaining('公开或合成'), sourceUrl: null });
+    expect(await session.execute({ callId: 'c2', tool: 'webfetch', arguments: { url: 'https://example.org/source' }, signal }))
+      .toEqual({ text: expect.stringContaining('公开或合成'), sourceUrl: null });
+    expect(sent).toBe(0);
+    expect(cache.lines).toEqual([]);
+  });
+
+  it('refuses a search whose binding went stale between the decision and the send, recording nothing', async () => {
+    const rule = (await ruleOf('v7'))!;
+    const bindingDigest = 'b'.repeat(64);
+    const cache = new ProviderResultCache(root);
+    await cache.open();
+    let current: string | null = bindingDigest;
+    let sent = 0;
+    // The snapshot lookup is the await between the gate's decision and the ticket's redemption: the binding moves there.
+    const snapshots = new ResearchSnapshotCache(root);
+    await snapshots.open();
+    const lookup = snapshots.lookup.bind(snapshots);
+    snapshots.lookup = async (...args) => {
+      current = 'f'.repeat(64);
+      return lookup(...args);
+    };
+    const session = new PlatformToolSession({
+      binding: bindingOf(rule, bindingDigest),
+      scope: { currentBindingDigest: () => current, acceptedOutputDigests: new Set(), ceilingState: () => 'within' },
+      fetch: async () => { sent += 1; throw new Error('never'); },
+      admitHost: () => { throw new Error('never'); },
+      cache,
+      snapshots,
+      purpose: 'factual-review',
+    });
+    session.startUnit();
+    expect(await session.execute({ callId: 'c1', tool: 'websearch', arguments: { query: '狂人日记' }, signal: new AbortController().signal }))
+      .toEqual({ text: expect.stringContaining('PLATFORM_TOOL_TICKET_REFUSED'), sourceUrl: null });
+    expect(sent).toBe(0);
+    expect(cache.lines).toEqual([]);
+  });
+
+  it('reads a breaker end only from a turn this unit\'s tripped breaker failed, and never as retry-safe', async () => {
+    const rule = (await ruleOf('v7'))!;
+    const bindingDigest = 'b'.repeat(64);
+    const cache = new ProviderResultCache(root);
+    await cache.open();
+    const snapshots = new ResearchSnapshotCache(root);
+    await snapshots.open();
+    const session = new PlatformToolSession({
+      binding: bindingOf(rule, bindingDigest),
+      scope: { currentBindingDigest: () => bindingDigest, acceptedOutputDigests: new Set(), ceilingState: () => 'within' },
+      fetch: async () => new Response(JSON.stringify({ result: { content: [{ type: 'text', text: SEARCH_TEXT }] } }), { status: 200, headers: { 'content-type': 'application/json' } }),
+      admitHost: () => () => undefined,
+      cache,
+      snapshots,
+      purpose: 'factual-review',
+      breaker: new PlatformToolBreaker(1),
+    });
+    const breakerTurn = turn('failed', AI7_FAILURE_CODES.PLATFORM_TOOL_BREAKER_TRIPPED);
+    session.startUnit();
+    // An intact breaker: even the breaker's code is not this unit's end.
+    expect(session.unitEnd(breakerTurn)).toBeNull();
+    const signal = new AbortController().signal;
+    await session.execute({ callId: 'c1', tool: 'websearch', arguments: { query: '甲' }, signal });
+    await session.execute({ callId: 'c2', tool: 'websearch', arguments: { query: '乙' }, signal });
+    expect(session.breakerState).toBe('tripped');
+    expect(session.unitEnd(breakerTurn)).toEqual({ reason: 'circuit-breaker-tripped', disclosure: '联网核查未完成', retry: 'never', settles: 'unit-only' });
+    // Every other ending of a tripped unit's turn settles as it would without platform tools.
+    expect(session.unitEnd(turn('failed', AI7_FAILURE_CODES.EGRESS_REFUSED))).toBeNull();
+    expect(session.unitEnd(turn('interrupted', AI7_FAILURE_CODES.EGRESS_REFUSED))).toBeNull();
+    expect(session.unitEnd(turn('interrupted', AI7_FAILURE_CODES.PLATFORM_TOOL_BREAKER_TRIPPED))).toBeNull();
+    expect(session.unitEnd(turn('failed', AI7_FAILURE_CODES.RATE_LIMIT))).toBeNull();
+    expect(session.unitEnd(turn('completed'))).toBeNull();
+    expect(session.unitEnd({ terminal: 'failed', signals: [] })).toBeNull();
+    // The failure is distinct from the generic refusal, and no retry path — automatic or ask-first — admits it.
+    const classified = classifyModelFailure({ code: AI7_FAILURE_CODES.PLATFORM_TOOL_BREAKER_TRIPPED, message: 'x' }, codes);
+    expect(classified).toMatchObject({ signal: 'failed', failureClass: 'platform-tool-breaker-tripped', retrySafe: false });
+    expect(classified.reason).toContain('联网核查未完成');
+    expect(isRetrySafeFailure({ code: AI7_FAILURE_CODES.PLATFORM_TOOL_BREAKER_TRIPPED, message: 'x', status: 503 })).toBe(false);
+    expect(classifyModelFailure({ code: AI7_FAILURE_CODES.EGRESS_REFUSED, message: 'x' }, codes)).toMatchObject({ signal: 'interrupted', failureClass: 'egress-refused' });
   });
 });
