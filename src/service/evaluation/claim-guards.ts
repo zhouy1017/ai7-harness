@@ -81,6 +81,13 @@ const YUAN_WORDS = new Set('对论化素');
  * 人 or 年, which follow a share as readily as they make 成人 and 成年 (「仅一成人会买」, 「一成年轻读者」; Issue #696).
  */
 const CHENG_WORDS = new Set('不功为长熟就绩果立本员型形事交分色全了');
+/**
+ * What before a lone 一 makes it the end of a word, so a 成 after it is a verb or a word of its own, never a share: 统一成,
+ * 唯一成年, 单一成分 (Issue #702 review). 万一 is a numeral run of its own and reads the same way.
+ */
+const YI_WORD_HEADS = new Set('统唯单同归专划逐');
+/** What before a lone 一 makes 一块 a piece rather than a yuan: 这一块, 每一块, 另一块 (Issue #702 review). */
+const YI_KUAI_PIECE = new Set('这那哪每另同整');
 /** 千万 the adverb — 千万不要, 千万别, 千万小心, 千万注意 — rather than ten million. */
 const QIANWAN_ADVERB = new Set('不别要莫勿记小注留务当谨');
 /** What before a small numeral and 册 names the Book's own volumes: 「全十二册」, 「共三册」, 「分两册」, 「上下两册」. */
@@ -124,14 +131,18 @@ function runStatesQuantity(chars: ReadonlyArray<string>, run: NumeralRun): boole
   if (ALWAYS_UNITS.some((entry) => startsWith(chars, at, entry))) return true;
   // 本 counts copies only after an amount: 「首印八千本」, 「3000本」 — not 「一本小说」, 「两本书」.
   if (unit === '本' && amount) return true;
-  // 块 is yuan after any numeral but a lone 一: 「九块九」, 「两块钱」 — not 「这一块」, 「一块儿」; after 一 too when 钱 or a
-  // numeral follows it, 「一块钱一本」, 「一块五」, but not 「一块一块地」 (Issue #696).
-  if (unit === '块' && (word !== '一' || after === '钱' || (isQuantityNumeral(after) && !(after === '一' && chars[at + 2] === '块')))) return true;
+  // 块 is yuan after any numeral but a lone 一: 「九块九」, 「两块钱」 — not 「这一块」, 「一块儿」; after 一 too when 钱, a numeral,
+  // 多 or 左右 follows it, 「一块钱一本」, 「一块五」, 「一块多一本」, 「一块左右」 (Issue #696, Issue #702 review), but not
+  // 「一块一块地」 nor after 这, 每 or 另: 「这一块多数读者」.
+  if (unit === '块' && (word !== '一' || (!YI_KUAI_PIECE.has(before!) && (after === '钱' || after === '多' || startsWith(chars, at + 1, '左右') ||
+    (isQuantityNumeral(after) && !(after === '一' && chars[at + 2] === '块')))))) return true;
   // 册 counts copies after any numeral, 「首印五册」, but the Book's own volumes are no claim: 「全十二册」, 「上下两册」.
   if (unit === '册' && !(VOLUME_WORDS.has(before!) && !digit && !own.some((char) => char !== '十' && MAGNITUDES.has(char)))) return true;
   // 元 is a price unless a Chinese numeral opens a word: 「49元对标同类」 is one, 二元对立 and 一元论 are not.
   if (unit === '元' && !(YUAN_WORDS.has(after!) && !amount)) return true;
   // 成 is a share unless 一 opens a word: 「七成年轻读者」, 「三成本」 are shares; 一成不变, 万一成功 are not.
+  // 一 that ends a word — 万一, 统一, 唯一 — is no share before 成: 「万一成年读者不买账」, 「统一成人物视角」 (Issue #702 review).
+  if (unit === '成' && (word === '万一' || (word === '一' && YI_WORD_HEADS.has(before!)))) return false;
   if (unit === '成' && !(CHENG_WORDS.has(after!) && own.at(-1) === '一')) return true;
   // A number in 万 or 亿 with its coefficient: 5万, 三万, 十万, 百万 — not 万一, 亿万读者, the adverb 千万, 十万火急, and not
   // the Book's own length, 「二十万字」 or 「十万余字」.
@@ -199,6 +210,23 @@ function digitsAt(chars: ReadonlyArray<string>, start: number): { end: number; w
 const fraction = (chars: ReadonlyArray<string>, at: number): boolean =>
   chars[at + 1] === '之' && (isDigit(chars[at + 2]) || SCORE_NUMERALS.has(chars[at + 2]!));
 
+/** Words that make a line about a score: a fraction over 5 in it is one (Issue #702 review). */
+const SCORE_CONTEXT = ['评分', '打分', '得分', '分数', '给分', '评价', '星级'];
+/** The rescaled 5: a denominator only for a score in its context, never for 「前1/5」 or 「约4/5的读者」. */
+const RESCALED_FIVE = 5;
+
+/**
+ * Whether a fraction over the rescaled 5 is a score (Issue #696, Issue #702 review): its numerator at most 5, and a half point
+ * in it (「4.5/5」), the line ending or 分 or 星 following it (「4/5。」, 「4/5分」), or a score named in the line (「4 ／ 5 的评价」).
+ */
+function scoreOverFive(chars: ReadonlyArray<string>, numerator: { end: number; whole: ReadonlyArray<string> }, start: number,
+  denominatorEnd: number, context: () => boolean): boolean {
+  if (digitsValue(numerator.whole) > RESCALED_FIVE) return false;
+  if (numerator.end > start + numerator.whole.length) return true;
+  const next = chars[skipSpace(chars, denominatorEnd)];
+  return isTerminal(next) || next === '分' || next === '星' || context();
+}
+
 /** Whether 分 at `at`, after a run of digits, is a time: 「3分30秒」. */
 function minutesAndSeconds(chars: ReadonlyArray<string>, at: number): boolean {
   let end = at + 1;
@@ -209,13 +237,13 @@ function minutesAndSeconds(chars: ReadonlyArray<string>, at: number): boolean {
 
 /**
  * The denominators a score in a rewritten line is written over (Issue #689 review): each item's 满分, the total of every item and
- * of the rated ones — a version with an item 不评 shows its total over the rest — and the rescaled 5, 10 and 100: 「4.5/5」, 「4/5」
- * (Issue #696).
+ * of the rated ones — a version with an item 不评 shows its total over the rest — and the rescaled 10 and 100. A score over 5
+ * is read by `claimsScore` in its context (Issue #696, Issue #702 review).
  */
 export function scoreDenominators(items: ReadonlyArray<{ readonly fullMarks: number; readonly notRated: string | null }>): number[] {
   const all = items.reduce((sum, item) => sum + item.fullMarks, 0);
   const rated = items.reduce((sum, item) => sum + (item.notRated === null ? item.fullMarks : 0), 0);
-  return [...new Set([...items.map((item) => item.fullMarks), all, rated, 5, 10, 100])];
+  return [...new Set([...items.map((item) => item.fullMarks), all, rated, 10, 100])];
 }
 
 /**
@@ -227,6 +255,9 @@ export function scoreDenominators(items: ReadonlyArray<{ readonly fullMarks: num
 export function claimsScore(text: string, fullMarks: ReadonlyArray<number>): boolean {
   if (text.includes('满分')) return true;
   const chars = Array.from(text);
+  let named: boolean | undefined;
+  // Read once, the first time a fraction over 5 asks: the cost stays linear.
+  const context = (): boolean => (named ??= SCORE_CONTEXT.some((word) => text.includes(word)));
   let index = 0;
   while (index < chars.length) {
     const char = chars[index]!;
@@ -241,6 +272,7 @@ export function claimsScore(text: string, fullMarks: ReadonlyArray<number>): boo
           const denominator = digitsAt(chars, from);
           const value = digitsValue(denominator.whole);
           if (Number.isNaN(value) || fullMarks.includes(value)) return true;
+          if (value === RESCALED_FIVE && scoreOverFive(chars, numerator, index, denominator.end, context)) return true;
         }
       }
       index = numerator.end;

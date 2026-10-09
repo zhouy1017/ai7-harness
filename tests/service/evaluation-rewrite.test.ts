@@ -7,7 +7,7 @@ import { RECONCILED_INTERRUPTED_DETAIL, RECONCILED_QUEUED_DETAIL } from '../../s
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { runReportUsageReconciles } from '../../src/service/analysis/run-report.js';
 import { canonicalRecord, sha256Hex } from '../../src/service/analysis/canonical.js';
-import { EVALUATION_INITIAL_DRAFT_TRIGGER_SQL, EVALUATION_RECORD_TRIGGER_SQL } from '../../src/service/evaluation-records.js';
+import { EVALUATION_ADOPTIONS_UNREADABLE, EVALUATION_INITIAL_DRAFT_TRIGGER_SQL, EVALUATION_RECORD_TRIGGER_SQL } from '../../src/service/evaluation-records.js';
 import { EVALUATION_REWRITE_SCHEMA_SQL, EVALUATION_REWRITE_TRIGGER_SQL } from '../../src/service/evaluation-rewrites.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { fixtureEntryKey, loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -350,6 +350,69 @@ describe('the market section and 按我的评分重写评语 over the real store
       refused.markCleanShutdown();
     } finally {
       refused.close();
+    }
+  }, 300_000);
+
+  it('reads 评估 past a damaged 采用 record, its marks kept and their source named unchecked, and 设置 past a damaged version (Issue #702 review)', async () => {
+    let bookId = '';
+    let recordId = '';
+    let firstId = '';
+    let firstOrdinal = 0;
+    let adjustedBefore = -1;
+    await withBook(async (book) => {
+      bookId = book.bookId;
+      await runInitialEvaluationToEnd(book.store, book.owner, book.bookId, launchPolicy);
+      const finalized = finalizeAsJ11(book.store, book.bookId);
+      firstId = finalized.recordId;
+      firstOrdinal = finalized.ordinal;
+      const record = beginRewriteAsJ11(book.store, book.bookId);
+      recordId = record.recordId;
+      await rewrite(book, record.recordId);
+      const proposal = book.store.inspectEvaluation(book.bookId, record.recordId).rewrite.proposal!;
+      const accepted = book.store.decideEvaluationRewrite(book.bookId, proposal.revisionId, 'accept');
+      expect(accepted.record!.ai7WordsNotice).toBeNull();
+      adjustedBefore = book.store.inspectEvaluationCalibration().calibration.adjustments;
+    });
+    // The 采用 decision, damaged: 评估 opens, the version's AI7 words stay marked and are named unchecked, and the rewrite says
+    // it is unavailable, as before.
+    const decision = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      decision.exec('DROP TRIGGER evaluation_rewrite_decisions_no_update');
+      decision.exec("UPDATE evaluation_rewrite_decisions SET canonical_json = canonical_json || ' ' WHERE decision = 'accepted'");
+      decision.exec(EVALUATION_REWRITE_TRIGGER_SQL.evaluation_rewrite_decisions_no_update!);
+    } finally {
+      decision.close();
+    }
+    const damaged = await openStore();
+    try {
+      const page = damaged.inspectEvaluation(bookId, recordId);
+      expect(page.record).toMatchObject({ recordId, entries: 3, ai7WordsNotice: EVALUATION_ADOPTIONS_UNREADABLE });
+      expect(page.rewrite.prepare).toEqual({ allowed: false, reason: '按我的评分重写评语暂不可用：评语重写记录已损坏。' });
+      damaged.markCleanShutdown();
+    } finally {
+      damaged.close();
+    }
+    // The 定稿 version's last entry, damaged: that version is refused as before, but the version after it still reads, and
+    // 设置 › 评估校准与预测 still reads for the house, the damaged version — its one adjusted Book — counting for nothing.
+    const entry = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      entry.exec('DROP TRIGGER evaluation_record_entries_no_update');
+      entry.prepare("UPDATE evaluation_record_entries SET sha256 = ? WHERE record_id = ? AND kind = 'finalized'").run('0'.repeat(64), firstId);
+      entry.exec(EVALUATION_RECORD_TRIGGER_SQL.evaluation_record_entries_no_update!);
+    } finally {
+      entry.close();
+    }
+    const settings = await openStore();
+    try {
+      expect(adjustedBefore).toBe(1);
+      expect(settings.inspectEvaluationCalibration().calibration.adjustments).toBe(0);
+      expect(await refusal(() => settings.inspectEvaluation(bookId, firstId))).toBe('EVALUATION_RECORD_INVALID:评估记录已损坏。');
+      const later = settings.inspectEvaluation(bookId, recordId);
+      expect(later.unreadableRecords).toEqual([firstOrdinal]);
+      expect(later.record).toMatchObject({ recordId, entries: 3 });
+      settings.markCleanShutdown();
+    } finally {
+      settings.close();
     }
   }, 300_000);
 

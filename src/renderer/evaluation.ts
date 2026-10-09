@@ -118,6 +118,7 @@ import {
   evaluationHeading,
   evaluationItemLegend,
   evaluationRevisionLine,
+  evaluationUnreadableLine,
   evaluationScoreFeedback,
   evaluationScoreInvalidLine,
   evaluationStarted,
@@ -726,6 +727,8 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         list.append(item);
       }
       versions.append(list);
+      const unreadable = evaluationUnreadableLine(workspace.unreadableRecords);
+      if (unreadable !== null) versions.append(el('p', 'field-note evaluation-unreadable', unreadable));
       if (leaving !== null && workspace.record !== null) {
         // Typed work is never lost by a click on the list: staying is the first way, and the discard says what it does.
         const target = leaving;
@@ -894,6 +897,8 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const heading = el('h3', undefined, evaluationHeading(record));
     heading.tabIndex = -1;
     node.append(heading, el('p', 'field-note evaluation-revision', evaluationRevisionLine(record)));
+    // Which words are AI7's could not all be checked: they stay marked as AI7's, and the page says so (Issue #702 review).
+    if (record.ai7WordsNotice !== null) node.append(el('p', 'field-note evaluation-ai7-words-notice', record.ai7WordsNotice));
     const finalized = evaluationFinalizedLine(record, localInstantLabel);
     if (finalized !== null) node.append(el('p', 'evaluation-finalized', finalized));
     const initial = record.initial;

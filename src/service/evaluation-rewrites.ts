@@ -475,17 +475,18 @@ export class EvaluationRewrites {
   }
 
   /**
-   * The rewrite whose 采用 appended this entry of the version (Issue #696), as the record reads a mark that names it; `null` for
-   * an entry no 采用 appended.
+   * Each entry of one version a 采用 appended, by ordinal, with the rewrite it took (Issue #696), as the record reads the marks
+   * that name them: every accepted decision of the version, each verified, in one read.
    */
-  adoptionAt(recordId: string, entryOrdinal: number): { taskIntentId: string; analysisRevisionId: string } | null {
-    const rows = this.#db.prepare("SELECT * FROM evaluation_rewrite_decisions WHERE record_id = ? AND entry_ordinal = ? AND decision = 'accepted'")
-      .all(recordId, entryOrdinal) as SqlRow[];
-    // One 采用 appends one entry: a second on the same entry is no row this owner wrote.
-    requireRewrite(rows.length <= 1, 'EVALUATION_REWRITE_RECORD_INVALID', CORRUPT);
-    if (rows.length === 0) return null;
-    const decision = this.#decision(rows[0]!);
-    return { taskIntentId: decision.taskIntentId, analysisRevisionId: decision.analysisRevisionId };
+  adoptionsOf(recordId: string): Map<number, { taskIntentId: string; analysisRevisionId: string }> {
+    const adopted = new Map<number, { taskIntentId: string; analysisRevisionId: string }>();
+    for (const row of this.#db.prepare("SELECT * FROM evaluation_rewrite_decisions WHERE record_id = ? AND decision = 'accepted'").all(recordId) as SqlRow[]) {
+      const decision = this.#decision(row);
+      // One 采用 appends one entry: a second on the same entry is no row this owner wrote.
+      requireRewrite(decision.entryOrdinal !== null && !adopted.has(decision.entryOrdinal), 'EVALUATION_REWRITE_RECORD_INVALID', CORRUPT);
+      adopted.set(decision.entryOrdinal, { taskIntentId: decision.taskIntentId, analysisRevisionId: decision.analysisRevisionId });
+    }
+    return adopted;
   }
 
   /** The editor's decision on one rewritten result, in the caller's transaction: once — a second is refused. */

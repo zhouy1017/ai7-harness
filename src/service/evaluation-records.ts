@@ -164,6 +164,11 @@ function requireEvaluation(condition: unknown, code: string, message: string): a
   if (!condition) throw new EvaluationError(code, message);
 }
 
+/** The refusal of text within its 字 whose symbols each take many characters (Issue #702 review). */
+export const EVALUATION_TEXT_TOO_DENSE = 'EVALUATION_TEXT_TOO_DENSE';
+export const evaluationTextTooDense = (field: string): string =>
+  `${field}里由几个字符拼成的符号太多（如部分表情、国旗、异体字标记、叠加的附加符号），超出了可以保存的长度；请删去一些再保存。`;
+
 const corrupt = (): EvaluationError => new EvaluationError('EVALUATION_RECORD_INVALID', '评估记录已损坏。');
 
 type SqlRow = Record<string, SQLOutputValue>;
@@ -275,20 +280,25 @@ export function emptyEvaluationContent(profile: Pick<Profile, 'items' | 'risks'>
   };
 }
 
-function text(value: unknown, maximum: number, code: string, message: string, multiline: boolean): string | null {
+/**
+ * Text within its graphemes, and within the bytes 评估's frame allows each of them (Issue #696). Only text whose symbols are
+ * each made of several characters — some emoji, flags, ideographic variation marks, stacked diacritics — can pass the first
+ * and not the second, and its refusal says so (Issue #702 review): `field` names the text in the editor's words.
+ */
+function text(value: unknown, maximum: number, code: string, message: string, multiline: boolean, field: string): string | null {
   if (value === null) return null;
   requireEvaluation(typeof value === 'string', 'EVALUATION_CONTENT_INVALID', '评估内容无效。');
   const trimmed = value.replace(/\r\n?/gu, '\n').trim();
   if (trimmed.length === 0) return null;
-  // Within its graphemes, and within the bytes 评估's frame allows each of them (Issue #696).
-  requireEvaluation(graphemeCount(trimmed) <= maximum && withinEvaluationBytes(trimmed, maximum), code, message);
+  requireEvaluation(graphemeCount(trimmed) <= maximum, code, message);
+  requireEvaluation(withinEvaluationBytes(trimmed, maximum), EVALUATION_TEXT_TOO_DENSE, evaluationTextTooDense(field));
   requireEvaluation(!(multiline ? CONTROL_CHARACTER : LINE_CONTROL_CHARACTER).test(trimmed), 'EVALUATION_CONTENT_INVALID', '评估内容含有不能显示的控制字符。');
   return trimmed;
 }
 
 function lines(value: unknown, what: string): string[] {
   requireEvaluation(Array.isArray(value), 'EVALUATION_CONTENT_INVALID', '评估内容无效。');
-  const kept = value.map((line) => text(line, MAX_EVALUATION_LINE_GRAPHEMES, 'EVALUATION_LINE_TOO_LONG', `${what}每一条要在 ${MAX_EVALUATION_LINE_GRAPHEMES} 字以内。`, false))
+  const kept = value.map((line) => text(line, MAX_EVALUATION_LINE_GRAPHEMES, 'EVALUATION_LINE_TOO_LONG', `${what}每一条要在 ${MAX_EVALUATION_LINE_GRAPHEMES} 字以内。`, false, what))
     .filter((line): line is string => line !== null);
   requireEvaluation(kept.length <= MAX_EVALUATION_LINES, 'EVALUATION_TOO_MANY_LINES', `${what}最多 ${MAX_EVALUATION_LINES} 条。`);
   return kept;
@@ -306,7 +316,7 @@ function adjustmentOf(value: unknown, adjusted: boolean, label: string): Evaluat
   requireEvaluation(reasons.every((reason) => EVALUATION_ADJUSTMENT_REASONS.includes(reason as EvaluationAdjustmentReasonId)) &&
     new Set(reasons).size === reasons.length, 'EVALUATION_CONTENT_INVALID', '调分原因无效。');
   const note = text(value.note ?? null, MAX_EVALUATION_ADJUSTMENT_NOTE_GRAPHEMES, 'EVALUATION_ADJUSTMENT_TOO_LONG',
-    `调分原因要在 ${MAX_EVALUATION_ADJUSTMENT_NOTE_GRAPHEMES} 字以内。`, false);
+    `调分原因要在 ${MAX_EVALUATION_ADJUSTMENT_NOTE_GRAPHEMES} 字以内。`, false, '调分原因');
   const own = reasons.includes('own');
   requireEvaluation(!own || note !== null, 'EVALUATION_ADJUSTMENT_NOTE', `「${label}」选了「自行输入」，要写明原因。`);
   requireEvaluation(own || note === null, 'EVALUATION_CONTENT_INVALID', '只有选「自行输入」时才写原因。');
@@ -336,14 +346,14 @@ export function evaluationContent(
   const items = profile.items.map((item, index) => {
     const given = givenItems[index];
     requireEvaluation(isRecord(given) && given.itemId === item.itemId, 'EVALUATION_CONTENT_INVALID', '评估内容与评估方案不一致。');
-    const notRated = text(given.notRated, MAX_EVALUATION_LINE_GRAPHEMES, 'EVALUATION_REASON_TOO_LONG', `不评的理由要在 ${MAX_EVALUATION_LINE_GRAPHEMES} 字以内。`, false);
+    const notRated = text(given.notRated, MAX_EVALUATION_LINE_GRAPHEMES, 'EVALUATION_REASON_TOO_LONG', `不评的理由要在 ${MAX_EVALUATION_LINE_GRAPHEMES} 字以内。`, false, '不评的理由');
     requireEvaluation(given.notRated === null || notRated !== null, 'EVALUATION_NOT_RATED_REASON', `「${item.label}」不评时要写明理由。`);
     const score = given.score;
     requireEvaluation(score === null || (typeof score === 'number' && validEvaluationScore(score, item.fullMarks)),
       'EVALUATION_SCORE_INVALID', `「${item.label}」的得分要在 0 到 ${item.fullMarks} 之间，按整分或半分填写。`);
     requireEvaluation(notRated === null || score === null, 'EVALUATION_CONTENT_INVALID', `「${item.label}」不评时不能有得分。`);
     requireEvaluation(!finalize || score !== null || notRated !== null, 'EVALUATION_ITEM_UNSCORED', `定稿前，「${item.label}」要打分或写明不评的理由。`);
-    const comment = text(given.comment, MAX_EVALUATION_COMMENT_GRAPHEMES, 'EVALUATION_COMMENT_TOO_LONG', `评语要在 ${MAX_EVALUATION_COMMENT_GRAPHEMES} 字以内。`, true);
+    const comment = text(given.comment, MAX_EVALUATION_COMMENT_GRAPHEMES, 'EVALUATION_COMMENT_TOO_LONG', `评语要在 ${MAX_EVALUATION_COMMENT_GRAPHEMES} 字以内。`, true, '评语');
     const adjusted = initialScores !== null &&
       evaluationItemAdjusted({ score: score as number | null, notRated: notRated !== null }, initialScores.get(item.itemId) ?? null);
     const adjustment = adjustmentOf(given.adjustment, adjusted, item.label);
@@ -359,7 +369,7 @@ export function evaluationContent(
       'EVALUATION_CONTENT_INVALID', '风险等级无效。');
     requireEvaluation(typeof given.reviewed === 'boolean', 'EVALUATION_CONTENT_INVALID', '评估内容无效。');
     const statement = text(given.statement, MAX_EVALUATION_RISK_STATEMENT_GRAPHEMES, 'EVALUATION_STATEMENT_TOO_LONG',
-      `风险说明要在 ${MAX_EVALUATION_RISK_STATEMENT_GRAPHEMES} 字以内。`, true);
+      `风险说明要在 ${MAX_EVALUATION_RISK_STATEMENT_GRAPHEMES} 字以内。`, true, '风险说明');
     const level = given.level as EvaluationContent['risks'][number]['level'];
     requireEvaluation(!finalize || level !== null, 'EVALUATION_RISK_UNRATED', `定稿前，要给「${risk.label}」定风险等级。`);
     requireEvaluation(!finalize || statement !== null, 'EVALUATION_RISK_STATEMENT',
@@ -379,7 +389,7 @@ export function evaluationContent(
     readiness: lines(input.readiness, '就绪清单'),
     strengths: lines(input.strengths, '主要优点'),
     weaknesses: lines(input.weaknesses, '主要问题'),
-    verdict: text(input.verdict, MAX_EVALUATION_VERDICT_GRAPHEMES, 'EVALUATION_VERDICT_TOO_LONG', `总评要在 ${MAX_EVALUATION_VERDICT_GRAPHEMES} 字以内。`, true),
+    verdict: text(input.verdict, MAX_EVALUATION_VERDICT_GRAPHEMES, 'EVALUATION_VERDICT_TOO_LONG', `总评要在 ${MAX_EVALUATION_VERDICT_GRAPHEMES} 字以内。`, true, '总评'),
     conclusion: conclusion as EvaluationContent['conclusion'],
   };
 }
@@ -426,23 +436,47 @@ interface StoredEntry {
   readonly rewriteMarks: EvaluationChainMarks | null;
 }
 
+/** One version's entries as the record reads them, and what of its AI7 marks could not be checked, in the editor's words. */
+interface Chain {
+  readonly count: number;
+  readonly latest: StoredEntry;
+  readonly notice: string | null;
+}
+
+type ItemMark = EvaluationRewriteMark & { readonly itemId: string };
+
 /**
- * Every mark a chain has recorded (Issue #696), oldest first, each once: an item may hold several, one per rewrite whose words
- * it has held — 采用 R1, the editor edits them away, 采用 R2, the editor pastes R1's words back: they read as R1's again.
+ * Every mark a chain has recorded (Issue #696), each once, by item and oldest first: an item may hold several, one per rewrite
+ * whose words it has held — 采用 R1, the editor edits them away, 采用 R2, the editor pastes R1's words back: they read as R1's.
  */
 export interface EvaluationChainMarks {
-  readonly items: ReadonlyArray<EvaluationRewriteMark & { readonly itemId: string }>;
+  readonly items: ReadonlyMap<string, ReadonlyArray<ItemMark>>;
   readonly verdict: ReadonlyArray<EvaluationRewriteMark>;
 }
 
+/** What the versions before leave a version's chain: their marks, or that one of them could not be read. */
+interface Carried {
+  readonly marks: EvaluationChainMarks | null;
+  readonly unreadable: boolean;
+}
+const NOTHING_CARRIED: Carried = { marks: null, unreadable: false };
+const CARRIED_UNREADABLE: Carried = { marks: null, unreadable: true };
+
+/** What 评估 says when a version's AI7 marks could not all be checked; the words stay AI7's, the safe side for EVAL-011. */
+export const EVALUATION_CARRIED_MARKS_UNREADABLE = '上一版评估记录已损坏：从上一版沿用的 AI7 评语标注无法核对，这些评语仍按 AI7 所写处理。';
+export const EVALUATION_ADOPTIONS_UNREADABLE = '评语重写的采用记录暂时读不到：这一版 AI7 评语标注的来源无法核对，这些评语仍按 AI7 所写处理。';
+
 /** Which 采用 appended which entry of a version (Issue #696): the evaluation rewrite owner's decisions, read by the record. */
 export interface EvaluationAdoptionReader {
-  /** The rewrite whose 采用 appended this entry of the version; `null` for an entry no 采用 appended. */
-  adoptedAt(recordId: string, entryOrdinal: number): EvaluationRewriteProvenance | null;
+  /**
+   * Each entry of the version a 采用 appended, by ordinal, with the rewrite it took; `null` when the decisions cannot be read
+   * now — the record then keeps the marks it holds and says their source cannot be checked, never refusing the version.
+   */
+  adoptionsOf(recordId: string): ReadonlyMap<number, EvaluationRewriteProvenance> | null;
 }
 
 /** A version whose 采用 are not wired: no entry is one, so no entry may name a rewrite of its own. The store wires the real one. */
-const NO_ADOPTIONS: EvaluationAdoptionReader = { adoptedAt: () => null };
+const NO_ADOPTIONS: EvaluationAdoptionReader = { adoptionsOf: () => new Map() };
 
 /** Which rewrite an entry's words came from: its Task and the Result Set Revision that wrote them. */
 export interface EvaluationRewriteProvenance {
@@ -489,9 +523,9 @@ const noWords = (items: EvaluationRewrittenWords['items'], verdict: EvaluationRe
 const wordsDigest = (words: string | null): string | null => (words === null ? null : sha256Hex(words));
 
 /** The latest of the marks whose digest is that of these words, or `undefined`. */
-function latestMatching<T extends EvaluationRewriteMark>(marks: ReadonlyArray<T>, words: string | null): T | undefined {
+function latestMatching<T extends EvaluationRewriteMark>(marks: ReadonlyArray<T> | undefined, words: string | null): T | undefined {
   const digest = wordsDigest(words);
-  if (digest === null) return undefined;
+  if (digest === null || marks === undefined) return undefined;
   for (let index = marks.length - 1; index >= 0; index -= 1) {
     if (marks[index]!.sha256 === digest) return marks[index];
   }
@@ -507,7 +541,7 @@ function latestMatching<T extends EvaluationRewriteMark>(marks: ReadonlyArray<T>
 export function rewrittenWordsIn(marks: EvaluationChainMarks | null, content: EvaluationContent): EvaluationRewrittenWords | null {
   if (marks === null) return null;
   const items = content.items.flatMap((item) => {
-    const mark = latestMatching(marks.items.filter((entry) => entry.itemId === item.itemId), item.comment);
+    const mark = latestMatching(marks.items.get(item.itemId), item.comment);
     return mark === undefined ? [] : [mark];
   });
   return noWords(items, latestMatching(marks.verdict, content.verdict) ?? null);
@@ -515,41 +549,70 @@ export function rewrittenWordsIn(marks: EvaluationChainMarks | null, content: Ev
 
 const sameMark = (a: EvaluationRewriteMark, b: EvaluationRewriteMark): boolean =>
   a.taskIntentId === b.taskIntentId && a.analysisRevisionId === b.analysisRevisionId && a.sha256 === b.sha256;
-const sameItemMark = (a: EvaluationRewriteMark & { itemId: string }, b: EvaluationRewriteMark & { itemId: string }): boolean =>
-  a.itemId === b.itemId && sameMark(a, b);
+const holdsItemMark = (marks: EvaluationChainMarks | null, mark: ItemMark): boolean =>
+  marks?.items.get(mark.itemId)?.some((entry) => sameMark(entry, mark)) ?? false;
+const holdsVerdictMark = (marks: EvaluationChainMarks | null, mark: EvaluationRewriteMark): boolean =>
+  marks?.verdict.some((entry) => sameMark(entry, mark)) ?? false;
+const namesRewrite = (mark: EvaluationRewriteProvenance, from: EvaluationRewriteProvenance): boolean =>
+  mark.taskIntentId === from.taskIntentId && mark.analysisRevisionId === from.analysisRevisionId;
 
-/** The marks a chain holds after one more entry: every one it held, and that entry's that it did not hold yet. */
-function mergedMarks(known: EvaluationChainMarks | null, words: EvaluationRewrittenWords | null): EvaluationChainMarks | null {
-  if (words === null) return known;
-  const items = [...(known?.items ?? [])];
-  const verdict = [...(known?.verdict ?? [])];
-  for (const item of words.items) if (!items.some((entry) => sameItemMark(entry, item))) items.push(item);
-  if (words.verdict !== null && !verdict.some((entry) => sameMark(entry, words.verdict!))) verdict.push(words.verdict);
-  return { items, verdict };
+/** The marks a chain reading owns: copied from the marks it began with the first time an entry adds one, then added to. */
+interface OwnedMarks {
+  readonly items: Map<string, ItemMark[]>;
+  readonly verdict: EvaluationRewriteMark[];
 }
 
 /**
- * Whether an entry's recorded marks are ones its chain could have written (Issue #696): every mark still standing is among
- * them — none dropped — and each is one the chain holds, or, on the entry a 采用 appended, that rewrite's own over words the
- * 采用 changed. `adoption` reads that rewrite, `null` on an entry no 采用 appended, only when a mark is new; `before` is the
- * entry before, if any — a version's first entry is never a 采用's.
+ * The marks a chain holds after one more entry: every one it held, and that entry's it did not hold yet (Issue #696). `owned`
+ * is this reading's own copy, made once; a reading that adds nothing copies nothing.
  */
-function chainWroteMarks(words: EvaluationRewrittenWords | null, known: EvaluationChainMarks | null, content: EvaluationContent,
-  before: EvaluationContent | undefined, adoption: () => EvaluationRewriteProvenance | null): boolean {
-  const standing = rewrittenWordsIn(known, content);
-  const items = words?.items ?? [];
-  const verdict = words?.verdict ?? null;
-  if (standing !== null && (!standing.items.every((mark) => items.some((item) => item.itemId === mark.itemId)) ||
-    (standing.verdict !== null && verdict === null))) return false;
-  let adopted: { read: EvaluationRewriteProvenance | null } | undefined;
-  const adoptedHere = (mark: EvaluationRewriteMark, words: string | null, was: string | null | undefined): boolean => {
-    if (before === undefined || words === was) return false;
-    adopted ??= { read: adoption() };
-    return adopted.read !== null && mark.taskIntentId === adopted.read.taskIntentId && mark.analysisRevisionId === adopted.read.analysisRevisionId;
+function mergedMarks(known: EvaluationChainMarks | null, owned: OwnedMarks | null, words: EvaluationRewrittenWords | null): { marks: EvaluationChainMarks | null; owned: OwnedMarks | null } {
+  const newItems = (words?.items ?? []).filter((item) => !holdsItemMark(known, item));
+  const newVerdict = words?.verdict !== null && words?.verdict !== undefined && !holdsVerdictMark(known, words.verdict) ? words.verdict : null;
+  if (newItems.length === 0 && newVerdict === null) return { marks: known, owned };
+  const own = owned ?? {
+    items: new Map([...(known?.items ?? new Map<string, ReadonlyArray<ItemMark>>())].map(([itemId, list]) => [itemId, [...list]] as const)),
+    verdict: [...(known?.verdict ?? [])],
   };
-  return items.every((item) => (known?.items ?? []).some((entry) => sameItemMark(entry, item)) ||
-    adoptedHere(item, content.items.find((entry) => entry.itemId === item.itemId)!.comment, before?.items.find((entry) => entry.itemId === item.itemId)?.comment)) &&
-    (verdict === null || (known?.verdict ?? []).some((entry) => sameMark(entry, verdict)) || adoptedHere(verdict, content.verdict, before?.verdict));
+  for (const item of newItems) {
+    const list = own.items.get(item.itemId);
+    if (list === undefined) own.items.set(item.itemId, [item]);
+    else list.push(item);
+  }
+  if (newVerdict !== null) own.verdict.push(newVerdict);
+  return { marks: own, owned: own };
+}
+
+/**
+ * An entry's AI7 words as the reader takes them (Issue #696): those it records, and the words still standing that its chain
+ * finds AI7's — a mark the entry leaves out is added back, never a reason to refuse it, so words in doubt stay AI7's and are
+ * never learned as the editor's. A version written before every mark was kept (#692) left such marks out by design.
+ */
+function unionWords(stored: EvaluationRewrittenWords | null, standing: EvaluationRewrittenWords | null, content: EvaluationContent): EvaluationRewrittenWords | null {
+  if (standing === null) return stored;
+  if (stored === null) return standing;
+  const items = content.items.flatMap((item) => {
+    const mark = stored.items.find((entry) => entry.itemId === item.itemId) ?? standing.items.find((entry) => entry.itemId === item.itemId);
+    return mark === undefined ? [] : [mark];
+  });
+  return noWords(items, stored.verdict ?? standing.verdict);
+}
+
+/** What the reader knows of the 采用 that may have appended one entry. */
+type Adoption = { readonly known: true; readonly from: EvaluationRewriteProvenance | null } | { readonly known: false };
+
+/**
+ * Whether each recorded mark the chain does not already hold is one its chain could have written (Issue #696): on the entry a
+ * 采用 appended, that rewrite's own over words the 采用 changed. `lenient` admits them as they stand — digest-checked, their
+ * source unknown — when the 采用 records or the version before cannot be read.
+ */
+function newMarksAdmitted(words: EvaluationRewrittenWords, known: EvaluationChainMarks | null, content: EvaluationContent,
+  before: EvaluationContent | undefined, adoption: Adoption, lenient: boolean): boolean {
+  const admitted = (mark: EvaluationRewriteMark, now: string | null, was: string | null | undefined): boolean =>
+    lenient || (adoption.known && adoption.from !== null && before !== undefined && namesRewrite(mark, adoption.from) && now !== was);
+  return words.items.every((item) => holdsItemMark(known, item) ||
+    admitted(item, content.items.find((entry) => entry.itemId === item.itemId)!.comment, before?.items.find((entry) => entry.itemId === item.itemId)?.comment)) &&
+    (words.verdict === null || holdsVerdictMark(known, words.verdict) || admitted(words.verdict, content.verdict, before?.verdict));
 }
 
 /**
@@ -783,46 +846,87 @@ export class EvaluationRecords {
   }
 
   /**
-   * The marks the versions before this one leave it (Issue #696): each earlier version's chain read oldest first, the marks of
-   * one carried into the next, so a first entry's marks are checked against the 定稿 they were carried from. `known` holds the
-   * marks of chains already read in this call, by record, and gains the ones read here.
+   * What the versions before this one leave it (Issue #696): each earlier version's chain read oldest first, the marks of one
+   * carried into the next, so a first entry's marks are checked against the 定稿 they were carried from. An earlier version
+   * that cannot be read leaves no marks and says so (`unreadable`), and the versions after it still read (Issue #702 review).
+   * `known` holds what each version already read in this call leaves its successor, and gains the ones read here.
    */
-  #marksBefore(record: StoredRecord, known: Map<string, EvaluationChainMarks | null>): EvaluationChainMarks | null {
+  #carriedInto(record: StoredRecord, known: Map<string, Carried>): Carried {
     const earlier: StoredRecord[] = [];
     let previous = record.previousRecordId;
+    let broken = false;
     while (previous !== null && !known.has(previous)) {
-      const row = this.#db.prepare('SELECT * FROM evaluation_records WHERE record_id = ? AND book_id = ?').get(previous, record.bookId) as SqlRow | undefined;
-      requireEvaluation(row !== undefined, 'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
-      const read = this.#record(row);
-      // Each version follows one of lower ordinal, so the walk ends.
-      requireEvaluation(read.ordinal < (earlier.at(-1) ?? record).ordinal, 'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
-      earlier.push(read);
-      previous = read.previousRecordId;
+      try {
+        const row = this.#db.prepare('SELECT * FROM evaluation_records WHERE record_id = ? AND book_id = ?').get(previous, record.bookId) as SqlRow | undefined;
+        requireEvaluation(row !== undefined, 'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
+        const read = this.#record(row);
+        // Each version follows one of lower ordinal, so the walk ends.
+        requireEvaluation(read.ordinal < (earlier.at(-1) ?? record).ordinal, 'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
+        earlier.push(read);
+        previous = read.previousRecordId;
+      } catch (error) {
+        if (!(error instanceof EvaluationError)) throw error;
+        broken = true;
+        break;
+      }
     }
-    let marks = previous === null ? null : known.get(previous)!;
+    let carried = broken ? CARRIED_UNREADABLE : previous === null ? NOTHING_CARRIED : known.get(previous)!;
     for (const read of earlier.reverse()) {
-      marks = this.#chain(read, marks).latest.rewriteMarks;
-      known.set(read.recordId, marks);
+      carried = this.#leaves(read, carried, known);
     }
-    return marks;
+    return carried;
   }
 
-  /** One version's entries as `#chain` reads them, with the marks the versions before it leave it. */
-  #entries(record: StoredRecord, known: Map<string, EvaluationChainMarks | null> = new Map()): { count: number; latest: StoredEntry } {
-    const chain = this.#chain(record, this.#marksBefore(record, known));
-    known.set(record.recordId, chain.latest.rewriteMarks);
-    return chain;
+  /** What one version leaves the next, read from its chain with what was carried into it; unreadable when it cannot be read. */
+  #leaves(record: StoredRecord, carried: Carried, known: Map<string, Carried>): Carried {
+    let left: Carried;
+    try {
+      left = { marks: this.#chain(record, carried).latest.rewriteMarks, unreadable: false };
+    } catch (error) {
+      if (!(error instanceof EvaluationError)) throw error;
+      left = CARRIED_UNREADABLE;
+    }
+    known.set(record.recordId, left);
+    return left;
+  }
+
+  /** One version's entries as `#chain` reads them, with what the versions before it leave it; refused when it cannot be read. */
+  #entries(record: StoredRecord, known: Map<string, Carried> = new Map()): Chain {
+    try {
+      const chain = this.#chain(record, this.#carriedInto(record, known));
+      known.set(record.recordId, { marks: chain.latest.rewriteMarks, unreadable: false });
+      return chain;
+    } catch (error) {
+      if (error instanceof EvaluationError) known.set(record.recordId, CARRIED_UNREADABLE);
+      throw error;
+    }
+  }
+
+  /** The entries of the version a 采用 appended, by ordinal, with the rewrite it took; `null` when they cannot be read now. */
+  #adoptionsOf(recordId: string): ReadonlyMap<number, EvaluationRewriteProvenance> | null {
+    return this.#adoptions.adoptionsOf(recordId);
   }
 
   /**
    * One version's entries, oldest first, each verified and chained to the one before; the first to the record itself. `carried`
-   * are the marks the version before leaves this one: its first entry's AI7 words are among them.
+   * is what the version before leaves this one: its first entry's AI7 words are among its marks.
+   *
+   * AI7's words in each entry (Issue #689, Issue #696): as it records them, each digest that of its own words, together with
+   * the words still standing that the chain's marks find AI7's — a mark left out is added back, never refused. A recorded mark
+   * the chain does not already hold is admitted only on the entry a 采用 appended, naming that 采用's rewrite over words it
+   * changed, and that entry names its rewrite at least once. An entry written before Issue #689 names its 采用's rewrite; an
+   * entry that names none reads the words still standing, and no 采用 ever appended one. When the 采用 records or the version
+   * before cannot be read, the digest-checked marks are kept as recorded and the chain says their source cannot be checked.
    */
-  #chain(record: StoredRecord, carried: EvaluationChainMarks | null): { count: number; latest: StoredEntry } {
+  #chain(record: StoredRecord, carried: Carried): Chain {
     const rows = this.#db.prepare('SELECT * FROM evaluation_record_entries WHERE record_id = ? ORDER BY ordinal').iterate(record.recordId);
+    const adoptions = this.#adoptionsOf(record.recordId);
     let previous = record.sha256;
     let count = 0;
     let latest: StoredEntry | undefined;
+    let marks = carried.marks;
+    let owned: OwnedMarks | null = null;
+    let adoptionsUsed = false;
     for (const row of rows) {
       requireEvaluation(latest === undefined || latest.kind === 'draft', 'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
       const json = String(row.canonical_json);
@@ -836,28 +940,33 @@ export class EvaluationRecords {
         (!Object.hasOwn(entry, 'rewrittenFrom') || entry.schema === ENTRY_SCHEMA),
       'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
       const content = contentOfEntry(entry.schema as typeof ENTRY_SCHEMA | typeof ENTRY_SCHEMA_V1, entry.content as Record<string, unknown>);
-      // AI7's words in it: as it records them, verified against its content and its chain (Issue #696) — none of the words
-      // still standing dropped, and no rewrite named but one the chain holds or the one whose 采用 appended this entry; as an
-      // entry written before Issue #689 named its rewrite, the words it changed and the ones still standing; and in an entry
-      // that names none, the ones the chain's marks still match — none, in a chain written since, which records every one.
-      const known = latest === undefined ? carried : latest.rewriteMarks;
+      const standing = rewrittenWordsIn(marks, content);
+      const adoption: Adoption = adoptions === null ? { known: false } : { known: true, from: adoptions.get(count + 1) ?? null };
+      if (adoptions === null) adoptionsUsed = true;
       let rewrittenFrom: EvaluationRewrittenWords | null;
       if (!Object.hasOwn(entry, 'rewrittenFrom')) {
-        rewrittenFrom = rewrittenWordsIn(known, content);
+        // No 采用 ever appended an entry that names none: since #682 each names its rewrite.
+        requireEvaluation(!adoption.known || adoption.from === null, 'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
+        rewrittenFrom = standing;
       } else {
         const legacy = rewriteProvenance(entry.rewrittenFrom);
-        const adopted = (): EvaluationRewriteProvenance | null => this.#adoptions.adoptedAt(record.recordId, count + 1);
-        const legacyAdopted = legacy === null ? null : adopted();
-        const stored = legacy === null ? storedRewrittenWords(entry.rewrittenFrom, content)
-          : legacyAdopted?.taskIntentId === legacy.taskIntentId && legacyAdopted.analysisRevisionId === legacy.analysisRevisionId
-            ? legacyRewrittenWords(legacy, latest?.content, content, rewrittenWordsIn(known, content))
-            : undefined;
-        requireEvaluation(stored !== undefined && (legacy !== null || chainWroteMarks(stored, known, content, latest?.content, adopted)),
+        if (legacy !== null) {
+          requireEvaluation(!adoption.known || (adoption.from !== null && namesRewrite(legacy, adoption.from)), 'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
+          rewrittenFrom = legacyRewrittenWords(legacy, latest?.content, content, standing);
+        } else {
+          const stored = storedRewrittenWords(entry.rewrittenFrom, content);
+          const lenient = !adoption.known || (latest === undefined && carried.unreadable);
+          requireEvaluation(stored !== undefined && stored !== null && newMarksAdmitted(stored, marks, content, latest?.content, adoption, lenient) &&
+            // The entry a 采用 appended names that rewrite at least once (Issue #702 review).
+            (!adoption.known || adoption.from === null ||
+              stored.items.some((item) => namesRewrite(item, adoption.from!)) || (stored.verdict !== null && namesRewrite(stored.verdict, adoption.from))),
           'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
-        rewrittenFrom = stored;
+          rewrittenFrom = unionWords(stored, standing, content);
+        }
       }
       previous = String(row.sha256);
       count += 1;
+      ({ marks, owned } = mergedMarks(marks, owned, rewrittenFrom));
       latest = {
         ordinal: count,
         kind: entry.kind as StoredEntry['kind'],
@@ -865,11 +974,12 @@ export class EvaluationRecords {
         recordedAt: String(row.recorded_at),
         sha256: String(row.sha256),
         rewrittenFrom,
-        rewriteMarks: mergedMarks(known, rewrittenFrom),
+        rewriteMarks: marks,
       };
     }
     requireEvaluation(latest !== undefined, 'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
-    return { count, latest };
+    const notice = carried.unreadable ? EVALUATION_CARRIED_MARKS_UNREADABLE : adoptionsUsed ? EVALUATION_ADOPTIONS_UNREADABLE : null;
+    return { count, latest, notice };
   }
 
   *#records(bookId: string): Generator<StoredRecord> {
@@ -997,8 +1107,8 @@ export class EvaluationRecords {
   }
 
   /** One version's 定稿 as 审稿意见 reads it, verified; `null` while the version is not 定稿. */
-  #finalized(record: StoredRecord, known: Map<string, EvaluationChainMarks | null> = new Map()): FinalizedEvaluation | null {
-    const latest = this.#entries(record, known).latest;
+  #finalized(record: StoredRecord, chain: Chain = this.#entries(record)): FinalizedEvaluation | null {
+    const latest = chain.latest;
     if (latest.kind !== 'finalized') return null;
     return {
       recordId: record.recordId,
@@ -1020,12 +1130,43 @@ export class EvaluationRecords {
    * one is still being scored; `null` while none is.
    */
   latestFinalized(bookId: string): FinalizedEvaluation | null {
-    let found: StoredRecord | null = null;
-    const known = new Map<string, EvaluationChainMarks | null>();
-    for (const record of this.#records(bookId)) {
-      if (this.#entries(record, known).latest.kind === 'finalized') found = record;
+    let found: { record: StoredRecord; chain: Chain } | null = null;
+    let damage: EvaluationError | null = null;
+    for (const read of this.#versions(bookId, new Map())) {
+      if (read.version === null) damage = read.error;
+      else if (read.version.chain.latest.kind === 'finalized') {
+        found = read.version;
+        damage = null;
+      }
     }
-    return found === null ? null : this.#finalized(found, known);
+    // A version after the latest 定稿 that cannot be read may itself be 定稿: which one is latest is then unknown.
+    if (damage !== null) throw damage;
+    return found === null ? null : this.#finalized(found.record, found.chain);
+  }
+
+  /**
+   * Each version of the Book, oldest first, read with what the ones before leave it (Issue #702 review): a version that cannot
+   * be read is yielded with why, and the ones after it still read.
+   */
+  *#versions(bookId: string, known: Map<string, Carried>): Generator<
+    { ordinal: number; recordId: string; version: { record: StoredRecord; chain: Chain }; error: null } |
+    { ordinal: number; recordId: string; version: null; error: EvaluationError }
+  > {
+    for (const row of this.#db.prepare('SELECT * FROM evaluation_records WHERE book_id = ? ORDER BY ordinal').all(bookId) as SqlRow[]) {
+      const ordinal = integer(row.ordinal);
+      const recordId = String(row.record_id);
+      let version: { record: StoredRecord; chain: Chain };
+      try {
+        const record = this.#record(row);
+        version = { record, chain: this.#entries(record, known) };
+      } catch (error) {
+        if (!(error instanceof EvaluationError)) throw error;
+        known.set(recordId, CARRIED_UNREADABLE);
+        yield { ordinal, recordId, version: null, error };
+        continue;
+      }
+      yield { ordinal, recordId, version, error: null };
+    }
   }
 
   /** One exact 定稿 version of the Book, as a 审稿意见 Task drafted from it reads it again; `null` when it is not one. */
@@ -1068,15 +1209,20 @@ export class EvaluationRecords {
       'SELECT r.* FROM evaluation_records r JOIN evaluation_initial_drafts d ON d.record_id = r.record_id ORDER BY r.book_id, r.ordinal',
     ).all() as SqlRow[];
     // Each version's chain is read once, whichever later version's carried marks need it.
-    const known = new Map<string, EvaluationChainMarks | null>();
+    const known = new Map<string, Carried>();
     for (const row of rows) {
-      const record = this.#record(row);
-      if (books.has(record.bookId)) continue;
-      const latest = this.#entries(record, known).latest;
-      if (latest.kind !== 'finalized') continue;
-      const scores = EvaluationRecords.#initialScores(this.#initialDraft(record))!;
-      if (latest.content.items.some((item) => evaluationItemAdjusted({ score: item.score, notRated: item.notRated !== null }, scores.get(item.itemId) ?? null))) {
-        books.add(record.bookId);
+      if (books.has(String(row.book_id))) continue;
+      // A version that cannot be read counts for nothing, and never fails 设置 for the whole house (Issue #702 review).
+      try {
+        const record = this.#record(row);
+        const latest = this.#entries(record, known).latest;
+        if (latest.kind !== 'finalized') continue;
+        const scores = EvaluationRecords.#initialScores(this.#initialDraft(record))!;
+        if (latest.content.items.some((item) => evaluationItemAdjusted({ score: item.score, notRated: item.notRated !== null }, scores.get(item.itemId) ?? null))) {
+          books.add(record.bookId);
+        }
+      } catch (error) {
+        if (!(error instanceof EvaluationError)) throw error;
       }
     }
     return books.size;
@@ -1129,7 +1275,7 @@ export class EvaluationRecords {
     this.#append(record, last.sha256, entries.count + 1, finalize ? 'finalized' : 'draft', checked, rewrittenWordsIn(last.rewriteMarks, checked));
   }
 
-  #rewritableOf(record: StoredRecord, chain: { count: number; latest: StoredEntry }, initial: EvaluationInitialDraft | null): RewritableEvaluation {
+  #rewritableOf(record: StoredRecord, chain: Chain, initial: EvaluationInitialDraft | null): RewritableEvaluation {
     return {
       recordId: record.recordId,
       bookId: record.bookId,
@@ -1156,6 +1302,24 @@ export class EvaluationRecords {
   }
 
   /**
+   * The words of a version's latest entry that are AI7's (Issue #689, Issue #696), as a consumer of the editor's words — the
+   * learning of EVAL-011 — leaves them out: each with the rewrite it came from and the digest of its words.
+   */
+  ai7Words(bookId: string, recordId: string): EvaluationRewrittenWords | null {
+    return this.#rewritableRead(bookId, recordId).chain.latest.rewrittenFrom;
+  }
+
+  /** One version of the Book as `rewritable` reads it, with its record and chain, read once. */
+  #rewritableRead(bookId: string, recordId: string): { record: StoredRecord; chain: Chain; version: RewritableEvaluation } {
+    requireEvaluation(UUID_PATTERN.test(recordId), 'EVALUATION_NOT_FOUND', '没有这个评估版本。');
+    const row = this.#db.prepare('SELECT * FROM evaluation_records WHERE record_id = ? AND book_id = ?').get(recordId, bookId) as SqlRow | undefined;
+    requireEvaluation(row !== undefined, 'EVALUATION_NOT_FOUND', '没有这个评估版本。');
+    const record = this.#record(row);
+    const chain = this.#entries(record);
+    return { record, chain, version: this.#rewritableOf(record, chain, this.#initialDraft(record)) };
+  }
+
+  /**
    * 采用 one rewrite (S81b2; EVAL-008), inside the caller's transaction: the version's latest content with each scored item's
    * 评语 and the 总评 replaced by AI7's words, appended as a new entry — refused when the version is 定稿, or moved past the
    * entry the rewrite read, so the words never land on scores the editor changed since. It changes no number: every score,
@@ -1163,7 +1327,7 @@ export class EvaluationRecords {
    */
   applyRewrite(bookId: string, recordId: string, read: { entryOrdinal: number; entrySha256: string },
     words: { items: ReadonlyArray<{ itemId: string; comment: string }>; verdict: string | null }, from: EvaluationRewriteProvenance): number {
-    const version = this.rewritable(bookId, recordId);
+    const { record, chain, version } = this.#rewritableRead(bookId, recordId);
     requireEvaluation(version.state !== 'finalized', 'EVALUATION_FINALIZED', `第 ${version.ordinal} 版已经定稿，不能再改；要改就重新评估。`);
     requireEvaluation(version.entryOrdinal === read.entryOrdinal && version.entrySha256 === read.entrySha256, 'EVALUATION_REWRITE_STALE',
       '这一版评估在重写之后又保存过：重写的评语依据的是之前的分数，不能采用；可以放弃它，再按现在的评分重写。');
@@ -1174,10 +1338,9 @@ export class EvaluationRecords {
     requireEvaluation(checked.items.every((item, index) => item.score === version.content.items[index]!.score &&
       item.notRated === version.content.items[index]!.notRated), 'EVALUATION_REWRITE_INVALID', '重写不能改动分数。');
     requireEvaluation(!sameContent(checked, version.content), 'EVALUATION_UNCHANGED', '重写的评语与现在的评语相同，没有可以采用的变化。');
-    const record = this.#record(this.#db.prepare('SELECT * FROM evaluation_records WHERE record_id = ?').get(recordId) as SqlRow);
     // The entry names, item by item, the words that are AI7's (S81b2 review; Issue #689): this rewrite's, and those an earlier
     // 采用 left that the editor has not changed since. They are never learned as the editor's.
-    const last = this.#entries(record).latest;
+    const last = chain.latest;
     const rewritten = adoptedRewrittenWords(last.rewriteMarks, new Set(words.items.map((item) => item.itemId)), words.verdict !== null, version.content, checked, from);
     this.#append(record, version.entrySha256, version.entryOrdinal + 1, 'draft', checked, rewritten);
     return version.entryOrdinal + 1;
@@ -1224,36 +1387,56 @@ export class EvaluationRecords {
     requireEvaluation(before === null || (Number.isSafeInteger(before) && before > 1), 'EVALUATION_PAGE_INVALID', '评估版本页码无效。');
     const summaries: EvaluationRecordSummaryProjection[] = [];
     let count = 0;
-    let open: { record: StoredRecord; count: number; latest: StoredEntry } | undefined;
+    let open: ({ record: StoredRecord } & Chain) | undefined;
     let shown: typeof open;
     let shownPrevious: typeof open;
-    const known = new Map<string, EvaluationChainMarks | null>();
+    let prior: typeof open;
+    const known = new Map<string, Carried>();
+    // A version that cannot be read is named, not shown, and the versions after it still read (Issue #702 review); the
+    // latest must read, since whether a version can begin depends on it, and so must the one asked for.
+    const unreadableRecords: number[] = [];
+    let lastDamage: EvaluationError | null = null;
+    let basisFound: { record: StoredRecord; chain: Chain } | null = null;
+    let basisDamage: EvaluationError | null = null;
     const begunFromInitial = new Set((this.#db.prepare(
       'SELECT d.record_id FROM evaluation_initial_drafts d JOIN evaluation_records r ON r.record_id = d.record_id WHERE r.book_id = ?',
     ).all(bookId) as SqlRow[]).map((row) => String(row.record_id)));
-    for (const record of this.#records(bookId)) {
-      const chain = { record, ...this.#entries(record, known) };
+    for (const read of this.#versions(bookId, known)) {
       count += 1;
+      if (read.version === null) {
+        if (read.recordId === recordId) throw read.error;
+        unreadableRecords.push(read.ordinal);
+        lastDamage = read.error;
+        basisDamage = read.error;
+        prior = undefined;
+        continue;
+      }
+      lastDamage = null;
+      const { record } = read.version;
+      const chain = { record, ...read.version.chain };
+      if (chain.latest.kind === 'finalized') {
+        basisFound = read.version;
+        basisDamage = null;
+      }
       if (recordId === null || record.recordId === recordId) {
         shown = chain;
-        shownPrevious = open;
+        shownPrevious = prior;
       }
       open = chain;
+      prior = chain;
       if (before === null || record.ordinal < before) {
         summaries.push(this.#summary(record, chain.latest, begunFromInitial.has(record.recordId)));
         if (summaries.length > 10) summaries.shift();
       }
     }
+    if (lastDamage !== null) throw lastDamage;
     requireEvaluation(recordId === null || shown !== undefined, 'EVALUATION_NOT_FOUND', '没有这个评估版本。');
     let record: EvaluationRecordProjection | null = null;
     let rewritable: RewritableEvaluation | null = null;
     if (shown !== undefined) {
       const last = shown.latest;
-      const previousRow = shown.record.previousRecordId === null ? undefined : this.#db.prepare('SELECT * FROM evaluation_records WHERE record_id = ? AND book_id = ?')
-        .get(shown.record.previousRecordId, bookId);
-      const previousRecord = previousRow === undefined ? undefined : this.#record(previousRow);
-      const previous = previousRecord === undefined ? undefined
-        : { record: previousRecord, latest: shownPrevious?.record.recordId === previousRecord.recordId ? shownPrevious.latest : this.#entries(previousRecord, known).latest };
+      // The version before, as the walk read it; one that could not be read leaves no comparison.
+      const previous = shown.record.previousRecordId !== null && shownPrevious?.record.recordId === shown.record.previousRecordId ? shownPrevious : undefined;
       const initial = this.#initialDraft(shown.record);
       record = {
         ...this.#summary(shown.record, last, initial !== null),
@@ -1267,6 +1450,7 @@ export class EvaluationRecords {
         recommendationBlocked: recommendationBlocked(last.content.risks),
         comparison: this.#comparison(previous, { record: shown.record, content: last.content }),
         initial: initial === null ? null : initialDraftProjection(initial),
+        ai7WordsNotice: shown.notice,
       };
       rewritable = this.#rewritableOf(shown.record, shown, initial);
     }
@@ -1288,7 +1472,8 @@ export class EvaluationRecords {
     let basis: FinalizedEvaluation | null = null;
     let unreadable: string | null = null;
     try {
-      basis = this.latestFinalized(bookId);
+      if (basisDamage !== null) throw basisDamage;
+      basis = basisFound === null ? null : this.#finalized(basisFound.record, basisFound.chain);
     } catch (error) {
       if (!(error instanceof EvaluationError)) throw error;
       unreadable = `审稿意见暂不可用：${error.message}`;
@@ -1303,6 +1488,7 @@ export class EvaluationRecords {
       recordCount: count,
       recordsBefore: before,
       recordsNext: (summaries.at(-1)?.ordinal ?? 1) > 1 ? summaries.at(-1)!.ordinal : null,
+      unreadableRecords,
       record,
       start,
       initial: {

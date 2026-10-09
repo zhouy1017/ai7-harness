@@ -4,8 +4,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { graphemeCount } from '../../src/service/analysis/factual-review-contract.js';
 import {
   BUILTIN_EVALUATION_PROFILE,
+  EVALUATION_TEXT_TOO_DENSE,
   EvaluationError,
   EvaluationRecords,
+  evaluationTextTooDense,
   evaluationProfileDigest,
   initializeEvaluationInitialDraftSchema,
   initializeEvaluationRecordSchema,
@@ -114,14 +116,22 @@ describe('评估 on a long Book stays within one frame (Issue #689)', () => {
     const recordId = records.start(bookId);
     const version = records.rewritable(bookId, recordId);
     const withVerdict = (verdict: string) => ({ ...version.content, verdict });
-    let code = 'none';
-    try {
-      records.save(bookId, recordId, version.entryOrdinal, withVerdict(`评${String.fromCodePoint(0x301).repeat(20_000)}`), false);
-    } catch (error) {
-      if (!(error instanceof EvaluationError)) throw error;
-      code = error.code;
-    }
-    expect(code).toBe('EVALUATION_VERDICT_TOO_LONG');
+    const refusal = (verdict: string): string => {
+      try {
+        records.save(bookId, recordId, version.entryOrdinal, withVerdict(verdict), false);
+      } catch (error) {
+        if (!(error instanceof EvaluationError)) throw error;
+        return `${error.code}:${error.message}`;
+      }
+      return 'none';
+    };
+    // Within its 字 but past its bytes: the refusal says what is too much, never that the 总评 is over its 字 (Issue #702 review).
+    const dense = `${EVALUATION_TEXT_TOO_DENSE}:${evaluationTextTooDense('总评')}`;
+    expect(refusal(`评${String.fromCodePoint(0x301).repeat(20_000)}`)).toBe(dense);
+    expect(evaluationTextTooDense('总评')).toMatch(/^总评里由几个字符拼成的符号太多/u);
+    // 1,200 flags — eight bytes each — are 1,200 字 of a 2,000-字 bound, and too many bytes.
+    expect(refusal('🇨🇳'.repeat(1_200))).toBe(dense);
+    expect(refusal('字'.repeat(2_001))).toMatch(/^EVALUATION_VERDICT_TOO_LONG:/u);
     records.save(bookId, recordId, version.entryOrdinal, withVerdict(words(100, 2)), false);
     expect(records.rewritable(bookId, recordId).content.verdict).toBe(words(100, 2));
   });

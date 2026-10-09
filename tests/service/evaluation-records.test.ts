@@ -88,7 +88,12 @@ describe('②C 评估 over the real store', () => {
         db.exec('DROP TRIGGER evaluation_record_entries_no_update');
         db.prepare('UPDATE evaluation_record_entries SET sha256 = ? WHERE record_id = ? AND ordinal = 2').run('0'.repeat(64), firstId);
       } finally { db.close(); }
-      expect(() => store.inspectEvaluation(book.bookId, null)).toThrowError('评估记录已损坏');
+      // A damaged version is named and not shown; the others still read (Issue #702 review). Asked for, it is refused.
+      const damaged = store.inspectEvaluation(book.bookId, null);
+      expect(damaged).toMatchObject({ recordCount: 13, unreadableRecords: [1], record: { ordinal: 13 } });
+      expect(store.inspectEvaluation(book.bookId, null, 4).records.map((record) => record.ordinal)).toEqual([3, 2]);
+      expect(store.inspectEvaluation(book.bookId, second.recordId).record?.comparison).toBeNull();
+      expect(() => store.inspectEvaluation(book.bookId, firstId)).toThrowError('评估记录已损坏');
     } finally { store.close(); }
   }, 120_000);
 

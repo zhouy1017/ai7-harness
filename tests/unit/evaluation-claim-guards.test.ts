@@ -66,7 +66,7 @@ describe('what AI7\'s evaluation words may not claim (Issue #429, S81b2)', () =>
     }
     // A version with an item 不评 shows its total over the rated items: 68 / 80 is a score of it.
     const rated = scoreDenominators(BUILTIN_EVALUATION_PROFILE.items.map((item, index) => ({ fullMarks: item.fullMarks, notRated: index === 4 ? '资料不足' : null })));
-    expect(rated).toEqual([20, 100, 80, 5, 10]);
+    expect(rated).toEqual([20, 100, 80, 10]);
     expect(claimsScore('68/80。', rated)).toBe(true);
     expect(claimsScore('68/80。', FULL_MARKS)).toBe(false);
   });
@@ -106,6 +106,27 @@ describe('what AI7\'s evaluation words may not claim (Issue #429, S81b2)', () =>
     }
   });
 
+  it('reads the review\'s residuals: 一块多 and 一块左右 are prices, 万一 · 统一 · 唯一 open no share, and x/5 is a score only as one (Issue #702 review)', () => {
+    for (const text of ['一块多一本。', '售价一块左右。', '一块多钱。']) {
+      expect(claimsQuantity(text), text).toBe(true);
+    }
+    for (const text of ['万一成年读者不买账。', '统一成人物视角来写。', '唯一成年的角色。', '这一块多数读者不熟。', '单一成分的叙事。', '每一块都写得扎实。']) {
+      expect(claimsQuantity(text), text).toBe(false);
+    }
+    // 一成 after any other word is still a share.
+    for (const text of ['仅一成人会买。', '只有一成年轻读者。', '近一成人群。']) {
+      expect(claimsQuantity(text), text).toBe(true);
+    }
+    for (const text of ['4.5/5。', '4/5。', '可以打 4/5。', '4/5分。', '4/5星的作品。', '4 ／ 5 的评价。', '评分约 3/5 左右。']) {
+      expect(claimsScore(text, FULL_MARKS), text).toBe(true);
+    }
+    for (const text of ['前1/5节奏拖沓。', '约4/5的读者会喜欢。', '后 1 / 5 写考古。', '9/5 的比例。', '比例是9/5。']) {
+      expect(claimsScore(text, FULL_MARKS), text).toBe(false);
+    }
+    // A profile whose 满分 is 5 reads every fraction over 5 as a score.
+    expect(claimsScore('前1/5节奏拖沓。', [5, 25])).toBe(true);
+  });
+
   it('finds a conclusion by the house\'s own labels — 推荐出版, 修改后再议, 暂缓, 不推荐 — wherever it stands in the line', () => {
     expect(CONCLUSIONS).toEqual(['推荐出版', '修改后再议', '暂缓', '不推荐']);
     for (const text of ['建议推荐出版。', '可以修改后再议。', '建议暂缓。', '目前暂缓出版为宜。', '不推荐。', '编辑部不推荐这部书稿。', '总体不推荐出版。']) {
@@ -119,7 +140,8 @@ describe('what AI7\'s evaluation words may not claim (Issue #429, S81b2)', () =>
 
   it('reads a line in time linear in its length, however its numerals fall', () => {
     for (const text of ['一'.repeat(200_000), '1'.repeat(200_000), '1/'.repeat(100_000), '千万'.repeat(100_000), '1,'.repeat(100_000), '首印'.repeat(100_000),
-      '一块'.repeat(100_000), '一成'.repeat(100_000), '十分之'.repeat(70_000), '十五分一'.repeat(50_000), '4/5'.repeat(70_000)]) {
+      '一块'.repeat(100_000), '一成'.repeat(100_000), '十分之'.repeat(70_000), '十五分一'.repeat(50_000), '4/5'.repeat(70_000), '1/5的'.repeat(50_000),
+      '统一成'.repeat(70_000), '一块左'.repeat(70_000)]) {
       const started = performance.now();
       claimsQuantity(text);
       claimsScore(text, FULL_MARKS);

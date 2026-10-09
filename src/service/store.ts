@@ -4222,13 +4222,14 @@ export class EditorialStore {
       market: (bookId) => this.#evaluationMarket(bookId),
       rewrite: (bookId, version) => this.#evaluationRewriteWorkspace(bookId, version),
     }, {
-      // A mark a version's entry records is tied to the 采用 that appended it (Issue #696): a damaged decision row makes that
-      // version unreadable, as a damaged entry does.
-      adoptedAt: (recordId, entryOrdinal) => {
+      // A mark a version's entry records is tied to the 采用 that appended it (Issue #696). A damaged decision row never makes
+      // 评估 unreadable (Issue #702 review): the record keeps the marks it holds and says their source cannot be checked, and
+      // 按我的评分重写评语 says it is unavailable, as before.
+      adoptionsOf: (recordId) => {
         try {
-          return this.#evaluationRewrites.adoptionAt(recordId, entryOrdinal);
+          return this.#evaluationRewrites.adoptionsOf(recordId);
         } catch (error) {
-          if (error instanceof EvaluationRewriteError) throw new EvaluationError('EVALUATION_RECORD_INVALID', '评估记录已损坏。');
+          if (error instanceof EvaluationRewriteError) return null;
           throw error;
         }
       },
@@ -8374,6 +8375,8 @@ export class EditorialStore {
           };
         }
         const last = this.#evaluationRewriteCall(() => this.#evaluationRewrites.latestDecision(version.recordId));
+        // Every 采用 of the version, read under the same guard: a damaged one makes the rewrite unavailable (Issue #702 review).
+        this.#evaluationRewriteCall(() => this.#evaluationRewrites.adoptionsOf(version.recordId));
         decided = last === null ? null : { decision: last.decision, entryOrdinal: last.entryOrdinal, decidedAt: last.recordedAt };
       }
     } catch (error) {
@@ -13730,7 +13733,7 @@ export class EditorialStore {
     try {
       return operation();
     } catch (error) {
-      if (error instanceof EvaluationCalibrationError) throw new StoreError(error.code, error.message);
+      if (error instanceof EvaluationCalibrationError || error instanceof EvaluationError) throw new StoreError(error.code, error.message);
       throw error;
     }
   }
