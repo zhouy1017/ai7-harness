@@ -759,7 +759,9 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       }
       parts.push(versions);
     } else {
-      parts.push(el('p', 'field-note evaluation-empty', EVALUATION_EMPTY));
+      // No version reads: either none was begun, or every one is damaged — then say which, never 「no version yet」 (Issue #708).
+      const unreadable = evaluationUnreadableLine(workspace.unreadableRecords);
+      parts.push(unreadable === null ? el('p', 'field-note evaluation-empty', EVALUATION_EMPTY) : el('p', 'field-note evaluation-unreadable', unreadable));
     }
     const start = el('div', 'button-row evaluation-start');
     if (workspace.start.allowed) {
