@@ -63,6 +63,7 @@ const STATES: ReadonlyArray<GlobalAttentionStateKey> = [
   'library-attribution-pending', 'learning-eligibility-pending', 'learning-eligibility-deferred',
   'learning-materials-pending', 'learning-materials-deferred',
   'dialogue-answering', 'dialogue-answered', 'dialogue-stopped', 'dialogue-interrupted', 'dialogue-failed',
+  'indexing-completed',
 ];
 
 function item(state: GlobalAttentionStateKey, overrides: Partial<GlobalAttentionItemProjection> = {}): GlobalAttentionItemProjection {
@@ -192,6 +193,8 @@ describe('each item', () => {
       // A Book's Learning Material (Issue #61, S26b).
       'learning-materials-pending': '学习准入待处理',
       'learning-materials-deferred': '学习准入待处理 · 稍后决定',
+      // 索引完成 (Issue #428, S80a; ATTN-009): the material table's own words.
+      'indexing-completed': '索引完成',
       // A dialogue Task (Issue #52, S17a): away from the foreground only 等待回答 (DIALOG-010); DIALOG-012's words once incomplete.
       'dialogue-answering': '等待回答',
       'dialogue-answered': '已回答',
@@ -243,6 +246,8 @@ describe('each item', () => {
       'decide-learning-materials': '定学习准入…',
       // A dialogue Task's own way to its dialogue (Issue #52, S17a; TASK-044).
       'open-dialogue': '打开对话',
+      // A 资料库 item's index (Issue #428, S80a): its card, with the layers and 查看分段.
+      'view-material-index': '查看索引',
     });
     // The drawer's own words for the way on from a Run the ceiling stopped (Issue #51, S16a).
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['adjust-budget-redo']).toBe(TASK_BAR_ADJUST_BUDGET_REDO);
@@ -293,6 +298,8 @@ describe('each item', () => {
     expect(globalAttentionObjectLabel({ kind: 'maintenance', classification: 'supersession', ordinal: 3, publicationOrdinal: 1 })).toBe('维护事项 · 第 3 项 · 替代 · 第 1 次发稿版本');
     // Issue #427 (S79c): a 资料库 item by its kind and title.
     expect(globalAttentionObjectLabel({ kind: 'library-material', title: 'sample1', materialKind: 'book', scope: 'none' })).toBe('资料库 · 图书「sample1」');
+    // Issue #428 (S80a): an item whose Material Index was built.
+    expect(globalAttentionObjectLabel({ kind: 'library-index', title: 'sample1', materialKind: 'paper', scope: 'house', outcome: 'unsupported' })).toBe('资料索引 · 论文「sample1」');
     // Issue #61 review: only what there is — a Book whose material was all left for later says no 0 条待定.
     expect(globalAttentionObjectLabel({ kind: 'learning-materials', pending: 2, deferred: 0 })).toBe('学习材料 · 2 条待定');
     expect(globalAttentionObjectLabel({ kind: 'learning-materials', pending: 2, deferred: 1 })).toBe('学习材料 · 2 条待定，1 条稍后决定');
@@ -365,6 +372,9 @@ describe('each item', () => {
       'learning-materials-deferred': globalAttentionReason(item('learning-materials-deferred', {
         object: { kind: 'learning-materials', pending: 0, deferred: 1 }, nextStep: 'decide-learning-materials',
       })),
+      'indexing-completed': globalAttentionReason(item('indexing-completed', {
+        object: { kind: 'library-index', title: '参考书', materialKind: 'book', scope: 'house', outcome: 'complete' }, nextStep: 'view-material-index',
+      })),
       ...Object.fromEntries((['dialogue-answering', 'dialogue-answered', 'dialogue-stopped', 'dialogue-interrupted', 'dialogue-failed'] as const)
         .map((state) => [state, globalAttentionReason(item(state, { object: { kind: 'dialogue', question: '这段的叙述视角是否一致？' }, nextStep: 'open-dialogue' }))])) as
         Record<'dialogue-answering' | 'dialogue-answered' | 'dialogue-stopped' | 'dialogue-interrupted' | 'dialogue-failed', string>,
@@ -420,6 +430,8 @@ describe('each item', () => {
       'learning-eligibility-deferred': '学习准入记为稍后决定：决定之前，它不会用来学习，任务也还不能把它列进「允许参考」。',
       'learning-materials-pending': '你的反馈与改动里有可以用来学习的材料：学习准入策略还只是建议，没有你的决定，它们不会用来学习。',
       'learning-materials-deferred': '这些学习材料记为稍后决定：决定之前，它们不会用来学习。',
+      // Issue #428 (S80a; ATTN-009, KB-009): 索引完成, and which layers it holds; it asks nothing.
+      'indexing-completed': '资料索引已在本机建好：原件、元数据、全文与分段锚点都已就绪；相似段落检索与文字识别未提供（需要本地依赖）。',
       // Issue #52 (S17a; DIALOG-010, 012, 016): a dialogue Task in the 任务 panel, read in the background.
       'dialogue-answering': '回答在后台继续；打开对话可以看到已经收到的完整内容。',
       'dialogue-answered': '回答已完成；它只是生成的内容，不改稿件，需要时可以转为修改建议。',
@@ -477,7 +489,8 @@ describe('material and knowledge-base items (V2-UX-ATTN-009)', () => {
     ]);
     for (const entry of GLOBAL_ATTENTION_MATERIAL_GROUPS) expect(GLOBAL_ATTENTION_GROUP_KEYS).toContain(entry.group);
     // The 资料库 decisions have their records since Issue #427 (S79c): their states carry the table's own words, each in its
-    // group. The retention and the index have none yet, so no state of 待我处理 speaks of one.
+    // group. The index has its records since Issue #428 (S80a): 索引完成 is the table's own word, in 最近完成. The retention has
+    // none yet, so no state of 待我处理 speaks of one.
     const placed = new Map(GLOBAL_ATTENTION_MATERIAL_GROUPS.map((entry) => [entry.material, entry] as const));
     expect(GLOBAL_ATTENTION_STATE_LABELS['library-attribution-pending']).toBe(placed.get('library-attribution-pending')!.label);
     expect(GLOBAL_ATTENTION_STATE_LABELS['learning-eligibility-pending']).toBe(placed.get('learning-eligibility-pending')!.label);
@@ -485,7 +498,9 @@ describe('material and knowledge-base items (V2-UX-ATTN-009)', () => {
     // A Book's Learning Material has its records since Issue #61 (S26b), in the same group under the spec's own words.
     expect(GLOBAL_ATTENTION_STATE_LABELS['learning-materials-pending']).toBe(placed.get('learning-materials-pending')!.label);
     expect(GLOBAL_ATTENTION_STATE_LABELS['learning-materials-deferred'].startsWith(placed.get('learning-materials-pending')!.label)).toBe(true);
-    for (const label of Object.values(GLOBAL_ATTENTION_STATE_LABELS)) expect(label).not.toMatch(/留存|索引/u);
+    expect(GLOBAL_ATTENTION_STATE_LABELS['indexing-completed']).toBe(placed.get('indexing-completed')!.label);
+    expect(placed.get('indexing-completed')!.group).toBe('recent');
+    for (const label of Object.values(GLOBAL_ATTENTION_STATE_LABELS)) expect(label).not.toMatch(/留存/u);
     // An item of 资料库 names where it belongs in the Book's place: a Book, the house, or not yet.
     const library = (scope: 'none' | 'book' | 'house', title: string | null) =>
       globalAttentionItemBookLabel({ book: { bookId: title === null ? null : '00000000-0000-4000-8000-000000000000', title }, object: { kind: 'library-material', title: '样书一', materialKind: 'book', scope } });
