@@ -774,10 +774,11 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           !optionalOrNull(input, 'recordsBefore', (before) => isSafeInteger(before, 2))) throw new ProtocolError(tentativeId);
       break;
     }
-    // 开始评估 or 重新评估, alone or from AI7's latest 初评 (Issue #429, S81b1).
+    // 开始评估 or 重新评估, alone or from AI7's latest 初评 (Issue #429, S81b1), saying whether a damaged latest version is skipped
+    // (Issue #726): the main process always names `skipDamaged`, so the frame requires it.
     case 'startEvaluation': {
-      const input = requireInput(value.input, ['bookId', 'fromInitial'], tentativeId);
-      if (!validUuid(input.bookId) || typeof input.fromInitial !== 'boolean') throw new ProtocolError(tentativeId);
+      const input = requireInput(value.input, ['bookId', 'fromInitial', 'skipDamaged'], tentativeId);
+      if (!validUuid(input.bookId) || typeof input.fromInitial !== 'boolean' || typeof input.skipDamaged !== 'boolean') throw new ProtocolError(tentativeId);
       break;
     }
     // 准备 AI7 初评: the route's Book; the mode is the service's to decide from the Book's 初评 so far.
