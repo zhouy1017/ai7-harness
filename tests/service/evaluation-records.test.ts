@@ -88,12 +88,13 @@ describe('②C 评估 over the real store', () => {
         db.exec('DROP TRIGGER evaluation_record_entries_no_update');
         db.prepare('UPDATE evaluation_record_entries SET sha256 = ? WHERE record_id = ? AND ordinal = 2').run('0'.repeat(64), firstId);
       } finally { db.close(); }
-      // A damaged version is named and not shown; the others still read (Issue #702 review). Asked for, it is refused.
+      // A damaged version is named and not shown; the others still read (Issue #702 review). Asked for, it gives way to the
+      // latest that reads (Issue #708).
       const damaged = store.inspectEvaluation(book.bookId, null);
       expect(damaged).toMatchObject({ recordCount: 13, unreadableRecords: [1], record: { ordinal: 13 } });
       expect(store.inspectEvaluation(book.bookId, null, 4).records.map((record) => record.ordinal)).toEqual([3, 2]);
       expect(store.inspectEvaluation(book.bookId, second.recordId).record?.comparison).toBeNull();
-      expect(() => store.inspectEvaluation(book.bookId, firstId)).toThrowError('评估记录已损坏');
+      expect(store.inspectEvaluation(book.bookId, firstId)).toMatchObject({ unreadableRecords: [1], record: { ordinal: 13 }, start: { allowed: true } });
     } finally { store.close(); }
   }, 120_000);
 
@@ -229,7 +230,8 @@ describe('②C 评估 over the real store', () => {
         expect(() => database.exec(`UPDATE ${table} SET canonical_json = canonical_json`)).toThrowError(/EVALUATION_LEDGER_IMMUTABLE/u);
         expect(() => database.exec(`DELETE FROM ${table}`)).toThrowError(/EVALUATION_LEDGER_IMMUTABLE/u);
       }
-      // Rewritten by hand behind the triggers' back, a save no longer reads, and the page says so rather than guess.
+      // Rewritten by hand behind the triggers' back, a save no longer reads, and the page says so rather than guess: both
+      // versions held those words, so neither is shown, and only 重新评估 — which needs the latest — is refused (Issue #708).
       database.exec('DROP TRIGGER evaluation_record_entries_no_update');
       database.exec(`UPDATE evaluation_record_entries SET canonical_json = replace(canonical_json, '人物鲜明', '改过') WHERE ordinal = 2`);
       database.exec(EVALUATION_RECORD_TRIGGER_SQL.evaluation_record_entries_no_update!);
@@ -240,7 +242,11 @@ describe('②C 评估 over the real store', () => {
     try {
       const books = reopened.listBooks(null).items;
       const bookId = books.find((entry) => entry.title === '评估之书')!.bookId;
-      expect(await refusal(() => reopened.inspectEvaluation(bookId, null))).toBe('EVALUATION_RECORD_INVALID:评估记录已损坏。');
+      expect(reopened.inspectEvaluation(bookId, null)).toMatchObject({
+        recordCount: 2, unreadableRecords: [1, 2], records: [], record: null, recordsNext: null,
+        start: { allowed: false, reason: '第 2 版评估记录已损坏，不能重新评估。' },
+      });
+      expect(await refusal(() => reopened.startEvaluation(bookId))).toBe('EVALUATION_RECORD_INVALID:第 2 版评估记录已损坏，不能重新评估。');
       reopened.markCleanShutdown();
     } finally {
       reopened.close();
