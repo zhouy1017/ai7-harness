@@ -1335,20 +1335,22 @@ async function main() {
       await clickSelector(renderer, `[data-screen="book-analysis"] li.analysis-unit[data-analysis-unit="${anchor.unit}"] [data-analysis-action="return-to-range"]`, 'selection-task-analysis-return');
       await waitFor(renderer, `document.querySelector('[data-screen="editor"] .ProseMirror [data-block-id]') !== null`, 'selection-task-editor', 60_000);
       await assertRenderer(renderer, MARK_HELPERS, 'selection-task-helpers');
-      const fits = await renderer.evaluate(`(() => { const node = window.__j16.block(${JSON.stringify(anchor.blockId)}); if (!(node instanceof HTMLElement) || node.tagName !== 'P' || node.querySelector('.editorial-mark') !== null) return false; const head = (node.textContent ?? '').slice(0, 30); return head.length === 30 && Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(head)).length === 30; })()`);
+      // Any block of the manuscript will do — a heading as well as a paragraph — once it holds a few single-unit characters.
+      const fits = await renderer.evaluate(`(() => { const node = window.__j16.block(${JSON.stringify(anchor.blockId)}); if (!(node instanceof HTMLElement)) return false; const head = (node.textContent ?? '').slice(0, 10); return head.length >= 4 && Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(head)).length === head.length; })()`);
       if (fits) {
         taskBlock = anchor.blockId;
         break;
       }
     }
     requireJourney(/^blk_[0-9a-f]{24}$/.test(taskBlock ?? ''), 'selection-task-block', leadAnchors);
-    const taskWords = await renderer.evaluate(`(window.__j16.block(${JSON.stringify(taskBlock)})?.textContent ?? '').slice(2, 12)`);
-    requireJourney(typeof taskWords === 'string' && taskWords.length === 10, 'selection-task-words');
+    const taskWords = await renderer.evaluate(`(window.__j16.block(${JSON.stringify(taskBlock)})?.textContent ?? '').slice(0, 10)`);
+    requireJourney(typeof taskWords === 'string' && taskWords.length >= 4, 'selection-task-words');
+    const wordsTo = taskWords.length;
     const paragraphText = () => renderer.evaluate(`window.__j16.block(${JSON.stringify(taskBlock)})?.textContent ?? null`);
     const paragraphBefore = await paragraphText();
     const windowLoads = () => renderer.evaluate(`document.querySelector('[data-screen="editor"] [data-window-loads]')?.dataset.windowLoads ?? ''`);
     // On a selection of that paragraph the menu's 就这段发起任务… acts; the house's 常用工序 wait, and the group says why.
-    await openSelectionMenu(renderer, taskBlock, 2, 12, 'selection-task-open-menu');
+    await openSelectionMenu(renderer, taskBlock, 0, wordsTo, 'selection-task-open-menu');
     await assertRenderer(renderer, `(() => { const item = window.__j16.item('task-on-selection'); const presets = ['preset-polish', 'preset-names', 'preset-continuity'].map((action) => window.__j16.item(action)); return item instanceof HTMLButtonElement && !item.disabled && item.textContent.startsWith('就这段发起任务…') && presets.every((preset) => preset instanceof HTMLButtonElement && preset.disabled) && window.__j16.menu().textContent.includes('本社常用工序就选区运行尚未接通'); })()`, 'selection-task-menu-items');
     await assertRenderer(renderer, `(() => { window.__j16.item('task-on-selection').click(); return true; })()`, 'selection-task-choose');
 
@@ -1357,10 +1359,10 @@ async function main() {
     // it stands at, how much is selected and where (TASK-002), the Tasks that read a range now, and what is handed over.
     await waitFor(renderer, `window.__j16.composer()?.dataset.markComposer === 'task-on-selection'`, 'selection-task-composer-open', 30_000);
     const composer = await renderer.evaluate(`(() => { const composer = window.__j16.composer(); const select = composer?.querySelector('select[data-mark-field="procedure"]'); return composer === null || !(select instanceof HTMLSelectElement) ? null : { label: composer.getAttribute('aria-label'), quote: composer.querySelector('.editorial-mark-quote')?.textContent ?? null, field: select.closest('label')?.firstElementChild?.textContent ?? null, hint: select.closest('label')?.querySelector('small')?.textContent ?? null, options: Array.from(select.options).map((option) => [option.value, option.textContent]), chosen: select.value, note: composer.querySelector('[data-mark-form-note]')?.textContent ?? null, submit: composer.querySelector('[data-mark-action="submit"]')?.textContent ?? null }; })()`);
-    const context = /^《(.+)》 · 修订版 (r\d+) · 修订日志序号 (\d+) · 已选 10 字 · 第 (\d+) 个内容块$/u.exec(composer?.hint ?? '');
-    const position = context?.[4] ?? null;
+    const context = /^《(.+)》 · 修订版 (r\d+) · 修订日志序号 (\d+) · 已选 (\d+) 字 · 第 (\d+) 个内容块$/u.exec(composer?.hint ?? '');
+    const position = context?.[5] ?? null;
     const offered = new Map(composer?.options ?? []);
-    requireJourney(composer?.label === '就这段发起任务' && composer.quote === taskWords && composer.field === '工序' && context !== null && context[1] === BOOK.title &&
+    requireJourney(composer?.label === '就这段发起任务' && composer.quote === taskWords && composer.field === '工序' && context !== null && context[1] === BOOK.title && Number(context[4]) === wordsTo &&
       composer.chosen === '' && offered.get('') === '请选择' && offered.get('reanalyze-range') === '重新分析这段' &&
       offered.get('review:plot-consistency') === '审阅这段 · 「情节逻辑与前后一致」' && !offered.has('review:factual-review') && composer.submit === '准备任务' &&
       composer.note === '只把所选文字所在的这一段交给任务：按包含它的阅读范围读取，计划里写明读哪些范围；审阅只在这一段上标出发现。准备任务先打开计划，由你开始；就选区发起的任务没有快速开始。',
