@@ -621,7 +621,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
         if (input.goal !== BASELINE_ANALYSIS_MODE_GOALS['first-baseline']) throw new ProtocolError(tentativeId);
         break;
       }
-      if (!isRecord(update) || !hasExactKeys(update, ['mode', 'selectedRange']) ||
+      if (!isRecord(update) || !(hasExactKeys(update, ['mode', 'selectedRange']) || hasExactKeys(update, ['mode', 'selectedRange', 'selectedBlocks'])) ||
           !BASELINE_ANALYSIS_UPDATE_MODES.includes(update.mode as BaselineAnalysisUpdateMode) ||
           input.goal !== BASELINE_ANALYSIS_MODE_GOALS[update.mode as BaselineAnalysisUpdateMode]) {
         throw new ProtocolError(tentativeId);
@@ -629,7 +629,13 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       const range = update.selectedRange;
       const validRange = isRecord(range) && hasExactKeys(range, ['startPosition', 'endPosition']) &&
         isSafeInteger(range.startPosition, 1) && isSafeInteger(range.endPosition, 1) && range.endPosition >= range.startPosition;
-      if ((update.mode === 'reanalyze-range') !== validRange || (update.mode !== 'reanalyze-range' && range !== null)) {
+      // 重新分析这段 names its paragraphs by block identity instead of a range (Issue #423 review, P3-3); never both.
+      const blocks = update.selectedBlocks ?? null;
+      const validBlocks = isRecord(blocks) && hasExactKeys(blocks, ['fromBlockId', 'toBlockId']) &&
+        isBoundedString(blocks.fromBlockId, 28) && MARK_BLOCK_PATTERN.test(blocks.fromBlockId) &&
+        isBoundedString(blocks.toBlockId, 28) && MARK_BLOCK_PATTERN.test(blocks.toBlockId);
+      if (blocks !== null && (!validBlocks || update.mode !== 'reanalyze-range' || range !== null)) throw new ProtocolError(tentativeId);
+      if ((update.mode === 'reanalyze-range') !== (validRange || validBlocks) || (update.mode !== 'reanalyze-range' && range !== null)) {
         throw new ProtocolError(tentativeId);
       }
       break;

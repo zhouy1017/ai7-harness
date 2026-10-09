@@ -420,13 +420,14 @@ async function selectionTaskOffer(): Promise<SelectionTaskChoices> {
 async function prepareSelectionTask(
   bookId: string,
   choice: SelectionTaskChoice,
-  anchor: { readonly blockId: string; readonly position: number },
+  anchor: { readonly blockId: string },
   returnFocus: () => HTMLElement | null,
 ): Promise<boolean> {
   if (choice.kind === 'reanalyze') {
+    // Named by block identity, as 审阅这段 names it (Issue #423 review, P3-3): the service finds where it stands as it prepares.
     const next = await startWholeBookTask(bookId, {
       goal: choice.goal,
-      update: { mode: 'reanalyze-range', selectedRange: { startPosition: anchor.position, endPosition: anchor.position } },
+      update: { mode: 'reanalyze-range', selectedRange: null, selectedBlocks: { fromBlockId: anchor.blockId, toBlockId: anchor.blockId } },
       quick: null,
     });
     if (next === null) return false;
@@ -7697,6 +7698,8 @@ function renderEditorWindow(
   };
 
   let pendingAuthoritativeRecovery: AuthoritativeRecovery | undefined;
+  /** What asks for the next window load, recorded when it lands (Issue #423 review, P2-3). */
+  let windowLoadCause = 'unnamed';
 
   const clearAuthoritativeRecovery = (): void => {
     pendingAuthoritativeRecovery = undefined;
@@ -7720,6 +7723,7 @@ function renderEditorWindow(
       next.revisionId !== expected.revisionId || next.journalSequence !== expected.journalSequence ||
       next.workingDigest !== expected.workingDigest
     )) throw new Error('权威写入确认与刷新窗口不一致。');
+    windowLoadCause = 'authoritative';
     if (!editor.loadWindow(next, continuity)) throw new Error('权威窗口已返回，但编辑器未能安全装载。');
     currentWindow = next;
     updateWindowChrome();
@@ -7848,6 +7852,7 @@ function renderEditorWindow(
         branchId: binding.branchId,
         target: navigation.target,
       });
+      windowLoadCause = `navigation-${navigation.target.kind}`;
       const loaded = navigation.preserveOffWindowContinuity && navigation.continuity
         ? editor.loadNavigationWindow(next, navigation.continuity)
         : editor.loadWindow(next, navigation.continuity);
@@ -8555,7 +8560,14 @@ function renderEditorWindow(
       else if (command === 'undo' || command === 'redo') void runHistory(command);
       else void navigateCursor(command === 'previous-window' ? 'previous' : 'next');
     },
-    onWindowLoaded: () => editorialMarks?.close(),
+    // A window loaded keeps an open composer below its paragraph while it is still there (Issue #423 review, P2-3), and says what
+    // loaded it — an authoritative refresh, or a navigation by its target — in the editor's `data-window-loads` (the last 12).
+    onWindowLoaded: () => {
+      editorialMarks?.reanchor();
+      const loads = [...(editorHost.dataset['windowLoads'] ?? '').split(',').filter((entry) => entry.length > 0), windowLoadCause].slice(-12);
+      editorHost.dataset['windowLoads'] = loads.join(',');
+      windowLoadCause = 'unnamed';
+    },
   });
   // Typing moves every place behind the caret a little; the rail is read again once the typing rests,
   // never per keystroke, and its cost follows the chapters and marks, not the manuscript's length.
@@ -8601,8 +8613,9 @@ function renderEditorWindow(
       onAsked: (dialogue: DialogueProjection) => taskDrawer.openDialogue(dialogue.bookId, dialogue.dialogueId, () => editorHost.querySelector<HTMLElement>('.ProseMirror')),
       // 就这段发起任务… (Issue #423, S77b): the Book's manuscript only; the prepared Task's plan opens in the side slot.
       startTaskOnSelection: {
+        bookTitle,
         choices: selectionTaskOffer,
-        prepare: (choice: SelectionTaskChoice, anchor: { readonly blockId: string; readonly position: number }) =>
+        prepare: (choice: SelectionTaskChoice, anchor: { readonly blockId: string }) =>
           prepareSelectionTask(initialWindow.bookId, choice, anchor, () => editorHost.querySelector<HTMLElement>('.ProseMirror')),
       },
     }),

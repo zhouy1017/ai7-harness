@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { BaselineAnalysisProjection, ReviewWorkspaceProjection } from '../../src/shared/protocol.js';
 import {
   SELECTION_PRESET_REASON,
+  SELECTION_TASK_DOCUMENT_REASON,
   SELECTION_TASK_FIELD,
   SELECTION_TASK_MENU_LABEL,
   SELECTION_TASK_NOTE,
@@ -57,8 +58,10 @@ describe('the words of 就这段发起任务…', () => {
     expect(SELECTION_TASK_TITLE).toBe('就这段发起任务');
     expect(SELECTION_TASK_FIELD).toBe('工序');
     expect(SELECTION_TASK_PREPARE).toBe('准备任务');
-    expect(SELECTION_TASK_NOTE).toBe('只把所选文字所在的这一段交给任务，按包含它的阅读范围读取，计划里写明读哪些范围，不会扩大到全书。准备任务先打开计划，由你开始；就选区发起的任务没有快速开始。');
-    expect(selectionTaskContextLine(12, 7)).toBe('已选 12 字 · 第 7 个内容块');
+    expect(SELECTION_TASK_NOTE).toBe('只把所选文字所在的这一段交给任务：按包含它的阅读范围读取，计划里写明读哪些范围；审阅只在这一段上标出发现。准备任务先打开计划，由你开始；就选区发起的任务没有快速开始。');
+    expect(selectionTaskContextLine({ bookTitle: '合成书名', revisionLabel: 'r3', journalSequence: 12, graphemes: 10, position: 7 }))
+      .toBe('《合成书名》 · 修订版 r3 · 修订日志序号 12 · 已选 10 字 · 第 7 个内容块');
+    expect(SELECTION_TASK_DOCUMENT_REASON).toBe('交付物和制作文档上不能就选区发起任务');
     expect(SELECTION_TASK_REANALYZE).toBe('重新分析这段');
     expect(selectionTaskReviewLabel('错别字与规范用语')).toBe('审阅这段 · 「错别字与规范用语」');
     expect(SELECTION_PRESET_REASON).toBe('本社常用工序就选区运行尚未接通');

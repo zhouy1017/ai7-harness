@@ -259,8 +259,11 @@ export const GLOBAL_ATTENTION_NEXT_STEP_LABELS: Readonly<Record<GlobalAttentionN
   'decide-learning-materials': '定学习准入…',
   'open-dialogue': DIALOGUE_OPEN_LABEL,
 };
-/** What a 审阅 started on a selection reads (Issue #423, S77b): the selected words' paragraph, nothing around it. */
-export const REVIEW_ON_SELECTION = '所选文字';
+/**
+ * A 审阅 started on a selection (Issue #423, S77b; review P3-4): it reads the reading ranges holding the selected words'
+ * paragraph as context and puts findings on that paragraph alone — the paragraph, not the words, so the card names it so.
+ */
+export const REVIEW_ON_SELECTION = '所选段落';
 /** The two scopes a question can have (CLAR-004), in the card's own words. */
 export const GLOBAL_ATTENTION_CLARIFICATION_WAITING = '任务等待你的说明';
 export const GLOBAL_ATTENTION_CLARIFICATION_CONTINUING = '该步骤等待说明 · 其他步骤仍在继续';

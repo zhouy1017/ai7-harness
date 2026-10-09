@@ -283,7 +283,7 @@ describe('each item', () => {
     expect(globalAttentionObjectLabel({ kind: 'analysis', mode: 'reanalyze-range' })).toBe('基线分析 · 重新分析所选范围');
     expect(globalAttentionObjectLabel({ kind: 'review', ordinal: 3 })).toBe('审阅 · 第 3 次');
     // A 审阅 on the selection 就这段发起任务… handed over says so (Issue #423, S77b).
-    expect(globalAttentionObjectLabel({ kind: 'review', ordinal: 4, onSelection: true })).toBe('审阅 · 第 4 次 · 所选文字');
+    expect(globalAttentionObjectLabel({ kind: 'review', ordinal: 4, onSelection: true })).toBe('审阅 · 第 4 次 · 所选段落');
     expect(globalAttentionObjectLabel({ kind: 'recovery', branchName: '主分支' })).toBe('稿件 · 主分支');
     expect(globalAttentionObjectLabel({ kind: 'manuscript-conflict', conflictKind: 'suggestion' })).toBe('修改建议 · 稿件冲突');
     expect(globalAttentionObjectLabel({ kind: 'manuscript-conflict', conflictKind: 'reversal' })).toBe('已应用的修改建议 · 稿件冲突');

@@ -132,6 +132,8 @@ export const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5
 const NATIVE_CARRIER_DIGEST = 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d' as const;
 const SIDECAR_DIGEST = '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff' as const;
 const SUCCESSOR_BEHAVIOR ='每次更新都是新的用户发起任务，经准备 → 计划预览 → 标准直接授权 → 执行后，在同一结果集上追加下一序号的不可变后继修订版；前一修订版不被改写，且始终可在修订历史中按其原始稿件 pin 查看。' as const;
+/** 重新分析这段's paragraphs are no longer in the working manuscript, or out of order (Issue #423 review, P3-3). */
+const SELECTED_BLOCKS_GONE = '所选文字所在的段落已不在当前稿件中，或先后颠倒；请重新选择。' as const;
 const ACTIVE_RUN_REASON = '当前已有分析任务在调度或执行中；在其结束前不能准备新的更新任务。' as const;
 /** A Run in Connectivity Wait blocks a new Task too, but it is not running: it waits to start once online (OFF-005, OFF-006). */
 const WAITING_RUN_REASON = '有一项分析任务在等待联网后开始；它开始并结束之前，或在任务抽屉里取消它之前，不能准备新的更新任务。' as const;
@@ -2432,7 +2434,7 @@ export class BaselineAnalysisStore {
       return { done: true, workId: null, completed: 0, total: 0, projection: null };
     }
     if (input.phase === 'advance') return this.#advance(input.workId);
-    const update = input.update;
+    const update = this.#resolveSelectedBlocks(input.bookId, input.update);
     const mode: AnalysisTaskMode = update === null ? this.#definition.initialMode : update.mode;
     // A named mode is one of the kind's update modes, or the range-bound first mode of a kind that
     // declares one (Issue #417). The whole first mode is never named: it is what `null` asks for.
@@ -3676,6 +3678,21 @@ export class BaselineAnalysisStore {
   }
 
   /** The current working blocks of one branch: what the next Task Input checkpoint would materialize. */
+  /**
+   * 重新分析这段 names its paragraphs by block identity (Issue #423 review, P3-3): resolved here, as the Task is prepared, to the
+   * range they hold in the working manuscript the Task Input checkpoint is about to pin. Every other request is as it came.
+   */
+  #resolveSelectedBlocks(bookId: string, update: BaselineAnalysisUpdateRequest | AnalysisModeRequest | null): AnalysisModeRequest | null {
+    const blocks = update !== null && 'selectedBlocks' in update ? update.selectedBlocks ?? null : null;
+    if (update === null || blocks === null) return update === null ? null : { mode: update.mode, selectedRange: update.selectedRange };
+    requireAnalysis(update.mode === 'reanalyze-range' && update.selectedRange === null, 'ANALYSIS_SELECTED_RANGE_INVALID', '只有重新分析所选范围可以携带内容块范围。');
+    const working = this.readWorkingBlocks(this.#binding(bookId).branchId);
+    const from = working.find((block) => block.blockId === blocks.fromBlockId)?.position;
+    const to = working.find((block) => block.blockId === blocks.toBlockId)?.position;
+    requireAnalysis(from !== undefined && to !== undefined && from <= to, 'ANALYSIS_SELECTED_RANGE_INVALID', SELECTED_BLOCKS_GONE);
+    return { mode: update.mode, selectedRange: { startPosition: from, endPosition: to } };
+  }
+
   readWorkingBlocks(branchId: string): ManifestBlockInput[] {
     requireAnalysis(UUID_PATTERN.test(branchId), 'ANALYSIS_RECORD_INVALID', '分支身份无效。');
     const rows = this.#db.prepare(

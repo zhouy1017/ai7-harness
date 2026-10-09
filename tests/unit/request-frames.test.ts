@@ -148,6 +148,22 @@ describe('decodeRequest accepts well-formed frames', () => {
     }
   });
 
+  it('accepts 重新分析这段 by its paragraphs\' block identities instead of a range, and never both (Issue #423 review, P3-3)', () => {
+    const BLOCK = `blk_${'a'.repeat(24)}`;
+    const ask = (update: unknown) => ({ id: randomUUID(), op: 'prepareBaselineAnalysis', input: { bookId: randomUUID(), goal: BASELINE_ANALYSIS_MODE_GOALS['reanalyze-range'], update, reconfirm: false } });
+    const named = ask({ mode: 'reanalyze-range', selectedRange: null, selectedBlocks: { fromBlockId: BLOCK, toBlockId: BLOCK } });
+    expect(decodeRequest(frameOf(named))).toEqual(named);
+    // A range and the blocks together, neither, a short identity, another mode, and an extra key are each refused.
+    expect(rejectionFor(frameOf(ask({ mode: 'reanalyze-range', selectedRange: { startPosition: 2, endPosition: 2 }, selectedBlocks: { fromBlockId: BLOCK, toBlockId: BLOCK } })))).toBeInstanceOf(ProtocolError);
+    expect(rejectionFor(frameOf(ask({ mode: 'reanalyze-range', selectedRange: null, selectedBlocks: null })))).toBeInstanceOf(ProtocolError);
+    expect(rejectionFor(frameOf(ask({ mode: 'reanalyze-range', selectedRange: null, selectedBlocks: { fromBlockId: 'blk_short', toBlockId: BLOCK } })))).toBeInstanceOf(ProtocolError);
+    expect(rejectionFor(frameOf(ask({ mode: 'reanalyze-range', selectedRange: null, selectedBlocks: { fromBlockId: BLOCK, toBlockId: BLOCK, extra: 1 } })))).toBeInstanceOf(ProtocolError);
+    const sync = { id: randomUUID(), op: 'prepareBaselineAnalysis', input: { bookId: randomUUID(), goal: BASELINE_ANALYSIS_MODE_GOALS['sync-current'], update: { mode: 'sync-current', selectedRange: null, selectedBlocks: { fromBlockId: BLOCK, toBlockId: BLOCK } }, reconfirm: false } };
+    expect(rejectionFor(frameOf(sync))).toBeInstanceOf(ProtocolError);
+    const plainSync = { ...sync, input: { ...sync.input, update: { mode: 'sync-current', selectedRange: null, selectedBlocks: null } } };
+    expect(decodeRequest(frameOf(plainSync))).toEqual(plainSync);
+  });
+
   it('accepts the three Connectivity Wait operations with their exact inputs, and refuses anything more (Issue #502)', () => {
     const startWhenOnline = {
       id: randomUUID(),
@@ -927,6 +943,8 @@ describe('decodeRequest rejects malformed frames', () => {
     expect(rejectionFor(prepare(categories, { kind: 'chapters', fromChapterBlockId: CHAPTER_BLOCK, toChapterBlockId: 'blk_short' })).requestId).toBe(id);
     expect(rejectionFor(prepare(categories, { kind: 'whole', fromChapterBlockId: CHAPTER_BLOCK, toChapterBlockId: CHAPTER_BLOCK })).requestId).toBe(id);
     expect(rejectionFor(prepare(categories, { kind: 'selection', fromChapterBlockId: CHAPTER_BLOCK, toChapterBlockId: null })).requestId).toBe(id);
+    // 当前选区 names its paragraphs (Issue #423 review, P2-4, P3-8): with neither, the frame is refused at the boundary.
+    expect(rejectionFor(prepare(categories, { kind: 'selection', fromChapterBlockId: null, toChapterBlockId: null })).requestId).toBe(id);
     expect(rejectionFor(prepare(categories, { kind: 'everything', fromChapterBlockId: null, toChapterBlockId: null })).requestId).toBe(id);
     expect(rejectionFor(prepare(categories, { kind: 'whole' })).requestId).toBe(id);
     expect(rejectionFor(prepare(categories, null)).requestId).toBe(id);

@@ -16,10 +16,19 @@ export const SELECTION_TASK_PREPARE = '准备任务';
  * What the Task is given, said before anything is prepared (TASK-002, TASK-003): the paragraph and nothing around it, read the
  * way every range Task reads it, with the plan seen before the start and no quick start.
  */
-export const SELECTION_TASK_NOTE = '只把所选文字所在的这一段交给任务，按包含它的阅读范围读取，计划里写明读哪些范围，不会扩大到全书。准备任务先打开计划，由你开始；就选区发起的任务没有快速开始。';
-/** The exact context the composer carries (TASK-002): how much is selected, and which paragraph of the manuscript it is in. */
-export function selectionTaskContextLine(graphemes: number, position: number): string {
-  return `已选 ${graphemes} 字 · 第 ${position} 个内容块`;
+export const SELECTION_TASK_NOTE = '只把所选文字所在的这一段交给任务：按包含它的阅读范围读取，计划里写明读哪些范围；审阅只在这一段上标出发现。准备任务先打开计划，由你开始；就选区发起的任务没有快速开始。';
+/**
+ * The exact context the composer carries (TASK-002; Issue #423 review, P3-6): the Book, the revision and journal position the
+ * manuscript stands at — 准备任务 saves the Task's own revision from it — how much is selected, and which paragraph it is in.
+ */
+export function selectionTaskContextLine(context: {
+  readonly bookTitle: string;
+  readonly revisionLabel: string;
+  readonly journalSequence: number;
+  readonly graphemes: number;
+  readonly position: number;
+}): string {
+  return `《${context.bookTitle}》 · 修订版 ${context.revisionLabel} · 修订日志序号 ${context.journalSequence} · 已选 ${context.graphemes} 字 · 第 ${context.position} 个内容块`;
 }
 
 export const SELECTION_TASK_REANALYZE = '重新分析这段';
@@ -29,6 +38,11 @@ export function selectionTaskReviewLabel(category: string): string {
 
 /** The house's 常用工序 do not run on a selection yet: a captured procedure is set for the whole Book or chosen chapters. */
 export const SELECTION_PRESET_REASON = '本社常用工序就选区运行尚未接通';
+/**
+ * A Production Document's manuscript (Issue #423 review, P3-5): no Task reads a document yet, so neither selection Task is
+ * offered there. TASK-001 names Editorial Deliverables as a composer host too — an Owner question recorded on the PR.
+ */
+export const SELECTION_TASK_DOCUMENT_REASON = '交付物和制作文档上不能就选区发起任务';
 
 export const SELECTION_TASK_STATUS = {
   reading: '正在读取可以就这段发起的工序…',

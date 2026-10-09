@@ -564,6 +564,43 @@ function baselinePlanEdit(
   };
 }
 
+type ReadUnit = { readonly unitOrdinal: number; readonly startPosition: number; readonly endPosition: number; readonly disposition: string };
+type ReadManifest = { readonly units: ReadonlyArray<{ readonly ordinal: number; readonly overlapBlockIds: ReadonlyArray<string> }> };
+
+/**
+ * What a range Task reads (Issue #423 review, P2-1): each reading range it reads again, from the trailing paragraphs of the range
+ * before it that it repeats as context to its own last paragraph, by block position at the Task Input revision.
+ */
+export function readSpans(units: ReadonlyArray<ReadUnit>, manifest: ReadManifest | null): Array<readonly [number, number]> {
+  return units.filter((unit) => unit.disposition === 'recomputed').map((unit) => {
+    const overlap = manifest?.units.find((candidate) => candidate.ordinal === unit.unitOrdinal)?.overlapBlockIds.length ?? 0;
+    return [Math.max(1, unit.startPosition - overlap), unit.endPosition] as const;
+  });
+}
+
+/** Spans in the words a plan names them by, merged where they meet or touch; `null` when there are none. */
+export function readSpansLabel(spans: ReadonlyArray<readonly [number, number]>): string | null {
+  const sorted = [...spans].sort((left, right) => left[0] - right[0] || left[1] - right[1]);
+  if (sorted.length === 0) return null;
+  const merged: Array<[number, number]> = [];
+  for (const [start, end] of sorted) {
+    const last = merged.at(-1);
+    if (last !== undefined && start <= last[1] + 1) last[1] = Math.max(last[1], end);
+    else merged.push([start, end]);
+  }
+  return `内容块 ${merged.map(([start, end]) => start === end ? `${start}` : `${start}–${end}`).join('、')}`;
+}
+
+/** The spans a frozen plan's records read again: its reuse or scope plan's recomputed units, with the manifest's overlap. */
+function frozenReadSpans(components: Readonly<Record<string, unknown>>): Array<readonly [number, number]> {
+  const plan = components['reuse-plan'];
+  const manifest = components['coverage-manifest'];
+  const units = typeof plan === 'object' && plan !== null ? (plan as { units?: unknown }).units : undefined;
+  if (!Array.isArray(units)) return [];
+  const manifestUnits = typeof manifest === 'object' && manifest !== null ? (manifest as { units?: unknown }).units : undefined;
+  return readSpans(units as ReadonlyArray<ReadUnit>, Array.isArray(manifestUnits) ? { units: manifestUnits as ReadManifest['units'] } : null);
+}
+
 /**
  * The plan of the Book's baseline analysis Task. The range the chips name is the current plan version's —
  * the one `重新确认计划` froze last — never the range the Task Intent row first recorded (#288's visible
@@ -603,6 +640,8 @@ export function baselineAnalysisPlan(input: {
   const live = route.kind === 'opencode-go';
   const ceiling = provider.runBudgetCeiling;
   const where = range === null ? '全书' : position;
+  // 重新分析所选范围 names what it reads again (Issue #423 review, P2-1): the ranges holding the selection, never only the selection.
+  const spans = range === null || update?.reusePlan == null ? null : readSpansLabel(readSpans(update.reusePlan.units, manifest));
   const revision = projection.planRevision;
   const boundary = envelope.boundary;
   return {
@@ -619,16 +658,22 @@ export function baselineAnalysisPlan(input: {
     scope: {
       process: counts === null
         ? `《${bookTitle}》${where} · ${groupedCount(reading.graphemes)} 字 · ${units} 个阅读范围`
-        : `《${bookTitle}》${where} · ${groupedCount(reading.graphemes)} 字 · 重新分析 ${recomputed} 个阅读范围，沿用 ${reused} 个`,
+        : `《${bookTitle}》${where} · ${groupedCount(reading.graphemes)} 字 · 重新分析 ${recomputed} 个阅读范围${spans === null ? '' : `（${spans}）`}，沿用 ${reused} 个`,
       reference: update === null || update.predecessor === null
         ? []
         : [`上一份基线分析（第 ${update.predecessor.ordinal} 份，读的是 ${update.predecessor.manuscriptPin.revisionLabel}）`],
-      send: live ? `所读阅读范围的稿件正文（${recomputed} 个）` : '不发送任何内容',
+      send: live ? `所读阅读范围的稿件正文（${spans ?? `${recomputed} 个`}）` : '不发送任何内容',
       notRead: NOT_READ,
     },
     // PLAN-011 (Issue #419): of the analysis's steps only 核对与抽检 can be left out with the result still formed.
     steps: [
-      { id: 'units', label: counts === null ? '逐章读取' : `逐章读取（重新读取 ${recomputed} 个阅读范围，沿用 ${reused} 个）`, result: '各章摘要', removable: false, removed: false },
+      {
+        id: 'units',
+        label: counts === null ? '逐章读取' : spans === null ? `逐章读取（重新读取 ${recomputed} 个阅读范围，沿用 ${reused} 个）` : `逐章读取（重新读取 ${spans}，沿用其余 ${reused} 个阅读范围）`,
+        result: '各章摘要',
+        removable: false,
+        removed: false,
+      },
       { id: 'reduction', label: '汇总全书', result: '梗概与人物、事件、关系、设定', removable: false, removed: false },
       {
         id: 'assurance-sampling',
@@ -665,7 +710,7 @@ export function baselineAnalysisPlan(input: {
       '这次运行的运行报告',
     ],
     notDo: {
-      editorial: [...EDITORIAL_NOT_DO, range === null ? '不读这本书以外的内容' : '不重新读取所选范围以外的正文', '不作事实判定'],
+      editorial: [...EDITORIAL_NOT_DO, range === null ? '不读这本书以外的内容' : spans === null ? '不重新读取所选范围以外的正文' : `不重新读取${spans}以外的正文`, '不作事实判定'],
       technical: [...projection.namedNonEffects],
     },
     // The adaptation the kind declares, read against the envelope the version froze: withdrawn when the editor
@@ -1918,7 +1963,12 @@ export function reviewRunPlan(input: {
     ? facts.staleReasons
     : refused.map((category) => `「${category.label}」没有开始：${category.detail ?? category.stateLabel}`);
   const riskPoints = categories.some((category) => category.riskPointsOnly);
-  const scopeWords = scope.kind === 'whole' ? '全书' : scope.kind === 'changed' ? '改动过的章' : scope.kind === 'selection' ? '所选文字' : position;
+  const scopeWords = scope.kind === 'whole' ? '全书' : scope.kind === 'changed' ? '改动过的章' : scope.kind === 'selection' ? '所选段落' : position;
+  // What a range review reads (Issue #423 review, P2-1): the reading ranges its categories read again, as context. A 当前选区 Run
+  // marks only what lies on the selected paragraphs (P1-1); the leads read no manuscript text at all.
+  const spans = scope.kind === 'whole' || scope.kind === 'changed' ? null
+    : readSpansLabel(tasks.flatMap((category) => frozenReadSpans(category.task!.components)));
+  const selection = scope.kind === 'selection';
   // The bar (Issue #420, S74a): the one approval binds every Task-backed category's exact digest, and the
   // route every category froze decides whether starting needs a model connection. A Run has no revision
   // route, so a plan that moved is only ever `changed`; the leads alone need nothing and start as they are.
@@ -1953,14 +2003,15 @@ export function reviewRunPlan(input: {
       savedForEdits: facts.inputRevision.createdForDirtyJournal,
     },
     scope: {
-      process: `《${bookTitle}》${position}${reading === null ? '' : ` · ${groupedCount(reading.graphemes)} 字`} · ${categories.length} 个类别`,
+      process: `《${bookTitle}》${position}${reading === null ? '' : ` · ${groupedCount(reading.graphemes)} 字`} · ${categories.length} 个类别` +
+        (spans === null ? (selection ? '；只在所选段落上标出发现' : '') : selection ? `；读取 ${spans} 作为上下文，只在所选段落上标出发现` : `；读取 ${spans}`),
       reference: categories.map((category) => category.modelFree
         ? `${category.label}：基线分析的前后不一致线索与未决事项`
         : category.guidelineDocuments.length === 0
           ? `${category.label}：${category.procedure.title}（第 ${category.procedure.version} 版）`
           : `${category.label}：${category.guidelineDocuments.map((document) => `${document.issuer}《${document.title}》第 ${document.version} 版`).join('、')}`),
-      send: tasks.length === 0 || !live ? '不发送任何内容' : '所读范围内的稿件正文和所选类别的规范条款',
-      notRead: scope.kind === 'whole' ? NOT_READ : `所选范围以外的正文；${NOT_READ}`,
+      send: tasks.length === 0 || !live ? '不发送任何内容' : `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款`,
+      notRead: scope.kind === 'whole' ? NOT_READ : spans === null ? `所选范围以外的正文；${NOT_READ}` : `${spans}以外的正文；${NOT_READ}`,
     },
     steps: [
       ...categories.map((category): TaskPlanStepProjection => ({
@@ -1985,7 +2036,7 @@ export function reviewRunPlan(input: {
           : route.kind === 'none'
             ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
             : '远程模型服务被拒绝（0 次实时传输）；由 AI7 本地确定性模型适配器执行',
-      send: route === null ? '只读基线分析的线索，不发送任何内容' : live ? '所读范围内的稿件正文和所选类别的规范条款，发往为审阅配置的模型服务' : NOTHING_SENT,
+      send: route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款，发往为审阅配置的模型服务` : NOTHING_SENT,
       sendCategory: outboundLabel('public-or-synthetic'),
       usage: live && allSet ? `至多 ${groupedCount(ceilingTotal)} tokens（${tasks.length} 类合计）` : NO_USAGE,
       usageIsCeiling: live && allSet,
@@ -2002,7 +2053,8 @@ export function reviewRunPlan(input: {
     notDo: {
       editorial: [
         ...EDITORIAL_NOT_DO,
-        scope.kind === 'whole' ? '不读这本书以外的内容' : '不读所选范围以外的正文',
+        scope.kind === 'whole' ? '不读这本书以外的内容' : spans === null ? '不读所选范围以外的正文' : `不读${spans}以外的正文`,
+        ...(selection ? ['不在所选段落以外标出发现：所读范围里别处的发现只计数，不标在稿件上'] : []),
         ...(riskPoints ? ['不给出合规、查重或政策结论'] : []),
       ],
       technical: [...namedNonEffects(facts.live, unitsRead === 0 ? null : unitsRead)],

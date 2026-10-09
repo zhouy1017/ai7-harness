@@ -2834,6 +2834,12 @@ export interface BaselineAnalysisSelectedRange {
 export interface BaselineAnalysisUpdateRequest {
   mode: BaselineAnalysisUpdateMode;
   selectedRange: BaselineAnalysisSelectedRange | null;
+  /**
+   * 重新分析这段 (Issue #423 review, P3-3): the selection's first and last paragraph by block identity, which the service resolves
+   * to `selectedRange` against the working manuscript as the Task is prepared — as 审阅这段 names its paragraphs. Only with
+   * `reanalyze-range` and a `null` `selectedRange`; absent everywhere else.
+   */
+  selectedBlocks?: { fromBlockId: string; toBlockId: string } | null;
 }
 
 export interface AnalysisReusePlanCounts {
@@ -4911,7 +4917,11 @@ export interface ReviewRunProjection {
   stateLabel: string;
   /** 继续审阅 is offered exactly when an authorized Run stopped with categories never finished. */
   canContinue: boolean;
-  scope: { kind: ReviewScopeKind; label: string; selectedRange: BaselineAnalysisSelectedRange | null };
+  /**
+   * `selection` names a 当前选区 Run's first and last paragraph by block identity (Issue #423 review, P2-4), so 返回修改 asks for
+   * the same paragraphs again; `null` for every other scope.
+   */
+  scope: { kind: ReviewScopeKind; label: string; selectedRange: BaselineAnalysisSelectedRange | null; selection: null | { fromBlockId: string; toBlockId: string } };
   manuscript: { manuscriptId: string; branchId: string; revisionId: string; revisionLabel: string; journalSequence: number; workingDigest: string };
   configurationDigest: string;
   authorization: null | { authorizedAt: string };

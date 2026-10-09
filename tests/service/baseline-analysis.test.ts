@@ -888,6 +888,40 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     expect((await reread()).adaptations.map((adaptation) => [adaptation.unitOrdinal, adaptation.retry?.spanOrdinal ?? null])).toEqual([[5, 6], [5, null], [6, null]]);
   }, 300_000);
 
+  it('prepares 重新分析这段 by the paragraph block identity, and its plan names the reading ranges it reads again (Issue #423 review)', async () => {
+    await requireExactSample1(roots.codeRoot);
+    const store = await openWithRoute(roots.dataRoot, fixture);
+    const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: fakeSecretResolver() });
+    try {
+      const imported = await importSample1Book(store, roots.codeRoot, 'L2 sample1 重新分析这段');
+      const bookId = imported.bookId;
+      await pinEditorialWorkspaceProfileRevision2(store, bookId);
+      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+      await runToSettled(store, owner, bookId, null);
+      const branchId = store.inspectBaselineAnalysis(bookId).checkpoint!.branchId;
+      const twenty = store.baselineAnalysisLedger.readWorkingBlocks(branchId).find((block) => block.position === 20)!;
+      const named = { fromBlockId: twenty.blockId, toBlockId: twenty.blockId };
+      // A paragraph the manuscript does not hold is refused before anything is prepared.
+      expect(() => prepare(store, bookId, { mode: 'reanalyze-range', selectedRange: null, selectedBlocks: { fromBlockId: `blk_${'0'.repeat(24)}`, toBlockId: twenty.blockId } }))
+        .toThrowError(/所选文字所在的段落已不在当前稿件中/u);
+      expect(() => prepare(store, bookId, { mode: 'sync-current', selectedRange: null, selectedBlocks: named })).toThrowError(/ANALYSIS_SELECTED_RANGE_INVALID|只有重新分析所选范围/u);
+      const prepared = prepare(store, bookId, { mode: 'reanalyze-range', selectedRange: null, selectedBlocks: named });
+      expect(prepared.update).toMatchObject({ mode: 'reanalyze-range', selectedRange: { startPosition: 20, endPosition: 20 } });
+      // The same paragraph asked for again by position is the same Task.
+      expect(prepare(store, bookId, { mode: 'reanalyze-range', selectedRange: { startPosition: 20, endPosition: 20 } }).taskIntent?.taskIntentId)
+        .toBe(prepared.taskIntent?.taskIntentId);
+      const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: prepared.taskIntent!.taskIntentId });
+      expect(plan.scope.process).toMatch(/· 重新分析 2 个阅读范围（内容块 15–43），沿用 6 个$/u);
+      expect(plan.steps[0]!.label).toBe('逐章读取（重新读取 内容块 15–43，沿用其余 6 个阅读范围）');
+      expect(plan.notDo.editorial).toContain('不重新读取内容块 15–43以外的正文');
+      expect(plan.notDo.editorial).not.toContain('不重新读取所选范围以外的正文');
+      store.markCleanShutdown();
+    } finally {
+      await owner.dispose();
+      store.close();
+    }
+  }, 300_000);
+
   it('supersedes a prepared plan on material drift, refuses the stale version, and reconfirms the next version on the same Task', async () => {
     await requireExactSample1(roots.codeRoot);
     const store = await openWithRoute(roots.dataRoot, fixture);

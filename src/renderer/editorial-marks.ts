@@ -62,6 +62,7 @@ import { applyOnce } from './manuscript-apply.js';
 import { REVIEW_VIEW_TASK_ABSENT, REVIEW_VIEW_TASK_RESOLVING } from './review-labels.js';
 import {
   SELECTION_PRESET_REASON,
+  SELECTION_TASK_DOCUMENT_REASON,
   SELECTION_TASK_FIELD,
   SELECTION_TASK_MENU_LABEL,
   SELECTION_TASK_NOTE,
@@ -83,6 +84,11 @@ import {
 export interface EditorialMarksSurface {
   /** Close whatever is floating: the blocks it was anchored to may be gone. */
   close(): void;
+  /**
+   * Another window of the manuscript was loaded (Issue #423 review, P2-3): menus close, and so does a Mark Card; a composer — with
+   * what was chosen and written in it — stays, placed again below its paragraph, while that paragraph is still in the window.
+   */
+  reanchor(): void;
   /** Open one mark's card, as a click on it would: 审阅's 回到原文 arrives at a finding's mark this way. */
   openMark(markId: string): Promise<void>;
   /**
@@ -133,8 +139,10 @@ interface MountOptions {
    * prepared. Without it (a Production Document) the item stays disabled with its reason.
    */
   startTaskOnSelection?: {
+    /** The Book the manuscript is of, which the composer names (TASK-002). */
+    readonly bookTitle: string;
     choices(): Promise<SelectionTaskChoices>;
-    prepare(choice: SelectionTaskChoice, anchor: { readonly blockId: string; readonly position: number }): Promise<boolean>;
+    prepare(choice: SelectionTaskChoice, anchor: { readonly blockId: string }): Promise<boolean>;
   };
   busy(): boolean;
   /** The set of marks changed: whatever counts them elsewhere on the surface reads again. */
@@ -148,6 +156,9 @@ interface MountOptions {
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
 }
+
+/** A composer whose paragraph left the window as another one was loaded (Issue #423 review, P2-3). */
+export const COMPOSER_LEFT_WINDOW = '撰写框所在的段落已不在当前稿件窗口中，撰写框已关闭；没有记下任何内容。';
 
 interface FormField {
   name: 'body' | 'proposedText' | 'rationale' | 'reason' | 'subject' | 'knowledgeClass' | 'question' | 'procedure';
@@ -293,6 +304,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   let menu: HTMLElement | undefined;
   let floating: HTMLElement | undefined;
   let floatingBlockId: string | undefined;
+  /**
+   * A composer asked for and not on screen yet (Issue #423 review, P2-3): from the menu's choice, through the settled selection and
+   * any read it waits on, to `openComposer`. Paging at the pane's edge waits for it, as it waits for an open composer.
+   */
+  let composerPending = false;
   let openCardId: string | undefined;
   /**
    * The one reason row open on the card (Issue #61, S26a): the prompt a decision just recorded asks once, or the editor's
@@ -1308,7 +1324,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
 
   // 就这段提问… (Issue #52, S17a) and 就这段发起任务… (Issue #423, S77b) are connected; the house's 常用工序 on a selection are not.
   // A Production Document's manuscript offers neither Task (its surface passes no way to start one).
-  const AI7_TASK_REASON = '稿件这里不能发起任务';
+  const AI7_TASK_REASON = SELECTION_TASK_DOCUMENT_REASON;
   const VIEW_TASK_REASON = '这条标记的来源任务还不能从这里打开';
   const taskOnSelection = (selectionReason: string | undefined, run: () => void): MenuItem => ({
     action: 'task-on-selection',
@@ -1339,7 +1355,14 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
    */
   const composeTask = async (): Promise<void> => {
     if (refuseWhileBusy() || options.startTaskOnSelection === undefined) return;
-    const start = options.startTaskOnSelection;
+    composerPending = true;
+    try {
+      await composeTaskNow(options.startTaskOnSelection);
+    } finally {
+      composerPending = false;
+    }
+  };
+  const composeTaskNow = async (start: NonNullable<MountOptions['startTaskOnSelection']>): Promise<void> => {
     const range = await settledRange();
     if (range === null || destroyed) return;
     options.setStatus(SELECTION_TASK_STATUS.reading, 'busy');
@@ -1355,7 +1378,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       options.setStatus(offered.refusal ?? SELECTION_TASK_STATUS.unreadable, 'error');
       return;
     }
-    const position = editor.currentWindow().blocks.find((block) => block.blockId === range.blockId)?.position ?? null;
+    const current = editor.currentWindow();
+    const position = current.blocks.find((block) => block.blockId === range.blockId)?.position ?? null;
     if (position === null) {
       options.setStatus(SELECTION_TASK_STATUS.gone, 'error');
       return;
@@ -1370,7 +1394,13 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         label: SELECTION_TASK_FIELD,
         value: '',
         required: true,
-        hint: selectionTaskContextLine(range.toGrapheme - range.fromGrapheme, position),
+        hint: selectionTaskContextLine({
+          bookTitle: start.bookTitle,
+          revisionLabel: current.revisionLabel,
+          journalSequence: current.journalSequence,
+          graphemes: range.toGrapheme - range.fromGrapheme,
+          position,
+        }),
         options: offered.choices.map((choice) => ({ value: choice.value, label: choice.label })),
       }],
       submitLabel: SELECTION_TASK_PREPARE,
@@ -1381,14 +1411,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           options.setStatus(SELECTION_TASK_STATUS.pickFirst, 'error');
           return;
         }
-        // The paragraph is named by where it stands once the journal is settled: words typed above it move it.
-        await editor.flush();
-        const at = editor.currentWindow().blocks.find((block) => block.blockId === range.blockId)?.position ?? null;
-        if (at === null) {
-          options.setStatus(SELECTION_TASK_STATUS.gone, 'error');
-          return;
-        }
-        if (await start.prepare(choice, { blockId: range.blockId, position: at }) && !destroyed) closeFloating();
+        // The paragraph is named by its block identity; the service finds where it stands as the Task is prepared (P3-3).
+        if (await start.prepare(choice, { blockId: range.blockId }) && !destroyed) closeFloating();
       },
       cancel: () => {
         closeFloating();
@@ -1404,7 +1428,13 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   const composeQuestion = async (): Promise<void> => {
     if (refuseWhileBusy() || options.askAboutSelection === undefined) return;
     const ask = options.askAboutSelection;
-    const range = await settledRange();
+    composerPending = true;
+    let range: Awaited<ReturnType<typeof settledRange>>;
+    try {
+      range = await settledRange();
+    } finally {
+      composerPending = false;
+    }
     if (range === null) return;
     openComposer(range.blockId, {
       id: 'ask-about-selection',
@@ -1772,8 +1802,20 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
 
   return {
     close,
+    reanchor: () => {
+      closeMenu();
+      if (floating === undefined) return;
+      const blockId = floatingBlockId;
+      if (floating.dataset['markComposer'] !== undefined && blockId !== undefined && blockElement(blockId) !== null) {
+        placeBelowBlock(floating, blockId);
+        return;
+      }
+      const composer = floating.dataset['markComposer'] !== undefined;
+      closeFloating();
+      if (composer) options.setStatus(COMPOSER_LEFT_WINDOW, 'error');
+    },
     openMark: (markId) => openCard(markId),
-    ownsScroll: () => floating !== undefined || (closedAt !== undefined && options.scroll.scrollTop === closedAt.top),
+    ownsScroll: () => composerPending || floating !== undefined || (closedAt !== undefined && options.scroll.scrollTop === closedAt.top),
     destroy: () => {
       destroyed = true;
       reflow.disconnect();

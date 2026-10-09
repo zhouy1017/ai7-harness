@@ -21,6 +21,11 @@ import type { ReviewCategoryExecutor } from './category-configuration.js';
 export const SELECTION_UNAVAILABLE_REASON = '在稿件里选中文字，右键「就这段发起任务…」审阅所选文字。' as const;
 /** The selection handed over no longer stands in the working manuscript, or its two ends are out of order. */
 export const SELECTION_GONE_REASON = '所选文字已不在当前稿件中，或先后颠倒；请重新选择。' as const;
+/** The paragraphs a prepared 当前选区 Run names were removed or reordered before it started (Issue #423 review, P2-2). */
+export const SELECTION_MOVED_REASON = '所选文字所在的段落在准备之后已删除或调换了次序；请在稿件里重新选中文字，再就这段发起任务。' as const;
+/** The most paragraphs one 当前选区 names: a longer stretch is a chapter's work, which 选章 does. */
+export const MAX_SELECTION_BLOCKS = 64;
+export const SELECTION_TOO_LONG_REASON = `所选文字跨越超过 ${MAX_SELECTION_BLOCKS} 个段落；请改用选章。` as const;
 export const NEVER_REVIEWED_REASON = '这一类还没有审阅过，没有“改动过的章”可比；请先审全书或所选各章。' as const;
 export const NOTHING_CHANGED_REASON = '稿件在这一类上次审阅之后没有改动；没有需要只审的章。' as const;
 export const LEADS_ABSENT_REASON = '先完成基线分析，才有前后不一致的线索。' as const;
@@ -47,6 +52,11 @@ export interface ResolvedReviewScope {
    * selection was handed over to, which no category can read.
    */
   readonly selectedRange: ReviewBlockRange | null;
+  /**
+   * The paragraphs 当前选区 names, by block identity, in manuscript order (Issue #423 review, P1-1, P2-2): a Run on a selection
+   * marks findings on these blocks only, and does not start once one of them is gone or out of order. `undefined` elsewhere.
+   */
+  readonly blockIds?: ReadonlyArray<string>;
 }
 
 /** What a scope asks of one category. */
@@ -182,7 +192,7 @@ export function chapterOfPosition(chapters: ReadonlyArray<ReviewChapterOptionPro
  * How a scope reads in a record: its label, and for 选章 the block range it resolved to. A chapter's
  * title is manuscript text, so the durable label names positions only.
  */
-export function reviewScopeLabel(scope: ResolvedReviewScope): string {
+export function reviewScopeLabel(scope: Pick<ResolvedReviewScope, 'kind' | 'selectedRange'>): string {
   return scope.selectedRange === null
     ? REVIEW_SCOPE_LABELS[scope.kind]
     : `${REVIEW_SCOPE_LABELS[scope.kind]} · 内容块 ${scope.selectedRange.startPosition}–${scope.selectedRange.endPosition}`;

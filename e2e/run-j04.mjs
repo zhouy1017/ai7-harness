@@ -1962,13 +1962,28 @@ async function main() {
     // the exact block range and the plan unit by unit read in the drawer's 查看技术详情.
     await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); return card?.dataset.planUpdateMode==='reanalyze-range' && card.dataset.planReused==='5' && card.dataset.planRecomputed==='3' && card.dataset.planInvalidated==='1' && card.dataset.planBypassed==='2' && card.querySelector('.analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：重新分析所选范围 · 第 ${selectedRange.startPosition}–${selectedRange.endPosition} 段 · 重新分析 3 个阅读范围，沿用 5 个 · 任务输入修订版 ${preparedRange.checkpoint.revisionLabel} · 计划版本 1`)} && card.querySelector('[data-task-plan-open="baseline-analysis"]')?.textContent==='查看计划并开始' && !card.querySelector('[data-analysis-action="authorize"]'); })()`, 'range-plan-preview');
     const rangeDrawer = await drawerShowing(renderer, preparedRange.taskIntent.taskIntentId, 'ready', 'range-drawer');
+    // What the range reads again, as the plan names it (Issue #423 review, P2-1): each recomputed range from the paragraphs it
+    // repeats as context, merged where they meet.
+    const rangeSpans = (() => {
+      const spans = rangePlan.units.filter((unit) => unit.disposition === 'recomputed').map((unit) => {
+        const overlap = rangeManifest.units.find((entry) => entry.ordinal === unit.unitOrdinal)?.overlapBlockIds.length ?? 0;
+        return [Math.max(1, unit.startPosition - overlap), unit.endPosition];
+      }).sort((left, right) => left[0] - right[0] || left[1] - right[1]);
+      const merged = [];
+      for (const [start, end] of spans) {
+        const last = merged.at(-1);
+        if (last !== undefined && start <= last[1] + 1) last[1] = Math.max(last[1], end);
+        else merged.push([start, end]);
+      }
+      return `内容块 ${merged.map(([start, end]) => start === end ? `${start}` : `${start}–${end}`).join('、')}`;
+    })();
     requireJourney(rangeDrawer?.chips.position === `第 ${selectedRange.startPosition}–${selectedRange.endPosition} 段` && /^已选 [\d,]+ 字$/u.test(rangeDrawer.chips.selected ?? '') &&
       rangeDrawer.sentence === '重新分析所选范围，其余阅读范围沿用上一份' && rangeDrawer.technical.goal === RANGE_GOAL &&
       rangeDrawer.technical['selected-range'] === `内容块 ${selectedRange.startPosition}–${selectedRange.endPosition}` &&
       rangeDrawer.technical['reuse-plan'] === reusePlanReading(preparedRange.update.reusePlanDigest, rangePlan) &&
       rangeDrawer.technical['reuse-plan-predecessors'] === predecessorUnitsReading(rangePlan) &&
       predecessorUnitsReading(rangePlan) === '单元 1 reused；单元 2 invalidated；单元 3 bypassed；单元 4 bypassed；单元 5 reused；单元 6 reused；单元 7 reused；单元 8 reused' &&
-      rangeDrawer.notDo.includes('不重新读取所选范围以外的正文') && rangeDrawer.technical.predecessor === `Revision 2 · ${revision2.revisionId} · ${revision2.digest}`,
+      rangeDrawer.notDo.includes(`不重新读取${rangeSpans}以外的正文`) && !rangeDrawer.notDo.includes('不重新读取所选范围以外的正文') && rangeDrawer.technical.predecessor === `Revision 2 · ${revision2.revisionId} · ${revision2.digest}`,
     'range-drawer-plan', rangeDrawer);
 
     at('reanalyze-range-dispatch');

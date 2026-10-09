@@ -121,7 +121,10 @@ import {
   FACTUAL_AGAIN_REASON,
   LEADS_ABSENT_REASON,
   NO_CHAPTERS_REASON,
+  MAX_SELECTION_BLOCKS,
   SELECTION_GONE_REASON,
+  SELECTION_MOVED_REASON,
+  SELECTION_TOO_LONG_REASON,
   SELECTION_UNAVAILABLE_REASON,
   chapterOfPosition,
   chapterOptionsFromOutline,
@@ -332,6 +335,16 @@ export class ReviewRunError extends Error {
 
 export function requireReview(condition: unknown, code: string, message: string): asserts condition {
   if (!condition) throw new ReviewRunError(code, message);
+}
+
+/** A 当前选区 Run's paragraphs by identity; `null` for every other scope, and for a Run recorded before they were kept. */
+function selectionBlocks(snapshot: { readonly scope: { readonly kind: ReviewScopeKind; readonly blockIds?: ReadonlyArray<string> } }): ReadonlySet<string> | null {
+  return snapshot.scope.kind === 'selection' && snapshot.scope.blockIds !== undefined ? new Set(snapshot.scope.blockIds) : null;
+}
+
+/** What a 当前选区 Run found in its reading ranges outside the selected paragraphs, in the category's own line (P1-1). */
+export function selectionOutsideLine(count: number): string {
+  return `所选范围外另有 ${count} 处，未标记`;
 }
 
 /**
@@ -577,7 +590,11 @@ interface RunSnapshot {
   readonly ordinal: number;
   readonly createdAt: string;
   readonly manuscript: { readonly manuscriptId: string; readonly branchId: string; readonly revisionId: string; readonly revisionLabel: string; readonly journalSequence: number; readonly workingDigest: string };
-  readonly scope: { readonly kind: ReviewScopeKind; readonly label: string; readonly selectedRange: ReviewBlockRange | null };
+  /**
+   * `blockIds` only for 当前选区 (Issue #423 review, P2-2): the selection's paragraphs by identity, kept in the canonical record
+   * with no schema change, so what the Run marks and whether it may start never depend on positions that move.
+   */
+  readonly scope: { readonly kind: ReviewScopeKind; readonly label: string; readonly selectedRange: ReviewBlockRange | null; readonly blockIds?: ReadonlyArray<string> };
   readonly configuration: { readonly schema: string; readonly version: string; readonly digest: string };
   readonly categories: ReadonlyArray<SnapshotCategory>;
 }
@@ -1092,7 +1109,12 @@ export class ReviewRunStore {
           journalSequence: head.journalSequence,
           workingDigest: head.workingDigest,
         },
-        scope: { kind: work.scope.kind, label: reviewScopeLabel(work.scope), selectedRange: work.scope.selectedRange },
+        scope: {
+          kind: work.scope.kind,
+          label: reviewScopeLabel(work.scope),
+          selectedRange: work.scope.selectedRange,
+          ...(work.scope.blockIds === undefined ? {} : { blockIds: work.scope.blockIds }),
+        },
         configuration: this.#configurationPin(work.configuration),
         categories: work.prepared,
       };
@@ -1158,6 +1180,8 @@ export class ReviewRunStore {
     // review), is prepared again, never authorized — whatever its plans say.
     const procedure = procedurePinRefusal(this.#db, reviewRunId);
     requireReview(procedure === null, procedure?.code ?? 'REVIEW_PROCEDURE_STOPPED', procedure?.message ?? '');
+    // A 当前选区 whose paragraphs were removed or reordered since it was prepared is chosen again, never started (P2-2).
+    requireReview(!this.#selectionMoved(snapshot), 'REVIEW_PLAN_CHANGED', SELECTION_MOVED_REASON);
     for (const category of tasks) {
       const projection = this.#ledgers.ledgerOf(category.entry).inspect(bookId);
       requireReview(projection.taskIntent?.taskIntentId === category.task!.taskIntentId && projection.state === 'prepared' &&
@@ -1199,6 +1223,24 @@ export class ReviewRunStore {
     const row = this.#db.prepare('SELECT * FROM review_runs WHERE review_run_id = ?').get(reviewRunId) as SqlRow | undefined;
     requireReview(row !== undefined, 'REVIEW_RUN_NOT_FOUND', '这次审阅不存在。');
     return this.#snapshotOf(row);
+  }
+
+  /**
+   * Whether a 当前选区 Run's paragraphs are gone from the working manuscript, or no longer in the order the selection named them
+   * (Issue #423 review, P2-2). Words typed inside them, and paragraphs added around or between them, move nothing: the Run reads
+   * and marks by block identity.
+   */
+  #selectionMoved(snapshot: RunSnapshot): boolean {
+    const blockIds = snapshot.scope.kind === 'selection' ? snapshot.scope.blockIds : undefined;
+    if (blockIds === undefined) return false;
+    const read = this.#db.prepare('SELECT position FROM working_blocks WHERE branch_id = ? AND block_id = ?');
+    let previous = 0;
+    for (const blockId of blockIds) {
+      const row = read.get(snapshot.manuscript.branchId, blockId) as SqlRow | undefined;
+      if (row === undefined || integer(row.position) <= previous) return true;
+      previous = integer(row.position);
+    }
+    return false;
   }
 
   #runOfBook(bookId: string, reviewRunId: string): RunSnapshot {
@@ -1257,6 +1299,7 @@ export class ReviewRunStore {
       } else {
         const procedure = procedurePinRefusal(this.#db, reviewRunId);
         if (procedure !== null) staleReasons.push(procedure.message);
+        if (this.#selectionMoved(snapshot)) staleReasons.push(SELECTION_MOVED_REASON);
         for (const category of snapshot.categories) {
           if (category.task === null) continue;
           let current: AnalysisProjection | null = null;
@@ -1759,6 +1802,7 @@ export class ReviewRunStore {
     };
     let findings: MaterializedFinding[];
     let excludedCount: number;
+    let outside = 0;
     if (category.executor === 'factual-review-kind') {
       const factual = revision as FactualReviewResultSetRevisionProjection;
       findings = factual.findings.filter(read).map((finding) => ({
@@ -1797,10 +1841,19 @@ export class ReviewRunStore {
       }));
       excludedCount = review.excluded.filter((excluded) => recomputed.has(excluded.unitOrdinal)).length;
     }
+    // 当前选区 (Issue #423 review, P1-1; V2-UX-TASK-003): the reading ranges are read whole, as context, and only what lies on the
+    // selected paragraphs is put on the manuscript. The rest is counted, never stored as a mark, so the editor can widen to 选章.
+    const selected = selectionBlocks(snapshot);
+    if (selected !== null) {
+      const kept = findings.filter((finding) => selected.has(finding.blockId));
+      outside = findings.length - kept.length;
+      findings = kept;
+    }
     this.#writeFindings(snapshot, category, findings, {
       runRecordId: settled.runRecordId,
       resultSetRevisionId: settled.resultSetRevisionId,
       excludedCount,
+      outsideSelection: outside,
       adapterPin: { route: revision.adapterPin.route, model: revision.adapterPin.model, fixtureIdentity: revision.adapterPin.fixtureIdentity, fixtureSha256: revision.adapterPin.fixtureSha256 },
     });
   }
@@ -1838,6 +1891,8 @@ export class ReviewRunStore {
     const working = new Map((this.#db.prepare('SELECT block_id, position FROM working_blocks WHERE branch_id = ?').all(snapshot.manuscript.branchId) as SqlRow[])
       .map((row) => [text(row.block_id), integer(row.position)] as const));
     const range = category.selectedRange;
+    // A 当前选区 keeps the leads anchored on its paragraphs by identity (Issue #423 review, P2-2): positions move with every edit.
+    const selected = selectionBlocks(snapshot);
     const findings: MaterializedFinding[] = [];
     let excludedCount = 0;
     for (const lead of reviewLeadsOf(revision)) {
@@ -1847,7 +1902,9 @@ export class ReviewRunStore {
         excludedCount += 1;
         continue;
       }
-      if (range !== null) {
+      if (selected !== null) {
+        if (!selected.has(anchor.blockId)) continue;
+      } else if (range !== null) {
         const position = working.get(anchor.blockId);
         if (position === undefined || position < range.startPosition || position > range.endPosition) continue;
       }
@@ -1890,6 +1947,7 @@ export class ReviewRunStore {
       runRecordId: null,
       resultSetRevisionId: revision.revisionId,
       excludedCount,
+      outsideSelection: 0,
       adapterPin: { route: revision.adapterPin.route, model: revision.adapterPin.model, fixtureIdentity: revision.adapterPin.fixtureIdentity, fixtureSha256: revision.adapterPin.fixtureSha256 },
     });
   }
@@ -1907,7 +1965,14 @@ export class ReviewRunStore {
     snapshot: RunSnapshot,
     category: SnapshotCategory,
     findings: ReadonlyArray<MaterializedFinding>,
-    source: { runRecordId: string | null; resultSetRevisionId: string; excludedCount: number; adapterPin: { route: string; model: string; fixtureIdentity: string | null; fixtureSha256: string | null } },
+    source: {
+      runRecordId: string | null;
+      resultSetRevisionId: string;
+      excludedCount: number;
+      /** Findings of a 当前选区 Run's reading ranges that lie outside the selected paragraphs: counted, not marked. */
+      outsideSelection: number;
+      adapterPin: { route: string; model: string; fixtureIdentity: string | null; fixtureSha256: string | null };
+    },
   ): void {
     const reviewRunId = snapshot.reviewRunId;
     transact(this.#db, () => {
@@ -1981,6 +2046,7 @@ export class ReviewRunStore {
           `已形成 ${findings.length} 条发现：${marked} 条在稿件上`,
           ...(changed > 0 ? [`${changed} 条原文已变，未能标出`] : []),
           ...(source.excludedCount > 0 ? [`另有 ${source.excludedCount} 条未能定位引文，列在排除附录中`] : []),
+          ...(source.outsideSelection > 0 ? [selectionOutsideLine(source.outsideSelection)] : []),
         ].join('；') + '。';
         this.#recordEvent(reviewRunId, category.categoryId, 'materialized', detail, {
           runRecordId: source.runRecordId,
@@ -2308,7 +2374,10 @@ export class ReviewRunStore {
     const from = position(request.fromChapterBlockId);
     const to = position(request.toChapterBlockId);
     requireReview(from !== null && to !== null && from <= to, 'REVIEW_SCOPE_INVALID', SELECTION_GONE_REASON);
-    return { kind: 'selection', selectedRange: { startPosition: from, endPosition: to } };
+    requireReview(to - from < MAX_SELECTION_BLOCKS, 'REVIEW_SCOPE_INVALID', SELECTION_TOO_LONG_REASON);
+    const blockIds = (this.#db.prepare('SELECT block_id FROM working_blocks WHERE branch_id = ? AND position BETWEEN ? AND ? ORDER BY position')
+      .all(head.branchId, from, to) as SqlRow[]).map((row) => text(row.block_id));
+    return { kind: 'selection', selectedRange: { startPosition: from, endPosition: to }, blockIds };
   }
 
   #readBaseline(bookId: string): BaselineReading {
@@ -2633,7 +2702,9 @@ export class ReviewRunStore {
     const first = chapters.chapters[0];
     const scope = (kind: ReviewScopeKind): ReviewAvailabilityProjection => {
       if (reading.unavailableReason !== null) return { available: false, unavailableReason: reading.unavailableReason };
-      // 当前选区 is offered for any one paragraph a selection names (Issue #423, S77b): its first stands in for every one.
+      // 当前选区 is offered for whatever paragraph a selection will name (Issue #423, S77b). Block 1 stands in for every one: this
+      // holds only while `reviewCategoryScopePlan` decides a range scope by whether a range exists, never by its positions — a rule
+      // that read the range's values would have to be asked with the selection itself.
       const selectedRange = kind === 'chapters' && first !== undefined ? { startPosition: first.position, endPosition: first.endPosition }
         : kind === 'selection' ? { startPosition: 1, endPosition: 1 } : null;
       const plan = reviewCategoryScopePlan(entry.executor, entry.unavailableReason, { kind, selectedRange }, reading.facts);
@@ -3111,7 +3182,14 @@ export class ReviewRunStore {
         state: view.state,
         stateLabel: reviewRunStateLabel(view.state, view.canContinue),
         canContinue: view.canContinue,
-        scope: { kind: snapshot.scope.kind, label: snapshot.scope.label, selectedRange: snapshot.scope.selectedRange },
+        scope: {
+          kind: snapshot.scope.kind,
+          label: snapshot.scope.label,
+          selectedRange: snapshot.scope.selectedRange,
+          selection: snapshot.scope.blockIds === undefined || snapshot.scope.blockIds.length === 0
+            ? null
+            : { fromBlockId: snapshot.scope.blockIds[0]!, toBlockId: snapshot.scope.blockIds.at(-1)! },
+        },
         manuscript: snapshot.manuscript,
         configurationDigest: snapshot.configuration.digest,
         authorization: view.authorization === null ? null : { authorizedAt: view.authorization.authorizedAt },

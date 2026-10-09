@@ -1275,6 +1275,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'selection-task-review-prepare',
     'selection-task-review-card',
     'selection-task-review-run',
+    'selection-task-from-mark',
     'selection-task-reanalyze',
     'zero-loopback-requests',
     'completion-browser-close',
