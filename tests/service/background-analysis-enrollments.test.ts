@@ -38,6 +38,7 @@ import {
   backgroundQuietReason,
   backgroundShareFullReason,
 } from '../../src/service/background-analysis-enrollments.js';
+import { MATERIAL_INDEX_SCHEMA_SQL } from '../../src/service/material-index.js';
 import { QUICK_START_PLAN_CHANGED } from '../../src/service/default-execution-rules.js';
 import { MERGE_TABLE_POLICY } from '../../src/service/database-merge.js';
 import { controlledUnitHold } from '../../src/service/unit-hold.js';
@@ -48,6 +49,7 @@ import { EditorialStore, StoreError, type BackgroundAnalysisRuntime } from '../.
 import {
   ANALYSIS_LEDGER_REVISION_65_SQL,
   BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
+  MATERIAL_INDEX_SCHEMA_VERSION,
   WRITING_TASK_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import {
@@ -1158,7 +1160,8 @@ describe('后台分析登记 over the real store on exact sample1', () => {
     }
     const before = withDatabase(false, (database) => {
       database.exec('PRAGMA foreign_keys = OFF');
-      for (const table of Object.keys(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL).reverse()) database.exec(`DROP TABLE ${table}`);
+      // A revision-65 store holds neither revision 67's relations (Issue #428, S80a) nor revision 66's.
+      for (const table of [...Object.keys(MATERIAL_INDEX_SCHEMA_SQL).reverse(), ...Object.keys(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL).reverse()]) database.exec(`DROP TABLE ${table}`);
       database.exec('PRAGMA foreign_keys = ON');
       downgradeAnalysisRunAuthorizationsToRevision65(database);
       database.exec(`PRAGMA user_version = ${WRITING_TASK_SCHEMA_VERSION}`);
@@ -1174,7 +1177,8 @@ describe('后台分析登记 over the real store on exact sample1', () => {
       reopened.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
+      // Revision 66's widening and the stamp of the terminal revision, 67 (Issue #428, S80a), in one open.
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
       expect(analysisRunAuthorizationsShape(database)).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all()).toEqual(before);
       for (const table of Object.keys(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL)) {
