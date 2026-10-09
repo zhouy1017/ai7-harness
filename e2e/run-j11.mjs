@@ -3079,9 +3079,15 @@ async function main() {
       await toLanding(name);
       // The house already holds exact sample1 as 评估旅程丙: the wizard offers 新建图书（作为不同作品）, chosen explicitly like any target.
       calibrationBookId = await importSample1(renderer, `校准样书${index}`, sample1, name, true);
+      // AI7 reads a Book only under its enabled workspace profile: the house's Revision 2, installed for 评估旅程丙 at
+      // feedback-prerequisites, is enabled for this Book from its card on the overview the import lands on, as J-16 does.
+      await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, `${name}-profile-enable-ready`);
+      await click(renderer, '审阅并为本图书启用 Revision 2', `${name}-profile-enable`);
+      await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, `${name}-profile-enabled`);
       await waitFor(renderer, `document.querySelector('.book-evaluation-summary')?.dataset.evaluationState === 'empty'`, `${name}-summary`);
       await clickSelector(renderer, '.book-evaluation-summary [data-evaluation-action="open"]', `${name}-open`);
-      await readEvaluation(renderer, (page) => page.state === 'ready' && page.initial?.state === 'none', `${name}-ready`);
+      const fresh = await readEvaluation(renderer, (page) => page.state === 'ready' && page.initial?.state === 'none', `${name}-ready`);
+      requireJourney(JSON.stringify(fresh.initial.actions) === JSON.stringify([['prepare-initial', '准备 AI7 初评', false]]), `${name}-prepare-offered`, fresh.initial);
       await runInitialEvaluation(name);
       await clickSelector(renderer, '[data-evaluation-action="start-from-initial"]', `${name}-begin`);
       const begun = await readEvaluation(renderer, (page) => page.record?.heading === '第 1 版 · AI7 初稿', `${name}-draft`);
