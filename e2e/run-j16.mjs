@@ -1390,10 +1390,17 @@ async function main() {
     // waits in 等你处理 as 基线分析 · 重新分析所选范围, and nothing starts behind the editor's back.
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'selection-task-reanalyze-close');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true`, 'selection-task-reanalyze-closed');
-    await openSelectionMenu(renderer, taskBlock, 2, 12, 'selection-task-reanalyze-menu');
-    await assertRenderer(renderer, `(() => { window.__j16.item('task-on-selection').click(); return true; })()`, 'selection-task-reanalyze-choose');
-    await waitFor(renderer, `window.__j16.composer()?.querySelector('select[data-mark-field="procedure"] option[value="reanalyze-range"]') !== null`, 'selection-task-reanalyze-composer', 30_000);
-    await assertRenderer(renderer, `(() => { const select = window.__j16.composer().querySelector('select[data-mark-field="procedure"]'); select.value = 'reanalyze-range'; select.dispatchEvent(new Event('change', { bubbles: true })); return window.__j16.act('submit'); })()`, 'selection-task-reanalyze-submit');
+    // The manuscript window may reload under the composer as the 审阅's marks land, which closes it; the editor would open it
+    // again, and so does the Journey, a bounded number of times.
+    let reanalyzeSubmitted = false;
+    for (let attempt = 0; attempt < 5 && !reanalyzeSubmitted; attempt += 1) {
+      await openSelectionMenu(renderer, taskBlock, 2, 12, 'selection-task-reanalyze-menu');
+      await assertRenderer(renderer, `(() => { window.__j16.item('task-on-selection')?.click(); return true; })()`, 'selection-task-reanalyze-choose');
+      await waitFor(renderer, `window.__j16.composer()?.querySelector('select[data-mark-field="procedure"] option[value="reanalyze-range"]') != null`, 'selection-task-reanalyze-composer', 30_000);
+      reanalyzeSubmitted = await renderer.evaluate(`(() => { const select = window.__j16.composer()?.querySelector('select[data-mark-field="procedure"]'); if (!(select instanceof HTMLSelectElement)) return false; select.value = 'reanalyze-range'; select.dispatchEvent(new Event('change', { bubbles: true })); return window.__j16.act('submit'); })()`);
+      if (!reanalyzeSubmitted) await pressEscape(renderer);
+    }
+    requireJourney(reanalyzeSubmitted, 'selection-task-reanalyze-submit');
     await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawerView === 'plan' && drawer.dataset.taskPlanKind === 'baseline-analysis' && drawer.dataset.taskPlanStart === 'ready' && window.__j16.composer() === null; })()`, 'selection-task-reanalyze-plan', 120_000);
     const rangeTask = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then((analysis) => ({ mode: analysis.taskIntent?.mode ?? null, run: analysis.run, update: analysis.update === null ? null : { mode: analysis.update.mode, selectedRange: analysis.update.selectedRange } }))`);
     requireJourney(rangeTask?.mode === 'reanalyze-range' && rangeTask.run === null &&
