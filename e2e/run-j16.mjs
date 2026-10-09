@@ -1332,8 +1332,8 @@ async function main() {
     for (const anchor of leadAnchors.slice(0, 6)) {
       await clickSelector(renderer, '[data-edge-entry="analysis"]', 'selection-task-analysis-open');
       await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .baseline-analysis-card')`, 'selection-task-analysis-screen', 60_000);
-      await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] [data-analysis-tab="chapters"]') instanceof HTMLButtonElement`, 'selection-task-analysis-chapters-ready', 60_000);
-      await clickSelector(renderer, '[data-screen="book-analysis"] [data-analysis-tab="chapters"]', 'selection-task-analysis-chapters');
+      await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] button[data-analysis-tab="chapters"]') instanceof HTMLButtonElement`, 'selection-task-analysis-chapters-ready', 60_000);
+      await clickSelector(renderer, '[data-screen="book-analysis"] button[data-analysis-tab="chapters"]', 'selection-task-analysis-chapters');
       await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] li.analysis-unit[data-analysis-unit="${anchor.unit}"] [data-analysis-action="return-to-range"]') instanceof HTMLButtonElement`, 'selection-task-analysis-return-ready', 60_000);
       await clickSelector(renderer, `[data-screen="book-analysis"] li.analysis-unit[data-analysis-unit="${anchor.unit}"] [data-analysis-action="return-to-range"]`, 'selection-task-analysis-return');
       await waitFor(renderer, `document.querySelector('[data-screen="editor"] .ProseMirror [data-block-id]') !== null`, 'selection-task-editor', 60_000);
@@ -1414,8 +1414,8 @@ async function main() {
     // The manuscript on screen read its marks before the 审阅 made this one; opened again at the paragraph, it shows it.
     await clickSelector(renderer, '[data-edge-entry="analysis"]', 'selection-task-reopen-analysis');
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .baseline-analysis-card')`, 'selection-task-reopen-analysis-screen', 60_000);
-    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] [data-analysis-tab="chapters"]') instanceof HTMLButtonElement`, 'selection-task-reopen-chapters-ready', 60_000);
-    await clickSelector(renderer, '[data-screen="book-analysis"] [data-analysis-tab="chapters"]', 'selection-task-reopen-chapters');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] button[data-analysis-tab="chapters"]') instanceof HTMLButtonElement`, 'selection-task-reopen-chapters-ready', 60_000);
+    await clickSelector(renderer, '[data-screen="book-analysis"] button[data-analysis-tab="chapters"]', 'selection-task-reopen-chapters');
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] li.analysis-unit[data-analysis-unit="${taskUnit}"] [data-analysis-action="return-to-range"]') instanceof HTMLButtonElement`, 'selection-task-reopen-return-ready', 60_000);
     await clickSelector(renderer, `[data-screen="book-analysis"] li.analysis-unit[data-analysis-unit="${taskUnit}"] [data-analysis-action="return-to-range"]`, 'selection-task-reopen-return');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true && document.querySelector(${JSON.stringify(`[data-screen="editor"] [data-block-id="${taskBlock}"] .editorial-mark[data-mark-source="ai7"]`)}) !== null`, 'selection-task-lead-marked', 60_000);
