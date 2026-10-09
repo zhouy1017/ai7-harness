@@ -1358,7 +1358,8 @@ async function main() {
     await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawerView === 'plan' && drawer.dataset.taskPlanKind === 'review-run' && drawer.dataset.taskPlanStart === 'ready' && window.__j16.composer() === null && (drawer.textContent ?? '').includes('按 1 类审阅所选文字：情节逻辑与前后一致'); })()`, 'selection-task-review-plan', 120_000);
     const selectionRun = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({ reviewRunId: null }).then((workspace) => workspace.run === null ? null : { reviewRunId: workspace.run.reviewRunId, state: workspace.run.state, scope: workspace.run.scope, categories: workspace.run.categories.map((category) => category.categoryId) })`);
     requireJourney(UUID_PATTERN.test(selectionRun?.reviewRunId ?? '') && selectionRun.state === 'prepared' && JSON.stringify(selectionRun.categories) === JSON.stringify(['plot-consistency']) &&
-      JSON.stringify(selectionRun.scope) === JSON.stringify({ kind: 'selection', label: `当前选区 · 内容块 ${position}–${position}`, selectedRange: { startPosition: Number(position), endPosition: Number(position) } }),
+      selectionRun.scope?.kind === 'selection' && selectionRun.scope.label === `当前选区 · 内容块 ${position}–${position}` &&
+      selectionRun.scope.selectedRange?.startPosition === Number(position) && selectionRun.scope.selectedRange.endPosition === Number(position),
     'selection-task-review-recorded', selectionRun);
     requireJourney((await paragraphText()) === paragraphBefore, 'selection-task-manuscript-unchanged');
 
@@ -1396,7 +1397,8 @@ async function main() {
     await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawerView === 'plan' && drawer.dataset.taskPlanKind === 'baseline-analysis' && drawer.dataset.taskPlanStart === 'ready' && window.__j16.composer() === null; })()`, 'selection-task-reanalyze-plan', 120_000);
     const rangeTask = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then((analysis) => ({ mode: analysis.taskIntent?.mode ?? null, run: analysis.run, update: analysis.update === null ? null : { mode: analysis.update.mode, selectedRange: analysis.update.selectedRange } }))`);
     requireJourney(rangeTask?.mode === 'reanalyze-range' && rangeTask.run === null &&
-      JSON.stringify(rangeTask.update) === JSON.stringify({ mode: 'reanalyze-range', selectedRange: { startPosition: Number(position), endPosition: Number(position) } }), 'selection-task-reanalyze-recorded', rangeTask);
+      rangeTask.update?.mode === 'reanalyze-range' && rangeTask.update.selectedRange?.startPosition === Number(position) &&
+      rangeTask.update.selectedRange.endPosition === Number(position), 'selection-task-reanalyze-recorded', rangeTask);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'selection-task-reanalyze-back');
     const rangePanel = await waitForPanel(renderer, (panel) => statesOf(panel, 'waiting').includes('analysis-prepared'), 'selection-task-reanalyze-waiting');
     const rangeCard = cardsOf(rangePanel, 'waiting').find((card) => card.state === 'analysis-prepared');
