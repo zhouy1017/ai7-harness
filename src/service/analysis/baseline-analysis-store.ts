@@ -167,10 +167,18 @@ export const REUSE_PLAN_DRIFT_AUTHORIZE_REASON = '重新推导的复用计划与
 /**
  * How much one ledger keeps of its walks and of revisions as a walk reads them (Issue #716): a few entries, and no more
  * block references than a large manuscript's handful of manifests hold. The least recently used is let go first.
+ *
+ * The chain cache is bounded four times wider than the walk cache (Issue #727). A walk reads its chain newest-first to
+ * the chain's first Run whenever a chapter stands unread, so once a chain outgrows the bound the walk evicts, in order,
+ * exactly what the next walk asks for first, and every revision is read from SQLite again at each new latest revision:
+ * a cliff, not a decline (`tests/unit/unread-changes.test.ts` measures it). At 262,144 the chain of a ~3,000-block
+ * manuscript (~4,700 weight a revision) stays cached to some 55 revisions, the entry bound's neighbourhood; the walk
+ * cache, one walk per latest revision, keeps its bound.
  */
-const UNREAD_WALK_CACHE_ENTRIES = 16;
-const CHAIN_REVISION_CACHE_ENTRIES = 64;
-const UNREAD_WALK_CACHE_WEIGHT = 65_536;
+export const UNREAD_WALK_CACHE_ENTRIES = 16;
+export const CHAIN_REVISION_CACHE_ENTRIES = 64;
+export const UNREAD_WALK_CACHE_WEIGHT = 65_536;
+export const CHAIN_REVISION_CACHE_WEIGHT = 4 * UNREAD_WALK_CACHE_WEIGHT;
 
 type ChainRevisionRead = { readonly revision: ChainRevision; readonly predecessorRevisionId: string | null } | 'unreadable';
 
@@ -835,9 +843,10 @@ export class BaselineAnalysisStore {
    * walks the chain once per latest revision, and the plan, the gate and the coverage matrix share that one answer.
    */
   readonly #unreadWalks = new UnreadWalkCache<UnreadWalk>(UNREAD_WALK_CACHE_ENTRIES, UNREAD_WALK_CACHE_WEIGHT, unreadWalkWeight);
-  readonly #chainRevisions = new UnreadWalkCache<ChainRevisionRead>(CHAIN_REVISION_CACHE_ENTRIES, UNREAD_WALK_CACHE_WEIGHT,
+  readonly #chainRevisions = new UnreadWalkCache<ChainRevisionRead>(CHAIN_REVISION_CACHE_ENTRIES, CHAIN_REVISION_CACHE_WEIGHT,
     (read) => read === 'unreadable' ? 1 : manifestWeight(read.revision.manifest) + read.revision.units.size);
   #unreadWalksComputed = 0;
+  #chainRevisionsRead = 0;
   #launch: LaunchBinding = DEVELOPMENT_CI_LAUNCH;
 
   constructor(
@@ -2485,6 +2494,11 @@ export class BaselineAnalysisStore {
     return this.#unreadWalksComputed;
   }
 
+  /** How many revisions this ledger's walks have read from SQLite: one per revision while the chain stays cached (Issue #727). */
+  get chainRevisionsRead(): number {
+    return this.#chainRevisionsRead;
+  }
+
   /** The walk of one latest revision, computed once (see {@link walkUnreadChanges}). */
   #unreadWalk(row: SqlRow): UnreadWalk {
     const revisionId = asString(row.revision_id);
@@ -2492,7 +2506,9 @@ export class BaselineAnalysisStore {
     if (kept !== undefined) return kept;
     const latest = this.#chainRevision(row);
     requireAnalysis(latest !== 'unreadable', 'ANALYSIS_RECORD_INVALID', '结果集修订版记录无效。');
-    // The revision each one this walk read followed, held by the walk itself: the cache may let a read go meanwhile.
+    // The revision each one this walk read followed, noted as it is read. `#chainRevision` hands back the read it has just
+    // kept, and the cache never lets go of the entry it just wrote, so the walk could not miss a predecessor it has read
+    // (Issue #727); the map only spares a second cache lookup per step.
     const followed = new Map<string, string | null>([[latest.revision.revisionId, latest.predecessorRevisionId]]);
     const walk = walkUnreadChanges(latest.revision, (revision) => {
       const predecessorRevisionId = followed.get(revision.revisionId);
@@ -2520,6 +2536,7 @@ export class BaselineAnalysisStore {
     const revisionId = asString(row.revision_id);
     const kept = this.#chainRevisions.get(revisionId);
     if (kept !== undefined) return kept;
+    this.#chainRevisionsRead += 1;
     let read: ChainRevisionRead;
     try {
       const facts = this.#predecessorFacts(row);

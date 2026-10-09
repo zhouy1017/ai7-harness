@@ -9,6 +9,7 @@
 // loads Playwright, with each line's time (`DEBUG_COLORS=no`), and reads the launch in flight back from it.
 
 import { execFile } from 'node:child_process';
+import { availableParallelism } from 'node:os';
 import { dirname, resolve } from 'node:path';
 
 /** The startup steps main names (src/main/application.ts), and the failures `AI7_STARTUP_FAILED/…` can carry. */
@@ -253,27 +254,40 @@ export function summarizeProductProcesses(rows, pid, runtimeRoot, platform = pro
   };
 }
 
+/** The listing command's output and the id of the process that produced it, or `null` when it could not be read. */
 const listingOutput = (file, args) => new Promise((settle) => {
-  execFile(file, args, { timeout: 10_000, windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (error, stdout) => {
-    settle(error ? null : String(stdout));
+  const child = execFile(file, args, { timeout: 10_000, windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (error, stdout) => {
+    settle(error ? null : { text: String(stdout), pid: child.pid ?? null });
   });
 });
 
-/** Every process on the host as `{ pid, ppid, cpuSeconds, path }`, or `null` when the listing could not be read. */
-export async function listHostProcesses(platform = process.platform) {
+/**
+ * Every process on the host as `{ pid, ppid, cpuSeconds, path }`, with the id of the process that listed them (`listingPid`,
+ * a child of this one that is in its own listing, alive while it lists), or `null` when the listing could not be read.
+ */
+export async function listHostProcessesWithListing(platform = process.platform) {
+  let listing;
   if (platform === 'win32') {
     const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
     if (systemRoot === undefined) return null;
-    const text = await listingOutput(resolve(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), [
+    listing = await listingOutput(resolve(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), [
       '-NoProfile',
       '-NonInteractive',
       '-Command',
       'Get-CimInstance Win32_Process | ForEach-Object { "{0}`t{1}`t{2}`t{3}" -f $_.ProcessId, $_.ParentProcessId, ([uint64]$_.UserModeTime + [uint64]$_.KernelModeTime), $_.ExecutablePath }',
     ]);
-    return text === null ? null : parseWindowsProcessListing(text);
+    if (listing === null) return null;
+    return { rows: parseWindowsProcessListing(listing.text), listingPid: listing.pid };
   }
-  const text = await listingOutput('/bin/ps', ['-A', '-ww', '-o', 'pid=,ppid=,time=,args=']);
-  return text === null ? null : parsePsProcessListing(text);
+  listing = await listingOutput('/bin/ps', ['-A', '-ww', '-o', 'pid=,ppid=,time=,args=']);
+  if (listing === null) return null;
+  return { rows: parsePsProcessListing(listing.text), listingPid: listing.pid };
+}
+
+/** Every process on the host as `{ pid, ppid, cpuSeconds, path }`, or `null` when the listing could not be read. */
+export async function listHostProcesses(platform = process.platform) {
+  const listing = await listHostProcessesWithListing(platform);
+  return listing === null ? null : listing.rows;
 }
 
 /** The Windows listing's tab-separated lines: process id, parent id, CPU time in 100 ns units and executable path. */
@@ -292,6 +306,56 @@ export function parsePsProcessListing(text) {
     if (found === null) return [];
     return [{ pid: Number(found[1]), ppid: Number(found[2]), cpuSeconds: psCpuSeconds(found[3]), path: found[4] }];
   });
+}
+
+/**
+ * How busy the product and the host were between two listings of the host's processes (Issue #621): the CPU time used in
+ * the window by every process below `rootPid` — the Journey that launched the product — as a share of one core, and by
+ * every process on the host as a share of all `cores`. A process that started in the window counts all its time; one that
+ * ended in it counts none; process 0, which on Windows carries the idle time, never counts. The process that made the
+ * `after` listing — `listingPid`, a child of the Journey alive while it lists itself, costing a few tenths of a second on a
+ * hosted Windows runner — and anything it started count for neither share, or an idle product would read as working.
+ */
+export function cpuShares(before, after, rootPid, windowMs, cores, listingPid = null) {
+  const earlier = new Map(before.filter((row) => row.cpuSeconds !== null).map((row) => [row.pid, row.cpuSeconds]));
+  const descendants = (origin) => {
+    const found = new Set([origin]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const row of after) {
+        if (!found.has(row.pid) && found.has(row.ppid)) {
+          found.add(row.pid);
+          grew = true;
+        }
+      }
+    }
+    return found;
+  };
+  const sampler = listingPid === null ? new Set() : descendants(listingPid);
+  const below = descendants(rootPid);
+  let product = 0;
+  let host = 0;
+  for (const row of after) {
+    if (row.pid === 0 || row.cpuSeconds === null || sampler.has(row.pid)) continue;
+    const used = Math.max(0, row.cpuSeconds - (earlier.get(row.pid) ?? 0));
+    host += used;
+    if (row.pid !== rootPid && below.has(row.pid)) product += used;
+  }
+  const seconds = Math.max(windowMs, 1) / 1_000;
+  return { product: product / seconds, host: host / seconds / Math.max(cores, 1) };
+}
+
+/**
+ * `cpuShares` over a window of `windowMs` from now, or `null` when the host's processes could not be read. The first
+ * listing's process has ended by the second listing, so only the second's own process needs leaving out.
+ */
+export async function measureCpuShares(rootPid, windowMs = 5_000) {
+  const before = await listHostProcesses();
+  const startedAt = Date.now();
+  await new Promise((settle) => setTimeout(settle, windowMs));
+  const after = await listHostProcessesWithListing();
+  if (before === null || after === null) return null;
+  return cpuShares(before, after.rows, rootPid, Date.now() - startedAt, availableParallelism(), after.listingPid);
 }
 
 /** The launched product's processes as `summarizeProductProcesses` says them, or `null` when the host's could not be read. */
