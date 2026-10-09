@@ -600,6 +600,8 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterial(request.input.materialId) };
     case 'readLibraryDecisionReason':
       return { id: request.id, ok: true, op: request.op, result: store.readLibraryDecisionReason(request.input) };
+    case 'inspectLibraryMaterialSegments':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectLibraryMaterialSegments(request.input) };
     case 'previewLibraryMaterial':
       return { id: request.id, ok: true, op: request.op, result: await store.previewLibraryMaterial(request.input.path) };
     case 'addLibraryMaterial':
@@ -1699,6 +1701,11 @@ async function run(): Promise<void> {
     preflightTimer.unref();
     // 定期自动备份 (Issue #434, S86b): asked at start, then hourly while the service runs; a backup is made only when one is due.
     void openStore.runScheduledBackupIfDue().catch(() => undefined);
+    // 资料索引 (Issue #428, S80a): every 资料库 item still without its Material Index is built now, in the background, one at a
+    // time — an item from before this revision, a merged Book's, or one a closing service stopped.
+    if (!openStore.replacementFrozen()) {
+      try { openStore.startMaterialIndexing(); } catch { /* the next open tries again */ }
+    }
     backupTimer = setInterval(() => void openStore.runScheduledBackupIfDue().catch(() => undefined), BACKUP_CHECK_INTERVAL_MS);
     backupTimer.unref();
     reachServiceStartup('serving');
