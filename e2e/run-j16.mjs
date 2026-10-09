@@ -1328,6 +1328,7 @@ async function main() {
     const leadAnchors = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then((analysis) => { const revision = analysis.resultSetRevision; if (revision === null) return []; const first = (ranges) => ranges?.[0]?.blockId ?? null; const anchors = [...revision.conflicts.map((conflict) => first(conflict.sourceRanges)), ...revision.crossUnitFindings.map((finding) => first(finding.sides.flatMap((side) => side.sourceRanges))), ...[...revision.sections.flatMap((section) => section.unresolved), ...revision.synthesis.unresolved].map((item) => first(item.sourceRanges))].filter((blockId) => blockId !== null); const units = analysis.coverageManifest?.units ?? []; return [...new Set(anchors)].map((blockId) => ({ blockId, unit: units.find((unit) => unit.blockIds.includes(blockId))?.ordinal ?? null })).filter((anchor) => anchor.unit !== null); })`);
     requireJourney(Array.isArray(leadAnchors) && leadAnchors.length > 0, 'selection-task-lead-anchors', leadAnchors);
     let taskBlock = null;
+    let taskUnit = null;
     for (const anchor of leadAnchors.slice(0, 6)) {
       await clickSelector(renderer, '[data-edge-entry="analysis"]', 'selection-task-analysis-open');
       await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .baseline-analysis-card')`, 'selection-task-analysis-screen', 60_000);
@@ -1339,6 +1340,7 @@ async function main() {
       const fits = await renderer.evaluate(`(() => { const node = window.__j16.block(${JSON.stringify(anchor.blockId)}); if (!(node instanceof HTMLElement)) return false; const head = (node.textContent ?? '').slice(0, 10); return head.length >= 4 && Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(head)).length === head.length; })()`);
       if (fits) {
         taskBlock = anchor.blockId;
+        taskUnit = anchor.unit;
         break;
       }
     }
@@ -1407,7 +1409,13 @@ async function main() {
     const reviewedFindings = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({ reviewRunId: ${JSON.stringify(selectionRun.reviewRunId)} }).then((workspace) => workspace.run.findings.map((finding) => [finding.blockId, finding.markId !== null]))`);
     requireJourney(Array.isArray(reviewedFindings) && reviewedFindings.length > 0 && reviewedFindings.every(([blockId, marked]) => blockId === taskBlock && marked), 'selection-task-review-in-paragraph', reviewedFindings);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'selection-task-review-close');
+    // The manuscript on screen read its marks before the 审阅 made this one; opened again at the paragraph, it shows it.
+    await clickSelector(renderer, '[data-edge-entry="analysis"]', 'selection-task-reopen-analysis');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .baseline-analysis-card')`, 'selection-task-reopen-analysis-screen', 60_000);
+    await clickSelector(renderer, '[data-screen="book-analysis"] [data-analysis-tab="chapters"]', 'selection-task-reopen-chapters');
+    await clickSelector(renderer, `[data-screen="book-analysis"] li.analysis-unit[data-analysis-unit="${taskUnit}"] [data-analysis-action="return-to-range"]`, 'selection-task-reopen-return');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true && document.querySelector(${JSON.stringify(`[data-screen="editor"] [data-block-id="${taskBlock}"] .editorial-mark[data-mark-source="ai7"]`)}) !== null`, 'selection-task-lead-marked', 60_000);
+    await assertRenderer(renderer, MARK_HELPERS, 'selection-task-mark-helpers');
 
     at('selection-task-from-mark');
     // From the lead's own 批注: its menu's 就这段发起任务… selects the marked words and opens the same composer, quoting them. While
