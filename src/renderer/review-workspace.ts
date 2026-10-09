@@ -129,6 +129,7 @@ import {
   reviewChapterOptionLabel,
   reviewClauseLine,
   reviewCountsLine,
+  reviewChangedScopeNotes,
   reviewCoverageChanges,
   reviewCoverageLastReview,
   reviewCreatedLine,
@@ -1779,6 +1780,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const scopes = el('fieldset', 'review-scope-options');
     scopes.append(el('legend', undefined, REVIEW_SCOPE_LEGEND));
     const scopeInputs = new Map<ReviewScopeKind, HTMLInputElement>();
+    // What could not be checked for 只审改动过的章, said beside it as well as on the coverage row (Issue #716).
+    const changedNote = el('small', 'field-note review-changed-scope-note');
+    changedNote.dataset['reviewChangedScopeNote'] = '';
+    changedNote.id = uid('changed-scope-note');
     for (const kind of REVIEW_SCOPE_KINDS) {
       const availability = scopeAvailability(workspace, state, kind);
       const label = el('label', 'review-scope-option');
@@ -1797,6 +1802,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         why.id = uid('scope-reason');
         input.setAttribute('aria-describedby', why.id);
         label.append(why);
+      }
+      if (kind === 'changed') {
+        label.append(changedNote);
+        input.setAttribute('aria-describedby', [input.getAttribute('aria-describedby'), changedNote.id].filter((id) => id !== null).join(' '));
       }
       input.addEventListener('change', () => {
         if (!input.checked) return;
@@ -1897,6 +1906,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         }
       }
       for (const [kind, input] of scopeInputs) input.disabled = !scopeAvailability(workspace, state, kind).available || preparing || (filled !== null && kind !== filled.scopeSlot);
+      const notes = reviewChangedScopeNotes(workspace.coverage, state.categories);
+      changedNote.textContent = notes.join(' ');
+      changedNote.hidden = notes.length === 0;
       procedureSelect.disabled = preparing || loading || state.procedures.length === 0;
       versionSelect.disabled = preparing || loading || versionSelect.options.length < 2;
       range.hidden = state.scope !== 'chapters';
