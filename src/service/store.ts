@@ -514,6 +514,8 @@ import {
   BACKGROUND_NO_ROUTE,
   BACKGROUND_PLACE_BUSY,
   BACKGROUND_PREPARATION_IN_FLIGHT,
+  BACKGROUND_EDITOR_JOB,
+  BACKGROUND_RECOVERY_PENDING,
   BACKGROUND_RECORD_DAMAGED,
   BACKGROUND_REPLACEMENT_WAITING,
   BACKGROUND_REVOKED,
@@ -532,7 +534,7 @@ import {
   BACKGROUND_STATE_LABELS,
   BackgroundAnalysisEnrollmentError,
   BackgroundAnalysisEnrollmentLedger,
-  backgroundAnalysisDecision,
+  backgroundAnalysisDecisionOf,
   backgroundAnalysisWhen,
   backgroundDriftReason,
   backgroundEnrollmentName,
@@ -5622,7 +5624,7 @@ export class EditorialStore {
     const read = this.#enrollmentRead(bookId);
     const record = read === 'damaged' ? null : read;
     const state = read === 'damaged' ? 'damaged' : record === null ? 'none' : record.state;
-    const next = this.#analysisCall(() => this.#backgroundDecision(bookId, read, runtime, false));
+    const next = this.#analysisCall(() => this.#backgroundDecision(bookId, read, runtime));
     const live = this.#baselineAnalysis.launch.live !== null;
     const binding = this.#enrollmentBinding(bookId);
     const nextOrdinal = record === null ? 1 : record.version.ordinal + 1;
@@ -5778,14 +5780,13 @@ export class EditorialStore {
   }
 
   /**
-   * What the Book's Enrollment would do now, and the version it would name: the dispatcher's one question. The facts that need no
-   * projection are read first, and a wait any of them says ends the look there (#713 review, P3-5). The look is remembered, so
-   * ②A can say when AI7 last looked and what it found.
+   * What the Book's Enrollment would do now, and the version it would name: the dispatcher's one question, answered by the same
+   * function as ②A's `next`. The look is remembered, so ②A can say when AI7 last looked and what it found.
    */
   backgroundAnalysisDecisionFor(bookId: string, runtime: BackgroundAnalysisRuntime): { decision: BackgroundAnalysisDecision; enrollmentVersionId: string | null } {
     this.#assertAvailable();
     const read = this.#enrollmentRead(bookId);
-    const decision = this.#analysisCall(() => this.#backgroundDecision(bookId, read, runtime, true));
+    const decision = this.#analysisCall(() => this.#backgroundDecision(bookId, read, runtime));
     this.#backgroundLooks.set(bookId, { at: new Date(runtime.now).toISOString(), kind: decision.kind, reason: decision.reason });
     return { decision, enrollmentVersionId: read !== 'damaged' && read !== null && read.state === 'active' ? read.version.enrollmentVersionId : null };
   }
@@ -5824,8 +5825,10 @@ export class EditorialStore {
     if (this.#baselineAnalysis.launch.live !== null) return BACKGROUND_DEVELOPER_LIVE;
     if (!runtime.routeExecutable) return BACKGROUND_NO_ROUTE;
     if (this.replacementFrozen()) return BACKGROUND_REPLACEMENT_WAITING;
-    if (runtime.editorWorkBusy || this.#baselineAnalysis.preparationInFlightBesides(bookId, workId)) return BACKGROUND_PREPARATION_IN_FLIGHT;
+    if (this.#baselineAnalysis.preparationInFlightBesides(bookId, workId)) return BACKGROUND_PREPARATION_IN_FLIGHT;
+    if (runtime.editorWorkBusy) return BACKGROUND_EDITOR_JOB;
     const point = this.#analysisCall(() => this.#baselineAnalysis.workingPointOf(bookId));
+    if (this.#boundedCall(() => this.#boundedAuthority.branchUnderRecovery(point.branchId))) return BACKGROUND_RECOVERY_PENDING;
     if (point.lastEditAt !== null && runtime.now - Date.parse(point.lastEditAt) < runtime.quietMs) return backgroundQuietReason(runtime.quietMs);
     if (!runtime.placeFree) return BACKGROUND_PLACE_BUSY;
     const share = backgroundAnalysisShare(runtime.capacity);
@@ -5939,75 +5942,65 @@ export class EditorialStore {
   }
 
   /**
-   * Every fact the decision weighs, read from the Book's records and this launch, in `backgroundAnalysisDecision`'s order. With
-   * `cheapFirst` — the dispatcher's look — the facts that need no projection are read first and a wait any of them says is the
-   * answer, so a Book the dispatcher cannot start now costs no projection; ②A always reads the whole answer.
+   * Every fact the decision weighs, read from the Book's records and this launch only when the decision reaches it
+   * (`backgroundAnalysisDecisionOf`), each at most once: the dispatcher's look and ②A's answer are the same function, and a Book
+   * with nothing to do costs no projection — none is ever built here (#713 re-review, P3-2, P3-3).
    */
-  #backgroundDecision(
-    bookId: string,
-    read: BackgroundAnalysisEnrollmentRecord | null | 'damaged',
-    runtime: BackgroundAnalysisRuntime,
-    cheapFirst: boolean,
-  ): BackgroundAnalysisDecision {
-    const developerLive = this.#baselineAnalysis.launch.live !== null;
-    const share = backgroundAnalysisShare(runtime.capacity);
-    const base = {
-      developerLive, routeExecutable: runtime.routeExecutable, share, placeFree: runtime.placeFree, quietMs: runtime.quietMs,
+  #backgroundDecision(bookId: string, read: BackgroundAnalysisEnrollmentRecord | null | 'damaged', runtime: BackgroundAnalysisRuntime): BackgroundAnalysisDecision {
+    const once = <T>(fact: () => T): (() => T) => {
+      let known: { value: T } | null = null;
+      return () => (known ??= { value: fact() }).value;
     };
-    const idle = {
-      drift: [], preparationInFlight: false, taskUnfinished: null, analysis: 'current' as const, changedSinceEditorTask: true,
-      startingPoint: 'backfill' as const, movedSinceEnrollment: false, attemptedAtThisText: false, sinceLastEditMs: null, backgroundRunning: 0,
-    };
-    if (read === null || read === 'damaged' || read.state !== 'active' || developerLive || !runtime.routeExecutable || share < 1) {
-      return backgroundAnalysisDecision({ ...base, ...idle, enrollment: read === 'damaged' ? 'damaged' : read?.state ?? null });
-    }
-    const point = this.#baselineAnalysis.workingPointOf(bookId);
-    const preparationInFlight = runtime.editorWorkBusy || this.#baselineAnalysis.preparationInFlight(bookId) ||
-      this.#boundedCall(() => this.#boundedAuthority.checkpointWorkInFlight(point.branchId));
-    const sinceLastEditMs = point.lastEditAt === null ? null : Math.max(0, runtime.now - Date.parse(point.lastEditAt));
-    const backgroundRunning = this.#backgroundRunningCount();
-    if (cheapFirst && (preparationInFlight || (sinceLastEditMs !== null && sinceLastEditMs < runtime.quietMs) || !runtime.placeFree || backgroundRunning >= share)) {
-      // A wait the dispatcher can tell from these alone: it says the first of them in the decision's own order.
-      return preparationInFlight
-        ? { kind: 'wait', reason: BACKGROUND_PREPARATION_IN_FLIGHT }
-        : sinceLastEditMs !== null && sinceLastEditMs < runtime.quietMs
-          ? { kind: 'wait', reason: backgroundQuietReason(runtime.quietMs) }
-          : !runtime.placeFree ? { kind: 'wait', reason: BACKGROUND_PLACE_BUSY } : { kind: 'wait', reason: backgroundShareFullReason(share) };
-    }
-    let drift: ReadonlyArray<string> | null;
-    try {
-      drift = defaultExecutionRuleDrift(read.version.binding, this.#baselineAnalysis.currentRuleFacts(bookId, 'first-baseline'));
-    } catch (error) {
-      if (!(error instanceof AnalysisError)) throw error;
-      drift = null;
-    }
-    const projection = this.#baselineAnalysis.inspect(bookId) as BaselineAnalysisProjection;
-    const latest = projection.resultSetRevision;
-    const analysis = latest === null ? 'absent' : latest.freshness.state === 'current' ? 'current' : 'stale';
-    const enrollmentsOwn = projection.taskIntent?.preparedByEnrollmentVersionId !== undefined;
-    const taskUnfinished = runIsActive(projection.run?.state ?? null)
-      ? 'run'
-      : projection.taskIntent !== null && projection.planEnvelope !== null && projection.authorization === null && !enrollmentsOwn ? 'prepared' : null;
-    const editorTask = this.#baselineAnalysis.latestEditorTaskOf(bookId);
-    const changedSinceEditorTask = editorTask === null ||
-      (editorTask.checkpointDigest !== null
-        ? editorTask.checkpointDigest !== point.workingDigest
-        : point.lastEditAt !== null && point.lastEditAt > editorTask.createdAt);
-    // Whoever's it was: the latest Task read exactly this text and the analysis is still not current with it (P2-4).
-    const attemptedAtThisText = projection.checkpoint !== null && projection.checkpoint.revisionDigest === point.workingDigest;
-    return backgroundAnalysisDecision({
-      ...base,
-      enrollment: 'active',
-      drift,
-      preparationInFlight,
-      taskUnfinished,
-      analysis,
-      changedSinceEditorTask,
-      startingPoint: read.version.startingPoint,
-      movedSinceEnrollment: point.workingDigest !== read.version.enrolledAt.workingDigest,
-      attemptedAtThisText,
-      sinceLastEditMs,
-      backgroundRunning,
+    const record = read === 'damaged' ? null : read;
+    const point = once(() => this.#baselineAnalysis.workingPointOf(bookId));
+    const latestTask = once(() => this.#baselineAnalysis.latestTaskFactsOf(bookId));
+    return backgroundAnalysisDecisionOf({
+      enrollment: () => (read === 'damaged' ? 'damaged' : read?.state ?? null),
+      developerLive: () => this.#baselineAnalysis.launch.live !== null,
+      routeExecutable: () => runtime.routeExecutable,
+      share: () => backgroundAnalysisShare(runtime.capacity),
+      recoveryPending: () => this.#boundedCall(() => this.#boundedAuthority.branchUnderRecovery(point().branchId)),
+      drift: once(() => {
+        try {
+          return defaultExecutionRuleDrift(record!.version.binding, this.#baselineAnalysis.currentRuleFacts(bookId, 'first-baseline'));
+        } catch (error) {
+          if (error instanceof AnalysisError) return null;
+          throw error;
+        }
+      }),
+      preparationInFlight: () => this.#baselineAnalysis.preparationInFlight(bookId) ||
+        this.#boundedCall(() => this.#boundedAuthority.checkpointWorkInFlight(point().branchId)),
+      editorJobRunning: () => runtime.editorWorkBusy,
+      analysis: once(() => this.#baselineAnalysis.analysisFreshnessOf(bookId)),
+      taskUnfinished: () => {
+        const task = latestTask();
+        if (task === null) return null;
+        if (runIsActive(task.runState)) return 'run';
+        // A plan the dispatcher left unstarted is the Enrollment's, never waited on as the editor's.
+        return task.planned && !task.authorized && !task.preparedByEnrollment ? 'prepared' : null;
+      },
+      changedSinceEditorTask: () => {
+        const editorTask = this.#baselineAnalysis.latestEditorTaskOf(bookId);
+        if (editorTask === null) return true;
+        const at = point();
+        return editorTask.checkpointDigest !== null
+          ? editorTask.checkpointDigest !== at.workingDigest
+          : at.lastEditAt !== null && at.lastEditAt > editorTask.createdAt;
+      },
+      startingPoint: () => record!.version.startingPoint,
+      movedSinceEnrollment: () => point().workingDigest !== record!.version.enrolledAt.workingDigest,
+      // Whoever's it was: the latest Task read exactly this text and the analysis is still not current with it (P2-4).
+      attemptedAtThisText: () => {
+        const task = latestTask();
+        return task !== null && task.checkpointDigest !== null && task.checkpointDigest === point().workingDigest;
+      },
+      sinceLastEditMs: () => {
+        const lastEditAt = point().lastEditAt;
+        return lastEditAt === null ? null : Math.max(0, runtime.now - Date.parse(lastEditAt));
+      },
+      quietMs: () => runtime.quietMs,
+      placeFree: () => runtime.placeFree,
+      backgroundRunning: () => this.#backgroundRunningCount(),
     });
   }
 

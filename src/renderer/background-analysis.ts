@@ -97,6 +97,11 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
   let lastJson = '';
   let engaged = false;
   let timer: number | null = null;
+  // Kept across every redraw (#713 re-review, P3-4): the live line is announced when its words change, never because it was
+  // made again, and the dispatcher's look is patched in place.
+  const nextNode = el('p', 'background-analysis-next');
+  nextNode.setAttribute('aria-live', 'polite');
+  const lookNode = el('p', 'field-note background-analysis-look');
 
   const follow = (): void => {
     if (timer !== null) window.clearTimeout(timer);
@@ -116,11 +121,14 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
   const draw = (projection: BackgroundAnalysisEnrollmentProjection): void => {
     const startedBefore = last?.startedRunCount ?? null;
     last = projection;
-    const json = JSON.stringify(projection);
+    // When AI7 last looked changes on every look: it is no reason to draw the block again, only to patch its own line.
+    const json = JSON.stringify({ ...projection, lastLook: projection.lastLook === null ? null : { kind: projection.lastLook.kind, reason: projection.lastLook.reason } });
     if (startedBefore !== null && projection.startedRunCount > startedBefore) options.onRunStarted();
     if (json !== lastJson) {
       lastJson = json;
       render(projection);
+    } else {
+      patchLook(projection.lastLook);
     }
     follow();
   };
@@ -150,7 +158,14 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     for (const details of Array.from(root.querySelectorAll<HTMLDetailsElement>('details[data-background-details]'))) {
       if (open.has(details.dataset['backgroundDetails'])) details.open = true;
     }
-    if (focusKey !== null) root.querySelector<HTMLElement>(focusKey)?.focus();
+    if (focusKey !== null) root.querySelector<HTMLElement>(focusKey)?.focus({ preventScroll: true });
+  };
+
+  const patchLook = (look: BackgroundAnalysisEnrollmentProjection['lastLook']): void => {
+    if (look === null) return;
+    const words = backgroundLookLine(look, localInstantLabel);
+    if (lookNode.textContent !== words) lookNode.textContent = words;
+    lookNode.dataset['lookedAt'] = look.at;
   };
 
   const paint = (projection: BackgroundAnalysisEnrollmentProjection): void => {
@@ -171,18 +186,17 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
       nodes.push(binds);
     }
     if (projection.state !== 'none') {
-      const next = el('p', 'background-analysis-next', backgroundNextLine(projection.next));
-      next.setAttribute('aria-live', 'polite');
-      nodes.push(next);
+      const words = backgroundNextLine(projection.next);
+      if (nextNode.textContent !== words) nextNode.textContent = words;
+      nodes.push(nextNode);
     }
     if (projection.lastNotStarted !== null) {
       const notice = el('p', 'field-note background-analysis-not-started', backgroundNotStartedLine(projection.lastNotStarted, localInstantLabel));
       nodes.push(notice);
     }
     if (projection.lastLook !== null) {
-      const look = el('p', 'field-note background-analysis-look', backgroundLookLine(projection.lastLook, localInstantLabel));
-      look.dataset['lookedAt'] = projection.lastLook.at;
-      nodes.push(look);
+      patchLook(projection.lastLook);
+      nodes.push(lookNode);
     }
     if (projection.startedRuns.length > 0) {
       const list = el('ol', 'background-analysis-started');

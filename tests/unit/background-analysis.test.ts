@@ -14,7 +14,10 @@ import {
   BACKGROUND_NO_SHARE,
   BACKGROUND_PLACE_BUSY,
   BACKGROUND_PREPARATION_IN_FLIGHT,
+  BACKGROUND_EDITOR_JOB,
+  BACKGROUND_RECOVERY_PENDING,
   BACKGROUND_RECORD_DAMAGED,
+  backgroundAnalysisDecisionOf,
   BACKGROUND_REVOKED,
   BACKGROUND_SUSPENDED,
   backgroundAnalysisShare,
@@ -68,8 +71,10 @@ const READY: BackgroundAnalysisFacts = {
   developerLive: false,
   routeExecutable: true,
   share: 1,
+  recoveryPending: false,
   drift: [],
   preparationInFlight: false,
+  editorJobRunning: false,
   taskUnfinished: null,
   analysis: 'stale',
   changedSinceEditorTask: true,
@@ -101,12 +106,14 @@ describe('the 后台分析登记 decision', () => {
       [{ developerLive: true }, 'stopped', BACKGROUND_DEVELOPER_LIVE],
       [{ routeExecutable: false }, 'stopped', BACKGROUND_NO_ROUTE],
       [{ share: 0 }, 'stopped', BACKGROUND_NO_SHARE],
+      [{ recoveryPending: true }, 'wait', BACKGROUND_RECOVERY_PENDING],
       [{ drift: null }, 'stopped', BACKGROUND_FACTS_UNREADABLE],
       [{ drift: ['模型服务'] }, 'stopped', backgroundDriftReason(['模型服务'])],
       [{ preparationInFlight: true }, 'wait', BACKGROUND_PREPARATION_IN_FLIGHT],
+      [{ editorJobRunning: true }, 'wait', BACKGROUND_EDITOR_JOB],
+      [{ analysis: 'current' }, 'none', BACKGROUND_CURRENT],
       [{ taskUnfinished: 'run' }, 'wait', BACKGROUND_TASK_RUNNING],
       [{ taskUnfinished: 'prepared' }, 'wait', BACKGROUND_TASK_PREPARED],
-      [{ analysis: 'current' }, 'none', BACKGROUND_CURRENT],
       [{ changedSinceEditorTask: false }, 'none', BACKGROUND_EDITOR_TASK],
       [{ movedSinceEnrollment: false }, 'none', BACKGROUND_NOT_MOVED],
       [{ attemptedAtThisText: true }, 'wait', BACKGROUND_ATTEMPTED],
@@ -117,8 +124,8 @@ describe('the 后台分析登记 decision', () => {
     for (const [facts, kind, reason] of cases) expect(backgroundAnalysisDecision({ ...READY, ...facts }), reason).toEqual({ kind, reason });
     // Revoked outranks everything after it: a revoked Enrollment under developer-live says it is revoked.
     expect(backgroundAnalysisDecision({ ...READY, enrollment: 'revoked', developerLive: true, placeFree: false }).reason).toBe(BACKGROUND_REVOKED);
-    // An unfinished Task outranks a current analysis; a prospective Enrollment over an unmoved text never waits on the clock.
-    expect(backgroundAnalysisDecision({ ...READY, taskUnfinished: 'run', analysis: 'current' }).reason).toBe(BACKGROUND_TASK_RUNNING);
+    // A current analysis is said before any Task is read; a prospective Enrollment over an unmoved text never waits on the clock.
+    expect(backgroundAnalysisDecision({ ...READY, taskUnfinished: 'run', analysis: 'current' }).reason).toBe(BACKGROUND_CURRENT);
     expect(backgroundAnalysisDecision({ ...READY, movedSinceEnrollment: false, sinceLastEditMs: 0 }).reason).toBe(BACKGROUND_NOT_MOVED);
     // A preparation under way outranks every reason the Book's own records give, and the editor's own Task outranks a prospective one.
     expect(backgroundAnalysisDecision({ ...READY, preparationInFlight: true, taskUnfinished: 'prepared', analysis: 'current' }).reason).toBe(BACKGROUND_PREPARATION_IN_FLIGHT);
@@ -126,6 +133,17 @@ describe('the 后台分析登记 decision', () => {
     // Below the share it starts; at it, it waits.
     expect(backgroundAnalysisDecision({ ...READY, share: 2, backgroundRunning: 1 }).kind).toBe('start');
     expect(backgroundAnalysisDecision({ ...READY, share: 2, backgroundRunning: 2 }).kind).toBe('wait');
+  });
+
+  it('reads each fact only when the decision reaches it, and the earliest reason wins', () => {
+    const asked: string[] = [];
+    const read = Object.fromEntries(Object.entries({ ...READY, analysis: 'current' as const }).map(([fact, value]) => [fact, () => {
+      asked.push(fact);
+      return value;
+    }])) as unknown as Parameters<typeof backgroundAnalysisDecisionOf>[0];
+    expect(backgroundAnalysisDecisionOf(read)).toEqual({ kind: 'none', reason: BACKGROUND_CURRENT });
+    // Nothing after a current analysis is read: no Task, no editor's Task, no clock, no place.
+    expect(asked).toEqual(['enrollment', 'developerLive', 'routeExecutable', 'share', 'recoveryPending', 'drift', 'preparationInFlight', 'editorJobRunning', 'analysis']);
   });
 
   it('leaves one of the governor\'s places for the editor, and none to share of one', () => {

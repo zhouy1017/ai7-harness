@@ -6239,6 +6239,16 @@ export class BoundedManuscriptStore {
   }
 
   /**
+   * Whether the branch waits on a recovery attention, pending or deferred (Issue #95, S39; #713 re-review, P2-1): ordinary
+   * edits and checkpoints are refused there, so the 后台分析登记 dispatcher does not begin a preparation on it either.
+   */
+  branchUnderRecovery(branchId: string): boolean {
+    return this.#db.prepare(
+      "SELECT 1 ok FROM recovery_attention WHERE branch_id = ? AND status IN ('pending', 'deferred') LIMIT 1",
+    ).get(branchId) !== undefined;
+  }
+
+  /**
    * `preemptible` is the 后台分析登记 dispatcher's (Issue #95, S39; #713 review, P1-1/P1-2): its checkpoint gives way to any other
    * the branch asks for — which cancels it and goes ahead — while it never displaces one itself.
    */

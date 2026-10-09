@@ -127,9 +127,16 @@ export class BackgroundAnalysisDispatcher {
     const { decision, enrollmentVersionId } = store.backgroundAnalysisDecisionFor(bookId, this.runtime());
     if (decision.kind !== 'start' || enrollmentVersionId === null) return;
     const mode = decision.mode;
-    if (store.backgroundMayContinue(bookId, enrollmentVersionId, null, this.runtime()) !== null) return;
-    let work = store.createBackgroundBaselineAnalysisPreparationWork(bookId, mode, enrollmentVersionId, this.#deps.launchPolicy);
+    const before = store.backgroundMayContinue(bookId, enrollmentVersionId, null, this.runtime());
+    if (before !== null) {
+      store.noteBackgroundNotStarted(bookId, before, this.runtime().now);
+      return;
+    }
+    let work: ReturnType<typeof store.createBackgroundBaselineAnalysisPreparationWork> | null = null;
     try {
+      // Nothing durable is written until the plan freezes: a preparation that stops — or never begins, refused here — leaves no
+      // Task Intent behind (#713 re-review, P2-1).
+      work = store.createBackgroundBaselineAnalysisPreparationWork(bookId, mode, enrollmentVersionId, this.#deps.launchPolicy);
       while (!work.done) {
         await (this.#deps.yieldStep ?? yieldToEventLoop)();
         const workId = work.workId;
@@ -144,9 +151,11 @@ export class BackgroundAnalysisDispatcher {
       }
     } catch (error) {
       // A step that failed — the manuscript moved under the checkpoint, another checkpoint took the branch — leaves nothing
-      // behind: the preparation and its checkpoint are cancelled, so neither the editor nor the next pass finds them (P1-1).
-      if (work.workId !== null) store.cancelBaselineAnalysisPreparationWork(work.workId);
-      throw error;
+      // behind: the preparation and its checkpoint are cancelled, so neither the editor nor the next pass finds them (P1-1), and
+      // ②A says why.
+      if (work !== null && work.workId !== null) store.cancelBaselineAnalysisPreparationWork(work.workId);
+      if (!this.#disposed) store.noteBackgroundNotStarted(bookId, error instanceof Error && error.message !== '' ? error.message : '准备没有完成。', this.runtime().now);
+      return;
     }
     const prepared = work.projection;
     if (this.#disposed || prepared === null || prepared.taskIntent === null || prepared.planEnvelope === null) return;

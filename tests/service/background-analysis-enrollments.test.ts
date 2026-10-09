@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
@@ -21,6 +22,9 @@ import {
   BACKGROUND_NO_ROUTE,
   BACKGROUND_PLACE_BUSY,
   BACKGROUND_PREPARATION_IN_FLIGHT,
+  BACKGROUND_EDITOR_JOB,
+  BACKGROUND_RECOVERY_PENDING,
+  BACKGROUND_REPLACEMENT_WAITING,
   BACKGROUND_RECORD_DAMAGED,
   BACKGROUND_REVOKED,
   BACKGROUND_START_SYNC,
@@ -35,6 +39,7 @@ import {
 } from '../../src/service/background-analysis-enrollments.js';
 import { QUICK_START_PLAN_CHANGED } from '../../src/service/default-execution-rules.js';
 import { MERGE_TABLE_POLICY } from '../../src/service/database-merge.js';
+import { controlledUnitHold } from '../../src/service/unit-hold.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -151,6 +156,10 @@ function prepare(store: EditorialStore, bookId: string, mode: BaselineAnalysisUp
 /** Every Run Authorization of the store, byte for byte. */
 function authorizations(): unknown[] {
   return withDatabase(true, (database) => database.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all());
+}
+
+function intentCount(bookId: string): number {
+  return withDatabase(true, (database) => (database.prepare('SELECT count(*) n FROM analysis_task_intents WHERE book_id = ?').get(bookId) as Row).n as number);
 }
 
 function backgroundOrigins(): number {
@@ -273,7 +282,7 @@ describe('后台分析登记 over the real store on exact sample1', () => {
       expect(store.backgroundAnalysisDecisionFor(book.bookId, runtime({ now: clock.now, placeFree: false })).decision)
         .toEqual({ kind: 'wait', reason: BACKGROUND_PLACE_BUSY });
       expect(store.backgroundAnalysisDecisionFor(book.bookId, runtime({ now: clock.now, editorWorkBusy: true })).decision)
-        .toEqual({ kind: 'wait', reason: BACKGROUND_PREPARATION_IN_FLIGHT });
+        .toEqual({ kind: 'wait', reason: BACKGROUND_EDITOR_JOB });
       expect(store.backgroundAnalysisDecisionFor(book.bookId, dispatcher.runtime()).decision)
         .toEqual({ kind: 'start', mode: 'sync-current', reason: BACKGROUND_START_SYNC });
       await pass(dispatcher, owner);
@@ -668,6 +677,8 @@ describe('后台分析登记 over the real store on exact sample1', () => {
         await pass(dispatcher, owner);
         expect(editorsWork).not.toBeNull();
         expect(backgroundLeftAtOnce).toBe(true);
+        expect(store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime()).lastNotStarted)
+          .toMatchObject({ reason: backgroundNotStartedReason(BACKGROUND_PREPARATION_IN_FLIGHT) });
         let progress = editorsWork!;
         while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
         const theirs = store.inspectBaselineAnalysis(book.bookId, () => null);
@@ -871,6 +882,251 @@ describe('后台分析登记 over the real store on exact sample1', () => {
     });
     // Merging a Book from another house never brings its Enrollment.
     for (const table of Object.keys(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL)) expect(MERGE_TABLE_POLICY[table]).toBe('house');
+  }, 300_000);
+
+  it('starts nothing, and writes nothing, on a manuscript waiting on a deferred recovery, and says why (re-review P2-1)', async () => {
+    let book: Imported | null = null;
+    const interrupted = await openWithRoute();
+    const firstOwner = ownerOf(interrupted);
+    try {
+      recordMissingCredentialConnection(interrupted, 'L2 主编辑连接');
+      book = await analysedBook(interrupted, firstOwner, 'L2 sample1 恢复待确认');
+      enroll(interrupted, book.bookId, 'prospective');
+      edit(interrupted, book, '〔关闭前的改动〕');
+    } finally {
+      // No clean shutdown: the service lifetime stays running, as an interrupted product leaves it.
+      await firstOwner.dispose();
+      interrupted.close();
+    }
+    const store = await openWithRoute();
+    const owner = ownerOf(store);
+    try {
+      const startup = await store.getStartup();
+      expect(startup.state).toBe('manuscript-recovery');
+      if (startup.state !== 'manuscript-recovery') throw new Error('unreachable');
+      expect((await store.deferRecovery(startup.recovery.attentionId, startup.recovery.attentionVersion)).status).toBe('deferred');
+      const intents = intentCount(book!.bookId);
+      const before = store.inspectBaselineAnalysis(book!.bookId, () => null);
+      const dispatcher = dispatcherOf(store, owner, { now: Date.now() + 2 * QUIET_MS });
+      for (let round = 0; round < 6; round += 1) await pass(dispatcher, owner);
+      // Not one Task Intent, plan or Run: the Book's latest Task and its Run card are the editor's, as they were.
+      expect(intentCount(book!.bookId)).toBe(intents);
+      expect(backgroundOrigins()).toBe(0);
+      expect(store.inspectBaselineAnalysis(book!.bookId, () => null).taskIntent).toEqual(before.taskIntent);
+      const read = store.inspectBackgroundAnalysisEnrollment(book!.bookId, runtime());
+      expect(read.next).toEqual({ kind: 'wait', reason: BACKGROUND_RECOVERY_PENDING });
+      expect(read.lastLook).toMatchObject({ kind: 'wait', reason: BACKGROUND_RECOVERY_PENDING });
+      // Even asked directly, a background preparation there writes nothing.
+      expect(await refusal(() => store.createBackgroundBaselineAnalysisPreparationWork(book!.bookId, 'sync-current', read.enrollment!.enrollmentVersionId, launchPolicy)))
+        .toBe('RECOVERY_ATTENTION_REQUIRED');
+      expect(intentCount(book!.bookId)).toBe(intents);
+      store.markCleanShutdown();
+    } finally {
+      await owner.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it('a background preparation that stops leaves no Task Intent: the editor\'s cancelled Run stays the latest, with 改计划重做 (re-review P3-1)', async () => {
+    const store = await openWithRoute();
+    const owner = ownerOf(store);
+    const holdPath = join(roots.inputRoot, 'unit-hold.txt');
+    const held = new BaselineAnalysisExecutionOwner({
+      ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
+      unitHold: controlledUnitHold(holdPath, { pollMs: 5 }),
+    });
+    try {
+      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+      const book = await analysedBook(store, owner, 'L2 sample1 编辑的取消留在最前');
+      enroll(store, book.bookId, 'prospective');
+      // The editor's own 重新分析全书, cancelled once it has read a range: its Run keeps 改计划重做.
+      const own = prepare(store, book.bookId, 'reanalyze-book');
+      const authorized = store.authorizeBaselineAnalysis(book.bookId, own.taskIntent!.taskIntentId, own.planEnvelope!.digest);
+      const runRecordId = authorized.dispatchRunRecordId!;
+      writeFileSync(holdPath, '1');
+      held.admitAndDispatch(runRecordId, store.baselineAnalysisLedger);
+      for (let tries = 0; (held.progressFor(runRecordId)?.unitsSettled ?? 0) < 1 && tries < 2_000; tries += 1) {
+        await new Promise((resolveWait) => setTimeout(resolveWait, 5));
+      }
+      expect(store.requestBaselineAnalysisCancel(book.bookId, own.taskIntent!.taskIntentId)).toBe(runRecordId);
+      held.cancelRun(runRecordId, store.baselineAnalysisLedger);
+      writeFileSync(holdPath, '99');
+      await held.whenIdle();
+      const cancelled = store.inspectBaselineAnalysis(book.bookId, () => null);
+      expect(cancelled.run?.state).toBe('cancelled');
+      // An edit after it, so the Enrollment may act; the editor types again while the background checkpoint is built.
+      edit(store, book, '〔取消之后的改动〕');
+      const intents = intentCount(book.bookId);
+      const clock = { now: Date.now() + 2 * QUIET_MS };
+      let typed = false;
+      await pass(dispatcherOf(store, owner, clock, {
+        yieldStep: async () => {
+          if (typed) return;
+          typed = true;
+          edit(store, book, '〔准备中又改动〕');
+          clock.now = Date.now();
+        },
+      }), owner);
+      expect(typed).toBe(true);
+      expect(intentCount(book.bookId)).toBe(intents);
+      const after = store.inspectBaselineAnalysis(book.bookId, () => null);
+      expect([after.taskIntent!.taskIntentId, after.run!.runRecordId, after.run!.state]).toEqual([own.taskIntent!.taskIntentId, runRecordId, 'cancelled']);
+      // 改计划重做 is still the editor's to take.
+      let redo = store.createBaselineAnalysisPreparationWork(book.bookId, BASELINE_ANALYSIS_MODE_GOALS['sync-current'], { mode: 'sync-current', selectedRange: null },
+        launchPolicy, false, runRecordId);
+      while (!redo.done) redo = store.advanceBaselineAnalysisPreparationWork(redo.workId!);
+      expect(redo.projection!.taskIntent!.redoOf?.runRecordId).toBe(runRecordId);
+      store.markCleanShutdown();
+    } finally {
+      await held.dispose();
+      await owner.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it('stops a preparation under way at the next step, writing nothing, when the Enrollment is revoked, a replacement waits, or the editor starts work (re-review P2-2)', async () => {
+    const T = new Date(2026, 8, 25, 10, 0, 0);
+    const store = await openWithRoute();
+    const owner = ownerOf(store);
+    try {
+      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+      const destination = join(roots.inputRoot, 'AI7 数据库.ai7db');
+      const cases: Array<{ title: string; reason: string; during: (book: Imported) => Promise<void>; busy?: { value: boolean } }> = [
+        {
+          title: 'L2 sample1 准备中撤销', reason: BACKGROUND_REVOKED,
+          during: async (book) => {
+            const enrollmentId = store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime()).enrollment!.enrollmentId;
+            store.revokeBackgroundAnalysisEnrollment(book.bookId, enrollmentId, runtime());
+          },
+        },
+        {
+          title: 'L2 sample1 准备中有了编辑的操作', reason: BACKGROUND_EDITOR_JOB, busy: { value: false },
+          during: async () => undefined,
+        },
+        {
+          title: 'L2 sample1 准备中编辑先看计划', reason: BACKGROUND_PREPARATION_IN_FLIGHT,
+          during: async (book) => {
+            store.createBaselineAnalysisPreparationWork(book.bookId, BASELINE_ANALYSIS_MODE_GOALS['reanalyze-book'], { mode: 'reanalyze-book', selectedRange: null }, launchPolicy);
+          },
+        },
+        {
+          title: 'L2 sample1 准备中要替换数据', reason: BACKGROUND_REPLACEMENT_WAITING,
+          during: async () => {
+            const preparation = await store.prepareDatabaseExport(destination, true);
+            expect((await store.approveDatabaseExport(preparation.preparationId, true)).outcome).toBe('created');
+            const preview = await store.inspectDatabaseImport(destination);
+            await store.prepareDatabaseReplacement(preview.previewId, T);
+          },
+        },
+      ];
+      for (const entry of cases) {
+        const book = await analysedBook(store, owner, entry.title);
+        enroll(store, book.bookId, 'prospective');
+        edit(store, book, '〔改动〕');
+        const intents = intentCount(book.bookId);
+        const busy = entry.busy;
+        let done = false;
+        await pass(dispatcherOf(store, owner, { now: Date.now() + 2 * QUIET_MS }, {
+          ...(busy === undefined ? {} : { editorWorkBusy: () => busy.value }),
+          yieldStep: async () => {
+            if (done) return;
+            done = true;
+            if (busy !== undefined) busy.value = true;
+            await entry.during(book);
+          },
+        }), owner);
+        expect(done, entry.title).toBe(true);
+        expect(backgroundOrigins(), entry.title).toBe(0);
+        expect(store.baselineAnalysisLedger.preparationInFlightBesides(book.bookId, null) && entry.reason !== BACKGROUND_PREPARATION_IN_FLIGHT).toBe(false);
+        // The editor's own preparation, if any, is theirs; nothing of the Enrollment's is written.
+        expect(withDatabase(true, (database) => (database.prepare(
+          "SELECT count(*) n FROM analysis_task_intents WHERE book_id = ? AND json_extract(canonical_json, '$.preparedByEnrollmentVersionId') IS NOT NULL",
+        ).get(book.bookId) as Row).n)).toBe(0);
+        expect(intentCount(book.bookId)).toBe(intents + (entry.reason === BACKGROUND_PREPARATION_IN_FLIGHT ? 1 : 0));
+        const read = store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime());
+        expect(read.lastNotStarted, entry.title).toMatchObject({ reason: backgroundNotStartedReason(entry.reason) });
+        // Each case's Book is left revoked, so the next case's dispatcher looks at its own Book alone.
+        if (read.state === 'active') store.revokeBackgroundAnalysisEnrollment(book.bookId, read.enrollment!.enrollmentId, runtime());
+      }
+    } finally {
+      await owner.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it('stops a preparation under way when another Book\'s background Run fills the share meanwhile (re-review P2-2)', async () => {
+    const store = await openWithRoute();
+    const owner = ownerOf(store);
+    try {
+      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+      const first = await importedBook(store, 'L2 sample1 名额被占甲');
+      const second = await importedBook(store, 'L2 sample1 名额被占乙');
+      edit(store, first, '〔改动〕');
+      enroll(store, first.bookId, 'backfill');
+      const secondVersion = enroll(store, second.bookId, 'backfill').enrollment!.enrollmentVersionId;
+      let filled = false;
+      const dispatcher = dispatcherOf(store, owner, { now: Date.now() + 2 * QUIET_MS }, {
+        execution: { busy: false, routeExecutable: true, capacity: 2, admitOrQueue: () => 'queued' },
+        yieldStep: async () => {
+          if (filled) return;
+          filled = true;
+          // 乙's background Run is recorded while 甲's preparation is under way: it takes the one place background may hold.
+          let work = store.createBackgroundBaselineAnalysisPreparationWork(second.bookId, 'first-baseline', secondVersion, launchPolicy);
+          while (!work.done) work = store.advanceBaselineAnalysisPreparationWork(work.workId!);
+          store.startEnrolledBaselineAnalysis(second.bookId, work.projection!.taskIntent!.taskIntentId, work.projection!.planEnvelope!.digest, secondVersion, 'first-baseline', runtime());
+        },
+      });
+      dispatcher.nudge();
+      await dispatcher.settled();
+      expect(filled).toBe(true);
+      expect(store.inspectBaselineAnalysis(first.bookId, () => null).taskIntent).toBeNull();
+      expect(store.inspectBackgroundAnalysisEnrollment(first.bookId, runtime()).lastNotStarted).toMatchObject({ reason: backgroundNotStartedReason(backgroundShareFullReason(1)) });
+      store.cancelWaitingBaselineAnalysis(second.bookId, store.inspectBaselineAnalysis(second.bookId, () => null).taskIntent!.taskIntentId);
+      store.markCleanShutdown();
+    } finally {
+      await owner.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it('data rolled back to the backup a replacement took never brings an Enrollment back into force either (re-review P2-2)', async () => {
+    const T = new Date(2026, 8, 25, 10, 0, 0);
+    const LATER = new Date(2026, 8, 25, 11, 0, 0);
+    let bookId = '';
+    let store = await openWithRoute();
+    try {
+      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+      bookId = (await importedBook(store, 'L2 sample1 回退数据')).bookId;
+      enroll(store, bookId, 'backfill');
+      const destination = join(roots.inputRoot, 'AI7 数据库.ai7db');
+      const preparation = await store.prepareDatabaseExport(destination, true);
+      expect((await store.approveDatabaseExport(preparation.preparationId, true)).outcome).toBe('created');
+      const preview = await store.inspectDatabaseImport(destination);
+      // The backup this replacement takes holds the Enrollment in force.
+      await store.prepareDatabaseReplacement(preview.previewId, T);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    store = await openWithRoute();
+    let replacementId = '';
+    try {
+      expect(store.inspectBackgroundAnalysisEnrollment(bookId, runtime()).state).toBe('suspended');
+      replacementId = (await store.inspectDatabaseReplacements()).replacements[0]!.replacementId;
+      await store.rollBackDatabaseReplacement(replacementId, LATER);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    store = await openWithRoute();
+    try {
+      expect((await store.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'roll-back', outcome: 'applied' });
+      const read = store.inspectBackgroundAnalysisEnrollment(bookId, runtime());
+      expect([read.state, read.next]).toEqual(['suspended', { kind: 'stopped', reason: BACKGROUND_SUSPENDED }]);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
   }, 300_000);
 
   it('brings a revision-65 store to revision 66: three empty relations, the origin widened, every authorization of every origin byte for byte', async () => {

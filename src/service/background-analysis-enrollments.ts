@@ -457,14 +457,18 @@ export interface BackgroundAnalysisFacts {
   readonly routeExecutable: boolean;
   /** How many places background Runs may hold at once (`backgroundAnalysisShare`). */
   readonly share: number;
+  /** The manuscript waits on a recovery attention, pending or deferred: nothing may checkpoint it (#713 re-review, P2-1). */
+  readonly recoveryPending: boolean;
   /** The fields in which the Book's facts now differ from what the Enrollment binds, in the drawer's words; `null` unreadable. */
   readonly drift: ReadonlyArray<string> | null;
-  /** A preparation is under way for the Book, or for anything the editor asked for: AI7 never steps in beside one (P1-2). */
+  /** A preparation of the Book is under way, the editor's or another kind's: AI7 never steps in beside one (P1-2). */
   readonly preparationInFlight: boolean;
-  /** The editor's own Task of the Book is prepared and not started, or a Run of the Book has not ended. */
-  readonly taskUnfinished: 'prepared' | 'run' | null;
+  /** A job the editor asked for — a search, an export, a preparation — is queued or under way (#713 re-review, P3-5). */
+  readonly editorJobRunning: boolean;
   /** The latest Result Set Revision: absent, current, or stale against the working text. */
   readonly analysis: 'absent' | 'current' | 'stale';
+  /** The editor's own Task of the Book is prepared and not started, or a Run of the Book has not ended. */
+  readonly taskUnfinished: 'prepared' | 'run' | null;
   /**
    * The text moved since the editor's latest Task of the Book: AI7 never redoes a Task the editor ran, cancelled or let fail,
    * and so never takes away its 改计划重做 — it acts only on edits made after it (#713 review, P2-4).
@@ -483,29 +487,51 @@ export interface BackgroundAnalysisFacts {
   readonly backgroundRunning: number;
 }
 
-export function backgroundAnalysisDecision(facts: BackgroundAnalysisFacts): BackgroundAnalysisDecision {
-  if (facts.enrollment === null) return { kind: 'none', reason: BACKGROUND_NOT_ENROLLED };
-  if (facts.enrollment === 'damaged') return { kind: 'stopped', reason: BACKGROUND_RECORD_DAMAGED };
-  if (facts.enrollment === 'revoked') return { kind: 'stopped', reason: BACKGROUND_REVOKED };
-  if (facts.enrollment === 'suspended') return { kind: 'stopped', reason: BACKGROUND_SUSPENDED };
-  if (facts.developerLive) return { kind: 'stopped', reason: BACKGROUND_DEVELOPER_LIVE };
-  if (!facts.routeExecutable) return { kind: 'stopped', reason: BACKGROUND_NO_ROUTE };
-  if (facts.share < 1) return { kind: 'stopped', reason: BACKGROUND_NO_SHARE };
-  if (facts.drift === null) return { kind: 'stopped', reason: BACKGROUND_FACTS_UNREADABLE };
-  if (facts.drift.length > 0) return { kind: 'stopped', reason: backgroundDriftReason(facts.drift) };
-  if (facts.preparationInFlight) return { kind: 'wait', reason: BACKGROUND_PREPARATION_IN_FLIGHT };
-  if (facts.taskUnfinished === 'run') return { kind: 'wait', reason: BACKGROUND_TASK_RUNNING };
-  if (facts.taskUnfinished === 'prepared') return { kind: 'wait', reason: BACKGROUND_TASK_PREPARED };
-  if (facts.analysis === 'current') return { kind: 'none', reason: BACKGROUND_CURRENT };
-  if (!facts.changedSinceEditorTask) return { kind: 'none', reason: BACKGROUND_EDITOR_TASK };
-  if (facts.startingPoint === 'prospective' && !facts.movedSinceEnrollment) return { kind: 'none', reason: BACKGROUND_NOT_MOVED };
-  if (facts.attemptedAtThisText) return { kind: 'wait', reason: BACKGROUND_ATTEMPTED };
-  if (facts.sinceLastEditMs !== null && facts.sinceLastEditMs < facts.quietMs) return { kind: 'wait', reason: backgroundQuietReason(facts.quietMs) };
-  if (!facts.placeFree) return { kind: 'wait', reason: BACKGROUND_PLACE_BUSY };
-  if (facts.backgroundRunning >= facts.share) return { kind: 'wait', reason: backgroundShareFullReason(facts.share) };
-  return facts.analysis === 'absent'
+/** Each fact read only when the decision reaches it: the dispatcher's look and ②A's answer are one function (#713 re-review, P3-2). */
+export type BackgroundAnalysisFactReader = { readonly [Fact in keyof BackgroundAnalysisFacts]: () => BackgroundAnalysisFacts[Fact] };
+
+/**
+ * The decision, reading each fact only when it is reached, in the order its reasons are said: the facts that need least are
+ * asked first, so a Book with nothing to do costs no projection, and the dispatcher's look and ②A's answer always agree.
+ */
+export function backgroundAnalysisDecisionOf(read: BackgroundAnalysisFactReader): BackgroundAnalysisDecision {
+  const enrollment = read.enrollment();
+  if (enrollment === null) return { kind: 'none', reason: BACKGROUND_NOT_ENROLLED };
+  if (enrollment === 'damaged') return { kind: 'stopped', reason: BACKGROUND_RECORD_DAMAGED };
+  if (enrollment === 'revoked') return { kind: 'stopped', reason: BACKGROUND_REVOKED };
+  if (enrollment === 'suspended') return { kind: 'stopped', reason: BACKGROUND_SUSPENDED };
+  if (read.developerLive()) return { kind: 'stopped', reason: BACKGROUND_DEVELOPER_LIVE };
+  if (!read.routeExecutable()) return { kind: 'stopped', reason: BACKGROUND_NO_ROUTE };
+  const share = read.share();
+  if (share < 1) return { kind: 'stopped', reason: BACKGROUND_NO_SHARE };
+  if (read.recoveryPending()) return { kind: 'wait', reason: BACKGROUND_RECOVERY_PENDING };
+  const drift = read.drift();
+  if (drift === null) return { kind: 'stopped', reason: BACKGROUND_FACTS_UNREADABLE };
+  if (drift.length > 0) return { kind: 'stopped', reason: backgroundDriftReason(drift) };
+  if (read.preparationInFlight()) return { kind: 'wait', reason: BACKGROUND_PREPARATION_IN_FLIGHT };
+  if (read.editorJobRunning()) return { kind: 'wait', reason: BACKGROUND_EDITOR_JOB };
+  const analysis = read.analysis();
+  if (analysis === 'current') return { kind: 'none', reason: BACKGROUND_CURRENT };
+  const unfinished = read.taskUnfinished();
+  if (unfinished === 'run') return { kind: 'wait', reason: BACKGROUND_TASK_RUNNING };
+  if (unfinished === 'prepared') return { kind: 'wait', reason: BACKGROUND_TASK_PREPARED };
+  if (!read.changedSinceEditorTask()) return { kind: 'none', reason: BACKGROUND_EDITOR_TASK };
+  if (read.startingPoint() === 'prospective' && !read.movedSinceEnrollment()) return { kind: 'none', reason: BACKGROUND_NOT_MOVED };
+  if (read.attemptedAtThisText()) return { kind: 'wait', reason: BACKGROUND_ATTEMPTED };
+  const sinceLastEditMs = read.sinceLastEditMs();
+  const quietMs = read.quietMs();
+  if (sinceLastEditMs !== null && sinceLastEditMs < quietMs) return { kind: 'wait', reason: backgroundQuietReason(quietMs) };
+  if (!read.placeFree()) return { kind: 'wait', reason: BACKGROUND_PLACE_BUSY };
+  if (read.backgroundRunning() >= share) return { kind: 'wait', reason: backgroundShareFullReason(share) };
+  return analysis === 'absent'
     ? { kind: 'start', mode: 'first-baseline', reason: BACKGROUND_START_FIRST }
     : { kind: 'start', mode: 'sync-current', reason: BACKGROUND_START_SYNC };
+}
+
+/** The decision over facts already read. */
+export function backgroundAnalysisDecision(facts: BackgroundAnalysisFacts): BackgroundAnalysisDecision {
+  const read = Object.fromEntries(Object.entries(facts).map(([fact, value]) => [fact, () => value])) as unknown as BackgroundAnalysisFactReader;
+  return backgroundAnalysisDecisionOf(read);
 }
 
 // ---- words -----------------------------------------------------------------------------------------------
@@ -556,6 +582,8 @@ export function backgroundDriftReason(labels: ReadonlyArray<string>): string {
   return `登记时定下的${labels.map((label) => `「${label}」`).join('、')}已经变化，后台分析不会按旧的登记开始；请撤销后重新登记。`;
 }
 export const BACKGROUND_REPLACEMENT_WAITING = '本机数据正在等待替换：后台分析不开始。';
+export const BACKGROUND_RECOVERY_PENDING = '这本书的稿件有恢复待确认：处理之前不能为任务建立固定点，后台分析不会开始。';
+export const BACKGROUND_EDITOR_JOB = '你有一项操作正在进行；它结束后再看。';
 export const BACKGROUND_PREPARATION_IN_FLIGHT = '正在准备一项任务；准备结束后再看，后台分析不会接手或替换它。';
 export const BACKGROUND_TASK_RUNNING = '这本书有一项任务还没结束；它结束后再看。';
 export const BACKGROUND_TASK_PREPARED = '这本书有一份你准备好但还没开始的计划；开始它，或另外准备一份之后再看。';

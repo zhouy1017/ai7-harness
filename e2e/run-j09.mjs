@@ -1197,12 +1197,12 @@ async function main() {
     requireJourney(beforeBackground?.bookId === bookB && beforeBackground.resultSetRevision?.ordinal === 2, 'background-before-record');
 
     at('j14-background-focus-kept');
-    // The block reads again while the Enrollment is in force, and each new answer — here the dispatcher's next look — is drawn
-    // with the keyboard focus on `撤销登记…` and the open disclosures left as the editor left them (#713 review, P2-6).
+    // The block reads again while the Enrollment is in force, and each new answer — here the dispatcher's next look, patched in
+    // place — leaves the keyboard focus on `撤销登记…` and the open disclosures as the editor left them (#713 review, P2-6, P3-4).
     await assertRenderer(renderer, `(() => { const binds=document.querySelector('details.background-analysis-binds'); const history=document.querySelector('details.background-analysis-history'); if(!(binds instanceof HTMLDetailsElement)||!(history instanceof HTMLDetailsElement))return false; binds.open=true; history.open=true; const revoke=document.querySelector('[data-background-action="revoke-open"]'); if(!(revoke instanceof HTMLButtonElement))return false; revoke.focus(); return document.activeElement===revoke; })()`, 'background-focus-set');
     const lookedBefore = await renderer.evaluate(`document.querySelector('.background-analysis-look')?.dataset.lookedAt ?? null`);
     for (const round of [1, 2]) {
-      await waitFor(renderer, `(() => { const at=document.querySelector('.background-analysis-look')?.dataset.lookedAt ?? null; return at !== null && at !== ${JSON.stringify(lookedBefore)} && (${round} === 1 || at !== window.__j09LookedAt); })()`, `background-redrawn-${round}`, 30_000);
+      await waitFor(renderer, `(() => { const at=document.querySelector('.background-analysis-look')?.dataset.lookedAt ?? null; return at !== null && at !== ${JSON.stringify(lookedBefore)} && (${round} === 1 || at !== window.__j09LookedAt); })()`, `background-looked-${round}`, 30_000);
       await renderer.evaluate(`(() => { window.__j09LookedAt = document.querySelector('.background-analysis-look')?.dataset.lookedAt ?? null; return true; })()`);
     }
     await assertRenderer(renderer, `document.activeElement===document.querySelector('[data-background-action="revoke-open"]') && document.activeElement.matches(':focus-visible, :focus') && document.querySelector('details.background-analysis-binds')?.open===true && document.querySelector('details.background-analysis-history')?.open===true`, 'background-focus-kept');

@@ -131,7 +131,7 @@ describe('the 后台分析登记 dispatcher', () => {
     const dispatcher = new BackgroundAnalysisDispatcher({ store, execution, launchPolicy: POLICY });
     dispatcher.nudge();
     await dispatcher.settled();
-    expect([calls.guards, calls.prepared, calls.started]).toEqual([[['a', null]], [], []]);
+    expect([calls.guards, calls.prepared, calls.started, calls.notes]).toEqual([[['a', null]], [], [], ['a:no']]);
   });
 
   it('stops before a step it may no longer take: the preparation is cancelled, why is noted, and nothing starts', async () => {
@@ -148,9 +148,21 @@ describe('the 后台分析登记 dispatcher', () => {
     const dispatcher = new BackgroundAnalysisDispatcher({ store, execution, launchPolicy: POLICY });
     dispatcher.nudge();
     await dispatcher.settled();
-    expect(calls.cancelled).toEqual(['work-a']);
+    expect([calls.cancelled, calls.notes]).toEqual([['work-a'], ['a:REIMPORT_CHECKPOINT_STALE']]);
     expect(calls.started).toEqual(['b:task-b:digest-b:version-b:sync-current']);
     expect(calls.admitted).toEqual(['run-b']);
+  });
+
+  it('notes why when the preparation cannot even begin, cancelling nothing it never made, and goes on to the next Book (P2-1)', async () => {
+    const { calls, store, execution } = harness({ a: START, b: START });
+    const refusing = { ...store, createBackgroundBaselineAnalysisPreparationWork: (bookId: string, ...rest: unknown[]) => {
+      if (bookId === 'a') throw new Error('该稿件分支仍有恢复待确认状态；普通编辑保持只读。');
+      return (store.createBackgroundBaselineAnalysisPreparationWork as (...args: unknown[]) => unknown)(bookId, ...rest);
+    } } as BackgroundAnalysisDispatcherDependencies['store'];
+    const dispatcher = new BackgroundAnalysisDispatcher({ store: refusing, execution, launchPolicy: POLICY });
+    dispatcher.nudge();
+    await dispatcher.settled();
+    expect([calls.cancelled, calls.notes, calls.admitted]).toEqual([[], ['a:该稿件分支仍有恢复待确认状态；普通编辑保持只读。'], ['run-b']]);
   });
 
   it('advances a preparation step by step, yielding between, and runs a nudge made meanwhile as one more pass', async () => {
