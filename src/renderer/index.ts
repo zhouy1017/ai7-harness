@@ -219,6 +219,8 @@ import {
   type GlobalAttentionSurface,
 } from './global-attention.js';
 import { GLOBAL_ATTENTION_ACTIONS, GLOBAL_ATTENTION_STATUS_LINES } from './global-attention-labels.js';
+import { SELECTION_TASK_STATUS, selectionTaskChoices, type SelectionTaskChoice, type SelectionTaskChoices } from './selection-task-labels.js';
+import { marksRefreshStep } from './marks-refresh.js';
 import { mountEditorialMarks, type EditorialMarksSurface } from './editorial-marks.js';
 import { mountPositionRail, type PositionRail } from './position-rail.js';
 import { mountReviewWorkspace, type ReviewFocus, type ReviewWorkspaceSurface } from './review-workspace.js';
@@ -302,7 +304,10 @@ const taskDrawer = mountTaskDrawer({
   setStatus,
   awaitServiceJob,
   onOpen: () => closeNavigation?.(),
-  onRecorded: (kind) => taskSurfaceRefresh[kind]?.(),
+  onRecorded: (kind, bookId, ref) => {
+    taskSurfaceRefresh[kind]?.();
+    if (kind === 'review-run') followReviewMarks(bookId, ref);
+  },
   openRunSurface: (plan) => void leaveThen(() => openTaskRunSurface(plan)),
   openConnectionSettings: () => void renderModelServiceSettings(),
   openRules: () => void renderKnowledgeBase('rules'),
@@ -399,6 +404,67 @@ async function startWholeBookTask(
   }
 }
 
+/**
+ * 就这段发起任务… (Issue #423, S77b; TASK-001, TASK-046): what the selected words' paragraph can start now — read from ②A's and
+ * ②B's own projections, so the composer offers exactly what they would — and nothing when neither can be read.
+ */
+async function selectionTaskOffer(): Promise<SelectionTaskChoices> {
+  const [analysis, workspace] = await Promise.all([
+    window.ai7.inspectBaselineAnalysis().then((value) => value, () => null),
+    window.ai7.inspectReviewWorkspace({ reviewRunId: null }).then((value) => value, () => null),
+  ]);
+  if (analysis === null && workspace === null) throw new Error(SELECTION_TASK_STATUS.unreadable);
+  return selectionTaskChoices(analysis, workspace);
+}
+
+/**
+ * The chosen Task prepared on that one paragraph, exactly as ②A's 先看计划 or ②B's 新建审阅 prepares a range Task, and its plan
+ * opened beside the manuscript, where it is started (TASK-004): 重新分析这段 over the paragraph's block, or 审阅这段 in one
+ * category over 当前选区. Answers whether the plan is open.
+ */
+async function prepareSelectionTask(
+  bookId: string,
+  choice: SelectionTaskChoice,
+  anchor: { readonly blockId: string },
+  returnFocus: () => HTMLElement | null,
+): Promise<boolean> {
+  if (choice.kind === 'reanalyze') {
+    // Named by block identity, as 审阅这段 names it (Issue #423 review, P3-3): the service finds where it stands as it prepares.
+    const next = await startWholeBookTask(bookId, {
+      goal: choice.goal,
+      update: { mode: 'reanalyze-range', selectedRange: null, selectedBlocks: { fromBlockId: anchor.blockId, toBlockId: anchor.blockId } },
+      quick: null,
+    });
+    if (next === null) return false;
+    taskDrawer.open({ bookId, kind: 'baseline-analysis', ref: next.ref }, returnFocus, next.note);
+    return true;
+  }
+  if (!(await settleScreen())) return false;
+  setStatus(SELECTION_TASK_STATUS.preparing, 'busy');
+  try {
+    const initial = await window.ai7.prepareReviewRun({
+      categoryIds: [choice.categoryId],
+      scope: { kind: 'selection', fromChapterBlockId: anchor.blockId, toChapterBlockId: anchor.blockId },
+    });
+    const completed = await awaitServiceJob(initial, (job) => setStatus(job.progress.label, job.state === 'failed' ? 'error' : 'busy'));
+    if (completed.state === 'cancelled') {
+      setStatus(SELECTION_TASK_STATUS.cancelled, 'success');
+      return false;
+    }
+    const result = completed.result;
+    if (completed.kind !== 'review-run-preparation' || result === null || !('scopeOptions' in result) || result.bookId !== bookId || result.run === null) {
+      throw new Error(SELECTION_TASK_STATUS.failed);
+    }
+    taskSurfaceRefresh['review-run']?.();
+    setStatus(SELECTION_TASK_STATUS.prepared, 'success');
+    taskDrawer.open({ bookId, kind: 'review-run', ref: result.run.reviewRunId }, returnFocus);
+    return true;
+  } catch (error) {
+    setStatus(rendererErrorMessage(error, SELECTION_TASK_STATUS.failed), 'error');
+    return false;
+  }
+}
+
 /** What a quick start that started its Task says: a start the launch has no route for is recorded and blocked before dispatch. */
 function quickStartStartedLine(rule: DefaultExecutionRuleReference, projection: BaselineAnalysisProjection): string {
   return projection.state === 'authorized-blocked'
@@ -417,7 +483,67 @@ let manuscriptOnScreen: null | {
   readonly branchId: string;
   readingPlace(): ReadingPlace | null;
   jump(target: { blockId: string; markId: string | null }): Promise<void>;
+  /**
+   * Bring the marks made meanwhile onto the window on screen (Issue #423 review, P2-6, P2-7): `true` once they are there, `false`
+   * when the editor is busy, typing or has something open over the text, so the caller asks again later.
+   */
+  refreshMarks(): Promise<boolean>;
 } = null;
+
+/**
+ * A Review Run of the Book whose manuscript is on screen was started from the drawer (Issue #423 review, P2-6, P3-2): that Run —
+ * by its identity — is followed while it runs, read in the projection's light form (no findings), more slowly the longer it
+ * takes; once it stops, its marks are brought onto the window on screen, as soon as the editor is not in the middle of something.
+ * A plan only edited or prepared is not followed. One follower at a time; leaving the manuscript ends it, and a Run still running
+ * after two hours is left with a line saying where its marks will be.
+ */
+let reviewMarksFollower = 0;
+const REVIEW_MARKS_FOLLOW_LIMIT_MS = 2 * 60 * 60_000;
+function followReviewMarks(bookId: string, reviewRunId: string | undefined): void {
+  const showing = manuscriptOnScreen;
+  if (showing === null || showing.bookId !== bookId || reviewRunId === undefined) return;
+  const mine = ++reviewMarksFollower;
+  const deadline = Date.now() + REVIEW_MARKS_FOLLOW_LIMIT_MS;
+  let wait = 1_000;
+  const following = (): boolean => mine === reviewMarksFollower && manuscriptOnScreen === showing;
+  // Asked again more slowly the longer the editor keeps something open over the text (final review P3-2).
+  let bringWait = 1_000;
+  const bring = (): void => {
+    if (!following()) return;
+    const again = (): void => {
+      window.setTimeout(bring, bringWait);
+      bringWait = Math.min(5_000, bringWait + 1_000);
+    };
+    void showing.refreshMarks().then((done) => {
+      if (!done) again();
+    }, again);
+  };
+  const step = (): void => {
+    if (!following()) return;
+    if (Date.now() > deadline) {
+      setStatus(REVIEW_MARKS_FOLLOW_STOPPED, 'success');
+      return;
+    }
+    void window.ai7.inspectReviewWorkspace({ reviewRunId, findingsAfterOrdinal: Number.MAX_SAFE_INTEGER }).then(
+      (workspace) => {
+        if (!following()) return;
+        const state = workspace.run?.reviewRunId === reviewRunId ? workspace.run.state : null;
+        // Only a Run that was started is followed: a plan reconfirmed or a rule set leaves it prepared.
+        if (state === 'prepared' || state === null) return;
+        if (state === 'running') {
+          window.setTimeout(step, wait);
+          wait = Math.min(5_000, wait + 1_000);
+          return;
+        }
+        bring();
+      },
+      () => window.setTimeout(step, 2_000),
+    );
+  };
+  step();
+}
+/** A 审阅 followed for its marks that runs past the follower's limit (review P3-2): where its marks will be. */
+const REVIEW_MARKS_FOLLOW_STOPPED = '审阅仍在进行；完成后它标出的发现会在稿件里，重新打开稿件即可看到。';
 
 /** A jump from another screen — 审阅's 回到原文, ②A's 回到稿件范围, a result's 跳到 — leaves the way back to where the editor last read. */
 async function leaveReturnChip(bookId: string, manuscriptId: string, branchId: string): Promise<void> {
@@ -7643,6 +7769,8 @@ function renderEditorWindow(
   };
 
   let pendingAuthoritativeRecovery: AuthoritativeRecovery | undefined;
+  /** What asks for the next window load, recorded when it lands (Issue #423 review, P2-3). */
+  let windowLoadCause = 'unnamed';
 
   const clearAuthoritativeRecovery = (): void => {
     pendingAuthoritativeRecovery = undefined;
@@ -7666,7 +7794,13 @@ function renderEditorWindow(
       next.revisionId !== expected.revisionId || next.journalSequence !== expected.journalSequence ||
       next.workingDigest !== expected.workingDigest
     )) throw new Error('权威写入确认与刷新窗口不一致。');
-    if (!editor.loadWindow(next, continuity)) throw new Error('权威窗口已返回，但编辑器未能安全装载。');
+    windowLoadCause = 'authoritative';
+    try {
+      if (!editor.loadWindow(next, continuity)) throw new Error('权威窗口已返回，但编辑器未能安全装载。');
+    } finally {
+      // A load refused or thrown names nothing it did not do (Issue #423 review, P3-6).
+      windowLoadCause = 'unnamed';
+    }
     currentWindow = next;
     updateWindowChrome();
   }
@@ -7794,9 +7928,15 @@ function renderEditorWindow(
         branchId: binding.branchId,
         target: navigation.target,
       });
-      const loaded = navigation.preserveOffWindowContinuity && navigation.continuity
-        ? editor.loadNavigationWindow(next, navigation.continuity)
-        : editor.loadWindow(next, navigation.continuity);
+      windowLoadCause = `navigation-${navigation.target.kind}`;
+      let loaded: boolean;
+      try {
+        loaded = navigation.preserveOffWindowContinuity && navigation.continuity
+          ? editor.loadNavigationWindow(next, navigation.continuity)
+          : editor.loadWindow(next, navigation.continuity);
+      } finally {
+        windowLoadCause = 'unnamed';
+      }
       if (!loaded) return false;
       currentWindow = next;
       updateWindowChrome();
@@ -7921,6 +8061,47 @@ function renderEditorWindow(
     manuscriptId: initialWindow.manuscriptId,
     branchId: initialWindow.branchId,
     readingPlace,
+    // A 审阅 of this Book settled (Issue #423 review, P2-6): the window on screen is read again, in place, so its marks — the ones
+    // a 审阅这段 started here made on this paragraph — appear where the editor is. Nothing is read while the editor is busy
+    // or holding words not yet written; an open composer stays (it is re-anchored).
+    refreshMarks: async () => {
+      if (!editor) return true;
+      if (authoritativeMutationBusy() || edgeNavigation || editor.isComposing()) return false;
+      if (!(await settleLocalEdit()) || !editor) return false;
+      const binding = editor.currentWindow();
+      const first = binding.blocks[0];
+      if (first === undefined) return true;
+      const next = await window.ai7.getManuscriptWindowAt({ manuscriptId: binding.manuscriptId, branchId: binding.branchId, target: { kind: 'window-start', blockId: first.blockId } });
+      if (!editor) return true;
+      // A save or a navigation that landed during the read makes the answer older than the screen: ask again (final review P3-1).
+      if (editor.currentWindow() !== binding) return false;
+      const step = marksRefreshStep(editor.currentWindow(), next, {
+        floating: editorialMarks?.holdsFloating() === true,
+        editor: authoritativeMutationBusy() || edgeNavigation || editor.isComposing(),
+      });
+      if (step === 'set-marks') {
+        // The text is the text on screen: only the marks are new, so nothing open over the text is touched (review P2-7).
+        editor.setMarks(next.marks, next.marksTruncated);
+        manuscriptRail?.refresh();
+        const refreshed = [...(editorHost.dataset['marksRefreshed'] ?? '').split(',').filter((entry) => entry.length > 0), 'review-settled'].slice(-12);
+        editorHost.dataset['marksRefreshed'] = refreshed.join(',');
+        return true;
+      }
+      // The window itself moved on: it is loaded again only once nothing is open over the text, with the place taken now (P3-3).
+      if (step === 'wait') return false;
+      const continuity = editor.captureContinuity();
+      windowLoadCause = 'review-settled';
+      let loaded: boolean;
+      try {
+        loaded = editor.loadWindow(next, continuity);
+      } finally {
+        windowLoadCause = 'unnamed';
+      }
+      if (!loaded) return false;
+      currentWindow = next;
+      updateWindowChrome();
+      return true;
+    },
     jump: async (target) => {
       const here = readingPlace();
       if (here !== null && here.blockId !== target.blockId) {
@@ -8501,7 +8682,13 @@ function renderEditorWindow(
       else if (command === 'undo' || command === 'redo') void runHistory(command);
       else void navigateCursor(command === 'previous-window' ? 'previous' : 'next');
     },
-    onWindowLoaded: () => editorialMarks?.close(),
+    // A window loaded keeps an open composer below its paragraph while it is still there (Issue #423 review, P2-3), and says what
+    // loaded it — an authoritative refresh, or a navigation by its target — in the editor's `data-window-loads` (the last 12).
+    onWindowLoaded: () => {
+      editorialMarks?.reanchor();
+      const loads = [...(editorHost.dataset['windowLoads'] ?? '').split(',').filter((entry) => entry.length > 0), windowLoadCause].slice(-12);
+      editorHost.dataset['windowLoads'] = loads.join(',');
+    },
   });
   // Typing moves every place behind the caret a little; the rail is read again once the typing rests,
   // never per keystroke, and its cost follows the chapters and marks, not the manuscript's length.
@@ -8545,6 +8732,13 @@ function renderEditorWindow(
     ...(isDocument ? {} : {
       askAboutSelection: (input: AskAboutSelectionInput) => window.ai7.askAboutSelection(input),
       onAsked: (dialogue: DialogueProjection) => taskDrawer.openDialogue(dialogue.bookId, dialogue.dialogueId, () => editorHost.querySelector<HTMLElement>('.ProseMirror')),
+      // 就这段发起任务… (Issue #423, S77b): the Book's manuscript only; the prepared Task's plan opens in the side slot.
+      startTaskOnSelection: {
+        bookTitle,
+        choices: selectionTaskOffer,
+        prepare: (choice: SelectionTaskChoice, anchor: { readonly blockId: string }) =>
+          prepareSelectionTask(initialWindow.bookId, choice, anchor, () => editorHost.querySelector<HTMLElement>('.ProseMirror')),
+      },
     }),
     // An Apply is an authoritative write like a replacement or an undo: the window is reloaded from the
     // service and must show exactly the manuscript state the Effect Receipt names.

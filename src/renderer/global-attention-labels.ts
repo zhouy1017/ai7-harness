@@ -259,6 +259,11 @@ export const GLOBAL_ATTENTION_NEXT_STEP_LABELS: Readonly<Record<GlobalAttentionN
   'decide-learning-materials': '定学习准入…',
   'open-dialogue': DIALOGUE_OPEN_LABEL,
 };
+/**
+ * A 审阅 started on a selection (Issue #423, S77b; review P3-4): it reads the reading ranges holding the selected words'
+ * paragraph as context and puts findings on that paragraph alone — the paragraph, not the words, so the card names it so.
+ */
+export const REVIEW_ON_SELECTION = '所选段落';
 /** The two scopes a question can have (CLAR-004), in the card's own words. */
 export const GLOBAL_ATTENTION_CLARIFICATION_WAITING = '任务等待你的说明';
 export const GLOBAL_ATTENTION_CLARIFICATION_CONTINUING = '该步骤等待说明 · 其他步骤仍在继续';
@@ -307,7 +312,8 @@ export function globalAttentionObjectLabel(object: GlobalAttentionObjectProjecti
     case 'analysis':
       return `基线分析 · ${BASELINE_ANALYSIS_MODE_LABELS[object.mode]}`;
     case 'review':
-      return `审阅 · 第 ${object.ordinal} 次`;
+      // A 审阅 on the selection 就这段发起任务… handed over says so (Issue #423, S77b).
+      return object.onSelection === true ? `审阅 · 第 ${object.ordinal} 次 · ${REVIEW_ON_SELECTION}` : `审阅 · 第 ${object.ordinal} 次`;
     case 'maintenance':
       return `维护事项 · 第 ${object.ordinal} 项 · ${MAINTENANCE_CLASSIFICATION_LABELS[object.classification]} · 第 ${object.publicationOrdinal} 次发稿版本`;
     case 'library-material':
