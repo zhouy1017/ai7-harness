@@ -200,6 +200,11 @@ export const OUT_OF_SCOPE_GAP_REASON = '不在本次审阅范围内' as const;
 /**
  * The reason of a gap a range Run carries (Issue #716): a unit outside its range whose last read failed. It is the gap it
  * was, never relabelled out of scope, so coverage keeps counting it and 只审改动过的章 retries it.
+ *
+ * A failed unit the editor then edits is carried no further, by design (Issue #727 item 4): its new content key matches
+ * neither a closed nor a failed predecessor unit, so the next range Run labels it `out-of-scope` and the unread-changes walk
+ * flags it changed — the row reads 需复审 instead of 「1 处缺口」, and 只审改动过的章 reads it (content-key matching, #711 P3-1).
+ * The promise is kept through that path; the label's drop is not a regression.
  */
 export const CARRIED_GAP_REASON = '上一次读这个单元没有成功；它不在本次审阅范围内，仍记为缺口，只审改动过的章或下一次覆盖它的审阅会重审。' as const;
 

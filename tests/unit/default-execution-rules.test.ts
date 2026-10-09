@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { TASK_BAR_OFFLINE_LATER } from '../../src/renderer/task-drawer-labels.js';
+import { OFFLINE_START_LATER } from '../../src/shared/offline-wording.js';
 import {
   DEFAULT_EXECUTION_RULES_STATEMENT,
   DEFAULT_EXECUTION_RULE_PROCEDURES,
@@ -124,6 +126,9 @@ describe('the words of quick start and its rules', () => {
     expect(defaultRuleBindingRows(defaultExecutionRuleBindingOf(INPUTS)).map((row) => row.label)).toEqual(['模型服务', '工序', '预算上限', '发送内容类别', '会得到']);
     expect(QUICK_START_OFFLINE_LATER).toBe('离线：这份计划要连到模型服务，而这台设备现在没有网络；联网后再开始。');
     expect(QUICK_START_OFFLINE_LATER).not.toContain('联网后开始任务');
+    // The Task Drawer's bar says the same sentence, without the final stop: one shared owner, never a hand copy (#714).
+    expect(QUICK_START_OFFLINE_LATER).toBe(`${TASK_BAR_OFFLINE_LATER}。`);
+    expect(TASK_BAR_OFFLINE_LATER).toBe(OFFLINE_START_LATER);
     expect(QUICK_START_DEVELOPER_LIVE).toBe('开发者实时模式下不用默认执行规则：每次都先看计划，再开始任务。');
     expect(ruleDriftReason('开始同步 · 第 1 版', ['Provider 绑定 · 模型', '外发数据类别']))
       .toBe('默认执行规则「开始同步 · 第 1 版」定下的「Provider 绑定 · 模型」、「外发数据类别」已经变化，不能按规则直接开始；请看过计划后再开始，也可以把新的计划设为快速开始默认。');

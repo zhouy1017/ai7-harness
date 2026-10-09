@@ -166,6 +166,28 @@ describe('the webfetch owner', () => {
     expect(sniffed.text).toBe('中文');
   });
 
+  it('leaves no host held when `deadlineSignal` throws before the fetch (Issue #728)', async () => {
+    const rule = await v7Rule();
+    const book = EgressTicketBook.open(binding(rule), scope);
+    const decision = evaluatePublicSourceFetch({ arguments: webfetch }, binding(rule), scope, book) as { ticket: PublicSourceTicket };
+    const admitted: string[] = [];
+    let released = 0;
+    const calls: StubCall[] = [];
+    // A caller signal `deadlineSignal` cannot listen to makes it throw: the stand-in for any future line between the hold's
+    // opening and the fetch that throws. The ticket is spent, nothing is sent, and no hold outlives the call.
+    const broken = { aborted: false } as unknown as AbortSignal;
+    await expect(fetchPublicSource({
+      ticket: decision.ticket, book, signal: broken, fetch: stub(() => new Response('x', { status: 200, headers: { 'content-type': 'text/plain' } }), calls),
+      admitHost: ({ host }) => { admitted.push(host); return () => { released += 1; }; },
+    })).rejects.toBeInstanceOf(TypeError);
+    expect(calls).toHaveLength(0);
+    expect(admitted.length).toBe(released);
+    // The same ticket is not redeemable again.
+    await expect(fetchPublicSource({ ticket: decision.ticket, book, fetch: stub(() => new Response('x'), calls), admitHost: () => () => undefined }))
+      .rejects.toMatchObject({ code: 'PLATFORM_TOOL_TICKET_REFUSED' });
+    expect(calls).toHaveLength(0);
+  });
+
   it('follows no redirect, reads no failure, and moves on — releasing the host every time', async () => {
     const redirect = await fetchWith(() => new Response(null, { status: 302, headers: { location: 'https://elsewhere.example/' } }));
     expect(redirect.outcome).toMatchObject({ status: 302, failure: 'redirect', text: null });
