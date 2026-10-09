@@ -27,8 +27,8 @@ export function predictionAvailable(booksWithActuals: number): boolean {
  * editor's adjustments, and the editor has not turned it off. The offset itself is computed from the house's 定稿 evaluations
  * every time it is read (`calibrationOffset`), never stored as truth, so past the gate it always exists.
  */
-export function calibrationActive(adjustments: number, enabled: boolean): boolean {
-  return enabled && adjustments >= CALIBRATION_MIN_ADJUSTMENTS;
+export function calibrationActive(adjustments: number, enabled: boolean, threshold: number = CALIBRATION_MIN_ADJUSTMENTS): boolean {
+  return enabled && adjustments >= threshold;
 }
 
 /** A number to the nearest half point, a quarter between two rounding away from zero: −0.25 → −0.5, 0.25 → 0.5, −0.2 → 0. */

@@ -32,6 +32,7 @@ import {
   predictionAvailable,
   roundToHalfPoint,
 } from '../../src/shared/evaluation-calibration.js';
+import { calibrationMinBooksForLaunch, parseCalibrationMinBooks } from '../../src/shared/protocol.js';
 
 // Unit suite for 设置 › 评估校准与预测 (Issue #430, plan slice S82; V2-UX-EVAL-010, EVAL-011, EVAL-014; ADR 0076 §7): the two
 // thresholds as ADR 0076 records them, when each switch applies, how the editor's typing becomes a price in 分 and a first
@@ -56,6 +57,31 @@ describe('评估校准与预测 thresholds', () => {
     expect(calibrationActive(10, true)).toBe(true);
     expect(calibrationActive(10, false)).toBe(false);
     expect(calibrationActive(40, false)).toBe(false);
+  });
+});
+
+describe('J-11\'s calibration gate flag (EVAL-011a; the Commander\'s ruling of 2026-10-10)', () => {
+  it('takes a whole number of Books from 2 to 10 and nothing else', () => {
+    expect([parseCalibrationMinBooks('2'), parseCalibrationMinBooks('5'), parseCalibrationMinBooks('10')]).toEqual([2, 5, 10]);
+    for (const value of ['1', '11', '0', '02', '2.5', '-2', ' 2', '2 ', '', 'two', '1e1']) expect([value, parseCalibrationMinBooks(value)]).toEqual([value, null]);
+  });
+
+  it('is refused in every launch but a J-11 Journey launch, where it sets the gate; absent, the product keeps its ten', () => {
+    expect(calibrationMinBooksForLaunch(undefined, undefined)).toBeUndefined();
+    expect(calibrationMinBooksForLaunch(undefined, 'J-11')).toBeUndefined();
+    expect(calibrationMinBooksForLaunch('2', 'J-11')).toBe(2);
+    expect(calibrationMinBooksForLaunch('10', 'J-11')).toBe(10);
+    // No Journey, another Journey, or an out-of-range value: refused, never silently ignored.
+    expect(calibrationMinBooksForLaunch('2', undefined)).toBeNull();
+    expect(calibrationMinBooksForLaunch('2', 'J-09')).toBeNull();
+    expect(calibrationMinBooksForLaunch('2', 'J-12')).toBeNull();
+    expect(calibrationMinBooksForLaunch('1', 'J-11')).toBeNull();
+    expect(calibrationMinBooksForLaunch('11', 'J-11')).toBeNull();
+    // The product's own gate is untouched by the flag's existence.
+    expect(CALIBRATION_MIN_ADJUSTMENTS).toBe(10);
+    expect(calibrationActive(2, true)).toBe(false);
+    expect(calibrationActive(2, true, 2)).toBe(true);
+    expect(calibrationActive(1, true, 2)).toBe(false);
   });
 });
 

@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 112 as const;
+export const SERVICE_PROTOCOL_VERSION = 113 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -1813,6 +1813,27 @@ export function parseBackgroundQuietMs(value: string): number | null {
   if (!/^[1-9][0-9]{3,4}$/u.test(value)) return null;
   const ms = Number(value);
   return ms >= 1_000 && ms <= 30_000 ? ms : null;
+}
+/**
+ * J-11's calibration gate (Issue #429, EVAL-011a; the Commander's ruling of 2026-10-10): the number of adjusted Books the
+ * house offset waits on, lowered for a development-ci J-11 launch beside the model adapter so the Journey proves the gate with
+ * two Books instead of ten. `CALIBRATION_MIN_ADJUSTMENTS` stays the product's in every other launch. Never in any other launch.
+ */
+export const CALIBRATION_MIN_BOOKS_ARGUMENT = '--j11-calibration-min-books';
+/** A J-11 calibration gate: a whole number of Books from 2 to 10; anything else is refused. */
+export function parseCalibrationMinBooks(value: string): number | null {
+  if (!/^(?:[2-9]|10)$/u.test(value)) return null;
+  return Number(value);
+}
+/**
+ * Whether a launch may carry `--j11-calibration-min-books`, and what it sets: `undefined` when the argument is absent, `null`
+ * when it must be refused — any Journey but J-11 (no Journey included), or a value outside 2–10 — else the gate. Main and the
+ * service both decide by this one rule.
+ */
+export function calibrationMinBooksForLaunch(value: string | undefined, journey: string | undefined): number | null | undefined {
+  if (value === undefined) return undefined;
+  if (journey !== 'J-11') return null;
+  return parseCalibrationMinBooks(value);
 }
 export const PROVIDER_CACHE_ROOT_ARGUMENT = '--provider-cache-root';
 export const LAUNCH_SELECTABLE_SCOPES: ReadonlyArray<TrustedOperationalScope> = ['development-ci', 'developer-live'];

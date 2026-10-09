@@ -1201,7 +1201,10 @@ async function main() {
       // adapter runs the baseline 分析反馈 judges (Issue #94, S38), and J-10's unit hold keeps one Run in flight (#641). A
       // cleanup launch names none of them.
       if (!forCleanup) {
-        args.push('--j11-picker-path', SAMPLE1_PATH, '--j04-model-adapter', FIXTURE_IDENTITY, '--j10-unit-hold-path', unitHoldPath, '--j11-save-path', draftExportPath);
+        // The calibration gate lowered to two Books (Issue #429, EVAL-011a; the Commander's ruling of 2026-10-10): the house offset
+        // is proven over 评估旅程丙 and one more Book, with the product's own ten untouched in every other launch.
+        args.push('--j11-picker-path', SAMPLE1_PATH, '--j04-model-adapter', FIXTURE_IDENTITY, '--j10-unit-hold-path', unitHoldPath, '--j11-save-path', draftExportPath,
+          '--j11-calibration-min-books', '2');
       }
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       if (!forCleanup) cancellation.throwIfRequested();
@@ -1911,7 +1914,8 @@ async function main() {
     await click(renderer, '返回图书列表', 'initial-evaluation-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'initial-evaluation-landing');
     await click(renderer, '评估校准与预测', 'initial-evaluation-calibration-open');
-    await waitFor(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration .calibration-progress')?.textContent === '调分记录 1 / 10 本 · 满 10 本后生效'`, 'initial-evaluation-calibration-count');
+    // The gate reads 2 here: this launch lowers it with `--j11-calibration-min-books 2` (EVAL-011a); the product's own is ten.
+    await waitFor(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration .calibration-progress')?.textContent === '调分记录 1 / 2 本 · 满 2 本后生效'`, 'initial-evaluation-calibration-count');
     await assertRenderer(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-waiting') === null`, 'initial-evaluation-calibration-connected');
     const calibrationService = await renderer.evaluate(`window.ai7.inspectEvaluationCalibration({ after: null, focusBookId: null }).then((answer) => JSON.stringify([answer.calibration.adjustments, answer.calibration.initialScoresConnected, answer.calibration.active]))`);
     requireJourney(calibrationService === JSON.stringify([1, true, false]), 'initial-evaluation-calibration-service', calibrationService);
@@ -3052,9 +3056,10 @@ async function main() {
     await waitFor(renderer, `${status} === '第 16 版评估已定稿。'`, 'evaluation-damaged-finalized-status');
 
     at('evaluation-calibration-books');
-    // Nine more Books from exact sample1, each with its own AI7 初评 on the adapter and a 定稿 begun from it that departs from AI7:
-    // 读者与市场潜力 12 → 10 on every one, 文学品质与作者声音 16.5 → 17 on the odd ones, both risks 低. Below ten 调分记录 each starts from
-    // the raw 初评 and records no calibration. With 评估旅程丙 the house then holds ten — the gate the offset waits on.
+    // One more Book from exact sample1, 校准样书1, with its own AI7 初评 on the adapter and a 定稿 begun from it that departs from AI7:
+    // 读者与市场潜力 12 → 10, 文学品质与作者声音 16.5 → 17, both risks 低. Below the gate it starts from the raw 初评 and records no
+    // calibration. With 评估旅程丙 the house then holds two 调分记录 — the gate this launch lowered to two (`--j11-calibration-min-books 2`;
+    // the Commander's ruling of 2026-10-10), the product's own ten untouched elsewhere.
     const toLanding = async (name) => {
       await assertRenderer(renderer, `(() => { const open = Array.from(document.querySelectorAll('[data-screen="book-evaluation"] .workbench-actions button')).find((button) => button.textContent === '工作概览'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, `${name}-overview`);
       await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, `${name}-overview-ready`);
@@ -3074,7 +3079,7 @@ async function main() {
     const RAW_SCORES = ['16.5', '15', '15.5', '14', '12'];
     const ai7Line = (index) => AI7_ITEM_LINES[index][2].slice(AI7_ITEM_LINES[index][2].indexOf('：') + 1);
     let calibrationBookId = null;
-    for (let index = 1; index <= 9; index += 1) {
+    for (const index of [1]) {
       const name = `calibration-book-${index}`;
       await toLanding(name);
       // The house already holds exact sample1 as 评估旅程丙: the wizard offers 新建图书（作为不同作品）, chosen explicitly like any target.
@@ -3104,23 +3109,23 @@ async function main() {
     }
 
     at('evaluation-calibrated-start');
-    // Ten 调分记录: the offset exists, over the nine Books whose latest 定稿 begun from AI7's 初评 reads — 评估旅程丙's 第 15 版 cannot be,
-    // so it gives the basis nothing while the Book still counts as adjusted: 文学品质 +0.5 (five of nine at +0.5 → the half point),
-    // 读者 −2, the rest 0. 从 AI7 初评开始 on the ninth Book starts at the calibrated scores, each line keeping AI7's raw score, no
-    // 调分原因 offered for a score that stays where the version started it, the risks carried untouched, no conclusion chosen.
+    // Two 调分记录, the gate: the offset exists, over the one Book whose latest 定稿 begun from AI7's 初评 reads — 评估旅程丙's 第 15 版
+    // cannot be, so it gives the basis nothing while the Book still counts as adjusted: 文学品质 +0.5, 读者 −2, the rest 0. 从 AI7
+    // 初评开始 on 校准样书1 starts at the calibrated scores, each line keeping AI7's raw score, no 调分原因 offered for a score that
+    // stays where the version started it, the risks carried untouched, no conclusion chosen.
     await clickSelector(renderer, '[data-evaluation-action="start-from-initial"]', 'calibrated-start');
     const calibratedDraft = await readEvaluation(renderer, (page) => page.record?.heading === '第 2 版 · AI7 初稿', 'calibrated-draft');
     const calibratedLine = (index, after) => ai7Line(index).replace(' · 依据充分度', ` · 校准后 ${after} / 20 · 依据充分度`);
     requireJourney(JSON.stringify(calibratedDraft.record.items.map(([, , score]) => score)) === JSON.stringify(['17', '15', '15.5', '14', '10']) &&
       calibratedDraft.record.total === '总分 71.5 / 100 · 优秀' &&
-      calibratedDraft.record.calibration === 'AI7 的初评分数已按本社校准（依据 9 本书的定稿评估）：调整了 2 项的起始分数，原始分数仍列在每一项旁边；校准只调 AI7 的分数，不调风险项，也不改你的评分。' &&
+      calibratedDraft.record.calibration === 'AI7 的初评分数已按本社校准（依据 1 本书的定稿评估）：调整了 2 项的起始分数，原始分数仍列在每一项旁边；校准只调 AI7 的分数，不调风险项，也不改你的评分。' &&
       calibratedDraft.record.ai7Items[0][1] === calibratedLine(0, '17') && calibratedDraft.record.ai7Items[4][1] === calibratedLine(4, '10') &&
       calibratedDraft.record.ai7Items[1][1] === ai7Line(1) && calibratedDraft.record.ai7Items[3][1] === ai7Line(3) &&
       JSON.stringify(calibratedDraft.record.ai7Items.map(([, , offered]) => offered)) === JSON.stringify([false, false, false, false, false]) &&
       calibratedDraft.record.conclusions.every(([, checked]) => checked === false),
     'calibrated-draft-words', calibratedDraft.record);
     const calibratedService = await renderer.evaluate(`window.ai7.inspectEvaluation({ recordId: null }).then((page) => JSON.stringify([page.record.calibration, page.record.initial.items.map((entry) => entry.score), page.record.content.risks.map((entry) => entry.level)]))`);
-    requireJourney(calibratedService === JSON.stringify([{ basisBooks: 9, items: [{ itemId: 'literary-quality', raw: 16.5, offset: 0.5, adjusted: 17 }, { itemId: 'readers-and-market', raw: 12, offset: -2, adjusted: 10 }] }, [16.5, 15, 15.5, 14, 12], ['low', 'low']]),
+    requireJourney(calibratedService === JSON.stringify([{ basisBooks: 1, items: [{ itemId: 'literary-quality', raw: 16.5, offset: 0.5, adjusted: 17 }, { itemId: 'readers-and-market', raw: 12, offset: -2, adjusted: 10 }] }, [16.5, 15, 15.5, 14, 12], ['low', 'low']]),
       'calibrated-draft-service', calibratedService);
     await tick(renderer, '[data-screen="book-evaluation"] .evaluation-conclusion [data-conclusion="revise"] input', 'calibrated-conclusion');
     await clickSelector(renderer, '[data-evaluation-action="finalize"]', 'calibrated-finalize');
@@ -3131,19 +3136,19 @@ async function main() {
     // and the next version from AI7's 初评 starts raw; on again — recorded too — the offset applies again, computed all along.
     await toLanding('calibration-disclosed');
     await click(renderer, '评估校准与预测', 'calibration-disclosed-open');
-    await waitFor(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration .calibration-progress')?.textContent === '调分记录 10 / 10 本 · 已生效'`, 'calibration-disclosed-active');
+    await waitFor(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration .calibration-progress')?.textContent === '调分记录 2 / 2 本 · 已生效'`, 'calibration-disclosed-active');
     const disclosed = await renderer.evaluate(`JSON.stringify((() => { const root = document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration'); return [root.querySelector('.calibration-offset')?.dataset.calibrationOffset ?? null, root.querySelector('.calibration-offset-basis')?.textContent ?? null, Array.from(root.querySelectorAll('.calibration-offset-list li'), (line) => [line.dataset.itemId, line.dataset.offset, line.textContent]), root.querySelector('.calibration-off-effect')?.textContent ?? null, root.querySelector('.calibration-offset-without-basis')?.textContent ?? null]; })())`);
-    requireJourney(disclosed === JSON.stringify(['computed', '校准依据：9 本书的定稿评估；各评分项的偏移如下（正数表示你的定稿分数通常高于 AI7 初评）。', [
-      ['literary-quality', '0.5', '文学品质与作者声音：+0.5（依据 9 本书，满分 20，调整后不超出 0 到 20）'],
-      ['theme-and-context', '0', '主题、价值与社会文化语境：0（依据 9 本书，满分 20，调整后不超出 0 到 20）'],
-      ['structure-and-coherence', '0', '结构、叙事逻辑与连贯：0（依据 9 本书，满分 20，调整后不超出 0 到 20）'],
-      ['chinese-language', '0', '中文语言与表达：0（依据 9 本书，满分 20，调整后不超出 0 到 20）'],
-      ['readers-and-market', '-2', '读者与市场潜力：−2（依据 9 本书，满分 20，调整后不超出 0 到 20）'],
+    requireJourney(disclosed === JSON.stringify(['computed', '校准依据：1 本书的定稿评估；各评分项的偏移如下（正数表示你的定稿分数通常高于 AI7 初评）。', [
+      ['literary-quality', '0.5', '文学品质与作者声音：+0.5（依据 1 本书，满分 20，调整后不超出 0 到 20）'],
+      ['theme-and-context', '0', '主题、价值与社会文化语境：0（依据 1 本书，满分 20，调整后不超出 0 到 20）'],
+      ['structure-and-coherence', '0', '结构、叙事逻辑与连贯：0（依据 1 本书，满分 20，调整后不超出 0 到 20）'],
+      ['chinese-language', '0', '中文语言与表达：0（依据 1 本书，满分 20，调整后不超出 0 到 20）'],
+      ['readers-and-market', '-2', '读者与市场潜力：−2（依据 1 本书，满分 20，调整后不超出 0 到 20）'],
     ], null, '其中 1 本书有从 AI7 初评开始的版本已损坏，不计入校准依据。']), 'calibration-disclosed-words', disclosed);
-    const disclosedService = await renderer.evaluate(`window.ai7.inspectEvaluationCalibration({ after: null, focusBookId: null }).then((answer) => JSON.stringify([answer.calibration.adjustments, answer.calibration.unreadableBooks, answer.calibration.active, answer.calibration.offset.basisBooks, answer.calibration.offset.booksWithoutBasis, answer.calibration.offset.items.map((entry) => [entry.itemId, entry.offset, entry.books])]))`);
-    requireJourney(disclosedService === JSON.stringify([10, 0, true, 9, 1, [['literary-quality', 0.5, 9], ['theme-and-context', 0, 9], ['structure-and-coherence', 0, 9], ['chinese-language', 0, 9], ['readers-and-market', -2, 9]]]), 'calibration-disclosed-service', disclosedService);
+    const disclosedService = await renderer.evaluate(`window.ai7.inspectEvaluationCalibration({ after: null, focusBookId: null }).then((answer) => JSON.stringify([answer.calibration.adjustments, answer.calibration.threshold, answer.calibration.unreadableBooks, answer.calibration.active, answer.calibration.offset.basisBooks, answer.calibration.offset.booksWithoutBasis, answer.calibration.offset.items.map((entry) => [entry.itemId, entry.offset, entry.books])]))`);
+    requireJourney(disclosedService === JSON.stringify([2, 2, 0, true, 1, 1, [['literary-quality', 0.5, 1], ['theme-and-context', 0, 1], ['structure-and-coherence', 0, 1], ['chinese-language', 0, 1], ['readers-and-market', -2, 1]]]), 'calibration-disclosed-service', disclosedService);
     await assertRenderer(renderer, `(() => { const input = document.querySelector('[data-calibration-switch="calibration"]'); if (!(input instanceof HTMLInputElement) || input.disabled || !input.checked) return false; input.click(); return true; })()`, 'calibration-off-click');
-    await waitFor(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration .calibration-progress')?.textContent === '调分记录 10 / 10 本 · 已关闭' && document.querySelector('[data-screen="evaluation-calibration"] .calibration-off-effect')?.textContent === '校准已关闭：新版本从 AI7 初评开始时直接用 AI7 的原始分数；可以随时再打开，关闭和打开都有记录。' && document.querySelector('[data-screen="evaluation-calibration"] .calibration-offset')?.dataset.calibrationOffset === 'computed'`, 'calibration-off');
+    await waitFor(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration .calibration-progress')?.textContent === '调分记录 2 / 2 本 · 已关闭' && document.querySelector('[data-screen="evaluation-calibration"] .calibration-off-effect')?.textContent === '校准已关闭：新版本从 AI7 初评开始时直接用 AI7 的原始分数；可以随时再打开，关闭和打开都有记录。' && document.querySelector('[data-screen="evaluation-calibration"] .calibration-offset')?.dataset.calibrationOffset === 'computed'`, 'calibration-off');
     await click(renderer, '返回', 'calibration-off-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'calibration-off-landing');
     await clickSelector(renderer, `[data-screen="landing"] button[data-book-id="${calibrationBookId}"]`, 'calibration-off-book');
@@ -3155,7 +3160,7 @@ async function main() {
     requireJourney(rawAgain.record.calibration === null && JSON.stringify(rawAgain.record.items.map(([, , score]) => score)) === JSON.stringify(RAW_SCORES) &&
       rawAgain.record.ai7Items[0][1] === ai7Line(0) && rawAgain.record.ai7Items[4][1] === ai7Line(4), 'calibration-off-raw', rawAgain.record);
     const onAgain = await renderer.evaluate(`window.ai7.inspectEvaluationCalibration({ after: null, focusBookId: null }).then((before) => window.ai7.setEvaluationPreferences({ expectedEntries: before.preferenceEntries, predictionEnabled: before.prediction.enabled, calibrationEnabled: true })).then((answer) => JSON.stringify([answer.calibration.enabled, answer.calibration.active, answer.calibration.offset?.basisBooks ?? null, answer.preferenceEntries]))`);
-    requireJourney(onAgain === JSON.stringify([true, true, 9, 2]), 'calibration-on-again', onAgain);
+    requireJourney(onAgain === JSON.stringify([true, true, 1, 2]), 'calibration-on-again', onAgain);
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

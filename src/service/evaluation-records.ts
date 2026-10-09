@@ -921,6 +921,8 @@ export class EvaluationRecords {
   readonly #extras: EvaluationExtrasReader;
   readonly #adoptions: EvaluationAdoptionReader;
   readonly #preferences: EvaluationPreferencesReader;
+  /** The adjusted Books the house offset waits on: `CALIBRATION_MIN_ADJUSTMENTS`, lowered only by a J-11 launch (EVAL-011a). */
+  readonly #gate: number;
   /**
    * Each version's chain as read, and what it leaves the next, kept between reads by record (Issue #708): the 评估 page and
    * every per-version operation would otherwise read every version's chain again. Each is kept with the stamp of the ledger
@@ -942,6 +944,7 @@ export class EvaluationRecords {
     extras: EvaluationExtrasReader = NO_EXTRAS,
     adoptions: EvaluationAdoptionReader = NO_ADOPTIONS,
     preferences: EvaluationPreferencesReader = CALIBRATION_ON,
+    gate: number = CALIBRATION_MIN_ADJUSTMENTS,
   ) {
     this.#db = db;
     this.#manuscripts = manuscripts;
@@ -950,6 +953,7 @@ export class EvaluationRecords {
     this.#extras = extras;
     this.#adoptions = adoptions;
     this.#preferences = preferences;
+    this.#gate = gate;
   }
 
   /** The profile a new version snapshots: AI7's built-in one until a house's own is managed in 知识库. */
@@ -1645,7 +1649,7 @@ export class EvaluationRecords {
     // The Books that count toward the gate but give the basis nothing because a version of theirs cannot be read (P3-1).
     const booksWithoutBasis = [...damaged].filter((bookId) => adjusted.has(bookId)).length;
     let offsets: Map<string, { offset: number | null; books: number }> | null = null;
-    if (adjustments >= CALIBRATION_MIN_ADJUSTMENTS) {
+    if (adjustments >= this.#gate) {
       const byItem = new Map<string, number[]>();
       for (const differences of basis.values()) {
         for (const [itemId, difference] of differences) {

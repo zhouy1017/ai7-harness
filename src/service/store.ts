@@ -3406,6 +3406,11 @@ interface StoreControl {
   /** The J-04-only local deterministic route resolved at service startup; `null` in every other launch. */
   baselineAnalysisRoute: BaselineAnalysisRouteFacts | null;
   /**
+   * The adjusted Books the house calibration offset waits on (Issue #429, EVAL-011a): `CALIBRATION_MIN_ADJUSTMENTS` unless a
+   * development-ci J-11 launch lowers it with `--j11-calibration-min-books`, so the Journey proves the gate with two Books.
+   */
+  calibrationMinAdjustments?: number;
+  /**
    * The software version the service entry read from the package the product ships in (Issue #433, S85a): the built
    * carrier holds no package manifest. Absent, the store reads the one at its code root — the source tree's, as the
    * service suites open it.
@@ -4356,7 +4361,7 @@ export class EditorialStore {
       // The house's calibration switch (EVAL-011a): a version begun from AI7's 初评 applies the offset only while it is on. A
       // preferences chain that cannot be read refuses that start with the ledger's own words (`#evaluationCall`).
       calibrationEnabled: () => this.#evaluationCalibration.preferences().calibrationEnabled,
-    });
+    }, control.calibrationMinAdjustments ?? CALIBRATION_MIN_ADJUSTMENTS);
     this.#analysisFeedback = new AnalysisFeedbackLedger(authority);
     this.#capturedProcedures = new CapturedProcedures(authority);
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
@@ -14606,9 +14611,9 @@ export class EditorialStore {
         adjustments,
         unreadableBooks,
         initialScoresConnected: true,
-        threshold: CALIBRATION_MIN_ADJUSTMENTS,
+        threshold: this.#control.calibrationMinAdjustments ?? CALIBRATION_MIN_ADJUSTMENTS,
         enabled: preferences.calibrationEnabled,
-        active: calibrationActive(adjustments, preferences.calibrationEnabled),
+        active: calibrationActive(adjustments, preferences.calibrationEnabled, this.#control.calibrationMinAdjustments ?? CALIBRATION_MIN_ADJUSTMENTS),
         offset: house.offsets === null ? null : {
           basisBooks: house.basisBooks,
           booksWithoutBasis: house.booksWithoutBasis,
