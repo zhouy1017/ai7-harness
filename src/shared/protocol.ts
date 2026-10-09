@@ -3856,7 +3856,10 @@ export interface ReviewCategoryFindingCountsProjection {
 export type ReviewCategoryUnitLineage = AnalysisUnitLineage | { kind: 'unreviewed' };
 
 export interface ReviewScopePlanCounts extends AnalysisReusePlanCounts {
-  /** New units the plan leaves out of scope: never dispatched, settled as `out-of-scope` gaps. */
+  /**
+   * New units the plan does not read: never dispatched, settled as `out-of-scope` gaps — or, for one whose last read failed,
+   * carried as the lost gap it is (Issue #716).
+   */
   unreviewed: number;
 }
 
@@ -3868,7 +3871,9 @@ export interface ReviewScopePlanUnitProjection {
   disposition: 'reused' | 'recomputed' | 'unreviewed';
   /**
    * `selected-range` is an in-range unit of a first range review, where there is nothing to bypass;
-   * `out-of-scope` is every `unreviewed` unit. The other six read exactly as the baseline plan's do.
+   * `out-of-scope` is every `unreviewed` unit but one whose last read failed, which is `unreviewed` with
+   * `predecessor-gap`: carried as a lost gap, never as out of scope (Issue #716). The other six read
+   * exactly as the baseline plan's do.
    */
   reason:
     | 'compatible'

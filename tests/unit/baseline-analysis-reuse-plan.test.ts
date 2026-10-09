@@ -195,4 +195,19 @@ describe('deriveScopePlan', () => {
     // Only a unit left unreviewed can have been left unread.
     expect(() => plan(scopePredecessor(base, [2], [3]), 'changed')).toThrowError(AnalysisError);
   });
+
+  it('carries an out-of-range unit whose last read failed as the lost gap it is, never as out of scope (Issue #716)', () => {
+    const base = manifestOf(baseBlocks);
+    // Unit 1 was never asked about; unit 2's read failed.
+    const failed: ScopePlanPredecessor = { ...scopePredecessor(base, [1]), unitStates: base.units.map((unit) => ({ unitOrdinal: unit.ordinal, state: unit.ordinal === 3 ? 'closed' : 'gap' })) };
+    const range = plan(failed, 'selected-range', { startPosition: 5, endPosition: 6 });
+    expect(rows(range)).toEqual([[1, 'unreviewed', 'out-of-scope'], [2, 'unreviewed', 'predecessor-gap'], [3, 'recomputed', 'bypassed-selected-range']]);
+    expect(range.counts).toMatchObject({ recomputed: 1, reused: 0, unreviewed: 2 });
+    // Inside the range it is read like any other unit there.
+    expect(rows(plan(failed, 'selected-range', { startPosition: 3, endPosition: 4 }))).toEqual([
+      [1, 'unreviewed', 'out-of-scope'], [2, 'recomputed', 'bypassed-selected-range'], [3, 'recomputed', 'bypassed-selected-range'],
+    ]);
+    // 只审改动过的章 retries it as it retries any predecessor gap, and leaves the never-read unit as it is.
+    expect(rows(plan(failed, 'changed'))).toEqual([[1, 'unreviewed', 'out-of-scope'], [2, 'recomputed', 'predecessor-gap'], [3, 'reused', 'compatible']]);
+  });
 });

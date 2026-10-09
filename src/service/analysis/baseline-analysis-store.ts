@@ -98,7 +98,15 @@ import {
 } from './canonical.js';
 import { unitRequestDigest } from './contract.js';
 import { deriveCoverageManifest, manifestCoversEveryBlock, manifestDigestIsExact, type ManifestBlockInput } from './coverage-manifest.js';
-import { walkUnreadChanges, type ChainRevision, type UnreadWalk, type UnreadWalkCut } from './unread-changes.js';
+import {
+  manifestWeight,
+  UnreadWalkCache,
+  unreadWalkWeight,
+  walkUnreadChanges,
+  type ChainRevision,
+  type UnreadWalk,
+  type UnreadWalkCut,
+} from './unread-changes.js';
 import { TASK_INPUT_CHECKPOINT_PURPOSE } from './identity.js';
 import type { AnalysisKindDefinition, AnalysisReductionResult } from './kind-definition.js';
 import {
@@ -156,14 +164,15 @@ const CONNECTIVITY_WAIT_DETAIL = '已记录授权；联网并通过重新联网�
 export const REUSE_PLAN_DRIFT_REASON = '重新推导的复用计划与冻结计划不一致；未开始执行，请重新准备。' as const;
 export const REUSE_PLAN_DRIFT_AUTHORIZE_REASON = '重新推导的复用计划与冻结计划不一致；无法授权，请重新准备。' as const;
 
-/** The most revisions one ledger keeps a walk, or a walk's reading, of: the oldest is let go first. */
-const UNREAD_WALK_CACHE_CAPACITY = 256;
+/**
+ * How much one ledger keeps of its walks and of revisions as a walk reads them (Issue #716): a few entries, and no more
+ * block references than a large manuscript's handful of manifests hold. The least recently used is let go first.
+ */
+const UNREAD_WALK_CACHE_ENTRIES = 16;
+const CHAIN_REVISION_CACHE_ENTRIES = 64;
+const UNREAD_WALK_CACHE_WEIGHT = 65_536;
 
-function remember<T>(cache: Map<string, T>, key: string, value: T): void {
-  cache.delete(key);
-  cache.set(key, value);
-  if (cache.size > UNREAD_WALK_CACHE_CAPACITY) cache.delete(cache.keys().next().value!);
-}
+type ChainRevisionRead = { readonly revision: ChainRevision; readonly predecessorRevisionId: string | null } | 'unreadable';
 
 function changedModeUnavailableReason(label: string): string {
   return `结果集修订版仍绑定当前稿件；只有在已确认编辑使精确修订版新鲜度为“已过期”后才可${label}。`;
@@ -779,8 +788,9 @@ export class BaselineAnalysisStore {
    * Revisions are immutable once written, so both are kept by revision id: a read — the 审阅 screen's poll among them —
    * walks the chain once per latest revision, and the plan, the gate and the coverage matrix share that one answer.
    */
-  readonly #unreadWalks = new Map<string, UnreadWalk>();
-  readonly #chainRevisions = new Map<string, { readonly revision: ChainRevision; readonly predecessorRevisionId: string | null } | 'unreadable'>();
+  readonly #unreadWalks = new UnreadWalkCache<UnreadWalk>(UNREAD_WALK_CACHE_ENTRIES, UNREAD_WALK_CACHE_WEIGHT, unreadWalkWeight);
+  readonly #chainRevisions = new UnreadWalkCache<ChainRevisionRead>(CHAIN_REVISION_CACHE_ENTRIES, UNREAD_WALK_CACHE_WEIGHT,
+    (read) => read === 'unreadable' ? 1 : manifestWeight(read.revision.manifest) + read.revision.units.size);
   #unreadWalksComputed = 0;
   #launch: LaunchBinding = DEVELOPMENT_CI_LAUNCH;
 
@@ -2337,31 +2347,35 @@ export class BaselineAnalysisStore {
     if (kept !== undefined) return kept;
     const latest = this.#chainRevision(row);
     requireAnalysis(latest !== 'unreadable', 'ANALYSIS_RECORD_INVALID', '结果集修订版记录无效。');
+    // The revision each one this walk read followed, held by the walk itself: the cache may let a read go meanwhile.
+    const followed = new Map<string, string | null>([[latest.revision.revisionId, latest.predecessorRevisionId]]);
     const walk = walkUnreadChanges(latest.revision, (revision) => {
-      const facts = revision.revisionId === latest.revision.revisionId ? latest : this.#chainRevisions.get(revision.revisionId);
-      if (facts === undefined || facts === 'unreadable') return 'unreadable';
-      if (facts.predecessorRevisionId === null) return null;
+      const predecessorRevisionId = followed.get(revision.revisionId);
+      if (predecessorRevisionId === undefined) return 'unreadable';
+      if (predecessorRevisionId === null) return null;
       let prior: SqlRow;
       try {
-        prior = this.#revisionRowById(facts.predecessorRevisionId);
+        prior = this.#revisionRowById(predecessorRevisionId);
       } catch (error) {
         if (error instanceof AnalysisError) return 'unreadable';
         throw error;
       }
       const read = this.#chainRevision(prior);
-      return read === 'unreadable' ? 'unreadable' : read.revision;
+      if (read === 'unreadable') return 'unreadable';
+      followed.set(read.revision.revisionId, read.predecessorRevisionId);
+      return read.revision;
     });
     this.#unreadWalksComputed += 1;
-    remember(this.#unreadWalks, revisionId, walk);
+    this.#unreadWalks.set(revisionId, walk);
     return walk;
   }
 
   /** One revision as the walk reads it, and the revision it followed; `'unreadable'` when its records cannot be read. */
-  #chainRevision(row: SqlRow): { readonly revision: ChainRevision; readonly predecessorRevisionId: string | null } | 'unreadable' {
+  #chainRevision(row: SqlRow): ChainRevisionRead {
     const revisionId = asString(row.revision_id);
     const kept = this.#chainRevisions.get(revisionId);
     if (kept !== undefined) return kept;
-    let read: { readonly revision: ChainRevision; readonly predecessorRevisionId: string | null } | 'unreadable';
+    let read: ChainRevisionRead;
     try {
       const facts = this.#predecessorFacts(row);
       const outOfScope = new Set(this.#unreviewedOrdinals(revisionId));
@@ -2383,7 +2397,7 @@ export class BaselineAnalysisStore {
       if (!(error instanceof AnalysisError)) throw error;
       read = 'unreadable';
     }
-    remember(this.#chainRevisions, revisionId, read);
+    this.#chainRevisions.set(revisionId, read);
     return read;
   }
 
