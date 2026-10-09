@@ -9,6 +9,7 @@ import {
   defaultExecutionRuleBindingOf,
   defaultExecutionRuleDoes,
   defaultExecutionRuleDrift,
+  defaultExecutionRuleCovers,
   defaultExecutionRuleKind,
   defaultExecutionRuleName,
   defaultExecutionRuleTitle,
@@ -22,6 +23,7 @@ import {
   setRuleAlreadyReason,
 } from '../../src/service/default-execution-rules.js';
 import { defaultRuleBindingRows } from '../../src/service/task-plan.js';
+import { BUILTIN_PRODUCTION_DOCUMENT_TYPES } from '../../src/service/production-document-types.js';
 import type { MaterialPlanInputsProjection } from '../../src/shared/protocol.js';
 
 // 默认执行规则 (Issue #421, plan slice S75): what a rule binds, how it is named, and every sentence quick start and
@@ -89,6 +91,14 @@ describe('the words of quick start and its rules', () => {
       .toEqual(['sync-current', 'reanalyze-book', 'writing:news-release']);
   });
 
+  it('admits every built-in house type as a writing rule pattern (#701 re-review P3-5)', () => {
+    for (const type of BUILTIN_PRODUCTION_DOCUMENT_TYPES.types) {
+      expect(isDefaultExecutionRulePattern(writingRulePattern(type.typeId))).toBe(true);
+      expect(writingRuleTypeId(writingRulePattern(type.typeId))).toBe(type.typeId);
+      expect(defaultExecutionRuleKind(writingRulePattern(type.typeId))).toBe('writing');
+    }
+  });
+
   it("names the writing Task's 工序 among what its rule binds (S84b)", () => {
     expect(defaultRuleBindingRows(defaultExecutionRuleBindingOf(INPUTS), '写作任务')[1])
       .toEqual({ label: '工序', value: '写作任务 · ai7.editorial-workspace-profile 1.0.0（方案修订 2）' });
@@ -106,7 +116,12 @@ describe('the words of quick start and its rules', () => {
     expect(quickStartNoRuleReason('reanalyze-book')).toBe('这本书还没有「开始全部重来」的默认执行规则：先看计划，可以在完整计划里设为快速开始默认。');
     expect(quickStartNoRuleReason('writing:news-release')).toBe('这本书还没有「写作任务 · 新闻稿」的默认执行规则：先看计划，可以在完整计划里设为快速开始默认。');
     expect(writingRuleOtherTypeReason('写作任务 · 宣传文章 · 第 1 版', '宣传文章', '新闻稿'))
-      .toBe('默认执行规则「写作任务 · 宣传文章 · 第 1 版」是按「宣传文章」的计划设定的，不用于「新闻稿」；请看过这份计划后再开始，也可以把它设为「新闻稿」的快速开始默认。');
+      .toBe('默认执行规则「写作任务 · 宣传文章 · 第 1 版」是按「宣传文章」的计划设定的，不用于「新闻稿」；请看过这份计划后再开始，也可以把这份计划设为「新闻稿」的快速开始默认。');
+    // What a writing rule covers, named where it is confirmed and listed (#701 re-review P2-1).
+    expect(defaultExecutionRuleCovers('writing:promotion-article')).toBe('新建文档「宣传文章」');
+    expect(defaultExecutionRuleCovers('sync-current')).toBeNull();
+    expect(defaultRuleBindingRows(defaultExecutionRuleBindingOf(INPUTS), '写作任务', '新建文档「宣传文章」').at(-1)).toEqual({ label: '适用于', value: '新建文档「宣传文章」' });
+    expect(defaultRuleBindingRows(defaultExecutionRuleBindingOf(INPUTS)).map((row) => row.label)).toEqual(['模型服务', '工序', '预算上限', '发送内容类别', '会得到']);
     expect(QUICK_START_OFFLINE_LATER).toBe('离线：这份计划要连到模型服务，而这台设备现在没有网络；联网后再开始。');
     expect(QUICK_START_OFFLINE_LATER).not.toContain('联网后开始任务');
     expect(QUICK_START_DEVELOPER_LIVE).toBe('开发者实时模式下不用默认执行规则：每次都先看计划，再开始任务。');

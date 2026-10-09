@@ -188,6 +188,8 @@ describe('the writing 默认执行规则 of one house type (S84b; AUTH-009, TASK
           { label: '预算上限', value: '未设置任务预算上限' },
           { label: '发送内容类别', value: '公开或合成材料' },
           { label: '会得到', value: inputs.expectedOutcome },
+          // The one house type the rule covers, named where the editor consents (#701 re-review P2-1).
+          { label: '适用于', value: '新建文档「宣传文章」' },
         ],
       });
 
@@ -253,6 +255,8 @@ describe('the writing 默认执行规则 of one house type (S84b; AUTH-009, TASK
         ['baseline-analysis', 'sync-current', '开始同步 · 第 1 版', 'active'],
       ]);
       expect(rules[2]!.binds.find((row) => row.label === '工序')!.value.startsWith('基线分析 · ')).toBe(true);
+      expect(rules.map((rule) => rule.binds.find((row) => row.label === '适用于')?.value ?? null))
+        .toEqual(['新建文档「宣传文章」', '新建文档「新闻稿」', null]);
       expect(quickOf(store, bookId).rule?.ruleId).toBe(promotion.ruleId);
       expect(quickOf(store, bookId, 'news-release').rule?.ruleId).toBe(news.ruleId);
       // A writing pattern held under the baseline kind is not a row this ledger wrote.
@@ -327,7 +331,7 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
       const news = prepare(store, bookId, NEWS_REQUEST);
       const quick = await store.quickStartWritingTask(bookId, news.taskIntent!.taskIntentId, news.planEnvelope!.digest, rule.ruleVersionId, ONLINE());
       expect(quick).toEqual(fell(writingRuleOtherTypeReason('写作任务 · 宣传文章 · 第 1 版', '宣传文章', '新闻稿')));
-      expect(quick.reasons[0]).toBe('默认执行规则「写作任务 · 宣传文章 · 第 1 版」是按「宣传文章」的计划设定的，不用于「新闻稿」；请看过这份计划后再开始，也可以把它设为「新闻稿」的快速开始默认。');
+      expect(quick.reasons[0]).toBe('默认执行规则「写作任务 · 宣传文章 · 第 1 版」是按「宣传文章」的计划设定的，不用于「新闻稿」；请看过这份计划后再开始，也可以把这份计划设为「新闻稿」的快速开始默认。');
       const unchanged = store.inspectWriting(bookId)!;
       expect(unchanged.authorization).toBeNull();
       expect(unchanged.state).toBe('prepared');
@@ -434,6 +438,23 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
       const again = prepare(store, bookId);
       ledger.authorize(bookId, again.taskIntent!.taskIntentId, again.planEnvelope!.digest, 'now',
         { kind: 'default-execution-rule', ruleVersionId: baseline.version.ruleVersionId });
+      expect(await refusal(() => store.inspectTaskPlan({ bookId, kind: 'writing', ref: again.taskIntent!.taskIntentId })))
+        .toBe('ANALYSIS_RECORD_INVALID:运行授权指向的默认执行规则不存在。');
+    });
+  }, 300_000);
+
+  it('reads a writing Task\'s authorization that names another house type\'s rule as damaged (#701 re-review P3-4)', async () => {
+    await withSession(async (session) => {
+      const { store } = session;
+      const { bookId, first, ledger, rule } = await ruledBook(session, '写作授权指错类型');
+      // A 新闻稿 rule of this Book, and a 宣传文章 Task whose authorization names it: not one any quick start could record.
+      const news = withDatabase(false, (database) => new DefaultExecutionRuleLedger(database).set({
+        bookId, pattern: writingRulePattern('news-release'), sourceTaskIntentId: first.taskIntent!.taskIntentId, sourcePlanEnvelopeDigest: 'b'.repeat(64),
+        binding: rule.binding,
+      }));
+      const again = prepare(store, bookId);
+      ledger.authorize(bookId, again.taskIntent!.taskIntentId, again.planEnvelope!.digest, 'now',
+        { kind: 'default-execution-rule', ruleVersionId: news.version.ruleVersionId });
       expect(await refusal(() => store.inspectTaskPlan({ bookId, kind: 'writing', ref: again.taskIntent!.taskIntentId })))
         .toBe('ANALYSIS_RECORD_INVALID:运行授权指向的默认执行规则不存在。');
     });

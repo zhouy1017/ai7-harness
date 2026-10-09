@@ -484,6 +484,7 @@ import {
   SET_RULE_FIRST_BASELINE,
   SET_RULE_RANGE,
   defaultExecutionRuleBindingOf,
+  defaultExecutionRuleCovers,
   defaultExecutionRuleDoes,
   defaultExecutionRuleKind,
   writingRuleOtherTypeReason,
@@ -5332,12 +5333,15 @@ export class EditorialStore {
     bookId: string,
     kind: DefaultExecutionRuleRecord['taskKind'],
     authorization: BaselineAnalysisProjection['authorization'],
+    /** For a writing Task, its house type's pattern: the rule a Task names is its own type's (#701 re-review P3-4). */
+    pattern: DefaultExecutionRulePattern | null = null,
   ): DefaultExecutionRuleReference | null {
     if (authorization === null || authorization.origin !== 'default-execution-rule' || authorization.ruleVersionId === null) return null;
     const ruleVersionId = authorization.ruleVersionId;
     const found = this.#ruleCall(() => this.#rules.version(ruleVersionId));
-    // The rule a Task names is its own Book's, and of its own kind.
-    requireStore(found !== null && found.rule.bookId === bookId && found.rule.taskKind === kind, 'ANALYSIS_RECORD_INVALID', '运行授权指向的默认执行规则不存在。');
+    // The rule a Task names is its own Book's, of its own kind and — for a writing Task — of its own house type.
+    requireStore(found !== null && found.rule.bookId === bookId && found.rule.taskKind === kind && (pattern === null || found.rule.pattern === pattern),
+      'ANALYSIS_RECORD_INVALID', '运行授权指向的默认执行规则不存在。');
     return defaultExecutionRuleReference(found.rule, found.version);
   }
 
@@ -5381,7 +5385,8 @@ export class EditorialStore {
       reason,
       planEnvelopeDigest: reason === null ? envelope.digest : null,
       current,
-      binds: defaultRuleBindingRows(defaultExecutionRuleBindingOf(version.materialInputs), DEFAULT_EXECUTION_RULE_PROCEDURES[defaultExecutionRuleKind(pattern)]),
+      binds: defaultRuleBindingRows(defaultExecutionRuleBindingOf(version.materialInputs), DEFAULT_EXECUTION_RULE_PROCEDURES[defaultExecutionRuleKind(pattern)],
+        defaultExecutionRuleCovers(pattern)),
       startedBy,
     };
   }
@@ -5502,7 +5507,7 @@ export class EditorialStore {
       state: record.state,
       stateLabel: RULE_STATE_LABELS[record.state],
       does: defaultExecutionRuleDoes(record.pattern),
-      binds: defaultRuleBindingRows(record.version.binding, DEFAULT_EXECUTION_RULE_PROCEDURES[record.taskKind]),
+      binds: defaultRuleBindingRows(record.version.binding, DEFAULT_EXECUTION_RULE_PROCEDURES[record.taskKind], defaultExecutionRuleCovers(record.pattern)),
       setBy: '本机编辑',
       setAt: record.version.createdAt,
       stateRecordedAt: record.stateRecordedAt,
@@ -8030,7 +8035,7 @@ export class EditorialStore {
     const envelope = projection.planEnvelope;
     const version = projection.planVersion;
     if (projection.taskIntent === null || envelope === null || version === null) return noDefaultRule(QUICK_START_NOT_READY);
-    const startedBy = this.#ruleStartedBy(projection.bookId, 'writing', projection.authorization);
+    const startedBy = this.#ruleStartedBy(projection.bookId, 'writing', projection.authorization, writingRulePattern(task.typeId));
     // A writing Task runs nowhere under a live scope (S84a), so no rule is set there, from whatever plan was frozen before.
     const kindReason = this.#baselineAnalysis.launch.live !== null ? SET_RULE_DEVELOPER_LIVE
       : !task.exemplarsReadable && projection.authorization === null ? WRITING_EXEMPLAR_MOVED : null;

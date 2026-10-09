@@ -348,7 +348,9 @@ describe('the draft and the page\'s words', () => {
     expect(writingQuickStarted('写作任务 · 第 1 版', true)).toBe('已按默认执行规则「写作任务 · 第 1 版」记下这项写作任务；当前启动没有可执行的路由，派发前已阻止。');
     expect(WRITING_STATUS.quickFailed).toBe('快速开始没有开始任务；计划已准备，可在任务计划里开始。');
     // A failed call keeps where the plan stands after the service's words (#701 review P3-5).
-    expect(writingQuickFailed('任务计划已经变化；无法记录该授权。')).toBe('任务计划已经变化；无法记录该授权。快速开始没有开始任务；计划已准备，可在任务计划里开始。');
+    // The service's words may say the plan can no longer start: nothing promises that it can (#701 re-review P3-2).
+    expect(writingQuickFailed('任务计划已经变化；无法记录该授权。')).toBe('任务计划已经变化；无法记录该授权。快速开始没有开始任务；请在任务计划里查看。');
+    expect(writingQuickFailed('这项任务已经开始了。')).not.toContain('可在任务计划里开始');
     expect(writingQuickFailed('  ')).toBe(WRITING_STATUS.quickFailed);
     expect(WRITING_STATUS.quickNoPlan).toBe('这份计划还没有冻结，没有按规则开始；请看过计划后再开始。');
     expect(WRITING_QUICK_PICK_TYPE).toBe('选好类型后显示：快速开始按这一类文档的默认执行规则开始。');

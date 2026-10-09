@@ -46,10 +46,14 @@ export const WRITING_STATUS = {
 
 /** A writing rule covers one house type (#701 review P2-1): until one is chosen there is nothing to say of 快速开始. */
 export const WRITING_QUICK_PICK_TYPE = '选好类型后显示：快速开始按这一类文档的默认执行规则开始。';
-/** A quick start whose call failed: the service's words, if any, then where the plan stands (#701 review P3-5). */
+/**
+ * A quick start whose call failed: the service's words, if any — which may say the plan can no longer start, so no promise
+ * that it can is added to them (#701 re-review P3-2) — or, with none, that the plan stands prepared.
+ */
+export const WRITING_QUICK_FAILED_SEE_PLAN = '快速开始没有开始任务；请在任务计划里查看。';
 export function writingQuickFailed(detail: string): string {
   const said = detail.trim().replace(/[。；]+$/u, '');
-  return said.length === 0 ? WRITING_STATUS.quickFailed : `${said}。${WRITING_STATUS.quickFailed}`;
+  return said.length === 0 ? WRITING_STATUS.quickFailed : `${said}。${WRITING_QUICK_FAILED_SEE_PLAN}`;
 }
 /** 快速开始 on offer (Issue #432, S84b; S75 D5): the rule it starts under, and that a plan unlike it stops for the editor. */
 export function writingQuickNote(ruleName: string): string {

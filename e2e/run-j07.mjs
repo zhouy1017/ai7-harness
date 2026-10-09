@@ -61,7 +61,7 @@ const WRITING_QUICK_START_REASON = '这本书还没有「写作任务 · 宣传�
 const WRITING_RULE_PATTERN = 'writing:promotion-article';
 const WRITING_RULE_NAME = '写作任务 · 宣传文章 · 第 1 版';
 const WRITING_QUICK_NOTE = `按默认执行规则「${WRITING_RULE_NAME}」：先准备计划，与规则一致时直接开始；有任何不同都会停在计划上。`;
-const WRITING_RULE_LEAD = '以后在「交付物」的新建文档里用快速开始起草这本书的文档时，AI7 会先按你选的类型和写的受众、渠道准备计划：计划与下面这些一致时直接开始，不再停下来等你确认；有任何不同都会停在计划上，等你看过再开始。规则不会自己开始任何任务。';
+const WRITING_RULE_LEAD = '以后在「交付物」的新建文档里选下面「适用于」这一类文档、用快速开始起草时，AI7 会先按你写的受众和渠道准备计划：计划与下面这些一致时直接开始，不再停下来等你确认；有任何不同都会停在计划上，等你看过再开始。别的类型各有自己的规则；规则不会自己开始任何任务。';
 const READ_CONNECTION = `window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection??null)`;
 
 /** The draft's blocks as the authored fixture's synthesis wrote them: its title, then each heading and its paragraphs. */
@@ -2596,8 +2596,9 @@ async function main() {
     const writingConfirm = await renderer.evaluate(`(() => { const confirm = document.querySelector('#task-drawer .task-plan-default-rule-confirm'); if (!(confirm instanceof HTMLElement) || confirm.hidden) return null; return JSON.stringify([confirm.querySelector(':scope > p')?.textContent ?? null, Array.from(confirm.querySelectorAll('[data-default-rule-bind]'), (node) => [node.dataset.defaultRuleBind ?? null, node.textContent ?? ''])]); })()`);
     const confirmRead = typeof writingConfirm === 'string' ? JSON.parse(writingConfirm) : null;
     requireJourney(confirmRead !== null && confirmRead[0] === WRITING_RULE_LEAD &&
-      confirmRead[1].map(([label]) => label).join('|') === '模型服务|工序|预算上限|发送内容类别|会得到' &&
-      confirmRead[1][1][1].startsWith('写作任务 · ') && confirmRead[1][2][1] === '未设置任务预算上限', 'writing-rule-confirm', writingConfirm);
+      confirmRead[1].map(([label]) => label).join('|') === '模型服务|工序|预算上限|发送内容类别|会得到|适用于' &&
+      confirmRead[1][1][1].startsWith('写作任务 · ') && confirmRead[1][2][1] === '未设置任务预算上限' &&
+      confirmRead[1][5][1] === '新建文档「宣传文章」', 'writing-rule-confirm', writingConfirm);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="default-rule-confirm"]', 'writing-rule-set');
     await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-default-rule-current')?.textContent === ${JSON.stringify(`这本书的默认执行规则：${WRITING_RULE_NAME}（使用中，由这份计划设定）`)}`, 'writing-rule-set-shown');
     const writingRules = await renderer.evaluate(`window.ai7.inspectDefaultExecutionRules().then((page) => JSON.stringify(page.rules.filter((rule) => rule.taskKind === 'writing').map((rule) => [rule.name, rule.pattern, rule.state, rule.bookTitle])))`);

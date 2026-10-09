@@ -493,7 +493,15 @@ export function quickStartNoRuleReason(pattern: DefaultExecutionRulePattern): st
  * quick start of another type stops at its plan.
  */
 export function writingRuleOtherTypeReason(ruleName: string, ruleTypeLabel: string, typeLabel: string): string {
-  return `默认执行规则「${ruleName}」是按「${ruleTypeLabel}」的计划设定的，不用于「${typeLabel}」；请看过这份计划后再开始，也可以把它设为「${typeLabel}」的快速开始默认。`;
+  return `默认执行规则「${ruleName}」是按「${ruleTypeLabel}」的计划设定的，不用于「${typeLabel}」；请看过这份计划后再开始，也可以把这份计划设为「${typeLabel}」的快速开始默认。`;
+}
+/**
+ * What a writing rule covers, as its confirmation and 工序与规则 name it (#701 re-review P2-1): `新建文档「宣传文章」` — the one house
+ * type the rule starts; `null` for a baseline rule, whose pattern is its whole scope.
+ */
+export function defaultExecutionRuleCovers(pattern: DefaultExecutionRulePattern): string | null {
+  const typeId = writingRuleTypeId(pattern);
+  return typeId === null ? null : `新建文档「${writingTypeLabel(typeId)}」`;
 }
 export function writingRuleTypeLabel(pattern: DefaultExecutionRulePattern): string {
   const typeId = writingRuleTypeId(pattern);

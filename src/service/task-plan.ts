@@ -151,7 +151,12 @@ export const REVIEW_RUN_NO_RULE = '审阅还不能设为快速开始默认：每
  * What a rule set from a plan binds, in the editor's words: the confirmation of `设为快速开始默认…` lists exactly
  * these rows, and 知识库 › 工序与规则 lists them again for the rule in force.
  */
-export function defaultRuleBindingRows(binding: DefaultExecutionRuleBinding, procedure = '基线分析'): ReadonlyArray<{ label: string; value: string }> {
+export function defaultRuleBindingRows(
+  binding: DefaultExecutionRuleBinding,
+  procedure = '基线分析',
+  /** What a writing rule covers — its one house type (#701 re-review P2-1) — listed last; a baseline rule lists none. */
+  covers: string | null = null,
+): ReadonlyArray<{ label: string; value: string }> {
   const provider = binding.providerBinding;
   const pin = binding.artifactPin;
   return [
@@ -160,6 +165,7 @@ export function defaultRuleBindingRows(binding: DefaultExecutionRuleBinding, pro
     { label: '预算上限', value: budgetCeilingLabel(binding.runBudgetCeiling) },
     { label: '发送内容类别', value: outboundLabel(binding.outboundDataCategory) },
     { label: '会得到', value: binding.expectedOutcome },
+    ...(covers === null ? [] : [{ label: '适用于', value: covers }]),
   ];
 }
 
