@@ -5,6 +5,9 @@ import type {
   LibraryMaterialKind,
   LibraryMaterialPreviewProjection,
   LibraryMaterialProjection,
+  MaterialIndexProjection,
+  MaterialIndexReason,
+  MaterialSegmentsPageProjection,
   KnowledgeArtifactProjection,
   KnowledgeProcedureProjection,
   ExemplarBookProjection,
@@ -436,4 +439,117 @@ export function libraryAttributed(title: string, where: string): string {
 
 export function libraryEligibilityDecided(title: string, choice: string): string {
   return `已记录学习准入：「${title}」 · ${choice}。`;
+}
+
+// ---- 资料索引 (Issue #428, plan slice S80a; editor-surfaces §8.4, V2-UX-KB-009, ATTN-009) -------------------------------
+
+/** The five layers of KB-009 in their order, and the two parts the text layer names: recognition and 来源译文. */
+export const MATERIAL_INDEX_LAYERS = ['original', 'metadata', 'text', 'recognition', 'translation', 'segments', 'vectors'] as const;
+export const MATERIAL_INDEX_LAYER_TERMS: Readonly<Record<(typeof MATERIAL_INDEX_LAYERS)[number], string>> = {
+  original: '原件',
+  metadata: '元数据',
+  text: '提取全文',
+  recognition: '文字识别',
+  translation: '来源译文',
+  segments: '分段与锚点',
+  vectors: '相似段落检索',
+};
+export const MATERIAL_INDEX_TERM = '资料索引';
+/** What a layer this build does not provide says: never imitated, never hidden (Owner 2026-10-09, option 乙). */
+export const MATERIAL_INDEX_NEEDS_DEPENDENCY = '未提供（需要本地依赖）';
+/** What the index is and is not, said once on the card (KB-009). */
+export const MATERIAL_INDEX_BOUNDARY = '索引只在本机建立：它不授予任务读取范围；任务只读计划列进「允许参考」的资料，发送什么仍由任务计划决定。';
+export const MATERIAL_SEGMENTS_OPEN = '查看分段';
+export const MATERIAL_SEGMENTS_CLOSE = '收起分段';
+export const MATERIAL_SEGMENTS_PREVIOUS = '上一页';
+export const MATERIAL_SEGMENTS_NEXT = '下一页';
+export const MATERIAL_SEGMENTS_FAILED = '暂时无法读取分段，请重试。';
+
+export const MATERIAL_INDEX_REASONS: Readonly<Record<MaterialIndexReason, string>> = {
+  'needs-local-dependency': '读取这种格式的文字需要本地依赖，尚未提供',
+  'format-unsupported': 'AI7 还不能提取这种格式的文字',
+  'over-bound': '超出本地读取边界（文件或其中的段落过大）',
+  unreadable: '文件无法读取，或内容已损坏',
+  'original-changed': '本机保存的原件与放入时的记录不一致',
+  empty: '文件里没有可提取的文字',
+};
+
+/** The index as a whole, in one line beside its term. */
+export function materialIndexStateLine(index: MaterialIndexProjection): string {
+  switch (index.state) {
+    case 'queued':
+      return '等待建立索引';
+    case 'indexing':
+      return '正在本机建立索引…';
+    case 'complete':
+      return '已在本机建好';
+    case 'unsupported':
+      return '已建好可读的层；这种格式的文字未能提取';
+    case 'failed':
+      return `未能提取文字：${MATERIAL_INDEX_REASONS[index.reason ?? 'unreadable']}`;
+  }
+}
+
+function waiting(index: MaterialIndexProjection): string {
+  return index.state === 'indexing' ? '正在建立…' : '等待建立索引';
+}
+
+/** One layer's state in the editor's words: what it holds, or why it holds nothing. */
+export function materialIndexLayerLine(index: MaterialIndexProjection, layer: (typeof MATERIAL_INDEX_LAYERS)[number]): string {
+  const state = index.layers[layer];
+  const metadata = index.metadata;
+  switch (layer) {
+    case 'original':
+      return '已原样保存在本机';
+    case 'metadata': {
+      if (state === 'pending' || metadata === null) return waiting(index);
+      if (index.state !== 'complete') return '已记录文件名、格式、大小与摘要';
+      const language = metadata.language === 'zh' ? '中文' : metadata.language === 'other' ? '非中文' : '没有文字';
+      const own = metadata.documentTitle === null ? '' : ` · 文件自带标题「${metadata.documentTitle}」`;
+      return `${language} · ${metadata.paragraphs} 段 · ${metadata.headings} 个标题${own}`;
+    }
+    case 'text':
+      if (state === 'pending') return waiting(index);
+      if (state === 'complete') return `已提取 ${metadata?.characters ?? 0} 字`;
+      if (state === 'deferred') return MATERIAL_INDEX_NEEDS_DEPENDENCY;
+      return `未能提取：${MATERIAL_INDEX_REASONS[index.reason ?? 'unreadable']}`;
+    case 'recognition':
+      return state === 'deferred' ? `${MATERIAL_INDEX_NEEDS_DEPENDENCY}：扫描件要先识别文字` : '不需要：文件里就是文字';
+    case 'translation':
+      if (state === 'pending') return '等待提取全文';
+      if (state === 'deferred' && index.state === 'complete') return '未提供：非中文资料的机器译文要经模型服务，尚未接通';
+      if (state === 'not-needed') return metadata?.language === 'none' ? '不需要：没有可译的文字' : '不需要：中文资料';
+      return '没有提取出全文，无从翻译';
+    case 'segments':
+      if (state === 'pending') return '等待提取全文';
+      if (state === 'complete' && metadata !== null) {
+        return `${metadata.paragraphs} 段 · ${metadata.sentences} 句；每句可按「第 n 段第 m 句」引用（这种格式没有页码，锚点是位置）`;
+      }
+      return '没有提取出全文，无从分段';
+    case 'vectors':
+      return MATERIAL_INDEX_NEEDS_DEPENDENCY;
+  }
+}
+
+/** A sentence's position anchor (KB-009): the paragraph and the sentence, as a citation names it. */
+export function materialAnchorLabel(paragraph: number, sentence: number): string {
+  return `第 ${paragraph} 段第 ${sentence} 句`;
+}
+
+/** Which paragraphs a page of 查看分段 shows, of how many. */
+export function materialSegmentsHeading(page: Pick<MaterialSegmentsPageProjection, 'from' | 'segments' | 'total'>): string {
+  const last = page.from + page.segments.length - 1;
+  return `分段：第 ${page.from}–${last} 段，共 ${page.total} 段`;
+}
+
+/** 索引完成 in 待我处理 (ATTN-009): how the build went, in the card's words. */
+export function materialIndexCompletedReason(outcome: 'complete' | 'unsupported' | 'failed'): string {
+  switch (outcome) {
+    case 'complete':
+      return '资料索引已在本机建好：原件、元数据、全文与分段锚点都已就绪；相似段落检索与文字识别未提供（需要本地依赖）。';
+    case 'unsupported':
+      return '资料索引已建好可读的层：原件与元数据已就绪，这种格式的文字未能提取。';
+    case 'failed':
+      return '资料索引已建立，但没能提取文字：打开资料看原因。';
+  }
 }

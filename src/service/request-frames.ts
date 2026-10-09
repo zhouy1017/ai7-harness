@@ -757,6 +757,12 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           Number(input.offset) % LIBRARY_REASON_PAGE_UNITS !== 0) throw new ProtocolError(tentativeId);
       break;
     }
+    // 查看分段 (Issue #428, S80a): one item, and the paragraph its page starts at.
+    case 'inspectLibraryMaterialSegments': {
+      const input = requireInput(value.input, ['materialId', 'from'], tentativeId);
+      if (!validUuid(input.materialId) || !isSafeInteger(input.from, 1)) throw new ProtocolError(tentativeId);
+      break;
+    }
     // 放入资料… (Issue #427, S79c): the absolute path main's picker returned.
     case 'previewLibraryMaterial': {
       const input = requireInput(value.input, ['path'], tentativeId);
