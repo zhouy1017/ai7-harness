@@ -236,6 +236,11 @@ describe('the writing 默认执行规则 of one house type (S84b; AUTH-009, TASK
       const news = store.setDefaultExecutionRule(bookId, newsPlan.taskIntent!.taskIntentId, newsPlan.planEnvelope!.digest);
       expect(news).toMatchObject({ pattern: 'writing:news-release', ordinal: 1, name: '写作任务 · 新闻稿 · 第 1 版', state: 'active' });
       expect(news.ruleId).not.toBe(promotion.ruleId);
+      // The 新闻稿's plan names its own type's rule beside the action, never the 宣传文章's.
+      expect(store.inspectTaskPlan({ bookId, kind: 'writing', ref: newsPlan.taskIntent!.taskIntentId }).defaultRule).toMatchObject({
+        canSet: false, reason: setRuleAlreadyReason('写作任务 · 新闻稿 · 第 1 版'),
+        current: { ruleId: news.ruleId, name: '写作任务 · 新闻稿 · 第 1 版', state: 'active', fromThisPlan: true },
+      });
       const baseline = withDatabase(false, (database) => new DefaultExecutionRuleLedger(database).set({
         bookId, pattern: 'sync-current', sourceTaskIntentId: promotionPlan.taskIntent!.taskIntentId, sourcePlanEnvelopeDigest: 'd'.repeat(64),
         binding: promotion.binding,
