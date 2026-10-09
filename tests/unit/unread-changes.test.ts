@@ -10,6 +10,11 @@ import {
   type ChainRevision,
   type ChainUnitState,
 } from '../../src/service/analysis/unread-changes.js';
+import {
+  CHAIN_REVISION_CACHE_ENTRIES,
+  CHAIN_REVISION_CACHE_WEIGHT,
+  UNREAD_WALK_CACHE_WEIGHT,
+} from '../../src/service/analysis/baseline-analysis-store.js';
 import { UNREAD_WALK_BOUND_NOTE, UNREAD_WALK_CUT_NOTE, unreadWalkCutNote } from '../../src/service/review/review-runs.js';
 import type { CoverageManifestProjection } from '../../src/shared/protocol.js';
 
@@ -182,6 +187,50 @@ describe('the walk caches (Issue #716)', () => {
     // Both units are measured from the one 全书, whose manifest is counted once.
     expect(unreadWalkWeight(walk)).toBe(walk.blockIds.size + references);
     expect(unreadWalkWeight(walkUnreadChanges(whole, () => null))).toBe(0);
+  });
+});
+
+describe("the chain cache under the walk's own reading order (Issue #727)", () => {
+  /** A manuscript of `blocks` paragraphs with a heading every 75, as a ~3,000-block Book's manifest weighs. */
+  function manuscript(blocks: number): CoverageManifestProjection {
+    const list: ManifestBlockInput[] = [];
+    for (let index = 0; index < blocks; index += 1) list.push(block(`b${index}`, `${index}`, index % 75 === 0 ? 'heading' : 'paragraph'));
+    return manifestOf(list);
+  }
+  /**
+   * The ledger's reads over a chain that grows one revision at a time, each walk reading newest-first to the chain's first
+   * Run (a chapter standing unread keeps it going): how many revisions each walk read from SQLite rather than the cache.
+   */
+  function missesPerWalk(maxEntries: number, maxWeight: number, revisionWeight: number, chain: number): number[] {
+    const cache = new UnreadWalkCache<number>(maxEntries, maxWeight, () => revisionWeight);
+    const misses: number[] = [];
+    for (let latest = 1; latest <= chain; latest += 1) {
+      let missed = 0;
+      for (let ordinal = latest; ordinal >= 1; ordinal -= 1) {
+        if (cache.get(`rev-${ordinal}`) !== undefined) continue;
+        missed += 1;
+        cache.set(`rev-${ordinal}`, ordinal);
+      }
+      misses.push(missed);
+    }
+    return misses;
+  }
+
+  it("keeps a ~3,000-block manuscript's chain of 40 选章 cached, where the walk cache's bound would re-read the whole chain at every Run", () => {
+    const manifest = manuscript(3_000);
+    const weight = manifestWeight(manifest) + manifest.units.length;
+    expect(weight).toBeGreaterThan(4_000);
+    // Measured, not fixed: under LRU a scan longer than the bound evicts exactly what the next walk asks for first, so past
+    // the bound every walk misses every revision — a cliff, 1 read a Run to n reads a Run — never a decline.
+    const fit = Math.floor(UNREAD_WALK_CACHE_WEIGHT / weight);
+    const thrashing = missesPerWalk(CHAIN_REVISION_CACHE_ENTRIES, UNREAD_WALK_CACHE_WEIGHT, weight, 40);
+    expect(thrashing.slice(0, fit).every((missed) => missed === 1)).toBe(true);
+    expect(thrashing.slice(fit)).toEqual(thrashing.slice(fit).map((_, index) => fit + index + 1));
+    expect(thrashing.at(-1)).toBe(40);
+    // Under the chain cache's own bound the chain of 40 is read from SQLite once, one revision per Run, with room past it.
+    const kept = missesPerWalk(CHAIN_REVISION_CACHE_ENTRIES, CHAIN_REVISION_CACHE_WEIGHT, weight, 40);
+    expect(kept).toEqual(new Array<number>(40).fill(1));
+    expect(Math.floor(CHAIN_REVISION_CACHE_WEIGHT / weight)).toBeGreaterThanOrEqual(48);
   });
 });
 
