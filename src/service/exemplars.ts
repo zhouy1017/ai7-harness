@@ -5,6 +5,7 @@ import {
   type ExemplarBookProjection,
   type ExemplarProjection,
   type ExemplarsProjection,
+  type ReadersReportExemplarProjection,
 } from '../shared/protocol.js';
 
 /**
@@ -20,6 +21,10 @@ import {
  * both append-only records already, read through their owners, which verify them exactly as 交付物 and 图书交付包 do: the
  * archive is what those records say, so it needs no relation of its own. An exemplar is referenced, never copied into a
  * manuscript or a deliverable.
+ *
+ * A Book's 审稿意见 (Issue #429, S81c remainder; KB-006) is offered beside them at the version 图书交付包 pins — the latest saved
+ * when the 发稿版本 was designated — under 仅本社; the editor admits it (`admitReadersReportExemplar`), and the admission is a
+ * Learning Eligibility decision on the ledger of S26b, so this page still writes nothing. The store reads and pins them.
  */
 
 /** One designation as 范例 reads it: when it was set, and when a 撤回 came to hold it. */
@@ -54,6 +59,8 @@ export interface ExemplarSources {
   documents(bookId: string): ReadonlyArray<ExemplarDocumentReading>;
   /** Who the Book is attributed to, as its people read now. */
   people(bookId: string): { readonly authors: ReadonlyArray<string>; readonly editors: ReadonlyArray<string> };
+  /** The Book's 审稿意见 at the version pinned against its latest designation, each with where its admission stands (Issue #429). */
+  readersReports(bookId: string, designation: ExemplarDesignationReading): ReadonlyArray<ReadersReportExemplarProjection>;
 }
 
 /** One document's exemplar: the version its latest delivery that came into 范例 named, or `null` when none came in. */
@@ -93,27 +100,31 @@ function exemplarOf(document: ExemplarDocumentReading, archive: ReturnType<Exemp
   };
 }
 
+/** One published Book in 范例: its attribution, its latest designation, its exemplars by document type, and its 审稿意见. */
+export function readExemplarBook(sources: ExemplarSources, book: { readonly bookId: string; readonly title: string }): ExemplarBookProjection {
+  const archive = sources.archive(book.bookId);
+  const latest = archive.latest;
+  const attribution = sources.people(book.bookId);
+  return {
+    bookId: book.bookId,
+    bookTitle: book.title,
+    authors: attribution.authors,
+    editors: attribution.editors,
+    publicationOrdinal: latest.ordinal,
+    designatedAt: latest.createdAt,
+    withdrawn: latest.withdrawnAt !== null,
+    exemplars: sources.documents(book.bookId).flatMap((document) => {
+      const exemplar = exemplarOf(document, archive);
+      return exemplar === null ? [] : [exemplar];
+    }),
+    readersReports: sources.readersReports(book.bookId, latest),
+  };
+}
+
 /** One page of 范例: the published Books after the cursor, by title, each with its exemplars by document type. */
 export function readExemplars(sources: ExemplarSources, after: ExemplarBookCursor | null): ExemplarsProjection {
   const page = sources.books(after, MAX_EXEMPLAR_BOOKS_PAGE + 1);
-  const books = page.slice(0, MAX_EXEMPLAR_BOOKS_PAGE).map((book): ExemplarBookProjection => {
-    const archive = sources.archive(book.bookId);
-    const latest = archive.latest;
-    const attribution = sources.people(book.bookId);
-    return {
-      bookId: book.bookId,
-      bookTitle: book.title,
-      authors: attribution.authors,
-      editors: attribution.editors,
-      publicationOrdinal: latest.ordinal,
-      designatedAt: latest.createdAt,
-      withdrawn: latest.withdrawnAt !== null,
-      exemplars: sources.documents(book.bookId).flatMap((document) => {
-        const exemplar = exemplarOf(document, archive);
-        return exemplar === null ? [] : [exemplar];
-      }),
-    };
-  });
+  const books = page.slice(0, MAX_EXEMPLAR_BOOKS_PAGE).map((book) => readExemplarBook(sources, book));
   const last = books.at(-1);
   return { books, nextCursor: page.length > MAX_EXEMPLAR_BOOKS_PAGE && last !== undefined ? { title: last.bookTitle, bookId: last.bookId } : null };
 }
