@@ -21,9 +21,10 @@ import {
   type ServiceSuccessResponse,
   type TrustedLaunchForm,
 } from '../shared/protocol.js';
-import { armSingleHostAllowance, installNodeNetworkDenial } from '../shared/network-denial.js';
+import { armHostAllowanceSet, armPerTicketHostAdmission, installNodeNetworkDenial } from '../shared/network-denial.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../shared/protected-secret-identity.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, resolveDeveloperLiveLaunch, type DeveloperLiveRuntime } from './launch-policy.js';
+import { OPENCODE_GO_V4_FLASH_PROFILE } from './provider/model-profile.js';
 import { readSoftwareVersion } from './data-version.js';
 import { BACKUP_CHECK_INTERVAL_MS } from './scheduled-backups.js';
 import { decodeRequest, isSafeInteger, ProtocolError } from './request-frames.js';
@@ -1498,10 +1499,18 @@ async function run(): Promise<void> {
   const { dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, connectivityPath, unitHoldPath, answerHoldPath,
     backgroundQuietMs } = parseArguments(process.argv.slice(2));
   if (launchForm.trustedOperationalScope === 'developer-live') {
-    // The single-host allowance (settlement l): armed before the denial so its gates admit exactly the
-    // policy's endpoint host and port; Node's own fetch resolves `tls.connect` and `dns.lookup` at call time.
+    // The policy-declared allowance set (ADR 0080 §7.3; settlement l): armed before the denial so its gates admit exactly
+    // the policy's endpoint host and port and, second, the one search host the selected rule's `platformTools` names;
+    // Node's own fetch resolves `tls.connect` and `dns.lookup` at call time. Both hosts are the pins the launch policy
+    // verifies against the Provider Processing v8 bytes before anything executes — a document naming another host is
+    // unreadable, and then nothing transmits anywhere. `webfetch` targets are never armed: each is reached only through a
+    // `fetch-public-source` ticket's own host admission, armed here and held per ticket (Issue #473).
     const endpoint = new URL(DEVELOPER_LIVE_POLICY_BINDING.endpoint);
-    armSingleHostAllowance({ host: endpoint.hostname, port: endpoint.port === '' ? 443 : Number(endpoint.port) });
+    armHostAllowanceSet([
+      { host: endpoint.hostname, port: endpoint.port === '' ? 443 : Number(endpoint.port) },
+      { host: DEVELOPER_LIVE_POLICY_BINDING.websearchHost, port: 443 },
+    ]);
+    armPerTicketHostAdmission();
   }
   installNodeNetworkDenial();
   reachServiceStartup('process');
@@ -1597,6 +1606,10 @@ async function run(): Promise<void> {
             credentialSlot: DEVELOPER_LIVE_POLICY_BINDING.credentialSlot,
             credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
             runBudgetCeiling: developerLive.launch.runBudgetCeiling,
+            // What the verified v8 analysis rule names, and what the bound model's profile declares (Issue #473): the two
+            // facts, with the kind's own declaration, that decide whether a plan freezes a composition with the tools.
+            platformTools: launchPolicy.providerProcessing.platformTools ?? null,
+            toolCalling: OPENCODE_GO_V4_FLASH_PROFILE.capabilities.toolCalling,
           },
         };
     store.baselineAnalysisLedger.bindLaunch(launch);

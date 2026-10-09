@@ -36,6 +36,18 @@ describe('readPlatformToolsRule', () => {
     expect((v5 as { transmissions: { webSearchToolAllowed: boolean } }).transmissions.webSearchToolAllowed).toBe(false);
   });
 
+  it('reads the selected v8 document: the analysis rule names the tools, the dialogue rule names none (Issue #473, S87-f3b)', async () => {
+    const [analysis, dialogue, ...rest] = await rulesOf('v8');
+    expect(rest).toHaveLength(0);
+    expect(readPlatformToolsRule(analysis)).toEqual({
+      websearch: { service: 'parallel', host: 'search.parallel.ai', tool: 'web_search', anonymous: true },
+      webfetch: { maxBytes: 5_242_880, timeoutSeconds: 30, boundedByCitations: true },
+    });
+    // ADR 0088 §1.5: the dialogue rule's switch is off and it carries no block, so an excerpt can never reach a tool.
+    expect((dialogue as { transmissions: { webSearchToolAllowed: boolean } }).transmissions.webSearchToolAllowed).toBe(false);
+    expect(readPlatformToolsRule(dialogue)).toBeNull();
+  });
+
   it('reads the v7 block exactly, and only while the rule\'s switch is on', async () => {
     const [v7] = await rulesOf('v7');
     expect(readPlatformToolsRule(v7)).toEqual({

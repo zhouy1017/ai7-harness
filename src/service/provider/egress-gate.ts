@@ -458,6 +458,12 @@ function refuseTool(reason: EgressRefusalReason, detail: string): PlatformToolRe
  * The one outbound category a platform-tool call may carry (ADR 0080 §7.2 and its Question 2): a query or a fetched URL is
  * written by a model that read only the binding's admitted material, so its category is the binding's own — and the
  * platform tools exist only for a binding of public or synthetic material.
+ *
+ * This constant widens with the policy and never ahead of it (#724 review, P3-3; Issue #473 S87-f3b). Provider Processing
+ * v8 names the platform tools on its analysis rule alone, whose `allowedOutboundDataCategories` is exactly
+ * `public-or-synthetic`; its dialogue rule carries `editor-selected-manuscript-excerpt` with `webSearchToolAllowed: false`
+ * (ADR 0088 §1.5), so no excerpt may reach a search service or a fetched page. A later revision that admits another
+ * category to a rule naming the tools is the Owner's byte review, and this constant moves in the same pull request.
  */
 const PLATFORM_TOOL_OUTBOUND_CATEGORY: OutboundDataCategory = 'public-or-synthetic';
 

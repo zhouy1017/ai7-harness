@@ -7,6 +7,7 @@ import {
   FACTUAL_SEVERITY_TIERS,
   FACTUAL_UNCHECKED_STATE,
   FACTUAL_UNREVIEWED_VERDICT,
+  WEB_VERIFICATION_INCOMPLETE,
   type AnalysisAssuranceAxis,
   type AnalysisCoverageAxis,
   type AnalysisGapProjection,
@@ -23,6 +24,12 @@ import {
 } from '../../shared/protocol.js';
 import { researchDisclosure, type ResearchCapability, type ResearchOutcome } from '../capabilities/research.js';
 import { canonicalJson, sha256Hex } from './canonical.js';
+
+/** The revision's research statement when a breaker ended one or more units (ADR 0080 §7.4), naming the ranges it ended. */
+export function webVerificationIncompleteStatement(unitOrdinals: ReadonlyArray<number>): string {
+  const ranges = unitOrdinals.map((ordinal) => `第 ${ordinal} 个阅读范围`).join('、');
+  return `联网核查未完成：${ranges}的联网工具往返达到熔断上限，该范围未形成发现，也不会重试；其余范围照常核查。`;
+}
 import type { ManifestBlockInput } from './coverage-manifest.js';
 import {
   factualReviewMessageBlockIds,
@@ -226,11 +233,13 @@ export function reduceFactualReview(input: FactualReductionInput): FactualReduct
     merged,
   };
   const disclosure = researchDisclosure(questions);
-  const research: FactualReviewResearchProjection = {
-    state: disclosure.state,
-    fetched: 0,
-    statement: disclosure.statement,
-  };
+  // A unit whose platform-tool round trips reached the breaker (ADR 0080 §7.4; Issue #473, S87-f3b) formed no findings, so
+  // the revision's research discloses 联网核查未完成 and names the ranges, above whatever the lookups answered for the units
+  // that did close; the findings that exist keep their own states.
+  const breakerEnded = gaps.filter((gap) => gap.code === 'web-verification-incomplete').map((gap) => gap.unitOrdinal);
+  const research: FactualReviewResearchProjection = breakerEnded.length === 0
+    ? { state: disclosure.state, fetched: 0, statement: disclosure.statement }
+    : { state: WEB_VERIFICATION_INCOMPLETE, fetched: 0, statement: webVerificationIncompleteStatement(breakerEnded) };
 
   const stages: AnalysisReducerStageProjection[] = [
     stage('unit-validation', ordered.length, gaps.length),

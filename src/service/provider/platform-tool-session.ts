@@ -190,6 +190,44 @@ export class PlatformToolSession implements PlatformToolOwner {
 }
 
 /**
+ * The owner the harness is composed with before the attempt's session exists (Issue #473, S87-f3b). `prepareExecution`
+ * takes its tool owner at composition time, while a `PlatformToolSession` needs the persisted Execution Binding, which is
+ * digested from that very composition; this owner closes the loop by holding the session's place. Every call before
+ * `bind` is a refusal returned to the model, never a throw — and none can arrive, because the gate refuses every model
+ * call until the binding is persisted, and the session is bound in the same step.
+ */
+export class DeferredPlatformToolOwner implements PlatformToolOwner {
+  #session: PlatformToolSession | null = null;
+
+  /** The attempt's session, once the Execution Binding it is built from is persisted. Bound once. */
+  bind(session: PlatformToolSession): void {
+    if (this.#session !== null) throw new Error('PLATFORM_TOOL_OWNER_ALREADY_BOUND');
+    this.#session = session;
+  }
+
+  get session(): PlatformToolSession | null {
+    return this.#session;
+  }
+
+  async execute(call: PlatformToolExecution): Promise<{ readonly text: string; readonly sourceUrl: string | null }> {
+    return this.#session === null ? refusal('执行绑定尚未持久化；不执行工具调用。') : this.#session.execute(call);
+  }
+
+  admit(result: { readonly callId: string; readonly tool: PlatformToolName; readonly sourceUrl: string | null; readonly text: string }): void {
+    this.#session?.admit(result);
+  }
+
+  acceptToolCallMessage(digest: string): void {
+    this.#session?.acceptToolCallMessage(digest);
+  }
+
+  /** One turn is one unit for the breakers: the harness starts it, after the execution owner read how the last one ended. */
+  startTurn(): void {
+    this.#session?.startUnit();
+  }
+}
+
+/**
  * A unit its breaker ended (ADR 0080 §7.4): the disclosed state its affected findings carry, and the one way it settles —
  * the unit ends, unretried, and the Run goes on to its next unit.
  */

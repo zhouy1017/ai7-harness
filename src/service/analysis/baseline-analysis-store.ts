@@ -131,6 +131,8 @@ import { assuranceSampleNotRun } from './reducers.js';
 import { baselineAnalysisKindDefinition } from './kind-definition.js';
 import { describeComposition } from '../harness/primary-agent-harness.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../provider/egress-gate.js';
+import type { ToolCalling } from '../provider/model-profile.js';
+import { platformToolsRegistered, type PlatformToolsRule } from '../provider/platform-tools.js';
 import type { AnalysisOutcomeAttentionReading, AnalysisTaskAttentionReading } from '../global-attention.js';
 import { PLAN_MOVED_LABEL, type WaitingRunBlockCause } from '../reconnect-preflight.js';
 
@@ -725,6 +727,15 @@ export interface LaunchBinding {
     readonly credentialSlot: 'opencode-go';
     readonly credentialReference: string;
     readonly runBudgetCeiling: DeveloperLiveCeiling;
+    /**
+     * The platform tools the verified document's analysis rule names (ADR 0080 §7.5; `null` under a rule naming none), and
+     * the bound model's declared `toolCalling` (Issue #473, S87-f3b). With the kind's own `webSearch` declaration these
+     * decide whether a frozen plan's composition registers the tools — the same three facts the execution owner reads, so
+     * the composition digest the plan pins is the one the Run executes under. Absent, a launch names no tools and declares
+     * none, and every composition freezes exactly as it did before the tools existed.
+     */
+    readonly platformTools?: PlatformToolsRule | null;
+    readonly toolCalling?: ToolCalling;
   } | null;
 }
 
@@ -3063,9 +3074,14 @@ export class BaselineAnalysisStore {
     // ceiling, so a redo that copies a ceiling the editor once set keeps the rest of the edit and not the ceiling.
     const edits = live === null ? input.edits : withoutCeiling(input.edits);
     const promptContractDigest = this.#definition.promptContractDigest;
+    // The live composition registers the platform tools only when the selected rule names them, this kind's row declares
+    // web search and the bound profile declares function calling (ADR 0080 §7.1, §4; Issue #473): the one question the
+    // execution owner asks again with the same facts, so a plan never pins a composition its Run would not execute.
     const composition = live === null
       ? describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, promptContractDigest)
-      : describeComposition(live.route, live.model, promptContractDigest);
+      : describeComposition(live.route, live.model, promptContractDigest, {
+          platformTools: platformToolsRegistered({ rule: live.platformTools ?? null, kindDeclaresWebSearch: this.#definition.webSearch === true, toolCalling: live.toolCalling ?? 'none' }),
+        });
     const providerPlan = {
       role: 'Main Editorial Role',
       capabilities: [],
@@ -3090,7 +3106,7 @@ export class BaselineAnalysisStore {
             credentialSlot: live.credentialSlot,
             credentialReference: live.credentialReference,
             credentialReadiness: input.credentialReadiness ?? facts.credentialOperationState,
-            providerProcessing: { operationalScope: 'developer-live', version: 'v5', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
+            providerProcessing: { operationalScope: 'developer-live', version: 'v8', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
           },
       executionRoute: live !== null
         ? { kind: live.route, model: live.model, endpoint: live.endpoint }
@@ -4253,8 +4269,8 @@ export class BaselineAnalysisStore {
           promptContractDigest: facts.promptContractDigest,
         },
         policyPin: live === null
-          ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v5', liveTransmissions: 0 }
-          : { operationalScope: 'developer-live', providerProcessingVersion: 'v5', activePolicySetVersion: 'v5', liveTransmissions: 'bounded-by-run' },
+          ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v6', liveTransmissions: 0 }
+          : { operationalScope: 'developer-live', providerProcessingVersion: 'v8', activePolicySetVersion: 'v6', liveTransmissions: 'bounded-by-run' },
         provenance: {
           taskIntentId: facts.taskIntentId,
           runRecordId: facts.runRecordId,
@@ -4398,17 +4414,18 @@ export class BaselineAnalysisStore {
 
   /**
    * A plan may be frozen only under a verified launch policy that matches the bound launch: the
-   * provider-free `development-ci` v1 denial, or the `developer-live` v5 eligibility whose live
-   * binding this store already holds. An unverified or mismatched policy freezes nothing.
+   * provider-free `development-ci` v1 denial, or the `developer-live` v8 eligibility whose live
+   * binding this store already holds, both under active-policy-set v6 (Issue #473, S87-f3b). An
+   * unverified or mismatched policy freezes nothing.
    */
   #requireDeniedPolicy(policy: LaunchPolicyProjection): void {
     requireAnalysis(policy.integrityState === 'verified' && policy.denialReason === null &&
-      policy.operationalScope === this.#launch.operationalScope && policy.activePolicySetVersion === 'v5',
+      policy.operationalScope === this.#launch.operationalScope && policy.activePolicySetVersion === 'v6',
     'ANALYSIS_POLICY_UNAVAILABLE', '可信启动策略与已绑定的可信区间不一致。');
     if (this.#launch.live !== null) {
-      requireAnalysis(policy.providerProcessing.version === 'v5' && policy.providerProcessing.decision === 'eligible-only' &&
+      requireAnalysis(policy.providerProcessing.version === 'v8' && policy.providerProcessing.decision === 'eligible-only' &&
         policy.providerProcessing.authorizedLiveTransmissionCount === 'bounded-by-run' && policy.providerProcessing.liveTransmissionAllowed === true,
-      'ANALYSIS_POLICY_UNAVAILABLE', '无法建立可信的 developer-live Provider Processing v5 记录。');
+      'ANALYSIS_POLICY_UNAVAILABLE', '无法建立可信的 developer-live Provider Processing v8 记录。');
       return;
     }
     requireAnalysis(policy.providerProcessing.version === 'v1' && policy.providerProcessing.decision === 'deny' &&

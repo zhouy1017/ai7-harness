@@ -1364,7 +1364,7 @@ function transact<T>(db: DatabaseSync, body: () => T): T {
  */
 const PROVIDER_PROCESSING_PINS: Readonly<Record<TrustedOperationalScope, ProviderProcessingPin>> = {
   'development-ci': { operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0 },
-  'developer-live': { operationalScope: 'developer-live', version: 'v5', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
+  'developer-live': { operationalScope: 'developer-live', version: 'v8', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
 };
 
 /**
@@ -2704,7 +2704,7 @@ export class TaskAuthorizationStore {
 
   #requireDeniedPolicy(policy: LaunchPolicyProjection): void {
     requireTask(policy.integrityState === 'verified' && policy.denialReason === null &&
-      policy.operationalScope === 'development-ci' && policy.activePolicySetVersion === 'v5' &&
+      policy.operationalScope === 'development-ci' && policy.activePolicySetVersion === 'v6' &&
       policy.providerProcessing.version === 'v1' && policy.providerProcessing.decision === 'deny' &&
       policy.providerProcessing.authorizedLiveTransmissionCount === 0 &&
       policy.providerProcessing.liveTransmissionAllowed === false,
