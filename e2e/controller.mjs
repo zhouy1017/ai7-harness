@@ -1036,6 +1036,15 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'concurrent-no-focus-theft',
     'concurrent-cancel',
     'concurrent-isolation',
+    // 后台分析登记 (Issue #95, plan slice S39): the disclosure, Escape, the Enrollment, the Run it starts in the background, its
+    // record, revoking, and nothing started after.
+    'background-enrollment-disclosure',
+    'j14-background-keyboard',
+    'background-enrollment-recorded',
+    'background-change-dispatches',
+    'background-run-record',
+    'background-revoke',
+    'background-revoked-no-dispatch',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',

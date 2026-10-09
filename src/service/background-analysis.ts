@@ -30,6 +30,7 @@ export class BackgroundAnalysisDispatcher {
   readonly #quietMs: number;
   #timer: NodeJS.Timeout | null = null;
   #pass: Promise<void> | null = null;
+  #running = false;
   #again = false;
   #disposed = false;
 
@@ -59,11 +60,14 @@ export class BackgroundAnalysisDispatcher {
   /** One more pass, after the one under way if there is one; never two at once. */
   nudge(): void {
     if (this.#disposed) return;
-    if (this.#pass !== null) {
+    // Marked before the pass begins: a nudge made while its first steps run, before it has yielded once, is the next pass's.
+    if (this.#running) {
       this.#again = true;
       return;
     }
+    this.#running = true;
     this.#pass = this.#run().finally(() => {
+      this.#running = false;
       this.#pass = null;
     });
   }
