@@ -208,15 +208,19 @@ async function waitForRecoveryScreen(renderer, name) {
     if (await renderer.evaluate(`Boolean(document.querySelector('[data-screen="manuscript-recovery"]'))`)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  const seen = await renderer.evaluate(SEEN_STATE);
+  // A renderer that is gone by now — the product died during a slow relaunch, one of #643's suspects — must not replace
+  // the labelled failure with its own: nothing read is `none` on every word.
+  const seen = await renderer.evaluate(SEEN_STATE).catch(() => null);
   const state = seen?.interrupted === true ? 'interrupted' : seen?.ready === true ? 'ready' : 'not-ready';
   throw journeyCheckFailure('J-08', `${name}-${state}-on-${screenWord(seen?.screen)}`);
 }
 
 /**
  * Wait for 恢复为新版本 to land in the editor with the recovered-state marker; past the bound, the label says how far the
- * restore came (Issue #643): `-editor-unmarked` (the editor opened without the marker), or the screen it stood on and the
- * status's tone — `busy` while the restore was still under way, `error` when it was refused or the window did not open.
+ * restore came (Issue #643): `-editor-unmarked` (the editor was on screen with its recovered-state marker present but still
+ * hidden; an absent marker element holds the wait), or the screen it stood on and the status's tone — `busy` while the
+ * restore was still under way, `error` when it was refused or the window did not open. A renderer gone by then reads as
+ * `none` on every word rather than replacing the label with its own failure.
  */
 async function waitForRestoredEditor(renderer, name, timeout) {
   const deadline = Date.now() + timeout;
@@ -224,7 +228,7 @@ async function waitForRestoredEditor(renderer, name, timeout) {
     if (await renderer.evaluate(`Boolean(document.querySelector('[data-screen="editor"]') && !document.querySelector('.recovered-state-marker')?.hidden)`)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  const seen = await renderer.evaluate(SEEN_STATE);
+  const seen = await renderer.evaluate(SEEN_STATE).catch(() => null);
   if (seen?.screen === 'editor') throw journeyCheckFailure('J-08', `${name}-editor-unmarked`);
   throw journeyCheckFailure('J-08', `${name}-on-${screenWord(seen?.screen)}-${toneWord(seen?.tone)}`);
 }

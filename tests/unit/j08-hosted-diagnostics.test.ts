@@ -68,6 +68,19 @@ describe('J-08 names what the product showed when a recovery wait passed its bou
     }
   });
 
+  it('keeps its label when the renderer is gone by the time the bound passes (review P3-1)', async () => {
+    // The post-deadline read rejects as a dead CDP session would: the label still names the wait, with `none` for what
+    // could not be read, rather than the session's own error reaching the hosted log as the stage alone.
+    const gone = { evaluate: async (expression: string) => { if (expression.startsWith('Boolean(')) return false; throw new Error('J-08/renderer-evaluate'); } };
+    vi.useFakeTimers();
+    try {
+      expect(await labelOf(helpers.waitForRecoveryScreen(gone, 'recovery-none'))).toBe('recovery-none-not-ready-on-none');
+      expect(await labelOf(helpers.waitForRestoredEditor(gone, 'none-restored', 120_000))).toBe('none-restored-on-none-none');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('returns at once when the wait holds', async () => {
     const holding = { evaluate: async () => true };
     await expect(helpers.waitForRecoveryScreen(holding, 'recovery-none')).resolves.toBeUndefined();
