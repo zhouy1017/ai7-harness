@@ -312,6 +312,11 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   database_merge_books: 'house',
   // A Series' retrieval exclusions are the house's, as its Series and their knowledge are (Issue #64, S29b).
   series_retrieval_exclusions: 'house',
+  // 后台分析登记 (Issue #95, S39; ADR 0048): a standing decision of this house's editor. A Book merged in never brings one — no
+  // merge makes AI7 start anything by itself — while its Runs keep naming the enrollment version they were started under.
+  background_analysis_enrollments: 'house',
+  background_analysis_enrollment_versions: 'house',
+  background_analysis_enrollment_states: 'house',
   // The search index over the working text, and its own relations.
   working_block_search: 'derived',
   working_block_search_config: 'derived',

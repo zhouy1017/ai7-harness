@@ -6,6 +6,8 @@ import {
   PROVIDER_CACHE_ROOT_ARGUMENT,
   RUN_BUDGET_CEILING_ARGUMENT,
   TRUSTED_SCOPE_ARGUMENT,
+  BACKGROUND_QUIET_ARGUMENT,
+  parseBackgroundQuietMs,
   parseTrustedLaunchForm,
   type J01ImportControl,
   type J03ForegroundExecutionControl,
@@ -42,6 +44,7 @@ import { REPLACEMENT_WAITING_MESSAGE, replacementBlockedBy, takenWhileReplacemen
 import type { BaselineAnalysisExecutionOwner } from './analysis/execution.js';
 import type { LaunchBinding } from './analysis/baseline-analysis-store.js';
 import type { ReviewRunDriver } from './review/review-run-driver.js';
+import type { BackgroundAnalysisDispatcher } from './background-analysis.js';
 
 async function* readFrames(): AsyncGenerator<Uint8Array> {
   const header = Buffer.allocUnsafe(4);
@@ -149,11 +152,12 @@ function requireNothingRunning(
   analysisExecution: BaselineAnalysisExecutionOwner,
   reviewRuns: ReviewRunDriver,
   dialogues: DialogueExecutionOwner,
+  background: BackgroundAnalysisDispatcher,
 ): void {
   // A dialogue answering writes its outcome when it settles (Issue #52, S17a), so it holds a replacement back as a Run does.
   const blocked = replacementBlockedBy({
     runsIdle: analysisExecution.idle && !dialogues.answering, reviewRunsDriving: reviewRuns.driving, jobsBusy: jobs.busy,
-    exportRunning: store.databaseExportRunning(),
+    exportRunning: store.databaseExportRunning(), backgroundBusy: background.busy,
   });
   if (blocked !== null) throw new StoreErrorClass('DATABASE_REPLACEMENT_BUSY', blocked);
 }
@@ -169,6 +173,7 @@ async function dispatch(
   importControl: J01ImportControl | undefined,
   launchPolicy: LaunchPolicyProjection,
   connectivity: ConnectivityContext,
+  background: BackgroundAnalysisDispatcher,
 ): Promise<ServiceSuccessResponse> {
   const analysisProgress = (runRecordId: string) => analysisExecution.progressFor(runRecordId);
   // 替换本机全部数据 waits for AI7's next start (Issue #434 review): until then nothing is written, so no change made meanwhile
@@ -674,14 +679,14 @@ async function dispatch(
     case 'inspectDatabaseImport':
       return { id: request.id, ok: true, op: request.op, result: await store.inspectDatabaseImport(request.input.source) };
     case 'prepareDatabaseReplacement':
-      requireNothingRunning(store, jobs, analysisExecution, reviewRuns, dialogues);
+      requireNothingRunning(store, jobs, analysisExecution, reviewRuns, dialogues, background);
       return { id: request.id, ok: true, op: request.op, result: await store.prepareDatabaseReplacement(request.input.previewId) };
     case 'cancelDatabaseReplacement':
       return { id: request.id, ok: true, op: request.op, result: await store.cancelDatabaseReplacement(request.input.replacementId) };
     case 'inspectDatabaseReplacements':
       return { id: request.id, ok: true, op: request.op, result: await store.inspectDatabaseReplacements() };
     case 'rollBackDatabaseReplacement':
-      requireNothingRunning(store, jobs, analysisExecution, reviewRuns, dialogues);
+      requireNothingRunning(store, jobs, analysisExecution, reviewRuns, dialogues, background);
       return { id: request.id, ok: true, op: request.op, result: await store.rollBackDatabaseReplacement(request.input.replacementId) };
     case 'prepareDatabaseMerge':
       return { id: request.id, ok: true, op: request.op, result: await store.prepareDatabaseMerge(request.input.previewId) };
@@ -835,6 +840,17 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.recordAnalysisFeedback(request.input) };
     case 'deactivateDefaultExecutionRule':
       return { id: request.id, ok: true, op: request.op, result: store.deactivateDefaultExecutionRule(request.input.ruleId) };
+    // 后台分析登记 (Issue #95, plan slice S39; ADR 0048): read with what it would do now; `登记` and `撤销登记` are the editor's
+    // two decisions, and the dispatcher looks at once after either, so a backfill starts without waiting for the next tick.
+    case 'inspectBackgroundAnalysisEnrollment':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectBackgroundAnalysisEnrollment(request.input.bookId, background.runtime()) };
+    case 'enrollBackgroundAnalysis': {
+      const result = store.enrollBackgroundAnalysis(request.input.bookId, request.input.disclosureDigest, request.input.startingPoint, background.runtime());
+      background.nudge();
+      return { id: request.id, ok: true, op: request.op, result };
+    }
+    case 'revokeBackgroundAnalysisEnrollment':
+      return { id: request.id, ok: true, op: request.op, result: store.revokeBackgroundAnalysisEnrollment(request.input.bookId, request.input.enrollmentId, background.runtime()) };
     // 审阅 (Issue #417, plan slice S69). Every answer that shows a Run reads the one owner's progress, so
     // a category executing now carries its Measured Run Progress.
     case 'inspectReviewWorkspace':
@@ -1344,6 +1360,7 @@ function parseArguments(argv: string[]): {
   connectivityPath: string | undefined;
   unitHoldPath: string | undefined;
   answerHoldPath: string | undefined;
+  backgroundQuietMs: number | undefined;
 } {
   const values = new Map<string, string>();
   for (let index = 0; index < argv.length; index += 2) {
@@ -1356,7 +1373,7 @@ function parseArguments(argv: string[]): {
       (key !== '--data-root' && key !== '--parent-pid' && key !== '--j01-import-control' &&
         key !== '--j03-foreground-execution-control' && key !== '--j08-recovery-control' &&
         key !== '--j04-model-adapter' && key !== '--j04-connectivity-path' && key !== '--j10-unit-hold-path' && key !== '--j16-answer-hold-path' &&
-        key !== TRUSTED_SCOPE_ARGUMENT && key !== RUN_BUDGET_CEILING_ARGUMENT &&
+        key !== BACKGROUND_QUIET_ARGUMENT && key !== TRUSTED_SCOPE_ARGUMENT && key !== RUN_BUDGET_CEILING_ARGUMENT &&
         key !== PROVIDER_CACHE_ROOT_ARGUMENT)
     ) {
       throw new ProtocolError();
@@ -1406,6 +1423,9 @@ function parseArguments(argv: string[]): {
   const unitHoldPath = values.get('--j10-unit-hold-path');
   // J-16's answer hold (Issue #52, S17a): a file the Journey writes, read before each text delta of a dialogue answer.
   const answerHoldPath = values.get('--j16-answer-hold-path');
+  // J-09's 后台分析登记 pace (Issue #95, S39): a shorter quiet period, beside the adapter, so the Journey waits on progress.
+  const backgroundQuietValue = values.get(BACKGROUND_QUIET_ARGUMENT);
+  const backgroundQuietMs = backgroundQuietValue === undefined ? null : parseBackgroundQuietMs(backgroundQuietValue);
   if (
     !dataRoot ||
     !isAbsolute(dataRoot) ||
@@ -1433,16 +1453,20 @@ function parseArguments(argv: string[]): {
       process.env.AI7_E2E_JOURNEY !== 'J-11' && process.env.AI7_E2E_JOURNEY !== 'J-13' && process.env.AI7_E2E_JOURNEY !== 'J-16') ||
       !isAbsolute(unitHoldPath))) ||
     (answerHoldPath !== undefined && (process.env.AI7_E2E_JOURNEY !== 'J-16' || !isAbsolute(answerHoldPath))) ||
+    (backgroundQuietValue !== undefined && (process.env.AI7_E2E_JOURNEY !== 'J-09' || backgroundQuietMs === null || modelAdapterControl === undefined)) ||
     [importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl].filter(Boolean).length > 1 ||
     // developer-live is a human-attended developer-host launch: never a Journey launch, never with a Journey control.
     (launchForm.trustedOperationalScope !== 'development-ci' &&
       (process.env.AI7_E2E_JOURNEY !== undefined || importControlValue !== undefined || foregroundExecutionControlValue !== undefined ||
         recoveryControlValue !== undefined || modelAdapterControlValue !== undefined || connectivityPath !== undefined ||
-        unitHoldPath !== undefined || answerHoldPath !== undefined))
+        unitHoldPath !== undefined || answerHoldPath !== undefined || backgroundQuietValue !== undefined))
   ) {
     throw new ProtocolError();
   }
-  return { dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, connectivityPath, unitHoldPath, answerHoldPath };
+  return {
+    dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, connectivityPath, unitHoldPath,
+    answerHoldPath, backgroundQuietMs: backgroundQuietMs ?? undefined,
+  };
 }
 
 function parentIsAlive(parentPid: number): boolean {
@@ -1473,8 +1497,8 @@ async function run(): Promise<void> {
   // The native `fetch` is captured before the denial replaces the global; only the developer-live
   // `opencode-go` transport ever receives it, and only through the adapter's transmit step.
   const nativeFetch: typeof fetch = globalThis.fetch;
-  const { dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, connectivityPath, unitHoldPath, answerHoldPath } =
-    parseArguments(process.argv.slice(2));
+  const { dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, connectivityPath, unitHoldPath, answerHoldPath,
+    backgroundQuietMs } = parseArguments(process.argv.slice(2));
   if (launchForm.trustedOperationalScope === 'developer-live') {
     // The single-host allowance (settlement l): armed before the denial so its gates admit exactly the
     // policy's endpoint host and port; Node's own fetch resolves `tls.connect` and `dns.lookup` at call time.
@@ -1493,6 +1517,7 @@ async function run(): Promise<void> {
     { createKeyringSecretResolver },
     { ReviewRunDriver },
     { DialogueExecutionOwner },
+    { BackgroundAnalysisDispatcher: BackgroundAnalysisDispatcherClass },
   ] =
     await Promise.all([
       import('./store.js'),
@@ -1504,6 +1529,7 @@ async function run(): Promise<void> {
       import('./provider/keyring-secret-resolver.js'),
       import('./review/review-run-driver.js'),
       import('./dialogue/dialogue-execution.js'),
+      import('./background-analysis.js'),
     ]);
   StoreErrorClass = StoreError;
   let stopping = false;
@@ -1527,6 +1553,7 @@ async function run(): Promise<void> {
   let dialogues: DialogueExecutionOwner | undefined;
   let preflightTimer: NodeJS.Timeout | undefined;
   let backupTimer: NodeJS.Timeout | undefined;
+  let background: BackgroundAnalysisDispatcher | undefined;
   try {
     const codeRoot = fileURLToPath(new URL('../', import.meta.url));
     const launchPolicy = await resolveSourceCheckoutLaunchPolicy(codeRoot, launchForm.trustedOperationalScope);
@@ -1708,6 +1735,16 @@ async function run(): Promise<void> {
     }
     backupTimer = setInterval(() => void openStore.runScheduledBackupIfDue().catch(() => undefined), BACKUP_CHECK_INTERVAL_MS);
     backupTimer.unref();
+    // 后台分析登记 (Issue #95, S39; ADR 0048): the one standing origin of a Run AI7 starts by itself. It looks once the service
+    // is active and then every few seconds; a Book it cannot start now is looked at again then, so nothing it would start
+    // waits in a queue of its own — and after a restart it starts only what an Enrollment in force matches anew.
+    const ownedJobs = jobs;
+    background = new BackgroundAnalysisDispatcherClass({
+      store: openStore, execution: owner, launchPolicy, editorWorkBusy: () => ownedJobs.busy,
+      // J-09's pace (Issue #95, S39): its quiet period, and a look four times as often, never less than a quarter second.
+      ...(backgroundQuietMs === undefined ? {} : { quietMs: backgroundQuietMs, tickMs: Math.max(250, Math.round(backgroundQuietMs / 4)) }),
+    });
+    background.start();
     reachServiceStartup('serving');
     for await (const frame of readFrames()) {
       let request: ServiceRequest;
@@ -1720,7 +1757,7 @@ async function run(): Promise<void> {
       }
       let response: ServiceResponse;
       try {
-        response = await dispatch(store, harness, jobs, analysisExecution, reviewRuns, dialogues, request, importControl, launchPolicy, connectivity);
+        response = await dispatch(store, harness, jobs, analysisExecution, reviewRuns, dialogues, request, importControl, launchPolicy, connectivity, background);
       } catch (error) {
         if (error instanceof StoreFatalError) {
           stop();
@@ -1763,6 +1800,8 @@ async function run(): Promise<void> {
       const backupsStopped = store?.stopScheduledBackups();
       // A database export under way stops as 取消导出 stops it, and leaves no package it was writing (Issue #434 review).
       const exportsStopped = store?.stopDatabaseExports();
+      // The dispatcher starts nothing more: a preparation it has under way stops at its next step.
+      await background?.dispose();
       await jobs?.dispose();
       // A dialogue answering is interrupted and settles 回答中断 while the store is still open (Issue #52, S17a).
       await dialogues?.dispose();

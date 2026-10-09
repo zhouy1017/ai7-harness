@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LIBRARY_OBJECT_DIRECTORY } from '../../src/service/library-materials.js';
 import { MATERIAL_INDEXER_IDENTITY, MATERIAL_INDEX_TRIGGER_SQL, MATERIAL_INDEX_WORK_DIRECTORY } from '../../src/service/material-index.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { MATERIAL_INDEX_SCHEMA_VERSION, WRITING_TASK_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, MATERIAL_INDEX_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { buildManuscriptPackage } from '../../src/service/text-manuscript.js';
 import { MAX_FRAME_BYTES, MAX_MATERIAL_SEGMENTS_PAGE, type LibraryMaterialKind, type LibraryMaterialProjection } from '../../src/shared/protocol.js';
 import { sample1Path } from '../support/sample1-baseline.js';
@@ -321,10 +321,10 @@ describe('资料索引 over the real store', () => {
     } finally {
       store.close();
     }
-    // A revision-65 store: the item arrived before the index existed.
+    // A revision-66 store: the item arrived before the index existed.
     const plant = new DatabaseSync(storePath());
     try {
-      plant.exec(`DROP TABLE material_index_segments; DROP TABLE material_index_builds; PRAGMA user_version = ${WRITING_TASK_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE material_index_segments; DROP TABLE material_index_builds; PRAGMA user_version = ${BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION};`);
     } finally {
       plant.close();
     }

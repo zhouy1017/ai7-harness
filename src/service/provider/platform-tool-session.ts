@@ -1,5 +1,6 @@
 import { sha256Hex } from '../analysis/canonical.js';
-import type { PlatformToolExecution, PlatformToolOwner } from '../harness/primary-agent-harness.js';
+import type { HarnessTurnOutcome, PlatformToolExecution, PlatformToolOwner } from '../harness/primary-agent-harness.js';
+import { AI7_FAILURE_CODES } from './classification.js';
 import {
   EgressTicketBook,
   evaluatePublicSourceFetch,
@@ -16,11 +17,10 @@ import {
   canonicalToolArguments,
   toolArgumentsDigest,
   type PlatformToolName,
-  type PlatformToolsRule,
 } from './platform-tools.js';
 import type { PlatformToolFetch } from './platform-tool-http.js';
 import type { ProviderResultCache } from './provider-result-cache.js';
-import { authorizePublicFetch, sendPublicFetch } from './public-source-fetch.js';
+import { authorizePublicFetch, sendPublicFetch, type TicketHostAdmission } from './public-source-fetch.js';
 import type { ResearchSnapshotCache } from './research-snapshot-cache.js';
 import { authorizeSearchCall, sendSearchCall } from './search-service.js';
 
@@ -36,17 +36,16 @@ import { authorizeSearchCall, sendSearchCall } from './search-service.js';
  */
 export class PlatformToolSession implements PlatformToolOwner {
   readonly #binding: EgressBindingFacts;
-  readonly #rule: PlatformToolsRule;
   readonly #base: Pick<EgressAttemptScope, 'currentBindingDigest' | 'acceptedOutputDigests' | 'ceilingState'>;
   readonly #fetch: PlatformToolFetch;
-  readonly #admitHost: (target: { host: string; port: number }) => () => void;
+  readonly #admitHost: TicketHostAdmission;
   readonly #cache: ProviderResultCache;
   readonly #snapshots: ResearchSnapshotCache;
   readonly #purpose: string;
   /** Where a search goes, as the rule names it: the Research Snapshot Cache never answers one service's query with another's. */
   readonly #searchOrigin: string;
   readonly #breaker: PlatformToolBreaker;
-  readonly #book = new EgressTicketBook();
+  readonly #book: EgressTicketBook;
   readonly #acceptedToolCallDigests = new Set<string>();
   readonly #admittedToolResults = new Map<string, AdmittedToolResult>();
   readonly #citations = new Set<string>();
@@ -56,7 +55,8 @@ export class PlatformToolSession implements PlatformToolOwner {
     readonly binding: EgressBindingFacts;
     readonly scope: Pick<EgressAttemptScope, 'currentBindingDigest' | 'acceptedOutputDigests' | 'ceilingState'>;
     readonly fetch: PlatformToolFetch;
-    readonly admitHost: (target: { host: string; port: number }) => () => void;
+    /** Per-ticket host admission: the network denial's `admitTicketHost`, keyed by each fetch ticket's id. */
+    readonly admitHost: TicketHostAdmission;
     readonly cache: ProviderResultCache;
     readonly snapshots: ResearchSnapshotCache;
     /** The test item purpose every call of this attempt is recorded under. */
@@ -66,7 +66,6 @@ export class PlatformToolSession implements PlatformToolOwner {
     const rule = deps.binding.platformTools ?? null;
     if (rule === null || deps.binding.policy.operationalScope !== 'developer-live') throw new Error('PLATFORM_TOOLS_NOT_NAMED');
     this.#binding = deps.binding;
-    this.#rule = rule;
     this.#base = deps.scope;
     this.#fetch = deps.fetch;
     this.#admitHost = deps.admitHost;
@@ -75,6 +74,8 @@ export class PlatformToolSession implements PlatformToolOwner {
     this.#purpose = deps.purpose;
     this.#searchOrigin = `${rule.websearch.service}@${rule.websearch.host}`;
     this.#breaker = deps.breaker ?? new PlatformToolBreaker();
+    // The gate opens this attempt's book for this binding; every redemption re-reads the attempt's current binding (#676).
+    this.#book = EgressTicketBook.open(deps.binding, { currentBindingDigest: () => this.#base.currentBindingDigest() });
   }
 
   /** The scope the gate evaluates every model call and every tool decision of this attempt against. */
@@ -95,11 +96,26 @@ export class PlatformToolSession implements PlatformToolOwner {
 
   /**
    * The disclosed state the unit in flight ends with: 联网核查未完成 once its breaker tripped (ADR 0080 §7.4). The gate then
-   * refuses the unit's next model call (`circuit-breaker-tripped`), so its turn ends interrupted, and the execution owner
-   * records this state on the unit's affected findings instead of retrying.
+   * refuses the unit's next model call (`circuit-breaker-tripped`), so its turn ends `failed` with the distinct
+   * `AI7_PLATFORM_TOOL_BREAKER_TRIPPED`, and the execution owner settles the unit through `unitEnd` instead of retrying.
    */
   get unitDisclosure(): '联网核查未完成' | null {
     return this.#breaker.state === 'tripped' ? '联网核查未完成' : null;
+  }
+
+  /**
+   * How the unit in flight ends, read from the turn the harness returned for it (ADR 0080 §7.4; #676) — the one read path
+   * the execution owner takes once it wires the platform tools (S87-f3b). A turn that ended on this unit's tripped breaker
+   * ends the unit with 联网核查未完成 on its affected findings, and is never retried: not by the automatic safe retry, not
+   * by asking the editor first (S76d) — its failure is not retry-safe — and not by ending the Run, since the other units
+   * owe nothing to this one's loop. Every other turn — answered, interrupted, refused for any other reason — is `null`, and
+   * settles exactly as a turn without platform tools does. Read it before `startUnit`, which resets the breaker.
+   */
+  unitEnd(turn: Pick<HarnessTurnOutcome, 'terminal' | 'signals'>): PlatformToolUnitEnd | null {
+    if (turn.terminal !== 'failed' || this.#breaker.state !== 'tripped') return null;
+    const failed = turn.signals.find((signal) => signal.kind === 'failed');
+    if (failed?.kind !== 'failed' || failed.failure.code !== AI7_FAILURE_CODES.PLATFORM_TOOL_BREAKER_TRIPPED) return null;
+    return BREAKER_UNIT_END;
   }
 
   /** Start a unit: its breaker is intact and no call is a duplicate yet. Citations persist across the attempt. */
@@ -141,13 +157,13 @@ export class PlatformToolSession implements PlatformToolOwner {
     const scope = this.egressScope;
     try {
       if (args.tool === 'websearch') {
-        const decision = evaluateSearchServiceCall({ host: this.#rule.websearch.host, arguments: args, outboundDataCategory: this.#binding.outboundDataCategory },
-          this.#binding, scope, this.#book);
+        // The call brings only its arguments: the gate derives the host and the category from the rule and the binding.
+        const decision = evaluateSearchServiceCall({ arguments: args }, this.#binding, scope, this.#book);
         if (decision.decision !== 'call-search-service') return refusal(decision.detail);
         const settled = await platformToolCallOnce(this.#cache, this.#snapshots,
           { kind: 'search-call', purpose: this.#purpose, argumentsDigest: decision.ticket.argumentsDigest, host: decision.ticket.host, origin: this.#searchOrigin },
           {
-            authorize: () => authorizeSearchCall({ ticket: decision.ticket, book: this.#book, rule: this.#rule, arguments: args }),
+            authorize: () => authorizeSearchCall({ ticket: decision.ticket, book: this.#book, arguments: args }),
             send: (authorized) => sendSearchCall(authorized, this.#fetch, call.signal),
           });
         if (settled.replayed) this.#book.revoke(decision.ticket);
@@ -160,7 +176,7 @@ export class PlatformToolSession implements PlatformToolOwner {
       const settled = await platformToolCallOnce(this.#cache, this.#snapshots,
         { kind: 'fetch', purpose: this.#purpose, argumentsDigest: decision.ticket.argumentsDigest, host: decision.ticket.host, origin: 'webfetch' },
         {
-          authorize: () => authorizePublicFetch({ ticket: decision.ticket, book: this.#book, rule: this.#rule }),
+          authorize: () => authorizePublicFetch({ ticket: decision.ticket, book: this.#book }),
           send: (authorized) => sendPublicFetch(authorized, { fetch: this.#fetch, admitHost: this.#admitHost, signal: call.signal }),
         });
       if (settled.replayed) this.#book.revoke(decision.ticket);
@@ -172,6 +188,24 @@ export class PlatformToolSession implements PlatformToolOwner {
     }
   }
 }
+
+/**
+ * A unit its breaker ended (ADR 0080 §7.4): the disclosed state its affected findings carry, and the one way it settles —
+ * the unit ends, unretried, and the Run goes on to its next unit.
+ */
+export interface PlatformToolUnitEnd {
+  readonly reason: 'circuit-breaker-tripped';
+  readonly disclosure: '联网核查未完成';
+  readonly retry: 'never';
+  readonly settles: 'unit-only';
+}
+
+const BREAKER_UNIT_END: PlatformToolUnitEnd = Object.freeze({
+  reason: 'circuit-breaker-tripped',
+  disclosure: '联网核查未完成',
+  retry: 'never',
+  settles: 'unit-only',
+});
 
 function refusal(text: string): { readonly text: string; readonly sourceUrl: null } {
   return { text, sourceUrl: null };

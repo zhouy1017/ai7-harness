@@ -1237,6 +1237,26 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (!validUuid(input.ruleId)) throw new ProtocolError(tentativeId);
       break;
     }
+    // 后台分析登记 (Issue #95, S39): the route's Book; `登记` names the disclosure it confirmed and one of the two starting points,
+    // and `撤销登记` the Enrollment it revokes.
+    case 'inspectBackgroundAnalysisEnrollment': {
+      const input = requireInput(value.input, ['bookId'], tentativeId);
+      if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'enrollBackgroundAnalysis': {
+      const input = requireInput(value.input, ['bookId', 'disclosureDigest', 'startingPoint'], tentativeId);
+      if (!validUuid(input.bookId) || !isBoundedString(input.disclosureDigest, 64) || !HEX_DIGEST_PATTERN.test(input.disclosureDigest) ||
+          (input.startingPoint !== 'prospective' && input.startingPoint !== 'backfill')) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'revokeBackgroundAnalysisEnrollment': {
+      const input = requireInput(value.input, ['bookId', 'enrollmentId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.enrollmentId)) throw new ProtocolError(tentativeId);
+      break;
+    }
     // 取消 while a Run waits (Issue #502), and 取消任务 once it started (Issue #422): the Task Intent names it, within
     // the route's Book.
     case 'cancelWaitingBaselineAnalysis':

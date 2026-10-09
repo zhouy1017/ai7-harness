@@ -6,6 +6,7 @@ import {
   MAX_FRAME_BYTES,
   PROVIDER_CACHE_ROOT_ARGUMENT,
   RUN_BUDGET_CEILING_ARGUMENT,
+  BACKGROUND_QUIET_ARGUMENT,
   TRUSTED_SCOPE_ARGUMENT,
   type J01ImportControl,
   type J03ForegroundExecutionControl,
@@ -220,6 +221,8 @@ export class ServiceClient {
     unitHoldPath?: string,
     answerHoldPath?: string,
     onStartupStep?: (step: ServiceStartupStep) => void,
+    /** J-09 only (Issue #95, S39): the 后台分析登记 quiet period, in milliseconds, so the Journey waits on progress, not a clock. */
+    backgroundQuietMs?: number,
   ): Promise<ServiceClient> {
     if (!isAbsolute(executable) || !isAbsolute(serviceEntry) || !isAbsolute(dataRoot)) {
       throw new ServiceCallError('SERVICE_LAUNCH_INVALID', '本地业务服务启动参数无效。');
@@ -241,6 +244,8 @@ export class ServiceClient {
     if (unitHoldPath !== undefined) args.push('--j10-unit-hold-path', unitHoldPath);
     // J-16's answer hold (Issue #52, S17a) likewise: the file whose number lets a dialogue answer's deltas through.
     if (answerHoldPath !== undefined) args.push('--j16-answer-hold-path', answerHoldPath);
+    // J-09's 后台分析登记 pace (Issue #95, S39): a shorter quiet period beside the adapter.
+    if (backgroundQuietMs !== undefined) args.push(BACKGROUND_QUIET_ARGUMENT, String(backgroundQuietMs));
     const child = spawn(
       executable,
       args,

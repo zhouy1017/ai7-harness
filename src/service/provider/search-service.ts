@@ -1,5 +1,5 @@
 import { isRecord } from '../analysis/canonical.js';
-import type { EgressTicketBook, SearchServiceTicket } from './egress-gate.js';
+import { redeemEgressTicket, type EgressTicketBook, type SearchServiceTicket } from './egress-gate.js';
 import { toolArgumentsDigest, type PlatformToolArguments, type PlatformToolsRule } from './platform-tools.js';
 import { PlatformToolHttpError, deadlineSignal, readBoundedBody, type PlatformToolFetch } from './platform-tool-http.js';
 
@@ -120,21 +120,30 @@ export interface AuthorizedSearchCall {
 
 const authorizedSearchCalls = new WeakSet<AuthorizedSearchCall>();
 
+function ticketRefused(): SearchServiceError {
+  return new SearchServiceError('PLATFORM_TOOL_TICKET_REFUSED', '没有本次搜索的 call-search-service 决定；未发送任何内容。');
+}
+
 /**
- * Redeem one `websearch` call's ticket. The ticket must be for exactly the rule's host and exactly this query's
- * canonical-argument digest; a ticket that does not redeem refuses the call before anything is claimed or sent.
+ * Redeem one `websearch` call's ticket through the gate (#676). The ticket must be for exactly this query's canonical-argument
+ * digest and must redeem from the gate's own book while its binding is current; the rule the request is built from is the
+ * one the gate returns for that binding — never one the caller hands in — and the request must address exactly the
+ * ticket's host. A ticket that does not redeem refuses the call before anything is claimed or sent.
  */
 export function authorizeSearchCall(input: {
   readonly ticket: SearchServiceTicket;
   readonly book: EgressTicketBook;
-  readonly rule: PlatformToolsRule;
   readonly arguments: Extract<PlatformToolArguments, { tool: 'websearch' }>;
 }): AuthorizedSearchCall {
-  const { ticket, rule } = input;
-  if (ticket.host !== rule.websearch.host || ticket.argumentsDigest !== toolArgumentsDigest(input.arguments) || !input.book.redeem(ticket)) {
-    throw new SearchServiceError('PLATFORM_TOOL_TICKET_REFUSED', '没有本次搜索的 call-search-service 决定；未发送任何内容。');
-  }
-  const authorized = Object.freeze({ request: searchServiceRequest(rule, input.arguments.query) });
+  const { ticket } = input;
+  if (ticket.argumentsDigest !== toolArgumentsDigest(input.arguments)) throw ticketRefused();
+  const rule = redeemEgressTicket(input.book, ticket);
+  if (rule === null) throw ticketRefused();
+  const request = searchServiceRequest(rule, input.arguments.query);
+  // The gate issues into a book only under the book's own rule, so this holds by construction; it is kept as the forwarder's
+  // own statement that a ticket sends to exactly its host.
+  if (new URL(request.url).hostname !== ticket.host) throw ticketRefused();
+  const authorized = Object.freeze({ request });
   authorizedSearchCalls.add(authorized);
   return authorized;
 }
@@ -143,7 +152,6 @@ export function authorizeSearchCall(input: {
 export async function forwardSearchCall(input: {
   readonly ticket: SearchServiceTicket;
   readonly book: EgressTicketBook;
-  readonly rule: PlatformToolsRule;
   readonly arguments: Extract<PlatformToolArguments, { tool: 'websearch' }>;
   readonly fetch: PlatformToolFetch;
   readonly signal?: AbortSignal;
@@ -153,9 +161,7 @@ export async function forwardSearchCall(input: {
 
 /** Send one authorized search call, exactly once; an object `authorizeSearchCall` did not return sends nothing. */
 export async function sendSearchCall(authorized: AuthorizedSearchCall, fetch: PlatformToolFetch, signal?: AbortSignal): Promise<SearchCallOutcome> {
-  if (!authorizedSearchCalls.delete(authorized)) {
-    throw new SearchServiceError('PLATFORM_TOOL_TICKET_REFUSED', '没有本次搜索的 call-search-service 决定；未发送任何内容。');
-  }
+  if (!authorizedSearchCalls.delete(authorized)) throw ticketRefused();
   const { request } = authorized;
   const input = { fetch, signal };
   const deadline = deadlineSignal(SEARCH_SERVICE_TIMEOUT_MS, input.signal);

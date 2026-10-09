@@ -21,6 +21,10 @@ export const PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER: ReadonlyArray<string> = [
   // 资料索引 (revision 67; Issue #428, S80a): the segments, then the builds, which name 资料库 items.
   'material_index_segments',
   'material_index_builds',
+  // 后台分析登记 (revision 66; Issue #95, S39): each Enrollment's states, versions and the Enrollment.
+  'background_analysis_enrollment_states',
+  'background_analysis_enrollment_versions',
+  'background_analysis_enrollments',
   // 写作任务 (revision 65; Issue #432, S84a): its drafts, which name documents, and its Tasks.
   'writing_drafts',
   'writing_tasks',

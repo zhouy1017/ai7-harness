@@ -384,6 +384,9 @@ async function constructPredecessorV12(dataRoot, bookId) {
       BEGIN IMMEDIATE;
       DROP TABLE material_index_segments;
       DROP TABLE material_index_builds;
+      DROP TABLE background_analysis_enrollment_states;
+      DROP TABLE background_analysis_enrollment_versions;
+      DROP TABLE background_analysis_enrollments;
       DROP TABLE writing_drafts;
       DROP TABLE writing_tasks;
       DROP TABLE evaluation_rewrite_decisions;

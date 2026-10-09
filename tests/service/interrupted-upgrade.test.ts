@@ -61,17 +61,19 @@ import {
   ANALYSIS_LEDGER_REVISION_59_SQL,
   ANALYSIS_LEDGER_REVISION_62_SQL,
   ANALYSIS_LEDGER_REVISION_64_SQL,
+  BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
   MATERIAL_INDEX_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import { EVALUATION_REWRITE_SCHEMA_SQL, initializeEvaluationRewriteSchema } from '../../src/service/evaluation-rewrites.js';
 import { WRITING_TASK_SCHEMA_SQL, initializeWritingTaskSchema } from '../../src/service/writing-tasks.js';
+import { BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL, initializeBackgroundAnalysisEnrollmentSchema } from '../../src/service/background-analysis-enrollments.js';
 import { MATERIAL_INDEX_SCHEMA_SQL, initializeMaterialIndexSchema } from '../../src/service/material-index.js';
 import { READERS_REPORT_SCHEMA_SQL, initializeReadersReportSchema } from '../../src/service/readers-reports.js';
 import { SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL, initializeSeriesRetrievalExclusionSchema } from '../../src/service/series-exclusions.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 import { plantRevision34Relations } from '../support/clarifications.js';
 import { downgradeAnalysisRunStatesToRevision29 } from '../support/connectivity-wait.js';
-import { plantRevision30Relations } from '../support/default-execution-rules.js';
+import { downgradeAnalysisRunAuthorizationsToRevision65, plantRevision30Relations } from '../support/default-execution-rules.js';
 import { downgradeEditorialMarksToRevision22 } from '../support/editorial-mark-revisions.js';
 import { IMPORT_RETENTION_RELATIONS_DROP_ORDER } from '../support/import-retention.js';
 import { downgradeProposalChangeItemsToRevision27, IMPORTED_MARK_RELATIONS_DROP_ORDER } from '../support/imported-marks.js';
@@ -157,19 +159,25 @@ interface Revision {
   readonly step: ((database: DatabaseSync) => void) | null;
   /** Take a store at this revision back to the one before, as the suites' own plants do. */
   readonly undo: (database: DatabaseSync) => void;
-  /** The revision a store is at before this one, when that is not the one just below it (67 follows 65; 66 is #713's). */
-  readonly before?: number;
 }
 
 // Newest first: a store is walked down one revision at a time.
 const REVISIONS: ReadonlyArray<Revision> = [
   {
-    // Revision 67 (Issue #428, S80a): each 资料库 item's Material Index build and its segments, created before the stamp. It
-    // follows revision 65 here; revision 66 is #713's.
+    // Revision 67 (Issue #428, S80a): each 资料库 item's Material Index build and its segments, created before the stamp.
     revision: 67,
-    before: 65,
     step: initializeMaterialIndexSchema,
     undo: (database) => drop(database, Object.keys(MATERIAL_INDEX_SCHEMA_SQL).reverse()),
+  },
+  {
+    // Revision 66 (Issue #95, S39): each Book's 后台分析登记, created before the stamp, and the Run Authorizations' origin widened
+    // for it — a widening the next open performs again from revision 65's text.
+    revision: 66,
+    step: initializeBackgroundAnalysisEnrollmentSchema,
+    undo: (database) => {
+      drop(database, Object.keys(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL).reverse());
+      downgradeAnalysisRunAuthorizationsToRevision65(database);
+    },
   },
   {
     // Revision 65 (Issue #432, S84a) rebuilds the three kind-coupled relations and stamps its version in one transaction, so the
@@ -397,9 +405,9 @@ const tables = (): string[] => {
 };
 
 describe('an upgrade interrupted before its version stamp', () => {
-  for (const { revision, step, before: named } of REVISIONS) {
+  for (const { revision, step } of REVISIONS) {
     if (step === null) continue;
-    const before = named ?? revision - 1;
+    const before = revision - 1;
     it(`is finished by the next open when revision ${revision}'s relations committed and its stamp did not`, async () => {
       expect(await opened()).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
       const terminal = tables();

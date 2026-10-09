@@ -346,7 +346,11 @@ describe('the market section and 按我的评分重写评语 over the real store
     }
     const refused = await openStore();
     try {
-      expect(await refusal(() => refused.inspectEvaluation(bookId, recordId))).toBe('EVALUATION_RECORD_INVALID:评估记录已损坏。');
+      // Asked for, the damaged version gives way to the latest, which still reads (Issue #708): the words it carried name a rewrite
+      // this Book accepted on the version before, over that rewrite's own words.
+      expect(refused.inspectEvaluation(bookId, recordId)).toMatchObject({ unreadableRecords: [3], record: { ordinal: 4, ai7WordsNotice: null } });
+      expect(await refusal(() => refused.saveEvaluation({ bookId, recordId, expectedEntries: 6, finalize: false, content: {} })))
+        .toBe('EVALUATION_RECORD_INVALID:评估记录已损坏。');
       refused.markCleanShutdown();
     } finally {
       refused.close();
@@ -387,7 +391,7 @@ describe('the market section and 按我的评分重写评语 over the real store
     try {
       const page = damaged.inspectEvaluation(bookId, recordId);
       expect(page.record).toMatchObject({ recordId, entries: 3 });
-      expect(page.record!.ai7WordsNotice).toMatch(/^评语重写的采用记录已损坏，AI7 评语标注的来源无法核对：「.+」的评语.*仍按 AI7 所写处理。$/u);
+      expect(page.record!.ai7WordsNotice).toMatch(/^评语重写的采用记录已损坏，AI7 评语的标注无法全部核对；以下仍按 AI7 所写处理：「.+」的评语.*。$/u);
       expect(page.rewrite.prepare).toEqual({ allowed: false, reason: '按我的评分重写评语暂不可用：评语重写记录已损坏。' });
       damaged.markCleanShutdown();
     } finally {
@@ -407,7 +411,7 @@ describe('the market section and 按我的评分重写评语 over the real store
     try {
       expect(adjustedBefore).toBe(1);
       expect(settings.inspectEvaluationCalibration().calibration).toMatchObject({ adjustments: 0, unreadableBooks: 1 });
-      expect(await refusal(() => settings.inspectEvaluation(bookId, firstId))).toBe('EVALUATION_RECORD_INVALID:评估记录已损坏。');
+      expect(settings.inspectEvaluation(bookId, firstId)).toMatchObject({ unreadableRecords: [firstOrdinal], record: { recordId } });
       const later = settings.inspectEvaluation(bookId, recordId);
       expect(later.unreadableRecords).toEqual([firstOrdinal]);
       expect(later.record).toMatchObject({ recordId, entries: 3 });

@@ -69,6 +69,7 @@ import {
   ANALYSIS_LEDGER_REVISION_33_SQL,
   ANALYSIS_LEDGER_REVISION_34_SQL,
   ANALYSIS_LEDGER_REVISION_30_SQL,
+  ANALYSIS_LEDGER_REVISION_65_SQL,
   ANALYSIS_LEDGER_REVISION_17_TABLES,
   ANALYSIS_LEDGER_SCHEMA_SQL,
   ANALYSIS_LEDGER_TRIGGER_SQL,
@@ -120,6 +121,7 @@ import {
   CAPTURED_PROCEDURE_SCHEMA_VERSION,
   EVALUATION_REWRITE_SCHEMA_VERSION,
   WRITING_TASK_SCHEMA_VERSION,
+  BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
   MATERIAL_INDEX_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
@@ -207,6 +209,11 @@ import { EVALUATION_REWRITE_FOREIGN_KEYS, EVALUATION_REWRITE_SCHEMA_SQL, EVALUAT
 import { WRITING_TASK_FOREIGN_KEYS, WRITING_TASK_SCHEMA_SQL, WRITING_TASK_TRIGGER_SQL } from './writing-tasks.js';
 import { MATERIAL_INDEX_FOREIGN_KEYS, MATERIAL_INDEX_SCHEMA_SQL, MATERIAL_INDEX_TRIGGER_SQL } from './material-index.js';
 import {
+  BACKGROUND_ANALYSIS_ENROLLMENT_FOREIGN_KEYS,
+  BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL,
+  BACKGROUND_ANALYSIS_ENROLLMENT_TRIGGER_SQL,
+} from './background-analysis-enrollments.js';
+import {
   SERIES_RETRIEVAL_EXCLUSION_FOREIGN_KEYS,
   SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL,
   SERIES_RETRIEVAL_EXCLUSION_TRIGGER_SQL,
@@ -292,6 +299,7 @@ const ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL: Readonly<Record<string, string | Read
   analysis_plan_revisions: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_plan_revisions, ANALYSIS_LEDGER_REVISION_33_SQL.analysis_plan_revisions],
   analysis_run_authorizations: [
     ANALYSIS_LEDGER_SCHEMA_SQL.analysis_run_authorizations,
+    ANALYSIS_LEDGER_REVISION_65_SQL.analysis_run_authorizations,
     ANALYSIS_LEDGER_REVISION_30_SQL.analysis_run_authorizations,
   ],
 };
@@ -1951,6 +1959,7 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...CAPTURED_PROCEDURE_FOREIGN_KEYS,
   ...EVALUATION_REWRITE_FOREIGN_KEYS,
   ...WRITING_TASK_FOREIGN_KEYS,
+  ...BACKGROUND_ANALYSIS_ENROLLMENT_FOREIGN_KEYS,
   ...MATERIAL_INDEX_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
@@ -2588,6 +2597,7 @@ function requireManuscriptReimportTargetSchema(
   includeCapturedProcedureTables = false,
   includeEvaluationRewriteTables = false,
   includeWritingTaskTables = false,
+  includeBackgroundAnalysisEnrollmentTables = false,
   includeMaterialIndexTables = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
@@ -2641,6 +2651,7 @@ function requireManuscriptReimportTargetSchema(
   includeCapturedProcedureTables ||= committed(CAPTURED_PROCEDURE_SCHEMA_SQL);
   includeEvaluationRewriteTables ||= committed(EVALUATION_REWRITE_SCHEMA_SQL);
   includeWritingTaskTables ||= committed(WRITING_TASK_SCHEMA_SQL);
+  includeBackgroundAnalysisEnrollmentTables ||= committed(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL);
   includeMaterialIndexTables ||= committed(MATERIAL_INDEX_SCHEMA_SQL);
   requireExactSchema(
     db,
@@ -2767,6 +2778,8 @@ function requireManuscriptReimportTargetSchema(
       ...(includeEvaluationRewriteTables ? EVALUATION_REWRITE_SCHEMA_SQL : {}),
       // Revision 65 (Issue #432, S84a) adds which type, words and reference set each writing Task drafts from, and its drafts.
       ...(includeWritingTaskTables ? WRITING_TASK_SCHEMA_SQL : {}),
+      // Revision 66 (Issue #95, S39) adds each Book's Background Analysis Enrollment, its versions and its states.
+      ...(includeBackgroundAnalysisEnrollmentTables ? BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL : {}),
       // Revision 67 (Issue #428, S80a) adds each 资料库 item's Material Index build and the segments of a complete one.
       ...(includeMaterialIndexTables ? MATERIAL_INDEX_SCHEMA_SQL : {}),
     },
@@ -2822,6 +2835,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeCapturedProcedureTables ? CAPTURED_PROCEDURE_TRIGGER_SQL : {}),
       ...(includeEvaluationRewriteTables ? EVALUATION_REWRITE_TRIGGER_SQL : {}),
       ...(includeWritingTaskTables ? WRITING_TASK_TRIGGER_SQL : {}),
+      ...(includeBackgroundAnalysisEnrollmentTables ? BACKGROUND_ANALYSIS_ENROLLMENT_TRIGGER_SQL : {}),
       ...(includeMaterialIndexTables ? MATERIAL_INDEX_TRIGGER_SQL : {}),
     },
   );
@@ -5567,6 +5581,7 @@ export function validateManuscriptReimportSchemaTruth(
   includeCapturedProcedureTables = false,
   includeEvaluationRewriteTables = false,
   includeWritingTaskTables = false,
+  includeBackgroundAnalysisEnrollmentTables = false,
   includeMaterialIndexTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
@@ -5619,6 +5634,7 @@ export function validateManuscriptReimportSchemaTruth(
     includeCapturedProcedureTables,
     includeEvaluationRewriteTables,
     includeWritingTaskTables,
+    includeBackgroundAnalysisEnrollmentTables,
     includeMaterialIndexTables,
   );
   validateSchemaAuthorityIds(db);
@@ -5718,6 +5734,7 @@ export function initializeBoundedSchema(
       version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
       version === EVALUATION_REWRITE_SCHEMA_VERSION ||
       version === WRITING_TASK_SCHEMA_VERSION ||
+      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
@@ -5767,6 +5784,7 @@ export function initializeBoundedSchema(
       version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
       version === EVALUATION_REWRITE_SCHEMA_VERSION ||
       version === WRITING_TASK_SCHEMA_VERSION ||
+      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION) {
     transact(db, () => {
       if (validateStoreTruth || version !== MATERIAL_INDEX_SCHEMA_VERSION) {
@@ -5821,6 +5839,7 @@ export function initializeBoundedSchema(
           version >= CAPTURED_PROCEDURE_SCHEMA_VERSION,
           version >= EVALUATION_REWRITE_SCHEMA_VERSION,
           version >= WRITING_TASK_SCHEMA_VERSION,
+          version >= BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
           version >= MATERIAL_INDEX_SCHEMA_VERSION,
         );
       }
@@ -6109,6 +6128,8 @@ interface ManuscriptCheckpointWork {
   createdAt: string;
   purpose: ManuscriptCheckpointPurpose;
   state: 'copying' | 'prepared';
+  /** The 后台分析登记 dispatcher's (Issue #95, S39): cancelled when anything else asks for a checkpoint of the branch. */
+  preemptible: boolean;
 }
 
 export interface ManuscriptCheckpointProgress {
@@ -6223,10 +6244,32 @@ export class BoundedManuscriptStore {
     );
   }
 
+  /**
+   * Whether a checkpoint is being built for the branch now (Issue #95, S39): the 后台分析登记 dispatcher never starts beside one.
+   */
+  checkpointWorkInFlight(branchId: string): boolean {
+    return Array.from(this.#manuscriptCheckpointWork.values()).some((work) => work.binding.branchId === branchId);
+  }
+
+  /**
+   * Whether the branch waits on a recovery attention, pending or deferred (Issue #95, S39; #713 re-review, P2-1): ordinary
+   * edits and checkpoints are refused there, so the 后台分析登记 dispatcher does not begin a preparation on it either.
+   */
+  branchUnderRecovery(branchId: string): boolean {
+    return this.#db.prepare(
+      "SELECT 1 ok FROM recovery_attention WHERE branch_id = ? AND status IN ('pending', 'deferred') LIMIT 1",
+    ).get(branchId) !== undefined;
+  }
+
+  /**
+   * `preemptible` is the 后台分析登记 dispatcher's (Issue #95, S39; #713 review, P1-1/P1-2): its checkpoint gives way to any other
+   * the branch asks for — which cancels it and goes ahead — while it never displaces one itself.
+   */
   createManuscriptCheckpointWork(
     manuscriptId: string,
     branchId: string,
     purpose: ManuscriptCheckpointPurpose,
+    options: { preemptible?: boolean } = {},
   ): { workId: string | null; total: number; checkpoint: ManuscriptCheckpointBinding | null } {
     const binding = this.#binding(manuscriptId, branchId);
     this.#requireBranchEditable(branchId);
@@ -6245,6 +6288,11 @@ export class BoundedManuscriptStore {
           createdForDirtyJournal: false,
         },
       };
+    }
+    if (options.preemptible !== true) {
+      for (const work of Array.from(this.#manuscriptCheckpointWork.values())) {
+        if (work.preemptible && work.binding.branchId === branchId) this.cancelManuscriptCheckpointWork(work.workId);
+      }
     }
     requireBounded(!Array.from(this.#manuscriptCheckpointWork.values()).some((work) => work.binding.branchId === branchId),
       'SERVICE_BUSY', '该稿件已有固定点任务。');
@@ -6282,6 +6330,7 @@ export class BoundedManuscriptStore {
       createdAt: new Date().toISOString(),
       purpose,
       state: 'copying',
+      preemptible: options.preemptible === true,
     });
     return { workId, total: totalBlocks, checkpoint: null };
   }

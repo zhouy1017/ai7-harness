@@ -179,6 +179,20 @@ export function reviewCoverageChanges(row: Pick<ReviewCoverageRowProjection, 'ch
   return row.changedBlocks === 0 ? '没有改动' : `改动了 ${row.changedBlocks} 个内容块`;
 }
 
+/**
+ * What could not be checked for 只审改动过的章, beside it in the review sheet (Issue #716): the note the coverage row of each
+ * chosen category carries — an earlier review record the walk for unread changes could not read, or a walk that looked
+ * back only as far as its bound — each named by its category. Empty when none of them carries one.
+ */
+export function reviewChangedScopeNotes(
+  coverage: ReadonlyArray<Pick<ReviewCoverageRowProjection, 'categoryId' | 'label' | 'state' | 'unavailableReason'>>,
+  chosen: ReadonlySet<string>,
+): string[] {
+  return coverage
+    .filter((row) => chosen.has(row.categoryId) && row.state !== 'unavailable' && row.unavailableReason !== null)
+    .map((row) => `${row.label}：${row.unavailableReason}`);
+}
+
 /** One entry of the 审阅记录: `第 N 次 · 类别 · 范围 · 状态`, newest first. */
 export function reviewRunLine(summary: Pick<ReviewRunSummaryProjection, 'label' | 'categoryLabels' | 'scopeLabel' | 'stateLabel'>): string {
   return `${summary.label} · ${summary.categoryLabels.join('、')} · ${summary.scopeLabel} · ${summary.stateLabel}`;
