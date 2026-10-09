@@ -165,3 +165,63 @@ function longestOrdered(values: ReadonlyArray<number>): Set<number> {
   for (let index = tails.length === 0 ? -1 : tails[tails.length - 1]!; index >= 0; index = previous[index]!) kept.add(index);
   return kept;
 }
+
+/**
+ * A cache of walks, or of revisions as a walk reads them, bounded by entry count and by weight — the block references its
+ * entries hold, which is what makes an entry large — and letting the least recently used entry go first (Issue #716).
+ * The entry just written is never let go by its own write, so a reader always gets back what it computed.
+ */
+export class UnreadWalkCache<T> {
+  readonly #entries = new Map<string, { readonly value: T; readonly weight: number }>();
+  #weight = 0;
+
+  constructor(readonly maxEntries: number, readonly maxWeight: number, readonly weigh: (value: T) => number) {}
+
+  get size(): number {
+    return this.#entries.size;
+  }
+
+  /** The total weight of what is kept. */
+  get weight(): number {
+    return this.#weight;
+  }
+
+  /** The kept value, made the most recently used; `undefined` when none is kept. */
+  get(key: string): T | undefined {
+    const entry = this.#entries.get(key);
+    if (entry === undefined) return undefined;
+    this.#entries.delete(key);
+    this.#entries.set(key, entry);
+    return entry.value;
+  }
+
+  set(key: string, value: T): void {
+    const previous = this.#entries.get(key);
+    if (previous !== undefined) {
+      this.#entries.delete(key);
+      this.#weight -= previous.weight;
+    }
+    const weight = Math.max(1, this.weigh(value));
+    this.#entries.set(key, { value, weight });
+    this.#weight += weight;
+    while (this.#entries.size > 1 && (this.#entries.size > this.maxEntries || this.#weight > this.maxWeight)) {
+      const [oldest, entry] = this.#entries.entries().next().value!;
+      this.#entries.delete(oldest);
+      this.#weight -= entry.weight;
+    }
+  }
+}
+
+/** The block references one manifest holds: its blocks, their digests and overlap context, one per unit besides. */
+export function manifestWeight(manifest: CoverageManifestProjection): number {
+  let weight = 0;
+  for (const unit of manifest.units) weight += 1 + unit.blockIds.length + unit.overlapBlockIds.length;
+  return weight;
+}
+
+/** What a walk holds: the blocks it names and the manifest of each revision a changed unit is measured from. */
+export function unreadWalkWeight(walk: UnreadWalk): number {
+  let weight = walk.blockIds.size;
+  for (const anchor of new Set(walk.changed.values())) weight += manifestWeight(anchor.manifest);
+  return weight;
+}

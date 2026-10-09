@@ -62,7 +62,7 @@ import {
   type CrossUnitOutcome,
   type GapUnitOutcome,
 } from './reducers.js';
-import { OUT_OF_SCOPE_GAP_REASON } from './reuse-plan.js';
+import { CARRIED_GAP_REASON, OUT_OF_SCOPE_GAP_REASON } from './reuse-plan.js';
 import { SERIES_SCOPE_STOP_SUMMARY } from '../series-exclusions.js';
 import {
   buildRunReportReflectionMessage,
@@ -1210,20 +1210,25 @@ export class BaselineAnalysisExecutionOwner {
       const reusedOrdinals = new Set<number>();
       // Reused units are copied by lineage before any model call; they never form a request or count usage.
       // Units a scope plan leaves unreviewed are settled here too, and for the same reason: nothing about
-      // them waits on a model. Each is an exact `out-of-scope` gap — the Run was asked not to read it —
-      // recorded with the request digest it would have carried, as every other unread unit is.
+      // them waits on a model. Each is an exact `out-of-scope` gap — the Run was asked not to read it — or,
+      // when its last read failed, the lost gap it still is (Issue #716), recorded with the request digest it
+      // would have carried, as every other unread unit is.
       for (const planUnit of planUnits) {
         const newUnit = manifest.units[planUnit.unitOrdinal - 1];
         if (planUnit.disposition === 'unreviewed') {
           if (newUnit === undefined) throw new ExecutionAdmissionError('EXECUTION_LINEAGE_INVALID', '审阅范围计划引用的单元不在覆盖清单内。');
-          outcomes.push({ unitOrdinal: newUnit.ordinal, state: 'gap', code: 'out-of-scope', reason: OUT_OF_SCOPE_GAP_REASON });
+          // One whose last read failed is carried as the lost gap it is, never as out of scope (Issue #716).
+          const carried = planUnit.reason === 'predecessor-gap';
+          const code = carried ? 'not-attempted' : 'out-of-scope';
+          const reason = carried ? CARRIED_GAP_REASON : OUT_OF_SCOPE_GAP_REASON;
+          outcomes.push({ unitOrdinal: newUnit.ordinal, state: 'gap', code, reason });
           unitRecords.push({
             unitOrdinal: newUnit.ordinal,
             requestDigest: definition.requestDigest(newUnit.ordinal, newUnit.digest),
             lineage: { kind: 'unreviewed' },
             closed: {
               state: 'gap',
-              gap: { unitOrdinal: newUnit.ordinal, code: 'out-of-scope', reason: OUT_OF_SCOPE_GAP_REASON, startPosition: newUnit.startPosition, endPosition: newUnit.endPosition, blockIds: [...newUnit.blockIds] },
+              gap: { unitOrdinal: newUnit.ordinal, code, reason, startPosition: newUnit.startPosition, endPosition: newUnit.endPosition, blockIds: [...newUnit.blockIds] },
             },
           });
           continue;

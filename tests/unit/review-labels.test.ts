@@ -40,6 +40,7 @@ import {
   reviewBatchItemLine,
   reviewBatchScopeLine,
   reviewCategoryProgressLine,
+  reviewChangedScopeNotes,
   reviewChapterOptionLabel,
   reviewClauseLine,
   reviewCountsLine,
@@ -297,5 +298,20 @@ describe('the words of the 审阅 destination', () => {
     expect(reviewOverviewLine({ runs: [], coverage: [] })).toBe('审阅 · 还没有审阅记录');
     expect(reviewOverviewLine({ runs: [summary], coverage: [row('current')] })).toBe('审阅 · 最近一次是第 2 次（已完成），待处理 6 条');
     expect(reviewOverviewLine({ runs: [summary], coverage: [row('needs-review'), row('needs-review')] })).toBe('审阅 · 最近一次是第 2 次（已完成），待处理 6 条；2 类需复审');
+  });
+});
+
+describe('the note beside 只审改动过的章 (Issue #716)', () => {
+  it('names each chosen category whose coverage row carries one, and nothing for an unavailable row or one not chosen', () => {
+    const rows = [
+      { categoryId: 'typos-and-usage', label: '错别字与规范用语', state: 'needs-review' as const, unavailableReason: '记录无法核对。' },
+      { categoryId: 'style-and-format', label: '体例与格式', state: 'current' as const, unavailableReason: '只往回查了最近 512 次审阅。' },
+      { categoryId: 'plot-consistency', label: '情节一致性', state: 'current' as const, unavailableReason: null },
+      { categoryId: 'series-consistency', label: '书系一致性', state: 'unavailable' as const, unavailableReason: '不能运行。' },
+    ];
+    const all = new Set(rows.map((row) => row.categoryId));
+    expect(reviewChangedScopeNotes(rows, all)).toEqual(['错别字与规范用语：记录无法核对。', '体例与格式：只往回查了最近 512 次审阅。']);
+    expect(reviewChangedScopeNotes(rows, new Set(['style-and-format', 'plot-consistency']))).toEqual(['体例与格式：只往回查了最近 512 次审阅。']);
+    expect(reviewChangedScopeNotes(rows, new Set())).toEqual([]);
   });
 });

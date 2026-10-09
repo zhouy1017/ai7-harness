@@ -313,6 +313,7 @@ import {
   initializeEvaluationRewriteSchema,
   rewriteProposalItems,
   type RewritableEvaluation,
+  type StoredEvaluationRewriteDecision,
   type StoredEvaluationRewriteTask,
 } from './evaluation-rewrites.js';
 import { readersReportExemplarLine, type ReadersReportContractInput } from './evaluation/readers-report-contract.js';
@@ -557,6 +558,7 @@ import {
   evaluationProfileDigest,
   initializeEvaluationInitialDraftSchema,
   initializeEvaluationRecordSchema,
+  type AcceptedEvaluationRewrite,
   type FinalizedEvaluation,
   type InitialEvaluationFacts,
 } from './evaluation-records.js';
@@ -4313,6 +4315,10 @@ export class EditorialStore {
           throw error;
         }
       },
+      // After a version that cannot be read, a mark is admitted only when it names a rewrite this Book accepted on an earlier
+      // version, over words that rewrite wrote (Issue #708). A decision or words that cannot be read leave the mark unchecked.
+      acceptedRewrite: (analysisRevisionId) => this.#acceptedEvaluationRewrite(analysisRevisionId),
+      adoptionStamps: (bookId) => this.#evaluationRewrites.decisionStamps(bookId),
     });
     this.#analysisFeedback = new AnalysisFeedbackLedger(authority);
     this.#capturedProcedures = new CapturedProcedures(authority);
@@ -8887,6 +8893,34 @@ export class EditorialStore {
       }
       throw error;
     }
+  }
+
+  /**
+   * One rewrite the editor accepted, as the evaluation record checks a mark that names it (Issue #708): the Book and version of
+   * the 采用, its Task and the words it wrote; `null` when no decision accepted it, `'unreadable'` when the decision cannot be
+   * read, and words `null` when they cannot be.
+   */
+  #acceptedEvaluationRewrite(analysisRevisionId: string): AcceptedEvaluationRewrite | null | 'unreadable' {
+    let decision: StoredEvaluationRewriteDecision | null;
+    try {
+      decision = this.#evaluationRewrites.decisionOf(analysisRevisionId);
+    } catch (error) {
+      if (error instanceof EvaluationRewriteError) return 'unreadable';
+      throw error;
+    }
+    if (decision === null || decision.decision !== 'accepted') return null;
+    let words: AcceptedEvaluationRewrite['words'] = null;
+    try {
+      const found = this.#evaluationRewriteTaskOf(decision.taskIntentId);
+      if (found !== null) {
+        const inspected = this.#analysisCall(() => found.ledger.inspect(decision.bookId, undefined, analysisRevisionId)) as EvaluationRewriteProjection;
+        const read = inspected.inspectedRevision?.revision.rewrite.words ?? null;
+        words = read === null ? null : { items: read.items.map((item) => ({ itemId: item.itemId, comment: item.comment })), verdict: read.verdict };
+      }
+    } catch (error) {
+      if (!(error instanceof StoreError)) throw error;
+    }
+    return { bookId: decision.bookId, recordId: decision.recordId, taskIntentId: decision.taskIntentId, words };
   }
 
   /** One Task's version and entry — the one its frozen plan names when it froze one. */

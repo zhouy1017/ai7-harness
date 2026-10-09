@@ -147,6 +147,9 @@ describe('评估 words', () => {
     // The versions that cannot be read are named beside the list (Issue #702 review).
     expect(evaluationUnreadableLine([])).toBeNull();
     expect(evaluationUnreadableLine([1, 3])).toBe('第 1、3 版评估记录已损坏，无法显示；其他版本照常可用。');
+    // Every version damaged: no 其他版本 to promise (Issue #708).
+    expect(evaluationUnreadableLine([1, 2], false)).toBe('第 1、2 版评估记录已损坏，无法显示。');
+    expect(evaluationUnreadableLine([], false)).toBeNull();
     expect(evaluationFinalizedLine({ finalized: { actor: '本机编辑', at: '2026-09-25T03:00:00.000Z' } }, instant)).toBe('定稿 · 本机编辑 · 〔2026-09-25〕');
     expect(evaluationFinalizedLine({ finalized: null }, instant)).toBeNull();
     expect(EVALUATION_RECOMMEND_BLOCKED).toBe('有「高」风险还没有经人工复核，「推荐出版」暂不能选。');
