@@ -27,8 +27,9 @@ const trace = (await import(new URL('../../e2e/readiness-trace.mjs', import.meta
   summarizeProductProcesses(rows: ReadonlyArray<ProcessRow>, pid: number, runtimeRoot: string, platform?: string): ProcessSample;
   sampleProductProcesses(pid: number, executable: string): Promise<ProcessSample | null>;
   classifyBrowserLaunchMiss(trace: Record<string, unknown> | null, sample: ProcessSample | null): Record<string, unknown>;
-  cpuShares(before: ReadonlyArray<ProcessRow>, after: ReadonlyArray<ProcessRow>, rootPid: number, windowMs: number, cores: number): { product: number; host: number };
+  cpuShares(before: ReadonlyArray<ProcessRow>, after: ReadonlyArray<ProcessRow>, rootPid: number, windowMs: number, cores: number, listingPid?: number | null): { product: number; host: number };
   measureCpuShares(rootPid: number, windowMs?: number): Promise<{ product: number; host: number } | null>;
+  listHostProcessesWithListing(platform?: string): Promise<{ rows: Array<ProcessRow>; listingPid: number | null } | null>;
 };
 interface ProcessRow { pid: number; ppid: number; cpuSeconds: number | null; path: string | null }
 interface ProcessSample { alive: boolean; cpuSeconds: number | null; helpers: number; prior: number }
@@ -280,7 +281,32 @@ describe('the readiness trace (Issue #518)', () => {
     expect(shares.product).toBeCloseTo(1);
     expect(shares.host).toBeCloseTo(0.7);
     expect(trace.cpuShares(after, after, 10, 5_000, 4)).toEqual({ product: 0, host: 0 });
+    // The sampler's own listing process (review P2-1): a transient child of the Journey, in the second listing only, with
+    // the few tenths of a second a hosted Windows listing costs, and a child of its own. Named, it counts for neither share;
+    // unnamed, it would lift an idle product over the 0.1 `idle` bound on its own.
+    const listing = [
+      ...after,
+      { pid: 99, ppid: 10, cpuSeconds: 0.6, path: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe' },
+      { pid: 100, ppid: 99, cpuSeconds: 0.1, path: 'conhost' },
+    ];
+    const named = trace.cpuShares(before, listing, 10, 5_000, 4, 99);
+    expect(named.product).toBeCloseTo(1);
+    expect(named.host).toBeCloseTo(0.7);
+    const unnamed = trace.cpuShares(before, listing, 10, 5_000, 4);
+    expect(unnamed.product).toBeCloseTo(1.14);
+    const idle = before.map((row) => ({ ...row }));
+    expect(trace.cpuShares(idle, [...idle, { pid: 99, ppid: 10, cpuSeconds: 0.6, path: 'powershell.exe' }], 10, 5_000, 4, 99).product).toBe(0);
+    expect(trace.cpuShares(idle, [...idle, { pid: 99, ppid: 10, cpuSeconds: 0.6, path: 'powershell.exe' }], 10, 5_000, 4).product).toBeCloseTo(0.12);
   });
+
+  it('names the listing process, which is in its own listing as a child of this one (review P2-1)', async () => {
+    const listing = await trace.listHostProcessesWithListing();
+    expect(listing).not.toBeNull();
+    expect(typeof listing!.listingPid).toBe('number');
+    const own = listing!.rows.find((row) => row.pid === listing!.listingPid);
+    expect(own).toBeDefined();
+    expect(own!.ppid).toBe(process.pid);
+  }, 30_000);
 
   it('measures a real busy process below this one (#621)', async () => {
     const child = spawn(process.execPath, ['-e', 'const end = Date.now() + 20_000; while (Date.now() < end);'], { stdio: 'ignore' });
