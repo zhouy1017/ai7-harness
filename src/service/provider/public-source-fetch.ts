@@ -131,9 +131,12 @@ export async function sendPublicFetch(authorized: AuthorizedPublicFetch, input: 
   if (!authorizedFetches.delete(authorized)) throw ticketRefused();
   const { rule } = authorized;
   const ticket = authorized;
-  const release = input.admitHost({ host: ticket.host, port: 443, ticketId: ticket.ticketId });
   const deadline = deadlineSignal(rule.webfetch.timeoutSeconds * 1000, input.signal);
+  // The host is admitted as the first statement inside the try that releases it (Issue #728): nothing between the hold's
+  // opening and its release can throw past the release, whatever `deadlineSignal` or a later line comes to do.
+  let release: (() => void) | undefined;
   try {
+    release = input.admitHost({ host: ticket.host, port: 443, ticketId: ticket.ticketId });
     const response = await input.fetch(ticket.url, {
       method: 'GET',
       headers: { accept: 'text/html, application/xhtml+xml, text/plain;q=0.9, text/markdown;q=0.9', 'user-agent': WEBFETCH_USER_AGENT },
@@ -163,6 +166,6 @@ export async function sendPublicFetch(authorized: AuthorizedPublicFetch, input: 
     throw error;
   } finally {
     deadline.dispose();
-    release();
+    release?.();
   }
 }
