@@ -1562,15 +1562,26 @@ async function main() {
     const goneCode = await renderer.evaluate(`window.ai7.getManuscriptWindowAt({ manuscriptId: ${JSON.stringify(goneAnchor?.manuscriptId ?? '')}, branchId: ${JSON.stringify(goneAnchor?.branchId ?? '')}, target: { kind: 'block', blockId: ${JSON.stringify(taskBlock)} } }).then(() => 'present', (error) => error?.code ?? 'unknown')`);
     requireJourney(goneCode === 'WINDOW_NOT_FOUND', 'selection-task-gone-paragraph-gone', goneCode);
     await assertRenderer(renderer, MARK_HELPERS, 'selection-task-gone-helpers');
+    // A standing 回到 chip — the unused return an earlier jump left — is used first, so the checks below tell a return place kept
+    // by the refused jump from none (review P3-A): the chip must be absent and the return store must hold no entry for this
+    // manuscript, read from the page by the exact key `preserveReturnPlace` writes.
+    if (await renderer.evaluate(`${CHIP} !== null`)) {
+      await clickSelector(renderer, '[data-screen="editor"] .return-chip-host [data-return-chip]', 'selection-task-gone-chip-use');
+      await waitFor(renderer, `${CHIP} === null && (document.querySelector('#persistence-status')?.textContent ?? '').startsWith('已回到')`, 'selection-task-gone-chip-used', 60_000);
+    }
+    const READ_RETURN_ENTRY = `new Promise((settle) => { let open; try { open = indexedDB.open('ai7-reading-return', 1); } catch { settle('error'); return; } open.onerror = () => settle('error'); open.onupgradeneeded = () => open.result.createObjectStore('returns'); open.onsuccess = () => { const db = open.result; let entry; let tx; try { tx = db.transaction('returns', 'readonly'); } catch { db.close(); settle('error'); return; } const get = tx.objectStore('returns').get(${JSON.stringify(`${goneAnchor?.manuscriptId ?? ''}\n${goneAnchor?.branchId ?? ''}`)}); get.onsuccess = () => { entry = get.result; }; tx.oncomplete = () => { db.close(); settle(entry === undefined ? null : (entry?.blockId ?? 'malformed')); }; tx.onerror = () => { db.close(); settle('error'); }; }; })`;
+    requireJourney(await renderer.evaluate(`${CHIP} === null`), 'selection-task-gone-no-chip-before');
+    const returnBefore = await renderer.evaluate(READ_RETURN_ENTRY);
+    requireJourney(returnBefore === null, 'selection-task-gone-no-return-before', returnBefore);
     const goneLoadsBefore = await windowLoads();
-    const goneChipBefore = await renderer.evaluate(`${CHIP}?.dataset.returnChip ?? null`);
     const gonePanel = await openPanel(renderer, 'selection-task-gone');
     const goneCard = cardsOf(gonePanel, 'recent').find((card) => card.state === 'review-completed');
     requireJourney(goneCard !== undefined && goneCard.title === '审阅 · 第 1 次 · 所选段落' && goneCard.actions.some(([key, label, state]) => key === 'jump' && label === '跳到所选文字' && state === 'enabled'), 'selection-task-gone-card', gonePanel);
     await cardAction(renderer, 'review-completed', 'jump', 'selection-task-gone-jump');
     await waitFor(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '') === '所选文字所在的段落已不在当前稿件中，无法跳到。' && document.querySelector('#persistence-status')?.dataset.tone === 'error'`, 'selection-task-gone-said', 30_000);
     const goneAfter = await renderer.evaluate(`(() => ({ chip: ${CHIP}?.dataset.returnChip ?? null, loads: document.querySelector('[data-screen="editor"] [data-window-loads]')?.dataset.windowLoads ?? '', panel: document.querySelector('#task-drawer')?.dataset.taskDrawerView ?? null }))()`);
-    requireJourney(goneAfter.chip === goneChipBefore && goneAfter.loads === goneLoadsBefore && goneAfter.panel === 'panel', 'selection-task-gone-nothing-moved', { before: { chip: goneChipBefore, loads: goneLoadsBefore }, after: goneAfter });
+    const returnAfter = await renderer.evaluate(READ_RETURN_ENTRY);
+    requireJourney(goneAfter.chip === null && returnAfter === null && goneAfter.loads === goneLoadsBefore && goneAfter.panel === 'panel', 'selection-task-gone-nothing-moved', { loadsBefore: goneLoadsBefore, returnAfter, after: goneAfter });
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'selection-task-gone-panel-close');
 
     at('zero-loopback-requests');

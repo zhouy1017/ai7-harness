@@ -8204,6 +8204,8 @@ function renderEditorWindow(
       if (!editor || !(await settleLocalEdit())) return false;
       const binding = editor.currentWindow();
       await window.ai7.getManuscriptWindowAt({ manuscriptId: binding.manuscriptId, branchId: binding.branchId, target: { kind: 'block', blockId: target.blockId } });
+      // A move `navigate` would refuse without a word — a write in flight, a navigation under way — keeps and paints no return place (review P3-B).
+      if (authoritativeMutationBusy() || edgeNavigation) return false;
       const here = readingPlace();
       if (here !== null && here.blockId !== target.blockId) {
         const request = ++returnRequest;

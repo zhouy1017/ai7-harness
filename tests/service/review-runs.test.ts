@@ -1911,7 +1911,7 @@ describe('the house\'s 可复用工序 on a 当前选区 (Issue #423, S77 deferr
       const card = (reviewRunId: string) => store.inspectBookTasks(book.bookId, () => null).groups.flatMap((group) => group.items).find((entry) => entry.item.itemId === `review:${reviewRunId}`);
       expect(card(pinned.reviewRunId)).toMatchObject({
         item: { object: { kind: 'review', ordinal: 2, onSelection: true }, state: 'review-prepared' },
-        selection: { fromBlockId: twentyNine.blockId, toBlockId: twentyNine.blockId },
+        selection: { manuscriptId: book.manuscriptId, fromBlockId: twentyNine.blockId, toBlockId: twentyNine.blockId },
       });
       expect(card(source.reviewRunId)!.selection).toBeUndefined();
       const coverageOf = (): Array<[string, string, number | null]> => workspace(session, book).coverage
@@ -1927,7 +1927,7 @@ describe('the house\'s 可复用工序 on a 当前选区 (Issue #423, S77 deferr
       expect(ran.findings.some((finding) => finding.categoryId === PLOT)).toBe(true);
       expect(ran.procedure).toMatchObject({ versionId: steps.versionId, stopped: false, missing: false });
       expect(coverageOf()).toEqual(coverageBefore);
-      expect(card(ran.reviewRunId)).toMatchObject({ item: { state: 'review-completed' }, result: { kind: 'review-run', reviewRunId: ran.reviewRunId }, selection: { fromBlockId: twentyNine.blockId } });
+      expect(card(ran.reviewRunId)).toMatchObject({ item: { state: 'review-completed' }, result: { kind: 'review-run', reviewRunId: ran.reviewRunId }, selection: { manuscriptId: book.manuscriptId, fromBlockId: twentyNine.blockId } });
       // The pin records the selection as the scope the Run ran under; a Run on the slot records the slot. The version counts the Run.
       const wholePinned = preparePinned(session, book, [STYLE, PLOT], WHOLE, steps);
       const pinScope = (reviewRunId: string): unknown => {
