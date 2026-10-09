@@ -19,8 +19,11 @@ import {
   procedureChoiceSelection,
   procedureChoiceStatus,
   procedurePreparationPin,
+  procedureSheetCloseStatus,
+  settleProcedureChoice,
   type ProcedureChoiceOutcome,
   type ProcedureSheetChoice,
+  type ProcedureSheetSettling,
   type ProcedureSheetTarget,
 } from '../../src/renderer/procedure-choice.js';
 
@@ -186,20 +189,27 @@ describe('what a choice leaves in the sheet (Issue #684)', () => {
 describe('a choice settling into the sheet, as the sheet wires it (Issue #691)', () => {
   const v2 = runAt(V2, 2, [['style-and-format', true], ['literary-expression', true]], 'whole');
 
-  /** The sheet's own state, pinned to v2: what `chooseProcedure` copies an outcome back into. */
-  function pinnedSheet(): ProcedureSheetTarget {
-    return { procedure: v2, categories: new Set(['style-and-format', 'literary-expression']), scope: 'whole', from: null, to: null, problem: null };
+  /** The sheet's own state, pinned to v2: what `chooseProcedure` settles an outcome into. */
+  function pinnedSheet(): ProcedureSheetSettling {
+    return { procedure: v2, categories: new Set(['style-and-format', 'literary-expression']), scope: 'whole', from: null, to: null, problem: null, requests: new ProcedureChoiceRequests() };
   }
 
-  /** The sheet's steps once a choice ends, in its order: the copy-back, the status line, the selectors, the focus. */
-  function settle(sheet: ProcedureSheetTarget, outcome: ProcedureChoiceOutcome, versionChoice: boolean) {
-    const next = procedureChoiceAfter(sheet, outcome);
-    copyProcedureChoice(sheet, next);
-    return {
-      status: procedureChoiceStatus(outcome, sheetProcedureChosenStatus),
-      selection: procedureChoiceSelection(sheet.procedure),
-      focus: procedureChoiceFocus(versionChoice, sheet.procedure),
-    };
+  /** A sheet chosen by hand, with the given categories and scope. */
+  function handSheet(categories: string[], scope: 'whole' | 'chapters', from: string | null, to: string | null, problem: string | null = null): ProcedureSheetSettling {
+    return { procedure: null, categories: new Set(categories), scope, from, to, problem, requests: new ProcedureChoiceRequests() };
+  }
+
+  /**
+   * One choice ending as the sheet wires it (Issue #705 item 3): the ticket it asked for settles through `settleProcedureChoice`,
+   * the sheet's own composition; the selectors are read as `renderSheet` reads them.
+   */
+  function settle(sheet: ProcedureSheetSettling, outcome: ProcedureChoiceOutcome, versionChoice: boolean) {
+    const requests = sheet.requests as ProcedureChoiceRequests;
+    const ticket = requests.ask();
+    expect(requests.loading).toBe(true);
+    const settled = settleProcedureChoice(sheet, ticket, outcome, versionChoice);
+    expect(requests.loading).toBe(false);
+    return { ...settled, selection: procedureChoiceSelection(sheet.procedure) };
   }
 
   it('keeps a pinned sheet whole when a version choice fails: its own set refilled, its selectors put back, focus on the version', () => {
@@ -219,7 +229,7 @@ describe('a choice settling into the sheet, as the sheet wires it (Issue #691)',
   });
 
   it('keeps a sheet chosen by hand when a procedure choice fails: its selector back on 不按工序, focus on it', () => {
-    const sheet: ProcedureSheetTarget = { procedure: null, categories: new Set(['plot-consistency']), scope: 'chapters', from: 'a', to: 'b', problem: null };
+    const sheet = handSheet(['plot-consistency'], 'chapters', 'a', 'b');
     const settled = settle(sheet, { kind: 'failed', reason: '无法读取所选的可复用工序。' }, false);
     expect([...sheet.categories]).toEqual(['plot-consistency']);
     expect([sheet.scope, sheet.from, sheet.to, sheet.problem]).toEqual(['chapters', 'a', 'b', '无法读取所选的可复用工序。']);
@@ -245,7 +255,7 @@ describe('a choice settling into the sheet, as the sheet wires it (Issue #691)',
   });
 
   it('moves a sheet chosen by hand onto the answer: its scope the slot, its chapters dropped', () => {
-    const sheet: ProcedureSheetTarget = { procedure: null, categories: new Set(['plot-consistency']), scope: 'chapters', from: 'a', to: 'b', problem: '旧的' };
+    const sheet = handSheet(['plot-consistency'], 'chapters', 'a', 'b', '旧的');
     const settled = settle(sheet, { kind: 'answered', run: v2 }, false);
     expect(sheet.procedure).toBe(v2);
     expect([...sheet.categories]).toEqual(['style-and-format', 'literary-expression']);
@@ -263,6 +273,24 @@ describe('a choice settling into the sheet, as the sheet wires it (Issue #691)',
     const sheet = pinnedSheet();
     expect(settle(sheet, { kind: 'cleared' }, false)).toEqual({ status: null, selection: { procedureId: '', versionId: null }, focus: 'procedure' });
     expect([...sheet.categories]).toEqual([]);
+  });
+
+  it('settles only the ticket of the newest choice, so a superseded answer leaves the sheet loading', () => {
+    const sheet = pinnedSheet();
+    const requests = sheet.requests as ProcedureChoiceRequests;
+    const older = requests.ask();
+    requests.ask();
+    settleProcedureChoice(sheet, older, { kind: 'failed', reason: '旧的回答' }, false);
+    expect(requests.loading).toBe(true);
+  });
+
+  it('clears 「正在读取…」 when the sheet closes while a choice loads, and leaves the bar alone otherwise (Issue #705)', () => {
+    const requests = new ProcedureChoiceRequests();
+    expect(procedureSheetCloseStatus(requests)).toBeNull();
+    const ticket = requests.ask();
+    expect(procedureSheetCloseStatus(requests)).toBe('');
+    requests.settle(ticket);
+    expect(procedureSheetCloseStatus(requests)).toBeNull();
   });
 });
 

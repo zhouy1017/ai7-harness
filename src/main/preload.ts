@@ -296,6 +296,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['inspectLibraryMaterial']['output']>(IPC_CHANNELS.inspectLibraryMaterial, input),
   readLibraryDecisionReason: (input: ServiceOperationMap['readLibraryDecisionReason']['input']) =>
     invoke<ServiceOperationMap['readLibraryDecisionReason']['output']>(IPC_CHANNELS.readLibraryDecisionReason, input),
+  inspectLibraryMaterialSegments: (input: ServiceOperationMap['inspectLibraryMaterialSegments']['input']) =>
+    invoke<ServiceOperationMap['inspectLibraryMaterialSegments']['output']>(IPC_CHANNELS.inspectLibraryMaterialSegments, input),
   previewLibraryMaterial: () =>
     invoke<ServiceOperationMap['previewLibraryMaterial']['output'] | null>(IPC_CHANNELS.previewLibraryMaterial),
   addLibraryMaterial: (input: ServiceOperationMap['addLibraryMaterial']['input']) =>

@@ -11,7 +11,7 @@ import {
   MAX_STORE_VERSIONS_LISTED,
 } from '../../src/service/data-version.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { SERIES_KNOWLEDGE_SCHEMA_VERSION, BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
+import { SERIES_KNOWLEDGE_SCHEMA_VERSION, MATERIAL_INDEX_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
@@ -66,9 +66,9 @@ describe('数据版本 over the real store', () => {
       softwareVersion: version,
       dataVersion: 1,
       frozen: false,
-      schemaRevision: BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
+      schemaRevision: MATERIAL_INDEX_SCHEMA_VERSION,
       update: null,
-      history: [{ softwareVersion: version, dataVersion: 1, schemaRevision: BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, recordedAt: first.history[0]!.recordedAt }],
+      history: [{ softwareVersion: version, dataVersion: 1, schemaRevision: MATERIAL_INDEX_SCHEMA_VERSION, recordedAt: first.history[0]!.recordedAt }],
       historyTruncated: false,
       upgrades: [],
       backupLocation: `${roots.dataRoot}-backups`,
@@ -85,10 +85,10 @@ describe('数据版本 over the real store', () => {
       const recordedAt = '2026-09-01T00:00:00.000Z';
       const earlier = canonicalRecord({
         schema: 'ai7.store-version/1', recordId: '00000000-0000-4000-8000-000000000001', ordinal: 1, softwareVersion: '0.0.9', dataVersion: 1,
-        schemaRevision: BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, supersedes: null, recordedAt,
+        schemaRevision: MATERIAL_INDEX_SCHEMA_VERSION, supersedes: null, recordedAt,
       });
       database.prepare(`INSERT INTO store_versions(record_id, ordinal, software_version, data_version, schema_revision, supersedes_record_id, recorded_at, canonical_json, sha256)
-        VALUES (?, 1, '0.0.9', 1, ?, NULL, ?, ?, ?)`).run('00000000-0000-4000-8000-000000000001', BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, recordedAt, earlier.json, earlier.digest);
+        VALUES (?, 1, '0.0.9', 1, ?, NULL, ?, ?, ?)`).run('00000000-0000-4000-8000-000000000001', MATERIAL_INDEX_SCHEMA_VERSION, recordedAt, earlier.json, earlier.digest);
     } finally {
       database.close();
     }
@@ -194,7 +194,7 @@ describe('数据版本 over the real store', () => {
       const store = new DatabaseSync(databasePath());
       try {
         const ledger = new DataVersionLedger(store);
-        for (let patch = from; patch <= to; patch += 1) ledger.recordOpen({ softwareVersion: `0.0.${patch}`, dataVersion: 1, schemaRevision: BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION });
+        for (let patch = from; patch <= to; patch += 1) ledger.recordOpen({ softwareVersion: `0.0.${patch}`, dataVersion: 1, schemaRevision: MATERIAL_INDEX_SCHEMA_VERSION });
       } finally {
         store.close();
       }
@@ -238,16 +238,16 @@ describe('数据版本 over the real store', () => {
     await reopened(() => undefined);
     const plant = new DatabaseSync(databasePath());
     try {
-      plant.exec(`DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; PRAGMA user_version = ${SERIES_KNOWLEDGE_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; PRAGMA user_version = ${SERIES_KNOWLEDGE_SCHEMA_VERSION};`);
       downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
     } finally {
       plant.close();
     }
     const migrated = await reopened((store) => store.inspectDataVersion());
-    expect([migrated.schemaRevision, migrated.history.length, migrated.update]).toEqual([BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, 1, null]);
+    expect([migrated.schemaRevision, migrated.history.length, migrated.update]).toEqual([MATERIAL_INDEX_SCHEMA_VERSION, 1, null]);
     const database = new DatabaseSync(databasePath(), { readOnly: true });
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
     } finally {
       database.close();
     }
