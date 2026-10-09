@@ -799,6 +799,32 @@ async function dispatch(
       }
       return { id: request.id, ok: true, op: request.op, result: store.inspectWritingTask(request.input.bookId) };
     }
+    // 快速开始 of a writing Task (Issue #432, S84b): after 先看计划's own preparation, the Task starts exactly as 开始任务 would
+    // start it, under the writing rule version the editor clicked, through the governor on its contract's ledger — or stays at
+    // its plan with the reason.
+    case 'quickStartWritingTask': {
+      const started = await store.quickStartWritingTask(
+        request.input.bookId,
+        request.input.taskIntentId,
+        request.input.planEnvelopeDigest,
+        request.input.ruleVersionId,
+        { credentialReadiness: () => analysisExecution.liveCredentialReadiness(), connectivity: connectivity.planConnectivity },
+      );
+      if (started.dispatchRunRecordId !== null && started.ledger !== null) {
+        try {
+          analysisExecution.admitOrQueue(started.dispatchRunRecordId, started.ledger);
+        } catch (error) {
+          const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
+          throw new StoreErrorClass(code, error instanceof Error ? error.message : '运行未能进入调度。');
+        }
+      }
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: { outcome: started.outcome, reasons: started.reasons, projection: store.inspectWritingTask(request.input.bookId) },
+      };
+    }
     case 'createWritingDraft':
       return { id: request.id, ok: true, op: request.op, result: store.createWritingDraft(request.input.bookId, request.input.revisionId) };
     case 'inspectAnalysisFeedback':

@@ -174,6 +174,15 @@ export const TASK_PLAN_DEFAULT_RULE_HEADING = '设为快速开始默认';
 /** What setting the rule means, above the rows it binds: a rule never starts anything by itself (TASK-028). */
 export const TASK_PLAN_DEFAULT_RULE_LEAD =
   '以后用快速开始更新这本书的分析时，AI7 会先准备计划：计划与下面这些一致时直接开始，不再停下来等你确认；有任何不同都会停在计划上，等你看过再开始。规则不会自己开始任何任务。';
+/**
+ * The same for a writing plan (Issue #432, S84b): the rule covers only the one house type the rows' 「适用于」 names (#701 re-review
+ * P2-1); the audience and channel are each Task's own, and every other type has its own rule.
+ */
+export const TASK_PLAN_WRITING_DEFAULT_RULE_LEAD =
+  '以后在「交付物」的新建文档里选下面「适用于」这一类文档、用快速开始起草时，AI7 会先按你写的受众和渠道准备计划：计划与下面这些一致时直接开始，不再停下来等你确认；有任何不同都会停在计划上，等你看过再开始。别的类型各有自己的规则；规则不会自己开始任何任务。';
+export function taskPlanDefaultRuleLead(kind: TaskPlanProjection['kind']): string {
+  return kind === 'writing' ? TASK_PLAN_WRITING_DEFAULT_RULE_LEAD : TASK_PLAN_DEFAULT_RULE_LEAD;
+}
 export const TASK_PLAN_DEFAULT_RULE_CONFIRM = '设为默认';
 export const TASK_PLAN_DEFAULT_RULE_CANCEL = '取消';
 export const TASK_PLAN_DEFAULT_RULE_FAILED = '无法设为快速开始默认。';

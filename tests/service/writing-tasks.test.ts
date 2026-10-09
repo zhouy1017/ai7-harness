@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
+import { ALWAYS_ONLINE } from '../../src/service/connectivity.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
@@ -13,7 +14,8 @@ import {
   EVALUATION_REWRITE_SCHEMA_VERSION,
   WRITING_TASK_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
-import { WRITING_EXEMPLAR_GONE_LABEL, WRITING_EXEMPLAR_GONE_SUFFIX, WRITING_NOT_DRAFTED_LABEL, WRITING_NO_RULE } from '../../src/service/task-plan.js';
+import { WRITING_EXEMPLAR_GONE_LABEL, WRITING_EXEMPLAR_GONE_SUFFIX, WRITING_NOT_DRAFTED_LABEL } from '../../src/service/task-plan.js';
+import { quickStartNoRuleReason, writingRulePattern } from '../../src/service/default-execution-rules.js';
 import { WRITING_EXEMPLAR_MOVED, WRITING_TASK_TRIGGER_SQL, writingDraftBlocks } from '../../src/service/writing-tasks.js';
 import { WRITING_EXEMPLAR_REFUSAL_PREFIX } from '../../src/service/writing/writing-kind.js';
 import {
@@ -22,7 +24,6 @@ import {
   WRITING_CONTRACT_VERSION,
   WRITING_KIND,
   WRITING_LIVE_UNAVAILABLE,
-  WRITING_QUICK_START_REASON,
   type LaunchPolicyProjection,
   type WritingProjection,
 } from '../../src/shared/protocol.js';
@@ -159,10 +160,10 @@ describe('写作任务 over the real store on exact sample1', () => {
         // 会发送 as S84a is: a writing Task runs only where nothing is sent.
         consequences: { read: '当前稿件的全部 97 个内容块，以及上面列出的参考材料', send: '不发送任何内容：写作任务目前只在不连接模型服务的运行范围内起草。', cost: '先看计划后显示' },
         task: null,
-        quickStart: { allowed: false, reason: WRITING_QUICK_START_REASON },
       });
-      expect(page.types.map((type) => [type.label, type.prepare, type.exemplars.statement, type.drafted])).toEqual(TYPE_LABELS.map((label) => [
+      expect(page.types.map((type) => [type.label, type.prepare, type.exemplars.statement, type.drafted, type.quickStart])).toEqual(TYPE_LABELS.map((label, index) => [
         label, { allowed: true, mode: 'writing-first' }, `本社暂无其他图书的${label}范例，本次不参考范例`, null,
+        { available: false, reason: quickStartNoRuleReason(writingRulePattern(page.types[index]!.typeId)), rule: null },
       ]));
 
       // 先看计划: the plan in the drawer's words.
@@ -181,7 +182,7 @@ describe('写作任务 over the real store on exact sample1', () => {
       expect(plan.steps.map((step) => step.label)).toEqual(['逐章读取，找出文档可以取用的看点、人物与主题', '依据参考材料写出「宣传文章」']);
       expect(plan.notDo.editorial).toContain('不照抄范例：与范例有连续 12 个字以上相同（跨标点时 16 个字；英文为 8 个词，跨标点时 11 个词）的草稿不予采用');
       expect(plan.start.readiness).toBe('ready');
-      expect(plan.defaultRule).toMatchObject({ reason: WRITING_NO_RULE });
+      expect(plan.defaultRule).toMatchObject({ canSet: true, reason: null, planEnvelopeDigest: prepared.planEnvelope!.digest, current: null, startedBy: null });
       expect(store.inspectWritingTask(bookId).task).toMatchObject({ taskIntentId: prepared.taskIntent!.taskIntentId, typeId: 'promotion-article', typeLabel: '宣传文章', state: 'prepared' });
 
       // 开始任务: the Run reads the eight ranges and writes the draft.
@@ -292,6 +293,7 @@ describe('写作任务 over the real store on exact sample1', () => {
     let laterPackage = '';
     let deliveredPackage = '';
     let parts: { bookId: string; draftedRevision: string } | undefined;
+    let promotionRule = '';
     await withSession(fixture, async (session) => {
       const { store, owner } = session;
       // Another Book, set as a 发稿版本, delivers a 宣传文章 made from its source material: it stands in 范例.
@@ -362,6 +364,8 @@ describe('写作任务 over the real store on exact sample1', () => {
       expect(drafted.taskOutcome!.classification).toBe('completed');
       const draftedRevision = store.inspectWritingTask(bookId).types.find((type) => type.typeId === 'promotion-article')!.drafted!.revisionId;
       expect(draftedRevision).toBe(drafted.resultSetRevision!.revisionId);
+      // The 宣传文章's 默认执行规则 is set from that plan (S84b), and travels with the Book.
+      promotionRule = store.setDefaultExecutionRule(bookId, first.taskIntent!.taskIntentId, first.planEnvelope!.digest).ruleVersionId;
 
       // Drafted again, and this time copying the 范例: refused whole — a gap with its own reason, never 已完成, nothing to open.
       const copying = prepare(store, bookId, { ...WRITING_REQUEST, requirements: '篇幅一千字以内' });
@@ -474,6 +478,12 @@ describe('写作任务 over the real store on exact sample1', () => {
       expect(target.inspectWriting(parts!.bookId)).toMatchObject({ planEnvelope: { digest: third!.planEnvelope!.digest } });
       expect(await refusal(() => target.authorizeWriting(parts!.bookId, third!.taskIntent!.taskIntentId, third!.planEnvelope!.digest)))
         .toBe(`WRITING_EXEMPLAR_MOVED:${WRITING_EXEMPLAR_MOVED}`);
+      // Nor does the 宣传文章's 默认执行规则 start it — it stops at its plan with why, nothing recorded — nor can its plan set one (S84b).
+      expect(plan.defaultRule).toMatchObject({ canSet: false, reason: WRITING_EXEMPLAR_MOVED, planEnvelopeDigest: null });
+      expect(await target.quickStartWritingTask(parts!.bookId, third!.taskIntent!.taskIntentId, third!.planEnvelope!.digest, promotionRule,
+        { credentialReadiness: async () => null, connectivity: ALWAYS_ONLINE }))
+        .toEqual({ outcome: 'fell-back', reasons: [WRITING_EXEMPLAR_MOVED], dispatchRunRecordId: null, ledger: null });
+      expect(target.inspectWriting(parts!.bookId)!.authorization).toBeNull();
       // A new Task of another type is prepared, and the older draft opens as the Book's 宣传文章.
       let progress = target.createWritingPreparationWork(parts!.bookId, { ...WRITING_REQUEST, typeId: 'news-release' }, launchPolicy);
       while (!progress.done) progress = target.advanceWritingPreparationWork(progress.workId!);

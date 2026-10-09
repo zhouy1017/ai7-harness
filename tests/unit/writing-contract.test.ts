@@ -35,7 +35,20 @@ import { writingCopyNotDo, writingReferenceLines } from '../../src/service/task-
 import { writingKindDefinition, writingRecordedKindDefinition, writingSchemaDigest } from '../../src/service/writing/writing-kind.js';
 import { WRITING_EXEMPLAR_ABSENT_TEXT, WRITING_EXEMPLAR_MOVED } from '../../src/service/writing-tasks.js';
 import { graphemeLength, writingDraftBlocks, writingWords } from '../../src/service/writing-tasks.js';
-import { WRITING_CONSEQUENCE_TERMS, WRITING_REFERENCE_TERMS, writingDraftedLine, writingFieldTooLong, writingOpenTaskTone, writingTaskLine } from '../../src/renderer/writing-task-labels.js';
+import {
+  WRITING_CONSEQUENCE_TERMS,
+  WRITING_REFERENCE_TERMS,
+  WRITING_QUICK_PICK_TYPE,
+  WRITING_STATUS,
+  writingDraftedLine,
+  writingFieldTooLong,
+  writingOpenTaskTone,
+  writingQuickFailed,
+  writingQuickNote,
+  writingQuickStarted,
+  writingQuickStarting,
+  writingTaskLine,
+} from '../../src/renderer/writing-task-labels.js';
 
 // Unit suite for Writing Contract v1 (Issue #432, plan slice S84a; V2-UX-DELIV-007, KB-004): the frozen input, the parsers, the
 // reference bound that refuses a copied exemplar, and the words the plan and the page say. Synthetic words only.
@@ -602,7 +615,7 @@ describe('the draft and the page\'s words', () => {
   it('speaks editor-surfaces §9\'s words', () => {
     expect(WRITING_CONSEQUENCE_TERMS).toEqual(['会读取', '会发送', '不会做', '费用']);
     expect(WRITING_REFERENCE_TERMS).toEqual(['梗概与人物', '评估结论与营销要点', '范例', '图书信息']);
-    expect(writingTaskLine({ taskIntentId: 'x', typeId: 'promotion-article', typeLabel: '宣传文章', state: 'settled', label: '已完成', refusal: null })).toBe('写作任务「宣传文章」：已完成');
+    expect(writingTaskLine({ taskIntentId: 'x', typeId: 'promotion-article', typeLabel: '宣传文章', state: 'settled', label: '已完成', refusal: null, planEnvelopeDigest: null })).toBe('写作任务「宣传文章」：已完成');
     // 查看任务 is the page's next step only for a prepared Task nothing refuses; a Task whose 范例 is gone is quiet (#698).
     expect(writingOpenTaskTone({ state: 'prepared', refusal: null })).toBe('primary');
     expect(writingOpenTaskTone({ state: 'prepared', refusal: WRITING_EXEMPLAR_MOVED })).toBe('quiet');
@@ -611,5 +624,18 @@ describe('the draft and the page\'s words', () => {
     expect(writingFieldTooLong('requirements')).toBe('其他要求最多 300 个字，只能写在一行里。');
     expect(writingFieldTooLong('audience')).toBe('受众最多 60 个字，只能写在一行里。');
     expect(writingDraftedLine('宣传文章', '10月9日 03:30')).toBe('「宣传文章」的草稿已写好（10月9日 03:30）；打开后成为这本书的宣传文章，处于「起草」阶段。');
+    // 快速开始 under the writing 默认执行规则 (S84b).
+    expect(writingQuickNote('写作任务 · 第 1 版')).toBe('按默认执行规则「写作任务 · 第 1 版」：先准备计划，与规则一致时直接开始；有任何不同都会停在计划上。');
+    expect(writingQuickStarting('写作任务 · 第 1 版')).toBe('正在按默认执行规则「写作任务 · 第 1 版」开始…');
+    expect(writingQuickStarted('写作任务 · 第 1 版', false)).toBe('已按默认执行规则「写作任务 · 第 1 版」开始写作任务。');
+    expect(writingQuickStarted('写作任务 · 第 1 版', true)).toBe('已按默认执行规则「写作任务 · 第 1 版」记下这项写作任务；当前启动没有可执行的路由，派发前已阻止。');
+    expect(WRITING_STATUS.quickFailed).toBe('快速开始没有开始任务；计划已准备，可在任务计划里开始。');
+    // A failed call keeps where the plan stands after the service's words (#701 review P3-5).
+    // The service's words may say the plan can no longer start: nothing promises that it can (#701 re-review P3-2).
+    expect(writingQuickFailed('任务计划已经变化；无法记录该授权。')).toBe('任务计划已经变化；无法记录该授权。快速开始没有开始任务；请在任务计划里查看。');
+    expect(writingQuickFailed('这项任务已经开始了。')).not.toContain('可在任务计划里开始');
+    expect(writingQuickFailed('  ')).toBe(WRITING_STATUS.quickFailed);
+    expect(WRITING_STATUS.quickNoPlan).toBe('这份计划还没有冻结，没有按规则开始；请看过计划后再开始。');
+    expect(WRITING_QUICK_PICK_TYPE).toBe('选好类型后显示：快速开始按这一类文档的默认执行规则开始。');
   });
 });

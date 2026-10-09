@@ -135,7 +135,7 @@ type DeliverablesApi = Pick<RendererApi, 'inspectDeliverables' | 'inspectProduct
   'inspectMaintenanceCase' | 'listMaintenanceCases' | 'recordMaintenanceCase' | 'appendMaintenanceCaseRevision' | 'saveMaintenanceErrata' |
   'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
   'createProductionDocument' | 'decideProductionDocumentType' | 'recordProductionDocumentDelivery' |
-  'inspectWritingTask' | 'prepareWritingTask' | 'createWritingDraft'>;
+  'inspectWritingTask' | 'prepareWritingTask' | 'quickStartWritingTask' | 'createWritingDraft'>;
 
 export interface MountDeliverablesOptions {
   /** The destination's panel: the surface appends its heading and its host, and the caller its persistent actions after them. */
@@ -161,7 +161,7 @@ export interface MountDeliverablesOptions {
   openActuals?(bookId: string): void;
   /** 新建文档 · 写作任务 (Issue #432, S84a): a preparation job followed to its end, and the Task's plan in the Task Drawer. */
   awaitServiceJob(job: ServiceJobProjection, onProgress: (job: ServiceJobProjection) => void): Promise<ServiceJobProjection>;
-  openWritingPlan(taskIntentId: string): void;
+  openWritingPlan(taskIntentId: string, note?: string): void;
 }
 
 /** 从来源材料创建…'s inline form while it is open: the type it creates and the material chosen, if any. */
