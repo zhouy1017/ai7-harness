@@ -161,6 +161,7 @@ import { openTaskResultWindow, type TaskResultWindow } from './task-result-windo
 import {
   RETURN_CHIP_TITLE,
   TASK_PANEL_COMPOSE_STATUS,
+  TASK_PANEL_JUMP_GONE,
   TASK_PANEL_LEAVE_STATUS,
   returnChipArrived,
   returnChipLabel,
@@ -220,7 +221,15 @@ import {
   type GlobalAttentionSurface,
 } from './global-attention.js';
 import { GLOBAL_ATTENTION_ACTIONS, GLOBAL_ATTENTION_STATUS_LINES } from './global-attention-labels.js';
-import { SELECTION_TASK_STATUS, selectionTaskChoices, type SelectionTaskChoice, type SelectionTaskChoices } from './selection-task-labels.js';
+import {
+  SELECTION_TASK_STATUS,
+  selectionProcedureEntries,
+  selectionProcedureStepReason,
+  selectionTaskChoices,
+  type SelectionProcedureEntry,
+  type SelectionTaskChoice,
+  type SelectionTaskChoices,
+} from './selection-task-labels.js';
 import { marksRefreshStep } from './marks-refresh.js';
 import { mountEditorialMarks, type EditorialMarksSurface } from './editorial-marks.js';
 import { mountPositionRail, type PositionRail } from './position-rail.js';
@@ -316,6 +325,8 @@ const taskDrawer = mountTaskDrawer({
   openTaskTarget: (target) => void leaveThen(() => openGlobalAttentionTarget(target)),
   openTaskResult: (entry, backToPanel) => openTaskResult(entry, backToPanel),
   startWholeBookTask: (bookId, input) => startWholeBookTask(bookId, input),
+  // 跳到所选文字 on a selection Task's card (Issue #423, S77 deferred item d).
+  jumpToSelection: (bookId, selection) => void jumpToSelectionText(bookId, selection),
   // 就这段提问… (Issue #52, S17a): 回到所选文字, and a 修改建议 made from an answer opened on the manuscript with its card.
   dialogueJump: (bookId, target) => void jumpToManuscript(bookId, { manuscriptId: target.manuscriptId, blockId: target.blockId, markId: null }),
   dialogueConverted: (dialogue, markId) => void jumpToManuscript(dialogue.bookId, { manuscriptId: dialogue.manuscriptId, blockId: dialogue.range.blockId, markId }),
@@ -349,6 +360,19 @@ function openTaskResult(entry: BookTaskItemProjection, backToPanel: () => void):
     },
     errorMessage: rendererErrorMessage,
   });
+}
+
+/**
+ * 跳到所选文字 (Issue #423, S77 deferred item d; TASK-045): the caret moved to the first paragraph a selection Task was started
+ * on — in the manuscript on screen, leaving 回到<位置> as every jump does, or in the manuscript opened there. A paragraph that
+ * no longer stands in the working manuscript is said, and nothing moves.
+ */
+async function jumpToSelectionText(bookId: string, selection: { readonly fromBlockId: string; readonly toBlockId: string }): Promise<void> {
+  try {
+    await jumpToManuscript(bookId, { manuscriptId: null, blockId: selection.fromBlockId, markId: null });
+  } catch (error) {
+    setStatus(rendererErrorMessage(error, TASK_PANEL_JUMP_GONE), 'error');
+  }
 }
 
 /**
@@ -410,23 +434,34 @@ async function startWholeBookTask(
  * ②B's own projections, so the composer offers exactly what they would — and nothing when neither can be read.
  */
 async function selectionTaskOffer(): Promise<SelectionTaskChoices> {
-  const [analysis, workspace] = await Promise.all([
+  const [analysis, workspace, procedures] = await Promise.all([
     window.ai7.inspectBaselineAnalysis().then((value) => value, () => null),
     window.ai7.inspectReviewWorkspace({ reviewRunId: null }).then((value) => value, () => null),
+    selectionProcedureOffer().then((value) => value, (): SelectionProcedureEntry[] => []),
   ]);
   if (analysis === null && workspace === null) throw new Error(SELECTION_TASK_STATUS.unreadable);
-  return selectionTaskChoices(analysis, workspace);
+  return selectionTaskChoices(analysis, workspace, procedures);
+}
+
+/**
+ * The house's enabled 可复用工序 as each applies to a 当前选区 of the Book (Issue #423, S77 deferred item a): the selection menu's
+ * entries, read as 新建审阅's 按已保存的工序 reads them — one answer for the whole house, scoped to the selection.
+ */
+async function selectionProcedureOffer(): Promise<SelectionProcedureEntry[]> {
+  return selectionProcedureEntries(await window.ai7.inspectCapturedProcedureApplicability({ scope: 'selection' }));
 }
 
 /**
  * The chosen Task prepared on that one paragraph, exactly as ②A's 先看计划 or ②B's 新建审阅 prepares a range Task, and its plan
- * opened beside the manuscript, where it is started (TASK-004): 重新分析这段 over the paragraph's block, or 审阅这段 in one
- * category over 当前选区. Answers whether the plan is open.
+ * opened beside the manuscript, where it is started (TASK-004): 重新分析这段 over the paragraph's block, 审阅这段 in one
+ * category over 当前选区, or one of the house's 可复用工序 over it — its exact version pinned, its Series steps as the editor
+ * ticked them (REUSE-050). Answers whether the plan is open.
  */
 async function prepareSelectionTask(
   bookId: string,
   choice: SelectionTaskChoice,
   anchor: { readonly blockId: string },
+  chosenApart: ReadonlyArray<string>,
   returnFocus: () => HTMLElement | null,
 ): Promise<boolean> {
   if (choice.kind === 'reanalyze') {
@@ -440,12 +475,51 @@ async function prepareSelectionTask(
     taskDrawer.open({ bookId, kind: 'baseline-analysis', ref: next.ref }, returnFocus, next.note);
     return true;
   }
+  if (choice.kind === 'procedure') {
+    // The version is resolved again for the selection as the sheet's choice resolves it (ADR 0087 §4): the one the menu offered,
+    // every step still able to run here, and the Series steps the editor ticked — nothing is prepared from a moved answer.
+    setStatus(SELECTION_TASK_STATUS.readingProcedure, 'busy');
+    let resolved: Awaited<ReturnType<typeof window.ai7.inspectCapturedProcedureRun>>['resolved'];
+    try {
+      resolved = (await window.ai7.inspectCapturedProcedureRun({ procedureId: choice.procedureId, versionId: choice.versionId, scope: 'selection' })).resolved;
+    } catch (error) {
+      setStatus(rendererErrorMessage(error, SELECTION_TASK_STATUS.procedureUnreadable), 'error');
+      return false;
+    }
+    if (resolved === null || resolved.versionId !== choice.versionId) {
+      setStatus(SELECTION_TASK_STATUS.procedureChanged, 'error');
+      return false;
+    }
+    const left = resolved.steps.find((step) => !step.available);
+    if (left !== undefined) {
+      setStatus(selectionProcedureStepReason(left.label, left.unavailableReason ?? ''), 'error');
+      return false;
+    }
+    const categoryIds = resolved.steps.filter((step) => !step.chosenApart || chosenApart.includes(step.label)).map((step) => step.categoryId);
+    if (categoryIds.length === 0) {
+      setStatus(SELECTION_TASK_STATUS.pickCategory, 'error');
+      return false;
+    }
+    return prepareSelectionReview(bookId, categoryIds, anchor, { versionId: resolved.versionId, documentSha256: resolved.documentSha256 }, returnFocus);
+  }
+  return prepareSelectionReview(bookId, [choice.categoryId], anchor, null, returnFocus);
+}
+
+/** 审阅 of 当前选区 prepared on the paragraph — by hand in one category, or pinned to a procedure version — and its plan opened. */
+async function prepareSelectionReview(
+  bookId: string,
+  categoryIds: ReadonlyArray<string>,
+  anchor: { readonly blockId: string },
+  capturedProcedure: { versionId: string; documentSha256: string } | null,
+  returnFocus: () => HTMLElement | null,
+): Promise<boolean> {
   if (!(await settleScreen())) return false;
   setStatus(SELECTION_TASK_STATUS.preparing, 'busy');
   try {
     const initial = await window.ai7.prepareReviewRun({
-      categoryIds: [choice.categoryId],
+      categoryIds,
       scope: { kind: 'selection', fromChapterBlockId: anchor.blockId, toChapterBlockId: anchor.blockId },
+      ...(capturedProcedure === null ? {} : { capturedProcedure }),
     });
     const completed = await awaitServiceJob(initial, (job) => setStatus(job.progress.label, job.state === 'failed' ? 'error' : 'busy'));
     if (completed.state === 'cancelled') {
@@ -8742,8 +8816,9 @@ function renderEditorWindow(
       startTaskOnSelection: {
         bookTitle,
         choices: selectionTaskOffer,
-        prepare: (choice: SelectionTaskChoice, anchor: { readonly blockId: string }) =>
-          prepareSelectionTask(initialWindow.bookId, choice, anchor, () => editorHost.querySelector<HTMLElement>('.ProseMirror')),
+        procedures: selectionProcedureOffer,
+        prepare: (choice: SelectionTaskChoice, anchor: { readonly blockId: string }, chosenApart: ReadonlyArray<string>) =>
+          prepareSelectionTask(initialWindow.bookId, choice, anchor, chosenApart, () => editorHost.querySelector<HTMLElement>('.ProseMirror')),
       },
     }),
     // An Apply is an authoritative write like a replacement or an undo: the window is reloaded from the

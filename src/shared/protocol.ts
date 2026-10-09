@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 109 as const;
+export const SERVICE_PROTOCOL_VERSION = 113 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -5872,12 +5872,20 @@ export interface KnowledgeProceduresProjection {
 
 /** The one schema a Captured Procedure version's document is written in (ADR 0087 §1). */
 export const CAPTURED_PROCEDURE_SCHEMA = 'ai7.captured-procedure/1' as const;
-/** The one parameter slot a Captured Procedure carries: the review scope kind. The chapters are chosen at each run. */
-export type CapturedProcedureScopeSlot = 'whole' | 'chapters';
-export const CAPTURED_PROCEDURE_SCOPE_SLOTS: readonly CapturedProcedureScopeSlot[] = ['whole', 'chapters'];
+/**
+ * The one parameter slot a Captured Procedure carries: the review scope kind. The chapters are chosen at each run. `selection`
+ * (Issue #423, S77 deferred item a) is the slot a Run pins when the house's procedure runs on the paragraphs 就这段发起任务… handed
+ * over: the set is widened under the same document schema, so no existing document or digest moves, and a capture still offers
+ * 全书 or 选定章节 (`CAPTURED_PROCEDURE_CAPTURE_SLOTS`).
+ */
+export type CapturedProcedureScopeSlot = 'whole' | 'chapters' | 'selection';
+export const CAPTURED_PROCEDURE_SCOPE_SLOTS: readonly CapturedProcedureScopeSlot[] = ['whole', 'chapters', 'selection'];
+/** The slots a capture may set a version to: a selection is handed over at each run from the manuscript, never saved as a setting. */
+export const CAPTURED_PROCEDURE_CAPTURE_SLOTS: readonly CapturedProcedureScopeSlot[] = ['whole', 'chapters'];
 export const CAPTURED_PROCEDURE_SCOPE_LABELS = {
   whole: '全书',
   chapters: '选定章节',
+  selection: '所选段落',
 } as const satisfies Record<CapturedProcedureScopeSlot, string>;
 /** The editor's title of a Captured Procedure: a label, never given to a model — in graphemes, and in UTF-16 code units. */
 export const MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES = 60;
@@ -9851,6 +9859,11 @@ export interface BookTaskItemProjection {
   item: GlobalAttentionItemProjection;
   /** `null` for a Task that formed no result — a Run that stopped before it read anything. */
   result: BookTaskResultRef | null;
+  /**
+   * The paragraphs a selection Task was started on, by block identity — the first and the last (Issue #423, S77 deferred item
+   * d): the card's `跳到所选文字` moves the caret there, or says the text moved. Absent for every other Task.
+   */
+  selection?: { fromBlockId: string; toBlockId: string };
 }
 
 export interface BookTaskGroupProjection {
@@ -10739,9 +10752,10 @@ export interface ServiceOperationMap {
    * For the Book's 新建审阅 sheet (ADR 0087 §4): the newest 已启用 version that still validates, or — `versionId` — the exact
    * eligible version the editor chose instead (Issue #66, S31; REUSE-043 to REUSE-045, REUSE-054).
    */
-  inspectCapturedProcedureRun: { input: { bookId: string; procedureId: string; versionId: string | null }; output: CapturedProcedureRunProjection };
+  // `scope` (Issue #423, S77 deferred item a): the steps resolved for a 当前选区 instead of the version's own slot; left out or `null` for the slot.
+  inspectCapturedProcedureRun: { input: { bookId: string; procedureId: string; versionId: string | null; scope?: CapturedProcedureScopeSlot | null }; output: CapturedProcedureRunProjection };
   /** The house's enabled Captured Procedures as each applies to one Book: its latest eligible version and its steps there (S31b). */
-  inspectCapturedProcedureApplicability: { input: { bookId: string }; output: CapturedProcedureApplicabilityProjection };
+  inspectCapturedProcedureApplicability: { input: { bookId: string; scope?: CapturedProcedureScopeSlot | null }; output: CapturedProcedureApplicabilityProjection };
   /** 保存开发建议: a new Developer Capability Proposal, or its next version (ADR 0087 §6). */
   saveDeveloperProposal: { input: SaveDeveloperProposalInput; output: DeveloperProposalProjection };
   /** 导出为文件…: the proposal version written to the file the editor chose through the Save dialog (ADR 0087 §6). */
@@ -11362,10 +11376,16 @@ export interface RendererApi {
   enableCapturedProcedure(input: { versionId: string; previewDigest: string }): Promise<CapturedProcedureProjection>;
   previewCapturedProcedureStop(input: { procedureId: string; versionId: string | null }): Promise<CapturedProcedureStopPreviewProjection>;
   stopCapturedProcedure(input: { procedureId: string; versionId: string | null; previewDigest: string }): Promise<CapturedProcedureProjection>;
-  /** For the current Book's 新建审阅 sheet: the latest eligible version, or the exact eligible one chosen (`versionId`). */
-  inspectCapturedProcedureRun(input: { procedureId: string; versionId?: string | null }): Promise<CapturedProcedureRunProjection>;
-  /** The house's enabled Captured Procedures as each applies to the route's Book (Issue #66, S31b): the sheet's 按已保存的工序. */
-  inspectCapturedProcedureApplicability(): Promise<CapturedProcedureApplicabilityProjection>;
+  /**
+   * For the current Book's 新建审阅 sheet: the latest eligible version, or the exact eligible one chosen (`versionId`). With
+   * `scope: 'selection'` (Issue #423, S77 deferred item a) its steps are resolved for the paragraphs 就这段发起任务… hands over.
+   */
+  inspectCapturedProcedureRun(input: { procedureId: string; versionId?: string | null; scope?: CapturedProcedureScopeSlot | null }): Promise<CapturedProcedureRunProjection>;
+  /**
+   * The house's enabled Captured Procedures as each applies to the route's Book (Issue #66, S31b): the sheet's 按已保存的工序 —
+   * or, with `scope: 'selection'`, as each applies to a 当前选区 of it, for the selection menu (Issue #423, S77 deferred item a).
+   */
+  inspectCapturedProcedureApplicability(input?: { scope?: CapturedProcedureScopeSlot | null }): Promise<CapturedProcedureApplicabilityProjection>;
   saveDeveloperProposal(input: SaveDeveloperProposalInput): Promise<DeveloperProposalProjection>;
   /** 导出为文件…: the platform Save dialog, then the file; nothing is written or recorded when the dialog is cancelled. */
   saveDeveloperProposalFile(input: { proposalVersionId: string }): Promise<SaveDeveloperProposalFileOutcome>;

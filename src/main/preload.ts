@@ -282,8 +282,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['previewCapturedProcedureStop']['output']>(IPC_CHANNELS.previewCapturedProcedureStop, input),
   stopCapturedProcedure: (input: Parameters<RendererApi['stopCapturedProcedure']>[0]) =>
     invoke<ServiceOperationMap['stopCapturedProcedure']['output']>(IPC_CHANNELS.stopCapturedProcedure, input),
-  inspectCapturedProcedureApplicability: () =>
-    invoke<ServiceOperationMap['inspectCapturedProcedureApplicability']['output']>(IPC_CHANNELS.inspectCapturedProcedureApplicability),
+  inspectCapturedProcedureApplicability: (input?: Parameters<RendererApi['inspectCapturedProcedureApplicability']>[0]) =>
+    invoke<ServiceOperationMap['inspectCapturedProcedureApplicability']['output']>(IPC_CHANNELS.inspectCapturedProcedureApplicability, input ?? {}),
   inspectCapturedProcedureRun: (input: Parameters<RendererApi['inspectCapturedProcedureRun']>[0]) =>
     invoke<ServiceOperationMap['inspectCapturedProcedureRun']['output']>(IPC_CHANNELS.inspectCapturedProcedureRun, input),
   saveDeveloperProposal: (input: Parameters<RendererApi['saveDeveloperProposal']>[0]) =>

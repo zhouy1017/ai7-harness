@@ -70,14 +70,18 @@ export const TASK_PANEL_ACTION_LABELS = {
   result: '查看结果',
   // A dialogue Task's own two (TASK-044): its latest answer in the floating window, and the dialogue in the foreground.
   answer: DIALOGUE_ANSWER_LABEL,
+  // A selection Task's own (Issue #423, S77 deferred item d): the caret moved to the paragraph it was started on.
+  jump: '跳到所选文字',
 } as const;
+/** 跳到所选文字 when the paragraph the Task was started on no longer stands in the manuscript: said, nothing moves. */
+export const TASK_PANEL_JUMP_GONE = '所选文字所在的段落已不在当前稿件中，无法跳到。';
 
 /**
  * What a card offers. `pause` and `resume` act on the card, as the drawer's bar does; `cancel` opens the plan with its
  * Cancellation Impact Summary, where the cancellation is confirmed; `plan` and `next` open the plan or the Task's own
- * surface; `result` opens `查看结果`'s floating window.
+ * surface; `result` opens `查看结果`'s floating window; `jump` moves the caret to a selection Task's paragraph.
  */
-export type TaskPanelActionKey = 'pause' | 'resume' | 'cancel' | 'plan' | 'next' | 'result' | 'answer';
+export type TaskPanelActionKey = 'pause' | 'resume' | 'cancel' | 'plan' | 'next' | 'result' | 'answer' | 'jump';
 export interface TaskPanelAction {
   readonly key: TaskPanelActionKey;
   readonly label: string;
@@ -140,6 +144,8 @@ export function taskPanelCardView(entry: BookTaskItemProjection): TaskPanelCardV
     default:
       actions = item.group === 'recent' && entry.result !== null ? [action('result', true)] : [next];
   }
+  // A Task started on a selection offers the way to its paragraph in every state (Issue #423, S77 deferred item d).
+  if (entry.selection !== undefined) actions = [...actions, action('jump')];
   return {
     kindLabel: item.object.kind === 'review' ? TASK_PANEL_KIND_LABELS.review
       : item.object.kind === 'dialogue' ? TASK_PANEL_KIND_LABELS.dialogue : TASK_PANEL_KIND_LABELS.analysis,

@@ -2064,6 +2064,61 @@ async function main() {
     await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'series-drawer-closed');
     await leaveReviewToLibrary(renderer, 'series-sheet-leave');
 
+    at('procedure-selection-run');
+    // The house's 可复用工序 on a selection (Issue #423, S77 deferred item a): in the member's manuscript the selection menu's AI7 任务
+    // group lists 《书系复核》 — 《体例复核》, every version stopped, is listed nowhere — while 润色这段 alone still waits with its
+    // reason and 再选一段加入 is refused in words. Its entry opens the 就这段发起任务 composer with it held; 书系一致性 is unticked and
+    // the editor's (S31b's reading, ruling 3): left unticked, 准备任务 prepares nothing and says so; ticked, it prepares a 当前选区
+    // Run pinned to version 1 with nothing left out, whose plan opens beside the manuscript. Its card in 任务 names the paragraph
+    // and offers 跳到所选文字 (deferred item d), which puts the caret back on it. The Run is left prepared: this window's adapter
+    // answers 体例与格式, not 书系一致性.
+    await fill(renderer, '#book-filter-text', MEMBER, 'selection-procedure-find-text');
+    await clickSelector(renderer, '[data-book-filter-action="find"]', 'selection-procedure-find');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"] button[data-book-id=${JSON.stringify(member)}]')`, 'selection-procedure-found');
+    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(member)}]`, 'selection-procedure-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(member)}]') && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')`, 'selection-procedure-editor', 120_000);
+    await assertRenderer(renderer, MARK_HELPERS, 'selection-procedure-helpers');
+    // A paragraph in the window whose first 12 code units are 12 graphemes, so a range by offset is a range of characters.
+    const selectionBlock = await renderer.evaluate(`(() => { const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }); return Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).find((node) => { const head = (node.textContent ?? '').slice(0, 12); return head.length === 12 && Array.from(segmenter.segment(head)).length === 12; })?.dataset.blockId ?? null; })()`);
+    requireJourney(/^blk_[0-9a-f]{24}$/.test(selectionBlock ?? ''), 'selection-procedure-paragraph');
+    const procedureAction = `procedure:${seriesProcedureId}`;
+    await openSelectionMenu(renderer, selectionBlock, 2, 8, 'selection-procedure-menu');
+    // The group lists the house's procedures once the editor's read of them answers, and is drawn again then: wait for it.
+    await waitFor(renderer, `(() => { const item = window.__j13.item(${JSON.stringify(procedureAction)}); const polish = window.__j13.item('preset-polish'); const note = window.__j13.menu()?.textContent ?? ''; return item instanceof HTMLButtonElement && !item.disabled && item.textContent.includes(${JSON.stringify(`按《${SERIES_PROCEDURE_TITLE}》审阅这段`)}) && item.textContent.includes('可复用工序 · 第 1 版 · 1 步 · 「书系一致性」另行勾选') && window.__j13.item(${JSON.stringify(`procedure:${procedureId}`)}) === null && polish instanceof HTMLButtonElement && polish.disabled && polish.title === '润色这段尚未接通：要有一项生成修改建议的润色工序' && window.__j13.item('preset-names') === null && window.__j13.item('preset-continuity') === null && note.includes('不提供「再选一段加入」') && !note.includes('本社还没有启用的可复用工序'); })()`, 'selection-procedure-menu-words', 15_000);
+    await assertRenderer(renderer, `(() => { window.__j13.item(${JSON.stringify(procedureAction)}).click(); return true; })()`, 'selection-procedure-choose');
+    await waitFor(renderer, `window.__j13.composer()?.dataset.markComposer === 'task-on-selection' && window.__j13.composer().querySelector('select[data-mark-field="procedure"]')?.value === ${JSON.stringify(procedureAction)}`, 'selection-procedure-composer', 30_000);
+    const READ_APART = `(() => { const composer = window.__j13.composer(); const set = composer?.querySelector('fieldset[data-mark-field="chosenApart"]'); const box = set?.querySelector('input[data-mark-checkbox="书系一致性"]'); if (!(set instanceof HTMLElement) || !(box instanceof HTMLInputElement)) return null; return { legend: set.querySelector('legend')?.textContent ?? null, shown: !set.hidden && box.closest('label')?.hidden === false, checked: box.checked, hint: box.closest('label')?.querySelector('small')?.textContent ?? null, options: Array.from(composer.querySelectorAll('select[data-mark-field="procedure"] option'), (option) => option.value) }; })()`;
+    const apart = await renderer.evaluate(READ_APART);
+    requireJourney(apart?.legend === '要另行勾选的类别' && apart.shown === true && apart.checked === false &&
+      apart.hint === '「书系一致性」要读这本书所在书系的资料，不会替你选上：要用就勾选它；不选，这次审阅会记下是你没有选。' &&
+      apart.options.includes(procedureAction) && !apart.options.includes(`procedure:${procedureId}`), 'selection-procedure-chosen-apart', apart);
+    // Left unticked, nothing is prepared: the composer stays and the status says to tick a category.
+    await assertRenderer(renderer, `window.__j13.act('submit')`, 'selection-procedure-submit-unticked');
+    await waitFor(renderer, `${status}===${JSON.stringify('请至少勾选一个类别：不勾，这项工序就没有可以运行的步骤。')} && window.__j13.composer()?.dataset.markComposer === 'task-on-selection'`, 'selection-procedure-pick-category', 15_000);
+    await clickSelector(renderer, '[data-mark-composer] input[data-mark-checkbox="书系一致性"]', 'selection-procedure-tick');
+    await assertRenderer(renderer, `window.__j13.act('submit')`, 'selection-procedure-submit');
+    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawerView === 'plan' && drawer.dataset.taskPlanKind === 'review-run' && drawer.dataset.taskPlanStart === 'ready' && window.__j13.composer() === null && (drawer.textContent ?? '').includes('按 1 类审阅所选段落：书系一致性'); })()`, 'selection-procedure-plan', 180_000);
+    const selectionRun = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({ reviewRunId: null }).then((workspace) => workspace.run === null ? null : { reviewRunId: workspace.run.reviewRunId, state: workspace.run.state, scope: workspace.run.scope, categories: workspace.run.categories.map((category) => category.categoryId), procedure: workspace.run.procedure })`);
+    requireJourney(UUID_PATTERN.test(selectionRun?.reviewRunId ?? '') && selectionRun.state === 'prepared' && selectionRun.scope?.kind === 'selection' &&
+      selectionRun.scope.selection?.fromBlockId === selectionBlock && selectionRun.scope.selection.toBlockId === selectionBlock &&
+      JSON.stringify(selectionRun.categories) === JSON.stringify(['series-consistency']) && selectionRun.procedure?.procedureId === seriesProcedureId &&
+      selectionRun.procedure.version === 1 && JSON.stringify(selectionRun.procedure.leftOut) === JSON.stringify([]), 'selection-procedure-pinned', selectionRun);
+    // ← 任务: the card names the paragraph and offers 跳到所选文字 beside its next step.
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'selection-procedure-tasks');
+    const SELECTION_CARD = `#task-drawer .task-panel li.task-card[data-task-state="review-prepared"]`;
+    await waitFor(renderer, `(() => { const card = document.querySelector(${JSON.stringify(SELECTION_CARD)}); return card !== null && (card.querySelector('.task-card-title')?.textContent ?? '').endsWith(' · 所选段落') && JSON.stringify(Array.from(card.querySelectorAll('[data-task-action]'), (button) => [button.dataset.taskAction, button.textContent, button.disabled])) === JSON.stringify([['next', '查看计划并开始', false], ['jump', '跳到所选文字', false]]); })()`, 'selection-procedure-card', 30_000);
+    // With the caret put on another paragraph of the window, 跳到所选文字 brings it back onto the Task's paragraph; the panel stays.
+    const awayBlock = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')).find((node) => (node.textContent ?? '').length > 0 && node.dataset.blockId !== ${JSON.stringify(selectionBlock)})?.dataset.blockId ?? null`);
+    requireJourney(/^blk_[0-9a-f]{24}$/.test(awayBlock ?? ''), 'selection-procedure-away-block');
+    await assertRenderer(renderer, `window.__j13.place(${JSON.stringify(awayBlock)}, 0, 0)`, 'selection-procedure-caret-away');
+    await clickSelector(renderer, `${SELECTION_CARD} [data-task-action="jump"]`, 'selection-procedure-jump');
+    await waitFor(renderer, `(() => { const anchor = getSelection()?.anchorNode ?? null; const block = document.querySelector(${JSON.stringify(`[data-testid="manuscript-editor"] [data-block-id="${selectionBlock}"]`)}); return block !== null && anchor !== null && block.contains(anchor) && document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'panel'; })()`, 'selection-procedure-jumped', 30_000);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'selection-procedure-drawer-close');
+    await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'selection-procedure-drawer-closed');
+    await click(renderer, '返回图书工作概览', 'selection-procedure-overview');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview')?.dataset.bookId===${JSON.stringify(member)}`, 'selection-procedure-overview-ready');
+    await backToLibrary(renderer, 'selection-procedure-leave');
+
     at('procedure-series-mismatch');
     // 工序运行之书 is in no Series: 《书系复核》 is still offered — manual choice is never ruled out — with why it cannot run here.
     await openBookReview(renderer, CAPTURE_TARGET_TITLE, targetBook, 'series-mismatch-review');

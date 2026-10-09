@@ -1351,9 +1351,12 @@ async function main() {
     const paragraphText = () => renderer.evaluate(`window.__j16.block(${JSON.stringify(taskBlock)})?.textContent ?? null`);
     const paragraphBefore = await paragraphText();
     const windowLoads = () => renderer.evaluate(`document.querySelector('[data-screen="editor"] [data-window-loads]')?.dataset.windowLoads ?? ''`);
-    // On a selection of that paragraph the menu's 就这段发起任务… acts; the house's 常用工序 wait, and the group says why.
+    // On a selection of that paragraph the menu's 就这段发起任务… acts; the house's 可复用工序 would be listed here (S77 deferred item a,
+    // J-13's) — this house has none, which the group says once its read answers — 润色这段 alone waits with its reason, the other two
+    // prototype presets are gone, and 再选一段加入 is refused in words.
     await openSelectionMenu(renderer, taskBlock, 0, wordsTo, 'selection-task-open-menu');
-    await assertRenderer(renderer, `(() => { const item = window.__j16.item('task-on-selection'); const presets = ['preset-polish', 'preset-names', 'preset-continuity'].map((action) => window.__j16.item(action)); return item instanceof HTMLButtonElement && !item.disabled && item.textContent.startsWith('就这段发起任务…') && presets.every((preset) => preset instanceof HTMLButtonElement && preset.disabled) && window.__j16.menu().textContent.includes('本社常用工序就选区运行尚未接通'); })()`, 'selection-task-menu-items');
+    await assertRenderer(renderer, `(() => { const item = window.__j16.item('task-on-selection'); const polish = window.__j16.item('preset-polish'); return item instanceof HTMLButtonElement && !item.disabled && item.textContent.startsWith('就这段发起任务…') && polish instanceof HTMLButtonElement && polish.disabled && polish.title === '润色这段尚未接通：要有一项生成修改建议的润色工序' && window.__j16.item('preset-names') === null && window.__j16.item('preset-continuity') === null && window.__j16.menu().textContent.includes('不提供「再选一段加入」'); })()`, 'selection-task-menu-items');
+    await waitFor(renderer, `window.__j16.menu()?.textContent.includes('本社还没有启用的可复用工序。') && window.__j16.menu().querySelectorAll('[data-mark-action^="procedure:"]').length === 0 && window.__j16.item('task-on-selection') instanceof HTMLButtonElement`, 'selection-task-menu-procedures-none', 15_000);
     await assertRenderer(renderer, `(() => { window.__j16.item('task-on-selection').click(); return true; })()`, 'selection-task-choose');
 
     at('selection-task-composer');
@@ -1393,7 +1396,16 @@ async function main() {
     const selectionPanel = await waitForPanel(renderer, (panel) => statesOf(panel, 'waiting').includes('review-prepared'), 'selection-task-review-waiting');
     const selectionCard = cardsOf(selectionPanel, 'waiting').find((card) => card.state === 'review-prepared');
     requireJourney(selectionCard.kind === '审阅任务 · 不需要对话' && selectionCard.title === '审阅 · 第 1 次 · 所选段落' && selectionCard.pill === '计划已准备 · 等你开始' &&
-      JSON.stringify(selectionCard.actions) === JSON.stringify([['next', '查看计划并开始', 'enabled']]), 'selection-task-review-card-words', selectionCard);
+      JSON.stringify(selectionCard.actions) === JSON.stringify([['next', '查看计划并开始', 'enabled'], ['jump', '跳到所选文字', 'enabled']]), 'selection-task-review-card-words', selectionCard);
+
+    at('selection-task-jump');
+    // 跳到所选文字 (S77 deferred item d): with the caret put on the window's first paragraph, the card's jump moves it to the paragraph
+    // the Task was started on — the panel stays beside the text.
+    const awayBlock = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')).find((node) => (node.textContent ?? '').length > 0 && node.dataset.blockId !== ${JSON.stringify(taskBlock)})?.dataset.blockId ?? null`);
+    requireJourney(/^blk_[0-9a-f]{24}$/.test(awayBlock ?? ''), 'selection-task-jump-away-block');
+    await assertRenderer(renderer, `window.__j16.place(${JSON.stringify(awayBlock)}, 0, 0)`, 'selection-task-jump-caret-away');
+    await cardAction(renderer, 'review-prepared', 'jump', 'selection-task-jump-click');
+    await waitFor(renderer, `(() => { const anchor = getSelection()?.anchorNode ?? null; const block = document.querySelector(${JSON.stringify(`[data-testid="manuscript-editor"] [data-block-id="${taskBlock}"]`)}); return block !== null && anchor !== null && block.contains(anchor) && document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'panel'; })()`, 'selection-task-jumped', 30_000);
 
     at('selection-task-review-run');
     // Started from its plan, the 审阅 puts the baseline's leads on that paragraph — at least one, every one there — sends
@@ -1405,7 +1417,7 @@ async function main() {
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'selection-task-review-done-back');
     const reviewedPanel = await waitForPanel(renderer, (panel) => cardsOf(panel, 'recent')[0]?.state === 'review-completed', 'selection-task-review-completed', 60_000);
     const reviewedCard = cardsOf(reviewedPanel, 'recent')[0];
-    requireJourney(reviewedCard.title === '审阅 · 第 1 次 · 所选段落' && JSON.stringify(reviewedCard.actions) === JSON.stringify([['result', '查看结果', 'enabled']]), 'selection-task-review-completed-words', reviewedCard);
+    requireJourney(reviewedCard.title === '审阅 · 第 1 次 · 所选段落' && JSON.stringify(reviewedCard.actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['jump', '跳到所选文字', 'enabled']]), 'selection-task-review-completed-words', reviewedCard);
     const reviewedFindings = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({ reviewRunId: ${JSON.stringify(selectionRun.reviewRunId)} }).then((workspace) => workspace.run.findings.map((finding) => [finding.blockId, finding.markId !== null]))`);
     requireJourney(Array.isArray(reviewedFindings) && reviewedFindings.length > 0 && reviewedFindings.every(([blockId, marked]) => blockId === taskBlock && marked), 'selection-task-review-in-paragraph', reviewedFindings);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'selection-task-review-close');

@@ -103,7 +103,10 @@ describe('the Captured Procedure document (ADR 0087 §1)', () => {
     const { title: _title, ...untitled } = document;
     expect(isCapturedProcedureDocument(untitled)).toBe(false);
     expect(isCapturedProcedureDocument({ ...document, runAs: 'skill' })).toBe(false);
-    expect(isCapturedProcedureDocument({ ...document, parameters: { scope: 'selection' } })).toBe(false);
+    // The slot set admits `selection` since Issue #423 (S77 deferred item a) — the scope a Run pins when the procedure runs on a
+    // 当前选区 — so a document naming it reads; a slot outside the set does not.
+    expect(isCapturedProcedureDocument({ ...document, parameters: { scope: 'selection' } })).toBe(true);
+    expect(isCapturedProcedureDocument({ ...document, parameters: { scope: 'paragraph' } })).toBe(false);
     expect(isCapturedProcedureDocument({ ...document, steps: [] })).toBe(false);
     expect(isCapturedProcedureDocument({ ...document, steps: [document.steps[0], document.steps[0]] })).toBe(false);
     expect(isCapturedProcedureDocument({ ...document, steps: [{ ...document.steps[0], prompt: '多做一点' }, document.steps[1]] })).toBe(false);

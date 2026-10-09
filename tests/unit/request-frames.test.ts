@@ -1756,6 +1756,9 @@ describe('decodeRequest rejects malformed frames', () => {
     const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
       { op: 'inspectCapturedProcedureRun', input: { bookId, procedureId, versionId: null } },
       { op: 'inspectCapturedProcedureRun', input: { bookId, procedureId, versionId } },
+      // The steps resolved for a 当前选区 instead of the version's slot (Issue #423, S77 deferred item a): `'selection'`, or `null` for the slot.
+      { op: 'inspectCapturedProcedureRun', input: { bookId, procedureId, versionId, scope: 'selection' } },
+      { op: 'inspectCapturedProcedureRun', input: { bookId, procedureId, versionId: null, scope: null } },
       { op: 'previewCapturedProcedureStop', input: { procedureId, versionId } },
       { op: 'previewCapturedProcedureStop', input: { procedureId, versionId: null } },
       { op: 'stopCapturedProcedure', input: { procedureId, versionId, previewDigest: 'a'.repeat(64) } },
@@ -1773,6 +1776,9 @@ describe('decodeRequest rejects malformed frames', () => {
       ['inspectCapturedProcedureRun', { bookId: 'book', procedureId, versionId: null }],
       ['inspectCapturedProcedureRun', { bookId, procedureId: 'procedure', versionId: null }],
       ['inspectCapturedProcedureRun', { bookId, procedureId, versionId: null, before: null }],
+      // The scope is a 当前选区 or nothing: never a slot of the version's own, never a number.
+      ['inspectCapturedProcedureRun', { bookId, procedureId, versionId: null, scope: 'whole' }],
+      ['inspectCapturedProcedureRun', { bookId, procedureId, versionId: null, scope: 1 }],
       // 停用… is a read: it carries no digest, and names one version or `null` for all.
       ['previewCapturedProcedureStop', { procedureId, versionId, previewDigest: 'a'.repeat(64) }],
       ['previewCapturedProcedureStop', { procedureId }],
@@ -1792,10 +1798,12 @@ describe('decodeRequest rejects malformed frames', () => {
     }
   });
 
-  it('accepts the applicability read naming exactly one Book (Issue #66, S31b)', () => {
-    const request = { id: randomUUID(), op: 'inspectCapturedProcedureApplicability', input: { bookId: randomUUID() } };
-    expect(decodeRequest(frameOf(request))).toEqual(request);
-    for (const input of [{}, { bookId: 'book' }, { bookId: null }, { bookId: randomUUID(), procedureId: randomUUID() }]) {
+  it('accepts the applicability read naming exactly one Book (Issue #66, S31b), scoped to a 当前选区 or not (Issue #423)', () => {
+    for (const input of [{ bookId: randomUUID() }, { bookId: randomUUID(), scope: 'selection' }, { bookId: randomUUID(), scope: null }]) {
+      const request = { id: randomUUID(), op: 'inspectCapturedProcedureApplicability', input };
+      expect(decodeRequest(frameOf(request))).toEqual(request);
+    }
+    for (const input of [{}, { bookId: 'book' }, { bookId: null }, { bookId: randomUUID(), procedureId: randomUUID() }, { bookId: randomUUID(), scope: 'chapters' }, { bookId: randomUUID(), scope: true }]) {
       expect(rejectionFor(frameOf({ id: randomUUID(), op: 'inspectCapturedProcedureApplicability', input }))).toBeInstanceOf(ProtocolError);
     }
   });

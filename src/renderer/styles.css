@@ -1369,6 +1369,12 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .editorial-mark-field { display: grid; gap: .2rem; margin: .5rem 0; font-weight: 700; }
 .editorial-mark-field textarea { width: 100%; padding: .45rem .55rem; border: 1px solid #b9b39f; border-radius: 6px; font: inherit; font-weight: 400; resize: vertical; }
 .editorial-mark-field textarea:focus-visible { outline: 3px solid #416458; outline-offset: 2px; }
+/* A procedure's Series steps, the editor's to tick (Issue #423): boxes under the 工序 field, each with why it is not ticked for them. */
+.editorial-mark-checkboxes { border: 1px solid #cfc9ba; border-radius: 6px; padding: .4rem .6rem; }
+.editorial-mark-checkboxes legend { padding: 0 .3rem; }
+.editorial-mark-checkbox { display: grid; grid-template-columns: auto 1fr; gap: .15rem .45rem; align-items: start; font-weight: 400; }
+.editorial-mark-checkbox input { margin-top: .25rem; }
+.editorial-mark-checkbox small { grid-column: 2; }
 .editorial-mark-problem { color: #9b2c2c; font-weight: 700; }
 .editorial-mark-unavailable { display: inline-flex; flex-direction: column; align-items: flex-start; gap: .15rem; max-width: 18rem; }
 .editorial-mark-basis, .editorial-mark-replies { margin: .25rem 0; padding-left: 1.2rem; }

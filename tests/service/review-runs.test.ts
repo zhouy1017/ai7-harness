@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { strFromU8, unzipSync } from 'fflate';
@@ -10,6 +11,7 @@ import { REPORT_EXPORT_FORMATS, REPORT_FORMAT_LINES } from '../../src/service/ma
 import { CooperativeJobOwner } from '../../src/service/cooperative-jobs.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
+import { PROCEDURE_STEP_NOT_CHOSEN } from '../../src/service/captured-procedures.js';
 import { RECONCILED_INTERRUPTED_DETAIL, type BaselineAnalysisStore } from '../../src/service/analysis/baseline-analysis-store.js';
 import { graphemeCount, sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -47,8 +49,10 @@ import {
   type ReviewWorkspaceProjection,
   type ServiceJobProjection,
 } from '../../src/shared/protocol.js';
+import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { LITERARY_EXPRESSION, STYLE_AND_FORMAT, TYPOS_AND_USAGE } from '../support/review-categories.js';
+import { makeJ13Series } from '../support/series-consistency.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 
 // Service-integration suite (L2) for Review Runs (Issue #417, plan slice S69, Stage B): the real store,
@@ -1750,6 +1754,197 @@ describe('the 审阅报告 exported in the manuscript\'s formats (Issue #500, S6
       // A report that is not this Book's — or none at all — is refused, and nothing is prepared.
       expect(await exportCode(() => session.store.reviewManuscriptExport({ bookId: book.bookId, target: { kind: 'report', reportId: randomUUID() }, options }, true)))
         .toBe('EXPORT_TARGET_NOT_FOUND');
+    });
+  }, 300_000);
+});
+
+// ---- The house's 可复用工序 on a 当前选区 (Issue #423, S77 deferred items a and d) ------------------------------------------
+
+const SERIES = 'series-consistency';
+const SELECTION_FIXTURE = 'l2-review-factual-and-series-consistency';
+
+/**
+ * A fixtures root holding every authored fixture and one layered over the review fixture with the 事实核查 and 书系一致性
+ * fixtures' answers: one Review Run of 体例与格式, 情节逻辑与前后一致, 事实核查 and 书系一致性 in a Series Book is answered
+ * whole, so a capture can keep any of them. Written for this suite only, under its scratch input root, from the admitted
+ * fixtures' own entries.
+ */
+async function selectionFixturesRoot(): Promise<string> {
+  const root = join(roots.inputRoot, 'fixtures');
+  await mkdir(root);
+  for (const name of await readdir(FIXTURES_ROOT)) if (name.endsWith('.json')) await copyFile(join(FIXTURES_ROOT, name), join(root, name));
+  const read = (name: string) => JSON.parse(readFileSync(join(FIXTURES_ROOT, `${name}.json`), 'utf8')) as { entries: unknown[] } & Record<string, unknown>;
+  const review = read('sample1-review-authored');
+  writeFileSync(join(root, `${SELECTION_FIXTURE}.json`), JSON.stringify({
+    ...review, identity: SELECTION_FIXTURE, entries: [...review.entries, ...read('sample1-factual-authored').entries, ...read('sample1-series-consistency-authored').entries],
+    description: 'L2 套件专用：审阅夹具的条目之外加上事实核查与书系一致性夹具的条目，使一次审阅同时覆盖四类。',
+  }));
+  return root;
+}
+
+async function openLayeredSelection(): Promise<Session> {
+  const fixture = await loadModelFixture(await selectionFixturesRoot(), SELECTION_FIXTURE);
+  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
+    induceUnprovableReconciliation: false,
+    persistLegacyReviewedDraft: false,
+    induceReimportProofTamper: false,
+    induceAbandonObjectRemovalFailure: false,
+    interruptAfterAbandonObjectRemoval: false,
+    baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
+  });
+  const owner = new BaselineAnalysisExecutionOwner({
+    ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
+    readGuard: (runRecordId) => store.seriesReadGuard(runRecordId),
+  });
+  return { store, owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, owner), fixture };
+}
+
+/** 先看计划 from a Captured Procedure version (ADR 0087 §4): the pin the sheet — or the selection composer — carries. */
+function preparePinned(session: Session, book: Book, categoryIds: ReadonlyArray<string>, scope: ReviewRunScopeRequest, pin: { versionId: string; documentSha256: string }): ReviewRunProjection {
+  let progress = session.store.createReviewRunPreparationWork(book.bookId, categoryIds, scope, launchPolicy, pin);
+  while (!progress.done) progress = session.store.advanceReviewRunPreparationWork(progress.workId!);
+  const run = progress.projection!.run!;
+  expect(run.state).toBe('prepared');
+  return run;
+}
+
+describe('the house\'s 可复用工序 on a 当前选区 (Issue #423, S77 deferred items a and d; ADR 0087 §4; REUSE-046, REUSE-050)', () => {
+  it('pins the exact version, reads only the selection and marks inside it, gives no coverage, leaves 书系一致性 the editor\'s to tick, and names a step that cannot read a selection', async () => {
+    const session = await openLayeredSelection();
+    try {
+      const { store } = session;
+      const book = await importBook(session);
+      makeJ13Series(store, book.bookId);
+      await runBaseline(session, book);
+      const source = await authorizeAndDrive(session, book, prepare(session, book, [STYLE, PLOT, FACTUAL, SERIES], WHOLE));
+      expect(source.state).toBe('settled');
+      expect(source.categories.map((category) => category.state)).toEqual(['settled', 'settled', 'settled', 'settled']);
+      const save = (categoryIds: ReadonlyArray<string>, title: string): { procedureId: string; versionId: string; documentSha256: string } => {
+        const saved = store.saveCapturedProcedure({ bookId: book.bookId, reviewRunId: source.reviewRunId, categoryIds, scopeSlot: 'whole', title, procedureId: null });
+        const version = saved.versions[0]!;
+        store.enableCapturedProcedure(version.versionId, store.previewCapturedProcedureValidation(version.versionId).previewDigest);
+        return { procedureId: saved.procedureId, versionId: version.versionId, documentSha256: version.technical.documentSha256 };
+      };
+      const steps = save([STYLE, PLOT], '体例线索复核');
+      const factual = save([STYLE, FACTUAL], '含事实核查');
+      const series = save([STYLE, SERIES], '书系复核');
+      // A capture sets 全书 or 选定章节; a selection is handed over at each run, never saved as a setting.
+      expect(storeCode(() => store.saveCapturedProcedure({ bookId: book.bookId, reviewRunId: source.reviewRunId, categoryIds: [STYLE], scopeSlot: 'selection', title: '不能保存', procedureId: null })))
+        .toBe('CAPTURED_PROCEDURE_INVALID');
+
+      // 按已保存的工序 for a selection of this Book (the menu's list): each enabled procedure, newest first, as a 当前选区 can take it.
+      const onSelection = store.inspectCapturedProcedureApplicability(book.bookId, 'selection').procedures;
+      expect(onSelection.map((entry) => [entry.title, entry.fit, entry.chosenApart, entry.leftOut.map((step) => step.label)])).toEqual([
+        ['书系复核', 'all', ['书系一致性'], []], ['含事实核查', 'partial', [], ['事实核查']], ['体例线索复核', 'all', [], []],
+      ]);
+      expect(storeCode(() => store.inspectCapturedProcedureApplicability(book.bookId, 'chapters'))).toBe('CAPTURED_PROCEDURE_INVALID');
+      expect(storeCode(() => store.inspectCapturedProcedureRun(book.bookId, factual.procedureId, null, 'whole'))).toBe('CAPTURED_PROCEDURE_INVALID');
+      // On a Book that never checked facts, 事实核查 can still run on the whole; on a selection it cannot, and the step is named with why
+      // (the Commander's ruling 2: offered disabled, the step named) — the leads are left out there for want of a baseline either way.
+      const other = await importSample1Book(store, roots.codeRoot, 'L2 书系外');
+      await pinEditorialWorkspaceProfileRevision2(store, other.bookId);
+      const otherWhole = store.inspectCapturedProcedureApplicability(other.bookId).procedures.find((entry) => entry.title === '含事实核查')!;
+      const otherSelection = store.inspectCapturedProcedureApplicability(other.bookId, 'selection').procedures.find((entry) => entry.title === '含事实核查')!;
+      expect(otherWhole.leftOut.map((step) => step.label)).not.toContain('事实核查');
+      expect(otherSelection).toMatchObject({ fit: 'partial', availableCount: 1, leftOut: [{ label: '事实核查', reason: FACTUAL_SELECTION_REASON }] });
+      expect(store.inspectCapturedProcedureRun(other.bookId, factual.procedureId, null, 'selection').resolved!.steps[1])
+        .toEqual({ categoryId: FACTUAL, label: '事实核查', available: false, unavailableReason: FACTUAL_SELECTION_REASON, chosenApart: false });
+      expect(store.inspectCapturedProcedureRun(other.bookId, steps.procedureId, null, 'selection').resolved!.steps[1])
+        .toMatchObject({ categoryId: PLOT, available: false, unavailableReason: LEADS_ABSENT_REASON });
+
+      // 按《体例线索复核》审阅这段 on 内容块 29, where one of sample1's leads stands: the Run pins the exact version and reads the
+      // selection as a category Run on it does — only its steps, nothing the slot would refuse.
+      const blocks = store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
+      const twentyNine = blocks.find((block) => block.position === 29)!;
+      const on = (blockId: string): ReviewRunScopeRequest => ({ kind: 'selection', fromChapterBlockId: blockId, toChapterBlockId: blockId });
+      expect(storeCode(() => preparePinned(session, book, [STYLE, LITERARY], on(twentyNine.blockId), steps))).toBe('REVIEW_PROCEDURE_STEPS_INVALID');
+      expect(storeCode(() => preparePinned(session, book, [STYLE], on(twentyNine.blockId), steps))).toBe('REVIEW_PROCEDURE_STEP_SKIPPED');
+      const pinned = preparePinned(session, book, [STYLE, PLOT], on(twentyNine.blockId), steps);
+      expect(pinned.procedure).toEqual({
+        procedureId: steps.procedureId, versionId: steps.versionId, version: 1, title: '体例线索复核', documentSha256: steps.documentSha256, stopped: false, missing: false, leftOut: [],
+      });
+      expect(pinned.scope).toEqual({
+        kind: 'selection', label: '当前选区 · 内容块 29–29', selectedRange: { startPosition: 29, endPosition: 29 },
+        selection: { fromBlockId: twentyNine.blockId, toBlockId: twentyNine.blockId },
+      });
+      expect(pinned.categories.map((category) => category.categoryId)).toEqual([STYLE, PLOT]);
+      // Its card in 任务 names the selection and carries the paragraphs 跳到所选文字 moves to (deferred item d).
+      const card = (reviewRunId: string) => store.inspectBookTasks(book.bookId, () => null).groups.flatMap((group) => group.items).find((entry) => entry.item.itemId === `review:${reviewRunId}`);
+      expect(card(pinned.reviewRunId)).toMatchObject({
+        item: { object: { kind: 'review', ordinal: 2, onSelection: true }, state: 'review-prepared' },
+        selection: { fromBlockId: twentyNine.blockId, toBlockId: twentyNine.blockId },
+      });
+      expect(card(source.reviewRunId)!.selection).toBeUndefined();
+      const coverageOf = (): Array<[string, string, number | null]> => workspace(session, book).coverage
+        .filter((row) => row.categoryId === STYLE || row.categoryId === PLOT).map((row) => [row.categoryId, row.state, row.lastRunOrdinal]);
+      const coverageBefore = coverageOf();
+      expect(coverageBefore).toEqual([[STYLE, 'current', 1], [PLOT, 'current', 1]]);
+
+      // Driven, it marks the paragraph alone — the lead on 29 among its findings — and moves no coverage: the matrix still reads the whole Run.
+      const ran = await authorizeAndDrive(session, book, pinned);
+      expect(ran.state).toBe('settled');
+      expect(ran.findings.length).toBeGreaterThan(0);
+      expect(ran.findings.every((finding) => finding.blockId === twentyNine.blockId && finding.markId !== null)).toBe(true);
+      expect(ran.findings.some((finding) => finding.categoryId === PLOT)).toBe(true);
+      expect(ran.procedure).toMatchObject({ versionId: steps.versionId, stopped: false, missing: false });
+      expect(coverageOf()).toEqual(coverageBefore);
+      expect(card(ran.reviewRunId)).toMatchObject({ item: { state: 'review-completed' }, result: { kind: 'review-run', reviewRunId: ran.reviewRunId }, selection: { fromBlockId: twentyNine.blockId } });
+      // The pin records the selection as the scope the Run ran under; a Run on the slot records the slot. The version counts the Run.
+      const wholePinned = preparePinned(session, book, [STYLE, PLOT], WHOLE, steps);
+      const pinScope = (reviewRunId: string): unknown => {
+        const db = database();
+        try {
+          const row = db.prepare('SELECT canonical_json FROM review_run_procedure_pins WHERE review_run_id = ?').get(reviewRunId) as { canonical_json: string };
+          return (JSON.parse(row.canonical_json) as { scope: unknown }).scope;
+        } finally {
+          db.close();
+        }
+      };
+      expect([pinScope(ran.reviewRunId), pinScope(wholePinned.reviewRunId)]).toEqual(['selection', 'whole']);
+      expect(store.inspectCapturedProcedure(steps.procedureId, null).versions[0]).toMatchObject({ runCount: 1, preparedRunCount: 1 });
+
+      // 书系一致性 on a selection is the editor's to tick (ruling 3), as S31b has it on 新建审阅: left unticked it is recorded as left
+      // out by choice; ticked it runs with the rest; a step the Book could take is never dropped.
+      expect(store.inspectCapturedProcedureRun(book.bookId, series.procedureId, null, 'selection').resolved!.steps).toEqual([
+        { categoryId: STYLE, label: '体例与格式', available: true, unavailableReason: null, chosenApart: false },
+        { categoryId: SERIES, label: '书系一致性', available: true, unavailableReason: null, chosenApart: true },
+      ]);
+      const unchosen = preparePinned(session, book, [STYLE], on(twentyNine.blockId), series);
+      expect(unchosen.categories.map((category) => category.categoryId)).toEqual([STYLE]);
+      expect(unchosen.procedure!.leftOut).toEqual([{ categoryId: SERIES, label: '书系一致性', reason: PROCEDURE_STEP_NOT_CHOSEN, byChoice: true }]);
+      expect(unchosen.scope.kind).toBe('selection');
+      const chosen = preparePinned(session, book, [STYLE, SERIES], on(twentyNine.blockId), series);
+      expect(chosen.categories.map((category) => category.categoryId)).toEqual([STYLE, SERIES]);
+      expect(chosen.procedure!.leftOut).toEqual([]);
+      expect(storeCode(() => preparePinned(session, book, [SERIES], on(twentyNine.blockId), series))).toBe('REVIEW_PROCEDURE_STEP_SKIPPED');
+      // 事实核查 cannot read a selection: the step is left out for want of the selection, never by choice, and the rest runs.
+      const partial = preparePinned(session, book, [STYLE], on(twentyNine.blockId), factual);
+      expect(partial.procedure!.leftOut).toEqual([expect.objectContaining({ categoryId: FACTUAL, label: '事实核查', byChoice: false })]);
+      expect(partial.categories.map((category) => category.categoryId)).toEqual([STYLE]);
+    } finally {
+      await close(session);
+    }
+  }, 300_000);
+
+  it('refuses a selection of a Production Document\'s manuscript: no Task reads a document (the Owner, 2026-10-09)', async () => {
+    await withBook('sample1-review-authored', async (session, book) => {
+      const { store } = session;
+      // A news release made from a source import of two of sample1's paragraphs; its manuscript is a branch of its own.
+      const path = join(roots.inputRoot, '新闻稿初稿.docx');
+      await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '新闻稿初稿', paragraphs: [21, 22].map((block) => ({ runs: [{ text: { block } }] })) });
+      const staged = await store.stageSelectedManuscript(randomUUID(), path);
+      const review = store.prepareSourceImportReview(staged.draftId, staged.draftVersion, { kind: 'existing-book', bookId: book.bookId, relationship: 'source-only', reuseSourceVersionId: null });
+      const commitId = randomUUID();
+      const commit = await store.commitSourceImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest, commitId });
+      await store.acknowledgeImportCompletion(commitId);
+      const document = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', sourceVersionId: commit.sourceVersionId })).document!;
+      const documentBlock = store.baselineAnalysisLedger.readWorkingBlocks(document.branchId)[0]!;
+      expect(documentBlock.blockId).toMatch(/^blk_[0-9a-f]{24}$/u);
+      // The document's paragraph is no paragraph of the Book's manuscript: refused as a selection that is gone, nothing prepared.
+      expect(storeMessage(() => store.createReviewRunPreparationWork(book.bookId, [TYPOS], { kind: 'selection', fromChapterBlockId: documentBlock.blockId, toChapterBlockId: documentBlock.blockId }, launchPolicy)))
+        .toBe(SELECTION_GONE_REASON);
+      expect(workspace(session, book).runs).toEqual([]);
+      expect(store.inspectBookTasks(book.bookId, () => null).groups.every((group) => group.total === 0)).toBe(true);
     });
   }, 300_000);
 });

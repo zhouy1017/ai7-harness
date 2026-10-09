@@ -983,7 +983,9 @@ export class ReviewRunStore {
    * Series, the leads without a baseline analysis — recorded with why. A step whose Series material the editor chooses apart
    * (Issue #66, S31b; REUSE-049, REUSE-050) may also be left unchosen, and is recorded as left out by choice. Any other step
    * the Book could take is never quietly dropped, and nothing beyond its steps is ever added: the Run can do no more than
-   * choosing those categories by hand allows.
+   * choosing those categories by hand allows. A 当前选区 (Issue #423, S77 deferred item a) is narrower than any slot: the
+   * house's procedure runs on the paragraphs 就这段发起任务… handed over whatever its slot says, reading and marking exactly as a
+   * category Run on that selection does, and the pin records the selection as the scope it ran under.
    */
   #procedureSelection(
     bookId: string,
@@ -994,8 +996,8 @@ export class ReviewRunStore {
     categoryIds: ReadonlyArray<string>,
     pin: ReviewRunProcedurePinInput,
   ): NonNullable<PreparationWork['procedure']> {
-    requireReview(scope.kind === pin.scope, 'REVIEW_PROCEDURE_SCOPE_INVALID',
-      `按可复用工序《${pin.title}》运行时，审阅范围要按它的设定选「${pin.scope === 'whole' ? '全书' : '选章'}」。`);
+    requireReview(scope.kind === pin.scope || scope.kind === 'selection', 'REVIEW_PROCEDURE_SCOPE_INVALID',
+      `按可复用工序《${pin.title}》运行时，审阅范围要按它的设定选「${pin.scope === 'whole' ? '全书' : pin.scope === 'chapters' ? '选章' : '当前选区'}」，或在稿件里就所选文字发起。`);
     requireReview(categoryIds.every((categoryId) => pin.steps.includes(categoryId)), 'REVIEW_PROCEDURE_STEPS_INVALID',
       `按可复用工序《${pin.title}》运行时，只能审阅它的步骤。`);
     const leftOut: ProcedureLeftOutStep[] = [];
@@ -1018,7 +1020,8 @@ export class ReviewRunStore {
         `「${entry?.label ?? categoryId}」这本书现在可以审阅；按可复用工序运行时不能略过它。`);
       leftOut.push({ categoryId, label: entry?.label ?? categoryId, reason, byChoice: false });
     }
-    return { pin, leftOut };
+    // The pin names the scope the Run runs under: its slot, or the selection it was narrowed to.
+    return { pin: scope.kind === 'selection' ? { ...pin, scope: 'selection' } : pin, leftOut };
   }
 
   #advance(work: PreparationWork): ReviewRunPreparationProgress {
@@ -3016,12 +3019,16 @@ export class ReviewRunStore {
       const view = this.#runStateView(this.#snapshotOf(row));
       const last = this.#db.prepare('SELECT max(recorded_at) last FROM review_run_category_events WHERE review_run_id = ?')
         .get(view.snapshot.reviewRunId) as SqlRow;
+      const blockIds = view.snapshot.scope.kind === 'selection' ? view.snapshot.scope.blockIds ?? [] : [];
+      const selection = blockIds.length === 0 ? null : { fromBlockId: blockIds[0]!, toBlockId: blockIds[blockIds.length - 1]! };
       return {
         bookId: view.snapshot.bookId,
         bookTitle: text(row.book_title),
         reviewRunId: view.snapshot.reviewRunId,
         ordinal: view.snapshot.ordinal,
         scopeKind: view.snapshot.scope.kind,
+        // The paragraphs a 当前选区 Run was started on, for the card's 跳到所选文字 (Issue #423, S77 deferred item d).
+        ...(selection === null ? {} : { selection }),
         createdAt: view.snapshot.createdAt,
         authorizedAt: view.authorization?.authorizedAt ?? null,
         state: view.state,
