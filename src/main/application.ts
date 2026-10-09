@@ -3376,6 +3376,15 @@ function registerRendererHandlers(
       return service.call('readLibraryDecisionReason', { materialId: input.materialId, ordinal: input.ordinal, offset: input.offset });
     }),
   );
+  // 查看分段 (Issue #428, S80a): one page of an item's indexed paragraphs, by the item and the paragraph it starts at.
+  ipcMain.handle(IPC_CHANNELS.inspectLibraryMaterialSegments, (event, input: ServiceOperationMap['inspectLibraryMaterialSegments']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectLibraryMaterialSegments', { materialId: input.materialId, from: input.from });
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.previewLibraryMaterial, (event) =>
     envelope(async () => {
       const owned = requireSender(event);

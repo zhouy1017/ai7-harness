@@ -877,6 +877,9 @@ describe('a Review Run over the real store on exact sample1', () => {
           .toEqual([[16, 'predecessor-gap']]);
         await authorizeAndDrive(session, book, chosen);
         expect(gaps()).toEqual([[16, 'not-attempted', CARRIED_GAP_REASON]]);
+        // The carrying Run itself ends 已完成 · 保留缺口: the carried gap is a gap of the Run, as every gap but `out-of-scope` is
+        // (Issue #727 item 1), so a later filter that let `not-attempted` through as complete could not pass here.
+        expect(inspect().taskOutcome).toMatchObject({ classification: 'completed-with-gaps' });
         expect(inspect().resultSetRevision!.coverage).toMatchObject({ gapCount: 1, label: expect.stringContaining('1 处缺口') });
         expect(row()).toMatchObject({ state: 'current', changedBlocks: 0, unavailableReason: null });
         expect(changedScope().available).toBe(false);
@@ -948,6 +951,41 @@ describe('a Review Run over the real store on exact sample1', () => {
       for (let read = 0; read < 5; read += 1) workspace(session, book);
       expect(ledger.unreadWalksComputed - walked).toBe(1);
     });
+  }, 300_000);
+
+  it('reads each revision of the chain from SQLite once — one per Run while the ledger lives, and the whole chain once more after a reopen (Issue #727)', async () => {
+    const definition = reviewCategoryKindDefinition(TYPOS_AND_USAGE);
+    const first = await open('sample1-review-authored');
+    let book: Book;
+    try {
+      book = await importBook(first);
+      const ledger = first.store.reviewCategoryLedger(definition);
+      await authorizeAndDrive(first, book, prepare(first, book, [TYPOS], WHOLE));
+      // Chapter 16–25 edited and never read since keeps the walk going to the chain's first Run at every 选章: each Run's walk
+      // reads its own new revision from SQLite and finds every earlier one kept.
+      appendToBlockAt(first, book, 20, '的的');
+      for (const position of [44, 76, 44, 76, 44]) await authorizeAndDrive(first, book, prepare(first, book, [TYPOS], chapterScope(first, book, position)));
+      expect(first.store.inspectReviewCategory(book.bookId, definition).resultSetRevision).toMatchObject({ ordinal: 6 });
+      expect(ledger.chainRevisionsRead).toBe(6);
+      for (let read = 0; read < 5; read += 1) workspace(first, book);
+      expect(ledger.chainRevisionsRead).toBe(6);
+    } finally {
+      await close(first);
+    }
+    // Opened again, the first read walks the chain cold — six reads, one a revision — and the poll's reads walk no more.
+    const second = await open('sample1-review-authored');
+    try {
+      const ledger = second.store.reviewCategoryLedger(definition);
+      expect(workspace(second, book!).coverage.find((entry) => entry.categoryId === TYPOS)).toMatchObject({ state: 'needs-review', changedBlocks: 1 });
+      expect(ledger.chainRevisionsRead).toBe(6);
+      for (let read = 0; read < 5; read += 1) workspace(second, book!);
+      expect(ledger.chainRevisionsRead).toBe(6);
+      await authorizeAndDrive(second, book!, prepare(second, book!, [TYPOS], chapterScope(second, book!, 76)));
+      workspace(second, book!);
+      expect(ledger.chainRevisionsRead).toBe(7);
+    } finally {
+      await close(second);
+    }
   }, 300_000);
 
   it('stops the walk at an earlier record it cannot read and says so, keeps the category, and asks a plan that no longer derives to be prepared again (#711 review P3-3, P3-4)', async () => {

@@ -324,6 +324,10 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   working_block_search_data: 'derived',
   working_block_search_docsize: 'derived',
   working_block_search_idx: 'derived',
+  // 资料索引 (Issue #428, S80a): an item's Material Index is built from its original on this machine; a merged item's is built
+  // here again at the next start, never carried.
+  material_index_builds: 'derived',
+  material_index_segments: 'derived',
 };
 
 /** What stays behind when a Book merges, said to the editor. */

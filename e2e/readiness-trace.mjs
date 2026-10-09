@@ -8,6 +8,10 @@
 // sets up when it loads: never to a client logger. A Journey therefore points that log at a file in its run root before it
 // loads Playwright, with each line's time (`DEBUG_COLORS=no`), and reads the launch in flight back from it.
 
+import { execFile } from 'node:child_process';
+import { availableParallelism } from 'node:os';
+import { dirname, resolve } from 'node:path';
+
 /** The startup steps main names (src/main/application.ts), and the failures `AI7_STARTUP_FAILED/…` can carry. */
 export const STARTUP_LOCATIONS = Object.freeze([
   'network-denial',
@@ -198,4 +202,190 @@ export function classifyRendererTargetMiss(atBudget, afterWatch = atBudget) {
   if (trace?.last === 'renderer-first-paint') return { outcome: 'window', step: null };
   if (trace?.last === 'readiness-signal') return { outcome: 'after-readiness', step: null };
   return { outcome: 'timeout', step: null };
+}
+
+/**
+ * The folder every process of the product's Electron runs from (Issue #675): its `.app` bundle on macOS, whose helpers live
+ * inside it, and the executable's own folder elsewhere.
+ */
+export function productRuntimeRoot(executable, platform = process.platform) {
+  if (platform === 'darwin') {
+    const bundle = executable.lastIndexOf('.app/');
+    if (bundle > 0) return executable.slice(0, bundle + 4);
+  }
+  return platform === 'win32' ? executable.replace(/[\\/][^\\/]*$/u, '') : dirname(executable);
+}
+
+/** `ps`'s CPU time, `[[dd-]hh:]mm:ss[.ss]`, in seconds; `null` for any other shape. */
+export function psCpuSeconds(text) {
+  const found = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)$/u.exec(String(text).trim());
+  if (found === null) return null;
+  const [, days = '0', hours = '0', minutes, seconds] = found;
+  return ((Number(days) * 24 + Number(hours)) * 60 + Number(minutes)) * 60 + Number(seconds);
+}
+
+/**
+ * What the launched product's processes were doing as its launch neared its budget (Issue #675), from one listing of the
+ * host's processes as `{ pid, ppid, cpuSeconds, path }`: whether its main process was still there, the CPU time it had
+ * used, how many processes it had started below it, and how many other processes of the same Electron were running beside
+ * it — an earlier launch's, still closing. Only counts and seconds come out; a path is compared, never kept.
+ */
+export function summarizeProductProcesses(rows, pid, runtimeRoot, platform = process.platform) {
+  const separator = platform === 'win32' ? '\\' : '/';
+  const fold = (path) => (platform === 'win32' ? path.replaceAll('/', '\\').toLowerCase() : path);
+  const root = fold(/[\\/]$/u.test(runtimeRoot) ? runtimeRoot : `${runtimeRoot}${separator}`);
+  const main = rows.find((row) => row.pid === pid);
+  const below = new Set([pid]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const row of rows) {
+      if (!below.has(row.pid) && below.has(row.ppid)) {
+        below.add(row.pid);
+        grew = true;
+      }
+    }
+  }
+  const prior = rows.filter((row) => !below.has(row.pid) && typeof row.path === 'string' && fold(row.path).startsWith(root)).length;
+  return {
+    alive: main !== undefined,
+    cpuSeconds: main?.cpuSeconds ?? null,
+    helpers: below.size - 1,
+    prior,
+  };
+}
+
+/** The listing command's output and the id of the process that produced it, or `null` when it could not be read. */
+const listingOutput = (file, args) => new Promise((settle) => {
+  const child = execFile(file, args, { timeout: 10_000, windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (error, stdout) => {
+    settle(error ? null : { text: String(stdout), pid: child.pid ?? null });
+  });
+});
+
+/**
+ * Every process on the host as `{ pid, ppid, cpuSeconds, path }`, with the id of the process that listed them (`listingPid`,
+ * a child of this one that is in its own listing, alive while it lists), or `null` when the listing could not be read.
+ */
+export async function listHostProcessesWithListing(platform = process.platform) {
+  let listing;
+  if (platform === 'win32') {
+    const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
+    if (systemRoot === undefined) return null;
+    listing = await listingOutput(resolve(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      'Get-CimInstance Win32_Process | ForEach-Object { "{0}`t{1}`t{2}`t{3}" -f $_.ProcessId, $_.ParentProcessId, ([uint64]$_.UserModeTime + [uint64]$_.KernelModeTime), $_.ExecutablePath }',
+    ]);
+    if (listing === null) return null;
+    return { rows: parseWindowsProcessListing(listing.text), listingPid: listing.pid };
+  }
+  listing = await listingOutput('/bin/ps', ['-A', '-ww', '-o', 'pid=,ppid=,time=,args=']);
+  if (listing === null) return null;
+  return { rows: parsePsProcessListing(listing.text), listingPid: listing.pid };
+}
+
+/** Every process on the host as `{ pid, ppid, cpuSeconds, path }`, or `null` when the listing could not be read. */
+export async function listHostProcesses(platform = process.platform) {
+  const listing = await listHostProcessesWithListing(platform);
+  return listing === null ? null : listing.rows;
+}
+
+/** The Windows listing's tab-separated lines: process id, parent id, CPU time in 100 ns units and executable path. */
+export function parseWindowsProcessListing(text) {
+  return String(text).split(/\r?\n/u).flatMap((line) => {
+    const [pid, ppid, time, path] = line.split('\t');
+    if (!/^\d+$/u.test(pid ?? '') || !/^\d+$/u.test(ppid ?? '') || !/^\d+$/u.test(time ?? '')) return [];
+    return [{ pid: Number(pid), ppid: Number(ppid), cpuSeconds: Number(time) / 10_000_000, path: path ? path : null }];
+  });
+}
+
+/** `ps -o pid=,ppid=,time=,args=` lines: the command line starts with the executable's path. */
+export function parsePsProcessListing(text) {
+  return String(text).split(/\r?\n/u).flatMap((line) => {
+    const found = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/u.exec(line);
+    if (found === null) return [];
+    return [{ pid: Number(found[1]), ppid: Number(found[2]), cpuSeconds: psCpuSeconds(found[3]), path: found[4] }];
+  });
+}
+
+/**
+ * How busy the product and the host were between two listings of the host's processes (Issue #621): the CPU time used in
+ * the window by every process below `rootPid` — the Journey that launched the product — as a share of one core, and by
+ * every process on the host as a share of all `cores`. A process that started in the window counts all its time; one that
+ * ended in it counts none; process 0, which on Windows carries the idle time, never counts. The process that made the
+ * `after` listing — `listingPid`, a child of the Journey alive while it lists itself, costing a few tenths of a second on a
+ * hosted Windows runner — and anything it started count for neither share, or an idle product would read as working.
+ */
+export function cpuShares(before, after, rootPid, windowMs, cores, listingPid = null) {
+  const earlier = new Map(before.filter((row) => row.cpuSeconds !== null).map((row) => [row.pid, row.cpuSeconds]));
+  const descendants = (origin) => {
+    const found = new Set([origin]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const row of after) {
+        if (!found.has(row.pid) && found.has(row.ppid)) {
+          found.add(row.pid);
+          grew = true;
+        }
+      }
+    }
+    return found;
+  };
+  const sampler = listingPid === null ? new Set() : descendants(listingPid);
+  const below = descendants(rootPid);
+  let product = 0;
+  let host = 0;
+  for (const row of after) {
+    if (row.pid === 0 || row.cpuSeconds === null || sampler.has(row.pid)) continue;
+    const used = Math.max(0, row.cpuSeconds - (earlier.get(row.pid) ?? 0));
+    host += used;
+    if (row.pid !== rootPid && below.has(row.pid)) product += used;
+  }
+  const seconds = Math.max(windowMs, 1) / 1_000;
+  return { product: product / seconds, host: host / seconds / Math.max(cores, 1) };
+}
+
+/**
+ * `cpuShares` over a window of `windowMs` from now, or `null` when the host's processes could not be read. The first
+ * listing's process has ended by the second listing, so only the second's own process needs leaving out.
+ */
+export async function measureCpuShares(rootPid, windowMs = 5_000) {
+  const before = await listHostProcesses();
+  const startedAt = Date.now();
+  await new Promise((settle) => setTimeout(settle, windowMs));
+  const after = await listHostProcessesWithListing();
+  if (before === null || after === null) return null;
+  return cpuShares(before, after.rows, rootPid, Date.now() - startedAt, availableParallelism(), after.listingPid);
+}
+
+/** The launched product's processes as `summarizeProductProcesses` says them, or `null` when the host's could not be read. */
+export async function sampleProductProcesses(pid, executable) {
+  const rows = await listHostProcesses();
+  return rows === null ? null : summarizeProductProcesses(rows, pid, productRuntimeRoot(executable));
+}
+
+/**
+ * Why a launch's browser was never acquired (Issue #675). The trace says how far main came: never started (`not-spawned`),
+ * a startup failure or an exit, no step at all (`before-main`: the product's script never said its first step) or the last
+ * step it said (`at-step`, with `step`). For a product still there, `sampled` says what the sample taken just before the
+ * launch's own timeout found: the main process (`alive`), already `gone`, or nothing (`unsampled`, the host's processes
+ * could not be read). Alive, `cpu` says whether the main process was `idle` (under 1 s of CPU), working (`some`, under
+ * 10 s) or `busy`, and `helpers` and `prior` count the processes it had started and an earlier launch's still running, each
+ * up to 9.
+ */
+export function classifyBrowserLaunchMiss(trace, sample) {
+  const miss = (outcome, step = null) => ({ outcome, step, sampled: null, cpu: null, helpers: 0, prior: 0 });
+  if (trace === null || trace === undefined || trace.launched === null) return miss('not-spawned');
+  if (trace.failed !== null) return miss('startup-failed');
+  if (trace.exited !== null) return miss('product-exited');
+  const where = trace.last === null || !LOCATION.has(trace.last) ? miss('before-main') : miss('at-step', trace.last);
+  if (sample === null || sample === undefined) return { ...where, sampled: 'unsampled' };
+  if (!sample.alive) return { ...where, sampled: 'gone' };
+  return {
+    ...where,
+    sampled: 'alive',
+    cpu: sample.cpuSeconds === null ? 'unknown' : sample.cpuSeconds < 1 ? 'idle' : sample.cpuSeconds < 10 ? 'some' : 'busy',
+    helpers: Math.min(sample.helpers, 9),
+    prior: Math.min(sample.prior, 9),
+  };
 }

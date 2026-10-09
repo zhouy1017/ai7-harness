@@ -11,6 +11,13 @@ import {
   libraryPreviewHeading,
   libraryReferenceLine,
   librarySourceLine,
+  MATERIAL_INDEX_LAYERS,
+  MATERIAL_INDEX_NEEDS_DEPENDENCY,
+  materialAnchorLabel,
+  materialIndexCompletedReason,
+  materialIndexLayerLine,
+  materialIndexStateLine,
+  materialSegmentsHeading,
   artifactLine,
   procedureLine,
   EXEMPLARS_LATER,
@@ -35,7 +42,12 @@ import {
   guidelineVersionPill,
 } from '../../src/renderer/knowledge-base-labels.js';
 import { MAX_GUIDELINE_CLAUSES, parseGuidelineClauses } from '../../src/service/review-guidelines.js';
-import type { LibraryMaterialProjection, ReviewGuidelineVersionProjection } from '../../src/shared/protocol.js';
+import type { LibraryMaterialProjection, MaterialIndexProjection, ReviewGuidelineVersionProjection } from '../../src/shared/protocol.js';
+
+const UNBUILT: MaterialIndexProjection = {
+  state: 'queued', reason: null, builtAt: null, digest: null, metadata: null,
+  layers: { original: 'complete', metadata: 'pending', text: 'pending', recognition: 'not-needed', translation: 'pending', segments: 'pending', vectors: 'deferred' },
+};
 
 // Unit suite for 知识库's words (Issue #427, plan slice S79a; editor-surfaces §8.4, V2-UX-KB-001 to KB-010) and the reading
 // of a guideline file's numbered clauses (KB-003).
@@ -151,6 +163,7 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
     const pending: LibraryMaterialProjection = {
       materialId: 'm', title: '样书一', kind: 'book', source, recordedAt: '2026-09-25T01:00:00.000Z', digest: 'b'.repeat(64),
       attribution: null, eligibility: null, eligibilityReset: false, reference: { state: 'pending' }, decisionCount: 0, decisions: [],
+      index: UNBUILT,
     };
     expect(librarySourceLine(pending, instant)).toBe('sample1.docx · Word · 28.9 KB · 放入于 〔2026-09-25〕');
     expect([libraryAttributionLine(pending), libraryEligibilityLine(pending), libraryReferenceLine(pending)])
@@ -183,6 +196,63 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
       .toBe('第 1 条 · 归属：《甲书》 · 本机编辑 · 〔2026-09-25〕');
     expect(libraryDecisionLine({ ordinal: 2, recordedAt: '2026-09-25T03:00:00.000Z', decision: { kind: 'eligibility', reasonHasMore: false, choice: 'excluded', bookTitle: null, reason: '版权未清' } }, instant))
       .toBe('第 2 条 · 学习准入：明确排除（说明：版权未清） · 本机编辑 · 〔2026-09-25〕');
+  });
+});
+
+describe('资料索引 in the editor\'s words (Issue #428, S80a; KB-009)', () => {
+  const lines = (index: MaterialIndexProjection): string[] => MATERIAL_INDEX_LAYERS.map((layer) => materialIndexLayerLine(index, layer));
+
+  it('says every layer waits while the index waits, and what is never provided says so from the start', () => {
+    expect(materialIndexStateLine(UNBUILT)).toBe('等待建立索引');
+    expect(materialIndexStateLine({ ...UNBUILT, state: 'indexing' })).toBe('正在本机建立索引…');
+    expect(lines(UNBUILT)).toEqual(['已原样保存在本机', '等待建立索引', '等待建立索引', '不需要：文件里就是文字', '等待提取全文', '等待提取全文', MATERIAL_INDEX_NEEDS_DEPENDENCY]);
+    expect(lines({ ...UNBUILT, state: 'indexing' })[2]).toBe('正在建立…');
+    expect(MATERIAL_INDEX_NEEDS_DEPENDENCY).toBe('未提供（需要本地依赖）');
+  });
+
+  it('states a complete index layer by layer, with the anchors as positions, and 来源译文 by the language', () => {
+    const complete: MaterialIndexProjection = {
+      state: 'complete', reason: null, builtAt: '2026-10-09T01:00:00.000Z', digest: 'c'.repeat(64),
+      metadata: { documentTitle: '样书', language: 'zh', paragraphs: 12, headings: 2, sentences: 40, characters: 900 },
+      layers: { original: 'complete', metadata: 'complete', text: 'complete', recognition: 'not-needed', translation: 'not-needed', segments: 'complete', vectors: 'deferred' },
+    };
+    expect(materialIndexStateLine(complete)).toBe('已在本机建好');
+    expect(lines(complete)).toEqual([
+      '已原样保存在本机',
+      '中文 · 12 段 · 2 个标题 · 文件自带标题「样书」',
+      '已提取 900 字',
+      '不需要：文件里就是文字',
+      '不需要：中文资料',
+      '12 段 · 40 句；每句可按「第 n 段第 m 句」引用（这种格式没有页码，锚点是位置）',
+      '未提供（需要本地依赖）',
+    ]);
+    const english = { ...complete, metadata: { ...complete.metadata!, language: 'other' as const, documentTitle: null }, layers: { ...complete.layers, translation: 'deferred' as const } };
+    expect(lines(english).slice(1, 5)).toEqual(['非中文 · 12 段 · 2 个标题', '已提取 900 字', '不需要：文件里就是文字', '未提供：非中文资料的机器译文要经模型服务，尚未接通']);
+    expect(materialIndexLayerLine({ ...complete, metadata: { ...complete.metadata!, language: 'none' } }, 'translation')).toBe('不需要：没有可译的文字');
+  });
+
+  it('says why no text was read: a PDF waits for a local dependency, other formats are not read yet, a failure names its reason', () => {
+    const pdf: MaterialIndexProjection = {
+      state: 'unsupported', reason: 'needs-local-dependency', builtAt: '2026-10-09T01:00:00.000Z', digest: 'd'.repeat(64),
+      metadata: { documentTitle: null, language: null, paragraphs: 0, headings: 0, sentences: 0, characters: 0 },
+      layers: { original: 'complete', metadata: 'complete', text: 'deferred', recognition: 'deferred', translation: 'deferred', segments: 'deferred', vectors: 'deferred' },
+    };
+    expect(materialIndexStateLine(pdf)).toBe('已建好可读的层；这种格式的文字未能提取');
+    expect(lines(pdf)).toEqual(['已原样保存在本机', '已记录文件名、格式、大小与摘要', '未提供（需要本地依赖）', '未提供（需要本地依赖）：扫描件要先识别文字',
+      '没有提取出全文，无从翻译', '没有提取出全文，无从分段', '未提供（需要本地依赖）']);
+    const html = { ...pdf, reason: 'format-unsupported' as const, layers: { ...pdf.layers, text: 'unsupported' as const, recognition: 'not-needed' as const } };
+    expect(materialIndexLayerLine(html, 'text')).toBe('未能提取：AI7 还不能提取这种格式的文字');
+    const failed = { ...pdf, state: 'failed' as const, reason: 'over-bound' as const, layers: { ...pdf.layers, text: 'failed' as const } };
+    expect(materialIndexStateLine(failed)).toBe('未能提取文字：超出本地读取边界（文件或其中的段落过大）');
+    expect(materialIndexLayerLine({ ...failed, reason: 'original-changed' }, 'text')).toBe('未能提取：本机保存的原件与放入时的记录不一致');
+  });
+
+  it('names a sentence by its position anchor, a page of segments by its range, and 索引完成 by how it went', () => {
+    expect(materialAnchorLabel(12, 3)).toBe('第 12 段第 3 句');
+    expect(materialSegmentsHeading({ from: 17, total: 40, segments: Array.from({ length: 16 }, () => ({ ordinal: 0, kind: 'paragraph' as const, text: 'x', sentences: [] })) }))
+      .toBe('分段：第 17–32 段，共 40 段');
+    expect(materialIndexCompletedReason('unsupported')).toBe('资料索引已建好可读的层：原件与元数据已就绪，这种格式的文字未能提取。');
+    expect(materialIndexCompletedReason('failed')).toBe('资料索引已建立，但没能提取文字：打开资料看原因。');
   });
 });
 
