@@ -83,6 +83,7 @@ export const IPC_CHANNELS = {
   previewReviewGuidelineVersion: 'ai7:j15:preview-review-guideline-version',
   importReviewGuidelineVersion: 'ai7:j15:import-review-guideline-version',
   inspectExemplars: 'ai7:j07:inspect-exemplars',
+  admitReadersReportExemplar: 'ai7:j07:admit-readers-report-exemplar',
   inspectKnowledgeProcedures: 'ai7:j15:inspect-knowledge-procedures',
   inspectCapturedProcedures: 'ai7:j15:inspect-captured-procedures',
   inspectCapturedProcedure: 'ai7:j15:inspect-captured-procedure',
@@ -5818,6 +5819,40 @@ export interface ExemplarBookProjection {
    */
   readonly withdrawn: boolean;
   readonly exemplars: ReadonlyArray<ExemplarProjection>;
+  /** The Book's 审稿意见 as 范例 offers them (Issue #429; KB-006): one per template with a draft, the version 图书交付包 pins. */
+  readonly readersReports: ReadonlyArray<ReadersReportExemplarProjection>;
+}
+
+/**
+ * One 审稿意见 of a Book with a 发稿版本 (Issue #429, S81c remainder; KB-006): the version pinned exactly as 图书交付包 pins it —
+ * the latest saved when the 发稿版本 was designated, or, for a draft that came after it, the latest saved now — offered into
+ * 范例 under 仅本社, and admitted only by the editor (`admitReadersReportExemplar`).
+ */
+export interface ReadersReportExemplarProjection {
+  readonly template: ReadersReportTemplate;
+  readonly typeId: string;
+  readonly typeLabel: string;
+  readonly documentId: string;
+  readonly version: number;
+  readonly revisionId: string;
+  readonly revisionDigest: string;
+  readonly savedAt: string;
+  /** `designation`: the latest version saved by the designation; `later`: the draft came after it, so its latest version. */
+  readonly pin: 'designation' | 'later';
+  readonly eligibility: 'house-only';
+  /**
+   * Where the editor's admission stands: `offered` while none was made, `admitted` when this exact version was, `superseded`
+   * when an earlier version of this 审稿意见 was admitted and this one is offered anew. `decisions` counts the admissions made.
+   */
+  readonly admission: { readonly state: 'offered' | 'admitted' | 'superseded'; readonly admittedAt: string | null; readonly decisions: number };
+}
+
+/** 归入范例 of one 审稿意见 (Issue #429): the Book, the template, the exact version seen, and how many admissions the editor saw. */
+export interface AdmitReadersReportExemplarInput {
+  readonly bookId: string;
+  readonly template: ReadersReportTemplate;
+  readonly revisionDigest: string;
+  readonly expectedDecisions: number;
 }
 
 export interface ExemplarsProjection {
@@ -6992,6 +7027,11 @@ export interface RecordAnalysisFeedbackInput {
  */
 export type LearningMaterialKind = 'proposal-decision' | 'analysis-feedback' | 'review-disposition';
 export const LEARNING_MATERIAL_KINDS: readonly LearningMaterialKind[] = ['proposal-decision', 'analysis-feedback', 'review-disposition'];
+/**
+ * What the Learning Eligibility ledger decides about: the three kinds 学习准入 shows a card for, and `readers-report-exemplar`
+ * (Issue #429) — 范例's admission of one 审稿意见 at one exact version, decided from 范例 and listed by no card.
+ */
+export type LearningLedgerMaterialKind = LearningMaterialKind | 'readers-report-exemplar';
 
 const LEARNING_UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 /**
@@ -7053,7 +7093,7 @@ export interface LearningMaterialProjection {
   readonly sourceTask: null | { readonly taskIntentId: string; readonly label: string };
   /** The material's place: its kind and the record it comes from. */
   readonly materialKey: string;
-  readonly kind: LearningMaterialKind;
+  readonly kind: LearningLedgerMaterialKind;
   /** The exact version a decision binds: the digest of what the material says now. */
   readonly digest: string;
   /** Where it came from, in the editor's words: `修改建议 · 拒绝`, `分析反馈 · 人物与名称`, `审阅 · 错别字与规范用语`. */
@@ -7253,7 +7293,7 @@ export interface LearningAuditInput {
 /** One material as 学习回溯 lists it: what it is, where it stands, and what used it (LAUD-001). */
 export interface LearningAuditMaterialProjection {
   readonly materialKey: string;
-  readonly kind: LearningMaterialKind;
+  readonly kind: LearningLedgerMaterialKind;
   readonly digest: string;
   readonly originLabel: string;
   readonly recordedAt: string;
@@ -7372,7 +7412,7 @@ export interface LearningRemediationPreviewProjection {
   readonly bookTitle: string;
   /** The one scope and kind every included material shares; `null` when none is included. */
   readonly scope: 'book' | 'house' | null;
-  readonly kind: LearningMaterialKind | null;
+  readonly kind: LearningLedgerMaterialKind | null;
   readonly included: ReadonlyArray<{ readonly materialKey: string; readonly originLabel: string }>;
   readonly leftOut: ReadonlyArray<{ readonly materialKey: string; readonly originLabel: string | null; readonly reason: LearningRemediationLeftOut }>;
   readonly groups: {
@@ -9451,7 +9491,8 @@ export interface BookDeliveryPackageConditionProjection {
 
 /** One line of the Manifest Preview (DPKG-004, DPKG-006): what it is, and a detail in words. */
 export interface BookDeliveryPackageItemProjection {
-  kind: 'publication' | 'document' | 'review-report' | 'not-for-this-book' | 'exclusion';
+  /** `evaluation-record` and `readers-report` (Issue #429, BUNDLE-001) are included when the Book has them, else excluded with the reason. */
+  kind: 'publication' | 'document' | 'review-report' | 'evaluation-record' | 'readers-report' | 'not-for-this-book' | 'exclusion';
   label: string;
   detail: string | null;
 }
@@ -10820,6 +10861,11 @@ export interface ServiceOperationMap {
     input: { after: ExemplarBookCursor | null };
     output: ExemplarsProjection;
   };
+  /** 知识库 › 范例 › 归入范例 (Issue #429): the editor admits one Book's 审稿意见, at the version 图书交付包 pins, under 仅本社. */
+  admitReadersReportExemplar: {
+    input: AdmitReadersReportExemplarInput;
+    output: ExemplarBookProjection;
+  };
   /** 知识库 › 工序与规则 (Issue #427, S79d): the review categories' 工序 and the native artifact, with their use. */
   inspectKnowledgeProcedures: {
     input: Record<string, never>;
@@ -11465,6 +11511,8 @@ export interface RendererApi {
   importReviewGuidelineVersion(input: { previewId: string }): Promise<ReviewGuidelinesProjection>;
   /** 知识库 › 范例 (Issue #427, S79b): names no Book; it reads the published Books' delivered documents, a page at a time. */
   inspectExemplars(input?: { after: ExemplarBookCursor | null }): Promise<ExemplarsProjection>;
+  /** 知识库 › 范例 › 归入范例 (Issue #429): names its Book; the window's route is not involved. */
+  admitReadersReportExemplar(input: AdmitReadersReportExemplarInput): Promise<ExemplarBookProjection>;
   /** 知识库 › 工序与规则's expert 工序 (Issue #427, S79d): names no Book. */
   inspectKnowledgeProcedures(): Promise<KnowledgeProceduresProjection>;
   /** 知识库 › 工序与规则's 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087): names no Book. */

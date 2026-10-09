@@ -14,9 +14,18 @@ import {
   EVALUATION_REWRITE_SCHEMA_VERSION,
   MATERIAL_INDEX_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
-import { WRITING_EXEMPLAR_GONE_LABEL, WRITING_EXEMPLAR_GONE_SUFFIX, WRITING_NOT_DRAFTED_LABEL } from '../../src/service/task-plan.js';
+import { WRITING_EXEMPLAR_GONE_LABEL, WRITING_EXEMPLAR_GONE_SUFFIX, WRITING_NOT_DRAFTED_LABEL, writingCopyNotDo } from '../../src/service/task-plan.js';
 import { quickStartNoRuleReason, writingRulePattern } from '../../src/service/default-execution-rules.js';
 import { WRITING_EXEMPLAR_MOVED, WRITING_TASK_TRIGGER_SQL, writingDraftBlocks } from '../../src/service/writing-tasks.js';
+import {
+  WRITING_COPY_SIZES,
+  WRITING_COPY_SIZES_V1,
+  WRITING_PROMPT_CONTRACT_SCHEMA_V1,
+  exemplarCopied,
+  writingContract,
+  writingContractDigest,
+  type WritingContractInput,
+} from '../../src/service/writing/writing-contract.js';
 import { WRITING_EXEMPLAR_REFUSAL_PREFIX } from '../../src/service/writing/writing-kind.js';
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
@@ -79,11 +88,14 @@ interface Session {
   readonly owner: BaselineAnalysisExecutionOwner;
 }
 
-async function openStore(fixture: ResolvedModelFixture): Promise<EditorialStore> {
-  return openAt(roots.dataRoot, fixture);
+/** The suites' own controls of the store, beyond the route: the copy rules a new writing Task is recorded under (#707). */
+type SuiteControl = Partial<Pick<NonNullable<Parameters<typeof EditorialStore.open>[2]>, 'writingCopyRules'>>;
+
+async function openStore(fixture: ResolvedModelFixture, control: SuiteControl = {}): Promise<EditorialStore> {
+  return openAt(roots.dataRoot, fixture, control);
 }
 
-async function openAt(dataRoot: string, fixture: ResolvedModelFixture): Promise<EditorialStore> {
+async function openAt(dataRoot: string, fixture: ResolvedModelFixture, control: SuiteControl = {}): Promise<EditorialStore> {
   return EditorialStore.open(dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false,
     persistLegacyReviewedDraft: false,
@@ -91,12 +103,13 @@ async function openAt(dataRoot: string, fixture: ResolvedModelFixture): Promise<
     induceAbandonObjectRemovalFailure: false,
     interruptAfterAbandonObjectRemoval: false,
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
+    ...control,
   });
 }
 
-async function withSession(fixture: ResolvedModelFixture, body: (session: Session) => Promise<void>): Promise<void> {
+async function withSession(fixture: ResolvedModelFixture, body: (session: Session) => Promise<void>, control: SuiteControl = {}): Promise<void> {
   await requireExactSample1(roots.codeRoot);
-  const store = await openStore(fixture);
+  const store = await openStore(fixture, control);
   const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   try {
     await body({ store, owner });
@@ -180,7 +193,7 @@ describe('写作任务 over the real store on exact sample1', () => {
         '你写的受众「喜欢历史与悬疑小说的读者」、渠道「出版社微信公众号」',
       ]);
       expect(plan.steps.map((step) => step.label)).toEqual(['逐章读取，找出文档可以取用的看点、人物与主题', '依据参考材料写出「宣传文章」']);
-      expect(plan.notDo.editorial).toContain('不照抄范例：与范例有连续 12 个字以上相同（跨标点时 16 个字；英文为 8 个词，跨标点时 11 个词）的草稿不予采用');
+      expect(plan.notDo.editorial).toContain('不照抄范例：与范例有连续 12 个字以上相同（跨标点、空格或外文词时 16 个字；拉丁字母文字为 8 个词，跨标点、数字或编号时 11 个词）的草稿不予采用');
       expect(plan.start.readiness).toBe('ready');
       expect(plan.defaultRule).toMatchObject({ canSet: true, reason: null, planEnvelopeDigest: prepared.planEnvelope!.digest, current: null, startedBy: null });
       expect(store.inspectWritingTask(bookId).task).toMatchObject({ taskIntentId: prepared.taskIntent!.taskIntentId, typeId: 'promotion-article', typeLabel: '宣传文章', state: 'prepared' });
@@ -573,6 +586,113 @@ describe('写作任务 over the real store on exact sample1', () => {
     }
     await withSession(fixture, async ({ store }) => {
       expect(store.inspectWritingTask(bookId).unavailable).toBe('写作任务暂不可用：写作任务记录已损坏。');
+    });
+  }, 300_000);
+
+  it('drives a genuine `/1` Task through the store\'s authorize, run and parse wiring, judged under `/1` where `/2` would admit (#707)', async () => {
+    // One in-memory fixture over the authored writing fixture, answered here for the `/1` contract the store composes.
+    const base = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
+    const entries = new Map<string, ModelFixtureEntry>(base.entries);
+    const fixture: ResolvedModelFixture = { ...base, identity: 'sample1-writing-l2-v1', lineage: [{ identity: 'sample1-writing-l2-v1', sha256: 'e'.repeat(64) }], sha256: 'f'.repeat(64), entries };
+    const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });
+    const graphemes = (text: string) => Array.from(segmenter.segment(text), ({ segment }) => segment);
+    let bookId = '';
+    let taskIntentId = '';
+    let planContract = '';
+    await withSession(fixture, async (session) => {
+      const { store } = session;
+      // Another Book, set as a 发稿版本, delivers a 宣传文章 made from its source material: it stands in 范例.
+      const sourcePath = join(roots.inputRoot, '范例来源书.docx');
+      await composeRevisedDocx(sourcePath, { source: ADMITTED_BASELINE_DOCX, title: '范例来源书', paragraphs: [{ runs: [{ text: { block: 1 } }] }, { runs: [{ text: { block: 2 } }] }] });
+      const staged = await store.stageSelectedManuscript(randomUUID(), sourcePath);
+      const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion, { kind: 'new-book', choiceId: 'new-book', confirmedTitle: '范例来源书' }, false);
+      const commitId = randomUUID();
+      const other = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest!, commitId });
+      await store.acknowledgeImportCompletion(commitId);
+      const milestone = await store.saveMilestone(other.manuscriptId, other.branchId, '一审稿', 'stage-archive', null, '');
+      store.designatePublicationVersion({ bookId: other.bookId, milestoneId: milestone.milestoneId, scope: '纸质版首印', basis: '三审通过' });
+      const materialPath = join(roots.inputRoot, '宣传文章初稿.docx');
+      await composeRevisedDocx(materialPath, { source: ADMITTED_BASELINE_DOCX, title: '宣传文章初稿', paragraphs: [{ runs: [{ text: { block: 21 } }] }, { runs: [{ text: { block: 22 } }] }] });
+      const material = await store.stageSelectedManuscript(randomUUID(), materialPath);
+      const materialReview = store.prepareSourceImportReview(material.draftId, material.draftVersion,
+        { kind: 'existing-book', bookId: other.bookId, relationship: 'source-only', reuseSourceVersionId: null });
+      const materialCommit = randomUUID();
+      const sourceVersionId = (await store.commitSourceImport({ draftId: material.draftId, expectedDraftVersion: materialReview.draftVersion, reviewDigest: materialReview.reviewDigest, commitId: materialCommit })).sourceVersionId;
+      await store.acknowledgeImportCompletion(materialCommit);
+      const promotion = (await store.createProductionDocument({ bookId: other.bookId, typeId: 'promotion-article', sourceVersionId })).document!;
+      await store.recordProductionDocumentDelivery({
+        bookId: other.bookId, documentId: promotion.documentId, version: { kind: 'saved', revisionId: promotion.versions[0]!.revisionId },
+        recipient: { kind: 'publicity', custom: null }, note: '公众号首发',
+      });
+      const exemplarText = store.getManuscriptWindow(promotion.documentId, promotion.branchId, null).blocks.map((block) => block.text).join('\n');
+
+      // This Book's Task, prepared by a store that records new writing Tasks as software before #698 did: its plan names `/1`'s
+      // rule, its row names no copy rules, and its contract is `/1`'s — not the `/2` contract of the same words.
+      bookId = await sample1Book(store, '参照之书');
+      const prepared = prepare(store, bookId);
+      taskIntentId = prepared.taskIntent!.taskIntentId;
+      planContract = prepared.planEnvelope!.promptContractDigest;
+      const plan = store.inspectTaskPlan({ bookId, kind: 'writing', ref: taskIntentId });
+      expect(plan.notDo.editorial).toContain(writingCopyNotDo(1));
+      expect(plan.notDo.editorial).not.toContain(writingCopyNotDo(2));
+      expect(plan.scope.reference[2]).toBe('参照本社 1 份宣传文章范例（只参照，不照抄）：《范例来源书》版本 1');
+      const page = store.inspectWritingTask(bookId);
+      expect(page.unavailable).toBeNull();
+      expect(page.task).toMatchObject({ taskIntentId, state: 'prepared' });
+
+      // The copy `/2` admits and `/1` refuses: twelve of the exemplar's characters with a comma inside — six and six across
+      // punctuation, which is under `/2`'s sixteen, and twelve whatever stands inside them under `/1`.
+      const comparable = graphemes(exemplarText.normalize('NFKC').replace(/[\s\p{P}\p{S}\p{C}]/gu, ''));
+      expect(comparable.length).toBeGreaterThanOrEqual(12);
+      const copied = `${comparable.slice(0, 6).join('')}，${comparable.slice(6, 12).join('')}`;
+      const draft = { ...AUTHORED_WRITING_DRAFT, sections: [...AUTHORED_WRITING_DRAFT.sections, { heading: '范例里的一段', paragraphs: [`正如范例所写：${copied}。`] }] };
+      const contractInput: WritingContractInput = {
+        type: { typeId: 'promotion-article', label: '宣传文章' },
+        book: { title: '参照之书', authors: [], editors: [], series: [] },
+        audience: WRITING_REQUEST.audience,
+        channel: WRITING_REQUEST.channel,
+        requirements: null,
+        synopsis: null,
+        evaluation: null,
+        exemplars: [{ bookTitle: '范例来源书', version: 1, text: exemplarText, excerpt: false }],
+      };
+      const { schema: _draftSchema, ...draftWords } = draft;
+      expect(exemplarCopied(draftWords, contractInput, WRITING_COPY_SIZES)).toBeNull();
+      expect(exemplarCopied(draftWords, contractInput, WRITING_COPY_SIZES_V1)).toEqual({ exemplar: 0, kind: 'verbatim', unit: 'character', run: 12 });
+      const v1 = writingContract(contractInput, 1);
+      expect(v1.schema).toBe(WRITING_PROMPT_CONTRACT_SCHEMA_V1);
+      expect(planContract).toBe(writingContractDigest(v1));
+      expect(planContract).not.toBe(writingContractDigest(writingContract(contractInput, 2)));
+
+      // 开始任务 through the governor: the request digests are the `/1` contract's, and the synthesis is judged under `/1`.
+      answerWriting(entries, prepared, draft);
+      const refused = await run(session, bookId, prepared);
+      answerWritingReflection(entries, refused.taskOutcome!.report!.accountingDigest);
+      expect(refused.state).toBe('settled');
+      expect(refused.resultSetRevision!.writing.draft).toBeNull();
+      expect(refused.resultSetRevision!.writing.synthesis.state).toBe('gap');
+      expect(refused.resultSetRevision!.writing.synthesis.reason)
+        .toBe(`${WRITING_EXEMPLAR_REFUSAL_PREFIX}草稿与范例《范例来源书》版本 1 有连续 12 个字以上相同；范例只参照，不复制，这份草稿不予采用。`);
+      expect(refused.taskOutcome!.classification).toBe('completed-with-gaps');
+      expect(store.inspectWritingTask(bookId).task!.label).toBe(WRITING_NOT_DRAFTED_LABEL);
+    }, { writingCopyRules: 1 });
+
+    // The row is the pre-#698 shape: it names no copy rules, and its contract digest is the plan's.
+    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    const database = new DatabaseSync(path);
+    try {
+      const row = database.prepare('SELECT prompt_contract_sha256, canonical_json FROM writing_tasks WHERE task_intent_id = ?').get(taskIntentId) as { prompt_contract_sha256: string; canonical_json: string };
+      expect(row.prompt_contract_sha256).toBe(planContract);
+      expect(row.canonical_json).not.toContain('copyRules');
+    } finally {
+      database.close();
+    }
+    // A store that records `/2` reads the `/1` Task as it was recorded, and its settled outcome under `/1`.
+    await withSession(fixture, async ({ store }) => {
+      const page = store.inspectWritingTask(bookId);
+      expect(page.unavailable).toBeNull();
+      expect(page.task).toMatchObject({ taskIntentId, state: 'settled', label: WRITING_NOT_DRAFTED_LABEL });
+      expect(store.inspectTaskPlan({ bookId, kind: 'writing', ref: taskIntentId }).notDo.editorial).toContain(writingCopyNotDo(1));
     });
   }, 300_000);
 

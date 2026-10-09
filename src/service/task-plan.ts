@@ -1141,11 +1141,15 @@ function writingState(projection: WritingProjection): TaskPlanProjection['state'
   return { ...state, label: projection.taskOutcome.label };
 }
 
-/** The plan's 不会做 line on copying a 范例, in the copy rules the Task's frozen contract carries (#704 P2-2). */
+/**
+ * The plan's 不会做 line on copying a 范例, in the copy rules the Task's frozen contract carries (#704 P2-2). Under `/2` it names
+ * every break a run may be copied across — in the characters, 标点, 空格 or an 外文词; in the words, 标点, 数字 or 编号 — and the
+ * word rules as 拉丁字母文字's, whatever the language (#707). The line is in no digest.
+ */
 export function writingCopyNotDo(rules: WritingCopyRules): string {
   if (rules === 1) return `不照抄范例：与范例有连续 ${WRITING_COPY_SIZES_V1.copyWindow} 个字以上相同的草稿不予采用`;
   const sizes = WRITING_COPY_SIZES;
-  return `不照抄范例：与范例有连续 ${sizes.copyWindow} 个字以上相同（跨标点时 ${sizes.copyWindowAcross} 个字；英文为 ${sizes.copyWords} 个词，跨标点时 ${sizes.copyWordsAcross} 个词）的草稿不予采用`;
+  return `不照抄范例：与范例有连续 ${sizes.copyWindow} 个字以上相同（跨标点、空格或外文词时 ${sizes.copyWindowAcross} 个字；拉丁字母文字为 ${sizes.copyWords} 个词，跨标点、数字或编号时 ${sizes.copyWordsAcross} 个词）的草稿不予采用`;
 }
 
 /** A writing Task whose 范例 is no longer here (#688 re-review): its state, and what its 参考 line adds. */
