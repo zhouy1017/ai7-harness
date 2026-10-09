@@ -34,7 +34,7 @@ import type { Connectivity } from './connectivity.js';
 import { PLAN_MOVED_LABEL } from './reconnect-preflight.js';
 import { graphemeCount, sliceGraphemes } from './analysis/factual-review-contract.js';
 import type { ReviewRunPlanFacts } from './review/review-runs.js';
-import { EXEMPLAR_COPY_WINDOW, EXEMPLAR_COPY_WINDOW_ACROSS, EXEMPLAR_COPY_WORDS, EXEMPLAR_COPY_WORDS_ACROSS, WRITING_EXEMPLAR_MOVED, writingExemplarLine, type WritingContractInput } from './writing/writing-contract.js';
+import { WRITING_COPY_SIZES, WRITING_COPY_SIZES_V1, WRITING_EXEMPLAR_MOVED, type WritingCopyRules, writingExemplarLine, type WritingContractInput } from './writing/writing-contract.js';
 
 /**
  * The Task Drawer's plan projection (Issue #418, plan slice S72; editor-surfaces §6 ③, V2-UX-PLAN-001 to
@@ -1093,6 +1093,13 @@ function writingState(projection: WritingProjection): TaskPlanProjection['state'
   return { ...state, label: projection.taskOutcome.label };
 }
 
+/** The plan's 不会做 line on copying a 范例, in the copy rules the Task's frozen contract carries (#704 P2-2). */
+export function writingCopyNotDo(rules: WritingCopyRules): string {
+  if (rules === 1) return `不照抄范例：与范例有连续 ${WRITING_COPY_SIZES_V1.copyWindow} 个字以上相同的草稿不予采用`;
+  const sizes = WRITING_COPY_SIZES;
+  return `不照抄范例：与范例有连续 ${sizes.copyWindow} 个字以上相同（跨标点时 ${sizes.copyWindowAcross} 个字；英文为 ${sizes.copyWords} 个词，跨标点时 ${sizes.copyWordsAcross} 个词）的草稿不予采用`;
+}
+
 /** A writing Task whose 范例 is no longer here (#688 re-review): its state, and what its 参考 line adds. */
 export const WRITING_EXEMPLAR_GONE_LABEL = '不能开始 · 范例已不在本机' as const;
 
@@ -1152,6 +1159,8 @@ export function writingPlan(input: {
   input: WritingContractInput;
   /** Whether every 范例 the Task referenced still gives the text it pinned; when not, the plan can never be started. */
   exemplarsHere?: boolean;
+  /** The copy rules the Task's frozen contract carries (#704 P2-2): the 不会做 line names those, not today's. */
+  copyRules?: WritingCopyRules;
 }): TaskPlanProjection {
   const { projection, bookTitle, blocks } = input;
   const task = input.input;
@@ -1235,7 +1244,7 @@ export function writingPlan(input: {
     notDo: {
       editorial: [
         ...EDITORIAL_NOT_DO,
-        `不照抄范例：与范例有连续 ${EXEMPLAR_COPY_WINDOW} 个字以上相同（跨标点时 ${EXEMPLAR_COPY_WINDOW_ACROSS} 个字；英文为 ${EXEMPLAR_COPY_WORDS} 个词，跨标点时 ${EXEMPLAR_COPY_WORDS_ACROSS} 个词）的草稿不予采用`,
+        writingCopyNotDo(input.copyRules ?? 2),
         '不交付、不发送：草稿在稿件编辑面上由你修改',
         '不改评估记录与基线分析',
         '不读这本书以外的稿件',

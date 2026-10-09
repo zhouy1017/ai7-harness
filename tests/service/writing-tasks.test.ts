@@ -538,6 +538,34 @@ describe('写作任务 over the real store on exact sample1', () => {
     });
   }, 300_000);
 
+  it('reads a Task under the copy rules its row names: `/2` now, `/1` for a row naming none (#704 P2-2)', async () => {
+    const fixture = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
+    let bookId = '';
+    await withSession(fixture, async ({ store }) => {
+      bookId = await sample1Book(store, WRITING_BOOK_TITLE);
+      prepare(store, bookId);
+      expect(store.inspectWritingTask(bookId).unavailable).toBeNull();
+    });
+    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    const database = new DatabaseSync(path);
+    try {
+      const row = database.prepare('SELECT task_intent_id, canonical_json FROM writing_tasks').get() as { task_intent_id: string; canonical_json: string };
+      expect(row.canonical_json).toContain('"copyRules":2');
+      // A row naming no rules is read as `/1`: its contract is composed under `/1`, which is not the `/2` contract it names.
+      const changed = row.canonical_json.replace('"copyRules":2,', '');
+      database.exec('DROP TRIGGER writing_tasks_no_update');
+      const { createHash } = await import('node:crypto');
+      database.prepare('UPDATE writing_tasks SET canonical_json = ?, sha256 = ? WHERE task_intent_id = ?')
+        .run(changed, createHash('sha256').update(changed).digest('hex'), row.task_intent_id);
+      database.exec(WRITING_TASK_TRIGGER_SQL.writing_tasks_no_update!);
+    } finally {
+      database.close();
+    }
+    await withSession(fixture, async ({ store }) => {
+      expect(store.inspectWritingTask(bookId).unavailable).toBe('写作任务暂不可用：写作任务记录已损坏。');
+    });
+  }, 300_000);
+
   it('rebuilds a revision-64 store\'s kind-coupled relations for the writing kind, every row kept byte for byte', async () => {
     const fixture = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
     await withSession(fixture, async ({ store }) => {
