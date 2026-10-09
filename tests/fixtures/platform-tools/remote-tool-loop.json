@@ -1,0 +1,241 @@
+{
+  "description": "Recorded exchanges of one platform-tool loop on the remote chat-completions route (#676): the exact request bodies AI7 assembles and the responses that answer them. Synthetic, public material only; no credential and no header is recorded. Replayed by tests/unit/platform-tools-remote-route.test.ts with no network.",
+  "model": [
+    {
+      "url": "https://api.deepseek.com/chat/completions",
+      "request": {
+        "messages": [
+          {
+            "content": "合成系统提示。",
+            "role": "system"
+          },
+          {
+            "content": "分析单元 1/1 · 单元摘要 1111111111111111111111111111111111111111111111111111111111111111\n[blk_aaaaaaaaaaaaaaaaaaaaaaaa] (paragraph) 合成段落：《狂人日记》发表于 1918 年。",
+            "role": "user"
+          }
+        ],
+        "model": "deepseek-v4-pro",
+        "reasoning_effort": "high",
+        "stream": false,
+        "thinking": {
+          "type": "enabled"
+        },
+        "tools": [
+          {
+            "function": {
+              "description": "取回一个公开网页的正文（转换为 Markdown）。只用于你已引用或搜索结果给出的 https 地址。",
+              "name": "webfetch",
+              "parameters": {
+                "additionalProperties": false,
+                "properties": {
+                  "url": {
+                    "description": "要取回的公开网页的完整 https 地址。",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "url"
+                ],
+                "type": "object"
+              }
+            },
+            "type": "function"
+          },
+          {
+            "function": {
+              "description": "在公开网络上搜索，返回结果摘要与来源地址。查询只写需要核实的事实，不写稿件原文。",
+              "name": "websearch",
+              "parameters": {
+                "additionalProperties": false,
+                "properties": {
+                  "query": {
+                    "description": "一条搜索查询。",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "type": "object"
+              }
+            },
+            "type": "function"
+          }
+        ]
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "chatcmpl-recorded-1",
+          "object": "chat.completion",
+          "model": "deepseek-v4-pro",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "tool_calls",
+              "message": {
+                "role": "assistant",
+                "content": null,
+                "reasoning_content": "单元说《狂人日记》发表于 1918 年。先搜索发表时间与刊物再核对。",
+                "tool_calls": [
+                  {
+                    "id": "call_00_recorded",
+                    "type": "function",
+                    "function": {
+                      "name": "websearch",
+                      "arguments": "{\"query\":\"狂人日记 发表 年份 新青年\"}"
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 412,
+            "completion_tokens": 58,
+            "total_tokens": 470
+          }
+        }
+      }
+    },
+    {
+      "url": "https://api.deepseek.com/chat/completions",
+      "request": {
+        "messages": [
+          {
+            "content": "合成系统提示。",
+            "role": "system"
+          },
+          {
+            "content": "分析单元 1/1 · 单元摘要 1111111111111111111111111111111111111111111111111111111111111111\n[blk_aaaaaaaaaaaaaaaaaaaaaaaa] (paragraph) 合成段落：《狂人日记》发表于 1918 年。",
+            "role": "user"
+          },
+          {
+            "content": null,
+            "reasoning_content": "单元说《狂人日记》发表于 1918 年。先搜索发表时间与刊物再核对。",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"query\":\"狂人日记 发表 年份 新青年\"}",
+                  "name": "websearch"
+                },
+                "id": "call_00_recorded",
+                "type": "function"
+              }
+            ]
+          },
+          {
+            "content": "《狂人日记》1918 年 5 月发表于《新青年》第 4 卷第 5 号。来源 https://example.org/xinqingnian",
+            "role": "tool",
+            "tool_call_id": "call_00_recorded"
+          }
+        ],
+        "model": "deepseek-v4-pro",
+        "reasoning_effort": "high",
+        "stream": false,
+        "thinking": {
+          "type": "enabled"
+        },
+        "tools": [
+          {
+            "function": {
+              "description": "取回一个公开网页的正文（转换为 Markdown）。只用于你已引用或搜索结果给出的 https 地址。",
+              "name": "webfetch",
+              "parameters": {
+                "additionalProperties": false,
+                "properties": {
+                  "url": {
+                    "description": "要取回的公开网页的完整 https 地址。",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "url"
+                ],
+                "type": "object"
+              }
+            },
+            "type": "function"
+          },
+          {
+            "function": {
+              "description": "在公开网络上搜索，返回结果摘要与来源地址。查询只写需要核实的事实，不写稿件原文。",
+              "name": "websearch",
+              "parameters": {
+                "additionalProperties": false,
+                "properties": {
+                  "query": {
+                    "description": "一条搜索查询。",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "type": "object"
+              }
+            },
+            "type": "function"
+          }
+        ]
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "chatcmpl-recorded-2",
+          "object": "chat.completion",
+          "model": "deepseek-v4-pro",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "stop",
+              "message": {
+                "role": "assistant",
+                "content": "{\"schema\":\"recorded-answer\",\"verified\":true,\"source\":\"https://example.org/xinqingnian\"}",
+                "reasoning_content": "搜索结果与单元一致。"
+              }
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 530,
+            "completion_tokens": 31,
+            "total_tokens": 561
+          }
+        }
+      }
+    }
+  ],
+  "search": {
+    "url": "https://search.parallel.ai/mcp",
+    "request": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "tools/call",
+      "params": {
+        "name": "web_search",
+        "arguments": {
+          "objective": "狂人日记 发表 年份 新青年",
+          "search_queries": [
+            "狂人日记 发表 年份 新青年"
+          ]
+        }
+      }
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "《狂人日记》1918 年 5 月发表于《新青年》第 4 卷第 5 号。来源 https://example.org/xinqingnian"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

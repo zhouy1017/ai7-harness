@@ -15,6 +15,12 @@ export const AI7_FAILURE_CODES = {
   INTERRUPTED: 'ABORTED',
   NETWORK_DENIED: 'AI7_OUTBOUND_NETWORK_DENIED',
   EGRESS_REFUSED: 'AI7_EGRESS_REFUSED',
+  /**
+   * The Egress Gate's `circuit-breaker-tripped` (ADR 0080 §7.4; #676): a unit whose platform-tool round trips passed the
+   * breaker ends with 联网核查未完成. Distinct from every other gate refusal, never retry-safe, reachable only under a rule
+   * naming the platform tools — no rule the selected Provider Processing v5 has.
+   */
+  PLATFORM_TOOL_BREAKER_TRIPPED: 'AI7_PLATFORM_TOOL_BREAKER_TRIPPED',
   TRANSMIT_TICKET_ABSENT: 'AI7_TRANSMIT_TICKET_ABSENT',
   FIXTURE_MISMATCH: 'AI7_FIXTURE_MISMATCH',
   RATE_LIMIT: 'RATE_LIMIT',
@@ -35,6 +41,7 @@ export type ModelFailureClass =
   | 'context-window-exceeded'
   | 'interrupted'
   | 'egress-refused'
+  | 'platform-tool-breaker-tripped'
   | 'network-denied'
   | 'fixture-mismatch'
   | 'rate-limit'
@@ -92,6 +99,10 @@ export function classifyModelFailure(failure: ModelFailureFacts, codes: DshFailu
   }
   if (code === AI7_FAILURE_CODES.EGRESS_REFUSED) {
     return classified('interrupted', 'egress-refused', 'Provider Payload/Egress Gate 拒绝发送；尝试已暂停。');
+  }
+  if (code === AI7_FAILURE_CODES.PLATFORM_TOOL_BREAKER_TRIPPED) {
+    // The unit ends, not the Run: a `failed` turn settles its own unit and the Run goes on, and no retry table names it.
+    return classified('failed', 'platform-tool-breaker-tripped', '联网核查未完成：本单元的工具往返已达到熔断上限，本单元到此结束，不重试。');
   }
   if (code === AI7_FAILURE_CODES.NETWORK_DENIED) {
     return classified('failed', 'network-denied', '出站网络在当前产品区间内被禁用。');

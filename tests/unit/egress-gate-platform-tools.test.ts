@@ -12,6 +12,7 @@ import {
   evaluatePublicSourceFetch,
   evaluateSearchServiceCall,
   payloadDigest,
+  redeemEgressTicket,
   toolResultKey,
   type AdmittedToolResult,
   type EgressAttemptScope,
@@ -98,6 +99,11 @@ const LOOP = [user(UNIT), toolCallMessage(), toolResult()];
 const websearch = canonicalToolArguments('websearch', { query: '狂人日记 发表 年份' }) as Extract<ReturnType<typeof canonicalToolArguments>, { tool: 'websearch' }>;
 const webfetch = canonicalToolArguments('webfetch', { url: CITED }) as Extract<ReturnType<typeof canonicalToolArguments>, { tool: 'webfetch' }>;
 
+/** The gate's book for a binding whose rule names the platform tools, re-reading the scope's current binding. */
+function bookFor(named: EgressBindingFacts, current: () => string | null = () => BINDING_DIGEST): EgressTicketBook {
+  return EgressTicketBook.open(named, { currentBindingDigest: current });
+}
+
 describe('under the selected Provider Processing v5 every platform-tool path still refuses', () => {
   it('reads no platform tools from the v5 rule', async () => {
     expect(await ruleOf('v5')).toBeNull();
@@ -125,11 +131,23 @@ describe('under the selected Provider Processing v5 every platform-tool path sti
 
   it('refuses call-search-service and fetch-public-source with platform-tools-not-named, issuing no ticket', async () => {
     const v5 = binding(await ruleOf('v5'));
-    const book = new EgressTicketBook();
-    expect(evaluateSearchServiceCall({ host: 'search.parallel.ai', arguments: websearch, outboundDataCategory: 'public-or-synthetic' }, v5, scope(), book))
-      .toMatchObject({ decision: 'refuse', reason: 'platform-tools-not-named' });
+    // Even handed a book the gate opened for the same digest under a naming rule, the v5 binding is refused first.
+    const book = bookFor(binding(await ruleOf('v7'), 'v8'));
+    expect(evaluateSearchServiceCall({ arguments: websearch }, v5, scope(), book)).toMatchObject({ decision: 'refuse', reason: 'platform-tools-not-named' });
     expect(evaluatePublicSourceFetch({ arguments: webfetch }, v5, scope(), book)).toMatchObject({ decision: 'refuse', reason: 'platform-tools-not-named' });
     expect(book.outstanding).toBe(0);
+  });
+
+  it('opens no ticket book for a binding whose rule names no platform tools (#676)', async () => {
+    const v5 = binding(await ruleOf('v5'));
+    expect(() => EgressTicketBook.open(v5, { currentBindingDigest: () => BINDING_DIGEST })).toThrowError('PLATFORM_TOOLS_NOT_NAMED');
+    const devCi: EgressBindingFacts = {
+      ...binding(await ruleOf('v7')),
+      policy: { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 },
+    };
+    expect(() => EgressTicketBook.open(devCi, { currentBindingDigest: () => BINDING_DIGEST })).toThrowError('PLATFORM_TOOLS_NOT_NAMED');
+    const malformed = { ...binding(await ruleOf('v7'), 'v8'), bindingDigest: 'not-a-digest' };
+    expect(() => EgressTicketBook.open(malformed, { currentBindingDigest: () => BINDING_DIGEST })).toThrowError('PLATFORM_TOOLS_NOT_NAMED');
   });
 
   it('never reads a rule outside developer-live, even one carrying the block', async () => {
@@ -139,9 +157,8 @@ describe('under the selected Provider Processing v5 every platform-tool path sti
     };
     expect(evaluateEgress(payload([user(UNIT)]), forged, scope())).toMatchObject({ reason: 'tools-present' });
     expect(evaluateEgress(payload(LOOP, false), forged, scope())).toMatchObject({ reason: 'payload-out-of-scope' });
-    const book = new EgressTicketBook();
-    expect(evaluateSearchServiceCall({ host: 'search.parallel.ai', arguments: websearch, outboundDataCategory: 'public-or-synthetic' }, forged, scope(), book))
-      .toMatchObject({ reason: 'remote-route-denied-under-v1' });
+    const book = bookFor(binding(await ruleOf('v7'), 'v8'));
+    expect(evaluateSearchServiceCall({ arguments: websearch }, forged, scope(), book)).toMatchObject({ reason: 'remote-route-denied-under-v1' });
     expect(book.outstanding).toBe(0);
   });
 
@@ -242,26 +259,56 @@ describe('under a rule naming the platform tools (v7\'s block, selected by nothi
     expect(evaluateEgress(payload([user(UNIT), toolCallMessage()]), named, scope())).toMatchObject({ reason: 'payload-out-of-scope' });
   });
 
-  it('decides call-search-service only for the rule\'s host, the binding\'s category, an intact breaker, and a held ceiling', async () => {
+  it('decides call-search-service only for the binding\'s public category, an intact breaker, and a held ceiling', async () => {
     const named = binding(await ruleOf('v7'), 'v8');
-    const book = new EgressTicketBook();
-    const request = { host: 'search.parallel.ai', arguments: websearch, outboundDataCategory: 'public-or-synthetic' as const };
-    expect(evaluateSearchServiceCall({ ...request, host: 'mcp.exa.ai' }, named, scope(), book)).toMatchObject({ reason: 'search-host-mismatch' });
-    expect(evaluateSearchServiceCall({ ...request, outboundDataCategory: 'editor-selected-manuscript-excerpt' }, named, scope(), book))
-      .toMatchObject({ reason: 'outbound-category-mismatch' });
+    const book = bookFor(named);
+    const request = { arguments: websearch };
     expect(evaluateSearchServiceCall(request, named, scope({ breakerState: () => 'tripped' }), book)).toMatchObject({ reason: 'circuit-breaker-tripped' });
     expect(evaluateSearchServiceCall(request, named, scope({ ceilingState: () => 'reached' }), book)).toMatchObject({ reason: 'run-budget-ceiling-reached' });
     expect(evaluateSearchServiceCall(request, named, scope({ ceilingState: () => 'unset' }), book)).toMatchObject({ reason: 'run-budget-ceiling-unset' });
     expect(evaluateSearchServiceCall(request, named, scope({ currentBindingDigest: () => null }), book)).toMatchObject({ reason: 'binding-stale' });
     expect(book.outstanding).toBe(0);
-    const decision = evaluateSearchServiceCall({ ...request, host: 'SEARCH.parallel.ai' }, named, scope(), book);
+    const decision = evaluateSearchServiceCall(request, named, scope(), book);
     expect(decision).toMatchObject({ decision: 'call-search-service', ticket: { host: 'search.parallel.ai', argumentsDigest: toolArgumentsDigest(websearch), bindingDigest: BINDING_DIGEST } });
     expect(book.outstanding).toBe(1);
   });
 
+  it('derives the search host from the selected rule and the category from the binding, never from the call (#676)', async () => {
+    const rule = (await ruleOf('v7'))!;
+    // The host the ticket carries is whatever the rule names: the call has no way to say another.
+    const elsewhere: typeof rule = { ...rule, websearch: { ...rule.websearch, host: 'mcp.exa.ai' } };
+    const moved = binding(elsewhere, 'v8');
+    const ticket = (evaluateSearchServiceCall({ arguments: websearch }, moved, scope(), bookFor(moved)) as { ticket: SearchServiceTicket }).ticket;
+    expect(ticket.host).toBe('mcp.exa.ai');
+    // A binding whose category is not public or synthetic is refused on both decisions, before any ticket is issued — even
+    // though the call itself states no category at all.
+    const excerpt: EgressBindingFacts = { ...binding(rule, 'v8'), outboundDataCategory: 'editor-selected-manuscript-excerpt' };
+    const book = bookFor(excerpt);
+    expect(evaluateSearchServiceCall({ arguments: websearch }, excerpt, scope(), book)).toMatchObject({ decision: 'refuse', reason: 'outbound-category-mismatch' });
+    expect(evaluatePublicSourceFetch({ arguments: webfetch }, excerpt, scope(), book)).toMatchObject({ decision: 'refuse', reason: 'outbound-category-mismatch' });
+    expect(book.outstanding).toBe(0);
+  });
+
+  it('issues only into the book the gate opened for this binding (#676)', async () => {
+    const named = binding(await ruleOf('v7'), 'v8');
+    const other = { ...named, bindingDigest: 'd'.repeat(64) };
+    const foreign = bookFor(other, () => other.bindingDigest);
+    expect(evaluateSearchServiceCall({ arguments: websearch }, named, scope(), foreign)).toMatchObject({ decision: 'refuse', reason: 'ticket-book-foreign' });
+    expect(evaluatePublicSourceFetch({ arguments: webfetch }, named, scope(), foreign)).toMatchObject({ decision: 'refuse', reason: 'ticket-book-foreign' });
+    // An object that only looks like a book holds no state the gate knows.
+    const lookalike = Object.create(EgressTicketBook.prototype) as EgressTicketBook;
+    expect(evaluateSearchServiceCall({ arguments: websearch }, named, scope(), lookalike)).toMatchObject({ reason: 'ticket-book-foreign' });
+    expect(foreign.outstanding).toBe(0);
+    expect(lookalike.outstanding).toBe(0);
+    // Nor can a book be constructed past `open`: the constructor holds the gate's key.
+    const Constructor = EgressTicketBook as unknown as new (key: symbol, state: unknown) => EgressTicketBook;
+    expect(() => new Constructor(Symbol('egress-ticket-book'), {})).toThrowError('EGRESS_TICKET_BOOK_NOT_OPENED_BY_GATE');
+    expect('issue' in EgressTicketBook.prototype).toBe(false);
+  });
+
   it('decides fetch-public-source only for a canonical cited public URL', async () => {
     const named = binding(await ruleOf('v7'), 'v8');
-    const book = new EgressTicketBook();
+    const book = bookFor(named);
     expect(evaluatePublicSourceFetch({ arguments: { tool: 'webfetch', url: 'https://example.org/other' } }, named, scope(), book)).toMatchObject({ reason: 'fetch-target-not-cited' });
     expect(evaluatePublicSourceFetch({ arguments: { tool: 'webfetch', url: 'http://example.org/source' } }, named, scope(), book)).toMatchObject({ reason: 'fetch-target-invalid' });
     expect(evaluatePublicSourceFetch({ arguments: { tool: 'webfetch', url: 'https://EXAMPLE.org/source' } }, named, scope(), book)).toMatchObject({ reason: 'fetch-target-invalid' });
@@ -273,20 +320,45 @@ describe('under a rule naming the platform tools (v7\'s block, selected by nothi
 });
 
 describe('EgressTicketBook', () => {
-  it('redeems each issued ticket exactly once, and nothing it did not issue', async () => {
-    const named = binding(await ruleOf('v7'), 'v8');
-    const book = new EgressTicketBook();
-    const decision = evaluateSearchServiceCall({ host: 'search.parallel.ai', arguments: websearch, outboundDataCategory: 'public-or-synthetic' }, named, scope(), book);
+  it('redeems each issued ticket exactly once, from the book that issued it, and nothing it did not issue', async () => {
+    const rule = (await ruleOf('v7'))!;
+    const named = binding(rule, 'v8');
+    const book = bookFor(named);
+    const decision = evaluateSearchServiceCall({ arguments: websearch }, named, scope(), book);
     const ticket = (decision as { ticket: SearchServiceTicket }).ticket;
     expect(Object.isFrozen(ticket)).toBe(true);
-    expect(book.redeem({ ...ticket, host: 'mcp.exa.ai' })).toBe(false);
-    expect(book.redeem({ ...ticket, ticketId: '00000000-0000-4000-8000-000000000000' })).toBe(false);
-    expect(new EgressTicketBook().redeem(ticket)).toBe(false);
-    expect(book.redeem(ticket)).toBe(true);
-    expect(book.redeem(ticket)).toBe(false);
+    expect(redeemEgressTicket(book, { ...ticket, host: 'mcp.exa.ai' })).toBeNull();
+    expect(redeemEgressTicket(book, { ...ticket, ticketId: '00000000-0000-4000-8000-000000000000' })).toBeNull();
+    // A field-for-field copy is not the ticket the gate issued.
+    expect(redeemEgressTicket(book, { ...ticket })).toBeNull();
+    expect(redeemEgressTicket(bookFor(named), ticket)).toBeNull();
+    expect(redeemEgressTicket(Object.create(EgressTicketBook.prototype) as EgressTicketBook, ticket)).toBeNull();
+    expect(book.outstanding).toBe(1);
+    // Redemption hands back the rule of the binding the ticket was issued under: the only rule a forwarder builds from.
+    expect(redeemEgressTicket(book, ticket)).toBe(rule);
+    expect(redeemEgressTicket(book, ticket)).toBeNull();
     expect(book.outstanding).toBe(0);
     const fetch = evaluatePublicSourceFetch({ arguments: webfetch }, named, scope(), book) as { ticket: PublicSourceTicket };
+    book.revoke({ ...fetch.ticket });
+    expect(book.outstanding).toBe(1);
     book.revoke(fetch.ticket);
-    expect(book.redeem(fetch.ticket)).toBe(false);
+    expect(book.outstanding).toBe(0);
+    expect(redeemEgressTicket(book, fetch.ticket)).toBeNull();
+  });
+
+  it('re-checks at redemption that the binding is still current, and spends a ticket it refuses (#676)', async () => {
+    const named = binding(await ruleOf('v7'), 'v8');
+    let current: string | null = BINDING_DIGEST;
+    const book = bookFor(named, () => current);
+    const ticket = (evaluateSearchServiceCall({ arguments: websearch }, named, scope(), book) as { ticket: SearchServiceTicket }).ticket;
+    current = null;
+    expect(redeemEgressTicket(book, ticket)).toBeNull();
+    current = BINDING_DIGEST;
+    expect(redeemEgressTicket(book, ticket)).toBeNull();
+    expect(book.outstanding).toBe(0);
+    // A superseding binding is not the ticket's binding either.
+    const fetch = (evaluatePublicSourceFetch({ arguments: webfetch }, named, scope(), book) as { ticket: PublicSourceTicket }).ticket;
+    current = 'e'.repeat(64);
+    expect(redeemEgressTicket(book, fetch)).toBeNull();
   });
 });
