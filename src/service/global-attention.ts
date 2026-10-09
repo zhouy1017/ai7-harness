@@ -20,6 +20,7 @@ import {
   type GlobalAttentionProjection,
   type GlobalAttentionStateKey,
   type GlobalAttentionTarget,
+  type LibraryMaterialKind,
   type MaintenanceClassification,
   type MaintenanceNextStep,
   type ProposalConflictKind,
@@ -220,6 +221,22 @@ export interface LearningMaterialsAttentionReading {
   readonly at: string;
 }
 
+/**
+ * 索引完成 (Issue #428, S80a; ATTN-009): a 资料库 item whose Material Index was built on this machine within the recent window,
+ * read by `material-index.ts` with where the item belongs from `library-materials.ts`.
+ */
+export interface MaterialIndexAttentionReading {
+  readonly materialId: string;
+  readonly indexId: string;
+  readonly title: string;
+  readonly kind: LibraryMaterialKind;
+  readonly scope: 'none' | 'book' | 'house';
+  readonly book: { readonly bookId: string; readonly title: string } | null;
+  readonly outcome: 'complete' | 'unsupported' | 'failed';
+  readonly recordedAt: string;
+  readonly indexSha256: string;
+}
+
 export interface GlobalAttentionReadings {
   readonly imports: ReadonlyArray<ImportAttentionReading>;
   readonly recoveries: ReadonlyArray<RecoveryAttentionReading>;
@@ -236,6 +253,8 @@ export interface GlobalAttentionReadings {
   readonly libraryMaterials: ReadonlyArray<LibraryMaterialAttentionReading>;
   /** Every Book whose Learning Material waits for the editor (Issue #61, S26b; LEARN-002). */
   readonly learningMaterials: ReadonlyArray<LearningMaterialsAttentionReading>;
+  /** The 资料库 items whose Material Index was built within the recent window (Issue #428, S80a; ATTN-009). */
+  readonly materialIndexes?: ReadonlyArray<MaterialIndexAttentionReading>;
   /** Whether Runs hold every place of the execution owner's governor now (Issue #49, S14). */
   readonly busy: boolean;
   /**
@@ -681,6 +700,27 @@ function learningMaterialsItem(reading: LearningMaterialsAttentionReading): Glob
   });
 }
 
+/**
+ * 索引完成 (ATTN-009, KB-009): a 资料库 item's Material Index built on this machine, in 最近完成 — however the build went, since a
+ * build that could not read every layer is finished too, and its card says which layers it has. It asks nothing of the editor.
+ */
+function materialIndexItem(reading: MaterialIndexAttentionReading): GlobalAttentionItemProjection {
+  return item('recent', 'indexing-completed', {
+    itemId: `library-index:${reading.materialId}`,
+    blocked: false,
+    at: reading.recordedAt,
+    book: reading.book === null ? { bookId: null, title: null } : { bookId: reading.book.bookId, title: reading.book.title },
+    object: { kind: 'library-index', title: reading.title, materialKind: reading.kind, scope: reading.scope, outcome: reading.outcome },
+    nextStep: 'view-material-index',
+    target: { kind: 'library-material', materialId: reading.materialId },
+    technical: [
+      { key: 'library-material', label: '资料', value: reading.materialId },
+      { key: 'material-index', label: '资料索引', value: reading.indexSha256 },
+      { key: 'completed-at', label: '完成时间', value: reading.recordedAt },
+    ],
+  });
+}
+
 // ---- ordering ------------------------------------------------------------------------------------------
 
 /** Code-point order, the same on every host; a missing title sorts first. */
@@ -740,6 +780,7 @@ export function composeGlobalAttention(readings: GlobalAttentionReadings, now: D
     ...readings.maintenance.map(maintenanceItem),
     ...readings.libraryMaterials.map(libraryMaterialItem),
     ...readings.learningMaterials.map(learningMaterialsItem),
+    ...(readings.materialIndexes ?? []).filter((reading) => reading.recordedAt >= since).map(materialIndexItem),
   ];
   // One record is one item: a Review Run read both as a Book's latest and as a completion is listed once.
   const unique = Array.from(new Map(all.map((entry) => [`${entry.group}\n${entry.itemId}`, entry] as const)).values());

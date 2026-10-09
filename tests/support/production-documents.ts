@@ -18,6 +18,9 @@ import type { DatabaseSync } from 'node:sqlite';
  * validation accepts, exactly as a store an earlier build planted after this one would hold them.
  */
 export const PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER: ReadonlyArray<string> = [
+  // 资料索引 (revision 67; Issue #428, S80a): the segments, then the builds, which name 资料库 items.
+  'material_index_segments',
+  'material_index_builds',
   // 后台分析登记 (revision 66; Issue #95, S39): each Enrollment's states, versions and the Enrollment.
   'background_analysis_enrollment_states',
   'background_analysis_enrollment_versions',
