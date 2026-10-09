@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -20,7 +20,19 @@ const trace = (await import(new URL('../../e2e/readiness-trace.mjs', import.meta
     atBudget: Record<string, unknown> | null,
     afterWatch?: Record<string, unknown> | null,
   ): { outcome: string; step: string | null };
+  productRuntimeRoot(executable: string, platform?: string): string;
+  psCpuSeconds(text: string): number | null;
+  parsePsProcessListing(text: string): Array<ProcessRow>;
+  parseWindowsProcessListing(text: string): Array<ProcessRow>;
+  summarizeProductProcesses(rows: ReadonlyArray<ProcessRow>, pid: number, runtimeRoot: string, platform?: string): ProcessSample;
+  sampleProductProcesses(pid: number, executable: string): Promise<ProcessSample | null>;
+  classifyBrowserLaunchMiss(trace: Record<string, unknown> | null, sample: ProcessSample | null): Record<string, unknown>;
+  cpuShares(before: ReadonlyArray<ProcessRow>, after: ReadonlyArray<ProcessRow>, rootPid: number, windowMs: number, cores: number, listingPid?: number | null): { product: number; host: number };
+  measureCpuShares(rootPid: number, windowMs?: number): Promise<{ product: number; host: number } | null>;
+  listHostProcessesWithListing(platform?: string): Promise<{ rows: Array<ProcessRow>; listingPid: number | null } | null>;
 };
+interface ProcessRow { pid: number; ppid: number; cpuSeconds: number | null; path: string | null }
+interface ProcessSample { alive: boolean; cpuSeconds: number | null; helpers: number; prior: number }
 const controller = (await import(new URL('../../e2e/controller.mjs', import.meta.url).href)) as {
   collectReadinessTrace(result: { stderr: string }, journey: string): string | null;
 };
@@ -151,6 +163,212 @@ describe('the readiness trace (Issue #518)', () => {
     expect(trace.classifyRendererTargetMiss(at([[900, '[pid=5][err] AI7_STARTUP/electron-ready']])))
       .toEqual({ outcome: 'timeout', step: null });
     expect(trace.classifyRendererTargetMiss(null)).toEqual({ outcome: 'timeout', step: null });
+  });
+
+  it('names why a launch\'s browser was never acquired, from the trace and the sample taken before its timeout (#675)', () => {
+    const at = (lines: ReadonlyArray<readonly [number, string]>) => launched([[2, '<launched> pid=5'], ...lines]);
+    const idle = { alive: true, cpuSeconds: 0.4, helpers: 0, prior: 0 };
+    const none = { step: null, sampled: null, cpu: null, helpers: 0, prior: 0 };
+    // Hosted macOS, run 37870925275: launched, and not one word from main in sixty seconds.
+    expect(trace.classifyBrowserLaunchMiss(at([]), idle))
+      .toEqual({ outcome: 'before-main', step: null, sampled: 'alive', cpu: 'idle', helpers: 0, prior: 0 });
+    expect(trace.classifyBrowserLaunchMiss(at([]), { alive: true, cpuSeconds: 4, helpers: 3, prior: 12 }))
+      .toMatchObject({ outcome: 'before-main', cpu: 'some', helpers: 3, prior: 9 });
+    expect(trace.classifyBrowserLaunchMiss(at([]), { alive: true, cpuSeconds: 42, helpers: 11, prior: 2 }))
+      .toMatchObject({ cpu: 'busy', helpers: 9, prior: 2 });
+    expect(trace.classifyBrowserLaunchMiss(at([]), { alive: true, cpuSeconds: null, helpers: 0, prior: 0 })).toMatchObject({ cpu: 'unknown' });
+    expect(trace.classifyBrowserLaunchMiss(at([]), { alive: false, cpuSeconds: null, helpers: 0, prior: 1 }))
+      .toEqual({ ...none, outcome: 'before-main', sampled: 'gone' });
+    expect(trace.classifyBrowserLaunchMiss(at([]), null)).toEqual({ ...none, outcome: 'before-main', sampled: 'unsampled' });
+    // Main's script ran: the last step it said.
+    expect(trace.classifyBrowserLaunchMiss(at([[40, '[pid=5][err] AI7_STARTUP/network-denial'], [60, '[pid=5][err] AI7_STARTUP/application-import']]), idle))
+      .toMatchObject({ outcome: 'at-step', step: 'application-import', sampled: 'alive', cpu: 'idle' });
+    expect(trace.classifyBrowserLaunchMiss(at([[400, '[pid=5][err] AI7_STARTUP/electron-ready']]), null))
+      .toEqual({ ...none, outcome: 'at-step', step: 'electron-ready', sampled: 'unsampled' });
+    // A failure, an exit, or no process at all need no sample.
+    expect(trace.classifyBrowserLaunchMiss(at([[400, '[pid=5][err] AI7_STARTUP_FAILED/arguments']]), idle)).toEqual({ ...none, outcome: 'startup-failed' });
+    expect(trace.classifyBrowserLaunchMiss(at([[400, '[pid=5] <process did exit: exitCode=1, signal=null>']]), idle))
+      .toEqual({ ...none, outcome: 'product-exited' });
+    expect(trace.classifyBrowserLaunchMiss(launched([]), idle)).toEqual({ ...none, outcome: 'not-spawned' });
+    expect(trace.classifyBrowserLaunchMiss(null, null)).toEqual({ ...none, outcome: 'not-spawned' });
+  });
+
+  it('has J-01 turn a launch it never acquired into a content-free label that names every step main says (#675)', () => {
+    const source = readFileSync(join(ROOT, 'e2e', 'run-j01.mjs'), 'utf8').replace(/\r\n/gu, '\n');
+    // J-01 runs as it is imported, so its label builder is read from its source and run here on its own.
+    const start = source.indexOf('const LAUNCH_STEP_WORDS = ');
+    const end = source.indexOf('\n}\n', source.indexOf('function browserLaunchMissLabel(')) + 3;
+    expect(start).toBeGreaterThan(-1);
+    const label = new Function(`${source.slice(start, end)}\nreturn { browserLaunchMissLabel, LAUNCH_STEP_WORDS };`)() as {
+      browserLaunchMissLabel(miss: unknown): string;
+      LAUNCH_STEP_WORDS: ReadonlyArray<string>;
+    };
+    expect(label.LAUNCH_STEP_WORDS).toEqual(trace.STARTUP_LOCATIONS);
+    const at = (lines: ReadonlyArray<readonly [number, string]>) => launched([[2, '<launched> pid=5'], ...lines]);
+    const named = (lines: ReadonlyArray<readonly [number, string]>, sample: ProcessSample | null) =>
+      label.browserLaunchMissLabel(trace.classifyBrowserLaunchMiss(at(lines), sample));
+    expect(named([], { alive: true, cpuSeconds: 0.4, helpers: 0, prior: 0 })).toBe('browser-launch-before-main-cpu-idle-helpers-0-prior-0');
+    expect(named([], { alive: true, cpuSeconds: 30, helpers: 14, prior: 1 })).toBe('browser-launch-before-main-cpu-busy-helpers-9-prior-1');
+    expect(named([], { alive: false, cpuSeconds: null, helpers: 0, prior: 0 })).toBe('browser-launch-before-main-gone');
+    expect(named([[60, '[pid=5][err] AI7_STARTUP/electron-ready']], null)).toBe('browser-launch-at-electron-ready-unsampled');
+    expect(named([[60, '[pid=5][err] AI7_STARTUP_FAILED/arguments']], null)).toBe('browser-launch-startup-failed');
+    expect(named([[60, '[pid=5] <process did exit: exitCode=1, signal=null>']], null)).toBe('browser-launch-product-exited');
+    expect(label.browserLaunchMissLabel(trace.classifyBrowserLaunchMiss(null, null))).toBe('browser-launch-not-spawned');
+    for (const location of trace.STARTUP_LOCATIONS) {
+      const text = named([[40, `[pid=5][err] AI7_STARTUP/${location}`]], { alive: true, cpuSeconds: 99, helpers: 99, prior: 99 });
+      expect(text).toBe(`browser-launch-at-${location}-cpu-busy-helpers-9-prior-9`);
+      expect(text).toMatch(/^[a-z0-9][a-z0-9-]{0,95}$/u);
+    }
+  });
+
+  it('samples the product\'s processes as counts and seconds only: its own, those it started, and an earlier launch\'s (#675)', () => {
+    expect(trace.psCpuSeconds('0:00.52')).toBeCloseTo(0.52);
+    expect(trace.psCpuSeconds('12:03.50')).toBeCloseTo(723.5);
+    expect(trace.psCpuSeconds('1:02:03')).toBe(3_723);
+    expect(trace.psCpuSeconds('2-01:00:00')).toBe(176_400);
+    expect(trace.psCpuSeconds('n/a')).toBeNull();
+    const app = '/runner/.runtime/electron/Electron.app';
+    expect(trace.productRuntimeRoot(`${app}/Contents/MacOS/Electron`, 'darwin')).toBe(app);
+    expect(trace.productRuntimeRoot('C:\\r\\.runtime\\electron\\electron.exe', 'win32')).toBe('C:\\r\\.runtime\\electron');
+    const mac = trace.parsePsProcessListing([
+      '    1     0   0:10.00 /sbin/launchd',
+      `  500     1   0:00.40 ${app}/Contents/MacOS/Electron --remote-debugging-pipe /x/dist/main/index.cjs --data-root /tmp/a`,
+      `  501   500   0:00.10 ${app}/Contents/Frameworks/Electron Helper (GPU).app/Contents/MacOS/Electron Helper (GPU) --type=gpu-process`,
+      `  502   501   0:00.01 /usr/bin/something-it-started`,
+      `  400     1   0:03.00 ${app}/Contents/MacOS/Electron /x/dist/service/index.mjs`,
+      `  401     1   0:00.00 /runner/.runtime/electron/Electron.app.bak/Contents/MacOS/Electron`,
+      'not a row',
+    ].join('\n'));
+    expect(mac).toHaveLength(6);
+    expect(trace.summarizeProductProcesses(mac, 500, app, 'darwin')).toEqual({ alive: true, cpuSeconds: 0.4, helpers: 2, prior: 1 });
+    expect(trace.summarizeProductProcesses(mac, 999, app, 'darwin')).toEqual({ alive: false, cpuSeconds: null, helpers: 0, prior: 3 });
+    const windows = trace.parseWindowsProcessListing([
+      '4\t0\t0\t',
+      '7000\t6000\t5000000\tC:\\R\\.runtime\\electron\\electron.exe',
+      '7001\t7000\t100000\tc:/r/.runtime/electron/electron.exe',
+      '6500\t1\t20000000\tC:\\r\\.runtime\\electron\\electron.exe',
+      '',
+    ].join('\r\n'));
+    expect(windows).toEqual([
+      { pid: 4, ppid: 0, cpuSeconds: 0, path: null },
+      { pid: 7000, ppid: 6000, cpuSeconds: 0.5, path: 'C:\\R\\.runtime\\electron\\electron.exe' },
+      { pid: 7001, ppid: 7000, cpuSeconds: 0.01, path: 'c:/r/.runtime/electron/electron.exe' },
+      { pid: 6500, ppid: 1, cpuSeconds: 2, path: 'C:\\r\\.runtime\\electron\\electron.exe' },
+    ]);
+    expect(trace.summarizeProductProcesses(windows, 7000, 'C:\\r\\.runtime\\electron', 'win32')).toEqual({ alive: true, cpuSeconds: 0.5, helpers: 1, prior: 1 });
+  });
+
+  it('says how busy the product and the host were over a window, from two listings (#621)', () => {
+    const before = [
+      { pid: 0, ppid: 0, cpuSeconds: 1_000, path: null },
+      { pid: 10, ppid: 1, cpuSeconds: 5, path: 'node' },
+      { pid: 20, ppid: 10, cpuSeconds: 2, path: 'electron' },
+      { pid: 21, ppid: 20, cpuSeconds: 1, path: 'electron' },
+      { pid: 30, ppid: 1, cpuSeconds: 50, path: 'scanner' },
+      { pid: 40, ppid: 1, cpuSeconds: 9, path: 'ended' },
+    ];
+    const after = [
+      { pid: 0, ppid: 0, cpuSeconds: 1_100, path: null },
+      { pid: 10, ppid: 1, cpuSeconds: 5.5, path: 'node' },
+      { pid: 20, ppid: 10, cpuSeconds: 6, path: 'electron' },
+      { pid: 21, ppid: 20, cpuSeconds: 1, path: 'electron' },
+      { pid: 22, ppid: 21, cpuSeconds: 1, path: 'electron' },
+      { pid: 30, ppid: 1, cpuSeconds: 58.5, path: 'scanner' },
+      { pid: 31, ppid: 1, cpuSeconds: null, path: 'unreadable' },
+    ];
+    // Over 5 s: the product (20, 21 and the new 22, not the Journey itself) used 5 s, one core; the host 14 s of 4 cores.
+    const shares = trace.cpuShares(before, after, 10, 5_000, 4);
+    expect(shares.product).toBeCloseTo(1);
+    expect(shares.host).toBeCloseTo(0.7);
+    expect(trace.cpuShares(after, after, 10, 5_000, 4)).toEqual({ product: 0, host: 0 });
+    // The sampler's own listing process (review P2-1): a transient child of the Journey, in the second listing only, with
+    // the few tenths of a second a hosted Windows listing costs, and a child of its own. Named, it counts for neither share;
+    // unnamed, it would lift an idle product over the 0.1 `idle` bound on its own.
+    const listing = [
+      ...after,
+      { pid: 99, ppid: 10, cpuSeconds: 0.6, path: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe' },
+      { pid: 100, ppid: 99, cpuSeconds: 0.1, path: 'conhost' },
+    ];
+    const named = trace.cpuShares(before, listing, 10, 5_000, 4, 99);
+    expect(named.product).toBeCloseTo(1);
+    expect(named.host).toBeCloseTo(0.7);
+    const unnamed = trace.cpuShares(before, listing, 10, 5_000, 4);
+    expect(unnamed.product).toBeCloseTo(1.14);
+    const idle = before.map((row) => ({ ...row }));
+    expect(trace.cpuShares(idle, [...idle, { pid: 99, ppid: 10, cpuSeconds: 0.6, path: 'powershell.exe' }], 10, 5_000, 4, 99).product).toBe(0);
+    expect(trace.cpuShares(idle, [...idle, { pid: 99, ppid: 10, cpuSeconds: 0.6, path: 'powershell.exe' }], 10, 5_000, 4).product).toBeCloseTo(0.12);
+  });
+
+  it('names the listing process, which is in its own listing as a child of this one (review P2-1)', async () => {
+    const listing = await trace.listHostProcessesWithListing();
+    expect(listing).not.toBeNull();
+    expect(typeof listing!.listingPid).toBe('number');
+    const own = listing!.rows.find((row) => row.pid === listing!.listingPid);
+    expect(own).toBeDefined();
+    expect(own!.ppid).toBe(process.pid);
+  }, 30_000);
+
+  it('measures a real busy process below this one (#621)', async () => {
+    const child = spawn(process.execPath, ['-e', 'const end = Date.now() + 20_000; while (Date.now() < end);'], { stdio: 'ignore' });
+    try {
+      await new Promise((settle) => child.once('spawn', settle));
+      const shares = await trace.measureCpuShares(process.pid, 1_500);
+      expect(shares).not.toBeNull();
+      expect(shares!.product).toBeGreaterThan(0.3);
+      expect(shares!.host).toBeGreaterThan(0);
+    } finally {
+      child.kill();
+    }
+  }, 30_000);
+
+  it('has J-02 name how busy the product and the host were when an import step ran out of its bound (#621)', async () => {
+    const source = readFileSync(join(ROOT, 'e2e', 'run-j02.mjs'), 'utf8').replace(/\r\n/gu, '\n');
+    const start = source.indexOf('function cpuShareWord(');
+    const end = source.indexOf('\n}\n', source.indexOf('async function importCpuWords(')) + 3;
+    const words = (shares: { product: number; host: number } | null) =>
+      (new Function('measureCpuShares', `${source.slice(start, end)}\nreturn importCpuWords();`) as (measure: () => Promise<unknown>) => Promise<string>)(
+        async () => shares,
+      );
+    expect(await words({ product: 0.05, host: 0.9 })).toBe('product-idle-host-busy');
+    expect(await words({ product: 0.5, host: 0.3 })).toBe('product-some-host-some');
+    expect(await words({ product: 1.2, host: 0.1 })).toBe('product-busy-host-idle');
+    expect(await words(null)).toBe('cpu-unsampled');
+    for (const label of ['stage-target-progressing-at-${Number(tenths)}-tenths-${cpu}', 'stage-target-stalled-at-${Number(tenths)}-tenths-${cpu}',
+      'imported-${outcome}-at-writing-${cpu}', 'imported-${outcome}-at-preparing-${cpu}', 'completion-acknowledged-before-open-stalled-${cpu}',
+      'completion-acknowledged-before-open-progressing-${cpu}']) {
+      expect(source).toContain(label);
+    }
+    // The longest label it can print still fits a check label.
+    expect('imported-progressing-at-revalidating-10-tenths-product-busy-host-busy').toMatch(/^[a-z0-9][a-z0-9-]{0,95}$/u);
+  });
+
+  it('samples a real process on this host', async () => {
+    const child = spawn(process.execPath, ['-e', 'setTimeout(() => undefined, 60_000)'], { stdio: 'ignore' });
+    try {
+      await new Promise((settle) => child.once('spawn', settle));
+      const sample = await trace.sampleProductProcesses(child.pid!, process.execPath);
+      expect(sample).not.toBeNull();
+      expect(sample).toMatchObject({ alive: true, helpers: 0 });
+      expect(typeof sample!.cpuSeconds).toBe('number');
+      expect(sample!.prior).toBeGreaterThanOrEqual(1);
+    } finally {
+      child.kill();
+    }
+  }, 30_000);
+
+  it('has main say the steps before its application runs, and J-01 name a launch it never acquired (#675)', () => {
+    const main = readFileSync(join(ROOT, 'src', 'main', 'index.ts'), 'utf8');
+    const denial = main.indexOf("journeyStartup('network-denial')");
+    const install = main.indexOf('installNodeNetworkDenial();');
+    const importStep = main.indexOf("journeyStartup('application-import')");
+    const load = main.indexOf("import('./application.js')");
+    expect([denial, install, importStep, load].every((index) => index > -1)).toBe(true);
+    expect(denial < install && install < importStep && importStep < load).toBe(true);
+    expect(main).toContain("if (process.env.AI7_E2E_JOURNEY !== undefined) process.stderr.write(`AI7_STARTUP/${location}\\n`);");
+    const j01 = readFileSync(join(ROOT, 'e2e', 'run-j01.mjs'), 'utf8').replace(/\r\n/gu, '\n');
+    expect(j01).toContain("throw journeyCheckFailure('J-01', browserLaunchMissLabel(classifyBrowserLaunchMiss(launchTraceNow(), sample)), { cause: error });");
+    expect(j01).toMatch(/setTimeout\(\(\) => \{\n\s+const pid = [^\n]+\n\s+launchSample = [^\n]+sampleProductProcesses\(pid, executable\)/u);
+    expect(j01).toContain('}, PRODUCT_READY_TIMEOUT_MS - LAUNCH_SAMPLE_LEAD_MS);');
   });
 
   it('reads only the launch in flight: nothing from before it began, from another process, or without its time', () => {

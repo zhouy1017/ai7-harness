@@ -550,7 +550,18 @@ import { BookDeliveryPackageError, BookDeliveryPackages, initializeBookDeliveryP
 import { MaintenanceCaseError, MaintenanceCases, initializeMaintenanceCaseSchema } from './maintenance-cases.js';
 import { BookPeople, BookPeopleError, initializeBookPeopleSchema } from './book-people.js';
 import { ReviewGuidelineError, ReviewGuidelineLedger, initializeReviewGuidelineSchema, readGuidelineFile } from './review-guidelines.js';
-import { LibraryMaterialError, LibraryMaterialLedger, initializeLibraryMaterialSchema, libraryMaterialTitle } from './library-materials.js';
+import { LIBRARY_OBJECT_DIRECTORY, LibraryMaterialError, LibraryMaterialLedger, initializeLibraryMaterialSchema, libraryMaterialTitle, type LibraryMaterialOriginal } from './library-materials.js';
+import {
+  MaterialIndexAborted,
+  MaterialIndexError,
+  MaterialIndexLedger,
+  extractMaterialText,
+  initializeMaterialIndexSchema,
+  sweepMaterialIndexWork,
+  type MaterialReferenceBoundary,
+  type MaterialReferencePin,
+  type MaterialTaskReading,
+} from './material-index.js';
 import {
   BUILTIN_EVALUATION_PROFILE,
   EvaluationError,
@@ -707,7 +718,7 @@ import {
 import { dialogueProjection, harnessHistoryReader, keptText, resolveAttempts, type DialogueHistoryReader, type LiveAnswer } from './dialogue/dialogue-history.js';
 import { dialogueQuestion } from './dialogue/contract.js';
 import { HARNESS_SESSION_LOG_DIRECTORY, readHarnessSessionLog } from './harness/session-log.js';
-import type { DialogueTaskReading } from './global-attention.js';
+import type { DialogueTaskReading, MaterialIndexAttentionReading } from './global-attention.js';
 import {
   SeriesKnowledgeError,
   SeriesKnowledgeLedger,
@@ -876,6 +887,7 @@ import {
   EVALUATION_REWRITE_SCHEMA_VERSION,
   WRITING_TASK_SCHEMA_VERSION,
   BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
+  MATERIAL_INDEX_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -2118,7 +2130,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
       currentVersion === EVALUATION_REWRITE_SCHEMA_VERSION ||
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
-      currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
+      currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
+      currentVersion === MATERIAL_INDEX_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2180,7 +2193,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
       currentVersion === EVALUATION_REWRITE_SCHEMA_VERSION ||
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
-      currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION
+      currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
+      currentVersion === MATERIAL_INDEX_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2556,7 +2570,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
       version === EVALUATION_REWRITE_SCHEMA_VERSION ||
       version === WRITING_TASK_SCHEMA_VERSION ||
-      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
+      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
+      version === MATERIAL_INDEX_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2607,7 +2622,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
       version === EVALUATION_REWRITE_SCHEMA_VERSION ||
       version === WRITING_TASK_SCHEMA_VERSION ||
-      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION) return;
+      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
+      version === MATERIAL_INDEX_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2750,7 +2766,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
       version === EVALUATION_REWRITE_SCHEMA_VERSION ||
       version === WRITING_TASK_SCHEMA_VERSION ||
-      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
+      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
+      version === MATERIAL_INDEX_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2800,7 +2817,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
       version === EVALUATION_REWRITE_SCHEMA_VERSION ||
       version === WRITING_TASK_SCHEMA_VERSION ||
-      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION) return;
+      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
+      version === MATERIAL_INDEX_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -3093,7 +3111,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== MATERIAL_INDEX_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -3146,6 +3164,7 @@ function validateModelServiceSchema(
       version >= EVALUATION_REWRITE_SCHEMA_VERSION,
       version >= WRITING_TASK_SCHEMA_VERSION,
       version >= BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
+      version >= MATERIAL_INDEX_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -3223,7 +3242,8 @@ function initializeModelServiceSchema(
       version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
       version === EVALUATION_REWRITE_SCHEMA_VERSION ||
       version === WRITING_TASK_SCHEMA_VERSION ||
-      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
+      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
+      version === MATERIAL_INDEX_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3273,7 +3293,8 @@ function initializeModelServiceSchema(
       version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
       version === EVALUATION_REWRITE_SCHEMA_VERSION ||
       version === WRITING_TASK_SCHEMA_VERSION ||
-      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION) {
+      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
+      version === MATERIAL_INDEX_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -4178,6 +4199,16 @@ export class EditorialStore {
   readonly #reviewGuidelines: ReviewGuidelineLedger;
   /** 知识库 › 资料库 (Issue #427, S79c): the items an editor collected and the decisions about them. */
   readonly #libraryMaterials: LibraryMaterialLedger;
+  /** 资料索引 (Issue #428, S80a; KB-009): each 资料库 item's Material Index, built here in the background, one at a time. */
+  readonly #materialIndex: MaterialIndexLedger;
+  /** The items waiting for their index, in arrival order, and the one being built now. */
+  readonly #indexQueue: string[] = [];
+  #indexing: string | null = null;
+  #indexController: AbortController | null = null;
+  #indexRun: Promise<void> | null = null;
+  #indexStopped = false;
+  /** Set once the service serves (`startMaterialIndexing`): a store opened for any other purpose builds no index by itself. */
+  #indexEnabled = false;
   readonly #learningEligibility: LearningEligibilityLedger;
   readonly #evaluationCalibration: EvaluationCalibrationLedger;
   readonly #series: SeriesLedger;
@@ -4266,7 +4297,10 @@ export class EditorialStore {
     this.#manuscriptApply = new ManuscriptApplyStore(authority, boundedAuthority, this.#editorialMarks, lifetimeId);
     // 知识库 › 审阅规范文件 (Issue #427, S79a): a Review Run prepared now applies each guideline document at its latest version.
     this.#reviewGuidelines = new ReviewGuidelineLedger(authority);
-    this.#libraryMaterials = new LibraryMaterialLedger(authority, dataRoot);
+    this.#materialIndex = new MaterialIndexLedger(authority);
+    this.#libraryMaterials = new LibraryMaterialLedger(authority, dataRoot, (material) =>
+      this.#materialIndex.projection({ materialId: material.materialId, sha256: material.sha256, format: material.source.format },
+        this.#indexing === material.materialId ? 'indexing' : 'queued'));
     this.#learningEligibility = new LearningEligibilityLedger(authority);
     this.#evaluationCalibration = new EvaluationCalibrationLedger(authority);
     this.#series = new SeriesLedger(authority);
@@ -4276,13 +4310,13 @@ export class EditorialStore {
     this.#dialogueHistory = harnessHistoryReader(join(dataRoot, HARNESS_SESSION_LOG_DIRECTORY));
     this.#dataVersions = new DataVersionLedger(authority);
     this.#databaseExports = new DatabaseExports(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: MATERIAL_INDEX_SCHEMA_VERSION }),
     });
     this.#scheduledBackups = new ScheduledBackups(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: MATERIAL_INDEX_SCHEMA_VERSION }),
     });
     this.#databaseReplacements = new DatabaseReplacements(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: MATERIAL_INDEX_SCHEMA_VERSION }),
       // A package's data opens as a store of its own, with no launch control: brought to this revision and checked whole.
       openPackage: async (root) => {
         const opened = await EditorialStore.open(root, this.#codeRoot, {
@@ -4456,7 +4490,7 @@ export class EditorialStore {
       // the backup location before anything migrates it, and a backup that cannot be made opens nothing.
       const classes = control.schemaRevisionClasses ?? SCHEMA_REVISION_CLASSES;
       const { upgrade, earlier } = await backUpBeforeUpgrade(authority, dataRoot, {
-        terminalRevision: BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
+        terminalRevision: MATERIAL_INDEX_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
       }).catch((error: unknown) => {
         if (error instanceof DataVersionError) throw new StoreError(error.code, error.message);
         throw error;
@@ -4560,6 +4594,8 @@ export class EditorialStore {
       // Revision 66 (Issue #95, S39): each Book's 后台分析登记; `initializeTaskAuthorizationSchema` widens the Run Authorizations'
       // origin for it and stamps the version.
       initializeBackgroundAnalysisEnrollmentSchema(authority);
+      // Revision 67 (Issue #428, S80a): each 资料库 item's Material Index build and the segments of a complete one.
+      initializeMaterialIndexSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -4601,13 +4637,15 @@ export class EditorialStore {
         store.#boundedCall(() => store.#boundedAuthority.isRecoveryObjectReferenced(relativeKey)));
       // What an interrupted 放入资料库 left beside the kept originals (Issue #427 review).
       await store.#libraryMaterials.sweep();
+      // A converted working copy an index build stopped mid-way left behind (Issue #428, S80a).
+      await sweepMaterialIndexWork(dataRoot);
       // A database package staged and never approved, or cut off mid-write, is a whole copy of the data (Issue #434 review).
       await store.#databaseExports.sweep(true);
       store.#boundedCall(() => store.#boundedAuthority.startServiceLifetime(lifetimeId, new Date().toISOString()));
       // Every store records the versions that open it (Issue #433, S85a; DSTO-016): a new record only when one changed.
       store.#softwareVersion = softwareVersion;
       store.#codeRoot = codeRoot;
-      store.#dataVersion = dataVersionAt(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, classes);
+      store.#dataVersion = dataVersionAt(MATERIAL_INDEX_SCHEMA_VERSION, classes);
       if (control.interruptUpgradeAt === 'before-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在记录版本之前停止。');
       // The open that raised the Data Version records the upgrade it made with the backup (S85b), and only then clears the note
       // that let an open stopped before this record it (Issue #433 review).
@@ -4615,7 +4653,7 @@ export class EditorialStore {
         // Upgrades other opens made and never recorded go first, oldest first, as those opens would have recorded them; one a
         // record already holds is not recorded again (Issue #433 review).
         for (const carried of earlier) store.#dataVersions.recordCarried(carried);
-        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, upgrade });
+        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: MATERIAL_INDEX_SCHEMA_VERSION, upgrade });
       }));
       if (control.interruptUpgradeAt === 'after-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在清除升级记录之前停止。');
       await completeUpgrade(dataRoot).catch(() => undefined);
@@ -6046,6 +6084,10 @@ export class EditorialStore {
   }
 
   close(): void {
+    // An index build under way stops at its next step and records nothing; the next open builds it again (Issue #428, S80a).
+    this.#indexStopped = true;
+    this.#indexQueue.length = 0;
+    this.#indexController?.abort();
     // A backup still under way stops at its next chunk rather than write on past the store (Issue #434 review).
     void this.#scheduledBackups.stop();
     // A database export still under way stops as 取消导出 stops it (Issue #434 review).
@@ -7605,8 +7647,121 @@ export class EditorialStore {
       throw error;
     }
     const materialId = this.#libraryCall(() => this.#transaction(this.#authority, () => this.#libraryMaterials.record(kept, input.title, input.kind)));
+    // Indexed on arrival (KB-007, KB-009), on this machine and in the background: the card says it waits until it is built.
+    this.#scheduleMaterialIndex([materialId]);
     // The one item it made: the page it joins is read again by the renderer's own paging, never re-sent whole.
     return this.inspectLibraryMaterial(materialId);
+  }
+
+  // ---- 资料索引 (Issue #428, plan slice S80a; editor-surfaces §8.4, V2-UX-KB-009, ATTN-009) ---------------------------------
+
+  /**
+   * Every item still without a Material Index by the current indexer, queued in arrival order: called once the service
+   * serves, so an item that arrived before this revision, came with a merged Book, or whose build a closing service stopped,
+   * is built now, and every later arrival as it arrives. Nothing is asked: indexing is automatic (editor-surfaces §0.3 少打扰).
+   */
+  startMaterialIndexing(): void {
+    if (this.#indexStopped) return;
+    this.#indexEnabled = true;
+    this.#scheduleMaterialIndex(this.#libraryCall(() => this.#materialIndex.unindexed()));
+  }
+
+  /** Resolves once the queue is empty: for a caller that must see the index built. */
+  async settleMaterialIndexing(): Promise<void> {
+    while (this.#indexRun !== null) await this.#indexRun;
+  }
+
+  #scheduleMaterialIndex(materialIds: ReadonlyArray<string>): void {
+    if (this.#indexStopped || !this.#indexEnabled) return;
+    for (const materialId of materialIds) {
+      if (this.#indexing !== materialId && !this.#indexQueue.includes(materialId)) this.#indexQueue.push(materialId);
+    }
+    if (this.#indexRun === null && this.#indexQueue.length > 0) {
+      this.#indexRun = this.#pumpMaterialIndex().finally(() => {
+        this.#indexRun = null;
+      });
+    }
+  }
+
+  /**
+   * One build after another: the original read outside any transaction, then the build and its segments written in one. An
+   * item already built is passed over; a replacement being prepared or waiting holds every write back until the next open,
+   * which builds what is still missing. A failure to read is itself a build — the card says why — and only a stop, or a
+   * store that can no longer write, leaves an item for the next open.
+   */
+  async #pumpMaterialIndex(): Promise<void> {
+    while (!this.#indexStopped && this.#indexQueue.length > 0) {
+      const materialId = this.#indexQueue.shift()!;
+      this.#indexing = materialId;
+      const controller = new AbortController();
+      this.#indexController = controller;
+      try {
+        if (this.#poisoned || this.replacementFrozen()) continue;
+        if (this.#materialIndex.current(materialId) !== null) continue;
+        const original: LibraryMaterialOriginal = this.#libraryMaterials.original(materialId);
+        const extraction = await extractMaterialText({
+          originalPath: resolve(this.#dataRoot, LIBRARY_OBJECT_DIRECTORY, ...original.objectKey.split('/')),
+          format: original.source.format,
+          displayName: original.source.displayName,
+          objectSha256: original.source.sha256,
+          bytes: original.source.bytes,
+          dataRoot: this.#dataRoot,
+          signal: controller.signal,
+        });
+        if (this.#indexStopped || this.#poisoned || this.replacementFrozen()) continue;
+        this.#transaction(this.#authority, () => {
+          if (this.#materialIndex.current(materialId) !== null) return;
+          this.#materialIndex.record({ materialId, sha256: original.sha256, format: original.source.format }, extraction);
+        });
+      } catch (error) {
+        // Stopped, refused, or its item changed meanwhile: nothing is recorded, and the next open tries again. A rollback that
+        // itself failed leaves the store unable to write, as every other write path treats it.
+        if (error instanceof AggregateError) this.#poisoned = true;
+      } finally {
+        this.#indexing = null;
+        this.#indexController = null;
+      }
+    }
+  }
+
+  #materialIndexCall<T>(operation: () => T): T {
+    return this.#libraryCall(() => {
+      try {
+        return operation();
+      } catch (error) {
+        if (error instanceof MaterialIndexError) throw new StoreError(error.code, error.message);
+        throw error;
+      }
+    });
+  }
+
+  /** 查看分段 (KB-009): one page of an item's indexed paragraphs and sentence anchors; read-only. */
+  inspectLibraryMaterialSegments(input: ServiceOperationMap['inspectLibraryMaterialSegments']['input']): ServiceOperationMap['inspectLibraryMaterialSegments']['output'] {
+    return this.#materialIndexCall(() => {
+      const original = this.#libraryMaterials.original(input.materialId);
+      return this.#materialIndex.page(input.materialId, original.title, input.from);
+    });
+  }
+
+  /**
+   * What a Task's plan freezes when it lists a 资料库 item under 允许参考 (KB-002, KB-007): the item and its exact index version,
+   * only for an item this Book's Tasks may list and whose text was read. Service-internal: no Task kind lists one yet.
+   */
+  pinMaterialReference(bookId: string, materialId: string): MaterialReferencePin {
+    return this.#materialIndexCall(() =>
+      this.#materialIndex.referencePin(materialId, bookId, (id, book) => this.#libraryMaterials.available(id, book)));
+  }
+
+  /**
+   * A Task's read of the Material Index (KB-009): read-only, within its plan boundary — the items its plan lists at the index
+   * versions it pinned, which this Book's Tasks may still list. Nothing is written, sent or scheduled by it; what the Task
+   * sends of what it read stays bounded by the plan's 发送 line. Service-internal: no Task kind lists 资料库 items yet.
+   */
+  readMaterialIndexForTask(boundary: MaterialReferenceBoundary, materialId: string, from: number): MaterialTaskReading {
+    return this.#materialIndexCall(() => {
+      const original = this.#libraryMaterials.original(materialId);
+      return this.#materialIndex.readForTask(boundary, materialId, original.title, from, (id, book) => this.#libraryMaterials.available(id, book));
+    });
   }
 
   /** 定归属 or 定学习准入 (KB-007, LEARN-007): one decision appended to the item's chain, and the item as it now reads. */
@@ -16118,6 +16273,20 @@ export class EditorialStore {
    * A read (V2-UX-ATTN-008): nothing is written, claimed or terminalized, and every list is bounded so the
    * answer fits one frame.
    */
+  /**
+   * 索引完成 (Issue #428, S80a; ATTN-009): the Material Indexes built within the recent window, each named with its item and where
+   * the item belongs now.
+   */
+  #materialIndexAttention(since: string, limit: number): MaterialIndexAttentionReading[] {
+    return this.#materialIndex.completions(since, limit).map((completion) => {
+      const place = this.#libraryMaterials.place(completion.materialId);
+      return {
+        materialId: completion.materialId, indexId: completion.indexId, title: place.title, kind: place.kind, scope: place.scope,
+        book: place.book, outcome: completion.state, recordedAt: completion.recordedAt, indexSha256: completion.sha256,
+      };
+    });
+  }
+
   inspectGlobalAttention(progress: ProgressReader, busy: boolean, waitingFor: WaitingFor = 'admitting', now: Date = new Date()): GlobalAttentionProjection {
     return this.#reviewCall(() => {
       const since = recentWindowStart(now);
@@ -16136,12 +16305,14 @@ export class EditorialStore {
           maintenance: this.#maintenanceCases.attentionReadings(limit),
           libraryMaterials: this.#libraryMaterials.attentionReadings(limit),
           learningMaterials: this.#learningAttention(limit),
+          materialIndexes: this.#materialIndexAttention(since, limit),
           busy,
           waitingFor,
         }, now);
       } catch (error) {
         if (error instanceof GlobalAttentionError || error instanceof MaintenanceCaseError || error instanceof LibraryMaterialError ||
-            error instanceof LearningEligibilityError || error instanceof DecisionFeedbackError || error instanceof AnalysisFeedbackError) {
+            error instanceof LearningEligibilityError || error instanceof DecisionFeedbackError || error instanceof AnalysisFeedbackError ||
+            error instanceof MaterialIndexError) {
           throw new StoreError(error.code, error.message);
         }
         throw error;
