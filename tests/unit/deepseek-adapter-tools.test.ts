@@ -8,7 +8,7 @@ import { CredentialBroker } from '../../src/service/provider/credential-broker.j
 import {
   DEEPSEEK_ROUTE_PROFILE,
   DeepSeekOpenAiCompatibleAdapter,
-  OPENCODE_GO_MESSAGES_ROUTE_PROFILE,
+  PROVIDER_ROUTE_PROFILES,
   OPENCODE_GO_ROUTE_PROFILE,
   assembleProviderRequest,
   parseProviderResponse,
@@ -74,8 +74,8 @@ describe('request assembly with tools', () => {
     expect(() => assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE, payload(OPENCODE_GO_ROUTE, OPENCODE_GO_MODEL, { messages: LOOP }), context))
       .toThrowError('DEEPSEEK_REQUEST_NON_TEXT_CONTENT');
     // A shape other than chat completions spells no function tool, whatever its model declares.
-    const messagesModel = Object.values(PROVIDER_MODEL_PROFILES).find((profile) => profile.capabilities.requestShape === 'anthropic-messages')!;
-    expect(() => assembleProviderRequest(OPENCODE_GO_MESSAGES_ROUTE_PROFILE, messagesModel, payload(messagesModel.route, messagesModel.model, { tools: tools() }), context))
+    const messagesModel = Object.values(PROVIDER_MODEL_PROFILES).find((profile) => profile.route === 'opencode-go-messages')!;
+    expect(() => assembleProviderRequest(PROVIDER_ROUTE_PROFILES['opencode-go-messages'], messagesModel, payload(messagesModel.route, messagesModel.model, { tools: tools() }), context))
       .toThrowError('PROVIDER_TOOL_CALLING_UNSUPPORTED');
   });
 

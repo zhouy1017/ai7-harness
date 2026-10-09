@@ -32,7 +32,7 @@ import { BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, crossUnitRequestDigest, par
 import { runReportUsageReconciles } from '../../src/service/analysis/run-report.js';
 import { PLAN_CEILING_LAUNCH_REASON } from '../../src/service/analysis/plan-edits.js';
 import {
-  OPENCODE_GO_ENDPOINT,
+  OPENCODE_GO_ROUTE_PROFILE,
   OPENCODE_GO_SESSION_HEADER,
   OPENCODE_GO_USER_AGENT,
 } from '../../src/service/provider/deepseek-adapter.js';
@@ -375,7 +375,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
       credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
       providerProcessing: { operationalScope: 'developer-live', version: 'v5', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
     });
-    expect(provider.executionRoute).toEqual({ kind: 'opencode-go', model: 'deepseek-v4-flash', endpoint: OPENCODE_GO_ENDPOINT });
+    expect(provider.executionRoute).toEqual({ kind: 'opencode-go', model: 'deepseek-v4-flash', endpoint: OPENCODE_GO_ROUTE_PROFILE.endpoint });
     expect(provider.runBudgetCeiling).toEqual(CEILING);
     expect(settled.planEnvelope!.providerStatus).toBe('remote-eligible-developer-live');
     expect(settled.planEnvelope!.dispatchAllowed).toBe(true);
@@ -384,7 +384,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     // topic-section turn, the sample's one anchor-unit turn, and the one report reflection turn.
     expect(calls).toHaveLength(FULL_CHAIN_TURNS);
     for (const call of calls) {
-      expect(call.url).toBe(OPENCODE_GO_ENDPOINT);
+      expect(call.url).toBe('https://opencode.ai/zen/go/v1/chat/completions');
       expect(call.headers.authorization).toBe('Bearer placeholder-development-key');
       expect(call.headers['user-agent']).toBe(OPENCODE_GO_USER_AGENT);
       expect(call.headers[OPENCODE_GO_SESSION_HEADER]).toMatch(/^[0-9a-f-]{36}$/u);

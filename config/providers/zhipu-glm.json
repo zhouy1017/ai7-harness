@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "providerId": "zhipu-glm",
+  "displayName": "智谱 GLM",
+  "credential": {
+    "slot": "zhipu-glm",
+    "developmentCredentialReference": "1bfa4e14-ce91-4666-bc69-eb72709379f0",
+    "headerForm": "authorization-bearer",
+    "anthropicVersion": null,
+    "headerEvidence": "bigmodel-docs"
+  },
+  "evidence": {
+    "bigmodel-docs": {
+      "kind": "vendor-documentation",
+      "source": "Zhipu documentation, docs.bigmodel.cn and docs.z.ai — OpenAI chat protocol, models",
+      "readOn": "2026-09-10",
+      "note": "China `https://open.bigmodel.cn/api/paas/v4` (the OpenAI chat protocol), `Authorization: Bearer`; `glm-5.3` (「支持 1M 上下文窗口」), `glm-5.3-flash` (1M), `glm-5.2` (1M), `glm-4.6` (200K) (ADR 0080 §3)."
+    },
+    "bigmodel-search-docs": {
+      "kind": "vendor-documentation",
+      "source": "Zhipu documentation, web search tool on chat completions, docs.bigmodel.cn",
+      "readOn": "2026-09-10",
+      "note": "A chat-completions tool `\"type\": \"web_search\"` with `search_engine`, `count` 1–50 and recency filters; no model allowlist is printed and the page names no model restriction, so the tool is read as route-wide, every model on the route."
+    },
+    "unverified": { "kind": "unverified" }
+  },
+  "routes": [
+    {
+      "routeId": "zhipu-glm",
+      "displayName": "智谱 GLM · Chat Completions",
+      "endpoint": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+      "requestShape": "openai-chat-completions",
+      "requestShapeEvidence": "bigmodel-docs",
+      "limitPolicy": "rate-limit-retryable",
+      "limitPolicyEvidence": "unverified",
+      "dshAttribution": false,
+      "dshAttributionEvidence": "unverified",
+      "sessionHeader": false,
+      "sessionHeaderEvidence": "unverified",
+      "maxOutputTokens": null,
+      "routeCapabilities": {
+        "webSearchTool": { "value": "provider-tool", "evidence": "bigmodel-search-docs" }
+      },
+      "models": [
+        { "modelId": "glm-5.3", "displayName": "GLM-5.3", "context": { "tokens": 1000000, "evidence": "bigmodel-docs" } },
+        { "modelId": "glm-5.3-flash", "displayName": "GLM-5.3-Flash", "context": { "tokens": 1000000, "evidence": "bigmodel-docs" } },
+        { "modelId": "glm-5.2", "displayName": "GLM-5.2", "context": { "tokens": 1000000, "evidence": "bigmodel-docs" } },
+        { "modelId": "glm-4.6", "displayName": "GLM-4.6", "context": { "tokens": 200000, "evidence": "bigmodel-docs" } }
+      ]
+    }
+  ],
+  "openQuestions": [
+    "The limit reading is not established: no page read states the shape of this endpoint's rate-limit or account-limit response, so a 429 is read as a retryable rate limit (`rate-limit-retryable`, `unverified`) until a page or a named live item says otherwise.",
+    "The international host `https://api.z.ai/api/paas/v4/` serves the same protocol; which region the house binds is the Owner's decision with the first live item.",
+    "Structured output is `text` and `json_object` only (`json_schema` is absent from the reference) and stays absent until a live item establishes it on this route."
+  ]
+}

@@ -1,0 +1,194 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AI7 provider configuration, version 1 (ADR 0073 §2)",
+  "description": "One Model Provider configured by declaring the request shape its endpoint speaks. A document is a claim about the request shape and nothing else (ADR 0073 §3): it authorizes no transmission, binds no Model Role, and enrolls no credential. tools/generate-provider-configuration.mjs validates every document against this schema and against the semantic rules it states, then generates the route and model profiles, the closed unions and the credential slot sets.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "providerId", "displayName", "credential", "evidence", "routes", "openQuestions"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "providerId": {
+      "description": "The provider's id; it is the file's base name and the id of its first route.",
+      "$ref": "#/definitions/identifier"
+    },
+    "displayName": {
+      "description": "The provider's name as the editor reads it beside a model id in a plan.",
+      "$ref": "#/definitions/label"
+    },
+    "credential": { "$ref": "#/definitions/credential" },
+    "evidence": {
+      "description": "Every evidence record the document cites, by key. A capability, a header form or a context size names one of these keys; every key is cited at least once.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/evidenceRecord" }
+    },
+    "routes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/route" }
+    },
+    "openQuestions": {
+      "description": "What the reading left unresolved, recorded rather than assumed.",
+      "type": "array",
+      "items": { "$ref": "#/definitions/prose" }
+    },
+    "notes": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/prose" }
+    }
+  },
+  "definitions": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "modelId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "label": {
+      "type": "string",
+      "pattern": "^\\S(.*\\S)?$"
+    },
+    "prose": {
+      "type": "string",
+      "pattern": "^\\S[\\s\\S]*\\S$"
+    },
+    "evidenceKey": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "day": {
+      "type": "string",
+      "pattern": "^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"
+    },
+    "evidenceRecord": {
+      "description": "How one value was established. vendor-documentation names the page and the day it was read; live-test-item names the ADR 0067 items and the day observed; frozen-request-baseline names what the request bytes have been pinned by since; unverified is the honest record behind an absent value. Which fields each kind carries is checked by the generator.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["vendor-documentation", "live-test-item", "frozen-request-baseline", "unverified"] },
+        "source": { "$ref": "#/definitions/label" },
+        "readOn": { "$ref": "#/definitions/day" },
+        "itemIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9/._-]*$" }
+        },
+        "observedOn": { "$ref": "#/definitions/day" },
+        "since": { "$ref": "#/definitions/label" },
+        "note": { "$ref": "#/definitions/prose" }
+      }
+    },
+    "credential": {
+      "description": "The provider's one credential slot (ADR 0073 §4): the slot id, the development Credential Reference the enrollment helper writes under, and the header form the vendor documents. No value is ever here.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slot", "developmentCredentialReference", "headerForm", "anthropicVersion", "headerEvidence"],
+      "properties": {
+        "slot": { "$ref": "#/definitions/identifier" },
+        "developmentCredentialReference": {
+          "description": "The Protected Secret Store entry the enrollment helper writes under on a developer host, or null where no development reference is read by anything (the production connection's slot, whose reference is per connection row). A reference is a place for a key, never a permission to enrol one: only `opencode-go` enrolment is authorized (ADR 0067).",
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "headerForm": { "enum": ["authorization-bearer", "x-api-key", "x-goog-api-key"] },
+        "anthropicVersion": {
+          "description": "The anthropic-version header value the x-api-key form travels with; null for every other form.",
+          "type": ["string", "null"]
+        },
+        "headerEvidence": { "$ref": "#/definitions/evidenceKey" }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "evidence"],
+      "properties": {
+        "value": { "type": "string" },
+        "evidence": { "$ref": "#/definitions/evidenceKey" }
+      }
+    },
+    "capabilities": {
+      "description": "Declared capabilities; one that is not declared is absent with unverified evidence (ADR 0073 §3, Issue #310). Allowed values are checked by the generator against the adapter's closed unions.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requestShape": { "$ref": "#/definitions/capability" },
+        "reasoningControl": { "$ref": "#/definitions/capability" },
+        "structuredOutput": { "$ref": "#/definitions/capability" },
+        "answerChannel": { "$ref": "#/definitions/capability" },
+        "reasoningChannel": { "$ref": "#/definitions/capability" },
+        "usageAttribution": { "$ref": "#/definitions/capability" },
+        "toolCalling": { "$ref": "#/definitions/capability" },
+        "webSearchTool": { "$ref": "#/definitions/capability" }
+      }
+    },
+    "context": {
+      "description": "The context size the vendor page states, in tokens (an input limit where the page states one separately); null where no page read states one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tokens", "evidence"],
+      "properties": {
+        "tokens": { "type": ["integer", "null"], "minimum": 1 },
+        "evidence": { "$ref": "#/definitions/evidenceKey" }
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["modelId", "displayName", "context"],
+      "properties": {
+        "modelId": { "$ref": "#/definitions/modelId" },
+        "displayName": { "$ref": "#/definitions/label" },
+        "capabilities": { "$ref": "#/definitions/capabilities" },
+        "context": { "$ref": "#/definitions/context" },
+        "note": { "$ref": "#/definitions/prose" }
+      }
+    },
+    "route": {
+      "description": "One endpoint and the one request shape it speaks. A provider reached over several paths (a gateway) declares one route per path, all on the provider's one credential slot.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["routeId", "displayName", "endpoint", "requestShape", "requestShapeEvidence", "limitPolicy", "limitPolicyEvidence", "dshAttribution", "dshAttributionEvidence", "sessionHeader", "sessionHeaderEvidence", "maxOutputTokens", "models"],
+      "properties": {
+        "routeId": { "$ref": "#/definitions/identifier" },
+        "displayName": { "$ref": "#/definitions/label" },
+        "endpoint": {
+          "type": "string",
+          "description": "https only, no port, userinfo, query or fragment; the host is DNS labels joined by dots, at least two, the last beginning with a letter (so no IP literal and no dotless host). The generator also refuses local and internal names.",
+          "pattern": "^https://([a-z0-9]([a-z0-9-]*[a-z0-9])?\\.)+[a-z]([a-z0-9-]*[a-z0-9])?(/[A-Za-z0-9._~-]+)*/?$"
+        },
+        "requestShape": { "enum": ["openai-chat-completions", "anthropic-messages", "openai-responses", "google-generate-content"] },
+        "requestShapeEvidence": { "$ref": "#/definitions/evidenceKey" },
+        "limitPolicy": { "enum": ["rate-limit-retryable", "account-limit-terminal"] },
+        "limitPolicyEvidence": {
+          "description": "How the limit reading was established; `unverified` where no page states the endpoint's limit shape, recorded as such on the support page.",
+          "$ref": "#/definitions/evidenceKey"
+        },
+        "dshAttribution": { "type": "boolean" },
+        "dshAttributionEvidence": {
+          "description": "Why the route does or does not send the DSH attribution headers; true only on the production route, on its frozen request baseline.",
+          "$ref": "#/definitions/evidenceKey"
+        },
+        "sessionHeader": { "type": "boolean" },
+        "sessionHeaderEvidence": {
+          "description": "The page that documents the OpenCode session header; true only on an OpenCode gateway route, until the header name is configuration (#452).",
+          "$ref": "#/definitions/evidenceKey"
+        },
+        "maxOutputTokens": { "type": ["integer", "null"], "minimum": 1 },
+        "routeCapabilities": {
+          "description": "Capabilities declared for every model on the route; a model's own declaration of the same capability replaces it.",
+          "$ref": "#/definitions/capabilities"
+        },
+        "models": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/model" }
+        },
+        "note": { "$ref": "#/definitions/prose" }
+      }
+    }
+  }
+}
