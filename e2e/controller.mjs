@@ -986,6 +986,9 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'writing-sheet',
     'writing-plan',
     'writing-run',
+    // Issue #432 (S84b): the writing rule set from the settled plan, and a 快速开始 of the 宣传文章 that starts under it.
+    'writing-rule',
+    'writing-quick-start',
     'writing-draft',
     'writing-card',
     'zero-loopback-requests',

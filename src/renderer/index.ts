@@ -2395,7 +2395,7 @@ function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { 
     openReview: () => renderBookReview(bookId, bookTitle),
     // 新建文档 · 写作任务 (Issue #432, S84a): its preparation job, and its plan in the Task Drawer beside 交付物.
     awaitServiceJob,
-    openWritingPlan: (ref) => openTaskPlan(bookId, 'writing', ref),
+    openWritingPlan: (ref, note) => openTaskPlan(bookId, 'writing', ref, note),
   });
   const actions = element('div', 'button-row workbench-actions');
   const openManuscript = button(DELIVERABLES_DESTINATION_ACTIONS[0], 'primary', async () => {

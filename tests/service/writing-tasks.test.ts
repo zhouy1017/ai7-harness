@@ -13,7 +13,8 @@ import {
   EVALUATION_REWRITE_SCHEMA_VERSION,
   WRITING_TASK_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
-import { WRITING_EXEMPLAR_GONE_LABEL, WRITING_EXEMPLAR_GONE_SUFFIX, WRITING_NOT_DRAFTED_LABEL, WRITING_NO_RULE } from '../../src/service/task-plan.js';
+import { WRITING_EXEMPLAR_GONE_LABEL, WRITING_EXEMPLAR_GONE_SUFFIX, WRITING_NOT_DRAFTED_LABEL } from '../../src/service/task-plan.js';
+import { quickStartNoRuleReason } from '../../src/service/default-execution-rules.js';
 import { WRITING_EXEMPLAR_MOVED, WRITING_TASK_TRIGGER_SQL, writingDraftBlocks } from '../../src/service/writing-tasks.js';
 import { WRITING_EXEMPLAR_REFUSAL_PREFIX } from '../../src/service/writing/writing-kind.js';
 import {
@@ -22,7 +23,6 @@ import {
   WRITING_CONTRACT_VERSION,
   WRITING_KIND,
   WRITING_LIVE_UNAVAILABLE,
-  WRITING_QUICK_START_REASON,
   type LaunchPolicyProjection,
   type WritingProjection,
 } from '../../src/shared/protocol.js';
@@ -159,7 +159,7 @@ describe('写作任务 over the real store on exact sample1', () => {
         // 会发送 as S84a is: a writing Task runs only where nothing is sent.
         consequences: { read: '当前稿件的全部 97 个内容块，以及上面列出的参考材料', send: '不发送任何内容：写作任务目前只在不连接模型服务的运行范围内起草。', cost: '先看计划后显示' },
         task: null,
-        quickStart: { allowed: false, reason: WRITING_QUICK_START_REASON },
+        quickStart: { available: false, reason: quickStartNoRuleReason('writing'), rule: null },
       });
       expect(page.types.map((type) => [type.label, type.prepare, type.exemplars.statement, type.drafted])).toEqual(TYPE_LABELS.map((label) => [
         label, { allowed: true, mode: 'writing-first' }, `本社暂无其他图书的${label}范例，本次不参考范例`, null,
@@ -181,7 +181,7 @@ describe('写作任务 over the real store on exact sample1', () => {
       expect(plan.steps.map((step) => step.label)).toEqual(['逐章读取，找出文档可以取用的看点、人物与主题', '依据参考材料写出「宣传文章」']);
       expect(plan.notDo.editorial).toContain('不照抄范例：与范例有连续 12 个字以上相同的草稿不予采用');
       expect(plan.start.readiness).toBe('ready');
-      expect(plan.defaultRule).toMatchObject({ reason: WRITING_NO_RULE });
+      expect(plan.defaultRule).toMatchObject({ canSet: true, reason: null, planEnvelopeDigest: prepared.planEnvelope!.digest, current: null, startedBy: null });
       expect(store.inspectWritingTask(bookId).task).toMatchObject({ taskIntentId: prepared.taskIntent!.taskIntentId, typeId: 'promotion-article', typeLabel: '宣传文章', state: 'prepared' });
 
       // 开始任务: the Run reads the eight ranges and writes the draft.

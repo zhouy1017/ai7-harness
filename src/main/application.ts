@@ -3226,6 +3226,28 @@ function registerRendererHandlers(
       });
     }),
   );
+  // 快速开始 of a writing Task (Issue #432, S84b): the Task just prepared within the route's Book, its exact plan and the rule
+  // version the editor started under; the answer must be that Book's.
+  ipcMain.handle(IPC_CHANNELS.quickStartWritingTask, (event, input: Parameters<RendererApi['quickStartWritingTask']>[0]) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        const result = await service.call('quickStartWritingTask', {
+          bookId: route.bookId,
+          taskIntentId: input.taskIntentId,
+          planEnvelopeDigest: input.planEnvelopeDigest,
+          ruleVersionId: input.ruleVersionId,
+        });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        if (result.projection.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '快速开始的结果不属于当前图书工作台。');
+        return result;
+      });
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.createWritingDraft, (event, input: Parameters<RendererApi['createWritingDraft']>[0]) =>
     envelope(async () => {
       const owned = requireSender(event);

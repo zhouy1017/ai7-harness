@@ -113,6 +113,7 @@ import {
   taskPlanDefaultRuleCurrent,
   taskPlanDefaultRuleSet,
   taskPlanQuickStartFellBack,
+  taskPlanDefaultRuleLead,
   taskPlanQuickStarted,
   taskPlanSavedLine,
   taskPlanSummaryLine,
@@ -301,6 +302,9 @@ describe('精简 and 完整 (D6)', () => {
   it('says what setting the quick-start default means, and what quick start did', () => {
     expect(TASK_PLAN_DEFAULT_RULE_HEADING).toBe('设为快速开始默认');
     expect(TASK_PLAN_DEFAULT_RULE_LEAD).toBe('以后用快速开始更新这本书的分析时，AI7 会先准备计划：计划与下面这些一致时直接开始，不再停下来等你确认；有任何不同都会停在计划上，等你看过再开始。规则不会自己开始任何任务。');
+    // A writing plan's (S84b): the rule covers every 新建文档 of the Book.
+    expect(taskPlanDefaultRuleLead('writing')).toBe('以后在「交付物」的新建文档里用快速开始起草这本书的文档时，AI7 会先按你选的类型和写的受众、渠道准备计划：计划与下面这些一致时直接开始，不再停下来等你确认；有任何不同都会停在计划上，等你看过再开始。规则不会自己开始任何任务。');
+    expect(taskPlanDefaultRuleLead('baseline-analysis')).toBe(TASK_PLAN_DEFAULT_RULE_LEAD);
     expect([TASK_PLAN_DEFAULT_RULE_CONFIRM, TASK_PLAN_DEFAULT_RULE_CANCEL, TASK_PLAN_DEFAULT_RULE_FAILED]).toEqual(['设为默认', '取消', '无法设为快速开始默认。']);
     expect(taskPlanDefaultRuleSet('开始同步 · 第 1 版')).toBe('已设为快速开始默认：开始同步 · 第 1 版');
     const current = { ruleId: 'r', ruleVersionId: 'v', ordinal: 2, name: '开始同步 · 第 2 版' };

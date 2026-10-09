@@ -673,8 +673,10 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
-    // 快速开始 (Issue #421): the Task just prepared, its exact plan, and the rule version the editor started under.
-    case 'quickStartBaselineAnalysis': {
+    // 快速开始 (Issue #421): the Task just prepared, its exact plan, and the rule version the editor started under — of the
+    // baseline's updates, or (Issue #432, S84b) of a writing Task.
+    case 'quickStartBaselineAnalysis':
+    case 'quickStartWritingTask': {
       const input = requireInput(value.input, ['bookId', 'taskIntentId', 'planEnvelopeDigest', 'ruleVersionId'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.taskIntentId) || !validUuid(input.ruleVersionId) ||
           !isBoundedString(input.planEnvelopeDigest, 64) || !HEX_DIGEST_PATTERN.test(input.planEnvelopeDigest)) {

@@ -292,9 +292,9 @@ import {
   MAX_WRITING_AUDIENCE_GRAPHEMES,
   MAX_WRITING_CHANNEL_GRAPHEMES,
   MAX_WRITING_REQUIREMENTS_GRAPHEMES,
+  WRITING_KIND,
   WRITING_LIVE_UNAVAILABLE,
   WRITING_MODE_GOALS,
-  WRITING_QUICK_START_REASON,
 } from '../shared/protocol.js';
 import { INITIAL_EVALUATION_LIVE_UNAVAILABLE, initialEvaluationKindDefinition } from './evaluation/initial-evaluation-kind.js';
 import { readersReportKindDefinition } from './evaluation/readers-report-kind.js';
@@ -462,6 +462,8 @@ import {
 import { ExportLedgerError, ManuscriptExportStore, initializeExportLedgerSchema } from './manuscript-export.js';
 import {
   DEFAULT_EXECUTION_RULES_STATEMENT,
+  DEFAULT_EXECUTION_RULE_KINDS,
+  DEFAULT_EXECUTION_RULE_PROCEDURES,
   DefaultExecutionRuleError,
   DefaultExecutionRuleLedger,
   QUICK_START_DEVELOPER_LIVE,
@@ -4958,7 +4960,8 @@ export class EditorialStore {
       requireStore(latest !== null && projection !== null && projection.taskIntent !== null && checkpoint !== null, 'TASK_PLAN_UNAVAILABLE', '写作任务还没有准备计划。');
       current(projection.taskIntent.taskIntentId);
       const blocks = this.#analysisCall(() => latest.ledger.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
-      const plan = this.#taskPlanCall(() => writingPlan({ projection, bookTitle, blocks, input: latest.task.input, exemplarsHere: latest.task.exemplarsReadable }));
+      const defaultRule = this.#writingDefaultRule(projection, latest.task);
+      const plan = this.#taskPlanCall(() => writingPlan({ projection, bookTitle, blocks, input: latest.task.input, exemplarsHere: latest.task.exemplarsReadable, defaultRule }));
       return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     if (input.kind === 'initial-evaluation') {
@@ -5311,39 +5314,69 @@ export class EditorialStore {
     const envelope = projection.planEnvelope;
     const version = projection.planVersion;
     if (intent === null || envelope === null || version === null) return noDefaultRule(QUICK_START_NOT_READY);
-    const authorization = projection.authorization;
-    let startedBy: DefaultExecutionRuleReference | null = null;
-    if (authorization !== null && authorization.origin === 'default-execution-rule' && authorization.ruleVersionId !== null) {
-      const ruleVersionId = authorization.ruleVersionId;
-      const found = this.#ruleCall(() => this.#rules.version(ruleVersionId));
-      requireStore(found !== null && found.rule.bookId === projection.bookId, 'ANALYSIS_RECORD_INVALID', '运行授权指向的默认执行规则不存在。');
-      startedBy = defaultExecutionRuleReference(found.rule, found.version);
-    }
+    const startedBy = this.#ruleStartedBy(projection.bookId, 'baseline-analysis', projection.authorization);
     const pattern = intent.mode;
     if (!isDefaultExecutionRulePattern(pattern)) {
       return { ...noDefaultRule(pattern === 'first-baseline' ? SET_RULE_FIRST_BASELINE : SET_RULE_RANGE), startedBy };
     }
-    const rule = this.#ruleCall(() => this.#rules.forPattern(projection.bookId, pattern));
+    return this.#ruleOffer(projection.bookId, pattern, { planEnvelope: envelope, planVersion: version, planRevision: projection.planRevision }, null, startedBy);
+  }
+
+  /** The rule version 快速开始 started a Task under, read from its authorization; `null` for a Task started from its plan. */
+  #ruleStartedBy(
+    bookId: string,
+    kind: DefaultExecutionRuleRecord['taskKind'],
+    authorization: BaselineAnalysisProjection['authorization'],
+  ): DefaultExecutionRuleReference | null {
+    if (authorization === null || authorization.origin !== 'default-execution-rule' || authorization.ruleVersionId === null) return null;
+    const ruleVersionId = authorization.ruleVersionId;
+    const found = this.#ruleCall(() => this.#rules.version(ruleVersionId));
+    // The rule a Task names is its own Book's, and of its own kind.
+    requireStore(found !== null && found.rule.bookId === bookId && found.rule.taskKind === kind, 'ANALYSIS_RECORD_INVALID', '运行授权指向的默认执行规则不存在。');
+    return defaultExecutionRuleReference(found.rule, found.version);
+  }
+
+  /**
+   * `设为快速开始默认…` on one frozen plan of a pattern a rule may cover (AUTH-009, TASK-019), shared by the baseline's whole-Book
+   * updates and the writing Task (S84b): the Book's rule of the pattern named beside it, and why the plan cannot set it — the
+   * kind's own reason first, then developer-live, a changed plan, the editor's ceiling or edits, or that it set the rule in force.
+   */
+  #ruleOffer(
+    bookId: string,
+    pattern: DefaultExecutionRulePattern,
+    plan: {
+      planEnvelope: NonNullable<BaselineAnalysisProjection['planEnvelope']>;
+      planVersion: NonNullable<BaselineAnalysisProjection['planVersion']>;
+      planRevision: BaselineAnalysisProjection['planRevision'];
+    },
+    kindReason: string | null,
+    startedBy: DefaultExecutionRuleReference | null,
+  ): TaskPlanDefaultRuleProjection {
+    const envelope = plan.planEnvelope;
+    const version = plan.planVersion;
+    const rule = this.#ruleCall(() => this.#rules.forPattern(bookId, pattern));
     const current = rule === null ? null : {
       ...defaultExecutionRuleReference(rule, rule.version),
       state: rule.state,
       fromThisPlan: rule.version.sourcePlanEnvelopeDigest === envelope.digest,
     };
-    const reason = envelope.providerStatus === 'remote-eligible-developer-live'
-      ? SET_RULE_DEVELOPER_LIVE
-      : projection.planRevision !== null
-        ? SET_RULE_CHANGED
-        : version.edits.runBudgetCeiling !== undefined
-          ? SET_RULE_BUDGET
-          : version.edits.removedSteps.length > 0 || version.edits.disallowedAdaptations.length > 0 || (version.edits.askFirstAdaptations ?? []).length > 0
-            ? SET_RULE_EDITED
-          : current !== null && current.state === 'active' && current.fromThisPlan ? setRuleAlreadyReason(current.name) : null;
+    const reason = kindReason !== null
+      ? kindReason
+      : envelope.providerStatus === 'remote-eligible-developer-live'
+        ? SET_RULE_DEVELOPER_LIVE
+        : plan.planRevision !== null
+          ? SET_RULE_CHANGED
+          : version.edits.runBudgetCeiling !== undefined
+            ? SET_RULE_BUDGET
+            : version.edits.removedSteps.length > 0 || version.edits.disallowedAdaptations.length > 0 || (version.edits.askFirstAdaptations ?? []).length > 0
+              ? SET_RULE_EDITED
+            : current !== null && current.state === 'active' && current.fromThisPlan ? setRuleAlreadyReason(current.name) : null;
     return {
       canSet: reason === null,
       reason,
       planEnvelopeDigest: reason === null ? envelope.digest : null,
       current,
-      binds: defaultRuleBindingRows(defaultExecutionRuleBindingOf(version.materialInputs)),
+      binds: defaultRuleBindingRows(defaultExecutionRuleBindingOf(version.materialInputs), DEFAULT_EXECUTION_RULE_PROCEDURES[DEFAULT_EXECUTION_RULE_KINDS[pattern]]),
       startedBy,
     };
   }
@@ -5356,6 +5389,10 @@ export class EditorialStore {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest),
       'DEFAULT_EXECUTION_RULE_INVALID', '默认执行规则的参数无效。');
+    // The plan on show is a writing Task's (S84b) when its Task is of that kind; every other plan is the baseline's, as before.
+    const intentKind = this.#authority.prepare('SELECT kind FROM analysis_task_intents WHERE task_intent_id = ? AND book_id = ?')
+      .get(taskIntentId, bookId) as SqlRow | undefined;
+    if (intentKind?.kind === WRITING_KIND) return this.#setWritingDefaultRule(bookId, taskIntentId, planEnvelopeDigest);
     const projection = this.#analysisCall(() => this.#baselineAnalysis.inspect(bookId)) as BaselineAnalysisProjection;
     const intent = projection.taskIntent;
     const version = projection.planVersion;
@@ -5460,7 +5497,7 @@ export class EditorialStore {
       state: record.state,
       stateLabel: RULE_STATE_LABELS[record.state],
       does: defaultExecutionRuleDoes(record.pattern),
-      binds: defaultRuleBindingRows(record.version.binding),
+      binds: defaultRuleBindingRows(record.version.binding, DEFAULT_EXECUTION_RULE_PROCEDURES[record.taskKind]),
       setBy: '本机编辑',
       setAt: record.version.createdAt,
       stateRecordedAt: record.stateRecordedAt,
@@ -7873,7 +7910,8 @@ export class EditorialStore {
   /**
    * 新建文档 · 写作任务 on ⑥ 交付物 (DELIV-007): what every draft references — each part said as it stands, or that the Book has
    * none — the four consequence rows, each house type with whether a writing Task may draft it now and its 范例, the newest
-   * drafted result not yet made a document, and the Book's latest writing Task. 快速开始 waits for a writing 默认执行规则 (S84b).
+   * drafted result not yet made a document, the Book's latest writing Task with the plan it froze, and whether 快速开始 starts
+   * one under the Book's writing 默认执行规则 (S84b), or why not.
    */
   inspectWritingTask(bookId: string): WritingTaskProjection {
     this.#assertAvailable();
@@ -7965,9 +8003,147 @@ export class EditorialStore {
         label: writingTaskStateLabel(latest.projection),
         // A Task not yet run whose exemplar is no longer here says it cannot start; one that ran says why it wrote no draft.
         refusal: !latest.task.exemplarsReadable && latest.projection.taskOutcome === null ? WRITING_EXEMPLAR_MOVED : this.#writingRefusal(latest.projection),
+        planEnvelopeDigest: latest.projection.planEnvelope?.digest ?? null,
       },
-      quickStart: { allowed: false, reason: WRITING_QUICK_START_REASON },
+      quickStart: this.#writingQuickStart(bookId, unavailable, latest, runState),
     };
+  }
+
+  // ---- 快速开始 of a writing Task under its 默认执行规则 (Issue #432, plan slice S84b; S75 D1–D9) ------------------------------
+
+  /**
+   * The drawer's `设为快速开始默认…` on a writing plan (AUTH-009, TASK-019; S84b), and the rule its Task was started under. One
+   * rule per Book covers every writing Task, whatever its house type and words — they are each Task's own, as a range is — so a
+   * plan of any type may set it, on the same terms as a baseline plan; a Task whose 范例 is no longer here, never started, cannot.
+   */
+  #writingDefaultRule(projection: WritingProjection, task: StoredWritingTask): TaskPlanDefaultRuleProjection {
+    const envelope = projection.planEnvelope;
+    const version = projection.planVersion;
+    if (projection.taskIntent === null || envelope === null || version === null) return noDefaultRule(QUICK_START_NOT_READY);
+    const startedBy = this.#ruleStartedBy(projection.bookId, 'writing', projection.authorization);
+    // A writing Task runs nowhere under a live scope (S84a), so no rule is set there, from whatever plan was frozen before.
+    const kindReason = this.#baselineAnalysis.launch.live !== null ? SET_RULE_DEVELOPER_LIVE
+      : !task.exemplarsReadable && projection.authorization === null ? WRITING_EXEMPLAR_MOVED : null;
+    return this.#ruleOffer(projection.bookId, 'writing', { planEnvelope: envelope, planVersion: version, planRevision: projection.planRevision }, kindReason, startedBy);
+  }
+
+  /**
+   * `设为快速开始默认…` for the Book's writing plan on show (S84b): which must still be the Book's latest writing Task's, unchanged,
+   * and one a rule may come from. It sets the Book's writing rule, or the rule's next version; the plan that set the rule in
+   * force, set again, answers with the rule as it is. The standard authorization never sets one.
+   */
+  #setWritingDefaultRule(bookId: string, taskIntentId: string, planEnvelopeDigest: string): DefaultExecutionRuleProjection {
+    const latest = this.#latestWriting(bookId);
+    const projection = latest?.projection ?? null;
+    requireStore(latest !== null && projection !== null && projection.taskIntent?.taskIntentId === taskIntentId &&
+      projection.planEnvelope?.digest === planEnvelopeDigest && projection.planVersion !== null,
+    'DEFAULT_EXECUTION_RULE_STALE', '这份计划已经变化；请重新打开计划后再设为快速开始默认。');
+    const offer = this.#writingDefaultRule(projection, latest.task);
+    if (offer.current !== null && offer.current.state === 'active' && offer.current.fromThisPlan) {
+      const same = this.#ruleCall(() => this.#rules.activeFor(bookId, 'writing'));
+      if (same !== null) return this.#ruleProjection(same);
+    }
+    requireStore(offer.canSet, 'DEFAULT_EXECUTION_RULE_UNAVAILABLE', offer.reason ?? QUICK_START_NOT_READY);
+    const record = this.#ruleCall(() => this.#rules.set({
+      bookId,
+      pattern: 'writing',
+      sourceTaskIntentId: taskIntentId,
+      sourcePlanEnvelopeDigest: planEnvelopeDigest,
+      binding: defaultExecutionRuleBindingOf(projection.planVersion!.materialInputs),
+    }));
+    return this.#ruleProjection(record);
+  }
+
+  /**
+   * 新建文档's 快速开始 (TASK-017, TASK-019; S84b): offered only while the Book has a writing rule in force, this launch may use
+   * one, a writing Task can be prepared now, and what the rule binds is what the Book's durable state reads now. Anything else
+   * is shown, disabled, with its reason; a rule never widens what a Run may do. The rule binds no house type or words, so the
+   * type the editor picks is held to the page's own terms, as 先看计划 is.
+   */
+  #writingQuickStart(
+    bookId: string,
+    unavailable: string | null,
+    latest: { task: StoredWritingTask; ledger: BaselineAnalysisStore; projection: WritingProjection } | null,
+    runState: BaselineAnalysisRunState | null,
+  ): BaselineAnalysisQuickStartProjection {
+    let rule: DefaultExecutionRuleRecord | null;
+    try {
+      rule = this.#ruleCall(() => this.#rules.activeFor(bookId, 'writing'));
+    } catch (error) {
+      if (!(error instanceof StoreError)) throw error;
+      return { available: false, reason: `快速开始暂不可用：${error.message}`, rule: null };
+    }
+    if (rule === null) return { available: false, reason: quickStartNoRuleReason('writing'), rule: null };
+    const reference = defaultExecutionRuleReference(rule, rule.version);
+    if (this.#baselineAnalysis.launch.live !== null) return { available: false, reason: QUICK_START_DEVELOPER_LIVE, rule: reference };
+    if (unavailable !== null) return { available: false, reason: unavailable, rule: reference };
+    if (runIsActive(runState)) return { available: false, reason: activeRunReason(runState), rule: reference };
+    // The facts are read on a writing ledger, the latest Task's: a rule comes only from a writing plan, so the Book has one.
+    if (latest === null) return { available: false, reason: QUICK_START_NOT_READY, rule: reference };
+    let drift: ReadonlyArray<string>;
+    try {
+      drift = defaultExecutionRuleDrift(rule.version.binding, latest.ledger.currentRuleFacts(bookId, 'writing-first'));
+    } catch (error) {
+      if (error instanceof AnalysisError) return { available: false, reason: error.message, rule: reference };
+      throw error;
+    }
+    if (drift.length > 0) return { available: false, reason: ruleDriftReason(reference.name, drift), rule: reference };
+    return { available: true, reason: null, rule: reference };
+  }
+
+  /**
+   * 快速开始 of a writing Task (TASK-017, TASK-020, TASK-026; S84b): the Task the caller has just prepared exactly as 先看计划
+   * prepares it is started exactly as 开始任务 would start it, on the ledger of its plan's contract, its authorization naming
+   * the writing rule version the editor started under. Whatever would make the start differ from the rule — the rule changed
+   * or was turned off, developer-live, a 范例 no longer here, the plan's key content or what the rule binds moved, the model
+   * service not connected, no network, a busy slot — leaves the Task at its plan with the reason, and nothing is recorded.
+   */
+  async quickStartWritingTask(
+    bookId: string,
+    taskIntentId: string,
+    planEnvelopeDigest: string,
+    ruleVersionId: string,
+    runtime: { credentialReadiness: () => Promise<'present' | 'missing' | null>; connectivity: TaskPlanConnectivity },
+  ): Promise<{ outcome: 'started' | 'fell-back'; reasons: ReadonlyArray<string>; dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore | null }> {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest) && UUID_PATTERN.test(ruleVersionId),
+      'QUICK_START_INVALID', '快速开始的参数无效。');
+    const plan = await this.inspectTaskPlanWithConnection({ bookId, kind: 'writing', ref: taskIntentId }, runtime.credentialReadiness, runtime.connectivity);
+    const latest = this.#latestWriting(bookId);
+    const projection = latest?.projection ?? null;
+    const envelope = projection?.planEnvelope ?? null;
+    const version = projection?.planVersion ?? null;
+    requireStore(latest !== null && projection !== null && projection.taskIntent?.taskIntentId === taskIntentId && envelope?.digest === planEnvelopeDigest &&
+      version !== null, 'ANALYSIS_AUTHORIZATION_STALE', '任务计划已经变化；无法记录该授权。');
+    if (projection.authorization !== null) {
+      // The same quick start made twice answers as the first did; a Task started any other way is not started again.
+      requireStore(projection.authorization.origin === 'default-execution-rule' && projection.authorization.ruleVersionId === ruleVersionId,
+        'ANALYSIS_AUTHORIZATION_STALE', '这项任务已经开始了。');
+      return { outcome: 'started', reasons: [], dispatchRunRecordId: null, ledger: null };
+    }
+    const fellBack = (reason: string) => ({ outcome: 'fell-back' as const, reasons: [reason], dispatchRunRecordId: null, ledger: null });
+    const rule = this.#ruleCall(() => this.#rules.activeFor(bookId, 'writing'));
+    if (rule === null || rule.version.ruleVersionId !== ruleVersionId) return fellBack(QUICK_START_RULE_CHANGED);
+    if (this.#baselineAnalysis.launch.live !== null) return fellBack(QUICK_START_DEVELOPER_LIVE);
+    if (!latest.task.exemplarsReadable) return fellBack(WRITING_EXEMPLAR_MOVED);
+    if (projection.planRevision !== null) return fellBack(QUICK_START_PLAN_CHANGED);
+    const drift = defaultExecutionRuleDrift(rule.version.binding, version.materialInputs);
+    if (drift.length > 0) return fellBack(ruleDriftReason(defaultExecutionRuleReference(rule, rule.version).name, drift));
+    switch (plan.start.readiness) {
+      case 'ready':
+      case 'no-route':
+        break;
+      case 'needs-connection':
+        return fellBack(QUICK_START_NEEDS_CONNECTION);
+      case 'offline':
+        return fellBack(QUICK_START_OFFLINE);
+      default:
+        return fellBack(QUICK_START_NOT_READY);
+    }
+    if (envelope.dispatchAllowed && runtime.connectivity.slotBusy()) return fellBack(QUICK_START_SLOT_BUSY);
+    const authorized = this.#analysisCall(() => latest.ledger.authorize(bookId, taskIntentId, planEnvelopeDigest, 'now',
+      { kind: 'default-execution-rule', ruleVersionId }));
+    return { outcome: 'started', reasons: [], dispatchRunRecordId: authorized.dispatchRunRecordId, ledger: latest.ledger };
   }
 
   /**

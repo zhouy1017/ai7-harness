@@ -1,4 +1,5 @@
 import type {
+  DefaultExecutionRuleReference,
   ProductionDocumentProjection,
   RendererApi,
   ServiceJobProjection,
@@ -6,6 +7,7 @@ import type {
   WritingTaskTypeProjection,
 } from '../shared/protocol.js';
 import { localInstantLabel } from './plan-preview-labels.js';
+import { taskPlanQuickStartFellBack } from './task-drawer-labels.js';
 import {
   WRITING_ACTIONS,
   WRITING_CONSEQUENCE_TERMS,
@@ -22,6 +24,9 @@ import {
   WRITING_TYPE_LEGEND,
   writingDraftedLine,
   writingFieldTooLong,
+  writingQuickNote,
+  writingQuickStarted,
+  writingQuickStarting,
   writingTaskLine,
 } from './writing-task-labels.js';
 
@@ -31,9 +36,11 @@ const GRAPHEMES = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });
  * 新建文档 · 写作任务 on ⑥ 交付物 (Issue #432, plan slice S84a; editor-surfaces §9; V2-UX-DELIV-007, KB-004): `新建文档…` opens a
  * sheet in place — the house types to pick one of (none preselected; a type with a document or marked 本书不做 says why it
  * cannot be drafted), what AI7 will reference, the editor's audience, channel and requirements, and the four consequence rows —
- * with `先看计划`, which prepares the writing Task and opens its plan in the Task Drawer, whose bar starts it, and `快速开始`,
- * shown with why it waits (S84b). A drafted result is opened with `打开草稿`: the service makes it the type's document in its
- * 起草 phase, and the document opens on the manuscript surface.
+ * with `先看计划`, which prepares the writing Task and opens its plan in the Task Drawer, whose bar starts it, and `快速开始`
+ * (S84b): offered only under the Book's writing 默认执行规则, it prepares the Task the same way and starts it under the rule — or
+ * stops at the plan, open in the drawer with the reason — and without a rule in force that matches it is shown, disabled, with
+ * why. A drafted result is opened with `打开草稿`: the service makes it the type's document in its 起草 phase, and the document
+ * opens on the manuscript surface.
  *
  * Everything shown is the service's projection; nothing here drafts, delivers or sends anything.
  */
@@ -43,7 +50,7 @@ export interface WritingTaskSurface {
   destroy(): void;
 }
 
-type WritingApi = Pick<RendererApi, 'inspectWritingTask' | 'prepareWritingTask' | 'createWritingDraft'>;
+type WritingApi = Pick<RendererApi, 'inspectWritingTask' | 'prepareWritingTask' | 'quickStartWritingTask' | 'createWritingDraft'>;
 
 export interface MountWritingTaskOptions {
   root: HTMLElement;
@@ -51,8 +58,8 @@ export interface MountWritingTaskOptions {
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
   awaitServiceJob(job: ServiceJobProjection, onProgress: (job: ServiceJobProjection) => void): Promise<ServiceJobProjection>;
-  /** The writing Task's plan in the Task Drawer, whose bar starts it. */
-  openPlan(taskIntentId: string): void;
+  /** The writing Task's plan in the Task Drawer, whose bar starts it; `note` says why a quick start stopped there. */
+  openPlan(taskIntentId: string, note?: string): void;
   /** 打开草稿's document on its own surface, as 交付物's 打开 opens one. */
   openDocument(document: ProductionDocumentProjection, type: { typeId: string; label: string }): Promise<void>;
   /** A document was made: 交付 · 生产文档 and 图书交付包 read again. */
@@ -274,12 +281,19 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       form.append(problem);
     }
     const row = el('div', 'button-row');
-    const plan = action(WRITING_ACTIONS.plan, 'primary', 'plan', () => void prepare());
+    const plan = action(WRITING_ACTIONS.plan, 'primary', 'plan', () => void prepare(null));
     plan.disabled = busy || page.unavailable !== null;
     plan.setAttribute('aria-controls', 'task-drawer');
-    const quick = action(WRITING_ACTIONS.quick, 'secondary', 'quick', () => undefined);
-    quick.disabled = true;
-    const quickReason = el('p', 'field-note writing-quick-reason', page.quickStart.reason);
+    // 快速开始 is the Book's writing 默认执行规则's to give (S84b): with one in force that matches, it prepares and starts under it.
+    const rule = page.quickStart.available ? page.quickStart.rule : null;
+    const quick = action(WRITING_ACTIONS.quick, 'secondary', 'quick', () => {
+      if (rule !== null) void prepare(rule);
+    });
+    quick.disabled = busy || rule === null || page.unavailable !== null;
+    quick.setAttribute('aria-controls', 'task-drawer');
+    if (page.quickStart.rule !== null) quick.dataset['ruleVersionId'] = page.quickStart.rule.ruleVersionId;
+    const quickReason = el('p', 'field-note writing-quick-reason', rule !== null ? writingQuickNote(rule.name) : page.quickStart.reason ?? '');
+    quickReason.dataset['quickStart'] = rule !== null ? 'available' : 'unavailable';
     quickReason.id = uid('quick');
     quick.setAttribute('aria-describedby', quickReason.id);
     const cancel = action(WRITING_ACTIONS.cancel, 'quiet', 'cancel', () => {
@@ -292,8 +306,13 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     return form;
   }
 
-  /** 先看计划: the Task prepared as one cooperative job, then its plan opened in the Task Drawer, whose bar starts it. */
-  async function prepare(): Promise<void> {
+  /**
+   * 先看计划: the Task prepared as one cooperative job, then its plan opened in the Task Drawer, whose bar starts it. 快速开始 (S84b;
+   * TASK-017, TASK-020, TASK-026) prepares it the same way and then starts the plan just frozen under `rule`, exactly as 开始任务
+   * would start it; whatever would make the start differ from the rule leaves the Task at its plan, open in the drawer with the
+   * reason beside the bar, and nothing recorded.
+   */
+  async function prepare(rule: DefaultExecutionRuleReference | null): Promise<void> {
     if (busy || sheet === null || projection === null) return;
     const state = sheet;
     if (state.typeId === null) {
@@ -332,10 +351,15 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       }
       projection = result;
       sheet = null;
-      options.setStatus(WRITING_STATUS.prepared, 'success');
-      paint(null);
       const ref = result.task?.taskIntentId ?? null;
-      if (ref !== null) options.openPlan(ref);
+      const planEnvelopeDigest = result.task?.planEnvelopeDigest ?? null;
+      if (rule === null || ref === null || planEnvelopeDigest === null) {
+        options.setStatus(WRITING_STATUS.prepared, 'success');
+        paint(null);
+        if (ref !== null) options.openPlan(ref);
+        return;
+      }
+      await quickStart(ref, planEnvelopeDigest, rule);
     } catch (error) {
       busy = false;
       if (destroyed) return;
@@ -343,6 +367,38 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       options.setStatus(state.problem, 'error');
       paint('.writing-problem');
     }
+  }
+
+  /** 快速开始's start of the plan just prepared, under the rule the editor clicked; its own failure leaves the plan prepared. */
+  async function quickStart(ref: string, planEnvelopeDigest: string, rule: DefaultExecutionRuleReference): Promise<void> {
+    busy = true;
+    options.setStatus(writingQuickStarting(rule.name), 'busy');
+    paint(null);
+    let result: Awaited<ReturnType<WritingApi['quickStartWritingTask']>>;
+    try {
+      result = await api.quickStartWritingTask({ taskIntentId: ref, planEnvelopeDigest, ruleVersionId: rule.ruleVersionId });
+    } catch (error) {
+      busy = false;
+      if (destroyed) return;
+      // The plan stands prepared: the bar starts it as usual.
+      options.setStatus(options.errorMessage(error, WRITING_STATUS.quickFailed), 'error');
+      paint(null);
+      options.openPlan(ref);
+      return;
+    }
+    busy = false;
+    if (destroyed || result.projection.bookId !== projection?.bookId) return;
+    projection = result.projection;
+    paint(null);
+    if (result.outcome === 'started') {
+      options.setStatus(writingQuickStarted(rule.name, result.projection.task?.state === 'authorized-blocked'), 'success');
+      options.openPlan(ref);
+      follow();
+      return;
+    }
+    const note = taskPlanQuickStartFellBack(result.reasons);
+    options.setStatus(note);
+    options.openPlan(ref, note);
   }
 
   /** 打开草稿: the drafted result made the type's document in its 起草 phase, then opened on the manuscript surface. */

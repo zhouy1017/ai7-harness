@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 104 as const;
+export const SERVICE_PROTOCOL_VERSION = 105 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -113,6 +113,7 @@ export const IPC_CHANNELS = {
   inspectWritingTask: 'ai7:j07:inspect-writing-task',
   prepareWritingTask: 'ai7:j07:prepare-writing-task',
   authorizeWritingTask: 'ai7:j07:authorize-writing-task',
+  quickStartWritingTask: 'ai7:j07:quick-start-writing-task',
   createWritingDraft: 'ai7:j07:create-writing-draft',
   inspectAnalysisFeedback: 'ai7:j11:inspect-analysis-feedback',
   recordAnalysisFeedback: 'ai7:j11:record-analysis-feedback',
@@ -2718,11 +2719,6 @@ export const WRITING_MODE_MEANINGS = {
 /** Under a live scope no Provider Processing policy names the writing kind yet: nothing is prepared or started there. */
 export const WRITING_LIVE_UNAVAILABLE =
   '写作任务暂不可用：当前的模型处理策略没有写明写作任务可以发送给模型，在这个运行范围下不能准备或开始起草。' as const;
-/**
- * 快速开始 of a writing Task waits for a 默认执行规则 of the writing kind (S84b): until then it is shown disabled with this reason,
- * and every writing Task is started from its plan (S75 D6: no rule, no quick start).
- */
-export const WRITING_QUICK_START_REASON = '写作任务还没有默认执行规则：先看计划，再在计划里开始任务。' as const;
 /** The editor's own words for the draft: who reads it, where it appears, and anything else it must do. */
 export const MAX_WRITING_AUDIENCE_GRAPHEMES = 60;
 export const MAX_WRITING_CHANNEL_GRAPHEMES = 60;
@@ -4559,8 +4555,8 @@ export interface WritingTaskTypeProjection {
 
 /**
  * 新建文档 · 写作任务 on ⑥ 交付物 (Issue #432, S84a; V2-UX-DELIV-007): the house types, what every draft references — each
- * line saying what is there or that there is none — the four consequence rows, the Book's latest writing Task, and why
- * 快速开始 is not offered yet.
+ * line saying what is there or that there is none — the four consequence rows, the Book's latest writing Task, and whether
+ * 快速开始 starts one under the Book's writing 默认执行规则 (S84b), or why not.
  */
 export interface WritingTaskProjection {
   readonly bookId: string;
@@ -4586,9 +4582,24 @@ export interface WritingTaskProjection {
     readonly label: string;
     /** Why the Task's settled Run wrote no draft — a copy of an exemplar refused, or a synthesis that did not close — or `null`. */
     readonly refusal: string | null;
+    /** The Plan Envelope the Task froze — the exact plan a 快速开始 starts (S84b) — or `null` while none is frozen. */
+    readonly planEnvelopeDigest: string | null;
   };
-  /** 快速开始 is not offered before a writing 默认执行规则 exists (S84b). */
-  readonly quickStart: { readonly allowed: false; readonly reason: typeof WRITING_QUICK_START_REASON };
+  /**
+   * 快速开始 (Issue #432, S84b; S75 D5, D6): offered only while the Book has a writing 默认执行规则 in force that still matches the
+   * Book's facts, this launch may use one, and a writing Task can be prepared now. One activation prepares the Task exactly as
+   * 先看计划 does and starts it exactly as 开始任务 would, its authorization naming the rule version; whatever would make the
+   * start differ from the rule stops at the plan with the reason. Without a rule it is shown, disabled, with why.
+   */
+  readonly quickStart: BaselineAnalysisQuickStartProjection;
+}
+
+/** What one 快速开始 of a writing Task did: started it under the rule, or stopped at its plan with the reasons (S84b). */
+export interface QuickStartWritingTaskResult {
+  outcome: 'started' | 'fell-back';
+  reasons: ReadonlyArray<string>;
+  /** 新建文档 · 写作任务 as it stands after it. */
+  projection: WritingTaskProjection;
 }
 
 /** 打开草稿's answer: the document the draft became, of its type, and 新建文档 · 写作任务 as it stands after it. */
@@ -5438,10 +5449,13 @@ export interface TaskPlanRedoProjection {
 
 /**
  * 默认执行规则 (Issue #421, plan slice S75; V2-UX-TASK-017, TASK-019, TASK-020, TASK-028, AUTH-009): the task
- * patterns a rule may cover — the baseline analysis's two updates of the whole Book, which ask for no range.
+ * patterns a rule may cover — the baseline analysis's two updates of the whole Book, which ask for no range, and
+ * (Issue #432, S84b) the writing Task of 新建文档, whose house type and words are each Task's own as a range is.
  */
-export type DefaultExecutionRulePattern = 'sync-current' | 'reanalyze-book';
-export const DEFAULT_EXECUTION_RULE_PATTERNS: readonly DefaultExecutionRulePattern[] = ['sync-current', 'reanalyze-book'];
+export type DefaultExecutionRulePattern = 'sync-current' | 'reanalyze-book' | 'writing';
+export const DEFAULT_EXECUTION_RULE_PATTERNS: readonly DefaultExecutionRulePattern[] = ['sync-current', 'reanalyze-book', 'writing'];
+/** The analysis kind each pattern's Tasks are of, as the analysis ledger names it. */
+export type DefaultExecutionRuleKind = 'baseline-analysis' | 'writing';
 
 /**
  * What a rule version binds: the material inputs of the plan the editor viewed when setting it that stay the same
@@ -5469,7 +5483,7 @@ export interface DefaultExecutionRuleReference {
 export interface DefaultExecutionRuleProjection extends DefaultExecutionRuleReference {
   bookId: string;
   bookTitle: string;
-  taskKind: 'baseline-analysis';
+  taskKind: DefaultExecutionRuleKind;
   pattern: DefaultExecutionRulePattern;
   state: 'active' | 'deactivated';
   stateLabel: string;
@@ -10715,6 +10729,15 @@ export interface ServiceOperationMap {
     input: { bookId: string; taskIntentId: string; planEnvelopeDigest: string };
     output: WritingTaskProjection;
   };
+  /**
+   * 快速开始 of a writing Task (Issue #432, S84b; TASK-017, TASK-020, TASK-026): the Task the caller just prepared exactly as
+   * 先看计划 prepares it is started exactly as 开始任务 would start it, its authorization naming the writing rule version — or,
+   * when anything would make the start differ from the rule, left at its plan with the reasons.
+   */
+  quickStartWritingTask: {
+    input: { bookId: string; taskIntentId: string; planEnvelopeDigest: string; ruleVersionId: string };
+    output: QuickStartWritingTaskResult;
+  };
   /** 打开草稿: one drafted result made the type's document, its 起草 phase started; once per type of a Book. */
   createWritingDraft: {
     input: { bookId: string; revisionId: string };
@@ -11244,6 +11267,7 @@ export interface RendererApi {
   prepareWritingTask(input: { typeId: string; audience: string; channel: string; requirements: string | null }): Promise<ServiceJobProjection>;
   /** The Task Drawer bar's 开始任务 for a writing Task. */
   authorizeWritingTask(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<WritingTaskProjection>;
+  quickStartWritingTask(input: { taskIntentId: string; planEnvelopeDigest: string; ruleVersionId: string }): Promise<QuickStartWritingTaskResult>;
   /** 打开草稿: the drafted result made the type's document in its 起草 phase; the renderer then opens it on the editing surface. */
   createWritingDraft(input: { revisionId: string }): Promise<WritingDraftCreatedProjection>;
   /** ②A 分析反馈 of the Book the window is showing (Issue #94, S38); the renderer never names the Book. */
