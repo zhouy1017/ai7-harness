@@ -219,6 +219,7 @@ import {
 } from './global-attention.js';
 import { GLOBAL_ATTENTION_ACTIONS, GLOBAL_ATTENTION_STATUS_LINES } from './global-attention-labels.js';
 import { SELECTION_TASK_STATUS, selectionTaskChoices, type SelectionTaskChoice, type SelectionTaskChoices } from './selection-task-labels.js';
+import { marksRefreshStep } from './marks-refresh.js';
 import { mountEditorialMarks, type EditorialMarksSurface } from './editorial-marks.js';
 import { mountPositionRail, type PositionRail } from './position-rail.js';
 import { mountReviewWorkspace, type ReviewFocus, type ReviewWorkspaceSurface } from './review-workspace.js';
@@ -302,9 +303,9 @@ const taskDrawer = mountTaskDrawer({
   setStatus,
   awaitServiceJob,
   onOpen: () => closeNavigation?.(),
-  onRecorded: (kind, bookId) => {
+  onRecorded: (kind, bookId, ref) => {
     taskSurfaceRefresh[kind]?.();
-    if (kind === 'review-run') followReviewMarks(bookId);
+    if (kind === 'review-run') followReviewMarks(bookId, ref);
   },
   openRunSurface: (plan) => void leaveThen(() => openTaskRunSurface(plan)),
   openConnectionSettings: () => void renderModelServiceSettings(),
@@ -481,38 +482,61 @@ let manuscriptOnScreen: null | {
   readonly branchId: string;
   readingPlace(): ReadingPlace | null;
   jump(target: { blockId: string; markId: string | null }): Promise<void>;
-  /** Read the window on screen again in place, so marks made meanwhile appear (Issue #423 review, P2-6). */
-  refreshMarks(): Promise<void>;
+  /**
+   * Bring the marks made meanwhile onto the window on screen (Issue #423 review, P2-6, P2-7): `true` once they are there, `false`
+   * when the editor is busy, typing or has something open over the text, so the caller asks again later.
+   */
+  refreshMarks(): Promise<boolean>;
 } = null;
 
 /**
- * A Review Run of the Book whose manuscript is on screen was started from the drawer (Issue #423 review, P2-6): its categories are
- * followed until the Run leaves 进行中, and the manuscript window is then read again so the marks it made are where the editor
- * is. One follower at a time; leaving the manuscript ends it.
+ * A Review Run of the Book whose manuscript is on screen was started from the drawer (Issue #423 review, P2-6, P3-2): that Run —
+ * by its identity — is followed while it runs, read in the projection's light form (no findings), more slowly the longer it
+ * takes; once it stops, its marks are brought onto the window on screen, as soon as the editor is not in the middle of something.
+ * A plan only edited or prepared is not followed. One follower at a time; leaving the manuscript ends it, and a Run still running
+ * after two hours is left with a line saying where its marks will be.
  */
 let reviewMarksFollower = 0;
-function followReviewMarks(bookId: string): void {
+const REVIEW_MARKS_FOLLOW_LIMIT_MS = 2 * 60 * 60_000;
+function followReviewMarks(bookId: string, reviewRunId: string | undefined): void {
   const showing = manuscriptOnScreen;
-  if (showing === null || showing.bookId !== bookId) return;
+  if (showing === null || showing.bookId !== bookId || reviewRunId === undefined) return;
   const mine = ++reviewMarksFollower;
-  const deadline = Date.now() + 30 * 60_000;
+  const deadline = Date.now() + REVIEW_MARKS_FOLLOW_LIMIT_MS;
+  let wait = 1_000;
+  const following = (): boolean => mine === reviewMarksFollower && manuscriptOnScreen === showing;
+  const bring = (): void => {
+    if (!following()) return;
+    void showing.refreshMarks().then((done) => {
+      if (!done) window.setTimeout(bring, 1_000);
+    }, () => window.setTimeout(bring, 2_000));
+  };
   const step = (): void => {
-    if (mine !== reviewMarksFollower || manuscriptOnScreen !== showing || Date.now() > deadline) return;
-    void window.ai7.inspectReviewWorkspace({ reviewRunId: null }).then(
+    if (!following()) return;
+    if (Date.now() > deadline) {
+      setStatus(REVIEW_MARKS_FOLLOW_STOPPED, 'success');
+      return;
+    }
+    void window.ai7.inspectReviewWorkspace({ reviewRunId, findingsAfterOrdinal: Number.MAX_SAFE_INTEGER }).then(
       (workspace) => {
-        if (mine !== reviewMarksFollower || manuscriptOnScreen !== showing) return;
-        const state = workspace.run?.state ?? null;
-        if (state === 'running' || state === 'prepared') {
-          window.setTimeout(step, 1_000);
+        if (!following()) return;
+        const state = workspace.run?.reviewRunId === reviewRunId ? workspace.run.state : null;
+        // Only a Run that was started is followed: a plan reconfirmed or a rule set leaves it prepared.
+        if (state === 'prepared' || state === null) return;
+        if (state === 'running') {
+          window.setTimeout(step, wait);
+          wait = Math.min(5_000, wait + 1_000);
           return;
         }
-        void showing.refreshMarks().catch(() => undefined);
+        bring();
       },
       () => window.setTimeout(step, 2_000),
     );
   };
   step();
 }
+/** A 审阅 followed for its marks that runs past the follower's limit (review P3-2): where its marks will be. */
+const REVIEW_MARKS_FOLLOW_STOPPED = '审阅仍在进行；完成后它标出的发现会在稿件里，重新打开稿件即可看到。';
 
 /** A jump from another screen — 审阅's 回到原文, ②A's 回到稿件范围, a result's 跳到 — leaves the way back to where the editor last read. */
 async function leaveReturnChip(bookId: string, manuscriptId: string, branchId: string): Promise<void> {
@@ -8028,14 +8052,29 @@ function renderEditorWindow(
     // a 审阅这段 started here made on this paragraph — appear where the editor is. Nothing is read while the editor is busy
     // or holding words not yet written; an open composer stays (it is re-anchored).
     refreshMarks: async () => {
-      if (!editor || authoritativeMutationBusy() || edgeNavigation || editor.isComposing()) return;
-      if (!(await settleLocalEdit()) || !editor) return;
+      if (!editor) return true;
+      if (authoritativeMutationBusy() || edgeNavigation || editor.isComposing()) return false;
+      if (!(await settleLocalEdit()) || !editor) return false;
       const binding = editor.currentWindow();
       const first = binding.blocks[0];
-      if (first === undefined) return;
-      const continuity = editor.captureContinuity();
+      if (first === undefined) return true;
       const next = await window.ai7.getManuscriptWindowAt({ manuscriptId: binding.manuscriptId, branchId: binding.branchId, target: { kind: 'window-start', blockId: first.blockId } });
-      if (!editor || editor.currentWindow() !== binding) return;
+      if (!editor) return true;
+      const step = marksRefreshStep(editor.currentWindow(), next, {
+        floating: editorialMarks?.holdsFloating() === true,
+        editor: authoritativeMutationBusy() || edgeNavigation || editor.isComposing(),
+      });
+      if (step === 'set-marks') {
+        // The text is the text on screen: only the marks are new, so nothing open over the text is touched (review P2-7).
+        editor.setMarks(next.marks, next.marksTruncated);
+        manuscriptRail?.refresh();
+        const refreshed = [...(editorHost.dataset['marksRefreshed'] ?? '').split(',').filter((entry) => entry.length > 0), 'review-settled'].slice(-12);
+        editorHost.dataset['marksRefreshed'] = refreshed.join(',');
+        return true;
+      }
+      // The window itself moved on: it is loaded again only once nothing is open over the text, with the place taken now (P3-3).
+      if (step === 'wait') return false;
+      const continuity = editor.captureContinuity();
       windowLoadCause = 'review-settled';
       let loaded: boolean;
       try {
@@ -8043,9 +8082,10 @@ function renderEditorWindow(
       } finally {
         windowLoadCause = 'unnamed';
       }
-      if (!loaded) return;
+      if (!loaded) return false;
       currentWindow = next;
       updateWindowChrome();
+      return true;
     },
     jump: async (target) => {
       const here = readingPlace();

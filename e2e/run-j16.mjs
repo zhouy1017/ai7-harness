@@ -1412,7 +1412,10 @@ async function main() {
     // The manuscript on screen reads its window again in place once the 审阅 settles (review P2-6): the lead's mark is on the
     // paragraph the editor started from, without leaving it, and the editor names that load.
     await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true && document.querySelector(${JSON.stringify(`[data-screen="editor"] [data-block-id="${taskBlock}"] .editorial-mark[data-mark-source="ai7"]`)}) !== null`, 'selection-task-lead-marked', 60_000);
-    requireJourney((await windowLoads()).split(',').includes('review-settled'), 'selection-task-review-settled-load', await windowLoads());
+    // The window on screen was the window the 审阅 read, so only its marks were set on it — nothing open over the text is closed
+    // (review P2-7); the editor names that in `data-marks-refreshed`.
+    const marksRefreshed = await renderer.evaluate(`document.querySelector('[data-screen="editor"] [data-marks-refreshed]')?.dataset.marksRefreshed ?? ''`);
+    requireJourney(marksRefreshed.split(',').includes('review-settled'), 'selection-task-review-settled-marks', { marksRefreshed, loads: await windowLoads() });
     await assertRenderer(renderer, MARK_HELPERS, 'selection-task-mark-helpers');
 
     at('selection-task-from-mark');
@@ -1446,8 +1449,11 @@ async function main() {
     requireJourney(loadsAfter.split(',').at(-1) === 'navigation-proportion' && loadsAfter.split(',').length === Math.min(12, loadsBefore.split(',').filter((entry) => entry.length > 0).length + 1) &&
       kept?.kind === 'task-on-selection' && kept.choice === 'reanalyze-range' && kept.quote === markWords && kept.below === true,
     'selection-task-composer-survives-load', { loadsBefore, loadsAfter, kept });
-    // With the composer open, the pane scrolled to its end pages nothing: no window is loaded while a composer is open or asked for.
-    await assertRenderer(renderer, `(() => { const pane = document.querySelector('[data-screen="editor"] .editor-window'); if (!(pane instanceof HTMLElement)) return false; pane.scrollTop = pane.scrollHeight; pane.dispatchEvent(new Event('scroll')); return true; })()`, 'selection-task-pane-edge');
+    // With the composer open, the pane scrolled to an edge that has a window beyond it pages nothing: no window is loaded while a
+    // composer is open or asked for (review P3-4: the edge chosen is one 向后浏览 or 向前浏览 says can page).
+    const edge = await renderer.evaluate(`(() => { const enabled = (label) => Array.from(document.querySelectorAll('[data-screen="editor"] .window-actions button')).some((button) => button.textContent === label && !button.disabled); return enabled('向后浏览') ? 'end' : enabled('向前浏览') ? 'start' : null; })()`);
+    requireJourney(edge === 'end' || edge === 'start', 'selection-task-pane-edge-pageable', edge);
+    await assertRenderer(renderer, `(() => { const pane = document.querySelector('[data-screen="editor"] .editor-window'); if (!(pane instanceof HTMLElement)) return false; pane.scrollTop = ${JSON.stringify(edge)} === 'end' ? pane.scrollHeight : 0; pane.dispatchEvent(new Event('scroll')); return true; })()`, 'selection-task-pane-edge');
     await new Promise((resolveWait) => setTimeout(resolveWait, 1_500));
     requireJourney((await windowLoads()) === loadsAfter && await renderer.evaluate(`window.__j16.composer()?.dataset.markComposer === 'task-on-selection'`) === true,
       'selection-task-no-paging-under-composer', { loadsAfter, now: await windowLoads() });

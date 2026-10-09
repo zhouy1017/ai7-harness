@@ -68,6 +68,12 @@ export type ReviewCategoryScopePlan =
 /** The facts of one category's ledger a scope reads: whether it has reviewed, and whether that is stale. */
 export interface ReviewCategoryLedgerFacts {
   readonly hasRevision: boolean;
+  /**
+   * A Run of the whole manuscript, chosen chapters or changed chapters put this category on the manuscript (Issue #423 review,
+   * P1-3). A 当前选区 Run leaves a revision in the ledger but reviews no chapter, so it never makes 只审改动过的章 available.
+   * Absent reads as `hasRevision`.
+   */
+  readonly reviewed?: boolean;
   /** The latest revision's freshness is `stale`: the manuscript changed since it was read. */
   readonly stale: boolean;
   /** Why `review-sync` is not offered, in the ledger's own words, when it is not. */
@@ -106,7 +112,7 @@ export function reviewCategoryScopePlan(
   }
   if (scope.kind === 'whole') return { kind: 'task', mode: facts.hasRevision ? 'review-again' : 'review-first', selectedRange: null };
   if (scope.kind === 'changed') {
-    if (!facts.hasRevision) return { kind: 'refused', reason: NEVER_REVIEWED_REASON };
+    if (!(facts.reviewed ?? facts.hasRevision)) return { kind: 'refused', reason: NEVER_REVIEWED_REASON };
     return facts.stale
       ? { kind: 'task', mode: 'review-sync', selectedRange: null }
       : { kind: 'refused', reason: facts.syncUnavailableReason ?? NOTHING_CHANGED_REASON };

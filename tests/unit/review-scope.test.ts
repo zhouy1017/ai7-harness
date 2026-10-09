@@ -60,6 +60,10 @@ describe('the scope a category reads', () => {
     expect(SELECTION_UNAVAILABLE_REASON).toBe('在稿件里选中文字，右键「就这段发起任务…」审阅所选文字。');
     expect(FACTUAL_SELECTION_REASON).toBe('事实核查暂只能核查全书；就所选文字核查随事实核查的更新方式接入。');
     expect(reviewScopeLabel(SELECTION)).toBe('当前选区 · 内容块 3–3');
+    // A category the ledger holds a revision of, from 当前选区 Runs only, has reviewed no chapter (Issue #423 review, P1-3).
+    expect(reviewCategoryScopePlan('review-category-contract', null, CHANGED, { ...STALE, reviewed: false })).toEqual({ kind: 'refused', reason: NEVER_REVIEWED_REASON });
+    expect(reviewCategoryScopePlan('review-category-contract', null, CHANGED, { ...STALE, reviewed: true })).toEqual({ kind: 'task', mode: 'review-sync', selectedRange: null });
+    expect(reviewCategoryScopePlan('review-category-contract', null, WHOLE, { ...STALE, reviewed: false })).toEqual({ kind: 'task', mode: 'review-again', selectedRange: null });
   });
 
   it('reads the leads for the whole manuscript or the chosen chapters, only once the baseline has a revision', () => {

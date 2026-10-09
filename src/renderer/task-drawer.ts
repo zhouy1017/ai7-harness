@@ -226,8 +226,8 @@ export interface MountTaskDrawerOptions {
   awaitServiceJob(initial: ServiceJobProjection, onProgress: (job: ServiceJobProjection) => void): Promise<ServiceJobProjection>;
   /** The one side slot (IA): the drawer is opening, so 导航 closes. */
   onOpen(): void;
-  /** The bar started the Task or reconfirmed its plan: the surfaces of that kind on screen read it again. */
-  onRecorded(kind: TaskPlanKind, bookId: string): void;
+  /** The bar started the Task or reconfirmed its plan: the surfaces of that kind on screen read it again. `ref` is the Task's plan. */
+  onRecorded(kind: TaskPlanKind, bookId: string, ref?: string): void;
   /** 查看运行 / 查看运行记录 / 查看审阅: the started Task's own surface (AUTH-007). */
   openRunSurface(plan: TaskPlanProjection): void;
   /** 去设置连接: 设置's model-service connections (§10, MODEL-008). */
@@ -932,7 +932,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       const rule = await api.setDefaultExecutionRule({ taskIntentId: current.ref, planEnvelopeDigest });
       ruleConfirmShown = false;
       options.setStatus(taskPlanDefaultRuleSet(rule.name), 'success');
-      options.onRecorded(current.kind, current.bookId);
+      options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {
       refusal = options.errorMessage(error, TASK_PLAN_DEFAULT_RULE_FAILED);
       options.setStatus(refusal, 'error');
@@ -1441,7 +1441,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       if (budgetForm?.key === editKey(current)) budgetForm = null;
       options.setStatus(`计划已更新为第 ${updated.planVersion?.ordinal ?? '?'} 版。`, 'success');
       focusBar = true;
-      options.onRecorded(current.kind, current.bookId);
+      options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {
       refusal = options.errorMessage(error, TASK_BAR_UPDATE_FAILED);
       options.setStatus(refusal, 'error');
@@ -1526,7 +1526,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       // start waiting for a place is recorded, and nothing has begun (CONC-007).
       options.setStatus(current.kind === 'fixed-task' ? '已记录授权 · 未派发' : recordOnly ? '已记录运行；派发前会被阻止' : queued ? TASK_BAR_QUEUED_STATUS : '已开始任务', 'success');
       focusBar = true;
-      options.onRecorded(current.kind, current.bookId);
+      options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {
       refusal = options.errorCode(error) === 'EXECUTION_BUSY' ? TASK_BAR_SLOT_BUSY : options.errorMessage(error, TASK_BAR_START_FAILED);
       options.setStatus(refusal, 'error');
@@ -1551,7 +1551,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       await api.startBaselineAnalysisWhenOnline({ taskIntentId: current.ref, planEnvelopeDigest });
       options.setStatus('已记录授权 · 联网后开始', 'success');
       focusBar = true;
-      options.onRecorded(current.kind, current.bookId);
+      options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {
       refusal = options.errorMessage(error, TASK_BAR_START_FAILED);
       options.setStatus(refusal, 'error');
@@ -1604,7 +1604,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       redoConfirmShown = false;
       options.setStatus(TASK_BAR_REDOING_NOTE, 'success');
       focusBar = true;
-      options.onRecorded(current.kind, current.bookId);
+      options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {
       refusal = options.errorMessage(error, TASK_BAR_REDO_FAILED);
       options.setStatus(refusal, 'error');
@@ -1637,7 +1637,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       }
       prepared = completed.result.taskIntent?.taskIntentId ?? null;
       options.setStatus('新任务已准备：可以先改计划，再开始。', 'success');
-      options.onRecorded(current.kind, current.bookId);
+      options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {
       refusal = options.errorMessage(error, TASK_BAR_REDO_FAILED);
       options.setStatus(refusal, 'error');
@@ -1674,7 +1674,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       }
       prepared = completed.result.taskIntent?.taskIntentId ?? null;
       options.setStatus('新计划已准备：看过之后再开始任务。', 'success');
-      options.onRecorded(current.kind, current.bookId);
+      options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {
       refusal = options.errorMessage(error, TASK_BAR_REPREPARE_FAILED);
       options.setStatus(refusal, 'error');
@@ -1764,7 +1764,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       // A Run under way stops at its next boundary; one nothing was running settled at once.
       options.setStatus(answered.run?.state === 'cancelling' ? TASK_BAR_CANCELLING_NOTE : TASK_BAR_CANCELLED_NOTE, 'success');
       focusBar = true;
-      options.onRecorded(current.kind, current.bookId);
+      options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {
       refusal = options.errorMessage(error, TASK_BAR_CANCEL_RUN_FAILED);
       options.setStatus(refusal, 'error');
@@ -1783,7 +1783,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       await api.pauseBaselineAnalysisRun({ taskIntentId: current.ref });
       options.setStatus(TASK_BAR_PAUSING_NOTE, 'success');
       focusBar = true;
-      options.onRecorded(current.kind, current.bookId);
+      options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {
       refusal = options.errorMessage(error, TASK_BAR_PAUSE_FAILED);
       options.setStatus(refusal, 'error');
@@ -1802,7 +1802,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       await api.resumeBaselineAnalysisRun({ taskIntentId: current.ref });
       options.setStatus('已续行，从已保存的进度接着读。', 'success');
       focusBar = true;
-      options.onRecorded(current.kind, current.bookId);
+      options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {
       refusal = options.errorMessage(error, TASK_BAR_RESUME_FAILED);
       options.setStatus(refusal, 'error');
@@ -1820,7 +1820,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       await api.cancelWaitingBaselineAnalysis({ taskIntentId: current.ref });
       options.setStatus(TASK_BAR_CANCELLED, 'success');
       focusBar = true;
-      options.onRecorded(current.kind, current.bookId);
+      options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {
       refusal = options.errorMessage(error, TASK_BAR_CANCEL_FAILED);
       options.setStatus(refusal, 'error');
@@ -1852,7 +1852,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       }
       options.setStatus(`计划已重新确认为版本 ${completed.result.planVersion?.ordinal ?? '?'}。`, 'success');
       focusBar = true;
-      options.onRecorded(current.kind, current.bookId);
+      options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {
       refusal = options.errorMessage(error, '无法重新确认计划。');
       options.setStatus(refusal, 'error');
@@ -2044,7 +2044,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       deferredQuestions.delete(card.requestId);
       options.setStatus(TASK_PLAN_CLARIFICATION_SUBMITTED, 'success');
       focusBar = true;
-      options.onRecorded(current.kind, current.bookId);
+      options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {
       refusal = options.errorMessage(error, TASK_PLAN_CLARIFICATION_FAILED);
       options.setStatus(refusal, 'error');

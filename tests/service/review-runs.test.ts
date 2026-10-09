@@ -715,26 +715,44 @@ describe('a Review Run over the real store on exact sample1', () => {
     });
   }, 300_000);
 
-  it('marks what a 当前选区 Run left off when a later 只审改动过的章 reuses its ranges, and counts no coverage from it (Issue #423 review, P1-2)', async () => {
+  it('takes no review from a 当前选区 Run: 只审改动过的章 waits for a chapter review, and what it left off is marked by the next Run in scope (Issue #423 review, P1-2, P1-3, P3-1)', async () => {
     await withBook('sample1-review-authored', async (session, book) => {
       const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
       const twenty = blocks.find((block) => block.position === 20)!;
       const selection = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], { kind: 'selection', fromChapterBlockId: twenty.blockId, toChapterBlockId: twenty.blockId }));
       expect(selection.findings).toEqual([]);
       expect(workspace(session, book).coverage.find((row) => row.categoryId === TYPOS)).toMatchObject({ state: 'never' });
-      // The editor writes in 内容块 1, and reviews only what changed: unit 1 is read again, 16–25 and 26–43 are reused — and the
-      // typos the selection Run found on 15 and 21 and left off are put on the manuscript now, with 10's.
+      // After a selection Run alone, the category has reviewed no chapter: 只审改动过的章 is refused as on a Book never reviewed.
       appendToFirstBlock(session, book);
-      const changed = prepare(session, book, [TYPOS], CHANGED);
-      expect(changed.categories[0]!.plan).toMatchObject({ recomputed: 1, reused: 2 });
-      const synced = await authorizeAndDrive(session, book, changed);
-      expect(synced.findings.map((finding) => [finding.blockPosition, finding.markId !== null]).sort((left, right) => Number(left[0]) - Number(right[0])))
-        .toEqual([[10, true], [15, true], [21, true]]);
-      expect(workspace(session, book).coverage.find((row) => row.categoryId === TYPOS)).toMatchObject({ state: 'current', lastRunOrdinal: 2 });
-      // A later whole review marks nothing twice: every finding it reuses or reads again names the mark already there.
-      const again = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
-      const marked = new Map(synced.findings.map((finding) => [finding.quote, finding.markId] as const));
-      expect(again.findings.filter((finding) => marked.has(finding.quote)).every((finding) => finding.markId === marked.get(finding.quote))).toBe(true);
+      const scopes = workspace(session, book).categories.find((category) => category.categoryId === TYPOS)!.scopes;
+      expect(scopes.changed).toEqual({ available: false, unavailableReason: NEVER_REVIEWED_REASON });
+      expect(storeMessage(() => session.store.createReviewRunPreparationWork(book.bookId, [TYPOS], CHANGED, launchPolicy))).toContain(NEVER_REVIEWED_REASON);
+
+      // A 选章 of 内容块 44–59 reads its chapter and the next, whose context it supplies, and marks what it finds there; the typos
+      // the selection Run left off on 15 and 21 lie outside its chapters and wait for a Run whose scope holds them.
+      const chapters = workspace(session, book).scopeOptions.chapters.chapters;
+      const fortyFour = chapters.find((chapter) => chapter.position === 44)!;
+      const chosen = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], { kind: 'chapters', fromChapterBlockId: fortyFour.blockId, toChapterBlockId: fortyFour.blockId }));
+      expect(chosen.findings.map((finding) => finding.blockPosition).sort((left, right) => Number(left) - Number(right))).toEqual([56, 64]);
+      expect(chosen.categories[0]!.detail).toBe('已形成 2 条发现：2 条在稿件上。');
+
+      // The whole manuscript reviewed, then written in again: 只审改动过的章 is offered, reads what changed, and the category is current
+      // with every typo on the manuscript, each once.
+      const whole = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
+      expect(whole.findings.map((finding) => [finding.blockPosition, finding.markId !== null]).sort((left, right) => Number(left[0]) - Number(right[0])))
+        .toEqual([[10, true], [15, true], [21, true], [56, true], [64, true]]);
+      const firstMarks = new Map(chosen.findings.map((finding) => [finding.quote, finding.markId] as const));
+      expect(whole.findings.filter((finding) => firstMarks.has(finding.quote)).every((finding) => finding.markId === firstMarks.get(finding.quote))).toBe(true);
+      appendToFirstBlock(session, book);
+      const synced = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], CHANGED));
+      expect(synced.state).toBe('settled');
+      expect(workspace(session, book).coverage.find((row) => row.categoryId === TYPOS)).toMatchObject({ state: 'current', lastRunOrdinal: 4 });
+      const db = database();
+      try {
+        expect((db.prepare("SELECT count(*) total FROM editorial_marks WHERE source_origin = 'review-category'").get() as { total: number }).total).toBe(5);
+      } finally {
+        db.close();
+      }
     });
   }, 300_000);
 

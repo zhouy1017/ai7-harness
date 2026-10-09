@@ -1805,8 +1805,18 @@ export class ReviewRunStore {
       `SELECT DISTINCT f.kind_ref FROM review_findings f JOIN review_runs r ON r.review_run_id = f.review_run_id
        WHERE r.book_id = ? AND f.category_id = ?`,
     ).all(snapshot.bookId, category.categoryId) as SqlRow[]).map((row) => text(row.kind_ref)));
-    const read = (finding: { findingId: string; unitOrdinal: number; mergedFrom: ReadonlyArray<{ unitOrdinal: number }> }): boolean =>
-      recomputed.has(finding.unitOrdinal) || finding.mergedFrom.some((merged) => recomputed.has(merged.unitOrdinal)) || !recorded.has(finding.findingId);
+    // Only within the Run's own scope (review P3-1): a 选章 puts on the manuscript what was left off in its chapters, never elsewhere.
+    const chapters = snapshot.scope.kind === 'chapters' ? snapshot.scope.selectedRange : null;
+    const positions = chapters === null ? null : new Map((this.#db.prepare('SELECT block_id, position FROM working_blocks WHERE branch_id = ?')
+      .all(snapshot.manuscript.branchId) as SqlRow[]).map((row) => [text(row.block_id), integer(row.position)] as const));
+    const inScope = (blockId: string): boolean => {
+      if (chapters === null || positions === null) return true;
+      const position = positions.get(blockId);
+      return position !== undefined && position >= chapters.startPosition && position <= chapters.endPosition;
+    };
+    const read = (finding: { findingId: string; unitOrdinal: number; mergedFrom: ReadonlyArray<{ unitOrdinal: number }>; sourceRange: { blockId: string } }): boolean =>
+      recomputed.has(finding.unitOrdinal) || finding.mergedFrom.some((merged) => recomputed.has(merged.unitOrdinal)) ||
+      (!recorded.has(finding.findingId) && inScope(finding.sourceRange.blockId));
     const pinned = (blockId: string, fromGrapheme: number, toGrapheme: number): string => {
       const blockText = blocks.get(blockId);
       requireReview(blockText !== undefined, 'REVIEW_RECORD_INVALID', '发现所在的内容块不在该修订版中。');
@@ -2673,7 +2683,7 @@ export class ReviewRunStore {
     const entry = this.#forBook(bookId, this.#configuration(), readings).categories.find((candidate) => candidate.categoryId === 'series-consistency');
     const last = this.#db.prepare(
       `SELECT max(e.recorded_at) reviewed_at FROM review_run_category_events e JOIN review_runs r ON r.review_run_id = e.review_run_id
-       WHERE r.book_id = ? AND e.category_id = 'series-consistency' AND e.state = 'materialized'`,
+       WHERE r.book_id = ? AND e.category_id = 'series-consistency' AND e.state = 'materialized' AND r.scope_kind <> 'selection'`,
     ).get(bookId) as SqlRow;
     const unavailableReason = entry === undefined
       ? '这一类暂不可用。'
@@ -2705,8 +2715,14 @@ export class ReviewRunStore {
     }
     const revision = projection.resultSetRevision;
     const actions = projection.updateControls?.actions as Readonly<Record<string, { unavailableReason: string | null }>> | undefined;
+    // Reviewed as the coverage matrix reads it (P1-3): by a Run that is not a 当前选区, which put the category on the manuscript.
+    const reviewed = revision !== null && this.#db.prepare(
+      `SELECT 1 FROM review_run_category_events e JOIN review_runs r ON r.review_run_id = e.review_run_id
+       WHERE r.book_id = ? AND e.category_id = ? AND e.state = 'materialized' AND r.scope_kind <> 'selection' LIMIT 1`,
+    ).get(bookId, entry.categoryId) !== undefined;
     const facts: ReviewCategoryLedgerFacts = {
       hasRevision: revision !== null,
+      reviewed,
       stale: revision !== null && revision.freshness.state === 'stale',
       syncUnavailableReason: actions?.['review-sync']?.unavailableReason ?? null,
       baselineRevision: baseline.revision !== null,

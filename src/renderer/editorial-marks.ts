@@ -89,6 +89,8 @@ export interface EditorialMarksSurface {
    * what was chosen and written in it — stays, placed again below its paragraph, while that paragraph is still in the window.
    */
   reanchor(): void;
+  /** Whether a menu, a Mark Card or a composer is open over the text (Issue #423 review, P2-7): a background reload waits for it. */
+  holdsFloating(): boolean;
   /** Open one mark's card, as a click on it would: 审阅's 回到原文 arrives at a finding's mark this way. */
   openMark(markId: string): Promise<void>;
   /**
@@ -1834,6 +1836,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       closeFloating();
       if (composer) options.setStatus(COMPOSER_LEFT_WINDOW, 'error');
     },
+    holdsFloating: () => menu !== undefined || floating !== undefined || composersPending > 0,
     openMark: (markId) => openCard(markId),
     ownsScroll: () => composersPending > 0 || floating !== undefined || (closedAt !== undefined && options.scroll.scrollTop === closedAt.top),
     destroy: () => {

@@ -3692,10 +3692,10 @@ export class BaselineAnalysisStore {
    */
   /** Whether the working manuscript holds, at `range`, the blocks the Task Input revision held there (P3-4). */
   #rangeStillHolds(bookId: string, checkpoint: { readonly manuscriptId: string; readonly revisionId: string }, range: BaselineAnalysisSelectedRange): boolean {
-    const pinned = this.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId);
+    const pinned = new Map(this.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId).map((block) => [block.position, block.blockId] as const));
     const working = new Map(this.readWorkingBlocks(this.#binding(bookId).branchId).map((block) => [block.position, block.blockId] as const));
     for (let position = range.startPosition; position <= range.endPosition; position += 1) {
-      const blockId = pinned.find((block) => block.position === position)?.blockId;
+      const blockId = pinned.get(position);
       if (blockId === undefined || working.get(position) !== blockId) return false;
     }
     return true;
