@@ -7962,7 +7962,7 @@ export class EditorialStore {
         typeId: latest.task.typeId,
         typeLabel: latest.task.input.type.label,
         state: latest.projection.state,
-        label: writingTaskStateLabel(latest.projection),
+        label: writingTaskStateLabel(latest.projection, latest.task.exemplarsReadable),
         // A Task not yet run whose exemplar is no longer here says it cannot start; one that ran says why it wrote no draft.
         refusal: !latest.task.exemplarsReadable && latest.projection.taskOutcome === null ? WRITING_EXEMPLAR_MOVED : this.#writingRefusal(latest.projection),
       },

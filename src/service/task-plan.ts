@@ -34,7 +34,7 @@ import type { Connectivity } from './connectivity.js';
 import { PLAN_MOVED_LABEL } from './reconnect-preflight.js';
 import { graphemeCount, sliceGraphemes } from './analysis/factual-review-contract.js';
 import type { ReviewRunPlanFacts } from './review/review-runs.js';
-import { EXEMPLAR_COPY_WINDOW, WRITING_EXEMPLAR_MOVED, writingExemplarLine, type WritingContractInput } from './writing/writing-contract.js';
+import { EXEMPLAR_COPY_WINDOW, EXEMPLAR_COPY_WINDOW_ACROSS, EXEMPLAR_COPY_WORDS, EXEMPLAR_COPY_WORDS_ACROSS, WRITING_EXEMPLAR_MOVED, writingExemplarLine, type WritingContractInput } from './writing/writing-contract.js';
 
 /**
  * The Task Drawer's plan projection (Issue #418, plan slice S72; editor-surfaces §6 ③, V2-UX-PLAN-001 to
@@ -1093,13 +1093,21 @@ function writingState(projection: WritingProjection): TaskPlanProjection['state'
   return { ...state, label: projection.taskOutcome.label };
 }
 
-/** A writing Task's state in the drawer's own words, for 交付物's 新建文档 · 写作任务 beside the drawer. */
-export function writingTaskStateLabel(projection: WritingProjection): string {
-  return writingState(projection).label;
-}
-
 /** A writing Task whose 范例 is no longer here (#688 re-review): its state, and what its 参考 line adds. */
 export const WRITING_EXEMPLAR_GONE_LABEL = '不能开始 · 范例已不在本机' as const;
+
+/** Whether a writing Task can never start because its 范例 is no longer here: not yet started, its exemplars' text gone. */
+function writingExemplarGone(projection: WritingProjection, exemplarsHere: boolean): boolean {
+  return !exemplarsHere && projection.authorization === null;
+}
+
+/**
+ * A writing Task's state in the drawer's own words, for 交付物's 新建文档 · 写作任务 beside the drawer — a Task whose 范例 is
+ * no longer here says so on both (Issue #698).
+ */
+export function writingTaskStateLabel(projection: WritingProjection, exemplarsHere: boolean): string {
+  return writingExemplarGone(projection, exemplarsHere) ? WRITING_EXEMPLAR_GONE_LABEL : writingState(projection).label;
+}
 export const WRITING_EXEMPLAR_GONE_SUFFIX = '——这些范例已不在本机，这次起草不能再开始' as const;
 
 /** 快速开始 of a writing Task waits for its 默认执行规则 (S84b): until then the plan says so where the rule would be set. */
@@ -1165,7 +1173,7 @@ export function writingPlan(input: {
   const ceiling = provider.runBudgetCeiling;
   const revision = projection.planRevision;
   const boundary = envelope.boundary;
-  const gone = !exemplarsHere && projection.authorization === null;
+  const gone = writingExemplarGone(projection, exemplarsHere);
   const state = gone ? { key: 'ready' as const, label: WRITING_EXEMPLAR_GONE_LABEL } : writingState(projection);
   const needsModelConnection = route.kind === 'opencode-go';
   // A Task whose 范例 is no longer here is never started (#688 re-review): the bar says why, and offers nothing that starts it.
@@ -1227,7 +1235,7 @@ export function writingPlan(input: {
     notDo: {
       editorial: [
         ...EDITORIAL_NOT_DO,
-        `不照抄范例：与范例有连续 ${EXEMPLAR_COPY_WINDOW} 个字以上相同的草稿不予采用`,
+        `不照抄范例：与范例有连续 ${EXEMPLAR_COPY_WINDOW} 个字以上相同（跨标点时 ${EXEMPLAR_COPY_WINDOW_ACROSS} 个字；英文为 ${EXEMPLAR_COPY_WORDS} 个词，跨标点时 ${EXEMPLAR_COPY_WORDS_ACROSS} 个词）的草稿不予采用`,
         '不交付、不发送：草稿在稿件编辑面上由你修改',
         '不改评估记录与基线分析',
         '不读这本书以外的稿件',

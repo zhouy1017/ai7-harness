@@ -52,9 +52,19 @@ export const MAX_CHARACTERS = 12;
 /**
  * The reference bound (Issue #432's stop clause): this many consecutive characters of a draft — compared without spaces,
  * punctuation or symbols, after compatibility normalization — that stand in an exemplar and not in the reference set's own
- * words are a copy, and the draft is refused.
+ * words are a copy, and the draft is refused, when no punctuation stands inside them in either text…
  */
 export const EXEMPLAR_COPY_WINDOW = 12;
+/** …and this many when punctuation does (the Commander's ruling on #698): house phrasing of two short clauses is no one's copy. */
+export const EXEMPLAR_COPY_WINDOW_ACROSS = 16;
+/**
+ * English prose under the same rules on words (#698): this many consecutive words within punctuation, or across it; shingles
+ * of this many words, and spans of this many. Not part of the frozen prompt contract, whose digest a recorded Task is read under.
+ */
+export const EXEMPLAR_COPY_WORDS = 8;
+export const EXEMPLAR_COPY_WORDS_ACROSS = 11;
+export const EXEMPLAR_WORD_SHINGLE = 4;
+export const EXEMPLAR_WORD_SPAN = 130;
 /** The near-copy test (the Commander's ruling (b)): this share or more of a draft's distinct shingles of this length in one exemplar. */
 export const EXEMPLAR_SHINGLE = 6;
 export const EXEMPLAR_SHINGLE_SHARE = 0.25;
@@ -391,52 +401,203 @@ export function writingContractDigest(contract: WritingPromptContract): string {
 // ---- the reference bound: an exemplar is referenced, never copied (KB-004) -----------------------------------------------
 
 /** Spaces, punctuation and symbols are not words: a copy is the same characters whatever stands between them. */
-const NOT_WORDS = /[\s\p{P}\p{S}\p{C}]/gu;
+const NOT_WORD = /[\s\p{P}\p{S}\p{C}]/u;
+/** …but punctuation and symbols end a run that is only 12 characters long: across them a run counts from 16 (#698). */
+const PUNCTUATION = /[\p{P}\p{S}]/u;
 const SEGMENTER = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });
 
-/** A text's characters as the bound compares them: compatibility-normalized, without spaces, punctuation or symbols. */
-function comparable(value: string): string[] {
-  return Array.from(SEGMENTER.segment(value.normalize('NFKC').replace(NOT_WORDS, '')), ({ segment }) => segment);
+/**
+ * One text as the bound compares it: a stream of units — characters, or English words — each with whether punctuation stands
+ * right before it, and whether it belongs to an identifier no one writes (an ISBN, a URL, a code).
+ */
+interface CopyStream {
+  readonly units: ReadonlyArray<string>;
+  readonly breakBefore: ReadonlyArray<boolean>;
+  readonly identifier: ReadonlyArray<boolean>;
+}
+
+/** The ASCII characters an identifier or an English word is written in, and the apostrophes English prose uses in a word. */
+function asciiWordCharacter(code: number): boolean {
+  return (code >= 0x21 && code <= 0x7e) || code === 0x2018 || code === 0x2019;
+}
+
+function alphanumeric(character: string | undefined): boolean {
+  return character !== undefined && /^[0-9A-Za-z]$/u.test(character);
+}
+
+/** Whether one run of ASCII between spaces and other scripts, its punctuation trimmed, is a URL, an e-mail address or a domain. */
+function addressLike(core: string): boolean {
+  if (core.includes('://') || /^www\./iu.test(core)) return true;
+  const at = core.indexOf('@');
+  if (at > 0) {
+    const dot = core.indexOf('.', at);
+    if (dot > at + 1 && dot < core.length - 1) return true;
+  }
+  const host = core.split(/[/?#]/u, 1)[0]!;
+  const labels = host.split('.');
+  return labels.length >= 2 && labels.every((label) => /^[0-9A-Za-z-]+$/u.test(label)) && /^[A-Za-z]{2,24}$/u.test(labels.at(-1)!);
 }
 
 /**
- * For each start of a `size`-character window of the draft's stream, whether it could be someone's words (the Commander's
- * ruling (c), #688 review): not a run of digits and ASCII letters only, and not one touching an ISBN-like run — ten or more of
- * digits and X with at least nine digits, a book number, a phone number, a date written out — wherever in that number the run
- * begins or ends. Linear in the stream.
+ * A text's two streams (the Commander's rulings on #688 and #698), read in two passes over its characters, linear in them:
+ *
+ * - characters: compatibility-normalized, without spaces, punctuation or symbols, each marked when punctuation stood before it;
+ * - English words: each maximal run of ASCII letters (an apostrophe or a hyphen inside one joins it), lower-cased, marked when
+ *   anything but a space stood before it. A number is no one's words and leaves a mark where it stood.
+ *
+ * An ASCII run that looks like an identifier — a URL, an e-mail address, a domain, or a code of letters and digits — is in
+ * neither stream's words: its characters are marked, and the words around it are apart. ISBN-like numbers are marked by
+ * {@link markNumbers}.
  */
-function wordWindows(characters: ReadonlyArray<string>, size: number): boolean[] {
-  const numbered = characters.map(() => false);
+function copyStreams(value: string): { characters: CopyStream; words: CopyStream } {
+  const text = value.normalize('NFKC');
+  const identifierAt = new Uint8Array(text.length);
+  const words: string[] = [];
+  const wordBreaks: boolean[] = [];
+  let wordBreak = false;
+  // The English words, and the identifiers, run by ASCII run.
+  let index = 0;
+  while (index < text.length) {
+    const code = text.charCodeAt(index);
+    if (!asciiWordCharacter(code)) {
+      if (!/\s/u.test(text[index]!)) wordBreak = true;
+      index += 1;
+      continue;
+    }
+    let end = index;
+    while (end < text.length && asciiWordCharacter(text.charCodeAt(end))) end += 1;
+    let first = index;
+    let last = end;
+    while (first < last && !alphanumeric(text[first])) first += 1;
+    while (last > first && !alphanumeric(text[last - 1])) last -= 1;
+    if (first > index) wordBreak = true;
+    if (first < last && addressLike(text.slice(first, last))) {
+      identifierAt.fill(1, first, last);
+      wordBreak = true;
+    } else {
+      let at = first;
+      while (at < last) {
+        if (!alphanumeric(text[at])) {
+          wordBreak = true;
+          at += 1;
+          continue;
+        }
+        let tail = at + 1;
+        while (tail < last && (alphanumeric(text[tail]) || (/^['\u2018\u2019-]$/u.test(text[tail]!) && alphanumeric(text[tail + 1])))) tail += 1;
+        const token = text.slice(at, tail);
+        const digits = /[0-9]/u.test(token);
+        if (digits && /[A-Za-z]/u.test(token)) identifierAt.fill(1, at, tail);
+        if (digits) {
+          wordBreak = true;
+        } else {
+          words.push(token.toLowerCase().replace(/[\u2018\u2019]/gu, "'"));
+          wordBreaks.push(wordBreak);
+          wordBreak = false;
+        }
+        at = tail;
+      }
+    }
+    if (last < end) wordBreak = true;
+    index = end;
+  }
+  // The characters: what is not a word is dropped, punctuation and symbols marking the next character kept.
+  let kept = '';
+  const keptBreak: boolean[] = [];
+  const keptIdentifier: boolean[] = [];
+  let pending = false;
+  for (let at = 0; at < text.length;) {
+    const point = text.codePointAt(at)!;
+    const character = String.fromCodePoint(point);
+    if (NOT_WORD.test(character)) {
+      if (PUNCTUATION.test(character)) pending = true;
+    } else {
+      kept += character;
+      for (let unit = 0; unit < character.length; unit += 1) {
+        keptBreak.push(unit === 0 && pending);
+        keptIdentifier.push(identifierAt[at + unit] === 1);
+      }
+      pending = false;
+    }
+    at += character.length;
+  }
+  const units: string[] = [];
+  const breakBefore: boolean[] = [];
+  const identifier: boolean[] = [];
+  for (const { segment, index: start } of SEGMENTER.segment(kept)) {
+    units.push(segment);
+    let broken = false;
+    let marked = false;
+    for (let unit = start; unit < start + segment.length; unit += 1) {
+      broken ||= keptBreak[unit]!;
+      marked ||= keptIdentifier[unit]!;
+    }
+    breakBefore.push(broken);
+    identifier.push(marked);
+  }
+  return { characters: { units, breakBefore, identifier: markNumbers(units, identifier) }, words: { units: words, breakBefore: wordBreaks, identifier: words.map(() => false) } };
+}
+
+/**
+ * The characters of an ISBN-like run — ten or more of digits and X with at least nine digits: a book number, a phone number, a
+ * date written out — marked as an identifier, wherever in that number a window begins or ends (the Commander's ruling (c),
+ * #688 review). Linear in the stream.
+ */
+function markNumbers(characters: ReadonlyArray<string>, identifier: ReadonlyArray<boolean>): boolean[] {
+  const marked = [...identifier];
   let start = 0;
   for (let index = 0; index <= characters.length; index += 1) {
     if (index < characters.length && /^[0-9Xx]$/u.test(characters[index]!)) continue;
     let digits = 0;
     for (let at = start; at < index; at += 1) if (/^[0-9]$/u.test(characters[at]!)) digits += 1;
-    if (index - start >= 10 && digits >= 9) numbered.fill(true, start, index);
+    if (index - start >= 10 && digits >= 9) marked.fill(true, start, index);
     start = index + 1;
   }
-  const ascii = characters.map((character) => /^[0-9A-Za-z]$/u.test(character));
-  // Running counts, so each window is decided in constant time.
-  const asciiBefore = [0];
-  const numberedBefore = [0];
-  for (let index = 0; index < characters.length; index += 1) {
-    asciiBefore.push(asciiBefore[index]! + (ascii[index] ? 1 : 0));
-    numberedBefore.push(numberedBefore[index]! + (numbered[index] ? 1 : 0));
-  }
-  const words: boolean[] = [];
-  for (let first = 0; first + size <= characters.length; first += 1) {
-    const allAscii = asciiBefore[first + size]! - asciiBefore[first]! === size;
-    const touchesNumber = numberedBefore[first + size]! - numberedBefore[first]! > 0;
-    words.push(!allAscii && !touchesNumber);
-  }
-  return words;
+  return marked;
 }
 
-/** The `size`-character window starting at each position of a stream. */
-function windowKeys(characters: ReadonlyArray<string>, size: number): string[] {
+/** Running counts of a stream's marks, so each window is decided in constant time. */
+function before(marks: ReadonlyArray<boolean>): number[] {
+  const counts = [0];
+  for (let index = 0; index < marks.length; index += 1) counts.push(counts[index]! + (marks[index] ? 1 : 0));
+  return counts;
+}
+
+/** The `size`-unit window starting at each position of a stream: characters joined as they are, words with a space. */
+function windowKeys(stream: CopyStream, size: number, words: boolean): string[] {
   const keys: string[] = [];
-  for (let first = 0; first + size <= characters.length; first += 1) keys.push(characters.slice(first, first + size).join(''));
+  for (let first = 0; first + size <= stream.units.length; first += 1) keys.push(stream.units.slice(first, first + size).join(words ? ' ' : ''));
   return keys;
+}
+
+/** For each `size`-unit window, whether punctuation stands anywhere inside it. */
+function crossesPunctuation(stream: CopyStream, size: number): boolean[] {
+  const breaks = before(stream.breakBefore);
+  const crosses: boolean[] = [];
+  for (let first = 0; first + size <= stream.units.length; first += 1) crosses.push(breaks[first + size]! - breaks[first + 1]! > 0);
+  return crosses;
+}
+
+/**
+ * For each `size`-character window, whether it could be someone's words (the Commander's rulings (c) on #688 and on #698): not
+ * one of digits and ASCII letters only — English prose is compared on its words, and a number is no one's — and not one
+ * touching an identifier: an ISBN-like number, a URL, an e-mail address, a domain or a code. Linear in the stream.
+ */
+function characterWindows(stream: CopyStream, size: number): boolean[] {
+  const ascii = before(stream.units.map((character) => /^[0-9A-Za-z]$/u.test(character)));
+  const marked = before(stream.identifier);
+  const windows: boolean[] = [];
+  for (let first = 0; first + size <= stream.units.length; first += 1) {
+    windows.push(ascii[first + size]! - ascii[first]! !== size && marked[first + size]! - marked[first]! === 0);
+  }
+  return windows;
+}
+
+/** Whether each `size`-character window is made of digits and ASCII letters only: English and numbers, the word stream's. */
+function asciiWindows(stream: CopyStream, size: number): boolean[] {
+  const ascii = before(stream.units.map((character) => /^[0-9A-Za-z]$/u.test(character)));
+  const windows: boolean[] = [];
+  for (let first = 0; first + size <= stream.units.length; first += 1) windows.push(ascii[first + size]! - ascii[first]! === size);
+  return windows;
 }
 
 /**
@@ -456,31 +617,91 @@ function ownWordsOf(input: WritingContractInput): string[] {
   ];
 }
 
+/** The two streams a copy is counted in: characters, and English words (#698). */
+export type ExemplarCopyUnit = 'character' | 'word';
+
 /**
- * How a draft copied an exemplar: a verbatim run; a near copy whose distinct shingles it shares at the threshold or above; or
- * one span of the draft whose shingles it shares at the span threshold or above.
+ * How a draft copied an exemplar: a verbatim run of `run` units; a near copy whose distinct shingles it shares at the threshold
+ * or above; or one span of the draft whose shingles it shares at the span threshold or above — each in characters or in words.
  */
 export type ExemplarCopy =
-  | { exemplar: number; kind: 'verbatim' }
-  | { exemplar: number; kind: 'near'; share: number }
-  | { exemplar: number; kind: 'span'; share: number };
+  | { exemplar: number; kind: 'verbatim'; unit: ExemplarCopyUnit; run: number }
+  | { exemplar: number; kind: 'near'; unit: ExemplarCopyUnit; share: number }
+  | { exemplar: number; kind: 'span'; unit: ExemplarCopyUnit; share: number };
+
+/** One stream's sizes: the verbatim run within punctuation and across it, the shingle, the span. */
+interface StreamRules {
+  readonly unit: ExemplarCopyUnit;
+  readonly within: number;
+  readonly across: number;
+  readonly shingle: number;
+  readonly span: number;
+}
+
+const CHARACTER_RULES: StreamRules = { unit: 'character', within: EXEMPLAR_COPY_WINDOW, across: EXEMPLAR_COPY_WINDOW_ACROSS, shingle: EXEMPLAR_SHINGLE, span: EXEMPLAR_SPAN };
+const WORD_RULES: StreamRules = { unit: 'word', within: EXEMPLAR_COPY_WORDS, across: EXEMPLAR_COPY_WORDS_ACROSS, shingle: EXEMPLAR_WORD_SHINGLE, span: EXEMPLAR_WORD_SPAN };
+
+/** One text's windows in one stream, as sets: the runs within punctuation, every run of each length, every shingle. */
+interface StreamWindows {
+  readonly within: Set<string>;
+  readonly withinAny: Set<string>;
+  readonly across: Set<string>;
+  readonly shingles: Set<string>;
+}
+
+function streamWindows(stream: CopyStream, rules: StreamRules): StreamWindows {
+  const words = rules.unit === 'word';
+  const within = windowKeys(stream, rules.within, words);
+  const crosses = crossesPunctuation(stream, rules.within);
+  return {
+    within: new Set(within.filter((_, at) => !crosses[at])),
+    withinAny: new Set(within),
+    across: new Set(windowKeys(stream, rules.across, words)),
+    shingles: new Set(windowKeys(stream, rules.shingle, words)),
+  };
+}
+
+/** What the draft holds in one stream, and which of its windows may count against an exemplar. */
+interface DraftStream {
+  readonly rules: StreamRules;
+  /** Runs that may count, each with whether punctuation stands inside it. */
+  readonly within: ReadonlyArray<{ key: string; crosses: boolean }>;
+  readonly across: ReadonlyArray<string>;
+  readonly shingleKeys: ReadonlyArray<string>;
+  readonly countable: ReadonlyArray<boolean>;
+  /** The draft's distinct shingles that weigh in the near share: its own words, numbers and the house's phrasing among them. */
+  readonly distinct: number;
+}
 
 /**
  * The first exemplar a draft copies, by its position among the contract's exemplars, or `null` when it copies none. The
- * Commander's rulings on the reference bound (#688 review and re-review), which the Issue's stop clause leaves to the Commander:
+ * Commander's rulings on the reference bound (#688 review and re-review, and #698), which the Issue's stop clause leaves to the
+ * Commander:
  *
  * - (a) The draft is compared as one stream, its title, headings and paragraphs joined as the exemplar's paragraphs are — a
- *   copy cut at a part's edge is still a copy. Both are compatibility-normalized, without spaces, punctuation or symbols.
- * - Verbatim: any {@link EXEMPLAR_COPY_WINDOW} consecutive characters of the draft that stand in the exemplar.
+ *   copy cut at a part's edge is still a copy. Both are compatibility-normalized; characters are compared without spaces,
+ *   punctuation or symbols.
+ * - Verbatim: {@link EXEMPLAR_COPY_WINDOW} consecutive characters of the draft that stand in the exemplar with no punctuation
+ *   inside them, in either; a run that crosses punctuation counts only from {@link EXEMPLAR_COPY_WINDOW_ACROSS} (#698) — so
+ *   house phrasing of two short clauses, 「书中人物形象鲜明，情节跌宕起伏」, is no one's copy even in one exemplar.
  * - (b) Near copy, over {@link EXEMPLAR_SHINGLE}-character shingles: {@link EXEMPLAR_SHINGLE_SHARE} or more of the draft's
  *   distinct shingles stand in one exemplar — a draft that is mostly a lightly edited exemplar — or, in any
  *   {@link EXEMPLAR_SPAN}-character span of the draft, {@link EXEMPLAR_SPAN_SHARE} or more of the span's shingles do — a
- *   near-copied paragraph inside a long draft. An edit every n characters keeps n − 6 clean shingles of every n (n ≥ 13 is a
- *   verbatim run), so a draft that is all such a copy is caught from n = 8 and a paragraph inside a long draft from n = 9.
- *   The known limits: edits every 5 characters or fewer leave no shingle in common; every 6 or 7 pass however much is
- *   copied; every 8 passes inside a long draft.
- * - (c) House boilerplate is no one's copy: a run that stands in two or more exemplars — each another Book's, one per Book —
- *   or one of digits and ASCII letters only, or one touching an ISBN-like run of the draft.
+ *   near-copied paragraph inside a long draft. An edit every n characters keeps n − 6 clean shingles of every n, so a draft
+ *   that is all such a copy is caught from n = 8. Inside a long draft the span rule needs 59 of a span's 195 shingles, so it
+ *   catches such a paragraph only from a certain length: 178 characters edited every 9, 148 every 10, 130 every 11, 118
+ *   every 12, and 112, 106, 100 and 94 every 13 to 16 when the clean runs cross punctuation (a clean run of 12 within
+ *   punctuation, or of 16 across it, is verbatim). A near-copied paragraph shorter than that — 120 characters edited every
+ *   10, say — passes inside a long draft (#698). The known limits: edits every 5 characters or fewer leave no shingle in
+ *   common; every 6 or 7 pass however much is copied; every 8 passes inside a long draft.
+ * - English prose runs through the same rules on words (#698): {@link EXEMPLAR_COPY_WORDS} words within punctuation, or
+ *   {@link EXEMPLAR_COPY_WORDS_ACROSS} across it; {@link EXEMPLAR_WORD_SHINGLE}-word shingles, their share counted with the
+ *   characters' in the near copy, and their own {@link EXEMPLAR_WORD_SPAN}-word span. A span floor follows the same way: an
+ *   edit every n words is caught inside a long draft from 118 words every 6, 90 every 7 and 78 every 8, and 70, 66 and 62
+ *   every 9 to 11 across punctuation. English edited every 5 words or fewer passes.
+ * - (c) House boilerplate is no one's copy: a run that stands in two or more exemplars — each another Book's, one per Book. An
+ *   ASCII run is no one's words only when it looks like an identifier (#698) — an ISBN-like number, a URL, an e-mail address, a
+ *   domain, a code of letters and digits — and a window touching one is left; a number between English words is no word.
  * - (d) A run the Book's own reference words share — its title, a character's name, its synopsis, its evaluation's words — is
  *   the Book's; the editor's 受众, 渠道 and 其他要求 exempt nothing.
  * - (e) 繁体 and 简体 are compared as written: no conversion table is among the dependencies, so a copy re-written in the other
@@ -490,51 +711,83 @@ export type ExemplarCopy =
  */
 export function exemplarCopied(draft: WritingDraftWordsProjection, input: WritingContractInput): ExemplarCopy | null {
   if (input.exemplars.length === 0) return null;
-  const ownRuns = new Set<string>();
-  const ownShingles = new Set<string>();
-  for (const words of ownWordsOf(input)) {
-    const characters = comparable(words);
-    for (const run of windowKeys(characters, EXEMPLAR_COPY_WINDOW)) ownRuns.add(run);
-    for (const run of windowKeys(characters, EXEMPLAR_SHINGLE)) ownShingles.add(run);
-  }
-  const exemplars = input.exemplars.map((exemplar) => {
-    const characters = comparable(exemplar.text);
-    return { runs: new Set(windowKeys(characters, EXEMPLAR_COPY_WINDOW)), shingles: new Set(windowKeys(characters, EXEMPLAR_SHINGLE)) };
+  const ownStreams = ownWordsOf(input).map(copyStreams);
+  const own = (pick: 'characters' | 'words', rules: StreamRules): StreamWindows => {
+    const sets: StreamWindows = { within: new Set(), withinAny: new Set(), across: new Set(), shingles: new Set() };
+    for (const streams of ownStreams) {
+      const windows = streamWindows(streams[pick], rules);
+      for (const key of windows.withinAny) sets.withinAny.add(key);
+      for (const key of windows.across) sets.across.add(key);
+      for (const key of windows.shingles) sets.shingles.add(key);
+    }
+    return sets;
+  };
+  const exemplarStreams = input.exemplars.map((exemplar) => copyStreams(exemplar.text));
+  // The draft's parts are joined as the exemplar's paragraphs are: its characters with nothing between them, its words apart.
+  const parts = [draft.title, ...draft.sections.flatMap((section) => [section.heading, ...section.paragraphs])];
+  const characterStream = copyStreams(parts.join(''));
+  const wordStream = copyStreams(parts.join('\n')).words;
+
+  const streams = ([['characters', characterStream.characters, CHARACTER_RULES], ['words', wordStream, WORD_RULES]] as const).map(([pick, stream, rules]) => {
+    const ownSets = own(pick, rules);
+    const exemplars = exemplarStreams.map((streamsOf) => streamWindows(streamsOf[pick], rules));
+    // Runs two exemplars share are the house's phrasing: every exemplar is another Book's, one per Book.
+    const shared = (sets: (entry: StreamWindows) => Set<string>, key: string): boolean => exemplars.filter((entry) => sets(entry).has(key)).length >= 2;
+    const characters = rules.unit === 'character';
+    const allowed = (size: number): boolean[] => (characters ? characterWindows(stream, size) : windowKeys(stream, size, true).map(() => true));
+    const withinKeys = windowKeys(stream, rules.within, !characters);
+    const withinAllowed = allowed(rules.within);
+    const withinCrosses = crossesPunctuation(stream, rules.within);
+    const acrossKeys = windowKeys(stream, rules.across, !characters);
+    const acrossAllowed = allowed(rules.across);
+    const shingleKeys = windowKeys(stream, rules.shingle, !characters);
+    const shingleAllowed = allowed(rules.shingle);
+    const shingleAscii = characters ? asciiWindows(stream, rules.shingle) : shingleKeys.map(() => false);
+    const draftStream: DraftStream = {
+      rules,
+      within: withinKeys.flatMap((key, at) => (withinAllowed[at] && !ownSets.withinAny.has(key) && !shared((entry) => entry.withinAny, key) ? [{ key, crosses: withinCrosses[at]! }] : [])),
+      across: acrossKeys.filter((key, at) => acrossAllowed[at] && !ownSets.across.has(key) && !shared((entry) => entry.across, key)),
+      shingleKeys,
+      countable: shingleKeys.map((key, at) => shingleAllowed[at]! && !ownSets.shingles.has(key) && !shared((entry) => entry.shingles, key)),
+      // The share is of every distinct shingle the draft has in this stream, so its own words, numbers and the house's
+      // phrasing dilute a copy only by what they add, never by being skipped; English in the character stream is the word
+      // stream's to weigh.
+      distinct: new Set(shingleKeys.filter((_, at) => !shingleAscii[at])).size,
+    };
+    return { draft: draftStream, exemplars };
   });
-  // Runs two exemplars share are the house's phrasing: every exemplar is another Book's, one per Book.
-  const shared = (pick: (entry: (typeof exemplars)[number]) => Set<string>, run: string): boolean =>
-    exemplars.filter((entry) => pick(entry).has(run)).length >= 2;
-  const stream = comparable([draft.title, ...draft.sections.flatMap((section) => [section.heading, ...section.paragraphs])].join(''));
-  const runKeys = windowKeys(stream, EXEMPLAR_COPY_WINDOW);
-  const runWords = wordWindows(stream, EXEMPLAR_COPY_WINDOW);
-  const runs = runKeys.filter((run, index) => runWords[index] && !ownRuns.has(run) && !shared((entry) => entry.runs, run));
-  for (const [index, exemplar] of exemplars.entries()) {
-    if (runs.some((run) => exemplar.runs.has(run))) return { exemplar: index, kind: 'verbatim' };
+
+  for (const index of input.exemplars.keys()) {
+    for (const { draft: stream, exemplars } of streams) {
+      const exemplar = exemplars[index]!;
+      if (stream.within.some((run) => !run.crosses && exemplar.within.has(run.key))) return { exemplar: index, kind: 'verbatim', unit: stream.rules.unit, run: stream.rules.within };
+      if (stream.across.some((run) => exemplar.across.has(run))) return { exemplar: index, kind: 'verbatim', unit: stream.rules.unit, run: stream.rules.across };
+    }
   }
-  const shingleKeys = windowKeys(stream, EXEMPLAR_SHINGLE);
-  if (shingleKeys.length === 0) return null;
-  const shingleWords = wordWindows(stream, EXEMPLAR_SHINGLE);
-  const countable = shingleKeys.map((run, index) => shingleWords[index]! && !ownShingles.has(run) && !shared((entry) => entry.shingles, run));
-  // The share is of every distinct shingle the draft has, so its own words, numbers and the house's phrasing dilute a copy only
-  // by what they add, never by being skipped.
-  const distinct = new Set(shingleKeys).size;
-  for (const [index, exemplar] of exemplars.entries()) {
-    const counted = new Set(shingleKeys.filter((run, at) => countable[at] && exemplar.shingles.has(run))).size;
-    if (counted / distinct >= EXEMPLAR_SHINGLE_SHARE) return { exemplar: index, kind: 'near', share: counted / distinct };
+  const distinct = streams.reduce((sum, { draft: stream }) => sum + stream.distinct, 0);
+  if (distinct > 0) {
+    for (const index of input.exemplars.keys()) {
+      const counted = streams.map(({ draft: stream, exemplars }) =>
+        new Set(stream.shingleKeys.filter((key, at) => stream.countable[at] && exemplars[index]!.shingles.has(key))).size);
+      const share = (counted[0]! + counted[1]!) / distinct;
+      if (share >= EXEMPLAR_SHINGLE_SHARE) return { exemplar: index, kind: 'near', unit: counted[0]! >= counted[1]! ? 'character' : 'word', share };
+    }
   }
   // One span of the draft at a time, slid along it with a running count.
-  const span = EXEMPLAR_SPAN - EXEMPLAR_SHINGLE + 1;
-  if (shingleKeys.length < span) return null;
-  for (const [index, exemplar] of exemplars.entries()) {
-    const hits = shingleKeys.map((run, at) => (countable[at] && exemplar.shingles.has(run) ? 1 : 0));
-    let inSpan = 0;
-    let most = 0;
-    for (let at = 0; at < hits.length; at += 1) {
-      inSpan += hits[at]!;
-      if (at >= span) inSpan -= hits[at - span]!;
-      if (at >= span - 1) most = Math.max(most, inSpan);
+  for (const index of input.exemplars.keys()) {
+    for (const { draft: stream, exemplars } of streams) {
+      const span = stream.rules.span - stream.rules.shingle + 1;
+      if (stream.shingleKeys.length < span) continue;
+      const hits = stream.shingleKeys.map((key, at) => (stream.countable[at] && exemplars[index]!.shingles.has(key) ? 1 : 0));
+      let inSpan = 0;
+      let most = 0;
+      for (let at = 0; at < hits.length; at += 1) {
+        inSpan += hits[at]!;
+        if (at >= span) inSpan -= hits[at - span]!;
+        if (at >= span - 1) most = Math.max(most, inSpan);
+      }
+      if (most / span >= EXEMPLAR_SPAN_SHARE) return { exemplar: index, kind: 'span', unit: stream.rules.unit, share: most / span };
     }
-    if (most / span >= EXEMPLAR_SPAN_SHARE) return { exemplar: index, kind: 'span', share: most / span };
   }
   return null;
 }
@@ -591,11 +844,14 @@ export function parseWritingUnitResult(value: string, expected: { unitOrdinal: n
 /** What a refused draft is told: which exemplar it copied, and how. */
 export function exemplarCopyDetail(copied: ExemplarCopy, input: WritingContractInput): string {
   const exemplar = input.exemplars[copied.exemplar]!;
+  const words = copied.unit === 'word';
+  const across = copied.kind === 'verbatim' && copied.run === (words ? EXEMPLAR_COPY_WORDS_ACROSS : EXEMPLAR_COPY_WINDOW_ACROSS);
+  const shingle = words ? `${EXEMPLAR_WORD_SHINGLE} 词片段` : `${EXEMPLAR_SHINGLE} 字片段`;
   const how = copied.kind === 'verbatim'
-    ? `有连续 ${EXEMPLAR_COPY_WINDOW} 个字以上相同`
+    ? `有${across ? '跨标点' : ''}连续 ${copied.run} 个${words ? '英文词' : '字'}以上相同`
     : copied.kind === 'near'
-      ? `的 ${EXEMPLAR_SHINGLE} 字片段重合达 ${Math.floor(copied.share * 100)}%（不少于 ${EXEMPLAR_SHINGLE_SHARE * 100}% 即算照抄）`
-      : `在草稿的一段 ${EXEMPLAR_SPAN} 字中，${EXEMPLAR_SHINGLE} 字片段重合达 ${Math.floor(copied.share * 100)}%（不少于 ${EXEMPLAR_SPAN_SHARE * 100}% 即算照抄）`;
+      ? `的 ${shingle}重合达 ${Math.floor(copied.share * 100)}%（不少于 ${EXEMPLAR_SHINGLE_SHARE * 100}% 即算照抄）`
+      : `在草稿的一段 ${words ? `${EXEMPLAR_WORD_SPAN} 个英文词` : `${EXEMPLAR_SPAN} 字`}中，${shingle}重合达 ${Math.floor(copied.share * 100)}%（不少于 ${EXEMPLAR_SPAN_SHARE * 100}% 即算照抄）`;
   return `草稿与范例《${exemplar.bookTitle}》版本 ${exemplar.version} ${how}；范例只参照，不复制，这份草稿不予采用。`;
 }
 
