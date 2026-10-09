@@ -283,10 +283,17 @@ describe('后台分析登记 over the real store on exact sample1', () => {
       expect(store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime()).startedRuns.map((run) => run.enrollmentOrdinal)).toEqual([1]);
       expect(after.resultSetRevision!.ordinal).toBe(2);
 
+      // A start the dispatcher decided under the revoked version records nothing.
+      expect(store.startEnrolledBaselineAnalysis(book.bookId, randomUUID(), 'a'.repeat(64), enrolled.enrollment!.enrollmentVersionId, 'sync-current', runtime()))
+        .toEqual({ dispatchRunRecordId: null, reason: BACKGROUND_REVOKED });
+
       // Enrolling again is a new decision, the next version.
       const again = enroll(store, book.bookId, 'backfill');
       expect([again.state, again.enrollment!.ordinal, again.enrollment!.startingPoint]).toEqual(['active', 2, 'backfill']);
       expect(again.history.map((entry) => [entry.state, entry.ordinal])).toEqual([['active', 1], ['revoked', 1], ['active', 2]]);
+      // The revoked version names no start even with a version in force: a start names the one in force, or nothing.
+      expect(store.startEnrolledBaselineAnalysis(book.bookId, randomUUID(), 'a'.repeat(64), enrolled.enrollment!.enrollmentVersionId, 'sync-current', runtime()))
+        .toEqual({ dispatchRunRecordId: null, reason: BACKGROUND_REVOKED });
       store.markCleanShutdown();
     } finally {
       await owner.dispose();
@@ -406,9 +413,16 @@ describe('后台分析登记 over the real store on exact sample1', () => {
         expect(() => database.exec(`UPDATE ${table} SET canonical_json = canonical_json`)).toThrow(/BACKGROUND_ANALYSIS_ENROLLMENT_IMMUTABLE/u);
         expect(() => database.exec(`DELETE FROM ${table}`)).toThrow(/BACKGROUND_ANALYSIS_ENROLLMENT_IMMUTABLE/u);
       }
-      // A forged active state over a version of another Enrollment is not one the ledger wrote.
+      // The ledger itself enrolls a Book in force only by the confirmation that put it there: any other is refused.
       const ledger = new BackgroundAnalysisEnrollmentLedger(database);
-      expect(ledger.active()).toHaveLength(1);
+      const [active] = ledger.active();
+      expect(active).toBeDefined();
+      const input = { bookId: active!.bookId, startingPoint: active!.version.startingPoint, binding: active!.version.binding,
+        enrolledAt: active!.version.enrolledAt, disclosureDigest: active!.version.disclosureDigest };
+      expect(ledger.enroll(input).version.enrollmentVersionId).toBe(active!.version.enrollmentVersionId);
+      expect(() => ledger.enroll({ ...input, disclosureDigest: 'b'.repeat(64) })).toThrow(/已经登记了后台分析/u);
+      expect(() => ledger.enroll({ ...input, startingPoint: 'prospective' })).toThrow(/已经登记了后台分析/u);
+      expect(ledger.history(active!.bookId)).toHaveLength(1);
     });
     // Merging a Book from another house never brings its Enrollment.
     for (const table of Object.keys(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL)) expect(MERGE_TABLE_POLICY[table]).toBe('house');
