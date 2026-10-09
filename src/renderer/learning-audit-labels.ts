@@ -1,6 +1,7 @@
 import type {
   LearningAuditStanding,
   LearningLineageDecisionProjection,
+  LearningLedgerMaterialKind,
   LearningMaterialKind,
   LearningRemediationLeftOut,
 } from '../shared/protocol.js';
@@ -51,10 +52,11 @@ export const LEARNING_AUDIT_MORE = '更多学习材料…';
 export const LEARNING_AUDIT_FIRST = '回到首批学习材料';
 export const LEARNING_AUDIT_SEARCH = '查找';
 
-export const LEARNING_AUDIT_KIND_LABELS: Readonly<Record<LearningMaterialKind, string>> = {
+export const LEARNING_AUDIT_KIND_LABELS: Readonly<Record<LearningLedgerMaterialKind, string>> = {
   'proposal-decision': '修改建议',
   'analysis-feedback': '分析反馈',
   'review-disposition': '审阅',
+  'readers-report-exemplar': '审稿意见范例',
 };
 
 /** Where a material stands, as a pill on its row and a choice of the filter. */

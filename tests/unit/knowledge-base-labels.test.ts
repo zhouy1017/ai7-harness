@@ -14,6 +14,11 @@ import {
   artifactLine,
   procedureLine,
   EXEMPLARS_LATER,
+  EXEMPLAR_READERS_REPORT_ADMIT,
+  EXEMPLAR_READERS_REPORT_PINS,
+  EXEMPLAR_READERS_REPORT_STATUS,
+  readersReportExemplarAdmission,
+  readersReportExemplarLine,
   exemplarAttribution,
   exemplarDesignation,
   exemplarLine,
@@ -124,7 +129,24 @@ describe('范例 (Issue #427, S79b)', () => {
     // Past the versions it names, the line says how many there were.
     expect(exemplarLine({ ...exemplar, version: 14, earlierVersionCount: 12, earlierVersions: [12, 13] }, (iso) => iso))
       .toBe('新闻稿 · 版本 14 · 交付给编辑部于 t1 · 归入于 t2 · 学习准入：仅本社 · 此前还交付过 12 个版本，最近的是版本 12、13');
-    expect(EXEMPLARS_LATER).toHaveLength(2);
+    // The 审稿意见 now come in (Issue #429); only the import of earlier Books is still to come.
+    expect(EXEMPLARS_LATER).toEqual(['以前出版的书的范例由编辑导入并标明图书、作者、责编：尚未提供。']);
+  });
+
+  it('offers a Book\'s 审稿意见 at the version 图书交付包 pins, under 仅本社, and says where its admission stands (Issue #429)', () => {
+    const offered = {
+      template: 'author' as const, typeId: 'readers-report-author', typeLabel: '审稿意见 · 给作者的修改意见', documentId: 'd', version: 2,
+      revisionId: 'r', revisionDigest: 'b'.repeat(64), savedAt: 't1', pin: 'designation' as const, eligibility: 'house-only' as const,
+      admission: { state: 'offered' as const, admittedAt: null, decisions: 0 },
+    };
+    expect(readersReportExemplarLine(offered, (iso) => iso))
+      .toBe('审稿意见 · 给作者的修改意见 · 版本 2 · 保存于 t1 · 设为发稿版本时的最新一版 · 学习准入：仅本社 · 尚未归入：由你决定是否归入范例');
+    expect(readersReportExemplarLine({ ...offered, pin: 'later', admission: { state: 'admitted', admittedAt: 't2', decisions: 1 } }, (iso) => iso))
+      .toBe('审稿意见 · 给作者的修改意见 · 版本 2 · 保存于 t1 · 发稿版本设定后才起草，按现在的最新一版 · 学习准入：仅本社 · 已归入于 t2');
+    expect(readersReportExemplarAdmission({ state: 'superseded', admittedAt: null, decisions: 1 }, (iso) => iso)).toBe('此前归入的是另一版；这一版尚未归入');
+    expect(EXEMPLAR_READERS_REPORT_PINS).toEqual({ designation: '设为发稿版本时的最新一版', later: '发稿版本设定后才起草，按现在的最新一版' });
+    expect(EXEMPLAR_READERS_REPORT_ADMIT).toBe('归入范例（仅本社）');
+    expect(EXEMPLAR_READERS_REPORT_STATUS).toEqual({ admitting: '正在归入范例…', admitted: '审稿意见已归入范例', failed: '无法归入范例。' });
   });
 });
 

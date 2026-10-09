@@ -131,11 +131,13 @@ describe('图书交付包 (S67a)', () => {
         { kind: 'publication', label: '发稿版本「一审稿」 · r1', detail: '发稿范围：纸质版首印' },
         { kind: 'document', label: '新闻稿 · 版本 1', detail: '第 1 次交付 · 版本 1 · 宣传部；交付记录 1 条' },
       ]);
-      expect(bundle.content.excluded.map((item) => [item.kind, item.label])).toEqual([
-        ['not-for-this-book', '宣传文章'], ['not-for-this-book', '评论文章'], ['not-for-this-book', '发布会材料'], ['not-for-this-book', '营销要点'],
-        ['exclusion', '备注'], ['exclusion', '资料库原件'], ['exclusion', '中间修订版'],
+      // A Book with no 定稿 评估记录 and no 审稿意见 lists both under 不包含 with the reason, and neither holds the package (Issue #429).
+      expect(bundle.content.excluded.map((item) => [item.kind, item.label, item.detail])).toEqual([
+        ['not-for-this-book', '宣传文章', '本书不做'], ['not-for-this-book', '评论文章', '本书不做'], ['not-for-this-book', '发布会材料', '本书不做'], ['not-for-this-book', '营销要点', '本书不做'],
+        ['evaluation-record', '评估记录', BOOK_DELIVERY_PACKAGE_WORDS.evaluationMissing], ['readers-report', '审稿意见', BOOK_DELIVERY_PACKAGE_WORDS.readersReportMissing],
+        ['exclusion', '备注', '稿件与文档上的备注只供编辑自己参考'], ['exclusion', '资料库原件', null], ['exclusion', '中间修订版', '稿件只含发稿版本，文档只含交付过的版本'],
       ]);
-      expect(bundle.content.limitations).toEqual([BOOK_DELIVERY_PACKAGE_WORDS.unavailableRecords]);
+      expect(bundle.content.limitations).toEqual([]);
 
       // A purpose within its bound, and the content the editor saw: a stale digest is refused.
       expect(code(() => prepare('   ', bundle.content.digest))).toBe('BOOK_DELIVERY_PACKAGE_PURPOSE_INVALID');
@@ -145,7 +147,7 @@ describe('图书交付包 (S67a)', () => {
       const v1 = prepare(' 交出版社存档 ', bundle.content.digest);
       expect([v1.outcome, v1.version, v1.package.ready, v1.package.changedSinceLatest]).toEqual(['prepared', 1, true, false]);
       expect(v1.package.versions.map((version) => [version.label, version.purpose, version.current, version.exportHistoryLabel, version.summary, version.technical.priorVersionId]))
-        .toEqual([['v1', '交出版社存档', true, '暂无导出记录', '发稿版本「一审稿」 · r1 · 生产文档 1 份 · 本书不做 4 类 · 审阅报告 0 份', null]]);
+        .toEqual([['v1', '交出版社存档', true, '暂无导出记录', '发稿版本「一审稿」 · r1 · 生产文档 1 份 · 本书不做 4 类 · 审阅报告 0 份 · 评估记录 0 份 · 审稿意见 0 份', null]]);
       // Preparing again with the same content and purpose is v1, unchanged; a new purpose is v2, naming v1.
       expect(prepare('交出版社存档', bundle.content.digest)).toMatchObject({ outcome: 'unchanged', version: 1 });
       const v2 = prepare('交印厂', bundle.content.digest);
@@ -247,7 +249,6 @@ describe('图书交付包 (S67a)', () => {
         '第 2 次审阅部分完成，报告按它的实际结果写出。',
         '第 3 次审阅未能完成，报告写明了原因。',
         '第 4 次审阅没有开始，不在包中。',
-        BOOK_DELIVERY_PACKAGE_WORDS.unavailableRecords,
       ]);
       // Without a 发稿版本 nothing is prepared, whatever else holds.
       expect(bundle.ready).toBe(false);

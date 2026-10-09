@@ -18,6 +18,7 @@ import {
   type FeedbackHistoryPeopleVersion,
   type FeedbackHistoryProjection,
   type LearningEligibilityChoice,
+  type LearningLedgerMaterialKind,
   type LearningMaterialKind,
   type LearningMaterialProjection,
   type LearningMaterialTarget,
@@ -150,9 +151,14 @@ export function initializeLearningEligibilitySchema(db: DatabaseSync): void {
 
 /** A Learning Material as the store identifies it; the ledger decides nothing about it but its eligibility. */
 export interface LearningMaterialCandidate {
-  readonly source: { readonly kind: 'decision'; readonly decisionId: string } | Omit<Extract<LearningMaterialTarget, { kind: 'analysis' }>, 'bookId'> | Omit<Extract<LearningMaterialTarget, { kind: 'review' }>, 'bookId'>;
+  readonly source:
+    | { readonly kind: 'decision'; readonly decisionId: string }
+    | Omit<Extract<LearningMaterialTarget, { kind: 'analysis' }>, 'bookId'>
+    | Omit<Extract<LearningMaterialTarget, { kind: 'review' }>, 'bookId'>
+    /** A 审稿意见 offered into 范例 at one exact version (Issue #429): 学习准入 lists no card for it; 范例 admits it. */
+    | { readonly kind: 'readers-report-exemplar'; readonly documentId: string; readonly revisionId: string };
   readonly materialKey: string;
-  readonly kind: LearningMaterialKind;
+  readonly kind: LearningLedgerMaterialKind;
   readonly originLabel: string;
   readonly recordedAt: string;
   /**
@@ -647,7 +653,7 @@ export function learningRemediationPreview(
   const leftOut: Array<{ materialKey: string; originLabel: string | null; reason: LearningRemediationPreviewProjection['leftOut'][number]['reason'] }> = [];
   const seen = new Set<string>();
   let scope: 'book' | 'house' | null = null;
-  let kind: LearningMaterialKind | null = null;
+  let kind: LearningLedgerMaterialKind | null = null;
   for (const item of items) {
     if (seen.has(item.materialKey)) {
       leftOut.push({ materialKey: item.materialKey, originLabel: null, reason: 'duplicate' });
