@@ -26,7 +26,7 @@ import {
   ANALYSIS_LEDGER_SCHEMA_SQL,
   ANALYSIS_LEDGER_TRIGGER_SQL,
   INITIAL_EVALUATION_SCHEMA_VERSION,
-  BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
+  MATERIAL_INDEX_SCHEMA_VERSION,
   DIALOGUE_SCHEMA_VERSION,
   SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
@@ -373,7 +373,7 @@ describe('审稿意见 over the real store on exact sample1', () => {
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
       expect(rows(after)).toBe(before!);
       for (const table of KIND_COUPLED_ANALYSIS_RELATIONS) {
         expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(ANALYSIS_LEDGER_SCHEMA_SQL[table]);
