@@ -86,10 +86,17 @@ const CHENG_WORDS = new Set('不功为长熟就绩果立本员型形事交分色
  * 唯一成年, 单一成分 (Issue #702 review). 万一 is a numeral run of its own and reads the same way.
  */
 const YI_WORD_HEADS = new Set('统唯单同归专划逐');
-/** What before 单 makes it the end of a word — 订单, 名单, 下单 — so 一成 after it is a share again (Issue #702 re-review). */
-const DAN_WORD_STARTS = new Set('订名清菜账下买保报简传开');
-/** What after 一块多 or 一块左右 keeps it a price: 钱, a count, the end of the line — not 「放在一块多有意思」 (Issue #702 re-review). */
-const PRICE_AFTER_ROUGHLY = new Set('钱一本的');
+/**
+ * What before 单 leaves it opening the word 单一 — a word's end such as 的, 很, 较为, 过于, or the line's start — so 一成 after
+ * it is no share: 「单一成年人物的视角」, 「视角过于单一成年读者会厌倦」. 单 after anything else ends a word of its own — 订单, 退单,
+ * 接单, 提单 — and 一成 after it is a share (Issue #708: the rule inverted, so a word outside a closed list is still caught).
+ */
+const DAN_YI_LEADS = new Set('的很较太于为更最不是也都和与并而且又既偏略稍常对极颇些得过种个了');
+/**
+ * What after 一块多 or 一块左右 keeps it a price: 钱, a count, 点 (「一块多点儿」), a sentence particle (「卖一块多吧」), the end of
+ * the line — not 「放在一块多有意思」 (Issue #702 re-review, Issue #708).
+ */
+const PRICE_AFTER_ROUGHLY = new Set('钱一本的点吧呢吗啊呀嘛啦哦');
 /** What before a lone 一 makes 一块 a piece rather than a yuan: 这一块, 每一块, 另一块 (Issue #702 review). */
 const YI_KUAI_PIECE = new Set('这那哪每另同整');
 /** 千万 the adverb — 千万不要, 千万别, 千万小心, 千万注意 — rather than ten million. */
@@ -118,7 +125,10 @@ function followsFigureWord(chars: ReadonlyArray<string>, start: number): boolean
   return false;
 }
 
-/** Whether what stands at `at` keeps 一块多 or 一块左右 a price: 钱, a count, 的 or the line's end. */
+/** Whether 单 at `at` opens the word 单一 rather than ending one: what stands before it is no character it makes a word with. */
+const opensDanYi = (chars: ReadonlyArray<string>, at: number): boolean => isTerminal(chars[at - 1]) || DAN_YI_LEADS.has(chars[at - 1]!);
+
+/** Whether what stands at `at` keeps 一块多 or 一块左右 a price: 钱, a count, 的, 点, a sentence particle or the line's end. */
 const priceFollows = (chars: ReadonlyArray<string>, at: number): boolean => PRICE_AFTER_ROUGHLY.has(chars[at]!) || isTerminal(chars[at]);
 
 /** Whether one numeral run, with what stands right after it and right before it, states a quantity. */
@@ -150,8 +160,9 @@ function runStatesQuantity(chars: ReadonlyArray<string>, run: NumeralRun): boole
   if (unit === '元' && !(YUAN_WORDS.has(after!) && !amount)) return true;
   // 成 is a share unless 一 opens a word: 「七成年轻读者」, 「三成本」 are shares; 一成不变, 万一成功 are not.
   // 一 that ends a word — 万一, 统一, 唯一 — is no share before 成: 「万一成年读者不买账」, 「统一成人物视角」 (Issue #702 review).
-  // 单 ends a word of its own before 一 — 订单一成, 下单一成 — and then the 成 is a share again.
-  if (unit === '成' && (word === '万一' || (word === '一' && YI_WORD_HEADS.has(before!) && !(before === '单' && DAN_WORD_STARTS.has(chars[run.start - 2]!))))) return false;
+  // 单 before 一 ends a word of its own — 订单一成, 退单一成 — and then the 成 is a share again, unless 单 opens 单一: at the line's
+  // start, after a space or punctuation, or after a word's end such as 的 or 较为 (Issue #708).
+  if (unit === '成' && (word === '万一' || (word === '一' && YI_WORD_HEADS.has(before!) && !(before === '单' && !opensDanYi(chars, run.start - 1))))) return false;
   if (unit === '成' && !(CHENG_WORDS.has(after!) && own.at(-1) === '一')) return true;
   // A number in 万 or 亿 with its coefficient: 5万, 三万, 十万, 百万 — not 万一, 亿万读者, the adverb 千万, 十万火急, and not
   // the Book's own length, 「二十万字」 or 「十万余字」.
@@ -221,6 +232,22 @@ const fraction = (chars: ReadonlyArray<string>, at: number): boolean =>
 
 /** Words that make a line about a score: a fraction over 5 in it is one (Issue #702 review). */
 const SCORE_CONTEXT = ['评分', '打分', '得分', '分数', '给分', '评价', '星级', '高分', '低分'];
+/**
+ * What after 高分 or 低分 makes the 分 begin another word, so the line names no score (Issue #708): 高分子, 低分辨率, 高分贝, 提高分段.
+ */
+const NOT_SCORE_AFTER_HIGH_LOW = new Set('子辨贝段');
+
+/** Whether a line names a score (`SCORE_CONTEXT`), read once from start to end: 高分子 and 低分辨率 name none. */
+function namesScore(chars: ReadonlyArray<string>): boolean {
+  for (let at = 0; at + 1 < chars.length; at += 1) {
+    const word = `${chars[at]}${chars[at + 1]}`;
+    if (!SCORE_CONTEXT.includes(word)) continue;
+    const next = chars[at + 2];
+    if ((word === '高分' || word === '低分') && next !== undefined && NOT_SCORE_AFTER_HIGH_LOW.has(next)) continue;
+    return true;
+  }
+  return false;
+}
 /** The rescaled 5: a denominator only for a score in its context, never for 「前1/5」 or 「约4/5的读者」. */
 const RESCALED_FIVE = 5;
 
@@ -266,7 +293,7 @@ export function claimsScore(text: string, fullMarks: ReadonlyArray<number>): boo
   const chars = Array.from(text);
   let named: boolean | undefined;
   // Read once, the first time a fraction over 5 asks: the cost stays linear.
-  const context = (): boolean => (named ??= SCORE_CONTEXT.some((word) => text.includes(word)));
+  const context = (): boolean => (named ??= namesScore(chars));
   let index = 0;
   while (index < chars.length) {
     const char = chars[index]!;

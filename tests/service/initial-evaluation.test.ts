@@ -462,7 +462,8 @@ describe('AI7 初评 over the real store on exact sample1', () => {
     const read = async (): Promise<string> => {
       const reopened = await openStore();
       try {
-        const answer = await refusal(() => reopened.inspectEvaluation(bookId, recordId));
+        // A version that cannot be read is named on the page, which still opens (Issue #708).
+        const answer = reopened.inspectEvaluation(bookId, recordId).unreadableRecords.length === 0 ? 'no-error' : 'unreadable';
         if (answer === 'no-error') {
           // An entry written before S81b1 names no adjustment, and each item reads as having none.
           expect(reopened.inspectEvaluation(bookId, recordId).record!.content.items.map((item) => item.adjustment)).toEqual([null, null, null, null, null]);
@@ -479,7 +480,7 @@ describe('AI7 初评 over the real store on exact sample1', () => {
     expect(await read()).toBe('no-error');
     // Schema 2 with one item's adjustment left out is refused.
     rewrite((json) => json.replace('"adjustment":null,', ''));
-    expect(await read()).toBe('EVALUATION_RECORD_INVALID:评估记录已损坏。');
+    expect(await read()).toBe('unreadable');
   }, 300_000);
 
   it('refuses a store stamped revision 58 whose kind-coupled relations already read as revision 59\'s', async () => {

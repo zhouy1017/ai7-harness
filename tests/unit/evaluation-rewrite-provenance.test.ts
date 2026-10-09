@@ -10,6 +10,7 @@ import {
   emptyEvaluationContent,
   evaluationAdoptionsNotice,
   evaluationCarriedMarksNotice,
+  evaluationDamagedLatestReason,
   initializeEvaluationInitialDraftSchema,
   initializeEvaluationRecordSchema,
 } from '../../src/service/evaluation-records.js';
@@ -41,6 +42,10 @@ let bookId: string;
 let adoptions: Map<string, typeof A>;
 /** Whether the decisions can be read now. */
 let decisionsReadable: boolean;
+/** Each rewrite a 采用 took, by its revision: the version it was taken on, and the words it wrote (Issue #708). */
+let accepted: Map<string, { recordId: string; from: typeof A; items: ReadonlyArray<{ itemId: string; comment: string }>; verdict: string | null }>;
+/** Whether the words of an accepted rewrite can be read now. */
+let wordsReadable: boolean;
 
 beforeEach(() => {
   db = new DatabaseSync(':memory:', { enableForeignKeyConstraints: false });
@@ -48,11 +53,21 @@ beforeEach(() => {
   initializeEvaluationInitialDraftSchema(db);
   adoptions = new Map();
   decisionsReadable = true;
+  accepted = new Map();
+  wordsReadable = true;
   records = new EvaluationRecords(db, { current: () => ({ manuscriptId: randomUUID(), revisionId: randomUUID(), revisionLabel: 'r1', uncheckpointed: false }) },
     undefined, undefined, undefined, {
       adoptionsOf: (recordId) => (decisionsReadable
         ? new Map([...adoptions].filter(([key]) => key.startsWith(`${recordId}:`)).map(([key, from]) => [Number(key.split(':')[1]), from] as const))
         : null),
+      acceptedRewrite: (analysisRevisionId) => {
+        if (!decisionsReadable) return 'unreadable';
+        const taken = accepted.get(analysisRevisionId);
+        if (taken === undefined) return null;
+        return { bookId: bookOf.get(taken.recordId)!, recordId: taken.recordId, taskIntentId: taken.from.taskIntentId,
+          words: wordsReadable ? { items: taken.items, verdict: taken.verdict } : null };
+      },
+      adoptionStamps: () => decisionStamps(),
     });
   bookId = randomUUID();
 });
@@ -83,7 +98,29 @@ function adopt(recordId: string, items: ReadonlyArray<{ itemId: string; comment:
   const version = latest(recordId);
   const ordinal = records.applyRewrite(bookId, recordId, { entryOrdinal: version.entryOrdinal, entrySha256: version.entrySha256 }, { items, verdict }, from);
   adoptions.set(`${recordId}:${ordinal}`, from);
+  accepted.set(from.analysisRevisionId, { recordId, from, items, verdict });
 }
+
+/**
+ * The suite's decisions as the record checks a reading it kept against: every 采用 and acceptance, by the version it was made
+ * on — never whether their words can be read now, which the store cannot tell either; `null` while the decisions cannot be read.
+ */
+function decisionStamps(): Map<string, string> | null {
+  if (!decisionsReadable) return null;
+  const stamps = new Map<string, string>();
+  const add = (recordId: string, part: string): void => {
+    stamps.set(recordId, `${stamps.get(recordId) ?? ''}${part};`);
+  };
+  for (const [key, from] of adoptions) add(key.split(':')[0]!, `${key}=${from.analysisRevisionId}`);
+  for (const [revisionId, taken] of accepted) add(taken.recordId, `${revisionId}:${JSON.stringify([taken.items, taken.verdict])}`);
+  return stamps;
+}
+
+/** The Book of each version, as the decisions name it. */
+const bookOf = {
+  get: (recordId: string): string | undefined =>
+    (db.prepare('SELECT book_id FROM evaluation_records WHERE record_id = ?').get(recordId) as { book_id: string } | undefined)?.book_id,
+};
 
 const withComment = (content: EvaluationContent, index: number, comment: string): EvaluationContent =>
   ({ ...content, items: content.items.map((item, at) => (at === index ? { ...item, comment } : item)) });
@@ -339,7 +376,7 @@ describe('AI7\'s words in an evaluation entry, item by item (Issue #689)', () =>
     decisionsReadable = false;
     const page = records.workspace(bookId, '书', recordId);
     expect(page.record!.ai7WordsNotice).toBe(evaluationAdoptionsNotice(`${FIRST}和总评`));
-    expect(page.record!.ai7WordsNotice).toBe(`评语重写的采用记录已损坏，AI7 评语标注的来源无法核对：${FIRST}和总评仍按 AI7 所写处理。`);
+    expect(page.record!.ai7WordsNotice).toBe(`评语重写的采用记录已损坏，AI7 评语的标注无法全部核对；以下仍按 AI7 所写处理：${FIRST}和总评。`);
     expect(records.ai7Words(bookId, recordId)).toEqual(adopted);
     // A mark of a rewrite nothing took is kept, its source unknown, rather than refusing 评估; its digest is still checked.
     forge(recordId, 3, (entry) => ({ ...entry, rewrittenFrom: { ...adopted, items: [mark(ITEMS[0]!, C, 'AI7 的评语一。')] } }));
@@ -386,14 +423,38 @@ describe('AI7\'s words in an evaluation entry, item by item (Issue #689)', () =>
     expect(records.latestFinalized(bookId)?.recordId).toBe(v2);
     save(v3, (content) => content, true);
     expect(records.latestFinalized(bookId)?.recordId).toBe(v3);
-    // The version asked for, or the latest, must read: one that cannot is refused as before.
-    expect(refused(() => records.workspace(bookId, '书', v1))).toBe('EVALUATION_RECORD_INVALID');
+    // The version asked for that cannot be read gives way to the latest that can, named among the unreadable (Issue #708);
+    // only the operations that need it are refused.
+    expect(records.workspace(bookId, '书', v1)).toMatchObject({ unreadableRecords: [1], record: { recordId: v3 }, start: { allowed: true } });
     expect(refused(() => latest(v1))).toBe('EVALUATION_RECORD_INVALID');
+    expect(refused(() => records.workspace(bookId, '书', randomUUID()))).toBe('EVALUATION_NOT_FOUND');
     // A version after the latest 定稿 that cannot be read may be 定稿 itself: the latest is then unknown, and so refused.
     db.exec('DROP TRIGGER evaluation_record_entries_no_update');
     db.prepare("UPDATE evaluation_record_entries SET sha256 = ? WHERE record_id = ? AND kind = 'finalized'").run('1'.repeat(64), v3);
     db.exec(EVALUATION_RECORD_TRIGGER_SQL.evaluation_record_entries_no_update!);
     expect(refused(() => records.latestFinalized(bookId))).toBe('EVALUATION_RECORD_INVALID');
+    // The latest that cannot be read (Issue #708): 评估 shows the readable versions, the latest of them on show, and refuses
+    // 重新评估 alone, saying why; the readable versions' own operations go on.
+    for (const asked of [null, v3]) {
+      const damaged = records.workspace(bookId, '书', asked);
+      expect(damaged).toMatchObject({ unreadableRecords: [1, 3], record: { recordId: v2 }, start: { allowed: false, reason: evaluationDamagedLatestReason(3) } });
+      expect(damaged.records.map((summary) => summary.ordinal)).toEqual([2]);
+    }
+    expect(evaluationDamagedLatestReason(3)).toBe('第 3 版评估记录已损坏，不能重新评估。');
+    let startRefusal = '';
+    try {
+      records.start(bookId);
+    } catch (error) {
+      startRefusal = error instanceof EvaluationError ? `${error.code}:${error.message}` : 'other';
+    }
+    expect(startRefusal).toBe(`EVALUATION_RECORD_INVALID:${evaluationDamagedLatestReason(3)}`);
+    expect(refused(() => latest(v2))).toBe('none');
+    expect(records.finalizedOf(bookId, v2)).not.toBeNull();
+    expect(refused(() => latest(v3))).toBe('EVALUATION_RECORD_INVALID');
+    // A latest whose record row itself cannot be read is named the same way.
+    db.exec('DROP TRIGGER evaluation_records_no_update');
+    db.prepare('UPDATE evaluation_records SET sha256 = ? WHERE record_id = ?').run('2'.repeat(64), v3);
+    expect(records.workspace(bookId, '书', null)).toMatchObject({ unreadableRecords: [1, 3], record: { recordId: v2 }, start: { allowed: false, reason: evaluationDamagedLatestReason(3) } });
   });
 
   it('keeps a version readable when it pastes back words of a version that cannot be read, however far back (Issue #702 re-review)', () => {
@@ -455,6 +516,161 @@ describe('AI7\'s words in an evaluation entry, item by item (Issue #689)', () =>
     damage(v1, 1);
     const page = records.workspace(bookId, '书', null);
     expect(page).toMatchObject({ unreadableRecords: [1], record: { ordinal: 2, ai7WordsNotice: null } });
+  });
+
+  it('after a version that cannot be read, admits a mark only of a rewrite this Book accepted earlier, over that rewrite\'s words (Issue #708)', () => {
+    // v1: 采用 A on item 1 and the 总评, 定稿. v2 carries A's words. Then v1 is damaged: v2's chain is incomplete.
+    const v1 = records.start(bookId);
+    save(v1, () => own());
+    adopt(v1, [{ itemId: ITEMS[0]!, comment: 'AI7 的评语一。' }], 'AI7 的总评。', A);
+    save(v1, (content) => ({ ...content, conclusion: 'revise' }), true);
+    const v2 = records.start(bookId);
+    save(v2, (content) => ({ ...content, conclusion: 'revise' }));
+    const first = mark(ITEMS[0]!, A, 'AI7 的评语一。');
+    const carried = { items: [first], verdict: verdictMark(A, 'AI7 的总评。') };
+    expect(marks(v2)).toEqual([carried, carried]);
+    damage(v1, 1);
+    expect(refused(() => latest(v2))).toBe('none');
+    const forgedWith = (rewrittenFrom: unknown): string => {
+      forge(v2, 2, (entry) => ({ ...entry, rewrittenFrom }));
+      return refused(() => latest(v2));
+    };
+    // The editor's own words on item 2, called AI7's by a forged mark.
+    for (const [what, rewrittenFrom] of [
+      ['a rewrite accepted earlier, over words it never wrote', { ...carried, items: [first, mark(ITEMS[1]!, A, '编辑的评语 2。')] }],
+      ['a rewrite never accepted', { ...carried, items: [first, mark(ITEMS[1]!, C, '编辑的评语 2。')] }],
+      ['another Task under the accepted revision', { ...carried, items: [{ ...(first as object), taskIntentId: B.taskIntentId }] }],
+    ] as const) {
+      expect(forgedWith(rewrittenFrom), what).toBe('EVALUATION_RECORD_INVALID');
+    }
+    expect(forgedWith(carried)).toBe('none');
+    // A rewrite accepted on this very version, or on a version of no Book here, is no earlier acceptance; one accepted earlier
+    // is, for the words it wrote — the 总评 checked against its own 总评. Each case is a rewrite of its own: a decision, once
+    // read, never changes.
+    const acceptedAs = (recordId: string, verdict: string | null): unknown => {
+      const from = { taskIntentId: randomUUID(), analysisRevisionId: randomUUID() };
+      accepted.set(from.analysisRevisionId, { recordId, from, items: [{ itemId: ITEMS[0]!, comment: 'AI7 的评语一。' }], verdict });
+      return { ...carried, items: [mark(ITEMS[0]!, from, 'AI7 的评语一。')], verdict: verdictMark(from, 'AI7 的总评。') };
+    };
+    expect(forgedWith(acceptedAs(v2, 'AI7 的总评。')), 'accepted on this version').toBe('EVALUATION_RECORD_INVALID');
+    expect(forgedWith(acceptedAs(randomUUID(), 'AI7 的总评。')), 'accepted on no version of this Book').toBe('EVALUATION_RECORD_INVALID');
+    expect(forgedWith(acceptedAs(v1, '别的总评。')), 'a 总评 the rewrite never wrote').toBe('EVALUATION_RECORD_INVALID');
+    expect(forgedWith(acceptedAs(v1, null)), 'a 总评 where the rewrite wrote none').toBe('EVALUATION_RECORD_INVALID');
+    expect(forgedWith(acceptedAs(v1, 'AI7 的总评。')), 'accepted earlier, over its own words').toBe('none');
+    // When the words or the decisions cannot be read, the mark is kept unchecked rather than refusing 评估; a rewrite no
+    // decision accepted is still refused.
+    const unread = acceptedAs(v1, '别的总评。');
+    wordsReadable = false;
+    expect(forgedWith(unread), 'accepted earlier, its words unread').toBe('none');
+    // Such a reading is not kept: once the words read, the same rows are read again and the mark is refused.
+    wordsReadable = true;
+    expect(refused(() => latest(v2)), 'the same rows, the words read now').toBe('EVALUATION_RECORD_INVALID');
+    wordsReadable = false;
+    expect(forgedWith({ ...carried, items: [first, mark(ITEMS[1]!, B, '编辑的评语 2。')] }), 'never accepted, words unread').toBe('EVALUATION_RECORD_INVALID');
+    wordsReadable = true;
+    expect(forgedWith(unread), 'accepted earlier, its words read').toBe('EVALUATION_RECORD_INVALID');
+    decisionsReadable = false;
+    expect(forgedWith({ ...carried, items: [first, mark(ITEMS[1]!, B, '编辑的评语 2。')] }), 'the decisions unread').toBe('none');
+    decisionsReadable = true;
+    expect(forgedWith(carried)).toBe('none');
+  });
+
+  it('names only the words whose marks could not be checked, and only while they stand (Issue #708)', () => {
+    const v1 = records.start(bookId);
+    save(v1, () => own());
+    adopt(v1, [{ itemId: ITEMS[0]!, comment: 'AI7 的评语一。' }], null, A);
+    save(v1, (content) => ({ ...content, conclusion: 'revise' }), true);
+    const v2 = records.start(bookId);
+    damage(v1, 1);
+    // v2 adopts B on item 2: checked against its own 采用. Item 1, carried from v1, cannot be: only it is named.
+    save(v2, (content) => ({ ...content, conclusion: 'revise' }));
+    adopt(v2, [{ itemId: ITEMS[1]!, comment: 'B 的评语二。' }], 'B 的总评。', B);
+    const SECOND = `「${BUILTIN_EVALUATION_PROFILE.items[1]!.label}」的评语`;
+    expect(records.workspace(bookId, '书', v2).record!.ai7WordsNotice).toBe(evaluationCarriedMarksNotice(FIRST));
+    expect(evaluationCarriedMarksNotice(FIRST)).toBe(`较早的评估版本记录已损坏，AI7 评语的标注无法全部核对；以下仍按 AI7 所写处理：${FIRST}。`);
+    expect(records.ai7Words(bookId, v2)!.items.map((item) => item.itemId)).toEqual([ITEMS[0], ITEMS[1]]);
+    // The next version carries both: still only item 1 is named.
+    save(v2, (content) => content, true);
+    const v3 = records.start(bookId);
+    expect(records.workspace(bookId, '书', v3).record!.ai7WordsNotice).toBe(evaluationCarriedMarksNotice(FIRST));
+    // Once the editor's words stand on item 1, nothing unchecked is left to name, though the version before is still damaged.
+    save(v3, (content) => withComment(content, 0, '编辑的评语一。'));
+    expect(records.workspace(bookId, '书', v3).record!.ai7WordsNotice).toBeNull();
+    expect(records.ai7Words(bookId, v3)).toEqual({ items: [mark(ITEMS[1]!, B, 'B 的评语二。')], verdict: verdictMark(B, 'B 的总评。') });
+    // Pasting the words back makes them AI7's again, and unchecked again.
+    save(v3, (content) => withComment(content, 0, 'AI7 的评语一。'));
+    expect(records.workspace(bookId, '书', v3).record!.ai7WordsNotice).toBe(evaluationCarriedMarksNotice(FIRST));
+    // The adoption notice names, of the same words, only those of unknown source.
+    const other = randomUUID();
+    const w1 = records.start(other);
+    records.save(other, w1, 1, own(), false);
+    const read = records.rewritable(other, w1);
+    const ordinal = records.applyRewrite(other, w1, { entryOrdinal: read.entryOrdinal, entrySha256: read.entrySha256 },
+      { items: [{ itemId: ITEMS[1]!, comment: 'B 的评语二。' }], verdict: null }, B);
+    adoptions.set(`${w1}:${ordinal}`, B);
+    decisionsReadable = false;
+    expect(records.workspace(other, '书', w1).record!.ai7WordsNotice).toBe(evaluationAdoptionsNotice(SECOND));
+    decisionsReadable = true;
+    expect(records.workspace(other, '书', w1).record!.ai7WordsNotice).toBeNull();
+  });
+
+  it('keeps what each earlier version leaves between reads, and reads afresh what moved since (Issue #708)', () => {
+    const reads = new Map<string, number>();
+    const owner = (): EvaluationRecords => new EvaluationRecords(db,
+      { current: () => ({ manuscriptId: randomUUID(), revisionId: randomUUID(), revisionLabel: 'r1', uncheckpointed: false }) },
+      undefined, undefined, undefined, {
+        adoptionsOf: (recordId) => {
+          reads.set(recordId, (reads.get(recordId) ?? 0) + 1);
+          return decisionsReadable ? new Map() : null;
+        },
+        acceptedRewrite: () => null,
+        adoptionStamps: () => (decisionsReadable ? new Map() : null),
+      });
+    let counted = owner();
+    const saveIn = (recordId: string): void => {
+      const version = counted.rewritable(bookId, recordId);
+      counted.save(bookId, recordId, version.entryOrdinal, { ...own(), conclusion: 'revise' }, true);
+    };
+    const versions: string[] = [];
+    for (let index = 0; index < 4; index += 1) {
+      versions.push(counted.start(bookId));
+      saveIn(versions.at(-1)!);
+    }
+    const [first, second, , last] = versions as [string, string, string, string];
+    // Once read, no version's chain is read again — not by the page, nor by any per-version operation — while its rows stand.
+    counted.workspace(bookId, '书', null);
+    reads.clear();
+    for (let index = 0; index < 5; index += 1) counted.rewritable(bookId, last);
+    counted.finalizedOf(bookId, last);
+    counted.ai7Words(bookId, last);
+    counted.workspace(bookId, '书', last);
+    expect(counted.latestFinalized(bookId)?.recordId).toBe(last);
+    expect(reads.size).toBe(0);
+    // A version whose rows moved is read afresh, and every one after it.
+    damage(first, 1);
+    reads.clear();
+    expect(counted.workspace(bookId, '书', null).unreadableRecords).toEqual([1]);
+    expect([first, ...versions.slice(1)].map((recordId) => reads.get(recordId))).toEqual([1, 1, 1, 1]);
+    reads.clear();
+    counted.rewritable(bookId, last);
+    expect(reads.size).toBe(0);
+    // A new entry reads its own version again, and nothing before it.
+    const v4 = counted.start(bookId);
+    reads.clear();
+    counted.save(bookId, v4, 1, { ...own(), conclusion: 'defer' }, false);
+    counted.rewritable(bookId, v4);
+    expect([...reads.keys()]).toEqual([v4]);
+    // A read while the 采用 records could not be read is not kept: a later read reads the versions again.
+    counted = owner();
+    decisionsReadable = false;
+    counted.rewritable(bookId, last);
+    decisionsReadable = true;
+    reads.clear();
+    counted.rewritable(bookId, last);
+    expect(reads.get(second)).toBe(1);
+    reads.clear();
+    counted.rewritable(bookId, last);
+    expect(reads.size).toBe(0);
   });
 
   it('counts adjusted Books without failing the house on one Book\'s damage (Issue #702 review)', () => {
