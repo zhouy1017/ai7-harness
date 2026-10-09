@@ -18,13 +18,20 @@ const TAKEN_WHILE_WAITING: ReadonlySet<string> = new Set([
 /** What a change asked for while a replacement waits is told. */
 export const REPLACEMENT_WAITING_MESSAGE = '本机数据正在等 AI7 重新启动后被替换；在此之前不能再做修改。要继续修改，请先取消替换。';
 
-/** What else would write while a replacement is prepared: the Runs, the Review Runs, the jobs and a database export. */
+/**
+ * What else would write while a replacement is prepared: the Runs, the Review Runs, the jobs and a database export. The
+ * Material Index builder (Issue #428, S80a) is not named here: its two relations are `derived`, and the store checks the freeze
+ * again after each extraction and before its one write, so a replacement prepared while an original is being read leaves that
+ * build for the next start (`tests/service/material-index.test.ts`). Naming it here is #428's follow-up (#725 review, P3-3).
+ */
 export interface RunningWork {
   /** No Run executes, waits for a place, or waits to finish its cancellation. */
   readonly runsIdle: boolean;
   readonly reviewRunsDriving: boolean;
   readonly jobsBusy: boolean;
   readonly exportRunning: boolean;
+  /** A 后台分析登记 pass is under way (Issue #95, S39; #713 review, P2-3): it could still write a Task, a plan and a Run. */
+  readonly backgroundBusy: boolean;
 }
 
 /**
@@ -32,7 +39,7 @@ export interface RunningWork {
  * running wrote after the backup would be lost with the data the replacement replaces.
  */
 export function replacementBlockedBy(work: RunningWork): string | null {
-  return !work.runsIdle || work.reviewRunsDriving || work.jobsBusy || work.exportRunning
+  return !work.runsIdle || work.reviewRunsDriving || work.jobsBusy || work.exportRunning || work.backgroundBusy
     ? '还有任务或处理在进行；请等它们结束，或先暂停或取消，再替换本机数据。'
     : null;
 }

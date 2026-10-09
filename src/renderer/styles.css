@@ -849,6 +849,19 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .library-field { display: grid; gap: .3rem; min-width: 0; }
 .library-field input, .library-field textarea { width: 100%; min-width: 0; box-sizing: border-box; font: inherit; }
 .library-decision-list { display: grid; gap: .3rem; margin: .4rem 0 0; padding-left: 1.4rem; overflow-wrap: anywhere; }
+/* 资料索引 (S80a): the index's layers in the card, each in words; 查看分段 pages paragraphs with each sentence's anchor. */
+.material-index { display: grid; gap: .4rem; min-width: 0; padding: .7rem .8rem; border: 1px solid #d5dcd9; border-radius: 9px; background: #f8faf7; }
+.material-index-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: .6rem; }
+.material-index-heading h4 { margin: 0; }
+.material-index-layers { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .2rem .8rem; margin: 0; }
+.material-index-layers dt { font-weight: 700; }
+.material-index-layers dd { margin: 0; overflow-wrap: anywhere; }
+.material-index-layer[data-layer-state="deferred"], .material-index-layer[data-layer-state="pending"] { color: #5c6358; }
+.material-segments { display: grid; gap: .4rem; min-width: 0; }
+.material-segments-heading { margin: 0; font-size: 1rem; }
+.material-segment-list { display: grid; gap: .35rem; margin: 0; padding-left: 2.2rem; overflow-wrap: anywhere; }
+.material-segment-title, .material-segment-heading { font-weight: 700; }
+.material-anchor { display: inline-block; margin-right: .2rem; padding: 0 .25rem; border: 1px solid #c9d6d2; border-radius: 4px; font-size: .75rem; color: #2c463b; }
 /* On a surface that raises a Task, the plan is one line and 查看计划 (S72 D4). */
 .task-plan-summary { margin-top: 1rem; }
 .task-plan-summary h4 { margin: 0; }
@@ -1637,3 +1650,18 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   max-height: 18rem;
   overflow: auto;
 }
+
+/* 后台分析 (Issue #95, S39): the Book's Background Analysis Enrollment beside its analysis. */
+.background-analysis { display: grid; gap: .6rem; margin-top: 1rem; }
+.background-analysis p { margin: 0; overflow-wrap: anywhere; }
+.background-analysis-heading { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
+.background-analysis-heading h3 { margin: 0; }
+.background-analysis-rows { display: grid; grid-template-columns: minmax(6rem, max-content) 1fr; gap: .3rem .8rem; margin: 0; }
+.background-analysis-rows dd { margin: 0; overflow-wrap: anywhere; }
+.background-analysis-started, .background-analysis-history ol { display: grid; gap: .3rem; margin: 0; padding-left: 1.4rem; }
+.background-analysis-disclosure, .background-analysis-revoke { display: grid; gap: .6rem; border-left: 3px solid currentColor; padding-left: .8rem; }
+.background-analysis-disclosure h4, .background-analysis-revoke h4, .background-analysis-disclosure h5 { margin: 0; }
+.background-analysis-starting-points { display: grid; gap: .4rem; border: 1px solid currentColor; padding: .6rem .8rem; }
+.background-analysis-starting-point { display: grid; grid-template-columns: auto 1fr; gap: .1rem .5rem; align-items: baseline; }
+.background-analysis-starting-point .field-note { grid-column: 2; }
+@media (max-width: 40rem) { .background-analysis-rows { grid-template-columns: 1fr; } }

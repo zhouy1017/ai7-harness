@@ -312,6 +312,11 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   database_merge_books: 'house',
   // A Series' retrieval exclusions are the house's, as its Series and their knowledge are (Issue #64, S29b).
   series_retrieval_exclusions: 'house',
+  // 后台分析登记 (Issue #95, S39; ADR 0048): a standing decision of this house's editor. A Book merged in never brings one — no
+  // merge makes AI7 start anything by itself — while its Runs keep naming the enrollment version they were started under.
+  background_analysis_enrollments: 'house',
+  background_analysis_enrollment_versions: 'house',
+  background_analysis_enrollment_states: 'house',
   // The search index over the working text, and its own relations.
   working_block_search: 'derived',
   working_block_search_config: 'derived',
@@ -319,6 +324,10 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   working_block_search_data: 'derived',
   working_block_search_docsize: 'derived',
   working_block_search_idx: 'derived',
+  // 资料索引 (Issue #428, S80a): an item's Material Index is built from its original on this machine; a merged item's is built
+  // here again at the next start, never carried.
+  material_index_builds: 'derived',
+  material_index_segments: 'derived',
 };
 
 /** What stays behind when a Book merges, said to the editor. */

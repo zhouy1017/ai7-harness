@@ -292,6 +292,22 @@ const READ_LIBRARY = `(() => {
           confirmDisabled: chooser.querySelector('[data-library-action^="confirm-"]')?.disabled ?? null,
         },
         history: Array.from(card.querySelectorAll('.library-decision-list > li'), (item) => item.textContent),
+        index: card.querySelector('section.material-index')?.dataset.indexState ?? null,
+        indexLine: card.querySelector('.material-index-state')?.textContent ?? null,
+        layers: Array.from(card.querySelectorAll('.material-index-layer'), (line) => [line.dataset.indexLayer, line.dataset.layerState, line.textContent]),
+        segments: (() => {
+          const reader = card.querySelector('.material-segments');
+          if (!(reader instanceof HTMLElement) || reader.dataset.segmentsFrom === undefined) return null;
+          return {
+            from: reader.dataset.segmentsFrom,
+            total: reader.dataset.segmentsTotal,
+            heading: reader.querySelector('.material-segments-heading')?.textContent ?? null,
+            items: Array.from(reader.querySelectorAll('.material-segment'), (item) => [item.dataset.segmentOrdinal,
+              Array.from(item.querySelectorAll('.material-sentence'), (sentence) => [sentence.dataset.anchor, sentence.querySelector('.material-anchor')?.getAttribute('aria-label') ?? null])]),
+            next: reader.querySelector('[data-library-action="segments-next"]') !== null,
+            previous: reader.querySelector('[data-library-action="segments-previous"]') !== null,
+          };
+        })(),
       };
     }),
     focus: active instanceof HTMLElement ? { tag: active.tagName, action: active.dataset.libraryAction ?? null, choice: active.dataset.libraryChoice ?? null } : null,
@@ -366,6 +382,11 @@ async function constructPredecessorV12(dataRoot, bookId) {
     database.exec(`
       PRAGMA foreign_keys = OFF;
       BEGIN IMMEDIATE;
+      DROP TABLE material_index_segments;
+      DROP TABLE material_index_builds;
+      DROP TABLE background_analysis_enrollment_states;
+      DROP TABLE background_analysis_enrollment_versions;
+      DROP TABLE background_analysis_enrollments;
       DROP TABLE writing_drafts;
       DROP TABLE writing_tasks;
       DROP TABLE evaluation_rewrite_decisions;
@@ -1074,6 +1095,54 @@ async function main() {
     const attentionAfter = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection)=>[projection.actionableCount, projection.groups.flatMap((group)=>group.items).filter((item)=>item.object.kind==='library-material').length])`);
     requireJourney(JSON.stringify(attentionAfter) === JSON.stringify([0, 0]), 'library-attention-resolved', attentionAfter);
 
+    // ---- 资料索引 (Issue #428, plan slice S80a; editor-surfaces §8.4, V2-UX-KB-009, ATTN-009) ----------------------------
+    at('knowledge-library-index');
+    // Built on this machine as it arrived, nothing asked: four layers read, and the three this build does not provide said so —
+    // recognition is not needed for a Word file, sample1 is Chinese so it needs no 来源译文, and similarity vectors wait for a
+    // local dependency. The anchors are positions: a Word file has no page numbers.
+    const libraryIndexed = await readLibrary(renderer, (page) => page.cards[0]?.index === 'complete', 'library-index-built');
+    const layers = new Map(libraryIndexed.cards[0].layers.map(([layer, state, line]) => [layer, [state, line]]));
+    requireJourney(libraryIndexed.cards[0].indexLine === '已在本机建好' && layers.size === 7 &&
+      JSON.stringify(layers.get('original')) === JSON.stringify(['complete', '已原样保存在本机']) &&
+      layers.get('metadata')?.[0] === 'complete' && /^中文 · \d+ 段 · \d+ 个标题/u.test(layers.get('metadata')?.[1] ?? '') &&
+      layers.get('text')?.[0] === 'complete' && /^已提取 \d+ 字$/u.test(layers.get('text')?.[1] ?? '') &&
+      JSON.stringify(layers.get('recognition')) === JSON.stringify(['not-needed', '不需要：文件里就是文字']) &&
+      JSON.stringify(layers.get('translation')) === JSON.stringify(['not-needed', '不需要：中文资料']) &&
+      layers.get('segments')?.[0] === 'complete' && /^\d+ 段 · \d+ 句；每句可按「第 n 段第 m 句」引用（这种格式没有页码，锚点是位置）$/u.test(layers.get('segments')?.[1] ?? '') &&
+      JSON.stringify(layers.get('vectors')) === JSON.stringify(['deferred', '未提供（需要本地依赖）']),
+    'library-index-layers', libraryIndexed.cards[0].layers);
+    const indexService = await renderer.evaluate(`window.ai7.inspectLibraryMaterial({ materialId: ${JSON.stringify(materialId)} }).then((material)=>[material.index.state, material.index.reason, /^[0-9a-f]{64}$/u.test(material.index.digest ?? ''), material.index.metadata?.language ?? null, material.index.metadata?.paragraphs ?? 0])`);
+    requireJourney(indexService[0] === 'complete' && indexService[1] === null && indexService[2] === true && indexService[3] === 'zh' && indexService[4] > 16,
+      'library-index-service', indexService);
+    // 查看分段: sixteen paragraphs a page, each sentence with its position anchor, read-only.
+    await clickSelector(renderer, `article.library-material[data-material-id="${materialId}"] [data-library-action="segments"]`, 'library-segments-open');
+    const firstSegments = await readLibrary(renderer, (page) => page.cards[0]?.segments?.from === '1', 'library-segments-page');
+    const firstPage = firstSegments.cards[0].segments;
+    requireJourney(firstPage.items.length === 16 && firstPage.items[0][0] === '1' && firstPage.items.every(([ordinal, sentences], index) =>
+      ordinal === String(index + 1) && sentences.length > 0 && sentences.every(([anchor, label], at) => anchor === `${ordinal}.${at + 1}` && label === `第 ${ordinal} 段第 ${at + 1} 句`)) &&
+      firstPage.heading === `分段：第 1–16 段，共 ${firstPage.total} 段` && firstPage.total === String(indexService[4]) && firstPage.next === true && firstPage.previous === false,
+    'library-segments-anchors', firstPage);
+    await waitFor(renderer, `document.activeElement === document.querySelector('.material-segments-heading')`, 'library-segments-focus', 10_000);
+    await clickSelector(renderer, '[data-library-action="segments-next"]', 'library-segments-next');
+    const secondSegments = await readLibrary(renderer, (page) => page.cards[0]?.segments?.from === '17', 'library-segments-second');
+    requireJourney(secondSegments.cards[0].segments.items[0][0] === '17' && secondSegments.cards[0].segments.previous === true, 'library-segments-second-page', secondSegments.cards[0].segments);
+    await clickSelector(renderer, '[data-library-action="segments-previous"]', 'library-segments-previous');
+    await readLibrary(renderer, (page) => page.cards[0]?.segments?.from === '1', 'library-segments-back');
+    await clickSelector(renderer, '[data-library-action="segments-close"]', 'library-segments-close');
+    await waitFor(renderer, `document.querySelector('.material-segments [data-library-action="segments"]') === document.activeElement`, 'library-segments-closed', 10_000);
+    // 索引完成 sits in 最近完成, names the item and asks nothing: the count stays the decisions'.
+    const indexItem = `library-index:${materialId}`;
+    const indexSelector = `[data-screen="global-attention"] li.global-attention-item[data-attention-item=${JSON.stringify(indexItem)}]`;
+    const indexAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection)=>{ const group=projection.groups.find((entry)=>entry.items.some((item)=>item.itemId===${JSON.stringify(indexItem)})); const item=group?.items.find((entry)=>entry.itemId===${JSON.stringify(indexItem)}); return [group?.key ?? null, item?.state ?? null, item?.nextStep ?? null, item?.object.kind ?? null, item?.object.outcome ?? null, projection.actionableCount]; })`);
+    requireJourney(JSON.stringify(indexAttention) === JSON.stringify(['recent', 'indexing-completed', 'view-material-index', 'library-index', 'complete', 0]), 'library-index-attention', indexAttention);
+    await clickSelector(renderer, '#global-attention-entry', 'library-index-attention-entry');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(indexSelector)}) !== null`, 'library-index-attention-listed', 30_000);
+    const indexListed = await renderer.evaluate(`(() => { const item=document.querySelector(${JSON.stringify(indexSelector)}); return { group: item.closest('section.global-attention-group')?.dataset.attentionGroup ?? null, pill: item.querySelector('.global-attention-pill')?.textContent ?? null, object: item.querySelector('button.global-attention-open')?.textContent ?? null, next: item.querySelector('.global-attention-next')?.textContent ?? null }; })()`);
+    requireJourney(indexListed.group === 'recent' && indexListed.pill === '索引完成' && indexListed.object === `资料索引 · 图书「${LIBRARY_TITLE}」` &&
+      indexListed.next === '安全的下一步：查看索引', 'library-index-attention-words', indexListed);
+    await clickSelector(renderer, `${indexSelector} button.global-attention-open`, 'library-index-attention-open');
+    await readLibrary(renderer, (page) => page.state === 'ready' && page.cards.some((card) => card.id === materialId && card.index === 'complete'), 'library-index-attention-opened');
+
     at('j14-library-reflow-forced-colors');
     // At 200% the item, its decisions and an open choice reflow into the width; under forced colours the card and the choice keep
     // their borders.
@@ -1142,6 +1211,16 @@ async function main() {
       await clickSelector(renderer, '[data-library-action="first"]', 'library-page-first');
       await readLibrary(renderer, (page) => page.cards.length === 20 && page.focus?.tag === 'H3', 'library-page-newest');
     }
+
+    // 资料索引 of a non-Chinese reference (Issue #428, S80a): its 来源译文 needs a Model Role and is not provided — said, never
+    // made up. The newest arrival is the runner's own English label.
+    at('knowledge-library-index-translation');
+    const englishIndexed = await readLibrary(renderer, (page) => page.cards[0]?.index === 'complete', 'library-index-english-built');
+    const englishLayers = new Map(englishIndexed.cards[0].layers.map(([layer, state, line]) => [layer, [state, line]]));
+    requireJourney(JSON.stringify(englishLayers.get('translation')) === JSON.stringify(['deferred', '未提供：非中文资料的机器译文要经模型服务，尚未接通']) &&
+      /^非中文 · 1 段/u.test(englishLayers.get('metadata')?.[1] ?? '') && englishLayers.get('segments')?.[0] === 'complete',
+    'library-index-translation-deferred', englishIndexed.cards[0].layers);
+    at('knowledge-library-bounded-readers');
 
     // Populate the Book chooser through the ordinary creation form, then retain one explicit choice across replacement pages.
     await click(renderer, '返回', 'library-books-landing');

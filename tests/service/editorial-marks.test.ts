@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
   MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
-  CLARIFICATION_SCHEMA_VERSION, WRITING_TASK_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_23_SQL,
+  CLARIFICATION_SCHEMA_VERSION, MATERIAL_INDEX_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_23_SQL,
 } from '../../src/service/task-authorization.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import type {
@@ -563,7 +563,7 @@ describe('Editorial Marks on a manuscript', () => {
     }
     const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
       expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     } finally {
       after.close();

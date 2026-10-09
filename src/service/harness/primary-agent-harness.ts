@@ -7,7 +7,7 @@ import type { SessionInspection, SessionPersistenceRevision } from '@deepseek-ai
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools';
 import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { AI7_FAILURE_CODES, classifyModelFailure, type ClassifiedModelFailure, type DshFailureCodes } from '../provider/classification.js';
-import { assistantToolCallDigest, type EgressDecision, type ExecutionRoute, type TransmitTicket } from '../provider/egress-gate.js';
+import { assistantToolCallDigest, type EgressDecision, type EgressRefusalReason, type ExecutionRoute, type TransmitTicket } from '../provider/egress-gate.js';
 import { assistantToolCalls, type AssembledModelPayload } from '../provider/payload.js';
 import {
   PLATFORM_TOOL_NAMES,
@@ -225,8 +225,13 @@ function requireHarness(condition: unknown, code: string, message: string): asse
   if (!condition) throw new PrimaryAgentHarnessError(code, message);
 }
 
-async function* refusalStream(detail: string): AsyncIterable<StreamChunk> {
-  yield { type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.EGRESS_REFUSED, message: detail } } };
+/**
+ * A gate refusal as the turn's failure. A tripped platform-tool breaker keeps its own code (ADR 0080 §7.4; #676), so the
+ * unit it ends is told apart from every other refusal and is never retried; every other refusal reads exactly as before.
+ */
+async function* refusalStream(detail: string, reason?: EgressRefusalReason): AsyncIterable<StreamChunk> {
+  const code = reason === 'circuit-breaker-tripped' ? AI7_FAILURE_CODES.PLATFORM_TOOL_BREAKER_TRIPPED : AI7_FAILURE_CODES.EGRESS_REFUSED;
+  yield { type: 'finish', reason: { kind: 'error', failure: { code, message: detail } } };
 }
 
 export async function prepareExecution(request: HarnessExecutionRequest): Promise<PrimaryAgentHarnessHandle> {
@@ -283,7 +288,7 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     context.on('llm/stream', function (this: LlmRuntime, options: GenerateOptions, next: () => AsyncIterable<StreamChunk>) {
       if (!bound) return refusalStream('执行绑定尚未核对；未发送任何内容。');
       const decision = request.gate(options);
-      if (decision.decision === 'refuse') return refusalStream(decision.detail);
+      if (decision.decision === 'refuse') return refusalStream(decision.detail, decision.reason);
       if (decision.decision === 'transmit-remote') request.onTransmitTicket(decision.ticket);
       return next();
     });

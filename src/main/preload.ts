@@ -249,6 +249,12 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['inspectDefaultExecutionRules']['output']>(IPC_CHANNELS.inspectDefaultExecutionRules),
   deactivateDefaultExecutionRule: (input: ServiceOperationMap['deactivateDefaultExecutionRule']['input']) =>
     invoke<ServiceOperationMap['deactivateDefaultExecutionRule']['output']>(IPC_CHANNELS.deactivateDefaultExecutionRule, input),
+  inspectBackgroundAnalysisEnrollment: () =>
+    invoke<ServiceOperationMap['inspectBackgroundAnalysisEnrollment']['output']>(IPC_CHANNELS.inspectBackgroundAnalysisEnrollment),
+  enrollBackgroundAnalysis: (input: Omit<ServiceOperationMap['enrollBackgroundAnalysis']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['enrollBackgroundAnalysis']['output']>(IPC_CHANNELS.enrollBackgroundAnalysis, input),
+  revokeBackgroundAnalysisEnrollment: (input: Omit<ServiceOperationMap['revokeBackgroundAnalysisEnrollment']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['revokeBackgroundAnalysisEnrollment']['output']>(IPC_CHANNELS.revokeBackgroundAnalysisEnrollment, input),
   inspectReviewGuidelines: (input?: ServiceOperationMap['inspectReviewGuidelines']['input']) =>
     invoke<ServiceOperationMap['inspectReviewGuidelines']['output']>(IPC_CHANNELS.inspectReviewGuidelines, input ?? {}),
   previewReviewGuidelineVersion: (input: { documentId: string; previewId?: string; clausePage?: number }) =>
@@ -290,6 +296,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['inspectLibraryMaterial']['output']>(IPC_CHANNELS.inspectLibraryMaterial, input),
   readLibraryDecisionReason: (input: ServiceOperationMap['readLibraryDecisionReason']['input']) =>
     invoke<ServiceOperationMap['readLibraryDecisionReason']['output']>(IPC_CHANNELS.readLibraryDecisionReason, input),
+  inspectLibraryMaterialSegments: (input: ServiceOperationMap['inspectLibraryMaterialSegments']['input']) =>
+    invoke<ServiceOperationMap['inspectLibraryMaterialSegments']['output']>(IPC_CHANNELS.inspectLibraryMaterialSegments, input),
   previewLibraryMaterial: () =>
     invoke<ServiceOperationMap['previewLibraryMaterial']['output'] | null>(IPC_CHANNELS.previewLibraryMaterial),
   addLibraryMaterial: (input: ServiceOperationMap['addLibraryMaterial']['input']) =>

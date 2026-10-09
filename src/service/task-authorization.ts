@@ -409,9 +409,23 @@ export const EVALUATION_REWRITE_SCHEMA_VERSION = 64;
  * kind — rebuilt exactly as revisions 20, 24, 59, 62 and 64 rebuilt them, every row copied byte for byte — and two additive,
  * append-only relations owned by `writing-tasks.ts` and created before this version is stamped record which house type, words
  * of the editor and reference set each writing Task drafts from, and which document each drafted result became. It follows
- * revision 64 (Issue #429, S81b2). No existing row changes. This is the terminal version.
+ * revision 64 (Issue #429, S81b2). No existing row changes.
  */
 export const WRITING_TASK_SCHEMA_VERSION = 65;
+/**
+ * The 后台分析登记 revision (Issue #95, S39; ADR 0048; V2-UX-ANALYSIS-016 to 021): three additive, append-only relations owned by
+ * `background-analysis-enrollments.ts` and created before this version is stamped — each Book's Background Analysis Enrollment,
+ * its versions and its states — and the Run Authorizations' origin widened to admit `background-analysis-enrollment`, rebuilt
+ * exactly as revision 31 widened it, every row copied byte for byte. It follows revision 65 (Issue #432, S84a). No existing row
+ * changes.
+ */
+export const BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION = 66;
+/**
+ * The 资料索引 revision (Issue #428, S80a; V2-UX-KB-009): two additive, append-only relations owned by `material-index.ts` and
+ * created before this version is stamped — each 资料库 item's Material Index build and the segments of a complete one. No
+ * existing row changes. It follows revision 66 (Issue #95, S39) and moves nothing of its relations. This is the terminal version.
+ */
+export const MATERIAL_INDEX_SCHEMA_VERSION = 67;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const SAMPLE1_SOURCE_DIGEST = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483' as const;
@@ -909,6 +923,23 @@ export const ANALYSIS_LEDGER_REVISION_30_SQL = {
 } as const;
 
 /**
+ * The one relation revision 66 widens, exactly as revisions 31 to 65 carried it — a Run was authorized from its plan or by
+ * 快速开始 before 后台分析登记 (Issue #95, S39). Kept to recognise a store that still holds it, which the widening rebuilds once.
+ */
+export const ANALYSIS_LEDGER_REVISION_65_SQL = {
+  analysis_run_authorizations: `CREATE TABLE analysis_run_authorizations (
+    authorization_id TEXT PRIMARY KEY,
+    task_intent_id TEXT NOT NULL UNIQUE REFERENCES analysis_task_intents(task_intent_id),
+    plan_envelope_sha256 TEXT NOT NULL CHECK(length(plan_envelope_sha256) = 64),
+    origin TEXT NOT NULL CHECK(origin IN ('standard-direct', 'default-execution-rule')),
+    authority TEXT NOT NULL CHECK(authority IN ('standard-direct-dispatch', 'record-only-no-dispatch')),
+    authorized_at TEXT NOT NULL,
+    canonical_json TEXT NOT NULL,
+    sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)
+  ) STRICT`,
+} as const;
+
+/**
  * The Run states as revision 32 left them for 取消任务 (Issue #422), before revision 33 widened them for 暂停 and
  * 续行 (S76b). Kept to recognise a store that still holds them, which the widening rebuilds once.
  */
@@ -1157,7 +1188,7 @@ export const ANALYSIS_LEDGER_SCHEMA_SQL = {
     authorization_id TEXT PRIMARY KEY,
     task_intent_id TEXT NOT NULL UNIQUE REFERENCES analysis_task_intents(task_intent_id),
     plan_envelope_sha256 TEXT NOT NULL CHECK(length(plan_envelope_sha256) = 64),
-    origin TEXT NOT NULL CHECK(origin IN ('standard-direct', 'default-execution-rule')),
+    origin TEXT NOT NULL CHECK(origin IN ('standard-direct', 'default-execution-rule', 'background-analysis-enrollment')),
     authority TEXT NOT NULL CHECK(authority IN ('standard-direct-dispatch', 'record-only-no-dispatch')),
     authorized_at TEXT NOT NULL,
     canonical_json TEXT NOT NULL,
@@ -1683,7 +1714,7 @@ function validateRevision16AnalysisLedgerSchema(db: DatabaseSync): void {
 
 export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
   const version = asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
-  requireTask(version === WRITING_TASK_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
+  requireTask(version === MATERIAL_INDEX_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
   validateJ03TaskAuthorizationSchema(db);
   validateAnalysisLedgerSchema(db);
 }
@@ -1708,13 +1739,39 @@ function validateRevision23AnalysisLedgerSchema(db: DatabaseSync): void {
     'TASK_RECORD_INVALID', '分析任务账本引用校验失败。');
 }
 
+/** The Run Authorizations' text a revision-59 to revision-65 store is validated against (Issue #95, S39). */
+type AuthorizationsAsFound = { readonly analysis_run_authorizations: string };
+
+/**
+ * The text a revision-59 to revision-65 store's Run Authorizations are validated against before revision 66 widens them: the
+ * current widened text when an upgrade that stopped before its stamp already widened them (Issue #596), and otherwise the text
+ * revisions 31 to 65 carried — so any other text, an older one included, is refused by the revision's exact check.
+ */
+function authorizationsAsFound(db: DatabaseSync): AuthorizationsAsFound {
+  const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'analysis_run_authorizations'").get() as SqlRow | undefined;
+  const widened = row !== undefined && normalizeSql(asString(row.sql)) === normalizeSql(ANALYSIS_LEDGER_SCHEMA_SQL.analysis_run_authorizations);
+  return { analysis_run_authorizations: widened ? ANALYSIS_LEDGER_SCHEMA_SQL.analysis_run_authorizations : ANALYSIS_LEDGER_REVISION_65_SQL.analysis_run_authorizations };
+}
+
+/**
+ * The analysis relations as revision 65 carried them, validated exactly — shapes, triggers, row digests and references — before
+ * revision 66 widens the Run Authorizations (Issue #95, S39). Only the authorizations' text differs from the terminal ledger.
+ */
+function validateRevision65AnalysisLedgerSchema(db: DatabaseSync, authorizations: AuthorizationsAsFound): void {
+  requireExactObjects(db, 'table', { ...ANALYSIS_LEDGER_SCHEMA_SQL, ...authorizations }, '分析任务账本表（修订版 65）');
+  requireExactObjects(db, 'trigger', ANALYSIS_LEDGER_TRIGGER_SQL, '分析任务账本触发器（修订版 65）');
+  validateCanonicalRowDigests(db, ANALYSIS_LEDGER_TABLES);
+  requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0,
+    'TASK_RECORD_INVALID', '分析任务账本引用校验失败。');
+}
+
 /**
  * The analysis relations as revision 64 carried them, validated exactly — shapes, triggers, row digests and references — before
  * revision 65's forward copy rebuilds the three kind-coupled relations for the writing kind. Only those exact shapes are read
  * as revision 64: a store stamped 64 whose relations already read as revision 65's is not one AI7 wrote.
  */
-function validateRevision64AnalysisLedgerSchema(db: DatabaseSync): void {
-  requireExactObjects(db, 'table', { ...ANALYSIS_LEDGER_SCHEMA_SQL, ...ANALYSIS_LEDGER_REVISION_64_SQL }, '分析任务账本表（修订版 64）');
+function validateRevision64AnalysisLedgerSchema(db: DatabaseSync, authorizations: AuthorizationsAsFound): void {
+  requireExactObjects(db, 'table', { ...ANALYSIS_LEDGER_SCHEMA_SQL, ...ANALYSIS_LEDGER_REVISION_64_SQL, ...authorizations }, '分析任务账本表（修订版 64）');
   requireExactObjects(db, 'trigger', ANALYSIS_LEDGER_TRIGGER_SQL, '分析任务账本触发器（修订版 64）');
   validateCanonicalRowDigests(db, ANALYSIS_LEDGER_TABLES);
   requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0,
@@ -1727,8 +1784,8 @@ function validateRevision64AnalysisLedgerSchema(db: DatabaseSync): void {
  * exact shapes are read as revision 62: a store at 62 or 63 whose relations already read as a later revision's is not one AI7
  * wrote.
  */
-function validateRevision62AnalysisLedgerSchema(db: DatabaseSync): void {
-  requireExactObjects(db, 'table', { ...ANALYSIS_LEDGER_SCHEMA_SQL, ...ANALYSIS_LEDGER_REVISION_62_SQL }, '分析任务账本表（修订版 62）');
+function validateRevision62AnalysisLedgerSchema(db: DatabaseSync, authorizations: AuthorizationsAsFound): void {
+  requireExactObjects(db, 'table', { ...ANALYSIS_LEDGER_SCHEMA_SQL, ...ANALYSIS_LEDGER_REVISION_62_SQL, ...authorizations }, '分析任务账本表（修订版 62）');
   requireExactObjects(db, 'trigger', ANALYSIS_LEDGER_TRIGGER_SQL, '分析任务账本触发器（修订版 62）');
   validateCanonicalRowDigests(db, ANALYSIS_LEDGER_TABLES);
   requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0,
@@ -1740,8 +1797,8 @@ function validateRevision62AnalysisLedgerSchema(db: DatabaseSync): void {
  * before revision 59's forward copy rebuilds the three kind-coupled relations for the evaluation kind. Only those exact shapes
  * are read as revision 58: a store at 24 to 58 whose relations already read as revision 59's is not one AI7 wrote.
  */
-function validateRevision59AnalysisLedgerSchema(db: DatabaseSync): void {
-  requireExactObjects(db, 'table', { ...ANALYSIS_LEDGER_SCHEMA_SQL, ...ANALYSIS_LEDGER_REVISION_59_SQL }, '分析任务账本表（修订版 59）');
+function validateRevision59AnalysisLedgerSchema(db: DatabaseSync, authorizations: AuthorizationsAsFound): void {
+  requireExactObjects(db, 'table', { ...ANALYSIS_LEDGER_SCHEMA_SQL, ...ANALYSIS_LEDGER_REVISION_59_SQL, ...authorizations }, '分析任务账本表（修订版 59）');
   requireExactObjects(db, 'trigger', ANALYSIS_LEDGER_TRIGGER_SQL, '分析任务账本触发器（修订版 59）');
   validateCanonicalRowDigests(db, ANALYSIS_LEDGER_TABLES);
   requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0,
@@ -1830,7 +1887,7 @@ function widenAnalysisRelation(
   table: 'analysis_run_states' | 'analysis_run_authorizations' | 'analysis_task_outcomes' | 'analysis_plan_revisions',
   priorSqls: readonly string[],
   columns: string,
-  revision: 30 | 31 | 32 | 33 | 34 | 35,
+  revision: 30 | 31 | 32 | 33 | 34 | 35 | 66,
 ): void {
   const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as SqlRow | undefined;
   if (row === undefined) return;
@@ -1933,7 +1990,7 @@ function migrateAnalysisLedgerToRevision17(db: DatabaseSync, from: typeof J04_BA
         db.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_delete`]!);
       }
       seedInitialPlanVersions(db);
-      db.exec(`PRAGMA user_version = ${WRITING_TASK_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${MATERIAL_INDEX_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
       db.exec('COMMIT');
@@ -2026,6 +2083,16 @@ function migrateAnalysisLedgerToRevision65(db: DatabaseSync): void {
 }
 
 /**
+ * Revision 66 → 67 (Issue #428, S80a), and revision 65 → 67 once revision 66 (Issue #95, S39) has widened the Run
+ * Authorizations' origin, which `initializeTaskAuthorizationSchema` has just done. Revision 66 adds
+ * `background-analysis-enrollments.ts`'s relations and revision 67 `material-index.ts`'s, both of which `EditorialStore.open`
+ * creates before this runs, and neither moves anything here: the ledger is already the terminal one, so only the version moves.
+ */
+function advanceToTerminalRevision(db: DatabaseSync): void {
+  migrateInTransaction(db, `PRAGMA user_version = ${MATERIAL_INDEX_SCHEMA_VERSION};`, 'Terminal version');
+}
+
+/**
  * The rebuild revisions 20, 24, 59 and 62 share. Each rebuilds the same three relations from their *current*
  * exact text, so whichever revision a store starts from, it lands on the terminal shapes — and the
  * terminal version, which the revisions between them moved without touching them — in this one transaction;
@@ -2047,7 +2114,7 @@ function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24
                   mode, predecessor_revision_id, selected_start_position, selected_end_position
            FROM temp.migrate_analysis_task_intents ORDER BY migrate_rowid`);
       rebuildResultSetRelations(db);
-      db.exec(`PRAGMA user_version = ${WRITING_TASK_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${MATERIAL_INDEX_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
       validateTaskAuthorizationSchema(db);
       db.exec('COMMIT');
@@ -2066,8 +2133,9 @@ function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24
 }
 
 /**
- * Forward-only. The newest stores are checked exactly and never widened: a revision-65 store is validated as the terminal
- * ledger; a revision-64 store is validated whole as revision 64 left the ledger and has the three kind-coupled relations
+ * Forward-only. The newest stores are checked exactly and never widened: a revision-67 store is validated as the terminal
+ * ledger; a revision-66 store carries it too and only has its version moved; a revision-65 store has its Run Authorizations'
+ * origin widened for revision 66 and its version moved; a revision-64 store is validated whole as revision 64 left the ledger and has the three kind-coupled relations
  * rebuilt for the writing kind; a revision-62 or revision-63 store is validated whole as revision 62 left the ledger and has
  * them rebuilt for the evaluation rewrite and writing kinds at once; a revision-59, revision-60 or revision-61 store is
  * validated whole as revision 59 left the ledger and has them rebuilt to the terminal shape. A store stamped 59 to 61 that
@@ -2109,34 +2177,41 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       version === DATABASE_REPLACEMENT_SCHEMA_VERSION || version === DATABASE_MERGE_SCHEMA_VERSION ||
       version === INITIAL_EVALUATION_SCHEMA_VERSION || version === DIALOGUE_SCHEMA_VERSION || version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
       version === READERS_REPORT_SCHEMA_VERSION || version === CAPTURED_PROCEDURE_SCHEMA_VERSION || version === EVALUATION_REWRITE_SCHEMA_VERSION ||
-      version === WRITING_TASK_SCHEMA_VERSION,
+      version === WRITING_TASK_SCHEMA_VERSION || version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
+      version === MATERIAL_INDEX_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
-  if (version === WRITING_TASK_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
-  if (version === EVALUATION_REWRITE_SCHEMA_VERSION) {
-    // A revision-64 store carries the ledger revision 64 left, validated as exactly that, and revision 65's rebuild of the three
-    // kind-coupled relations brings it to the terminal shape and stamps the terminal version.
+  if (version === MATERIAL_INDEX_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION) {
+    // Revision 67 (Issue #428, S80a) adds no task-authorization or analysis relation, so a revision-66 store carries the terminal
+    // ledger: it is validated as exactly that, and nothing but the version moves.
     validateJ03TaskAuthorizationSchema(db);
-    validateRevision64AnalysisLedgerSchema(db);
-    return migrateAnalysisLedgerToRevision65(db);
+    validateAnalysisLedgerSchema(db);
+    return advanceToTerminalRevision(db);
   }
-  if (version === READERS_REPORT_SCHEMA_VERSION || version === CAPTURED_PROCEDURE_SCHEMA_VERSION) {
-    // Revision 63 (Issue #65, S30) adds no task-authorization or analysis relation: a revision-62 or revision-63 store carries
-    // the ledger revision 62 left, validated as exactly that, and one rebuild of the three kind-coupled relations brings it to
-    // the terminal shape — revision 64's evaluation rewrite kind and revision 65's writing kind at once — and stamps the
-    // terminal version.
+  if (version >= INITIAL_EVALUATION_SCHEMA_VERSION) {
+    // A store at revision 59 to 65 is validated exactly as its revision left it first — its Run Authorizations in the text
+    // revisions 31 to 65 carried, or already widened by an upgrade that stopped before its stamp (Issue #596) — and only then
+    // does revision 66 (Issue #95, S39) widen them for 后台分析登记, every row copied byte for byte. A store stamped 59 or later
+    // that holds any older text of a relation is refused before anything moves, never widened (Issue #672; #713 review, P3-8).
+    const asFound = authorizationsAsFound(db);
     validateJ03TaskAuthorizationSchema(db);
-    validateRevision62AnalysisLedgerSchema(db);
-    return migrateAnalysisLedgerToRevision64(db);
-  }
-  if (version === INITIAL_EVALUATION_SCHEMA_VERSION || version === DIALOGUE_SCHEMA_VERSION || version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION) {
-    // Revisions 60 (Issue #52, S17a) and 61 (Issue #64, S29b) add no task-authorization or analysis relation: a revision-59,
-    // revision-60 or revision-61 store carries the ledger revision 59 left, validated as exactly that, and revision 62's
-    // rebuild of the three kind-coupled relations brings it to the terminal shape and stamps the terminal version. Revision 59
-    // came long after the four widenings below, so it is checked exactly before them: a store stamped 59, 60 or 61 that holds
-    // an older text of one of those relations is not one AI7 wrote, and is refused rather than widened (Issue #672).
-    validateJ03TaskAuthorizationSchema(db);
-    validateRevision59AnalysisLedgerSchema(db);
+    if (version === WRITING_TASK_SCHEMA_VERSION) validateRevision65AnalysisLedgerSchema(db, asFound);
+    else if (version === EVALUATION_REWRITE_SCHEMA_VERSION) validateRevision64AnalysisLedgerSchema(db, asFound);
+    else if (version === READERS_REPORT_SCHEMA_VERSION || version === CAPTURED_PROCEDURE_SCHEMA_VERSION) validateRevision62AnalysisLedgerSchema(db, asFound);
+    else validateRevision59AnalysisLedgerSchema(db, asFound);
+    widenAnalysisRelation(db, 'analysis_run_authorizations', [ANALYSIS_LEDGER_REVISION_65_SQL.analysis_run_authorizations],
+      'authorization_id, task_intent_id, plan_envelope_sha256, origin, authority, authorized_at, canonical_json, sha256', 66);
+    // Revisions 66 and 67 add no other task-authorization or analysis relation: a revision-65 store's widened ledger is the
+    // terminal one, and only the version moves — to 67.
+    if (version === WRITING_TASK_SCHEMA_VERSION) return advanceToTerminalRevision(db);
+    // A revision-64 store has revision 65's rebuild of the three kind-coupled relations left to make.
+    if (version === EVALUATION_REWRITE_SCHEMA_VERSION) return migrateAnalysisLedgerToRevision65(db);
+    // Revision 63 (Issue #65, S30) added no task-authorization or analysis relation: a revision-62 or revision-63 store has one
+    // rebuild of the three left — revision 64's evaluation rewrite kind and revision 65's writing kind at once.
+    if (version === READERS_REPORT_SCHEMA_VERSION || version === CAPTURED_PROCEDURE_SCHEMA_VERSION) return migrateAnalysisLedgerToRevision64(db);
+    // Revisions 60 (Issue #52, S17a) and 61 (Issue #64, S29b) added none either: a revision-59 to revision-61 store has revision
+    // 62's rebuild left to make. Revision 59 came long after the four widenings below, so it is checked exactly before them.
     return migrateAnalysisLedgerToRevision62(db);
   }
   // Revisions 30 to 32 widen the Run states, the Run Authorizations' origin and the Task Outcomes first, for every
@@ -2148,8 +2223,10 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
     [ANALYSIS_LEDGER_REVISION_34_SQL.analysis_run_states, ANALYSIS_LEDGER_REVISION_32_SQL.analysis_run_states,
       ANALYSIS_LEDGER_REVISION_31_SQL.analysis_run_states, ANALYSIS_LEDGER_REVISION_29_SQL.analysis_run_states],
     'run_record_id, sequence, state, recorded_at, canonical_json, sha256', 35);
-  widenAnalysisRelation(db, 'analysis_run_authorizations', [ANALYSIS_LEDGER_REVISION_30_SQL.analysis_run_authorizations],
-    'authorization_id, task_intent_id, plan_envelope_sha256, origin, authority, authorized_at, canonical_json, sha256', 31);
+  // Revision 66 (Issue #95, S39) widens the origin once more, for 后台分析登记, from revision 31's text or revision 30's.
+  widenAnalysisRelation(db, 'analysis_run_authorizations',
+    [ANALYSIS_LEDGER_REVISION_65_SQL.analysis_run_authorizations, ANALYSIS_LEDGER_REVISION_30_SQL.analysis_run_authorizations],
+    'authorization_id, task_intent_id, plan_envelope_sha256, origin, authority, authorized_at, canonical_json, sha256', 66);
   widenAnalysisRelation(db, 'analysis_task_outcomes', [ANALYSIS_LEDGER_REVISION_31_SQL.analysis_task_outcomes],
     'outcome_id, task_intent_id, run_record_id, classification, result_set_revision_id, recorded_at, canonical_json, sha256', 32);
   // Revision 34 (Issue #419): the Plan Revisions gain `plan-edit`. A store before revision 17 has none yet, and
@@ -2211,7 +2288,7 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   }
   const analysisStatements = `${Object.values(ANALYSIS_LEDGER_SCHEMA_SQL).join(';\n')};
       ${Object.values(ANALYSIS_LEDGER_TRIGGER_SQL).join(';\n')};
-      PRAGMA user_version = ${WRITING_TASK_SCHEMA_VERSION};`;
+      PRAGMA user_version = ${MATERIAL_INDEX_SCHEMA_VERSION};`;
   if (version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION) {
     validateJ03TaskAuthorizationSchema(db);
     return migrateInTransaction(db, analysisStatements, 'Analysis ledger');

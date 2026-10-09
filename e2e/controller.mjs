@@ -655,8 +655,11 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'knowledge-library-add',
     'knowledge-library-attention',
     'knowledge-library-decide',
+    // 资料索引 (Issue #428, S80a).
+    'knowledge-library-index',
     'j14-library-reflow-forced-colors',
     'knowledge-library-bounded-readers',
+    'knowledge-library-index-translation',
     'zero-activity',
   ]),
   'J-03': Object.freeze([
@@ -1036,6 +1039,16 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'concurrent-no-focus-theft',
     'concurrent-cancel',
     'concurrent-isolation',
+    // 后台分析登记 (Issue #95, plan slice S39): the disclosure, Escape, the Enrollment, the Run it starts in the background, its
+    // record, revoking, and nothing started after.
+    'background-enrollment-disclosure',
+    'j14-background-keyboard',
+    'background-enrollment-recorded',
+    'j14-background-focus-kept',
+    'background-change-dispatches',
+    'background-run-record',
+    'background-revoke',
+    'background-revoked-no-dispatch',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',

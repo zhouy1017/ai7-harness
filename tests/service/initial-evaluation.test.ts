@@ -15,7 +15,7 @@ import {
   ANALYSIS_LEDGER_REVISION_58_SQL,
   ANALYSIS_LEDGER_SCHEMA_SQL,
   DATABASE_MERGE_SCHEMA_VERSION,
-  WRITING_TASK_SCHEMA_VERSION,
+  MATERIAL_INDEX_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import {
   INITIAL_EVALUATION_ASSURANCE_STATEMENT,
@@ -258,7 +258,7 @@ describe('AI7 初评 over the real store on exact sample1', () => {
     // The snapshot is immutable, as the rest of the record is.
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
       expect(() => database.exec('UPDATE evaluation_initial_drafts SET canonical_json = canonical_json')).toThrowError(/EVALUATION_LEDGER_IMMUTABLE/u);
       expect(() => database.exec('DELETE FROM evaluation_initial_drafts')).toThrowError(/EVALUATION_LEDGER_IMMUTABLE/u);
       database.exec('DROP TRIGGER evaluation_initial_drafts_no_update');
@@ -407,7 +407,7 @@ describe('AI7 初评 over the real store on exact sample1', () => {
     let before: string;
     try {
       // Revision 58 exactly: the three relations as revision 24 left them, and no relation of revision 59 or 60.
-      plant.exec(`DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; PRAGMA user_version = ${DATABASE_MERGE_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; PRAGMA user_version = ${DATABASE_MERGE_SCHEMA_VERSION};`);
       downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
       before = rows(plant);
       // At revision 58 the evaluation kind is refused by the CHECK itself.
@@ -424,7 +424,7 @@ describe('AI7 初评 over the real store on exact sample1', () => {
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(WRITING_TASK_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
       expect(rows(after)).toBe(before!);
       for (const table of KIND_COUPLED_ANALYSIS_RELATIONS) {
         expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(ANALYSIS_LEDGER_SCHEMA_SQL[table]);
@@ -462,7 +462,8 @@ describe('AI7 初评 over the real store on exact sample1', () => {
     const read = async (): Promise<string> => {
       const reopened = await openStore();
       try {
-        const answer = await refusal(() => reopened.inspectEvaluation(bookId, recordId));
+        // A version that cannot be read is named on the page, which still opens (Issue #708).
+        const answer = reopened.inspectEvaluation(bookId, recordId).unreadableRecords.length === 0 ? 'no-error' : 'unreadable';
         if (answer === 'no-error') {
           // An entry written before S81b1 names no adjustment, and each item reads as having none.
           expect(reopened.inspectEvaluation(bookId, recordId).record!.content.items.map((item) => item.adjustment)).toEqual([null, null, null, null, null]);
@@ -479,7 +480,7 @@ describe('AI7 初评 over the real store on exact sample1', () => {
     expect(await read()).toBe('no-error');
     // Schema 2 with one item's adjustment left out is refused.
     rewrite((json) => json.replace('"adjustment":null,', ''));
-    expect(await read()).toBe('EVALUATION_RECORD_INVALID:评估记录已损坏。');
+    expect(await read()).toBe('unreadable');
   }, 300_000);
 
   it('refuses a store stamped revision 58 whose kind-coupled relations already read as revision 59\'s', async () => {
@@ -488,7 +489,7 @@ describe('AI7 初评 over the real store on exact sample1', () => {
     const plant = new DatabaseSync(path);
     try {
       // Only the version moves back: no store AI7 wrote at revision 58 held these shapes, and none is read as one.
-      plant.exec(`DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; PRAGMA user_version = ${DATABASE_MERGE_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; PRAGMA user_version = ${DATABASE_MERGE_SCHEMA_VERSION};`);
     } finally {
       plant.close();
     }

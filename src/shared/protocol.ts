@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 107 as const;
+export const SERVICE_PROTOCOL_VERSION = 110 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -76,6 +76,9 @@ export const IPC_CHANNELS = {
   setDefaultExecutionRule: 'ai7:j04:set-default-execution-rule',
   inspectDefaultExecutionRules: 'ai7:j04:inspect-default-execution-rules',
   deactivateDefaultExecutionRule: 'ai7:j04:deactivate-default-execution-rule',
+  inspectBackgroundAnalysisEnrollment: 'ai7:j09:inspect-background-analysis-enrollment',
+  enrollBackgroundAnalysis: 'ai7:j09:enroll-background-analysis',
+  revokeBackgroundAnalysisEnrollment: 'ai7:j09:revoke-background-analysis-enrollment',
   inspectReviewGuidelines: 'ai7:j15:inspect-review-guidelines',
   previewReviewGuidelineVersion: 'ai7:j15:preview-review-guideline-version',
   importReviewGuidelineVersion: 'ai7:j15:import-review-guideline-version',
@@ -119,6 +122,7 @@ export const IPC_CHANNELS = {
   inspectAnalysisFeedback: 'ai7:j11:inspect-analysis-feedback',
   recordAnalysisFeedback: 'ai7:j11:record-analysis-feedback',
   readLibraryDecisionReason: 'ai7:j15:read-library-decision-reason',
+  inspectLibraryMaterialSegments: 'ai7:j15:inspect-library-material-segments',
   inspectReviewWorkspace: 'ai7:j04:inspect-review-workspace',
   prepareReviewRun: 'ai7:j04:prepare-review-run',
   authorizeReviewRun: 'ai7:j04:authorize-review-run',
@@ -1799,6 +1803,17 @@ export type ResultSetPolicyPin =
 /** The three launch-form arguments the built entry accepts beside `--data-root`; carried by argv only, never by an environment variable or setting. */
 export const TRUSTED_SCOPE_ARGUMENT = '--trusted-operational-scope';
 export const RUN_BUDGET_CEILING_ARGUMENT = '--run-budget-ceiling';
+/**
+ * J-09's 后台分析登记 pace (Issue #95, S39; #713 review, P2-7): the quiet period in milliseconds a development-ci J-09 launch sets
+ * beside the model adapter, so the Journey waits on the dispatcher's progress rather than a clock. Never in any other launch.
+ */
+export const BACKGROUND_QUIET_ARGUMENT = '--j09-background-quiet-ms';
+/** A J-09 quiet period: whole milliseconds from 1 s to 30 s, the product's own; anything else is refused. */
+export function parseBackgroundQuietMs(value: string): number | null {
+  if (!/^[1-9][0-9]{3,4}$/u.test(value)) return null;
+  const ms = Number(value);
+  return ms >= 1_000 && ms <= 30_000 ? ms : null;
+}
 export const PROVIDER_CACHE_ROOT_ARGUMENT = '--provider-cache-root';
 export const LAUNCH_SELECTABLE_SCOPES: ReadonlyArray<TrustedOperationalScope> = ['development-ci', 'developer-live'];
 /** A positive decimal token count without sign, separators, or leading zeros; twelve digits stay well inside the safe-integer range. */
@@ -3343,6 +3358,11 @@ export interface BaselineAnalysisProjection {
     modeLabel: string;
     /** 改计划重做 (Issue #422, S76c; CONT-013): the cancelled Run this Task redoes, and its Task; `null` for any other Task. */
     redoOf: null | { runRecordId: string; taskIntentId: string };
+    /**
+     * The 后台分析登记 version whose dispatcher prepared this Task (Issue #95, S39); absent for every Task the editor asked for, so
+     * a plan AI7 prepared is never shown as the editor's.
+     */
+    preparedByEnrollmentVersionId?: string;
   };
   checkpoint: null | TaskAuthorizationProjection['checkpoint'];
   manuscriptPin: null | {
@@ -3413,10 +3433,15 @@ export interface BaselineAnalysisProjection {
     planEnvelopeDigest: string;
     /** The plan version the authorization bound, resolved from the envelope digest. */
     planVersionOrdinal: number | null;
-    /** `default-execution-rule` when 快速开始 started the Task under a 默认执行规则 (Issue #421). */
-    origin: 'standard-direct' | 'default-execution-rule';
+    /**
+     * `default-execution-rule` when 快速开始 started the Task under a 默认执行规则 (Issue #421); `background-analysis-enrollment`
+     * when AI7 started it by itself under the Book's 后台分析登记 (Issue #95, S39).
+     */
+    origin: 'standard-direct' | 'default-execution-rule' | 'background-analysis-enrollment';
     /** The rule version the authorization names; `null` for a standard-direct start. */
     ruleVersionId: string | null;
+    /** The enrollment version the authorization names; `null` unless the Enrollment started it. */
+    enrollmentVersionId: string | null;
     authority: 'standard-direct-dispatch' | 'record-only-no-dispatch';
     authorizedAt: string;
   };
@@ -3856,7 +3881,10 @@ export interface ReviewCategoryFindingCountsProjection {
 export type ReviewCategoryUnitLineage = AnalysisUnitLineage | { kind: 'unreviewed' };
 
 export interface ReviewScopePlanCounts extends AnalysisReusePlanCounts {
-  /** New units the plan leaves out of scope: never dispatched, settled as `out-of-scope` gaps. */
+  /**
+   * New units the plan does not read: never dispatched, settled as `out-of-scope` gaps — or, for one whose last read failed,
+   * carried as the lost gap it is (Issue #716).
+   */
   unreviewed: number;
 }
 
@@ -3868,7 +3896,9 @@ export interface ReviewScopePlanUnitProjection {
   disposition: 'reused' | 'recomputed' | 'unreviewed';
   /**
    * `selected-range` is an in-range unit of a first range review, where there is nothing to bypass;
-   * `out-of-scope` is every `unreviewed` unit. The other six read exactly as the baseline plan's do.
+   * `out-of-scope` is every `unreviewed` unit but one whose last read failed, which is `unreviewed` with
+   * `predecessor-gap`: carried as a lost gap, never as out of scope (Issue #716). The other six read
+   * exactly as the baseline plan's do.
    */
   reason:
     | 'compatible'
@@ -5524,6 +5554,65 @@ export interface DefaultExecutionRuleProjection extends DefaultExecutionRuleRefe
   binding: DefaultExecutionRuleBinding;
 }
 
+// ---- 后台分析登记 (Issue #95, plan slice S39; ADR 0048; V2-UX-ANALYSIS-016 to 021) ------------------------------------
+
+/** Where an Enrollment starts: only what changes after it is made, or the text as it stands too. */
+export type BackgroundAnalysisStartingPoint = 'prospective' | 'backfill';
+
+/** One Book's 后台分析登记 on ②A: what it is, its state, what it would do now and why, and the two decisions it offers. */
+export interface BackgroundAnalysisEnrollmentProjection {
+  bookId: string;
+  bookTitle: string;
+  /**
+   * `suspended`: AI7 suspended it when the local data was replaced or rolled back, and it starts nothing until the editor confirms
+   * it again; `damaged`: its record does not read back, and only this Book's background analysis stops.
+   */
+  state: 'none' | 'active' | 'suspended' | 'revoked' | 'damaged';
+  stateLabel: string;
+  statement: string;
+  /** The version in force — or the last one, once revoked; `null` before the Book was ever enrolled. */
+  enrollment: null | {
+    enrollmentId: string;
+    enrollmentVersionId: string;
+    ordinal: number;
+    /** `后台分析登记 · 第 1 版`. */
+    name: string;
+    startingPoint: BackgroundAnalysisStartingPoint;
+    startingPointLabel: string;
+    enrolledBy: '本机编辑';
+    enrolledAt: string;
+    stateRecordedAt: string;
+    /** What the version binds, in the words its disclosure listed. */
+    binds: ReadonlyArray<{ label: string; value: string }>;
+  };
+  /** The Enrollment's newest states, newest first (at most 10); revoking never shortens it. */
+  history: ReadonlyArray<{ state: 'active' | 'suspended' | 'revoked'; stateLabel: string; ordinal: number; recordedAt: string }>;
+  historyCount: number;
+  /** What the Enrollment would do now, and why — `start` only while every condition holds. */
+  next: { kind: 'start' | 'none' | 'wait' | 'stopped'; reason: string };
+  /** The dispatcher's latest look at the Book in this service's lifetime, and what it found; `null` before its first. */
+  lastLook: null | { at: string; kind: 'start' | 'none' | 'wait' | 'stopped'; reason: string };
+  /** Why the dispatcher's latest pass that began preparing did not start, until it next starts or the Book is enrolled again. */
+  lastNotStarted: null | { at: string; reason: string };
+  /** The Runs the Enrollment started on this Book, newest first (at most 10), and how many there are. */
+  startedRuns: ReadonlyArray<{ taskIntentId: string; modeLabel: string; enrollmentOrdinal: number | null; authorizedAt: string }>;
+  startedRunCount: number;
+  /** `登记…`'s disclosure: everything the Enrollment would bind, before the editor chooses where it starts. */
+  offer: {
+    canEnroll: boolean;
+    reason: string | null;
+    /** The digest `enrollBackgroundAnalysis` must name; `null` while it cannot be enrolled. */
+    disclosureDigest: string | null;
+    scope: string;
+    what: string;
+    when: string;
+    binds: ReadonlyArray<{ label: string; value: string }>;
+    startingPoints: ReadonlyArray<{ value: BackgroundAnalysisStartingPoint; label: string; note: string }>;
+    notGranted: ReadonlyArray<string>;
+  };
+  revoke: { canRevoke: boolean; consequences: ReadonlyArray<string> };
+}
+
 export interface DefaultExecutionRulesProjection {
   /** Every rule of every Book, the Book's rules together, active before turned off. */
   rules: ReadonlyArray<DefaultExecutionRuleProjection>;
@@ -6329,6 +6418,89 @@ export interface LibraryMaterialProjection {
   readonly decisionCount: number;
   /** The latest of them, oldest first, at most `MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN`. */
   readonly decisions: ReadonlyArray<LibraryMaterialDecisionProjection>;
+  /** Its Material Index, layer by layer, as it stands on this machine (Issue #428, S80a; KB-009). */
+  readonly index: MaterialIndexProjection;
+}
+
+// ---- ⑤ 资料库 · 资料索引 (Issue #428, plan slice S80a; editor-surfaces §8.4, V2-UX-KB-009, ATTN-009) -------------------
+
+/**
+ * Where an item's Material Index stands: waiting for its turn or being built on this machine, or built — every layer
+ * read, or some layers not readable for its format, or not readable at all for the reason given.
+ */
+export type MaterialIndexState = 'queued' | 'indexing' | 'complete' | 'unsupported' | 'failed';
+
+/**
+ * Why a layer could not be read (S80a): the format needs a local dependency the Owner has not admitted (PDF text and
+ * recognition), AI7 reads no text of this format yet, the text crossed the local reading bounds, the file could not be
+ * read, the kept original no longer matches its record, or the file holds no text.
+ */
+export type MaterialIndexReason = 'needs-local-dependency' | 'format-unsupported' | 'over-bound' | 'unreadable' | 'original-changed' | 'empty';
+
+/**
+ * One layer's state, in the five layers of KB-009 and the two parts its text layer names (recognition, Source
+ * Translation). `deferred` is a layer this build of AI7 does not provide: similarity vectors and recognition need a local
+ * dependency the Owner has not admitted, and machine Source Translation needs a Model Role.
+ */
+export type MaterialIndexLayerState = 'complete' | 'pending' | 'unsupported' | 'failed' | 'deferred' | 'not-needed';
+
+/** The language the extracted text is mostly in: Chinese, another language, or no letters at all. */
+export type MaterialIndexLanguage = 'zh' | 'other' | 'none';
+
+export interface MaterialIndexProjection {
+  readonly state: MaterialIndexState;
+  /** Why the text could not be read; `null` while it is waiting, or once it was read. */
+  readonly reason: MaterialIndexReason | null;
+  /** When the index was built; `null` before. */
+  readonly builtAt: string | null;
+  /** The index record's digest: the version a Task that lists the item pins (KB-002); `null` before it is built. */
+  readonly digest: string | null;
+  readonly layers: {
+    readonly original: MaterialIndexLayerState;
+    readonly metadata: MaterialIndexLayerState;
+    readonly text: MaterialIndexLayerState;
+    readonly recognition: MaterialIndexLayerState;
+    readonly translation: MaterialIndexLayerState;
+    readonly segments: MaterialIndexLayerState;
+    readonly vectors: MaterialIndexLayerState;
+  };
+  /** What the metadata layer read of the file: its own title when it names one, the language, and the counts. */
+  readonly metadata: null | {
+    readonly documentTitle: string | null;
+    readonly language: MaterialIndexLanguage | null;
+    readonly paragraphs: number;
+    readonly headings: number;
+    readonly sentences: number;
+    readonly characters: number;
+  };
+}
+
+/** The paragraphs one answer of 查看分段 carries at most: one frame holds them at the paragraph bound. */
+export const MAX_MATERIAL_SEGMENTS_PAGE = 16;
+
+/**
+ * One page of an item's segments (KB-009): each paragraph with its kind and its sentences as ranges of its text, so every
+ * sentence is citable by its position anchor — 第 n 段第 m 句. These formats carry no page numbers, and the anchors say so by
+ * being positions.
+ */
+export interface MaterialSegmentsPageProjection {
+  readonly materialId: string;
+  readonly title: string;
+  /** The index record the page was read from. */
+  readonly indexDigest: string;
+  /** How many paragraphs the index holds. */
+  readonly total: number;
+  /** The first paragraph's ordinal on this page, 1-based. */
+  readonly from: number;
+  readonly segments: ReadonlyArray<{
+    readonly ordinal: number;
+    readonly kind: 'title' | 'heading' | 'paragraph';
+    readonly text: string;
+    /** Each sentence as `[start, end)` in UTF-16 code units of `text`, in order. */
+    readonly sentences: ReadonlyArray<readonly [number, number]>;
+  }>;
+  readonly next: number | null;
+  readonly previous: number | null;
 }
 
 /** One page of 资料库. An attribution names its Book from 书库's own pages (`listBooks`), never from this answer. */
@@ -9598,6 +9770,8 @@ export type GlobalAttentionStateKey =
   // material waits for a decision or changed since it had one, or else while any was left for later.
   | 'learning-materials-pending'
   | 'learning-materials-deferred'
+  // 索引完成 (Issue #428, S80a; ATTN-009): a 资料库 item's Material Index built on this machine, in 最近完成.
+  | 'indexing-completed'
   // A dialogue Task of the Book (Issue #52, S17a; TASK-044, DIALOG-010, 012): only the 任务 panel lists it. Away from the
   // foreground dialogue an answer in flight reads `等待回答` and nothing more; settled, it is answered or incomplete.
   | 'dialogue-answering'
@@ -9637,13 +9811,15 @@ export type GlobalAttentionNextStep =
   | 'set-learning-eligibility'
   // A Book's Learning Material in 质量与学习 (Issue #61, S26b).
   | 'decide-learning-materials'
+  // 查看索引: the item's card in 资料库, its index layers and 查看分段 (Issue #428, S80a).
+  | 'view-material-index'
   // A dialogue Task's 打开对话 (Issue #52, S17a; TASK-044).
   | 'open-dialogue';
 export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
   'view-run', 'view-review', 'reconfirm-plan', 'continue-review', 'return-to-recovery', 'retry-abandon-cleanup', 'await-local-check',
   'resolve-conflict', 'answer-clarification', 'adjust-budget-redo', 'resolve-model-service', 'reprepare', 'redo', 'view-plan',
   'maintenance-link-proposal', 'maintenance-link-publication', 'maintenance-write-errata', 'maintenance-conclude',
-  'set-library-attribution', 'set-learning-eligibility', 'decide-learning-materials', 'open-dialogue',
+  'set-library-attribution', 'set-learning-eligibility', 'decide-learning-materials', 'open-dialogue', 'view-material-index',
 ];
 
 /**
@@ -9679,6 +9855,8 @@ export type GlobalAttentionObjectProjection =
   | { kind: 'maintenance'; classification: MaintenanceClassification; ordinal: number; publicationOrdinal: number }
   // A 资料库 item (Issue #427, S79c): its title and kind, and where it belongs so far — a Book, the house, or not yet decided.
   | { kind: 'library-material'; title: string; materialKind: LibraryMaterialKind; scope: 'none' | 'book' | 'house' }
+  // A 资料库 item whose Material Index was built (Issue #428, S80a): its title and kind, where it belongs, and how the build went.
+  | { kind: 'library-index'; title: string; materialKind: LibraryMaterialKind; scope: 'none' | 'book' | 'house'; outcome: 'complete' | 'unsupported' | 'failed' }
   // A Book's Learning Material (Issue #61, S26b): how many wait for a decision, and how many were left for later.
   | { kind: 'learning-materials'; pending: number; deferred: number }
   // A dialogue Task (Issue #52, S17a): the editor's own question, as the Harness Session Ledger holds it — `null` when it
@@ -10587,6 +10765,21 @@ export interface ServiceOperationMap {
     input: { ruleId: string };
     output: DefaultExecutionRuleProjection;
   };
+  /** 后台分析登记 of one Book (Issue #95, S39): its state, what it would do now, and its disclosure. */
+  inspectBackgroundAnalysisEnrollment: {
+    input: { bookId: string };
+    output: BackgroundAnalysisEnrollmentProjection;
+  };
+  /** `登记`: the Enrollment, from the disclosure the editor confirmed and the starting point they chose. */
+  enrollBackgroundAnalysis: {
+    input: { bookId: string; disclosureDigest: string; startingPoint: BackgroundAnalysisStartingPoint };
+    output: BackgroundAnalysisEnrollmentProjection;
+  };
+  /** `撤销登记`: no new Run starts under it; everything already recorded stays. */
+  revokeBackgroundAnalysisEnrollment: {
+    input: { bookId: string; enrollmentId: string };
+    output: BackgroundAnalysisEnrollmentProjection;
+  };
   /** 知识库 › 审阅规范文件 (Issue #427, S79a): every guideline document the review categories apply, with its versions. */
   inspectReviewGuidelines: {
     input: { page?: ReviewGuidelinesPage };
@@ -10656,6 +10849,11 @@ export interface ServiceOperationMap {
   readLibraryDecisionReason: {
     input: { materialId: string; ordinal: number; offset: number };
     output: LibraryDecisionReasonPage;
+  };
+  /** 查看分段 (Issue #428, S80a): one page of an item's indexed paragraphs and sentence anchors, from the paragraph named. */
+  inspectLibraryMaterialSegments: {
+    input: { materialId: string; from: number };
+    output: MaterialSegmentsPageProjection;
   };
   /** 放入资料…: the absolute path main's picker returned, read as it would arrive; nothing is kept. */
   previewLibraryMaterial: {
@@ -11235,6 +11433,10 @@ export interface RendererApi {
   setDefaultExecutionRule(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<DefaultExecutionRuleProjection>;
   inspectDefaultExecutionRules(): Promise<DefaultExecutionRulesProjection>;
   deactivateDefaultExecutionRule(input: { ruleId: string }): Promise<DefaultExecutionRuleProjection>;
+  /** 后台分析登记 of the Book the window is showing (Issue #95, S39). */
+  inspectBackgroundAnalysisEnrollment(): Promise<BackgroundAnalysisEnrollmentProjection>;
+  enrollBackgroundAnalysis(input: { disclosureDigest: string; startingPoint: BackgroundAnalysisStartingPoint }): Promise<BackgroundAnalysisEnrollmentProjection>;
+  revokeBackgroundAnalysisEnrollment(input: { enrollmentId: string }): Promise<BackgroundAnalysisEnrollmentProjection>;
   /** 知识库 › 审阅规范文件 (Issue #427, S79a): names no Book; it reads every Book's Review Runs to say who used which version. */
   inspectReviewGuidelines(input?: { page?: ReviewGuidelinesPage }): Promise<ReviewGuidelinesProjection>;
   /** 导入新版本: the native picker, then the file's clauses as the next version would read them; `null` when the picker was cancelled. */
@@ -11267,6 +11469,8 @@ export interface RendererApi {
   /** One 资料库 item, by its identity. */
   inspectLibraryMaterial(input: { materialId: string }): Promise<LibraryMaterialProjection>;
   readLibraryDecisionReason(input: ServiceOperationMap['readLibraryDecisionReason']['input']): Promise<LibraryDecisionReasonPage>;
+  /** 查看分段: one page of the item's segments, read-only. */
+  inspectLibraryMaterialSegments(input: ServiceOperationMap['inspectLibraryMaterialSegments']['input']): Promise<MaterialSegmentsPageProjection>;
   /** 放入资料…: the native picker, then the file as it would arrive; `null` when the picker was cancelled. */
   previewLibraryMaterial(): Promise<LibraryMaterialPreviewProjection | null>;
   addLibraryMaterial(input: { previewId: string; title: string; kind: LibraryMaterialKind }): Promise<LibraryMaterialProjection>;

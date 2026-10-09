@@ -16,7 +16,7 @@ import { TASK_BAR_RECONFIRM, TASK_BAR_REDO, TASK_BAR_REPREPARE, TASK_BAR_RUN_LIN
 import { RESOLVE_CONFLICT_LABEL } from './editorial-mark-labels.js';
 import { PROPOSAL_CONFLICT_CLASSIFICATION, REVERSAL_CONFLICT_LINE } from './proposal-conflict-labels.js';
 import { MAINTENANCE_CLASSIFICATION_LABELS, MAINTENANCE_NEXT_STEP_LABELS } from '../shared/maintenance-wording.js';
-import { LIBRARY_ATTRIBUTE, LIBRARY_ELIGIBILITY, LIBRARY_HOUSE, LIBRARY_KIND_LABELS, LIBRARY_NO_ATTRIBUTION } from './knowledge-base-labels.js';
+import { LIBRARY_ATTRIBUTE, LIBRARY_ELIGIBILITY, LIBRARY_HOUSE, LIBRARY_KIND_LABELS, LIBRARY_NO_ATTRIBUTION, materialIndexCompletedReason } from './knowledge-base-labels.js';
 import { DIALOGUE_CARD_REASONS, DIALOGUE_OPEN_LABEL, DIALOGUE_STATE_LABELS, DIALOGUE_WAITING_LABEL, dialogueQuestionLine } from './dialogue-labels.js';
 
 /**
@@ -161,6 +161,8 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   // A Book's Learning Material (Issue #61, S26b; LEARN-002): the words of the spec's attention item.
   'learning-materials-pending': '学习准入待处理',
   'learning-materials-deferred': '学习准入待处理 · 稍后决定',
+  // 索引完成 (Issue #428, S80a; ATTN-009): the material table's own words for it.
+  'indexing-completed': '索引完成',
   // A dialogue Task (Issue #52, S17a): away from the foreground dialogue an answer in flight is only 等待回答 (DIALOG-010);
   // a stopped or interrupted one is labelled incomplete in DIALOG-012's words.
   'dialogue-answering': DIALOGUE_WAITING_LABEL,
@@ -215,6 +217,7 @@ export const GLOBAL_ATTENTION_STATE_PILLS: Readonly<Record<GlobalAttentionStateK
   'learning-eligibility-deferred': { tone: 'attention', shape: 'triangle' },
   'learning-materials-pending': { tone: 'attention', shape: 'triangle' },
   'learning-materials-deferred': { tone: 'attention', shape: 'triangle' },
+  'indexing-completed': { tone: 'good', shape: 'check' },
   'dialogue-answering': { tone: 'neutral', shape: 'ring' },
   'dialogue-answered': { tone: 'good', shape: 'check' },
   'dialogue-stopped': { tone: 'attention', shape: 'half' },
@@ -258,6 +261,8 @@ export const GLOBAL_ATTENTION_NEXT_STEP_LABELS: Readonly<Record<GlobalAttentionN
   'set-learning-eligibility': LIBRARY_ELIGIBILITY,
   'decide-learning-materials': '定学习准入…',
   'open-dialogue': DIALOGUE_OPEN_LABEL,
+  // A 资料库 item's index (Issue #428, S80a): its card, with the layers and 查看分段.
+  'view-material-index': '查看索引',
 };
 /**
  * A 审阅 started on a selection (Issue #423, S77b; review P3-4): it reads the reading ranges holding the selected words'
@@ -286,7 +291,7 @@ export function globalAttentionBookLabel(book: GlobalAttentionItemProjection['bo
  * or that it does not belong anywhere yet.
  */
 export function globalAttentionItemBookLabel(item: Pick<GlobalAttentionItemProjection, 'book' | 'object'>): string {
-  if (item.object.kind === 'library-material' && item.object.scope !== 'book') {
+  if ((item.object.kind === 'library-material' || item.object.kind === 'library-index') && item.object.scope !== 'book') {
     return item.object.scope === 'house' ? LIBRARY_HOUSE : LIBRARY_NO_ATTRIBUTION;
   }
   return globalAttentionBookLabel(item.book);
@@ -318,6 +323,8 @@ export function globalAttentionObjectLabel(object: GlobalAttentionObjectProjecti
       return `维护事项 · 第 ${object.ordinal} 项 · ${MAINTENANCE_CLASSIFICATION_LABELS[object.classification]} · 第 ${object.publicationOrdinal} 次发稿版本`;
     case 'library-material':
       return `资料库 · ${LIBRARY_KIND_LABELS[object.materialKind]}「${object.title}」`;
+    case 'library-index':
+      return `资料索引 · ${LIBRARY_KIND_LABELS[object.materialKind]}「${object.title}」`;
     case 'learning-materials':
       // Only what there is: a Book whose material was all left for later says no 0 条待定 (Issue #61 review).
       return `学习材料 · ${[...(object.pending > 0 ? [`${object.pending} 条待定`] : []), ...(object.deferred > 0 ? [`${object.deferred} 条稍后决定`] : [])].join('，')}`;
@@ -460,6 +467,9 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
       return '你的反馈与改动里有可以用来学习的材料：学习准入策略还只是建议，没有你的决定，它们不会用来学习。';
     case 'learning-materials-deferred':
       return '这些学习材料记为稍后决定：决定之前，它们不会用来学习。';
+    // 索引完成 (Issue #428, S80a; ATTN-009, KB-009): how the build went; it asks nothing.
+    case 'indexing-completed':
+      return materialIndexCompletedReason(item.object.kind === 'library-index' ? item.object.outcome : 'complete');
     // A dialogue Task (Issue #52, S17a; DIALOG-010, 012, 016).
     case 'dialogue-answering':
     case 'dialogue-answered':
@@ -549,8 +559,8 @@ export function globalAttentionView(projection: GlobalAttentionProjection): Read
  * Where material and knowledge-base items go when their records exist: a failed external source retention
  * to 异常与结果待确认, a pending 资料库 attribution or Learning Eligibility to 等待你的决定, a completed
  * indexing to 最近完成 — the same four groups, and no fifth (ADR 0077). The 资料库 decisions have their records
- * since Issue #427 (S79c), and their items carry these states; the retention (SRC-013) and the index (S80) arrive
- * with their own slices, so for those this table places them and no item is invented from it.
+ * since Issue #427 (S79c), and the index since Issue #428 (S80a), and their items carry these states; the retention
+ * (SRC-013) arrives with its own slice, so for it this table places it and no item is invented from it.
  */
 export const GLOBAL_ATTENTION_MATERIAL_GROUPS = [
   { material: 'external-source-retention-failed', label: '外部来源留存失败', group: 'exceptions' },

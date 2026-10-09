@@ -22,6 +22,8 @@ import {
   PROVIDER_CACHE_ROOT_ARGUMENT,
   REVIEW_FINDING_PAGE_KEYS,
   RUN_BUDGET_CEILING_ARGUMENT,
+  BACKGROUND_QUIET_ARGUMENT,
+  parseBackgroundQuietMs,
   TRUSTED_SCOPE_ARGUMENT,
   parseTrustedLaunchForm,
   type AskAboutSelectionInput,
@@ -89,6 +91,8 @@ interface LaunchArguments {
   unitHoldPath: string | undefined;
   /** J-16 only (Issue #52, S17a): the file whose number says how many text deltas a dialogue answer may stream. */
   answerHoldPath: string | undefined;
+  /** J-09 only (Issue #95, S39): the 后台分析登记 quiet period in milliseconds, within its bounds. */
+  backgroundQuietMs: number | undefined;
   /** J-05 only: the first Apply commits and its acknowledgement is withheld from the renderer, once. */
   applyControl: 'lose-first-acknowledgement' | undefined;
   observeJ12Reveal: boolean;
@@ -210,6 +214,7 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j04-connectivity-path' ||
           key === '--j10-unit-hold-path' ||
           key === '--j16-answer-hold-path' ||
+          key === BACKGROUND_QUIET_ARGUMENT ||
           key === '--j05-apply-control' ||
           key === '--j12-observe-reveal' ||
           key === '--launcher-pid' ||
@@ -386,6 +391,10 @@ function parseArguments(argv: string[]): LaunchArguments {
   // J-16's answer hold (Issue #52, S17a): J-16's own, absolute, beside the adapter — it holds a dialogue answer mid-stream.
   const answerHoldPath = values.get('--j16-answer-hold-path');
   requireDesktop(answerHoldPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-16' && isAbsolute(answerHoldPath)));
+  // J-09's 后台分析登记 pace (Issue #95, S39): J-09's own, development-ci only, beside the adapter, within its bounds.
+  const backgroundQuietValue = values.get(BACKGROUND_QUIET_ARGUMENT);
+  const backgroundQuietMs = backgroundQuietValue === undefined ? undefined : parseBackgroundQuietMs(backgroundQuietValue);
+  requireDesktop(backgroundQuietValue === undefined || (process.env.AI7_E2E_JOURNEY === 'J-09' && backgroundQuietMs !== null));
   requireDesktop(
     observeJ12RevealValue === undefined ||
       (process.env.AI7_E2E_JOURNEY === 'J-12' && observeJ12RevealValue === 'true'),
@@ -397,7 +406,7 @@ function parseArguments(argv: string[]): LaunchArguments {
       (process.env.AI7_E2E_JOURNEY === undefined && injectedPickerPath === undefined && observeJ12RevealValue === undefined &&
         importControlValue === undefined && foregroundExecutionControlValue === undefined && recoveryControlValue === undefined && modelAdapterControlValue === undefined &&
         applyControlValue === undefined && injectedSavePath === undefined && injectedFolderPath === undefined && connectivityPath === undefined &&
-        unitHoldPath === undefined && answerHoldPath === undefined),
+        unitHoldPath === undefined && answerHoldPath === undefined && backgroundQuietValue === undefined),
   );
   return {
     dataRoot,
@@ -412,6 +421,7 @@ function parseArguments(argv: string[]): LaunchArguments {
     connectivityPath,
     unitHoldPath,
     answerHoldPath,
+    backgroundQuietMs: backgroundQuietMs ?? undefined,
     applyControl,
     observeJ12Reveal,
     launcherPid,
@@ -2741,6 +2751,63 @@ function registerRendererHandlers(
         });
       }),
   );
+  // 后台分析登记 (Issue #95, S39) is the route's Book's: read, `登记` and `撤销登记`, the two decisions serialized with every other
+  // effect of this window's authority.
+  ipcMain.handle(IPC_CHANNELS.inspectBackgroundAnalysisEnrollment, (event) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const routeGeneration = owned.routeGeneration;
+      const routeRequestSequence = owned.routeRequestSequence;
+      const result = await service.call('inspectBackgroundAnalysisEnrollment', { bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+      if (result.bookId !== route.bookId) {
+        throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '后台分析登记不属于当前图书工作台。');
+      }
+      return result;
+    }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.enrollBackgroundAnalysis,
+    (event, input: Omit<ServiceOperationMap['enrollBackgroundAnalysis']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('enrollBackgroundAnalysis', {
+            disclosureDigest: input.disclosureDigest,
+            startingPoint: input.startingPoint,
+            bookId: route.bookId,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          if (result.bookId !== route.bookId) {
+            throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '后台分析登记不属于当前图书工作台。');
+          }
+          return result;
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.revokeBackgroundAnalysisEnrollment,
+    (event, input: Omit<ServiceOperationMap['revokeBackgroundAnalysisEnrollment']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('revokeBackgroundAnalysisEnrollment', { enrollmentId: input.enrollmentId, bookId: route.bookId });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          if (result.bookId !== route.bookId) {
+            throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '后台分析登记不属于当前图书工作台。');
+          }
+          return result;
+        });
+      }),
+  );
   // 知识库 › 审阅规范文件 (Issue #427, S79a) names no Book: it reads every Book's Review Runs. 导入新版本 opens the picker and
   // hands the service the path it returned; confirming records the version, serialized with every other effect.
   ipcMain.handle(IPC_CHANNELS.inspectReviewGuidelines, (event, input?: ServiceOperationMap['inspectReviewGuidelines']['input']) =>
@@ -3307,6 +3374,15 @@ function registerRendererHandlers(
       requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
       requireAuthority();
       return service.call('readLibraryDecisionReason', { materialId: input.materialId, ordinal: input.ordinal, offset: input.offset });
+    }),
+  );
+  // 查看分段 (Issue #428, S80a): one page of an item's indexed paragraphs, by the item and the paragraph it starts at.
+  ipcMain.handle(IPC_CHANNELS.inspectLibraryMaterialSegments, (event, input: ServiceOperationMap['inspectLibraryMaterialSegments']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectLibraryMaterialSegments', { materialId: input.materialId, from: input.from });
     }),
   );
   ipcMain.handle(IPC_CHANNELS.previewLibraryMaterial, (event) =>
@@ -5098,6 +5174,7 @@ export async function runApplication(): Promise<void> {
       launch.answerHoldPath,
       // A Journey reads how far the service's own startup came (Issue #675), beside main's steps and under the same switch.
       journeyStartupRelay(process.env, (line) => void process.stderr.write(line)),
+      launch.backgroundQuietMs,
     );
     service.onUnexpectedExit(() => {
       serviceInterrupted = true;
