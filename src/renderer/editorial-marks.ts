@@ -60,6 +60,19 @@ import {
 } from './editorial-mark-labels.js';
 import { applyOnce } from './manuscript-apply.js';
 import { REVIEW_VIEW_TASK_ABSENT, REVIEW_VIEW_TASK_RESOLVING } from './review-labels.js';
+import {
+  SELECTION_PRESET_REASON,
+  SELECTION_TASK_DOCUMENT_REASON,
+  SELECTION_TASK_FIELD,
+  SELECTION_TASK_MENU_LABEL,
+  SELECTION_TASK_NOTE,
+  SELECTION_TASK_PREPARE,
+  SELECTION_TASK_STATUS,
+  SELECTION_TASK_TITLE,
+  selectionTaskContextLine,
+  type SelectionTaskChoice,
+  type SelectionTaskChoices,
+} from './selection-task-labels.js';
 
 /**
  * The Editorial Mark surface of the manuscript (Issue #407; editor-surfaces.md §1 标记系统 and 右键菜单;
@@ -71,6 +84,13 @@ import { REVIEW_VIEW_TASK_ABSENT, REVIEW_VIEW_TASK_RESOLVING } from './review-la
 export interface EditorialMarksSurface {
   /** Close whatever is floating: the blocks it was anchored to may be gone. */
   close(): void;
+  /**
+   * Another window of the manuscript was loaded (Issue #423 review, P2-3): menus close, and so does a Mark Card; a composer — with
+   * what was chosen and written in it — stays, placed again below its paragraph, while that paragraph is still in the window.
+   */
+  reanchor(): void;
+  /** Whether a menu, a Mark Card or a composer is open over the text (Issue #423 review, P2-7): a background reload waits for it. */
+  holdsFloating(): boolean;
   /** Open one mark's card, as a click on it would: 审阅's 回到原文 arrives at a finding's mark this way. */
   openMark(markId: string): Promise<void>;
   /**
@@ -115,6 +135,17 @@ interface MountOptions {
   askAboutSelection?(input: AskAboutSelectionInput): Promise<DialogueProjection>;
   /** The question was asked: its dialogue comes to the foreground beside the manuscript. */
   onAsked?(dialogue: DialogueProjection): void;
+  /**
+   * 就这段发起任务… (Issue #423, S77b; TASK-001, TASK-046): the Tasks the selected words' paragraph can start now, and the one
+   * the editor chose prepared on that paragraph — its plan opened beside the manuscript. `prepare` answers whether the plan was
+   * prepared. Without it (a Production Document) the item stays disabled with its reason.
+   */
+  startTaskOnSelection?: {
+    /** The Book the manuscript is of, which the composer names (TASK-002). */
+    readonly bookTitle: string;
+    choices(): Promise<SelectionTaskChoices>;
+    prepare(choice: SelectionTaskChoice, anchor: { readonly blockId: string }): Promise<boolean>;
+  };
   busy(): boolean;
   /** The set of marks changed: whatever counts them elsewhere on the surface reads again. */
   marksChanged?(): void;
@@ -128,8 +159,11 @@ interface MountOptions {
   errorMessage(error: unknown, fallback: string): string;
 }
 
+/** A composer whose paragraph left the window as another one was loaded (Issue #423 review, P2-3). */
+export const COMPOSER_LEFT_WINDOW = '撰写框所在的段落已不在当前稿件窗口中，撰写框已关闭；没有记下任何内容。';
+
 interface FormField {
-  name: 'body' | 'proposedText' | 'rationale' | 'reason' | 'subject' | 'knowledgeClass' | 'question';
+  name: 'body' | 'proposedText' | 'rationale' | 'reason' | 'subject' | 'knowledgeClass' | 'question' | 'procedure';
   label: string;
   value: string;
   required: boolean;
@@ -272,6 +306,14 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   let menu: HTMLElement | undefined;
   let floating: HTMLElement | undefined;
   let floatingBlockId: string | undefined;
+  /**
+   * Composers asked for and not on screen yet (Issue #423 review, P2-3, P3-8): from the menu's choice, through the settled selection
+   * every composer waits on and any read after it, to `openComposer`. Paging at the pane's edge waits while any is, as it waits for
+   * an open composer. A count, since one asking can hold the selection's wait inside its own.
+   */
+  let composersPending = 0;
+  /** The open composer's own refresh after a window load (P3-7): the 就这段发起任务 composer's context line. */
+  let floatingRefresh: (() => void) | undefined;
   let openCardId: string | undefined;
   /**
    * The one reason row open on the card (Issue #61, S26a): the prompt a decision just recorded asks once, or the editor's
@@ -310,6 +352,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   };
 
   const closeFloating = (): void => {
+    floatingRefresh = undefined;
     if (floating !== undefined) {
       floating.remove();
       // Where the pane rests once the card's height is gone. The mark lapses two frames on, past the
@@ -420,7 +463,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     form.append(problem, row);
     form.addEventListener('submit', (event) => {
       event.preventDefault();
-      const values = { body: '', proposedText: '', rationale: '', reason: '', subject: '', knowledgeClass: '', question: '' };
+      const values = { body: '', proposedText: '', rationale: '', reason: '', subject: '', knowledgeClass: '', question: '', procedure: '' };
       for (const [name, input] of inputs) values[name] = input.value;
       const missing = config.fields.find((field) => field.required && values[field.name].trim().length === 0);
       if (missing) {
@@ -480,7 +523,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   }, '标记未能添加。');
 
   const settledRange = async (): Promise<Extract<ReturnType<BoundedEditor['selectedRange']>, { kind: 'range' }> | null> => {
-    await editor.flush();
+    composersPending += 1;
+    try {
+      await editor.flush();
+    } finally {
+      composersPending -= 1;
+    }
     const range = editor.selectedRange();
     if (range.kind === 'range') return range;
     options.setStatus(selectionMenuReason(range.kind), 'error');
@@ -1285,24 +1333,120 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     controls.find((control) => !control.disabled)?.focus({ preventScroll: true });
   };
 
-  // The 任务 panel is connected (Issue #423, S77a); a Task started on a selection is not yet. 就这段提问… is (Issue #52, S17a).
-  const AI7_TASK_REASON = '就选区发起的任务尚未接通';
+  // 就这段提问… (Issue #52, S17a) and 就这段发起任务… (Issue #423, S77b) are connected; the house's 常用工序 on a selection are not.
+  // A Production Document's manuscript offers neither Task (its surface passes no way to start one).
+  const AI7_TASK_REASON = SELECTION_TASK_DOCUMENT_REASON;
   const VIEW_TASK_REASON = '这条标记的来源任务还不能从这里打开';
+  const taskOnSelection = (selectionReason: string | undefined, run: () => void): MenuItem => ({
+    action: 'task-on-selection',
+    label: SELECTION_TASK_MENU_LABEL,
+    ...(options.startTaskOnSelection === undefined ? { disabledReason: AI7_TASK_REASON }
+      : selectionReason !== undefined ? { disabledReason: selectionReason } : { run }),
+  });
   const aiTaskGroup = (selectionReason: string | undefined): MenuGroup => ({
     label: 'AI7 任务',
-    note: AI7_TASK_REASON,
+    note: SELECTION_PRESET_REASON,
     items: [
-      { action: 'task-on-selection', label: '就这段发起任务…', disabledReason: AI7_TASK_REASON },
+      taskOnSelection(selectionReason, () => void composeTask()),
       {
         action: 'ask-on-selection', label: DIALOGUE_MENU_LABEL, hint: DIALOGUE_MENU_HINT,
         ...(options.askAboutSelection === undefined ? { disabledReason: AI7_TASK_REASON }
           : selectionReason !== undefined ? { disabledReason: selectionReason } : { run: () => void composeQuestion() }),
       },
-      { action: 'preset-polish', label: '润色这段', hint: '常用工序 · 生成修改建议', disabledReason: AI7_TASK_REASON },
-      { action: 'preset-names', label: '核查人名与称谓一致', hint: '常用工序 · 生成批注 / 建议', disabledReason: AI7_TASK_REASON },
-      { action: 'preset-continuity', label: '检查与前文的连贯', hint: '常用工序 · 生成批注', disabledReason: AI7_TASK_REASON },
+      { action: 'preset-polish', label: '润色这段', hint: '常用工序 · 生成修改建议', disabledReason: SELECTION_PRESET_REASON },
+      { action: 'preset-names', label: '核查人名与称谓一致', hint: '常用工序 · 生成批注 / 建议', disabledReason: SELECTION_PRESET_REASON },
+      { action: 'preset-continuity', label: '检查与前文的连贯', hint: '常用工序 · 生成批注', disabledReason: SELECTION_PRESET_REASON },
     ],
   });
+
+  /**
+   * 就这段发起任务… (Issue #423, S77b; TASK-001 to 003, TASK-046): the composer anchored to the selected words' paragraph, which
+   * it carries and nothing else, offering the Tasks that read a range now. 准备任务 prepares the chosen one on that paragraph
+   * and its plan opens beside the manuscript, where it is started — or not.
+   */
+  const composeTask = async (): Promise<void> => {
+    if (refuseWhileBusy() || options.startTaskOnSelection === undefined) return;
+    composersPending += 1;
+    try {
+      await composeTaskNow(options.startTaskOnSelection);
+    } finally {
+      composersPending -= 1;
+    }
+  };
+  const composeTaskNow = async (start: NonNullable<MountOptions['startTaskOnSelection']>): Promise<void> => {
+    const range = await settledRange();
+    if (range === null || destroyed) return;
+    options.setStatus(SELECTION_TASK_STATUS.reading, 'busy');
+    let offered: SelectionTaskChoices;
+    try {
+      offered = await start.choices();
+    } catch (error) {
+      options.setStatus(options.errorMessage(error, SELECTION_TASK_STATUS.unreadable), 'error');
+      return;
+    }
+    if (destroyed) return;
+    if (offered.refusal !== null || offered.choices.length === 0) {
+      options.setStatus(offered.refusal ?? SELECTION_TASK_STATUS.unreadable, 'error');
+      return;
+    }
+    const current = editor.currentWindow();
+    const position = current.blocks.find((block) => block.blockId === range.blockId)?.position ?? null;
+    if (position === null) {
+      options.setStatus(SELECTION_TASK_STATUS.gone, 'error');
+      return;
+    }
+    options.setStatus(SELECTION_TASK_STATUS.choose);
+    openComposer(range.blockId, {
+      id: 'task-on-selection',
+      title: SELECTION_TASK_TITLE,
+      quote: range.text,
+      fields: [{
+        name: 'procedure',
+        label: SELECTION_TASK_FIELD,
+        value: '',
+        required: true,
+        hint: selectionTaskContextLine({
+          bookTitle: start.bookTitle,
+          revisionLabel: current.revisionLabel,
+          journalSequence: current.journalSequence,
+          graphemes: range.toGrapheme - range.fromGrapheme,
+          position,
+        }),
+        options: offered.choices.map((choice) => ({ value: choice.value, label: choice.label })),
+      }],
+      submitLabel: SELECTION_TASK_PREPARE,
+      note: SELECTION_TASK_NOTE,
+      submit: async (values) => {
+        const choice = offered.choices.find((candidate) => candidate.value === values.procedure);
+        if (choice === undefined) {
+          options.setStatus(SELECTION_TASK_STATUS.pickFirst, 'error');
+          return;
+        }
+        // Words typed in the manuscript while the composer was open are written first, so the Task Input checkpoint pins the text
+        // on screen (Issue #423 review, P3-5); the paragraph is named by its block identity, which the service resolves (P3-3).
+        await editor.flush();
+        if (await start.prepare(choice, { blockId: range.blockId }) && !destroyed) closeFloating();
+      },
+      cancel: () => {
+        closeFloating();
+        editor.focus();
+      },
+    });
+    // After a window load keeps this composer, its context line names the revision and journal position the window now stands at.
+    floatingRefresh = () => {
+      const hint = floating?.querySelector<HTMLElement>('[data-mark-field="procedure"]')?.closest('label')?.querySelector('small');
+      const now = editor.currentWindow();
+      const at = now.blocks.find((block) => block.blockId === range.blockId)?.position ?? null;
+      if (hint === null || hint === undefined || at === null) return;
+      hint.textContent = selectionTaskContextLine({
+        bookTitle: start.bookTitle,
+        revisionLabel: now.revisionLabel,
+        journalSequence: now.journalSequence,
+        graphemes: range.toGrapheme - range.fromGrapheme,
+        position: at,
+      });
+    };
+  };
 
   /**
    * 就这段提问… (Issue #52, S17a; TASK-046; the Owner, 2026-10-07): the question about the exact selected words, asked at once.
@@ -1530,7 +1674,15 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       label: '这段文字',
       items: [
         { action: 'copy-marked-text', label: '复制这段', run: () => copyMarkedText(mark) },
-        { action: 'task-on-selection', label: '就这段发起任务…', disabledReason: AI7_TASK_REASON },
+        // The marked words are the selection the composer carries (Issue #423, S77b).
+        taskOnSelection(undefined, () => {
+          close();
+          if (!editor.selectRange(mark.blockId, mark.fromGrapheme, mark.toGrapheme)) {
+            options.setStatus('请先等待当前写入完成，再就这段发起任务。', 'error');
+            return;
+          }
+          void composeTask();
+        }),
       ],
     };
     const title = `${MARK_KIND_LABELS[mark.kind]}${mark.sourceKind === 'ai7' ? ' · AI7' : mark.sourceKind === 'imported-author' ? ' · 导入文件的作者' : ' · 你'}`;
@@ -1671,8 +1823,22 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
 
   return {
     close,
+    reanchor: () => {
+      closeMenu();
+      if (floating === undefined) return;
+      const blockId = floatingBlockId;
+      if (floating.dataset['markComposer'] !== undefined && blockId !== undefined && blockElement(blockId) !== null) {
+        placeBelowBlock(floating, blockId);
+        floatingRefresh?.();
+        return;
+      }
+      const composer = floating.dataset['markComposer'] !== undefined;
+      closeFloating();
+      if (composer) options.setStatus(COMPOSER_LEFT_WINDOW, 'error');
+    },
+    holdsFloating: () => menu !== undefined || floating !== undefined || composersPending > 0,
     openMark: (markId) => openCard(markId),
-    ownsScroll: () => floating !== undefined || (closedAt !== undefined && options.scroll.scrollTop === closedAt.top),
+    ownsScroll: () => composersPending > 0 || floating !== undefined || (closedAt !== undefined && options.scroll.scrollTop === closedAt.top),
     destroy: () => {
       destroyed = true;
       reflow.disconnect();
