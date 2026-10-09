@@ -49,6 +49,7 @@ import {
   type ReviewWorkspaceProjection,
 } from '../../shared/protocol.js';
 import type { BaselineAnalysisStore, ProgressReader } from '../analysis/baseline-analysis-store.js';
+import { UNREAD_WALK_BOUND, type UnreadWalkCut } from '../analysis/unread-changes.js';
 import {
   AnalysisError,
   BLOCK_ID_PATTERN,
@@ -654,6 +655,18 @@ const NO_UNREAD_CHANGES: UnreadChanges = { units: 0, blockIds: new Set(), cut: n
  * not be read, so what it read is not known, and a chapter read before it and changed since is not re-read by 只审改动过的章.
  */
 export const UNREAD_WALK_CUT_NOTE = '这一类有较早的审阅记录无法核对：在它之前读过、之后又改动的章，只审改动过的章不会重读；需要时请审全书或所选各章。' as const;
+
+/**
+ * Said instead when the walk stopped only at its bound (Issue #716): every record it read could be checked, but it looked
+ * back no further than the latest {@link UNREAD_WALK_BOUND} reviews of this category.
+ */
+export const UNREAD_WALK_BOUND_NOTE =
+  `这一类的审阅记录很多，只往回查了最近 ${UNREAD_WALK_BOUND} 次审阅：更早读过、之后又改动的章，只审改动过的章不会重读；需要时请审全书或所选各章。` as const;
+
+/** The note a cut walk puts beside its category, worded by why it stopped; `null` for a walk that was not cut. */
+export function unreadWalkCutNote(cut: UnreadWalkCut): string | null {
+  return cut === null ? null : cut === 'bounded' ? UNREAD_WALK_BOUND_NOTE : UNREAD_WALK_CUT_NOTE;
+}
 
 /** A located finding ready to be written with the mark it becomes. */
 interface MaterializedFinding {
@@ -2865,7 +2878,7 @@ export class ReviewRunStore {
         lastRunOrdinal: last.ordinal,
         lastReviewedRevisionLabel: text(pin.revision_label),
         changedBlocks: fresh && unread.units === 0 ? 0 : this.#changedBlocks(head, pinnedRevisionId, unread.blockIds),
-        unavailableReason: unread.cut === null ? null : UNREAD_WALK_CUT_NOTE,
+        unavailableReason: unreadWalkCutNote(unread.cut),
       });
     });
   }

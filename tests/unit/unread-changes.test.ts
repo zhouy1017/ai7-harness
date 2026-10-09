@@ -1,7 +1,16 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { deriveCoverageManifest, type ManifestBlockInput } from '../../src/service/analysis/coverage-manifest.js';
-import { walkUnreadChanges, type ChainPredecessor, type ChainRevision, type ChainUnitState } from '../../src/service/analysis/unread-changes.js';
+import {
+  manifestWeight,
+  UnreadWalkCache,
+  unreadWalkWeight,
+  walkUnreadChanges,
+  type ChainPredecessor,
+  type ChainRevision,
+  type ChainUnitState,
+} from '../../src/service/analysis/unread-changes.js';
+import { UNREAD_WALK_BOUND_NOTE, UNREAD_WALK_CUT_NOTE, unreadWalkCutNote } from '../../src/service/review/review-runs.js';
 import type { CoverageManifestProjection } from '../../src/shared/protocol.js';
 
 // Unit suite for the unread-changes walk (Issue #709; #711 review): synthetic revisions only, planted as the ledger would
@@ -122,5 +131,67 @@ describe('the unread-changes walk', () => {
     // Nothing left unread, nothing to walk: no cut even over an unreadable chain.
     const read = revision(3, manifestOf(sections()), READ);
     expect(walkUnreadChanges(read, () => 'unreadable')).toMatchObject({ cut: null });
+  });
+});
+
+describe('the walk caches (Issue #716)', () => {
+  it('lets the least recently used entry go first, not the oldest written', () => {
+    const cache = new UnreadWalkCache<string>(2, 1_000, () => 1);
+    cache.set('a', 'A');
+    cache.set('b', 'B');
+    expect(cache.get('a')).toBe('A');
+    cache.set('c', 'C');
+    expect(cache.get('b')).toBeUndefined();
+    expect(cache.get('a')).toBe('A');
+    expect(cache.get('c')).toBe('C');
+    expect(cache.size).toBe(2);
+  });
+
+  it('is bounded by weight as well as by count, and never lets go of the entry it just wrote', () => {
+    const cache = new UnreadWalkCache<number>(10, 10, (value) => value);
+    cache.set('a', 4);
+    cache.set('b', 4);
+    expect([cache.size, cache.weight]).toEqual([2, 8]);
+    cache.set('c', 4);
+    expect(cache.get('a')).toBeUndefined();
+    expect([cache.size, cache.weight]).toEqual([2, 8]);
+    // An entry heavier than the bound is kept alone, so its reader still gets back what it computed.
+    cache.set('d', 50);
+    expect([cache.size, cache.weight, cache.get('d')]).toEqual([1, 50, 50]);
+    // Rewriting a key replaces its weight rather than adding to it.
+    cache.set('d', 3);
+    cache.set('d', 3);
+    expect([cache.size, cache.weight]).toEqual([1, 3]);
+    // A weight of nothing still counts as one.
+    const light = new UnreadWalkCache<number>(10, 2, () => 0);
+    light.set('a', 0);
+    light.set('b', 0);
+    light.set('c', 0);
+    expect([light.size, light.weight]).toEqual([2, 2]);
+  });
+
+  it('weighs a manifest by the block references it holds, and a walk by its blocks and the manifests it is measured from', () => {
+    const manifest = manifestOf(sections());
+    const references = manifest.units.reduce((total, unit) => total + 1 + unit.blockIds.length + unit.overlapBlockIds.length, 0);
+    expect(manifestWeight(manifest)).toBe(references);
+    expect(references).toBeGreaterThan(manifest.units.length);
+    const whole = revision(1, manifest, READ);
+    const chosen = revision(2, manifestOf(sections({ A2: '改过', C2: '改过' })), ['out-of-scope', 'closed', 'out-of-scope']);
+    const walk = walkUnreadChanges(chosen, chain(chosen, whole));
+    expect(walk.changed.size).toBe(2);
+    // Both units are measured from the one 全书, whose manifest is counted once.
+    expect(unreadWalkWeight(walk)).toBe(walk.blockIds.size + references);
+    expect(unreadWalkWeight(walkUnreadChanges(whole, () => null))).toBe(0);
+  });
+});
+
+describe('the note a cut walk puts beside its category (Issue #716)', () => {
+  it('words a walk that only reached its bound apart from one that met a record it could not check', () => {
+    expect(unreadWalkCutNote(null)).toBeNull();
+    expect(unreadWalkCutNote('unreadable')).toBe(UNREAD_WALK_CUT_NOTE);
+    expect(unreadWalkCutNote('out-of-order')).toBe(UNREAD_WALK_CUT_NOTE);
+    expect(unreadWalkCutNote('bounded')).toBe(UNREAD_WALK_BOUND_NOTE);
+    expect(UNREAD_WALK_BOUND_NOTE).toBe('这一类的审阅记录很多，只往回查了最近 512 次审阅：更早读过、之后又改动的章，只审改动过的章不会重读；需要时请审全书或所选各章。');
+    expect(UNREAD_WALK_BOUND_NOTE).not.toContain('无法核对');
   });
 });

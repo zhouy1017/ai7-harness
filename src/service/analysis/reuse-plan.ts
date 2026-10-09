@@ -169,7 +169,9 @@ export function reusePlanRecord(plan: AnalysisReusePlanProjection | ReviewScopeP
  * A third disposition. A new unit outside the mode's scope that no compatible closed predecessor unit
  * serves is `unreviewed` (`out-of-scope`): it is never dispatched, and the Run settles it as an
  * `out-of-scope` gap. The baseline recomputes such a unit, because a baseline revision always covers
- * the whole manuscript; a review must not, or 选章 would silently send other chapters.
+ * the whole manuscript; a review must not, or 选章 would silently send other chapters. One whose last
+ * read failed is `unreviewed` too, but with `predecessor-gap` (Issue #716): the Run carries it as the
+ * lost gap it is ({@link CARRIED_GAP_REASON}), never as out of scope.
  *
  * A predecessor that may be absent. A first review of one range has none, which is what lets
  * chapter-by-chapter work start without a whole-book Run: every unit in the range's closure is
@@ -194,6 +196,12 @@ export const SCOPE_PLAN_SCHEMA = 'ai7.analysis.reuse-plan/2' as const;
 
 /** The exact reason of every `out-of-scope` gap, as an editor reads it. */
 export const OUT_OF_SCOPE_GAP_REASON = '不在本次审阅范围内' as const;
+
+/**
+ * The reason of a gap a range Run carries (Issue #716): a unit outside its range whose last read failed. It is the gap it
+ * was, never relabelled out of scope, so coverage keeps counting it and 只审改动过的章 retries it.
+ */
+export const CARRIED_GAP_REASON = '上一次读这个单元没有成功；它不在本次审阅范围内，仍记为缺口，只审改动过的章或下一次覆盖它的审阅会重审。' as const;
 
 export interface ScopePlanPredecessor extends ReusePlanPredecessor {
   /** The schema digest the predecessor revision pinned: the frozen category contract its units were read under. */
@@ -276,9 +284,15 @@ export function deriveScopePlan(input: ScopePlanInput): ReviewScopePlanProjectio
       consumed.set(candidate, { disposition: 'reused', successorUnitOrdinal: unit.ordinal });
       return { ...base, disposition: 'reused', reason: 'compatible', reusedFrom: { revisionId: predecessor!.revisionId, revisionOrdinal: predecessor!.ordinal, unitOrdinal: candidate } };
     }
-    // Outside a range, nothing without a reusable result is read. Under `changed`, neither is a unit
-    // the predecessor saw with this very content and left unreviewed: it has not changed — unless it
-    // changed since the category last read it, and only a range Run since left it unread (Issue #709).
+    // Outside a range, nothing without a reusable result is read. A unit whose last read failed stays the
+    // gap it is (Issue #716): carried as lost, not relabelled out of scope, so coverage keeps counting it
+    // and 只审改动过的章 retries it the way it retries any predecessor gap.
+    if (rangeBound && failedKeys.has(contentKey)) {
+      return { ...base, disposition: 'unreviewed', reason: 'predecessor-gap', reusedFrom: null };
+    }
+    // Under `changed`, neither is a unit the predecessor saw with this very content and left unreviewed:
+    // it has not changed — unless it changed since the category last read it, and only a range Run since
+    // left it unread (Issue #709).
     if (rangeBound || (unreviewedKeys.has(contentKey) && !failedKeys.has(contentKey) && !changedUnreadKeys.has(contentKey))) {
       return { ...base, disposition: 'unreviewed', reason: 'out-of-scope', reusedFrom: null };
     }
