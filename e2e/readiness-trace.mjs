@@ -9,6 +9,7 @@
 // loads Playwright, with each line's time (`DEBUG_COLORS=no`), and reads the launch in flight back from it.
 
 import { execFile } from 'node:child_process';
+import { availableParallelism } from 'node:os';
 import { dirname, resolve } from 'node:path';
 
 /** The startup steps main names (src/main/application.ts), and the failures `AI7_STARTUP_FAILED/…` can carry. */
@@ -292,6 +293,46 @@ export function parsePsProcessListing(text) {
     if (found === null) return [];
     return [{ pid: Number(found[1]), ppid: Number(found[2]), cpuSeconds: psCpuSeconds(found[3]), path: found[4] }];
   });
+}
+
+/**
+ * How busy the product and the host were between two listings of the host's processes (Issue #621): the CPU time used in
+ * the window by every process below `rootPid` — the Journey that launched the product — as a share of one core, and by
+ * every process on the host as a share of all `cores`. A process that started in the window counts all its time; one that
+ * ended in it counts none; process 0, which on Windows carries the idle time, never counts.
+ */
+export function cpuShares(before, after, rootPid, windowMs, cores) {
+  const earlier = new Map(before.filter((row) => row.cpuSeconds !== null).map((row) => [row.pid, row.cpuSeconds]));
+  const below = new Set([rootPid]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const row of after) {
+      if (!below.has(row.pid) && below.has(row.ppid)) {
+        below.add(row.pid);
+        grew = true;
+      }
+    }
+  }
+  let product = 0;
+  let host = 0;
+  for (const row of after) {
+    if (row.pid === 0 || row.cpuSeconds === null) continue;
+    const used = Math.max(0, row.cpuSeconds - (earlier.get(row.pid) ?? 0));
+    host += used;
+    if (row.pid !== rootPid && below.has(row.pid)) product += used;
+  }
+  const seconds = Math.max(windowMs, 1) / 1_000;
+  return { product: product / seconds, host: host / seconds / Math.max(cores, 1) };
+}
+
+/** `cpuShares` over a window of `windowMs` from now, or `null` when the host's processes could not be read. */
+export async function measureCpuShares(rootPid, windowMs = 5_000) {
+  const before = await listHostProcesses();
+  const startedAt = Date.now();
+  await new Promise((settle) => setTimeout(settle, windowMs));
+  const after = await listHostProcesses();
+  if (before === null || after === null) return null;
+  return cpuShares(before, after, rootPid, Date.now() - startedAt, availableParallelism());
 }
 
 /** The launched product's processes as `summarizeProductProcesses` says them, or `null` when the host's could not be read. */
