@@ -27,6 +27,8 @@ export const SELECTION_MOVED_REASON = '所选文字所在的段落在准备之�
 export const MAX_SELECTION_BLOCKS = 64;
 export const SELECTION_TOO_LONG_REASON = `所选文字跨越超过 ${MAX_SELECTION_BLOCKS} 个段落；请改用选章。` as const;
 export const NEVER_REVIEWED_REASON = '这一类还没有审阅过，没有“改动过的章”可比；请先审全书或所选各章。' as const;
+/** The latest review of the category was of a selected paragraph only (P1-4): a chapter or whole review comes first. */
+export const SELECTION_BASE_REASON = '这一类最近一次只审了所选段落，不能据它只审改动过的章；请先审全书或所选各章。' as const;
 export const NOTHING_CHANGED_REASON = '稿件在这一类上次审阅之后没有改动；没有需要只审的章。' as const;
 export const LEADS_ABSENT_REASON = '先完成基线分析，才有前后不一致的线索。' as const;
 export const LEADS_CHANGED_REASON = '线索来自基线分析的全书结果，不按改动过的章筛选；请选全书或所选各章。' as const;
@@ -74,6 +76,11 @@ export interface ReviewCategoryLedgerFacts {
    * Absent reads as `hasRevision`.
    */
   readonly reviewed?: boolean;
+  /**
+   * The category's latest revision is a 当前选区 Run's (Issue #423 final review, P1-4). Its ranges outside the selection were never
+   * read, so it is no base for 只审改动过的章: what changed since the last chapter review would be carried as unchanged.
+   */
+  readonly selectionBase?: boolean;
   /** The latest revision's freshness is `stale`: the manuscript changed since it was read. */
   readonly stale: boolean;
   /** Why `review-sync` is not offered, in the ledger's own words, when it is not. */
@@ -113,6 +120,7 @@ export function reviewCategoryScopePlan(
   if (scope.kind === 'whole') return { kind: 'task', mode: facts.hasRevision ? 'review-again' : 'review-first', selectedRange: null };
   if (scope.kind === 'changed') {
     if (!(facts.reviewed ?? facts.hasRevision)) return { kind: 'refused', reason: NEVER_REVIEWED_REASON };
+    if (facts.selectionBase === true) return { kind: 'refused', reason: SELECTION_BASE_REASON };
     return facts.stale
       ? { kind: 'task', mode: 'review-sync', selectedRange: null }
       : { kind: 'refused', reason: facts.syncUnavailableReason ?? NOTHING_CHANGED_REASON };

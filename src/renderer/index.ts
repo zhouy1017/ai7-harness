@@ -505,11 +505,17 @@ function followReviewMarks(bookId: string, reviewRunId: string | undefined): voi
   const deadline = Date.now() + REVIEW_MARKS_FOLLOW_LIMIT_MS;
   let wait = 1_000;
   const following = (): boolean => mine === reviewMarksFollower && manuscriptOnScreen === showing;
+  // Asked again more slowly the longer the editor keeps something open over the text (final review P3-2).
+  let bringWait = 1_000;
   const bring = (): void => {
     if (!following()) return;
+    const again = (): void => {
+      window.setTimeout(bring, bringWait);
+      bringWait = Math.min(5_000, bringWait + 1_000);
+    };
     void showing.refreshMarks().then((done) => {
-      if (!done) window.setTimeout(bring, 1_000);
-    }, () => window.setTimeout(bring, 2_000));
+      if (!done) again();
+    }, again);
   };
   const step = (): void => {
     if (!following()) return;
@@ -8060,6 +8066,8 @@ function renderEditorWindow(
       if (first === undefined) return true;
       const next = await window.ai7.getManuscriptWindowAt({ manuscriptId: binding.manuscriptId, branchId: binding.branchId, target: { kind: 'window-start', blockId: first.blockId } });
       if (!editor) return true;
+      // A save or a navigation that landed during the read makes the answer older than the screen: ask again (final review P3-1).
+      if (editor.currentWindow() !== binding) return false;
       const step = marksRefreshStep(editor.currentWindow(), next, {
         floating: editorialMarks?.holdsFloating() === true,
         editor: authoritativeMutationBusy() || edgeNavigation || editor.isComposing(),

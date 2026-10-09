@@ -9,6 +9,7 @@ import {
   NEVER_REVIEWED_REASON,
   NOTHING_CHANGED_REASON,
   NO_CHAPTERS_REASON,
+  SELECTION_BASE_REASON,
   SELECTION_UNAVAILABLE_REASON,
   chapterOfPosition,
   chapterOptionsFromOutline,
@@ -64,6 +65,10 @@ describe('the scope a category reads', () => {
     expect(reviewCategoryScopePlan('review-category-contract', null, CHANGED, { ...STALE, reviewed: false })).toEqual({ kind: 'refused', reason: NEVER_REVIEWED_REASON });
     expect(reviewCategoryScopePlan('review-category-contract', null, CHANGED, { ...STALE, reviewed: true })).toEqual({ kind: 'task', mode: 'review-sync', selectedRange: null });
     expect(reviewCategoryScopePlan('review-category-contract', null, WHOLE, { ...STALE, reviewed: false })).toEqual({ kind: 'task', mode: 'review-again', selectedRange: null });
+    // Nor is a 当前选区 Run's revision the base it measures from (final review P1-4); a whole review still is offered.
+    expect(reviewCategoryScopePlan('review-category-contract', null, CHANGED, { ...STALE, reviewed: true, selectionBase: true })).toEqual({ kind: 'refused', reason: SELECTION_BASE_REASON });
+    expect(reviewCategoryScopePlan('review-category-contract', null, WHOLE, { ...STALE, reviewed: true, selectionBase: true })).toEqual({ kind: 'task', mode: 'review-again', selectedRange: null });
+    expect(SELECTION_BASE_REASON).toBe('这一类最近一次只审了所选段落，不能据它只审改动过的章；请先审全书或所选各章。');
   });
 
   it('reads the leads for the whole manuscript or the chosen chapters, only once the baseline has a revision', () => {

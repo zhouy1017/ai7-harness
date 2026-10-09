@@ -1793,8 +1793,8 @@ export class ReviewRunStore {
     const inspected = ledger.inspect(snapshot.bookId, undefined, settled.resultSetRevisionId).inspectedRevision;
     requireReview(inspected !== null, 'REVIEW_RECORD_INVALID', '这一类的结果集修订版缺失。');
     const revision = inspected.revision;
-    const blocks = new Map(ledger.readRevisionBlocks(revision.manuscriptPin.manuscriptId, revision.manuscriptPin.revisionId)
-      .map((block) => [block.blockId, block.text] as const));
+    const revisionBlocks = ledger.readRevisionBlocks(revision.manuscriptPin.manuscriptId, revision.manuscriptPin.revisionId);
+    const blocks = new Map(revisionBlocks.map((block) => [block.blockId, block.text] as const));
     // A Run's findings are the ones of the units it read. A unit it reused is an earlier Run's reading,
     // and a unit it left out of scope was not read at all.
     const recomputed = new Set(revision.lineage.filter((unit) => unit.kind === 'recomputed').map((unit) => unit.unitOrdinal));
@@ -1807,8 +1807,8 @@ export class ReviewRunStore {
     ).all(snapshot.bookId, category.categoryId) as SqlRow[]).map((row) => text(row.kind_ref)));
     // Only within the Run's own scope (review P3-1): a 选章 puts on the manuscript what was left off in its chapters, never elsewhere.
     const chapters = snapshot.scope.kind === 'chapters' ? snapshot.scope.selectedRange : null;
-    const positions = chapters === null ? null : new Map((this.#db.prepare('SELECT block_id, position FROM working_blocks WHERE branch_id = ?')
-      .all(snapshot.manuscript.branchId) as SqlRow[]).map((row) => [text(row.block_id), integer(row.position)] as const));
+    // By the positions of the revision the Run read, the ones its chapters were resolved against (final review P3-3).
+    const positions = chapters === null ? null : new Map(revisionBlocks.map((block) => [block.blockId, block.position] as const));
     const inScope = (blockId: string): boolean => {
       if (chapters === null || positions === null) return true;
       const position = positions.get(blockId);
@@ -2720,9 +2720,15 @@ export class ReviewRunStore {
       `SELECT 1 FROM review_run_category_events e JOIN review_runs r ON r.review_run_id = e.review_run_id
        WHERE r.book_id = ? AND e.category_id = ? AND e.state = 'materialized' AND r.scope_kind <> 'selection' LIMIT 1`,
     ).get(bookId, entry.categoryId) !== undefined;
+    // The ledger's latest revision is a 当前选区 Run's (final review P1-4): never the base 只审改动过的章 measures from.
+    const selectionBase = revision !== null && this.#db.prepare(
+      `SELECT 1 FROM review_run_category_events e JOIN review_runs r ON r.review_run_id = e.review_run_id
+       WHERE e.result_set_revision_id = ? AND e.category_id = ? AND r.scope_kind = 'selection' LIMIT 1`,
+    ).get(revision.revisionId, entry.categoryId) !== undefined;
     const facts: ReviewCategoryLedgerFacts = {
       hasRevision: revision !== null,
       reviewed,
+      selectionBase,
       stale: revision !== null && revision.freshness.state === 'stale',
       syncUnavailableReason: actions?.['review-sync']?.unavailableReason ?? null,
       baselineRevision: baseline.revision !== null,

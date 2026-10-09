@@ -24,6 +24,7 @@ import {
   LEADS_CHANGED_REASON,
   NEVER_REVIEWED_REASON,
   MAX_SELECTION_BLOCKS,
+  SELECTION_BASE_REASON,
   SELECTION_GONE_REASON,
   SELECTION_MOVED_REASON,
   SELECTION_TOO_LONG_REASON,
@@ -202,6 +203,18 @@ function binding(session: Session, book: Book): { manuscriptId: string; branchId
 
 function workingText(session: Session, book: Book): Map<string, string> {
   return new Map(session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).map((block) => [block.blockId, block.text] as const));
+}
+
+/** Words written at the end of the paragraph at `position`, as the editor's journal writes them. */
+function appendToBlockAt(session: Session, book: Book, position: number, words: string): void {
+  const target = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).find((entry) => entry.position === position)!;
+  const window = session.store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: target.blockId });
+  const block = window.blocks.find((entry) => entry.blockId === target.blockId)!;
+  session.store.flushJournalEdit({
+    clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: window.revisionId, blockId: block.blockId,
+    windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: block.digest, expectedJournalSequence: window.journalSequence,
+    fromGrapheme: target.graphemes, toGrapheme: target.graphemes, insertText: words,
+  });
 }
 
 function appendToFirstBlock(session: Session, book: Book): void {
@@ -753,6 +766,32 @@ describe('a Review Run over the real store on exact sample1', () => {
       } finally {
         db.close();
       }
+    });
+  }, 300_000);
+
+  it('measures 只审改动过的章 from no 当前选区 Run: after one, an edit made before it is never carried as unchanged (Issue #423 final review, P1-4)', async () => {
+    await withBook('sample1-review-authored', async (session, book) => {
+      const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
+      const twenty = blocks.find((block) => block.position === 20)!;
+      const row = () => workspace(session, book).coverage.find((entry) => entry.categoryId === TYPOS)!;
+      await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
+      // An edit at 内容块 56 after the whole review: the category needs reviewing again.
+      appendToBlockAt(session, book, 56, '的的');
+      expect(row()).toMatchObject({ state: 'needs-review' });
+      // A 审阅这段 elsewhere, then another edit: the selection Run is no base for 只审改动过的章, which is refused with why, and the
+      // matrix still says the category needs reviewing — it never reads 当前 over the edit at 56.
+      await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], { kind: 'selection', fromChapterBlockId: twenty.blockId, toChapterBlockId: twenty.blockId }));
+      appendToFirstBlock(session, book);
+      const scopes = workspace(session, book).categories.find((category) => category.categoryId === TYPOS)!.scopes;
+      expect(scopes.changed).toEqual({ available: false, unavailableReason: SELECTION_BASE_REASON });
+      expect(storeMessage(() => session.store.createReviewRunPreparationWork(book.bookId, [TYPOS], CHANGED, launchPolicy))).toContain(SELECTION_BASE_REASON);
+      expect(row()).toMatchObject({ state: 'needs-review' });
+      // 审阅全书 reads the edit at 56 again; after it, 只审改动过的章 is the editor's again.
+      const whole = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
+      expect(whole.state).toBe('settled');
+      expect(row()).toMatchObject({ state: 'current' });
+      appendToFirstBlock(session, book);
+      expect(workspace(session, book).categories.find((category) => category.categoryId === TYPOS)!.scopes.changed).toEqual({ available: true, unavailableReason: null });
     });
   }, 300_000);
 

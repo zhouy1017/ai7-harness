@@ -533,8 +533,9 @@ AI7 初评 (Issue #429, S81b1) is service protocol version 93 and schema revisio
   - The rest of the reading ranges' findings are counted in the category's line 「所选范围外另有 N 处，未标记」 and in the event's `outsideSelectionCount`. They are not stored as marks.
   - Unplaceable quotes are said as 「所读范围内另有 N 条…」.
   - A later Run that reuses those ranges puts on the manuscript every finding of a reused unit that no Review Run of the Book ever recorded for the category. This is the review's option (a). Option (b) needed an `anchor` CHECK change.
-  - A 选章 marks only those left-off findings that lie in its own chapters.
+  - A 选章 marks only those left-off findings that lie in its own chapters, by the positions of the revision it read.
   - A selection Run gives no coverage. The matrix, the 书系 page's date and the gate for 只审改动过的章 read only 书, 章 and 改动过的章 Runs. The gate uses a `reviewed` fact; `hasRevision` still chooses between review-again and review-first.
+  - A selection Run's revision is never the base 只审改动过的章 measures from (`selectionBase`). Until a chapter or whole review follows it, 只审改动过的章 is refused with 「这一类最近一次只审了所选段落……」 and the matrix keeps 需要重审. Measuring from the latest non-selection revision instead would need the category ledger to take a predecessor that is not the latest revision of its result set, which the chain does not allow today.
 - **重新确认计划 and 重新准备 of a range Task.** Both are refused when the working manuscript no longer holds, at the plan's positions, the blocks the Task Input revision held there.
 - **The manuscript window on screen.** When a Review Run of its Book, started from the drawer, settles, its marks are brought onto the window on screen.
   - The Run is followed by its identity in the light projection, while it runs, with back-off. It is followed for at most two hours, after which a line says where the marks will be.
