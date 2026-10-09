@@ -183,7 +183,7 @@ describe('the 任务 panel of one Book (S77a)', () => {
     expect(panel.groups[2]!.items[0]!.result).toEqual({ kind: 'review-run', reviewRunId: done.reviewRunId });
     // A Run on a selection carries its paragraphs onto its card in every group (Issue #423, S77 deferred item d); the rest carry none.
     expect(panel.groups.flatMap((group) => group.items).every((item) => item.selection === undefined)).toBe(true);
-    const selection = { fromBlockId: 'blk_000000000000000000000014', toBlockId: 'blk_000000000000000000000015' };
+    const selection = { manuscriptId: randomUUID(), fromBlockId: 'blk_000000000000000000000014', toBlockId: 'blk_000000000000000000000015' };
     const onSelection = composeBookTasks(readings({
       reviewRuns: [review({ ...prepared, scopeKind: 'selection', selection }), review({ ...done, ordinal: 4, scopeKind: 'selection', selection })],
       reviewCompletions: [review({ ...done, ordinal: 4, scopeKind: 'selection', selection })],

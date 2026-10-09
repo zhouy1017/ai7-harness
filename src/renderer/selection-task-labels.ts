@@ -85,8 +85,8 @@ export interface SelectionProcedureEntry {
   readonly version: number | null;
   readonly label: string;
   readonly hint: string | null;
-  /** The labels of its steps the editor chooses apart at each run (REUSE-050): the composer offers each unticked. */
-  readonly chosenApart: ReadonlyArray<string>;
+  /** Its steps the editor chooses apart at each run (REUSE-050), by category and label: the composer offers each unticked. */
+  readonly chosenApart: ReadonlyArray<{ readonly categoryId: string; readonly label: string }>;
   /** Why it is offered disabled — no runnable version, or a step named with why; `null` when it can start. */
   readonly disabledReason: string | null;
 }
@@ -103,7 +103,7 @@ export function selectionProcedureEntry(entry: CapturedProcedureApplicabilityEnt
     versionId: entry.latestEligible.versionId,
     version: entry.latestEligible.version,
     hint: selectionProcedureHint(entry.latestEligible.version, entry.stepCount, entry.chosenApart),
-    chosenApart: entry.chosenApart,
+    chosenApart: entry.chosenApartSteps,
     disabledReason: first === undefined ? null : selectionProcedureStepReason(first.label, first.reason),
   };
 }

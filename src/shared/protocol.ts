@@ -5875,13 +5875,14 @@ export interface KnowledgeProceduresProjection {
 export const CAPTURED_PROCEDURE_SCHEMA = 'ai7.captured-procedure/1' as const;
 /**
  * The one parameter slot a Captured Procedure carries: the review scope kind. The chapters are chosen at each run. `selection`
- * (Issue #423, S77 deferred item a) is the slot a Run pins when the house's procedure runs on the paragraphs 就这段发起任务… handed
- * over: the set is widened under the same document schema, so no existing document or digest moves, and a capture still offers
- * 全书 or 选定章节 (`CAPTURED_PROCEDURE_CAPTURE_SLOTS`).
+ * (Issue #423, S77 deferred item a) is the scope a Run pins when the house's procedure runs on the paragraphs 就这段发起任务… handed
+ * over, and the scope a selection menu asks the house's procedures to be resolved for: it lives on the pin and that read only. A
+ * document names a capture slot — 全书 or 选定章节 (`CAPTURED_PROCEDURE_CAPTURE_SLOTS`) — and never `selection`, so no existing
+ * document or digest moves and none can be made that promises a scope 新建审阅 cannot supply.
  */
 export type CapturedProcedureScopeSlot = 'whole' | 'chapters' | 'selection';
 export const CAPTURED_PROCEDURE_SCOPE_SLOTS: readonly CapturedProcedureScopeSlot[] = ['whole', 'chapters', 'selection'];
-/** The slots a capture may set a version to: a selection is handed over at each run from the manuscript, never saved as a setting. */
+/** The slots a document may carry and a capture may set: a selection is handed over at each run from the manuscript, never saved. */
 export const CAPTURED_PROCEDURE_CAPTURE_SLOTS: readonly CapturedProcedureScopeSlot[] = ['whole', 'chapters'];
 export const CAPTURED_PROCEDURE_SCOPE_LABELS = {
   whole: '全书',
@@ -6290,6 +6291,8 @@ export interface CapturedProcedureApplicabilityEntryProjection {
   readonly availableCount: number;
   /** The labels of the steps this Book can take that the editor chooses apart at each run (REUSE-050). */
   readonly chosenApart: ReadonlyArray<string>;
+  /** The same steps by category and label (Issue #423, S77 deferred item a): the selection composer's boxes carry the category. */
+  readonly chosenApartSteps: ReadonlyArray<{ readonly categoryId: string; readonly label: string }>;
   /** The steps this Book cannot take now, with why. */
   readonly leftOut: ReadonlyArray<{ readonly label: string; readonly reason: string }>;
 }
@@ -9953,10 +9956,11 @@ export interface BookTaskItemProjection {
   /** `null` for a Task that formed no result — a Run that stopped before it read anything. */
   result: BookTaskResultRef | null;
   /**
-   * The paragraphs a selection Task was started on, by block identity — the first and the last (Issue #423, S77 deferred item
-   * d): the card's `跳到所选文字` moves the caret there, or says the text moved. Absent for every other Task.
+   * The paragraphs a selection Task was started on, by block identity — the first and the last — in the manuscript named
+   * (Issue #423, S77 deferred item d): the card's `跳到所选文字` moves the caret there, or says the paragraph is gone. Absent for
+   * every other Task.
    */
-  selection?: { fromBlockId: string; toBlockId: string };
+  selection?: { manuscriptId: string; fromBlockId: string; toBlockId: string };
 }
 
 export interface BookTaskGroupProjection {

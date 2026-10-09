@@ -3020,7 +3020,7 @@ export class ReviewRunStore {
       const last = this.#db.prepare('SELECT max(recorded_at) last FROM review_run_category_events WHERE review_run_id = ?')
         .get(view.snapshot.reviewRunId) as SqlRow;
       const blockIds = view.snapshot.scope.kind === 'selection' ? view.snapshot.scope.blockIds ?? [] : [];
-      const selection = blockIds.length === 0 ? null : { fromBlockId: blockIds[0]!, toBlockId: blockIds[blockIds.length - 1]! };
+      const selection = blockIds.length === 0 ? null : { manuscriptId: view.snapshot.manuscript.manuscriptId, fromBlockId: blockIds[0]!, toBlockId: blockIds[blockIds.length - 1]! };
       return {
         bookId: view.snapshot.bookId,
         bookTitle: text(row.book_title),

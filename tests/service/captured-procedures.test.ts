@@ -251,7 +251,7 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
         bookId: target, truncated: false,
         procedures: [{
           procedureId: saved.procedureId, title: '线索与体例复核', latestEligible: { versionId: first!.versionId, version: 1 }, fit: 'partial',
-          stepCount: 2, availableCount: 1, chosenApart: [], leftOut: [{ label: '情节逻辑与前后一致', reason: LEADS_ABSENT_REASON }],
+          stepCount: 2, availableCount: 1, chosenApart: [], chosenApartSteps: [], leftOut: [{ label: '情节逻辑与前后一致', reason: LEADS_ABSENT_REASON }],
         }],
       });
       expect(store.inspectCapturedProcedureApplicability(source).procedures).toEqual([expect.objectContaining({ fit: 'all', stepCount: 2, availableCount: 2, leftOut: [] })]);
@@ -893,8 +893,8 @@ describe('Series material chosen apart, and how each procedure fits a Book (Issu
       expect(store.inspectCapturedProcedureApplicability(member)).toEqual({
         bookId: member, truncated: false,
         procedures: [
-          { procedureId: alone.procedureId, title: '只看书系', latestEligible: { versionId: alone.versions[0]!.versionId, version: 1 }, fit: 'all', stepCount: 1, availableCount: 1, chosenApart: ['书系一致性'], leftOut: [] },
-          { procedureId: saved.procedureId, title: '书系复核', latestEligible: { versionId: version.versionId, version: 1 }, fit: 'all', stepCount: 2, availableCount: 2, chosenApart: ['书系一致性'], leftOut: [] },
+          { procedureId: alone.procedureId, title: '只看书系', latestEligible: { versionId: alone.versions[0]!.versionId, version: 1 }, fit: 'all', stepCount: 1, availableCount: 1, chosenApart: ['书系一致性'], chosenApartSteps: [{ categoryId: SERIES, label: '书系一致性' }], leftOut: [] },
+          { procedureId: saved.procedureId, title: '书系复核', latestEligible: { versionId: version.versionId, version: 1 }, fit: 'all', stepCount: 2, availableCount: 2, chosenApart: ['书系一致性'], chosenApartSteps: [{ categoryId: SERIES, label: '书系一致性' }], leftOut: [] },
         ],
       });
       const pin = { versionId: version.versionId, documentSha256: version.technical.documentSha256 };
@@ -959,7 +959,7 @@ describe('a procedure whose enabled versions no longer run (Issue #66, S31b revi
       expect(store.inspectCapturedProcedure(saved.procedureId, null)).toMatchObject({ runnable: true, latestEligibleVersionId: null, versions: [{ state: 'enabled' }] });
       expect(store.inspectCapturedProcedureApplicability(source)).toEqual({
         bookId: source, truncated: false,
-        procedures: [{ procedureId: saved.procedureId, title: '体例复核', latestEligible: null, fit: 'no-version', stepCount: 0, availableCount: 0, chosenApart: [], leftOut: [] }],
+        procedures: [{ procedureId: saved.procedureId, title: '体例复核', latestEligible: null, fit: 'no-version', stepCount: 0, availableCount: 0, chosenApart: [], chosenApartSteps: [], leftOut: [] }],
       });
       expect(store.inspectCapturedProcedureRun(source, saved.procedureId)).toMatchObject({
         resolved: null, unavailableReason: '这个工序启用的各版现在都不能按原样运行；请从一次新的审阅重新保存。',

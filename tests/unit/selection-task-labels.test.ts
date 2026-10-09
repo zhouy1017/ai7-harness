@@ -69,7 +69,7 @@ const VERSION = '00000000-0000-4000-8000-0000000000ab';
 /** One enabled procedure as `inspectCapturedProcedureApplicability` with `scope: 'selection'` answers it for the Book. */
 function procedure(overrides: Partial<CapturedProcedureApplicabilityEntryProjection>): CapturedProcedureApplicabilityEntryProjection {
   return {
-    procedureId: PROCEDURE, title: '体例复核', latestEligible: { versionId: VERSION, version: 2 }, fit: 'all', stepCount: 2, availableCount: 2, chosenApart: [], leftOut: [],
+    procedureId: PROCEDURE, title: '体例复核', latestEligible: { versionId: VERSION, version: 2 }, fit: 'all', stepCount: 2, availableCount: 2, chosenApart: [], chosenApartSteps: [], leftOut: [],
     ...overrides,
   };
 }
@@ -156,13 +156,14 @@ describe('what a selection can start', () => {
   it('offers each of the house\'s 可复用工序 that can run on the selection after the categories, and names why one cannot (S77 deferred item a)', () => {
     const entries = selectionProcedureEntries({ procedures: [
       procedure({}),
-      procedure({ procedureId: 'p2', title: '书系复核', latestEligible: { versionId: 'v2', version: 1 }, stepCount: 1, availableCount: 1, chosenApart: ['书系一致性'] }),
+      procedure({ procedureId: 'p2', title: '书系复核', latestEligible: { versionId: 'v2', version: 1 }, stepCount: 1, availableCount: 1, chosenApart: ['书系一致性'], chosenApartSteps: [{ categoryId: 'series-consistency', label: '书系一致性' }] }),
       procedure({ procedureId: 'p3', title: '含事实核查', fit: 'partial', availableCount: 1, leftOut: [{ label: '事实核查', reason: '事实核查暂只能核查全书；就所选文字核查随事实核查的更新方式接入。' }] }),
       procedure({ procedureId: 'p4', title: '不再可用', latestEligible: null, fit: 'no-version', stepCount: 0, availableCount: 0 }),
     ] });
     expect(entries).toEqual([
       { kind: 'procedure', value: `procedure:${PROCEDURE}`, procedureId: PROCEDURE, title: '体例复核', versionId: VERSION, version: 2, label: '按《体例复核》审阅这段', hint: '可复用工序 · 第 2 版 · 2 步', chosenApart: [], disabledReason: null },
-      { kind: 'procedure', value: 'procedure:p2', procedureId: 'p2', title: '书系复核', versionId: 'v2', version: 1, label: '按《书系复核》审阅这段', hint: '可复用工序 · 第 1 版 · 1 步 · 「书系一致性」另行勾选', chosenApart: ['书系一致性'], disabledReason: null },
+      // The Series step by category and label: the composer's box carries the category (review P3-3).
+      { kind: 'procedure', value: 'procedure:p2', procedureId: 'p2', title: '书系复核', versionId: 'v2', version: 1, label: '按《书系复核》审阅这段', hint: '可复用工序 · 第 1 版 · 1 步 · 「书系一致性」另行勾选', chosenApart: [{ categoryId: 'series-consistency', label: '书系一致性' }], disabledReason: null },
       // A version with a step that cannot run on the selection is offered disabled, the step named (the Commander's ruling 2).
       { kind: 'procedure', value: 'procedure:p3', procedureId: 'p3', title: '含事实核查', versionId: VERSION, version: 2, label: '按《含事实核查》审阅这段', hint: '可复用工序 · 第 2 版 · 2 步', chosenApart: [],
         disabledReason: '「事实核查」不能就所选文字运行：事实核查暂只能核查全书；就所选文字核查随事实核查的更新方式接入。' },

@@ -1866,9 +1866,10 @@ describe('the house\'s 可复用工序 on a 当前选区 (Issue #423, S77 deferr
       const steps = save([STYLE, PLOT], '体例线索复核');
       const factual = save([STYLE, FACTUAL], '含事实核查');
       const series = save([STYLE, SERIES], '书系复核');
-      // A capture sets 全书 or 选定章节; a selection is handed over at each run, never saved as a setting.
-      expect(storeCode(() => store.saveCapturedProcedure({ bookId: book.bookId, reviewRunId: source.reviewRunId, categoryIds: [STYLE], scopeSlot: 'selection', title: '不能保存', procedureId: null })))
-        .toBe('CAPTURED_PROCEDURE_INVALID');
+      // A capture sets 全书 or 选定章节; a selection is handed over at each run, never saved as a setting — refused by the store's own
+      // guard before the document validator, which refuses such a document too (review P3-1).
+      expect(storeMessage(() => store.saveCapturedProcedure({ bookId: book.bookId, reviewRunId: source.reviewRunId, categoryIds: [STYLE], scopeSlot: 'selection', title: '不能保存', procedureId: null })))
+        .toBe('审阅范围的设定无效。');
 
       // 按已保存的工序 for a selection of this Book (the menu's list): each enabled procedure, newest first, as a 当前选区 can take it.
       const onSelection = store.inspectCapturedProcedureApplicability(book.bookId, 'selection').procedures;

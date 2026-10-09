@@ -1295,6 +1295,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'selection-task-review-run',
     'selection-task-from-mark',
     'selection-task-reanalyze',
+    // 跳到所选文字 on a paragraph the manuscript no longer holds (Issue #423 review, P2-1): the Book reimported without it.
+    'selection-task-gone',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',

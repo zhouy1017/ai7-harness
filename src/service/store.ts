@@ -7501,10 +7501,11 @@ export class EditorialStore {
         const { projection } = this.#capturedRunResolution(bookId, procedureId, null, { versions, availability, scope });
         const resolved = projection.resolved;
         if (resolved === null) {
-          procedures.push({ procedureId, title: projection.title, latestEligible: null, fit: 'no-version', stepCount: 0, availableCount: 0, chosenApart: [], leftOut: [] });
+          procedures.push({ procedureId, title: projection.title, latestEligible: null, fit: 'no-version', stepCount: 0, availableCount: 0, chosenApart: [], chosenApartSteps: [], leftOut: [] });
           continue;
         }
         const available = resolved.steps.filter((step) => step.available);
+        const chosenApart = available.filter((step) => step.chosenApart);
         procedures.push({
           procedureId,
           title: projection.title,
@@ -7512,7 +7513,8 @@ export class EditorialStore {
           fit: available.length === resolved.steps.length ? 'all' : available.length === 0 ? 'none' : 'partial',
           stepCount: resolved.steps.length,
           availableCount: available.length,
-          chosenApart: available.filter((step) => step.chosenApart).map((step) => step.label),
+          chosenApart: chosenApart.map((step) => step.label),
+          chosenApartSteps: chosenApart.map((step) => ({ categoryId: step.categoryId, label: step.label })),
           leftOut: resolved.steps.filter((step) => !step.available).map((step) => ({ label: step.label, reason: step.unavailableReason ?? '' })),
         });
       }

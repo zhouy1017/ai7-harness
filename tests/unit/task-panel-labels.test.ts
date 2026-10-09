@@ -55,7 +55,7 @@ describe('the 任务 panel', () => {
   });
 
   it('offers 跳到所选文字 on a Task started on a selection, in every state, after what the state offers (Issue #423, S77 deferred item d)', () => {
-    const selection = { fromBlockId: 'blk_000000000000000000000001', toBlockId: 'blk_000000000000000000000001' };
+    const selection = { manuscriptId: TASK, fromBlockId: 'blk_000000000000000000000001', toBlockId: 'blk_000000000000000000000001' };
     const onSelection = (state: GlobalAttentionStateKey, overrides: Partial<GlobalAttentionItemProjection>, result: BookTaskItemProjection['result'] = null): BookTaskItemProjection =>
       ({ ...entry(state, { object: { kind: 'review', ordinal: 1, onSelection: true }, ...overrides }, result), selection });
     const prepared = labels.taskPanelCardView(onSelection('review-prepared', { group: 'decisions', nextStep: 'view-plan' }));

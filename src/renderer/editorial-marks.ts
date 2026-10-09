@@ -155,7 +155,7 @@ interface MountOptions {
      * entry each, read again for every selection menu and drawn once read.
      */
     procedures(): Promise<ReadonlyArray<SelectionProcedureEntry>>;
-    /** `chosenApart`: the labels of the chosen procedure's Series steps the editor ticked (REUSE-050); empty for any other choice. */
+    /** `chosenApart`: the categories of the chosen procedure's Series steps the editor ticked (REUSE-050); empty for any other choice. */
     prepare(choice: SelectionTaskChoice, anchor: { readonly blockId: string }, chosenApart: ReadonlyArray<string>): Promise<boolean>;
   };
   busy(): boolean;
@@ -1488,9 +1488,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       return;
     }
     options.setStatus(SELECTION_TASK_STATUS.choose);
-    // A procedure's Series steps are the editor's to tick (REUSE-049, REUSE-050): one box each, shown while that procedure is chosen.
+    // A procedure's Series steps are the editor's to tick (REUSE-049, REUSE-050): one box each, shown while that procedure is
+    // chosen, each carrying the step's category (Issue #423 review, P3-3).
     const apartBoxes = offered.choices.flatMap((choice) => choice.kind === 'procedure'
-      ? choice.chosenApart.map((label) => ({ value: label, label, hint: sheetChosenApartLine(label), group: choice.value }))
+      ? choice.chosenApart.map((step) => ({ value: step.categoryId, label: step.label, hint: sheetChosenApartLine(step.label), group: choice.value }))
       : []);
     openComposer(range.blockId, {
       id: 'task-on-selection',

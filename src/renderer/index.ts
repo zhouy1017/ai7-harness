@@ -325,7 +325,7 @@ const taskDrawer = mountTaskDrawer({
   openTaskTarget: (target) => void leaveThen(() => openGlobalAttentionTarget(target)),
   openTaskResult: (entry, backToPanel) => openTaskResult(entry, backToPanel),
   startWholeBookTask: (bookId, input) => startWholeBookTask(bookId, input),
-  // 跳到所选文字 on a selection Task's card (Issue #423, S77 deferred item d).
+  // 跳到所选文字 on a selection Task's card (Issue #423, S77 deferred item d): every refusal is said on the status line.
   jumpToSelection: (bookId, selection) => void jumpToSelectionText(bookId, selection),
   // 就这段提问… (Issue #52, S17a): 回到所选文字, and a 修改建议 made from an answer opened on the manuscript with its card.
   dialogueJump: (bookId, target) => void jumpToManuscript(bookId, { manuscriptId: target.manuscriptId, blockId: target.blockId, markId: null }),
@@ -364,15 +364,12 @@ function openTaskResult(entry: BookTaskItemProjection, backToPanel: () => void):
 
 /**
  * 跳到所选文字 (Issue #423, S77 deferred item d; TASK-045): the caret moved to the first paragraph a selection Task was started
- * on — in the manuscript on screen, leaving 回到<位置> as every jump does, or in the manuscript opened there. A paragraph that
- * no longer stands in the working manuscript is said, and nothing moves.
+ * on — in the Task's manuscript on screen, leaving 回到<位置> as every jump does, or in that manuscript opened there. A paragraph
+ * that no longer stands in the working manuscript is said in the card's own words (Issue #423 review, P2-1), and nothing
+ * moves: no window is loaded and no return place is kept.
  */
-async function jumpToSelectionText(bookId: string, selection: { readonly fromBlockId: string; readonly toBlockId: string }): Promise<void> {
-  try {
-    await jumpToManuscript(bookId, { manuscriptId: null, blockId: selection.fromBlockId, markId: null });
-  } catch (error) {
-    setStatus(rendererErrorMessage(error, TASK_PANEL_JUMP_GONE), 'error');
-  }
+function jumpToSelectionText(bookId: string, selection: { readonly manuscriptId: string; readonly fromBlockId: string; readonly toBlockId: string }): Promise<boolean> {
+  return jumpToManuscript(bookId, { manuscriptId: selection.manuscriptId, blockId: selection.fromBlockId, markId: null }, TASK_PANEL_JUMP_GONE);
 }
 
 /**
@@ -495,7 +492,8 @@ async function prepareSelectionTask(
       setStatus(selectionProcedureStepReason(left.label, left.unavailableReason ?? ''), 'error');
       return false;
     }
-    const categoryIds = resolved.steps.filter((step) => !step.chosenApart || chosenApart.includes(step.label)).map((step) => step.categoryId);
+    // The ticked boxes carry the step's category (Issue #423 review, P3-3), so a label renamed between the menu and 准备任务 changes nothing.
+    const categoryIds = resolved.steps.filter((step) => !step.chosenApart || chosenApart.includes(step.categoryId)).map((step) => step.categoryId);
     if (categoryIds.length === 0) {
       setStatus(SELECTION_TASK_STATUS.pickCategory, 'error');
       return false;
@@ -557,7 +555,12 @@ let manuscriptOnScreen: null | {
   readonly manuscriptId: string;
   readonly branchId: string;
   readingPlace(): ReadingPlace | null;
-  jump(target: { blockId: string; markId: string | null }): Promise<void>;
+  /**
+   * Move to that paragraph, leaving 回到<位置>: `true` once there, `false` when the move was refused (busy, or a return place
+   * that could not be kept). The window at the paragraph is read before any return place is kept (Issue #423 review, P2-1), so
+   * a paragraph that is gone throws — `WINDOW_NOT_FOUND` — and leaves no chip.
+   */
+  jump(target: { blockId: string; markId: string | null }): Promise<boolean>;
   /**
    * Bring the marks made meanwhile onto the window on screen (Issue #423 review, P2-6, P2-7): `true` once they are there, `false`
    * when the editor is busy, typing or has something open over the text, so the caller asks again later.
@@ -636,13 +639,24 @@ async function leaveReturnChip(bookId: string, manuscriptId: string, branchId: s
   if (block !== undefined) await preserveReturnPlace({ manuscriptId, branchId, blockId: block.blockId, place: returnChipPlace(remembered.position.structureLabel, block.position) });
 }
 
-/** 跳到 (TASK-045): the manuscript at that paragraph — moved in place while it is on screen — leaving 回到<位置>. */
-async function jumpToManuscript(bookId: string, target: { manuscriptId: string | null; blockId: string; markId: string | null }): Promise<void> {
+/**
+ * 跳到 (TASK-045): the manuscript at that paragraph — moved in place while it is on screen — leaving 回到<位置>. Answers whether
+ * the manuscript stands there. `gone` is what a paragraph no longer in the working manuscript (`WINDOW_NOT_FOUND`) is said as,
+ * in the caller's own words (Issue #423 review, P2-1); every other refusal is said in the service's.
+ */
+async function jumpToManuscript(bookId: string, target: { manuscriptId: string | null; blockId: string; markId: string | null }, gone?: string): Promise<boolean> {
   const origin = screen.firstElementChild;
   const showing = manuscriptOnScreen;
+  const refused = (error: unknown, fallback: string): false => {
+    setStatus(gone !== undefined && hasErrorCode(error, 'WINDOW_NOT_FOUND') ? gone : rendererErrorMessage(error, fallback), 'error');
+    return false;
+  };
   if (showing !== null && showing.bookId === bookId && (target.manuscriptId === null || target.manuscriptId === showing.manuscriptId)) {
-    await showing.jump(target);
-    return;
+    try {
+      return await showing.jump(target);
+    } catch (error) {
+      return refused(error, '无法移动到该稿件位置。');
+    }
   }
   setStatus('正在打开对应稿件位置…', 'busy');
   try {
@@ -651,11 +665,12 @@ async function jumpToManuscript(bookId: string, target: { manuscriptId: string |
     if (anchor === null || (target.manuscriptId !== null && target.manuscriptId !== anchor.manuscriptId)) throw new Error('这项结果所在的稿件已不在这本书中。');
     const opened = await window.ai7.getManuscriptWindowAt({ manuscriptId: anchor.manuscriptId, branchId: anchor.branchId, target: { kind: 'block', blockId: target.blockId } });
     await leaveReturnChip(bookId, anchor.manuscriptId, anchor.branchId);
-    if (screen.firstElementChild !== origin) return;
+    if (screen.firstElementChild !== origin) return false;
     await openEditorWindow(opened, overview.book.title, undefined, undefined, target.markId ?? undefined);
+    return true;
   } catch (error) {
-    if (screen.firstElementChild !== origin) return;
-    setStatus(rendererErrorMessage(error, '无法打开对应稿件位置。'), 'error');
+    if (screen.firstElementChild !== origin) return false;
+    return refused(error, '无法打开对应稿件位置。');
   }
 }
 
@@ -8183,27 +8198,34 @@ function renderEditorWindow(
       return true;
     },
     jump: async (target) => {
+      // The paragraph must stand in the manuscript before any return place is kept (Issue #423 review, P2-1): the words typed
+      // just now are written first, so the read sees the manuscript as the editor has it, and a paragraph that is gone throws
+      // here — to the caller's wording — leaving the return place, the chip and the window exactly as they were.
+      if (!editor || !(await settleLocalEdit())) return false;
+      const binding = editor.currentWindow();
+      await window.ai7.getManuscriptWindowAt({ manuscriptId: binding.manuscriptId, branchId: binding.branchId, target: { kind: 'block', blockId: target.blockId } });
       const here = readingPlace();
       if (here !== null && here.blockId !== target.blockId) {
         const request = ++returnRequest;
         try {
           const retained = await preserveReturnPlace(here);
-          if (!chipHost.isConnected || request !== returnRequest) return;
+          if (!chipHost.isConnected || request !== returnRequest) return false;
           returnPlace = retained;
           returnReadFailed = false;
         } catch (error) {
-          if (!chipHost.isConnected || request !== returnRequest) return;
+          if (!chipHost.isConnected || request !== returnRequest) return false;
           returnReadFailed = true;
           paintReturnChip();
           setStatus(rendererErrorMessage(error, '无法保存返回位置，尚未跳转。'), 'error');
-          return;
+          return false;
         }
       }
-      if (!(await navigate({ kind: 'block', blockId: target.blockId }))) { paintReturnChip(); return; }
-      if (!chipHost.isConnected) return;
+      if (!(await navigate({ kind: 'block', blockId: target.blockId }))) { paintReturnChip(); return false; }
+      if (!chipHost.isConnected) return false;
       paintReturnChip();
       if (target.markId !== null && editorialMarks !== undefined) await editorialMarks.openMark(target.markId);
       else landAt(target.blockId);
+      return true;
     },
   };
 
@@ -8784,7 +8806,8 @@ function renderEditorWindow(
     track: railTrack,
     api: window.ai7,
     binding: () => ({ manuscriptId: currentWindow.manuscriptId, branchId: currentWindow.branchId }),
-    jumpToBlock: (blockId) => void manuscriptOnScreen?.jump({ blockId, markId: null }),
+    // A marker's paragraph gone between the rail's read and the click is said as the service says it.
+    jumpToBlock: (blockId) => void manuscriptOnScreen?.jump({ blockId, markId: null }).catch((error: unknown) => setStatus(rendererErrorMessage(error, '无法移动到该稿件位置。'), 'error')),
     onError: (error) => setStatus(rendererErrorMessage(error, '全稿位置轨未能更新。'), 'error'),
   });
   manuscriptRail.setPosition(initialWindow.position.proportion);
