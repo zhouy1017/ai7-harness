@@ -1037,6 +1037,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'concurrent-attention',
     'concurrent-pause',
     'concurrent-no-focus-theft',
+    // A 修改建议 accepted and applied on 丙 while its Run holds a range in flight (Issue #632).
+    'concurrent-apply-effect',
     'concurrent-cancel',
     'concurrent-isolation',
     // 后台分析登记 (Issue #95, plan slice S39): the disclosure, Escape, the Enrollment, the Run it starts in the background, its
