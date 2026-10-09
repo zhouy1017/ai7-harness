@@ -6,6 +6,8 @@ import {
   PROVIDER_CACHE_ROOT_ARGUMENT,
   RUN_BUDGET_CEILING_ARGUMENT,
   TRUSTED_SCOPE_ARGUMENT,
+  BACKGROUND_QUIET_ARGUMENT,
+  parseBackgroundQuietMs,
   parseTrustedLaunchForm,
   type J01ImportControl,
   type J03ForegroundExecutionControl,
@@ -150,11 +152,12 @@ function requireNothingRunning(
   analysisExecution: BaselineAnalysisExecutionOwner,
   reviewRuns: ReviewRunDriver,
   dialogues: DialogueExecutionOwner,
+  background: BackgroundAnalysisDispatcher,
 ): void {
   // A dialogue answering writes its outcome when it settles (Issue #52, S17a), so it holds a replacement back as a Run does.
   const blocked = replacementBlockedBy({
     runsIdle: analysisExecution.idle && !dialogues.answering, reviewRunsDriving: reviewRuns.driving, jobsBusy: jobs.busy,
-    exportRunning: store.databaseExportRunning(),
+    exportRunning: store.databaseExportRunning(), backgroundBusy: background.busy,
   });
   if (blocked !== null) throw new StoreErrorClass('DATABASE_REPLACEMENT_BUSY', blocked);
 }
@@ -674,14 +677,14 @@ async function dispatch(
     case 'inspectDatabaseImport':
       return { id: request.id, ok: true, op: request.op, result: await store.inspectDatabaseImport(request.input.source) };
     case 'prepareDatabaseReplacement':
-      requireNothingRunning(store, jobs, analysisExecution, reviewRuns, dialogues);
+      requireNothingRunning(store, jobs, analysisExecution, reviewRuns, dialogues, background);
       return { id: request.id, ok: true, op: request.op, result: await store.prepareDatabaseReplacement(request.input.previewId) };
     case 'cancelDatabaseReplacement':
       return { id: request.id, ok: true, op: request.op, result: await store.cancelDatabaseReplacement(request.input.replacementId) };
     case 'inspectDatabaseReplacements':
       return { id: request.id, ok: true, op: request.op, result: await store.inspectDatabaseReplacements() };
     case 'rollBackDatabaseReplacement':
-      requireNothingRunning(store, jobs, analysisExecution, reviewRuns, dialogues);
+      requireNothingRunning(store, jobs, analysisExecution, reviewRuns, dialogues, background);
       return { id: request.id, ok: true, op: request.op, result: await store.rollBackDatabaseReplacement(request.input.replacementId) };
     case 'prepareDatabaseMerge':
       return { id: request.id, ok: true, op: request.op, result: await store.prepareDatabaseMerge(request.input.previewId) };
@@ -1355,6 +1358,7 @@ function parseArguments(argv: string[]): {
   connectivityPath: string | undefined;
   unitHoldPath: string | undefined;
   answerHoldPath: string | undefined;
+  backgroundQuietMs: number | undefined;
 } {
   const values = new Map<string, string>();
   for (let index = 0; index < argv.length; index += 2) {
@@ -1367,7 +1371,7 @@ function parseArguments(argv: string[]): {
       (key !== '--data-root' && key !== '--parent-pid' && key !== '--j01-import-control' &&
         key !== '--j03-foreground-execution-control' && key !== '--j08-recovery-control' &&
         key !== '--j04-model-adapter' && key !== '--j04-connectivity-path' && key !== '--j10-unit-hold-path' && key !== '--j16-answer-hold-path' &&
-        key !== TRUSTED_SCOPE_ARGUMENT && key !== RUN_BUDGET_CEILING_ARGUMENT &&
+        key !== BACKGROUND_QUIET_ARGUMENT && key !== TRUSTED_SCOPE_ARGUMENT && key !== RUN_BUDGET_CEILING_ARGUMENT &&
         key !== PROVIDER_CACHE_ROOT_ARGUMENT)
     ) {
       throw new ProtocolError();
@@ -1417,6 +1421,9 @@ function parseArguments(argv: string[]): {
   const unitHoldPath = values.get('--j10-unit-hold-path');
   // J-16's answer hold (Issue #52, S17a): a file the Journey writes, read before each text delta of a dialogue answer.
   const answerHoldPath = values.get('--j16-answer-hold-path');
+  // J-09's 后台分析登记 pace (Issue #95, S39): a shorter quiet period, beside the adapter, so the Journey waits on progress.
+  const backgroundQuietValue = values.get(BACKGROUND_QUIET_ARGUMENT);
+  const backgroundQuietMs = backgroundQuietValue === undefined ? null : parseBackgroundQuietMs(backgroundQuietValue);
   if (
     !dataRoot ||
     !isAbsolute(dataRoot) ||
@@ -1444,16 +1451,20 @@ function parseArguments(argv: string[]): {
       process.env.AI7_E2E_JOURNEY !== 'J-11' && process.env.AI7_E2E_JOURNEY !== 'J-13' && process.env.AI7_E2E_JOURNEY !== 'J-16') ||
       !isAbsolute(unitHoldPath))) ||
     (answerHoldPath !== undefined && (process.env.AI7_E2E_JOURNEY !== 'J-16' || !isAbsolute(answerHoldPath))) ||
+    (backgroundQuietValue !== undefined && (process.env.AI7_E2E_JOURNEY !== 'J-09' || backgroundQuietMs === null || modelAdapterControl === undefined)) ||
     [importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl].filter(Boolean).length > 1 ||
     // developer-live is a human-attended developer-host launch: never a Journey launch, never with a Journey control.
     (launchForm.trustedOperationalScope !== 'development-ci' &&
       (process.env.AI7_E2E_JOURNEY !== undefined || importControlValue !== undefined || foregroundExecutionControlValue !== undefined ||
         recoveryControlValue !== undefined || modelAdapterControlValue !== undefined || connectivityPath !== undefined ||
-        unitHoldPath !== undefined || answerHoldPath !== undefined))
+        unitHoldPath !== undefined || answerHoldPath !== undefined || backgroundQuietValue !== undefined))
   ) {
     throw new ProtocolError();
   }
-  return { dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, connectivityPath, unitHoldPath, answerHoldPath };
+  return {
+    dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, connectivityPath, unitHoldPath,
+    answerHoldPath, backgroundQuietMs: backgroundQuietMs ?? undefined,
+  };
 }
 
 function parentIsAlive(parentPid: number): boolean {
@@ -1484,8 +1495,8 @@ async function run(): Promise<void> {
   // The native `fetch` is captured before the denial replaces the global; only the developer-live
   // `opencode-go` transport ever receives it, and only through the adapter's transmit step.
   const nativeFetch: typeof fetch = globalThis.fetch;
-  const { dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, connectivityPath, unitHoldPath, answerHoldPath } =
-    parseArguments(process.argv.slice(2));
+  const { dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, connectivityPath, unitHoldPath, answerHoldPath,
+    backgroundQuietMs } = parseArguments(process.argv.slice(2));
   if (launchForm.trustedOperationalScope === 'developer-live') {
     // The single-host allowance (settlement l): armed before the denial so its gates admit exactly the
     // policy's endpoint host and port; Node's own fetch resolves `tls.connect` and `dns.lookup` at call time.
@@ -1720,7 +1731,12 @@ async function run(): Promise<void> {
     // 后台分析登记 (Issue #95, S39; ADR 0048): the one standing origin of a Run AI7 starts by itself. It looks once the service
     // is active and then every few seconds; a Book it cannot start now is looked at again then, so nothing it would start
     // waits in a queue of its own — and after a restart it starts only what an Enrollment in force matches anew.
-    background = new BackgroundAnalysisDispatcherClass({ store: openStore, execution: owner, launchPolicy });
+    const ownedJobs = jobs;
+    background = new BackgroundAnalysisDispatcherClass({
+      store: openStore, execution: owner, launchPolicy, editorWorkBusy: () => ownedJobs.busy,
+      // J-09's pace (Issue #95, S39): its quiet period, and a look four times as often, never less than a quarter second.
+      ...(backgroundQuietMs === undefined ? {} : { quietMs: backgroundQuietMs, tickMs: Math.max(250, Math.round(backgroundQuietMs / 4)) }),
+    });
     background.start();
     reachServiceStartup('serving');
     for await (const frame of readFrames()) {

@@ -65,9 +65,11 @@ const QUEUED_NOTE = '运行名额已满：正在运行的任务结束后，这�
 const BACKGROUND_CURRENT_LINE = '现在：分析结果与当前稿件一致，没有要做的。';
 const BACKGROUND_REVOKED_LINE = '现在：已撤销：不会再开始新的后台分析。';
 const BACKGROUND_AUTHORIZED_DETAIL = '后台分析按登记记录了运行授权。';
-/** The quiet period the manuscript must stand still for before a background Run starts, and a margin for the look after it. */
-const BACKGROUND_QUIET_MS = 30_000;
-const BACKGROUND_WAIT_MS = 90_000;
+/**
+ * The quiet period this Journey's launch sets for 后台分析登记 (`--j09-background-quiet-ms`, development-ci and J-09 only; #713
+ * review, P2-7): the dispatcher then looks four times as often, and every background stage waits on its progress, not a clock.
+ */
+const BACKGROUND_QUIET_MS = 3_000;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
@@ -730,7 +732,9 @@ async function main() {
         resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid),
       ];
       if (!forCleanup && launchControls.picker) args.push('--j09-picker-path', SAMPLE1_PATH);
-      if (!forCleanup && launchControls.adapter) args.push('--j04-model-adapter', FIXTURE_IDENTITY, '--j10-unit-hold-path', holdPath);
+      if (!forCleanup && launchControls.adapter) {
+        args.push('--j04-model-adapter', FIXTURE_IDENTITY, '--j10-unit-hold-path', holdPath, '--j09-background-quiet-ms', String(BACKGROUND_QUIET_MS));
+      }
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       return args;
     };
@@ -1192,6 +1196,17 @@ async function main() {
     const beforeBackground = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(beforeBackground?.bookId === bookB && beforeBackground.resultSetRevision?.ordinal === 2, 'background-before-record');
 
+    at('j14-background-focus-kept');
+    // The block reads again while the Enrollment is in force, and each new answer — here the dispatcher's next look — is drawn
+    // with the keyboard focus on `撤销登记…` and the open disclosures left as the editor left them (#713 review, P2-6).
+    await assertRenderer(renderer, `(() => { const binds=document.querySelector('details.background-analysis-binds'); const history=document.querySelector('details.background-analysis-history'); if(!(binds instanceof HTMLDetailsElement)||!(history instanceof HTMLDetailsElement))return false; binds.open=true; history.open=true; const revoke=document.querySelector('[data-background-action="revoke-open"]'); if(!(revoke instanceof HTMLButtonElement))return false; revoke.focus(); return document.activeElement===revoke; })()`, 'background-focus-set');
+    const lookedBefore = await renderer.evaluate(`document.querySelector('.background-analysis-look')?.dataset.lookedAt ?? null`);
+    for (const round of [1, 2]) {
+      await waitFor(renderer, `(() => { const at=document.querySelector('.background-analysis-look')?.dataset.lookedAt ?? null; return at !== null && at !== ${JSON.stringify(lookedBefore)} && (${round} === 1 || at !== window.__j09LookedAt); })()`, `background-redrawn-${round}`, 30_000);
+      await renderer.evaluate(`(() => { window.__j09LookedAt = document.querySelector('.background-analysis-look')?.dataset.lookedAt ?? null; return true; })()`);
+    }
+    await assertRenderer(renderer, `document.activeElement===document.querySelector('[data-background-action="revoke-open"]') && document.activeElement.matches(':focus-visible, :focus') && document.querySelector('details.background-analysis-binds')?.open===true && document.querySelector('details.background-analysis-history')?.open===true`, 'background-focus-kept');
+
     at('background-change-dispatches');
     // The editor edits 乙's manuscript and keeps the caret in its text. Once the text has stood still, AI7 starts 同步到当前稿件 by
     // itself, in the background: the screen, the Book and the focus stay exactly where the editor left them.
@@ -1201,7 +1216,7 @@ async function main() {
     const backgroundFocusBefore = await renderer.evaluate(FOCUS_STATE);
     requireJourney(backgroundFocusBefore?.screen === 'editor' && backgroundFocusBefore.book === bookB && backgroundFocusBefore.focused === true, 'background-focus-before', backgroundFocusBefore);
     const settledBackground = await waitForItems(renderer, (answer) => answer.items.some((item) => item.group === 'recent' && item.bookId === bookB &&
-      item.itemId !== completionItem.itemId && item.itemId !== completionB.itemId), 'background-run-completed', BACKGROUND_WAIT_MS);
+      item.itemId !== completionItem.itemId && item.itemId !== completionB.itemId), 'background-run-completed', 120_000);
     const backgroundFocusAfter = await renderer.evaluate(FOCUS_STATE);
     requireJourney(JSON.stringify(backgroundFocusAfter) === JSON.stringify(backgroundFocusBefore) && (await renderer.evaluate(`window.ai7.getBookWorkbenchRoute()`))?.bookId === bookB,
       'background-run-steals-nothing', { before: backgroundFocusBefore, after: backgroundFocusAfter });
@@ -1242,11 +1257,13 @@ async function main() {
     const keptRecord = JSON.stringify({ task: backgroundRun.taskIntent, authorization: backgroundRun.authorization, run: backgroundRun.run.state, revision: backgroundRun.resultSetRevision.revisionId });
 
     at('background-revoked-no-dispatch');
-    // A further edit, and longer than the text must stand still: nothing starts, and what the Enrollment started stays as it was.
+    // A further edit, and the dispatcher looking at 乙 again after the text has stood still past the quiet period, finding the
+    // Enrollment revoked: nothing starts, and what the Enrollment started stays as it was. The wait is on that look, not a clock.
     await toLibrary(renderer, 'background-revoked-edit');
     await openManuscriptOf(renderer, bookB, 'background-revoked-edit');
     await editAndSave(renderer, '〔撤销之后的改动〕', 'background-revoked-edit');
-    await new Promise((resolveWait) => setTimeout(resolveWait, BACKGROUND_QUIET_MS + 12_000));
+    const savedAt = await renderer.evaluate('Date.now()');
+    await waitFor(renderer, `window.ai7.inspectBackgroundAnalysisEnrollment().then((enrollment) => enrollment.lastLook !== null && enrollment.lastLook.kind === 'stopped' && Date.parse(enrollment.lastLook.at) > ${Number(savedAt) + BACKGROUND_QUIET_MS})`, 'background-revoked-looked', 60_000);
     const afterRevoke = await renderer.evaluate(READ_ITEMS);
     requireJourney(!afterRevoke.items.some((item) => item.bookId === bookB && item.group === 'active') &&
       afterRevoke.items.filter((item) => item.group === 'recent' && item.bookId === bookB).length ===

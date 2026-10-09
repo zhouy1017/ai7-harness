@@ -22,6 +22,8 @@ import {
   PROVIDER_CACHE_ROOT_ARGUMENT,
   REVIEW_FINDING_PAGE_KEYS,
   RUN_BUDGET_CEILING_ARGUMENT,
+  BACKGROUND_QUIET_ARGUMENT,
+  parseBackgroundQuietMs,
   TRUSTED_SCOPE_ARGUMENT,
   parseTrustedLaunchForm,
   type AskAboutSelectionInput,
@@ -89,6 +91,8 @@ interface LaunchArguments {
   unitHoldPath: string | undefined;
   /** J-16 only (Issue #52, S17a): the file whose number says how many text deltas a dialogue answer may stream. */
   answerHoldPath: string | undefined;
+  /** J-09 only (Issue #95, S39): the 后台分析登记 quiet period in milliseconds, within its bounds. */
+  backgroundQuietMs: number | undefined;
   /** J-05 only: the first Apply commits and its acknowledgement is withheld from the renderer, once. */
   applyControl: 'lose-first-acknowledgement' | undefined;
   observeJ12Reveal: boolean;
@@ -210,6 +214,7 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j04-connectivity-path' ||
           key === '--j10-unit-hold-path' ||
           key === '--j16-answer-hold-path' ||
+          key === BACKGROUND_QUIET_ARGUMENT ||
           key === '--j05-apply-control' ||
           key === '--j12-observe-reveal' ||
           key === '--launcher-pid' ||
@@ -386,6 +391,10 @@ function parseArguments(argv: string[]): LaunchArguments {
   // J-16's answer hold (Issue #52, S17a): J-16's own, absolute, beside the adapter — it holds a dialogue answer mid-stream.
   const answerHoldPath = values.get('--j16-answer-hold-path');
   requireDesktop(answerHoldPath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-16' && isAbsolute(answerHoldPath)));
+  // J-09's 后台分析登记 pace (Issue #95, S39): J-09's own, development-ci only, beside the adapter, within its bounds.
+  const backgroundQuietValue = values.get(BACKGROUND_QUIET_ARGUMENT);
+  const backgroundQuietMs = backgroundQuietValue === undefined ? undefined : parseBackgroundQuietMs(backgroundQuietValue);
+  requireDesktop(backgroundQuietValue === undefined || (process.env.AI7_E2E_JOURNEY === 'J-09' && backgroundQuietMs !== null));
   requireDesktop(
     observeJ12RevealValue === undefined ||
       (process.env.AI7_E2E_JOURNEY === 'J-12' && observeJ12RevealValue === 'true'),
@@ -397,7 +406,7 @@ function parseArguments(argv: string[]): LaunchArguments {
       (process.env.AI7_E2E_JOURNEY === undefined && injectedPickerPath === undefined && observeJ12RevealValue === undefined &&
         importControlValue === undefined && foregroundExecutionControlValue === undefined && recoveryControlValue === undefined && modelAdapterControlValue === undefined &&
         applyControlValue === undefined && injectedSavePath === undefined && injectedFolderPath === undefined && connectivityPath === undefined &&
-        unitHoldPath === undefined && answerHoldPath === undefined),
+        unitHoldPath === undefined && answerHoldPath === undefined && backgroundQuietValue === undefined),
   );
   return {
     dataRoot,
@@ -412,6 +421,7 @@ function parseArguments(argv: string[]): LaunchArguments {
     connectivityPath,
     unitHoldPath,
     answerHoldPath,
+    backgroundQuietMs: backgroundQuietMs ?? undefined,
     applyControl,
     observeJ12Reveal,
     launcherPid,
@@ -5155,6 +5165,7 @@ export async function runApplication(): Promise<void> {
       launch.answerHoldPath,
       // A Journey reads how far the service's own startup came (Issue #675), beside main's steps and under the same switch.
       journeyStartupRelay(process.env, (line) => void process.stderr.write(line)),
+      launch.backgroundQuietMs,
     );
     service.onUnexpectedExit(() => {
       serviceInterrupted = true;

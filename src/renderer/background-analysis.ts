@@ -24,6 +24,8 @@ import {
   BACKGROUND_WHEN_LABEL,
   backgroundEnrollmentLine,
   backgroundHistoryLine,
+  backgroundLookLine,
+  backgroundNotStartedLine,
   backgroundNextLine,
   backgroundStartedLine,
   backgroundStartedMoreLine,
@@ -34,7 +36,8 @@ import {
  * beside its analysis — whether there is one, what it would do now and why, the Runs it started, and the two decisions it
  * offers. `登记后台分析…` opens the disclosure first, consequence before decision, with no starting point chosen for the editor;
  * `撤销登记…` says what revoking keeps. While an Enrollment is in force the block reads again every two seconds, never while the
- * editor is in one of its two forms, and tells the card beside it when a Run it started has begun.
+ * editor is in one of its two forms, and tells the card beside it when a Run it started has begun. A new answer redraws the block
+ * with the keyboard focus and every open `<details>` kept where the editor left them (#713 review, P2-6).
  */
 export interface MountBackgroundAnalysisOptions {
   readonly root: HTMLElement;
@@ -60,6 +63,15 @@ function action(label: string, tone: 'primary' | 'secondary' | 'quiet', name: st
   node.dataset['backgroundAction'] = name;
   node.addEventListener('click', run);
   return node;
+}
+
+/** How a focused control of the block is found again after a redraw, or `null` for one it does not keep. */
+function focusKeyOf(node: HTMLElement): string | null {
+  const actionName = node.dataset['backgroundAction'];
+  if (actionName !== undefined) return `[data-background-action="${actionName}"]`;
+  const details = node.closest<HTMLElement>('details[data-background-details]');
+  if (details !== null && node.tagName === 'SUMMARY') return `details[data-background-details="${details.dataset['backgroundDetails']}"] > summary`;
+  return null;
 }
 
 function rows(entries: ReadonlyArray<{ label: string; value: string }>): HTMLDListElement {
@@ -125,7 +137,23 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     }
   };
 
+  /**
+   * Redraws the block keeping what the editor is doing in it: the focused control — named by its action, its disclosure or its
+   * summary — and which disclosures are open, each found again by its class.
+   */
   const render = (projection: BackgroundAnalysisEnrollmentProjection): void => {
+    const active = document.activeElement;
+    const focusKey = active instanceof HTMLElement && root.contains(active) ? focusKeyOf(active) : null;
+    const open = new Set(Array.from(root.querySelectorAll<HTMLDetailsElement>('details[data-background-details]'))
+      .filter((details) => details.open).map((details) => details.dataset['backgroundDetails']));
+    paint(projection);
+    for (const details of Array.from(root.querySelectorAll<HTMLDetailsElement>('details[data-background-details]'))) {
+      if (open.has(details.dataset['backgroundDetails'])) details.open = true;
+    }
+    if (focusKey !== null) root.querySelector<HTMLElement>(focusKey)?.focus();
+  };
+
+  const paint = (projection: BackgroundAnalysisEnrollmentProjection): void => {
     root.dataset['backgroundState'] = projection.state;
     root.dataset['backgroundNext'] = projection.next.kind;
     root.dataset['backgroundStarted'] = String(projection.startedRunCount);
@@ -138,6 +166,7 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
       line.dataset['enrollmentVersionId'] = projection.enrollment.enrollmentVersionId;
       nodes.push(line);
       const binds = el('details', 'background-analysis-binds');
+      binds.dataset['backgroundDetails'] = 'binds';
       binds.append(el('summary', undefined, BACKGROUND_BINDS_SUMMARY), rows(projection.enrollment.binds));
       nodes.push(binds);
     }
@@ -145,6 +174,15 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
       const next = el('p', 'background-analysis-next', backgroundNextLine(projection.next));
       next.setAttribute('aria-live', 'polite');
       nodes.push(next);
+    }
+    if (projection.lastNotStarted !== null) {
+      const notice = el('p', 'field-note background-analysis-not-started', backgroundNotStartedLine(projection.lastNotStarted, localInstantLabel));
+      nodes.push(notice);
+    }
+    if (projection.lastLook !== null) {
+      const look = el('p', 'field-note background-analysis-look', backgroundLookLine(projection.lastLook, localInstantLabel));
+      look.dataset['lookedAt'] = projection.lastLook.at;
+      nodes.push(look);
     }
     if (projection.startedRuns.length > 0) {
       const list = el('ol', 'background-analysis-started');
@@ -160,15 +198,16 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     }
     if (projection.history.length > 0) {
       const details = el('details', 'background-analysis-history');
+      details.dataset['backgroundDetails'] = 'history';
       const list = el('ol');
       for (const entry of projection.history) list.append(el('li', undefined, backgroundHistoryLine(entry, localInstantLabel)));
-      details.append(el('summary', undefined, `${BACKGROUND_HISTORY_SUMMARY}（${projection.history.length}）`), list);
+      details.append(el('summary', undefined, `${BACKGROUND_HISTORY_SUMMARY}（${projection.historyCount}）`), list);
       nodes.push(details);
     }
     const actions = el('div', 'button-row background-analysis-actions');
     const form = el('div', 'background-analysis-form');
     form.hidden = true;
-    if (projection.state === 'active' && projection.enrollment !== null) {
+    if ((projection.state === 'active' || projection.state === 'suspended') && projection.enrollment !== null && projection.revoke.canRevoke) {
       const enrollmentId = projection.enrollment.enrollmentId;
       const open = action(BACKGROUND_REVOKE_OPEN, 'secondary', 'revoke-open', () => {
         engaged = true;
@@ -179,7 +218,8 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
       });
       open.setAttribute('aria-expanded', 'false');
       actions.append(open);
-    } else {
+    }
+    if (projection.state !== 'active') {
       const open = action(BACKGROUND_ENROLL_OPEN, 'secondary', 'enroll-open', () => {
         engaged = true;
         open.setAttribute('aria-expanded', 'true');

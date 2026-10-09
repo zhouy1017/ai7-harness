@@ -1041,6 +1041,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'background-enrollment-disclosure',
     'j14-background-keyboard',
     'background-enrollment-recorded',
+    'j14-background-focus-kept',
     'background-change-dispatches',
     'background-run-record',
     'background-revoke',

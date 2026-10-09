@@ -1801,6 +1801,17 @@ export type ResultSetPolicyPin =
 /** The three launch-form arguments the built entry accepts beside `--data-root`; carried by argv only, never by an environment variable or setting. */
 export const TRUSTED_SCOPE_ARGUMENT = '--trusted-operational-scope';
 export const RUN_BUDGET_CEILING_ARGUMENT = '--run-budget-ceiling';
+/**
+ * J-09's 后台分析登记 pace (Issue #95, S39; #713 review, P2-7): the quiet period in milliseconds a development-ci J-09 launch sets
+ * beside the model adapter, so the Journey waits on the dispatcher's progress rather than a clock. Never in any other launch.
+ */
+export const BACKGROUND_QUIET_ARGUMENT = '--j09-background-quiet-ms';
+/** A J-09 quiet period: whole milliseconds from 1 s to 30 s, the product's own; anything else is refused. */
+export function parseBackgroundQuietMs(value: string): number | null {
+  if (!/^[1-9][0-9]{3,4}$/u.test(value)) return null;
+  const ms = Number(value);
+  return ms >= 1_000 && ms <= 30_000 ? ms : null;
+}
 export const PROVIDER_CACHE_ROOT_ARGUMENT = '--provider-cache-root';
 export const LAUNCH_SELECTABLE_SCOPES: ReadonlyArray<TrustedOperationalScope> = ['development-ci', 'developer-live'];
 /** A positive decimal token count without sign, separators, or leading zeros; twelve digits stay well inside the safe-integer range. */
@@ -3345,6 +3356,11 @@ export interface BaselineAnalysisProjection {
     modeLabel: string;
     /** 改计划重做 (Issue #422, S76c; CONT-013): the cancelled Run this Task redoes, and its Task; `null` for any other Task. */
     redoOf: null | { runRecordId: string; taskIntentId: string };
+    /**
+     * The 后台分析登记 version whose dispatcher prepared this Task (Issue #95, S39); absent for every Task the editor asked for, so
+     * a plan AI7 prepared is never shown as the editor's.
+     */
+    preparedByEnrollmentVersionId?: string;
   };
   checkpoint: null | TaskAuthorizationProjection['checkpoint'];
   manuscriptPin: null | {
@@ -5536,7 +5552,11 @@ export type BackgroundAnalysisStartingPoint = 'prospective' | 'backfill';
 export interface BackgroundAnalysisEnrollmentProjection {
   bookId: string;
   bookTitle: string;
-  state: 'none' | 'active' | 'revoked';
+  /**
+   * `suspended`: AI7 suspended it when the local data was replaced or rolled back, and it starts nothing until the editor confirms
+   * it again; `damaged`: its record does not read back, and only this Book's background analysis stops.
+   */
+  state: 'none' | 'active' | 'suspended' | 'revoked' | 'damaged';
   stateLabel: string;
   statement: string;
   /** The version in force — or the last one, once revoked; `null` before the Book was ever enrolled. */
@@ -5554,10 +5574,15 @@ export interface BackgroundAnalysisEnrollmentProjection {
     /** What the version binds, in the words its disclosure listed. */
     binds: ReadonlyArray<{ label: string; value: string }>;
   };
-  /** Every state the Enrollment has had, oldest first; revoking never shortens it. */
-  history: ReadonlyArray<{ state: 'active' | 'revoked'; stateLabel: string; ordinal: number; recordedAt: string }>;
+  /** The Enrollment's newest states, newest first (at most 10); revoking never shortens it. */
+  history: ReadonlyArray<{ state: 'active' | 'suspended' | 'revoked'; stateLabel: string; ordinal: number; recordedAt: string }>;
+  historyCount: number;
   /** What the Enrollment would do now, and why — `start` only while every condition holds. */
   next: { kind: 'start' | 'none' | 'wait' | 'stopped'; reason: string };
+  /** The dispatcher's latest look at the Book in this service's lifetime, and what it found; `null` before its first. */
+  lastLook: null | { at: string; kind: 'start' | 'none' | 'wait' | 'stopped'; reason: string };
+  /** Why the dispatcher's latest pass that began preparing did not start, until it next starts or the Book is enrolled again. */
+  lastNotStarted: null | { at: string; reason: string };
   /** The Runs the Enrollment started on this Book, newest first (at most 10), and how many there are. */
   startedRuns: ReadonlyArray<{ taskIntentId: string; modeLabel: string; enrollmentOrdinal: number | null; authorizedAt: string }>;
   startedRunCount: number;

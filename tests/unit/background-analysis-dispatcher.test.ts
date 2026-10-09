@@ -1,19 +1,40 @@
 import { describe, expect, it } from 'vitest';
 import { BackgroundAnalysisDispatcher, type BackgroundAnalysisDispatcherDependencies } from '../../src/service/background-analysis.js';
 import type { BackgroundAnalysisDecision } from '../../src/service/background-analysis-enrollments.js';
-import { BASELINE_ANALYSIS_MODE_GOALS, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
+import type { LaunchPolicyProjection } from '../../src/shared/protocol.js';
 
-// Unit suite for the 后台分析登记 dispatcher (Issue #95, plan slice S39): it asks the store, prepares exactly as 先看计划 does
-// only on a `start`, starts through the governor, never runs two passes at once, and starts nothing while a replacement waits
-// or once it is disposed.
+// Unit suite for the 后台分析登记 dispatcher (Issue #95, plan slice S39; #713 review): it asks the store, prepares a Task of its
+// own only on a `start`, asks again before every step whether it may go on, starts in the same turn as the step that froze the
+// plan, cancels its preparation and checkpoint on any failure, never runs two passes at once, and starts nothing while a
+// replacement waits or once it is disposed.
 
 const POLICY = {} as LaunchPolicyProjection;
 
-interface Calls { decided: string[]; prepared: Array<[string, string, unknown]>; advanced: number; cancelled: number; started: string[]; admitted: string[] }
+interface Calls {
+  decided: string[];
+  prepared: Array<[string, string, string]>;
+  advanced: number;
+  cancelled: string[];
+  guards: Array<[string, string | null]>;
+  notes: string[];
+  started: string[];
+  admitted: string[];
+}
 
-function harness(decisions: Readonly<Record<string, BackgroundAnalysisDecision>>, options: { frozen?: boolean; steps?: number; busy?: boolean } = {}) {
-  const calls: Calls = { decided: [], prepared: [], advanced: 0, cancelled: 0, started: [], admitted: [] };
-  let remaining = options.steps ?? 0;
+interface Options {
+  frozen?: boolean;
+  steps?: number;
+  busy?: boolean;
+  /** The guard's answer before step n (0 = before preparing). */
+  guard?: (step: number) => string | null;
+  /** The step whose advance throws. */
+  throwAt?: number;
+}
+
+function harness(decisions: Readonly<Record<string, BackgroundAnalysisDecision>>, options: Options = {}) {
+  const calls: Calls = { decided: [], prepared: [], advanced: 0, cancelled: [], guards: [], notes: [], started: [], admitted: [] };
+  const remaining = new Map<string, number>();
+  let guardStep = 0;
   const projection = (bookId: string) => ({ taskIntent: { taskIntentId: `task-${bookId}` }, planEnvelope: { digest: `digest-${bookId}` } });
   const store = {
     replacementFrozen: () => options.frozen ?? false,
@@ -24,23 +45,34 @@ function harness(decisions: Readonly<Record<string, BackgroundAnalysisDecision>>
       const decision = calls.started.some((entry) => entry.startsWith(`${bookId}:`)) ? { kind: 'wait', reason: 'running' } : decisions[bookId]!;
       return { decision, enrollmentVersionId: `version-${bookId}` };
     },
-    createBaselineAnalysisPreparationWork: (bookId: string, goal: string, update: unknown) => {
-      calls.prepared.push([bookId, goal, update]);
-      return remaining === 0
+    backgroundMayContinue: (bookId: string, _version: string, workId: string | null) => {
+      calls.guards.push([bookId, workId]);
+      return options.guard?.(guardStep++) ?? null;
+    },
+    createBackgroundBaselineAnalysisPreparationWork: (bookId: string, mode: string, version: string) => {
+      calls.prepared.push([bookId, mode, version]);
+      const steps = options.steps ?? 0;
+      remaining.set(`work-${bookId}`, steps);
+      return steps === 0
         ? { done: true, workId: null, completed: 1, total: 1, projection: projection(bookId) }
         : { done: false, workId: `work-${bookId}`, completed: 0, total: 1, projection: null };
     },
     advanceBaselineAnalysisPreparationWork: (workId: string) => {
       calls.advanced += 1;
-      remaining -= 1;
+      if (options.throwAt === calls.advanced) throw new Error('REIMPORT_CHECKPOINT_STALE');
+      const left = remaining.get(workId)! - 1;
+      remaining.set(workId, left);
       const bookId = workId.slice('work-'.length);
-      return remaining <= 0
+      return left <= 0
         ? { done: true, workId: null, completed: 1, total: 1, projection: projection(bookId) }
         : { done: false, workId, completed: 0, total: 1, projection: null };
     },
-    cancelBaselineAnalysisPreparationWork: () => {
-      calls.cancelled += 1;
+    cancelBaselineAnalysisPreparationWork: (workId: string) => {
+      calls.cancelled.push(workId);
       return true;
+    },
+    noteBackgroundNotStarted: (bookId: string, reason: string) => {
+      calls.notes.push(`${bookId}:${reason}`);
     },
     startEnrolledBaselineAnalysis: (bookId: string, taskIntentId: string, digest: string, versionId: string, mode: string) => {
       calls.started.push(`${bookId}:${taskIntentId}:${digest}:${versionId}:${mode}`);
@@ -50,6 +82,7 @@ function harness(decisions: Readonly<Record<string, BackgroundAnalysisDecision>>
   const execution = {
     busy: options.busy ?? false,
     routeExecutable: true,
+    capacity: 2,
     admitOrQueue: (runRecordId: string) => {
       calls.admitted.push(runRecordId);
       return 'admitted' as const;
@@ -58,41 +91,70 @@ function harness(decisions: Readonly<Record<string, BackgroundAnalysisDecision>>
   return { calls, store, execution };
 }
 
+const START: BackgroundAnalysisDecision = { kind: 'start', mode: 'sync-current', reason: 'go' };
+
 describe('the 后台分析登记 dispatcher', () => {
   it('prepares and starts only the Books whose decision is start, each in the mode it names, through the governor', async () => {
     const { calls, store, execution } = harness({
-      a: { kind: 'start', mode: 'sync-current', reason: 'go' },
+      a: START,
       b: { kind: 'wait', reason: 'busy' },
       c: { kind: 'start', mode: 'first-baseline', reason: 'go' },
     });
-    const dispatcher = new BackgroundAnalysisDispatcher({ store, execution, launchPolicy: POLICY, now: () => 7, quietMs: 5 });
-    expect(dispatcher.runtime()).toEqual({ routeExecutable: true, placeFree: true, now: 7, quietMs: 5 });
+    const dispatcher = new BackgroundAnalysisDispatcher({ store, execution, launchPolicy: POLICY, now: () => 7, quietMs: 5, editorWorkBusy: () => true });
+    expect(dispatcher.runtime()).toEqual({ routeExecutable: true, placeFree: true, capacity: 2, editorWorkBusy: true, now: 7, quietMs: 5 });
     dispatcher.nudge();
+    expect(dispatcher.busy).toBe(true);
     await dispatcher.settled();
+    expect(dispatcher.busy).toBe(false);
     expect(calls.decided).toEqual(['a', 'b', 'c']);
-    expect(calls.prepared).toEqual([
-      ['a', BASELINE_ANALYSIS_MODE_GOALS['sync-current'], { mode: 'sync-current', selectedRange: null }],
-      ['c', BASELINE_ANALYSIS_MODE_GOALS['first-baseline'], null],
-    ]);
+    expect(calls.prepared).toEqual([['a', 'sync-current', 'version-a'], ['c', 'first-baseline', 'version-c']]);
     expect(calls.started).toEqual(['a:task-a:digest-a:version-a:sync-current', 'c:task-c:digest-c:version-c:first-baseline']);
     expect(calls.admitted).toEqual(['run-a', 'run-c']);
   });
 
-  it('reads a busy governor as no free place', () => {
+  it('reads a busy governor as no free place, and an editor with no jobs as idle', () => {
     const { store, execution } = harness({}, { busy: true });
-    expect(new BackgroundAnalysisDispatcher({ store, execution, launchPolicy: POLICY }).runtime().placeFree).toBe(false);
+    expect(new BackgroundAnalysisDispatcher({ store, execution, launchPolicy: POLICY }).runtime())
+      .toMatchObject({ placeFree: false, editorWorkBusy: false });
   });
 
   it('starts nothing while a replacement of the local data waits', async () => {
-    const { calls, store, execution } = harness({ a: { kind: 'start', mode: 'sync-current', reason: 'go' } }, { frozen: true });
+    const { calls, store, execution } = harness({ a: START }, { frozen: true });
     const dispatcher = new BackgroundAnalysisDispatcher({ store, execution, launchPolicy: POLICY });
     dispatcher.nudge();
     await dispatcher.settled();
     expect([calls.decided, calls.prepared, calls.started]).toEqual([[], [], []]);
   });
 
+  it('asks before preparing and before every step, and prepares nothing when told not to', async () => {
+    const { calls, store, execution } = harness({ a: START }, { steps: 2, guard: (step) => (step === 0 ? 'no' : null) });
+    const dispatcher = new BackgroundAnalysisDispatcher({ store, execution, launchPolicy: POLICY });
+    dispatcher.nudge();
+    await dispatcher.settled();
+    expect([calls.guards, calls.prepared, calls.started]).toEqual([[['a', null]], [], []]);
+  });
+
+  it('stops before a step it may no longer take: the preparation is cancelled, why is noted, and nothing starts', async () => {
+    const { calls, store, execution } = harness({ a: START }, { steps: 3, guard: (step) => (step === 2 ? '已撤销' : null) });
+    const dispatcher = new BackgroundAnalysisDispatcher({ store, execution, launchPolicy: POLICY });
+    dispatcher.nudge();
+    await dispatcher.settled();
+    expect(calls.guards).toEqual([['a', null], ['a', 'work-a'], ['a', 'work-a']]);
+    expect([calls.advanced, calls.cancelled, calls.notes, calls.started, calls.admitted]).toEqual([1, ['work-a'], ['a:已撤销'], [], []]);
+  });
+
+  it('cancels its preparation and checkpoint when a step fails, and goes on to the next Book (P1-1)', async () => {
+    const { calls, store, execution } = harness({ a: START, b: START }, { steps: 2, throwAt: 1 });
+    const dispatcher = new BackgroundAnalysisDispatcher({ store, execution, launchPolicy: POLICY });
+    dispatcher.nudge();
+    await dispatcher.settled();
+    expect(calls.cancelled).toEqual(['work-a']);
+    expect(calls.started).toEqual(['b:task-b:digest-b:version-b:sync-current']);
+    expect(calls.admitted).toEqual(['run-b']);
+  });
+
   it('advances a preparation step by step, yielding between, and runs a nudge made meanwhile as one more pass', async () => {
-    const { calls, store, execution } = harness({ a: { kind: 'start', mode: 'sync-current', reason: 'go' } }, { steps: 3 });
+    const { calls, store, execution } = harness({ a: START }, { steps: 3 });
     let yields = 0;
     let dispatcher: BackgroundAnalysisDispatcher | null = null;
     dispatcher = new BackgroundAnalysisDispatcher({
@@ -112,12 +174,12 @@ describe('the 后台分析登记 dispatcher', () => {
   });
 
   it('stops a preparation under way once disposed, and starts nothing after', async () => {
-    const { calls, store, execution } = harness({ a: { kind: 'start', mode: 'sync-current', reason: 'go' } }, { steps: 3 });
+    const { calls, store, execution } = harness({ a: START }, { steps: 3 });
     let dispatcher: BackgroundAnalysisDispatcher | null = null;
     dispatcher = new BackgroundAnalysisDispatcher({ store, execution, launchPolicy: POLICY, yieldStep: async () => void dispatcher!.dispose() });
     dispatcher.nudge();
     await dispatcher.settled();
-    expect([calls.cancelled, calls.started, calls.admitted]).toEqual([1, [], []]);
+    expect([calls.cancelled, calls.notes, calls.started, calls.admitted]).toEqual([['work-a'], [], [], []]);
     dispatcher.nudge();
     dispatcher.start();
     await dispatcher.settled();
@@ -125,10 +187,7 @@ describe('the 后台分析登记 dispatcher', () => {
   });
 
   it('keeps going past a Book whose start failed', async () => {
-    const { calls, store, execution } = harness({
-      a: { kind: 'start', mode: 'sync-current', reason: 'go' },
-      b: { kind: 'start', mode: 'sync-current', reason: 'go' },
-    });
+    const { calls, store, execution } = harness({ a: START, b: START });
     const failing = { ...store, startEnrolledBaselineAnalysis: (bookId: string, ...rest: unknown[]) => {
       if (bookId === 'a') throw new Error('stale');
       return (store.startEnrolledBaselineAnalysis as (...args: unknown[]) => { dispatchRunRecordId: string | null; reason: string | null })(bookId, ...rest);

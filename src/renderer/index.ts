@@ -90,6 +90,7 @@ import { LEARNING_AUDIT_HEADING, LEARNING_AUDIT_STATUS } from './learning-audit-
 import { mountEvaluationCalibration } from './evaluation-calibration.js';
 import { mountBookSeries, mountSeries, mountSeriesList } from './series.js';
 import { mountBackgroundAnalysis } from './background-analysis.js';
+import { BACKGROUND_PREPARED_PLAN_NOTE } from './background-analysis-labels.js';
 import {
   DATA_VERSION_DATA,
   DATA_VERSION_HEADING,
@@ -4048,6 +4049,11 @@ function renderFrozenAnalysisPlan(card: HTMLElement, projection: BaselineAnalysi
       projection.planVersion === null ? '' : `计划版本 ${projection.planVersion.ordinal}`,
     ])),
   );
+  // A plan the 后台分析登记 dispatcher prepared and did not start (Issue #95, S39; #713 review, P2-2) says whose it is.
+  if (projection.taskIntent?.preparedByEnrollmentVersionId !== undefined && projection.authorization === null) {
+    const note = element('p', 'field-note analysis-background-prepared-note', BACKGROUND_PREPARED_PLAN_NOTE);
+    summary.append(note);
+  }
   // AUTH-006: a plan whose key content changed cannot start; the card says so, and the drawer's bar holds
   // 查看计划修订 and 重新确认计划 (§10: 物质变化 · 计划已被取代 reads 计划的关键内容已变化).
   const revision = projection.authorization === null ? projection.planRevision : null;

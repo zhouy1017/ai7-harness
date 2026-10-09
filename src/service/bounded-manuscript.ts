@@ -6115,6 +6115,8 @@ interface ManuscriptCheckpointWork {
   createdAt: string;
   purpose: ManuscriptCheckpointPurpose;
   state: 'copying' | 'prepared';
+  /** The 后台分析登记 dispatcher's (Issue #95, S39): cancelled when anything else asks for a checkpoint of the branch. */
+  preemptible: boolean;
 }
 
 export interface ManuscriptCheckpointProgress {
@@ -6229,10 +6231,22 @@ export class BoundedManuscriptStore {
     );
   }
 
+  /**
+   * Whether a checkpoint is being built for the branch now (Issue #95, S39): the 后台分析登记 dispatcher never starts beside one.
+   */
+  checkpointWorkInFlight(branchId: string): boolean {
+    return Array.from(this.#manuscriptCheckpointWork.values()).some((work) => work.binding.branchId === branchId);
+  }
+
+  /**
+   * `preemptible` is the 后台分析登记 dispatcher's (Issue #95, S39; #713 review, P1-1/P1-2): its checkpoint gives way to any other
+   * the branch asks for — which cancels it and goes ahead — while it never displaces one itself.
+   */
   createManuscriptCheckpointWork(
     manuscriptId: string,
     branchId: string,
     purpose: ManuscriptCheckpointPurpose,
+    options: { preemptible?: boolean } = {},
   ): { workId: string | null; total: number; checkpoint: ManuscriptCheckpointBinding | null } {
     const binding = this.#binding(manuscriptId, branchId);
     this.#requireBranchEditable(branchId);
@@ -6251,6 +6265,11 @@ export class BoundedManuscriptStore {
           createdForDirtyJournal: false,
         },
       };
+    }
+    if (options.preemptible !== true) {
+      for (const work of Array.from(this.#manuscriptCheckpointWork.values())) {
+        if (work.preemptible && work.binding.branchId === branchId) this.cancelManuscriptCheckpointWork(work.workId);
+      }
     }
     requireBounded(!Array.from(this.#manuscriptCheckpointWork.values()).some((work) => work.binding.branchId === branchId),
       'SERVICE_BUSY', '该稿件已有固定点任务。');
@@ -6288,6 +6307,7 @@ export class BoundedManuscriptStore {
       createdAt: new Date().toISOString(),
       purpose,
       state: 'copying',
+      preemptible: options.preemptible === true,
     });
     return { workId, total: totalBlocks, checkpoint: null };
   }

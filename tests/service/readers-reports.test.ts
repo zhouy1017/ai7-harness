@@ -386,10 +386,9 @@ describe('审稿意见 over the real store on exact sample1', () => {
 
   // A store stamped 59, 60 or 61 holds the four relations revisions 30 to 35 widened in their widened text: revision 59 came long
   // after. One that holds an older text was not written by AI7, so it is refused before any widening, not quietly widened
-  // (Issue #672) — whichever of the four it is. The Run Authorizations are refused by revision 66's widening (Issue #95, S39),
-  // which from revision 59 on admits only the text revisions 31 to 65 carried, before the revision-59 check reads them.
+  // (Issue #672) — whichever of the four it is. Revision 66's widening (Issue #95, S39) comes only after that exact check.
   it.each([
-    [INITIAL_EVALUATION_SCHEMA_VERSION, 'analysis_run_authorizations', ANALYSIS_LEDGER_REVISION_30_SQL.analysis_run_authorizations, '分析任务账本表'],
+    [INITIAL_EVALUATION_SCHEMA_VERSION, 'analysis_run_authorizations', ANALYSIS_LEDGER_REVISION_30_SQL.analysis_run_authorizations, '分析任务账本表（修订版 59）'],
     [INITIAL_EVALUATION_SCHEMA_VERSION, 'analysis_plan_revisions', ANALYSIS_LEDGER_REVISION_33_SQL.analysis_plan_revisions, '分析任务账本表（修订版 59）'],
     [DIALOGUE_SCHEMA_VERSION, 'analysis_run_states', ANALYSIS_LEDGER_REVISION_29_SQL.analysis_run_states, '分析任务账本表（修订版 59）'],
     [SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION, 'analysis_task_outcomes', ANALYSIS_LEDGER_REVISION_31_SQL.analysis_task_outcomes, '分析任务账本表（修订版 59）'],

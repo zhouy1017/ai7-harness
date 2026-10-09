@@ -1,22 +1,31 @@
-import { BASELINE_ANALYSIS_MODE_GOALS, type LaunchPolicyProjection } from '../shared/protocol.js';
+import type { LaunchPolicyProjection } from '../shared/protocol.js';
 import { BACKGROUND_ANALYSIS_QUIET_MS, BACKGROUND_ANALYSIS_TICK_MS } from './background-analysis-enrollments.js';
 import type { BackgroundAnalysisRuntime, EditorialStore } from './store.js';
 import type { BaselineAnalysisExecutionOwner } from './analysis/execution.js';
 
 /**
  * The 后台分析登记 dispatcher (Issue #95, plan slice S39; ADR 0048; ADR 0046): the one place AI7 starts an analysis by itself. It
- * looks at every Book's Enrollment in force, one Book after another, every few seconds and whenever something may have changed
- * what an Enrollment would do — an Enrollment made, a Run leaving its place. For each it asks the store what the Enrollment
- * would do now, and only when every condition holds does it prepare the Task exactly as 先看计划 prepares it and start it as
- * 开始任务 would, its Run Authorization naming the enrollment version, through the governor. Nothing waits in a queue of its
- * own: a Book the dispatcher cannot start now is looked at again on the next pass. It never runs under developer-live, never
- * while a replacement of the local data waits, and never without a route this launch can execute.
+ * looks at every enrolled Book, one Book after another, every few seconds and whenever something may have changed what an
+ * Enrollment would do. For each it asks the store what the Enrollment would do now, and only when every condition holds does it
+ * prepare a Task of its own exactly as 先看计划 prepares one and start it as 开始任务 would, its Run Authorization naming the
+ * enrollment version, through the governor.
+ *
+ * It never steps in beside the editor (the Commander's ruling on #713): it acts only while no preparation of the Book is under
+ * way and no job the editor asked for runs; it never takes up a Task Intent but its own; any preparation the editor starts stops
+ * its own; and before every step of its preparation it asks again whether it may go on, so the step that freezes the plan and
+ * the start that follows it in the same turn are never taken once the Enrollment was revoked, the local data is to be replaced,
+ * the manuscript was edited, or no place is left for it. A step that fails cancels its preparation and the checkpoint with it,
+ * so a Book is never left holding either. Nothing waits in a queue of its own: a Book it cannot start now is looked at again on
+ * the next pass.
  */
 export interface BackgroundAnalysisDispatcherDependencies {
   readonly store: Pick<EditorialStore,
-    'backgroundAnalysisBooks' | 'backgroundAnalysisDecisionFor' | 'createBaselineAnalysisPreparationWork' |
-    'advanceBaselineAnalysisPreparationWork' | 'cancelBaselineAnalysisPreparationWork' | 'startEnrolledBaselineAnalysis' | 'replacementFrozen'>;
-  readonly execution: Pick<BaselineAnalysisExecutionOwner, 'busy' | 'routeExecutable' | 'admitOrQueue'>;
+    'backgroundAnalysisBooks' | 'backgroundAnalysisDecisionFor' | 'createBackgroundBaselineAnalysisPreparationWork' |
+    'advanceBaselineAnalysisPreparationWork' | 'cancelBaselineAnalysisPreparationWork' | 'backgroundMayContinue' |
+    'startEnrolledBaselineAnalysis' | 'noteBackgroundNotStarted' | 'replacementFrozen'>;
+  readonly execution: Pick<BaselineAnalysisExecutionOwner, 'busy' | 'routeExecutable' | 'admitOrQueue' | 'capacity'>;
+  /** Whether a job the editor asked for is queued or under way: the dispatcher never steps in beside one. */
+  readonly editorWorkBusy?: () => boolean;
   readonly launchPolicy: LaunchPolicyProjection;
   readonly tickMs?: number;
   readonly quietMs?: number;
@@ -39,14 +48,21 @@ export class BackgroundAnalysisDispatcher {
     this.#quietMs = deps.quietMs ?? BACKGROUND_ANALYSIS_QUIET_MS;
   }
 
-  /** The facts the store weighs beside its own records: this launch's route, the governor's places, and the clock. */
+  /** The facts the store weighs beside its own records: this launch's route, the governor's places, the editor's jobs, the clock. */
   runtime(): BackgroundAnalysisRuntime {
     return {
       routeExecutable: this.#deps.execution.routeExecutable,
       placeFree: !this.#deps.execution.busy,
+      capacity: this.#deps.execution.capacity,
+      editorWorkBusy: this.#deps.editorWorkBusy?.() ?? false,
       now: (this.#deps.now ?? Date.now)(),
       quietMs: this.#quietMs,
     };
+  }
+
+  /** Whether a pass is under way: a replacement of the local data is not prepared beside one (#713 review, P2-3). */
+  get busy(): boolean {
+    return this.#running;
   }
 
   /** Looks now, then every tick while the service runs. */
@@ -100,37 +116,44 @@ export class BackgroundAnalysisDispatcher {
         try {
           await this.#consider(bookId);
         } catch {
-          // A Book whose start failed is looked at again on the next pass; its records say what was recorded.
+          // A Book whose look or start failed is looked at again on the next pass; its records say what was recorded.
         }
       }
     } while (this.#again && !this.#disposed);
   }
 
   async #consider(bookId: string): Promise<void> {
-    const { decision, enrollmentVersionId } = this.#deps.store.backgroundAnalysisDecisionFor(bookId, this.runtime());
+    const store = this.#deps.store;
+    const { decision, enrollmentVersionId } = store.backgroundAnalysisDecisionFor(bookId, this.runtime());
     if (decision.kind !== 'start' || enrollmentVersionId === null) return;
     const mode = decision.mode;
-    const store = this.#deps.store;
-    let work = store.createBaselineAnalysisPreparationWork(
-      bookId,
-      BASELINE_ANALYSIS_MODE_GOALS[mode],
-      mode === 'first-baseline' ? null : { mode: 'sync-current', selectedRange: null },
-      this.#deps.launchPolicy,
-    );
-    while (!work.done) {
-      await (this.#deps.yieldStep ?? yieldToEventLoop)();
-      if (this.#disposed || work.workId === null) {
-        if (work.workId !== null) store.cancelBaselineAnalysisPreparationWork(work.workId);
-        return;
+    if (store.backgroundMayContinue(bookId, enrollmentVersionId, null, this.runtime()) !== null) return;
+    let work = store.createBackgroundBaselineAnalysisPreparationWork(bookId, mode, enrollmentVersionId, this.#deps.launchPolicy);
+    try {
+      while (!work.done) {
+        await (this.#deps.yieldStep ?? yieldToEventLoop)();
+        const workId = work.workId;
+        if (workId === null) return;
+        const stop = this.#disposed ? '本地业务服务正在停止。' : store.backgroundMayContinue(bookId, enrollmentVersionId, workId, this.runtime());
+        if (stop !== null) {
+          store.cancelBaselineAnalysisPreparationWork(workId);
+          if (!this.#disposed) store.noteBackgroundNotStarted(bookId, stop, this.runtime().now);
+          return;
+        }
+        work = store.advanceBaselineAnalysisPreparationWork(workId);
       }
-      work = store.advanceBaselineAnalysisPreparationWork(work.workId);
+    } catch (error) {
+      // A step that failed — the manuscript moved under the checkpoint, another checkpoint took the branch — leaves nothing
+      // behind: the preparation and its checkpoint are cancelled, so neither the editor nor the next pass finds them (P1-1).
+      if (work.workId !== null) store.cancelBaselineAnalysisPreparationWork(work.workId);
+      throw error;
     }
     const prepared = work.projection;
     if (this.#disposed || prepared === null || prepared.taskIntent === null || prepared.planEnvelope === null) return;
+    // In the same turn as the step that froze the plan: nothing the editor does can come between them.
     const started = store.startEnrolledBaselineAnalysis(bookId, prepared.taskIntent.taskIntentId, prepared.planEnvelope.digest,
       enrollmentVersionId, mode, this.runtime());
-    // Through the governor as 开始任务's start goes: admitted at once while a place is free — it was when the pass began — or
-    // waiting for one if the editor took it meanwhile; one this launch cannot admit is blocked before dispatch with the reason.
+    // Admitted at once: the place it was asked for before the last step is still free in this turn, so it never queues.
     if (started.dispatchRunRecordId !== null) this.#deps.execution.admitOrQueue(started.dispatchRunRecordId);
   }
 }

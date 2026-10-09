@@ -56,6 +56,19 @@ export function backgroundHistoryLine(
   return `第 ${entry.ordinal} 版 · ${entry.stateLabel} · ${instant(entry.recordedAt)}`;
 }
 
+/** The dispatcher's latest look at the Book: `AI7 上次查看：… · <what it found>`. */
+export function backgroundLookLine(look: NonNullable<BackgroundAnalysisEnrollmentProjection['lastLook']>, instant: (value: string) => string): string {
+  return `AI7 上次查看：${instant(look.at)} · ${look.reason}`;
+}
+
+/** Why the latest pass that began preparing did not start: the plan it may have left is the Enrollment's, never the editor's. */
+export function backgroundNotStartedLine(note: NonNullable<BackgroundAnalysisEnrollmentProjection['lastNotStarted']>, instant: (value: string) => string): string {
+  return `${note.reason}（${instant(note.at)}）`;
+}
+
+/** ②A's card beside a plan the Enrollment prepared and did not start (#713 review, P2-2). */
+export const BACKGROUND_PREPARED_PLAN_NOTE = '这份计划是后台分析登记准备的，没有开始，也不是你准备的；可以看过后自己开始，或另外准备一份。';
+
 /** `还有 N 项更早的` beneath the ten newest Runs. */
 export function backgroundStartedMoreLine(hidden: number): string {
   return `还有 ${hidden} 项更早的。`;

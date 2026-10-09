@@ -14,7 +14,9 @@ import { isDefaultExecutionRuleBinding } from './default-execution-rules.js';
  *   the budget, the outbound data and the outcome, read from the Book's own facts when the editor enrolled it, never widened —
  *   which analysis it covers, where it starts (`prospective`: only what changes after; `backfill`: the text as it stands too),
  *   the working text it was made against, and the digest of the disclosure the editor confirmed;
- * - `background_analysis_enrollment_states`: whether the version in force is `active` or `revoked`.
+ * - `background_analysis_enrollment_states`: whether the version in force is `active`, `suspended` — set by AI7, never by the
+ *   editor, when the local data was replaced or rolled back, so no Enrollment arriving in restored data starts anything until
+ *   the editor confirms it again — or `revoked`.
  *
  * An Enrollment is never a Run Authorization. Each Run it starts is its own Task with its own Intent, plan, envelope and Run
  * Authorization, whose origin is `background-analysis-enrollment` and which names the enrollment version. Revoking appends a
@@ -46,13 +48,14 @@ export const BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL = {
   background_analysis_enrollment_states: `CREATE TABLE background_analysis_enrollment_states (
   enrollment_id TEXT NOT NULL REFERENCES background_analysis_enrollments(enrollment_id),
   sequence INTEGER NOT NULL CHECK(sequence >= 1),
-  state TEXT NOT NULL CHECK(state IN ('active', 'revoked')),
+  state TEXT NOT NULL CHECK(state IN ('active', 'suspended', 'revoked')),
   enrollment_version_id TEXT NOT NULL REFERENCES background_analysis_enrollment_versions(enrollment_version_id),
-  actor TEXT NOT NULL CHECK(actor = '本机编辑'),
+  actor TEXT NOT NULL CHECK(actor IN ('本机编辑', 'AI7')),
   recorded_at TEXT NOT NULL,
   canonical_json TEXT NOT NULL,
   sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
-  PRIMARY KEY(enrollment_id, sequence)
+  PRIMARY KEY(enrollment_id, sequence),
+  CHECK((state = 'suspended') = (actor = 'AI7'))
 ) STRICT`,
 } as const;
 
@@ -142,12 +145,18 @@ export interface BackgroundAnalysisEnrollmentVersionRecord {
   createdAt: string;
 }
 
-/** One Book's Enrollment as the ledger holds it: the version in force — or the last one, once revoked — and its state. */
+export type BackgroundAnalysisEnrollmentState = 'active' | 'suspended' | 'revoked';
+const STATES: ReadonlyArray<BackgroundAnalysisEnrollmentState> = ['active', 'suspended', 'revoked'];
+function isState(value: string): value is BackgroundAnalysisEnrollmentState {
+  return (STATES as ReadonlyArray<string>).includes(value);
+}
+
+/** One Book's Enrollment as the ledger holds it: the version in force — or the last one, once suspended or revoked — and its state. */
 export interface BackgroundAnalysisEnrollmentRecord {
   enrollmentId: string;
   bookId: string;
   createdAt: string;
-  state: 'active' | 'revoked';
+  state: BackgroundAnalysisEnrollmentState;
   stateRecordedAt: string;
   version: BackgroundAnalysisEnrollmentVersionRecord;
 }
@@ -255,6 +264,33 @@ export class BackgroundAnalysisEnrollmentLedger {
     });
   }
 
+  /**
+   * After the local data was replaced or rolled back (ADR 0045:54's reading, the Commander's ruling on #713): every Enrollment
+   * the restored data holds in force is suspended by AI7 and starts nothing until the editor confirms it again through its
+   * disclosure, as the next version. A revoked one stays revoked. Answers how many were suspended.
+   */
+  suspendActive(): number {
+    return transact(this.#db, () => {
+      const now = new Date().toISOString();
+      let suspended = 0;
+      for (const bookId of this.enrolledBooks()) {
+        const enrollmentId = this.#enrollmentId(bookId)!;
+        let current: BackgroundAnalysisEnrollmentRecord | null;
+        try {
+          current = this.#read(enrollmentId);
+        } catch (error) {
+          // A damaged record starts nothing anyway; it is said as damaged where the Book is read.
+          if (error instanceof BackgroundAnalysisEnrollmentError) continue;
+          throw error;
+        }
+        if (current === null || current.state !== 'active') continue;
+        this.#appendState(enrollmentId, 'suspended', current.version.enrollmentVersionId, now);
+        suspended += 1;
+      }
+      return suspended;
+    });
+  }
+
   /** `撤销登记`: the Enrollment stays on record with every version, and no new Run starts under it. Revoking twice answers as once. */
   revoke(enrollmentId: string): BackgroundAnalysisEnrollmentRecord {
     requireEnrollment(UUID_PATTERN.test(enrollmentId), 'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台分析登记标识无效。');
@@ -273,10 +309,27 @@ export class BackgroundAnalysisEnrollmentLedger {
     return enrollmentId === null ? null : this.#read(enrollmentId);
   }
 
-  /** Every Book's Enrollment in force, in the order they were made: what the dispatcher looks at. */
+  /**
+   * Every Book that has an Enrollment, in the order they were made, read without verifying a record: what the dispatcher looks
+   * at, one Book at a time, so a damaged record stops only its own Book (#713 review, P3-6).
+   */
+  enrolledBooks(): ReadonlyArray<string> {
+    const rows = this.#db.prepare('SELECT book_id FROM background_analysis_enrollments ORDER BY created_at, rowid').all() as SqlRow[];
+    return rows.map((row) => text(row.book_id));
+  }
+
+  /** Every Book's Enrollment in force, in the order they were made; a damaged record is left out rather than stopping the rest. */
   active(): ReadonlyArray<BackgroundAnalysisEnrollmentRecord> {
-    const rows = this.#db.prepare('SELECT enrollment_id FROM background_analysis_enrollments ORDER BY created_at, rowid').all() as SqlRow[];
-    return rows.map((row) => this.#read(text(row.enrollment_id))!).filter((record) => record.state === 'active');
+    const records: BackgroundAnalysisEnrollmentRecord[] = [];
+    for (const bookId of this.enrolledBooks()) {
+      try {
+        const record = this.forBook(bookId);
+        if (record !== null && record.state === 'active') records.push(record);
+      } catch (error) {
+        if (!(error instanceof BackgroundAnalysisEnrollmentError)) throw error;
+      }
+    }
+    return records;
   }
 
   /** The Enrollment a version belongs to and that version, whichever is in force now: a Run names the one it started under. */
@@ -289,20 +342,27 @@ export class BackgroundAnalysisEnrollmentLedger {
     return { enrollment, version: this.#versionOf(row) };
   }
 
-  /** Every version and state of the Book's Enrollment, oldest first: its history, which revoking never shortens. */
-  history(bookId: string): ReadonlyArray<{ state: 'active' | 'revoked'; ordinal: number; recordedAt: string }> {
+  /**
+   * The Book's Enrollment's newest states, newest first and at most `limit` of them, with how many there are: its history, which
+   * revoking never shortens.
+   */
+  history(bookId: string, limit: number): { entries: ReadonlyArray<{ state: BackgroundAnalysisEnrollmentState; ordinal: number; recordedAt: string }>; count: number } {
     const enrollmentId = this.#enrollmentId(bookId);
-    if (enrollmentId === null) return [];
+    if (enrollmentId === null) return { entries: [], count: 0 };
     const rows = this.#db.prepare(
       `SELECT s.state, s.recorded_at, v.ordinal FROM background_analysis_enrollment_states s
        JOIN background_analysis_enrollment_versions v ON v.enrollment_version_id = s.enrollment_version_id
-       WHERE s.enrollment_id = ? ORDER BY s.sequence`,
-    ).all(enrollmentId) as SqlRow[];
-    return rows.map((row) => {
-      const state = text(row.state);
-      requireEnrollment(state === 'active' || state === 'revoked', 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台分析登记状态无效。');
-      return { state, ordinal: integer(row.ordinal), recordedAt: text(row.recorded_at) };
-    });
+       WHERE s.enrollment_id = ? ORDER BY s.sequence DESC LIMIT ?`,
+    ).all(enrollmentId, limit) as SqlRow[];
+    const count = integer((this.#db.prepare('SELECT count(*) n FROM background_analysis_enrollment_states WHERE enrollment_id = ?').get(enrollmentId) as SqlRow).n);
+    return {
+      entries: rows.map((row) => {
+        const state = text(row.state);
+        requireEnrollment(isState(state), 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台分析登记状态无效。');
+        return { state, ordinal: integer(row.ordinal), recordedAt: text(row.recorded_at) };
+      }),
+      count,
+    };
   }
 
   #enrollmentId(bookId: string): string | null {
@@ -310,14 +370,16 @@ export class BackgroundAnalysisEnrollmentLedger {
     return row === undefined ? null : text(row.enrollment_id);
   }
 
-  #appendState(enrollmentId: string, state: 'active' | 'revoked', enrollmentVersionId: string, recordedAt: string): void {
+  #appendState(enrollmentId: string, state: BackgroundAnalysisEnrollmentState, enrollmentVersionId: string, recordedAt: string): void {
     const last = this.#db.prepare('SELECT max(sequence) last FROM background_analysis_enrollment_states WHERE enrollment_id = ?').get(enrollmentId) as SqlRow;
     const sequence = last.last === null ? 1 : integer(last.last) + 1;
-    const record = canonicalRecord({ schema: STATE_SCHEMA, enrollmentId, sequence, state, enrollmentVersionId, actor: ACTOR, recordedAt });
+    // A suspension is AI7's, after the local data was replaced; every other state is the editor's decision.
+    const actor = state === 'suspended' ? 'AI7' : ACTOR;
+    const record = canonicalRecord({ schema: STATE_SCHEMA, enrollmentId, sequence, state, enrollmentVersionId, actor, recordedAt });
     this.#db.prepare(
       `INSERT INTO background_analysis_enrollment_states(enrollment_id, sequence, state, enrollment_version_id, actor, recorded_at, canonical_json, sha256)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(enrollmentId, sequence, state, enrollmentVersionId, ACTOR, recordedAt, record.json, record.digest);
+    ).run(enrollmentId, sequence, state, enrollmentVersionId, actor, recordedAt, record.json, record.digest);
   }
 
   #versionOf(row: SqlRow): BackgroundAnalysisEnrollmentVersionRecord {
@@ -349,7 +411,7 @@ export class BackgroundAnalysisEnrollmentLedger {
     // An Enrollment, its first version and its first state are written in one transaction: one without a state is not one this ledger wrote.
     requireEnrollment(stateRow !== undefined, 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台分析登记缺少状态记录。');
     const state = text(stateRow.state);
-    requireEnrollment(state === 'active' || state === 'revoked', 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台分析登记状态无效。');
+    requireEnrollment(isState(state), 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台分析登记状态无效。');
     const stateRecordedAt = text(stateRow.recorded_at);
     const enrollmentVersionId = text(stateRow.enrollment_version_id);
     requireRecord(stateRow, {
@@ -362,12 +424,23 @@ export class BackgroundAnalysisEnrollmentLedger {
   }
 }
 
+
 // ---- the dispatcher's decision ------------------------------------------------------------------------------
 
 /** How long the manuscript must have stood still since its last confirmed edit before a background Run starts on it. */
 export const BACKGROUND_ANALYSIS_QUIET_MS = 30_000;
-/** How often the service looks at every Enrollment in force. */
+/** How often the service looks at every Enrollment. */
 export const BACKGROUND_ANALYSIS_TICK_MS = 5_000;
+/** How many of the Enrollment's newest states and started Runs ②A lists. */
+export const BACKGROUND_ANALYSIS_LISTED = 10;
+
+/**
+ * How many of the governor's places background Runs may hold at once (the Commander's default on #713, P3-2): all but one, so
+ * one is always left for a Task the editor starts. A governor of one place leaves background analysis none.
+ */
+export function backgroundAnalysisShare(capacity: number): number {
+  return Math.max(0, capacity - 1);
+}
 
 /**
  * What the Book's Enrollment would do now, as the dispatcher and ②A read it alike: `start` names the mode it would start; every
@@ -378,41 +451,58 @@ export type BackgroundAnalysisDecision =
   | { readonly kind: 'none' | 'wait' | 'stopped'; readonly reason: string };
 
 export interface BackgroundAnalysisFacts {
-  /** The Book's Enrollment state; `null` when it has none. */
-  readonly enrollment: 'active' | 'revoked' | null;
+  /** The Book's Enrollment state; `null` when it has none, `damaged` when its record does not read back. */
+  readonly enrollment: BackgroundAnalysisEnrollmentState | 'damaged' | null;
   readonly developerLive: boolean;
   readonly routeExecutable: boolean;
-  /** The fields in which the Book's facts now differ from what the Enrollment binds, in the drawer's words. */
+  /** How many places background Runs may hold at once (`backgroundAnalysisShare`). */
+  readonly share: number;
+  /** The fields in which the Book's facts now differ from what the Enrollment binds, in the drawer's words; `null` unreadable. */
   readonly drift: ReadonlyArray<string> | null;
-  /** A Task of the Book is prepared and not started, or its Run has not ended. */
+  /** A preparation is under way for the Book, or for anything the editor asked for: AI7 never steps in beside one (P1-2). */
+  readonly preparationInFlight: boolean;
+  /** The editor's own Task of the Book is prepared and not started, or a Run of the Book has not ended. */
   readonly taskUnfinished: 'prepared' | 'run' | null;
   /** The latest Result Set Revision: absent, current, or stale against the working text. */
   readonly analysis: 'absent' | 'current' | 'stale';
+  /**
+   * The text moved since the editor's latest Task of the Book: AI7 never redoes a Task the editor ran, cancelled or let fail,
+   * and so never takes away its 改计划重做 — it acts only on edits made after it (#713 review, P2-4).
+   */
+  readonly changedSinceEditorTask: boolean;
   readonly startingPoint: BackgroundAnalysisStartingPoint;
   /** Whether the working text moved since the Enrollment was made. */
   readonly movedSinceEnrollment: boolean;
-  /** How long ago the last confirmed edit was made; `null` when the working text has none since its revision. */
-  readonly sinceLastEditMs: number | null;
-  /** The Book's latest Task was started by an Enrollment over exactly this working text and did not bring it up to date. */
+  /** The Book's latest Task — anyone's — read exactly this working text and did not bring the analysis up to it. */
   readonly attemptedAtThisText: boolean;
-  readonly placeFree: boolean;
+  /** How long ago the last confirmed edit of the manuscript was made, whatever revision it was made on; `null` when none was. */
+  readonly sinceLastEditMs: number | null;
   readonly quietMs: number;
+  readonly placeFree: boolean;
+  /** How many background Runs hold a place, or wait for one, now. */
+  readonly backgroundRunning: number;
 }
 
 export function backgroundAnalysisDecision(facts: BackgroundAnalysisFacts): BackgroundAnalysisDecision {
   if (facts.enrollment === null) return { kind: 'none', reason: BACKGROUND_NOT_ENROLLED };
+  if (facts.enrollment === 'damaged') return { kind: 'stopped', reason: BACKGROUND_RECORD_DAMAGED };
   if (facts.enrollment === 'revoked') return { kind: 'stopped', reason: BACKGROUND_REVOKED };
+  if (facts.enrollment === 'suspended') return { kind: 'stopped', reason: BACKGROUND_SUSPENDED };
   if (facts.developerLive) return { kind: 'stopped', reason: BACKGROUND_DEVELOPER_LIVE };
   if (!facts.routeExecutable) return { kind: 'stopped', reason: BACKGROUND_NO_ROUTE };
+  if (facts.share < 1) return { kind: 'stopped', reason: BACKGROUND_NO_SHARE };
   if (facts.drift === null) return { kind: 'stopped', reason: BACKGROUND_FACTS_UNREADABLE };
   if (facts.drift.length > 0) return { kind: 'stopped', reason: backgroundDriftReason(facts.drift) };
+  if (facts.preparationInFlight) return { kind: 'wait', reason: BACKGROUND_PREPARATION_IN_FLIGHT };
   if (facts.taskUnfinished === 'run') return { kind: 'wait', reason: BACKGROUND_TASK_RUNNING };
   if (facts.taskUnfinished === 'prepared') return { kind: 'wait', reason: BACKGROUND_TASK_PREPARED };
   if (facts.analysis === 'current') return { kind: 'none', reason: BACKGROUND_CURRENT };
+  if (!facts.changedSinceEditorTask) return { kind: 'none', reason: BACKGROUND_EDITOR_TASK };
   if (facts.startingPoint === 'prospective' && !facts.movedSinceEnrollment) return { kind: 'none', reason: BACKGROUND_NOT_MOVED };
   if (facts.attemptedAtThisText) return { kind: 'wait', reason: BACKGROUND_ATTEMPTED };
   if (facts.sinceLastEditMs !== null && facts.sinceLastEditMs < facts.quietMs) return { kind: 'wait', reason: backgroundQuietReason(facts.quietMs) };
   if (!facts.placeFree) return { kind: 'wait', reason: BACKGROUND_PLACE_BUSY };
+  if (facts.backgroundRunning >= facts.share) return { kind: 'wait', reason: backgroundShareFullReason(facts.share) };
   return facts.analysis === 'absent'
     ? { kind: 'start', mode: 'first-baseline', reason: BACKGROUND_START_FIRST }
     : { kind: 'start', mode: 'sync-current', reason: BACKGROUND_START_SYNC };
@@ -420,13 +510,19 @@ export function backgroundAnalysisDecision(facts: BackgroundAnalysisFacts): Back
 
 // ---- words -----------------------------------------------------------------------------------------------
 
-export const BACKGROUND_STATE_LABELS = { none: '未登记', active: '已登记', revoked: '已撤销' } as const;
+export const BACKGROUND_STATE_LABELS = {
+  none: '未登记',
+  active: '已登记',
+  suspended: '待你确认',
+  revoked: '已撤销',
+  damaged: '登记记录无法读取',
+} as const;
 /** ②A's statement of what an Enrollment is (ADR 0048; V2-UX-ANALYSIS-017). */
 export const BACKGROUND_ANALYSIS_STATEMENT =
   '登记后台分析后，这本书的稿件有了已确认的改动、停下一会儿，AI7 会自己开始一次基线分析，把结果带到当前稿件；每次开始都会留下那一次的计划和运行授权，并写明按哪一版登记开始。撤销后不再开始新的后台分析。';
 export const BACKGROUND_ANALYSIS_WHAT = '基线分析：还没有结果时做首次基线分析；结果过期时同步到当前稿件，只重算改动过的部分。';
 export function backgroundAnalysisWhen(quietMs: number): string {
-  return `稿件有已确认的改动并停下 ${Math.round(quietMs / 1000)} 秒后开始；本机运行名额已满时等下一次，不排队，也不抢正在做的事。`;
+  return `稿件有已确认的改动并停下 ${Math.round(quietMs / 1000)} 秒后开始；你正在准备或运行这本书的任务时不开始，也不重做你开始过的任务；运行名额总给你留一个，不够时等下一次，不排队等候。`;
 }
 export const BACKGROUND_ANALYSIS_NOT_GRANTED: ReadonlyArray<string> = [
   '不改动稿件，不采纳或应用任何建议',
@@ -449,26 +545,41 @@ export const BACKGROUND_REVOKE_CONSEQUENCES: ReadonlyArray<string> = [
 ];
 
 export const BACKGROUND_NOT_ENROLLED = '这本书没有登记后台分析：只有你开始的任务才会运行。';
+export const BACKGROUND_RECORD_DAMAGED = '这本书的后台分析登记记录无法读取，后台分析不会开始；其他图书不受影响。';
 export const BACKGROUND_REVOKED = '已撤销：不会再开始新的后台分析。';
+export const BACKGROUND_SUSPENDED = '本机数据替换或回滚后，这份登记待你确认：重新登记之前不会开始后台分析。';
 export const BACKGROUND_DEVELOPER_LIVE = '开发者实时模式下不进行后台分析：每次都先看计划，再开始任务。';
 export const BACKGROUND_NO_ROUTE = '这次启动没有可执行的分析路由，后台分析不会开始。';
+export const BACKGROUND_NO_SHARE = '本机一次只运行一个任务，这个名额留给你开始的任务，后台分析不会开始。';
 export const BACKGROUND_FACTS_UNREADABLE = '读不到这本书的分析设置，后台分析不会开始。';
 export function backgroundDriftReason(labels: ReadonlyArray<string>): string {
   return `登记时定下的${labels.map((label) => `「${label}」`).join('、')}已经变化，后台分析不会按旧的登记开始；请撤销后重新登记。`;
 }
+export const BACKGROUND_REPLACEMENT_WAITING = '本机数据正在等待替换：后台分析不开始。';
+export const BACKGROUND_PREPARATION_IN_FLIGHT = '正在准备一项任务；准备结束后再看，后台分析不会接手或替换它。';
 export const BACKGROUND_TASK_RUNNING = '这本书有一项任务还没结束；它结束后再看。';
-export const BACKGROUND_TASK_PREPARED = '这本书有一份准备好但还没开始的计划；开始它，或另外准备一份之后再看。';
+export const BACKGROUND_TASK_PREPARED = '这本书有一份你准备好但还没开始的计划；开始它，或另外准备一份之后再看。';
 export const BACKGROUND_CURRENT = '分析结果与当前稿件一致，没有要做的。';
+export const BACKGROUND_EDITOR_TASK = '你最近开始的任务之后，稿件还没有新的改动：后台分析不重做你开始过的任务。';
 export const BACKGROUND_NOT_MOVED = '登记之后稿件还没有改动。';
-export const BACKGROUND_ATTEMPTED = '上一次后台分析没有把结果带到这一版稿件；稿件再改动后才会再试。';
+export const BACKGROUND_ATTEMPTED = '最近一项任务读的就是这一版稿件，没有把结果带到它；稿件再改动后才会再试。';
 export function backgroundQuietReason(quietMs: number): string {
   return `稿件刚改动过；停下 ${Math.round(quietMs / 1000)} 秒后开始。`;
 }
 export const BACKGROUND_PLACE_BUSY = '运行名额已满；有空位后再开始。';
+export function backgroundShareFullReason(share: number): string {
+  return `后台分析最多同时占用 ${share} 个运行名额，总给你留一个；有空位后再开始。`;
+}
 export const BACKGROUND_START_FIRST = '条件满足：即将开始首次基线分析。';
 export const BACKGROUND_START_SYNC = '条件满足：即将同步到当前稿件。';
 export const BACKGROUND_ENROLL_DEVELOPER_LIVE = '开发者实时模式下不能登记后台分析：每次都先看计划，再开始任务。';
+export const BACKGROUND_ENROLL_NO_ROUTE = '这次启动没有可执行的分析路由：登记了也不会开始后台分析，所以现在不能登记。';
+export const BACKGROUND_ENROLL_NO_SHARE = '本机一次只运行一个任务，后台分析没有可用的运行名额，所以现在不能登记。';
 export const BACKGROUND_ENROLL_STALE = '登记内容已经变化；请重新打开登记后再确认。';
+/** A pass that prepared a plan and then did not start it: the plan is the Enrollment's, never left as the editor's. */
+export function backgroundNotStartedReason(reason: string): string {
+  return `后台分析这次没有开始：${reason}`;
+}
 export function backgroundEnrollmentName(ordinal: number): string {
   return `后台分析登记 · 第 ${ordinal} 版`;
 }
