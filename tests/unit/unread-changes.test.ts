@@ -83,6 +83,12 @@ describe('the unread-changes walk', () => {
     expect(walkUnreadChanges(chosen, chain(chosen, before)).changed.size).toBe(0);
     // Under the same contract the same words were read: unchanged, too.
     expect(walkUnreadChanges({ ...chosen, contract: 'c1' }, chain({ ...chosen, contract: 'c1' }, before)).changed.size).toBe(0);
+    // A read of these words under another contract settles nothing: measured past it, from the last read under this one,
+    // whose words were other, the unit changed.
+    const earlier = revision(0, manifestOf(sections({ A1: '原来' })), READ, 'c2');
+    const walk = walkUnreadChanges(chosen, chain(chosen, before, earlier));
+    expect([...walk.changed].map(([ordinal, anchor]) => [ordinal, anchor.revisionId])).toEqual([[1, 'rev-0']]);
+    expect([...walk.blockIds]).toEqual([id('A1')]);
   });
 
   it('counts a paragraph removed from, or reordered within, a unit left unread — never a row at 需复审 with nothing counted (P2-1)', () => {
