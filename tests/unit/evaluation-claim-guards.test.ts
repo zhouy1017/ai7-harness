@@ -147,8 +147,12 @@ describe('what AI7\'s evaluation words may not claim (Issue #429, S81b2)', () =>
   });
 
   it('reads the #702 residuals: 一块多 before 点 or a particle is a price, 单一成 is a share after any word 单 ends, and 高分子 names no score (Issue #708)', () => {
-    for (const text of ['卖一块多吧', '一块多点儿。', '一块多点', '定一块左右吧。', '一块多呢？', '售价一块多啊']) {
+    for (const text of ['卖一块多吧', '一块多点儿。', '一块多点', '一块多点钱', '一块多点吧。', '定一块左右吧。', '一块多呢？', '售价一块多啊']) {
       expect(claimsQuantity(text), text).toBe(true);
+    }
+    // 点 that opens 点菜 or 点评 is no price (#720 review).
+    for (const text of ['咱们一块多点菜。', '大家一块多点评几句。', '一块多点东西']) {
+      expect(claimsQuantity(text), text).toBe(false);
     }
     // 单 ends a word outside any list: the share after it is still one.
     for (const text of ['退单一成。', '接单一成来自老客户。', '提单一成以上。', '订单一成来自线上。', '下单一成以上。', '名单一成是新读者。', '保单一成续保。']) {
@@ -183,7 +187,7 @@ describe('what AI7\'s evaluation words may not claim (Issue #429, S81b2)', () =>
     for (const text of ['一'.repeat(200_000), '1'.repeat(200_000), '1/'.repeat(100_000), '千万'.repeat(100_000), '1,'.repeat(100_000), '首印'.repeat(100_000),
       '一块'.repeat(100_000), '一成'.repeat(100_000), '十分之'.repeat(70_000), '十五分一'.repeat(50_000), '4/5'.repeat(70_000), '1/5的'.repeat(50_000),
       '统一成'.repeat(70_000), '一块左'.repeat(70_000), '订单一成'.repeat(50_000), '4/5颗'.repeat(50_000), '一块多'.repeat(70_000),
-      '退单一成'.repeat(50_000), '一块多吧'.repeat(50_000), '高分子4/5'.repeat(30_000), '的单一成'.repeat(50_000)]) {
+      '退单一成'.repeat(50_000), '一块多吧'.repeat(50_000), '高分子4/5'.repeat(30_000), '的单一成'.repeat(50_000), '一块多点'.repeat(50_000)]) {
       const started = performance.now();
       claimsQuantity(text);
       claimsScore(text, FULL_MARKS);

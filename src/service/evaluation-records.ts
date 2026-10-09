@@ -869,6 +869,8 @@ export class EvaluationRecords {
    * rows it was read from — the version's and every earlier one's record digest and every entry digest — and used
    * only while that stamp still holds, so an appended entry, a new version or a damaged row reads afresh. A version that
    * cannot be read keeps what it leaves and no chain; a reading made while a 采用 record could not be read is not kept.
+   * The stamp reads the recorded digests alone and is no integrity check: a row whose text is altered under its own digest
+   * is seen when its version is next read anew — a row of the Book changes, or the store reopens — not before.
    */
   readonly #kept = new Map<string, { readonly stamp: string; readonly chain: Chain | null; readonly left: Carried }>();
   /** The rewrites the editor accepted, as read once (Issue #708): a decision and the words it took never change. */
@@ -1090,7 +1092,8 @@ export class EvaluationRecords {
    * names none reads the words still standing, and no 采用 ever appended one. When the 采用 records cannot be read, the
    * digest-checked marks are kept as recorded, unchecked. After a version that cannot be read (`incomplete`), a mark the chain
    * does not hold is admitted only when it names a rewrite this Book accepted on an earlier version, over words that rewrite
-   * wrote (Issue #708) — still unchecked, since the chain that held it cannot be read — and refused otherwise.
+   * wrote (Issue #708) — checked, then — and refused otherwise; one whose acceptance or words cannot be read now is kept
+   * unchecked.
    */
   #chain(record: StoredRecord, carried: Carried): Chain {
     const rows = this.#db.prepare('SELECT * FROM evaluation_record_entries WHERE record_id = ? ORDER BY ordinal').iterate(record.recordId);
@@ -1138,14 +1141,17 @@ export class EvaluationRecords {
           const stored = storedRewrittenWords(entry.rewrittenFrom, content);
           const before = latest?.content;
           // Whether a recorded mark is one the chain could have written: held already, this entry's 采用's own over words it
-          // changed, or — its source unknown or its chain unreadable — kept, unchecked, as the rules above say.
+          // changed, an earlier acceptance of this Book over the rewrite's own words — checked — or, its source unknown,
+          // kept unchecked, as the rules above say.
           const admitted = (mark: EvaluationRewriteMark, itemId: string | null, now: string | null, was: string | null | undefined): boolean => {
             if (itemId === null ? holdsVerdictMark(marks, mark) : holdsItemMark(marks, { ...mark, itemId })) return true;
             if (adoption.known && adoption.from !== null && before !== undefined && namesRewrite(mark, adoption.from) && now !== was) return true;
             if (carried.incomplete) {
               const accepted = this.#acceptedEarlier(record, mark, itemId);
               if (accepted === 'no') return false;
-              if (accepted === 'unknown') settled = false;
+              // Verified is checked (#720 review): the rewrite wrote these words, and they stand.
+              if (accepted === 'yes') return true;
+              settled = false;
             } else if (adoption.known) {
               return false;
             }

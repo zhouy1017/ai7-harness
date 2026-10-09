@@ -411,13 +411,14 @@ describe('AI7\'s words in an evaluation entry, item by item (Issue #689)', () =>
     expect(records.ai7Words(bookId, v2)).toEqual(carried);
     const page = records.workspace(bookId, '书', v2);
     expect(page.unreadableRecords).toEqual([1]);
-    expect(page.record!.ai7WordsNotice).toBe(evaluationCarriedMarksNotice(FIRST));
+    // A's acceptance on v1 over these very words is read: the carried mark is checked, and nothing is named (Issue #708).
+    expect(page.record!.ai7WordsNotice).toBeNull();
     expect(page.records.map((summary) => summary.ordinal)).toEqual([3, 2]);
     // Every older version is unreadable: no 「更早」 page to open (Issue #702 re-review).
     expect(page.recordsNext).toBeNull();
     expect(page.record!.comparison).toBeNull();
     // v3 reads after v2, its marks still uncheckable against v1, and the per-version operations go on.
-    expect(records.workspace(bookId, '书', null).record!.ai7WordsNotice).toBe(evaluationCarriedMarksNotice(FIRST));
+    expect(records.workspace(bookId, '书', null).record!.ai7WordsNotice).toBeNull();
     save(v3, (content) => ({ ...content, conclusion: 'revise' }));
     expect(records.finalizedOf(bookId, v2)).not.toBeNull();
     expect(records.latestFinalized(bookId)?.recordId).toBe(v2);
@@ -473,7 +474,8 @@ describe('AI7\'s words in an evaluation entry, item by item (Issue #689)', () =>
     expect(records.ai7Words(bookId, v2)).toEqual(pasted);
     const page = records.workspace(bookId, '书', null);
     expect(page.unreadableRecords).toEqual([1]);
-    expect(page.record).toMatchObject({ ordinal: 2, ai7WordsNotice: evaluationCarriedMarksNotice(FIRST) });
+    // The words are AI7's, and A's acceptance on v1 checks the mark: nothing is named (Issue #708).
+    expect(page.record).toMatchObject({ ordinal: 2, ai7WordsNotice: null });
     save(v2, (content) => ({ ...content, conclusion: 'revise' }), true);
     expect(records.latestFinalized(bookId)?.recordId).toBe(v2);
     // A forged mark still has its digest checked, and a mark of an editor's own words names a rewrite only as an over-mark.
@@ -501,7 +503,8 @@ describe('AI7\'s words in an evaluation entry, item by item (Issue #689)', () =>
     const page = records.workspace(bookId, '书', null);
     expect(page.unreadableRecords).toEqual([1]);
     expect(page.records.map((summary) => summary.ordinal)).toEqual([3, 2]);
-    expect(page.record!.ai7WordsNotice).toBe(evaluationCarriedMarksNotice(FIRST));
+    // A's acceptance on v1 over these very words is read: the carried mark is checked, and nothing is named (Issue #708).
+    expect(page.record!.ai7WordsNotice).toBeNull();
     // v1 holds no AI7 words: no notice there.
     expect(records.workspace(bookId, '书', v1).record!.ai7WordsNotice).toBeNull();
     save(v2, (content) => ({ ...content, conclusion: 'revise' }));
@@ -573,6 +576,20 @@ describe('AI7\'s words in an evaluation entry, item by item (Issue #689)', () =>
     expect(forgedWith({ ...carried, items: [first, mark(ITEMS[1]!, B, '编辑的评语 2。')] }), 'the decisions unread').toBe('none');
     decisionsReadable = true;
     expect(forgedWith(carried)).toBe('none');
+    // A rewrite another Book accepted, over these very words, is no acceptance of this Book's (#720 review P2-1).
+    const other = randomUUID();
+    const w1 = records.start(other);
+    records.save(other, w1, 1, own(), false);
+    const read = records.rewritable(other, w1);
+    const D = { taskIntentId: randomUUID(), analysisRevisionId: randomUUID() };
+    const taken = { items: [{ itemId: ITEMS[0]!, comment: 'AI7 的评语一。' }], verdict: 'AI7 的总评。' };
+    const ordinal = records.applyRewrite(other, w1, { entryOrdinal: read.entryOrdinal, entrySha256: read.entrySha256 }, taken, D);
+    adoptions.set(`${w1}:${ordinal}`, D);
+    accepted.set(D.analysisRevisionId, { recordId: w1, from: D, ...taken });
+    expect(records.ai7Words(other, w1)).toEqual({ items: [mark(ITEMS[0]!, D, 'AI7 的评语一。')], verdict: verdictMark(D, 'AI7 的总评。') });
+    expect(forgedWith({ ...carried, items: [mark(ITEMS[0]!, D, 'AI7 的评语一。')], verdict: verdictMark(D, 'AI7 的总评。') }), 'accepted on another Book')
+      .toBe('EVALUATION_RECORD_INVALID');
+    expect(forgedWith(carried)).toBe('none');
   });
 
   it('names only the words whose marks could not be checked, and only while they stand (Issue #708)', () => {
@@ -582,7 +599,9 @@ describe('AI7\'s words in an evaluation entry, item by item (Issue #689)', () =>
     save(v1, (content) => ({ ...content, conclusion: 'revise' }), true);
     const v2 = records.start(bookId);
     damage(v1, 1);
-    // v2 adopts B on item 2: checked against its own 采用. Item 1, carried from v1, cannot be: only it is named.
+    // While A's acceptance cannot be checked — its words unreadable now — item 1, carried from v1, is unchecked. v2 adopts B
+    // on item 2, checked against its own 采用: only item 1 is named.
+    wordsReadable = false;
     save(v2, (content) => ({ ...content, conclusion: 'revise' }));
     adopt(v2, [{ itemId: ITEMS[1]!, comment: 'B 的评语二。' }], 'B 的总评。', B);
     const SECOND = `「${BUILTIN_EVALUATION_PROFILE.items[1]!.label}」的评语`;
@@ -600,6 +619,12 @@ describe('AI7\'s words in an evaluation entry, item by item (Issue #689)', () =>
     // Pasting the words back makes them AI7's again, and unchecked again.
     save(v3, (content) => withComment(content, 0, 'AI7 的评语一。'));
     expect(records.workspace(bookId, '书', v3).record!.ai7WordsNotice).toBe(evaluationCarriedMarksNotice(FIRST));
+    // Once A's acceptance reads, the mark is checked against the words A wrote — verified is checked (#720 review P3-1) — and
+    // nothing is named, though v1 is still damaged; the words stay AI7's.
+    wordsReadable = true;
+    expect(records.workspace(bookId, '书', v3).record!.ai7WordsNotice).toBeNull();
+    expect(records.ai7Words(bookId, v3)!.items.map((item) => item.itemId)).toEqual([ITEMS[0], ITEMS[1]]);
+    expect(records.workspace(bookId, '书', v2).record!.ai7WordsNotice).toBeNull();
     // The adoption notice names, of the same words, only those of unknown source.
     const other = randomUUID();
     const w1 = records.start(other);

@@ -93,10 +93,12 @@ const YI_WORD_HEADS = new Set('统唯单同归专划逐');
  */
 const DAN_YI_LEADS = new Set('的很较太于为更最不是也都和与并而且又既偏略稍常对极颇些得过种个了');
 /**
- * What after 一块多 or 一块左右 keeps it a price: 钱, a count, 点 (「一块多点儿」), a sentence particle (「卖一块多吧」), the end of
- * the line — not 「放在一块多有意思」 (Issue #702 re-review, Issue #708).
+ * What after 一块多 or 一块左右 keeps it a price: 钱, a count, 的, a sentence particle (「卖一块多吧」) or the end of the line —
+ * not 「放在一块多有意思」 (Issue #702 re-review, Issue #708). 点 keeps it one only before 儿, a particle, 钱 or the line's end
+ * (「一块多点儿」), never 「咱们一块多点菜」 or 「大家一块多点评几句」 (#720 review).
  */
-const PRICE_AFTER_ROUGHLY = new Set('钱一本的点吧呢吗啊呀嘛啦哦');
+const PRICE_PARTICLES = new Set('吧呢吗啊呀嘛啦哦');
+const PRICE_AFTER_ROUGHLY = new Set(['钱', '一', '本', '的', ...PRICE_PARTICLES]);
 /** What before a lone 一 makes 一块 a piece rather than a yuan: 这一块, 每一块, 另一块 (Issue #702 review). */
 const YI_KUAI_PIECE = new Set('这那哪每另同整');
 /** 千万 the adverb — 千万不要, 千万别, 千万小心, 千万注意 — rather than ten million. */
@@ -128,8 +130,9 @@ function followsFigureWord(chars: ReadonlyArray<string>, start: number): boolean
 /** Whether 单 at `at` opens the word 单一 rather than ending one: what stands before it is no character it makes a word with. */
 const opensDanYi = (chars: ReadonlyArray<string>, at: number): boolean => isTerminal(chars[at - 1]) || DAN_YI_LEADS.has(chars[at - 1]!);
 
-/** Whether what stands at `at` keeps 一块多 or 一块左右 a price: 钱, a count, 的, 点, a sentence particle or the line's end. */
-const priceFollows = (chars: ReadonlyArray<string>, at: number): boolean => PRICE_AFTER_ROUGHLY.has(chars[at]!) || isTerminal(chars[at]);
+/** Whether what stands at `at` keeps 一块多 or 一块左右 a price: 钱, a count, 的, a particle, the line's end, or 点 before one of those. */
+const priceFollows = (chars: ReadonlyArray<string>, at: number): boolean => PRICE_AFTER_ROUGHLY.has(chars[at]!) || isTerminal(chars[at]) ||
+  (chars[at] === '点' && (chars[at + 1] === '儿' || chars[at + 1] === '钱' || PRICE_PARTICLES.has(chars[at + 1]!) || isTerminal(chars[at + 1])));
 
 /** Whether one numeral run, with what stands right after it and right before it, states a quantity. */
 function runStatesQuantity(chars: ReadonlyArray<string>, run: NumeralRun): boolean {
