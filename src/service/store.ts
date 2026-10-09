@@ -3401,6 +3401,12 @@ interface StoreControl {
    * are recorded, or just after, before the upgrade's note is cleared. The service entry never sets it.
    */
   interruptUpgradeAt?: 'before-record' | 'after-record';
+  /**
+   * The suites record a new writing Task under these copy rules (#707): `1` composes its contract, its plan and its row as the
+   * software before #698 did — a row naming no rules — so a genuine `/1` Task is driven through the store's authorize, run and
+   * parse wiring. The service entry never sets it; absent, every Task is `/2`.
+   */
+  writingCopyRules?: WritingCopyRules;
 }
 
 function continuationNotice(access: OriginalFileAccessProjection): string {
@@ -8319,7 +8325,9 @@ export class EditorialStore {
       evaluation: evaluation?.input ?? null,
       exemplars: exemplars.map((exemplar) => exemplar.input),
     };
-    const ledger = this.#writingLedger(input);
+    // `/2` for every Task prepared by the product; the suites may prepare one under `/1`, as software before #698 did (#707).
+    const copyRules = this.#control.writingCopyRules ?? WRITING_COPY_RULES;
+    const ledger = this.#writingLedger(input, copyRules);
     const mode = latest === null || latest.projection.resultSetRevision === null ? 'writing-first' : 'writing-again';
     const result = this.#analysisCall(() => ledger.prepare({
       phase: 'start',
@@ -8340,6 +8348,7 @@ export class EditorialStore {
       exemplarSources: exemplars.map((exemplar) => exemplar.source),
       contract: input,
       promptContractSha256: ledger.definition.promptContractDigest,
+      copyRules,
     })));
     if (result.workId !== null) this.#writingWork.set(result.workId, ledger);
     return { ...result, projection: result.projection as WritingProjection | null };
