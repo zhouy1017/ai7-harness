@@ -648,7 +648,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .exemplar-list { display: grid; gap: .8rem; }
 .exemplar-book { display: grid; gap: .4rem; min-width: 0; padding: 1rem; border: 1px solid #ded9cd; border-radius: 12px; background: #fffdf8; }
 .exemplar-book h3, .exemplar-book p { margin: 0; overflow-wrap: anywhere; }
-.exemplar-items { display: grid; gap: .3rem; margin: 0; padding-left: 1.2rem; overflow-wrap: anywhere; }
+.exemplar-items, .exemplar-readers-reports { display: grid; gap: .3rem; margin: 0; padding-left: 1.2rem; overflow-wrap: anywhere; }
 /* ②C 评估 (S81a): the versions, then the version on show as a form; each item and risk a fieldset that reflows to one column. */
 .book-evaluation-summary { margin-top: 1rem; }
 .evaluation { display: grid; gap: .9rem; min-width: 0; }
