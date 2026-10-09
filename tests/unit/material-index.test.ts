@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import {
@@ -118,6 +119,15 @@ describe('the ledger over a minimal store', () => {
     db.exec('DROP TRIGGER material_index_segments_no_update');
     db.exec("UPDATE material_index_segments SET canonical_json = replace(canonical_json, '第一句', '第三句') WHERE ordinal = 2");
     expect(() => new MaterialIndexLedger(db).page(MATERIAL, '资料', 1)).toThrowError(/MATERIAL_INDEX_RECORD_INVALID|已损坏/u);
+    // A segment rewritten with a digest of its own still breaks the build's digest over every segment.
+    const forged = store();
+    const third = new MaterialIndexLedger(forged);
+    third.record({ materialId: MATERIAL, sha256: SHA, format: 'DOCX' }, complete);
+    forged.exec('DROP TRIGGER material_index_segments_no_update');
+    const row = forged.prepare('SELECT canonical_json FROM material_index_segments WHERE ordinal = 2').get() as { canonical_json: string };
+    const json = row.canonical_json.replace('第一句', '第三句');
+    forged.prepare('UPDATE material_index_segments SET canonical_json = ?, sha256 = ? WHERE ordinal = 2').run(json, createHash('sha256').update(json).digest('hex'));
+    expect(() => new MaterialIndexLedger(forged).page(MATERIAL, '资料', 1)).toThrowError(MaterialIndexError);
     const fresh = store();
     const second = new MaterialIndexLedger(fresh);
     second.record({ materialId: MATERIAL, sha256: SHA, format: 'DOCX' }, complete);
