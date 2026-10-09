@@ -172,6 +172,63 @@ async function waitFor(renderer, expression, name, timeout = 60_000) {
   }
   throw journeyCheckFailure('J-08', name);
 }
+/** Which screen the product showed, as a check label's word: the ones J-08 waits on, or `other` and `none` (Issue #643). */
+function screenWord(screen) {
+  switch (screen) {
+    case 'landing': return 'landing';
+    case 'manuscript-recovery': return 'manuscript-recovery';
+    case 'recovery-viewer': return 'recovery-viewer';
+    case 'editor': return 'editor';
+    case 'error': return 'error';
+    case null: case undefined: return 'none';
+    default: return 'other';
+  }
+}
+
+/** The status line's tone, as a check label's word: a restore still under way (`busy`), refused (`error`), or neither. */
+function toneWord(tone) {
+  switch (tone) {
+    case 'busy': return 'busy';
+    case 'error': return 'error';
+    case 'success': return 'success';
+    default: return 'none';
+  }
+}
+
+/** What the product showed when a wait passed its bound (Issue #643): its screen, whether it was ready, and the status's tone. */
+const SEEN_STATE = `({ screen: document.querySelector('[data-screen]')?.dataset.screen ?? null, ready: document.documentElement.dataset.ai7ProductReady === 'true', interrupted: document.documentElement.dataset.ai7ServiceState === 'interrupted', tone: document.querySelector('#persistence-status')?.dataset.tone ?? null })`;
+
+/**
+ * Wait for the recovery screen; past the bound, the label says what the product showed instead (Issue #643): `-<ready|
+ * not-ready|interrupted>-on-<screen>`.
+ */
+async function waitForRecoveryScreen(renderer, name) {
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    if (await renderer.evaluate(`Boolean(document.querySelector('[data-screen="manuscript-recovery"]'))`)) return;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  const seen = await renderer.evaluate(SEEN_STATE);
+  const state = seen?.interrupted === true ? 'interrupted' : seen?.ready === true ? 'ready' : 'not-ready';
+  throw journeyCheckFailure('J-08', `${name}-${state}-on-${screenWord(seen?.screen)}`);
+}
+
+/**
+ * Wait for 恢复为新版本 to land in the editor with the recovered-state marker; past the bound, the label says how far the
+ * restore came (Issue #643): `-editor-unmarked` (the editor opened without the marker), or the screen it stood on and the
+ * status's tone — `busy` while the restore was still under way, `error` when it was refused or the window did not open.
+ */
+async function waitForRestoredEditor(renderer, name, timeout) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (await renderer.evaluate(`Boolean(document.querySelector('[data-screen="editor"]') && !document.querySelector('.recovered-state-marker')?.hidden)`)) return;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  const seen = await renderer.evaluate(SEEN_STATE);
+  if (seen?.screen === 'editor') throw journeyCheckFailure('J-08', `${name}-editor-unmarked`);
+  throw journeyCheckFailure('J-08', `${name}-on-${screenWord(seen?.screen)}-${toneWord(seen?.tone)}`);
+}
+
 async function assertRenderer(renderer, expression, name) {
   requireJourney(await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`), name);
 }
@@ -221,7 +278,7 @@ async function saveMilestone(renderer, label, token) {
 
 async function assertRecoveryScreen(renderer, snapshotState = 'eligible') {
   const stateToken = snapshotState === 'eligible' ? 'eligible' : snapshotState === '摘要不匹配' ? 'mismatch' : snapshotState === '对象缺失' ? 'missing' : snapshotState === '对象不完整' ? 'incomplete' : 'none';
-  await waitFor(renderer, `document.querySelector('[data-screen="manuscript-recovery"]')`, `recovery-${stateToken}`);
+  await waitForRecoveryScreen(renderer, `recovery-${stateToken}`);
   await assertRenderer(renderer, `document.querySelector('.recovery-identity')?.textContent.includes('最后持久写入边界') && document.querySelector('.recovery-identity')?.textContent.includes('未获得修订日志确认的输入可能不存在')`, 'durable-boundary-disclosed');
   await assertRenderer(renderer, `document.querySelectorAll('input[name="recovery-source"]:checked').length === 0 && Array.from(document.querySelectorAll('button')).find((item)=>item.textContent==='仅查看')?.disabled && Array.from(document.querySelectorAll('button')).find((item)=>item.textContent==='恢复为新版本')?.disabled`, 'comparison-unselected');
   const expected = snapshotState === 'eligible' ? 3 : 2;
@@ -298,7 +355,7 @@ async function main() {
     (await import(pathToFileURL(denial).href)).installNodeNetworkDenial();
     ({ electronExecutable } = await import('../tools/electron-runtime.mjs'));
     const { createCanonicalExternalDataRoot, ensureCanonicalDataDirectory } = await import(pathToFileURL(resolve(ROOT, 'dist', 'shared', 'data-root.mjs')).href);
-    const { chromium } = await import('playwright-core');
+    const { chromium, errors: { TimeoutError: PlaywrightTimeoutError } } = await import('playwright-core');
     tempParent = await realpath(tmpdir());
     const checkout = await realpath(ROOT);
     requireJourney(!inside(checkout, tempParent) && !inside(tempParent, checkout), 'temp-boundary');
@@ -329,7 +386,12 @@ async function main() {
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       cancellation.throwIfRequested();
       browserAcquisition = chromium.launch({ executablePath: executable, headless: false, ignoreDefaultArgs: true, args, env: productEnvironment(executable), timeout: 60_000 });
-      browser = await browserAcquisition;
+      try {
+        browser = await browserAcquisition;
+      } catch (error) {
+        // A launch that never answered names itself (Issue #643), rather than reaching the hosted log as the stage alone.
+        throw journeyCheckFailure('J-08', error instanceof PlaywrightTimeoutError ? 'browser-launch-timeout' : 'browser-launch-refused', { cause: error });
+      }
       attachProductOutput('J-08', browser, 'launch');
       cancellation.throwIfRequested();
       return attachRenderer(browser);
@@ -524,7 +586,7 @@ async function main() {
     await assertRecoveryScreen(renderer, '没有适用的恢复快照');
     await assertRenderer(renderer, `(() => { const journal=document.querySelector('[data-recovery-candidate="journal"] input'); journal.click(); return journal.checked; })()`, 'none-journal-select');
     await click(renderer, '恢复为新版本', 'none-restore');
-    await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && !document.querySelector('.recovered-state-marker')?.hidden`, 'none-restored', 120_000);
+    await waitForRestoredEditor(renderer, 'none-restored', 120_000);
     await close();
 
     renderer = await launch();
