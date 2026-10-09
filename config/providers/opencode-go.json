@@ -32,7 +32,7 @@
       "kind": "vendor-documentation",
       "source": "OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/",
       "readOn": "2026-09-08",
-      "note": "The Go page for which path the gateway serves each model on, the Zen model table for the exact id it answers to: both facts or no row. Where the pages disagree the Go page decides and the disagreement is recorded."
+      "note": "The Go page for which path the gateway serves each model on, the Zen model table for the exact id it answers to: both facts or no row. Where the pages disagree the Go page decides and the disagreement is recorded. The Go page also prints the `x-opencode-session` header for session stability (ADR 0080 §3), which is why the Go routes send it and no other route does."
     },
     "go-responses-docs": {
       "kind": "vendor-documentation",

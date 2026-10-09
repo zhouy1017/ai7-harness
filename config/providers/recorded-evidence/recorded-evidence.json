@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "liveTestItems": [
+    { "itemId": "S40/first-baseline/1", "route": "opencode-go", "model": "deepseek-v4-flash", "observedOn": "2026-09-07", "issue": "#307" },
+    { "itemId": "S40/first-baseline/2", "route": "opencode-go", "model": "deepseek-v4-flash", "observedOn": "2026-09-07", "issue": "#307" },
+    { "itemId": "S40/first-baseline/3", "route": "opencode-go", "model": "deepseek-v4-flash", "observedOn": "2026-09-07", "issue": "#307" },
+    { "itemId": "S40/first-baseline/4", "route": "opencode-go", "model": "deepseek-v4-flash", "observedOn": "2026-09-07", "issue": "#307" },
+    { "itemId": "S40/first-baseline/5", "route": "opencode-go", "model": "deepseek-v4-flash", "observedOn": "2026-09-07", "issue": "#307" },
+    { "itemId": "S40/first-baseline/6", "route": "opencode-go", "model": "deepseek-v4-flash", "observedOn": "2026-09-07", "issue": "#307" },
+    { "itemId": "S40/first-baseline/7", "route": "opencode-go", "model": "deepseek-v4-flash", "observedOn": "2026-09-07", "issue": "#307" },
+    { "itemId": "S40/first-baseline/8", "route": "opencode-go", "model": "deepseek-v4-flash", "observedOn": "2026-09-07", "issue": "#307" },
+    { "itemId": "S40/reanalyze-range/1", "route": "opencode-go", "model": "deepseek-v4-flash", "observedOn": "2026-09-08", "issue": "#306" }
+  ],
+  "frozenRequestBaselines": [
+    { "since": "adapter revision 1", "route": "deepseek-open-platform", "models": ["deepseek-v4-pro"], "issue": "#310" }
+  ]
+}

@@ -1,10 +1,10 @@
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validatePolicyDocument } from './validate-policies.mjs';
 
 /**
- * The provider configuration generator of ADR 0073 §2 (Issue #435, S55a).
+ * The provider configuration generator of ADR 0073 §2 (Issue #435, S55a; Issue #715).
  *
  * A provider whose request shape AI7 already implements is configured by one document under
  * `config/providers/<provider-id>.json`, validated against `provider-configuration.v1.schema.json`
@@ -17,8 +17,10 @@ import { validatePolicyDocument } from './validate-policies.mjs';
  *   tools/provider-credential-slots.generated.mjs       the enrollment helper's slot list
  *   docs/development/provider-support.md                the support page
  *
- *   node tools/generate-provider-configuration.mjs           write the four files
- *   node tools/generate-provider-configuration.mjs --check   exit 1 naming every file that is not current
+ *   node tools/generate-provider-configuration.mjs                        write the four files
+ *   node tools/generate-provider-configuration.mjs --check                exit 1 naming every file that is not current
+ *   node tools/generate-provider-configuration.mjs --ledger <cache root>  developer host only: compare the recorded
+ *                                                                         evidence with the Provider Test Ledger
  *
  * Generation is deterministic: the same documents give the same bytes, with no clock reading and no
  * hash of the output. A document is a claim about the request shape (ADR 0073 §3): nothing generated
@@ -28,6 +30,19 @@ import { validatePolicyDocument } from './validate-policies.mjs';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const PROVIDERS_DIRECTORY = 'config/providers';
 export const SCHEMA_FILE = 'provider-configuration.v1.schema.json';
+/**
+ * The evidence a document may cite that no page can supply, recorded row by row (Issue #715): the live test items the
+ * ADR 0067 Provider Test Ledger holds, each with the route and model it was sent to and the UTC day it was recorded,
+ * and the production route's frozen request baseline with the models whose bytes it pins. The ledger itself lives
+ * outside every checkout and CI has none, so this record is its reviewed mirror: a new live item is added here, in the
+ * pull request that records it, and `--ledger` compares the two on a developer host. Without it a document alone could
+ * make a model readable by naming an item nobody sent, or by borrowing one sent to another row. The record and its
+ * schema live in their own subdirectory because everything that reads `config/providers/*.json` (J-12 among them)
+ * reads a provider document, and the record is not one.
+ */
+export const RECORDED_EVIDENCE_DIRECTORY = 'recorded-evidence';
+export const RECORDED_EVIDENCE_FILE = 'recorded-evidence.json';
+export const RECORDED_EVIDENCE_SCHEMA_FILE = 'recorded-evidence.v1.schema.json';
 export const OUTPUT_PATHS = Object.freeze({
   shared: 'src/shared/provider-configuration.generated.ts',
   profiles: 'src/service/provider/provider-profiles.generated.ts',
@@ -105,34 +120,20 @@ const SHAPE_RULES = Object.freeze({
 const RESERVED_ROUTE_IDS = new Set(['ai7-local-deterministic']);
 
 /**
- * The evidence a document may cite that no page can supply, by the provider that carries it: the live test items the
- * ADR 0067 Provider Test Ledger holds — the nine transmissions of this product's history (PROGRESS › What exists) — and
- * the production route's frozen request baseline. The ledger itself lives outside every checkout, so this list is its
- * reviewed mirror: a new live item is added here, in the same pull request that records it, and nowhere else. Without
- * it a document alone could make a model readable by naming an item nobody sent.
- */
-export const RECORDED_EVIDENCE = Object.freeze({
-  liveTestItems: Object.freeze({
-    'opencode-go': Object.freeze([
-      'S40/first-baseline/1', 'S40/first-baseline/2', 'S40/first-baseline/3', 'S40/first-baseline/4',
-      'S40/first-baseline/5', 'S40/first-baseline/6', 'S40/first-baseline/7', 'S40/first-baseline/8',
-      'S40/reanalyze-range/1',
-    ]),
-  }),
-  frozenRequestBaselines: Object.freeze({ 'deepseek-open-platform': Object.freeze(['adapter revision 1']) }),
-});
-
-/**
  * Provider-specific behaviour still spelled by the adapter rather than by configuration, and the providers it may be
  * declared for: DeepSeek's `thinking` / `reasoning_effort` pair and the DSH attribution headers belong to the production
- * route, and the `x-opencode-session` header with its developer-live User-Agent to the OpenCode gateways. Until the
- * header names and parameters are configuration (#452), a document of any other provider may not switch them on.
+ * route, and the `x-opencode-session` header with its developer-live User-Agent to the OpenCode Go gateway, the one
+ * whose page prints the header (ADR 0080 §3; the Zen page names none). Until the header names and parameters are
+ * configuration (#452), a document of any other provider may not switch them on.
  */
 const DEEPSEEK_ONLY_PROVIDERS = new Set(['deepseek-open-platform']);
-const OPENCODE_GATEWAY_PROVIDERS = new Set(['opencode-go', 'opencode-zen']);
+const SESSION_HEADER_PROVIDERS = new Set(['opencode-go']);
 
-/** Host names an endpoint may never use, whatever the schema's pattern admits. */
-const LOCAL_HOST = /(^|\.)(localhost|local|internal|lan|home|arpa)$/u;
+/**
+ * Host names an endpoint may never use, whatever the schema's pattern admits: local and internal names, and the
+ * names RFC 2606 and RFC 6761 reserve so that they never resolve on the public Internet.
+ */
+const LOCAL_HOST = /(^|\.)(localhost|local|internal|lan|home|arpa|test|example|invalid)$/u;
 const IPV4_HOST = /^\d{1,3}(\.\d{1,3}){3}$/u;
 
 /** A calendar day, not only its shape: `2023-13-45` is refused. */
@@ -153,19 +154,54 @@ function refuse(condition, message) {
   if (!condition) throw new ProviderConfigurationError(message);
 }
 
-/** Every `<id>.json` beside the schema, sorted by file name, parsed; the schema itself is returned apart. */
+/**
+ * Every `<id>.json` beside the schema, sorted by file name, parsed; the schema itself is returned apart, and so is the
+ * recorded evidence with its own schema, read from the `recorded-evidence/` subdirectory.
+ */
 export function readProviderDocuments(directory = resolve(ROOT, PROVIDERS_DIRECTORY)) {
   const names = readdirSync(directory).filter((name) => name.endsWith('.json')).sort();
   refuse(names.includes(SCHEMA_FILE), `PROVIDER_CONFIGURATION/schema-absent: ${SCHEMA_FILE}`);
-  const schema = JSON.parse(readFileSync(resolve(directory, SCHEMA_FILE), 'utf8'));
+  const read = (name) => JSON.parse(readFileSync(resolve(directory, name), 'utf8'));
   const documents = names
     .filter((name) => name !== SCHEMA_FILE)
     .map((file) => {
       refuse(!file.endsWith('.schema.json'), `PROVIDER_CONFIGURATION/unknown-schema: ${file}`);
-      return { file, data: JSON.parse(readFileSync(resolve(directory, file), 'utf8')) };
+      return { file, data: read(file) };
     });
-  return { schema, documents };
+  const recordedEvidence = {};
+  for (const [key, name] of [['schema', RECORDED_EVIDENCE_SCHEMA_FILE], ['data', RECORDED_EVIDENCE_FILE]]) {
+    const path = resolve(directory, RECORDED_EVIDENCE_DIRECTORY, name);
+    refuse(existsSync(path), `PROVIDER_CONFIGURATION/recorded-evidence-absent: ${RECORDED_EVIDENCE_DIRECTORY}/${name}`);
+    recordedEvidence[key] = JSON.parse(readFileSync(path, 'utf8'));
+  }
+  return { schema: read(SCHEMA_FILE), documents, recordedEvidence };
 }
+
+/**
+ * The recorded evidence as rows: every live test item by id with the one row (route and model) it was sent to and
+ * its day, every frozen request baseline by what pins it with the rows it pins. A duplicate id or baseline refuses.
+ */
+function resolveRecordedEvidence({ schema, data }) {
+  try {
+    validatePolicyDocument(data, schema);
+  } catch (error) {
+    throw new ProviderConfigurationError(`PROVIDER_CONFIGURATION/recorded-evidence-schema: ${RECORDED_EVIDENCE_FILE}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const items = new Map();
+  for (const item of data.liveTestItems) {
+    refuse(!items.has(item.itemId), `PROVIDER_CONFIGURATION/recorded-evidence-duplicate: ${RECORDED_EVIDENCE_FILE} item ${item.itemId}`);
+    refuse(isCalendarDay(item.observedOn), `PROVIDER_CONFIGURATION/evidence-day: ${RECORDED_EVIDENCE_FILE} item ${item.itemId} (${item.observedOn} is not a calendar day)`);
+    items.set(item.itemId, { route: item.route, model: item.model, observedOn: item.observedOn, issue: item.issue });
+  }
+  const baselines = new Map();
+  for (const baseline of data.frozenRequestBaselines) {
+    refuse(!baselines.has(baseline.since), `PROVIDER_CONFIGURATION/recorded-evidence-duplicate: ${RECORDED_EVIDENCE_FILE} baseline ${baseline.since}`);
+    baselines.set(baseline.since, { route: baseline.route, models: [...baseline.models], issue: baseline.issue });
+  }
+  return { items, baselines };
+}
+
+const rowText = (row) => `${row.route}/${row.model}`;
 
 function evidenceRecord(record, where) {
   const keys = Object.keys(record).filter((key) => key !== 'note').sort().join(',');
@@ -190,8 +226,10 @@ function evidenceRecord(record, where) {
  * in route order, every capability present with its evidence, every evidence key resolved. Throws a
  * `ProviderConfigurationError` naming the first rule a document breaks.
  */
-export function resolveProviderConfiguration({ schema, documents }) {
+export function resolveProviderConfiguration({ schema, documents, recordedEvidence }) {
+  const recorded = resolveRecordedEvidence(recordedEvidence);
   const routeIds = new Set();
+  const declaredRows = new Set();
   const slots = new Set();
   const references = new Set();
   const providers = [];
@@ -202,8 +240,11 @@ export function resolveProviderConfiguration({ schema, documents }) {
       throw new ProviderConfigurationError(`PROVIDER_CONFIGURATION/schema: ${file}: ${error instanceof Error ? error.message : String(error)}`);
     }
     refuse(file === `${data.providerId}.json`, `PROVIDER_CONFIGURATION/file-name: ${file} declares ${data.providerId}`);
+    const ownRoutes = new Set(data.routes.map((route) => route.routeId));
     const cited = new Set();
     const evidence = {};
+    // The rows (route and model) each ledger-backed record was observed on; a page's record has none.
+    const recordedRows = new Map();
     for (const [key, record] of Object.entries(data.evidence)) {
       const where = `${file} evidence ${key}`;
       evidence[key] = evidenceRecord(record, where);
@@ -211,18 +252,36 @@ export function resolveProviderConfiguration({ schema, documents }) {
         if (day !== undefined) refuse(isCalendarDay(day), `PROVIDER_CONFIGURATION/evidence-day: ${where} (${day} is not a calendar day)`);
       }
       if (record.kind === 'live-test-item') {
-        const held = RECORDED_EVIDENCE.liveTestItems[data.providerId] ?? [];
-        refuse(record.itemIds.every((id) => held.includes(id)),
+        const rows = record.itemIds.map((id) => recorded.items.get(id));
+        refuse(rows.every((row) => row !== undefined && ownRoutes.has(row.route)),
           `PROVIDER_CONFIGURATION/live-item-unrecorded: ${where} (an item the Provider Test Ledger does not hold for ${data.providerId})`);
+        refuse(rows.every((row) => row.observedOn === record.observedOn),
+          `PROVIDER_CONFIGURATION/live-item-day: ${where} (the ledger recorded ${record.itemIds.map((id, index) => `${id} on ${rows[index].observedOn}`).join(', ')}, not ${record.observedOn})`);
+        recordedRows.set(key, rows.map((row) => ({ route: row.route, model: row.model })));
       }
       if (record.kind === 'frozen-request-baseline') {
-        const held = RECORDED_EVIDENCE.frozenRequestBaselines[data.providerId] ?? [];
-        refuse(held.includes(record.since), `PROVIDER_CONFIGURATION/baseline-unrecorded: ${where} (no frozen request baseline of ${data.providerId} is ${record.since})`);
+        const baseline = recorded.baselines.get(record.since);
+        refuse(baseline !== undefined && ownRoutes.has(baseline.route),
+          `PROVIDER_CONFIGURATION/baseline-unrecorded: ${where} (no frozen request baseline of ${data.providerId} is ${record.since})`);
+        recordedRows.set(key, baseline.models.map((model) => ({ route: baseline.route, model })));
       }
     }
-    const cite = (key, where) => {
+    /**
+     * A ledger-backed record is cited only from the row it was observed on: a route cites it for its route-wide facts
+     * only when every item was sent on that route, a model only when every item was sent to that model on that route.
+     * A page's record has no row and is cited from anywhere in the document.
+     */
+    const assertRow = (key, where, scope) => {
+      const rows = recordedRows.get(key);
+      if (rows === undefined || scope === undefined) return;
+      refuse(rows.every((row) => row.route === scope.route && (scope.model === undefined || row.model === scope.model)),
+        `PROVIDER_CONFIGURATION/evidence-row: ${file} ${where} cites ${key}, which the Provider Test Ledger recorded for ${[...new Set(rows.map(rowText))].join(', ')} and not for ${scope.model === undefined ? scope.route : rowText(scope)}`);
+    };
+    /** Cite an evidence key from a place, under `assertRow`'s rule. The credential is the provider's, so it cites from any of its routes. */
+    const cite = (key, where, scope) => {
       refuse(Object.hasOwn(evidence, key), `PROVIDER_CONFIGURATION/evidence-unknown: ${file} ${where} cites ${key}`);
       cited.add(key);
+      assertRow(key, where, scope);
       return evidence[key];
     };
 
@@ -253,23 +312,29 @@ export function resolveProviderConfiguration({ schema, documents }) {
         `PROVIDER_CONFIGURATION/header-form: ${where} (${route.requestShape} is not spoken with ${credential.headerForm})`);
       refuse(!shape.requiresOutputCap || route.maxOutputTokens !== null,
         `PROVIDER_CONFIGURATION/output-cap: ${where} (${route.requestShape} requires a per-turn output cap)`);
-      const routeShapeEvidence = cite(route.requestShapeEvidence, `${route.routeId}.requestShapeEvidence`);
+      const routeScope = { route: route.routeId };
+      const routeShapeEvidence = cite(route.requestShapeEvidence, `${route.routeId}.requestShapeEvidence`, routeScope);
       refuse(routeShapeEvidence.kind !== 'unverified', `PROVIDER_CONFIGURATION/shape-unverified: ${where}`);
-      const host = new URL(route.endpoint).hostname;
-      refuse(!LOCAL_HOST.test(host) && !IPV4_HOST.test(host) && host.includes('.'),
-        `PROVIDER_CONFIGURATION/endpoint-host: ${where} (${host} is a local, internal or literal address)`);
-      const limitEvidence = cite(route.limitPolicyEvidence, `${route.routeId}.limitPolicyEvidence`);
-      const attributionEvidence = cite(route.dshAttributionEvidence, `${route.routeId}.dshAttributionEvidence`);
-      const sessionEvidence = cite(route.sessionHeaderEvidence, `${route.routeId}.sessionHeaderEvidence`);
+      const url = new URL(route.endpoint);
+      refuse(!LOCAL_HOST.test(url.hostname) && !IPV4_HOST.test(url.hostname) && url.hostname.includes('.'),
+        `PROVIDER_CONFIGURATION/endpoint-host: ${where} (${url.hostname} is a local, internal, reserved or literal address)`);
+      // The literal is the URL a request is sent to: a `.` or `..` segment, or anything else the URL parser rewrites, is not.
+      refuse(url.href === route.endpoint,
+        `PROVIDER_CONFIGURATION/endpoint-path: ${where} (${route.endpoint} is requested as ${url.href}; write the endpoint as it is sent, with no . or .. segment)`);
+      const limitEvidence = cite(route.limitPolicyEvidence, `${route.routeId}.limitPolicyEvidence`, routeScope);
+      const attributionEvidence = cite(route.dshAttributionEvidence, `${route.routeId}.dshAttributionEvidence`, routeScope);
+      const sessionEvidence = cite(route.sessionHeaderEvidence, `${route.routeId}.sessionHeaderEvidence`, routeScope);
       refuse(!route.dshAttribution || (DEEPSEEK_ONLY_PROVIDERS.has(data.providerId) && attributionEvidence.kind !== 'unverified'),
         `PROVIDER_CONFIGURATION/dsh-attribution: ${where} (only the production route sends the DSH attribution headers, on its baseline)`);
-      refuse(!route.sessionHeader || (OPENCODE_GATEWAY_PROVIDERS.has(data.providerId) && sessionEvidence.kind === 'vendor-documentation'),
-        `PROVIDER_CONFIGURATION/session-header: ${where} (the OpenCode session header is sent only on a gateway route whose page documents it)`);
+      refuse(!route.sessionHeader || (SESSION_HEADER_PROVIDERS.has(data.providerId) && sessionEvidence.kind === 'vendor-documentation'),
+        `PROVIDER_CONFIGURATION/session-header: ${where} (the OpenCode session header is sent only on an OpenCode Go route, whose page documents it)`);
       const modelIds = new Set();
       const models = route.models.map((model) => {
         const modelWhere = `${where} model ${model.modelId}`;
         refuse(!modelIds.has(model.modelId), `PROVIDER_CONFIGURATION/model-duplicate: ${modelWhere}`);
         modelIds.add(model.modelId);
+        declaredRows.add(rowText({ route: route.routeId, model: model.modelId }));
+        const modelScope = { route: route.routeId, model: model.modelId };
         const declared = { ...(route.routeCapabilities ?? {}), ...(model.capabilities ?? {}) };
         const capabilities = {};
         const capabilityEvidence = {};
@@ -279,7 +344,10 @@ export function resolveProviderConfiguration({ schema, documents }) {
             refuse(entry === undefined || entry.value === route.requestShape,
               `PROVIDER_CONFIGURATION/request-shape: ${modelWhere} (a model speaks its route's shape)`);
             capabilities.requestShape = route.requestShape;
-            capabilityEvidence.requestShape = entry === undefined ? routeShapeEvidence : cite(entry.evidence, `${modelWhere}.requestShape`);
+            // A model that inherits the route's shape evidence inherits it under the row rule: a baseline or an item that
+            // never pinned this model does not read as its evidence (the model then cites a page of its own).
+            if (entry === undefined) assertRow(route.requestShapeEvidence, `${modelWhere}.requestShape`, modelScope);
+            capabilityEvidence.requestShape = entry === undefined ? routeShapeEvidence : cite(entry.evidence, `${modelWhere}.requestShape`, modelScope);
             refuse(capabilityEvidence.requestShape.kind !== 'unverified', `PROVIDER_CONFIGURATION/shape-unverified: ${modelWhere}`);
             continue;
           }
@@ -289,7 +357,7 @@ export function resolveProviderConfiguration({ schema, documents }) {
             continue;
           }
           refuse(CAPABILITY_VALUES[capability].includes(entry.value), `PROVIDER_CONFIGURATION/capability-value: ${modelWhere} ${capability}=${entry.value}`);
-          const record = cite(entry.evidence, `${modelWhere}.${capability}`);
+          const record = cite(entry.evidence, `${modelWhere}.${capability}`, modelScope);
           // The table's one rule (Issue #310): an unverified capability is declared absent.
           refuse(entry.value === ABSENT[capability] || record.kind !== 'unverified',
             `PROVIDER_CONFIGURATION/capability-unverified: ${modelWhere} ${capability}=${entry.value}`);
@@ -310,7 +378,7 @@ export function resolveProviderConfiguration({ schema, documents }) {
           refuse(shape[capability].includes(capabilities[capability]),
             `PROVIDER_CONFIGURATION/shape-capability: ${modelWhere} (${route.requestShape} implements no ${capability}=${capabilities[capability]})`);
         }
-        const contextEvidence = cite(model.context.evidence, `${modelWhere}.context`);
+        const contextEvidence = cite(model.context.evidence, `${modelWhere}.context`, modelScope);
         refuse(model.context.tokens === null || contextEvidence.kind === 'vendor-documentation',
           `PROVIDER_CONFIGURATION/context-evidence: ${modelWhere} (a context size names the vendor page that states it)`);
         return {
@@ -365,7 +433,61 @@ export function resolveProviderConfiguration({ schema, documents }) {
     });
   }
   refuse(providers.length > 0, 'PROVIDER_CONFIGURATION/no-documents');
-  return { providers };
+  // Every recorded row is a declared row: the record names what the documents declare, never a model nobody configures.
+  const recordedRows = [
+    ...[...recorded.items.values()].map((item) => ({ route: item.route, model: item.model })),
+    ...[...recorded.baselines.values()].flatMap((baseline) => baseline.models.map((model) => ({ route: baseline.route, model }))),
+  ];
+  const unknownRows = recordedRows.map(rowText).filter((row) => !declaredRows.has(row));
+  refuse(unknownRows.length === 0, `PROVIDER_CONFIGURATION/recorded-evidence-row-unknown: ${RECORDED_EVIDENCE_FILE} names ${[...new Set(unknownRows)].join(', ')}, which no document declares`);
+  return {
+    providers,
+    recordedEvidence: {
+      liveTestItems: [...recorded.items].map(([itemId, item]) => ({ itemId, ...item })),
+      frozenRequestBaselines: [...recorded.baselines].map(([since, baseline]) => ({ since, ...baseline })),
+    },
+  };
+}
+
+/** A developer host, not CI: the ledger is human-attended by construction (ADR 0065, ADR 0067). */
+function continuousIntegrationPresent(env) {
+  return env.CI !== undefined || env.GITHUB_ACTIONS !== undefined || env.AI7_E2E_JOURNEY !== undefined;
+}
+
+/**
+ * Compare the recorded live test items with the Provider Test Ledger's lines, on a developer host only: the record
+ * names exactly the ledger's transmitted, non-stale model-call lines, each under the model and on the UTC day the
+ * ledger recorded. Returns every difference as one sentence; an empty list is agreement. Reads no response, no cache
+ * entry and no clock, and refuses to run where CI is present, because CI has no ledger and must never need one.
+ */
+export function compareRecordedEvidenceWithLedger(recordedEvidence, lines, env = process.env) {
+  refuse(!continuousIntegrationPresent(env), 'PROVIDER_CONFIGURATION/ledger-on-ci (the Provider Test Ledger is compared on a developer host only)');
+  const recorded = resolveRecordedEvidence(recordedEvidence);
+  const transmitted = new Map();
+  for (const line of lines) {
+    if ((line.kind !== undefined && line.kind !== 'model-call') || line.outcome !== 'transmitted' || line.stale === true) continue;
+    const held = transmitted.get(line.itemId) ?? [];
+    held.push(line);
+    transmitted.set(line.itemId, held);
+  }
+  const differences = [];
+  for (const [itemId, item] of recorded.items) {
+    const held = transmitted.get(itemId);
+    if (held === undefined) {
+      differences.push(`${itemId} is recorded but the ledger holds no transmitted line for it`);
+      continue;
+    }
+    for (const line of held) {
+      if (line.model !== item.model) differences.push(`${itemId} is recorded for ${item.model} but the ledger transmitted it to ${line.model}`);
+      const recordedAt = new Date(typeof line.recordedAt === 'string' ? line.recordedAt : NaN);
+      const day = Number.isNaN(recordedAt.getTime()) ? 'no day' : recordedAt.toISOString().slice(0, 10);
+      if (day !== item.observedOn) differences.push(`${itemId} is recorded as observed on ${item.observedOn} but the ledger recorded it on ${day}`);
+    }
+  }
+  for (const itemId of transmitted.keys()) {
+    if (!recorded.items.has(itemId)) differences.push(`${itemId} was transmitted but is not recorded`);
+  }
+  return differences;
 }
 
 const HEADER = (source) => [
@@ -526,7 +648,7 @@ function cell(text) {
   return String(text).replaceAll('|', '\\|');
 }
 
-function renderSupport({ providers }) {
+function renderSupport({ providers, recordedEvidence }) {
   const lines = [
     '# Provider support',
     '',
@@ -623,9 +745,22 @@ function renderSupport({ providers }) {
   lines.push('');
   lines.push('A credential slot is a logical slot of the Main Editorial Role, one per configured provider; the Credential Broker\'s closed set and `tools/enroll-dev-credential.mjs`\'s slot list are generated from the documents, so a slot cannot exist without a reviewed document. Enrolment, where a record authorizes it, is the one way ADR 0067 established for `opencode-go`: from an untracked key file the enrollment helper alone reads, into the Protected Secret Store under the slot\'s development Credential Reference. A Credential Reference names a store entry and is not a secret. See [ADR 0067](../adr/0067-authorize-the-opencode-go-development-credential-with-live-once-testing.md) for the live-once ledger and the Provider Result Cache.');
   lines.push('');
+  lines.push('## Recorded evidence', '');
+  lines.push(`The evidence no page can supply — the live test items the ADR 0067 Provider Test Ledger holds and the production route's frozen request baseline — is recorded row by row in [\`config/providers/${RECORDED_EVIDENCE_DIRECTORY}/${RECORDED_EVIDENCE_FILE}\`](../../config/providers/${RECORDED_EVIDENCE_DIRECTORY}/${RECORDED_EVIDENCE_FILE}), validated by [\`${RECORDED_EVIDENCE_SCHEMA_FILE}\`](../../config/providers/${RECORDED_EVIDENCE_DIRECTORY}/${RECORDED_EVIDENCE_SCHEMA_FILE}) (its own subdirectory, because the record is not a provider document and everything that reads \`config/providers/*.json\` reads one). A document cites an item or a baseline only from the row it was observed on: a route for its route-wide facts only when every item was sent on that route, a model only when every item was sent to that model on that route. The ledger itself lives outside every checkout and CI has none, so the record is its reviewed mirror: the pull request that records a new live item adds it here and runs \`node tools/generate-provider-configuration.mjs --ledger <cache root>\` on the developer host, which compares the record with the ledger's transmitted, non-stale model-call lines by item, model and UTC day and prints every difference. CI never runs it.`);
+  lines.push('');
+  lines.push('| Item | Route | Model | Observed | Stated on |', '| --- | --- | --- | --- | --- |');
+  for (const item of recordedEvidence.liveTestItems) {
+    lines.push(`| \`${item.itemId}\` | \`${item.route}\` | \`${item.model}\` | ${item.observedOn} | ${item.issue} |`);
+  }
+  lines.push('');
+  lines.push('| Baseline | Route | Models | Stated on |', '| --- | --- | --- | --- |');
+  for (const baseline of recordedEvidence.frozenRequestBaselines) {
+    lines.push(`| ${cell(baseline.since)} | \`${baseline.route}\` | ${baseline.models.map((model) => `\`${model}\``).join(', ')} | ${baseline.issue} |`);
+  }
+  lines.push('');
   lines.push('## How a provider is added');
   lines.push('');
-  lines.push('Write or edit one document under `config/providers/`, run `node tools/generate-provider-configuration.mjs`, and commit the document with the four generated files. A model is a row: it is admitted only when the vendor\'s documentation places it on a path and states its id verbatim, and an unverified capability is declared absent (Issue #310). The generator refuses a capability the request shape does not implement, a header form the shape is not spoken with, an anthropic-messages route without a per-turn output cap, a duplicate route, slot or Credential Reference, an evidence record nothing cites or whose fields or days are malformed, an endpoint on a local, internal, literal or dotless host, a live test item or frozen request baseline the Provider Test Ledger does not hold for that provider (`RECORDED_EVIDENCE` in the generator mirrors it), DeepSeek\'s thinking parameters or the DSH attribution headers outside DeepSeek official, and the OpenCode session header outside an OpenCode gateway route whose page documents it. Nothing a document says authorizes a transmission: a route becomes bindable only through a Provider Processing policy revision (ADR 0073 §3). See Issue #310, Issue #321, Issue #322 and Issue #435.');
+  lines.push(`Write or edit one document under \`config/providers/\`, run \`node tools/generate-provider-configuration.mjs\`, and commit the document with the four generated files. A model is a row: it is admitted only when the vendor's documentation places it on a path and states its id verbatim, and an unverified capability is declared absent (Issue #310). The generator refuses a capability the request shape does not implement, a header form the shape is not spoken with, an anthropic-messages route without a per-turn output cap, a duplicate route, slot or Credential Reference, an evidence record nothing cites or whose fields or days are malformed, an endpoint on a local, internal, reserved, literal or dotless host or one written otherwise than it is requested (a \`.\` or \`..\` segment), a live test item or frozen request baseline \`${RECORDED_EVIDENCE_FILE}\` does not record, cited from any row but the one it records or under another day, DeepSeek's thinking parameters or the DSH attribution headers outside DeepSeek official, and the OpenCode session header outside an OpenCode Go route, whose page documents it. Nothing a document says authorizes a transmission: a route becomes bindable only through a Provider Processing policy revision (ADR 0073 §3). See Issue #310, Issue #321, Issue #322, Issue #435 and Issue #715.`);
   lines.push('');
   return lines.join('\n');
 }
@@ -658,15 +793,36 @@ export function generateProviderConfiguration({ root = ROOT, check = false } = {
   return stale;
 }
 
+/**
+ * `--ledger <cache root>`: read the Provider Test Ledger through the ADR 0067 fixture tooling's own reader and compare
+ * it with the record. A developer-host step for the pull request that records a live item; never a `check` rung.
+ */
+async function compareWithLedgerAt(cacheRoot) {
+  refuse(typeof cacheRoot === 'string' && cacheRoot.length > 0 && isAbsolute(cacheRoot), 'PROVIDER_CONFIGURATION/ledger-root (--ledger names the cache root as an absolute path)');
+  const { readLedgerLines } = await import('./generate-model-fixture.mjs');
+  const { recordedEvidence } = readProviderDocuments();
+  const differences = compareRecordedEvidenceWithLedger(recordedEvidence, await readLedgerLines(cacheRoot));
+  return { differences, items: recordedEvidence.data.liveTestItems.length };
+}
+
 const invokedDirectly = process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (invokedDirectly) {
-  const check = process.argv.slice(2).includes('--check');
+  const args = process.argv.slice(2);
+  const check = args.includes('--check');
+  const ledger = args.indexOf('--ledger');
   try {
-    const stale = generateProviderConfiguration({ check });
-    if (check && stale.length > 0) {
-      for (const path of stale) console.error(`PROVIDER_CONFIGURATION/stale: ${path}`);
-      console.error('Run `node tools/generate-provider-configuration.mjs` and commit the result.');
-      process.exitCode = 1;
+    if (ledger >= 0) {
+      const { differences, items } = await compareWithLedgerAt(args[ledger + 1]);
+      for (const difference of differences) console.error(`PROVIDER_CONFIGURATION/ledger-differs: ${difference}`);
+      if (differences.length > 0) process.exitCode = 1;
+      else console.log(`PROVIDER_CONFIGURATION/ledger-agrees: ${items} items`);
+    } else {
+      const stale = generateProviderConfiguration({ check });
+      if (check && stale.length > 0) {
+        for (const path of stale) console.error(`PROVIDER_CONFIGURATION/stale: ${path}`);
+        console.error('Run `node tools/generate-provider-configuration.mjs` and commit the result.');
+        process.exitCode = 1;
+      }
     }
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
