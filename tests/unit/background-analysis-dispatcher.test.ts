@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BackgroundAnalysisDispatcher, type BackgroundAnalysisDispatcherDependencies } from '../../src/service/background-analysis.js';
-import type { BackgroundAnalysisDecision } from '../../src/service/background-analysis-enrollments.js';
+import { BACKGROUND_CHECKPOINT_PREEMPTED, BACKGROUND_RECOVERY_PENDING, type BackgroundAnalysisDecision } from '../../src/service/background-analysis-enrollments.js';
 import type { LaunchPolicyProjection } from '../../src/shared/protocol.js';
 
 // Unit suite for the 后台分析登记 dispatcher (Issue #95, plan slice S39; #713 review): it asks the store, prepares a Task of its
@@ -59,7 +59,7 @@ function harness(decisions: Readonly<Record<string, BackgroundAnalysisDecision>>
     },
     advanceBaselineAnalysisPreparationWork: (workId: string) => {
       calls.advanced += 1;
-      if (options.throwAt === calls.advanced) throw new Error('REIMPORT_CHECKPOINT_STALE');
+      if (options.throwAt === calls.advanced) throw Object.assign(new Error('建立重新导入安全固定点时稿件已变化。'), { code: 'REIMPORT_CHECKPOINT_STALE' });
       const left = remaining.get(workId)! - 1;
       remaining.set(workId, left);
       const bookId = workId.slice('work-'.length);
@@ -148,7 +148,7 @@ describe('the 后台分析登记 dispatcher', () => {
     const dispatcher = new BackgroundAnalysisDispatcher({ store, execution, launchPolicy: POLICY });
     dispatcher.nudge();
     await dispatcher.settled();
-    expect([calls.cancelled, calls.notes]).toEqual([['work-a'], ['a:REIMPORT_CHECKPOINT_STALE']]);
+    expect([calls.cancelled, calls.notes]).toEqual([['work-a'], [`a:${BACKGROUND_CHECKPOINT_PREEMPTED}`]]);
     expect(calls.started).toEqual(['b:task-b:digest-b:version-b:sync-current']);
     expect(calls.admitted).toEqual(['run-b']);
   });
@@ -156,13 +156,13 @@ describe('the 后台分析登记 dispatcher', () => {
   it('notes why when the preparation cannot even begin, cancelling nothing it never made, and goes on to the next Book (P2-1)', async () => {
     const { calls, store, execution } = harness({ a: START, b: START });
     const refusing = { ...store, createBackgroundBaselineAnalysisPreparationWork: (bookId: string, ...rest: unknown[]) => {
-      if (bookId === 'a') throw new Error('该稿件分支仍有恢复待确认状态；普通编辑保持只读。');
+      if (bookId === 'a') throw Object.assign(new Error('该稿件分支仍有恢复待确认状态；普通编辑保持只读。'), { code: 'RECOVERY_ATTENTION_REQUIRED' });
       return (store.createBackgroundBaselineAnalysisPreparationWork as (...args: unknown[]) => unknown)(bookId, ...rest);
     } } as BackgroundAnalysisDispatcherDependencies['store'];
     const dispatcher = new BackgroundAnalysisDispatcher({ store: refusing, execution, launchPolicy: POLICY });
     dispatcher.nudge();
     await dispatcher.settled();
-    expect([calls.cancelled, calls.notes, calls.admitted]).toEqual([[], ['a:该稿件分支仍有恢复待确认状态；普通编辑保持只读。'], ['run-b']]);
+    expect([calls.cancelled, calls.notes, calls.admitted]).toEqual([[], [`a:${BACKGROUND_RECOVERY_PENDING}`], ['run-b']]);
   });
 
   it('advances a preparation step by step, yielding between, and runs a nudge made meanwhile as one more pass', async () => {

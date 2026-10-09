@@ -22,6 +22,7 @@ import {
   BACKGROUND_UNAVAILABLE,
   BACKGROUND_WHAT_LABEL,
   BACKGROUND_WHEN_LABEL,
+  backgroundChangeKey,
   backgroundEnrollmentLine,
   backgroundHistoryLine,
   backgroundLookLine,
@@ -121,9 +122,16 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
   const draw = (projection: BackgroundAnalysisEnrollmentProjection): void => {
     const startedBefore = last?.startedRunCount ?? null;
     last = projection;
-    // When AI7 last looked changes on every look: it is no reason to draw the block again, only to patch its own line.
-    const json = JSON.stringify({ ...projection, lastLook: projection.lastLook === null ? null : { kind: projection.lastLook.kind, reason: projection.lastLook.reason } });
     if (startedBefore !== null && projection.startedRunCount > startedBefore) options.onRunStarted();
+    // A form the editor has open is never drawn over by an answer that arrives meanwhile (#713 round 3, P3-2): the look is
+    // patched, and the answer is drawn once the form closes, since the change key it carries is not yet the block's.
+    if (engaged) {
+      patchLook(projection.lastLook);
+      follow();
+      return;
+    }
+    // When AI7 last looked changes on every look: it is no reason to draw the block again, only to patch its own line.
+    const json = backgroundChangeKey(projection);
     if (json !== lastJson) {
       lastJson = json;
       render(projection);

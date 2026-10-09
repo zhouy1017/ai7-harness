@@ -1,5 +1,5 @@
 import type { LaunchPolicyProjection } from '../shared/protocol.js';
-import { BACKGROUND_ANALYSIS_QUIET_MS, BACKGROUND_ANALYSIS_TICK_MS } from './background-analysis-enrollments.js';
+import { BACKGROUND_ANALYSIS_QUIET_MS, BACKGROUND_ANALYSIS_TICK_MS, backgroundStepFailureReason } from './background-analysis-enrollments.js';
 import type { BackgroundAnalysisRuntime, EditorialStore } from './store.js';
 import type { BaselineAnalysisExecutionOwner } from './analysis/execution.js';
 
@@ -154,7 +154,7 @@ export class BackgroundAnalysisDispatcher {
       // behind: the preparation and its checkpoint are cancelled, so neither the editor nor the next pass finds them (P1-1), and
       // ②A says why.
       if (work !== null && work.workId !== null) store.cancelBaselineAnalysisPreparationWork(work.workId);
-      if (!this.#disposed) store.noteBackgroundNotStarted(bookId, error instanceof Error && error.message !== '' ? error.message : '准备没有完成。', this.runtime().now);
+      if (!this.#disposed) store.noteBackgroundNotStarted(bookId, backgroundStepFailureReason(error), this.runtime().now);
       return;
     }
     const prepared = work.projection;

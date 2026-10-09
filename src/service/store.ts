@@ -5958,6 +5958,7 @@ export class EditorialStore {
       enrollment: () => (read === 'damaged' ? 'damaged' : read?.state ?? null),
       developerLive: () => this.#baselineAnalysis.launch.live !== null,
       routeExecutable: () => runtime.routeExecutable,
+      replacementWaiting: () => this.replacementFrozen(),
       share: () => backgroundAnalysisShare(runtime.capacity),
       recoveryPending: () => this.#boundedCall(() => this.#boundedAuthority.branchUnderRecovery(point().branchId)),
       drift: once(() => {

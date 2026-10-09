@@ -11,6 +11,7 @@ import {
   BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL,
   BACKGROUND_ANALYSIS_ENROLLMENT_TRIGGER_SQL,
   BACKGROUND_ATTEMPTED,
+  BACKGROUND_CHECKPOINT_PREEMPTED,
   BACKGROUND_CURRENT,
   BACKGROUND_DEVELOPER_LIVE,
   BACKGROUND_EDITOR_TASK,
@@ -533,6 +534,8 @@ describe('后台分析登记 over the real store on exact sample1', () => {
       expect(typed).toBe(true);
       expect(backgroundOrigins()).toBe(0);
       expect(store.baselineAnalysisLedger.preparationInFlight(book.bookId)).toBe(false);
+      expect(store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime()).lastNotStarted)
+        .toMatchObject({ reason: backgroundNotStartedReason(BACKGROUND_CHECKPOINT_PREEMPTED) });
       // Every preparation the editor makes on the Book works at once: nothing holds its checkpoint.
       const editorsOwn = prepare(store, book.bookId, 'reanalyze-book');
       expect(editorsOwn.state).toBe('prepared');
@@ -722,6 +725,9 @@ describe('后台分析登记 over the real store on exact sample1', () => {
       while (!progress.done) progress = store.advanceTaskAuthorizationPreparationWork(progress.workId!);
       expect(backgroundOrigins()).toBe(0);
       expect(store.baselineAnalysisLedger.preparationInFlight(book.bookId)).toBe(false);
+      // ②A says, in the editor's words, that the background gave way — never the engineering code.
+      expect(store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime()).lastNotStarted)
+        .toMatchObject({ reason: backgroundNotStartedReason(BACKGROUND_CHECKPOINT_PREEMPTED) });
       store.markCleanShutdown();
     } finally {
       await owner.dispose();

@@ -17,6 +17,10 @@ import {
   BACKGROUND_EDITOR_JOB,
   BACKGROUND_RECOVERY_PENDING,
   BACKGROUND_RECORD_DAMAGED,
+  BACKGROUND_REPLACEMENT_WAITING,
+  BACKGROUND_CHECKPOINT_PREEMPTED,
+  BACKGROUND_PREPARATION_INCOMPLETE,
+  backgroundStepFailureReason,
   backgroundAnalysisDecisionOf,
   BACKGROUND_REVOKED,
   BACKGROUND_SUSPENDED,
@@ -37,8 +41,10 @@ import {
   type BackgroundAnalysisFacts,
 } from '../../src/service/background-analysis-enrollments.js';
 import { parseBackgroundQuietMs } from '../../src/shared/protocol.js';
+import type { BackgroundAnalysisEnrollmentProjection } from '../../src/shared/protocol.js';
 import {
   BACKGROUND_ENROLL_OPEN,
+  backgroundChangeKey,
   backgroundLookLine,
   backgroundNotStartedLine,
   BACKGROUND_REVOKE_OPEN,
@@ -71,6 +77,7 @@ const READY: BackgroundAnalysisFacts = {
   developerLive: false,
   routeExecutable: true,
   share: 1,
+  replacementWaiting: false,
   recoveryPending: false,
   drift: [],
   preparationInFlight: false,
@@ -105,6 +112,7 @@ describe('the 后台分析登记 decision', () => {
       [{ enrollment: 'suspended' }, 'stopped', BACKGROUND_SUSPENDED],
       [{ developerLive: true }, 'stopped', BACKGROUND_DEVELOPER_LIVE],
       [{ routeExecutable: false }, 'stopped', BACKGROUND_NO_ROUTE],
+      [{ replacementWaiting: true }, 'wait', BACKGROUND_REPLACEMENT_WAITING],
       [{ share: 0 }, 'stopped', BACKGROUND_NO_SHARE],
       [{ recoveryPending: true }, 'wait', BACKGROUND_RECOVERY_PENDING],
       [{ drift: null }, 'stopped', BACKGROUND_FACTS_UNREADABLE],
@@ -143,7 +151,17 @@ describe('the 后台分析登记 decision', () => {
     }])) as unknown as Parameters<typeof backgroundAnalysisDecisionOf>[0];
     expect(backgroundAnalysisDecisionOf(read)).toEqual({ kind: 'none', reason: BACKGROUND_CURRENT });
     // Nothing after a current analysis is read: no Task, no editor's Task, no clock, no place.
-    expect(asked).toEqual(['enrollment', 'developerLive', 'routeExecutable', 'share', 'recoveryPending', 'drift', 'preparationInFlight', 'editorJobRunning', 'analysis']);
+    expect(asked).toEqual(['enrollment', 'developerLive', 'routeExecutable', 'replacementWaiting', 'share', 'recoveryPending', 'drift', 'preparationInFlight', 'editorJobRunning', 'analysis']);
+  });
+
+  it('words a failed preparation step by its code, never by the engineering message', () => {
+    const withCode = (code: string) => Object.assign(new Error(`engineering ${code}`), { code });
+    expect(backgroundStepFailureReason(withCode('JOB_NOT_FOUND'))).toBe(BACKGROUND_CHECKPOINT_PREEMPTED);
+    expect(backgroundStepFailureReason(withCode('REIMPORT_CHECKPOINT_STALE'))).toBe(BACKGROUND_CHECKPOINT_PREEMPTED);
+    expect(backgroundStepFailureReason(withCode('RECOVERY_ATTENTION_REQUIRED'))).toBe(BACKGROUND_RECOVERY_PENDING);
+    expect(backgroundStepFailureReason(withCode('ANALYSIS_PREPARATION_IN_FLIGHT'))).toBe(BACKGROUND_PREPARATION_IN_FLIGHT);
+    for (const error of [withCode('SOMETHING_ELSE'), new Error('plain'), 'a string', null]) expect(backgroundStepFailureReason(error)).toBe(BACKGROUND_PREPARATION_INCOMPLETE);
+    expect(BACKGROUND_EDITOR_TASK).toContain('开始或准备过的任务');
   });
 
   it('leaves one of the governor\'s places for the editor, and none to share of one', () => {
@@ -204,6 +222,13 @@ describe('the 后台分析 block words', () => {
       .toBe('首次基线分析 · 按另一份数据的登记 · 授权于 〈A〉');
     expect(backgroundHistoryLine({ state: 'revoked', stateLabel: '已撤销', ordinal: 1, recordedAt: 'R' }, instant)).toBe('第 1 版 · 已撤销 · 〈R〉');
     expect(backgroundStartedMoreLine(3)).toBe('还有 3 项更早的。');
+    // When AI7 last looked changes on every look and alone never redraws the block; what it found does.
+    const projection = { state: 'active', next: { kind: 'none', reason: 'r' }, lastLook: { at: 'T1', kind: 'none', reason: 'r' } } as unknown as BackgroundAnalysisEnrollmentProjection;
+    const later = { ...projection, lastLook: { at: 'T2', kind: 'none', reason: 'r' } } as BackgroundAnalysisEnrollmentProjection;
+    const changed = { ...projection, lastLook: { at: 'T2', kind: 'wait', reason: 'w' } } as BackgroundAnalysisEnrollmentProjection;
+    expect(backgroundChangeKey(later)).toBe(backgroundChangeKey(projection));
+    expect(backgroundChangeKey(changed)).not.toBe(backgroundChangeKey(projection));
+    expect(backgroundChangeKey({ ...projection, lastLook: null } as BackgroundAnalysisEnrollmentProjection)).not.toBe(backgroundChangeKey(projection));
     expect(backgroundLookLine({ at: 'L', kind: 'wait', reason: BACKGROUND_PLACE_BUSY }, instant)).toBe(`AI7 上次查看：〈L〉 · ${BACKGROUND_PLACE_BUSY}`);
     expect(backgroundNotStartedLine({ at: 'N', reason: '后台分析这次没有开始：已撤销' }, instant)).toBe('后台分析这次没有开始：已撤销（〈N〉）');
   });

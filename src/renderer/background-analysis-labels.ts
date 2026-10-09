@@ -26,6 +26,14 @@ export const BACKGROUND_UNAVAILABLE = '无法读取这本书的后台分析登�
 export const BACKGROUND_ENROLLED_STATUS = '已登记后台分析';
 export const BACKGROUND_REVOKED_STATUS = '已撤销后台分析登记';
 
+/**
+ * What makes the block draw itself again: everything the projection says except when AI7 last looked, which changes on every
+ * look and is patched in place instead (#713 review, P3-4).
+ */
+export function backgroundChangeKey(projection: BackgroundAnalysisEnrollmentProjection): string {
+  return JSON.stringify({ ...projection, lastLook: projection.lastLook === null ? null : { kind: projection.lastLook.kind, reason: projection.lastLook.reason } });
+}
+
 /** `下一次：…` — what the Enrollment would do now; said only while the Book has one. */
 export function backgroundNextLine(next: BackgroundAnalysisEnrollmentProjection['next']): string {
   return `${next.kind === 'start' ? '马上' : '现在'}：${next.reason}`;

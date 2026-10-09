@@ -457,6 +457,8 @@ export interface BackgroundAnalysisFacts {
   readonly routeExecutable: boolean;
   /** How many places background Runs may hold at once (`backgroundAnalysisShare`). */
   readonly share: number;
+  /** A replacement of the local data waits for AI7's next start: nothing is written until then (#713 round 3, P3-1). */
+  readonly replacementWaiting: boolean;
   /** The manuscript waits on a recovery attention, pending or deferred: nothing may checkpoint it (#713 re-review, P2-1). */
   readonly recoveryPending: boolean;
   /** The fields in which the Book's facts now differ from what the Enrollment binds, in the drawer's words; `null` unreadable. */
@@ -502,6 +504,7 @@ export function backgroundAnalysisDecisionOf(read: BackgroundAnalysisFactReader)
   if (enrollment === 'suspended') return { kind: 'stopped', reason: BACKGROUND_SUSPENDED };
   if (read.developerLive()) return { kind: 'stopped', reason: BACKGROUND_DEVELOPER_LIVE };
   if (!read.routeExecutable()) return { kind: 'stopped', reason: BACKGROUND_NO_ROUTE };
+  if (read.replacementWaiting()) return { kind: 'wait', reason: BACKGROUND_REPLACEMENT_WAITING };
   const share = read.share();
   if (share < 1) return { kind: 'stopped', reason: BACKGROUND_NO_SHARE };
   if (read.recoveryPending()) return { kind: 'wait', reason: BACKGROUND_RECOVERY_PENDING };
@@ -588,7 +591,7 @@ export const BACKGROUND_PREPARATION_IN_FLIGHT = '正在准备一项任务；准�
 export const BACKGROUND_TASK_RUNNING = '这本书有一项任务还没结束；它结束后再看。';
 export const BACKGROUND_TASK_PREPARED = '这本书有一份你准备好但还没开始的计划；开始它，或另外准备一份之后再看。';
 export const BACKGROUND_CURRENT = '分析结果与当前稿件一致，没有要做的。';
-export const BACKGROUND_EDITOR_TASK = '你最近开始的任务之后，稿件还没有新的改动：后台分析不重做你开始过的任务。';
+export const BACKGROUND_EDITOR_TASK = '你最近开始或准备过的任务之后，稿件还没有新的改动：后台分析不重做你开始过的任务。';
 export const BACKGROUND_NOT_MOVED = '登记之后稿件还没有改动。';
 export const BACKGROUND_ATTEMPTED = '最近一项任务读的就是这一版稿件，没有把结果带到它；稿件再改动后才会再试。';
 export function backgroundQuietReason(quietMs: number): string {
@@ -604,6 +607,31 @@ export const BACKGROUND_ENROLL_DEVELOPER_LIVE = '开发者实时模式下不能�
 export const BACKGROUND_ENROLL_NO_ROUTE = '这次启动没有可执行的分析路由：登记了也不会开始后台分析，所以现在不能登记。';
 export const BACKGROUND_ENROLL_NO_SHARE = '本机一次只运行一个任务，后台分析没有可用的运行名额，所以现在不能登记。';
 export const BACKGROUND_ENROLL_STALE = '登记内容已经变化；请重新打开登记后再确认。';
+/** The background checkpoint gave way: the manuscript changed under it, or another Task took a checkpoint of the branch. */
+export const BACKGROUND_CHECKPOINT_PREEMPTED = '稿件在准备中变化，或另一项任务为它建立了固定点；后台分析让开，下次再看。';
+export const BACKGROUND_PREPARATION_INCOMPLETE = '准备没有完成。';
+/**
+ * Why a preparation step failed, in the editor's words (#713 round 3, P3-3): a known refusal by its code, anything else as a
+ * preparation that did not complete — never the engineering message itself.
+ */
+export function backgroundStepFailureReason(error: unknown): string {
+  const code = typeof error === 'object' && error !== null && 'code' in error && typeof (error as { code: unknown }).code === 'string'
+    ? (error as { code: string }).code : null;
+  switch (code) {
+    case 'JOB_NOT_FOUND':
+    case 'REIMPORT_CHECKPOINT_STALE':
+    case 'SERVICE_BUSY':
+      return BACKGROUND_CHECKPOINT_PREEMPTED;
+    case 'RECOVERY_ATTENTION_REQUIRED':
+      return BACKGROUND_RECOVERY_PENDING;
+    case 'ANALYSIS_PREPARATION_IN_FLIGHT':
+    case 'ANALYSIS_TASK_PREPARED':
+      return BACKGROUND_PREPARATION_IN_FLIGHT;
+    default:
+      return BACKGROUND_PREPARATION_INCOMPLETE;
+  }
+}
+
 /** A pass that prepared a plan and then did not start it: the plan is the Enrollment's, never left as the editor's. */
 export function backgroundNotStartedReason(reason: string): string {
   return `后台分析这次没有开始：${reason}`;
