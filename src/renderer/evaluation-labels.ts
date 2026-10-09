@@ -134,6 +134,11 @@ export function evaluationRevisionLine(record: Pick<EvaluationRecordProjection, 
   return `评估的是修订版 ${record.revisionLabel}${record.uncheckpointed ? '（当时另有写入修订日志、尚未保存为修订版的改动）' : ''}`;
 }
 
+/** The Book's versions that cannot be read, named beside the list (Issue #702 review); `null` when every version reads. */
+export function evaluationUnreadableLine(ordinals: ReadonlyArray<number>): string | null {
+  return ordinals.length === 0 ? null : `第 ${ordinals.join('、')} 版评估记录已损坏，无法显示；其他版本照常可用。`;
+}
+
 export function evaluationFinalizedLine(record: Pick<EvaluationRecordProjection, 'finalized'>, instant: (iso: string) => string): string | null {
   return record.finalized === null ? null : `定稿 · ${record.finalized.actor} · ${instant(record.finalized.at)}`;
 }

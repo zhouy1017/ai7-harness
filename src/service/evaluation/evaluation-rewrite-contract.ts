@@ -3,6 +3,7 @@ import { DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, requireAnalysis,
 import type { ManifestBlockInput } from '../analysis/coverage-manifest.js';
 import { graphemeCount } from '../analysis/factual-review-contract.js';
 import { claimsConclusion, claimsScore, scoreDenominators } from './claim-guards.js';
+import { withinEvaluationBytes } from './initial-evaluation-contract.js';
 
 /**
  * Evaluation Rewrite Contract v1 (Issue #429, plan slice S81b2; V2-UX-EVAL-008): `按我的评分重写评语` — AI7 rewrites one
@@ -120,7 +121,7 @@ const SYNTHESIS_NO_OBSERVATION = '- （各阅读范围都没有记下这一项�
 
 function line(value: unknown, maximumGraphemes: number): value is string {
   return typeof value === 'string' && value.isWellFormed() && value.trim().length > 0 && value === value.trim() &&
-    !CONTROL_CHARACTER.test(value) && graphemeCount(value) <= maximumGraphemes;
+    !CONTROL_CHARACTER.test(value) && graphemeCount(value) <= maximumGraphemes && withinEvaluationBytes(value, maximumGraphemes);
 }
 
 function text(value: unknown, maximum: number): value is string {

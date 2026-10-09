@@ -21,6 +21,7 @@ import {
   PREDICTION_SWITCH,
   actualsBookLine,
   calibrationProgressLine,
+  calibrationUnreadableLine,
   predictionProgressLine,
 } from './evaluation-calibration-labels.js';
 
@@ -108,6 +109,8 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
     calibrationSection.append(
       el('h3', undefined, CALIBRATION_HEADING),
       el('p', 'calibration-progress', calibrationProgressLine(calibration)),
+      ...(calibrationUnreadableLine(calibration.unreadableBooks) === null ? []
+        : [el('p', 'field-note calibration-unreadable', calibrationUnreadableLine(calibration.unreadableBooks)!)]),
       el('p', 'field-note', CALIBRATION_SCOPE),
       // Said while AI7 gives no 初评 to adjust (Issue #430 review), not by the count: after S81b a count below ten is progress.
       ...(!calibration.initialScoresConnected ? [el('p', 'field-note calibration-waiting', CALIBRATION_WAITING)] : []),

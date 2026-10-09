@@ -19,6 +19,11 @@ export const CALIBRATION_WAITING = 'AI7 初评尚未接通：你改过 AI7 的�
 /** Past the threshold, before any build computes the offset: nothing is adjusted yet, and the page says so. */
 export const CALIBRATION_NOT_COMPUTED = '已满数，但校准还没有计算：AI7 的初评分数暂不调整';
 export const CALIBRATION_SWITCH = '启用校准';
+
+/** Books left out of the count because their evaluation records are damaged (Issue #702 review); `null` when none are. */
+export function calibrationUnreadableLine(books: number): string | null {
+  return books === 0 ? null : `另有 ${books} 本书的评估记录已损坏，未计入调分记录。`;
+}
 export const PREDICTION_HEADING = '定价与首印预测';
 /** What turning it on would add (EVAL-014). */
 export const PREDICTION_ADDS = '打开后，评估的市场部分会给出定价与首印的预测区间，标注「预测 · 低确定性」；关闭时不预测。';

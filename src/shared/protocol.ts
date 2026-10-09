@@ -1,7 +1,7 @@
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 
-export const SERVICE_PROTOCOL_VERSION = 104 as const;
+export const SERVICE_PROTOCOL_VERSION = 105 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -6498,6 +6498,11 @@ export interface EvaluationRecordProjection extends EvaluationRecordSummaryProje
   readonly comparison: EvaluationComparisonProjection | null;
   /** AI7's 初评 this version began from, beside the editor's scores (EVAL-006); `null` for a version the editor began alone. */
   readonly initial: EvaluationInitialDraftProjection | null;
+  /**
+   * Why which of this version's words are AI7's could not all be checked (Issue #702 review): the version before could not be
+   * read, or the 采用 records cannot be read now. The words the version marks stay AI7's. `null` when every mark was checked.
+   */
+  readonly ai7WordsNotice: string | null;
 }
 
 /** ②C 评估 of one Book: its versions newest first, the one on show, and whether a version can begin. */
@@ -6512,6 +6517,8 @@ export interface EvaluationWorkspaceProjection {
   readonly recordCount: number;
   readonly recordsBefore: number | null;
   readonly recordsNext: number | null;
+  /** The ordinals of the Book's versions that cannot be read, oldest first (Issue #702 review): named, never shown. */
+  readonly unreadableRecords: ReadonlyArray<number>;
   readonly record: EvaluationRecordProjection | null;
   /**
    * `开始评估` or `重新评估`, or why neither can begin now; `fromInitial` names AI7's latest 初评 when a version can begin from it
@@ -7211,6 +7218,8 @@ export interface EvaluationCalibrationProjection {
      * once when one of its 定稿 versions began from AI7's 初评 and changed at least one of its scores.
      */
     readonly adjustments: number;
+    /** The Books left out of `adjustments` because a version of theirs begun from AI7's 初评 cannot be read (Issue #702 review). */
+    readonly unreadableBooks: number;
     /**
      * Whether AI7 gives 初评 scores the editor can adjust at all (Issue #430 review): since S81b1 it does. Before then the page
      * said so, whatever the count.
