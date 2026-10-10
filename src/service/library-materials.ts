@@ -433,6 +433,21 @@ export class LibraryMaterialLedger {
     return now.attribution.scope === 'house' || now.attribution.bookId === bookId;
   }
 
+  /**
+   * Every item this Book's Tasks may list under 允许参考 by {@link available}'s rule (Issue #428: 写作任务's 允许参考), the latest
+   * arrival first, each with its title and whose it is. Read-only.
+   */
+  referable(bookId: string): Array<{ materialId: string; title: string; scope: 'book' | 'house' }> {
+    const found: Array<{ materialId: string; title: string; scope: 'book' | 'house' }> = [];
+    for (const material of this.#materials()) {
+      const now = standing(this.#decisions(material));
+      if (now.attribution === null || now.eligibility === null || now.eligibility.choice === 'deferred') continue;
+      if (now.attribution.scope === 'house') found.push({ materialId: material.materialId, title: material.title, scope: 'house' });
+      else if (now.attribution.bookId === bookId) found.push({ materialId: material.materialId, title: material.title, scope: 'book' });
+    }
+    return found.reverse();
+  }
+
   /** Every item, oldest first, each verified: its digest and its record's agreement with its row. */
   *#materials(): IterableIterator<StoredMaterial> {
     const rows = this.#db.prepare('SELECT * FROM library_materials ORDER BY recorded_at, material_id').iterate() as IterableIterator<SqlRow>;

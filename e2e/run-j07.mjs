@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
@@ -62,13 +62,28 @@ const WRITING_RULE_PATTERN = 'writing:promotion-article';
 const WRITING_RULE_NAME = '写作任务 · 宣传文章 · 第 1 版';
 const WRITING_QUICK_NOTE = `按默认执行规则「${WRITING_RULE_NAME}」：先准备计划，与规则一致时直接开始；有任何不同都会停在计划上。`;
 const WRITING_RULE_LEAD = '以后在「交付物」的新建文档里选下面「适用于」这一类文档、用快速开始起草时，AI7 会先按你写的受众和渠道准备计划：计划与下面这些一致时直接开始，不再停下来等你确认；有任何不同都会停在计划上，等你看过再开始。别的类型各有自己的规则；规则不会自己开始任何任务。';
+// Issue #428: J-07's last Task — a 评论文章 that lists one 资料库 item under 允许参考. The item is a plain-text file of the Journey's
+// own words, never a manuscript, put into 资料库 through 放入资料…'s picker, set to the house and kept out of learning; the plan
+// pins it at its Material Index build and the Run reads it there. Its words, the 评论文章's request and its draft are the authored
+// fixture's (`tests/support/writing-task.ts`, the same words): the fixture answers only them.
+const WRITING_LIBRARY_FILE = '青铜器保护笔记.txt';
+const WRITING_LIBRARY_TITLE = '青铜器保护笔记';
+const WRITING_LIBRARY_TEXT = '这份笔记整理自一次博物馆讲座：青铜器出土后最怕潮湿与盐分，修复人员先要清除锈蚀，再逐件建立档案。\n\n讲座还提到，研究者常把器物铭文与传世文献对读，一个字的释读往往要花上数年。\n';
+const WRITING_LIBRARY_CHARACTERS = 85;
+const WRITING_LIBRARY_REQUEST = Object.freeze({ typeId: 'review-article', audience: '关注历史题材小说的读者', channel: '读书网站书评栏目' });
+const WRITING_LIBRARY_DRAFT_TITLE = '一封古怪的来信与一门安静的学问';
+const WRITING_MATERIALS_NONE = '资料库里还没有这本书可以参考的资料：资料定了归属（这本书或社级）与学习准入、建好索引以后，才能在这里勾选，列进「允许参考」。';
+const WRITING_MATERIALS_STATEMENT = '勾选的资料列进这次计划的「允许参考」，按计划冻结的索引版本读取：每份不超过 3,000 字，合计不超过 6,000 字，最多 4 份；只参照，不照抄。';
 const READ_CONNECTION = `window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection??null)`;
 
-/** The draft's blocks as the authored fixture's synthesis wrote them: its title, then each heading and its paragraphs. */
-async function writingDraftTexts() {
+/**
+ * The draft's blocks as the authored fixture's synthesis wrote them: its title, then each heading and its paragraphs — the
+ * 宣传文章's, the fixture's first, or the one titled `title` (Issue #428: the 评论文章's).
+ */
+async function writingDraftTexts(title = null) {
   const fixture = JSON.parse(await readFile(resolve(ROOT, 'tests', 'fixtures', 'model', `${WRITING_FIXTURE}.json`), 'utf8'));
   const draft = fixture.entries.map((entry) => { try { return JSON.parse(entry.response.text); } catch { return null; } })
-    .find((value) => value?.schema === 'ai7.writing.synthesis-result/1');
+    .find((value) => value?.schema === 'ai7.writing.synthesis-result/1' && (title === null || value.title === title));
   requireJourney(draft !== undefined, 'writing-fixture-draft');
   return [draft.title, ...draft.sections.flatMap((section) => [section.heading, ...section.paragraphs])];
 }
@@ -2576,6 +2591,8 @@ async function main() {
     requireJourney(JSON.stringify(writingSheet.types) === JSON.stringify(WRITING_TYPES.map(([typeId, label]) => [typeId, label, false, false])) &&
       JSON.stringify(writingSheet.references) === JSON.stringify([
         '本书尚无基线分析，本次不参考梗概与人物', '本书尚无定稿的评估，本次不参考评估结论与营销要点', '选好类型后显示',
+        // 资料库 (Issue #428): nothing this Book's Tasks may list yet.
+        WRITING_MATERIALS_NONE,
         `《${WRITING_TITLE}》 · 作者：未填写 · 责编：未填写 · 书系：不在任何书系中`,
       ]) &&
       JSON.stringify(writingSheet.consequences) === JSON.stringify(['会读取', '当前稿件的全部 97 个内容块，以及上面列出的参考材料', '会发送', WRITING_SEND, '不会做', WRITING_NOT_DO, '费用', '先看计划后显示']) &&
@@ -2688,6 +2705,102 @@ async function main() {
     const writingAfter = await readWriting((page) => page.state === 'settled', 'writing-after');
     requireJourney(writingAfter.drafted.length === 0 && !writingAfter.open, 'writing-nothing-to-open', writingAfter);
     await assertNoForbiddenWords(renderer, 'writing-without-forbidden-words');
+
+    at('writing-library-material');
+    // 资料库 under 允许参考 (Issue #428; V2-UX-TASK-030, TASK-032, KB-007, KB-009): one more launch, whose picker answers 放入资料…
+    // with the Journey's own plain-text file. 放入资料库 keeps it and indexes it on this machine; set to the house and kept out of
+    // learning, the Book's Tasks may list it.
+    const libraryPath = resolve(runRoot, WRITING_LIBRARY_FILE);
+    await writeFile(libraryPath, WRITING_LIBRARY_TEXT, 'utf8');
+    await close();
+    renderer = await launch({ picker: libraryPath, adapter: WRITING_FIXTURE });
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'writing-library-landing');
+    await assertRenderer(renderer, PAGE_HELPERS, 'writing-library-page-helpers');
+    await click(renderer, '知识库', 'writing-library-knowledge');
+    await waitFor(renderer, `document.querySelector('[data-screen="knowledge-base"] .knowledge-base')`, 'writing-library-knowledge-page');
+    await click(renderer, '资料库', 'writing-library-tab');
+    await waitFor(renderer, `document.querySelector('[data-screen="knowledge-base"] .library-materials')?.dataset.library === 'ready' && document.querySelectorAll('article.library-material').length === 0`, 'writing-library-empty');
+    await clickSelector(renderer, '[data-library-action="add"]', 'writing-library-add');
+    await waitFor(renderer, `document.querySelector('.library-preview [data-library-field="title"]') !== null`, 'writing-library-preview');
+    await fill(renderer, '.library-preview [data-library-field="title"]', WRITING_LIBRARY_TITLE, 'writing-library-title');
+    // 资料库's choices are radio buttons: each is chosen as the editor chooses it, and must then read as chosen.
+    const chooseLibrary = (selector, name) => assertRenderer(renderer, `(() => { const radio = document.querySelector(${JSON.stringify(selector)}); if (!(radio instanceof HTMLInputElement) || radio.disabled) return false; radio.click(); return radio.checked; })()`, name);
+    await chooseLibrary('.library-preview [data-library-choice="document"]', 'writing-library-kind');
+    await waitFor(renderer, `document.querySelector('[data-library-action="confirm-add"]')?.disabled === false`, 'writing-library-confirm-enabled');
+    await clickSelector(renderer, '[data-library-action="confirm-add"]', 'writing-library-confirm');
+    await waitFor(renderer, `document.querySelectorAll('article.library-material').length === 1 && document.querySelector('.library-preview') === null`, 'writing-library-added');
+    const libraryMaterialId = await renderer.evaluate(`window.ai7.inspectLibraryMaterials().then((page) => page.materials.length === 1 ? page.materials[0].materialId : null)`);
+    requireJourney(typeof libraryMaterialId === 'string' && UUID_PATTERN.test(libraryMaterialId), 'writing-library-identity', libraryMaterialId);
+    await clickSelector(renderer, '[data-library-action="attribute"]', 'writing-library-attribute');
+    await waitFor(renderer, `document.querySelector('.library-attribution-chooser [data-library-choice="house"]') !== null`, 'writing-library-attribution-chooser');
+    await chooseLibrary('.library-attribution-chooser [data-library-choice="house"]', 'writing-library-attribution-house');
+    await waitFor(renderer, `document.querySelector('[data-library-action="confirm-attribution"]')?.disabled === false`, 'writing-library-attribution-enabled');
+    await clickSelector(renderer, '[data-library-action="confirm-attribution"]', 'writing-library-attribution-confirm');
+    await waitFor(renderer, `document.querySelector('.library-attribution-chooser') === null && document.querySelector('[data-library-action="eligibility"]')?.disabled === false`, 'writing-library-attributed');
+    await clickSelector(renderer, '[data-library-action="eligibility"]', 'writing-library-eligibility');
+    await waitFor(renderer, `document.querySelector('.library-eligibility-chooser [data-library-choice="excluded"]') !== null`, 'writing-library-eligibility-chooser');
+    await chooseLibrary('.library-eligibility-chooser [data-library-choice="excluded"]', 'writing-library-eligibility-excluded');
+    await waitFor(renderer, `document.querySelector('[data-library-action="confirm-eligibility"]')?.disabled === false`, 'writing-library-eligibility-enabled');
+    await clickSelector(renderer, '[data-library-action="confirm-eligibility"]', 'writing-library-eligibility-confirm');
+    // Its index, built here in the background: complete, its text extracted.
+    const libraryIndexDeadline = Date.now() + 60_000;
+    let libraryIndex = null;
+    while (Date.now() < libraryIndexDeadline) {
+      libraryIndex = await renderer.evaluate(`window.ai7.inspectLibraryMaterial({ materialId: ${JSON.stringify(libraryMaterialId)} }).then((material) => [material.reference.state, material.index.state, material.index.digest, material.index.metadata?.characters ?? null])`).catch(() => null);
+      if (Array.isArray(libraryIndex) && libraryIndex[0] === 'available' && libraryIndex[1] === 'complete') break;
+      await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+    }
+    requireJourney(Array.isArray(libraryIndex) && libraryIndex[0] === 'available' && libraryIndex[1] === 'complete' && /^[0-9a-f]{64}$/u.test(libraryIndex[2] ?? '') &&
+      libraryIndex[3] === WRITING_LIBRARY_CHARACTERS, 'writing-library-indexed', libraryIndex);
+    const libraryIndexDigest = libraryIndex[2];
+
+    at('writing-library-plan');
+    // On the Book's 交付物 the sheet offers the item under 资料库, none ticked; ticked for a 评论文章, 先看计划 freezes a plan that
+    // lists it under 允许参考, pinned at its index build, and that copies it no more than it copies a 范例.
+    await click(renderer, '返回', 'writing-library-books');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'writing-library-books-landing');
+    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(writingBookId)}]`, 'writing-library-book-open');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(writingBookId)}] [data-testid="manuscript-editor"] > [data-block-id]')`, 'writing-library-manuscript', 120_000);
+    await openDeliverables(renderer, 'writing-library-deliverables');
+    await readWriting((page) => page.heading === '新建文档 · 写作任务' && page.state === 'settled', 'writing-library-section');
+    await clickSelector(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-action="new"]', 'writing-library-new');
+    const librarySheet = await readWriting((page) => page.open, 'writing-library-sheet');
+    const libraryBox = await renderer.evaluate(`(() => { const box = document.querySelector(${JSON.stringify(`[data-screen="book-deliverables"] .writing-task input[type="checkbox"][data-writing-material="${libraryMaterialId}"]`)}); return box instanceof HTMLInputElement ? [box.checked, box.disabled, box.labels?.[0]?.textContent ?? null, document.querySelectorAll('[data-screen="book-deliverables"] .writing-task input[data-writing-material]').length] : null; })()`);
+    requireJourney(librarySheet.references[3] === `${WRITING_MATERIALS_STATEMENT}《${WRITING_LIBRARY_TITLE}》 · 已提取 ${WRITING_LIBRARY_CHARACTERS} 字 · 社级资料` &&
+      JSON.stringify(libraryBox) === JSON.stringify([false, false, `《${WRITING_LIBRARY_TITLE}》 · 已提取 ${WRITING_LIBRARY_CHARACTERS} 字 · 社级资料`, 1]), 'writing-library-offered', [librarySheet.references, libraryBox]);
+    await assertRenderer(renderer, `(() => { const radio = document.querySelector('[data-screen="book-deliverables"] .writing-task input[name="writing-type"][value=${JSON.stringify(WRITING_LIBRARY_REQUEST.typeId)}]'); if (!(radio instanceof HTMLInputElement) || radio.disabled) return false; radio.click(); return radio.checked; })()`, 'writing-library-type');
+    await assertRenderer(renderer, `(() => { const box = document.querySelector(${JSON.stringify(`[data-screen="book-deliverables"] .writing-task input[data-writing-material="${libraryMaterialId}"]`)}); if (!(box instanceof HTMLInputElement) || box.disabled || box.checked) return false; box.click(); return box.checked; })()`, 'writing-library-tick');
+    await fill(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-field="audience"]', WRITING_LIBRARY_REQUEST.audience, 'writing-library-audience');
+    await fill(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-field="channel"]', WRITING_LIBRARY_REQUEST.channel, 'writing-library-channel');
+    await clickSelector(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-action="plan"]', 'writing-library-plan-open');
+    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer === 'open' && drawer.dataset.taskPlanKind === 'writing' && drawer.dataset.taskPlanStart === 'ready' && drawer.querySelector('[data-task-drawer-control="start"]')?.disabled === false; })()`, 'writing-library-plan-ready', 120_000);
+    const libraryPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'writing', ref: document.querySelector('#task-drawer').dataset.taskPlanRef })
+      .then((plan) => JSON.stringify([plan.goal.sentence, plan.scope.reference, plan.scope.send, plan.technical.find((row) => row.key === 'material-references')?.value ?? null,
+        plan.notDo.editorial.includes('不照抄资料库资料：与任何一份资料有连续 12 个字以上相同（规则与范例相同，每份资料各自比较）的草稿不予采用'), plan.defaultRule.canSet]))`);
+    requireJourney(libraryPlan === JSON.stringify([
+      `为《${WRITING_TITLE}》起草「评论文章」：受众「${WRITING_LIBRARY_REQUEST.audience}」，渠道「${WRITING_LIBRARY_REQUEST.channel}」`,
+      ['本书尚无基线分析，本次不参考梗概与人物', '本书尚无定稿的评估，本次不参考评估结论与营销要点', '本社暂无其他图书的评论文章范例，本次不参考范例',
+        `资料库资料《${WRITING_LIBRARY_TITLE}》：已提取 ${WRITING_LIBRARY_CHARACTERS} 字，按计划冻结的索引版本读取（只参照，不照抄）`,
+        `图书信息：《${WRITING_TITLE}》 · 作者：未填写 · 责编：未填写 · 书系：不在任何书系中`, `你写的受众「${WRITING_LIBRARY_REQUEST.audience}」、渠道「${WRITING_LIBRARY_REQUEST.channel}」`],
+      '不发送任何内容', `《${WRITING_LIBRARY_TITLE}》 · ${libraryMaterialId} · 索引版本 ${libraryIndexDigest}`, true, false,
+    ]), 'writing-library-plan-words', libraryPlan);
+
+    at('writing-library-draft');
+    // 开始任务 runs it on the authored fixture, reading the item through the index at its pin, and the 评论文章's draft is written;
+    // 打开草稿 makes it the Book's 评论文章, its words the fixture's.
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'writing-library-start');
+    const libraryEnded = await readWriting((page) => ['settled', 'failed', 'interrupted'].includes(page.state) && page.task === '写作任务「评论文章」：已完成', 'writing-library-ended');
+    requireJourney(libraryEnded.drafted.length === 1 && libraryEnded.drafted[0][0] === WRITING_LIBRARY_REQUEST.typeId, 'writing-library-drafted', libraryEnded);
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState === 'settled'`, 'writing-library-drawer-settled', 30_000);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'writing-library-drawer-close');
+    await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'writing-library-drawer-closed');
+    await clickSelector(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-action="open-draft"]', 'writing-library-open-draft');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"][data-document-type-id="review-article"] .editor-toolbar h2')?.textContent === '评论文章 · 版本 1' && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]') !== null`, 'writing-library-draft-surface', 120_000);
+    const libraryTexts = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]'), (block) => block.textContent ?? '')`);
+    requireJourney(JSON.stringify(libraryTexts) === JSON.stringify(await writingDraftTexts(WRITING_LIBRARY_DRAFT_TITLE)), 'writing-library-draft-words', Array.isArray(libraryTexts) ? libraryTexts.length : null);
+    // The index the Run read is the one the plan pinned, unchanged.
+    const libraryAfter = await renderer.evaluate(`window.ai7.inspectLibraryMaterial({ materialId: ${JSON.stringify(libraryMaterialId)} }).then((material) => material.index.digest)`);
+    requireJourney(libraryAfter === libraryIndexDigest, 'writing-library-index-unchanged', libraryAfter);
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

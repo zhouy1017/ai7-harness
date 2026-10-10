@@ -830,11 +830,13 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     // 先看计划 of a writing Task: the route's Book, a house type by its identity, and the editor's words, each a bounded string
-    // the store holds to its own bounds; the reference set is the service's to read.
+    // the store holds to its own bounds; the reference set is the service's to read, but for the 资料库 items the editor ticked
+    // under 允许参考 (Issue #428): optional, each an identity, at most a few more than the store takes, which refuses with words.
     case 'prepareWritingTask': {
-      const input = requireInput(value.input, ['bookId', 'typeId', 'audience', 'channel', 'requirements'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'typeId', 'audience', 'channel', 'requirements'], ['materialIds'], tentativeId);
       if (!validUuid(input.bookId) || !isBoundedString(input.typeId, 64) || !isBoundedString(input.audience, 1_000, true) ||
-          !isBoundedString(input.channel, 1_000, true) || !(input.requirements === null || isBoundedString(input.requirements, 4_000))) {
+          !isBoundedString(input.channel, 1_000, true) || !(input.requirements === null || isBoundedString(input.requirements, 4_000)) ||
+          !(input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= 16 && input.materialIds.every(validUuid)))) {
         throw new ProtocolError(tentativeId);
       }
       break;

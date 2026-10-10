@@ -893,6 +893,9 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .writing-type { display: flex; flex-wrap: wrap; gap: .45rem; align-items: baseline; margin-top: .35rem; }
 .writing-references, .writing-consequences { display: grid; grid-template-columns: minmax(0, 8rem) minmax(0, 1fr); gap: .3rem .7rem; margin: 0; }
 .writing-references dd, .writing-consequences dd { margin: 0; }
+.writing-materials p { margin: 0; }
+.writing-material-list { margin: .35rem 0 0; padding: 0; list-style: none; display: grid; gap: .3rem; }
+.writing-material { display: flex; flex-wrap: wrap; gap: .45rem; align-items: baseline; }
 .writing-field { display: grid; gap: .25rem; }
 .writing-field input, .writing-field textarea { max-width: 100%; box-sizing: border-box; }
 /* 交付 (Issue #415, S66b): the delivery form and the Delivery Records inside a document's card. */

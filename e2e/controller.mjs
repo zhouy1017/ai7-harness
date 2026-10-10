@@ -999,6 +999,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'writing-quick-start',
     'writing-draft',
     'writing-card',
+    // Issue #428: a 评论文章 that lists a 资料库 item under 允许参考, read through the Material Index at the build its plan pins.
+    'writing-library-material',
+    'writing-library-plan',
+    'writing-library-draft',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',
