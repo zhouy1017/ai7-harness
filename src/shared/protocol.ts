@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 113 as const;
+export const SERVICE_PROTOCOL_VERSION = 114 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -8284,13 +8284,17 @@ export interface DatabaseReplacementRecordProjection {
   /**
    * Why one that failed failed: its data would not open; what waited was no longer the package the preparation verified; or
    * an open of the data it moved in was interrupted, which leaves nothing to tell that data from what was verified (Issue #434
-   * review). `null` for one applied, and for one that failed before this was recorded.
+   * review); a merge's Books conflicted with what this data holds now; or a merge could not finish writing its Books, before
+   * any of them committed (Issue #644). `null` for one applied, and for one that failed before this was recorded.
    */
   readonly failure: DatabaseReplacementFailure | null;
 }
 
-/** Why a replacement failed, as its record says. */
-export type DatabaseReplacementFailure = 'unopenable' | 'changed' | 'interrupted' | 'conflict';
+/**
+ * Why a replacement or a merge failed, as its record says. `conflict` and `unmergeable` are a merge's: `unmergeable` is a merge
+ * that stopped on something other than a conflict — a file it takes, or a write into the store — and only a merge records it.
+ */
+export type DatabaseReplacementFailure = 'unopenable' | 'changed' | 'interrupted' | 'conflict' | 'unmergeable';
 
 /** 替换本机全部数据: the replacement waiting for AI7's next start, if any, and the replacements this data records. */
 export interface DatabaseReplacementsProjection {
