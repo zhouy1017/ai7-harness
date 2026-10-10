@@ -2412,6 +2412,29 @@ function registerRendererHandlers(
       return result;
     }),
   );
+  // 保留为缺口 (Issue #757): an effect on the route's Book, named by the kind and the Task as the plan read is, and the digest of
+  // the list the editor read; the answer is that Book's plan of that kind again.
+  ipcMain.handle(
+    IPC_CHANNELS.resolveUnconfirmedOutcomes,
+    (event, input?: Omit<ServiceOperationMap['resolveUnconfirmedOutcomes']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const kind = input?.kind as ServiceOperationMap['resolveUnconfirmedOutcomes']['input']['kind'];
+          const ref = typeof input?.ref === 'string' ? input.ref : null;
+          const digest = input?.digest as string;
+          const result = await service.call('resolveUnconfirmedOutcomes', { bookId: route.bookId, kind, ref, digest });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          if (result.bookId !== route.bookId || result.kind !== kind || (ref !== null && result.ref !== ref)) {
+            throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '人工结果确认的结果不属于当前图书工作台。');
+          }
+          return result;
+        });
+      }),
+  );
   ipcMain.handle(
     IPC_CHANNELS.inspectForegroundExecutionBoundary,
     (event, input: Omit<ServiceOperationMap['inspectForegroundExecutionBoundary']['input'], 'bookId'>) =>

@@ -27,6 +27,8 @@ import {
   type ReviewRunCategoryState,
   type ReviewRunState,
   type ReviewScopeKind,
+  type TaskPlanKind,
+  type UnconfirmedStageId,
 } from '../shared/protocol.js';
 import type { ProgressReader, RunProgress } from './analysis/baseline-analysis-store.js';
 import type { WaitingFor } from './task-plan.js';
@@ -149,6 +151,26 @@ export interface AnalysisTaskAttentionReading {
   };
 }
 
+/**
+ * 结果待确认 that Runs of one Task kind left on a Book and that reached their Task Outcome (Issue #757; ATTN-002, NOTIF-004,
+ * CTRL-007), read by the store through each kind's ledger: how many ranges, which steps, and the plan they are listed on —
+ * the Book's current Task of the kind, or its latest Review Run. Only what no later Run of the kind has read and the editor has
+ * not kept as gaps (保留为缺口) is read.
+ */
+export interface UnconfirmedAttentionReading {
+  readonly bookId: string;
+  readonly bookTitle: string;
+  readonly surface: TaskPlanKind;
+  /** The Review Run whose plan lists them; `null` for every other kind, whose plan is the Book's current Task's. */
+  readonly ref: string | null;
+  readonly ranges: number;
+  readonly steps: ReadonlyArray<UnconfirmedStageId>;
+  /** When the latest of the Runs that sent them reached its outcome. */
+  readonly at: string;
+  /** Those Runs, for the technical layer. */
+  readonly runRecordIds: ReadonlyArray<string>;
+}
+
 /** One completed baseline Task Outcome of the recent window. */
 export interface AnalysisOutcomeAttentionReading {
   readonly bookId: string;
@@ -259,6 +281,8 @@ export interface GlobalAttentionReadings {
   readonly learningMaterials: ReadonlyArray<LearningMaterialsAttentionReading>;
   /** The 资料库 items whose Material Index was built within the recent window (Issue #428, S80a; ATTN-009). */
   readonly materialIndexes?: ReadonlyArray<MaterialIndexAttentionReading>;
+  /** 结果待确认 that completed Runs left, one reading per Book and Task kind (Issue #757; ATTN-002, NOTIF-004). */
+  readonly unconfirmed?: ReadonlyArray<UnconfirmedAttentionReading>;
   /** Whether Runs hold every place of the execution owner's governor now (Issue #49, S14). */
   readonly busy: boolean;
   /**
@@ -544,6 +568,28 @@ function analysisTaskItem(reading: AnalysisTaskAttentionReading, waitingFor: Wai
   }
 }
 
+/**
+ * 结果待确认 a completed Run left (Issue #757; ATTN-002, NOTIF-004, CTRL-007; interaction-spec §1036): in 异常与结果待确认,
+ * counted, never blocking — the Run's Task Outcome stands and nothing waits on it — and its next step is to see which ranges and
+ * steps, where 保留为缺口 settles them; never a repeat-shaped action. It resolves by itself when a later Run of the kind reads
+ * them.
+ */
+function unconfirmedItem(reading: UnconfirmedAttentionReading): GlobalAttentionItemProjection {
+  return item('exceptions', 'analysis-outcome-unconfirmed', {
+    itemId: `unconfirmed:${reading.bookId}:${reading.surface}`,
+    blocked: false,
+    at: reading.at,
+    book: { bookId: reading.bookId, title: reading.bookTitle },
+    object: { kind: 'unconfirmed', taskKind: reading.surface, ranges: reading.ranges, steps: reading.steps },
+    nextStep: 'view-unconfirmed',
+    target: { kind: 'task-plan', bookId: reading.bookId, taskKind: reading.surface, ref: reading.ref },
+    technical: [
+      { key: 'run-records', label: '运行记录', value: reading.runRecordIds.join('、') },
+      { key: 'state-at', label: '状态记录时间', value: reading.at },
+    ],
+  });
+}
+
 function analysisOutcomeItem(reading: AnalysisOutcomeAttentionReading): GlobalAttentionItemProjection {
   const state = reading.classification === 'completed' ? 'analysis-completed'
     : reading.classification === 'cancelled' ? 'analysis-cancelled' : 'analysis-completed-with-gaps';
@@ -794,6 +840,7 @@ export function composeGlobalAttention(readings: GlobalAttentionReadings, now: D
     ...readings.libraryMaterials.map(libraryMaterialItem),
     ...readings.learningMaterials.map(learningMaterialsItem),
     ...(readings.materialIndexes ?? []).filter((reading) => reading.recordedAt >= since).map(materialIndexItem),
+    ...(readings.unconfirmed ?? []).map(unconfirmedItem),
   ];
   // One record is one item: a Review Run read both as a Book's latest and as a completion is listed once.
   const unique = Array.from(new Map(all.map((entry) => [`${entry.group}\n${entry.itemId}`, entry] as const)).values());

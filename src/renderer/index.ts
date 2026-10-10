@@ -1020,6 +1020,28 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysis
         openTaskPlan(route.bookId, 'review-run', target.reviewRunId);
       });
       return;
+    // 结果待确认 a completed Run left (Issue #757): the kind's own surface, with its plan in the Task Drawer, where the list is and
+    // 保留为缺口 is recorded.
+    case 'task-plan':
+      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
+        switch (target.taskKind) {
+          case 'review-run':
+            renderBookReview(route.bookId, route.bookTitle, target.ref === null ? null : { reviewRunId: target.ref, findingId: null });
+            break;
+          case 'initial-evaluation':
+          case 'readers-report':
+          case 'evaluation-rewrite':
+            renderBookEvaluation(route.bookId, route.bookTitle);
+            break;
+          case 'writing':
+            renderBookDeliverables(route.bookId, route.bookTitle);
+            break;
+          default:
+            renderBookAnalysis(route.bookId, route.bookTitle);
+        }
+        openTaskPlan(route.bookId, target.taskKind, target.ref);
+      });
+      return;
     // 维护事项待处理 (Issue #426, S68b): 交付物, with the case open on its 发稿版本 where its next step is.
     case 'maintenance':
       await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) =>

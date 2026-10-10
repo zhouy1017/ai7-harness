@@ -16,7 +16,7 @@ import {
   initializeScheduledBackupSchema,
 } from '../../src/service/scheduled-backups.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { DATABASE_EXPORT_SCHEMA_VERSION, MATERIAL_INDEX_SCHEMA_VERSION, SCHEDULED_BACKUP_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
+import { DATABASE_EXPORT_SCHEMA_VERSION, OUTCOME_RESOLUTION_SCHEMA_VERSION, SCHEDULED_BACKUP_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
@@ -279,7 +279,7 @@ describe('定期自动备份 over the real store', () => {
       expect(made.backups[0]).toMatchObject({ fileName: backupFileName(T), createdAt: T.toISOString(), expiresAt: at(14 * DAY).toISOString(), present: true });
       const packaged = unzipSync(await readFile(join(location, backupFileName(T))));
       expect(parseCanonicalJson(strFromU8(packaged['manifest.json']!))).toMatchObject({
-        schema: 'ai7.database-package/1', origin: 'scheduled-backup', dataVersion: 1, schemaRevision: MATERIAL_INDEX_SCHEMA_VERSION, credentials: 'excluded',
+        schema: 'ai7.database-package/1', origin: 'scheduled-backup', dataVersion: 1, schemaRevision: OUTCOME_RESOLUTION_SCHEMA_VERSION, credentials: 'excluded',
       });
       expect((await readdir(location)).filter((name) => name.includes('.partial'))).toEqual([]);
 
@@ -441,7 +441,7 @@ describe('定期自动备份 over the real store', () => {
       first.close();
       const plant = new DatabaseSync(join(other.dataRoot, 'store', 'ai7.sqlite'));
       try {
-        plant.exec(`DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; PRAGMA user_version = ${DATABASE_EXPORT_SCHEMA_VERSION};`);
+        plant.exec(`DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; PRAGMA user_version = ${DATABASE_EXPORT_SCHEMA_VERSION};`);
         downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
       } finally {
         plant.close();
@@ -455,7 +455,7 @@ describe('定期自动备份 over the real store', () => {
       }
       const check = new DatabaseSync(join(other.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
       try {
-        expect((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
+        expect((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(OUTCOME_RESOLUTION_SCHEMA_VERSION);
       } finally {
         check.close();
       }
@@ -554,7 +554,7 @@ describe('定期自动备份 over the real store', () => {
     const createdAt = at(-15 * DAY).toISOString();
     const planted = {
       schema: 'ai7.scheduled-backup/1', backupId, fileName: '../input/victim.txt', byteLength: bytes.byteLength,
-      fileSha256: createHash('sha256').update(bytes).digest('hex'), dataVersion: 1, schemaRevision: MATERIAL_INDEX_SCHEMA_VERSION,
+      fileSha256: createHash('sha256').update(bytes).digest('hex'), dataVersion: 1, schemaRevision: OUTCOME_RESOLUTION_SCHEMA_VERSION,
       softwareVersion: '0.1.0', contents, createdAt,
     };
     const record = canonicalRecord(planted);
@@ -564,7 +564,7 @@ describe('定期自动备份 over the real store', () => {
         plant.prepare(
           `INSERT INTO scheduled_backups(backup_id, file_name, byte_length, file_sha256, data_version, schema_revision, software_version, contents_json, created_at, canonical_json, sha256)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(backupId, planted.fileName, planted.byteLength, planted.fileSha256, 1, MATERIAL_INDEX_SCHEMA_VERSION, '0.1.0',
+        ).run(backupId, planted.fileName, planted.byteLength, planted.fileSha256, 1, OUTCOME_RESOLUTION_SCHEMA_VERSION, '0.1.0',
           JSON.stringify(contents), createdAt, record.json, record.digest);
       };
       // The relation refuses the name itself…

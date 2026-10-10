@@ -6,6 +6,8 @@ import type {
   TaskPlanRunControlProjection,
   TaskPlanStartReadiness,
   TaskPlanStateKey,
+  TaskPlanUnconfirmedProjection,
+  UnconfirmedStageId,
 } from '../shared/protocol.js';
 import { OFFLINE_START_LATER } from '../shared/offline-wording.js';
 import { RUN_BUDGET_CEILING_PATTERN } from '../shared/protocol.js';
@@ -413,6 +415,45 @@ export function taskBarOutcomeUnknownNote(unconfirmed: number, unitsSettled: num
 /** One unconfirmed range in 查看未确认的部分's list: which range, and how often its request was sent. */
 export function taskBarUnconfirmedUnit(unitOrdinal: number, attempts: number): string {
   return `第 ${unitOrdinal} 个阅读范围 · 请求已发出 ${attempts} 次 · 回答没有完整传回`;
+}
+
+/**
+ * 结果待确认 a completed Run left (Issue #757; ATTN-002, NOTIF-004, CTRL-007; interaction-spec §1036): what is known, what is
+ * missing, and the editor's determination — 保留为缺口, a Manual Outcome Resolution — never a repeat-shaped action.
+ */
+export const UNCONFIRMED_TASK_KIND_LABELS: Readonly<Record<TaskPlanKind, string>> = {
+  'fixed-task': '固定任务',
+  'baseline-analysis': '基线分析',
+  'review-run': '审阅',
+  'initial-evaluation': 'AI7 初评',
+  'readers-report': '审稿意见',
+  'evaluation-rewrite': '按我的评分重写评语',
+  writing: '写作任务',
+};
+/** The steps after the reading ranges, in the Run Report's own words. */
+export const UNCONFIRMED_STAGE_LABELS: Readonly<Record<UnconfirmedStageId, string>> = {
+  'cross-unit-reduction': '跨单元归纳',
+  'assurance-sampling': '保证抽样',
+  'run-report-reflection': '运行反思',
+};
+export const UNCONFIRMED_HEADING = '结果待确认';
+export const UNCONFIRMED_KEEP_AS_GAP = '保留为缺口';
+export const UNCONFIRMED_KEEP_FAILED = '未能记下保留为缺口。';
+export const UNCONFIRMED_KEPT_NOTE = '已记下：这些部分保留为结果待确认的缺口，不再列在待我处理里；没有发送任何内容。';
+/** `2 个阅读范围、跨单元归纳`: how many ranges, and which steps. */
+export function unconfirmedWhat(ranges: number, steps: ReadonlyArray<UnconfirmedStageId>): string {
+  return [...(ranges === 0 ? [] : [`${ranges} 个阅读范围`]), ...steps.map((stage) => UNCONFIRMED_STAGE_LABELS[stage])].join('、');
+}
+/** What the block says above its list: what is known and what is missing, and what 保留为缺口 does and does not do. */
+export function unconfirmedStatement(listed: TaskPlanUnconfirmedProjection): string {
+  const what = unconfirmedWhat(listed.ranges.length, [...new Set(listed.steps.map((step) => step.stage))]);
+  return `${what}的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；任务已完成，这些部分在结果里记为结果待确认的缺口，AI7 没有自动再发。` +
+    '保留为缺口只记下你的确认：不发送任何内容，不改变结果；以后再读这些阅读范围的任务仍会在计划里说明会再发一次。';
+}
+/** One line of the list: the category in a Review Run, the range or the step, and that its request was sent. */
+export function unconfirmedLine(entry: { unitOrdinal?: number; stage?: UnconfirmedStageId; category: string | null }): string {
+  const what = entry.stage !== undefined ? UNCONFIRMED_STAGE_LABELS[entry.stage] : `第 ${entry.unitOrdinal} 个阅读范围`;
+  return `${entry.category === null ? '' : `「${entry.category}」`}${what} · 请求已发出 · 回答没有完整传回`;
 }
 
 /** A stopped Run's continuation point, as the bar states it beside 续行; `null` when its kept progress no longer reads back. */

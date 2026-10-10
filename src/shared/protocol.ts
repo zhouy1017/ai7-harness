@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 117 as const;
+export const SERVICE_PROTOCOL_VERSION = 120 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -58,6 +58,7 @@ export const IPC_CHANNELS = {
   enableEditorialWorkspaceProfile: 'ai7:j15:enable-editorial-workspace-profile',
   inspectTaskAuthorization: 'ai7:j03:inspect-task-authorization',
   inspectTaskPlan: 'ai7:j03:inspect-task-plan',
+  resolveUnconfirmedOutcomes: 'ai7:j10:resolve-unconfirmed-outcomes',
   inspectForegroundExecutionBoundary: 'ai7:j03:inspect-foreground-execution-boundary',
   prepareTaskAuthorization: 'ai7:j03:prepare-task-authorization',
   authorizeTaskAuthorization: 'ai7:j03:authorize-task-authorization',
@@ -5212,6 +5213,24 @@ export const TASK_PLAN_KINDS: readonly TaskPlanKind[] = [
   'fixed-task', 'baseline-analysis', 'review-run', 'initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing',
 ];
 
+/** A step after the ranges whose sent request's result cannot be known (Issue #757): the reduction, a sample, the reflection. */
+export type UnconfirmedStageId = 'cross-unit-reduction' | 'assurance-sampling' | 'run-report-reflection';
+
+/**
+ * 结果待确认 left by Runs that reached their Task Outcome (Issue #757): a kind that keeps no progress reads on past a range whose
+ * request was sent and whose answer never came back whole, and any kind reads on past such a step. Each is listed until a later
+ * Run of the kind reads it or the editor determines it — 保留为缺口, a Manual Outcome Resolution retained with its manual
+ * evidence class, which sends nothing and leaves every gap as it is.
+ */
+export interface TaskPlanUnconfirmedProjection {
+  /** Each range by its ordinal in the latest revision that holds it, and, in a Review Run, its category. */
+  ranges: ReadonlyArray<{ unitOrdinal: number; category: string | null; recordedAt: string }>;
+  /** Each step of the latest Run that reached its Task Outcome, and, in a Review Run, its category. */
+  steps: ReadonlyArray<{ stage: UnconfirmedStageId; category: string | null; recordedAt: string }>;
+  /** What 保留为缺口 settles: the service records exactly these, and refuses a list that changed since (`UNCONFIRMED_CHANGED`). */
+  digest: string;
+}
+
 /** Which plan the drawer reads. The Book is always the route's; the renderer never names it. */
 export interface InspectTaskPlanInput {
   bookId: string;
@@ -5502,6 +5521,12 @@ export interface TaskPlanProjection {
    * request's result could not be known, and the Plan Preview's statement of it; `null` when there are none.
    */
   resend: null | { units: ReadonlyArray<number>; statement: string };
+  /**
+   * 结果待确认 a Run of this Task's kind left on this Book that reached its Task Outcome (Issue #757; ATTN-002, NOTIF-004,
+   * CTRL-007): the ranges and steps whose sent requests' results cannot be known, which no later Run of the kind has read and
+   * the editor has not kept as gaps (保留为缺口, 人工结果确认); `null` when there are none.
+   */
+  unconfirmed: TaskPlanUnconfirmedProjection | null;
   /** 重新准备 for a waiting Run whose plan moved before it could start (Issue #536); else `null`. */
   reprepare: TaskPlanReprepareProjection | null;
   /** What the Task's Run asked the editor (Issue #422, S76d; CLAR-001 to CLAR-007): open questions first; empty when none. */
@@ -9906,6 +9931,8 @@ export type GlobalAttentionStateKey =
   | 'analysis-budget-reached'
   | 'analysis-account-limit'
   | 'analysis-outcome-unknown'
+  // 结果待确认 a completed Run left (Issue #757; ATTN-002, NOTIF-004): its Task Outcome stands, and its unconfirmed requests wait.
+  | 'analysis-outcome-unconfirmed'
   | 'analysis-blocked'
   | 'analysis-orphaned'
   | 'review-failed'
@@ -10026,7 +10053,10 @@ export type GlobalAttentionTarget =
   // 质量与学习 › 学习准入 with the Book's materials (Issue #61, S26b).
   | { kind: 'learning-materials'; bookId: string }
   // The dialogue in the side slot, in the foreground (Issue #52, S17a).
-  | { kind: 'dialogue'; bookId: string; dialogueId: string };
+  | { kind: 'dialogue'; bookId: string; dialogueId: string }
+  // A Task kind's plan in the Task Drawer, on the Book's current Task of the kind — or, for a review, the named Review Run
+  // (Issue #757): where 结果待确认 a completed Run left is listed and kept as gaps.
+  | { kind: 'task-plan'; bookId: string; taskKind: TaskPlanKind; ref: string | null };
 
 /** The Active Work Object of one item, in its record's own terms (V2-UX-ATTN-007). */
 export type GlobalAttentionObjectProjection =
@@ -10045,7 +10075,9 @@ export type GlobalAttentionObjectProjection =
   | { kind: 'learning-materials'; pending: number; deferred: number }
   // A dialogue Task (Issue #52, S17a): the editor's own question, as the Harness Session Ledger holds it — `null` when it
   // holds no turn of it here.
-  | { kind: 'dialogue'; question: string | null };
+  | { kind: 'dialogue'; question: string | null }
+  // 结果待确认 that completed Runs of one Task kind left on the Book (Issue #757): how many ranges, and which steps.
+  | { kind: 'unconfirmed'; taskKind: TaskPlanKind; ranges: number; steps: ReadonlyArray<UnconfirmedStageId> };
 
 /** The record facts an item's reason is told from: identities, counts and states, never manuscript text. */
 export interface GlobalAttentionFactsProjection {
@@ -10824,6 +10856,11 @@ export interface ServiceOperationMap {
    * the baseline analysis, or a Review Run — in the editor's words. A read; it records nothing.
    */
   inspectTaskPlan: { input: InspectTaskPlanInput; output: TaskPlanProjection };
+  /**
+   * 保留为缺口 (Issue #757; Manual Outcome Resolution): the editor keeps as gaps exactly the 结果待确认 the plan of this kind
+   * listed, by its digest; the answer is that plan read again.
+   */
+  resolveUnconfirmedOutcomes: { input: InspectTaskPlanInput & { digest: string }; output: TaskPlanProjection };
   inspectForegroundExecutionBoundary: {
     input: { bookId: string; runRecordId: string };
     output: ForegroundExecutionBoundaryProjection;
@@ -11586,6 +11623,7 @@ export interface RendererApi {
   inspectTaskAuthorization(): Promise<TaskAuthorizationProjection>;
   /** The Task Drawer's plan of one Task of the Book the window is showing (Issue #418). */
   inspectTaskPlan(input: Omit<InspectTaskPlanInput, 'bookId'>): Promise<TaskPlanProjection>;
+  resolveUnconfirmedOutcomes(input: Omit<InspectTaskPlanInput, 'bookId'> & { digest: string }): Promise<TaskPlanProjection>;
   inspectForegroundExecutionBoundary(input: Omit<
     ServiceOperationMap['inspectForegroundExecutionBoundary']['input'],
     'bookId'

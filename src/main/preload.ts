@@ -208,6 +208,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['inspectTaskAuthorization']['output']>(IPC_CHANNELS.inspectTaskAuthorization),
   inspectTaskPlan: (input: Omit<ServiceOperationMap['inspectTaskPlan']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['inspectTaskPlan']['output']>(IPC_CHANNELS.inspectTaskPlan, input),
+  resolveUnconfirmedOutcomes: (input: Omit<ServiceOperationMap['resolveUnconfirmedOutcomes']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['resolveUnconfirmedOutcomes']['output']>(IPC_CHANNELS.resolveUnconfirmedOutcomes, input),
   inspectForegroundExecutionBoundary: (input: Omit<
     ServiceOperationMap['inspectForegroundExecutionBoundary']['input'],
     'bookId'

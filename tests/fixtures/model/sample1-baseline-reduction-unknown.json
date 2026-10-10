@@ -1,0 +1,18 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-baseline-reduction-unknown",
+  "description": "Hand-written synthetic shape (ix) over shape (i): identical to sample1-baseline-happy except that the cross-unit reduction over all eight ranges closed is sent and its answer never comes back whole (结果待确认, Issue #757). Every range is read and the Run completes, its reduction a 结果待确认 step that 待我处理 lists until a later Run reads it or the editor keeps it as a gap. Only J-10's launch may bind it (`outcomeUnknownFixtureAllowed`). Every other entry, the sample included, is the base's. Public synthetic text only; no manuscript content and no finding text.",
+  "basedOn": "sample1-baseline-happy",
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "3e6c2262e197cb0179a4f49ab26d8bb54ca14e2eae81af26ed62f28eb039c336",
+      "response": {
+        "kind": "outcome-unknown",
+        "message": "Synthetic dropped answer for the cross-unit reduction over the eight ranges closed: the request was sent and its answer never came back whole (fixture shape ix)."
+      }
+    }
+  ]
+}

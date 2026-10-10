@@ -193,6 +193,8 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   analysis_unit_results: 'owned',
   analysis_task_outcomes: 'owned',
   analysis_feedback_signals: 'owned',
+  // 人工结果确认 (Issue #757): the editor's 保留为缺口 travels with the Book whose Runs' outcomes it settled.
+  analysis_outcome_resolutions: 'owned',
   default_execution_rules: 'owned',
   default_execution_rule_versions: 'owned',
   default_execution_rule_states: 'owned',

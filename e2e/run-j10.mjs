@@ -57,6 +57,12 @@ import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState
 // 异常与结果待确认. 查看未确认的部分 names unit 4 and sends nothing; 取消任务 then keeps what was read, unit 4 its own
 // outcome-unknown gap. Only then is 改计划重做 offered, and the Task it prepares says, before it is started, that it sends
 // unit 4's request again, which may already have been processed and billed.
+//
+// On the eighth Book, launched over the reduction fixture (Issue #757), every range is read and the cross-unit reduction's
+// request is sent and its answer never comes back whole: the Run completes, and 待我处理 holds it in 异常与结果待确认 with
+// 查看未确认的部分 as its next step. That opens ②A with the plan in the drawer, where the reduction is listed; 保留为缺口
+// records the editor's determination and nothing else — the revision and the report stay as they were — and 待我处理 no longer
+// holds it.
 // 重试, 回退运行方向 and 重放 are J-10's later operations, not these slices'.
 //
 // The runner writes J-10's unit-hold file, and reads the service's projections through `window.ai7` only to
@@ -92,6 +98,12 @@ const OUTCOME_UNKNOWN_NOTE = '1 个阅读范围的请求已发出，但回答没
   '其余已读完的 7 / 8 个阅读范围结果都已保存。取消任务会保留已读完的部分，这 1 个记为结果待确认的缺口';
 const OUTCOME_UNKNOWN_RESEND = '第 4 个阅读范围上一次的请求已发出、结果待确认，可能已被模型服务处理并计费；这项任务会再发一次它的请求，开始任务即重新授权这次发送。';
 const OUTCOME_UNKNOWN_CANCEL_LINE = '第 4 个阅读范围的请求已发出、结果待确认；不会再发，在这份修订版里记为结果待确认的缺口，不记为未尝试。';
+const EIGHTH_BOOK = Object.freeze({ title: '归纳结果待确认旅程' });
+/** The eighth Book's launch (Issue #757): every range is read, and the reduction's request is sent and never answers whole. */
+const REDUCTION_UNKNOWN_FIXTURE_IDENTITY = 'sample1-baseline-reduction-unknown';
+const UNCONFIRMED_REASON = '任务已完成，但有请求已发出而回答没有完整传回，无法确认模型服务是否已处理并计费；这些部分记为结果待确认的缺口，AI7 没有自动再发。';
+const UNCONFIRMED_STATEMENT = '跨单元归纳的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；任务已完成，这些部分在结果里记为结果待确认的缺口，AI7 没有自动再发。' +
+  '保留为缺口只记下你的确认：不发送任何内容，不改变结果；以后再读这些阅读范围的任务仍会在计划里说明会再发一次。';
 /** The fourth Book's launch: unit 2 fails for good, and unit 5's first attempt fails retry-safe (Issue #422, S76d). */
 const TRANSIENT_FIXTURE_IDENTITY = 'sample1-baseline-transient-retry';
 /** Five ranges may settle before the fourth Book's Run is held: 1 to 4 do, 5 asks, 6 settles, and 7 is in flight. */
@@ -1591,6 +1603,74 @@ async function main() {
     requireJourney(resendTask?.state === 'prepared' && (resendTask.run ?? null) === null && resendTask.taskIntent?.redoOf?.runRecordId === unconfirmed.run.runRecordId &&
       resendTask.update?.reusePlan?.counts?.reused === SAMPLE1_UNITS - 1 && resendTask.update.reusePlan.counts.recomputed === 1,
     'outcome-unknown-redo-task', { state: resendTask?.state, run: resendTask?.run?.state ?? null, counts: resendTask?.update?.reusePlan?.counts ?? null });
+
+    // ---- 结果待确认 a completed Run left (Issue #757; ATTN-002, NOTIF-004, CTRL-007) ---------------------------------------
+    at('relaunch-for-reduction-unknown');
+    // A launch over the reduction fixture, which only J-10 may bind: every range is answered, and the reduction over the eight
+    // is sent and its answer never comes back whole.
+    await closeOwnedBrowser();
+    cancellation.throwIfRequested();
+    adapterFixture = REDUCTION_UNKNOWN_FIXTURE_IDENTITY;
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'reduction-unknown-ready');
+
+    at('eighth-book-import');
+    const eighthBookId = await importSample1(renderer, EIGHTH_BOOK.title, true, 'eighth-import');
+    requireJourney(![bookId, secondBookId, thirdBookId, fourthBookId, fifthBookId, sixthBookId, seventhBookId].includes(eighthBookId), 'eight-books');
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'eighth-artifact-enable-ready');
+    await click(renderer, '审阅并为本图书启用 Revision 2', 'eighth-artifact-enable');
+    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'eighth-artifact-enabled');
+    await click(renderer, '返回图书列表', 'eighth-return-library');
+
+    at('outcome-unconfirmed-completed');
+    // 开始任务: the Run reads all eight ranges and completes — no stop, nothing to cancel — its reduction a gap whose request was
+    // sent and whose result cannot be known, in its own words, never 被中断. 待我处理 holds it in 异常与结果待确认: counted,
+    // never blocking, its next step 查看未确认的部分.
+    await openAnalysisOf(renderer, eighthBookId, 'eighth-analysis');
+    await startFirstBaseline(renderer, 'ready', 'eighth-baseline');
+    const eighthIntentId = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanRef ?? ''`);
+    requireJourney(UUID_PATTERN.test(eighthIntentId), 'eighth-task');
+    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.taskIntent?.taskIntentId===${JSON.stringify(eighthIntentId)} && analysis.state==='settled')`, 'reduction-unknown-completed', 180_000);
+    const reductionUnknown = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const reductionFailures = reductionUnknown?.taskOutcome?.report?.failures ?? [];
+    requireJourney(reductionUnknown?.run?.state?.startsWith('completed') === true && reductionUnknown.resultSetRevision?.coverage?.unitsClosed === SAMPLE1_UNITS &&
+      (reductionUnknown.resultSetRevision?.gaps?.length ?? -1) === 0 &&
+      reductionFailures.length === 1 && reductionFailures[0].stage === 'cross-unit-reduction' && reductionFailures[0].reason.includes('（AI7_OUTCOME_UNKNOWN）；这次运行不会再发它，结果待确认。'),
+    'reduction-unknown-record', { run: reductionUnknown?.run?.state, gaps: reductionUnknown?.resultSetRevision?.gaps?.length ?? null, failures: reductionFailures });
+    const unconfirmedItemId = `unconfirmed:${eighthBookId}:baseline-analysis`;
+    await assertRenderer(renderer, `(() => { const entry=document.querySelector('#global-attention-entry'); if (!(entry instanceof HTMLButtonElement) || entry.disabled) return false; entry.click(); return true; })()`, 'unconfirmed-attention-entry');
+    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"] li.global-attention-item[data-attention-item=${JSON.stringify(unconfirmedItemId)}]')`, 'unconfirmed-attention-painted', 30_000);
+    const unconfirmedRow = await renderer.evaluate(`(() => {
+      const item = document.querySelector('[data-screen="global-attention"] li.global-attention-item[data-attention-item=${JSON.stringify(unconfirmedItemId)}]');
+      return {
+        group: item.closest('section.global-attention-group')?.dataset.attentionGroup ?? null, state: item.dataset.attentionState, blocked: item.dataset.attentionBlocked,
+        target: item.dataset.attentionTarget, pill: item.querySelector('.global-attention-pill')?.textContent ?? null,
+        object: item.querySelector('button.global-attention-open')?.textContent ?? null, reason: item.querySelector('.global-attention-reason')?.textContent ?? null,
+        next: item.querySelector('.global-attention-next')?.textContent ?? null,
+      };
+    })()`);
+    requireJourney(unconfirmedRow?.group === 'exceptions' && unconfirmedRow.state === 'analysis-outcome-unconfirmed' && unconfirmedRow.blocked === 'false' &&
+      unconfirmedRow.target === 'task-plan' && unconfirmedRow.pill === '结果待确认' && unconfirmedRow.object === '基线分析 · 跨单元归纳' &&
+      unconfirmedRow.reason === UNCONFIRMED_REASON && unconfirmedRow.next === '安全的下一步：查看未确认的部分', 'unconfirmed-attention-row', unconfirmedRow);
+
+    at('outcome-unconfirmed-kept');
+    // The item opens ②A with the plan in the drawer, where 结果待确认 says what is known and what is missing. 查看未确认的部分 lists the
+    // reduction and sends nothing; 保留为缺口 records the editor's determination and nothing else, and 待我处理 no longer holds it.
+    await clickSelector(renderer, `[data-screen="global-attention"] button.global-attention-open[data-attention-open=${JSON.stringify(unconfirmedItemId)}]`, 'unconfirmed-attention-open');
+    await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); const block=drawer?.querySelector('.task-plan-unconfirmed'); return document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(eighthBookId)}]') !== null && drawer?.dataset.taskDrawer==='open' && drawer.dataset.taskPlanRef===${JSON.stringify(eighthIntentId)} && block?.querySelector('h4')?.textContent==='结果待确认' && block.querySelector('.attention-note')?.textContent===${JSON.stringify(UNCONFIRMED_STATEMENT)} && block.querySelector('ul')===null; })()`, 'unconfirmed-plan-opened', 60_000);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="view-unconfirmed-record"]', 'unconfirmed-view');
+    await waitFor(renderer, `(() => { const lines=[...document.querySelectorAll('#task-drawer .task-plan-unconfirmed li')]; return lines.length===1 && lines[0].dataset.unconfirmedStep==='cross-unit-reduction' && lines[0].textContent==='跨单元归纳 · 请求已发出 · 回答没有完整传回' && document.querySelector('#task-drawer [data-task-drawer-control="view-unconfirmed-record"]')?.getAttribute('aria-expanded')==='true'; })()`, 'unconfirmed-list', 30_000);
+    const beforeKept = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(JSON.stringify(beforeKept?.run?.transitions) === JSON.stringify(reductionUnknown.run.transitions) &&
+      beforeKept?.taskOutcome?.report?.reportDigest === reductionUnknown.taskOutcome.report.reportDigest, 'unconfirmed-view-unmoved');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="keep-unconfirmed"]', 'unconfirmed-keep');
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-unconfirmed')===null && document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(eighthIntentId)}`, 'unconfirmed-kept', 30_000);
+    const afterKept = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(JSON.stringify(afterKept?.run?.transitions) === JSON.stringify(reductionUnknown.run.transitions) &&
+      afterKept?.resultSetRevision?.revisionId === reductionUnknown.resultSetRevision.revisionId &&
+      afterKept?.taskOutcome?.report?.reportDigest === reductionUnknown.taskOutcome.report.reportDigest, 'unconfirmed-kept-unmoved');
+    const keptAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
+    requireJourney(keptAttention?.groups?.every((group) => group.items.every((entry) => entry.itemId !== unconfirmedItemId)) === true, 'unconfirmed-left-attention', keptAttention?.groups ?? null);
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

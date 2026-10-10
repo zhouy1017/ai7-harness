@@ -340,6 +340,19 @@ async function dispatch(
         op: request.op,
         result: await store.inspectTaskPlanWithConnection(request.input, () => analysisExecution.liveCredentialReadiness(), connectivity.planConnectivity, analysisProgress),
       };
+    // 保留为缺口 (Issue #757; Manual Outcome Resolution): recorded, and the plan read again as the drawer reads it.
+    case 'resolveUnconfirmedOutcomes': {
+      const { digest, ...plan } = request.input;
+      // The plan it was read on must still be the Book's plan of that Task, or nothing is recorded.
+      store.inspectTaskPlan(plan);
+      store.resolveUnconfirmedOutcomes(plan.bookId, plan.kind, digest);
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: await store.inspectTaskPlanWithConnection(plan, () => analysisExecution.liveCredentialReadiness(), connectivity.planConnectivity, analysisProgress),
+      };
+    }
     case 'inspectForegroundExecutionBoundary':
       return {
         id: request.id,

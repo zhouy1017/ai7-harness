@@ -10,7 +10,7 @@ import {
   initializeEvaluationCalibrationSchema,
 } from '../../src/service/evaluation-calibration.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { MATERIAL_INDEX_SCHEMA_VERSION, LEARNING_ELIGIBILITY_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
+import { OUTCOME_RESOLUTION_SCHEMA_VERSION, LEARNING_ELIGIBILITY_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { MAX_FIRST_PRINT, MAX_PRICE_FEN } from '../../src/shared/evaluation-calibration.js';
 import { PUBLICATION_FORBIDDEN_WORDS, type DesignatePublicationVersionInput, type EvaluationCalibrationProjection } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx, type ComposedManuscriptRequest } from '../support/composed-fixture.js';
@@ -208,7 +208,7 @@ describe('设置 › 评估校准与预测 over the real store', () => {
     }
     const database = new DatabaseSync(databasePath());
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(OUTCOME_RESOLUTION_SCHEMA_VERSION);
       const records = (database.prepare('SELECT canonical_json FROM publication_actuals ORDER BY ordinal').all() as Array<{ canonical_json: string }>)
         .map((row) => JSON.parse(row.canonical_json) as { schema: string; priceFen: number; publicationOrdinal: number; supersedes: string | null; actor: string });
       expect(records).toHaveLength(67);
@@ -376,7 +376,7 @@ describe('设置 › 评估校准与预测 over the real store', () => {
     const plant = new DatabaseSync(databasePath());
     let before: Array<{ name: string; sql: string }>;
     try {
-      plant.exec(`DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_conflicts; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; PRAGMA user_version = ${LEARNING_ELIGIBILITY_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; DROP TABLE database_merge_books; DROP TABLE database_merges; DROP TABLE database_replacements; DROP TABLE scheduled_backup_removals; DROP TABLE scheduled_backups; DROP TABLE backup_preferences; DROP TABLE database_export_receipts; DROP TABLE database_export_approvals; DROP TABLE database_export_preparations; DROP TABLE store_versions; DROP TABLE series_knowledge_conflicts; DROP TABLE series_knowledge_promotions; DROP TABLE series_knowledge_revisions; DROP TABLE series_knowledge_candidates; DROP TABLE series_knowledge_items; DROP TABLE series_membership_changes; DROP TABLE series; DROP TABLE evaluation_preferences; DROP TABLE publication_actuals; PRAGMA user_version = ${LEARNING_ELIGIBILITY_SCHEMA_VERSION};`);
       before = tablesOf(plant);
       // Taken before the kind-coupled relations go back to revision 58: revision 59 rebuilds them to these exact shapes again.
       downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
@@ -394,10 +394,10 @@ describe('设置 › 评估校准与预测 over the real store', () => {
     }
     const database = new DatabaseSync(databasePath(), { readOnly: true });
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(OUTCOME_RESOLUTION_SCHEMA_VERSION);
       const after = tablesOf(database);
       // Revision 52's Series relations (Issue #63, S28a) return with it, as the planted store lacked them too.
-      expect(after.filter((entry) => !/^(publication_actuals|evaluation_preferences|series|store_versions|database_export_|backup_preferences|scheduled_backup|database_replacements|database_merge|evaluation_initial_drafts|dialogue_|readers_report_|captured_procedure|review_run_procedure_pins|developer_capability_proposal|evaluation_rewrite_|writing_|material_index_)/u.test(entry.name))).toEqual(before!);
+      expect(after.filter((entry) => !/^(publication_actuals|evaluation_preferences|series|store_versions|database_export_|backup_preferences|scheduled_backup|database_replacements|database_merge|evaluation_initial_drafts|dialogue_|readers_report_|captured_procedure|review_run_procedure_pins|developer_capability_proposal|evaluation_rewrite_|writing_|material_index_|analysis_outcome_resolutions)/u.test(entry.name))).toEqual(before!);
       expect(after.filter((entry) => ACTUALS_TABLES.includes(entry.name)).map((entry) => entry.sql))
         .toEqual(ACTUALS_TABLES.slice().sort().map((table) => EVALUATION_CALIBRATION_SCHEMA_SQL[table as keyof typeof EVALUATION_CALIBRATION_SCHEMA_SQL]));
       expect(counts()).toEqual({ publication_actuals: 0, evaluation_preferences: 0 });

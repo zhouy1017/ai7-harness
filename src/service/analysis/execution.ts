@@ -33,6 +33,7 @@ import { CARRIED_STAGES, OUTCOME_UNKNOWN_NO_RESUME, SAMPLE1_SOURCE_DIGEST, type 
 import type { BaselineUnitResult } from './contract.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
 import { ExecutionAdmissionError } from './execution-error.js';
+import { OUTCOME_UNKNOWN_NOT_RESENT, carriedOutcomeUnknownReason } from './outcome-unknown.js';
 import { applyAssuranceSample, type AnalysisKindDefinition, type AnalysisReductionResult } from './kind-definition.js';
 import { ASSURANCE_SAMPLING_REMOVED, SAFE_RETRY_WITHHELD, adaptationMode, assuranceSamplingKept } from './plan-edits.js';
 import {
@@ -273,17 +274,8 @@ export function accountLimitDetail(settled: number, total: number): string {
     : `模型服务账户限额：模型服务按账户限额拒绝了请求，这项任务已停下。已读完 ${settled} / ${total} 个阅读范围，结果都已保存。处理好模型服务、限额解除后点「续行」从下一个阅读范围接着读；在此之前不会发送任何内容。`;
 }
 
-/**
- * 结果待确认 (Issue #51, S16c; V2-UX-CTRL-007, COPY-009, CONT-011, CONT-016; ADR 0034): a reading range whose request was sent
- * and whose answer never came back whole, so whether the model service processed and billed it cannot be known. Nothing in
- * the same Run ever sends it again — no safe retry, no fallback, no 续行 — so it is kept at once, as the continuation point
- * keeps every settled range, as its own gap `outcome-unknown`; the Run reads the other ranges and then stops 结果待确认,
- * keeping everything it read. The way on is the editor's: 取消任务, which keeps what was read, or 改计划重做, a newly
- * authorized Run.
- */
-export const OUTCOME_UNKNOWN_NOT_RESENT = '这次运行不会再发它，结果待确认' as const;
-/** A range an earlier Run left 结果待确认 that this Run ended without reading (Issue #51, S16c): still that gap. */
-export const OUTCOME_UNKNOWN_CARRIED = '这次运行结束前没有读到它，结果仍待确认' as const;
+// 结果待确认's words (Issue #51, S16c; Issue #757) live in `./outcome-unknown.js`, which the ledger reads too.
+export { OUTCOME_UNKNOWN_CARRIED, OUTCOME_UNKNOWN_NOT_RESENT, carriedOutcomeUnknownReason } from './outcome-unknown.js';
 
 /** 结果待确认's stop, in the Run's own words: which ranges, what is kept, and what the editor can do. */
 export function outcomeUnknownDetail(unitOrdinals: ReadonlyArray<number>, settled: number, total: number): string {
@@ -1918,7 +1910,7 @@ export class BaselineAnalysisExecutionOwner {
           if (reason === undefined || unitRecords.some((record) => record.unitOrdinal === planUnit.unitOrdinal)) continue;
           const unit = submittedUnits.find((candidate) => candidate.ordinal === planUnit.unitOrdinal);
           if (unit === undefined) continue;
-          const words = reason.endsWith(OUTCOME_UNKNOWN_CARRIED) ? reason : `${reason}；${OUTCOME_UNKNOWN_CARRIED}`;
+          const words = carriedOutcomeUnknownReason(reason);
           outcomes.push({ unitOrdinal: unit.ordinal, state: 'gap', code: 'outcome-unknown', reason: words });
           unitRecords.push({
             unitOrdinal: unit.ordinal,

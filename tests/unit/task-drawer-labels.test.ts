@@ -189,6 +189,7 @@ function plan(overrides: Partial<TaskPlanProjection> = {}): TaskPlanProjection {
     runControl: null,
     redo: null,
     resend: null,
+    unconfirmed: null,
     reprepare: null,
     clarifications: [],
     budgetStop: null,
