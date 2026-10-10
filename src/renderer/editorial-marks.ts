@@ -254,6 +254,19 @@ export function menuPlacement(
   };
 }
 
+/** Where the text pane stood, by its scroll offsets. */
+export type PanePosition = { readonly top: number; readonly left: number };
+
+/**
+ * Whether a `scroll` event of the text pane means the text under an open menu moved (Issue #745): the pane is no longer
+ * where it stood when the menu was drawn. The event arrives in the frame after the movement that caused it, so a movement
+ * made before the menu opened — the editor revealing its caret as it takes focus, a card brought into view, the pane
+ * restored after a window load — reaches the menu after it is on screen, and must not close it.
+ */
+export function paneMovedUnderMenu(drawnAt: PanePosition | undefined, now: PanePosition): boolean {
+  return drawnAt === undefined || drawnAt.top !== now.top || drawnAt.left !== now.left;
+}
+
 type SeriesChoice = { readonly seriesId: string; readonly title: string };
 
 /**
@@ -348,6 +361,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   document.body.append(menuLayer);
   let destroyed = false;
   let menu: HTMLElement | undefined;
+  /** Where the text pane stood when the open menu was drawn (Issue #745). */
+  let menuPane: PanePosition | undefined;
   let floating: HTMLElement | undefined;
   let floatingBlockId: string | undefined;
   /**
@@ -393,7 +408,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   const closeMenu = (): void => {
     menu?.remove();
     menu = undefined;
+    menuPane = undefined;
   };
+
+  const panePosition = (): PanePosition => ({ top: options.scroll.scrollTop, left: options.scroll.scrollLeft });
 
   const closeFloating = (): void => {
     floatingRefresh = undefined;
@@ -1406,6 +1424,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     panel.style.top = `${at.y}px`;
     menuLayer.append(panel);
     menu = panel;
+    // Read after the menu is in the document, so any movement the pane has already made is in it (Issue #745).
+    menuPane = panePosition();
     const rect = panel.getBoundingClientRect();
     const placed = menuPlacement(at, rect, { width: window.innerWidth, height: window.innerHeight });
     panel.style.left = `${placed.left}px`;
@@ -1913,8 +1933,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   const reflow = new ResizeObserver(() => {
     if (floating !== undefined && floatingBlockId !== undefined) placeBelowBlock(floating, floatingBlockId);
   });
-  // A menu points at a place on screen; once the text under it moves, it points at nothing.
-  const onPaneScroll = (): void => closeMenu();
+  // A menu points at a place on screen; once the text under it moves, it points at nothing. A scroll event that only
+  // reports a movement made before the menu was drawn leaves it standing (Issue #745).
+  const onPaneScroll = (): void => {
+    if (menu !== undefined && paneMovedUnderMenu(menuPane, panePosition())) closeMenu();
+  };
   const onWindowResize = (): void => closeMenu();
   options.scroll.addEventListener('scroll', onPaneScroll, { passive: true });
   window.addEventListener('resize', onWindowResize);

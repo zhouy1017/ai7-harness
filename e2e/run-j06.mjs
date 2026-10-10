@@ -255,7 +255,8 @@ const PAGE_HELPERS = `(() => {
     return null;
   };
   const layer = () => document.querySelector('.editorial-mark-layer');
-  const conflict = () => document.querySelector('[data-screen="proposal-conflict"] section.proposal-conflict');
+  const pane = () => { const node = document.querySelector('.editor-window'); return node ? node.scrollTop + ',' + node.scrollLeft : null; };
+  const conflict =() => document.querySelector('[data-screen="proposal-conflict"] section.proposal-conflict');
   const draft = () => conflict()?.querySelector('[data-conflict-draft]') ?? null;
   const press = (control) => {
     if (!(control instanceof HTMLButtonElement) || control.disabled) return false;
@@ -286,8 +287,11 @@ const PAGE_HELPERS = `(() => {
       element.dispatchEvent(new MouseEvent('mousedown', init));
       element.dispatchEvent(new MouseEvent('mouseup', { ...init, buttons: 0 }));
       element.dispatchEvent(new MouseEvent('contextmenu', { ...init, buttons: 0 }));
+      // Where the text pane stood once the menu was drawn, so a choice that finds no menu can say whether it moved (#745).
+      window.__j06.paneAtMenu = pane();
       return true;
     },
+    pane,
     block,
     mark: (kind, id) => Array.from(block(id)?.querySelectorAll('.editorial-mark[data-mark-kind="' + kind + '"]') ?? []),
     markById: (markId) => editor()?.querySelector('.editorial-mark[data-mark-id="' + markId + '"]') ?? null,
@@ -375,6 +379,75 @@ async function rightClickUntil(renderer, prepare, target, ready, name) {
   throw journeyCheckFailure('J-06', name);
 }
 
+/** Which menu was open, as a check label's word: the selection menu, a mark's menu, another, or none (Issue #745). */
+function menuWord(kind) {
+  switch (kind) {
+    case 'selection': return 'selection';
+    case 'mark': return 'mark';
+    case null: case undefined: return 'none';
+    default: return 'other';
+  }
+}
+
+/** The menu item's state, as a check label's word: not on the menu, on it but unavailable, or choosable. */
+function itemWord(item) {
+  switch (item) {
+    case 'enabled': return 'enabled';
+    case 'disabled': return 'disabled';
+    default: return 'absent';
+  }
+}
+
+/** The open Mark Card's state (`data-mark-state`), as a check label's word, or `none` when no card was open. */
+function cardWord(state) {
+  switch (state) {
+    case 'open': return 'open';
+    case 'applied': return 'applied';
+    case 'resolved': return 'resolved';
+    case 'accepted': return 'accepted';
+    case 'accepted-with-edit': return 'edited';
+    case 'rejected': return 'rejected';
+    case 'withdrawn': return 'withdrawn';
+    case null: case undefined: return 'none';
+    default: return 'other';
+  }
+}
+
+/** The status line's tone, as a check label's word. */
+function toneWord(tone) {
+  switch (tone) {
+    case 'busy': return 'busy';
+    case 'error': return 'error';
+    case 'success': return 'success';
+    default: return 'none';
+  }
+}
+
+/** What the product showed when a menu choice could not be made: the menu, the item, the card, the tone, and the pane. */
+const menuSeen = (action) => `(() => {
+  const menu = window.__j06.menu();
+  const item = menu?.querySelector('[data-mark-action="${action}"]') ?? null;
+  return {
+    menu: menu?.dataset.markMenu ?? null,
+    item: item instanceof HTMLButtonElement ? (item.disabled ? 'disabled' : 'enabled') : null,
+    card: window.__j06.card() === null ? null : (window.__j06.card().querySelector('[data-mark-state]')?.dataset.markState ?? 'unknown'),
+    tone: window.__j06.tone(),
+    moved: window.__j06.paneAtMenu !== window.__j06.pane(),
+  };
+})()`;
+
+/**
+ * Choose one item of the menu the right-click opened. When it cannot be chosen, the label says what the product showed
+ * (Issue #745): `-menu-<selection|mark|other|none>-item-<enabled|disabled|absent>-card-<state|none>-<tone>-pane-<moved|
+ * still>`, the pane's word saying whether the text pane moved since the menu was drawn. A renderer gone by then reads as
+ * `none` on every word and `still`, rather than replacing the label with its own failure.
+ */
+async function chooseFromMenu(renderer, action, name) {
+  if (await renderer.evaluate(`(() => { const item = window.__j06.item(${JSON.stringify(action)}); if (!(item instanceof HTMLButtonElement) || item.disabled) return false; item.click(); return true; })()`)) return;
+  const seen = await renderer.evaluate(menuSeen(action)).catch(() => null);
+  throw journeyCheckFailure('J-06', `${name}-menu-${menuWord(seen?.menu)}-item-${itemWord(seen?.item)}-card-${cardWord(seen?.card)}-${toneWord(seen?.tone)}-pane-${seen?.moved === true ? 'moved' : 'still'}`);
+}
+
 /** A 修改建议 over RANGE of a paragraph, made through the selection menu and its composer. */
 async function suggest(renderer, blockId, proposedText, rationale, name) {
   await rightClickUntil(
@@ -384,7 +457,7 @@ async function suggest(renderer, blockId, proposedText, rationale, name) {
     `window.__j06.menu()?.dataset.markMenu === 'selection' && window.__j06.menu().textContent.includes('已选 ${RANGE[1] - RANGE[0]} 字')`,
     `${name}-menu`,
   );
-  await assertRenderer(renderer, `(() => { const item = window.__j06.item('add-change-suggestion'); if (!(item instanceof HTMLButtonElement) || item.disabled) return false; item.click(); return true; })()`, `${name}-choose`);
+  await chooseFromMenu(renderer, 'add-change-suggestion', `${name}-choose`);
   await waitFor(renderer, `window.__j06.composer()?.dataset.markComposer === 'create-change-suggestion'`, `${name}-composer`);
   await assertRenderer(renderer, `window.__j06.write('proposedText', ${JSON.stringify(proposedText)}) && (${JSON.stringify(rationale)} === '' || window.__j06.write('rationale', ${JSON.stringify(rationale)})) && window.__j06.act('submit')`, `${name}-submit`);
   await waitFor(renderer, `window.__j06.mark('change-suggestion', ${JSON.stringify(blockId)}).length > 0 && window.__j06.composer() === null`, `${name}-drawn`);
