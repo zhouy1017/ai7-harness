@@ -469,18 +469,82 @@ function paneScrollWord(state) {
 function movePaneAround(blockId, rightClickAfter) {
   return `(async () => {
     const pane = document.querySelector('.editor-window');
-    if (!(pane instanceof HTMLElement)) return 'undrawn';
-    if (!${rightClickAfter} && window.__j06.menu()?.dataset.markMenu !== 'selection') return 'undrawn';
-    const from = pane.scrollTop;
-    pane.scrollTop = from >= 40 ? from - 40 : from + 40;
-    if (pane.scrollTop === from) return 'unmoved';
-    if (${rightClickAfter}) {
-      window.__j06.rightClick(window.__j06.block(${JSON.stringify(blockId)}));
-      if (window.__j06.menu()?.dataset.markMenu !== 'selection') return 'undrawn';
+    const seen = { state: 'undrawn', cause: null, delta: null, fraction: null, ratio: window.devicePixelRatio };
+    if (!(pane instanceof HTMLElement)) return seen;
+    if (!${rightClickAfter} && window.__j06.menu()?.dataset.markMenu !== 'selection') return seen;
+    // Which event was being dispatched when the menu left the page, and where the pane stood then (Issue #745 review).
+    let current = null;
+    const note = (event) => {
+      current = event.type === 'scroll' ? (event.target === pane ? 'scroll' : 'other-scroll') : event.type;
+      setTimeout(() => { current = null; }, 0);
+    };
+    const types = ['scroll', 'mousedown', 'keydown', 'selectionchange', 'focusin', 'focusout', 'pointerdown'];
+    for (const type of types) document.addEventListener(type, note, true);
+    window.addEventListener('resize', note, true);
+    let drawn = null;
+    let drawnAt = null;
+    const watcher = new MutationObserver((records) => {
+      for (const record of records) for (const node of record.removedNodes) {
+        if (node === drawn && seen.cause === null) { seen.cause = current ?? 'task'; seen.delta = pane.scrollTop - drawnAt; }
+      }
+    });
+    try {
+      const from = pane.scrollTop;
+      pane.scrollTop = from >= 40 ? from - 40 : from + 40;
+      if (pane.scrollTop === from) { seen.state = 'unmoved'; return seen; }
+      if (${rightClickAfter}) window.__j06.rightClick(window.__j06.block(${JSON.stringify(blockId)}));
+      drawn = window.__j06.menu();
+      if (drawn?.dataset.markMenu !== 'selection') return seen;
+      drawnAt = pane.scrollTop;
+      seen.fraction = drawnAt % 1 !== 0;
+      if (drawn.parentNode) watcher.observe(drawn.parentNode, { childList: true });
+      await new Promise((resolveFrames) => requestAnimationFrame(() => requestAnimationFrame(resolveFrames)));
+      seen.state = window.__j06.menu()?.dataset.markMenu === 'selection' ? 'open' : 'closed';
+      if (seen.state === 'closed' && seen.cause === null) { seen.cause = 'unobserved'; seen.delta = pane.scrollTop - drawnAt; }
+      return seen;
+    } finally {
+      watcher.disconnect();
+      for (const type of types) document.removeEventListener(type, note, true);
+      window.removeEventListener('resize', note, true);
     }
-    await new Promise((resolveFrames) => requestAnimationFrame(() => requestAnimationFrame(resolveFrames)));
-    return window.__j06.menu()?.dataset.markMenu === 'selection' ? 'open' : 'closed';
   })()`;
+}
+
+/** The event dispatched when the menu left the page, as a check label's word (Issue #745 review). */
+function closerWord(cause) {
+  switch (cause) {
+    case 'scroll': return 'scroll';
+    case 'other-scroll': return 'other-scroll';
+    case 'mousedown': return 'mousedown';
+    case 'pointerdown': return 'pointerdown';
+    case 'keydown': return 'keydown';
+    case 'selectionchange': return 'selection';
+    case 'focusin': return 'focusin';
+    case 'focusout': return 'focusout';
+    case 'resize': return 'resize';
+    case 'task': return 'task';
+    case 'unobserved': return 'unobserved';
+    default: return 'none';
+  }
+}
+
+/** How far the pane stood from where it was when the menu was drawn, as a check label's word. */
+function deltaWord(delta) {
+  if (typeof delta !== 'number' || !Number.isFinite(delta)) return 'unknown';
+  if (delta === 0) return 'same';
+  return Math.abs(delta) < 1 ? 'subpixel' : 'moved';
+}
+
+/**
+ * What became of the menu when the pane moved before it was drawn, with why it closed when it did:
+ * `<state>-by-<closer>-<same|subpixel|moved|unknown>-<whole|fraction>-dpr<1|2|x>`.
+ */
+function movedBeforeWords(seen) {
+  const state = paneScrollWord(seen?.state);
+  if (state !== 'closed') return state;
+  const fraction = seen?.fraction === true ? 'fraction' : 'whole';
+  const ratio = seen?.ratio === 1 ? 'dpr1' : seen?.ratio === 2 ? 'dpr2' : 'dprx';
+  return `closed-by-${closerWord(seen?.cause)}-${deltaWord(seen?.delta)}-${fraction}-${ratio}`;
 }
 
 /** A 修改建议 over RANGE of a paragraph, made through the selection menu and its composer. */
@@ -830,9 +894,9 @@ async function main() {
       `window.__j06.menu()?.dataset.markMenu === 'selection' && window.__j06.menu().textContent.includes('已选 ${RANGE[1] - RANGE[0]} 字')`,
       'menu-scroll-open',
     );
-    const movedBefore = paneScrollWord(await renderer.evaluate(movePaneAround(third, true)));
+    const movedBefore = movedBeforeWords(await renderer.evaluate(movePaneAround(third, true)));
     requireJourney(movedBefore === 'open', `menu-pane-moved-before-${movedBefore}`);
-    const movedAfter = paneScrollWord(await renderer.evaluate(movePaneAround(third, false)));
+    const movedAfter = paneScrollWord((await renderer.evaluate(movePaneAround(third, false)))?.state);
     requireJourney(movedAfter === 'closed', `menu-pane-moved-after-${movedAfter}`);
     cancellation.throwIfRequested();
 
