@@ -3922,10 +3922,45 @@ export class BaselineAnalysisStore {
     });
   }
 
-  /** Every Run of this kind waiting in Connectivity Wait, oldest first, with its Book. */
-  waitingRuns(): Array<{ bookId: string; taskIntentId: string; runRecordId: string }> {
+  /**
+   * Each Book's latest Task of this kind whose Run waits in Connectivity Wait, or was blocked because its plan moved while it
+   * waited (Issue #760, S74c; ATTN-004): what 待我处理 and the 任务 panel read of a kind they otherwise leave to its own surface.
+   * A read; nothing is written.
+   */
+  waitingAttentionReadings(bookId: string | null, limit: number): Array<{
+    bookId: string; bookTitle: string; taskIntentId: string; runRecordId: string; state: 'awaiting-connectivity' | 'plan-moved'; stateAt: string;
+  }> {
+    const lastState = `(SELECT s.state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1)`;
     const rows = this.#db.prepare(
-      `SELECT r.run_record_id, r.task_intent_id, i.book_id
+      `SELECT t.task_intent_id, t.book_id, b.title book_title, r.run_record_id, ${lastState} last_state,
+              (SELECT s.recorded_at FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1) last_state_at
+       FROM analysis_task_intents t
+       JOIN books b ON b.book_id = t.book_id
+       JOIN analysis_run_records r ON r.task_intent_id = t.task_intent_id
+       WHERE t.kind = ? AND t.rowid = (
+           SELECT t2.rowid FROM analysis_task_intents t2 WHERE t2.book_id = t.book_id AND t2.kind = t.kind
+           ORDER BY t2.created_at DESC, t2.rowid DESC LIMIT 1)
+         AND ${lastState} IN ('awaiting-connectivity', 'blocked-before-dispatch')
+         AND (? IS NULL OR t.book_id = ?)
+       ORDER BY t.created_at, t.task_intent_id LIMIT ?`,
+    ).all(this.#definition.kind, bookId, bookId, limit) as SqlRow[];
+    const readings: Array<{ bookId: string; bookTitle: string; taskIntentId: string; runRecordId: string; state: 'awaiting-connectivity' | 'plan-moved'; stateAt: string }> = [];
+    for (const row of rows) {
+      const runRecordId = asString(row.run_record_id);
+      const waiting = row.last_state === 'awaiting-connectivity';
+      if (!waiting && this.blockedByOf(runRecordId) !== 'plan-moved') continue;
+      readings.push({
+        bookId: asString(row.book_id), bookTitle: asString(row.book_title), taskIntentId: asString(row.task_intent_id), runRecordId,
+        state: waiting ? 'awaiting-connectivity' : 'plan-moved', stateAt: asString(row.last_state_at),
+      });
+    }
+    return readings;
+  }
+
+  /** Every Run of this kind waiting in Connectivity Wait, oldest first, with its Book. */
+  waitingRuns(): Array<{ bookId: string; taskIntentId: string; runRecordId: string; recordedAt: string }> {
+    const rows = this.#db.prepare(
+      `SELECT r.run_record_id, r.task_intent_id, r.recorded_at, i.book_id
        FROM analysis_run_records r
        JOIN analysis_task_intents i ON i.task_intent_id = r.task_intent_id
        WHERE i.kind = ?
@@ -3933,7 +3968,9 @@ export class BaselineAnalysisStore {
            = 'awaiting-connectivity'
        ORDER BY r.recorded_at, r.rowid`,
     ).all(this.#definition.kind) as SqlRow[];
-    return rows.map((row) => ({ bookId: asString(row.book_id), taskIntentId: asString(row.task_intent_id), runRecordId: asString(row.run_record_id) }));
+    return rows.map((row) => ({
+      bookId: asString(row.book_id), taskIntentId: asString(row.task_intent_id), runRecordId: asString(row.run_record_id), recordedAt: asString(row.recorded_at),
+    }));
   }
 
   /**

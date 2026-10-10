@@ -9,7 +9,7 @@ import type { Connectivity, TaskPlanConnectivity } from '../../src/service/conne
 import {
   DefaultExecutionRuleLedger,
   QUICK_START_DEVELOPER_LIVE,
-  QUICK_START_OFFLINE_LATER,
+  QUICK_START_OFFLINE,
   QUICK_START_PLAN_CHANGED,
   QUICK_START_RULE_CHANGED,
   QUICK_START_SLOT_BUSY,
@@ -357,8 +357,8 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
       const digest = plan.planEnvelope!.digest;
       const state = { connectivity: 'offline' as Connectivity, busy: false };
       const runtime = { credentialReadiness: async () => null, connectivity: reader(state) };
-      // Offline: the writing bar has no 联网后开始任务, so the reason says to start once online (#701 review P3-3).
-      expect(await store.quickStartWritingTask(bookId, taskIntentId, digest, rule.ruleVersionId, runtime)).toEqual(fell(QUICK_START_OFFLINE_LATER));
+      // Offline: the Task stops at its plan, whose bar offers 联网后开始任务, as the baseline's does (Issue #760, S74c).
+      expect(await store.quickStartWritingTask(bookId, taskIntentId, digest, rule.ruleVersionId, runtime)).toEqual(fell(QUICK_START_OFFLINE));
       state.connectivity = 'online';
       state.busy = true;
       expect(await store.quickStartWritingTask(bookId, taskIntentId, digest, rule.ruleVersionId, runtime)).toEqual(fell(QUICK_START_SLOT_BUSY));

@@ -48,9 +48,9 @@ function world(overrides: Partial<World> = {}): World {
 function dependencies(state: World): ReconnectPreflightDependencies {
   return {
     waitingRuns: () => state.waiting.map((runRecordId) => ({ runRecordId })),
-    stillWaiting: (runRecordId) => !state.settledElsewhere.has(runRecordId) && !state.admitted.includes(runRecordId),
-    drift: (runRecordId) => state.drift[runRecordId] ?? [],
-    block: (runRecordId, reasons, cause) => {
+    stillWaiting: ({ runRecordId }) => !state.settledElsewhere.has(runRecordId) && !state.admitted.includes(runRecordId),
+    drift: ({ runRecordId }) => state.drift[runRecordId] ?? [],
+    block: ({ runRecordId }, reasons, cause) => {
       state.blocked.push({ runRecordId, reasons, cause });
     },
     reachesNetwork: state.reachesNetwork,
@@ -60,7 +60,7 @@ function dependencies(state: World): ReconnectPreflightDependencies {
       return state.credential;
     },
     slotBusy: () => state.busy,
-    admit: (runRecordId) => {
+    admit: ({ runRecordId }) => {
       const error = state.admitThrows[runRecordId];
       if (error !== undefined) throw error;
       state.admitted.push(runRecordId);
@@ -116,7 +116,8 @@ describe('Reconnect Preflight', () => {
   });
 
   it('leaves a Run waiting when the owner answers it is busy or stopping, and blocks it with the owner\'s reason otherwise', async () => {
-    for (const code of ['EXECUTION_BUSY', 'EXECUTION_STOPPING']) {
+    // A Review Run's drive refused because another Run of its Book is driven (Issue #760) ends by itself too.
+    for (const code of ['EXECUTION_BUSY', 'EXECUTION_STOPPING', 'REVIEW_RUN_ACTIVE']) {
       const state = world({ admitThrows: { 'run-a': new AdmissionError(code, '稍后再试。') } });
       expect(await reconnectPreflight(dependencies(state))).toEqual({ admitted: 0, blocked: 0, waiting: 1 });
     }

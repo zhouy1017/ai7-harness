@@ -5,6 +5,7 @@ import {
   type ReviewRunCategoryState,
   type ReviewRunState,
 } from '../../shared/protocol.js';
+import { PLAN_MOVED_LABEL } from '../reconnect-preflight.js';
 
 /**
  * What a Review Run, its categories and its findings read as (Issue #417; V2-UX-REV-004, REV-008,
@@ -114,19 +115,33 @@ export function reviewRunCategoryStateLabel(state: ReviewRunCategoryState, waiti
 export const SERIES_RETRIEVAL_SCOPE_CHANGED = 'SERIES_RETRIEVAL_SCOPE_CHANGED' as const;
 export const REVIEW_RUN_CANCELLED = 'REVIEW_RUN_CANCELLED' as const;
 export const REVIEW_RUN_CANCELLED_LABEL = '已取消' as const;
+/**
+ * The codes every category of a Run waiting in Connectivity Wait records when Reconnect Preflight stops it before anything was
+ * sent (Issue #760, S74c; OFF-008): its plan moved meanwhile, or this launch cannot start it. Durable in each event's record.
+ */
+export const REVIEW_RUN_PLAN_MOVED = 'REVIEW_RUN_PLAN_MOVED' as const;
+export const REVIEW_RUN_LAUNCH_BLOCKED = 'REVIEW_RUN_LAUNCH_BLOCKED' as const;
+/** 需要重新确认计划 (OFF-008), as `reconnect-preflight.ts` names the state for every kind. */
+export const REVIEW_RUN_PLAN_MOVED_LABEL = PLAN_MOVED_LABEL;
+/** A Run waiting to start once online (Issue #760, S74c), in the words a waiting baseline Run reads in: nothing has begun. */
+export const REVIEW_RUN_WAITING_LABEL = '等待网络 · 未启动' as const;
 
 /** How a stopped category reads: the stop's own words, never 未能开始 or 已中断 (SER-024). */
 export function reviewRunCategoryStopLabel(code: unknown): string | null {
-  return code === SERIES_RETRIEVAL_SCOPE_CHANGED ? SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL : code === REVIEW_RUN_CANCELLED ? REVIEW_RUN_CANCELLED_LABEL : null;
+  return code === SERIES_RETRIEVAL_SCOPE_CHANGED ? SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL
+    : code === REVIEW_RUN_CANCELLED ? REVIEW_RUN_CANCELLED_LABEL
+      : code === REVIEW_RUN_PLAN_MOVED ? REVIEW_RUN_PLAN_MOVED_LABEL : null;
 }
 
 export const REVIEW_RUN_STATE_LABELS = {
   prepared: '计划已冻结 · 待授权',
+  waiting: REVIEW_RUN_WAITING_LABEL,
   running: '正在审阅',
   settled: '已完成',
   partial: '部分完成',
   failed: '未能完成',
   'scope-changed': SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL,
+  'plan-moved': REVIEW_RUN_PLAN_MOVED_LABEL,
   cancelled: REVIEW_RUN_CANCELLED_LABEL,
 } as const satisfies Record<ReviewRunState, string>;
 
@@ -170,6 +185,12 @@ export function reviewRunCategoryState(input: ReviewRunCategoryStateInput): { st
 }
 
 /**
+ * What stopped a Run for good (Issue #64, S29b; Issue #760): a Series Retrieval Exclusion, the editor's 取消任务 after one or while
+ * the Run waited to start, or Reconnect Preflight finding its plan moved while it waited.
+ */
+export type ReviewRunStop = 'scope-changed' | 'cancelled' | 'plan-moved';
+
+/**
  * The Run's state from its categories': prepared until approved; running while driven with anything
  * left; `partial` with 继续审阅 when it stopped with categories left; once every category is finished,
  * `settled` if all of them reached the manuscript, `failed` if none did, and `partial` otherwise.
@@ -182,10 +203,18 @@ export function reviewRunState(input: {
    * What stopped the Run for good, from its categories' events (Issue #64, S29b): a Series Retrieval Exclusion, which leaves
    * only 修改计划并重新授权 and 取消任务 — never 继续审阅 (SER-024) — or the editor's 取消任务 after it. Absent, nothing did.
    */
-  readonly stop?: 'scope-changed' | 'cancelled' | null;
+  readonly stop?: ReviewRunStop | null;
+  /**
+   * Approved with 联网后开始任务 and nothing of it begun (Issue #760, S74c): it waits in Connectivity Wait for Reconnect Preflight,
+   * and nothing — never 继续审阅 — starts it meanwhile. Absent, it does not wait.
+   */
+  readonly waiting?: boolean;
 }): { state: ReviewRunState; canContinue: boolean } {
   if (!input.authorized) return { state: 'prepared', canContinue: false };
   if (input.stop === 'cancelled') return { state: 'cancelled', canContinue: false };
+  if (input.waiting === true) return { state: 'waiting', canContinue: false };
+  // Reconnect Preflight stopped it before anything was sent (OFF-008): every category records why, so none is left to drive.
+  if (input.stop === 'plan-moved') return { state: 'plan-moved', canContinue: false };
   // A Run still driven finishes its own step first; once it is not, it reads the stop, whatever categories are left.
   if (input.stop === 'scope-changed' && !input.driving) return { state: 'scope-changed', canContinue: false };
   if (input.categories.some((category) => category.pending)) {

@@ -462,6 +462,7 @@ import {
   TaskPlanError,
   withConnectionReadiness,
   withConnectivityReadiness,
+  withPlanMovedReason,
   withAnswerBlockers,
   withResumeBlockers,
   RESUME_BLOCKED_BINDING,
@@ -496,7 +497,6 @@ import {
 import { ExportLedgerError, ManuscriptExportStore, initializeExportLedgerSchema } from './manuscript-export.js';
 import {
   DEFAULT_EXECUTION_RULES_STATEMENT,
-  QUICK_START_OFFLINE_LATER,
   DEFAULT_EXECUTION_RULE_PROCEDURES,
   DefaultExecutionRuleError,
   DefaultExecutionRuleLedger,
@@ -734,6 +734,9 @@ import {
   type SeriesExclusionTargetProjection,
   type SeriesExclusionTargetsProjection,
   type SeriesExclusionsProjection,
+  type CancelWaitingTaskInput,
+  type StartTaskWhenOnlineInput,
+  type StartWhenOnlineTaskKind,
 } from '../shared/protocol.js';
 /** How many items or Runs one line of an exclusion's impact preview names before it gives the count. */
 const NAMED_EXCLUSION_ENTRIES = 5;
@@ -753,7 +756,7 @@ import {
 import { dialogueProjection, harnessHistoryReader, keptText, resolveAttempts, type DialogueHistoryReader, type LiveAnswer } from './dialogue/dialogue-history.js';
 import { dialogueQuestion } from './dialogue/contract.js';
 import { HARNESS_SESSION_LOG_DIRECTORY, readHarnessSessionLog } from './harness/session-log.js';
-import type { DialogueTaskReading, MaterialIndexAttentionReading } from './global-attention.js';
+import type { DialogueTaskReading, MaterialIndexAttentionReading, WaitingTaskAttentionReading } from './global-attention.js';
 import {
   SeriesKnowledgeError,
   SeriesKnowledgeLedger,
@@ -4199,6 +4202,39 @@ export interface BackgroundAnalysisRuntime {
   readonly quietMs: number;
 }
 
+/** The kinds whose Tasks run on an analysis ledger and wait with 联网后开始任务 through `startTaskWhenOnline` (Issue #760). */
+type LedgerTaskKind = Exclude<StartWhenOnlineTaskKind, 'review-run'>;
+
+/**
+ * A Run waiting in Connectivity Wait, of any kind (Issue #760, plan slice S74c): its Book, its Task, and its Run — a Review Run
+ * waits as a whole, and names itself, since its categories' Runs are recorded only as each one's turn comes.
+ */
+export interface WaitingTaskRun {
+  readonly kind: 'baseline-analysis' | StartWhenOnlineTaskKind;
+  readonly bookId: string;
+  /** The Task Intent of a ledger Task; the Review Run of a review. */
+  readonly ref: string;
+  /** The Run Record of a ledger Task; the Review Run of a review. */
+  readonly runRecordId: string;
+  /** When it was authorized to start once online: the order Reconnect Preflight looks at waiting Runs in. */
+  readonly at: string;
+}
+
+const TASK_PLAN_NOT_CURRENT_REASON = '这项任务已不是这本书当前的任务；请从它所在的位置重新打开计划。';
+/**
+ * What moved, by the refusal a waiting ledger Task's own start check makes at Reconnect Preflight (Issue #760; OFF-008), in the
+ * words 需要重新确认计划 names it with.
+ */
+const WAITING_TASK_MOVED_LABELS: Readonly<Record<string, string>> = {
+  TASK_PLAN_NOT_CURRENT: '这本书当前的任务',
+  EVALUATION_REWRITE_STALE: '这一版的评分',
+  EVALUATION_REWRITE_UNAVAILABLE: '这一版的评分',
+  WRITING_EXEMPLAR_MOVED: '范例',
+  MATERIAL_INDEX_MOVED: '参考资料',
+  MATERIAL_REFERENCE_UNAVAILABLE: '参考资料',
+};
+const WAITING_TASK_MOVED_FALLBACK = '计划依据的内容';
+
 export class EditorialStore {
   readonly #dataRoot: string;
   readonly #objectsRoot: string;
@@ -5015,7 +5051,7 @@ export class EditorialStore {
     slotBusy = false,
   ): ReviewWorkspaceProjection {
     return this.#reviewCall(() => {
-      this.#reviewRuns.recordAuthorization(bookId, reviewRunId, approvedDigests, slotBusy);
+      this.#reviewRuns.recordAuthorization(bookId, reviewRunId, approvedDigests, slotBusy, 'now');
       return this.#reviewRuns.workspace(bookId, reviewRunId);
     });
   }
@@ -5132,7 +5168,7 @@ export class EditorialStore {
       // 结果待确认 (Issue #51, S16c): the ranges this Task would send again whose earlier result could not be known.
       const resendUnits = this.#analysisCall(() => this.#baselineAnalysis.resendUnitsOf(projection));
       const plan = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, defaultRule, clarifications, resendUnits, ...(stopped === null ? {} : { stopped }) }));
-      return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(plan, projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     if (input.kind === 'readers-report') {
       // 审稿意见 (Issue #429, S81c): the reader's report kind's latest Task, on the ledger of the contract its plan froze.
@@ -5153,7 +5189,7 @@ export class EditorialStore {
           exemplars: readersReportExemplarLine(latest.task.input.exemplars),
         },
       }));
-      return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(plan, projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     if (input.kind === 'evaluation-rewrite') {
       // 按我的评分重写评语 (Issue #429, S81b2): the rewrite kind's latest Task, on the ledger of the contract its plan froze.
@@ -5174,7 +5210,7 @@ export class EditorialStore {
           scored: evaluationRewriteScoredItems(latest.task.input).map((item) => ({ label: item.label, score: item.score!, fullMarks: item.fullMarks })),
         },
       }));
-      return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(plan, projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     if (input.kind === 'writing') {
       // 写作任务 (Issue #432, S84a): the writing kind's latest Task, on the ledger of the contract its plan froze.
@@ -5189,7 +5225,7 @@ export class EditorialStore {
         projection, bookTitle, blocks, input: latest.task.input, exemplarsHere: latest.task.exemplarsReadable, copyRules: latest.task.copyRules, defaultRule,
         materials: latest.task.materials,
       }));
-      return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(plan, projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     if (input.kind === 'initial-evaluation') {
       // AI7 初评 (Issue #429, S81b1): the evaluation kind's latest Task, read as the baseline's is.
@@ -5200,7 +5236,7 @@ export class EditorialStore {
       const blocks = this.#analysisCall(() => this.#initialEvaluation.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
       const profile = this.#evaluations.profile();
       const plan = this.#taskPlanCall(() => initialEvaluationPlan({ projection, bookTitle, blocks, profile }));
-      return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(plan, projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     const reviewRunId = input.ref;
     requireStore(reviewRunId !== null, 'TASK_PLAN_INVALID', '审阅的计划要指明是哪一次审阅。');
@@ -5213,7 +5249,9 @@ export class EditorialStore {
       .map((category) => category.task?.components['provider-resolution-plan'])
       .map((provider) => (provider !== null && typeof provider === 'object' ? (provider as { executionRoute?: { kind?: unknown } }).executionRoute?.kind : undefined))
       .find((kind): kind is string => typeof kind === 'string');
-    return { plan, routeKind: plan.start.needsModelConnection ? frozenRoute ?? null : null };
+    // Whether the Run can be offline is its route's to say, as the baseline's (Issue #760, S74c): a route that reaches its model
+    // over the network — and only one — waits for it. Whether it needs a credential is `needsModelConnection`'s, decided apart.
+    return { plan, routeKind: frozenRoute ?? null };
   }
 
   /**
@@ -5472,7 +5510,9 @@ export class EditorialStore {
   /** The baseline Runs waiting in Connectivity Wait — the route Book's, or every Book's — oldest first. */
   waitingBaselineAnalysisRuns(bookId: string | null): Array<{ bookId: string; taskIntentId: string; runRecordId: string }> {
     this.#assertAvailable();
-    return this.#analysisCall(() => this.#baselineAnalysis.waitingRuns()).filter((run) => bookId === null || run.bookId === bookId);
+    return this.#analysisCall(() => this.#baselineAnalysis.waitingRuns())
+      .filter((run) => bookId === null || run.bookId === bookId)
+      .map((run) => ({ bookId: run.bookId, taskIntentId: run.taskIntentId, runRecordId: run.runRecordId }));
   }
 
   /** Reconnect Preflight's local half for one waiting Run: the labels of the material inputs that moved, or none. */
@@ -5491,6 +5531,234 @@ export class EditorialStore {
   baselineAnalysisRunWaits(runRecordId: string): boolean {
     this.#assertAvailable();
     return this.#analysisCall(() => this.#baselineAnalysis.currentRunState(runRecordId)) === 'awaiting-connectivity';
+  }
+
+  // ---- 联网后开始任务 for every kind (Issue #760, plan slice S74c) ----------------------------------------------
+
+  /**
+   * 联网后开始任务 of a Task of any other kind with a plan (Issue #760, S74c; AUTH-004, OFF-005): exactly the Run Authorization
+   * its 开始任务 records — a ledger Task's Run Record, after every check its own start makes, or a Review Run's one approval —
+   * and the Run then waits in Connectivity Wait. Nothing is sent, no usage arises and no place is taken; Reconnect Preflight
+   * starts it as 开始任务 would. A repeat answers as the first did.
+   */
+  startTaskWhenOnline(input: StartTaskWhenOnlineInput): void {
+    this.#assertAvailable();
+    if (input.kind === 'review-run') {
+      this.#reviewCall(() => this.#reviewRuns.recordAuthorization(input.bookId, input.ref, input.planDigests, false, 'when-online'));
+      return;
+    }
+    const digest = input.planEnvelopeDigest;
+    requireStore(digest !== null && input.planDigests.length === 0, 'TASK_PLAN_INVALID', '任务计划请求无效。');
+    switch (input.kind) {
+      case 'initial-evaluation':
+        this.authorizeInitialEvaluation(input.bookId, input.ref, digest, 'when-online');
+        return;
+      case 'readers-report':
+        this.authorizeReadersReport(input.bookId, input.ref, digest, 'when-online');
+        return;
+      case 'evaluation-rewrite':
+        this.authorizeEvaluationRewrite(input.bookId, input.ref, digest, 'when-online');
+        return;
+      case 'writing':
+        this.authorizeWriting(input.bookId, input.ref, digest, 'when-online');
+        return;
+    }
+  }
+
+  /**
+   * 取消 while the Task's Run waits (Issue #760; OFF-010) — in Connectivity Wait, or on the governor for a place: terminal, before
+   * any dispatch and without provider work. Answers the Run the governor must let go of, when it waited there for a place.
+   */
+  cancelWaitingTask(input: CancelWaitingTaskInput): { dequeue: string | null } {
+    this.#assertAvailable();
+    if (input.kind === 'review-run') {
+      this.#reviewCall(() => this.#reviewRuns.cancelWaiting(input.bookId, input.ref));
+      return { dequeue: null };
+    }
+    const ledger = this.#ledgerTaskOf(input.kind, input.bookId, input.ref);
+    const before = this.#analysisCall(() => ledger.inspect(input.bookId)).run;
+    this.#analysisCall(() => ledger.cancelWaiting(input.bookId, input.ref));
+    return { dequeue: before !== null && before.state === 'authorized' ? before.runRecordId : null };
+  }
+
+  /**
+   * Every Run waiting in Connectivity Wait — the route Book's, or every Book's — of every kind, oldest authorization first: the
+   * baseline's, each ledger kind's, and each Review Run approved to start once online.
+   */
+  waitingTaskRuns(bookId: string | null): WaitingTaskRun[] {
+    this.#assertAvailable();
+    const runs: WaitingTaskRun[] = [];
+    const ofLedger = (kind: WaitingTaskRun['kind'], ledger: BaselineAnalysisStore | null): void => {
+      if (ledger === null) return;
+      for (const run of this.#analysisCall(() => ledger.waitingRuns())) {
+        runs.push({ kind, bookId: run.bookId, ref: run.taskIntentId, runRecordId: run.runRecordId, at: run.recordedAt });
+      }
+    };
+    ofLedger('baseline-analysis', this.#baselineAnalysis);
+    ofLedger('initial-evaluation', this.#initialEvaluation);
+    for (const kind of ['readers-report', 'evaluation-rewrite', 'writing'] as const) ofLedger(kind, this.#anyLedgerOfKind(kind));
+    for (const run of this.#reviewCall(() => this.#reviewRuns.waitingRuns())) {
+      runs.push({ kind: 'review-run', bookId: run.bookId, ref: run.reviewRunId, runRecordId: run.reviewRunId, at: run.authorizedAt });
+    }
+    return runs.filter((run) => bookId === null || run.bookId === bookId).sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+  }
+
+  /** Whether the Run still waits: Reconnect Preflight re-reads it before it acts — the editor may have cancelled it meanwhile. */
+  taskRunWaits(run: WaitingTaskRun): boolean {
+    this.#assertAvailable();
+    if (run.kind === 'review-run') return this.#reviewCall(() => this.#reviewRuns.runWaits(run.ref));
+    // The Run states are one relation for every ledger kind: any ledger reads one by its Run Record.
+    return this.#analysisCall(() => this.#baselineAnalysis.currentRunState(run.runRecordId)) === 'awaiting-connectivity';
+  }
+
+  /**
+   * Reconnect Preflight's local half for one waiting Run of any kind (OFF-007, OFF-008): the labels of what the authorization
+   * bound that moved — the ledger plan's material inputs, and what the kind's own start checks (the version a rewrite read, a
+   * writing Task's 范例 and 资料库 items, the Task still the Book's current one); none while it all stands. This launch's scope
+   * is admission's to refuse, in its own words.
+   */
+  taskPreflightDrift(run: WaitingTaskRun): ReadonlyArray<string> {
+    this.#assertAvailable();
+    if (run.kind === 'review-run') return this.#reviewCall(() => this.#reviewRuns.preflightDrift(run.ref));
+    if (run.kind === 'baseline-analysis') return this.baselineAnalysisPreflightDrift(run.runRecordId);
+    let ledger: BaselineAnalysisStore;
+    try {
+      ledger = this.#ledgerTaskOf(run.kind, run.bookId, run.ref);
+    } catch (error) {
+      if (!(error instanceof StoreError)) throw error;
+      return [WAITING_TASK_MOVED_LABELS[error.code] ?? WAITING_TASK_MOVED_FALLBACK];
+    }
+    return this.#analysisCall(() => ledger.preflightDrift(run.runRecordId));
+  }
+
+  /** A waiting Run that can never start as authorized is blocked with its reasons, whatever its kind (OFF-008). */
+  blockWaitingTaskRun(run: WaitingTaskRun, reasons: ReadonlyArray<string>, cause: WaitingRunBlockCause): void {
+    this.#assertAvailable();
+    if (run.kind === 'review-run') {
+      this.#reviewCall(() => this.#reviewRuns.blockWaiting(run.ref, reasons, cause));
+      return;
+    }
+    // The Run states are one relation for every ledger kind: the baseline ledger records the block of any kind's Run.
+    this.#analysisCall(() => this.#baselineAnalysis.blockWaitingRun(run.runRecordId, reasons, cause));
+  }
+
+  /**
+   * What Reconnect Preflight hands a waiting ledger Run to the execution owner on (Issue #760): this launch's scope for the kind
+   * checked again — a refusal blocks the Run with its words — and the ledger of its Task's contract.
+   */
+  waitingRunLedger(run: WaitingTaskRun & { kind: Exclude<WaitingTaskRun['kind'], 'review-run'> }): BaselineAnalysisStore {
+    this.#assertAvailable();
+    if (run.kind === 'baseline-analysis') return this.#baselineAnalysis;
+    this.#requireLedgerKindScope(run.kind, run.bookId, run.ref);
+    return this.#ledgerTaskOf(run.kind, run.bookId, run.ref);
+  }
+
+  /** Reconnect Preflight starts a waiting Review Run (Issue #760): `drive` hands it to the drive loop, which may take it now. */
+  admitWaitingReviewRun(reviewRunId: string, drive: () => void): void {
+    this.#assertAvailable();
+    this.#reviewCall(() => this.#reviewRuns.admitWaiting(reviewRunId, drive));
+  }
+
+  /**
+   * This launch's scope for a ledger kind (Issue #760, S74c): 开始任务, 联网后开始任务 and Reconnect Preflight's admission refuse a
+   * kind no policy of this launch sends, in that kind's own words. A writing plan that lists 资料库 items is refused in its own
+   * words first (Issue #428).
+   */
+  #requireLedgerKindScope(kind: LedgerTaskKind, bookId: string, taskIntentId: string): void {
+    switch (kind) {
+      case 'initial-evaluation':
+        this.#requireInitialEvaluationScope();
+        return;
+      case 'readers-report':
+        this.#requireReadersReportScope();
+        return;
+      case 'evaluation-rewrite':
+        this.#requireEvaluationRewriteScope();
+        return;
+      case 'writing':
+        this.#assertAvailable();
+        if (this.#baselineAnalysis.launch.live !== null) {
+          const listed = this.#latestWriting(bookId);
+          this.#requireWritingMaterialScope(listed !== null && listed.task.taskIntentId === taskIntentId && listed.task.materials.length > 0);
+        }
+        this.#requireWritingScope();
+        return;
+    }
+  }
+
+  /**
+   * The ledger of a ledger Task of `kind` that 开始任务 and 联网后开始任务 may authorize, and Reconnect Preflight admit (Issue #760):
+   * the Book's current Task of the kind, and — for a rewrite — the version it read still as it read it, or — for a writing Task —
+   * its 范例 and 资料库 items still giving what its plan pinned. Each refusal is the kind's own, as its 开始任务 always said it.
+   */
+  #ledgerTaskOf(kind: LedgerTaskKind, bookId: string, taskIntentId: string): BaselineAnalysisStore {
+    this.#assertAvailable();
+    switch (kind) {
+      case 'initial-evaluation':
+        // The ledger itself refuses a Task that is not the Book's current one, as its authorization always did.
+        return this.#initialEvaluation;
+      case 'readers-report': {
+        const latest = this.#latestReadersReport(bookId);
+        requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT', TASK_PLAN_NOT_CURRENT_REASON);
+        return latest.ledger;
+      }
+      case 'evaluation-rewrite': {
+        const latest = this.#latestEvaluationRewrite(bookId);
+        requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT', TASK_PLAN_NOT_CURRENT_REASON);
+        // The version may have moved since the plan was prepared — saved again, or 定稿 — while the drawer stayed open: a Run then
+        // would only write words that can never be 采用 (S81b2 review). Refused here, before any Run is spent.
+        const version = this.#evaluationCall(() => this.#evaluations.rewritable(bookId, latest.task.recordId));
+        const refusal = evaluationRewriteRefusal(version);
+        requireStore(refusal === null, 'EVALUATION_REWRITE_UNAVAILABLE', refusal ?? '');
+        requireStore(version.entryOrdinal === latest.task.entryOrdinal && version.entrySha256 === latest.task.entrySha256, 'EVALUATION_REWRITE_STALE',
+          '这一版在准备重写之后又保存过：这份计划依据的是之前的分数；请按现在的评分重新准备重写。');
+        return latest.ledger;
+      }
+      case 'writing': {
+        const latest = this.#latestWriting(bookId);
+        requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT', TASK_PLAN_NOT_CURRENT_REASON);
+        // A Task whose exemplar no longer gives the text it pinned is never run on other words (#688 re-review).
+        requireStore(latest.task.exemplarsReadable, 'WRITING_EXEMPLAR_MOVED', WRITING_EXEMPLAR_MOVED);
+        // …nor one whose 资料库 item no longer reads at the build its plan pinned (Issue #428): the Run is not started, and the words
+        // say 改计划重做 — a plan prepared again in 交付物 pins the item as it is now.
+        const moved = latest.task.materials.find((material) => material.refusal !== null)?.refusal ?? null;
+        if (moved !== null) throw new StoreError(moved.code, moved.message);
+        return latest.ledger;
+      }
+    }
+  }
+
+  /**
+   * 待我处理's and the 任务 panel's reading of every other ledger kind (Issue #760, S74c): each Book's latest Task of the kind whose
+   * Run waits to start once online, or was blocked because its plan moved meanwhile.
+   */
+  #waitingTaskAttention(bookId: string | null, limit: number): WaitingTaskAttentionReading[] {
+    const readings: WaitingTaskAttentionReading[] = [];
+    const add = (kind: LedgerTaskKind, ledger: BaselineAnalysisStore | null): void => {
+      if (ledger === null) return;
+      for (const reading of this.#analysisCall(() => ledger.waitingAttentionReadings(bookId, limit))) readings.push({ kind, ...reading });
+    };
+    add('initial-evaluation', this.#initialEvaluation);
+    for (const kind of ['readers-report', 'evaluation-rewrite', 'writing'] as const) add(kind, this.#anyLedgerOfKind(kind));
+    return readings;
+  }
+
+  /** One ledger of a kind whose Tasks each run on the ledger of their own contract: any of them reads the kind's Run states. */
+  #anyLedgerOfKind(kind: 'readers-report' | 'evaluation-rewrite' | 'writing'): BaselineAnalysisStore | null {
+    switch (kind) {
+      case 'readers-report': {
+        const any = this.#readersReportCall(() => this.#readersReports.anyTask());
+        return any === null ? null : this.readersReportLedger(any.input);
+      }
+      case 'evaluation-rewrite': {
+        const any = this.#evaluationRewriteCall(() => this.#evaluationRewrites.anyTask());
+        return any === null ? null : this.#evaluationRewriteLedger(any.input);
+      }
+      case 'writing': {
+        const any = this.#writingCall(() => this.#writingTasks.anyTask());
+        return any === null ? null : this.#writingLedgerOf(any);
+      }
+    }
   }
 
   // ---- 默认执行规则 and 快速开始 (Issue #421, plan slice S75) ---------------------------------------------------
@@ -8070,9 +8338,15 @@ export class EditorialStore {
   }
 
   /** 开始任务 in the drawer's bar: the standard-direct Run Authorization and the Run; the caller hands the Run to the owner. */
-  authorizeInitialEvaluation(bookId: string, taskIntentId: string, planEnvelopeDigest: string): { dispatchRunRecordId: string | null } {
-    this.#requireInitialEvaluationScope();
-    const authorized = this.#analysisCall(() => this.#initialEvaluation.authorize(bookId, taskIntentId, planEnvelopeDigest));
+  authorizeInitialEvaluation(
+    bookId: string,
+    taskIntentId: string,
+    planEnvelopeDigest: string,
+    start: 'now' | 'when-online' = 'now',
+  ): { dispatchRunRecordId: string | null } {
+    this.#requireLedgerKindScope('initial-evaluation', bookId, taskIntentId);
+    const ledger = this.#ledgerTaskOf('initial-evaluation', bookId, taskIntentId);
+    const authorized = this.#analysisCall(() => ledger.authorize(bookId, taskIntentId, planEnvelopeDigest, start));
     return { dispatchRunRecordId: authorized.dispatchRunRecordId };
   }
 
@@ -8318,13 +8592,16 @@ export class EditorialStore {
   }
 
   /** 开始任务 in the drawer's bar: the Run Authorization and the Run on the ledger of the plan's contract, for the owner. */
-  authorizeReadersReport(bookId: string, taskIntentId: string, planEnvelopeDigest: string): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore } {
-    this.#requireReadersReportScope();
-    const latest = this.#latestReadersReport(bookId);
-    requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT',
-      '这项任务已不是这本书当前的任务；请从它所在的位置重新打开计划。');
-    const authorized = this.#analysisCall(() => latest.ledger.authorize(bookId, taskIntentId, planEnvelopeDigest));
-    return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger: latest.ledger };
+  authorizeReadersReport(
+    bookId: string,
+    taskIntentId: string,
+    planEnvelopeDigest: string,
+    start: 'now' | 'when-online' = 'now',
+  ): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore } {
+    this.#requireLedgerKindScope('readers-report', bookId, taskIntentId);
+    const ledger = this.#ledgerTaskOf('readers-report', bookId, taskIntentId);
+    const authorized = this.#analysisCall(() => ledger.authorize(bookId, taskIntentId, planEnvelopeDigest, start));
+    return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger };
   }
 
   /**
@@ -8911,25 +9188,16 @@ export class EditorialStore {
   }
 
   /** 开始任务 in the drawer's bar: the Run Authorization and the Run on the ledger of the plan's contract, for the owner. */
-  authorizeWriting(bookId: string, taskIntentId: string, planEnvelopeDigest: string): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore } {
-    this.#assertAvailable();
-    // A plan that lists 资料库 items is refused under a live scope in its own words (Issue #428), then every writing plan is.
-    if (this.#baselineAnalysis.launch.live !== null) {
-      const listed = this.#latestWriting(bookId);
-      this.#requireWritingMaterialScope(listed !== null && listed.task.taskIntentId === taskIntentId && listed.task.materials.length > 0);
-    }
-    this.#requireWritingScope();
-    const latest = this.#latestWriting(bookId);
-    requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT',
-      '这项任务已不是这本书当前的任务；请从它所在的位置重新打开计划。');
-    // A Task whose exemplar no longer gives the text it pinned is never run on other words (#688 re-review).
-    requireStore(latest.task.exemplarsReadable, 'WRITING_EXEMPLAR_MOVED', WRITING_EXEMPLAR_MOVED);
-    // …nor one whose 资料库 item no longer reads at the build its plan pinned (Issue #428): the Run is not started, and the words
-    // say 改计划重做 — a plan prepared again in 交付物 pins the item as it is now.
-    const moved = latest.task.materials.find((material) => material.refusal !== null)?.refusal ?? null;
-    if (moved !== null) throw new StoreError(moved.code, moved.message);
-    const authorized = this.#analysisCall(() => latest.ledger.authorize(bookId, taskIntentId, planEnvelopeDigest));
-    return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger: latest.ledger };
+  authorizeWriting(
+    bookId: string,
+    taskIntentId: string,
+    planEnvelopeDigest: string,
+    start: 'now' | 'when-online' = 'now',
+  ): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore } {
+    this.#requireLedgerKindScope('writing', bookId, taskIntentId);
+    const ledger = this.#ledgerTaskOf('writing', bookId, taskIntentId);
+    const authorized = this.#analysisCall(() => ledger.authorize(bookId, taskIntentId, planEnvelopeDigest, start));
+    return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger };
   }
 
   /**
@@ -9234,8 +9502,9 @@ export class EditorialStore {
       case 'needs-connection':
         return fellBack(QUICK_START_NEEDS_CONNECTION);
       case 'offline':
-        // The writing bar has no 联网后开始任务 (#701 review P3-3): the reason says to start once online.
-        return fellBack(QUICK_START_OFFLINE_LATER);
+        // As the baseline's (Issue #760, S74c; TASK-024): a rule starts only a Run that can begin now, so offline the Task stops
+        // at its plan, whose bar offers 联网后开始任务 — never a wait the editor did not choose there.
+        return fellBack(QUICK_START_OFFLINE);
       default:
         return fellBack(QUICK_START_NOT_READY);
     }
@@ -9584,20 +9853,16 @@ export class EditorialStore {
   }
 
   /** 开始任务 in the drawer's bar: the Run Authorization and the Run on the ledger of the plan's contract, for the owner. */
-  authorizeEvaluationRewrite(bookId: string, taskIntentId: string, planEnvelopeDigest: string): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore; recordId: string } {
-    this.#requireEvaluationRewriteScope();
-    const latest = this.#latestEvaluationRewrite(bookId);
-    requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT',
-      '这项任务已不是这本书当前的任务；请从它所在的位置重新打开计划。');
-    // The version may have moved since the plan was prepared — saved again, or 定稿 — while the drawer stayed open: a Run then
-    // would only write words that can never be 采用 (S81b2 review). Refused here, before any Run is spent.
-    const version = this.#evaluationCall(() => this.#evaluations.rewritable(bookId, latest.task.recordId));
-    const refusal = evaluationRewriteRefusal(version);
-    requireStore(refusal === null, 'EVALUATION_REWRITE_UNAVAILABLE', refusal ?? '');
-    requireStore(version.entryOrdinal === latest.task.entryOrdinal && version.entrySha256 === latest.task.entrySha256, 'EVALUATION_REWRITE_STALE',
-      '这一版在准备重写之后又保存过：这份计划依据的是之前的分数；请按现在的评分重新准备重写。');
-    const authorized = this.#analysisCall(() => latest.ledger.authorize(bookId, taskIntentId, planEnvelopeDigest));
-    return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger: latest.ledger, recordId: latest.task.recordId };
+  authorizeEvaluationRewrite(
+    bookId: string,
+    taskIntentId: string,
+    planEnvelopeDigest: string,
+    start: 'now' | 'when-online' = 'now',
+  ): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore; recordId: string } {
+    this.#requireLedgerKindScope('evaluation-rewrite', bookId, taskIntentId);
+    const ledger = this.#ledgerTaskOf('evaluation-rewrite', bookId, taskIntentId);
+    const authorized = this.#analysisCall(() => ledger.authorize(bookId, taskIntentId, planEnvelopeDigest, start));
+    return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger, recordId: this.#latestEvaluationRewrite(bookId)!.task.recordId };
   }
 
   /**
@@ -16719,6 +16984,7 @@ export class EditorialStore {
           conflicts: readConflictAttention(this.#authority, limit),
           analysisTasks: baseline.tasks,
           analysisOutcomes: baseline.outcomes,
+          waitingTasks: this.#waitingTaskAttention(null, limit),
           reviewRuns: review.latest,
           reviewCompletions: review.completed,
           maintenance: this.#maintenanceCases.attentionReadings(limit),
@@ -16758,6 +17024,7 @@ export class EditorialStore {
           bookId,
           analysisTasks: baseline.tasks,
           analysisOutcomes: baseline.outcomes,
+          waitingTasks: this.#waitingTaskAttention(bookId, limit),
           reviewRuns: review.latest,
           reviewCompletions: review.completed,
           waitingFor,

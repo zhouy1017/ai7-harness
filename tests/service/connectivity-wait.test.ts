@@ -73,14 +73,14 @@ function reader(state: { connectivity: Connectivity; busy: boolean }): TaskPlanC
 function preflight(store: EditorialStore, owner: BaselineAnalysisExecutionOwner, connectivity: () => Connectivity) {
   return reconnectPreflight({
     waitingRuns: () => store.waitingBaselineAnalysisRuns(null),
-    stillWaiting: (runRecordId) => store.baselineAnalysisRunWaits(runRecordId),
-    drift: (runRecordId) => store.baselineAnalysisPreflightDrift(runRecordId),
-    block: (runRecordId, reasons, cause) => store.blockWaitingBaselineAnalysisRun(runRecordId, reasons, cause),
+    stillWaiting: ({ runRecordId }) => store.baselineAnalysisRunWaits(runRecordId),
+    drift: ({ runRecordId }) => store.baselineAnalysisPreflightDrift(runRecordId),
+    block: ({ runRecordId }, reasons, cause) => store.blockWaitingBaselineAnalysisRun(runRecordId, reasons, cause),
     reachesNetwork: true,
     connectivity,
     credentialReadiness: () => owner.liveCredentialReadiness(),
     slotBusy: () => owner.busy,
-    admit: (runRecordId) => owner.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { afterReconnectPreflight: true }),
+    admit: ({ runRecordId }) => owner.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { afterReconnectPreflight: true }),
     frozen: () => store.replacementFrozen(),
   });
 }
