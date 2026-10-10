@@ -30,6 +30,16 @@ const trace = (await import(new URL('../../e2e/readiness-trace.mjs', import.meta
   cpuShares(before: ReadonlyArray<ProcessRow>, after: ReadonlyArray<ProcessRow>, rootPid: number, windowMs: number, cores: number, listingPid?: number | null): { product: number; host: number };
   measureCpuShares(rootPid: number, windowMs?: number): Promise<{ product: number; host: number } | null>;
   listHostProcessesWithListing(platform?: string): Promise<{ rows: Array<ProcessRow>; listingPid: number | null } | null>;
+  STARTUP_FILES: ReadonlyArray<string>;
+  singletonLockName(platform?: string): string;
+  observeLaunchStart(userDataDir: string, executable: string, platform?: string): Promise<{ lock: string; prior: number | null }>;
+  parseProcessStatus(text: string | null): { state: string | null; rssMb: number | null };
+  parseThreadCount(text: string | null): number | null;
+  startupFilesOpen(text: string | null, runtimeRoot: string, userDataDir: string): Array<string> | null;
+  lastLogEntry(text: string | null, pid: number): { entries: number; sender: string | null; subsystem: string | null } | null;
+  probeStalledProduct(pid: number, executable: string, userDataDir: string, lookbackSeconds: number, platform?: string): Promise<Record<string, unknown> | null>;
+  formatLaunchStart(start: { lock: string; prior: number | null }): string;
+  formatStalledProduct(stall: Record<string, unknown>): string;
 };
 interface ProcessRow { pid: number; ppid: number; cpuSeconds: number | null; path: string | null }
 interface ProcessSample { alive: boolean; cpuSeconds: number | null; helpers: number; prior: number }
@@ -445,6 +455,135 @@ describe('the readiness trace (Issue #518)', () => {
     for (const location of trace.STARTUP_LOCATIONS) {
       expect(trace.readReadinessTrace(line.replace('last=none', `last=${location}`), 'J-01')).not.toBeNull();
     }
+  });
+
+  it('carries what a launch began from and what a probe of a launch never acquired found, and relays only their closed shape (#675)', () => {
+    const launch = launched([[3, '<launched> pid=5']]);
+    launch.start = { lock: 'no', prior: 0 };
+    launch.stall = {
+      state: 'sleep', rssMb: 142, threads: 31, files: ['icu', 'framework', 'pak'],
+      log: { entries: 4, sender: 'skylight', subsystem: 'com.apple.skylight' },
+    };
+    const line = trace.formatReadinessTrace('J-01', launch, 1_000 + 60_009);
+    expect(line).toBe(
+      'READINESS/J-01/launch=empty-book-first-import;launched=3;last=none@none;service=none@none;ready=none;failed=none;exit=none@none;target=no;other=0;age=60009' +
+        ';start=lock:no,prior:0;stall=threads:31,state:sleep,rss:142,files:framework+icu+pak,log:4:skylight:com.apple.skylight',
+    );
+    const fields = line.slice('READINESS/J-01/'.length);
+    expect(controller.collectReadinessTrace({ stderr: `${line}\n` }, 'J-01')).toBe(fields);
+    // Unread parts say so; a probe that never ran leaves the field out, and a launch with no start record leaves both out.
+    launch.stall = { state: null, rssMb: null, threads: null, files: null, log: null };
+    expect(trace.formatReadinessTrace('J-01', launch, 1_000 + 60_009))
+      .toMatch(/;start=lock:no,prior:0;stall=threads:unknown,state:unknown,rss:unknown,files:unknown,log:unknown:none:none$/u);
+    launch.stall = { state: 'wait', rssMb: 3, threads: 1, files: [], log: { entries: 0, sender: null, subsystem: null } };
+    const bare = trace.formatReadinessTrace('J-01', launch, 1_000 + 60_009);
+    expect(bare).toMatch(/;stall=threads:1,state:wait,rss:3,files:none,log:0:none:none$/u);
+    expect(trace.readReadinessTrace(bare, 'J-01')).not.toBeNull();
+    launch.stall = null;
+    launch.start = { lock: 'yes', prior: null };
+    expect(trace.formatReadinessTrace('J-01', launch, 1_000 + 60_009)).toMatch(/;age=60009;start=lock:yes,prior:unknown$/u);
+    launch.start = null;
+    expect(trace.formatReadinessTrace('J-01', launch, 1_000 + 60_009)).toMatch(/;age=60009$/u);
+    // Nothing outside the closed words passes: an unknown state or file, a path, a message.
+    launch.start = { lock: '/tmp/x', prior: 400 };
+    launch.stall = { state: 'blocked', rssMb: 1, threads: 2, files: ['framework', '/Users/x'], log: { entries: 1, sender: 'Electron Framework', subsystem: '稿件' } };
+    expect(trace.formatReadinessTrace('J-01', launch, 1_000 + 60_009))
+      .toMatch(/;start=lock:unknown,prior:99;stall=threads:2,state:unknown,rss:1,files:framework,log:1:other:other$/u);
+    for (const forged of [
+      `${fields.replace('files:framework+icu+pak', 'files:/Users/runner')}`,
+      `${fields.replace('log:4:skylight', 'log:4:Sky Light')}`,
+      `${fields.replace('state:sleep', 'state:稿件')}`,
+      `${fields.replace(';start=lock:no,prior:0', '')};start=lock:no,prior:0`,
+      `${fields};note=x`,
+    ]) expect(trace.readReadinessTrace(`READINESS/J-01/${forged}`, 'J-01')).toBeNull();
+  });
+
+  it('says whether a launch\'s user-data-dir still held an instance\'s lock before it began (#675)', async () => {
+    expect(trace.singletonLockName('darwin')).toBe('SingletonLock');
+    expect(trace.singletonLockName('win32')).toBe('lockfile');
+    const root = mkdtempSync(join(tmpdir(), 'ai7-launch-start-'));
+    try {
+      // Off macOS the host's processes are not listed before a launch.
+      expect(await trace.observeLaunchStart(root, process.execPath, 'win32')).toEqual({ lock: 'no', prior: null });
+      writeFileSync(join(root, 'lockfile'), '');
+      expect(await trace.observeLaunchStart(root, process.execPath, 'win32')).toEqual({ lock: 'yes', prior: null });
+      expect(await trace.observeLaunchStart(root, process.execPath, 'linux')).toEqual({ lock: 'no', prior: null });
+      writeFileSync(join(root, 'SingletonLock'), '');
+      expect(await trace.observeLaunchStart(root, process.execPath, 'linux')).toEqual({ lock: 'yes', prior: null });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('reads a stalled macOS product\'s state, threads, startup files and last unified-log entry, keeping no path or message (#675)', async () => {
+    expect(trace.parseProcessStatus('Ss    145408\n')).toEqual({ state: 'sleep', rssMb: 142 });
+    expect(trace.parseProcessStatus('U       3072')).toEqual({ state: 'wait', rssMb: 3 });
+    expect(trace.parseProcessStatus('I+ 1024')).toEqual({ state: 'idle', rssMb: 1 });
+    expect(trace.parseProcessStatus('X 1024')).toEqual({ state: 'unknown', rssMb: 1 });
+    expect(trace.parseProcessStatus('')).toEqual({ state: null, rssMb: null });
+    expect(trace.parseProcessStatus(null)).toEqual({ state: null, rssMb: null });
+    expect(trace.parseThreadCount([
+      'USER     PID   TT  %CPU STAT PRI     STIME     UTIME COMMAND',
+      'runner  5000   ??    0.0 S    31T   0:00.01   0:00.02 /a/Electron.app/Contents/MacOS/Electron --x',
+      '        5000         0.0 S    31T   0:00.00   0:00.00',
+      '',
+    ].join('\n'))).toBe(2);
+    expect(trace.parseThreadCount('USER PID\n')).toBeNull();
+    expect(trace.parseThreadCount(null)).toBeNull();
+    const app = '/runner/.runtime/electron/Electron.app';
+    const data = '/private/var/folders/x/T/ai7-j01-e2e-1/before-paint-data/shell';
+    const lsof = [
+      'p5000',
+      'ftxt',
+      `n${app}/Contents/MacOS/Electron`,
+      'ftxt',
+      `n${app}/Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework`,
+      'ftxt',
+      'n/usr/lib/dyld',
+      'ftxt',
+      `n${app}/Contents/Frameworks/Electron Framework.framework/Versions/A/Resources/icudtl.dat`,
+      `n${app}/Contents/Frameworks/Electron Framework.framework/Versions/A/Resources/v8_context_snapshot.arm64.bin`,
+      'f3',
+      'npipe',
+      `n${data}/SingletonLock`,
+    ].join('\n');
+    expect(trace.startupFilesOpen(lsof, app, data)).toEqual(['framework', 'icu', 'snapshot', 'data']);
+    expect(trace.startupFilesOpen(`p1\nn${app}/Contents/Resources/default_app.asar\nn${app}/Contents/Frameworks/Electron Framework.framework/Resources/resources.pak`, app, data))
+      .toEqual(['framework', 'pak', 'asar']);
+    expect(trace.startupFilesOpen('p1\nfcwd\nn/\n', app, data)).toEqual([]);
+    expect(trace.startupFilesOpen(null, app, data)).toBeNull();
+    // A framework of the same name outside the runtime root is not this Electron's.
+    expect(trace.startupFilesOpen('n/elsewhere/Electron Framework.framework/Electron Framework', app, data)).toEqual([]);
+    const log = [
+      'Filtering the log data using "processIdentifier == 5000"',
+      JSON.stringify({ processID: 5000, subsystem: 'com.apple.CFPreferences', senderImagePath: '/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation', eventMessage: 'a message' }),
+      JSON.stringify({ processID: 4999, subsystem: 'com.apple.other', senderImagePath: '/usr/lib/other.dylib' }),
+      JSON.stringify({ processID: 5000, subsystem: '', senderImagePath: '/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/SkyLight', eventMessage: '/Users/runner/secret' }),
+      '{not json',
+    ].join('\n');
+    expect(trace.lastLogEntry(log, 5000)).toEqual({ entries: 2, sender: 'skylight', subsystem: null });
+    expect(trace.lastLogEntry('', 5000)).toEqual({ entries: 0, sender: null, subsystem: null });
+    expect(trace.lastLogEntry(null, 5000)).toBeNull();
+    expect(trace.lastLogEntry(JSON.stringify({ processID: 5000, subsystem: 'com.apple.launchservices', senderImagePath: '/x/Electron Framework' }), 5000))
+      .toEqual({ entries: 1, sender: 'electron-framework', subsystem: 'com.apple.launchservices' });
+    // Off macOS there is no probe.
+    expect(await trace.probeStalledProduct(process.pid, process.execPath, data, 60, 'win32')).toBeNull();
+    expect(await trace.probeStalledProduct(0, process.execPath, data, 60, 'darwin')).toBeNull();
+  });
+
+  it('has J-01 record what each launch began from and carry the probe of a launch it never acquired (#675)', () => {
+    const j01 = readFileSync(join(ROOT, 'e2e', 'run-j01.mjs'), 'utf8').replace(/\r\n/gu, '\n');
+    const start = j01.indexOf('const start = await observeLaunchStart(shellRoot, executable).catch(() => null);');
+    const inFlight = j01.indexOf('const inFlight = { scenario: launchScenario, startedAt: Date.now(), target: false, start, stall: null };');
+    const launch = j01.indexOf('const launchPromise = chromium.launch({');
+    expect(start).toBeGreaterThan(-1);
+    expect(start < inFlight && inFlight < launch).toBe(true);
+    expect(j01).toMatch(/launchProbe = Number\.isSafeInteger\(pid\) \? probeStalledProduct\(pid, executable, shellRoot, lookbackSeconds\)/u);
+    const probe = j01.indexOf('inFlight.stall = launchProbe === undefined ? null : await launchProbe;');
+    const label = j01.indexOf("throw journeyCheckFailure('J-01', browserLaunchMissLabel(classifyBrowserLaunchMiss(launchTraceNow(), sample)), { cause: error });");
+    expect(probe).toBeGreaterThan(-1);
+    expect(probe < label).toBe(true);
+    expect(j01).toContain('trace.start = launchInFlight.start;\n  trace.stall = launchInFlight.stall;');
   });
 
   it('reads a real launch through the installed Playwright\'s browser log, set up as J-01 sets it up', () => {

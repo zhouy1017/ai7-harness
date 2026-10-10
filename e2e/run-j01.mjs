@@ -18,7 +18,7 @@ import {
   IMPORTED_MARKS_REJECTED_BLOCKS,
 } from './composed-docx.mjs';
 import { attachProductOutput, awaitWithinDeadline, createJ01CompletionLocation, discloseJourneySkip, installJourneyCancellationCleanup, journeyCheckFailure, LOCAL_ONLY_DOC, localDebugEnabled, localManuscriptAvailable, localManuscriptPath, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
-import { classifyBrowserLaunchMiss, classifyRendererTargetMiss, createLaunchTrace, formatReadinessTrace, readBrowserLog, sampleProductProcesses, waitingForService } from './readiness-trace.mjs';
+import { classifyBrowserLaunchMiss, classifyRendererTargetMiss, createLaunchTrace, formatReadinessTrace, observeLaunchStart, probeStalledProduct, readBrowserLog, sampleProductProcesses, waitingForService } from './readiness-trace.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const PRODUCT_RENDERER_URL = pathToFileURL(resolve(ROOT, 'dist', 'renderer', 'index.html')).href;
@@ -76,6 +76,8 @@ function launchTraceNow() {
   if (launchInFlight === null) return null;
   const trace = createLaunchTrace(launchInFlight.scenario, launchInFlight.startedAt);
   trace.target = launchInFlight.target;
+  trace.start = launchInFlight.start;
+  trace.stall = launchInFlight.stall;
   if (browserLogPath !== null && existsSync(browserLogPath)) readBrowserLog(trace, readFileSync(browserLogPath, 'utf8'));
   return trace;
 }
@@ -2313,7 +2315,11 @@ async function main() {
       );
       cancellation.throwIfRequested();
       at(`launch-${launchScenario}-browser-acquisition`);
-      const inFlight = { scenario: launchScenario, startedAt: Date.now(), target: false };
+      // What the launch begins from (Issue #675): whether its user-data-dir still holds an earlier instance's lock and, on
+      // macOS, how many of the same Electron's processes are still running. Only a failure's readiness line carries it.
+      const start = await observeLaunchStart(shellRoot, executable).catch(() => null);
+      cancellation.throwIfRequested();
+      const inFlight = { scenario: launchScenario, startedAt: Date.now(), target: false, start, stall: null };
       launchInFlight = inFlight;
       const launchPromise = chromium.launch({
         executablePath: executable,
@@ -2335,11 +2341,16 @@ async function main() {
       ]);
       browserAcquisition = acquisition;
       // A launch not acquired just before its own timeout has its processes sampled while they are still there (Issue
-      // #675): a miss then says whether main ever ran its script, how far it came, and what its processes were doing.
+      // #675): a miss then says whether main ever ran its script, how far it came, and what its processes were doing. On
+      // macOS its main process is probed beside the sample — threads, state, memory, startup files open, its last word in
+      // the unified log — and the readiness line carries what the probe found.
       let launchSample;
+      let launchProbe;
       const sampleTimer = setTimeout(() => {
         const pid = Number(launchTraceNow()?.pid ?? Number.NaN);
         launchSample = Number.isSafeInteger(pid) ? sampleProductProcesses(pid, executable).catch(() => null) : Promise.resolve(null);
+        const lookbackSeconds = (Date.now() - inFlight.startedAt) / 1_000 + 5;
+        launchProbe = Number.isSafeInteger(pid) ? probeStalledProduct(pid, executable, shellRoot, lookbackSeconds).catch(() => null) : Promise.resolve(null);
       }, PRODUCT_READY_TIMEOUT_MS - LAUNCH_SAMPLE_LEAD_MS);
       try {
         browser = await acquisition;
@@ -2347,6 +2358,7 @@ async function main() {
       } catch (error) {
         if (isBrowserLaunchTimeout(error)) browserLifecycleIncomplete = true;
         const sample = launchSample === undefined ? null : await launchSample;
+        inFlight.stall = launchProbe === undefined ? null : await launchProbe;
         throw journeyCheckFailure('J-01', browserLaunchMissLabel(classifyBrowserLaunchMiss(launchTraceNow(), sample)), { cause: error });
       } finally {
         clearTimeout(sampleTimer);
