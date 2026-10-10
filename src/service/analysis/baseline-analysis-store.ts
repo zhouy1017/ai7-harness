@@ -97,7 +97,7 @@ import {
   sha256Hex,
 } from './canonical.js';
 import { unitRequestDigest } from './contract.js';
-import { deriveCoverageManifest, manifestCoversEveryBlock, manifestDigestIsExact, type ManifestBlockInput } from './coverage-manifest.js';
+import { deriveCoverageManifest, manifestCoversEveryBlock, manifestDigestIsExact, unitContentKeys, type ManifestBlockInput } from './coverage-manifest.js';
 import {
   manifestWeight,
   UnreadWalkCache,
@@ -2276,6 +2276,24 @@ export class BaselineAnalysisStore {
   latestUnconfirmedRangesOf(bookId: string): number[] {
     const latest = this.#revisionRows(bookId).at(-1);
     return latest === undefined ? [] : this.#unknownGapOrdinals(latest);
+  }
+
+  /**
+   * A revision's `outcome-unknown` gaps by the content key of their unit, with each gap's own words (Issue #51, S16c): what a
+   * later Run that ends without reading such a range carries forward as the same gap.
+   */
+  unknownGapsByContentKey(revisionId: string): Map<string, string> {
+    const row = this.#db.prepare('SELECT * FROM analysis_result_set_revisions WHERE revision_id = ?').get(revisionId) as SqlRow | undefined;
+    if (row === undefined) return new Map();
+    const record = parseCanonicalJson(asString(row.canonical_json));
+    if (!isRecord(record) || !Array.isArray(record.gaps)) return new Map();
+    const reasons = new Map<number, string>(record.gaps.flatMap((gap: unknown) =>
+      isRecord(gap) && gap.code === 'outcome-unknown' && typeof gap.unitOrdinal === 'number' && typeof gap.reason === 'string'
+        ? [[gap.unitOrdinal, gap.reason] as const] : []));
+    if (reasons.size === 0) return new Map();
+    const manifest = this.#predecessorFacts(row).manifest;
+    const keys = unitContentKeys(manifest);
+    return new Map(manifest.units.flatMap((unit, index) => reasons.has(unit.ordinal) ? [[keys[index]!, reasons.get(unit.ordinal)!] as const] : []));
   }
 
   /**

@@ -282,6 +282,8 @@ export function accountLimitDetail(settled: number, total: number): string {
  * authorized Run.
  */
 export const OUTCOME_UNKNOWN_NOT_RESENT = '这次运行不会再发它，结果待确认' as const;
+/** A range an earlier Run left 结果待确认 that this Run ended without reading (Issue #51, S16c): still that gap. */
+export const OUTCOME_UNKNOWN_CARRIED = '这次运行结束前没有读到它，结果仍待确认' as const;
 
 /** 结果待确认's stop, in the Run's own words: which ranges, what is kept, and what the editor can do. */
 export function outcomeUnknownDetail(unitOrdinals: ReadonlyArray<number>, settled: number, total: number): string {
@@ -1904,6 +1906,26 @@ export class BaselineAnalysisExecutionOwner {
           settleGap(unit, definition.requestDigest(unit.ordinal, unit.digest), { unitOrdinal: unit.ordinal, attempts: refused.attempts, wallMs: refused.wallMs, usage: refused.usage },
             'adapter-failure', `${refused.condition}；${active.cancelRequested ? ACCOUNT_LIMIT_CANCELLED_UNREAD : ACCOUNT_LIMIT_ENDED_UNREAD}`);
           keepSettled(unit, refused.wallMs);
+        }
+      }
+      // 结果待确认 carried forward (Issue #51, S16c): a range its predecessor holds as an `outcome-unknown` gap — matched by content
+      // key — that this Run ends without reading is still that gap, in its own words, never a range merely not attempted: its
+      // earlier request was sent, and every later Task and the background dispatcher must still see it.
+      if (predecessorFacts !== null && submittedUnits.some((unit) => !unitRecords.some((record) => record.unitOrdinal === unit.ordinal))) {
+        const carried = ledger.unknownGapsByContentKey(predecessorFacts.revisionId);
+        for (const planUnit of planUnits) {
+          const reason = carried.get(planUnit.contentKey);
+          if (reason === undefined || unitRecords.some((record) => record.unitOrdinal === planUnit.unitOrdinal)) continue;
+          const unit = submittedUnits.find((candidate) => candidate.ordinal === planUnit.unitOrdinal);
+          if (unit === undefined) continue;
+          const words = reason.endsWith(OUTCOME_UNKNOWN_CARRIED) ? reason : `${reason}；${OUTCOME_UNKNOWN_CARRIED}`;
+          outcomes.push({ unitOrdinal: unit.ordinal, state: 'gap', code: 'outcome-unknown', reason: words });
+          unitRecords.push({
+            unitOrdinal: unit.ordinal,
+            requestDigest: definition.requestDigest(unit.ordinal, unit.digest),
+            lineage: { kind: 'recomputed' },
+            closed: { state: 'gap', gap: { unitOrdinal: unit.ordinal, code: 'outcome-unknown', reason: words, startPosition: unit.startPosition, endPosition: unit.endPosition, blockIds: [...unit.blockIds] } },
+          });
         }
       }
       if (active.interrupted && terminalClassification === 'completed') terminalClassification = 'interrupted';

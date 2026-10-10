@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { BaselineAnalysisExecutionOwner, OUTCOME_UNKNOWN_NOT_RESENT, outcomeUnknownDetail } from '../../src/service/analysis/execution.js';
+import { BaselineAnalysisExecutionOwner, OUTCOME_UNKNOWN_CARRIED, OUTCOME_UNKNOWN_NOT_RESENT, outcomeUnknownDetail } from '../../src/service/analysis/execution.js';
 import { OUTCOME_UNKNOWN_NO_RESUME, RECONCILED_RESUMABLE_DETAIL } from '../../src/service/analysis/baseline-analysis-store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { OUTCOME_UNKNOWN_NO_REDO, resendDisclosure } from '../../src/service/task-plan.js';
@@ -552,6 +552,91 @@ describe('结果待确认 after 取消任务', () => {
       const sync = prepareUpdate(store, bookId, 'sync-current');
       expect(resendOf(store, bookId, sync.taskIntent!.taskIntentId)?.units).toEqual([4]);
       expect(store.baselineAnalysisLedger.latestUnconfirmedRangesOf(bookId)).toEqual([4]);
+      store.markCleanShutdown();
+    } finally {
+      await execution.dispose();
+      store.close();
+    }
+  }, 300_000);
+});
+
+// Issue #51 (S16c; fourth review of #755): a Task the editor started over unit 4 and cancelled before it read unit 4 carries unit
+// 4 forward as its own outcome-unknown gap — never `not-attempted` — so the next plan still names it and the dispatcher still
+// waits; and the dispatcher's own start refuses a plan that would re-send it, whatever changed since its look.
+describe('结果待确认 carried forward', () => {
+  it('keeps unit 4 outcome-unknown through a later Task cancelled before it, and the dispatcher never re-sends it', async () => {
+    const store = await openWithRoute();
+    const execution = owner(store);
+    try {
+      const stopped = await stoppedRun(store, execution, 'L2 sample1 结果待确认延续');
+      const { bookId } = stopped;
+      store.requestBaselineAnalysisCancel(bookId, stopped.taskIntentId);
+      execution.cancelRun(stopped.runRecordId, store.baselineAnalysisLedger);
+      await execution.whenIdle();
+      const checkpoint = store.inspectBaselineAnalysis(bookId, () => null).checkpoint!;
+      const editFirstParagraph = (text: string): void => {
+        const window = store.getManuscriptWindow(checkpoint.manuscriptId, checkpoint.branchId, null);
+        const block = window.blocks.find((candidate) => candidate.kind === 'paragraph')!;
+        store.flushJournalEdit({
+          clientEditId: randomUUID(), manuscriptId: checkpoint.manuscriptId, branchId: checkpoint.branchId, baseRevisionId: window.revisionId,
+          blockId: block.blockId, windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: block.digest,
+          expectedJournalSequence: window.journalSequence, fromGrapheme: 0, toGrapheme: 0, insertText: text,
+        });
+      };
+      const prepareSync = () => {
+        let progress = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_MODE_GOALS['sync-current'], { mode: 'sync-current', selectedRange: null }, launchPolicy);
+        while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
+        return progress.projection!;
+      };
+      // The editor edits, prepares 同步到当前稿件 — whose plan names unit 4 — starts it, and cancels it after its first turn.
+      editFirstParagraph('〔结果待确认后的第一次改动〕');
+      const sync = prepareSync();
+      const recomputed = sync.update!.reusePlan!.units.filter((unit) => unit.disposition === 'recomputed').map((unit) => unit.unitOrdinal);
+      expect(recomputed).toContain(4);
+      expect(recomputed[0]).toBeLessThan(4);
+      expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: sync.taskIntent!.taskIntentId }).resend?.units).toEqual([4]);
+      const runRecordId = store.authorizeBaselineAnalysis(bookId, sync.taskIntent!.taskIntentId, sync.planEnvelope!.digest).dispatchRunRecordId!;
+      let turns = 0;
+      const held: BaselineAnalysisExecutionOwner = new BaselineAnalysisExecutionOwner({
+        ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
+        unitHold: async () => {
+          turns += 1;
+          if (turns === 1) {
+            store.requestBaselineAnalysisCancel(bookId, sync.taskIntent!.taskIntentId);
+            held.cancelRun(runRecordId, store.baselineAnalysisLedger);
+          }
+        },
+      });
+      try {
+        held.admitAndDispatch(runRecordId);
+        await held.whenIdle();
+      } finally {
+        await held.dispose();
+      }
+      const cancelled = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(cancelled.run?.state).toBe('cancelled');
+      expect(cancelled.run?.attempt?.spans.map((span) => span.unitOrdinal)).toEqual([recomputed[0]]);
+      // Unit 4 was not read by this Run: it is still the outcome-unknown gap it was, never `not-attempted`.
+      const gap4 = cancelled.resultSetRevision!.gaps.find((gap) => gap.unitOrdinal === 4)!;
+      expect(gap4.code).toBe('outcome-unknown');
+      expect(gap4.reason).toBe(`${UNKNOWN_GAP}；${OUTCOME_UNKNOWN_CARRIED}`);
+      expect(store.baselineAnalysisLedger.latestUnconfirmedRangesOf(bookId)).toEqual([4]);
+
+      // One more edit: the next 同步 still names unit 4, and the dispatcher still waits rather than re-sending it.
+      const runtime = (): BackgroundAnalysisRuntime => ({ routeExecutable: true, placeFree: true, capacity: 2, editorWorkBusy: false, now: Date.now() + 600_000, quietMs: 30_000 });
+      const shown = store.inspectBackgroundAnalysisEnrollment(bookId, runtime());
+      const enrollmentVersionId = store.enrollBackgroundAnalysis(bookId, shown.offer.disclosureDigest!, 'prospective', runtime()).enrollment!.enrollmentVersionId;
+      editFirstParagraph('〔再一次改动〕');
+      expect(store.backgroundAnalysisDecisionFor(bookId, runtime()).decision).toEqual({ kind: 'wait', reason: BACKGROUND_OUTCOME_UNKNOWN });
+      // Were the dispatcher to prepare a 同步 regardless — something changing between its look and its start — its start refuses
+      // it and records nothing (P3).
+      let background = store.createBackgroundBaselineAnalysisPreparationWork(bookId, 'sync-current', enrollmentVersionId, launchPolicy);
+      while (!background.done) background = store.advanceBaselineAnalysisPreparationWork(background.workId!);
+      const planned = background.projection!;
+      expect(store.baselineAnalysisLedger.resendUnitsOf(planned)).toEqual([4]);
+      expect(store.startEnrolledBaselineAnalysis(bookId, planned.taskIntent!.taskIntentId, planned.planEnvelope!.digest, enrollmentVersionId, 'sync-current', runtime()))
+        .toEqual({ dispatchRunRecordId: null, reason: BACKGROUND_OUTCOME_UNKNOWN });
+      expect(store.inspectBaselineAnalysis(bookId, () => null).authorization).toBeNull();
       store.markCleanShutdown();
     } finally {
       await execution.dispose();

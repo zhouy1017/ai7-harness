@@ -541,6 +541,7 @@ import {
   BACKGROUND_ENROLL_NO_ROUTE,
   BACKGROUND_ENROLL_NO_SHARE,
   BACKGROUND_NO_ROUTE,
+  BACKGROUND_OUTCOME_UNKNOWN,
   BACKGROUND_PLACE_BUSY,
   BACKGROUND_PREPARATION_IN_FLIGHT,
   BACKGROUND_EDITOR_JOB,
@@ -6026,6 +6027,9 @@ export class EditorialStore {
     if (projection.planRevision !== null) return refused(QUICK_START_PLAN_CHANGED);
     const drift = defaultExecutionRuleDrift(record.version.binding, version.materialInputs);
     if (drift.length > 0) return refused(backgroundDriftReason(drift));
+    // 结果待确认 (Issue #51, S16c; CTRL-007, CONT-011): a plan that would send again a range whose earlier result could not be
+    // known is never started by the dispatcher, whatever changed between its look and this start.
+    if (this.#analysisCall(() => this.#baselineAnalysis.resendUnitsOf(projection)).length > 0) return refused(BACKGROUND_OUTCOME_UNKNOWN);
     if (!envelope.dispatchAllowed) return refused(BACKGROUND_NO_ROUTE);
     const authorized = this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest, 'now',
       { kind: 'background-analysis-enrollment', enrollmentVersionId }));
