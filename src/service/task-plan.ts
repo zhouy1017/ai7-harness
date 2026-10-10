@@ -98,6 +98,21 @@ export const OUTCOME_UNKNOWN_NO_REDO = '结果待确认：先取消任务，确�
 export function resendDisclosure(units: ReadonlyArray<number>): string {
   return `第 ${units.join('、')} 个阅读范围上一次的请求已发出、结果待确认，可能已被模型服务处理并计费；这项任务会再发一次它的请求，开始任务即重新授权这次发送。`;
 }
+/**
+ * A Review Run whose categories send again ranges an earlier Run of the same category left 结果待确认 (Issue #757; CONT-011):
+ * each category by name with its ranges, then the same statement as `resendDisclosure`.
+ */
+export function categoryResendDisclosure(entries: ReadonlyArray<{ category: string; units: ReadonlyArray<number> }>): string {
+  const named = entries.map((entry) => `「${entry.category}」第 ${entry.units.join('、')} 个`).join('，');
+  return `${named}阅读范围上一次的请求已发出、结果待确认，可能已被模型服务处理并计费；这项任务会再发一次它们的请求，开始任务即重新授权这次发送。`;
+}
+/**
+ * A plan of a kind that keeps no progress with the ranges it sends again whose earlier request's result could not be known
+ * (Issue #757; CONT-011), named in its Plan Preview as the baseline's are; the plan as it was when there are none.
+ */
+export function withResend(plan: TaskPlanProjection, units: ReadonlyArray<number>): TaskPlanProjection {
+  return units.length === 0 ? plan : { ...plan, resend: { units: [...units], statement: resendDisclosure(units) } };
+}
 /** No Run has measured a duration this estimate could stand on. */
 export const DURATION_UNKNOWN = '暂无可靠估计';
 const NO_USAGE = '不发送，没有模型用量';
@@ -489,6 +504,7 @@ export function fixedTaskPlan(input: {
     runControl: null,
     redo: null,
     resend: null,
+    unconfirmed: null,
     reprepare: null,
     clarifications: [],
     budgetStop: null,
@@ -826,6 +842,7 @@ export function baselineAnalysisPlan(input: {
     runControl: baselineRunControl(projection, input.stopped),
     redo: baselineRedo(projection, input.stopped),
     resend: baselineResend(input.resendUnits),
+    unconfirmed: null,
     reprepare: baselineReprepare(projection),
     clarifications: baselineClarifications(projection, input.clarifications ?? [], input.stopped),
     budgetStop: baselineBudgetStop(projection),
@@ -1003,6 +1020,7 @@ export function initialEvaluationPlan(input: {
     runControl: null,
     redo: null,
     resend: null,
+    unconfirmed: null,
     reprepare: null,
     clarifications: [],
     budgetStop: null,
@@ -1162,6 +1180,7 @@ export function readersReportPlan(input: {
     runControl: null,
     redo: null,
     resend: null,
+    unconfirmed: null,
     reprepare: null,
     clarifications: [],
     budgetStop: null,
@@ -1445,6 +1464,7 @@ export function writingPlan(input: {
     runControl: null,
     redo: null,
     resend: null,
+    unconfirmed: null,
     reprepare: null,
     clarifications: [],
     budgetStop: null,
@@ -1599,6 +1619,7 @@ export function evaluationRewritePlan(input: {
     runControl: null,
     redo: null,
     resend: null,
+    unconfirmed: null,
     reprepare: null,
     clarifications: [],
     budgetStop: null,
@@ -2265,6 +2286,7 @@ export function reviewRunPlan(input: {
     runControl: null,
     redo: null,
     resend: null,
+    unconfirmed: null,
     reprepare: null,
     ...(facts.state === 'plan-moved' ? { planMovedReason: reasons[0] ?? PLAN_MOVED_LABEL } : {}),
     clarifications: [],

@@ -36,6 +36,13 @@ import {
   TASK_BAR_CANCEL_IMPACT_HEADING,
   TASK_BAR_UNCONFIRMED_HEADING,
   taskBarUnconfirmedUnit,
+  TASK_BAR_VIEW_UNCONFIRMED,
+  UNCONFIRMED_HEADING,
+  UNCONFIRMED_KEEP_AS_GAP,
+  UNCONFIRMED_KEEP_FAILED,
+  UNCONFIRMED_KEPT_NOTE,
+  unconfirmedLine,
+  unconfirmedStatement,
   TASK_BAR_CANCEL_KEEP,
   TASK_BAR_CANCEL_RUN_FAILED,
   TASK_BAR_CANCELLED,
@@ -193,6 +200,7 @@ type DrawerApi = Pick<
   | 'inspectBookTasks'
   | 'inspectBaselineAnalysis'
   | 'inspectTaskPlan'
+  | 'resolveUnconfirmedOutcomes'
   | 'authorizeTaskAuthorization'
   | 'authorizeBaselineAnalysis'
   | 'authorizeReviewRun'
@@ -355,6 +363,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   let cancelConfirmShown = false;
   // 查看未确认的部分 (Issue #51, S16c): whether the list of unconfirmed ranges is open beside the bar.
   let unconfirmedShown = false;
+  // …and (Issue #757) whether the list of what a completed Run left 结果待确认 is open in its block above the plan.
+  let unconfirmedRecordShown = false;
   /** 改计划重做's summary is open (Issue #422, S76c). */
   let redoConfirmShown = false;
   /**
@@ -589,6 +599,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
     if (!sameVersion) {
       diffShown = false;
+      unconfirmedRecordShown = false;
       refusal = null;
       ruleConfirmShown = false;
     }
@@ -636,6 +647,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       // 结果待确认 (Issue #51, S16c; CONT-011): a Task that sends again a range whose earlier result could not be known says so
       // in its Plan Preview, in both modes, before it is started.
       ...(next.resend === null ? [] : [resendNote(next.resend)]),
+      // 结果待确认 a completed Run of this kind left on the Book (Issue #757; ATTN-002, NOTIF-004): the list and 保留为缺口.
+      ...(next.unconfirmed === null ? [] : [unconfirmedRecord(next.unconfirmed)]),
       ...(next.defaultRule.startedBy === null ? [] : [quickStartedBlock(next.defaultRule.startedBy)]),
       ...(next.drift === null ? [] : [driftBlock(next.drift)]),
       ...(next.edit.lastEdit === null ? [] : [el('p', 'field-note task-plan-edit-record', taskPlanLastEdit(next.edit.lastEdit))]),
@@ -686,6 +699,78 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     button.setAttribute('aria-describedby', why.id);
     wrap.append(button, why);
     return wrap;
+  }
+
+  /**
+   * 结果待确认 a completed Run left (Issue #757; interaction-spec §1036): what is known and what is missing, 查看未确认的部分 for the
+   * list — which sends and records nothing — and 保留为缺口, the editor's own determination, which records only that.
+   */
+  function unconfirmedRecord(listed: NonNullable<TaskPlanProjection['unconfirmed']>): HTMLElement {
+    const section = el('section', 'task-plan-unconfirmed');
+    section.dataset['taskPlanUnconfirmed'] = listed.digest;
+    section.setAttribute('role', 'group');
+    const heading = el('h4', undefined, UNCONFIRMED_HEADING);
+    heading.id = uid('unconfirmed-record');
+    section.setAttribute('aria-labelledby', heading.id);
+    section.append(heading, el('p', 'attention-note', unconfirmedStatement(listed)));
+    const listId = uid('unconfirmed-list');
+    const actions = el('div', 'button-row');
+    const view = document.createElement('button');
+    view.type = 'button';
+    view.className = 'secondary';
+    view.textContent = TASK_BAR_VIEW_UNCONFIRMED;
+    view.dataset['taskDrawerControl'] = 'view-unconfirmed-record';
+    view.setAttribute('aria-controls', listId);
+    view.setAttribute('aria-expanded', unconfirmedRecordShown ? 'true' : 'false');
+    view.addEventListener('click', () => {
+      unconfirmedRecordShown = !unconfirmedRecordShown;
+      if (plan !== null) paint(plan, true);
+    });
+    const keep = document.createElement('button');
+    keep.type = 'button';
+    keep.className = 'secondary';
+    keep.textContent = UNCONFIRMED_KEEP_AS_GAP;
+    keep.dataset['taskDrawerControl'] = 'keep-unconfirmed';
+    keep.disabled = working || interrupted;
+    keep.addEventListener('click', () => void keepUnconfirmed(listed.digest));
+    actions.append(view, keep);
+    section.append(actions);
+    if (unconfirmedRecordShown) {
+      const lines = el('ul', 'task-plan-list task-plan-unconfirmed-lines');
+      lines.id = listId;
+      for (const range of listed.ranges) {
+        const line = el('li', undefined, unconfirmedLine({ unitOrdinal: range.unitOrdinal, earlierText: range.earlierText, category: range.category }));
+        line.dataset['unconfirmedUnit'] = String(range.unitOrdinal);
+        lines.append(line);
+      }
+      for (const step of listed.steps) {
+        const line = el('li', undefined, unconfirmedLine({ stage: step.stage, category: step.category }));
+        line.dataset['unconfirmedStep'] = step.stage;
+        lines.append(line);
+      }
+      section.append(lines);
+    }
+    return section;
+  }
+
+  /** 保留为缺口 (Issue #757): exactly the list on show, by its digest; a list that moved since is refused in words. */
+  async function keepUnconfirmed(digest: string): Promise<void> {
+    const current = plan;
+    const asked = request;
+    if (current === null || current.unconfirmed?.digest !== digest || !beginWork()) return;
+    for (const button of body.querySelectorAll<HTMLButtonElement>('.task-plan-unconfirmed button')) button.disabled = true;
+    options.setStatus('正在记下保留为缺口…', 'busy');
+    try {
+      await api.resolveUnconfirmedOutcomes({ kind: current.kind, ref: current.ref, digest });
+      unconfirmedRecordShown = false;
+      options.setStatus(UNCONFIRMED_KEPT_NOTE, 'success');
+      options.onRecorded(current.kind, current.bookId, current.ref);
+    } catch (error) {
+      refusal = options.errorMessage(error, UNCONFIRMED_KEEP_FAILED);
+      options.setStatus(refusal, 'error');
+    } finally {
+      endWork(asked);
+    }
   }
 
   function resendNote(resend: NonNullable<TaskPlanProjection['resend']>): HTMLElement {

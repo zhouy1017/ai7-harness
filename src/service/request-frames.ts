@@ -594,6 +594,16 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    // 保留为缺口 (Issue #757): the plan it was read on, never the fixed task's, and the digest of the list read there.
+    case 'resolveUnconfirmedOutcomes': {
+      const input = requireInput(value.input, ['bookId', 'kind', 'ref', 'digest'], tentativeId);
+      if (!validUuid(input.bookId) || !TASK_PLAN_KINDS.includes(input.kind as TaskPlanKind) || input.kind === 'fixed-task' ||
+          !(input.ref === null ? input.kind !== 'review-run' : validUuid(input.ref)) ||
+          !isBoundedString(input.digest, 64) || !/^[0-9a-f]{64}$/u.test(input.digest)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     case 'inspectBaselineAnalysis': {
       const input = requireInput(value.input, ['bookId', 'revisionId'], tentativeId);
       if (!isBoundedString(input.bookId, 36) || !UUID_PATTERN.test(input.bookId) ||

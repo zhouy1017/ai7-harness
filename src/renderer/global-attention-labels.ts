@@ -12,7 +12,7 @@ import {
 import { RUN_LIVENESS_STAGE_LABELS, localInstantLabel } from './plan-preview-labels.js';
 import type { ReviewPill } from './review-labels.js';
 import { REVIEW_ACTION_LABELS } from './review-labels.js';
-import { TASK_BAR_RECONFIRM, TASK_BAR_REDO, TASK_BAR_REPREPARE, TASK_BAR_RUN_LINKS, TASK_PLAN_OPEN_START } from './task-drawer-labels.js';
+import { TASK_BAR_RECONFIRM, TASK_BAR_REDO, TASK_BAR_REPREPARE, TASK_BAR_RUN_LINKS, TASK_PLAN_OPEN_START, UNCONFIRMED_TASK_KIND_LABELS, unconfirmedWhat } from './task-drawer-labels.js';
 import { RESOLVE_CONFLICT_LABEL } from './editorial-mark-labels.js';
 import { PROPOSAL_CONFLICT_CLASSIFICATION, REVERSAL_CONFLICT_LINE } from './proposal-conflict-labels.js';
 import { MAINTENANCE_CLASSIFICATION_LABELS, MAINTENANCE_NEXT_STEP_LABELS } from '../shared/maintenance-wording.js';
@@ -118,6 +118,8 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   'analysis-account-limit': '模型服务账户限额',
   // 结果待确认 (Issue #51, S16c): the drawer's own status for a Run stopped on sent requests whose results cannot be known.
   'analysis-outcome-unknown': '结果待确认',
+  // 结果待确认 a completed Run left (Issue #757): the same words; the Task Outcome stands.
+  'analysis-outcome-unconfirmed': '结果待确认',
   'analysis-blocked': '派发前已阻止',
   'analysis-orphaned': '已中断',
   'review-failed': '运行失败',
@@ -188,6 +190,7 @@ export const GLOBAL_ATTENTION_STATE_PILLS: Readonly<Record<GlobalAttentionStateK
   'analysis-account-limit': { tone: 'blocked', shape: 'diamond' },
   // The triangle 导入提交结果待确认 has too: an outcome to confirm, never a failure's square.
   'analysis-outcome-unknown': { tone: 'attention', shape: 'triangle' },
+  'analysis-outcome-unconfirmed': { tone: 'attention', shape: 'triangle' },
   'analysis-blocked': { tone: 'blocked', shape: 'diamond' },
   'analysis-orphaned': { tone: 'blocked', shape: 'square' },
   'review-failed': { tone: 'blocked', shape: 'square' },
@@ -347,6 +350,9 @@ export function globalAttentionObjectLabel(object: GlobalAttentionObjectProjecti
       return `学习材料 · ${[...(object.pending > 0 ? [`${object.pending} 条待定`] : []), ...(object.deferred > 0 ? [`${object.deferred} 条稍后决定`] : [])].join('，')}`;
     case 'dialogue':
       return dialogueQuestionLine(object.question);
+    // 结果待确认 a completed Run left (Issue #757): the Task kind, and what is unconfirmed.
+    case 'unconfirmed':
+      return `${UNCONFIRMED_TASK_KIND_LABELS[object.taskKind]} · ${unconfirmedWhat(object.ranges, object.steps)}`;
   }
 }
 
@@ -390,6 +396,8 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
       return '模型服务按账户限额拒绝了请求，这项任务已停下，读完的部分都已保存；处理好模型服务、限额解除后续行。';
     case 'analysis-outcome-unknown':
       return '有阅读范围的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；AI7 没有自动再发，读完的部分都已保存。';
+    case 'analysis-outcome-unconfirmed':
+      return '运行已结束，但有请求已发出而回答没有完整传回，无法确认模型服务是否已处理并计费；这些部分记为结果待确认的缺口，AI7 没有自动再发。';
     case 'analysis-blocked':
       return '授权已记录，派发前阻止：当前启动没有可执行的路由。';
     case 'analysis-orphaned':

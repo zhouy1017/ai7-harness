@@ -101,6 +101,7 @@ import {
   sha256Hex,
 } from './canonical.js';
 import { unitRequestDigest } from './contract.js';
+import { saysCarried, saysOutcomeUnknown } from './outcome-unknown.js';
 import { deriveCoverageManifest, manifestCoversEveryBlock, manifestDigestIsExact, unitContentKeys, type ManifestBlockInput } from './coverage-manifest.js';
 import {
   manifestWeight,
@@ -288,6 +289,42 @@ export interface UnconfirmedUnitRecord {
   readonly unitOrdinal: number;
   readonly attempts: number;
   readonly reason: string;
+}
+
+/** A step after the ranges whose sent request's result cannot be known (Issue #757): the reduction, a sample, the reflection. */
+export type UnconfirmedStage = 'cross-unit-reduction' | 'assurance-sampling' | 'run-report-reflection';
+
+/**
+ * One sent request of a Book's Runs of one kind whose result cannot be known and that no later Run of the kind has read since
+ * (Issue #757; CTRL-007, CONT-011): a range — named by the content key the reuse plans match by, and by its ordinal in the
+ * latest revision that holds it — or a step of the latest Run that reached its Task Outcome. `key` names it across launches:
+ * the kind, the Run that sent the request, and the range's content key or the step, so 人工结果确认 settles exactly it.
+ */
+export interface UnconfirmedOutcomeRecord {
+  readonly key: string;
+  readonly kind: string;
+  /** The Run that sent the request — for a range carried forward, the Run that first sent it, never the one that carried it. */
+  readonly runRecordId: string;
+  readonly taskIntentId: string;
+  /** That Run's Task Outcome; `null` while it has none. */
+  readonly classification: string | null;
+  /** When that Run's outcome was recorded, or its revision when it has none. */
+  readonly recordedAt: string;
+  readonly unitOrdinal: number | null;
+  /** The manuscript revision the latest revision holding the range read — whose text `unitOrdinal` counts in; `null` for a step. */
+  readonly heldAtRevisionId: string | null;
+  readonly contentKey: string | null;
+  readonly stage: UnconfirmedStage | null;
+}
+
+/** The units a Task's reuse or scope plan names, as `resendUnitsByContent` reads them: which it reads again, by content key. */
+export interface ResendPlan {
+  readonly units: ReadonlyArray<{ readonly unitOrdinal: number; readonly contentKey: string; readonly disposition: string }>;
+}
+
+/** The outcome key of a range or a step (Issue #757), as `UnconfirmedOutcomeRecord.key` and the resolutions spell it. */
+export function unconfirmedOutcomeKey(kind: string, runRecordId: string, target: { contentKey: string } | { stage: UnconfirmedStage }): string {
+  return `${kind}\n${runRecordId}\n${'contentKey' in target ? `range:${target.contentKey}` : `step:${target.stage}`}`;
 }
 
 /** Why an interrupted Run stopped, when a limit stopped it (Issue #51, S16a): the ceiling, what it used, and what it read. */
@@ -2325,6 +2362,147 @@ export class BaselineAnalysisStore {
     const unknown = new Set(this.#unknownGapOrdinals(row));
     if (unknown.size === 0) return [];
     return resendUnits(this.#predecessorFacts(row).manifest, unknown, plan);
+  }
+
+  /**
+   * 结果待确认 that a Book's Runs of one kind left and no later Run of that kind has read since (Issue #757; CTRL-007, CONT-011,
+   * ATTN-002): the ranges whose sent requests' results cannot be known, and the steps of the latest Run that reached its Task
+   * Outcome — the reduction, a sample, the reflection — whose results cannot be known either.
+   *
+   * The ranges are walked through the kind's revisions in order, by the content key the reuse plans match by: a range read to a
+   * result by a later revision is no longer unconfirmed, a range a later Run ended without reading stays so — carried forward,
+   * under the Run that first sent it — and one whose own content an edit changed is a different request, no longer this one.
+   * The steps are the latest completed Run's alone, since every later Run that completes makes its own. A read: nothing is
+   * written. `kind` reads another kind's revisions through this ledger, whose readings here are kind-generic.
+   */
+  unconfirmedOutcomesOf(bookId: string, kind: string = this.#definition.kind): { ranges: UnconfirmedOutcomeRecord[]; steps: UnconfirmedOutcomeRecord[] } {
+    // A kind none of whose revisions ever held such a gap has no range to walk for: the drawer reads this on every poll.
+    const held = this.#db.prepare(
+      `SELECT 1 FROM analysis_result_set_revisions r JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
+       WHERE s.book_id = ? AND s.kind = ? AND instr(r.canonical_json, '"outcome-unknown"') > 0 LIMIT 1`,
+    ).get(bookId, kind) !== undefined;
+    const rows = !held ? [] : this.#db.prepare(
+      `SELECT r.* FROM analysis_result_set_revisions r
+       JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
+       WHERE s.book_id = ? AND s.kind = ? ORDER BY r.ordinal`,
+    ).all(bookId, kind) as SqlRow[];
+    const outcomeOf = this.#db.prepare('SELECT classification, recorded_at FROM analysis_task_outcomes WHERE run_record_id = ?');
+    const checkpointOf = this.#db.prepare('SELECT revision_id FROM analysis_task_input_checkpoints WHERE task_intent_id = ?');
+    const outstanding = new Map<string, UnconfirmedOutcomeRecord>();
+    for (const row of rows) {
+      const record = parseCanonicalJson(asString(row.canonical_json));
+      const unknown = isRecord(record) && Array.isArray(record.gaps)
+        ? record.gaps.flatMap((gap: unknown) => isRecord(gap) && gap.code === 'outcome-unknown' && typeof gap.unitOrdinal === 'number'
+          ? [{ unitOrdinal: gap.unitOrdinal, carried: typeof gap.reason === 'string' && saysCarried(gap.reason) }] : [])
+        : [];
+      let facts: ReusePlanPredecessor;
+      try {
+        facts = this.#predecessorFacts(row);
+      } catch {
+        // A revision whose plan no longer reads back names no range by content; the walk goes on past it.
+        continue;
+      }
+      const keys = unitContentKeys(facts.manifest);
+      const keyOf = new Map(facts.manifest.units.map((unit, index) => [unit.ordinal, keys[index]!] as const));
+      for (const unit of facts.unitStates) {
+        const key = unit.state === 'closed' ? keyOf.get(unit.unitOrdinal) : undefined;
+        if (key !== undefined) outstanding.delete(key);
+      }
+      const runRecordId = asString(row.run_record_id);
+      const outcome = outcomeOf.get(runRecordId) as SqlRow | undefined;
+      const heldAt = unknown.length === 0 ? undefined : checkpointOf.get(asString(row.task_intent_id)) as SqlRow | undefined;
+      const heldAtRevisionId = heldAt === undefined ? null : asString(heldAt.revision_id);
+      for (const gap of unknown) {
+        const contentKey = keyOf.get(gap.unitOrdinal);
+        if (contentKey === undefined) continue;
+        const earlier = outstanding.get(contentKey);
+        // Carried forward: the same request, still unconfirmed, now at this revision's ordinal.
+        if (gap.carried && earlier !== undefined) {
+          outstanding.set(contentKey, { ...earlier, unitOrdinal: gap.unitOrdinal, heldAtRevisionId });
+          continue;
+        }
+        outstanding.set(contentKey, {
+          key: unconfirmedOutcomeKey(kind, runRecordId, { contentKey }),
+          kind,
+          runRecordId,
+          taskIntentId: asString(row.task_intent_id),
+          classification: outcome === undefined ? null : asString(outcome.classification),
+          recordedAt: outcome === undefined ? asString(row.created_at) : asString(outcome.recorded_at),
+          unitOrdinal: gap.unitOrdinal,
+          heldAtRevisionId,
+          contentKey,
+          stage: null,
+        });
+      }
+    }
+    const latest = this.#db.prepare(
+      `SELECT o.* FROM analysis_task_outcomes o JOIN analysis_task_intents t ON t.task_intent_id = o.task_intent_id
+       WHERE t.book_id = ? AND t.kind = ? AND o.classification IN ('completed', 'completed-with-gaps')
+       ORDER BY o.recorded_at DESC, o.rowid DESC LIMIT 1`,
+    ).get(bookId, kind) as SqlRow | undefined;
+    const steps: UnconfirmedOutcomeRecord[] = [];
+    if (latest !== undefined) {
+      const record = parseCanonicalJson(asString(latest.canonical_json));
+      const report = isRecord(record) && isRecord(record.report) ? record.report : null;
+      const failures = report !== null && Array.isArray(report.failures) ? report.failures.filter(isRecord) : [];
+      const said = (stage: string): boolean => failures.some((failure) => failure.stage === stage && typeof failure.reason === 'string' && saysOutcomeUnknown(failure.reason));
+      const reflection = report !== null && isRecord(report.ifRedone) && report.ifRedone.state === 'gap' &&
+        typeof report.ifRedone.reason === 'string' && saysOutcomeUnknown(report.ifRedone.reason);
+      const runRecordId = asString(latest.run_record_id);
+      const stages: UnconfirmedStage[] = [
+        ...(said('cross-unit-reduction') ? ['cross-unit-reduction' as const] : []),
+        ...(said('assurance-sampling') ? ['assurance-sampling' as const] : []),
+        ...(reflection ? ['run-report-reflection' as const] : []),
+      ];
+      for (const stage of stages) {
+        steps.push({
+          key: unconfirmedOutcomeKey(kind, runRecordId, { stage }),
+          kind,
+          runRecordId,
+          taskIntentId: asString(latest.task_intent_id),
+          classification: asString(latest.classification),
+          recordedAt: asString(latest.recorded_at),
+          unitOrdinal: null,
+          heldAtRevisionId: null,
+          contentKey: null,
+          stage,
+        });
+      }
+    }
+    const ranges = [...outstanding.values()].sort((left, right) => (left.unitOrdinal ?? 0) - (right.unitOrdinal ?? 0));
+    return { ranges, steps };
+  }
+
+  /**
+   * The units a Task of a kind that keeps no progress sends again whose content is that of a range an earlier Run of the kind
+   * left 结果待确认 and no Run has read since (Issue #757; CONT-011) — matched by content key, whatever the reason the Task
+   * reads it, and whether or not the editor kept it as a gap: its earlier request may already have been processed and billed.
+   * The units it sends are its reuse or scope plan's recomputed ones, or, with no such plan, every unit of its coverage
+   * manifest. Empty once its Run has begun — so its own Run never counts against it: the disclosure is its Plan Preview's.
+   */
+  resendUnitsByContentOf(projection: AnalysisProjection, kind: string = this.#definition.kind): number[] {
+    const intent = projection.taskIntent;
+    const manifest = projection.coverageManifest;
+    // Until its Run begins — authorized, waiting to start once online (Issue #760), or blocked before dispatch — the Task has read
+    // nothing, so nothing of its own counts and its plan keeps saying what starting it will send.
+    const begun = projection.run !== null && !['authorized', 'awaiting-connectivity', 'blocked-before-dispatch'].includes(projection.run.state);
+    if (intent === null || manifest === null || begun) return [];
+    const update = projection.update as { reusePlan?: ResendPlan | null } | null;
+    return this.resendUnitsByContent(projection.bookId, kind, manifest, update?.reusePlan ?? null);
+  }
+
+  /**
+   * `resendUnitsByContentOf` over a Task's frozen parts (Issue #757): a Review Run's category reads its coverage manifest and its
+   * scope plan from the components it froze.
+   */
+  resendUnitsByContent(bookId: string, kind: string, manifest: CoverageManifestProjection, plan: ResendPlan | null): number[] {
+    const unconfirmed = new Set(this.unconfirmedOutcomesOf(bookId, kind).ranges.map((range) => range.contentKey));
+    if (unconfirmed.size === 0) return [];
+    const keys = unitContentKeys(manifest);
+    const sent = plan !== null
+      ? plan.units.filter((unit) => unit.disposition === 'recomputed').map((unit) => ({ ordinal: unit.unitOrdinal, key: unit.contentKey }))
+      : manifest.units.map((unit, index) => ({ ordinal: unit.ordinal, key: keys[index]! }));
+    return sent.filter((unit) => unconfirmed.has(unit.key)).map((unit) => unit.ordinal).sort((left, right) => left - right);
   }
 
   #revisionBody(row: SqlRow): Record<string, unknown> {

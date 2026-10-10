@@ -9,7 +9,7 @@ import { MATERIAL_INDEXER_IDENTITY, MATERIAL_INDEX_SCHEMA_SQL, MATERIAL_INDEX_TR
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL } from '../../src/service/background-analysis-enrollments.js';
 import { replacementBlockedBy } from '../../src/service/replacement-gate.js';
-import { MATERIAL_INDEX_SCHEMA_VERSION, WRITING_TASK_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { OUTCOME_RESOLUTION_SCHEMA_VERSION, WRITING_TASK_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { buildManuscriptPackage } from '../../src/service/text-manuscript.js';
 import { MAX_FRAME_BYTES, MAX_MATERIAL_SEGMENTS_PAGE, type LibraryMaterialKind, type LibraryMaterialProjection } from '../../src/shared/protocol.js';
 import { sample1Path } from '../support/sample1-baseline.js';
@@ -144,7 +144,7 @@ describe('资料索引 over the real store', () => {
       // The ledger is append-only and the build is the current indexer's.
       const database = new DatabaseSync(storePath());
       try {
-        expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
+        expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(OUTCOME_RESOLUTION_SCHEMA_VERSION);
         expect(database.prepare('SELECT indexer, state, segment_count FROM material_index_builds').all())
           .toEqual([{ indexer: MATERIAL_INDEXER_IDENTITY, state: 'complete', segment_count: built.metadata!.paragraphs }]);
         for (const table of ['material_index_builds', 'material_index_segments']) {
@@ -493,7 +493,7 @@ describe('资料索引 over the real store', () => {
     try {
       const database = new DatabaseSync(storePath(), { readOnly: true });
       try {
-        expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
+        expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(OUTCOME_RESOLUTION_SCHEMA_VERSION);
         expect(analysisRunAuthorizationsShape(database)).toBe('current');
         expect((database.prepare('SELECT count(*) count FROM material_index_builds').get() as { count: number }).count).toBeLessThanOrEqual(1);
       } finally {

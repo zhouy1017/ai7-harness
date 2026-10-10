@@ -123,6 +123,7 @@ import {
   WRITING_TASK_SCHEMA_VERSION,
   BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
   MATERIAL_INDEX_SCHEMA_VERSION,
+  OUTCOME_RESOLUTION_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -208,6 +209,7 @@ import { CAPTURED_PROCEDURE_FOREIGN_KEYS, CAPTURED_PROCEDURE_SCHEMA_SQL, CAPTURE
 import { EVALUATION_REWRITE_FOREIGN_KEYS, EVALUATION_REWRITE_SCHEMA_SQL, EVALUATION_REWRITE_TRIGGER_SQL } from './evaluation-rewrites.js';
 import { WRITING_TASK_FOREIGN_KEYS, WRITING_TASK_SCHEMA_SQL, WRITING_TASK_TRIGGER_SQL } from './writing-tasks.js';
 import { MATERIAL_INDEX_FOREIGN_KEYS, MATERIAL_INDEX_SCHEMA_SQL, MATERIAL_INDEX_TRIGGER_SQL } from './material-index.js';
+import { OUTCOME_RESOLUTION_FOREIGN_KEYS, OUTCOME_RESOLUTION_SCHEMA_SQL, OUTCOME_RESOLUTION_TRIGGER_SQL } from './analysis/outcome-resolutions.js';
 import {
   BACKGROUND_ANALYSIS_ENROLLMENT_FOREIGN_KEYS,
   BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL,
@@ -1961,6 +1963,7 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...WRITING_TASK_FOREIGN_KEYS,
   ...BACKGROUND_ANALYSIS_ENROLLMENT_FOREIGN_KEYS,
   ...MATERIAL_INDEX_FOREIGN_KEYS,
+  ...OUTCOME_RESOLUTION_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
   ],
@@ -2599,6 +2602,7 @@ function requireManuscriptReimportTargetSchema(
   includeWritingTaskTables = false,
   includeBackgroundAnalysisEnrollmentTables = false,
   includeMaterialIndexTables = false,
+  includeOutcomeResolutionTables = false,
 ): void {
   const analysisTables = includePlanVersionTables ? ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL : PRE_17_ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL;
   const analysisTriggers = includePlanVersionTables ? ANALYSIS_LEDGER_TRIGGER_SQL : PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL;
@@ -2653,6 +2657,7 @@ function requireManuscriptReimportTargetSchema(
   includeWritingTaskTables ||= committed(WRITING_TASK_SCHEMA_SQL);
   includeBackgroundAnalysisEnrollmentTables ||= committed(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL);
   includeMaterialIndexTables ||= committed(MATERIAL_INDEX_SCHEMA_SQL);
+  includeOutcomeResolutionTables ||= committed(OUTCOME_RESOLUTION_SCHEMA_SQL);
   requireExactSchema(
     db,
     {
@@ -2782,6 +2787,8 @@ function requireManuscriptReimportTargetSchema(
       ...(includeBackgroundAnalysisEnrollmentTables ? BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL : {}),
       // Revision 67 (Issue #428, S80a) adds each 资料库 item's Material Index build and the segments of a complete one.
       ...(includeMaterialIndexTables ? MATERIAL_INDEX_SCHEMA_SQL : {}),
+      // Revision 68 (Issue #757) adds the editor's 人工结果确认 over requests whose results cannot be known.
+      ...(includeOutcomeResolutionTables ? OUTCOME_RESOLUTION_SCHEMA_SQL : {}),
     },
     // The partial index that keeps one primary Manuscript per Book stands with the rebuilt relation, whatever the version.
     {
@@ -2837,6 +2844,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeWritingTaskTables ? WRITING_TASK_TRIGGER_SQL : {}),
       ...(includeBackgroundAnalysisEnrollmentTables ? BACKGROUND_ANALYSIS_ENROLLMENT_TRIGGER_SQL : {}),
       ...(includeMaterialIndexTables ? MATERIAL_INDEX_TRIGGER_SQL : {}),
+      ...(includeOutcomeResolutionTables ? OUTCOME_RESOLUTION_TRIGGER_SQL : {}),
     },
   );
 }
@@ -5602,6 +5610,7 @@ export function validateManuscriptReimportSchemaTruth(
   includeWritingTaskTables = false,
   includeBackgroundAnalysisEnrollmentTables = false,
   includeMaterialIndexTables = false,
+  includeOutcomeResolutionTables = false,
 ): void {
   requireManuscriptReimportTargetSchema(
     db,
@@ -5655,6 +5664,7 @@ export function validateManuscriptReimportSchemaTruth(
     includeWritingTaskTables,
     includeBackgroundAnalysisEnrollmentTables,
     includeMaterialIndexTables,
+    includeOutcomeResolutionTables,
   );
   validateSchemaAuthorityIds(db);
   validateWorkflowSemanticTruth(db, profile);
@@ -5754,7 +5764,8 @@ export function initializeBoundedSchema(
       version === EVALUATION_REWRITE_SCHEMA_VERSION ||
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
-      version === MATERIAL_INDEX_SCHEMA_VERSION,
+      version === MATERIAL_INDEX_SCHEMA_VERSION ||
+      version === OUTCOME_RESOLUTION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5804,9 +5815,10 @@ export function initializeBoundedSchema(
       version === EVALUATION_REWRITE_SCHEMA_VERSION ||
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
-      version === MATERIAL_INDEX_SCHEMA_VERSION) {
+      version === MATERIAL_INDEX_SCHEMA_VERSION ||
+      version === OUTCOME_RESOLUTION_SCHEMA_VERSION) {
     transact(db, () => {
-      if (validateStoreTruth || version !== MATERIAL_INDEX_SCHEMA_VERSION) {
+      if (validateStoreTruth || version !== OUTCOME_RESOLUTION_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
           db,
           profile,
@@ -5860,6 +5872,7 @@ export function initializeBoundedSchema(
           version >= WRITING_TASK_SCHEMA_VERSION,
           version >= BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
           version >= MATERIAL_INDEX_SCHEMA_VERSION,
+          version >= OUTCOME_RESOLUTION_SCHEMA_VERSION,
         );
       }
       terminalizeOrphanedReplacementPreviews(db);

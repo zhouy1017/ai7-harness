@@ -270,7 +270,7 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
     if (target.kind === 'analysis' || target.kind === 'analysis-plan') return { kind: 'baseline-analysis', ref: target.taskIntentId };
     if (target.kind === 'review' || target.kind === 'review-plan') return { kind: 'review-run', ref: target.reviewRunId };
     // A ledger Task of another kind (Issue #760, S74c): its own plan.
-    if (target.kind === 'task-plan') return { kind: target.taskKind, ref: target.ref };
+    if (target.kind === 'task-plan' && target.ref !== null) return { kind: target.taskKind, ref: target.ref };
     return null;
   }
 
