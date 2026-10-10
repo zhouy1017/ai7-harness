@@ -21,9 +21,11 @@ describe('what the service takes while a replacement waits (Issue #434 review)',
   });
 
   it('prepares a replacement only while nothing else would write', () => {
-    const quiet = { runsIdle: true, reviewRunsDriving: false, jobsBusy: false, exportRunning: false, backgroundBusy: false };
+    const quiet = { runsIdle: true, reviewRunsDriving: false, jobsBusy: false, exportRunning: false, backgroundBusy: false, indexing: false };
     expect(replacementBlockedBy(quiet)).toBeNull();
-    for (const busy of [{ runsIdle: false }, { reviewRunsDriving: true }, { jobsBusy: true }, { exportRunning: true }, { backgroundBusy: true }]) {
+    for (const busy of [{ runsIdle: false }, { reviewRunsDriving: true }, { jobsBusy: true }, { exportRunning: true }, { backgroundBusy: true },
+      // 资料索引 being built, or items waiting for it (#729).
+      { indexing: true }]) {
       expect(replacementBlockedBy({ ...quiet, ...busy })).toBe('还有任务或处理在进行；请等它们结束，或先暂停或取消，再替换本机数据。');
     }
   });

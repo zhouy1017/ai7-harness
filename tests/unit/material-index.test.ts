@@ -2,16 +2,22 @@ import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import {
+  MATERIAL_INDEXER_IDENTITY,
+  MATERIAL_INDEX_PREPARE_SLICE,
   MATERIAL_INDEX_SCHEMA_SQL,
+  MaterialIndexAborted,
   MaterialIndexError,
   MaterialIndexLedger,
   classifyLanguage,
   initializeMaterialIndexSchema,
   materialCitation,
+  prepareMaterialIndex,
+  prepareMaterialIndexInSlices,
   splitSentences,
   type MaterialExtraction,
 } from '../../src/service/material-index.js';
 import { LIBRARY_MATERIAL_SCHEMA_SQL, initializeLibraryMaterialSchema } from '../../src/service/library-materials.js';
+import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 
 // Unit suite (L1) for the Material Index's own rules (Issue #428, plan slice S80a; V2-UX-KB-009): the sentence anchors, the
 // language the Source Translation layer reads, and the ledger's projection and boundary over a minimal in-memory store. Every
@@ -35,6 +41,21 @@ describe('the sentence anchors of a paragraph', () => {
     expect(sentences('e.g.no space')).toEqual(['e.g.no space']);
     expect(sentences('Done.')).toEqual(['Done.']);
     expect(sentences('Really?! Yes')).toEqual(['Really?!', 'Yes']);
+  });
+
+  it('ends no sentence at the full stop of a clause number or an initial (#729)', () => {
+    // A numbered clause: the sentence so far is only digits.
+    expect(sentences('1. 第一条\n2. 第二条')).toEqual(['1. 第一条', '2. 第二条']);
+    expect(sentences('12. 第十二条。下一句')).toEqual(['12. 第十二条。', '下一句']);
+    expect(sentences('  3. 前有空白')).toEqual(['3. 前有空白']);
+    // Digits after words are a sentence's end: only a sentence that is nothing but the number is held.
+    expect(sentences('Chapter 1. Next')).toEqual(['Chapter 1.', 'Next']);
+    // A single letter, or single letters joined by full stops, after a space or at the start.
+    expect(sentences('The U.S. economy grew.')).toEqual(['The U.S. economy grew.']);
+    expect(sentences('J. Smith wrote it. Then he left.')).toEqual(['J. Smith wrote it.', 'Then he left.']);
+    expect(sentences('Use e.g. this one.')).toEqual(['Use e.g. this one.']);
+    // A word of more than one letter still ends one.
+    expect(sentences('It is Mr. Smith.')).toEqual(['It is Mr.', 'Smith.']);
   });
 
   it('ends a sentence at a line break, gives none for white space, and one for a paragraph without end marks', () => {
@@ -64,6 +85,41 @@ describe('the language a text is mostly in', () => {
     expect(classifyLanguage(['The river rose.'])).toBe('other');
     expect(classifyLanguage(['123 —— ！', ''])).toBe('none');
     expect(classifyLanguage([])).toBe('none');
+  });
+});
+
+describe('a build prepared before its one write (#729)', () => {
+  const block = (text: string, index: number) => ({ kind: 'paragraph' as const, level: null, text, graphemeLength: text.length, sourceParagraphIndex: index });
+  const INDEX = '44444444-4444-4444-8444-444444444444';
+
+  it('yields to the service\'s other work after each slice of text, and prepares exactly what one piece prepares', async () => {
+    // Three slices' worth of the suite's own synthetic words, in paragraphs of the parser's longest.
+    const paragraph = '甲乙丙丁。'.repeat(400);
+    const count = Math.ceil((MATERIAL_INDEX_PREPARE_SLICE * 3) / paragraph.length);
+    const extraction: MaterialExtraction = { state: 'complete', converter: 'test', documentTitle: null, blocks: Array.from({ length: count }, (_, index) => block(paragraph, index)) };
+    let turns = 0;
+    let counting = true;
+    const countTurn = (): void => {
+      if (!counting) return;
+      turns += 1;
+      setImmediate(countTurn);
+    };
+    setImmediate(countTurn);
+    const sliced = await prepareMaterialIndexInSlices(extraction, undefined, INDEX);
+    counting = false;
+    // The other work ran between the slices: once per slice at least, where one piece would let it run not at all.
+    expect(turns).toBeGreaterThanOrEqual(3);
+    expect(sliced).toEqual(prepareMaterialIndex(extraction, INDEX));
+    expect([sliced.segments.length, sliced.sentences, sliced.language]).toEqual([count, count * 400, 'zh']);
+  });
+
+  it('stops before the next slice when the store closes, and needs no turn for a short text', async () => {
+    const controller = new AbortController();
+    const long: MaterialExtraction = { state: 'complete', converter: 'test', documentTitle: null, blocks: [block('长'.repeat(MATERIAL_INDEX_PREPARE_SLICE), 0), block('后', 1)] };
+    controller.abort();
+    await expect(prepareMaterialIndexInSlices(long, controller.signal)).rejects.toThrowError(MaterialIndexAborted);
+    const short: MaterialExtraction = { state: 'complete', converter: 'test', documentTitle: null, blocks: [block('短的一句。', 0)] };
+    expect((await prepareMaterialIndexInSlices(short, controller.signal)).segments).toHaveLength(1);
   });
 });
 
@@ -151,6 +207,51 @@ describe('the ledger over a minimal store', () => {
     expect(materialCitation('资料', 2, 1)).toBe('《资料》第 2 段第 1 句');
     expect(() => ledger.readForTask({ bookId: BOOK, references: [] }, MATERIAL, '资料', 1, anyone)).toThrowError(/不在这项任务计划/u);
     expect(() => ledger.readForTask({ bookId: BOOK, references: [pin] }, MATERIAL, '资料', 1, nobody)).toThrowError(/现在不能列进/u);
+  });
+
+  it('reads the build a plan pinned while this data keeps it, after a later indexer built the item again (#729)', () => {
+    const db = store();
+    const ledger = new MaterialIndexLedger(db);
+    const older: MaterialExtraction = { ...complete, blocks: [{ kind: 'paragraph', level: null, text: '旧的一句。', graphemeLength: 5, sourceParagraphIndex: 0 }] };
+    ledger.record({ materialId: MATERIAL, sha256: SHA, format: 'TXT' }, older);
+    const anyone = (): boolean => true;
+    const pin = ledger.referencePin(MATERIAL, BOOK, anyone);
+    // The build as an earlier indexer made it: its identity rewritten under its own digest, as that indexer would have
+    // recorded it. The triggers keep the ledger append-only, so the test lifts the one it must.
+    const row = db.prepare('SELECT index_id, canonical_json FROM material_index_builds').get() as { index_id: string; canonical_json: string };
+    const earlier = canonicalRecord({ ...(JSON.parse(row.canonical_json) as Record<string, unknown>), indexer: 'ai7-material-index/0' });
+    db.exec('DROP TRIGGER material_index_builds_no_update');
+    db.prepare('UPDATE material_index_builds SET indexer = ?, canonical_json = ?, sha256 = ? WHERE index_id = ?')
+      .run('ai7-material-index/0', earlier.json, earlier.digest, row.index_id);
+    const pinned = { ...pin, indexDigest: earlier.digest };
+    // The current indexer builds the item again, beside the earlier build.
+    expect(ledger.current(MATERIAL)).toBeNull();
+    ledger.record({ materialId: MATERIAL, sha256: SHA, format: 'TXT' }, complete);
+    const now = ledger.referencePin(MATERIAL, BOOK, anyone);
+    expect(now.indexDigest).not.toBe(pinned.indexDigest);
+    // A plan pinned to the earlier build reads it, and a plan pinned to the current one reads that.
+    const read = ledger.readForTask({ bookId: BOOK, references: [pinned] }, MATERIAL, '资料', 1, anyone);
+    expect([read.indexDigest, read.total, read.segments[0]!.sentences.map((sentence) => sentence.text)]).toEqual([pinned.indexDigest, 1, ['旧的一句。']]);
+    expect(ledger.readForTask({ bookId: BOOK, references: [now] }, MATERIAL, '资料', 1, anyone).indexDigest).toBe(now.indexDigest);
+    // A version this data does not keep, or another item's, is refused as moved.
+    for (const indexDigest of ['f'.repeat(64), 'not a digest']) {
+      expect(() => ledger.readForTask({ bookId: BOOK, references: [{ ...pin, indexDigest }] }, MATERIAL, '资料', 1, anyone)).toThrowError(/索引版本已不在本机/u);
+    }
+    const OTHER = '33333333-3333-4333-8333-333333333333';
+    db.prepare('INSERT INTO library_materials(material_id, object_sha256, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?)')
+      .run(OTHER, 'e'.repeat(64), '2026-10-09T00:00:00.000Z', '{}', 'c'.repeat(64));
+    expect(() => ledger.readForTask({ bookId: BOOK, references: [{ materialId: OTHER, indexDigest: now.indexDigest }] }, OTHER, '资料', 1, anyone))
+      .toThrowError(/索引版本已不在本机/u);
+  });
+
+  it('names one indexer for every format, and keeps the converter each build read through in its record (#729)', () => {
+    // Naming the DOC and text converters here would move every item's current build, DOCX ones included: the identity
+    // stays, and a converter's change moves `ai7-material-index/N` instead.
+    expect(MATERIAL_INDEXER_IDENTITY).toBe('ai7-material-index/1+ai7-docx-fflate-saxes/3');
+    const db = store();
+    new MaterialIndexLedger(db).record({ materialId: MATERIAL, sha256: SHA, format: 'TXT' }, { ...complete, converter: 'ai7-text-to-docx/1+ai7-docx-fflate-saxes/3' });
+    const row = db.prepare('SELECT canonical_json FROM material_index_builds').get() as { canonical_json: string };
+    expect(JSON.parse(row.canonical_json)).toMatchObject({ indexer: MATERIAL_INDEXER_IDENTITY, converter: 'ai7-text-to-docx/1+ai7-docx-fflate-saxes/3' });
   });
 
   it('records a build that read no text with its reason and no segments', () => {

@@ -4,12 +4,15 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LIBRARY_OBJECT_DIRECTORY } from '../../src/service/library-materials.js';
-import { MATERIAL_INDEXER_IDENTITY, MATERIAL_INDEX_TRIGGER_SQL, MATERIAL_INDEX_WORK_DIRECTORY } from '../../src/service/material-index.js';
+import { MATERIAL_INDEXER_IDENTITY, MATERIAL_INDEX_SCHEMA_SQL, MATERIAL_INDEX_TRIGGER_SQL, MATERIAL_INDEX_WORK_DIRECTORY } from '../../src/service/material-index.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION, MATERIAL_INDEX_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL } from '../../src/service/background-analysis-enrollments.js';
+import { replacementBlockedBy } from '../../src/service/replacement-gate.js';
+import { MATERIAL_INDEX_SCHEMA_VERSION, WRITING_TASK_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { buildManuscriptPackage } from '../../src/service/text-manuscript.js';
 import { MAX_FRAME_BYTES, MAX_MATERIAL_SEGMENTS_PAGE, type LibraryMaterialKind, type LibraryMaterialProjection } from '../../src/shared/protocol.js';
 import { sample1Path } from '../support/sample1-baseline.js';
+import { analysisRunAuthorizationsShape, downgradeAnalysisRunAuthorizationsToRevision65 } from '../support/default-execution-rules.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // Service-integration suite (L2) for ⑤ 资料库 · 资料索引 (Issue #428, plan slice S80a; editor-surfaces §8.4, V2-UX-KB-009,
@@ -55,6 +58,9 @@ async function put(store: EditorialStore, path: string, title: string, kind: Lib
   const preview = await store.previewLibraryMaterial(path);
   return store.addLibraryMaterial({ previewId: preview.previewId, title, kind });
 }
+
+/** Nothing else that would write is under way: what the service's gate reads besides the builder. */
+const QUIET = { runsIdle: true, reviewRunsDriving: false, jobsBusy: false, exportRunning: false, backgroundBusy: false } as const;
 
 const storePath = (): string => join(roots.dataRoot, 'store', 'ai7.sqlite');
 
@@ -221,19 +227,22 @@ describe('资料索引 over the real store', () => {
     }
   }, 120_000);
 
-  it('holds a build back when a replacement freezes the data after its extraction began, and builds it at the next start', async () => {
-    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    let materialId: string;
+  it('holds a build back while a replacement freezes the data, and builds it in the same lifetime once 取消替换 lifts it', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       // A package of this very data, to replace it with: what 替换本机全部数据 would be given.
       const destination = join(roots.inputRoot, 'same.ai7db');
       const preparation = await store.prepareDatabaseExport(destination, true);
       expect((await store.approveDatabaseExport(preparation.preparationId, true)).outcome).toBe('created');
       const preview = await store.inspectDatabaseImport(destination);
-      materialId = (await put(store, file('late.txt', '第一句。第二句。'), '迟到')).materialId;
-      // The build passes its first check and awaits the original; the replacement freezes the data synchronously meanwhile
-      // (#725 review, P2-2): the gate the service applies before a replacement does not count the builder as running work.
+      const materialId = (await put(store, file('late.txt', '第一句。第二句。'), '迟到')).materialId;
       store.startMaterialIndexing();
+      // The builder could still write, so the service's gate prepares no replacement now (#729), as for a Run under way.
+      expect(store.materialIndexing()).toBe(true);
+      expect(replacementBlockedBy({ ...QUIET, indexing: store.materialIndexing() })).not.toBeNull();
+      // Asked of the store directly, past that gate: the build has passed its first check and awaits the original, and the
+      // replacement freezes the data synchronously meanwhile (#725 review, P2-2). The store's own re-check after the
+      // extraction is the defence in depth that holds the write back.
       const preparing = store.prepareDatabaseReplacement(preview.previewId, new Date());
       expect(store.replacementFrozen()).toBe(true);
       await store.settleMaterialIndexing();
@@ -241,17 +250,41 @@ describe('资料索引 over the real store', () => {
       expect(store.inspectLibraryMaterial(materialId).index.state).toBe('queued');
       const pending = (await preparing).pending;
       expect(pending).not.toBeNull();
+      expect([store.materialIndexing(), replacementBlockedBy({ ...QUIET, indexing: store.materialIndexing() })]).toEqual([false, null]);
+      expect(store.inspectLibraryMaterial(materialId).index.state).toBe('queued');
+      // 取消替换 builds what the freeze held back, without waiting for the next start (#729).
       await store.cancelDatabaseReplacement(pending!.replacementId);
       expect(store.replacementFrozen()).toBe(false);
+      await store.settleMaterialIndexing();
+      expect(store.inspectLibraryMaterial(materialId).index.state).toBe('complete');
       store.markCleanShutdown();
     } finally {
       store.close();
     }
-    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  }, 120_000);
+
+  it('builds nothing while it starts frozen, then what waited and every later arrival once 取消替换 lifts the freeze', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
+      const destination = join(roots.inputRoot, 'same.ai7db');
+      const preparation = await store.prepareDatabaseExport(destination, true);
+      expect((await store.approveDatabaseExport(preparation.preparationId, true)).outcome).toBe('created');
+      const preview = await store.inspectDatabaseImport(destination);
+      const waited = (await put(store, file('waited.txt', '等过的一句。'), '等过')).materialId;
+      const pending = (await store.prepareDatabaseReplacement(preview.previewId, new Date())).pending;
+      expect(pending).not.toBeNull();
+      // The service starts its indexing while the replacement waits: nothing is built, nothing is under way (#729).
       store.startMaterialIndexing();
+      expect(store.materialIndexing()).toBe(false);
       await store.settleMaterialIndexing();
-      expect(store.inspectLibraryMaterial(materialId).index.state).toBe('complete');
+      expect(store.inspectLibraryMaterial(waited).index.state).toBe('queued');
+      await store.cancelDatabaseReplacement(pending!.replacementId);
+      await store.settleMaterialIndexing();
+      expect(store.inspectLibraryMaterial(waited).index.state).toBe('complete');
+      // The builder was started though it was frozen then: a later arrival is built as it arrives.
+      const later = (await put(store, file('later.txt', '后到的一句。'), '后到')).materialId;
+      await store.settleMaterialIndexing();
+      expect(store.inspectLibraryMaterial(later).index.state).toBe('complete');
       store.markCleanShutdown();
     } finally {
       store.close();
@@ -312,7 +345,7 @@ describe('资料索引 over the real store', () => {
     }
   }, 120_000);
 
-  it('builds at the next start what a closing service stopped, what came before revision 67, and removes stray working copies', async () => {
+  it('builds at the next start what a closing service stopped, what arrived at revision 65, and removes stray working copies', async () => {
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let materialId: string;
     try {
@@ -321,10 +354,16 @@ describe('资料索引 over the real store', () => {
     } finally {
       store.close();
     }
-    // A revision-66 store: the item arrived before the index existed.
+    // A revision-65 store: the item arrived before revision 66's enrollments and revision 67's index existed, so its open
+    // takes the two steps 65 → 66 → 67 before it builds (#725 re-review; #729).
     const plant = new DatabaseSync(storePath());
     try {
-      plant.exec(`DROP TABLE material_index_segments; DROP TABLE material_index_builds; PRAGMA user_version = ${BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION};`);
+      plant.exec('PRAGMA foreign_keys = OFF');
+      for (const table of [...Object.keys(MATERIAL_INDEX_SCHEMA_SQL).reverse(), ...Object.keys(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL).reverse()]) plant.exec(`DROP TABLE ${table}`);
+      plant.exec('PRAGMA foreign_keys = ON');
+      downgradeAnalysisRunAuthorizationsToRevision65(plant);
+      plant.exec(`PRAGMA user_version = ${WRITING_TASK_SCHEMA_VERSION}`);
+      expect(analysisRunAuthorizationsShape(plant)).toBe('revision-65');
     } finally {
       plant.close();
     }
@@ -347,6 +386,7 @@ describe('资料索引 over the real store', () => {
       const database = new DatabaseSync(storePath(), { readOnly: true });
       try {
         expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
+        expect(analysisRunAuthorizationsShape(database)).toBe('current');
         expect((database.prepare('SELECT count(*) count FROM material_index_builds').get() as { count: number }).count).toBeLessThanOrEqual(1);
       } finally {
         database.close();
