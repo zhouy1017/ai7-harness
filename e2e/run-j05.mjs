@@ -721,9 +721,10 @@ async function main() {
     // closed by the pane's own reflow — which is what closed it, the moment it opened, on hosted runners.
     // A pointer can only ask for a menu at a point that is on screen, so the paragraph is brought into
     // view first: on hosted runners the card of the step before had scrolled it above the window, and
-    // the step asked for a menu up there. The step also starts from a pane at rest — a pane still
-    // settling closes the menu, as any scroll of the pane rightly does — watches what happens to the
-    // menu, and names what it found: a hosted runner says nothing but a stage name.
+    // the step asked for a menu up there. The step also starts from a pane at rest, so the menu is asked
+    // for at the place the paragraph will stay (the pane moving on its own no longer closes the menu since
+    // #745, but a menu drawn at a point the text then leaves would point at nothing), watches what happens
+    // to the menu, and names what it found: a hosted runner says nothing but a stage name.
     await assertRenderer(renderer, `(() => { window.__j05.block(${JSON.stringify(first)}).scrollIntoView({ block: 'start' }); return true; })()`, 'edge-paragraph-into-view');
     await renderer.evaluate(`new Promise((resolve) => { const pane = document.querySelector('.editor-window'); let last = pane.scrollTop; let quiet = 0; const tick = () => { if (pane.scrollTop !== last) { last = pane.scrollTop; quiet = 0; } else quiet += 1; if (quiet >= 10) resolve(true); else requestAnimationFrame(tick); }; requestAnimationFrame(tick); })`);
     await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(first)}, 0, 0)`, 'edge-caret');
