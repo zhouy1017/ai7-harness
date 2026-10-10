@@ -2757,7 +2757,7 @@ async function main() {
     at('writing-library-plan');
     // On the Book's 交付物 the sheet offers the item under 资料库, none ticked; ticked for a 评论文章, 先看计划 freezes a plan that
     // lists it under 允许参考, pinned at its index build, and that copies it no more than it copies a 范例.
-    await click(renderer, '返回图书列表', 'writing-library-books');
+    await click(renderer, '返回', 'writing-library-books');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'writing-library-books-landing');
     await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(writingBookId)}]`, 'writing-library-book-open');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(writingBookId)}] [data-testid="manuscript-editor"] > [data-block-id]')`, 'writing-library-manuscript', 120_000);
