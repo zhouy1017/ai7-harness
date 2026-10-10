@@ -23,6 +23,7 @@ import {
 import { TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { MATERIAL_INDEX_SCHEMA_VERSION, OUTCOME_RESOLUTION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 
 // Service-integration suite (L2) for 结果待确认 a completed Run left (Issue #757; V2-UX-ATTN-002, NOTIF-004, CTRL-007, CONT-011;
 // execution CONTEXT.md, Manual Outcome Resolution): the real store on a temporary Agent Data Root, exact `sample1` imported
@@ -229,6 +230,49 @@ describe('结果待确认 a completed Run left (Issue #757)', () => {
       store.close();
     }
   }, 300_000);
+
+  it('adds revision 68 to a revision-67 store with nothing else moved, and every row kept', async () => {
+    const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const creation = first.prepareBookCreation('早先的图书', null);
+      first.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest });
+      first.markCleanShutdown();
+    } finally {
+      first.close();
+    }
+    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    const schemaOf = (database: DatabaseSync): Array<{ name: string; sql: string }> =>
+      database.prepare("SELECT name, sql FROM sqlite_schema WHERE type IN ('table', 'trigger', 'index') AND sql IS NOT NULL ORDER BY name").all() as Array<{ name: string; sql: string }>;
+    const plant = new DatabaseSync(path);
+    let before: Array<{ name: string; sql: string }>;
+    let books: unknown[];
+    try {
+      plant.exec(`DROP TABLE analysis_outcome_resolutions; PRAGMA user_version = ${MATERIAL_INDEX_SCHEMA_VERSION};`);
+      before = schemaOf(plant);
+      books = plant.prepare('SELECT * FROM books ORDER BY rowid').all();
+    } finally {
+      plant.close();
+    }
+    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      migrated.markCleanShutdown();
+    } finally {
+      migrated.close();
+    }
+    const database = new DatabaseSync(path, { readOnly: true });
+    try {
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(OUTCOME_RESOLUTION_SCHEMA_VERSION);
+      expect(OUTCOME_RESOLUTION_SCHEMA_VERSION).toBe(MATERIAL_INDEX_SCHEMA_VERSION + 1);
+      const after = schemaOf(database);
+      expect(after.filter((entry) => !entry.name.startsWith('analysis_outcome_resolutions'))).toEqual(before!);
+      expect(after.filter((entry) => entry.name.startsWith('analysis_outcome_resolutions')).map((entry) => entry.name))
+        .toEqual(['analysis_outcome_resolutions', 'analysis_outcome_resolutions_no_delete', 'analysis_outcome_resolutions_no_update']);
+      expect(database.prepare('SELECT * FROM books ORDER BY rowid').all()).toEqual(books!);
+      expect((database.prepare('SELECT count(*) total FROM analysis_outcome_resolutions').get() as { total: number }).total).toBe(0);
+    } finally {
+      database.close();
+    }
+  }, 120_000);
 
   it('lists nothing for a Run stopped 结果待确认 and then cancelled — 取消任务 settled it — and still discloses its re-send', async () => {
     const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-outcome-unknown');
