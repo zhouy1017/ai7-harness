@@ -255,6 +255,7 @@ const PAGE_HELPERS = `(() => {
     return null;
   };
   const layer = () => document.querySelector('.editorial-mark-layer');
+  const pane = () => { const node = document.querySelector('.editor-window'); return node ? node.scrollTop + ',' + node.scrollLeft : null; };
   const conflict = () => document.querySelector('[data-screen="proposal-conflict"] section.proposal-conflict');
   const draft = () => conflict()?.querySelector('[data-conflict-draft]') ?? null;
   const press = (control) => {
@@ -286,8 +287,11 @@ const PAGE_HELPERS = `(() => {
       element.dispatchEvent(new MouseEvent('mousedown', init));
       element.dispatchEvent(new MouseEvent('mouseup', { ...init, buttons: 0 }));
       element.dispatchEvent(new MouseEvent('contextmenu', { ...init, buttons: 0 }));
+      // Where the text pane stood once the menu was drawn, so a choice that finds no menu can say whether it moved (#745).
+      window.__j06.paneAtMenu = pane();
       return true;
     },
+    pane,
     block,
     mark: (kind, id) => Array.from(block(id)?.querySelectorAll('.editorial-mark[data-mark-kind="' + kind + '"]') ?? []),
     markById: (markId) => editor()?.querySelector('.editorial-mark[data-mark-id="' + markId + '"]') ?? null,
@@ -375,6 +379,248 @@ async function rightClickUntil(renderer, prepare, target, ready, name) {
   throw journeyCheckFailure('J-06', name);
 }
 
+/** Which menu was open, as a check label's word: the selection menu, a mark's menu, another, or none (Issue #745). */
+function menuWord(kind) {
+  switch (kind) {
+    case 'selection': return 'selection';
+    case 'mark': return 'mark';
+    case null: case undefined: return 'none';
+    default: return 'other';
+  }
+}
+
+/** The menu item's state, as a check label's word: not on the menu, on it but unavailable, or choosable. */
+function itemWord(item) {
+  switch (item) {
+    case 'enabled': return 'enabled';
+    case 'disabled': return 'disabled';
+    default: return 'absent';
+  }
+}
+
+/** The open Mark Card's state (`data-mark-state`), as a check label's word, or `none` when no card was open. */
+function cardWord(state) {
+  switch (state) {
+    case 'open': return 'open';
+    case 'applied': return 'applied';
+    case 'resolved': return 'resolved';
+    case 'accepted': return 'accepted';
+    case 'accepted-with-edit': return 'edited';
+    case 'rejected': return 'rejected';
+    case 'withdrawn': return 'withdrawn';
+    case null: case undefined: return 'none';
+    default: return 'other';
+  }
+}
+
+/** The status line's tone, as a check label's word. */
+function toneWord(tone) {
+  switch (tone) {
+    case 'busy': return 'busy';
+    case 'error': return 'error';
+    case 'success': return 'success';
+    default: return 'none';
+  }
+}
+
+/** What the product showed when a menu choice could not be made: the menu, the item, the card, the tone, and the pane. */
+const menuSeen = (action) => `(() => {
+  const menu = window.__j06.menu();
+  const item = menu?.querySelector('[data-mark-action="${action}"]') ?? null;
+  return {
+    menu: menu?.dataset.markMenu ?? null,
+    item: item instanceof HTMLButtonElement ? (item.disabled ? 'disabled' : 'enabled') : null,
+    card: window.__j06.card() === null ? null : (window.__j06.card().querySelector('[data-mark-state]')?.dataset.markState ?? 'unknown'),
+    tone: window.__j06.tone(),
+    moved: window.__j06.paneAtMenu !== window.__j06.pane(),
+  };
+})()`;
+
+/**
+ * Choose one item of the menu the right-click opened. When it cannot be chosen, the label says what the product showed
+ * (Issue #745): `-menu-<selection|mark|other|none>-item-<enabled|disabled|absent>-card-<state|none>-<tone>-pane-<moved|
+ * still>`, the pane's word saying whether the text pane moved since the menu was drawn. A renderer that could not be read
+ * by then fails as `-menu-unread`, never as a page that showed nothing, and never with the session's own failure instead.
+ */
+async function chooseFromMenu(renderer, action, name) {
+  if (await renderer.evaluate(`(() => { const item = window.__j06.item(${JSON.stringify(action)}); if (!(item instanceof HTMLButtonElement) || item.disabled) return false; item.click(); return true; })()`)) return;
+  const seen = await renderer.evaluate(menuSeen(action)).catch(() => null);
+  if (seen === null || typeof seen !== 'object') throw journeyCheckFailure('J-06', `${name}-menu-unread`);
+  throw journeyCheckFailure('J-06', `${name}-menu-${menuWord(seen?.menu)}-item-${itemWord(seen?.item)}-card-${cardWord(seen?.card)}-${toneWord(seen?.tone)}-pane-${seen?.moved === true ? 'moved' : 'still'}`);
+}
+
+/** What became of the selection menu once the pane moved, as a check label's word (Issue #745). */
+function paneScrollWord(state) {
+  switch (state) {
+    case 'open': return 'open';
+    case 'closed': return 'closed';
+    case 'unmoved': return 'unmoved';
+    case 'undrawn': return 'undrawn';
+    default: return 'unread';
+  }
+}
+
+/**
+ * Move the text pane by 40.5 px, toward its top when it can, and say what the selection menu did two frames on
+ * (Issue #745): `open`, `closed`, `unmoved` when the pane could not move, or `undrawn` when no selection menu stood where it
+ * should. With `rightClickAfter`, the right-click on `blockId` is made in the same task as the movement, so the menu is drawn
+ * after the pane moved and the movement's `scroll` event reaches it a frame later; without, the menu is already open.
+ */
+function movePaneAround(blockId, rightClickAfter) {
+  return `(async () => {
+    const pane = document.querySelector('.editor-window');
+    const seen = { state: 'undrawn' };
+    if (!(pane instanceof HTMLElement)) return seen;
+    if (!${rightClickAfter} && window.__j06.menu()?.dataset.markMenu !== 'selection') return seen;
+    // Which event was being dispatched when the menu left the page, and where the pane, the selection and the pane's box
+    // stood then against where they stood when the menu was drawn (Issue #745 review). The first event of a task is kept:
+    // removing the focused menu item dispatches a focusout inside the handler that removed it.
+    let current = null;
+    const note = (event) => {
+      if (current !== null) return;
+      current = event.type === 'scroll' ? (event.target === pane ? 'scroll' : 'other-scroll') : event.type;
+      setTimeout(() => { current = null; }, 0);
+    };
+    const types = ['scroll', 'mousedown', 'keydown', 'selectionchange', 'focusin', 'focusout', 'pointerdown'];
+    for (const type of types) document.addEventListener(type, note, true);
+    window.addEventListener('resize', note, true);
+    const selectionKey = () => { const selection = getSelection(); return selection === null || selection.rangeCount === 0 ? 'none' : [selection.anchorOffset, selection.focusOffset, selection.anchorNode === selection.focusNode].join(','); };
+    let drawn = null;
+    let drawnAt = null;
+    let from = null;
+    let target = null;
+    let box = null;
+    const close = () => {
+      seen.cause = current ?? 'task';
+      seen.delta = pane.scrollTop - drawnAt;
+      seen.back = Math.abs(pane.scrollTop - from) < 1;
+      seen.selection = selectionKey() === box.selection;
+      seen.width = pane.clientWidth === box.width;
+      seen.height = pane.scrollHeight === box.height;
+    };
+    const watcher = new MutationObserver((records) => {
+      for (const record of records) for (const node of record.removedNodes) if (node === drawn && seen.cause === undefined) close();
+    });
+    try {
+      // A fractional distance (#745 review): where a platform keeps fractional offsets, the pane settles onto a device
+      // pixel once the frame is drawn, and the menu must stand through that settling as through the scroll event itself.
+      from = pane.scrollTop;
+      target = from >= 41 ? from - 40.5 : from + 40.5;
+      pane.scrollTop = target;
+      if (Math.abs(pane.scrollTop - from) < 1) { seen.state = 'unmoved'; return seen; }
+      if (${rightClickAfter}) window.__j06.rightClick(window.__j06.block(${JSON.stringify(blockId)}));
+      drawn = window.__j06.menu();
+      if (drawn?.dataset.markMenu !== 'selection') return seen;
+      drawnAt = pane.scrollTop;
+      seen.cause = undefined;
+      seen.drawn = Math.abs(drawnAt - target) < 1 ? 'target' : Math.abs(drawnAt - from) < 1 ? 'origin' : 'other';
+      seen.fromFraction = from % 1 !== 0;
+      box = { selection: selectionKey(), width: pane.clientWidth, height: pane.scrollHeight };
+      if (drawn.parentNode) watcher.observe(drawn.parentNode, { childList: true });
+      await new Promise((resolveFrames) => requestAnimationFrame(() => requestAnimationFrame(resolveFrames)));
+      seen.state = window.__j06.menu()?.dataset.markMenu === 'selection' ? 'open' : 'closed';
+      if (seen.state === 'closed' && seen.cause === undefined) { close(); seen.cause = 'unobserved'; }
+      return seen;
+    } finally {
+      watcher.disconnect();
+      for (const type of types) document.removeEventListener(type, note, true);
+      window.removeEventListener('resize', note, true);
+    }
+  })()`;
+}
+
+/** The event dispatched when the menu left the page, as a check label's word (Issue #745 review). */
+function closerWord(cause) {
+  switch (cause) {
+    case 'scroll': return 'scroll';
+    case 'other-scroll': return 'other-scroll';
+    case 'mousedown': return 'mousedown';
+    case 'pointerdown': return 'pointerdown';
+    case 'keydown': return 'keydown';
+    case 'selectionchange': return 'selection';
+    case 'focusin': return 'focusin';
+    case 'focusout': return 'focusout';
+    case 'resize': return 'resize';
+    case 'task': return 'task';
+    case 'unobserved': return 'unobserved';
+    default: return 'none';
+  }
+}
+
+/** How far, and which way, the pane stood from where it was when the menu was drawn, as two check label words. */
+function deltaWords(delta) {
+  if (typeof delta !== 'number' || !Number.isFinite(delta)) return 'unknown-none';
+  const direction = delta < 0 ? 'up' : delta > 0 ? 'down' : 'none';
+  const size = Math.abs(delta);
+  const bucket = size === 0 ? 'same' : size <= 1 ? 'le1' : size <= 5 ? 'le5' : size >= 35 && size <= 45 ? 'near40' : 'large';
+  return `${bucket}-${direction}`;
+}
+
+/** Where the pane stood when the menu was drawn: at the position set, still at the one before it, or elsewhere. */
+function drawnWord(drawn) {
+  switch (drawn) {
+    case 'target': return 'tgt';
+    case 'origin': return 'org';
+    default: return 'oth';
+  }
+}
+
+/**
+ * What became of the menu when the pane moved before it was drawn, with why it closed when it did:
+ * `closed-by-<closer>-<same|le1|le5|near40|large|unknown>-<up|down|none>-<back|fwd>-<tgt|org|oth>-<ss|sm>-<ws|wc>-<hs|hc>-
+ * <ff|fw>` — the closer; the pane's distance and direction from where the menu was drawn; whether it stood back where it
+ * was before the move; where it stood when the menu was drawn (the position set, the one before, other); whether the
+ * selection, the pane's width and its scroll height were the same (`s`) or changed (`m`/`c`); whether the position before
+ * the move was fractional.
+ */
+function movedBeforeWords(seen) {
+  const state = paneScrollWord(seen?.state);
+  if (state !== 'closed') return state;
+  const back = seen?.back === true ? 'back' : 'fwd';
+  const selection = seen?.selection === true ? 'ss' : 'sm';
+  const width = seen?.width === true ? 'ws' : 'wc';
+  const height = seen?.height === true ? 'hs' : 'hc';
+  const fraction = seen?.fromFraction === true ? 'ff' : 'fw';
+  return `closed-by-${closerWord(seen?.cause)}-${deltaWords(seen?.delta)}-${back}-${drawnWord(seen?.drawn)}-${selection}-${width}-${height}-${fraction}`;
+}
+
+/** What a wheel over the pane did to the open selection menu, as a check label's word (Issue #745). */
+function wheelWord(state) {
+  switch (state) {
+    case 'open': return 'open';
+    case 'closed': return 'closed';
+    case 'unaimed': return 'unaimed';
+    case 'undrawn': return 'undrawn';
+    default: return 'unread';
+  }
+}
+
+/**
+ * The reader's own scroll (Issue #745): a mouse wheel turned over the text pane, at a point of the pane the open selection
+ * menu does not cover, sent through the browser's input as a hand's wheel is. Says what the menu did two frames on:
+ * `closed`, `open`, `unaimed` when no point of the pane stood clear of the menu, or `undrawn` when no menu was open.
+ */
+async function wheelOverPane(renderer) {
+  const aim = await renderer.evaluate(`(() => {
+    const pane = document.querySelector('.editor-window');
+    const menu = window.__j06.menu();
+    if (!(pane instanceof HTMLElement) || menu?.dataset.markMenu !== 'selection') return { state: 'undrawn' };
+    const rect = pane.getBoundingClientRect();
+    const candidates = [[rect.right - 40, rect.top + rect.height / 2], [rect.right - 40, rect.top + 60], [rect.right - 40, rect.bottom - 60], [rect.left + 40, rect.bottom - 60]];
+    for (const [x, y] of candidates) {
+      const hit = document.elementFromPoint(x, y);
+      if (hit !== null && pane.contains(hit) && !menu.contains(hit)) return { state: 'aimed', x: Math.round(x), y: Math.round(y), down: pane.scrollTop < 100 };
+    }
+    return { state: 'unaimed' };
+  })()`);
+  if (aim?.state !== 'aimed') return wheelWord(aim?.state);
+  await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: aim.x, y: aim.y, deltaX: 0, deltaY: aim.down ? 100 : -100 });
+  return wheelWord(await renderer.evaluate(`(async () => {
+    await new Promise((resolveFrames) => requestAnimationFrame(() => requestAnimationFrame(resolveFrames)));
+    return window.__j06.menu()?.dataset.markMenu === 'selection' ? 'open' : 'closed';
+  })()`));
+}
+
 /** A 修改建议 over RANGE of a paragraph, made through the selection menu and its composer. */
 async function suggest(renderer, blockId, proposedText, rationale, name) {
   await rightClickUntil(
@@ -384,7 +630,7 @@ async function suggest(renderer, blockId, proposedText, rationale, name) {
     `window.__j06.menu()?.dataset.markMenu === 'selection' && window.__j06.menu().textContent.includes('已选 ${RANGE[1] - RANGE[0]} 字')`,
     `${name}-menu`,
   );
-  await assertRenderer(renderer, `(() => { const item = window.__j06.item('add-change-suggestion'); if (!(item instanceof HTMLButtonElement) || item.disabled) return false; item.click(); return true; })()`, `${name}-choose`);
+  await chooseFromMenu(renderer, 'add-change-suggestion', `${name}-choose`);
   await waitFor(renderer, `window.__j06.composer()?.dataset.markComposer === 'create-change-suggestion'`, `${name}-composer`);
   await assertRenderer(renderer, `window.__j06.write('proposedText', ${JSON.stringify(proposedText)}) && (${JSON.stringify(rationale)} === '' || window.__j06.write('rationale', ${JSON.stringify(rationale)})) && window.__j06.act('submit')`, `${name}-submit`);
   await waitFor(renderer, `window.__j06.mark('change-suggestion', ${JSON.stringify(blockId)}).length > 0 && window.__j06.composer() === null`, `${name}-drawn`);
@@ -709,6 +955,25 @@ async function main() {
     await waitFor(renderer, `window.__j06.card()?.querySelector('[data-mark-application]') && window.__j06.text(${JSON.stringify(first)}) === window.__j06Texts.now.slice(0, ${RANGE[0]}) + ${JSON.stringify(MERGED)} + window.__j06Texts.now.slice(${RANGE[1] + TYPED_INSIDE.length})`, 'new-version-written', 60_000);
     await assertRenderer(renderer, `window.__j06.card().querySelector('[data-mark-state]')?.textContent === '已应用' && window.__j06.markById(${JSON.stringify(versionId)})?.dataset.markStatus === 'applied'`, 'new-version-applied-with-its-receipt');
     await assertRenderer(renderer, `(() => { window.__j06Applied = window.__j06.text(${JSON.stringify(first)}); window.__j06Replaced = window.__j06Texts.current; return true; })()`, 'applied-text-kept');
+    cancellation.throwIfRequested();
+
+    at('menu-pane-scroll');
+    // A menu closes when the reader scrolls the text from under it, and stands when the pane moves on its own (Issue #745):
+    // a movement made in the same task as the right-click, and one made while the menu is open, both leave it open two
+    // frames on, after the movement's `scroll` event has been dispatched; a wheel over the pane closes it.
+    await rightClickUntil(
+      renderer,
+      `window.__j06.place(${JSON.stringify(third)}, ${RANGE[0]}, ${RANGE[1]})`,
+      `window.__j06.block(${JSON.stringify(third)})`,
+      `window.__j06.menu()?.dataset.markMenu === 'selection' && window.__j06.menu().textContent.includes('已选 ${RANGE[1] - RANGE[0]} 字')`,
+      'menu-scroll-open',
+    );
+    const movedBefore = movedBeforeWords(await renderer.evaluate(movePaneAround(third, true)));
+    requireJourney(movedBefore === 'open', `menu-pane-moved-before-${movedBefore}`);
+    const movedWhileOpen = paneScrollWord((await renderer.evaluate(movePaneAround(third, false)))?.state);
+    requireJourney(movedWhileOpen === 'open', `menu-pane-moved-while-open-${movedWhileOpen}`);
+    const wheeled = await wheelOverPane(renderer);
+    requireJourney(wheeled === 'closed', `menu-reader-wheel-${wheeled}`);
     cancellation.throwIfRequested();
 
     at('keep-current');

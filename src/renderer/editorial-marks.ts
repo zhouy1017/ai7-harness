@@ -1913,10 +1913,15 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   const reflow = new ResizeObserver(() => {
     if (floating !== undefined && floatingBlockId !== undefined) placeBelowBlock(floating, floatingBlockId);
   });
-  // A menu points at a place on screen; once the text under it moves, it points at nothing.
-  const onPaneScroll = (): void => closeMenu();
+  // A menu points at a place on screen: once the reader scrolls the text from under it — a wheel or a touch moving over
+  // the pane — it points at nothing and goes (a drag on the pane's scrollbar is a mousedown, which closes it already).
+  // The pane moving on its own leaves it standing (Issue #745): the editor revealing its caret as it takes focus, a card
+  // brought into view, a window restored after an Apply, the text reflowing. Their `scroll` events arrive a frame after
+  // the movement, often after the menu the reader just opened, and the menu acts on the selection, not on the point.
+  const onReaderScroll = (): void => closeMenu();
   const onWindowResize = (): void => closeMenu();
-  options.scroll.addEventListener('scroll', onPaneScroll, { passive: true });
+  options.scroll.addEventListener('wheel', onReaderScroll, { passive: true });
+  options.scroll.addEventListener('touchmove', onReaderScroll, { passive: true });
   window.addEventListener('resize', onWindowResize);
   reflow.observe(options.scroll);
   reflow.observe(options.host);
@@ -1949,7 +1954,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     destroy: () => {
       destroyed = true;
       reflow.disconnect();
-      options.scroll.removeEventListener('scroll', onPaneScroll);
+      options.scroll.removeEventListener('wheel', onReaderScroll);
+      options.scroll.removeEventListener('touchmove', onReaderScroll);
       window.removeEventListener('resize', onWindowResize);
       close();
       options.host.removeEventListener('mousedown', onMouseDown);
