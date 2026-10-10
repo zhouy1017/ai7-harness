@@ -64,6 +64,7 @@ type Generator = {
   renderProviderConfiguration: (resolved: unknown) => Record<string, string>;
   generateProviderConfiguration: (options?: { root?: string; check?: boolean }) => string[];
   compareRecordedEvidenceWithLedger: (recordedEvidence: RecordedEvidence, lines: LedgerLine[], env?: Record<string, string | undefined>) => string[];
+  isLedgerRoot: (cacheRoot: unknown, platform?: string) => boolean;
 };
 
 // @ts-expect-error tools/*.mjs carry no declarations; the generator is exercised as the plain module it is.
@@ -284,6 +285,10 @@ describe('provider documents and the generator (ADR 0073 §2)', () => {
       ['recorded-evidence-row-unknown', (input) => { input.recordedEvidence.data.liveTestItems.push({ itemId: 'S99/nobody/1', route: 'opencode-go', model: 'nobody-model', observedOn: '2026-10-09', issue: '#715' }); }],
       ['recorded-evidence-row-unknown', (input) => { input.recordedEvidence.data.liveTestItems.push({ itemId: 'S99/nobody/1', route: 'bytedance-doubao', model: 'doubao-seed', observedOn: '2026-10-09', issue: '#715' }); }],
       ['recorded-evidence-row-unknown', (input) => { input.recordedEvidence.data.frozenRequestBaselines.push({ since: 'adapter revision 2', route: 'opencode-zen', models: ['nobody-model'], issue: '#715' }); }],
+      // The withdrawal marker is the record's statement that the row left the documents (Issue #743): never on a declared row.
+      ['recorded-evidence-withdrawn-declared', (input) => { input.recordedEvidence.data.liveTestItems[0]!.withdrawn = '#743'; }],
+      ['recorded-evidence-schema', (input) => { input.recordedEvidence.data.liveTestItems[0]!.withdrawn = '743'; }],
+      ['recorded-evidence-schema', (input) => { input.recordedEvidence.data.liveTestItems[0]!.withdrawn = true; }],
       ['baseline-unrecorded', (input) => { input.recordedEvidence.data.frozenRequestBaselines[0]!.route = 'opencode-zen'; }],
       ['live-item-unrecorded', (input) => { input.recordedEvidence.data.liveTestItems[0]!.route = 'opencode-zen'; }],
       ['evidence-unknown', (input) => { route(documentOf(input, 'minimax')).limitPolicyEvidence = 'nobody-read-this'; }],
@@ -380,6 +385,52 @@ describe('recorded evidence and the Provider Test Ledger (Issue #715, ADR 0067)'
     expect(refusalAfter((input) => { input.recordedEvidence.data.liveTestItems.push({ itemId: 'S99/spare/1', route: 'opencode-go', model: 'glm-5.3', observedOn: '2026-10-09', issue: '#715' }); })).toBeNull();
   });
 
+  it('keeps an item whose row left the documents, marked withdrawn, as a disclosure the ledger comparison still counts (Issue #743)', () => {
+    const retired = { itemId: 'S99/retired/1', route: 'opencode-go', model: 'retired-model', observedOn: '2026-10-09', issue: '#715' };
+    // Unmarked, an undeclared row is refused: in CI, where no ledger exists, that is what catches a mistyped row.
+    expect(refusalAfter((input) => { input.recordedEvidence.data.liveTestItems.push({ ...retired }); }))
+      .toContain('PROVIDER_CONFIGURATION/recorded-evidence-row-unknown');
+    const input = freshInput();
+    input.recordedEvidence.data.liveTestItems.push({ ...retired, withdrawn: '#743' });
+    const resolved = generator.resolveProviderConfiguration(input);
+    expect(resolved.recordedEvidence.liveTestItems.at(-1)).toEqual({ ...retired, withdrawn: '#743' });
+    const outputs = generator.renderProviderConfiguration(resolved);
+    expect(outputs['docs/development/provider-support.md']).toContain('| `S99/retired/1` | `opencode-go` | `retired-model` (row no longer declared, withdrawn on #743) | 2026-10-09 | #715 |');
+    expect(outputs['docs/development/provider-support.md']).toContain('| `S40/reanalyze-range/1` | `opencode-go` | `deepseek-v4-flash` | 2026-09-08 | #306 |');
+    // The generated modules carry nothing of the record, withdrawn or not.
+    const current = generator.renderProviderConfiguration(generator.resolveProviderConfiguration(freshInput()));
+    for (const path of ['src/shared/provider-configuration.generated.ts', 'src/service/provider/provider-profiles.generated.ts', 'tools/provider-credential-slots.generated.mjs']) {
+      expect(outputs[path], path).toBe(current[path]);
+    }
+    // No document can cite the withdrawn item for a model row: its row is no declared model's.
+    expect(refusalAfter((inner) => {
+      inner.recordedEvidence.data.liveTestItems.push({ ...retired, observedOn: '2026-09-07', withdrawn: '#743' });
+      const evidence = documentOf(inner, 'opencode-go').evidence as Record<string, any>;
+      evidence['first-live-run'].itemIds = [...evidence['first-live-run'].itemIds, 'S99/retired/1'];
+    })).toContain('PROVIDER_CONFIGURATION/evidence-row');
+    // The ledger still holds the line, and the comparison still mirrors it: agreement with it, a difference without it.
+    const developer: Record<string, string | undefined> = { ...process.env };
+    for (const name of ['CI', 'GITHUB_ACTIONS', 'AI7_E2E_JOURNEY']) delete developer[name];
+    const line = (itemId: string, model: string, recordedAt: string): LedgerLine => ({
+      itemId, purpose: 'synthetic', model, promptContractDigest: '0'.repeat(64), requestDigest: '1'.repeat(64),
+      outcome: 'transmitted', status: 200, usage: { inputTokens: 1, outputTokens: 1 }, recordedAt,
+    });
+    const lines = input.recordedEvidence.data.liveTestItems.map((item) => line(item.itemId, item.model, `${item.observedOn}T08:00:00.000Z`));
+    expect(generator.compareRecordedEvidenceWithLedger(input.recordedEvidence, lines, developer)).toEqual([]);
+    expect(generator.compareRecordedEvidenceWithLedger(input.recordedEvidence, lines.slice(0, -1), developer))
+      .toEqual(['S99/retired/1 is recorded but the ledger holds no transmitted line for it']);
+  });
+
+  it('accepts as the --ledger cache root only an absolute path, drive letter included on Windows (Issue #743)', () => {
+    for (const root of ['C:\\ai7\\cache', 'C:/ai7/cache', 'd:\\cache']) expect(generator.isLedgerRoot(root, 'win32'), root).toBe(true);
+    // `isAbsolute('/cache')` holds on Windows and resolves against the current drive; a UNC root names no drive.
+    for (const root of ['/cache', '\\cache', 'C:cache', 'relative/cache', '\\\\server\\share\\cache', '', undefined]) {
+      expect(generator.isLedgerRoot(root, 'win32'), String(root)).toBe(false);
+    }
+    expect(generator.isLedgerRoot('/Users/editor/cache', 'darwin')).toBe(true);
+    for (const root of ['relative/cache', '', undefined]) expect(generator.isLedgerRoot(root, 'darwin'), String(root)).toBe(false);
+  });
+
   it('compares the record with the ledger on a developer host: agreement is empty, every difference is one sentence', () => {
     const { recordedEvidence } = freshInput();
     const compare = (lines: LedgerLine[]) => generator.compareRecordedEvidenceWithLedger(recordedEvidence, lines, developerEnv());
@@ -434,6 +485,10 @@ describe('recorded evidence and the Provider Test Ledger (Issue #715, ADR 0067)'
       ].join('\n'));
       expect(run(['--ledger', 'relative/cache'], developerEnv())).toMatchObject({ status: 1, stderr: expect.stringContaining('PROVIDER_CONFIGURATION/ledger-root') });
       expect(run(['--ledger'], developerEnv())).toMatchObject({ status: 1, stderr: expect.stringContaining('PROVIDER_CONFIGURATION/ledger-root') });
+      if (process.platform === 'win32') {
+        // A drive-relative root is refused before the ledger is read, wherever the current drive is.
+        expect(run(['--ledger', '/cache'], developerEnv())).toMatchObject({ status: 1, stderr: expect.stringContaining('PROVIDER_CONFIGURATION/ledger-root') });
+      }
       expect(run(['--ledger', scratch], { ...developerEnv(), CI: 'true' })).toMatchObject({ status: 1, stderr: expect.stringContaining('PROVIDER_CONFIGURATION/ledger-on-ci') });
       rmSync(join(scratch, 'ledger.jsonl'));
       expect(run(['--ledger', scratch], developerEnv())).toMatchObject({ status: 1, stderr: expect.stringContaining('FIXTURE_GEN/ledger-unreadable') });

@@ -89,6 +89,13 @@ export const MATERIAL_INDEX_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<
 /**
  * The indexer's identity: what a build was made by. A build is made once per item per identity, so a later indexer that
  * reads more makes a new build beside the old one, and nothing is rewritten.
+ *
+ * It names the DOCX parser every format is read through, and not the DOC and text converters (#729): it is one identity for
+ * every format, so naming them would move every item's current build — DOCX ones included — and rebuild them all, each
+ * build's digest with it. Each build records the converter it read through in its own record (`converter`, under the
+ * build's digest); a change to a converter's output moves `ai7-material-index/N` instead. Refinements of the sentence
+ * anchors (`splitSentences`) are not versioned this way: a build made earlier keeps the anchors it was made with, and a
+ * plan pins a build by its digest, so what a plan froze never moves under it (#729; #751 review, P3-3).
  */
 export const MATERIAL_INDEXER_IDENTITY = `ai7-material-index/1+${DOCX_PARSER_IDENTITY}`;
 /** Where a converted working copy is written while it is read, inside the Agent Data Root; removed after, and at open. */
@@ -139,13 +146,39 @@ const TERMINATORS: ReadonlySet<string> = new Set(['。', '！', '？', '!', '?',
 /** What closes a sentence after its end mark and belongs to it: closing quotes and brackets. */
 const CLOSERS: ReadonlySet<string> = new Set(['”', '’', '」', '』', '）', ')', '】', '》', '〉', '"', '\'', '］', ']', '〗', '〕']);
 const WHITESPACE = /\s/u;
+/** A clause number: `1` of 「1. 第一条」. */
+const CLAUSE_NUMBER = /^\d+$/u;
+/**
+ * A single Latin letter, or single Latin letters joined by full stops: `U.S` of 「The U.S. economy」. Latin only: a Han
+ * character before a stop, 「好. 我们走吧.」, ends its sentence (#751 review, P1-1).
+ */
+const INITIALS = /^\p{Script=Latin}(?:\.\p{Script=Latin})*$/u;
+
+/**
+ * Whether a Latin full stop at `index` closes no sentence though white space follows it (#729): the sentence so far is
+ * only digits — a numbered clause, 「1. 第一条」 — or the word before the stop, after a space or at the sentence's start, is
+ * a single Latin letter or single Latin letters joined by full stops — an initial or an abbreviation, 「The U.S. economy」,
+ * 「J. Smith」.
+ * Only the word before the stop is read, and the white space before it, so a paragraph is still read once over.
+ */
+function heldFullStop(text: string, start: number, index: number): boolean {
+  let word = index;
+  while (word > start && !WHITESPACE.test(text.charAt(word - 1))) word -= 1;
+  const last = text.slice(word, index);
+  if (INITIALS.test(last)) return true;
+  if (!CLAUSE_NUMBER.test(last)) return false;
+  let before = word;
+  while (before > start && WHITESPACE.test(text.charAt(before - 1))) before -= 1;
+  return before === start;
+}
 
 /**
  * A paragraph's sentences, as `[start, end)` ranges of its UTF-16 code units, in order and without the white space around
  * them: a sentence ends after a run of end marks and the closing quotes or brackets that follow, a Latin full stop ends
- * one only before white space or the paragraph's end (so `3.14` stays whole), and a line break inside a paragraph ends
- * one too. A paragraph without any end mark is one sentence. Every end mark and closer is a single code unit, so no range
- * ever splits a surrogate pair. Deterministic: the same text always gives the same anchors.
+ * one only before white space or the paragraph's end (so `3.14` stays whole) and never after a clause number or an
+ * initial (`heldFullStop`), and a line break inside a paragraph ends one too. A paragraph without any end mark is one
+ * sentence. Every end mark and closer is a single code unit, so no range ever splits a surrogate pair. Deterministic: the
+ * same text always gives the same anchors.
  */
 export function splitSentences(text: string): Array<readonly [number, number]> {
   const ranges: Array<readonly [number, number]> = [];
@@ -166,7 +199,8 @@ export function splitSentences(text: string): Array<readonly [number, number]> {
       start = index;
       continue;
     }
-    const ends = TERMINATORS.has(character) || (character === '.' && (index + 1 >= text.length || WHITESPACE.test(text.charAt(index + 1))));
+    const ends = TERMINATORS.has(character) ||
+      (character === '.' && (index + 1 >= text.length || WHITESPACE.test(text.charAt(index + 1))) && !heldFullStop(text, start, index));
     if (ends) {
       let next = index + 1;
       while (next < text.length && (TERMINATORS.has(text.charAt(next)) || text.charAt(next) === '.')) next += 1;
@@ -190,17 +224,101 @@ const HAN = /\p{Script=Han}/u;
  * its letters, another language when they are fewer, and none when it has no letters.
  */
 export function classifyLanguage(texts: Iterable<string>): MaterialIndexLanguage {
-  let letters = 0;
-  let han = 0;
-  for (const text of texts) {
-    for (const character of text) {
-      if (!LETTER.test(character)) continue;
-      letters += 1;
-      if (HAN.test(character)) han += 1;
-    }
+  const counts = { letters: 0, han: 0 };
+  for (const text of texts) countLetters(text, counts);
+  return languageOf(counts);
+}
+
+function countLetters(text: string, counts: { letters: number; han: number }): void {
+  for (const character of text) {
+    if (!LETTER.test(character)) continue;
+    counts.letters += 1;
+    if (HAN.test(character)) counts.han += 1;
   }
-  if (letters === 0) return 'none';
-  return han * 2 >= letters ? 'zh' : 'other';
+}
+
+function languageOf(counts: { letters: number; han: number }): MaterialIndexLanguage {
+  if (counts.letters === 0) return 'none';
+  return counts.han * 2 >= counts.letters ? 'zh' : 'other';
+}
+
+// ---- a build's segments, prepared before its one write --------------------------------------------------------------
+
+/**
+ * A build's segments and the facts read from them, prepared before the transaction that records it (#729): the sentence
+ * ranges, each segment's canonical record and digest, and the counts and language of its metadata.
+ */
+export interface PreparedMaterialIndex {
+  readonly indexId: string;
+  readonly extraction: MaterialExtraction;
+  readonly segments: ReadonlyArray<{ readonly json: string; readonly digest: string }>;
+  readonly sentences: number;
+  readonly headings: number;
+  readonly characters: number;
+  readonly language: MaterialIndexLanguage | null;
+}
+
+/**
+ * How much text is prepared before the service takes its other work again (#729). Measured on the developer host, a
+ * 10,000,000-character DOCX took about 0.96 s to prepare in one piece, which every request then waited behind; a slice of
+ * this many code units takes about 20 ms.
+ */
+export const MATERIAL_INDEX_PREPARE_SLICE = 200_000;
+
+/** The preparation, one slice at a time: it yields after each slice of text and returns what it prepared. */
+function* preparing(extraction: MaterialExtraction, indexId: string): Generator<void, PreparedMaterialIndex, void> {
+  const segments: Array<{ json: string; digest: string }> = [];
+  let sentences = 0;
+  let headings = 0;
+  let characters = 0;
+  let language: MaterialIndexLanguage | null = null;
+  if (extraction.state === 'complete') {
+    const counts = { letters: 0, han: 0 };
+    let slice = 0;
+    for (const [index, block] of extraction.blocks.entries()) {
+      const ranges = splitSentences(block.text);
+      // A paragraph of white space alone is no sentence, and is never a segment: the parser keeps none such.
+      requireIndex(ranges.length > 0, 'MATERIAL_INDEX_INVALID', '资料的分段无效。');
+      sentences += ranges.length;
+      if (block.kind !== 'paragraph') headings += 1;
+      characters += block.graphemeLength;
+      countLetters(block.text, counts);
+      segments.push(canonicalRecord({
+        schema: SEGMENT_SCHEMA, indexId, ordinal: index + 1, kind: block.kind, level: block.level,
+        sourceParagraphIndex: block.sourceParagraphIndex, text: block.text, sentences: ranges,
+      }));
+      slice += block.text.length;
+      if (slice >= MATERIAL_INDEX_PREPARE_SLICE) {
+        slice = 0;
+        yield;
+      }
+    }
+    language = languageOf(counts);
+  }
+  return { indexId, extraction, segments, sentences, headings, characters, language };
+}
+
+/** A build prepared in one piece: for a caller that records it at once. */
+export function prepareMaterialIndex(extraction: MaterialExtraction, indexId: string = randomUUID()): PreparedMaterialIndex {
+  const steps = preparing(extraction, indexId);
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+  }
+}
+
+/**
+ * A build prepared a slice at a time, the service taking its other work between two slices (#729): what one piece took
+ * the requests waiting behind it no longer wait for. A stop asked meanwhile ends it before the next slice.
+ */
+export async function prepareMaterialIndexInSlices(extraction: MaterialExtraction, signal?: AbortSignal, indexId: string = randomUUID()): Promise<PreparedMaterialIndex> {
+  const steps = preparing(extraction, indexId);
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+    await new Promise<void>((resolveTurn) => setImmediate(resolveTurn));
+    if (signal?.aborted === true) throw new MaterialIndexAborted();
+  }
 }
 
 // ---- the text layer: extraction ------------------------------------------------------------------------------------
@@ -490,47 +608,30 @@ export class MaterialIndexLedger {
   /**
    * One build recorded, inside the caller's transaction: the extraction's state, the metadata and layer facts, and — for a
    * complete one — every paragraph as a segment with its sentence ranges, the build naming the digest over them all.
-   * Refused when the item already has a build by this indexer; nothing of an earlier build is touched.
+   * Refused when the item already has a build by this indexer; nothing of an earlier build is touched. The segments come
+   * prepared (`prepareMaterialIndexInSlices`, #729), or are prepared here in one piece.
    */
-  record(material: IndexedMaterial, extraction: MaterialExtraction, recordedAt = new Date().toISOString()): string {
+  record(material: IndexedMaterial, extraction: MaterialExtraction | PreparedMaterialIndex, recordedAt = new Date().toISOString()): string {
     requireIndex(UUID_PATTERN.test(material.materialId) && DIGEST_PATTERN.test(material.sha256), 'MATERIAL_INDEX_INVALID', '资料标识无效。');
     requireIndex(this.#db.prepare('SELECT 1 FROM library_materials WHERE material_id = ? AND sha256 = ?').get(material.materialId, material.sha256) !== undefined,
       'MATERIAL_INDEX_MATERIAL_MOVED', '资料库里没有这份资料。');
     requireIndex(this.current(material.materialId) === null, 'MATERIAL_INDEX_EXISTS', '这份资料的索引已经建好。');
-    const indexId = randomUUID();
-    const segments: Array<{ json: string; digest: string }> = [];
-    let sentences = 0;
-    let headings = 0;
-    let characters = 0;
-    let language: MaterialIndexLanguage | null = null;
-    if (extraction.state === 'complete') {
-      extraction.blocks.forEach((block, index) => {
-        const ranges = splitSentences(block.text);
-        // A paragraph of white space alone is no sentence, and is never a segment: the parser keeps none such.
-        requireIndex(ranges.length > 0, 'MATERIAL_INDEX_INVALID', '资料的分段无效。');
-        sentences += ranges.length;
-        if (block.kind !== 'paragraph') headings += 1;
-        characters += block.graphemeLength;
-        segments.push(canonicalRecord({
-          schema: SEGMENT_SCHEMA, indexId, ordinal: index + 1, kind: block.kind, level: block.level,
-          sourceParagraphIndex: block.sourceParagraphIndex, text: block.text, sentences: ranges,
-        }));
-      });
-      language = classifyLanguage(extraction.blocks.map((block) => block.text));
-    }
+    const prepared = 'indexId' in extraction ? extraction : prepareMaterialIndex(extraction);
+    const { indexId, segments, sentences, headings, characters, language } = prepared;
+    const read = prepared.extraction;
     const build = canonicalRecord({
       schema: BUILD_SCHEMA,
       indexId,
       materialId: material.materialId,
       materialSha256: material.sha256,
       indexer: MATERIAL_INDEXER_IDENTITY,
-      converter: extraction.converter,
-      state: extraction.state,
-      reason: extraction.state === 'complete' ? null : extraction.reason,
+      converter: read.converter,
+      state: read.state,
+      reason: read.state === 'complete' ? null : read.reason,
       segmentCount: segments.length,
-      segmentsSha256: extraction.state === 'complete' ? sha256Hex(segments.map((segment) => segment.digest).join('\n')) : null,
+      segmentsSha256: read.state === 'complete' ? sha256Hex(segments.map((segment) => segment.digest).join('\n')) : null,
       metadata: {
-        documentTitle: extraction.state === 'complete' ? extraction.documentTitle : null,
+        documentTitle: read.state === 'complete' ? read.documentTitle : null,
         language,
         paragraphs: segments.length,
         headings,
@@ -542,7 +643,7 @@ export class MaterialIndexLedger {
     this.#db.prepare(
       `INSERT INTO material_index_builds(index_id, material_id, indexer, state, segment_count, recorded_at, canonical_json, sha256)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(indexId, material.materialId, MATERIAL_INDEXER_IDENTITY, extraction.state, segments.length, recordedAt, build.json, build.digest);
+    ).run(indexId, material.materialId, MATERIAL_INDEXER_IDENTITY, read.state, segments.length, recordedAt, build.json, build.digest);
     const insert = this.#db.prepare('INSERT INTO material_index_segments(index_id, ordinal, canonical_json, sha256) VALUES (?, ?, ?, ?)');
     segments.forEach((segment, index) => insert.run(indexId, index + 1, segment.json, segment.digest));
     return indexId;
@@ -600,6 +701,22 @@ export class MaterialIndexLedger {
     return build;
   }
 
+  /**
+   * The build a plan pinned (#729): read whichever indexer made it, so a plan pinned before a later indexer built the item
+   * again still reads what it froze, for as long as this data keeps that build — builds are append-only, so only data
+   * replaced or merged from elsewhere loses one, and then the plan is told its version is gone.
+   */
+  #pinned(materialId: string, indexDigest: string): StoredBuild {
+    const row = DIGEST_PATTERN.test(indexDigest) && this.#present()
+      ? this.#db.prepare('SELECT * FROM material_index_builds WHERE material_id = ? AND sha256 = ?').get(materialId, indexDigest) as SqlRow | undefined
+      : undefined;
+    requireIndex(row !== undefined, 'MATERIAL_INDEX_MOVED', '计划冻结的这份资料的索引版本已不在本机。');
+    const build = this.#build(row);
+    requireIndex(build.state === 'complete', 'MATERIAL_INDEX_NO_TEXT', '这份资料没有提取出可分段的文字。');
+    this.#verify(build);
+    return build;
+  }
+
   #segments(indexId: string, from: number, count: number): StoredSegment[] {
     return (this.#db.prepare('SELECT * FROM material_index_segments WHERE index_id = ? AND ordinal >= ? ORDER BY ordinal LIMIT ?')
       .all(indexId, from, count) as SqlRow[]).map((row) => this.#segment(row, indexId));
@@ -645,8 +762,7 @@ export class MaterialIndexLedger {
     const pin = boundary.references.find((reference) => reference.materialId === materialId);
     requireIndex(pin !== undefined, 'MATERIAL_OUTSIDE_PLAN', '这份资料不在这项任务计划的「允许参考」里。');
     requireIndex(available(materialId, boundary.bookId), 'MATERIAL_REFERENCE_UNAVAILABLE', '这份资料现在不能列进这本书任务的「允许参考」。');
-    const build = this.#complete(materialId);
-    requireIndex(build.sha256 === pin.indexDigest, 'MATERIAL_INDEX_MOVED', '这份资料的索引不是计划冻结的版本。');
+    const build = this.#pinned(materialId, pin.indexDigest);
     requireIndex(from <= build.segmentCount, 'MATERIAL_INDEX_CURSOR_INVALID', '分段位置无效。');
     const segments = this.#segments(build.indexId, from, MAX_MATERIAL_SEGMENTS_PAGE);
     const last = from + segments.length - 1;

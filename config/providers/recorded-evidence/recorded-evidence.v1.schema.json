@@ -8,7 +8,7 @@
   "properties": {
     "schemaVersion": { "const": 1 },
     "liveTestItems": {
-      "description": "One entry per transmitted, non-stale model-call line of the ledger; the item id is the ledger's.",
+      "description": "One entry per transmitted, non-stale model-call line of the ledger, for the life of the ledger: an item whose row left the documents stays here marked withdrawn. The item id is the ledger's.",
       "type": "array",
       "items": { "$ref": "#/definitions/liveTestItem" }
     },
@@ -58,7 +58,11 @@
           "description": "The UTC day of the ledger line's `recordedAt`.",
           "$ref": "#/definitions/day"
         },
-        "issue": { "$ref": "#/definitions/issue" }
+        "issue": { "$ref": "#/definitions/issue" },
+        "withdrawn": {
+          "description": "The GitHub Issue that took the item's row out of the documents. A ledger line is history and is never withdrawn, so the item stays recorded for the ledger comparison; the generator refuses an undeclared row without this marker and a declared row with it.",
+          "$ref": "#/definitions/issue"
+        }
       }
     },
     "frozenRequestBaseline": {

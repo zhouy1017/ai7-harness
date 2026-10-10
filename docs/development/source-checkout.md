@@ -613,7 +613,7 @@ The house calibration offset and the route past a damaged latest 评估 version 
 
 ## 合并失败的原因
 
-A failed database merge's own reason (Issue #644, the protocol item PR #660 left) is service protocol version 115 and no schema revision: it follows protocol 114 (#742) and keeps schema revision 67. The reason lives in the merge record's canonical JSON, which no CHECK constrains.
+A failed database merge's own reason (Issue #644, the protocol item PR #660 left) is service protocol version 114 and no schema revision: it follows protocol 113 (#741; #742, the Owner's S87-f3b policy PR, takes 115 when it lands) and keeps schema revision 67. The reason lives in the merge record's canonical JSON, which no CHECK constrains.
 
 - **Service.** `DatabaseReplacementFailure` gains `unmergeable`. A merge whose apply stopped on anything other than a conflict the rules name (`conflict`) or what waited having changed (`changed`) — a file it takes, or a write into the store — before any of it committed writes `refused.json` = `"unmergeable"`, puts the store's files back, and records the merge as failed with `failure: 'unmergeable'`; `unopenable` is left for merged data that will not open. Only a merge writes or reads that note: beside a replacement it is not AI7's and reads as `changed`, and a replacement record naming it is `DATABASE_REPLACEMENT_RECORD_INVALID`. Merge records written before this read back byte for byte.
 - **Renderer.** 导入记录 reads 「未能从「…」合并图书：写入图书时出错，本机数据保持原样」; a merge recorded `unopenable` still reads 「未能从「…」合并图书：本机数据保持原样」.
