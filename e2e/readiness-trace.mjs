@@ -9,8 +9,9 @@
 // loads Playwright, with each line's time (`DEBUG_COLORS=no`), and reads the launch in flight back from it.
 
 import { execFile } from 'node:child_process';
+import { lstat } from 'node:fs/promises';
 import { availableParallelism } from 'node:os';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 /** The startup steps main names (src/main/application.ts), and the failures `AI7_STARTUP_FAILED/…` can carry. */
 export const STARTUP_LOCATIONS = Object.freeze([
@@ -56,6 +57,10 @@ export function createLaunchTrace(scenario, startedAt = Date.now()) {
     exitCode: null,
     target: false,
     other: 0,
+    // What the Journey saw of the launch's user-data-dir and the host just before the launch began, and what a probe of a
+    // launch never acquired found (Issue #675): `observeLaunchStart` and `probeStalledProduct`, `null` when not taken.
+    start: null,
+    stall: null,
   };
 }
 
@@ -150,15 +155,64 @@ export function formatReadinessTrace(journey, trace, now = Date.now()) {
     `target=${trace.target ? 'yes' : 'no'}`,
     `other=${Math.min(trace.other, 999_999)}`,
     `age=${ms(now - trace.startedAt)}`,
+    ...(trace.start === null || trace.start === undefined ? [] : [`start=${formatLaunchStart(trace.start)}`]),
+    ...(trace.stall === null || trace.stall === undefined ? [] : [`stall=${formatStalledProduct(trace.stall)}`]),
   ].join(';');
+}
+
+/** A count as a word: the number up to `cap`, or `unknown`. */
+const countWord = (value, cap) => (Number.isSafeInteger(value) && value >= 0 ? String(Math.min(value, cap)) : 'unknown');
+const LOCK_WORDS = Object.freeze(['yes', 'no', 'unknown']);
+/** `ps`'s process states (macOS ps(1) `state`), as words: runnable, sleeping, idle (asleep over 20 s), in an uninterruptible wait, stopped, zombie. */
+const PROCESS_STATES = Object.freeze({ R: 'run', S: 'sleep', I: 'idle', U: 'wait', T: 'stop', Z: 'zombie' });
+const PROCESS_STATE_WORDS = Object.freeze([...Object.values(PROCESS_STATES), 'unknown']);
+/**
+ * The files a macOS Electron browser process opens or maps on its way to its main script, in that order (Issue #675): the
+ * Electron framework (dyld loaded it), ICU's data, the V8 snapshot, the resource packs, an `.asar` archive (Electron's own
+ * JavaScript started: the bundled default app the main script is loaded through), and anything in its user-data-dir.
+ */
+export const STARTUP_FILES = Object.freeze(['framework', 'icu', 'snapshot', 'pak', 'asar', 'data']);
+/** A system identifier — a logging subsystem, the basename of the binary image that logged — as a word, or `other`. */
+const SYSTEM_TOKEN = /^[a-z0-9][a-z0-9.-]{0,47}$/u;
+
+/** `lock:<yes|no|unknown>,prior:<n|unknown>`: the user-data-dir's single-instance lock, and the same Electron's processes, before a launch. */
+export function formatLaunchStart(start) {
+  return `lock:${LOCK_WORDS.includes(start.lock) ? start.lock : 'unknown'},prior:${countWord(start.prior, 99)}`;
+}
+
+/**
+ * `threads:<n>,state:<word>,rss:<MB>,files:<none|unknown|file+…>,log:<n>:<sender>:<subsystem>`: what a probe of a launch
+ * never acquired found of its main process (Issue #675). Every value is a count, a closed word, or a system identifier.
+ */
+export function formatStalledProduct(stall) {
+  const files = Array.isArray(stall.files)
+    ? (stall.files.length === 0 ? 'none' : STARTUP_FILES.filter((file) => stall.files.includes(file)).join('+') || 'none')
+    : 'unknown';
+  const token = (value) => (value === null || value === undefined ? 'none' : SYSTEM_TOKEN.test(value) ? value : 'other');
+  const log = stall.log === null || stall.log === undefined
+    ? 'unknown:none:none'
+    : `${countWord(stall.log.entries, 999_999)}:${token(stall.log.sender)}:${token(stall.log.subsystem)}`;
+  return [
+    `threads:${countWord(stall.threads, 999)}`,
+    `state:${PROCESS_STATE_WORDS.includes(stall.state) ? stall.state : 'unknown'}`,
+    `rss:${countWord(stall.rssMb, 999_999)}`,
+    `files:${files}`,
+    `log:${log}`,
+  ].join(',');
 }
 
 const LOCATION_WORD = `(?:${STARTUP_LOCATIONS.join('|')}|none)`;
 const SERVICE_WORD = `(?:${SERVICE_STARTUP_STEPS.join('|')}|none)`;
 const MS = '(?:\\d{1,9}|none)';
+const COUNT = (digits) => `(?:\\d{1,${digits}}|unknown)`;
+const TOKEN = '(?:[a-z0-9][a-z0-9.-]{0,47}|none|other)';
+const START = `;start=lock:(?:${LOCK_WORDS.join('|')}),prior:${COUNT(2)}`;
+const STALL =
+  `;stall=threads:${COUNT(3)},state:(?:${PROCESS_STATE_WORDS.join('|')}),rss:${COUNT(6)},` +
+  `files:(?:none|unknown|(?:${STARTUP_FILES.join('|')})(?:\\+(?:${STARTUP_FILES.join('|')}))*),log:${COUNT(6)}:${TOKEN}:${TOKEN}`;
 const FIELDS = new RegExp(
   `^launch=[a-z0-9]+(?:-[a-z0-9]+)*;launched=${MS};last=${LOCATION_WORD}@${MS};service=${SERVICE_WORD}@${MS};ready=${MS};failed=${LOCATION_WORD};` +
-    `exit=(?:-?\\d{1,10}|null|none)@${MS};target=(?:yes|no);other=\\d{1,6};age=\\d{1,9}$`,
+    `exit=(?:-?\\d{1,10}|null|none)@${MS};target=(?:yes|no);other=\\d{1,6};age=\\d{1,9}(?:${START})?(?:${STALL})?$`,
   'u',
 );
 
@@ -255,8 +309,8 @@ export function summarizeProductProcesses(rows, pid, runtimeRoot, platform = pro
 }
 
 /** The listing command's output and the id of the process that produced it, or `null` when it could not be read. */
-const listingOutput = (file, args) => new Promise((settle) => {
-  const child = execFile(file, args, { timeout: 10_000, windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (error, stdout) => {
+const listingOutput = (file, args, timeout = 10_000) => new Promise((settle) => {
+  const child = execFile(file, args, { timeout, windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (error, stdout) => {
     settle(error ? null : { text: String(stdout), pid: child.pid ?? null });
   });
 });
@@ -362,6 +416,125 @@ export async function measureCpuShares(rootPid, windowMs = 5_000) {
 export async function sampleProductProcesses(pid, executable) {
   const rows = await listHostProcesses();
   return rows === null ? null : summarizeProductProcesses(rows, pid, productRuntimeRoot(executable));
+}
+
+/**
+ * The file Chromium's single-instance lock keeps in a user-data-dir while an instance holds it: the `SingletonLock` link on
+ * macOS, the `lockfile` a Windows instance deletes as it closes. Electron takes that lock only when main asks for it.
+ */
+export function singletonLockName(platform = process.platform) {
+  return platform === 'win32' ? 'lockfile' : 'SingletonLock';
+}
+
+/**
+ * What a launch began from (Issue #675), taken just before it: whether its user-data-dir still held an instance's lock
+ * (`yes`, `no`, or `unknown` when it could not be read), and on macOS — where listing the host's processes is quick — how
+ * many processes of the same Electron were running (`prior`, `null` elsewhere or when they could not be read).
+ */
+export async function observeLaunchStart(userDataDir, executable, platform = process.platform) {
+  let lock;
+  try {
+    await lstat(join(userDataDir, singletonLockName(platform)));
+    lock = 'yes';
+  } catch (error) {
+    lock = error?.code === 'ENOENT' ? 'no' : 'unknown';
+  }
+  let prior = null;
+  if (platform === 'darwin') {
+    const rows = await listHostProcesses(platform);
+    if (rows !== null) prior = summarizeProductProcesses(rows, -1, productRuntimeRoot(executable, platform), platform).prior;
+  }
+  return { lock, prior };
+}
+
+/** `ps -o state=,rss=` for one process: its state as a word of `PROCESS_STATES` and its resident memory in whole MB. */
+export function parseProcessStatus(text) {
+  const found = /^([A-Za-z])\S*\s+(\d{1,12})$/u.exec(String(text ?? '').trim());
+  if (found === null) return { state: null, rssMb: null };
+  return { state: PROCESS_STATES[found[1]] ?? 'unknown', rssMb: Math.round(Number(found[2]) / 1_024) };
+}
+
+/** `ps -M -p <pid>`: one header line, then one line per thread of the process. */
+export function parseThreadCount(text) {
+  const lines = String(text ?? '').split(/\r?\n/u).filter((line) => line.trim().length > 0);
+  return lines.length >= 2 && /^\s*USER\s/u.test(lines[0]) ? lines.length - 1 : null;
+}
+
+/**
+ * Which of `STARTUP_FILES` a process has open or mapped, from `lsof -F n`'s name lines; `null` without a listing. A path is
+ * compared, never kept.
+ */
+export function startupFilesOpen(text, runtimeRoot, userDataDir) {
+  if (text === null || text === undefined) return null;
+  const root = runtimeRoot.endsWith('/') ? runtimeRoot : `${runtimeRoot}/`;
+  const found = new Set();
+  for (const line of String(text).split(/\r?\n/u)) {
+    if (!line.startsWith('n/')) continue;
+    const name = line.slice(1);
+    const base = name.slice(name.lastIndexOf('/') + 1);
+    if (name.startsWith(root) && name.includes('/Electron Framework.framework/')) found.add('framework');
+    if (base === 'icudtl.dat') found.add('icu');
+    if (/^(?:v8_context_snapshot|snapshot_blob)(?:\.[a-z0-9_]+)?\.bin$/u.test(base)) found.add('snapshot');
+    if (base.endsWith('.pak')) found.add('pak');
+    if (base.endsWith('.asar')) found.add('asar');
+    if (name === userDataDir || name.startsWith(`${userDataDir}/`)) found.add('data');
+  }
+  return STARTUP_FILES.filter((file) => found.has(file));
+}
+
+/** A system identifier as a word: lower case, any other character run as one hyphen, or `other` when that is not a word. */
+function systemToken(value) {
+  if (typeof value !== 'string' || value.length === 0) return null;
+  const token = value.toLowerCase().replace(/[^a-z0-9.]+/gu, '-').replace(/^[-.]+|[-.]+$/gu, '');
+  return SYSTEM_TOKEN.test(token) ? token : 'other';
+}
+
+/**
+ * The process's own entries in the macOS unified log, from `log show --style ndjson`: how many there were and, of the last,
+ * the binary image that logged it (its basename) and its subsystem — where the process was when it last said anything.
+ * `null` without a listing. No message is read.
+ */
+export function lastLogEntry(text, pid) {
+  if (text === null || text === undefined) return null;
+  let entries = 0;
+  let last = null;
+  for (const line of String(text).split(/\r?\n/u)) {
+    if (!line.startsWith('{')) continue;
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (entry?.processID !== pid) continue;
+    entries += 1;
+    last = entry;
+  }
+  const sender = typeof last?.senderImagePath === 'string' ? last.senderImagePath.slice(last.senderImagePath.lastIndexOf('/') + 1) : null;
+  return { entries, sender: systemToken(sender), subsystem: systemToken(last?.subsystem) };
+}
+
+/**
+ * What a launch never acquired was doing (Issue #675), probed on macOS beside the sample before its timeout: its main
+ * process's thread count, state and resident memory, which of its startup files it had open, and its last word in the
+ * unified log over the last `lookbackSeconds`. Each part is `null` when it could not be read; elsewhere the probe is `null`.
+ */
+export async function probeStalledProduct(pid, executable, userDataDir, lookbackSeconds, platform = process.platform) {
+  if (platform !== 'darwin' || !Number.isSafeInteger(pid) || pid <= 0) return null;
+  const id = String(pid);
+  const seconds = Math.max(1, Math.min(600, Math.ceil(Number(lookbackSeconds) || 0)));
+  const [status, threads, files, log] = await Promise.all([
+    listingOutput('/bin/ps', ['-o', 'state=,rss=', '-p', id]),
+    listingOutput('/bin/ps', ['-M', '-p', id]),
+    listingOutput('/usr/sbin/lsof', ['-n', '-P', '-w', '-p', id, '-F', 'n']),
+    listingOutput('/usr/bin/log', ['show', '--last', `${seconds}s`, '--info', '--debug', '--style', 'ndjson', '--predicate', `processIdentifier == ${id}`], 30_000),
+  ]);
+  return {
+    ...parseProcessStatus(status?.text ?? null),
+    threads: parseThreadCount(threads?.text ?? null),
+    files: startupFilesOpen(files?.text ?? null, productRuntimeRoot(executable, platform), userDataDir),
+    log: lastLogEntry(log?.text ?? null, pid),
+  };
 }
 
 /**
