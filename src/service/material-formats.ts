@@ -131,14 +131,24 @@ export function extractMaterialFormatText(bytes: Uint8Array, format: MaterialTex
 
 // ---- paragraphs ------------------------------------------------------------------------------------------------------
 
-/** What XML 1.0 cannot carry, and so the working package never may: C0 controls but tab, and the two non-characters. */
-const NOT_XML_TEXT = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\uFFFE\uFFFF]/gu;
+/**
+ * What the working package never carries: the C0 controls XML 1.0 cannot hold (tab aside), the two non-characters, and
+ * the C1 controls (a numeric reference to one of them, say), which are no text a reader sees.
+ */
+const NOT_XML_TEXT = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\uFFFE\uFFFF]/gu;
 const LINE_ENDS = /[\r\n]/gu;
 
-/** The paragraphs a reader finds, within the text and paragraph bounds. */
+/**
+ * The paragraphs a reader finds, within the text and paragraph bounds. Every step is constant time in what is already
+ * read (#761 review, P1-1): a line holding nothing but white space keeps none of it, a line break after an empty line adds
+ * nothing, and whether the paragraph holds text is a count, never a scan of its lines.
+ */
 class ParagraphSink {
   readonly paragraphs: ConvertedParagraph[] = [];
-  #lines: string[] = [''];
+  /** The paragraph's finished lines, each holding text. */
+  #lines: string[] = [];
+  /** The line being read: empty until it holds text, so white space before any text is never kept. */
+  #line = '';
   #characters = 0;
 
   constructor(readonly bounds: MaterialFormatBounds) {}
@@ -147,31 +157,42 @@ class ParagraphSink {
     if (value.length === 0) return;
     this.#characters += value.length;
     requireFormat(this.#characters <= this.bounds.textCodeUnits, 'over-bound', 'text exceeds its bound');
-    const clean = value.toWellFormed().replace(NOT_XML_TEXT, '').replace(LINE_ENDS, ' ');
-    this.#lines[this.#lines.length - 1] += clean;
+    let clean = value.toWellFormed().replace(NOT_XML_TEXT, '').replace(LINE_ENDS, ' ');
+    if (this.#line.length === 0) clean = clean.trimStart();
+    this.#line += clean;
   }
 
-  /** Whether the line being read holds nothing but white space. */
+  /** Whether the line being read holds nothing yet. */
   lineEmpty(): boolean {
-    return this.#lines[this.#lines.length - 1]!.trim().length === 0;
+    return this.#line.length === 0;
   }
 
   /** Whether the paragraph being read holds any text yet. */
   holdsText(): boolean {
-    return this.#lines.some((line) => line.trim().length > 0);
+    return this.#lines.length > 0 || this.#line.length > 0;
   }
 
+  /** The line being read ends; a line with nothing in it ends nothing. */
   lineBreak(): void {
-    this.#lines.push('');
+    if (this.#line.length === 0) return;
+    this.#lines.push(this.#line.trimEnd());
+    this.#line = '';
   }
 
-  /** The paragraph read so far ends: kept when it holds text, with its empty lines dropped. */
+  /** The paragraph read so far ends: kept when it holds text. */
   flush(style?: string): void {
-    const lines = this.#lines.map((line) => line.trim()).filter((line) => line.length > 0);
-    this.#lines = [''];
+    this.lineBreak();
+    const lines = this.#lines;
+    this.#lines = [];
     if (lines.length === 0) return;
     requireFormat(this.paragraphs.length < this.bounds.paragraphs, 'over-bound', 'too many paragraphs');
     this.paragraphs.push(style === undefined ? { lines } : { lines, style });
+  }
+
+  /** The paragraph read so far is dropped: it is hidden from a reader. */
+  discard(): void {
+    this.#lines = [];
+    this.#line = '';
   }
 }
 
@@ -183,6 +204,14 @@ const HTML_BLOCKS: ReadonlySet<string> = new Set([
   'dt', 'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header', 'hgroup',
   'hr', 'html', 'legend', 'li', 'listing', 'main', 'menu', 'nav', 'ol', 'p', 'pre', 'section', 'summary', 'table',
   'tbody', 'td', 'tfoot', 'th', 'thead', 'tr', 'ul',
+]);
+/**
+ * Blocks whose lines belong together: inside one, a single `<br>` breaks a line of the same paragraph. Anywhere else — a
+ * `<br>` straight in `body`, a `div` or a `section`, as converted web novels write every paragraph — it ends one.
+ */
+const HTML_LINE_HOLDERS: ReadonlySet<string> = new Set([
+  'p', 'li', 'dd', 'dt', 'td', 'th', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'pre', 'listing', 'caption', 'figcaption', 'summary',
+  'legend', 'address',
 ]);
 /** Elements that never hold content. */
 const HTML_VOID: ReadonlySet<string> = new Set([
@@ -208,6 +237,10 @@ const HTML_IMPLIED_END: Readonly<Record<string, ReadonlySet<string>>> = {
 };
 const HTML_HEADING = /^h([1-6])$/u;
 const HTML_SPACE = /[\t\n\f\r ]+/gu;
+/** One attribute of a start tag: its name, and its value quoted, single-quoted or bare. */
+const HTML_ATTRIBUTE = /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/gu;
+/** An inline style that hides its element. */
+const HTML_DISPLAY_NONE = /(?:^|;)\s*display\s*:\s*none\s*(?:!\s*important\s*)?(?:;|$)/iu;
 
 /** The named character references a page commonly writes; any other name stays as the characters written. */
 const HTML_ENTITIES: Readonly<Record<string, string>> = {
@@ -220,22 +253,48 @@ const HTML_ENTITIES: Readonly<Record<string, string>> = {
 };
 /** Names a page may write without their semicolon, as browsers read them. */
 const HTML_LEGACY_ENTITIES: ReadonlySet<string> = new Set(['amp', 'lt', 'gt', 'quot', 'nbsp', 'copy', 'reg']);
-const HTML_REFERENCE = /&(#[0-9]{1,8}|#[xX][0-9a-fA-F]{1,8}|[A-Za-z][A-Za-z0-9]{1,31})(;?)/gu;
+const HTML_REFERENCE = /&(?:#[xX]([0-9a-fA-F]+)|#([0-9]+)|([A-Za-z][A-Za-z0-9]{1,31}))(;?)/gu;
+/**
+ * What a numeric reference to 128–159 means, as HTML reads it: the windows-1252 character at that byte. The five bytes
+ * windows-1252 leaves undefined stay the C1 control they name, which the paragraphs then drop.
+ */
+const HTML_WINDOWS_1252_C1: ReadonlyArray<number> = [
+  0x20ac, 0x81, 0x201a, 0x0192, 0x201e, 0x2026, 0x2020, 0x2021, 0x02c6, 0x2030, 0x0160, 0x2039, 0x0152, 0x8d, 0x017d, 0x8f,
+  0x90, 0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014, 0x02dc, 0x2122, 0x0161, 0x203a, 0x0153, 0x9d, 0x017e, 0x0178,
+];
+/** A code point needs at most this many digits once leading zeros are dropped; more is past Unicode. */
+const HTML_REFERENCE_DIGITS = 8;
 
-function codePointText(value: number): string {
+/** One numeric reference's character: U+FFFD for none, a surrogate or past Unicode; windows-1252's for 128–159. */
+function numericReference(digits: string, radix: 10 | 16): string {
+  const significant = digits.replace(/^0+/u, '');
+  if (significant.length > HTML_REFERENCE_DIGITS) return '\uFFFD';
+  const value = significant.length === 0 ? 0 : Number.parseInt(significant, radix);
+  if (value >= 0x80 && value <= 0x9f) return String.fromCodePoint(HTML_WINDOWS_1252_C1[value - 0x80]!);
   return value > 0 && value <= 0x10ffff && (value < 0xd800 || value > 0xdfff) ? String.fromCodePoint(value) : '\uFFFD';
 }
 
 /** Character references decoded; an unknown name, never expanded, stays as written. */
 export function decodeHtmlReferences(text: string): string {
   if (!text.includes('&')) return text;
-  return text.replace(HTML_REFERENCE, (whole, name: string, semicolon: string) => {
-    if (name.startsWith('#x') || name.startsWith('#X')) return codePointText(Number.parseInt(name.slice(2), 16));
-    if (name.startsWith('#')) return codePointText(Number.parseInt(name.slice(1), 10));
-    const value = HTML_ENTITIES[name];
-    if (value === undefined || (semicolon === '' && !HTML_LEGACY_ENTITIES.has(name))) return whole;
+  return text.replace(HTML_REFERENCE, (whole, hex: string | undefined, decimal: string | undefined, name: string | undefined, semicolon: string) => {
+    if (hex !== undefined) return numericReference(hex, 16);
+    if (decimal !== undefined) return numericReference(decimal, 10);
+    const value = HTML_ENTITIES[name!];
+    if (value === undefined || (semicolon === '' && !HTML_LEGACY_ENTITIES.has(name!))) return whole;
     return value;
   });
+}
+
+/** Whether a start tag's attributes hide its element: `hidden`, or an inline style of `display: none`. */
+function hiddenByAttributes(attributes: string): boolean {
+  if (!/hidden|style/iu.test(attributes)) return false;
+  for (const match of attributes.matchAll(HTML_ATTRIBUTE)) {
+    const name = match[1]!.toLowerCase();
+    if (name === 'hidden') return true;
+    if (name === 'style' && HTML_DISPLAY_NONE.test(decodeHtmlReferences(match[2] ?? match[3] ?? match[4] ?? ''))) return true;
+  }
+  return false;
 }
 
 /** Where `token` next occurs from `from`, or the source's end when it never does. */
@@ -269,6 +328,15 @@ class HtmlReader {
     return undefined;
   }
 
+  /** Whether the nearest open block keeps its lines together (`HTML_LINE_HOLDERS`). */
+  #holdsLines(): boolean {
+    for (let index = this.#stack.length - 1; index >= 0; index -= 1) {
+      const name = this.#stack[index]!.name;
+      if (HTML_BLOCKS.has(name)) return HTML_LINE_HOLDERS.has(name);
+    }
+    return false;
+  }
+
   #flush(): void {
     this.#sink.flush(this.#style());
   }
@@ -281,12 +349,15 @@ class HtmlReader {
     if (HTML_PREFORMATTED.has(top.name)) this.#preformatted -= 1;
   }
 
-  #open(name: string, selfClosing: boolean): void {
+  #open(name: string, selfClosing: boolean, hidden: boolean): void {
     if (this.#skipping === 0) {
       if (name === 'br') {
-        // Two line breaks in a row part two paragraphs, as a page means them.
-        if (this.#sink.lineEmpty() && this.#sink.holdsText()) this.#flush();
-        else this.#sink.lineBreak();
+        // A line break after an empty line — two in a row — ends the paragraph; one inside a paragraph, a list item or a
+        // cell breaks its line; one straight in body, a div or a section ends the paragraph (HTML_LINE_HOLDERS).
+        if (this.#sink.lineEmpty()) {
+          if (this.#sink.holdsText()) this.#flush();
+        } else if (this.#holdsLines()) this.#sink.lineBreak();
+        else this.#flush();
         return;
       }
       if (HTML_BLOCKS.has(name) && this.#stack.at(-1)?.name === 'p') this.#pop();
@@ -296,7 +367,7 @@ class HtmlReader {
     }
     if (HTML_VOID.has(name) || selfClosing) return;
     requireFormat(this.#stack.length < this.#sink.bounds.depth, 'over-bound', 'markup nesting exceeds its bound');
-    const skipped = HTML_SKIPPED.has(name);
+    const skipped = HTML_SKIPPED.has(name) || hidden;
     this.#stack.push({ name, skipped });
     if (skipped) this.#skipping += 1;
     if (HTML_PREFORMATTED.has(name)) this.#preformatted += 1;
@@ -370,7 +441,8 @@ class HtmlReader {
       const qualified = nameMatch[0].toLowerCase();
       const name = qualified.slice(qualified.lastIndexOf(':') + 1);
       // The tag's end: the first `>` outside an attribute's quoted value.
-      let cursor = at + (closing ? 2 : 1) + nameMatch[0].length;
+      const attributesFrom = at + (closing ? 2 : 1) + nameMatch[0].length;
+      let cursor = attributesFrom;
       let quote: string | null = null;
       let previous = '';
       while (cursor < source.length) {
@@ -382,11 +454,12 @@ class HtmlReader {
         } else if (character === '>') {
           break;
         }
-        if (!/\s/u.test(character)) previous = character;
+        if (character !== ' ' && character !== '\t' && character !== '\n' && character !== '\r' && character !== '\f') previous = character;
         cursor += 1;
         requireFormat(cursor - at <= bound, 'over-bound', 'tag exceeds its bound');
       }
       const selfClosing = source.charAt(cursor - 1) === '/';
+      const attributes = source.slice(attributesFrom, cursor);
       at = cursor + 1;
       if (closing) {
         this.#close(name);
@@ -404,7 +477,7 @@ class HtmlReader {
         at = close < 0 ? source.length : close + 1;
         continue;
       }
-      this.#open(name, selfClosing);
+      this.#open(name, selfClosing, hiddenByAttributes(attributes));
     }
   }
 
@@ -499,11 +572,21 @@ function inspectCentralDirectory(bytes: Uint8Array, bounds: MaterialFormatBounds
   }
 }
 
-function entryName(name: string, seen: Set<string>): string {
+/**
+ * A path inside the archive as it is meant: `./x` reads as `x` and `a//b` as `a/b` (#761 review, P3), and a path that
+ * names the archive itself is empty. One that is absolute, uses a backslash or leaves the archive (`..`) is refused.
+ */
+function archivePath(name: string): string {
   requireFormat(name.length > 0 && name.length <= 1024 && !name.includes('\\') && !name.includes('\u0000'), 'unreadable', 'invalid archive entry name');
   requireFormat(!name.startsWith('/') && !/^[A-Za-z]:/u.test(name), 'unreadable', 'absolute archive entry name');
   const normalized = posix.normalize(name);
-  requireFormat(normalized === name && !normalized.startsWith('../') && normalized !== '..', 'unreadable', 'archive entry name leaves the archive');
+  requireFormat(!normalized.startsWith('../') && normalized !== '..' && !normalized.startsWith('/'), 'unreadable', 'archive entry name leaves the archive');
+  return normalized === '.' || normalized === './' ? '' : normalized;
+}
+
+function entryName(name: string, seen: Set<string>): string {
+  const normalized = archivePath(name);
+  if (normalized === '') return normalized;
   const identity = normalized.toLocaleLowerCase('en-US');
   requireFormat(!seen.has(identity), 'unreadable', 'duplicate archive entry');
   seen.add(identity);
@@ -528,7 +611,7 @@ function readArchive(bytes: Uint8Array, bounds: MaterialFormatBounds, keep: (nam
       requireFormat(entries <= bounds.entries, 'over-bound', 'too many archive entries');
       requireFormat(file.compression === 0 || file.compression === 8, 'unreadable', 'unsupported archive compression');
       requireFormat(file.originalSize === undefined || file.originalSize <= bounds.entryBytes, 'over-bound', 'archive entry is too large');
-      const chunks: Uint8Array[] | null = name.endsWith('/') || !keep(name) ? null : [];
+      const chunks: Uint8Array[] | null = name === '' || name.endsWith('/') || !keep(name) ? null : [];
       let received = 0;
       file.ondata = (error, chunk, final) => {
         try {
@@ -668,11 +751,12 @@ function readEpub(bytes: Uint8Array, bounds: MaterialFormatBounds): MaterialForm
   readXml(xmlPart(container), bounds, {
     open: (tag) => {
       if (tag.local === 'rootfile' && packagePath === null && (attribute(tag, 'media-type') ?? EPUB_PACKAGE_TYPE) === EPUB_PACKAGE_TYPE) {
-        packagePath = attribute(tag, 'full-path') ?? null;
+        const fullPath = attribute(tag, 'full-path');
+        packagePath = fullPath === undefined ? null : archivePath(fullPath);
       }
     },
   });
-  requireFormat(packagePath !== null, 'unreadable', 'EPUB names no package');
+  requireFormat(packagePath !== null && packagePath !== '', 'unreadable', 'EPUB names no package');
   const packageBytes = entries.get(packagePath);
   requireFormat(packageBytes !== undefined, 'unreadable', 'EPUB package is missing');
 
@@ -696,6 +780,10 @@ function readEpub(bytes: Uint8Array, bounds: MaterialFormatBounds): MaterialForm
 
   const sink = new ParagraphSink(bounds);
   const base = posix.dirname(packagePath);
+  // Each chapter is read once, however often the spine or the manifest names it (#761 review, P1-2), and all the chapters
+  // read together are held to the archive's expanded bound.
+  const read = new Set<string>();
+  let markup = 0;
   for (const idref of spine) {
     const item = manifest.get(idref);
     if (item === undefined || item.nav || !EPUB_CONTENT_TYPES.has(item.type)) continue;
@@ -705,10 +793,16 @@ function readEpub(bytes: Uint8Array, bounds: MaterialFormatBounds): MaterialForm
     } catch {
       continue;
     }
-    const chapter = entries.get(posix.normalize(base === '.' ? href : posix.join(base, href)));
+    const path = posix.normalize(base === '.' ? href : posix.join(base, href));
+    if (read.has(path)) continue;
+    read.add(path);
+    const chapter = entries.get(path);
     if (chapter === undefined) continue;
+    const source = decodeMarkup(chapter);
+    markup += source.length;
+    requireFormat(markup <= bounds.expandedBytes, 'over-bound', 'chapters exceed their bound');
     const reader = new HtmlReader(sink);
-    reader.read(decodeMarkup(chapter));
+    reader.read(source);
     reader.finish();
   }
   return { title, paragraphs: sink.paragraphs };
@@ -719,9 +813,13 @@ function readEpub(bytes: Uint8Array, bounds: MaterialFormatBounds): MaterialForm
 const ODF_TEXT = 'urn:oasis:names:tc:opendocument:xmlns:text:1.0';
 const ODF_OFFICE = 'urn:oasis:names:tc:opendocument:xmlns:office:1.0';
 const ODF_DRAW = 'urn:oasis:names:tc:opendocument:xmlns:drawing:1.0';
-/** What a reader of the body does not read as body text: notes, comments, tracked deletions, frames and their boxes. */
+/**
+ * What a reader of the body does not read as body text: notes, comments, tracked deletions, frames and their boxes, and
+ * hidden text.
+ */
 const ODF_SKIPPED: ReadonlySet<string> = new Set([
   `${ODF_TEXT} note`, `${ODF_TEXT} tracked-changes`, `${ODF_OFFICE} annotation`, `${ODF_OFFICE} forms`, `${ODF_DRAW} frame`,
+  `${ODF_TEXT} hidden-text`,
   `${ODF_DRAW} custom-shape`, `${ODF_DRAW} rect`, `${ODF_DRAW} g`, `${ODF_TEXT} sequence-decls`, `${ODF_TEXT} variable-decls`,
 ]);
 const ODF_SPACE = /[ \t\r\n]+/gu;
@@ -749,13 +847,19 @@ function readOdt(bytes: Uint8Array, bounds: MaterialFormatBounds): MaterialForma
   const sink = new ParagraphSink(bounds);
   let body = 0;
   let skipping = 0;
-  /** The paragraphs open around the current position, innermost last, each with its heading style. */
-  const open: Array<string | undefined> = [];
+  /** The paragraphs open around the current position, innermost last, each with its heading style and whether it is hidden. */
+  const open: Array<{ style: string | undefined; hidden: boolean }> = [];
+  const end = (paragraph: { style: string | undefined; hidden: boolean } | undefined): void => {
+    if (paragraph?.hidden === true) sink.discard();
+    else sink.flush(paragraph?.style);
+  };
   readXml(xmlPart(content), bounds, {
     open: (tag) => {
       if (tag.uri === ODF_OFFICE && tag.local === 'body') body += 1;
       if (body === 0) return;
-      if (skipping > 0 || ODF_SKIPPED.has(`${tag.uri} ${tag.local}`)) {
+      // A section shown to no reader (`text:display="none"`) is skipped whole, as hidden text is.
+      if (skipping > 0 || ODF_SKIPPED.has(`${tag.uri} ${tag.local}`) ||
+        (tag.uri === ODF_TEXT && tag.local === 'section' && attribute(tag, 'display') === 'none')) {
         skipping += 1;
         return;
       }
@@ -764,11 +868,15 @@ function readOdt(bytes: Uint8Array, bounds: MaterialFormatBounds): MaterialForma
         case 'p':
         case 'h': {
           // A paragraph inside a paragraph ends what the one around it read so far.
-          if (open.length > 0) sink.flush(open.at(-1));
+          if (open.length > 0) end(open.at(-1));
           const level = Math.min(6, Math.max(1, Number.parseInt(attribute(tag, 'outline-level') ?? '1', 10) || 1));
-          open.push(tag.local === 'h' ? `Heading${level}` : undefined);
+          open.push({ style: tag.local === 'h' ? `Heading${level}` : undefined, hidden: false });
           break;
         }
+        case 'hidden-paragraph':
+          // The paragraph it stands in is hidden, unless the file records it as shown now.
+          if (open.length > 0 && attribute(tag, 'is-hidden') !== 'false') open.at(-1)!.hidden = true;
+          break;
         case 's':
           if (open.length > 0) {
             const count = Number.parseInt(attribute(tag, 'c') ?? '1', 10);
@@ -792,7 +900,7 @@ function readOdt(bytes: Uint8Array, bounds: MaterialFormatBounds): MaterialForma
         skipping -= 1;
         return;
       }
-      if (tag.uri === ODF_TEXT && (tag.local === 'p' || tag.local === 'h')) sink.flush(open.pop());
+      if (tag.uri === ODF_TEXT && (tag.local === 'p' || tag.local === 'h')) end(open.pop());
       if (tag.uri === ODF_OFFICE && tag.local === 'body') body -= 1;
     },
   });
@@ -844,8 +952,11 @@ function rtfDigit(code: number): boolean {
   return code >= 0x30 && code <= 0x39;
 }
 
-/** Where a group's text goes: the body, the document's title, nowhere (the font table, the information group, a skipped destination). */
-type RtfDestination = 'body' | 'title' | 'info' | 'fonttbl' | 'skip';
+/**
+ * Where a group's text goes: the body, the document's title, or nowhere — the font table, the information group, a skipped
+ * destination, or the ANSI alternative of an `\upr` group, whose `\ud` alternative alone is read.
+ */
+type RtfDestination = 'body' | 'title' | 'info' | 'fonttbl' | 'skip' | 'upr';
 
 interface RtfGroup {
   destination: RtfDestination;
@@ -853,6 +964,10 @@ interface RtfGroup {
   unicodeSkip: number;
   font: number | null;
   hidden: boolean;
+  /** Text a tracked change deleted (`\deleted`): never the document's text. */
+  deleted: boolean;
+  /** The destination around an `\upr` group, which its `\ud` alternative is read in. */
+  unicodeAlternative: RtfDestination | null;
   /** The paragraph's outline level (`\outlinelevelN`, 0 for a first-level heading). */
   outline: number | null;
 }
@@ -880,7 +995,7 @@ function readRtf(bytes: Uint8Array, bounds: MaterialFormatBounds): MaterialForma
   let title = '';
   let fontDefinition: number | null = null;
   const stack: RtfGroup[] = [];
-  let group: RtfGroup = { destination: 'body', unicodeSkip: 1, font: null, hidden: false, outline: null };
+  let group: RtfGroup = { destination: 'body', unicodeSkip: 1, font: null, hidden: false, deleted: false, unicodeAlternative: null, outline: null };
   let pending: number[] = [];
   let pendingCodePage = 1252;
   /** Characters still to pass over after a `\u`: what stands in for it for a reader without Unicode. */
@@ -893,7 +1008,7 @@ function readRtf(bytes: Uint8Array, bounds: MaterialFormatBounds): MaterialForma
   /** Body text read and not yet handed to the paragraphs. */
   let body = '';
 
-  const reading = (): boolean => (group.destination === 'body' || group.destination === 'title') && !group.hidden;
+  const reading = (): boolean => (group.destination === 'body' || group.destination === 'title') && !group.hidden && !group.deleted;
   const flushBody = (): void => {
     if (body.length === 0) return;
     sink.text(body);
@@ -1009,25 +1124,37 @@ function readRtf(bytes: Uint8Array, bounds: MaterialFormatBounds): MaterialForma
       case 'plain':
         flushBytes();
         group.hidden = false;
+        group.deleted = false;
         return;
       case 'v':
         flushBytes();
         group.hidden = parameter !== 0;
         return;
+      case 'deleted':
+        flushBytes();
+        group.deleted = parameter !== 0;
+        return;
       case 'line':
       case 'lbr':
         flushBytes();
         flushBody();
-        if (group.destination === 'body' && !group.hidden) sink.lineBreak();
+        if (group.destination === 'body' && !group.hidden && !group.deleted) sink.lineBreak();
         return;
       case 'upr':
-        // `{\upr{ANSI text}{\*\ud{Unicode text}}}`: the ANSI alternative is passed over and the Unicode one read in its place.
+        // `{\upr{ANSI text}{\*\ud{Unicode text}}}`: the ANSI alternative is passed over and the Unicode one read in its place,
+        // in the destination around the `\upr` — a skipped one stays skipped.
         flushBytes();
-        group.destination = 'skip';
+        if (group.destination !== 'upr') group.unicodeAlternative = group.destination;
+        group.destination = 'upr';
         return;
       case 'ud': {
-        const outer = stack.at(-2);
-        if (stack.at(-1)?.destination === 'skip' && outer !== undefined) group.destination = outer.destination;
+        // Only the direct alternative of an `\upr` group is read; a `\ud` anywhere else (a header's, a note's, a field
+        // code's) lifts nothing (#761 review, P2-1).
+        const parent = stack.at(-1);
+        if (parent?.destination === 'upr' && group.destination === 'upr' && parent.unicodeAlternative !== null) {
+          group.destination = parent.unicodeAlternative;
+          group.unicodeAlternative = null;
+        } else group.destination = 'skip';
         return;
       }
     }
@@ -1054,7 +1181,8 @@ function readRtf(bytes: Uint8Array, bounds: MaterialFormatBounds): MaterialForma
       flushBytes();
       requireFormat(stack.length < bounds.depth, 'over-bound', 'RTF group nesting exceeds its bound');
       stack.push(group);
-      group = { ...group };
+      // A group inherits its parent's state, but only the group an `\upr` opened names the alternative its `\ud` reads in.
+      group = { ...group, unicodeAlternative: null };
       skipCharacters = 0;
       at += 1;
       continue;

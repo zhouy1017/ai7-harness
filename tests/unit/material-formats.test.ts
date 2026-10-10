@@ -410,3 +410,89 @@ describe('RTF', () => {
     expect(refusal(`{\\rtf1 ${'字'.repeat(20)}\\par}`, 'RTF', small({ textCodeUnits: 10 }))).toBe('over-bound');
   });
 });
+
+// ---- #761 review ----------------------------------------------------------------------------------------------------
+
+/** How long reading takes, in milliseconds. */
+function timed(read: () => unknown): number {
+  const start = performance.now();
+  read();
+  return performance.now() - start;
+}
+
+describe('what the review of #761 found', () => {
+  it('reads a run of line breaks in time linear in it, with or without white space between them (P1-1)', () => {
+    const breaks = 200_000;
+    expect(read(`<p>${'<br>'.repeat(breaks)}x</p>`, 'HTML').paragraphs).toEqual([[undefined, ['x']]]);
+    expect(timed(() => read(`<p>${'<br>'.repeat(breaks)}x</p>`, 'HTML'))).toBeLessThan(1_000);
+    expect(timed(() => read(`<p>${'<br> \n'.repeat(breaks)}x</p>`, 'HTML'))).toBeLessThan(1_000);
+    expect(timed(() => read(`<div>甲${'<br/>'.repeat(breaks)}乙</div>`, 'HTML'))).toBeLessThan(1_000);
+    // The ODT and RTF line breaks share the paragraphs' rule: a break after an empty line adds nothing.
+    expect(timed(() => read(odt(`<text:p>${'<text:line-break/>'.repeat(breaks)}x</text:p>`), 'ODT'))).toBeLessThan(1_000);
+    expect(timed(() => read(`{\\rtf1 ${'\\line '.repeat(breaks)}x\\par}`, 'RTF'))).toBeLessThan(1_000);
+  });
+
+  it('parts paragraphs at a run of line breaks, and at each line break straight in body or a div (P3-4)', () => {
+    expect(read('<html><body>第一段<br>第二段<br />第三段</body></html>', 'HTML').paragraphs)
+      .toEqual([[undefined, ['第一段']], [undefined, ['第二段']], [undefined, ['第三段']]]);
+    expect(read('<div><span>甲</span><br>乙<br><br><br>丙</div>', 'HTML').paragraphs)
+      .toEqual([[undefined, ['甲']], [undefined, ['乙']], [undefined, ['丙']]]);
+    // Inside a paragraph, a list item or a cell, one line break breaks a line of the same paragraph; two part it.
+    expect(read('<p>一行<br>二行<br><br>新段</p><ul><li>项<br>续</li></ul><table><tr><td>格<br>续</td></tr></table>', 'HTML').paragraphs)
+      .toEqual([[undefined, ['一行', '二行']], [undefined, ['新段']], [undefined, ['项', '续']], [undefined, ['格', '续']]]);
+    // A converted web novel whose chapter is one div of lines no longer crosses the paragraph bound as one paragraph.
+    const lines = Array.from({ length: 400 }, (_, index) => `第${index}行的文字，长短不一。`).join('<br>\n');
+    expect(read(`<html><body><div id="content">${lines}</div></body></html>`, 'HTML').paragraphs).toHaveLength(400);
+  });
+
+  it('reads each chapter once however often the spine or the manifest names it (P1-2)', () => {
+    const markup = chapter(`${'<span></span>'.repeat(80_000)}<p>只读一次。</p>`);
+    const repeated = OPF
+      .replace('<item id="c1"', '<item id="again" href="text/ch2.xhtml" media-type="application/xhtml+xml"/><item id="c1"')
+      .replace('<spine>', `<spine>${'<itemref idref="c2"/><itemref idref="again"/>'.repeat(1_000)}`);
+    const book = epub({ ...BOOK, 'OEBPS/content.opf': repeated, 'OEBPS/text/ch2.xhtml': markup });
+    expect(read(book, 'EPUB').paragraphs.filter(([, lines]) => lines[0] === '只读一次。')).toHaveLength(1);
+    expect(timed(() => read(book, 'EPUB'))).toBeLessThan(2_000);
+  });
+
+  it('reads `./x` and `a//b` as the paths they mean, and still refuses an absolute or backslashed one (P3-3)', () => {
+    const odd = epub({
+      './OEBPS//content.opf': OPF,
+      'OEBPS/./text/ch2.xhtml': BOOK['OEBPS/text/ch2.xhtml'],
+      'OEBPS/text//ch 1.xhtml': BOOK['OEBPS/text/ch 1.xhtml'],
+    }, { packagePath: './OEBPS//content.opf' });
+    expect(read(odd, 'EPUB').paragraphs.map(([, lines]) => lines[0])).toEqual(['第一章', '书脊里的第一章。', '第二段', '第二章', '后面的一章，\u00a0放在书脊第二位。', 'a & b < c']);
+    expect(refusal(epub({ ...BOOK, '/absolute.xhtml': '<p>外</p>' }), 'EPUB')).toBe('unreadable');
+    expect(refusal(epub({ ...BOOK, 'OEBPS\\back.xhtml': '<p>外</p>' }), 'EPUB')).toBe('unreadable');
+    expect(refusal(epub({ ...BOOK, 'OEBPS/../../up.xhtml': '<p>外</p>' }), 'EPUB')).toBe('unreadable');
+    expect(refusal(epub(BOOK, { packagePath: '../content.opf' }), 'EPUB')).toBe('unreadable');
+    // Two names that mean one path are one entry twice.
+    expect(refusal(epub({ ...BOOK, 'OEBPS/./content.opf': OPF }), 'EPUB')).toBe('unreadable');
+  });
+
+  it('does not read hidden text: HTML `hidden` and `display: none`, ODT hidden text, paragraphs and sections (P3-1)', () => {
+    expect(read('<p>看得见</p><p hidden>藏起来</p><div style="color: red; display:none !important"><p>也藏</p></div>' +
+      '<p style="color: red">红字</p><p title="hidden">标题叫 hidden</p><span hidden="">行内藏</span>', 'HTML').paragraphs)
+      .toEqual([[undefined, ['看得见']], [undefined, ['红字']], [undefined, ['标题叫 hidden']]]);
+    expect(read(odt('<text:p>可见<text:hidden-text text:condition="ooow:true" text:string-value="藏">藏</text:hidden-text>的字</text:p>' +
+      '<text:p><text:hidden-paragraph text:condition="ooow:true" text:is-hidden="true"/>整段藏起来</text:p>' +
+      '<text:p><text:hidden-paragraph text:condition="ooow:false" text:is-hidden="false"/>这段显示</text:p>' +
+      '<text:section text:name="s" text:display="none"><text:p>节藏起来</text:p></text:section>' +
+      '<text:section text:name="t"><text:p>节显示</text:p></text:section>'), 'ODT').paragraphs)
+      .toEqual([[undefined, ['可见的字']], [undefined, ['这段显示']], [undefined, ['节显示']]]);
+  });
+
+  it('decodes numeric references with any leading zeros, windows-1252 for 128 to 159, and drops C1 controls (P3-2)', () => {
+    expect(decodeHtmlReferences('&#0000000065;&#x000000004E2D;&#128;&#150;&#x9F;&#99999999999;&#x0000000000000000110000;'))
+      .toBe('A中€–Ÿ\uFFFD\uFFFD');
+    expect(read('<p>甲&#129;乙&#x8D;丙&#133;</p>', 'HTML').paragraphs).toEqual([[undefined, ['甲乙丙…']]]);
+  });
+
+  it('reads an RTF `\\ud` only as the alternative of an `\\upr`, and never a tracked deletion (P2-1, P2-2)', () => {
+    // The fixture's own characters are UTF-8 bytes, read under that code page.
+    const rtf = String.raw`{\rtf1\ansi\ansicpg65001 正文{\header {\*\ud{页眉密文}}}{\footnote {\*\ud{脚注密文}}}{\field{\*\fldinst {\*\ud{域代码密文}}}{\fldrslt 域结果}}` +
+      String.raw`{\upr{旧}{乙 {\*\ud{嵌套密文}}}{\*\ud{新}}}\par` +
+      String.raw`甲{\deleted 删掉的}乙\deleted 也删\deleted0 丙{\deleted\plain 回来了}\par}`;
+    expect(read(rtf, 'RTF').paragraphs).toEqual([[undefined, ['正文域结果新']], [undefined, ['甲乙丙回来了']]]);
+  });
+});
