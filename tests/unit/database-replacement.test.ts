@@ -259,11 +259,13 @@ describe('applying a replacement of the local data', () => {
       () => writeFileSync(join(staging(), 'refused.json'), ' '.repeat(65)),
       () => mkdirSync(join(staging(), 'refused.json')),
       () => writeFileSync(join(staging(), 'refused.json'), JSON.stringify('sideways')),
+      // A merge's own failure is a note only a merge writes: beside a replacement it is not AI7's (Issue #644).
+      () => writeFileSync(join(staging(), 'refused.json'), JSON.stringify('unmergeable')),
     ]) {
       const { applied } = await restoredWith(note) as { applied: Awaited<ReturnType<typeof openWithPendingReplacement<string>>> };
       reasons.push(applied.replacement?.failure);
     }
-    expect(reasons).toEqual(['unopenable', 'interrupted', 'changed', 'changed', 'changed']);
+    expect(reasons).toEqual(['unopenable', 'interrupted', 'changed', 'changed', 'changed', 'changed']);
   });
 
   it('reads the list of what waits only within the bound a package manifest has (Issue #434 review)', async () => {

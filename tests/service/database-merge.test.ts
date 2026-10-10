@@ -533,7 +533,7 @@ describe('what a merge refuses, puts back and brings forward', () => {
       .toThrowError(expect.objectContaining({ code: 'DATABASE_MERGE_CROSS_BOOK' }) as unknown as Error);
   }, 180_000);
 
-  it('puts the store back when the merged data will not open at the next open', async () => {
+  it('merges nothing from a staged package that lost records after its preparation, as what waited having changed', async () => {
     const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let packagePath: string;
     try {
@@ -550,15 +550,90 @@ describe('what a merge refuses, puts back and brings forward', () => {
     } finally {
       target.close();
     }
-    // The staged package loses the commits its imports were recorded by, which no foreign key names: the merge commits, and the
-    // data it leaves fails the store's own check of its import records at the next open.
+    // The staged package loses the commits its imports were recorded by, which no foreign key names. What waits is checked
+    // again against what the preparation verified before anything merges (Issue #434 review), so nothing is merged.
     const incoming = join(replacementStagingFor(otherRoot), 'incoming');
     tamper(incoming, 'import_commits', (db) => db.exec('DELETE FROM import_commits'));
     target = await EditorialStore.open(otherRoot, roots.codeRoot);
     try {
       expect(titles(target)).toEqual(['本机之书']);
-      expect((await target.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'merge', outcome: 'failed' });
+      expect((await target.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'merge', outcome: 'failed', failure: 'changed' });
       expect(existsSync(replacementStagingFor(otherRoot))).toBe(false);
+    } finally {
+      target.close();
+    }
+  }, 180_000);
+
+  it('puts the store back when the merged data will not open at the next open, and records it as unopenable (Issue #644)', async () => {
+    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let packagePath: string;
+    try {
+      const book = await importBook(source, await compose(TITLE, [1, 2]));
+      await importSource(source, book.bookId, await compose('新闻稿初稿', [21, 22]));
+      packagePath = await exportedFrom(source, 'AI7 数据库.ai7db');
+    } finally {
+      source.close();
+    }
+    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      emptyBook(target, '本机之书');
+      await target.prepareDatabaseMerge((await target.inspectDatabaseImport(packagePath)).previewId, T);
+    } finally {
+      target.close();
+    }
+    // The merge runs as the apply runs it and commits, with its receipt; then the merged data loses the commits its imports were
+    // recorded by, which no foreign key names, and the apply resumes at its open: the data fails the store's own check of its
+    // import records, so the store's files go back as they were saved, and the merge is recorded as data that would not open.
+    const staging = replacementStagingFor(otherRoot);
+    const intent = JSON.parse(await readFile(join(staging, 'intent.json'), 'utf8')) as { json: string };
+    const prepared = parseCanonicalJson(intent.json) as ReplacementIntent & { schema: string };
+    const listed = { ...prepared.mergeBooks!, path: join(staging, MERGING_BOOKS_FILE) };
+    saveStoreFiles(otherRoot, join(staging, 'store-before'));
+    expect(mergeIntoStoreFile(otherRoot, join(staging, 'incoming'), listed, (db) => writeMergeReceipt(db, prepared, T))).toBe('merged');
+    tamper(otherRoot, 'import_commits', (db) => db.exec('DELETE FROM import_commits'));
+    await writeFile(join(staging, 'phase.json'), JSON.stringify('opening-merge'));
+    target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      expect(titles(target)).toEqual(['本机之书']);
+      expect((await target.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'merge', outcome: 'failed', failure: 'unopenable' });
+      expect(existsSync(staging)).toBe(false);
+    } finally {
+      target.close();
+    }
+  }, 180_000);
+
+  it('records a merge that could not finish writing its Books as such, not as data that would not open (Issue #644)', async () => {
+    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let packagePath: string;
+    try {
+      await importBook(source, await compose(TITLE, [1, 2]));
+      packagePath = await exportedFrom(source, 'AI7 数据库.ai7db');
+    } finally {
+      source.close();
+    }
+    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      emptyBook(target, '本机之书');
+      await target.prepareDatabaseMerge((await target.inspectDatabaseImport(packagePath)).previewId, T);
+    } finally {
+      target.close();
+    }
+    // What waits is exactly what was verified, but this data holds a folder at the name of a file the merge takes: putting the
+    // file there fails, which is neither a conflict the rules name nor what waited having changed.
+    const key = withAttached(otherRoot, roots.dataRoot, (db) =>
+      (db.prepare('SELECT relative_key FROM src.content_objects LIMIT 1').get() as { relative_key: string }).relative_key);
+    const occupied = join(otherRoot, 'objects', ...key.split('/'));
+    await mkdir(occupied, { recursive: true });
+    await writeFile(join(occupied, 'not-a-content-object.txt'), 'here before');
+    target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      expect(titles(target)).toEqual(['本机之书']);
+      expect((await target.inspectDatabaseReplacements()).replacements[0]).toMatchObject({
+        kind: 'merge', outcome: 'failed', failure: 'unmergeable', mergedCount: 0, mergedTitles: [],
+      });
+      expect(existsSync(replacementStagingFor(otherRoot))).toBe(false);
+      expect(await readFile(join(occupied, 'not-a-content-object.txt'), 'utf8')).toBe('here before');
+      target.markCleanShutdown();
     } finally {
       target.close();
     }
