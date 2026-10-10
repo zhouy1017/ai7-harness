@@ -472,9 +472,11 @@ function movePaneAround(blockId, rightClickAfter) {
     const seen = { state: 'undrawn', cause: null, delta: null, fraction: null, ratio: window.devicePixelRatio };
     if (!(pane instanceof HTMLElement)) return seen;
     if (!${rightClickAfter} && window.__j06.menu()?.dataset.markMenu !== 'selection') return seen;
-    // Which event was being dispatched when the menu left the page, and where the pane stood then (Issue #745 review).
+    // Which event was being dispatched when the menu left the page, and where the pane stood then (Issue #745 review). The
+    // first event of a task is kept: removing the focused menu item dispatches a focusout inside the handler that removed it.
     let current = null;
     const note = (event) => {
+      if (current !== null) return;
       current = event.type === 'scroll' ? (event.target === pane ? 'scroll' : 'other-scroll') : event.type;
       setTimeout(() => { current = null; }, 0);
     };
