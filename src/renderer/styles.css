@@ -493,6 +493,8 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .task-plan-drift { margin: 0; }
 .task-plan-drift h3 { margin: 0 0 .35rem; font-size: 1rem; }
 .task-plan-drift p { margin: .3rem 0; }
+/* A Task that sends again a range whose earlier result could not be known says so (Issue #51, S16c). */
+.task-plan-resend { margin: 0; }
 .task-plan-drift-table { width: 100%; margin-top: .5rem; border-collapse: collapse; font-size: .86rem; }
 .task-plan-drift-table th, .task-plan-drift-table td { padding: .3rem .4rem; border-bottom: 1px solid #ded9cd; text-align: left; vertical-align: top; }
 .task-plan-rows, .task-plan-facts, .task-plan-technical-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .45rem .8rem; margin: 0; }

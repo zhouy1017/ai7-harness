@@ -188,6 +188,7 @@ function plan(overrides: Partial<TaskPlanProjection> = {}): TaskPlanProjection {
     defaultRule: { canSet: false, reason: '这份计划不能设为快速开始默认。', planEnvelopeDigest: null, current: null, binds: [], startedBy: null },
     runControl: null,
     redo: null,
+    resend: null,
     reprepare: null,
     clarifications: [],
     budgetStop: null,
@@ -867,8 +868,8 @@ describe('模型服务账户限额 in the drawer (S16b)', () => {
 });
 
 // Issue #51 (plan slice S16c; V2-UX-CTRL-007, COPY-009, CONT-011, CONT-016; interaction-spec §807, §1036; ADR 0034): the bar of
-// a Run stopped on sent requests whose results cannot be known — 查看未确认的部分 first, 取消任务 that keeps what was read,
-// 改计划重做 and 查看运行, and never 续行: nothing in this Run sends those ranges again.
+// a Run stopped on sent requests whose results cannot be known — 查看未确认的部分 first, 取消任务 that keeps what was read, and
+// 查看运行 — never 续行 nor 改计划重做 (CONT-011): nothing repeats those ranges' requests until the editor ends this Run.
 describe('结果待确认 in the drawer (S16c)', () => {
   const control = {
     runRecordId: 'run', cancelling: false, pausing: false,
@@ -885,15 +886,14 @@ describe('结果待确认 in the drawer (S16c)', () => {
     expect([TASK_BAR_VIEW_UNCONFIRMED, TASK_BAR_UNCONFIRMED_HEADING]).toEqual(['查看未确认的部分', '结果待确认的阅读范围']);
     expect(taskBarOutcomeUnknownNote(1, 8, 8)).toBe(
       '1 个阅读范围的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；这次运行不会再发它。' +
-      '其余已读完的 7 / 8 个阅读范围结果都已保存。取消任务会保留已读完的部分；改计划重做会作为新任务重新授权');
-    expect(taskBarOutcomeUnknownNote(1, 8, 8)).not.toMatch(/续行|计费；可能|再次计费/u);
+      '其余已读完的 7 / 8 个阅读范围结果都已保存。取消任务会保留已读完的部分，这 1 个记为结果待确认的缺口');
+    expect(taskBarOutcomeUnknownNote(1, 8, 8)).not.toMatch(/续行|重做|再次计费/u);
     expect(taskBarUnconfirmedUnit(4, 1)).toBe('第 4 个阅读范围 · 请求已发出 1 次 · 回答没有完整传回');
     const unknown = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'outcome-unknown', label: '结果待确认' }, runControl: control }));
     expect(unknown).toMatchObject({ status: '结果待确认', note: taskBarOutcomeUnknownNote(1, 8, 8) });
     expect(unknown.actions.map((entry) => [entry.name, entry.label, entry.tone, entry.disabledReason])).toEqual([
       ['view-unconfirmed', '查看未确认的部分', 'primary', null],
       ['cancel-run', '取消任务', 'secondary', null],
-      ['redo', '改计划重做', 'secondary', null],
       ['run-link', '查看运行', 'secondary', null],
     ]);
     // A kept progress that does not read back is never a count.

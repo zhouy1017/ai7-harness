@@ -1136,6 +1136,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'outcome-unknown-stop',
     'outcome-unknown-view',
     'outcome-unknown-cancelled',
+    'outcome-unknown-redo-disclosed',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',

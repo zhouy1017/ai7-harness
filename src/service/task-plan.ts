@@ -85,6 +85,19 @@ export function accountLimitReached(condition: string): string {
  * whose results cannot be known — never 任务已中断 · 可续行 nor 已取消.
  */
 export const OUTCOME_UNKNOWN_STATE = { key: 'outcome-unknown', label: '结果待确认' } as const;
+/**
+ * Why 结果待确认 offers no 改计划重做 (Issue #51, S16c; CONT-011 lists Redo among the blocked repeats): the editor settles the
+ * uncertainty first with 取消任务, which keeps each such range as its own gap; a redo after that discloses the resend.
+ */
+export const OUTCOME_UNKNOWN_NO_REDO = '结果待确认：先取消任务，确定这次运行到此为止；之后才能改计划重做。';
+/**
+ * A Task that recomputes ranges whose earlier request's result could not be known (Issue #51, S16c; CONT-011): it names them,
+ * says the earlier request may already have been processed and billed, and that this Task sends it again — under the fresh
+ * authorization 开始任务 gives.
+ */
+export function resendDisclosure(units: ReadonlyArray<number>): string {
+  return `第 ${units.join('、')} 个阅读范围上一次的请求已发出、结果待确认，可能已被模型服务处理并计费；这项任务会再发一次它的请求，开始任务即重新授权这次发送。`;
+}
 /** No Run has measured a duration this estimate could stand on. */
 export const DURATION_UNKNOWN = '暂无可靠估计';
 const NO_USAGE = '不发送，没有模型用量';
@@ -475,6 +488,7 @@ export function fixedTaskPlan(input: {
     defaultRule: noDefaultRule(FIXED_TASK_NO_RULE),
     runControl: null,
     redo: null,
+    resend: null,
     reprepare: null,
     clarifications: [],
     budgetStop: null,
@@ -809,6 +823,7 @@ export function baselineAnalysisPlan(input: {
     defaultRule: input.defaultRule ?? noDefaultRule(BASELINE_NO_RULE),
     runControl: baselineRunControl(projection, input.stopped),
     redo: baselineRedo(projection, input.stopped),
+    resend: baselineResend(projection),
     reprepare: baselineReprepare(projection),
     clarifications: baselineClarifications(projection, input.clarifications ?? [], input.stopped),
     budgetStop: baselineBudgetStop(projection),
@@ -976,6 +991,7 @@ export function initialEvaluationPlan(input: {
     defaultRule: noDefaultRule(INITIAL_EVALUATION_NO_RULE),
     runControl: null,
     redo: null,
+    resend: null,
     reprepare: null,
     clarifications: [],
     budgetStop: null,
@@ -1134,6 +1150,7 @@ export function readersReportPlan(input: {
     defaultRule: noDefaultRule(READERS_REPORT_NO_RULE),
     runControl: null,
     redo: null,
+    resend: null,
     reprepare: null,
     clarifications: [],
     budgetStop: null,
@@ -1416,6 +1433,7 @@ export function writingPlan(input: {
     defaultRule: input.defaultRule ?? noDefaultRule(WRITING_NO_RULE),
     runControl: null,
     redo: null,
+    resend: null,
     reprepare: null,
     clarifications: [],
     budgetStop: null,
@@ -1569,6 +1587,7 @@ export function evaluationRewritePlan(input: {
     defaultRule: noDefaultRule(EVALUATION_REWRITE_NO_RULE),
     runControl: null,
     redo: null,
+    resend: null,
     reprepare: null,
     clarifications: [],
     budgetStop: null,
@@ -1760,7 +1779,8 @@ export function baselineCancellationImpact(
       }
       return [
         `这项任务已经停下；${restOf(Math.max(0, unitsTotal - unitsSettled - asked.length))}之后的归纳、抽样都不再进行，不再发送任何内容。`,
-        ...(unitsSettled === 0 ? [] : [partial(unitsSettled)]),
+        // Ranges kept as 结果待确认 gaps (Issue #51, S16c) are named on their own line, never counted as read.
+        ...(unitsSettled - unconfirmed.length <= 0 ? [] : [partial(unitsSettled - unconfirmed.length)]),
         ...waitingLines(asked, unitsSettled > 0),
         // 结果待确认 (Issue #51, S16c): their requests were sent, so they are gaps of their own — never ranges not attempted.
         ...(unconfirmed.length === 0 ? [] : [
@@ -1849,7 +1869,10 @@ function baselineRunControl(projection: BaselineAnalysisProjection, stopped?: Ba
     // A Run waiting for the editor's answer goes on when they answer (CLAR-006), never by 续行.
     // 结果待确认 (Issue #51, S16c; ADR 0034, CONT-011, CONT-016) has no 续行: the Run never goes on from it.
     resume: continuation === null || waitsForAnswer || stopped?.outcomeUnknown?.stopped === true ? null : { reason: stopped!.blockers.length === 0 ? null : stopped!.blockers.join('') },
-    redo: { reason: continuation === null ? RUN_CONTROL_REDO_REASON : runBegan(run) ? null : RUN_CONTROL_REDO_NOT_BEGUN_REASON },
+    redo: {
+      reason: stopped?.outcomeUnknown?.stopped === true && kept !== null ? OUTCOME_UNKNOWN_NO_REDO
+        : continuation === null ? RUN_CONTROL_REDO_REASON : runBegan(run) ? null : RUN_CONTROL_REDO_NOT_BEGUN_REASON,
+    },
     activity: run.progress,
     executingSince: run.transitions.find((transition) => transition.state === 'executing')?.recordedAt ?? null,
     continuation,
@@ -1899,6 +1922,8 @@ function baselineRedo(projection: BaselineAnalysisProjection, stopped?: Baseline
   // redone at once, as a cancelled one is — neither 续行 nor 重试 is offered for it.
   const budgetReached = run.state === 'interrupted' && projection.taskOutcome?.stop?.reason === 'run-budget-ceiling-reached';
   if (!cancelledAfterStart && !stoppedRun && !budgetReached) return null;
+  // 结果待确认 itself is never redone (Issue #51, S16c; CONT-011): 取消任务 settles it first.
+  if (stoppedRun && stopped!.outcomeUnknown?.stopped === true) return null;
   // A stopped Run's kept ranges are carried only while this launch can still form them into its partial revision.
   const carries = stoppedRun
     ? (stopped!.unitsSettled ?? 0) > 0 && stopped!.bindingHolds
@@ -1908,7 +1933,9 @@ function baselineRedo(projection: BaselineAnalysisProjection, stopped?: Baseline
     : projection.update === null ? null : { mode: projection.update.mode, selectedRange: projection.update.selectedRange };
   const prepare = { goal: update === null ? BASELINE_ANALYSIS_TASK_GOAL : BASELINE_ANALYSIS_MODE_GOALS[update.mode], update, redoOf: run.runRecordId };
   if (!stoppedRun) return { summary: [], prepare };
-  const kept = stopped!.unitsSettled ?? 0;
+  // Ranges kept as 结果待确认 gaps (Issue #51, S16c) are counted apart from the ranges read, never as read.
+  const unconfirmed = stopped!.outcomeUnknown?.units.map((unit) => unit.unitOrdinal) ?? [];
+  const kept = (stopped!.unitsSettled ?? 0) - unconfirmed.length;
   // 同步到当前稿件 reuses the ranges the Run read to a result and reads its gaps again.
   const closed = stopped!.unitsClosed ?? 0;
   const total = stopped!.unitsTotal;
@@ -1926,9 +1953,11 @@ function baselineRedo(projection: BaselineAnalysisProjection, stopped?: Baseline
         : kept === 0
           ? '这项任务会在这里停下并取消；它还没有读完任何阅读范围，不会形成结果集修订版。'
           : carries
-            ? `这项任务会在这里停下并取消；已读完的 ${kept} 个阅读范围保留在一份新的结果集修订版里，没读到的记为未尝试。`
-            : `这项任务会在这里停下并取消；执行绑定已经变化，已读完的 ${kept} 个阅读范围不能沿用，不会形成结果集修订版。`,
+            ? `这项任务会在这里停下并取消；已读完的 ${kept} 个阅读范围${unconfirmedApart(unconfirmed.length)}保留在一份新的结果集修订版里，没读到的记为未尝试。`
+            : `这项任务会在这里停下并取消；执行绑定已经变化，已读完的 ${kept} 个阅读范围${unconfirmedApart(unconfirmed.length)}不能沿用，不会形成结果集修订版。`,
       next,
+      // 结果待确认 (Issue #51, S16c): the new Task reads them again, and says so before it is started.
+      ...(unconfirmed.length === 0 ? [] : [resendDisclosure(unconfirmed)]),
       CANCELLATION_NO_EFFECTS,
       '新任务由你开始，不会自己运行。',
     ],
@@ -1942,6 +1971,32 @@ function baselineRedo(projection: BaselineAnalysisProjection, stopped?: Baseline
  * cannot: the plan moved, its progress no longer reads back, or, read by the service, the model service, the network
  * or the slot.
  */
+/** `（另有 M 个结果待确认）` beside a count of ranges read (Issue #51, S16c), or nothing when there are none. */
+function unconfirmedApart(count: number): string {
+  return count === 0 ? '' : `（另有 ${count} 个结果待确认）`;
+}
+
+/**
+ * 结果待确认 after the Run that left it ended (Issue #51, S16c; CONT-011): the ranges this Task recomputes whose predecessor
+ * revision holds them as `outcome-unknown` gaps — their earlier request was sent and may have been processed and billed —
+ * named in the Plan Preview with what this Task does about them; `null` when it recomputes none.
+ */
+function baselineResend(projection: BaselineAnalysisProjection): TaskPlanProjection['resend'] {
+  const update = projection.update;
+  const plan = update?.reusePlan ?? null;
+  const latest = projection.resultSetRevision;
+  if (update === null || plan === null || latest === null || latest.revisionId !== update.predecessor.revisionId) return null;
+  const unknown = latest.gaps.filter((gap) => gap.code === 'outcome-unknown');
+  if (unknown.length === 0) return null;
+  // A unit recomputed because its content-compatible predecessor was a gap, over the range of an outcome-unknown gap.
+  const units = plan.units
+    .filter((unit) => unit.disposition === 'recomputed' && unit.reason === 'predecessor-gap' &&
+      unknown.some((gap) => unit.startPosition < gap.endPosition && gap.startPosition < unit.endPosition))
+    .map((unit) => unit.unitOrdinal)
+    .sort((left, right) => left - right);
+  return units.length === 0 ? null : { units, statement: resendDisclosure(units) };
+}
+
 export interface BaselineStoppedRunFacts {
   /** The units that asked the editor and have not settled since, and whether each was answered (Issue #422, S76d). */
   readonly waiting: ReadonlyArray<{ readonly unitOrdinal: number; readonly answered: boolean }>;
@@ -2200,6 +2255,7 @@ export function reviewRunPlan(input: {
     defaultRule: noDefaultRule(REVIEW_RUN_NO_RULE),
     runControl: null,
     redo: null,
+    resend: null,
     reprepare: null,
     clarifications: [],
     budgetStop: null,

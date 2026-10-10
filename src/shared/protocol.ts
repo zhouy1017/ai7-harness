@@ -5497,6 +5497,11 @@ export interface TaskPlanProjection {
   runControl: TaskPlanRunControlProjection | null;
   /** 改计划重做 while it can be made (Issue #422, S76c): on a stopped Run, or one cancelled after it began; else `null`. */
   redo: TaskPlanRedoProjection | null;
+  /**
+   * 结果待确认 after the Run that left it ended (Issue #51, S16c; CONT-011): the ranges this Task sends again whose earlier
+   * request's result could not be known, and the Plan Preview's statement of it; `null` when there are none.
+   */
+  resend: null | { units: ReadonlyArray<number>; statement: string };
   /** 重新准备 for a waiting Run whose plan moved before it could start (Issue #536); else `null`. */
   reprepare: TaskPlanReprepareProjection | null;
   /** What the Task's Run asked the editor (Issue #422, S76d; CLAR-001 to CLAR-007): open questions first; empty when none. */

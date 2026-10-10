@@ -5,9 +5,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BaselineAnalysisExecutionOwner, OUTCOME_UNKNOWN_NOT_RESENT, outcomeUnknownDetail } from '../../src/service/analysis/execution.js';
 import { OUTCOME_UNKNOWN_NO_RESUME, RECONCILED_RESUMABLE_DETAIL } from '../../src/service/analysis/baseline-analysis-store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { OUTCOME_UNKNOWN_NO_REDO, resendDisclosure } from '../../src/service/task-plan.js';
 import { ModelFixtureError, loadLaunchFixture, loadModelFixture, outcomeUnknownFixtureAllowed, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { BASELINE_ANALYSIS_TASK_GOAL, type BaselineAnalysisProjection, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
+import { BASELINE_ANALYSIS_TASK_GOAL, FACTUAL_REVIEW_TASK_GOAL, type BaselineAnalysisProjection, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
@@ -146,10 +147,12 @@ describe('结果待确认 over the real store', () => {
       // The drawer: 结果待确认 in its own words, the unconfirmed range, and no 续行 (ADR 0034, CONT-011, CONT-016).
       const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
       expect(plan.state).toEqual({ key: 'outcome-unknown', label: '结果待确认' });
+      // Neither 续行 nor 改计划重做 (CONT-011): 取消任务 settles it first.
       expect(plan.runControl).toMatchObject({
-        resume: null, redo: { reason: null }, continuation: { unitsSettled: SAMPLE1_UNITS, unitsTotal: SAMPLE1_UNITS }, accountLimit: null,
+        resume: null, redo: { reason: OUTCOME_UNKNOWN_NO_REDO }, continuation: { unitsSettled: SAMPLE1_UNITS, unitsTotal: SAMPLE1_UNITS }, accountLimit: null,
         outcomeUnknown: { units: [{ unitOrdinal: 4, attempts: 1 }], stopped: true },
       });
+      expect(plan.redo).toBeNull();
       expect(plan.technical.find((row) => row.key === 'outcome-unknown')?.value).toBe(`第 4 个阅读范围 · 已发送 1 次 · ${UNKNOWN_GAP}`);
       // 待我处理: 异常与结果待确认, blocking, whose next step is 查看未确认的部分.
       expect(attentionOf(store, bookId)?.[0]).toBe('exceptions');
@@ -176,8 +179,9 @@ describe('结果待确认 over the real store', () => {
       const { bookId, taskIntentId, runRecordId } = await stoppedRun(store, execution, 'L2 sample1 结果待确认取消');
       const before = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
       expect(before.state.key).toBe('outcome-unknown');
-      // 取消任务's summary says what it keeps, and that unit 4 ends as its own gap rather than a range not attempted.
+      // 取消任务's summary counts seven ranges read and names unit 4 apart, its own gap rather than a range not attempted.
       expect(before.runControl?.cancel.impact).toContain(CANCEL_LINE);
+      expect(before.runControl?.cancel.impact).toContain('已读完的 7 个阅读范围的结果与缺口会保留在一份新的结果集修订版里，没读到的记为未尝试；这份修订版会成为这本书最新的分析。');
       store.requestBaselineAnalysisCancel(bookId, taskIntentId);
       execution.cancelRun(runRecordId, store.baselineAnalysisLedger);
       await execution.whenIdle();
@@ -187,6 +191,17 @@ describe('结果待确认 over the real store', () => {
       expect(cancelled.resultSetRevision?.coverage.unitsClosed).toBe(7);
       expect(cancelled.resultSetRevision?.gaps.map((gap) => [gap.unitOrdinal, gap.code, gap.reason])).toEqual([[4, 'outcome-unknown', UNKNOWN_GAP]]);
       expect(cancelled.taskOutcome!.report!.usagePerStage.units.requests).toBe(SAMPLE1_UNITS);
+      // Once cancelled, 改计划重做 is offered; the Task it prepares reads unit 4 again, and its Plan Preview says so first.
+      const after = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
+      expect(after.redo?.prepare).toMatchObject({ redoOf: runRecordId, update: { mode: 'sync-current' } });
+      expect(after.resend).toBeNull();
+      let progress = store.createBaselineAnalysisPreparationWork(bookId, after.redo!.prepare.goal, after.redo!.prepare.update, launchPolicy, false, runRecordId);
+      while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
+      const redo = progress.projection!;
+      expect(redo.update?.reusePlan?.counts).toMatchObject({ reused: 7, recomputed: 1 });
+      const preview = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: redo.taskIntent!.taskIntentId });
+      expect(preview.resend).toEqual({ units: [4], statement: resendDisclosure([4]) });
+      expect(resendDisclosure([4])).toBe('第 4 个阅读范围上一次的请求已发出、结果待确认，可能已被模型服务处理并计费；这项任务会再发一次它的请求，开始任务即重新授权这次发送。');
       store.markCleanShutdown();
     } finally {
       await execution.dispose();
@@ -208,6 +223,9 @@ describe('结果待确认 over the real store', () => {
       expect(paused.state.key).toBe('paused');
       expect(paused.runControl).toMatchObject({ resume: { reason: null }, outcomeUnknown: { units: [{ unitOrdinal: 4, attempts: 1 }], stopped: false } });
       expect(paused.runControl?.cancel.impact).toContain(CANCEL_LINE);
+      // Its 改计划重做 summary counts what was read apart from unit 4 and discloses that the new Task sends unit 4 again.
+      expect(paused.redo?.summary).toContain('这项任务会在这里停下并取消；已读完的 4 个阅读范围（另有 1 个结果待确认）保留在一份新的结果集修订版里，没读到的记为未尝试。');
+      expect(paused.redo?.summary).toContain(resendDisclosure([4]));
       // 续行, then 暂停 before it reaches its first range: the early pause keeps unit 4 where it was.
       execution.admitAndDispatch(runRecordId, ledger, { resume: true });
       store.requestBaselineAnalysisPause(bookId, taskIntentId);
@@ -355,6 +373,46 @@ describe('结果待确认 over the real store', () => {
     expect(JSON.stringify(sampling)).not.toContain('保证抽样被中断');
     // The reflection's request digest binds the Run's own accounting, which no edited fixture reproduces; its words come from the
     // same `ambiguousTurnReason`, pinned in tests/unit/baseline-analysis-gap-readings.test.ts.
+  }, 300_000);
+
+  it('settles an unknown unit of a kind that keeps no progress as its gap, reads on and completes with a Task Outcome', async () => {
+    // The factual kind (Issue #53) keeps no continuation checkpoints, so it never stops 结果待确认: unit 3's request is sent once,
+    // its answer never comes back whole, the unit is its own outcome-unknown gap, and the Run reads on to its end.
+    const factual = await loadModelFixture(FIXTURES_ROOT, 'sample1-factual-authored');
+    fixture = {
+      ...factual,
+      entries: new Map([...factual.entries].map(([key, entry]) => [key, entry.unitOrdinal === 3
+        ? { ...entry, response: { kind: 'outcome-unknown' as const, message: '合成：回答没有完整传回。' } }
+        : entry])),
+    };
+    const store = await openWithRoute();
+    const execution = new BaselineAnalysisExecutionOwner({
+      ledger: store.factualReviewLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
+    });
+    try {
+      const imported = await importSample1Book(store, roots.codeRoot, 'L2 sample1 事实核查结果待确认');
+      const bookId = imported.bookId;
+      await pinEditorialWorkspaceProfileRevision2(store, bookId);
+      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+      let progress = store.createFactualReviewPreparationWork(bookId, FACTUAL_REVIEW_TASK_GOAL, launchPolicy);
+      while (!progress.done) progress = store.advanceFactualReviewPreparationWork(progress.workId!);
+      const prepared = progress.projection!;
+      const runRecordId = store.authorizeFactualReview(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
+      execution.admitAndDispatch(runRecordId, store.factualReviewLedger);
+      await execution.whenIdle();
+      const settled = store.inspectFactualReview(bookId);
+      expect(settled.state).toBe('settled');
+      expect(settled.taskOutcome?.classification).toBe('completed-with-gaps');
+      expect(settled.resultSetRevision?.gaps.map((gap) => [gap.unitOrdinal, gap.code, gap.reason])).toEqual([[3, 'outcome-unknown', UNKNOWN_GAP]]);
+      expect(settled.run?.attempt?.spans.filter((span) => span.unitOrdinal === 3)).toHaveLength(1);
+      expect(store.factualReviewLedger.currentRunState(runRecordId)).toBe('completed-with-gaps');
+      // Nothing is left standing: a further factual Task is never refused as one still active.
+      expect(await refusal(() => store.createFactualReviewPreparationWork(bookId, FACTUAL_REVIEW_TASK_GOAL, launchPolicy))).not.toBe('ANALYSIS_TASK_ACTIVE');
+      store.markCleanShutdown();
+    } finally {
+      await execution.dispose();
+      store.close();
+    }
   }, 300_000);
 
   it('refuses its stimulus at startup for every launch but J-10, before the store opens', async () => {

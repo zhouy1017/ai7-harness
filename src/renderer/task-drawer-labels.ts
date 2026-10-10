@@ -408,7 +408,7 @@ export const TASK_BAR_VIEW_UNCONFIRMED = '查看未确认的部分';
 export const TASK_BAR_UNCONFIRMED_HEADING = '结果待确认的阅读范围';
 export function taskBarOutcomeUnknownNote(unconfirmed: number, unitsSettled: number, unitsTotal: number): string {
   return `${unconfirmed} 个阅读范围的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；这次运行不会再发它。` +
-    `其余已读完的 ${unitsSettled - unconfirmed} / ${unitsTotal} 个阅读范围结果都已保存。取消任务会保留已读完的部分；改计划重做会作为新任务重新授权`;
+    `其余已读完的 ${unitsSettled - unconfirmed} / ${unitsTotal} 个阅读范围结果都已保存。取消任务会保留已读完的部分，这 ${unconfirmed} 个记为结果待确认的缺口`;
 }
 /** One unconfirmed range in 查看未确认的部分's list: which range, and how often its request was sent. */
 export function taskBarUnconfirmedUnit(unitOrdinal: number, attempts: number): string {
@@ -687,7 +687,8 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         };
       }
       // 结果待确认 (Issue #51, S16c; CTRL-007, CONT-011, CONT-016; ADR 0034): 查看未确认的部分 first, then 取消任务, which keeps
-      // what was read, 改计划重做 and the way to the Run — never 续行: nothing in this Run sends those ranges again.
+      // what was read and settles the uncertainty, and the way to the Run — never 续行 nor 改计划重做: nothing repeats those
+      // ranges' requests until the editor has ended this Run.
       if (control.outcomeUnknown?.stopped === true) {
         const continuation = control.continuation;
         return {
@@ -702,7 +703,6 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
           actions: [
             { name: 'view-unconfirmed', label: TASK_BAR_VIEW_UNCONFIRMED, tone: 'primary', disabledReason: null },
             { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
-            { name: 'redo', label: TASK_BAR_REDO, tone: control.redo.reason === null ? 'secondary' : 'quiet', disabledReason: control.redo.reason },
             runLink,
           ],
         };

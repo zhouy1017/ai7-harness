@@ -630,6 +630,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       ...(next.runControl === null ? [] : [activityBlock(next.runControl)]),
       ...(next.clarifications.some((card) => card.state !== 'open') ? [clarificationRecord(next)] : []),
       goalBlock(next),
+      // 结果待确认 (Issue #51, S16c; CONT-011): a Task that sends again a range whose earlier result could not be known says so
+      // in its Plan Preview, in both modes, before it is started.
+      ...(next.resend === null ? [] : [resendNote(next.resend)]),
       ...(next.defaultRule.startedBy === null ? [] : [quickStartedBlock(next.defaultRule.startedBy)]),
       ...(next.drift === null ? [] : [driftBlock(next.drift)]),
       ...(next.edit.lastEdit === null ? [] : [el('p', 'field-note task-plan-edit-record', taskPlanLastEdit(next.edit.lastEdit))]),
@@ -680,6 +683,12 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     button.setAttribute('aria-describedby', why.id);
     wrap.append(button, why);
     return wrap;
+  }
+
+  function resendNote(resend: NonNullable<TaskPlanProjection['resend']>): HTMLElement {
+    const note = el('p', 'attention-note task-plan-resend', resend.statement);
+    note.dataset['taskPlanResend'] = resend.units.join(',');
+    return note;
   }
 
   function goalBlock(next: TaskPlanProjection): HTMLElement {

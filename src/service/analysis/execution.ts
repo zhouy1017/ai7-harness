@@ -1796,7 +1796,8 @@ export class BaselineAnalysisExecutionOwner {
         const asking = waiting.size > 0 && !unitsEnded && !active.interrupted;
         // 结果待确认 (Issue #51, S16c): every range the Run could read is read, and some sent request's result is unknown.
         const unconfirmed = unconfirmedOrdinals();
-        const confirming = unconfirmed.length > 0 && !unitsEnded && !active.interrupted;
+        // Only a kind that keeps its progress stops there: one that keeps none settles the range as its gap and completes.
+        const confirming = active.resumableOnInterrupt && unconfirmed.length > 0 && !unitsEnded && !active.interrupted;
         if (accountLimit === null && !stopping && !asking && !confirming) return false;
         // A spent ceiling outranks a pause, AI7 stopping, an open question and an account limit (Issue #51, S16a; MODEL-016):
         // nothing more may be sent under it, so no Run waits to be continued past it. An open question's answer and the
@@ -1870,7 +1871,6 @@ export class BaselineAnalysisExecutionOwner {
           unitsSettled: settled,
           unitsTotal: submittedUnits.length,
           stopReason: 'outcome-unknown',
-          unconfirmedUnits: unconfirmed,
           carriedUsage,
         });
         return true;
