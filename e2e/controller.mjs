@@ -1498,6 +1498,15 @@ export function isContentFreeCheckLabel(label) {
 }
 
 /**
+ * Issue #746: a Journey's wall time as `e2e:all` prints it on its `pass` and `fail` lines — whole seconds, `412s`. Digits
+ * and one letter only, so the segment is content-free by the same rule as a check label.
+ */
+export function journeyElapsedSegment(milliseconds) {
+  const seconds = Number.isFinite(milliseconds) && milliseconds > 0 ? Math.round(milliseconds / 1_000) : 0;
+  return `${seconds}s`;
+}
+
+/**
  * The one way a runner builds the error a failed check throws: its message is `<journey>/<check>` exactly as before (with
  * `:<failed,…>` when a multi-check wait names the members still false), and the check's label rides on the error for
  * `reportJourneyFailure` to name.
