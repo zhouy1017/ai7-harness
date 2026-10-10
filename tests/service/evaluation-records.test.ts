@@ -113,7 +113,7 @@ describe('②C 评估 over the real store', () => {
       const book = await importSample1Book(store, roots.codeRoot, '评估之书');
       const before = store.inspectEvaluation(book.bookId, null);
       expect([before.bookTitle, before.manuscript, before.records, before.record, before.start]).toEqual([
-        '评估之书', { revisionId: book.revisionId, revisionLabel: 'r1', uncheckpointed: false }, [], null, { allowed: true, kind: 'first', fromInitial: null },
+        '评估之书', { revisionId: book.revisionId, revisionLabel: 'r1', uncheckpointed: false }, [], null, { allowed: true, kind: 'first', fromInitial: null, skipDamaged: null },
       ]);
       // The profile: five items of 20 each, the bands, two risks, four conclusions — and nothing named a weight.
       expect(before.profile.items.map((item) => [item.label, item.fullMarks])).toEqual([
@@ -244,9 +244,21 @@ describe('②C 评估 over the real store', () => {
       const bookId = books.find((entry) => entry.title === '评估之书')!.bookId;
       expect(reopened.inspectEvaluation(bookId, null)).toMatchObject({
         recordCount: 2, unreadableRecords: [1, 2], records: [], record: null, recordsNext: null,
-        start: { allowed: false, reason: '第 2 版评估记录已损坏，不能重新评估。' },
+        start: { allowed: true, kind: 'again', fromInitial: null, skipDamaged: { skipped: [1, 2], seedOrdinal: null } },
       });
+      // 重新评估 as before is still refused; only a start that says it skips the damaged versions goes on (Issue #726) — from
+      // nothing, since no 定稿 reads — and the new version records them as skipped, in its own words.
       expect(await refusal(() => reopened.startEvaluation(bookId))).toBe('EVALUATION_RECORD_INVALID:第 2 版评估记录已损坏，不能重新评估。');
+      const fresh = reopened.startEvaluation(bookId, false, true);
+      expect(fresh).toMatchObject({
+        recordCount: 3, unreadableRecords: [1, 2], recordsNext: null,
+        record: { ordinal: 3, state: 'editing', entries: 1, skippedRecords: [1, 2], seededFrom: null, comparison: null, initial: null, calibration: null },
+        start: { allowed: false, reason: '第 3 版还没有定稿；定稿后才能重新评估。' },
+      });
+      expect(fresh.record!.content).toEqual(emptyEvaluationContent(BUILTIN_EVALUATION_PROFILE));
+      expect(fresh.records.map((record) => record.ordinal)).toEqual([3]);
+      // Saying so while the latest reads is refused, skipping nothing.
+      expect(await refusal(() => reopened.startEvaluation(bookId, false, true))).toBe('EVALUATION_MOVED:第 3 版评估记录现在可以读取，没有要跳过的版本；请看过现在的页面再重新评估。');
       reopened.markCleanShutdown();
     } finally {
       reopened.close();

@@ -627,7 +627,6 @@ import {
 } from './series.js';
 import {
   CALIBRATION_MIN_ADJUSTMENTS,
-  CALIBRATION_OFFSET_COMPUTED,
   PREDICTION_MIN_BOOKS_WITH_ACTUALS,
   calibrationActive,
   predictionAvailable,
@@ -3437,6 +3436,11 @@ interface StoreControl {
   /** The J-04-only local deterministic route resolved at service startup; `null` in every other launch. */
   baselineAnalysisRoute: BaselineAnalysisRouteFacts | null;
   /**
+   * The adjusted Books the house calibration offset waits on (Issue #429, EVAL-011a): `CALIBRATION_MIN_ADJUSTMENTS` unless a
+   * development-ci J-11 launch lowers it with `--j11-calibration-min-books`, so the Journey proves the gate with two Books.
+   */
+  calibrationMinAdjustments?: number;
+  /**
    * The software version the service entry read from the package the product ships in (Issue #433, S85a): the built
    * carrier holds no package manifest. Absent, the store reads the one at its code root — the source tree's, as the
    * service suites open it.
@@ -4389,7 +4393,11 @@ export class EditorialStore {
       // version, over words that rewrite wrote (Issue #708). A decision or words that cannot be read leave the mark unchecked.
       acceptedRewrite: (analysisRevisionId) => this.#acceptedEvaluationRewrite(analysisRevisionId),
       adoptionStamps: (bookId) => this.#evaluationRewrites.decisionStamps(bookId),
-    });
+    }, {
+      // The house's calibration switch (EVAL-011a): a version begun from AI7's 初评 applies the offset only while it is on. A
+      // preferences chain that cannot be read refuses that start with the ledger's own words (`#evaluationCall`).
+      calibrationEnabled: () => this.#evaluationCalibration.preferences().calibrationEnabled,
+    }, control.calibrationMinAdjustments ?? CALIBRATION_MIN_ADJUSTMENTS);
     this.#analysisFeedback = new AnalysisFeedbackLedger(authority);
     this.#capturedProcedures = new CapturedProcedures(authority);
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
@@ -7949,12 +7957,13 @@ export class EditorialStore {
 
   /**
    * 开始评估 or 重新评估: a new version bound to the manuscript's current revision, and the page with it on show — begun from
-   * AI7's latest 初评 when `fromInitial` (Issue #429, S81b1).
+   * AI7's latest 初评 when `fromInitial` (Issue #429, S81b1), and skipping a latest version that cannot be read only when
+   * `skipDamaged` says the editor saw it skipped (Issue #726).
    */
-  startEvaluation(bookId: string, fromInitial = false): EvaluationWorkspaceProjection {
+  startEvaluation(bookId: string, fromInitial = false, skipDamaged = false): EvaluationWorkspaceProjection {
     return this.#evaluationCall(() => {
       const title = this.#evaluationBookTitle(bookId);
-      const recordId = this.#transaction(this.#authority, () => this.#evaluations.start(bookId, fromInitial));
+      const recordId = this.#transaction(this.#authority, () => this.#evaluations.start(bookId, fromInitial, skipDamaged));
       return this.#evaluations.workspace(bookId, title, recordId);
     });
   }
@@ -10253,6 +10262,8 @@ export class EditorialStore {
       return operation();
     } catch (error) {
       if (error instanceof EvaluationError) throw new StoreError(error.code, error.message);
+      // The house's calibration switch, read when a version begins from AI7's 初评 (EVAL-011a): its chain's own refusal.
+      if (error instanceof EvaluationCalibrationError) throw new StoreError(error.code, error.message);
       if (error instanceof AggregateError) {
         this.#poisoned = true;
         throw new StoreFatalError(error);
@@ -14777,9 +14788,11 @@ export class EditorialStore {
     requireStore(focusBookId === null || UUID_PATTERN.test(focusBookId), 'BOOK_INVALID', '图书标识无效。');
     const preferences = this.#evaluationCalibration.preferences();
     const booksWithActuals = this.#evaluationCalibration.booksWithActuals();
-    // The Books whose editor adjusted AI7's 初评 in a 定稿 version, each counted once (Issue #429, S81b1; §8.6 「10 本调分记录」).
-    // The calibration itself — the offset it would apply to AI7's starting scores — is not computed yet: it waits for its slice.
-    const { books: adjustments, unreadable: unreadableBooks } = this.#evaluations.adjustedBooks();
+    // The Books whose editor adjusted AI7's 初评 in a 定稿 version, each counted once (Issue #429, S81b1; §8.6 「10 本调分记录」),
+    // and past ten of them the house offset as the 定稿 evaluations give it now (EVAL-011a), recomputed at every read.
+    const house = this.#evaluations.calibration();
+    const { adjustments, unreadable: unreadableBooks } = house;
+    const profileItems = this.#evaluations.profile().items;
     const where = 'EXISTS (SELECT 1 FROM publication_versions p WHERE p.book_id = b.book_id)';
     const rows = (after === null
       ? this.#authority.prepare(`SELECT b.book_id, b.title FROM books b WHERE ${where} ORDER BY b.title, b.book_id LIMIT ?`).all(MAX_EVALUATION_CALIBRATION_BOOKS + 1)
@@ -14799,10 +14812,17 @@ export class EditorialStore {
         adjustments,
         unreadableBooks,
         initialScoresConnected: true,
-        threshold: CALIBRATION_MIN_ADJUSTMENTS,
+        threshold: this.#control.calibrationMinAdjustments ?? CALIBRATION_MIN_ADJUSTMENTS,
         enabled: preferences.calibrationEnabled,
-        offsetComputed: CALIBRATION_OFFSET_COMPUTED,
-        active: calibrationActive(adjustments, preferences.calibrationEnabled, CALIBRATION_OFFSET_COMPUTED),
+        active: calibrationActive(adjustments, preferences.calibrationEnabled, this.#control.calibrationMinAdjustments ?? CALIBRATION_MIN_ADJUSTMENTS),
+        offset: house.offsets === null ? null : {
+          basisBooks: house.basisBooks,
+          booksWithoutBasis: house.booksWithoutBasis,
+          items: profileItems.map((item) => ({
+            itemId: item.itemId, label: item.label, fullMarks: item.fullMarks,
+            offset: house.offsets!.get(item.itemId)?.offset ?? null, books: house.offsets!.get(item.itemId)?.books ?? 0,
+          })),
+        },
       },
       prediction: {
         booksWithActuals,

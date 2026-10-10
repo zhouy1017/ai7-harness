@@ -2,6 +2,7 @@ import type {
   EvaluationAdjustmentReasonId,
   EvaluationComparisonProjection,
   EvaluationConclusion,
+  EvaluationInitialCalibrationProjection,
   EvaluationInitialDraftProjection,
   EvaluationInitialProjection,
   InitialEvaluationSufficiency,
@@ -32,6 +33,27 @@ export const EVALUATION_LEDE = '按本社评估方案打分：总分 100，每�
 /** Said of a version the editor began alone: AI7's 初评 took no part in it. */
 export const EVALUATION_AI7_PENDING = '这一版不是从 AI7 初评开始的：由你打分。';
 export const EVALUATION_START = { first: '开始评估', again: '重新评估' } as const;
+/**
+ * `开始评估`, `重新评估`, or — while the latest version cannot be read (Issue #726) — the start that skips it: from the latest
+ * 定稿 that reads, or from nothing when none does.
+ */
+export function evaluationStartLabel(start: Extract<EvaluationWorkspaceProjection['start'], { allowed: true }>): string {
+  if (start.skipDamaged === null) return EVALUATION_START[start.kind];
+  return start.skipDamaged.seedOrdinal === null ? '从头重新评估' : `从第 ${start.skipDamaged.seedOrdinal} 版重新评估`;
+}
+/** What the start that skips a damaged latest version will do (Issue #726), said before it is pressed. */
+export function evaluationSkipDamagedLine(skipDamaged: NonNullable<Extract<EvaluationWorkspaceProjection['start'], { allowed: true }>['skipDamaged']>): string {
+  const damaged = `第 ${skipDamaged.skipped.join('、')} 版评估记录已损坏`;
+  return skipDamaged.seedOrdinal === null
+    ? `${damaged}，没有可以读取的定稿：重新评估将从头开始，新版本会记下跳过了这些版本。`
+    : `${damaged}：重新评估将从第 ${skipDamaged.seedOrdinal} 版定稿开始，新版本会记下跳过了${skipDamaged.skipped.length === 1 ? '它' : '这些版本'}。`;
+}
+/** What a version says of the damaged versions it skipped when it began (Issue #726); `null` for one that skipped none. */
+export function evaluationSkippedRecordsLine(record: Pick<EvaluationRecordProjection, 'skippedRecords' | 'seededFrom'>): string | null {
+  if (record.skippedRecords.length === 0) return null;
+  const skipped = `这一版跳过了已损坏的第 ${record.skippedRecords.join('、')} 版`;
+  return record.seededFrom === null ? `${skipped}，从头开始评估。` : `${skipped}，从第 ${record.seededFrom} 版定稿重新评估。`;
+}
 export const EVALUATION_SAVE = '保存评估';
 export const EVALUATION_FINALIZE = '定稿';
 /** 定稿 waits while every item is 不评 (Issue #638): the service's own words for its refusal. */
@@ -246,10 +268,37 @@ export function evaluationAi7SufficiencyLine(item: Pick<EvaluationInitialDraftPr
   return item.citedBlocks === 0 ? `${label}（没有引用内容块）` : `${label}（引用 ${item.citedBlocks} 个段落，分布在 ${item.unitsCited} 个阅读范围）`;
 }
 
-/** AI7's score of one item beside the editor's (EVAL-006). */
-export function evaluationAi7ItemLine(item: Pick<EvaluationInitialDraftProjection['items'][number], 'score' | 'sufficiency' | 'citedBlocks' | 'unitsCited'>, fullMarks: number): string {
+/**
+ * AI7's score of one item beside the editor's (EVAL-006), and — where the house calibration moved the version's starting score
+ * (EVAL-011a) — the score after it, the raw one kept: 「AI7 初评 12 / 20 · 校准后 10 / 20 · …」.
+ */
+export function evaluationAi7ItemLine(
+  item: Pick<EvaluationInitialDraftProjection['items'][number], 'score' | 'sufficiency' | 'citedBlocks' | 'unitsCited'>,
+  fullMarks: number,
+  calibrated: Pick<EvaluationInitialCalibrationProjection['items'][number], 'adjusted'> | null = null,
+): string {
   const score = item.score === null ? '没有给出分数' : `${evaluationScore(item.score)} / ${fullMarks}`;
-  return `AI7 初评 ${score} · ${evaluationAi7SufficiencyLine(item)}`;
+  const after = calibrated === null || item.score === null ? '' : ` · 校准后 ${evaluationScore(calibrated.adjusted)} / ${fullMarks}`;
+  return `AI7 初评 ${score}${after} · ${evaluationAi7SufficiencyLine(item)}`;
+}
+
+/**
+ * What a version begun from AI7's 初评 says of the house calibration applied to its starting scores (EVAL-011; EVAL-011a):
+ * the Books it rested on and that the raw scores stay beside it; `null` for a version begun from the raw 初评.
+ */
+export function evaluationAi7CalibrationLine(calibration: EvaluationInitialCalibrationProjection | null): string | null {
+  if (calibration === null) return null;
+  const moved = calibration.items.length === 0 ? '各项偏移为 0，起始分数未变' : `调整了 ${calibration.items.length} 项的起始分数，原始分数仍列在每一项旁边`;
+  return `AI7 的初评分数已按本社校准（依据 ${calibration.basisBooks} 本书的定稿评估）：${moved}；校准只调 AI7 的分数，不调风险项，也不改你的评分。`;
+}
+
+/**
+ * The score one item started at in a version begun from AI7's 初评 (EVAL-011a): AI7's score after the house calibration where
+ * it moved the item, else AI7's raw score; `null` for a version begun alone or an item AI7 did not score. The service reads the
+ * editor's departures — where 调分原因 is offered and what counts toward 调分记录 — against exactly this start, so the page must too.
+ */
+export function evaluationStartingScore(record: Pick<EvaluationRecordProjection, 'initial' | 'calibration'>, itemId: string): number | null {
+  return record.calibration?.items.find((entry) => entry.itemId === itemId)?.adjusted ?? record.initial?.items.find((entry) => entry.itemId === itemId)?.score ?? null;
 }
 
 /**

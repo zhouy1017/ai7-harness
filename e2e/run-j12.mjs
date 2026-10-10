@@ -418,6 +418,11 @@ const READ_CALIBRATION = `(() => {
   return {
     calibration: root.querySelector('.calibration-calibration .calibration-progress')?.textContent ?? null,
     waiting: root.querySelector('.calibration-waiting')?.textContent ?? null,
+    // The house offset's disclosure (Issue #429, EVAL-011a): computed or waiting, its method, and what 停用 does.
+    offset: root.querySelector('.calibration-offset')?.dataset.calibrationOffset ?? null,
+    offsetWaiting: root.querySelector('.calibration-offset-waiting')?.textContent ?? null,
+    method: root.querySelector('.calibration-method')?.textContent ?? null,
+    offEffect: root.querySelector('.calibration-off-effect')?.textContent ?? null,
     prediction: root.querySelector('.calibration-prediction .calibration-progress')?.textContent ?? null,
     switches: { calibration: switchOf('calibration'), prediction: switchOf('prediction') },
     empty: root.querySelector('.calibration-actuals-empty')?.textContent ?? null,
@@ -1579,6 +1584,10 @@ async function main() {
     const calibrationPage = await readCalibration(primary, () => true, 'calibration-page');
     requireJourney(calibrationPage.calibration === '调分记录 0 / 10 本 · 满 10 本后生效' &&
       calibrationPage.waiting === null &&
+      // The house offset (Issue #429, EVAL-011a): its method stated, waiting below ten 调分记录, nothing said of 停用 while on.
+      calibrationPage.offset === 'waiting' && calibrationPage.offsetWaiting === '校准偏移尚未计算：满 10 本调分记录后，按上述方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。' &&
+      calibrationPage.method === '校准偏移 = 各本书最新一次从 AI7 初评开始并定稿的评估里，你的定稿分数减去 AI7 初评分数的平均值，取到半分；每次读取时重新计算，不另存。' &&
+      calibrationPage.offEffect === null &&
       calibrationPage.prediction === '已录入实际数据的已发稿图书 0 / 30 本 · 满 30 本后才能打开' &&
       JSON.stringify(calibrationPage.switches) === JSON.stringify({ calibration: [true, false], prediction: [false, true] }) &&
       calibrationPage.empty === '还没有已发稿的图书。设为发稿版本后，在这里录入它的定价与首印。' && calibrationPage.books.length === 0,
@@ -1586,11 +1595,14 @@ async function main() {
     const toggle = (name) => primary.evaluate(`(() => { const input = document.querySelector('[data-calibration-switch="${name}"]'); if (!(input instanceof HTMLInputElement) || input.disabled) return false; input.click(); return true; })()`);
     requireJourney(await toggle('calibration'), 'calibration-off-click');
     const calibrationOff = await readCalibration(primary, (page) => page.calibration === '调分记录 0 / 10 本 · 已关闭', 'calibration-off');
-    requireJourney(JSON.stringify(calibrationOff.switches.calibration) === JSON.stringify([false, false]) && calibrationOff.focus === 'calibration', 'calibration-off-words', calibrationOff);
+    requireJourney(JSON.stringify(calibrationOff.switches.calibration) === JSON.stringify([false, false]) && calibrationOff.focus === 'calibration' &&
+      // Off says what a new version does instead, and that the switch stays reversible (EVAL-011; EVAL-011a).
+      calibrationOff.offEffect === '校准已关闭：新版本从 AI7 初评开始时直接用 AI7 的原始分数；可以随时再打开，关闭和打开都有记录。' && calibrationOff.offset === 'waiting',
+    'calibration-off-words', calibrationOff);
     const offService = await primary.evaluate(`window.ai7.inspectEvaluationCalibration().then((answer) => [answer.calibration.enabled, answer.calibration.active, answer.preferenceEntries, answer.prediction.enabled])`);
     requireJourney(JSON.stringify(offService) === JSON.stringify([false, false, 1, false]), 'calibration-off-service', offService);
     requireJourney(await toggle('calibration'), 'calibration-on-click');
-    await readCalibration(primary, (page) => page.calibration === '调分记录 0 / 10 本 · 满 10 本后生效' && page.switches.calibration?.[0] === true, 'calibration-on');
+    await readCalibration(primary, (page) => page.calibration === '调分记录 0 / 10 本 · 满 10 本后生效' && page.switches.calibration?.[0] === true && page.offEffect === null, 'calibration-on');
     // The closed switch cannot be clicked open, and the service refuses it as well.
     requireJourney(await toggle('prediction') === false, 'prediction-closed');
     const refusedPrediction = await primary.evaluate(`window.ai7.setEvaluationPreferences({ expectedEntries: 2, predictionEnabled: true, calibrationEnabled: true }).then(() => ({ recorded: true }), (error) => ({ code: error?.code ?? null, message: error?.message ?? null }))`);

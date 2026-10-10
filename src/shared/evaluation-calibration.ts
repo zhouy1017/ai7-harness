@@ -4,7 +4,10 @@
  * through an ADR, never by tuning here.
  */
 
-/** House-level calibration of AI7's starting scores begins only after this many of the editor's adjustments (EVAL-011). */
+/**
+ * House-level calibration of AI7's starting scores begins only after this many Books carry one of the editor's adjustments
+ * (EVAL-011; §8.6 「10 本调分记录」): the gate the house offset waits on.
+ */
 export const CALIBRATION_MIN_ADJUSTMENTS = 10 as const;
 
 /** The pricing and first-print prediction can be enabled only once this many published Books carry actuals (EVAL-010). */
@@ -20,17 +23,45 @@ export function predictionAvailable(booksWithActuals: number): boolean {
 }
 
 /**
- * Whether this build computes the house offset calibration applies to AI7's starting scores (Issue #429 review): it does not
- * yet. Until one does, calibration never reads as applied, however many adjustments the house holds, and the page says why.
+ * Whether house calibration applies to AI7's starting scores (EVAL-011; Issue #429, EVAL-011a): enough Books carry one of the
+ * editor's adjustments, and the editor has not turned it off. The offset itself is computed from the house's 定稿 evaluations
+ * every time it is read (`calibrationOffset`), never stored as truth, so past the gate it always exists.
  */
-export const CALIBRATION_OFFSET_COMPUTED = false as boolean;
+export function calibrationActive(adjustments: number, enabled: boolean, threshold: number = CALIBRATION_MIN_ADJUSTMENTS): boolean {
+  return enabled && adjustments >= threshold;
+}
+
+/** A number to the nearest half point, a quarter between two rounding away from zero: −0.25 → −0.5, 0.25 → 0.5, −0.2 → 0. */
+export function roundToHalfPoint(value: number): number {
+  const rounded = Math.sign(value) * Math.round(Math.abs(value) * 2) / 2;
+  // Never −0: an offset of nothing reads as 0.
+  return rounded === 0 ? 0 : rounded;
+}
 
 /**
- * Whether house calibration applies to AI7's starting scores: enough adjustments, the editor has not turned it off, and an
- * offset exists to apply.
+ * The house offset of one Evaluation Profile item (EVAL-011; the Commander's method of 2026-10-09): the mean of each Book's
+ * (editor's 定稿 score − AI7's 初评 score), one value per Book, to the nearest half point; `null` when no Book gives a value
+ * for the item. The gate — `CALIBRATION_MIN_ADJUSTMENTS` Books with an adjustment — is the caller's, not this function's.
  */
-export function calibrationActive(adjustments: number, enabled: boolean, offsetComputed: boolean): boolean {
-  return enabled && offsetComputed && adjustments >= CALIBRATION_MIN_ADJUSTMENTS;
+export function calibrationOffset(differences: ReadonlyArray<number>): number | null {
+  if (differences.length === 0) return null;
+  const sum = differences.reduce((total, difference) => total + difference, 0);
+  return roundToHalfPoint(sum / differences.length);
+}
+
+/**
+ * AI7's starting score of one item after the house offset (EVAL-011): the raw 初评 score plus the offset, clamped so the
+ * adjusted score stays within [0, 满分]. Raw and offset are half points, so their sum is one; the clamp keeps it on the scale.
+ */
+export function calibratedScore(raw: number, offset: number, fullMarks: number): number {
+  return Math.min(fullMarks, Math.max(0, raw + offset));
+}
+
+/** An offset as the page states it: `+1.5`, `−0.5`, `0`. */
+export function formatCalibrationOffset(offset: number): string {
+  if (offset === 0) return '0';
+  const magnitude = Math.abs(offset);
+  return `${offset > 0 ? '+' : '−'}${Number.isInteger(magnitude) ? String(magnitude) : magnitude.toFixed(1)}`;
 }
 
 /** A price in 分 as the editor writes it: yuan with two decimals. */

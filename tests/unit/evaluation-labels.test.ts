@@ -6,8 +6,13 @@ import {
   EVALUATION_AI7_PENDING,
   EVALUATION_AI7_PREPARE,
   EVALUATION_STATE_LABELS,
+  evaluationAi7CalibrationLine,
   evaluationAi7ConclusionLine,
   evaluationAi7ItemLine,
+  evaluationSkipDamagedLine,
+  evaluationSkippedRecordsLine,
+  evaluationStartLabel,
+  evaluationStartingScore,
   evaluationAi7LatestLine,
   evaluationAi7RecordLine,
   evaluationAi7SufficiencyLine,
@@ -294,5 +299,48 @@ describe('AI7 初评 words (Issue #429, S81b1; EVAL-001, EVAL-005 to EVAL-007)',
     expect(evaluationRewriteReadingLine({ unitsTotal: 8, unitsRead: 6 })).toBe('AI7 这次重写只读到 6 / 8 个阅读范围：没读到的范围里的内容没有进入重写的评语。');
     expect(evaluationRewriteDecidedLine({ decision: 'accepted', entryOrdinal: 3, decidedAt: 'x' })).toBe('上一次重写的评语已采用（记为第 3 次保存），分数没有改动。');
     expect(evaluationRewriteDecidedLine({ decision: 'discarded', entryOrdinal: null, decidedAt: 'x' })).toBe('上一次重写的评语已放弃，评语保持原样。');
+  });
+
+  it('names the start that skips a damaged latest version, what it will do, and what the new version says of it (Issue #726)', () => {
+    expect(evaluationStartLabel({ allowed: true, kind: 'first', fromInitial: null, skipDamaged: null })).toBe('开始评估');
+    expect(evaluationStartLabel({ allowed: true, kind: 'again', fromInitial: null, skipDamaged: null })).toBe('重新评估');
+    expect(evaluationStartLabel({ allowed: true, kind: 'again', fromInitial: null, skipDamaged: { skipped: [3], seedOrdinal: 2 } })).toBe('从第 2 版重新评估');
+    expect(evaluationStartLabel({ allowed: true, kind: 'again', fromInitial: null, skipDamaged: { skipped: [1, 2], seedOrdinal: null } })).toBe('从头重新评估');
+    expect(evaluationSkipDamagedLine({ skipped: [3], seedOrdinal: 2 })).toBe('第 3 版评估记录已损坏：重新评估将从第 2 版定稿开始，新版本会记下跳过了它。');
+    expect(evaluationSkipDamagedLine({ skipped: [3, 4], seedOrdinal: 2 })).toBe('第 3、4 版评估记录已损坏：重新评估将从第 2 版定稿开始，新版本会记下跳过了这些版本。');
+    expect(evaluationSkipDamagedLine({ skipped: [1, 2], seedOrdinal: null })).toBe('第 1、2 版评估记录已损坏，没有可以读取的定稿：重新评估将从头开始，新版本会记下跳过了这些版本。');
+    expect(evaluationSkippedRecordsLine({ skippedRecords: [], seededFrom: 3 })).toBeNull();
+    expect(evaluationSkippedRecordsLine({ skippedRecords: [3], seededFrom: 2 })).toBe('这一版跳过了已损坏的第 3 版，从第 2 版定稿重新评估。');
+    expect(evaluationSkippedRecordsLine({ skippedRecords: [1, 2], seededFrom: null })).toBe('这一版跳过了已损坏的第 1、2 版，从头开始评估。');
+  });
+
+  it('shows the calibrated start beside AI7\'s raw score, and says what the house calibration did to a version (EVAL-011a)', () => {
+    const item = { score: 12, sufficiency: 'insufficient' as const, citedBlocks: 0, unitsCited: 0 };
+    expect(evaluationAi7ItemLine(item, 20)).toBe('AI7 初评 12 / 20 · 依据充分度 不足（没有引用内容块）');
+    expect(evaluationAi7ItemLine(item, 20, null)).toBe('AI7 初评 12 / 20 · 依据充分度 不足（没有引用内容块）');
+    expect(evaluationAi7ItemLine(item, 20, { adjusted: 10 })).toBe('AI7 初评 12 / 20 · 校准后 10 / 20 · 依据充分度 不足（没有引用内容块）');
+    expect(evaluationAi7ItemLine({ ...item, score: 16.5 }, 20, { adjusted: 17 })).toBe('AI7 初评 16.5 / 20 · 校准后 17 / 20 · 依据充分度 不足（没有引用内容块）');
+    // No raw score, nothing to calibrate: the line says so and names no adjusted score.
+    expect(evaluationAi7ItemLine({ ...item, score: null }, 20, { adjusted: 1 })).toBe('AI7 初评 没有给出分数 · 依据充分度 不足（没有引用内容块）');
+    expect(evaluationAi7CalibrationLine(null)).toBeNull();
+    expect(evaluationAi7CalibrationLine({ basisBooks: 10, items: [{ itemId: 'readers-and-market', raw: 12, offset: -2, adjusted: 10 }] }))
+      .toBe('AI7 的初评分数已按本社校准（依据 10 本书的定稿评估）：调整了 1 项的起始分数，原始分数仍列在每一项旁边；校准只调 AI7 的分数，不调风险项，也不改你的评分。');
+    expect(evaluationAi7CalibrationLine({ basisBooks: 12, items: [] }))
+      .toBe('AI7 的初评分数已按本社校准（依据 12 本书的定稿评估）：各项偏移为 0，起始分数未变；校准只调 AI7 的分数，不调风险项，也不改你的评分。');
+  });
+
+  it('reads an item\'s starting score as the service does: the calibrated start where it moved the item, else AI7\'s raw score (EVAL-011a)', () => {
+    const items = (scores: Array<number | null>) => scores.map((score, index) => ({ itemId: `item-${index}`, score, comment: null, sufficiency: 'fair' as const, citedBlocks: 1, unitsCited: 1, evidence: [], evidenceCount: 0 }));
+    const initial = { revisionId: 'r', ordinal: 1, revisionLabel: 'r1', createdAt: 'x', items: items([16.5, 15, null]), unitsTotal: 1, unreadUnits: [], total: { score: 31.5, fullMarks: 60, notRated: 0, unscored: 1 }, strengths: [], weaknesses: [], nextStep: null, suggestedConclusion: null, complete: false, market: null };
+    // A version begun alone starts nowhere; one begun from the raw 初评 starts at AI7's score, nothing for an unscored item.
+    expect(evaluationStartingScore({ initial: null, calibration: null }, 'item-0')).toBeNull();
+    expect(evaluationStartingScore({ initial, calibration: null }, 'item-0')).toBe(16.5);
+    expect(evaluationStartingScore({ initial, calibration: null }, 'item-2')).toBeNull();
+    expect(evaluationStartingScore({ initial, calibration: null }, 'missing')).toBeNull();
+    // A calibrated version starts at the adjusted score where the calibration moved the item, and at AI7's raw score elsewhere.
+    const calibration = { basisBooks: 10, items: [{ itemId: 'item-0', raw: 16.5, offset: 0.5, adjusted: 17 }] };
+    expect(evaluationStartingScore({ initial, calibration }, 'item-0')).toBe(17);
+    expect(evaluationStartingScore({ initial, calibration }, 'item-1')).toBe(15);
+    expect(evaluationStartingScore({ initial, calibration }, 'item-2')).toBeNull();
   });
 });

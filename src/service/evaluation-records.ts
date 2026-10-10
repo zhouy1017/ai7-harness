@@ -12,6 +12,7 @@ import {
   type EvaluationAdjustmentReasonId,
   type EvaluationComparisonProjection,
   type EvaluationContent,
+  type EvaluationInitialCalibrationProjection,
   type EvaluationInitialDraftProjection,
   type EvaluationInitialProjection,
   type EvaluationMarketProjection,
@@ -25,7 +26,7 @@ import {
   type EvaluationTotalProjection,
   type EvaluationWorkspaceProjection,
 } from '../shared/protocol.js';
-import { PREDICTION_MIN_BOOKS_WITH_ACTUALS } from '../shared/evaluation-calibration.js';
+import { CALIBRATION_MIN_ADJUSTMENTS, PREDICTION_MIN_BOOKS_WITH_ACTUALS, calibratedScore, calibrationOffset } from '../shared/evaluation-calibration.js';
 import { boundedEvidenceSet, contentWithRewrite, type RewritableEvaluation } from './evaluation-rewrites.js';
 import {
   EVALUATION_ADJUSTMENT_REASONS,
@@ -64,6 +65,18 @@ import { withinEvaluationBytes } from './evaluation/initial-evaluation-contract.
  * the version it began (draft snapshot `/2`); the 书系 comparables and 定价与首印 are house data the store reads beside the
  * page. A rewrite reads a version at its latest saved entry (`rewritable`), and 采用 appends its words as a new entry of the
  * version (`applyRewrite`) — every score exactly as it was — only while that entry is still the latest.
+ *
+ * The house calibration (EVAL-011a; EVAL-011, §8.6): once `CALIBRATION_MIN_ADJUSTMENTS` Books carry one of the editor's
+ * adjustments, each profile item's offset is the mean, to the half point, of (editor's 定稿 score − AI7's raw 初评 score) over
+ * each Book's latest 定稿 version begun from AI7's 初评, one value per Book (`calibration`), recomputed at every read and never
+ * stored as truth. A version begun from AI7's 初评 while the house switch is on starts each item at the raw score plus its
+ * offset, clamped to [0, 满分]; the snapshot (`/3`) records what was applied and keeps the raw score beside it. A risk item has
+ * no score and is never touched. The editor's departures are read against the starting score the version offered.
+ *
+ * A latest version that cannot be read (Issue #726) no longer ends the Book's evaluation: a start that says so
+ * (`skipDamaged`) seeds the next version from the latest 定稿 that reads — empty when none does — follows that version in
+ * the chain, and records the skipped versions by ordinal in its own record (`/2`). The chain carry treats them as a gap:
+ * nothing of theirs is held, and marks after the gap are admitted as after any version that cannot be read.
  */
 
 export const EVALUATION_RECORD_SCHEMA_SQL = {
@@ -174,15 +187,20 @@ const corrupt = (): EvaluationError => new EvaluationError('EVALUATION_RECORD_IN
 type SqlRow = Record<string, SQLOutputValue>;
 type Profile = Omit<EvaluationProfileProjection, 'sha256'>;
 
-const RECORD_SCHEMA = 'ai7.evaluation-record/1';
+/** Records written before Issue #726: each follows the version just before it and skips none. */
+const RECORD_SCHEMA_V1 = 'ai7.evaluation-record/1';
+/** Every record written since: it names the ordinal of the version it follows and the versions it skipped, `[]` included. */
+const RECORD_SCHEMA = 'ai7.evaluation-record/2';
 /** Entries written before S81b1: no item carries an adjustment, and each reads as having none. */
 const ENTRY_SCHEMA_V1 = 'ai7.evaluation-entry/1';
 /** Every entry written since S81b1: each item carries its adjustment of AI7's 初评, or `null`. */
 const ENTRY_SCHEMA = 'ai7.evaluation-entry/2';
 /** A 初评 snapshotted before the market section existed (S81b1): it names none, and reads as having none. */
 const INITIAL_DRAFT_SCHEMA_V1 = 'ai7.evaluation-initial-draft/1';
-/** Every snapshot since S81b2: the draft names its market section, `null` included. */
-const INITIAL_DRAFT_SCHEMA = 'ai7.evaluation-initial-draft/2';
+/** A snapshot of S81b2: the draft names its market section, `null` included; no calibration was applied then. */
+const INITIAL_DRAFT_SCHEMA_V2 = 'ai7.evaluation-initial-draft/2';
+/** Every snapshot since EVAL-011a: it also names the house calibration applied to AI7's starting scores, `null` included. */
+const INITIAL_DRAFT_SCHEMA = 'ai7.evaluation-initial-draft/3';
 const PROFILE_SCHEMA = 'ai7.evaluation-profile/1';
 /** Who scores and finalizes, as the other editor records of this device name it. */
 export const EVALUATION_ACTOR = '本机编辑' as const;
@@ -416,6 +434,10 @@ interface StoredRecord {
   readonly revisionLabel: string;
   readonly uncheckpointed: boolean;
   readonly previousRecordId: string | null;
+  /** The ordinal of the version this one follows, `null` for a first version; a `/1` record reads it from the row it names. */
+  readonly previousOrdinal: number | null;
+  /** The versions after `previousRecordId` this one skipped because they could not be read when it began (Issue #726). */
+  readonly skipped: ReadonlyArray<{ readonly ordinal: number; readonly recordId: string }>;
   readonly profile: EvaluationProfileProjection;
   readonly createdAt: string;
   readonly sha256: string;
@@ -522,8 +544,14 @@ export const evaluationCarriedMarksNotice = (named: string): string =>
   `较早的评估版本记录已损坏，AI7 评语的标注无法全部核对；以下仍按 AI7 所写处理：${named}。`;
 export const evaluationAdoptionsNotice = (named: string): string =>
   `评语重写的采用记录已损坏，AI7 评语的标注无法全部核对；以下仍按 AI7 所写处理：${named}。`;
-/** Why 重新评估 waits while the Book's latest version cannot be read (Issue #708): the others still show. */
+/**
+ * Why 重新评估 waits while the Book's latest version cannot be read (Issue #708): the others still show. Since Issue #726 the
+ * editor may go on by skipping it (`从第 M 版重新评估`); a start that does not say so is still refused with this.
+ */
 export const evaluationDamagedLatestReason = (ordinal: number): string => `第 ${ordinal} 版评估记录已损坏，不能重新评估。`;
+/** Why a start that would skip the latest version is refused when that version reads after all (Issue #726). */
+export const evaluationLatestReadsReason = (ordinal: number | null): string =>
+  ordinal === null ? '这本书的评估版本刚有变化；请看过现在的页面再重新评估。' : `第 ${ordinal} 版评估记录现在可以读取，没有要跳过的版本；请看过现在的页面再重新评估。`;
 
 /** Which 采用 appended which entry of a version (Issue #696): the evaluation rewrite owner's decisions, read by the record. */
 export interface EvaluationAdoptionReader {
@@ -828,6 +856,35 @@ const NO_INITIAL_EVALUATION: InitialEvaluationReader = {
   task: () => ({ task: null, prepare: { allowed: false, reason: 'AI7 初评暂不可用。' } }),
 };
 
+/** The house's calibration switch (EVAL-011; 设置 › 评估校准与预测), as a version begun from AI7's 初评 reads it (EVAL-011a). */
+export interface EvaluationPreferencesReader {
+  /** Whether house calibration is on; a chain that cannot be read throws, and the start is refused with why. */
+  calibrationEnabled(): boolean;
+}
+
+/** A house whose switch is not wired: calibration on, as the house starts. The store wires the real one. */
+const CALIBRATION_ON: EvaluationPreferencesReader = { calibrationEnabled: () => true };
+
+/** The house calibration as computed now (EVAL-011a): the gate's count, the basis, and each item's offset past the gate. */
+export interface HouseCalibration {
+  /** The Books with one of the editor's adjustments in a 定稿 version begun from AI7's 初评, each once (§8.6 「10 本调分记录」). */
+  readonly adjustments: number;
+  /** The Books left out of `adjustments` because a version of theirs begun from AI7's 初评 cannot be read (Issue #702 review). */
+  readonly unreadable: number;
+  /** The Books whose latest 定稿 version begun from AI7's 初评 gives the basis: one value per Book and item. */
+  readonly basisBooks: number;
+  /** Of `adjustments`, the Books that give the basis nothing because a version of theirs begun from AI7's 初评 cannot be read. */
+  readonly booksWithoutBasis: number;
+  /** Each item's offset to the half point with the Books it rests on, by item; `null` below the gate. */
+  readonly offsets: ReadonlyMap<string, { readonly offset: number | null; readonly books: number }> | null;
+}
+
+/** The 初评 one version snapshotted, with the house calibration it recorded as applied to AI7's starting scores. */
+interface InitialSnapshot {
+  readonly draft: EvaluationInitialDraft;
+  readonly calibration: EvaluationInitialCalibrationProjection | null;
+}
+
 function integer(value: SQLOutputValue | undefined): number {
   return typeof value === 'bigint' ? Number(value) : Number(value);
 }
@@ -863,6 +920,9 @@ export class EvaluationRecords {
   readonly #readersReport: ReadersReportReader;
   readonly #extras: EvaluationExtrasReader;
   readonly #adoptions: EvaluationAdoptionReader;
+  readonly #preferences: EvaluationPreferencesReader;
+  /** The adjusted Books the house offset waits on: `CALIBRATION_MIN_ADJUSTMENTS`, lowered only by a J-11 launch (EVAL-011a). */
+  readonly #gate: number;
   /**
    * Each version's chain as read, and what it leaves the next, kept between reads by record (Issue #708): the 评估 page and
    * every per-version operation would otherwise read every version's chain again. Each is kept with the stamp of the ledger
@@ -883,6 +943,8 @@ export class EvaluationRecords {
     readersReport: ReadersReportReader = NO_READERS_REPORT,
     extras: EvaluationExtrasReader = NO_EXTRAS,
     adoptions: EvaluationAdoptionReader = NO_ADOPTIONS,
+    preferences: EvaluationPreferencesReader = CALIBRATION_ON,
+    gate: number = CALIBRATION_MIN_ADJUSTMENTS,
   ) {
     this.#db = db;
     this.#manuscripts = manuscripts;
@@ -890,6 +952,8 @@ export class EvaluationRecords {
     this.#readersReport = readersReport;
     this.#extras = extras;
     this.#adoptions = adoptions;
+    this.#preferences = preferences;
+    this.#gate = gate;
   }
 
   /** The profile a new version snapshots: AI7's built-in one until a house's own is managed in 知识库. */
@@ -901,21 +965,48 @@ export class EvaluationRecords {
     const json = String(row.canonical_json);
     requireEvaluation(sha256Hex(json) === String(row.sha256), 'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
     const record = parseStoredJson(json, corrupt);
-    requireEvaluation(isRecord(record) && record.schema === RECORD_SCHEMA && record.recordId === row.record_id && record.bookId === row.book_id &&
+    requireEvaluation(isRecord(record) && (record.schema === RECORD_SCHEMA || record.schema === RECORD_SCHEMA_V1) && record.recordId === row.record_id && record.bookId === row.book_id &&
       record.ordinal === integer(row.ordinal) && record.manuscriptId === row.manuscript_id && record.revisionId === row.revision_id &&
       (record.previousRecordId ?? null) === (row.previous_record_id ?? null) && record.createdAt === row.created_at &&
       isRecord(record.profile) && evaluationProfileDigest(record.profile as unknown as Profile) === row.profile_sha256 &&
       typeof record.revisionLabel === 'string' && typeof record.uncheckpointed === 'boolean',
     'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
+    const ordinal = integer(row.ordinal);
+    const previousRecordId = row.previous_record_id === null ? null : String(row.previous_record_id);
+    let previousOrdinal: number | null;
+    let skipped: StoredRecord['skipped'];
+    if (record.schema === RECORD_SCHEMA_V1) {
+      // Written before Issue #726: it followed the version just before it and skipped none; that version's ordinal is its row's.
+      requireEvaluation(!Object.hasOwn(record, 'skipped') && !Object.hasOwn(record, 'previousOrdinal'), 'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
+      skipped = [];
+      const before = previousRecordId === null ? undefined
+        : this.#db.prepare('SELECT ordinal FROM evaluation_records WHERE record_id = ? AND book_id = ?').get(previousRecordId, String(row.book_id)) as SqlRow | undefined;
+      requireEvaluation(previousRecordId === null || (before !== undefined && integer(before.ordinal) < ordinal), 'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
+      previousOrdinal = before === undefined ? null : integer(before.ordinal);
+    } else {
+      // Since Issue #726: the ordinal of the version it follows, and the versions after it that it skipped, each of lower
+      // ordinal than its own and higher than the one it follows, oldest first.
+      const before = record.previousOrdinal;
+      requireEvaluation((before === null) === (previousRecordId === null) && (before === null || (typeof before === 'number' && Number.isSafeInteger(before) && before >= 1 && before < ordinal)) &&
+        Array.isArray(record.skipped) && record.skipped.every((entry, index) => isRecord(entry) && hasExactKeys(entry, ['ordinal', 'recordId']) &&
+          typeof entry.ordinal === 'number' && Number.isSafeInteger(entry.ordinal) && entry.ordinal < ordinal && entry.ordinal > (before ?? 0) &&
+          entry.ordinal > (index === 0 ? 0 : ((record.skipped as Array<{ ordinal: number }>)[index - 1]!.ordinal)) &&
+          typeof entry.recordId === 'string' && UUID_PATTERN.test(entry.recordId)),
+      'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
+      previousOrdinal = before as number | null;
+      skipped = (record.skipped as Array<{ ordinal: number; recordId: string }>).map((entry) => ({ ordinal: entry.ordinal, recordId: entry.recordId }));
+    }
     return {
       recordId: String(row.record_id),
       bookId: String(row.book_id),
-      ordinal: integer(row.ordinal),
+      ordinal,
       manuscriptId: String(row.manuscript_id),
       revisionId: String(row.revision_id),
       revisionLabel: record.revisionLabel,
       uncheckpointed: record.uncheckpointed,
-      previousRecordId: row.previous_record_id === null ? null : String(row.previous_record_id),
+      previousRecordId,
+      previousOrdinal,
+      skipped,
       profile: withDigest(record.profile as unknown as Profile),
       createdAt: String(row.created_at),
       sha256: String(row.sha256),
@@ -957,7 +1048,10 @@ export class EvaluationRecords {
     for (const read of earlier.reverse()) {
       carried = this.#leaves(read, carried, reading);
     }
-    return carried;
+    // The versions this one skipped (Issue #726) are a gap: nothing of theirs is held, and the marks may be missing some they
+    // held, so a mark the chain does not hold is admitted as after any version that cannot be read — checked against an
+    // acceptance of this Book, or kept unchecked — never refused for the gap alone.
+    return record.skipped.length === 0 || carried.incomplete ? carried : { ...carried, incomplete: true };
   }
 
   /** What one version leaves the next, read from its chain with what was carried into it; unreadable when it cannot be read. */
@@ -1240,25 +1334,57 @@ export class EvaluationRecords {
    * revision under the profile that applies now — empty the first time, seeded from the last 定稿 after — refused while the
    * Book has no manuscript or a version is still being scored. `fromInitial` begins it from AI7's latest 初评 (S81b1): AI7's
    * scores, comments, strengths and weaknesses are the editor's starting point and are snapshotted beside the version; risks
-   * and what is still missing carry from the last 定稿, as 重新评估 carries them, and no conclusion is chosen.
+   * and what is still missing carry from the last 定稿, as 重新评估 carries them, and no conclusion is chosen. With the house
+   * switch on and past the gate, each of AI7's starting scores is raw plus its item's offset, clamped to [0, 满分], and the
+   * snapshot records what was applied with the raw score kept (EVAL-011a); off or below the gate, the raw score starts it.
+   *
+   * A latest version that cannot be read (Issue #726) refuses the start until the editor says they saw it skipped
+   * (`skipDamaged`): the new version is then seeded from the latest 定稿 that reads — empty when none does — follows that
+   * version, and records every version after it, none of which reads, as skipped. A start that says so while the latest
+   * reads after all is refused, so no version is skipped unseen.
    */
-  start(bookId: string, fromInitial = false): string {
+  start(bookId: string, fromInitial = false, skipDamaged = false): string {
     const manuscript = this.#manuscripts.current(bookId);
     requireEvaluation(manuscript !== null, 'EVALUATION_NO_MANUSCRIPT', '这本书还没有稿件，没有可以评估的内容。');
     const rows = this.#db.prepare('SELECT * FROM evaluation_records WHERE book_id = ? ORDER BY ordinal').all(bookId) as SqlRow[];
     const count = rows.length;
     let last: StoredRecord | undefined;
     let lastEntry: StoredEntry | undefined;
+    const skipped: Array<{ ordinal: number; recordId: string }> = [];
     if (count > 0) {
       // 重新评估 is the one operation the latest version must read for (Issue #708): it seeds the next and must be 定稿.
       const row = rows[count - 1]!;
+      let damaged: number | null = null;
       try {
         last = this.#record(row);
         lastEntry = this.#entries(last).latest;
       } catch (error) {
         if (!(error instanceof EvaluationError)) throw error;
-        throw new EvaluationError('EVALUATION_RECORD_INVALID', evaluationDamagedLatestReason(integer(row.ordinal)));
+        damaged = integer(row.ordinal);
+        last = undefined;
+        lastEntry = undefined;
       }
+      if (damaged === null) {
+        requireEvaluation(!skipDamaged, 'EVALUATION_MOVED', evaluationLatestReadsReason(integer(row.ordinal)));
+      } else {
+        requireEvaluation(skipDamaged, 'EVALUATION_RECORD_INVALID', evaluationDamagedLatestReason(damaged));
+        // The latest 定稿 that reads seeds the next version; the versions after it are skipped, oldest first.
+        let seed: { record: StoredRecord; chain: Chain } | null = null;
+        for (const read of this.#versions(bookId, newReading())) {
+          if (read.version !== null) {
+            seed = read.version;
+            skipped.length = 0;
+          } else {
+            skipped.push({ ordinal: read.ordinal, recordId: read.recordId });
+          }
+        }
+        if (seed !== null) {
+          last = seed.record;
+          lastEntry = seed.chain.latest;
+        }
+      }
+    } else {
+      requireEvaluation(!skipDamaged, 'EVALUATION_MOVED', evaluationLatestReadsReason(null));
     }
     requireEvaluation(last === undefined || lastEntry!.kind === 'finalized', 'EVALUATION_OPEN',
       `第 ${last?.ordinal ?? 0} 版还没有定稿；定稿后才能重新评估。`);
@@ -1268,16 +1394,33 @@ export class EvaluationRecords {
       ? emptyEvaluationContent(snapshot)
       : this.#reseed(lastEntry!.content, snapshot);
     let initial: InitialEvaluationFacts | null = null;
+    let calibration: EvaluationInitialCalibrationProjection | null = null;
     if (fromInitial) {
       const startable = this.#startableInitial(bookId, profileSha256, manuscript.revisionId);
       requireEvaluation('facts' in startable, 'EVALUATION_INITIAL_UNAVAILABLE', 'reason' in startable ? startable.reason : '');
       initial = startable.facts;
+      // The house offset applied to AI7's starting scores (EVAL-011a): as the house's 定稿 evaluations give it now, past the
+      // gate and while the switch is on; an item AI7 did not score, or whose offset is 0, is left as it is.
+      if (this.#preferences.calibrationEnabled()) {
+        const house = this.calibration();
+        if (house.offsets !== null && house.basisBooks > 0) {
+          const facts = initial;
+          const items = snapshot.items.flatMap((item) => {
+            const raw = facts.draft.items.find((entry) => entry.itemId === item.itemId)?.score ?? null;
+            const offset = house.offsets!.get(item.itemId)?.offset ?? null;
+            if (raw === null || offset === null || offset === 0) return [];
+            return [{ itemId: item.itemId, raw, offset, adjusted: calibratedScore(raw, offset, item.fullMarks) }];
+          });
+          calibration = { basisBooks: house.basisBooks, items };
+        }
+      }
     }
     const seed: EvaluationContent = initial === null ? carried : {
       ...carried,
       items: carried.items.map((item) => {
         const ai7 = initial!.draft.items.find((entry) => entry.itemId === item.itemId);
-        return { itemId: item.itemId, score: ai7?.score ?? null, notRated: null, comment: ai7?.comment ?? null, adjustment: null };
+        const adjusted = calibration?.items.find((entry) => entry.itemId === item.itemId)?.adjusted;
+        return { itemId: item.itemId, score: adjusted ?? ai7?.score ?? null, notRated: null, comment: ai7?.comment ?? null, adjustment: null };
       }),
       strengths: initial.draft.strengths.slice(0, MAX_EVALUATION_LINES),
       weaknesses: initial.draft.weaknesses.slice(0, MAX_EVALUATION_LINES),
@@ -1297,6 +1440,8 @@ export class EvaluationRecords {
       revisionLabel: manuscript.revisionLabel,
       uncheckpointed: manuscript.uncheckpointed,
       previousRecordId: last?.recordId ?? null,
+      previousOrdinal: last?.ordinal ?? null,
+      skipped,
       profile: snapshot,
       createdAt,
     });
@@ -1313,6 +1458,7 @@ export class EvaluationRecords {
         analysisRevisionId: initial.draft.revisionId,
         draft: initial.draft,
         profileSha256,
+        calibration,
         recordedAt,
       });
       this.#db.prepare('INSERT INTO evaluation_initial_drafts(record_id, analysis_revision_id, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?)')
@@ -1338,7 +1484,7 @@ export class EvaluationRecords {
       total: totalOf(record.profile, latest.content),
       entrySha256: latest.sha256,
       finalizedAt: latest.recordedAt,
-      initial: this.#initialDraft(record),
+      initial: this.#initialDraft(record)?.draft ?? null,
     };
   }
 
@@ -1393,58 +1539,128 @@ export class EvaluationRecords {
     return row === undefined ? null : this.#finalized(this.#record(row));
   }
 
-  /** The AI7 初评 one version began from, verified against its row; `null` for a version the editor began alone. */
-  #initialDraft(record: StoredRecord): EvaluationInitialDraft | null {
+  /**
+   * The AI7 初评 one version began from, verified against its row, with the house calibration it recorded as applied to AI7's
+   * starting scores (EVAL-011a); `null` for a version the editor began alone.
+   */
+  #initialDraft(record: StoredRecord): InitialSnapshot | null {
     const row = this.#db.prepare('SELECT * FROM evaluation_initial_drafts WHERE record_id = ?').get(record.recordId) as SqlRow | undefined;
     if (row === undefined) return null;
     const json = String(row.canonical_json);
     requireEvaluation(sha256Hex(json) === String(row.sha256), 'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
     const stored = parseStoredJson(json, corrupt);
-    requireEvaluation(isRecord(stored) && (stored.schema === INITIAL_DRAFT_SCHEMA || stored.schema === INITIAL_DRAFT_SCHEMA_V1) &&
+    const schema = stored !== null && isRecord(stored) ? stored.schema : undefined;
+    const withMarket = schema === INITIAL_DRAFT_SCHEMA || schema === INITIAL_DRAFT_SCHEMA_V2;
+    requireEvaluation(isRecord(stored) && (withMarket || schema === INITIAL_DRAFT_SCHEMA_V1) &&
       stored.recordId === record.recordId && stored.analysisRevisionId === row.analysis_revision_id && stored.recordedAt === row.recorded_at &&
       stored.profileSha256 === record.profile.sha256 && isRecord(stored.draft) && stored.draft.revisionId === row.analysis_revision_id &&
-      // A `/2` snapshot names its market section, `null` included; a `/1` one, written before it existed, names none.
-      Object.hasOwn(stored.draft, 'market') === (stored.schema === INITIAL_DRAFT_SCHEMA),
+      // A `/2` or `/3` snapshot names its market section, `null` included; a `/1` one, written before it existed, names none.
+      Object.hasOwn(stored.draft, 'market') === withMarket &&
+      // Only a `/3` snapshot names the calibration applied, `null` included; the earlier shapes applied none.
+      Object.hasOwn(stored, 'calibration') === (schema === INITIAL_DRAFT_SCHEMA),
     'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
     const draft = stored.draft as unknown as Omit<EvaluationInitialDraft, 'total'>;
-    return { ...draft, market: stored.schema === INITIAL_DRAFT_SCHEMA ? draft.market : null, total: totalOfScores(record.profile, draft.items) };
-  }
-
-  /** AI7's scores of a version begun from its 初评, by item; `null` for any other. */
-  static #initialScores(draft: EvaluationInitialDraft | null): ReadonlyMap<string, number | null> | null {
-    return draft === null ? null : new Map(draft.items.map((item) => [item.itemId, item.score] as const));
+    const calibration = schema === INITIAL_DRAFT_SCHEMA ? EvaluationRecords.#storedCalibration(stored.calibration, draft, record.profile) : null;
+    return { draft: { ...draft, market: withMarket ? draft.market : null, total: totalOfScores(record.profile, draft.items) }, calibration };
   }
 
   /**
-   * The Books whose editor adjusted AI7's 初评 (EVAL-011; Issue #429, S81b1), counted per Book as 设置 counts them (§8.6 「10 本
-   * 调分记录」): a Book counts once when one of its 定稿 versions began from AI7's 初评 and kept at least one score that departs
-   * from AI7's. A version still being scored has adjusted nothing yet. A version that cannot be read counts for nothing, and
-   * `unreadable` says how many Books were left out for it, never failing 设置 for the whole house (Issue #702 review).
+   * The calibration a `/3` snapshot recorded, held to what the start could have written: `null`, or each listed item once in
+   * the profile's order with AI7's raw score as the draft holds it, a non-zero half-point offset, and the adjusted score exactly
+   * raw plus offset clamped to [0, 满分].
    */
-  adjustedBooks(): { books: number; unreadable: number } {
-    const books = new Set<string>();
+  static #storedCalibration(value: unknown, draft: Omit<EvaluationInitialDraft, 'total'>, profile: Pick<Profile, 'items'>): EvaluationInitialCalibrationProjection | null {
+    if (value === null) return null;
+    requireEvaluation(isRecord(value) && hasExactKeys(value, ['basisBooks', 'items']) && typeof value.basisBooks === 'number' &&
+      Number.isSafeInteger(value.basisBooks) && value.basisBooks >= 1 && Array.isArray(value.items), 'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
+    let after = -1;
+    const items = (value.items as unknown[]).map((entry) => {
+      requireEvaluation(isRecord(entry) && hasExactKeys(entry, ['itemId', 'raw', 'offset', 'adjusted']) && typeof entry.itemId === 'string' &&
+        typeof entry.raw === 'number' && typeof entry.offset === 'number' && typeof entry.adjusted === 'number', 'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
+      const index = profile.items.findIndex((item) => item.itemId === entry.itemId);
+      const item = profile.items[index];
+      requireEvaluation(index > after && item !== undefined && draft.items.find((candidate) => candidate.itemId === entry.itemId)?.score === entry.raw &&
+        entry.offset !== 0 && Number.isInteger(entry.offset * 2) && entry.adjusted === calibratedScore(entry.raw, entry.offset, item.fullMarks),
+      'EVALUATION_RECORD_INVALID', '评估记录已损坏。');
+      after = index;
+      return { itemId: entry.itemId, raw: entry.raw, offset: entry.offset, adjusted: entry.adjusted };
+    });
+    return { basisBooks: value.basisBooks, items };
+  }
+
+  /**
+   * AI7's starting scores of a version begun from its 初评, by item — after the house calibration where it moved one (EVAL-011a),
+   * so the editor's departures are read against the start the version offered; `null` for any other version.
+   */
+  static #initialScores(snapshot: InitialSnapshot | null): ReadonlyMap<string, number | null> | null {
+    if (snapshot === null) return null;
+    return new Map(snapshot.draft.items.map((item) =>
+      [item.itemId, snapshot.calibration?.items.find((entry) => entry.itemId === item.itemId)?.adjusted ?? item.score] as const));
+  }
+
+  /**
+   * The house calibration as it stands now (EVAL-011; Issue #429, S81b1 and EVAL-011a), read from every 定稿 version begun
+   * from AI7's 初评 and never stored. 设置 counts the editor's adjustments per Book (§8.6 「10 本调分记录」): a Book counts once
+   * when one of its 定稿 versions began from AI7's 初评 and kept at least one score that departs from the start it offered.
+   * A version still being scored has adjusted nothing yet. Past the gate — `CALIBRATION_MIN_ADJUSTMENTS` such Books — each
+   * profile item's offset is the mean, to the half point, of (editor's 定稿 score − AI7's raw 初评 score) over each Book's
+   * latest 定稿 version begun from AI7's 初评, one value per Book, an item the editor left `不评` or AI7 did not score giving
+   * none. A version that cannot be read counts for nothing: `unreadable` says how many Books were left out of the count for
+   * it, never failing 设置 for the whole house (Issue #702 review), and a Book with such a version gives the basis no value,
+   * since which of its 定稿 versions is the latest is then unknown.
+   */
+  calibration(): HouseCalibration {
+    const adjusted = new Set<string>();
     const damaged = new Set<string>();
+    /** Each Book's (editor − AI7 raw) by item, of its latest 定稿 version begun from AI7's 初评 read so far. */
+    const basis = new Map<string, ReadonlyMap<string, number>>();
     const rows = this.#db.prepare(
       'SELECT r.* FROM evaluation_records r JOIN evaluation_initial_drafts d ON d.record_id = r.record_id ORDER BY r.book_id, r.ordinal',
     ).all() as SqlRow[];
     // Each version's chain is read once, whichever later version's carried marks need it.
     const reading = newReading();
     for (const row of rows) {
-      if (books.has(String(row.book_id))) continue;
+      const bookId = String(row.book_id);
       try {
         const record = this.#record(row);
         const latest = this.#entries(record, reading).latest;
         if (latest.kind !== 'finalized') continue;
-        const scores = EvaluationRecords.#initialScores(this.#initialDraft(record))!;
-        if (latest.content.items.some((item) => evaluationItemAdjusted({ score: item.score, notRated: item.notRated !== null }, scores.get(item.itemId) ?? null))) {
-          books.add(record.bookId);
+        const snapshot = this.#initialDraft(record)!;
+        const starting = EvaluationRecords.#initialScores(snapshot)!;
+        if (latest.content.items.some((item) => evaluationItemAdjusted({ score: item.score, notRated: item.notRated !== null }, starting.get(item.itemId) ?? null))) {
+          adjusted.add(bookId);
         }
+        const differences = new Map<string, number>();
+        for (const item of latest.content.items) {
+          const raw = snapshot.draft.items.find((entry) => entry.itemId === item.itemId)?.score ?? null;
+          if (item.score !== null && item.notRated === null && raw !== null) differences.set(item.itemId, item.score - raw);
+        }
+        // Versions read oldest first: the Book's latest 定稿 begun from AI7's 初评 is the one that stands — and a Book whose latest
+        // gives no item a value (AI7 scored none, or every scored item 不评) is not in the basis at all.
+        if (differences.size > 0) basis.set(bookId, differences);
+        else basis.delete(bookId);
       } catch (error) {
         if (!(error instanceof EvaluationError)) throw error;
-        damaged.add(String(row.book_id));
+        damaged.add(bookId);
       }
     }
-    return { books: books.size, unreadable: [...damaged].filter((bookId) => !books.has(bookId)).length };
+    for (const bookId of damaged) basis.delete(bookId);
+    const adjustments = adjusted.size;
+    // The Books that count toward the gate but give the basis nothing because a version of theirs cannot be read (P3-1).
+    const booksWithoutBasis = [...damaged].filter((bookId) => adjusted.has(bookId)).length;
+    let offsets: Map<string, { offset: number | null; books: number }> | null = null;
+    if (adjustments >= this.#gate) {
+      const byItem = new Map<string, number[]>();
+      for (const differences of basis.values()) {
+        for (const [itemId, difference] of differences) {
+          const list = byItem.get(itemId);
+          if (list === undefined) byItem.set(itemId, [difference]);
+          else list.push(difference);
+        }
+      }
+      offsets = new Map([...byItem].map(([itemId, differences]) => [itemId, { offset: calibrationOffset(differences), books: differences.length }] as const));
+    }
+    return { adjustments, unreadable: [...damaged].filter((bookId) => !adjusted.has(bookId)).length, basisBooks: basis.size, booksWithoutBasis, offsets };
   }
 
   /**
@@ -1517,7 +1733,7 @@ export class EvaluationRecords {
     const row = this.#db.prepare('SELECT * FROM evaluation_records WHERE record_id = ? AND book_id = ?').get(recordId, bookId) as SqlRow | undefined;
     requireEvaluation(row !== undefined, 'EVALUATION_NOT_FOUND', '没有这个评估版本。');
     const record = this.#record(row);
-    return this.#rewritableOf(record, this.#entries(record), this.#initialDraft(record));
+    return this.#rewritableOf(record, this.#entries(record), this.#initialDraft(record)?.draft ?? null);
   }
 
   /**
@@ -1535,7 +1751,7 @@ export class EvaluationRecords {
     requireEvaluation(row !== undefined, 'EVALUATION_NOT_FOUND', '没有这个评估版本。');
     const record = this.#record(row);
     const chain = this.#entries(record);
-    return { record, chain, version: this.#rewritableOf(record, chain, this.#initialDraft(record)) };
+    return { record, chain, version: this.#rewritableOf(record, chain, this.#initialDraft(record)?.draft ?? null) };
   }
 
   /**
@@ -1552,7 +1768,7 @@ export class EvaluationRecords {
       '这一版评估在重写之后又保存过：重写的评语依据的是之前的分数，不能采用；可以放弃它，再按现在的评分重写。');
     const { sha256: _digest, ...profile } = version.profile;
     const next = contentWithRewrite(version.content, words);
-    const checked = evaluationContent(next, profile, false, EvaluationRecords.#initialScores(version.initial));
+    const checked = evaluationContent(next, profile, false, EvaluationRecords.#initialScores(this.#initialDraft(record)));
     // The rewrite is words only: a number that moved is a fault here, never the model's to make.
     requireEvaluation(checked.items.every((item, index) => item.score === version.content.items[index]!.score &&
       item.notRated === version.content.items[index]!.notRated), 'EVALUATION_REWRITE_INVALID', '重写不能改动分数。');
@@ -1606,19 +1822,17 @@ export class EvaluationRecords {
     requireEvaluation(before === null || (Number.isSafeInteger(before) && before > 1), 'EVALUATION_PAGE_INVALID', '评估版本页码无效。');
     const summaries: EvaluationRecordSummaryProjection[] = [];
     let count = 0;
-    let open: ({ record: StoredRecord } & Chain) | undefined;
-    let shown: typeof open;
-    let shownPrevious: typeof open;
-    let prior: typeof open;
+    let shown: ({ record: StoredRecord } & Chain) | undefined;
+    /** Every version that reads, by identity: the one a version follows is found here for its comparison (EVAL-012). */
+    const readable = new Map<string, { record: StoredRecord } & Chain>();
     const reading = newReading();
     // A version that cannot be read is named, not shown, and the versions after it still read (Issue #702 review). The one asked
-    // for, when it cannot be read, gives way to the latest that can; and a latest that cannot be read refuses only 重新评估,
-    // the one operation that needs it (Issue #708).
+    // for, when it cannot be read, gives way to the latest that can. A latest that cannot be read refuses 重新评估 as it was
+    // (Issue #708) and offers instead to skip it (Issue #726): the next version seeds from the latest 定稿 that reads.
     const unreadableRecords: number[] = [];
     let lastDamage: number | null = null;
     let askedUnreadable = false;
-    let newest: typeof open;
-    let newestPrevious: typeof open;
+    let newest: typeof shown;
     let basisFound: { record: StoredRecord; chain: Chain } | null = null;
     let basisDamage: EvaluationError | null = null;
     let oldestReadable: number | null = null;
@@ -1632,44 +1846,36 @@ export class EvaluationRecords {
         unreadableRecords.push(read.ordinal);
         lastDamage = read.ordinal;
         basisDamage = read.error;
-        prior = undefined;
         continue;
       }
       lastDamage = null;
       oldestReadable ??= read.ordinal;
       const { record } = read.version;
       const chain = { record, ...read.version.chain };
+      readable.set(record.recordId, chain);
       if (chain.latest.kind === 'finalized') {
         basisFound = read.version;
         basisDamage = null;
       }
-      if (record.recordId === recordId) {
-        shown = chain;
-        shownPrevious = prior;
-      }
+      if (record.recordId === recordId) shown = chain;
       newest = chain;
-      newestPrevious = prior;
-      open = chain;
-      prior = chain;
       if (before === null || record.ordinal < before) {
         summaries.push(this.#summary(record, chain.latest, begunFromInitial.has(record.recordId)));
         if (summaries.length > 10) summaries.shift();
       }
     }
     requireEvaluation(recordId === null || shown !== undefined || askedUnreadable, 'EVALUATION_NOT_FOUND', '没有这个评估版本。');
-    if (recordId === null || askedUnreadable) {
-      shown = newest;
-      shownPrevious = newestPrevious;
-    }
+    if (recordId === null || askedUnreadable) shown = newest;
     let record: EvaluationRecordProjection | null = null;
     let rewritable: RewritableEvaluation | null = null;
     if (shown !== undefined) {
       const last = shown.latest;
-      // The version before, as the walk read it; one that could not be read leaves no comparison.
-      const previous = shown.record.previousRecordId !== null && shownPrevious?.record.recordId === shown.record.previousRecordId ? shownPrevious : undefined;
-      const initial = this.#initialDraft(shown.record);
+      // The version this one follows, as the walk read it — the one just before, or the 定稿 it was seeded from across versions
+      // it skipped (Issue #726); one that could not be read leaves no comparison.
+      const previous = shown.record.previousRecordId === null ? undefined : readable.get(shown.record.previousRecordId);
+      const snapshot = this.#initialDraft(shown.record);
       record = {
-        ...this.#summary(shown.record, last, initial !== null),
+        ...this.#summary(shown.record, last, snapshot !== null),
         revisionId: shown.record.revisionId,
         uncheckpointed: shown.record.uncheckpointed,
         profile: shown.record.profile,
@@ -1679,24 +1885,26 @@ export class EvaluationRecords {
         finalized: last.kind === 'finalized' ? { actor: EVALUATION_ACTOR, at: last.recordedAt } : null,
         recommendationBlocked: recommendationBlocked(last.content.risks),
         comparison: this.#comparison(previous, { record: shown.record, content: last.content }),
-        initial: initial === null ? null : initialDraftProjection(initial),
+        initial: snapshot === null ? null : initialDraftProjection(snapshot.draft),
+        calibration: snapshot?.calibration ?? null,
         ai7WordsNotice: shown.notice,
+        skippedRecords: shown.record.skipped.map((entry) => entry.ordinal),
+        seededFrom: shown.record.previousOrdinal,
       };
-      rewritable = this.#rewritableOf(shown.record, shown, initial);
+      rewritable = this.#rewritableOf(shown.record, shown, snapshot?.draft ?? null);
     }
     const manuscript = this.#manuscripts.current(bookId);
     const profile = this.profile();
     const startable = manuscript === null ? null : this.#startableInitial(bookId, profile.sha256, manuscript.revisionId);
+    const fromInitial = startable !== null && 'facts' in startable ? { revisionId: startable.facts.draft.revisionId, ordinal: startable.facts.draft.ordinal } : null;
     const start: EvaluationWorkspaceProjection['start'] = manuscript === null
       ? { allowed: false, reason: '这本书还没有稿件，没有可以评估的内容。' }
-      : lastDamage !== null ? { allowed: false, reason: evaluationDamagedLatestReason(lastDamage) }
-      : open !== undefined && open.latest.kind !== 'finalized'
-        ? { allowed: false, reason: `第 ${open.record.ordinal} 版还没有定稿；定稿后才能重新评估。` }
-        : {
-            allowed: true,
-            kind: open === undefined ? 'first' : 'again',
-            fromInitial: startable !== null && 'facts' in startable ? { revisionId: startable.facts.draft.revisionId, ordinal: startable.facts.draft.ordinal } : null,
-          };
+      : newest !== undefined && newest.latest.kind !== 'finalized'
+        ? { allowed: false, reason: `第 ${newest.record.ordinal} 版还没有定稿；定稿后才能重新评估。` }
+      : lastDamage !== null
+        // The latest cannot be read: the next version may skip it and every version after the latest 定稿 that reads.
+        ? { allowed: true, kind: 'again', fromInitial, skipDamaged: { skipped: unreadableRecords.filter((ordinal) => newest === undefined || ordinal > newest.record.ordinal), seedOrdinal: newest?.record.ordinal ?? null } }
+        : { allowed: true, kind: newest === undefined ? 'first' : 'again', fromInitial, skipDamaged: null };
     const latestInitial = this.#initial.latest(bookId);
     const initialTask = this.#initial.task(bookId);
     // A 定稿 version that cannot be read takes 审稿意见 with it, and only it: 评估 still opens and says so there.

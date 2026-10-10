@@ -434,11 +434,12 @@ describe('AI7\'s words in an evaluation entry, item by item (Issue #689)', () =>
     db.prepare("UPDATE evaluation_record_entries SET sha256 = ? WHERE record_id = ? AND kind = 'finalized'").run('1'.repeat(64), v3);
     db.exec(EVALUATION_RECORD_TRIGGER_SQL.evaluation_record_entries_no_update!);
     expect(refused(() => records.latestFinalized(bookId))).toBe('EVALUATION_RECORD_INVALID');
-    // The latest that cannot be read (Issue #708): 评估 shows the readable versions, the latest of them on show, and refuses
-    // 重新评估 alone, saying why; the readable versions' own operations go on.
+    // The latest that cannot be read (Issue #708): 评估 shows the readable versions, the latest of them on show, and offers to
+    // skip it — 从第 2 版重新评估 (Issue #726) — while a start that does not say so is still refused, saying why; the readable
+    // versions' own operations go on.
     for (const asked of [null, v3]) {
       const damaged = records.workspace(bookId, '书', asked);
-      expect(damaged).toMatchObject({ unreadableRecords: [1, 3], record: { recordId: v2 }, start: { allowed: false, reason: evaluationDamagedLatestReason(3) } });
+      expect(damaged).toMatchObject({ unreadableRecords: [1, 3], record: { recordId: v2 }, start: { allowed: true, kind: 'again', skipDamaged: { skipped: [3], seedOrdinal: 2 } } });
       expect(damaged.records.map((summary) => summary.ordinal)).toEqual([2]);
     }
     expect(evaluationDamagedLatestReason(3)).toBe('第 3 版评估记录已损坏，不能重新评估。');
@@ -452,10 +453,85 @@ describe('AI7\'s words in an evaluation entry, item by item (Issue #689)', () =>
     expect(refused(() => latest(v2))).toBe('none');
     expect(records.finalizedOf(bookId, v2)).not.toBeNull();
     expect(refused(() => latest(v3))).toBe('EVALUATION_RECORD_INVALID');
-    // A latest whose record row itself cannot be read is named the same way.
+    // A latest whose record row itself cannot be read is named, and offered to be skipped, the same way.
     db.exec('DROP TRIGGER evaluation_records_no_update');
     db.prepare('UPDATE evaluation_records SET sha256 = ? WHERE record_id = ?').run('2'.repeat(64), v3);
-    expect(records.workspace(bookId, '书', null)).toMatchObject({ unreadableRecords: [1, 3], record: { recordId: v2 }, start: { allowed: false, reason: evaluationDamagedLatestReason(3) } });
+    expect(records.workspace(bookId, '书', null)).toMatchObject({ unreadableRecords: [1, 3], record: { recordId: v2 }, start: { allowed: true, skipDamaged: { skipped: [3], seedOrdinal: 2 } } });
+  });
+
+  it('begins again from the latest 定稿 that reads when the latest version cannot be, recording the skipped versions as a gap (Issue #726)', () => {
+    // v1 定稿 with a 采用 whose words stand; v2 定稿 carrying them; v3 begun and damaged while being scored.
+    const v1 = records.start(bookId);
+    save(v1, () => own());
+    adopt(v1, [{ itemId: ITEMS[0]!, comment: 'AI7 的评语一。' }], null, A);
+    save(v1, (content) => ({ ...content, conclusion: 'revise' }), true);
+    const v2 = records.start(bookId);
+    save(v2, (content) => ({ ...content, conclusion: 'defer' }), true);
+    const v3 = records.start(bookId);
+    save(v3, (content) => withComment(content, 1, '第三版的评语。'));
+    // A 采用 on v3 of rewrite B over the second item, before v3 is damaged whole.
+    adopt(v3, [{ itemId: ITEMS[1]!, comment: 'R2 的评语二。' }], null, B);
+    damage(v3, 1);
+    // Without saying so, the start is refused as before; saying so while the latest reads is refused too (nothing to skip).
+    expect(refused(() => records.start(bookId))).toBe('EVALUATION_RECORD_INVALID');
+    // Saying so: v4 is seeded from v2's 定稿, follows v2, names v3 as skipped, and compares with v2.
+    const v4 = records.start(bookId, false, true);
+    const page = records.workspace(bookId, '书', null);
+    expect(page).toMatchObject({ unreadableRecords: [3], record: { recordId: v4, ordinal: 4, skippedRecords: [3], seededFrom: 2, comparison: { previousOrdinal: 2 }, ai7WordsNotice: null } });
+    expect(page.records.map((summary) => summary.ordinal)).toEqual([4, 2, 1]);
+    expect(page.record!.content.items.map((item) => item.score)).toEqual(own().items.map((item) => item.score));
+    expect(page.record!.content.conclusion).toBeNull();
+    // v2's mark over A's words, which still stand, is carried into v4 and checked against v2's chain: nothing is unchecked.
+    expect(records.ai7Words(bookId, v4)).toEqual({ items: [mark(ITEMS[0]!, A, 'AI7 的评语一。')], verdict: null });
+    expect(marks(v4).at(-1)).toEqual({ items: [mark(ITEMS[0]!, A, 'AI7 的评语一。')], verdict: null });
+    // The skipped v3 is a gap, not a predecessor whose marks are held: B's words pasted back into v4 carry no mark from v2's chain,
+    // and a recorded mark naming B is admitted only through B's acceptance on this Book over those very words (Issue #708's
+    // rule after a version that cannot be read) — checked, so nothing is named — never because v3 held it.
+    save(v4, (content) => withComment(content, 1, 'R2 的评语二。'));
+    expect(marks(v4).at(-1)).toEqual({ items: [mark(ITEMS[0]!, A, 'AI7 的评语一。')], verdict: null });
+    forge(v4, 2, (entry) => ({ ...entry, rewrittenFrom: { items: [mark(ITEMS[0]!, A, 'AI7 的评语一。'), mark(ITEMS[1]!, B, 'R2 的评语二。')], verdict: null } }));
+    expect(refused(() => latest(v4))).toBe('none');
+    expect(records.ai7Words(bookId, v4)).toEqual({ items: [mark(ITEMS[0]!, A, 'AI7 的评语一。'), mark(ITEMS[1]!, B, 'R2 的评语二。')], verdict: null });
+    expect(records.workspace(bookId, '书', v4).record!.ai7WordsNotice).toBeNull();
+    // A mark naming a rewrite nobody accepted is refused as ever.
+    forge(v4, 2, (entry) => ({ ...entry, rewrittenFrom: { items: [mark(ITEMS[0]!, A, 'AI7 的评语一。'), mark(ITEMS[1]!, C, 'R2 的评语二。')], verdict: null } }));
+    expect(refused(() => latest(v4))).toBe('EVALUATION_RECORD_INVALID');
+    forge(v4, 2, (entry) => ({ ...entry, rewrittenFrom: { items: [mark(ITEMS[0]!, A, 'AI7 的评语一。'), mark(ITEMS[1]!, B, 'R2 的评语二。')], verdict: null } }));
+    // The gap: nothing of v3's is held by v4, and a later version of the Book goes on as any other. While v4 reads, a start
+    // that says it skips is refused before anything else — there is nothing to skip.
+    expect(refused(() => records.start(bookId, false, true))).toBe('EVALUATION_MOVED');
+    expect(refused(() => records.start(bookId))).toBe('EVALUATION_OPEN');
+    save(v4, (content) => ({ ...content, conclusion: 'revise' }), true);
+    expect(records.latestFinalized(bookId)?.recordId).toBe(v4);
+    const v5 = records.start(bookId);
+    expect(records.workspace(bookId, '书', v5).record).toMatchObject({ ordinal: 5, skippedRecords: [], seededFrom: 4, comparison: { previousOrdinal: 4 } });
+    // A start that says it skips while the latest reads after all is refused with why, and skips nothing.
+    save(v5, (content) => ({ ...content, conclusion: 'revise' }), true);
+    let moved = '';
+    try {
+      records.start(bookId, false, true);
+    } catch (error) {
+      moved = error instanceof EvaluationError ? `${error.code}:${error.message}` : 'other';
+    }
+    expect(moved).toBe('EVALUATION_MOVED:第 5 版评估记录现在可以读取，没有要跳过的版本；请看过现在的页面再重新评估。');
+    expect(records.workspace(bookId, '书', null).recordCount).toBe(5);
+  });
+
+  it('begins from nothing when no version reads, recording every version as skipped (Issue #726)', () => {
+    const v1 = records.start(bookId);
+    save(v1, () => own());
+    save(v1, (content) => ({ ...content, conclusion: 'revise' }), true);
+    const v2 = records.start(bookId);
+    damage(v1, 1);
+    damage(v2, 1);
+    const before = records.workspace(bookId, '书', null);
+    expect(before).toMatchObject({ unreadableRecords: [1, 2], record: null, start: { allowed: true, kind: 'again', skipDamaged: { skipped: [1, 2], seedOrdinal: null } } });
+    const v3 = records.start(bookId, false, true);
+    const page = records.workspace(bookId, '书', null);
+    expect(page).toMatchObject({ unreadableRecords: [1, 2], record: { recordId: v3, ordinal: 3, skippedRecords: [1, 2], seededFrom: null, comparison: null, initial: null } });
+    expect(page.record!.content).toEqual(emptyEvaluationContent(BUILTIN_EVALUATION_PROFILE));
+    expect(page.records.map((summary) => summary.ordinal)).toEqual([3]);
+    expect(page.recordsNext).toBeNull();
   });
 
   it('keeps a version readable when it pastes back words of a version that cannot be read, however far back (Issue #702 re-review)', () => {
@@ -707,6 +783,6 @@ describe('AI7\'s words in an evaluation entry, item by item (Issue #689)', () =>
     db.exec('DROP TRIGGER evaluation_record_entries_no_update');
     db.prepare("UPDATE evaluation_record_entries SET sha256 = ? WHERE record_id = ? AND ordinal = 1").run('0'.repeat(64), recordId);
     db.exec(EVALUATION_RECORD_TRIGGER_SQL.evaluation_record_entries_no_update!);
-    expect(records.adjustedBooks()).toEqual({ books: 0, unreadable: 1 });
+    expect(records.calibration()).toEqual({ adjustments: 0, unreadable: 1, basisBooks: 0, booksWithoutBasis: 0, offsets: null });
   });
 });

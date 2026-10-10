@@ -7,6 +7,7 @@ import {
   PROVIDER_CACHE_ROOT_ARGUMENT,
   RUN_BUDGET_CEILING_ARGUMENT,
   BACKGROUND_QUIET_ARGUMENT,
+  CALIBRATION_MIN_BOOKS_ARGUMENT,
   TRUSTED_SCOPE_ARGUMENT,
   type J01ImportControl,
   type J03ForegroundExecutionControl,
@@ -159,7 +160,7 @@ function serviceEnvironment(
 
 function readinessIsExact(value: ServiceReadiness): boolean {
   return (
-    value.protocolVersion === 112 &&
+    value.protocolVersion === 113 &&
     value.state === 'ready' &&
     value.runtime.electron === '43.4.1' &&
     value.runtime.node === '24.18.1' &&
@@ -223,6 +224,8 @@ export class ServiceClient {
     onStartupStep?: (step: ServiceStartupStep) => void,
     /** J-09 only (Issue #95, S39): the 后台分析登记 quiet period, in milliseconds, so the Journey waits on progress, not a clock. */
     backgroundQuietMs?: number,
+    /** J-11 only (Issue #429, EVAL-011a): the calibration gate in Books, so the Journey proves the house offset with two Books. */
+    calibrationMinBooks?: number,
   ): Promise<ServiceClient> {
     if (!isAbsolute(executable) || !isAbsolute(serviceEntry) || !isAbsolute(dataRoot)) {
       throw new ServiceCallError('SERVICE_LAUNCH_INVALID', '本地业务服务启动参数无效。');
@@ -246,6 +249,8 @@ export class ServiceClient {
     if (answerHoldPath !== undefined) args.push('--j16-answer-hold-path', answerHoldPath);
     // J-09's 后台分析登记 pace (Issue #95, S39): a shorter quiet period beside the adapter.
     if (backgroundQuietMs !== undefined) args.push(BACKGROUND_QUIET_ARGUMENT, String(backgroundQuietMs));
+    // J-11's calibration gate (Issue #429, EVAL-011a): the Books the house offset waits on, beside the adapter.
+    if (calibrationMinBooks !== undefined) args.push(CALIBRATION_MIN_BOOKS_ARGUMENT, String(calibrationMinBooks));
     const child = spawn(
       executable,
       args,
