@@ -49,6 +49,12 @@ import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState
 // Run stops there — 模型服务账户限额, never 任务已中断 · 可续行 — keeping three ranges and holding nothing, with 处理模型服务
 // and 续行, and 待我处理 holds it as an exception. 处理模型服务 opens 设置 › 模型服务 and moves nothing; 续行 then goes on
 // in the same Run and attempt from unit 4, whose second turn the fixture serves, to its end.
+//
+// On the seventh Book, launched over the outcome-unknown fixture (Issue #51, S16c), unit 4's request is sent and its answer
+// never comes back whole. AI7 never sends it again on its own: the Run reads the other seven ranges and stops — 结果待确认,
+// never 任务已中断 · 可续行 — keeping them and holding nothing, with 查看未确认的部分 first and 续行 that says it sends again and
+// may be billed, and 待我处理 holds it in 异常与结果待确认. 查看未确认的部分 names unit 4 and sends nothing; 续行 then reads
+// unit 4 alone, its second turn, in the same Run and attempt, to its end.
 // 重试, 回退运行方向 and 重放 are J-10's later operations, not these slices'.
 //
 // The runner writes J-10's unit-hold file, and reads the service's projections through `window.ai7` only to
@@ -77,6 +83,11 @@ const SIXTH_BOOK = Object.freeze({ title: '账户限额旅程' });
 /** The sixth Book's launch (Issue #51, S16b): unit 4's first turn is refused on the account's limit, its second is served. */
 const ACCOUNT_LIMIT_FIXTURE_IDENTITY = 'sample1-baseline-account-limit';
 const ACCOUNT_LIMIT_NOTE = '模型服务按账户限额拒绝了第 4 个阅读范围。已读完 3 / 8 个阅读范围，结果都已保存；处理好模型服务、限额解除后点「续行」从第 4 个接着读';
+const SEVENTH_BOOK = Object.freeze({ title: '结果待确认旅程' });
+/** The seventh Book's launch (Issue #51, S16c): unit 4's first request is sent and its answer never comes back whole. */
+const OUTCOME_UNKNOWN_FIXTURE_IDENTITY = 'sample1-baseline-outcome-unknown';
+const OUTCOME_UNKNOWN_NOTE = '1 个阅读范围的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；AI7 没有自动再发。' +
+  '已读完 7 / 8 个阅读范围，结果都已保存。点「续行」只重读这 1 个，会再发一次请求，可能再次计费；取消任务会保留已读完的部分';
 /** The fourth Book's launch: unit 2 fails for good, and unit 5's first attempt fails retry-safe (Issue #422, S76d). */
 const TRANSIENT_FIXTURE_IDENTITY = 'sample1-baseline-transient-retry';
 /** Five ranges may settle before the fourth Book's Run is held: 1 to 4 do, 5 asks, 6 settles, and 7 is in flight. */
@@ -1492,6 +1503,75 @@ async function main() {
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='settled'`, 'account-limit-shown-settled', 30_000);
     const clearedAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
     requireJourney(clearedAttention?.groups?.every((group) => group.items.every((entry) => entry.state !== 'analysis-account-limit')) === true, 'account-limit-left-attention', clearedAttention?.groups ?? null);
+
+    // ---- 结果待确认 (Issue #51, S16c; CTRL-007, COPY-009, CONT-016) ---------------------------------------------------------
+    at('relaunch-for-outcome-unknown');
+    // A launch over the outcome-unknown fixture, which only J-10 may bind: unit 4's first request is sent and its answer
+    // never comes back whole, and its next turn is the happy fixture's result.
+    await closeOwnedBrowser();
+    cancellation.throwIfRequested();
+    adapterFixture = OUTCOME_UNKNOWN_FIXTURE_IDENTITY;
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'outcome-unknown-ready');
+
+    at('seventh-book-import');
+    const seventhBookId = await importSample1(renderer, SEVENTH_BOOK.title, true, 'seventh-import');
+    requireJourney(![bookId, secondBookId, thirdBookId, fourthBookId, fifthBookId, sixthBookId].includes(seventhBookId), 'seven-books');
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'seventh-artifact-enable-ready');
+    await click(renderer, '审阅并为本图书启用 Revision 2', 'seventh-artifact-enable');
+    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'seventh-artifact-enabled');
+    await click(renderer, '返回图书列表', 'seventh-return-library');
+
+    at('outcome-unknown-stop');
+    // 开始任务: unit 4's request is sent and its answer never comes back whole. It is never sent again on its own; the Run reads
+    // the other seven ranges and stops — 结果待确认 in its own words, never 任务已中断 · 可续行's — keeping them and holding
+    // nothing: 查看未确认的部分 first, then 续行, 取消任务, 改计划重做 and 查看运行; ②A's card says the same, and 待我处理 holds it in
+    // 异常与结果待确认 whose next step is 查看未确认的部分.
+    await openAnalysisOf(renderer, seventhBookId, 'seventh-analysis');
+    await startFirstBaseline(renderer, 'ready', 'seventh-baseline');
+    const seventhIntentId = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanRef ?? ''`);
+    requireJourney(UUID_PATTERN.test(seventhIntentId), 'seventh-task');
+    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.taskIntent?.taskIntentId===${JSON.stringify(seventhIntentId)} && analysis.run?.state==='resumable')`, 'outcome-unknown-stopped', 180_000);
+    await waitForBar(renderer, {
+      state: 'outcome-unknown', pill: '结果待确认', status: '结果待确认', note: OUTCOME_UNKNOWN_NOTE,
+      actions: [['view-unconfirmed', '查看未确认的部分', 'enabled', null], ['resume', '续行', 'enabled', null], ['cancel-run', '取消任务', 'enabled', null], ['redo', '改计划重做', 'enabled', null], ['run-link', '查看运行', 'enabled', null]],
+    }, 'outcome-unknown-bar', 30_000);
+    const unconfirmed = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(unconfirmed?.state === 'resumable' && unconfirmed.stateLabel === '结果待确认' && unconfirmed.run?.stateLabel === '结果待确认' &&
+      JSON.stringify(unconfirmed.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'resumable']) &&
+      JSON.stringify(unconfirmed.run.attempt?.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([1, 2, 3, 4, 5, 6, 7, 8]) &&
+      (unconfirmed.taskOutcome ?? null) === null && (unconfirmed.resultSetRevision ?? null) === null,
+    'outcome-unknown-record', { state: unconfirmed?.state, label: unconfirmed?.stateLabel, transitions: unconfirmed?.run?.transitions?.map((transition) => transition.state), spans: unconfirmed?.run?.attempt?.spans?.map((span) => span.unitOrdinal) });
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='resumable' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='结果待确认'`, 'outcome-unknown-card', 30_000);
+    const unknownAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
+    requireJourney(unknownAttention?.groups?.find((group) => group.key === 'exceptions')?.items?.some((entry) =>
+      entry.book?.bookId === seventhBookId && entry.state === 'analysis-outcome-unknown' && entry.nextStep === 'view-unconfirmed' && entry.blocked === true) === true,
+    'outcome-unknown-in-attention', unknownAttention?.groups ?? null);
+
+    at('outcome-unknown-view');
+    // 查看未确认的部分 opens the list beside the bar, focused on its heading: unit 4, sent once, its answer not back whole. It sends
+    // and records nothing.
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="view-unconfirmed"]', 'outcome-unknown-view');
+    await waitFor(renderer, `(() => { const items=[...document.querySelectorAll('#task-drawer-unconfirmed li')]; return document.querySelector('#task-drawer-unconfirmed h4')?.textContent==='结果待确认的阅读范围' && items.length===1 && items[0].dataset.unconfirmedUnit==='4' && items[0].textContent==='第 4 个阅读范围 · 请求已发出 1 次 · 回答没有完整传回' && document.activeElement?.dataset?.taskDrawerControl==='unconfirmed' && document.querySelector('#task-drawer [data-task-drawer-control="view-unconfirmed"]')?.getAttribute('aria-expanded')==='true'; })()`, 'outcome-unknown-list', 30_000);
+    const whileViewing = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(whileViewing?.run?.state === 'resumable' && JSON.stringify(whileViewing.run.transitions) === JSON.stringify(unconfirmed.run.transitions) &&
+      JSON.stringify(whileViewing.run.attempt?.spans) === JSON.stringify(unconfirmed.run.attempt?.spans), 'outcome-unknown-unmoved');
+
+    at('outcome-unknown-resumed');
+    // 续行, the editor's own choice: the same Run and attempt read unit 4 alone — its second turn — and go on to the end; the
+    // seven kept ranges are not read again, and 待我处理 no longer holds the Book.
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="resume"]', 'outcome-unknown-resume');
+    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.taskIntent?.taskIntentId===${JSON.stringify(seventhIntentId)} && analysis.run !== null && !['resumable','admitted','executing'].includes(analysis.run.state))`, 'outcome-unknown-run-ended', 180_000);
+    const confirmedRun = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(confirmedRun?.state === 'settled' && confirmedRun.run?.state === 'completed' && confirmedRun.run.runRecordId === unconfirmed.run.runRecordId &&
+      JSON.stringify(confirmedRun.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'resumable', 'admitted', 'executing', 'completed']) &&
+      JSON.stringify(confirmedRun.run.attempt?.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([1, 2, 3, 4, 5, 6, 7, 8, 4]) &&
+      confirmedRun.run.attempt?.attemptId === unconfirmed.run.attempt?.attemptId &&
+      confirmedRun.resultSetRevision?.coverage?.unitsClosed === SAMPLE1_UNITS && confirmedRun.taskOutcome?.classification === 'completed',
+    'outcome-unknown-resumed-run', { state: confirmedRun?.state, run: confirmedRun?.run?.state, transitions: confirmedRun?.run?.transitions?.map((transition) => transition.state), spans: confirmedRun?.run?.attempt?.spans?.map((span) => span.unitOrdinal) });
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='settled'`, 'outcome-unknown-shown-settled', 30_000);
+    const confirmedAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
+    requireJourney(confirmedAttention?.groups?.every((group) => group.items.every((entry) => entry.state !== 'analysis-outcome-unknown')) === true, 'outcome-unknown-left-attention', confirmedAttention?.groups ?? null);
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');
