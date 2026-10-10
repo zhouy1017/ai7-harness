@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, resolve } from 'node:path';
+import { dirname, posix, resolve, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validatePolicyDocument } from './validate-policies.mjs';
 
@@ -39,6 +39,12 @@ export const SCHEMA_FILE = 'provider-configuration.v1.schema.json';
  * make a model readable by naming an item nobody sent, or by borrowing one sent to another row. The record and its
  * schema live in their own subdirectory because everything that reads `config/providers/*.json` (J-12 among them)
  * reads a provider document, and the record is not one.
+ *
+ * A ledger line is history and is never withdrawn, but a model row can leave the documents. The item then stays in the
+ * record, marked `withdrawn` with the Issue that took the row out (Issue #743), so `--ledger` keeps mirroring the
+ * ledger for its whole life and the support page discloses the item as a row no longer declared. The marker is
+ * explicit rather than inferred from the documents: an undeclared row without it is still refused, because in CI,
+ * where no ledger exists, that refusal is what catches a new item recorded under a mistyped route or model.
  */
 export const RECORDED_EVIDENCE_DIRECTORY = 'recorded-evidence';
 export const RECORDED_EVIDENCE_FILE = 'recorded-evidence.json';
@@ -191,7 +197,7 @@ function resolveRecordedEvidence({ schema, data }) {
   for (const item of data.liveTestItems) {
     refuse(!items.has(item.itemId), `PROVIDER_CONFIGURATION/recorded-evidence-duplicate: ${RECORDED_EVIDENCE_FILE} item ${item.itemId}`);
     refuse(isCalendarDay(item.observedOn), `PROVIDER_CONFIGURATION/evidence-day: ${RECORDED_EVIDENCE_FILE} item ${item.itemId} (${item.observedOn} is not a calendar day)`);
-    items.set(item.itemId, { route: item.route, model: item.model, observedOn: item.observedOn, issue: item.issue });
+    items.set(item.itemId, { route: item.route, model: item.model, observedOn: item.observedOn, issue: item.issue, withdrawn: item.withdrawn ?? null });
   }
   const baselines = new Map();
   for (const baseline of data.frozenRequestBaselines) {
@@ -433,13 +439,17 @@ export function resolveProviderConfiguration({ schema, documents, recordedEviden
     });
   }
   refuse(providers.length > 0, 'PROVIDER_CONFIGURATION/no-documents');
-  // Every recorded row is a declared row: the record names what the documents declare, never a model nobody configures.
+  // Every recorded row is a declared row, except a live item marked withdrawn: the record names what the documents
+  // declare, never a model nobody configures, and keeps a withdrawn row's items only because the ledger keeps them.
   const recordedRows = [
-    ...[...recorded.items.values()].map((item) => ({ route: item.route, model: item.model })),
+    ...[...recorded.items.values()].filter((item) => item.withdrawn === null).map((item) => ({ route: item.route, model: item.model })),
     ...[...recorded.baselines.values()].flatMap((baseline) => baseline.models.map((model) => ({ route: baseline.route, model }))),
   ];
   const unknownRows = recordedRows.map(rowText).filter((row) => !declaredRows.has(row));
-  refuse(unknownRows.length === 0, `PROVIDER_CONFIGURATION/recorded-evidence-row-unknown: ${RECORDED_EVIDENCE_FILE} names ${[...new Set(unknownRows)].join(', ')}, which no document declares`);
+  refuse(unknownRows.length === 0, `PROVIDER_CONFIGURATION/recorded-evidence-row-unknown: ${RECORDED_EVIDENCE_FILE} names ${[...new Set(unknownRows)].join(', ')}, which no document declares (an item whose row left the documents is marked withdrawn)`);
+  // And the converse: the marker says the row left the documents, so a row a document still declares carries none.
+  const withdrawnDeclared = [...recorded.items].filter(([, item]) => item.withdrawn !== null && declaredRows.has(rowText(item))).map(([itemId]) => itemId);
+  refuse(withdrawnDeclared.length === 0, `PROVIDER_CONFIGURATION/recorded-evidence-withdrawn-declared: ${RECORDED_EVIDENCE_FILE} marks ${withdrawnDeclared.join(', ')} withdrawn, but a document still declares its row`);
   return {
     providers,
     recordedEvidence: {
@@ -746,11 +756,12 @@ function renderSupport({ providers, recordedEvidence }) {
   lines.push('A credential slot is a logical slot of the Main Editorial Role, one per configured provider; the Credential Broker\'s closed set and `tools/enroll-dev-credential.mjs`\'s slot list are generated from the documents, so a slot cannot exist without a reviewed document. Enrolment, where a record authorizes it, is the one way ADR 0067 established for `opencode-go`: from an untracked key file the enrollment helper alone reads, into the Protected Secret Store under the slot\'s development Credential Reference. A Credential Reference names a store entry and is not a secret. See [ADR 0067](../adr/0067-authorize-the-opencode-go-development-credential-with-live-once-testing.md) for the live-once ledger and the Provider Result Cache.');
   lines.push('');
   lines.push('## Recorded evidence', '');
-  lines.push(`The evidence no page can supply — the live test items the ADR 0067 Provider Test Ledger holds and the production route's frozen request baseline — is recorded row by row in [\`config/providers/${RECORDED_EVIDENCE_DIRECTORY}/${RECORDED_EVIDENCE_FILE}\`](../../config/providers/${RECORDED_EVIDENCE_DIRECTORY}/${RECORDED_EVIDENCE_FILE}), validated by [\`${RECORDED_EVIDENCE_SCHEMA_FILE}\`](../../config/providers/${RECORDED_EVIDENCE_DIRECTORY}/${RECORDED_EVIDENCE_SCHEMA_FILE}) (its own subdirectory, because the record is not a provider document and everything that reads \`config/providers/*.json\` reads one). A document cites an item or a baseline only from the row it was observed on: a route for its route-wide facts only when every item was sent on that route, a model only when every item was sent to that model on that route. The ledger itself lives outside every checkout and CI has none, so the record is its reviewed mirror: the pull request that records a new live item adds it here and runs \`node tools/generate-provider-configuration.mjs --ledger <cache root>\` on the developer host, which compares the record with the ledger's transmitted, non-stale model-call lines by item, model and UTC day and prints every difference. CI never runs it.`);
+  lines.push(`The evidence no page can supply — the live test items the ADR 0067 Provider Test Ledger holds and the production route's frozen request baseline — is recorded row by row in [\`config/providers/${RECORDED_EVIDENCE_DIRECTORY}/${RECORDED_EVIDENCE_FILE}\`](../../config/providers/${RECORDED_EVIDENCE_DIRECTORY}/${RECORDED_EVIDENCE_FILE}), validated by [\`${RECORDED_EVIDENCE_SCHEMA_FILE}\`](../../config/providers/${RECORDED_EVIDENCE_DIRECTORY}/${RECORDED_EVIDENCE_SCHEMA_FILE}) (its own subdirectory, because the record is not a provider document and everything that reads \`config/providers/*.json\` reads one). A document cites an item or a baseline only from the row it was observed on: a route for its route-wide facts only when every item was sent on that route, a model only when every item was sent to that model on that route. The ledger itself lives outside every checkout and CI has none, so the record is its reviewed mirror: the pull request that records a new live item adds it here and runs \`node tools/generate-provider-configuration.mjs --ledger <cache root>\` on the developer host, which compares the record with the ledger's transmitted, non-stale model-call lines by item, model and UTC day and prints every difference. CI never runs it. A ledger line is never withdrawn, but a model row can leave the documents: its items then stay in the record marked \`withdrawn\` with the Issue that took the row out, are listed below as a row no longer declared, and keep \`--ledger\` comparing every transmitted line; an undeclared row without the marker is refused.`);
   lines.push('');
   lines.push('| Item | Route | Model | Observed | Stated on |', '| --- | --- | --- | --- | --- |');
   for (const item of recordedEvidence.liveTestItems) {
-    lines.push(`| \`${item.itemId}\` | \`${item.route}\` | \`${item.model}\` | ${item.observedOn} | ${item.issue} |`);
+    const model = item.withdrawn === null ? `\`${item.model}\`` : `\`${item.model}\` (row no longer declared, withdrawn on ${item.withdrawn})`;
+    lines.push(`| \`${item.itemId}\` | \`${item.route}\` | ${model} | ${item.observedOn} | ${item.issue} |`);
   }
   lines.push('');
   lines.push('| Baseline | Route | Models | Stated on |', '| --- | --- | --- | --- |');
@@ -794,11 +805,22 @@ export function generateProviderConfiguration({ root = ROOT, check = false } = {
 }
 
 /**
+ * The cache root `--ledger` reads, as the platform roots it: an absolute path, and on Windows one that names its drive
+ * (Issue #743). `isAbsolute('/cache')` holds on Windows, where the path then resolves against whatever drive is
+ * current; a drive-relative root is refused rather than read from wherever that happens to be.
+ */
+export function isLedgerRoot(cacheRoot, platform = process.platform) {
+  if (typeof cacheRoot !== 'string' || cacheRoot.length === 0) return false;
+  if (platform !== 'win32') return posix.isAbsolute(cacheRoot);
+  return win32.isAbsolute(cacheRoot) && /^[A-Za-z]:[\\/]$/u.test(win32.parse(cacheRoot).root);
+}
+
+/**
  * `--ledger <cache root>`: read the Provider Test Ledger through the ADR 0067 fixture tooling's own reader and compare
  * it with the record. A developer-host step for the pull request that records a live item; never a `check` rung.
  */
 async function compareWithLedgerAt(cacheRoot) {
-  refuse(typeof cacheRoot === 'string' && cacheRoot.length > 0 && isAbsolute(cacheRoot), 'PROVIDER_CONFIGURATION/ledger-root (--ledger names the cache root as an absolute path)');
+  refuse(isLedgerRoot(cacheRoot), 'PROVIDER_CONFIGURATION/ledger-root (--ledger names the cache root as an absolute path, drive letter included on Windows)');
   const { readLedgerLines } = await import('./generate-model-fixture.mjs');
   const { recordedEvidence } = readProviderDocuments();
   const differences = compareRecordedEvidenceWithLedger(recordedEvidence, await readLedgerLines(cacheRoot));
