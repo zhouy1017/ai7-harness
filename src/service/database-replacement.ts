@@ -620,7 +620,7 @@ export async function openWithPendingReplacement<T>(
     phase = 'restored';
     await writePhase(staging, phase);
   }
-  const failure = await refusalOf(staging) ?? 'unopenable';
+  const failure = await refusalOf(staging, false) ?? 'unopenable';
   return { store: await openStore(), replacement: intent === null ? null : { intent, outcome: 'failed', failure } };
 }
 
@@ -673,6 +673,10 @@ async function applyPendingMerge<T>(
         await writeAtomic(join(staging, REFUSAL_NOTE), JSON.stringify('changed'));
       } else if (error instanceof DatabaseMergeError && MERGE_CONFLICTS.has(error.code)) {
         await writeAtomic(join(staging, REFUSAL_NOTE), JSON.stringify('conflict'));
+      } else {
+        // Anything else stopped the merge itself — a file it takes, or a write into the store — before any of it committed:
+        // the data was never left unable to open, and the record says so (Issue #644).
+        await writeAtomic(join(staging, REFUSAL_NOTE), JSON.stringify('unmergeable'));
       }
       phase = 'restoring-store';
     }
@@ -699,7 +703,7 @@ async function applyPendingMerge<T>(
     phase = 'store-restored';
     await writePhase(staging, phase);
   }
-  const failure = await refusalOf(staging) ?? 'unopenable';
+  const failure = await refusalOf(staging, true) ?? 'unopenable';
   return { store: await openStore(), replacement: { intent, outcome: 'failed', failure } };
 }
 
@@ -711,19 +715,23 @@ const PACKAGE_STORE_JOURNALS: ReadonlySet<string> = new Set(STORE_JOURNALS.map((
 
 /**
  * Written when a resumed apply put the data back because what waited had changed, or because an open of the data it moved in
- * was interrupted: the replacement is then recorded as failed for that reason.
+ * was interrupted, or when a merge was refused over what this data holds now or could not finish its Books: the replacement or
+ * the merge is then recorded as failed for that reason.
  */
 const REFUSAL_NOTE = 'refused.json';
 
-/** Why a resumed apply put the data back, as its note says; `null` when none was written, or what is there is not one. */
-async function refusalOf(staging: string): Promise<'changed' | 'interrupted' | 'conflict' | null> {
+/**
+ * Why a resumed apply put the data back, as its note says; `null` when none was written, or what is there is not one. A merge's
+ * own failure (`unmergeable`) is a note only a merge writes: one beside a replacement is not AI7's (Issue #644).
+ */
+async function refusalOf(staging: string, merge: boolean): Promise<Exclude<DatabaseReplacementFailure, 'unopenable'> | null> {
   try {
     // Read only within its bound (Issue #434 review). A note there that is not AI7's — not a file, larger than any AI7 writes,
     // or saying something else — still tells a refusal from data that would not open: what waited had changed.
     const text = await readSmallFile(join(staging, REFUSAL_NOTE), MAX_REFUSAL_NOTE_BYTES);
     if (text === null) return null;
     const noted: unknown = JSON.parse(text);
-    return noted === 'changed' || noted === 'interrupted' || noted === 'conflict' ? noted : 'changed';
+    return noted === 'changed' || noted === 'interrupted' || noted === 'conflict' || (merge && noted === 'unmergeable') ? noted : 'changed';
   } catch {
     return 'changed';
   }
@@ -1135,7 +1143,7 @@ export class DatabaseReplacements {
       requireReplacement(sha256Hex(canonical) === text(row.sha256), 'DATABASE_REPLACEMENT_RECORD_INVALID', INVALID);
       const record = parseCanonicalJson(canonical);
       requireReplacement(isRecord(record), 'DATABASE_REPLACEMENT_RECORD_INVALID', INVALID);
-      const failure = failureOf(record, outcome);
+      const failure = failureOf(record, outcome, true);
       requireReplacement(canonicalJson(record) === canonicalJson({ schema: MERGE_RECORD_SCHEMA, ...stored, ...(failure === undefined ? {} : { failure }) }),
         'DATABASE_REPLACEMENT_RECORD_INVALID', INVALID);
       yield {
@@ -1274,18 +1282,21 @@ export class DatabaseReplacements {
     requireReplacement(sha256Hex(canonical) === text(row.sha256), 'DATABASE_REPLACEMENT_RECORD_INVALID', INVALID);
     const record = parseCanonicalJson(canonical);
     requireReplacement(isRecord(record), 'DATABASE_REPLACEMENT_RECORD_INVALID', INVALID);
-    const failure = failureOf(record, outcome);
+    const failure = failureOf(record, outcome, false);
     requireReplacement(canonicalJson(record) === canonicalJson({ schema: RECORD_SCHEMA, ...stored, ...(failure === undefined ? {} : { failure }) }),
       'DATABASE_REPLACEMENT_RECORD_INVALID', INVALID);
     return { ...stored, mergeBooks: null, mergeNotices: [], ...(failure === undefined ? {} : { failure }) };
   }
 }
 
-/** Why a stored replacement or merge failed, as its record names it: only on one that failed, and only a reason AI7 gives. */
-function failureOf(record: Record<string, unknown>, outcome: string): DatabaseReplacementFailure | undefined {
+/**
+ * Why a stored replacement or merge failed, as its record names it: only on one that failed, and only a reason AI7 gives —
+ * `unmergeable` only on a merge's (Issue #644).
+ */
+function failureOf(record: Record<string, unknown>, outcome: string, merge: boolean): DatabaseReplacementFailure | undefined {
   const failure = record.failure;
   requireReplacement(failure === undefined || (outcome === 'failed' && (failure === 'unopenable' || failure === 'changed' || failure === 'interrupted' ||
-    failure === 'conflict')),
+    failure === 'conflict' || (merge && failure === 'unmergeable'))),
     'DATABASE_REPLACEMENT_RECORD_INVALID', INVALID);
   return failure as DatabaseReplacementFailure | undefined;
 }

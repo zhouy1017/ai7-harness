@@ -196,12 +196,17 @@ describe('导入数据库\'s words', () => {
       databaseReplacementRecordLine({ ...merged, outcome: 'failed', failure: 'changed' }, instant),
       // One the rules refused at its apply, over what this data held then, says the records conflict (Issue #434 review).
       databaseReplacementRecordLine({ ...merged, outcome: 'failed', failure: 'conflict' }, instant),
+      // One that could not finish writing its Books says so, apart from merged data that would not open (Issue #644).
+      databaseReplacementRecordLine({ ...merged, outcome: 'failed', failure: 'unmergeable' }, instant),
+      databaseReplacementRecordLine({ ...merged, outcome: 'failed', failure: 'unopenable' }, instant),
     ]).toEqual([
       '〔09-25T02:05〕 · 已从「AI7 数据库.ai7db」合并 2 本图书：《山河故人》、《空白之书》 · 合并前备份「AI7 合并前备份 1.ai7db」',
       '〔09-25T02:05〕 · 未能从「AI7 数据库.ai7db」合并图书：本机数据保持原样 · 合并前备份「AI7 合并前备份 1.ai7db」（文件不在备份位置）',
       '〔09-25T02:05〕 · 已从「AI7 数据库.ai7db」合并 12 本图书：《山河故人》、《空白之书》 等 · 合并前备份「AI7 合并前备份 1.ai7db」',
       '〔09-25T02:05〕 · 未能从「AI7 数据库.ai7db」合并图书：准备好的文件已不完整或被改动，本机数据保持原样 · 合并前备份「AI7 合并前备份 1.ai7db」',
       '〔09-25T02:05〕 · 未能从「AI7 数据库.ai7db」合并图书：它的记录与本机现在的数据冲突，本机数据保持原样 · 合并前备份「AI7 合并前备份 1.ai7db」',
+      '〔09-25T02:05〕 · 未能从「AI7 数据库.ai7db」合并图书：写入图书时出错，本机数据保持原样 · 合并前备份「AI7 合并前备份 1.ai7db」',
+      '〔09-25T02:05〕 · 未能从「AI7 数据库.ai7db」合并图书：本机数据保持原样 · 合并前备份「AI7 合并前备份 1.ai7db」',
     ]);
     expect([databaseImportMoreBooksLine(50, 50), databaseImportMoreBooksLine(50, 73)]).toEqual([null, '…以及另外 23 本']);
     expect([DATABASE_IMPORT_STATUS_LINES.preparingMerge, DATABASE_IMPORT_STATUS_LINES.mergePrepared, DATABASE_IMPORT_STATUS_LINES.mergeFailed])

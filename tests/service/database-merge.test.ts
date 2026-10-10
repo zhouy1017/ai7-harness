@@ -564,6 +564,43 @@ describe('what a merge refuses, puts back and brings forward', () => {
     }
   }, 180_000);
 
+  it('records a merge that could not finish writing its Books as such, not as data that would not open (Issue #644)', async () => {
+    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let packagePath: string;
+    try {
+      await importBook(source, await compose(TITLE, [1, 2]));
+      packagePath = await exportedFrom(source, 'AI7 数据库.ai7db');
+    } finally {
+      source.close();
+    }
+    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      emptyBook(target, '本机之书');
+      await target.prepareDatabaseMerge((await target.inspectDatabaseImport(packagePath)).previewId, T);
+    } finally {
+      target.close();
+    }
+    // What waits is exactly what was verified, but this data holds a folder at the name of a file the merge takes: putting the
+    // file there fails, which is neither a conflict the rules name nor what waited having changed.
+    const key = withAttached(otherRoot, roots.dataRoot, (db) =>
+      (db.prepare('SELECT relative_key FROM src.content_objects LIMIT 1').get() as { relative_key: string }).relative_key);
+    const occupied = join(otherRoot, 'objects', ...key.split('/'));
+    await mkdir(occupied, { recursive: true });
+    await writeFile(join(occupied, 'not-a-content-object.txt'), 'here before');
+    target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      expect(titles(target)).toEqual(['本机之书']);
+      expect((await target.inspectDatabaseReplacements()).replacements[0]).toMatchObject({
+        kind: 'merge', outcome: 'failed', failure: 'unmergeable', mergedCount: 0, mergedTitles: [],
+      });
+      expect(existsSync(replacementStagingFor(otherRoot))).toBe(false);
+      expect(await readFile(join(occupied, 'not-a-content-object.txt'), 'utf8')).toBe('here before');
+      target.markCleanShutdown();
+    } finally {
+      target.close();
+    }
+  }, 180_000);
+
   it('verifies what waits again when it resumes a merge before its Books went in, and merges nothing that changed (Issue #434 review)', async () => {
     const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let packagePath: string;
