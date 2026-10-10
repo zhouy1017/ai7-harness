@@ -888,6 +888,9 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'draft-restart',
     'new-version',
     'new-version-applied',
+    // Issue #745: the selection menu stands through the pane moving on its own, before or after it is drawn, and closes
+    // on the reader's wheel over the pane.
+    'menu-pane-scroll',
     'keep-current',
     'defer',
     // Issue #424 (S78): 待我处理 lists the conflict put aside, and its 解决冲突… opens 稿件冲突 of that suggestion.
