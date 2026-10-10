@@ -342,3 +342,22 @@ export function deriveScopePlan(input: ScopePlanInput): ReviewScopePlanProjectio
     counts,
   };
 }
+
+/**
+ * 结果待确认 after the Run that left it ended (Issue #51, S16c; CONT-011): the units a reuse plan recomputes whose content — by
+ * the content key the plan matches predecessors by — is the content of a predecessor unit kept as an `outcome-unknown` gap,
+ * whatever the reason each is recomputed (a predecessor gap, the whole Book or a selected range bypassed, a contract change).
+ * A block inserted or removed before the range moves its ordinal and positions and nothing else; no other gap is named.
+ */
+export function resendUnits(
+  predecessorManifest: CoverageManifestProjection,
+  unknownOrdinals: ReadonlySet<number>,
+  plan: Pick<AnalysisReusePlanProjection, 'units'>,
+): number[] {
+  if (unknownOrdinals.size === 0) return [];
+  const keys = unitContentKeys(predecessorManifest);
+  const unknownKeys = new Set(predecessorManifest.units.flatMap((unit, index) => unknownOrdinals.has(unit.ordinal) ? [keys[index]!] : []));
+  return plan.units.filter((unit) => unit.disposition === 'recomputed' && unknownKeys.has(unit.contentKey))
+    .map((unit) => unit.unitOrdinal).sort((left, right) => left - right);
+}
+

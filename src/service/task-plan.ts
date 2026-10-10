@@ -642,6 +642,8 @@ export function baselineAnalysisPlan(input: {
   stopped?: BaselineStoppedRunFacts;
   /** What the Task's Run asked the editor, and the answers (Issue #422, S76d); absent reads as nothing asked. */
   clarifications?: ReadonlyArray<ClarificationFacts>;
+  /** The ranges this Task sends again whose earlier result could not be known (Issue #51, S16c); absent reads as none. */
+  resendUnits?: ReadonlyArray<number>;
 }): TaskPlanProjection {
   const { projection, bookTitle, blocks } = input;
   const intent = projection.taskIntent;
@@ -823,7 +825,7 @@ export function baselineAnalysisPlan(input: {
     defaultRule: input.defaultRule ?? noDefaultRule(BASELINE_NO_RULE),
     runControl: baselineRunControl(projection, input.stopped),
     redo: baselineRedo(projection, input.stopped),
-    resend: baselineResend(projection),
+    resend: baselineResend(input.resendUnits),
     reprepare: baselineReprepare(projection),
     clarifications: baselineClarifications(projection, input.clarifications ?? [], input.stopped),
     budgetStop: baselineBudgetStop(projection),
@@ -1979,22 +1981,11 @@ function unconfirmedApart(count: number): string {
 /**
  * 结果待确认 after the Run that left it ended (Issue #51, S16c; CONT-011): the ranges this Task recomputes whose predecessor
  * revision holds them as `outcome-unknown` gaps — their earlier request was sent and may have been processed and billed —
- * named in the Plan Preview with what this Task does about them; `null` when it recomputes none.
+ * named in the Plan Preview with what this Task does about them; `null` when it recomputes none. The store matches them by
+ * content key (`resendUnitsOf`), whatever the reason each is recomputed.
  */
-function baselineResend(projection: BaselineAnalysisProjection): TaskPlanProjection['resend'] {
-  const update = projection.update;
-  const plan = update?.reusePlan ?? null;
-  const latest = projection.resultSetRevision;
-  if (update === null || plan === null || latest === null || latest.revisionId !== update.predecessor.revisionId) return null;
-  const unknown = latest.gaps.filter((gap) => gap.code === 'outcome-unknown');
-  if (unknown.length === 0) return null;
-  // A unit recomputed because its content-compatible predecessor was a gap, over the range of an outcome-unknown gap.
-  const units = plan.units
-    .filter((unit) => unit.disposition === 'recomputed' && unit.reason === 'predecessor-gap' &&
-      unknown.some((gap) => unit.startPosition < gap.endPosition && gap.startPosition < unit.endPosition))
-    .map((unit) => unit.unitOrdinal)
-    .sort((left, right) => left - right);
-  return units.length === 0 ? null : { units, statement: resendDisclosure(units) };
+function baselineResend(units: ReadonlyArray<number> | undefined): TaskPlanProjection['resend'] {
+  return units === undefined || units.length === 0 ? null : { units: [...units], statement: resendDisclosure(units) };
 }
 
 export interface BaselineStoppedRunFacts {

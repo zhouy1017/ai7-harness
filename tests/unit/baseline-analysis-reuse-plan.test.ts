@@ -7,6 +7,7 @@ import {
   deriveReusePlan,
   deriveScopePlan,
   requireSelectedRange,
+  resendUnits,
   reusePlanRecord,
   selectedRangeClosure,
   type ReusePlanPredecessor,
@@ -223,3 +224,45 @@ describe('deriveScopePlan', () => {
     expect(rows(derive('changed', null))).toEqual([[1, 'unreviewed', 'out-of-scope'], [2, 'recomputed', 'no-compatible-predecessor'], [3, 'reused', 'compatible']]);
   });
 });
+
+// Issue #51 (S16c; CONT-011): which recomputed units a Task sends again whose earlier request's result could not be known —
+// matched by content key, whatever the reason each is recomputed, so a section inserted before the range moves nothing and an
+// ordinary gap is never named.
+describe('resendUnits', () => {
+  const sections = (names: string[]): ManifestBlockInput[] => names.flatMap((name, index) => [
+    block(name.toUpperCase(), index * 2 + 1, 'heading', 0, 1),
+    block(name, index * 2 + 2, 'paragraph', 300),
+  ]);
+  const base = manifestOf(sections(['p', 'q', 'r', 's']));
+
+  it('names the outcome-unknown range across sync, whole-book and selected-range plans, after a section is inserted before it', () => {
+    expect(base.units).toHaveLength(4);
+    // Unit 2 is an ordinary gap (an adapter failure), unit 4 an outcome-unknown one.
+    const predecessor = predecessorOf(base, [2, 4]);
+    const unknown = new Set([4]);
+    for (const mode of ['sync-current', 'reanalyze-book'] as const) {
+      expect(resendUnits(base, unknown, deriveReusePlan({ mode, selectedRange: null, manifest: base, predecessor }))).toEqual([4]);
+    }
+    const unit4 = base.units[3]!;
+    expect(resendUnits(base, unknown, deriveReusePlan({
+      mode: 'reanalyze-range', selectedRange: { startPosition: unit4.startPosition, endPosition: unit4.endPosition }, manifest: base, predecessor,
+    }))).toEqual([4]);
+    // A range elsewhere still reads every gap again, unit 4 among them — and unit 2, an ordinary gap read again too, is never named.
+    const unit1 = base.units[0]!;
+    const elsewhere = deriveReusePlan({
+      mode: 'reanalyze-range', selectedRange: { startPosition: unit1.startPosition, endPosition: unit1.endPosition }, manifest: base, predecessor,
+    });
+    expect(elsewhere.units.filter((unit) => unit.disposition === 'recomputed').map((unit) => unit.unitOrdinal)).toEqual([1, 2, 4]);
+    expect(resendUnits(base, unknown, elsewhere)).toEqual([4]);
+    // A section inserted before them all: unit 4's content is now unit 5, at other positions — still named, and only it.
+    const inserted = manifestOf(sections(['o', 'p', 'q', 'r', 's']));
+    expect(inserted.units).toHaveLength(5);
+    expect(inserted.units[4]!.startPosition).not.toBe(unit4.startPosition);
+    const shifted = deriveReusePlan({ mode: 'sync-current', selectedRange: null, manifest: inserted, predecessor });
+    expect(shifted.units.filter((unit) => unit.disposition === 'recomputed').map((unit) => unit.unitOrdinal)).toEqual([1, 3, 5]);
+    expect(resendUnits(base, unknown, shifted)).toEqual([5]);
+    // With no outcome-unknown gap, nothing is named.
+    expect(resendUnits(base, new Set(), shifted)).toEqual([]);
+  });
+});
+

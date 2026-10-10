@@ -525,6 +525,11 @@ export const QUICK_START_OFFLINE = '离线：这份计划要连到模型服务�
 /** The same for a kind whose bar has no 联网后开始任务 — the writing Task's (#701 review P3-3): the bar's shared sentence, ended (#714). */
 export const QUICK_START_OFFLINE_LATER = `${OFFLINE_START_LATER}。`;
 export const QUICK_START_SLOT_BUSY = '运行名额已满：正在运行的任务结束后再开始。';
+/**
+ * 结果待确认 (Issue #51, S16c; CONT-011): the Task would send again a range whose earlier request may already have been processed
+ * and billed, so 快速开始 leaves it at its plan, which says so, for the editor to start there.
+ */
+export const QUICK_START_RESEND = '结果待确认：这项任务会再发一次上一次结果待确认的阅读范围；请在计划里看清这一点，再开始任务。';
 export const QUICK_START_NOT_READY = '这份计划现在不能开始；请看过计划后再开始。';
 
 // The drawer's `设为快速开始默认…`.

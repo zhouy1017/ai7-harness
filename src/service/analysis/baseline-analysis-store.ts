@@ -113,6 +113,7 @@ import {
   deriveReusePlan,
   deriveScopePlan,
   requireSelectedRange,
+  resendUnits,
   reusePlanRecord,
   type ReusePlanPredecessor,
   type ScopePlanPredecessor,
@@ -2258,6 +2259,39 @@ export class BaselineAnalysisStore {
        JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
        WHERE s.book_id = ? AND s.kind = ? ORDER BY r.ordinal`,
     ).all(bookId, this.#definition.kind) as SqlRow[];
+  }
+
+  /** A revision's `outcome-unknown` gaps (Issue #51, S16c): the ranges whose request was sent and whose result is unknown. */
+  #unknownGapOrdinals(row: SqlRow): number[] {
+    const record = parseCanonicalJson(asString(row.canonical_json));
+    if (!isRecord(record) || !Array.isArray(record.gaps)) return [];
+    return record.gaps.flatMap((gap: unknown) =>
+      isRecord(gap) && gap.code === 'outcome-unknown' && typeof gap.unitOrdinal === 'number' ? [gap.unitOrdinal] : []);
+  }
+
+  /**
+   * 结果待确认 left in the Book's latest revision (Issue #51, S16c): its `outcome-unknown` gaps, which any Task that recomputes
+   * them would send again — the background dispatcher never starts one over them (CTRL-007, CONT-011).
+   */
+  latestUnconfirmedRangesOf(bookId: string): number[] {
+    const latest = this.#revisionRows(bookId).at(-1);
+    return latest === undefined ? [] : this.#unknownGapOrdinals(latest);
+  }
+
+  /**
+   * The units a Task's frozen reuse plan recomputes whose content is the content of an `outcome-unknown` gap of its
+   * predecessor revision (Issue #51, S16c; CONT-011), whatever the reason each is recomputed — matched by the same content key
+   * the reuse plan matches by, so a block inserted before the range moves nothing and no other gap is ever named.
+   */
+  resendUnitsOf(projection: BaselineAnalysisProjection): number[] {
+    const update = projection.update;
+    const plan = update?.reusePlan ?? null;
+    if (update === null || plan === null) return [];
+    const row = this.#db.prepare('SELECT * FROM analysis_result_set_revisions WHERE revision_id = ?').get(update.predecessor.revisionId) as SqlRow | undefined;
+    if (row === undefined) return [];
+    const unknown = new Set(this.#unknownGapOrdinals(row));
+    if (unknown.size === 0) return [];
+    return resendUnits(this.#predecessorFacts(row).manifest, unknown, plan);
   }
 
   #revisionBody(row: SqlRow): Record<string, unknown> {

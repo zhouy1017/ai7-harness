@@ -509,6 +509,7 @@ import {
   QUICK_START_RANGE_REASON,
   QUICK_START_RULE_CHANGED,
   QUICK_START_SLOT_BUSY,
+  QUICK_START_RESEND,
   RULE_STATE_LABELS,
   SET_RULE_BUDGET,
   SET_RULE_CHANGED,
@@ -5127,7 +5128,9 @@ export class EditorialStore {
       const stopped = this.#baselineStoppedRun(projection, carriesStoppedRun);
       // What the Run asked the editor, and the answers (Issue #422, S76d).
       const clarifications = projection.run === null ? [] : this.#analysisCall(() => this.#baselineAnalysis.clarificationsOf(projection.run!.runRecordId));
-      const plan = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, defaultRule, clarifications, ...(stopped === null ? {} : { stopped }) }));
+      // 结果待确认 (Issue #51, S16c): the ranges this Task would send again whose earlier result could not be known.
+      const resendUnits = this.#analysisCall(() => this.#baselineAnalysis.resendUnitsOf(projection));
+      const plan = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, defaultRule, clarifications, resendUnits, ...(stopped === null ? {} : { stopped }) }));
       return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     if (input.kind === 'readers-report') {
@@ -5700,6 +5703,9 @@ export class EditorialStore {
     if (projection.planRevision !== null) return fellBack(QUICK_START_PLAN_CHANGED);
     const drift = defaultExecutionRuleDrift(rule.version.binding, version.materialInputs);
     if (drift.length > 0) return fellBack(ruleDriftReason(defaultExecutionRuleReference(rule, rule.version).name, drift));
+    // 结果待确认 (Issue #51, S16c; CONT-011): a Task that sends again a range whose earlier result could not be known is started
+    // only from its plan, where the editor has read that it will.
+    if (plan.resend !== null) return fellBack(QUICK_START_RESEND);
     switch (plan.start.readiness) {
       case 'ready':
       case 'no-route':
@@ -6122,6 +6128,8 @@ export class EditorialStore {
       startingPoint: () => record!.version.startingPoint,
       movedSinceEnrollment: () => point().workingDigest !== record!.version.enrolledAt.workingDigest,
       // Whoever's it was: the latest Task read exactly this text and the analysis is still not current with it (P2-4).
+      // 结果待确认 (Issue #51, S16c): the latest revision holds ranges whose request was sent and whose result is unknown.
+      unconfirmedPending: () => this.#baselineAnalysis.latestUnconfirmedRangesOf(bookId).length > 0,
       attemptedAtThisText: () => {
         const task = latestTask();
         return task !== null && task.checkpointDigest !== null && task.checkpointDigest === point().workingDigest;

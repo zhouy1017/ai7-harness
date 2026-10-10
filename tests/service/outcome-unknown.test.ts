@@ -1,14 +1,19 @@
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BaselineAnalysisExecutionOwner, OUTCOME_UNKNOWN_NOT_RESENT, outcomeUnknownDetail } from '../../src/service/analysis/execution.js';
 import { OUTCOME_UNKNOWN_NO_RESUME, RECONCILED_RESUMABLE_DETAIL } from '../../src/service/analysis/baseline-analysis-store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { OUTCOME_UNKNOWN_NO_REDO, resendDisclosure } from '../../src/service/task-plan.js';
-import { ModelFixtureError, loadLaunchFixture, loadModelFixture, outcomeUnknownFixtureAllowed, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
-import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { BASELINE_ANALYSIS_TASK_GOAL, FACTUAL_REVIEW_TASK_GOAL, type BaselineAnalysisProjection, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
+import { ModelFixtureError, fixtureEntryKey, loadLaunchFixture, loadModelFixture, outcomeUnknownFixtureAllowed, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
+import { QUICK_START_RESEND } from '../../src/service/default-execution-rules.js';
+import { BACKGROUND_OUTCOME_UNKNOWN } from '../../src/service/background-analysis-enrollments.js';
+import { BackgroundAnalysisDispatcher } from '../../src/service/background-analysis.js';
+import { EditorialStore, StoreError, type BackgroundAnalysisRuntime } from '../../src/service/store.js';
+import { BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_TASK_GOAL, FACTUAL_REVIEW_TASK_GOAL, type BaselineAnalysisProjection, type BaselineAnalysisUpdateMode, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
@@ -426,4 +431,131 @@ describe('结果待确认 over the real store', () => {
     // Every other fixture binds as it always has.
     expect((await loadLaunchFixture(FIXTURES_ROOT, 'sample1-baseline-happy', undefined)).identity).toBe('sample1-baseline-happy');
   });
+});
+
+// Issue #51 (S16c; review of #755, P2-a and P2-b): after 取消任务 settles 结果待确认, every Task that sends unit 4 again says so in
+// its plan, whatever recomputes it, and nothing starts one without the editor reading that plan.
+describe('结果待确认 after 取消任务', () => {
+  /** A Run stopped 结果待确认 and cancelled: the Book's latest revision holds unit 4 as its own outcome-unknown gap. */
+  async function cancelledHoldingUnit4(store: EditorialStore, execution: BaselineAnalysisExecutionOwner, title: string) {
+    const stopped = await stoppedRun(store, execution, title);
+    store.requestBaselineAnalysisCancel(stopped.bookId, stopped.taskIntentId);
+    execution.cancelRun(stopped.runRecordId, store.baselineAnalysisLedger);
+    await execution.whenIdle();
+    expect(store.inspectBaselineAnalysis(stopped.bookId, () => null).run?.state).toBe('cancelled');
+    return stopped;
+  }
+  const prepareUpdate = (store: EditorialStore, bookId: string, mode: BaselineAnalysisUpdateMode, selectedRange: { startPosition: number; endPosition: number } | null = null) => {
+    let progress = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_MODE_GOALS[mode], { mode, selectedRange }, launchPolicy);
+    while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
+    return progress.projection!;
+  };
+  const resendOf = (store: EditorialStore, bookId: string, taskIntentId: string) => store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }).resend;
+  const ONLINE = { reading: () => 'online' as const, reachesNetwork: (routeKind: string | null) => routeKind === LOCAL_DETERMINISTIC_ROUTE, slotBusy: () => false };
+
+  it('names unit 4 for 重新分析全书 and for 重新分析所选范围 over it, by content, whatever recomputes it', async () => {
+    const store = await openWithRoute();
+    const execution = owner(store);
+    try {
+      const { bookId } = await cancelledHoldingUnit4(store, execution, 'L2 sample1 结果待确认重算');
+      const book = prepareUpdate(store, bookId, 'reanalyze-book');
+      expect(book.update?.reusePlan?.units.find((unit) => unit.unitOrdinal === 4)?.reason).toBe('bypassed-whole-book');
+      expect(resendOf(store, bookId, book.taskIntent!.taskIntentId)).toEqual({ units: [4], statement: resendDisclosure([4]) });
+      const unit4 = book.coverageManifest!.units[3]!;
+      const range = prepareUpdate(store, bookId, 'reanalyze-range', { startPosition: unit4.startPosition, endPosition: unit4.endPosition });
+      expect(range.update?.reusePlan?.units.find((unit) => unit.unitOrdinal === 4)?.reason).toBe('bypassed-selected-range');
+      expect(resendOf(store, bookId, range.taskIntent!.taskIntentId)).toEqual({ units: [4], statement: resendDisclosure([4]) });
+      store.markCleanShutdown();
+    } finally {
+      await execution.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it('never names an ordinary gap: unit 2 failed for good beside unit 4, and only unit 4 is sent again knowingly', async () => {
+    // The one-unit-failure fixture (unit 2 fails for good) with unit 4 answering 结果待确认.
+    const failing = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-one-unit-failure');
+    const unknown4 = [...fixture.entries.values()].find((entry) => entry.unitOrdinal === 4 && entry.response.kind === 'outcome-unknown')!;
+    fixture = { ...failing, entries: new Map([...failing.entries, [fixtureEntryKey(4, unknown4.requestDigest, 1), unknown4]]) };
+    const store = await openWithRoute();
+    const execution = owner(store);
+    try {
+      const { bookId } = await cancelledHoldingUnit4(store, execution, 'L2 sample1 结果待确认与失败');
+      expect(store.inspectBaselineAnalysis(bookId, () => null).resultSetRevision?.gaps.map((gap) => [gap.unitOrdinal, gap.code]))
+        .toEqual([[2, 'adapter-failure'], [4, 'outcome-unknown']]);
+      // 重新分析全书 reads every range again, unit 2 among them: only unit 4 is named.
+      const book = prepareUpdate(store, bookId, 'reanalyze-book');
+      expect(book.update?.reusePlan?.counts.recomputed).toBe(SAMPLE1_UNITS);
+      expect(resendOf(store, bookId, book.taskIntent!.taskIntentId)).toEqual({ units: [4], statement: resendDisclosure([4]) });
+      store.markCleanShutdown();
+    } finally {
+      await execution.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it('快速开始 falls back to the plan, recording nothing, when the Task would send unit 4 again', async () => {
+    const store = await openWithRoute();
+    const execution = owner(store);
+    try {
+      const { bookId } = await cancelledHoldingUnit4(store, execution, 'L2 sample1 结果待确认快速开始');
+      const plan = prepareUpdate(store, bookId, 'reanalyze-book');
+      const rule = store.setDefaultExecutionRule(bookId, plan.taskIntent!.taskIntentId, plan.planEnvelope!.digest);
+      const quick = await store.quickStartBaselineAnalysis(bookId, plan.taskIntent!.taskIntentId, plan.planEnvelope!.digest, rule.ruleVersionId,
+        { credentialReadiness: async () => null, connectivity: ONLINE });
+      expect(quick).toEqual({ outcome: 'fell-back', reasons: [QUICK_START_RESEND], dispatchRunRecordId: null });
+      const after = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(after.taskIntent!.taskIntentId).toBe(plan.taskIntent!.taskIntentId);
+      expect(after.authorization).toBeNull();
+      expect(after.run).toBeNull();
+      store.markCleanShutdown();
+    } finally {
+      await execution.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it('the background dispatcher never starts a Task that would send unit 4 again, and says why until the editor starts one', async () => {
+    const store = await openWithRoute();
+    const execution = owner(store);
+    try {
+      const { bookId } = await cancelledHoldingUnit4(store, execution, 'L2 sample1 结果待确认后台');
+      const imported = store.inspectBaselineAnalysis(bookId, () => null).checkpoint!;
+      const runtime = (): BackgroundAnalysisRuntime => ({ routeExecutable: true, placeFree: true, capacity: 2, editorWorkBusy: false, now: Date.now() + 600_000, quietMs: 30_000 });
+      const shown = store.inspectBackgroundAnalysisEnrollment(bookId, runtime());
+      expect(shown.offer.canEnroll).toBe(true);
+      store.enrollBackgroundAnalysis(bookId, shown.offer.disclosureDigest!, 'prospective', runtime());
+      // A confirmed edit: the analysis is stale, the text moved since the editor's Task, and the quiet period has passed.
+      const window = store.getManuscriptWindow(imported.manuscriptId, imported.branchId, null);
+      const block = window.blocks.find((candidate) => candidate.kind === 'paragraph')!;
+      store.flushJournalEdit({
+        clientEditId: randomUUID(), manuscriptId: imported.manuscriptId, branchId: imported.branchId, baseRevisionId: window.revisionId,
+        blockId: block.blockId, windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: block.digest,
+        expectedJournalSequence: window.journalSequence, fromGrapheme: 0, toGrapheme: 0, insertText: '〔结果待确认后的改动〕',
+      });
+      expect(store.backgroundAnalysisDecisionFor(bookId, runtime()).decision).toEqual({ kind: 'wait', reason: BACKGROUND_OUTCOME_UNKNOWN });
+      const before = store.inspectBaselineAnalysis(bookId, () => null);
+      const dispatcher = new BackgroundAnalysisDispatcher({ store, execution, launchPolicy, quietMs: 30_000, now: () => Date.now() + 600_000 });
+      try {
+        dispatcher.nudge();
+        await dispatcher.settled();
+        await execution.whenIdle();
+      } finally {
+        await dispatcher.dispose();
+      }
+      // Nothing was prepared or started; ②A reads why.
+      const after = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(after.taskIntent!.taskIntentId).toBe(before.taskIntent!.taskIntentId);
+      expect(after.run?.runRecordId).toBe(before.run?.runRecordId);
+      expect(store.inspectBackgroundAnalysisEnrollment(bookId, runtime()).lastLook).toMatchObject({ kind: 'wait', reason: BACKGROUND_OUTCOME_UNKNOWN });
+      // The editor's own Task names unit 4 in its plan before they start it; the dispatcher still prepares nothing of its own.
+      const sync = prepareUpdate(store, bookId, 'sync-current');
+      expect(resendOf(store, bookId, sync.taskIntent!.taskIntentId)?.units).toEqual([4]);
+      expect(store.baselineAnalysisLedger.latestUnconfirmedRangesOf(bookId)).toEqual([4]);
+      store.markCleanShutdown();
+    } finally {
+      await execution.dispose();
+      store.close();
+    }
+  }, 300_000);
 });
