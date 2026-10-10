@@ -161,3 +161,54 @@ export const AUTHORED_WRITING_DRAFT: WritingSynthesisResult = {
     },
   ],
 };
+
+// 资料库 under 允许参考 (Issue #428): what J-07 drafts last, on the same Book — a 评论文章 that lists one 资料库 item, put into 资料库
+// from a plain-text file of the Journey's own words (never a manuscript), attributed to the Book and taught to it alone, and
+// read through its Material Index at the build the plan pinned. Its words are the contract's, so the authored fixture answers the
+// same questions here as in J-07, where the Task is the Book's third writing Task and drafts again.
+
+/** The 资料库 item's file, title and words: two paragraphs, separated by a blank line as a plain-text file's paragraphs are. */
+export const WRITING_LIBRARY_FILE = '青铜器保护笔记.txt';
+export const WRITING_LIBRARY_TITLE = '青铜器保护笔记';
+export const WRITING_LIBRARY_PARAGRAPHS: ReadonlyArray<string> = Object.freeze([
+  '这份笔记整理自一次博物馆讲座：青铜器出土后最怕潮湿与盐分，修复人员先要清除锈蚀，再逐件建立档案。',
+  '讲座还提到，研究者常把器物铭文与传世文献对读，一个字的释读往往要花上数年。',
+]);
+export const WRITING_LIBRARY_TEXT = `${WRITING_LIBRARY_PARAGRAPHS.join('\n\n')}\n`;
+
+/** What J-07's editor writes for the 评论文章, with the item ticked under 允许参考. */
+export const WRITING_LIBRARY_REQUEST = Object.freeze({
+  typeId: 'review-article',
+  audience: '关注历史题材小说的读者',
+  channel: '读书网站书评栏目',
+  requirements: null,
+});
+
+/**
+ * The authored 评论文章: written from the passages, J-07's words and the 资料库 item — drawing on the item's facts in its own words
+ * and copying none of it, as the copy rules hold an item to.
+ */
+export const AUTHORED_LIBRARY_DRAFT: WritingSynthesisResult = {
+  schema: WRITING_SYNTHESIS_RESULT_SCHEMA,
+  title: '一封古怪的来信与一门安静的学问',
+  sections: [
+    {
+      heading: '学问里的人',
+      paragraphs: [
+        '小说以六十五岁的曾本之为中心，写他收到一封用甲骨文写成、落款早已去世之人的信。作者把悬念放进一位老派学者的日常：他仍用书信往来，在东湖边独坐，对弟子兼女婿郑雄的逢迎又恼又难以发作。',
+      ],
+    },
+    {
+      heading: '器物与文字',
+      paragraphs: [
+        '书中反复出现的曾侯乙尊盘，不只是情节的道具，也寄托着人物的心事。读者若知道出土器物要经过除锈、建档和多年修复，更能体会主人公面对一件重器时的郑重；那四个甲骨文字的考释，也让人想到释读一个古字常常需要几年功夫。',
+      ],
+    },
+    {
+      heading: '可以更紧凑的地方',
+      paragraphs: [
+        '前八个阅读范围铺陈从容，人物关系交代清楚，但来信之谜推进稍慢，几处家常场面还可以写得更紧凑。',
+      ],
+    },
+  ],
+};

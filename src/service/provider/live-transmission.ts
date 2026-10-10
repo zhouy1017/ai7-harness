@@ -79,6 +79,16 @@ export async function transmitOnce(
   try {
     body = await response.json();
   } catch {
+    // 结果待确认 (Issue #51, S16c): accepted, and its answer never came back whole. It was transmitted, so its item is on the
+    // ledger as sent with the status it carried — and never cached, so nothing ever replays it as a result. The adapter
+    // reads the same unreadable answer, and ends the turn as an outcome it cannot know.
+    if (response.status === 200) {
+      await cache.record({
+        itemId, purpose, model, promptContractDigest, requestDigest,
+        outcome: 'failed', status: response.status, usage: null, classification: 'outcome-unknown', recordedAt: new Date().toISOString(),
+      });
+      return { status: response.status, json: () => Promise.reject(new Error('AI7_OUTCOME_UNKNOWN')) };
+    }
     body = null;
   }
   const usage = usageOfResponse(body);

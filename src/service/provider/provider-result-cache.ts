@@ -58,8 +58,10 @@ export interface ProviderLedgerLine {
    * The ledger's own label for a Provider Account Limit. The product class is
    * `provider-account-limit`; `quota-exhausted` is what the ledger calls it, so a later reader can
    * tell an exhausted development account from any other failure without reopening the response.
+   * `outcome-unknown` (Issue #51, S16c) is a request that was sent and accepted whose answer never came
+   * back whole: it may have been processed and billed, and nothing of it is cached.
    */
-  readonly classification?: 'quota-exhausted';
+  readonly classification?: 'quota-exhausted' | 'outcome-unknown';
   /** Set only for a Provider Account Limit, and only when the response stated one. */
   readonly resetWindow?: string;
   /** A stale line no longer reserves its item id: the same item may run live again. */

@@ -97,7 +97,7 @@ import {
   sha256Hex,
 } from './canonical.js';
 import { unitRequestDigest } from './contract.js';
-import { deriveCoverageManifest, manifestCoversEveryBlock, manifestDigestIsExact, type ManifestBlockInput } from './coverage-manifest.js';
+import { deriveCoverageManifest, manifestCoversEveryBlock, manifestDigestIsExact, unitContentKeys, type ManifestBlockInput } from './coverage-manifest.js';
 import {
   manifestWeight,
   UnreadWalkCache,
@@ -113,6 +113,7 @@ import {
   deriveReusePlan,
   deriveScopePlan,
   requireSelectedRange,
+  resendUnits,
   reusePlanRecord,
   type ReusePlanPredecessor,
   type ScopePlanPredecessor,
@@ -264,6 +265,23 @@ const BUDGET_REACHED_OUTCOME_LABEL = '任务结果：任务运行预算已达上
 export const BUDGET_REACHED_RUN_LABEL = '任务运行预算已达上限 · 已保留部分结果' as const;
 /** A Run the provider's account limit stopped (Issue #51, S16b; RUN-012): a remediable blocker, never 任务已中断 · 可续行. */
 export const ACCOUNT_LIMIT_RUN_LABEL = '模型服务账户限额' as const;
+/**
+ * A Run stopped because a sent request's result cannot be known (Issue #51, S16c; CTRL-007, COPY-009): 结果待确认, never
+ * 任务已中断 · 可续行 nor 已取消.
+ */
+export const OUTCOME_UNKNOWN_RUN_LABEL = '结果待确认' as const;
+/** Why 结果待确认 has no 续行 (Issue #51, S16c; ADR 0034, CONT-011, CONT-016). */
+export const OUTCOME_UNKNOWN_NO_RESUME = '结果待确认：有阅读范围的请求已发出而结果无法确认，这次运行不能续行；可以取消任务保留已读完的部分，或改计划重做。' as const;
+
+/**
+ * One reading range whose sent request's result could not be known (Issue #51, S16c): a kept checkpoint whose gap is
+ * `outcome-unknown`, with how often its request was sent and the gap's own words — the technical layer's, never the bar's.
+ */
+export interface UnconfirmedUnitRecord {
+  readonly unitOrdinal: number;
+  readonly attempts: number;
+  readonly reason: string;
+}
 
 /** Why an interrupted Run stopped, when a limit stopped it (Issue #51, S16a): the ceiling, what it used, and what it read. */
 export interface RunStop {
@@ -462,6 +480,12 @@ export type BaselineAnalysisPrepareInput =
      * under way or the editor's own Task is prepared and not started; its checkpoint gives way to any other the Book asks for.
      */
     background?: { enrollmentVersionId: string };
+    /**
+     * A new Task Intent even where the latest prepared one would be revised in place (Issue #428): 写作任务's preparation when
+     * the 资料库 builds it pins differ from the ones the prepared Task froze. Its contract holds words only, so the same words
+     * at another build are the same contract, and only a Task of its own can freeze the new pins.
+     */
+    newTask?: boolean;
   }
   | { phase: 'advance'; workId: string }
   | { phase: 'cancel'; workId: string }
@@ -1076,7 +1100,8 @@ export class BaselineAnalysisStore {
               : state === 'cancelling' ? RUN_STATE_LABELS.cancelling
                 : state === 'pausing' ? RUN_STATE_LABELS.pausing
                   : state === 'paused' ? RUN_STATE_LABELS.paused
-                    : state === 'resumable' ? (run !== null && this.accountLimitOf(run.runRecordId) !== null ? ACCOUNT_LIMIT_RUN_LABEL : RUN_STATE_LABELS.resumable)
+                    : state === 'resumable' ? (run !== null && this.accountLimitOf(run.runRecordId) !== null ? ACCOUNT_LIMIT_RUN_LABEL
+                      : run !== null && this.outcomeUnknownOf(run.runRecordId) !== null ? OUTCOME_UNKNOWN_RUN_LABEL : RUN_STATE_LABELS.resumable)
                       : state === 'awaiting-clarification' ? RUN_STATE_LABELS['awaiting-clarification']
               : state === 'admitted' ? '已进入调度'
                 : state === 'executing' ? '正在执行'
@@ -1317,6 +1342,9 @@ export class BaselineAnalysisStore {
             launchSetsCeiling: state === 'interrupted' && this.#runStop(runRecordId) !== null && this.#launchSetsCeiling(asString(row.task_intent_id)),
             // 模型服务账户限额 (Issue #51, S16b): a resumable Run the provider's account limit stopped.
             accountLimited: state === 'resumable' && this.accountLimitOf(runRecordId) !== null,
+            // 结果待确认 (Issue #51, S16c): a resumable Run stopped on a sent request whose result cannot be known.
+            // It holds them while paused, account-limited, waiting for an answer or left 可续行 too, and is listed so (P2-1).
+            outcomeUnknown: (state === 'paused' || state === 'resumable' || state === 'awaiting-clarification') && this.unconfirmedRangesOf(runRecordId).length > 0,
             // 需要重新确认计划 (Issue #536; OFF-008): a waiting Run blocked because its plan moved.
             planMoved: state === 'blocked-before-dispatch' && this.blockedByOf(runRecordId) === 'plan-moved',
           },
@@ -2200,6 +2228,7 @@ export class BaselineAnalysisStore {
       stateLabel: current.state === 'cancelled' && runBegan(transitions) ? RUN_CANCELLED_AFTER_START_LABEL
         : current.state === 'interrupted' && this.#runStop(runRecordId) !== null ? BUDGET_REACHED_RUN_LABEL
           : current.state === 'resumable' && this.accountLimitOf(runRecordId) !== null ? ACCOUNT_LIMIT_RUN_LABEL
+            : current.state === 'resumable' && this.outcomeUnknownOf(runRecordId) !== null ? OUTCOME_UNKNOWN_RUN_LABEL
             : blockedBy === 'plan-moved' ? PLAN_MOVED_LABEL : RUN_STATE_LABELS[current.state],
       recordedAt: asString(runRecord.recorded_at),
       transitions,
@@ -2241,6 +2270,57 @@ export class BaselineAnalysisStore {
        JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
        WHERE s.book_id = ? AND s.kind = ? ORDER BY r.ordinal`,
     ).all(bookId, this.#definition.kind) as SqlRow[];
+  }
+
+  /** A revision's `outcome-unknown` gaps (Issue #51, S16c): the ranges whose request was sent and whose result is unknown. */
+  #unknownGapOrdinals(row: SqlRow): number[] {
+    const record = parseCanonicalJson(asString(row.canonical_json));
+    if (!isRecord(record) || !Array.isArray(record.gaps)) return [];
+    return record.gaps.flatMap((gap: unknown) =>
+      isRecord(gap) && gap.code === 'outcome-unknown' && typeof gap.unitOrdinal === 'number' ? [gap.unitOrdinal] : []);
+  }
+
+  /**
+   * 结果待确认 left in the Book's latest revision (Issue #51, S16c): its `outcome-unknown` gaps, which any Task that recomputes
+   * them would send again — the background dispatcher never starts one over them (CTRL-007, CONT-011).
+   */
+  latestUnconfirmedRangesOf(bookId: string): number[] {
+    const latest = this.#revisionRows(bookId).at(-1);
+    return latest === undefined ? [] : this.#unknownGapOrdinals(latest);
+  }
+
+  /**
+   * A revision's `outcome-unknown` gaps by the content key of their unit, with each gap's own words (Issue #51, S16c): what a
+   * later Run that ends without reading such a range carries forward as the same gap.
+   */
+  unknownGapsByContentKey(revisionId: string): Map<string, string> {
+    const row = this.#db.prepare('SELECT * FROM analysis_result_set_revisions WHERE revision_id = ?').get(revisionId) as SqlRow | undefined;
+    if (row === undefined) return new Map();
+    const record = parseCanonicalJson(asString(row.canonical_json));
+    if (!isRecord(record) || !Array.isArray(record.gaps)) return new Map();
+    const reasons = new Map<number, string>(record.gaps.flatMap((gap: unknown) =>
+      isRecord(gap) && gap.code === 'outcome-unknown' && typeof gap.unitOrdinal === 'number' && typeof gap.reason === 'string'
+        ? [[gap.unitOrdinal, gap.reason] as const] : []));
+    if (reasons.size === 0) return new Map();
+    const manifest = this.#predecessorFacts(row).manifest;
+    const keys = unitContentKeys(manifest);
+    return new Map(manifest.units.flatMap((unit, index) => reasons.has(unit.ordinal) ? [[keys[index]!, reasons.get(unit.ordinal)!] as const] : []));
+  }
+
+  /**
+   * The units a Task's frozen reuse plan recomputes whose content is the content of an `outcome-unknown` gap of its
+   * predecessor revision (Issue #51, S16c; CONT-011), whatever the reason each is recomputed — matched by the same content key
+   * the reuse plan matches by, so a block inserted before the range moves nothing and no other gap is ever named.
+   */
+  resendUnitsOf(projection: BaselineAnalysisProjection): number[] {
+    const update = projection.update;
+    const plan = update?.reusePlan ?? null;
+    if (update === null || plan === null) return [];
+    const row = this.#db.prepare('SELECT * FROM analysis_result_set_revisions WHERE revision_id = ?').get(update.predecessor.revisionId) as SqlRow | undefined;
+    if (row === undefined) return [];
+    const unknown = new Set(this.#unknownGapOrdinals(row));
+    if (unknown.size === 0) return [];
+    return resendUnits(this.#predecessorFacts(row).manifest, unknown, plan);
   }
 
   #revisionBody(row: SqlRow): Record<string, unknown> {
@@ -2863,7 +2943,7 @@ export class BaselineAnalysisStore {
     const planDerives = existing.coverageManifest === null || existing.authorization !== null || this.#frozenPlanDerives(existing.update, existing.coverageManifest);
     // A Task the 后台分析登记 dispatcher prepared is never the editor's to revise or resume, and the dispatcher never takes up any
     // Task Intent but the one it creates now (#713 review, P1-2): each side's preparation is a Task of its own.
-    const sameTask = background === null && latestIntent !== null && latestIntent.preparedByEnrollmentVersionId === null &&
+    const sameTask = background === null && input.newTask !== true && latestIntent !== null && latestIntent.preparedByEnrollmentVersionId === null &&
       existing.run === null && latestIntent.mode === mode &&
       latestIntent.predecessorRevisionId === (latest?.revisionId ?? null) && (input.reconfirm || checkpointCurrent) && contractCurrent && planDerives;
     if (sameTask && existing.checkpoint !== null) {
@@ -3384,6 +3464,9 @@ export class BaselineAnalysisStore {
     const run = current.run;
     requireAnalysis(current.taskIntent?.taskIntentId === taskIntentId && run !== null, 'ANALYSIS_RESUME_STALE', '这项任务已经变化；无法续行。');
     requireAnalysis(run.state === 'paused' || run.state === 'resumable', 'ANALYSIS_RESUME_NOT_PAUSED', '只有已暂停或中断后可续行的任务可以续行。');
+    // 结果待确认 (Issue #51, S16c; ADR 0034, CONT-011, CONT-016): the Run does not go on; nothing the old authorization covers
+    // may send again under it.
+    requireAnalysis(this.outcomeUnknownOf(run.runRecordId) === null, 'ANALYSIS_RESUME_OUTCOME_UNKNOWN', OUTCOME_UNKNOWN_NO_RESUME);
     return run.runRecordId;
   }
 
@@ -3677,6 +3760,37 @@ export class BaselineAnalysisStore {
       };
     }
     return { condition: record.condition, unitOrdinal: typeof record.unitOrdinal === 'number' ? record.unitOrdinal : null, refusedAttempt };
+  }
+
+  /**
+   * 结果待确认 (Issue #51, S16c): the ranges of a Run whose sent requests' results cannot be known — its kept checkpoints whose gap
+   * is `outcome-unknown`, durable from the instant each was found, so every stop, reconciliation and continuation keeps them
+   * and none ever reads them again. Empty when there are none, or when the kept progress no longer reads back.
+   */
+  unconfirmedRangesOf(runRecordId: string): UnconfirmedUnitRecord[] {
+    let checkpoints: UnitCheckpoint[];
+    try {
+      checkpoints = this.unitCheckpoints(runRecordId);
+    } catch {
+      return [];
+    }
+    return checkpoints.flatMap((checkpoint) => checkpoint.unit.closed.state === 'gap' && checkpoint.unit.closed.gap.code === 'outcome-unknown'
+      ? [{ unitOrdinal: checkpoint.unit.unitOrdinal, attempts: checkpoint.observation?.attempts ?? 1, reason: checkpoint.unit.closed.gap.reason }]
+      : []);
+  }
+
+  /**
+   * The 结果待确认 stop of a resumable Run (Issue #51, S16c): its latest state stopped there, with the unconfirmed ranges; `null`
+   * for every other Run. Such a Run does not go on (ADR 0034, CONT-011, CONT-016): 续行 refuses it.
+   */
+  outcomeUnknownOf(runRecordId: string): { units: UnconfirmedUnitRecord[] } | null {
+    const row = this.#db.prepare('SELECT state, canonical_json FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC LIMIT 1')
+      .get(runRecordId) as SqlRow | undefined;
+    if (row === undefined || row.state !== 'resumable') return null;
+    const record = parseCanonicalJson(asString(row.canonical_json));
+    if (!isRecord(record) || record.stopReason !== 'outcome-unknown') return null;
+    const units = this.unconfirmedRangesOf(runRecordId);
+    return units.length === 0 ? null : { units };
   }
 
   /** Whether the plan a Task holds was frozen under developer-live, where the launch sets the Run Budget Ceiling (Issue #541). */

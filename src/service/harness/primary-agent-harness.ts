@@ -144,7 +144,11 @@ export type HarnessSignal =
   | { readonly kind: 'completed' }
   | { readonly kind: 'interrupted'; readonly failure: ClassifiedModelFailure }
   | { readonly kind: 'failed'; readonly failure: ClassifiedModelFailure }
-  | { readonly kind: 'ambiguous'; readonly reason: string };
+  /**
+   * A turn whose result cannot be established. `failure` is present when the adapter itself said so — a request sent whose
+   * answer never came back whole (Issue #51, S16c) — and absent for a turn the loop ended without a terminal event.
+   */
+  | { readonly kind: 'ambiguous'; readonly reason: string; readonly failure?: ClassifiedModelFailure };
 
 export interface HarnessExecutionSpan {
   readonly sessionId: string;
@@ -359,7 +363,11 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
             terminal = 'completed';
           } else if (reason.kind === 'error') {
             const failure = classifyModelFailure(reason.error, failureCodes);
-            signals.push(failure.signal === 'interrupted' ? { kind: 'interrupted', failure } : { kind: 'failed', failure });
+            // 结果待确认 (Issue #51, S16c): a request sent whose result cannot be known ends the turn ambiguous, never failed,
+            // so no retry table is ever asked about it.
+            signals.push(failure.signal === 'ambiguous'
+              ? { kind: 'ambiguous', reason: failure.reason, failure }
+              : failure.signal === 'interrupted' ? { kind: 'interrupted', failure } : { kind: 'failed', failure });
             terminal = failure.signal;
           } else if (reason.kind === 'aborted') {
             const failure = classifyModelFailure({ code: AI7_FAILURE_CODES.INTERRUPTED, message: '请求被中断。' }, failureCodes);

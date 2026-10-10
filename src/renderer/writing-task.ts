@@ -24,6 +24,8 @@ import {
   WRITING_TYPE_LEGEND,
   writingDraftedLine,
   writingFieldTooLong,
+  writingMaterialLabel,
+  writingMaterialsMore,
   WRITING_QUICK_PICK_TYPE,
   writingQuickFailed,
   writingQuickNote,
@@ -79,6 +81,8 @@ interface Sheet {
   audience: string;
   channel: string;
   requirements: string;
+  /** The 资料库 items ticked under 允许参考 (Issue #428), by identity. */
+  materialIds: string[];
   problem: string | null;
 }
 
@@ -149,6 +153,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       : active.dataset['writingField'] !== undefined ? `[data-writing-field="${active.dataset['writingField']}"]`
       : active.dataset['writingAction'] !== undefined ? `[data-writing-action="${active.dataset['writingAction']}"]`
       : active instanceof HTMLInputElement && active.name === 'writing-type' ? `input[name="writing-type"][value="${CSS.escape(active.value)}"]`
+      : active.dataset['writingMaterial'] !== undefined ? `[data-writing-material="${CSS.escape(active.dataset['writingMaterial'])}"]`
       : null);
     section.replaceChildren();
     section.dataset['writingState'] = page.task?.state ?? 'none';
@@ -188,7 +193,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     }
     if (sheet === null) {
       const opener = action(WRITING_ACTIONS.open, 'secondary', 'new', () => {
-        sheet = { typeId: null, audience: '', channel: '', requirements: '', problem: null };
+        sheet = { typeId: null, audience: '', channel: '', requirements: '', materialIds: [], problem: null };
         paint('legend');
       });
       opener.disabled = busy || page.unavailable !== null;
@@ -239,11 +244,12 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     form.append(types);
     const chosen = page.types.find((type) => type.typeId === state.typeId) ?? null;
     const references = el('dl', 'writing-references');
-    const [synopsisTerm, evaluationTerm, exemplarTerm, bookTerm] = WRITING_REFERENCE_TERMS;
+    const [synopsisTerm, evaluationTerm, exemplarTerm, materialTerm, bookTerm] = WRITING_REFERENCE_TERMS;
     references.append(
       el('dt', undefined, synopsisTerm), el('dd', undefined, page.references.synopsis),
       el('dt', undefined, evaluationTerm), el('dd', undefined, page.references.evaluation),
       el('dt', undefined, exemplarTerm), el('dd', 'writing-exemplars', chosen === null ? WRITING_EXEMPLAR_PICK_TYPE : chosen.exemplars.statement),
+      el('dt', undefined, materialTerm), materialsNode(page, state),
       el('dt', undefined, bookTerm), el('dd', undefined, page.references.book),
     );
     form.append(el('h4', undefined, WRITING_REFERENCE_HEADING), references);
@@ -314,6 +320,53 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
   }
 
   /**
+   * 资料库 under 允许参考 (Issue #428; TASK-030, TASK-032): the service's statement, then one box per item this Book's Tasks may list
+   * whose index extracted text — none ticked for the editor — an item that may not be ticked disabled with why, and how many
+   * more there are. A ticked item is pinned in the plan at its current index build by 先看计划; nothing is read or sent here.
+   */
+  function materialsNode(page: WritingTaskProjection, state: Sheet): HTMLElement {
+    const node = el('dd', 'writing-materials');
+    const offer = page.references.materials;
+    node.append(el('p', 'writing-materials-statement', offer.statement));
+    // An item no longer offered is no longer ticked.
+    state.materialIds = state.materialIds.filter((id) => offer.items.some((item) => item.materialId === id && item.selectable));
+    if (offer.items.length > 0) {
+      const list = el('ul', 'writing-material-list');
+      for (const item of offer.items) {
+        const id = uid('material');
+        const row = el('li', 'writing-material');
+        row.dataset['materialId'] = item.materialId;
+        const box = el('input');
+        box.type = 'checkbox';
+        box.id = id;
+        box.value = item.materialId;
+        box.dataset['writingMaterial'] = item.materialId;
+        box.checked = state.materialIds.includes(item.materialId);
+        box.disabled = busy || !item.selectable;
+        box.addEventListener('change', () => {
+          state.materialIds = box.checked
+            ? offer.items.filter((entry) => entry.materialId === item.materialId || state.materialIds.includes(entry.materialId)).map((entry) => entry.materialId)
+            : state.materialIds.filter((entry) => entry !== item.materialId);
+          state.problem = null;
+        });
+        const label = el('label', undefined, writingMaterialLabel(item));
+        label.htmlFor = id;
+        row.append(box, label);
+        if (item.reason !== null) {
+          const reason = el('span', 'field-note writing-material-reason', item.reason);
+          reason.id = uid('material-reason');
+          box.setAttribute('aria-describedby', reason.id);
+          row.append(reason);
+        }
+        list.append(row);
+      }
+      node.append(list);
+    }
+    if (offer.more > 0) node.append(el('p', 'field-note writing-materials-more', writingMaterialsMore(offer.more)));
+    return node;
+  }
+
+  /**
    * 先看计划: the Task prepared as one cooperative job, then its plan opened in the Task Drawer, whose bar starts it. 快速开始 (S84b;
    * TASK-017, TASK-020, TASK-026) prepares it the same way and then starts the plan just frozen under `rule`, exactly as 开始任务
    * would start it; whatever would make the start differ from the rule leaves the Task at its plan, open in the drawer with the
@@ -343,6 +396,8 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
         audience: state.audience,
         channel: state.channel,
         requirements: state.requirements.trim().length === 0 ? null : state.requirements,
+        // In the order the row offers them, so the same ticks always make the same plan (Issue #428).
+        materialIds: [...state.materialIds],
       });
       const completed = await options.awaitServiceJob(job, (next) => options.setStatus(next.progress.label, 'busy'));
       busy = false;

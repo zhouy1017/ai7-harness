@@ -153,6 +153,7 @@ describe('route-aware readiness of the authorization bar (S74a A3; AUTH-005, MOD
       defaultRule: { canSet: false, reason: '这份计划不能设为快速开始默认。', planEnvelopeDigest: null, current: null, binds: [], startedBy: null },
       runControl: null,
       redo: null,
+      resend: null,
       reprepare: null,
       clarifications: [],
       budgetStop: null,

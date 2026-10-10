@@ -659,6 +659,12 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
         try {
           body = await response.json();
         } catch {
+          // 结果待确认 (Issue #51, S16c): the service accepted the request and its answer never came back whole — the
+          // connection dropped mid-answer, or what arrived does not read — so whether it was processed and billed cannot be
+          // known. It is no failure to retry and no answer to read. A refusal's unreadable body is still that refusal.
+          if (response.status === 200) {
+            return { kind: 'failure', code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN, message: '模型服务已接受请求，但回答没有完整传回。', status: 200 };
+          }
           body = null;
         }
         // Tool calls are read only for a request that offered tools (Issue #473); to any other the response reads as before.

@@ -36,6 +36,7 @@ import { PLAN_MOVED_LABEL } from './reconnect-preflight.js';
 import { graphemeCount, sliceGraphemes } from './analysis/factual-review-contract.js';
 import type { ReviewRunPlanFacts } from './review/review-runs.js';
 import { WRITING_COPY_SIZES, WRITING_COPY_SIZES_V1, WRITING_EXEMPLAR_MOVED, type WritingCopyRules, writingExemplarLine, type WritingContractInput } from './writing/writing-contract.js';
+import type { WritingMaterialSource } from './writing-tasks.js';
 
 /**
  * The Task Drawer's plan projection (Issue #418, plan slice S72; editor-surfaces §6 ③, V2-UX-PLAN-001 to
@@ -78,6 +79,24 @@ export const ACCOUNT_LIMIT_UNKNOWN = '未知 · 提供方未返回';
 /** ⑤'s 账户限额 once the provider's limit stopped the Run (Issue #51, S16b; MODEL-018): what the provider said. */
 export function accountLimitReached(condition: string): string {
   return `已达到 · ${condition}`;
+}
+/**
+ * 结果待确认 (Issue #51, S16c; CTRL-007, COPY-009, interaction-spec §807, §1036): the pill of a Run stopped on sent requests
+ * whose results cannot be known — never 任务已中断 · 可续行 nor 已取消.
+ */
+export const OUTCOME_UNKNOWN_STATE = { key: 'outcome-unknown', label: '结果待确认' } as const;
+/**
+ * Why 结果待确认 offers no 改计划重做 (Issue #51, S16c; CONT-011 lists Redo among the blocked repeats): the editor settles the
+ * uncertainty first with 取消任务, which keeps each such range as its own gap; a redo after that discloses the resend.
+ */
+export const OUTCOME_UNKNOWN_NO_REDO = '结果待确认：先取消任务，确定这次运行到此为止；之后才能改计划重做。';
+/**
+ * A Task that recomputes ranges whose earlier request's result could not be known (Issue #51, S16c; CONT-011): it names them,
+ * says the earlier request may already have been processed and billed, and that this Task sends it again — under the fresh
+ * authorization 开始任务 gives.
+ */
+export function resendDisclosure(units: ReadonlyArray<number>): string {
+  return `第 ${units.join('、')} 个阅读范围上一次的请求已发出、结果待确认，可能已被模型服务处理并计费；这项任务会再发一次它的请求，开始任务即重新授权这次发送。`;
 }
 /** No Run has measured a duration this estimate could stand on. */
 export const DURATION_UNKNOWN = '暂无可靠估计';
@@ -469,6 +488,7 @@ export function fixedTaskPlan(input: {
     defaultRule: noDefaultRule(FIXED_TASK_NO_RULE),
     runControl: null,
     redo: null,
+    resend: null,
     reprepare: null,
     clarifications: [],
     budgetStop: null,
@@ -520,7 +540,10 @@ function baselineState(projection: BaselineAnalysisProjection, stopped?: Baselin
       return { key: 'paused', label: '已暂停' };
     case 'resumable':
       // 模型服务账户限额 (Issue #51, S16b; RUN-012): its own words, never 任务已中断 · 可续行's.
-      return stopped?.accountLimit != null ? { ...ACCOUNT_LIMIT_STATE } : { key: 'resumable', label: '任务已中断 · 可续行' };
+      return stopped?.accountLimit != null ? { ...ACCOUNT_LIMIT_STATE }
+        // 结果待确认 (Issue #51, S16c): its own words too.
+        : stopped?.outcomeUnknown?.stopped === true ? { ...OUTCOME_UNKNOWN_STATE }
+          : { key: 'resumable', label: '任务已中断 · 可续行' };
     // 任务等待你的说明 (Issue #422, S76d; CLAR-004): every unit the Run could read is read; it waits for the answer.
     case 'awaiting-clarification':
       return { key: 'awaiting-clarification', label: '任务等待你的说明' };
@@ -619,6 +642,8 @@ export function baselineAnalysisPlan(input: {
   stopped?: BaselineStoppedRunFacts;
   /** What the Task's Run asked the editor, and the answers (Issue #422, S76d); absent reads as nothing asked. */
   clarifications?: ReadonlyArray<ClarificationFacts>;
+  /** The ranges this Task sends again whose earlier result could not be known (Issue #51, S16c); absent reads as none. */
+  resendUnits?: ReadonlyArray<number>;
 }): TaskPlanProjection {
   const { projection, bookTitle, blocks } = input;
   const intent = projection.taskIntent;
@@ -789,11 +814,18 @@ export function baselineAnalysisPlan(input: {
       ]),
       // 模型服务账户限额 (Issue #51, S16b): the refusal as AI7 classified it, one step below the bar's words.
       ...(input.stopped?.accountLimit == null ? [] : [{ key: 'account-limit', label: '模型服务账户限额', value: input.stopped.accountLimit.condition }]),
+      // 结果待确认 (Issue #51, S16c): each unconfirmed range's outcome as AI7 classified it, one step below the bar's words.
+      ...(input.stopped?.outcomeUnknown == null ? [] : [{
+        key: 'outcome-unknown',
+        label: '结果待确认',
+        value: input.stopped.outcomeUnknown.units.map((unit) => `第 ${unit.unitOrdinal} 个阅读范围 · 已发送 ${unit.attempts} 次 · ${unit.reason}`).join('；'),
+      }]),
     ],
     start: baselineStart(projection, envelope.digest),
     defaultRule: input.defaultRule ?? noDefaultRule(BASELINE_NO_RULE),
     runControl: baselineRunControl(projection, input.stopped),
     redo: baselineRedo(projection, input.stopped),
+    resend: baselineResend(input.resendUnits),
     reprepare: baselineReprepare(projection),
     clarifications: baselineClarifications(projection, input.clarifications ?? [], input.stopped),
     budgetStop: baselineBudgetStop(projection),
@@ -961,6 +993,7 @@ export function initialEvaluationPlan(input: {
     defaultRule: noDefaultRule(INITIAL_EVALUATION_NO_RULE),
     runControl: null,
     redo: null,
+    resend: null,
     reprepare: null,
     clarifications: [],
     budgetStop: null,
@@ -1119,6 +1152,7 @@ export function readersReportPlan(input: {
     defaultRule: noDefaultRule(READERS_REPORT_NO_RULE),
     runControl: null,
     redo: null,
+    resend: null,
     reprepare: null,
     clarifications: [],
     budgetStop: null,
@@ -1152,8 +1186,40 @@ export function writingCopyNotDo(rules: WritingCopyRules): string {
   return `不照抄范例：与范例有连续 ${sizes.copyWindow} 个字以上相同（跨标点、空格或外文词时 ${sizes.copyWindowAcross} 个字；拉丁字母文字为 ${sizes.copyWords} 个词，跨标点、数字或编号时 ${sizes.copyWordsAcross} 个词）的草稿不予采用`;
 }
 
+/**
+ * The plan's 不会做 line on copying a 资料库 item a `/3` Task references (Issue #428): the same rules as for a 范例, each item on
+ * its own. Only a plan that lists an item says it.
+ */
+export function writingMaterialCopyNotDo(): string {
+  const sizes = WRITING_COPY_SIZES;
+  return `不照抄资料库资料：与任何一份资料有连续 ${sizes.copyWindow} 个字以上相同（规则与范例相同，每份资料各自比较）的草稿不予采用`;
+}
+
 /** A writing Task whose 范例 is no longer here (#688 re-review): its state, and what its 参考 line adds. */
 export const WRITING_EXEMPLAR_GONE_LABEL = '不能开始 · 范例已不在本机' as const;
+/** A writing Task one of whose 资料库 items no longer reads at the build its plan pinned (Issue #428). */
+export const WRITING_MATERIAL_GONE_LABEL = '不能开始 · 参考资料已不在本机' as const;
+
+/**
+ * One 资料库 item a writing plan lists under 允许参考 (Issue #428): its pin and the facts the plan names it by, and why it does
+ * not read at that build, or `null` when it does.
+ */
+export interface WritingPlanMaterial {
+  readonly source: WritingMaterialSource;
+  readonly refusal: { readonly code: string; readonly message: string } | null;
+}
+
+/** The first of a writing Task's 资料库 items that keeps a never-started Task from starting, or `null` (Issue #428). */
+function writingMaterialGone(projection: WritingProjection, materials: ReadonlyArray<WritingPlanMaterial>): WritingPlanMaterial | null {
+  return projection.authorization === null ? materials.find((material) => material.refusal !== null) ?? null : null;
+}
+
+/** The plan's line for one 资料库 item under 允许参考 (Issue #428; TASK-032): the product record, its size, the pinned build. */
+export function writingMaterialReferenceLine(material: WritingPlanMaterial): string {
+  const line = `资料库资料《${material.source.title}》：已提取 ${groupedCount(material.source.characters)} 字，按计划冻结的索引版本读取（只参照，不照抄）`;
+  return material.refusal === null ? line : `${line}——${material.refusal.code === 'MATERIAL_REFERENCE_UNAVAILABLE'
+    ? '这份资料现在不能列进这本书任务的「允许参考」' : '计划冻结的索引版本已不在本机'}，这次起草不能开始`;
+}
 
 /** Whether a writing Task can never start because its 范例 is no longer here: not yet started, its exemplars' text gone. */
 function writingExemplarGone(projection: WritingProjection, exemplarsHere: boolean): boolean {
@@ -1164,8 +1230,9 @@ function writingExemplarGone(projection: WritingProjection, exemplarsHere: boole
  * A writing Task's state in the drawer's own words, for 交付物's 新建文档 · 写作任务 beside the drawer — a Task whose 范例 is
  * no longer here says so on both (Issue #698).
  */
-export function writingTaskStateLabel(projection: WritingProjection, exemplarsHere: boolean): string {
-  return writingExemplarGone(projection, exemplarsHere) ? WRITING_EXEMPLAR_GONE_LABEL : writingState(projection).label;
+export function writingTaskStateLabel(projection: WritingProjection, exemplarsHere: boolean, materials: ReadonlyArray<WritingPlanMaterial> = []): string {
+  if (writingExemplarGone(projection, exemplarsHere)) return WRITING_EXEMPLAR_GONE_LABEL;
+  return writingMaterialGone(projection, materials) !== null ? WRITING_MATERIAL_GONE_LABEL : writingState(projection).label;
 }
 export const WRITING_EXEMPLAR_GONE_SUFFIX = '——这些范例已不在本机，这次起草不能再开始' as const;
 
@@ -1176,7 +1243,7 @@ export const WRITING_NO_RULE = '这份写作计划现在不能设为快速开始
  * What a writing Task references, in the plan's words (DELIV-007): each part of its frozen reference set as it is there, or
  * that the Book has none — read from the contract input, never from anything the Task did not freeze.
  */
-export function writingReferenceLines(input: WritingContractInput, exemplarsHere = true): string[] {
+export function writingReferenceLines(input: WritingContractInput, exemplarsHere = true, materials: ReadonlyArray<WritingPlanMaterial> = []): string[] {
   const named = (list: ReadonlyArray<string>, none: string): string => (list.length === 0 ? none : list.join('、'));
   const synopsis = input.synopsis;
   const evaluation = input.evaluation;
@@ -1191,6 +1258,8 @@ export function writingReferenceLines(input: WritingContractInput, exemplarsHere
         : `，营销要点：目标读者 ${evaluation.market.readers.length} 条、差异化卖点 ${evaluation.market.sellingPoints.length} 条、渠道与策略 ${evaluation.market.channels.length} 条`}`,
     // A 范例 the Task referenced and this data no longer holds is said so where it is named (#688 re-review).
     exemplarsHere ? writingExemplarLine(input.type.label, input.exemplars) : `${writingExemplarLine(input.type.label, input.exemplars)}${WRITING_EXEMPLAR_GONE_SUFFIX}`,
+    // The 资料库 items the editor listed under 允许参考, one line each, after the 范例 (Issue #428); a plan that lists none has none.
+    ...materials.map(writingMaterialReferenceLine),
     `图书信息：《${input.book.title}》 · 作者：${named(input.book.authors, '未填写')} · 责编：${named(input.book.editors, '未填写')} · 书系：${named(input.book.series, '不在任何书系中')}`,
     `你写的受众「${input.audience}」、渠道「${input.channel}」${input.requirements === null ? '' : `与其他要求「${input.requirements}」`}`,
   ];
@@ -1216,10 +1285,13 @@ export function writingPlan(input: {
   defaultRule?: TaskPlanDefaultRuleProjection;
   /** The copy rules the Task's frozen contract carries (#704 P2-2): the 不会做 line names those, not today's. */
   copyRules?: WritingCopyRules;
+  /** The 资料库 items the Task's plan lists under 允许参考 (Issue #428), as its row pins them: none for a `/1` or `/2` Task. */
+  materials?: ReadonlyArray<WritingPlanMaterial>;
 }): TaskPlanProjection {
   const { projection, bookTitle, blocks } = input;
   const task = input.input;
   const exemplarsHere = input.exemplarsHere ?? true;
+  const materials = input.materials ?? [];
   const intent = projection.taskIntent;
   const checkpoint = projection.checkpoint;
   const manifest = projection.coverageManifest;
@@ -1237,12 +1309,15 @@ export function writingPlan(input: {
   const ceiling = provider.runBudgetCeiling;
   const revision = projection.planRevision;
   const boundary = envelope.boundary;
-  const gone = writingExemplarGone(projection, exemplarsHere);
-  const state = gone ? { key: 'ready' as const, label: WRITING_EXEMPLAR_GONE_LABEL } : writingState(projection);
+  // A Task whose 范例 is no longer here, or one of whose 资料库 items no longer reads at the build its plan pinned (Issue #428), is
+  // never started.
+  const materialGone = writingExemplarGone(projection, exemplarsHere) ? null : writingMaterialGone(projection, materials);
+  const gone = writingExemplarGone(projection, exemplarsHere) || materialGone !== null;
+  const state = gone ? { key: 'ready' as const, label: materialGone === null ? WRITING_EXEMPLAR_GONE_LABEL : WRITING_MATERIAL_GONE_LABEL } : writingState(projection);
   const needsModelConnection = route.kind === 'opencode-go';
   // A Task whose 范例 is no longer here is never started (#688 re-review): the bar says why, and offers nothing that starts it.
   const start: TaskPlanStartProjection = gone
-    ? { readiness: 'unavailable', needsModelConnection, planEnvelopeDigest: null, categoryDigests: [], reconfirm: null, unavailableReason: WRITING_EXEMPLAR_MOVED }
+    ? { readiness: 'unavailable', needsModelConnection, planEnvelopeDigest: null, categoryDigests: [], reconfirm: null, unavailableReason: materialGone?.refusal?.message ?? WRITING_EXEMPLAR_MOVED }
     : projection.authorization !== null
     ? startedBar(needsModelConnection)
     : !projection.actions.canAuthorize
@@ -1262,9 +1337,9 @@ export function writingPlan(input: {
     },
     scope: {
       process: `《${bookTitle}》全书 · ${groupedCount(reading.graphemes)} 字 · ${units} 个阅读范围`,
-      reference: writingReferenceLines(task, exemplarsHere),
+      reference: writingReferenceLines(task, exemplarsHere, materials),
       send: live
-        ? `全书各阅读范围的稿件正文（${units} 个）、上面列出的参考材料——其中包括其他图书的范例原文——与你写的受众、渠道和要求，以及汇总时各处段落的说明`
+        ? `全书各阅读范围的稿件正文（${units} 个）、上面列出的参考材料——其中包括其他图书的范例原文${materials.length === 0 ? '' : '与资料库资料原文'}——与你写的受众、渠道和要求，以及汇总时各处段落的说明`
         : '不发送任何内容',
       notRead: NOT_READ,
     },
@@ -1300,6 +1375,7 @@ export function writingPlan(input: {
       editorial: [
         ...EDITORIAL_NOT_DO,
         writingCopyNotDo(input.copyRules ?? 2),
+        ...(materials.length === 0 ? [] : [writingMaterialCopyNotDo()]),
         '不交付、不发送：草稿在稿件编辑面上由你修改',
         '不改评估记录与基线分析',
         '不读这本书以外的稿件',
@@ -1340,6 +1416,12 @@ export function writingPlan(input: {
       { key: 'reducer-stages', label: '归约阶段', value: plan.reducerStages.join(' → ') },
       { key: 'stop-condition', label: '停止条件', value: plan.stopCondition },
       { key: 'prompt-contract', label: '提示契约摘要', value: envelope.promptContractDigest },
+      // 允许参考's 资料库 items as product records and exact versions (Issue #428; TASK-032, TASK-036).
+      ...(materials.length === 0 ? [] : [{
+        key: 'material-references',
+        label: '允许参考的资料库资料',
+        value: materials.map(({ source }) => `《${source.title}》 · ${source.materialId} · 索引版本 ${source.indexDigest}`).join('；'),
+      }]),
       { key: 'dispatch', label: '派发状态', value: envelope.summary },
       { key: 'plan-envelope', label: '计划权限边界', value: envelope.digest },
       ...(projection.authorization === null ? [] : [
@@ -1353,6 +1435,7 @@ export function writingPlan(input: {
     defaultRule: input.defaultRule ?? noDefaultRule(WRITING_NO_RULE),
     runControl: null,
     redo: null,
+    resend: null,
     reprepare: null,
     clarifications: [],
     budgetStop: null,
@@ -1506,6 +1589,7 @@ export function evaluationRewritePlan(input: {
     defaultRule: noDefaultRule(EVALUATION_REWRITE_NO_RULE),
     runControl: null,
     redo: null,
+    resend: null,
     reprepare: null,
     clarifications: [],
     budgetStop: null,
@@ -1649,6 +1733,8 @@ export function baselineCancellationImpact(
     unitsTotal: number;
     bindingHolds?: boolean;
     waiting?: ReadonlyArray<{ unitOrdinal: number; answered: boolean }>;
+    /** The kept ranges whose sent requests' results cannot be known (Issue #51, S16c): each stays its own gap. */
+    unconfirmed?: ReadonlyArray<number>;
   } | null = null,
 ): ReadonlyArray<string> {
   // An update Run reads only the ranges it recomputes: the rest it names as such, and the ranges it reuses are kept.
@@ -1689,13 +1775,19 @@ export function baselineCancellationImpact(
         return ['这项任务已经停下，它已保存的阅读进度无法核对；取消后不会发送任何内容，也不会形成结果集修订版。', CANCELLATION_NO_EFFECTS];
       }
       const asked = kept.waiting ?? [];
-      if (unitsSettled === 0 && asked.length === 0) {
+      const unconfirmed = kept.unconfirmed ?? [];
+      if (unitsSettled === 0 && asked.length === 0 && unconfirmed.length === 0) {
         return ['这项任务还没有读完任何阅读范围；取消后不会发送任何内容，也不会形成结果集修订版。', CANCELLATION_NO_EFFECTS];
       }
       return [
         `这项任务已经停下；${restOf(Math.max(0, unitsTotal - unitsSettled - asked.length))}之后的归纳、抽样都不再进行，不再发送任何内容。`,
-        ...(unitsSettled === 0 ? [] : [partial(unitsSettled)]),
+        // Ranges kept as 结果待确认 gaps (Issue #51, S16c) are named on their own line, never counted as read.
+        ...(unitsSettled - unconfirmed.length <= 0 ? [] : [partial(unitsSettled - unconfirmed.length)]),
         ...waitingLines(asked, unitsSettled > 0),
+        // 结果待确认 (Issue #51, S16c): their requests were sent, so they are gaps of their own — never ranges not attempted.
+        ...(unconfirmed.length === 0 ? [] : [
+          `${unconfirmed.map((ordinal) => `第 ${ordinal} 个`).join('、')}阅读范围的请求已发出、结果待确认；不会再发，${kept.bindingHolds === false ? '' : '在这份修订版里'}记为结果待确认的缺口，不记为未尝试。`,
+        ]),
         CANCELLATION_NO_EFFECTS,
       ];
     }
@@ -1761,6 +1853,7 @@ function baselineRunControl(projection: BaselineAnalysisProjection, stopped?: Ba
   // a stopped one — paused, left 可续行, or waiting for the editor's answer — continues from it.
   const kept = held || stopped === undefined ? null : {
     unitsSettled: stopped.unitsSettled, unitsTotal: stopped.unitsTotal, bindingHolds: stopped.bindingHolds, waiting: stopped.waiting,
+    unconfirmed: stopped.outcomeUnknown?.units.map((unit) => unit.unitOrdinal) ?? [],
   };
   const continuation = kept !== null && (run.state === 'paused' || run.state === 'resumable' || waitsForAnswer) ? { unitsSettled: kept.unitsSettled, unitsTotal: kept.unitsTotal } : null;
   const counts = projection.update?.reusePlan?.counts ?? null;
@@ -1776,14 +1869,21 @@ function baselineRunControl(projection: BaselineAnalysisProjection, stopped?: Ba
     // CTRL-001 and CTRL-008: a Run executing its units, or admitted and waiting its turn, pauses in one click.
     pause: { reason: (run.state === 'executing' || run.state === 'admitted') && held ? null : RUN_CONTROL_PAUSE_REASON },
     // A Run waiting for the editor's answer goes on when they answer (CLAR-006), never by 续行.
-    resume: continuation === null || waitsForAnswer ? null : { reason: stopped!.blockers.length === 0 ? null : stopped!.blockers.join('') },
-    redo: { reason: continuation === null ? RUN_CONTROL_REDO_REASON : runBegan(run) ? null : RUN_CONTROL_REDO_NOT_BEGUN_REASON },
+    // 结果待确认 (Issue #51, S16c; ADR 0034, CONT-011, CONT-016) has no 续行: the Run never goes on from it.
+    resume: continuation === null || waitsForAnswer || stopped?.outcomeUnknown?.stopped === true ? null : { reason: stopped!.blockers.length === 0 ? null : stopped!.blockers.join('') },
+    redo: {
+      reason: stopped?.outcomeUnknown?.stopped === true && kept !== null ? OUTCOME_UNKNOWN_NO_REDO
+        : continuation === null ? RUN_CONTROL_REDO_REASON : runBegan(run) ? null : RUN_CONTROL_REDO_NOT_BEGUN_REASON,
+    },
     activity: run.progress,
     executingSince: run.transitions.find((transition) => transition.state === 'executing')?.recordedAt ?? null,
     continuation,
     update,
     accountLimit: run.state === 'resumable' && stopped?.accountLimit != null
       ? { unitOrdinal: stopped.accountLimit.unitOrdinal, condition: stopped.accountLimit.condition }
+      : null,
+    outcomeUnknown: kept !== null && stopped?.outcomeUnknown != null
+      ? { units: stopped.outcomeUnknown.units.map((unit) => ({ unitOrdinal: unit.unitOrdinal, attempts: unit.attempts })), stopped: stopped.outcomeUnknown.stopped }
       : null,
   };
 }
@@ -1824,6 +1924,8 @@ function baselineRedo(projection: BaselineAnalysisProjection, stopped?: Baseline
   // redone at once, as a cancelled one is — neither 续行 nor 重试 is offered for it.
   const budgetReached = run.state === 'interrupted' && projection.taskOutcome?.stop?.reason === 'run-budget-ceiling-reached';
   if (!cancelledAfterStart && !stoppedRun && !budgetReached) return null;
+  // 结果待确认 itself is never redone (Issue #51, S16c; CONT-011): 取消任务 settles it first.
+  if (stoppedRun && stopped!.outcomeUnknown?.stopped === true) return null;
   // A stopped Run's kept ranges are carried only while this launch can still form them into its partial revision.
   const carries = stoppedRun
     ? (stopped!.unitsSettled ?? 0) > 0 && stopped!.bindingHolds
@@ -1833,7 +1935,9 @@ function baselineRedo(projection: BaselineAnalysisProjection, stopped?: Baseline
     : projection.update === null ? null : { mode: projection.update.mode, selectedRange: projection.update.selectedRange };
   const prepare = { goal: update === null ? BASELINE_ANALYSIS_TASK_GOAL : BASELINE_ANALYSIS_MODE_GOALS[update.mode], update, redoOf: run.runRecordId };
   if (!stoppedRun) return { summary: [], prepare };
-  const kept = stopped!.unitsSettled ?? 0;
+  // Ranges kept as 结果待确认 gaps (Issue #51, S16c) are counted apart from the ranges read, never as read.
+  const unconfirmed = stopped!.outcomeUnknown?.units.map((unit) => unit.unitOrdinal) ?? [];
+  const kept = (stopped!.unitsSettled ?? 0) - unconfirmed.length;
   // 同步到当前稿件 reuses the ranges the Run read to a result and reads its gaps again.
   const closed = stopped!.unitsClosed ?? 0;
   const total = stopped!.unitsTotal;
@@ -1851,9 +1955,11 @@ function baselineRedo(projection: BaselineAnalysisProjection, stopped?: Baseline
         : kept === 0
           ? '这项任务会在这里停下并取消；它还没有读完任何阅读范围，不会形成结果集修订版。'
           : carries
-            ? `这项任务会在这里停下并取消；已读完的 ${kept} 个阅读范围保留在一份新的结果集修订版里，没读到的记为未尝试。`
-            : `这项任务会在这里停下并取消；执行绑定已经变化，已读完的 ${kept} 个阅读范围不能沿用，不会形成结果集修订版。`,
+            ? `这项任务会在这里停下并取消；已读完的 ${kept} 个阅读范围${unconfirmedApart(unconfirmed.length)}保留在一份新的结果集修订版里，没读到的记为未尝试。`
+            : `这项任务会在这里停下并取消；执行绑定已经变化，已读完的 ${kept} 个阅读范围${unconfirmedApart(unconfirmed.length)}不能沿用，不会形成结果集修订版。`,
       next,
+      // 结果待确认 (Issue #51, S16c): the new Task reads them again, and says so before it is started.
+      ...(unconfirmed.length === 0 ? [] : [resendDisclosure(unconfirmed)]),
       CANCELLATION_NO_EFFECTS,
       '新任务由你开始，不会自己运行。',
     ],
@@ -1867,6 +1973,21 @@ function baselineRedo(projection: BaselineAnalysisProjection, stopped?: Baseline
  * cannot: the plan moved, its progress no longer reads back, or, read by the service, the model service, the network
  * or the slot.
  */
+/** `（另有 M 个结果待确认）` beside a count of ranges read (Issue #51, S16c), or nothing when there are none. */
+function unconfirmedApart(count: number): string {
+  return count === 0 ? '' : `（另有 ${count} 个结果待确认）`;
+}
+
+/**
+ * 结果待确认 after the Run that left it ended (Issue #51, S16c; CONT-011): the ranges this Task recomputes whose predecessor
+ * revision holds them as `outcome-unknown` gaps — their earlier request was sent and may have been processed and billed —
+ * named in the Plan Preview with what this Task does about them; `null` when it recomputes none. The store matches them by
+ * content key (`resendUnitsOf`), whatever the reason each is recomputed.
+ */
+function baselineResend(units: ReadonlyArray<number> | undefined): TaskPlanProjection['resend'] {
+  return units === undefined || units.length === 0 ? null : { units: [...units], statement: resendDisclosure(units) };
+}
+
 export interface BaselineStoppedRunFacts {
   /** The units that asked the editor and have not settled since, and whether each was answered (Issue #422, S76d). */
   readonly waiting: ReadonlyArray<{ readonly unitOrdinal: number; readonly answered: boolean }>;
@@ -1882,6 +2003,14 @@ export interface BaselineStoppedRunFacts {
   readonly bindingHolds: boolean;
   /** The provider's account limit stopped the Run (Issue #51, S16b), in the provider's words; absent or `null` otherwise. */
   readonly accountLimit?: { readonly condition: string; readonly unitOrdinal: number | null } | null;
+  /**
+   * 结果待确认 (Issue #51, S16c): the ranges the stopped Run holds whose sent requests' results cannot be known, with how often
+   * each was sent and the gap's own words, and whether the Run stopped 结果待确认 itself; absent or `null` when it holds none.
+   */
+  readonly outcomeUnknown?: {
+    readonly units: ReadonlyArray<{ readonly unitOrdinal: number; readonly attempts: number; readonly reason: string }>;
+    readonly stopped: boolean;
+  } | null;
 }
 
 /** 续行's own words when the service cannot let the Run go on now (CONT-015): each names what it waits for. */
@@ -2117,6 +2246,7 @@ export function reviewRunPlan(input: {
     defaultRule: noDefaultRule(REVIEW_RUN_NO_RULE),
     runControl: null,
     redo: null,
+    resend: null,
     reprepare: null,
     clarifications: [],
     budgetStop: null,

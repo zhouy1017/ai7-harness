@@ -479,6 +479,11 @@ export interface BackgroundAnalysisFacts {
   readonly startingPoint: BackgroundAnalysisStartingPoint;
   /** Whether the working text moved since the Enrollment was made. */
   readonly movedSinceEnrollment: boolean;
+  /**
+   * The Book's latest revision holds ranges whose request was sent and whose result is unknown (Issue #51, S16c): any Task
+   * that brings the analysis up to date would send them again, which only the editor may start (CTRL-007, CONT-011).
+   */
+  readonly unconfirmedPending: boolean;
   /** The Book's latest Task — anyone's — read exactly this working text and did not bring the analysis up to it. */
   readonly attemptedAtThisText: boolean;
   /** How long ago the last confirmed edit of the manuscript was made, whatever revision it was made on; `null` when none was. */
@@ -520,6 +525,7 @@ export function backgroundAnalysisDecisionOf(read: BackgroundAnalysisFactReader)
   if (unfinished === 'prepared') return { kind: 'wait', reason: BACKGROUND_TASK_PREPARED };
   if (!read.changedSinceEditorTask()) return { kind: 'none', reason: BACKGROUND_EDITOR_TASK };
   if (read.startingPoint() === 'prospective' && !read.movedSinceEnrollment()) return { kind: 'none', reason: BACKGROUND_NOT_MOVED };
+  if (read.unconfirmedPending()) return { kind: 'wait', reason: BACKGROUND_OUTCOME_UNKNOWN };
   if (read.attemptedAtThisText()) return { kind: 'wait', reason: BACKGROUND_ATTEMPTED };
   const sinceLastEditMs = read.sinceLastEditMs();
   const quietMs = read.quietMs();
@@ -593,6 +599,8 @@ export const BACKGROUND_TASK_PREPARED = '这本书有一份你准备好但还没
 export const BACKGROUND_CURRENT = '分析结果与当前稿件一致，没有要做的。';
 export const BACKGROUND_EDITOR_TASK = '你最近开始或准备过的任务之后，稿件还没有新的改动：后台分析不重做你开始过的任务。';
 export const BACKGROUND_NOT_MOVED = '登记之后稿件还没有改动。';
+/** 结果待确认 (Issue #51, S16c): the dispatcher never re-sends a request whose result is unknown; the editor starts that Task. */
+export const BACKGROUND_OUTCOME_UNKNOWN = '最新的分析里有阅读范围的请求结果待确认；再分析会再发一次它，所以后台不开始，等你自己开始一项任务。';
 export const BACKGROUND_ATTEMPTED = '最近一项任务读的就是这一版稿件，没有把结果带到它；稿件再改动后才会再试。';
 export function backgroundQuietReason(quietMs: number): string {
   return `稿件刚改动过；停下 ${Math.round(quietMs / 1000)} 秒后开始。`;
