@@ -3,7 +3,6 @@ import {
   ACTUALS_EMPTY,
   CALIBRATION_METHOD,
   CALIBRATION_OFF_EFFECT,
-  CALIBRATION_OFFSET_WAITING,
   CALIBRATION_PAGE_LEDE,
   CALIBRATION_SCOPE,
   CALIBRATION_WAITING,
@@ -12,6 +11,7 @@ import {
   actualsLine,
   calibrationBasisLine,
   calibrationOffsetLine,
+  calibrationOffsetWaiting,
   calibrationProgressLine,
   calibrationUnreadableLine,
   calibrationWithoutBasisLine,
@@ -180,7 +180,10 @@ describe('评估校准与预测 words', () => {
     expect(CALIBRATION_METHOD).toContain('你的定稿分数减去 AI7 初评分数的平均值');
     expect(CALIBRATION_METHOD).toContain('取到半分');
     expect(CALIBRATION_METHOD).toContain('不另存');
-    expect(CALIBRATION_OFFSET_WAITING).toBe('校准偏移尚未计算：满 10 本调分记录后，按上述方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。');
+    // The waiting line names the gate the service answers, so it agrees with the progress line: ten in the product, two under
+    // J-11's Journey-only control (#741 review P1).
+    expect(calibrationOffsetWaiting(10)).toBe('校准偏移尚未计算：满 10 本调分记录后，按上述方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。');
+    expect(calibrationOffsetWaiting(2)).toBe('校准偏移尚未计算：满 2 本调分记录后，按上述方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。');
     expect(CALIBRATION_OFF_EFFECT).toBe('校准已关闭：新版本从 AI7 初评开始时直接用 AI7 的原始分数；可以随时再打开，关闭和打开都有记录。');
     expect(calibrationBasisLine({ basisBooks: 10 })).toBe('校准依据：10 本书的定稿评估；各评分项的偏移如下（正数表示你的定稿分数通常高于 AI7 初评）。');
     // Why the basis can be fewer Books than 调分记录 counts (P3-1): said only when it is.

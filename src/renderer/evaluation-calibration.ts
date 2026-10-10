@@ -14,7 +14,6 @@ import {
   CALIBRATION_HEADING,
   CALIBRATION_METHOD,
   CALIBRATION_OFF_EFFECT,
-  CALIBRATION_OFFSET_WAITING,
   CALIBRATION_SCOPE,
   CALIBRATION_STATUS,
   CALIBRATION_SWITCH,
@@ -25,6 +24,7 @@ import {
   actualsBookLine,
   calibrationBasisLine,
   calibrationOffsetLine,
+  calibrationOffsetWaiting,
   calibrationProgressLine,
   calibrationUnreadableLine,
   calibrationWithoutBasisLine,
@@ -116,7 +116,7 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
     const offsetNode = el('div', 'calibration-offset');
     offsetNode.dataset['calibrationOffset'] = calibration.offset === null ? 'waiting' : 'computed';
     if (calibration.offset === null) {
-      offsetNode.append(el('p', 'field-note calibration-offset-waiting', CALIBRATION_OFFSET_WAITING));
+      offsetNode.append(el('p', 'field-note calibration-offset-waiting', calibrationOffsetWaiting(calibration.threshold)));
     } else {
       offsetNode.append(el('p', 'field-note calibration-offset-basis', calibrationBasisLine(calibration.offset)));
       // Why the basis may be fewer Books than 调分记录 counts (a damaged from-初评 version): said beside the two counts.

@@ -1908,7 +1908,8 @@ async function main() {
 
     at('initial-evaluation-calibration');
     // 设置 › 评估校准与预测 counts the Book whose AI7 初评 the editor adjusted, once — 「1 本」 — and no longer says AI7's 初评 is not
-    // connected. The calibration itself waits for ten such Books.
+    // connected. The calibration itself waits for two such Books under this launch's `--j11-calibration-min-books 2` (ten in the
+    // product), and the waiting line names the same two.
     await assertRenderer(renderer, `(() => { const open = Array.from(document.querySelectorAll('[data-screen="book-evaluation"] .workbench-actions button')).find((button) => button.textContent === '工作概览'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'initial-evaluation-overview');
     await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'initial-evaluation-overview-ready');
     await click(renderer, '返回图书列表', 'initial-evaluation-library');
@@ -1917,6 +1918,8 @@ async function main() {
     // The gate reads 2 here: this launch lowers it with `--j11-calibration-min-books 2` (EVAL-011a); the product's own is ten.
     await waitFor(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration .calibration-progress')?.textContent === '调分记录 1 / 2 本 · 满 2 本后生效'`, 'initial-evaluation-calibration-count');
     await assertRenderer(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-waiting') === null`, 'initial-evaluation-calibration-connected');
+    // The offset's waiting line names the same gate as the progress line above it (#741 review P1).
+    await assertRenderer(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-offset-waiting')?.textContent === '校准偏移尚未计算：满 2 本调分记录后，按上述方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。'`, 'initial-evaluation-calibration-waiting-gate');
     const calibrationService = await renderer.evaluate(`window.ai7.inspectEvaluationCalibration({ after: null, focusBookId: null }).then((answer) => JSON.stringify([answer.calibration.adjustments, answer.calibration.initialScoresConnected, answer.calibration.active]))`);
     requireJourney(calibrationService === JSON.stringify([1, true, false]), 'initial-evaluation-calibration-service', calibrationService);
     // Back to 评估 by the manuscript's 工作 group, where the Journey goes on.
@@ -3078,35 +3081,33 @@ async function main() {
     };
     const RAW_SCORES = ['16.5', '15', '15.5', '14', '12'];
     const ai7Line = (index) => AI7_ITEM_LINES[index][2].slice(AI7_ITEM_LINES[index][2].indexOf('：') + 1);
-    let calibrationBookId = null;
-    for (const index of [1]) {
-      const name = `calibration-book-${index}`;
-      await toLanding(name);
-      // The house already holds exact sample1 as 评估旅程丙: the wizard offers 新建图书（作为不同作品）, chosen explicitly like any target.
-      calibrationBookId = await importSample1(renderer, `校准样书${index}`, sample1, name, true);
-      // AI7 reads a Book only under its enabled workspace profile: the house's Revision 2, installed for 评估旅程丙 at
-      // feedback-prerequisites, is enabled for this Book from its card on the overview the import lands on, as J-16 does.
-      await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, `${name}-profile-enable-ready`);
-      await click(renderer, '审阅并为本图书启用 Revision 2', `${name}-profile-enable`);
-      await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, `${name}-profile-enabled`);
-      await waitFor(renderer, `document.querySelector('.book-evaluation-summary')?.dataset.evaluationState === 'empty'`, `${name}-summary`);
-      await clickSelector(renderer, '.book-evaluation-summary [data-evaluation-action="open"]', `${name}-open`);
-      const fresh = await readEvaluation(renderer, (page) => page.state === 'ready' && page.initial?.state === 'none', `${name}-ready`);
-      requireJourney(JSON.stringify(fresh.initial.actions) === JSON.stringify([['prepare-initial', '准备 AI7 初评', false]]), `${name}-prepare-offered`, fresh.initial);
-      await runInitialEvaluation(name);
-      await clickSelector(renderer, '[data-evaluation-action="start-from-initial"]', `${name}-begin`);
-      const begun = await readEvaluation(renderer, (page) => page.record?.heading === '第 1 版 · AI7 初稿', `${name}-draft`);
-      requireJourney(begun.record.calibration === null && JSON.stringify(begun.record.items.map(([, , score]) => score)) === JSON.stringify(RAW_SCORES), `${name}-raw-start`, begun.record);
-      await fill(renderer, `${item('readers-and-market')} [data-evaluation-field="score"]`, '10', `${name}-readers`);
-      if (index % 2 === 1) await fill(renderer, `${item('literary-quality')} [data-evaluation-field="score"]`, '17', `${name}-literary`);
-      for (const riskId of ['facts-and-sources', 'law-rights-ethics-policy']) {
-        await tick(renderer, `${risk(riskId)} input[value="low"]`, `${name}-${riskId}-level`);
-        await fill(renderer, `${risk(riskId)} [data-evaluation-field="statement"]`, '（旅程示例）未见问题。', `${name}-${riskId}-statement`);
-      }
-      await tick(renderer, '[data-screen="book-evaluation"] .evaluation-conclusion [data-conclusion="revise"] input', `${name}-conclusion`);
-      await clickSelector(renderer, '[data-evaluation-action="finalize"]', `${name}-finalize`);
-      await waitFor(renderer, `${status} === '第 1 版评估已定稿。'`, `${name}-finalized`);
+    const name = 'calibration-book-1';
+    await toLanding(name);
+    // The house already holds exact sample1 as 评估旅程丙: the wizard offers 新建图书（作为不同作品）, chosen explicitly like any target.
+    const calibrationBookId = await importSample1(renderer, '校准样书1', sample1, name, true);
+    // AI7 reads a Book only under its enabled workspace profile: the house's Revision 2, installed for 评估旅程丙 at
+    // feedback-prerequisites, is enabled for this Book from its card on the overview the import lands on, as J-16 does.
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, `${name}-profile-enable-ready`);
+    await click(renderer, '审阅并为本图书启用 Revision 2', `${name}-profile-enable`);
+    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, `${name}-profile-enabled`);
+    await waitFor(renderer, `document.querySelector('.book-evaluation-summary')?.dataset.evaluationState === 'empty'`, `${name}-summary`);
+    await clickSelector(renderer, '.book-evaluation-summary [data-evaluation-action="open"]', `${name}-open`);
+    const fresh = await readEvaluation(renderer, (page) => page.state === 'ready' && page.initial?.state === 'none', `${name}-ready`);
+    requireJourney(JSON.stringify(fresh.initial.actions) === JSON.stringify([['prepare-initial', '准备 AI7 初评', false]]), `${name}-prepare-offered`, fresh.initial);
+    await runInitialEvaluation(name);
+    await clickSelector(renderer, '[data-evaluation-action="start-from-initial"]', `${name}-begin`);
+    const begun = await readEvaluation(renderer, (page) => page.record?.heading === '第 1 版 · AI7 初稿', `${name}-draft`);
+    requireJourney(begun.record.calibration === null && JSON.stringify(begun.record.items.map(([, , score]) => score)) === JSON.stringify(RAW_SCORES), `${name}-raw-start`, begun.record);
+    // Two departures from AI7's 初评: 读者与市场潜力 12 → 10 and 文学品质与作者声音 16.5 → 17.
+    await fill(renderer, `${item('readers-and-market')} [data-evaluation-field="score"]`, '10', `${name}-readers`);
+    await fill(renderer, `${item('literary-quality')} [data-evaluation-field="score"]`, '17', `${name}-literary`);
+    for (const riskId of ['facts-and-sources', 'law-rights-ethics-policy']) {
+      await tick(renderer, `${risk(riskId)} input[value="low"]`, `${name}-${riskId}-level`);
+      await fill(renderer, `${risk(riskId)} [data-evaluation-field="statement"]`, '（旅程示例）未见问题。', `${name}-${riskId}-statement`);
     }
+    await tick(renderer, '[data-screen="book-evaluation"] .evaluation-conclusion [data-conclusion="revise"] input', `${name}-conclusion`);
+    await clickSelector(renderer, '[data-evaluation-action="finalize"]', `${name}-finalize`);
+    await waitFor(renderer, `${status} === '第 1 版评估已定稿。'`, `${name}-finalized`);
 
     at('evaluation-calibrated-start');
     // Two 调分记录, the gate: the offset exists, over the one Book whose latest 定稿 begun from AI7's 初评 reads — 评估旅程丙's 第 15 版

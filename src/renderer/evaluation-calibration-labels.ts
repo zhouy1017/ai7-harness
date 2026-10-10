@@ -19,8 +19,13 @@ export const CALIBRATION_WAITING = 'AI7 初评尚未接通：你改过 AI7 的�
 export const CALIBRATION_SWITCH = '启用校准';
 /** How the house offset is computed (EVAL-011; EVAL-011a), said in the editor's words. */
 export const CALIBRATION_METHOD = '校准偏移 = 各本书最新一次从 AI7 初评开始并定稿的评估里，你的定稿分数减去 AI7 初评分数的平均值，取到半分；每次读取时重新计算，不另存。';
-/** Below the gate: what the offset waits for. */
-export const CALIBRATION_OFFSET_WAITING = '校准偏移尚未计算：满 10 本调分记录后，按上述方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。';
+/**
+ * Below the gate: what the offset waits for, naming the gate the service answers (`calibration.threshold`) — ten in the
+ * product, lower only under J-11's Journey-only control — so it never disagrees with the progress line above it.
+ */
+export function calibrationOffsetWaiting(threshold: number): string {
+  return `校准偏移尚未计算：满 ${threshold} 本调分记录后，按上述方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。`;
+}
 /** With the switch off: what a new version does instead, and that the switch can be turned on again. */
 export const CALIBRATION_OFF_EFFECT = '校准已关闭：新版本从 AI7 初评开始时直接用 AI7 的原始分数；可以随时再打开，关闭和打开都有记录。';
 /** The heading of the per-item offsets, with the Books they rest on. */
