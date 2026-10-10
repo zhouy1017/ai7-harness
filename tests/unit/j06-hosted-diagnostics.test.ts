@@ -57,11 +57,14 @@ describe('J-06 names what the product showed when a menu choice could not be mad
       .toBe('third-suggestion-choose-menu-mark-item-enabled-card-other-error-pane-moved');
   });
 
-  it('keeps its label when the renderer is gone by the time it is read', async () => {
+  it('says the renderer could not be read, apart from a page that showed nothing (review P3)', async () => {
     let calls = 0;
     const gone = { evaluate: async () => { if (calls++ === 0) return false; throw new Error('J-06/renderer-evaluate'); } };
     const label = await helpers.chooseFromMenu(gone, 'add-change-suggestion', 'third-suggestion-choose').then(() => null, (error: unknown) => controller.journeyCheckLabel(error));
-    expect(label).toBe('third-suggestion-choose-menu-none-item-absent-card-none-none-pane-still');
+    expect(label).toBe('third-suggestion-choose-menu-unread');
+    expect(await labelOf(null)).toBe('third-suggestion-choose-menu-unread');
+    expect(await labelOf({ menu: null, item: null, card: null, tone: '', moved: false }))
+      .toBe('third-suggestion-choose-menu-none-item-absent-card-none-none-pane-still');
   });
 
   it('fits the content-free check shape at its longest', async () => {

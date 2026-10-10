@@ -888,6 +888,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'draft-restart',
     'new-version',
     'new-version-applied',
+    // Issue #745: a pane movement made before the selection menu was drawn leaves it open; one made after closes it.
+    'menu-pane-scroll',
     'keep-current',
     'defer',
     // Issue #424 (S78): 待我处理 lists the conflict put aside, and its 解决冲突… opens 稿件冲突 of that suggestion.

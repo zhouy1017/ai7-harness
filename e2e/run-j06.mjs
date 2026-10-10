@@ -256,7 +256,7 @@ const PAGE_HELPERS = `(() => {
   };
   const layer = () => document.querySelector('.editorial-mark-layer');
   const pane = () => { const node = document.querySelector('.editor-window'); return node ? node.scrollTop + ',' + node.scrollLeft : null; };
-  const conflict =() => document.querySelector('[data-screen="proposal-conflict"] section.proposal-conflict');
+  const conflict = () => document.querySelector('[data-screen="proposal-conflict"] section.proposal-conflict');
   const draft = () => conflict()?.querySelector('[data-conflict-draft]') ?? null;
   const press = (control) => {
     if (!(control instanceof HTMLButtonElement) || control.disabled) return false;
@@ -439,13 +439,48 @@ const menuSeen = (action) => `(() => {
 /**
  * Choose one item of the menu the right-click opened. When it cannot be chosen, the label says what the product showed
  * (Issue #745): `-menu-<selection|mark|other|none>-item-<enabled|disabled|absent>-card-<state|none>-<tone>-pane-<moved|
- * still>`, the pane's word saying whether the text pane moved since the menu was drawn. A renderer gone by then reads as
- * `none` on every word and `still`, rather than replacing the label with its own failure.
+ * still>`, the pane's word saying whether the text pane moved since the menu was drawn. A renderer that could not be read
+ * by then fails as `-menu-unread`, never as a page that showed nothing, and never with the session's own failure instead.
  */
 async function chooseFromMenu(renderer, action, name) {
   if (await renderer.evaluate(`(() => { const item = window.__j06.item(${JSON.stringify(action)}); if (!(item instanceof HTMLButtonElement) || item.disabled) return false; item.click(); return true; })()`)) return;
   const seen = await renderer.evaluate(menuSeen(action)).catch(() => null);
+  if (seen === null || typeof seen !== 'object') throw journeyCheckFailure('J-06', `${name}-menu-unread`);
   throw journeyCheckFailure('J-06', `${name}-menu-${menuWord(seen?.menu)}-item-${itemWord(seen?.item)}-card-${cardWord(seen?.card)}-${toneWord(seen?.tone)}-pane-${seen?.moved === true ? 'moved' : 'still'}`);
+}
+
+/** What became of the selection menu once the pane moved, as a check label's word (Issue #745). */
+function paneScrollWord(state) {
+  switch (state) {
+    case 'open': return 'open';
+    case 'closed': return 'closed';
+    case 'unmoved': return 'unmoved';
+    case 'undrawn': return 'undrawn';
+    default: return 'unread';
+  }
+}
+
+/**
+ * Move the text pane by a fixed distance, toward its top when it can, and say what the selection menu did two frames on
+ * (Issue #745): `open`, `closed`, `unmoved` when the pane could not move, or `undrawn` when no selection menu stood where it
+ * should. With `rightClickAfter`, the right-click on `blockId` is made in the same task as the movement, so the menu is drawn
+ * after the pane moved and the movement's `scroll` event reaches it a frame later; without, the menu is already open.
+ */
+function movePaneAround(blockId, rightClickAfter) {
+  return `(async () => {
+    const pane = document.querySelector('.editor-window');
+    if (!(pane instanceof HTMLElement)) return 'undrawn';
+    if (!${rightClickAfter} && window.__j06.menu()?.dataset.markMenu !== 'selection') return 'undrawn';
+    const from = pane.scrollTop;
+    pane.scrollTop = from >= 40 ? from - 40 : from + 40;
+    if (pane.scrollTop === from) return 'unmoved';
+    if (${rightClickAfter}) {
+      window.__j06.rightClick(window.__j06.block(${JSON.stringify(blockId)}));
+      if (window.__j06.menu()?.dataset.markMenu !== 'selection') return 'undrawn';
+    }
+    await new Promise((resolveFrames) => requestAnimationFrame(() => requestAnimationFrame(resolveFrames)));
+    return window.__j06.menu()?.dataset.markMenu === 'selection' ? 'open' : 'closed';
+  })()`;
 }
 
 /** A 修改建议 over RANGE of a paragraph, made through the selection menu and its composer. */
@@ -782,6 +817,23 @@ async function main() {
     await waitFor(renderer, `window.__j06.card()?.querySelector('[data-mark-application]') && window.__j06.text(${JSON.stringify(first)}) === window.__j06Texts.now.slice(0, ${RANGE[0]}) + ${JSON.stringify(MERGED)} + window.__j06Texts.now.slice(${RANGE[1] + TYPED_INSIDE.length})`, 'new-version-written', 60_000);
     await assertRenderer(renderer, `window.__j06.card().querySelector('[data-mark-state]')?.textContent === '已应用' && window.__j06.markById(${JSON.stringify(versionId)})?.dataset.markStatus === 'applied'`, 'new-version-applied-with-its-receipt');
     await assertRenderer(renderer, `(() => { window.__j06Applied = window.__j06.text(${JSON.stringify(first)}); window.__j06Replaced = window.__j06Texts.current; return true; })()`, 'applied-text-kept');
+    cancellation.throwIfRequested();
+
+    at('menu-pane-scroll');
+    // A menu points at a place on screen (Issue #745): a scroll event reporting a movement the pane made before the menu
+    // was drawn leaves it open, and a movement made while it is open closes it. Both are read two frames on, after the
+    // movement's `scroll` event has been dispatched.
+    await rightClickUntil(
+      renderer,
+      `window.__j06.place(${JSON.stringify(third)}, ${RANGE[0]}, ${RANGE[1]})`,
+      `window.__j06.block(${JSON.stringify(third)})`,
+      `window.__j06.menu()?.dataset.markMenu === 'selection' && window.__j06.menu().textContent.includes('已选 ${RANGE[1] - RANGE[0]} 字')`,
+      'menu-scroll-open',
+    );
+    const movedBefore = paneScrollWord(await renderer.evaluate(movePaneAround(third, true)));
+    requireJourney(movedBefore === 'open', `menu-pane-moved-before-${movedBefore}`);
+    const movedAfter = paneScrollWord(await renderer.evaluate(movePaneAround(third, false)));
+    requireJourney(movedAfter === 'closed', `menu-pane-moved-after-${movedAfter}`);
     cancellation.throwIfRequested();
 
     at('keep-current');
