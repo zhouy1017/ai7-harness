@@ -101,8 +101,11 @@ import {
   reviewRunState,
   reviewRunStateLabel,
   REVIEW_RUN_CANCELLED,
+  REVIEW_RUN_LAUNCH_BLOCKED,
+  REVIEW_RUN_PLAN_MOVED,
   SERIES_RETRIEVAL_SCOPE_CHANGED,
   type ReviewLedgerRunOutcome,
+  type ReviewRunStop,
   type ReviewMarkStatus,
   type ReviewRunCategoryEventState,
 } from './review-run-state.js';
@@ -451,6 +454,14 @@ const STOPPED_UNSTARTED_DETAIL = '这次审阅已停下，这一类没有开始�
 /** What a stale reason names when the exclusion ledger no longer reads (Issue #64 review). */
 const UNREADABLE_EXCLUSIONS = '无法读取的书系检索排除记录' as const;
 const CANCELLED_DETAIL = '已取消任务：这次审阅不再继续；已经写到稿件上的发现和已形成的结果都保持原样。' as const;
+/** A Run waiting to start once online (Issue #760, S74c): a new 审阅 waits for it to start or be cancelled, as a driven one does. */
+const RUN_WAITING_REASON = '这本书有一次审阅在等待联网后开始；取消它之后才能新建审阅。' as const;
+/** A category of a Run waiting to start once online: nothing of it is sent before Reconnect Preflight starts the Run. */
+const WAITING_DETAIL = '联网后开始：恢复联网后，AI7 先核对计划再开始这次审阅；在此之前什么都没有发送。' as const;
+/** 取消 of a Run waiting to start once online (OFF-010), as each of its categories records it. */
+const WAITING_CANCELLED_DETAIL = '编辑在开始前取消了这次等待联网的审阅；没有发送任何内容，也没有产生用量。' as const;
+/** 继续审阅 of a Run waiting to start once online: only Reconnect Preflight starts it, after checking its plan (OFF-008). */
+const WAITING_DRIVE_REASON = '这次审阅在等待联网后开始：联网后 AI7 先核对计划再开始；请等待，或取消它。' as const;
 export const HOUSE_GUIDELINE_NOT_TRANSMITTABLE = 'REVIEW_GUIDELINE_NOT_TRANSMITTABLE' as const;
 
 /** Why a prepared 书系一致性 plan is no longer approvable: the Book's Series or their knowledge moved since (Issue #64, S29a). */
@@ -740,7 +751,8 @@ interface CategoryView {
 
 interface RunView {
   readonly snapshot: RunSnapshot;
-  readonly authorization: null | { readonly authorizedAt: string; readonly approvals: ReadonlyMap<string, string> };
+  /** `whenOnline` for an approval made with 联网后开始任务 (Issue #760, S74c), which the Run waits under until it begins. */
+  readonly authorization: null | { readonly authorizedAt: string; readonly approvals: ReadonlyMap<string, string>; readonly whenOnline: boolean };
   readonly driving: boolean;
   readonly categories: ReadonlyArray<CategoryView>;
   readonly findings: ReadonlyArray<FindingView>;
@@ -893,6 +905,11 @@ export class ReviewRunStore {
   /** The Review Runs being driven in this service lifetime, with the Book each belongs to. */
   readonly #driving = new Map<string, string>();
   readonly #placeWaits = new Map<string, string>();
+  /**
+   * The waiting Runs Reconnect Preflight is handing to the drive loop now (Issue #760, S74c): the one way a Run approved with
+   * 联网后开始任务 begins, and only for the moment of that hand-off. In memory only.
+   */
+  readonly #preflightAdmitted = new Set<string>();
 
   constructor(
     db: DatabaseSync,
@@ -934,6 +951,8 @@ export class ReviewRunStore {
     const head = this.#head(bookId);
     requireReview(head !== null, 'REVIEW_MANUSCRIPT_ABSENT', NO_MANUSCRIPT_REASON);
     requireReview(!this.#bookIsDriving(bookId), 'REVIEW_RUN_ACTIVE', RUN_ACTIVE_REASON);
+    // A Run waiting to start once online would find its plans replaced (Issue #760): the editor cancels it first.
+    requireReview(!this.#bookWaits(bookId), 'REVIEW_RUN_WAITING', RUN_WAITING_REASON);
     // Two preparations of one Book would prepare the same category ledgers' Tasks under each other.
     requireReview(!Array.from(this.#work.values()).some((work) => work.bookId === bookId), 'REVIEW_RUN_PREPARING', '这本书有一次审阅正在准备计划；准备完成后再新建。');
     // The configuration a preparation starts under is the one its Run snapshots, whatever is imported meanwhile (REV-012);
@@ -1194,7 +1213,13 @@ export class ReviewRunStore {
    * A2; Issue #49, S14): a new approval is then refused before anything is written, so the Run never waits in a
    * queue; a repeat of an approval already recorded answers as it always has.
    */
-  recordAuthorization(bookId: string, reviewRunId: string, planDigests: ReadonlyArray<{ categoryId: string; planEnvelopeDigest: string }>, slotBusy = false): void {
+  recordAuthorization(
+    bookId: string,
+    reviewRunId: string,
+    planDigests: ReadonlyArray<{ categoryId: string; planEnvelopeDigest: string }>,
+    slotBusy = false,
+    start: 'now' | 'when-online' = 'now',
+  ): void {
     const snapshot = this.#runOfBook(bookId, reviewRunId);
     const existing = this.#authorizationOf(reviewRunId);
     const tasks = snapshot.categories.filter((category) => category.task !== null);
@@ -1226,7 +1251,9 @@ export class ReviewRunStore {
       requireReview(excluded.length === 0, SERIES_RETRIEVAL_SCOPE_CHANGED, seriesScopeChangedReason(category.entry.label, excluded));
       requireReview(!this.#seriesKnowledgeMoved(bookId, category), 'REVIEW_PLAN_CHANGED', seriesKnowledgeMovedReason(category.entry.label));
     }
-    requireReview(!slotBusy, EXECUTION_SLOT_BUSY, EXECUTION_SLOT_BUSY_REASON);
+    // A Run approved to start once online waits in Connectivity Wait and takes no place until Reconnect Preflight starts it
+    // (Issue #760, S74c; Issue #49, S14): only an approval that would start now is refused for a busy governor.
+    requireReview(start === 'when-online' || !slotBusy, EXECUTION_SLOT_BUSY, EXECUTION_SLOT_BUSY_REASON);
     const authorizedAt = new Date().toISOString();
     const record = canonicalRecord({
       schema: AUTHORIZATION_SCHEMA,
@@ -1234,6 +1261,9 @@ export class ReviewRunStore {
       authorizedAt,
       actor: 'editor',
       interaction: 'authorize-review-run',
+      // 联网后开始任务 (OFF-005): the same one approval, which the Run waits under. An approval that starts now carries no key,
+      // so every record written before this one reads exactly as it did.
+      ...(start === 'when-online' ? { start: 'when-online' } : {}),
       approvals: tasks.map((category) => ({
         categoryId: category.categoryId,
         taskIntentId: category.task!.taskIntentId,
@@ -1474,7 +1504,123 @@ export class ReviewRunStore {
     return {
       authorizedAt: text(row.authorized_at),
       approvals: new Map((approvals as ReadonlyArray<{ categoryId: string; planEnvelopeDigest: string }>).map((entry) => [entry.categoryId, entry.planEnvelopeDigest] as const)),
+      whenOnline: record.start === 'when-online',
     };
+  }
+
+  /**
+   * Whether the Run waits in Connectivity Wait (Issue #760, S74c; OFF-005): approved with 联网后开始任务, not driven now, and
+   * nothing of it begun — no category has an event, and no category's ledger holds a Run of its Task. A Run whose drive began
+   * and was lost before anything was recorded waits again, and the next Reconnect Preflight starts it; one whose first category
+   * was authorized on its ledger is no longer waiting, and 继续审阅 takes it on as it does after any restart (Issue #657).
+   */
+  #waits(snapshot: RunSnapshot, authorization: RunView['authorization'] = this.#authorizationOf(snapshot.reviewRunId)): boolean {
+    if (authorization === null || !authorization.whenOnline || this.#driving.has(snapshot.reviewRunId)) return false;
+    if (this.#db.prepare('SELECT 1 FROM review_run_category_events WHERE review_run_id = ? LIMIT 1').get(snapshot.reviewRunId) !== undefined) return false;
+    return snapshot.categories.every((category) => category.task === null || this.#runRecordOf(category.task.taskIntentId) === null);
+  }
+
+  // ---- Connectivity Wait (Issue #760, plan slice S74c) ----------------------------------------------------------
+
+  /** Every Review Run waiting in Connectivity Wait, oldest approval first, with its Book. */
+  waitingRuns(): Array<{ bookId: string; reviewRunId: string; authorizedAt: string }> {
+    const rows = this.#db.prepare(
+      `SELECT r.*, a.authorized_at approved_at FROM review_run_authorizations a JOIN review_runs r ON r.review_run_id = a.review_run_id
+       WHERE json_extract(a.canonical_json, '$.start') = 'when-online'
+       ORDER BY a.authorized_at, r.review_run_id`,
+    ).all() as SqlRow[];
+    const waiting: Array<{ bookId: string; reviewRunId: string; authorizedAt: string }> = [];
+    for (const row of rows) {
+      const snapshot = this.#snapshotOf(row);
+      if (this.#waits(snapshot)) waiting.push({ bookId: snapshot.bookId, reviewRunId: snapshot.reviewRunId, authorizedAt: text(row.approved_at) });
+    }
+    return waiting;
+  }
+
+  /** Whether this Run still waits: Reconnect Preflight reads it again before it acts. */
+  runWaits(reviewRunId: string): boolean {
+    return this.#waits(this.#run(reviewRunId));
+  }
+
+  /** Whether one of the Book's Runs waits to start once online: no new 审阅 is prepared over it. */
+  #bookWaits(bookId: string): boolean {
+    return this.waitingRuns().some((run) => run.bookId === bookId);
+  }
+
+  /**
+   * Reconnect Preflight's local half for a waiting Run (OFF-007, OFF-008): what the one approval bound that no longer stands —
+   * every check `recordAuthorization` makes, read as the labels of what moved; none while the approval still stands. A
+   * missing credential is never among them (OFF-009).
+   */
+  preflightDrift(reviewRunId: string): ReadonlyArray<string> {
+    const snapshot = this.#run(reviewRunId);
+    const moved: string[] = [];
+    const latest = this.#db.prepare('SELECT review_run_id FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC LIMIT 1').get(snapshot.bookId) as SqlRow;
+    if (text(latest.review_run_id) !== reviewRunId) moved.push('这次审阅的计划');
+    if (procedurePinRefusal(this.#db, reviewRunId) !== null) moved.push('审阅工序');
+    if (this.#selectionMoved(snapshot)) moved.push('所选段落');
+    const approvals = this.#authorizationOf(reviewRunId)?.approvals ?? new Map<string, string>();
+    for (const category of snapshot.categories) {
+      if (category.task === null) continue;
+      let current: AnalysisProjection | null = null;
+      try {
+        current = this.#ledgers.ledgerOf(category.entry).inspect(snapshot.bookId);
+      } catch (error) {
+        if (!(error instanceof AnalysisError)) throw error;
+      }
+      const stands = current !== null && current.taskIntent?.taskIntentId === category.task.taskIntentId && current.state === 'prepared' &&
+        current.actions.canAuthorize && current.planEnvelope?.digest === category.task.planEnvelopeDigest &&
+        approvals.get(category.categoryId) === category.task.planEnvelopeDigest &&
+        this.#unverifiedTargets(category, snapshot.createdAt) === null && !this.#seriesKnowledgeMoved(snapshot.bookId, category);
+      if (!stands) moved.push(`「${category.entry.label}」的计划`);
+    }
+    return moved;
+  }
+
+  /**
+   * A waiting Run that can never start as it was approved (OFF-008): every category records why — its plan moved, or this
+   * launch cannot start it — so nothing of it is driven, and the Run reads 需要重新确认计划 or 未能完成 with the reason. Nothing
+   * was sent. The way on is a new 审阅, prepared from the manuscript as it is now.
+   */
+  blockWaiting(reviewRunId: string, reasons: ReadonlyArray<string>, cause: 'plan-moved' | 'launch'): void {
+    const snapshot = this.#run(reviewRunId);
+    requireReview(reasons.length > 0 && reasons.every((reason) => typeof reason === 'string' && reason.length > 0) && (cause === 'plan-moved' || cause === 'launch'),
+      'REVIEW_RUN_INVALID', '阻止审阅需要写明原因。');
+    requireReview(this.#waits(snapshot), 'REVIEW_RUN_NOT_WAITING', '这次审阅已不在等待中。');
+    const detail = reasons.join(' ');
+    const code = cause === 'plan-moved' ? REVIEW_RUN_PLAN_MOVED : REVIEW_RUN_LAUNCH_BLOCKED;
+    transact(this.#db, () => {
+      for (const category of snapshot.categories) this.#recordEvent(reviewRunId, category.categoryId, 'refused', detail, { extra: { code } });
+    });
+  }
+
+  /**
+   * 取消 while the Run waits to start once online (OFF-010): terminal, before anything is sent — every category records the
+   * cancellation, so the Run reads 已取消 and offers nothing more. Cancelling twice answers as the first did.
+   */
+  cancelWaiting(bookId: string, reviewRunId: string): void {
+    const snapshot = this.#runOfBook(bookId, reviewRunId);
+    if (this.#stoppedFor(reviewRunId) === 'cancelled') return;
+    requireReview(this.#waits(snapshot), 'REVIEW_RUN_NOT_WAITING', '只有等待联网后开始的审阅可以在这里取消；它已经开始或已经结束。');
+    transact(this.#db, () => {
+      for (const category of snapshot.categories) {
+        this.#recordEvent(reviewRunId, category.categoryId, 'refused', WAITING_CANCELLED_DETAIL, { extra: { code: REVIEW_RUN_CANCELLED } });
+      }
+    });
+  }
+
+  /**
+   * Reconnect Preflight starts a waiting Run (OFF-008): `drive` hands it to the drive loop, which may take it only now. The loop
+   * then starts its categories one after another exactly as an approval that started at once does.
+   */
+  admitWaiting(reviewRunId: string, drive: () => void): void {
+    requireReview(this.#waits(this.#run(reviewRunId)), 'REVIEW_RUN_NOT_WAITING', '这次审阅已不在等待中。');
+    this.#preflightAdmitted.add(reviewRunId);
+    try {
+      drive();
+    } finally {
+      this.#preflightAdmitted.delete(reviewRunId);
+    }
   }
 
   #events(reviewRunId: string, categoryId: string): CategoryEvent[] {
@@ -1549,10 +1695,14 @@ export class ReviewRunStore {
     requireReview(this.#authorizationOf(reviewRunId) !== null, 'REVIEW_RUN_NOT_AUTHORIZED', '这次审阅尚未授权。');
     requireReview(!this.#driving.has(reviewRunId), 'REVIEW_RUN_ACTIVE', '这次审阅已在进行。');
     requireReview(!this.#bookIsDriving(snapshot.bookId), 'REVIEW_RUN_ACTIVE', RUN_ACTIVE_REASON);
+    // A Run waiting to start once online is begun by Reconnect Preflight alone, once it found the plan standing (Issue #760).
+    requireReview(this.#preflightAdmitted.has(reviewRunId) || !this.#waits(snapshot), 'REVIEW_RUN_WAITING', WAITING_DRIVE_REASON);
     // A Run a Series Retrieval Exclusion stopped, or the editor then cancelled, is never driven again (Issue #64, S29b; SER-024).
     const stop = this.#stoppedFor(reviewRunId);
     requireReview(stop === null, 'REVIEW_RUN_STOPPED',
-      stop === 'cancelled' ? '这次审阅已取消；不能继续审阅。' : `这次审阅显示「${SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL}」；只能修改计划并重新授权，或取消任务。`);
+      stop === 'cancelled' ? '这次审阅已取消；不能继续审阅。'
+        : stop === 'plan-moved' ? '这次审阅等待联网时计划已经变化，没有开始；请新建一次审阅。'
+          : `这次审阅显示「${SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL}」；只能修改计划并重新授权，或取消任务。`);
     this.#driving.set(reviewRunId, snapshot.bookId);
     return snapshot.categories.map((category) => category.categoryId);
   }
@@ -2334,7 +2484,8 @@ export class ReviewRunStore {
       scopeOptions: this.#scopeOptions(head, chapters),
       newReview: head === null
         ? { available: false, unavailableReason: NO_MANUSCRIPT_REASON }
-        : driving ? { available: false, unavailableReason: RUN_ACTIVE_REASON } : { available: true, unavailableReason: null },
+        : driving ? { available: false, unavailableReason: RUN_ACTIVE_REASON }
+          : this.#bookWaits(bookId) ? { available: false, unavailableReason: RUN_WAITING_REASON } : { available: true, unavailableReason: null },
       runs: listed.map((snapshot) => this.#summary(views.get(snapshot.reviewRunId)!)),
       runsTruncated: rows.length > MAX_REVIEW_RUN_SUMMARIES,
       run: run?.projection ?? null,
@@ -2524,14 +2675,16 @@ export class ReviewRunStore {
   }
 
   /** What stopped a Run for good, from its categories' events: an exclusion, the editor's 取消任务 after it, or nothing. */
-  #stoppedFor(reviewRunId: string): 'scope-changed' | 'cancelled' | null {
-    let stop: 'scope-changed' | 'cancelled' | null = null;
+  #stoppedFor(reviewRunId: string): ReviewRunStop | null {
+    let stop: ReviewRunStop | null = null;
     for (const row of this.#db.prepare(
       "SELECT canonical_json, sha256 FROM review_run_category_events WHERE review_run_id = ? AND state IN ('refused', 'interrupted')",
     ).all(reviewRunId) as SqlRow[]) {
       const code = recordOf(text(row.canonical_json), text(row.sha256)).code;
       if (code === REVIEW_RUN_CANCELLED) return 'cancelled';
       if (code === SERIES_RETRIEVAL_SCOPE_CHANGED) stop = 'scope-changed';
+      // Reconnect Preflight found the plan moved while the Run waited (Issue #760): nothing of it began.
+      else if (code === REVIEW_RUN_PLAN_MOVED && stop === null) stop = 'plan-moved';
     }
     return stop;
   }
@@ -2918,6 +3071,7 @@ export class ReviewRunStore {
     const authorization = this.#authorizationOf(snapshot.reviewRunId);
     const driving = this.#driving.has(snapshot.reviewRunId);
     const stop = this.#stoppedFor(snapshot.reviewRunId);
+    const waiting = this.#waits(snapshot, authorization);
     const categories = snapshot.categories.map((category): CategoryView => {
       const events = this.#events(snapshot.reviewRunId, category.categoryId);
       const last = events.at(-1) ?? null;
@@ -2933,7 +3087,8 @@ export class ReviewRunStore {
       const { state, pending } = reviewRunCategoryState({ authorized: authorization !== null, driving, lastEvent: last?.state ?? null, ledgerRun });
       const waitingForPlace = driving && state === 'waiting' && this.#placeWaits.get(snapshot.reviewRunId) === category.categoryId;
       const derived = !driving && pending && authorization !== null
-        ? stop !== null && last === null ? STOPPED_UNSTARTED_DETAIL
+        ? waiting ? WAITING_DETAIL
+          : stop !== null && last === null ? STOPPED_UNSTARTED_DETAIL
           : state === 'interrupted' ? INTERRUPTED_DETAIL
             : state === 'failed' ? FAILED_UNRECORDED_DETAIL
               : last !== null ? UNWRITTEN_DETAIL : UNSTARTED_DETAIL
@@ -2954,6 +3109,7 @@ export class ReviewRunStore {
       driving,
       categories: categories.map((view) => ({ pending: view.pending, materialized: view.materialized !== null })),
       stop,
+      waiting,
     });
     return {
       snapshot,

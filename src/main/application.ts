@@ -2588,6 +2588,50 @@ function registerRendererHandlers(
         });
       }),
   );
+  // 联网后开始任务 and its 取消 for every other kind with a plan (Issue #760, S74c), as the baseline's: the renderer names the
+  // kind and the Task, never a Book; the service is asked within the route's, and the plan it answers must be that Book's.
+  ipcMain.handle(
+    IPC_CHANNELS.startTaskWhenOnline,
+    (event, input: Omit<ServiceOperationMap['startTaskWhenOnline']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('startTaskWhenOnline', {
+            kind: input.kind,
+            ref: input.ref,
+            planEnvelopeDigest: input.planEnvelopeDigest,
+            planDigests: input.planDigests,
+            bookId: route.bookId,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          if (result.bookId !== route.bookId || result.kind !== input.kind || result.ref !== input.ref) {
+            throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '联网后开始任务的结果不属于当前图书工作台。');
+          }
+          return result;
+        });
+      }),
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.cancelWaitingTask,
+    (event, input: Omit<ServiceOperationMap['cancelWaitingTask']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('cancelWaitingTask', { kind: input.kind, ref: input.ref, bookId: route.bookId });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          if (result.bookId !== route.bookId || result.kind !== input.kind || result.ref !== input.ref) {
+            throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '取消等待中任务的结果不属于当前图书工作台。');
+          }
+          return result;
+        });
+      }),
+  );
   // 取消任务 (Issue #422) is the baseline Task's own as well: the renderer names the Task Intent and never a Book, and
   // the answer must be the route Book's. It is serialized with every other effect, since it records a Run state.
   ipcMain.handle(

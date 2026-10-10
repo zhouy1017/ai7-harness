@@ -297,6 +297,9 @@ describe('each item', () => {
     expect(globalAttentionObjectLabel({ kind: 'analysis', mode: 'first-baseline' })).toBe('基线分析 · 首次基线分析');
     expect(globalAttentionObjectLabel({ kind: 'analysis', mode: 'reanalyze-range' })).toBe('基线分析 · 重新分析所选范围');
     expect(globalAttentionObjectLabel({ kind: 'review', ordinal: 3 })).toBe('审阅 · 第 3 次');
+    // A ledger Task of another kind waiting to start once online, as its own surface names it (Issue #760, S74c).
+    expect((['initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing'] as const).map((taskKind) => globalAttentionObjectLabel({ kind: 'task', taskKind })))
+      .toEqual(['AI7 初评', '审稿意见', '按我的评分重写评语', '写作任务']);
     // A 审阅 on the selection 就这段发起任务… handed over says so (Issue #423, S77b).
     expect(globalAttentionObjectLabel({ kind: 'review', ordinal: 4, onSelection: true })).toBe('审阅 · 第 4 次 · 所选段落');
     expect(globalAttentionObjectLabel({ kind: 'recovery', branchName: '主分支' })).toBe('稿件 · 主分支');

@@ -1020,6 +1020,15 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysis
         openTaskPlan(route.bookId, 'review-run', target.reviewRunId);
       });
       return;
+    // A ledger Task of another kind (Issue #760, S74c): the surface that owns it, with its plan in the Task Drawer — 评估 for
+    // AI7 初评, 审稿意见 and 按我的评分重写评语, 交付物 for a 写作任务.
+    case 'task-plan':
+      await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
+        if (target.taskKind === 'writing') renderBookDeliverables(route.bookId, route.bookTitle);
+        else renderBookEvaluation(route.bookId, route.bookTitle);
+        openTaskPlan(route.bookId, target.taskKind, target.ref);
+      });
+      return;
     // 维护事项待处理 (Issue #426, S68b): 交付物, with the case open on its 发稿版本 where its next step is.
     case 'maintenance':
       await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) =>
