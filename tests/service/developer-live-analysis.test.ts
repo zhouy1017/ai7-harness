@@ -971,6 +971,53 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     await store.close();
   });
 
+  // Issue #51 (S16c): an accepted request whose answer never comes back whole. It was sent, so the ledger says so — in its own
+  // classification — and nothing caches it: the Run stops 结果待确认 without sending it again, and the editor's 续行 transmits
+  // it once more as a new test item, never replaying a result nobody saw.
+  it('stops 结果待确认 on a dropped answer, records it sent and uncached, and transmits it again only on 续行', async () => {
+    const calls: StubCall[] = [];
+    const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
+    const { units: responses, named } = await unitAnswers(prepared);
+    const inner = stubTransport({ calls, responses, named }) as unknown as (url: string, init: { headers: Record<string, string>; body: string }) => Promise<{ status: number; json(): Promise<unknown> }>;
+    let dropped = 0;
+    const transport = async (url: string, init: { headers: Record<string, string>; body: string }) => {
+      const answered = await inner(url, init);
+      if (dropped === 0 && /^分析单元 4\//mu.test((JSON.parse(init.body) as { messages: Array<{ content: string }> }).messages.at(-1)!.content)) {
+        dropped += 1;
+        return { status: 200, json: async () => { throw new Error('socket hang up'); } };
+      }
+      return answered;
+    };
+    const execution = owner(store, transport as unknown as typeof fetch);
+    const stopped = await runLive(store, bookId, prepared, execution);
+    const runRecordId = stopped.run!.runRecordId;
+    // Every range was sent once, unit 4 included and never again; the Run stopped before the reduction.
+    expect(calls).toHaveLength(SAMPLE1_UNITS);
+    expect(stopped.run!.state).toBe('resumable');
+    expect(stopped.run!.stateLabel).toBe('结果待确认');
+    expect(stopped.taskOutcome).toBeNull();
+    expect(store.baselineAnalysisLedger.outcomeUnknownOf(runRecordId)?.units.map((unit) => [unit.unitOrdinal, unit.attempts])).toEqual([[4, 1]]);
+    const lines = await ledgerLines(cacheRoot);
+    expect(lines).toHaveLength(SAMPLE1_UNITS);
+    const unknown = lines.filter((line) => line.classification === 'outcome-unknown');
+    expect(unknown).toHaveLength(1);
+    expect(unknown[0]).toMatchObject({ outcome: 'failed', status: 200, usage: null });
+    expect(await new ProviderResultCache(cacheRoot).lookup('deepseek-v4-flash', String(unknown[0]!.requestDigest))).toBeNull();
+
+    // The editor's 续行: unit 4 is transmitted again under a new item — the cache holds nothing for it — and the chain completes.
+    execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true });
+    await execution.whenIdle();
+    const settled = store.inspectBaselineAnalysis(bookId, () => null);
+    expect(settled.run!.state).toBe('completed');
+    const after = await ledgerLines(cacheRoot);
+    const again = after.slice(SAMPLE1_UNITS).find((line) => line.requestDigest === unknown[0]!.requestDigest);
+    expect(again).toMatchObject({ outcome: 'transmitted', status: 200 });
+    expect(again!.itemId).not.toBe(unknown[0]!.itemId);
+    expect(after.filter((line) => line.outcome === 'replayed')).toEqual([]);
+    expect(settled.taskOutcome!.report!.unitRows.find((row) => row.unitOrdinal === 4)?.attempts).toBe(2);
+    await store.close();
+  });
+
   it('states the bound scope, version, route, and ceiling on every reading that names them', async () => {
     const calls: StubCall[] = [];
     const { store, bookId, prepared } = await prepareLive(roots.dataRoot);

@@ -689,6 +689,21 @@ describe('DeepSeekOpenAiCompatibleAdapter.stream', () => {
     expect(wrongBinding.calls).toEqual([]);
   });
 
+  // Issue #51 (S16c): accepted, and the answer never came back whole — whether it was processed and billed cannot be known.
+  // It is neither a failure to retry nor an answer to read; a refusal whose body does not read is still that refusal.
+  it('turns an accepted request whose answer never came back whole into an outcome that cannot be known', async () => {
+    const dropped = adapter({ ticket: ticketFor(), secret: 'placeholder', transport: async () => ({ status: 200, json: async () => { throw new Error('socket hang up'); } }) });
+    expect((await collect(dropped.adapter.stream(request()))).at(-1)).toEqual({
+      type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN, message: '模型服务已接受请求，但回答没有完整传回。', status: 200 } },
+    });
+    expect(dropped.adapter.transmissions).toBe(1);
+    expect(dropped.adapter.lastCanonicalResult).toBeNull();
+    const refusedUnread = adapter({ ticket: ticketFor(), secret: 'placeholder', transport: async () => ({ status: 503, json: async () => { throw new Error('bad body'); } }) });
+    expect((await collect(refusedUnread.adapter.stream(request()))).at(-1)).toMatchObject({
+      type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.PROVIDER_ERROR, status: 503 } },
+    });
+  });
+
   it('carries an empty answer out of band while the stream stays exactly what it was', async () => {
     const { adapter: instance } = adapter({
       ticket: ticketFor(),
@@ -752,6 +767,9 @@ describe('classification', () => {
     expect(classifyModelFailure({ code: AI7_FAILURE_CODES.INTERRUPTED, message: '' }, codes)).toMatchObject({ signal: 'interrupted', failureClass: 'interrupted' });
     expect(classifyModelFailure({ code: AI7_FAILURE_CODES.EGRESS_REFUSED, message: '' }, codes)).toMatchObject({ signal: 'interrupted', failureClass: 'egress-refused' });
     expect(classifyModelFailure({ code: 'SOMETHING_ELSE', message: '' }, codes)).toMatchObject({ signal: 'failed', failureClass: 'adapter-failure', code: 'SOMETHING_ELSE' });
+    // 结果待确认 (Issue #51, S16c): neither failed nor interrupted, and never retry-safe.
+    expect(classifyModelFailure({ code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN, message: '', status: 200 }, codes))
+      .toMatchObject({ signal: 'ambiguous', failureClass: 'outcome-unknown', retrySafe: false, status: 200 });
     expect(QUOTA_EXCEEDED_CODE).toBe('QUOTA');
   });
 
@@ -773,7 +791,7 @@ describe('classification', () => {
     for (const code of [
       QUOTA_EXCEEDED_CODE, INVALID_CREDENTIAL_CODE, CONTEXT_WINDOW_EXCEEDED_CODE,
       AI7_FAILURE_CODES.INTERRUPTED, AI7_FAILURE_CODES.EGRESS_REFUSED, AI7_FAILURE_CODES.NETWORK_DENIED, AI7_FAILURE_CODES.FIXTURE_MISMATCH,
-      AI7_FAILURE_CODES.INVALID_RESPONSE, AI7_FAILURE_CODES.TRANSMIT_TICKET_ABSENT, 'SYNTHETIC_ADAPTER_FAILURE', 'MAX_TOKENS', 'UNKNOWN',
+      AI7_FAILURE_CODES.INVALID_RESPONSE, AI7_FAILURE_CODES.TRANSMIT_TICKET_ABSENT, AI7_FAILURE_CODES.OUTCOME_UNKNOWN, 'SYNTHETIC_ADAPTER_FAILURE', 'MAX_TOKENS', 'UNKNOWN',
     ]) {
       expect(verdict(code, 503).retrySafe).toBe(false);
       expect(verdict(code).retrySafe).toBe(false);

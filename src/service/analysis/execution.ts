@@ -273,6 +273,24 @@ export function accountLimitDetail(settled: number, total: number): string {
     : `模型服务账户限额：模型服务按账户限额拒绝了请求，这项任务已停下。已读完 ${settled} / ${total} 个阅读范围，结果都已保存。处理好模型服务、限额解除后点「续行」从下一个阅读范围接着读；在此之前不会发送任何内容。`;
 }
 
+/**
+ * 结果待确认 (Issue #51, S16c; V2-UX-CTRL-007, COPY-009): a reading range whose request was sent and whose answer never came back
+ * whole, so whether the model service processed and billed it cannot be known. AI7 never sends it again on its own — a
+ * second request could bill again — so the range stays unconfirmed while the Run reads the others, and the Run then stops
+ * keeping everything it read. Only the editor's 续行 reads those ranges again, as their next attempt; 取消任务 ends them as
+ * the gaps they are, never as ranges the Run did not attempt.
+ */
+export const OUTCOME_UNKNOWN_NOT_RESENT = '没有自动再发一次' as const;
+export const OUTCOME_UNKNOWN_CANCELLED_UNREAD = '任务取消时它还没有再读，结果仍待确认' as const;
+export const OUTCOME_UNKNOWN_ENDED_UNREAD = '任务结束时它还没有再读，结果仍待确认' as const;
+
+/** 结果待确认's stop, in the Run's own words: which ranges, what is kept, and what 续行 sends. */
+export function outcomeUnknownDetail(unitOrdinals: ReadonlyArray<number>, settled: number, total: number): string {
+  const ranges = unitOrdinals.map((ordinal) => `第 ${ordinal} 个`).join('、');
+  return `结果待确认：${ranges}阅读范围的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；AI7 没有自动再发。` +
+    `已读完 ${settled} / ${total} 个阅读范围，结果都已保存。点「续行」只重读这 ${unitOrdinals.length} 个阅读范围，会再发一次请求，可能再次计费；在此之前不会发送任何内容。`;
+}
+
 /** The disclosure of a cross-unit reduction, a sample, and a reflection the editor's cancellation stopped. */
 export const CROSS_UNIT_CANCELLED = '运行已按你的要求取消，跨单元归纳未发起。' as const;
 export const ASSURANCE_SAMPLING_CANCELLED = '运行已按你的要求取消，保证抽样未发起。' as const;
@@ -1160,7 +1178,8 @@ export class BaselineAnalysisExecutionOwner {
       // 取消任务 before the Run kept any unit (CTRL-008): nothing of it is left to gather, so it ends here without
       // provider work and without a revision. A stopped Run that kept units — or whose units asked the editor, their first
       // attempts sent (Issue #422, S76d) — is finished below, sending nothing.
-      if (active.cancelRequested && checkpoints.length === 0 && ledger.clarificationsOf(facts.runRecordId).length === 0) {
+      if (active.cancelRequested && checkpoints.length === 0 && ledger.clarificationsOf(facts.runRecordId).length === 0 &&
+        (ledger.unconfirmedUnitsOf(facts.runRecordId)?.units.length ?? 0) === 0) {
         recordCancelledWithoutRevision(ledger, facts.runRecordId, facts.taskIntentId, attemptId, CANCELLED_BEFORE_UNITS);
         return;
       }
@@ -1318,6 +1337,28 @@ export class BaselineAnalysisExecutionOwner {
           accumulated.push(refused.usage);
         }
       }
+      // 结果待确认 (Issue #51, S16c): the ranges whose sent request's result could not be known when the Run last stopped. Their
+      // attempts were sent, and count toward the Run and the ceiling. A 续行 from 结果待确认 itself is the editor's own choice
+      // to read them again, and they are read as their next attempt; any other 续行 — after a pause, a question, AI7 stopping or
+      // an account limit — leaves them unconfirmed, never sent again on its own, until the Run stops at 结果待确认.
+      type UnconfirmedUnit = { readonly attempts: number; readonly wallMs: number; readonly usage: { inputTokens: number; outputTokens: number } | null; readonly reason: string };
+      const unconfirmed = new Map<number, UnconfirmedUnit>();
+      const rereading = new Map<number, UnconfirmedUnit>();
+      const lastUnconfirmed = continuation === null ? null : ledger.unconfirmedUnitsOf(facts.runRecordId);
+      for (const entry of lastUnconfirmed?.units ?? []) {
+        if (checkpointed.has(entry.unitOrdinal) || !submittedUnits.some((unit) => unit.ordinal === entry.unitOrdinal)) continue;
+        (lastUnconfirmed!.rereading ? rereading : unconfirmed).set(entry.unitOrdinal, entry);
+        usage.requests += entry.attempts;
+        stageUsage.units.requests += entry.attempts;
+        active.progress.completedAttempts += entry.attempts;
+        if (entry.usage !== null) {
+          usage.inputTokens += entry.usage.inputTokens;
+          usage.outputTokens += entry.usage.outputTokens;
+          stageUsage.units.inputTokens += entry.usage.inputTokens;
+          stageUsage.units.outputTokens += entry.usage.outputTokens;
+          accumulated.push(entry.usage);
+        }
+      }
       // Units whose safe retry waits for the editor's answer (Issue #422, S76d; CLAR-004). A question the Run asked before
       // it stopped is still its own, answered or not: its unit is not read again until the answer says so, and what its
       // first attempt cost counts toward the Run as it did then.
@@ -1350,7 +1391,7 @@ export class BaselineAnalysisExecutionOwner {
           accumulated.push(request.firstUsage);
         }
       }
-      const remainingUnits = submittedUnits.filter((unit) => !checkpointed.has(unit.ordinal) && !waiting.has(unit.ordinal));
+      const remainingUnits = submittedUnits.filter((unit) => !checkpointed.has(unit.ordinal) && !waiting.has(unit.ordinal) && !unconfirmed.has(unit.ordinal));
       // One technical turn for one unit attempt: the span is recorded by reference with the attempt index, the admitted
       // payload digest and the digest of the unit message it submitted — and a safe retry's, the adaptation it carries out
       // (Issue #286) — and every attempt's usage counts toward the Run.
@@ -1411,7 +1452,9 @@ export class BaselineAnalysisExecutionOwner {
       };
       /**
        * A unit settled from the turn that ends it — its only attempt, or its safe retry — closed, or the gap it is. `end` is a
-       * gap that ends the Run (a Provider Account Limit, an interruption, an ambiguous outcome), which is not kept.
+       * gap that ends the Run (a Provider Account Limit, an interruption, a turn the harness could not end), which is not kept.
+       * `unconfirmed` is a sent request whose result cannot be known (Issue #51, S16c): the unit is left unsettled and the Run
+       * reads on.
        */
       const settleFromTurn = (s: {
         readonly unit: CoverageManifestUnitProjection;
@@ -1422,7 +1465,7 @@ export class BaselineAnalysisExecutionOwner {
         readonly wallMs: number;
         readonly firstFailure: { readonly reason: string; readonly code: string } | null;
         readonly withheld: string | null;
-      }): 'settled' | 'end' | 'stop' => {
+      }): 'settled' | 'end' | 'stop' | 'unconfirmed' => {
         const { unit, requestDigest } = s;
         const { turn, unitUsage } = s.attempt;
         const candidate = turn.signals.find((signal) => signal.kind === 'contentCandidate');
@@ -1482,9 +1525,27 @@ export class BaselineAnalysisExecutionOwner {
           terminalClassification = 'interrupted';
           return 'end';
         } else {
-          gap('interrupted', '技术回合结果不明确；自动重试与回退已停止。');
-          terminalClassification = 'interrupted';
-          return 'end';
+          const ambiguous = turn.signals.find((signal) => signal.kind === 'ambiguous');
+          // 结果待确认 (Issue #51, S16c; CTRL-007): the request was sent and its result cannot be known. It is never sent again on
+          // its own — not as a safe retry, not as a fallback — since a second request could bill again. A kind that keeps its
+          // progress leaves the unit unconfirmed and reads on; one that keeps none settles it as the gap it is and reads on.
+          if (ambiguous?.kind === 'ambiguous' && ambiguous.failure !== undefined) {
+            const said = `${ambiguous.failure.reason}（${ambiguous.failure.code}）`;
+            const reason = s.firstFailure !== null ? `第 1 次尝试：${s.firstFailure.reason}（${s.firstFailure.code}）；安全重试后第 2 次尝试：${said}` : said;
+            if (active.resumableOnInterrupt) {
+              unconfirmed.set(unit.ordinal, { attempts: s.attempts, wallMs: s.wallMs, usage: s.usage, reason });
+              active.progress.longestSettledUnitMs = Math.max(active.progress.longestSettledUnitMs ?? 0, s.wallMs);
+              active.progress.currentUnitOrdinal = null;
+              active.progress.currentUnitStartedAt = null;
+              active.progress.attemptState = null;
+              return 'unconfirmed';
+            }
+            gap('outcome-unknown', `${reason}；${OUTCOME_UNKNOWN_NOT_RESENT}`);
+          } else {
+            gap('interrupted', '技术回合结果不明确；自动重试与回退已停止。');
+            terminalClassification = 'interrupted';
+            return 'end';
+          }
         }
         keepSettled(unit, s.wallMs);
         return 'settled';
@@ -1712,8 +1773,9 @@ export class BaselineAnalysisExecutionOwner {
             }
           }
         }
-        // A range the account limit refused before 续行 carries that attempt in its row as well.
-        const prior = refused !== null && refused.unitOrdinal === unit.ordinal ? refused : null;
+        // A range the account limit refused before 续行 carries that attempt in its row as well, and so does one 结果待确认 left
+        // unconfirmed and the editor's 续行 reads again (Issue #51, S16c).
+        const prior = refused !== null && refused.unitOrdinal === unit.ordinal ? refused : rereading.get(unit.ordinal) ?? null;
         const settled = settleFromTurn({
           unit, requestDigest, attempt,
           attempts: attempts + (prior?.attempts ?? 0),
@@ -1738,13 +1800,16 @@ export class BaselineAnalysisExecutionOwner {
       scopeChanged();
       // 暂停, or AI7 stopping under a Run it can continue (Issue #422, S76b): the Run stops here keeping what it read —
       // no reduction, no revision, no outcome — and 续行 goes on from the next unit. A cancellation outranks both, and a
-      // spent ceiling, an account limit, or a unit whose turn ended the Run — refused, cut off or ambiguous — still ends
-      // it as the interruption it is, with that unit's gap kept.
+      // spent ceiling, an account limit, or a unit whose turn ended the Run — refused, cut off, or one the harness could not
+      // end — still ends it as the interruption it is, with that unit's gap kept. A sent request whose result cannot be known
+      // stops it 结果待确认 instead, once every other range is read (Issue #51, S16c).
       const stopWithoutEnding = (): boolean => {
         if (active.cancelRequested || liveInterruption !== null || terminalClassification === 'interrupted') return false;
         const stopping = active.pauseRequested || (active.interrupted && active.resumableOnInterrupt);
         const asking = waiting.size > 0 && !unitsEnded && !active.interrupted;
-        if (accountLimit === null && !stopping && !asking) return false;
+        // 结果待确认 (Issue #51, S16c): every other range the Run could read is read, and some sent request's result is unknown.
+        const confirming = unconfirmed.size > 0 && !unitsEnded && !active.interrupted;
+        if (accountLimit === null && !stopping && !asking && !confirming) return false;
         // A spent ceiling outranks a pause, AI7 stopping, an open question and an account limit (Issue #51, S16a; MODEL-016):
         // nothing more may be sent under it, so no Run waits to be continued past it. An open question's answer and the
         // request an account limit refused would each be one more request, and AI7 stopping leaves nothing to send the rest:
@@ -1753,7 +1818,8 @@ export class BaselineAnalysisExecutionOwner {
         // ceiling reached if one is still to be sent, and a Run that needs none completes, since the ceiling counts only
         // where it stops a request.
         if (ceilingState() === 'reached') {
-          if (asking || accountLimit !== null || active.interrupted) {
+          // Reading an unconfirmed range again would be one more request too (Issue #51, S16c).
+          if (asking || confirming || accountLimit !== null || active.interrupted) {
             liveInterruption = 'run-budget-ceiling-reached';
             terminalClassification = 'interrupted';
           }
@@ -1769,6 +1835,11 @@ export class BaselineAnalysisExecutionOwner {
           stages: carriedStages,
         };
         const settled = active.progress.unitsSettled;
+        // The ranges whose result is unknown go with every stop, so no 续行 but 结果待确认's reads them again (Issue #51, S16c).
+        const unconfirmedUnits = unconfirmed.size === 0 ? {} : {
+          unconfirmedUnits: [...unconfirmed].sort(([left], [right]) => left - right)
+            .map(([unitOrdinal, entry]) => ({ unitOrdinal, attempts: entry.attempts, wallMs: entry.wallMs, usage: entry.usage, reason: entry.reason })),
+        };
         // 模型服务账户限额 (Issue #51, S16b; MODEL-018): outside developer-live the Run stops resumable in its own words, with
         // the provider's, and holds nothing; 续行 goes on once the limit clears.
         if (accountLimit !== null) {
@@ -1781,6 +1852,7 @@ export class BaselineAnalysisExecutionOwner {
             ...(accountLimit.unitOrdinal === null ? {} : { unitOrdinal: accountLimit.unitOrdinal }),
             // The refused attempt was sent: 续行 counts it, and a cancellation ends its range as the gap it is.
             ...(accountLimit.refused === undefined ? {} : { refusedAttempt: accountLimit.refused }),
+            ...unconfirmedUnits,
             carriedUsage,
           });
           return true;
@@ -1790,6 +1862,7 @@ export class BaselineAnalysisExecutionOwner {
             detail: active.pauseRequested ? pausedDetail(settled, submittedUnits.length) : resumableDetail(settled, submittedUnits.length),
             unitsSettled: settled,
             unitsTotal: submittedUnits.length,
+            ...unconfirmedUnits,
             carriedUsage,
           });
           return true;
@@ -1797,11 +1870,26 @@ export class BaselineAnalysisExecutionOwner {
         // 任务等待你的说明 (Issue #422, S76d; CLAR-004): every unit the Run could read is read, and a question is still open.
         // It stops at this boundary — no reduction, no revision, no outcome — holding nothing and keeping what it read, and
         // the answer takes it on. The ledger was read for answers just now, with nothing awaited since.
-        ledger.recordRunState(facts.runRecordId, 'awaiting-clarification', {
-          detail: awaitingClarificationDetail([...waiting.keys()], settled, submittedUnits.length),
+        if (asking) {
+          ledger.recordRunState(facts.runRecordId, 'awaiting-clarification', {
+            detail: awaitingClarificationDetail([...waiting.keys()], settled, submittedUnits.length),
+            unitsSettled: settled,
+            unitsTotal: submittedUnits.length,
+            waitingUnits: [...waiting.keys()],
+            ...unconfirmedUnits,
+            carriedUsage,
+          });
+          return true;
+        }
+        // 结果待确认 (Issue #51, S16c; CTRL-007, CONT-016): the Run stops here — no reduction, no revision, no outcome — keeping
+        // everything it read and holding nothing; nothing more is sent until the editor reads those ranges again with 续行,
+        // or ends the Task with 取消任务, which keeps what was read.
+        ledger.recordRunState(facts.runRecordId, 'resumable', {
+          detail: outcomeUnknownDetail([...unconfirmed.keys()].sort((left, right) => left - right), settled, submittedUnits.length),
           unitsSettled: settled,
           unitsTotal: submittedUnits.length,
-          waitingUnits: [...waiting.keys()],
+          stopReason: 'outcome-unknown',
+          ...unconfirmedUnits,
           carriedUsage,
         });
         return true;
@@ -1837,6 +1925,17 @@ export class BaselineAnalysisExecutionOwner {
           keepSettled(unit, refused.wallMs);
         }
       }
+      // A range whose result is unknown and that the Run's end leaves unread again (Issue #51, S16c): its request was sent, so it
+      // is the gap it is, under its own code, and never a range the Run did not attempt.
+      for (const [unitOrdinal, entry] of [...unconfirmed, ...rereading].sort(([left], [right]) => left - right)) {
+        if (unitRecords.some((record) => record.unitOrdinal === unitOrdinal)) continue;
+        const unit = submittedUnits.find((candidate) => candidate.ordinal === unitOrdinal);
+        if (unit === undefined) continue;
+        settleGap(unit, definition.requestDigest(unit.ordinal, unit.digest), { unitOrdinal, attempts: entry.attempts, wallMs: entry.wallMs, usage: entry.usage },
+          'outcome-unknown', `${entry.reason}；${active.cancelRequested ? OUTCOME_UNKNOWN_CANCELLED_UNREAD : OUTCOME_UNKNOWN_ENDED_UNREAD}`);
+        keepSettled(unit, entry.wallMs);
+      }
+      unconfirmed.clear();
       if (active.interrupted && terminalClassification === 'completed') terminalClassification = 'interrupted';
       // A Run the editor cancelled ends `cancelled`, whatever else stopped it (CTRL-005), and nothing after this point
       // is sent. A failure that ends the Run is still recorded as the failure it is, by `#recordFailure`.

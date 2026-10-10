@@ -60,6 +60,36 @@ describe('transmitOnce', () => {
     await transmitOnce(cache, modelFetch([], 429), { purpose: 'dialogue', slice: 'S17c', promptContractDigest: CONTRACT }, OPENCODE_GO_ROUTE_PROFILE, 'deepseek-v4-flash', 'https://x.invalid', init);
     expect(cache.lines).toMatchObject([{ itemId: 'S17c/dialogue/1', outcome: 'failed', status: 429, classification: 'quota-exhausted' }]);
   });
+
+  // Issue #51 (S16c): accepted, and the answer never came back whole. It was sent, so its item is on the ledger with the
+  // status it carried — in the line shape the ledger already has, the classification its own — and nothing is cached, so an
+  // identical request later transmits again rather than replaying a result nobody saw.
+  it('records an accepted request whose answer never came back whole as outcome-unknown, and never caches or replays it', async () => {
+    const cache = new ProviderResultCache(root);
+    await cache.open();
+    const calls: string[] = [];
+    const dropped: LiveModelFetch = async (_url, init) => {
+      calls.push(init.body);
+      return { status: 200, json: async () => { throw new Error('socket hang up'); } };
+    };
+    const init = { method: 'POST' as const, headers: { authorization: 'Bearer placeholder' }, body: '{"model":"deepseek-v4-flash","n":4}' };
+    const first = await transmitOnce(cache, dropped, { purpose: 'first-baseline', promptContractDigest: CONTRACT }, OPENCODE_GO_ROUTE_PROFILE, 'deepseek-v4-flash', 'https://x.invalid', init);
+    expect(first.status).toBe(200);
+    await expect(first.json()).rejects.toThrowError(/AI7_OUTCOME_UNKNOWN/u);
+    expect(await readdir(join(root, 'entries'))).toEqual([]);
+    const second = await transmitOnce(cache, modelFetch(calls), { purpose: 'first-baseline', promptContractDigest: CONTRACT }, OPENCODE_GO_ROUTE_PROFILE, 'deepseek-v4-flash', 'https://x.invalid', init);
+    expect(second.status).toBe(200);
+    expect(calls).toHaveLength(2);
+    const lines = (await rawLedger()).map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines.map((line) => [line.itemId, line.outcome, line.status, line.classification ?? null])).toEqual([
+      ['S40/first-baseline/1', 'failed', 200, 'outcome-unknown'],
+      ['S40/first-baseline/2', 'transmitted', 200, null],
+    ]);
+    expect(lines[0]!.usage).toBeNull();
+    // The S40 line shape is unchanged: the same keys a limit's line carries beside its classification, and nothing else.
+    expect(Object.keys(lines[0]!).sort()).toEqual(['classification', 'itemId', 'model', 'outcome', 'promptContractDigest', 'purpose', 'recordedAt', 'requestDigest', 'status', 'usage']);
+    expect(JSON.stringify(lines)).not.toContain('placeholder');
+  });
 });
 
 describe('the ledger across slices and kinds', () => {

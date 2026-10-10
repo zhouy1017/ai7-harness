@@ -7,7 +7,7 @@ import { CONTEXT_WINDOW_EXCEEDED_CODE, INVALID_CREDENTIAL_CODE, QUOTA_EXCEEDED_C
 import { BASELINE_PROMPT_CONTRACT, BASELINE_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/contract.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE, evaluateEgress, type EgressBindingFacts } from '../../src/service/provider/egress-gate.js';
 import { Ai7LocalDeterministicAdapter } from '../../src/service/provider/local-deterministic-adapter.js';
-import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
+import { fixtureEntryKey, loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import { HARNESS_PACKAGE_PINS, describeComposition, prepareExecution } from '../../src/service/harness/primary-agent-harness.js';
 import { installNodeNetworkDenial } from '../../src/shared/network-denial.js';
 
@@ -123,6 +123,42 @@ describe('PrimaryAgentHarness', () => {
       const outcome = await handle.submitUnit(ZERO_UNIT);
       expect(outcome.terminal).toBe('failed');
       expect(outcome.signals.at(-1)).toMatchObject({ kind: 'failed', failure: { failureClass: 'provider-account-limit', code: QUOTA_EXCEEDED_CODE } });
+    } finally {
+      await handle.finish();
+    }
+  });
+
+  // Issue #51 (S16c): a request sent whose answer never came back whole ends the turn ambiguous — never failed, so no retry
+  // table is ever asked about it — with the classified outcome the executor names the unit by.
+  it('ends a turn whose result cannot be known as ambiguous, carrying the classified outcome', async () => {
+    const synthetic = await loadModelFixture(FIXTURES_ROOT, 'synthetic-interrupted');
+    const entry = [...synthetic.entries.values()][0]!;
+    const fixture = {
+      ...synthetic,
+      entries: new Map([[fixtureEntryKey(entry.unitOrdinal, entry.requestDigest), { ...entry, response: { kind: 'outcome-unknown' as const, message: '合成：回答没有完整传回。' } }]]),
+    };
+    const adapter = new Ai7LocalDeterministicAdapter(fixture, BASELINE_PROMPT_CONTRACT_DIGEST, codes);
+    const sessionId = randomUUID();
+    const handle = await prepareExecution({
+      sessionId,
+      route: LOCAL_DETERMINISTIC_ROUTE,
+      model: LOCAL_DETERMINISTIC_MODEL,
+      systemPrompt: SYSTEM,
+      promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
+      adapterFactory: () => adapter,
+      gate: () => ({ decision: 'transmit-local', payloadDigest: 'a'.repeat(64) }),
+      onTransmitTicket: () => undefined,
+    });
+    try {
+      handle.bindExecution({ harnessSessionId: sessionId, behaviorCompositionDigest: handle.composition.digest, promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST });
+      const outcome = await handle.submitUnit(ZERO_UNIT);
+      expect(outcome.terminal).toBe('ambiguous');
+      expect(outcome.signals.some((signal) => signal.kind === 'failed' || signal.kind === 'contentCandidate')).toBe(false);
+      expect(outcome.signals.at(-1)).toMatchObject({
+        kind: 'ambiguous',
+        reason: '结果待确认：请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费。',
+        failure: { signal: 'ambiguous', failureClass: 'outcome-unknown', code: 'AI7_OUTCOME_UNKNOWN', retrySafe: false },
+      });
     } finally {
       await handle.finish();
     }

@@ -116,6 +116,8 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   'analysis-budget-reached': '已停止 · 预算已达上限',
   // A Provider Account Limit (Issue #51, S16b): the drawer's own status, a blocker the editor resolves with the model service.
   'analysis-account-limit': '模型服务账户限额',
+  // 结果待确认 (Issue #51, S16c): the drawer's own status for a Run stopped on sent requests whose results cannot be known.
+  'analysis-outcome-unknown': '结果待确认',
   'analysis-blocked': '派发前已阻止',
   'analysis-orphaned': '已中断',
   'review-failed': '运行失败',
@@ -184,6 +186,8 @@ export const GLOBAL_ATTENTION_STATE_PILLS: Readonly<Record<GlobalAttentionStateK
   'analysis-interrupted': { tone: 'blocked', shape: 'square' },
   'analysis-budget-reached': { tone: 'attention', shape: 'square' },
   'analysis-account-limit': { tone: 'blocked', shape: 'diamond' },
+  // The triangle 导入提交结果待确认 has too: an outcome to confirm, never a failure's square.
+  'analysis-outcome-unknown': { tone: 'attention', shape: 'triangle' },
   'analysis-blocked': { tone: 'blocked', shape: 'diamond' },
   'analysis-orphaned': { tone: 'blocked', shape: 'square' },
   'review-failed': { tone: 'blocked', shape: 'square' },
@@ -245,6 +249,8 @@ export const GLOBAL_ATTENTION_NEXT_STEP_LABELS: Readonly<Record<GlobalAttentionN
   'adjust-budget-redo': '调整预算并重做',
   // The remediation route of a Provider Account Limit (Issue #51, S16b; interaction-spec §1566).
   'resolve-model-service': '处理模型服务',
+  // 结果待确认's first step (Issue #51, S16c): which reading ranges are unconfirmed — never a repeat-shaped action.
+  'view-unconfirmed': '查看未确认的部分',
   // The drawer's own action for a waiting Run whose plan moved (Issue #536; OFF-008).
   reprepare: TASK_BAR_REPREPARE,
   // The drawer's own action for a Run the launch's ceiling stopped under developer-live (Issue #541).
@@ -371,6 +377,8 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
         : '运行用到了你设的预算上限，已停止；读完的部分已保留。要接着读，请调整预算并重做。';
     case 'analysis-account-limit':
       return '模型服务按账户限额拒绝了请求，这项任务已停下，读完的部分都已保存；处理好模型服务、限额解除后续行。';
+    case 'analysis-outcome-unknown':
+      return '有阅读范围的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；AI7 没有自动再发，读完的部分都已保存。';
     case 'analysis-blocked':
       return '授权已记录，派发前阻止：当前启动没有可执行的路由。';
     case 'analysis-orphaned':

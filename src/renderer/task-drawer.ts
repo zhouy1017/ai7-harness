@@ -33,6 +33,8 @@ import {
   TASK_BAR_CANCEL_CONFIRM,
   TASK_BAR_CANCEL_FAILED,
   TASK_BAR_CANCEL_IMPACT_HEADING,
+  TASK_BAR_UNCONFIRMED_HEADING,
+  taskBarUnconfirmedUnit,
   TASK_BAR_CANCEL_KEEP,
   TASK_BAR_CANCEL_RUN_FAILED,
   TASK_BAR_CANCELLED,
@@ -263,6 +265,8 @@ const WAITING_POLL_MS = 2_000;
 const DRIFT_TABLE_ID = 'task-drawer-drift-table';
 /** The Cancellation Impact Summary 取消任务 opens inline (Issue #422, CTRL-004); one bar, so one summary. */
 const CANCEL_IMPACT_ID = 'task-drawer-cancel-impact';
+/** 查看未确认的部分's list (Issue #51, S16c): the reading ranges 结果待确认 left unconfirmed. */
+const UNCONFIRMED_ID = 'task-drawer-unconfirmed';
 const REDO_SUMMARY_ID = 'task-drawer-redo-summary';
 /** How the editor left an editable item (Issue #419; S76d): kept, left out or withheld, or asked first. */
 type ItemEdit = 'kept' | 'removed' | 'ask-first';
@@ -346,6 +350,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   let ruleConfirmShown = false;
   /** Whether 取消任务's Cancellation Impact Summary is open; kept across the reads while the Run can still be cancelled. */
   let cancelConfirmShown = false;
+  // 查看未确认的部分 (Issue #51, S16c): whether the list of unconfirmed ranges is open beside the bar.
+  let unconfirmedShown = false;
   /** 改计划重做's summary is open (Issue #422, S76c). */
   let redoConfirmShown = false;
   /**
@@ -520,7 +526,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     // — is back, and so is one waiting for the editor's answer, which the service takes on by itself once the slot is
     // free (S76d).
     // A start waiting on the governor (Issue #49, S14) is read again slowly too, so the bar shows it once it is admitted.
-    const stopped = next.state.key === 'paused' || next.state.key === 'resumable' || next.state.key === 'account-limit' || next.state.key === 'awaiting-clarification' ||
+    const stopped = next.state.key === 'paused' || next.state.key === 'resumable' || next.state.key === 'account-limit' || next.state.key === 'outcome-unknown' ||
+      next.state.key === 'awaiting-clarification' ||
       next.state.key === 'queued';
     const followed = next.state.key === 'running' || next.state.key === 'cancelling' || next.state.key === 'pausing';
     if ((!followed && !waiting && !stopped) || interrupted || root.hidden) return;
@@ -584,6 +591,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
     // The summary stays open only while there is still a Run 取消任务 can name.
     if (next.runControl === null || next.runControl.cancel.reason !== null) cancelConfirmShown = false;
+    // …and the unconfirmed list only while the Run stands at 结果待确认.
+    if (next.runControl?.outcomeUnknown == null) unconfirmedShown = false;
     // A card's 取消任务 (Issue #423, S77a) opens the summary here, where the cancellation is confirmed; a Run that can no
     // longer be cancelled shows its bar instead, which says why.
     let focusCancelImpact = false;
@@ -1001,6 +1010,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     for (const action of view.actions) actions.append(barAction(action, noteId));
     parts.push(actions);
     const run = next.runControl;
+    if (run !== null && run.outcomeUnknown !== null && unconfirmedShown) parts.push(unconfirmedBlock(run.outcomeUnknown.units));
     if (run !== null && run.cancel.reason === null && cancelConfirmShown) parts.push(cancelImpactBlock(run));
     if (next.redo !== null && next.redo.summary.length > 0 && redoConfirmShown) parts.push(redoSummaryBlock(next.redo));
     bar.replaceChildren(...parts);
@@ -1044,6 +1054,16 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
           cancelConfirmShown = !cancelConfirmShown;
           if (plan !== null) paintBar(plan);
           bar.querySelector<HTMLElement>(cancelConfirmShown ? `#${CANCEL_IMPACT_ID} h4` : '[data-task-drawer-control="cancel-run"]')?.focus();
+        });
+        break;
+      // 查看未确认的部分 (Issue #51, S16c): opens the list of unconfirmed ranges beside the bar; it sends and records nothing.
+      case 'view-unconfirmed':
+        button.setAttribute('aria-controls', UNCONFIRMED_ID);
+        button.setAttribute('aria-expanded', unconfirmedShown ? 'true' : 'false');
+        button.addEventListener('click', () => {
+          unconfirmedShown = !unconfirmedShown;
+          if (plan !== null) paintBar(plan);
+          bar.querySelector<HTMLElement>(unconfirmedShown ? `#${UNCONFIRMED_ID} h4` : '[data-task-drawer-control="view-unconfirmed"]')?.focus();
         });
         break;
       case 'reconfirm-plan':
@@ -1691,6 +1711,27 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       endWork(asked);
     }
     if (prepared !== null && !root.hidden) surface.open({ bookId: current.bookId, kind: current.kind, ref: prepared }, returnFocus);
+  }
+
+  /** 查看未确认的部分 (Issue #51, S16c): each range whose sent request's result cannot be known, and how often it was sent. */
+  function unconfirmedBlock(units: NonNullable<TaskPlanRunControlProjection['outcomeUnknown']>['units']): HTMLElement {
+    const section = el('section', 'task-bar-unconfirmed');
+    section.id = UNCONFIRMED_ID;
+    section.setAttribute('role', 'group');
+    const heading = el('h4', undefined, TASK_BAR_UNCONFIRMED_HEADING);
+    heading.id = uid('unconfirmed');
+    heading.tabIndex = -1;
+    // Named as the bar's controls are, so a repaint while the editor reads the list keeps focus on it.
+    heading.dataset['taskDrawerControl'] = 'unconfirmed';
+    section.setAttribute('aria-labelledby', heading.id);
+    const lines = el('ul', 'task-bar-unconfirmed-lines');
+    for (const unit of units) {
+      const line = el('li', undefined, taskBarUnconfirmedUnit(unit.unitOrdinal, unit.attempts));
+      line.dataset['unconfirmedUnit'] = String(unit.unitOrdinal);
+      lines.append(line);
+    }
+    section.append(heading, lines);
+    return section;
   }
 
   function cancelImpactBlock(run: TaskPlanRunControlProjection): HTMLElement {

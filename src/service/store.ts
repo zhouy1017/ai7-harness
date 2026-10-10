@@ -5436,7 +5436,9 @@ export class EditorialStore {
       const blockers = stopped ? [...this.#baselineAnalysis.continuationBlockers(run.runRecordId), ...(bindingHolds ? [] : [RESUME_BLOCKED_BINDING])] : [];
       // 模型服务账户限额 (Issue #51, S16b): the stop the provider's limit made, which 续行 takes on once it clears.
       const accountLimit = run.state === 'resumable' ? this.#baselineAnalysis.accountLimitOf(run.runRecordId) : null;
-      return { unitsSettled, unitsClosed, unitsTotal, blockers, bindingHolds, waiting, accountLimit };
+      // 结果待确认 (Issue #51, S16c): the ranges whose sent requests' results cannot be known, which only 续行 reads again.
+      const outcomeUnknown = run.state === 'resumable' ? this.#baselineAnalysis.outcomeUnknownOf(run.runRecordId) : null;
+      return { unitsSettled, unitsClosed, unitsTotal, blockers, bindingHolds, waiting, accountLimit, outcomeUnknown };
     });
   }
 

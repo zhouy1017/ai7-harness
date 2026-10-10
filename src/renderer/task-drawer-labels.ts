@@ -97,6 +97,9 @@ export const TASK_PLAN_STATE_PILLS: Readonly<Record<TaskPlanStateKey, ReviewPill
   // 模型服务账户限额 (Issue #51, S16b): a blocker the model service resolves, in the diamond 模型未连接 has too — never the
   // ring of 任务已中断 · 可续行, which RUN-012 keeps apart.
   'account-limit': { tone: 'blocked', shape: 'diamond' },
+  // 结果待确认 (Issue #51, S16c): an outcome to confirm, in the triangle 导入提交结果待确认 has too — never 可续行's ring nor a
+  // failure's square.
+  'outcome-unknown': { tone: 'attention', shape: 'triangle' },
   // 需要重新确认计划 (Issue #536; OFF-008): the plan moved, as 计划已变化's did — the editor's decision, never 派发前已阻止's square.
   'plan-moved': { tone: 'attention', shape: 'triangle' },
 };
@@ -397,6 +400,21 @@ export function taskBarAccountLimitNote(unitOrdinal: number | null, unitsSettled
     : `模型服务按账户限额拒绝了第 ${unitOrdinal} 个阅读范围。已读完 ${unitsSettled} / ${unitsTotal} 个阅读范围，结果都已保存；处理好模型服务、限额解除后点「续行」从第 ${unitOrdinal} 个接着读`;
 }
 
+/**
+ * 结果待确认 (Issue #51, S16c; CTRL-007, COPY-009, interaction-spec §807, §1036): what is known, what is missing, and what
+ * 续行 would send — a second request the model service may bill — with 查看未确认的部分 to see which ranges.
+ */
+export const TASK_BAR_VIEW_UNCONFIRMED = '查看未确认的部分';
+export const TASK_BAR_UNCONFIRMED_HEADING = '结果待确认的阅读范围';
+export function taskBarOutcomeUnknownNote(unconfirmed: number, unitsSettled: number, unitsTotal: number): string {
+  return `${unconfirmed} 个阅读范围的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；AI7 没有自动再发。` +
+    `已读完 ${unitsSettled} / ${unitsTotal} 个阅读范围，结果都已保存。点「续行」只重读这 ${unconfirmed} 个，会再发一次请求，可能再次计费；取消任务会保留已读完的部分`;
+}
+/** One unconfirmed range in 查看未确认的部分's list: which range, and how often its request was sent. */
+export function taskBarUnconfirmedUnit(unitOrdinal: number, attempts: number): string {
+  return `第 ${unitOrdinal} 个阅读范围 · 请求已发出 ${attempts} 次 · 回答没有完整传回`;
+}
+
 /** A stopped Run's continuation point, as the bar states it beside 续行; `null` when its kept progress no longer reads back. */
 export function taskBarContinuationNote(unitsSettled: number | null, unitsTotal: number): string {
   if (unitsSettled === null) return '已保存的阅读进度无法核对，这次运行不能续行；可以取消它，再重新开始';
@@ -493,6 +511,7 @@ export type TaskBarActionName =
   | 'cancel-run'
   | 'redo'
   | 'reprepare'
+  | 'view-unconfirmed'
   | 'run-link';
 
 export interface TaskBarAction {
@@ -682,6 +701,29 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
           actions: [
             { name: 'connect', label: TASK_BAR_RESOLVE_MODEL_SERVICE, tone: 'secondary', disabledReason: null },
             { name: 'resume', label: TASK_BAR_RESUME, tone: 'primary', disabledReason: control.resume.reason },
+            { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
+            { name: 'redo', label: TASK_BAR_REDO, tone: control.redo.reason === null ? 'secondary' : 'quiet', disabledReason: control.redo.reason },
+            runLink,
+          ],
+        };
+      }
+      // 结果待确认 (Issue #51, S16c; CTRL-007, CONT-016): 查看未确认的部分 first; 续行 reads only those ranges again, and the note
+      // says it sends a second request that may be billed; 取消任务 keeps what was read.
+      if (control.resume !== null && control.outcomeUnknown !== null) {
+        const continuation = control.continuation;
+        const count = control.outcomeUnknown.units.length;
+        return {
+          readiness,
+          summary,
+          statement: null,
+          // A kept progress that no longer reads back is never stated as a count.
+          note: continuation === null || continuation.unitsSettled === null
+            ? null
+            : taskBarOutcomeUnknownNote(count, continuation.unitsSettled, continuation.unitsTotal),
+          status: plan.state.label,
+          actions: [
+            { name: 'view-unconfirmed', label: TASK_BAR_VIEW_UNCONFIRMED, tone: 'primary', disabledReason: null },
+            { name: 'resume', label: TASK_BAR_RESUME, tone: 'secondary', disabledReason: control.resume.reason },
             { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
             { name: 'redo', label: TASK_BAR_REDO, tone: control.redo.reason === null ? 'secondary' : 'quiet', disabledReason: control.redo.reason },
             runLink,

@@ -247,6 +247,10 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
       return;
     }
     const response = entry.response;
+    if (response.kind === 'outcome-unknown') {
+      yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '结果待确认的夹具响应只答复分析单元。');
+      return;
+    }
     if (response.kind === 'adapter-failure' || response.kind === 'interrupted' || response.kind === 'quota-exceeded') {
       yield response.kind === 'quota-exceeded'
         ? failure(this.#codes.QUOTA_EXCEEDED_CODE, response.message, response.status)
@@ -426,6 +430,13 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
         return;
       case 'interrupted':
         yield failure(AI7_FAILURE_CODES.INTERRUPTED, response.message);
+        return;
+      // 结果待确认 (Issue #51, S16c): the request was sent and its answer never came back whole. Only an Analysis Unit
+      // answers it — the reduction, a sample, a reflection or a synthesis keep their own paths, which no fixture names.
+      case 'outcome-unknown':
+        yield named || header === null
+          ? failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '结果待确认的夹具响应只答复分析单元。')
+          : failure(AI7_FAILURE_CODES.OUTCOME_UNKNOWN, response.message);
         return;
     }
   }

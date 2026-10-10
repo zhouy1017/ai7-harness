@@ -1,0 +1,19 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-baseline-outcome-unknown",
+  "description": "Hand-written synthetic shape (viii) layered over shape (i): identical to sample1-baseline-happy except that Analysis Unit 4 answers its first attempt with an outcome that cannot be known — the request reached the model service and its answer never came back whole (结果待确认, Issue #51, S16c). The entry names attempt 1 only, so once the editor's 续行 reads the unit again — its next turn for the same unit and request digest being that unit's second — it falls through to the base's conforming result. Only J-10's launch may bind it (`outcomeUnknownFixtureAllowed`); the L2 suite constructs it directly. It inherits every other entry of the base, the cross-unit reduction and the sample included. Public synthetic text only; no manuscript content and no finding text.",
+  "basedOn": "sample1-baseline-happy",
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 4,
+      "requestDigest": "d7eef03bffc2df6e4b39f8d430a9841f00a3f83feb7ab68e8a96700326433c46",
+      "attempt": 1,
+      "response": {
+        "kind": "outcome-unknown",
+        "message": "Synthetic dropped answer for Analysis Unit 4 on attempt 1: the request was sent and its answer never came back whole (fixture shape viii)."
+      }
+    }
+  ]
+}

@@ -79,6 +79,11 @@ export const ACCOUNT_LIMIT_UNKNOWN = '未知 · 提供方未返回';
 export function accountLimitReached(condition: string): string {
   return `已达到 · ${condition}`;
 }
+/**
+ * 结果待确认 (Issue #51, S16c; CTRL-007, COPY-009, interaction-spec §807, §1036): the pill of a Run stopped on sent requests
+ * whose results cannot be known — never 任务已中断 · 可续行 nor 已取消.
+ */
+export const OUTCOME_UNKNOWN_STATE = { key: 'outcome-unknown', label: '结果待确认' } as const;
 /** No Run has measured a duration this estimate could stand on. */
 export const DURATION_UNKNOWN = '暂无可靠估计';
 const NO_USAGE = '不发送，没有模型用量';
@@ -520,7 +525,10 @@ function baselineState(projection: BaselineAnalysisProjection, stopped?: Baselin
       return { key: 'paused', label: '已暂停' };
     case 'resumable':
       // 模型服务账户限额 (Issue #51, S16b; RUN-012): its own words, never 任务已中断 · 可续行's.
-      return stopped?.accountLimit != null ? { ...ACCOUNT_LIMIT_STATE } : { key: 'resumable', label: '任务已中断 · 可续行' };
+      return stopped?.accountLimit != null ? { ...ACCOUNT_LIMIT_STATE }
+        // 结果待确认 (Issue #51, S16c): its own words too.
+        : stopped?.outcomeUnknown != null ? { ...OUTCOME_UNKNOWN_STATE }
+          : { key: 'resumable', label: '任务已中断 · 可续行' };
     // 任务等待你的说明 (Issue #422, S76d; CLAR-004): every unit the Run could read is read; it waits for the answer.
     case 'awaiting-clarification':
       return { key: 'awaiting-clarification', label: '任务等待你的说明' };
@@ -789,6 +797,12 @@ export function baselineAnalysisPlan(input: {
       ]),
       // 模型服务账户限额 (Issue #51, S16b): the refusal as AI7 classified it, one step below the bar's words.
       ...(input.stopped?.accountLimit == null ? [] : [{ key: 'account-limit', label: '模型服务账户限额', value: input.stopped.accountLimit.condition }]),
+      // 结果待确认 (Issue #51, S16c): each unconfirmed range's outcome as AI7 classified it, one step below the bar's words.
+      ...(input.stopped?.outcomeUnknown == null ? [] : [{
+        key: 'outcome-unknown',
+        label: '结果待确认',
+        value: input.stopped.outcomeUnknown.units.map((unit) => `第 ${unit.unitOrdinal} 个阅读范围 · 已发送 ${unit.attempts} 次 · ${unit.reason}`).join('；'),
+      }]),
     ],
     start: baselineStart(projection, envelope.digest),
     defaultRule: input.defaultRule ?? noDefaultRule(BASELINE_NO_RULE),
@@ -1649,6 +1663,8 @@ export function baselineCancellationImpact(
     unitsTotal: number;
     bindingHolds?: boolean;
     waiting?: ReadonlyArray<{ unitOrdinal: number; answered: boolean }>;
+    /** The ranges 结果待确认 left unconfirmed (Issue #51, S16c): each ends as the gap its sent request left. */
+    unconfirmed?: ReadonlyArray<number>;
   } | null = null,
 ): ReadonlyArray<string> {
   // An update Run reads only the ranges it recomputes: the rest it names as such, and the ranges it reuses are kept.
@@ -1689,13 +1705,18 @@ export function baselineCancellationImpact(
         return ['这项任务已经停下，它已保存的阅读进度无法核对；取消后不会发送任何内容，也不会形成结果集修订版。', CANCELLATION_NO_EFFECTS];
       }
       const asked = kept.waiting ?? [];
-      if (unitsSettled === 0 && asked.length === 0) {
+      const unconfirmed = kept.unconfirmed ?? [];
+      if (unitsSettled === 0 && asked.length === 0 && unconfirmed.length === 0) {
         return ['这项任务还没有读完任何阅读范围；取消后不会发送任何内容，也不会形成结果集修订版。', CANCELLATION_NO_EFFECTS];
       }
       return [
-        `这项任务已经停下；${restOf(Math.max(0, unitsTotal - unitsSettled - asked.length))}之后的归纳、抽样都不再进行，不再发送任何内容。`,
+        `这项任务已经停下；${restOf(Math.max(0, unitsTotal - unitsSettled - asked.length - unconfirmed.length))}之后的归纳、抽样都不再进行，不再发送任何内容。`,
         ...(unitsSettled === 0 ? [] : [partial(unitsSettled)]),
         ...waitingLines(asked, unitsSettled > 0),
+        // 结果待确认 (Issue #51, S16c): their requests were sent, so they are gaps of their own — never ranges not attempted.
+        ...(unconfirmed.length === 0 ? [] : [
+          `${unconfirmed.map((ordinal) => `第 ${ordinal} 个`).join('、')}阅读范围的结果待确认；取消后不再重读，${kept.bindingHolds === false ? '' : '在这份修订版里'}记为结果待确认的缺口。`,
+        ]),
         CANCELLATION_NO_EFFECTS,
       ];
     }
@@ -1761,6 +1782,7 @@ function baselineRunControl(projection: BaselineAnalysisProjection, stopped?: Ba
   // a stopped one — paused, left 可续行, or waiting for the editor's answer — continues from it.
   const kept = held || stopped === undefined ? null : {
     unitsSettled: stopped.unitsSettled, unitsTotal: stopped.unitsTotal, bindingHolds: stopped.bindingHolds, waiting: stopped.waiting,
+    unconfirmed: stopped.outcomeUnknown?.units.map((unit) => unit.unitOrdinal) ?? [],
   };
   const continuation = kept !== null && (run.state === 'paused' || run.state === 'resumable' || waitsForAnswer) ? { unitsSettled: kept.unitsSettled, unitsTotal: kept.unitsTotal } : null;
   const counts = projection.update?.reusePlan?.counts ?? null;
@@ -1784,6 +1806,9 @@ function baselineRunControl(projection: BaselineAnalysisProjection, stopped?: Ba
     update,
     accountLimit: run.state === 'resumable' && stopped?.accountLimit != null
       ? { unitOrdinal: stopped.accountLimit.unitOrdinal, condition: stopped.accountLimit.condition }
+      : null,
+    outcomeUnknown: run.state === 'resumable' && stopped?.outcomeUnknown != null
+      ? { units: stopped.outcomeUnknown.units.map((unit) => ({ unitOrdinal: unit.unitOrdinal, attempts: unit.attempts })) }
       : null,
   };
 }
@@ -1882,6 +1907,11 @@ export interface BaselineStoppedRunFacts {
   readonly bindingHolds: boolean;
   /** The provider's account limit stopped the Run (Issue #51, S16b), in the provider's words; absent or `null` otherwise. */
   readonly accountLimit?: { readonly condition: string; readonly unitOrdinal: number | null } | null;
+  /**
+   * 结果待确认 stopped the Run (Issue #51, S16c): the ranges whose sent requests' results cannot be known, with how often each
+   * was sent and the outcome as AI7 classified it; absent or `null` otherwise.
+   */
+  readonly outcomeUnknown?: { readonly units: ReadonlyArray<{ readonly unitOrdinal: number; readonly attempts: number; readonly reason: string }> } | null;
 }
 
 /** 续行's own words when the service cannot let the Run go on now (CONT-015): each names what it waits for. */

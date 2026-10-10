@@ -133,6 +133,8 @@ export interface AnalysisTaskAttentionReading {
     readonly launchSetsCeiling?: boolean;
     /** A resumable Run the provider's account limit stopped (Issue #51, S16b): 模型服务账户限额. */
     readonly accountLimited?: boolean;
+    /** A resumable Run stopped on sent requests whose results cannot be known (Issue #51, S16c): 结果待确认. */
+    readonly outcomeUnknown?: boolean;
     /** A waiting Run blocked because its plan moved before it could start (Issue #536): 需要重新确认计划. */
     readonly planMoved?: boolean;
   };
@@ -521,6 +523,14 @@ function analysisTaskItem(reading: AnalysisTaskAttentionReading, waitingFor: Wai
       if (run.accountLimited === true) {
         return item('exceptions', 'analysis-account-limit', {
           itemId, blocked: true, at: run.stateAt, book, object, nextStep: 'resolve-model-service',
+          target: { kind: 'analysis-plan', bookId: reading.bookId, taskIntentId: reading.taskIntentId }, technical,
+        });
+      }
+      // 结果待确认 (Issue #51, S16c; ATTN-002, NOTIF-004): an ambiguous outcome, in 异常与结果待确认, whose next step is to see
+      // which ranges it left unconfirmed — never a repeat-shaped action.
+      if (run.outcomeUnknown === true) {
+        return item('exceptions', 'analysis-outcome-unknown', {
+          itemId, blocked: true, at: run.stateAt, book, object, nextStep: 'view-unconfirmed',
           target: { kind: 'analysis-plan', bookId: reading.bookId, taskIntentId: reading.taskIntentId }, technical,
         });
       }

@@ -32,7 +32,7 @@ import {
   parseAssuranceSamplingMessageHeader,
   parseAssuranceSamplingResult,
 } from '../../src/service/analysis/assurance-sampling-contract.js';
-import { AI7_FAILURE_CODES, classifyModelFailure, evaluateRunBudgetCeiling } from '../../src/service/provider/classification.js';
+import { AI7_FAILURE_CODES, classifyModelFailure, evaluateRunBudgetCeiling, isRetrySafeFailure } from '../../src/service/provider/classification.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
 import {
   Ai7LocalDeterministicAdapter,
@@ -47,7 +47,10 @@ import { BASELINE_PROMPT_CONTRACT } from '../../src/service/analysis/contract.js
 import type { CoverageManifestUnitProjection } from '../../src/shared/protocol.js';
 import {
   ModelFixtureError,
+  OUTCOME_UNKNOWN_FIXTURE_JOURNEY,
+  fixtureEndsAmbiguously,
   fixtureEntryKey,
+  outcomeUnknownFixtureAllowed,
   fixturePath,
   loadModelFixture,
   parseModelFixture,
@@ -264,6 +267,46 @@ describe('model fixture loading', () => {
     // Four entries of its own over the base: unit 5's first-attempt failure, and (Issue #276) the
     // three Run Report reflection answers for the accountings the Runs on this fixture produce.
     expect(transient.entries.size).toBe(base.entries.size + 4);
+  });
+
+  // Issue #51 (S16c): 结果待确认's stimulus. An `outcome-unknown` entry answers a unit as a sent request whose result cannot be
+  // known; it is classified ambiguous and never retry-safe, and only J-10's launch may bind a fixture that names one.
+  it('(viii) answers an outcome-unknown entry as AI7_OUTCOME_UNKNOWN, never retry-safe, and only J-10 may bind it', async () => {
+    const digest = ZERO_UNIT_REQUEST_DIGEST;
+    await writeFile(join(root, 'unknown-once.json'), fixture('unknown-once', null, [
+      { unitOrdinal: 1, requestDigest: digest, attempt: 1, response: { kind: 'outcome-unknown', message: '合成：回答没有完整传回。' } },
+      { unitOrdinal: 1, requestDigest: digest, response: { kind: 'unit-result', text: 'second', usage: { inputTokens: 1, outputTokens: 1 } } },
+    ]));
+    const once = await loadModelFixture(root, 'unknown-once');
+    const adapter = new Ai7LocalDeterministicAdapter(once, BASELINE_PROMPT_CONTRACT_DIGEST, codes);
+    expect(await collect(adapter.stream(request()))).toEqual([
+      { type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN, message: '合成：回答没有完整传回。' } } },
+    ]);
+    // The editor's 续行 reads it again as its second attempt, which the any-attempt entry answers.
+    expect((await collect(adapter.stream(request()))).at(-1)).toEqual({ type: 'finish', reason: { kind: 'stop' } });
+    const classified = classifyModelFailure({ code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN, message: '' }, codes);
+    expect(classified).toMatchObject({ signal: 'ambiguous', failureClass: 'outcome-unknown', retrySafe: false });
+    expect(isRetrySafeFailure({ code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN, message: '', status: 200 })).toBe(false);
+    // Bound only under J-10: any other Journey, and a launch under none, is refused; a fixture without one binds anywhere.
+    expect(fixtureEndsAmbiguously(once)).toBe(true);
+    expect(OUTCOME_UNKNOWN_FIXTURE_JOURNEY).toBe('J-10');
+    for (const journey of [undefined, '', 'J-04', 'J-09', 'J-11', 'J-13', 'J-16', 'j-10']) expect(outcomeUnknownFixtureAllowed(once, journey)).toBe(false);
+    expect(outcomeUnknownFixtureAllowed(once, 'J-10')).toBe(true);
+    const happy = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-happy');
+    expect(fixtureEndsAmbiguously(happy)).toBe(false);
+    expect(outcomeUnknownFixtureAllowed(happy, undefined)).toBe(true);
+    // The shape is closed like every other response's.
+    expect(() => parseModelFixture(JSON.parse(fixture('bad', null, [
+      { unitOrdinal: 1, requestDigest: digest, response: { kind: 'outcome-unknown', message: 'x', status: 200 } },
+    ])))).toThrowError(/outcome-unknown/u);
+    // The J-10 fixture: unit 4's first attempt only, over the happy fixture, which answers its second.
+    const journey = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-outcome-unknown');
+    expect(journey.lineage.map((link) => link.identity)).toEqual(['sample1-baseline-outcome-unknown', 'sample1-baseline-happy']);
+    const unit4 = 'd7eef03bffc2df6e4b39f8d430a9841f00a3f83feb7ab68e8a96700326433c46';
+    expect(resolveFixtureEntry(journey.entries, 4, unit4, 1)?.response.kind).toBe('outcome-unknown');
+    expect(resolveFixtureEntry(journey.entries, 4, unit4, 2)?.response.kind).toBe('unit-result');
+    expect(journey.entries.size).toBe(happy.entries.size + 1);
+    expect(outcomeUnknownFixtureAllowed(journey, undefined)).toBe(false);
   });
 
   // Issue #53: a second analysis kind shares this adapter. Which kind a request belongs to is decided

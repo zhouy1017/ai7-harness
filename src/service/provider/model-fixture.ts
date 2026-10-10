@@ -58,7 +58,12 @@ export type ModelFixtureResponse =
   | { readonly kind: 'answer-chunks'; readonly chunks: ReadonlyArray<string>; readonly usage: { readonly inputTokens: number; readonly outputTokens: number } }
   | { readonly kind: 'adapter-failure'; readonly code: string; readonly message: string; readonly status: number | null }
   | { readonly kind: 'quota-exceeded'; readonly message: string; readonly status: number }
-  | { readonly kind: 'interrupted'; readonly message: string };
+  | { readonly kind: 'interrupted'; readonly message: string }
+  /**
+   * 结果待确认's stimulus (Issue #51, S16c): the request reached the model service and its answer never came back whole, so
+   * whether it was processed and billed cannot be known. Only J-10 may load a fixture that names it ({@link outcomeUnknownFixtureAllowed}).
+   */
+  | { readonly kind: 'outcome-unknown'; readonly message: string };
 
 export interface ModelFixtureEntry {
   /** The Analysis Unit this entry answers, or `0` for the Run's one cross-unit reduction. */
@@ -156,6 +161,10 @@ function parseResponse(value: unknown): ModelFixtureResponse {
       requireFixture(hasExactKeys(value, ['kind', 'message']) && wellFormed(value.message, 1_024), '夹具 interrupted 响应无效。');
       return { kind: 'interrupted', message: value.message };
     }
+    case 'outcome-unknown': {
+      requireFixture(hasExactKeys(value, ['kind', 'message']) && wellFormed(value.message, 1_024), '夹具 outcome-unknown 响应无效。');
+      return { kind: 'outcome-unknown', message: value.message };
+    }
     default:
       throw new ModelFixtureError('MODEL_FIXTURE_INVALID', '夹具响应类型不在闭合集合内。');
   }
@@ -210,6 +219,23 @@ export function parseModelFixture(value: unknown): ModelFixture {
     model: 'ai7-deterministic-fixture',
     entries,
   };
+}
+
+/**
+ * The one Journey whose launch may load a fixture that ends a turn ambiguously (Issue #51, S16c): J-10, under development-ci —
+ * the only scope a fixture is ever loaded in. Any other launch naming such a fixture is refused before the store opens, so the
+ * stimulus is never reachable in a product launch nor in another Journey's.
+ */
+export const OUTCOME_UNKNOWN_FIXTURE_JOURNEY = 'J-10' as const;
+
+/** Whether any entry of a resolved fixture, its bases' included, ends its turn with 结果待确认. */
+export function fixtureEndsAmbiguously(fixture: ResolvedModelFixture): boolean {
+  return [...fixture.entries.values()].some((entry) => entry.response.kind === 'outcome-unknown');
+}
+
+/** Whether a launch under `journey` (the `AI7_E2E_JOURNEY` it runs under, or none) may bind this fixture. */
+export function outcomeUnknownFixtureAllowed(fixture: ResolvedModelFixture, journey: string | undefined): boolean {
+  return !fixtureEndsAmbiguously(fixture) || journey === OUTCOME_UNKNOWN_FIXTURE_JOURNEY;
 }
 
 export function fixturePath(fixturesRoot: string, identity: string): string {
