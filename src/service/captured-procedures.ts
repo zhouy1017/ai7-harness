@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   CAPTURED_PROCEDURE_SCHEMA,
-  CAPTURED_PROCEDURE_SCOPE_SLOTS,
+  CAPTURED_PROCEDURE_CAPTURE_SLOTS,
   CAPTURED_PROCEDURE_STATE_LABELS,
   MAX_CAPTURED_PROCEDURE_PACKAGES_SHOWN,
   MAX_CAPTURED_PROCEDURE_RUNS_SHOWN,
@@ -275,8 +275,9 @@ export function readCapturedProcedureDocument(json: string, digest: string): Cap
 export function isCapturedProcedureDocument(value: unknown): value is CapturedProcedureDocument {
   if (!isRecord(value) || !hasExactKeys(value, ['schema', 'title', 'runAs', 'steps', 'parameters', 'authorityCeiling'])) return false;
   if (value.schema !== CAPTURED_PROCEDURE_SCHEMA || value.runAs !== 'review-run' || !validCapturedProcedureTitle(value.title)) return false;
+  // A document carries a capture slot — 全书 or 选定章节 — never `selection`, which is a per-Run handover on the pin (Issue #423).
   if (!isRecord(value.parameters) || !hasExactKeys(value.parameters, ['scope']) ||
-      !(CAPTURED_PROCEDURE_SCOPE_SLOTS as readonly unknown[]).includes(value.parameters.scope)) return false;
+      !(CAPTURED_PROCEDURE_CAPTURE_SLOTS as readonly unknown[]).includes(value.parameters.scope)) return false;
   const steps = value.steps;
   if (!Array.isArray(steps) || steps.length === 0) return false;
   const seen = new Set<string>();

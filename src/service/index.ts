@@ -7,6 +7,8 @@ import {
   RUN_BUDGET_CEILING_ARGUMENT,
   TRUSTED_SCOPE_ARGUMENT,
   BACKGROUND_QUIET_ARGUMENT,
+  CALIBRATION_MIN_BOOKS_ARGUMENT,
+  calibrationMinBooksForLaunch,
   parseBackgroundQuietMs,
   parseTrustedLaunchForm,
   type J01ImportControl,
@@ -595,9 +597,9 @@ async function dispatch(
     case 'stopCapturedProcedure':
       return { id: request.id, ok: true, op: request.op, result: store.stopCapturedProcedure(request.input.procedureId, request.input.versionId, request.input.previewDigest) };
     case 'inspectCapturedProcedureApplicability':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectCapturedProcedureApplicability(request.input.bookId) };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectCapturedProcedureApplicability(request.input.bookId, request.input.scope ?? null) };
     case 'inspectCapturedProcedureRun':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectCapturedProcedureRun(request.input.bookId, request.input.procedureId, request.input.versionId) };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectCapturedProcedureRun(request.input.bookId, request.input.procedureId, request.input.versionId, request.input.scope ?? null) };
     case 'saveDeveloperProposal':
       return { id: request.id, ok: true, op: request.op, result: store.saveDeveloperProposal(request.input) };
     case 'writeDeveloperProposalFile':
@@ -725,7 +727,7 @@ async function dispatch(
     case 'inspectEvaluation':
       return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluation(request.input.bookId, request.input.recordId, request.input.recordsBefore) };
     case 'startEvaluation':
-      return { id: request.id, ok: true, op: request.op, result: store.startEvaluation(request.input.bookId, request.input.fromInitial) };
+      return { id: request.id, ok: true, op: request.op, result: store.startEvaluation(request.input.bookId, request.input.fromInitial, request.input.skipDamaged) };
     case 'saveEvaluation':
       return { id: request.id, ok: true, op: request.op, result: store.saveEvaluation(request.input) };
     // AI7 初评 (Issue #429, S81b1): prepared as a cooperative job whose plan the Task Drawer opens, and started from its bar
@@ -1364,6 +1366,8 @@ function parseArguments(argv: string[]): {
   unitHoldPath: string | undefined;
   answerHoldPath: string | undefined;
   backgroundQuietMs: number | undefined;
+  /** J-11 only (Issue #429, EVAL-011a): the calibration gate in Books, 2–10. */
+  calibrationMinBooks: number | undefined;
 } {
   const values = new Map<string, string>();
   for (let index = 0; index < argv.length; index += 2) {
@@ -1376,7 +1380,7 @@ function parseArguments(argv: string[]): {
       (key !== '--data-root' && key !== '--parent-pid' && key !== '--j01-import-control' &&
         key !== '--j03-foreground-execution-control' && key !== '--j08-recovery-control' &&
         key !== '--j04-model-adapter' && key !== '--j04-connectivity-path' && key !== '--j10-unit-hold-path' && key !== '--j16-answer-hold-path' &&
-        key !== BACKGROUND_QUIET_ARGUMENT && key !== TRUSTED_SCOPE_ARGUMENT && key !== RUN_BUDGET_CEILING_ARGUMENT &&
+        key !== BACKGROUND_QUIET_ARGUMENT && key !== CALIBRATION_MIN_BOOKS_ARGUMENT && key !== TRUSTED_SCOPE_ARGUMENT && key !== RUN_BUDGET_CEILING_ARGUMENT &&
         key !== PROVIDER_CACHE_ROOT_ARGUMENT)
     ) {
       throw new ProtocolError();
@@ -1429,6 +1433,10 @@ function parseArguments(argv: string[]): {
   // J-09's 后台分析登记 pace (Issue #95, S39): a shorter quiet period, beside the adapter, so the Journey waits on progress.
   const backgroundQuietValue = values.get(BACKGROUND_QUIET_ARGUMENT);
   const backgroundQuietMs = backgroundQuietValue === undefined ? null : parseBackgroundQuietMs(backgroundQuietValue);
+  // J-11's calibration gate (Issue #429, EVAL-011a): J-11's own, development-ci only, beside the adapter, 2–10 Books — decided
+  // by the same rule main decides it by.
+  const calibrationMinBooksValue = values.get(CALIBRATION_MIN_BOOKS_ARGUMENT);
+  const calibrationMinBooks = calibrationMinBooksForLaunch(calibrationMinBooksValue, process.env.AI7_E2E_JOURNEY);
   if (
     !dataRoot ||
     !isAbsolute(dataRoot) ||
@@ -1457,18 +1465,19 @@ function parseArguments(argv: string[]): {
       !isAbsolute(unitHoldPath))) ||
     (answerHoldPath !== undefined && (process.env.AI7_E2E_JOURNEY !== 'J-16' || !isAbsolute(answerHoldPath))) ||
     (backgroundQuietValue !== undefined && (process.env.AI7_E2E_JOURNEY !== 'J-09' || backgroundQuietMs === null || modelAdapterControl === undefined)) ||
+    (calibrationMinBooksValue !== undefined && (calibrationMinBooks === null || calibrationMinBooks === undefined || modelAdapterControl === undefined)) ||
     [importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl].filter(Boolean).length > 1 ||
     // developer-live is a human-attended developer-host launch: never a Journey launch, never with a Journey control.
     (launchForm.trustedOperationalScope !== 'development-ci' &&
       (process.env.AI7_E2E_JOURNEY !== undefined || importControlValue !== undefined || foregroundExecutionControlValue !== undefined ||
         recoveryControlValue !== undefined || modelAdapterControlValue !== undefined || connectivityPath !== undefined ||
-        unitHoldPath !== undefined || answerHoldPath !== undefined || backgroundQuietValue !== undefined))
+        unitHoldPath !== undefined || answerHoldPath !== undefined || backgroundQuietValue !== undefined || calibrationMinBooksValue !== undefined))
   ) {
     throw new ProtocolError();
   }
   return {
     dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, connectivityPath, unitHoldPath,
-    answerHoldPath, backgroundQuietMs: backgroundQuietMs ?? undefined,
+    answerHoldPath, backgroundQuietMs: backgroundQuietMs ?? undefined, calibrationMinBooks: calibrationMinBooks ?? undefined,
   };
 }
 
@@ -1501,7 +1510,7 @@ async function run(): Promise<void> {
   // `opencode-go` transport ever receives it, and only through the adapter's transmit step.
   const nativeFetch: typeof fetch = globalThis.fetch;
   const { dataRoot, parentPid, launchForm, importControl, foregroundExecutionControl, recoveryControl, modelAdapterControl, connectivityPath, unitHoldPath, answerHoldPath,
-    backgroundQuietMs } = parseArguments(process.argv.slice(2));
+    backgroundQuietMs, calibrationMinBooks } = parseArguments(process.argv.slice(2));
   // The policy-declared allowance set and per-ticket host admission (ADR 0080 §7.3; settlement l), armed before the denial
   // so its gates admit exactly the policy's endpoint and the one search host the selected rule names; nothing under
   // `development-ci`. Node's own fetch resolves `tls.connect` and `dns.lookup` at call time. `webfetch` targets are never
@@ -1586,6 +1595,8 @@ async function run(): Promise<void> {
       baselineAnalysisRoute: fixture === null
         ? null
         : { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
+      // J-11's calibration gate (Issue #429, EVAL-011a): the product's ten Books in every other launch.
+      ...(calibrationMinBooks === undefined ? {} : { calibrationMinAdjustments: calibrationMinBooks }),
     });
     reachServiceStartup('owners');
     // The ledger learns the trusted launch once, before any frame is served, so every plan it freezes

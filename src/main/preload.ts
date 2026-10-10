@@ -284,8 +284,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['previewCapturedProcedureStop']['output']>(IPC_CHANNELS.previewCapturedProcedureStop, input),
   stopCapturedProcedure: (input: Parameters<RendererApi['stopCapturedProcedure']>[0]) =>
     invoke<ServiceOperationMap['stopCapturedProcedure']['output']>(IPC_CHANNELS.stopCapturedProcedure, input),
-  inspectCapturedProcedureApplicability: () =>
-    invoke<ServiceOperationMap['inspectCapturedProcedureApplicability']['output']>(IPC_CHANNELS.inspectCapturedProcedureApplicability),
+  inspectCapturedProcedureApplicability: (input?: Parameters<RendererApi['inspectCapturedProcedureApplicability']>[0]) =>
+    invoke<ServiceOperationMap['inspectCapturedProcedureApplicability']['output']>(IPC_CHANNELS.inspectCapturedProcedureApplicability, input ?? {}),
   inspectCapturedProcedureRun: (input: Parameters<RendererApi['inspectCapturedProcedureRun']>[0]) =>
     invoke<ServiceOperationMap['inspectCapturedProcedureRun']['output']>(IPC_CHANNELS.inspectCapturedProcedureRun, input),
   saveDeveloperProposal: (input: Parameters<RendererApi['saveDeveloperProposal']>[0]) =>
@@ -309,7 +309,7 @@ const api: RendererApi = Object.freeze({
   inspectEvaluationProfiles: () => invoke<ServiceOperationMap['inspectEvaluationProfiles']['output']>(IPC_CHANNELS.inspectEvaluationProfiles),
   inspectEvaluation: (input: { recordId: string | null; recordsBefore?: number | null }) =>
     invoke<ServiceOperationMap['inspectEvaluation']['output']>(IPC_CHANNELS.inspectEvaluation, input),
-  startEvaluation: (input?: { fromInitial: boolean }) =>
+  startEvaluation: (input?: { fromInitial: boolean; skipDamaged?: boolean }) =>
     invoke<ServiceOperationMap['startEvaluation']['output']>(IPC_CHANNELS.startEvaluation, input),
   saveEvaluation: (input: Omit<ServiceOperationMap['saveEvaluation']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['saveEvaluation']['output']>(IPC_CHANNELS.saveEvaluation, input),

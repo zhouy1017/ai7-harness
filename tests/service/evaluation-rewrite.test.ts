@@ -661,12 +661,14 @@ describe('the market section and 按我的评分重写评语 over the real store
         expect(() => database.exec(`UPDATE ${table} SET recorded_at = recorded_at`)).toThrowError(/EVALUATION_REWRITE_LEDGER_IMMUTABLE/u);
         expect(() => database.exec(`DELETE FROM ${table}`)).toThrowError(/EVALUATION_REWRITE_LEDGER_IMMUTABLE/u);
       }
-      // A snapshot written before the market section existed (`/1`) names none and reads as having none.
+      // A snapshot written before the market section existed (`/1`) names none and reads as having none; one written since
+      // EVAL-011a (`/3`) names the calibration applied too, `null` here with one Book (the unit suite reads a `/2` as well).
       const snapshot = database.prepare('SELECT canonical_json FROM evaluation_initial_drafts WHERE record_id = ?').get(recordId) as { canonical_json: string };
-      const stored = JSON.parse(snapshot.canonical_json) as { schema: string; draft: Record<string, unknown> };
-      expect(stored.schema).toBe('ai7.evaluation-initial-draft/2');
+      const stored = JSON.parse(snapshot.canonical_json) as { schema: string; calibration: unknown; draft: Record<string, unknown> };
+      expect([stored.schema, stored.calibration]).toEqual(['ai7.evaluation-initial-draft/3', null]);
       const { market: _market, ...draftV1 } = stored.draft;
-      const v1 = JSON.stringify({ ...stored, schema: 'ai7.evaluation-initial-draft/1', draft: draftV1 });
+      const { calibration: _calibration, ...storedV1 } = stored;
+      const v1 = JSON.stringify({ ...storedV1, schema: 'ai7.evaluation-initial-draft/1', draft: draftV1 });
       const rewriteSnapshot = (json: string): void => {
         const canonical = JSON.stringify(JSON.parse(json), (_key, value: unknown) =>
           value !== null && typeof value === 'object' && !Array.isArray(value)

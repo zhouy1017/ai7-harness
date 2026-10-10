@@ -103,6 +103,7 @@ describe('the Captured Procedure document (ADR 0087 §1)', () => {
     const { title: _title, ...untitled } = document;
     expect(isCapturedProcedureDocument(untitled)).toBe(false);
     expect(isCapturedProcedureDocument({ ...document, runAs: 'skill' })).toBe(false);
+    // `selection` is the scope a Run pins when a procedure runs on a 当前选区 (Issue #423, S77 deferred item a), never a document's slot.
     expect(isCapturedProcedureDocument({ ...document, parameters: { scope: 'selection' } })).toBe(false);
     expect(isCapturedProcedureDocument({ ...document, steps: [] })).toBe(false);
     expect(isCapturedProcedureDocument({ ...document, steps: [document.steps[0], document.steps[0]] })).toBe(false);

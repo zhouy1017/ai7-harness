@@ -121,7 +121,7 @@ describe('AI7 初评 over the real store on exact sample1', () => {
       // Before any 初评: 评估 offers to prepare one, and nothing to begin from.
       const before = book.store.inspectEvaluation(book.bookId, null);
       expect(before.initial).toEqual({ task: null, prepare: { allowed: true, mode: 'evaluation-first' }, latest: null });
-      expect(before.start).toEqual({ allowed: true, kind: 'first', fromInitial: null });
+      expect(before.start).toEqual({ allowed: true, kind: 'first', fromInitial: null, skipDamaged: null });
       expect(await refusal(() => book.store.startEvaluation(book.bookId, true))).toBe('EVALUATION_INITIAL_UNAVAILABLE:这本书还没有完成的 AI7 初评。');
 
       // The plan in the Task Drawer, in the editor's words: two steps, nothing sent under the deterministic route, ready to start.
@@ -170,7 +170,7 @@ describe('AI7 初评 over the real store on exact sample1', () => {
       expect(after.initial.prepare).toEqual({ allowed: true, mode: 'evaluation-again' });
       expect(after.initial.latest).toMatchObject({ revisionId: revision.revisionId, ordinal: 1, revisionLabel: 'r1', complete: true, current: true,
         total: { score: 73, fullMarks: 100, notRated: 0, unscored: 0 }, suggestedConclusion: 'revise' });
-      expect(after.start).toEqual({ allowed: true, kind: 'first', fromInitial: { revisionId: revision.revisionId, ordinal: 1 } });
+      expect(after.start).toEqual({ allowed: true, kind: 'first', fromInitial: { revisionId: revision.revisionId, ordinal: 1 }, skipDamaged: null });
       // What each score rests on travels with it (EVAL-006): AI7's notes range by range, with the blocks they cite; every range read.
       expect(after.initial.latest!.items.map((item) => item.evidence)).toEqual(evaluation.items.map((item) =>
         item.observations.map((observation) => ({ unitOrdinal: observation.unitOrdinal, note: observation.note, blockIds: observation.blockIds }))));
@@ -186,7 +186,8 @@ describe('AI7 初评 over the real store on exact sample1', () => {
 
       // 从 AI7 初评开始: AI7's scores and words are the starting point, beside the version; no risk and no conclusion are AI7's.
       const draft = book.store.startEvaluation(book.bookId, true).record!;
-      expect(draft).toMatchObject({ ordinal: 1, state: 'draft', entries: 1, conclusion: null, total: { score: 73, fullMarks: 100 } });
+      // Below the gate no house offset exists (EVAL-011a): the version starts from the raw 初评 and records no calibration.
+      expect(draft).toMatchObject({ ordinal: 1, state: 'draft', entries: 1, conclusion: null, total: { score: 73, fullMarks: 100 }, calibration: null, skippedRecords: [], seededFrom: null });
       expect(draft.content.items.map((item) => [item.score, item.adjustment])).toEqual(AI7_SCORES.map((score) => [score, null]));
       expect(draft.content.risks.every((risk) => risk.level === null)).toBe(true);
       expect(draft.content.strengths.length).toBe(2);
@@ -224,7 +225,7 @@ describe('AI7 初评 over the real store on exact sample1', () => {
         conclusion: 'revise',
       }, true).record!;
       expect(finalized).toMatchObject({ state: 'finalized', conclusion: 'revise' });
-      expect(book.store.inspectEvaluationCalibration().calibration).toMatchObject({ adjustments: 1, initialScoresConnected: true, active: false });
+      expect(book.store.inspectEvaluationCalibration().calibration).toMatchObject({ adjustments: 1, initialScoresConnected: true, active: false, offset: null });
 
       // 重新评估 alone carries the editor's scores but no adjustment: its start is its own.
       const again = book.store.startEvaluation(book.bookId).record!;
@@ -251,7 +252,7 @@ describe('AI7 初评 over the real store on exact sample1', () => {
       });
       const moved = book.store.inspectEvaluation(book.bookId, null);
       expect(moved.initial.latest).toMatchObject({ current: false });
-      expect(moved.start).toEqual({ allowed: true, kind: 'again', fromInitial: null });
+      expect(moved.start).toEqual({ allowed: true, kind: 'again', fromInitial: null, skipDamaged: null });
       expect(await refusal(() => book.store.startEvaluation(book.bookId, true))).toBe('EVALUATION_INITIAL_UNAVAILABLE:稿件在最近一次 AI7 初评之后改过；请重新初评，再从初评开始。');
     });
 
@@ -302,7 +303,7 @@ describe('AI7 初评 over the real store on exact sample1', () => {
       expect(workspace.initial.latest).toMatchObject({ complete: false, current: true, total: { score: 0, fullMarks: 100, unscored: 5 } });
       // The ranges it never read are named.
       expect(workspace.initial.latest).toMatchObject({ unitsTotal: 8, unreadUnits: [2, 3, 4, 5, 6, 7, 8] });
-      expect(workspace.start).toEqual({ allowed: true, kind: 'first', fromInitial: null });
+      expect(workspace.start).toEqual({ allowed: true, kind: 'first', fromInitial: null, skipDamaged: null });
       expect(await refusal(() => book.store.startEvaluation(book.bookId, true)))
         .toBe('EVALUATION_INITIAL_UNAVAILABLE:最近一次 AI7 初评没有给出全部评分项的分数；请重新初评。');
     });

@@ -50,7 +50,21 @@ describe('the 任务 panel', () => {
     expect(labels.taskPanelMoreLine('waiting', 50, 57)).toBe('共 57 项，这里列出 50 项。');
     expect(labels.TASK_PANEL_STATUS_LINES).toEqual({ loading: '正在读取这本书的任务…', unavailable: '无法读取这本书的任务。' });
     expect(labels.TASK_PANEL_KIND_LABELS).toEqual({ analysis: '分析任务 · 不需要对话', review: '审阅任务 · 不需要对话', dialogue: '对话任务 · 就所选文字提问' });
-    expect(labels.TASK_PANEL_ACTION_LABELS).toEqual({ pause: '暂停', resume: '续行', cancel: '取消任务', plan: '查看计划', result: '查看结果', answer: '回答' });
+    expect(labels.TASK_PANEL_ACTION_LABELS).toEqual({ pause: '暂停', resume: '续行', cancel: '取消任务', plan: '查看计划', result: '查看结果', answer: '回答', jump: '跳到所选文字' });
+    expect(labels.TASK_PANEL_JUMP_GONE).toBe('所选文字所在的段落已不在当前稿件中，无法跳到。');
+  });
+
+  it('offers 跳到所选文字 on a Task started on a selection, in every state, after what the state offers (Issue #423, S77 deferred item d)', () => {
+    const selection = { manuscriptId: TASK, fromBlockId: 'blk_000000000000000000000001', toBlockId: 'blk_000000000000000000000001' };
+    const onSelection = (state: GlobalAttentionStateKey, overrides: Partial<GlobalAttentionItemProjection>, result: BookTaskItemProjection['result'] = null): BookTaskItemProjection =>
+      ({ ...entry(state, { object: { kind: 'review', ordinal: 1, onSelection: true }, ...overrides }, result), selection });
+    const prepared = labels.taskPanelCardView(onSelection('review-prepared', { group: 'decisions', nextStep: 'view-plan' }));
+    expect([prepared.title, keys(prepared)]).toEqual(['审阅 · 第 1 次 · 所选段落', ['next:查看计划并开始*', 'jump:跳到所选文字']]);
+    expect(keys(labels.taskPanelCardView(onSelection('review-running', { nextStep: 'view-review' })))).toEqual(['next:查看审阅*', 'jump:跳到所选文字']);
+    expect(keys(labels.taskPanelCardView(onSelection('review-completed', { group: 'recent', nextStep: 'view-review' }, { kind: 'review-run', reviewRunId: TASK }))))
+      .toEqual(['result:查看结果*', 'jump:跳到所选文字']);
+    // A Task on the whole Book never offers it.
+    expect(keys(labels.taskPanelCardView(entry('review-prepared', { group: 'decisions', nextStep: 'view-plan', object: { kind: 'review', ordinal: 1 } })))).toEqual(['next:查看计划并开始*']);
   });
 
   it('lets a card act only as the drawer’s bar would, and opens everything else where it is decided', () => {

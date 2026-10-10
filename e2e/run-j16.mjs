@@ -1,10 +1,11 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { lstat, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { ADMITTED_BASELINE_DOCX, composeRevisedAdmittedDocx } from './composed-docx.mjs';
 import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
@@ -323,6 +324,8 @@ async function prepareFirstBaseline(renderer, readiness, name) {
 
 const BOOK = Object.freeze({ title: '任务面旅程' });
 const SAMPLE1_UNITS = 8;
+/** Exact sample1's paragraphs, as `composed-docx.mjs` records them: the reimport that drops one paragraph is composed from the other 96. */
+const SAMPLE1_BLOCKS = 97;
 /** Two reading ranges settle; the third waits, in flight, until the Journey writes the next number. */
 const FIRST_HOLD = 2;
 const PANEL_NOTE = '这里只列这本书的任务；跨书的待办在「待我处理」。';
@@ -750,13 +753,15 @@ async function main() {
     const writeAnswerHold = (count) => writeFile(answerHoldPath, String(count), 'utf8');
     // The J-04 adapter's fixture: the happy one until the fourth Book's launch (Issue #422, S76d).
     let adapterFixture = FIXTURE_IDENTITY;
+    // The picker's file: exact sample1, until the last launch reimports the Book from a composed DOCX without one paragraph.
+    let pickerPath = SAMPLE1_PATH;
     const launchArgs = ({ forCleanup }) => {
       const args = [
         '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
         '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
         resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid),
       ];
-      if (!forCleanup) args.push('--j16-picker-path', SAMPLE1_PATH, '--j04-model-adapter', adapterFixture, '--j10-unit-hold-path', holdPath, '--j16-answer-hold-path', answerHoldPath);
+      if (!forCleanup) args.push('--j16-picker-path', pickerPath, '--j04-model-adapter', adapterFixture, '--j10-unit-hold-path', holdPath, '--j16-answer-hold-path', answerHoldPath);
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
       return args;
     };
@@ -1351,9 +1356,12 @@ async function main() {
     const paragraphText = () => renderer.evaluate(`window.__j16.block(${JSON.stringify(taskBlock)})?.textContent ?? null`);
     const paragraphBefore = await paragraphText();
     const windowLoads = () => renderer.evaluate(`document.querySelector('[data-screen="editor"] [data-window-loads]')?.dataset.windowLoads ?? ''`);
-    // On a selection of that paragraph the menu's 就这段发起任务… acts; the house's 常用工序 wait, and the group says why.
+    // On a selection of that paragraph the menu's 就这段发起任务… acts; the house's 可复用工序 would be listed here (S77 deferred item a,
+    // J-13's) — this house has none, which the group says once its read answers — 润色这段 alone waits with its reason, the other two
+    // prototype presets are gone, and 再选一段加入 is refused in words.
     await openSelectionMenu(renderer, taskBlock, 0, wordsTo, 'selection-task-open-menu');
-    await assertRenderer(renderer, `(() => { const item = window.__j16.item('task-on-selection'); const presets = ['preset-polish', 'preset-names', 'preset-continuity'].map((action) => window.__j16.item(action)); return item instanceof HTMLButtonElement && !item.disabled && item.textContent.startsWith('就这段发起任务…') && presets.every((preset) => preset instanceof HTMLButtonElement && preset.disabled) && window.__j16.menu().textContent.includes('本社常用工序就选区运行尚未接通'); })()`, 'selection-task-menu-items');
+    await assertRenderer(renderer, `(() => { const item = window.__j16.item('task-on-selection'); const polish = window.__j16.item('preset-polish'); return item instanceof HTMLButtonElement && !item.disabled && item.textContent.startsWith('就这段发起任务…') && polish instanceof HTMLButtonElement && polish.disabled && polish.title === '润色这段尚未接通：要有一项生成修改建议的润色工序' && window.__j16.item('preset-names') === null && window.__j16.item('preset-continuity') === null && window.__j16.menu().textContent.includes('不提供「再选一段加入」'); })()`, 'selection-task-menu-items');
+    await waitFor(renderer, `window.__j16.menu()?.textContent.includes('本社还没有启用的可复用工序。') && window.__j16.menu().querySelectorAll('[data-mark-action^="procedure:"]').length === 0 && window.__j16.item('task-on-selection') instanceof HTMLButtonElement`, 'selection-task-menu-procedures-none', 15_000);
     await assertRenderer(renderer, `(() => { window.__j16.item('task-on-selection').click(); return true; })()`, 'selection-task-choose');
 
     at('selection-task-composer');
@@ -1393,7 +1401,16 @@ async function main() {
     const selectionPanel = await waitForPanel(renderer, (panel) => statesOf(panel, 'waiting').includes('review-prepared'), 'selection-task-review-waiting');
     const selectionCard = cardsOf(selectionPanel, 'waiting').find((card) => card.state === 'review-prepared');
     requireJourney(selectionCard.kind === '审阅任务 · 不需要对话' && selectionCard.title === '审阅 · 第 1 次 · 所选段落' && selectionCard.pill === '计划已准备 · 等你开始' &&
-      JSON.stringify(selectionCard.actions) === JSON.stringify([['next', '查看计划并开始', 'enabled']]), 'selection-task-review-card-words', selectionCard);
+      JSON.stringify(selectionCard.actions) === JSON.stringify([['next', '查看计划并开始', 'enabled'], ['jump', '跳到所选文字', 'enabled']]), 'selection-task-review-card-words', selectionCard);
+
+    at('selection-task-jump');
+    // 跳到所选文字 (S77 deferred item d): with the caret put on the window's first paragraph, the card's jump moves it to the paragraph
+    // the Task was started on — the panel stays beside the text.
+    const awayBlock = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')).find((node) => (node.textContent ?? '').length > 0 && node.dataset.blockId !== ${JSON.stringify(taskBlock)})?.dataset.blockId ?? null`);
+    requireJourney(/^blk_[0-9a-f]{24}$/.test(awayBlock ?? ''), 'selection-task-jump-away-block');
+    await assertRenderer(renderer, `window.__j16.place(${JSON.stringify(awayBlock)}, 0, 0)`, 'selection-task-jump-caret-away');
+    await cardAction(renderer, 'review-prepared', 'jump', 'selection-task-jump-click');
+    await waitFor(renderer, `(() => { const anchor = getSelection()?.anchorNode ?? null; const block = document.querySelector(${JSON.stringify(`[data-testid="manuscript-editor"] [data-block-id="${taskBlock}"]`)}); return block !== null && anchor !== null && block.contains(anchor) && document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'panel'; })()`, 'selection-task-jumped', 30_000);
 
     at('selection-task-review-run');
     // Started from its plan, the 审阅 puts the baseline's leads on that paragraph — at least one, every one there — sends
@@ -1405,7 +1422,7 @@ async function main() {
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'selection-task-review-done-back');
     const reviewedPanel = await waitForPanel(renderer, (panel) => cardsOf(panel, 'recent')[0]?.state === 'review-completed', 'selection-task-review-completed', 60_000);
     const reviewedCard = cardsOf(reviewedPanel, 'recent')[0];
-    requireJourney(reviewedCard.title === '审阅 · 第 1 次 · 所选段落' && JSON.stringify(reviewedCard.actions) === JSON.stringify([['result', '查看结果', 'enabled']]), 'selection-task-review-completed-words', reviewedCard);
+    requireJourney(reviewedCard.title === '审阅 · 第 1 次 · 所选段落' && JSON.stringify(reviewedCard.actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['jump', '跳到所选文字', 'enabled']]), 'selection-task-review-completed-words', reviewedCard);
     const reviewedFindings = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({ reviewRunId: ${JSON.stringify(selectionRun.reviewRunId)} }).then((workspace) => workspace.run.findings.map((finding) => [finding.blockId, finding.markId !== null]))`);
     requireJourney(Array.isArray(reviewedFindings) && reviewedFindings.length > 0 && reviewedFindings.every(([blockId, marked]) => blockId === taskBlock && marked), 'selection-task-review-in-paragraph', reviewedFindings);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'selection-task-review-close');
@@ -1474,6 +1491,100 @@ async function main() {
       statesOf(rangePanel, 'running').length === 0, 'selection-task-reanalyze-card', rangePanel);
     requireJourney((await paragraphText()) === paragraphBefore, 'selection-task-reanalyze-manuscript-unchanged');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'selection-task-panel-close');
+
+    at('selection-task-gone');
+    // 跳到所选文字 on a paragraph the manuscript no longer holds (Issue #423 review, P2-1). The bounded editor keeps every
+    // paragraph, so the one product path that drops one is a reimport: the Book is reimported from a DOCX composed of exact
+    // sample1's paragraphs without the Task's, through the import flow as J-01 drives a reimport. The selection Task's card
+    // then says the paragraph is gone, in its own words; nothing moves — no window is loaded and no 回到 chip appears.
+    const removedPosition = Number(position);
+    requireJourney(Number.isInteger(removedPosition) && removedPosition >= 1 && removedPosition <= SAMPLE1_BLOCKS, 'selection-task-gone-position', position);
+    // A standing 回到 chip — the unused return an earlier jump left — is used now, while every paragraph it could name still stands
+    // (a reimport re-identifies rewritten paragraphs), so the checks after the reimport tell a return place kept by the refused
+    // jump from none (review P3-A).
+    if (await renderer.evaluate(`${CHIP} !== null`)) {
+      await clickSelector(renderer, '[data-screen="editor"] .return-chip-host [data-return-chip]', 'selection-task-gone-chip-use');
+      await waitFor(renderer, `${CHIP} === null && (document.querySelector('#persistence-status')?.textContent ?? '').startsWith('已回到')`, 'selection-task-gone-chip-used', 60_000);
+    }
+    const composedInputs = resolve(runRoot, 'composed-inputs');
+    await mkdir(composedInputs, { recursive: true });
+    const withoutParagraph = resolve(composedInputs, 'sample1-without-paragraph.docx');
+    await composeRevisedAdmittedDocx(withoutParagraph, {
+      source: ADMITTED_BASELINE_DOCX, title: BOOK.title,
+      paragraphs: Array.from({ length: SAMPLE1_BLOCKS }, (_, index) => index + 1).filter((block) => block !== removedPosition).map((block) => ({ runs: [{ text: { block } }] })),
+    });
+    await closeOwnedBrowser();
+    cancellation.throwIfRequested();
+    pickerPath = withoutParagraph;
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'selection-task-gone-ready');
+    await click(renderer, '导入稿件', 'selection-task-gone-import');
+    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'selection-task-gone-target');
+    await assertRenderer(renderer, `(() => { const target = document.querySelector('[data-import-target-choice="existing-book"][data-book-id=${JSON.stringify(bookId)}]'); if (!target) return false; target.click(); return true; })()`, 'selection-task-gone-target-book');
+    await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, 'selection-task-gone-relationship');
+    await assertRenderer(renderer, `(() => { const reimport = document.querySelector('[data-import-relationship="reimport"]'); if (!reimport) return false; reimport.click(); return true; })()`, 'selection-task-gone-reimport');
+    await waitFor(renderer, `document.querySelector('[data-reimport-lineage="unconfirmed"]')`, 'selection-task-gone-lineage-choices');
+    await assertRenderer(renderer, `(() => { const lineage = document.querySelector('[data-reimport-lineage="unconfirmed"]'); if (!lineage) return false; lineage.click(); return true; })()`, 'selection-task-gone-lineage');
+    await waitFor(renderer, `document.querySelector('[data-create-source-version="true"]')`, 'selection-task-gone-source-choice');
+    await assertRenderer(renderer, `(() => { const source = document.querySelector('[data-create-source-version="true"]'); if (!source) return false; source.click(); return true; })()`, 'selection-task-gone-source');
+    await waitFor(renderer, `document.querySelector('[data-prepare-manuscript-reimport=${JSON.stringify(bookId)}]')`, 'selection-task-gone-prepare-ready');
+    await click(renderer, '准备稿件重新导入比较', 'selection-task-gone-prepare');
+    await waitFor(renderer, `document.querySelector('[data-screen="review"] [data-import-review-kind="reimport"]') || document.querySelector('#persistence-status')?.dataset.tone === 'error'`, 'selection-task-gone-review', 180_000);
+    requireJourney(await renderer.evaluate(`document.querySelector('#persistence-status')?.dataset.tone !== 'error'`), 'selection-task-gone-review-valid', await renderer.evaluate(`document.querySelector('#persistence-status')?.textContent ?? null`));
+    // Every change group the comparison found is decided as J-01 decides them — 改写与新增 where the row has new paragraphs, else
+    // 删除 — and a degradation accepted when the composed file asks for one, until the commit is ready. The removed paragraph's
+    // group is a 删除.
+    const reviewVersion = () => renderer.evaluate(`document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion ?? null`);
+    for (let round = 0; round < 80; round += 1) {
+      await waitFor(renderer, `document.querySelector('[data-reimport-mappings="failed"]') || (document.querySelector('[data-reimport-mappings="ready"]') && (document.querySelector('[data-accept-reimport-degradation]:not(:disabled)') || document.querySelector('[data-reimport-verb-choice]:not(:disabled)') || document.querySelector('[data-reimport-next-page]:not(:disabled)') || document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportCommitReady === 'true'))`, 'selection-task-gone-mapping-page', 120_000);
+      requireJourney(await renderer.evaluate(`document.querySelector('[data-reimport-mappings="failed"]') === null`), 'selection-task-gone-mappings-valid');
+      if (await renderer.evaluate(`Boolean(document.querySelector('[data-accept-reimport-degradation]:not(:disabled)'))`)) {
+        const before = await reviewVersion();
+        await click(renderer, '明确接受完整降级集合', 'selection-task-gone-degradation');
+        await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion !== ${JSON.stringify(before)}`, 'selection-task-gone-degradation-persisted', 60_000);
+        continue;
+      }
+      const row = await renderer.evaluate(`(() => { const row = document.querySelector('article.reimport-group[data-reimport-group-verb=""]'); return row ? { groupId: row.dataset.reimportGroupId, verbs: Array.from(row.querySelectorAll('[data-reimport-verb-choice]'), (choice) => choice.dataset.reimportVerbChoice) } : null; })()`);
+      if (row === null) {
+        if (await renderer.evaluate(`document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportCommitReady === 'true'`)) break;
+        const firstGroup = await renderer.evaluate(`document.querySelector('article.reimport-group')?.dataset.reimportGroupId ?? null`);
+        await assertRenderer(renderer, `(() => { const next = document.querySelector('[data-reimport-next-page]:not(:disabled)'); if (!next) return false; next.click(); return true; })()`, 'selection-task-gone-next-page');
+        await waitFor(renderer, `document.querySelector('[data-reimport-mappings="ready"]') && document.querySelector('article.reimport-group')?.dataset.reimportGroupId !== ${JSON.stringify(firstGroup)}`, 'selection-task-gone-next-page-ready', 60_000);
+        continue;
+      }
+      const verb = row.verbs.includes('rewrite') ? 'rewrite' : 'delete';
+      requireJourney(row.verbs.includes(verb), 'selection-task-gone-row-verb', row);
+      const before = await reviewVersion();
+      await assertRenderer(renderer, `(() => { const choose = document.querySelector('[data-reimport-verb-choice=${JSON.stringify(verb)}][data-reimport-group-id=${JSON.stringify(row.groupId)}]:not(:disabled)'); if (!choose) return false; choose.click(); return true; })()`, 'selection-task-gone-resolve');
+      await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportDraftVersion !== ${JSON.stringify(before)} || document.querySelector('#persistence-status')?.dataset.tone === 'error'`, 'selection-task-gone-resolution-persisted', 60_000);
+      requireJourney(await renderer.evaluate(`document.querySelector('#persistence-status')?.dataset.tone !== 'error'`), 'selection-task-gone-resolution-valid');
+    }
+    await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportCommitReady === 'true'`, 'selection-task-gone-commit-ready', 60_000);
+    await assertRenderer(renderer, `(() => { const commit = document.querySelector('[data-commit-manuscript-reimport=${JSON.stringify(bookId)}]'); if (!(commit instanceof HTMLButtonElement) || commit.disabled) return false; commit.click(); return true; })()`, 'selection-task-gone-commit');
+    // A reimport lands in the manuscript (Issue #412).
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookId)}] .ProseMirror [data-block-id]') !== null`, 'selection-task-gone-landed', 180_000);
+    requireJourney(await renderer.evaluate(`document.querySelector('#persistence-status')?.dataset.tone !== 'error'`), 'selection-task-gone-committed', await renderer.evaluate(`document.querySelector('#persistence-status')?.textContent ?? null`));
+    // The Task's paragraph is gone from the working manuscript: the service has no window at it.
+    const goneAnchor = await renderer.evaluate(`window.ai7.getBookOverview({ bookId: ${JSON.stringify(bookId)}, historyCursor: null }).then((overview) => overview.manuscriptAnchor)`);
+    const goneCode = await renderer.evaluate(`window.ai7.getManuscriptWindowAt({ manuscriptId: ${JSON.stringify(goneAnchor?.manuscriptId ?? '')}, branchId: ${JSON.stringify(goneAnchor?.branchId ?? '')}, target: { kind: 'block', blockId: ${JSON.stringify(taskBlock)} } }).then(() => 'present', (error) => error?.code ?? 'unknown')`);
+    requireJourney(goneCode === 'WINDOW_NOT_FOUND', 'selection-task-gone-paragraph-gone', goneCode);
+    await assertRenderer(renderer, MARK_HELPERS, 'selection-task-gone-helpers');
+    // No chip stands and the return store holds no entry for this manuscript — read from the page by the exact key
+    // `preserveReturnPlace` writes — before the click, so what the click leaves is the refused jump's alone (review P3-A).
+    const READ_RETURN_ENTRY = `new Promise((settle) => { let open; try { open = indexedDB.open('ai7-reading-return', 1); } catch { settle('error'); return; } open.onerror = () => settle('error'); open.onupgradeneeded = () => open.result.createObjectStore('returns'); open.onsuccess = () => { const db = open.result; let entry; let tx; try { tx = db.transaction('returns', 'readonly'); } catch { db.close(); settle('error'); return; } const get = tx.objectStore('returns').get(${JSON.stringify(`${goneAnchor?.manuscriptId ?? ''}\n${goneAnchor?.branchId ?? ''}`)}); get.onsuccess = () => { entry = get.result; }; tx.oncomplete = () => { db.close(); settle(entry === undefined ? null : (entry?.blockId ?? 'malformed')); }; tx.onerror = () => { db.close(); settle('error'); }; }; })`;
+    requireJourney(await renderer.evaluate(`${CHIP} === null`), 'selection-task-gone-no-chip-before');
+    const returnBefore = await renderer.evaluate(READ_RETURN_ENTRY);
+    requireJourney(returnBefore === null, 'selection-task-gone-no-return-before', returnBefore);
+    const goneLoadsBefore = await windowLoads();
+    const gonePanel = await openPanel(renderer, 'selection-task-gone');
+    const goneCard = cardsOf(gonePanel, 'recent').find((card) => card.state === 'review-completed');
+    requireJourney(goneCard !== undefined && goneCard.title === '审阅 · 第 1 次 · 所选段落' && goneCard.actions.some(([key, label, state]) => key === 'jump' && label === '跳到所选文字' && state === 'enabled'), 'selection-task-gone-card', gonePanel);
+    await cardAction(renderer, 'review-completed', 'jump', 'selection-task-gone-jump');
+    await waitFor(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '') === '所选文字所在的段落已不在当前稿件中，无法跳到。' && document.querySelector('#persistence-status')?.dataset.tone === 'error'`, 'selection-task-gone-said', 30_000);
+    const goneAfter = await renderer.evaluate(`(() => ({ chip: ${CHIP}?.dataset.returnChip ?? null, loads: document.querySelector('[data-screen="editor"] [data-window-loads]')?.dataset.windowLoads ?? '', panel: document.querySelector('#task-drawer')?.dataset.taskDrawerView ?? null }))()`);
+    const returnAfter = await renderer.evaluate(READ_RETURN_ENTRY);
+    requireJourney(goneAfter.chip === null && returnAfter === null && goneAfter.loads === goneLoadsBefore && goneAfter.panel === 'panel', 'selection-task-gone-nothing-moved', { loadsBefore: goneLoadsBefore, returnAfter, after: goneAfter });
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'selection-task-gone-panel-close');
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

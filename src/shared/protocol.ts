@@ -1815,6 +1815,27 @@ export function parseBackgroundQuietMs(value: string): number | null {
   const ms = Number(value);
   return ms >= 1_000 && ms <= 30_000 ? ms : null;
 }
+/**
+ * J-11's calibration gate (Issue #429, EVAL-011a; the Commander's ruling of 2026-10-10): the number of adjusted Books the
+ * house offset waits on, lowered for a development-ci J-11 launch beside the model adapter so the Journey proves the gate with
+ * two Books instead of ten. `CALIBRATION_MIN_ADJUSTMENTS` stays the product's in every other launch. Never in any other launch.
+ */
+export const CALIBRATION_MIN_BOOKS_ARGUMENT = '--j11-calibration-min-books';
+/** A J-11 calibration gate: a whole number of Books from 2 to 10; anything else is refused. */
+export function parseCalibrationMinBooks(value: string): number | null {
+  if (!/^(?:[2-9]|10)$/u.test(value)) return null;
+  return Number(value);
+}
+/**
+ * Whether a launch may carry `--j11-calibration-min-books`, and what it sets: `undefined` when the argument is absent, `null`
+ * when it must be refused — any Journey but J-11 (no Journey included), or a value outside 2–10 — else the gate. Main and the
+ * service both decide by this one rule.
+ */
+export function calibrationMinBooksForLaunch(value: string | undefined, journey: string | undefined): number | null | undefined {
+  if (value === undefined) return undefined;
+  if (journey !== 'J-11') return null;
+  return parseCalibrationMinBooks(value);
+}
 export const PROVIDER_CACHE_ROOT_ARGUMENT = '--provider-cache-root';
 export const LAUNCH_SELECTABLE_SCOPES: ReadonlyArray<TrustedOperationalScope> = ['development-ci', 'developer-live'];
 /** A positive decimal token count without sign, separators, or leading zeros; twelve digits stay well inside the safe-integer range. */
@@ -5973,12 +5994,21 @@ export interface KnowledgeProceduresProjection {
 
 /** The one schema a Captured Procedure version's document is written in (ADR 0087 §1). */
 export const CAPTURED_PROCEDURE_SCHEMA = 'ai7.captured-procedure/1' as const;
-/** The one parameter slot a Captured Procedure carries: the review scope kind. The chapters are chosen at each run. */
-export type CapturedProcedureScopeSlot = 'whole' | 'chapters';
-export const CAPTURED_PROCEDURE_SCOPE_SLOTS: readonly CapturedProcedureScopeSlot[] = ['whole', 'chapters'];
+/**
+ * The one parameter slot a Captured Procedure carries: the review scope kind. The chapters are chosen at each run. `selection`
+ * (Issue #423, S77 deferred item a) is the scope a Run pins when the house's procedure runs on the paragraphs 就这段发起任务… handed
+ * over, and the scope a selection menu asks the house's procedures to be resolved for: it lives on the pin and that read only. A
+ * document names a capture slot — 全书 or 选定章节 (`CAPTURED_PROCEDURE_CAPTURE_SLOTS`) — and never `selection`, so no existing
+ * document or digest moves and none can be made that promises a scope 新建审阅 cannot supply.
+ */
+export type CapturedProcedureScopeSlot = 'whole' | 'chapters' | 'selection';
+export const CAPTURED_PROCEDURE_SCOPE_SLOTS: readonly CapturedProcedureScopeSlot[] = ['whole', 'chapters', 'selection'];
+/** The slots a document may carry and a capture may set: a selection is handed over at each run from the manuscript, never saved. */
+export const CAPTURED_PROCEDURE_CAPTURE_SLOTS: readonly CapturedProcedureScopeSlot[] = ['whole', 'chapters'];
 export const CAPTURED_PROCEDURE_SCOPE_LABELS = {
   whole: '全书',
   chapters: '选定章节',
+  selection: '所选段落',
 } as const satisfies Record<CapturedProcedureScopeSlot, string>;
 /** The editor's title of a Captured Procedure: a label, never given to a model — in graphemes, and in UTF-16 code units. */
 export const MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES = 60;
@@ -6382,6 +6412,8 @@ export interface CapturedProcedureApplicabilityEntryProjection {
   readonly availableCount: number;
   /** The labels of the steps this Book can take that the editor chooses apart at each run (REUSE-050). */
   readonly chosenApart: ReadonlyArray<string>;
+  /** The same steps by category and label (Issue #423, S77 deferred item a): the selection composer's boxes carry the category. */
+  readonly chosenApartSteps: ReadonlyArray<{ readonly categoryId: string; readonly label: string }>;
   /** The steps this Book cannot take now, with why. */
   readonly leftOut: ReadonlyArray<{ readonly label: string; readonly reason: string }>;
 }
@@ -6811,10 +6843,33 @@ export interface EvaluationRecordProjection extends EvaluationRecordSummaryProje
   /** AI7's 初评 this version began from, beside the editor's scores (EVAL-006); `null` for a version the editor began alone. */
   readonly initial: EvaluationInitialDraftProjection | null;
   /**
+   * The house calibration applied to AI7's starting scores when this version began from its 初评 (EVAL-011; Issue #429,
+   * EVAL-011a): recorded with the version, as it was then. `null` for a version begun alone, or from the raw 初评 — below the
+   * gate, or with calibration turned off. `initial.items[].score` keeps AI7's raw score either way.
+   */
+  readonly calibration: EvaluationInitialCalibrationProjection | null;
+  /**
    * Why which of this version's words are AI7's could not all be checked (Issue #702 review): the version before could not be
    * read, or the 采用 records cannot be read now. The words the version marks stay AI7's. `null` when every mark was checked.
    */
   readonly ai7WordsNotice: string | null;
+  /**
+   * The versions this one skipped when it began (Issue #726): the ordinals of the Book's versions after the one it was seeded
+   * from that could not be read then, oldest first. Empty for a version that followed the one before it.
+   */
+  readonly skippedRecords: ReadonlyArray<number>;
+  /** The ordinal of the version this one was seeded from — the one it compares with — or `null` when it began empty. */
+  readonly seededFrom: number | null;
+}
+
+/**
+ * The house calibration a version begun from AI7's 初评 recorded (EVAL-011; Issue #429, EVAL-011a): how many Books' 定稿
+ * evaluations the offsets rested on, and each item whose starting score it moved — AI7's raw score, the offset, and the
+ * starting score after it, clamped to [0, 满分]. An item whose offset was 0, or which AI7 did not score, is not listed.
+ */
+export interface EvaluationInitialCalibrationProjection {
+  readonly basisBooks: number;
+  readonly items: ReadonlyArray<{ readonly itemId: string; readonly raw: number; readonly offset: number; readonly adjusted: number }>;
 }
 
 /** ②C 评估 of one Book: its versions newest first, the one on show, and whether a version can begin. */
@@ -6834,10 +6889,17 @@ export interface EvaluationWorkspaceProjection {
   readonly record: EvaluationRecordProjection | null;
   /**
    * `开始评估` or `重新评估`, or why neither can begin now; `fromInitial` names AI7's latest 初评 when a version can begin from it
-   * — the 初评 settled and read the manuscript as it stands now.
+   * — the 初评 settled and read the manuscript as it stands now. `skipDamaged` is set while the Book's latest version cannot
+   * be read (Issue #726): the next version then skips every version after `seedOrdinal` — the latest readable 定稿, or `null`
+   * when none reads and the version begins empty — and `startEvaluation` must say so (`StartEvaluationInput.skipDamaged`).
    */
   readonly start:
-    | { readonly allowed: true; readonly kind: 'first' | 'again'; readonly fromInitial: null | { readonly revisionId: string; readonly ordinal: number } }
+    | {
+        readonly allowed: true;
+        readonly kind: 'first' | 'again';
+        readonly fromInitial: null | { readonly revisionId: string; readonly ordinal: number };
+        readonly skipDamaged: null | { readonly skipped: ReadonlyArray<number>; readonly seedOrdinal: number | null };
+      }
     | { readonly allowed: false; readonly reason: string };
   /** AI7's 初评 of the Book (Issue #429, S81b1). */
   readonly initial: EvaluationInitialProjection;
@@ -6995,9 +7057,14 @@ export interface EvaluationReadersReportProjection {
   readonly templates: ReadonlyArray<EvaluationReadersReportTemplateProjection>;
 }
 
-/** 开始评估 or 重新评估: alone, or from AI7's latest 初评 (Issue #429, S81b1). */
+/**
+ * 开始评估 or 重新评估: alone, or from AI7's latest 初评 (Issue #429, S81b1). `skipDamaged` says the editor saw that the latest
+ * version cannot be read and chose to skip it (Issue #726): without it a damaged latest still refuses, and with it a latest
+ * that reads after all refuses too, so no version is skipped that the editor did not see skipped.
+ */
 export interface StartEvaluationInput {
   readonly fromInitial: boolean;
+  readonly skipDamaged: boolean;
 }
 
 // ---- ②A 分析反馈 (Issue #94, plan slice S38; V2-UX-ANALYSIS-023, ANALYSIS-024, FDBK-005 to FDBK-008) -------------------
@@ -7544,12 +7611,23 @@ export interface EvaluationCalibrationProjection {
     readonly initialScoresConnected: boolean;
     readonly threshold: number;
     readonly enabled: boolean;
-    /**
-     * Whether the house offset calibration applies has been computed (Issue #429 review): not yet in any build. `active` is
-     * never true without it, so the page never says 「已生效」 while AI7's starting scores are left as they are.
-     */
-    readonly offsetComputed: boolean;
+    /** Whether the house offset applies to AI7's starting scores now: past the gate, with calibration not turned off. */
     readonly active: boolean;
+    /**
+     * The house offset as computed now (EVAL-011; Issue #429, EVAL-011a), recomputed at every read and never stored: `null`
+     * below the gate. Past it, the Books whose latest 定稿 version begun from AI7's 初评 gives the basis — one value per
+     * Book — and each profile item's offset to the half point, `null` for an item no Book scored both ways. The offset is
+     * computed while the switch is off too, so turning it back on applies what the house's evaluations say now.
+     */
+    readonly offset: null | {
+      readonly basisBooks: number;
+      /**
+       * Of `adjustments`, the Books that give the basis nothing: a version of theirs begun from AI7's 初评 cannot be read, so
+       * which of their 定稿 is the latest is unknown. Said on the page beside the basis, so the two counts never disagree unexplained.
+       */
+      readonly booksWithoutBasis: number;
+      readonly items: ReadonlyArray<{ readonly itemId: string; readonly label: string; readonly fullMarks: number; readonly offset: number | null; readonly books: number }>;
+    };
   };
   readonly prediction: {
     readonly booksWithActuals: number;
@@ -10050,6 +10128,12 @@ export interface BookTaskItemProjection {
   item: GlobalAttentionItemProjection;
   /** `null` for a Task that formed no result — a Run that stopped before it read anything. */
   result: BookTaskResultRef | null;
+  /**
+   * The paragraphs a selection Task was started on, by block identity — the first and the last — in the manuscript named
+   * (Issue #423, S77 deferred item d): the card's `跳到所选文字` moves the caret there, or says the paragraph is gone. Absent for
+   * every other Task.
+   */
+  selection?: { manuscriptId: string; fromBlockId: string; toBlockId: string };
 }
 
 export interface BookTaskGroupProjection {
@@ -10943,9 +11027,10 @@ export interface ServiceOperationMap {
    * For the Book's 新建审阅 sheet (ADR 0087 §4): the newest 已启用 version that still validates, or — `versionId` — the exact
    * eligible version the editor chose instead (Issue #66, S31; REUSE-043 to REUSE-045, REUSE-054).
    */
-  inspectCapturedProcedureRun: { input: { bookId: string; procedureId: string; versionId: string | null }; output: CapturedProcedureRunProjection };
+  // `scope` (Issue #423, S77 deferred item a): the steps resolved for a 当前选区 instead of the version's own slot; left out or `null` for the slot.
+  inspectCapturedProcedureRun: { input: { bookId: string; procedureId: string; versionId: string | null; scope?: CapturedProcedureScopeSlot | null }; output: CapturedProcedureRunProjection };
   /** The house's enabled Captured Procedures as each applies to one Book: its latest eligible version and its steps there (S31b). */
-  inspectCapturedProcedureApplicability: { input: { bookId: string }; output: CapturedProcedureApplicabilityProjection };
+  inspectCapturedProcedureApplicability: { input: { bookId: string; scope?: CapturedProcedureScopeSlot | null }; output: CapturedProcedureApplicabilityProjection };
   /** 保存开发建议: a new Developer Capability Proposal, or its next version (ADR 0087 §6). */
   saveDeveloperProposal: { input: SaveDeveloperProposalInput; output: DeveloperProposalProjection };
   /** 导出为文件…: the proposal version written to the file the editor chose through the Save dialog (ADR 0087 §6). */
@@ -11573,10 +11658,16 @@ export interface RendererApi {
   enableCapturedProcedure(input: { versionId: string; previewDigest: string }): Promise<CapturedProcedureProjection>;
   previewCapturedProcedureStop(input: { procedureId: string; versionId: string | null }): Promise<CapturedProcedureStopPreviewProjection>;
   stopCapturedProcedure(input: { procedureId: string; versionId: string | null; previewDigest: string }): Promise<CapturedProcedureProjection>;
-  /** For the current Book's 新建审阅 sheet: the latest eligible version, or the exact eligible one chosen (`versionId`). */
-  inspectCapturedProcedureRun(input: { procedureId: string; versionId?: string | null }): Promise<CapturedProcedureRunProjection>;
-  /** The house's enabled Captured Procedures as each applies to the route's Book (Issue #66, S31b): the sheet's 按已保存的工序. */
-  inspectCapturedProcedureApplicability(): Promise<CapturedProcedureApplicabilityProjection>;
+  /**
+   * For the current Book's 新建审阅 sheet: the latest eligible version, or the exact eligible one chosen (`versionId`). With
+   * `scope: 'selection'` (Issue #423, S77 deferred item a) its steps are resolved for the paragraphs 就这段发起任务… hands over.
+   */
+  inspectCapturedProcedureRun(input: { procedureId: string; versionId?: string | null; scope?: CapturedProcedureScopeSlot | null }): Promise<CapturedProcedureRunProjection>;
+  /**
+   * The house's enabled Captured Procedures as each applies to the route's Book (Issue #66, S31b): the sheet's 按已保存的工序 —
+   * or, with `scope: 'selection'`, as each applies to a 当前选区 of it, for the selection menu (Issue #423, S77 deferred item a).
+   */
+  inspectCapturedProcedureApplicability(input?: { scope?: CapturedProcedureScopeSlot | null }): Promise<CapturedProcedureApplicabilityProjection>;
   saveDeveloperProposal(input: SaveDeveloperProposalInput): Promise<DeveloperProposalProjection>;
   /** 导出为文件…: the platform Save dialog, then the file; nothing is written or recorded when the dialog is cancelled. */
   saveDeveloperProposalFile(input: { proposalVersionId: string }): Promise<SaveDeveloperProposalFileOutcome>;

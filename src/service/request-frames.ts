@@ -784,10 +784,11 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           !optionalOrNull(input, 'recordsBefore', (before) => isSafeInteger(before, 2))) throw new ProtocolError(tentativeId);
       break;
     }
-    // 开始评估 or 重新评估, alone or from AI7's latest 初评 (Issue #429, S81b1).
+    // 开始评估 or 重新评估, alone or from AI7's latest 初评 (Issue #429, S81b1), saying whether a damaged latest version is skipped
+    // (Issue #726): the main process always names `skipDamaged`, so the frame requires it.
     case 'startEvaluation': {
-      const input = requireInput(value.input, ['bookId', 'fromInitial'], tentativeId);
-      if (!validUuid(input.bookId) || typeof input.fromInitial !== 'boolean') throw new ProtocolError(tentativeId);
+      const input = requireInput(value.input, ['bookId', 'fromInitial', 'skipDamaged'], tentativeId);
+      if (!validUuid(input.bookId) || typeof input.fromInitial !== 'boolean' || typeof input.skipDamaged !== 'boolean') throw new ProtocolError(tentativeId);
       break;
     }
     // 准备 AI7 初评: the route's Book; the mode is the service's to decide from the Book's 初评 so far.
@@ -1361,16 +1362,18 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'inspectCapturedProcedureRun': {
       // `versionId` names the exact eligible version the editor chose instead of the latest (Issue #66, S31); `null` for the latest.
-      const input = requireInput(value.input, ['bookId', 'procedureId', 'versionId'], tentativeId);
-      if (!validUuid(input.bookId) || !validUuid(input.procedureId) || (input.versionId !== null && !validUuid(input.versionId))) {
+      // `scope` (Issue #423, S77 deferred item a) asks for the steps on a 当前选区 instead of the version's slot; absent or `null` for the slot.
+      const input = requireInputWithOptional(value.input, ['bookId', 'procedureId', 'versionId'], ['scope'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.procedureId) || (input.versionId !== null && !validUuid(input.versionId)) ||
+          !optionalOrNull(input, 'scope', (scope) => scope === 'selection')) {
         throw new ProtocolError(tentativeId);
       }
       break;
     }
     case 'inspectCapturedProcedureApplicability': {
-      // The house's enabled procedures as each applies to the route's Book (Issue #66, S31b).
-      const input = requireInput(value.input, ['bookId'], tentativeId);
-      if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
+      // The house's enabled procedures as each applies to the route's Book (Issue #66, S31b) — or to a 当前选区 of it (Issue #423).
+      const input = requireInputWithOptional(value.input, ['bookId'], ['scope'], tentativeId);
+      if (!validUuid(input.bookId) || !optionalOrNull(input, 'scope', (scope) => scope === 'selection')) throw new ProtocolError(tentativeId);
       break;
     }
     case 'saveDeveloperProposal': {
