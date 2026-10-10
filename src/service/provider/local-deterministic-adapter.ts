@@ -431,12 +431,10 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
       case 'interrupted':
         yield failure(AI7_FAILURE_CODES.INTERRUPTED, response.message);
         return;
-      // 结果待确认 (Issue #51, S16c): the request was sent and its answer never came back whole. Only an Analysis Unit
-      // answers it — the reduction, a sample, a reflection or a synthesis keep their own paths, which no fixture names.
+      // 结果待确认 (Issue #51, S16c): the request was sent and its answer never came back whole — a unit's, the reduction's, a
+      // sample's or the reflection's alike.
       case 'outcome-unknown':
-        yield named || header === null
-          ? failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '结果待确认的夹具响应只答复分析单元。')
-          : failure(AI7_FAILURE_CODES.OUTCOME_UNKNOWN, response.message);
+        yield failure(AI7_FAILURE_CODES.OUTCOME_UNKNOWN, response.message);
         return;
     }
   }

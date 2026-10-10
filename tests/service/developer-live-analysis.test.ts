@@ -972,9 +972,9 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
   });
 
   // Issue #51 (S16c): an accepted request whose answer never comes back whole. It was sent, so the ledger says so — in its own
-  // classification — and nothing caches it: the Run stops 结果待确认 without sending it again, and the editor's 续行 transmits
-  // it once more as a new test item, never replaying a result nobody saw.
-  it('stops 结果待确认 on a dropped answer, records it sent and uncached, and transmits it again only on 续行', async () => {
+  // classification — and nothing caches it, so nothing replays a result nobody saw: the Run stops 结果待确认, which has no
+  // 续行, and nothing in it ever transmits the range again.
+  it('stops 结果待确认 on a dropped answer, records it sent and uncached, and never transmits it again', async () => {
     const calls: StubCall[] = [];
     const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
     const { units: responses, named } = await unitAnswers(prepared);
@@ -1004,17 +1004,16 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     expect(unknown[0]).toMatchObject({ outcome: 'failed', status: 200, usage: null });
     expect(await new ProviderResultCache(cacheRoot).lookup('deepseek-v4-flash', String(unknown[0]!.requestDigest))).toBeNull();
 
-    // The editor's 续行: unit 4 is transmitted again under a new item — the cache holds nothing for it — and the chain completes.
-    execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true });
+    // 续行 is refused, and 取消任务 keeps what was read with unit 4 its own gap: nothing more is transmitted.
+    expect(() => execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true })).toThrowError(/结果待确认/u);
+    store.requestBaselineAnalysisCancel(bookId, prepared.taskIntent!.taskIntentId);
+    execution.cancelRun(runRecordId, store.baselineAnalysisLedger);
     await execution.whenIdle();
-    const settled = store.inspectBaselineAnalysis(bookId, () => null);
-    expect(settled.run!.state).toBe('completed');
-    const after = await ledgerLines(cacheRoot);
-    const again = after.slice(SAMPLE1_UNITS).find((line) => line.requestDigest === unknown[0]!.requestDigest);
-    expect(again).toMatchObject({ outcome: 'transmitted', status: 200 });
-    expect(again!.itemId).not.toBe(unknown[0]!.itemId);
-    expect(after.filter((line) => line.outcome === 'replayed')).toEqual([]);
-    expect(settled.taskOutcome!.report!.unitRows.find((row) => row.unitOrdinal === 4)?.attempts).toBe(2);
+    const cancelled = store.inspectBaselineAnalysis(bookId, () => null);
+    expect(cancelled.run!.state).toBe('cancelled');
+    expect(cancelled.resultSetRevision!.gaps.map((gap) => [gap.unitOrdinal, gap.code])).toEqual([[4, 'outcome-unknown']]);
+    expect(calls).toHaveLength(SAMPLE1_UNITS);
+    expect(await ledgerLines(cacheRoot)).toHaveLength(SAMPLE1_UNITS);
     await store.close();
   });
 

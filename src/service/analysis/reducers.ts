@@ -118,7 +118,9 @@ export type CrossUnitGapCode =
   | 'interrupted'
   | 'egress-refused'
   | 'policy-bounded'
-  | 'run-budget-ceiling-reached';
+  | 'run-budget-ceiling-reached'
+  // 结果待确认 (Issue #51, S16c): the reduction's request was sent and its result cannot be known.
+  | 'outcome-unknown';
 
 /** What the reduction did, as the execution owner observed it. `not-run` is fewer than two closed units. */
 export type CrossUnitOutcome =

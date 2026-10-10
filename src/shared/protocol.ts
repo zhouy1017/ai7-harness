@@ -5253,11 +5253,12 @@ export interface TaskPlanRunControlProjection {
    */
   accountLimit: null | { unitOrdinal: number | null; condition: string };
   /**
-   * 结果待确认 (Issue #51, S16c; V2-UX-CTRL-007, COPY-009): the Run stopped because the requests for these reading ranges were
-   * sent and their results cannot be known — each may have been processed and billed. Nothing re-sends them on its own;
-   * `续行` reads only them again, as a second request the model service may bill. `null` for every other Run.
+   * 结果待确认 (Issue #51, S16c; V2-UX-CTRL-007, COPY-009, CONT-011, CONT-016): the stopped Run holds reading ranges whose requests
+   * were sent and whose results cannot be known — each may have been processed and billed — kept as their own gaps that
+   * nothing in this Run sends again. `stopped` is a Run that stopped 结果待确认 itself, which has no `续行`. `null` for every
+   * Run that holds none, and while a Run executes.
    */
-  outcomeUnknown: null | { units: ReadonlyArray<{ unitOrdinal: number; attempts: number }> };
+  outcomeUnknown: null | { units: ReadonlyArray<{ unitOrdinal: number; attempts: number }>; stopped: boolean };
 }
 
 /**

@@ -401,14 +401,14 @@ export function taskBarAccountLimitNote(unitOrdinal: number | null, unitsSettled
 }
 
 /**
- * 结果待确认 (Issue #51, S16c; CTRL-007, COPY-009, interaction-spec §807, §1036): what is known, what is missing, and what
- * 续行 would send — a second request the model service may bill — with 查看未确认的部分 to see which ranges.
+ * 结果待确认 (Issue #51, S16c; CTRL-007, COPY-009, CONT-011, CONT-016; interaction-spec §807, §1036; ADR 0034): what is known
+ * and what is missing, with 查看未确认的部分 to see which ranges — and no repeat-shaped action: this Run never sends them again.
  */
 export const TASK_BAR_VIEW_UNCONFIRMED = '查看未确认的部分';
 export const TASK_BAR_UNCONFIRMED_HEADING = '结果待确认的阅读范围';
 export function taskBarOutcomeUnknownNote(unconfirmed: number, unitsSettled: number, unitsTotal: number): string {
-  return `${unconfirmed} 个阅读范围的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；AI7 没有自动再发。` +
-    `已读完 ${unitsSettled} / ${unitsTotal} 个阅读范围，结果都已保存。点「续行」只重读这 ${unconfirmed} 个，会再发一次请求，可能再次计费；取消任务会保留已读完的部分`;
+  return `${unconfirmed} 个阅读范围的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；这次运行不会再发它。` +
+    `其余已读完的 ${unitsSettled - unconfirmed} / ${unitsTotal} 个阅读范围结果都已保存。取消任务会保留已读完的部分；改计划重做会作为新任务重新授权`;
 }
 /** One unconfirmed range in 查看未确认的部分's list: which range, and how often its request was sent. */
 export function taskBarUnconfirmedUnit(unitOrdinal: number, attempts: number): string {
@@ -686,6 +686,30 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
           ],
         };
       }
+      // 结果待确认 (Issue #51, S16c; CTRL-007, CONT-011, CONT-016; ADR 0034): 查看未确认的部分 first, then 取消任务, which keeps
+      // what was read, 改计划重做 and the way to the Run — never 续行: nothing in this Run sends those ranges again.
+      if (control.outcomeUnknown?.stopped === true) {
+        const continuation = control.continuation;
+        return {
+          readiness,
+          summary,
+          statement: null,
+          // A kept progress that no longer reads back is never stated as a count.
+          note: continuation === null || continuation.unitsSettled === null
+            ? null
+            : taskBarOutcomeUnknownNote(control.outcomeUnknown.units.length, continuation.unitsSettled, continuation.unitsTotal),
+          status: plan.state.label,
+          actions: [
+            { name: 'view-unconfirmed', label: TASK_BAR_VIEW_UNCONFIRMED, tone: 'primary', disabledReason: null },
+            { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
+            { name: 'redo', label: TASK_BAR_REDO, tone: control.redo.reason === null ? 'secondary' : 'quiet', disabledReason: control.redo.reason },
+            runLink,
+          ],
+        };
+      }
+      // A stopped Run that holds ranges whose results cannot be known says which, beside its own actions (Issue #51, S16c).
+      const unconfirmedLink: TaskBarAction[] = control.outcomeUnknown === null ? []
+        : [{ name: 'view-unconfirmed', label: TASK_BAR_VIEW_UNCONFIRMED, tone: 'secondary', disabledReason: null }];
       // 模型服务账户限额 (Issue #51, S16b; MODEL-018): 处理模型服务 and 续行 once the condition clears, 取消任务, 改计划重做.
       if (control.resume !== null && control.accountLimit !== null) {
         const continuation = control.continuation;
@@ -703,29 +727,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
             { name: 'resume', label: TASK_BAR_RESUME, tone: 'primary', disabledReason: control.resume.reason },
             { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
             { name: 'redo', label: TASK_BAR_REDO, tone: control.redo.reason === null ? 'secondary' : 'quiet', disabledReason: control.redo.reason },
-            runLink,
-          ],
-        };
-      }
-      // 结果待确认 (Issue #51, S16c; CTRL-007, CONT-016): 查看未确认的部分 first; 续行 reads only those ranges again, and the note
-      // says it sends a second request that may be billed; 取消任务 keeps what was read.
-      if (control.resume !== null && control.outcomeUnknown !== null) {
-        const continuation = control.continuation;
-        const count = control.outcomeUnknown.units.length;
-        return {
-          readiness,
-          summary,
-          statement: null,
-          // A kept progress that no longer reads back is never stated as a count.
-          note: continuation === null || continuation.unitsSettled === null
-            ? null
-            : taskBarOutcomeUnknownNote(count, continuation.unitsSettled, continuation.unitsTotal),
-          status: plan.state.label,
-          actions: [
-            { name: 'view-unconfirmed', label: TASK_BAR_VIEW_UNCONFIRMED, tone: 'primary', disabledReason: null },
-            { name: 'resume', label: TASK_BAR_RESUME, tone: 'secondary', disabledReason: control.resume.reason },
-            { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
-            { name: 'redo', label: TASK_BAR_REDO, tone: control.redo.reason === null ? 'secondary' : 'quiet', disabledReason: control.redo.reason },
+            ...unconfirmedLink,
             runLink,
           ],
         };
@@ -744,6 +746,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
             { name: 'resume', label: TASK_BAR_RESUME, tone: 'primary', disabledReason: control.resume.reason },
             { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
             { name: 'redo', label: TASK_BAR_REDO, tone: control.redo.reason === null ? 'secondary' : 'quiet', disabledReason: control.redo.reason },
+            ...unconfirmedLink,
             runLink,
           ],
         };

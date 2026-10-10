@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { emptyAnswerGapReason, unparsableAnswerGapReason } from '../../src/service/analysis/execution.js';
+import { OUTCOME_UNKNOWN_NOT_RESENT, ambiguousTurnReason, emptyAnswerGapReason, unparsableAnswerGapReason } from '../../src/service/analysis/execution.js';
+import { classifyModelFailure, AI7_FAILURE_CODES } from '../../src/service/provider/classification.js';
 
 // The exact text an editor reads when a unit closes as a gap the model itself produced, asserted
 // without a Run, a Provider, or a manuscript. Every answer passed in here is synthetic, and the only
@@ -54,5 +55,18 @@ describe('unparsableAnswerGapReason', () => {
     expect(reason).not.toContain('不该出现在缺口理由里的内容');
     expect(reason).toContain(`模型返回了 ${[...answer].length} 个字符`);
     expect(reason.length).toBeLessThan(answer.length);
+  });
+});
+
+// Issue #51 (S16c; P2-2): the words of a reduction, a sample or a reflection whose turn's result cannot be known — never 被中断 —
+// and nothing for a turn the harness could not end, which keeps its own reading.
+describe('ambiguousTurnReason', () => {
+  it('names 结果待确认 with the classified outcome, and nothing for any other turn', () => {
+    const codes = { QUOTA_EXCEEDED_CODE: 'QUOTA', INVALID_CREDENTIAL_CODE: 'CRED', CONTEXT_WINDOW_EXCEEDED_CODE: 'CTX' };
+    const failure = classifyModelFailure({ code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN, message: '', status: 200 }, codes);
+    expect(ambiguousTurnReason([{ kind: 'started', turn: 1 }, { kind: 'ambiguous', reason: failure.reason, failure }])).toBe(
+      `结果待确认：请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费。（AI7_OUTCOME_UNKNOWN）；${OUTCOME_UNKNOWN_NOT_RESENT}。`);
+    expect(ambiguousTurnReason([{ kind: 'ambiguous', reason: '技术回合没有终态事件。' }])).toBeNull();
+    expect(ambiguousTurnReason([{ kind: 'interrupted', failure: classifyModelFailure({ code: AI7_FAILURE_CODES.INTERRUPTED, message: '' }, codes) }])).toBeNull();
   });
 });

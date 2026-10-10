@@ -527,7 +527,7 @@ function baselineState(projection: BaselineAnalysisProjection, stopped?: Baselin
       // 模型服务账户限额 (Issue #51, S16b; RUN-012): its own words, never 任务已中断 · 可续行's.
       return stopped?.accountLimit != null ? { ...ACCOUNT_LIMIT_STATE }
         // 结果待确认 (Issue #51, S16c): its own words too.
-        : stopped?.outcomeUnknown != null ? { ...OUTCOME_UNKNOWN_STATE }
+        : stopped?.outcomeUnknown?.stopped === true ? { ...OUTCOME_UNKNOWN_STATE }
           : { key: 'resumable', label: '任务已中断 · 可续行' };
     // 任务等待你的说明 (Issue #422, S76d; CLAR-004): every unit the Run could read is read; it waits for the answer.
     case 'awaiting-clarification':
@@ -1663,7 +1663,7 @@ export function baselineCancellationImpact(
     unitsTotal: number;
     bindingHolds?: boolean;
     waiting?: ReadonlyArray<{ unitOrdinal: number; answered: boolean }>;
-    /** The ranges 结果待确认 left unconfirmed (Issue #51, S16c): each ends as the gap its sent request left. */
+    /** The kept ranges whose sent requests' results cannot be known (Issue #51, S16c): each stays its own gap. */
     unconfirmed?: ReadonlyArray<number>;
   } | null = null,
 ): ReadonlyArray<string> {
@@ -1710,12 +1710,12 @@ export function baselineCancellationImpact(
         return ['这项任务还没有读完任何阅读范围；取消后不会发送任何内容，也不会形成结果集修订版。', CANCELLATION_NO_EFFECTS];
       }
       return [
-        `这项任务已经停下；${restOf(Math.max(0, unitsTotal - unitsSettled - asked.length - unconfirmed.length))}之后的归纳、抽样都不再进行，不再发送任何内容。`,
+        `这项任务已经停下；${restOf(Math.max(0, unitsTotal - unitsSettled - asked.length))}之后的归纳、抽样都不再进行，不再发送任何内容。`,
         ...(unitsSettled === 0 ? [] : [partial(unitsSettled)]),
         ...waitingLines(asked, unitsSettled > 0),
         // 结果待确认 (Issue #51, S16c): their requests were sent, so they are gaps of their own — never ranges not attempted.
         ...(unconfirmed.length === 0 ? [] : [
-          `${unconfirmed.map((ordinal) => `第 ${ordinal} 个`).join('、')}阅读范围的结果待确认；取消后不再重读，${kept.bindingHolds === false ? '' : '在这份修订版里'}记为结果待确认的缺口。`,
+          `${unconfirmed.map((ordinal) => `第 ${ordinal} 个`).join('、')}阅读范围的请求已发出、结果待确认；不会再发，${kept.bindingHolds === false ? '' : '在这份修订版里'}记为结果待确认的缺口，不记为未尝试。`,
         ]),
         CANCELLATION_NO_EFFECTS,
       ];
@@ -1798,7 +1798,8 @@ function baselineRunControl(projection: BaselineAnalysisProjection, stopped?: Ba
     // CTRL-001 and CTRL-008: a Run executing its units, or admitted and waiting its turn, pauses in one click.
     pause: { reason: (run.state === 'executing' || run.state === 'admitted') && held ? null : RUN_CONTROL_PAUSE_REASON },
     // A Run waiting for the editor's answer goes on when they answer (CLAR-006), never by 续行.
-    resume: continuation === null || waitsForAnswer ? null : { reason: stopped!.blockers.length === 0 ? null : stopped!.blockers.join('') },
+    // 结果待确认 (Issue #51, S16c; ADR 0034, CONT-011, CONT-016) has no 续行: the Run never goes on from it.
+    resume: continuation === null || waitsForAnswer || stopped?.outcomeUnknown?.stopped === true ? null : { reason: stopped!.blockers.length === 0 ? null : stopped!.blockers.join('') },
     redo: { reason: continuation === null ? RUN_CONTROL_REDO_REASON : runBegan(run) ? null : RUN_CONTROL_REDO_NOT_BEGUN_REASON },
     activity: run.progress,
     executingSince: run.transitions.find((transition) => transition.state === 'executing')?.recordedAt ?? null,
@@ -1807,8 +1808,8 @@ function baselineRunControl(projection: BaselineAnalysisProjection, stopped?: Ba
     accountLimit: run.state === 'resumable' && stopped?.accountLimit != null
       ? { unitOrdinal: stopped.accountLimit.unitOrdinal, condition: stopped.accountLimit.condition }
       : null,
-    outcomeUnknown: run.state === 'resumable' && stopped?.outcomeUnknown != null
-      ? { units: stopped.outcomeUnknown.units.map((unit) => ({ unitOrdinal: unit.unitOrdinal, attempts: unit.attempts })) }
+    outcomeUnknown: kept !== null && stopped?.outcomeUnknown != null
+      ? { units: stopped.outcomeUnknown.units.map((unit) => ({ unitOrdinal: unit.unitOrdinal, attempts: unit.attempts })), stopped: stopped.outcomeUnknown.stopped }
       : null,
   };
 }
@@ -1908,10 +1909,13 @@ export interface BaselineStoppedRunFacts {
   /** The provider's account limit stopped the Run (Issue #51, S16b), in the provider's words; absent or `null` otherwise. */
   readonly accountLimit?: { readonly condition: string; readonly unitOrdinal: number | null } | null;
   /**
-   * 结果待确认 stopped the Run (Issue #51, S16c): the ranges whose sent requests' results cannot be known, with how often each
-   * was sent and the outcome as AI7 classified it; absent or `null` otherwise.
+   * 结果待确认 (Issue #51, S16c): the ranges the stopped Run holds whose sent requests' results cannot be known, with how often
+   * each was sent and the gap's own words, and whether the Run stopped 结果待确认 itself; absent or `null` when it holds none.
    */
-  readonly outcomeUnknown?: { readonly units: ReadonlyArray<{ readonly unitOrdinal: number; readonly attempts: number; readonly reason: string }> } | null;
+  readonly outcomeUnknown?: {
+    readonly units: ReadonlyArray<{ readonly unitOrdinal: number; readonly attempts: number; readonly reason: string }>;
+    readonly stopped: boolean;
+  } | null;
 }
 
 /** 续行's own words when the service cannot let the Run go on now (CONT-015): each names what it waits for. */

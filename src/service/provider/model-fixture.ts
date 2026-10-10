@@ -238,6 +238,19 @@ export function outcomeUnknownFixtureAllowed(fixture: ResolvedModelFixture, jour
   return !fixtureEndsAmbiguously(fixture) || journey === OUTCOME_UNKNOWN_FIXTURE_JOURNEY;
 }
 
+/**
+ * The fixture a launch's `--j04-model-adapter` binds, as the service's startup loads it (Issue #51, S16c): its base chain
+ * resolved, and refused with `MODEL_FIXTURE_REFUSED` — before the store opens — when it ends a turn with 结果待确认 and the
+ * launch is not J-10's.
+ */
+export async function loadLaunchFixture(fixturesRoot: string, identity: string, journey: string | undefined): Promise<ResolvedModelFixture> {
+  const fixture = await loadModelFixture(fixturesRoot, identity);
+  if (!outcomeUnknownFixtureAllowed(fixture, journey)) {
+    throw new ModelFixtureError('MODEL_FIXTURE_REFUSED', `夹具 ${identity} 含结果待确认的响应，只能在 ${OUTCOME_UNKNOWN_FIXTURE_JOURNEY} 的启动中绑定。`);
+  }
+  return fixture;
+}
+
 export function fixturePath(fixturesRoot: string, identity: string): string {
   if (!FIXTURE_IDENTITY_PATTERN.test(identity) || !isAbsolute(fixturesRoot)) throw new ModelFixtureError('MODEL_FIXTURE_INVALID', '夹具身份或根目录无效。');
   const target = resolve(fixturesRoot, `${identity}.json`);

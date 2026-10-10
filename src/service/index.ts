@@ -1524,7 +1524,7 @@ async function run(): Promise<void> {
     { CooperativeJobOwner },
     { resolveSourceCheckoutLaunchPolicy },
     { BaselineAnalysisExecutionOwner },
-    { loadModelFixture, outcomeUnknownFixtureAllowed },
+    { loadLaunchFixture },
     { createKeyringSecretResolver },
     { ReviewRunDriver },
     { DialogueExecutionOwner },
@@ -1580,10 +1580,9 @@ async function run(): Promise<void> {
     // that contains `dist/`, never from the carrier itself.
     const fixture = modelAdapterControl === undefined
       ? null
-      : await loadModelFixture(resolve(codeRoot, '..', 'tests', 'fixtures', 'model'), modelAdapterControl);
-    // 结果待确认's stimulus (Issue #51, S16c): a fixture that ends a turn ambiguously binds only J-10's launch, and every other
-    // launch naming one is refused here, before the store opens.
-    if (fixture !== null && !outcomeUnknownFixtureAllowed(fixture, process.env.AI7_E2E_JOURNEY)) throw new ProtocolError();
+      // 结果待确认's stimulus (Issue #51, S16c): a fixture that ends a turn ambiguously binds only J-10's launch, and every
+      // other launch naming one is refused here, before the store opens.
+      : await loadLaunchFixture(resolve(codeRoot, '..', 'tests', 'fixtures', 'model'), modelAdapterControl, process.env.AI7_E2E_JOURNEY);
     // The software version the store records beside its Data Version (Issue #433, S85a) is the package the product ships
     // in: the carrier holds no package manifest, so it is read from the source checkout that contains `dist/`.
     const softwareVersion = await readSoftwareVersion(resolve(codeRoot, '..'));
