@@ -16,7 +16,8 @@ import { ensureCanonicalDataDirectory, inspectCanonicalDataFile } from '../share
 import { UUID_PATTERN, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
 import { DOC_CONVERTER_IDENTITY, convertDocManuscript } from './doc-manuscript.js';
 import { DOCX_PARSER_IDENTITY, MAX_ARCHIVE_BYTES, parseDocx, type ParsedDocxBlock } from './docx.js';
-import { TEXT_CONVERTER_IDENTITY, convertTextManuscript } from './text-manuscript.js';
+import { MATERIAL_FORMAT_CONVERTER_IDENTITIES, MaterialFormatRefusal, extractMaterialFormatText, isMaterialTextFormat } from './material-formats.js';
+import { TEXT_CONVERTER_IDENTITY, buildManuscriptPackage, convertTextManuscript } from './text-manuscript.js';
 
 /**
  * ⑤ 资料库 · 资料索引 (Issue #428, plan slice S80a; editor-surfaces §8.4, V2-UX-KB-009, ATTN-009): the Material Index of a
@@ -29,7 +30,9 @@ import { TEXT_CONVERTER_IDENTITY, convertTextManuscript } from './text-manuscrip
  * 2. metadata — the file's own title when it names one, the language its text is mostly in, and its counts;
  * 3. extracted full text — for the formats AI7 already reads with its admitted conversion dependencies: DOCX (fflate and
  *    saxes), the legacy DOC (word-extractor) and plain text or Markdown, each through the very parser and converter the
- *    manuscript intake uses, inside the same bounds;
+ *    manuscript intake uses, inside the same bounds; and HTML, EPUB, ODT and RTF (Issue #428), each read by its own reader
+ *    in `material-formats.ts` — fflate and saxes again, and two small tokenizers — into the same paragraphs, packaged and
+ *    read through the same DOCX parser;
  * 4. segments — each paragraph with its sentences, every sentence citable by its position anchor (第 n 段第 m 句). These
  *    formats carry no page layout, so the anchors are positions and never claim a page.
  *
@@ -97,7 +100,17 @@ export const MATERIAL_INDEX_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<
  * anchors (`splitSentences`) are not versioned this way: a build made earlier keeps the anchors it was made with, and a
  * plan pins a build by its digest, so what a plan froze never moves under it (#729; #751 review, P3-3).
  */
-export const MATERIAL_INDEXER_IDENTITY = `ai7-material-index/1+${DOCX_PARSER_IDENTITY}`;
+export const MATERIAL_INDEXER_IDENTITY = `ai7-material-index/2+${DOCX_PARSER_IDENTITY}`;
+/**
+ * The indexer before this one (#725), which read DOCX, DOC, TXT and MD as this one does and refused HTML, EPUB, ODT and RTF
+ * as `format-unsupported` (Issue #428). Its builds stand for this indexer — they are what this one would build — except
+ * those refusals, which this one builds again beside them: an item whose text could now be read is read, and no other item
+ * is built twice, its digest and any plan pinned to it unmoved.
+ */
+export const MATERIAL_INDEXER_PREDECESSOR = `ai7-material-index/1+${DOCX_PARSER_IDENTITY}`;
+/** Which builds stand for the current indexer: its own, and its predecessor's other than a format it could not read. */
+const STANDING_BUILD = `(indexer = ? OR (indexer = ? AND NOT (state = 'unsupported' AND json_extract(canonical_json, '$.reason') = 'format-unsupported')))`;
+const STANDING_PARAMETERS = [MATERIAL_INDEXER_IDENTITY, MATERIAL_INDEXER_PREDECESSOR] as const;
 /** Where a converted working copy is written while it is read, inside the Agent Data Root; removed after, and at open. */
 export const MATERIAL_INDEX_WORK_DIRECTORY = 'material-index-work';
 const BUILD_SCHEMA = 'ai7.material-index/1';
@@ -105,9 +118,11 @@ const SEGMENT_SCHEMA = 'ai7.material-index-segment/1';
 const TABLE_PRESENT = "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'material_index_builds'";
 const WORK_NAME = /^\.work-[0-9a-f-]{36}\.docx$/u;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
-const READABLE: ReadonlySet<LibraryMaterialFormat> = new Set(['DOCX', 'DOC', 'TXT', 'MD']);
+const READABLE: ReadonlySet<LibraryMaterialFormat> = new Set(['DOCX', 'DOC', 'TXT', 'MD', 'HTML', 'EPUB', 'ODT', 'RTF']);
 const SEGMENT_KINDS: ReadonlySet<string> = new Set(['title', 'heading', 'paragraph']);
-const REASONS: ReadonlySet<MaterialIndexReason> = new Set(['needs-local-dependency', 'format-unsupported', 'over-bound', 'unreadable', 'original-changed', 'empty']);
+const REASONS: ReadonlySet<MaterialIndexReason> = new Set([
+  'needs-local-dependency', 'format-unsupported', 'over-bound', 'unreadable', 'original-changed', 'empty', 'encrypted', 'external-entity',
+]);
 const LANGUAGES: ReadonlySet<MaterialIndexLanguage> = new Set(['zh', 'other', 'none']);
 
 export class MaterialIndexError extends Error {
@@ -381,8 +396,9 @@ export async function extractMaterialText(input: MaterialExtractionInput): Promi
     blocks.push({ kind: block.kind, level: block.level, text: block.text, graphemeLength: block.graphemeLength, sourceParagraphIndex: block.sourceParagraphIndex });
   };
   const aborted = (): boolean => input.signal?.aborted === true;
-  const converter = input.format === 'DOCX' ? DOCX_PARSER_IDENTITY
-    : `${input.format === 'DOC' ? DOC_CONVERTER_IDENTITY : TEXT_CONVERTER_IDENTITY}+${DOCX_PARSER_IDENTITY}`;
+  const format = input.format;
+  const converter = format === 'DOCX' ? DOCX_PARSER_IDENTITY
+    : `${format === 'DOC' ? DOC_CONVERTER_IDENTITY : isMaterialTextFormat(format) ? MATERIAL_FORMAT_CONVERTER_IDENTITIES[format] : TEXT_CONVERTER_IDENTITY}+${DOCX_PARSER_IDENTITY}`;
   try {
     if (input.format === 'DOCX') {
       const parsed = await parseDocx(input.originalPath, input.displayName, onBlock,
@@ -402,9 +418,18 @@ export async function extractMaterialText(input: MaterialExtractionInput): Promi
     const bytes = await readFile(input.originalPath);
     if (sha256Hex(bytes) !== input.objectSha256) return { state: 'failed', reason: 'original-changed', converter };
     let docx: Uint8Array;
+    // The file's own title, for the formats that name one beside their text (a page's <title>, a book's or document's
+    // metadata, an RTF's information group).
+    let documentTitle: string | null = null;
     try {
-      docx = input.format === 'DOC' ? (await convertDocManuscript(bytes)).docx : convertTextManuscript(bytes, { format: input.format as 'TXT' | 'MD' }).docx;
+      if (format === 'DOC') docx = (await convertDocManuscript(bytes)).docx;
+      else if (isMaterialTextFormat(format)) {
+        const read = extractMaterialFormatText(bytes, format);
+        documentTitle = read.title;
+        docx = buildManuscriptPackage(read.paragraphs);
+      } else docx = convertTextManuscript(bytes, { format: format as 'TXT' | 'MD' }).docx;
     } catch (error) {
+      if (error instanceof MaterialFormatRefusal) return { state: 'failed', reason: error.reason, converter };
       return { state: 'failed', reason: conversionRefusal(error), converter };
     }
     if (aborted()) throw new MaterialIndexAborted();
@@ -418,7 +443,7 @@ export async function extractMaterialText(input: MaterialExtractionInput): Promi
     }
     if (aborted()) throw new MaterialIndexAborted();
     if (blocks.length === 0) return { state: 'failed', reason: 'empty', converter };
-    return { state: 'complete', converter, documentTitle: null, blocks };
+    return { state: 'complete', converter, documentTitle, blocks };
   } catch (error) {
     if (error instanceof MaterialIndexAborted || aborted()) throw new MaterialIndexAborted();
     const refusal = docxRefusal(error);
@@ -592,21 +617,22 @@ export class MaterialIndexLedger {
     return { ordinal, kind: record.kind as StoredSegment['kind'], text, sentences, sha256: String(row.sha256) };
   }
 
-  /** The build of the current indexer for one item, verified; `null` before one is made. */
+  /** The build that stands for the current indexer for one item (`STANDING_BUILD`), verified; `null` before one is made. */
   current(materialId: string): StoredBuild | null {
     if (!this.#present()) return null;
-    const row = this.#db.prepare('SELECT * FROM material_index_builds WHERE material_id = ? AND indexer = ?').get(materialId, MATERIAL_INDEXER_IDENTITY) as SqlRow | undefined;
+    const row = this.#db.prepare(`SELECT * FROM material_index_builds WHERE material_id = ? AND ${STANDING_BUILD} ORDER BY indexer = ? DESC LIMIT 1`)
+      .get(materialId, ...STANDING_PARAMETERS, MATERIAL_INDEXER_IDENTITY) as SqlRow | undefined;
     return row === undefined ? null : this.#build(row);
   }
 
-  /** The items that still wait for a build by the current indexer, oldest arrival first. */
+  /** The items that still wait for a build standing for the current indexer, oldest arrival first. */
   unindexed(): string[] {
     if (!this.#present()) return [];
     return (this.#db.prepare(
       `SELECT m.material_id FROM library_materials m
-       WHERE NOT EXISTS (SELECT 1 FROM material_index_builds b WHERE b.material_id = m.material_id AND b.indexer = ?)
+       WHERE NOT EXISTS (SELECT 1 FROM material_index_builds WHERE material_id = m.material_id AND ${STANDING_BUILD})
        ORDER BY m.recorded_at, m.material_id`,
-    ).all(MATERIAL_INDEXER_IDENTITY) as SqlRow[]).map((row) => String(row.material_id));
+    ).all(...STANDING_PARAMETERS) as SqlRow[]).map((row) => String(row.material_id));
   }
 
   /**
@@ -786,13 +812,13 @@ export class MaterialIndexLedger {
     };
   }
 
-  /** The builds of the current indexer recorded since `since`, newest first, at most `limit` (索引完成, ATTN-009). */
+  /** The builds standing for the current indexer recorded since `since`, newest first, at most `limit` (索引完成, ATTN-009). */
   completions(since: string, limit: number): MaterialIndexCompletion[] {
     requireIndex(Number.isSafeInteger(limit) && limit >= 0, 'MATERIAL_INDEX_CURSOR_INVALID', '资料索引列表数量无效。');
     if (!this.#present()) return [];
     return (this.#db.prepare(
-      `SELECT * FROM material_index_builds WHERE indexer = ? AND recorded_at >= ? ORDER BY recorded_at DESC, index_id DESC LIMIT ?`,
-    ).all(MATERIAL_INDEXER_IDENTITY, since, limit) as SqlRow[]).map((row) => {
+      `SELECT * FROM material_index_builds WHERE ${STANDING_BUILD} AND recorded_at >= ? ORDER BY recorded_at DESC, index_id DESC LIMIT ?`,
+    ).all(...STANDING_PARAMETERS, since, limit) as SqlRow[]).map((row) => {
       const build = this.#build(row);
       return { materialId: build.materialId, indexId: build.indexId, state: build.state, recordedAt: build.recordedAt, sha256: build.sha256 };
     });

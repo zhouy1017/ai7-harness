@@ -660,6 +660,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'j14-library-reflow-forced-colors',
     'knowledge-library-bounded-readers',
     'knowledge-library-index-translation',
+    // 资料索引 of HTML, EPUB, ODT and RTF (Issue #428).
+    'knowledge-library-index-formats',
     'zero-activity',
   ]),
   'J-03': Object.freeze([

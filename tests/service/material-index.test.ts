@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { strToU8, zipSync, type Zippable } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LIBRARY_OBJECT_DIRECTORY } from '../../src/service/library-materials.js';
 import { MATERIAL_INDEXER_IDENTITY, MATERIAL_INDEX_SCHEMA_SQL, MATERIAL_INDEX_TRIGGER_SQL, MATERIAL_INDEX_WORK_DIRECTORY } from '../../src/service/material-index.js';
@@ -14,12 +15,16 @@ import { MAX_FRAME_BYTES, MAX_MATERIAL_SEGMENTS_PAGE, type LibraryMaterialKind, 
 import { sample1Path } from '../support/sample1-baseline.js';
 import { analysisRunAuthorizationsShape, downgradeAnalysisRunAuthorizationsToRevision65 } from '../support/default-execution-rules.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 
 // Service-integration suite (L2) for ⑤ 资料库 · 资料索引 (Issue #428, plan slice S80a; editor-surfaces §8.4, V2-UX-KB-009,
 // ATTN-009) over the real store on a temporary Agent Data Root. The collected book is exact `sample1` — an admitted Public
 // SampleBook — and every other file is the suite's own synthetic words, never a manuscript. The Owner's option 乙
 // (2026-10-09) builds four layers — original, metadata, extracted text, sentence-anchored segments — and states similarity
 // vectors, recognition and machine 来源译文 as not provided. A Task reads the index read-only, only within its plan boundary.
+
+/** An archive as every writer in the product writes one: at the fixed archive time (#611). */
+const archive = (files: Zippable): Uint8Array => zipSync(files, { mtime: fixedArchiveTime() });
 
 let roots: ServiceTestRoots;
 
@@ -189,14 +194,14 @@ describe('资料索引 over the real store', () => {
       expect([en.state, en.metadata!.language, en.metadata!.headings, en.layers.translation, en.layers.segments]).toEqual(['complete', 'other', 1, 'deferred', 'complete']);
       expect(store.inspectLibraryMaterialSegments({ materialId: english.materialId, from: 1 }).segments.map((segment) => segment.sentences.length)).toEqual([1, 2, 1]);
 
-      // A PDF's text and recognition need a local dependency the Owner has not admitted; a web page is a format AI7 does not
-      // read yet; a file with no text has none. Each is a build that says so, and the original and metadata stand.
+      // A PDF's text and recognition need a local dependency the Owner has not admitted; a file with no text has none. Each
+      // is a build that says so, and the original and metadata stand. A web page is read since Issue #428's formats.
       expect(store.inspectLibraryMaterial(pdf.materialId).index).toMatchObject({
         state: 'unsupported', reason: 'needs-local-dependency',
         layers: { original: 'complete', metadata: 'complete', text: 'deferred', recognition: 'deferred', translation: 'deferred', segments: 'deferred', vectors: 'deferred' },
       });
       expect(store.inspectLibraryMaterial(page.materialId).index).toMatchObject({
-        state: 'unsupported', reason: 'format-unsupported', layers: { text: 'unsupported', recognition: 'not-needed', segments: 'unsupported' },
+        state: 'complete', reason: null, layers: { text: 'complete', recognition: 'not-needed', segments: 'complete' },
       });
       // No text at all is said as that (#725 review, P2-1), never as a file that could not be read.
       expect(store.inspectLibraryMaterial(blank.materialId).index).toMatchObject({ state: 'failed', reason: 'empty', layers: { text: 'failed' } });
@@ -205,7 +210,85 @@ describe('资料索引 over the real store', () => {
 
       const outcomes = store.inspectGlobalAttention(() => null, false).groups.flatMap((group) => group.items)
         .filter((item) => item.object.kind === 'library-index').map((item) => item.object.kind === 'library-index' ? [item.object.title, item.object.outcome] : null).sort();
-      expect(outcomes).toEqual([['Field notes', 'complete'], ['中文笔记', 'complete'], ['扫描件', 'unsupported'], ['空文档', 'failed'], ['空白', 'failed'], ['网页', 'unsupported']]);
+      expect(outcomes).toEqual([['Field notes', 'complete'], ['中文笔记', 'complete'], ['扫描件', 'unsupported'], ['空文档', 'failed'], ['空白', 'failed'], ['网页', 'complete']]);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 120_000);
+
+  it('reads HTML, EPUB, ODT and RTF into sentence-anchored segments, and names DRM and declared entities as the reasons it will not', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const page = await put(store, file('网页.html', '<!doctype html><html><head><meta charset="utf-8"><title>河边</title><script>alert("不读")</script></head>' +
+        '<body><h1>第一章</h1><p>她推开窗。风从河上吹来！</p><p>第二段&mdash;只有一句</p></body></html>'), '网页', 'web');
+      const chapter = (body: string): string => '<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>章</title></head>' +
+        `<body>${body}</body></html>`;
+      const book = (extra: Record<string, string>): Uint8Array => archive({
+        mimetype: [strToU8('application/epub+zip'), { level: 0 }],
+        'META-INF/container.xml': strToU8('<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">' +
+          '<rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>'),
+        'OEBPS/content.opf': strToU8('<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">' +
+          '<dc:title>合成样书</dc:title></metadata><manifest><item id="a" href="a.xhtml" media-type="application/xhtml+xml"/>' +
+          '<item id="b" href="b.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="a"/><itemref idref="b"/></spine></package>'),
+        'OEBPS/a.xhtml': strToU8(chapter('<h2>上卷</h2><p>第一句。第二句？</p>')),
+        'OEBPS/b.xhtml': strToU8(chapter('<p>下一章的话。</p>')),
+        ...Object.fromEntries(Object.entries(extra).map(([name, value]) => [name, strToU8(value)])),
+      });
+      const epub = await put(store, file('样书.epub', book({})), '样书', 'book');
+      const drm = await put(store, file('加密.epub', book({ 'META-INF/rights.xml': '<rights/>' })), '加密书', 'book');
+      const odt = await put(store, file('文档.odt', archive({
+        mimetype: [strToU8('application/vnd.oasis.opendocument.text'), { level: 0 }],
+        'content.xml': strToU8('<?xml version="1.0"?><office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" ' +
+          'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"><office:body><office:text><text:h text:outline-level="1">开头</text:h>' +
+          '<text:p>一句话。<text:span>又一句。</text:span></text:p></office:text></office:body></office:document-content>'),
+        'meta.xml': strToU8('<?xml version="1.0"?><office:document-meta xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" ' +
+          'xmlns:dc="http://purl.org/dc/elements/1.1/"><office:meta><dc:title>开放文档</dc:title></office:meta></office:document-meta>'),
+      })), '文档');
+      // 「标题」 and 「好。」 as GB2312 bytes in a font of charset 134, and 「富文本」「他说。」 as Unicode escapes.
+      const unicode = (text: string): string => Array.from(text, (character) => `\\u${character.codePointAt(0)}?`).join('');
+      const rtf = await put(store, file('富文本.rtf', String.raw`{\rtf1\ansi\ansicpg936{\fonttbl{\f0\fnil\fcharset134 SimSun;}}{\info{\title ` + unicode('富文本') + '}}' +
+        String.raw`\f0\pard\outlinelevel0 \'b1\'ea\'cc\'e2\par\pard ` + unicode('他说。') + String.raw`\'ba\'c3\'a1\'a3\par}`), '富文本');
+      const unsafe = await put(store, file('实体.html', '<!DOCTYPE html [<!ENTITY x SYSTEM "file:///etc/hosts">]><html><body><p>&x;</p></body></html>'), '实体', 'web');
+      store.startMaterialIndexing();
+      await store.settleMaterialIndexing();
+
+      const segmentsOf = (materialId: string) => store.inspectLibraryMaterialSegments({ materialId, from: 1 }).segments;
+      const cases = [
+        [page, '河边', [['第一章'], ['她推开窗。', '风从河上吹来！'], ['第二段—只有一句']]],
+        [epub, '合成样书', [['上卷'], ['第一句。', '第二句？'], ['下一章的话。']]],
+        [odt, '开放文档', [['开头'], ['一句话。', '又一句。']]],
+        [rtf, '富文本', [['标题'], ['他说。', '好。']]],
+      ] as const;
+      for (const [item, title, sentences] of cases) {
+        const index = store.inspectLibraryMaterial(item.materialId).index;
+        expect([index.state, index.reason, index.metadata?.documentTitle, index.metadata?.language, index.metadata?.headings, index.metadata?.paragraphs])
+          .toEqual(['complete', null, title, 'zh', 1, sentences.length]);
+        expect(index.layers).toEqual({ original: 'complete', metadata: 'complete', text: 'complete', recognition: 'not-needed', translation: 'not-needed', segments: 'complete', vectors: 'deferred' });
+        const segments = segmentsOf(item.materialId);
+        expect(segments.map((segment) => segment.sentences.map(([start, end]) => segment.text.slice(start, end)))).toEqual(sentences);
+        expect(segments.map((segment) => segment.kind)).toEqual(['heading', ...sentences.slice(1).map(() => 'paragraph')]);
+        // 「已提取 N 字」 counts what was extracted, and is what 允许参考's bounds read (#758).
+        expect(index.metadata?.characters).toBe(segments.map((segment) => segment.text).join('').length);
+      }
+      expect([page, epub, odt, rtf].map((item) => item.source.format)).toEqual(['HTML', 'EPUB', 'ODT', 'RTF']);
+      // DRM and a declared entity are refused with their own reasons, never read and never called a damaged file.
+      expect(store.inspectLibraryMaterial(drm.materialId).index).toMatchObject({ state: 'failed', reason: 'encrypted', layers: { text: 'failed', segments: 'failed' } });
+      expect(store.inspectLibraryMaterial(unsafe.materialId).index).toMatchObject({ state: 'failed', reason: 'external-entity', layers: { text: 'failed' } });
+      const database = new DatabaseSync(storePath(), { readOnly: true });
+      try {
+        const converters = (database.prepare('SELECT material_id, canonical_json FROM material_index_builds').all() as Array<{ material_id: string; canonical_json: string }>)
+          .map((row) => [row.material_id, (JSON.parse(row.canonical_json) as { converter: string }).converter]);
+        expect(Object.fromEntries(converters)).toEqual({
+          [page.materialId]: 'ai7-html-text/1+ai7-docx-fflate-saxes/3', [epub.materialId]: 'ai7-epub-text/1+ai7-docx-fflate-saxes/3',
+          [drm.materialId]: 'ai7-epub-text/1+ai7-docx-fflate-saxes/3', [odt.materialId]: 'ai7-odt-text/1+ai7-docx-fflate-saxes/3',
+          [rtf.materialId]: 'ai7-rtf-text/1+ai7-docx-fflate-saxes/3', [unsafe.materialId]: 'ai7-html-text/1+ai7-docx-fflate-saxes/3',
+        });
+      } finally {
+        database.close();
+      }
+      // No working copy is left behind.
+      expect(readdirSync(join(roots.dataRoot, MATERIAL_INDEX_WORK_DIRECTORY))).toEqual([]);
       store.markCleanShutdown();
     } finally {
       store.close();

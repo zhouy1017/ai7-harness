@@ -472,6 +472,8 @@ export const MATERIAL_INDEX_REASONS: Readonly<Record<MaterialIndexReason, string
   unreadable: '文件无法读取，或内容已损坏',
   'original-changed': '本机保存的原件与放入时的记录不一致',
   empty: '文件里没有可提取的文字',
+  encrypted: '文件已加密或带有版权保护（DRM），AI7 不读取其中的文字',
+  'external-entity': '文件声明了实体或内部文档类型定义，AI7 为安全起见不读取',
 };
 
 /** The index as a whole, in one line beside its term. */

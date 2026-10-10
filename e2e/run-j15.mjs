@@ -5,6 +5,8 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { strToU8, zipSync } from 'fflate';
+import { fixedArchiveTime } from './composed-docx.mjs';
 import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -313,6 +315,22 @@ const READ_LIBRARY = `(() => {
     focus: active instanceof HTMLElement ? { tag: active.tagName, action: active.dataset.libraryAction ?? null, choice: active.dataset.libraryChoice ?? null } : null,
   };
 })()`;
+/**
+ * A synthetic EPUB in the runner's own words, never a manuscript (Issue #428): two chapters in reading order, the second
+ * placed first in the manifest, and the book's own title in its package metadata.
+ */
+function syntheticEpub() {
+  const chapter = (body) => `<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>章</title></head><body>${body}</body></html>`;
+  return zipSync({
+    mimetype: [strToU8('application/epub+zip'), { level: 0 }],
+    'META-INF/container.xml': strToU8('<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>'),
+    'OEBPS/content.opf': strToU8('<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>合成电子书</dc:title></metadata>' +
+      '<manifest><item id="two" href="two.xhtml" media-type="application/xhtml+xml"/><item id="one" href="one.xhtml" media-type="application/xhtml+xml"/></manifest>' +
+      '<spine><itemref idref="one"/><itemref idref="two"/></spine></package>'),
+    'OEBPS/one.xhtml': strToU8(chapter('<h1>第一章</h1><p>这是运行器自己写的一句话。第二句也是。</p><script>不读</script>')),
+    'OEBPS/two.xhtml': strToU8(chapter('<p>第二章只有一句。</p>')),
+  }, { mtime: fixedArchiveTime() });
+}
 async function readLibrary(renderer, predicate, name) {
   const deadline = Date.now() + 60_000;
   let page = null;
@@ -1222,6 +1240,40 @@ async function main() {
     requireJourney(JSON.stringify(englishLayers.get('translation')) === JSON.stringify(['deferred', '未提供：非中文资料的机器译文要经模型服务，尚未接通']) &&
       /^非中文 · 1 段/u.test(englishLayers.get('metadata')?.[1] ?? '') && englishLayers.get('segments')?.[0] === 'complete',
     'library-index-translation-deferred', englishIndexed.cards[0].layers);
+
+    // 资料索引 of an EPUB (Issue #428): the runner's synthetic book arrives through the real picker, review and commit, and its
+    // chapters are read on this machine in reading order into paragraphs with sentence anchors, under the book's own title.
+    at('knowledge-library-index-formats');
+    await closeBrowser();
+    const epubPath = resolve(runRoot, 'library-reference-book.epub');
+    await writeFile(epubPath, syntheticEpub());
+    manager = await launch(epubPath);
+    renderer = await waitForRenderer(manager, 'library-epub-window');
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'library-epub-ready');
+    await click(renderer, '知识库', 'library-epub-knowledge');
+    await click(renderer, '资料库', 'library-epub-tab');
+    await readLibrary(renderer, (page) => page.state === 'ready', 'library-epub-loaded');
+    await clickSelector(renderer, '[data-library-action="add"]', 'library-epub-add');
+    await readLibrary(renderer, (page) => page.preview?.heading === '放入资料库：library-reference-book.epub', 'library-epub-preview');
+    await fill(renderer, '[data-library-field="title"]', '合成电子书', 'library-epub-title');
+    await clickSelector(renderer, '[data-library-choice="book"]', 'library-epub-kind');
+    await clickSelector(renderer, '[data-library-action="confirm-add"]', 'library-epub-confirm');
+    const epubIndexed = await readLibrary(renderer, (page) => page.cards[0]?.title === '合成电子书' && page.cards[0].index === 'complete', 'library-epub-indexed');
+    const epubLayers = new Map(epubIndexed.cards[0].layers.map(([layer, state, line]) => [layer, [state, line]]));
+    requireJourney(epubLayers.get('metadata')?.[1] === '中文 · 3 段 · 1 个标题 · 文件自带标题「合成电子书」' &&
+      JSON.stringify(epubLayers.get('text')) === JSON.stringify(['complete', '已提取 30 字']) &&
+      JSON.stringify(epubLayers.get('segments')) === JSON.stringify(['complete', '3 段 · 4 句；每句可按「第 n 段第 m 句」引用（这种格式没有页码，锚点是位置）']),
+    'library-epub-layers', epubIndexed.cards[0].layers);
+    const epubCard = `article.library-material[data-material-id="${epubIndexed.cards[0].id}"]`;
+    await clickSelector(renderer, `${epubCard} [data-library-action="segments"]`, 'library-epub-segments-open');
+    const epubSegments = await readLibrary(renderer, (page) => page.cards[0]?.segments?.from === '1', 'library-epub-segments');
+    requireJourney(JSON.stringify(epubSegments.cards[0].segments.items) === JSON.stringify([
+      ['1', [['1.1', '第 1 段第 1 句']]],
+      ['2', [['2.1', '第 2 段第 1 句'], ['2.2', '第 2 段第 2 句']]],
+      ['3', [['3.1', '第 3 段第 1 句']]],
+    ]), 'library-epub-anchors', epubSegments.cards[0].segments);
+    await clickSelector(renderer, `${epubCard} [data-library-action="segments-close"]`, 'library-epub-segments-close');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${epubCard} .material-segments [data-library-action="segments"]`)}) === document.activeElement`, 'library-epub-segments-closed', 10_000);
     at('knowledge-library-bounded-readers');
 
     // Populate the Book chooser through the ordinary creation form, then retain one explicit choice across replacement pages.
