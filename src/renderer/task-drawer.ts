@@ -239,6 +239,8 @@ export interface MountTaskDrawerOptions {
   openTaskTarget(target: GlobalAttentionTarget): void;
   /** 查看结果 (TASK-045): the finished Task's result beside the text; `backToPanel` opens the panel again when it closes. */
   openTaskResult(entry: BookTaskItemProjection, backToPanel: () => void): void;
+  /** 跳到所选文字 (Issue #423, S77 deferred item d): the caret moved to the first paragraph a selection Task was started on, or why not. */
+  jumpToSelection(bookId: string, selection: { readonly manuscriptId: string; readonly fromBlockId: string; readonly toBlockId: string }): void;
   /**
    * 发起全书任务 (TASK-044): prepare the procedure's Task — and start it under its rule when `quick` names one. It answers the
    * Task whose plan the drawer shows next, with why a quick start stopped there; `null` keeps the panel.
@@ -430,6 +432,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       options.openTaskResult(entry, () => {
         if (book !== null && !interrupted) surface.openPanel(book, finder);
       });
+    },
+    // The panel stays beside the text: the jump moves the caret in the manuscript on screen, or opens it there.
+    jumpToSelection: (entry) => {
+      if (panelBookId !== null) options.jumpToSelection(panelBookId, entry.selection);
     },
     startWholeBook: async (input) => {
       const book = panelBookId;

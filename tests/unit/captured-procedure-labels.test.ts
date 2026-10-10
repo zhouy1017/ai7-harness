@@ -186,7 +186,7 @@ describe('Series material chosen apart, applicability and linked packages (Issue
   });
 
   it('offers each enabled procedure with the one version a new use takes and how it fits this Book (REUSE-046, REUSE-053)', () => {
-    const entry = { procedureId: 'p', title: '书系复核', latestEligible: { versionId: 'v', version: 2 }, fit: 'all' as const, stepCount: 2, availableCount: 2, chosenApart: [], leftOut: [] };
+    const entry = { procedureId: 'p', title: '书系复核', latestEligible: { versionId: 'v', version: 2 }, fit: 'all' as const, stepCount: 2, availableCount: 2, chosenApart: [], chosenApartSteps: [], leftOut: [] };
     expect(sheetProcedureOption(entry)).toBe('《书系复核》第 2 版 · 这本书能运行全部 2 步');
     expect(sheetProcedureOption({ ...entry, chosenApart: ['书系一致性'] })).toBe('《书系复核》第 2 版 · 这本书能运行全部 2 步；「书系一致性」要你另行勾选');
     expect(sheetProcedureOption({ ...entry, chosenApart: ['书系一致性', '体例与格式'] })).toBe('《书系复核》第 2 版 · 这本书能运行全部 2 步；「书系一致性」、「体例与格式」要你另行勾选');

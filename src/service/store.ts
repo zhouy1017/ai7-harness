@@ -3,7 +3,7 @@ import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSyn
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
-import { BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_MODE_LABELS, CAPTURED_PROCEDURE_SCOPE_SLOTS, CAPTURED_PROCEDURE_STATE_LABELS, MAX_CAPTURED_PROCEDURE_RUNS_SHOWN, MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_BOOK_CHOICES, MAX_LEARNING_AUDIT_PAGE, MAX_LEARNING_AUDIT_SERIES_CHOICES, MAX_LEARNING_LINEAGE_DECISIONS, MAX_LEARNING_REMEDIATION_ITEMS, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
+import { BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_MODE_LABELS, CAPTURED_PROCEDURE_CAPTURE_SLOTS, CAPTURED_PROCEDURE_STATE_LABELS, MAX_CAPTURED_PROCEDURE_RUNS_SHOWN, MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_BOOK_CHOICES, MAX_LEARNING_AUDIT_PAGE, MAX_LEARNING_AUDIT_SERIES_CHOICES, MAX_LEARNING_LINEAGE_DECISIONS, MAX_LEARNING_REMEDIATION_ITEMS, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
   InspectSeriesKnowledgeReviewInput,
   ServiceOperationMap,
@@ -7335,7 +7335,8 @@ export class EditorialStore {
         Array.isArray(input.categoryIds) && input.categoryIds.length >= 1 && new Set(input.categoryIds).size === input.categoryIds.length &&
         input.categoryIds.every((categoryId) => typeof categoryId === 'string'),
       'CAPTURED_PROCEDURE_STEPS_INVALID', '请至少保留一个步骤，且不要重复。');
-      requireStore((CAPTURED_PROCEDURE_SCOPE_SLOTS as readonly string[]).includes(input.scopeSlot), 'CAPTURED_PROCEDURE_INVALID', '审阅范围的设定无效。');
+      // A capture sets 全书 or 选定章节; a selection is handed over at each run, never saved as a setting (Issue #423, S77 deferred item a).
+      requireStore((CAPTURED_PROCEDURE_CAPTURE_SLOTS as readonly string[]).includes(input.scopeSlot), 'CAPTURED_PROCEDURE_INVALID', '审阅范围的设定无效。');
       requireStore(validCapturedProcedureTitle(input.title), 'CAPTURED_PROCEDURE_TITLE_INVALID',
         `请给这个工序起一个名字（1–${MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES} 个字，前后不留空格）。`);
       const source = this.#reviewRuns.captureSource(input.bookId, input.reviewRunId);
@@ -7536,9 +7537,10 @@ export class EditorialStore {
    * version the editor chose instead (Issue #66, S31), with its steps as this Book can take them and where today's guideline
    * versions differ from the source Run's. A version that is not eligible cannot be chosen. A read: the 新建审阅 sheet prepares.
    */
-  inspectCapturedProcedureRun(bookId: string, procedureId: string, versionId: string | null = null): CapturedProcedureRunProjection {
+  inspectCapturedProcedureRun(bookId: string, procedureId: string, versionId: string | null = null, scope: CapturedProcedureScopeSlot | null = null): CapturedProcedureRunProjection {
     return this.#procedureCall(() => {
-      const resolution = this.#capturedRunResolution(bookId, procedureId, versionId);
+      requireStore(scope === null || scope === 'selection', 'CAPTURED_PROCEDURE_INVALID', '可复用工序的运行范围无效。');
+      const resolution = this.#capturedRunResolution(bookId, procedureId, versionId, { scope });
       requireStore(resolution.ineligible === null, 'REVIEW_PROCEDURE_VERSION_INELIGIBLE', resolution.ineligible ?? '');
       return resolution.projection;
     });
@@ -7546,13 +7548,14 @@ export class EditorialStore {
 
   /**
    * One procedure resolved for one Book. `read` lets a caller that weighs many procedures for the same Book (S31b review P3-3)
-   * pass the versions it already read and share the Book's category availability, which depends only on the scope slot.
+   * pass the versions it already read and share the Book's category availability, which depends only on the scope slot — or on
+   * `read.scope`, the 当前选区 a selection menu asks for instead of each version's slot (Issue #423, S77 deferred item a).
    */
   #capturedRunResolution(
     bookId: string,
     procedureId: string,
     versionId: string | null,
-    read: { versions?: ReadonlyArray<StoredCapturedVersion>; availability?: Map<CapturedProcedureScopeSlot, ReadonlyMap<string, string | null>> } = {},
+    read: { versions?: ReadonlyArray<StoredCapturedVersion>; availability?: Map<CapturedProcedureScopeSlot, ReadonlyMap<string, string | null>>; scope?: CapturedProcedureScopeSlot | null } = {},
   ): { projection: CapturedProcedureRunProjection; ineligible: string | null } {
     requireStore(typeof bookId === 'string' && UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
     requireStore(versionId === null || (typeof versionId === 'string' && UUID_PATTERN.test(versionId)), 'CAPTURED_PROCEDURE_INVALID', '可复用工序的版本标识无效。');
@@ -7588,7 +7591,7 @@ export class EditorialStore {
     }
     const stored = versions.find((candidate) => candidate.versionId === chosen.versionId)!;
     const validation = this.#capturedValidation(stored);
-    const slot = stored.document.parameters.scope;
+    const slot = read.scope ?? stored.document.parameters.scope;
     let availability = read.availability?.get(slot);
     if (availability === undefined) {
       availability = this.#reviewRuns.categoryAvailability(bookId, slot);
@@ -7654,11 +7657,13 @@ export class EditorialStore {
    * Procedure of the house, each with the one version a new use takes — its latest eligible — and how many of that version's
    * steps this Book can take now, the Series steps chosen apart among them, and why each other is left out. Deterministic and
    * provider-free, and a read: no procedure is recommended (ADR 0087 §4) and none is ruled out — a mismatch is said, and the
-   * editor may still choose it by hand.
+   * editor may still choose it by hand. With `scope: 'selection'` (Issue #423, S77 deferred item a) each applies to a 当前选区 of
+   * the Book instead of its own slot, for the selection menu's list of the house's procedures.
    */
-  inspectCapturedProcedureApplicability(bookId: string): CapturedProcedureApplicabilityProjection {
+  inspectCapturedProcedureApplicability(bookId: string, scope: CapturedProcedureScopeSlot | null = null): CapturedProcedureApplicabilityProjection {
     return this.#procedureCall(() => {
       requireStore(typeof bookId === 'string' && UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+      requireStore(scope === null || scope === 'selection', 'CAPTURED_PROCEDURE_INVALID', '可复用工序的运行范围无效。');
       const { ids, truncated } = this.#capturedProcedures.procedureIds();
       const procedures: CapturedProcedureApplicabilityEntryProjection[] = [];
       // The Book's category availability once per scope slot, and each procedure's versions read once (S31b review P3-3).
@@ -7666,13 +7671,14 @@ export class EditorialStore {
       for (const procedureId of ids) {
         const versions = this.#capturedProcedures.versions(procedureId);
         if (!versions.some((stored) => stored.state === 'enabled')) continue;
-        const { projection } = this.#capturedRunResolution(bookId, procedureId, null, { versions, availability });
+        const { projection } = this.#capturedRunResolution(bookId, procedureId, null, { versions, availability, scope });
         const resolved = projection.resolved;
         if (resolved === null) {
-          procedures.push({ procedureId, title: projection.title, latestEligible: null, fit: 'no-version', stepCount: 0, availableCount: 0, chosenApart: [], leftOut: [] });
+          procedures.push({ procedureId, title: projection.title, latestEligible: null, fit: 'no-version', stepCount: 0, availableCount: 0, chosenApart: [], chosenApartSteps: [], leftOut: [] });
           continue;
         }
         const available = resolved.steps.filter((step) => step.available);
+        const chosenApart = available.filter((step) => step.chosenApart);
         procedures.push({
           procedureId,
           title: projection.title,
@@ -7680,7 +7686,8 @@ export class EditorialStore {
           fit: available.length === resolved.steps.length ? 'all' : available.length === 0 ? 'none' : 'partial',
           stepCount: resolved.steps.length,
           availableCount: available.length,
-          chosenApart: available.filter((step) => step.chosenApart).map((step) => step.label),
+          chosenApart: chosenApart.map((step) => step.label),
+          chosenApartSteps: chosenApart.map((step) => ({ categoryId: step.categoryId, label: step.label })),
           leftOut: resolved.steps.filter((step) => !step.available).map((step) => ({ label: step.label, reason: step.unavailableReason ?? '' })),
         });
       }

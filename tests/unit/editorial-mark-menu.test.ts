@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { menuPlacement, sameSeriesGroup, seriesKnowledgeMenuGroup, seriesMembership } from '../../src/renderer/editorial-marks.js';
+import { latestAnswer, menuPlacement, sameProcedureEntries, sameSeriesGroup, seriesKnowledgeMenuGroup, seriesMembership } from '../../src/renderer/editorial-marks.js';
+import type { SelectionProcedureEntry } from '../../src/renderer/selection-task-labels.js';
 
 const viewport = { width: 640, height: 400 };
 const menu = { width: 260, height: 300 };
@@ -100,5 +101,47 @@ describe('the Book\'s Series as the editor reads them while it is open (Issue #6
     const membership = seriesMembership(async () => ({ memberships: one }), () => false);
     await membership.refresh();
     expect(membership.current()).toBeNull();
+  });
+});
+
+describe('the house\'s 可复用工序 as the selection menu reads them (Issue #423, S77 deferred item a)', () => {
+  const entry = (procedureId: string, disabledReason: string | null = null): SelectionProcedureEntry => ({
+    kind: 'procedure', value: `procedure:${procedureId}`, procedureId, title: '体例复核', versionId: 'v1', version: 1, label: '按《体例复核》审阅这段', hint: '可复用工序 · 第 1 版 · 1 步', chosenApart: [], disabledReason,
+  });
+
+  it('draws the group again when the house\'s procedures become known, change, or when none is left — and not otherwise', async () => {
+    let answer: ReadonlyArray<SelectionProcedureEntry> = [];
+    const procedures = latestAnswer(async () => answer);
+    expect(procedures.current()).toBeNull();
+    // Not known yet draws no entry and no note; known and none draws the note: the two differ.
+    await procedures.refresh();
+    expect(procedures.current()).toEqual([]);
+    expect(sameProcedureEntries(null, procedures.current())).toBe(false);
+    expect(sameProcedureEntries(null, null)).toBe(true);
+    expect(sameProcedureEntries([], [])).toBe(true);
+    answer = [entry('p1')];
+    await procedures.refresh();
+    expect(sameProcedureEntries([], procedures.current())).toBe(false);
+    expect(sameProcedureEntries([entry('p1')], procedures.current())).toBe(true);
+    expect(sameProcedureEntries([entry('p1')], [entry('p1', '「事实核查」不能就所选文字运行：…')])).toBe(false);
+  });
+
+  it('counts only the latest read\'s answer, keeps the last answer when a read fails, and records nothing once the editor is gone', async () => {
+    const pending: Array<(value: number) => void> = [];
+    let fail = false;
+    const reader = latestAnswer<number>(() => fail ? Promise.reject(new Error('读不到')) : new Promise((resolve) => { pending.push(resolve); }));
+    const first = reader.refresh();
+    const second = reader.refresh();
+    pending[1]!(2);
+    await second;
+    pending[0]!(1);
+    await first;
+    expect(reader.current()).toBe(2);
+    fail = true;
+    await reader.refresh();
+    expect(reader.current()).toBe(2);
+    const gone = latestAnswer(async () => 3, () => false);
+    await gone.refresh();
+    expect(gone.current()).toBeNull();
   });
 });

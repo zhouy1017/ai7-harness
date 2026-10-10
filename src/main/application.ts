@@ -2962,21 +2962,26 @@ function registerRendererHandlers(
       const route = requireCurrentBookRoute(owned);
       const routeGeneration = owned.routeGeneration;
       const routeRequestSequence = owned.routeRequestSequence;
-      const result = await service.call('inspectCapturedProcedureRun', { bookId: route.bookId, procedureId: input.procedureId, versionId: input.versionId ?? null });
+      const result = await service.call('inspectCapturedProcedureRun', {
+        bookId: route.bookId, procedureId: input.procedureId, versionId: input.versionId ?? null, scope: input.scope === 'selection' ? 'selection' : null,
+      });
       requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
       if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '工序的运行预览不属于当前图书工作台。');
       return result;
     }),
   );
-  // 按已保存的工序 (Issue #66, S31b): the house's enabled procedures as each applies to the route's Book, which the renderer never names.
-  ipcMain.handle(IPC_CHANNELS.inspectCapturedProcedureApplicability, (event) =>
+  // 按已保存的工序 (Issue #66, S31b): the house's enabled procedures as each applies to the route's Book, which the renderer never names;
+  // with `scope: 'selection'`, as each applies to a 当前选区 of it, for the selection menu (Issue #423, S77 deferred item a).
+  ipcMain.handle(IPC_CHANNELS.inspectCapturedProcedureApplicability, (event, input?: Parameters<RendererApi['inspectCapturedProcedureApplicability']>[0]) =>
     envelope(async () => {
       const owned = requireSender(event);
+      requireDesktop(input === undefined || input === null || typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
       requireAuthority();
       const route = requireCurrentBookRoute(owned);
       const routeGeneration = owned.routeGeneration;
       const routeRequestSequence = owned.routeRequestSequence;
-      const result = await service.call('inspectCapturedProcedureApplicability', { bookId: route.bookId });
+      const scope = input !== undefined && input !== null && input.scope === 'selection' ? 'selection' : null;
+      const result = await service.call('inspectCapturedProcedureApplicability', { bookId: route.bookId, scope });
       requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
       if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '工序的适用情况不属于当前图书工作台。');
       return result;

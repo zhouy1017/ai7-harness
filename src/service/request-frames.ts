@@ -1362,16 +1362,18 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'inspectCapturedProcedureRun': {
       // `versionId` names the exact eligible version the editor chose instead of the latest (Issue #66, S31); `null` for the latest.
-      const input = requireInput(value.input, ['bookId', 'procedureId', 'versionId'], tentativeId);
-      if (!validUuid(input.bookId) || !validUuid(input.procedureId) || (input.versionId !== null && !validUuid(input.versionId))) {
+      // `scope` (Issue #423, S77 deferred item a) asks for the steps on a 当前选区 instead of the version's slot; absent or `null` for the slot.
+      const input = requireInputWithOptional(value.input, ['bookId', 'procedureId', 'versionId'], ['scope'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.procedureId) || (input.versionId !== null && !validUuid(input.versionId)) ||
+          !optionalOrNull(input, 'scope', (scope) => scope === 'selection')) {
         throw new ProtocolError(tentativeId);
       }
       break;
     }
     case 'inspectCapturedProcedureApplicability': {
-      // The house's enabled procedures as each applies to the route's Book (Issue #66, S31b).
-      const input = requireInput(value.input, ['bookId'], tentativeId);
-      if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
+      // The house's enabled procedures as each applies to the route's Book (Issue #66, S31b) — or to a 当前选区 of it (Issue #423).
+      const input = requireInputWithOptional(value.input, ['bookId'], ['scope'], tentativeId);
+      if (!validUuid(input.bookId) || !optionalOrNull(input, 'scope', (scope) => scope === 'selection')) throw new ProtocolError(tentativeId);
       break;
     }
     case 'saveDeveloperProposal': {
