@@ -424,12 +424,14 @@ describe('what the review of #761 found', () => {
   it('reads a run of line breaks in time linear in it, with or without white space between them (P1-1)', () => {
     const breaks = 200_000;
     expect(read(`<p>${'<br>'.repeat(breaks)}x</p>`, 'HTML').paragraphs).toEqual([[undefined, ['x']]]);
-    expect(timed(() => read(`<p>${'<br>'.repeat(breaks)}x</p>`, 'HTML'))).toBeLessThan(1_000);
-    expect(timed(() => read(`<p>${'<br> \n'.repeat(breaks)}x</p>`, 'HTML'))).toBeLessThan(1_000);
-    expect(timed(() => read(`<div>甲${'<br/>'.repeat(breaks)}乙</div>`, 'HTML'))).toBeLessThan(1_000);
+    // Generous bounds, for slower hosted runners: each takes well under a second here, and the quadratic reading this pins
+    // took 15 s for 80,000 breaks — about 94 s for these.
+    expect(timed(() => read(`<p>${'<br>'.repeat(breaks)}x</p>`, 'HTML'))).toBeLessThan(5_000);
+    expect(timed(() => read(`<p>${'<br> \n'.repeat(breaks)}x</p>`, 'HTML'))).toBeLessThan(5_000);
+    expect(timed(() => read(`<div>甲${'<br/>'.repeat(breaks)}乙</div>`, 'HTML'))).toBeLessThan(5_000);
     // The ODT and RTF line breaks share the paragraphs' rule: a break after an empty line adds nothing.
-    expect(timed(() => read(odt(`<text:p>${'<text:line-break/>'.repeat(breaks)}x</text:p>`), 'ODT'))).toBeLessThan(1_000);
-    expect(timed(() => read(`{\\rtf1 ${'\\line '.repeat(breaks)}x\\par}`, 'RTF'))).toBeLessThan(1_000);
+    expect(timed(() => read(odt(`<text:p>${'<text:line-break/>'.repeat(breaks)}x</text:p>`), 'ODT'))).toBeLessThan(5_000);
+    expect(timed(() => read(`{\\rtf1 ${'\\line '.repeat(breaks)}x\\par}`, 'RTF'))).toBeLessThan(5_000);
   });
 
   it('parts paragraphs at a run of line breaks, and at each line break straight in body or a div (P3-4)', () => {
@@ -452,7 +454,8 @@ describe('what the review of #761 found', () => {
       .replace('<spine>', `<spine>${'<itemref idref="c2"/><itemref idref="again"/>'.repeat(1_000)}`);
     const book = epub({ ...BOOK, 'OEBPS/content.opf': repeated, 'OEBPS/text/ch2.xhtml': markup });
     expect(read(book, 'EPUB').paragraphs.filter(([, lines]) => lines[0] === '只读一次。')).toHaveLength(1);
-    expect(timed(() => read(book, 'EPUB'))).toBeLessThan(2_000);
+    // A generous bound: about 55 ms here, against 36 s for half as many repeats before (#761 review).
+    expect(timed(() => read(book, 'EPUB'))).toBeLessThan(10_000);
   });
 
   it('reads `./x` and `a//b` as the paths they mean, and still refuses an absolute or backslashed one (P3-3)', () => {
@@ -477,9 +480,11 @@ describe('what the review of #761 found', () => {
     expect(read(odt('<text:p>可见<text:hidden-text text:condition="ooow:true" text:string-value="藏">藏</text:hidden-text>的字</text:p>' +
       '<text:p><text:hidden-paragraph text:condition="ooow:true" text:is-hidden="true"/>整段藏起来</text:p>' +
       '<text:p><text:hidden-paragraph text:condition="ooow:false" text:is-hidden="false"/>这段显示</text:p>' +
+      // ODF's default for `text:is-hidden` is false: a hidden-paragraph field that records nothing leaves its paragraph read.
+      '<text:p><text:hidden-paragraph text:condition="ooow:true"/>没记录就显示</text:p>' +
       '<text:section text:name="s" text:display="none"><text:p>节藏起来</text:p></text:section>' +
       '<text:section text:name="t"><text:p>节显示</text:p></text:section>'), 'ODT').paragraphs)
-      .toEqual([[undefined, ['可见的字']], [undefined, ['这段显示']], [undefined, ['节显示']]]);
+      .toEqual([[undefined, ['可见的字']], [undefined, ['这段显示']], [undefined, ['没记录就显示']], [undefined, ['节显示']]]);
   });
 
   it('decodes numeric references with any leading zeros, windows-1252 for 128 to 159, and drops C1 controls (P3-2)', () => {
@@ -494,5 +499,51 @@ describe('what the review of #761 found', () => {
       String.raw`{\upr{旧}{乙 {\*\ud{嵌套密文}}}{\*\ud{新}}}\par` +
       String.raw`甲{\deleted 删掉的}乙\deleted 也删\deleted0 丙{\deleted\plain 回来了}\par}`;
     expect(read(rtf, 'RTF').paragraphs).toEqual([[undefined, ['正文域结果新']], [undefined, ['甲乙丙回来了']]]);
+  });
+});
+
+describe('what the re-review of #761 found', () => {
+  it('lets the next paragraph, list item or cell close a hidden one, so the visible text after it is read (P2-A)', () => {
+    expect(read('<p hidden>secret<p>visible one<p>visible two', 'HTML').paragraphs).toEqual([[undefined, ['visible one']], [undefined, ['visible two']]]);
+    expect(read('<ul><li hidden>secret<li>visible</ul><p>after</p>', 'HTML').paragraphs).toEqual([[undefined, ['visible']], [undefined, ['after']]]);
+    expect(read('<table><tr><td hidden>S10<td>visible</table>', 'HTML').paragraphs).toEqual([[undefined, ['visible']]]);
+    // A hidden block still hides what is inside it.
+    expect(read('<div hidden><p>甲<p>乙</div><p>丙', 'HTML').paragraphs).toEqual([[undefined, ['丙']]]);
+  });
+
+  it('does not read ODT text in a character or paragraph style that hides it, its own or a parent\'s (a)', () => {
+    const style = 'xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" ' +
+      'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"';
+    const common = `<?xml version="1.0"?><office:document-styles ${style}><office:styles>` +
+      '<style:style style:name="Hidden" style:family="text"><style:text-properties text:display="none"/></style:style>' +
+      '<style:style style:name="HiddenParagraph" style:family="paragraph"><style:text-properties text:display="none"/></style:style>' +
+      '</office:styles></office:document-styles>';
+    const content = `<?xml version="1.0"?><office:document-content ${style}><office:automatic-styles>` +
+      '<style:style style:name="T1" style:family="text"><style:text-properties text:display="none"/></style:style>' +
+      '<style:style style:name="T2" style:family="text" style:parent-style-name="Hidden"/>' +
+      '<style:style style:name="T3" style:family="text" style:parent-style-name="Hidden"><style:text-properties text:display="true"/></style:style>' +
+      '<style:style style:name="P1" style:family="paragraph" style:parent-style-name="HiddenParagraph"/>' +
+      '<style:style style:name="P2" style:family="paragraph"><style:text-properties fo:font-weight="bold" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"/></style:style>' +
+      '</office:automatic-styles><office:body><office:text>' +
+      '<text:p>可见<text:span text:style-name="T1">隐一</text:span><text:span text:style-name="T2">隐二</text:span><text:span text:style-name="T3">显三</text:span>的字</text:p>' +
+      '<text:p text:style-name="P1">整段在隐藏样式里</text:p>' +
+      '<text:p text:style-name="P2">粗体段落</text:p>' +
+      '<text:p text:style-name="T1">段落不按字符样式隐藏</text:p>' +
+      '</office:text></office:body></office:document-content>';
+    const file = archive({
+      mimetype: [strToU8('application/vnd.oasis.opendocument.text'), { level: 0 }],
+      'content.xml': strToU8(content),
+      'styles.xml': strToU8(common),
+    });
+    expect(read(file, 'ODT').paragraphs).toEqual([[undefined, ['可见显三的字']], [undefined, ['粗体段落']], [undefined, ['段落不按字符样式隐藏']]]);
+    // The styles are bounded, and a parent chain that loops ends.
+    const looping = content.replace('<style:style style:name="T1" style:family="text"><style:text-properties text:display="none"/></style:style>',
+      '<style:style style:name="T1" style:family="text" style:parent-style-name="T4"/><style:style style:name="T4" style:family="text" style:parent-style-name="T1"/>');
+    expect(read(archive({ mimetype: [strToU8('application/vnd.oasis.opendocument.text'), { level: 0 }], 'content.xml': strToU8(looping) }), 'ODT').paragraphs[0])
+      .toEqual([undefined, ['可见隐一隐二显三的字']]);
+    const many = `<?xml version="1.0"?><office:document-styles ${style}><office:styles>` +
+      Array.from({ length: 10_001 }, (_, index) => `<style:style style:name="S${index}" style:family="text"/>`).join('') + '</office:styles></office:document-styles>';
+    expect(refusal(archive({ mimetype: [strToU8('application/vnd.oasis.opendocument.text'), { level: 0 }], 'content.xml': strToU8(content), 'styles.xml': strToU8(many) }), 'ODT'))
+      .toBe('over-bound');
   });
 });

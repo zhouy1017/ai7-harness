@@ -350,21 +350,22 @@ class HtmlReader {
   }
 
   #open(name: string, selfClosing: boolean, hidden: boolean): void {
-    if (this.#skipping === 0) {
-      if (name === 'br') {
-        // A line break after an empty line — two in a row — ends the paragraph; one inside a paragraph, a list item or a
-        // cell breaks its line; one straight in body, a div or a section ends the paragraph (HTML_LINE_HOLDERS).
-        if (this.#sink.lineEmpty()) {
-          if (this.#sink.holdsText()) this.#flush();
-        } else if (this.#holdsLines()) this.#sink.lineBreak();
-        else this.#flush();
-        return;
-      }
-      if (HTML_BLOCKS.has(name) && this.#stack.at(-1)?.name === 'p') this.#pop();
-      const implied = HTML_IMPLIED_END[name];
-      if (implied !== undefined && implied.has(this.#stack.at(-1)?.name ?? '')) this.#pop();
-      if (HTML_BLOCKS.has(name)) this.#flush();
+    if (name === 'br') {
+      if (this.#skipping > 0) return;
+      // A line break after an empty line — two in a row — ends the paragraph; one inside a paragraph, a list item or a
+      // cell breaks its line; one straight in body, a div or a section ends the paragraph (HTML_LINE_HOLDERS).
+      if (this.#sink.lineEmpty()) {
+        if (this.#sink.holdsText()) this.#flush();
+      } else if (this.#holdsLines()) this.#sink.lineBreak();
+      else this.#flush();
+      return;
     }
+    // The ends a start tag implies hold whether or not what they close is read: the next `<p>`, `<li>` or `<td>` closes a
+    // hidden one rather than opening inside it (#761 re-review, P2-A). Only the flush is the reader's; `#pop` guards it.
+    if (HTML_BLOCKS.has(name) && this.#stack.at(-1)?.name === 'p') this.#pop();
+    const implied = HTML_IMPLIED_END[name];
+    if (implied !== undefined && implied.has(this.#stack.at(-1)?.name ?? '')) this.#pop();
+    if (this.#skipping === 0 && HTML_BLOCKS.has(name)) this.#flush();
     if (HTML_VOID.has(name) || selfClosing) return;
     requireFormat(this.#stack.length < this.#sink.bounds.depth, 'over-bound', 'markup nesting exceeds its bound');
     const skipped = HTML_SKIPPED.has(name) || hidden;
@@ -822,7 +823,68 @@ const ODF_SKIPPED: ReadonlySet<string> = new Set([
   `${ODF_TEXT} hidden-text`,
   `${ODF_DRAW} custom-shape`, `${ODF_DRAW} rect`, `${ODF_DRAW} g`, `${ODF_TEXT} sequence-decls`, `${ODF_TEXT} variable-decls`,
 ]);
+const ODF_STYLE = 'urn:oasis:names:tc:opendocument:xmlns:style:1.0';
 const ODF_SPACE = /[ \t\r\n]+/gu;
+/** At most this many named styles are read from one document's style parts. */
+const ODF_MAX_STYLES = 10_000;
+/** A style's parent chain is followed at most this far. */
+const ODF_MAX_STYLE_DEPTH = 32;
+
+interface OdfStyle {
+  readonly parent: string | null;
+  /** `text:display="none"` (`true`), another display (`false`), or none set here (`null`: the parent's). */
+  hidden: boolean | null;
+}
+
+/**
+ * The named styles of one document — `styles.xml`'s and `content.xml`'s automatic ones — and whether text in each is shown
+ * to no reader: LibreOffice's Format › Character › Hidden writes `<style:text-properties text:display="none"/>`. A style
+ * without its own display takes its parent's, followed at most {@link ODF_MAX_STYLE_DEPTH} steps.
+ */
+class OdfStyles {
+  readonly #styles = new Map<string, OdfStyle>();
+  readonly #resolved = new Map<string, boolean>();
+  #current: OdfStyle | null = null;
+
+  open(tag: SaxesTagNS): void {
+    if (tag.uri !== ODF_STYLE) return;
+    if (tag.local === 'style') {
+      const name = attribute(tag, 'name');
+      const family = attribute(tag, 'family');
+      this.#current = null;
+      if (name === undefined || family === undefined) return;
+      requireFormat(this.#styles.size < ODF_MAX_STYLES, 'over-bound', 'too many styles');
+      const style: OdfStyle = { parent: attribute(tag, 'parent-style-name') ?? null, hidden: null };
+      this.#styles.set(`${family} ${name}`, style);
+      this.#current = style;
+    } else if (tag.local === 'text-properties' && this.#current !== null) {
+      const display = attribute(tag, 'display');
+      if (display !== undefined) this.#current.hidden = display === 'none';
+    }
+  }
+
+  close(tag: SaxesTagNS): void {
+    if (tag.uri === ODF_STYLE && tag.local === 'style') this.#current = null;
+  }
+
+  hidden(family: 'text' | 'paragraph', name: string | undefined): boolean {
+    if (name === undefined) return false;
+    const key = `${family} ${name}`;
+    const known = this.#resolved.get(key);
+    if (known !== undefined) return known;
+    let style = this.#styles.get(key);
+    let hidden = false;
+    for (let step = 0; style !== undefined && step < ODF_MAX_STYLE_DEPTH; step += 1) {
+      if (style.hidden !== null) {
+        hidden = style.hidden;
+        break;
+      }
+      style = style.parent === null ? undefined : this.#styles.get(`${family} ${style.parent}`);
+    }
+    this.#resolved.set(key, hidden);
+    return hidden;
+  }
+}
 /** One `text:s` stands for at most this many spaces. */
 const ODF_MAX_SPACES = 1_024;
 
@@ -832,7 +894,7 @@ const ODF_MAX_SPACES = 1_024;
  * (its manifest names encryption data) is refused.
  */
 function readOdt(bytes: Uint8Array, bounds: MaterialFormatBounds): MaterialFormatText {
-  const entries = readArchive(bytes, bounds, (name) => name === 'content.xml' || name === 'meta.xml' || name === 'META-INF/manifest.xml');
+  const entries = readArchive(bytes, bounds, (name) => name === 'content.xml' || name === 'styles.xml' || name === 'meta.xml' || name === 'META-INF/manifest.xml');
   const manifest = entries.get('META-INF/manifest.xml');
   if (manifest !== undefined) {
     readXml(xmlPart(manifest), bounds, {
@@ -843,6 +905,9 @@ function readOdt(bytes: Uint8Array, bounds: MaterialFormatBounds): MaterialForma
   requireFormat(content !== undefined, 'unreadable', 'ODT has no content');
   const meta = entries.get('meta.xml');
   const title = meta === undefined ? null : firstElementText(xmlPart(meta), 'title', bounds);
+  const styles = new OdfStyles();
+  const common = entries.get('styles.xml');
+  if (common !== undefined) readXml(xmlPart(common), bounds, { open: (tag) => styles.open(tag), close: (tag) => styles.close(tag) });
 
   const sink = new ParagraphSink(bounds);
   let body = 0;
@@ -856,10 +921,16 @@ function readOdt(bytes: Uint8Array, bounds: MaterialFormatBounds): MaterialForma
   readXml(xmlPart(content), bounds, {
     open: (tag) => {
       if (tag.uri === ODF_OFFICE && tag.local === 'body') body += 1;
-      if (body === 0) return;
-      // A section shown to no reader (`text:display="none"`) is skipped whole, as hidden text is.
+      if (body === 0) {
+        // The automatic styles come before the body.
+        styles.open(tag);
+        return;
+      }
+      // A section shown to no reader (`text:display="none"`), and a span in a style that hides its text, are skipped
+      // whole, as hidden text is.
       if (skipping > 0 || ODF_SKIPPED.has(`${tag.uri} ${tag.local}`) ||
-        (tag.uri === ODF_TEXT && tag.local === 'section' && attribute(tag, 'display') === 'none')) {
+        (tag.uri === ODF_TEXT && tag.local === 'section' && attribute(tag, 'display') === 'none') ||
+        (tag.uri === ODF_TEXT && tag.local === 'span' && styles.hidden('text', attribute(tag, 'style-name')))) {
         skipping += 1;
         return;
       }
@@ -870,12 +941,13 @@ function readOdt(bytes: Uint8Array, bounds: MaterialFormatBounds): MaterialForma
           // A paragraph inside a paragraph ends what the one around it read so far.
           if (open.length > 0) end(open.at(-1));
           const level = Math.min(6, Math.max(1, Number.parseInt(attribute(tag, 'outline-level') ?? '1', 10) || 1));
-          open.push({ style: tag.local === 'h' ? `Heading${level}` : undefined, hidden: false });
+          open.push({ style: tag.local === 'h' ? `Heading${level}` : undefined, hidden: styles.hidden('paragraph', attribute(tag, 'style-name')) });
           break;
         }
         case 'hidden-paragraph':
-          // The paragraph it stands in is hidden, unless the file records it as shown now.
-          if (open.length > 0 && attribute(tag, 'is-hidden') !== 'false') open.at(-1)!.hidden = true;
+          // The paragraph it stands in is hidden when the file records it hidden now (`text:is-hidden="true"`); ODF's
+          // default for `text:is-hidden` is `false`, so one that records nothing is read.
+          if (open.length > 0 && attribute(tag, 'is-hidden') === 'true') open.at(-1)!.hidden = true;
           break;
         case 's':
           if (open.length > 0) {
@@ -895,7 +967,10 @@ function readOdt(bytes: Uint8Array, bounds: MaterialFormatBounds): MaterialForma
       if (body > 0 && skipping === 0 && open.length > 0) sink.text(text.replace(ODF_SPACE, ' '));
     },
     close: (tag) => {
-      if (body === 0) return;
+      if (body === 0) {
+        styles.close(tag);
+        return;
+      }
       if (skipping > 0) {
         skipping -= 1;
         return;
