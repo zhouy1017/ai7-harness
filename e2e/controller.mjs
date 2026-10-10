@@ -804,6 +804,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'review-prepare',
     // Issue #420 (S74a): the Run's one approval is the drawer bar's 开始任务.
     'review-bar-ready',
+    // Issue #760 (S74c): offline, the Review Run is approved with 联网后开始任务, waits, and starts once the network is back.
+    'review-offline-bar',
+    'review-start-when-online',
+    'review-online-dispatch',
     'review-authorize',
     'review-marks-on-manuscript',
     'review-batch-apply',

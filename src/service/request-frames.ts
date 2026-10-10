@@ -1,6 +1,7 @@
 import { isAbsolute } from 'node:path';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
+  START_WHEN_ONLINE_TASK_KINDS,
   FEEDBACK_HISTORY_SIGNALS,
   LEARNING_AUDIT_STANDINGS,
   LEARNING_MATERIAL_KINDS,
@@ -1278,6 +1279,31 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'revokeBackgroundAnalysisEnrollment': {
       const input = requireInput(value.input, ['bookId', 'enrollmentId'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.enrollmentId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    // 联网后开始任务 for every other kind with a plan (Issue #760, S74c): the kind, its Task — a Task Intent or a Review Run —
+    // and exactly the digests 开始任务 would bind: one plan envelope's for a ledger Task, every Task-backed category's for a
+    // Review Run; never both. Whether they still stand is the store's to decide.
+    case 'startTaskWhenOnline': {
+      const input = requireInput(value.input, ['bookId', 'kind', 'ref', 'planEnvelopeDigest', 'planDigests'], tentativeId);
+      const review = input.kind === 'review-run';
+      if (!validUuid(input.bookId) || !START_WHEN_ONLINE_TASK_KINDS.includes(input.kind as never) || !validUuid(input.ref) ||
+          !Array.isArray(input.planDigests) ||
+          (review
+            ? input.planEnvelopeDigest !== null ||
+              !input.planDigests.every((entry) => isRecord(entry) && hasExactKeys(entry, ['categoryId', 'planEnvelopeDigest']) &&
+                isBoundedString(entry.planEnvelopeDigest, 64) && HEX_DIGEST_PATTERN.test(entry.planEnvelopeDigest)) ||
+              !validReviewCategoryIds(input.planDigests.map((entry: Record<string, unknown>) => entry.categoryId), 0)
+            : !isBoundedString(input.planEnvelopeDigest, 64) || !HEX_DIGEST_PATTERN.test(input.planEnvelopeDigest) || input.planDigests.length !== 0)) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
+    case 'cancelWaitingTask': {
+      const input = requireInput(value.input, ['bookId', 'kind', 'ref'], tentativeId);
+      if (!validUuid(input.bookId) || !START_WHEN_ONLINE_TASK_KINDS.includes(input.kind as never) || !validUuid(input.ref)) {
+        throw new ProtocolError(tentativeId);
+      }
       break;
     }
     // 取消 while a Run waits (Issue #502), and 取消任务 once it started (Issue #422): the Task Intent names it, within

@@ -153,6 +153,10 @@ describe('结果待确认 a completed Run left (Issue #757)', () => {
       const secondPlan = store.inspectTaskPlan({ bookId, kind: 'review-run', ref: second.reviewRunId });
       expect(secondPlan.resend).toEqual({ units: [3], statement: categoryResendDisclosure([{ category: TYPOS_AND_USAGE.label, units: [3] }]) });
       expect(secondPlan.unconfirmed?.digest).toBe(plan.unconfirmed!.digest);
+      // 联网后开始任务 (Issue #760): while it waits to start, it has read nothing, and its plan still says what starting it sends.
+      store.startTaskWhenOnline({ bookId, kind: 'review-run', ref: second.reviewRunId, planEnvelopeDigest: null,
+        planDigests: second.categories.map((entry) => ({ categoryId: entry.categoryId, planEnvelopeDigest: entry.planEnvelopeDigest! })) });
+      expect(store.inspectTaskPlan({ bookId, kind: 'review-run', ref: second.reviewRunId }).resend?.units).toEqual([3]);
       // The item names the latest Review Run's plan now.
       expect(unconfirmedItem(store, bookId, 'review-run')?.target).toEqual({ kind: 'task-plan', bookId, taskKind: 'review-run', ref: second.reviewRunId });
 

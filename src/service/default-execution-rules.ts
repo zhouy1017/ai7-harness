@@ -10,7 +10,6 @@ import {
   type MaterialPlanInputsProjection,
   type WritingDefaultExecutionRulePattern,
 } from '../shared/protocol.js';
-import { OFFLINE_START_LATER } from '../shared/offline-wording.js';
 import { productionDocumentType } from './production-document-types.js';
 import { DIGEST_PATTERN, UUID_PATTERN, canonicalRecord, isRecord, parseCanonicalJson, sha256Hex } from './analysis/canonical.js';
 import { diffMaterialPlanInputs } from './analysis/plan-boundary.js';
@@ -521,9 +520,11 @@ export function ruleDriftReason(ruleName: string, labels: ReadonlyArray<string>)
 export const QUICK_START_RULE_CHANGED = '这条默认执行规则刚刚停用或改过，这次没有按规则开始；请看过计划后再开始。';
 export const QUICK_START_PLAN_CHANGED = '计划的关键内容已变化，这次没有按规则开始；请查看计划修订并重新确认计划。';
 export const QUICK_START_NEEDS_CONNECTION = '模型未连接：这份计划要发送到模型服务，所需的凭据还没有就绪；连接好之后再开始。';
+/**
+ * Offline, a quick start stops at the plan, whose bar offers 联网后开始任务 — the baseline's (Issue #502) and, since Issue #760
+ * (S74c), the writing Task's too: a rule starts only a Run that can begin now (TASK-024).
+ */
 export const QUICK_START_OFFLINE = '离线：这份计划要连到模型服务，而这台设备现在没有网络；可以在计划里选择联网后开始任务。';
-/** The same for a kind whose bar has no 联网后开始任务 — the writing Task's (#701 review P3-3): the bar's shared sentence, ended (#714). */
-export const QUICK_START_OFFLINE_LATER = `${OFFLINE_START_LATER}。`;
 export const QUICK_START_SLOT_BUSY = '运行名额已满：正在运行的任务结束后再开始。';
 /**
  * 结果待确认 (Issue #51, S16c; CONT-011): the Task would send again a range whose earlier request may already have been processed

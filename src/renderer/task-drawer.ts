@@ -14,6 +14,7 @@ import type {
   TaskPlanProjection,
   TaskPlanRunControlProjection,
 } from '../shared/protocol.js';
+import { isStartWhenOnlineTaskKind } from '../shared/protocol.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 import { mountTaskPanel } from './task-panel.js';
 import { mountDialogue } from './dialogue.js';
@@ -210,6 +211,8 @@ type DrawerApi = Pick<
   | 'prepareBaselineAnalysis'
   | 'startBaselineAnalysisWhenOnline'
   | 'cancelWaitingBaselineAnalysis'
+  | 'startTaskWhenOnline'
+  | 'cancelWaitingTask'
   | 'cancelBaselineAnalysisRun'
   | 'pauseBaselineAnalysisRun'
   | 'resumeBaselineAnalysisRun'
@@ -1670,8 +1673,20 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     options.setStatus('正在记录授权…', 'busy');
     try {
       const planEnvelopeDigest = current.start.planEnvelopeDigest;
-      if (planEnvelopeDigest === null) throw new Error(TASK_BAR_START_FAILED);
-      await api[operation]({ taskIntentId: current.ref, planEnvelopeDigest });
+      if (operation === 'startBaselineAnalysisWhenOnline') {
+        if (planEnvelopeDigest === null) throw new Error(TASK_BAR_START_FAILED);
+        await api.startBaselineAnalysisWhenOnline({ taskIntentId: current.ref, planEnvelopeDigest });
+      } else {
+        // Every other kind (Issue #760, S74c) binds exactly what its 开始任务 would: a Review Run's one approval of every
+        // Task-backed category's digest, or a ledger Task's plan envelope.
+        if (!isStartWhenOnlineTaskKind(current.kind)) throw new Error(TASK_BAR_START_FAILED);
+        if (current.kind === 'review-run') {
+          await api.startTaskWhenOnline({ kind: current.kind, ref: current.ref, planEnvelopeDigest: null, planDigests: current.start.categoryDigests });
+        } else {
+          if (planEnvelopeDigest === null) throw new Error(TASK_BAR_START_FAILED);
+          await api.startTaskWhenOnline({ kind: current.kind, ref: current.ref, planEnvelopeDigest, planDigests: [] });
+        }
+      }
       options.setStatus('已记录授权 · 联网后开始', 'success');
       focusBar = true;
       options.onRecorded(current.kind, current.bookId, current.ref);
@@ -1958,10 +1973,12 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   async function cancelWait(): Promise<void> {
     const current = plan;
     const asked = request;
-    if (current === null || current.kind !== 'baseline-analysis' || !beginWork()) return;
+    // The baseline's own operation (Issue #502), and every other kind's keyed by kind (Issue #760, S74c).
+    if (current === null || (current.kind !== 'baseline-analysis' && !isStartWhenOnlineTaskKind(current.kind)) || !beginWork()) return;
     options.setStatus('正在取消…', 'busy');
     try {
-      await api.cancelWaitingBaselineAnalysis({ taskIntentId: current.ref });
+      if (current.kind === 'baseline-analysis') await api.cancelWaitingBaselineAnalysis({ taskIntentId: current.ref });
+      else if (isStartWhenOnlineTaskKind(current.kind)) await api.cancelWaitingTask({ kind: current.kind, ref: current.ref });
       options.setStatus(TASK_BAR_CANCELLED, 'success');
       focusBar = true;
       options.onRecorded(current.kind, current.bookId, current.ref);

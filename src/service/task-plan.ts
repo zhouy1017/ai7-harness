@@ -850,6 +850,15 @@ export function baselineAnalysisPlan(input: {
 }
 
 /**
+ * 需要重新确认计划 of a ledger Task of a kind with no 重新准备 in the drawer (Issue #760, S74c; OFF-008): the reasons Reconnect
+ * Preflight recorded, which the bar states beside the way to the kind's own surface. Every other plan reads as it came.
+ */
+export function withPlanMovedReason(plan: TaskPlanProjection, blockedReasons: ReadonlyArray<string> | null | undefined): TaskPlanProjection {
+  if (plan.state.key !== 'plan-moved' || plan.reprepare !== null) return plan;
+  return { ...plan, planMovedReason: blockedReasons === null || blockedReasons === undefined || blockedReasons.length === 0 ? PLAN_MOVED_LABEL : blockedReasons.join(' ') };
+}
+
+/**
  * 重新准备 (Issue #536; V2-UX-OFF-008): a waiting Run blocked because the plan its authorization bound moved never ran, and a
  * Task Intent holds one Run, so the Plan Revision and renewed Run Authorization OFF-008 routes through are a new
  * preparation of the Task it was — the same goal over the same range — whose plan the editor reads before starting it.
@@ -2076,6 +2085,12 @@ function reviewState(facts: ReviewRunPlanFacts): TaskPlanProjection['state'] {
       return { key: 'running', label: '运行中' };
     case 'settled':
       return { key: 'settled', label: '已完成' };
+    // 联网后开始任务 (Issue #760, S74c): the label says what it waits for once the service has looked (`withWaitingReason`).
+    case 'waiting':
+      return { key: 'waiting', label: WAITING_LABELS.network };
+    // Its plan moved while it waited (OFF-008): it never started.
+    case 'plan-moved':
+      return { key: 'plan-moved', label: PLAN_MOVED_LABEL };
     case 'partial':
       return { key: 'stopped', label: facts.canContinue ? '中途停止 · 可继续审阅' : '中途停止' };
     case 'failed':
@@ -2138,7 +2153,10 @@ export function reviewRunPlan(input: {
   const refused = categories.filter((category) => category.state === 'refused');
   const reasons = facts.state === 'prepared'
     ? facts.staleReasons
-    : refused.map((category) => `「${category.label}」没有开始：${category.detail ?? category.stateLabel}`);
+    // A Run whose plan moved while it waited to start once online (Issue #760): every category records the one reason.
+    : facts.state === 'plan-moved'
+      ? [...new Set(refused.map((category) => category.detail ?? category.stateLabel))]
+      : refused.map((category) => `「${category.label}」没有开始：${category.detail ?? category.stateLabel}`);
   const riskPoints = categories.some((category) => category.riskPointsOnly);
   const scopeWords = scope.kind === 'whole' ? '全书' : scope.kind === 'changed' ? '改动过的章' : scope.kind === 'selection' ? '所选段落' : position;
   // What a range review reads (Issue #423 review, P2-1): the reading ranges its categories read again, as context. A 当前选区 Run
@@ -2270,6 +2288,7 @@ export function reviewRunPlan(input: {
     resend: null,
     unconfirmed: null,
     reprepare: null,
+    ...(facts.state === 'plan-moved' ? { planMovedReason: reasons[0] ?? PLAN_MOVED_LABEL } : {}),
     clarifications: [],
     budgetStop: null,
   };

@@ -312,6 +312,14 @@ const IMPORT_RELATIONSHIP_LABELS = {
   reimport: '重新导入主稿件',
 } as const;
 
+/** What a ledger Task of another kind is, as its own surface names it (Issue #760, S74c). */
+export const GLOBAL_ATTENTION_TASK_KIND_LABELS = {
+  'initial-evaluation': 'AI7 初评',
+  'readers-report': '审稿意见',
+  'evaluation-rewrite': '按我的评分重写评语',
+  writing: '写作任务',
+} as const;
+
 /** The Active Work Object, in its record's own terms. */
 export function globalAttentionObjectLabel(object: GlobalAttentionObjectProjection): string {
   switch (object.kind) {
@@ -325,6 +333,9 @@ export function globalAttentionObjectLabel(object: GlobalAttentionObjectProjecti
       return object.conflictKind === 'reversal' ? '已应用的修改建议 · 稿件冲突' : '修改建议 · 稿件冲突';
     case 'analysis':
       return `基线分析 · ${BASELINE_ANALYSIS_MODE_LABELS[object.mode]}`;
+    // A ledger Task of another kind waiting to start once online, or whose plan moved meanwhile (Issue #760, S74c).
+    case 'task':
+      return GLOBAL_ATTENTION_TASK_KIND_LABELS[object.taskKind];
     case 'review':
       // A 审阅 on the selection 就这段发起任务… handed over says so (Issue #423, S77b).
       return object.onSelection === true ? `审阅 · 第 ${object.ordinal} 次 · ${REVIEW_ON_SELECTION}` : `审阅 · 第 ${object.ordinal} 次`;
