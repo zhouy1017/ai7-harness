@@ -126,7 +126,9 @@ export function toMatrix(set) {
 
 // ---- Reading a Gate occurrence's result -----------------------------------------------------
 
-const COMPLETION = /^LOCAL_COMPLETION\/([A-Za-z0-9-]+)\/(start|pass|fail|interrupted)$/u;
+// Since Issue #746 `run-all.mjs` prints a Journey's wall time on its pass and fail lines as whole seconds
+// (`…/pass/412s`); the line reads as the same pass or fail, and a log printed before that reads as it did.
+const COMPLETION = /^LOCAL_COMPLETION\/([A-Za-z0-9-]+)\/(start|pass|fail|interrupted)(?:\/\d{1,7}s)?$/u;
 const FAILURE = /^LOCAL_COMPLETION\/([A-Z0-9-]+)\/fail\/([a-z0-9-]+)\/([a-z0-9-]+)$/u;
 const DISCLOSURE = /^(?:DISCLOSED_SKIP\/([A-Z0-9-]+)|LOCAL_COMPLETION\/([A-Z0-9-]+)\/disclosed-skip)\/([a-z0-9-]+)$/u;
 
