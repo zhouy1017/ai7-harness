@@ -87,15 +87,24 @@ describe('J-06 names why the selection menu closed when the pane moved before it
     expect(words.movedBeforeWords(null)).toBe('unread');
   });
 
-  it('names the event that closed it, how far the pane stood from where it was drawn, and the pixel ratio', () => {
-    expect(words.movedBeforeWords({ state: 'closed', cause: 'scroll', delta: 0.5, fraction: true, ratio: 2 })).toBe('closed-by-scroll-subpixel-fraction-dpr2');
-    expect(words.movedBeforeWords({ state: 'closed', cause: 'scroll', delta: -40, fraction: false, ratio: 1 })).toBe('closed-by-scroll-moved-whole-dpr1');
-    expect(words.movedBeforeWords({ state: 'closed', cause: 'selectionchange', delta: 0, fraction: false, ratio: 1.25 })).toBe('closed-by-selection-same-whole-dprx');
-    expect(words.movedBeforeWords({ state: 'closed', cause: '稿件', delta: 'far', fraction: 'x', ratio: null })).toBe('closed-by-none-unknown-whole-dprx');
+  it('names the closer, the distance and direction, where the pane stood, and what else changed', () => {
+    const settled = { selection: true, width: true, height: true, fromFraction: false };
+    expect(words.movedBeforeWords({ state: 'closed', cause: 'scroll', delta: 1, back: false, drawn: 'target', ...settled }))
+      .toBe('closed-by-scroll-le1-down-fwd-tgt-ss-ws-hs-fw');
+    expect(words.movedBeforeWords({ state: 'closed', cause: 'scroll', delta: -40, back: true, drawn: 'target', ...settled }))
+      .toBe('closed-by-scroll-near40-up-back-tgt-ss-ws-hs-fw');
+    expect(words.movedBeforeWords({ state: 'closed', cause: 'scroll', delta: 3, back: false, drawn: 'origin', selection: false, width: false, height: false, fromFraction: true }))
+      .toBe('closed-by-scroll-le5-down-fwd-org-sm-wc-hc-ff');
+    expect(words.movedBeforeWords({ state: 'closed', cause: 'selectionchange', delta: 0, back: false, drawn: 'target', ...settled }))
+      .toBe('closed-by-selection-same-none-fwd-tgt-ss-ws-hs-fw');
+    expect(words.movedBeforeWords({ state: 'closed', cause: '稿件', delta: 'far', back: 'x', drawn: '稿件' }))
+      .toBe('closed-by-none-unknown-none-fwd-oth-sm-wc-hc-fw');
+    expect(words.movedBeforeWords({ state: 'closed', cause: 'scroll', delta: 120, back: false, drawn: 'target', ...settled }))
+      .toBe('closed-by-scroll-large-down-fwd-tgt-ss-ws-hs-fw');
   });
 
   it('fits the content-free check shape at its longest', () => {
-    const longest = `menu-pane-moved-before-${words.movedBeforeWords({ state: 'closed', cause: 'other-scroll', delta: 0.25, fraction: true, ratio: 3 })}`;
+    const longest = `menu-pane-moved-before-${words.movedBeforeWords({ state: 'closed', cause: 'other-scroll', delta: 'x', back: true, drawn: 'other' })}`;
     expect(controller.isContentFreeCheckLabel(longest)).toBe(true);
   });
 });

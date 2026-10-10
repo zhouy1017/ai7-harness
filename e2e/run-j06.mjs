@@ -469,11 +469,12 @@ function paneScrollWord(state) {
 function movePaneAround(blockId, rightClickAfter) {
   return `(async () => {
     const pane = document.querySelector('.editor-window');
-    const seen = { state: 'undrawn', cause: null, delta: null, fraction: null, ratio: window.devicePixelRatio };
+    const seen = { state: 'undrawn' };
     if (!(pane instanceof HTMLElement)) return seen;
     if (!${rightClickAfter} && window.__j06.menu()?.dataset.markMenu !== 'selection') return seen;
-    // Which event was being dispatched when the menu left the page, and where the pane stood then (Issue #745 review). The
-    // first event of a task is kept: removing the focused menu item dispatches a focusout inside the handler that removed it.
+    // Which event was being dispatched when the menu left the page, and where the pane, the selection and the pane's box
+    // stood then against where they stood when the menu was drawn (Issue #745 review). The first event of a task is kept:
+    // removing the focused menu item dispatches a focusout inside the handler that removed it.
     let current = null;
     const note = (event) => {
       if (current !== null) return;
@@ -483,28 +484,42 @@ function movePaneAround(blockId, rightClickAfter) {
     const types = ['scroll', 'mousedown', 'keydown', 'selectionchange', 'focusin', 'focusout', 'pointerdown'];
     for (const type of types) document.addEventListener(type, note, true);
     window.addEventListener('resize', note, true);
+    const selectionKey = () => { const selection = getSelection(); return selection === null || selection.rangeCount === 0 ? 'none' : [selection.anchorOffset, selection.focusOffset, selection.anchorNode === selection.focusNode].join(','); };
     let drawn = null;
     let drawnAt = null;
+    let from = null;
+    let target = null;
+    let box = null;
+    const close = () => {
+      seen.cause = current ?? 'task';
+      seen.delta = pane.scrollTop - drawnAt;
+      seen.back = Math.abs(pane.scrollTop - from) < 1;
+      seen.selection = selectionKey() === box.selection;
+      seen.width = pane.clientWidth === box.width;
+      seen.height = pane.scrollHeight === box.height;
+    };
     const watcher = new MutationObserver((records) => {
-      for (const record of records) for (const node of record.removedNodes) {
-        if (node === drawn && seen.cause === null) { seen.cause = current ?? 'task'; seen.delta = pane.scrollTop - drawnAt; }
-      }
+      for (const record of records) for (const node of record.removedNodes) if (node === drawn && seen.cause === undefined) close();
     });
     try {
       // A fractional distance (#745 review): where a platform keeps fractional offsets, the pane settles onto a device
       // pixel once the frame is drawn, and the menu must stand through that settling as through the scroll event itself.
-      const from = pane.scrollTop;
-      pane.scrollTop = from >= 41 ? from - 40.5 : from + 40.5;
+      from = pane.scrollTop;
+      target = from >= 41 ? from - 40.5 : from + 40.5;
+      pane.scrollTop = target;
       if (Math.abs(pane.scrollTop - from) < 1) { seen.state = 'unmoved'; return seen; }
       if (${rightClickAfter}) window.__j06.rightClick(window.__j06.block(${JSON.stringify(blockId)}));
       drawn = window.__j06.menu();
       if (drawn?.dataset.markMenu !== 'selection') return seen;
       drawnAt = pane.scrollTop;
-      seen.fraction = drawnAt % 1 !== 0;
+      seen.cause = undefined;
+      seen.drawn = Math.abs(drawnAt - target) < 1 ? 'target' : Math.abs(drawnAt - from) < 1 ? 'origin' : 'other';
+      seen.fromFraction = from % 1 !== 0;
+      box = { selection: selectionKey(), width: pane.clientWidth, height: pane.scrollHeight };
       if (drawn.parentNode) watcher.observe(drawn.parentNode, { childList: true });
       await new Promise((resolveFrames) => requestAnimationFrame(() => requestAnimationFrame(resolveFrames)));
       seen.state = window.__j06.menu()?.dataset.markMenu === 'selection' ? 'open' : 'closed';
-      if (seen.state === 'closed' && seen.cause === null) { seen.cause = 'unobserved'; seen.delta = pane.scrollTop - drawnAt; }
+      if (seen.state === 'closed' && seen.cause === undefined) { close(); seen.cause = 'unobserved'; }
       return seen;
     } finally {
       watcher.disconnect();
@@ -532,23 +547,41 @@ function closerWord(cause) {
   }
 }
 
-/** How far the pane stood from where it was when the menu was drawn, as a check label's word. */
-function deltaWord(delta) {
-  if (typeof delta !== 'number' || !Number.isFinite(delta)) return 'unknown';
-  if (delta === 0) return 'same';
-  return Math.abs(delta) < 1 ? 'subpixel' : 'moved';
+/** How far, and which way, the pane stood from where it was when the menu was drawn, as two check label words. */
+function deltaWords(delta) {
+  if (typeof delta !== 'number' || !Number.isFinite(delta)) return 'unknown-none';
+  const direction = delta < 0 ? 'up' : delta > 0 ? 'down' : 'none';
+  const size = Math.abs(delta);
+  const bucket = size === 0 ? 'same' : size <= 1 ? 'le1' : size <= 5 ? 'le5' : size >= 35 && size <= 45 ? 'near40' : 'large';
+  return `${bucket}-${direction}`;
+}
+
+/** Where the pane stood when the menu was drawn: at the position set, still at the one before it, or elsewhere. */
+function drawnWord(drawn) {
+  switch (drawn) {
+    case 'target': return 'tgt';
+    case 'origin': return 'org';
+    default: return 'oth';
+  }
 }
 
 /**
  * What became of the menu when the pane moved before it was drawn, with why it closed when it did:
- * `<state>-by-<closer>-<same|subpixel|moved|unknown>-<whole|fraction>-dpr<1|2|x>`.
+ * `closed-by-<closer>-<same|le1|le5|near40|large|unknown>-<up|down|none>-<back|fwd>-<tgt|org|oth>-<ss|sm>-<ws|wc>-<hs|hc>-
+ * <ff|fw>` — the closer; the pane's distance and direction from where the menu was drawn; whether it stood back where it
+ * was before the move; where it stood when the menu was drawn (the position set, the one before, other); whether the
+ * selection, the pane's width and its scroll height were the same (`s`) or changed (`m`/`c`); whether the position before
+ * the move was fractional.
  */
 function movedBeforeWords(seen) {
   const state = paneScrollWord(seen?.state);
   if (state !== 'closed') return state;
-  const fraction = seen?.fraction === true ? 'fraction' : 'whole';
-  const ratio = seen?.ratio === 1 ? 'dpr1' : seen?.ratio === 2 ? 'dpr2' : 'dprx';
-  return `closed-by-${closerWord(seen?.cause)}-${deltaWord(seen?.delta)}-${fraction}-${ratio}`;
+  const back = seen?.back === true ? 'back' : 'fwd';
+  const selection = seen?.selection === true ? 'ss' : 'sm';
+  const width = seen?.width === true ? 'ws' : 'wc';
+  const height = seen?.height === true ? 'hs' : 'hc';
+  const fraction = seen?.fromFraction === true ? 'ff' : 'fw';
+  return `closed-by-${closerWord(seen?.cause)}-${deltaWords(seen?.delta)}-${back}-${drawnWord(seen?.drawn)}-${selection}-${width}-${height}-${fraction}`;
 }
 
 /** A 修改建议 over RANGE of a paragraph, made through the selection menu and its composer. */
