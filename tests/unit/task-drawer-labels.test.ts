@@ -15,9 +15,9 @@ import {
   TASK_BAR_RUN_LINKS,
   TASK_BAR_SAVE_DRAFT,
   TASK_BAR_SAVED,
-  TASK_BAR_REVIEW_OFFLINE,
   TASK_BAR_OFFLINE_LATER,
   TASK_BAR_WAITS_FOR_CONNECTIVITY,
+  TASK_BAR_PLAN_MOVED_ELSEWHERE,
   TASK_BAR_START_WHEN_ONLINE_OPERATIONS,
   TASK_BAR_SAVE_DRAFT_ONLY,
   TASK_BAR_QUEUED_NOTE,
@@ -447,7 +447,6 @@ describe('the authorization bar (S74a)', () => {
     expect(TASK_BAR_CANCEL_FAILED).toBe('无法取消这项任务。');
     expect(TASK_BAR_WAITING_FOR_CONNECTION).toBe('需要处理模型连接');
     expect(TASK_BAR_WAITING_NOTE).toBe('已记录这次授权。联网、并确认计划没有变化后会自动开始；在此之前不会发送任何内容');
-    expect(TASK_BAR_REVIEW_OFFLINE).toBe('离线：审阅要连到模型服务，而这台设备现在没有网络；联网后再开始审阅');
   });
 
   it('offers 联网后开始任务 beside 仅保存任务草稿 while offline, and no 开始任务 to confuse it with (AUTH-002, OFF-004)', () => {
@@ -461,23 +460,26 @@ describe('the authorization bar (S74a)', () => {
     for (const entry of view.actions) expect(entry.label).not.toContain('授权');
   });
 
-  it('keeps a Review Run from starting while offline, with the reason, because it cannot wait yet', () => {
+  it('offers a Review Run 联网后开始任务 while offline, as every kind with a plan has it (Issue #760, S74c)', () => {
     const view = taskBarView(barOf(
       { readiness: 'offline', planEnvelopeDigest: null, categoryDigests: [{ categoryId: 'consistency', planEnvelopeDigest: 'd'.repeat(64) }] },
       { kind: 'review-run', planVersion: null, state: { key: 'offline', label: '离线' } },
     ));
-    expect(names(view)).toEqual(['start', 'revise', 'save-draft']);
-    expect(action(view, 'start')?.disabledReason).toBe(TASK_BAR_REVIEW_OFFLINE);
-    expect(view.note).toBe(TASK_BAR_REVIEW_OFFLINE);
-    expect(names(view)).not.toContain('start-when-online');
+    expect(names(view)).toEqual(['start-when-online', 'save-draft', 'revise']);
+    expect(view.note).toBe(TASK_BAR_NOTES.offline);
+    expect(names(view)).not.toContain('start');
   });
 
-  it('offers 联网后开始任务 only for a kind the service can record waiting, and never a dead control (Issue #706)', () => {
+  it('offers 联网后开始任务 for every kind the service can record waiting, and never a dead control (Issue #706, Issue #760)', () => {
     expect(TASK_BAR_OFFLINE_LATER).toBe('离线：这份计划要连到模型服务，而这台设备现在没有网络；联网后再开始');
-    // Every kind says whether it waits, and the kinds that do are exactly those with a when-online operation.
+    // Every kind says whether it waits, and the kinds that do are exactly those with a when-online operation: every kind with a
+    // plan and 开始任务, but J-03's fixed Task, which only records and never reaches a model service (ADR 0055).
     expect(Object.keys(TASK_BAR_WAITS_FOR_CONNECTIVITY).sort()).toEqual([...TASK_PLAN_KINDS].sort());
-    expect(TASK_PLAN_KINDS.filter((kind) => TASK_BAR_WAITS_FOR_CONNECTIVITY[kind])).toEqual(['baseline-analysis']);
-    expect(Object.keys(IPC_CHANNELS).filter((channel) => /WhenOnline$/.test(channel))).toEqual(['startBaselineAnalysisWhenOnline']);
+    expect(TASK_PLAN_KINDS.filter((kind) => !TASK_BAR_WAITS_FOR_CONNECTIVITY[kind])).toEqual(['fixed-task']);
+    expect(Object.keys(IPC_CHANNELS).filter((channel) => /WhenOnline$/.test(channel))).toEqual(['startBaselineAnalysisWhenOnline', 'startTaskWhenOnline']);
+    for (const kind of TASK_PLAN_KINDS) {
+      if (kind !== 'fixed-task' && kind !== 'baseline-analysis') expect(TASK_BAR_START_WHEN_ONLINE_OPERATIONS[kind], kind).toBe('startTaskWhenOnline');
+    }
     // The bar and the drawer's click read one map (#710 review P3-1): a kind waits exactly when it names an operation, and
     // every operation named is one the service has.
     expect(Object.keys(TASK_BAR_START_WHEN_ONLINE_OPERATIONS).sort()).toEqual([...TASK_PLAN_KINDS].sort());
@@ -497,7 +499,7 @@ describe('the authorization bar (S74a)', () => {
       // No wait path: no 联网后开始任务, and 开始任务 says why it cannot start, beside 返回修改 and the draft.
       expect(names(view), kind).toEqual(['start', 'revise', 'save-draft']);
       const reason = action(view, 'start')?.disabledReason;
-      expect(reason, kind).toBe(kind === 'review-run' ? TASK_BAR_REVIEW_OFFLINE : TASK_BAR_OFFLINE_LATER);
+      expect(reason, kind).toBe(TASK_BAR_OFFLINE_LATER);
       expect(view.note, kind).toBe(reason);
       expect(view.statement, kind).toBe(TASK_BAR_STATEMENT);
     }
@@ -978,5 +980,37 @@ describe('the drawer\'s bar for a waiting Run whose plan moved', () => {
     expect(TASK_PLAN_STATE_PILLS['plan-moved']).toEqual(TASK_PLAN_STATE_PILLS.changed);
     const blocked = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'blocked', label: '派发前已阻止' } }));
     expect([blocked.status, blocked.actions.map((entry) => entry.name)]).toEqual(['派发前已阻止', ['run-link']]);
+  });
+});
+
+// Issue #760 (S74c): every other kind waits too, and a plan that moved meanwhile has no 重新准备 in the drawer — its own surface
+// prepares it again. The bar says what moved and where, beside the way to that surface, and never 开始任务.
+describe('the drawer bar for a waiting Run of every other kind', () => {
+  it('reads 需要重新确认计划 with what moved and where its own surface prepares it again', () => {
+    const reason = '需要重新确认计划：这一版的评分已经变化，这次授权不再对应当前的情况。';
+    for (const [kind, where, link] of [
+      ['review-run', '请在「审阅」里新建一次审阅，看过新计划后再开始。', '查看审阅'],
+      ['initial-evaluation', '请在「评估」里重新准备 AI7 初评，看过新计划后再开始。', '查看评估'],
+      ['readers-report', '请在「评估」里重新准备审稿意见，看过新计划后再开始。', '查看评估'],
+      ['evaluation-rewrite', '请在「评估」里按现在的评分重新准备重写，看过新计划后再开始。', '查看评估'],
+      ['writing', '请在「交付物」的新建文档 · 写作任务里重新准备，看过新计划后再开始。', '查看交付物'],
+    ] as const) {
+      expect(TASK_BAR_PLAN_MOVED_ELSEWHERE[kind], kind).toBe(where);
+      const view = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, {
+        kind, state: { key: 'plan-moved', label: '需要重新确认计划' }, reprepare: null, planMovedReason: reason,
+      }));
+      expect([view.status, view.note, view.actions.map((entry) => [entry.name, entry.label])], kind)
+        .toEqual(['需要重新确认计划', `${reason}${where}`, [['run-link', link]]]);
+    }
+    // A plan that carries no reason still says the state, then where.
+    const bare = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { kind: 'writing', state: { key: 'plan-moved', label: '需要重新确认计划' }, reprepare: null }));
+    expect(bare.note).toBe(`需要重新确认计划。${TASK_BAR_PLAN_MOVED_ELSEWHERE.writing}`);
+  });
+
+  it('shows a waiting Run of every kind what it waits for, with its direct 取消 and the way to the Run (OFF-006, OFF-010)', () => {
+    for (const kind of ['review-run', 'initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing'] as const) {
+      const view = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { kind, state: { key: 'waiting', label: '等待网络' } }));
+      expect([view.status, view.note, view.actions.map((entry) => entry.name)], kind).toEqual(['等待网络', TASK_BAR_WAITING_NOTE, ['cancel-wait', 'run-link']]);
+    }
   });
 });

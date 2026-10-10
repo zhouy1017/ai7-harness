@@ -40,7 +40,7 @@ import { readBookTasks, readGlobalAttention } from './global-attention.js';
 import { reconnectPreflight } from './reconnect-preflight.js';
 import { LOCAL_DETERMINISTIC_ROUTE } from './provider/egress-gate.js';
 import type { DormantHarnessRuntime } from './runtime.js';
-import type { EditorialStore } from './store.js';
+import type { EditorialStore, WaitingTaskRun } from './store.js';
 import type { CooperativeJobOwner } from './cooperative-jobs.js';
 import { REPLACEMENT_WAITING_MESSAGE, replacementBlockedBy, takenWhileReplacementWaits } from './replacement-gate.js';
 import type { BaselineAnalysisExecutionOwner } from './analysis/execution.js';
@@ -422,6 +422,33 @@ async function dispatch(
         ok: true,
         op: request.op,
         result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress),
+      };
+    }
+    // 联网后开始任务 for every other kind with a plan (Issue #760, S74c; AUTH-004, OFF-005): the kind's own Run Authorization is
+    // recorded waiting, and Reconnect Preflight looks at once — so a start made just as the network came back begins now. The
+    // answer is the plan, read as the drawer reads it.
+    case 'startTaskWhenOnline': {
+      store.startTaskWhenOnline(request.input);
+      // A look that fails leaves the Run waiting as recorded; the next look starts it.
+      await connectivity.preflight().catch(() => undefined);
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: await store.inspectTaskPlanWithConnection({ bookId: request.input.bookId, kind: request.input.kind, ref: request.input.ref },
+          () => analysisExecution.liveCredentialReadiness(), connectivity.planConnectivity, analysisProgress),
+      };
+    }
+    case 'cancelWaitingTask': {
+      // A ledger Task's Run waiting on the governor leaves its queue as it is cancelled (Issue #49, S14): nothing of it ran.
+      const cancelled = store.cancelWaitingTask(request.input);
+      if (cancelled.dequeue !== null) analysisExecution.dequeue(cancelled.dequeue);
+      return {
+        id: request.id,
+        ok: true,
+        op: request.op,
+        result: await store.inspectTaskPlanWithConnection({ bookId: request.input.bookId, kind: request.input.kind, ref: request.input.ref },
+          () => analysisExecution.liveCredentialReadiness(), connectivity.planConnectivity, analysisProgress),
       };
     }
     case 'cancelWaitingBaselineAnalysis': {
@@ -1703,6 +1730,7 @@ async function run(): Promise<void> {
     // live route reaches its model over the network, and so — under that control only — does J-04's route.
     const owner = analysisExecution;
     const openStore = store;
+    const reviewDriver = reviewRuns;
     const reading = connectivityPath === undefined ? hostConnectivity : () => controlledConnectivity(connectivityPath);
     const reachesNetwork = (routeKind: string): boolean =>
       routeKind === DEVELOPER_LIVE_POLICY_BINDING.route || (connectivityPath !== undefined && routeKind === LOCAL_DETERMINISTIC_ROUTE);
@@ -1716,16 +1744,25 @@ async function run(): Promise<void> {
         : (await owner.liveCredentialReadiness()) === 'missing' ? 'connection' : owner.busy ? 'slot' : 'admitting',
       // One at a time: a look already under way answers a second request for one.
       preflight: () => {
-        preflightInFlight ??= reconnectPreflight({
-          waitingRuns: () => openStore.waitingBaselineAnalysisRuns(null),
-          stillWaiting: (runRecordId) => openStore.baselineAnalysisRunWaits(runRecordId),
-          drift: (runRecordId) => openStore.baselineAnalysisPreflightDrift(runRecordId),
-          block: (runRecordId, reasons, cause) => openStore.blockWaitingBaselineAnalysisRun(runRecordId, reasons, cause),
+        // Every kind's waiting Runs (Issue #760, S74c), oldest first: a ledger Task's Run is admitted through the execution owner
+        // on the ledger of its Task's contract, exactly as its immediate start is; a Review Run is handed to its drive loop, which
+        // starts its categories one after another through the same owner.
+        preflightInFlight ??= reconnectPreflight<WaitingTaskRun>({
+          waitingRuns: () => openStore.waitingTaskRuns(null),
+          stillWaiting: (run) => openStore.taskRunWaits(run),
+          drift: (run) => openStore.taskPreflightDrift(run),
+          block: (run, reasons, cause) => openStore.blockWaitingTaskRun(run, reasons, cause),
           reachesNetwork: developerLive !== null || (connectivityPath !== undefined && fixture !== null),
           connectivity: reading,
           credentialReadiness: () => owner.liveCredentialReadiness(),
           slotBusy: () => owner.busy,
-          admit: (runRecordId) => owner.admitAndDispatch(runRecordId, openStore.baselineAnalysisLedger, { afterReconnectPreflight: true }),
+          admit: (run) => {
+            if (run.kind === 'review-run') {
+              openStore.admitWaitingReviewRun(run.ref, () => driveReviewRun(reviewDriver, run.ref));
+              return;
+            }
+            owner.admitAndDispatch(run.runRecordId, openStore.waitingRunLedger({ ...run, kind: run.kind }), { afterReconnectPreflight: true });
+          },
           frozen: () => openStore.replacementFrozen(),
         }).finally(() => {
           preflightInFlight = null;

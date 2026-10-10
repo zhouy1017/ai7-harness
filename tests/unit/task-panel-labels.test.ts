@@ -38,6 +38,17 @@ function entry(state: GlobalAttentionStateKey, overrides: Partial<GlobalAttentio
 
 const keys = (view: labels.TaskPanelCardView): string[] => view.actions.map((action) => `${action.key}:${action.label}${action.primary ? '*' : ''}`);
 
+describe('a waiting Task of another kind on the 任务 panel (Issue #760, S74c)', () => {
+  it('is a card of its own kind that opens its plan, where the wait is cancelled', () => {
+    const waiting = (taskKind: 'initial-evaluation' | 'writing') => labels.taskPanelCardView(entry('analysis-waiting-network', {
+      itemId: `task:${TASK}`, object: { kind: 'task', taskKind }, target: { kind: 'task-plan', bookId: BOOK, taskKind, ref: TASK },
+    }));
+    expect([waiting('writing').kindLabel, waiting('writing').title, waiting('writing').stateLabel, keys(waiting('writing'))])
+      .toEqual(['写作任务 · 不需要对话', '写作任务', '等待网络', ['plan:查看计划*']]);
+    expect([waiting('initial-evaluation').kindLabel, waiting('initial-evaluation').title]).toEqual(['评估任务 · 不需要对话', 'AI7 初评']);
+  });
+});
+
 describe('the 任务 panel', () => {
   it('names itself, its three groups and what it lists', () => {
     expect(labels.TASK_PANEL_TITLE).toBe('任务');
@@ -49,7 +60,7 @@ describe('the 任务 panel', () => {
     expect(labels.taskPanelMoreLine('recent', 10, 13)).toBe('只列出最近的 10 项。');
     expect(labels.taskPanelMoreLine('waiting', 50, 57)).toBe('共 57 项，这里列出 50 项。');
     expect(labels.TASK_PANEL_STATUS_LINES).toEqual({ loading: '正在读取这本书的任务…', unavailable: '无法读取这本书的任务。' });
-    expect(labels.TASK_PANEL_KIND_LABELS).toEqual({ analysis: '分析任务 · 不需要对话', review: '审阅任务 · 不需要对话', dialogue: '对话任务 · 就所选文字提问' });
+    expect(labels.TASK_PANEL_KIND_LABELS).toEqual({ analysis: '分析任务 · 不需要对话', review: '审阅任务 · 不需要对话', evaluation: '评估任务 · 不需要对话', writing: '写作任务 · 不需要对话', dialogue: '对话任务 · 就所选文字提问' });
     expect(labels.TASK_PANEL_ACTION_LABELS).toEqual({ pause: '暂停', resume: '续行', cancel: '取消任务', plan: '查看计划', result: '查看结果', answer: '回答', jump: '跳到所选文字' });
     expect(labels.TASK_PANEL_JUMP_GONE).toBe('所选文字所在的段落已不在当前稿件中，无法跳到。');
   });

@@ -210,6 +210,37 @@ describe('decodeRequest accepts well-formed frames', () => {
     expect(rejectionFor(frameOf({ ...startWhenOnline, input: { ...startWhenOnline.input, planEnvelopeDigest: 'b'.repeat(63) } }))).toBeInstanceOf(ProtocolError);
   });
 
+  it('accepts 联网后开始任务 and its 取消 for every other kind by kind, binding exactly what 开始任务 would (Issue #760, S74c)', () => {
+    const ledger = {
+      id: randomUUID(),
+      op: 'startTaskWhenOnline',
+      input: { bookId: randomUUID(), kind: 'writing', ref: randomUUID(), planEnvelopeDigest: 'c'.repeat(64), planDigests: [] },
+    } satisfies ServiceRequest;
+    const review = {
+      id: randomUUID(),
+      op: 'startTaskWhenOnline',
+      input: { bookId: randomUUID(), kind: 'review-run', ref: randomUUID(), planEnvelopeDigest: null, planDigests: [{ categoryId: 'typos-and-usage', planEnvelopeDigest: 'd'.repeat(64) }] },
+    } satisfies ServiceRequest;
+    const cancel = { id: randomUUID(), op: 'cancelWaitingTask', input: { bookId: randomUUID(), kind: 'initial-evaluation', ref: randomUUID() } } satisfies ServiceRequest;
+    for (const request of [ledger, review, cancel]) expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
+    for (const kind of ['initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing'] as const) {
+      expect(decodeRequest(acceptedFrameOf({ ...ledger, input: { ...ledger.input, kind } }))).toMatchObject({ input: { kind } });
+    }
+    // The baseline keeps its own operation, and J-03's fixed Task never waits: neither is a kind here.
+    for (const kind of ['baseline-analysis', 'fixed-task', 'dialogue']) {
+      expect(rejectionFor(frameOf({ ...ledger, input: { ...ledger.input, kind } })), kind).toBeInstanceOf(ProtocolError);
+      expect(rejectionFor(frameOf({ ...cancel, input: { ...cancel.input, kind } })), kind).toBeInstanceOf(ProtocolError);
+    }
+    // A ledger Task binds one envelope and no categories; a Review Run every category and no envelope; never both.
+    expect(rejectionFor(frameOf({ ...ledger, input: { ...ledger.input, planEnvelopeDigest: null } }))).toBeInstanceOf(ProtocolError);
+    expect(rejectionFor(frameOf({ ...ledger, input: { ...ledger.input, planDigests: review.input.planDigests } }))).toBeInstanceOf(ProtocolError);
+    expect(rejectionFor(frameOf({ ...review, input: { ...review.input, planEnvelopeDigest: 'c'.repeat(64) } }))).toBeInstanceOf(ProtocolError);
+    expect(rejectionFor(frameOf({ ...review, input: { ...review.input, planDigests: [{ categoryId: 'typos-and-usage', planEnvelopeDigest: 'd'.repeat(63) }] } }))).toBeInstanceOf(ProtocolError);
+    expect(rejectionFor(frameOf({ ...review, input: { ...review.input, planDigests: [...review.input.planDigests, ...review.input.planDigests] } }))).toBeInstanceOf(ProtocolError);
+    expect(rejectionFor(frameOf({ ...ledger, input: { ...ledger.input, ref: 'not-a-uuid' } }))).toBeInstanceOf(ProtocolError);
+    expect(rejectionFor(frameOf({ ...cancel, input: { ...cancel.input, runRecordId: randomUUID() } }))).toBeInstanceOf(ProtocolError);
+  });
+
   it('accepts 取消任务 by the Task Intent within the route\'s Book, and nothing more (Issue #422)', () => {
     const cancel = { id: randomUUID(), op: 'cancelBaselineAnalysisRun', input: { bookId: randomUUID(), taskIntentId: randomUUID() } } satisfies ServiceRequest;
     expect(decodeRequest(acceptedFrameOf(cancel))).toEqual(cancel);

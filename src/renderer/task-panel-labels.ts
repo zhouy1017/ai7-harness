@@ -59,6 +59,9 @@ export const TASK_PANEL_STATUS_LINES = {
 export const TASK_PANEL_KIND_LABELS = {
   analysis: '分析任务 · 不需要对话',
   review: '审阅任务 · 不需要对话',
+  // A ledger Task of another kind (Issue #760, S74c): 评估's three, and the 写作任务.
+  evaluation: '评估任务 · 不需要对话',
+  writing: '写作任务 · 不需要对话',
   dialogue: '对话任务 · 就所选文字提问',
 } as const;
 
@@ -148,7 +151,9 @@ export function taskPanelCardView(entry: BookTaskItemProjection): TaskPanelCardV
   if (entry.selection !== undefined) actions = [...actions, action('jump')];
   return {
     kindLabel: item.object.kind === 'review' ? TASK_PANEL_KIND_LABELS.review
-      : item.object.kind === 'dialogue' ? TASK_PANEL_KIND_LABELS.dialogue : TASK_PANEL_KIND_LABELS.analysis,
+      : item.object.kind === 'dialogue' ? TASK_PANEL_KIND_LABELS.dialogue
+        : item.object.kind === 'task' ? (item.object.taskKind === 'writing' ? TASK_PANEL_KIND_LABELS.writing : TASK_PANEL_KIND_LABELS.evaluation)
+          : TASK_PANEL_KIND_LABELS.analysis,
     title: globalAttentionObjectLabel(item.object),
     stateLabel: GLOBAL_ATTENTION_STATE_LABELS[item.state],
     pill: GLOBAL_ATTENTION_STATE_PILLS[item.state],
