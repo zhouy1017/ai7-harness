@@ -379,6 +379,8 @@ async function constructPredecessorV12(dataRoot, bookId) {
   );
   const database = new DatabaseSync(databasePath);
   try {
+    // Every post-v12 table. A table left off is not caught here: the open accepts a predecessor that kept a later layer's
+    // tables (`includeMaterialIndexTables ||= committed(…)` in bounded-manuscript.ts), so that mutant survives by design.
     database.exec(`
       PRAGMA foreign_keys = OFF;
       BEGIN IMMEDIATE;
