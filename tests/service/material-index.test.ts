@@ -291,6 +291,31 @@ describe('资料索引 over the real store', () => {
     }
   }, 120_000);
 
+  it('builds what a refused preparation or roll-back held back, without 取消替换 (#751 review, P3-1)', async () => {
+    const lifetimes: Array<['prepare' | 'roll-back', string]> = [['prepare', 'DATABASE_IMPORT_PREVIEW_STALE'], ['roll-back', 'DATABASE_REPLACEMENT_ROLLBACK_STALE']];
+    for (const [step, code] of lifetimes) {
+      const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      try {
+        const materialId = (await put(store, file(`${step}.txt`, `被拦下的一句（${step}）。`), step)).materialId;
+        // The freeze is held from the call's first step; the service starts its indexing meanwhile, which builds nothing.
+        const refused = step === 'prepare'
+          ? store.prepareDatabaseReplacement(randomUUID(), new Date())
+          : store.rollBackDatabaseReplacement(randomUUID(), new Date());
+        expect(store.replacementFrozen()).toBe(true);
+        store.startMaterialIndexing();
+        expect(store.materialIndexing()).toBe(false);
+        expect(await refusal(() => refused)).toBe(code);
+        // Nothing waits to replace the data: the freeze lifted with the refusal, and what it held back is built now.
+        expect(store.replacementFrozen()).toBe(false);
+        await store.settleMaterialIndexing();
+        expect(store.inspectLibraryMaterial(materialId).index.state).toBe('complete');
+        store.markCleanShutdown();
+      } finally {
+        store.close();
+      }
+    }
+  }, 120_000);
+
   it('lets a Task read the index only within its plan boundary, read-only, at the version its plan pinned', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {

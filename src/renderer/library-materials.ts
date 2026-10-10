@@ -143,6 +143,14 @@ export function nextIndexPollDelay(previous: number, moved: boolean): number {
   return moved ? INDEX_POLL_MS : Math.min(previous * 2, INDEX_POLL_MAX_MS);
 }
 
+/**
+ * Whether a card now waits for its index that did not when the next read was set (#729; #751 review, P3-2): an arrival, or
+ * a page read. Such a card is read again after the first second, not after the longest wait.
+ */
+export function startsWaiting(waiting: ReadonlyArray<string>, polled: ReadonlySet<string>): boolean {
+  return waiting.some((materialId) => !polled.has(materialId));
+}
+
 const indexWaits = (material: LibraryMaterialProjection): boolean => material.index.state === 'queued' || material.index.state === 'indexing';
 
 export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { load(): Promise<void> } {
@@ -212,7 +220,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     if (focus !== null) root.querySelector<HTMLElement>(focus)?.focus();
     // A card that newly waits — an arrival, or a page read — is read again after the first second, not the longest wait.
     const waiting = shown().filter(indexWaits).map((material) => material.materialId);
-    if (waiting.some((materialId) => !polled.has(materialId))) {
+    if (startsWaiting(waiting, polled)) {
       if (pollTimer !== null) clearTimeout(pollTimer);
       pollTimer = null;
       pollDelay = INDEX_POLL_MS;

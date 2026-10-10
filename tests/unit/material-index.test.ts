@@ -56,6 +56,10 @@ describe('the sentence anchors of a paragraph', () => {
     expect(sentences('Use e.g. this one.')).toEqual(['Use e.g. this one.']);
     // A word of more than one letter still ends one.
     expect(sentences('It is Mr. Smith.')).toEqual(['It is Mr.', 'Smith.']);
+    // Only a Latin letter is an initial: a Han character before a Latin full stop ends its sentence (#751 review, P1-1).
+    expect(sentences('好. 我们走吧.')).toEqual(['好.', '我们走吧.']);
+    expect(sentences('是 吗. 不是.')).toEqual(['是 吗.', '不是.']);
+    expect(sentences('对. 就是这样。')).toEqual(['对.', '就是这样。']);
   });
 
   it('ends a sentence at a line break, gives none for white space, and one for a paragraph without end marks', () => {

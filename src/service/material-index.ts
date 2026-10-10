@@ -93,7 +93,9 @@ export const MATERIAL_INDEX_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<
  * It names the DOCX parser every format is read through, and not the DOC and text converters (#729): it is one identity for
  * every format, so naming them would move every item's current build — DOCX ones included — and rebuild them all, each
  * build's digest with it. Each build records the converter it read through in its own record (`converter`, under the
- * build's digest); a change to a converter's output moves `ai7-material-index/N` instead.
+ * build's digest); a change to a converter's output moves `ai7-material-index/N` instead. Refinements of the sentence
+ * anchors (`splitSentences`) are not versioned this way: a build made earlier keeps the anchors it was made with, and a
+ * plan pins a build by its digest, so what a plan froze never moves under it (#729; #751 review, P3-3).
  */
 export const MATERIAL_INDEXER_IDENTITY = `ai7-material-index/1+${DOCX_PARSER_IDENTITY}`;
 /** Where a converted working copy is written while it is read, inside the Agent Data Root; removed after, and at open. */
@@ -146,13 +148,17 @@ const CLOSERS: ReadonlySet<string> = new Set(['”', '’', '」', '』', '）',
 const WHITESPACE = /\s/u;
 /** A clause number: `1` of 「1. 第一条」. */
 const CLAUSE_NUMBER = /^\d+$/u;
-/** A single letter, or single letters joined by full stops: `U.S` of 「The U.S. economy」. */
-const INITIALS = /^\p{L}(?:\.\p{L})*$/u;
+/**
+ * A single Latin letter, or single Latin letters joined by full stops: `U.S` of 「The U.S. economy」. Latin only: a Han
+ * character before a stop, 「好. 我们走吧.」, ends its sentence (#751 review, P1-1).
+ */
+const INITIALS = /^\p{Script=Latin}(?:\.\p{Script=Latin})*$/u;
 
 /**
  * Whether a Latin full stop at `index` closes no sentence though white space follows it (#729): the sentence so far is
  * only digits — a numbered clause, 「1. 第一条」 — or the word before the stop, after a space or at the sentence's start, is
- * a single letter or single letters joined by full stops — an initial or an abbreviation, 「The U.S. economy」, 「J. Smith」.
+ * a single Latin letter or single Latin letters joined by full stops — an initial or an abbreviation, 「The U.S. economy」,
+ * 「J. Smith」.
  * Only the word before the stop is read, and the white space before it, so a paragraph is still read once over.
  */
 function heldFullStop(text: string, start: number, index: number): boolean {

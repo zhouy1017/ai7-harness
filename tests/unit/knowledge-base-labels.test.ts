@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { nextIndexPollDelay } from '../../src/renderer/library-materials.js';
+import { nextIndexPollDelay, startsWaiting } from '../../src/renderer/library-materials.js';
 import {
   LIBRARY_EMPTY,
   LIBRARY_HOUSE_CONSEQUENCE,
@@ -281,6 +281,13 @@ describe('资料索引 in the editor\'s words (Issue #428, S80a; KB-009)', () =>
     expect(nextIndexPollDelay(8_000, false)).toBe(8_000);
     // A card whose index moved brings the next read back to the first second.
     expect(nextIndexPollDelay(8_000, true)).toBe(1_000);
+  });
+
+  it('reads a card again after the first second when it newly waits, and keeps the wait for cards already waiting (#729)', () => {
+    expect(startsWaiting(['a'], new Set())).toBe(true);
+    expect(startsWaiting(['a', 'b'], new Set(['a']))).toBe(true);
+    expect(startsWaiting(['a'], new Set(['a', 'b']))).toBe(false);
+    expect(startsWaiting([], new Set(['a']))).toBe(false);
   });
 
   it('names a sentence by its position anchor, a page of segments by its range, and 索引完成 by how it went', () => {
