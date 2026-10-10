@@ -304,6 +304,9 @@ import {
   MAX_WRITING_MATERIAL_GRAPHEMES,
   MAX_WRITING_MATERIAL_OFFERS,
   WRITING_KIND,
+  INITIAL_EVALUATION_KIND,
+  READERS_REPORT_KIND,
+  EVALUATION_REWRITE_KIND,
   WRITING_LIVE_UNAVAILABLE,
   WRITING_MATERIAL_LIVE_UNAVAILABLE,
   WRITING_MODE_GOALS,
@@ -5575,7 +5578,9 @@ export class EditorialStore {
       this.#reviewCall(() => this.#reviewRuns.cancelWaiting(input.bookId, input.ref));
       return { dequeue: null };
     }
-    const ledger = this.#ledgerTaskOf(input.kind, input.bookId, input.ref);
+    // Never through the kind's start checks (Issue #760 review, P2-1): a Run whose version, 范例 or 资料库 item moved while it
+    // waited is exactly one the editor must be able to cancel, offline too (OFF-010).
+    const ledger = this.#currentLedgerOf(input.kind, input.bookId, input.ref);
     const before = this.#analysisCall(() => ledger.inspect(input.bookId)).run;
     this.#analysisCall(() => ledger.cancelWaiting(input.bookId, input.ref));
     return { dequeue: before !== null && before.state === 'authorized' ? before.runRecordId : null };
@@ -5751,6 +5756,20 @@ export class EditorialStore {
       }
     }
     return readings;
+  }
+
+  /**
+   * The ledger of the Book's current Task of a ledger kind, with none of the checks its start makes (Issue #760 review, P2-1):
+   * what 取消 reads a waiting or queued Run through, whatever moved since it was authorized.
+   */
+  #currentLedgerOf(kind: LedgerTaskKind, bookId: string, taskIntentId: string): BaselineAnalysisStore {
+    this.#assertAvailable();
+    // The ledger itself refuses a 初评 that is not the Book's current Task, as its cancellation always did.
+    if (kind === 'initial-evaluation') return this.#initialEvaluation;
+    const latest = kind === 'readers-report' ? this.#latestReadersReport(bookId)
+      : kind === 'evaluation-rewrite' ? this.#latestEvaluationRewrite(bookId) : this.#latestWriting(bookId);
+    requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT', TASK_PLAN_NOT_CURRENT_REASON);
+    return latest.ledger;
   }
 
   /** One ledger of a kind whose Tasks each run on the ledger of their own contract: any of them reads the kind's Run states. */
@@ -8428,7 +8447,7 @@ export class EditorialStore {
       prepare: this.#initialEvaluation.launch.live !== null
         ? { allowed: false, reason: INITIAL_EVALUATION_LIVE_UNAVAILABLE }
         : runIsActive(runState)
-        ? { allowed: false, reason: activeRunReason(runState) }
+        ? { allowed: false, reason: activeRunReason(runState, INITIAL_EVALUATION_KIND) }
         : { allowed: true, mode: projection.resultSetRevision === null ? 'evaluation-first' : 'evaluation-again' },
     };
   }
@@ -8672,7 +8691,7 @@ export class EditorialStore {
         : unavailable !== null ? { allowed: false, reason: unavailable }
         : basis === null ? { allowed: false, reason: READERS_REPORT_NEEDS_FINALIZED }
         : draft !== null ? { allowed: false, reason: `这本书已经有「${label}」的草稿；请打开它继续修改。` }
-        : runIsActive(runState) ? { allowed: false, reason: activeRunReason(runState) }
+        : runIsActive(runState) ? { allowed: false, reason: activeRunReason(runState, READERS_REPORT_KIND) }
         : { allowed: true, mode: latest === null || latest.projection.resultSetRevision === null ? 'readers-report-first' : 'readers-report-again' };
       return { template, label, prepare, drafted, draft };
     });
@@ -9120,7 +9139,7 @@ export class EditorialStore {
     requireStore(!this.#documentCall(() => this.#productionDocuments.notForThisBook(bookId, type.typeId)),
       'WRITING_NOT_FOR_THIS_BOOK', writingNotForThisBook(type.label));
     const latest = this.#latestWriting(bookId);
-    requireStore(!runIsActive(latest?.projection.run?.state ?? null), 'WRITING_UNAVAILABLE', activeRunReason(latest?.projection.run?.state ?? null));
+    requireStore(!runIsActive(latest?.projection.run?.state ?? null), 'WRITING_UNAVAILABLE', activeRunReason(latest?.projection.run?.state ?? null, WRITING_KIND));
     const synopsis = this.#writingSynopsis(bookId);
     const evaluation = this.#writingEvaluation(bookId);
     const exemplars = this.#writingExemplars(bookId, type.typeId);
@@ -9334,7 +9353,7 @@ export class EditorialStore {
           unavailable !== null ? { allowed: false, reason: unavailable }
           : type.document !== null ? { allowed: false, reason: writingDocumentExists(type.label) }
           : type.notForThisBook ? { allowed: false, reason: writingNotForThisBook(type.label) }
-          : runIsActive(runState) ? { allowed: false, reason: activeRunReason(runState) }
+          : runIsActive(runState) ? { allowed: false, reason: activeRunReason(runState, WRITING_KIND) }
           : { allowed: true, mode: latest === null || latest.projection.resultSetRevision === null ? 'writing-first' : 'writing-again' };
         return {
           typeId: type.typeId,
@@ -9814,7 +9833,7 @@ export class EditorialStore {
     const input = this.#evaluationRewriteCall(() => evaluationRewriteContractInput(version));
     const ledger = this.#evaluationRewriteLedger(input);
     const latest = this.#latestEvaluationRewrite(bookId);
-    requireStore(!runIsActive(latest?.projection.run?.state ?? null), 'EVALUATION_REWRITE_UNAVAILABLE', activeRunReason(latest?.projection.run?.state ?? null));
+    requireStore(!runIsActive(latest?.projection.run?.state ?? null), 'EVALUATION_REWRITE_UNAVAILABLE', activeRunReason(latest?.projection.run?.state ?? null, EVALUATION_REWRITE_KIND));
     const mode = latest === null || latest.projection.resultSetRevision === null ? 'evaluation-rewrite-first' : 'evaluation-rewrite-again';
     const result = this.#analysisCall(() => ledger.prepare({
       phase: 'start',
@@ -9966,7 +9985,7 @@ export class EditorialStore {
       this.#baselineAnalysis.launch.live !== null ? { allowed: false, reason: EVALUATION_REWRITE_LIVE_UNAVAILABLE }
       : unavailable !== null ? { allowed: false, reason: unavailable }
       : refusal !== null ? { allowed: false, reason: refusal }
-      : runIsActive(runState) ? { allowed: false, reason: activeRunReason(runState) }
+      : runIsActive(runState) ? { allowed: false, reason: activeRunReason(runState, EVALUATION_REWRITE_KIND) }
       : { allowed: true, mode: latest === null || latest.projection.resultSetRevision === null ? 'evaluation-rewrite-first' : 'evaluation-rewrite-again' };
     return { prepare, task, proposal, decided };
   }

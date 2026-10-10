@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
+import { activeRunReason } from '../../src/service/analysis/baseline-analysis-store.js';
 import type { Connectivity, TaskPlanConnectivity } from '../../src/service/connectivity.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
@@ -55,7 +57,7 @@ interface Session {
   readonly driver: ReviewRunDriver;
 }
 
-async function withSession(fixtureIdentity: string, body: (session: Session) => Promise<void>): Promise<void> {
+async function withSession(fixtureIdentity: string, body: (session: Session) => Promise<void>, capacity?: number): Promise<void> {
   await requireExactSample1(roots.codeRoot);
   const fixture = await loadModelFixture(FIXTURES_ROOT, fixtureIdentity);
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
@@ -66,7 +68,9 @@ async function withSession(fixtureIdentity: string, body: (session: Session) => 
     interruptAfterAbandonObjectRemoval: false,
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
   });
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  const owner = new BaselineAnalysisExecutionOwner({
+    ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null }, ...(capacity === undefined ? {} : { capacity }),
+  });
   const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
   try {
     await body({ store, owner, driver });
@@ -253,7 +257,8 @@ describe('联网后开始任务 of a 写作任务 (Issue #760, S74c)', () => {
       store.startTaskWhenOnline({ bookId, kind: 'writing', ref: taskIntentId, planEnvelopeDigest: digest, planDigests: [] });
       // A waiting Run counts as active: nothing is prepared over it, and the refusal says it waits to start (OFF-005).
       expect(await code(() => prepareWriting(store, bookId))).toBe('WRITING_UNAVAILABLE');
-      expect(() => prepareWriting(store, bookId)).toThrow('在等待联网后开始');
+      // …in the writing kind's own words, never an 分析任务's (Issue #760 review).
+      expect(() => prepareWriting(store, bookId)).toThrow('有一项写作任务在等待联网后开始；它开始并结束之前，或在任务抽屉里取消它之前，不能准备新的写作任务。');
       expect(store.cancelWaitingTask({ bookId, kind: 'writing', ref: taskIntentId })).toEqual({ dequeue: null });
       expect(transitions(taskIntentId)).toEqual(['authorized', 'awaiting-connectivity', 'cancelled']);
       expect((await planOf(store, bookId, 'writing', taskIntentId, 'online')).state).toEqual({ key: 'cancelled', label: '已取消' });
@@ -290,6 +295,110 @@ describe('联网后开始任务 of a 写作任务 (Issue #760, S74c)', () => {
       expect(attentionItem(store, `task:${taskIntentId}`)).toMatchObject({ group: 'decisions', state: 'analysis-plan-moved', blocked: true });
       expect(panelItem(store, bookId, `task:${taskIntentId}`)).toMatchObject({ state: 'analysis-plan-moved' });
       expect(await code(() => store.cancelWaitingTask({ bookId, kind: 'writing', ref: taskIntentId }))).toBe('ANALYSIS_CANCEL_NOT_WAITING');
+    });
+  }, 300_000);
+});
+
+describe('取消 of a waiting or queued Run of another kind (Issue #760 review)', () => {
+  it('says why a new Task waits in its own kind’s words: 分析任务, 写作任务, 评估任务 or 审阅任务, never one for every kind', () => {
+    expect(activeRunReason('awaiting-connectivity')).toBe('有一项分析任务在等待联网后开始；它开始并结束之前，或在任务抽屉里取消它之前，不能准备新的更新任务。');
+    expect(activeRunReason('authorized', 'writing')).toBe('有一项写作任务在等待运行名额；它开始并结束之前，或在任务抽屉里取消它之前，不能准备新的写作任务。');
+    for (const kind of ['evaluation', 'readers-report', 'evaluation-rewrite']) {
+      expect(activeRunReason('executing', kind), kind).toBe('当前已有评估任务在调度或执行中；在其结束前不能准备新的评估任务。');
+    }
+    expect(activeRunReason('awaiting-connectivity', 'factual-review')).toBe('有一项审阅任务在等待联网后开始；它开始并结束之前，或在任务抽屉里取消它之前，不能准备新的审阅。');
+  });
+
+  it('cancels a waiting 写作任务 offline after a 资料库 item it lists may no longer be listed: the start checks never stand in its way', async () => {
+    await withSession(WRITING_FIXTURE_IDENTITY, async (session) => {
+      const { store } = session;
+      const bookId = await sample1Book(store, '写作资料变化后取消');
+      const directory = join(roots.inputRoot, 'start-when-online');
+      mkdirSync(directory, { recursive: true });
+      const path = join(directory, '参考资料.txt');
+      writeFileSync(path, '这份资料记录了一座古城在战火中保存青铜器的经过，馆员连夜把器物装箱转移。');
+      const preview = await store.previewLibraryMaterial(path);
+      const material = await store.addLibraryMaterial({ previewId: preview.previewId, title: '参考资料', kind: 'document' });
+      store.decideLibraryMaterial({ materialId: material.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId } } });
+      store.decideLibraryMaterial({ materialId: material.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+      store.startMaterialIndexing();
+      await store.settleMaterialIndexing();
+      let progress = store.createWritingPreparationWork(bookId, { ...WRITING_REQUEST, materialIds: [material.materialId] }, launchPolicy);
+      while (!progress.done) progress = store.advanceWritingPreparationWork(progress.workId!);
+      const taskIntentId = progress.projection!.taskIntent!.taskIntentId;
+      const digest = (await planOf(store, bookId, 'writing', taskIntentId, 'offline')).start.planEnvelopeDigest!;
+      store.startTaskWhenOnline({ bookId, kind: 'writing', ref: taskIntentId, planEnvelopeDigest: digest, planDigests: [] });
+      // While it waits offline, the item may no longer be listed by this Book's Tasks: the writing start check now refuses.
+      store.decideLibraryMaterial({ materialId: material.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+      expect(await code(() => store.authorizeWriting(bookId, taskIntentId, digest))).toBe('MATERIAL_REFERENCE_UNAVAILABLE');
+      // 取消 still ends it, offline, before anything is sent (OFF-010) — and a new Task can then be prepared.
+      expect(store.cancelWaitingTask({ bookId, kind: 'writing', ref: taskIntentId })).toEqual({ dequeue: null });
+      expect(transitions(taskIntentId)).toEqual(['authorized', 'awaiting-connectivity', 'cancelled']);
+      expect(attempts(taskIntentId)).toBe(0);
+      expect(prepareWriting(store, bookId)).not.toBe(taskIntentId);
+    });
+  }, 300_000);
+
+  it('cancels a waiting rewrite offline after its version was saved again, where re-preparing said to cancel it first', async () => {
+    await withSession(EVALUATION_REWRITE_FIXTURE_IDENTITY, async (session) => {
+      const { store, owner } = session;
+      const bookId = await sample1Book(store, '重写变化后取消');
+      await runInitialEvaluationToEnd(store, owner, bookId, launchPolicy);
+      finalizeAsJ11(store, bookId);
+      const record = beginRewriteAsJ11(store, bookId);
+      const prepare = (): string => {
+        let progress = store.createEvaluationRewritePreparationWork(bookId, record.recordId, launchPolicy);
+        while (!progress.done) progress = store.advanceEvaluationRewritePreparationWork(progress.workId!);
+        return progress.projection!.taskIntent!.taskIntentId;
+      };
+      const taskIntentId = prepare();
+      const digest = (await planOf(store, bookId, 'evaluation-rewrite', taskIntentId, 'offline')).start.planEnvelopeDigest!;
+      store.startTaskWhenOnline({ bookId, kind: 'evaluation-rewrite', ref: taskIntentId, planEnvelopeDigest: digest, planDigests: [] });
+      store.saveEvaluation({ bookId, recordId: record.recordId, expectedEntries: record.entries, finalize: false, content: { ...record.content, readiness: [...record.content.readiness, '补一句。'] } });
+      expect(await code(() => store.authorizeEvaluationRewrite(bookId, taskIntentId, digest))).toBe('EVALUATION_REWRITE_STALE');
+      // Re-preparing waits for the wait, in 评估's words, and says to cancel it there.
+      expect(() => prepare()).toThrow('有一项评估任务在等待联网后开始；它开始并结束之前，或在任务抽屉里取消它之前，不能准备新的评估任务。');
+      expect(store.cancelWaitingTask({ bookId, kind: 'evaluation-rewrite', ref: taskIntentId })).toEqual({ dequeue: null });
+      expect(transitions(taskIntentId)).toEqual(['authorized', 'awaiting-connectivity', 'cancelled']);
+      // Prepared again at the scores as they are now.
+      expect(prepare()).not.toBe(taskIntentId);
+    });
+  }, 300_000);
+
+  it('cancels a 写作任务 waiting on the governor for a place, and the governor lets it go (Issue #49, S14; CONC-007)', async () => {
+    await withSession(WRITING_FIXTURE_IDENTITY, async (session) => {
+      const { store, owner } = session;
+      const holding = await sample1Book(store, '写作占位');
+      const queuedBook = await sample1Book(store, '写作排队后取消');
+      const first = prepareWriting(store, holding);
+      const second = prepareWriting(store, queuedBook);
+      const started = store.authorizeWriting(holding, first, (await planOf(store, holding, 'writing', first, 'online')).start.planEnvelopeDigest!);
+      expect(owner.admitOrQueue(started.dispatchRunRecordId!, started.ledger)).toBe('admitted');
+      const queued = store.authorizeWriting(queuedBook, second, (await planOf(store, queuedBook, 'writing', second, 'online')).start.planEnvelopeDigest!);
+      expect(owner.admitOrQueue(queued.dispatchRunRecordId!, queued.ledger)).toBe('queued');
+      expect((await planOf(store, queuedBook, 'writing', second, 'online')).state).toEqual({ key: 'queued', label: '等待运行名额' });
+      // The service's 取消 names the Run the governor must let go of, exactly as it does for a queued baseline Run.
+      const cancelled = store.cancelWaitingTask({ bookId: queuedBook, kind: 'writing', ref: second });
+      expect(cancelled).toEqual({ dequeue: queued.dispatchRunRecordId });
+      expect(owner.dequeue(cancelled.dequeue!)).toBe(true);
+      await owner.whenIdle();
+      expect(transitions(second)).toEqual(['authorized', 'cancelled']);
+      expect(attempts(second)).toBe(0);
+    }, 1);
+  }, 300_000);
+
+  it('lists a waiting Run Reconnect Preflight could not start under 异常与结果待确认, where the editor acts on it (CONC-006)', async () => {
+    await withSession(WRITING_FIXTURE_IDENTITY, async (session) => {
+      const { store } = session;
+      const bookId = await sample1Book(store, '写作不能开始');
+      const taskIntentId = prepareWriting(store, bookId);
+      const digest = (await planOf(store, bookId, 'writing', taskIntentId, 'offline')).start.planEnvelopeDigest!;
+      store.startTaskWhenOnline({ bookId, kind: 'writing', ref: taskIntentId, planEnvelopeDigest: digest, planDigests: [] });
+      const [run] = store.waitingTaskRuns(bookId);
+      store.blockWaitingTaskRun(run!, ['这次启动不能开始写作任务。'], 'launch');
+      expect(attentionItem(store, `task:${taskIntentId}`)).toMatchObject({ group: 'exceptions', state: 'analysis-blocked', blocked: true, nextStep: 'view-run' });
+      expect(store.inspectGlobalAttention(() => null, false).actionableCount).toBe(1);
+      expect(panelItem(store, bookId, `task:${taskIntentId}`)).toMatchObject({ state: 'analysis-blocked' });
     });
   }, 300_000);
 });

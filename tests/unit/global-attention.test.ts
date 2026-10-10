@@ -251,6 +251,10 @@ describe('the four groups of 待我处理', () => {
     expect(group(decided, 'decisions').map((entry) => [entry.state, entry.blocked, entry.nextStep])).toEqual([['analysis-plan-moved', true, 'view-run']]);
     expect(decided.actionableCount).toBe(1);
     expect(decided.running).toBe(false);
+    // One Reconnect Preflight could not start for this launch never ran either: an exception the editor acts on (CONC-006).
+    const blocked = composeGlobalAttention(readings({ waitingTasks: [{ ...waitingTasks[0]!, state: 'launch-blocked' as const }] }), NOW);
+    expect(group(blocked, 'exceptions').map((entry) => [entry.state, entry.blocked, entry.nextStep])).toEqual([['analysis-blocked', true, 'view-run']]);
+    expect(blocked.actionableCount).toBe(1);
     // A Review Run waits as a whole, and opens 审阅.
     const review = reviewRun('等网审阅', { state: 'waiting', categories: [category('错别字与规范用语', 'waiting', true)], lastEventAt: null });
     const reviewWaiting = composeGlobalAttention(readings({ reviewRuns: [review], waitingFor: 'network' }), NOW);

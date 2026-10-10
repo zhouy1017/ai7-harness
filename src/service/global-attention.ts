@@ -160,7 +160,8 @@ export interface WaitingTaskAttentionReading {
   readonly bookTitle: string;
   readonly taskIntentId: string;
   readonly runRecordId: string;
-  readonly state: 'awaiting-connectivity' | 'plan-moved';
+  /** `launch-blocked` is a waiting Run Reconnect Preflight blocked because this launch cannot start it (CONC-006). */
+  readonly state: 'awaiting-connectivity' | 'plan-moved' | 'launch-blocked';
   /** When the Run's last state was recorded. */
   readonly stateAt: string;
 }
@@ -674,9 +675,10 @@ function waitingTaskItem(reading: WaitingTaskAttentionReading, waitingFor: Waiti
       { key: 'state-at', label: '状态记录时间', value: reading.stateAt },
     ],
   };
-  return reading.state === 'plan-moved'
-    ? item('decisions', 'analysis-plan-moved', { ...fields, blocked: true })
-    : item('active', WAITING_STATES[waitingFor], { ...fields, blocked: waitingFor === 'connection' });
+  // A Run this launch could not start never ran either: an exception the editor acts on, as a baseline Run blocked so is (CONC-006).
+  return reading.state === 'plan-moved' ? item('decisions', 'analysis-plan-moved', { ...fields, blocked: true })
+    : reading.state === 'launch-blocked' ? item('exceptions', 'analysis-blocked', { ...fields, blocked: true })
+      : item('active', WAITING_STATES[waitingFor], { ...fields, blocked: waitingFor === 'connection' });
 }
 
 function reviewCompletionItem(reading: ReviewRunAttentionReading): GlobalAttentionItemProjection {

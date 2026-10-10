@@ -2,6 +2,10 @@ import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   BASELINE_ANALYSIS_KIND,
+  EVALUATION_REWRITE_KIND,
+  INITIAL_EVALUATION_KIND,
+  READERS_REPORT_KIND,
+  WRITING_KIND,
   type AnalysisGoal,
   type AnalysisKindId,
   type AnalysisProjection,
@@ -146,11 +150,16 @@ const SUCCESSOR_BEHAVIOR ='每次更新都是新的用户发起任务，经准�
 const SELECTED_BLOCKS_GONE = '所选文字所在的段落已不在当前稿件中，或先后颠倒；请重新选择。' as const;
 /** A range Task's paragraphs no longer stand at the positions its plan names (Issue #423 review, P3-4). */
 const SELECTED_RANGE_MOVED = '所选范围的段落在准备之后已移动或删除；请重新选择范围，再准备这项任务。' as const;
-const ACTIVE_RUN_REASON = '当前已有分析任务在调度或执行中；在其结束前不能准备新的更新任务。' as const;
-/** A Run in Connectivity Wait blocks a new Task too, but it is not running: it waits to start once online (OFF-005, OFF-006). */
-const WAITING_RUN_REASON = '有一项分析任务在等待联网后开始；它开始并结束之前，或在任务抽屉里取消它之前，不能准备新的更新任务。' as const;
-/** A Run waiting on the governor blocks a new Task too, and it is not running either (Issue #49, S14; CONC-007). */
-const QUEUED_RUN_REASON = '有一项分析任务在等待运行名额；它开始并结束之前，或在任务抽屉里取消它之前，不能准备新的更新任务。' as const;
+/**
+ * What an active Run of a kind is called, and what it keeps from being prepared (Issue #760 review): the baseline's 分析任务
+ * and 更新任务, a 写作任务's own, 评估's for AI7 初评, 审稿意见 and 按我的评分重写评语, and 审阅's for a review category's Task.
+ */
+function activeRunWords(kind: string): { readonly task: string; readonly next: string } {
+  if (kind === BASELINE_ANALYSIS_KIND) return { task: '分析任务', next: '新的更新任务' };
+  if (kind === WRITING_KIND) return { task: '写作任务', next: '新的写作任务' };
+  if (kind === INITIAL_EVALUATION_KIND || kind === READERS_REPORT_KIND || kind === EVALUATION_REWRITE_KIND) return { task: '评估任务', next: '新的评估任务' };
+  return { task: '审阅任务', next: '新的审阅' };
+}
 /** A queued Run's own words (Issue #49, S14; CONC-007): what it waits for, and that nothing has begun. */
 export const RUN_QUEUED_LABEL = '等待运行名额' as const;
 /** The waiting state's own words (Issue #502, OFF-005): recorded, and nothing has been sent or begun. */
@@ -734,9 +743,15 @@ export function runIsActive(state: BaselineAnalysisRunState | null): boolean {
     state === 'cancelling' || state === 'pausing' || state === 'paused' || state === 'resumable' || state === 'awaiting-clarification';
 }
 
-/** Why an active Run blocks a new Task, in the words of its state: a waiting Run is never said to be under way. */
-export function activeRunReason(state: BaselineAnalysisRunState | null): string {
-  return state === 'awaiting-connectivity' ? WAITING_RUN_REASON : state === 'authorized' ? QUEUED_RUN_REASON : ACTIVE_RUN_REASON;
+/**
+ * Why an active Run blocks a new Task, in the words of its state — a waiting Run is never said to be under way (OFF-005,
+ * OFF-006; Issue #49, S14) — and of its kind (Issue #760 review): a 写作任务 is never called an 分析任务.
+ */
+export function activeRunReason(state: BaselineAnalysisRunState | null, kind: string = BASELINE_ANALYSIS_KIND): string {
+  const { task, next } = activeRunWords(kind);
+  if (state === 'awaiting-connectivity') return `有一项${task}在等待联网后开始；它开始并结束之前，或在任务抽屉里取消它之前，不能准备${next}。`;
+  if (state === 'authorized') return `有一项${task}在等待运行名额；它开始并结束之前，或在任务抽屉里取消它之前，不能准备${next}。`;
+  return `当前已有${task}在调度或执行中；在其结束前不能准备${next}。`;
 }
 
 /**
@@ -2733,7 +2748,7 @@ export class BaselineAnalysisStore {
     activeRun: BaselineAnalysisRunState | null,
   ): BaselineAnalysisUpdateControlsProjection | ReviewCategoryUpdateControlsProjection {
     const blockedByActiveRun = activeRun !== null;
-    const blockedReason = blockedByActiveRun ? activeRunReason(activeRun) : null;
+    const blockedReason = blockedByActiveRun ? activeRunReason(activeRun, this.#definition.kind) : null;
     const head = this.#workingHead(latest.manuscriptPin.manuscriptId, bookId);
     const blocks = this.readWorkingBlocks(head.branchId);
     const preview = deriveCoverageManifest({
@@ -2845,7 +2860,7 @@ export class BaselineAnalysisStore {
       requireAnalysis(!this.preparationInFlight(input.bookId), 'ANALYSIS_PREPARATION_IN_FLIGHT', '这本书正在准备一项任务；后台分析不接手。');
     }
     const existing = this.inspect(input.bookId);
-    requireAnalysis(!runIsActive(existing.run?.state ?? null), 'ANALYSIS_TASK_ACTIVE', activeRunReason(existing.run?.state ?? null));
+    requireAnalysis(!runIsActive(existing.run?.state ?? null), 'ANALYSIS_TASK_ACTIVE', activeRunReason(existing.run?.state ?? null, this.#definition.kind));
     const latest = existing.resultSetRevision;
     // 改计划重做 (Issue #422, S76c; AUTH-010, CONT-013): a new Task after the latest Task's Run was cancelled once it
     // began. What that Run kept it formed into the Book's latest revision, which the redo carries and reads again
@@ -3923,12 +3938,13 @@ export class BaselineAnalysisStore {
   }
 
   /**
-   * Each Book's latest Task of this kind whose Run waits in Connectivity Wait, or was blocked because its plan moved while it
-   * waited (Issue #760, S74c; ATTN-004): what 待我处理 and the 任务 panel read of a kind they otherwise leave to its own surface.
-   * A read; nothing is written.
+   * Each Book's latest Task of this kind whose Run waits in Connectivity Wait, or that Reconnect Preflight blocked after it
+   * waited — its plan moved, or this launch could not start it (Issue #760, S74c; ATTN-004, CONC-006): what 待我处理 and the 任务
+   * panel read of a kind they otherwise leave to its own surface. Every row the query keeps is a reading, so the limit bounds
+   * what is shown and nothing is dropped after it. A read; nothing is written.
    */
   waitingAttentionReadings(bookId: string | null, limit: number): Array<{
-    bookId: string; bookTitle: string; taskIntentId: string; runRecordId: string; state: 'awaiting-connectivity' | 'plan-moved'; stateAt: string;
+    bookId: string; bookTitle: string; taskIntentId: string; runRecordId: string; state: 'awaiting-connectivity' | 'plan-moved' | 'launch-blocked'; stateAt: string;
   }> {
     const lastState = `(SELECT s.state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1)`;
     const rows = this.#db.prepare(
@@ -3940,21 +3956,17 @@ export class BaselineAnalysisStore {
        WHERE t.kind = ? AND t.rowid = (
            SELECT t2.rowid FROM analysis_task_intents t2 WHERE t2.book_id = t.book_id AND t2.kind = t.kind
            ORDER BY t2.created_at DESC, t2.rowid DESC LIMIT 1)
-         AND ${lastState} IN ('awaiting-connectivity', 'blocked-before-dispatch')
+         AND (${lastState} = 'awaiting-connectivity' OR (${lastState} = 'blocked-before-dispatch' AND EXISTS (
+           SELECT 1 FROM analysis_run_states w WHERE w.run_record_id = r.run_record_id AND w.state = 'awaiting-connectivity')))
          AND (? IS NULL OR t.book_id = ?)
        ORDER BY t.created_at, t.task_intent_id LIMIT ?`,
     ).all(this.#definition.kind, bookId, bookId, limit) as SqlRow[];
-    const readings: Array<{ bookId: string; bookTitle: string; taskIntentId: string; runRecordId: string; state: 'awaiting-connectivity' | 'plan-moved'; stateAt: string }> = [];
-    for (const row of rows) {
+    return rows.map((row) => {
       const runRecordId = asString(row.run_record_id);
-      const waiting = row.last_state === 'awaiting-connectivity';
-      if (!waiting && this.blockedByOf(runRecordId) !== 'plan-moved') continue;
-      readings.push({
-        bookId: asString(row.book_id), bookTitle: asString(row.book_title), taskIntentId: asString(row.task_intent_id), runRecordId,
-        state: waiting ? 'awaiting-connectivity' : 'plan-moved', stateAt: asString(row.last_state_at),
-      });
-    }
-    return readings;
+      const state = row.last_state === 'awaiting-connectivity' ? 'awaiting-connectivity' as const
+        : this.blockedByOf(runRecordId) === 'plan-moved' ? 'plan-moved' as const : 'launch-blocked' as const;
+      return { bookId: asString(row.book_id), bookTitle: asString(row.book_title), taskIntentId: asString(row.task_intent_id), runRecordId, state, stateAt: asString(row.last_state_at) };
+    });
   }
 
   /** Every Run of this kind waiting in Connectivity Wait, oldest first, with its Book. */
