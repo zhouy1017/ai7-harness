@@ -1,5 +1,5 @@
 import type { EvaluationCalibrationBookProjection, EvaluationCalibrationProjection, PublicationActualsProjection } from '../shared/protocol.js';
-import { formatPriceFen } from '../shared/evaluation-calibration.js';
+import { formatCalibrationOffset, formatPriceFen } from '../shared/evaluation-calibration.js';
 
 /**
  * 设置 › 评估校准与预测's words (Issue #430, plan slice S82; V2-UX-EVAL-010, EVAL-011, EVAL-014; ADR 0076 §7): calibration's
@@ -16,9 +16,34 @@ export const CALIBRATION_HEADING = '校准';
 export const CALIBRATION_SCOPE = '校准只调整 AI7 给出的初评分数，不改你的评分，也不改风险项。';
 /** Why there is nothing to count, for a service that gives no AI7 初评 scores to adjust (`initialScoresConnected` false). */
 export const CALIBRATION_WAITING = 'AI7 初评尚未接通：你改过 AI7 的初评分数后，调分记录才开始累积。';
-/** Past the threshold, before any build computes the offset: nothing is adjusted yet, and the page says so. */
-export const CALIBRATION_NOT_COMPUTED = '已满数，但校准还没有计算：AI7 的初评分数暂不调整';
 export const CALIBRATION_SWITCH = '启用校准';
+/** How the house offset is computed (EVAL-011; EVAL-011a), said in the editor's words. */
+export const CALIBRATION_METHOD = '校准偏移 = 各本书最新一次从 AI7 初评开始并定稿的评估里，你的定稿分数减去 AI7 初评分数的平均值，取到半分；每次读取时重新计算，不另存。';
+/**
+ * Below the gate: what the offset waits for, naming the gate the service answers (`calibration.threshold`) — ten in the
+ * product, lower only under J-11's Journey-only control — so it never disagrees with the progress line above it.
+ */
+export function calibrationOffsetWaiting(threshold: number): string {
+  return `校准偏移尚未计算：满 ${threshold} 本调分记录后，按上述方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。`;
+}
+/** With the switch off: what a new version does instead, and that the switch can be turned on again. */
+export const CALIBRATION_OFF_EFFECT = '校准已关闭：新版本从 AI7 初评开始时直接用 AI7 的原始分数；可以随时再打开，关闭和打开都有记录。';
+/** The heading of the per-item offsets, with the Books they rest on. */
+export function calibrationBasisLine(offset: Pick<NonNullable<EvaluationCalibrationProjection['calibration']['offset']>, 'basisBooks'>): string {
+  return `校准依据：${offset.basisBooks} 本书的定稿评估；各评分项的偏移如下（正数表示你的定稿分数通常高于 AI7 初评）。`;
+}
+/**
+ * Why the basis may hold fewer Books than 调分记录 counts: a Book with a from-初评 version that cannot be read counts toward the
+ * gate but gives the basis nothing; `null` when every counted Book is in the basis.
+ */
+export function calibrationWithoutBasisLine(offset: Pick<NonNullable<EvaluationCalibrationProjection['calibration']['offset']>, 'booksWithoutBasis'>): string | null {
+  return offset.booksWithoutBasis === 0 ? null : `其中 ${offset.booksWithoutBasis} 本书有从 AI7 初评开始的版本已损坏，不计入校准依据。`;
+}
+/** One item's offset: `+1.5`, `−0.5`, `0`, or that no Book gives it a value, with the Books it rests on. */
+export function calibrationOffsetLine(item: NonNullable<EvaluationCalibrationProjection['calibration']['offset']>['items'][number]): string {
+  if (item.offset === null) return `${item.label}：暂无数据（没有书同时有你的定稿分数和 AI7 初评分数）`;
+  return `${item.label}：${formatCalibrationOffset(item.offset)}（依据 ${item.books} 本书，满分 ${item.fullMarks}，调整后不超出 0 到 ${item.fullMarks}）`;
+}
 
 /** Books left out of the count because their evaluation records are damaged (Issue #702 review); `null` when none are. */
 export function calibrationUnreadableLine(books: number): string | null {
@@ -49,16 +74,13 @@ export const CALIBRATION_STATUS = {
 } as const;
 
 /**
- * Calibration's progress toward its threshold, and whether it applies (EVAL-011, EVAL-014). Past the threshold with no offset
- * computed it says exactly that (Issue #429 review): AI7's starting scores are left as they are, never said to be calibrated.
+ * Calibration's progress toward its threshold, and whether it applies (EVAL-011, EVAL-014): 已生效 once the gate is passed with
+ * the switch on, since the offset is computed at every read past it (EVAL-011a).
  */
 export function calibrationProgressLine(calibration: Pick<EvaluationCalibrationProjection['calibration'], 'adjustments' | 'threshold' | 'enabled' | 'active'>): string {
   const progress = `调分记录 ${calibration.adjustments} / ${calibration.threshold} 本`;
   if (!calibration.enabled) return `${progress} · 已关闭`;
-  if (calibration.active) return `${progress} · 已生效`;
-  return calibration.adjustments >= calibration.threshold
-    ? `${progress} · ${CALIBRATION_NOT_COMPUTED}`
-    : `${progress} · 满 ${calibration.threshold} 本后生效`;
+  return calibration.active ? `${progress} · 已生效` : `${progress} · 满 ${calibration.threshold} 本后生效`;
 }
 
 /** The prediction switch's state, and what it waits for until it may be turned on (EVAL-010). */

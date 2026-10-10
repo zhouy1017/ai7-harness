@@ -37,6 +37,7 @@ import {
   EVALUATION_AI7_STATUS,
   EVALUATION_AI7_SUGGESTED,
   EVALUATION_START_FROM_INITIAL,
+  evaluationAi7CalibrationLine,
   evaluationAi7ConclusionLine,
   evaluationAi7ItemLine,
   evaluationAi7LatestLine,
@@ -61,7 +62,10 @@ import {
   EVALUATION_RISKS_HEADING,
   EVALUATION_SAVE,
   EVALUATION_SCORE,
-  EVALUATION_START,
+  evaluationSkipDamagedLine,
+  evaluationSkippedRecordsLine,
+  evaluationStartLabel,
+  evaluationStartingScore,
   EVALUATION_STATUS,
   EVALUATION_STAY,
   EVALUATION_STRENGTHS,
@@ -764,6 +768,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       parts.push(unreadable === null ? el('p', 'field-note evaluation-empty', EVALUATION_EMPTY) : el('p', 'field-note evaluation-unreadable', unreadable));
     }
     const start = el('div', 'button-row evaluation-start');
+    start.dataset['skipDamaged'] = String(workspace.start.allowed && workspace.start.skipDamaged !== null);
     if (workspace.start.allowed) {
       // 从 AI7 初评开始 leads once AI7's latest 初评 read the text as it stands (EVAL-001, EVAL-006); the editor may still begin alone.
       const fromInitial = workspace.start.fromInitial;
@@ -772,9 +777,11 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         seeded.disabled = busy;
         start.append(seeded);
       }
-      const begin = action(EVALUATION_START[workspace.start.kind], workspace.start.kind === 'first' && fromInitial === null ? 'primary' : 'secondary', 'start', () => void begin_(false));
+      // While the latest version cannot be read (Issue #726), the start names the 定稿 it will seed from and says what it skips.
+      const begin = action(evaluationStartLabel(workspace.start), workspace.start.kind === 'first' && fromInitial === null ? 'primary' : 'secondary', 'start', () => void begin_(false));
       begin.disabled = busy;
       start.append(begin);
+      if (workspace.start.skipDamaged !== null) start.append(el('p', 'field-note evaluation-skip-damaged', evaluationSkipDamagedLine(workspace.start.skipDamaged)));
     } else {
       start.append(el('p', 'field-note evaluation-start-reason', workspace.start.reason));
     }
@@ -903,9 +910,16 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     if (record.ai7WordsNotice !== null) node.append(el('p', 'field-note evaluation-ai7-words-notice', record.ai7WordsNotice));
     const finalized = evaluationFinalizedLine(record, localInstantLabel);
     if (finalized !== null) node.append(el('p', 'evaluation-finalized', finalized));
+    // A version that skipped damaged versions when it began says so, in its own words (Issue #726).
+    const skipped = evaluationSkippedRecordsLine(record);
+    if (skipped !== null) node.append(el('p', 'field-note evaluation-skipped', skipped));
     const initial = record.initial;
     node.dataset['initial'] = String(initial !== null);
+    node.dataset['calibrated'] = String(record.calibration !== null);
     node.append(el('p', 'field-note evaluation-ai7', initial === null ? EVALUATION_AI7_PENDING : evaluationAi7RecordLine(initial)));
+    // The house calibration applied to AI7's starting scores, with the raw scores kept beside each item (EVAL-011a).
+    const calibrated = evaluationAi7CalibrationLine(record.calibration);
+    if (calibrated !== null) node.append(el('p', 'field-note evaluation-ai7-calibration', calibrated));
     // A version begun from a 初评 that completed with gaps says which ranges AI7's draft never read.
     const unread = initial === null ? null : evaluationAi7UnreadLine(initial);
     if (unread !== null) node.append(el('p', 'field-note evaluation-ai7-unread', unread));
@@ -961,8 +975,11 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       const ai7 = initial?.items.find((entry) => entry.itemId === item.itemId) ?? null;
       const beside: HTMLElement[] = [];
       if (ai7 !== null) {
-        const line = el('p', 'evaluation-item-ai7', evaluationAi7ItemLine(ai7, item.fullMarks));
+        // The house calibration's adjusted start, where it moved this item (EVAL-011a); AI7's raw score stays on the line.
+        const calibrated = record.calibration?.items.find((entry) => entry.itemId === item.itemId) ?? null;
+        const line = el('p', 'evaluation-item-ai7', evaluationAi7ItemLine(ai7, item.fullMarks, calibrated));
         line.dataset['sufficiency'] = ai7.sufficiency;
+        if (calibrated !== null) line.dataset['calibrated'] = String(calibrated.adjusted);
         beside.push(line);
         if (ai7.comment !== null) beside.push(el('p', 'field-note evaluation-item-ai7-comment', `AI7 评语：${ai7.comment}`));
         // What AI7's score rests on (EVAL-006): each note it made toward the item, with the range it read it in.
@@ -1098,9 +1115,12 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     return node;
   };
 
-  /** AI7's score of one item in the version on show; `null` when the version began without AI7's 初评 or AI7 gave none. */
-  const ai7ScoreOf = (record: EvaluationRecordProjection, itemId: string): number | null =>
-    record.initial?.items.find((entry) => entry.itemId === itemId)?.score ?? null;
+  /**
+   * The score one item started at in the version on show — AI7's score after the house calibration where it moved it, else
+   * AI7's raw score (EVAL-011a; the service reads departures against the same start) — `null` when the version began without
+   * AI7's 初评 or AI7 gave none.
+   */
+  const ai7ScoreOf = (record: EvaluationRecordProjection, itemId: string): number | null => evaluationStartingScore(record, itemId);
 
   /** The reasons ticked for one item, kept only while the editor's score departs from AI7's. */
   const adjustmentOf = (set: HTMLElement, record: EvaluationRecordProjection, itemId: string, score: number | null, notRated: boolean): EvaluationAdjustment | null => {
@@ -1236,7 +1256,9 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     setStatus(fromInitial ? EVALUATION_AI7_STATUS.startingFromInitial : EVALUATION_STATUS.starting, 'busy');
     paint(null);
     try {
-      workspace = await api.startEvaluation({ fromInitial });
+      // The start says whether the editor saw the latest version skipped (Issue #726): the page offered it so only then.
+      const skipDamaged = workspace?.start.allowed === true && workspace.start.skipDamaged !== null;
+      workspace = await api.startEvaluation({ fromInitial, skipDamaged });
       busy = false;
       setStatus(evaluationStarted(workspace.record?.ordinal ?? 1), 'success');
       paint('.evaluation-record h3');

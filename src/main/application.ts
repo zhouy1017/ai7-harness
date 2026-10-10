@@ -23,6 +23,8 @@ import {
   REVIEW_FINDING_PAGE_KEYS,
   RUN_BUDGET_CEILING_ARGUMENT,
   BACKGROUND_QUIET_ARGUMENT,
+  CALIBRATION_MIN_BOOKS_ARGUMENT,
+  calibrationMinBooksForLaunch,
   parseBackgroundQuietMs,
   TRUSTED_SCOPE_ARGUMENT,
   parseTrustedLaunchForm,
@@ -93,6 +95,8 @@ interface LaunchArguments {
   answerHoldPath: string | undefined;
   /** J-09 only (Issue #95, S39): the 后台分析登记 quiet period in milliseconds, within its bounds. */
   backgroundQuietMs: number | undefined;
+  /** J-11 only (Issue #429, EVAL-011a): the calibration gate in Books, 2–10, so the Journey proves the house offset with two Books. */
+  calibrationMinBooks: number | undefined;
   /** J-05 only: the first Apply commits and its acknowledgement is withheld from the renderer, once. */
   applyControl: 'lose-first-acknowledgement' | undefined;
   observeJ12Reveal: boolean;
@@ -214,6 +218,7 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--j04-connectivity-path' ||
           key === '--j10-unit-hold-path' ||
           key === '--j16-answer-hold-path' ||
+          key === CALIBRATION_MIN_BOOKS_ARGUMENT ||
           key === BACKGROUND_QUIET_ARGUMENT ||
           key === '--j05-apply-control' ||
           key === '--j12-observe-reveal' ||
@@ -395,6 +400,10 @@ function parseArguments(argv: string[]): LaunchArguments {
   const backgroundQuietValue = values.get(BACKGROUND_QUIET_ARGUMENT);
   const backgroundQuietMs = backgroundQuietValue === undefined ? undefined : parseBackgroundQuietMs(backgroundQuietValue);
   requireDesktop(backgroundQuietValue === undefined || (process.env.AI7_E2E_JOURNEY === 'J-09' && backgroundQuietMs !== null));
+  // J-11's calibration gate (Issue #429, EVAL-011a): J-11's own, development-ci only, beside the adapter, 2–10 Books.
+  const calibrationMinBooksValue = values.get(CALIBRATION_MIN_BOOKS_ARGUMENT);
+  const calibrationMinBooks = calibrationMinBooksForLaunch(calibrationMinBooksValue, process.env.AI7_E2E_JOURNEY);
+  requireDesktop(calibrationMinBooks !== null);
   requireDesktop(
     observeJ12RevealValue === undefined ||
       (process.env.AI7_E2E_JOURNEY === 'J-12' && observeJ12RevealValue === 'true'),
@@ -406,7 +415,7 @@ function parseArguments(argv: string[]): LaunchArguments {
       (process.env.AI7_E2E_JOURNEY === undefined && injectedPickerPath === undefined && observeJ12RevealValue === undefined &&
         importControlValue === undefined && foregroundExecutionControlValue === undefined && recoveryControlValue === undefined && modelAdapterControlValue === undefined &&
         applyControlValue === undefined && injectedSavePath === undefined && injectedFolderPath === undefined && connectivityPath === undefined &&
-        unitHoldPath === undefined && answerHoldPath === undefined && backgroundQuietValue === undefined),
+        unitHoldPath === undefined && answerHoldPath === undefined && backgroundQuietValue === undefined && calibrationMinBooksValue === undefined),
   );
   return {
     dataRoot,
@@ -422,6 +431,7 @@ function parseArguments(argv: string[]): LaunchArguments {
     unitHoldPath,
     answerHoldPath,
     backgroundQuietMs: backgroundQuietMs ?? undefined,
+    calibrationMinBooks: calibrationMinBooks ?? undefined,
     applyControl,
     observeJ12Reveal,
     launcherPid,
@@ -3076,12 +3086,14 @@ function registerRendererHandlers(
   ipcMain.handle(IPC_CHANNELS.startEvaluation, (event, input?: Parameters<RendererApi['startEvaluation']>[0]) =>
     envelope(async () => {
       const owned = requireSender(event);
-      requireDesktop(input === undefined || input === null || (typeof input === 'object' && typeof input.fromInitial === 'boolean'), 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireDesktop(input === undefined || input === null || (typeof input === 'object' && typeof input.fromInitial === 'boolean' &&
+        (input.skipDamaged === undefined || typeof input.skipDamaged === 'boolean')), 'AI7_RENDERER_BOUNDARY_INVALID');
       return serializeEffect(async () => {
         requireAuthority();
         const route = requireCurrentBookRoute(owned);
         const routeGeneration = owned.routeGeneration;
-        const result = await service.call('startEvaluation', { bookId: route.bookId, fromInitial: input?.fromInitial === true });
+        // Skipping a latest version that cannot be read (Issue #726) is said explicitly, never assumed.
+        const result = await service.call('startEvaluation', { bookId: route.bookId, fromInitial: input?.fromInitial === true, skipDamaged: input?.skipDamaged === true });
         requireCurrentRouteGeneration(owned, routeGeneration);
         if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '评估不属于当前图书工作台。');
         return result;
@@ -5196,6 +5208,7 @@ export async function runApplication(): Promise<void> {
       // A Journey reads how far the service's own startup came (Issue #675), beside main's steps and under the same switch.
       journeyStartupRelay(process.env, (line) => void process.stderr.write(line)),
       launch.backgroundQuietMs,
+      launch.calibrationMinBooks,
     );
     service.onUnexpectedExit(() => {
       serviceInterrupted = true;

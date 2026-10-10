@@ -1210,8 +1210,10 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'inspectEvaluation', input: { bookId, recordId: null, recordsBefore: 11 } },
       { op: 'inspectEvaluation', input: { bookId, recordId: null, recordsBefore: null } },
       { op: 'inspectEvaluation', input: { bookId, recordId } },
-      { op: 'startEvaluation', input: { bookId, fromInitial: false } },
-      { op: 'startEvaluation', input: { bookId, fromInitial: true } },
+      // 开始评估 names whether a damaged latest version is skipped (Issue #726), always, as the main process sends it.
+      { op: 'startEvaluation', input: { bookId, fromInitial: false, skipDamaged: false } },
+      { op: 'startEvaluation', input: { bookId, fromInitial: true, skipDamaged: false } },
+      { op: 'startEvaluation', input: { bookId, fromInitial: false, skipDamaged: true } },
       { op: 'saveEvaluation', input: { bookId, recordId, expectedEntries: 1, content, finalize: false } },
       { op: 'saveEvaluation', input: { bookId, recordId, expectedEntries: 3, content, finalize: true } },
       // AI7 初评 (Issue #429, S81b1): an item may carry its adjustment of AI7's score, or none.
@@ -1249,7 +1251,12 @@ describe('decodeRequest rejects malformed frames', () => {
       ['inspectEvaluation', { bookId: 'book', recordId: null }],
       ['startEvaluation', { bookId, recordId }],
       ['startEvaluation', { bookId }],
-      ['startEvaluation', { bookId, fromInitial: 'yes' }],
+      ['startEvaluation', { bookId, fromInitial: 'yes', skipDamaged: false }],
+      // The shape before Issue #726, and a non-boolean skip: the frame that broke J-11's 开始评估 at 7a5b4bca would have been
+      // caught here had the key been pinned.
+      ['startEvaluation', { bookId, fromInitial: false }],
+      ['startEvaluation', { bookId, fromInitial: false, skipDamaged: 'yes' }],
+      ['startEvaluation', { bookId, fromInitial: false, skipDamaged: null }],
       ['prepareInitialEvaluation', { bookId, mode: 'evaluation-first' }],
       ['authorizeInitialEvaluation', { bookId, taskIntentId: recordId, planEnvelopeDigest: 'A'.repeat(64) }],
       ['authorizeInitialEvaluation', { bookId, taskIntentId: 'task', planEnvelopeDigest: 'a'.repeat(64) }],
