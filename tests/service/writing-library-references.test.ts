@@ -216,6 +216,7 @@ const LIVE = {
     credentialSlot: 'opencode-go',
     credentialReference: randomUUID(),
     runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 100_000 },
+    platformTools: null, toolCalling: 'none',
   },
 } as const;
 

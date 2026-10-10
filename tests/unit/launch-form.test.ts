@@ -54,8 +54,8 @@ describe('resolveDeveloperLiveLaunch', () => {
 
   it('binds the policy per-frozen-unit default ceiling and the sibling cache directory of the checkout', () => {
     const launch = resolveDeveloperLiveLaunch({ trustedOperationalScope: 'developer-live', runBudgetCeiling: null, providerCacheRoot: null }, checkout);
-    // ADR 0070: 30,000 tokens per frozen Coverage Manifest unit, resolved once the manifest freezes.
-    expect(launch.runBudgetCeiling).toEqual({ kind: 'tokens-per-frozen-unit', tokensPerFrozenUnit: 30_000 });
+    // ADR 0070 as ADR 0080 §7.4 sizes it under v8: 90,000 tokens per frozen Coverage Manifest unit, resolved once the manifest freezes.
+    expect(launch.runBudgetCeiling).toEqual({ kind: 'tokens-per-frozen-unit', tokensPerFrozenUnit: 90_000 });
     expect(launch.providerCacheRoot).toBe(resolve(checkout, '..', DEFAULT_PROVIDER_CACHE_DIRECTORY));
     expect(DEFAULT_PROVIDER_CACHE_DIRECTORY).toBe('ai7-harness-provider-cache');
   });
@@ -92,9 +92,10 @@ describe('resolveDeveloperLiveCeiling', () => {
     // the ceiling sizes with the work, which is the whole point of the per-unit form.
     expect(resolveDeveloperLiveCeiling(perUnit, 8)).toEqual({ kind: 'tokens', maxTotalTokens: 240_000 });
     expect(resolveDeveloperLiveCeiling(perUnit, 3)).toEqual({ kind: 'tokens', maxTotalTokens: 90_000 });
-    // The policy default itself is the one `resolveDeveloperLiveLaunch` binds, not a second constant.
+    // The policy default itself is the one `resolveDeveloperLiveLaunch` binds, not a second constant: 90,000 per frozen
+    // unit under Provider Processing v8 (ADR 0080 §7.4), so eight units bind 720,000.
     const bound = resolveDeveloperLiveLaunch({ trustedOperationalScope: 'developer-live', runBudgetCeiling: null, providerCacheRoot: null }, resolve(REPO_ROOT)).runBudgetCeiling;
-    expect(resolveDeveloperLiveCeiling(bound, 8)).toEqual({ kind: 'tokens', maxTotalTokens: 240_000 });
+    expect(resolveDeveloperLiveCeiling(bound, 8)).toEqual({ kind: 'tokens', maxTotalTokens: 720_000 });
   });
 });
 

@@ -8,7 +8,7 @@ Generated from the provider documents under [`config/providers/`](../../config/p
 
 - **Declared** — a document declares the route and the model. A declared model whose `answerChannel` is `none` is inert: it can read no response. A declared format is a claim about the request shape and nothing else (ADR 0073 §3).
 - **Live-verified** — a capability whose evidence is `live-test-item`, cited by its item ids.
-- **Bindable** — a route a Provider Resolution Plan may bind. No document makes a route bindable: that is a Provider Processing policy rule naming the exact binding, the Owner's decision per provider, and its first transmission is a named test item under ADR 0067. Today the bindable routes are the production connection's `deepseek-open-platform` and Provider Processing v5's developer-live `opencode-go` (`ExecutionRoute`, `src/service/provider/egress-gate.ts`).
+- **Bindable** — a route a Provider Resolution Plan may bind. No document makes a route bindable: that is a Provider Processing policy rule naming the exact binding, the Owner's decision per provider, and its first transmission is a named test item under ADR 0067. Today the bindable routes are the production connection's `deepseek-open-platform` and Provider Processing v8's developer-live `opencode-go` (`ExecutionRoute`, `src/service/provider/egress-gate.ts`).
 
 A capability a document does not declare is absent with `unverified` evidence. A context size is the one the vendor page states, in tokens (an input limit where the page states one separately; a page's "1M" is read as 1,000,000), and `none` where no page read states one.
 
@@ -393,7 +393,7 @@ Open:
 | OpenCode session header | sent — `vendor-documentation`, OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/, read 2026-09-08 |
 | Per-turn output cap | none |
 
-The developer-live route of Provider Processing v5 (ADR 0065, ADR 0067). On this gateway a 429, a 402 or a body naming the usage limit is the development account's limit, so it ends the Run. The Session header carries the technical Session id for the gateway's prompt cache. Named by the documentation and deliberately absent, because the Zen table states no id for them: LongCat-2.0, Hy4 preview, Hy3, Omen Alpha, MiMo-V2.5, MiMo-V2.5-Pro.
+The developer-live route of Provider Processing v8 (ADR 0065, ADR 0067; v5's binding carried unchanged). On this gateway a 429, a 402 or a body naming the usage limit is the development account's limit, so it ends the Run. The Session header carries the technical Session id for the gateway's prompt cache. Named by the documentation and deliberately absent, because the Zen table states no id for them: LongCat-2.0, Hy4 preview, Hy3, Omen Alpha, MiMo-V2.5, MiMo-V2.5-Pro.
 
 | Model id | Display name | Context | Tool calling | Web search tool |
 | --- | --- | --- | --- | --- |

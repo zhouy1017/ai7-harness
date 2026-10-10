@@ -670,7 +670,7 @@ function renderSupport({ providers, recordedEvidence }) {
     '',
     '- **Declared** — a document declares the route and the model. A declared model whose `answerChannel` is `none` is inert: it can read no response. A declared format is a claim about the request shape and nothing else (ADR 0073 §3).',
     '- **Live-verified** — a capability whose evidence is `live-test-item`, cited by its item ids.',
-    '- **Bindable** — a route a Provider Resolution Plan may bind. No document makes a route bindable: that is a Provider Processing policy rule naming the exact binding, the Owner\'s decision per provider, and its first transmission is a named test item under ADR 0067. Today the bindable routes are the production connection\'s `deepseek-open-platform` and Provider Processing v5\'s developer-live `opencode-go` (`ExecutionRoute`, `src/service/provider/egress-gate.ts`).',
+    '- **Bindable** — a route a Provider Resolution Plan may bind. No document makes a route bindable: that is a Provider Processing policy rule naming the exact binding, the Owner\'s decision per provider, and its first transmission is a named test item under ADR 0067. Today the bindable routes are the production connection\'s `deepseek-open-platform` and Provider Processing v8\'s developer-live `opencode-go` (`ExecutionRoute`, `src/service/provider/egress-gate.ts`).',
     '',
     'A capability a document does not declare is absent with `unverified` evidence. A context size is the one the vendor page states, in tokens (an input limit where the page states one separately; a page\'s "1M" is read as 1,000,000), and `none` where no page read states one.',
     '',

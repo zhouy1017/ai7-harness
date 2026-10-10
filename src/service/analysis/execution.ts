@@ -8,7 +8,12 @@ import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } fro
 import { evaluateRunBudgetCeiling, totalTokens, type ClassifiedModelFailure, type RunBudgetCeiling, type UsageFacts } from '../provider/classification.js';
 import { DeepSeekOpenAiCompatibleAdapter, OPENCODE_GO_ROUTE_PROFILE } from '../provider/deepseek-adapter.js';
 import { transmitOnce } from '../provider/live-transmission.js';
-import { OPENCODE_GO_V4_FLASH_PROFILE } from '../provider/model-profile.js';
+import { OPENCODE_GO_V4_FLASH_PROFILE, type ProviderModelProfile } from '../provider/model-profile.js';
+import type { PlatformToolFetch } from '../provider/platform-tool-http.js';
+import { DeferredPlatformToolOwner, PlatformToolSession } from '../provider/platform-tool-session.js';
+import { platformToolsRegistered } from '../provider/platform-tools.js';
+import { ResearchSnapshotCache } from '../provider/research-snapshot-cache.js';
+import { admitTicketHost } from '../../shared/network-denial.js';
 import {
   LOCAL_DETERMINISTIC_MODEL,
   LOCAL_DETERMINISTIC_ROUTE,
@@ -134,8 +139,15 @@ export interface ExecutionOwnerDependencies {
   readonly launchPolicy: LaunchPolicyProjection;
   readonly fixture: ResolvedModelFixture | null;
   readonly secretResolver: SecretResolver;
-  /** The developer-live launch facts and captured transport; present exactly when the policy bound v5. */
+  /** The developer-live launch facts and captured transport; present exactly when the policy bound v8. */
   readonly developerLive?: DeveloperLiveRuntime | null;
+  /**
+   * The bound model's capability profile under developer-live: the launch's own `opencode-go/deepseek-v4-flash` when absent.
+   * Its `toolCalling` decides, with the selected rule and the kind's declaration, whether a Run registers the platform
+   * tools (ADR 0080 §4, §7.1; Issue #473, S87-f3b). The service suite names a function-calling profile to exercise the tool
+   * loop on a stub transport, as the remote-route unit test does; the service entry never names one.
+   */
+  readonly modelProfile?: ProviderModelProfile;
   /** J-10's unit hold (Issue #422); absent in every other launch, where a unit settles as soon as its turn returns. */
   readonly unitHold?: UnitHold | null;
   /**
@@ -333,6 +345,12 @@ export const BUDGET_REACHED_NEXT_ACTION = '点「调整预算并重做」：在�
 export const SAFE_RETRY_SCOPE_CHANGED = '书系检索范围已变化，没有再试一次' as const;
 /** A safe retry the spent ceiling stopped (Issue #51, S16a): the unit's first failure is its gap, and nothing more is sent. */
 export const SAFE_RETRY_BUDGET_REACHED = '任务运行预算已达上限，没有再试一次' as const;
+/**
+ * The reason a unit settles under the disclosed state 联网核查未完成 (ADR 0080 §7.4; Issue #473, S87-f3b): its platform-tool
+ * round trips reached the breaker — a loop, not a budget — so it formed no result and is not retried; the Run goes on.
+ * The state itself is the gap code `web-verification-incomplete`; this is what the editor reads beside it.
+ */
+export const WEB_VERIFICATION_INCOMPLETE_GAP_REASON = '本阅读范围的联网工具往返达到熔断上限，该范围未形成结果，也不会重试；其余范围照常。' as const;
 /**
  * A safe retry that would not repeat its first attempt's unit message byte for byte (Issue #286): it is not a safe retry, so
  * it is not sent, and the unit's first failure is its gap.
@@ -708,7 +726,14 @@ export class BaselineAnalysisExecutionOwner {
     // describe it, never the one the plan froze: a harness a later release pins differently is seen here, before a
     // summary promises what the Run kept, and not first when the execution refuses it.
     const { route, model } = routeFactsOf(facts, live);
-    const composition = describeComposition(route, model, ledger.definition.promptContractDigest);
+    // The same registration question `#execute` asks (Issue #473): a composition that registers the tools is pinned as one.
+    const composition = describeComposition(route, model, ledger.definition.promptContractDigest, {
+      platformTools: platformToolsRegistered({
+        rule: live === null ? null : (this.#deps.launchPolicy.providerProcessing.platformTools ?? null),
+        kindDeclaresWebSearch: ledger.definition.webSearch === true,
+        toolCalling: (this.#deps.modelProfile ?? OPENCODE_GO_V4_FLASH_PROFILE).capabilities.toolCalling,
+      }),
+    });
     const rebuilt = executionBindingRecordOf({
       facts, definition: ledger.definition, live, fixture: this.#deps.fixture, attemptId: stored.attemptId,
       harnessSessionId: stored.binding.harnessSessionId, boundAt: stored.binding.boundAt, compositionDigest: composition.digest,
@@ -1013,11 +1038,21 @@ export class BaselineAnalysisExecutionOwner {
       if (policy.operationalScope !== 'development-ci' || policy.providerProcessing.version !== 'v1' || policy.providerProcessing.liveTransmissionAllowed !== false) {
         throw new ExecutionAdmissionError('EXECUTION_POLICY_INVALID', '当前可信策略不是 development-ci · Provider Processing v1。');
       }
-    } else if (policy.operationalScope !== 'developer-live' || policy.providerProcessing.version !== 'v5' ||
+    } else if (policy.operationalScope !== 'developer-live' || policy.providerProcessing.version !== 'v8' ||
         policy.providerProcessing.decision !== 'eligible-only' || policy.providerProcessing.liveTransmissionAllowed !== true) {
-      throw new ExecutionAdmissionError('EXECUTION_POLICY_INVALID', '当前可信策略不是 developer-live · Provider Processing v5。');
+      throw new ExecutionAdmissionError('EXECUTION_POLICY_INVALID', '当前可信策略不是 developer-live · Provider Processing v8。');
     }
     const fixture = this.#deps.fixture;
+    // The platform tools (ADR 0080 §7.1, §4; Issue #473, S87-f3b): registered only for a Run whose selected rule names them,
+    // whose kind declares web search on its row, and whose bound profile declares function calling — the same three facts
+    // the plan freeze read, so the composition this Run executes is the one its plan pinned. The owner is composed into
+    // the harness now and bound to its session once the Execution Binding it is built from is persisted.
+    const modelProfile = this.#deps.modelProfile ?? OPENCODE_GO_V4_FLASH_PROFILE;
+    const platformToolsRule = live === null ? null : (policy.providerProcessing.platformTools ?? null);
+    const registersPlatformTools = platformToolsRegistered({
+      rule: platformToolsRule, kindDeclaresWebSearch: definition.webSearch === true, toolCalling: modelProfile.capabilities.toolCalling,
+    });
+    const toolOwner = registersPlatformTools ? new DeferredPlatformToolOwner() : null;
     // The route the plan froze, resolved once — the deterministic fixture, or the live route profile — and the
     // ceiling it carries, already resolved: an explicit launch total, or the policy's per-frozen-unit default
     // against this Run's own frozen unit count. Never re-derived at dispatch.
@@ -1087,9 +1122,11 @@ export class BaselineAnalysisExecutionOwner {
       model,
       systemPrompt: definition.systemPrompt,
       promptContractDigest,
-      // One technical Session per Analysis Unit under v5; the deterministic route keeps its single
+      // One technical Session per Analysis Unit under v8 (as under v5); the deterministic route keeps its single
       // accumulating Session, so J-04's proven composition is untouched.
       ...(live === null ? {} : { sessionMode: 'per-unit' as const }),
+      // The two platform tools, only for a Run that registers them; every other composition keeps `registeredTools: 0`.
+      ...(toolOwner === null ? {} : { platformTools: toolOwner }),
       adapterFactory: (codes) => {
         // A continuation's retry is the unit's second attempt however many executions it took to reach it (Issue #422,
         // S76d): the deterministic fixture serves attempts in order, so it is told what each unit attempted before.
@@ -1106,7 +1143,7 @@ export class BaselineAnalysisExecutionOwner {
           promptContractDigest,
           codes,
           profile: OPENCODE_GO_ROUTE_PROFILE,
-          modelProfile: OPENCODE_GO_V4_FLASH_PROFILE,
+          modelProfile,
           sessionId: () => harness.currentSessionId(),
           // The captured native `fetch`, reached only through the cache: an identical request
           // replays without transmitting, and a live call happens at most once per test item. The
@@ -1118,7 +1155,10 @@ export class BaselineAnalysisExecutionOwner {
       },
       gate: (payload) => {
         if (bindingFacts === null) return { decision: 'refuse', reason: 'binding-stale', detail: '执行绑定尚未持久化；未发送任何内容。' };
-        const decision = evaluateEgress(payload, bindingFacts, { currentBindingDigest: () => currentBindingDigest, acceptedOutputDigests, ceilingState });
+        // With the tools registered, the attempt's scope is the session's: its accepted tool-call messages, admitted tool
+        // results, breaker state and citation set, over the same binding digest, accepted outputs and ceiling.
+        const scope = toolOwner?.session?.egressScope ?? { currentBindingDigest: () => currentBindingDigest, acceptedOutputDigests, ceilingState };
+        const decision = evaluateEgress(payload, bindingFacts, scope);
         admittedPayloadDigest = decision.decision === 'refuse' ? null : decision.payloadDigest;
         return decision;
       },
@@ -1178,9 +1218,29 @@ export class BaselineAnalysisExecutionOwner {
         outboundDataCategory: 'public-or-synthetic',
         policy: live === null
           ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }
-          : { operationalScope: 'developer-live', providerProcessingVersion: 'v5', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+          : { operationalScope: 'developer-live', providerProcessingVersion: 'v8', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
         admittedUserMessages,
+        // The rule's platform tools reach the gate exactly when the composition registered them; a Run whose composition
+        // kept zero tools carries none, and the gate refuses every tool, tool call and tool result as before.
+        platformTools: registersPlatformTools ? platformToolsRule : null,
       };
+      if (toolOwner !== null && live !== null) {
+        // The attempt's platform-tool session (ADR 0080 §7; Issue #473): the one Egress Gate's tickets, the breakers, the
+        // Research Snapshot Cache beside the Provider Result Cache, the once-only ledger under this Task mode's purpose, and
+        // the per-ticket host admission `webfetch` targets are reached through. Bound now, before any model call: the gate
+        // refuses every turn until the binding is persisted, and the binding is what the session is built from.
+        const snapshots = new ResearchSnapshotCache(live.launch.providerCacheRoot);
+        await snapshots.open();
+        toolOwner.bind(new PlatformToolSession({
+          binding: bindingFacts,
+          scope: { currentBindingDigest: () => currentBindingDigest, acceptedOutputDigests, ceilingState },
+          fetch: live.nativeFetch as unknown as PlatformToolFetch,
+          admitHost: admitTicketHost,
+          cache: cache!,
+          snapshots,
+          purpose: testItemPurpose,
+        }));
+      }
       harness.bindExecution({ harnessSessionId, behaviorCompositionDigest: harness.composition.digest, promptContractDigest });
       // 取消任务 before the Run kept any unit (CTRL-008): nothing of it is left to gather, so it ends here without
       // provider work and without a revision. A stopped Run that kept units — or whose units asked the editor, their first
@@ -1461,6 +1521,8 @@ export class BaselineAnalysisExecutionOwner {
         const candidate = turn.signals.find((signal) => signal.kind === 'contentCandidate');
         const observation: RunReportUnitObservation = { unitOrdinal: unit.ordinal, attempts: s.attempts, wallMs: s.wallMs, usage: s.usage };
         const gap = (code: AnalysisGapProjection['code'], reason: string): void => settleGap(unit, requestDigest, observation, code, reason);
+        // How the platform-tool session says this turn ended — read before the next turn starts and resets the breaker.
+        const breakerEnd = toolOwner?.session?.unitEnd(turn) ?? null;
         if (turn.terminal === 'completed' && candidate?.kind === 'contentCandidate' && s.attempt.canonical?.kind === 'empty-answer') {
           // The model was reached and answered in the channel its profile declares, and the channel
           // was empty. That is not a contract the model broke — there is nothing to parse — so the
@@ -1486,6 +1548,12 @@ export class BaselineAnalysisExecutionOwner {
           }
         } else if (turn.terminal === 'completed') {
           gap('contract-invalid', '技术回合完成但没有模型输出。');
+        } else if (turn.terminal === 'failed' && breakerEnd !== null) {
+          // 联网核查未完成 (ADR 0080 §7.4; Issue #473, S87-f3b): this unit's platform-tool round trips reached the breaker, so
+          // its findings were never formed. It settles as that disclosed state — read from the session before the next turn
+          // resets the breaker — never as a generic adapter failure, never retried (its failure is not retry-safe), and never
+          // ending the Run: the other units owe nothing to this one's loop.
+          gap('web-verification-incomplete', WEB_VERIFICATION_INCOMPLETE_GAP_REASON);
         } else if (turn.terminal === 'failed') {
           const failure = turn.signals.find((signal) => signal.kind === 'failed');
           const reason = failure?.kind === 'failed' ? `${failure.failure.reason}（${failure.failure.code}）` : '适配器失败。';
@@ -2396,8 +2464,8 @@ function executionBindingRecordOf(input: {
     credentialSlot: { modelRole: 'Main Editorial Role', slot: credentialSlot, credentialReference },
     outboundDataCategory: 'public-or-synthetic',
     policyPin: live === null
-      ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v5', liveTransmissions: 0 }
-      : { operationalScope: 'developer-live', providerProcessingVersion: 'v5', activePolicySetVersion: 'v5', liveTransmissions: 'bounded-by-run' },
+      ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v6', liveTransmissions: 0 }
+      : { operationalScope: 'developer-live', providerProcessingVersion: 'v8', activePolicySetVersion: 'v6', liveTransmissions: 'bounded-by-run' },
     runBudgetCeiling: runBudgetCeiling.kind === 'unset' ? 'unset' : runBudgetCeiling,
     dispatchAttribution: 'Dispatch',
     boundAt: input.boundAt,

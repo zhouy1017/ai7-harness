@@ -249,6 +249,7 @@ describe('改计划重做 over the real store', () => {
           credentialSlot: 'opencode-go',
           credentialReference: randomUUID(),
           runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 240_000 },
+          platformTools: null, toolCalling: 'none',
         },
       });
       const offline = () => store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null });

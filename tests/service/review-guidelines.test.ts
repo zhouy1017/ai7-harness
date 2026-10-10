@@ -69,6 +69,7 @@ const LIVE: LaunchBinding = {
     credentialSlot: 'opencode-go',
     credentialReference: randomUUID(),
     runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 240_000 },
+    platformTools: null, toolCalling: 'none',
   },
 };
 /** What 新建审阅 and the drive say of a category that would send the house's clauses to a live model. */

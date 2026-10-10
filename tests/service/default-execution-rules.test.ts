@@ -482,6 +482,7 @@ describe('快速开始 over the real store (TASK-017, TASK-020, TASK-026, TASK-0
           credentialSlot: 'opencode-go',
           credentialReference: randomUUID(),
           runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 240_000 },
+          platformTools: null, toolCalling: 'none',
         },
       });
       expect(store.inspectBaselineAnalysis(bookId, () => null).updateControls!.actions['reanalyze-book'].quickStart)

@@ -25,9 +25,9 @@ function launch(scope: 'development-ci' | 'developer-live'): LaunchPolicyProject
     integrityState: 'verified',
     denialReason: null,
     operationalScope: scope,
-    activePolicySetVersion: 'v5',
+    activePolicySetVersion: 'v6',
     providerProcessing: {
-      version: live ? 'v5' : 'v1',
+      version: live ? 'v8' : 'v1',
       decision: live ? 'eligible-only' : 'deny',
       authorizedLiveTransmissionCount: live ? 'bounded-by-run' : 0,
       liveTransmissionAllowed: live,
@@ -75,7 +75,7 @@ describe('the denied Task kind reads its statements from the bound launch', () =
     const pin = planProviderProcessingPin(launch('developer-live'));
     expect(pin).toEqual({
       operationalScope: 'developer-live',
-      version: 'v5',
+      version: 'v8',
       decision: 'eligible-only',
       authorizedLiveTransmissionCount: 'bounded-by-run',
     });
@@ -95,7 +95,7 @@ describe('the denied Task kind reads its statements from the bound launch', () =
       expect(reading).not.toContain('v1');
       expect(reading).not.toContain('0 次');
     }
-    expect(planStopCondition(pin)).toContain('v5');
+    expect(planStopCondition(pin)).toContain('v8');
     expect(foregroundDenialReasons(pin)[1]).toContain('developer-live');
     expect(foregroundDenialReasons(pin)[1]).toContain('bounded-by-run');
     // The plan and its envelope carry the second scope's pin and the readings of that pin.

@@ -15,7 +15,7 @@ import {
 } from '../../src/service/provider/platform-tools.js';
 
 // The platform tools' policy reading (Issue #473, S87-f3a), over the real Policy Document bytes: the selected
-// developer-live document (Provider Processing v5) names no platform tools, so every consumer of the rule refuses; the
+// predecessor developer-live document (Provider Processing v5) names no platform tools, so every consumer of the rule refuses; the
 // reviewed-but-unselected v7 names them exactly as ADR 0080 §7.5 writes them.
 
 const REPO_ROOT = resolve(fileURLToPath(new URL('../../', import.meta.url)));
@@ -28,12 +28,24 @@ async function rulesOf(version: string): Promise<unknown[]> {
 }
 
 describe('readPlatformToolsRule', () => {
-  it('reads no platform tools from any rule of the selected documents, v5 included', async () => {
+  it('reads no platform tools from any rule of v1, v6 or the predecessor v5', async () => {
     for (const version of ['v1', 'v5', 'v6']) {
       for (const rule of await rulesOf(version)) expect(readPlatformToolsRule(rule)).toBeNull();
     }
     const [v5] = await rulesOf('v5');
     expect((v5 as { transmissions: { webSearchToolAllowed: boolean } }).transmissions.webSearchToolAllowed).toBe(false);
+  });
+
+  it('reads the selected v8 document: the analysis rule names the tools, the dialogue rule names none (Issue #473, S87-f3b)', async () => {
+    const [analysis, dialogue, ...rest] = await rulesOf('v8');
+    expect(rest).toHaveLength(0);
+    expect(readPlatformToolsRule(analysis)).toEqual({
+      websearch: { service: 'parallel', host: 'search.parallel.ai', tool: 'web_search', anonymous: true },
+      webfetch: { maxBytes: 5_242_880, timeoutSeconds: 30, boundedByCitations: true },
+    });
+    // ADR 0088 §1.5: the dialogue rule's switch is off and it carries no block, so an excerpt can never reach a tool.
+    expect((dialogue as { transmissions: { webSearchToolAllowed: boolean } }).transmissions.webSearchToolAllowed).toBe(false);
+    expect(readPlatformToolsRule(dialogue)).toBeNull();
   });
 
   it('reads the v7 block exactly, and only while the rule\'s switch is on', async () => {

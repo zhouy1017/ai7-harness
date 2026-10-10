@@ -585,6 +585,7 @@ describe('the market section and 按我的评分重写评语 over the real store
           credentialSlot: 'opencode-go',
           credentialReference: randomUUID(),
           runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 100_000 },
+          platformTools: null, toolCalling: 'none',
         },
       });
       try {

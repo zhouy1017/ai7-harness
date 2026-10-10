@@ -123,6 +123,10 @@ function liveBinding(ceiling: Ceiling) {
       credentialSlot: DEVELOPER_LIVE_POLICY_BINDING.credentialSlot,
       credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
       runBudgetCeiling: ceiling,
+      // What the service entry binds under v8 (Issue #473): the rule's tools, and the flash profile's own `toolCalling`
+      // (`none`), so the baseline kind — which declares no web search anyway — freezes the tool-less composition.
+      platformTools: launchPolicy.providerProcessing.platformTools ?? null,
+      toolCalling: 'none' as const,
     },
   };
 }
@@ -359,7 +363,7 @@ async function ledgerLines(root: string): Promise<Array<Record<string, unknown>>
 vi.setConfig({ hookTimeout: 60_000 });
 
 describe('the developer-live scope over exact sample1 with a stub transport', { timeout: 60_000 }, () => {
-  it('freezes the v5 plan and transmits the full declared chain through the gate', async () => {
+  it('freezes the v8 plan and transmits the full declared chain through the gate, tool-less on the flash profile', async () => {
     const calls: StubCall[] = [];
     const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
     const { units: responses, named } = await unitAnswers(prepared);
@@ -373,7 +377,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
       modelId: 'deepseek-v4-flash',
       credentialSlot: 'opencode-go',
       credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
-      providerProcessing: { operationalScope: 'developer-live', version: 'v5', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
+      providerProcessing: { operationalScope: 'developer-live', version: 'v8', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
     });
     expect(provider.executionRoute).toEqual({ kind: 'opencode-go', model: 'deepseek-v4-flash', endpoint: OPENCODE_GO_ROUTE_PROFILE.endpoint });
     expect(provider.runBudgetCeiling).toEqual(CEILING);
@@ -394,7 +398,9 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
       expect(body.response_format).toEqual({ type: 'json_object' });
       expect(body).not.toHaveProperty('thinking');
       expect(body).not.toHaveProperty('reasoning_effort');
-      // Provider Processing v5's rule names no platform tools (Issue #473): no request offers the model a tool.
+      // Provider Processing v8's analysis rule names the platform tools, but the baseline kind declares no web search and
+      // `opencode-go/deepseek-v4-flash` still declares `toolCalling: 'none'` (Issue #473, S87-f3b): no request offers the
+      // model a tool, and every request body stays byte-identical to the v5 chain's.
       expect(body).not.toHaveProperty('tools');
       expect(JSON.stringify(body.messages)).not.toContain('tool_calls');
       // The credential never enters the body or its digest.
@@ -412,11 +418,11 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     expect(spanSessions).not.toContain(attempt.executionBinding!.harnessSessionId);
     expect(attempt.credentialReadinessCheck).toMatchObject({ slot: 'opencode-go', readiness: 'present', valueReleased: false });
 
-    // The revision records the live route and the v5 policy pin, through the existing real path.
+    // The revision records the live route and the v8 policy pin under active-policy-set v6, through the existing real path.
     const revision = settled.resultSetRevision!;
     expect(revision.adapterPin).toEqual({ route: 'opencode-go', model: 'deepseek-v4-flash', fixtureIdentity: null, fixtureSha256: null });
     expect(revision.policyPin).toEqual({
-      operationalScope: 'developer-live', providerProcessingVersion: 'v5', activePolicySetVersion: 'v5', liveTransmissions: 'bounded-by-run',
+      operationalScope: 'developer-live', providerProcessingVersion: 'v8', activePolicySetVersion: 'v6', liveTransmissions: 'bounded-by-run',
     });
     // The revision counts the three revision-facing stages: eight unit turns, the reduction turn and
     // the sampling turn. The reflection turn is dispatched after the revision is persisted, so its

@@ -210,6 +210,7 @@ const LIVE: LaunchBinding = {
   live: {
     route: 'opencode-go', model: 'deepseek-v4-flash', endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
     credentialSlot: 'opencode-go', credentialReference: randomUUID(), runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 240_000 },
+    platformTools: null, toolCalling: 'none',
   },
 };
 

@@ -83,6 +83,22 @@ export function readPlatformToolsRule(rule: unknown): PlatformToolsRule | null {
   });
 }
 
+/**
+ * Whether one composition registers the platform tools (ADR 0080 §7.1 and §4, supply b; Issue #473 S87-f3b): only for a
+ * Run whose selected rule names them, whose kind declares web search on its row of ADR 0080's task table, and whose
+ * binding's profile declares function calling — the adapter sends `tools` only to such a model, so a profile that still
+ * declares `toolCalling: 'none'` (as `opencode-go/deepseek-v4-flash` does until the ADR 0080 §7.7 evidence item) keeps
+ * every composition tool-less and byte-identical to the one it froze before. The plan freeze and the execution owner both
+ * ask this one question with the same three facts, so the composition the plan pins is the one the Run executes.
+ */
+export function platformToolsRegistered(input: {
+  readonly rule: PlatformToolsRule | null;
+  readonly kindDeclaresWebSearch: boolean;
+  readonly toolCalling: 'none' | 'function';
+}): boolean {
+  return input.rule !== null && input.kindDeclaresWebSearch && input.toolCalling === 'function';
+}
+
 /** One tool schema exactly as the model sees it: the three fields DSH projects, and nothing else. */
 export interface PlatformToolSchema {
   readonly name: PlatformToolName;

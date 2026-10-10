@@ -5034,7 +5034,9 @@ export class EditorialStore {
     if (entry.executor === 'factual-review-kind') return this.#factualReview;
     requireStore(entry.executor === 'review-category-contract', 'REVIEW_CATEGORY_NOT_TASK_BACKED', '这一类没有自己的任务账本。');
     const input = reviewCategoryContractInput(entry);
-    const definition = this.#reviewCategoryDefinitions.obtain(JSON.stringify(input), () => this.#analysisCall(() => reviewCategoryKindDefinition(input)));
+    // The category's web-search declaration (Issue #473) is part of the definition's identity, never of its contract.
+    const options = { webSearch: entry.searchEngine };
+    const definition = this.#reviewCategoryDefinitions.obtain(JSON.stringify({ input, options }), () => this.#analysisCall(() => reviewCategoryKindDefinition(input, options)));
     return this.reviewCategoryLedger(definition);
   }
 

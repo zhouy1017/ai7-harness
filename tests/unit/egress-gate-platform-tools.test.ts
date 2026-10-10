@@ -24,8 +24,9 @@ import type { AssembledContentBlock, AssembledModelPayload } from '../../src/ser
 import { PLATFORM_TOOL_SCHEMAS, canonicalToolArguments, readPlatformToolsRule, toolArgumentsDigest, type PlatformToolsRule } from '../../src/service/provider/platform-tools.js';
 
 // The Egress Gate's platform-tool narrowings (ADR 0080 §7.2; Issue #473, S87-f3a). Every new path is keyed on the
-// binding's rule naming the platform tools. The selected developer-live document, Provider Processing v5, names none, so
-// the first half of this file proves each path still refuses under v5 exactly as before — with every other precondition
+// binding's rule naming the platform tools. The predecessor developer-live document, Provider Processing v5 (every row
+// persisted before S87-f3b names it), names none, so the first half of this file proves each path refuses under a
+// v5-shaped binding exactly as before — with every other precondition
 // satisfied, so the rule is the only thing refusing. The second half exercises the paths under the v7 block, which no
 // active set selects.
 
@@ -104,7 +105,7 @@ function bookFor(named: EgressBindingFacts, current: () => string | null = () =>
   return EgressTicketBook.open(named, { currentBindingDigest: current });
 }
 
-describe('under the selected Provider Processing v5 every platform-tool path still refuses', () => {
+describe('under a binding of the predecessor Provider Processing v5 every platform-tool path still refuses', () => {
   it('reads no platform tools from the v5 rule', async () => {
     expect(await ruleOf('v5')).toBeNull();
   });

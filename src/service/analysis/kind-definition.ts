@@ -248,6 +248,13 @@ export interface AnalysisKindDefinition {
   /** Why the sampling stage did not run, for a kind that declares no such stage. */
   readonly assuranceAbsentReason: string;
   /**
+   * Whether this kind's row of ADR 0080's task table declares web search (WS: 事实核查, 学术道德与引用 and the other
+   * search rows; Issue #473, S87-f3b). A declaring kind registers AI7's platform tools for a Run whose selected rule names
+   * them on a binding whose profile declares function calling; every other kind keeps `registeredTools: 0`. Absent means
+   * `false`, so every kind that predates the declaration reads as it always did.
+   */
+  readonly webSearch?: true;
+  /**
    * How many findings of each class this reduction produced, as the kind that owns them names its own
    * classes. The Run Report's accounting names these counts and nothing else about a finding: never a
    * description, a quotation, an entity, or a source range. The kind decides what a class is, because
@@ -535,6 +542,9 @@ export function factualReviewKindDefinition(research: ResearchCapability = new F
     updateExecutionSteps: FACTUAL_REVIEW_UPDATE_EXECUTION_STEPS,
     crossUnit: null,
     crossUnitAbsentReason: FACTUAL_REVIEW_CROSS_UNIT_ABSENT_REASON,
+    // Row 8 of ADR 0080's task table (事实核查): search is the point. The tools are registered only once the selected rule
+    // names them on a function-calling binding (Issue #473); the capability above keeps answering 外部研究未获准 meanwhile.
+    webSearch: true,
     assurance: {
       promptContractDigest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST,
       resultSchema: ASSURANCE_SAMPLING_RESULT_SCHEMA,

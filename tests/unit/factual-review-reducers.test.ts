@@ -173,6 +173,18 @@ describe('the factual review reduction', () => {
     expect(reduction.findings).toEqual([]);
   });
 
+  it('discloses 联网核查未完成 on the revision when a unit ended at the platform-tool breaker, naming that range (Issue #473)', () => {
+    // The unit the breaker ended settles as its own gap code; the units that closed keep their findings and their states.
+    const tripped: FactualUnitOutcome = { unitOrdinal: 1, state: 'gap', code: 'web-verification-incomplete', reason: '本阅读范围的联网工具往返达到熔断上限，该范围未形成结果，也不会重试；其余范围照常。' };
+    const reduction = reduceFactualReview({ manifest, outcomes: [tripped, { ...closed([assertion()]), unitOrdinal: 2 }], blocks: blocksById, research });
+    expect(reduction.gaps[0]).toMatchObject({ unitOrdinal: 1, code: 'web-verification-incomplete' });
+    expect(reduction.research.state).toBe('联网核查未完成');
+    expect(reduction.research.statement).toBe('联网核查未完成：第 1 个阅读范围的联网工具往返达到熔断上限，该范围未形成发现，也不会重试；其余范围照常核查。');
+    expect(reduction.research.fetched).toBe(0);
+    // A revision without such a unit still discloses what the lookups answered.
+    expect(reduce([closed([assertion()])]).research.state).toBe('外部研究未获准');
+  });
+
   it('reports complete coverage and a qualified axis when every quotation anchored', () => {
     const reduction = reduce([closed([assertion()])]);
     expect(reduction.coverage).toMatchObject({ state: 'complete', unitsClosed: manifest.units.length, gapCount: 0 });

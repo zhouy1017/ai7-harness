@@ -1,23 +1,26 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import { LAUNCH_SELECTABLE_SCOPES, isTrustedOperationalScope, type DeveloperLiveCeiling, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope } from '../shared/protocol.js';
+import { LAUNCH_SELECTABLE_SCOPES, isTrustedOperationalScope, type DeveloperLiveCeiling, type LaunchPolicyProjection, type PlatformToolsProjection, type TrustedLaunchForm, type TrustedOperationalScope } from '../shared/protocol.js';
+import { armHostAllowanceSet, armPerTicketHostAdmission, type SingleHostAllowance } from '../shared/network-denial.js';
+import { readPlatformToolsRule } from './provider/platform-tools.js';
 
 /**
  * The source-checkout launch authority (ADR 0046, ADR 0065): the build-embedded carrier pins active
- * policy set v5, the sole active set for all four Provider Processing scopes, and names the two
+ * policy set v6, the sole active set for all four Provider Processing scopes, and names the two
  * scopes the built entry may bind from its launch form. `development-ci` is the default and binds
  * Provider Processing v1 (zero live transmissions); `developer-live` is bound only by the launch
  * argument `--trusted-operational-scope developer-live` on a developer host and binds the immutable
- * Provider Processing v5. `fixture-recording` and `ordinary-production` are pinned by the active set
- * but are not selectable from the source checkout. No environment variable or product setting
- * selects a scope; every invalid state resolves to the zero-transmission denial.
+ * Provider Processing v8 (Issue #473, S87-f3b: v7's platform-tools analysis rule beside the dialogue
+ * rule of ADR 0088). `fixture-recording` and `ordinary-production` are pinned by the active set but
+ * are not selectable from the source checkout. No environment variable or product setting selects a
+ * scope; every invalid state resolves to the zero-transmission denial.
  */
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
 const CARRIER_VERSION = 2;
-export const ACTIVE_SET_VERSION = 'v5' as const;
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v5.json';
-const ACTIVE_SET_SHA256 = '8329eda368d4870c552bdc792a74f0035a2dc8da818c37617902fa0af7368f8a';
+export const ACTIVE_SET_VERSION = 'v6' as const;
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v6.json';
+const ACTIVE_SET_SHA256 = 'fbb0649bb533d993b595ce39ea7872397f88e05b21396b69a79ea8283b547d5a';
 const PROVIDER_PINS = {
   'development-ci': {
     version: 'v1',
@@ -35,9 +38,9 @@ const PROVIDER_PINS = {
     sha256: '10e69a5d7b027d077728ec1bc7393dc0583b99a05246b4e883098b9d96b221a4',
   },
   'developer-live': {
-    version: 'v5',
-    canonicalPath: 'docs/policies/provider-processing-policy.v5.json',
-    sha256: '4b7356aaa36a75b3085d6eecb593fb3bd765682073e37fa21b5abf7bc78ea0bb',
+    version: 'v8',
+    canonicalPath: 'docs/policies/provider-processing-policy.v8.json',
+    sha256: '2465416a5d0a95ef61c3f6a8e628edc3cd3e2bf3f108d690627f299cb6239232',
   },
 } as const;
 const EXTERNAL_PIN = {
@@ -46,16 +49,26 @@ const EXTERNAL_PIN = {
   sha256: '162441cc3e5d30b0cafb00a0d04ca5ab32b64c5039baafc8952a9925bd7984b6',
 } as const;
 
-/** The exact developer-live binding Provider Processing v5 declares; the resolver verifies the policy bytes say the same. */
+/**
+ * The exact developer-live binding Provider Processing v8 declares; the resolver verifies the policy bytes say the same.
+ * Every value here is a pin the launch refuses to run without matching in the selected document — the policy is the
+ * record, this is its checksum — which is why the service entry may arm the allowance set from `websearchHost` before the
+ * document is read (arming must precede the network denial), and why a document that names another host is unreadable.
+ */
 export const DEVELOPER_LIVE_POLICY_BINDING = {
   ruleId: 'developer-live-public-samplebook-analysis',
+  /** The second rule of v8 (ADR 0088 §1): one Interactive Editorial Dialogue attempt, no plan, no Run, no web search. */
+  dialogueRuleId: 'developer-live-editor-selected-excerpt-dialogue',
   launchArgument: '--trusted-operational-scope developer-live',
   route: 'opencode-go',
   endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
   model: 'deepseek-v4-flash',
   credentialSlot: 'opencode-go',
-  defaultRunBudgetCeilingTokensPerFrozenUnit: 30_000,
+  /** 90,000 under v8 (ADR 0080 §7.4, the Owner's byte of 2026-09-12), three times v5's 30,000 (ADR 0070). */
+  defaultRunBudgetCeilingTokensPerFrozenUnit: 90_000,
   providerAccountLimitClassification: 'quota-exhausted',
+  /** The one host the analysis rule's `platformTools.websearch` names (ADR 0080 §7.5); the allowance set's second member. */
+  websearchHost: 'search.parallel.ai',
 } as const;
 
 /** The sibling directory of the checkout that holds the Provider Result Cache when no root is named. */
@@ -87,10 +100,10 @@ function isInsideOrEqual(root: string, candidate: string): boolean {
 
 /**
  * Resolve the developer-live launch facts. An explicit form ceiling is bound as the total; when the
- * form leaves it unset, the policy's default is bound as 30,000 tokens per frozen Coverage Manifest
- * unit (ADR 0070), computed once the manifest freezes. Whatever is bound, the ceiling is never
- * `unset`; the cache root defaults to the checkout's sibling directory and must lie outside the
- * checkout so raw Provider material never enters a working tree.
+ * form leaves it unset, the policy's default is bound per frozen Coverage Manifest unit (ADR 0070;
+ * 90,000 tokens under v8, ADR 0080 §7.4), computed once the manifest freezes. Whatever is bound, the
+ * ceiling is never `unset`; the cache root defaults to the checkout's sibling directory and must lie
+ * outside the checkout so raw Provider material never enters a working tree.
  */
 export function resolveDeveloperLiveLaunch(form: TrustedLaunchForm, checkoutRoot: string): DeveloperLiveLaunch {
   if (form.trustedOperationalScope !== 'developer-live' || !isAbsolute(checkoutRoot)) throw new Error('LAUNCH_FORM_INVALID');
@@ -202,21 +215,25 @@ function verifyDevelopmentCiPolicy(policy: Record<string, unknown>): void {
 }
 
 /**
- * Provider Processing v5: default deny with exactly the one developer-live eligible-only rule and its
- * exact binding, the three declared suboperations of ADR 0066, the per-frozen-unit Run Budget Ceiling
- * default of ADR 0070, and the house-people redaction rule of ADR 0079 §4.4. v5 names all three
- * suboperations `true` and the web-search flag `false`; the projection reads exactly those bytes, and
- * a field that does not match is a policy the launch cannot read — the zero-transmission denial.
+ * Provider Processing v8: default deny with exactly two developer-live eligible-only rules. The first is the analysis
+ * rule — its exact binding, the three declared suboperations of ADR 0066, the per-frozen-unit Run Budget Ceiling default
+ * of ADR 0070 as ADR 0080 §7.4 sizes it, the house-people redaction rule of ADR 0079 §4.4, the web-search switch on and
+ * the `platformTools` block of ADR 0080 §7.5 naming the pinned search host. The second is the Interactive Editorial
+ * Dialogue rule of ADR 0088 §1: the same binding, redaction and account-limit terms, the excerpt category, no plan and no
+ * Run Authorization, one transmission over one Session per attempt, and the web-search switch off. The projection reads
+ * exactly those bytes, and a field that does not match is a policy the launch cannot read — the zero-transmission denial.
+ * A one-rule document (v5, v7) is such a policy.
  *
- * Exported so the reading of the rule's exact fields can be pinned against the real v5 bytes with one
- * field varied. The document digests this resolver checks are constants of this module, so a policy
- * revision could not be fed through `resolveSourceCheckoutLaunchPolicy` at all — which is the point
- * of the pins, and why the reading is tested here instead.
+ * Exported so the reading of the rules' exact fields can be pinned against the real v8 bytes with one field varied. The
+ * document digests this resolver checks are constants of this module, so a policy revision could not be fed through
+ * `resolveSourceCheckoutLaunchPolicy` at all — which is the point of the pins, and why the reading is tested here instead.
  */
 export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
   crossUnitReductionAllowed: boolean;
   assuranceSamplingAllowed: boolean;
   runReportReflectionAllowed: boolean;
+  webSearchToolAllowed: true;
+  platformTools: PlatformToolsProjection;
 } {
   requirePolicy(policy['operationalScope'] === 'developer-live' && policy['lifecycleStatus'] === 'active');
   const selection = policy['trustedSelection'];
@@ -231,9 +248,16 @@ export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
       selection['crossScopeFallbackAllowed'] === false,
   );
   const decision = policy['decision'];
-  requirePolicy(isRecord(decision) && decision['default'] === 'deny' && Array.isArray(decision['providerAllowRules']) && decision['providerAllowRules'].length === 1);
+  // Exactly the two rules of v8 (ADR 0088 §3): the analysis rule first, the dialogue rule second. A one-rule document —
+  // v5, or the never-selected v7 — is not the pinned document, whatever its other bytes say.
+  requirePolicy(isRecord(decision) && decision['default'] === 'deny' && Array.isArray(decision['providerAllowRules']) && decision['providerAllowRules'].length === 2);
   const rule: unknown = decision['providerAllowRules'][0];
   requirePolicy(isRecord(rule) && rule['ruleId'] === DEVELOPER_LIVE_POLICY_BINDING.ruleId && rule['policyResult'] === 'eligible-only');
+  const dialogueRule: unknown = decision['providerAllowRules'][1];
+  requirePolicy(isRecord(dialogueRule) && dialogueRule['ruleId'] === DEVELOPER_LIVE_POLICY_BINDING.dialogueRuleId && dialogueRule['policyResult'] === 'eligible-only');
+  // Human-attended on a developer host, and never CI, hosted, scheduled or background (ADR 0065; ADR 0079 §2): the
+  // execution mode is read for both rules, so a document that admitted a scheduled or background dispatch is unreadable.
+  requirePolicy(isAttendedDeveloperHostMode(rule['executionMode']));
   // The house-people redaction rule (ADR 0079 §4.4): the identity of the house's people never leaves,
   // while the author's information and the house name may.
   const redaction = rule['redaction'];
@@ -269,10 +293,14 @@ export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
       transmissions['accumulatingSingleSessionAllowed'] === false &&
       transmissions['identicalRequestReplaysFromProviderResultCache'] === true &&
       transmissions['repeatedTestItemIdentifierAllowed'] === false &&
-      // No web-search allowance yet (ADR 0079 §4.2, §6): the model-tool path waits for the provider
-      // assignment design, so a document that enabled it would be one this launch cannot read.
-      transmissions['webSearchToolAllowed'] === false,
+      // The web-search switch is on for the analysis rule (ADR 0080 §7.5; v8 carries v7's bytes here), and what it
+      // admits is the `platformTools` block read below — a document with the switch off is v5's reading, not v8's.
+      transmissions['webSearchToolAllowed'] === true,
   );
+  // The platform tools the rule names, exactly as ADR 0080 §7.5 writes them, read by the one reader every consumer of the
+  // block shares; a malformed block throws there, and a block naming another search host is not the pinned document.
+  const platformTools = readPlatformToolsRule(rule);
+  requirePolicy(platformTools !== null && platformTools.websearch.host === DEVELOPER_LIVE_POLICY_BINDING.websearchHost);
   // The three suboperations ADR 0066 declares, which v5 names `true`. An absent or non-`true` key is
   // not the pinned document; reading anything but the exact bytes is the zero-transmission denial.
   requirePolicy(
@@ -302,11 +330,128 @@ export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
   requirePolicy(isRecord(source) && source['privateManuscriptAllowed'] === false && source['otherBookRefusedBeforeDispatch'] === true);
   const capture = rule['capture'];
   requirePolicy(isRecord(capture) && capture['fixtureEmissionAllowed'] === false && capture['uploadAllowed'] === false && capture['providerResultCacheAllowed'] === true);
+  verifyDialogueRule(dialogueRule, { binding, redaction, limit });
   return {
     crossUnitReductionAllowed: true,
     assuranceSamplingAllowed: true,
     runReportReflectionAllowed: true,
+    webSearchToolAllowed: true,
+    platformTools,
   };
+}
+
+/**
+ * The dialogue rule of ADR 0088 §1, term by term: carried unchanged from the analysis rule — the exact binding, the
+ * house-people redaction, the Provider Account Limit (§1.5) — and its own terms: the excerpt category (§1.4), one
+ * foreground attempt as the authority with no Plan Envelope and no Run Authorization (§1.1), one transmission over one
+ * Session per attempt (§1.2), no Run Budget Ceiling because one bounded payload is the bound (§1.6), the Harness Session
+ * Ledger as the only persistence (§1.7), and no web search (§1.5). Nothing here authorizes a dialogue transmission: the
+ * dialogue owner's gate branch is S17c's, and until it lands asking under `developer-live` stays refused as S17a built it.
+ */
+function verifyDialogueRule(
+  rule: Record<string, unknown>,
+  analysis: { readonly binding: Record<string, unknown>; readonly redaction: Record<string, unknown>; readonly limit: Record<string, unknown> },
+): void {
+  requirePolicy(rule['purpose'] === 'developer-live-interactive-editorial-dialogue');
+  const origin = rule['authorityOrigin'];
+  requirePolicy(
+    isRecord(origin) &&
+      origin['editorStartedForegroundAttemptRequired'] === true &&
+      origin['exactSelectionAndQuestionAreTheAuthority'] === true &&
+      origin['newlyUserInitiatedTaskRequired'] === false &&
+      origin['directRunAuthorizationRequired'] === false &&
+      origin['matchingActiveDefaultExecutionRuleAllowed'] === false &&
+      origin['backgroundAnalysisEnrollmentAllowed'] === false &&
+      origin['idleScheduledImportTriggeredOrCrossRunDispatchAllowed'] === false,
+  );
+  requirePolicy(isAttendedDeveloperHostMode(rule['executionMode']));
+  const categories = rule['allowedOutboundDataCategories'];
+  requirePolicy(Array.isArray(categories) && categories.length === 1 && categories[0] === 'editor-selected-manuscript-excerpt');
+  // Carried unchanged from the analysis rule (§1.5): the same bytes, compared field by field rather than by trust.
+  for (const [key, expected] of [['providerBinding', analysis.binding], ['redaction', analysis.redaction]] as const) {
+    const actual = rule[key];
+    requirePolicy(isRecord(actual) && exactKeys(actual, Object.keys(expected)) && Object.keys(expected).every((field) => actual[field] === expected[field]));
+  }
+  // The Provider Account Limit ends the attempt as the analysis rule's ends the Run: same classification, no retry, no
+  // fallback, no second model.
+  const limit = rule['providerAccountLimit'];
+  requirePolicy(
+    isRecord(limit) &&
+      limit['classification'] === analysis.limit['classification'] &&
+      limit['endsAttemptAsProviderAccountLimit'] === true &&
+      limit['retryAllowed'] === false &&
+      limit['fallbackAllowed'] === false &&
+      limit['secondModelAllowed'] === false,
+  );
+  const transmissions = rule['transmissions'];
+  requirePolicy(
+    isRecord(transmissions) &&
+      transmissions['oneTransmissionPerAttempt'] === true &&
+      transmissions['oneTechnicalSessionPerAttempt'] === true &&
+      transmissions['retryResendOrContinuationWithinSessionAllowed'] === false &&
+      transmissions['continueAndRegenerateAreNewAttempts'] === true &&
+      transmissions['identicalRequestReplaysFromProviderResultCache'] === true &&
+      transmissions['repeatedTestItemIdentifierAllowed'] === false &&
+      // Row 18's permission to use the web is not taken up here (ADR 0088 §1.5): a dialogue rule with the switch on would
+      // be a document this launch cannot read.
+      transmissions['webSearchToolAllowed'] === false,
+  );
+  const preconditions = rule['authorizationPreconditions'];
+  requirePolicy(
+    isRecord(preconditions) &&
+      preconditions['planEnvelopeRequired'] === false &&
+      preconditions['runAuthorizationRequired'] === false &&
+      preconditions['runBudgetCeilingApplies'] === false &&
+      preconditions['costBound'] === 'one-bounded-payload-per-attempt' &&
+      // The per-attempt output cap is the Owner's byte (§1.6): `null` for none, or a positive whole token count; any
+      // other value — a string, zero, a negative or fractional number — is a document this launch cannot read.
+      (preconditions['perAttemptOutputCapTokens'] === null ||
+        (Number.isSafeInteger(preconditions['perAttemptOutputCapTokens']) && (preconditions['perAttemptOutputCapTokens'] as number) > 0)) &&
+      preconditions['finalProviderPayloadEgressGateRequired'] === true &&
+      preconditions['frozenBeforeTransmission'] === true,
+  );
+  const source = rule['source'];
+  requirePolicy(isRecord(source) && source['privateManuscriptAllowed'] === false && source['otherBookRefusedBeforeDispatch'] === true && source['editedRevisionsOfAdmittedBookAllowed'] === true);
+  const capture = rule['capture'];
+  requirePolicy(
+    isRecord(capture) &&
+      capture['fixtureEmissionAllowed'] === false &&
+      capture['uploadAllowed'] === false &&
+      capture['providerResultCacheAllowed'] === true &&
+      capture['harnessSessionLedgerUnderAgentDataRootIsTheOnlyPersistence'] === true &&
+      capture['ai7RelationLogOrDiagnosticHoldsQuestionOrAnswer'] === false,
+  );
+}
+
+/** The execution mode both v8 rules declare (ADR 0065): human-attended on a developer host, never CI, hosted, scheduled or background. */
+function isAttendedDeveloperHostMode(mode: unknown): boolean {
+  return isRecord(mode) &&
+    mode['humanAttended'] === true &&
+    mode['developerHostOnly'] === true &&
+    mode['ciAllowed'] === false &&
+    mode['hostedAllowed'] === false &&
+    mode['scheduledAllowed'] === false &&
+    mode['backgroundAllowed'] === false;
+}
+
+/**
+ * Arm the network-denial allowances a launch form calls for, before the denial is installed (ADR 0080 §7.3; settlement l):
+ * nothing under `development-ci`, where every remote primitive stays denied; under `developer-live` the policy-declared
+ * set — the model endpoint host and port first, then the one search host the selected rule's `platformTools` names — and
+ * per-ticket host admission for `webfetch`. Both hosts are the pins the launch policy verifies against the Provider
+ * Processing v8 bytes before anything executes; a document naming another host is unreadable, and then nothing transmits.
+ * Returns what it armed, so the service entry and its test read the same answer.
+ */
+export function armLaunchNetworkAllowances(form: Pick<TrustedLaunchForm, 'trustedOperationalScope'>): ReadonlyArray<SingleHostAllowance> {
+  if (form.trustedOperationalScope !== 'developer-live') return [];
+  const endpoint = new URL(DEVELOPER_LIVE_POLICY_BINDING.endpoint);
+  const set: ReadonlyArray<SingleHostAllowance> = [
+    { host: endpoint.hostname, port: endpoint.port === '' ? 443 : Number(endpoint.port) },
+    { host: DEVELOPER_LIVE_POLICY_BINDING.websearchHost, port: 443 },
+  ];
+  armHostAllowanceSet(set);
+  armPerTicketHostAdmission();
+  return set;
 }
 
 /**
@@ -436,13 +581,17 @@ export async function resolveSourceCheckoutLaunchPolicy(
         operationalScope: 'developer-live',
         activePolicySetVersion: ACTIVE_SET_VERSION,
         providerProcessing: {
-          version: 'v5',
+          version: 'v8',
           decision: 'eligible-only',
           authorizedLiveTransmissionCount: 'bounded-by-run',
           liveTransmissionAllowed: true,
           crossUnitReductionAllowed: suboperations.crossUnitReductionAllowed,
           assuranceSamplingAllowed: suboperations.assuranceSamplingAllowed,
           runReportReflectionAllowed: suboperations.runReportReflectionAllowed,
+          // The analysis rule's switch and block, read from the v8 bytes (ADR 0080 §7.5): what the service entry armed
+          // and what the execution owner may register for a Run whose kind declares web search.
+          webSearchToolAllowed: suboperations.webSearchToolAllowed,
+          platformTools: suboperations.platformTools,
           label: '开发者实时：实时传输受运行边界约束',
         },
         externalExport,

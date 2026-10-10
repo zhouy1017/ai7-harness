@@ -65,6 +65,8 @@ import type {
   TaskPlanProjection,
 } from '../shared/protocol.js';
 import {
+  ANALYSIS_GAP_CODE_LABELS,
+  analysisGapLead,
   BASELINE_ANALYSIS_TASK_GOAL,
   J03_TASK_GOAL,
   MAX_BOOK_SUMMARY_FILTER_CHARACTERS,
@@ -3469,7 +3471,9 @@ function renderBaselineAnalysisOverview(
       const firstRange = unit.entities.flatMap((entity) => entity.sourceRanges)[0] ?? unit.events.flatMap((event) => event.sourceRanges)[0];
       if (firstRange !== undefined) item.append(returnButton(firstRange.blockId));
     } else {
-      item.append(element('p', 'attention-note', `尚未分析：${unit.gap.reason}`));
+      // 联网核查未完成 (Issue #473, S87-f3b; ADR 0080 §7.4) is a disclosed state the unit ended in, named as itself; every
+      // other gap is a range the Run did not read, said as it always was.
+      item.append(element('p', 'attention-note', `${analysisGapLead(unit.gap.code)}：${unit.gap.reason}`));
       if (unit.gap.blockIds[0] !== undefined) item.append(returnButton(unit.gap.blockIds[0]));
     }
     item.append(technicalDetails(
@@ -3493,7 +3497,7 @@ function renderBaselineAnalysisOverview(
     const item = element('li');
     item.dataset['analysisGapUnit'] = String(gap.unitOrdinal);
     item.dataset['analysisGapCode'] = gap.code;
-    item.append(element('span', undefined, `第 ${gap.unitOrdinal} 个阅读范围 · 内容块 ${gap.startPosition}–${gap.endPosition} · ${gap.reason} `));
+    item.append(element('span', undefined, `第 ${gap.unitOrdinal} 个阅读范围 · 内容块 ${gap.startPosition}–${gap.endPosition} · ${gap.code === 'web-verification-incomplete' ? `${ANALYSIS_GAP_CODE_LABELS[gap.code]}：` : ''}${gap.reason} `));
     if (gap.blockIds[0] !== undefined) item.append(returnButton(gap.blockIds[0]));
     gaps.append(item);
   }

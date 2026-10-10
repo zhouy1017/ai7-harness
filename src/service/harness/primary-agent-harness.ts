@@ -120,6 +120,12 @@ export interface PlatformToolOwner {
   admit(result: { readonly callId: string; readonly tool: PlatformToolName; readonly sourceUrl: string | null; readonly text: string }): void;
   /** Accept one assistant tool-call message this attempt's adapter returned, by `assistantToolCallDigest`. */
   acceptToolCallMessage(digest: string): void;
+  /**
+   * Start one turn's unit for the breakers of ADR 0080 §7.4 (Issue #473, S87-f3b): the harness calls it at the start of
+   * every turn, so an identical call is a duplicate within one turn and the round-trip breaker counts one turn. Optional,
+   * because an owner that keeps no breaker of its own needs nothing started.
+   */
+  startTurn?(): void;
 }
 
 /** The value a platform tool's body returns: the text and its source URL (`''` for none), as DSH's lossless JSON carries it. */
@@ -406,6 +412,10 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     requireHarness(!disposed, 'HARNESS_DISPOSED', 'PrimaryAgentHarness 已释放。');
     requireHarness(bound, 'HARNESS_UNBOUND', '执行绑定尚未核对，不能提交单元。');
     requireHarness(streamReader === null, 'HARNESS_TURN_IN_FLIGHT', '上一个回合尚未结束。');
+    // Every turn — a unit, its safe retry, the reduction, a sampling turn, the reflection — is one unit for the platform
+    // tools' breakers (ADR 0080 §7.4): the owner starts it intact here, after the execution owner has read how the
+    // previous turn ended (Issue #473, S87-f3b).
+    toolOwner?.startTurn?.();
     if (sessionMode === 'per-unit') await openUnitSession();
     const session = live.agent.session;
     const startSeq = session.seq;

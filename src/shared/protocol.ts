@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 121 as const;
+export const SERVICE_PROTOCOL_VERSION = 122 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -1771,21 +1771,21 @@ export interface ModelServiceConnectionProjection {
  */
 export type TrustedOperationalScope = 'development-ci' | 'developer-live';
 /**
- * The `developer-live` Provider Processing versions a pin may name: v5, selected by active-policy-set v5, and v8, the
- * platform-tools successor that will carry the dialogue rule too (ADR 0088 §3, Issue #473). v8 is admitted by the type so
- * that its selection (S87-f3b, an Owner byte review) moves no union; nothing selects it, and every persisted row says v5.
- * v7 is reviewed history that no active set will select.
+ * The `developer-live` Provider Processing versions a pin may name: v5, which active-policy-set v5 selected and every row
+ * persisted under it still names, and v8, the platform-tools successor carrying the dialogue rule of ADR 0088 §3, which
+ * active-policy-set v6 selects (Issue #473, S87-f3b). v7 is reviewed history that no active set selects.
  */
 export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8';
-/** The active policy set versions a pin may name: v5, selected, and its successor v6 (S87-f3b), selected by nothing yet. */
+/** The active policy set versions a pin may name: v5, the predecessor every earlier row names, and v6, selected (S87-f3b). */
 export type ActivePolicySetVersion = 'v5' | 'v6';
 export type ProviderProcessingVersion = 'v1' | DeveloperLiveProviderProcessingVersion;
 /** Exact Run Budget Ceiling state: `unset` under development-ci, an explicit total-token ceiling under developer-live. */
 export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: number };
 /**
- * The Run Budget Ceiling a developer-live launch binds: an explicit form ceiling as a total, or the
- * Provider Processing v5 default of 30,000 tokens per frozen Coverage Manifest unit (ADR 0070),
- * resolved once the manifest freezes and before the plan does.
+ * The Run Budget Ceiling a developer-live launch binds: an explicit form ceiling as a total, or the selected Provider
+ * Processing document's default per frozen Coverage Manifest unit (ADR 0070; 30,000 under v5, 90,000 under v8 because a
+ * search-enabled unit spends model turns on tool results, ADR 0080 §7.4), resolved once the manifest freezes and before
+ * the plan does.
  */
 export type DeveloperLiveCeiling =
   | { readonly kind: 'tokens'; readonly maxTotalTokens: number }
@@ -1888,6 +1888,54 @@ export function parseTrustedLaunchForm(raw: RawTrustedLaunchForm): TrustedLaunch
   return { trustedOperationalScope: scope, runBudgetCeiling, providerCacheRoot };
 }
 
+// ---- S87-f3b (Issue #473): Provider Processing v8, active-policy-set v6, the platform tools on the wire -----------------
+
+/**
+ * The `platformTools` block of a Provider Processing allow rule as the launch projects it (ADR 0080 §7.5): the search
+ * service's name, the one host its calls may address, its tool name and anonymity, and the fetch bounds. Every value is
+ * the policy's; no identifier here is a source constant.
+ */
+export interface PlatformToolsProjection {
+  readonly websearch: {
+    readonly service: string;
+    readonly host: string;
+    readonly tool: string;
+    readonly anonymous: true;
+  };
+  readonly webfetch: {
+    readonly maxBytes: number;
+    readonly timeoutSeconds: number;
+    readonly boundedByCitations: true;
+  };
+}
+
+/** The disclosed state of a unit, and of a factual revision's research, that a platform-tool breaker ended (ADR 0080 §7.4). */
+export const WEB_VERIFICATION_INCOMPLETE = '联网核查未完成' as const;
+
+/**
+ * What each gap code says to the editor, beside the technical code the ②A unit facts keep (Issue #473, S87-f3b). The six
+ * earlier codes read as the ②A block always rendered them; only `web-verification-incomplete` names a disclosed state. `outcome-unknown`
+ * (Issue #51, S16c) reads 结果待确认, and its reason already says so, so ②A leads it as 尚未分析 like the earlier codes.
+ */
+export const ANALYSIS_GAP_CODE_LABELS: Readonly<Record<AnalysisGapProjection['code'], string>> = Object.freeze({
+  'adapter-failure': '适配器失败',
+  'contract-invalid': '契约无效',
+  interrupted: '已中断',
+  'egress-refused': '出口拒绝',
+  'not-attempted': '未尝试',
+  'out-of-scope': '不在本次审阅范围内',
+  'web-verification-incomplete': WEB_VERIFICATION_INCOMPLETE,
+  'outcome-unknown': '结果待确认',
+});
+
+/**
+ * How a unit's gap leads in ②A: the disclosed state 联网核查未完成 by its own name (ADR 0080 §7.4), and every other gap as
+ * 尚未分析 — the lead J-04 has always read for a range the Run did not read.
+ */
+export function analysisGapLead(code: AnalysisGapProjection['code']): string {
+  return code === 'web-verification-incomplete' ? ANALYSIS_GAP_CODE_LABELS[code] : '尚未分析';
+}
+
 export interface LaunchPolicyProjection {
   integrityState: 'verified' | 'denied';
   denialReason: string | null;
@@ -1919,6 +1967,19 @@ export interface LaunchPolicyProjection {
      * records `policy-bounded` with its reason.
      */
     runReportReflectionAllowed?: boolean;
+    /**
+     * Whether the selected document's analysis rule switches the model's web-search use on (`webSearchToolAllowed`, ADR
+     * 0080 §7.5): `true` under the verified v8 document, `false` under v5, absent on a denial. The switch alone registers
+     * nothing; `platformTools` says what the rule names.
+     */
+    webSearchToolAllowed?: boolean;
+    /**
+     * The AI7 platform tools the selected document's analysis rule names, read from its `platformTools` block exactly as
+     * ADR 0080 §7.5 writes it (Issue #473, S87-f3b), or `null` when the rule names none. The service entry arms the
+     * network-denial allowance set from `websearch.host`; the execution owner registers the tools only for a Run whose
+     * kind declares web search on a binding whose profile declares function calling. Absent on a denial.
+     */
+    platformTools?: PlatformToolsProjection | null;
     label: '开发与持续集成：零次实时传输' | '开发者实时：实时传输受运行边界约束';
   };
   externalExport: {
@@ -2403,9 +2464,11 @@ export interface AnalysisGapProjection {
    * Why the unit carries no result. The first five are things that went wrong or never happened in a
    * Run that meant to read the unit. `out-of-scope` (Issue #417) is the one that is not a failure: a
    * kind that leaves out-of-scope units unreviewed planned not to read this unit, never dispatched it,
-   * and says so — `不在本次审阅范围内`. No baseline or factual Run produces it.
+   * and says so — `不在本次审阅范围内`. No baseline or factual Run produces it. `web-verification-incomplete`
+   * (Issue #473, S87-f3b; ADR 0080 §7.4) is the disclosed state 联网核查未完成: the unit's platform-tool
+   * round trips reached the breaker, the unit ended there and was never retried, and the Run went on.
    */
-  code: 'adapter-failure' | 'contract-invalid' | 'interrupted' | 'egress-refused' | 'not-attempted' | 'out-of-scope' | 'outcome-unknown';
+  code: 'adapter-failure' | 'contract-invalid' | 'interrupted' | 'egress-refused' | 'not-attempted' | 'out-of-scope' | 'web-verification-incomplete' | 'outcome-unknown';
   reason: string;
   startPosition: number;
   endPosition: number;
@@ -3626,8 +3689,12 @@ export type FactualReferenceIntegrityState = 'verified' | 'failed';
 export type FactualEvidenceState = '未核查' | '成立' | '不成立' | '冲突' | '不适用';
 export const FACTUAL_UNCHECKED_STATE = '未核查' as const;
 
-/** The research capability's disclosed state; `外部研究未获准` is the only one this slice can produce. */
-export type FactualResearchState = '外部研究未获准' | '研究预算已用尽' | '已检索';
+/**
+ * The research capability's disclosed state. `外部研究未获准` is what every lookup answers today; `联网核查未完成` (Issue #473,
+ * S87-f3b; ADR 0080 §7.4) is the Run-level disclosure a factual revision carries when a unit's platform-tool round trips
+ * reached the breaker, so that unit's findings were never formed.
+ */
+export type FactualResearchState = '外部研究未获准' | '研究预算已用尽' | '已检索' | '联网核查未完成';
 export const FACTUAL_RESEARCH_NOT_AUTHORIZED = '外部研究未获准' as const;
 
 /**

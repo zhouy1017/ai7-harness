@@ -91,7 +91,16 @@ export function reviewCategorySchemaDigest(promptContractDigest: string): string
   }));
 }
 
-export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput): AnalysisKindDefinition {
+/**
+ * What a category declares beside its contract (Issue #473, S87-f3b): whether its row of ADR 0080's task table carries web
+ * search — the configuration entry's `searchEngine`, which never enters the contract or its digest, so a category reads
+ * and digests exactly as before whether or not it declares the search.
+ */
+export interface ReviewCategoryKindOptions {
+  readonly webSearch?: boolean;
+}
+
+export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput, options: ReviewCategoryKindOptions = {}): AnalysisKindDefinition {
   const contract = reviewCategoryContract(input);
   const category = contract.category;
   const promptContractDigest = reviewCategoryContractDigest(contract);
@@ -153,6 +162,8 @@ export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput)
         })),
     },
     assuranceAbsentReason: '',
+    // Rows 8 to 10 of ADR 0080's task table declare web search; the configuration entry's `searchEngine` says which this is.
+    ...(options.webSearch === true ? { webSearch: true as const } : {}),
     safeNextActions: REVIEW_SAFE_NEXT_ACTIONS,
     // A category's finding classes: the severity of every located finding, and the exclusion reason of
     // every finding that could not be anchored. Both are closed sets and neither carries a quotation.
