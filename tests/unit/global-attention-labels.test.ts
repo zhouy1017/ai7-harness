@@ -55,7 +55,7 @@ const AT = '2026-09-23T04:05:06.000Z';
 const STATES: ReadonlyArray<GlobalAttentionStateKey> = [
   'import-outcome-uncertain', 'import-cleanup-pending', 'recovery-pending', 'recovery-deferred',
   'manuscript-conflict', 'manuscript-conflict-deferred', 'analysis-failed',
-  'analysis-interrupted', 'analysis-budget-reached', 'analysis-account-limit', 'analysis-outcome-unknown', 'analysis-blocked', 'analysis-orphaned', 'review-failed', 'review-stopped',
+  'analysis-interrupted', 'analysis-budget-reached', 'analysis-account-limit', 'analysis-outcome-unknown', 'analysis-outcome-unconfirmed', 'analysis-blocked', 'analysis-orphaned', 'review-failed', 'review-stopped',
   'analysis-plan-revision', 'analysis-plan-moved', 'analysis-clarification', 'analysis-queued', 'analysis-running', 'analysis-waiting-network', 'analysis-waiting-connection',
   'analysis-waiting-slot', 'analysis-waiting-admission', 'analysis-waiting-capacity', 'analysis-cancelling', 'analysis-pausing', 'analysis-paused', 'analysis-resumable',
   'review-running', 'review-continuable',
@@ -159,6 +159,7 @@ describe('each item', () => {
       'analysis-budget-reached': '已停止 · 预算已达上限',
       'analysis-account-limit': '模型服务账户限额',
       'analysis-outcome-unknown': '结果待确认',
+      'analysis-outcome-unconfirmed': '结果待确认',
       'analysis-blocked': '派发前已阻止',
       'analysis-orphaned': '已中断',
       'review-failed': '运行失败',
@@ -265,6 +266,8 @@ describe('each item', () => {
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['view-unconfirmed']).toBe(TASK_BAR_VIEW_UNCONFIRMED);
     expect(GLOBAL_ATTENTION_STATE_PILLS['analysis-outcome-unknown']).toEqual(GLOBAL_ATTENTION_STATE_PILLS['import-outcome-uncertain']);
     expect(GLOBAL_ATTENTION_STATE_PILLS['analysis-outcome-unknown'].shape).not.toBe(GLOBAL_ATTENTION_STATE_PILLS['analysis-resumable'].shape);
+    // …and what a completed Run left 结果待确认 (Issue #757) reads as the same outcome to confirm.
+    expect(GLOBAL_ATTENTION_STATE_PILLS['analysis-outcome-unconfirmed']).toEqual(GLOBAL_ATTENTION_STATE_PILLS['analysis-outcome-unknown']);
     // A waiting Run whose plan moved (Issue #536; OFF-008): the drawer's own words and pill, never 派发前已阻止's.
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS.reprepare).toBe(TASK_BAR_REPREPARE);
     // A Run the launch's ceiling stopped under developer-live (Issue #541): the drawer's 改计划重做, and words that say the
@@ -297,6 +300,9 @@ describe('each item', () => {
     expect(globalAttentionObjectLabel({ kind: 'analysis', mode: 'first-baseline' })).toBe('基线分析 · 首次基线分析');
     expect(globalAttentionObjectLabel({ kind: 'analysis', mode: 'reanalyze-range' })).toBe('基线分析 · 重新分析所选范围');
     expect(globalAttentionObjectLabel({ kind: 'review', ordinal: 3 })).toBe('审阅 · 第 3 次');
+    // A ledger Task of another kind waiting to start once online, as its own surface names it (Issue #760, S74c).
+    expect((['initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing'] as const).map((taskKind) => globalAttentionObjectLabel({ kind: 'task', taskKind })))
+      .toEqual(['AI7 初评', '审稿意见', '按我的评分重写评语', '写作任务']);
     // A 审阅 on the selection 就这段发起任务… handed over says so (Issue #423, S77b).
     expect(globalAttentionObjectLabel({ kind: 'review', ordinal: 4, onSelection: true })).toBe('审阅 · 第 4 次 · 所选段落');
     expect(globalAttentionObjectLabel({ kind: 'recovery', branchName: '主分支' })).toBe('稿件 · 主分支');
@@ -336,6 +342,7 @@ describe('each item', () => {
       'analysis-budget-reached': globalAttentionReason(item('analysis-budget-reached')),
       'analysis-account-limit': globalAttentionReason(item('analysis-account-limit')),
       'analysis-outcome-unknown': globalAttentionReason(item('analysis-outcome-unknown')),
+      'analysis-outcome-unconfirmed': globalAttentionReason(item('analysis-outcome-unconfirmed')),
       'analysis-blocked': globalAttentionReason(item('analysis-blocked')),
       'analysis-orphaned': globalAttentionReason(item('analysis-orphaned')),
       'review-failed': globalAttentionReason(item('review-failed', { facts: { progress: null, revisionOrdinal: null, categories: categories([['错别字与规范用语', 'failed', null], ['体例与格式', 'refused', null]]) } })),
@@ -402,6 +409,7 @@ describe('each item', () => {
       'analysis-budget-reached': '运行用到了你设的预算上限，已停止；读完的部分已保留。要接着读，请调整预算并重做。',
       'analysis-account-limit': '模型服务按账户限额拒绝了请求，这项任务已停下，读完的部分都已保存；处理好模型服务、限额解除后续行。',
       'analysis-outcome-unknown': '有阅读范围的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；AI7 没有自动再发，读完的部分都已保存。',
+      'analysis-outcome-unconfirmed': '运行已结束，但有请求已发出而回答没有完整传回，无法确认模型服务是否已处理并计费；这些部分记为结果待确认的缺口，AI7 没有自动再发。',
       'analysis-blocked': '授权已记录，派发前阻止：当前启动没有可执行的路由。',
       'analysis-orphaned': '服务在这次运行期间停止，运行已中断；已完成单元的结果与缺口保留在分析账本中。',
       'review-failed': '「错别字与规范用语」运行失败；「体例与格式」未能开始',

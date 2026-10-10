@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 118 as const;
+export const SERVICE_PROTOCOL_VERSION = 122 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -58,6 +58,7 @@ export const IPC_CHANNELS = {
   enableEditorialWorkspaceProfile: 'ai7:j15:enable-editorial-workspace-profile',
   inspectTaskAuthorization: 'ai7:j03:inspect-task-authorization',
   inspectTaskPlan: 'ai7:j03:inspect-task-plan',
+  resolveUnconfirmedOutcomes: 'ai7:j10:resolve-unconfirmed-outcomes',
   inspectForegroundExecutionBoundary: 'ai7:j03:inspect-foreground-execution-boundary',
   prepareTaskAuthorization: 'ai7:j03:prepare-task-authorization',
   authorizeTaskAuthorization: 'ai7:j03:authorize-task-authorization',
@@ -66,6 +67,9 @@ export const IPC_CHANNELS = {
   authorizeBaselineAnalysis: 'ai7:j04:authorize-baseline-analysis',
   startBaselineAnalysisWhenOnline: 'ai7:j04:start-baseline-analysis-when-online',
   cancelWaitingBaselineAnalysis: 'ai7:j04:cancel-waiting-baseline-analysis',
+  // 联网后开始任务 and its 取消 for every other kind that has a plan (Issue #760, S74c): one pair, keyed by kind.
+  startTaskWhenOnline: 'ai7:j04:start-task-when-online',
+  cancelWaitingTask: 'ai7:j04:cancel-waiting-task',
   cancelBaselineAnalysisRun: 'ai7:j04:cancel-baseline-analysis-run',
   pauseBaselineAnalysisRun: 'ai7:j04:pause-baseline-analysis-run',
   resumeBaselineAnalysisRun: 'ai7:j04:resume-baseline-analysis-run',
@@ -4841,8 +4845,11 @@ export const REVIEW_COVERAGE_STATE_LABELS = {
  * — after a restart, `canContinue` says whether 继续审阅 would pick up the categories never finished.
  * `scope-changed` is a Run a Series Retrieval Exclusion stopped before a further read (Issue #64, S29b; SER-024): its only ways
  * on are 修改计划并重新授权 and 取消任务; `cancelled` is such a Run the editor then cancelled.
+ * `waiting` is a Run the editor started with 联网后开始任务 (Issue #760, S74c; OFF-005): approved, and waiting in Connectivity
+ * Wait — nothing of it has begun. `plan-moved` is such a Run whose plan moved before it could start (OFF-008): Reconnect Preflight
+ * stopped it before anything was sent, and the way on is a new 审阅.
  */
-export type ReviewRunState = 'prepared' | 'running' | 'settled' | 'partial' | 'failed' | 'scope-changed' | 'cancelled';
+export type ReviewRunState = 'prepared' | 'waiting' | 'running' | 'settled' | 'partial' | 'failed' | 'scope-changed' | 'plan-moved' | 'cancelled';
 
 /**
  * One category inside a Review Run. `settled` means its findings are on the manuscript and actionable
@@ -5279,7 +5286,59 @@ export const TASK_PLAN_KINDS: readonly TaskPlanKind[] = [
   'fixed-task', 'baseline-analysis', 'review-run', 'initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing',
 ];
 
+/** A step after the ranges whose sent request's result cannot be known (Issue #757): the reduction, a sample, the reflection. */
+export type UnconfirmedStageId = 'cross-unit-reduction' | 'assurance-sampling' | 'run-report-reflection';
+
+/**
+ * 结果待确认 left by Runs that reached their Task Outcome (Issue #757): a kind that keeps no progress reads on past a range whose
+ * request was sent and whose answer never came back whole, and any kind reads on past such a step. Each is listed until a later
+ * Run of the kind reads it or the editor determines it — 保留为缺口, a Manual Outcome Resolution retained with its manual
+ * evidence class, which sends nothing and leaves every gap as it is.
+ */
+export interface TaskPlanUnconfirmedProjection {
+  /**
+   * Each range by its ordinal in the latest revision that holds it, and, in a Review Run, its category; `earlierText` when that
+   * revision read a manuscript revision other than the Book's latest, so the ordinal counts in the text as it was then.
+   */
+  ranges: ReadonlyArray<{ unitOrdinal: number; category: string | null; recordedAt: string; earlierText: boolean }>;
+  /** Each step of the latest Run that reached its Task Outcome, and, in a Review Run, its category. */
+  steps: ReadonlyArray<{ stage: UnconfirmedStageId; category: string | null; recordedAt: string }>;
+  /** What 保留为缺口 settles: the service records exactly these, and refuses a list that changed since (`UNCONFIRMED_CHANGED`). */
+  digest: string;
+}
+
 /** Which plan the drawer reads. The Book is always the route's; the renderer never names it. */
+/**
+ * The kinds whose 联网后开始任务 goes through `startTaskWhenOnline` (Issue #760, S74c): every kind with a plan and 开始任务 but the
+ * baseline analysis, which keeps its own `startBaselineAnalysisWhenOnline` (Issue #502), and J-03's fixed Task, which only ever
+ * records and never reaches a model service, so it is never offline (ADR 0055).
+ */
+export type StartWhenOnlineTaskKind = 'review-run' | 'initial-evaluation' | 'readers-report' | 'evaluation-rewrite' | 'writing';
+export const START_WHEN_ONLINE_TASK_KINDS: readonly StartWhenOnlineTaskKind[] = ['review-run', 'initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing'];
+export function isStartWhenOnlineTaskKind(kind: TaskPlanKind): kind is StartWhenOnlineTaskKind {
+  return (START_WHEN_ONLINE_TASK_KINDS as readonly TaskPlanKind[]).includes(kind);
+}
+
+/**
+ * 联网后开始任务 for one Task (Issue #760, S74c; AUTH-004, OFF-005): exactly the digests 开始任务 would bind — the plan envelope's
+ * for a ledger Task (`planDigests` empty), every Task-backed category's for a Review Run (`planEnvelopeDigest` `null`).
+ */
+export interface StartTaskWhenOnlineInput {
+  bookId: string;
+  kind: StartWhenOnlineTaskKind;
+  /** The Task Intent of a ledger Task; the Review Run of a review. */
+  ref: string;
+  planEnvelopeDigest: string | null;
+  planDigests: ReadonlyArray<{ categoryId: string; planEnvelopeDigest: string }>;
+}
+
+/** 取消 while a Task's Run waits to start (Issue #760; OFF-010): terminal, before anything is sent. */
+export interface CancelWaitingTaskInput {
+  bookId: string;
+  kind: StartWhenOnlineTaskKind;
+  ref: string;
+}
+
 export interface InspectTaskPlanInput {
   bookId: string;
   kind: TaskPlanKind;
@@ -5569,8 +5628,19 @@ export interface TaskPlanProjection {
    * request's result could not be known, and the Plan Preview's statement of it; `null` when there are none.
    */
   resend: null | { units: ReadonlyArray<number>; statement: string };
+  /**
+   * 结果待确认 a Run of this Task's kind left on this Book that reached its Task Outcome (Issue #757; ATTN-002, NOTIF-004,
+   * CTRL-007): the ranges and steps whose sent requests' results cannot be known, which no later Run of the kind has read and
+   * the editor has not kept as gaps (保留为缺口, 人工结果确认); `null` when there are none.
+   */
+  unconfirmed: TaskPlanUnconfirmedProjection | null;
   /** 重新准备 for a waiting Run whose plan moved before it could start (Issue #536); else `null`. */
   reprepare: TaskPlanReprepareProjection | null;
+  /**
+   * Why a waiting Run of a kind with no 重新准备 in the drawer never started (Issue #760, S74c; OFF-008): what moved, in
+   * 需要重新确认计划's words. The kind's own surface prepares it again. Absent for every other plan.
+   */
+  planMovedReason?: string;
   /** What the Task's Run asked the editor (Issue #422, S76d; CLAR-001 to CLAR-007): open questions first; empty when none. */
   clarifications: ReadonlyArray<TaskPlanClarificationProjection>;
   /**
@@ -6624,9 +6694,19 @@ export type MaterialIndexState = 'queued' | 'indexing' | 'complete' | 'unsupport
 /**
  * Why a layer could not be read (S80a): the format needs a local dependency the Owner has not admitted (PDF text and
  * recognition), AI7 reads no text of this format yet, the text crossed the local reading bounds, the file could not be
- * read, the kept original no longer matches its record, or the file holds no text.
+ * read, the kept original no longer matches its record, or the file holds no text. Since protocol 121 (Issue #428): the file
+ * is encrypted or carries DRM (an EPUB's, an ODT saved with a password), or it declares entities or an internal DTD subset,
+ * which AI7 never expands or fetches.
  */
-export type MaterialIndexReason = 'needs-local-dependency' | 'format-unsupported' | 'over-bound' | 'unreadable' | 'original-changed' | 'empty';
+export type MaterialIndexReason =
+  | 'needs-local-dependency'
+  | 'format-unsupported'
+  | 'over-bound'
+  | 'unreadable'
+  | 'original-changed'
+  | 'empty'
+  | 'encrypted'
+  | 'external-entity';
 
 /**
  * One layer's state, in the five layers of KB-009 and the two parts its text layer names (recognition, Source
@@ -9973,6 +10053,8 @@ export type GlobalAttentionStateKey =
   | 'analysis-budget-reached'
   | 'analysis-account-limit'
   | 'analysis-outcome-unknown'
+  // 结果待确认 a completed Run left (Issue #757; ATTN-002, NOTIF-004): its Task Outcome stands, and its unconfirmed requests wait.
+  | 'analysis-outcome-unconfirmed'
   | 'analysis-blocked'
   | 'analysis-orphaned'
   | 'review-failed'
@@ -10093,7 +10175,11 @@ export type GlobalAttentionTarget =
   // 质量与学习 › 学习准入 with the Book's materials (Issue #61, S26b).
   | { kind: 'learning-materials'; bookId: string }
   // The dialogue in the side slot, in the foreground (Issue #52, S17a).
-  | { kind: 'dialogue'; bookId: string; dialogueId: string };
+  | { kind: 'dialogue'; bookId: string; dialogueId: string }
+  // A Task kind's plan in the Task Drawer, on the surface that owns it — ②A, 审阅, 评估 for AI7 初评, 审稿意见 and 按我的评分重写评语,
+  // 交付物 for a 写作任务: a waiting ledger Task of another kind, named by its Task (Issue #760, S74c), and 结果待确认 a Run left,
+  // on the Book's current Task of the kind or, for a review, its latest Review Run (Issue #757).
+  | { kind: 'task-plan'; bookId: string; taskKind: TaskPlanKind; ref: string | null };
 
 /** The Active Work Object of one item, in its record's own terms (V2-UX-ATTN-007). */
 export type GlobalAttentionObjectProjection =
@@ -10101,6 +10187,8 @@ export type GlobalAttentionObjectProjection =
   | { kind: 'recovery'; branchName: string }
   | { kind: 'manuscript-conflict'; conflictKind: ProposalConflictKind }
   | { kind: 'analysis'; mode: BaselineAnalysisTaskMode }
+  // A ledger Task of another kind whose Run waits to start once online, or whose plan moved meanwhile (Issue #760, S74c).
+  | { kind: 'task'; taskKind: Exclude<StartWhenOnlineTaskKind, 'review-run'> }
   // A Review Run; `onSelection` for one that reads only the selection 就这段发起任务… handed over (Issue #423, S77b).
   | { kind: 'review'; ordinal: number; onSelection?: true }
   | { kind: 'maintenance'; classification: MaintenanceClassification; ordinal: number; publicationOrdinal: number }
@@ -10112,7 +10200,9 @@ export type GlobalAttentionObjectProjection =
   | { kind: 'learning-materials'; pending: number; deferred: number }
   // A dialogue Task (Issue #52, S17a): the editor's own question, as the Harness Session Ledger holds it — `null` when it
   // holds no turn of it here.
-  | { kind: 'dialogue'; question: string | null };
+  | { kind: 'dialogue'; question: string | null }
+  // 结果待确认 that completed Runs of one Task kind left on the Book (Issue #757): how many ranges, and which steps.
+  | { kind: 'unconfirmed'; taskKind: TaskPlanKind; ranges: number; steps: ReadonlyArray<UnconfirmedStageId> };
 
 /** The record facts an item's reason is told from: identities, counts and states, never manuscript text. */
 export interface GlobalAttentionFactsProjection {
@@ -10891,6 +10981,11 @@ export interface ServiceOperationMap {
    * the baseline analysis, or a Review Run — in the editor's words. A read; it records nothing.
    */
   inspectTaskPlan: { input: InspectTaskPlanInput; output: TaskPlanProjection };
+  /**
+   * 保留为缺口 (Issue #757; Manual Outcome Resolution): the editor keeps as gaps exactly the 结果待确认 the plan of this kind
+   * listed, by its digest; the answer is that plan read again.
+   */
+  resolveUnconfirmedOutcomes: { input: InspectTaskPlanInput & { digest: string }; output: TaskPlanProjection };
   inspectForegroundExecutionBoundary: {
     input: { bookId: string; runRecordId: string };
     output: ForegroundExecutionBoundaryProjection;
@@ -10998,6 +11093,14 @@ export interface ServiceOperationMap {
     input: Record<string, never>;
     output: ReconnectPreflightProjection;
   };
+  /**
+   * 联网后开始任务 for every kind but the baseline's (Issue #760, S74c; AUTH-004, OFF-005): the kind's own exact Run Authorization
+   * — a ledger Task's Run Record, or a Review Run's one approval — and the Run waits in Connectivity Wait; nothing is sent, no
+   * usage arises, and nothing implies it began. Reconnect Preflight then starts it as 开始任务 would. The answer is the plan.
+   */
+  startTaskWhenOnline: { input: StartTaskWhenOnlineInput; output: TaskPlanProjection };
+  /** 取消 while that Run waits (OFF-010), or while it waits on the governor for a place: terminal, before any dispatch. */
+  cancelWaitingTask: { input: CancelWaitingTaskInput; output: TaskPlanProjection };
   /**
    * 快速开始 (Issue #421; TASK-017, TASK-020, TASK-026): the Task the caller just prepared exactly as 先看计划
    * prepares it is started exactly as 开始任务 would start it, its authorization naming the rule version — or,
@@ -11653,6 +11756,7 @@ export interface RendererApi {
   inspectTaskAuthorization(): Promise<TaskAuthorizationProjection>;
   /** The Task Drawer's plan of one Task of the Book the window is showing (Issue #418). */
   inspectTaskPlan(input: Omit<InspectTaskPlanInput, 'bookId'>): Promise<TaskPlanProjection>;
+  resolveUnconfirmedOutcomes(input: Omit<InspectTaskPlanInput, 'bookId'> & { digest: string }): Promise<TaskPlanProjection>;
   inspectForegroundExecutionBoundary(input: Omit<
     ServiceOperationMap['inspectForegroundExecutionBoundary']['input'],
     'bookId'
@@ -11672,6 +11776,9 @@ export interface RendererApi {
   authorizeBaselineAnalysis(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<BaselineAnalysisProjection>;
   startBaselineAnalysisWhenOnline(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<BaselineAnalysisProjection>;
   cancelWaitingBaselineAnalysis(input: { taskIntentId: string }): Promise<BaselineAnalysisProjection>;
+  /** 联网后开始任务 and its 取消 for every other kind with a plan (Issue #760, S74c), within the route's Book. */
+  startTaskWhenOnline(input: Omit<StartTaskWhenOnlineInput, 'bookId'>): Promise<TaskPlanProjection>;
+  cancelWaitingTask(input: Omit<CancelWaitingTaskInput, 'bookId'>): Promise<TaskPlanProjection>;
   cancelBaselineAnalysisRun(input: { taskIntentId: string }): Promise<BaselineAnalysisProjection>;
   pauseBaselineAnalysisRun(input: { taskIntentId: string }): Promise<BaselineAnalysisProjection>;
   resumeBaselineAnalysisRun(input: { taskIntentId: string }): Promise<BaselineAnalysisProjection>;

@@ -3,20 +3,21 @@ import type { Connectivity } from './connectivity.js';
 
 /**
  * What Reconnect Preflight reads and does (Issue #502), handed in by the service so the rule below is the whole
- * of it and can be exercised without one.
+ * of it and can be exercised without one. A waiting Run is whatever the service lists — since Issue #760 a Run of any
+ * kind, with what the service needs to find it again — and every question about one is asked of that same entry.
  */
-export interface ReconnectPreflightDependencies {
+export interface ReconnectPreflightDependencies<Run extends { readonly runRecordId: string } = { readonly runRecordId: string }> {
   /** The waiting Runs this preflight covers, oldest first. */
-  waitingRuns(): ReadonlyArray<{ runRecordId: string }>;
+  waitingRuns(): ReadonlyArray<Run>;
   /** Whether the Run still waits — another preflight or the editor's 取消 may have settled it meanwhile. */
-  stillWaiting(runRecordId: string): boolean;
+  stillWaiting(run: Run): boolean;
   /** The labels of the material inputs of the Run's bound plan that moved; none while the plan stands. */
-  drift(runRecordId: string): ReadonlyArray<string>;
+  drift(run: Run): ReadonlyArray<string>;
   /**
    * Block the Run with its reasons and why (Issue #536): `plan-moved` when its bound plan moved, `launch` when this
    * launch cannot admit it. It never dispatches.
    */
-  block(runRecordId: string, reasons: ReadonlyArray<string>, cause: WaitingRunBlockCause): void;
+  block(run: Run, reasons: ReadonlyArray<string>, cause: WaitingRunBlockCause): void;
   /** Whether this launch's baseline route reaches its model over the network. */
   reachesNetwork: boolean;
   /** This device's reading now: local, never a probe. */
@@ -26,7 +27,7 @@ export interface ReconnectPreflightDependencies {
   /** Whether the one execution slot is held. */
   slotBusy(): boolean;
   /** Admit the Run to the slot and dispatch it, through the execution owner; throws its admission error. */
-  admit(runRecordId: string): void;
+  admit(run: Run): void;
   /**
    * Whether nothing may be admitted or blocked now (Issue #434 review): a replacement of the local data is being prepared or
    * waits, and what a Run wrote would be lost with the data it replaces. Every waiting Run then waits.
@@ -34,8 +35,11 @@ export interface ReconnectPreflightDependencies {
   frozen(): boolean;
 }
 
-/** Admission refusals that are only a matter of time: the slot is held, or the service is stopping. */
-const RETRY_LATER = new Set(['EXECUTION_BUSY', 'EXECUTION_STOPPING']);
+/**
+ * Admission refusals that are only a matter of time: the slot is held, or the service is stopping — or, for a Review Run
+ * (Issue #760), another Run of its Book is being driven, which ends by itself.
+ */
+const RETRY_LATER = new Set(['EXECUTION_BUSY', 'EXECUTION_STOPPING', 'REVIEW_RUN_ACTIVE']);
 
 /** Why Reconnect Preflight blocked a waiting Run (Issue #536): its bound plan moved, or this launch cannot admit it. */
 export type WaitingRunBlockCause = 'plan-moved' | 'launch';
@@ -64,7 +68,7 @@ export function planDriftReason(changed: ReadonlyArray<string>): string {
  * wait for nothing. Nothing is sent and no usage arises before admission, and no credential value is read here —
  * only the readiness the dispatch check reports.
  */
-export async function reconnectPreflight(deps: ReconnectPreflightDependencies): Promise<ReconnectPreflightProjection> {
+export async function reconnectPreflight<Run extends { readonly runRecordId: string }>(deps: ReconnectPreflightDependencies<Run>): Promise<ReconnectPreflightProjection> {
   const outcome = { admitted: 0, blocked: 0, waiting: 0 };
   const runs = deps.waitingRuns();
   if (runs.length === 0) return outcome;
@@ -78,14 +82,14 @@ export async function reconnectPreflight(deps: ReconnectPreflightDependencies): 
       outcome.waiting += 1;
       continue;
     }
-    if (!deps.stillWaiting(run.runRecordId)) continue;
+    if (!deps.stillWaiting(run)) continue;
     if (offline || credential === 'missing') {
       outcome.waiting += 1;
       continue;
     }
-    const changed = deps.drift(run.runRecordId);
+    const changed = deps.drift(run);
     if (changed.length > 0) {
-      deps.block(run.runRecordId, [planDriftReason(changed)], 'plan-moved');
+      deps.block(run, [planDriftReason(changed)], 'plan-moved');
       outcome.blocked += 1;
       continue;
     }
@@ -94,7 +98,7 @@ export async function reconnectPreflight(deps: ReconnectPreflightDependencies): 
       continue;
     }
     try {
-      deps.admit(run.runRecordId);
+      deps.admit(run);
       outcome.admitted += 1;
     } catch (error) {
       const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : '';
@@ -102,7 +106,7 @@ export async function reconnectPreflight(deps: ReconnectPreflightDependencies): 
         outcome.waiting += 1;
         continue;
       }
-      deps.block(run.runRecordId, [error instanceof Error && error.message.length > 0 ? error.message : '运行未能进入调度。'], 'launch');
+      deps.block(run, [error instanceof Error && error.message.length > 0 ? error.message : '运行未能进入调度。'], 'launch');
       outcome.blocked += 1;
     }
   }

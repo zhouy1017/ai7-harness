@@ -233,6 +233,39 @@ describe('the four groups of 待我处理', () => {
     ]);
   });
 
+  it('lists a waiting Run of every other kind the same way, on its own plan, and one whose plan moved as a decision (Issue #760, S74c)', () => {
+    const bookId = randomUUID();
+    const kinds = ['initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing'] as const;
+    const waitingTasks = kinds.map((kind, index) => ({
+      kind, bookId, bookTitle: '等网之书', taskIntentId: randomUUID(), runRecordId: randomUUID(), state: 'awaiting-connectivity' as const, stateAt: minutesAgo(10 - index),
+    }));
+    const projection = composeGlobalAttention(readings({ waitingTasks, waitingFor: 'connection' }), NOW);
+    expect(group(projection, 'active').map((entry) => [entry.itemId, entry.state, entry.blocked, entry.nextStep, entry.object, entry.target])).toEqual(
+      waitingTasks.map((task) => [`task:${task.taskIntentId}`, 'analysis-waiting-connection', true, 'view-run', { kind: 'task', taskKind: task.kind },
+        { kind: 'task-plan', bookId, taskKind: task.kind, ref: task.taskIntentId }]),
+    );
+    expect(projection.running).toBe(true);
+    // Its plan moved while it waited: the editor's plan decision, counted, and nothing runs.
+    const moved = { ...waitingTasks[3]!, state: 'plan-moved' as const };
+    const decided = composeGlobalAttention(readings({ waitingTasks: [moved] }), NOW);
+    expect(group(decided, 'decisions').map((entry) => [entry.state, entry.blocked, entry.nextStep])).toEqual([['analysis-plan-moved', true, 'view-run']]);
+    expect(decided.actionableCount).toBe(1);
+    expect(decided.running).toBe(false);
+    // One Reconnect Preflight could not start for this launch never ran either: an exception the editor acts on (CONC-006).
+    const blocked = composeGlobalAttention(readings({ waitingTasks: [{ ...waitingTasks[0]!, state: 'launch-blocked' as const }] }), NOW);
+    expect(group(blocked, 'exceptions').map((entry) => [entry.state, entry.blocked, entry.nextStep])).toEqual([['analysis-blocked', true, 'view-run']]);
+    expect(blocked.actionableCount).toBe(1);
+    // A Review Run waits as a whole, and opens 审阅.
+    const review = reviewRun('等网审阅', { state: 'waiting', categories: [category('错别字与规范用语', 'waiting', true)], lastEventAt: null });
+    const reviewWaiting = composeGlobalAttention(readings({ reviewRuns: [review], waitingFor: 'network' }), NOW);
+    expect(group(reviewWaiting, 'active').map((entry) => [entry.state, entry.blocked, entry.nextStep, entry.target])).toEqual([
+      ['analysis-waiting-network', false, 'view-review', { kind: 'review', bookId: review.bookId, reviewRunId: review.reviewRunId }],
+    ]);
+    expect(reviewWaiting.running).toBe(true);
+    const reviewMoved = composeGlobalAttention(readings({ reviewRuns: [{ ...review, state: 'plan-moved', categories: [category('错别字与规范用语', 'refused', false)], lastEventAt: minutesAgo(2) }] }), NOW);
+    expect(group(reviewMoved, 'decisions').map((entry) => [entry.state, entry.blocked, entry.nextStep, entry.at])).toEqual([['analysis-plan-moved', true, 'view-review', minutesAgo(2)]]);
+  });
+
   it('reads what a Run waits for only while one waits, and a failed read as waiting for the connection (Issue #539)', async () => {
     let reads = 0;
     const read = async () => {

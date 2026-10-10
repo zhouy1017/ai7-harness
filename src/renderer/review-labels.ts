@@ -142,6 +142,10 @@ export const REVIEW_RUN_STATE_PILLS: Readonly<Record<ReviewRunState, ReviewPill>
   // square of a failure; and a Run the editor then cancelled keeps the dash of every 已取消.
   'scope-changed': { tone: 'attention', shape: 'triangle' },
   cancelled: { tone: 'neutral', shape: 'dash' },
+  // 联网后开始任务 (Issue #760, S74c): waiting reads as a waiting baseline Run does — nothing begun — and a plan that moved
+  // meanwhile is the editor's decision, as 需要重新确认计划 is everywhere.
+  waiting: { tone: 'neutral', shape: 'ring' },
+  'plan-moved': { tone: 'attention', shape: 'triangle' },
 };
 
 export const REVIEW_CATEGORY_STATE_PILLS: Readonly<Record<ReviewRunCategoryState, ReviewPill>> = {

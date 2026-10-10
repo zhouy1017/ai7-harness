@@ -6,6 +6,8 @@ import type {
   TaskPlanRunControlProjection,
   TaskPlanStartReadiness,
   TaskPlanStateKey,
+  TaskPlanUnconfirmedProjection,
+  UnconfirmedStageId,
 } from '../shared/protocol.js';
 import { OFFLINE_START_LATER } from '../shared/offline-wording.js';
 import { RUN_BUDGET_CEILING_PATTERN } from '../shared/protocol.js';
@@ -415,6 +417,50 @@ export function taskBarUnconfirmedUnit(unitOrdinal: number, attempts: number): s
   return `第 ${unitOrdinal} 个阅读范围 · 请求已发出 ${attempts} 次 · 回答没有完整传回`;
 }
 
+/**
+ * 结果待确认 a completed Run left (Issue #757; ATTN-002, NOTIF-004, CTRL-007; interaction-spec §1036): what is known, what is
+ * missing, and the editor's determination — 保留为缺口, a Manual Outcome Resolution — never a repeat-shaped action.
+ */
+export const UNCONFIRMED_TASK_KIND_LABELS: Readonly<Record<TaskPlanKind, string>> = {
+  'fixed-task': '固定任务',
+  'baseline-analysis': '基线分析',
+  'review-run': '审阅',
+  'initial-evaluation': 'AI7 初评',
+  'readers-report': '审稿意见',
+  'evaluation-rewrite': '按我的评分重写评语',
+  writing: '写作任务',
+};
+/** The steps after the reading ranges, in the Run Report's own words. */
+export const UNCONFIRMED_STAGE_LABELS: Readonly<Record<UnconfirmedStageId, string>> = {
+  'cross-unit-reduction': '跨单元归纳',
+  'assurance-sampling': '保证抽样',
+  'run-report-reflection': '运行反思',
+};
+export const UNCONFIRMED_HEADING = '结果待确认';
+export const UNCONFIRMED_KEEP_AS_GAP = '保留为缺口';
+export const UNCONFIRMED_KEEP_FAILED = '未能记下保留为缺口。';
+export const UNCONFIRMED_KEPT_NOTE = '已记下：这些部分保留为结果待确认的缺口，不再列在待我处理里；没有发送任何内容。';
+/** `2 个阅读范围、跨单元归纳`: how many ranges, and which steps. */
+export function unconfirmedWhat(ranges: number, steps: ReadonlyArray<UnconfirmedStageId>): string {
+  return [...(ranges === 0 ? [] : [`${ranges} 个阅读范围`]), ...steps.map((stage) => UNCONFIRMED_STAGE_LABELS[stage])].join('、');
+}
+/** What the block says above its list: what is known and what is missing, and what 保留为缺口 does and does not do. */
+export function unconfirmedStatement(listed: TaskPlanUnconfirmedProjection): string {
+  const what = unconfirmedWhat(listed.ranges.length, [...new Set(listed.steps.map((step) => step.stage))]);
+  // A step is never sent again by a later Task as the same request, so only ranges carry the re-send sentence (#763 review).
+  return `${what}的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；运行已结束，这些部分在结果里记为结果待确认的缺口，AI7 没有自动再发。` +
+    `保留为缺口只记下你的确认：不发送任何内容，不改变结果${listed.ranges.length === 0 ? '。' : '；以后再读这些阅读范围的任务仍会在计划里说明会再发一次。'}`;
+}
+/**
+ * One line of the list: the category in a Review Run, the range or the step, and that its request was sent. A range counted in a
+ * text the Book has moved on from says so: 「第 N 个阅读范围（当时的文字）」.
+ */
+export function unconfirmedLine(entry: { unitOrdinal?: number; earlierText?: boolean; stage?: UnconfirmedStageId; category: string | null }): string {
+  const what = entry.stage !== undefined ? UNCONFIRMED_STAGE_LABELS[entry.stage]
+    : `第 ${entry.unitOrdinal} 个阅读范围${entry.earlierText === true ? '（当时的文字）' : ''}`;
+  return `${entry.category === null ? '' : `「${entry.category}」`}${what} · 请求已发出 · 回答没有完整传回`;
+}
+
 /** A stopped Run's continuation point, as the bar states it beside 续行; `null` when its kept progress no longer reads back. */
 export function taskBarContinuationNote(unitsSettled: number | null, unitsTotal: number): string {
   if (unitsSettled === null) return '已保存的阅读进度无法核对，这次运行不能续行；可以取消它，再重新开始';
@@ -423,9 +469,11 @@ export function taskBarContinuationNote(unitsSettled: number | null, unitsTotal:
     : `已读完 ${unitsSettled} / ${unitsTotal} 个阅读范围，结果都已保存；续行时从第 ${unitsSettled + 1} 个接着读，不重复已读完的部分`;
 }
 
-/** A Review Run cannot wait yet (Issue #502): offline, its start is shown disabled with this reason. */
-export const TASK_BAR_REVIEW_OFFLINE = '离线：审阅要连到模型服务，而这台设备现在没有网络；联网后再开始审阅';
-/** The same for every other kind that cannot wait (Issue #706): writing, 评估, 审稿意见 and 按评分重写 — the shared sentence (#714). */
+/**
+ * Why a kind with no Connectivity Wait does not start while offline (Issue #706; #714): the shared sentence. Since Issue #760
+ * (S74c) every kind with a plan and 开始任务 waits; J-03's fixed Task only records and never reaches a model service, so it is
+ * never offline either, and this is the bar's answer only for a kind that might one day be offline without a wait.
+ */
 export const TASK_BAR_OFFLINE_LATER = OFFLINE_START_LATER;
 
 /** A renderer operation that records a Run Authorization whose Run waits in Connectivity Wait. */
@@ -433,19 +481,20 @@ export type StartWhenOnlineOperation = Extract<keyof RendererApi, `${string}When
 
 /**
  * The operation each kind's 联网后开始任务 records (Issue #706; #710 review P3-1), or `null` for a kind with no Connectivity
- * Wait: 联网后开始任务 is the baseline analysis Task's own (Issue #502, S74b) — the only kind the service records waiting.
- * The bar shows the control, and the drawer's click calls the operation, from this one map, so a kind can never be offered
- * a control its click would drop. Every other kind, offline, shows 开始任务 disabled with why. A kind is listed here, so a
- * new kind has to say which it is.
+ * Wait. The baseline analysis keeps its own (Issue #502, S74b); every other kind with a plan and 开始任务 — 审阅, AI7 初评,
+ * 审稿意见, 按我的评分重写评语 and the 写作任务 — waits through the one operation keyed by kind (Issue #760, S74c). J-03's fixed
+ * Task has none: it only ever records and never reaches a model service, so it is never offline (ADR 0055). The bar shows the
+ * control, and the drawer's click calls the operation, from this one map, so a kind can never be offered a control its click
+ * would drop. A kind is listed here, so a new kind has to say which it is.
  */
 export const TASK_BAR_START_WHEN_ONLINE_OPERATIONS: Readonly<Record<TaskPlanKind, StartWhenOnlineOperation | null>> = {
   'fixed-task': null,
   'baseline-analysis': 'startBaselineAnalysisWhenOnline',
-  'review-run': null,
-  'initial-evaluation': null,
-  'readers-report': null,
-  'evaluation-rewrite': null,
-  writing: null,
+  'review-run': 'startTaskWhenOnline',
+  'initial-evaluation': 'startTaskWhenOnline',
+  'readers-report': 'startTaskWhenOnline',
+  'evaluation-rewrite': 'startTaskWhenOnline',
+  writing: 'startTaskWhenOnline',
 };
 
 /** Which kinds have a Connectivity Wait (Issue #706): those {@link TASK_BAR_START_WHEN_ONLINE_OPERATIONS} names an operation for. */
@@ -453,10 +502,19 @@ export const TASK_BAR_WAITS_FOR_CONNECTIVITY: Readonly<Record<TaskPlanKind, bool
   (Object.keys(TASK_BAR_START_WHEN_ONLINE_OPERATIONS) as TaskPlanKind[]).map((kind) => [kind, TASK_BAR_START_WHEN_ONLINE_OPERATIONS[kind] !== null]),
 ) as Record<TaskPlanKind, boolean>;
 
-/** Why a kind without a Connectivity Wait does not start while offline. */
-export function taskBarOfflineReason(kind: TaskPlanKind): string {
-  return kind === 'review-run' ? TASK_BAR_REVIEW_OFFLINE : TASK_BAR_OFFLINE_LATER;
-}
+/**
+ * 需要重新确认计划 of a kind with no 重新准备 in the drawer (Issue #760, S74c; OFF-008): where its own surface prepares it again,
+ * beside what moved. The baseline analysis's bar offers 重新准备 itself (Issue #536).
+ */
+export const TASK_BAR_PLAN_MOVED_ELSEWHERE: Readonly<Record<TaskPlanKind, string>> = {
+  'fixed-task': '请重新准备这项任务，看过新计划后再开始。',
+  'baseline-analysis': '请在「分析」里重新准备，看过新计划后再开始。',
+  'review-run': '请在「审阅」里新建一次审阅，看过新计划后再开始。',
+  'initial-evaluation': '请在「评估」里重新准备 AI7 初评，看过新计划后再开始。',
+  'readers-report': '请在「评估」里重新准备审稿意见，看过新计划后再开始。',
+  'evaluation-rewrite': '请在「评估」里按现在的评分重新准备重写，看过新计划后再开始。',
+  writing: '请在「交付物」的新建文档 · 写作任务里重新准备，看过新计划后再开始。',
+};
 
 /**
  * The one sentence a pre-start state adds beside the actions: J-03's fixed Task is only ever recorded (ADR
@@ -779,6 +837,18 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         actions: [{ name: 'reprepare', label: TASK_BAR_REPREPARE, tone: 'primary', disabledReason: null }, runLink],
       };
     }
+    // The same for a kind whose drawer prepares nothing (Issue #760, S74c): what moved, and where its own surface prepares it
+    // again; 查看… opens that surface.
+    if (plan.state.key === 'plan-moved') {
+      return {
+        readiness,
+        summary,
+        statement: null,
+        note: `${plan.planMovedReason ?? `${plan.state.label}。`}${TASK_BAR_PLAN_MOVED_ELSEWHERE[plan.kind]}`,
+        status: plan.state.label,
+        actions: [runLink],
+      };
+    }
     // Run Budget Ceiling Reached (Issue #51, S16a): what the Run read and used, 调整预算并重做, and the partial results.
     if (plan.state.key === 'budget-reached' && plan.budgetStop !== null) {
       return {
@@ -810,7 +880,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
     // action sits beside it in OFF-004's words, and neither is preselected. A kind without a Connectivity Wait
     // (Issue #706) shows 开始任务 disabled with why instead.
     if (!TASK_BAR_WAITS_FOR_CONNECTIVITY[plan.kind]) {
-      const reason = taskBarOfflineReason(plan.kind);
+      const reason = TASK_BAR_OFFLINE_LATER;
       return {
         readiness,
         summary,

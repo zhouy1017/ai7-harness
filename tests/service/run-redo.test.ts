@@ -109,14 +109,14 @@ const states = (projection: BaselineAnalysisProjection): string[] => projection.
 function preflight(store: EditorialStore, execution: BaselineAnalysisExecutionOwner, connectivity: () => Connectivity) {
   return reconnectPreflight({
     waitingRuns: () => store.waitingBaselineAnalysisRuns(null),
-    stillWaiting: (runRecordId) => store.baselineAnalysisRunWaits(runRecordId),
-    drift: (runRecordId) => store.baselineAnalysisPreflightDrift(runRecordId),
-    block: (runRecordId, reasons, cause) => store.blockWaitingBaselineAnalysisRun(runRecordId, reasons, cause),
+    stillWaiting: ({ runRecordId }) => store.baselineAnalysisRunWaits(runRecordId),
+    drift: ({ runRecordId }) => store.baselineAnalysisPreflightDrift(runRecordId),
+    block: ({ runRecordId }, reasons, cause) => store.blockWaitingBaselineAnalysisRun(runRecordId, reasons, cause),
     reachesNetwork: true,
     connectivity,
     credentialReadiness: () => execution.liveCredentialReadiness(),
     slotBusy: () => execution.busy,
-    admit: (runRecordId) => execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { afterReconnectPreflight: true }),
+    admit: ({ runRecordId }) => execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { afterReconnectPreflight: true }),
     frozen: () => store.replacementFrozen(),
   });
 }

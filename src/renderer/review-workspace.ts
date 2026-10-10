@@ -461,7 +461,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
           return;
         }
         options.setStatus(options.errorMessage(error, REVIEW_STATUS_LINES.refreshFailed), 'error');
-        if (projection.run?.state === 'running') schedulePoll();
+        if (projection.run?.state === 'running' || projection.run?.state === 'waiting') schedulePoll();
       },
     );
   }
@@ -481,7 +481,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       renderCard(next);
     }
     updateLive(previous, next);
-    if (next.run?.state === 'running') schedulePoll();
+    // A Run waiting to start once online is read again too (Issue #760, S74c), so 审阅 follows it into running.
+    if (next.run?.state === 'running' || next.run?.state === 'waiting') schedulePoll();
     followFocus(next);
     // 运行此工序… from 知识库: the sheet opens filled from the procedure once this Book's workspace is on screen.
     if (pendingProcedureId !== null && card !== undefined) {

@@ -273,20 +273,21 @@ describe('写作任务 lists 资料库 items under 允许参考 and reads them t
       const others = await put(store, '别的书的资料.txt', sized(200, 0x8000), '别的书的资料');
       const deferred = await put(store, '待定资料.txt', sized(200, 0x8400), '待定资料');
       await put(store, '没定归属.txt', sized(200, 0x8800), '没定归属');
-      const page = await put(store, '网页.html', '<html><body><p>网页正文</p></body></html>', '网页资料', 'web');
+      // A scan whose text no admitted dependency reads (a web page was this item until Issue #428 read HTML).
+      const scan = await put(store, '扫描件.pdf', '%PDF-1.4\n% synthetic test bytes, not a real document\n', '扫描件资料');
       decide(store, listed.materialId, { scope: 'book', bookId }, 'book');
       decide(store, house.materialId, { scope: 'house' }, 'excluded');
       decide(store, middle.materialId, { scope: 'book', bookId }, 'book');
       decide(store, long.materialId, { scope: 'book', bookId }, 'book');
       decide(store, others.materialId, { scope: 'book', bookId: otherBook }, 'book');
       decide(store, deferred.materialId, { scope: 'book', bookId }, 'deferred');
-      decide(store, page.materialId, { scope: 'book', bookId }, 'book');
+      decide(store, scan.materialId, { scope: 'book', bookId }, 'book');
 
       // Before any index is built, nothing has extracted text: nothing is offered, and the row says what an item needs.
       expect(store.inspectWritingTask(bookId).references.materials).toEqual({ statement: WRITING_MATERIALS_NONE, items: [], more: 0 });
       store.startMaterialIndexing();
       await store.settleMaterialIndexing();
-      expect(store.inspectLibraryMaterial(page.materialId).index.state).toBe('unsupported');
+      expect(store.inspectLibraryMaterial(scan.materialId).index.state).toBe('unsupported');
 
       // Offered: this Book's and the house's items whose index extracted text; the long one shown, disabled, with why.
       const offer = store.inspectWritingTask(bookId).references.materials;
@@ -309,8 +310,8 @@ describe('写作任务 lists 资料库 items under 允许参考 and reads them t
         .toBe('MATERIAL_REFERENCE_UNAVAILABLE:资料《别的书的资料》：这份资料还不能列进这本书任务的「允许参考」。');
       expect(await refusal(() => prepare(store, bookId, { ...news, materialIds: [deferred.materialId] })))
         .toBe('MATERIAL_REFERENCE_UNAVAILABLE:资料《待定资料》：这份资料还不能列进这本书任务的「允许参考」。');
-      expect(await refusal(() => prepare(store, bookId, { ...news, materialIds: [page.materialId] })))
-        .toBe('MATERIAL_INDEX_NO_TEXT:资料《网页资料》：这份资料没有提取出可分段的文字。');
+      expect(await refusal(() => prepare(store, bookId, { ...news, materialIds: [scan.materialId] })))
+        .toBe('MATERIAL_INDEX_NO_TEXT:资料《扫描件资料》：这份资料没有提取出可分段的文字。');
       expect(await refusal(() => prepare(store, bookId, { ...news, materialIds: [long.materialId] })))
         .toBe(`WRITING_MATERIAL_OVER_BOUND:${writingMaterialOverBoundNamed('长资料', 3_500)}`);
       expect(await refusal(() => prepare(store, bookId, { ...news, materialIds: [listed.materialId, house.materialId, middle.materialId] })))

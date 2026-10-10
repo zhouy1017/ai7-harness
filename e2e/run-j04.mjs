@@ -2887,10 +2887,54 @@ async function main() {
       barActions(reviewDrawer) === 'start:开始任务:enabled|revise:返回修改:disabled|save-draft:保存草稿:enabled',
     'review-bar-ready', reviewDrawer.bar);
 
+    // ---- 联网后开始任务 of a Review Run (Issue #760, plan slice S74c; editor-surfaces §6 离线 / 等待网络; V2-UX-AUTH-002,
+    // AUTH-004, OFF-004 to OFF-010). The device goes offline through J-04's control; the plan read again says so.
+    at('review-offline-bar');
+    cancellation.throwIfRequested();
+    await writeFile(connectivityPath, 'offline');
+    await reviewAction(renderer, 'section.review-plans [data-review-action="view-plan"]', 'review-offline-reopen');
+    const reviewOffline = await drawerShowing(renderer, preparedReview.reviewRunId, 'offline', 'review-offline-drawer');
+    // The same two start actions a baseline offers offline, neither preselected, and no 开始任务 to confuse them with.
+    requireJourney(reviewOffline?.kind === 'review-run' && reviewOffline.pill === '离线' && reviewOffline.bar?.state === 'offline' &&
+      reviewOffline.bar.start === 'offline' && reviewOffline.bar.statement === BAR_STATEMENT &&
+      reviewOffline.bar.note === '离线：这份计划要连到模型服务，而这台设备现在没有网络。联网后开始任务会先记录这次授权，联网后自动开始；在此之前不会发送任何内容' &&
+      barActions(reviewOffline) === 'start-when-online:联网后开始任务:enabled|save-draft:仅保存任务草稿:enabled|revise:返回修改:disabled',
+    'review-offline-bar', reviewOffline?.bar);
+    await assertRenderer(renderer, `(() => { const bar=document.querySelector('#task-drawer .task-drawer-bar'); return bar instanceof HTMLElement && !bar.contains(document.activeElement) && [...bar.querySelectorAll('button')].every((button)=>!button.textContent.includes('授权')); })()`, 'review-offline-nothing-preselected');
+
+    at('review-start-when-online');
+    cancellation.throwIfRequested();
+    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="start-when-online"]', 'review-start-when-online-click');
+    const reviewWaitingDrawer = await drawerShowing(renderer, preparedReview.reviewRunId, 'waiting', 'review-waiting-drawer');
+    requireJourney(reviewWaitingDrawer?.pill === '等待网络' && reviewWaitingDrawer.bar?.state === 'started' && reviewWaitingDrawer.bar.status === '等待网络' &&
+      reviewWaitingDrawer.bar.note === '已记录这次授权。联网、并确认计划没有变化后会自动开始；在此之前不会发送任何内容' &&
+      barActions(reviewWaitingDrawer) === 'cancel-wait:取消:enabled|run-link:查看审阅:enabled',
+    'review-waiting-bar', reviewWaitingDrawer?.bar);
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='waiting'`, 'review-waiting-card');
+    const waitingReview = await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`);
+    // The one approval is recorded and nothing of the Run began: every category waits, none was authorized on its ledger
+    // or dispatched, 继续审阅 is not offered, and no new 审阅 is prepared over it (OFF-005).
+    requireJourney(waitingReview?.run?.reviewRunId === preparedReview.reviewRunId && waitingReview.run.state === 'waiting' && waitingReview.run.canContinue === false &&
+      waitingReview.run.categories.every((category) => category.state === 'waiting') && waitingReview.newReview?.available === false,
+    'review-waiting-run', { state: waitingReview?.run?.state, categories: waitingReview?.run?.categories?.map((category) => category.state), newReview: waitingReview?.newReview });
+    await assertRenderer(renderer, `!document.querySelector('[data-review-action="continue"]')`, 'review-waiting-no-continue');
+    // 待我处理 holds it under 运行中与已暂停 in what it waits for, as a waiting baseline Run (ATTN-004).
+    const waitingAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
+    const waitingItem = waitingAttention?.groups?.flatMap((group) => group.items).find((item) => item.itemId === `review:${preparedReview.reviewRunId}`);
+    requireJourney(waitingItem?.group === 'active' && waitingItem.state === 'analysis-waiting-network' && waitingItem.nextStep === 'view-review',
+      'review-waiting-attention', waitingItem);
+
+    at('review-online-dispatch');
+    cancellation.throwIfRequested();
+    // The network returns. The drawer showing the waiting Run asks Reconnect Preflight on its own clock; the approval still
+    // stands and a place is free, so the Run is handed to its drive loop, and ②B beside it follows the Run to its end
+    // (OFF-008).
+    await writeFile(connectivityPath, 'online');
+
     at('review-authorize');
-    // Synchronized delta with Issue #420 (S74a A2): one activation of the bar's 开始任务 records the Run's one
-    // approval and hands it to its drive loop; ②B beside the drawer follows the Run to its end.
-    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="start"]', 'review-authorize-click');
+    // Synchronized delta with Issue #420 (S74a A2) and Issue #760 (S74c): the Run's one approval was the bar's
+    // 联网后开始任务; Reconnect Preflight handed it to its drive loop, and it reviews exactly as an approval that started at
+    // once does.
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'review-settled', 180_000);
     const reviewed = await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`);
     const reviewedCategories = reviewed?.run?.categories ?? [];

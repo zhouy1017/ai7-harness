@@ -12,7 +12,7 @@ import {
   ANALYSIS_LEDGER_REVISION_64_SQL,
   ANALYSIS_LEDGER_SCHEMA_SQL,
   EVALUATION_REWRITE_SCHEMA_VERSION,
-  MATERIAL_INDEX_SCHEMA_VERSION,
+  OUTCOME_RESOLUTION_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import { WRITING_EXEMPLAR_GONE_LABEL, WRITING_EXEMPLAR_GONE_SUFFIX, WRITING_NOT_DRAFTED_LABEL, writingCopyNotDo } from '../../src/service/task-plan.js';
 import { quickStartNoRuleReason, writingRulePattern } from '../../src/service/default-execution-rules.js';
@@ -711,7 +711,7 @@ describe('写作任务 over the real store on exact sample1', () => {
     let before: string;
     try {
       // Revision 64 exactly: the three relations as revision 64 left them, and no relation of revision 65.
-      plant.exec(`DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; PRAGMA user_version = ${EVALUATION_REWRITE_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; PRAGMA user_version = ${EVALUATION_REWRITE_SCHEMA_VERSION};`);
       downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_64_SQL);
       before = rows(plant);
       expect(() => plant.exec(`INSERT INTO analysis_result_sets(result_set_id, book_id, kind, created_at, canonical_json, sha256)
@@ -727,7 +727,7 @@ describe('写作任务 over the real store on exact sample1', () => {
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(OUTCOME_RESOLUTION_SCHEMA_VERSION);
       expect(rows(after)).toBe(before!);
       for (const table of KIND_COUPLED_ANALYSIS_RELATIONS) {
         expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(ANALYSIS_LEDGER_SCHEMA_SQL[table]);
@@ -744,7 +744,7 @@ describe('写作任务 over the real store on exact sample1', () => {
     const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const plant = new DatabaseSync(path);
     try {
-      plant.exec(`DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; PRAGMA user_version = ${EVALUATION_REWRITE_SCHEMA_VERSION};`);
+      plant.exec(`DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; PRAGMA user_version = ${EVALUATION_REWRITE_SCHEMA_VERSION};`);
     } finally {
       plant.close();
     }

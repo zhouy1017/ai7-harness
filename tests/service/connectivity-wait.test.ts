@@ -12,7 +12,7 @@ import { LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gat
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { reconnectPreflight } from '../../src/service/reconnect-preflight.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { CLARIFICATION_SCHEMA_VERSION, MATERIAL_INDEX_SCHEMA_VERSION, EXPORT_LEDGER_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
+import { CLARIFICATION_SCHEMA_VERSION, OUTCOME_RESOLUTION_SCHEMA_VERSION, EXPORT_LEDGER_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
   type BaselineAnalysisProjection,
@@ -73,14 +73,14 @@ function reader(state: { connectivity: Connectivity; busy: boolean }): TaskPlanC
 function preflight(store: EditorialStore, owner: BaselineAnalysisExecutionOwner, connectivity: () => Connectivity) {
   return reconnectPreflight({
     waitingRuns: () => store.waitingBaselineAnalysisRuns(null),
-    stillWaiting: (runRecordId) => store.baselineAnalysisRunWaits(runRecordId),
-    drift: (runRecordId) => store.baselineAnalysisPreflightDrift(runRecordId),
-    block: (runRecordId, reasons, cause) => store.blockWaitingBaselineAnalysisRun(runRecordId, reasons, cause),
+    stillWaiting: ({ runRecordId }) => store.baselineAnalysisRunWaits(runRecordId),
+    drift: ({ runRecordId }) => store.baselineAnalysisPreflightDrift(runRecordId),
+    block: ({ runRecordId }, reasons, cause) => store.blockWaitingBaselineAnalysisRun(runRecordId, reasons, cause),
     reachesNetwork: true,
     connectivity,
     credentialReadiness: () => owner.liveCredentialReadiness(),
     slotBusy: () => owner.busy,
-    admit: (runRecordId) => owner.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { afterReconnectPreflight: true }),
+    admit: ({ runRecordId }) => owner.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { afterReconnectPreflight: true }),
     frozen: () => store.replacementFrozen(),
   });
 }
@@ -174,7 +174,7 @@ describe('schema revision 30 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(OUTCOME_RESOLUTION_SCHEMA_VERSION);
       expect(analysisRunStatesShape(database)).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM analysis_run_states ORDER BY rowid').all()).toEqual(before.states);
       const after = relationTruth(database);

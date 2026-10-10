@@ -2,6 +2,10 @@ import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   BASELINE_ANALYSIS_KIND,
+  EVALUATION_REWRITE_KIND,
+  INITIAL_EVALUATION_KIND,
+  READERS_REPORT_KIND,
+  WRITING_KIND,
   type AnalysisGoal,
   type AnalysisKindId,
   type AnalysisProjection,
@@ -97,6 +101,7 @@ import {
   sha256Hex,
 } from './canonical.js';
 import { unitRequestDigest } from './contract.js';
+import { saysCarried, saysOutcomeUnknown } from './outcome-unknown.js';
 import { deriveCoverageManifest, manifestCoversEveryBlock, manifestDigestIsExact, unitContentKeys, type ManifestBlockInput } from './coverage-manifest.js';
 import {
   manifestWeight,
@@ -148,11 +153,16 @@ const SUCCESSOR_BEHAVIOR ='每次更新都是新的用户发起任务，经准�
 const SELECTED_BLOCKS_GONE = '所选文字所在的段落已不在当前稿件中，或先后颠倒；请重新选择。' as const;
 /** A range Task's paragraphs no longer stand at the positions its plan names (Issue #423 review, P3-4). */
 const SELECTED_RANGE_MOVED = '所选范围的段落在准备之后已移动或删除；请重新选择范围，再准备这项任务。' as const;
-const ACTIVE_RUN_REASON = '当前已有分析任务在调度或执行中；在其结束前不能准备新的更新任务。' as const;
-/** A Run in Connectivity Wait blocks a new Task too, but it is not running: it waits to start once online (OFF-005, OFF-006). */
-const WAITING_RUN_REASON = '有一项分析任务在等待联网后开始；它开始并结束之前，或在任务抽屉里取消它之前，不能准备新的更新任务。' as const;
-/** A Run waiting on the governor blocks a new Task too, and it is not running either (Issue #49, S14; CONC-007). */
-const QUEUED_RUN_REASON = '有一项分析任务在等待运行名额；它开始并结束之前，或在任务抽屉里取消它之前，不能准备新的更新任务。' as const;
+/**
+ * What an active Run of a kind is called, and what it keeps from being prepared (Issue #760 review): the baseline's 分析任务
+ * and 更新任务, a 写作任务's own, 评估's for AI7 初评, 审稿意见 and 按我的评分重写评语, and 审阅's for a review category's Task.
+ */
+function activeRunWords(kind: string): { readonly task: string; readonly next: string } {
+  if (kind === BASELINE_ANALYSIS_KIND) return { task: '分析任务', next: '新的更新任务' };
+  if (kind === WRITING_KIND) return { task: '写作任务', next: '新的写作任务' };
+  if (kind === INITIAL_EVALUATION_KIND || kind === READERS_REPORT_KIND || kind === EVALUATION_REWRITE_KIND) return { task: '评估任务', next: '新的评估任务' };
+  return { task: '审阅任务', next: '新的审阅' };
+}
 /** A queued Run's own words (Issue #49, S14; CONC-007): what it waits for, and that nothing has begun. */
 export const RUN_QUEUED_LABEL = '等待运行名额' as const;
 /** The waiting state's own words (Issue #502, OFF-005): recorded, and nothing has been sent or begun. */
@@ -281,6 +291,42 @@ export interface UnconfirmedUnitRecord {
   readonly unitOrdinal: number;
   readonly attempts: number;
   readonly reason: string;
+}
+
+/** A step after the ranges whose sent request's result cannot be known (Issue #757): the reduction, a sample, the reflection. */
+export type UnconfirmedStage = 'cross-unit-reduction' | 'assurance-sampling' | 'run-report-reflection';
+
+/**
+ * One sent request of a Book's Runs of one kind whose result cannot be known and that no later Run of the kind has read since
+ * (Issue #757; CTRL-007, CONT-011): a range — named by the content key the reuse plans match by, and by its ordinal in the
+ * latest revision that holds it — or a step of the latest Run that reached its Task Outcome. `key` names it across launches:
+ * the kind, the Run that sent the request, and the range's content key or the step, so 人工结果确认 settles exactly it.
+ */
+export interface UnconfirmedOutcomeRecord {
+  readonly key: string;
+  readonly kind: string;
+  /** The Run that sent the request — for a range carried forward, the Run that first sent it, never the one that carried it. */
+  readonly runRecordId: string;
+  readonly taskIntentId: string;
+  /** That Run's Task Outcome; `null` while it has none. */
+  readonly classification: string | null;
+  /** When that Run's outcome was recorded, or its revision when it has none. */
+  readonly recordedAt: string;
+  readonly unitOrdinal: number | null;
+  /** The manuscript revision the latest revision holding the range read — whose text `unitOrdinal` counts in; `null` for a step. */
+  readonly heldAtRevisionId: string | null;
+  readonly contentKey: string | null;
+  readonly stage: UnconfirmedStage | null;
+}
+
+/** The units a Task's reuse or scope plan names, as `resendUnitsByContent` reads them: which it reads again, by content key. */
+export interface ResendPlan {
+  readonly units: ReadonlyArray<{ readonly unitOrdinal: number; readonly contentKey: string; readonly disposition: string }>;
+}
+
+/** The outcome key of a range or a step (Issue #757), as `UnconfirmedOutcomeRecord.key` and the resolutions spell it. */
+export function unconfirmedOutcomeKey(kind: string, runRecordId: string, target: { contentKey: string } | { stage: UnconfirmedStage }): string {
+  return `${kind}\n${runRecordId}\n${'contentKey' in target ? `range:${target.contentKey}` : `step:${target.stage}`}`;
 }
 
 /** Why an interrupted Run stopped, when a limit stopped it (Issue #51, S16a): the ceiling, what it used, and what it read. */
@@ -736,9 +782,15 @@ export function runIsActive(state: BaselineAnalysisRunState | null): boolean {
     state === 'cancelling' || state === 'pausing' || state === 'paused' || state === 'resumable' || state === 'awaiting-clarification';
 }
 
-/** Why an active Run blocks a new Task, in the words of its state: a waiting Run is never said to be under way. */
-export function activeRunReason(state: BaselineAnalysisRunState | null): string {
-  return state === 'awaiting-connectivity' ? WAITING_RUN_REASON : state === 'authorized' ? QUEUED_RUN_REASON : ACTIVE_RUN_REASON;
+/**
+ * Why an active Run blocks a new Task, in the words of its state — a waiting Run is never said to be under way (OFF-005,
+ * OFF-006; Issue #49, S14) — and of its kind (Issue #760 review): a 写作任务 is never called an 分析任务.
+ */
+export function activeRunReason(state: BaselineAnalysisRunState | null, kind: string = BASELINE_ANALYSIS_KIND): string {
+  const { task, next } = activeRunWords(kind);
+  if (state === 'awaiting-connectivity') return `有一项${task}在等待联网后开始；它开始并结束之前，或在任务抽屉里取消它之前，不能准备${next}。`;
+  if (state === 'authorized') return `有一项${task}在等待运行名额；它开始并结束之前，或在任务抽屉里取消它之前，不能准备${next}。`;
+  return `当前已有${task}在调度或执行中；在其结束前不能准备${next}。`;
 }
 
 /**
@@ -2323,6 +2375,147 @@ export class BaselineAnalysisStore {
     return resendUnits(this.#predecessorFacts(row).manifest, unknown, plan);
   }
 
+  /**
+   * 结果待确认 that a Book's Runs of one kind left and no later Run of that kind has read since (Issue #757; CTRL-007, CONT-011,
+   * ATTN-002): the ranges whose sent requests' results cannot be known, and the steps of the latest Run that reached its Task
+   * Outcome — the reduction, a sample, the reflection — whose results cannot be known either.
+   *
+   * The ranges are walked through the kind's revisions in order, by the content key the reuse plans match by: a range read to a
+   * result by a later revision is no longer unconfirmed, a range a later Run ended without reading stays so — carried forward,
+   * under the Run that first sent it — and one whose own content an edit changed is a different request, no longer this one.
+   * The steps are the latest completed Run's alone, since every later Run that completes makes its own. A read: nothing is
+   * written. `kind` reads another kind's revisions through this ledger, whose readings here are kind-generic.
+   */
+  unconfirmedOutcomesOf(bookId: string, kind: string = this.#definition.kind): { ranges: UnconfirmedOutcomeRecord[]; steps: UnconfirmedOutcomeRecord[] } {
+    // A kind none of whose revisions ever held such a gap has no range to walk for: the drawer reads this on every poll.
+    const held = this.#db.prepare(
+      `SELECT 1 FROM analysis_result_set_revisions r JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
+       WHERE s.book_id = ? AND s.kind = ? AND instr(r.canonical_json, '"outcome-unknown"') > 0 LIMIT 1`,
+    ).get(bookId, kind) !== undefined;
+    const rows = !held ? [] : this.#db.prepare(
+      `SELECT r.* FROM analysis_result_set_revisions r
+       JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
+       WHERE s.book_id = ? AND s.kind = ? ORDER BY r.ordinal`,
+    ).all(bookId, kind) as SqlRow[];
+    const outcomeOf = this.#db.prepare('SELECT classification, recorded_at FROM analysis_task_outcomes WHERE run_record_id = ?');
+    const checkpointOf = this.#db.prepare('SELECT revision_id FROM analysis_task_input_checkpoints WHERE task_intent_id = ?');
+    const outstanding = new Map<string, UnconfirmedOutcomeRecord>();
+    for (const row of rows) {
+      const record = parseCanonicalJson(asString(row.canonical_json));
+      const unknown = isRecord(record) && Array.isArray(record.gaps)
+        ? record.gaps.flatMap((gap: unknown) => isRecord(gap) && gap.code === 'outcome-unknown' && typeof gap.unitOrdinal === 'number'
+          ? [{ unitOrdinal: gap.unitOrdinal, carried: typeof gap.reason === 'string' && saysCarried(gap.reason) }] : [])
+        : [];
+      let facts: ReusePlanPredecessor;
+      try {
+        facts = this.#predecessorFacts(row);
+      } catch {
+        // A revision whose plan no longer reads back names no range by content; the walk goes on past it.
+        continue;
+      }
+      const keys = unitContentKeys(facts.manifest);
+      const keyOf = new Map(facts.manifest.units.map((unit, index) => [unit.ordinal, keys[index]!] as const));
+      for (const unit of facts.unitStates) {
+        const key = unit.state === 'closed' ? keyOf.get(unit.unitOrdinal) : undefined;
+        if (key !== undefined) outstanding.delete(key);
+      }
+      const runRecordId = asString(row.run_record_id);
+      const outcome = outcomeOf.get(runRecordId) as SqlRow | undefined;
+      const heldAt = unknown.length === 0 ? undefined : checkpointOf.get(asString(row.task_intent_id)) as SqlRow | undefined;
+      const heldAtRevisionId = heldAt === undefined ? null : asString(heldAt.revision_id);
+      for (const gap of unknown) {
+        const contentKey = keyOf.get(gap.unitOrdinal);
+        if (contentKey === undefined) continue;
+        const earlier = outstanding.get(contentKey);
+        // Carried forward: the same request, still unconfirmed, now at this revision's ordinal.
+        if (gap.carried && earlier !== undefined) {
+          outstanding.set(contentKey, { ...earlier, unitOrdinal: gap.unitOrdinal, heldAtRevisionId });
+          continue;
+        }
+        outstanding.set(contentKey, {
+          key: unconfirmedOutcomeKey(kind, runRecordId, { contentKey }),
+          kind,
+          runRecordId,
+          taskIntentId: asString(row.task_intent_id),
+          classification: outcome === undefined ? null : asString(outcome.classification),
+          recordedAt: outcome === undefined ? asString(row.created_at) : asString(outcome.recorded_at),
+          unitOrdinal: gap.unitOrdinal,
+          heldAtRevisionId,
+          contentKey,
+          stage: null,
+        });
+      }
+    }
+    const latest = this.#db.prepare(
+      `SELECT o.* FROM analysis_task_outcomes o JOIN analysis_task_intents t ON t.task_intent_id = o.task_intent_id
+       WHERE t.book_id = ? AND t.kind = ? AND o.classification IN ('completed', 'completed-with-gaps')
+       ORDER BY o.recorded_at DESC, o.rowid DESC LIMIT 1`,
+    ).get(bookId, kind) as SqlRow | undefined;
+    const steps: UnconfirmedOutcomeRecord[] = [];
+    if (latest !== undefined) {
+      const record = parseCanonicalJson(asString(latest.canonical_json));
+      const report = isRecord(record) && isRecord(record.report) ? record.report : null;
+      const failures = report !== null && Array.isArray(report.failures) ? report.failures.filter(isRecord) : [];
+      const said = (stage: string): boolean => failures.some((failure) => failure.stage === stage && typeof failure.reason === 'string' && saysOutcomeUnknown(failure.reason));
+      const reflection = report !== null && isRecord(report.ifRedone) && report.ifRedone.state === 'gap' &&
+        typeof report.ifRedone.reason === 'string' && saysOutcomeUnknown(report.ifRedone.reason);
+      const runRecordId = asString(latest.run_record_id);
+      const stages: UnconfirmedStage[] = [
+        ...(said('cross-unit-reduction') ? ['cross-unit-reduction' as const] : []),
+        ...(said('assurance-sampling') ? ['assurance-sampling' as const] : []),
+        ...(reflection ? ['run-report-reflection' as const] : []),
+      ];
+      for (const stage of stages) {
+        steps.push({
+          key: unconfirmedOutcomeKey(kind, runRecordId, { stage }),
+          kind,
+          runRecordId,
+          taskIntentId: asString(latest.task_intent_id),
+          classification: asString(latest.classification),
+          recordedAt: asString(latest.recorded_at),
+          unitOrdinal: null,
+          heldAtRevisionId: null,
+          contentKey: null,
+          stage,
+        });
+      }
+    }
+    const ranges = [...outstanding.values()].sort((left, right) => (left.unitOrdinal ?? 0) - (right.unitOrdinal ?? 0));
+    return { ranges, steps };
+  }
+
+  /**
+   * The units a Task of a kind that keeps no progress sends again whose content is that of a range an earlier Run of the kind
+   * left 结果待确认 and no Run has read since (Issue #757; CONT-011) — matched by content key, whatever the reason the Task
+   * reads it, and whether or not the editor kept it as a gap: its earlier request may already have been processed and billed.
+   * The units it sends are its reuse or scope plan's recomputed ones, or, with no such plan, every unit of its coverage
+   * manifest. Empty once its Run has begun — so its own Run never counts against it: the disclosure is its Plan Preview's.
+   */
+  resendUnitsByContentOf(projection: AnalysisProjection, kind: string = this.#definition.kind): number[] {
+    const intent = projection.taskIntent;
+    const manifest = projection.coverageManifest;
+    // Until its Run begins — authorized, waiting to start once online (Issue #760), or blocked before dispatch — the Task has read
+    // nothing, so nothing of its own counts and its plan keeps saying what starting it will send.
+    const begun = projection.run !== null && !['authorized', 'awaiting-connectivity', 'blocked-before-dispatch'].includes(projection.run.state);
+    if (intent === null || manifest === null || begun) return [];
+    const update = projection.update as { reusePlan?: ResendPlan | null } | null;
+    return this.resendUnitsByContent(projection.bookId, kind, manifest, update?.reusePlan ?? null);
+  }
+
+  /**
+   * `resendUnitsByContentOf` over a Task's frozen parts (Issue #757): a Review Run's category reads its coverage manifest and its
+   * scope plan from the components it froze.
+   */
+  resendUnitsByContent(bookId: string, kind: string, manifest: CoverageManifestProjection, plan: ResendPlan | null): number[] {
+    const unconfirmed = new Set(this.unconfirmedOutcomesOf(bookId, kind).ranges.map((range) => range.contentKey));
+    if (unconfirmed.size === 0) return [];
+    const keys = unitContentKeys(manifest);
+    const sent = plan !== null
+      ? plan.units.filter((unit) => unit.disposition === 'recomputed').map((unit) => ({ ordinal: unit.unitOrdinal, key: unit.contentKey }))
+      : manifest.units.map((unit, index) => ({ ordinal: unit.ordinal, key: keys[index]! }));
+    return sent.filter((unit) => unconfirmed.has(unit.key)).map((unit) => unit.ordinal).sort((left, right) => left - right);
+  }
+
   #revisionBody(row: SqlRow): Record<string, unknown> {
     const body = parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>;
     requireAnalysis(body.schema === this.#definition.revisionSchema || body.schema === this.#definition.successorRevisionSchema,
@@ -2744,7 +2937,7 @@ export class BaselineAnalysisStore {
     activeRun: BaselineAnalysisRunState | null,
   ): BaselineAnalysisUpdateControlsProjection | ReviewCategoryUpdateControlsProjection {
     const blockedByActiveRun = activeRun !== null;
-    const blockedReason = blockedByActiveRun ? activeRunReason(activeRun) : null;
+    const blockedReason = blockedByActiveRun ? activeRunReason(activeRun, this.#definition.kind) : null;
     const head = this.#workingHead(latest.manuscriptPin.manuscriptId, bookId);
     const blocks = this.readWorkingBlocks(head.branchId);
     const preview = deriveCoverageManifest({
@@ -2856,7 +3049,7 @@ export class BaselineAnalysisStore {
       requireAnalysis(!this.preparationInFlight(input.bookId), 'ANALYSIS_PREPARATION_IN_FLIGHT', '这本书正在准备一项任务；后台分析不接手。');
     }
     const existing = this.inspect(input.bookId);
-    requireAnalysis(!runIsActive(existing.run?.state ?? null), 'ANALYSIS_TASK_ACTIVE', activeRunReason(existing.run?.state ?? null));
+    requireAnalysis(!runIsActive(existing.run?.state ?? null), 'ANALYSIS_TASK_ACTIVE', activeRunReason(existing.run?.state ?? null, this.#definition.kind));
     const latest = existing.resultSetRevision;
     // 改计划重做 (Issue #422, S76c; AUTH-010, CONT-013): a new Task after the latest Task's Run was cancelled once it
     // began. What that Run kept it formed into the Book's latest revision, which the redo carries and reads again
@@ -3938,10 +4131,42 @@ export class BaselineAnalysisStore {
     });
   }
 
-  /** Every Run of this kind waiting in Connectivity Wait, oldest first, with its Book. */
-  waitingRuns(): Array<{ bookId: string; taskIntentId: string; runRecordId: string }> {
+  /**
+   * Each Book's latest Task of this kind whose Run waits in Connectivity Wait, or that Reconnect Preflight blocked after it
+   * waited — its plan moved, or this launch could not start it (Issue #760, S74c; ATTN-004, CONC-006): what 待我处理 and the 任务
+   * panel read of a kind they otherwise leave to its own surface. Every row the query keeps is a reading, so the limit bounds
+   * what is shown and nothing is dropped after it. A read; nothing is written.
+   */
+  waitingAttentionReadings(bookId: string | null, limit: number): Array<{
+    bookId: string; bookTitle: string; taskIntentId: string; runRecordId: string; state: 'awaiting-connectivity' | 'plan-moved' | 'launch-blocked'; stateAt: string;
+  }> {
+    const lastState = `(SELECT s.state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1)`;
     const rows = this.#db.prepare(
-      `SELECT r.run_record_id, r.task_intent_id, i.book_id
+      `SELECT t.task_intent_id, t.book_id, b.title book_title, r.run_record_id, ${lastState} last_state,
+              (SELECT s.recorded_at FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1) last_state_at
+       FROM analysis_task_intents t
+       JOIN books b ON b.book_id = t.book_id
+       JOIN analysis_run_records r ON r.task_intent_id = t.task_intent_id
+       WHERE t.kind = ? AND t.rowid = (
+           SELECT t2.rowid FROM analysis_task_intents t2 WHERE t2.book_id = t.book_id AND t2.kind = t.kind
+           ORDER BY t2.created_at DESC, t2.rowid DESC LIMIT 1)
+         AND (${lastState} = 'awaiting-connectivity' OR (${lastState} = 'blocked-before-dispatch' AND EXISTS (
+           SELECT 1 FROM analysis_run_states w WHERE w.run_record_id = r.run_record_id AND w.state = 'awaiting-connectivity')))
+         AND (? IS NULL OR t.book_id = ?)
+       ORDER BY t.created_at, t.task_intent_id LIMIT ?`,
+    ).all(this.#definition.kind, bookId, bookId, limit) as SqlRow[];
+    return rows.map((row) => {
+      const runRecordId = asString(row.run_record_id);
+      const state = row.last_state === 'awaiting-connectivity' ? 'awaiting-connectivity' as const
+        : this.blockedByOf(runRecordId) === 'plan-moved' ? 'plan-moved' as const : 'launch-blocked' as const;
+      return { bookId: asString(row.book_id), bookTitle: asString(row.book_title), taskIntentId: asString(row.task_intent_id), runRecordId, state, stateAt: asString(row.last_state_at) };
+    });
+  }
+
+  /** Every Run of this kind waiting in Connectivity Wait, oldest first, with its Book. */
+  waitingRuns(): Array<{ bookId: string; taskIntentId: string; runRecordId: string; recordedAt: string }> {
+    const rows = this.#db.prepare(
+      `SELECT r.run_record_id, r.task_intent_id, r.recorded_at, i.book_id
        FROM analysis_run_records r
        JOIN analysis_task_intents i ON i.task_intent_id = r.task_intent_id
        WHERE i.kind = ?
@@ -3949,7 +4174,9 @@ export class BaselineAnalysisStore {
            = 'awaiting-connectivity'
        ORDER BY r.recorded_at, r.rowid`,
     ).all(this.#definition.kind) as SqlRow[];
-    return rows.map((row) => ({ bookId: asString(row.book_id), taskIntentId: asString(row.task_intent_id), runRecordId: asString(row.run_record_id) }));
+    return rows.map((row) => ({
+      bookId: asString(row.book_id), taskIntentId: asString(row.task_intent_id), runRecordId: asString(row.run_record_id), recordedAt: asString(row.recorded_at),
+    }));
   }
 
   /**

@@ -5,7 +5,11 @@ import {
   reviewFindingStatus,
   reviewRunCategoryState,
   reviewRunCategoryStateLabel,
+  reviewRunCategoryStopLabel,
   reviewRunState,
+  REVIEW_RUN_CANCELLED,
+  REVIEW_RUN_LAUNCH_BLOCKED,
+  REVIEW_RUN_PLAN_MOVED,
   reviewRunStateLabel,
   type ReviewFindingStatusInput,
 } from '../../src/service/review/review-run-state.js';
@@ -109,6 +113,30 @@ describe('a Review Run\'s state', () => {
     expect(reviewRunState({ authorized: true, driving: false, categories: [lost, lost] })).toEqual({ state: 'failed', canContinue: false });
     expect(reviewRunStateLabel('partial', true)).toBe('部分完成 · 可继续审阅');
     expect(reviewRunStateLabel('partial', false)).toBe('部分完成');
+  });
+});
+
+describe('a Review Run started with 联网后开始任务 (Issue #760, S74c)', () => {
+  const left = { pending: true, materialized: false };
+  const refused = { pending: false, materialized: false };
+
+  it('waits, never offering 继续审阅, until something begins it — and a cancellation ends the wait', () => {
+    expect(reviewRunState({ authorized: true, driving: false, categories: [left, left], waiting: true })).toEqual({ state: 'waiting', canContinue: false });
+    // Not approved yet, it is prepared whatever it would wait for; driven, the wait is over.
+    expect(reviewRunState({ authorized: false, driving: false, categories: [left], waiting: true })).toEqual({ state: 'prepared', canContinue: false });
+    expect(reviewRunState({ authorized: true, driving: true, categories: [left], waiting: false })).toEqual({ state: 'running', canContinue: false });
+    expect(reviewRunState({ authorized: true, driving: false, categories: [refused], stop: 'cancelled', waiting: true })).toEqual({ state: 'cancelled', canContinue: false });
+    expect(reviewRunStateLabel('waiting', false)).toBe('等待网络 · 未启动');
+  });
+
+  it('reads 需要重新确认计划 when Reconnect Preflight found its plan moved, and its categories say so in the same words', () => {
+    expect(reviewRunState({ authorized: true, driving: false, categories: [refused, refused], stop: 'plan-moved' })).toEqual({ state: 'plan-moved', canContinue: false });
+    expect(reviewRunStateLabel('plan-moved', false)).toBe('需要重新确认计划');
+    expect(reviewRunCategoryStopLabel(REVIEW_RUN_PLAN_MOVED)).toBe('需要重新确认计划');
+    expect(reviewRunCategoryStopLabel(REVIEW_RUN_CANCELLED)).toBe('已取消');
+    // A launch that cannot start it reads as the refusal it is, in its own reason: 未能开始.
+    expect(reviewRunCategoryStopLabel(REVIEW_RUN_LAUNCH_BLOCKED)).toBeNull();
+    expect(reviewRunState({ authorized: true, driving: false, categories: [refused, refused] })).toEqual({ state: 'failed', canContinue: false });
   });
 });
 

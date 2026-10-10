@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { OUTCOME_UNKNOWN_NOT_RESENT, ambiguousTurnReason, emptyAnswerGapReason, unparsableAnswerGapReason } from '../../src/service/analysis/execution.js';
+import { OUTCOME_UNKNOWN_CARRIED, OUTCOME_UNKNOWN_NOT_RESENT, ambiguousTurnReason, carriedOutcomeUnknownReason, emptyAnswerGapReason, unparsableAnswerGapReason } from '../../src/service/analysis/execution.js';
 import { classifyModelFailure, AI7_FAILURE_CODES } from '../../src/service/provider/classification.js';
 
 // The exact text an editor reads when a unit closes as a gap the model itself produced, asserted
@@ -68,5 +68,23 @@ describe('ambiguousTurnReason', () => {
       `结果待确认：请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费。（AI7_OUTCOME_UNKNOWN）；${OUTCOME_UNKNOWN_NOT_RESENT}。`);
     expect(ambiguousTurnReason([{ kind: 'ambiguous', reason: '技术回合没有终态事件。' }])).toBeNull();
     expect(ambiguousTurnReason([{ kind: 'interrupted', failure: classifyModelFailure({ code: AI7_FAILURE_CODES.INTERRUPTED, message: '' }, codes) }])).toBeNull();
+  });
+});
+
+// Issue #757: a carried gap's words replace the earlier Run's closing clause instead of appending a near-duplicate one, and
+// carrying them again changes nothing.
+describe('carriedOutcomeUnknownReason', () => {
+  const said = '结果待确认：请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费。（AI7_OUTCOME_UNKNOWN）';
+  it('replaces 「这次运行不会再发它，结果待确认」 with the carried clause, once', () => {
+    const carried = carriedOutcomeUnknownReason(`${said}；${OUTCOME_UNKNOWN_NOT_RESENT}`);
+    expect(carried).toBe(`${said}；${OUTCOME_UNKNOWN_CARRIED}`);
+    expect(carried).not.toContain(OUTCOME_UNKNOWN_NOT_RESENT);
+    expect(carriedOutcomeUnknownReason(carried)).toBe(carried);
+    expect(carriedOutcomeUnknownReason(carriedOutcomeUnknownReason(carried))).toBe(carried);
+  });
+  it('keeps a safe retry’s first attempt and gives words ending in neither clause the carried one', () => {
+    const retried = `第 1 次尝试：超时（AI7_TIMEOUT）；安全重试后第 2 次尝试：${said}；${OUTCOME_UNKNOWN_NOT_RESENT}`;
+    expect(carriedOutcomeUnknownReason(retried)).toBe(`第 1 次尝试：超时（AI7_TIMEOUT）；安全重试后第 2 次尝试：${said}；${OUTCOME_UNKNOWN_CARRIED}`);
+    expect(carriedOutcomeUnknownReason(said)).toBe(`${said}；${OUTCOME_UNKNOWN_CARRIED}`);
   });
 });

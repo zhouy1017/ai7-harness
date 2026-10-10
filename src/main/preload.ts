@@ -208,6 +208,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['inspectTaskAuthorization']['output']>(IPC_CHANNELS.inspectTaskAuthorization),
   inspectTaskPlan: (input: Omit<ServiceOperationMap['inspectTaskPlan']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['inspectTaskPlan']['output']>(IPC_CHANNELS.inspectTaskPlan, input),
+  resolveUnconfirmedOutcomes: (input: Omit<ServiceOperationMap['resolveUnconfirmedOutcomes']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['resolveUnconfirmedOutcomes']['output']>(IPC_CHANNELS.resolveUnconfirmedOutcomes, input),
   inspectForegroundExecutionBoundary: (input: Omit<
     ServiceOperationMap['inspectForegroundExecutionBoundary']['input'],
     'bookId'
@@ -229,6 +231,10 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['startBaselineAnalysisWhenOnline']['output']>(IPC_CHANNELS.startBaselineAnalysisWhenOnline, input),
   cancelWaitingBaselineAnalysis: (input: Omit<ServiceOperationMap['cancelWaitingBaselineAnalysis']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['cancelWaitingBaselineAnalysis']['output']>(IPC_CHANNELS.cancelWaitingBaselineAnalysis, input),
+  startTaskWhenOnline: (input: Omit<ServiceOperationMap['startTaskWhenOnline']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['startTaskWhenOnline']['output']>(IPC_CHANNELS.startTaskWhenOnline, input),
+  cancelWaitingTask: (input: Omit<ServiceOperationMap['cancelWaitingTask']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['cancelWaitingTask']['output']>(IPC_CHANNELS.cancelWaitingTask, input),
   cancelBaselineAnalysisRun: (input: Omit<ServiceOperationMap['cancelBaselineAnalysisRun']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['cancelBaselineAnalysisRun']['output']>(IPC_CHANNELS.cancelBaselineAnalysisRun, input),
   pauseBaselineAnalysisRun: (input: Omit<ServiceOperationMap['pauseBaselineAnalysisRun']['input'], 'bookId'>) =>

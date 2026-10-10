@@ -98,6 +98,21 @@ export const OUTCOME_UNKNOWN_NO_REDO = '结果待确认：先取消任务，确�
 export function resendDisclosure(units: ReadonlyArray<number>): string {
   return `第 ${units.join('、')} 个阅读范围上一次的请求已发出、结果待确认，可能已被模型服务处理并计费；这项任务会再发一次它的请求，开始任务即重新授权这次发送。`;
 }
+/**
+ * A Review Run whose categories send again ranges an earlier Run of the same category left 结果待确认 (Issue #757; CONT-011):
+ * each category by name with its ranges, then the same statement as `resendDisclosure`.
+ */
+export function categoryResendDisclosure(entries: ReadonlyArray<{ category: string; units: ReadonlyArray<number> }>): string {
+  const named = entries.map((entry) => `「${entry.category}」第 ${entry.units.join('、')} 个`).join('，');
+  return `${named}阅读范围上一次的请求已发出、结果待确认，可能已被模型服务处理并计费；这项任务会再发一次它们的请求，开始任务即重新授权这次发送。`;
+}
+/**
+ * A plan of a kind that keeps no progress with the ranges it sends again whose earlier request's result could not be known
+ * (Issue #757; CONT-011), named in its Plan Preview as the baseline's are; the plan as it was when there are none.
+ */
+export function withResend(plan: TaskPlanProjection, units: ReadonlyArray<number>): TaskPlanProjection {
+  return units.length === 0 ? plan : { ...plan, resend: { units: [...units], statement: resendDisclosure(units) } };
+}
 /** No Run has measured a duration this estimate could stand on. */
 export const DURATION_UNKNOWN = '暂无可靠估计';
 const NO_USAGE = '不发送，没有模型用量';
@@ -489,6 +504,7 @@ export function fixedTaskPlan(input: {
     runControl: null,
     redo: null,
     resend: null,
+    unconfirmed: null,
     reprepare: null,
     clarifications: [],
     budgetStop: null,
@@ -826,10 +842,20 @@ export function baselineAnalysisPlan(input: {
     runControl: baselineRunControl(projection, input.stopped),
     redo: baselineRedo(projection, input.stopped),
     resend: baselineResend(input.resendUnits),
+    unconfirmed: null,
     reprepare: baselineReprepare(projection),
     clarifications: baselineClarifications(projection, input.clarifications ?? [], input.stopped),
     budgetStop: baselineBudgetStop(projection),
   };
+}
+
+/**
+ * 需要重新确认计划 of a ledger Task of a kind with no 重新准备 in the drawer (Issue #760, S74c; OFF-008): the reasons Reconnect
+ * Preflight recorded, which the bar states beside the way to the kind's own surface. Every other plan reads as it came.
+ */
+export function withPlanMovedReason(plan: TaskPlanProjection, blockedReasons: ReadonlyArray<string> | null | undefined): TaskPlanProjection {
+  if (plan.state.key !== 'plan-moved' || plan.reprepare !== null) return plan;
+  return { ...plan, planMovedReason: blockedReasons === null || blockedReasons === undefined || blockedReasons.length === 0 ? PLAN_MOVED_LABEL : blockedReasons.join(' ') };
 }
 
 /**
@@ -994,6 +1020,7 @@ export function initialEvaluationPlan(input: {
     runControl: null,
     redo: null,
     resend: null,
+    unconfirmed: null,
     reprepare: null,
     clarifications: [],
     budgetStop: null,
@@ -1153,6 +1180,7 @@ export function readersReportPlan(input: {
     runControl: null,
     redo: null,
     resend: null,
+    unconfirmed: null,
     reprepare: null,
     clarifications: [],
     budgetStop: null,
@@ -1436,6 +1464,7 @@ export function writingPlan(input: {
     runControl: null,
     redo: null,
     resend: null,
+    unconfirmed: null,
     reprepare: null,
     clarifications: [],
     budgetStop: null,
@@ -1590,6 +1619,7 @@ export function evaluationRewritePlan(input: {
     runControl: null,
     redo: null,
     resend: null,
+    unconfirmed: null,
     reprepare: null,
     clarifications: [],
     budgetStop: null,
@@ -2055,6 +2085,12 @@ function reviewState(facts: ReviewRunPlanFacts): TaskPlanProjection['state'] {
       return { key: 'running', label: '运行中' };
     case 'settled':
       return { key: 'settled', label: '已完成' };
+    // 联网后开始任务 (Issue #760, S74c): the label says what it waits for once the service has looked (`withWaitingReason`).
+    case 'waiting':
+      return { key: 'waiting', label: WAITING_LABELS.network };
+    // Its plan moved while it waited (OFF-008): it never started.
+    case 'plan-moved':
+      return { key: 'plan-moved', label: PLAN_MOVED_LABEL };
     case 'partial':
       return { key: 'stopped', label: facts.canContinue ? '中途停止 · 可继续审阅' : '中途停止' };
     case 'failed':
@@ -2117,7 +2153,10 @@ export function reviewRunPlan(input: {
   const refused = categories.filter((category) => category.state === 'refused');
   const reasons = facts.state === 'prepared'
     ? facts.staleReasons
-    : refused.map((category) => `「${category.label}」没有开始：${category.detail ?? category.stateLabel}`);
+    // A Run whose plan moved while it waited to start once online (Issue #760): every category records the one reason.
+    : facts.state === 'plan-moved'
+      ? [...new Set(refused.map((category) => category.detail ?? category.stateLabel))]
+      : refused.map((category) => `「${category.label}」没有开始：${category.detail ?? category.stateLabel}`);
   const riskPoints = categories.some((category) => category.riskPointsOnly);
   const scopeWords = scope.kind === 'whole' ? '全书' : scope.kind === 'changed' ? '改动过的章' : scope.kind === 'selection' ? '所选段落' : position;
   // What a range review reads (Issue #423 review, P2-1): the reading ranges its categories read again, as context. A 当前选区 Run
@@ -2247,7 +2286,9 @@ export function reviewRunPlan(input: {
     runControl: null,
     redo: null,
     resend: null,
+    unconfirmed: null,
     reprepare: null,
+    ...(facts.state === 'plan-moved' ? { planMovedReason: reasons[0] ?? PLAN_MOVED_LABEL } : {}),
     clarifications: [],
     budgetStop: null,
   };

@@ -154,6 +154,7 @@ describe('route-aware readiness of the authorization bar (S74a A3; AUTH-005, MOD
       runControl: null,
       redo: null,
       resend: null,
+      unconfirmed: null,
       reprepare: null,
       clarifications: [],
       budgetStop: null,

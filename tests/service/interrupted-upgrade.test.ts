@@ -1,3 +1,4 @@
+import { OUTCOME_RESOLUTION_SCHEMA_SQL, initializeOutcomeResolutionSchema } from '../../src/service/analysis/outcome-resolutions.js';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -62,7 +63,7 @@ import {
   ANALYSIS_LEDGER_REVISION_62_SQL,
   ANALYSIS_LEDGER_REVISION_64_SQL,
   BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
-  MATERIAL_INDEX_SCHEMA_VERSION,
+  OUTCOME_RESOLUTION_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import { EVALUATION_REWRITE_SCHEMA_SQL, initializeEvaluationRewriteSchema } from '../../src/service/evaluation-rewrites.js';
 import { WRITING_TASK_SCHEMA_SQL, initializeWritingTaskSchema } from '../../src/service/writing-tasks.js';
@@ -163,6 +164,12 @@ interface Revision {
 
 // Newest first: a store is walked down one revision at a time.
 const REVISIONS: ReadonlyArray<Revision> = [
+  {
+    // Revision 68 (Issue #757): the editor's 人工结果确认 over requests whose results cannot be known, created before the stamp.
+    revision: 68,
+    step: initializeOutcomeResolutionSchema,
+    undo: (database) => drop(database, Object.keys(OUTCOME_RESOLUTION_SCHEMA_SQL).reverse()),
+  },
   {
     // Revision 67 (Issue #428, S80a): each 资料库 item's Material Index build and its segments, created before the stamp.
     revision: 67,
@@ -409,11 +416,11 @@ describe('an upgrade interrupted before its version stamp', () => {
     if (step === null) continue;
     const before = revision - 1;
     it(`is finished by the next open when revision ${revision}'s relations committed and its stamp did not`, async () => {
-      expect(await opened()).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
+      expect(await opened()).toBe(OUTCOME_RESOLUTION_SCHEMA_VERSION);
       const terminal = tables();
       // The plant is a store at the revision before, which opens and upgrades as one.
       plant(before);
-      expect(await opened()).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
+      expect(await opened()).toBe(OUTCOME_RESOLUTION_SCHEMA_VERSION);
       expect(tables()).toEqual(terminal);
       // The step commits the revision's relations, and the process stops before the stamp.
       plant(before);
@@ -421,15 +428,15 @@ describe('an upgrade interrupted before its version stamp', () => {
         step(database);
         expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(before);
       });
-      expect(await opened()).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
+      expect(await opened()).toBe(OUTCOME_RESOLUTION_SCHEMA_VERSION);
       expect(tables()).toEqual(terminal);
       // Once finished it opens as any store does.
-      expect(await opened()).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
+      expect(await opened()).toBe(OUTCOME_RESOLUTION_SCHEMA_VERSION);
     }, 120_000);
   }
 
   it('still refuses a store holding only some of a revision\'s relations', async () => {
-    expect(await opened()).toBe(MATERIAL_INDEX_SCHEMA_VERSION);
+    expect(await opened()).toBe(OUTCOME_RESOLUTION_SCHEMA_VERSION);
     plant(36);
     withDatabase((database) => database.exec(PRODUCTION_DOCUMENT_SCHEMA_SQL.production_documents));
     const refused = await EditorialStore.open(roots.dataRoot, roots.codeRoot).then((store) => {

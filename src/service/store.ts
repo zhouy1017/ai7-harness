@@ -5,6 +5,7 @@ import { basename, extname, isAbsolute, join, posix, relative, resolve, sep } fr
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_MODE_LABELS, CAPTURED_PROCEDURE_CAPTURE_SLOTS, CAPTURED_PROCEDURE_STATE_LABELS, MAX_CAPTURED_PROCEDURE_RUNS_SHOWN, MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_BOOK_CHOICES, MAX_LEARNING_AUDIT_PAGE, MAX_LEARNING_AUDIT_SERIES_CHOICES, MAX_LEARNING_LINEAGE_DECISIONS, MAX_LEARNING_REMEDIATION_ITEMS, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
+  CoverageManifestProjection,
   InspectSeriesKnowledgeReviewInput,
   ServiceOperationMap,
   InspectTaskPlanInput,
@@ -304,6 +305,13 @@ import {
   MAX_WRITING_MATERIAL_GRAPHEMES,
   MAX_WRITING_MATERIAL_OFFERS,
   WRITING_KIND,
+  BASELINE_ANALYSIS_KIND,
+  FACTUAL_REVIEW_KIND,
+  INITIAL_EVALUATION_KIND,
+  READERS_REPORT_KIND,
+  EVALUATION_REWRITE_KIND,
+  type TaskPlanKind,
+  type TaskPlanUnconfirmedProjection,
   WRITING_LIVE_UNAVAILABLE,
   WRITING_MATERIAL_LIVE_UNAVAILABLE,
   WRITING_MODE_GOALS,
@@ -400,6 +408,8 @@ import {
   type BaselineAnalysisPreparationResult,
   type BaselineAnalysisRouteFacts,
   type ProgressReader,
+  type ResendPlan,
+  type UnconfirmedOutcomeRecord,
 } from './analysis/baseline-analysis-store.js';
 import { factualReviewKindDefinition, type AnalysisKindDefinition } from './analysis/kind-definition.js';
 import { convertDocManuscript, isDocConversionRefusal } from './doc-manuscript.js';
@@ -430,7 +440,8 @@ import {
   type ConversionLoss,
 } from './text-manuscript.js';
 import { initializeManuscriptEffectSchema, ManuscriptApplyStore } from './manuscript-apply.js';
-import { initializeReviewRunSchema, ReviewRunError, ReviewRunStore, type ReviewRunPreparationProgress } from './review/review-runs.js';
+import { initializeReviewRunSchema, ReviewRunError, ReviewRunStore, type ReviewRunPlanFacts, type ReviewRunPreparationProgress } from './review/review-runs.js';
+import { OUTCOME_UNKNOWN_NOT_RESENT } from './analysis/outcome-unknown.js';
 import { newSeriesKnowledgeReadings } from './review/series-consistency.js';
 import { initializePublicationVersionSchema, PublicationVersionError, PublicationVersionStore } from './publication-versions.js';
 import {
@@ -442,6 +453,7 @@ import {
   readRecoveryAttention,
   recentWindowStart,
   type LearningMaterialsAttentionReading,
+  type UnconfirmedAttentionReading,
 } from './global-attention.js';
 import { ALWAYS_ONLINE, type TaskPlanConnectivity } from './connectivity.js';
 import { RecentCache } from './recent-cache.js';
@@ -462,8 +474,11 @@ import {
   TaskPlanError,
   withConnectionReadiness,
   withConnectivityReadiness,
+  withPlanMovedReason,
   withAnswerBlockers,
   withResumeBlockers,
+  withResend,
+  categoryResendDisclosure,
   RESUME_BLOCKED_BINDING,
   withWaitingReason,
   type WaitingFor,
@@ -496,7 +511,6 @@ import {
 import { ExportLedgerError, ManuscriptExportStore, initializeExportLedgerSchema } from './manuscript-export.js';
 import {
   DEFAULT_EXECUTION_RULES_STATEMENT,
-  QUICK_START_OFFLINE_LATER,
   DEFAULT_EXECUTION_RULE_PROCEDURES,
   DefaultExecutionRuleError,
   DefaultExecutionRuleLedger,
@@ -610,6 +624,7 @@ import {
   type InitialEvaluationFacts,
 } from './evaluation-records.js';
 import { AnalysisFeedbackError, AnalysisFeedbackLedger, analysisFeedbackItems, initializeAnalysisFeedbackSchema } from './analysis-feedback.js';
+import { OutcomeResolutionLedger, initializeOutcomeResolutionSchema } from './analysis/outcome-resolutions.js';
 import { DecisionFeedbackError, DecisionFeedbackLedger, initializeDecisionFeedbackSchema } from './decision-feedback.js';
 import {
   DIMENSION_LABELS,
@@ -632,7 +647,7 @@ import {
   reviewDispositionCandidate,
   type LearningMaterialCandidate,
 } from './learning-eligibility.js';
-import { reviewCategoryEntry } from './review/category-configuration.js';
+import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryEntry } from './review/category-configuration.js';
 import { EvaluationCalibrationError, EvaluationCalibrationLedger, initializeEvaluationCalibrationSchema } from './evaluation-calibration.js';
 import {
   SeriesError,
@@ -734,6 +749,9 @@ import {
   type SeriesExclusionTargetProjection,
   type SeriesExclusionTargetsProjection,
   type SeriesExclusionsProjection,
+  type CancelWaitingTaskInput,
+  type StartTaskWhenOnlineInput,
+  type StartWhenOnlineTaskKind,
 } from '../shared/protocol.js';
 /** How many items or Runs one line of an exclusion's impact preview names before it gives the count. */
 const NAMED_EXCLUSION_ENTRIES = 5;
@@ -753,7 +771,7 @@ import {
 import { dialogueProjection, harnessHistoryReader, keptText, resolveAttempts, type DialogueHistoryReader, type LiveAnswer } from './dialogue/dialogue-history.js';
 import { dialogueQuestion } from './dialogue/contract.js';
 import { HARNESS_SESSION_LOG_DIRECTORY, readHarnessSessionLog } from './harness/session-log.js';
-import type { DialogueTaskReading, MaterialIndexAttentionReading } from './global-attention.js';
+import type { DialogueTaskReading, MaterialIndexAttentionReading, WaitingTaskAttentionReading } from './global-attention.js';
 import {
   SeriesKnowledgeError,
   SeriesKnowledgeLedger,
@@ -923,6 +941,7 @@ import {
   WRITING_TASK_SCHEMA_VERSION,
   BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
   MATERIAL_INDEX_SCHEMA_VERSION,
+  OUTCOME_RESOLUTION_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1524,6 +1543,25 @@ function canonicalJson(value: unknown): string {
   if (encoded === undefined) throw new StoreError('CANONICAL_VALUE_INVALID', '无法形成规范记录摘要。');
   return encoded;
 }
+
+/** Which Task kind's plan a kind's 结果待确认 is listed on (Issue #757): a review category's is its Review Run's. */
+function unconfirmedSurfaceOf(kind: string): TaskPlanKind | null {
+  if (kind === BASELINE_ANALYSIS_KIND) return 'baseline-analysis';
+  if (kind === FACTUAL_REVIEW_KIND || isReviewCategoryKindId(kind)) return 'review-run';
+  if (kind === INITIAL_EVALUATION_KIND) return 'initial-evaluation';
+  if (kind === READERS_REPORT_KIND) return 'readers-report';
+  if (kind === EVALUATION_REWRITE_KIND) return 'evaluation-rewrite';
+  if (kind === WRITING_KIND) return 'writing';
+  return null;
+}
+
+/** What 保留为缺口 names: the digest of exactly the outcomes listed, in key order (Issue #757). */
+function unconfirmedDigest(listed: { ranges: ReadonlyArray<{ key: string }>; steps: ReadonlyArray<{ key: string }> }): string {
+  return sha256(canonicalJson([...listed.ranges, ...listed.steps].map((entry) => entry.key).sort()));
+}
+
+/** Why 保留为缺口 was refused: the list moved since the editor read it (Issue #757). */
+export const UNCONFIRMED_CHANGED = '结果待确认的列表已经变化；请重新查看后再确认。' as const;
 
 function sha256(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex');
@@ -2181,7 +2219,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === EVALUATION_REWRITE_SCHEMA_VERSION ||
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
-      currentVersion === MATERIAL_INDEX_SCHEMA_VERSION,
+      currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
+      currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2244,7 +2283,8 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === EVALUATION_REWRITE_SCHEMA_VERSION ||
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
-      currentVersion === MATERIAL_INDEX_SCHEMA_VERSION
+      currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
+      currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2621,7 +2661,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === EVALUATION_REWRITE_SCHEMA_VERSION ||
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
-      version === MATERIAL_INDEX_SCHEMA_VERSION,
+      version === MATERIAL_INDEX_SCHEMA_VERSION ||
+      version === OUTCOME_RESOLUTION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2673,7 +2714,8 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === EVALUATION_REWRITE_SCHEMA_VERSION ||
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
-      version === MATERIAL_INDEX_SCHEMA_VERSION) return;
+      version === MATERIAL_INDEX_SCHEMA_VERSION ||
+      version === OUTCOME_RESOLUTION_SCHEMA_VERSION) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2817,7 +2859,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === EVALUATION_REWRITE_SCHEMA_VERSION ||
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
-      version === MATERIAL_INDEX_SCHEMA_VERSION,
+      version === MATERIAL_INDEX_SCHEMA_VERSION ||
+      version === OUTCOME_RESOLUTION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2868,7 +2911,8 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === EVALUATION_REWRITE_SCHEMA_VERSION ||
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
-      version === MATERIAL_INDEX_SCHEMA_VERSION) return;
+      version === MATERIAL_INDEX_SCHEMA_VERSION ||
+      version === OUTCOME_RESOLUTION_SCHEMA_VERSION) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -3161,7 +3205,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== MATERIAL_INDEX_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== OUTCOME_RESOLUTION_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -3215,6 +3259,7 @@ function validateModelServiceSchema(
       version >= WRITING_TASK_SCHEMA_VERSION,
       version >= BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
       version >= MATERIAL_INDEX_SCHEMA_VERSION,
+      version >= OUTCOME_RESOLUTION_SCHEMA_VERSION,
     );
   }
   const invalid = db.prepare(
@@ -3293,7 +3338,8 @@ function initializeModelServiceSchema(
       version === EVALUATION_REWRITE_SCHEMA_VERSION ||
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
-      version === MATERIAL_INDEX_SCHEMA_VERSION,
+      version === MATERIAL_INDEX_SCHEMA_VERSION ||
+      version === OUTCOME_RESOLUTION_SCHEMA_VERSION,
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3344,7 +3390,8 @@ function initializeModelServiceSchema(
       version === EVALUATION_REWRITE_SCHEMA_VERSION ||
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
-      version === MATERIAL_INDEX_SCHEMA_VERSION) {
+      version === MATERIAL_INDEX_SCHEMA_VERSION ||
+      version === OUTCOME_RESOLUTION_SCHEMA_VERSION) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -4199,6 +4246,39 @@ export interface BackgroundAnalysisRuntime {
   readonly quietMs: number;
 }
 
+/** The kinds whose Tasks run on an analysis ledger and wait with 联网后开始任务 through `startTaskWhenOnline` (Issue #760). */
+type LedgerTaskKind = Exclude<StartWhenOnlineTaskKind, 'review-run'>;
+
+/**
+ * A Run waiting in Connectivity Wait, of any kind (Issue #760, plan slice S74c): its Book, its Task, and its Run — a Review Run
+ * waits as a whole, and names itself, since its categories' Runs are recorded only as each one's turn comes.
+ */
+export interface WaitingTaskRun {
+  readonly kind: 'baseline-analysis' | StartWhenOnlineTaskKind;
+  readonly bookId: string;
+  /** The Task Intent of a ledger Task; the Review Run of a review. */
+  readonly ref: string;
+  /** The Run Record of a ledger Task; the Review Run of a review. */
+  readonly runRecordId: string;
+  /** When it was authorized to start once online: the order Reconnect Preflight looks at waiting Runs in. */
+  readonly at: string;
+}
+
+const TASK_PLAN_NOT_CURRENT_REASON = '这项任务已不是这本书当前的任务；请从它所在的位置重新打开计划。';
+/**
+ * What moved, by the refusal a waiting ledger Task's own start check makes at Reconnect Preflight (Issue #760; OFF-008), in the
+ * words 需要重新确认计划 names it with.
+ */
+const WAITING_TASK_MOVED_LABELS: Readonly<Record<string, string>> = {
+  TASK_PLAN_NOT_CURRENT: '这本书当前的任务',
+  EVALUATION_REWRITE_STALE: '这一版的评分',
+  EVALUATION_REWRITE_UNAVAILABLE: '这一版的评分',
+  WRITING_EXEMPLAR_MOVED: '范例',
+  MATERIAL_INDEX_MOVED: '参考资料',
+  MATERIAL_REFERENCE_UNAVAILABLE: '参考资料',
+};
+const WAITING_TASK_MOVED_FALLBACK = '计划依据的内容';
+
 export class EditorialStore {
   readonly #dataRoot: string;
   readonly #objectsRoot: string;
@@ -4287,6 +4367,8 @@ export class EditorialStore {
   readonly #evaluations: EvaluationRecords;
   /** ②A 分析反馈 (Issue #94, S38): the editor's judgments of analysis results. */
   readonly #analysisFeedback: AnalysisFeedbackLedger;
+  // 人工结果确认 (Issue #757): the editor's 保留为缺口 over requests whose results cannot be known.
+  readonly #outcomeResolutions: OutcomeResolutionLedger;
   /** 就这段提问… (Issue #52, S17a): the dialogue Tasks, and the reader that joins them to the Harness Session Ledger. */
   readonly #dialogues: DialogueLedger;
   readonly #dialogueHistory: DialogueHistoryReader;
@@ -4365,13 +4447,13 @@ export class EditorialStore {
     this.#dialogueHistory = harnessHistoryReader(join(dataRoot, HARNESS_SESSION_LOG_DIRECTORY));
     this.#dataVersions = new DataVersionLedger(authority);
     this.#databaseExports = new DatabaseExports(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: MATERIAL_INDEX_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: OUTCOME_RESOLUTION_SCHEMA_VERSION }),
     });
     this.#scheduledBackups = new ScheduledBackups(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: MATERIAL_INDEX_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: OUTCOME_RESOLUTION_SCHEMA_VERSION }),
     });
     this.#databaseReplacements = new DatabaseReplacements(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: MATERIAL_INDEX_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: OUTCOME_RESOLUTION_SCHEMA_VERSION }),
       // A package's data opens as a store of its own, with no launch control: brought to this revision and checked whole.
       openPackage: async (root) => {
         const opened = await EditorialStore.open(root, this.#codeRoot, {
@@ -4421,6 +4503,7 @@ export class EditorialStore {
       calibrationEnabled: () => this.#evaluationCalibration.preferences().calibrationEnabled,
     }, control.calibrationMinAdjustments ?? CALIBRATION_MIN_ADJUSTMENTS);
     this.#analysisFeedback = new AnalysisFeedbackLedger(authority);
+    this.#outcomeResolutions = new OutcomeResolutionLedger(authority);
     this.#capturedProcedures = new CapturedProcedures(authority);
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
       ledgerOf: (entry) => this.#reviewLedgerOf(entry),
@@ -4567,7 +4650,7 @@ export class EditorialStore {
       // the backup location before anything migrates it, and a backup that cannot be made opens nothing.
       const classes = control.schemaRevisionClasses ?? SCHEMA_REVISION_CLASSES;
       const { upgrade, earlier } = await backUpBeforeUpgrade(authority, dataRoot, {
-        terminalRevision: MATERIAL_INDEX_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
+        terminalRevision: OUTCOME_RESOLUTION_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
       }).catch((error: unknown) => {
         if (error instanceof DataVersionError) throw new StoreError(error.code, error.message);
         throw error;
@@ -4673,6 +4756,8 @@ export class EditorialStore {
       initializeBackgroundAnalysisEnrollmentSchema(authority);
       // Revision 67 (Issue #428, S80a): each 资料库 item's Material Index build and the segments of a complete one.
       initializeMaterialIndexSchema(authority);
+      // Revision 68 (Issue #757): the editor's 人工结果确认 over requests whose results cannot be known.
+      initializeOutcomeResolutionSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -4722,7 +4807,7 @@ export class EditorialStore {
       // Every store records the versions that open it (Issue #433, S85a; DSTO-016): a new record only when one changed.
       store.#softwareVersion = softwareVersion;
       store.#codeRoot = codeRoot;
-      store.#dataVersion = dataVersionAt(MATERIAL_INDEX_SCHEMA_VERSION, classes);
+      store.#dataVersion = dataVersionAt(OUTCOME_RESOLUTION_SCHEMA_VERSION, classes);
       if (control.interruptUpgradeAt === 'before-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在记录版本之前停止。');
       // The open that raised the Data Version records the upgrade it made with the backup (S85b), and only then clears the note
       // that let an open stopped before this record it (Issue #433 review).
@@ -4730,7 +4815,7 @@ export class EditorialStore {
         // Upgrades other opens made and never recorded go first, oldest first, as those opens would have recorded them; one a
         // record already holds is not recorded again (Issue #433 review).
         for (const carried of earlier) store.#dataVersions.recordCarried(carried);
-        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: MATERIAL_INDEX_SCHEMA_VERSION, upgrade });
+        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: OUTCOME_RESOLUTION_SCHEMA_VERSION, upgrade });
       }));
       if (control.interruptUpgradeAt === 'after-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在清除升级记录之前停止。');
       await completeUpgrade(dataRoot).catch(() => undefined);
@@ -5017,7 +5102,7 @@ export class EditorialStore {
     slotBusy = false,
   ): ReviewWorkspaceProjection {
     return this.#reviewCall(() => {
-      this.#reviewRuns.recordAuthorization(bookId, reviewRunId, approvedDigests, slotBusy);
+      this.#reviewRuns.recordAuthorization(bookId, reviewRunId, approvedDigests, slotBusy, 'now');
       return this.#reviewRuns.workspace(bookId, reviewRunId);
     });
   }
@@ -5104,6 +5189,17 @@ export class EditorialStore {
     progress?: ProgressReader,
     carriesStoppedRun: (runRecordId: string) => boolean = () => true,
   ): { plan: TaskPlanProjection; routeKind: string | null } {
+    const found = this.#taskPlanOfKind(input, progress, carriesStoppedRun);
+    // 结果待确认 a completed Run of this kind left on the Book (Issue #757): listed on whichever of its plans is open.
+    if (input.kind === 'fixed-task') return found;
+    return { ...found, plan: { ...found.plan, unconfirmed: this.#unconfirmedProjection(input.bookId, input.kind) } };
+  }
+
+  #taskPlanOfKind(
+    input: InspectTaskPlanInput,
+    progress?: ProgressReader,
+    carriesStoppedRun: (runRecordId: string) => boolean = () => true,
+  ): { plan: TaskPlanProjection; routeKind: string | null } {
     this.#assertAvailable();
     requireStore(typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId) && TASK_PLAN_KINDS.includes(input.kind) &&
       (input.ref === null || (typeof input.ref === 'string' && UUID_PATTERN.test(input.ref))), 'TASK_PLAN_INVALID', '任务计划请求无效。');
@@ -5134,7 +5230,7 @@ export class EditorialStore {
       // 结果待确认 (Issue #51, S16c): the ranges this Task would send again whose earlier result could not be known.
       const resendUnits = this.#analysisCall(() => this.#baselineAnalysis.resendUnitsOf(projection));
       const plan = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, defaultRule, clarifications, resendUnits, ...(stopped === null ? {} : { stopped }) }));
-      return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(plan, projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     if (input.kind === 'readers-report') {
       // 审稿意见 (Issue #429, S81c): the reader's report kind's latest Task, on the ledger of the contract its plan froze.
@@ -5155,7 +5251,7 @@ export class EditorialStore {
           exemplars: readersReportExemplarLine(latest.task.input.exemplars),
         },
       }));
-      return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(withResend(plan, this.#analysisCall(() => latest.ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     if (input.kind === 'evaluation-rewrite') {
       // 按我的评分重写评语 (Issue #429, S81b2): the rewrite kind's latest Task, on the ledger of the contract its plan froze.
@@ -5176,7 +5272,7 @@ export class EditorialStore {
           scored: evaluationRewriteScoredItems(latest.task.input).map((item) => ({ label: item.label, score: item.score!, fullMarks: item.fullMarks })),
         },
       }));
-      return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(withResend(plan, this.#analysisCall(() => latest.ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     if (input.kind === 'writing') {
       // 写作任务 (Issue #432, S84a): the writing kind's latest Task, on the ledger of the contract its plan froze.
@@ -5191,7 +5287,7 @@ export class EditorialStore {
         projection, bookTitle, blocks, input: latest.task.input, exemplarsHere: latest.task.exemplarsReadable, copyRules: latest.task.copyRules, defaultRule,
         materials: latest.task.materials,
       }));
-      return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(withResend(plan, this.#analysisCall(() => latest.ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     if (input.kind === 'initial-evaluation') {
       // AI7 初评 (Issue #429, S81b1): the evaluation kind's latest Task, read as the baseline's is.
@@ -5202,20 +5298,24 @@ export class EditorialStore {
       const blocks = this.#analysisCall(() => this.#initialEvaluation.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
       const profile = this.#evaluations.profile();
       const plan = this.#taskPlanCall(() => initialEvaluationPlan({ projection, bookTitle, blocks, profile }));
-      return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(withResend(plan, this.#analysisCall(() => this.#initialEvaluation.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     const reviewRunId = input.ref;
     requireStore(reviewRunId !== null, 'TASK_PLAN_INVALID', '审阅的计划要指明是哪一次审阅。');
     const facts = this.#reviewCall(() => this.#reviewRuns.planFacts(input.bookId, reviewRunId));
     const blocks = this.#analysisCall(() => this.#baselineAnalysis.readRevisionBlocks(facts.manuscript.manuscriptId, facts.inputRevision.revisionId));
-    const plan = this.#taskPlanCall(() => reviewRunPlan({ bookId: input.bookId, facts, bookTitle, blocks }));
+    const reviewed = this.#taskPlanCall(() => reviewRunPlan({ bookId: input.bookId, facts, bookTitle, blocks }));
+    // 结果待确认 (Issue #757): each category that sends again a range an earlier Run of its kind left unconfirmed says so.
+    const plan = { ...reviewed, resend: this.#reviewResend(input.bookId, facts) };
     // The route the categories' frozen plans resolve, read from the first Task's Provider Resolution Plan as the
     // baseline reads its own: a review's Tasks share one launch, and a Run of the leads alone reaches no model.
     const frozenRoute = facts.categories
       .map((category) => category.task?.components['provider-resolution-plan'])
       .map((provider) => (provider !== null && typeof provider === 'object' ? (provider as { executionRoute?: { kind?: unknown } }).executionRoute?.kind : undefined))
       .find((kind): kind is string => typeof kind === 'string');
-    return { plan, routeKind: plan.start.needsModelConnection ? frozenRoute ?? null : null };
+    // Whether the Run can be offline is its route's to say, as the baseline's (Issue #760, S74c): a route that reaches its model
+    // over the network — and only one — waits for it. Whether it needs a credential is `needsModelConnection`'s, decided apart.
+    return { plan, routeKind: frozenRoute ?? null };
   }
 
   /**
@@ -5474,7 +5574,9 @@ export class EditorialStore {
   /** The baseline Runs waiting in Connectivity Wait — the route Book's, or every Book's — oldest first. */
   waitingBaselineAnalysisRuns(bookId: string | null): Array<{ bookId: string; taskIntentId: string; runRecordId: string }> {
     this.#assertAvailable();
-    return this.#analysisCall(() => this.#baselineAnalysis.waitingRuns()).filter((run) => bookId === null || run.bookId === bookId);
+    return this.#analysisCall(() => this.#baselineAnalysis.waitingRuns())
+      .filter((run) => bookId === null || run.bookId === bookId)
+      .map((run) => ({ bookId: run.bookId, taskIntentId: run.taskIntentId, runRecordId: run.runRecordId }));
   }
 
   /** Reconnect Preflight's local half for one waiting Run: the labels of the material inputs that moved, or none. */
@@ -5493,6 +5595,260 @@ export class EditorialStore {
   baselineAnalysisRunWaits(runRecordId: string): boolean {
     this.#assertAvailable();
     return this.#analysisCall(() => this.#baselineAnalysis.currentRunState(runRecordId)) === 'awaiting-connectivity';
+  }
+
+  // ---- 联网后开始任务 for every kind (Issue #760, plan slice S74c) ----------------------------------------------
+
+  /**
+   * 联网后开始任务 of a Task of any other kind with a plan (Issue #760, S74c; AUTH-004, OFF-005): exactly the Run Authorization
+   * its 开始任务 records — a ledger Task's Run Record, after every check its own start makes, or a Review Run's one approval —
+   * and the Run then waits in Connectivity Wait. Nothing is sent, no usage arises and no place is taken; Reconnect Preflight
+   * starts it as 开始任务 would. A repeat answers as the first did.
+   */
+  startTaskWhenOnline(input: StartTaskWhenOnlineInput): void {
+    this.#assertAvailable();
+    if (input.kind === 'review-run') {
+      this.#reviewCall(() => this.#reviewRuns.recordAuthorization(input.bookId, input.ref, input.planDigests, false, 'when-online'));
+      return;
+    }
+    const digest = input.planEnvelopeDigest;
+    requireStore(digest !== null && input.planDigests.length === 0, 'TASK_PLAN_INVALID', '任务计划请求无效。');
+    switch (input.kind) {
+      case 'initial-evaluation':
+        this.authorizeInitialEvaluation(input.bookId, input.ref, digest, 'when-online');
+        return;
+      case 'readers-report':
+        this.authorizeReadersReport(input.bookId, input.ref, digest, 'when-online');
+        return;
+      case 'evaluation-rewrite':
+        this.authorizeEvaluationRewrite(input.bookId, input.ref, digest, 'when-online');
+        return;
+      case 'writing':
+        this.authorizeWriting(input.bookId, input.ref, digest, 'when-online');
+        return;
+    }
+  }
+
+  /**
+   * 取消 while the Task's Run waits (Issue #760; OFF-010) — in Connectivity Wait, or on the governor for a place: terminal, before
+   * any dispatch and without provider work. Answers the Run the governor must let go of, when it waited there for a place.
+   */
+  cancelWaitingTask(input: CancelWaitingTaskInput): { dequeue: string | null } {
+    this.#assertAvailable();
+    if (input.kind === 'review-run') {
+      this.#reviewCall(() => this.#reviewRuns.cancelWaiting(input.bookId, input.ref));
+      return { dequeue: null };
+    }
+    // Never through the kind's start checks (Issue #760 review, P2-1): a Run whose version, 范例 or 资料库 item moved while it
+    // waited is exactly one the editor must be able to cancel, offline too (OFF-010).
+    const ledger = this.#currentLedgerOf(input.kind, input.bookId, input.ref);
+    const before = this.#analysisCall(() => ledger.inspect(input.bookId)).run;
+    this.#analysisCall(() => ledger.cancelWaiting(input.bookId, input.ref));
+    return { dequeue: before !== null && before.state === 'authorized' ? before.runRecordId : null };
+  }
+
+  /**
+   * Every Run waiting in Connectivity Wait — the route Book's, or every Book's — of every kind, oldest authorization first: the
+   * baseline's, each ledger kind's, and each Review Run approved to start once online.
+   */
+  waitingTaskRuns(bookId: string | null): WaitingTaskRun[] {
+    this.#assertAvailable();
+    const runs: WaitingTaskRun[] = [];
+    const ofLedger = (kind: WaitingTaskRun['kind'], ledger: BaselineAnalysisStore | null): void => {
+      if (ledger === null) return;
+      for (const run of this.#analysisCall(() => ledger.waitingRuns())) {
+        runs.push({ kind, bookId: run.bookId, ref: run.taskIntentId, runRecordId: run.runRecordId, at: run.recordedAt });
+      }
+    };
+    ofLedger('baseline-analysis', this.#baselineAnalysis);
+    // A kind whose records no longer read is said where its own surface reads it: it never keeps another kind's Run waiting.
+    for (const kind of ['initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing'] as const) {
+      try {
+        ofLedger(kind, kind === 'initial-evaluation' ? this.#initialEvaluation : this.#anyLedgerOfKind(kind));
+      } catch (error) {
+        if (!(error instanceof StoreError)) throw error;
+      }
+    }
+    for (const run of this.#reviewCall(() => this.#reviewRuns.waitingRuns())) {
+      runs.push({ kind: 'review-run', bookId: run.bookId, ref: run.reviewRunId, runRecordId: run.reviewRunId, at: run.authorizedAt });
+    }
+    return runs.filter((run) => bookId === null || run.bookId === bookId).sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+  }
+
+  /** Whether the Run still waits: Reconnect Preflight re-reads it before it acts — the editor may have cancelled it meanwhile. */
+  taskRunWaits(run: WaitingTaskRun): boolean {
+    this.#assertAvailable();
+    if (run.kind === 'review-run') return this.#reviewCall(() => this.#reviewRuns.runWaits(run.ref));
+    // The Run states are one relation for every ledger kind: any ledger reads one by its Run Record.
+    return this.#analysisCall(() => this.#baselineAnalysis.currentRunState(run.runRecordId)) === 'awaiting-connectivity';
+  }
+
+  /**
+   * Reconnect Preflight's local half for one waiting Run of any kind (OFF-007, OFF-008): the labels of what the authorization
+   * bound that moved — the ledger plan's material inputs, and what the kind's own start checks (the version a rewrite read, a
+   * writing Task's 范例 and 资料库 items, the Task still the Book's current one); none while it all stands. This launch's scope
+   * is admission's to refuse, in its own words.
+   */
+  taskPreflightDrift(run: WaitingTaskRun): ReadonlyArray<string> {
+    this.#assertAvailable();
+    if (run.kind === 'review-run') return this.#reviewCall(() => this.#reviewRuns.preflightDrift(run.ref));
+    if (run.kind === 'baseline-analysis') return this.baselineAnalysisPreflightDrift(run.runRecordId);
+    let ledger: BaselineAnalysisStore;
+    try {
+      ledger = this.#ledgerTaskOf(run.kind, run.bookId, run.ref);
+    } catch (error) {
+      if (!(error instanceof StoreError)) throw error;
+      return [WAITING_TASK_MOVED_LABELS[error.code] ?? WAITING_TASK_MOVED_FALLBACK];
+    }
+    return this.#analysisCall(() => ledger.preflightDrift(run.runRecordId));
+  }
+
+  /** A waiting Run that can never start as authorized is blocked with its reasons, whatever its kind (OFF-008). */
+  blockWaitingTaskRun(run: WaitingTaskRun, reasons: ReadonlyArray<string>, cause: WaitingRunBlockCause): void {
+    this.#assertAvailable();
+    if (run.kind === 'review-run') {
+      this.#reviewCall(() => this.#reviewRuns.blockWaiting(run.ref, reasons, cause));
+      return;
+    }
+    // The Run states are one relation for every ledger kind: the baseline ledger records the block of any kind's Run.
+    this.#analysisCall(() => this.#baselineAnalysis.blockWaitingRun(run.runRecordId, reasons, cause));
+  }
+
+  /**
+   * What Reconnect Preflight hands a waiting ledger Run to the execution owner on (Issue #760): this launch's scope for the kind
+   * checked again — a refusal blocks the Run with its words — and the ledger of its Task's contract.
+   */
+  waitingRunLedger(run: WaitingTaskRun & { kind: Exclude<WaitingTaskRun['kind'], 'review-run'> }): BaselineAnalysisStore {
+    this.#assertAvailable();
+    if (run.kind === 'baseline-analysis') return this.#baselineAnalysis;
+    this.#requireLedgerKindScope(run.kind, run.bookId, run.ref);
+    return this.#ledgerTaskOf(run.kind, run.bookId, run.ref);
+  }
+
+  /** Reconnect Preflight starts a waiting Review Run (Issue #760): `drive` hands it to the drive loop, which may take it now. */
+  admitWaitingReviewRun(reviewRunId: string, drive: () => void): void {
+    this.#assertAvailable();
+    this.#reviewCall(() => this.#reviewRuns.admitWaiting(reviewRunId, drive));
+  }
+
+  /**
+   * This launch's scope for a ledger kind (Issue #760, S74c): 开始任务, 联网后开始任务 and Reconnect Preflight's admission refuse a
+   * kind no policy of this launch sends, in that kind's own words. A writing plan that lists 资料库 items is refused in its own
+   * words first (Issue #428).
+   */
+  #requireLedgerKindScope(kind: LedgerTaskKind, bookId: string, taskIntentId: string): void {
+    switch (kind) {
+      case 'initial-evaluation':
+        this.#requireInitialEvaluationScope();
+        return;
+      case 'readers-report':
+        this.#requireReadersReportScope();
+        return;
+      case 'evaluation-rewrite':
+        this.#requireEvaluationRewriteScope();
+        return;
+      case 'writing':
+        this.#assertAvailable();
+        if (this.#baselineAnalysis.launch.live !== null) {
+          const listed = this.#latestWriting(bookId);
+          this.#requireWritingMaterialScope(listed !== null && listed.task.taskIntentId === taskIntentId && listed.task.materials.length > 0);
+        }
+        this.#requireWritingScope();
+        return;
+    }
+  }
+
+  /**
+   * The ledger of a ledger Task of `kind` that 开始任务 and 联网后开始任务 may authorize, and Reconnect Preflight admit (Issue #760):
+   * the Book's current Task of the kind, and — for a rewrite — the version it read still as it read it, or — for a writing Task —
+   * its 范例 and 资料库 items still giving what its plan pinned. Each refusal is the kind's own, as its 开始任务 always said it.
+   */
+  #ledgerTaskOf(kind: LedgerTaskKind, bookId: string, taskIntentId: string): BaselineAnalysisStore {
+    this.#assertAvailable();
+    switch (kind) {
+      case 'initial-evaluation':
+        // The ledger itself refuses a Task that is not the Book's current one, as its authorization always did.
+        return this.#initialEvaluation;
+      case 'readers-report': {
+        const latest = this.#latestReadersReport(bookId);
+        requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT', TASK_PLAN_NOT_CURRENT_REASON);
+        return latest.ledger;
+      }
+      case 'evaluation-rewrite': {
+        const latest = this.#latestEvaluationRewrite(bookId);
+        requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT', TASK_PLAN_NOT_CURRENT_REASON);
+        // The version may have moved since the plan was prepared — saved again, or 定稿 — while the drawer stayed open: a Run then
+        // would only write words that can never be 采用 (S81b2 review). Refused here, before any Run is spent.
+        const version = this.#evaluationCall(() => this.#evaluations.rewritable(bookId, latest.task.recordId));
+        const refusal = evaluationRewriteRefusal(version);
+        requireStore(refusal === null, 'EVALUATION_REWRITE_UNAVAILABLE', refusal ?? '');
+        requireStore(version.entryOrdinal === latest.task.entryOrdinal && version.entrySha256 === latest.task.entrySha256, 'EVALUATION_REWRITE_STALE',
+          '这一版在准备重写之后又保存过：这份计划依据的是之前的分数；请按现在的评分重新准备重写。');
+        return latest.ledger;
+      }
+      case 'writing': {
+        const latest = this.#latestWriting(bookId);
+        requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT', TASK_PLAN_NOT_CURRENT_REASON);
+        // A Task whose exemplar no longer gives the text it pinned is never run on other words (#688 re-review).
+        requireStore(latest.task.exemplarsReadable, 'WRITING_EXEMPLAR_MOVED', WRITING_EXEMPLAR_MOVED);
+        // …nor one whose 资料库 item no longer reads at the build its plan pinned (Issue #428): the Run is not started, and the words
+        // say 改计划重做 — a plan prepared again in 交付物 pins the item as it is now.
+        const moved = latest.task.materials.find((material) => material.refusal !== null)?.refusal ?? null;
+        if (moved !== null) throw new StoreError(moved.code, moved.message);
+        return latest.ledger;
+      }
+    }
+  }
+
+  /**
+   * 待我处理's and the 任务 panel's reading of every other ledger kind (Issue #760, S74c): each Book's latest Task of the kind whose
+   * Run waits to start once online, or was blocked because its plan moved meanwhile.
+   */
+  #waitingTaskAttention(bookId: string | null, limit: number): WaitingTaskAttentionReading[] {
+    const readings: WaitingTaskAttentionReading[] = [];
+    // A kind whose records no longer read is said where its own surface reads it, never by taking 待我处理 down with it.
+    for (const kind of ['initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing'] as const) {
+      try {
+        const ledger = kind === 'initial-evaluation' ? this.#initialEvaluation : this.#anyLedgerOfKind(kind);
+        if (ledger === null) continue;
+        for (const reading of this.#analysisCall(() => ledger.waitingAttentionReadings(bookId, limit))) readings.push({ kind, ...reading });
+      } catch (error) {
+        if (!(error instanceof StoreError)) throw error;
+      }
+    }
+    return readings;
+  }
+
+  /**
+   * The ledger of the Book's current Task of a ledger kind, with none of the checks its start makes (Issue #760 review, P2-1):
+   * what 取消 reads a waiting or queued Run through, whatever moved since it was authorized.
+   */
+  #currentLedgerOf(kind: LedgerTaskKind, bookId: string, taskIntentId: string): BaselineAnalysisStore {
+    this.#assertAvailable();
+    // The ledger itself refuses a 初评 that is not the Book's current Task, as its cancellation always did.
+    if (kind === 'initial-evaluation') return this.#initialEvaluation;
+    const latest = kind === 'readers-report' ? this.#latestReadersReport(bookId)
+      : kind === 'evaluation-rewrite' ? this.#latestEvaluationRewrite(bookId) : this.#latestWriting(bookId);
+    requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT', TASK_PLAN_NOT_CURRENT_REASON);
+    return latest.ledger;
+  }
+
+  /** One ledger of a kind whose Tasks each run on the ledger of their own contract: any of them reads the kind's Run states. */
+  #anyLedgerOfKind(kind: 'readers-report' | 'evaluation-rewrite' | 'writing'): BaselineAnalysisStore | null {
+    switch (kind) {
+      case 'readers-report': {
+        const any = this.#readersReportCall(() => this.#readersReports.anyTask());
+        return any === null ? null : this.readersReportLedger(any.input);
+      }
+      case 'evaluation-rewrite': {
+        const any = this.#evaluationRewriteCall(() => this.#evaluationRewrites.anyTask());
+        return any === null ? null : this.#evaluationRewriteLedger(any.input);
+      }
+      case 'writing': {
+        const any = this.#writingCall(() => this.#writingTasks.anyTask());
+        return any === null ? null : this.#writingLedgerOf(any);
+      }
+    }
   }
 
   // ---- 默认执行规则 and 快速开始 (Issue #421, plan slice S75) ---------------------------------------------------
@@ -8072,9 +8428,15 @@ export class EditorialStore {
   }
 
   /** 开始任务 in the drawer's bar: the standard-direct Run Authorization and the Run; the caller hands the Run to the owner. */
-  authorizeInitialEvaluation(bookId: string, taskIntentId: string, planEnvelopeDigest: string): { dispatchRunRecordId: string | null } {
-    this.#requireInitialEvaluationScope();
-    const authorized = this.#analysisCall(() => this.#initialEvaluation.authorize(bookId, taskIntentId, planEnvelopeDigest));
+  authorizeInitialEvaluation(
+    bookId: string,
+    taskIntentId: string,
+    planEnvelopeDigest: string,
+    start: 'now' | 'when-online' = 'now',
+  ): { dispatchRunRecordId: string | null } {
+    this.#requireLedgerKindScope('initial-evaluation', bookId, taskIntentId);
+    const ledger = this.#ledgerTaskOf('initial-evaluation', bookId, taskIntentId);
+    const authorized = this.#analysisCall(() => ledger.authorize(bookId, taskIntentId, planEnvelopeDigest, start));
     return { dispatchRunRecordId: authorized.dispatchRunRecordId };
   }
 
@@ -8146,7 +8508,7 @@ export class EditorialStore {
       prepare: this.#initialEvaluation.launch.live !== null
         ? { allowed: false, reason: INITIAL_EVALUATION_LIVE_UNAVAILABLE }
         : runIsActive(runState)
-        ? { allowed: false, reason: activeRunReason(runState) }
+        ? { allowed: false, reason: activeRunReason(runState, INITIAL_EVALUATION_KIND) }
         : { allowed: true, mode: projection.resultSetRevision === null ? 'evaluation-first' : 'evaluation-again' },
     };
   }
@@ -8320,13 +8682,16 @@ export class EditorialStore {
   }
 
   /** 开始任务 in the drawer's bar: the Run Authorization and the Run on the ledger of the plan's contract, for the owner. */
-  authorizeReadersReport(bookId: string, taskIntentId: string, planEnvelopeDigest: string): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore } {
-    this.#requireReadersReportScope();
-    const latest = this.#latestReadersReport(bookId);
-    requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT',
-      '这项任务已不是这本书当前的任务；请从它所在的位置重新打开计划。');
-    const authorized = this.#analysisCall(() => latest.ledger.authorize(bookId, taskIntentId, planEnvelopeDigest));
-    return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger: latest.ledger };
+  authorizeReadersReport(
+    bookId: string,
+    taskIntentId: string,
+    planEnvelopeDigest: string,
+    start: 'now' | 'when-online' = 'now',
+  ): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore } {
+    this.#requireLedgerKindScope('readers-report', bookId, taskIntentId);
+    const ledger = this.#ledgerTaskOf('readers-report', bookId, taskIntentId);
+    const authorized = this.#analysisCall(() => ledger.authorize(bookId, taskIntentId, planEnvelopeDigest, start));
+    return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger };
   }
 
   /**
@@ -8387,7 +8752,7 @@ export class EditorialStore {
         : unavailable !== null ? { allowed: false, reason: unavailable }
         : basis === null ? { allowed: false, reason: READERS_REPORT_NEEDS_FINALIZED }
         : draft !== null ? { allowed: false, reason: `这本书已经有「${label}」的草稿；请打开它继续修改。` }
-        : runIsActive(runState) ? { allowed: false, reason: activeRunReason(runState) }
+        : runIsActive(runState) ? { allowed: false, reason: activeRunReason(runState, READERS_REPORT_KIND) }
         : { allowed: true, mode: latest === null || latest.projection.resultSetRevision === null ? 'readers-report-first' : 'readers-report-again' };
       return { template, label, prepare, drafted, draft };
     });
@@ -8835,7 +9200,7 @@ export class EditorialStore {
     requireStore(!this.#documentCall(() => this.#productionDocuments.notForThisBook(bookId, type.typeId)),
       'WRITING_NOT_FOR_THIS_BOOK', writingNotForThisBook(type.label));
     const latest = this.#latestWriting(bookId);
-    requireStore(!runIsActive(latest?.projection.run?.state ?? null), 'WRITING_UNAVAILABLE', activeRunReason(latest?.projection.run?.state ?? null));
+    requireStore(!runIsActive(latest?.projection.run?.state ?? null), 'WRITING_UNAVAILABLE', activeRunReason(latest?.projection.run?.state ?? null, WRITING_KIND));
     const synopsis = this.#writingSynopsis(bookId);
     const evaluation = this.#writingEvaluation(bookId);
     const exemplars = this.#writingExemplars(bookId, type.typeId);
@@ -8913,25 +9278,16 @@ export class EditorialStore {
   }
 
   /** 开始任务 in the drawer's bar: the Run Authorization and the Run on the ledger of the plan's contract, for the owner. */
-  authorizeWriting(bookId: string, taskIntentId: string, planEnvelopeDigest: string): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore } {
-    this.#assertAvailable();
-    // A plan that lists 资料库 items is refused under a live scope in its own words (Issue #428), then every writing plan is.
-    if (this.#baselineAnalysis.launch.live !== null) {
-      const listed = this.#latestWriting(bookId);
-      this.#requireWritingMaterialScope(listed !== null && listed.task.taskIntentId === taskIntentId && listed.task.materials.length > 0);
-    }
-    this.#requireWritingScope();
-    const latest = this.#latestWriting(bookId);
-    requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT',
-      '这项任务已不是这本书当前的任务；请从它所在的位置重新打开计划。');
-    // A Task whose exemplar no longer gives the text it pinned is never run on other words (#688 re-review).
-    requireStore(latest.task.exemplarsReadable, 'WRITING_EXEMPLAR_MOVED', WRITING_EXEMPLAR_MOVED);
-    // …nor one whose 资料库 item no longer reads at the build its plan pinned (Issue #428): the Run is not started, and the words
-    // say 改计划重做 — a plan prepared again in 交付物 pins the item as it is now.
-    const moved = latest.task.materials.find((material) => material.refusal !== null)?.refusal ?? null;
-    if (moved !== null) throw new StoreError(moved.code, moved.message);
-    const authorized = this.#analysisCall(() => latest.ledger.authorize(bookId, taskIntentId, planEnvelopeDigest));
-    return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger: latest.ledger };
+  authorizeWriting(
+    bookId: string,
+    taskIntentId: string,
+    planEnvelopeDigest: string,
+    start: 'now' | 'when-online' = 'now',
+  ): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore } {
+    this.#requireLedgerKindScope('writing', bookId, taskIntentId);
+    const ledger = this.#ledgerTaskOf('writing', bookId, taskIntentId);
+    const authorized = this.#analysisCall(() => ledger.authorize(bookId, taskIntentId, planEnvelopeDigest, start));
+    return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger };
   }
 
   /**
@@ -9058,7 +9414,7 @@ export class EditorialStore {
           unavailable !== null ? { allowed: false, reason: unavailable }
           : type.document !== null ? { allowed: false, reason: writingDocumentExists(type.label) }
           : type.notForThisBook ? { allowed: false, reason: writingNotForThisBook(type.label) }
-          : runIsActive(runState) ? { allowed: false, reason: activeRunReason(runState) }
+          : runIsActive(runState) ? { allowed: false, reason: activeRunReason(runState, WRITING_KIND) }
           : { allowed: true, mode: latest === null || latest.projection.resultSetRevision === null ? 'writing-first' : 'writing-again' };
         return {
           typeId: type.typeId,
@@ -9229,6 +9585,9 @@ export class EditorialStore {
     if (projection.planRevision !== null) return fellBack(QUICK_START_PLAN_CHANGED);
     const drift = defaultExecutionRuleDrift(rule.version.binding, version.materialInputs);
     if (drift.length > 0) return fellBack(ruleDriftReason(defaultExecutionRuleReference(rule, rule.version).name, drift));
+    // 结果待确认 (Issue #757; CONT-011): a writing Task that sends again a range whose earlier result could not be known is started
+    // only from its plan, where the editor has read that it will.
+    if (plan.resend !== null) return fellBack(QUICK_START_RESEND);
     switch (plan.start.readiness) {
       case 'ready':
       case 'no-route':
@@ -9236,8 +9595,9 @@ export class EditorialStore {
       case 'needs-connection':
         return fellBack(QUICK_START_NEEDS_CONNECTION);
       case 'offline':
-        // The writing bar has no 联网后开始任务 (#701 review P3-3): the reason says to start once online.
-        return fellBack(QUICK_START_OFFLINE_LATER);
+        // As the baseline's (Issue #760, S74c; TASK-024): a rule starts only a Run that can begin now, so offline the Task stops
+        // at its plan, whose bar offers 联网后开始任务 — never a wait the editor did not choose there.
+        return fellBack(QUICK_START_OFFLINE);
       default:
         return fellBack(QUICK_START_NOT_READY);
     }
@@ -9537,7 +9897,7 @@ export class EditorialStore {
     const input = this.#evaluationRewriteCall(() => evaluationRewriteContractInput(version));
     const ledger = this.#evaluationRewriteLedger(input);
     const latest = this.#latestEvaluationRewrite(bookId);
-    requireStore(!runIsActive(latest?.projection.run?.state ?? null), 'EVALUATION_REWRITE_UNAVAILABLE', activeRunReason(latest?.projection.run?.state ?? null));
+    requireStore(!runIsActive(latest?.projection.run?.state ?? null), 'EVALUATION_REWRITE_UNAVAILABLE', activeRunReason(latest?.projection.run?.state ?? null, EVALUATION_REWRITE_KIND));
     const mode = latest === null || latest.projection.resultSetRevision === null ? 'evaluation-rewrite-first' : 'evaluation-rewrite-again';
     const result = this.#analysisCall(() => ledger.prepare({
       phase: 'start',
@@ -9586,20 +9946,16 @@ export class EditorialStore {
   }
 
   /** 开始任务 in the drawer's bar: the Run Authorization and the Run on the ledger of the plan's contract, for the owner. */
-  authorizeEvaluationRewrite(bookId: string, taskIntentId: string, planEnvelopeDigest: string): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore; recordId: string } {
-    this.#requireEvaluationRewriteScope();
-    const latest = this.#latestEvaluationRewrite(bookId);
-    requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT',
-      '这项任务已不是这本书当前的任务；请从它所在的位置重新打开计划。');
-    // The version may have moved since the plan was prepared — saved again, or 定稿 — while the drawer stayed open: a Run then
-    // would only write words that can never be 采用 (S81b2 review). Refused here, before any Run is spent.
-    const version = this.#evaluationCall(() => this.#evaluations.rewritable(bookId, latest.task.recordId));
-    const refusal = evaluationRewriteRefusal(version);
-    requireStore(refusal === null, 'EVALUATION_REWRITE_UNAVAILABLE', refusal ?? '');
-    requireStore(version.entryOrdinal === latest.task.entryOrdinal && version.entrySha256 === latest.task.entrySha256, 'EVALUATION_REWRITE_STALE',
-      '这一版在准备重写之后又保存过：这份计划依据的是之前的分数；请按现在的评分重新准备重写。');
-    const authorized = this.#analysisCall(() => latest.ledger.authorize(bookId, taskIntentId, planEnvelopeDigest));
-    return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger: latest.ledger, recordId: latest.task.recordId };
+  authorizeEvaluationRewrite(
+    bookId: string,
+    taskIntentId: string,
+    planEnvelopeDigest: string,
+    start: 'now' | 'when-online' = 'now',
+  ): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore; recordId: string } {
+    this.#requireLedgerKindScope('evaluation-rewrite', bookId, taskIntentId);
+    const ledger = this.#ledgerTaskOf('evaluation-rewrite', bookId, taskIntentId);
+    const authorized = this.#analysisCall(() => ledger.authorize(bookId, taskIntentId, planEnvelopeDigest, start));
+    return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger, recordId: this.#latestEvaluationRewrite(bookId)!.task.recordId };
   }
 
   /**
@@ -9693,7 +10049,7 @@ export class EditorialStore {
       this.#baselineAnalysis.launch.live !== null ? { allowed: false, reason: EVALUATION_REWRITE_LIVE_UNAVAILABLE }
       : unavailable !== null ? { allowed: false, reason: unavailable }
       : refusal !== null ? { allowed: false, reason: refusal }
-      : runIsActive(runState) ? { allowed: false, reason: activeRunReason(runState) }
+      : runIsActive(runState) ? { allowed: false, reason: activeRunReason(runState, EVALUATION_REWRITE_KIND) }
       : { allowed: true, mode: latest === null || latest.projection.resultSetRevision === null ? 'evaluation-rewrite-first' : 'evaluation-rewrite-again' };
     return { prepare, task, proposal, decided };
   }
@@ -16708,6 +17064,146 @@ export class EditorialStore {
     });
   }
 
+  // ---- 结果待确认 a completed Run left (Issue #757; ATTN-002, NOTIF-004, CTRL-007, CONT-011) -------------------------------
+
+  /**
+   * The ranges and steps whose sent requests' results cannot be known that Runs of one Task kind left on a Book and that reached
+   * their Task Outcome, whatever it was — completed (a kind that keeps no progress reads on past such a range, and any kind past
+   * such a step), interrupted, failed or cancelled — which no later Run of the kind has read and the editor has not kept as gaps.
+   * 取消任务 settles nothing here (CTRL-007: an ambiguous outcome stays distinct from a successful cancellation): only
+   * 保留为缺口, the Manual Outcome Resolution, does. A Run stopped 结果待确认 that has no outcome yet is its own item. A Review
+   * Run's categories are each their own kind, read together. A read.
+   */
+  #unconfirmedListed(bookId: string, surface: TaskPlanKind): { ranges: UnconfirmedOutcomeRecord[]; steps: UnconfirmedOutcomeRecord[] } {
+    const kinds = (this.#authority.prepare('SELECT DISTINCT kind FROM analysis_result_sets WHERE book_id = ? ORDER BY kind').all(bookId) as SqlRow[])
+      .map((row) => asString(row.kind)).filter((kind) => unconfirmedSurfaceOf(kind) === surface);
+    if (kinds.length === 0) return { ranges: [], steps: [] };
+    const resolved = this.#analysisCall(() => this.#outcomeResolutions.resolvedKeys(bookId));
+    const ranges: UnconfirmedOutcomeRecord[] = [];
+    const steps: UnconfirmedOutcomeRecord[] = [];
+    for (const kind of kinds) {
+      const found = this.#analysisCall(() => this.#baselineAnalysis.unconfirmedOutcomesOf(bookId, kind));
+      ranges.push(...found.ranges.filter((range) => range.classification !== null && !resolved.has(range.key)));
+      steps.push(...found.steps.filter((step) => !resolved.has(step.key)));
+    }
+    return { ranges, steps };
+  }
+
+  /** The category a review kind names, in the house's built-in configuration's words; `null` for any other kind. */
+  #unconfirmedCategory(kind: string): string | null {
+    if (kind === FACTUAL_REVIEW_KIND) {
+      return BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((entry) => entry.executor === 'factual-review-kind')?.label ?? kind;
+    }
+    if (!isReviewCategoryKindId(kind)) return null;
+    const categoryId = kind.slice(kind.indexOf('/') + 1);
+    return reviewCategoryEntry(categoryId)?.label ?? categoryId;
+  }
+
+  /** The drawer's list of 结果待确认 a completed Run of this kind left on the Book (Issue #757); `null` when there is none. */
+  #unconfirmedProjection(bookId: string, surface: TaskPlanKind): TaskPlanUnconfirmedProjection | null {
+    const listed = this.#unconfirmedListed(bookId, surface);
+    if (listed.ranges.length === 0 && listed.steps.length === 0) return null;
+    // The text a range's ordinal counts in: the Book's manuscript as it is saved now, or an earlier one (Issue #757 review).
+    const latest = this.#authority.prepare(
+      `SELECT mr.revision_id FROM manuscript_revisions mr JOIN manuscripts m ON m.manuscript_id = mr.manuscript_id AND m.role = 'primary'
+       WHERE m.book_id = ? ORDER BY mr.ordinal DESC LIMIT 1`,
+    ).get(bookId) as SqlRow | undefined;
+    const current = latest === undefined ? null : asString(latest.revision_id);
+    return {
+      ranges: listed.ranges.map((range) => ({
+        unitOrdinal: range.unitOrdinal!, category: this.#unconfirmedCategory(range.kind), recordedAt: range.recordedAt,
+        earlierText: range.heldAtRevisionId !== null && range.heldAtRevisionId !== current,
+      })),
+      steps: listed.steps.map((step) => ({ stage: step.stage!, category: this.#unconfirmedCategory(step.kind), recordedAt: step.recordedAt })),
+      digest: unconfirmedDigest(listed),
+    };
+  }
+
+  /**
+   * 保留为缺口 (Issue #757; Manual Outcome Resolution): the editor determines that the requests the drawer listed for this kind
+   * — exactly those, by digest — stay 结果待确认 and their ranges and steps stay gaps. It records that determination with its
+   * manual evidence class and nothing else: no revision, no Task Outcome and no gap changes, nothing is sent, and a later Task
+   * that sends such a range again still says so in its plan. A list that changed since it was read is refused.
+   */
+  resolveUnconfirmedOutcomes(bookId: string, surface: TaskPlanKind, digest: string, now: Date = new Date()): { resolved: number } {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(bookId) && TASK_PLAN_KINDS.includes(surface) && surface !== 'fixed-task' && DIGEST_PATTERN.test(digest),
+      'UNCONFIRMED_INVALID', '人工结果确认的参数无效。');
+    requireStore(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(bookId) !== undefined, 'BOOK_NOT_FOUND', '图书不存在。');
+    return this.#transaction(this.#authority, () => {
+      const listed = this.#unconfirmedListed(bookId, surface);
+      const keys = [...listed.ranges, ...listed.steps].map((entry) => entry.key);
+      requireStore(keys.length > 0 && unconfirmedDigest(listed) === digest, 'UNCONFIRMED_CHANGED', UNCONFIRMED_CHANGED);
+      this.#analysisCall(() => this.#outcomeResolutions.record(bookId, surface, keys, now));
+      return { resolved: keys.length };
+    });
+  }
+
+  /** A Review Run's categories that send again ranges an earlier Run of their kind left 结果待确认 (Issue #757), before it starts. */
+  #reviewResend(bookId: string, facts: ReviewRunPlanFacts): TaskPlanProjection['resend'] {
+    // Until a category runs — prepared, or waiting to start once online (Issue #760) — the plan says what starting it sends.
+    if (facts.state !== 'prepared' && facts.state !== 'waiting' && facts.state !== 'plan-moved') return null;
+    const entries: Array<{ category: string; units: number[] }> = [];
+    for (const category of facts.categories) {
+      const task = category.task;
+      const manifest = task?.components['coverage-manifest'] as CoverageManifestProjection | undefined;
+      if (task === null || manifest === undefined) continue;
+      const kind = this.#authority.prepare('SELECT kind FROM analysis_task_intents WHERE task_intent_id = ?').get(task.taskIntentId) as SqlRow | undefined;
+      if (kind === undefined) continue;
+      const plan = (task.components['reuse-plan'] ?? null) as ResendPlan | null;
+      const units = this.#analysisCall(() => this.#baselineAnalysis.resendUnitsByContent(bookId, asString(kind.kind), manifest, plan));
+      if (units.length > 0) entries.push({ category: category.label, units });
+    }
+    if (entries.length === 0) return null;
+    const units = [...new Set(entries.flatMap((entry) => entry.units))].sort((left, right) => left - right);
+    return { units, statement: categoryResendDisclosure(entries) };
+  }
+
+  /**
+   * 待我处理's readings of 结果待确认 completed Runs left (Issue #757; ATTN-002, NOTIF-004): one per Book and Task kind, read only
+   * where a revision holds an `outcome-unknown` gap or a completed Run's report names a step so — every list bounded.
+   */
+  #unconfirmedAttention(limit: number, bookId: string | null = null): UnconfirmedAttentionReading[] {
+    const pairs = this.#authority.prepare(
+      `SELECT DISTINCT book_id, kind FROM (
+         SELECT s.book_id, s.kind FROM analysis_result_set_revisions r JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
+         WHERE instr(r.canonical_json, '"outcome-unknown"') > 0
+         UNION
+         SELECT t.book_id, t.kind FROM analysis_task_outcomes o JOIN analysis_task_intents t ON t.task_intent_id = o.task_intent_id
+         WHERE o.classification IN ('completed', 'completed-with-gaps') AND instr(o.canonical_json, ?) > 0
+       ) WHERE ? IS NULL OR book_id = ? ORDER BY book_id, kind LIMIT ?`,
+    ).all(OUTCOME_UNKNOWN_NOT_RESENT, bookId, bookId, limit) as SqlRow[];
+    const surfaces = new Map<string, { bookId: string; surface: TaskPlanKind }>();
+    for (const pair of pairs) {
+      const surface = unconfirmedSurfaceOf(asString(pair.kind));
+      if (surface !== null) surfaces.set(`${asString(pair.book_id)}\n${surface}`, { bookId: asString(pair.book_id), surface });
+    }
+    const readings: UnconfirmedAttentionReading[] = [];
+    for (const { bookId: book, surface } of surfaces.values()) {
+      const listed = this.#unconfirmedListed(book, surface);
+      const entries = [...listed.ranges, ...listed.steps];
+      if (entries.length === 0) continue;
+      const title = this.#authority.prepare('SELECT title FROM books WHERE book_id = ?').get(book) as SqlRow | undefined;
+      if (title === undefined) continue;
+      const latestReview = surface === 'review-run'
+        ? this.#authority.prepare('SELECT review_run_id FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC LIMIT 1').get(book) as SqlRow | undefined
+        : undefined;
+      // A review's plan is always named; a Book whose Review Runs are gone has nowhere to show the list.
+      if (surface === 'review-run' && latestReview === undefined) continue;
+      readings.push({
+        bookId: book,
+        bookTitle: asString(title.title),
+        surface,
+        ref: latestReview === undefined ? null : asString(latestReview.review_run_id),
+        ranges: listed.ranges.length,
+        steps: [...new Set(listed.steps.map((step) => step.stage!))],
+        at: entries.map((entry) => entry.recordedAt).sort().at(-1)!,
+        runRecordIds: [...new Set(entries.map((entry) => entry.runRecordId))],
+      });
+    }
+    return readings;
+  }
+
   inspectGlobalAttention(progress: ProgressReader, busy: boolean, waitingFor: WaitingFor = 'admitting', now: Date = new Date()): GlobalAttentionProjection {
     return this.#reviewCall(() => {
       const since = recentWindowStart(now);
@@ -16721,12 +17217,14 @@ export class EditorialStore {
           conflicts: readConflictAttention(this.#authority, limit),
           analysisTasks: baseline.tasks,
           analysisOutcomes: baseline.outcomes,
+          waitingTasks: this.#waitingTaskAttention(null, limit),
           reviewRuns: review.latest,
           reviewCompletions: review.completed,
           maintenance: this.#maintenanceCases.attentionReadings(limit),
           libraryMaterials: this.#libraryMaterials.attentionReadings(limit),
           learningMaterials: this.#learningAttention(limit),
           materialIndexes: this.#materialIndexAttention(since, limit),
+          unconfirmed: this.#unconfirmedAttention(limit),
           busy,
           waitingFor,
         }, now);
@@ -16760,6 +17258,7 @@ export class EditorialStore {
           bookId,
           analysisTasks: baseline.tasks,
           analysisOutcomes: baseline.outcomes,
+          waitingTasks: this.#waitingTaskAttention(bookId, limit),
           reviewRuns: review.latest,
           reviewCompletions: review.completed,
           waitingFor,

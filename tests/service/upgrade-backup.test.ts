@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/canonical.js';
 import { DATA_VERSION_TRIGGER_SQL, DataVersionLedger, PRE_UPGRADE_BACKUP_NAME, type ClassifiedSchemaRevision, type DataVersionUpgrade } from '../../src/service/data-version.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { MATERIAL_INDEX_SCHEMA_VERSION, DATABASE_MERGE_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
+import { OUTCOME_RESOLUTION_SCHEMA_VERSION, DATABASE_MERGE_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { backUpBeforeUpgrade, preUpgradeBackupFileName, writePendingUpgrade } from '../../src/service/upgrade-backup.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
@@ -33,11 +33,11 @@ afterEach(async () => {
 
 /** The terminal revision's change as the classification names it: revision 60, the dialogue Tasks (Issue #52). */
 const CHANGE = '记录就所选文字的提问与回答';
-const BREAKING: ReadonlyArray<ClassifiedSchemaRevision> = [{ revision: MATERIAL_INDEX_SCHEMA_VERSION, class: 'breaking', change: CHANGE }];
+const BREAKING: ReadonlyArray<ClassifiedSchemaRevision> = [{ revision: OUTCOME_RESOLUTION_SCHEMA_VERSION, class: 'breaking', change: CHANGE }];
 /** Revisions 58 and 60 both breaking: Data Version 1 at revision 57, 2 at 58 and 59, and 3 at 60. */
 const BOTH: ReadonlyArray<ClassifiedSchemaRevision> = [
   { revision: DATABASE_MERGE_SCHEMA_VERSION, class: 'breaking', change: '替换记录' },
-  { revision: MATERIAL_INDEX_SCHEMA_VERSION, class: 'breaking', change: CHANGE },
+  { revision: OUTCOME_RESOLUTION_SCHEMA_VERSION, class: 'breaking', change: CHANGE },
 ];
 /** Revisions 57, 58 and 60 all breaking: Data Version 1 at revision 56, 2 at 57, 3 at 58 and 59, and 4 at 60. */
 const THREE: ReadonlyArray<ClassifiedSchemaRevision> = [
@@ -106,7 +106,7 @@ async function storeBeforeUpgrade(): Promise<void> {
   }
   const plant = new DatabaseSync(storePath());
   try {
-    plant.exec(`DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; PRAGMA user_version = ${DATABASE_MERGE_SCHEMA_VERSION};`);
+    plant.exec(`DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; PRAGMA user_version = ${DATABASE_MERGE_SCHEMA_VERSION};`);
     downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_58_SQL);
   } finally {
     plant.close();
@@ -141,7 +141,7 @@ describe('升级前备份 over the real store', () => {
     try {
       const version = store.inspectDataVersion();
       expect([version.dataVersion, version.schemaRevision, version.backupLocation, version.upgrades.length])
-        .toEqual([2, MATERIAL_INDEX_SCHEMA_VERSION, backups(), 1]);
+        .toEqual([2, OUTCOME_RESOLUTION_SCHEMA_VERSION, backups(), 1]);
       const [upgrade] = version.upgrades;
       expect(upgrade).toMatchObject({
         fromDataVersion: 1, toDataVersion: 2, fromSoftwareVersion: software, softwareVersion: software, changes: [CHANGE], backupPresent: true,
@@ -259,7 +259,7 @@ describe('升级前备份 over the real store', () => {
     const db = new DatabaseSync(storePath());
     try {
       const backingUp = backUpBeforeUpgrade(db, roots.dataRoot, {
-        terminalRevision: MATERIAL_INDEX_SCHEMA_VERSION, classes: BREAKING, softwareVersion: await packageVersion(), now: T,
+        terminalRevision: OUTCOME_RESOLUTION_SCHEMA_VERSION, classes: BREAKING, softwareVersion: await packageVersion(), now: T,
       });
       const deadline = Date.now() + 60_000;
       while (!(existsSync(backups()) && readdirSync(backups()).some((name) => /\.ai7db\.partial$/u.test(name)))) {
@@ -280,7 +280,7 @@ describe('升级前备份 over the real store', () => {
     await storeBeforeUpgrade();
     // Stopped after every migration and before the versions that opened the store were recorded.
     expect(code(await refusal(open(BREAKING, 'before-record')))).toBe('E2E_CONTROL_INTERRUPTED');
-    expect([userVersion(storePath()), existsSync(note())]).toEqual([MATERIAL_INDEX_SCHEMA_VERSION, true]);
+    expect([userVersion(storePath()), existsSync(note())]).toEqual([OUTCOME_RESOLUTION_SCHEMA_VERSION, true]);
     const made = await upgradeBackups();
     expect(made).toHaveLength(1);
     // The next open records that upgrade with that backup, makes no second one, and clears the note.
@@ -352,7 +352,7 @@ describe('升级前备份 over the real store', () => {
     // Backed up and noted, then stopped before anything migrated the store.
     const db = new DatabaseSync(storePath());
     try {
-      await backUpBeforeUpgrade(db, roots.dataRoot, { terminalRevision: MATERIAL_INDEX_SCHEMA_VERSION, classes: BREAKING, softwareVersion: await packageVersion(), now: T });
+      await backUpBeforeUpgrade(db, roots.dataRoot, { terminalRevision: OUTCOME_RESOLUTION_SCHEMA_VERSION, classes: BREAKING, softwareVersion: await packageVersion(), now: T });
     } finally {
       db.close();
     }
@@ -376,7 +376,7 @@ describe('升级前备份 over the real store', () => {
         fromDataVersion: 1, fromSchemaRevision: DATABASE_MERGE_SCHEMA_VERSION, fromSoftwareVersion: null, changes: [CHANGE],
         backup: { fileName: preUpgradeBackupFileName(T), byteLength: 1, sha256: 'a'.repeat(64) },
       },
-      target: { softwareVersion: '0.1.0', dataVersion: 2, schemaRevision: MATERIAL_INDEX_SCHEMA_VERSION },
+      target: { softwareVersion: '0.1.0', dataVersion: 2, schemaRevision: OUTCOME_RESOLUTION_SCHEMA_VERSION },
       earlier: [],
     });
     // One carrying more than sixteen earlier upgrades on, digest and all, is not a note AI7 writes either.
@@ -434,9 +434,9 @@ describe('升级前备份 over the real store', () => {
       expect(upgradesOf(store)).toEqual([[software, 2, 3, [CHANGE]], ['0.0.10', 1, 2, ['替换记录']]]);
       expect(store.inspectDataVersion().upgrades[0]!.fromSoftwareVersion).toBe('0.0.10');
       expect(historyOf(store)).toEqual([
-        [software, 3, MATERIAL_INDEX_SCHEMA_VERSION],
+        [software, 3, OUTCOME_RESOLUTION_SCHEMA_VERSION],
         ['0.0.10', 2, DATABASE_MERGE_SCHEMA_VERSION],
-        [software, 1, MATERIAL_INDEX_SCHEMA_VERSION],
+        [software, 1, OUTCOME_RESOLUTION_SCHEMA_VERSION],
       ]);
       store.markCleanShutdown();
     } finally {
@@ -479,13 +479,13 @@ describe('升级前备份 over the real store', () => {
       store.close();
     }
     await writePendingUpgrade(roots.dataRoot, madeUpgrade(1, DATABASE_MERGE_SCHEMA_VERSION, '0.0.9', [CHANGE], '09-00-00'),
-      { softwareVersion: '0.0.10', dataVersion: 2, schemaRevision: MATERIAL_INDEX_SCHEMA_VERSION });
+      { softwareVersion: '0.0.10', dataVersion: 2, schemaRevision: OUTCOME_RESOLUTION_SCHEMA_VERSION });
     store = await open(BREAKING);
     try {
       // Their upgrade is recorded as theirs, and this software, finding the data at its own Data Version, makes none.
       expect(upgradesOf(store)).toEqual([['0.0.10', 1, 2, [CHANGE]]]);
       expect(historyOf(store)).toEqual([
-        [software, 2, MATERIAL_INDEX_SCHEMA_VERSION], ['0.0.10', 2, MATERIAL_INDEX_SCHEMA_VERSION], [software, 1, MATERIAL_INDEX_SCHEMA_VERSION],
+        [software, 2, OUTCOME_RESOLUTION_SCHEMA_VERSION], ['0.0.10', 2, OUTCOME_RESOLUTION_SCHEMA_VERSION], [software, 1, OUTCOME_RESOLUTION_SCHEMA_VERSION],
       ]);
       store.markCleanShutdown();
     } finally {
@@ -501,7 +501,7 @@ describe('升级前备份 over the real store', () => {
     // revision 57 to 2 at 58, and stopped before recording it. This build goes on to 60, still Data Version 2.
     const classes: ReadonlyArray<ClassifiedSchemaRevision> = [
       { revision: DATABASE_MERGE_SCHEMA_VERSION, class: 'breaking', change: '替换记录' },
-      { revision: MATERIAL_INDEX_SCHEMA_VERSION, class: 'additive' },
+      { revision: OUTCOME_RESOLUTION_SCHEMA_VERSION, class: 'additive' },
     ];
     await writePendingUpgrade(roots.dataRoot, THEIRS, { ...THEIR_TARGET, softwareVersion: software });
     const store = await open(classes);
@@ -509,7 +509,7 @@ describe('升级前备份 over the real store', () => {
       // The upgrade is recorded where that build left the data, and this build's open after it.
       expect(upgradesOf(store)).toEqual([[software, 1, 2, ['替换记录']]]);
       expect(historyOf(store)).toEqual([
-        [software, 2, MATERIAL_INDEX_SCHEMA_VERSION], [software, 2, DATABASE_MERGE_SCHEMA_VERSION], [software, 1, MATERIAL_INDEX_SCHEMA_VERSION],
+        [software, 2, OUTCOME_RESOLUTION_SCHEMA_VERSION], [software, 2, DATABASE_MERGE_SCHEMA_VERSION], [software, 1, OUTCOME_RESOLUTION_SCHEMA_VERSION],
       ]);
       store.markCleanShutdown();
     } finally {
@@ -524,7 +524,7 @@ describe('升级前备份 over the real store', () => {
     // 0.0.10 brought the data to Data Version 2 and never recorded it. 0.0.11 then backed up, noted its own upgrade with
     // theirs carried on, and stopped before migrating anything.
     await writePendingUpgrade(roots.dataRoot, madeUpgrade(2, DATABASE_MERGE_SCHEMA_VERSION, '0.0.10', [CHANGE], '09-30-00'),
-      { softwareVersion: '0.0.11', dataVersion: 3, schemaRevision: MATERIAL_INDEX_SCHEMA_VERSION }, [{ ...THEIR_TARGET, upgrade: THEIRS }]);
+      { softwareVersion: '0.0.11', dataVersion: 3, schemaRevision: OUTCOME_RESOLUTION_SCHEMA_VERSION }, [{ ...THEIR_TARGET, upgrade: THEIRS }]);
     const store = await open(BOTH);
     try {
       // Theirs is still recorded. 0.0.11's never happened, and this software's own names the backup it made now.
@@ -542,7 +542,7 @@ describe('升级前备份 over the real store', () => {
     // Under THREE, 0.0.10 set out to bring the data from Data Version 1 at revision 56 to 4 at 60, and stopped at revision 58,
     // at Data Version 3, before recording anything.
     await writePendingUpgrade(roots.dataRoot, madeUpgrade(1, DATABASE_MERGE_SCHEMA_VERSION - 2, '0.0.9', ['定时备份', '替换记录', CHANGE], '09-00-00'),
-      { softwareVersion: '0.0.10', dataVersion: 4, schemaRevision: MATERIAL_INDEX_SCHEMA_VERSION });
+      { softwareVersion: '0.0.10', dataVersion: 4, schemaRevision: OUTCOME_RESOLUTION_SCHEMA_VERSION });
     const store = await open(THREE);
     try {
       expect(upgradesOf(store)).toEqual([[software, 3, 4, [CHANGE]], ['0.0.10', 1, 3, ['定时备份', '替换记录']]]);
@@ -589,7 +589,7 @@ describe('升级前备份 over the real store', () => {
     await storeBeforeUpgrade();
     // Under BREAKING, 0.0.10 set out from revision 57 and stopped at 58, still at Data Version 1: it raised nothing.
     await writePendingUpgrade(roots.dataRoot, madeUpgrade(1, DATABASE_MERGE_SCHEMA_VERSION - 1, '0.0.9', [CHANGE], '09-00-00'),
-      { softwareVersion: '0.0.10', dataVersion: 2, schemaRevision: MATERIAL_INDEX_SCHEMA_VERSION });
+      { softwareVersion: '0.0.10', dataVersion: 2, schemaRevision: OUTCOME_RESOLUTION_SCHEMA_VERSION });
     const store = await open(BREAKING);
     try {
       expect(upgradesOf(store)).toEqual([[software, 1, 2, [CHANGE]]]);

@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import {
   MATERIAL_INDEXER_IDENTITY,
+  MATERIAL_INDEXER_PREDECESSOR,
   MATERIAL_INDEX_PREPARE_SLICE,
   MATERIAL_INDEX_SCHEMA_SQL,
   MaterialIndexAborted,
@@ -251,11 +252,62 @@ describe('the ledger over a minimal store', () => {
   it('names one indexer for every format, and keeps the converter each build read through in its record (#729)', () => {
     // Naming the DOC and text converters here would move every item's current build, DOCX ones included: the identity
     // stays, and a converter's change moves `ai7-material-index/N` instead.
-    expect(MATERIAL_INDEXER_IDENTITY).toBe('ai7-material-index/1+ai7-docx-fflate-saxes/3');
+    expect(MATERIAL_INDEXER_IDENTITY).toBe('ai7-material-index/2+ai7-docx-fflate-saxes/3');
+    expect(MATERIAL_INDEXER_PREDECESSOR).toBe('ai7-material-index/1+ai7-docx-fflate-saxes/3');
     const db = store();
     new MaterialIndexLedger(db).record({ materialId: MATERIAL, sha256: SHA, format: 'TXT' }, { ...complete, converter: 'ai7-text-to-docx/1+ai7-docx-fflate-saxes/3' });
     const row = db.prepare('SELECT canonical_json FROM material_index_builds').get() as { canonical_json: string };
     expect(JSON.parse(row.canonical_json)).toMatchObject({ indexer: MATERIAL_INDEXER_IDENTITY, converter: 'ai7-text-to-docx/1+ai7-docx-fflate-saxes/3' });
+  });
+
+  /** A build rewritten as the predecessor indexer made it, under its own digest; the trigger is lifted for that alone. */
+  function asPredecessor(db: DatabaseSync, materialId: string): string {
+    const row = db.prepare('SELECT index_id, canonical_json FROM material_index_builds WHERE material_id = ?').get(materialId) as { index_id: string; canonical_json: string };
+    const earlier = canonicalRecord({ ...(JSON.parse(row.canonical_json) as Record<string, unknown>), indexer: MATERIAL_INDEXER_PREDECESSOR });
+    db.exec('DROP TRIGGER IF EXISTS material_index_builds_no_update');
+    db.prepare('UPDATE material_index_builds SET indexer = ?, canonical_json = ?, sha256 = ? WHERE index_id = ?')
+      .run(MATERIAL_INDEXER_PREDECESSOR, earlier.json, earlier.digest, row.index_id);
+    return earlier.digest;
+  }
+
+  it('lets the predecessor\'s builds stand, but builds again an item it refused as a format it could not read (#428)', () => {
+    const db = store();
+    const PAGE = '33333333-3333-4333-8333-333333333333';
+    const SCAN = '44444444-4444-4444-8444-444444444444';
+    for (const [id, sha] of [[PAGE, 'd'.repeat(64)], [SCAN, 'e'.repeat(64)]] as const) {
+      db.prepare('INSERT INTO library_materials(material_id, object_sha256, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?)')
+        .run(id, sha, '2026-10-09T00:00:01.000Z', '{}', sha);
+    }
+    const ledger = new MaterialIndexLedger(db);
+    ledger.record({ materialId: MATERIAL, sha256: SHA, format: 'TXT' }, complete, '2026-10-09T01:00:00.000Z');
+    ledger.record({ materialId: PAGE, sha256: 'd'.repeat(64), format: 'HTML' }, { state: 'unsupported', reason: 'format-unsupported', converter: null }, '2026-10-09T01:00:01.000Z');
+    ledger.record({ materialId: SCAN, sha256: 'e'.repeat(64), format: 'PDF' }, { state: 'unsupported', reason: 'needs-local-dependency', converter: null }, '2026-10-09T01:00:02.000Z');
+    const text = asPredecessor(db, MATERIAL);
+    asPredecessor(db, PAGE);
+    const scan = asPredecessor(db, SCAN);
+    // The text and the PDF stand as they were built: not built again, their digests unmoved, a plan's pin still current.
+    expect(ledger.current(MATERIAL)?.sha256).toBe(text);
+    expect(ledger.current(SCAN)?.sha256).toBe(scan);
+    expect(ledger.referencePin(MATERIAL, BOOK, () => true).indexDigest).toBe(text);
+    // The web page the predecessor could not read waits for this indexer, and leaves 最近完成 until it is built.
+    expect(ledger.current(PAGE)).toBeNull();
+    expect(ledger.unindexed()).toEqual([PAGE]);
+    expect(ledger.completions('2000-01-01T00:00:00.000Z', 5).map((entry) => entry.materialId)).toEqual([SCAN, MATERIAL]);
+    ledger.record({ materialId: PAGE, sha256: 'd'.repeat(64), format: 'HTML' }, complete, '2026-10-10T00:00:00.000Z');
+    expect(ledger.current(PAGE)).toMatchObject({ state: 'complete' });
+    expect(ledger.unindexed()).toEqual([]);
+    expect(ledger.completions('2000-01-01T00:00:00.000Z', 5).map((entry) => entry.materialId)).toEqual([PAGE, SCAN, MATERIAL]);
+    // Both of the page's builds are kept: nothing is rewritten.
+    expect((db.prepare('SELECT count(*) count FROM material_index_builds WHERE material_id = ?').get(PAGE) as { count: number }).count).toBe(2);
+    // A build an indexer before the predecessor made never stands.
+    const older = store();
+    const olderLedger = new MaterialIndexLedger(older);
+    olderLedger.record({ materialId: MATERIAL, sha256: SHA, format: 'TXT' }, complete);
+    const row = older.prepare('SELECT index_id, canonical_json FROM material_index_builds').get() as { index_id: string; canonical_json: string };
+    const earliest = canonicalRecord({ ...(JSON.parse(row.canonical_json) as Record<string, unknown>), indexer: 'ai7-material-index/0' });
+    older.exec('DROP TRIGGER material_index_builds_no_update');
+    older.prepare('UPDATE material_index_builds SET indexer = ?, canonical_json = ?, sha256 = ? WHERE index_id = ?').run('ai7-material-index/0', earliest.json, earliest.digest, row.index_id);
+    expect(olderLedger.current(MATERIAL)).toBeNull();
   });
 
   it('records a build that read no text with its reason and no segments', () => {

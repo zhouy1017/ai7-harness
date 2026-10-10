@@ -660,6 +660,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'j14-library-reflow-forced-colors',
     'knowledge-library-bounded-readers',
     'knowledge-library-index-translation',
+    // 资料索引 of HTML, EPUB, ODT and RTF (Issue #428).
+    'knowledge-library-index-formats',
     'zero-activity',
   ]),
   'J-03': Object.freeze([
@@ -804,6 +806,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'review-prepare',
     // Issue #420 (S74a): the Run's one approval is the drawer bar's 开始任务.
     'review-bar-ready',
+    // Issue #760 (S74c): offline, the Review Run is approved with 联网后开始任务, waits, and starts once the network is back.
+    'review-offline-bar',
+    'review-start-when-online',
+    'review-online-dispatch',
     'review-authorize',
     'review-marks-on-manuscript',
     'review-batch-apply',
@@ -1137,6 +1143,10 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'outcome-unknown-view',
     'outcome-unknown-cancelled',
     'outcome-unknown-redo-disclosed',
+    'relaunch-for-reduction-unknown',
+    'eighth-book-import',
+    'outcome-unconfirmed-completed',
+    'outcome-unconfirmed-kept',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',

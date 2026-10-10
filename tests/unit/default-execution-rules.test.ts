@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { TASK_BAR_OFFLINE_LATER } from '../../src/renderer/task-drawer-labels.js';
 import { OFFLINE_START_LATER } from '../../src/shared/offline-wording.js';
+import { QUICK_START_OFFLINE } from '../../src/service/default-execution-rules.js';
 import {
   DEFAULT_EXECUTION_RULES_STATEMENT,
   DEFAULT_EXECUTION_RULE_PROCEDURES,
   DEFAULT_EXECUTION_RULE_QUICK_LABELS,
   QUICK_START_DEVELOPER_LIVE,
-  QUICK_START_OFFLINE_LATER,
   QUICK_START_RANGE_REASON,
   defaultExecutionRuleBindingOf,
   defaultExecutionRuleDoes,
@@ -124,10 +124,9 @@ describe('the words of quick start and its rules', () => {
     expect(defaultExecutionRuleCovers('sync-current')).toBeNull();
     expect(defaultRuleBindingRows(defaultExecutionRuleBindingOf(INPUTS), '写作任务', '新建文档「宣传文章」').at(-1)).toEqual({ label: '适用于', value: '新建文档「宣传文章」' });
     expect(defaultRuleBindingRows(defaultExecutionRuleBindingOf(INPUTS)).map((row) => row.label)).toEqual(['模型服务', '工序', '预算上限', '发送内容类别', '会得到']);
-    expect(QUICK_START_OFFLINE_LATER).toBe('离线：这份计划要连到模型服务，而这台设备现在没有网络；联网后再开始。');
-    expect(QUICK_START_OFFLINE_LATER).not.toContain('联网后开始任务');
-    // The Task Drawer's bar says the same sentence, without the final stop: one shared owner, never a hand copy (#714).
-    expect(QUICK_START_OFFLINE_LATER).toBe(`${TASK_BAR_OFFLINE_LATER}。`);
+    // Every kind with a quick start waits now (Issue #760, S74c): offline, its quick start stops at the plan whose bar offers
+    // 联网后开始任务, and says so. The bar's fallback sentence for a kind without a wait keeps its one shared owner (#714).
+    expect(QUICK_START_OFFLINE).toBe('离线：这份计划要连到模型服务，而这台设备现在没有网络；可以在计划里选择联网后开始任务。');
     expect(TASK_BAR_OFFLINE_LATER).toBe(OFFLINE_START_LATER);
     expect(QUICK_START_DEVELOPER_LIVE).toBe('开发者实时模式下不用默认执行规则：每次都先看计划，再开始任务。');
     expect(ruleDriftReason('开始同步 · 第 1 版', ['Provider 绑定 · 模型', '外发数据类别']))

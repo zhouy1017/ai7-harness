@@ -27,6 +27,8 @@ import {
   type ReviewRunCategoryState,
   type ReviewRunState,
   type ReviewScopeKind,
+  type TaskPlanKind,
+  type UnconfirmedStageId,
 } from '../shared/protocol.js';
 import type { ProgressReader, RunProgress } from './analysis/baseline-analysis-store.js';
 import type { WaitingFor } from './task-plan.js';
@@ -149,6 +151,43 @@ export interface AnalysisTaskAttentionReading {
   };
 }
 
+/**
+ * 结果待确认 that Runs of one Task kind left on a Book and that reached their Task Outcome — completed, interrupted, failed or
+ * cancelled (Issue #757; ATTN-002, NOTIF-004, CTRL-007), read by the store through each kind's ledger: how many ranges, which steps, and the plan they are listed on —
+ * the Book's current Task of the kind, or its latest Review Run. Only what no later Run of the kind has read and the editor has
+ * not kept as gaps (保留为缺口) is read.
+ */
+export interface UnconfirmedAttentionReading {
+  readonly bookId: string;
+  readonly bookTitle: string;
+  readonly surface: TaskPlanKind;
+  /** The Review Run whose plan lists them; `null` for every other kind, whose plan is the Book's current Task's. */
+  readonly ref: string | null;
+  readonly ranges: number;
+  readonly steps: ReadonlyArray<UnconfirmedStageId>;
+  /** When the latest of the Runs that sent them reached its outcome. */
+  readonly at: string;
+  /** Those Runs, for the technical layer. */
+  readonly runRecordIds: ReadonlyArray<string>;
+}
+
+/**
+ * A Run of a ledger Task of another kind — AI7 初评, 审稿意见, 按我的评分重写评语 or a 写作任务 — waiting to start once online, or
+ * blocked because its plan moved while it waited (Issue #760, S74c). 待我处理 and the 任务 panel list nothing else of these
+ * kinds: their own surfaces follow them, and only the wait is one the editor may have left behind.
+ */
+export interface WaitingTaskAttentionReading {
+  readonly kind: 'initial-evaluation' | 'readers-report' | 'evaluation-rewrite' | 'writing';
+  readonly bookId: string;
+  readonly bookTitle: string;
+  readonly taskIntentId: string;
+  readonly runRecordId: string;
+  /** `launch-blocked` is a waiting Run Reconnect Preflight blocked because this launch cannot start it (CONC-006). */
+  readonly state: 'awaiting-connectivity' | 'plan-moved' | 'launch-blocked';
+  /** When the Run's last state was recorded. */
+  readonly stateAt: string;
+}
+
 /** One completed baseline Task Outcome of the recent window. */
 export interface AnalysisOutcomeAttentionReading {
   readonly bookId: string;
@@ -247,6 +286,8 @@ export interface GlobalAttentionReadings {
   readonly conflicts: ReadonlyArray<ConflictAttentionReading>;
   readonly analysisTasks: ReadonlyArray<AnalysisTaskAttentionReading>;
   readonly analysisOutcomes: ReadonlyArray<AnalysisOutcomeAttentionReading>;
+  /** Every other ledger kind's Runs waiting to start once online, or blocked because their plan moved (Issue #760). */
+  readonly waitingTasks?: ReadonlyArray<WaitingTaskAttentionReading>;
   /** Each Book's latest Review Run. */
   readonly reviewRuns: ReadonlyArray<ReviewRunAttentionReading>;
   /** The Review Runs that reached the manuscript in every category within the recent window. */
@@ -259,6 +300,8 @@ export interface GlobalAttentionReadings {
   readonly learningMaterials: ReadonlyArray<LearningMaterialsAttentionReading>;
   /** The 资料库 items whose Material Index was built within the recent window (Issue #428, S80a; ATTN-009). */
   readonly materialIndexes?: ReadonlyArray<MaterialIndexAttentionReading>;
+  /** 结果待确认 that completed Runs left, one reading per Book and Task kind (Issue #757; ATTN-002, NOTIF-004). */
+  readonly unconfirmed?: ReadonlyArray<UnconfirmedAttentionReading>;
   /** Whether Runs hold every place of the execution owner's governor now (Issue #49, S14). */
   readonly busy: boolean;
   /**
@@ -308,14 +351,14 @@ export async function attentionWaitingFor(anyWaiting: boolean, read: () => Promi
 /** 待我处理 as the service answers it (Issue #539): what a waiting Run waits for is checked only while one waits. */
 export async function readGlobalAttention(
   store: {
-    waitingBaselineAnalysisRuns(bookId: null): ReadonlyArray<unknown>;
+    waitingTaskRuns(bookId: null): ReadonlyArray<unknown>;
     inspectGlobalAttention(progress: ProgressReader, busy: boolean, waitingFor: WaitingFor): GlobalAttentionProjection;
   },
   progress: ProgressReader,
   busy: boolean,
   read: () => Promise<WaitingFor>,
 ): Promise<GlobalAttentionProjection> {
-  return store.inspectGlobalAttention(progress, busy, await attentionWaitingFor(store.waitingBaselineAnalysisRuns(null).length > 0, read));
+  return store.inspectGlobalAttention(progress, busy, await attentionWaitingFor(store.waitingTaskRuns(null).length > 0, read));
 }
 
 function item(
@@ -544,6 +587,28 @@ function analysisTaskItem(reading: AnalysisTaskAttentionReading, waitingFor: Wai
   }
 }
 
+/**
+ * 结果待确认 a Run that ended left (Issue #757; ATTN-002, NOTIF-004, CTRL-007; interaction-spec §1036): in 异常与结果待确认,
+ * counted, never blocking — the Run's Task Outcome stands and nothing waits on it — and its next step is to see which ranges and
+ * steps, where 保留为缺口 settles them; never a repeat-shaped action. It resolves by itself when a later Run of the kind reads
+ * them; 取消任务 never settles it.
+ */
+function unconfirmedItem(reading: UnconfirmedAttentionReading): GlobalAttentionItemProjection {
+  return item('exceptions', 'analysis-outcome-unconfirmed', {
+    itemId: `unconfirmed:${reading.bookId}:${reading.surface}`,
+    blocked: false,
+    at: reading.at,
+    book: { bookId: reading.bookId, title: reading.bookTitle },
+    object: { kind: 'unconfirmed', taskKind: reading.surface, ranges: reading.ranges, steps: reading.steps },
+    nextStep: 'view-unconfirmed',
+    target: { kind: 'task-plan', bookId: reading.bookId, taskKind: reading.surface, ref: reading.ref },
+    technical: [
+      { key: 'run-records', label: '运行记录', value: reading.runRecordIds.join('、') },
+      { key: 'state-at', label: '状态记录时间', value: reading.at },
+    ],
+  });
+}
+
 function analysisOutcomeItem(reading: AnalysisOutcomeAttentionReading): GlobalAttentionItemProjection {
   const state = reading.classification === 'completed' ? 'analysis-completed'
     : reading.classification === 'cancelled' ? 'analysis-cancelled' : 'analysis-completed-with-gaps';
@@ -585,12 +650,26 @@ function reviewObject(reading: ReviewRunAttentionReading): GlobalAttentionObject
 }
 
 /** The Book's latest Review Run's item, if its state asks for one; a Run that reached the manuscript is 最近完成's. */
-function reviewRunItem(reading: ReviewRunAttentionReading): GlobalAttentionItemProjection | null {
+function reviewRunItem(reading: ReviewRunAttentionReading, waitingFor: WaitingFor = 'admitting'): GlobalAttentionItemProjection | null {
   const book = { bookId: reading.bookId, title: reading.bookTitle };
   const object = reviewObject(reading);
   const target: GlobalAttentionTarget = { kind: 'review', bookId: reading.bookId, reviewRunId: reading.reviewRunId };
   const itemId = `review:${reading.reviewRunId}`;
   const started = reading.authorizedAt ?? reading.createdAt;
+  // A Run waiting to start once online (Issue #760, S74c; ATTN-004): 运行中与已暂停's, in the words of what it waits for, exactly
+  // as a waiting baseline Run reads; only a missing model connection asks the editor to act.
+  if (reading.state === 'waiting') {
+    return item('active', WAITING_STATES[waitingFor], {
+      itemId, blocked: waitingFor === 'connection', at: started, book, object, nextStep: 'view-review', target, technical: reviewTechnical(reading, started),
+    });
+  }
+  // 需要重新确认计划 (OFF-008): its plan moved while it waited, so it never started — the editor's plan decision, as a baseline's is.
+  if (reading.state === 'plan-moved') {
+    const at = reading.lastEventAt ?? started;
+    return item('decisions', 'analysis-plan-moved', {
+      itemId, blocked: true, at, book, object, nextStep: 'view-review', target, technical: reviewTechnical(reading, at),
+    });
+  }
   if (reading.state === 'running') {
     const current = reading.categories.find((category) => category.state === 'running') ??
       reading.categories.find((category) => category.pending) ?? null;
@@ -622,6 +701,30 @@ function reviewRunItem(reading: ReviewRunAttentionReading): GlobalAttentionItemP
     });
   }
   return null;
+}
+
+/**
+ * A ledger Task of another kind whose Run waits to start once online, or whose plan moved meanwhile (Issue #760, S74c): the same
+ * items a baseline Run's wait makes, on the Task's own plan in the Task Drawer, beside the surface that owns it.
+ */
+function waitingTaskItem(reading: WaitingTaskAttentionReading, waitingFor: WaitingFor): GlobalAttentionItemProjection {
+  const fields = {
+    itemId: `task:${reading.taskIntentId}`,
+    at: reading.stateAt,
+    book: { bookId: reading.bookId, title: reading.bookTitle },
+    object: { kind: 'task', taskKind: reading.kind } as const,
+    nextStep: 'view-run' as const,
+    target: { kind: 'task-plan', bookId: reading.bookId, taskKind: reading.kind, ref: reading.taskIntentId } as const,
+    technical: [
+      { key: 'task-intent', label: '任务意图', value: reading.taskIntentId },
+      { key: 'run-record', label: '运行记录', value: `${reading.runRecordId} · ${reading.state}` },
+      { key: 'state-at', label: '状态记录时间', value: reading.stateAt },
+    ],
+  };
+  // A Run this launch could not start never ran either: an exception the editor acts on, as a baseline Run blocked so is (CONC-006).
+  return reading.state === 'plan-moved' ? item('decisions', 'analysis-plan-moved', { ...fields, blocked: true })
+    : reading.state === 'launch-blocked' ? item('exceptions', 'analysis-blocked', { ...fields, blocked: true })
+      : item('active', WAITING_STATES[waitingFor], { ...fields, blocked: waitingFor === 'connection' });
 }
 
 function reviewCompletionItem(reading: ReviewRunAttentionReading): GlobalAttentionItemProjection {
@@ -786,7 +889,8 @@ export function composeGlobalAttention(readings: GlobalAttentionReadings, now: D
     ...readings.conflicts.map(conflictItem),
     ...readings.analysisTasks.flatMap((reading) => analysisTaskItem(reading, readings.waitingFor) ?? []),
     ...readings.analysisOutcomes.filter((reading) => reading.recordedAt >= since && reading.classification !== 'cancelled').map(analysisOutcomeItem),
-    ...readings.reviewRuns.flatMap((reading) => reviewRunItem(reading) ?? []),
+    ...(readings.waitingTasks ?? []).map((reading) => waitingTaskItem(reading, readings.waitingFor)),
+    ...readings.reviewRuns.flatMap((reading) => reviewRunItem(reading, readings.waitingFor) ?? []),
     ...readings.reviewCompletions
       .filter((reading) => reading.state === 'settled' && (reading.lastEventAt ?? '') >= since)
       .map(reviewCompletionItem),
@@ -794,6 +898,7 @@ export function composeGlobalAttention(readings: GlobalAttentionReadings, now: D
     ...readings.libraryMaterials.map(libraryMaterialItem),
     ...readings.learningMaterials.map(learningMaterialsItem),
     ...(readings.materialIndexes ?? []).filter((reading) => reading.recordedAt >= since).map(materialIndexItem),
+    ...(readings.unconfirmed ?? []).map(unconfirmedItem),
   ];
   // One record is one item: a Review Run read both as a Book's latest and as a completion is listed once.
   const unique = Array.from(new Map(all.map((entry) => [`${entry.group}\n${entry.itemId}`, entry] as const)).values());
@@ -807,8 +912,9 @@ export function composeGlobalAttention(readings: GlobalAttentionReadings, now: D
     actionableCount: groups.filter((group) => GLOBAL_ATTENTION_COUNTED_GROUPS.includes(group.key)).reduce((sum, group) => sum + group.total, 0),
     // A Run holds a place of the governor's, or waits for one (Issue #49, S14), or a Review Run is being driven — between
     // two categories it holds none — or a Run waits to start once online, which a reader follows until it starts (Issue #502).
-    running: readings.busy || readings.reviewRuns.some((reading) => reading.state === 'running') ||
-      readings.analysisTasks.some((reading) => reading.run !== null && followedRun(reading.run)),
+    running: readings.busy || readings.reviewRuns.some((reading) => reading.state === 'running' || reading.state === 'waiting') ||
+      readings.analysisTasks.some((reading) => reading.run !== null && followedRun(reading.run)) ||
+      (readings.waitingTasks ?? []).some((reading) => reading.state === 'awaiting-connectivity'),
   };
 }
 
@@ -823,6 +929,8 @@ export interface BookTaskReadings {
   readonly bookId: string;
   readonly analysisTasks: ReadonlyArray<AnalysisTaskAttentionReading>;
   readonly analysisOutcomes: ReadonlyArray<AnalysisOutcomeAttentionReading>;
+  /** The Book's other ledger kinds' Runs waiting to start once online, or blocked because their plan moved (Issue #760). */
+  readonly waitingTasks?: ReadonlyArray<WaitingTaskAttentionReading>;
   readonly reviewRuns: ReadonlyArray<ReviewRunAttentionReading>;
   readonly reviewCompletions: ReadonlyArray<ReviewRunAttentionReading>;
   readonly waitingFor: WaitingFor;
@@ -971,8 +1079,9 @@ export function composeBookTasks(readings: BookTaskReadings): BookTasksProjectio
   // A selection Run's card carries the paragraphs it was started on, for 跳到所选文字 (Issue #423, S77 deferred item d).
   const onSelection = (reading: ReviewRunAttentionReading): Pick<BookTaskItemProjection, 'selection'> =>
     reading.selection === undefined ? {} : { selection: { manuscriptId: reading.selection.manuscriptId, fromBlockId: reading.selection.fromBlockId, toBlockId: reading.selection.toBlockId } };
+  for (const reading of own(readings.waitingTasks ?? [])) entries.push({ item: waitingTaskItem(reading, readings.waitingFor), result: null });
   for (const reading of own(readings.reviewRuns)) {
-    const built = reading.state === 'prepared' && reading.authorizedAt === null ? preparedReviewItem(reading) : reviewRunItem(reading);
+    const built = reading.state === 'prepared' && reading.authorizedAt === null ? preparedReviewItem(reading) : reviewRunItem(reading, readings.waitingFor);
     if (built !== null) entries.push({ item: built, result: null, ...onSelection(reading) });
   }
   for (const reading of own(readings.reviewCompletions).filter((reading) => reading.state === 'settled')) {
@@ -1000,7 +1109,8 @@ export function composeBookTasks(readings: BookTaskReadings): BookTasksProjectio
     bookId: readings.bookId,
     groups,
     running: own(readings.analysisTasks).some((reading) => reading.run !== null && followedRun(reading.run)) ||
-      own(readings.reviewRuns).some((reading) => reading.state === 'running') ||
+      own(readings.reviewRuns).some((reading) => reading.state === 'running' || reading.state === 'waiting') ||
+      own(readings.waitingTasks ?? []).some((reading) => reading.state === 'awaiting-connectivity') ||
       own(readings.dialogues ?? []).some((reading) => reading.state === 'answering'),
   };
 }
@@ -1008,7 +1118,7 @@ export function composeBookTasks(readings: BookTaskReadings): BookTasksProjectio
 /** The 任务 panel as the service answers it: what a waiting Run of the Book waits for is checked only while one waits. */
 export async function readBookTasks(
   store: {
-    waitingBaselineAnalysisRuns(bookId: string | null): ReadonlyArray<unknown>;
+    waitingTaskRuns(bookId: string | null): ReadonlyArray<unknown>;
     inspectBookTasks(bookId: string, progress: ProgressReader, waitingFor: WaitingFor, dialogueLive?: (attemptId: string) => LiveAnswer | null): BookTasksProjection;
   },
   bookId: string,
@@ -1016,7 +1126,7 @@ export async function readBookTasks(
   read: () => Promise<WaitingFor>,
   dialogueLive: (attemptId: string) => LiveAnswer | null = () => null,
 ): Promise<BookTasksProjection> {
-  return store.inspectBookTasks(bookId, progress, await attentionWaitingFor(store.waitingBaselineAnalysisRuns(bookId).length > 0, read), dialogueLive);
+  return store.inspectBookTasks(bookId, progress, await attentionWaitingFor(store.waitingTaskRuns(bookId).length > 0, read), dialogueLive);
 }
 
 // ---- the import and recovery relations, read as they stand -----------------------------------------------
