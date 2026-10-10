@@ -130,8 +130,28 @@ function choice(name: string, value: string, label: string, checked: boolean, di
   return wrapper;
 }
 
-/** How long a card whose index waits or is being built waits before it is read again. */
+/** How long a card whose index waits or is being built waits before it is read again, at first. */
 const INDEX_POLL_MS = 1_000;
+/** The longest wait between two reads: a long build, or one a replacement holds back, is read no faster than this (#729). */
+const INDEX_POLL_MAX_MS = 8_000;
+
+/**
+ * The wait before the next read of the waiting cards (#729): back to the first second when a card's index moved, and twice
+ * the last wait otherwise, up to `INDEX_POLL_MAX_MS` — so a card waiting long is not read every second.
+ */
+export function nextIndexPollDelay(previous: number, moved: boolean): number {
+  return moved ? INDEX_POLL_MS : Math.min(previous * 2, INDEX_POLL_MAX_MS);
+}
+
+/**
+ * Whether a card now waits for its index that did not when the next read was set (#729; #751 review, P3-2): an arrival, or
+ * a page read. Such a card is read again after the first second, not after the longest wait.
+ */
+export function startsWaiting(waiting: ReadonlyArray<string>, polled: ReadonlySet<string>): boolean {
+  return waiting.some((materialId) => !polled.has(materialId));
+}
+
+const indexWaits = (material: LibraryMaterialProjection): boolean => material.index.state === 'queued' || material.index.state === 'indexing';
 
 export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { load(): Promise<void> } {
   const { root, api, setStatus, errorMessage, technicalDetails } = options;
@@ -153,8 +173,10 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
   let chooser: Chooser | null = null;
   /** A refusal, beside the item it concerns, or at the top for an arrival. */
   let refusal: { materialId: string | null; message: string } | null = null;
-  /** The next read of the cards whose index waits or is being built. */
+  /** The next read of the cards whose index waits or is being built, how long it waits, and the cards it was set for. */
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
+  let pollDelay = INDEX_POLL_MS;
+  let polled: ReadonlySet<string> = new Set();
 
   /** Every item on the page: the pinned one first, then the pages read, each once. */
   const shown = (): LibraryMaterialProjection[] =>
@@ -196,19 +218,28 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     }
     root.replaceChildren(...parts);
     if (focus !== null) root.querySelector<HTMLElement>(focus)?.focus();
+    // A card that newly waits — an arrival, or a page read — is read again after the first second, not the longest wait.
+    const waiting = shown().filter(indexWaits).map((material) => material.materialId);
+    if (startsWaiting(waiting, polled)) {
+      if (pollTimer !== null) clearTimeout(pollTimer);
+      pollTimer = null;
+      pollDelay = INDEX_POLL_MS;
+    }
+    polled = new Set(waiting);
     schedulePoll();
   };
 
   /** The indexes still waiting or being built, read again card by card until each is built; nothing else is repainted. */
   const schedulePoll = (): void => {
-    if (pollTimer !== null || !shown().some((material) => material.index.state === 'queued' || material.index.state === 'indexing')) return;
-    pollTimer = setTimeout(() => void poll(), INDEX_POLL_MS);
+    if (pollTimer !== null || !shown().some(indexWaits)) return;
+    pollTimer = setTimeout(() => void poll(), pollDelay);
   };
 
   const poll = async (): Promise<void> => {
     pollTimer = null;
     if (!root.isConnected) return;
-    for (const material of shown().filter((entry) => entry.index.state === 'queued' || entry.index.state === 'indexing')) {
+    let moved = false;
+    for (const material of shown().filter(indexWaits)) {
       let next: LibraryMaterialProjection;
       try {
         next = await api.inspectLibraryMaterial({ materialId: material.materialId });
@@ -218,12 +249,14 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       if (!root.isConnected) return;
       const now = shown().find((entry) => entry.materialId === next.materialId);
       if (now === undefined || (now.index.state === next.index.state && now.index.digest === next.index.digest)) continue;
+      moved = true;
       replace(next);
       // Only the index of the card whose index moved is drawn again: nothing the editor is in — a focused heading, an open
       // choice, a note being read — is touched.
       const section = root.querySelector<HTMLElement>(`article.library-material[data-material-id="${next.materialId}"] > section.material-index`);
       section?.replaceWith(indexSection(next));
     }
+    pollDelay = nextIndexPollDelay(pollDelay, moved);
     schedulePoll();
   };
 
