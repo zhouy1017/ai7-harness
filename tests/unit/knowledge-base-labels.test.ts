@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { nextIndexPollDelay, startsWaiting } from '../../src/renderer/library-materials.js';
 import {
   LIBRARY_EMPTY,
   LIBRARY_HOUSE_CONSEQUENCE,
@@ -267,6 +268,26 @@ describe('资料索引 in the editor\'s words (Issue #428, S80a; KB-009)', () =>
     const failed = { ...pdf, state: 'failed' as const, reason: 'over-bound' as const, layers: { ...pdf.layers, text: 'failed' as const } };
     expect(materialIndexStateLine(failed)).toBe('未能提取文字：超出本地读取边界（文件或其中的段落过大）');
     expect(materialIndexLayerLine({ ...failed, reason: 'original-changed' }, 'text')).toBe('未能提取：本机保存的原件与放入时的记录不一致');
+    // A file with no text at all says so, never that it could not be read (#725 review, P2-1; #729).
+    const empty = { ...failed, reason: 'empty' as const };
+    expect(materialIndexStateLine(empty)).toBe('未能提取文字：文件里没有可提取的文字');
+    expect(materialIndexLayerLine(empty, 'text')).toBe('未能提取：文件里没有可提取的文字');
+  });
+
+  it('reads a waiting card again after a second, then backs off to eight seconds while nothing moves (#729)', () => {
+    expect(nextIndexPollDelay(1_000, false)).toBe(2_000);
+    expect(nextIndexPollDelay(2_000, false)).toBe(4_000);
+    expect(nextIndexPollDelay(4_000, false)).toBe(8_000);
+    expect(nextIndexPollDelay(8_000, false)).toBe(8_000);
+    // A card whose index moved brings the next read back to the first second.
+    expect(nextIndexPollDelay(8_000, true)).toBe(1_000);
+  });
+
+  it('reads a card again after the first second when it newly waits, and keeps the wait for cards already waiting (#729)', () => {
+    expect(startsWaiting(['a'], new Set())).toBe(true);
+    expect(startsWaiting(['a', 'b'], new Set(['a']))).toBe(true);
+    expect(startsWaiting(['a'], new Set(['a', 'b']))).toBe(false);
+    expect(startsWaiting([], new Set(['a']))).toBe(false);
   });
 
   it('names a sentence by its position anchor, a page of segments by its range, and 索引完成 by how it went', () => {

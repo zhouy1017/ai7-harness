@@ -160,7 +160,7 @@ function requireNothingRunning(
   // A dialogue answering writes its outcome when it settles (Issue #52, S17a), so it holds a replacement back as a Run does.
   const blocked = replacementBlockedBy({
     runsIdle: analysisExecution.idle && !dialogues.answering, reviewRunsDriving: reviewRuns.driving, jobsBusy: jobs.busy,
-    exportRunning: store.databaseExportRunning(), backgroundBusy: background.busy,
+    exportRunning: store.databaseExportRunning(), backgroundBusy: background.busy, indexing: store.materialIndexing(),
   });
   if (blocked !== null) throw new StoreErrorClass('DATABASE_REPLACEMENT_BUSY', blocked);
 }
@@ -1746,10 +1746,9 @@ async function run(): Promise<void> {
     // 定期自动备份 (Issue #434, S86b): asked at start, then hourly while the service runs; a backup is made only when one is due.
     void openStore.runScheduledBackupIfDue().catch(() => undefined);
     // 资料索引 (Issue #428, S80a): every 资料库 item still without its Material Index is built now, in the background, one at a
-    // time — an item from before this revision, a merged Book's, or one a closing service stopped.
-    if (!openStore.replacementFrozen()) {
-      try { openStore.startMaterialIndexing(); } catch { /* the next open tries again */ }
-    }
+    // time — an item from before this revision, a merged Book's, or one a closing service stopped. While a replacement is
+    // prepared or waits it builds nothing; 取消替换 starts what was held back (#729).
+    try { openStore.startMaterialIndexing(); } catch { /* the next open tries again */ }
     backupTimer = setInterval(() => void openStore.runScheduledBackupIfDue().catch(() => undefined), BACKUP_CHECK_INTERVAL_MS);
     backupTimer.unref();
     // 后台分析登记 (Issue #95, S39; ADR 0048): the one standing origin of a Run AI7 starts by itself. It looks once the service

@@ -19,10 +19,10 @@ const TAKEN_WHILE_WAITING: ReadonlySet<string> = new Set([
 export const REPLACEMENT_WAITING_MESSAGE = '本机数据正在等 AI7 重新启动后被替换；在此之前不能再做修改。要继续修改，请先取消替换。';
 
 /**
- * What else would write while a replacement is prepared: the Runs, the Review Runs, the jobs and a database export. The
- * Material Index builder (Issue #428, S80a) is not named here: its two relations are `derived`, and the store checks the freeze
- * again after each extraction and before its one write, so a replacement prepared while an original is being read leaves that
- * build for the next start (`tests/service/material-index.test.ts`). Naming it here is #428's follow-up (#725 review, P3-3).
+ * What else would write while a replacement is prepared: the Runs, the Review Runs, the jobs, a database export, a
+ * 后台分析登记 pass and the Material Index builder. The builder (Issue #428, S80a; #729) is named as #713's pass is; the store
+ * still checks the freeze again after each extraction and before its one write, as defence in depth for a replacement the
+ * store is asked for directly, so a build under way then is left for the next start (`tests/service/material-index.test.ts`).
  */
 export interface RunningWork {
   /** No Run executes, waits for a place, or waits to finish its cancellation. */
@@ -32,6 +32,8 @@ export interface RunningWork {
   readonly exportRunning: boolean;
   /** A 后台分析登记 pass is under way (Issue #95, S39; #713 review, P2-3): it could still write a Task, a plan and a Run. */
   readonly backgroundBusy: boolean;
+  /** 资料索引 is being built, or items wait for it (Issue #428, S80a; #729): a build writes when its original has been read. */
+  readonly indexing: boolean;
 }
 
 /**
@@ -39,7 +41,7 @@ export interface RunningWork {
  * running wrote after the backup would be lost with the data the replacement replaces.
  */
 export function replacementBlockedBy(work: RunningWork): string | null {
-  return !work.runsIdle || work.reviewRunsDriving || work.jobsBusy || work.exportRunning || work.backgroundBusy
+  return !work.runsIdle || work.reviewRunsDriving || work.jobsBusy || work.exportRunning || work.backgroundBusy || work.indexing
     ? '还有任务或处理在进行；请等它们结束，或先暂停或取消，再替换本机数据。'
     : null;
 }

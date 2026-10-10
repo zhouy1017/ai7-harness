@@ -572,6 +572,7 @@ import {
   MaterialIndexLedger,
   extractMaterialText,
   initializeMaterialIndexSchema,
+  prepareMaterialIndexInSlices,
   sweepMaterialIndexWork,
   type MaterialReferenceBoundary,
   type MaterialReferencePin,
@@ -7839,7 +7840,26 @@ export class EditorialStore {
   startMaterialIndexing(): void {
     if (this.#indexStopped) return;
     this.#indexEnabled = true;
+    // A replacement prepared or waiting holds every build back: 取消替换, or a preparation that failed, starts them (#729).
+    if (this.replacementFrozen()) return;
     this.#scheduleMaterialIndex(this.#libraryCall(() => this.#materialIndex.unindexed()));
+  }
+
+  /**
+   * Whether the Material Index builder could still write (#729): a build under way or items waiting for one. A replacement
+   * is not prepared meanwhile (`replacementBlockedBy`), as it is not while a Run or a 后台分析登记 pass is under way.
+   */
+  materialIndexing(): boolean {
+    return this.#indexRun !== null;
+  }
+
+  /**
+   * The builds a freeze held back, queued again once it lifts (#729): after 取消替换, or a preparation that did not end in a
+   * replacement waiting. Only for a store that serves; never a reason for the call that lifted the freeze to fail.
+   */
+  #resumeMaterialIndexing(): void {
+    if (!this.#indexEnabled) return;
+    try { this.startMaterialIndexing(); } catch { /* the next open builds what is still missing */ }
   }
 
   /** Resolves once the queue is empty: for a caller that must see the index built. */
@@ -7884,15 +7904,17 @@ export class EditorialStore {
           dataRoot: this.#dataRoot,
           signal: controller.signal,
         });
+        // The segments are prepared a slice at a time, the service taking its other work between slices (#729); the freeze is
+        // checked again after the last await, right before the one write.
+        const prepared = await prepareMaterialIndexInSlices(extraction, controller.signal);
         if (this.#indexStopped || this.#poisoned || this.replacementFrozen()) continue;
         this.#transaction(this.#authority, () => {
           if (this.#materialIndex.current(materialId) !== null) return;
-          this.#materialIndex.record({ materialId, sha256: original.sha256, format: original.source.format }, extraction);
+          this.#materialIndex.record({ materialId, sha256: original.sha256, format: original.source.format }, prepared);
         });
-      } catch (error) {
+      } catch {
         // Stopped, refused, or its item changed meanwhile: nothing is recorded, and the next open tries again. A rollback that
-        // itself failed leaves the store unable to write, as every other write path treats it.
-        if (error instanceof AggregateError) this.#poisoned = true;
+        // itself failed has already left the store unable to write: `#transaction` poisons it and throws `StoreFatalError`.
       } finally {
         this.#indexing = null;
         this.#indexController = null;
@@ -15947,8 +15969,12 @@ export class EditorialStore {
    * starting until it is written.
    */
   async prepareDatabaseReplacement(previewId: string, now: Date = new Date()): Promise<DatabaseReplacementsProjection> {
-    return this.#databaseReplacementCall(() =>
-      this.#databaseReplacements.freezing(() => this.#scheduledBackups.alone(() => this.#databaseReplacements.prepare(previewId, now))));
+    try {
+      return await this.#databaseReplacementCall(() =>
+        this.#databaseReplacements.freezing(() => this.#scheduledBackups.alone(() => this.#databaseReplacements.prepare(previewId, now))));
+    } finally {
+      this.#resumeMaterialIndexing();
+    }
   }
 
   /**
@@ -15969,7 +15995,10 @@ export class EditorialStore {
 
   /** `取消替换`: the replacement waiting is removed and the data stays as it is. */
   async cancelDatabaseReplacement(replacementId: string): Promise<DatabaseReplacementsProjection> {
-    return this.#databaseReplacementCall(() => this.#databaseReplacements.cancel(replacementId));
+    const cancelled = await this.#databaseReplacementCall(() => this.#databaseReplacements.cancel(replacementId));
+    // What the replacement held back is built now, in this same lifetime, and every later arrival as it arrives (#729).
+    this.#resumeMaterialIndexing();
+    return cancelled;
   }
 
   /** The replacement waiting, if any, and the replacements this data records. A read. */
@@ -15979,8 +16008,12 @@ export class EditorialStore {
 
   /** `回退到替换前的数据`: the latest replacement's backup waiting to replace the data, which is backed up first, alone too. */
   async rollBackDatabaseReplacement(replacementId: string, now: Date = new Date()): Promise<DatabaseReplacementsProjection> {
-    return this.#databaseReplacementCall(() =>
-      this.#databaseReplacements.freezing(() => this.#scheduledBackups.alone(() => this.#databaseReplacements.rollBack(replacementId, now))));
+    try {
+      return await this.#databaseReplacementCall(() =>
+        this.#databaseReplacements.freezing(() => this.#scheduledBackups.alone(() => this.#databaseReplacements.rollBack(replacementId, now))));
+    } finally {
+      this.#resumeMaterialIndexing();
+    }
   }
 
   /**

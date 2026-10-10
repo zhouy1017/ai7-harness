@@ -710,4 +710,38 @@ describe('替换本机全部数据 at its second review (Issue #434 review)', ()
       store.close();
     }
   }, 180_000);
+
+  it("refuses a replacement record that names a merge's own failure: only a merge records one (Issue #644)", async () => {
+    const created = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      created.markCleanShutdown();
+    } finally {
+      created.close();
+    }
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      const at = T.toISOString();
+      const stored = {
+        replacementId: '00000000-0000-4000-8000-000000000644', kind: 'replace', outcome: 'failed',
+        packageFileName: 'AI7 数据库.ai7db', packageSha256: 'a'.repeat(64), backupFileName: 'AI7 替换前备份.ai7db',
+        backupSha256: 'b'.repeat(64), preparedAt: at, recordedAt: at, failure: 'unmergeable',
+      };
+      const record = canonicalRecord({ schema: 'ai7.database-replacement/1', ...stored });
+      database.prepare(
+        `INSERT INTO database_replacements(replacement_id, kind, outcome, package_file_name, package_sha256, backup_file_name, backup_sha256, prepared_at, recorded_at, canonical_json, sha256)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(stored.replacementId, stored.kind, stored.outcome, stored.packageFileName, stored.packageSha256, stored.backupFileName,
+        stored.backupSha256, stored.preparedAt, stored.recordedAt, record.json, record.digest);
+    } finally {
+      database.close();
+    }
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const refused = await store.inspectDatabaseReplacements().catch((error: unknown) => error);
+      expect((refused as { code?: string }).code).toBe('DATABASE_REPLACEMENT_RECORD_INVALID');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 180_000);
 });
