@@ -5595,8 +5595,14 @@ export class EditorialStore {
       }
     };
     ofLedger('baseline-analysis', this.#baselineAnalysis);
-    ofLedger('initial-evaluation', this.#initialEvaluation);
-    for (const kind of ['readers-report', 'evaluation-rewrite', 'writing'] as const) ofLedger(kind, this.#anyLedgerOfKind(kind));
+    // A kind whose records no longer read is said where its own surface reads it: it never keeps another kind's Run waiting.
+    for (const kind of ['initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing'] as const) {
+      try {
+        ofLedger(kind, kind === 'initial-evaluation' ? this.#initialEvaluation : this.#anyLedgerOfKind(kind));
+      } catch (error) {
+        if (!(error instanceof StoreError)) throw error;
+      }
+    }
     for (const run of this.#reviewCall(() => this.#reviewRuns.waitingRuns())) {
       runs.push({ kind: 'review-run', bookId: run.bookId, ref: run.reviewRunId, runRecordId: run.reviewRunId, at: run.authorizedAt });
     }
@@ -5734,12 +5740,16 @@ export class EditorialStore {
    */
   #waitingTaskAttention(bookId: string | null, limit: number): WaitingTaskAttentionReading[] {
     const readings: WaitingTaskAttentionReading[] = [];
-    const add = (kind: LedgerTaskKind, ledger: BaselineAnalysisStore | null): void => {
-      if (ledger === null) return;
-      for (const reading of this.#analysisCall(() => ledger.waitingAttentionReadings(bookId, limit))) readings.push({ kind, ...reading });
-    };
-    add('initial-evaluation', this.#initialEvaluation);
-    for (const kind of ['readers-report', 'evaluation-rewrite', 'writing'] as const) add(kind, this.#anyLedgerOfKind(kind));
+    // A kind whose records no longer read is said where its own surface reads it, never by taking 待我处理 down with it.
+    for (const kind of ['initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing'] as const) {
+      try {
+        const ledger = kind === 'initial-evaluation' ? this.#initialEvaluation : this.#anyLedgerOfKind(kind);
+        if (ledger === null) continue;
+        for (const reading of this.#analysisCall(() => ledger.waitingAttentionReadings(bookId, limit))) readings.push({ kind, ...reading });
+      } catch (error) {
+        if (!(error instanceof StoreError)) throw error;
+      }
+    }
     return readings;
   }
 
