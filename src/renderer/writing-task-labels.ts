@@ -1,4 +1,4 @@
-import type { WritingTaskProjection } from '../shared/protocol.js';
+import type { WritingTaskMaterialProjection, WritingTaskProjection } from '../shared/protocol.js';
 
 /**
  * The words of 新建文档 · 写作任务 on ⑥ 交付物 (Issue #432, plan slice S84a; editor-surfaces §9; V2-UX-DELIV-007, KB-004).
@@ -9,8 +9,19 @@ export const WRITING_HEADING = '新建文档 · 写作任务';
 export const WRITING_LEDE = '选一类文档，AI7 参考下面列出的材料起草。打开草稿后，它就是这本书的这一类文档，处于「起草」阶段，在稿件编辑面上修改。范例只参照，不复制。';
 export const WRITING_TYPE_LEGEND = '文档类型（单选）';
 export const WRITING_REFERENCE_HEADING = 'AI7 会参考';
-/** The reference set's rows, in the order editor-surfaces §9 names them. */
-export const WRITING_REFERENCE_TERMS = ['梗概与人物', '评估结论与营销要点', '范例', '图书信息'] as const;
+/**
+ * The reference set's rows, in the order editor-surfaces §9 names them, with 资料库 — the items the editor ticks under 允许参考
+ * (Issue #428; TASK-030) — after the 范例.
+ */
+export const WRITING_REFERENCE_TERMS = ['梗概与人物', '评估结论与营销要点', '范例', '资料库', '图书信息'] as const;
+/** One 资料库 item as its box reads: its title, its size as its card states it, and whose it is. */
+export function writingMaterialLabel(item: Pick<WritingTaskMaterialProjection, 'title' | 'characters' | 'scope'>): string {
+  return `《${item.title}》 · 已提取 ${item.characters.toLocaleString('en-US')} 字 · ${item.scope === 'book' ? '本书资料' : '社级资料'}`;
+}
+/** The items the row did not list. */
+export function writingMaterialsMore(count: number): string {
+  return `另有 ${count} 份资料没有列出：这里只列最近收进的几份。`;
+}
 export const WRITING_EXEMPLAR_PICK_TYPE = '选好类型后显示';
 import { MAX_WRITING_AUDIENCE_GRAPHEMES, MAX_WRITING_CHANNEL_GRAPHEMES, MAX_WRITING_REQUIREMENTS_GRAPHEMES } from '../shared/protocol.js';
 

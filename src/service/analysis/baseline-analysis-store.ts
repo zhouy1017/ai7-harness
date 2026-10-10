@@ -477,6 +477,12 @@ export type BaselineAnalysisPrepareInput =
      * under way or the editor's own Task is prepared and not started; its checkpoint gives way to any other the Book asks for.
      */
     background?: { enrollmentVersionId: string };
+    /**
+     * A new Task Intent even where the latest prepared one would be revised in place (Issue #428): 写作任务's preparation when
+     * the 资料库 builds it pins differ from the ones the prepared Task froze. Its contract holds words only, so the same words
+     * at another build are the same contract, and only a Task of its own can freeze the new pins.
+     */
+    newTask?: boolean;
   }
   | { phase: 'advance'; workId: string }
   | { phase: 'cancel'; workId: string }
@@ -2874,7 +2880,7 @@ export class BaselineAnalysisStore {
     const planDerives = existing.coverageManifest === null || existing.authorization !== null || this.#frozenPlanDerives(existing.update, existing.coverageManifest);
     // A Task the 后台分析登记 dispatcher prepared is never the editor's to revise or resume, and the dispatcher never takes up any
     // Task Intent but the one it creates now (#713 review, P1-2): each side's preparation is a Task of its own.
-    const sameTask = background === null && latestIntent !== null && latestIntent.preparedByEnrollmentVersionId === null &&
+    const sameTask = background === null && input.newTask !== true && latestIntent !== null && latestIntent.preparedByEnrollmentVersionId === null &&
       existing.run === null && latestIntent.mode === mode &&
       latestIntent.predecessorRevisionId === (latest?.revisionId ?? null) && (input.reconfirm || checkpointCurrent) && contractCurrent && planDerives;
     if (sameTask && existing.checkpoint !== null) {

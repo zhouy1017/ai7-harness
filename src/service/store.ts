@@ -299,8 +299,13 @@ import {
   MAX_WRITING_AUDIENCE_GRAPHEMES,
   MAX_WRITING_CHANNEL_GRAPHEMES,
   MAX_WRITING_REQUIREMENTS_GRAPHEMES,
+  MAX_WRITING_MATERIALS,
+  MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES,
+  MAX_WRITING_MATERIAL_GRAPHEMES,
+  MAX_WRITING_MATERIAL_OFFERS,
   WRITING_KIND,
   WRITING_LIVE_UNAVAILABLE,
+  WRITING_MATERIAL_LIVE_UNAVAILABLE,
   WRITING_MODE_GOALS,
 } from '../shared/protocol.js';
 import { INITIAL_EVALUATION_LIVE_UNAVAILABLE, initialEvaluationKindDefinition } from './evaluation/initial-evaluation-kind.js';
@@ -348,9 +353,19 @@ import {
   WRITING_NEEDS_MANUSCRIPT,
   WRITING_NOT_DO,
   WRITING_SEND_CONSEQUENCE,
+  WRITING_MATERIALS_NONE,
+  WRITING_MATERIALS_STATEMENT,
+  WRITING_MATERIALS_TOO_MANY,
+  WRITING_QUICK_START_MATERIALS,
+  WRITING_RULE_MATERIALS,
   WritingTaskError,
   WritingTasks,
   graphemeLength,
+  writingMaterialDigest,
+  writingMaterialOverBound,
+  writingMaterialOverBoundNamed,
+  writingMaterialParagraph,
+  writingMaterialsOverTotal,
   readWritingExemplarWords,
   writingExemplarDigest,
   initializeWritingTaskSchema,
@@ -361,6 +376,8 @@ import {
   writingWords,
   type StoredWritingTask,
   type WritingExemplarSource,
+  type WritingMaterialReading,
+  type WritingMaterialSource,
 } from './writing-tasks.js';
 import { writingKindDefinition, writingRecordedKindDefinition } from './writing/writing-kind.js';
 import {
@@ -371,6 +388,7 @@ import {
   type WritingContractInput,
   type WritingEvaluationInput,
   type WritingExemplarInput,
+  type WritingMaterialInput,
   type WritingSynopsisInput,
 } from './writing/writing-contract.js';
 import {
@@ -4368,7 +4386,8 @@ export class EditorialStore {
     });
     this.#readersReports = new ReadersReports(authority);
     this.#evaluationRewrites = new EvaluationRewrites(authority);
-    this.#writingTasks = new WritingTasks(authority);
+    // A writing Task's 资料库 items are read through the Material Index's Task seam alone, at the builds its plan pinned (Issue #428).
+    this.#writingTasks = new WritingTasks(authority, (bookId, source) => this.#readWritingMaterial(bookId, source));
     this.#evaluations = new EvaluationRecords(authority, { current: (bookId) => this.#evaluationManuscript(bookId) }, {
       latest: (bookId) => this.#initialEvaluationFacts(bookId),
       task: (bookId) => this.#initialEvaluationTask(bookId),
@@ -5164,6 +5183,7 @@ export class EditorialStore {
       const defaultRule = this.#writingDefaultRule(projection, latest.task);
       const plan = this.#taskPlanCall(() => writingPlan({
         projection, bookTitle, blocks, input: latest.task.input, exemplarsHere: latest.task.exemplarsReadable, copyRules: latest.task.copyRules, defaultRule,
+        materials: latest.task.materials,
       }));
       return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
@@ -7946,7 +7966,7 @@ export class EditorialStore {
 
   /**
    * What a Task's plan freezes when it lists a 资料库 item under 允许参考 (KB-002, KB-007): the item and its exact index version,
-   * only for an item this Book's Tasks may list and whose text was read. Service-internal: no Task kind lists one yet.
+   * only for an item this Book's Tasks may list and whose text was read. 写作任务 pins each item it lists (Issue #428).
    */
   pinMaterialReference(bookId: string, materialId: string): MaterialReferencePin {
     return this.#materialIndexCall(() =>
@@ -7956,7 +7976,7 @@ export class EditorialStore {
   /**
    * A Task's read of the Material Index (KB-009): read-only, within its plan boundary — the items its plan lists at the index
    * versions it pinned, which this Book's Tasks may still list. Nothing is written, sent or scheduled by it; what the Task
-   * sends of what it read stays bounded by the plan's 发送 line. Service-internal: no Task kind lists 资料库 items yet.
+   * sends of what it read stays bounded by the plan's 发送 line. 写作任务 reads each item it lists through it (Issue #428).
    */
   readMaterialIndexForTask(boundary: MaterialReferenceBoundary, materialId: string, from: number): MaterialTaskReading {
     return this.#materialIndexCall(() => {
@@ -8489,9 +8509,12 @@ export class EditorialStore {
    */
   #writingLedgerOf(task: StoredWritingTask): BaselineAnalysisStore {
     // A Task recorded under `/1` is run and judged under `/1` (#704 P2-2).
-    if (task.exemplarsReadable) return this.#writingLedger(task.input, task.copyRules);
-    const definition = this.#analysisCall(() => writingRecordedKindDefinition(task.input, task.promptContractSha256, task.copyRules));
-    return this.#writingLedgers.obtain(`${task.promptContractSha256}:recorded`, () => {
+    const material = task.materials.find((entry) => entry.refusal !== null)?.refusal ?? null;
+    if (task.exemplarsReadable && material === null) return this.#writingLedger(task.input, task.copyRules);
+    // …and one whose 资料库 item no longer reads at its pinned build refuses as one whose 范例 is gone does (Issue #428).
+    const moved = task.exemplarsReadable && material !== null ? material : { code: 'WRITING_EXEMPLAR_MOVED', message: WRITING_EXEMPLAR_MOVED };
+    const definition = this.#analysisCall(() => writingRecordedKindDefinition(task.input, task.promptContractSha256, task.copyRules, moved));
+    return this.#writingLedgers.obtain(`${task.promptContractSha256}:recorded:${moved.code}`, () => {
       const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
       ledger.bindLaunch(this.#baselineAnalysis.launch);
       return ledger;
@@ -8547,6 +8570,107 @@ export class EditorialStore {
   #requireWritingScope(): void {
     this.#assertAvailable();
     if (this.#baselineAnalysis.launch.live !== null) throw new StoreError('WRITING_UNAVAILABLE', WRITING_LIVE_UNAVAILABLE);
+  }
+
+  /**
+   * A 资料库 item under a live scope (Issue #428): the item is the editor's own material, and no Provider Processing policy admits
+   * it — developer-live transmits only the Owner-designated Public SampleBooks — so a plan that lists one is refused there in
+   * its own words, before the writing kind's.
+   */
+  #requireWritingMaterialScope(listsMaterials: boolean): void {
+    this.#assertAvailable();
+    if (listsMaterials && this.#baselineAnalysis.launch.live !== null) throw new StoreError('WRITING_UNAVAILABLE', WRITING_MATERIAL_LIVE_UNAVAILABLE);
+  }
+
+  /**
+   * One pinned 资料库 item read whole through the Material Index's Task seam (`readMaterialIndexForTask`, KB-009; Issue #428):
+   * under a boundary of this Book that lists it at the build its plan pinned, a page at a time, each paragraph's text as the
+   * index extracted it. Read-only: nothing is written, sent or scheduled by it. A refusal of the seam — the build gone, the item
+   * no longer one this Book's Tasks may list, the item gone — is returned in its code, never read around.
+   */
+  #readWritingMaterial(bookId: string, source: Pick<WritingMaterialSource, 'materialId' | 'indexDigest'>): WritingMaterialReading {
+    const boundary = { bookId, references: [{ materialId: source.materialId, indexDigest: source.indexDigest }] };
+    const paragraphs: string[] = [];
+    try {
+      for (let from: number | null = 1; from !== null;) {
+        const page = this.readMaterialIndexForTask(boundary, source.materialId, from);
+        for (const segment of page.segments) paragraphs.push(segment.text);
+        from = page.next;
+      }
+    } catch (error) {
+      if (error instanceof StoreError && /^(?:MATERIAL_|LIBRARY_MATERIAL_)/u.test(error.code)) return { refusal: { code: error.code, message: error.message } };
+      throw error;
+    }
+    return { paragraphs };
+  }
+
+  /**
+   * 允许参考's 资料库 items of a writing Task being prepared (Issue #428; TASK-030, TASK-032, KB-007): each pinned at its current
+   * build by `pinMaterialReference` — only an item this Book's Tasks may list whose text was read — then read whole through the
+   * Task seam at that pin, within the bounds or refused with words: at most {@link MAX_WRITING_MATERIALS}, each within
+   * {@link MAX_WRITING_MATERIAL_GRAPHEMES} characters as its index extracted them, all within
+   * {@link MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES}. Nothing is cut.
+   */
+  #writingMaterials(bookId: string, materialIds: ReadonlyArray<string>): Array<{ input: WritingMaterialInput; source: WritingMaterialSource }> {
+    requireStore(materialIds.length <= MAX_WRITING_MATERIALS, 'WRITING_MATERIALS_INVALID', WRITING_MATERIALS_TOO_MANY);
+    let total = 0;
+    const found = materialIds.map((materialId) => {
+      const original = this.#libraryCall(() => this.#libraryMaterials.original(materialId));
+      const title = writingWords(original.title, 200);
+      let pin: MaterialReferencePin;
+      try {
+        pin = this.pinMaterialReference(bookId, materialId);
+      } catch (error) {
+        if (error instanceof StoreError) throw new StoreError(error.code, `资料《${title}》：${error.message}`);
+        throw error;
+      }
+      const build = this.#materialIndexCall(() => this.#materialIndex.current(materialId));
+      requireStore(build !== null && build.sha256 === pin.indexDigest, 'MATERIAL_INDEX_MOVED', `资料《${title}》：计划冻结的这份资料的索引版本已不在本机。`);
+      const characters = build.metadata.characters;
+      requireStore(characters <= MAX_WRITING_MATERIAL_GRAPHEMES, 'WRITING_MATERIAL_OVER_BOUND', writingMaterialOverBoundNamed(title, characters));
+      total += characters;
+      return { materialId, title, pin, characters };
+    });
+    requireStore(total <= MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES, 'WRITING_MATERIAL_OVER_BOUND', writingMaterialsOverTotal(total));
+    return found.map(({ materialId, title, pin, characters }) => {
+      const read = this.#readWritingMaterial(bookId, pin);
+      if ('refusal' in read) throw new StoreError(read.refusal.code, `资料《${title}》：${read.refusal.message}`);
+      const paragraphs = read.paragraphs.map(writingMaterialParagraph).filter((paragraph) => paragraph.length > 0);
+      requireStore(paragraphs.length > 0, 'MATERIAL_INDEX_NO_TEXT', `资料《${title}》：这份资料没有提取出可分段的文字。`);
+      return {
+        input: { title, paragraphs },
+        source: { materialId, indexDigest: pin.indexDigest, title, characters, sha256: writingMaterialDigest(paragraphs) },
+      };
+    });
+  }
+
+  /**
+   * 新建文档 · 写作任务's 资料库 row (Issue #428): every item this Book's Tasks may list under 允许参考 whose index extracted text,
+   * the latest arrival first and at most {@link MAX_WRITING_MATERIAL_OFFERS} of them, each with whether it may be ticked — an
+   * item longer than one may be is shown, disabled, with why — and under a live scope none, with why.
+   */
+  #writingMaterialOffer(bookId: string): WritingTaskProjection['references']['materials'] {
+    const live = this.#baselineAnalysis.launch.live !== null;
+    const indexed: Array<{ materialId: string; title: string; scope: 'book' | 'house'; characters: number }> = [];
+    try {
+      for (const entry of this.#libraryCall(() => this.#libraryMaterials.referable(bookId))) {
+        const build = this.#materialIndexCall(() => this.#materialIndex.current(entry.materialId));
+        if (build === null || build.state !== 'complete') continue;
+        indexed.push({ ...entry, characters: build.metadata.characters });
+      }
+    } catch (error) {
+      if (!(error instanceof StoreError)) throw error;
+      return { statement: `资料库暂不可用：${error.message}`, items: [], more: 0 };
+    }
+    const shown = indexed.slice(0, MAX_WRITING_MATERIAL_OFFERS);
+    return {
+      statement: live ? WRITING_MATERIAL_LIVE_UNAVAILABLE : indexed.length === 0 ? WRITING_MATERIALS_NONE : WRITING_MATERIALS_STATEMENT,
+      items: shown.map((item) => {
+        const reason = live ? WRITING_MATERIAL_LIVE_UNAVAILABLE : item.characters > MAX_WRITING_MATERIAL_GRAPHEMES ? writingMaterialOverBound(item.characters) : null;
+        return { materialId: item.materialId, title: item.title, characters: item.characters, scope: item.scope, selectable: reason === null, reason };
+      }),
+      more: indexed.length - shown.length,
+    };
   }
 
   /** The Book's metadata as a draft may state it: its title, its people as they read now, and its 书系. */
@@ -8673,9 +8797,14 @@ export class EditorialStore {
    */
   createWritingPreparationWork(
     bookId: string,
-    request: { typeId: string; audience: string; channel: string; requirements: string | null },
+    request: { typeId: string; audience: string; channel: string; requirements: string | null; materialIds?: ReadonlyArray<string> },
     launchPolicy: LaunchPolicyProjection,
   ): AnalysisPreparationResult<WritingProjection> {
+    // 允许参考's 资料库 items the editor ticked (Issue #428): each once, by identity.
+    const materialIds = request.materialIds ?? [];
+    requireStore(Array.isArray(materialIds) && materialIds.every((id) => typeof id === 'string' && UUID_PATTERN.test(id)) &&
+      new Set(materialIds).size === materialIds.length, 'WRITING_INVALID', '写作任务参数无效。');
+    this.#requireWritingMaterialScope(materialIds.length > 0);
     this.#requireWritingScope();
     requireStore(UUID_PATTERN.test(bookId), 'WRITING_INVALID', '写作任务参数无效。');
     const type = productionDocumentType(request.typeId);
@@ -8696,6 +8825,7 @@ export class EditorialStore {
     const synopsis = this.#writingSynopsis(bookId);
     const evaluation = this.#writingEvaluation(bookId);
     const exemplars = this.#writingExemplars(bookId, type.typeId);
+    const materials = this.#writingMaterials(bookId, materialIds);
     const input: WritingContractInput = {
       type: { typeId: type.typeId, label: type.label },
       book: this.#writingBook(bookId),
@@ -8705,11 +8835,18 @@ export class EditorialStore {
       synopsis: synopsis?.input ?? null,
       evaluation: evaluation?.input ?? null,
       exemplars: exemplars.map((exemplar) => exemplar.input),
+      // A Task that lists 资料库 items is `/3`; one that lists none has no `materials` at all and stays `/2` (Issue #428).
+      ...(materials.length === 0 ? {} : { materials: materials.map((material) => material.input) }),
     };
     // `/2` for every Task prepared by the product; the suites may prepare one under `/1`, as software before #698 did (#707).
     const copyRules = this.#control.writingCopyRules ?? WRITING_COPY_RULES;
     const ledger = this.#writingLedger(input, copyRules);
     const mode = latest === null || latest.projection.resultSetRevision === null ? 'writing-first' : 'writing-again';
+    // The pins are no words of the contract (Issue #428): a prepared Task that froze other builds of the items — one whose build is
+    // gone, say — is never revised in place to these, since its row would keep its own; 改计划重做 makes a Task of its own.
+    const pins = (list: ReadonlyArray<Pick<WritingMaterialSource, 'materialId' | 'indexDigest'>>): string =>
+      list.map((source) => `${source.materialId}:${source.indexDigest}`).join(',');
+    const newTask = latest !== null && pins(latest.task.materials.map((material) => material.source)) !== pins(materials.map((material) => material.source));
     const result = this.#analysisCall(() => ledger.prepare({
       phase: 'start',
       bookId,
@@ -8717,6 +8854,7 @@ export class EditorialStore {
       update: mode === 'writing-first' ? null : { mode, selectedRange: null },
       reconfirm: false,
       launchPolicy,
+      ...(newTask ? { newTask } : {}),
     }));
     // Which type, words and reference set the Task drafts from, recorded once for it and this contract.
     const taskIntentId = this.#writingCall(() => this.#writingTasks.latestTaskIntentId(bookId));
@@ -8727,6 +8865,7 @@ export class EditorialStore {
       evaluationRecordId: evaluation?.recordId ?? null,
       baselineRevisionId: synopsis?.revisionId ?? null,
       exemplarSources: exemplars.map((exemplar) => exemplar.source),
+      materialSources: materials.map((material) => material.source),
       contract: input,
       promptContractSha256: ledger.definition.promptContractDigest,
       copyRules,
@@ -8761,12 +8900,22 @@ export class EditorialStore {
 
   /** 开始任务 in the drawer's bar: the Run Authorization and the Run on the ledger of the plan's contract, for the owner. */
   authorizeWriting(bookId: string, taskIntentId: string, planEnvelopeDigest: string): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore } {
+    this.#assertAvailable();
+    // A plan that lists 资料库 items is refused under a live scope in its own words (Issue #428), then every writing plan is.
+    if (this.#baselineAnalysis.launch.live !== null) {
+      const listed = this.#latestWriting(bookId);
+      this.#requireWritingMaterialScope(listed !== null && listed.task.taskIntentId === taskIntentId && listed.task.materials.length > 0);
+    }
     this.#requireWritingScope();
     const latest = this.#latestWriting(bookId);
     requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT',
       '这项任务已不是这本书当前的任务；请从它所在的位置重新打开计划。');
     // A Task whose exemplar no longer gives the text it pinned is never run on other words (#688 re-review).
     requireStore(latest.task.exemplarsReadable, 'WRITING_EXEMPLAR_MOVED', WRITING_EXEMPLAR_MOVED);
+    // …nor one whose 资料库 item no longer reads at the build its plan pinned (Issue #428): the Run is not started, and the words
+    // say 改计划重做 — a plan prepared again in 交付物 pins the item as it is now.
+    const moved = latest.task.materials.find((material) => material.refusal !== null)?.refusal ?? null;
+    if (moved !== null) throw new StoreError(moved.code, moved.message);
     const authorized = this.#analysisCall(() => latest.ledger.authorize(bookId, taskIntentId, planEnvelopeDigest));
     return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger: latest.ledger };
   }
@@ -8881,6 +9030,7 @@ export class EditorialStore {
           ? '本书尚无定稿的评估，本次不参考评估结论与营销要点'
           : `第 ${evaluation.ordinal} 版定稿评估的结论「${evaluation.input.conclusion}」、主要优点${evaluation.input.market === null ? '（这一版没有 AI7 初评的市场部分）' : '与营销要点（目标读者、差异化卖点、渠道与策略）'}`,
         book: `《${book.title}》 · 作者：${named(book.authors, '未填写')} · 责编：${named(book.editors, '未填写')} · 书系：${named(book.series, '不在任何书系中')}`,
+        materials: this.#writingMaterialOffer(bookId),
       },
       consequences: {
         read: blocks === 0 ? '这本书还没有稿件。' : `当前稿件的全部 ${blocks} 个内容块，以及上面列出的参考材料`,
@@ -8910,9 +9060,12 @@ export class EditorialStore {
         typeId: latest.task.typeId,
         typeLabel: latest.task.input.type.label,
         state: latest.projection.state,
-        label: writingTaskStateLabel(latest.projection, latest.task.exemplarsReadable),
-        // A Task not yet run whose exemplar is no longer here says it cannot start; one that ran says why it wrote no draft.
-        refusal: !latest.task.exemplarsReadable && latest.projection.taskOutcome === null ? WRITING_EXEMPLAR_MOVED : this.#writingRefusal(latest.projection),
+        label: writingTaskStateLabel(latest.projection, latest.task.exemplarsReadable, latest.task.materials),
+        // A Task not yet run whose exemplar — or 资料库 item's pinned build (Issue #428) — is no longer here says it cannot start;
+        // one that ran says why it wrote no draft.
+        refusal: latest.projection.taskOutcome !== null ? this.#writingRefusal(latest.projection)
+          : !latest.task.exemplarsReadable ? WRITING_EXEMPLAR_MOVED
+            : latest.task.materials.find((material) => material.refusal !== null)?.refusal?.message ?? this.#writingRefusal(latest.projection),
         planEnvelopeDigest: latest.projection.planEnvelope?.digest ?? null,
       },
     };
@@ -8933,8 +9086,10 @@ export class EditorialStore {
     if (projection.taskIntent === null || envelope === null || version === null) return noDefaultRule(QUICK_START_NOT_READY);
     const startedBy = this.#ruleStartedBy(projection.bookId, 'writing', projection.authorization, writingRulePattern(task.typeId));
     // A writing Task runs nowhere under a live scope (S84a), so no rule is set there, from whatever plan was frozen before.
+    // A rule binds no 资料库 item (Issue #428; TASK-023, TASK-026): a plan that lists one sets none.
     const kindReason = this.#baselineAnalysis.launch.live !== null ? SET_RULE_DEVELOPER_LIVE
-      : !task.exemplarsReadable && projection.authorization === null ? WRITING_EXEMPLAR_MOVED : null;
+      : !task.exemplarsReadable && projection.authorization === null ? WRITING_EXEMPLAR_MOVED
+        : task.materials.length > 0 ? WRITING_RULE_MATERIALS : null;
     return this.#ruleOffer(projection.bookId, writingRulePattern(task.typeId), { planEnvelope: envelope, planVersion: version, planRevision: projection.planRevision }, kindReason, startedBy);
   }
 
@@ -9055,6 +9210,8 @@ export class EditorialStore {
     if (rule === null || rule.version.ruleVersionId !== ruleVersionId) return fellBack(QUICK_START_RULE_CHANGED);
     if (this.#baselineAnalysis.launch.live !== null) return fellBack(QUICK_START_DEVELOPER_LIVE);
     if (!latest.task.exemplarsReadable) return fellBack(WRITING_EXEMPLAR_MOVED);
+    // A rule binds no 资料库 item, so a plan that lists one never starts under it (Issue #428; TASK-026: no widened source).
+    if (latest.task.materials.length > 0) return fellBack(WRITING_QUICK_START_MATERIALS);
     if (projection.planRevision !== null) return fellBack(QUICK_START_PLAN_CHANGED);
     const drift = defaultExecutionRuleDrift(rule.version.binding, version.materialInputs);
     if (drift.length > 0) return fellBack(ruleDriftReason(defaultExecutionRuleReference(rule, rule.version).name, drift));

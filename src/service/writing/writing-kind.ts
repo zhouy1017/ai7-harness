@@ -67,6 +67,8 @@ const NO_SAMPLE = '写作任务没有保证抽样阶段：草稿由编辑修改�
 const SYNTHESIS_LABEL = '全书综合' as const;
 /** The reading of a draft refused for copying an exemplar: it parsed, and it was turned away. */
 export const WRITING_EXEMPLAR_REFUSAL_PREFIX = '全书综合写出的草稿被拒绝（exemplar-copied），AI7 没有写出可以打开的草稿：' as const;
+/** The reading of a draft refused for copying a 资料库 item (Issue #428): it parsed, and it was turned away. */
+export const WRITING_MATERIAL_REFUSAL_PREFIX = '全书综合写出的草稿被拒绝（material-copied），AI7 没有写出可以打开的草稿：' as const;
 
 /** What a settled writing Task tells its editor to do next: in 交付物, where its draft opens. */
 const SAFE_NEXT_ACTIONS = {
@@ -105,10 +107,16 @@ function closedUnits(closed: ReadonlyArray<ClosedUnitOutcome<unknown>>): ClosedW
  * re-review): the contract digest is the row's, since the contract cannot be composed again without that text, and every step
  * that would build a request or read an answer refuses. Its records — outcome, revisions, drafts — read as any other's.
  */
-export function writingRecordedKindDefinition(input: WritingContractInput, promptContractDigest: string, rules: WritingCopyRules): AnalysisKindDefinition {
+export function writingRecordedKindDefinition(
+  input: WritingContractInput,
+  promptContractDigest: string,
+  rules: WritingCopyRules,
+  moved: { readonly code: string; readonly message: string } = { code: 'WRITING_EXEMPLAR_MOVED', message: WRITING_EXEMPLAR_MOVED },
+): AnalysisKindDefinition {
   const composed = writingKindDefinition(input, rules);
+  // Why nothing of it builds a request: an exemplar's text, or a 资料库 item's pinned build, is no longer here (Issue #428).
   const refuse = (): never => {
-    throw new AnalysisError('WRITING_EXEMPLAR_MOVED', WRITING_EXEMPLAR_MOVED);
+    throw new AnalysisError(moved.code, moved.message);
   };
   const crossUnit = composed.crossUnit!;
   const step = crossUnit.step!;
@@ -171,7 +179,8 @@ export function writingKindDefinition(input: WritingContractInput, rules: Writin
         requestDigest: (closed) => writingSynthesisRequestDigest(promptContractDigest, writingPassageSetDigest(closedUnits(closed))),
         // A draft that copies an exemplar is refused whole, a gap: AI7 then writes no draft (KB-004).
         parse: (text) => parseWritingSynthesis(text, contract),
-        refusalReason: (code, detail) => (code === 'exemplar-copied' ? `${WRITING_EXEMPLAR_REFUSAL_PREFIX}${detail}` : null),
+        refusalReason: (code, detail) => (code === 'exemplar-copied' ? `${WRITING_EXEMPLAR_REFUSAL_PREFIX}${detail}`
+          : code === 'material-copied' ? `${WRITING_MATERIAL_REFUSAL_PREFIX}${detail}` : null),
         // The draft is the Task's result: a Run that wrote none completed with gaps, never 已完成.
         requiredForCompletion: true,
       },

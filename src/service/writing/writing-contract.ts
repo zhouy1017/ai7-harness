@@ -1,4 +1,7 @@
 import {
+  MAX_WRITING_MATERIALS,
+  MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES,
+  MAX_WRITING_MATERIAL_GRAPHEMES,
   WRITING_CONTRACT_VERSION,
   WRITING_PASSAGE_KINDS,
   type CoverageManifestUnitProjection,
@@ -27,6 +30,10 @@ import { graphemeCount } from '../analysis/factual-review-contract.js';
  * A 范例 is referenced, never copied (KB-004). The instruction says so, and the synthesis is refused whole —
  * `exemplar-copied`, a gap, so AI7 writes no draft — when the draft copies an exemplar verbatim or nearly, by the bound the
  * Commander ruled for the Issue's stop clause ({@link exemplarCopied}).
+ *
+ * `/3` (Issue #428) adds the 资料库 items a plan lists under 允许参考, each read through its Material Index at the build the plan
+ * pinned, whole and within {@link MAX_WRITING_MATERIAL_GRAPHEMES}: their paragraphs are reference material, referenced and never
+ * copied under exactly the 范例's rules ({@link referenceCopied}, `material-copied`). A Task that lists no item is `/2` still.
  */
 export const WRITING_UNIT_RESULT_SCHEMA = 'ai7.writing.unit-result/1' as const;
 export const WRITING_SYNTHESIS_RESULT_SCHEMA = 'ai7.writing.synthesis-result/1' as const;
@@ -36,6 +43,12 @@ export const WRITING_SYNTHESIS_RESULT_SCHEMA = 'ai7.writing.synthesis-result/1' 
  */
 export const WRITING_PROMPT_CONTRACT_SCHEMA = 'ai7.writing.prompt-contract/2' as const;
 export const WRITING_PROMPT_CONTRACT_SCHEMA_V1 = 'ai7.writing.prompt-contract/1' as const;
+/**
+ * `/3` (Issue #428): `/2` and the 资料库 items the plan lists under 允许参考. Only a Task that lists at least one is `/3`; every
+ * other Task is composed under `/2` byte for byte, and a `/1` or `/2` Task keeps its contract, its digest and its rules.
+ */
+export const WRITING_PROMPT_CONTRACT_SCHEMA_V3 = 'ai7.writing.prompt-contract/3' as const;
+export { MAX_WRITING_MATERIALS, MAX_WRITING_MATERIAL_GRAPHEMES, MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES };
 export const WRITING_RESULT_SET_REVISION_SCHEMA = 'ai7.writing.result-set-revision/1' as const;
 /** The shape that carries scope-plan facts and per-unit lineage: every draft after the first. */
 export const WRITING_SUCCESSOR_REVISION_SCHEMA = 'ai7.writing.result-set-revision/2' as const;
@@ -165,6 +178,15 @@ export interface WritingExemplarInput {
   readonly excerpt: boolean;
 }
 
+/**
+ * One 资料库 item a `/3` contract references (Issue #428): the title it arrived under and its paragraphs as the Material Index
+ * extracted them at the build the plan pinned — the editor's material, to reference and never copy.
+ */
+export interface WritingMaterialInput {
+  readonly title: string;
+  readonly paragraphs: ReadonlyArray<string>;
+}
+
 export interface WritingContractInput {
   readonly type: { readonly typeId: string; readonly label: string };
   readonly book: WritingBookInput;
@@ -174,6 +196,8 @@ export interface WritingContractInput {
   readonly synopsis: WritingSynopsisInput | null;
   readonly evaluation: WritingEvaluationInput | null;
   readonly exemplars: ReadonlyArray<WritingExemplarInput>;
+  /** The 资料库 items under 允许参考 (Issue #428): present exactly in a `/3` contract, one item or more. */
+  readonly materials?: ReadonlyArray<WritingMaterialInput>;
 }
 
 /** One passage exactly as the model listed it. */
@@ -199,8 +223,8 @@ export interface WritingSynthesisResult extends WritingDraftWordsProjection {
  * contract does not list; `block-out-of-unit` a cited position past the unit's blocks.
  */
 export type WritingUnitParseFailureCode = 'not-json' | 'schema-invalid' | 'unit-mismatch' | 'kind-unknown' | 'block-out-of-unit';
-/** `exemplar-copied`: a draft that copies an exemplar's text (KB-004), refused whole. */
-export type WritingSynthesisParseFailureCode = 'not-json' | 'schema-invalid' | 'exemplar-copied';
+/** `exemplar-copied`: a draft that copies an exemplar's text (KB-004), refused whole; `material-copied`: a 资料库 item's (Issue #428). */
+export type WritingSynthesisParseFailureCode = 'not-json' | 'schema-invalid' | 'exemplar-copied' | 'material-copied';
 
 export type WritingUnitParse =
   | { ok: true; result: WritingUnitResult; canonicalJson: string; digest: string }
@@ -309,7 +333,7 @@ function frozenInput(input: WritingContractInput): WritingContractInput {
     }
     return { bookTitle: exemplar.bookTitle, version: exemplar.version, text: exemplar.text, excerpt: exemplar.excerpt };
   });
-  return {
+  const frozen: WritingContractInput = {
     type: { typeId: input.type.typeId, label: input.type.label },
     book: { title: book.title, authors: [...book.authors], editors: [...book.editors], series: [...book.series] },
     audience: input.audience,
@@ -319,6 +343,37 @@ function frozenInput(input: WritingContractInput): WritingContractInput {
     evaluation,
     exemplars,
   };
+  // A contract without 资料库 items has no `materials` key at all: its bytes are `/2`'s, or `/1`'s (Issue #428).
+  if (input.materials === undefined) return frozen;
+  return { ...frozen, materials: frozenMaterials(input.materials, invalid) };
+}
+
+/** How many characters one item's paragraphs hold, as the bound counts them: their graphemes, nothing between them. */
+export function writingMaterialGraphemes(paragraphs: ReadonlyArray<string>): number {
+  return paragraphs.reduce((sum, paragraph) => sum + graphemeCount(paragraph), 0);
+}
+
+/**
+ * The 资料库 items as `/3` freezes them (Issue #428): one to {@link MAX_WRITING_MATERIALS}, each whole within
+ * {@link MAX_WRITING_MATERIAL_GRAPHEMES} and all of them together within {@link MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES}; never
+ * cut, since a plan references an item whole or not at all.
+ */
+function frozenMaterials(given: unknown, invalid: (what: string) => never): WritingMaterialInput[] {
+  if (!Array.isArray(given) || given.length < 1 || given.length > MAX_WRITING_MATERIALS) invalid('资料库资料');
+  let total = 0;
+  const materials = (given as unknown[]).map((material) => {
+    if (!isRecord(material) || !text(material.title, 200) || !Array.isArray(material.paragraphs) || material.paragraphs.length < 1 ||
+        !material.paragraphs.every((paragraph) => text(paragraph, MAX_WRITING_MATERIAL_GRAPHEMES))) {
+      invalid('资料库资料');
+    }
+    const paragraphs = [...(material.paragraphs as string[])];
+    const graphemes = writingMaterialGraphemes(paragraphs);
+    if (graphemes > MAX_WRITING_MATERIAL_GRAPHEMES) invalid('资料库资料');
+    total += graphemes;
+    return { title: material.title as string, paragraphs };
+  });
+  if (total > MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES) invalid('资料库资料');
+  return materials;
 }
 
 /** The Book's metadata, the editor's words and the reference parts, as the prompt states them, one line each. */
@@ -371,6 +426,33 @@ export function writingExemplarLine(typeLabel: string, exemplars: ReadonlyArray<
     : `参照本社 ${exemplars.length} 份${typeLabel}范例（只参照，不照抄）：${exemplars.map((exemplar) => `《${exemplar.bookTitle}》版本 ${exemplar.version}`).join('、')}`;
 }
 
+/** What the plan and the synthesis say of the 资料库 items a `/3` contract references (Issue #428). */
+export function writingMaterialLine(materials: ReadonlyArray<Pick<WritingMaterialInput, 'title'>>): string {
+  return `参照资料库的 ${materials.length} 份资料（只参照，不照抄）：${materials.map((material) => `《${material.title}》`).join('、')}`;
+}
+
+/**
+ * What the model is told of the copy rules for 资料库 items (Issue #428): the `/2` rules in their sizes, said of each item on its
+ * own — words two items share exempt nothing, unlike the house phrasing two other Books' exemplars share.
+ */
+function materialCopyRulesInstruction(): string {
+  const sizes = WRITING_COPY_SIZES;
+  return [
+    `以下任何一种都会让整份草稿被拒绝：中文与一份资料在一句之内有连续 ${sizes.copyWindow} 个字相同，或跨标点、空格有连续 ${sizes.copyWindowAcross} 个字相同`,
+    `英文等拉丁字母文字与一份资料在一句之内有连续 ${sizes.copyWords} 个词相同，或跨标点有连续 ${sizes.copyWordsAcross} 个词相同`,
+    `与一份资料大段近似：草稿的 ${sizes.shingle} 字片段与 ${sizes.wordShingle} 词片段合计有 ${sizes.shingleShare * 100}% 出现在这份资料中，或草稿任一 ${sizes.span} 字、${sizes.wordSpan} 词的段落中有 ${sizes.spanShare * 100}% 的片段出现在这份资料中`,
+    '本书自己的书名人名与参考信息，以及书号、网址、编号不算照抄；每份资料各自比较，几份资料共有的文字同样不能照抄',
+  ].join('；');
+}
+
+/** The synthesis instruction's 资料库 lines (Issue #428): what the items are and how they may be used, then their paragraphs. */
+function materialLinesOf(materials: ReadonlyArray<WritingMaterialInput>): string[] {
+  return [
+    `${writingMaterialLine(materials)}。它们是编辑自己收集的资料，只用来核对事实与背景、取用其中有依据的信息，不照抄其中任何句子；${materialCopyRulesInstruction()}：`,
+    ...materials.flatMap((material) => material.paragraphs.map((paragraph, index) => `《${oneLine(material.title)}》第 ${index + 1} 段：${oneLine(paragraph)}`)),
+  ];
+}
+
 /** What the model is told of the copy rules (the Commander's ruling on #704 P2-2: `/2` states the Chinese and English rules plainly). */
 function copyRulesInstruction(rules: WritingCopyRules): string {
   if (rules === 1) return `与范例相同的连续 ${WRITING_COPY_SIZES_V1.copyWindow} 个字以上的文字，或与一份范例大段近似的写法，都会让整份草稿被拒绝`;
@@ -395,6 +477,8 @@ function synthesisInstructionOf(input: WritingContractInput, rules: WritingCopyR
     writingTypeGuidance(input.type.typeId),
     ...referenceLines(input),
     ...exemplarLines,
+    // `/3` alone (Issue #428): a contract without 资料库 items has no line here, so `/2`'s instruction stays byte for byte.
+    ...(input.materials === undefined ? [] : materialLinesOf(input.materials)),
     '只写参考信息与段落中有依据的内容：不编造获奖、销量、价格、日期或任何数字，不重读稿件原文、不引用外部知识、不调用任何工具、不改写稿件。',
     '只输出一个 JSON 对象，不加说明文字，不加代码围栏。JSON 必须精确包含以下键，且不得多出任何键：',
     'schema（固定为 "ai7.writing.synthesis-result/1"）、title、sections。',
@@ -445,8 +529,13 @@ export interface WritingPromptContractV2 extends WritingPromptContractCommon {
   readonly exemplarWordSpan: typeof EXEMPLAR_WORD_SPAN;
 }
 
+/** `/3` (Issue #428): `/2`'s sizes, its input holding the 资料库 items the plan lists under 允许参考. */
+export interface WritingPromptContractV3 extends Omit<WritingPromptContractV2, 'schema'> {
+  readonly schema: typeof WRITING_PROMPT_CONTRACT_SCHEMA_V3;
+}
+
 /** The frozen prompt contract: model-facing text, fixed formats, the type, the editor's words, the reference set and the exemplars. */
-export type WritingPromptContract = WritingPromptContractV1 | WritingPromptContractV2;
+export type WritingPromptContract = WritingPromptContractV1 | WritingPromptContractV2 | WritingPromptContractV3;
 
 /**
  * The frozen prompt contract of one request, under the copy rules `rules`: `/2` for every Task prepared now; `/1` only to read
@@ -470,6 +559,8 @@ export function writingContract(input: WritingContractInput, rules: WritingCopyR
     synthesisPassageLine: SYNTHESIS_PASSAGE_LINE,
     synthesisNoPassage: SYNTHESIS_NO_PASSAGE,
   };
+  // 资料库 items come with `/3`, which judges by `/2`'s sizes: never under `/1` (Issue #428).
+  if (frozen.materials !== undefined && rules !== 2) throw new AnalysisError('WRITING_INPUT_INVALID', '写作任务的资料库资料无效。');
   if (rules === 1) {
     const sizes = WRITING_COPY_SIZES_V1;
     return {
@@ -485,7 +576,8 @@ export function writingContract(input: WritingContractInput, rules: WritingCopyR
   const sizes = WRITING_COPY_SIZES;
   return {
     ...common,
-    schema: WRITING_PROMPT_CONTRACT_SCHEMA,
+    // Only a contract that references 资料库 items is `/3` (Issue #428).
+    schema: frozen.materials === undefined ? WRITING_PROMPT_CONTRACT_SCHEMA : WRITING_PROMPT_CONTRACT_SCHEMA_V3,
     exemplarCopyWindow: sizes.copyWindow,
     exemplarCopyWindowAcross: sizes.copyWindowAcross,
     exemplarShingle: sizes.shingle,
@@ -837,10 +929,14 @@ export type ExemplarCopyUnit = 'character' | 'word';
  * across them under `/2` (#707); a near copy whose distinct shingles it shares at the threshold or above; or one span of the draft
  * whose shingles it shares at the span threshold or above — each in characters or in words.
  */
-export type ExemplarCopy =
+export type ExemplarCopy = (
   | { exemplar: number; kind: 'verbatim'; unit: ExemplarCopyUnit; run: number; breaks?: ReadonlyArray<CopyBreak> }
   | { exemplar: number; kind: 'near'; unit: ExemplarCopyUnit; share: number }
-  | { exemplar: number; kind: 'span'; unit: ExemplarCopyUnit; share: number };
+  | { exemplar: number; kind: 'span'; unit: ExemplarCopyUnit; share: number }
+) & {
+  /** `material` when the text copied is a 资料库 item's (Issue #428), `exemplar` then its position among the items; absent for an exemplar. */
+  source?: 'material';
+};
 
 /** One stream's sizes: the verbatim run within punctuation and across it, the shingle, the span. */
 interface StreamRules {
@@ -1028,6 +1124,24 @@ export function exemplarCopied(draft: WritingDraftWordsProjection, input: Writin
   return null;
 }
 
+/**
+ * The first reference a draft copies under its contract's rules (Issue #428): an exemplar exactly as {@link exemplarCopied}
+ * judges it, and then each 资料库 item of a `/3` contract under exactly the same rules and sizes, one item at a time — so the
+ * house-phrasing exemption, which is words two other Books' exemplars share, never comes from two items sharing them — with the
+ * Book's own reference words exempted as they are for an exemplar. `null` when it copies none. No number of the rules changes.
+ */
+export function referenceCopied(draft: WritingDraftWordsProjection, input: WritingContractInput, sizes: WritingCopySizes = WRITING_COPY_SIZES): ExemplarCopy | null {
+  const exemplar = exemplarCopied(draft, input, sizes);
+  if (exemplar !== null || input.materials === undefined) return exemplar;
+  for (const [index, material] of input.materials.entries()) {
+    // The item stands where the one exemplar would, its paragraphs one per line as an exemplar's are.
+    const alone: WritingContractInput = { ...input, exemplars: [{ bookTitle: material.title, version: 1, text: material.paragraphs.join('\n'), excerpt: false }] };
+    const copied = exemplarCopied(draft, alone, sizes);
+    if (copied !== null) return { ...copied, exemplar: index, source: 'material' };
+  }
+  return null;
+}
+
 // ---- the `/1` rules: #688's bound, kept for the Tasks recorded under it -----------------------------------------------
 
 const V1_NOT_WORDS = /[\s\p{P}\p{S}\p{C}]/gu;
@@ -1169,18 +1283,25 @@ const BREAK_NAMES: Readonly<Record<CopyBreak, string>> = { punctuation: '标点'
  * the language (#707).
  */
 export function exemplarCopyDetail(copied: ExemplarCopy, input: WritingContractInput, sizes: WritingCopySizes = WRITING_COPY_SIZES): string {
+  const how = copyHow(copied, sizes);
+  // A 资料库 item copied (Issue #428) is named as the item it is, in the same words of how.
+  if (copied.source === 'material') return `草稿与资料库资料《${input.materials![copied.exemplar]!.title}》${how}；资料只参照，不复制，这份草稿不予采用。`;
   const exemplar = input.exemplars[copied.exemplar]!;
+  return `草稿与范例《${exemplar.bookTitle}》版本 ${exemplar.version} ${how}；范例只参照，不复制，这份草稿不予采用。`;
+}
+
+/** How a draft copied, in the sizes of the rules that judged it: the words an exemplar's refusal and an item's share. */
+function copyHow(copied: ExemplarCopy, sizes: WritingCopySizes): string {
   const words = copied.unit === 'word' && sizes.rules === 2;
   const across = copied.kind === 'verbatim' && sizes.rules === 2 && copied.breaks !== undefined && copied.breaks.length > 0
     ? `跨${copied.breaks.map((name) => BREAK_NAMES[name]).join('、')}`
     : '';
   const shingle = words ? `${sizes.wordShingle} 词片段` : `${sizes.shingle} 字片段`;
-  const how = copied.kind === 'verbatim'
+  return copied.kind === 'verbatim'
     ? `有${across}连续 ${copied.run} 个${words ? '外文词' : '字'}以上相同`
     : copied.kind === 'near'
       ? `的 ${shingle}重合达 ${Math.floor(copied.share * 100)}%（不少于 ${sizes.shingleShare * 100}% 即算照抄）`
       : `在草稿的一段 ${words ? `${sizes.wordSpan} 个外文词` : `${sizes.span} 字`}中，${shingle}重合达 ${Math.floor(copied.share * 100)}%（不少于 ${sizes.spanShare * 100}% 即算照抄）`;
-  return `草稿与范例《${exemplar.bookTitle}》版本 ${exemplar.version} ${how}；范例只参照，不复制，这份草稿不予采用。`;
 }
 
 /**
@@ -1213,9 +1334,11 @@ export function parseWritingSynthesis(value: string, contract: WritingPromptCont
     sections.push({ heading: candidate.heading, paragraphs: [...(paragraphs as string[])] });
   }
   const draft: WritingSynthesisResult = { schema: WRITING_SYNTHESIS_RESULT_SCHEMA, title: result.title, sections };
-  // Judged under the sizes the Task's own frozen contract carries (#704 P2-2).
-  const copied = exemplarCopied(draft, input, sizes);
-  if (copied !== null) return { ok: false, code: 'exemplar-copied', detail: exemplarCopyDetail(copied, input, sizes) };
+  // Judged under the sizes the Task's own frozen contract carries (#704 P2-2); its 资料库 items under the same (Issue #428).
+  const copied = referenceCopied(draft, input, sizes);
+  if (copied !== null) {
+    return { ok: false, code: copied.source === 'material' ? 'material-copied' : 'exemplar-copied', detail: exemplarCopyDetail(copied, input, sizes) };
+  }
   return { ok: true, result: draft };
 }
 

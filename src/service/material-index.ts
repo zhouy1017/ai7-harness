@@ -489,7 +489,10 @@ export interface MaterialReferencePin {
   readonly indexDigest: string;
 }
 
-/** What a Task reads of one listed item: a page of its segments, each sentence with its citation. */
+/**
+ * What a Task reads of one listed item: a page of its segments — each paragraph's text as the index extracted it (Issue #428:
+ * what a 写作任务's `/3` contract takes) — each sentence with its citation.
+ */
 export interface MaterialTaskReading {
   readonly materialId: string;
   readonly indexDigest: string;
@@ -497,6 +500,7 @@ export interface MaterialTaskReading {
   readonly segments: ReadonlyArray<{
     readonly ordinal: number;
     readonly kind: 'title' | 'heading' | 'paragraph';
+    readonly text: string;
     readonly sentences: ReadonlyArray<{ readonly ordinal: number; readonly text: string; readonly citation: string }>;
   }>;
   readonly next: number | null;
@@ -773,6 +777,7 @@ export class MaterialIndexLedger {
       segments: segments.map((segment) => ({
         ordinal: segment.ordinal,
         kind: segment.kind,
+        text: segment.text,
         sentences: segment.sentences.map(([start, end], index) => ({
           ordinal: index + 1, text: segment.text.slice(start, end), citation: materialCitation(title, segment.ordinal, index + 1),
         })),

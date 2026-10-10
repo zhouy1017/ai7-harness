@@ -7,11 +7,15 @@ import {
   MAX_EXEMPLAR_GRAPHEMES,
   MAX_SYNOPSIS_GRAPHEMES,
   MAX_WRITING_EXEMPLARS,
+  MAX_WRITING_MATERIALS,
+  MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES,
+  MAX_WRITING_MATERIAL_GRAPHEMES,
   writingContract,
   writingContractDigest,
   type WritingCopyRules,
   type WritingContractInput,
   type WritingExemplarInput,
+  type WritingMaterialInput,
 } from './writing/writing-contract.js';
 
 /**
@@ -161,6 +165,85 @@ export function readWritingExemplarWords(db: DatabaseSync, revisionId: string): 
 /** The words a contract input holds for an exemplar no longer here: never sent, never compared, only named. */
 export const WRITING_EXEMPLAR_ABSENT_TEXT = '（这份范例已不在本机）' as const;
 
+/**
+ * One 资料库 item a `/3` Task's plan lists under 允许参考 (Issue #428; TASK-032, TASK-036), by reference only: the item and the
+ * Material Index build the plan pinned (`pinMaterialReference`), the title and the extracted character count the plan names it
+ * by, and the digest of the paragraphs the contract took. Its words never enter this Task's rows: they are read again through
+ * `readMaterialIndexForTask` at that build whenever the Task needs them, and a Task whose build is gone is not started.
+ */
+export interface WritingMaterialSource {
+  readonly materialId: string;
+  readonly indexDigest: string;
+  readonly title: string;
+  readonly characters: number;
+  readonly sha256: string;
+}
+
+/** How a material reference's digest is taken: of the paragraphs the contract took, never of the facts beside them. */
+export const WRITING_MATERIAL_TEXT_SCHEMA = 'ai7.writing-material/1' as const;
+
+export function writingMaterialDigest(paragraphs: ReadonlyArray<string>): string {
+  return sha256Hex(canonicalJson({ schema: WRITING_MATERIAL_TEXT_SCHEMA, paragraphs }));
+}
+
+/** The words a contract input holds for an item whose pinned build is no longer here: never sent, never compared, only named. */
+export const WRITING_MATERIAL_ABSENT_TEXT = '（这份资料计划冻结的索引版本已不在本机）' as const;
+
+/**
+ * A paragraph of a 资料库 item as a writing contract takes it (Issue #428): as {@link writingWords} takes the Book's own words —
+ * normalized, each stray control or separator character read as a space, trimmed — and never cut; `''` when nothing is left.
+ */
+export function writingMaterialParagraph(value: string): string {
+  return writingWords(value, Number.MAX_SAFE_INTEGER);
+}
+
+/**
+ * What a Task reads of one item through the Material Index (Issue #428): its paragraphs at the pinned build, or the refusal —
+ * the build gone (`MATERIAL_INDEX_MOVED`), the item no longer one this Book's Tasks may list — in the read seam's code.
+ */
+export type WritingMaterialReading =
+  | { readonly paragraphs: ReadonlyArray<string> }
+  | { readonly refusal: { readonly code: string; readonly message: string } };
+
+/** The store's read of a pinned item, `readMaterialIndexForTask` under the Task's own boundary: SELECT-only, nothing sent. */
+export type WritingMaterialReader = (bookId: string, source: WritingMaterialSource) => WritingMaterialReading;
+
+/** What a Task whose 资料库 item does not read at its pinned build says (Issue #428): which item, why, and 改计划重做. */
+export function writingMaterialMoved(title: string): string {
+  return `这次起草参考的资料《${title}》，计划冻结的索引版本已不在本机，不能开始；请改计划重做：在「交付物」的新建文档 · 写作任务里重新准备计划。`;
+}
+export function writingMaterialUnavailable(title: string): string {
+  return `这次起草参考的资料《${title}》现在不能列进这本书任务的「允许参考」，不能开始；请改计划重做：在「交付物」的新建文档 · 写作任务里重新准备计划。`;
+}
+
+/** A count as the editor reads a bound: `3,000`. */
+function grouped(value: number): string {
+  return value.toLocaleString('en-US');
+}
+
+/** 新建文档 · 写作任务's 资料库 row (Issue #428): no item this Book's Tasks may list has extracted text yet. */
+export const WRITING_MATERIALS_NONE =
+  '资料库里还没有这本书可以参考的资料：资料定了归属（这本书或社级）与学习准入、建好索引以后，才能在这里勾选，列进「允许参考」。' as const;
+/** …and when some have: what ticking one does, and the bounds. */
+export const WRITING_MATERIALS_STATEMENT =
+  `勾选的资料列进这次计划的「允许参考」，按计划冻结的索引版本读取：每份不超过 ${grouped(MAX_WRITING_MATERIAL_GRAPHEMES)} 字，合计不超过 ${grouped(MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES)} 字，最多 ${MAX_WRITING_MATERIALS} 份；只参照，不照抄。`;
+/** Why an item cannot be ticked: it is longer than one item may be, and a plan never takes part of one. */
+export function writingMaterialOverBound(characters: number): string {
+  return `这份资料已提取 ${grouped(characters)} 字，超过每份 ${grouped(MAX_WRITING_MATERIAL_GRAPHEMES)} 字的上限，不能列进「允许参考」。`;
+}
+export function writingMaterialOverBoundNamed(title: string, characters: number): string {
+  return `资料《${title}》已提取 ${grouped(characters)} 字，超过每份 ${grouped(MAX_WRITING_MATERIAL_GRAPHEMES)} 字的上限，不能列进「允许参考」。`;
+}
+export const WRITING_MATERIALS_TOO_MANY = `写作任务最多参考 ${MAX_WRITING_MATERIALS} 份资料库资料；请少选几份。`;
+export function writingMaterialsOverTotal(characters: number): string {
+  return `所选资料合计已提取 ${grouped(characters)} 字，超过合计 ${grouped(MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES)} 字的上限；请少选几份。`;
+}
+/** A writing rule binds no 资料库 item (TASK-023, TASK-026): a plan that lists one sets none, and no quick start starts one. */
+export const WRITING_RULE_MATERIALS =
+  '列了资料库资料的写作计划不能设为快速开始默认：默认执行规则不带参考资料，资料要在每次计划里由你勾选。' as const;
+export const WRITING_QUICK_START_MATERIALS =
+  '这次勾选了资料库资料：默认执行规则不带参考资料，不能按规则直接开始；计划已准备，请看过再开始。' as const;
+
 /** One writing Task as its row holds it, verified. */
 export interface StoredWritingTask {
   readonly taskIntentId: string;
@@ -176,6 +259,12 @@ export interface StoredWritingTask {
    * read as recorded — its outcome and drafts — but never authorized or run again (#688 re-review).
    */
   readonly exemplarsReadable: boolean;
+  /**
+   * The 资料库 items a `/3` Task's plan lists under 允许参考 (Issue #428), each with why it does not read at its pinned build, or
+   * `null` when it does; `[]` for every `/1` and `/2` Task. When one does not, `input` names it with
+   * {@link WRITING_MATERIAL_ABSENT_TEXT} for its paragraphs and the Task is read as recorded but never authorized or run again.
+   */
+  readonly materials: ReadonlyArray<{ readonly source: WritingMaterialSource; readonly refusal: { readonly code: string; readonly message: string } | null }>;
   readonly input: WritingContractInput;
   /**
    * The copy rules its frozen contract carries (the Commander's ruling on #704 P2-2): `2` for a row that says so, `1` for a row
@@ -284,6 +373,19 @@ function isExemplarSource(source: unknown): source is WritingExemplarSource {
     typeof source.sha256 === 'string' && /^[0-9a-f]{64}$/u.test(source.sha256);
 }
 
+function isMaterialSource(source: unknown): source is WritingMaterialSource {
+  return isRecord(source) &&
+    typeof source.materialId === 'string' && UUID_PATTERN.test(source.materialId) &&
+    typeof source.indexDigest === 'string' && /^[0-9a-f]{64}$/u.test(source.indexDigest) &&
+    typeof source.title === 'string' && source.title.length > 0 &&
+    typeof source.characters === 'number' && Number.isSafeInteger(source.characters) && source.characters >= 1 &&
+    typeof source.sha256 === 'string' && /^[0-9a-f]{64}$/u.test(source.sha256);
+}
+
+function materialSourceOf(source: WritingMaterialSource): WritingMaterialSource {
+  return { materialId: source.materialId, indexDigest: source.indexDigest, title: source.title, characters: source.characters, sha256: source.sha256 };
+}
+
 function exemplarSourceOf(source: WritingExemplarSource): WritingExemplarSource {
   return {
     documentId: source.documentId, revisionId: source.revisionId, bookId: source.bookId,
@@ -299,9 +401,28 @@ export class WritingTasks {
    * `null` when the revision no longer gives the pinned text. Bounded.
    */
   readonly #exemplarWords = new Map<string, string | null>();
+  /** How a pinned 资料库 item is read (Issue #428): the store's Material Index read seam; without one, no item reads. */
+  readonly #readMaterial: WritingMaterialReader;
 
-  constructor(db: DatabaseSync) {
+  constructor(db: DatabaseSync, readMaterial: WritingMaterialReader = () => ({ refusal: { code: 'MATERIAL_INDEX_MOVED', message: '' } })) {
     this.#db = db;
+    this.#readMaterial = readMaterial;
+  }
+
+  /**
+   * One pinned item's paragraphs as the contract took them, read again through the Material Index at the build the plan pinned
+   * (Issue #428), or why not: the build gone, the item no longer listable, or words other than the ones the reference pinned.
+   */
+  #pinnedMaterial(bookId: string, source: WritingMaterialSource): { paragraphs: string[] } | { refusal: { code: string; message: string } } {
+    const read = this.#readMaterial(bookId, source);
+    if ('refusal' in read) {
+      return { refusal: read.refusal.code === 'MATERIAL_REFERENCE_UNAVAILABLE'
+        ? { code: 'MATERIAL_REFERENCE_UNAVAILABLE', message: writingMaterialUnavailable(source.title) }
+        : { code: 'MATERIAL_INDEX_MOVED', message: writingMaterialMoved(source.title) } };
+    }
+    const paragraphs = read.paragraphs.map(writingMaterialParagraph).filter((paragraph) => paragraph.length > 0);
+    if (writingMaterialDigest(paragraphs) !== source.sha256) return { refusal: { code: 'MATERIAL_INDEX_MOVED', message: writingMaterialMoved(source.title) } };
+    return { paragraphs };
   }
 
   #pinnedWords(source: WritingExemplarSource): string | null {
@@ -325,7 +446,13 @@ export class WritingTasks {
       stored.recordedAt === row.recorded_at && isRecord(stored.input) && isRecord(stored.input.type) && stored.input.type.typeId === row.type_id &&
       Array.isArray(stored.exemplarSources) && stored.exemplarSources.every(isExemplarSource) &&
       Array.isArray(stored.input.exemplars) && stored.input.exemplars.length === 0 &&
-      (stored.copyRules === undefined || stored.copyRules === 2),
+      (stored.copyRules === undefined || stored.copyRules === 2) &&
+      // A `/3` row (Issue #428) names its 资料库 items by reference, its input holding none of their words; any other names none.
+      (stored.materialSources === undefined
+        ? stored.input.materials === undefined
+        : Array.isArray(stored.materialSources) && stored.materialSources.length >= 1 && stored.materialSources.length <= MAX_WRITING_MATERIALS &&
+          stored.materialSources.every(isMaterialSource) && stored.copyRules === 2 &&
+          Array.isArray(stored.input.materials) && stored.input.materials.length === 0),
     'WRITING_RECORD_INVALID', CORRUPT);
     // A row recorded before #698 names no copy rules: its contract is `/1`, and so is the bound that judges it.
     const copyRules: WritingCopyRules = stored.copyRules === 2 ? 2 : 1;
@@ -337,16 +464,25 @@ export class WritingTasks {
     const exemplars = sources.map((source, index) => ({
       bookTitle: source.bookTitle, version: source.version, excerpt: source.excerpt, text: words[index] ?? WRITING_EXEMPLAR_ABSENT_TEXT,
     }));
-    const input = { ...(stored.input as unknown as WritingContractInput), exemplars };
-    // The frozen input is the contract: its digest must be the one the row names — checked whenever the exemplars' text is
-    // here to check it with. Without it the row's own digest above still holds it.
+    // The 资料库 items' words come back through the Material Index at the builds the plan pinned (Issue #428), each the words its
+    // reference pinned; an item not readable there is named, never read from anywhere else.
+    const materialSources = stored.materialSources === undefined ? null : (stored.materialSources as WritingMaterialSource[]).map(materialSourceOf);
+    const read = materialSources === null ? [] : materialSources.map((source) => ({ source, words: this.#pinnedMaterial(text(row.book_id), source) }));
+    const materials: WritingMaterialInput[] | undefined = materialSources === null ? undefined : read.map(({ source, words }) => ({
+      title: source.title, paragraphs: 'paragraphs' in words ? words.paragraphs : [WRITING_MATERIAL_ABSENT_TEXT],
+    }));
+    const materialsReadable = read.every(({ words }) => 'paragraphs' in words);
+    const base = { ...(stored.input as unknown as WritingContractInput), exemplars };
+    const input: WritingContractInput = materials === undefined ? base : { ...base, materials };
+    // The frozen input is the contract: its digest must be the one the row names — checked whenever the exemplars' text and the
+    // items' paragraphs are here to check it with. Without them the row's own digest above still holds it.
     let digest: string;
     try {
       digest = writingContractDigest(writingContract(input, copyRules));
     } catch {
       throw new WritingTaskError('WRITING_RECORD_INVALID', CORRUPT);
     }
-    requireWriting(!exemplarsReadable || digest === row.prompt_contract_sha256, 'WRITING_RECORD_INVALID', CORRUPT);
+    requireWriting(!exemplarsReadable || !materialsReadable || digest === row.prompt_contract_sha256, 'WRITING_RECORD_INVALID', CORRUPT);
     return {
       taskIntentId: text(row.task_intent_id),
       promptContractSha256: text(row.prompt_contract_sha256),
@@ -356,6 +492,7 @@ export class WritingTasks {
       baselineRevisionId: nullableText(row.baseline_revision_id),
       exemplarSources: sources,
       exemplarsReadable,
+      materials: read.map(({ source, words }) => ({ source, refusal: 'refusal' in words ? words.refusal : null })),
       input,
       copyRules,
       recordedAt: text(row.recorded_at),
@@ -372,11 +509,14 @@ export class WritingTasks {
     evaluationRecordId: string | null;
     baselineRevisionId: string | null;
     exemplarSources: ReadonlyArray<WritingExemplarSource>;
+    /** The 资料库 items a `/3` contract references, by reference (Issue #428): none for any other. */
+    materialSources?: ReadonlyArray<WritingMaterialSource>;
     contract: WritingContractInput;
     promptContractSha256: string;
     /** The copy rules the contract was composed under: `/2` for every Task the product records; `/1` only for the suites (#707). */
     copyRules: WritingCopyRules;
   }): void {
+    const materialSources = input.materialSources ?? [];
     requireWriting(UUID_PATTERN.test(input.taskIntentId) && UUID_PATTERN.test(input.bookId) &&
       (input.evaluationRecordId === null || UUID_PATTERN.test(input.evaluationRecordId)) &&
       (input.baselineRevisionId === null || UUID_PATTERN.test(input.baselineRevisionId)) &&
@@ -387,7 +527,14 @@ export class WritingTasks {
         const exemplar = input.contract.exemplars[index]!;
         return source.sha256 === writingExemplarDigest(exemplar.text) && source.bookTitle === exemplar.bookTitle &&
           source.version === exemplar.version && source.excerpt === exemplar.excerpt;
-      }),
+      }) &&
+      // Each 资料库 item by reference, one per item, its digest the paragraphs the contract took (Issue #428).
+      materialSources.length === (input.contract.materials?.length ?? 0) && materialSources.every(isMaterialSource) &&
+      new Set(materialSources.map((source) => source.materialId)).size === materialSources.length &&
+      materialSources.every((source, index) => {
+        const material = input.contract.materials![index]!;
+        return source.title === material.title && source.sha256 === writingMaterialDigest(material.paragraphs);
+      }) && (materialSources.length === 0 || input.copyRules === 2),
     'WRITING_INVALID', '写作任务参数无效。');
     const intent = this.#db.prepare('SELECT book_id, kind FROM analysis_task_intents WHERE task_intent_id = ?').get(input.taskIntentId) as SqlRow | undefined;
     requireWriting(intent !== undefined && intent.book_id === input.bookId && intent.kind === WRITING_KIND, 'WRITING_INVALID', '写作任务无效。');
@@ -404,8 +551,10 @@ export class WritingTasks {
       evaluationRecordId: input.evaluationRecordId,
       baselineRevisionId: input.baselineRevisionId,
       exemplarSources: input.exemplarSources.map(exemplarSourceOf),
-      // Another Book's words are referenced, never stored here: the exemplars travel as references only.
-      input: { ...input.contract, exemplars: [] },
+      // Another Book's words are referenced, never stored here: the exemplars travel as references only. So do the 资料库 items
+      // of a `/3` contract (Issue #428): the plan's pins and the digests of the words it took, never the words.
+      ...(materialSources.length === 0 ? {} : { materialSources: materialSources.map(materialSourceOf) }),
+      input: materialSources.length === 0 ? { ...input.contract, exemplars: [] } : { ...input.contract, exemplars: [], materials: [] },
       // The copy rules its contract carries (#704 P2-2): every Task the product records is `/2`. A `/1` row names none, in the
       // shape the software before #698 wrote, which `#task` reads as `/1` (#707).
       ...(input.copyRules === 2 ? { copyRules: input.copyRules } : {}),

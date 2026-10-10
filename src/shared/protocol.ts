@@ -2761,6 +2761,24 @@ export const WRITING_LIVE_UNAVAILABLE =
 export const MAX_WRITING_AUDIENCE_GRAPHEMES = 60;
 export const MAX_WRITING_CHANNEL_GRAPHEMES = 60;
 export const MAX_WRITING_REQUIREMENTS_GRAPHEMES = 300;
+/**
+ * 资料库 under a writing Task's 允许参考 (Issue #428; V2-UX-TASK-030, TASK-032, KB-007, KB-009): at most this many items, each at
+ * most this many characters as its Material Index extracted them (the card's 「已提取 N 字」), and all of them together at most
+ * this many. An item longer than one may be is offered disabled and refused with words, never cut: a plan references an item
+ * whole or not at all.
+ */
+export const MAX_WRITING_MATERIALS = 4;
+export const MAX_WRITING_MATERIAL_GRAPHEMES = 3_000;
+export const MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES = 6_000;
+/** At most this many 资料库 items are offered in 新建文档 · 写作任务, the latest arrivals first; the rest are counted. */
+export const MAX_WRITING_MATERIAL_OFFERS = 50;
+/**
+ * Under a live scope no Provider Processing policy admits a 资料库 item: an item is the editor's own material, and developer-live
+ * transmits only the Owner-designated Public SampleBooks (provider-processing-policy v7, ADR 0065). A plan that lists one is
+ * never prepared or started there.
+ */
+export const WRITING_MATERIAL_LIVE_UNAVAILABLE =
+  '资料库资料不能列进这个运行范围的写作计划：资料是编辑自己收集的材料，当前的模型处理策略只允许发送本社指定的公开样书，不能把资料库的文字发送给模型。' as const;
 
 /**
  * The review-category kind family (Issue #417, plan slice S69): one analysis kind per Review Category,
@@ -4620,6 +4638,19 @@ export interface WritingTaskTypeProjection {
   readonly quickStart: BaselineAnalysisQuickStartProjection;
 }
 
+/** One 资料库 item a writing Task may list under 允许参考 (Issue #428; TASK-030, TASK-032): the product record, never a path. */
+export interface WritingTaskMaterialProjection {
+  readonly materialId: string;
+  readonly title: string;
+  /** 已提取的字数, as the item's card states it: what the bound is counted in. */
+  readonly characters: number;
+  /** Whose the item is: this Book's, or the house's. */
+  readonly scope: 'book' | 'house';
+  /** Whether a plan may list it now; when not, why — it is longer than one item may be. */
+  readonly selectable: boolean;
+  readonly reason: string | null;
+}
+
 /**
  * 新建文档 · 写作任务 on ⑥ 交付物 (Issue #432, S84a; V2-UX-DELIV-007): the house types, what every draft references — each
  * line saying what is there or that there is none — the four consequence rows, the Book's latest writing Task, and for each
@@ -4636,6 +4667,15 @@ export interface WritingTaskProjection {
     readonly evaluation: string;
     /** 图书信息: title, authors, editors and 书系 as they stand. */
     readonly book: string;
+    /**
+     * 资料库 (Issue #428): the items this Book's Tasks may list under 允许参考 whose Material Index extracted text — the editor
+     * ticks the ones the draft references — each with whether it may be ticked or why not, and how many more were not listed.
+     */
+    readonly materials: {
+      readonly statement: string;
+      readonly items: ReadonlyArray<WritingTaskMaterialProjection>;
+      readonly more: number;
+    };
   };
   /** The four rows (editor-surfaces §9: 四行后果): 会读取 · 会发送 · 不会做 · 费用. */
   readonly consequences: { readonly read: string; readonly send: string; readonly notDo: string; readonly cost: string };
@@ -11103,7 +11143,8 @@ export interface ServiceOperationMap {
    * job. The completed job's result is 新建文档 · 写作任务 with the prepared Task named, whose plan the Task Drawer opens.
    */
   prepareWritingTask: {
-    input: { bookId: string; typeId: string; audience: string; channel: string; requirements: string | null };
+    /** `materialIds` (Issue #428): the 资料库 items the editor ticked under 允许参考, in the order offered; none when absent. */
+    input: { bookId: string; typeId: string; audience: string; channel: string; requirements: string | null; materialIds?: ReadonlyArray<string> };
     output: ServiceJobProjection;
   };
   /** 开始任务 in the drawer's bar for a writing Task. */
@@ -11660,7 +11701,7 @@ export interface RendererApi {
   /** 新建文档 · 写作任务 of the Book the window is showing (Issue #432, S84a); the renderer never names the Book. */
   inspectWritingTask(): Promise<WritingTaskProjection>;
   /** 先看计划 of a writing Task: a `writing-preparation` job; its plan opens in the Task Drawer. */
-  prepareWritingTask(input: { typeId: string; audience: string; channel: string; requirements: string | null }): Promise<ServiceJobProjection>;
+  prepareWritingTask(input: { typeId: string; audience: string; channel: string; requirements: string | null; materialIds?: ReadonlyArray<string> }): Promise<ServiceJobProjection>;
   /** The Task Drawer bar's 开始任务 for a writing Task. */
   authorizeWritingTask(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<WritingTaskProjection>;
   quickStartWritingTask(input: { taskIntentId: string; planEnvelopeDigest: string; ruleVersionId: string }): Promise<QuickStartWritingTaskResult>;
