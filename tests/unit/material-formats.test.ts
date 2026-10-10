@@ -541,9 +541,34 @@ describe('what the re-review of #761 found', () => {
       '<style:style style:name="T1" style:family="text" style:parent-style-name="T4"/><style:style style:name="T4" style:family="text" style:parent-style-name="T1"/>');
     expect(read(archive({ mimetype: [strToU8('application/vnd.oasis.opendocument.text'), { level: 0 }], 'content.xml': strToU8(looping) }), 'ODT').paragraphs[0])
       .toEqual([undefined, ['可见隐一隐二显三的字']]);
+    // Past 10,000 styles — the cap counts both style parts — a style is not read and text in it reads as shown; the
+    // document is still read (P3-E).
     const many = `<?xml version="1.0"?><office:document-styles ${style}><office:styles>` +
-      Array.from({ length: 10_001 }, (_, index) => `<style:style style:name="S${index}" style:family="text"/>`).join('') + '</office:styles></office:document-styles>';
-    expect(refusal(archive({ mimetype: [strToU8('application/vnd.oasis.opendocument.text'), { level: 0 }], 'content.xml': strToU8(content), 'styles.xml': strToU8(many) }), 'ODT'))
-      .toBe('over-bound');
+      Array.from({ length: 10_000 }, (_, index) => `<style:style style:name="S${index}" style:family="text"/>`).join('') +
+      '<style:style style:name="Hidden" style:family="text"><style:text-properties text:display="none"/></style:style>' +
+      '<style:style style:name="HiddenParagraph" style:family="paragraph"><style:text-properties text:display="none"/></style:style>' +
+      '</office:styles></office:document-styles>';
+    expect(read(archive({ mimetype: [strToU8('application/vnd.oasis.opendocument.text'), { level: 0 }], 'content.xml': strToU8(content), 'styles.xml': strToU8(many) }), 'ODT').paragraphs)
+      .toEqual([[undefined, ['可见隐一隐二显三的字']], [undefined, ['整段在隐藏样式里']], [undefined, ['粗体段落']], [undefined, ['段落不按字符样式隐藏']]]);
+  });
+});
+
+describe('what the third review of #761 found', () => {
+  it('ends a hidden row, item or paragraph with what was opened inside it when the next one starts (P2-B, P3-D)', () => {
+    expect(read('<table><tr hidden><td>S9<tr><td>visible</table>', 'HTML').paragraphs).toEqual([[undefined, ['visible']]]);
+    expect(read('<p hidden>S5 <b>bold<p>visible</p>', 'HTML').paragraphs).toEqual([[undefined, ['visible']]]);
+    expect(read('<ul><li hidden><p>S <b>b<li>visible</ul>', 'HTML').paragraphs).toEqual([[undefined, ['visible']]]);
+    expect(read('<dl><dt hidden><span>S<dd>visible</dl>', 'HTML').paragraphs).toEqual([[undefined, ['visible']]]);
+    expect(read('<p hidden><i>S<div>block after</div>', 'HTML').paragraphs).toEqual([[undefined, ['block after']]]);
+    // A boundary stops the search: a cell's item never closes the list outside the table, a nested table's row never
+    // the outer table's, and an element never read is never closed from inside it.
+    expect(read('<ul><li>外项<table><tr><td>格<li>格内项</td></tr></table></li></ul>', 'HTML').paragraphs)
+      .toEqual([[undefined, ['外项']], [undefined, ['格']], [undefined, ['格内项']]]);
+    expect(read('<table><tr><td>外格<table><tr><td>内格<tr><td>内二</table>外续</td></tr></table>', 'HTML').paragraphs)
+      .toEqual([[undefined, ['外格']], [undefined, ['内格']], [undefined, ['内二']], [undefined, ['外续']]]);
+    expect(read('<p>可见<noscript><p>脚本说明</noscript>后文', 'HTML').paragraphs).toEqual([[undefined, ['可见后文']]]);
+    // A hidden item inside a cell ends with the cell, never by closing the list around the table: the next cell is read.
+    expect(read('<ul><li>外<table><tr><td><li hidden>藏</td><td>格</td></tr></table></ul>', 'HTML').paragraphs)
+      .toEqual([[undefined, ['外']], [undefined, ['格']]]);
   });
 });

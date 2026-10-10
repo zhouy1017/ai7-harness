@@ -225,16 +225,24 @@ const HTML_SKIPPED: ReadonlySet<string> = new Set([
 const HTML_RAW_TEXT: ReadonlySet<string> = new Set(['script', 'style', 'xmp', 'iframe', 'noembed', 'noframes', 'textarea', 'title']);
 /** Elements that keep their line breaks. */
 const HTML_PREFORMATTED: ReadonlySet<string> = new Set(['pre', 'listing', 'plaintext']);
-/** A start tag of the first closes an open element of the second right above it, as HTML's parser does. */
-const HTML_IMPLIED_END: Readonly<Record<string, ReadonlySet<string>>> = {
-  li: new Set(['li']),
-  dt: new Set(['dt', 'dd']),
-  dd: new Set(['dt', 'dd']),
-  tr: new Set(['tr', 'td', 'th']),
-  td: new Set(['td', 'th']),
-  th: new Set(['td', 'th']),
-  option: new Set(['option']),
+/** What bounds the search for an element a start tag implies the end of, besides each kind's own boundary. */
+const HTML_SCOPE: ReadonlySet<string> = new Set(['html', 'table', 'td', 'th', 'caption', 'template', 'object', 'button', 'marquee', 'applet']);
+/**
+ * A start tag of each kind ends the nearest open element it names, with everything opened inside it, as HTML's parser
+ * does (#761 third review, P2-B, P3-D): the search runs down the open elements and stops at the kind's boundary — the
+ * list for an item, the table for a row or cell, the `select` for an option — or at an element whose content is never
+ * read (`HTML_SKIPPED`). Every block start ends an open `<p>` the same way.
+ */
+const HTML_IMPLIED_END: Readonly<Record<string, { readonly closes: ReadonlySet<string>; readonly boundary: ReadonlySet<string> }>> = {
+  li: { closes: new Set(['li']), boundary: new Set([...HTML_SCOPE, 'ul', 'ol', 'menu', 'dir']) },
+  dt: { closes: new Set(['dt', 'dd']), boundary: new Set([...HTML_SCOPE, 'dl']) },
+  dd: { closes: new Set(['dt', 'dd']), boundary: new Set([...HTML_SCOPE, 'dl']) },
+  tr: { closes: new Set(['tr']), boundary: new Set(['html', 'table', 'template']) },
+  td: { closes: new Set(['td', 'th']), boundary: new Set(['html', 'table', 'template', 'tr']) },
+  th: { closes: new Set(['td', 'th']), boundary: new Set(['html', 'table', 'template', 'tr']) },
+  option: { closes: new Set(['option']), boundary: new Set(['html', 'select', 'datalist', 'template']) },
 };
+const HTML_P_END = { closes: new Set(['p']), boundary: HTML_SCOPE };
 const HTML_HEADING = /^h([1-6])$/u;
 const HTML_SPACE = /[\t\n\f\r ]+/gu;
 /** One attribute of a start tag: its name, and its value quoted, single-quoted or bare. */
@@ -341,6 +349,21 @@ class HtmlReader {
     this.#sink.flush(this.#style());
   }
 
+  /**
+   * The nearest open element `end` closes, ended with everything opened inside it; nothing when a boundary, or an element
+   * never read, comes first.
+   */
+  #endImplied(end: { readonly closes: ReadonlySet<string>; readonly boundary: ReadonlySet<string> }): void {
+    for (let index = this.#stack.length - 1; index >= 0; index -= 1) {
+      const name = this.#stack[index]!.name;
+      if (end.closes.has(name)) {
+        while (this.#stack.length > index) this.#pop();
+        return;
+      }
+      if (end.boundary.has(name) || HTML_SKIPPED.has(name)) return;
+    }
+  }
+
   #pop(): void {
     const top = this.#stack.at(-1)!;
     if (this.#skipping === 0 && HTML_BLOCKS.has(top.name)) this.#flush();
@@ -362,9 +385,9 @@ class HtmlReader {
     }
     // The ends a start tag implies hold whether or not what they close is read: the next `<p>`, `<li>` or `<td>` closes a
     // hidden one rather than opening inside it (#761 re-review, P2-A). Only the flush is the reader's; `#pop` guards it.
-    if (HTML_BLOCKS.has(name) && this.#stack.at(-1)?.name === 'p') this.#pop();
+    if (HTML_BLOCKS.has(name)) this.#endImplied(HTML_P_END);
     const implied = HTML_IMPLIED_END[name];
-    if (implied !== undefined && implied.has(this.#stack.at(-1)?.name ?? '')) this.#pop();
+    if (implied !== undefined) this.#endImplied(implied);
     if (this.#skipping === 0 && HTML_BLOCKS.has(name)) this.#flush();
     if (HTML_VOID.has(name) || selfClosing) return;
     requireFormat(this.#stack.length < this.#sink.bounds.depth, 'over-bound', 'markup nesting exceeds its bound');
@@ -825,7 +848,10 @@ const ODF_SKIPPED: ReadonlySet<string> = new Set([
 ]);
 const ODF_STYLE = 'urn:oasis:names:tc:opendocument:xmlns:style:1.0';
 const ODF_SPACE = /[ \t\r\n]+/gu;
-/** At most this many named styles are read from one document's style parts. */
+/**
+ * At most this many named styles are read from one document's style parts. A style past it is not read — text in it reads
+ * as shown — and the document's text still is (#761 third review, P3-E).
+ */
 const ODF_MAX_STYLES = 10_000;
 /** A style's parent chain is followed at most this far. */
 const ODF_MAX_STYLE_DEPTH = 32;
@@ -852,8 +878,7 @@ class OdfStyles {
       const name = attribute(tag, 'name');
       const family = attribute(tag, 'family');
       this.#current = null;
-      if (name === undefined || family === undefined) return;
-      requireFormat(this.#styles.size < ODF_MAX_STYLES, 'over-bound', 'too many styles');
+      if (name === undefined || family === undefined || this.#styles.size >= ODF_MAX_STYLES) return;
       const style: OdfStyle = { parent: attribute(tag, 'parent-style-name') ?? null, hidden: null };
       this.#styles.set(`${family} ${name}`, style);
       this.#current = style;
