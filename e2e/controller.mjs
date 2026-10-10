@@ -888,7 +888,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'draft-restart',
     'new-version',
     'new-version-applied',
-    // Issue #745: a pane movement made before the selection menu was drawn leaves it open; one made after closes it.
+    // Issue #745: the selection menu stands through the pane moving on its own, before or after it is drawn, and closes
+    // on the reader's wheel over the pane.
     'menu-pane-scroll',
     'keep-current',
     'defer',
