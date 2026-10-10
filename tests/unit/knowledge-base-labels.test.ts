@@ -272,6 +272,9 @@ describe('资料索引 in the editor\'s words (Issue #428, S80a; KB-009)', () =>
     const empty = { ...failed, reason: 'empty' as const };
     expect(materialIndexStateLine(empty)).toBe('未能提取文字：文件里没有可提取的文字');
     expect(materialIndexLayerLine(empty, 'text')).toBe('未能提取：文件里没有可提取的文字');
+    // DRM or a password, and a declared entity, are said as what they are (Issue #428), never as a damaged file.
+    expect(materialIndexStateLine({ ...failed, reason: 'encrypted' })).toBe('未能提取文字：文件已加密或带有版权保护（DRM），AI7 不读取其中的文字');
+    expect(materialIndexLayerLine({ ...failed, reason: 'external-entity' }, 'text')).toBe('未能提取：文件声明了实体或内部文档类型定义，AI7 为安全起见不读取');
   });
 
   it('reads a waiting card again after a second, then backs off to eight seconds while nothing moves (#729)', () => {

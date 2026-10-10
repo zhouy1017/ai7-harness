@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 120 as const;
+export const SERVICE_PROTOCOL_VERSION = 121 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -6627,9 +6627,19 @@ export type MaterialIndexState = 'queued' | 'indexing' | 'complete' | 'unsupport
 /**
  * Why a layer could not be read (S80a): the format needs a local dependency the Owner has not admitted (PDF text and
  * recognition), AI7 reads no text of this format yet, the text crossed the local reading bounds, the file could not be
- * read, the kept original no longer matches its record, or the file holds no text.
+ * read, the kept original no longer matches its record, or the file holds no text. Since protocol 121 (Issue #428): the file
+ * is encrypted or carries DRM (an EPUB's, an ODT saved with a password), or it declares entities or an internal DTD subset,
+ * which AI7 never expands or fetches.
  */
-export type MaterialIndexReason = 'needs-local-dependency' | 'format-unsupported' | 'over-bound' | 'unreadable' | 'original-changed' | 'empty';
+export type MaterialIndexReason =
+  | 'needs-local-dependency'
+  | 'format-unsupported'
+  | 'over-bound'
+  | 'unreadable'
+  | 'original-changed'
+  | 'empty'
+  | 'encrypted'
+  | 'external-entity';
 
 /**
  * One layer's state, in the five layers of KB-009 and the two parts its text layer names (recognition, Source
