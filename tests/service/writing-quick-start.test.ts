@@ -11,6 +11,7 @@ import {
   QUICK_START_DEVELOPER_LIVE,
   QUICK_START_OFFLINE,
   QUICK_START_PLAN_CHANGED,
+  QUICK_START_RESEND,
   QUICK_START_RULE_CHANGED,
   QUICK_START_SLOT_BUSY,
   SET_RULE_DEVELOPER_LIVE,
@@ -24,6 +25,7 @@ import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-poli
 import { LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
+import { resendDisclosure } from '../../src/service/task-plan.js';
 import { WRITING_LIVE_UNAVAILABLE, type LaunchPolicyProjection, type WritingProjection } from '../../src/shared/protocol.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -273,6 +275,34 @@ describe('the writing 默认执行规则 of one house type (S84b; AUTH-009, TASK
 });
 
 describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TASK-028)', () => {
+  it('stops at the plan, recording nothing, when the Task would send again a range an earlier one left 结果待确认 (Issue #757)', async () => {
+    // The first Task's request for unit 3 is sent and its answer never comes back whole; the kind keeps no progress, so it reads on.
+    const dropped: ResolvedModelFixture = {
+      ...fixture,
+      entries: new Map([...fixture.entries].map(([key, entry]) => [key, entry.unitOrdinal === 3
+        ? { ...entry, response: { kind: 'outcome-unknown' as const, message: '合成：回答没有完整传回。' } }
+        : entry])),
+    };
+    await withSession(async (session) => {
+      const owner = new BaselineAnalysisExecutionOwner({ ledger: session.store.baselineAnalysisLedger, launchPolicy, fixture: dropped, secretResolver: { resolve: async () => null } });
+      try {
+        const { store } = session;
+        const { bookId, rule } = await ruledBook({ store, owner }, WRITING_BOOK_TITLE);
+        // The first Task completed with unit 3 its own outcome-unknown gap.
+        expect(store.inspectWriting(bookId)!.resultSetRevision?.gaps.map((gap) => [gap.unitOrdinal, gap.code])).toEqual([[3, 'outcome-unknown']]);
+        const plan = prepare(store, bookId);
+        const viewed = store.inspectTaskPlan({ bookId, kind: 'writing', ref: plan.taskIntent!.taskIntentId });
+        expect(viewed.resend).toEqual({ units: [3], statement: resendDisclosure([3]) });
+        expect(viewed.unconfirmed?.ranges.map((range) => range.unitOrdinal)).toEqual([3]);
+        expect(await store.quickStartWritingTask(bookId, plan.taskIntent!.taskIntentId, plan.planEnvelope!.digest, rule.ruleVersionId, ONLINE()))
+          .toEqual(fell(QUICK_START_RESEND));
+        expect(store.inspectWriting(bookId)!.authorization).toBeNull();
+      } finally {
+        await owner.dispose();
+      }
+    });
+  }, 300_000);
+
   it('starts the prepared Task of the rule\'s type exactly as 开始任务 would, naming the rule version, and runs it to its end', async () => {
     await withSession(async (session) => {
       const { store, owner } = session;

@@ -619,7 +619,7 @@ describe('结果待确认 carried forward', () => {
       // Unit 4 was not read by this Run: it is still the outcome-unknown gap it was, never `not-attempted`.
       const gap4 = cancelled.resultSetRevision!.gaps.find((gap) => gap.unitOrdinal === 4)!;
       expect(gap4.code).toBe('outcome-unknown');
-      expect(gap4.reason).toBe(`${UNKNOWN_GAP}；${OUTCOME_UNKNOWN_CARRIED}`);
+      expect(gap4.reason).toBe(`${UNKNOWN_REASON}；${OUTCOME_UNKNOWN_CARRIED}`);
       expect(store.baselineAnalysisLedger.latestUnconfirmedRangesOf(bookId)).toEqual([4]);
 
       // One more edit: the next 同步 still names unit 4, and the dispatcher still waits rather than re-sending it.

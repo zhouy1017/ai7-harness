@@ -1020,12 +1020,25 @@ async function openGlobalAttentionTarget(target: GlobalAttentionTarget, analysis
         openTaskPlan(route.bookId, 'review-run', target.reviewRunId);
       });
       return;
-    // A ledger Task of another kind (Issue #760, S74c): the surface that owns it, with its plan in the Task Drawer — 评估 for
-    // AI7 初评, 审稿意见 and 按我的评分重写评语, 交付物 for a 写作任务.
+    // 结果待确认 a completed Run left (Issue #757): the kind's own surface, with its plan in the Task Drawer, where the list is and
+    // 保留为缺口 is recorded.
     case 'task-plan':
       await requestBookWorkbenchRoute({ kind: 'book', bookId: target.bookId }, async (route) => {
-        if (target.taskKind === 'writing') renderBookDeliverables(route.bookId, route.bookTitle);
-        else renderBookEvaluation(route.bookId, route.bookTitle);
+        switch (target.taskKind) {
+          case 'review-run':
+            renderBookReview(route.bookId, route.bookTitle, target.ref === null ? null : { reviewRunId: target.ref, findingId: null });
+            break;
+          case 'initial-evaluation':
+          case 'readers-report':
+          case 'evaluation-rewrite':
+            renderBookEvaluation(route.bookId, route.bookTitle);
+            break;
+          case 'writing':
+            renderBookDeliverables(route.bookId, route.bookTitle);
+            break;
+          default:
+            renderBookAnalysis(route.bookId, route.bookTitle);
+        }
         openTaskPlan(route.bookId, target.taskKind, target.ref);
       });
       return;
