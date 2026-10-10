@@ -2723,7 +2723,9 @@ async function main() {
     await clickSelector(renderer, '[data-library-action="add"]', 'writing-library-add');
     await waitFor(renderer, `document.querySelector('.library-preview [data-library-field="title"]') !== null`, 'writing-library-preview');
     await fill(renderer, '.library-preview [data-library-field="title"]', WRITING_LIBRARY_TITLE, 'writing-library-title');
-    await clickSelector(renderer, '.library-preview [data-library-choice="document"]', 'writing-library-kind');
+    // 资料库's choices are radio buttons: each is chosen as the editor chooses it, and must then read as chosen.
+    const chooseLibrary = (selector, name) => assertRenderer(renderer, `(() => { const radio = document.querySelector(${JSON.stringify(selector)}); if (!(radio instanceof HTMLInputElement) || radio.disabled) return false; radio.click(); return radio.checked; })()`, name);
+    await chooseLibrary('.library-preview [data-library-choice="document"]', 'writing-library-kind');
     await waitFor(renderer, `document.querySelector('[data-library-action="confirm-add"]')?.disabled === false`, 'writing-library-confirm-enabled');
     await clickSelector(renderer, '[data-library-action="confirm-add"]', 'writing-library-confirm');
     await waitFor(renderer, `document.querySelectorAll('article.library-material').length === 1 && document.querySelector('.library-preview') === null`, 'writing-library-added');
@@ -2731,13 +2733,13 @@ async function main() {
     requireJourney(typeof libraryMaterialId === 'string' && UUID_PATTERN.test(libraryMaterialId), 'writing-library-identity', libraryMaterialId);
     await clickSelector(renderer, '[data-library-action="attribute"]', 'writing-library-attribute');
     await waitFor(renderer, `document.querySelector('.library-attribution-chooser [data-library-choice="house"]') !== null`, 'writing-library-attribution-chooser');
-    await clickSelector(renderer, '.library-attribution-chooser [data-library-choice="house"]', 'writing-library-attribution-house');
+    await chooseLibrary('.library-attribution-chooser [data-library-choice="house"]', 'writing-library-attribution-house');
     await waitFor(renderer, `document.querySelector('[data-library-action="confirm-attribution"]')?.disabled === false`, 'writing-library-attribution-enabled');
     await clickSelector(renderer, '[data-library-action="confirm-attribution"]', 'writing-library-attribution-confirm');
     await waitFor(renderer, `document.querySelector('.library-attribution-chooser') === null && document.querySelector('[data-library-action="eligibility"]')?.disabled === false`, 'writing-library-attributed');
     await clickSelector(renderer, '[data-library-action="eligibility"]', 'writing-library-eligibility');
     await waitFor(renderer, `document.querySelector('.library-eligibility-chooser [data-library-choice="excluded"]') !== null`, 'writing-library-eligibility-chooser');
-    await clickSelector(renderer, '.library-eligibility-chooser [data-library-choice="excluded"]', 'writing-library-eligibility-excluded');
+    await chooseLibrary('.library-eligibility-chooser [data-library-choice="excluded"]', 'writing-library-eligibility-excluded');
     await waitFor(renderer, `document.querySelector('[data-library-action="confirm-eligibility"]')?.disabled === false`, 'writing-library-eligibility-enabled');
     await clickSelector(renderer, '[data-library-action="confirm-eligibility"]', 'writing-library-eligibility-confirm');
     // Its index, built here in the background: complete, its text extracted.
