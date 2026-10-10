@@ -674,8 +674,9 @@ async function applyPendingMerge<T>(
       } else if (error instanceof DatabaseMergeError && MERGE_CONFLICTS.has(error.code)) {
         await writeAtomic(join(staging, REFUSAL_NOTE), JSON.stringify('conflict'));
       } else {
-        // Anything else stopped the merge itself — a file it takes, or a write into the store — before any of it committed:
-        // the data was never left unable to open, and the record says so (Issue #644).
+        // Anything else stopped the merge itself — a file it takes, or a write into the store — before any of it committed,
+        // and the store's files are put back as they were saved; the record says so, apart from data that would not open
+        // (Issue #644).
         await writeAtomic(join(staging, REFUSAL_NOTE), JSON.stringify('unmergeable'));
       }
       phase = 'restoring-store';
