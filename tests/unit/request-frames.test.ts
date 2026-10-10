@@ -21,17 +21,34 @@ import {
   MAX_REVIEW_FINDING_REASON_CHARACTERS,
   MAX_REVIEW_RUN_CATEGORIES,
 } from '../../src/shared/protocol.js';
+import type { ServiceOperation, ServiceOperationMap, ServiceRequest } from '../../src/shared/protocol.js';
 
 const encoder = new TextEncoder();
 
+/**
+ * Every accepted frame in this suite is typed against the protocol (Issue #746): a frame literal is `satisfies
+ * ServiceRequest`, a table of accepted rows is `ReadonlyArray<AcceptedInput>`, and a shared input is an `InputOf<op>`.
+ * A key the protocol adds to an operation's input then fails `node tools/check.mjs` on the stale frame here, and
+ * fixing the frame fails the decoder test until `requireInput`'s key list follows — the pin that would have caught the
+ * 7a5b4bca regression, where `startEvaluation` was decoded with its old two keys while the main process sent three.
+ * Rejection rows stay untyped on purpose: they are frames the protocol never sends.
+ */
+type InputOf<Operation extends ServiceOperation> = ServiceOperationMap[Operation]['input'];
+type AcceptedInput = { [Operation in ServiceOperation]: { op: Operation; input: InputOf<Operation> } }[ServiceOperation];
+
 /** The built-in configuration's categories, in its order; the frame bound must admit all of them at once. */
 const BUILTIN_CATEGORY_IDS = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.map((entry) => entry.categoryId);
-const WHOLE_SCOPE = { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null };
+const WHOLE_SCOPE: InputOf<'prepareReviewRun'>['scope'] = { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null };
 const CHAPTER_BLOCK = `blk_${'1'.repeat(24)}`;
 const FINDING_ID = `rvf_${'0'.repeat(24)}`;
 
 function frameOf(value: unknown): Uint8Array {
   return encoder.encode(JSON.stringify(value));
+}
+
+/** An accepted frame: only a request the protocol types can be encoded through here. */
+function acceptedFrameOf(request: ServiceRequest): Uint8Array {
+  return frameOf(request);
 }
 
 function rejectionFor(frame: Uint8Array): ProtocolError {
@@ -44,7 +61,7 @@ function rejectionFor(frame: Uint8Array): ProtocolError {
   throw new Error('expected decodeRequest to reject this frame');
 }
 
-function flushJournalEditInput(insertText: string): Record<string, unknown> {
+function flushJournalEditInput(insertText: string): InputOf<'flushJournalEdit'> {
   return {
     clientEditId: randomUUID(),
     manuscriptId: randomUUID(),
@@ -62,35 +79,35 @@ function flushJournalEditInput(insertText: string): Record<string, unknown> {
 
 describe('decodeRequest accepts well-formed frames', () => {
   it('accepts an operation that takes no input', () => {
-    const request = { id: randomUUID(), op: 'ready', input: {} };
-    expect(decodeRequest(frameOf(request))).toEqual(request);
+    const request = { id: randomUUID(), op: 'ready', input: {} } satisfies ServiceRequest;
+    expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
   });
 
   it('accepts each shape of a discriminated input', () => {
-    const bookRoute = { id: randomUUID(), op: 'resolveBookWorkbenchRoute', input: { kind: 'book', bookId: randomUUID() } };
+    const bookRoute = { id: randomUUID(), op: 'resolveBookWorkbenchRoute', input: { kind: 'book', bookId: randomUUID() } } satisfies ServiceRequest;
     const revisionRoute = {
       id: randomUUID(),
       op: 'resolveBookWorkbenchRoute',
       input: { kind: 'revision', revisionId: randomUUID() },
-    };
-    expect(decodeRequest(frameOf(bookRoute))).toEqual(bookRoute);
-    const feedbackRoute = { ...bookRoute, input: { ...bookRoute.input, feedbackEntryId: `proposal-decision:${randomUUID()}` } };
-    expect(decodeRequest(frameOf(feedbackRoute))).toEqual(feedbackRoute);
+    } satisfies ServiceRequest;
+    expect(decodeRequest(acceptedFrameOf(bookRoute))).toEqual(bookRoute);
+    const feedbackRoute = { ...bookRoute, input: { ...bookRoute.input, feedbackEntryId: `proposal-decision:${randomUUID()}` } } satisfies ServiceRequest;
+    expect(decodeRequest(acceptedFrameOf(feedbackRoute))).toEqual(feedbackRoute);
     for (const input of [
       { ...feedbackRoute.input, feedbackEntryId: 'x'.repeat(161) },
       { ...feedbackRoute.input, feedbackEntryId: null },
       { ...feedbackRoute.input, target: { kind: 'mark' } },
       { ...revisionRoute.input, feedbackEntryId: feedbackRoute.input.feedbackEntryId },
     ]) expect(() => decodeRequest(frameOf({ ...bookRoute, input }))).toThrow(ProtocolError);
-    const materialRoute = { ...bookRoute, input: { ...bookRoute.input, learningMaterialKey: `proposal-decision:${randomUUID()}` } };
-    expect(decodeRequest(frameOf(materialRoute))).toEqual(materialRoute);
+    const materialRoute = { ...bookRoute, input: { ...bookRoute.input, learningMaterialKey: `proposal-decision:${randomUUID()}` } } satisfies ServiceRequest;
+    expect(decodeRequest(acceptedFrameOf(materialRoute))).toEqual(materialRoute);
     for (const input of [
       { ...materialRoute.input, learningMaterialKey: 'x'.repeat(161) },
       { ...materialRoute.input, learningMaterialKey: null },
       { ...materialRoute.input, target: { kind: 'mark' } },
       { ...revisionRoute.input, learningMaterialKey: materialRoute.input.learningMaterialKey },
     ]) expect(() => decodeRequest(frameOf({ ...bookRoute, input }))).toThrow(ProtocolError);
-    expect(decodeRequest(frameOf(revisionRoute))).toEqual(revisionRoute);
+    expect(decodeRequest(acceptedFrameOf(revisionRoute))).toEqual(revisionRoute);
   });
 
   it('accepts an import review with each text-box choice (ADR 0086)', () => {
@@ -105,8 +122,8 @@ describe('decodeRequest accepts well-formed frames', () => {
           acceptDegradation: false,
           textBoxDisposition,
         },
-      };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+      } satisfies ServiceRequest;
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
   });
 
@@ -115,8 +132,8 @@ describe('decodeRequest accepts well-formed frames', () => {
       id: randomUUID(),
       op: 'getHistoricalRevision',
       input: { revisionId: randomUUID(), cursor: null },
-    };
-    expect(decodeRequest(frameOf(request))).toEqual(request);
+    } satisfies ServiceRequest;
+    expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
   });
 
   it('accepts a foreground-boundary inspection that names a Book and a Run record', () => {
@@ -124,35 +141,44 @@ describe('decodeRequest accepts well-formed frames', () => {
       id: randomUUID(),
       op: 'inspectForegroundExecutionBoundary',
       input: { bookId: randomUUID(), runRecordId: randomUUID() },
-    };
-    expect(decodeRequest(frameOf(request))).toEqual(request);
+    } satisfies ServiceRequest;
+    expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
   });
 
   it('accepts the three baseline-analysis operations with their exact inputs', () => {
-    const inspect = { id: randomUUID(), op: 'inspectBaselineAnalysis', input: { bookId: randomUUID(), revisionId: null } };
-    const inspectRevision = { id: randomUUID(), op: 'inspectBaselineAnalysis', input: { bookId: randomUUID(), revisionId: randomUUID() } };
-    const prepare = { id: randomUUID(), op: 'prepareBaselineAnalysis', input: { bookId: randomUUID(), goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false } };
-    const sync = { id: randomUUID(), op: 'prepareBaselineAnalysis', input: { bookId: randomUUID(), goal: BASELINE_ANALYSIS_MODE_GOALS['sync-current'], update: { mode: 'sync-current', selectedRange: null }, reconfirm: false } };
-    const range = { id: randomUUID(), op: 'prepareBaselineAnalysis', input: { bookId: randomUUID(), goal: BASELINE_ANALYSIS_MODE_GOALS['reanalyze-range'], update: { mode: 'reanalyze-range', selectedRange: { startPosition: 26, endPosition: 43 } }, reconfirm: true } };
-    const whole = { id: randomUUID(), op: 'prepareBaselineAnalysis', input: { bookId: randomUUID(), goal: BASELINE_ANALYSIS_MODE_GOALS['reanalyze-book'], update: { mode: 'reanalyze-book', selectedRange: null }, reconfirm: false } };
+    const inspect = { id: randomUUID(), op: 'inspectBaselineAnalysis', input: { bookId: randomUUID(), revisionId: null } } satisfies ServiceRequest;
+    const inspectRevision = { id: randomUUID(), op: 'inspectBaselineAnalysis', input: { bookId: randomUUID(), revisionId: randomUUID() } } satisfies ServiceRequest;
+    const prepare = { id: randomUUID(), op: 'prepareBaselineAnalysis', input: { bookId: randomUUID(), goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false } } satisfies ServiceRequest;
+    const sync = { id: randomUUID(), op: 'prepareBaselineAnalysis', input: { bookId: randomUUID(), goal: BASELINE_ANALYSIS_MODE_GOALS['sync-current'], update: { mode: 'sync-current', selectedRange: null }, reconfirm: false } } satisfies ServiceRequest;
+    const range = { id: randomUUID(), op: 'prepareBaselineAnalysis', input: { bookId: randomUUID(), goal: BASELINE_ANALYSIS_MODE_GOALS['reanalyze-range'], update: { mode: 'reanalyze-range', selectedRange: { startPosition: 26, endPosition: 43 } }, reconfirm: true } } satisfies ServiceRequest;
+    const whole = { id: randomUUID(), op: 'prepareBaselineAnalysis', input: { bookId: randomUUID(), goal: BASELINE_ANALYSIS_MODE_GOALS['reanalyze-book'], update: { mode: 'reanalyze-book', selectedRange: null }, reconfirm: false } } satisfies ServiceRequest;
     const authorize = {
       id: randomUUID(),
       op: 'authorizeBaselineAnalysis',
       input: { bookId: randomUUID(), taskIntentId: randomUUID(), planEnvelopeDigest: 'a'.repeat(64) },
-    };
+    } satisfies ServiceRequest;
     // 改计划重做 (Issue #422, S76c): a preparation may name the cancelled Run it redoes, or say plainly that it redoes none.
-    const redo = { id: randomUUID(), op: 'prepareBaselineAnalysis', input: { bookId: randomUUID(), goal: BASELINE_ANALYSIS_MODE_GOALS['sync-current'], update: { mode: 'sync-current', selectedRange: null }, reconfirm: false, redoOf: randomUUID() } };
-    const redoNone = { id: randomUUID(), op: 'prepareBaselineAnalysis', input: { bookId: randomUUID(), goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false, redoOf: null } };
+    const redo = { id: randomUUID(), op: 'prepareBaselineAnalysis', input: { bookId: randomUUID(), goal: BASELINE_ANALYSIS_MODE_GOALS['sync-current'], update: { mode: 'sync-current', selectedRange: null }, reconfirm: false, redoOf: randomUUID() } } satisfies ServiceRequest;
+    const redoNone = { id: randomUUID(), op: 'prepareBaselineAnalysis', input: { bookId: randomUUID(), goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false, redoOf: null } } satisfies ServiceRequest;
     for (const request of [inspect, inspectRevision, prepare, sync, range, whole, authorize, redo, redoNone]) {
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
   });
 
   it('accepts 重新分析这段 by its paragraphs\' block identities instead of a range, and never both (Issue #423 review, P3-3)', () => {
     const BLOCK = `blk_${'a'.repeat(24)}`;
     const ask = (update: unknown) => ({ id: randomUUID(), op: 'prepareBaselineAnalysis', input: { bookId: randomUUID(), goal: BASELINE_ANALYSIS_MODE_GOALS['reanalyze-range'], update, reconfirm: false } });
-    const named = ask({ mode: 'reanalyze-range', selectedRange: null, selectedBlocks: { fromBlockId: BLOCK, toBlockId: BLOCK } });
-    expect(decodeRequest(frameOf(named))).toEqual(named);
+    const named = {
+      id: randomUUID(),
+      op: 'prepareBaselineAnalysis',
+      input: {
+        bookId: randomUUID(),
+        goal: BASELINE_ANALYSIS_MODE_GOALS['reanalyze-range'],
+        update: { mode: 'reanalyze-range', selectedRange: null, selectedBlocks: { fromBlockId: BLOCK, toBlockId: BLOCK } },
+        reconfirm: false,
+      },
+    } satisfies ServiceRequest;
+    expect(decodeRequest(acceptedFrameOf(named))).toEqual(named);
     // A range and the blocks together, neither, a short identity, another mode, and an extra key are each refused.
     expect(rejectionFor(frameOf(ask({ mode: 'reanalyze-range', selectedRange: { startPosition: 2, endPosition: 2 }, selectedBlocks: { fromBlockId: BLOCK, toBlockId: BLOCK } })))).toBeInstanceOf(ProtocolError);
     expect(rejectionFor(frameOf(ask({ mode: 'reanalyze-range', selectedRange: null, selectedBlocks: null })))).toBeInstanceOf(ProtocolError);
@@ -160,8 +186,12 @@ describe('decodeRequest accepts well-formed frames', () => {
     expect(rejectionFor(frameOf(ask({ mode: 'reanalyze-range', selectedRange: null, selectedBlocks: { fromBlockId: BLOCK, toBlockId: BLOCK, extra: 1 } })))).toBeInstanceOf(ProtocolError);
     const sync = { id: randomUUID(), op: 'prepareBaselineAnalysis', input: { bookId: randomUUID(), goal: BASELINE_ANALYSIS_MODE_GOALS['sync-current'], update: { mode: 'sync-current', selectedRange: null, selectedBlocks: { fromBlockId: BLOCK, toBlockId: BLOCK } }, reconfirm: false } };
     expect(rejectionFor(frameOf(sync))).toBeInstanceOf(ProtocolError);
-    const plainSync = { ...sync, input: { ...sync.input, update: { mode: 'sync-current', selectedRange: null, selectedBlocks: null } } };
-    expect(decodeRequest(frameOf(plainSync))).toEqual(plainSync);
+    const plainSync = {
+      ...sync,
+      op: 'prepareBaselineAnalysis',
+      input: { ...sync.input, update: { mode: 'sync-current', selectedRange: null, selectedBlocks: null } },
+    } satisfies ServiceRequest;
+    expect(decodeRequest(acceptedFrameOf(plainSync))).toEqual(plainSync);
   });
 
   it('accepts the three Connectivity Wait operations with their exact inputs, and refuses anything more (Issue #502)', () => {
@@ -169,10 +199,10 @@ describe('decodeRequest accepts well-formed frames', () => {
       id: randomUUID(),
       op: 'startBaselineAnalysisWhenOnline',
       input: { bookId: randomUUID(), taskIntentId: randomUUID(), planEnvelopeDigest: 'b'.repeat(64) },
-    };
-    const cancel = { id: randomUUID(), op: 'cancelWaitingBaselineAnalysis', input: { bookId: randomUUID(), taskIntentId: randomUUID() } };
-    const preflight = { id: randomUUID(), op: 'runReconnectPreflight', input: {} };
-    for (const request of [startWhenOnline, cancel, preflight]) expect(decodeRequest(frameOf(request))).toEqual(request);
+    } satisfies ServiceRequest;
+    const cancel = { id: randomUUID(), op: 'cancelWaitingBaselineAnalysis', input: { bookId: randomUUID(), taskIntentId: randomUUID() } } satisfies ServiceRequest;
+    const preflight = { id: randomUUID(), op: 'runReconnectPreflight', input: {} } satisfies ServiceRequest;
+    for (const request of [startWhenOnline, cancel, preflight]) expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     // Reconnect Preflight names no Book; a waiting Run is named by its Task Intent; a digest is 64 hex digits.
     expect(rejectionFor(frameOf({ ...preflight, input: { bookId: randomUUID() } }))).toBeInstanceOf(ProtocolError);
     expect(rejectionFor(frameOf({ ...cancel, input: { ...cancel.input, runRecordId: randomUUID() } }))).toBeInstanceOf(ProtocolError);
@@ -181,8 +211,8 @@ describe('decodeRequest accepts well-formed frames', () => {
   });
 
   it('accepts 取消任务 by the Task Intent within the route\'s Book, and nothing more (Issue #422)', () => {
-    const cancel = { id: randomUUID(), op: 'cancelBaselineAnalysisRun', input: { bookId: randomUUID(), taskIntentId: randomUUID() } };
-    expect(decodeRequest(frameOf(cancel))).toEqual(cancel);
+    const cancel = { id: randomUUID(), op: 'cancelBaselineAnalysisRun', input: { bookId: randomUUID(), taskIntentId: randomUUID() } } satisfies ServiceRequest;
+    expect(decodeRequest(acceptedFrameOf(cancel))).toEqual(cancel);
     expect(rejectionFor(frameOf({ ...cancel, input: { ...cancel.input, runRecordId: randomUUID() } }))).toBeInstanceOf(ProtocolError);
     expect(rejectionFor(frameOf({ ...cancel, input: { bookId: randomUUID(), taskIntentId: 'not-a-uuid' } }))).toBeInstanceOf(ProtocolError);
     expect(rejectionFor(frameOf({ ...cancel, input: { taskIntentId: randomUUID() } }))).toBeInstanceOf(ProtocolError);
@@ -193,10 +223,11 @@ describe('decodeRequest accepts well-formed frames', () => {
       id: randomUUID(),
       op: 'editBaselineAnalysisPlan',
       input: { bookId: randomUUID(), taskIntentId: randomUUID(), planEnvelopeDigest: 'a'.repeat(64), removedSteps: ['assurance-sampling'], disallowedAdaptations: [] },
-    };
-    expect(decodeRequest(frameOf(edit))).toEqual(edit);
+    } satisfies ServiceRequest;
+    expect(decodeRequest(acceptedFrameOf(edit))).toEqual(edit);
     // The frame carries identities only; which of them a plan can leave out is the ledger's to decide.
-    expect(decodeRequest(frameOf({ ...edit, input: { ...edit.input, removedSteps: ['units'] } }))).toMatchObject({ op: 'editBaselineAnalysisPlan' });
+    const unitsRemoved = { ...edit, input: { ...edit.input, removedSteps: ['units'] } } satisfies ServiceRequest;
+    expect(decodeRequest(acceptedFrameOf(unitsRemoved))).toMatchObject({ op: 'editBaselineAnalysisPlan' });
     for (const input of [
       { ...edit.input, planEnvelopeDigest: 'A'.repeat(64) },
       { ...edit.input, removedSteps: 'assurance-sampling' },
@@ -219,12 +250,12 @@ describe('decodeRequest accepts well-formed frames', () => {
     ]) {
       expect(rejectionFor(frameOf({ ...edit, input }))).toBeInstanceOf(ProtocolError);
     }
-    const asked = { ...edit, input: { ...edit.input, askFirstAdaptations: ['safe-retry'] } };
-    expect(decodeRequest(frameOf(asked))).toEqual(asked);
-    const bounded = { ...edit, input: { ...edit.input, runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 5000 } } };
-    expect(decodeRequest(frameOf(bounded))).toEqual(bounded);
-    const unbounded = { ...edit, input: { ...edit.input, runBudgetCeiling: null } };
-    expect(decodeRequest(frameOf(unbounded))).toEqual(unbounded);
+    const asked = { ...edit, input: { ...edit.input, askFirstAdaptations: ['safe-retry'] } } satisfies ServiceRequest;
+    expect(decodeRequest(acceptedFrameOf(asked))).toEqual(asked);
+    const bounded = { ...edit, input: { ...edit.input, runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 5000 } } } satisfies ServiceRequest;
+    expect(decodeRequest(acceptedFrameOf(bounded))).toEqual(bounded);
+    const unbounded = { ...edit, input: { ...edit.input, runBudgetCeiling: null } } satisfies ServiceRequest;
+    expect(decodeRequest(acceptedFrameOf(unbounded))).toEqual(unbounded);
   });
 
   it('accepts 提交回答 with the question, one option and a note or none, and refuses anything else (Issue #422, S76d)', () => {
@@ -232,10 +263,10 @@ describe('decodeRequest accepts well-formed frames', () => {
       id: randomUUID(),
       op: 'answerBaselineAnalysisClarification',
       input: { bookId: randomUUID(), taskIntentId: randomUUID(), requestId: randomUUID(), optionId: 'retry', note: null },
-    };
-    expect(decodeRequest(frameOf(answer))).toEqual(answer);
-    const noted = { ...answer, input: { ...answer.input, optionId: 'record-gap', note: '先看看服务状态' } };
-    expect(decodeRequest(frameOf(noted))).toEqual(noted);
+    } satisfies ServiceRequest;
+    expect(decodeRequest(acceptedFrameOf(answer))).toEqual(answer);
+    const noted = { ...answer, input: { ...answer.input, optionId: 'record-gap', note: '先看看服务状态' } } satisfies ServiceRequest;
+    expect(decodeRequest(acceptedFrameOf(noted))).toEqual(noted);
     for (const input of [
       { ...answer.input, optionId: 'maybe' },
       { ...answer.input, requestId: 'not-a-uuid' },
@@ -249,9 +280,9 @@ describe('decodeRequest accepts well-formed frames', () => {
   });
 
   it('accepts 暂停 and 续行 by the Task Intent within the route\'s Book, and nothing more (Issue #422, S76b)', () => {
-    for (const op of ['pauseBaselineAnalysisRun', 'resumeBaselineAnalysisRun']) {
-      const request = { id: randomUUID(), op, input: { bookId: randomUUID(), taskIntentId: randomUUID() } };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+    for (const op of ['pauseBaselineAnalysisRun', 'resumeBaselineAnalysisRun'] as const) {
+      const request = { id: randomUUID(), op, input: { bookId: randomUUID(), taskIntentId: randomUUID() } } satisfies ServiceRequest;
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
       expect(rejectionFor(frameOf({ ...request, input: { ...request.input, runRecordId: randomUUID() } }))).toBeInstanceOf(ProtocolError);
       expect(rejectionFor(frameOf({ ...request, input: { bookId: randomUUID(), taskIntentId: 'not-a-uuid' } }))).toBeInstanceOf(ProtocolError);
       expect(rejectionFor(frameOf({ ...request, input: { taskIntentId: randomUUID() } }))).toBeInstanceOf(ProtocolError);
@@ -261,7 +292,7 @@ describe('decodeRequest accepts well-formed frames', () => {
   it('accepts the seven 审阅 operations with their exact inputs', () => {
     const bookId = randomUUID();
     const reviewRunId = randomUUID();
-    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+    const inputs: ReadonlyArray<AcceptedInput> = [
       { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId: null } },
       { op: 'inspectReviewWorkspace', input: { bookId, reviewRunId } },
       // The page cursor and the four filters of the results are each optional, and `null` is none.
@@ -291,27 +322,27 @@ describe('decodeRequest accepts well-formed frames', () => {
       { op: 'generateReviewReport', input: { bookId, reviewRunId } },
       { op: 'inspectReviewFindingOfMark', input: { bookId, markId: randomUUID() } },
     ];
-    for (const { op, input } of inputs) {
-      const request = { id: randomUUID(), op, input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
     expect(new Set(inputs.map((entry) => entry.op)).size).toBe(7);
   });
 
   it('accepts a milestone save with a frozen purpose and no words, and with 自行输入 and the editor\'s words', () => {
     const binding = { manuscriptId: randomUUID(), branchId: randomUUID(), label: '二审前', note: '' };
-    for (const purposeKind of ['stage-archive', 'review-candidate', 'delivery-candidate', 'other']) {
-      const request = { id: randomUUID(), op: 'saveMilestone', input: { ...binding, purposeKind, purpose: null } };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+    for (const purposeKind of ['stage-archive', 'review-candidate', 'delivery-candidate', 'other'] as const) {
+      const request = { id: randomUUID(), op: 'saveMilestone', input: { ...binding, purposeKind, purpose: null } } satisfies ServiceRequest;
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
-    const own = { id: randomUUID(), op: 'saveMilestone', input: { ...binding, purposeKind: 'custom', purpose: '途'.repeat(MAX_MILESTONE_PURPOSE_CODE_UNITS), note: '说明' } };
-    expect(decodeRequest(frameOf(own))).toEqual(own);
+    const own = { id: randomUUID(), op: 'saveMilestone', input: { ...binding, purposeKind: 'custom', purpose: '途'.repeat(MAX_MILESTONE_PURPOSE_CODE_UNITS), note: '说明' } } satisfies ServiceRequest;
+    expect(decodeRequest(acceptedFrameOf(own))).toEqual(own);
   });
 
   it('accepts the two 交付物 operations with their exact inputs, 发稿范围 and 依据 at their bounds however padded', () => {
     const bookId = randomUUID();
     const milestoneId = randomUUID();
-    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+    const inputs: ReadonlyArray<AcceptedInput> = [
       { op: 'inspectDeliverables', input: { bookId } },
       { op: 'designatePublicationVersion', input: { bookId, milestoneId, scope: '纸质版首印', basis: '三审通过，社领导同意' } },
       {
@@ -321,16 +352,18 @@ describe('decodeRequest accepts well-formed frames', () => {
       // Characters outside the Basic Multilingual Plane count once each, as the store counts them.
       { op: 'designatePublicationVersion', input: { bookId, milestoneId, scope: '𠀀'.repeat(MAX_PUBLICATION_SCOPE_CHARACTERS), basis: '𠀀'.repeat(MAX_PUBLICATION_BASIS_CHARACTERS) } },
     ];
-    for (const { op, input } of inputs) {
-      const request = { id: randomUUID(), op, input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
   });
 
   it('accepts the 生产文档 read and commands with a house type, a material, a document and a delivery by their identities', () => {
     const bookId = randomUUID();
-    const delivery = { bookId, documentId: randomUUID(), version: { kind: 'saved', revisionId: randomUUID() } };
-    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+    const delivery: Pick<InputOf<'recordProductionDocumentDelivery'>, 'bookId' | 'documentId' | 'version'> = {
+      bookId, documentId: randomUUID(), version: { kind: 'saved', revisionId: randomUUID() },
+    };
+    const inputs: ReadonlyArray<AcceptedInput> = [
       { op: 'inspectProductionDocuments', input: { bookId } },
       // The Book's 任务 panel (Issue #423, S77a).
       { op: 'inspectBookTasks', input: { bookId } },
@@ -352,22 +385,24 @@ describe('decodeRequest accepts well-formed frames', () => {
           note: '𠀀'.repeat(MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS) },
       },
     ];
-    for (const { op, input } of inputs) {
-      const request = { id: randomUUID(), op, input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
   });
 
   it('takes a workflow move\'s reason within the one bound the service holds it to, and refuses one past it (Issue #626)', () => {
-    const move = { bookId: randomUUID(), documentId: randomUUID(), phaseId: 'drafting', action: 'skip', expectedTransitions: 3 };
-    const taken: ReadonlyArray<unknown> = [
+    const move: Omit<InputOf<'transitionProductionDocumentPhase'>, 'reason'> = {
+      bookId: randomUUID(), documentId: randomUUID(), phaseId: 'drafting', action: 'skip', expectedTransitions: 3,
+    };
+    const taken: ReadonlyArray<InputOf<'transitionProductionDocumentPhase'>> = [
       { ...move, reason: { choice: 'custom', text: '𠀀'.repeat(MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS) } },
       { ...move, reason: { choice: 'later', text: null } },
       { ...move, action: 'start', reason: null },
     ];
     for (const input of taken) {
-      const request = { id: randomUUID(), op: 'transitionProductionDocumentPhase', input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+      const request = { id: randomUUID(), op: 'transitionProductionDocumentPhase', input } satisfies ServiceRequest;
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
     const refused: ReadonlyArray<unknown> = [
       { ...move, reason: { choice: 'custom', text: '字'.repeat(MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS + 1) } },
@@ -441,14 +476,14 @@ describe('decodeRequest accepts well-formed frames', () => {
 
   it('accepts the read of 图书交付包, and 准备 with a purpose in its bound and the digest of the content read (Issue #416)', () => {
     const bookId = randomUUID();
-    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+    const inputs: ReadonlyArray<AcceptedInput> = [
       { op: 'inspectBookDeliveryPackage', input: { bookId } },
       { op: 'prepareBookDeliveryPackage', input: { bookId, purpose: '交出版社存档', expectedContentDigest: 'a'.repeat(64) } },
       { op: 'prepareBookDeliveryPackage', input: { bookId, purpose: '𠀀'.repeat(MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS), expectedContentDigest: 'b'.repeat(64) } },
     ];
-    for (const { op, input } of inputs) {
-      const request = { id: randomUUID(), op, input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
   });
 
@@ -477,7 +512,7 @@ describe('decodeRequest accepts well-formed frames', () => {
     const bookId = randomUUID();
     const folder = resolve('交付包导出');
     const options = { includeAnnotations: true, includeSuggestions: false };
-    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+    const inputs: ReadonlyArray<AcceptedInput> = [
       { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options } },
       { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options: { includeAnnotations: false, includeSuggestions: true } } },
       { op: 'prepareBookDeliveryPackageExport', input: { bookId, packageVersionId: randomUUID(), options, memberKeys: ['manifest'], reviewDigest: 'a'.repeat(64), folder } },
@@ -490,15 +525,15 @@ describe('decodeRequest accepts well-formed frames', () => {
       },
       { op: 'approveBookDeliveryPackageExport', input: { bookId, exportId: randomUUID() } },
     ];
-    for (const { op, input } of inputs) {
-      const request = { id: randomUUID(), op, input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
   });
 
   it('accepts a Book\'s people and 书库\'s search within their bounds (Issue #431, S83)', () => {
     const bookId = randomUUID();
-    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+    const inputs: ReadonlyArray<AcceptedInput> = [
       { op: 'updateBookPeople', input: { bookId, expectedVersion: 0, authors: ['周一', '吴二'], editors: ['郑三'], related: [{ roleId: 'proofreader', name: '王四' }] } },
       { op: 'updateBookPeople', input: { bookId, expectedVersion: 3, authors: [], editors: [], related: [] } },
       { op: 'updateBookPeople', input: { bookId, expectedVersion: 1, authors: ['𠀀'.repeat(40)], editors: [], related: [] } },
@@ -506,9 +541,9 @@ describe('decodeRequest accepts well-formed frames', () => {
       { op: 'listBooks', input: { after: null, filter: { field: 'author', text: '吴二' } } },
       { op: 'listBooks', input: { after: { title: '人员之书甲', bookId }, filter: { field: 'all', text: '郑' } } },
     ];
-    for (const { op, input } of inputs) {
-      const request = { id: randomUUID(), op, input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
   });
 
@@ -540,7 +575,7 @@ describe('decodeRequest accepts well-formed frames', () => {
 
   it('accepts 维护事项: a case read, recorded on a designation, its steps and its 勘误 (Issue #426, S68a)', () => {
     const bookId = randomUUID();
-    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+    const inputs: ReadonlyArray<AcceptedInput> = [
       { op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID() } },
       { op: 'inspectMaintenanceCase', input: { bookId, caseId: randomUUID(), beforeRevision: 61, afterPublicationOrdinal: 30, errataVersionId: randomUUID() } },
       { op: 'listMaintenanceCases', input: { bookId, publicationVersionId: randomUUID(), beforeOrdinal: 22 } },
@@ -551,9 +586,9 @@ describe('decodeRequest accepts well-formed frames', () => {
       { op: 'appendMaintenanceCaseRevision', input: { bookId, caseId: randomUUID(), expectedRevision: 3, step: { kind: 'conclude', status: 'complete', outcome: '已记录' } } },
       { op: 'saveMaintenanceErrata', input: { bookId, caseId: randomUUID(), expectedRevision: 1, body: '第三段「甲」应为「乙」。' } },
     ];
-    for (const { op, input } of inputs) {
-      const request = { id: randomUUID(), op, input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
   });
 
@@ -628,13 +663,13 @@ describe('decodeRequest accepts well-formed frames', () => {
   });
 
   it('accepts 待我处理, which reads across every Book and names none', () => {
-    const request = { id: randomUUID(), op: 'inspectGlobalAttention', input: {} };
-    expect(decodeRequest(frameOf(request))).toEqual(request);
+    const request = { id: randomUUID(), op: 'inspectGlobalAttention', input: {} } satisfies ServiceRequest;
+    expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
   });
 
   it('accepts the Task Drawer read for each of the three kinds, naming the Task or the current one', () => {
     const bookId = randomUUID();
-    const inputs: ReadonlyArray<Record<string, unknown>> = [
+    const inputs: ReadonlyArray<InputOf<'inspectTaskPlan'>> = [
       { bookId, kind: 'fixed-task', ref: null },
       { bookId, kind: 'fixed-task', ref: randomUUID() },
       { bookId, kind: 'baseline-analysis', ref: null },
@@ -642,17 +677,17 @@ describe('decodeRequest accepts well-formed frames', () => {
       { bookId, kind: 'review-run', ref: randomUUID() },
     ];
     for (const input of inputs) {
-      const request = { id: randomUUID(), op: 'inspectTaskPlan', input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+      const request = { id: randomUUID(), op: 'inspectTaskPlan', input } satisfies ServiceRequest;
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
   });
 
   it('accepts the four 导出 operations with their exact inputs (Issue #413)', () => {
     const bookId = randomUUID();
     const options = { includeAnnotations: true, includeSuggestions: true, includeEditorNotes: false };
-    const milestone = { kind: 'milestone', milestoneId: randomUUID() };
+    const milestone: InputOf<'reviewManuscriptExport'>['target'] = { kind: 'milestone', milestoneId: randomUUID() };
     const destination = process.platform === 'win32' ? 'C:\\导出\\稿件.docx' : '/导出/稿件.docx';
-    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+    const inputs: ReadonlyArray<AcceptedInput> = [
       { op: 'reviewManuscriptExport', input: { bookId, target: { kind: 'current' }, options } },
       { op: 'reviewManuscriptExport', input: { bookId, target: milestone, options: { ...options, includeEditorNotes: true } } },
       { op: 'prepareManuscriptExport', input: { bookId, revisionId: randomUUID(), target: milestone, options, reviewDigest: 'd'.repeat(64), destination } },
@@ -678,16 +713,16 @@ describe('decodeRequest accepts well-formed frames', () => {
           reviewDigest: 'c'.repeat(64), destination },
       },
     ];
-    for (const { op, input } of inputs) {
-      const request = { id: randomUUID(), op, input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
   });
 
   it('accepts the three 稿件冲突 operations with their exact inputs, and a draft of every resolution at its bounds', () => {
     const conflict = { manuscriptId: randomUUID(), branchId: randomUUID(), markId: randomUUID() };
     const basisDigest = 'b'.repeat(64);
-    const units = [
+    const units: InputOf<'saveProposalConflictDraft'>['units'] = [
       { resolution: null, text: null },
       { resolution: 'unresolved', text: null },
       { resolution: 'current', text: null },
@@ -697,7 +732,7 @@ describe('decodeRequest accepts well-formed frames', () => {
       { resolution: 'edited', text: '' },
       { resolution: 'edited', text: '合'.repeat(MAX_MARK_BODY_CODE_UNITS) },
     ];
-    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+    const inputs: ReadonlyArray<AcceptedInput> = [
       { op: 'inspectProposalConflict', input: conflict },
       { op: 'saveProposalConflictDraft', input: { ...conflict, basisDigest, units } },
       { op: 'saveProposalConflictDraft', input: { ...conflict, basisDigest, units: Array.from({ length: MAX_PROPOSAL_CONFLICT_UNITS }, () => ({ resolution: null, text: null })) } },
@@ -705,9 +740,9 @@ describe('decodeRequest accepts well-formed frames', () => {
       { op: 'resolveProposalConflict', input: { ...conflict, basisDigest, outcome: 'defer', draftOrdinal: null } },
       { op: 'resolveProposalConflict', input: { ...conflict, basisDigest, outcome: 'new-version', draftOrdinal: 7 } },
     ];
-    for (const { op, input } of inputs) {
-      const request = { id: randomUUID(), op, input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
   });
 });
@@ -715,16 +750,16 @@ describe('decodeRequest accepts well-formed frames', () => {
 describe('decodeRequest enforces size limits', () => {
   it('accepts an edit at the code-unit bound and rejects one past it', () => {
     const id = randomUUID();
-    const atBound = { id, op: 'flushJournalEdit', input: flushJournalEditInput('x'.repeat(MAX_EDIT_CODE_UNITS)) };
-    expect(decodeRequest(frameOf(atBound))).toEqual(atBound);
+    const atBound = { id, op: 'flushJournalEdit', input: flushJournalEditInput('x'.repeat(MAX_EDIT_CODE_UNITS)) } satisfies ServiceRequest;
+    expect(decodeRequest(acceptedFrameOf(atBound))).toEqual(atBound);
 
     const pastBound = { id, op: 'flushJournalEdit', input: flushJournalEditInput('x'.repeat(MAX_EDIT_CODE_UNITS + 1)) };
     expect(rejectionFor(frameOf(pastBound)).requestId).toBe(id);
   });
 
   it('accepts an empty edit, which the bound explicitly allows', () => {
-    const request = { id: randomUUID(), op: 'flushJournalEdit', input: flushJournalEditInput('') };
-    expect(decodeRequest(frameOf(request))).toEqual(request);
+    const request = { id: randomUUID(), op: 'flushJournalEdit', input: flushJournalEditInput('') } satisfies ServiceRequest;
+    expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
   });
 
   it('accepts the exclusion list at its bound and rejects one entry past it', () => {
@@ -738,8 +773,8 @@ describe('decodeRequest enforces size limits', () => {
         replacement: '替换文本',
         excludedMatchIds: Array.from({ length: MAX_REPLACEMENT_EXCLUSIONS }, () => exclusion),
       },
-    };
-    expect(decodeRequest(frameOf(atBound))).toEqual(atBound);
+    } satisfies ServiceRequest;
+    expect(decodeRequest(acceptedFrameOf(atBound))).toEqual(atBound);
 
     const pastBound = {
       id,
@@ -757,13 +792,13 @@ describe('decodeRequest enforces size limits', () => {
     expect(BUILTIN_CATEGORY_IDS).toHaveLength(MAX_REVIEW_RUN_CATEGORIES);
     const id = randomUUID();
     const bookId = randomUUID();
-    const all = { id, op: 'prepareReviewRun', input: { bookId, categoryIds: BUILTIN_CATEGORY_IDS, scope: WHOLE_SCOPE } };
-    expect(decodeRequest(frameOf(all))).toEqual(all);
+    const all = { id, op: 'prepareReviewRun', input: { bookId, categoryIds: BUILTIN_CATEGORY_IDS, scope: WHOLE_SCOPE } } satisfies ServiceRequest;
+    expect(decodeRequest(acceptedFrameOf(all))).toEqual(all);
     const oneMore = { id, op: 'prepareReviewRun', input: { bookId, categoryIds: [...BUILTIN_CATEGORY_IDS, 'house-category'], scope: WHOLE_SCOPE } };
     expect(rejectionFor(frameOf(oneMore)).requestId).toBe(id);
     const approvals = BUILTIN_CATEGORY_IDS.map((categoryId) => ({ categoryId, planEnvelopeDigest: 'c'.repeat(64) }));
-    const approveAll = { id, op: 'authorizeReviewRun', input: { bookId, reviewRunId: randomUUID(), planDigests: approvals } };
-    expect(decodeRequest(frameOf(approveAll))).toEqual(approveAll);
+    const approveAll = { id, op: 'authorizeReviewRun', input: { bookId, reviewRunId: randomUUID(), planDigests: approvals } } satisfies ServiceRequest;
+    expect(decodeRequest(acceptedFrameOf(approveAll))).toEqual(approveAll);
     const approveOneMore = { ...approveAll, input: { ...approveAll.input, planDigests: [...approvals, { categoryId: 'house-category', planEnvelopeDigest: 'c'.repeat(64) }] } };
     expect(rejectionFor(frameOf(approveOneMore)).requestId).toBe(id);
   });
@@ -776,7 +811,7 @@ describe('decodeRequest enforces size limits', () => {
       id,
       op: 'recordReviewFindingDisposition',
       input: { bookId, reviewRunId, findingId: FINDING_ID, disposition: 'ignored', reason },
-    });
+    }) satisfies ServiceRequest;
     for (const reason of [
       '理'.repeat(MAX_REVIEW_FINDING_REASON_CHARACTERS),
       `  ${'理'.repeat(MAX_REVIEW_FINDING_REASON_CHARACTERS)}\n`,
@@ -784,7 +819,7 @@ describe('decodeRequest enforces size limits', () => {
       '𠀀'.repeat(MAX_REVIEW_FINDING_REASON_CHARACTERS),
     ]) {
       const request = dispose(reason);
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
     expect(rejectionFor(frameOf(dispose('理'.repeat(MAX_REVIEW_FINDING_REASON_CHARACTERS + 1)))).requestId).toBe(id);
     expect(rejectionFor(frameOf(dispose('𠀀'.repeat(MAX_REVIEW_FINDING_REASON_CHARACTERS + 1)))).requestId).toBe(id);
@@ -1146,7 +1181,7 @@ describe('decodeRequest rejects malformed frames', () => {
   });
 
   it('accepts 知识库 › 审阅规范文件: the read naming nothing, a preview by document and absolute path, a confirmation by preview (Issue #427)', () => {
-    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+    const inputs: ReadonlyArray<AcceptedInput> = [
       { op: 'inspectReviewGuidelines', input: {} },
       { op: 'inspectReviewGuidelines', input: { page: { documentId: 'ai7-builtin/typos-and-usage', versionsBefore: 9, clausePage: 2 } } },
       { op: 'inspectReviewGuidelines', input: { page: { documentId: 'ai7-builtin/typos-and-usage', versionsBefore: null } } },
@@ -1154,9 +1189,9 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'previewReviewGuidelineVersion', input: { documentId: 'ai7-builtin/typos-and-usage', path: `${process.cwd()}/规范/文字.docx` } },
       { op: 'importReviewGuidelineVersion', input: { previewId: randomUUID() } },
     ];
-    for (const { op, input } of inputs) {
-      const request = { id: randomUUID(), op, input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
     const absolute = `${process.cwd()}/规范/文字.docx`;
     for (const [op, input] of [
@@ -1180,9 +1215,10 @@ describe('decodeRequest rejects malformed frames', () => {
   });
 
   it('accepts 知识库 › 范例 only as a page start: none, or a title and Book as 书库 pages (Issue #427)', () => {
-    for (const input of [{ after: null }, { after: { title: '出版之书', bookId: randomUUID() } }]) {
-      const request = { id: randomUUID(), op: 'inspectExemplars', input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+    const pages: ReadonlyArray<InputOf<'inspectExemplars'>> = [{ after: null }, { after: { title: '出版之书', bookId: randomUUID() } }];
+    for (const input of pages) {
+      const request = { id: randomUUID(), op: 'inspectExemplars', input } satisfies ServiceRequest;
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
     for (const input of [
       {},
@@ -1199,12 +1235,12 @@ describe('decodeRequest rejects malformed frames', () => {
   it('accepts ②C 评估: the profile read naming nothing, a version by the route\'s Book, a start, and a save of the closed content shape (Issue #429, S81a)', () => {
     const bookId = randomUUID();
     const recordId = randomUUID();
-    const content = {
+    const content: InputOf<'saveEvaluation'>['content'] = {
       items: [{ itemId: 'literary-quality', score: 16.5, notRated: null, comment: '评语' }, { itemId: 'readers-and-market', score: null, notRated: '资料不足', comment: null }],
       risks: [{ riskId: 'facts-and-sources', level: 'high', statement: '需法务看过', reviewed: true }],
       readiness: ['第三章结尾需要重写'], strengths: [], weaknesses: ['节奏偏慢'], verdict: null, conclusion: 'revise',
     };
-    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+    const inputs: ReadonlyArray<AcceptedInput> = [
       { op: 'inspectEvaluationProfiles', input: {} },
       { op: 'inspectEvaluation', input: { bookId, recordId: null } },
       { op: 'inspectEvaluation', input: { bookId, recordId: null, recordsBefore: 11 } },
@@ -1238,9 +1274,9 @@ describe('decodeRequest rejects malformed frames', () => {
       // 快速开始 of a writing Task (S84b): the Task just prepared, its exact plan, and the rule version.
       { op: 'quickStartWritingTask', input: { bookId, taskIntentId: recordId, planEnvelopeDigest: 'c'.repeat(64), ruleVersionId: bookId } },
     ];
-    for (const { op, input } of inputs) {
-      const request = { id: randomUUID(), op, input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
     for (const [op, input] of [
       ['inspectEvaluationProfiles', { bookId }],
@@ -1301,30 +1337,40 @@ describe('decodeRequest rejects malformed frames', () => {
 
   it('accepts 学习准入: every Book or one, and a decision of the closed choices on an exact version (Issue #61, S26b)', () => {
     const bookId = randomUUID();
-    const decision = {
+    const decision: InputOf<'decideLearningMaterial'> = {
       bookId, materialKey: `proposal-decision:${randomUUID()}`, materialDigest: 'b'.repeat(64), expectedDecisions: 0, choice: 'book', note: null,
     };
-    for (const [op, input] of [
-      ['inspectLearningMaterials', { bookId: null, after: null }],
-      ['inspectLearningMaterials', { bookId, after: null }],
-      ['inspectLearningMaterials', { bookId: null, after: { bookTitle: '学习之书', bookId, orderedAt: '2026-09-26T01:02:03.004Z', materialKey: `proposal-decision:${randomUUID()}` } }],
-      ['inspectLearningMaterial', { bookId, materialKey: `review-disposition:${randomUUID()}/rvf_${'9c'.repeat(12)}` }],
-      ['inspectFeedbackHistory', {}],
-      ['inspectFeedbackHistory', { bookId, origin: 'analysis-feedback', author: '周一', editor: null, after: null }],
-      ['inspectFeedbackHistory', { bookId, origin: 'analysis-feedback', dimension: '人物与名称', recordedFrom: '2026-09-25T16:00:00.000Z', recordedBefore: '2026-09-26T16:00:00.000Z' }],
-      ['inspectFeedbackHistory', { dimension: null, recordedFrom: null, recordedBefore: null }],
-      ['inspectFeedbackHistory', { signal: '修改后接受', origin: 'proposal-decision' }],
-      ['inspectFeedbackHistory', { signal: '准确', dimension: '人物与名称' }],
-      ['inspectFeedbackHistory', { signal: null }],
-      ['inspectFeedbackHistory', { after: { recordedAt: '2026-09-26T01:02:03.004Z', entryId: `proposal-decision:${randomUUID()}` } }],
-      ['decideLearningMaterial', decision],
-      ['decideLearningMaterial', { ...decision, materialKey: `analysis-feedback:${randomUUID()}/entities/12`, expectedDecisions: 3, choice: 'deferred', note: '以后再说' }],
-      ['decideLearningMaterial', { ...decision, materialKey: `analysis-feedback:${randomUUID()}/synopsis`, choice: 'house' }],
+    const inputs: ReadonlyArray<AcceptedInput> = [
+      { op: 'inspectLearningMaterials', input: { bookId: null, after: null } },
+      { op: 'inspectLearningMaterials', input: { bookId, after: null } },
+      {
+        op: 'inspectLearningMaterials',
+        input: { bookId: null, after: { bookTitle: '学习之书', bookId, orderedAt: '2026-09-26T01:02:03.004Z', materialKey: `proposal-decision:${randomUUID()}` } },
+      },
+      { op: 'inspectLearningMaterial', input: { bookId, materialKey: `review-disposition:${randomUUID()}/rvf_${'9c'.repeat(12)}` } },
+      { op: 'inspectFeedbackHistory', input: {} },
+      { op: 'inspectFeedbackHistory', input: { bookId, origin: 'analysis-feedback', author: '周一', editor: null, after: null } },
+      {
+        op: 'inspectFeedbackHistory',
+        input: { bookId, origin: 'analysis-feedback', dimension: '人物与名称', recordedFrom: '2026-09-25T16:00:00.000Z', recordedBefore: '2026-09-26T16:00:00.000Z' },
+      },
+      { op: 'inspectFeedbackHistory', input: { dimension: null, recordedFrom: null, recordedBefore: null } },
+      { op: 'inspectFeedbackHistory', input: { signal: '修改后接受', origin: 'proposal-decision' } },
+      { op: 'inspectFeedbackHistory', input: { signal: '准确', dimension: '人物与名称' } },
+      { op: 'inspectFeedbackHistory', input: { signal: null } },
+      { op: 'inspectFeedbackHistory', input: { after: { recordedAt: '2026-09-26T01:02:03.004Z', entryId: `proposal-decision:${randomUUID()}` } } },
+      { op: 'decideLearningMaterial', input: decision },
+      {
+        op: 'decideLearningMaterial',
+        input: { ...decision, materialKey: `analysis-feedback:${randomUUID()}/entities/12`, expectedDecisions: 3, choice: 'deferred', note: '以后再说' },
+      },
+      { op: 'decideLearningMaterial', input: { ...decision, materialKey: `analysis-feedback:${randomUUID()}/synopsis`, choice: 'house' } },
       // A 审阅 finding's own identity, underscore and all (Issue #61 review).
-      ['decideLearningMaterial', { ...decision, materialKey: `review-disposition:${randomUUID()}/rvf_${'9c'.repeat(12)}`, choice: 'excluded' }],
-    ] as const) {
-      const request = { id: randomUUID(), op, input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+      { op: 'decideLearningMaterial', input: { ...decision, materialKey: `review-disposition:${randomUUID()}/rvf_${'9c'.repeat(12)}`, choice: 'excluded' } },
+    ];
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
     for (const [op, input] of [
       ['inspectLearningMaterials', {}],
@@ -1366,20 +1412,26 @@ describe('decodeRequest rejects malformed frames', () => {
 
   it('accepts 学习回溯: filters before the page, one lineage, and 停止今后使用 on exact versions (Issue #62, S27a)', () => {
     const bookId = randomUUID();
-    const item = { materialKey: `proposal-decision:${randomUUID()}`, materialDigest: 'a'.repeat(64), expectedDecisions: 1 };
+    const item: InputOf<'previewLearningRemediation'>['items'][number] = {
+      materialKey: `proposal-decision:${randomUUID()}`, materialDigest: 'a'.repeat(64), expectedDecisions: 1,
+    };
     const after = { bookTitle: '回溯之书', bookId, orderedAt: '2026-10-08T01:02:03.004Z', materialKey: `analysis-feedback:${randomUUID()}/synopsis` };
-    for (const [op, input] of [
-      ['inspectLearningAudit', {}],
-      ['inspectLearningAudit', { bookId, seriesId: null, kind: 'review-disposition', standing: 'excluded', query: '原因', after }],
-      ['inspectLearningAudit', { seriesId: randomUUID(), standing: 'pending', recordedFrom: '2026-10-07T16:00:00.000Z', recordedBefore: '2026-10-08T16:00:00.000Z' }],
-      ['inspectLearningAudit', { query: '' }],
-      ['inspectLearningLineage', { bookId, materialKey: item.materialKey }],
-      ['previewLearningRemediation', { bookId, items: [item] }],
-      ['previewLearningRemediation', { bookId, items: Array.from({ length: 40 }, () => item) }],
-      ['recordLearningRemediation', { bookId, items: [item, { ...item, expectedDecisions: 0 }], previewDigest: 'b'.repeat(64) }],
-    ] as const) {
-      const request = { id: randomUUID(), op, input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+    const inputs: ReadonlyArray<AcceptedInput> = [
+      { op: 'inspectLearningAudit', input: {} },
+      { op: 'inspectLearningAudit', input: { bookId, seriesId: null, kind: 'review-disposition', standing: 'excluded', query: '原因', after } },
+      {
+        op: 'inspectLearningAudit',
+        input: { seriesId: randomUUID(), standing: 'pending', recordedFrom: '2026-10-07T16:00:00.000Z', recordedBefore: '2026-10-08T16:00:00.000Z' },
+      },
+      { op: 'inspectLearningAudit', input: { query: '' } },
+      { op: 'inspectLearningLineage', input: { bookId, materialKey: item.materialKey } },
+      { op: 'previewLearningRemediation', input: { bookId, items: [item] } },
+      { op: 'previewLearningRemediation', input: { bookId, items: Array.from({ length: 40 }, () => item) } },
+      { op: 'recordLearningRemediation', input: { bookId, items: [item, { ...item, expectedDecisions: 0 }], previewDigest: 'b'.repeat(64) } },
+    ];
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
     for (const [op, input] of [
       ['inspectLearningAudit', { standing: 'memory' }],
@@ -1408,11 +1460,14 @@ describe('decodeRequest rejects malformed frames', () => {
 
   it('accepts 不说明 and 改原因 after a Proposal Decision in their own shapes (Issue #61, S26a)', () => {
     const binding = { manuscriptId: randomUUID(), branchId: randomUUID(), windowStartBlockId: `blk_${'a'.repeat(24)}` };
-    const dismiss = { ...binding, markId: randomUUID(), decisionId: randomUUID(), expectedFeedback: 0, action: 'dismiss', reason: null, reasonSource: null };
-    const revise = { ...dismiss, expectedFeedback: 2, action: 'revise', reason: '其实是篇幅所限', reasonSource: 'free-text' };
-    for (const input of [dismiss, revise, { ...revise, reasonSource: 'suggested' }]) {
-      const request = { id: randomUUID(), op: 'recordProposalDecisionFeedback', input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+    const dismiss: InputOf<'recordProposalDecisionFeedback'> = {
+      ...binding, markId: randomUUID(), decisionId: randomUUID(), expectedFeedback: 0, action: 'dismiss', reason: null, reasonSource: null,
+    };
+    const revise: InputOf<'recordProposalDecisionFeedback'> = { ...dismiss, expectedFeedback: 2, action: 'revise', reason: '其实是篇幅所限', reasonSource: 'free-text' };
+    const accepted: ReadonlyArray<InputOf<'recordProposalDecisionFeedback'>> = [dismiss, revise, { ...revise, reasonSource: 'suggested' }];
+    for (const input of accepted) {
+      const request = { id: randomUUID(), op: 'recordProposalDecisionFeedback', input } satisfies ServiceRequest;
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
     for (const input of [
       { ...dismiss, reason: '顺带一句' },
@@ -1434,16 +1489,16 @@ describe('decodeRequest rejects malformed frames', () => {
     const bookId = randomUUID();
     const revisionId = randomUUID();
     const itemDigest = 'a'.repeat(64);
-    const judged = { bookId, revisionId, itemKey: 'entities/0', itemDigest, expectedLatestSignalId: null, judgment: 'accurate', reason: null, correction: null };
-    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+    const judged: InputOf<'recordAnalysisFeedback'> = { bookId, revisionId, itemKey: 'entities/0', itemDigest, expectedLatestSignalId: null, judgment: 'accurate', reason: null, correction: null };
+    const inputs: ReadonlyArray<AcceptedInput> = [
       { op: 'inspectAnalysisFeedback', input: { bookId, revisionId } },
       { op: 'recordAnalysisFeedback', input: judged },
       { op: 'recordAnalysisFeedback', input: { ...judged, itemKey: 'synopsis', expectedLatestSignalId: randomUUID(), judgment: 'incomplete', reason: { choice: 'ending-missing', text: null }, correction: '结尾的和解没有写到' } },
       { op: 'recordAnalysisFeedback', input: { ...judged, itemKey: 'settings/12', judgment: 'inaccurate', reason: { choice: 'other', text: '年代写错了' }, correction: null } },
     ];
-    for (const { op, input } of inputs) {
-      const request = { id: randomUUID(), op, input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
     for (const [op, input] of [
       ['inspectAnalysisFeedback', { bookId }],
@@ -1467,7 +1522,7 @@ describe('decodeRequest rejects malformed frames', () => {
     const bookId = randomUUID();
     const actuals = { bookId, publicationVersionId: randomUUID(), expectedEntries: 0, priceFen: 4500, firstPrint: 3000 };
     const preferences = { expectedEntries: 2, predictionEnabled: false, calibrationEnabled: true };
-    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+    const inputs: ReadonlyArray<AcceptedInput> = [
       { op: 'inspectEvaluationCalibration', input: { after: null, focusBookId: null } },
       { op: 'inspectEvaluationCalibration', input: { after: { title: '图书', bookId }, focusBookId: bookId } },
       { op: 'recordPublicationActuals', input: actuals },
@@ -1475,9 +1530,9 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'setEvaluationPreferences', input: preferences },
       { op: 'setEvaluationPreferences', input: { ...preferences, expectedEntries: 0, predictionEnabled: true, calibrationEnabled: false } },
     ];
-    for (const { op, input } of inputs) {
-      const request = { id: randomUUID(), op, input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
     for (const [op, input] of [
       ['inspectEvaluationCalibration', { bookId }],
@@ -1509,10 +1564,10 @@ describe('decodeRequest rejects malformed frames', () => {
   it('accepts 书系: the list a page at a time, 新建书系 by two texts, a Series, its further pages, a membership change and its preview, and a Book\'s side (Issue #63, S28a)', () => {
     const seriesId = randomUUID();
     const bookId = randomUUID();
-    const change = { seriesId, bookId, kind: 'add', previewDigest: 'c'.repeat(64) };
+    const change: InputOf<'changeSeriesMembership'> = { seriesId, bookId, kind: 'add', previewDigest: 'c'.repeat(64) };
     const instant = '2026-09-26T01:02:03.004Z';
     const record = { recordedAt: instant, seriesId, bookId, ordinal: 2 };
-    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+    const inputs: ReadonlyArray<AcceptedInput> = [
       { op: 'inspectSeriesList', input: { after: null } },
       { op: 'inspectSeriesList', input: { after: { title: '星河三部曲', seriesId } } },
       { op: 'inspectSeriesMembers', input: { seriesId, after: null } },
@@ -1534,9 +1589,9 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'inspectBookSeries', input: { bookId, membershipsAfter: { title: '书系', seriesId } } },
       { op: 'listBooks', input: { after: null, filter: { field: 'series', text: '星河' } } },
     ];
-    for (const { op, input } of inputs) {
-      const request = { id: randomUUID(), op, input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
     for (const [op, input] of [
       // Each page starts after one item of its own list, and nothing else (Issue #63 review).
@@ -1578,7 +1633,7 @@ describe('decodeRequest rejects malformed frames', () => {
 
   it('accepts 导出数据库: an absolute destination, the one preparation it approves, and the records naming nothing (Issue #434, S86a)', () => {
     const destination = process.platform === 'win32' ? 'C:\\Users\\编辑\\Documents\\AI7 数据库.ai7db' : '/Users/编辑/Documents/AI7 数据库.ai7db';
-    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+    const inputs: ReadonlyArray<AcceptedInput> = [
       { op: 'prepareDatabaseExport', input: { destination } },
       { op: 'approveDatabaseExport', input: { preparationId: randomUUID() } },
       { op: 'inspectDatabaseExports', input: {} },
@@ -1589,9 +1644,9 @@ describe('decodeRequest rejects malformed frames', () => {
       // 取消导出 (Issue #434 review, V2-UX-EXP-011): the one export under way it stops.
       { op: 'cancelDatabaseExport', input: { activityId: randomUUID() } },
     ];
-    for (const { op, input } of inputs) {
-      const request = { id: randomUUID(), op, input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
     for (const [op, input] of [
       ['prepareDatabaseExport', { destination: 'AI7 数据库.ai7db' }],
@@ -1617,7 +1672,7 @@ describe('decodeRequest rejects malformed frames', () => {
 
   it('accepts 导入数据库: an absolute package, the one preview it replaces with, and the one replacement each change names (Issue #434, S86c)', () => {
     const source = process.platform === 'win32' ? 'C:\\Users\\编辑\\Documents\\AI7 数据库.ai7db' : '/Users/编辑/Documents/AI7 数据库.ai7db';
-    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+    const inputs: ReadonlyArray<AcceptedInput> = [
       { op: 'inspectDatabaseImport', input: { source } },
       { op: 'prepareDatabaseReplacement', input: { previewId: randomUUID() } },
       { op: 'cancelDatabaseReplacement', input: { replacementId: randomUUID() } },
@@ -1626,9 +1681,9 @@ describe('decodeRequest rejects malformed frames', () => {
       // 只导入其中的图书 (Issue #434, S86d): the one preview it merges from.
       { op: 'prepareDatabaseMerge', input: { previewId: randomUUID() } },
     ];
-    for (const { op, input } of inputs) {
-      const request = { id: randomUUID(), op, input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
     for (const [op, input] of [
       ['inspectDatabaseImport', { source: 'AI7 数据库.ai7db' }],
@@ -1655,13 +1710,13 @@ describe('decodeRequest rejects malformed frames', () => {
   it('accepts 书系知识: a candidate of the editor\'s words or a manuscript span, its review, its edit and its promotion (Issue #63, S28b)', () => {
     const seriesId = randomUUID();
     const candidateId = randomUUID();
-    const span = {
+    const span: NonNullable<InputOf<'proposeSeriesKnowledge'>['span']> = {
       manuscriptId: randomUUID(), branchId: randomUUID(), windowStartBlockId: `blk_${'a'.repeat(24)}`, baseRevisionId: randomUUID(), expectedJournalSequence: 3,
       blockId: `blk_${'b'.repeat(24)}`, baseBlockDigest: 'c'.repeat(64), fromGrapheme: 0, toGrapheme: 4, selectedText: '海边小城',
     };
-    const newItem = { kind: 'new', subject: '林默', knowledgeClass: 'characters' };
-    const promote = { seriesId, candidateId, candidateVersion: 2, reviewDigest: 'd'.repeat(64), reuseScope: 'series-tasks', conflictDisposition: 'none' };
-    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+    const newItem: InputOf<'proposeSeriesKnowledge'>['target'] = { kind: 'new', subject: '林默', knowledgeClass: 'characters' };
+    const promote: InputOf<'promoteSeriesKnowledge'> = { seriesId, candidateId, candidateVersion: 2, reviewDigest: 'd'.repeat(64), reuseScope: 'series-tasks', conflictDisposition: 'none' };
+    const inputs: ReadonlyArray<AcceptedInput> = [
       { op: 'proposeSeriesKnowledge', input: { seriesId, target: newItem, content: '三部曲里的年龄以第一部为准。', span: null } },
       { op: 'proposeSeriesKnowledge', input: { seriesId, target: newItem, content: '海边小城', span } },
       { op: 'proposeSeriesKnowledge', input: { seriesId, target: { kind: 'existing', itemId: randomUUID() }, content: '改', span: null } },
@@ -1680,9 +1735,9 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'inspectSeriesKnowledgeConflicts', input: { seriesId, itemId: randomUUID(), revisionId: randomUUID(), after: 0 } },
       { op: 'inspectSeriesKnowledgeConflicts', input: { seriesId, itemId: randomUUID(), revisionId: randomUUID(), after: 50 } },
     ];
-    for (const { op, input } of inputs) {
-      const request = { id: randomUUID(), op, input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
     for (const [op, input] of [
       ['proposeSeriesKnowledge', { seriesId, target: newItem, content: '话' }],
@@ -1718,8 +1773,8 @@ describe('decodeRequest rejects malformed frames', () => {
   it('accepts 书系检索排除: a page of one kind\'s targets, a page of revisions, and a revision with its preview and digest (Issue #64, S29b)', () => {
     const seriesId = randomUUID();
     const exclusionId = randomUUID();
-    const add = { seriesId, action: 'add', exclusionId: null, target: { kind: 'knowledge-item', id: randomUUID() }, reason: '待核对' };
-    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+    const add: InputOf<'previewSeriesExclusion'> = { seriesId, action: 'add', exclusionId: null, target: { kind: 'knowledge-item', id: randomUUID() }, reason: '待核对' };
+    const inputs: ReadonlyArray<AcceptedInput> = [
       { op: 'inspectSeriesExclusionTargets', input: { seriesId, kind: 'knowledge-item', after: null } },
       { op: 'inspectSeriesExclusionTargets', input: { seriesId, kind: 'source-version', after: { key: '2026-10-08T01:02:03.004Z', id: randomUUID() } } },
       { op: 'inspectSeriesExclusionTargets', input: { seriesId, kind: 'knowledge-class', after: null } },
@@ -1731,9 +1786,9 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'recordSeriesExclusion', input: { ...add, previewDigest: 'e'.repeat(64) } },
       { op: 'cancelReviewRun', input: { bookId: randomUUID(), reviewRunId: randomUUID() } },
     ];
-    for (const { op, input } of inputs) {
-      const request = { id: randomUUID(), op, input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
     for (const [op, input] of [
       ['inspectSeriesExclusionTargets', { seriesId, kind: 'members', after: null }],
@@ -1760,7 +1815,7 @@ describe('decodeRequest rejects malformed frames', () => {
     const bookId = randomUUID();
     const procedureId = randomUUID();
     const versionId = randomUUID();
-    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+    const inputs: ReadonlyArray<AcceptedInput> = [
       { op: 'inspectCapturedProcedureRun', input: { bookId, procedureId, versionId: null } },
       { op: 'inspectCapturedProcedureRun', input: { bookId, procedureId, versionId } },
       // The steps resolved for a 当前选区 instead of the version's slot (Issue #423, S77 deferred item a): `'selection'`, or `null` for the slot.
@@ -1771,9 +1826,9 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'stopCapturedProcedure', input: { procedureId, versionId, previewDigest: 'a'.repeat(64) } },
       { op: 'stopCapturedProcedure', input: { procedureId, versionId: null, previewDigest: '0123456789abcdef'.repeat(4) } },
     ];
-    for (const { op, input } of inputs) {
-      const request = { id: randomUUID(), op, input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
     for (const [op, input] of [
       // The run read names its version, or `null` for the latest; never left out, never a number or a non-UUID.
@@ -1806,9 +1861,12 @@ describe('decodeRequest rejects malformed frames', () => {
   });
 
   it('accepts the applicability read naming exactly one Book (Issue #66, S31b), scoped to a 当前选区 or not (Issue #423)', () => {
-    for (const input of [{ bookId: randomUUID() }, { bookId: randomUUID(), scope: 'selection' }, { bookId: randomUUID(), scope: null }]) {
-      const request = { id: randomUUID(), op: 'inspectCapturedProcedureApplicability', input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+    const reads: ReadonlyArray<InputOf<'inspectCapturedProcedureApplicability'>> = [
+      { bookId: randomUUID() }, { bookId: randomUUID(), scope: 'selection' }, { bookId: randomUUID(), scope: null },
+    ];
+    for (const input of reads) {
+      const request = { id: randomUUID(), op: 'inspectCapturedProcedureApplicability', input } satisfies ServiceRequest;
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
     for (const input of [{}, { bookId: 'book' }, { bookId: null }, { bookId: randomUUID(), procedureId: randomUUID() }, { bookId: randomUUID(), scope: 'chapters' }, { bookId: randomUUID(), scope: true }]) {
       expect(rejectionFor(frameOf({ id: randomUUID(), op: 'inspectCapturedProcedureApplicability', input }))).toBeInstanceOf(ProtocolError);
@@ -1817,7 +1875,7 @@ describe('decodeRequest rejects malformed frames', () => {
 
   it('accepts 知识库 › 资料库: the read naming nothing, a preview by absolute path, an arrival, and a decision of a closed shape (Issue #427, S79c)', () => {
     const materialId = randomUUID();
-    const inputs: ReadonlyArray<{ op: string; input: Record<string, unknown> }> = [
+    const inputs: ReadonlyArray<AcceptedInput> = [
       { op: 'inspectLibraryMaterials', input: { after: null } },
       { op: 'inspectLibraryMaterials', input: { after: { recordedAt: '2026-09-26T01:02:03.004Z', materialId: randomUUID() } } },
       { op: 'inspectLibraryMaterial', input: { materialId } },
@@ -1833,9 +1891,9 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'decideLibraryMaterial', input: { materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } } },
       { op: 'decideLibraryMaterial', input: { materialId, expectedDecisions: 3, decision: { kind: 'eligibility', choice: 'excluded', reason: '版权未清' } } },
     ];
-    for (const { op, input } of inputs) {
-      const request = { id: randomUUID(), op, input };
-      expect(decodeRequest(frameOf(request))).toEqual(request);
+    for (const entry of inputs) {
+      const request = { id: randomUUID(), ...entry };
+      expect(decodeRequest(acceptedFrameOf(request))).toEqual(request);
     }
     const house = { kind: 'attribution', attribution: { scope: 'house' } };
     for (const [op, input] of [
