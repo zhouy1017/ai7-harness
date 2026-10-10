@@ -1,3 +1,4 @@
+import { OUTCOME_RESOLUTION_SCHEMA_SQL, initializeOutcomeResolutionSchema } from '../../src/service/analysis/outcome-resolutions.js';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -163,6 +164,12 @@ interface Revision {
 
 // Newest first: a store is walked down one revision at a time.
 const REVISIONS: ReadonlyArray<Revision> = [
+  {
+    // Revision 68 (Issue #757): the editor's 人工结果确认 over requests whose results cannot be known, created before the stamp.
+    revision: 68,
+    step: initializeOutcomeResolutionSchema,
+    undo: (database) => drop(database, Object.keys(OUTCOME_RESOLUTION_SCHEMA_SQL).reverse()),
+  },
   {
     // Revision 67 (Issue #428, S80a): each 资料库 item's Material Index build and its segments, created before the stamp.
     revision: 67,

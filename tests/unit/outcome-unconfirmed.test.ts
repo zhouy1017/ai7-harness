@@ -80,7 +80,7 @@ describe('待我处理 over 结果待确认 a completed Run left', () => {
     const item = projection.groups[0]!.items[0]!;
     expect(GLOBAL_ATTENTION_STATE_LABELS[item.state]).toBe('结果待确认');
     expect(globalAttentionObjectLabel(item.object)).toBe('基线分析 · 1 个阅读范围、保证抽样、运行反思');
-    expect(globalAttentionReason(item)).toBe('任务已完成，但有请求已发出而回答没有完整传回，无法确认模型服务是否已处理并计费；这些部分记为结果待确认的缺口，AI7 没有自动再发。');
+    expect(globalAttentionReason(item)).toBe('运行已结束，但有请求已发出而回答没有完整传回，无法确认模型服务是否已处理并计费；这些部分记为结果待确认的缺口，AI7 没有自动再发。');
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS[item.nextStep]).toBe(TASK_BAR_VIEW_UNCONFIRMED);
     expect(globalAttentionObjectLabel({ kind: 'unconfirmed', taskKind: 'writing', ranges: 3, steps: [] })).toBe('写作任务 · 3 个阅读范围');
   });
@@ -91,12 +91,17 @@ describe('the drawer\'s 结果待确认 block', () => {
     expect(unconfirmedWhat(0, ['cross-unit-reduction'])).toBe('跨单元归纳');
     expect(unconfirmedWhat(2, [])).toBe('2 个阅读范围');
     const listed: NonNullable<TaskPlanProjection['unconfirmed']> = {
-      ranges: [{ unitOrdinal: 3, category: '错别字与规范用语', recordedAt: NOW.toISOString() }],
+      ranges: [{ unitOrdinal: 3, category: '错别字与规范用语', recordedAt: NOW.toISOString(), earlierText: false }],
       steps: [{ stage: 'assurance-sampling', category: null, recordedAt: NOW.toISOString() }, { stage: 'assurance-sampling', category: null, recordedAt: NOW.toISOString() }],
       digest: 'c'.repeat(64),
     };
-    expect(unconfirmedStatement(listed)).toBe('1 个阅读范围、保证抽样的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；任务已完成，这些部分在结果里记为结果待确认的缺口，AI7 没有自动再发。' +
+    expect(unconfirmedStatement(listed)).toBe('1 个阅读范围、保证抽样的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；运行已结束，这些部分在结果里记为结果待确认的缺口，AI7 没有自动再发。' +
       '保留为缺口只记下你的确认：不发送任何内容，不改变结果；以后再读这些阅读范围的任务仍会在计划里说明会再发一次。');
+    // Only a step listed: nothing a later Task reads is named as sent again, so the statement says no such thing (#763 review).
+    expect(unconfirmedStatement({ ...listed, ranges: [] })).toBe('保证抽样的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；运行已结束，这些部分在结果里记为结果待确认的缺口，AI7 没有自动再发。' +
+      '保留为缺口只记下你的确认：不发送任何内容，不改变结果。');
+    // A range counted in a text the Book has moved on from says so.
+    expect(unconfirmedLine({ unitOrdinal: 4, earlierText: true, category: null })).toBe('第 4 个阅读范围（当时的文字） · 请求已发出 · 回答没有完整传回');
     expect(unconfirmedLine({ unitOrdinal: 3, category: '错别字与规范用语' })).toBe('「错别字与规范用语」第 3 个阅读范围 · 请求已发出 · 回答没有完整传回');
     expect(unconfirmedLine({ stage: 'run-report-reflection', category: null })).toBe('运行反思 · 请求已发出 · 回答没有完整传回');
     expect(UNCONFIRMED_KEEP_AS_GAP).toBe('保留为缺口');

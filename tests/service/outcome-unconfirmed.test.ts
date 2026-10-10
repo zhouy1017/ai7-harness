@@ -181,6 +181,40 @@ describe('结果待确认 a completed Run left (Issue #757)', () => {
     }
   }, 300_000);
 
+  it('lists what an interrupted 初评 left 结果待确认: an outcome that is not a completion still names the range (#763 review)', async () => {
+    const authored = await loadModelFixture(FIXTURES_ROOT, 'sample1-evaluation-authored');
+    // Unit 3's answer never comes back whole; unit 6's turn is cut off, which ends a Run that keeps no progress `interrupted`.
+    const fixture: ResolvedModelFixture = {
+      ...authored,
+      entries: new Map([...authored.entries].map(([key, entry]) => [key, entry.unitOrdinal === 3 ? { ...entry, response: DROPPED }
+        : entry.unitOrdinal === 6 ? { ...entry, response: { kind: 'interrupted' as const, message: '合成：技术回合被中断。' } } : entry])),
+    };
+    const store = await open(fixture);
+    const execution = ownerOf(store, fixture);
+    try {
+      const bookId = await book(store, 'L2 sample1 初评中断结果待确认');
+      let progress = store.createInitialEvaluationPreparationWork(bookId, launchPolicy);
+      while (!progress.done) progress = store.advanceInitialEvaluationPreparationWork(progress.workId!);
+      const prepared = progress.projection!;
+      const authorized = store.authorizeInitialEvaluation(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+      expect(execution.admitOrQueue(authorized.dispatchRunRecordId!, store.initialEvaluationLedger)).toBe('admitted');
+      await execution.whenIdle();
+      const ended = store.inspectInitialEvaluation(bookId);
+      expect(ended.taskOutcome?.classification).toBe('interrupted');
+      expect(store.baselineAnalysisLedger.unconfirmedOutcomesOf(bookId, ended.kind).ranges.map((range) => [range.unitOrdinal, range.classification]))
+        .toEqual([[3, 'interrupted']]);
+      expect(unconfirmedItem(store, bookId, 'initial-evaluation')).toMatchObject({
+        state: 'analysis-outcome-unconfirmed', target: { kind: 'task-plan', bookId, taskKind: 'initial-evaluation', ref: null },
+        object: { kind: 'unconfirmed', taskKind: 'initial-evaluation', ranges: 1, steps: [] },
+      });
+      expect(store.inspectTaskPlan({ bookId, kind: 'initial-evaluation', ref: null }).unconfirmed?.ranges.map((range) => range.unitOrdinal)).toEqual([3]);
+      store.markCleanShutdown();
+    } finally {
+      await execution.dispose();
+      store.close();
+    }
+  }, 300_000);
+
   it('clears what a completed 初评 left 结果待确认 once a later 初评 reads the range to a result', async () => {
     const authored = await loadModelFixture(FIXTURES_ROOT, 'sample1-evaluation-authored');
     const store = await open(authored);
@@ -274,12 +308,12 @@ describe('结果待确认 a completed Run left (Issue #757)', () => {
     }
   }, 120_000);
 
-  it('lists nothing for a Run stopped 结果待确认 and then cancelled — 取消任务 settled it — and still discloses its re-send', async () => {
+  it('lists a Run stopped 结果待确认 once it is cancelled — 取消任务 settles nothing — until 保留为缺口 (CTRL-007; #763 review)', async () => {
     const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-outcome-unknown');
     const store = await open(fixture);
     const execution = ownerOf(store, fixture);
     try {
-      const bookId = await book(store, 'L2 sample1 取消后不列');
+      const bookId = await book(store, 'L2 sample1 取消后仍列');
       let progress = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_TASK_GOAL, null, launchPolicy);
       while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
       const prepared = progress.projection!;
@@ -287,17 +321,25 @@ describe('结果待确认 a completed Run left (Issue #757)', () => {
       const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
       execution.admitAndDispatch(runRecordId);
       await execution.whenIdle();
+      // Stopped 结果待确认, the Run has no outcome yet: it is its own item, and nothing is listed beside it.
+      expect(unconfirmedItem(store, bookId, 'baseline-analysis')).toBeUndefined();
       store.requestBaselineAnalysisCancel(bookId, taskIntentId);
       execution.cancelRun(runRecordId, store.baselineAnalysisLedger);
       await execution.whenIdle();
-      // The partial revision holds unit 4 as its own outcome-unknown gap, and the Run's outcome is the editor's cancellation.
+      // The partial revision holds unit 4 as its own outcome-unknown gap, and the Run's outcome is the editor's cancellation —
+      // which is not a settlement of unit 4's request: it is listed until the editor keeps it as a gap.
       expect(store.inspectBaselineAnalysis(bookId, () => null).resultSetRevision?.gaps.map((gap) => [gap.unitOrdinal, gap.code])).toEqual([[4, 'outcome-unknown']]);
-      expect(unconfirmedItem(store, bookId, 'baseline-analysis')).toBeUndefined();
-      const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
-      expect(plan.unconfirmed).toBeNull();
-      expect(await refusal(() => store.resolveUnconfirmedOutcomes(bookId, 'baseline-analysis', 'a'.repeat(64)))).toBe('UNCONFIRMED_CHANGED');
-      // The ledger still reads unit 4 as unconfirmed — the redo's plan names it as sent again.
       expect(store.baselineAnalysisLedger.unconfirmedOutcomesOf(bookId).ranges.map((range) => [range.unitOrdinal, range.classification])).toEqual([[4, 'cancelled']]);
+      expect(unconfirmedItem(store, bookId, 'baseline-analysis')).toMatchObject({ state: 'analysis-outcome-unconfirmed', object: { ranges: 1, steps: [] } });
+      const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
+      expect(plan.unconfirmed?.ranges).toEqual([{ unitOrdinal: 4, category: null, recordedAt: expect.any(String), earlierText: false }]);
+      expect(store.resolveUnconfirmedOutcomes(bookId, 'baseline-analysis', plan.unconfirmed!.digest)).toEqual({ resolved: 1 });
+      expect(unconfirmedItem(store, bookId, 'baseline-analysis')).toBeUndefined();
+      // Kept as a gap is not read: the redo's plan still names unit 4 as sent again.
+      const after = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
+      let redoProgress = store.createBaselineAnalysisPreparationWork(bookId, after.redo!.prepare.goal, after.redo!.prepare.update, launchPolicy, false, runRecordId);
+      while (!redoProgress.done) redoProgress = store.advanceBaselineAnalysisPreparationWork(redoProgress.workId!);
+      expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: redoProgress.projection!.taskIntent!.taskIntentId }).resend?.units).toEqual([4]);
       store.markCleanShutdown();
     } finally {
       await execution.dispose();

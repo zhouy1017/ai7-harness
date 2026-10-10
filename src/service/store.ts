@@ -16775,10 +16775,11 @@ export class EditorialStore {
 
   /**
    * The ranges and steps whose sent requests' results cannot be known that Runs of one Task kind left on a Book and that reached
-   * their Task Outcome — a kind that keeps no progress reads on past such a range and completes, and any kind reads on past such a
-   * step — which no later Run of the kind has read and the editor has not kept as gaps. A Run stopped 结果待确认, and one the
-   * editor then cancelled, is not here: the stopped Run is its own item, and 取消任务 is the editor settling it. A Review Run's
-   * categories are each their own kind, read together. A read.
+   * their Task Outcome, whatever it was — completed (a kind that keeps no progress reads on past such a range, and any kind past
+   * such a step), interrupted, failed or cancelled — which no later Run of the kind has read and the editor has not kept as gaps.
+   * 取消任务 settles nothing here (CTRL-007: an ambiguous outcome stays distinct from a successful cancellation): only
+   * 保留为缺口, the Manual Outcome Resolution, does. A Run stopped 结果待确认 that has no outcome yet is its own item. A Review
+   * Run's categories are each their own kind, read together. A read.
    */
   #unconfirmedListed(bookId: string, surface: TaskPlanKind): { ranges: UnconfirmedOutcomeRecord[]; steps: UnconfirmedOutcomeRecord[] } {
     const kinds = (this.#authority.prepare('SELECT DISTINCT kind FROM analysis_result_sets WHERE book_id = ? ORDER BY kind').all(bookId) as SqlRow[])
@@ -16789,7 +16790,7 @@ export class EditorialStore {
     const steps: UnconfirmedOutcomeRecord[] = [];
     for (const kind of kinds) {
       const found = this.#analysisCall(() => this.#baselineAnalysis.unconfirmedOutcomesOf(bookId, kind));
-      ranges.push(...found.ranges.filter((range) => (range.classification === 'completed' || range.classification === 'completed-with-gaps') && !resolved.has(range.key)));
+      ranges.push(...found.ranges.filter((range) => range.classification !== null && !resolved.has(range.key)));
       steps.push(...found.steps.filter((step) => !resolved.has(step.key)));
     }
     return { ranges, steps };
@@ -16809,8 +16810,17 @@ export class EditorialStore {
   #unconfirmedProjection(bookId: string, surface: TaskPlanKind): TaskPlanUnconfirmedProjection | null {
     const listed = this.#unconfirmedListed(bookId, surface);
     if (listed.ranges.length === 0 && listed.steps.length === 0) return null;
+    // The text a range's ordinal counts in: the Book's manuscript as it is saved now, or an earlier one (Issue #757 review).
+    const latest = this.#authority.prepare(
+      `SELECT mr.revision_id FROM manuscript_revisions mr JOIN manuscripts m ON m.manuscript_id = mr.manuscript_id AND m.role = 'primary'
+       WHERE m.book_id = ? ORDER BY mr.ordinal DESC LIMIT 1`,
+    ).get(bookId) as SqlRow | undefined;
+    const current = latest === undefined ? null : asString(latest.revision_id);
     return {
-      ranges: listed.ranges.map((range) => ({ unitOrdinal: range.unitOrdinal!, category: this.#unconfirmedCategory(range.kind), recordedAt: range.recordedAt })),
+      ranges: listed.ranges.map((range) => ({
+        unitOrdinal: range.unitOrdinal!, category: this.#unconfirmedCategory(range.kind), recordedAt: range.recordedAt,
+        earlierText: range.heldAtRevisionId !== null && range.heldAtRevisionId !== current,
+      })),
       steps: listed.steps.map((step) => ({ stage: step.stage!, category: this.#unconfirmedCategory(step.kind), recordedAt: step.recordedAt })),
       digest: unconfirmedDigest(listed),
     };

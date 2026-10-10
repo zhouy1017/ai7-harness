@@ -302,6 +302,8 @@ export interface UnconfirmedOutcomeRecord {
   /** When that Run's outcome was recorded, or its revision when it has none. */
   readonly recordedAt: string;
   readonly unitOrdinal: number | null;
+  /** The manuscript revision the latest revision holding the range read — whose text `unitOrdinal` counts in; `null` for a step. */
+  readonly heldAtRevisionId: string | null;
   readonly contentKey: string | null;
   readonly stage: UnconfirmedStage | null;
 }
@@ -2370,6 +2372,7 @@ export class BaselineAnalysisStore {
        WHERE s.book_id = ? AND s.kind = ? ORDER BY r.ordinal`,
     ).all(bookId, kind) as SqlRow[];
     const outcomeOf = this.#db.prepare('SELECT classification, recorded_at FROM analysis_task_outcomes WHERE run_record_id = ?');
+    const checkpointOf = this.#db.prepare('SELECT revision_id FROM analysis_task_input_checkpoints WHERE task_intent_id = ?');
     const outstanding = new Map<string, UnconfirmedOutcomeRecord>();
     for (const row of rows) {
       const record = parseCanonicalJson(asString(row.canonical_json));
@@ -2392,13 +2395,15 @@ export class BaselineAnalysisStore {
       }
       const runRecordId = asString(row.run_record_id);
       const outcome = outcomeOf.get(runRecordId) as SqlRow | undefined;
+      const heldAt = unknown.length === 0 ? undefined : checkpointOf.get(asString(row.task_intent_id)) as SqlRow | undefined;
+      const heldAtRevisionId = heldAt === undefined ? null : asString(heldAt.revision_id);
       for (const gap of unknown) {
         const contentKey = keyOf.get(gap.unitOrdinal);
         if (contentKey === undefined) continue;
         const earlier = outstanding.get(contentKey);
         // Carried forward: the same request, still unconfirmed, now at this revision's ordinal.
         if (gap.carried && earlier !== undefined) {
-          outstanding.set(contentKey, { ...earlier, unitOrdinal: gap.unitOrdinal });
+          outstanding.set(contentKey, { ...earlier, unitOrdinal: gap.unitOrdinal, heldAtRevisionId });
           continue;
         }
         outstanding.set(contentKey, {
@@ -2409,6 +2414,7 @@ export class BaselineAnalysisStore {
           classification: outcome === undefined ? null : asString(outcome.classification),
           recordedAt: outcome === undefined ? asString(row.created_at) : asString(outcome.recorded_at),
           unitOrdinal: gap.unitOrdinal,
+          heldAtRevisionId,
           contentKey,
           stage: null,
         });
@@ -2442,6 +2448,7 @@ export class BaselineAnalysisStore {
           classification: asString(latest.classification),
           recordedAt: asString(latest.recorded_at),
           unitOrdinal: null,
+          heldAtRevisionId: null,
           contentKey: null,
           stage,
         });

@@ -101,9 +101,10 @@ const OUTCOME_UNKNOWN_CANCEL_LINE = '第 4 个阅读范围的请求已发出、�
 const EIGHTH_BOOK = Object.freeze({ title: '归纳结果待确认旅程' });
 /** The eighth Book's launch (Issue #757): every range is read, and the reduction's request is sent and never answers whole. */
 const REDUCTION_UNKNOWN_FIXTURE_IDENTITY = 'sample1-baseline-reduction-unknown';
-const UNCONFIRMED_REASON = '任务已完成，但有请求已发出而回答没有完整传回，无法确认模型服务是否已处理并计费；这些部分记为结果待确认的缺口，AI7 没有自动再发。';
-const UNCONFIRMED_STATEMENT = '跨单元归纳的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；任务已完成，这些部分在结果里记为结果待确认的缺口，AI7 没有自动再发。' +
-  '保留为缺口只记下你的确认：不发送任何内容，不改变结果；以后再读这些阅读范围的任务仍会在计划里说明会再发一次。';
+const UNCONFIRMED_REASON = '运行已结束，但有请求已发出而回答没有完整传回，无法确认模型服务是否已处理并计费；这些部分记为结果待确认的缺口，AI7 没有自动再发。';
+// Only a step is listed, so the statement names no later re-send (#763 review).
+const UNCONFIRMED_STATEMENT = '跨单元归纳的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；运行已结束，这些部分在结果里记为结果待确认的缺口，AI7 没有自动再发。' +
+  '保留为缺口只记下你的确认：不发送任何内容，不改变结果。';
 /** The fourth Book's launch: unit 2 fails for good, and unit 5's first attempt fails retry-safe (Issue #422, S76d). */
 const TRANSIENT_FIXTURE_IDENTITY = 'sample1-baseline-transient-retry';
 /** Five ranges may settle before the fourth Book's Run is held: 1 to 4 do, 5 asks, 6 settles, and 7 is in flight. */
@@ -1577,7 +1578,8 @@ async function main() {
     at('outcome-unknown-cancelled');
     // No 续行 anywhere: the way out is 取消任务, whose summary names unit 4 as its own gap, never a range not attempted. Confirmed,
     // the Run ends cancelled with what it read kept — seven ranges closed, unit 4 the outcome-unknown gap its sent request
-    // left — and nothing more sent; 待我处理 no longer holds the Book.
+    // left — and nothing more sent. 待我处理 no longer holds the stopped Run, but 取消任务 settles nothing about unit 4's request
+    // (CTRL-007): the ended Run's unit 4 is listed in 异常与结果待确认 until the editor keeps it as a gap (#763 review).
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="cancel-run"]', 'outcome-unknown-cancel');
     await waitFor(renderer, `[...document.querySelectorAll('#task-drawer-cancel-impact li')].some((line)=>line.textContent===${JSON.stringify(OUTCOME_UNKNOWN_CANCEL_LINE)})`, 'outcome-unknown-cancel-impact', 30_000);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="confirm-cancel-run"]', 'outcome-unknown-cancel-confirm');
@@ -1592,6 +1594,10 @@ async function main() {
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='cancelled-after-start'`, 'outcome-unknown-shown-cancelled', 30_000);
     const confirmedAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
     requireJourney(confirmedAttention?.groups?.every((group) => group.items.every((entry) => entry.state !== 'analysis-outcome-unknown')) === true, 'outcome-unknown-left-attention', confirmedAttention?.groups ?? null);
+    requireJourney(confirmedAttention?.groups?.find((group) => group.key === 'exceptions')?.items?.some((entry) =>
+      entry.itemId === `unconfirmed:${seventhBookId}:baseline-analysis` && entry.state === 'analysis-outcome-unconfirmed' && entry.blocked === false &&
+      entry.object?.kind === 'unconfirmed' && entry.object.ranges === 1 && entry.nextStep === 'view-unconfirmed') === true,
+    'outcome-unknown-cancelled-still-listed', confirmedAttention?.groups ?? null);
 
     at('outcome-unknown-redo-disclosed');
     // Once the editor ended the Run, 改计划重做 is offered. The Task it prepares carries the seven ranges read and reads unit 4

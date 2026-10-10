@@ -5223,8 +5223,11 @@ export type UnconfirmedStageId = 'cross-unit-reduction' | 'assurance-sampling' |
  * evidence class, which sends nothing and leaves every gap as it is.
  */
 export interface TaskPlanUnconfirmedProjection {
-  /** Each range by its ordinal in the latest revision that holds it, and, in a Review Run, its category. */
-  ranges: ReadonlyArray<{ unitOrdinal: number; category: string | null; recordedAt: string }>;
+  /**
+   * Each range by its ordinal in the latest revision that holds it, and, in a Review Run, its category; `earlierText` when that
+   * revision read a manuscript revision other than the Book's latest, so the ordinal counts in the text as it was then.
+   */
+  ranges: ReadonlyArray<{ unitOrdinal: number; category: string | null; recordedAt: string; earlierText: boolean }>;
   /** Each step of the latest Run that reached its Task Outcome, and, in a Review Run, its category. */
   steps: ReadonlyArray<{ stage: UnconfirmedStageId; category: string | null; recordedAt: string }>;
   /** What 保留为缺口 settles: the service records exactly these, and refuses a list that changed since (`UNCONFIRMED_CHANGED`). */

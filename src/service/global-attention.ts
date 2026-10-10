@@ -152,8 +152,8 @@ export interface AnalysisTaskAttentionReading {
 }
 
 /**
- * 结果待确认 that Runs of one Task kind left on a Book and that reached their Task Outcome (Issue #757; ATTN-002, NOTIF-004,
- * CTRL-007), read by the store through each kind's ledger: how many ranges, which steps, and the plan they are listed on —
+ * 结果待确认 that Runs of one Task kind left on a Book and that reached their Task Outcome — completed, interrupted, failed or
+ * cancelled (Issue #757; ATTN-002, NOTIF-004, CTRL-007), read by the store through each kind's ledger: how many ranges, which steps, and the plan they are listed on —
  * the Book's current Task of the kind, or its latest Review Run. Only what no later Run of the kind has read and the editor has
  * not kept as gaps (保留为缺口) is read.
  */
@@ -569,10 +569,10 @@ function analysisTaskItem(reading: AnalysisTaskAttentionReading, waitingFor: Wai
 }
 
 /**
- * 结果待确认 a completed Run left (Issue #757; ATTN-002, NOTIF-004, CTRL-007; interaction-spec §1036): in 异常与结果待确认,
+ * 结果待确认 a Run that ended left (Issue #757; ATTN-002, NOTIF-004, CTRL-007; interaction-spec §1036): in 异常与结果待确认,
  * counted, never blocking — the Run's Task Outcome stands and nothing waits on it — and its next step is to see which ranges and
  * steps, where 保留为缺口 settles them; never a repeat-shaped action. It resolves by itself when a later Run of the kind reads
- * them.
+ * them; 取消任务 never settles it.
  */
 function unconfirmedItem(reading: UnconfirmedAttentionReading): GlobalAttentionItemProjection {
   return item('exceptions', 'analysis-outcome-unconfirmed', {

@@ -447,12 +447,17 @@ export function unconfirmedWhat(ranges: number, steps: ReadonlyArray<Unconfirmed
 /** What the block says above its list: what is known and what is missing, and what 保留为缺口 does and does not do. */
 export function unconfirmedStatement(listed: TaskPlanUnconfirmedProjection): string {
   const what = unconfirmedWhat(listed.ranges.length, [...new Set(listed.steps.map((step) => step.stage))]);
-  return `${what}的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；任务已完成，这些部分在结果里记为结果待确认的缺口，AI7 没有自动再发。` +
-    '保留为缺口只记下你的确认：不发送任何内容，不改变结果；以后再读这些阅读范围的任务仍会在计划里说明会再发一次。';
+  // A step is never sent again by a later Task as the same request, so only ranges carry the re-send sentence (#763 review).
+  return `${what}的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；运行已结束，这些部分在结果里记为结果待确认的缺口，AI7 没有自动再发。` +
+    `保留为缺口只记下你的确认：不发送任何内容，不改变结果${listed.ranges.length === 0 ? '。' : '；以后再读这些阅读范围的任务仍会在计划里说明会再发一次。'}`;
 }
-/** One line of the list: the category in a Review Run, the range or the step, and that its request was sent. */
-export function unconfirmedLine(entry: { unitOrdinal?: number; stage?: UnconfirmedStageId; category: string | null }): string {
-  const what = entry.stage !== undefined ? UNCONFIRMED_STAGE_LABELS[entry.stage] : `第 ${entry.unitOrdinal} 个阅读范围`;
+/**
+ * One line of the list: the category in a Review Run, the range or the step, and that its request was sent. A range counted in a
+ * text the Book has moved on from says so: 「第 N 个阅读范围（当时的文字）」.
+ */
+export function unconfirmedLine(entry: { unitOrdinal?: number; earlierText?: boolean; stage?: UnconfirmedStageId; category: string | null }): string {
+  const what = entry.stage !== undefined ? UNCONFIRMED_STAGE_LABELS[entry.stage]
+    : `第 ${entry.unitOrdinal} 个阅读范围${entry.earlierText === true ? '（当时的文字）' : ''}`;
   return `${entry.category === null ? '' : `「${entry.category}」`}${what} · 请求已发出 · 回答没有完整传回`;
 }
 
