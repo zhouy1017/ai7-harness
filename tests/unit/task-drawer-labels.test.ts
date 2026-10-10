@@ -137,6 +137,10 @@ import {
   taskPlanBudgetEdited,
   TASK_BAR_RESOLVE_MODEL_SERVICE,
   taskBarAccountLimitNote,
+  TASK_BAR_UNCONFIRMED_HEADING,
+  TASK_BAR_VIEW_UNCONFIRMED,
+  taskBarOutcomeUnknownNote,
+  taskBarUnconfirmedUnit,
   TASK_BAR_REPREPARE,
   taskBarReprepareNote,
 } from '../../src/renderer/task-drawer-labels.js';
@@ -184,6 +188,7 @@ function plan(overrides: Partial<TaskPlanProjection> = {}): TaskPlanProjection {
     defaultRule: { canSet: false, reason: '这份计划不能设为快速开始默认。', planEnvelopeDigest: null, current: null, binds: [], startedBy: null },
     runControl: null,
     redo: null,
+    resend: null,
     reprepare: null,
     clarifications: [],
     budgetStop: null,
@@ -224,7 +229,7 @@ describe('the drawer', () => {
     const keys: TaskPlanStateKey[] = [
       'ready', 'changed', 'unconnected', 'offline', 'recorded', 'blocked', 'waiting', 'queued', 'running', 'settled', 'stopped', 'cancelled',
       'cancelling', 'cancelled-after-start', 'pausing', 'paused', 'resumable', 'awaiting-clarification', 'budget-reached', 'account-limit',
-      'plan-moved',
+      'plan-moved', 'outcome-unknown',
     ];
     expect(Object.keys(TASK_PLAN_STATE_PILLS).sort()).toEqual([...keys].sort());
     // 已停止 · 预算已达上限 (Issue #51, S16a) asks for the editor: never the blocked square of 已中断.
@@ -232,6 +237,9 @@ describe('the drawer', () => {
     expect(TASK_PLAN_STATE_PILLS['budget-reached']).not.toEqual(TASK_PLAN_STATE_PILLS.stopped);
     // 模型服务账户限额 (Issue #51, S16b) never reads as 任务已中断 · 可续行 without colour (RUN-012).
     expect(TASK_PLAN_STATE_PILLS['account-limit'].shape).not.toBe(TASK_PLAN_STATE_PILLS.resumable.shape);
+    // 结果待确认 (Issue #51, S16c) never reads as 可续行 nor as a failure's square without colour (COPY-009).
+    expect(TASK_PLAN_STATE_PILLS['outcome-unknown'].shape).not.toBe(TASK_PLAN_STATE_PILLS.resumable.shape);
+    expect(TASK_PLAN_STATE_PILLS['outcome-unknown'].shape).not.toBe(TASK_PLAN_STATE_PILLS.stopped.shape);
     // 需要重新确认计划 (Issue #536) is a plan decision, never 派发前已阻止's blocked square.
     expect(TASK_PLAN_STATE_PILLS['plan-moved'].shape).not.toBe(TASK_PLAN_STATE_PILLS.blocked.shape);
     expect(new Set(keys.map((key) => TASK_PLAN_STATE_PILLS[key].shape)).size).toBeGreaterThan(4);
@@ -543,7 +551,7 @@ describe('the authorization bar (S74a)', () => {
       executingSince: null,
       update: null,
       continuation: null,
-      accountLimit: null,
+      accountLimit: null, outcomeUnknown: null,
     };
     const running = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'running', label: '运行中' }, runControl }));
     expect(running).toMatchObject({ readiness: 'started', statement: null, note: null, status: '运行中' });
@@ -592,7 +600,7 @@ describe('the authorization bar (S74a)', () => {
       redo: { reason: null },
       activity: null, executingSince: null,
       continuation: { unitsSettled: 3, unitsTotal: 8 }, update: null,
-      accountLimit: null,
+      accountLimit: null, outcomeUnknown: null,
     };
     expect(TASK_BAR_RESUME).toBe('续行');
     const paused = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'paused', label: '已暂停' }, runControl: stoppedControl }));
@@ -840,7 +848,7 @@ describe('模型服务账户限额 in the drawer (S16b)', () => {
       redo: { reason: null },
       activity: null, executingSince: null,
       continuation: { unitsSettled: 3, unitsTotal: 8 }, update: null,
-      accountLimit: { unitOrdinal: 4, condition },
+      accountLimit: { unitOrdinal: 4, condition }, outcomeUnknown: null,
     };
     const limited = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'account-limit', label: '模型服务账户限额' }, runControl: control }));
     expect(limited).toMatchObject({ status: '模型服务账户限额', note: taskBarAccountLimitNote(4, 3, 8) });
@@ -856,6 +864,53 @@ describe('模型服务账户限额 in the drawer (S16b)', () => {
       state: { key: 'account-limit', label: '模型服务账户限额' }, runControl: { ...control, resume: { reason: '运行名额已满：正在运行的任务结束后再续行。' } },
     }));
     expect(busy.actions.find((entry) => entry.name === 'resume')?.disabledReason).toBe('运行名额已满：正在运行的任务结束后再续行。');
+  });
+});
+
+// Issue #51 (plan slice S16c; V2-UX-CTRL-007, COPY-009, CONT-011, CONT-016; interaction-spec §807, §1036; ADR 0034): the bar of
+// a Run stopped on sent requests whose results cannot be known — 查看未确认的部分 first, 取消任务 that keeps what was read, and
+// 查看运行 — never 续行 nor 改计划重做 (CONT-011): nothing repeats those ranges' requests until the editor ends this Run.
+describe('结果待确认 in the drawer (S16c)', () => {
+  const control = {
+    runRecordId: 'run', cancelling: false, pausing: false,
+    cancel: { reason: null, impact: ['这项任务已经停下。'] },
+    pause: { reason: '这项任务现在没有在运行，不能暂停；可以取消它' },
+    resume: null,
+    redo: { reason: null },
+    activity: null, executingSince: null,
+    continuation: { unitsSettled: 8, unitsTotal: 8 }, update: null,
+    accountLimit: null, outcomeUnknown: { units: [{ unitOrdinal: 4, attempts: 1 }], stopped: true },
+  };
+
+  it('names the unconfirmed ranges and what the editor can do, with no repeat-shaped action', () => {
+    expect([TASK_BAR_VIEW_UNCONFIRMED, TASK_BAR_UNCONFIRMED_HEADING]).toEqual(['查看未确认的部分', '结果待确认的阅读范围']);
+    expect(taskBarOutcomeUnknownNote(1, 8, 8)).toBe(
+      '1 个阅读范围的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；这次运行不会再发它。' +
+      '其余已读完的 7 / 8 个阅读范围结果都已保存。取消任务会保留已读完的部分，这 1 个记为结果待确认的缺口');
+    expect(taskBarOutcomeUnknownNote(1, 8, 8)).not.toMatch(/续行|重做|再次计费/u);
+    expect(taskBarUnconfirmedUnit(4, 1)).toBe('第 4 个阅读范围 · 请求已发出 1 次 · 回答没有完整传回');
+    const unknown = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'outcome-unknown', label: '结果待确认' }, runControl: control }));
+    expect(unknown).toMatchObject({ status: '结果待确认', note: taskBarOutcomeUnknownNote(1, 8, 8) });
+    expect(unknown.actions.map((entry) => [entry.name, entry.label, entry.tone, entry.disabledReason])).toEqual([
+      ['view-unconfirmed', '查看未确认的部分', 'primary', null],
+      ['cancel-run', '取消任务', 'secondary', null],
+      ['run-link', '查看运行', 'secondary', null],
+    ]);
+    // A kept progress that does not read back is never a count.
+    const unread = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, {
+      state: { key: 'outcome-unknown', label: '结果待确认' }, runControl: { ...control, continuation: { unitsSettled: null, unitsTotal: 8 } },
+    }));
+    expect(unread.note).toBeNull();
+  });
+
+  it('lets a paused Run that holds an unconfirmed range go on with the others, and say which range it holds', () => {
+    const paused = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, {
+      state: { key: 'paused', label: '已暂停' },
+      runControl: { ...control, resume: { reason: null }, continuation: { unitsSettled: 4, unitsTotal: 8 }, outcomeUnknown: { units: [{ unitOrdinal: 4, attempts: 1 }], stopped: false } },
+    }));
+    expect(paused.actions.map((entry) => [entry.name, entry.tone])).toEqual([
+      ['resume', 'primary'], ['cancel-run', 'secondary'], ['redo', 'secondary'], ['view-unconfirmed', 'secondary'], ['run-link', 'secondary'],
+    ]);
   });
 });
 
@@ -882,7 +937,7 @@ describe('Clarification Requests in the drawer (S76d)', () => {
     const control = {
       runRecordId: 'run', cancelling: false, pausing: false,
       cancel: { reason: null, impact: [] }, pause: { reason: '这项任务现在没有在运行，不能暂停；可以取消它' }, resume: null, redo: { reason: null },
-      activity: null, executingSince: null, continuation: { unitsSettled: 7, unitsTotal: 8 }, accountLimit: null,
+      activity: null, executingSince: null, continuation: { unitsSettled: 7, unitsTotal: 8 }, accountLimit: null, outcomeUnknown: null,
     };
     const waiting = taskBarView(plan({
       state: { key: 'awaiting-clarification', label: '任务等待你的说明' },

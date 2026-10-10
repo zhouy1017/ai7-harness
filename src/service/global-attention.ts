@@ -133,6 +133,8 @@ export interface AnalysisTaskAttentionReading {
     readonly launchSetsCeiling?: boolean;
     /** A resumable Run the provider's account limit stopped (Issue #51, S16b): 模型服务账户限额. */
     readonly accountLimited?: boolean;
+    /** A resumable Run stopped on sent requests whose results cannot be known (Issue #51, S16c): 结果待确认. */
+    readonly outcomeUnknown?: boolean;
     /** A waiting Run blocked because its plan moved before it could start (Issue #536): 需要重新确认计划. */
     readonly planMoved?: boolean;
   };
@@ -513,21 +515,30 @@ function analysisTaskItem(reading: AnalysisTaskAttentionReading, waitingFor: Wai
         });
       }
       return item('exceptions', 'analysis-blocked', { itemId, blocked: true, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
-    // 运行中与已暂停 (Issue #422, S76b): a paused Run, and one AI7 stopped under, wait for the editor's 续行 or 取消任务.
+    // 结果待确认 (Issue #51, S16c; ATTN-002, NOTIF-004): a stopped Run that holds ranges whose sent requests' results cannot be
+    // known is listed in 异常与结果待确认 whatever stopped it — unless an account limit needs the model service first — and
+    // its next step is to see which ranges; never a repeat-shaped action.
     case 'paused':
-      return item('active', 'analysis-paused', { itemId, blocked: false, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
     case 'resumable':
+    case 'awaiting-clarification': {
       // 模型服务账户限额 (Issue #51, S16b; MODEL-018): an exception the editor resolves with the model service, then 续行.
-      if (run.accountLimited === true) {
+      if (run.state === 'resumable' && run.accountLimited === true) {
         return item('exceptions', 'analysis-account-limit', {
           itemId, blocked: true, at: run.stateAt, book, object, nextStep: 'resolve-model-service',
           target: { kind: 'analysis-plan', bookId: reading.bookId, taskIntentId: reading.taskIntentId }, technical,
         });
       }
-      return item('active', 'analysis-resumable', { itemId, blocked: false, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
-    // Answered, and waiting its turn in the slot to go on (Issue #422, S76d).
-    case 'awaiting-clarification':
-      return item('active', 'analysis-queued', { itemId, blocked: false, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
+      if (run.outcomeUnknown === true) {
+        return item('exceptions', 'analysis-outcome-unknown', {
+          itemId, blocked: true, at: run.stateAt, book, object, nextStep: 'view-unconfirmed',
+          target: { kind: 'analysis-plan', bookId: reading.bookId, taskIntentId: reading.taskIntentId }, technical,
+        });
+      }
+      // 运行中与已暂停 (Issue #422, S76b): a paused Run, and one AI7 stopped under, wait for the editor's 续行 or 取消任务; one
+      // answered waits its turn in the slot to go on (S76d).
+      const state = run.state === 'paused' ? 'analysis-paused' : run.state === 'resumable' ? 'analysis-resumable' : 'analysis-queued';
+      return item('active', state, { itemId, blocked: false, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
+    }
     default:
       return null;
   }

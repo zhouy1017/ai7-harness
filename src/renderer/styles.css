@@ -493,6 +493,8 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .task-plan-drift { margin: 0; }
 .task-plan-drift h3 { margin: 0 0 .35rem; font-size: 1rem; }
 .task-plan-drift p { margin: .3rem 0; }
+/* A Task that sends again a range whose earlier result could not be known says so (Issue #51, S16c). */
+.task-plan-resend { margin: 0; }
 .task-plan-drift-table { width: 100%; margin-top: .5rem; border-collapse: collapse; font-size: .86rem; }
 .task-plan-drift-table th, .task-plan-drift-table td { padding: .3rem .4rem; border-bottom: 1px solid #ded9cd; text-align: left; vertical-align: top; }
 .task-plan-rows, .task-plan-facts, .task-plan-technical-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .45rem .8rem; margin: 0; }
@@ -533,6 +535,11 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .task-bar-cancel-impact h4 { margin: 0; }
 .task-bar-cancel-impact h4:focus-visible { outline: 3px solid #416458; outline-offset: 2px; }
 .task-bar-cancel-lines { display: grid; gap: .3rem; margin: 0; padding-left: 1.1rem; font-size: .86rem; line-height: 1.5; }
+/* 查看未确认的部分 (Issue #51, S16c): the unconfirmed ranges, in the outline the cancellation summary has. */
+.task-bar-unconfirmed { display: grid; gap: .45rem; padding: .75rem; border: 1px solid #c9a36b; border-radius: 10px; background: #fffdf6; }
+.task-bar-unconfirmed h4 { margin: 0; }
+.task-bar-unconfirmed h4:focus-visible { outline: 3px solid #416458; outline-offset: 2px; }
+.task-bar-unconfirmed-lines { display: grid; gap: .3rem; margin: 0; padding-left: 1.1rem; font-size: .86rem; line-height: 1.5; }
 /* 澄清卡 (Issue #422, S76d; CLAR-002, INPUT-002): the question first in the drawer, its choices unselected and
    each with its consequence, 推荐 as words beside one, and the note that may qualify a choice. */
 .task-drawer-questions:empty { display: none; }
@@ -1516,7 +1523,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .task-drawer-foot, .task-drawer-bar, .task-bar-actions, .task-bar-note, .task-bar-refusal,
   .global-attention-group, .global-attention-item,
   .manuscript-export, .export-format-option, .export-option, .export-fidelity-row, .export-receipt, .export-records > li,
-  .task-plan-default-rule-confirm, .default-rule-card, .guideline-card, .guideline-preview, .exemplar-book, .task-plan-activity, .task-bar-cancel-impact,
+  .task-plan-default-rule-confirm, .default-rule-card, .guideline-card, .guideline-preview, .exemplar-book, .task-plan-activity, .task-bar-cancel-impact, .task-bar-unconfirmed,
   .library-material, .library-preview, .library-chooser, .library-chooser fieldset, .library-kinds,
   .evaluation-record, .evaluation-item, .evaluation-risk, .evaluation-conclusion, .evaluation-comparison, .evaluation-profile,
   .evaluation-initial, .evaluation-adjustment, .evaluation-market, .evaluation-market-list, .evaluation-comparables, .evaluation-prediction,
@@ -1564,7 +1571,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   .task-drawer-title:focus-visible, .task-drawer-mode:focus-visible { outline-color: Highlight; }
   /* A Run stopping at the editor's word keeps a heavier edge than one simply running, and the summary its outline. */
   .task-plan-activity[data-task-plan-activity="cancelling"], .task-bar-cancel-impact { border-width: 2px; }
-  .task-bar-cancel-impact h4:focus-visible { outline-color: Highlight; }
+  .task-bar-cancel-impact h4:focus-visible, .task-bar-unconfirmed h4:focus-visible { outline-color: Highlight; }
   /* Without colour a question keeps its heavier edge, and the chosen answer its own. */
   .task-plan-clarification { border-width: 3px; }
   .task-plan-choice:has(input:checked) { outline: 2px solid Highlight; outline-offset: -3px; }

@@ -509,6 +509,7 @@ import {
   QUICK_START_RANGE_REASON,
   QUICK_START_RULE_CHANGED,
   QUICK_START_SLOT_BUSY,
+  QUICK_START_RESEND,
   RULE_STATE_LABELS,
   SET_RULE_BUDGET,
   SET_RULE_CHANGED,
@@ -540,6 +541,7 @@ import {
   BACKGROUND_ENROLL_NO_ROUTE,
   BACKGROUND_ENROLL_NO_SHARE,
   BACKGROUND_NO_ROUTE,
+  BACKGROUND_OUTCOME_UNKNOWN,
   BACKGROUND_PLACE_BUSY,
   BACKGROUND_PREPARATION_IN_FLIGHT,
   BACKGROUND_EDITOR_JOB,
@@ -5127,7 +5129,9 @@ export class EditorialStore {
       const stopped = this.#baselineStoppedRun(projection, carriesStoppedRun);
       // What the Run asked the editor, and the answers (Issue #422, S76d).
       const clarifications = projection.run === null ? [] : this.#analysisCall(() => this.#baselineAnalysis.clarificationsOf(projection.run!.runRecordId));
-      const plan = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, defaultRule, clarifications, ...(stopped === null ? {} : { stopped }) }));
+      // 结果待确认 (Issue #51, S16c): the ranges this Task would send again whose earlier result could not be known.
+      const resendUnits = this.#analysisCall(() => this.#baselineAnalysis.resendUnitsOf(projection));
+      const plan = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, defaultRule, clarifications, resendUnits, ...(stopped === null ? {} : { stopped }) }));
       return { plan, routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     if (input.kind === 'readers-report') {
@@ -5456,7 +5460,12 @@ export class EditorialStore {
       const blockers = stopped ? [...this.#baselineAnalysis.continuationBlockers(run.runRecordId), ...(bindingHolds ? [] : [RESUME_BLOCKED_BINDING])] : [];
       // 模型服务账户限额 (Issue #51, S16b): the stop the provider's limit made, which 续行 takes on once it clears.
       const accountLimit = run.state === 'resumable' ? this.#baselineAnalysis.accountLimitOf(run.runRecordId) : null;
-      return { unitsSettled, unitsClosed, unitsTotal, blockers, bindingHolds, waiting, accountLimit };
+      // 结果待确认 (Issue #51, S16c): the ranges whose sent requests' results cannot be known — held by any stopped Run, and
+      // whether the Run stopped there itself, which it never goes on from.
+      const unconfirmed = stopped ? this.#baselineAnalysis.unconfirmedRangesOf(run.runRecordId) : [];
+      const outcomeUnknown = unconfirmed.length === 0 ? null
+        : { units: unconfirmed, stopped: run.state === 'resumable' && this.#baselineAnalysis.outcomeUnknownOf(run.runRecordId) !== null };
+      return { unitsSettled, unitsClosed, unitsTotal, blockers, bindingHolds, waiting, accountLimit, outcomeUnknown };
     });
   }
 
@@ -5695,6 +5704,9 @@ export class EditorialStore {
     if (projection.planRevision !== null) return fellBack(QUICK_START_PLAN_CHANGED);
     const drift = defaultExecutionRuleDrift(rule.version.binding, version.materialInputs);
     if (drift.length > 0) return fellBack(ruleDriftReason(defaultExecutionRuleReference(rule, rule.version).name, drift));
+    // 结果待确认 (Issue #51, S16c; CONT-011): a Task that sends again a range whose earlier result could not be known is started
+    // only from its plan, where the editor has read that it will.
+    if (plan.resend !== null) return fellBack(QUICK_START_RESEND);
     switch (plan.start.readiness) {
       case 'ready':
       case 'no-route':
@@ -6015,6 +6027,9 @@ export class EditorialStore {
     if (projection.planRevision !== null) return refused(QUICK_START_PLAN_CHANGED);
     const drift = defaultExecutionRuleDrift(record.version.binding, version.materialInputs);
     if (drift.length > 0) return refused(backgroundDriftReason(drift));
+    // 结果待确认 (Issue #51, S16c; CTRL-007, CONT-011): a plan that would send again a range whose earlier result could not be
+    // known is never started by the dispatcher, whatever changed between its look and this start.
+    if (this.#analysisCall(() => this.#baselineAnalysis.resendUnitsOf(projection)).length > 0) return refused(BACKGROUND_OUTCOME_UNKNOWN);
     if (!envelope.dispatchAllowed) return refused(BACKGROUND_NO_ROUTE);
     const authorized = this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest, 'now',
       { kind: 'background-analysis-enrollment', enrollmentVersionId }));
@@ -6117,6 +6132,8 @@ export class EditorialStore {
       startingPoint: () => record!.version.startingPoint,
       movedSinceEnrollment: () => point().workingDigest !== record!.version.enrolledAt.workingDigest,
       // Whoever's it was: the latest Task read exactly this text and the analysis is still not current with it (P2-4).
+      // 结果待确认 (Issue #51, S16c): the latest revision holds ranges whose request was sent and whose result is unknown.
+      unconfirmedPending: () => this.#baselineAnalysis.latestUnconfirmedRangesOf(bookId).length > 0,
       attemptedAtThisText: () => {
         const task = latestTask();
         return task !== null && task.checkpointDigest !== null && task.checkpointDigest === point().workingDigest;

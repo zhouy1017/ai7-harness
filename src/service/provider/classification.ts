@@ -23,6 +23,12 @@ export const AI7_FAILURE_CODES = {
   PLATFORM_TOOL_BREAKER_TRIPPED: 'AI7_PLATFORM_TOOL_BREAKER_TRIPPED',
   TRANSMIT_TICKET_ABSENT: 'AI7_TRANSMIT_TICKET_ABSENT',
   FIXTURE_MISMATCH: 'AI7_FIXTURE_MISMATCH',
+  /**
+   * 结果待确认 (Issue #51, S16c): a request that was sent and whose result cannot be known — the model service accepted it,
+   * and the answer never came back whole, so it may or may not have been processed and billed. Never retried on its own:
+   * a second request could bill again. The unit it answers is left unconfirmed, and only the editor reads it again.
+   */
+  OUTCOME_UNKNOWN: 'AI7_OUTCOME_UNKNOWN',
   RATE_LIMIT: 'RATE_LIMIT',
   PROVIDER_ERROR: 'PROVIDER_ERROR',
   INVALID_RESPONSE: 'INVALID_RESPONSE',
@@ -45,10 +51,12 @@ export type ModelFailureClass =
   | 'network-denied'
   | 'fixture-mismatch'
   | 'rate-limit'
+  | 'outcome-unknown'
   | 'adapter-failure';
 
 export interface ClassifiedModelFailure {
-  readonly signal: 'failed' | 'interrupted';
+  /** `ambiguous` (Issue #51, S16c): the request was sent and its result cannot be known — neither a failure nor a success. */
+  readonly signal: 'failed' | 'interrupted' | 'ambiguous';
   readonly failureClass: ModelFailureClass;
   /** Safe, payload-free reason for records and the UI. */
   readonly reason: string;
@@ -64,8 +72,8 @@ export interface ClassifiedModelFailure {
  * unit request may be repeated once inside the unchanged Plan Envelope only when its code is
  * `RATE_LIMIT`, `TRANSPORT_FAILED`, or `PROVIDER_ERROR` carrying a 5xx server status. Every other
  * code — Provider Account Limit, invalid credential, context-window exceeded, interruption, egress
- * refusal, network denial, fixture mismatch, invalid response, and any unknown adapter code — is
- * never retried and keeps its first-attempt meaning.
+ * refusal, network denial, fixture mismatch, invalid response, an outcome that cannot be known (Issue #51, S16c), and
+ * any unknown adapter code — is never retried and keeps its first-attempt meaning.
  */
 export const RETRY_SAFE_FAILURE_TABLE: Readonly<Record<string, 'any-status' | 'server-status-only'>> = {
   [AI7_FAILURE_CODES.RATE_LIMIT]: 'any-status',
@@ -83,7 +91,7 @@ export function isRetrySafeFailure(failure: ModelFailureFacts): boolean {
 export function classifyModelFailure(failure: ModelFailureFacts, codes: DshFailureCodes): ClassifiedModelFailure {
   const code = failure.code;
   const status = typeof failure.status === 'number' && Number.isSafeInteger(failure.status) ? failure.status : null;
-  const classified = (signal: 'failed' | 'interrupted', failureClass: ModelFailureClass, reason: string): ClassifiedModelFailure =>
+  const classified = (signal: ClassifiedModelFailure['signal'], failureClass: ModelFailureClass, reason: string): ClassifiedModelFailure =>
     ({ signal, failureClass, reason, code, status, retrySafe: isRetrySafeFailure(failure) });
   if (code === codes.QUOTA_EXCEEDED_CODE) {
     return classified('failed', 'provider-account-limit', 'Provider Account Limit：模型服务账户限额阻止了本次请求。');
@@ -112,6 +120,10 @@ export function classifyModelFailure(failure: ModelFailureFacts, codes: DshFailu
   }
   if (code === AI7_FAILURE_CODES.RATE_LIMIT) {
     return classified('failed', 'rate-limit', '模型服务速率限制拒绝了本次请求。');
+  }
+  if (code === AI7_FAILURE_CODES.OUTCOME_UNKNOWN) {
+    // No retry table names it, and it is no failure: the harness ends the turn `ambiguous`, which nothing retries.
+    return classified('ambiguous', 'outcome-unknown', '结果待确认：请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费。');
   }
   return classified('failed', 'adapter-failure', `适配器失败（${code}${status === null ? '' : ` · ${status}`}）。`);
 }

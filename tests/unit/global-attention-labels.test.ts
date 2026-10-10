@@ -28,7 +28,9 @@ import {
 } from '../../src/renderer/global-attention-labels.js';
 import { localInstantLabel } from '../../src/renderer/plan-preview-labels.js';
 import { REVIEW_ACTION_LABELS } from '../../src/renderer/review-labels.js';
-import { TASK_BAR_ADJUST_BUDGET_REDO, TASK_BAR_RECONFIRM, TASK_BAR_REDO, TASK_BAR_REPREPARE, TASK_BAR_RESOLVE_MODEL_SERVICE, TASK_BAR_RUN_LINKS } from '../../src/renderer/task-drawer-labels.js';
+import {
+  TASK_BAR_ADJUST_BUDGET_REDO, TASK_BAR_RECONFIRM, TASK_BAR_REDO, TASK_BAR_REPREPARE, TASK_BAR_RESOLVE_MODEL_SERVICE, TASK_BAR_RUN_LINKS, TASK_BAR_VIEW_UNCONFIRMED,
+} from '../../src/renderer/task-drawer-labels.js';
 import { RESOLVE_CONFLICT_LABEL } from '../../src/renderer/editorial-mark-labels.js';
 import { PROPOSAL_CONFLICT_CLASSIFICATION } from '../../src/renderer/proposal-conflict-labels.js';
 import { REVIEW_RUN_CATEGORY_STATE_LABELS } from '../../src/service/review/review-run-state.js';
@@ -53,7 +55,7 @@ const AT = '2026-09-23T04:05:06.000Z';
 const STATES: ReadonlyArray<GlobalAttentionStateKey> = [
   'import-outcome-uncertain', 'import-cleanup-pending', 'recovery-pending', 'recovery-deferred',
   'manuscript-conflict', 'manuscript-conflict-deferred', 'analysis-failed',
-  'analysis-interrupted', 'analysis-budget-reached', 'analysis-account-limit', 'analysis-blocked', 'analysis-orphaned', 'review-failed', 'review-stopped',
+  'analysis-interrupted', 'analysis-budget-reached', 'analysis-account-limit', 'analysis-outcome-unknown', 'analysis-blocked', 'analysis-orphaned', 'review-failed', 'review-stopped',
   'analysis-plan-revision', 'analysis-plan-moved', 'analysis-clarification', 'analysis-queued', 'analysis-running', 'analysis-waiting-network', 'analysis-waiting-connection',
   'analysis-waiting-slot', 'analysis-waiting-admission', 'analysis-waiting-capacity', 'analysis-cancelling', 'analysis-pausing', 'analysis-paused', 'analysis-resumable',
   'review-running', 'review-continuable',
@@ -156,6 +158,7 @@ describe('each item', () => {
       'analysis-interrupted': '已中断',
       'analysis-budget-reached': '已停止 · 预算已达上限',
       'analysis-account-limit': '模型服务账户限额',
+      'analysis-outcome-unknown': '结果待确认',
       'analysis-blocked': '派发前已阻止',
       'analysis-orphaned': '已中断',
       'review-failed': '运行失败',
@@ -232,6 +235,8 @@ describe('each item', () => {
       'answer-clarification': '回答问题',
       'adjust-budget-redo': '调整预算并重做',
       'resolve-model-service': '处理模型服务',
+      // 结果待确认's first step (Issue #51, S16c): which ranges are unconfirmed, never a repeat-shaped action.
+      'view-unconfirmed': '查看未确认的部分',
       reprepare: '重新准备',
       redo: '改计划重做',
       // A prepared plan nobody started (Issue #423, S77a): the drawer's own entry to it.
@@ -255,6 +260,11 @@ describe('each item', () => {
     // A Provider Account Limit's remediation route (Issue #51, S16b), the drawer's own words for it.
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['resolve-model-service']).toBe(TASK_BAR_RESOLVE_MODEL_SERVICE);
     expect(GLOBAL_ATTENTION_STATE_PILLS['analysis-account-limit'].shape).not.toBe(GLOBAL_ATTENTION_STATE_PILLS['analysis-resumable'].shape);
+    // 结果待确认 (Issue #51, S16c): the drawer's own words for its first step, and the pill 导入提交结果待确认 has — never a
+    // failure's, nor 可续行's.
+    expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['view-unconfirmed']).toBe(TASK_BAR_VIEW_UNCONFIRMED);
+    expect(GLOBAL_ATTENTION_STATE_PILLS['analysis-outcome-unknown']).toEqual(GLOBAL_ATTENTION_STATE_PILLS['import-outcome-uncertain']);
+    expect(GLOBAL_ATTENTION_STATE_PILLS['analysis-outcome-unknown'].shape).not.toBe(GLOBAL_ATTENTION_STATE_PILLS['analysis-resumable'].shape);
     // A waiting Run whose plan moved (Issue #536; OFF-008): the drawer's own words and pill, never 派发前已阻止's.
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS.reprepare).toBe(TASK_BAR_REPREPARE);
     // A Run the launch's ceiling stopped under developer-live (Issue #541): the drawer's 改计划重做, and words that say the
@@ -325,6 +335,7 @@ describe('each item', () => {
       'analysis-interrupted': globalAttentionReason(item('analysis-interrupted')),
       'analysis-budget-reached': globalAttentionReason(item('analysis-budget-reached')),
       'analysis-account-limit': globalAttentionReason(item('analysis-account-limit')),
+      'analysis-outcome-unknown': globalAttentionReason(item('analysis-outcome-unknown')),
       'analysis-blocked': globalAttentionReason(item('analysis-blocked')),
       'analysis-orphaned': globalAttentionReason(item('analysis-orphaned')),
       'review-failed': globalAttentionReason(item('review-failed', { facts: { progress: null, revisionOrdinal: null, categories: categories([['错别字与规范用语', 'failed', null], ['体例与格式', 'refused', null]]) } })),
@@ -390,6 +401,7 @@ describe('each item', () => {
       'analysis-interrupted': '运行已在派发后中断；已完成单元的结果与缺口均已保留。',
       'analysis-budget-reached': '运行用到了你设的预算上限，已停止；读完的部分已保留。要接着读，请调整预算并重做。',
       'analysis-account-limit': '模型服务按账户限额拒绝了请求，这项任务已停下，读完的部分都已保存；处理好模型服务、限额解除后续行。',
+      'analysis-outcome-unknown': '有阅读范围的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；AI7 没有自动再发，读完的部分都已保存。',
       'analysis-blocked': '授权已记录，派发前阻止：当前启动没有可执行的路由。',
       'analysis-orphaned': '服务在这次运行期间停止，运行已中断；已完成单元的结果与缺口保留在分析账本中。',
       'review-failed': '「错别字与规范用语」运行失败；「体例与格式」未能开始',

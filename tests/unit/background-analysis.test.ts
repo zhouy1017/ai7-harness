@@ -4,6 +4,7 @@ import { ProtocolError, decodeRequest } from '../../src/service/request-frames.j
 import {
   BACKGROUND_ANALYSIS_NOT_GRANTED,
   BACKGROUND_ATTEMPTED,
+  BACKGROUND_OUTCOME_UNKNOWN,
   BACKGROUND_CURRENT,
   BACKGROUND_DEVELOPER_LIVE,
   BACKGROUND_EDITOR_TASK,
@@ -87,6 +88,7 @@ const READY: BackgroundAnalysisFacts = {
   changedSinceEditorTask: true,
   startingPoint: 'prospective',
   movedSinceEnrollment: true,
+  unconfirmedPending: false,
   attemptedAtThisText: false,
   sinceLastEditMs: 60_000,
   quietMs: 30_000,
@@ -124,6 +126,8 @@ describe('the 后台分析登记 decision', () => {
       [{ taskUnfinished: 'prepared' }, 'wait', BACKGROUND_TASK_PREPARED],
       [{ changedSinceEditorTask: false }, 'none', BACKGROUND_EDITOR_TASK],
       [{ movedSinceEnrollment: false }, 'none', BACKGROUND_NOT_MOVED],
+      // 结果待确认 (Issue #51, S16c): a revision holding an outcome-unknown range is never brought up to date by the dispatcher.
+      [{ unconfirmedPending: true }, 'wait', BACKGROUND_OUTCOME_UNKNOWN],
       [{ attemptedAtThisText: true }, 'wait', BACKGROUND_ATTEMPTED],
       [{ sinceLastEditMs: 29_999 }, 'wait', backgroundQuietReason(30_000)],
       [{ placeFree: false }, 'wait', BACKGROUND_PLACE_BUSY],

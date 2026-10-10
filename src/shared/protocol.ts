@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 116 as const;
+export const SERVICE_PROTOCOL_VERSION = 117 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -2401,7 +2401,7 @@ export interface AnalysisGapProjection {
    * kind that leaves out-of-scope units unreviewed planned not to read this unit, never dispatched it,
    * and says so — `不在本次审阅范围内`. No baseline or factual Run produces it.
    */
-  code: 'adapter-failure' | 'contract-invalid' | 'interrupted' | 'egress-refused' | 'not-attempted' | 'out-of-scope';
+  code: 'adapter-failure' | 'contract-invalid' | 'interrupted' | 'egress-refused' | 'not-attempted' | 'out-of-scope' | 'outcome-unknown';
   reason: string;
   startPosition: number;
   endPosition: number;
@@ -5238,6 +5238,8 @@ export type TaskPlanStateKey =
   | 'ready' | 'changed' | 'unconnected' | 'offline' | 'recorded' | 'blocked' | 'waiting' | 'running' | 'settled' | 'stopped'
   | 'cancelled' | 'cancelling' | 'cancelled-after-start' | 'pausing' | 'paused' | 'resumable' | 'awaiting-clarification' | 'budget-reached'
   | 'account-limit' | 'plan-moved'
+  // 结果待确认 (Issue #51, S16c): the Run stopped on sent requests whose results cannot be known.
+  | 'outcome-unknown'
   // 等待运行名额 (Issue #49, S14; CONC-007): authorized, and waiting on the governor for a place; nothing has begun.
   | 'queued';
 
@@ -5290,6 +5292,13 @@ export interface TaskPlanRunControlProjection {
    * in the same Run once the condition clears. `null` for every other Run.
    */
   accountLimit: null | { unitOrdinal: number | null; condition: string };
+  /**
+   * 结果待确认 (Issue #51, S16c; V2-UX-CTRL-007, COPY-009, CONT-011, CONT-016): the stopped Run holds reading ranges whose requests
+   * were sent and whose results cannot be known — each may have been processed and billed — kept as their own gaps that
+   * nothing in this Run sends again. `stopped` is a Run that stopped 结果待确认 itself, which has no `续行`. `null` for every
+   * Run that holds none, and while a Run executes.
+   */
+  outcomeUnknown: null | { units: ReadonlyArray<{ unitOrdinal: number; attempts: number }>; stopped: boolean };
 }
 
 /**
@@ -5488,6 +5497,11 @@ export interface TaskPlanProjection {
   runControl: TaskPlanRunControlProjection | null;
   /** 改计划重做 while it can be made (Issue #422, S76c): on a stopped Run, or one cancelled after it began; else `null`. */
   redo: TaskPlanRedoProjection | null;
+  /**
+   * 结果待确认 after the Run that left it ended (Issue #51, S16c; CONT-011): the ranges this Task sends again whose earlier
+   * request's result could not be known, and the Plan Preview's statement of it; `null` when there are none.
+   */
+  resend: null | { units: ReadonlyArray<number>; statement: string };
   /** 重新准备 for a waiting Run whose plan moved before it could start (Issue #536); else `null`. */
   reprepare: TaskPlanReprepareProjection | null;
   /** What the Task's Run asked the editor (Issue #422, S76d; CLAR-001 to CLAR-007): open questions first; empty when none. */
@@ -9891,6 +9905,7 @@ export type GlobalAttentionStateKey =
   | 'analysis-interrupted'
   | 'analysis-budget-reached'
   | 'analysis-account-limit'
+  | 'analysis-outcome-unknown'
   | 'analysis-blocked'
   | 'analysis-orphaned'
   | 'review-failed'
@@ -9962,6 +9977,8 @@ export type GlobalAttentionNextStep =
   | 'answer-clarification'
   | 'adjust-budget-redo'
   | 'resolve-model-service'
+  // 结果待确认's 查看未确认的部分 (Issue #51, S16c): which reading ranges are unconfirmed, in the drawer.
+  | 'view-unconfirmed'
   | 'reprepare'
   // 改计划重做 for a Run the launch's ceiling stopped under developer-live (Issue #541): the plan cannot raise it.
   | 'redo'
@@ -9986,6 +10003,7 @@ export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
   'resolve-conflict', 'answer-clarification', 'adjust-budget-redo', 'resolve-model-service', 'reprepare', 'redo', 'view-plan',
   'maintenance-link-proposal', 'maintenance-link-publication', 'maintenance-write-errata', 'maintenance-conclude',
   'set-library-attribution', 'set-learning-eligibility', 'decide-learning-materials', 'open-dialogue', 'view-material-index',
+  'view-unconfirmed',
 ];
 
 /**
