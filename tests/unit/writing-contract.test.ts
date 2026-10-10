@@ -15,9 +15,15 @@ import {
   WRITING_COPY_SIZES_V1,
   WRITING_PROMPT_CONTRACT_SCHEMA,
   WRITING_PROMPT_CONTRACT_SCHEMA_V1,
+  WRITING_PROMPT_CONTRACT_SCHEMA_V3,
+  MAX_WRITING_MATERIALS,
+  MAX_WRITING_MATERIAL_GRAPHEMES,
+  MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES,
   WRITING_SYNTHESIS_RESULT_SCHEMA,
   WRITING_UNIT_RESULT_SCHEMA,
   exemplarCopied,
+  exemplarCopyDetail,
+  referenceCopied,
   parseWritingSynthesis,
   parseWritingSynthesisMessageHeader,
   parseWritingUnitMessageHeader,
@@ -27,13 +33,26 @@ import {
   writingContractRules,
   writingCopySizes,
   writingExemplarLine,
+  writingMaterialGraphemes,
+  writingMaterialLine,
   writingRequestDigest,
   writingTypeGuidance,
   type WritingContractInput,
 } from '../../src/service/writing/writing-contract.js';
-import { writingCopyNotDo, writingReferenceLines } from '../../src/service/task-plan.js';
-import { writingKindDefinition, writingRecordedKindDefinition, writingSchemaDigest } from '../../src/service/writing/writing-kind.js';
-import { WRITING_EXEMPLAR_ABSENT_TEXT, WRITING_EXEMPLAR_MOVED } from '../../src/service/writing-tasks.js';
+import { WRITING_MATERIAL_GONE_LABEL, writingCopyNotDo, writingMaterialCopyNotDo, writingMaterialReferenceLine, writingReferenceLines } from '../../src/service/task-plan.js';
+import { WRITING_MATERIAL_REFUSAL_PREFIX, writingKindDefinition, writingRecordedKindDefinition, writingSchemaDigest } from '../../src/service/writing/writing-kind.js';
+import {
+  WRITING_EXEMPLAR_ABSENT_TEXT,
+  WRITING_EXEMPLAR_MOVED,
+  WRITING_MATERIALS_STATEMENT,
+  WRITING_MATERIALS_TOO_MANY,
+  WRITING_MATERIAL_ABSENT_TEXT,
+  writingMaterialDigest,
+  writingMaterialMoved,
+  writingMaterialOverBound,
+  writingMaterialParagraph,
+  writingMaterialsOverTotal,
+} from '../../src/service/writing-tasks.js';
 import { graphemeLength, writingDraftBlocks, writingWords } from '../../src/service/writing-tasks.js';
 import {
   WRITING_CONSEQUENCE_TERMS,
@@ -42,6 +61,8 @@ import {
   WRITING_STATUS,
   writingDraftedLine,
   writingFieldTooLong,
+  writingMaterialLabel,
+  writingMaterialsMore,
   writingOpenTaskTone,
   writingQuickFailed,
   writingQuickNote,
@@ -630,6 +651,162 @@ describe('the copy rules a frozen contract carries (the Commander\'s ruling on #
   });
 });
 
+describe('资料库 under 允许参考 — `ai7.writing.prompt-contract/3` (Issue #428)', () => {
+  const MATERIAL = { title: '参考资料甲', paragraphs: ['这份资料记录了一座古城在战火中保存青铜器的经过，馆员连夜把器物装箱转移。', '转移途中遭遇暴雨，木箱浸水，修复工作持续了三年。'] };
+  const withMaterials = (materials: NonNullable<WritingContractInput['materials']>, overrides: Partial<WritingContractInput> = {}) => input({ ...overrides, materials });
+  const draft = (paragraph: string) => ({ title: '标题', sections: [{ heading: '一', paragraphs: [paragraph] }] });
+  const synthetic = (length: number, from = 0x4e00) => Array.from({ length }, (_, index) => String.fromCodePoint(from + ((index * 37) % 2000))).join('');
+  const FRESH = synthetic(240, 0x6000);
+
+  it('keeps `/1` and `/2` byte for byte: a Task that lists no item has no `materials` and its digest is the one dev@799e73a0 gave', () => {
+    // The digests the code before Issue #428 gave these inputs (origin/dev 799e73a0): `/1` and `/2` Tasks keep their contracts.
+    expect(writingContractDigest(writingContract(input(), 1))).toBe('074bbc8696b2157eaf3a427abc0e82a50ff91e5479db9d4efd6cde224f5fce08');
+    expect(writingContractDigest(writingContract(input(), 2))).toBe('076f78acd70cf7987f6f43c9fd35f2d4d83f546903c532b903c94ee9339f4bf6');
+    expect(writingContractDigest(writingContract(input({ exemplars: [] }), 1))).toBe('055bd2e9c7167e3bc2490c968e8b8010aa2a9db263c1ee68f4f14114e0b6e61d');
+    expect(writingContractDigest(writingContract(input({ exemplars: [] }), 2))).toBe('929e4a334a92987c183e9e38c28bd6d3d4176dd80ec8216b6cc9eba9207686f3');
+    expect('materials' in writingContract(input()).input).toBe(false);
+    expect(writingContract(input()).schema).toBe(WRITING_PROMPT_CONTRACT_SCHEMA);
+  });
+
+  it('composes `/3` with the items\' paragraphs as reference material, under `/2`\'s sizes, and its own exact bytes', () => {
+    const v3 = writingContract(withMaterials([MATERIAL]));
+    const v2 = writingContract(input());
+    expect(v3.schema).toBe(WRITING_PROMPT_CONTRACT_SCHEMA_V3);
+    expect(writingContractRules(v3)).toBe(2);
+    expect(writingCopySizes(v3)).toEqual(WRITING_COPY_SIZES);
+    // The unit step reads the manuscript as `/2`'s does: the items reach only the synthesis.
+    expect(v3.systemPrompt).toBe(v2.systemPrompt);
+    expect(v3.synthesisInstruction).toContain('参照资料库的 1 份资料（只参照，不照抄）：《参考资料甲》。它们是编辑自己收集的资料，只用来核对事实与背景');
+    expect(v3.synthesisInstruction).toContain(`中文与一份资料在一句之内有连续 ${EXEMPLAR_COPY_WINDOW} 个字相同，或跨标点、空格有连续 ${EXEMPLAR_COPY_WINDOW_ACROSS} 个字相同`);
+    expect(v3.synthesisInstruction).toContain(`《参考资料甲》第 1 段：${MATERIAL.paragraphs[0]}`);
+    expect(v3.synthesisInstruction).toContain(`《参考资料甲》第 2 段：${MATERIAL.paragraphs[1]}`);
+    // `/2`'s instruction is `/3`'s without the item lines.
+    expect(v3.synthesisInstruction.split('\n').filter((line) => !line.includes('资料')).join('\n')).toBe(v2.synthesisInstruction.split('\n').filter((line) => !line.includes('资料')).join('\n'));
+    // The same words are the same contract; any changed word of an item another. `/3`'s bytes are pinned as `/1`'s and `/2`'s are.
+    const digest = writingContractDigest(v3);
+    expect(digest).toBe('8a24b882fd2eefb4ac08c977f54260c9c76c94275664784117cd29ba492a0150');
+    expect(writingContractDigest(writingContract(withMaterials([{ ...MATERIAL }])))).toBe(digest);
+    expect(writingContractDigest(writingContract(withMaterials([{ ...MATERIAL, title: '参考资料乙' }])))).not.toBe(digest);
+    expect(writingContractDigest(writingContract(withMaterials([{ ...MATERIAL, paragraphs: [MATERIAL.paragraphs[0]!] }])))).not.toBe(digest);
+    expect(writingContractDigest(v3)).not.toBe(writingContractDigest(v2));
+    // A paragraph's own line break reads as `／` inside the prompt, as an exemplar's does.
+    expect(writingContract(withMaterials([{ title: '甲', paragraphs: ['上一行\n下一行'] }])).synthesisInstruction).toContain('《甲》第 1 段：上一行／下一行');
+  });
+
+  it('bounds the items whole: four at most, each 3,000 characters, 6,000 together — and never under `/1`', () => {
+    expect([MAX_WRITING_MATERIALS, MAX_WRITING_MATERIAL_GRAPHEMES, MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES]).toEqual([4, 3_000, 6_000]);
+    const sized = (characters: number, title = '甲') => ({ title, paragraphs: ['文'.repeat(characters - 1), '字'] });
+    expect(writingMaterialGraphemes(sized(3_000).paragraphs)).toBe(3_000);
+    expect(writingMaterialGraphemes(['👩‍👩‍👧中'])).toBe(2);
+    expect(code(() => writingContract(withMaterials([sized(3_000)])))).toBe('no-error');
+    expect(code(() => writingContract(withMaterials([sized(3_001)])))).toBe('WRITING_INPUT_INVALID');
+    expect(code(() => writingContract(withMaterials([sized(3_000, '甲'), sized(3_000, '乙')])))).toBe('no-error');
+    expect(code(() => writingContract(withMaterials([sized(3_000, '甲'), sized(2_999, '乙'), sized(2, '丙')])))).toBe('WRITING_INPUT_INVALID');
+    expect(code(() => writingContract(withMaterials(['甲', '乙', '丙', '丁'].map((title) => sized(10, title)))))).toBe('no-error');
+    expect(code(() => writingContract(withMaterials(['甲', '乙', '丙', '丁', '戊'].map((title) => sized(10, title)))))).toBe('WRITING_INPUT_INVALID');
+    expect(code(() => writingContract(withMaterials([])))).toBe('WRITING_INPUT_INVALID');
+    expect(code(() => writingContract(withMaterials([{ title: '甲', paragraphs: [] }])))).toBe('WRITING_INPUT_INVALID');
+    expect(code(() => writingContract(withMaterials([{ title: '甲', paragraphs: ['  '] }])))).toBe('WRITING_INPUT_INVALID');
+    expect(code(() => writingContract(withMaterials([{ title: '甲', paragraphs: ['控制\u0007字符'] }])))).toBe('WRITING_INPUT_INVALID');
+    expect(code(() => writingContract(withMaterials([{ title: '', paragraphs: ['一段'] }])))).toBe('WRITING_INPUT_INVALID');
+    expect(code(() => writingContract(withMaterials([MATERIAL]), 1))).toBe('WRITING_INPUT_INVALID');
+  });
+
+  it('judges a 资料库 item exactly as a 范例: the same verdict, kind, unit and share for every rule', () => {
+    const text = MATERIAL.paragraphs.join('\n');
+    const asExemplar = input({ exemplars: [{ bookTitle: '参考资料甲', version: 1, text, excerpt: false }] });
+    const asMaterial = withMaterials([MATERIAL], { exemplars: [] });
+    const edited = (value: string, period: number) => Array.from(value).map((character, index) => (index % period === period - 1 ? String.fromCodePoint(0x9f00 + index) : character)).join('');
+    const long = synthetic(240);
+    const longExemplar = input({ exemplars: [{ bookTitle: '长资料', version: 1, text: long, excerpt: false }] });
+    const longMaterial = withMaterials([{ title: '长资料', paragraphs: [long] }], { exemplars: [] });
+    const english = 'The archive kept every letter the old curator wrote to the museum during the long winter of the war.';
+    const englishExemplar = input({ exemplars: [{ bookTitle: 'Archive', version: 1, text: english, excerpt: false }] });
+    const englishMaterial = withMaterials([{ title: 'Archive', paragraphs: [english] }], { exemplars: [] });
+    const cases: Array<[ReturnType<typeof draft>, WritingContractInput, WritingContractInput]> = [
+      // Twelve characters within punctuation; eleven; sixteen across it.
+      [draft(`${FRESH}在战火中保存青铜器的经过`), asExemplar, asMaterial],
+      [draft(`${FRESH}${Array.from('在战火中保存青铜器的经过').slice(0, 11).join('')}`), asExemplar, asMaterial],
+      [draft(`${FRESH}转移途中遭遇暴雨，木箱浸水，修复工作`), asExemplar, asMaterial],
+      // A lightly edited copy (near), and an edited paragraph inside a long draft (span).
+      [draft(edited(long, 10)), longExemplar, longMaterial],
+      [draft(`${synthetic(400, 0x7000)}${edited(long.slice(0, 180), 9)}`), longExemplar, longMaterial],
+      // Latin-script words: eight within punctuation.
+      [draft('In those years the old curator wrote to the museum during the long winter.'), englishExemplar, englishMaterial],
+      // Nothing copied.
+      [draft(FRESH), asExemplar, asMaterial],
+    ];
+    for (const [given, exemplar, material] of cases) {
+      const byExemplar = exemplarCopied(given, exemplar);
+      const byMaterial = referenceCopied(given, material);
+      expect(byMaterial === null ? null : { ...byMaterial, source: undefined }).toEqual(byExemplar === null ? null : { ...byExemplar, source: undefined });
+      if (byMaterial !== null) expect(byMaterial.source).toBe('material');
+    }
+    expect(cases.filter(([given, , material]) => referenceCopied(given, material) !== null)).toHaveLength(5);
+  });
+
+  it('refuses a draft that copies an item — material-copied, in words naming it — and lets the Book\'s own words stand', () => {
+    const contract = writingContract(withMaterials([MATERIAL]));
+    const copied = parseWritingSynthesis(synthesis([`${FRESH}在战火中保存青铜器的经过`]), contract);
+    expect(copied).toEqual({ ok: false, code: 'material-copied', detail: `草稿与资料库资料《参考资料甲》有连续 ${EXEMPLAR_COPY_WINDOW} 个字以上相同；资料只参照，不复制，这份草稿不予采用。` });
+    const across = parseWritingSynthesis(synthesis([`${FRESH}转移途中遭遇暴雨，木箱浸水，修复工作`]), contract);
+    expect(across.ok ? '' : across.detail).toBe(`草稿与资料库资料《参考资料甲》有跨标点连续 ${EXEMPLAR_COPY_WINDOW_ACROSS} 个字以上相同；资料只参照，不复制，这份草稿不予采用。`);
+    expect(parseWritingSynthesis(synthesis([FRESH]), contract)).toMatchObject({ ok: true });
+    // An exemplar copied is still the exemplar's refusal, judged first.
+    expect(parseWritingSynthesis(synthesis([EXEMPLAR]), contract)).toMatchObject({ ok: false, code: 'exemplar-copied' });
+    // The second item is named as the second.
+    const second = withMaterials([{ title: '无关资料', paragraphs: [synthetic(40, 0x8000)] }, MATERIAL]);
+    const named = referenceCopied(draft(`${FRESH}在战火中保存青铜器的经过`), second)!;
+    expect(named).toMatchObject({ exemplar: 1, source: 'material' });
+    expect(exemplarCopyDetail(named, second)).toContain('《参考资料甲》');
+    // A run the Book's own reference words hold is the Book's, for an item as for a 范例.
+    const own = withMaterials([{ title: '甲', paragraphs: ['一位学者收到一封古怪的信，信里只有四个字。'] }], { exemplars: [] });
+    expect(referenceCopied(draft(`${FRESH}一位学者收到一封古怪的信`), own)).toBeNull();
+    // Words two items share exempt nothing — unlike the house phrasing two other Books' exemplars share.
+    const twice = '书中人物形象鲜明而情节跌宕起伏引人入胜';
+    const twoItems = withMaterials([{ title: '甲', paragraphs: [`${synthetic(20, 0x5000)}${twice}`] }, { title: '乙', paragraphs: [`${synthetic(20, 0x5400)}${twice}`] }], { exemplars: [] });
+    expect(referenceCopied(draft(`${FRESH}${twice}`), twoItems)).toMatchObject({ exemplar: 0, kind: 'verbatim', source: 'material' });
+    const twoExemplars = input({ exemplars: [{ bookTitle: '甲书', version: 1, text: `${synthetic(20, 0x5000)}${twice}`, excerpt: false }, { bookTitle: '乙书', version: 1, text: `${synthetic(20, 0x5400)}${twice}`, excerpt: false }] });
+    expect(exemplarCopied(draft(`${FRESH}${twice}`), twoExemplars)).toBeNull();
+    // The kind reads a refused draft as its own gap reason.
+    const step = writingKindDefinition(withMaterials([MATERIAL])).crossUnit!.step!;
+    expect(step.refusalReason!('material-copied', 'x')).toBe(`${WRITING_MATERIAL_REFUSAL_PREFIX}x`);
+    expect(WRITING_MATERIAL_REFUSAL_PREFIX).toBe('全书综合写出的草稿被拒绝（material-copied），AI7 没有写出可以打开的草稿：');
+  });
+
+  it('says what the plan lists and refuses in words, and reads a Task whose pinned build is gone as one that builds nothing', () => {
+    const source = { materialId: '11111111-1111-4111-8111-111111111111', indexDigest: 'c'.repeat(64), title: '参考资料甲', characters: 1234, sha256: 'd'.repeat(64) };
+    expect(writingMaterialLine([MATERIAL])).toBe('参照资料库的 1 份资料（只参照，不照抄）：《参考资料甲》');
+    expect(writingMaterialReferenceLine({ source, refusal: null })).toBe('资料库资料《参考资料甲》：已提取 1,234 字，按计划冻结的索引版本读取（只参照，不照抄）');
+    expect(writingMaterialReferenceLine({ source, refusal: { code: 'MATERIAL_INDEX_MOVED', message: 'x' } }))
+      .toBe('资料库资料《参考资料甲》：已提取 1,234 字，按计划冻结的索引版本读取（只参照，不照抄）——计划冻结的索引版本已不在本机，这次起草不能开始');
+    expect(writingMaterialReferenceLine({ source, refusal: { code: 'MATERIAL_REFERENCE_UNAVAILABLE', message: 'x' } }))
+      .toBe('资料库资料《参考资料甲》：已提取 1,234 字，按计划冻结的索引版本读取（只参照，不照抄）——这份资料现在不能列进这本书任务的「允许参考」，这次起草不能开始');
+    // The item's line follows the 范例's, and a plan without items has none.
+    const lines = writingReferenceLines(withMaterials([MATERIAL]), true, [{ source, refusal: null }]);
+    expect(lines[3]).toBe(writingMaterialReferenceLine({ source, refusal: null }));
+    expect(writingReferenceLines(input())).toHaveLength(5);
+    expect(lines).toHaveLength(6);
+    expect(writingMaterialCopyNotDo()).toBe(`不照抄资料库资料：与任何一份资料有连续 ${EXEMPLAR_COPY_WINDOW} 个字以上相同（规则与范例相同，每份资料各自比较）的草稿不予采用`);
+    expect(WRITING_MATERIAL_GONE_LABEL).toBe('不能开始 · 参考资料已不在本机');
+    expect(writingMaterialMoved('参考资料甲')).toBe('这次起草参考的资料《参考资料甲》，计划冻结的索引版本已不在本机，不能开始；请改计划重做：在「交付物」的新建文档 · 写作任务里重新准备计划。');
+    expect(WRITING_MATERIALS_STATEMENT).toBe('勾选的资料列进这次计划的「允许参考」，按计划冻结的索引版本读取：每份不超过 3,000 字，合计不超过 6,000 字，最多 4 份；只参照，不照抄。');
+    expect(writingMaterialOverBound(12_345)).toBe('这份资料已提取 12,345 字，超过每份 3,000 字的上限，不能列进「允许参考」。');
+    expect(writingMaterialsOverTotal(6_001)).toBe('所选资料合计已提取 6,001 字，超过合计 6,000 字的上限；请少选几份。');
+    expect(WRITING_MATERIALS_TOO_MANY).toBe('写作任务最多参考 4 份资料库资料；请少选几份。');
+    // A paragraph is taken as the Book's own words are, never cut; the reference pins the words taken.
+    expect(writingMaterialParagraph(' 甲\t乙 ')).toBe('甲 乙');
+    expect(writingMaterialParagraph('文'.repeat(5_000))).toHaveLength(5_000);
+    expect(writingMaterialDigest(['一'])).not.toBe(writingMaterialDigest(['一', '二']));
+    // Gone at its pinned build: the row's digest, and nothing built or read.
+    const recorded = writingRecordedKindDefinition(withMaterials([{ title: '参考资料甲', paragraphs: [WRITING_MATERIAL_ABSENT_TEXT] }]), 'a'.repeat(64), 2,
+      { code: 'MATERIAL_INDEX_MOVED', message: writingMaterialMoved('参考资料甲') });
+    expect(recorded.promptContractDigest).toBe('a'.repeat(64));
+    expect(code(() => recorded.buildUnitMessage({} as never, 1, new Map()))).toBe('MATERIAL_INDEX_MOVED');
+    expect(code(() => recorded.crossUnit!.step!.buildMessage([], 1))).toBe('MATERIAL_INDEX_MOVED');
+  });
+});
+
 describe('a recorded Task whose 范例 is no longer here (#688 re-review)', () => {
   it('reads under the row\'s own contract digest, and builds no request and reads no answer', () => {
     const recorded = writingRecordedKindDefinition(input({ exemplars: [{ bookTitle: '范例书', version: 2, text: WRITING_EXEMPLAR_ABSENT_TEXT, excerpt: false }] }), 'a'.repeat(64), 2);
@@ -666,7 +843,11 @@ describe('the draft and the page\'s words', () => {
 
   it('speaks editor-surfaces §9\'s words', () => {
     expect(WRITING_CONSEQUENCE_TERMS).toEqual(['会读取', '会发送', '不会做', '费用']);
-    expect(WRITING_REFERENCE_TERMS).toEqual(['梗概与人物', '评估结论与营销要点', '范例', '图书信息']);
+    expect(WRITING_REFERENCE_TERMS).toEqual(['梗概与人物', '评估结论与营销要点', '范例', '资料库', '图书信息']);
+    // 资料库 under 允许参考 (Issue #428): one box per item, and how many more were not listed.
+    expect(writingMaterialLabel({ title: '参考资料甲', characters: 1234, scope: 'book' })).toBe('《参考资料甲》 · 已提取 1,234 字 · 本书资料');
+    expect(writingMaterialLabel({ title: '社级资料', characters: 80, scope: 'house' })).toBe('《社级资料》 · 已提取 80 字 · 社级资料');
+    expect(writingMaterialsMore(3)).toBe('另有 3 份资料没有列出：这里只列最近收进的几份。');
     expect(writingTaskLine({ taskIntentId: 'x', typeId: 'promotion-article', typeLabel: '宣传文章', state: 'settled', label: '已完成', refusal: null, planEnvelopeDigest: null })).toBe('写作任务「宣传文章」：已完成');
     // 查看任务 is the page's next step only for a prepared Task nothing refuses; a Task whose 范例 is gone is quiet (#698).
     expect(writingOpenTaskTone({ state: 'prepared', refusal: null })).toBe('primary');

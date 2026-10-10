@@ -796,6 +796,7 @@ async function dispatch(
           audience: request.input.audience,
           channel: request.input.channel,
           requirements: request.input.requirements,
+          materialIds: request.input.materialIds ?? [],
         }, launchPolicy),
       };
     case 'authorizeWritingTask': {

@@ -1248,8 +1248,9 @@ function registerRendererHandlers(
   };
   /**
    * 放入资料… (Issue #427, S79c): the platform's own open dialog. 资料库 keeps a file whole whatever it is and names its format
-   * from its content, so the dialog suggests the usual ones without restricting to them. J-15 alone answers it through its
-   * picker control, which serves one choice per window as the manuscript picker's.
+   * from its content, so the dialog suggests the usual ones without restricting to them. J-15 answers it through its picker
+   * control, and J-07 through its own for the 资料库 item its last 写作任务 lists (Issue #428); each serves one choice per window
+   * as the manuscript picker's.
    */
   const chooseLibraryMaterialFile = async (owned: OwnedRendererWindow): Promise<string | undefined> => {
     let selectedPath = owned.injectedPickerPath;
@@ -3281,7 +3282,10 @@ function registerRendererHandlers(
     envelope(async () => {
       const owned = requireSender(event);
       requireDesktop(input !== null && typeof input === 'object' && typeof input.typeId === 'string' && typeof input.audience === 'string' &&
-        typeof input.channel === 'string' && (input.requirements === null || typeof input.requirements === 'string'), 'AI7_RENDERER_BOUNDARY_INVALID');
+        typeof input.channel === 'string' && (input.requirements === null || typeof input.requirements === 'string') &&
+        // 允许参考's ticked 资料库 items (Issue #428): identities only; the service reads, pins and bounds them.
+        (input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= 16 &&
+          input.materialIds.every((id) => typeof id === 'string' && id.length <= 64))), 'AI7_RENDERER_BOUNDARY_INVALID');
       return serializeEffect(async () => {
         requireAuthority();
         const route = requireCurrentBookRoute(owned);
@@ -3291,6 +3295,7 @@ function registerRendererHandlers(
           audience: input.audience,
           channel: input.channel,
           requirements: input.requirements,
+          materialIds: [...(input.materialIds ?? [])],
         });
         const prepared = result.result;
         if (result.kind !== 'writing-preparation' ||

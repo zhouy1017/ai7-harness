@@ -36,6 +36,7 @@ import { PLAN_MOVED_LABEL } from './reconnect-preflight.js';
 import { graphemeCount, sliceGraphemes } from './analysis/factual-review-contract.js';
 import type { ReviewRunPlanFacts } from './review/review-runs.js';
 import { WRITING_COPY_SIZES, WRITING_COPY_SIZES_V1, WRITING_EXEMPLAR_MOVED, type WritingCopyRules, writingExemplarLine, type WritingContractInput } from './writing/writing-contract.js';
+import type { WritingMaterialSource } from './writing-tasks.js';
 
 /**
  * The Task Drawer's plan projection (Issue #418, plan slice S72; editor-surfaces §6 ③, V2-UX-PLAN-001 to
@@ -1152,8 +1153,40 @@ export function writingCopyNotDo(rules: WritingCopyRules): string {
   return `不照抄范例：与范例有连续 ${sizes.copyWindow} 个字以上相同（跨标点、空格或外文词时 ${sizes.copyWindowAcross} 个字；拉丁字母文字为 ${sizes.copyWords} 个词，跨标点、数字或编号时 ${sizes.copyWordsAcross} 个词）的草稿不予采用`;
 }
 
+/**
+ * The plan's 不会做 line on copying a 资料库 item a `/3` Task references (Issue #428): the same rules as for a 范例, each item on
+ * its own. Only a plan that lists an item says it.
+ */
+export function writingMaterialCopyNotDo(): string {
+  const sizes = WRITING_COPY_SIZES;
+  return `不照抄资料库资料：与任何一份资料有连续 ${sizes.copyWindow} 个字以上相同（规则与范例相同，每份资料各自比较）的草稿不予采用`;
+}
+
 /** A writing Task whose 范例 is no longer here (#688 re-review): its state, and what its 参考 line adds. */
 export const WRITING_EXEMPLAR_GONE_LABEL = '不能开始 · 范例已不在本机' as const;
+/** A writing Task one of whose 资料库 items no longer reads at the build its plan pinned (Issue #428). */
+export const WRITING_MATERIAL_GONE_LABEL = '不能开始 · 参考资料已不在本机' as const;
+
+/**
+ * One 资料库 item a writing plan lists under 允许参考 (Issue #428): its pin and the facts the plan names it by, and why it does
+ * not read at that build, or `null` when it does.
+ */
+export interface WritingPlanMaterial {
+  readonly source: WritingMaterialSource;
+  readonly refusal: { readonly code: string; readonly message: string } | null;
+}
+
+/** The first of a writing Task's 资料库 items that keeps a never-started Task from starting, or `null` (Issue #428). */
+function writingMaterialGone(projection: WritingProjection, materials: ReadonlyArray<WritingPlanMaterial>): WritingPlanMaterial | null {
+  return projection.authorization === null ? materials.find((material) => material.refusal !== null) ?? null : null;
+}
+
+/** The plan's line for one 资料库 item under 允许参考 (Issue #428; TASK-032): the product record, its size, the pinned build. */
+export function writingMaterialReferenceLine(material: WritingPlanMaterial): string {
+  const line = `资料库资料《${material.source.title}》：已提取 ${groupedCount(material.source.characters)} 字，按计划冻结的索引版本读取（只参照，不照抄）`;
+  return material.refusal === null ? line : `${line}——${material.refusal.code === 'MATERIAL_REFERENCE_UNAVAILABLE'
+    ? '这份资料现在不能列进这本书任务的「允许参考」' : '计划冻结的索引版本已不在本机'}，这次起草不能开始`;
+}
 
 /** Whether a writing Task can never start because its 范例 is no longer here: not yet started, its exemplars' text gone. */
 function writingExemplarGone(projection: WritingProjection, exemplarsHere: boolean): boolean {
@@ -1164,8 +1197,9 @@ function writingExemplarGone(projection: WritingProjection, exemplarsHere: boole
  * A writing Task's state in the drawer's own words, for 交付物's 新建文档 · 写作任务 beside the drawer — a Task whose 范例 is
  * no longer here says so on both (Issue #698).
  */
-export function writingTaskStateLabel(projection: WritingProjection, exemplarsHere: boolean): string {
-  return writingExemplarGone(projection, exemplarsHere) ? WRITING_EXEMPLAR_GONE_LABEL : writingState(projection).label;
+export function writingTaskStateLabel(projection: WritingProjection, exemplarsHere: boolean, materials: ReadonlyArray<WritingPlanMaterial> = []): string {
+  if (writingExemplarGone(projection, exemplarsHere)) return WRITING_EXEMPLAR_GONE_LABEL;
+  return writingMaterialGone(projection, materials) !== null ? WRITING_MATERIAL_GONE_LABEL : writingState(projection).label;
 }
 export const WRITING_EXEMPLAR_GONE_SUFFIX = '——这些范例已不在本机，这次起草不能再开始' as const;
 
@@ -1176,7 +1210,7 @@ export const WRITING_NO_RULE = '这份写作计划现在不能设为快速开始
  * What a writing Task references, in the plan's words (DELIV-007): each part of its frozen reference set as it is there, or
  * that the Book has none — read from the contract input, never from anything the Task did not freeze.
  */
-export function writingReferenceLines(input: WritingContractInput, exemplarsHere = true): string[] {
+export function writingReferenceLines(input: WritingContractInput, exemplarsHere = true, materials: ReadonlyArray<WritingPlanMaterial> = []): string[] {
   const named = (list: ReadonlyArray<string>, none: string): string => (list.length === 0 ? none : list.join('、'));
   const synopsis = input.synopsis;
   const evaluation = input.evaluation;
@@ -1191,6 +1225,8 @@ export function writingReferenceLines(input: WritingContractInput, exemplarsHere
         : `，营销要点：目标读者 ${evaluation.market.readers.length} 条、差异化卖点 ${evaluation.market.sellingPoints.length} 条、渠道与策略 ${evaluation.market.channels.length} 条`}`,
     // A 范例 the Task referenced and this data no longer holds is said so where it is named (#688 re-review).
     exemplarsHere ? writingExemplarLine(input.type.label, input.exemplars) : `${writingExemplarLine(input.type.label, input.exemplars)}${WRITING_EXEMPLAR_GONE_SUFFIX}`,
+    // The 资料库 items the editor listed under 允许参考, one line each, after the 范例 (Issue #428); a plan that lists none has none.
+    ...materials.map(writingMaterialReferenceLine),
     `图书信息：《${input.book.title}》 · 作者：${named(input.book.authors, '未填写')} · 责编：${named(input.book.editors, '未填写')} · 书系：${named(input.book.series, '不在任何书系中')}`,
     `你写的受众「${input.audience}」、渠道「${input.channel}」${input.requirements === null ? '' : `与其他要求「${input.requirements}」`}`,
   ];
@@ -1216,10 +1252,13 @@ export function writingPlan(input: {
   defaultRule?: TaskPlanDefaultRuleProjection;
   /** The copy rules the Task's frozen contract carries (#704 P2-2): the 不会做 line names those, not today's. */
   copyRules?: WritingCopyRules;
+  /** The 资料库 items the Task's plan lists under 允许参考 (Issue #428), as its row pins them: none for a `/1` or `/2` Task. */
+  materials?: ReadonlyArray<WritingPlanMaterial>;
 }): TaskPlanProjection {
   const { projection, bookTitle, blocks } = input;
   const task = input.input;
   const exemplarsHere = input.exemplarsHere ?? true;
+  const materials = input.materials ?? [];
   const intent = projection.taskIntent;
   const checkpoint = projection.checkpoint;
   const manifest = projection.coverageManifest;
@@ -1237,12 +1276,15 @@ export function writingPlan(input: {
   const ceiling = provider.runBudgetCeiling;
   const revision = projection.planRevision;
   const boundary = envelope.boundary;
-  const gone = writingExemplarGone(projection, exemplarsHere);
-  const state = gone ? { key: 'ready' as const, label: WRITING_EXEMPLAR_GONE_LABEL } : writingState(projection);
+  // A Task whose 范例 is no longer here, or one of whose 资料库 items no longer reads at the build its plan pinned (Issue #428), is
+  // never started.
+  const materialGone = writingExemplarGone(projection, exemplarsHere) ? null : writingMaterialGone(projection, materials);
+  const gone = writingExemplarGone(projection, exemplarsHere) || materialGone !== null;
+  const state = gone ? { key: 'ready' as const, label: materialGone === null ? WRITING_EXEMPLAR_GONE_LABEL : WRITING_MATERIAL_GONE_LABEL } : writingState(projection);
   const needsModelConnection = route.kind === 'opencode-go';
   // A Task whose 范例 is no longer here is never started (#688 re-review): the bar says why, and offers nothing that starts it.
   const start: TaskPlanStartProjection = gone
-    ? { readiness: 'unavailable', needsModelConnection, planEnvelopeDigest: null, categoryDigests: [], reconfirm: null, unavailableReason: WRITING_EXEMPLAR_MOVED }
+    ? { readiness: 'unavailable', needsModelConnection, planEnvelopeDigest: null, categoryDigests: [], reconfirm: null, unavailableReason: materialGone?.refusal?.message ?? WRITING_EXEMPLAR_MOVED }
     : projection.authorization !== null
     ? startedBar(needsModelConnection)
     : !projection.actions.canAuthorize
@@ -1262,9 +1304,9 @@ export function writingPlan(input: {
     },
     scope: {
       process: `《${bookTitle}》全书 · ${groupedCount(reading.graphemes)} 字 · ${units} 个阅读范围`,
-      reference: writingReferenceLines(task, exemplarsHere),
+      reference: writingReferenceLines(task, exemplarsHere, materials),
       send: live
-        ? `全书各阅读范围的稿件正文（${units} 个）、上面列出的参考材料——其中包括其他图书的范例原文——与你写的受众、渠道和要求，以及汇总时各处段落的说明`
+        ? `全书各阅读范围的稿件正文（${units} 个）、上面列出的参考材料——其中包括其他图书的范例原文${materials.length === 0 ? '' : '与资料库资料原文'}——与你写的受众、渠道和要求，以及汇总时各处段落的说明`
         : '不发送任何内容',
       notRead: NOT_READ,
     },
@@ -1300,6 +1342,7 @@ export function writingPlan(input: {
       editorial: [
         ...EDITORIAL_NOT_DO,
         writingCopyNotDo(input.copyRules ?? 2),
+        ...(materials.length === 0 ? [] : [writingMaterialCopyNotDo()]),
         '不交付、不发送：草稿在稿件编辑面上由你修改',
         '不改评估记录与基线分析',
         '不读这本书以外的稿件',
@@ -1340,6 +1383,12 @@ export function writingPlan(input: {
       { key: 'reducer-stages', label: '归约阶段', value: plan.reducerStages.join(' → ') },
       { key: 'stop-condition', label: '停止条件', value: plan.stopCondition },
       { key: 'prompt-contract', label: '提示契约摘要', value: envelope.promptContractDigest },
+      // 允许参考's 资料库 items as product records and exact versions (Issue #428; TASK-032, TASK-036).
+      ...(materials.length === 0 ? [] : [{
+        key: 'material-references',
+        label: '允许参考的资料库资料',
+        value: materials.map(({ source }) => `《${source.title}》 · ${source.materialId} · 索引版本 ${source.indexDigest}`).join('；'),
+      }]),
       { key: 'dispatch', label: '派发状态', value: envelope.summary },
       { key: 'plan-envelope', label: '计划权限边界', value: envelope.digest },
       ...(projection.authorization === null ? [] : [
