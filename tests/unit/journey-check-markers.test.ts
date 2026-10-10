@@ -26,9 +26,15 @@ const controller = (await import(new URL('../../e2e/controller.mjs', import.meta
   formatJourneyCheckLine(journey: string, location: string, error: unknown): string | null;
   classifyJourneyResult(result: JourneyResult, journey: string): Failure;
   collectJourneyCheck(result: JourneyResult, journey: string, failure: Failure): string | null;
+  journeyElapsedSegment(milliseconds: number): string;
 };
 const queue = (await import(new URL('../../tools/nightly-queue.mjs', import.meta.url).href)) as {
-  parseGateLog(text: string): { failed: readonly Record<string, unknown>[]; unclassified: number };
+  parseGateLog(text: string): {
+    journeys: readonly Record<string, unknown>[];
+    failed: readonly Record<string, unknown>[];
+    complete: boolean;
+    unclassified: number;
+  };
 };
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -199,6 +205,42 @@ describe('the controller reads the check a failed child named', () => {
     const withCheck = queue.parseGateLog(after.join('\n'));
     expect(withCheck.failed).toEqual(read.failed);
     expect(withCheck.unclassified).toBe(read.unclassified + 1);
+  });
+});
+
+describe('e2e:all prints each Journey\'s elapsed seconds on its pass and fail lines (Issue #746)', () => {
+  it('prints whole seconds as a content-free segment, never a negative or a fraction', () => {
+    expect(controller.journeyElapsedSegment(412_400)).toBe('412s');
+    expect(controller.journeyElapsedSegment(499)).toBe('0s');
+    expect(controller.journeyElapsedSegment(1_500)).toBe('2s');
+    for (const milliseconds of [-5, Number.NaN, Number.POSITIVE_INFINITY]) expect(controller.journeyElapsedSegment(milliseconds)).toBe('0s');
+    for (const milliseconds of [0, 999, 61_000, 3_600_000]) {
+      expect(controller.isContentFreeCheckLabel(controller.journeyElapsedSegment(milliseconds))).toBe(true);
+    }
+  });
+
+  it('puts the segment on the pass line and the bare fail line, and leaves every other marker as it was', () => {
+    const source = readFileSync(resolve(E2E, 'run-all.mjs'), 'utf8');
+    expect(source).toContain('console.log(`LOCAL_COMPLETION/${journey}/pass/${elapsed}`)');
+    expect(source).toContain('console.error(`LOCAL_COMPLETION/${journey}/fail/${elapsed}`)');
+    expect(source).toContain('console.error(`LOCAL_COMPLETION/${journey}/interrupted`)');
+    expect(source).toContain("console.log('LOCAL_COMPLETION/all/pass')");
+    expect(source.match(/journeyElapsedSegment\(performance\.now\(\) - startedAt\)/gu)).toHaveLength(1);
+  });
+
+  it('leaves the nightly queue reading a timed run as it read an untimed one, with nothing unclassified', () => {
+    const untimed = ['LOCAL_COMPLETION/J-01/start', 'LOCAL_COMPLETION/J-01/pass', 'LOCAL_COMPLETION/J-11/start', 'LOCAL_COMPLETION/J-11/pass', 'LOCAL_COMPLETION/all/pass'];
+    const timed = ['LOCAL_COMPLETION/J-01/start', 'LOCAL_COMPLETION/J-01/pass/37s', 'LOCAL_COMPLETION/J-11/start', 'LOCAL_COMPLETION/J-11/pass/412s', 'LOCAL_COMPLETION/all/pass'];
+    expect(queue.parseGateLog(timed.join('\n'))).toEqual(queue.parseGateLog(untimed.join('\n')));
+    expect(queue.parseGateLog(timed.join('\n'))).toMatchObject({ complete: true, unclassified: 0 });
+    const failing = (bare: string) => [
+      'LOCAL_COMPLETION/J-07/start', bare, `LOCAL_COMPLETION/J-07/fail/${J07_LOCATION}/journey-failure`,
+    ].join('\n');
+    expect(queue.parseGateLog(failing('LOCAL_COMPLETION/J-07/fail/95s'))).toEqual(queue.parseGateLog(failing('LOCAL_COMPLETION/J-07/fail')));
+    // A seconds segment is digits and one `s`: anything else on a pass line is still counted, never read as a pass.
+    for (const line of ['LOCAL_COMPLETION/J-01/pass/37', 'LOCAL_COMPLETION/J-01/pass/3.7s', 'LOCAL_COMPLETION/J-01/pass/abc']) {
+      expect(queue.parseGateLog(line)).toMatchObject({ journeys: [], unclassified: 1 });
+    }
   });
 });
 
