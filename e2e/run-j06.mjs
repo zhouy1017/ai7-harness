@@ -584,6 +584,43 @@ function movedBeforeWords(seen) {
   return `closed-by-${closerWord(seen?.cause)}-${deltaWords(seen?.delta)}-${back}-${drawnWord(seen?.drawn)}-${selection}-${width}-${height}-${fraction}`;
 }
 
+/** What a wheel over the pane did to the open selection menu, as a check label's word (Issue #745). */
+function wheelWord(state) {
+  switch (state) {
+    case 'open': return 'open';
+    case 'closed': return 'closed';
+    case 'unaimed': return 'unaimed';
+    case 'undrawn': return 'undrawn';
+    default: return 'unread';
+  }
+}
+
+/**
+ * The reader's own scroll (Issue #745): a mouse wheel turned over the text pane, at a point of the pane the open selection
+ * menu does not cover, sent through the browser's input as a hand's wheel is. Says what the menu did two frames on:
+ * `closed`, `open`, `unaimed` when no point of the pane stood clear of the menu, or `undrawn` when no menu was open.
+ */
+async function wheelOverPane(renderer) {
+  const aim = await renderer.evaluate(`(() => {
+    const pane = document.querySelector('.editor-window');
+    const menu = window.__j06.menu();
+    if (!(pane instanceof HTMLElement) || menu?.dataset.markMenu !== 'selection') return { state: 'undrawn' };
+    const rect = pane.getBoundingClientRect();
+    const candidates = [[rect.right - 40, rect.top + rect.height / 2], [rect.right - 40, rect.top + 60], [rect.right - 40, rect.bottom - 60], [rect.left + 40, rect.bottom - 60]];
+    for (const [x, y] of candidates) {
+      const hit = document.elementFromPoint(x, y);
+      if (hit !== null && pane.contains(hit) && !menu.contains(hit)) return { state: 'aimed', x: Math.round(x), y: Math.round(y), down: pane.scrollTop < 100 };
+    }
+    return { state: 'unaimed' };
+  })()`);
+  if (aim?.state !== 'aimed') return wheelWord(aim?.state);
+  await renderer.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: aim.x, y: aim.y, deltaX: 0, deltaY: aim.down ? 100 : -100 });
+  return wheelWord(await renderer.evaluate(`(async () => {
+    await new Promise((resolveFrames) => requestAnimationFrame(() => requestAnimationFrame(resolveFrames)));
+    return window.__j06.menu()?.dataset.markMenu === 'selection' ? 'open' : 'closed';
+  })()`));
+}
+
 /** A 修改建议 over RANGE of a paragraph, made through the selection menu and its composer. */
 async function suggest(renderer, blockId, proposedText, rationale, name) {
   await rightClickUntil(
@@ -921,9 +958,9 @@ async function main() {
     cancellation.throwIfRequested();
 
     at('menu-pane-scroll');
-    // A menu points at a place on screen (Issue #745): a scroll event reporting a movement the pane made before the menu
-    // was drawn leaves it open, and a movement made while it is open closes it. Both are read two frames on, after the
-    // movement's `scroll` event has been dispatched.
+    // A menu closes when the reader scrolls the text from under it, and stands when the pane moves on its own (Issue #745):
+    // a movement made in the same task as the right-click, and one made while the menu is open, both leave it open two
+    // frames on, after the movement's `scroll` event has been dispatched; a wheel over the pane closes it.
     await rightClickUntil(
       renderer,
       `window.__j06.place(${JSON.stringify(third)}, ${RANGE[0]}, ${RANGE[1]})`,
@@ -933,8 +970,10 @@ async function main() {
     );
     const movedBefore = movedBeforeWords(await renderer.evaluate(movePaneAround(third, true)));
     requireJourney(movedBefore === 'open', `menu-pane-moved-before-${movedBefore}`);
-    const movedAfter = paneScrollWord((await renderer.evaluate(movePaneAround(third, false)))?.state);
-    requireJourney(movedAfter === 'closed', `menu-pane-moved-after-${movedAfter}`);
+    const movedWhileOpen = paneScrollWord((await renderer.evaluate(movePaneAround(third, false)))?.state);
+    requireJourney(movedWhileOpen === 'open', `menu-pane-moved-while-open-${movedWhileOpen}`);
+    const wheeled = await wheelOverPane(renderer);
+    requireJourney(wheeled === 'closed', `menu-reader-wheel-${wheeled}`);
     cancellation.throwIfRequested();
 
     at('keep-current');

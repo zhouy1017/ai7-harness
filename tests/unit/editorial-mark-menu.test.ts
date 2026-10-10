@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { latestAnswer, menuPlacement, paneMovedUnderMenu, sameProcedureEntries, sameSeriesGroup, seriesKnowledgeMenuGroup, seriesMembership } from '../../src/renderer/editorial-marks.js';
+import { latestAnswer, menuPlacement, sameProcedureEntries, sameSeriesGroup, seriesKnowledgeMenuGroup, seriesMembership } from '../../src/renderer/editorial-marks.js';
 import type { SelectionProcedureEntry } from '../../src/renderer/selection-task-labels.js';
 
 const viewport = { width: 640, height: 400 };
@@ -24,32 +24,6 @@ describe('where a Mark surface menu goes', () => {
 
   it('starts at the margin when it is larger than the window', () => {
     expect(menuPlacement({ x: 300, y: 200 }, { width: 700, height: 500 }, viewport)).toEqual({ left: 8, top: 8 });
-  });
-});
-
-describe('when a scroll of the text pane closes an open menu (Issue #745)', () => {
-  it('leaves the menu standing when the event reports a movement made before the menu was drawn', () => {
-    // The editor revealed its caret as it took focus and the right-click opened the menu in the same frame: the pane is
-    // where it stood when the menu was read, and the scroll event that arrives a frame later moves nothing under it.
-    expect(paneMovedUnderMenu({ top: 0, left: 0 }, { top: 0, left: 0 })).toBe(false);
-    expect(paneMovedUnderMenu({ top: 312, left: 0 }, { top: 312, left: 0 })).toBe(false);
-  });
-
-  it('leaves it standing when the pane only settles a fractional offset onto a device pixel', () => {
-    expect(paneMovedUnderMenu({ top: 271.5, left: 0 }, { top: 272, left: 0 })).toBe(false);
-    expect(paneMovedUnderMenu({ top: 271.5, left: 0 }, { top: 271, left: 0 })).toBe(false);
-    expect(paneMovedUnderMenu({ top: 312, left: 0.25 }, { top: 312, left: 0 })).toBe(false);
-  });
-
-  it('closes it once the text under it has moved, either way', () => {
-    expect(paneMovedUnderMenu({ top: 271.5, left: 0 }, { top: 272.5, left: 0 })).toBe(true);
-    expect(paneMovedUnderMenu({ top: 312, left: 0 }, { top: 349, left: 0 })).toBe(true);
-    expect(paneMovedUnderMenu({ top: 312, left: 0 }, { top: 275, left: 0 })).toBe(true);
-    expect(paneMovedUnderMenu({ top: 312, left: 0 }, { top: 312, left: 14 })).toBe(true);
-  });
-
-  it('closes a menu whose drawing position is not known', () => {
-    expect(paneMovedUnderMenu(undefined, { top: 0, left: 0 })).toBe(true);
   });
 });
 

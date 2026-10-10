@@ -254,21 +254,6 @@ export function menuPlacement(
   };
 }
 
-/** Where the text pane stood, by its scroll offsets. */
-export type PanePosition = { readonly top: number; readonly left: number };
-
-/**
- * Whether a `scroll` event of the text pane means the text under an open menu moved (Issue #745): the pane is no longer
- * where it stood when the menu was drawn. The event arrives in the frame after the movement that caused it, so a movement
- * made before the menu opened — the editor revealing its caret as it takes focus, a card brought into view, the pane
- * restored after a window load — reaches the menu after it is on screen, and must not close it. Nor does the pane settling
- * a fractional offset onto a device pixel once that frame is drawn (macOS keeps fractional offsets until then): the text
- * under the menu moves by less than a pixel, which is no movement a reader sees.
- */
-export function paneMovedUnderMenu(drawnAt: PanePosition | undefined, now: PanePosition): boolean {
-  return drawnAt === undefined || Math.abs(drawnAt.top - now.top) >= 1 || Math.abs(drawnAt.left - now.left) >= 1;
-}
-
 type SeriesChoice = { readonly seriesId: string; readonly title: string };
 
 /**
@@ -363,8 +348,6 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   document.body.append(menuLayer);
   let destroyed = false;
   let menu: HTMLElement | undefined;
-  /** Where the text pane stood when the open menu was drawn (Issue #745). */
-  let menuPane: PanePosition | undefined;
   let floating: HTMLElement | undefined;
   let floatingBlockId: string | undefined;
   /**
@@ -410,10 +393,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   const closeMenu = (): void => {
     menu?.remove();
     menu = undefined;
-    menuPane = undefined;
   };
-
-  const panePosition = (): PanePosition => ({ top: options.scroll.scrollTop, left: options.scroll.scrollLeft });
 
   const closeFloating = (): void => {
     floatingRefresh = undefined;
@@ -1426,8 +1406,6 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     panel.style.top = `${at.y}px`;
     menuLayer.append(panel);
     menu = panel;
-    // Read after the menu is in the document, so any movement the pane has already made is in it (Issue #745).
-    menuPane = panePosition();
     const rect = panel.getBoundingClientRect();
     const placed = menuPlacement(at, rect, { width: window.innerWidth, height: window.innerHeight });
     panel.style.left = `${placed.left}px`;
@@ -1935,13 +1913,15 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   const reflow = new ResizeObserver(() => {
     if (floating !== undefined && floatingBlockId !== undefined) placeBelowBlock(floating, floatingBlockId);
   });
-  // A menu points at a place on screen; once the text under it moves, it points at nothing. A scroll event that only
-  // reports a movement made before the menu was drawn leaves it standing (Issue #745).
-  const onPaneScroll = (): void => {
-    if (menu !== undefined && paneMovedUnderMenu(menuPane, panePosition())) closeMenu();
-  };
+  // A menu points at a place on screen: once the reader scrolls the text from under it — a wheel or a touch moving over
+  // the pane — it points at nothing and goes (a drag on the pane's scrollbar is a mousedown, which closes it already).
+  // The pane moving on its own leaves it standing (Issue #745): the editor revealing its caret as it takes focus, a card
+  // brought into view, a window restored after an Apply, the text reflowing. Their `scroll` events arrive a frame after
+  // the movement, often after the menu the reader just opened, and the menu acts on the selection, not on the point.
+  const onReaderScroll = (): void => closeMenu();
   const onWindowResize = (): void => closeMenu();
-  options.scroll.addEventListener('scroll', onPaneScroll, { passive: true });
+  options.scroll.addEventListener('wheel', onReaderScroll, { passive: true });
+  options.scroll.addEventListener('touchmove', onReaderScroll, { passive: true });
   window.addEventListener('resize', onWindowResize);
   reflow.observe(options.scroll);
   reflow.observe(options.host);
@@ -1974,7 +1954,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     destroy: () => {
       destroyed = true;
       reflow.disconnect();
-      options.scroll.removeEventListener('scroll', onPaneScroll);
+      options.scroll.removeEventListener('wheel', onReaderScroll);
+      options.scroll.removeEventListener('touchmove', onReaderScroll);
       window.removeEventListener('resize', onWindowResize);
       close();
       options.host.removeEventListener('mousedown', onMouseDown);
