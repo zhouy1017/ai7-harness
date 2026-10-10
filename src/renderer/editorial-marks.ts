@@ -261,10 +261,12 @@ export type PanePosition = { readonly top: number; readonly left: number };
  * Whether a `scroll` event of the text pane means the text under an open menu moved (Issue #745): the pane is no longer
  * where it stood when the menu was drawn. The event arrives in the frame after the movement that caused it, so a movement
  * made before the menu opened — the editor revealing its caret as it takes focus, a card brought into view, the pane
- * restored after a window load — reaches the menu after it is on screen, and must not close it.
+ * restored after a window load — reaches the menu after it is on screen, and must not close it. Nor does the pane settling
+ * a fractional offset onto a device pixel once that frame is drawn (macOS keeps fractional offsets until then): the text
+ * under the menu moves by less than a pixel, which is no movement a reader sees.
  */
 export function paneMovedUnderMenu(drawnAt: PanePosition | undefined, now: PanePosition): boolean {
-  return drawnAt === undefined || drawnAt.top !== now.top || drawnAt.left !== now.left;
+  return drawnAt === undefined || Math.abs(drawnAt.top - now.top) >= 1 || Math.abs(drawnAt.left - now.left) >= 1;
 }
 
 type SeriesChoice = { readonly seriesId: string; readonly title: string };

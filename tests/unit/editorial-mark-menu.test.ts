@@ -35,7 +35,14 @@ describe('when a scroll of the text pane closes an open menu (Issue #745)', () =
     expect(paneMovedUnderMenu({ top: 312, left: 0 }, { top: 312, left: 0 })).toBe(false);
   });
 
+  it('leaves it standing when the pane only settles a fractional offset onto a device pixel', () => {
+    expect(paneMovedUnderMenu({ top: 271.5, left: 0 }, { top: 272, left: 0 })).toBe(false);
+    expect(paneMovedUnderMenu({ top: 271.5, left: 0 }, { top: 271, left: 0 })).toBe(false);
+    expect(paneMovedUnderMenu({ top: 312, left: 0.25 }, { top: 312, left: 0 })).toBe(false);
+  });
+
   it('closes it once the text under it has moved, either way', () => {
+    expect(paneMovedUnderMenu({ top: 271.5, left: 0 }, { top: 272.5, left: 0 })).toBe(true);
     expect(paneMovedUnderMenu({ top: 312, left: 0 }, { top: 349, left: 0 })).toBe(true);
     expect(paneMovedUnderMenu({ top: 312, left: 0 }, { top: 275, left: 0 })).toBe(true);
     expect(paneMovedUnderMenu({ top: 312, left: 0 }, { top: 312, left: 14 })).toBe(true);

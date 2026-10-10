@@ -20,6 +20,12 @@ const helpers = new Function('journeyCheckFailure', `${source.slice(start, end)}
   controller.journeyCheckFailure,
 ) as { chooseFromMenu(renderer: unknown, action: string, name: string): Promise<void> };
 
+const wordsStart = source.indexOf('function paneScrollWord(');
+const wordsEnd = source.indexOf('\n}\n', source.indexOf('function movedBeforeWords(')) + 3;
+const words = new Function(`${source.slice(wordsStart, source.indexOf('/**', wordsStart))}\n${source.slice(source.indexOf('function closerWord('), wordsEnd)}\nreturn { movedBeforeWords };`)() as {
+  movedBeforeWords(seen: unknown): string;
+};
+
 /** A renderer whose choice never succeeds and whose state, read after it, is `seen`. */
 function rendererShowing(seen: Record<string, unknown> | null) {
   let calls = 0;
@@ -69,6 +75,27 @@ describe('J-06 names what the product showed when a menu choice could not be mad
 
   it('fits the content-free check shape at its longest', async () => {
     const longest = await labelOf({ menu: 'selection', item: 'disabled', card: 'withdrawn', tone: 'success', moved: true }, 'second-suggestion-choose');
+    expect(controller.isContentFreeCheckLabel(longest)).toBe(true);
+  });
+});
+
+describe('J-06 names why the selection menu closed when the pane moved before it was drawn (#745 review)', () => {
+  it('reads open, and the states that never reached a menu, as their own words', () => {
+    expect(words.movedBeforeWords({ state: 'open' })).toBe('open');
+    expect(words.movedBeforeWords({ state: 'unmoved' })).toBe('unmoved');
+    expect(words.movedBeforeWords({ state: 'undrawn' })).toBe('undrawn');
+    expect(words.movedBeforeWords(null)).toBe('unread');
+  });
+
+  it('names the event that closed it, how far the pane stood from where it was drawn, and the pixel ratio', () => {
+    expect(words.movedBeforeWords({ state: 'closed', cause: 'scroll', delta: 0.5, fraction: true, ratio: 2 })).toBe('closed-by-scroll-subpixel-fraction-dpr2');
+    expect(words.movedBeforeWords({ state: 'closed', cause: 'scroll', delta: -40, fraction: false, ratio: 1 })).toBe('closed-by-scroll-moved-whole-dpr1');
+    expect(words.movedBeforeWords({ state: 'closed', cause: 'selectionchange', delta: 0, fraction: false, ratio: 1.25 })).toBe('closed-by-selection-same-whole-dprx');
+    expect(words.movedBeforeWords({ state: 'closed', cause: '稿件', delta: 'far', fraction: 'x', ratio: null })).toBe('closed-by-none-unknown-whole-dprx');
+  });
+
+  it('fits the content-free check shape at its longest', () => {
+    const longest = `menu-pane-moved-before-${words.movedBeforeWords({ state: 'closed', cause: 'other-scroll', delta: 0.25, fraction: true, ratio: 3 })}`;
     expect(controller.isContentFreeCheckLabel(longest)).toBe(true);
   });
 });

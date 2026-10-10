@@ -461,7 +461,7 @@ function paneScrollWord(state) {
 }
 
 /**
- * Move the text pane by a fixed distance, toward its top when it can, and say what the selection menu did two frames on
+ * Move the text pane by 40.5 px, toward its top when it can, and say what the selection menu did two frames on
  * (Issue #745): `open`, `closed`, `unmoved` when the pane could not move, or `undrawn` when no selection menu stood where it
  * should. With `rightClickAfter`, the right-click on `blockId` is made in the same task as the movement, so the menu is drawn
  * after the pane moved and the movement's `scroll` event reaches it a frame later; without, the menu is already open.
@@ -489,9 +489,11 @@ function movePaneAround(blockId, rightClickAfter) {
       }
     });
     try {
+      // A fractional distance (#745 review): where a platform keeps fractional offsets, the pane settles onto a device
+      // pixel once the frame is drawn, and the menu must stand through that settling as through the scroll event itself.
       const from = pane.scrollTop;
-      pane.scrollTop = from >= 40 ? from - 40 : from + 40;
-      if (pane.scrollTop === from) { seen.state = 'unmoved'; return seen; }
+      pane.scrollTop = from >= 41 ? from - 40.5 : from + 40.5;
+      if (Math.abs(pane.scrollTop - from) < 1) { seen.state = 'unmoved'; return seen; }
       if (${rightClickAfter}) window.__j06.rightClick(window.__j06.block(${JSON.stringify(blockId)}));
       drawn = window.__j06.menu();
       if (drawn?.dataset.markMenu !== 'selection') return seen;
