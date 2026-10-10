@@ -60,8 +60,12 @@ import {
 } from './editorial-mark-labels.js';
 import { applyOnce } from './manuscript-apply.js';
 import { REVIEW_VIEW_TASK_ABSENT, REVIEW_VIEW_TASK_RESOLVING } from './review-labels.js';
+import { sheetChosenApartLine } from './captured-procedure-labels.js';
 import {
-  SELECTION_PRESET_REASON,
+  SELECTION_POLISH_HINT,
+  SELECTION_POLISH_LABEL,
+  SELECTION_POLISH_REASON,
+  SELECTION_TASK_CHOSEN_APART_LEGEND,
   SELECTION_TASK_DOCUMENT_REASON,
   SELECTION_TASK_FIELD,
   SELECTION_TASK_MENU_LABEL,
@@ -70,6 +74,8 @@ import {
   SELECTION_TASK_STATUS,
   SELECTION_TASK_TITLE,
   selectionTaskContextLine,
+  selectionTaskGroupNote,
+  type SelectionProcedureEntry,
   type SelectionTaskChoice,
   type SelectionTaskChoices,
 } from './selection-task-labels.js';
@@ -144,7 +150,13 @@ interface MountOptions {
     /** The Book the manuscript is of, which the composer names (TASK-002). */
     readonly bookTitle: string;
     choices(): Promise<SelectionTaskChoices>;
-    prepare(choice: SelectionTaskChoice, anchor: { readonly blockId: string }): Promise<boolean>;
+    /**
+     * The house's enabled 可复用工序 as each applies to a selection of this Book (Issue #423, S77 deferred item a): one menu
+     * entry each, read again for every selection menu and drawn once read.
+     */
+    procedures(): Promise<ReadonlyArray<SelectionProcedureEntry>>;
+    /** `chosenApart`: the categories of the chosen procedure's Series steps the editor ticked (REUSE-050); empty for any other choice. */
+    prepare(choice: SelectionTaskChoice, anchor: { readonly blockId: string }, chosenApart: ReadonlyArray<string>): Promise<boolean>;
   };
   busy(): boolean;
   /** The set of marks changed: whatever counts them elsewhere on the surface reads again. */
@@ -163,13 +175,19 @@ interface MountOptions {
 export const COMPOSER_LEFT_WINDOW = '撰写框所在的段落已不在当前稿件窗口中，撰写框已关闭；没有记下任何内容。';
 
 interface FormField {
-  name: 'body' | 'proposedText' | 'rationale' | 'reason' | 'subject' | 'knowledgeClass' | 'question' | 'procedure';
+  name: 'body' | 'proposedText' | 'rationale' | 'reason' | 'subject' | 'knowledgeClass' | 'question' | 'procedure' | 'chosenApart';
   label: string;
   value: string;
   required: boolean;
   hint?: string;
   /** A closed choice, drawn as a select with none chosen (Issue #63, S28b). */
   options?: ReadonlyArray<{ readonly value: string; readonly label: string }>;
+  /**
+   * Boxes none of which is ticked for the editor (Issue #423, S77 deferred item a; REUSE-050), each shown only while the field
+   * `groupedBy` names holds its `group`; the value is the ticked, shown boxes' values, one per line.
+   */
+  checkboxes?: ReadonlyArray<{ readonly value: string; readonly label: string; readonly hint?: string; readonly group: string }>;
+  groupedBy?: FormField['name'];
 }
 
 interface FormConfig {
@@ -269,6 +287,32 @@ export function sameSeriesGroup(a: ReadonlyArray<SeriesChoice> | null, b: Readon
   const left = a ?? [];
   const right = b ?? [];
   return left.length === right.length && left.every((series, index) => series.seriesId === right[index]!.seriesId && series.title === right[index]!.title);
+}
+
+/**
+ * Whether two readings of the house's 可复用工序 draw the same entries of the AI7 任务 group (Issue #423, S77 deferred item a):
+ * not known yet draws none and no note; known and none draws the note that there are none, so the two differ.
+ */
+export function sameProcedureEntries(a: ReadonlyArray<SelectionProcedureEntry> | null, b: ReadonlyArray<SelectionProcedureEntry> | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.length === b.length && a.every((entry, index) => JSON.stringify(entry) === JSON.stringify(b[index]));
+}
+
+/**
+ * The latest answer of one read, as the editor last had it: `null` until the first read answers. Only the latest read's answer
+ * counts, and a read that fails leaves the last answer standing — as `seriesMembership` reads the Book's Series.
+ */
+export function latestAnswer<T>(read: () => Promise<T>, alive: () => boolean = () => true): { current(): T | null; refresh(): Promise<void> } {
+  let current: T | null = null;
+  let asked = 0;
+  return {
+    current: () => current,
+    async refresh(): Promise<void> {
+      const mine = ++asked;
+      const answer = await read().then((value) => ({ value }), () => null);
+      if (answer !== null && alive() && mine === asked) current = answer.value;
+    },
+  };
 }
 
 /**
@@ -414,7 +458,30 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       form.append(quote);
     }
     const inputs = new Map<FormField['name'], HTMLTextAreaElement | HTMLSelectElement>();
+    /** A field of boxes (REUSE-050): the boxes with the group each belongs to, and what shows them. */
+    const boxGroups: Array<{ field: FormField; set: HTMLFieldSetElement; boxes: Array<{ box: HTMLInputElement; row: HTMLElement; group: string }> }> = [];
     for (const field of config.fields) {
+      if (field.checkboxes !== undefined) {
+        const set = el('fieldset', 'editorial-mark-field editorial-mark-checkboxes');
+        set.dataset['markField'] = field.name;
+        set.append(el('legend', undefined, field.label));
+        const boxes = field.checkboxes.map((choice) => {
+          const row = el('label', 'editorial-mark-checkbox');
+          row.dataset['markChoiceGroup'] = choice.group;
+          const box = el('input');
+          box.type = 'checkbox';
+          box.name = field.name;
+          box.value = choice.value;
+          box.dataset['markCheckbox'] = choice.value;
+          row.append(box, el('span', undefined, choice.label));
+          if (choice.hint) row.append(el('small', 'muted', choice.hint));
+          set.append(row);
+          return { box, row, group: choice.group };
+        });
+        boxGroups.push({ field, set, boxes });
+        form.append(set);
+        continue;
+      }
       const label = el('label', 'editorial-mark-field');
       label.append(el('span', undefined, field.label));
       let input: HTMLTextAreaElement | HTMLSelectElement;
@@ -442,6 +509,18 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       inputs.set(field.name, input);
       form.append(label);
     }
+    // A box shows only while the field it is grouped by holds its group; a field with no box to show is hidden whole.
+    const showBoxes = (): void => {
+      for (const { field, set, boxes } of boxGroups) {
+        const held = field.groupedBy === undefined ? null : inputs.get(field.groupedBy)?.value ?? null;
+        for (const entry of boxes) entry.row.hidden = held !== null && entry.group !== held;
+        set.hidden = boxes.every((entry) => entry.row.hidden);
+      }
+    };
+    for (const { field } of boxGroups) {
+      if (field.groupedBy !== undefined) inputs.get(field.groupedBy)?.addEventListener('change', showBoxes);
+    }
+    showBoxes();
     const problem = el('p', 'editorial-mark-problem');
     problem.setAttribute('role', 'alert');
     problem.hidden = true;
@@ -463,8 +542,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     form.append(problem, row);
     form.addEventListener('submit', (event) => {
       event.preventDefault();
-      const values = { body: '', proposedText: '', rationale: '', reason: '', subject: '', knowledgeClass: '', question: '', procedure: '' };
+      const values = { body: '', proposedText: '', rationale: '', reason: '', subject: '', knowledgeClass: '', question: '', procedure: '', chosenApart: '' };
       for (const [name, input] of inputs) values[name] = input.value;
+      for (const { field, boxes } of boxGroups) values[field.name] = boxes.filter((entry) => !entry.row.hidden && entry.box.checked).map((entry) => entry.box.value).join('\n');
       const missing = config.fields.find((field) => field.required && values[field.name].trim().length === 0);
       if (missing) {
         problem.textContent = `请填写「${missing.label}」。`;
@@ -1333,8 +1413,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     controls.find((control) => !control.disabled)?.focus({ preventScroll: true });
   };
 
-  // 就这段提问… (Issue #52, S17a) and 就这段发起任务… (Issue #423, S77b) are connected; the house's 常用工序 on a selection are not.
-  // A Production Document's manuscript offers neither Task (its surface passes no way to start one).
+  // 就这段提问… (Issue #52, S17a), 就这段发起任务… (Issue #423, S77b) and the house's 可复用工序 on the selection (S77 deferred item a)
+  // are connected; 润色这段 waits for a polishing 工序. A Production Document's manuscript offers no selection Task (its surface
+  // passes no way to start one; the Owner, 2026-10-09).
   const AI7_TASK_REASON = SELECTION_TASK_DOCUMENT_REASON;
   const VIEW_TASK_REASON = '这条标记的来源任务还不能从这里打开';
   const taskOnSelection = (selectionReason: string | undefined, run: () => void): MenuItem => ({
@@ -1343,9 +1424,13 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     ...(options.startTaskOnSelection === undefined ? { disabledReason: AI7_TASK_REASON }
       : selectionReason !== undefined ? { disabledReason: selectionReason } : { run }),
   });
-  const aiTaskGroup = (selectionReason: string | undefined): MenuGroup => ({
+  /** The house's 可复用工序 as they apply to a selection of this Book: read again for each selection menu, drawn once read. */
+  const startOnSelection = options.startTaskOnSelection;
+  const houseProcedures = startOnSelection === undefined ? null : latestAnswer(() => startOnSelection.procedures(), () => !destroyed);
+  void houseProcedures?.refresh();
+  const aiTaskGroup = (selectionReason: string | undefined, procedures: ReadonlyArray<SelectionProcedureEntry> | null): MenuGroup => ({
     label: 'AI7 任务',
-    note: SELECTION_PRESET_REASON,
+    note: selectionTaskGroupNote(options.startTaskOnSelection === undefined ? null : procedures),
     items: [
       taskOnSelection(selectionReason, () => void composeTask()),
       {
@@ -1353,9 +1438,15 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         ...(options.askAboutSelection === undefined ? { disabledReason: AI7_TASK_REASON }
           : selectionReason !== undefined ? { disabledReason: selectionReason } : { run: () => void composeQuestion() }),
       },
-      { action: 'preset-polish', label: '润色这段', hint: '常用工序 · 生成修改建议', disabledReason: SELECTION_PRESET_REASON },
-      { action: 'preset-names', label: '核查人名与称谓一致', hint: '常用工序 · 生成批注 / 建议', disabledReason: SELECTION_PRESET_REASON },
-      { action: 'preset-continuity', label: '检查与前文的连贯', hint: '常用工序 · 生成批注', disabledReason: SELECTION_PRESET_REASON },
+      // One entry per enabled procedure (as 新建审阅's 按已保存的工序 lists them): it opens the same composer with that procedure chosen.
+      ...(options.startTaskOnSelection === undefined ? [] : procedures ?? []).map((entry): MenuItem => ({
+        action: entry.value,
+        label: entry.label,
+        ...(entry.hint === null ? {} : { hint: entry.hint }),
+        ...(selectionReason !== undefined ? { disabledReason: selectionReason }
+          : entry.disabledReason !== null ? { disabledReason: entry.disabledReason } : { run: () => void composeTask(entry.value) }),
+      })),
+      { action: 'preset-polish', label: SELECTION_POLISH_LABEL, hint: SELECTION_POLISH_HINT, disabledReason: SELECTION_POLISH_REASON },
     ],
   });
 
@@ -1364,16 +1455,17 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
    * it carries and nothing else, offering the Tasks that read a range now. 准备任务 prepares the chosen one on that paragraph
    * and its plan opens beside the manuscript, where it is started — or not.
    */
-  const composeTask = async (): Promise<void> => {
+  const composeTask = async (preselect?: string): Promise<void> => {
     if (refuseWhileBusy() || options.startTaskOnSelection === undefined) return;
     composersPending += 1;
     try {
-      await composeTaskNow(options.startTaskOnSelection);
+      await composeTaskNow(options.startTaskOnSelection, preselect);
     } finally {
       composersPending -= 1;
     }
   };
-  const composeTaskNow = async (start: NonNullable<MountOptions['startTaskOnSelection']>): Promise<void> => {
+  /** `preselect`: the 工序 the menu's own entry chose — one of the house's 可复用工序 — held in the field when it is still offered. */
+  const composeTaskNow = async (start: NonNullable<MountOptions['startTaskOnSelection']>, preselect?: string): Promise<void> => {
     const range = await settledRange();
     if (range === null || destroyed) return;
     options.setStatus(SELECTION_TASK_STATUS.reading, 'busy');
@@ -1396,6 +1488,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       return;
     }
     options.setStatus(SELECTION_TASK_STATUS.choose);
+    // A procedure's Series steps are the editor's to tick (REUSE-049, REUSE-050): one box each, shown while that procedure is
+    // chosen, each carrying the step's category (Issue #423 review, P3-3).
+    const apartBoxes = offered.choices.flatMap((choice) => choice.kind === 'procedure'
+      ? choice.chosenApart.map((step) => ({ value: step.categoryId, label: step.label, hint: sheetChosenApartLine(step.label), group: choice.value }))
+      : []);
     openComposer(range.blockId, {
       id: 'task-on-selection',
       title: SELECTION_TASK_TITLE,
@@ -1403,7 +1500,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       fields: [{
         name: 'procedure',
         label: SELECTION_TASK_FIELD,
-        value: '',
+        value: preselect !== undefined && offered.choices.some((choice) => choice.value === preselect) ? preselect : '',
         required: true,
         hint: selectionTaskContextLine({
           bookTitle: start.bookTitle,
@@ -1413,7 +1510,14 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           position,
         }),
         options: offered.choices.map((choice) => ({ value: choice.value, label: choice.label })),
-      }],
+      }, ...(apartBoxes.length === 0 ? [] : [{
+        name: 'chosenApart' as const,
+        label: SELECTION_TASK_CHOSEN_APART_LEGEND,
+        value: '',
+        required: false,
+        checkboxes: apartBoxes,
+        groupedBy: 'procedure' as const,
+      }])],
       submitLabel: SELECTION_TASK_PREPARE,
       note: SELECTION_TASK_NOTE,
       submit: async (values) => {
@@ -1425,7 +1529,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         // Words typed in the manuscript while the composer was open are written first, so the Task Input checkpoint pins the text
         // on screen (Issue #423 review, P3-5); the paragraph is named by its block identity, which the service resolves (P3-3).
         await editor.flush();
-        if (await start.prepare(choice, { blockId: range.blockId }) && !destroyed) closeFloating();
+        const chosenApart = values.chosenApart.split('\n').filter((label) => label.length > 0);
+        if (await start.prepare(choice, { blockId: range.blockId }, chosenApart) && !destroyed) closeFloating();
       },
       cancel: () => {
         closeFloating();
@@ -1585,6 +1690,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const selected = range.kind === 'range' ? `已选 ${range.toGrapheme - range.fromGrapheme} 字` : range.kind === 'none' ? '未选中文字' : '已选中文字';
     const needsSelection = range.kind === 'none' ? '先选中文字' : undefined;
     const shown = inSeries?.current() ?? null;
+    const shownProcedures = houseProcedures?.current() ?? null;
     const knowledge = inSeries === null || options.proposeSeriesKnowledge === undefined ? null
       : seriesKnowledgeMenuGroup(shown, why, { compose: (series) => void composeKnowledge(series), choose: () => void chooseKnowledgeSeries() });
     showMenu('selection', '稿件右键菜单', [
@@ -1620,14 +1726,15 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           })),
         ],
       },
-      aiTaskGroup(range.kind === 'range' ? undefined : why ?? selectionMenuReason(range.kind)),
+      aiTaskGroup(range.kind === 'range' ? undefined : why ?? selectionMenuReason(range.kind), shownProcedures),
       ...(knowledge === null ? [] : [knowledge]),
     ], at);
-    if (!reread || inSeries === null) return;
+    if (!reread || (inSeries === null && houseProcedures === null)) return;
     const drawn = menu;
-    const series = inSeries;
-    void series.refresh().then(() => {
-      if (drawn === undefined || menu !== drawn || sameSeriesGroup(shown, series.current())) return;
+    // The Book's Series and the house's procedures are read again together; the menu is drawn again once when either moved.
+    void Promise.all([inSeries?.refresh(), houseProcedures?.refresh()]).then(() => {
+      if (drawn === undefined || menu !== drawn) return;
+      if (sameSeriesGroup(shown, inSeries?.current() ?? null) && sameProcedureEntries(shownProcedures, houseProcedures?.current() ?? null)) return;
       // The answer differs from what this menu shows: draw it again from the corner it stands at — it moves only if it no
       // longer fits the window — keeping the item the editor is on, a 书系 entry by its Series (Issue #642 review).
       const active = document.activeElement;

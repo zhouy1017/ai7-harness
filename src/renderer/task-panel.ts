@@ -46,6 +46,8 @@ export interface TaskPanelOptions {
   openTarget(target: GlobalAttentionTarget): void;
   /** 查看结果: the finished Task's result in the floating window beside the text. */
   openResult(entry: BookTaskItemProjection): void;
+  /** 跳到所选文字 (Issue #423, S77 deferred item d): the caret moved to the paragraph a selection Task was started on. */
+  jumpToSelection(entry: BookTaskItemProjection & { selection: NonNullable<BookTaskItemProjection['selection']> }): void;
   /** 发起全书任务: prepare the procedure's Task, and start it under its rule when `quick` names one. */
   startWholeBook(input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; quick: DefaultExecutionRuleReference | null }): Promise<void>;
   /** A card's 暂停 or 续行 was recorded: the surfaces of the analysis read it again. */
@@ -307,6 +309,9 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
       case 'result':
       case 'answer':
         options.openResult(entry);
+        return;
+      case 'jump':
+        if (entry.selection !== undefined) options.jumpToSelection({ ...entry, selection: entry.selection });
         return;
       case 'next':
         if (target.kind === 'analysis-plan' || target.kind === 'review-plan') {

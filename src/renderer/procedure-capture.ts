@@ -1,6 +1,6 @@
 import {
   CAPTURED_PROCEDURE_SCOPE_LABELS,
-  CAPTURED_PROCEDURE_SCOPE_SLOTS,
+  CAPTURED_PROCEDURE_CAPTURE_SLOTS,
   type CapturedProcedureScopeSlot,
   type ProcedureCaptureProjection,
   type ProcedureCaptureResultKind,
@@ -145,7 +145,8 @@ export async function openProcedureCapture(options: ProcedureCaptureOptions): Pr
 
   const scopes = el('fieldset', 'procedure-capture-scope');
   scopes.append(el('legend', undefined, CAPTURE_SCOPE_LEGEND));
-  for (const slot of CAPTURED_PROCEDURE_SCOPE_SLOTS) {
+  // 全书 or 选定章节: a selection is handed over at each run from the manuscript, never saved as a setting (Issue #423).
+  for (const slot of CAPTURED_PROCEDURE_CAPTURE_SLOTS) {
     const label = el('label', 'procedure-capture-scope-option');
     const radio = el('input');
     radio.type = 'radio';

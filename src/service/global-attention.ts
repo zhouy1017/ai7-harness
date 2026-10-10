@@ -170,6 +170,8 @@ export interface ReviewRunAttentionReading {
   readonly ordinal: number;
   /** What the Run reads (Issue #423, S77b): a Run on the selection 就这段发起任务… handed over says so on its card. */
   readonly scopeKind?: ReviewScopeKind;
+  /** The first and the last paragraph of that selection, by block identity, in the Run's manuscript (Issue #423, S77 deferred item d): the card's 跳到所选文字. */
+  readonly selection?: { readonly manuscriptId: string; readonly fromBlockId: string; readonly toBlockId: string };
   readonly createdAt: string;
   readonly authorizedAt: string | null;
   readonly state: ReviewRunState;
@@ -955,12 +957,15 @@ export function composeBookTasks(readings: BookTaskReadings): BookTasksProjectio
       result: reading.revisionId === null ? null : { kind: 'analysis-revision', revisionId: reading.revisionId },
     });
   }
+  // A selection Run's card carries the paragraphs it was started on, for 跳到所选文字 (Issue #423, S77 deferred item d).
+  const onSelection = (reading: ReviewRunAttentionReading): Pick<BookTaskItemProjection, 'selection'> =>
+    reading.selection === undefined ? {} : { selection: { manuscriptId: reading.selection.manuscriptId, fromBlockId: reading.selection.fromBlockId, toBlockId: reading.selection.toBlockId } };
   for (const reading of own(readings.reviewRuns)) {
     const built = reading.state === 'prepared' && reading.authorizedAt === null ? preparedReviewItem(reading) : reviewRunItem(reading);
-    if (built !== null) entries.push({ item: built, result: null });
+    if (built !== null) entries.push({ item: built, result: null, ...onSelection(reading) });
   }
   for (const reading of own(readings.reviewCompletions).filter((reading) => reading.state === 'settled')) {
-    entries.push({ item: reviewCompletionItem(reading), result: { kind: 'review-run', reviewRunId: reading.reviewRunId } });
+    entries.push({ item: reviewCompletionItem(reading), result: { kind: 'review-run', reviewRunId: reading.reviewRunId }, ...onSelection(reading) });
   }
   // A dialogue Task's 回答 opens its latest answer once that answer settled with something to read (TASK-044).
   for (const reading of own(readings.dialogues ?? [])) {

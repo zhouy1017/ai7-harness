@@ -1294,9 +1294,13 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'selection-task-composer',
     'selection-task-review-prepare',
     'selection-task-review-card',
+    // 跳到所选文字 on a selection Task's card (Issue #423, S77 deferred item d).
+    'selection-task-jump',
     'selection-task-review-run',
     'selection-task-from-mark',
     'selection-task-reanalyze',
+    // 跳到所选文字 on a paragraph the manuscript no longer holds (Issue #423 review, P2-1): the Book reimported without it.
+    'selection-task-gone',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',
@@ -1375,6 +1379,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     // Issue #66 (S31b): a 书系一致性 procedure whose Series step the editor chooses apart, and how it fits a Book in no Series.
     'procedure-series-capture',
     'procedure-series-chosen-apart',
+    // Issue #423 (S77 deferred items a and d): the house's procedure on a selection from the menu, and the card's 跳到所选文字.
+    'procedure-selection-run',
     'procedure-series-mismatch',
     'capture-proposal-file',
     'capture-restart',
