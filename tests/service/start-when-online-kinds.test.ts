@@ -25,7 +25,7 @@ import { READERS_REPORT_FIXTURE_IDENTITY, finalizeAsJ11, runInitialEvaluationToE
 import { TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { WRITING_FIXTURE_IDENTITY, WRITING_REQUEST } from '../support/writing-task.js';
+import { WRITING_BOOK_TITLE, WRITING_FIXTURE_IDENTITY, WRITING_REQUEST } from '../support/writing-task.js';
 
 // Service-integration suite (L2) for 联网后开始任务 of every Task kind with a plan (Issue #760, plan slice S74c): the real store,
 // every kind's ledger, the Review Run ledger and its drive loop, the one execution owner and the AI7 local deterministic adapter
@@ -307,6 +307,42 @@ describe('联网后开始任务 of a 写作任务 (Issue #760, S74c)', () => {
 });
 
 describe('取消 of a waiting or queued Run of another kind (Issue #760 review)', () => {
+  it('never dismisses a Run that sent a request and holds 结果待确认, even if its latest state says blocked (CTRL-007, Issue #764)', async () => {
+    await withSession(WRITING_FIXTURE_IDENTITY, async ({ store }) => {
+      const fixture = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
+      const dropped = {
+        ...fixture,
+        entries: new Map([...fixture.entries].map(([key, entry]) => [key, entry.unitOrdinal === 3
+          ? { ...entry, response: { kind: 'outcome-unknown' as const, message: '合成：回答没有完整传回。' } }
+          : entry])),
+      };
+      const owner = new BaselineAnalysisExecutionOwner({
+        ledger: store.baselineAnalysisLedger, launchPolicy, fixture: dropped, secretResolver: { resolve: async () => null },
+      });
+      try {
+        const bookId = await sample1Book(store, WRITING_BOOK_TITLE);
+        const taskIntentId = prepareWriting(store, bookId);
+        const digest = (await planOf(store, bookId, 'writing', taskIntentId, 'online')).start.planEnvelopeDigest!;
+        const started = store.authorizeWriting(bookId, taskIntentId, digest);
+        expect(owner.admitOrQueue(started.dispatchRunRecordId!, started.ledger)).toBe('admitted');
+        await owner.whenIdle();
+        const gaps = store.inspectWriting(bookId)!.resultSetRevision!.gaps;
+        expect(gaps.map((gap) => [gap.unitOrdinal, gap.code])).toEqual([[3, 'outcome-unknown']]);
+        expect(transitions(taskIntentId)).toContain('executing');
+        expect(attempts(taskIntentId)).toBeGreaterThan(0);
+        expect(await code(() => store.cancelWaitingTask({ bookId, kind: 'writing', ref: taskIntentId }))).toBe('ANALYSIS_CANCEL_NOT_WAITING');
+        // Healthy dispatch never blocks a started Run. Even an inconsistent later state must not erase the sent-request history.
+        started.ledger.recordRunState(started.dispatchRunRecordId!, 'blocked-before-dispatch', { detail: '合成：晚到的阻止状态。' });
+        const before = transitions(taskIntentId);
+        expect(await code(() => store.cancelWaitingTask({ bookId, kind: 'writing', ref: taskIntentId }))).toBe('ANALYSIS_CANCEL_NOT_WAITING');
+        expect(transitions(taskIntentId)).toEqual(before);
+        expect(store.inspectWriting(bookId)!.resultSetRevision!.gaps).toEqual(gaps);
+      } finally {
+        await owner.dispose();
+      }
+    });
+  }, 300_000);
+
   it('says why a new Task waits in its own kind’s words: 分析任务, 写作任务, 评估任务 or 审阅任务, never one for every kind', () => {
     expect(activeRunReason('awaiting-connectivity')).toBe('有一项分析任务在等待联网后开始；它开始并结束之前，或在任务抽屉里取消它之前，不能准备新的更新任务。');
     expect(activeRunReason('authorized', 'writing')).toBe('有一项写作任务在等待运行名额；它开始并结束之前，或在任务抽屉里取消它之前，不能准备新的写作任务。');
@@ -417,6 +453,32 @@ describe('取消 of a waiting or queued Run of another kind (Issue #760 review)'
 });
 
 describe('联网后开始任务 of AI7 初评, 审稿意见 and 按我的评分重写评语 (Issue #760, S74c)', () => {
+  it('dismisses a blocked AI7 初评 after reopening and keeps it cancelled on the next restart (Issue #764)', async () => {
+    let bookId = '';
+    let taskIntentId = '';
+    await withSession('sample1-evaluation-authored', async ({ store }) => {
+      bookId = await sample1Book(store, '初评不能开始');
+      let progress = store.createInitialEvaluationPreparationWork(bookId, launchPolicy);
+      while (!progress.done) progress = store.advanceInitialEvaluationPreparationWork(progress.workId!);
+      taskIntentId = progress.projection!.taskIntent!.taskIntentId;
+      const digest = (await planOf(store, bookId, 'initial-evaluation', taskIntentId, 'offline')).start.planEnvelopeDigest!;
+      store.startTaskWhenOnline({ bookId, kind: 'initial-evaluation', ref: taskIntentId, planEnvelopeDigest: digest, planDigests: [] });
+      store.blockWaitingTaskRun(store.waitingTaskRuns(bookId)[0]!, ['这次启动不能开始初评任务。'], 'launch');
+    });
+    await withSession('sample1-evaluation-authored', async ({ store }) => {
+      expect(attentionItem(store, `task:${taskIntentId}`)?.state).toBe('analysis-blocked');
+      store.cancelWaitingTask({ bookId, kind: 'initial-evaluation', ref: taskIntentId });
+      store.cancelWaitingTask({ bookId, kind: 'initial-evaluation', ref: taskIntentId });
+      expect(transitions(taskIntentId)).toEqual(['authorized', 'awaiting-connectivity', 'blocked-before-dispatch', 'cancelled']);
+    });
+    await withSession('sample1-evaluation-authored', async ({ store }) => {
+      expect((await planOf(store, bookId, 'initial-evaluation', taskIntentId, 'offline')).state.key).toBe('cancelled');
+      expect(attentionItem(store, `task:${taskIntentId}`)).toBeUndefined();
+      expect(panelItem(store, bookId, `task:${taskIntentId}`)).toBeUndefined();
+      expect(attempts(taskIntentId)).toBe(0);
+    });
+  }, 300_000);
+
   it('AI7 初评 waits for the network and starts once online', async () => {
     await withSession('sample1-evaluation-authored', async (session) => {
       const { store } = session;
