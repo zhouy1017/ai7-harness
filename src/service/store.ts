@@ -5049,6 +5049,11 @@ export class EditorialStore {
         }));
         const pins = components.get('execution-plan')?.materialReferences;
         if (pins !== undefined) {
+          const frozenBase = components.get('execution-plan')!.materialReferenceBasePromptContractDigest;
+          requireStore(typeof frozenBase === 'string' && /^[0-9a-f]{64}$/u.test(frozenBase), 'ANALYSIS_RECORD_INVALID', '任务参考资料的基础契约记录无效。');
+          // A new guideline version is a new current kind contract, not corruption of the previous Task's pins.
+          // Its ordinary ledger projection already knows how to offer a fresh preparation under that contract.
+          if (frozenBase !== base.promptContractDigest) return this.reviewCategoryLedger(base);
           materials = { bookId: latestForBook, references: this.#analysisCall(() => taskMaterialSources(pins)) };
           frozenPromptDigest = asString(components.get('plan-envelope')!.promptContractDigest as SqlRow[string]);
         }

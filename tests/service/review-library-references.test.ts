@@ -195,6 +195,24 @@ describe('review categories reference exact local library versions', () => {
     expect(repeated.categories[0]!.planEnvelopeDigest).toBe(referenced.categories[0]!.planEnvelopeDigest);
   });
 
+  it('prepares under a changed guideline contract without misclassifying the old references as corrupt', async () => {
+    const id = await material();
+    const earlier = prepare([id]);
+    const originalPins = recordPins(earlier);
+    const path = join(roots.inputRoot, '合成文字规范.txt');
+    writeFileSync(path, '合成文字规范\n\n1. 指出错字、别字、多字与漏字，给出改正后的文字。\n2. 指出成分残缺与搭配不当，给出通顺的改法。');
+    const preview = await store.previewReviewGuidelineVersion('ai7-builtin/typos-and-usage', path);
+    store.importReviewGuidelineVersion(preview.previewId);
+    expect(() => store.inspectReviewWorkspace(bookId, null)).not.toThrow();
+    const next = prepare([id]);
+    expect(next.categories[0]!.taskIntentId).not.toBe(earlier.categories[0]!.taskIntentId);
+    expect(recordPins(next)).toEqual(originalPins);
+    expect(plan(earlier).technical.find((row) => row.key === 'category:typos-and-usage')?.value).toContain(earlier.categories[0]!.planEnvelopeDigest!);
+    await close();
+    await open();
+    expect(plan(next).start.readiness).toBe('ready');
+  });
+
   it('refuses references for factual-review-only and leads-only selections without changing their contracts', async () => {
     const id = await material();
     for (const category of ['factual-review', 'plot-consistency']) expect(() => prepare([id], [category])).toThrow(REVIEW_MATERIAL_CATEGORY_REQUIRED);

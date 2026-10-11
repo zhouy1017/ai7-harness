@@ -20,6 +20,7 @@ describe('exact Material Index reference contracts', () => {
   it('binds the base contract, version pin and words without changing SQL version or manuscript messages', () => {
     const definition = taskMaterialKindDefinition(base, boundary, [taskMaterialWords(source, paragraphs)]);
     expect(definition.contractVersion).toBe(base.contractVersion);
+    expect(definition.materialReferences).toEqual({ sources: [source], basePromptContractDigest: base.promptContractDigest });
     expect(definition.buildUnitMessage).toBe(base.buildUnitMessage);
     expect(definition.systemPrompt).toContain(paragraphs[0]);
     expect(definition.systemPrompt).toContain('只参照，不照抄');

@@ -94,7 +94,7 @@ export function taskMaterialKindDefinition(
   const blocked = (): never => { throw new AnalysisError(refusal!.code, refusal!.message); };
   return {
     ...base,
-    materialReferences: sources,
+    materialReferences: { sources, basePromptContractDigest: base.promptContractDigest },
     systemPrompt: refusal === null ? [base.systemPrompt, contract.instruction, ...readings.flatMap((reading) =>
       reading.paragraphs!.map((paragraph, index) => `《${reading.source.title}》第 ${index + 1} 段：${paragraph}`))].join('\n') : base.systemPrompt,
     promptContractDigest,
