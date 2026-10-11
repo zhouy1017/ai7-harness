@@ -24,6 +24,8 @@ import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState
 // J-10's unit hold holding each Run's reading range in flight: a third Book is made from the same input; 甲's first
 // baseline and 丙's execute at once, and 乙's range update, started while both places are taken, waits as 等待运行名额 —
 // recorded, nothing sent — in the Task Drawer, on ②A and in 待我处理, which lists the three by Book and counts none.
+// A second Book window opens through 工作概览 → 打开另一本图书 (Issue #632): both windows show the same attention
+// items, words and count, and follow 甲 pausing and 乙 starting without taking the main window's manuscript focus.
 // 暂停 on 甲 hands its place to 乙, whose Run starts in the background while the editor's caret stays in 丙's
 // manuscript; the editor then accepts and applies a 修改建议 on 丙 while its Run holds a range in flight — a Controlled
 // Apply Effect committed beside the Run (Issue #632); 取消任务 on 丙 keeps what it read as 丙's own partial revision,
@@ -201,15 +203,17 @@ async function createLoopbackSentinel() {
   };
 }
 
-async function attachRenderer(browser) {
+/** Attach the sole page, or the one new Book window beside an already attached page (Issue #632). */
+async function attachRenderer(browser, existingTargetId = null) {
   const guard = (request) => settleOnBrowserDisconnect(browser, request);
   const root = await guard(browser.newBrowserCDPSession());
   const deadline = Date.now() + 60_000;
   let target;
   while (Date.now() < deadline) {
     const pages = (await guard(root.send('Target.getTargets'))).targetInfos.filter((item) => item.type === 'page');
-    if (pages.length === 1) { target = pages[0]; break; }
-    requireJourney(pages.length === 0, 'renderer-target-count');
+    const candidates = pages.filter((page) => page.targetId !== existingTargetId);
+    requireJourney(candidates.length <= 1 && (existingTargetId === null || pages.some((page) => page.targetId === existingTargetId)), 'renderer-target-count');
+    if (candidates.length === 1) { target = candidates[0]; break; }
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
   requireJourney(target, 'renderer-target-timeout');
@@ -242,6 +246,17 @@ async function attachRenderer(browser) {
   };
   await send('Runtime.enable');
   return {
+    targetId: target.targetId,
+    close: async () => {
+      requireJourney((await guard(root.send('Target.closeTarget', { targetId: target.targetId }))).success === true, 'observer-close-accepted');
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const pages = (await guard(root.send('Target.getTargets'))).targetInfos.filter((item) => item.type === 'page');
+        if (pages.length === 1 && pages[0].targetId === existingTargetId) return;
+        await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+      }
+      throw journeyCheckFailure('J-09', 'observer-close-confirmed');
+    },
     send,
     evaluate: async (expression) => {
       const response = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
@@ -639,6 +654,24 @@ const READ_SERVICE = `window.ai7.inspectGlobalAttention().then((projection) => (
   running: projection.running,
   groups: projection.groups.map((group) => ({ key: group.key, total: group.total, items: group.items.map((item) => ({ itemId: item.itemId, state: item.state, nextStep: item.nextStep, target: item.target, bookId: item.book.bookId, title: item.book.title })) })),
 }))`;
+
+/** Compare both rendered views with the same authoritative answer, allowing an in-flight refresh to finish. */
+async function sameAttentionInBothWindows(main, observer, name) {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const service = await main.evaluate(READ_SERVICE);
+    const [mainPage, observerPage, observerService] = await Promise.all([
+      main.evaluate(READ_PAGE), observer.evaluate(READ_PAGE), observer.evaluate(READ_SERVICE),
+    ]);
+    const identity = (groups) => groups.map((group) => ({ key: group.key, total: Number(group.total), items: group.items.map((item) => [item.itemId, item.bookId, item.state]) }));
+    if (JSON.stringify(service) === JSON.stringify(observerService) &&
+      JSON.stringify(identity(service.groups)) === JSON.stringify(identity(mainPage.groups)) &&
+      mainPage.count === String(service.count) && mainPage.running === String(service.running) &&
+      JSON.stringify(mainPage) === JSON.stringify(observerPage)) return service;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  throw journeyCheckFailure('J-09', name);
+}
 
 /** The service's answer once no Run is in flight — a completed Run's last step may still hold its place of the governor. */
 async function readSettledAttention(renderer) {
@@ -1211,6 +1244,40 @@ async function main() {
     'concurrent-attention-by-book', concurrentPage?.groups?.map((group) => ({ key: group.key, items: group.items.map((item) => [item.book, item.state, item.pill]) })));
     await waitFor(renderer, `document.querySelector('#global-attention-entry')?.dataset.attentionCount==='0' && document.querySelector('#global-attention-entry .global-attention-badge')?.hidden===true`, 'concurrent-count-zero', 30_000);
 
+    at('concurrent-second-window');
+    const secondWindowStarted = performance.now();
+    // Use the existing product chooser, as J-12 does, rather than a test hook that creates a window.
+    await openItem(renderer, queuedItem.itemId, 'second-window-b');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}]')`, 'second-window-b-analysis', 30_000);
+    await click(renderer, '工作概览', 'second-window-overview');
+    await waitFor(renderer, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookB)}]')`, 'second-window-overview-ready', 30_000);
+    await click(renderer, '打开另一本图书', 'second-window-open-other');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-workbench-chooser"]')`, 'second-window-chooser', 30_000);
+    await clickSelector(renderer, `button[data-book-id=${JSON.stringify(bookC)}]`, 'second-window-choose-c');
+    const observer = await attachRenderer(browser, renderer.targetId);
+    requireJourney(observer.targetId !== renderer.targetId, 'second-window-distinct-target');
+    await waitFor(observer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookC)}]') && document.hasFocus()`, 'second-window-c-ready', 30_000);
+    requireJourney((await observer.evaluate(`window.ai7.getBookWorkbenchRoute()`))?.bookId === bookC, 'second-window-c-route');
+    // The editor returns to the main window through the same chooser: 乙 is already open there, so AI7 focuses that
+    // window rather than opening a third (J-12's reuse) — the product's own focus, not a debugging command.
+    await click(observer, '返回图书工作概览', 'second-window-c-overview');
+    await waitFor(observer, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookC)}]')`, 'second-window-c-overview-ready', 30_000);
+    await click(observer, '打开另一本图书', 'second-window-c-open-other');
+    await waitFor(observer, `document.querySelector('[data-screen="book-workbench-chooser"]')`, 'second-window-c-chooser', 30_000);
+    await clickSelector(observer, `button[data-book-id=${JSON.stringify(bookB)}]`, 'second-window-return-b');
+    await waitFor(renderer, `document.hasFocus() && window.ai7.getBookWorkbenchRoute().then((route)=>route?.bookId===${JSON.stringify(bookB)})`, 'main-window-focused', 30_000);
+    await waitFor(observer, `!document.hasFocus()`, 'observer-not-focused', 10_000);
+    await openAttention(observer, 'second-window-observer-attention');
+    await openAttention(renderer, 'second-window-main-attention');
+
+    at('concurrent-attention-in-both-windows');
+    const bothQueued = await sameAttentionInBothWindows(renderer, observer, 'both-windows-queued-attention');
+    requireJourney(JSON.stringify(bothQueued) === JSON.stringify(concurrentService) && new Set([runA, runB, runC]).size === 3,
+      'both-windows-separate-runs-same-queue');
+    // The main window still holds the focus the chooser gave it; subsequent background changes must leave it there.
+    await assertRenderer(renderer, `document.hasFocus()`, 'main-window-still-focused');
+    let multiWindowAddedMs = performance.now() - secondWindowStarted;
+
     at('concurrent-pause');
     // 暂停 on 甲, from its own plan: 正在暂停 while its range in flight finishes.
     await openItem(renderer, `analysis:${taskA}`, 'concurrent-a-item');
@@ -1228,12 +1295,35 @@ async function main() {
     await assertRenderer(renderer, `(() => { const text=document.querySelector('[data-screen="editor"] .ProseMirror'); if(!(text instanceof HTMLElement))return false; text.focus(); return document.activeElement===text; })()`, 'focus-in-text');
     const focusBefore = await renderer.evaluate(FOCUS_STATE);
     requireJourney(focusBefore?.screen === 'editor' && focusBefore.book === bookC && focusBefore.focused === true, 'focus-before', focusBefore);
+    const routeBefore = await renderer.evaluate(`window.ai7.getBookWorkbenchRoute()`);
+    await renderer.evaluate(`(() => { window.__j09MultiFocus = document.activeElement; window.__j09MultiDrawer = document.querySelector('#task-drawer'); window.__j09MultiDrawerPin = JSON.stringify([window.__j09MultiDrawer?.dataset.taskPlanKind, window.__j09MultiDrawer?.dataset.taskPlanRef]); return true; })()`);
     await writeFile(holdPath, '2', 'utf8');
     await waitForItems(renderer, (answer) => answer.items.some((item) => item.bookId === bookA && item.state === 'analysis-paused') &&
       !answer.items.some((item) => item.bookId === bookB && item.state === 'analysis-waiting-capacity'), 'concurrent-a-paused-b-admitted');
+    const observerRefreshStarted = performance.now();
+    // The observer's already-open view follows the real poll, without a focus event or another click.
+    await waitFor(observer, `(() => { const page=${READ_PAGE}; const items=page.groups.flatMap((group)=>group.items); return items.some((item)=>item.itemId===${JSON.stringify(`analysis:${taskA}`)}&&item.state==='analysis-paused') && !items.some((item)=>item.itemId===${JSON.stringify(queuedItem.itemId)}&&item.state==='analysis-waiting-capacity'); })()`, 'observer-follows-pause-and-admission', 30_000);
     const focusAfter = await renderer.evaluate(FOCUS_STATE);
     const routeAfter = await renderer.evaluate(`window.ai7.getBookWorkbenchRoute()`);
-    requireJourney(JSON.stringify(focusAfter) === JSON.stringify(focusBefore) && routeAfter?.bookId === bookC, 'background-run-steals-nothing', { before: focusBefore, after: focusAfter, route: routeAfter?.bookId === bookC });
+    requireJourney(JSON.stringify(focusAfter) === JSON.stringify(focusBefore) && JSON.stringify(routeAfter) === JSON.stringify(routeBefore) && routeAfter?.bookId === bookC, 'background-run-steals-nothing', { before: focusBefore, after: focusAfter, route: routeAfter?.bookId === bookC });
+    await assertRenderer(renderer, `document.hasFocus() && document.activeElement===window.__j09MultiFocus && document.querySelector('#task-drawer')===window.__j09MultiDrawer && JSON.stringify([window.__j09MultiDrawer?.dataset.taskPlanKind, window.__j09MultiDrawer?.dataset.taskPlanRef])===window.__j09MultiDrawerPin`, 'observer-refresh-keeps-main-focus-and-drawer');
+
+    at('concurrent-attention-updated-in-both-windows');
+    // Only after proving focus stayed put does the editor deliberately return to the attention view.
+    await openAttention(renderer, 'both-windows-updated-main');
+    const bothUpdated = await sameAttentionInBothWindows(renderer, observer, 'both-windows-updated-attention');
+    const updatedItems = bothUpdated.groups.flatMap((group) => group.items);
+    requireJourney(updatedItems.some((item) => item.itemId === `analysis:${taskA}` && item.state === 'analysis-paused') &&
+      updatedItems.some((item) => item.itemId === `analysis:${taskC}` && item.state === 'analysis-running') &&
+      !updatedItems.some((item) => item.itemId === queuedItem.itemId && item.state === 'analysis-waiting-capacity') &&
+      bothUpdated.count === 0 && bothUpdated.running === true, 'both-windows-same-changed-state');
+
+    at('concurrent-observer-close');
+    await observer.close();
+    await toLibrary(renderer, 'observer-closed');
+    await openManuscriptOf(renderer, bookC, 'observer-closed');
+    multiWindowAddedMs += performance.now() - observerRefreshStarted;
+    recordDebugDetail('J-09', `multi-window-added-ms=${Math.round(multiWindowAddedMs)}`);
 
     at('concurrent-apply-effect');
     // While 丙's Run holds its third range in flight, the editor accepts and applies a 修改建议 on 丙's manuscript — a Controlled
