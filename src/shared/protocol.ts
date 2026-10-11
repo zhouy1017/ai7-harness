@@ -5927,7 +5927,7 @@ export interface ExemplarBookCursor {
   readonly bookId: string;
 }
 
-/** One exemplar: the version of one delivered document of a published Book that stands in 范例. */
+/** 导入以前图书的范例 (Issue #427): the chosen file as it will arrive, read and kept nowhere yet. */
 export interface ImportedExemplarPreview {
   readonly previewId: string;
   readonly displayName: string;
@@ -5953,6 +5953,7 @@ export interface ImportedExemplarDecisionInput {
   readonly choice: 'house' | 'excluded' | 'deferred';
 }
 
+/** One exemplar: the version of one delivered document of a published Book that stands in 范例. */
 export interface ExemplarProjection {
   readonly documentId: string;
   readonly typeId: string;
@@ -11118,7 +11119,7 @@ export interface ServiceOperationMap {
     input: { previewId: string };
     output: ReviewGuidelinesProjection;
   };
-  /** 知识库 › 范例 (Issue #427, S79b): the published Books' delivered documents, by Book and type, a page at a time. */
+  /** 知识库 › 范例 › 导入以前图书的范例 (Issue #427): preview a file, import it under an earlier Book, decide its eligibility. */
   previewImportedExemplar: {
     input: { path: string };
     output: ImportedExemplarPreview;
@@ -11131,6 +11132,7 @@ export interface ServiceOperationMap {
     input: ImportedExemplarDecisionInput;
     output: ExemplarBookProjection;
   };
+  /** 知识库 › 范例 (Issue #427, S79b): the published Books' delivered documents, by Book and type, a page at a time. */
   inspectExemplars: {
     input: { after: ExemplarBookCursor | null };
     output: ExemplarsProjection;

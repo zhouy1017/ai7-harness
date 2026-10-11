@@ -1,5 +1,5 @@
-import { randomUUID } from 'node:crypto';
-import { writeFile, readFile, rm } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { writeFile, readFile, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -189,12 +189,31 @@ describe('earlier published Books in 范例', () => {
 
   it('detects corrupted immutable revisions rather than silently retargeting a reference', async () => {
     const book = await store.importEarlierExemplar(await input());
+    const bookId = await projectBook();
     const database = db();
     try {
       database.exec('DROP TRIGGER earlier_exemplar_versions_no_update');
       database.prepare("UPDATE earlier_exemplar_versions SET canonical_json = '{}' WHERE revision_id = ?").run(book.exemplars[0]!.revisionId);
       expect(() => readImportedExemplar(database, book.exemplars[0]!.revisionId)).toThrow('范例记录无法读取');
     } finally { database.close(); }
+    // Every reader of 范例 says so as it says any other unreadable part, rather than failing whole.
+    expect(() => store.inspectExemplars(null)).toThrow(expect.objectContaining({ name: 'StoreError', code: 'EXEMPLAR_RECORD_INVALID' }));
+    expect(store.inspectWritingTask(bookId).unavailable).toBe('写作任务暂不可用：以前图书的范例记录无法读取。');
+  });
+
+  it('keeps each original whole under its digest and sweeps at open what an interrupted or refused import left', async () => {
+    const first = await store.importEarlierExemplar(await input());
+    const directory = join(roots.dataRoot, IMPORTED_EXEMPLAR_OBJECT_DIRECTORY);
+    const [kept] = await readdir(directory);
+    await expect(store.importEarlierExemplar({ ...await input('被拒绝的虚构范例。'), bookId: first.bookId, expectedVersion: 0 })).rejects.toThrow('范例已添了新版本');
+    await writeFile(join(directory, `.partial-${randomUUID()}`), '中断的写入');
+    expect(await readdir(directory)).toHaveLength(3);
+    // A damaged original under the digest is replaced by the whole bytes when the same file arrives again.
+    await writeFile(join(directory, kept!), '损坏的原件');
+    await store.importEarlierExemplar({ ...await input(), bookId: first.bookId, expectedVersion: 1 });
+    expect(createHash('sha256').update(await readFile(join(directory, kept!))).digest('hex')).toBe(kept!.slice(0, 64));
+    store.markCleanShutdown(); store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    expect(await readdir(directory)).toEqual([kept]);
   });
 
   it('carries all exemplar versions and eligibility through full export/replacement and refuses a missing original', async () => {
@@ -222,6 +241,6 @@ describe('earlier published Books in 范例', () => {
     try { objectKey = JSON.parse(String(database.prepare('SELECT canonical_json FROM earlier_exemplar_versions WHERE revision_id = ?').get(current.revisionId)!.canonical_json)).source.objectKey; }
     finally { database.close(); }
     await rm(join(roots.dataRoot, IMPORTED_EXEMPLAR_OBJECT_DIRECTORY, objectKey));
-    await expect(store.prepareDatabaseExport(join(roots.inputRoot, 'damaged.ai7db'), true)).rejects.toThrow('数据文件');
+    await expect(store.prepareDatabaseExport(join(roots.inputRoot, 'damaged.ai7db'), true)).rejects.toThrow('范例原件 1 个');
   });
 });

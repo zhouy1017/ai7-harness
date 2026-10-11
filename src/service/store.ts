@@ -4766,6 +4766,7 @@ export class EditorialStore {
       initializeMaterialIndexSchema(authority);
       // Revision 68 (Issue #757): the editor's 人工结果确认 over requests whose results cannot be known.
       initializeOutcomeResolutionSchema(authority);
+      // Revision 69 (Issue #427): earlier published Books' imported 范例, their exact versions and Learning Eligibility.
       initializeImportedExemplarSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
@@ -4808,6 +4809,8 @@ export class EditorialStore {
         store.#boundedCall(() => store.#boundedAuthority.isRecoveryObjectReferenced(relativeKey)));
       // What an interrupted 放入资料库 left beside the kept originals (Issue #427 review).
       await store.#libraryMaterials.sweep();
+      // What an interrupted or refused 导入范例 left beside the kept earlier-Book originals (Issue #427).
+      await store.#importedExemplars.sweep();
       // A converted working copy an index build stopped mid-way left behind (Issue #428, S80a).
       await sweepMaterialIndexWork(dataRoot);
       // A database package staged and never approved, or cut off mid-write, is a whole copy of the data (Issue #434 review).
@@ -7488,11 +7491,11 @@ export class EditorialStore {
     }
     const sources = this.#exemplarSources();
     const archived = sources.books(after, MAX_EXEMPLAR_BOOKS_PAGE + 1);
-    const imported = this.#importedExemplars.books(after, MAX_EXEMPLAR_BOOKS_PAGE + 1);
+    const imported = this.#importedCall(() => this.#importedExemplars.books(after, MAX_EXEMPLAR_BOOKS_PAGE + 1));
     const importedIds = new Set(imported.map((book) => book.bookId));
     const page = [...archived, ...imported].sort((a, b) => a.title < b.title ? -1 : a.title > b.title ? 1 : a.bookId < b.bookId ? -1 : a.bookId > b.bookId ? 1 : 0);
     const books = page.slice(0, MAX_EXEMPLAR_BOOKS_PAGE).map((book) => importedIds.has(book.bookId)
-      ? this.#importedExemplars.book(book.bookId)
+      ? this.#importedCall(() => this.#importedExemplars.book(book.bookId))
       : this.#documentCall(() => this.#publicationCall(() => readExemplarBook(sources, book))));
     const last = books.at(-1);
     return { books, nextCursor: page.length > MAX_EXEMPLAR_BOOKS_PAGE && last !== undefined ? { title: last.bookTitle, bookId: last.bookId } : null };
@@ -7500,24 +7503,30 @@ export class EditorialStore {
 
   async previewImportedExemplar(path: string): Promise<ImportedExemplarPreview> {
     this.#assertAvailable();
-    try { return await this.#importedExemplars.preview(path); } catch (error) {
-      if (error instanceof ImportedExemplarError) throw new StoreError(error.code, error.message);
-      throw error;
-    }
+    return this.#importedCall(() => this.#importedExemplars.preview(path));
   }
   async importEarlierExemplar(input: ImportedExemplarInput): Promise<ExemplarBookProjection> {
     this.#assertAvailable();
-    try { return await this.#importedExemplars.import(input); } catch (error) {
-      if (error instanceof ImportedExemplarError) throw new StoreError(error.code, error.message);
-      throw error;
-    }
+    return this.#importedCall(() => this.#importedExemplars.import(input));
   }
   decideImportedExemplar(input: ImportedExemplarDecisionInput): ExemplarBookProjection {
     this.#assertAvailable();
-    try { return this.#importedExemplars.decide(input); } catch (error) {
+    return this.#importedCall(() => this.#importedExemplars.decide(input));
+  }
+
+  /**
+   * An earlier-Book 范例 record that no longer reads is a store refusal, so every reader of 范例 — 写作任务 and 审稿意见 among
+   * them — says so as it says any other unreadable part, rather than failing whole (Issue #427 review).
+   */
+  #importedCall<T>(operation: () => T): T {
+    const refuse = (error: unknown): never => {
       if (error instanceof ImportedExemplarError) throw new StoreError(error.code, error.message);
       throw error;
-    }
+    };
+    try {
+      const result = operation();
+      return (result instanceof Promise ? result.catch(refuse) : result) as T;
+    } catch (error) { return refuse(error); }
   }
 
   #exemplarSources(): ExemplarSources {
@@ -8662,19 +8671,21 @@ export class EditorialStore {
       if (words.length === 0) continue;
       exemplars.push({ title: boundedGraphemes(`${asString(row.title)} · ${pin.typeLabel}`, 200), text: boundedGraphemes(words, MAX_EXEMPLAR_GRAPHEMES) });
     }
+    // Then earlier Books' imported 审稿意见 (Issue #427), by title as 范例 lists them: only those Books are read, a page at a time.
     let after: ExemplarBookCursor | null = null;
-    do {
-      const page = this.inspectExemplars(after);
-      for (const book of page.books) {
-        if (!book.imported) continue;
+    while (exemplars.length < MAX_READERS_REPORT_EXEMPLARS) {
+      const page = this.#importedCall(() => this.#importedExemplars.books(after, MAX_EXEMPLAR_BOOKS_PAGE));
+      for (const earlier of page) {
+        const book = this.#importedCall(() => this.#importedExemplars.book(earlier.bookId));
         for (const entry of book.exemplars) {
           if (!entry.typeId.startsWith('readers-report-') || entry.eligibility !== 'house-only') continue;
-          const words = readWritingExemplarWords(this.#authority, entry.revisionId);
+          const words = this.#importedCall(() => readWritingExemplarWords(this.#authority, entry.revisionId));
           if (words !== null) exemplars.push({ title: boundedGraphemes(`${book.bookTitle} · ${entry.typeLabel} · 版本 ${entry.version}`, 200), text: words.text });
         }
       }
-      after = page.nextCursor;
-    } while (after !== null && exemplars.length < MAX_READERS_REPORT_EXEMPLARS);
+      if (page.length < MAX_EXEMPLAR_BOOKS_PAGE) break;
+      after = { title: page.at(-1)!.title, bookId: page.at(-1)!.bookId };
+    }
     return exemplars.slice(0, MAX_READERS_REPORT_EXEMPLARS);
   }
 
@@ -8956,7 +8967,7 @@ export class EditorialStore {
     try {
       return operation();
     } catch (error) {
-      if (error instanceof WritingTaskError || error instanceof AnalysisError || error instanceof EvaluationError) {
+      if (error instanceof WritingTaskError || error instanceof AnalysisError || error instanceof EvaluationError || error instanceof ImportedExemplarError) {
         throw new StoreError(error.code, error.message);
       }
       throw error;
@@ -9192,7 +9203,7 @@ export class EditorialStore {
           if (exemplar === undefined || exemplar.eligibility !== 'house-only') continue;
           // Its text as the contract takes it, read from its own revision, and the reference that pins it with the facts the
           // plan names it by.
-          const words = readWritingExemplarWords(this.#authority, exemplar.revisionId);
+          const words = this.#importedCall(() => readWritingExemplarWords(this.#authority, exemplar.revisionId));
           if (words === null) continue;
           const input: WritingExemplarInput = { bookTitle: writingWords(book.bookTitle, 200), version: exemplar.version, text: words.text, excerpt: words.excerpt };
           list.push({

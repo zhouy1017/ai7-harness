@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { readFile, stat, writeFile } from 'node:fs/promises';
-import { basename } from 'node:path';
+import { open, opendir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { basename, resolve } from 'node:path';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { ensureCanonicalDataDirectory, inspectCanonicalDataFile } from '../shared/data-root.js';
 import type { ExemplarBookCursor, ExemplarBookProjection, ImportedExemplarInput, ImportedExemplarPreview, ImportedExemplarDecisionInput } from '../shared/protocol.js';
@@ -202,9 +202,20 @@ export class ImportedExemplars {
     const directory = await ensureCanonicalDataDirectory(this.dataRoot, IMPORTED_EXEMPLAR_OBJECT_DIRECTORY);
     const objectKey = `${preview.source.sha256}.${preview.source.format.toLowerCase()}`;
     const target = await inspectCanonicalDataFile(this.dataRoot, directory, objectKey);
-    try { await writeFile(target.path, preview.bytes, { flag: 'wx' }); } catch (error) {
-      if (!(isRecord(error) && error.code === 'EEXIST')) throw error;
-      requireExemplar(sha256Hex(await readFile(target.path)) === preview.source.sha256, '范例原件已损坏。', 'EXEMPLAR_FILE_DAMAGED');
+    // Written aside, synced and verified, then named: a stop mid-write leaves only a partial the open-time sweep removes, and an
+    // original under its digest is always whole (as 放入资料库 keeps its originals).
+    if (!(target.exists && sha256Hex(await readFile(target.path)) === preview.source.sha256)) {
+      const partial = resolve(directory, `.partial-${randomUUID()}`);
+      try {
+        await writeFile(partial, preview.bytes, { flag: 'wx' });
+        const handle = await open(partial, 'r+');
+        try { await handle.sync(); } finally { await handle.close(); }
+        requireExemplar(sha256Hex(await readFile(partial)) === preview.source.sha256, '范例原件无法保存，请重试。', 'EXEMPLAR_FILE_DAMAGED');
+        await rename(partial, target.path);
+      } catch (error) {
+        await rm(partial, { force: true });
+        throw error;
+      }
     }
     const recordedAt = new Date().toISOString();
     this.db.exec('BEGIN IMMEDIATE');
@@ -227,6 +238,28 @@ export class ImportedExemplars {
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
     this.#previews.delete(input.previewId);
     return this.book(bookId);
+  }
+  /**
+   * At open: what an interrupted or refused 导入范例 left in the Agent Data Root — a partial written aside, or an original kept
+   * under its digest that no recorded version names — is removed, so no unrecorded earlier-Book text stays behind.
+   */
+  async sweep(): Promise<void> {
+    if (this.db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'earlier_exemplar_versions'").get() === undefined) return;
+    let entries: Awaited<ReturnType<typeof opendir>>;
+    try { entries = await opendir(resolve(this.dataRoot, IMPORTED_EXEMPLAR_OBJECT_DIRECTORY)); } catch (error) {
+      if (isRecord(error) && error.code === 'ENOENT') return;
+      throw error;
+    }
+    const recorded = this.db.prepare("SELECT 1 FROM earlier_exemplar_versions WHERE json_extract(canonical_json, '$.source.objectKey') = ?");
+    const directory = await ensureCanonicalDataDirectory(this.dataRoot, IMPORTED_EXEMPLAR_OBJECT_DIRECTORY);
+    for await (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const partial = /^\.partial-[0-9a-f-]{36}$/u.test(entry.name);
+      const object = /^[0-9a-f]{64}\.(?:docx|txt|md)$/u.test(entry.name);
+      if (partial || (object && recorded.get(entry.name) === undefined)) {
+        await rm((await inspectCanonicalDataFile(this.dataRoot, directory, entry.name)).path, { force: true });
+      }
+    }
   }
   decide(input: ImportedExemplarDecisionInput): ExemplarBookProjection {
     requireExemplar(isRecord(input) && UUID_PATTERN.test(input.revisionId) && ['house', 'excluded', 'deferred'].includes(input.choice), '学习准入参数无效。');
