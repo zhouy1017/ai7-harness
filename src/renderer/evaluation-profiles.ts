@@ -54,7 +54,9 @@ export function renderEvaluationProfiles(root: HTMLElement, projection: Evaluati
     const readiness = el('ul', 'evaluation-profile-readiness');
     for (const item of profile.readiness ?? []) readiness.append(el('li', undefined, item));
     const details = el('details', 'technical-details');
-    details.append(el('summary', undefined, '技术详情'), el('p', 'technical-identity', profile.sha256));
+    const facts = el('dl', 'evaluation-profile-facts');
+    facts.append(el('dt', undefined, '评估方案摘要'), el('dd', 'technical-identity', profile.sha256));
+    details.append(el('summary', undefined, '查看技术详情'), facts);
     card.append(heading, el('p', 'field-note evaluation-profile-use', evaluationProfileUse(profile)),
       el('h4', undefined, `评分项 · 总分 ${profile.total}`), items,
       el('h4', undefined, '档位'), bands,
