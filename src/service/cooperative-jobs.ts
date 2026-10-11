@@ -337,9 +337,10 @@ export class CooperativeJobOwner {
     scope: Parameters<EditorialStore['createReviewRunPreparationWork']>[2],
     launchPolicy: Parameters<EditorialStore['createReviewRunPreparationWork']>[3],
     capturedProcedure: Parameters<EditorialStore['createReviewRunPreparationWork']>[4] = null,
+    materialIds: ReadonlyArray<string> = [],
   ): ServiceJobProjection {
     this.#requireCapacity();
-    const work = this.#store.createReviewRunPreparationWork(bookId, categoryIds, scope, launchPolicy, capturedProcedure);
+    const work = this.#store.createReviewRunPreparationWork(bookId, categoryIds, scope, launchPolicy, capturedProcedure, materialIds);
     const jobId = randomUUID();
     const job: JobRecord = {
       subjectId: work.workId ?? bookId,

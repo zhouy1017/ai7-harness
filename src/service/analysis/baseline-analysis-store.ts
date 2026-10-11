@@ -3418,7 +3418,11 @@ export class BaselineAnalysisStore {
       'run-source-scope': canonicalRecord(sourceScope),
       'coverage-manifest': canonicalRecord(manifest),
       'provider-resolution-plan': canonicalRecord(providerPlan),
-      'execution-plan': canonicalRecord(executionPlan),
+      'execution-plan': canonicalRecord(this.#definition.materialReferences === undefined ? executionPlan : {
+        ...executionPlan,
+        materialReferences: this.#definition.materialReferences.sources,
+        materialReferenceBasePromptContractDigest: this.#definition.materialReferences.basePromptContractDigest,
+      }),
     };
     if (reusePlan !== null) records['reuse-plan'] = reusePlanRecord(reusePlan);
     const envelopeBase = {

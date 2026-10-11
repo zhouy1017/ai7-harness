@@ -1357,9 +1357,10 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'prepareReviewRun': {
       // A sheet pre-filled from a Captured Procedure (Issue #65, S30) names the exact version and digest it was filled from.
-      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'materialIds'], tentativeId);
       if (!validUuid(input.bookId) || !Array.isArray(input.categoryIds) || !validReviewCategoryIds(input.categoryIds, 1) ||
           !validReviewRunScope(input.scope) ||
+          !(input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= 16 && input.materialIds.every(validUuid))) ||
           !optionalOrNull(input, 'capturedProcedure', (pin) => isRecord(pin) && hasExactKeys(pin, ['versionId', 'documentSha256']) &&
             validUuid(pin.versionId) && isBoundedString(pin.documentSha256, 64) && HEX_DIGEST_PATTERN.test(pin.documentSha256))) {
         throw new ProtocolError(tentativeId);

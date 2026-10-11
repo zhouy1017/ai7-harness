@@ -702,3 +702,7 @@ Earlier Books are Knowledge Base identities, never AI7 Book projects. Imports de
 Writing Tasks pin exact versions and digests; 审稿意见 retains its existing frozen-word contract.
 Full database export/replacement includes these ledgers and originals. Book-only merges leave this house knowledge behind:
 a writing Task whose referenced exemplar is absent keeps readable results/drafts but cannot start again.
+
+## 资料库 references for 审阅 (Issue #428, slice 1)
+
+Service protocol 125 follows 124 (#427) and adds optional `materialIds` to review preparation and bounded reference offers to 审阅. Only model-calling review-category contracts consume references; factual review and model-free consistency leads do not. The Run and each consuming Task freeze exact Material Index pins in canonical JSON without a schema revision (69 unchanged), and their plans disclose the references separately from manuscript scope. Up to four whole items, 3,000 extracted characters each and 6,000 in total, are read through the read-only Material Index boundary. Reference-aware prompts use `ai7.editorial-review.materials.prompt-contract/1`; Tasks without references retain their existing contract bytes and fixtures. Unavailable pins block a new authorization with a precise reason, while completed results remain readable. References remain unavailable in developer-live; evaluation references are deferred to a separate slice.

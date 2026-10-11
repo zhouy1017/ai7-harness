@@ -1,3 +1,4 @@
+import { TASK_MATERIALS_NONE, TASK_MATERIALS_STATEMENT, TASK_MATERIAL_LIVE_UNAVAILABLE, REVIEW_MATERIAL_CATEGORY_REQUIRED, taskMaterialKindDefinition, taskMaterialSources, taskMaterialWords, taskMaterialRefusal, type TaskMaterialBoundary, type TaskMaterialReading, type TaskMaterialSource } from './task-material-references.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
@@ -4505,7 +4506,9 @@ export class EditorialStore {
     this.#outcomeResolutions = new OutcomeResolutionLedger(authority);
     this.#capturedProcedures = new CapturedProcedures(authority);
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
-      ledgerOf: (entry) => this.#reviewLedgerOf(entry),
+      ledgerOf: (entry, materials, digest, bookId) => this.#reviewLedgerOf(entry, materials, digest, bookId),
+      materialReadings: (boundary) => this.#taskMaterialReadings(boundary),
+      materialOffers: (bookId) => this.#taskMaterialOffers(bookId),
       baseline: () => this.#baselineAnalysis,
     }, () => this.#reviewGuidelines.configuration());
     this.#manuscriptExport = new ManuscriptExportStore(authority, {
@@ -4956,14 +4959,15 @@ export class EditorialStore {
    * The ledger takes the route and the launch the baseline ledger was bound to, so every plan it
    * freezes names the binding this launch actually bound — which the one execution owner then checks.
    */
-  reviewCategoryLedger(definition: AnalysisKindDefinition): BaselineAnalysisStore {
+  reviewCategoryLedger(definition: AnalysisKindDefinition, cached = true): BaselineAnalysisStore {
     this.#assertAvailable();
     requireStore(isReviewCategoryKindId(definition.kind), 'REVIEW_CATEGORY_INVALID', '该分析种类不是审阅类别。');
-    return this.#reviewCategoryLedgers.obtain(`${definition.kind}\n${definition.promptContractDigest}`, () => {
+    const make = (): BaselineAnalysisStore => {
       const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
       ledger.bindLaunch(this.#baselineAnalysis.launch);
       return ledger;
-    });
+    };
+    return cached ? this.#reviewCategoryLedgers.obtain(`${definition.kind}\n${definition.promptContractDigest}`, make) : make();
   }
 
   /** One category's Task, latest Result Set Revision, history and update controls; `revisionId` opens one exact revision read-only. */
@@ -5033,12 +5037,98 @@ export class EditorialStore {
    * otherwise the category's own, built from the configuration entry the Run snapshotted — so a Run keeps
    * finding the ledger of the exact contract it prepared under.
    */
-  #reviewLedgerOf(entry: ReviewCategoryConfigurationEntry): BaselineAnalysisStore {
+  #reviewLedgerOf(entry: ReviewCategoryConfigurationEntry, materials?: TaskMaterialBoundary, frozenPromptDigest?: string, latestForBook?: string): BaselineAnalysisStore {
     if (entry.executor === 'factual-review-kind') return this.#factualReview;
     requireStore(entry.executor === 'review-category-contract', 'REVIEW_CATEGORY_NOT_TASK_BACKED', '这一类没有自己的任务账本。');
     const input = reviewCategoryContractInput(entry);
-    const definition = this.#reviewCategoryDefinitions.obtain(JSON.stringify(input), () => this.#analysisCall(() => reviewCategoryKindDefinition(input)));
-    return this.reviewCategoryLedger(definition);
+    const base = this.#reviewCategoryDefinitions.obtain(JSON.stringify(input), () => this.#analysisCall(() => reviewCategoryKindDefinition(input)));
+    if (materials === undefined && latestForBook !== undefined) {
+      const row = this.#authority.prepare("SELECT task_intent_id FROM analysis_task_intents WHERE book_id = ? AND kind = ? ORDER BY rowid DESC LIMIT 1").get(latestForBook, base.kind) as SqlRow | undefined;
+      if (row !== undefined) {
+        const records = this.#authority.prepare("SELECT component, canonical_json, sha256 FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = (SELECT max(plan_version) FROM analysis_plan_records WHERE task_intent_id = ?) AND component IN ('execution-plan', 'plan-envelope')").all(asString(row.task_intent_id), asString(row.task_intent_id)) as SqlRow[];
+        const components = new Map(records.map((record) => {
+          const json = asString(record.canonical_json);
+          requireStore(sha256(json) === record.sha256, 'ANALYSIS_RECORD_INVALID', '任务计划记录与摘要不一致。');
+          return [asString(record.component), JSON.parse(json) as Record<string, unknown>] as const;
+        }));
+        const pins = components.get('execution-plan')?.materialReferences;
+        if (pins !== undefined) {
+          const frozenBase = components.get('execution-plan')!.materialReferenceBasePromptContractDigest;
+          requireStore(typeof frozenBase === 'string' && /^[0-9a-f]{64}$/u.test(frozenBase), 'ANALYSIS_RECORD_INVALID', '任务参考资料的基础契约记录无效。');
+          // A new guideline version is a new current kind contract, not corruption of the previous Task's pins.
+          // Its ordinary ledger projection already knows how to offer a fresh preparation under that contract.
+          if (frozenBase !== base.promptContractDigest) return this.reviewCategoryLedger(base);
+          materials = { bookId: latestForBook, references: this.#analysisCall(() => taskMaterialSources(pins)) };
+          frozenPromptDigest = asString(components.get('plan-envelope')!.promptContractDigest as SqlRow[string]);
+        }
+      }
+    }
+    if (materials === undefined) return this.reviewCategoryLedger(base);
+    const readings = this.#taskMaterialReadings(materials);
+    const definition = this.#analysisCall(() => taskMaterialKindDefinition(base, materials!, readings, frozenPromptDigest));
+    // A pin unreadable now gives a definition that cannot build requests, under the frozen contract's own key: it is never
+    // cached, so the same plan runs once the pin reads again, and a cached readable ledger never outlives its pin.
+    return this.reviewCategoryLedger(definition, readings.every((reading) => reading.refusal === null));
+  }
+
+  #taskMaterialReadings(boundary: TaskMaterialBoundary): ReadonlyArray<TaskMaterialReading> {
+    return this.#analysisCall(() => taskMaterialSources(boundary.references)).map((source) => {
+      const paragraphs: string[] = [];
+      try {
+        for (let from: number | null = 1; from !== null;) {
+          const page = this.readMaterialIndexForTask(boundary, source.materialId, from);
+          paragraphs.push(...page.segments.map((segment) => segment.text));
+          from = page.next;
+        }
+      } catch (error) {
+        if (error instanceof StoreError && (error.code === 'MATERIAL_INDEX_MOVED' || error.code === 'MATERIAL_REFERENCE_UNAVAILABLE')) {
+          return taskMaterialRefusal(source, error.code);
+        }
+        throw error;
+      }
+      return this.#analysisCall(() => taskMaterialWords(source, paragraphs));
+    });
+  }
+
+  #prepareTaskMaterials(bookId: string, materialIds: ReadonlyArray<string>): ReadonlyArray<TaskMaterialSource> {
+    let total = 0;
+    const references = materialIds.map((materialId) => {
+      const material = this.#libraryCall(() => this.#libraryMaterials.original(materialId));
+      const title = writingWords(material.title, 200);
+      const pin = this.pinMaterialReference(bookId, materialId);
+      const build = this.#materialIndexCall(() => this.#materialIndex.current(materialId));
+      requireStore(build !== null && build.sha256 === pin.indexDigest, 'MATERIAL_INDEX_MOVED', `资料《${title}》的索引版本已不在本机。`);
+      const characters = build.metadata.characters;
+      requireStore(characters <= MAX_WRITING_MATERIAL_GRAPHEMES, 'TASK_MATERIAL_OVER_BOUND', writingMaterialOverBoundNamed(title, characters));
+      total += characters;
+      const paragraphs: string[] = [];
+      const boundary = { bookId, references: [pin] };
+      for (let from: number | null = 1; from !== null;) {
+        const page = this.readMaterialIndexForTask(boundary, materialId, from);
+        paragraphs.push(...page.segments.map((segment) => writingMaterialParagraph(segment.text)).filter((text) => text.length > 0));
+        from = page.next;
+      }
+      requireStore(paragraphs.length > 0, 'MATERIAL_INDEX_NO_TEXT', `资料《${title}》没有提取出可分段的文字。`);
+      return { ...pin, title, characters, sha256: writingMaterialDigest(paragraphs) };
+    });
+    requireStore(total <= MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES, 'TASK_MATERIAL_OVER_BOUND', writingMaterialsOverTotal(total));
+    return references;
+  }
+
+  #taskMaterialOffers(bookId: string): NonNullable<ReviewWorkspaceProjection['materials']> {
+    const live = this.#baselineAnalysis.launch.live !== null;
+    const indexed = this.#libraryCall(() => this.#libraryMaterials.referable(bookId)).flatMap((item) => {
+      const build = this.#materialIndexCall(() => this.#materialIndex.current(item.materialId));
+      return build === null || build.state !== 'complete' ? [] : [{ ...item, characters: build.metadata.characters }];
+    });
+    return {
+      statement: live ? TASK_MATERIAL_LIVE_UNAVAILABLE : indexed.length === 0 ? TASK_MATERIALS_NONE : TASK_MATERIALS_STATEMENT,
+      items: indexed.slice(0, MAX_WRITING_MATERIAL_OFFERS).map((item) => {
+        const reason = live ? TASK_MATERIAL_LIVE_UNAVAILABLE : item.characters > MAX_WRITING_MATERIAL_GRAPHEMES ? writingMaterialOverBound(item.characters) : null;
+        return { ...item, selectable: reason === null, reason };
+      }),
+      more: Math.max(0, indexed.length - MAX_WRITING_MATERIAL_OFFERS),
+    };
   }
 
   /**
@@ -5063,9 +5153,21 @@ export class EditorialStore {
     launchPolicy: LaunchPolicyProjection,
     // The Captured Procedure version the sheet was pre-filled from (Issue #65, S30; ADR 0087 §4): pinned by the Run.
     capturedProcedure: { versionId: string; documentSha256: string } | null = null,
+    materialIds: ReadonlyArray<string> = [],
   ): AnalysisPreparationResult<ReviewWorkspaceProjection> {
     const procedure = capturedProcedure === null ? null : this.#procedureCall(() => this.#capturedProcedurePin(bookId, capturedProcedure));
-    return this.#reviewPreparation(() => this.#reviewRuns.prepare({ phase: 'start', bookId, categoryIds, scope, launchPolicy, procedure }));
+    requireStore(Array.isArray(materialIds) && materialIds.length <= MAX_WRITING_MATERIALS && materialIds.every((id) => typeof id === 'string' && UUID_PATTERN.test(id)) && new Set(materialIds).size === materialIds.length,
+      'TASK_MATERIALS_INVALID', '请选择不重复的资料库资料，最多 4 份。');
+    if (materialIds.length > 0) {
+      requireStore(this.#baselineAnalysis.launch.live === null, 'REVIEW_MATERIAL_UNAVAILABLE', TASK_MATERIAL_LIVE_UNAVAILABLE);
+      const categories = this.inspectReviewWorkspace(bookId, null).categories;
+      requireStore(categories.some((category) => categoryIds.includes(category.categoryId) && category.materialReferencesAllowed === true),
+        'REVIEW_MATERIAL_CATEGORY_REQUIRED', REVIEW_MATERIAL_CATEGORY_REQUIRED);
+    }
+    const references = this.#prepareTaskMaterials(bookId, materialIds);
+    return this.#reviewPreparation(() => this.#reviewRuns.prepare({ phase: 'start', bookId, categoryIds, scope, launchPolicy, procedure,
+      ...(references.length === 0 ? {} : { materialReferences: { bookId, references } }),
+    }));
   }
 
   advanceReviewRunPreparationWork(workId: string): AnalysisPreparationResult<ReviewWorkspaceProjection> {
