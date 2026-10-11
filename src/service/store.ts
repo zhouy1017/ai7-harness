@@ -9365,7 +9365,7 @@ export class EditorialStore {
       for (const entry of unread) {
         if (!damaged.has(entry.typeId)) continue;
         const names = damaged.get(entry.typeId)!;
-        if (!names.includes(entry.title)) names.push(entry.title);
+        names.push(entry.title);
       }
       for (const book of page.books) {
         if (book.bookId === bookId) continue;

@@ -324,7 +324,7 @@ export class ImportedExemplars {
   /**
    * The Book as the 写作任务 scan reads it, one item at a time (Issue #789, as #778 did for 审稿意见): a type whose versions or
    * decision ledger no longer read — or any type of a Book whose own record does not — is left out of `book.exemplars` and named in
-   * `damaged` by Book, type and latest version, while every other type of the Book still reads. `title` is the Book's listed title.
+   * `damaged` by Book and type, while every other type of the Book still reads. `title` is the Book's listed title.
    */
   bookForWriting(bookId: string, title: string): { book: ExemplarBookProjection; damaged: Array<{ typeId: string; title: string }> } {
     let head: { title: string; authors: string[]; editors: string[]; recordedAt: string } | null = null;
@@ -339,7 +339,8 @@ export class ImportedExemplars {
         exemplars.push(...this.#exemplar(bookId, type));
       } catch (error) {
         if (!(error instanceof ImportedExemplarError)) throw error;
-        damaged.push({ typeId: type.typeId, title: `${title} · ${type.label} · 版本 ${String(latest.version)}` });
+        // The broken link can be an older version or the Book/decision record; do not blame the latest version.
+        damaged.push({ typeId: type.typeId, title: `${title} · ${type.label}` });
       }
     }
     return { book: this.#projection(bookId, head ?? { title, authors: [], editors: [], recordedAt: '' }, exemplars), damaged };
