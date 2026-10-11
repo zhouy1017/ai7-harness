@@ -69,6 +69,26 @@ function dropping(fixture: ResolvedModelFixture, drop: (entry: ModelFixtureEntry
   return { ...fixture, entries: new Map([...fixture.entries].map(([key, entry]) => [key, drop(entry) ? { ...entry, response: DROPPED } : entry])) };
 }
 
+/**
+ * The replay route's own count of the requests it answered 结果待确认. Every request it serves resolves its entry once, by
+ * its `#<attempt>` key first (`resolveFixtureEntry`), so a step sent a second time is counted here whatever sends it —
+ * the report's request count and the stage hold count what the owner kept, not what went out.
+ */
+class ServedEntries extends Map<string, ModelFixtureEntry> {
+  unknownServed = 0;
+
+  override get(key: string): ModelFixtureEntry | undefined {
+    const hash = key.lastIndexOf('#');
+    if (hash !== -1 && (super.get(key) ?? super.get(key.slice(0, hash)))?.response.kind === 'outcome-unknown') this.unknownServed += 1;
+    return super.get(key);
+  }
+}
+
+function counted(fixture: ResolvedModelFixture): { fixture: ResolvedModelFixture; entries: ServedEntries } {
+  const entries = new ServedEntries(fixture.entries);
+  return { fixture: { ...fixture, entries }, entries };
+}
+
 async function book(store: EditorialStore, title: string, recordConnection = true): Promise<string> {
   const imported = await importSample1Book(store, roots.codeRoot, title);
   await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
@@ -89,7 +109,7 @@ async function run(store: EditorialStore, execution: BaselineAnalysisExecutionOw
 describe('结果待确认 in non-unit steps (Issue #757, item 3)', () => {
   it('records an ambiguous cross-unit reduction on the revision and the report, sent once, never re-sent', async () => {
     // From disk: J-10's reduction fixture reads all eight ranges and answers the reduction 结果待确认.
-    const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-reduction-unknown');
+    const { fixture, entries } = counted(await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-reduction-unknown'));
     const store = await open(fixture);
     const sent: Array<'cross-unit-reduction' | 'assurance-sampling'> = [];
     const execution = ownerOf(store, fixture, sent);
@@ -109,6 +129,7 @@ describe('结果待确认 in non-unit steps (Issue #757, item 3)', () => {
       // Its request was sent exactly once: one dispatched turn, and no automatic re-send (ADR 0034; CONT-011/016).
       expect(settled.taskOutcome!.report!.usagePerStage['cross-unit-reduction'].requests).toBe(1);
       expect(sent.filter((stage) => stage === 'cross-unit-reduction')).toHaveLength(1);
+      expect(entries.unknownServed).toBe(1);
       expect(settled.resultSetRevision?.crossUnitReduction?.requestDigest).toMatch(/^[0-9a-f]{64}$/);
       store.markCleanShutdown();
     } finally {
@@ -120,9 +141,9 @@ describe('结果待确认 in non-unit steps (Issue #757, item 3)', () => {
   it('records an ambiguous sample on the revision and the report, sent once, never re-sent', async () => {
     const happy = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-happy');
     // The happy fixture's sampling answers, told apart by the result schema they carry, answer 结果待确认 instead. The
-    // first turn is ambiguous, the sample stops there, and no later turn is sent — one dispatched turn, never a retry.
-    const fixture = dropping(happy, (entry) =>
-      entry.unitOrdinal === 0 && entry.response.kind === 'unit-result' && entry.response.text.includes('assurance-sampling-result'));
+    // first turn is ambiguous and the sample stops there — one dispatched turn, never a retry.
+    const { fixture, entries } = counted(dropping(happy, (entry) =>
+      entry.unitOrdinal === 0 && entry.response.kind === 'unit-result' && entry.response.text.includes('assurance-sampling-result')));
     const store = await open(fixture);
     const sent: Array<'cross-unit-reduction' | 'assurance-sampling'> = [];
     const execution = ownerOf(store, fixture, sent);
@@ -140,6 +161,7 @@ describe('结果待确认 in non-unit steps (Issue #757, item 3)', () => {
       expect(saysOutcomeUnknown(failure!.reason)).toBe(true);
       expect(settled.taskOutcome!.report!.usagePerStage['assurance-sampling'].requests).toBe(1);
       expect(sent.filter((stage) => stage === 'assurance-sampling')).toHaveLength(1);
+      expect(entries.unknownServed).toBe(1);
       store.markCleanShutdown();
     } finally {
       await execution.dispose();
@@ -163,12 +185,12 @@ describe('结果待确认 in non-unit steps (Issue #757, item 3)', () => {
       expect(first.taskOutcome!.report!.usagePerStage['run-report-reflection'].requests).toBe(1);
       const requestDigest = runReportReflectionRequestDigest(RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, first.taskOutcome!.report!.accountingDigest);
       // A second Run over the same fixture answers exactly that reflection request 结果待确认.
-      const fixture: ResolvedModelFixture = {
+      const { fixture, entries } = counted({
         ...happy,
         entries: new Map([...happy.entries, [fixtureEntryKey(0, requestDigest), {
           unitOrdinal: 0, requestDigest, attempt: null, contentDigest: null, response: DROPPED,
         }]]),
-      };
+      });
       const execution = ownerOf(store, fixture, []);
       executions.push(execution);
       const bookId = await book(store, 'L2 sample1 反思步骤结果待确认', false);
@@ -180,8 +202,10 @@ describe('结果待确认 in non-unit steps (Issue #757, item 3)', () => {
       expect(ifRedone).toEqual({ state: 'gap', items: [], reason: UNKNOWN_STEP_REASON });
       expect(ifRedone.state === 'gap' && saysOutcomeUnknown(ifRedone.reason)).toBe(true);
       expect(settled.taskOutcome!.report!.failures.map((entry) => String(entry.stage))).not.toContain('run-report-reflection');
-      // Its one turn was dispatched; nothing re-sent it.
+      // Its one turn was dispatched; nothing re-sent it. The report's count is the step's own constant, so the route's
+      // count is what proves it.
       expect(settled.taskOutcome!.report!.usagePerStage['run-report-reflection'].requests).toBe(1);
+      expect(entries.unknownServed).toBe(1);
       store.markCleanShutdown();
     } finally {
       for (const execution of executions) await execution.dispose();
