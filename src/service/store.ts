@@ -4301,7 +4301,6 @@ export class EditorialStore {
   readonly #evaluationProfiles: EvaluationProfiles;
   readonly #initialEvaluationLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
   readonly #initialPreparationProfiles = new Map<string, EvaluationProfileProjection>();
-  #selectedInitialLedger: BaselineAnalysisStore | null = null;
   /** One ledger per review-category kind and frozen category contract, made when first asked for (Issue #417); bounded (#649). */
   readonly #reviewCategoryLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
   /** The kind definition of each configured category a Review Run snapshotted, by its contract input; bounded (#649). */
@@ -8612,10 +8611,13 @@ export class EditorialStore {
     if (result.workId !== null) this.#initialPreparationProfiles.set(result.workId, profile);
   }
 
-  /** The evaluation kind's append-only ledger, which its execution owner writes through; service-internal. */
+  /**
+   * The built-in profile's 初评 ledger, which the launch is bound through; service-internal. A house profile's ledger takes that
+   * binding when made, and a Run is admitted on its own Task's ledger (`initialEvaluationLedgerForRun`), never on the last one used.
+   */
   get initialEvaluationLedger(): BaselineAnalysisStore {
     this.#assertAvailable();
-    return this.#selectedInitialLedger ?? this.#initialEvaluation;
+    return this.#initialEvaluation;
   }
 
   /** The Book's AI7 初评 Task, latest Result Set Revision and history, as the evaluation kind's ledger holds them. */
@@ -8672,7 +8674,6 @@ export class EditorialStore {
   ): { dispatchRunRecordId: string | null } {
     this.#requireLedgerKindScope('initial-evaluation', bookId, taskIntentId);
     const ledger = this.#ledgerTaskOf('initial-evaluation', bookId, taskIntentId);
-    this.#selectedInitialLedger = ledger;
     const authorized = this.#analysisCall(() => ledger.authorize(bookId, taskIntentId, planEnvelopeDigest, start));
     return { dispatchRunRecordId: authorized.dispatchRunRecordId };
   }

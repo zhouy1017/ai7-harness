@@ -132,7 +132,11 @@ describe('知识库 › 评估方案, prospective snapshots over the real store'
       expect(store.inspectInitialEvaluation(book.bookId).planEnvelope!.promptContractDigest).toBe(prepared.planEnvelope!.promptContractDigest);
       expect(store.inspectTaskPlan({ kind: 'initial-evaluation', bookId: book.bookId, ref: prepared.taskIntent!.taskIntentId })).toEqual(plan);
       store.authorizeInitialEvaluation(book.bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
-      expect(store.initialEvaluationLedgerForRun(store.inspectInitialEvaluation(book.bookId).run!.runRecordId).definition.promptContractDigest).toBe(prepared.planEnvelope!.promptContractDigest);
+      const runRecordId = store.inspectInitialEvaluation(book.bookId).run!.runRecordId;
+      expect(store.initialEvaluationLedgerForRun(runRecordId).definition.promptContractDigest).toBe(prepared.planEnvelope!.promptContractDigest);
+      // Reconnect Preflight hands a waiting 初评 to the execution owner on its Task's own ledger, never the current profile's.
+      const waiting = { kind: 'initial-evaluation' as const, bookId: book.bookId, ref: prepared.taskIntent!.taskIntentId, runRecordId, at: new Date().toISOString() };
+      expect(store.waitingRunLedger(waiting).definition.promptContractDigest).toBe(prepared.planEnvelope!.promptContractDigest);
       store.close();
       closed = true;
       const target = await EditorialStore.open(other, roots.codeRoot);
