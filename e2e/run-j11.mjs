@@ -3182,8 +3182,9 @@ async function main() {
     await click(renderer, '返回', 'profile-editing-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'profile-editing-library');
     await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(calibrationBookId)}]`, 'profile-editing-book');
-    await waitFor(renderer, `document.querySelector('.book-evaluation-summary [data-evaluation-action="open"]')`, 'profile-editing-overview');
-    await clickSelector(renderer, '.book-evaluation-summary [data-evaluation-action="open"]', 'profile-editing-old-record');
+    // A Book opens on its manuscript, as calibration-off reads it: 评估 is its work destination there.
+    await waitFor(renderer, `document.querySelector('.editor-shell [data-work-destination="evaluation"]')`, 'profile-editing-manuscript', 120_000);
+    await clickSelector(renderer, '.editor-shell [data-work-destination="evaluation"]', 'profile-editing-old-record');
     await waitFor(renderer, `document.querySelector('[data-screen="book-evaluation"] .evaluation-item')`, 'profile-editing-old-ready');
     const keptProfiles = await renderer.evaluate(`window.ai7.inspectEvaluation({recordId:null}).then((page)=>JSON.stringify([page.record.profile,page.initial.latest.profile]))`);
     requireJourney(keptProfiles === profileSnapshots, 'profile-editing-old-snapshots');
