@@ -690,6 +690,41 @@ describe('审稿意见 over the real store on exact sample1', () => {
     });
   }, 300_000);
 
+  it('reads a 审稿意见 Task row recorded before Issue #792 as skipping nothing, under its own digest', async () => {
+    let bookId = '';
+    let ref = '';
+    await withBook(async (book) => {
+      bookId = book.bookId;
+      await runInitialEvaluationToEnd(book.store, book.owner, book.bookId, launchPolicy);
+      finalizeAsJ11(book.store, book.bookId);
+      let progress = book.store.createReadersReportPreparationWork(book.bookId, 'author', launchPolicy);
+      while (!progress.done) progress = book.store.advanceReadersReportPreparationWork(progress.workId!);
+      ref = progress.projection!.taskIntent!.taskIntentId;
+    });
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      // The row as a store before Issue #792 wrote it: no skippedExemplars key, its digest over those very bytes.
+      const row = database.prepare('SELECT task_intent_id, canonical_json FROM readers_report_tasks').get() as { task_intent_id: string; canonical_json: string };
+      const json = row.canonical_json.replace('"skippedExemplars":[],', '');
+      expect(json).not.toBe(row.canonical_json);
+      const { createHash } = await import('node:crypto');
+      database.exec('DROP TRIGGER readers_report_tasks_no_update');
+      database.prepare('UPDATE readers_report_tasks SET canonical_json = ?, sha256 = ? WHERE task_intent_id = ?')
+        .run(json, createHash('sha256').update(json).digest('hex'), row.task_intent_id);
+      database.exec(READERS_REPORT_TRIGGER_SQL.readers_report_tasks_no_update!);
+    } finally {
+      database.close();
+    }
+    const reopened = await openStore();
+    try {
+      expect(reopened.inspectReadersReport(bookId)?.taskIntent?.taskIntentId).toBe(ref);
+      expect(reopened.inspectTaskPlan({ bookId, kind: 'readers-report', ref }).scope.reference[1]).toBe('本社暂无审稿意见范例，本次不参考范例');
+      reopened.markCleanShutdown();
+    } finally {
+      reopened.close();
+    }
+  }, 300_000);
+
   it('refuses a 审稿意见 Task record rewritten whole', async () => {
     let bookId = '';
     await withBook(async (book) => {
