@@ -3172,11 +3172,18 @@ function registerRendererHandlers(
   );
   // 知识库 › 评估方案 (Issue #429, S81a) names no Book; ②C 评估 is the route's Book's — the renderer never names it, the
   // service is asked within the route's, reads are held to its read epoch, and writes are serialized and held to its generation.
-  ipcMain.handle(IPC_CHANNELS.inspectEvaluationProfiles, (event) =>
+  ipcMain.handle(IPC_CHANNELS.inspectEvaluationProfiles, (event, input: { before?: number | null } = {}) =>
     envelope(async () => {
       requireSender(event);
       requireAuthority();
-      return service.call('inspectEvaluationProfiles', {});
+      return service.call('inspectEvaluationProfiles', input);
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.saveEvaluationProfile, (event, input: Parameters<RendererApi['saveEvaluationProfile']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return service.call('saveEvaluationProfile', input);
     }),
   );
   ipcMain.handle(IPC_CHANNELS.inspectEvaluation, (event, input: Parameters<RendererApi['inspectEvaluation']>[0]) =>

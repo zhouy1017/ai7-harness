@@ -317,7 +317,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['addLibraryMaterial']['output']>(IPC_CHANNELS.addLibraryMaterial, input),
   decideLibraryMaterial: (input: ServiceOperationMap['decideLibraryMaterial']['input']) =>
     invoke<ServiceOperationMap['decideLibraryMaterial']['output']>(IPC_CHANNELS.decideLibraryMaterial, input),
-  inspectEvaluationProfiles: () => invoke<ServiceOperationMap['inspectEvaluationProfiles']['output']>(IPC_CHANNELS.inspectEvaluationProfiles),
+  inspectEvaluationProfiles: (input?: { before: number | null }) => invoke<ServiceOperationMap['inspectEvaluationProfiles']['output']>(IPC_CHANNELS.inspectEvaluationProfiles, input ?? {}),
+  saveEvaluationProfile: (input: ServiceOperationMap['saveEvaluationProfile']['input']) => invoke<ServiceOperationMap['saveEvaluationProfile']['output']>(IPC_CHANNELS.saveEvaluationProfile, input),
   inspectEvaluation: (input: { recordId: string | null; recordsBefore?: number | null }) =>
     invoke<ServiceOperationMap['inspectEvaluation']['output']>(IPC_CHANNELS.inspectEvaluation, input),
   startEvaluation: (input?: { fromInitial: boolean; skipDamaged?: boolean }) =>

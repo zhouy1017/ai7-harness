@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 126 as const;
+export const SERVICE_PROTOCOL_VERSION = 127 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -111,6 +111,7 @@ export const IPC_CHANNELS = {
   decideLibraryMaterial: 'ai7:j15:decide-library-material',
   inspectLibraryMaterial: 'ai7:j15:inspect-library-material',
   inspectEvaluationProfiles: 'ai7:j11:inspect-evaluation-profiles',
+  saveEvaluationProfile: 'ai7:kb:save-evaluation-profile',
   inspectEvaluation: 'ai7:j11:inspect-evaluation',
   startEvaluation: 'ai7:j11:start-evaluation',
   saveEvaluation: 'ai7:j11:save-evaluation',
@@ -6828,6 +6829,8 @@ export interface EvaluationProfileProjection {
 
 /** 知识库 › 评估方案: each profile, and how many Evaluation Records of how many Books used it. */
 export interface EvaluationProfilesProjection {
+  readonly activeSha256?: string;
+  readonly nextBefore?: number | null;
   readonly profiles: ReadonlyArray<EvaluationProfileProjection & { readonly records: number; readonly books: number }>;
 }
 
@@ -6956,7 +6959,7 @@ export interface EvaluationInitialProjection {
   /** 准备 AI7 初评, or why it cannot be prepared now. */
   readonly prepare: { readonly allowed: true; readonly mode: InitialEvaluationTaskMode } | { readonly allowed: false; readonly reason: string };
   /** The latest 初评 that settled, and whether it read the manuscript as it stands now. */
-  readonly latest: null | (EvaluationInitialDraftProjection & { readonly current: boolean });
+  readonly latest: null | (EvaluationInitialDraftProjection & { readonly current: boolean; readonly profile?: EvaluationProfileProjection });
 }
 
 export interface EvaluationRecordSummaryProjection {
@@ -6977,7 +6980,9 @@ export interface EvaluationRecordSummaryProjection {
 /** One version compared item by item with the version it re-evaluated (EVAL-012). */
 export interface EvaluationComparisonProjection {
   readonly previousOrdinal: number;
-  readonly items: ReadonlyArray<{ readonly itemId: string; readonly previous: number | 'not-rated' | null; readonly current: number | 'not-rated' | null }>;
+  readonly items: ReadonlyArray<{ readonly itemId: string;
+    readonly label?: string;
+    readonly change?: 'added' | 'removed' | null; readonly previous: number | 'not-rated' | null; readonly current: number | 'not-rated' | null }>;
   readonly risks: ReadonlyArray<{ readonly riskId: string; readonly previous: 'low' | 'medium' | 'high' | null; readonly current: 'low' | 'medium' | 'high' | null }>;
   readonly total: { readonly previous: EvaluationTotalProjection; readonly current: EvaluationTotalProjection };
   readonly conclusion: { readonly previous: EvaluationConclusion | null; readonly current: EvaluationConclusion | null };
@@ -11273,8 +11278,9 @@ export interface ServiceOperationMap {
     output: LibraryMaterialProjection;
   };
   /** 知识库 › 评估方案 (Issue #429, S81a): the house Evaluation Profile and its use. */
+  saveEvaluationProfile: { input: SaveEvaluationProfileInput; output: EvaluationProfilesProjection };
   inspectEvaluationProfiles: {
-    input: Record<string, never>;
+    input: { before?: number | null };
     output: EvaluationProfilesProjection;
   };
   /** ②C 评估 of the route's Book (Issue #429, S81a): one version by its identity, or the latest when `null`. */
@@ -11894,7 +11900,8 @@ export interface RendererApi {
   addLibraryMaterial(input: { previewId: string; title: string; kind: LibraryMaterialKind }): Promise<LibraryMaterialProjection>;
   decideLibraryMaterial(input: { materialId: string; expectedDecisions: number; decision: LibraryMaterialDecisionInput }): Promise<LibraryMaterialProjection>;
   /** 知识库 › 评估方案 (Issue #429, S81a): names no Book. */
-  inspectEvaluationProfiles(): Promise<EvaluationProfilesProjection>;
+  inspectEvaluationProfiles(input?: { before: number | null }): Promise<EvaluationProfilesProjection>;
+  saveEvaluationProfile(input: SaveEvaluationProfileInput): Promise<EvaluationProfilesProjection>;
   /** ②C 评估 of the Book the window is showing (Issue #429, S81a); the renderer never names the Book. */
   inspectEvaluation(input: { recordId: string | null; recordsBefore?: number | null }): Promise<EvaluationWorkspaceProjection>;
   /** Begins the next version — from AI7's latest 初评 when `fromInitial` (Issue #429, S81b1). */

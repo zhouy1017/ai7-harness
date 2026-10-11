@@ -75,6 +75,8 @@ import type {
   LibraryMaterialProjection,
   LibraryMaterialsProjection,
   EvaluationProfilesProjection,
+  EvaluationProfileProjection,
+  SaveEvaluationProfileInput,
   EvaluationWorkspaceProjection,
   AnalysisFeedbackProjection,
   RecordAnalysisFeedbackInput,
@@ -251,6 +253,7 @@ import type {
   TaskAuthorizationProjection,
   BaselineAnalysisGoal,
   BaselineAnalysisProjection,
+  AnalysisProjection,
   BaselineAnalysisResultSetRevisionProjection,
   BaselineAnalysisRunState,
   BaselineAnalysisQuickStartProjection,
@@ -4296,6 +4299,9 @@ export class EditorialStore {
   /** AI7 初评 (Issue #429, S81b1): the evaluation kind's own ledger over the same Book database. */
   readonly #initialEvaluation: BaselineAnalysisStore;
   readonly #evaluationProfiles: EvaluationProfiles;
+  readonly #initialEvaluationLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
+  readonly #initialPreparationProfiles = new Map<string, EvaluationProfileProjection>();
+  #selectedInitialLedger: BaselineAnalysisStore | null = null;
   /** One ledger per review-category kind and frozen category contract, made when first asked for (Issue #417); bounded (#649). */
   readonly #reviewCategoryLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
   /** The kind definition of each configured category a Review Run snapshotted, by its contract input; bounded (#649). */
@@ -4506,7 +4512,7 @@ export class EditorialStore {
       // The house's calibration switch (EVAL-011a): a version begun from AI7's 初评 applies the offset only while it is on. A
       // preferences chain that cannot be read refuses that start with the ledger's own words (`#evaluationCall`).
       calibrationEnabled: () => this.#evaluationCalibration.preferences().calibrationEnabled,
-    }, control.calibrationMinAdjustments ?? CALIBRATION_MIN_ADJUSTMENTS);
+    }, control.calibrationMinAdjustments ?? CALIBRATION_MIN_ADJUSTMENTS, () => this.#evaluationProfiles.current());
     this.#analysisFeedback = new AnalysisFeedbackLedger(authority);
     this.#outcomeResolutions = new OutcomeResolutionLedger(authority);
     this.#capturedProcedures = new CapturedProcedures(authority);
@@ -5404,10 +5410,11 @@ export class EditorialStore {
       const checkpoint = projection.checkpoint;
       requireStore(projection.taskIntent !== null && checkpoint !== null, 'TASK_PLAN_UNAVAILABLE', 'AI7 初评还没有准备计划。');
       current(projection.taskIntent.taskIntentId);
-      const blocks = this.#analysisCall(() => this.#initialEvaluation.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
-      const profile = this.#evaluations.profile();
+      const ledger = this.#initialLedgerForBook(input.bookId);
+      const blocks = this.#analysisCall(() => ledger.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
+      const profile = this.#initialProfileForTask(projection.taskIntent.taskIntentId);
       const plan = this.#taskPlanCall(() => initialEvaluationPlan({ projection, bookTitle, blocks, profile }));
-      return { plan: withPlanMovedReason(withResend(plan, this.#analysisCall(() => this.#initialEvaluation.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(withResend(plan, this.#analysisCall(() => ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     const reviewRunId = input.ref;
     requireStore(reviewRunId !== null, 'TASK_PLAN_INVALID', '审阅的计划要指明是哪一次审阅。');
@@ -5877,7 +5884,7 @@ export class EditorialStore {
     switch (kind) {
       case 'initial-evaluation':
         // The ledger itself refuses a Task that is not the Book's current one, as its authorization always did.
-        return this.#initialEvaluation;
+        return this.#initialLedgerForBook(bookId);
       case 'readers-report': {
         const latest = this.#latestReadersReport(bookId);
         requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT', TASK_PLAN_NOT_CURRENT_REASON);
@@ -5935,7 +5942,7 @@ export class EditorialStore {
   #currentLedgerOf(kind: LedgerTaskKind, bookId: string, taskIntentId: string): BaselineAnalysisStore {
     this.#assertAvailable();
     // The ledger itself refuses a 初评 that is not the Book's current Task, as its cancellation always did.
-    if (kind === 'initial-evaluation') return this.#initialEvaluation;
+    if (kind === 'initial-evaluation') return this.#initialLedgerForBook(bookId);
     const latest = kind === 'readers-report' ? this.#latestReadersReport(bookId)
       : kind === 'evaluation-rewrite' ? this.#latestEvaluationRewrite(bookId) : this.#latestWriting(bookId);
     requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT', TASK_PLAN_NOT_CURRENT_REASON);
@@ -6544,7 +6551,7 @@ export class EditorialStore {
     try {
       return defaultExecutionRuleBindingOf(this.#baselineAnalysis.currentRuleFacts(bookId, 'first-baseline'));
     } catch (error) {
-      if (error instanceof AnalysisError) return null;
+      if (error instanceof AnalysisError || error instanceof StoreError) return null;
       throw error;
     }
   }
@@ -6573,7 +6580,7 @@ export class EditorialStore {
         try {
           return defaultExecutionRuleDrift(record!.version.binding, this.#baselineAnalysis.currentRuleFacts(bookId, 'first-baseline'));
         } catch (error) {
-          if (error instanceof AnalysisError) return null;
+          if (error instanceof AnalysisError || error instanceof StoreError) return null;
           throw error;
         }
       }),
@@ -6657,6 +6664,8 @@ export class EditorialStore {
     this.#baselineAnalysis.prepare({ phase: 'cancel-all' });
     this.#factualReview.prepare({ phase: 'cancel-all' });
     this.#initialEvaluation.prepare({ phase: 'cancel-all' });
+    for (const ledger of this.#initialEvaluationLedgers.values()) ledger.prepare({ phase: 'cancel-all' });
+    this.#initialPreparationProfiles.clear();
     for (const ledger of this.#reviewCategoryLedgers.values()) ledger.prepare({ phase: 'cancel-all' });
     for (const ledger of this.#readersReportLedgers.values()) ledger.prepare({ phase: 'cancel-all' });
     for (const ledger of this.#evaluationRewriteLedgers.values()) ledger.prepare({ phase: 'cancel-all' });
@@ -8511,8 +8520,21 @@ export class EditorialStore {
   }
 
   /** 知识库 › 评估方案 (Issue #429, S81a; KB-001, EVAL-003): the profile a new 评估 version snapshots, and its use. */
-  inspectEvaluationProfiles(): EvaluationProfilesProjection {
-    return this.#evaluationCall(() => this.#evaluations.profiles());
+  inspectEvaluationProfiles(before: number | null = null): EvaluationProfilesProjection {
+    return this.#evaluationCall(() => {
+      requireStore(before === null || (Number.isSafeInteger(before) && before > 0), 'EVALUATION_PROFILE_PAGE_INVALID', '评估方案版本页码无效。');
+      const page = this.#evaluationProfiles.page(before);
+      return { activeSha256: this.#evaluationProfiles.current().sha256, nextBefore: page.nextBefore,
+        profiles: page.profiles.map((profile) => {
+          const use = this.#authority.prepare('SELECT count(*) AS records, count(DISTINCT book_id) AS books FROM evaluation_records WHERE profile_sha256 = ?').get(profile.sha256)!;
+          return { ...profile, records: Number(use.records), books: Number(use.books) };
+        }) };
+    });
+  }
+
+  saveEvaluationProfile(input: SaveEvaluationProfileInput): EvaluationProfilesProjection {
+    this.#evaluationCall(() => this.#transaction(this.#authority, () => this.#evaluationProfiles.save(input)));
+    return this.inspectEvaluationProfiles();
   }
 
   /** ②C 评估 of one Book (Issue #429, S81a; EVAL-001, EVAL-012): its versions, one on show, and whether one can begin. */
@@ -8535,15 +8557,60 @@ export class EditorialStore {
 
   // ---- AI7 初评 (Issue #429, plan slice S81b1; V2-UX-EVAL-001, EVAL-005 to EVAL-007) ----------------------------------------
 
+  #initialLedger(profile: EvaluationProfileProjection): BaselineAnalysisStore {
+    if (profile.sha256 === evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE)) return this.#initialEvaluation;
+    const definition = initialEvaluationKindDefinition(profile);
+    return this.#initialEvaluationLedgers.obtain(definition.promptContractDigest, () => {
+      const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
+      ledger.bindLaunch(this.#initialEvaluation.launch);
+      return ledger;
+    });
+  }
+
+  #initialProfileForTask(taskIntentId: string): EvaluationProfileProjection {
+    const row = this.#authority.prepare("SELECT component, canonical_json, sha256 FROM analysis_plan_records WHERE task_intent_id = ? AND component = 'plan-envelope' ORDER BY plan_version DESC LIMIT 1").get(taskIntentId) as SqlRow | undefined;
+    if (row === undefined) {
+      const pin = this.#authority.prepare('SELECT prompt_contract_sha256 FROM initial_evaluation_tasks WHERE task_intent_id = ? ORDER BY rowid DESC LIMIT 1').get(taskIntentId);
+      return pin === undefined ? this.#evaluationProfiles.current() : this.#evaluationProfiles.taskProfile(taskIntentId, asString(pin.prompt_contract_sha256))!;
+    }
+    requireStore(sha256(asString(row.canonical_json)) === row.sha256, 'EVALUATION_PROFILE_DAMAGED', '初评任务计划已损坏。');
+    const envelope = parseStoredJson(asString(row.canonical_json), '初评任务计划已损坏。');
+    requireStore(isRecord(envelope) && typeof envelope.promptContractDigest === 'string', 'EVALUATION_PROFILE_DAMAGED', '初评任务方案快照缺失。');
+    const snapshot = this.#evaluationProfiles.taskProfile(taskIntentId, envelope.promptContractDigest);
+    if (snapshot !== null) return snapshot;
+    requireStore(envelope.promptContractDigest === this.#initialEvaluation.definition.promptContractDigest, 'EVALUATION_PROFILE_DAMAGED', '初评任务方案快照缺失。');
+    return { ...BUILTIN_EVALUATION_PROFILE, sha256: evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE) };
+  }
+
+  #initialLedgerForBook(bookId: string): BaselineAnalysisStore {
+    const row = this.#authority.prepare("SELECT task_intent_id FROM analysis_task_intents WHERE book_id = ? AND kind = 'evaluation' ORDER BY created_at DESC, rowid DESC LIMIT 1").get(bookId);
+    return row === undefined ? this.#initialLedger(this.#evaluationProfiles.current()) : this.#initialLedger(this.#initialProfileForTask(asString(row.task_intent_id)));
+  }
+
+  initialEvaluationLedgerForRun(runRecordId: string): BaselineAnalysisStore {
+    this.#assertAvailable();
+    const row = this.#authority.prepare("SELECT r.task_intent_id FROM analysis_run_records r JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id WHERE r.run_record_id = ? AND t.kind = 'evaluation'").get(runRecordId);
+    requireStore(row !== undefined, 'TASK_PLAN_NOT_CURRENT', TASK_PLAN_NOT_CURRENT_REASON);
+    return this.#initialLedger(this.#initialProfileForTask(asString(row.task_intent_id)));
+  }
+
+  #snapshotInitialPreparation(result: AnalysisPreparationResult<AnalysisProjection>, profile: EvaluationProfileProjection): void {
+    const projection = result.projection;
+    if (result.done && projection?.taskIntent !== null && projection?.taskIntent !== undefined && projection.planEnvelope !== null) {
+      this.#evaluationCall(() => this.#transaction(this.#authority, () => this.#evaluationProfiles.snapshotTask(projection.taskIntent!.taskIntentId, projection.planEnvelope!.promptContractDigest, profile)));
+    }
+    if (result.workId !== null) this.#initialPreparationProfiles.set(result.workId, profile);
+  }
+
   /** The evaluation kind's append-only ledger, which its execution owner writes through; service-internal. */
   get initialEvaluationLedger(): BaselineAnalysisStore {
     this.#assertAvailable();
-    return this.#initialEvaluation;
+    return this.#selectedInitialLedger ?? this.#initialEvaluation;
   }
 
   /** The Book's AI7 初评 Task, latest Result Set Revision and history, as the evaluation kind's ledger holds them. */
   inspectInitialEvaluation(bookId: string, progress?: ProgressReader, revisionId: string | null = null): InitialEvaluationProjection {
-    return this.#analysisCall(() => this.#initialEvaluation.inspect(bookId, progress, revisionId)) as InitialEvaluationProjection;
+    return this.#analysisCall(() => this.#initialLedgerForBook(bookId).inspect(bookId, progress, revisionId)) as InitialEvaluationProjection;
   }
 
   /**
@@ -8554,7 +8621,9 @@ export class EditorialStore {
     this.#requireInitialEvaluationScope();
     const current = this.inspectInitialEvaluation(bookId);
     const mode = current.resultSetRevision === null ? 'evaluation-first' : 'evaluation-again';
-    const result = this.#analysisCall(() => this.#initialEvaluation.prepare({
+    const profile = this.#evaluationProfiles.current();
+    const ledger = this.#initialLedger(profile);
+    const result = this.#analysisCall(() => ledger.prepare({
       phase: 'start',
       bookId,
       goal: INITIAL_EVALUATION_MODE_GOALS[mode],
@@ -8562,16 +8631,25 @@ export class EditorialStore {
       reconfirm: false,
       launchPolicy,
     }));
+    const intent = this.#authority.prepare("SELECT task_intent_id FROM analysis_task_intents WHERE book_id = ? AND kind = 'evaluation' ORDER BY created_at DESC, rowid DESC LIMIT 1").get(bookId);
+    if (intent !== undefined) this.#evaluationCall(() => this.#transaction(this.#authority, () => this.#evaluationProfiles.snapshotTask(asString(intent.task_intent_id), ledger.definition.promptContractDigest, profile)));
+    this.#snapshotInitialPreparation(result, profile);
     return { ...result, projection: result.projection as InitialEvaluationProjection | null };
   }
 
   advanceInitialEvaluationPreparationWork(workId: string): AnalysisPreparationResult<InitialEvaluationProjection> {
-    const result = this.#analysisCall(() => this.#initialEvaluation.prepare({ phase: 'advance', workId }));
+    const profile = this.#initialPreparationProfiles.get(workId);
+    requireStore(profile !== undefined, 'ANALYSIS_PREPARATION_NOT_FOUND', '初评准备任务不存在。');
+    const result = this.#analysisCall(() => this.#initialLedger(profile).prepare({ phase: 'advance', workId }));
+    this.#snapshotInitialPreparation(result, profile);
+    if (result.done) this.#initialPreparationProfiles.delete(workId);
     return { ...result, projection: result.projection as InitialEvaluationProjection | null };
   }
 
   cancelInitialEvaluationPreparationWork(workId: string): boolean {
-    this.#analysisCall(() => this.#initialEvaluation.prepare({ phase: 'cancel', workId }));
+    const profile = this.#initialPreparationProfiles.get(workId);
+    if (profile !== undefined) this.#analysisCall(() => this.#initialLedger(profile).prepare({ phase: 'cancel', workId }));
+    this.#initialPreparationProfiles.delete(workId);
     return true;
   }
 
@@ -8584,6 +8662,7 @@ export class EditorialStore {
   ): { dispatchRunRecordId: string | null } {
     this.#requireLedgerKindScope('initial-evaluation', bookId, taskIntentId);
     const ledger = this.#ledgerTaskOf('initial-evaluation', bookId, taskIntentId);
+    this.#selectedInitialLedger = ledger;
     const authorized = this.#analysisCall(() => ledger.authorize(bookId, taskIntentId, planEnvelopeDigest, start));
     return { dispatchRunRecordId: authorized.dispatchRunRecordId };
   }
@@ -8601,9 +8680,9 @@ export class EditorialStore {
   #initialEvaluationFacts(bookId: string): InitialEvaluationFacts | null {
     let projection: InitialEvaluationProjection;
     try {
-      projection = this.#initialEvaluation.inspect(bookId) as InitialEvaluationProjection;
+      projection = this.inspectInitialEvaluation(bookId);
     } catch (error) {
-      if (error instanceof AnalysisError) return null;
+      if (error instanceof AnalysisError || error instanceof StoreError) return null;
       throw error;
     }
     const revision = projection.resultSetRevision;
@@ -8635,6 +8714,7 @@ export class EditorialStore {
       manuscriptRevisionId: revision.manuscriptPin.revisionId,
       current: revision.freshness.state === 'current',
       profileSha256: evaluation.profile.sha256,
+      profile: this.#initialProfileForTask(asString(this.#authority.prepare('SELECT task_intent_id FROM analysis_result_set_revisions WHERE revision_id = ?').get(revision.revisionId)!.task_intent_id)),
     };
   }
 
@@ -8645,9 +8725,9 @@ export class EditorialStore {
   #initialEvaluationTask(bookId: string): Pick<EvaluationInitialProjection, 'task' | 'prepare'> {
     let projection: InitialEvaluationProjection;
     try {
-      projection = this.#initialEvaluation.inspect(bookId) as InitialEvaluationProjection;
+      projection = this.inspectInitialEvaluation(bookId);
     } catch (error) {
-      if (error instanceof AnalysisError) return { task: null, prepare: { allowed: false, reason: `AI7 初评暂不可用：${error.message}` } };
+      if (error instanceof AnalysisError || error instanceof StoreError) return { task: null, prepare: { allowed: false, reason: `AI7 初评暂不可用：${error.message}` } };
       throw error;
     }
     const runState = projection.run?.state ?? null;

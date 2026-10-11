@@ -57,6 +57,7 @@ const LINE_BREAKS = /\r\n?|\n/gu;
 /** One scored item of the finalized record, in its words. */
 export interface ReadersReportRecordItem {
   readonly label: string;
+  readonly description?: string;
   readonly fullMarks: number;
   readonly score: number | null;
   /** `不评`, with its reason. */
@@ -203,8 +204,10 @@ function frozenInput(input: ReadersReportContractInput): ReadersReportContractIn
         SUFFICIENCIES.includes(item.ai7.sufficiency) && Array.isArray(item.ai7.evidence) &&
         item.ai7.evidence.every((entry) => isRecord(entry) && Number.isSafeInteger(entry.unitOrdinal) && text(entry.note, 400)))),
     'READERS_REPORT_INPUT_INVALID', '审稿意见所依据的评分项无效。');
+    requireAnalysis(item.description === undefined || item.description === '' || text(item.description, 500), 'EVALUATION_PROFILE_INVALID', '评分项说明无效。');
     return {
       label: item.label,
+      ...(item.description === undefined ? {} : { description: item.description }),
       fullMarks: item.fullMarks,
       score: item.score,
       notRated: item.notRated,
@@ -254,7 +257,7 @@ function recordLines(record: ReadersReportRecordInput): string[] {
   ];
   for (const item of record.items) {
     const own = item.notRated !== null ? `不评（${oneLine(item.notRated)}）` : item.score === null ? '未打分' : `得分 ${score(item.score)}`;
-    lines.push(`- 评分项「${item.label}」（满分 ${item.fullMarks}）：${own}${item.comment === null ? '' : `；评语：${oneLine(item.comment)}`}`);
+    lines.push(`- 评分项「${item.label}」（满分 ${item.fullMarks}）${item.description ? `；评分项说明：${item.description}` : ''}：${own}${item.comment === null ? '' : `；评语：${oneLine(item.comment)}`}`);
     if (item.ai7 !== null) {
       lines.push(`  AI7 初评：${item.ai7.score === null ? '未给分' : `${score(item.ai7.score)} 分`}，依据充分度${SUFFICIENCY_LABELS[item.ai7.sufficiency]}`);
       for (const evidence of item.ai7.evidence) lines.push(`  · 单元 ${evidence.unitOrdinal}：${oneLine(evidence.note)}`);
