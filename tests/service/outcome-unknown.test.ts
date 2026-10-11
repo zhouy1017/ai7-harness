@@ -472,6 +472,48 @@ describe('结果待确认 after 取消任务', () => {
     }
   }, 300_000);
 
+  it('never counts a Task\'s own Run against its plan: a 重新分析全书 that first leaves unit 4 结果待确认 names no re-send (#765 review)', async () => {
+    // The happy fixture for the first Task; the second Task's unit 4 answers 结果待确认 on its first send.
+    const unknown4 = [...fixture.entries.values()].find((entry) => entry.unitOrdinal === 4 && entry.response.kind === 'outcome-unknown')!;
+    const happy = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-happy');
+    fixture = happy;
+    const store = await openWithRoute();
+    const first = owner(store);
+    fixture = { ...happy, entries: new Map([...happy.entries, [fixtureEntryKey(4, unknown4.requestDigest, 1), unknown4]]) };
+    const second = owner(store);
+    try {
+      const imported = await importSample1Book(store, roots.codeRoot, 'L2 sample1 自身结果待确认');
+      const bookId = imported.bookId;
+      await pinEditorialWorkspaceProfileRevision2(store, bookId);
+      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+      const initial = prepare(store, bookId);
+      first.admitAndDispatch(store.authorizeBaselineAnalysis(bookId, initial.taskIntent!.taskIntentId, initial.planEnvelope!.digest).dispatchRunRecordId!);
+      await first.whenIdle();
+      expect(store.inspectBaselineAnalysis(bookId, () => null).resultSetRevision!.gaps).toEqual([]);
+      const book = prepareUpdate(store, bookId, 'reanalyze-book');
+      const taskIntentId = book.taskIntent!.taskIntentId;
+      expect(resendOf(store, bookId, taskIntentId)).toBeNull();
+      const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, book.planEnvelope!.digest).dispatchRunRecordId!;
+      second.admitAndDispatch(runRecordId);
+      await second.whenIdle();
+      store.requestBaselineAnalysisCancel(bookId, taskIntentId);
+      second.cancelRun(runRecordId, store.baselineAnalysisLedger);
+      await second.whenIdle();
+      const cancelled = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(cancelled.resultSetRevision!.gaps.map((gap) => [gap.unitOrdinal, gap.code])).toEqual([[4, 'outcome-unknown']]);
+      // Its own send is no earlier request: the cancelled Task's plan names none, and the Task the editor prepares next does.
+      expect(store.baselineAnalysisLedger.resendUnitsOf(cancelled)).toEqual([]);
+      expect(resendOf(store, bookId, taskIntentId)).toBeNull();
+      const next = prepareUpdate(store, bookId, 'reanalyze-book');
+      expect(resendOf(store, bookId, next.taskIntent!.taskIntentId)).toEqual({ units: [4], statement: resendDisclosure([4]) });
+      store.markCleanShutdown();
+    } finally {
+      await first.dispose();
+      await second.dispose();
+      store.close();
+    }
+  }, 300_000);
+
   it('never names an ordinary gap: unit 2 failed for good beside unit 4, and only unit 4 is sent again knowingly', async () => {
     // The one-unit-failure fixture (unit 2 fails for good) with unit 4 answering 结果待确认.
     const failing = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-one-unit-failure');
