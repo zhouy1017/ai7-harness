@@ -44,6 +44,15 @@ describe('immutable house evaluation profile versions (KB-002, EVAL-014)', () =>
     expect(profiles.page().profiles).toHaveLength(2);
   });
 
+  it('refuses changes outside editable fields and bounded descriptions or readiness', () => {
+    expect(() => profiles.save({ ...input(), risks: [] } as SaveEvaluationProfileInput)).toThrow('修改无效');
+    expect(() => profiles.save({ ...input(), items: input().items.map((item) => ({ ...item, fullMarks: 99 })) })).toThrow('标识无效');
+    expect(() => profiles.save({ ...input(), items: input().items.map((item) => ({ ...item, description: '字'.repeat(501) })) })).toThrow('500');
+    expect(() => profiles.save({ ...input(), readiness: ['重复', '重复'] })).toThrow('不能重复');
+    expect(() => profiles.save({ ...input(), readiness: Array.from({ length: 21 }, (_, index) => `第${index}项`) })).toThrow('20');
+    expect(profiles.page().profiles).toEqual([builtinEvaluationProfile()]);
+  });
+
   it('keeps Task snapshots independently readable after house edits and bounds history pages', () => {
     const task = randomUUID();
     db.prepare('INSERT INTO analysis_task_intents VALUES (?)').run(task);

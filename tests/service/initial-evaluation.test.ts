@@ -116,6 +116,24 @@ function adjust(content: EvaluationContent, index: number, score: number, adjust
 }
 
 describe('AI7 初评 over the real store on exact sample1', () => {
+  it('keeps settled prediction and item scores under their own profile after house edits and refuses stale 初评 starts', async () => {
+    await withBook(async (book) => {
+      await runInitialEvaluation(book);
+      const before = book.store.inspectEvaluation(book.bookId, null).initial.latest!;
+      const profile = book.store.inspectEvaluationProfiles().profiles[0]!;
+      book.store.saveEvaluationProfile({ expectedSha256: profile.sha256, items: profile.items.slice(0, 4).map((item) => ({ itemId: item.itemId, label: `新${item.label}`, description: '本社新说明。' })), readiness: ['来源已复核。'] });
+      const after = book.store.inspectEvaluation(book.bookId, null);
+      expect(after.initial.latest).toEqual(before);
+      expect(after.start).toMatchObject({ allowed: true, fromInitial: null });
+      expect(await refusal(() => book.store.startEvaluation(book.bookId, true))).toContain('请重新初评');
+      expect(book.store.startEvaluation(book.bookId).record!.profile.items.map((item) => item.fullMarks)).toEqual([25, 25, 25, 25]);
+      let preparation = book.store.createInitialEvaluationPreparationWork(book.bookId, launchPolicy);
+      while (!preparation.done) preparation = book.store.advanceInitialEvaluationPreparationWork(preparation.workId!);
+      expect(preparation.projection!.planEnvelope!.promptContractDigest).not.toBe(book.store.initialEvaluationLedger.definition.promptContractDigest);
+      expect(book.store.inspectEvaluation(book.bookId, null).initial.latest).toEqual(before);
+    });
+  });
+
   it('reads every range for the evidence of each item, scores the items once, and says how well each score stands', async () => {
     await withBook(async (book) => {
       // Before any 初评: 评估 offers to prepare one, and nothing to begin from.

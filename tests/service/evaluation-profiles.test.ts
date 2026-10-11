@@ -23,6 +23,57 @@ function finalContent(content: EvaluationContent): EvaluationContent {
 }
 
 describe('知识库 › 评估方案, prospective snapshots over the real store', () => {
+  it.each(['absent', 'committed'] as const)('finishes revision 69 with profile relations %s before the terminal stamp', async (state) => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const profile = store.saveEvaluationProfile(edit(store.inspectEvaluationProfiles().profiles[0]!, ['已复核。'])).profiles[0]!;
+    store.close();
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      if (state === 'absent') db.exec('DROP TABLE initial_evaluation_tasks; DROP TABLE evaluation_profile_versions');
+      db.exec('PRAGMA user_version = 69');
+    } finally { db.close(); }
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(store.inspectDataVersion().schemaRevision).toBe(LATEST_SCHEMA_VERSION);
+      expect(store.inspectEvaluationProfiles().profiles[0]!.sha256).toBe(state === 'committed' ? profile.sha256 : store.inspectEvaluationProfiles().profiles.at(-1)!.sha256);
+    } finally { store.close(); }
+  });
+
+  it('refuses a partial profile upgrade instead of inventing the missing Task ledger', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    store.close();
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try { db.exec('DROP TABLE initial_evaluation_tasks; PRAGMA user_version = 69'); } finally { db.close(); }
+    await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow('不兼容');
+  });
+
+  it('carries every house version and its record snapshots through full export and replacement', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const targetRoots = await createServiceTestRoots('ai7-service-profile-replacement-');
+    let target = await EditorialStore.open(targetRoots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importSample1Book(store, roots.codeRoot, '全库方案版本');
+      const builtinRecord = store.startEvaluation(book.bookId).record!;
+      store.saveEvaluation({ bookId: book.bookId, recordId: builtinRecord.recordId, expectedEntries: builtinRecord.entries, content: finalContent(builtinRecord.content), finalize: true });
+      const builtin = store.inspectEvaluationProfiles().profiles[0]!;
+      const second = store.saveEvaluationProfile({ ...edit(builtin, ['来源已复核。']), items: edit(builtin).items.slice(0, 4) }).profiles[0]!;
+      const houseRecord = store.startEvaluation(book.bookId).record!;
+      store.saveEvaluationProfile(edit(second, ['来源和版权已复核。']));
+      const history = store.inspectEvaluationProfiles();
+      const snapshots = [builtinRecord, houseRecord].map((record) => store.inspectEvaluation(book.bookId, record.recordId).record);
+      const destination = join(roots.inputRoot, 'profiles.ai7db');
+      const prepared = await store.prepareDatabaseExport(destination, true);
+      expect((await store.approveDatabaseExport(prepared.preparationId, true)).outcome).toBe('created');
+      const preview = await target.inspectDatabaseImport(destination);
+      expect(preview.compatibility).toBe('compatible');
+      await target.prepareDatabaseReplacement(preview.previewId, new Date());
+      target.markCleanShutdown(); target.close();
+      target = await EditorialStore.open(targetRoots.dataRoot, roots.codeRoot);
+      expect(target.inspectEvaluationProfiles()).toEqual(history);
+      expect([builtinRecord, houseRecord].map((record) => target.inspectEvaluation(book.bookId, record.recordId).record)).toEqual(snapshots);
+    } finally { store.close(); target.close(); await targetRoots.dispose(); }
+  });
+
   it('keeps historical records and readers-report inputs, seeds new readiness, and compares removed/new items', async () => {
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let closed = false;

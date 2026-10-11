@@ -67,6 +67,25 @@ function unit(ordinal: number, own: number, overlap: number): CoverageManifestUn
 }
 
 describe('the unit contract', () => {
+  it('pins edited descriptions, readiness and the full profile while retaining the legacy contract', () => {
+    const profile = { ...PROFILE, profileId: 'house/evaluation-profile', version: '2', readiness: ['来源已复核。'],
+      items: PROFILE.items.slice(0, 4).map((item) => ({ ...item, label: `新${item.label}`, fullMarks: 25, description: '看作者声音。' })) };
+    const digest = evaluationProfileDigest(profile);
+    const contract = initialEvaluationContract({ ...profile, profileSha256: digest });
+    expect(contract.systemPrompt).toContain('（满分 25）：看作者声音。');
+    expect(contract.systemPrompt).toContain('来源已复核。');
+    expect(contract.profile.profileSha256).toBe(digest);
+    expect(initialEvaluationKindDefinition({ ...profile, sha256: digest }).promptContractDigest).toBe(initialEvaluationContractDigest(contract));
+    expect(initialEvaluationContractDigest(contract)).not.toBe(initialEvaluationContractDigest(CONTRACT));
+    expect(initialEvaluationContractDigest(initialEvaluationContract({ ...profile, readiness: ['版权已复核。'], profileSha256: digest }))).not.toBe(initialEvaluationContractDigest(contract));
+    expect(initialEvaluationContractDigest(initialEvaluationContract({ ...profile, items: profile.items.map((item) => ({ ...item, description: '修改说明。' })), profileSha256: digest }))).not.toBe(initialEvaluationContractDigest(contract));
+    expect(CONTRACT.profile).not.toHaveProperty('readiness');
+    expect(CONTRACT.profile).not.toHaveProperty('profileSha256');
+    const result = parseInitialEvaluationSynthesis(synthesis({ items: profile.items.map((item) => ({ itemId: item.itemId, score: 24.5, comment: '合成依据。' })) }), profile);
+    expect(result.ok).toBe(true);
+    expect(parseInitialEvaluationSynthesis(synthesis(), profile).ok).toBe(false);
+  });
+
   it('admits observations of the profile\'s items that cite blocks of the unit, and refuses everything else whole', () => {
     const expected = { unitOrdinal: 2, blockCount: 4, itemIds: ITEM_IDS };
     const ok = parseInitialEvaluationUnitResult(unitResult([{ itemId: 'literary-quality', note: '写景与写心相互映照。', blockOrdinals: [1, 4] }]), expected);
