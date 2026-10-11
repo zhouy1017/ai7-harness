@@ -1258,6 +1258,15 @@ async function main() {
     requireJourney(observer.targetId !== renderer.targetId, 'second-window-distinct-target');
     await waitFor(observer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookC)}]') && document.hasFocus()`, 'second-window-c-ready', 30_000);
     requireJourney((await observer.evaluate(`window.ai7.getBookWorkbenchRoute()`))?.bookId === bookC, 'second-window-c-route');
+    // The editor returns to the main window through the same chooser: 乙 is already open there, so AI7 focuses that
+    // window rather than opening a third (J-12's reuse) — the product's own focus, not a debugging command.
+    await click(observer, '返回图书工作概览', 'second-window-c-overview');
+    await waitFor(observer, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookC)}]')`, 'second-window-c-overview-ready', 30_000);
+    await click(observer, '打开另一本图书', 'second-window-c-open-other');
+    await waitFor(observer, `document.querySelector('[data-screen="book-workbench-chooser"]')`, 'second-window-c-chooser', 30_000);
+    await clickSelector(observer, `button[data-book-id=${JSON.stringify(bookB)}]`, 'second-window-return-b');
+    await waitFor(renderer, `document.hasFocus() && window.ai7.getBookWorkbenchRoute().then((route)=>route?.bookId===${JSON.stringify(bookB)})`, 'main-window-focused', 30_000);
+    await waitFor(observer, `!document.hasFocus()`, 'observer-not-focused', 10_000);
     await openAttention(observer, 'second-window-observer-attention');
     await openAttention(renderer, 'second-window-main-attention');
 
@@ -1265,9 +1274,8 @@ async function main() {
     const bothQueued = await sameAttentionInBothWindows(renderer, observer, 'both-windows-queued-attention');
     requireJourney(JSON.stringify(bothQueued) === JSON.stringify(concurrentService) && new Set([runA, runB, runC]).size === 3,
       'both-windows-separate-runs-same-queue');
-    // Bring the main window back deliberately; subsequent background changes must leave it focused.
-    await renderer.send('Page.bringToFront');
-    await waitFor(renderer, `document.hasFocus()`, 'main-window-focused', 10_000);
+    // The main window still holds the focus the chooser gave it; subsequent background changes must leave it there.
+    await assertRenderer(renderer, `document.hasFocus()`, 'main-window-still-focused');
     let multiWindowAddedMs = performance.now() - secondWindowStarted;
 
     at('concurrent-pause');
