@@ -797,6 +797,7 @@ import {
   type StoredRevision,
 } from './series-knowledge.js';
 import { MAX_EXEMPLAR_BOOKS_PAGE } from '../shared/protocol.js';
+import { EvaluationProfiles, initializeEvaluationProfileSchema } from './evaluation-profiles.js';
 import { ImportedExemplars, ImportedExemplarError, initializeImportedExemplarSchema } from './imported-exemplars.js';
 import { readExemplarBook, type ExemplarSources } from './exemplars.js';
 import { readKnowledgeProcedures } from './knowledge-procedures.js';
@@ -949,6 +950,8 @@ import {
   MATERIAL_INDEX_SCHEMA_VERSION,
   OUTCOME_RESOLUTION_SCHEMA_VERSION,
   IMPORTED_EXEMPLAR_SCHEMA_VERSION,
+  EVALUATION_PROFILE_SCHEMA_VERSION,
+  LATEST_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -2218,7 +2221,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION),
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2282,7 +2285,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION)
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION)
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2660,7 +2663,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2713,7 +2716,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION)) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2858,7 +2861,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2910,7 +2913,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION)) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -3203,7 +3206,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== IMPORTED_EXEMPLAR_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== LATEST_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -3337,7 +3340,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3389,7 +3392,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION)) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -4292,6 +4295,7 @@ export class EditorialStore {
   readonly #factualReview: BaselineAnalysisStore;
   /** AI7 初评 (Issue #429, S81b1): the evaluation kind's own ledger over the same Book database. */
   readonly #initialEvaluation: BaselineAnalysisStore;
+  readonly #evaluationProfiles: EvaluationProfiles;
   /** One ledger per review-category kind and frozen category contract, made when first asked for (Issue #417); bounded (#649). */
   readonly #reviewCategoryLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
   /** The kind definition of each configured category a Review Run snapshotted, by its contract input; bounded (#649). */
@@ -4427,6 +4431,7 @@ export class EditorialStore {
     this.#baselineAnalysis = baselineAnalysis;
     this.#factualReview = factualReview;
     this.#initialEvaluation = initialEvaluation;
+    this.#evaluationProfiles = new EvaluationProfiles(authority);
     this.#editorialMarks = new EditorialMarkStore(authority);
     this.#rules = new DefaultExecutionRuleLedger(authority);
     this.#enrollments = new BackgroundAnalysisEnrollmentLedger(authority);
@@ -4446,13 +4451,13 @@ export class EditorialStore {
     this.#dialogueHistory = harnessHistoryReader(join(dataRoot, HARNESS_SESSION_LOG_DIRECTORY));
     this.#dataVersions = new DataVersionLedger(authority);
     this.#databaseExports = new DatabaseExports(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: IMPORTED_EXEMPLAR_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: LATEST_SCHEMA_VERSION }),
     });
     this.#scheduledBackups = new ScheduledBackups(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: IMPORTED_EXEMPLAR_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: LATEST_SCHEMA_VERSION }),
     });
     this.#databaseReplacements = new DatabaseReplacements(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: IMPORTED_EXEMPLAR_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: LATEST_SCHEMA_VERSION }),
       // A package's data opens as a store of its own, with no launch control: brought to this revision and checked whole.
       openPackage: async (root) => {
         const opened = await EditorialStore.open(root, this.#codeRoot, {
@@ -4652,7 +4657,7 @@ export class EditorialStore {
       // the backup location before anything migrates it, and a backup that cannot be made opens nothing.
       const classes = control.schemaRevisionClasses ?? SCHEMA_REVISION_CLASSES;
       const { upgrade, earlier } = await backUpBeforeUpgrade(authority, dataRoot, {
-        terminalRevision: IMPORTED_EXEMPLAR_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
+        terminalRevision: LATEST_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
       }).catch((error: unknown) => {
         if (error instanceof DataVersionError) throw new StoreError(error.code, error.message);
         throw error;
@@ -4762,6 +4767,7 @@ export class EditorialStore {
       initializeOutcomeResolutionSchema(authority);
       // Revision 69 (Issue #427): earlier published Books' imported 范例, their exact versions and Learning Eligibility.
       initializeImportedExemplarSchema(authority);
+      initializeEvaluationProfileSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -4813,7 +4819,7 @@ export class EditorialStore {
       // Every store records the versions that open it (Issue #433, S85a; DSTO-016): a new record only when one changed.
       store.#softwareVersion = softwareVersion;
       store.#codeRoot = codeRoot;
-      store.#dataVersion = dataVersionAt(IMPORTED_EXEMPLAR_SCHEMA_VERSION, classes);
+      store.#dataVersion = dataVersionAt(LATEST_SCHEMA_VERSION, classes);
       if (control.interruptUpgradeAt === 'before-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在记录版本之前停止。');
       // The open that raised the Data Version records the upgrade it made with the backup (S85b), and only then clears the note
       // that let an open stopped before this record it (Issue #433 review).
@@ -4821,7 +4827,7 @@ export class EditorialStore {
         // Upgrades other opens made and never recorded go first, oldest first, as those opens would have recorded them; one a
         // record already holds is not recorded again (Issue #433 review).
         for (const carried of earlier) store.#dataVersions.recordCarried(carried);
-        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: IMPORTED_EXEMPLAR_SCHEMA_VERSION, upgrade });
+        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: LATEST_SCHEMA_VERSION, upgrade });
       }));
       if (control.interruptUpgradeAt === 'after-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在清除升级记录之前停止。');
       await completeUpgrade(dataRoot).catch(() => undefined);

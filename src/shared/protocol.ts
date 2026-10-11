@@ -6818,7 +6818,8 @@ export interface EvaluationProfileProjection {
   readonly version: string;
   readonly issuer: string;
   readonly total: number;
-  readonly items: ReadonlyArray<{ readonly itemId: string; readonly label: string; readonly fullMarks: number }>;
+  readonly items: ReadonlyArray<{ readonly itemId: string; readonly label: string; readonly fullMarks: number; readonly description?: string }>;
+  readonly readiness?: ReadonlyArray<string>;
   readonly bands: ReadonlyArray<{ readonly band: 'excellent' | 'good' | 'adequate' | 'weak' | 'unsuitable'; readonly label: EvaluationBandLabel; readonly floor: number; readonly anchor: string }>;
   readonly risks: ReadonlyArray<{ readonly riskId: string; readonly label: string }>;
   readonly conclusions: ReadonlyArray<{ readonly conclusion: EvaluationConclusion; readonly label: string }>;
@@ -6828,6 +6829,13 @@ export interface EvaluationProfileProjection {
 /** 知识库 › 评估方案: each profile, and how many Evaluation Records of how many Books used it. */
 export interface EvaluationProfilesProjection {
   readonly profiles: ReadonlyArray<EvaluationProfileProjection & { readonly records: number; readonly books: number }>;
+}
+
+/** A new immutable house version; null item identities are assigned by the service. */
+export interface SaveEvaluationProfileInput {
+  readonly expectedSha256: string;
+  readonly items: ReadonlyArray<{ readonly itemId: string | null; readonly label: string; readonly description: string }>;
+  readonly readiness: ReadonlyArray<string>;
 }
 
 /** What the editor wrote about one version of an evaluation: every item, every risk, and the rest of the record. */

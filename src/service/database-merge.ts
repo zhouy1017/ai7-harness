@@ -242,6 +242,7 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   maintenance_cases: 'owned',
   maintenance_case_revisions: 'owned',
   maintenance_errata_versions: 'owned',
+  initial_evaluation_tasks: 'owned',
   evaluation_records: 'owned',
   evaluation_record_entries: 'owned',
   // The AI7 初评 each version began from (Issue #429, S81b1): the version's own, as its entries are.
@@ -305,6 +306,7 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   series_knowledge_promotions: 'house',
   series_knowledge_conflicts: 'house',
   evaluation_preferences: 'house',
+  evaluation_profile_versions: 'house',
   store_versions: 'house',
   database_export_preparations: 'house',
   database_export_approvals: 'house',

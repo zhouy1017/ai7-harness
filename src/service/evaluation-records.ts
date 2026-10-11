@@ -246,7 +246,7 @@ export const BUILTIN_EVALUATION_PROFILE: Profile = {
 };
 
 export function evaluationProfileDigest(profile: Profile): string {
-  return sha256Hex(canonicalJson({ schema: PROFILE_SCHEMA, profile }));
+  return sha256Hex(canonicalJson({ schema: profile.readiness === undefined ? PROFILE_SCHEMA : 'ai7.evaluation-profile/2', profile }));
 }
 
 function withDigest(profile: Profile): EvaluationProfileProjection {
