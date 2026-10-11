@@ -3,7 +3,7 @@ import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
@@ -314,5 +314,66 @@ describe('review categories reference exact local library versions', () => {
     try { plan(run); throw new Error('corruption not refused'); } catch (error) {
       expect(error instanceof StoreError && error.code === 'MATERIAL_INDEX_RECORD_INVALID').toBe(true);
     }
+  });
+
+  it('says nothing would be sent when a plan listing library items is read under developer-live', async () => {
+    const id = await material();
+    const run = prepare([id]);
+    expect(plan(run).scope.send).toContain('也只在本机读取');
+    const free = store.baselineAnalysisLedger.launch;
+    store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'developer-live', live: { route: 'opencode-go', model: 'deepseek-v4-flash', endpoint: 'https://example.invalid/v1', credentialSlot: 'opencode-go', credentialReference: randomUUID(), runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 100_000 } } });
+    try {
+      const send = plan(run).scope.send;
+      expect(send.startsWith('不发送任何内容')).toBe(true);
+      expect(send).not.toContain('原文');
+      expect(send).not.toContain('也只在本机读取');
+    } finally { store.baselineAnalysisLedger.bindLaunch(free); }
+  });
+
+  it('reads each pinned item whole once, then only re-checks its first page on later workspace reads', async () => {
+    const id = await material(Array.from({ length: 40 }, (_, index) => `第 ${index + 1} 段合成资料。`).join('\n\n'));
+    const run = prepare([id]);
+    const pages = vi.spyOn(store, 'readMaterialIndexForTask');
+    try {
+      plan(run);
+      const first = pages.mock.calls.length;
+      expect(first).toBeGreaterThan(1);
+      pages.mockClear();
+      plan(run);
+      plan(run);
+      // One re-check per read and per referenced category's ledger, never the later pages again.
+      expect(pages.mock.calls.every((call) => call[2] === 1)).toBe(true);
+      expect(pages.mock.calls.length).toBeGreaterThan(0);
+      // A reference withdrawn since still refuses: the cache never stands in for the pin's availability.
+      store.decideLibraryMaterial({ materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+      expect(plan(run).scope.reference.some((line) => line.includes('现在不能列进'))).toBe(true);
+    } finally { pages.mockRestore(); }
+  });
+
+  it('gives ANALYSIS_RECORD_INVALID, not a TypeError, when a frozen plan has lost its envelope row', async () => {
+    const id = await material();
+    prepare([id]);
+    await close();
+    database((db) => {
+      const triggers = db.prepare("SELECT name, sql FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = 'analysis_plan_records'").all() as Array<{ name: string; sql: string }>;
+      for (const trigger of triggers) db.exec(`DROP TRIGGER "${trigger.name}"`);
+      db.prepare("DELETE FROM analysis_plan_records WHERE component = 'plan-envelope'").run();
+      for (const trigger of triggers) db.exec(trigger.sql);
+    }, true);
+    await open();
+    try { store.inspectReviewWorkspace(bookId, null); throw new Error('missing envelope not refused'); } catch (error) {
+      expect(error).not.toBeInstanceOf(TypeError);
+      expect(error instanceof StoreError && error.code === 'ANALYSIS_RECORD_INVALID').toBe(true);
+    }
+  });
+
+  it('checks the category executor from the configuration without building the whole workspace', async () => {
+    const id = await material();
+    const workspace = vi.spyOn(store, 'inspectReviewWorkspace');
+    try {
+      expect(() => prepare([id], ['factual-review'])).toThrow(REVIEW_MATERIAL_CATEGORY_REQUIRED);
+      prepare([id]);
+      expect(workspace).not.toHaveBeenCalled();
+    } finally { workspace.mockRestore(); }
   });
 });

@@ -4296,6 +4296,8 @@ export class EditorialStore {
   readonly #reviewCategoryLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
   /** The kind definition of each configured category a Review Run snapshotted, by its contract input; bounded (#649). */
   readonly #reviewCategoryDefinitions = new RecentCache<AnalysisKindDefinition>(REVIEW_CATEGORY_CACHE_CAPACITY);
+  // 资料库 reference texts of the 审阅 workspace, by pin: at most four items per Run, a few Runs recent.
+  readonly #taskMaterialTexts = new RecentCache<ReadonlyArray<string>>(REVIEW_CATEGORY_CACHE_CAPACITY);
   /**
    * 审稿意见 (Issue #429, S81c): one ledger per frozen reader's report contract, made when first asked for; bounded as the
    * category ledgers are (#672), and a preparation in flight is found on the ledger that holds it.
@@ -5059,7 +5061,9 @@ export class EditorialStore {
           // Its ordinary ledger projection already knows how to offer a fresh preparation under that contract.
           if (frozenBase !== base.promptContractDigest) return this.reviewCategoryLedger(base);
           materials = { bookId: latestForBook, references: this.#analysisCall(() => taskMaterialSources(pins)) };
-          frozenPromptDigest = asString(components.get('plan-envelope')!.promptContractDigest as SqlRow[string]);
+          const envelope = components.get('plan-envelope');
+          requireStore(envelope !== undefined, 'ANALYSIS_RECORD_INVALID', '任务计划记录不完整。');
+          frozenPromptDigest = asString(envelope.promptContractDigest as SqlRow[string]);
         }
       }
     }
@@ -5073,13 +5077,20 @@ export class EditorialStore {
 
   #taskMaterialReadings(boundary: TaskMaterialBoundary): ReadonlyArray<TaskMaterialReading> {
     return this.#analysisCall(() => taskMaterialSources(boundary.references)).map((source) => {
-      const paragraphs: string[] = [];
+      let paragraphs: ReadonlyArray<string>;
       try {
-        for (let from: number | null = 1; from !== null;) {
-          const page = this.readMaterialIndexForTask(boundary, source.materialId, from);
-          paragraphs.push(...page.segments.map((segment) => segment.text));
-          from = page.next;
-        }
+        // The first page is always read: it re-checks that the pin is still referable and its index version still local.
+        // The text of an index version never changes, so the remaining pages are read once per pin and kept.
+        const first = this.readMaterialIndexForTask(boundary, source.materialId, 1);
+        paragraphs = this.#taskMaterialTexts.obtain(`${boundary.bookId}|${source.materialId}|${source.indexDigest}|${source.sha256}`, () => {
+          const texts = first.segments.map((segment) => segment.text);
+          for (let from = first.next; from !== null;) {
+            const page = this.readMaterialIndexForTask(boundary, source.materialId, from);
+            texts.push(...page.segments.map((segment) => segment.text));
+            from = page.next;
+          }
+          return texts;
+        });
       } catch (error) {
         if (error instanceof StoreError && (error.code === 'MATERIAL_INDEX_MOVED' || error.code === 'MATERIAL_REFERENCE_UNAVAILABLE')) {
           return taskMaterialRefusal(source, error.code);
@@ -5160,8 +5171,7 @@ export class EditorialStore {
       'TASK_MATERIALS_INVALID', '请选择不重复的资料库资料，最多 4 份。');
     if (materialIds.length > 0) {
       requireStore(this.#baselineAnalysis.launch.live === null, 'REVIEW_MATERIAL_UNAVAILABLE', TASK_MATERIAL_LIVE_UNAVAILABLE);
-      const categories = this.inspectReviewWorkspace(bookId, null).categories;
-      requireStore(categories.some((category) => categoryIds.includes(category.categoryId) && category.materialReferencesAllowed === true),
+      requireStore(this.#reviewCall(() => this.#reviewRuns.materialReferencesAllowed(bookId, categoryIds)),
         'REVIEW_MATERIAL_CATEGORY_REQUIRED', REVIEW_MATERIAL_CATEGORY_REQUIRED);
     }
     const references = this.#prepareTaskMaterials(bookId, materialIds);
