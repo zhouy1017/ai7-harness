@@ -773,6 +773,8 @@ interface RunView {
  */
 export interface ReviewRunPlanFacts {
   readonly materials?: ReadonlyArray<Pick<TaskMaterialReading, 'source' | 'refusal'>>;
+  /** The Run lists 资料库 items and the launch now bound is developer-live, which sends none of them: the plan is refused. */
+  readonly materialsRefusedLive?: boolean;
   readonly reviewRunId: string;
   readonly ordinal: number;
   readonly label: string;
@@ -1413,6 +1415,7 @@ export class ReviewRunStore {
     const firstCheckpoint = categories.find((category) => category.checkpoint !== null)?.checkpoint ?? null;
     const firstTask = snapshot.categories.find((category) => category.task !== null);
     return {
+      ...(snapshot.materialReferences !== undefined && this.#ledgers.baseline().launch.live !== null ? { materialsRefusedLive: true } : {}),
       ...(snapshot.materialReferences === undefined ? {} : { materials: this.#materialReadings(snapshot).map((reading) => view.authorization === null ? reading : { ...reading, refusal: null }) }),
       reviewRunId: snapshot.reviewRunId,
       ordinal: snapshot.ordinal,
@@ -2538,6 +2541,12 @@ export class ReviewRunStore {
    * none is named. `progress` is the one execution owner's reader, so a category executing now carries
    * its Measured Run Progress.
    */
+  /** Whether any selected category calls a model, so a 资料库 reference has a reader; the configuration answers it without reading the Book. */
+  materialReferencesAllowed(bookId: string, categoryIds: ReadonlyArray<string>): boolean {
+    this.#requireBook(bookId);
+    return this.#forBook(bookId, this.#configuration()).categories.some((entry) => categoryIds.includes(entry.categoryId) && entry.executor === 'review-category-contract');
+  }
+
   workspace(bookId: string, reviewRunId: string | null, progress?: ProgressReader, page: ReviewFindingPageRequest = FIRST_FINDING_PAGE): ReviewWorkspaceProjection {
     this.#requireBook(bookId);
     requireReview(reviewRunId === null || (typeof reviewRunId === 'string' && UUID_PATTERN.test(reviewRunId)), 'REVIEW_RUN_INVALID', '审阅记录标识无效。');
