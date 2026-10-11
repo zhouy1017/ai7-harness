@@ -227,23 +227,55 @@ const HTML_RAW_TEXT: ReadonlySet<string> = new Set(['script', 'style', 'xmp', 'i
 const HTML_PREFORMATTED: ReadonlySet<string> = new Set(['pre', 'listing', 'plaintext']);
 /** What bounds the search for an element a start tag implies the end of, besides each kind's own boundary. */
 const HTML_SCOPE: ReadonlySet<string> = new Set(['html', 'table', 'td', 'th', 'caption', 'template', 'object', 'button', 'marquee', 'applet']);
+interface HtmlEndRule {
+  /** Which of the reader's tracked match lists this rule reads. */
+  readonly kind: number;
+  /** The open elements a start tag of this kind closes. */
+  readonly closes: ReadonlySet<string>;
+  /** Every element the search stops at: what the kind closes, a boundary, or an element never read. */
+  readonly matches: ReadonlySet<string>;
+}
+
+/** One rule's stop set, its own members and `HTML_SKIPPED` together, so a start tag matches its open elements once. */
+function htmlEndRule(kind: number, closes: ReadonlySet<string>, boundary: ReadonlySet<string>): HtmlEndRule {
+  return { kind, closes, matches: new Set([...closes, ...boundary, ...HTML_SKIPPED]) };
+}
+
 /**
  * A start tag of each kind ends the nearest open element it names, with everything opened inside it, as HTML's parser
- * does (#761 third review, P2-B, P3-D): the search runs down the open elements and stops at the kind's boundary — the
- * list for an item, the table for a row or cell, the `select` for an option — or at an element whose content is never
- * read (`HTML_SKIPPED`). Every block start ends an open `<p>` the same way.
+ * does (#761 third review, P2-B, P3-D): the search stops at the kind's boundary — the list for an item, the table for a
+ * row or cell, the `select` for an option — or at an element whose content is never read (`HTML_SKIPPED`). Every block
+ * start ends an open `<p>` the same way. The reader tracks each rule's nearest open match as elements come and go
+ * (#766), so a start tag costs O(1) however deep the inline nesting around it is.
  */
-const HTML_IMPLIED_END: Readonly<Record<string, { readonly closes: ReadonlySet<string>; readonly boundary: ReadonlySet<string> }>> = {
-  li: { closes: new Set(['li']), boundary: new Set([...HTML_SCOPE, 'ul', 'ol', 'menu', 'dir']) },
-  dt: { closes: new Set(['dt', 'dd']), boundary: new Set([...HTML_SCOPE, 'dl']) },
-  dd: { closes: new Set(['dt', 'dd']), boundary: new Set([...HTML_SCOPE, 'dl']) },
-  tr: { closes: new Set(['tr']), boundary: new Set(['html', 'table', 'template']) },
-  td: { closes: new Set(['td', 'th']), boundary: new Set(['html', 'table', 'template', 'tr']) },
-  th: { closes: new Set(['td', 'th']), boundary: new Set(['html', 'table', 'template', 'tr']) },
-  option: { closes: new Set(['option']), boundary: new Set(['html', 'select', 'datalist', 'template']) },
+const HTML_IMPLIED_END: Readonly<Record<string, HtmlEndRule>> = {
+  li: htmlEndRule(1, new Set(['li']), new Set([...HTML_SCOPE, 'ul', 'ol', 'menu', 'dir'])),
+  dt: htmlEndRule(2, new Set(['dt', 'dd']), new Set([...HTML_SCOPE, 'dl'])),
+  dd: htmlEndRule(3, new Set(['dt', 'dd']), new Set([...HTML_SCOPE, 'dl'])),
+  tr: htmlEndRule(4, new Set(['tr']), new Set(['html', 'table', 'template'])),
+  td: htmlEndRule(5, new Set(['td', 'th']), new Set(['html', 'table', 'template', 'tr'])),
+  th: htmlEndRule(6, new Set(['td', 'th']), new Set(['html', 'table', 'template', 'tr'])),
+  option: htmlEndRule(7, new Set(['option']), new Set(['html', 'select', 'datalist', 'template'])),
 };
-const HTML_P_END = { closes: new Set(['p']), boundary: HTML_SCOPE };
-const HTML_HEADING = /^h([1-6])$/u;
+const HTML_P_END = htmlEndRule(0, new Set(['p']), HTML_SCOPE);
+/** Every rule by kind, so the reader can hold one tracked match list per rule. */
+const HTML_END_RULES: ReadonlyArray<HtmlEndRule> = [HTML_P_END, ...Object.values(HTML_IMPLIED_END)];
+/** For a name that stops some rule's search, the rules whose nearest match it becomes; a name absent stops none. */
+const HTML_END_KINDS: ReadonlyMap<string, ReadonlyArray<number>> = (() => {
+  const kinds = new Map<string, number[]>();
+  for (const rule of HTML_END_RULES) {
+    for (const name of rule.matches) {
+      const list = kinds.get(name);
+      if (list === undefined) kinds.set(name, [rule.kind]);
+      else list.push(rule.kind);
+    }
+  }
+  return kinds;
+})();
+/** The headings the reader tracks the innermost of, and the style each names. */
+const HTML_HEADINGS: ReadonlyMap<string, string> = new Map([
+  ['h1', 'Heading1'], ['h2', 'Heading2'], ['h3', 'Heading3'], ['h4', 'Heading4'], ['h5', 'Heading5'], ['h6', 'Heading6'],
+]);
 const HTML_SPACE = /[\t\n\f\r ]+/gu;
 /** One attribute of a start tag: its name, and its value quoted, single-quoted or bare. */
 const HTML_ATTRIBUTE = /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/gu;
@@ -314,62 +346,77 @@ function indexOrEnd(source: string, token: string, from: number): number {
 interface HtmlOpen {
   readonly name: string;
   readonly skipped: boolean;
+  /** The innermost heading style open when this element was opened. */
+  readonly heading: string | undefined;
+  /** The innermost block open when this element was opened. */
+  readonly block: string | undefined;
+  /** The end rules whose nearest match this element became, when any: they are left when it closes. */
+  readonly kinds: ReadonlyArray<number> | undefined;
 }
 
 /** One HTML or XHTML document read into a sink: a small tokenizer and the block model a reader of the page sees. */
 class HtmlReader {
   readonly #sink: ParagraphSink;
   readonly #stack: HtmlOpen[] = [];
+  /** Each end rule's open matches, nearest last: the deepest element its start tag would close or stop at (#766). */
+  readonly #ends: number[][] = HTML_END_RULES.map(() => []);
   #skipping = 0;
   #preformatted = 0;
+  /** The innermost open heading's style and the innermost open block's name (#766). */
+  #heading: string | undefined;
+  #block: string | undefined;
   title: string | null = null;
 
   constructor(sink: ParagraphSink) {
     this.#sink = sink;
   }
 
-  #style(): string | undefined {
-    for (let index = this.#stack.length - 1; index >= 0; index -= 1) {
-      const heading = HTML_HEADING.exec(this.#stack[index]!.name);
-      if (heading !== null) return `Heading${heading[1]}`;
-    }
-    return undefined;
-  }
-
   /** Whether the nearest open block keeps its lines together (`HTML_LINE_HOLDERS`). */
   #holdsLines(): boolean {
-    for (let index = this.#stack.length - 1; index >= 0; index -= 1) {
-      const name = this.#stack[index]!.name;
-      if (HTML_BLOCKS.has(name)) return HTML_LINE_HOLDERS.has(name);
-    }
-    return false;
+    return this.#block !== undefined && HTML_LINE_HOLDERS.has(this.#block);
   }
 
   #flush(): void {
-    this.#sink.flush(this.#style());
+    this.#sink.flush(this.#heading);
   }
 
   /**
-   * The nearest open element `end` closes, ended with everything opened inside it; nothing when a boundary, or an element
-   * never read, comes first.
+   * The nearest open element `rule` stops at, ended with everything opened inside it when the rule closes it; nothing
+   * when a boundary, or an element never read, comes first. The nearest match is tracked as elements open and close, so
+   * one start tag costs O(1) however deep the open elements above it are (#766).
    */
-  #endImplied(end: { readonly closes: ReadonlySet<string>; readonly boundary: ReadonlySet<string> }): void {
-    for (let index = this.#stack.length - 1; index >= 0; index -= 1) {
-      const name = this.#stack[index]!.name;
-      if (end.closes.has(name)) {
-        while (this.#stack.length > index) this.#pop();
-        return;
-      }
-      if (end.boundary.has(name) || HTML_SKIPPED.has(name)) return;
-    }
+  #endImplied(rule: HtmlEndRule): void {
+    const index = this.#ends[rule.kind]!.at(-1);
+    if (index === undefined || !rule.closes.has(this.#stack[index]!.name)) return;
+    while (this.#stack.length > index) this.#pop();
   }
 
   #pop(): void {
     const top = this.#stack.at(-1)!;
     if (this.#skipping === 0 && HTML_BLOCKS.has(top.name)) this.#flush();
     this.#stack.pop();
+    this.#heading = top.heading;
+    this.#block = top.block;
+    // Every list this element was pushed onto has it at its end: everything opened after it has closed before it.
+    if (top.kinds !== undefined) for (const kind of top.kinds) this.#ends[kind]!.pop();
     if (top.skipped) this.#skipping -= 1;
     if (HTML_PREFORMATTED.has(top.name)) this.#preformatted -= 1;
+  }
+
+  /** One open element: its own heading and block, and each end rule's nearest match, tracked as it is pushed. */
+  #push(name: string, skipped: boolean): void {
+    requireFormat(this.#stack.length < this.#sink.bounds.depth, 'over-bound', 'markup nesting exceeds its bound');
+    const kinds = HTML_END_KINDS.get(name);
+    if (kinds !== undefined) {
+      const index = this.#stack.length;
+      for (const kind of kinds) this.#ends[kind]!.push(index);
+    }
+    this.#stack.push({ name, skipped, heading: this.#heading, block: this.#block, kinds });
+    const heading = HTML_HEADINGS.get(name);
+    if (heading !== undefined) this.#heading = heading;
+    if (HTML_BLOCKS.has(name)) this.#block = name;
+    if (skipped) this.#skipping += 1;
+    if (HTML_PREFORMATTED.has(name)) this.#preformatted += 1;
   }
 
   #open(name: string, selfClosing: boolean, hidden: boolean): void {
@@ -390,11 +437,7 @@ class HtmlReader {
     if (implied !== undefined) this.#endImplied(implied);
     if (this.#skipping === 0 && HTML_BLOCKS.has(name)) this.#flush();
     if (HTML_VOID.has(name) || selfClosing) return;
-    requireFormat(this.#stack.length < this.#sink.bounds.depth, 'over-bound', 'markup nesting exceeds its bound');
-    const skipped = HTML_SKIPPED.has(name) || hidden;
-    this.#stack.push({ name, skipped });
-    if (skipped) this.#skipping += 1;
-    if (HTML_PREFORMATTED.has(name)) this.#preformatted += 1;
+    this.#push(name, HTML_SKIPPED.has(name) || hidden);
   }
 
   #close(name: string): void {
@@ -676,7 +719,11 @@ function readArchive(bytes: Uint8Array, bounds: MaterialFormatBounds, keep: (nam
   return kept;
 }
 
-/** An XML part's text: UTF-8 (or what it declares), with no DOCTYPE or entity declaration anywhere. */
+/**
+ * An XML part's text: UTF-8 (or what it declares), with no DOCTYPE or entity declaration anywhere. The check is defence
+ * in depth beside `saxes`, which also refuses these — a DOCTYPE through `readXml`'s own handler, an entity declaration as
+ * a parse error (#766) — and it refuses both with the entity reason before the parser is handed the part.
+ */
 function xmlPart(bytes: Uint8Array): string {
   const text = decodeMarkup(bytes);
   requireFormat(!/<!DOCTYPE|<!ENTITY/iu.test(text), 'external-entity', 'XML part declares a DTD or entities');
@@ -849,8 +896,9 @@ const ODF_SKIPPED: ReadonlySet<string> = new Set([
 const ODF_STYLE = 'urn:oasis:names:tc:opendocument:xmlns:style:1.0';
 const ODF_SPACE = /[ \t\r\n]+/gu;
 /**
- * At most this many named styles are read from one document's style parts. A style past it is not read — text in it reads
- * as shown — and the document's text still is (#761 third review, P3-E).
+ * At most this many named styles are read from one document's style parts. A new style past it is not read — text in it
+ * reads as shown — while a style already held is still replaced by a later same-named one (#766), and the document's text
+ * still is (#761 third review, P3-E).
  */
 const ODF_MAX_STYLES = 10_000;
 /** A style's parent chain is followed at most this far. */
@@ -878,9 +926,13 @@ class OdfStyles {
       const name = attribute(tag, 'name');
       const family = attribute(tag, 'family');
       this.#current = null;
-      if (name === undefined || family === undefined || this.#styles.size >= ODF_MAX_STYLES) return;
+      if (name === undefined || family === undefined) return;
+      const key = `${family} ${name}`;
+      // The cap bounds the styles held, and a content.xml automatic style still replaces a same-named common one at it
+      // (#766): the automatic style is the one that applies, so text it shows is not dropped by the common style.
+      if (this.#styles.size >= ODF_MAX_STYLES && !this.#styles.has(key)) return;
       const style: OdfStyle = { parent: attribute(tag, 'parent-style-name') ?? null, hidden: null };
-      this.#styles.set(`${family} ${name}`, style);
+      this.#styles.set(key, style);
       this.#current = style;
     } else if (tag.local === 'text-properties' && this.#current !== null) {
       const display = attribute(tag, 'display');
