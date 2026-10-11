@@ -826,14 +826,14 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // 准备 AI7 初评: the route's Book; the mode is the service's to decide from the Book's 初评 so far.
     case 'prepareInitialEvaluation': {
-      const input = requireInput(value.input, ['bookId'], tentativeId);
-      if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId'], ['materialIds'], tentativeId);
+      if (!validUuid(input.bookId) || !(input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= 16 && input.materialIds.every(validUuid)))) throw new ProtocolError(tentativeId);
       break;
     }
     // 起草审稿意见 (Issue #429, S81c): the route's Book and one of the two templates; the 定稿 version is the service's to find.
     case 'prepareReadersReport': {
-      const input = requireInput(value.input, ['bookId', 'template'], tentativeId);
-      if (!validUuid(input.bookId) || (input.template !== 'author' && input.template !== 'editorial')) throw new ProtocolError(tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'template'], ['materialIds'], tentativeId);
+      if (!validUuid(input.bookId) || (input.template !== 'author' && input.template !== 'editorial') || !(input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= 16 && input.materialIds.every(validUuid)))) throw new ProtocolError(tentativeId);
       break;
     }
     // 打开草稿: one drafted result of the route's Book's 审稿意见.

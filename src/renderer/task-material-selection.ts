@@ -13,6 +13,14 @@ export function taskMaterialSelection(items: ReadonlyArray<WritingTaskMaterialPr
   return result;
 }
 
+/** Name only current bounded choices; plans never display extracted reference text. */
+export function taskMaterialSendLine(items: ReadonlyArray<WritingTaskMaterialProjection>, selected: ReadonlySet<string>): string | null {
+  const ids = new Set(taskMaterialSelection(items, selected));
+  if (ids.size === 0) return null;
+  const names = items.filter((item) => ids.has(item.materialId)).map((item) => `《${item.title}》`).join('、');
+  return `会发送：所选资料库资料${names}的提取文字随稿件一并发往，只参照，不照抄；本机确定性运行不发送任何内容。`;
+}
+
 export function taskMaterialSelectionReason(item: WritingTaskMaterialProjection, items: ReadonlyArray<WritingTaskMaterialProjection>, selected: ReadonlySet<string>): string | null {
   if (!item.selectable) return item.reason;
   if (selected.has(item.materialId)) return null;
