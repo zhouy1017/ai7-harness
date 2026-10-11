@@ -1238,14 +1238,16 @@ export class BaselineAnalysisExecutionOwner {
       // them waits on a model. Each is an exact `out-of-scope` gap — the Run was asked not to read it — or,
       // when its last read failed, the lost gap it still is (Issue #716), recorded with the request digest it
       // would have carried, as every other unread unit is.
+      const unknownPredecessorGaps = predecessorFacts === null ? new Map<string, string>() : ledger.unknownGapsByContentKey(predecessorFacts.revisionId);
       for (const planUnit of planUnits) {
         const newUnit = manifest.units[planUnit.unitOrdinal - 1];
         if (planUnit.disposition === 'unreviewed') {
           if (newUnit === undefined) throw new ExecutionAdmissionError('EXECUTION_LINEAGE_INVALID', '审阅范围计划引用的单元不在覆盖清单内。');
           // One whose last read failed is carried as the lost gap it is, never as out of scope (Issue #716).
           const carried = planUnit.reason === 'predecessor-gap';
-          const code = carried ? 'not-attempted' : 'out-of-scope';
-          const reason = carried ? CARRIED_GAP_REASON : OUT_OF_SCOPE_GAP_REASON;
+          const unknownReason = carried ? unknownPredecessorGaps.get(planUnit.contentKey) : undefined;
+          const code = unknownReason !== undefined ? 'outcome-unknown' : carried ? 'not-attempted' : 'out-of-scope';
+          const reason = unknownReason !== undefined ? carriedOutcomeUnknownReason(unknownReason) : carried ? CARRIED_GAP_REASON : OUT_OF_SCOPE_GAP_REASON;
           outcomes.push({ unitOrdinal: newUnit.ordinal, state: 'gap', code, reason });
           unitRecords.push({
             unitOrdinal: newUnit.ordinal,

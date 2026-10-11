@@ -118,7 +118,6 @@ import {
   deriveReusePlan,
   deriveScopePlan,
   requireSelectedRange,
-  resendUnits,
   reusePlanRecord,
   type ReusePlanPredecessor,
   type ScopePlanPredecessor,
@@ -2350,18 +2349,14 @@ export class BaselineAnalysisStore {
 
   /**
    * The units a Task's frozen reuse plan recomputes whose content is the content of an `outcome-unknown` gap of its
-   * predecessor revision (Issue #51, S16c; CONT-011), whatever the reason each is recomputed — matched by the same content key
-   * the reuse plan matches by, so a block inserted before the range moves nothing and no other gap is ever named.
+   * history (Issue #51, S16c; CONT-011), whatever the reason each is recomputed — matched by the same content key
+   * the reuse plan matches by, so a block inserted before the range moves nothing and no other gap is ever named. Empty once
+   * its Run has begun, as `resendUnitsByContentOf` is: the history then holds the Task's own revision, which never counts against it.
    */
   resendUnitsOf(projection: BaselineAnalysisProjection): number[] {
-    const update = projection.update;
-    const plan = update?.reusePlan ?? null;
-    if (update === null || plan === null) return [];
-    const row = this.#db.prepare('SELECT * FROM analysis_result_set_revisions WHERE revision_id = ?').get(update.predecessor.revisionId) as SqlRow | undefined;
-    if (row === undefined) return [];
-    const unknown = new Set(this.#unknownGapOrdinals(row));
-    if (unknown.size === 0) return [];
-    return resendUnits(this.#predecessorFacts(row).manifest, unknown, plan);
+    const plan = projection.update?.reusePlan ?? null;
+    if (plan === null) return [];
+    return this.resendUnitsByContentOf(projection);
   }
 
   /**
