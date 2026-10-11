@@ -208,6 +208,56 @@ function radio(name: string, value: string, label: string, checked: boolean, dis
   return wrapper;
 }
 
+/**
+ * 评估's 允许参考 fieldset (Issue #428, #795 item 7): the statement and background note, one choice per offered 资料库 item with
+ * its extracted length, why a choice is off, the send line for a bounded selection, and the latest Tasks' frozen rows. Ticking
+ * one updates `selected` and asks the page to repaint its fieldset. Exported so the real rows run under a DOM stub in tests.
+ */
+export function evaluationMaterialsField(
+  page: Pick<EvaluationWorkspaceProjection, 'materials' | 'materialReferences'>,
+  kind: 'initial' | 'readersReport',
+  selected: Set<string>,
+  available: boolean,
+  busy: boolean,
+  repaint: (materialId: string) => void,
+): HTMLElement {
+  const fieldset = el('fieldset', 'evaluation-materials');
+  fieldset.dataset['evaluationMaterials'] = kind;
+  fieldset.append(el('legend', undefined, '允许参考 · 资料库'));
+  fieldset.append(el('p', 'field-note', page.materials?.statement ?? '暂无可参考的资料库资料。'));
+  fieldset.append(el('p', 'field-note', '资料只提供背景，不改变本社评估方案，也不覆盖定稿的分数、评语与结论。'));
+  const items = page.materials?.items ?? [];
+  const retained = taskMaterialSelection(items, selected);
+  selected.clear();
+  for (const id of retained) selected.add(id);
+  for (const item of items) {
+    const label = el('label', 'evaluation-choice');
+    const input = el('input');
+    input.type = 'checkbox';
+    input.dataset['evaluationMaterial'] = item.materialId;
+    input.checked = selected.has(item.materialId);
+    const reason = taskMaterialSelectionReason(item, items, selected);
+    input.disabled = busy || !available || (reason !== null && !input.checked);
+    input.addEventListener('change', () => {
+      if (input.checked) selected.add(item.materialId);
+      else selected.delete(item.materialId);
+      repaint(item.materialId);
+    });
+    label.append(input, el('span', undefined, `《${item.title}》 · 已提取 ${item.characters.toLocaleString('en-US')} 字`));
+    if (reason !== null) label.append(el('span', 'field-note', reason));
+    fieldset.append(label);
+  }
+  if ((page.materials?.more ?? 0) > 0) fieldset.append(el('p', 'field-note', `另有 ${page.materials!.more} 份资料未列出。`));
+  const sending = taskMaterialSendLine(items, selected);
+  if (sending !== null) fieldset.append(el('p', 'field-note evaluation-material-send', sending));
+  const frozen = page.materialReferences?.[kind] ?? [];
+  if (frozen.length > 0) {
+    fieldset.append(el('p', 'field-note', '这份计划允许参考：'));
+    for (const line of frozen) fieldset.append(el('p', 'field-note evaluation-material-pin', line));
+  }
+  return fieldset;
+}
+
 export function mountEvaluation(options: MountEvaluationOptions): { load(): Promise<void>; refresh(): void } {
   const { root, api, setStatus, errorMessage, technicalDetails } = options;
   root.classList.add('evaluation');
@@ -234,43 +284,9 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       : null,
   });
 
-  const materialsNode = (page: EvaluationWorkspaceProjection, kind: 'initial' | 'readersReport', selected: Set<string>, available: boolean): HTMLElement => {
-    const fieldset = el('fieldset', 'evaluation-materials');
-    fieldset.dataset['evaluationMaterials'] = kind;
-    fieldset.append(el('legend', undefined, '允许参考 · 资料库'));
-    fieldset.append(el('p', 'field-note', page.materials?.statement ?? '暂无可参考的资料库资料。'));
-    fieldset.append(el('p', 'field-note', '资料只提供背景，不改变本社评估方案，也不覆盖定稿的分数、评语与结论。'));
-    const items = page.materials?.items ?? [];
-    const retained = taskMaterialSelection(items, selected);
-    selected.clear();
-    for (const id of retained) selected.add(id);
-    for (const item of items) {
-      const label = el('label', 'evaluation-choice');
-      const input = el('input');
-      input.type = 'checkbox';
-      input.dataset['evaluationMaterial'] = item.materialId;
-      input.checked = selected.has(item.materialId);
-      const reason = taskMaterialSelectionReason(item, items, selected);
-      input.disabled = busy || !available || (reason !== null && !input.checked);
-      input.addEventListener('change', () => {
-        if (input.checked) selected.add(item.materialId);
-        else selected.delete(item.materialId);
-        paint(`[data-evaluation-materials="${kind}"] [data-evaluation-material="${item.materialId}"]`, true);
-      });
-      label.append(input, el('span', undefined, `《${item.title}》 · 已提取 ${item.characters.toLocaleString('en-US')} 字`));
-      if (reason !== null) label.append(el('span', 'field-note', reason));
-      fieldset.append(label);
-    }
-    if ((page.materials?.more ?? 0) > 0) fieldset.append(el('p', 'field-note', `另有 ${page.materials!.more} 份资料未列出。`));
-    const sending = taskMaterialSendLine(items, selected);
-    if (sending !== null) fieldset.append(el('p', 'field-note evaluation-material-send', sending));
-    const frozen = page.materialReferences?.[kind] ?? [];
-    if (frozen.length > 0) {
-      fieldset.append(el('p', 'field-note', '这份计划允许参考：'));
-      for (const line of frozen) fieldset.append(el('p', 'field-note evaluation-material-pin', line));
-    }
-    return fieldset;
-  };
+  const materialsNode = (page: EvaluationWorkspaceProjection, kind: 'initial' | 'readersReport', selected: Set<string>, available: boolean): HTMLElement =>
+    evaluationMaterialsField(page, kind, selected, available, busy,
+      (materialId) => paint(`[data-evaluation-materials="${kind}"] [data-evaluation-material="${materialId}"]`, true));
 
   /**
    * 审稿意见 (Issue #429, S81c; EVAL-013): the 定稿 version it drafts from, that the house has no 审稿意见 among its 范例 yet,

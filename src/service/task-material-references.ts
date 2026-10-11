@@ -56,9 +56,10 @@ export function taskMaterialWords(source: TaskMaterialSource, paragraphs: Readon
 }
 
 export function taskMaterialRefusal(source: TaskMaterialSource, code: string, surface: '审阅' | '评估' = '审阅'): TaskMaterialReading {
-  requireAnalysis(code === 'MATERIAL_INDEX_MOVED' || code === 'MATERIAL_REFERENCE_UNAVAILABLE',
+  requireAnalysis(code === 'MATERIAL_INDEX_MOVED' || code === 'MATERIAL_REFERENCE_UNAVAILABLE' || code === 'MATERIAL_INDEX_RECORD_INVALID',
     'TASK_MATERIAL_RECORD_INVALID', '任务参考资料记录无法核对。');
-  const why = code === 'MATERIAL_INDEX_MOVED' ? '计划冻结的索引版本已不在本机' : '现在不能列进这本书任务的「允许参考」';
+  const why = code === 'MATERIAL_INDEX_MOVED' ? '计划冻结的索引版本已不在本机'
+    : code === 'MATERIAL_INDEX_RECORD_INVALID' ? '的索引记录已损坏' : '现在不能列进这本书任务的「允许参考」';
   return { source, paragraphs: null, refusal: { code, message: `资料《${source.title}》${why}，这份计划不能再开始；可以在「${surface}」重新准备计划。` } };
 }
 

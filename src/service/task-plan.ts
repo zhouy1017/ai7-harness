@@ -889,11 +889,14 @@ const INITIAL_EVALUATION_GOAL_SENTENCES: Readonly<Record<InitialEvaluationTaskMo
 };
 
 /** Evaluation's optional background references: preserve every no-reference projection byte. */
-export function evaluationMaterialPlan(plan: TaskPlanProjection, materials: ReadonlyArray<TaskMaterialReading>): TaskPlanProjection {
+export function evaluationMaterialPlan(plan: TaskPlanProjection, materials: ReadonlyArray<TaskMaterialReading>, refusedLive = false): TaskPlanProjection {
   if (materials.length === 0) return plan;
   const refusal = materials.find((material) => material.refusal !== null)?.refusal ?? null;
   const names = materials.map(({ source }) => `《${source.title}》`).join('、');
-  const sending = plan.scope.send === '不发送任何内容'
+  // Under developer-live a plan listing references cannot start: say nothing would be sent, as 审阅's plan does (#782, #795).
+  const sending = refusedLive
+    ? '不发送任何内容；这份计划列了资料库资料，当前运行范围不能把它们发送给模型，这份计划不能开始'
+    : plan.scope.send === '不发送任何内容'
     ? `不发送任何内容；资料库资料${names}的提取文字也只在本机读取，只参照，不照抄`
     : `${plan.scope.send}；资料库资料${names}的提取文字随稿件一并发往，只参照，不照抄`;
   return {
