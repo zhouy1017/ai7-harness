@@ -435,16 +435,17 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     section.append(materialsNode(page, 'initial', initialMaterialIds, initial.prepare.allowed && (initial.task?.state !== 'prepared' || initialBlocked)));
     if (initial.task !== null) section.append(el('p', 'evaluation-initial-task', evaluationAi7TaskLine(initial.task)));
     const latest = initial.latest;
+    const initialProfile = latest?.profile ?? page.profile;
     if (latest === null) {
       section.append(el('p', 'field-note evaluation-initial-none', EVALUATION_AI7_NONE));
     } else {
       section.dataset['initialRevision'] = latest.revisionId;
       section.dataset['initialCurrent'] = String(latest.current);
-      section.append(el('p', 'evaluation-initial-latest', evaluationAi7LatestLine(page.profile, latest)));
+      section.append(el('p', 'evaluation-initial-latest', evaluationAi7LatestLine(initialProfile, latest)));
       const unread = evaluationAi7UnreadLine(latest);
       if (unread !== null) section.append(el('p', 'field-note evaluation-initial-unread', unread));
       const items = el('ul', 'evaluation-initial-items');
-      for (const item of page.profile.items) {
+      for (const item of initialProfile.items) {
         const ai7 = latest.items.find((entry) => entry.itemId === item.itemId);
         if (ai7 === undefined) continue;
         const line = el('li', undefined, `${item.label}：${evaluationAi7ItemLine(ai7, item.fullMarks)}`);
@@ -462,7 +463,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         if (value.length === 0) continue;
         lists.append(el('dt', undefined, label), el('dd', undefined, value));
       }
-      section.append(lists, el('p', 'field-note evaluation-initial-conclusion', evaluationAi7ConclusionLine(page.profile, latest.suggestedConclusion)));
+      section.append(lists, el('p', 'field-note evaluation-initial-conclusion', evaluationAi7ConclusionLine(initialProfile, latest.suggestedConclusion)));
     }
     const row = el('div', 'button-row evaluation-initial-actions');
     const task = initial.task;
@@ -987,6 +988,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       const set = el('fieldset', 'evaluation-item');
       set.dataset['itemId'] = item.itemId;
       set.append(el('legend', undefined, evaluationItemLegend(item)));
+      if (item.description) set.append(el('p', 'field-note evaluation-item-description', item.description));
       const score = el('input');
       score.type = 'number';
       score.min = '0';

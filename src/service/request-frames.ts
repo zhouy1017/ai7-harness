@@ -372,9 +372,22 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectKnowledgeProcedures':
     // 知识库 › 工序与规则's 可复用工序 and 开发建议 (Issue #65, S30) are the house's too.
     case 'inspectCapturedProcedures':
-    case 'inspectEvaluationProfiles':
     case 'shutdown': {
       requireInput(value.input, [], tentativeId);
+      break;
+    }
+    case 'inspectEvaluationProfiles': {
+      const input = requireInputWithOptional(value.input, [], ['before'], tentativeId);
+      if (input.before !== undefined && input.before !== null && (typeof input.before !== 'number' || !Number.isSafeInteger(input.before) || input.before < 1)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'saveEvaluationProfile': {
+      const input = requireInput(value.input, ['expectedSha256', 'items', 'readiness'], tentativeId);
+      if (!isBoundedString(input.expectedSha256, 64) || !HEX_DIGEST_PATTERN.test(input.expectedSha256) || !Array.isArray(input.items) || input.items.length > 10 || !Array.isArray(input.readiness) || input.readiness.length > 20) throw new ProtocolError(tentativeId);
+      for (const item of input.items) {
+        if (!isRecord(item) || !hasExactKeys(item, ['itemId', 'label', 'description']) || (item.itemId !== null && !isBoundedString(item.itemId, 80)) || !isBoundedString(item.label, 160) || typeof item.description !== 'string' || item.description.length > 4000) throw new ProtocolError(tentativeId);
+      }
+      if (!input.readiness.every((line) => isBoundedString(line, 1600))) throw new ProtocolError(tentativeId);
       break;
     }
     case 'resolveBookWorkbenchRoute': {

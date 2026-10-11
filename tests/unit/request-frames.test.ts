@@ -2007,3 +2007,15 @@ describe('decodeRequest rejects malformed frames', () => {
     ).toBe(id);
   });
 });
+
+
+describe('evaluation profile version commands (KB-002)', () => {
+  it('accepts bounded edits and history cursors, and refuses forged profile fields', () => {
+    const input: InputOf<'saveEvaluationProfile'> = { expectedSha256: 'a'.repeat(64), items: [{ itemId: null, label: '作品品质', description: '合成说明。' }], readiness: ['完成复核。'] };
+    expect(decodeRequest(acceptedFrameOf({ id: randomUUID(), op: 'saveEvaluationProfile', input }))).toMatchObject({ op: 'saveEvaluationProfile', input });
+    expect(decodeRequest(acceptedFrameOf({ id: randomUUID(), op: 'inspectEvaluationProfiles', input: { before: 3 } }))).toMatchObject({ input: { before: 3 } });
+    for (const forged of [{ ...input, total: 200 }, { ...input, risks: [] }, { ...input, items: [{ ...input.items[0], fullMarks: 100 }] }, { ...input, expectedSha256: 'bad' }, { ...input, items: Array(11).fill(input.items[0]) }]) {
+      expect(() => decodeRequest(frameOf({ id: randomUUID(), op: 'saveEvaluationProfile', input: forged }))).toThrow(ProtocolError);
+    }
+  });
+});

@@ -102,7 +102,7 @@ function closedUnits(closed: ReadonlyArray<ClosedUnitOutcome<unknown>>): ClosedI
 }
 
 export function initialEvaluationKindDefinition(profile: InitialEvaluationProfileInput & { readonly sha256: string }): AnalysisKindDefinition {
-  const contract = initialEvaluationContract(profile);
+  const contract = initialEvaluationContract({ ...profile, ...(profile.readiness === undefined ? {} : { profileSha256: profile.sha256 }) });
   const promptContractDigest = initialEvaluationContractDigest(contract);
   const itemIds = contract.profile.items.map((item) => item.itemId);
   return {

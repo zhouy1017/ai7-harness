@@ -72,7 +72,9 @@ const ITEM_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 export interface InitialEvaluationProfileInput {
   readonly profileId: string;
   readonly version: string;
-  readonly items: ReadonlyArray<{ readonly itemId: string; readonly label: string; readonly fullMarks: number }>;
+  readonly items: ReadonlyArray<{ readonly itemId: string; readonly label: string; readonly fullMarks: number; readonly description?: string }>;
+  readonly readiness?: ReadonlyArray<string>;
+  readonly profileSha256?: string;
   readonly conclusions: ReadonlyArray<{ readonly conclusion: EvaluationConclusion; readonly label: string }>;
 }
 
@@ -143,20 +145,25 @@ function frozenProfile(input: InitialEvaluationProfileInput): InitialEvaluationP
     requireAnalysis(isRecord(item) && typeof item.itemId === 'string' && ITEM_ID_PATTERN.test(item.itemId) && line(item.label, 40) &&
       typeof item.fullMarks === 'number' && Number.isSafeInteger(item.fullMarks) && item.fullMarks >= 1 && item.fullMarks <= 100,
     'EVALUATION_PROFILE_INVALID', '评估方案的评分项无效。');
-    return { itemId: item.itemId, label: item.label, fullMarks: item.fullMarks };
+    requireAnalysis(item.description === undefined || item.description === '' || line(item.description, 500), 'EVALUATION_PROFILE_INVALID', '评分项说明无效。');
+    return { itemId: item.itemId, label: item.label, fullMarks: item.fullMarks, ...(item.description === undefined ? {} : { description: item.description }) };
   });
   requireAnalysis(new Set(items.map((item) => item.itemId)).size === items.length, 'EVALUATION_PROFILE_INVALID', '评估方案的评分项重复。');
   const conclusions = input.conclusions.map((entry) => ({ conclusion: entry.conclusion, label: entry.label }));
   requireAnalysis(conclusions.length === EVALUATION_CONCLUSIONS.length && conclusions.every((entry, index) => entry.conclusion === EVALUATION_CONCLUSIONS[index] && line(entry.label, 20)),
     'EVALUATION_PROFILE_INVALID', '评估方案的结论无效。');
-  return { profileId: input.profileId, version: input.version, items, conclusions };
+  requireAnalysis(input.readiness === undefined || (Array.isArray(input.readiness) && input.readiness.length <= 20 && input.readiness.every((entry) => line(entry, 200))), 'EVALUATION_PROFILE_INVALID', '就绪清单无效。');
+  requireAnalysis(input.profileSha256 === undefined || (typeof input.profileSha256 === 'string' && DIGEST_PATTERN.test(input.profileSha256)), 'EVALUATION_PROFILE_INVALID', '评估方案摘要无效。');
+  return { profileId: input.profileId, version: input.version, items, conclusions,
+    ...(input.readiness === undefined ? {} : { readiness: input.readiness }), ...(input.profileSha256 === undefined ? {} : { profileSha256: input.profileSha256 }) };
 }
 
 function systemPromptOf(profile: InitialEvaluationProfileInput): string {
   return [
     `你是 AI7 的审稿评估组件，按本社评估方案「${profile.profileId}」第 ${profile.version} 版为书稿做初评。你只处理用户消息中给出的一个分析单元，逐块阅读，记下这一单元里与各评分项有关的依据。`,
     '评分项（每条以评分项编号开头；只记与这些评分项有关的依据）：',
-    ...profile.items.map((item) => `- [${item.itemId}] ${item.label}（满分 ${item.fullMarks}）`),
+    ...profile.items.map((item) => `- [${item.itemId}] ${item.label}（满分 ${item.fullMarks}）${item.description ? `：${item.description}` : ''}`),
+    ...(profile.readiness === undefined ? [] : ['就绪清单（仅作参考）：', ...profile.readiness.map((entry) => `- ${entry}`)]),
     '本步只记依据，不打分、不下结论、不改写稿件、不调用任何工具、不引用外部资料。',
     '每条依据精确包含以下键：itemId（上面列出的评分项编号之一）、note（这条依据说明了什么，不超过 200 字素）、blockOrdinals（它所依据的内容块序号数组，至少 1 个、至多 8 个、不重复）。',
     '内容块序号从 1 开始，按用户消息中列出的顺序计数：先是重叠上下文的内容块，然后是本单元的内容块。',

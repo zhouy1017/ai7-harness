@@ -195,9 +195,9 @@ function compared(value: number | 'not-rated' | null): string {
 export function evaluationComparisonLines(profile: EvaluationProfileProjection, comparison: EvaluationComparisonProjection): { heading: string; lines: string[] } {
   const lines: string[] = [];
   for (const item of comparison.items) {
-    if (item.previous === item.current) continue;
-    const label = profile.items.find((entry) => entry.itemId === item.itemId)?.label ?? item.itemId;
-    lines.push(`${label}：${compared(item.previous)} → ${compared(item.current)}`);
+    if (item.previous === item.current && item.change == null) continue;
+    const label = item.label ?? profile.items.find((entry) => entry.itemId === item.itemId)?.label ?? item.itemId;
+    lines.push(item.change === 'added' ? `${label}：新增评分项` : item.change === 'removed' ? `${label}：已移除（原得分 ${compared(item.previous)}）` : `${label}：${compared(item.previous)} → ${compared(item.current)}`);
   }
   for (const risk of comparison.risks) {
     if (risk.previous === risk.current) continue;
