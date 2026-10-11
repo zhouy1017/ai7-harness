@@ -5121,6 +5121,10 @@ export class EditorialStore {
         if (error instanceof StoreError && (error.code === 'MATERIAL_INDEX_MOVED' || error.code === 'MATERIAL_REFERENCE_UNAVAILABLE')) {
           return taskMaterialRefusal(source, error.code, surface);
         }
+        // A corrupt index record degrades 评估 to that reference, named plainly (Issue #795); 审阅 keeps it propagating.
+        if (surface === '评估' && error instanceof StoreError && error.code === 'MATERIAL_INDEX_RECORD_INVALID') {
+          return taskMaterialRefusal(source, error.code, surface);
+        }
         throw error;
       }
       return this.#analysisCall(() => taskMaterialWords(source, paragraphs));
@@ -5154,11 +5158,17 @@ export class EditorialStore {
     return references;
   }
 
-  #taskMaterialOffers(bookId: string): NonNullable<ReviewWorkspaceProjection['materials']> {
+  #taskMaterialOffers(bookId: string, surface: '审阅' | '评估' = '审阅'): NonNullable<ReviewWorkspaceProjection['materials']> {
     const live = this.#baselineAnalysis.launch.live !== null;
     const indexed = this.#libraryCall(() => this.#libraryMaterials.referable(bookId)).flatMap((item) => {
-      const build = this.#materialIndexCall(() => this.#materialIndex.current(item.materialId));
-      return build === null || build.state !== 'complete' ? [] : [{ ...item, characters: build.metadata.characters }];
+      try {
+        const build = this.#materialIndexCall(() => this.#materialIndex.current(item.materialId));
+        return build === null || build.state !== 'complete' ? [] : [{ ...item, characters: build.metadata.characters }];
+      } catch (error) {
+        // A damaged build cannot be offered again; 评估's frozen reference row carries its named refusal (#795).
+        if (surface === '评估' && error instanceof StoreError && error.code === 'MATERIAL_INDEX_RECORD_INVALID') return [];
+        throw error;
+      }
     });
     return {
       statement: live ? TASK_MATERIAL_LIVE_UNAVAILABLE : indexed.length === 0 ? TASK_MATERIALS_NONE : TASK_MATERIALS_STATEMENT,
@@ -5398,7 +5408,7 @@ export class EditorialStore {
           }),
         },
       }));
-      return { plan: withPlanMovedReason(withResend(evaluationMaterialPlan(plan, this.#evaluationPlanMaterials(latest.ledger, input.bookId, projection.authorization !== null)), this.#analysisCall(() => latest.ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(withResend(evaluationMaterialPlan(plan, this.#evaluationPlanMaterials(latest.ledger, input.bookId, projection.authorization !== null), this.#baselineAnalysis.launch.live !== null), this.#analysisCall(() => latest.ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     if (input.kind === 'evaluation-rewrite') {
       // 按我的评分重写评语 (Issue #429, S81b2): the rewrite kind's latest Task, on the ledger of the contract its plan froze.
@@ -5447,7 +5457,7 @@ export class EditorialStore {
       // The profile the Task froze (Issue #427), never the house's current one, beside the references its plan froze (#428).
       const profile = this.#initialProfileForTask(projection.taskIntent.taskIntentId);
       const plan = this.#taskPlanCall(() => initialEvaluationPlan({ projection, bookTitle, blocks, profile }));
-      return { plan: withPlanMovedReason(withResend(evaluationMaterialPlan(plan, this.#evaluationPlanMaterials(ledger, input.bookId, projection.authorization !== null)), this.#analysisCall(() => ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(withResend(evaluationMaterialPlan(plan, this.#evaluationPlanMaterials(ledger, input.bookId, projection.authorization !== null), this.#baselineAnalysis.launch.live !== null), this.#analysisCall(() => ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     const reviewRunId = input.ref;
     requireStore(reviewRunId !== null, 'TASK_PLAN_INVALID', '审阅的计划要指明是哪一次审阅。');
@@ -8629,7 +8639,7 @@ export class EditorialStore {
     };
     const initial = frozenOf(page.initial.task);
     const readersReport = frozenOf(page.readersReport.task);
-    return { ...page, materials: this.#taskMaterialOffers(page.bookId), materialReferences: {
+    return { ...page, materials: this.#taskMaterialOffers(page.bookId, '评估'), materialReferences: {
       initial: initial.lines, readersReport: readersReport.lines, blocked: { initial: initial.blocked, readersReport: readersReport.blocked },
     } };
   }
