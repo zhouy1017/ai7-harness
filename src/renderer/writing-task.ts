@@ -26,6 +26,8 @@ import {
   writingFieldTooLong,
   writingMaterialLabel,
   writingMaterialsMore,
+  writingMaterialsOverTotalNote,
+  WRITING_MATERIALS_AT_LIMIT,
   WRITING_QUICK_PICK_TYPE,
   writingQuickFailed,
   writingQuickNote,
@@ -345,10 +347,8 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
         box.dataset['writingMaterial'] = item.materialId;
         box.checked = state.materialIds.includes(item.materialId);
         const reasonText = item.reason ?? (box.checked ? null : state.materialIds.length >= 4
-          ? '写作任务最多参考 4 份资料库资料；请少选几份。'
-          : selectedCharacters + item.characters > 6_000
-            ? `所选资料合计已提取 ${(selectedCharacters + item.characters).toLocaleString('en-US')} 字，超过合计 6,000 字的上限；请少选几份。`
-            : null);
+          ? WRITING_MATERIALS_AT_LIMIT
+          : selectedCharacters + item.characters > 6_000 ? writingMaterialsOverTotalNote(selectedCharacters + item.characters) : null);
         box.disabled = busy || !item.selectable || reasonText !== null;
         box.addEventListener('change', () => {
           state.materialIds = box.checked

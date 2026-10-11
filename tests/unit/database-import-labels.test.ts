@@ -180,7 +180,7 @@ describe('导入数据库\'s words', () => {
       series: '书系关系与书系知识不随图书合并。',
       'internal-number': '内部编号已被本机其他图书使用的，合并后不带内部编号。',
       'writing-exemplar': '写作任务参照的其他图书的范例和导入的以前图书范例不随图书合并：这些起草的结果和草稿照常可看、可打开，但不能再开始，需要时重新准备。',
-      'writing-material': '写作任务参考的资料库资料的索引版本不随图书合并：这些起草的结果和草稿照常可看、可打开，但不能再开始，可以用「新建文档…」重新准备。',
+      'writing-material': '写作任务参考的资料库资料的索引版本不随图书合并，不属于被合并图书的资料本身也不随图书合并：这些起草的结果和草稿照常可看、可打开，但不能再开始，可以用「新建文档…」重新准备。',
     });
     // The count is every Book the merge takes, however few it lists (Issue #434 review).
     expect(databasePendingLines({ kind: 'merge', packageFileName: 'AI7 数据库.ai7db', backupFileName: 'AI7 合并前备份 1.ai7db', mergeBooksTotal: 73 })).toEqual([
