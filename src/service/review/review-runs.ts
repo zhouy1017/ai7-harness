@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { TASK_MATERIAL_LIVE_UNAVAILABLE, taskMaterialSources, type TaskMaterialBoundary, type TaskMaterialReading } from '../task-material-references.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   EDITORIAL_REVIEW_KIND_PREFIX,
@@ -574,7 +575,9 @@ function boundedTitle(title: string): string {
  * kind's, and the leads read the baseline's.
  */
 export interface ReviewRunLedgers {
-  ledgerOf(entry: ReviewCategoryConfigurationEntry): BaselineAnalysisStore;
+  ledgerOf(entry: ReviewCategoryConfigurationEntry, materials?: TaskMaterialBoundary, frozenPromptDigest?: string, latestForBook?: string): BaselineAnalysisStore;
+  materialReadings?(boundary: TaskMaterialBoundary): ReadonlyArray<TaskMaterialReading>;
+  materialOffers?(bookId: string): NonNullable<ReviewWorkspaceProjection['materials']>;
   baseline(): BaselineAnalysisStore;
 }
 
@@ -601,6 +604,7 @@ interface SnapshotCategory {
 
 /** The canonical record of `review_runs`. */
 interface RunSnapshot {
+  readonly materialReferences?: TaskMaterialBoundary;
   readonly schema: typeof RUN_SCHEMA;
   readonly reviewRunId: string;
   readonly bookId: string;
@@ -768,6 +772,7 @@ interface RunView {
  * approval — why that approval would now be refused, in the words the refusal itself uses (D8).
  */
 export interface ReviewRunPlanFacts {
+  readonly materials?: ReadonlyArray<Pick<TaskMaterialReading, 'source' | 'refusal'>>;
   readonly reviewRunId: string;
   readonly ordinal: number;
   readonly label: string;
@@ -820,6 +825,7 @@ export type ReviewRunPrepareInput =
      * its ledger: the Run records it as its pin, with the steps the Book could not take left out and said why.
      */
     procedure?: ReviewRunProcedurePinInput | null;
+    materialReferences?: TaskMaterialBoundary;
   }
   | { phase: 'advance'; workId: string }
   | { phase: 'cancel'; workId: string }
@@ -842,6 +848,7 @@ interface PlannedCategory {
 }
 
 interface PreparationWork {
+  readonly materialReferences?: TaskMaterialBoundary;
   readonly workId: string;
   readonly bookId: string;
   readonly configuration: ReviewCategoryConfiguration;
@@ -985,6 +992,7 @@ export class ReviewRunStore {
       bookId,
       configuration: house,
       launchPolicy: structuredClone(input.launchPolicy),
+      ...(input.materialReferences === undefined ? {} : { materialReferences: input.materialReferences }),
       scope,
       planned,
       prepared: [],
@@ -1061,7 +1069,7 @@ export class ReviewRunStore {
           work.index += 1;
           continue;
         }
-        const ledger = this.#ledgers.ledgerOf(planned.entry);
+        const ledger = this.#ledgers.ledgerOf(planned.entry, planned.entry.executor === 'review-category-contract' ? work.materialReferences : undefined);
         const request = this.#ledgerRequest(work, planned.plan.mode, planned.plan.selectedRange, ledger);
         const result = work.ledgerWorkId === null
           ? ledger.prepare({ ...request, reconfirm: false })
@@ -1101,7 +1109,7 @@ export class ReviewRunStore {
     this.#work.delete(work.workId);
     const planned = work.planned[work.index];
     if (work.ledgerWorkId !== null && planned !== undefined) {
-      this.#ledgers.ledgerOf(planned.entry).prepare({ phase: 'cancel', workId: work.ledgerWorkId });
+      this.#ledgers.ledgerOf(planned.entry, planned.entry.executor === 'review-category-contract' ? work.materialReferences : undefined).prepare({ phase: 'cancel', workId: work.ledgerWorkId });
     }
   }
 
@@ -1141,6 +1149,10 @@ export class ReviewRunStore {
   /** The Run as prepared, 第 N 次 of its Book, bound to the manuscript as it stands when the last plan froze. */
   #writeRun(work: PreparationWork): string {
     const head = this.#head(work.bookId);
+    if (work.materialReferences !== undefined) {
+      const refusal = this.#ledgers.materialReadings!(work.materialReferences).find((reading) => reading.refusal !== null)?.refusal;
+      requireReview(refusal === undefined, refusal?.code ?? 'REVIEW_PLAN_CHANGED', refusal?.message ?? '');
+    }
     requireReview(head !== null, 'REVIEW_MANUSCRIPT_ABSENT', NO_MANUSCRIPT_REASON);
     const reviewRunId = randomUUID();
     const createdAt = new Date().toISOString();
@@ -1148,6 +1160,7 @@ export class ReviewRunStore {
       const last = this.#db.prepare('SELECT max(ordinal) last FROM review_runs WHERE book_id = ?').get(work.bookId) as SqlRow;
       const ordinal = last.last === null ? 1 : integer(last.last) + 1;
       const snapshot: RunSnapshot = {
+        ...(work.materialReferences === undefined ? {} : { materialReferences: work.materialReferences }),
         schema: RUN_SCHEMA,
         reviewRunId,
         bookId: work.bookId,
@@ -1231,6 +1244,9 @@ export class ReviewRunStore {
       tasks.every((category) => approved.get(category.categoryId) === category.task!.planEnvelopeDigest),
     'REVIEW_AUTHORIZATION_STALE', '授权所依据的计划与这次审阅准备的计划不一致；请重新查看计划。');
     if (existing !== null) return;
+    requireReview(snapshot.materialReferences === undefined || this.#ledgers.baseline().launch.live === null, 'REVIEW_MATERIAL_UNAVAILABLE', TASK_MATERIAL_LIVE_UNAVAILABLE);
+    const unavailableMaterial = this.#materialReadings(snapshot).find((reading) => reading.refusal !== null)?.refusal;
+    requireReview(unavailableMaterial === undefined, unavailableMaterial?.code ?? 'REVIEW_PLAN_CHANGED', unavailableMaterial?.message ?? '');
     const latest = this.#db.prepare('SELECT review_run_id FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC LIMIT 1').get(bookId) as SqlRow;
     requireReview(text(latest.review_run_id) === reviewRunId, 'REVIEW_RUN_SUPERSEDED', '这次审阅的计划已被之后准备的一次取代；请授权最新的一次。');
     requireReview(!this.#bookIsDriving(bookId), 'REVIEW_RUN_ACTIVE', RUN_ACTIVE_REASON);
@@ -1241,7 +1257,7 @@ export class ReviewRunStore {
     // A 当前选区 whose paragraphs were removed or reordered since it was prepared is chosen again, never started (P2-2).
     requireReview(!this.#selectionMoved(snapshot), 'REVIEW_PLAN_CHANGED', SELECTION_MOVED_REASON);
     for (const category of tasks) {
-      const projection = this.#ledgers.ledgerOf(category.entry).inspect(bookId);
+      const projection = this.#categoryLedger(category).inspect(bookId);
       requireReview(projection.taskIntent?.taskIntentId === category.task!.taskIntentId && projection.state === 'prepared' &&
         projection.actions.canAuthorize && projection.planEnvelope?.digest === category.task!.planEnvelopeDigest,
       'REVIEW_PLAN_CHANGED', `「${category.entry.label}」的计划已经变化；请重新准备这次审阅。`);
@@ -1330,7 +1346,7 @@ export class ReviewRunStore {
     const view = this.#runStateView(snapshot);
     const categories = view.categories.map((categoryView) => {
       const { category } = categoryView;
-      const frozen = category.task === null ? null : this.#ledgers.ledgerOf(category.entry).frozenPlan(category.task.taskIntentId, category.task.planEnvelopeDigest);
+      const frozen = category.task === null ? null : this.#categoryLedger(category).frozenPlan(category.task.taskIntentId, category.task.planEnvelopeDigest);
       return {
         categoryId: category.categoryId,
         label: category.entry.label,
@@ -1356,6 +1372,8 @@ export class ReviewRunStore {
     });
     const staleReasons: string[] = [];
     if (view.authorization === null) {
+      if (snapshot.materialReferences !== undefined && this.#ledgers.baseline().launch.live !== null) staleReasons.push(TASK_MATERIAL_LIVE_UNAVAILABLE);
+      staleReasons.push(...this.#materialReadings(snapshot).flatMap((reading) => reading.refusal === null ? [] : [reading.refusal.message]));
       const latest = this.#db.prepare('SELECT review_run_id FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC LIMIT 1').get(bookId) as SqlRow;
       if (text(latest.review_run_id) !== reviewRunId) {
         staleReasons.push('这次审阅的计划已被之后准备的一次取代；请授权最新的一次。');
@@ -1367,7 +1385,7 @@ export class ReviewRunStore {
           if (category.task === null) continue;
           let current: AnalysisProjection | null = null;
           try {
-            current = this.#ledgers.ledgerOf(category.entry).inspect(bookId);
+            current = this.#categoryLedger(category).inspect(bookId);
           } catch (error) {
             if (!(error instanceof AnalysisError)) throw error;
           }
@@ -1385,6 +1403,7 @@ export class ReviewRunStore {
     const firstCheckpoint = categories.find((category) => category.checkpoint !== null)?.checkpoint ?? null;
     const firstTask = snapshot.categories.find((category) => category.task !== null);
     return {
+      ...(snapshot.materialReferences === undefined ? {} : { materials: this.#materialReadings(snapshot).map((reading) => view.authorization === null ? reading : { ...reading, refusal: null }) }),
       reviewRunId: snapshot.reviewRunId,
       ordinal: snapshot.ordinal,
       label: `第 ${snapshot.ordinal} 次`,
@@ -1399,7 +1418,7 @@ export class ReviewRunStore {
       inputRevision: firstCheckpoint === null
         ? { revisionId: snapshot.manuscript.revisionId, revisionLabel: snapshot.manuscript.revisionLabel, createdForDirtyJournal: false }
         : { revisionId: firstCheckpoint.revisionId, revisionLabel: firstCheckpoint.revisionLabel, createdForDirtyJournal: firstCheckpoint.createdForDirtyJournal },
-      live: (firstTask === undefined ? this.#ledgers.baseline() : this.#ledgers.ledgerOf(firstTask.entry)).launch.live,
+      live: (firstTask === undefined ? this.#ledgers.baseline() : this.#categoryLedger(firstTask)).launch.live,
       categories: categories.map(({ checkpoint: _checkpoint, ...category }) => category),
       staleReasons,
     };
@@ -1488,10 +1507,29 @@ export class ReviewRunStore {
     }));
   }
 
+  #categoryLedger(category: SnapshotCategory): BaselineAnalysisStore {
+    if (category.task === null || category.entry.executor !== 'review-category-contract') return this.#ledgers.ledgerOf(category.entry);
+    const frozen = this.#ledgers.ledgerOf(category.entry).frozenPlan(category.task.taskIntentId, category.task.planEnvelopeDigest);
+    const execution = frozen.components['execution-plan'] as Record<string, unknown>;
+    if (execution.materialReferences === undefined) return this.#ledgers.ledgerOf(category.entry);
+    const references = taskMaterialSources(execution.materialReferences);
+    const envelope = frozen.components['plan-envelope'] as Record<string, unknown>;
+    const intent = this.#db.prepare('SELECT book_id FROM analysis_task_intents WHERE task_intent_id = ?').get(category.task.taskIntentId) as SqlRow;
+    return this.#ledgers.ledgerOf(category.entry, { bookId: text(intent.book_id), references }, String(envelope.promptContractDigest));
+  }
+
+  #materialReadings(snapshot: RunSnapshot): ReadonlyArray<TaskMaterialReading> {
+    return snapshot.materialReferences === undefined ? [] : this.#ledgers.materialReadings!(snapshot.materialReferences);
+  }
+
   #snapshotOf(row: SqlRow): RunSnapshot {
     const record = recordOf(text(row.canonical_json), text(row.sha256)) as unknown as RunSnapshot;
     requireReview(record.schema === RUN_SCHEMA && record.reviewRunId === text(row.review_run_id) && record.bookId === text(row.book_id) &&
       record.ordinal === integer(row.ordinal) && Array.isArray(record.categories), 'REVIEW_RECORD_INVALID', '审阅记录无效。');
+    if (record.materialReferences !== undefined) {
+      requireReview(record.materialReferences.bookId === record.bookId, 'REVIEW_RECORD_INVALID', '审阅参考资料记录无效。');
+      taskMaterialSources(record.materialReferences.references);
+    }
     return record;
   }
 
@@ -1564,7 +1602,7 @@ export class ReviewRunStore {
       if (category.task === null) continue;
       let current: AnalysisProjection | null = null;
       try {
-        current = this.#ledgers.ledgerOf(category.entry).inspect(snapshot.bookId);
+        current = this.#categoryLedger(category).inspect(snapshot.bookId);
       } catch (error) {
         if (!(error instanceof AnalysisError)) throw error;
       }
@@ -1752,7 +1790,7 @@ export class ReviewRunStore {
     // A ledger Run still only authorized is one an earlier hand-off never got to the owner — the startup reconciliation
     // leaves it so for 继续审阅 (Issue #657 review) — and is dispatched; every other Run is settled from its own record,
     // including one the owner took that this history never heard of.
-    const ledger = this.#ledgers.ledgerOf(category.entry);
+    const ledger = this.#categoryLedger(category);
     return ledger.currentRunState(runRecordId) === 'authorized' ? { kind: 'dispatch', runRecordId, ledger } : SETTLE;
   }
 
@@ -1781,7 +1819,7 @@ export class ReviewRunStore {
       });
       return null;
     }
-    const ledger = this.#ledgers.ledgerOf(category.entry);
+    const ledger = this.#categoryLedger(category);
     // House guideline text never reaches a live model before the Owner admits it, whenever the Run was prepared.
     const withheld = houseGuidelineRefusal(category.entry, ledger.launch.live !== null);
     if (withheld !== null) {
@@ -1817,7 +1855,7 @@ export class ReviewRunStore {
    */
   refuseDispatch(reviewRunId: string, categoryId: string, runRecordId: string, code: string, message: string): void {
     const { category } = this.#category(reviewRunId, categoryId);
-    const ledger = this.#ledgers.ledgerOf(category.entry);
+    const ledger = this.#categoryLedger(category);
     const stopping = code === 'EXECUTION_STOPPING';
     const detail = stopping ? `服务正在停止，这一类的运行没有开始（${code}）。` : `运行未能进入调度（${code}）：${message}`;
     transact(this.#db, () => {
@@ -1837,7 +1875,7 @@ export class ReviewRunStore {
     requireReview(category.task !== null, 'REVIEW_CATEGORY_NOT_TASK_BACKED', '这一类没有任务。');
     const runRecordId = this.#runRecordOf(category.task.taskIntentId);
     requireReview(runRecordId !== null, 'REVIEW_RECORD_INVALID', '这一类的运行记录缺失。');
-    const ledger = this.#ledgers.ledgerOf(category.entry);
+    const ledger = this.#categoryLedger(category);
     const state = ledger.currentRunState(runRecordId);
     if (state === 'authorized') return;
     transact(this.#db, () => {
@@ -1890,7 +1928,7 @@ export class ReviewRunStore {
       const detail = `这一类未能完成（${code}）：${message}`;
       const runRecordId = category.task === null ? null : this.#runRecordOf(category.task.taskIntentId);
       if (runRecordId !== null) {
-        const ledger = this.#ledgers.ledgerOf(category.entry);
+        const ledger = this.#categoryLedger(category);
         if (ledger.currentRunState(runRecordId) === 'authorized') ledger.recordRunState(runRecordId, 'failed', { detail, code });
       }
       this.#recordEvent(reviewRunId, categoryId, 'failed', detail, { runRecordId, extra: { code } });
@@ -1945,7 +1983,7 @@ export class ReviewRunStore {
       if (reconciled.has(kind)) continue;
       let ledger: BaselineAnalysisStore;
       try {
-        ledger = this.#ledgers.ledgerOf(this.#category(text(row.review_run_id), text(row.category_id)).category.entry);
+        ledger = this.#categoryLedger(this.#category(text(row.review_run_id), text(row.category_id)).category);
       } catch {
         // This snapshot does not read back; another Run of the kind, or 继续审阅, may still reach its ledger.
         continue;
@@ -1967,7 +2005,7 @@ export class ReviewRunStore {
     }
     const settled = this.#events(reviewRunId, categoryId).find((event) => event.state === 'settled');
     requireReview(settled !== undefined && settled.resultSetRevisionId !== null, 'REVIEW_RECORD_INVALID', '这一类还没有可写入的结果集修订版。');
-    const ledger = this.#ledgers.ledgerOf(category.entry);
+    const ledger = this.#categoryLedger(category);
     const inspected = ledger.inspect(snapshot.bookId, undefined, settled.resultSetRevisionId).inspectedRevision;
     requireReview(inspected !== null, 'REVIEW_RECORD_INVALID', '这一类的结果集修订版缺失。');
     const revision = inspected.revision;
@@ -2477,6 +2515,7 @@ export class ReviewRunStore {
     const run = opened === null ? null : this.#runProjection(views.get(opened.reviewRunId)!, readings, chapters, page);
     const workspace: ReviewWorkspaceProjection = {
       bookId,
+      ...(this.#ledgers.materialOffers === undefined ? {} : { materials: this.#ledgers.materialOffers(bookId) }),
       manuscript: head,
       configuration: this.#configurationPin(house),
       categories: readings.map((reading) => this.#workspaceCategory(reading, chapters)),
@@ -2763,7 +2802,7 @@ export class ReviewRunStore {
       const runRecordId = this.#runRecordOf(category.task.taskIntentId);
       if (runRecordId === null) continue;
       if (this.#events(snapshot.reviewRunId, category.categoryId).some((event) => event.state === 'dispatched')) continue;
-      const ledger = this.#ledgers.ledgerOf(category.entry);
+      const ledger = this.#categoryLedger(category);
       if (ledger.currentRunState(runRecordId) === 'authorized') ledger.recordRunState(runRecordId, 'blocked-before-dispatch', { detail, reasons: [detail] });
     }
   }
@@ -2889,7 +2928,7 @@ export class ReviewRunStore {
     if (withheld !== null) return { entry, unavailableReason: withheld, facts: none, projection: null };
     let projection: AnalysisProjection;
     try {
-      projection = this.#ledgers.ledgerOf(entry).inspect(bookId, progress);
+      projection = this.#ledgers.ledgerOf(entry, undefined, undefined, bookId).inspect(bookId, progress);
     } catch (error) {
       if (error instanceof AnalysisError) return { entry, unavailableReason: error.message, facts: none, projection: null };
       throw error;
@@ -2911,7 +2950,7 @@ export class ReviewRunStore {
     let unread: UnreadChanges = NO_UNREAD_CHANGES;
     if (revision !== null) {
       try {
-        unread = this.#ledgers.ledgerOf(entry).unreadChanges(bookId);
+        unread = this.#ledgers.ledgerOf(entry, undefined, undefined, bookId).unreadChanges(bookId);
       } catch (error) {
         if (error instanceof AnalysisError) return { entry, unavailableReason: error.message, facts: none, projection: null };
         throw error;
@@ -2957,6 +2996,7 @@ export class ReviewRunStore {
       batchApply: entry.batchApply,
       searchEngine: entry.searchEngine,
       modelFree: entry.executor === 'baseline-leads',
+      materialReferencesAllowed: entry.executor === 'review-category-contract',
       basisStatement: reviewCategoryBasisStatement(entry),
       guidelineDocuments: entry.guidelineDocuments.map((document) => ({
         documentId: document.documentId, title: document.title, issuer: document.issuer, version: document.version, clauseCount: document.clauses.length,
@@ -3078,7 +3118,7 @@ export class ReviewRunStore {
       let ledgerRun: ReviewLedgerRunOutcome = 'unfinished';
       if (last?.state === 'dispatched' && last.runRecordId !== null) {
         try {
-          const ledgerState = this.#ledgers.ledgerOf(category.entry).currentRunState(last.runRecordId);
+          const ledgerState = this.#categoryLedger(category).currentRunState(last.runRecordId);
           ledgerRun = ledgerState === 'completed' || ledgerState === 'completed-with-gaps' ? 'completed' : ledgerState === 'failed' ? 'failed' : 'unfinished';
         } catch (error) {
           if (!(error instanceof AnalysisError)) throw error;

@@ -219,6 +219,8 @@ export function applyAssuranceSample(reduction: AnalysisReductionResult, sample:
 }
 
 export interface AnalysisKindDefinition {
+  /** Optional exact Material Index pins, frozen into this Task’s execution plan (Issue #428). */
+  readonly materialReferences?: ReadonlyArray<import('../task-material-references.js').TaskMaterialSource>;
   readonly kind: AnalysisKindId;
   readonly contractVersion: string;
   readonly expectedOutcome: string;

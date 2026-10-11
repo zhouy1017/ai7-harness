@@ -1,3 +1,4 @@
+import { taskMaterialReferenceLine } from './task-material-references.js';
 import type {
   AnalysisReusePlanCounts,
   BaselineAnalysisPlanRevisionProjection,
@@ -2141,6 +2142,7 @@ export function reviewRunPlan(input: {
     : scope.selectedRange !== null ? readRange(blocks, scope.selectedRange) : null;
   const position = scope.kind === 'changed' ? '改动过的章' : reading === null ? scope.label : positionLabel(reading);
   const categories = facts.categories;
+  const materials = facts.materials ?? [];
   const tasks = categories.filter((category) => category.task !== null);
   const procedures = [...new Set(categories.map((category) => category.procedure.title))];
   const firstProcedure = procedures[0] ?? '审阅工序';
@@ -2200,12 +2202,13 @@ export function reviewRunPlan(input: {
     scope: {
       process: `《${bookTitle}》${position}${reading === null ? '' : ` · ${groupedCount(reading.graphemes)} 字`} · ${categories.length} 个类别` +
         (spans === null ? (selection ? '；只在所选段落上标出发现' : '') : selection ? `；读取 ${spans} 作为上下文，只在所选段落上标出发现` : `；读取 ${spans}`),
-      reference: categories.map((category) => category.modelFree
+      reference: [...categories.map((category) => category.modelFree
         ? `${category.label}：基线分析的前后不一致线索与未决事项`
         : category.guidelineDocuments.length === 0
           ? `${category.label}：${category.procedure.title}（第 ${category.procedure.version} 版）`
-          : `${category.label}：${category.guidelineDocuments.map((document) => `${document.issuer}《${document.title}》第 ${document.version} 版`).join('、')}`),
-      send: tasks.length === 0 || !live ? '不发送任何内容' : `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款`,
+          : `${category.label}：${category.guidelineDocuments.map((document) => `${document.issuer}《${document.title}》第 ${document.version} 版`).join('、')}`), ...materials.map(taskMaterialReferenceLine),
+        ...(materials.length === 0 ? [] : ['资料库资料只供调用模型的审阅类别参考；事实核查与只读已有线索的类别不参考这些资料。'])],
+      send: tasks.length === 0 || !live ? materials.length === 0 ? '不发送任何内容' : '不发送任何内容；上面列出的资料库资料也只在本机读取' : `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${materials.length === 0 ? '' : '，以及上面列出的资料库资料原文'}`,
       notRead: scope.kind === 'whole' ? NOT_READ : spans === null ? `所选范围以外的正文；${NOT_READ}` : `${spans}以外的正文；${NOT_READ}`,
     },
     steps: [
@@ -2248,7 +2251,7 @@ export function reviewRunPlan(input: {
     notDo: {
       editorial: [
         ...EDITORIAL_NOT_DO,
-        scope.kind === 'whole' ? '不读这本书以外的内容' : spans === null ? '不读所选范围以外的正文' : `不读${spans}以外的正文`,
+        scope.kind === 'whole' ? materials.length === 0 ? '不读这本书以外的内容' : '不读允许参考以外的资料' : spans === null ? '不读所选范围以外的正文' : `不读${spans}以外的正文`,
         ...(selection ? ['不在所选段落以外标出发现：所读范围里别处的发现只计数，不标在稿件上'] : []),
         ...(riskPoints ? ['不给出合规、查重或政策结论'] : []),
       ],
@@ -2267,6 +2270,7 @@ export function reviewRunPlan(input: {
         : '没有开始的类别可以在「审阅」里新建一次审阅再审。',
     },
     technical: [
+      ...(materials.length === 0 ? [] : [{ key: 'material-references', label: '资料库参考版本', value: materials.map(({ source }) => `《${source.title}》 · ${source.materialId} · 索引版本 ${source.indexDigest}`).join('；') }]),
       { key: 'review-run', label: '审阅记录', value: `${facts.label} · ${facts.reviewRunId} · ${facts.createdAt}` },
       { key: 'manuscript', label: '稿件 pin', value: `${facts.manuscript.revisionLabel} · ${facts.manuscript.revisionId} · 修订日志序号 ${facts.manuscript.journalSequence} · ${facts.manuscript.workingDigest}` },
       { key: 'task-input-revision', label: '任务输入修订版', value: `${facts.inputRevision.revisionLabel} · ${facts.inputRevision.revisionId}` },

@@ -4066,6 +4066,7 @@ function registerRendererHandlers(
           const result = await service.call('prepareReviewRun', {
             categoryIds: input.categoryIds,
             scope: input.scope,
+            ...(input.materialIds === undefined ? {} : { materialIds: input.materialIds }),
             bookId: route.bookId,
             // A sheet pre-filled from a Captured Procedure (Issue #65, S30) names the version it was filled from.
             ...(input.capturedProcedure === undefined || input.capturedProcedure === null ? {} : { capturedProcedure: input.capturedProcedure }),

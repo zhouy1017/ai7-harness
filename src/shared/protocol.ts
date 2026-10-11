@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 121 as const;
+export const SERVICE_PROTOCOL_VERSION = 122 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -4798,6 +4798,8 @@ export interface ReviewAvailabilityProjection {
 
 /** One category of the configuration as the 新建审阅 sheet shows it, its basis stated once (REV-010). */
 export interface ReviewWorkspaceCategoryProjection {
+  /** Only model-calling review contracts consume 资料库 references; factual review does not. */
+  materialReferencesAllowed?: boolean;
   categoryId: string;
   label: string;
   description: string;
@@ -5068,11 +5070,19 @@ export interface ReviewRunProjection {
   capture: ReviewAvailabilityProjection;
 }
 
+export interface TaskMaterialOffersProjection {
+  readonly statement: string;
+  readonly items: ReadonlyArray<WritingTaskMaterialProjection>;
+  readonly more: number;
+}
+
 /**
  * The 审阅 destination of one Book (V2-UX-REV-001 to REV-013): the configured categories with their
  * basis, the coverage matrix, the scope options, the 审阅记录, and the opened Run.
  */
 export interface ReviewWorkspaceProjection {
+  /** Eligible local references offered separately from manuscript scope (Issue #428). */
+  materials?: TaskMaterialOffersProjection;
   bookId: string;
   /** The Book's primary Manuscript as it stands now; `null` for a Book without one. */
   manuscript: null | { manuscriptId: string; branchId: string; revisionId: string; revisionLabel: string; journalSequence: number; workingDigest: string; totalBlocks: number };
@@ -5137,6 +5147,7 @@ export interface InspectReviewWorkspaceInput extends Partial<ReviewFindingPageRe
 }
 
 export interface PrepareReviewRunInput {
+  materialIds?: ReadonlyArray<string>;
   bookId: string;
   categoryIds: ReadonlyArray<string>;
   scope: ReviewRunScopeRequest;
