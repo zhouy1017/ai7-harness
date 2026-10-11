@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 122 as const;
+export const SERVICE_PROTOCOL_VERSION = 125 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -86,6 +86,9 @@ export const IPC_CHANNELS = {
   inspectReviewGuidelines: 'ai7:j15:inspect-review-guidelines',
   previewReviewGuidelineVersion: 'ai7:j15:preview-review-guideline-version',
   importReviewGuidelineVersion: 'ai7:j15:import-review-guideline-version',
+  previewImportedExemplar: 'ai7:kb:preview-imported-exemplar',
+  importEarlierExemplar: 'ai7:kb:import-earlier-exemplar',
+  decideImportedExemplar: 'ai7:kb:decide-imported-exemplar',
   inspectExemplars: 'ai7:j07:inspect-exemplars',
   admitReadersReportExemplar: 'ai7:j07:admit-readers-report-exemplar',
   inspectKnowledgeProcedures: 'ai7:j15:inspect-knowledge-procedures',
@@ -502,6 +505,7 @@ export type BookRecordPresentation =
       sourceVersionDisposition: 'created' | 'reused-same-book';
       retainedBoundary: {
         kind: 'complete-local-file';
+        label: SourceImportRetainedBoundaryLabel;
         format: SourceFormat;
         displayName: string;
         sourceSha256: string;
@@ -825,12 +829,48 @@ export interface BookCreationCommitProjection {
 export type SourceFormat = 'DOCX' | 'DOC' | 'PDF' | 'ODT' | 'RTF' | 'TXT' | 'MD' | 'UNKNOWN';
 
 /**
- * What a source-only import retained. The second label belongs to an original the product kept
- * whole without parsing, so it claims no content or structure identity it did not derive.
+ * What a source-only import retained. The first label belongs to a DOCX the product parsed itself. The next three
+ * belong to a TXT, Markdown or `.doc` file it read through a converter: each names the original format and says it was
+ * converted (Issue #583). The last belongs to an original the product kept whole without parsing, so it claims no
+ * content or structure identity it did not derive.
  */
 export type SourceImportRetainedBoundaryLabel =
   | '保留完整所选 DOCX 文件及本地解析出的完整内容与结构身份'
+  | '保留完整所选 TXT 文件及本地转换出的完整内容与结构身份（已转换）'
+  | '保留完整所选 MD 文件及本地转换出的完整内容与结构身份（已转换）'
+  | '保留完整所选 DOC 文件及本地转换出的完整内容与结构身份（已转换）'
   | '保留完整所选原始文件及其精确身份；未进行本地解析';
+
+/** The label a new Source Import Record carries for a file of this format, parsed or kept whole (Issue #583). */
+export function sourceImportRetainedBoundaryLabel(
+  format: SourceFormat,
+  parsed: boolean,
+): SourceImportRetainedBoundaryLabel {
+  if (!parsed) return '保留完整所选原始文件及其精确身份；未进行本地解析';
+  switch (format) {
+    case 'TXT':
+    case 'MD':
+    case 'DOC':
+      return `保留完整所选 ${format} 文件及本地转换出的完整内容与结构身份（已转换）`;
+    default:
+      return '保留完整所选 DOCX 文件及本地解析出的完整内容与结构身份';
+  }
+}
+
+/**
+ * The labels a stored Source Import Record of this format may carry. A record written before Issue #583 labelled a
+ * converted TXT, Markdown or `.doc` file with the DOCX label, and the label is part of the record digest, so both
+ * stay valid on those formats; nothing else is accepted.
+ */
+export function acceptedSourceImportRetainedBoundaryLabels(
+  format: SourceFormat,
+  parsed: boolean,
+): ReadonlyArray<SourceImportRetainedBoundaryLabel> {
+  const current = sourceImportRetainedBoundaryLabel(format, parsed);
+  return parsed && (format === 'TXT' || format === 'MD' || format === 'DOC')
+    ? [current, sourceImportRetainedBoundaryLabel('DOCX', true)]
+    : [current];
+}
 
 /**
  * The converter a format is read through, and the format it was read from. A format with no
@@ -5935,6 +5975,32 @@ export interface ExemplarBookCursor {
   readonly bookId: string;
 }
 
+/** 导入以前图书的范例 (Issue #427): the chosen file as it will arrive, read and kept nowhere yet. */
+export interface ImportedExemplarPreview {
+  readonly previewId: string;
+  readonly displayName: string;
+  readonly format: 'DOCX' | 'TXT' | 'MD';
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly excerpt: string;
+  readonly types: ReadonlyArray<{ readonly typeId: string; readonly label: string }>;
+}
+export interface ImportedExemplarInput {
+  readonly previewId: string;
+  readonly bookId: string | null;
+  readonly bookTitle: string;
+  readonly authors: ReadonlyArray<string>;
+  readonly editors: ReadonlyArray<string>;
+  readonly typeId: string;
+  readonly expectedVersion: number;
+}
+export interface ImportedExemplarDecisionInput {
+  readonly revisionId: string;
+  readonly revisionDigest: string;
+  readonly expectedDecisions: number;
+  readonly choice: 'house' | 'excluded' | 'deferred';
+}
+
 /** One exemplar: the version of one delivered document of a published Book that stands in 范例. */
 export interface ExemplarProjection {
   readonly documentId: string;
@@ -5956,11 +6022,13 @@ export interface ExemplarProjection {
   /** The latest of them, oldest first, at most `MAX_EXEMPLAR_EARLIER_VERSIONS`. */
   readonly earlierVersions: ReadonlyArray<number>;
   /** The Learning Eligibility it came in with: `仅本社`, the default, asked of no one. */
-  readonly eligibility: 'house-only';
+  readonly eligibility: 'house-only' | 'excluded' | 'deferred';
+  readonly imported?: { readonly decisions: number; readonly sourceName: string };
 }
 
 /** A published Book in 范例: who it is attributed to, its latest 发稿版本, and its exemplars by document type. */
 export interface ExemplarBookProjection {
+  readonly imported?: true;
   readonly bookId: string;
   readonly bookTitle: string;
   /** As the Book's 人员 read now. */
@@ -8345,9 +8413,11 @@ export interface DatabaseImportBookProjection {
 
 /**
  * What stays behind when a package's Books merge: Series, 资料库 items, the 编辑工作区方案's enablement, a 内部编号 taken here — and
- * the 范例 of other Books a merging Book's writing Tasks referenced, when neither merges nor is here (Issue #432 re-review).
+ * the 范例 of other Books a merging Book's writing Tasks referenced, when neither merges nor is here (Issue #432 re-review), and
+ * the 资料库 items' pinned index builds a merging Book's writing Tasks referenced: builds do not merge and a rebuild gets a new
+ * digest, and an item no merging Book owns stays behind itself (Issue #771).
  */
-export type DatabaseMergeNotice = 'series' | 'internal-number' | 'writing-exemplar';
+export type DatabaseMergeNotice = 'series' | 'internal-number' | 'writing-exemplar' | 'writing-material';
 
 /**
  * Whether this AI7 can take a package's data: the same Data Version, and a schema revision it knows. A package from a newer
@@ -11099,6 +11169,19 @@ export interface ServiceOperationMap {
     input: { previewId: string };
     output: ReviewGuidelinesProjection;
   };
+  /** 知识库 › 范例 › 导入以前图书的范例 (Issue #427): preview a file, import it under an earlier Book, decide its eligibility. */
+  previewImportedExemplar: {
+    input: { path: string };
+    output: ImportedExemplarPreview;
+  };
+  importEarlierExemplar: {
+    input: ImportedExemplarInput;
+    output: ExemplarBookProjection;
+  };
+  decideImportedExemplar: {
+    input: ImportedExemplarDecisionInput;
+    output: ExemplarBookProjection;
+  };
   /** 知识库 › 范例 (Issue #427, S79b): the published Books' delivered documents, by Book and type, a page at a time. */
   inspectExemplars: {
     input: { after: ExemplarBookCursor | null };
@@ -11758,6 +11841,9 @@ export interface RendererApi {
   previewReviewGuidelineVersion(input: { documentId: string; previewId?: string; clausePage?: number }): Promise<ReviewGuidelinePreviewProjection | null>;
   importReviewGuidelineVersion(input: { previewId: string }): Promise<ReviewGuidelinesProjection>;
   /** 知识库 › 范例 (Issue #427, S79b): names no Book; it reads the published Books' delivered documents, a page at a time. */
+  previewImportedExemplar(): Promise<ImportedExemplarPreview | null>;
+  importEarlierExemplar(input: ImportedExemplarInput): Promise<ExemplarBookProjection>;
+  decideImportedExemplar(input: ImportedExemplarDecisionInput): Promise<ExemplarBookProjection>;
   inspectExemplars(input?: { after: ExemplarBookCursor | null }): Promise<ExemplarsProjection>;
   /** 知识库 › 范例 › 归入范例 (Issue #429): names its Book; the window's route is not involved. */
   admitReadersReportExemplar(input: AdmitReadersReportExemplarInput): Promise<ExemplarBookProjection>;

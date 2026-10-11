@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
-import { canonicalRecord, isRecord, parseCanonicalJson, requireAnalysis } from './canonical.js';
+import { AnalysisError, canonicalRecord, isRecord, parseCanonicalJson, requireAnalysis, sha256Hex } from './canonical.js';
 
 /**
  * 人工结果确认 — Manual Outcome Resolution (Issue #757; execution CONTEXT.md, ARCHITECTURE.md's failure table: an ambiguous
@@ -87,10 +87,22 @@ export class OutcomeResolutionLedger {
   /** Every outcome key a resolution of this Book settled. */
   resolvedKeys(bookId: string): Set<string> {
     const keys = new Set<string>();
-    for (const row of this.#db.prepare('SELECT canonical_json FROM analysis_outcome_resolutions WHERE book_id = ? ORDER BY rowid').all(bookId) as SqlRow[]) {
-      const record = parseCanonicalJson(String(row.canonical_json));
-      requireAnalysis(isRecord(record) && record.schema === RESOLUTION_SCHEMA && Array.isArray(record.outcomes), 'ANALYSIS_RECORD_INVALID', '人工结果确认记录无效。');
-      for (const key of record.outcomes) if (typeof key === 'string') keys.add(key);
+    for (const row of this.#db.prepare('SELECT * FROM analysis_outcome_resolutions WHERE book_id = ? ORDER BY rowid').all(bookId) as SqlRow[]) {
+      try {
+        const json = String(row.canonical_json);
+        requireAnalysis(sha256Hex(json) === row.sha256, 'ANALYSIS_RECORD_INVALID', '人工结果确认记录无效。');
+        const record = parseCanonicalJson(json);
+        requireAnalysis(isRecord(record) && record.schema === RESOLUTION_SCHEMA && record.bookId === bookId &&
+          record.resolutionId === row.resolution_id && record.resolvedAt === row.resolved_at &&
+          record.determination === OUTCOME_RESOLUTION_DETERMINATION && record.evidenceClass === OUTCOME_RESOLUTION_EVIDENCE &&
+          Array.isArray(record.outcomes) && record.outcomes.length > 0 && record.outcomes.length <= OUTCOME_RESOLUTION_LIMIT &&
+          record.outcomes.every((key) => typeof key === 'string'), 'ANALYSIS_RECORD_INVALID', '人工结果确认记录无效。');
+        for (const key of record.outcomes) if (typeof key === 'string') keys.add(key);
+      } catch (error) {
+        // An unreadable determination settles nothing: its outcomes stay listed and can be kept as gaps again.
+        // The damaged append-only row stays untouched; every other resolution still reads normally.
+        if (!(error instanceof AnalysisError)) throw error;
+      }
     }
     return keys;
   }

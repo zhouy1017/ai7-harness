@@ -98,6 +98,9 @@ export type MergeTablePolicy = 'seed' | 'owned' | 'dependent' | 'shared' | 'excl
 
 export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   books: 'seed',
+  earlier_exemplar_books: 'house',
+  earlier_exemplar_versions: 'house',
+  earlier_exemplar_eligibility: 'house',
   // The Book's manuscripts and their history.
   manuscripts: 'owned',
   manuscript_branches: 'owned',
@@ -333,7 +336,7 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
 };
 
 /** What stays behind when a Book merges, said to the editor. */
-export type MergeNotice = 'series' | 'internal-number' | 'writing-exemplar';
+export type MergeNotice = 'series' | 'internal-number' | 'writing-exemplar' | 'writing-material';
 
 const EXCLUSION_NOTICES: Readonly<Record<string, { notice: MergeNotice; bookColumn: string }>> = {
   series_membership_changes: { notice: 'series', bookColumn: 'book_id' },
@@ -449,11 +452,31 @@ export interface MergeBookPlan {
 function writingExemplarLeftBehind(db: DatabaseSync): boolean {
   if (!tableExists(db, 'src', 'writing_tasks')) return false;
   const merging = `SELECT b.book_id FROM src.books b WHERE ${MERGING_BOOK}`;
+  const importedHere = tableExists(db, 'main', 'earlier_exemplar_versions')
+    ? `AND NOT EXISTS (SELECT 1 FROM main.earlier_exemplar_versions v WHERE v.revision_id = json_extract(e.value, '$.revisionId'))`
+    : '';
   return db.prepare(
     `SELECT 1 FROM src.writing_tasks t, json_each(t.canonical_json, '$.exemplarSources') e
      WHERE t.book_id IN (${merging})
        AND json_extract(e.value, '$.bookId') NOT IN (${merging})
        AND NOT EXISTS (SELECT 1 FROM main.manuscript_block_versions v WHERE v.revision_id = json_extract(e.value, '$.revisionId'))
+       ${importedHere}
+     LIMIT 1`,
+  ).get() !== undefined;
+}
+
+/**
+ * Whether a merging Book's writing Tasks pinned a Material Index build this store does not hold. Builds do not merge, and a build
+ * made here afterwards gets a new digest, never the pinned one: such a Task keeps its pins, outcome and drafts readable but cannot
+ * start again. An item no merging Book owns does not merge either (`library_materials` is `owned`), so its builds are missing too.
+ */
+function writingMaterialLeftBehind(db: DatabaseSync): boolean {
+  if (!tableExists(db, 'src', 'writing_tasks')) return false;
+  return db.prepare(
+    `SELECT 1 FROM src.writing_tasks t, json_each(t.canonical_json, '$.materialSources') m
+     WHERE t.book_id IN (SELECT b.book_id FROM src.books b WHERE ${MERGING_BOOK})
+       AND NOT EXISTS (SELECT 1 FROM main.material_index_builds i
+         WHERE i.material_id = json_extract(m.value, '$.materialId') AND i.sha256 = json_extract(m.value, '$.indexDigest'))
      LIMIT 1`,
   ).get() !== undefined;
 }
@@ -522,6 +545,7 @@ export function planMerge(db: DatabaseSync, listed = MAX_MERGE_BOOKS_LISTED, mer
   }
   if (numberCleared) notices.add('internal-number');
   if (counts.new + counts.sameTitle > 0 && writingExemplarLeftBehind(db)) notices.add('writing-exemplar');
+  if (counts.new + counts.sameTitle > 0 && writingMaterialLeftBehind(db)) notices.add('writing-material');
   const refusal = counts.new + counts.sameTitle === 0 ? null : libraryRefusal(db, `SELECT b.book_id FROM src.books b WHERE ${MERGING_BOOK}`);
   return { books, counts, notices: [...notices].sort(), refusal };
 }

@@ -1,4 +1,5 @@
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
+import { readImportedExemplar } from './imported-exemplars.js';
 import { WRITING_KIND, type WritingDraftWordsProjection } from '../shared/protocol.js';
 import { UUID_PATTERN, canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
 import { graphemeCount } from './analysis/factual-review-contract.js';
@@ -156,7 +157,7 @@ export function writingExemplarDigest(text: string): string {
  * the contract takes, which `excerpt` says. `null` when the revision holds no words here.
  */
 export function readWritingExemplarWords(db: DatabaseSync, revisionId: string): { text: string; excerpt: boolean } | null {
-  const whole = (db.prepare('SELECT text FROM manuscript_block_versions WHERE revision_id = ? ORDER BY position').all(revisionId) as SqlRow[])
+  const whole = readImportedExemplar(db, revisionId)?.text ?? (db.prepare('SELECT text FROM manuscript_block_versions WHERE revision_id = ? ORDER BY position').all(revisionId) as SqlRow[])
     .map((block) => String(block.text)).join('\n');
   const words = writingWords(whole, MAX_EXEMPLAR_GRAPHEMES);
   return words.length === 0 ? null : { text: words, excerpt: graphemeLength(whole.trim()) > MAX_EXEMPLAR_GRAPHEMES };
@@ -208,12 +209,12 @@ export type WritingMaterialReading =
 /** The store's read of a pinned item, `readMaterialIndexForTask` under the Task's own boundary: SELECT-only, nothing sent. */
 export type WritingMaterialReader = (bookId: string, source: WritingMaterialSource) => WritingMaterialReading;
 
-/** What a Task whose 资料库 item does not read at its pinned build says (Issue #428): which item, why, and 改计划重做. */
+/** What a Task whose 资料库 item does not read at its pinned build says: which item, why, and how to prepare again. */
 export function writingMaterialMoved(title: string): string {
-  return `这次起草参考的资料《${title}》，计划冻结的索引版本已不在本机，不能开始；请改计划重做：在「交付物」的新建文档 · 写作任务里重新准备计划。`;
+  return `这次起草参考的资料《${title}》，计划冻结的索引版本已不在本机，不能再开始；可以用「新建文档…」重新准备。`;
 }
 export function writingMaterialUnavailable(title: string): string {
-  return `这次起草参考的资料《${title}》现在不能列进这本书任务的「允许参考」，不能开始；请改计划重做：在「交付物」的新建文档 · 写作任务里重新准备计划。`;
+  return `这次起草参考的资料《${title}》现在不能列进这本书任务的「允许参考」，不能再开始；可以用「新建文档…」重新准备。`;
 }
 
 /** A count as the editor reads a bound: `3,000`. */
@@ -416,9 +417,11 @@ export class WritingTasks {
   #pinnedMaterial(bookId: string, source: WritingMaterialSource): { paragraphs: string[] } | { refusal: { code: string; message: string } } {
     const read = this.#readMaterial(bookId, source);
     if ('refusal' in read) {
-      return { refusal: read.refusal.code === 'MATERIAL_REFERENCE_UNAVAILABLE'
-        ? { code: 'MATERIAL_REFERENCE_UNAVAILABLE', message: writingMaterialUnavailable(source.title) }
-        : { code: 'MATERIAL_INDEX_MOVED', message: writingMaterialMoved(source.title) } };
+      if (read.refusal.code === 'MATERIAL_REFERENCE_UNAVAILABLE') return { refusal: { code: read.refusal.code, message: writingMaterialUnavailable(source.title) } };
+      if (read.refusal.code === 'MATERIAL_INDEX_MOVED' || read.refusal.code === 'LIBRARY_MATERIAL_NOT_FOUND') {
+        return { refusal: { code: 'MATERIAL_INDEX_MOVED', message: writingMaterialMoved(source.title) } };
+      }
+      throw new WritingTaskError(read.refusal.code, read.refusal.message);
     }
     const paragraphs = read.paragraphs.map(writingMaterialParagraph).filter((paragraph) => paragraph.length > 0);
     if (writingMaterialDigest(paragraphs) !== source.sha256) return { refusal: { code: 'MATERIAL_INDEX_MOVED', message: writingMaterialMoved(source.title) } };

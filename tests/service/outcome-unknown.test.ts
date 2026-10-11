@@ -472,6 +472,48 @@ describe('结果待确认 after 取消任务', () => {
     }
   }, 300_000);
 
+  it('never counts a Task\'s own Run against its plan: a 重新分析全书 that first leaves unit 4 结果待确认 names no re-send (#765 review)', async () => {
+    // The happy fixture for the first Task; the second Task's unit 4 answers 结果待确认 on its first send.
+    const unknown4 = [...fixture.entries.values()].find((entry) => entry.unitOrdinal === 4 && entry.response.kind === 'outcome-unknown')!;
+    const happy = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-happy');
+    fixture = happy;
+    const store = await openWithRoute();
+    const first = owner(store);
+    fixture = { ...happy, entries: new Map([...happy.entries, [fixtureEntryKey(4, unknown4.requestDigest, 1), unknown4]]) };
+    const second = owner(store);
+    try {
+      const imported = await importSample1Book(store, roots.codeRoot, 'L2 sample1 自身结果待确认');
+      const bookId = imported.bookId;
+      await pinEditorialWorkspaceProfileRevision2(store, bookId);
+      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+      const initial = prepare(store, bookId);
+      first.admitAndDispatch(store.authorizeBaselineAnalysis(bookId, initial.taskIntent!.taskIntentId, initial.planEnvelope!.digest).dispatchRunRecordId!);
+      await first.whenIdle();
+      expect(store.inspectBaselineAnalysis(bookId, () => null).resultSetRevision!.gaps).toEqual([]);
+      const book = prepareUpdate(store, bookId, 'reanalyze-book');
+      const taskIntentId = book.taskIntent!.taskIntentId;
+      expect(resendOf(store, bookId, taskIntentId)).toBeNull();
+      const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, book.planEnvelope!.digest).dispatchRunRecordId!;
+      second.admitAndDispatch(runRecordId);
+      await second.whenIdle();
+      store.requestBaselineAnalysisCancel(bookId, taskIntentId);
+      second.cancelRun(runRecordId, store.baselineAnalysisLedger);
+      await second.whenIdle();
+      const cancelled = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(cancelled.resultSetRevision!.gaps.map((gap) => [gap.unitOrdinal, gap.code])).toEqual([[4, 'outcome-unknown']]);
+      // Its own send is no earlier request: the cancelled Task's plan names none, and the Task the editor prepares next does.
+      expect(store.baselineAnalysisLedger.resendUnitsOf(cancelled)).toEqual([]);
+      expect(resendOf(store, bookId, taskIntentId)).toBeNull();
+      const next = prepareUpdate(store, bookId, 'reanalyze-book');
+      expect(resendOf(store, bookId, next.taskIntent!.taskIntentId)).toEqual({ units: [4], statement: resendDisclosure([4]) });
+      store.markCleanShutdown();
+    } finally {
+      await first.dispose();
+      await second.dispose();
+      store.close();
+    }
+  }, 300_000);
+
   it('never names an ordinary gap: unit 2 failed for good beside unit 4, and only unit 4 is sent again knowingly', async () => {
     // The one-unit-failure fixture (unit 2 fails for good) with unit 4 answering 结果待确认.
     const failing = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-one-unit-failure');
@@ -564,6 +606,46 @@ describe('结果待确认 after 取消任务', () => {
 // 4 forward as its own outcome-unknown gap — never `not-attempted` — so the next plan still names it and the dispatcher still
 // waits; and the dispatcher's own start refuses a plan that would re-send it, whatever changed since its look.
 describe('结果待确认 carried forward', () => {
+  it('discloses a baseline re-send after the unknown range is edited and then reverted (#765)', async () => {
+    const store = await openWithRoute();
+    const execution = owner(store);
+    try {
+      const stopped = await stoppedRun(store, execution, 'L2 sample1 改后还原');
+      const { bookId } = stopped;
+      store.requestBaselineAnalysisCancel(bookId, stopped.taskIntentId);
+      execution.cancelRun(stopped.runRecordId, store.baselineAnalysisLedger);
+      await execution.whenIdle();
+      const initial = store.inspectBaselineAnalysis(bookId, () => null);
+      const checkpoint = initial.checkpoint!;
+      const blockId = initial.coverageManifest!.units[3]!.blockIds.find((id) => store.baselineAnalysisLedger.readWorkingBlocks(checkpoint.branchId).find((block) => block.blockId === id)?.kind === 'paragraph')!;
+      const edit = (revert: boolean) => {
+        const window = store.getManuscriptWindowAt(checkpoint.manuscriptId, checkpoint.branchId, { kind: 'block', blockId });
+        const block = window.blocks.find((entry) => entry.blockId === blockId)!;
+        store.flushJournalEdit({
+          clientEditId: randomUUID(), manuscriptId: checkpoint.manuscriptId, branchId: checkpoint.branchId, baseRevisionId: window.revisionId,
+          blockId, windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: block.digest, expectedJournalSequence: window.journalSequence,
+          fromGrapheme: 0, toGrapheme: revert ? 1 : 0, insertText: revert ? '' : '改',
+        });
+      };
+      const sync = () => {
+        let work = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_MODE_GOALS['sync-current'], { mode: 'sync-current', selectedRange: null }, launchPolicy);
+        while (!work.done) work = store.advanceBaselineAnalysisPreparationWork(work.workId!);
+        return work.projection!;
+      };
+      edit(false);
+      const changed = sync();
+      expect(store.baselineAnalysisLedger.resendUnitsOf(changed)).not.toContain(4);
+      execution.admitAndDispatch(store.authorizeBaselineAnalysis(bookId, changed.taskIntent!.taskIntentId, changed.planEnvelope!.digest).dispatchRunRecordId!);
+      await execution.whenIdle();
+      expect(store.inspectBaselineAnalysis(bookId, () => null).resultSetRevision!.gaps.some((gap) => gap.code === 'outcome-unknown')).toBe(false);
+      edit(true);
+      const reverted = sync();
+      expect(store.baselineAnalysisLedger.resendUnitsOf(reverted)).toContain(4);
+      expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: reverted.taskIntent!.taskIntentId }).resend?.units).toContain(4);
+      store.markCleanShutdown();
+    } finally { await execution.dispose(); store.close(); }
+  }, 300_000);
+
   it('keeps unit 4 outcome-unknown through a later Task cancelled before it, and the dispatcher never re-sends it', async () => {
     const store = await openWithRoute();
     const execution = owner(store);

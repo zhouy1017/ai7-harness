@@ -10,7 +10,7 @@ import type { TaskPlanConnectivity } from '../../src/service/connectivity.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { CLARIFICATION_SCHEMA_VERSION, OUTCOME_RESOLUTION_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
+import { CLARIFICATION_SCHEMA_VERSION, IMPORTED_EXEMPLAR_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { RESUME_BLOCKED_OFFLINE, RESUME_BLOCKED_SLOT, RUN_CONTROL_CANCELLING_REASON } from '../../src/service/task-plan.js';
 import { controlledUnitHold } from '../../src/service/unit-hold.js';
 import { BASELINE_ANALYSIS_TASK_GOAL, type BaselineAnalysisProjection, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
@@ -176,7 +176,7 @@ describe('schema revision 33 over the real store', () => {
       migrated.close();
     }
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(OUTCOME_RESOLUTION_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(IMPORTED_EXEMPLAR_SCHEMA_VERSION);
       expect(runStatesShapeAt32(database)).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM analysis_run_states ORDER BY rowid').all()).toEqual(before.states);
       const after = relationTruth(database);
@@ -294,7 +294,7 @@ describe('暂停 and 续行 over the real store', () => {
     try {
       writeFileSync(holdPath, 'release');
       // Nothing to reconcile: the Run was left 可续行 already, and nothing is sent until 续行 (CONT-014).
-      expect(second.reconcileStoppedBaselineAnalysisRuns()).toEqual({ settled: 0, cancelling: [], answered: [] });
+      expect(second.reconcileStoppedBaselineAnalysisRuns()).toEqual({ settled: 0, cancelling: [] });
       const plan = await second.inspectTaskPlanWithConnection({ bookId, kind: 'baseline-analysis', ref: taskIntentId }, async () => null, ONLINE, () => null);
       expect(plan).toMatchObject({ state: { key: 'resumable' }, runControl: { resume: { reason: null }, continuation: { unitsSettled: 2 } } });
       secondOwner.admitAndDispatch(runRecordId, second.baselineAnalysisLedger, { resume: true });
@@ -323,11 +323,11 @@ describe('暂停 and 续行 over the real store', () => {
       const executing = await run('L2 sample1 遗留执行', ['admitted', 'executing']);
       const pausing = await run('L2 sample1 遗留暂停', ['admitted', 'executing', 'pausing']);
       const cancelling = await run('L2 sample1 遗留取消', ['admitted', 'executing', 'cancelling']);
-      expect(store.reconcileStoppedBaselineAnalysisRuns()).toEqual({ settled: 2, cancelling: [cancelling.runRecordId], answered: [] });
+      expect(store.reconcileStoppedBaselineAnalysisRuns()).toEqual({ settled: 2, cancelling: [cancelling.runRecordId] });
       expect(store.inspectBaselineAnalysis(executing.bookId, () => null).run!.transitions.at(-1)).toMatchObject({ state: 'resumable', detail: RECONCILED_RESUMABLE_DETAIL });
       expect(store.inspectBaselineAnalysis(pausing.bookId, () => null).run!.transitions.at(-1)).toMatchObject({ state: 'paused', detail: RECONCILED_PAUSED_DETAIL });
       // A second look finds nothing left to settle.
-      expect(store.reconcileStoppedBaselineAnalysisRuns()).toEqual({ settled: 0, cancelling: [cancelling.runRecordId], answered: [] });
+      expect(store.reconcileStoppedBaselineAnalysisRuns()).toEqual({ settled: 0, cancelling: [cancelling.runRecordId] });
       // The Run left executing never persisted an attempt: 续行 starts its first one.
       const execution = owner(store);
       try {

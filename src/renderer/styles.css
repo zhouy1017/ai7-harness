@@ -1681,3 +1681,8 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .background-analysis-starting-point { display: grid; grid-template-columns: auto 1fr; gap: .1rem .5rem; align-items: baseline; }
 .background-analysis-starting-point .field-note { grid-column: 2; }
 @media (max-width: 40rem) { .background-analysis-rows { grid-template-columns: 1fr; } }
+
+.exemplar-import-form { display: grid; gap: .6rem; padding: 1rem; border: 1px solid #ded9cd; border-radius: 12px; }
+.exemplar-import-form label { display: grid; gap: .3rem; }
+.exemplar-import-excerpt { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 12rem; overflow: auto; }
+.exemplar-items label { margin-left: .7rem; }

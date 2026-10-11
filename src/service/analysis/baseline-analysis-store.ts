@@ -118,7 +118,6 @@ import {
   deriveReusePlan,
   deriveScopePlan,
   requireSelectedRange,
-  resendUnits,
   reusePlanRecord,
   type ReusePlanPredecessor,
   type ScopePlanPredecessor,
@@ -2350,18 +2349,14 @@ export class BaselineAnalysisStore {
 
   /**
    * The units a Task's frozen reuse plan recomputes whose content is the content of an `outcome-unknown` gap of its
-   * predecessor revision (Issue #51, S16c; CONT-011), whatever the reason each is recomputed — matched by the same content key
-   * the reuse plan matches by, so a block inserted before the range moves nothing and no other gap is ever named.
+   * history (Issue #51, S16c; CONT-011), whatever the reason each is recomputed — matched by the same content key
+   * the reuse plan matches by, so a block inserted before the range moves nothing and no other gap is ever named. Empty once
+   * its Run has begun, as `resendUnitsByContentOf` is: the history then holds the Task's own revision, which never counts against it.
    */
   resendUnitsOf(projection: BaselineAnalysisProjection): number[] {
-    const update = projection.update;
-    const plan = update?.reusePlan ?? null;
-    if (update === null || plan === null) return [];
-    const row = this.#db.prepare('SELECT * FROM analysis_result_set_revisions WHERE revision_id = ?').get(update.predecessor.revisionId) as SqlRow | undefined;
-    if (row === undefined) return [];
-    const unknown = new Set(this.#unknownGapOrdinals(row));
-    if (unknown.size === 0) return [];
-    return resendUnits(this.#predecessorFacts(row).manifest, unknown, plan);
+    const plan = projection.update?.reusePlan ?? null;
+    if (plan === null) return [];
+    return this.resendUnitsByContentOf(projection);
   }
 
   /**
@@ -3574,8 +3569,15 @@ export class BaselineAnalysisStore {
     const run = current.run;
     requireAnalysis(current.taskIntent?.taskIntentId === taskIntentId && run !== null, 'ANALYSIS_CANCEL_STALE', '这项任务已经变化；无法取消。');
     if (run.state === 'cancelled') return current;
+    // 取消 on a Task of another kind whose Run never began: blocked before dispatch after it waited — its plan moved, or this
+    // launch could not start it (Issue #764). Under developer-live 初评 cannot be prepared again, so nothing else would end it;
+    // the item leaves 待我处理 once the Run is cancelled. A Run that began (so one holding a 结果待确认 range) is never here.
+    if (run.state === 'blocked-before-dispatch' && this.#definition.kind !== BASELINE_ANALYSIS_KIND && !runBegan(run.transitions)) {
+      this.recordRunState(run.runRecordId, 'cancelled', { detail: '编辑取消了这项没能开始的任务；没有发送任何内容，也没有产生用量。' });
+      return this.inspect(bookId);
+    }
     // A Run waiting on the governor (Issue #49, S14) is cancelled the same way: nothing of it ran either.
-    requireAnalysis(run.state === 'awaiting-connectivity' || run.state === 'authorized', 'ANALYSIS_CANCEL_NOT_WAITING', '只有等待中的任务可以在这里取消；它已经开始或已经结束。');
+    requireAnalysis(run.state === 'awaiting-connectivity' || run.state === 'authorized', 'ANALYSIS_CANCEL_NOT_WAITING', '只有等待中或没能开始的任务可以在这里取消；它已经开始或已经结束。');
     this.recordRunState(run.runRecordId, 'cancelled', {
       detail: run.state === 'authorized'
         ? '编辑在派发前取消了这项等待运行名额的任务；没有发送任何内容，也没有产生用量。'
@@ -4039,7 +4041,7 @@ export class BaselineAnalysisStore {
      * leaves as it is: a Review Run's category, which 继续审阅 dispatches (Issue #657 review).
      */
     readonly leaveAuthorized?: (runRecordId: string) => boolean;
-  } = {}): { settled: number; cancelling: ReadonlyArray<string>; answered: ReadonlyArray<string> } {
+  } = {}): { settled: number; cancelling: ReadonlyArray<string> } {
     const rows = this.#db.prepare(
       `SELECT r.run_record_id,
               (SELECT s.state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1) last_state
@@ -4053,9 +4055,6 @@ export class BaselineAnalysisStore {
     const resumable = this.#definition.kind === BASELINE_ANALYSIS_KIND;
     let settled = 0;
     const cancelling: string[] = [];
-    // A Run that waits for an answer the editor has already given (Issue #422, S76d) — answered while another Run held
-    // the slot, before AI7 closed — is named for the owner to take on, as CLAR-006 goes on without being asked again.
-    const answered: string[] = [];
     for (const row of rows) {
       const runRecordId = asString(row.run_record_id);
       const state = row.last_state === null ? null : asString(row.last_state);
@@ -4072,7 +4071,10 @@ export class BaselineAnalysisStore {
       } else if (state === 'cancelling') {
         cancelling.push(runRecordId);
       } else if (state === 'awaiting-clarification' && this.clarificationsOf(runRecordId).every((entry) => entry.answer !== null)) {
-        answered.push(runRecordId);
+        // The editor answered while another Run held the slot, and AI7 closed before it went on (Issue #767; ADR 0034): the answer
+        // stays recorded, and the Run waits for the editor's 续行 like every Run a restart left, so nothing is sent by itself.
+        this.recordRunState(runRecordId, 'resumable', { detail: RECONCILED_RESUMABLE_DETAIL, reconciled: true });
+        settled += 1;
       } else if (state === 'authorized' && options.leaveAuthorized?.(runRecordId) !== true) {
         // A start the governor had not admitted yet (Issue #49, S14) — or one a service stopped on between its
         // authorization and its admission — never began: blocked with why, it waits for the editor, not for a place.
@@ -4080,7 +4082,7 @@ export class BaselineAnalysisStore {
         settled += 1;
       }
     }
-    return { settled, cancelling, answered };
+    return { settled, cancelling };
   }
 
   /**

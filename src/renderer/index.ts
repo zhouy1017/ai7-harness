@@ -1,3 +1,4 @@
+import { exemplarImportButton, exemplarEligibility } from './imported-exemplars.js';
 import { consumeReturnPlace, preserveReturnPlace, readReturnPlace, type ReadingPlace } from './reading-return.js';
 import type {
   AnalysisReusePlanCounts,
@@ -2139,10 +2140,8 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
         '来源版本结果',
         record.sourceVersionDisposition === 'reused-same-book' ? '复用已明确选择的同图书来源版本' : '创建图书拥有的新来源版本',
       );
-      // The boundary claims a parse only where one happened (ADR 0072 §2).
-      appendRecordField(values, '保留边界', record.retainedBoundary.contentDigest === null
-        ? '完整所选原始文件及其精确身份；未进行本地解析'
-        : '完整所选 DOCX 文件及本地解析出的完整内容与结构身份');
+      // The boundary claims a parse only where one happened, and says so when a converter did it (ADR 0072 §2; Issue #583).
+      appendRecordField(values, '保留边界', record.retainedBoundary.label.replace(/^保留/, ''));
       appendRecordField(values, '保留文件名', record.retainedBoundary.displayName);
       appendRecordField(values, '保留格式', record.retainedBoundary.format);
       appendRecordField(values, '保留字节数', String(record.retainedBoundary.sourceBytes));
@@ -4974,6 +4973,16 @@ function renderEvaluationProfiles(root: HTMLElement, projection: EvaluationProfi
  * Books come a page at a time; moving forward or back to the first page replaces the current bounded page.
  */
 function renderExemplars(root: HTMLElement, projection: ExemplarsProjection): void {
+  const surface = {
+    api: window.ai7, status: setStatus, error: rendererErrorMessage,
+    refresh: async () => {
+      const next = await window.ai7.inspectExemplars({ after: null });
+      if (!root.isConnected) return;
+      root.replaceChildren();
+      renderExemplars(root, next);
+    },
+  };
+  root.append(exemplarImportButton(surface));
   if (projection.books.length === 0) root.append(element('p', 'field-note exemplars-empty', EXEMPLARS_EMPTY));
   const list = element('div', 'exemplar-list');
   const append = (books: ExemplarsProjection['books']): HTMLElement | null => {
@@ -4999,10 +5008,12 @@ function renderExemplars(root: HTMLElement, projection: ExemplarsProjection): vo
         item.dataset['exemplarDocument'] = exemplar.documentId;
         item.dataset['exemplarType'] = exemplar.typeId;
         item.dataset['exemplarVersion'] = String(exemplar.version);
+        if (exemplar.imported) item.append(exemplarEligibility(surface, exemplar));
         items.append(item);
       }
       if (book.exemplars.length > 0) card.append(items);
       card.append(readersReportExemplars(book));
+      if (book.imported) card.append(exemplarImportButton(surface, book));
       list.append(card);
     }
     root.dataset['exemplarBooks'] = String(list.children.length);

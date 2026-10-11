@@ -26,6 +26,8 @@ import {
   writingFieldTooLong,
   writingMaterialLabel,
   writingMaterialsMore,
+  writingMaterialsOverTotalNote,
+  WRITING_MATERIALS_AT_LIMIT,
   WRITING_QUICK_PICK_TYPE,
   writingQuickFailed,
   writingQuickNote,
@@ -330,6 +332,8 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     node.append(el('p', 'writing-materials-statement', offer.statement));
     // An item no longer offered is no longer ticked.
     state.materialIds = state.materialIds.filter((id) => offer.items.some((item) => item.materialId === id && item.selectable));
+    const selectedCharacters = offer.items.filter((item) => state.materialIds.includes(item.materialId))
+      .reduce((total, item) => total + item.characters, 0);
     if (offer.items.length > 0) {
       const list = el('ul', 'writing-material-list');
       for (const item of offer.items) {
@@ -342,18 +346,22 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
         box.value = item.materialId;
         box.dataset['writingMaterial'] = item.materialId;
         box.checked = state.materialIds.includes(item.materialId);
-        box.disabled = busy || !item.selectable;
+        const reasonText = item.reason ?? (box.checked ? null : state.materialIds.length >= 4
+          ? WRITING_MATERIALS_AT_LIMIT
+          : selectedCharacters + item.characters > 6_000 ? writingMaterialsOverTotalNote(selectedCharacters + item.characters) : null);
+        box.disabled = busy || !item.selectable || reasonText !== null;
         box.addEventListener('change', () => {
           state.materialIds = box.checked
             ? offer.items.filter((entry) => entry.materialId === item.materialId || state.materialIds.includes(entry.materialId)).map((entry) => entry.materialId)
             : state.materialIds.filter((entry) => entry !== item.materialId);
           state.problem = null;
+          paint(`[data-writing-material="${CSS.escape(item.materialId)}"]`);
         });
         const label = el('label', undefined, writingMaterialLabel(item));
         label.htmlFor = id;
         row.append(box, label);
-        if (item.reason !== null) {
-          const reason = el('span', 'field-note writing-material-reason', item.reason);
+        if (reasonText !== null) {
+          const reason = el('span', 'field-note writing-material-reason', reasonText);
           reason.id = uid('material-reason');
           box.setAttribute('aria-describedby', reason.id);
           row.append(reason);

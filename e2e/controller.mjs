@@ -662,6 +662,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'knowledge-library-index-translation',
     // 资料索引 of HTML, EPUB, ODT and RTF (Issue #428).
     'knowledge-library-index-formats',
+    'knowledge-earlier-exemplar-import',
     'zero-activity',
   ]),
   'J-03': Object.freeze([
@@ -1122,8 +1123,11 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'clarification-deferred',
     'clarification-waiting',
     'clarification-survives-restart',
+    'clarification-places-held',
     'j14-clarification-keyboard',
     'clarification-answered',
+    'answered-clarification-survives-restart',
+    'answered-clarification-resumed',
     'relaunch-for-budget',
     'fifth-book-import',
     'budget-set',

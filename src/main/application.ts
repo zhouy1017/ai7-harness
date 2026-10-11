@@ -2897,6 +2897,48 @@ function registerRendererHandlers(
   );
   // 知识库 › 范例 (Issue #427, S79b) names no Book either: it reads the published Books' delivered documents, a page at a
   // time, starting where the renderer's cursor says; the service checks the cursor.
+  ipcMain.handle(IPC_CHANNELS.previewImportedExemplar, (event) => envelope(async () => {
+    const owned = requireSender(event);
+    return serializeEffect(async () => {
+      requireAuthority();
+      let path = owned.injectedPickerPath;
+      owned.injectedPickerPath = undefined;
+      if (!path) {
+        const picked = await dialog.showOpenDialog(owned.window, {
+          title: '选择以前图书的范例', buttonLabel: '选择文件', properties: ['openFile'],
+          filters: [{ name: 'Word 或纯文本', extensions: ['docx', 'txt', 'md'] }],
+        });
+        if (picked.canceled || picked.filePaths.length !== 1) return null;
+        path = picked.filePaths[0];
+      }
+      requireDesktop(path !== undefined && isAbsolute(path));
+      return service.call('previewImportedExemplar', { path });
+    });
+  }));
+  ipcMain.handle(IPC_CHANNELS.importEarlierExemplar, (event, input: ServiceOperationMap['importEarlierExemplar']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('importEarlierExemplar', {
+          previewId: input.previewId, bookId: input.bookId, bookTitle: input.bookTitle,
+          authors: input.authors, editors: input.editors, typeId: input.typeId, expectedVersion: input.expectedVersion,
+        });
+      });
+    }));
+  ipcMain.handle(IPC_CHANNELS.decideImportedExemplar, (event, input: ServiceOperationMap['decideImportedExemplar']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object');
+      return serializeEffect(async () => {
+        requireAuthority();
+        return service.call('decideImportedExemplar', {
+          revisionId: input.revisionId, revisionDigest: input.revisionDigest,
+          expectedDecisions: input.expectedDecisions, choice: input.choice,
+        });
+      });
+    }));
   ipcMain.handle(IPC_CHANNELS.inspectExemplars, (event, input: ServiceOperationMap['inspectExemplars']['input']) =>
     envelope(async () => {
       requireSender(event);

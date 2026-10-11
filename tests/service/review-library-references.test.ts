@@ -8,6 +8,7 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { MATERIAL_INDEX_TRIGGER_SQL } from '../../src/service/material-index.js';
+import { IMPORTED_EXEMPLAR_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { fixtureEntryKey, loadModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
@@ -145,7 +146,7 @@ describe('review categories reference exact local library versions', () => {
     await close();
     await open();
     expect(plan(run)).toEqual(first);
-    expect(database((db) => db.prepare('PRAGMA user_version').get()!.user_version)).toBe(68);
+    expect(database((db) => db.prepare('PRAGMA user_version').get()!.user_version)).toBe(IMPORTED_EXEMPLAR_SCHEMA_VERSION);
   });
 
   it('runs both referenced categories through the real execution owner, then still reads settled results with the build gone', async () => {
