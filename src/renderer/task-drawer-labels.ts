@@ -467,9 +467,15 @@ export function unconfirmedLine(entry: { unitOrdinal?: number; earlierText?: boo
   return `${entry.category === null ? '' : `「${entry.category}」`}${what} · 请求已发出 · 回答没有完整传回`;
 }
 
-/** A stopped Run's continuation point, as the bar states it beside 续行; `null` when its kept progress no longer reads back. */
-export function taskBarContinuationNote(unitsSettled: number | null, unitsTotal: number): string {
+/**
+ * A stopped Run's continuation point, as the bar states it beside 续行; `null` when its kept progress no longer reads back.
+ * Ranges whose answer the editor gave and nothing has carried out yet are handled first (Issue #784).
+ */
+export function taskBarContinuationNote(unitsSettled: number | null, unitsTotal: number, pendingAnswerUnits: ReadonlyArray<number> = []): string {
   if (unitsSettled === null) return '已保存的阅读进度无法核对，这次运行不能续行；可以取消它，再重新开始';
+  if (pendingAnswerUnits.length > 0 && unitsSettled < unitsTotal) {
+    return `已读完 ${unitsSettled} / ${unitsTotal} 个阅读范围，结果都已保存；续行时先按你的回答处理第 ${pendingAnswerUnits.join('、')} 个，再继续未完成的部分，不重复已读完的部分`;
+  }
   return unitsSettled >= unitsTotal
     ? `已读完全部 ${unitsTotal} 个阅读范围，结果都已保存；续行时接着做之后的归纳与抽样`
     : `已读完 ${unitsSettled} / ${unitsTotal} 个阅读范围，结果都已保存；续行时从第 ${unitsSettled + 1} 个接着读，不重复已读完的部分`;
@@ -804,7 +810,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
           readiness,
           summary,
           statement: null,
-          note: continuation === null ? null : taskBarContinuationNote(continuation.unitsSettled, continuation.unitsTotal),
+          note: continuation === null ? null : taskBarContinuationNote(continuation.unitsSettled, continuation.unitsTotal, continuation.pendingAnswerUnits),
           status: plan.state.label,
           actions: [
             { name: 'resume', label: TASK_BAR_RESUME, tone: 'primary', disabledReason: control.resume.reason },

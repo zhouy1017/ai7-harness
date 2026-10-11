@@ -1892,7 +1892,11 @@ function baselineRunControl(projection: BaselineAnalysisProjection, stopped?: Ba
     unitsSettled: stopped.unitsSettled, unitsTotal: stopped.unitsTotal, bindingHolds: stopped.bindingHolds, waiting: stopped.waiting,
     unconfirmed: stopped.outcomeUnknown?.units.map((unit) => unit.unitOrdinal) ?? [],
   };
-  const continuation = kept !== null && (run.state === 'paused' || run.state === 'resumable' || waitsForAnswer) ? { unitsSettled: kept.unitsSettled, unitsTotal: kept.unitsTotal } : null;
+  const continuation = kept !== null && (run.state === 'paused' || run.state === 'resumable' || waitsForAnswer) ? {
+    unitsSettled: kept.unitsSettled, unitsTotal: kept.unitsTotal,
+    // Ranges the editor answered that no checkpoint has settled since: 续行 carries those answers out first (Issue #784).
+    pendingAnswerUnits: (kept.waiting ?? []).filter((entry) => entry.answered).map((entry) => entry.unitOrdinal),
+  } : null;
   const counts = projection.update?.reusePlan?.counts ?? null;
   const update = counts === null ? null : { manuscriptUnits: projection.coverageManifest?.units.length ?? counts.recomputed + counts.reused, reusedUnits: counts.reused };
   return {
