@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/canonical.js';
+import { taskBarContinuationNote } from '../../src/renderer/task-drawer-labels.js';
 import { RECONCILED_RESUMABLE_DETAIL } from '../../src/service/analysis/baseline-analysis-store.js';
 import {
   CLARIFICATION_CANCELLED_ANSWERED,
@@ -533,6 +534,10 @@ describe('Clarification Requests over the real store', () => {
         reading: () => 'online', reachesNetwork: () => false, slotBusy: () => false, carriesStoppedRun: (id) => carrier.carriesStoppedRun(id),
       }, () => null);
       expect(resumable.runControl?.resume?.reason).toBeNull();
+      // The answer is recorded and not yet carried out, so the continuation point names its range: 续行 starts there (Issue #784).
+      expect(resumable.runControl?.continuation?.pendingAnswerUnits).toEqual([5]);
+      expect(taskBarContinuationNote(resumable.runControl!.continuation!.unitsSettled, resumable.runControl!.continuation!.unitsTotal, resumable.runControl!.continuation!.pendingAnswerUnits))
+        .toContain('续行时先按你的回答处理第 5 个，再从第 ');
       next.admitAndDispatch(asking.runRecordId, store.baselineAnalysisLedger, { resume: true });
       await next.whenIdle();
       const settled = store.inspectBaselineAnalysis(first, () => null);

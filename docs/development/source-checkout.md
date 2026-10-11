@@ -702,3 +702,5 @@ Earlier Books are Knowledge Base identities, never AI7 Book projects. Imports de
 Writing Tasks pin exact versions and digests; 审稿意见 retains its existing frozen-word contract.
 Full database export/replacement includes these ledgers and originals. Book-only merges leave this house knowledge behind:
 a writing Task whose referenced exemplar is absent keeps readable results/drafts but cannot start again.
+
+A Run an answered Clarification Request is still waiting to be carried out is told apart in its continuation point (Issue #784): `continuation.pendingAnswerUnits` lists the reading ranges whose answer was recorded and not yet carried out, so the stopped-Run note says where 续行 really starts. This is service protocol version **125** (placeholder; the Commander renumbers at landing) and no schema revision.

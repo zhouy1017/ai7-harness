@@ -1378,7 +1378,7 @@ async function main() {
     await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'answered-restart-plan');
     await waitForBar(renderer, {
       state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · 可续行',
-      note: '已读完 7 / 8 个阅读范围，结果都已保存；续行时从第 8 个接着读，不重复已读完的部分', actions: STOPPED_ACTIONS,
+      note: '已读完 7 / 8 个阅读范围，结果都已保存；续行时先按你的回答处理第 5 个，再从第 8 个接着读，不重复已读完的部分', actions: STOPPED_ACTIONS,
     }, 'answered-restart-bar');
     await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-clarification-record li[data-clarification-state="answered"] .task-plan-clarification-answer')?.textContent?.startsWith(${JSON.stringify(`你已回答：再试一次 · 说明：${QUESTION_NOTE}（`)}) === true && document.querySelector('#task-drawer .task-drawer-questions [data-task-plan-clarification]')===null`, 'answered-restart-answer-shown');
     const answeredRestart = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);

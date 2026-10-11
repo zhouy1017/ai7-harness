@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 124 as const;
+export const SERVICE_PROTOCOL_VERSION = 125 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -5382,9 +5382,10 @@ export interface TaskPlanRunControlProjection {
   update: null | { manuscriptUnits: number; reusedUnits: number };
   /**
    * A stopped Run's continuation point (S76b): how many of the units it submits it has kept — `unitsSettled` is `null`
-   * when that progress no longer reads back — and `null` while it runs.
+   * when that progress no longer reads back — and `null` while it runs. `pendingAnswerUnits` are the reading ranges whose
+   * Clarification answer is recorded and not yet carried out (Issue #784): 续行 handles those first, then goes on after the kept ones.
    */
-  continuation: { unitsSettled: number | null; unitsTotal: number } | null;
+  continuation: { unitsSettled: number | null; unitsTotal: number; pendingAnswerUnits: ReadonlyArray<number> } | null;
   /**
    * 模型服务账户限额 (Issue #51, S16b; V2-UX-MODEL-018): the provider's account limit stopped the Run — at the reading range it
    * refused, or `null` for the reduction or the sample after them — with the refusal as AI7 classified it; `续行` goes on
