@@ -465,18 +465,6 @@ function writingExemplarLeftBehind(db: DatabaseSync): boolean {
   ).get() !== undefined;
 }
 
-/** Material Index builds are derived: a merged writing Task keeps its pins, but a missing pinned build is rebuilt locally. */
-function writingMaterialLeftBehind(db: DatabaseSync): boolean {
-  if (!tableExists(db, 'src', 'writing_tasks')) return false;
-  return db.prepare(
-    `SELECT 1 FROM src.writing_tasks t, json_each(t.canonical_json, '$.materialSources') m
-     WHERE t.book_id IN (SELECT b.book_id FROM src.books b WHERE ${MERGING_BOOK})
-       AND NOT EXISTS (SELECT 1 FROM main.material_index_builds i
-         WHERE i.material_id = json_extract(m.value, '$.materialId') AND i.sha256 = json_extract(m.value, '$.indexDigest'))
-     LIMIT 1`,
-  ).get() !== undefined;
-}
-
 /**
  * Whether a merging Book's writing Tasks pinned a Material Index build this store does not hold. Builds do not merge, and a build
  * made here afterwards gets a new digest, never the pinned one: such a Task keeps its pins, outcome and drafts readable but cannot
