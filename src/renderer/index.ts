@@ -1,3 +1,4 @@
+import { renderEvaluationProfiles } from './evaluation-profiles.js';
 import { exemplarImportButton, exemplarEligibility } from './imported-exemplars.js';
 import { consumeReturnPlace, preserveReturnPlace, readReturnPlace, type ReadingPlace } from './reading-return.js';
 import type {
@@ -9,7 +10,6 @@ import type {
   BookTaskItemProjection,
   DefaultExecutionRuleReference,
   DefaultExecutionRulesProjection,
-  EvaluationProfilesProjection,
   ExemplarBookProjection,
   ExemplarsProjection,
   KnowledgeProceduresProjection,
@@ -132,11 +132,8 @@ import {
   EVALUATION_LEDE,
   EVALUATION_STATUS,
   EVALUATION_TITLE,
-  evaluationBandLine,
   evaluationItemLegend,
   evaluationOverviewLine,
-  evaluationProfilePill,
-  evaluationProfileUse,
 } from './evaluation-labels.js';
 import {
   PROCEDURES_HEADING,
@@ -4898,7 +4895,7 @@ async function renderKnowledgeBase(tab: KnowledgeBaseTab = 'guidelines', tabFocu
   if (tab === 'evaluation') {
     setStatus('正在读取评估方案…', 'busy');
     try {
-      renderEvaluationProfiles(panelNode, await window.ai7.inspectEvaluationProfiles());
+      renderEvaluationProfiles(panelNode, await window.ai7.inspectEvaluationProfiles(), { api: window.ai7, status: setStatus, error: rendererErrorMessage });
       if (content.isConnected) setStatus('评估方案已打开');
     } catch (error) {
       setStatus(rendererErrorMessage(error, '无法读取评估方案。'), 'error');
@@ -4940,34 +4937,6 @@ async function renderKnowledgeBase(tab: KnowledgeBaseTab = 'guidelines', tabFocu
     if (content.isConnected) setStatus(GUIDELINE_STATUS.opened);
   } catch (error) {
     setStatus(rendererErrorMessage(error, GUIDELINE_STATUS.unavailable), 'error');
-  }
-}
-
-/** 知识库 › 评估方案's card (Issue #429, S81a): the items and their 满分, the bands, the risk items and the conclusions. */
-function renderEvaluationProfiles(root: HTMLElement, projection: EvaluationProfilesProjection): void {
-  root.dataset['evaluationProfiles'] = String(projection.profiles.length);
-  for (const profile of projection.profiles) {
-    const card = element('article', 'evaluation-profile');
-    card.dataset['profileId'] = profile.profileId;
-    card.dataset['profileRecords'] = String(profile.records);
-    const heading = element('div', 'guideline-heading');
-    heading.append(element('h3', undefined, profile.title), element('span', 'status-pill evaluation-profile-pill', evaluationProfilePill(profile)));
-    const items = element('ul', 'evaluation-profile-items');
-    for (const item of profile.items) items.append(element('li', undefined, evaluationItemLegend(item)));
-    const bands = element('ul', 'evaluation-profile-bands');
-    for (const band of profile.bands) bands.append(element('li', undefined, evaluationBandLine(band)));
-    card.append(
-      heading,
-      element('p', 'field-note evaluation-profile-use', evaluationProfileUse(profile)),
-      element('h4', undefined, `评分项 · 总分 ${profile.total}`), items,
-      element('h4', undefined, '档位'), bands,
-      element('h4', undefined, '风险项（低 / 中 / 高，不计入总分）'),
-      element('p', 'evaluation-profile-risks', profile.risks.map((risk) => risk.label).join('、')),
-      element('h4', undefined, '结论'),
-      element('p', 'evaluation-profile-conclusions', profile.conclusions.map((conclusion) => conclusion.label).join(' · ')),
-      technicalDetails('evaluation-profile-facts', element('dt', undefined, '评估方案摘要'), element('dd', 'technical-identity', profile.sha256)),
-    );
-    root.append(card);
   }
 }
 

@@ -47,6 +47,7 @@ const ITEM_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 export interface EvaluationRewriteItemInput {
   readonly itemId: string;
   readonly label: string;
+  readonly description?: string;
   readonly fullMarks: number;
   /** The editor's score, or `null` while unscored or `不评`. */
   readonly score: number | null;
@@ -160,9 +161,11 @@ function frozenInput(input: EvaluationRewriteContractInput): EvaluationRewriteCo
       (item.adjustment === null || (isRecord(item.adjustment) && Array.isArray(item.adjustment.reasons) && item.adjustment.reasons.length >= 1 &&
         item.adjustment.reasons.every((reason) => text(reason, 20)) && (item.adjustment.note === null || text(item.adjustment.note, 400)))),
     'EVALUATION_REWRITE_INPUT_INVALID', '评语重写所依据的评分项无效。');
+    requireAnalysis(item.description === undefined || item.description === '' || text(item.description, 500), 'EVALUATION_PROFILE_INVALID', '评分项说明无效。');
     return {
       itemId: item.itemId,
       label: item.label,
+      ...(item.description === undefined ? {} : { description: item.description }),
       fullMarks: item.fullMarks,
       score: item.score,
       notRated: item.notRated,
@@ -197,7 +200,7 @@ function versionLines(input: EvaluationRewriteContractInput): string[] {
   const lines = [`- 评估方案：${input.profile.title} 第 ${input.profile.version} 版`];
   for (const item of input.items) {
     const own = item.notRated !== null ? `不评（${oneLine(item.notRated)}）` : item.score === null ? '未打分' : `编辑的得分 ${score(item.score)}`;
-    lines.push(`- 评分项【${item.itemId}】「${item.label}」（满分 ${item.fullMarks}）：${own}${item.comment === null ? '' : `；现在的评语：${oneLine(item.comment)}`}`);
+    lines.push(`- 评分项【${item.itemId}】「${item.label}」（满分 ${item.fullMarks}）：${own}${item.description ? `；评分项说明：${item.description}` : ''}${item.comment === null ? '' : `；现在的评语：${oneLine(item.comment)}`}`);
     const ai7 = item.ai7.score === null ? 'AI7 初评未给分' : `AI7 初评 ${score(item.ai7.score)} 分`;
     lines.push(`  ${ai7}${item.ai7.comment === null ? '' : `；AI7 的评语：${oneLine(item.ai7.comment)}`}`);
     if (item.adjustment !== null) {

@@ -246,7 +246,7 @@ export const BUILTIN_EVALUATION_PROFILE: Profile = {
 };
 
 export function evaluationProfileDigest(profile: Profile): string {
-  return sha256Hex(canonicalJson({ schema: PROFILE_SCHEMA, profile }));
+  return sha256Hex(canonicalJson({ schema: profile.readiness === undefined ? PROFILE_SCHEMA : 'ai7.evaluation-profile/2', profile }));
 }
 
 function withDigest(profile: Profile): EvaluationProfileProjection {
@@ -290,7 +290,7 @@ export function emptyEvaluationContent(profile: Pick<Profile, 'items' | 'risks'>
   return {
     items: profile.items.map((item) => ({ itemId: item.itemId, score: null, notRated: null, comment: null, adjustment: null })),
     risks: profile.risks.map((risk) => ({ riskId: risk.riskId, level: null, statement: null, reviewed: false })),
-    readiness: [],
+    readiness: [...((profile as Profile).readiness ?? [])],
     strengths: [],
     weaknesses: [],
     verdict: null,
@@ -794,6 +794,7 @@ export interface InitialEvaluationFacts {
   readonly current: boolean;
   /** The profile the 初评's contract was frozen under. */
   readonly profileSha256: string;
+  readonly profile?: EvaluationProfileProjection;
 }
 
 /** What 评估 reads of AI7's 初评: its latest settled result, and its Task as the Task Drawer opens it. */
@@ -945,6 +946,7 @@ export class EvaluationRecords {
     adoptions: EvaluationAdoptionReader = NO_ADOPTIONS,
     preferences: EvaluationPreferencesReader = CALIBRATION_ON,
     gate: number = CALIBRATION_MIN_ADJUSTMENTS,
+    readonly profileReader?: () => EvaluationProfileProjection,
   ) {
     this.#db = db;
     this.#manuscripts = manuscripts;
@@ -958,7 +960,7 @@ export class EvaluationRecords {
 
   /** The profile a new version snapshots: AI7's built-in one until a house's own is managed in 知识库. */
   profile(): EvaluationProfileProjection {
-    return withDigest(BUILTIN_EVALUATION_PROFILE);
+    return this.profileReader?.() ?? withDigest(BUILTIN_EVALUATION_PROFILE);
   }
 
   #record(row: SqlRow): StoredRecord {
@@ -1392,7 +1394,7 @@ export class EvaluationRecords {
     const { sha256: profileSha256, ...snapshot } = profile;
     const carried = last === undefined
       ? emptyEvaluationContent(snapshot)
-      : this.#reseed(lastEntry!.content, snapshot);
+      : this.#reseed(lastEntry!.content, snapshot, last!.profile);
     let initial: InitialEvaluationFacts | null = null;
     let calibration: EvaluationInitialCalibrationProjection | null = null;
     if (fromInitial) {
@@ -1614,6 +1616,7 @@ export class EvaluationRecords {
     const damaged = new Set<string>();
     /** Each Book's (editor − AI7 raw) by item, of its latest 定稿 version begun from AI7's 初评 read so far. */
     const basis = new Map<string, ReadonlyMap<string, number>>();
+    const maxima = new Map(this.profile().items.map((item) => [item.itemId, item.fullMarks]));
     const rows = this.#db.prepare(
       'SELECT r.* FROM evaluation_records r JOIN evaluation_initial_drafts d ON d.record_id = r.record_id ORDER BY r.book_id, r.ordinal',
     ).all() as SqlRow[];
@@ -1633,7 +1636,9 @@ export class EvaluationRecords {
         const differences = new Map<string, number>();
         for (const item of latest.content.items) {
           const raw = snapshot.draft.items.find((entry) => entry.itemId === item.itemId)?.score ?? null;
-          if (item.score !== null && item.notRated === null && raw !== null) differences.set(item.itemId, item.score - raw);
+          const to = maxima.get(item.itemId);
+          const from = record.profile.items.find((entry) => entry.itemId === item.itemId)?.fullMarks;
+          if (item.score !== null && item.notRated === null && raw !== null && to !== undefined && from !== undefined) differences.set(item.itemId, (item.score - raw) * to / from);
         }
         // Versions read oldest first: the Book's latest 定稿 begun from AI7's 初评 is the one that stands — and a Book whose latest
         // gives no item a value (AI7 scored none, or every scored item 不评) is not in the basis at all.
@@ -1669,12 +1674,13 @@ export class EvaluationRecords {
    * but not a person's review of the old text, which does not count for the changed one (EVAL-004, EVAL-012; Issue #429
    * review): 推荐出版 waits until a person reviews this version's 高 risks.
    */
-  #reseed(content: EvaluationContent, to: Pick<Profile, 'items' | 'risks'>): EvaluationContent {
+  #reseed(content: EvaluationContent, to: Profile, from: Profile): EvaluationContent {
     const empty = emptyEvaluationContent(to);
     const items = new Map(content.items.map((item) => [item.itemId, item] as const));
     const risks = new Map(content.risks.map((risk) => [risk.riskId, risk] as const));
     return {
       ...content,
+      readiness: [...new Set([...(to.readiness ?? []), ...content.readiness.filter((line) => !(from.readiness ?? []).includes(line))])].slice(0, MAX_EVALUATION_LINES),
       conclusion: null,
       items: empty.items.map((item, index) => {
         const carried = items.get(item.itemId);
@@ -1802,10 +1808,12 @@ export class EvaluationRecords {
       item === undefined ? null : item.notRated !== null ? 'not-rated' : item.score;
     return {
       previousOrdinal: previous.record.ordinal,
-      items: current.record.profile.items.map((item, index) => ({
+      items: [...current.record.profile.items, ...previous.record.profile.items.filter((item) => !current.record.profile.items.some((entry) => entry.itemId === item.itemId))].map((item) => ({
         itemId: item.itemId,
+        label: item.label,
+        change: !current.record.profile.items.some((entry) => entry.itemId === item.itemId) ? 'removed' as const : !previous.record.profile.items.some((entry) => entry.itemId === item.itemId) ? 'added' as const : null,
         previous: value(before.items.find((entry) => entry.itemId === item.itemId)),
-        current: value(current.content.items[index]),
+        current: value(current.content.items.find((entry) => entry.itemId === item.itemId)),
       })),
       risks: current.record.profile.risks.map((risk, index) => ({
         riskId: risk.riskId,
@@ -1934,7 +1942,7 @@ export class EvaluationRecords {
       initial: {
         ...initialTask,
         latest: latestInitial === null ? null
-          : { ...initialDraftProjection({ ...latestInitial.draft, total: totalOfScores(profile, latestInitial.draft.items) }), current: latestInitial.current },
+          : { ...initialDraftProjection({ ...latestInitial.draft, total: totalOfScores(latestInitial.profile ?? profile, latestInitial.draft.items) }), current: latestInitial.current, profile: latestInitial.profile ?? profile },
       },
       readersReport,
       market: this.#extras.market(bookId),

@@ -149,6 +149,7 @@ export function readersReportContractInput(
         const ai7 = finalized.initial?.items.find((entry) => entry.itemId === item.itemId) ?? null;
         return {
           label: item.label,
+          ...(item.description === undefined ? {} : { description: item.description }),
           fullMarks: item.fullMarks,
           score: own.score,
           notRated: own.notRated,

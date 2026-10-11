@@ -166,6 +166,7 @@ export function evaluationRewriteContractInput(version: RewritableEvaluation): E
       return {
         itemId: item.itemId,
         label: item.label,
+        ...(item.description === undefined ? {} : { description: item.description }),
         fullMarks: item.fullMarks,
         score: own.score,
         notRated: own.notRated,

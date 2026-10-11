@@ -1271,6 +1271,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'evaluation-calibration-books',
     'evaluation-calibrated-start',
     'evaluation-calibration-disclosed',
+    'evaluation-profile-editing',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',
