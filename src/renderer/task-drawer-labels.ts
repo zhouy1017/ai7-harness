@@ -335,6 +335,12 @@ export const TASK_BAR_SAVE_DRAFT_ONLY = '仅保存任务草稿';
 export const TASK_BAR_CANCEL_WAIT = '取消';
 /** A cancelled wait, as the status line states it: nothing was sent. */
 export const TASK_BAR_CANCELLED = '已取消 · 未发送任何内容';
+/** The sentence beside 取消 on a Run that never started (Issue #764): blocked after it waited, so nothing ran or was sent. */
+export const TASK_BAR_BLOCKED_CANCEL_NOTE = '这项任务没有开始，也没有发送任何内容；取消后不再提醒。';
+/** A kind whose blocked Run the bar can cancel: a ledger kind's, which no other surface may be able to prepare again (Issue #764). */
+function blockedRunCancellable(plan: TaskPlanProjection): boolean {
+  return plan.kind === 'initial-evaluation' || plan.kind === 'readers-report' || plan.kind === 'evaluation-rewrite' || plan.kind === 'writing';
+}
 /** The fallback when 取消 is refused for a reason the service does not word. */
 export const TASK_BAR_CANCEL_FAILED = '无法取消这项任务。';
 /** What a waiting Run needs the editor for (OFF-009): the connection, fixed in 设置 — the one wait with an action beside it. */
@@ -844,9 +850,20 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         readiness,
         summary,
         statement: null,
-        note: `${plan.planMovedReason ?? `${plan.state.label}。`}${TASK_BAR_PLAN_MOVED_ELSEWHERE[plan.kind]}`,
+        note: `${plan.planMovedReason ?? `${plan.state.label}。`}${TASK_BAR_PLAN_MOVED_ELSEWHERE[plan.kind]}${blockedRunCancellable(plan) ? TASK_BAR_BLOCKED_CANCEL_NOTE : ''}`,
         status: plan.state.label,
-        actions: [runLink],
+        actions: blockedRunCancellable(plan) ? [{ name: 'cancel-wait', label: TASK_BAR_CANCEL_WAIT, tone: 'secondary', disabledReason: null }, runLink] : [runLink],
+      };
+    }
+    // 派发前已阻止 of a ledger kind (Issue #764): it never started; 取消 ends it and takes its item out of 待我处理.
+    if (plan.state.key === 'blocked' && blockedRunCancellable(plan)) {
+      return {
+        readiness,
+        summary,
+        statement: null,
+        note: TASK_BAR_BLOCKED_CANCEL_NOTE,
+        status: plan.state.label,
+        actions: [{ name: 'cancel-wait', label: TASK_BAR_CANCEL_WAIT, tone: 'secondary', disabledReason: null }, runLink],
       };
     }
     // Run Budget Ceiling Reached (Issue #51, S16a): what the Run read and used, 调整预算并重做, and the partial results.
