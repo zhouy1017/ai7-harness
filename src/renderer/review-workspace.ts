@@ -1956,7 +1956,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const from = chapterOptions.find((chapter) => chapter.blockId === state.from) ?? null;
       const to = chapterOptions.find((chapter) => chapter.blockId === state.to) ?? null;
       readValue.textContent = reviewReadConsequence(state.scope, workspace.manuscript, { from, to });
-      sendValue.textContent = reviewSendConsequence(workspace.categories.filter((entry) => state.categories.has(entry.categoryId))) + (state.materialIds.size === 0 ? '' : '；所选资料库资料也只在本机读取，不发送给模型。');
+      const send = reviewSendConsequence(workspace.categories.filter((entry) => state.categories.has(entry.categoryId)));
+      sendValue.textContent = state.materialIds.size === 0 || !acceptsMaterials ? send
+        : `${send.replace(/。$/u, '')}；所选资料库资料的文字随稿件一并发往，只参照，不照抄。`;
       problem.textContent = state.problem ?? '';
       problem.hidden = state.problem === null;
       progress.hidden = state.job === null;

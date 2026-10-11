@@ -106,6 +106,22 @@ function removeBuild(id: string): void {
     for (const sql of Object.values(MATERIAL_INDEX_TRIGGER_SQL)) db.exec(sql);
   }, true);
 }
+/** Fixture answers, with no findings, for every unit of every referenced category of `run`. */
+function answerEveryUnit(run: ReviewRunProjection, id: string): void {
+  const pins = recordPins(run);
+  const reading = store.readMaterialIndexForTask({ bookId, references: pins }, id, 1);
+  for (const category of run.categories) {
+    const entry = reviewCategoryEntry(category.categoryId)!;
+    const definition = taskMaterialKindDefinition(reviewCategoryKindDefinition(reviewCategoryContractInput(entry)), { bookId, references: pins },
+      pins.map((pin) => taskMaterialWords(pin, reading.segments.map((segment) => segment.text))));
+    const manifest = database((db) => JSON.parse(String(db.prepare("SELECT canonical_json FROM analysis_plan_records WHERE component = 'coverage-manifest' AND task_intent_id = (SELECT json_extract(value, '$.task.taskIntentId') FROM review_runs, json_each(review_runs.canonical_json, '$.categories') WHERE review_run_id = ? AND json_extract(value, '$.categoryId') = ?)").get(run.reviewRunId, category.categoryId)!.canonical_json)));
+    for (const unit of manifest.units) {
+      const digest = definition.requestDigest(unit.ordinal, unit.digest);
+      entries.set(fixtureEntryKey(unit.ordinal, digest), { unitOrdinal: unit.ordinal, requestDigest: digest, attempt: null, contentDigest: null,
+        response: { kind: 'unit-result', text: JSON.stringify({ schema: definition.unitResultSchema, unitOrdinal: unit.ordinal, findings: [] }), usage: { inputTokens: 10, outputTokens: 10 } } });
+    }
+  }
+}
 
 describe('review categories reference exact local library versions', () => {
   it('offers eligible items and freezes read-only pins in the Run and consuming Task plans, across reopen', async () => {
@@ -135,21 +151,11 @@ describe('review categories reference exact local library versions', () => {
   it('runs both referenced categories through the real execution owner, then still reads settled results with the build gone', async () => {
     const id = await material();
     const run = prepare([id], ['typos-and-usage', 'style-and-format']);
-    const pins = recordPins(run);
-    const reading = store.readMaterialIndexForTask({ bookId, references: pins }, id, 1);
     for (const category of run.categories) {
-      const entry = reviewCategoryEntry(category.categoryId)!;
-      const definition = taskMaterialKindDefinition(reviewCategoryKindDefinition(reviewCategoryContractInput(entry)), { bookId, references: pins },
-        pins.map((pin) => taskMaterialWords(pin, reading.segments.map((segment) => segment.text))));
       const frozen = plan(run).technical.find((row) => row.key === `category:${category.categoryId}`)!;
       expect(frozen.value).toContain(category.planEnvelopeDigest!);
-      const manifest = database((db) => JSON.parse(String(db.prepare("SELECT canonical_json FROM analysis_plan_records WHERE component = 'coverage-manifest' AND task_intent_id = (SELECT json_extract(value, '$.task.taskIntentId') FROM review_runs, json_each(review_runs.canonical_json, '$.categories') WHERE review_run_id = ? AND json_extract(value, '$.categoryId') = ?)").get(run.reviewRunId, category.categoryId)!.canonical_json)));
-      for (const unit of manifest.units) {
-        const digest = definition.requestDigest(unit.ordinal, unit.digest);
-        entries.set(fixtureEntryKey(unit.ordinal, digest), { unitOrdinal: unit.ordinal, requestDigest: digest, attempt: null, contentDigest: null,
-          response: { kind: 'unit-result', text: JSON.stringify({ schema: definition.unitResultSchema, unitOrdinal: unit.ordinal, findings: [] }), usage: { inputTokens: 10, outputTokens: 10 } } });
-      }
     }
+    answerEveryUnit(run, id);
     const before = indexRows();
     store.authorizeReviewRun(bookId, run.reviewRunId, approvals(run));
     await driver.drive(run.reviewRunId);
@@ -180,6 +186,22 @@ describe('review categories reference exact local library versions', () => {
     expect(plan(run).scope.reference.some((line) => line.includes('索引版本已不在本机'))).toBe(true);
     expect(() => store.authorizeReviewRun(bookId, run.reviewRunId, approvals(run))).toThrow('索引版本已不在本机');
     expect(plan(run).scope.reference.some((line) => line.includes('改计划重做'))).toBe(false);
+  });
+
+  it('runs a plan read while its reference was withdrawn once the reference is admitted again', async () => {
+    const id = await material();
+    const run = prepare([id]);
+    answerEveryUnit(run, id);
+    store.decideLibraryMaterial({ materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+    // A fresh start, so the plan is first read while the pin cannot be: that unreadable contract must not be the one kept.
+    await close();
+    await open();
+    expect(plan(run).start.readiness).toBe('changed');
+    store.decideLibraryMaterial({ materialId: id, expectedDecisions: 3, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+    expect(plan(run).start.readiness).toBe('ready');
+    store.authorizeReviewRun(bookId, run.reviewRunId, approvals(run));
+    await driver.drive(run.reviewRunId);
+    expect(store.inspectReviewWorkspace(bookId, run.reviewRunId).run!.state).toBe('settled');
   });
 
   it('keeps the same prepared intent and contract for the same pins, with a new contract when references change', async () => {

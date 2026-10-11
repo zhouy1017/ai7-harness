@@ -4956,14 +4956,15 @@ export class EditorialStore {
    * The ledger takes the route and the launch the baseline ledger was bound to, so every plan it
    * freezes names the binding this launch actually bound — which the one execution owner then checks.
    */
-  reviewCategoryLedger(definition: AnalysisKindDefinition): BaselineAnalysisStore {
+  reviewCategoryLedger(definition: AnalysisKindDefinition, cached = true): BaselineAnalysisStore {
     this.#assertAvailable();
     requireStore(isReviewCategoryKindId(definition.kind), 'REVIEW_CATEGORY_INVALID', '该分析种类不是审阅类别。');
-    return this.#reviewCategoryLedgers.obtain(`${definition.kind}\n${definition.promptContractDigest}`, () => {
+    const make = (): BaselineAnalysisStore => {
       const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
       ledger.bindLaunch(this.#baselineAnalysis.launch);
       return ledger;
-    });
+    };
+    return cached ? this.#reviewCategoryLedgers.obtain(`${definition.kind}\n${definition.promptContractDigest}`, make) : make();
   }
 
   /** One category's Task, latest Result Set Revision, history and update controls; `revisionId` opens one exact revision read-only. */
@@ -5059,8 +5060,12 @@ export class EditorialStore {
         }
       }
     }
-    const definition = materials === undefined ? base : this.#analysisCall(() => taskMaterialKindDefinition(base, materials!, this.#taskMaterialReadings(materials!), frozenPromptDigest));
-    return this.reviewCategoryLedger(definition);
+    if (materials === undefined) return this.reviewCategoryLedger(base);
+    const readings = this.#taskMaterialReadings(materials);
+    const definition = this.#analysisCall(() => taskMaterialKindDefinition(base, materials!, readings, frozenPromptDigest));
+    // A pin unreadable now gives a definition that cannot build requests, under the frozen contract's own key: it is never
+    // cached, so the same plan runs once the pin reads again, and a cached readable ledger never outlives its pin.
+    return this.reviewCategoryLedger(definition, readings.every((reading) => reading.refusal === null));
   }
 
   #taskMaterialReadings(boundary: TaskMaterialBoundary): ReadonlyArray<TaskMaterialReading> {
