@@ -7486,7 +7486,22 @@ export class EditorialStore {
     const archived = sources.books(after, MAX_EXEMPLAR_BOOKS_PAGE + 1);
     const imported = this.#importedCall(() => this.#importedExemplars.books(after, MAX_EXEMPLAR_BOOKS_PAGE + 1));
     const importedIds = new Set(imported.map((book) => book.bookId));
-    const page = [...archived, ...imported].sort((a, b) => a.title < b.title ? -1 : a.title > b.title ? 1 : a.bookId < b.bookId ? -1 : a.bookId > b.bookId ? 1 : 0);
+    // One collation for the cursor (Issue #778): both sources page in SQLite's BINARY order — UTF-8 bytes, which is code point
+    // order — so the merge of their pages must order exactly as the queries that continue them do. JS's `<` compares UTF-16
+    // code units and disagrees for a supplementary-plane character against a BMP character above U+DBFF (e.g. 𠀀 against Ａ).
+    const compareTitles = (left: string, right: string): number => {
+      let i = 0;
+      let j = 0;
+      while (i < left.length && j < right.length) {
+        const a = left.codePointAt(i)!;
+        const b = right.codePointAt(j)!;
+        if (a !== b) return a < b ? -1 : 1;
+        i += a > 0xffff ? 2 : 1;
+        j += b > 0xffff ? 2 : 1;
+      }
+      return (left.length - i) - (right.length - j);
+    };
+    const page = [...archived, ...imported].sort((a, b) => compareTitles(a.title, b.title) || (a.bookId < b.bookId ? -1 : a.bookId > b.bookId ? 1 : 0));
     const books = page.slice(0, MAX_EXEMPLAR_BOOKS_PAGE).map((book) => importedIds.has(book.bookId)
       ? this.#importedCall(() => this.#importedExemplars.book(book.bookId))
       : this.#documentCall(() => this.#publicationCall(() => readExemplarBook(sources, book))));
@@ -8640,46 +8655,69 @@ export class EditorialStore {
    * Book title, at most `MAX_READERS_REPORT_EXEMPLARS`; each is its Book's title with the template, and the pinned version's own
    * words, their opening when longer than the contract takes. A Book's own 审稿意见 never seeds its own draft. Before any
    * admission every plan says 「本社暂无审稿意见范例，本次不参考范例」 and the draft is written without one.
+   *
+   * A damaged record is named rather than raised (Issue #778): the item is listed in `damaged` as it would be listed if it
+   * read, and every other exemplar — and the rest of 评估 — still reads.
    */
-  #readersReportExemplars(bookId: string): ReadersReportExemplarInput[] {
+  #readersReportExemplars(bookId: string): { exemplars: ReadersReportExemplarInput[]; damaged: string[] } {
     const rows = this.#authority.prepare(
       `SELECT DISTINCT d.book_id, d.material_key, b.title FROM learning_eligibility_decisions d JOIN books b ON b.book_id = d.book_id
        WHERE d.material_key LIKE ? AND d.book_id <> ? ORDER BY b.title COLLATE BINARY, d.book_id, d.material_key`,
     ).all(`${READERS_REPORT_EXEMPLAR_KEY_PREFIX}%`, bookId) as SqlRow[];
     const exemplars: ReadersReportExemplarInput[] = [];
+    const damaged: string[] = [];
     for (const row of rows) {
       if (exemplars.length === MAX_READERS_REPORT_EXEMPLARS) break;
       const otherBookId = asString(row.book_id);
       const template = asString(row.material_key).slice(READERS_REPORT_EXEMPLAR_KEY_PREFIX.length) as ReadersReportTemplate;
       if (!READERS_REPORT_TEMPLATES.includes(template)) continue;
-      const current = this.#publicationCall(() => this.#publicationVersions.current(otherBookId));
-      if (current === null || current.withdrawn) continue;
-      const pin = this.#readersReportPins(otherBookId, current.projection.createdAt).find((entry) => entry.template === template);
-      if (pin === undefined) continue;
-      const candidate = this.#readersReportExemplarCandidate(pin);
-      const latest = this.#learningCall(() => this.#learningEligibility.history(otherBookId, candidate.materialKey)).at(-1);
-      if (latest === undefined || latest.choice !== 'house' || latest.materialDigest !== learningMaterialDigest(candidate)) continue;
-      const words = (this.#authority.prepare('SELECT text FROM manuscript_block_versions WHERE revision_id = ? ORDER BY position').all(pin.revisionId) as SqlRow[])
-        .map((block) => asString(block.text).replace(/\r\n?/gu, '\n').replace(/[\t\f\v]/gu, ' ').trim()).filter((line) => line.length > 0).join('\n');
-      if (words.length === 0) continue;
-      exemplars.push({ title: boundedGraphemes(`${asString(row.title)} · ${pin.typeLabel}`, 200), text: boundedGraphemes(words, MAX_EXEMPLAR_GRAPHEMES) });
-    }
-    // Then earlier Books' imported 审稿意见 (Issue #427), by title as 范例 lists them: only those Books are read, a page at a time.
-    let after: ExemplarBookCursor | null = null;
-    while (exemplars.length < MAX_READERS_REPORT_EXEMPLARS) {
-      const page = this.#importedCall(() => this.#importedExemplars.books(after, MAX_EXEMPLAR_BOOKS_PAGE));
-      for (const earlier of page) {
-        const book = this.#importedCall(() => this.#importedExemplars.book(earlier.bookId));
-        for (const entry of book.exemplars) {
-          if (!entry.typeId.startsWith('readers-report-') || entry.eligibility !== 'house-only') continue;
-          const words = this.#importedCall(() => readWritingExemplarWords(this.#authority, entry.revisionId));
-          if (words !== null) exemplars.push({ title: boundedGraphemes(`${book.bookTitle} · ${entry.typeLabel} · 版本 ${entry.version}`, 200), text: words.text });
-        }
+      // Named as 范例 lists it, so a damaged record is still named by its Book and template.
+      const title = boundedGraphemes(`${asString(row.title)} · ${readersReportDocumentType(readersReportDocumentTypeId(template))!.label}`, 200);
+      try {
+        const current = this.#publicationCall(() => this.#publicationVersions.current(otherBookId));
+        if (current === null || current.withdrawn) continue;
+        const pin = this.#readersReportPins(otherBookId, current.projection.createdAt).find((entry) => entry.template === template);
+        if (pin === undefined) continue;
+        const candidate = this.#readersReportExemplarCandidate(pin);
+        const latest = this.#learningCall(() => this.#learningEligibility.history(otherBookId, candidate.materialKey)).at(-1);
+        if (latest === undefined || latest.choice !== 'house' || latest.materialDigest !== learningMaterialDigest(candidate)) continue;
+        const words = (this.#authority.prepare('SELECT text FROM manuscript_block_versions WHERE revision_id = ? ORDER BY position').all(pin.revisionId) as SqlRow[])
+          .map((block) => asString(block.text).replace(/\r\n?/gu, '\n').replace(/[\t\f\v]/gu, ' ').trim()).filter((line) => line.length > 0).join('\n');
+        if (words.length === 0) continue;
+        exemplars.push({ title, text: boundedGraphemes(words, MAX_EXEMPLAR_GRAPHEMES) });
+      } catch (error) {
+        if (!(error instanceof StoreError)) throw error;
+        damaged.push(title);
       }
-      if (page.length < MAX_EXEMPLAR_BOOKS_PAGE) break;
-      after = { title: page.at(-1)!.title, bookId: page.at(-1)!.bookId };
     }
-    return exemplars.slice(0, MAX_READERS_REPORT_EXEMPLARS);
+    // Then earlier Books' imported 审稿意见 (Issue #427), by title as 范例 lists them: only those Books are read, one item at a
+    // time, so a damaged record leaves out only itself (Issue #778).
+    for (const item of this.#importedCall(() => this.#importedExemplars.readersReportExemplarCandidates())) {
+      if (exemplars.length === MAX_READERS_REPORT_EXEMPLARS) break;
+      const title = boundedGraphemes(item.title, 200);
+      if (item.revisionId === null) { damaged.push(title); continue; }
+      try {
+        const words = readWritingExemplarWords(this.#authority, item.revisionId);
+        if (words !== null) exemplars.push({ title, text: words.text });
+      } catch (error) {
+        if (!(error instanceof ImportedExemplarError)) throw error;
+        damaged.push(title);
+      }
+    }
+    return { exemplars, damaged };
+  }
+
+  /**
+   * What 评估 says of the house's 审稿意见 exemplars (Issue #778): the ones that read, and any damaged record named as it would
+   * be listed, so one damaged record leaves only itself out.
+   */
+  #readersReportExemplarStatement(readings: { exemplars: ReadersReportExemplarInput[]; damaged: string[] }): string {
+    if (readings.damaged.length === 0) return readersReportExemplarLine(readings.exemplars);
+    const names = readings.damaged.map((title) => `《${title}》`).join('、');
+    const damaged = `另有 ${readings.damaged.length} 份范例记录已损坏，无法读取`;
+    return readings.exemplars.length === 0
+      ? `本社没有可以读取的审稿意见范例，本次不参考范例；${damaged}：${names}`
+      : `${readersReportExemplarLine(readings.exemplars)}；${damaged}，本次不参考：${names}`;
   }
 
   /**
@@ -8694,7 +8732,7 @@ export class EditorialStore {
     requireStore(basis !== null, 'READERS_REPORT_NEEDS_FINALIZED', READERS_REPORT_NEEDS_FINALIZED);
     requireStore(this.#documentCall(() => this.#productionDocuments.documentOfType(bookId, readersReportDocumentTypeId(template))) === undefined,
       'READERS_REPORT_DRAFT_EXISTS', `这本书已经有「${READERS_REPORT_TEMPLATE_LABELS[template]}」的草稿；请打开它继续修改。`);
-    const input = this.#readersReportCall(() => readersReportContractInput(template, basis, this.#readersReportExemplars(bookId)));
+    const input = this.#readersReportCall(() => readersReportContractInput(template, basis, this.#readersReportExemplars(bookId).exemplars));
     const ledger = this.readersReportLedger(input);
     const latest = this.#latestReadersReport(bookId);
     const mode = latest === null || latest.projection.resultSetRevision === null ? 'readers-report-first' : 'readers-report-again';
@@ -8766,7 +8804,7 @@ export class EditorialStore {
    * drafted, its newest result not yet opened, and its draft document.
    */
   #readersReportWorkspace(bookId: string, basis: FinalizedEvaluation | null, unreadable: string | null): EvaluationReadersReportProjection {
-    const exemplars = this.#readersReportExemplars(bookId);
+    const readings = this.#readersReportExemplars(bookId);
     let latest: { task: StoredReadersReportTask; ledger: BaselineAnalysisStore; projection: ReadersReportProjection } | null = null;
     let unavailable: string | null = unreadable;
     try {
@@ -8814,7 +8852,7 @@ export class EditorialStore {
     const task = latest?.projection.taskIntent ?? null;
     return {
       basis: basis === null ? null : { recordId: basis.recordId, ordinal: basis.ordinal, revisionLabel: basis.revisionLabel, finalizedAt: basis.finalizedAt },
-      exemplars: { count: exemplars.length, statement: readersReportExemplarLine(exemplars) },
+      exemplars: { count: readings.exemplars.length, statement: this.#readersReportExemplarStatement(readings) },
       task: latest === null || task === null ? null : {
         taskIntentId: task.taskIntentId,
         template: latest.task.template,

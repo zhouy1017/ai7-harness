@@ -37,23 +37,28 @@ async function projectBook(): Promise<string> {
 function db(): DatabaseSync { return new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite')); }
 
 describe('earlier published Books in 范例', () => {
-  it('pages imported and AI7 publication provenance together without skipping duplicate titles', async () => {
-    const imported = await importSample1Book(store, roots.codeRoot, '第010本');
+  it('pages imported and AI7 publication provenance together in one pinned collation across duplicate and mixed titles', async () => {
+    const imported = await importSample1Book(store, roots.codeRoot, '第017本');
     const milestone = await store.saveMilestone(imported.manuscriptId, imported.branchId, '一审稿', 'stage-archive', null, '');
     store.designatePublicationVersion({ bookId: imported.bookId, milestoneId: milestone.milestoneId, scope: '纸质版首印', basis: '测试通过' });
-    for (let index = 0; index < 21; index += 1) {
+    for (let index = 0; index < 18; index += 1) {
       await store.importEarlierExemplar({ ...await input(), bookTitle: `第${String(index).padStart(3, '0')}本` });
     }
+    // U+FF21 sorts after the surrogate range in UTF-16 but before U+10000 in code points, and 𠀀 is a supplementary-plane
+    // character: JS's `<` and SQLite's BINARY disagree, so only the pinned collation keeps the page cursor stable (Issue #778).
+    await store.importEarlierExemplar({ ...await input(), bookTitle: 'Ａ本' });
+    await store.importEarlierExemplar({ ...await input(), bookTitle: '𠀀本' });
     const first = store.inspectExemplars(null);
     expect(first.books).toHaveLength(20);
     expect(first.nextCursor).not.toBeNull();
     const rest = store.inspectExemplars(first.nextCursor);
-    expect(rest.books).toHaveLength(2);
     expect(rest.nextCursor).toBeNull();
     const all = [...first.books, ...rest.books];
-    expect(new Set(all.map((book) => book.bookId)).size).toBe(22);
-    expect(all.filter((book) => book.bookTitle === '第010本')).toHaveLength(2);
-    expect(all.map((book) => book.bookTitle)).toEqual(all.map((book) => book.bookTitle).sort());
+    expect(new Set(all.map((book) => book.bookId)).size).toBe(21);
+    expect(all.filter((book) => book.bookTitle === '第017本')).toHaveLength(2);
+    expect(all.map((book) => book.bookTitle)).toEqual([
+      ...Array.from({ length: 18 }, (_, index) => `第${String(index).padStart(3, '0')}本`), '第017本', 'Ａ本', '𠀀本',
+    ]);
     const normalized = await store.importEarlierExemplar({ ...await input(), bookTitle: '  测试  书名  ' });
     expect(normalized.bookTitle).toBe('测试 书名');
     let after = null;
@@ -199,6 +204,35 @@ describe('earlier published Books in 范例', () => {
     // Every reader of 范例 says so as it says any other unreadable part, rather than failing whole.
     expect(() => store.inspectExemplars(null)).toThrow(expect.objectContaining({ name: 'StoreError', code: 'EXEMPLAR_RECORD_INVALID' }));
     expect(store.inspectWritingTask(bookId).unavailable).toBe('写作任务暂不可用：以前图书的范例记录无法读取。');
+  });
+
+  it('lists a damaged imported 审稿意见 exemplar as damaged while 评估 reads the rest (Issue #778)', async () => {
+    const readable = await store.importEarlierExemplar({ ...await input('虚构的审稿意见，用于读取测试。'), typeId: 'readers-report-editorial' });
+    const damaged = await store.importEarlierExemplar({ ...await input('另一份虚构的审稿意见。'), bookTitle: '另一本以前出版的书', typeId: 'readers-report-author' });
+    const bookId = await projectBook();
+    const database = db();
+    try {
+      database.exec('DROP TRIGGER earlier_exemplar_versions_no_update');
+      database.prepare("UPDATE earlier_exemplar_versions SET canonical_json = '{}' WHERE revision_id = ?").run(damaged.exemplars[0]!.revisionId);
+    } finally { database.close(); }
+    const workspace = store.inspectEvaluation(bookId, null).readersReport;
+    expect(workspace.templates.map((entry) => entry.template)).toEqual(['author', 'editorial']);
+    expect(workspace.exemplars.count).toBe(1);
+    expect(workspace.exemplars.statement).toBe(
+      '参考本社 1 份审稿意见范例：《以前出版的测试图书 · 审稿意见 · 给编辑部 / 选题会的审读报告 · 版本 1》；'
+      + '另有 1 份范例记录已损坏，无法读取，本次不参考：《另一本以前出版的书 · 审稿意见 · 给作者的修改意见 · 版本 1》',
+    );
+    // When nothing reads, 评估 names the damaged exemplars rather than calling 范例 none.
+    const allDamaged = db();
+    try {
+      allDamaged.prepare("UPDATE earlier_exemplar_versions SET canonical_json = '{}' WHERE revision_id = ?").run(readable.exemplars[0]!.revisionId);
+    } finally { allDamaged.close(); }
+    const nothingReads = store.inspectEvaluation(bookId, null).readersReport.exemplars;
+    expect(nothingReads.count).toBe(0);
+    expect(nothingReads.statement).toBe(
+      '本社没有可以读取的审稿意见范例，本次不参考范例；另有 2 份范例记录已损坏，无法读取：'
+      + '《以前出版的测试图书 · 审稿意见 · 给编辑部 / 选题会的审读报告 · 版本 1》、《另一本以前出版的书 · 审稿意见 · 给作者的修改意见 · 版本 1》',
+    );
   });
 
   it('keeps each original whole under its digest and sweeps at open what an interrupted or refused import left', async () => {
