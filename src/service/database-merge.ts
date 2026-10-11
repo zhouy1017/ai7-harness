@@ -477,6 +477,22 @@ function writingMaterialLeftBehind(db: DatabaseSync): boolean {
   ).get() !== undefined;
 }
 
+/**
+ * Whether a merging Book's writing Tasks pinned a Material Index build this store does not hold. Builds do not merge, and a build
+ * made here afterwards gets a new digest, never the pinned one: such a Task keeps its pins, outcome and drafts readable but cannot
+ * start again. An item no merging Book owns does not merge either (`library_materials` is `owned`), so its builds are missing too.
+ */
+function writingMaterialLeftBehind(db: DatabaseSync): boolean {
+  if (!tableExists(db, 'src', 'writing_tasks')) return false;
+  return db.prepare(
+    `SELECT 1 FROM src.writing_tasks t, json_each(t.canonical_json, '$.materialSources') m
+     WHERE t.book_id IN (SELECT b.book_id FROM src.books b WHERE ${MERGING_BOOK})
+       AND NOT EXISTS (SELECT 1 FROM main.material_index_builds i
+         WHERE i.material_id = json_extract(m.value, '$.materialId') AND i.sha256 = json_extract(m.value, '$.indexDigest'))
+     LIMIT 1`,
+  ).get() !== undefined;
+}
+
 /** At most this many of a package's Books are listed in a preview or a waiting merge; the rest are counted (Issue #434 review). */
 export const MAX_MERGE_BOOKS_LISTED = 50;
 

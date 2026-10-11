@@ -2,9 +2,9 @@ import { readFileSync } from 'node:fs';
 import { createContext, runInContext } from 'node:vm';
 import { createSourceFile, forEachChild, isFunctionDeclaration, ModuleKind, ScriptTarget, transpileModule, type Node } from 'typescript';
 import { describe, expect, it } from 'vitest';
-import { writingMaterialLabel, writingMaterialsMore } from '../../src/renderer/writing-task-labels.js';
+import { WRITING_MATERIALS_AT_LIMIT, writingMaterialLabel, writingMaterialsMore, writingMaterialsOverTotalNote } from '../../src/renderer/writing-task-labels.js';
 import { WRITING_MATERIALS_TOO_MANY, writingMaterialsOverTotal } from '../../src/service/writing-tasks.js';
-import type { WritingTaskProjection } from '../../src/shared/protocol.js';
+import { MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES, type WritingTaskProjection } from '../../src/shared/protocol.js';
 
 // Run the actual renderer's private material controls with a small DOM stub, as task-drawer-completion does.
 // This exercises event order, refreshed offers and the visible disabled reasons without opening Electron.
@@ -45,7 +45,7 @@ function harness(items: Item[]) {
   let identities = 0;
   let paints = 0;
   const context = createContext({
-    busy: false, CSS: { escape: (value: string) => value }, writingMaterialLabel, writingMaterialsMore,
+    busy: false, CSS: { escape: (value: string) => value }, writingMaterialLabel, writingMaterialsMore, WRITING_MATERIALS_AT_LIMIT, writingMaterialsOverTotalNote,
     el: (tag: string, className?: string, text?: string) => new Element(tag, className, text),
     uid: () => `control-${++identities}`,
     paint: () => { paints += 1; draw(); },
@@ -73,6 +73,13 @@ function harness(items: Item[]) {
 }
 
 describe('writing material controls', () => {
+  it('keeps the picker limit sentences in the writing words, equal to the service words', () => {
+    expect(WRITING_MATERIALS_AT_LIMIT).toBe(WRITING_MATERIALS_TOO_MANY);
+    expect(writingMaterialsOverTotalNote(MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES + 9)).toBe(writingMaterialsOverTotal(MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES + 9));
+    expect(source).not.toMatch(/最多参考 4|超过合计/u);
+  });
+
+
   it('submits ticks in offer order and drops absent or no longer selectable items on refresh', () => {
     const view = harness([item('a'), item('b'), item('c')]);
     view.tick('c');

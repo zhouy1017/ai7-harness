@@ -8402,7 +8402,9 @@ export interface DatabaseImportBookProjection {
 
 /**
  * What stays behind when a package's Books merge: Series, 资料库 items, the 编辑工作区方案's enablement, a 内部编号 taken here — and
- * the 范例 of other Books a merging Book's writing Tasks referenced, when neither merges nor is here (Issue #432 re-review).
+ * the 范例 of other Books a merging Book's writing Tasks referenced, when neither merges nor is here (Issue #432 re-review), and
+ * the 资料库 items' pinned index builds a merging Book's writing Tasks referenced: builds do not merge and a rebuild gets a new
+ * digest, and an item no merging Book owns stays behind itself (Issue #771).
  */
 export type DatabaseMergeNotice = 'series' | 'internal-number' | 'writing-exemplar' | 'writing-material';
 

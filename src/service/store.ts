@@ -9032,9 +9032,9 @@ export class EditorialStore {
         from = page.next;
       }
     } catch (error) {
-      if (error instanceof StoreError && ['MATERIAL_INDEX_MOVED', 'MATERIAL_REFERENCE_UNAVAILABLE', 'LIBRARY_MATERIAL_NOT_FOUND'].includes(error.code)) {
-        return { refusal: { code: error.code, message: error.message } };
-      }
+      // Every seam refusal is handed on in its code; the ledger (`WritingTasks.#pinnedMaterial`) alone tells a moved or unavailable
+      // item from a corrupt record, which it throws.
+      if (error instanceof StoreError && /^(?:MATERIAL_|LIBRARY_MATERIAL_)/u.test(error.code)) return { refusal: { code: error.code, message: error.message } };
       throw error;
     }
     return { paragraphs };
