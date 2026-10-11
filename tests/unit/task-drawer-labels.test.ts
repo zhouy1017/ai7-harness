@@ -3,6 +3,7 @@ import type { TaskPlanProjection, TaskPlanStartProjection, TaskPlanStateKey } fr
 import { IPC_CHANNELS, TASK_PLAN_KINDS } from '../../src/shared/protocol.js';
 import {
   TASK_BAR_CANCEL_FAILED,
+  TASK_BAR_BLOCKED_CANCEL_NOTE,
   TASK_BAR_CANCEL_WAIT,
   TASK_BAR_CANCELLED,
   TASK_BAR_CONNECT,
@@ -1000,12 +1001,24 @@ describe('the drawer bar for a waiting Run of every other kind', () => {
       const view = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, {
         kind, state: { key: 'plan-moved', label: '需要重新确认计划' }, reprepare: null, planMovedReason: reason,
       }));
+      // A ledger kind's Run that never started can be cancelled, which takes its item out of 待我处理 (Issue #764).
+      const cancellable = kind !== 'review-run';
       expect([view.status, view.note, view.actions.map((entry) => [entry.name, entry.label])], kind)
-        .toEqual(['需要重新确认计划', `${reason}${where}`, [['run-link', link]]]);
+        .toEqual(['需要重新确认计划', `${reason}${where}${cancellable ? TASK_BAR_BLOCKED_CANCEL_NOTE : ''}`,
+          [...(cancellable ? [['cancel-wait', TASK_BAR_CANCEL_WAIT]] : []), ['run-link', link]]]);
     }
     // A plan that carries no reason still says the state, then where.
     const bare = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { kind: 'writing', state: { key: 'plan-moved', label: '需要重新确认计划' }, reprepare: null }));
-    expect(bare.note).toBe(`需要重新确认计划。${TASK_BAR_PLAN_MOVED_ELSEWHERE.writing}`);
+    expect(bare.note).toBe(`需要重新确认计划。${TASK_BAR_PLAN_MOVED_ELSEWHERE.writing}${TASK_BAR_BLOCKED_CANCEL_NOTE}`);
+  });
+
+  it('offers 取消 on a blocked ledger-kind Run that never started, and on no other kind (Issue #764)', () => {
+    for (const kind of ['initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing'] as const) {
+      const view = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { kind, state: { key: 'blocked', label: '派发前已阻止' } }));
+      expect([view.note, view.actions.map((entry) => entry.name)], kind).toEqual([TASK_BAR_BLOCKED_CANCEL_NOTE, ['cancel-wait', 'run-link']]);
+    }
+    const review = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { kind: 'review-run', state: { key: 'blocked', label: '派发前已阻止' } }));
+    expect(review.actions.map((entry) => entry.name)).not.toContain('cancel-wait');
   });
 
   it('shows a waiting Run of every kind what it waits for, with its direct 取消 and the way to the Run (OFF-006, OFF-010)', () => {

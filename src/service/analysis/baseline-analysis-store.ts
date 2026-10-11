@@ -3565,8 +3565,15 @@ export class BaselineAnalysisStore {
     const run = current.run;
     requireAnalysis(current.taskIntent?.taskIntentId === taskIntentId && run !== null, 'ANALYSIS_CANCEL_STALE', '这项任务已经变化；无法取消。');
     if (run.state === 'cancelled') return current;
+    // 取消 on a Task of another kind whose Run never began: blocked before dispatch after it waited — its plan moved, or this
+    // launch could not start it (Issue #764). Under developer-live 初评 cannot be prepared again, so nothing else would end it;
+    // the item leaves 待我处理 once the Run is cancelled. A Run that began (so one holding a 结果待确认 range) is never here.
+    if (run.state === 'blocked-before-dispatch' && this.#definition.kind !== BASELINE_ANALYSIS_KIND && !runBegan(run.transitions)) {
+      this.recordRunState(run.runRecordId, 'cancelled', { detail: '编辑取消了这项没能开始的任务；没有发送任何内容，也没有产生用量。' });
+      return this.inspect(bookId);
+    }
     // A Run waiting on the governor (Issue #49, S14) is cancelled the same way: nothing of it ran either.
-    requireAnalysis(run.state === 'awaiting-connectivity' || run.state === 'authorized', 'ANALYSIS_CANCEL_NOT_WAITING', '只有等待中的任务可以在这里取消；它已经开始或已经结束。');
+    requireAnalysis(run.state === 'awaiting-connectivity' || run.state === 'authorized', 'ANALYSIS_CANCEL_NOT_WAITING', '只有等待中或没能开始的任务可以在这里取消；它已经开始或已经结束。');
     this.recordRunState(run.runRecordId, 'cancelled', {
       detail: run.state === 'authorized'
         ? '编辑在派发前取消了这项等待运行名额的任务；没有发送任何内容，也没有产生用量。'

@@ -294,7 +294,14 @@ describe('联网后开始任务 of a 写作任务 (Issue #760, S74c)', () => {
       expect(plan.planMovedReason).toMatch(/^需要重新确认计划：.+已经变化，这次授权不再对应当前的情况。$/u);
       expect(attentionItem(store, `task:${taskIntentId}`)).toMatchObject({ group: 'decisions', state: 'analysis-plan-moved', blocked: true });
       expect(panelItem(store, bookId, `task:${taskIntentId}`)).toMatchObject({ state: 'analysis-plan-moved' });
-      expect(await code(() => store.cancelWaitingTask({ bookId, kind: 'writing', ref: taskIntentId }))).toBe('ANALYSIS_CANCEL_NOT_WAITING');
+      // Nothing else can end it (under developer-live 初评 cannot be prepared again), so 取消 does, and the item leaves both lists (Issue #764).
+      expect(store.cancelWaitingTask({ bookId, kind: 'writing', ref: taskIntentId })).toEqual({ dequeue: null });
+      expect(transitions(taskIntentId)).toEqual(['authorized', 'awaiting-connectivity', 'blocked-before-dispatch', 'cancelled']);
+      expect(attentionItem(store, `task:${taskIntentId}`)).toBeUndefined();
+      expect(panelItem(store, bookId, `task:${taskIntentId}`)).toBeUndefined();
+      expect((await planOf(store, bookId, 'writing', taskIntentId, 'online')).state).toEqual({ key: 'cancelled', label: '已取消' });
+      store.cancelWaitingTask({ bookId, kind: 'writing', ref: taskIntentId });
+      expect(transitions(taskIntentId)).toHaveLength(4);
     });
   }, 300_000);
 });
@@ -399,6 +406,12 @@ describe('取消 of a waiting or queued Run of another kind (Issue #760 review)'
       expect(attentionItem(store, `task:${taskIntentId}`)).toMatchObject({ group: 'exceptions', state: 'analysis-blocked', blocked: true, nextStep: 'view-run' });
       expect(store.inspectGlobalAttention(() => null, false).actionableCount).toBe(1);
       expect(panelItem(store, bookId, `task:${taskIntentId}`)).toMatchObject({ state: 'analysis-blocked' });
+      // A launch that cannot start it leaves nothing to prepare over: 取消 dismisses the item from both lists (Issue #764).
+      store.cancelWaitingTask({ bookId, kind: 'writing', ref: taskIntentId });
+      expect(transitions(taskIntentId)).toEqual(['authorized', 'awaiting-connectivity', 'blocked-before-dispatch', 'cancelled']);
+      expect(attentionItem(store, `task:${taskIntentId}`)).toBeUndefined();
+      expect(panelItem(store, bookId, `task:${taskIntentId}`)).toBeUndefined();
+      expect(store.inspectGlobalAttention(() => null, false).actionableCount).toBe(0);
     });
   }, 300_000);
 });
