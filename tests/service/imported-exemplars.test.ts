@@ -1,3 +1,4 @@
+import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { writeFile, readFile, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -73,7 +74,7 @@ describe('earlier published Books in 范例', () => {
     expect(store.getBookOverview(existing).book).toMatchObject({ title: '升级前的测试项目' });
     expect(store.inspectExemplars(null).books).toEqual([]);
     const upgraded = db();
-    try { expect(upgraded.prepare('PRAGMA user_version').get()!.user_version).toBe(69); } finally { upgraded.close(); }
+    try { expect(upgraded.prepare('PRAGMA user_version').get()!.user_version).toBe(LATEST_SCHEMA_VERSION); } finally { upgraded.close(); }
   });
 
   it.each(['docx', 'txt', 'md'])('imports %s with attribution, without fabricating a Book project, and keeps an exact revision', async (extension) => {
@@ -84,7 +85,7 @@ describe('earlier published Books in 范例', () => {
     const database = db();
     try {
       expect(database.prepare('SELECT count(*) n FROM books').get()!.n).toBe(0);
-      expect(database.prepare('PRAGMA user_version').get()!.user_version).toBe(69);
+      expect(database.prepare('PRAGMA user_version').get()!.user_version).toBe(LATEST_SCHEMA_VERSION);
       expect(readWritingExemplarWords(database, first.revisionId)).toEqual({ text: sentence, excerpt: false });
       expect(() => database.prepare('DELETE FROM earlier_exemplar_versions').run()).toThrow('IMPORTED_EXEMPLAR_LEDGER_IMMUTABLE');
       const value = JSON.parse(String(database.prepare('SELECT canonical_json FROM earlier_exemplar_versions').get()!.canonical_json));
