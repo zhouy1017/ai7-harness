@@ -17059,6 +17059,21 @@ export class EditorialStore {
 
   // ---- 结果待确认 a completed Run left (Issue #757; ATTN-002, NOTIF-004, CTRL-007, CONT-011) -------------------------------
 
+  #unconfirmedReadVersion: string | null = null;
+  #unconfirmedPairs: SqlRow[] | null = null;
+  readonly #unconfirmedLists = new Map<string, { ranges: UnconfirmedOutcomeRecord[]; steps: UnconfirmedOutcomeRecord[] }>();
+
+  /** Lazily derived, never persisted: local writes and commits by another handle invalidate the readings. */
+  #refreshUnconfirmedIndex(): void {
+    const changes = this.#authority.prepare('SELECT total_changes() AS changes').get() as SqlRow;
+    const external = this.#authority.prepare('PRAGMA data_version').get() as SqlRow;
+    const version = `${changes.changes}:${external.data_version}`;
+    if (this.#unconfirmedReadVersion === version) return;
+    this.#unconfirmedReadVersion = version;
+    this.#unconfirmedPairs = null;
+    this.#unconfirmedLists.clear();
+  }
+
   /**
    * The ranges and steps whose sent requests' results cannot be known that Runs of one Task kind left on a Book and that reached
    * their Task Outcome, whatever it was — completed (a kind that keeps no progress reads on past such a range, and any kind past
@@ -17068,9 +17083,12 @@ export class EditorialStore {
    * Run's categories are each their own kind, read together. A read.
    */
   #unconfirmedListed(bookId: string, surface: TaskPlanKind): { ranges: UnconfirmedOutcomeRecord[]; steps: UnconfirmedOutcomeRecord[] } {
+    this.#refreshUnconfirmedIndex();
+    const cacheKey = `${bookId}\n${surface}`;
+    const cached = this.#unconfirmedLists.get(cacheKey);
+    if (cached !== undefined) return cached;
     const kinds = (this.#authority.prepare('SELECT DISTINCT kind FROM analysis_result_sets WHERE book_id = ? ORDER BY kind').all(bookId) as SqlRow[])
       .map((row) => asString(row.kind)).filter((kind) => unconfirmedSurfaceOf(kind) === surface);
-    if (kinds.length === 0) return { ranges: [], steps: [] };
     const resolved = this.#analysisCall(() => this.#outcomeResolutions.resolvedKeys(bookId));
     const ranges: UnconfirmedOutcomeRecord[] = [];
     const steps: UnconfirmedOutcomeRecord[] = [];
@@ -17079,7 +17097,9 @@ export class EditorialStore {
       ranges.push(...found.ranges.filter((range) => range.classification !== null && !resolved.has(range.key)));
       steps.push(...found.steps.filter((step) => !resolved.has(step.key)));
     }
-    return { ranges, steps };
+    const listed = { ranges, steps };
+    this.#unconfirmedLists.set(cacheKey, listed);
+    return listed;
   }
 
   /** The category a review kind names, in the house's built-in configuration's words; `null` for any other kind. */
@@ -17157,17 +17177,19 @@ export class EditorialStore {
    * where a revision holds an `outcome-unknown` gap or a completed Run's report names a step so — every list bounded.
    */
   #unconfirmedAttention(limit: number, bookId: string | null = null): UnconfirmedAttentionReading[] {
-    const pairs = this.#authority.prepare(
+    this.#refreshUnconfirmedIndex();
+    const pairs = this.#unconfirmedPairs ??= this.#authority.prepare(
       `SELECT DISTINCT book_id, kind FROM (
          SELECT s.book_id, s.kind FROM analysis_result_set_revisions r JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
          WHERE instr(r.canonical_json, '"outcome-unknown"') > 0
          UNION
          SELECT t.book_id, t.kind FROM analysis_task_outcomes o JOIN analysis_task_intents t ON t.task_intent_id = o.task_intent_id
          WHERE o.classification IN ('completed', 'completed-with-gaps') AND instr(o.canonical_json, ?) > 0
-       ) WHERE ? IS NULL OR book_id = ? ORDER BY book_id, kind LIMIT ?`,
-    ).all(OUTCOME_UNKNOWN_NOT_RESENT, bookId, bookId, limit) as SqlRow[];
+       ) ORDER BY book_id, kind`,
+    ).all(OUTCOME_UNKNOWN_NOT_RESENT) as SqlRow[];
     const surfaces = new Map<string, { bookId: string; surface: TaskPlanKind }>();
     for (const pair of pairs) {
+      if (bookId !== null && asString(pair.book_id) !== bookId) continue;
       const surface = unconfirmedSurfaceOf(asString(pair.kind));
       if (surface !== null) surfaces.set(`${asString(pair.book_id)}\n${surface}`, { bookId: asString(pair.book_id), surface });
     }
@@ -17193,6 +17215,8 @@ export class EditorialStore {
         at: entries.map((entry) => entry.recordedAt).sort().at(-1)!,
         runRecordIds: [...new Set(entries.map((entry) => entry.runRecordId))],
       });
+      // The bound applies to unresolved surfaces, after every resolved pair has been removed.
+      if (readings.length >= limit) break;
     }
     return readings;
   }
