@@ -11,8 +11,8 @@ import { reconnectPreflight } from '../../src/service/reconnect-preflight.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { SeriesExclusionLedger, seriesExclusionImpact, seriesExclusionTarget, seriesScopeStopDetail } from '../../src/service/series-exclusions.js';
 import { EditorialStore, type WaitingTaskRun } from '../../src/service/store.js';
-import { SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL, type LaunchPolicyProjection, type StartWhenOnlineTaskKind } from '../../src/shared/protocol.js';
-import { TYPOS_AND_USAGE } from '../support/review-categories.js';
+import { BASELINE_ANALYSIS_TASK_GOAL, SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL, type LaunchPolicyProjection, type StartWhenOnlineTaskKind } from '../../src/shared/protocol.js';
+import { LITERARY_EXPRESSION, TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { J13_PLACE, J13_SERIES_TITLE, makeJ13Series } from '../support/series-consistency.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -134,8 +134,8 @@ function reviewStates(reviewRunId: string): string[] {
   ).all(reviewRunId) as Array<{ state: string }>).map((row) => row.state));
 }
 
-function prepareReview(store: EditorialStore, bookId: string, categoryId = TYPOS): string {
-  let progress = store.createReviewRunPreparationWork(bookId, [categoryId], WHOLE, launchPolicy);
+function prepareReview(store: EditorialStore, bookId: string, categoryId: string | ReadonlyArray<string> = TYPOS): string {
+  let progress = store.createReviewRunPreparationWork(bookId, typeof categoryId === 'string' ? [categoryId] : categoryId, WHOLE, launchPolicy);
   while (!progress.done) progress = store.advanceReviewRunPreparationWork(progress.workId!);
   return progress.projection!.run!.reviewRunId;
 }
@@ -176,6 +176,40 @@ describe('Reconnect Preflight admits strictly oldest-first across kinds (Issue #
       expect(await preflight(session, 'online')).toEqual({ admitted: 1, blocked: 0, waiting: 0 });
       await owner.whenIdle();
       expect(transitions(taskIntentId).slice(0, 3)).toEqual(['authorized', 'awaiting-connectivity', 'admitted']);
+    }, 1);
+  }, 300_000);
+});
+
+describe('a local-first Review Run keeps its place in the order (Issue #764 review)', () => {
+  it('writes the baseline leads of 情节逻辑与前后一致 and takes the free place for the next category before a later 写作任务 is admitted', async () => {
+    await withSession('sample1-review-authored', async (session) => {
+      const { store, owner } = session;
+      const reviewBook = await sample1Book(store, '先到的本地审阅');
+      const writingBook = await sample1Book(store, '后到的写作');
+      // The leads come from the Book's baseline analysis, settled through the same owner.
+      let baseline = store.createBaselineAnalysisPreparationWork(reviewBook, BASELINE_ANALYSIS_TASK_GOAL, null, launchPolicy);
+      while (!baseline.done) baseline = store.advanceBaselineAnalysisPreparationWork(baseline.workId!);
+      const prepared = baseline.projection!;
+      owner.admitAndDispatch(store.authorizeBaselineAnalysis(reviewBook, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!);
+      await owner.whenIdle();
+      expect(store.inspectBaselineAnalysis(reviewBook).state).toBe('settled');
+
+      // The configuration orders 情节逻辑 (no model) before 文学表达 (a model), whatever the selection order.
+      const reviewRunId = prepareReview(store, reviewBook, [LITERARY_EXPRESSION.categoryId, 'plot-consistency']);
+      const taskIntentId = prepareWriting(store, writingBook);
+      await reviewWaitsOnline(store, reviewBook, reviewRunId);
+      const digest = (await planOf(store, writingBook, 'writing', taskIntentId)).start.planEnvelopeDigest!;
+      store.startTaskWhenOnline({ bookId: writingBook, kind: 'writing', ref: taskIntentId, planEnvelopeDigest: digest, planDigests: [] });
+      expect(owner.capacity).toBe(1);
+      expect(await preflight(session, 'online')).toEqual({ admitted: 1, blocked: 0, waiting: 1 });
+      expect(withDatabase((database) => (database.prepare(
+        'SELECT category_id, state FROM review_run_category_events WHERE review_run_id = ? ORDER BY rowid',
+      ).all(reviewRunId) as Array<{ category_id: string; state: string }>).map((row) => [row.category_id, row.state]))[0]).toEqual(['plot-consistency', 'materialized']);
+      expect(reviewStates(reviewRunId)).toContain('dispatched');
+      expect(transitions(taskIntentId)).toEqual(['authorized', 'awaiting-connectivity']);
+      await owner.whenIdle();
+      expect(await preflight(session, 'online')).toEqual({ admitted: 1, blocked: 0, waiting: 0 });
+      await owner.whenIdle();
     }, 1);
   }, 300_000);
 });

@@ -93,3 +93,59 @@ describe('the drive loop takes a free place in the turn it is handed a Run (Issu
     expect(calls).toEqual(['admitAndDispatch', 'recordDispatch']);
   });
 });
+
+describe('the drive loop passes through categories that need no place in the same turn (Issue #764 review)', () => {
+  function localFirst(): { calls: string[]; driver: ReviewRunDriver } {
+    const calls: string[] = [];
+    const written = new Set<string>();
+    const steps: ReviewRunDriveSteps = {
+      begin: () => ['plot-consistency', 'literary-expression'],
+      end: () => undefined,
+      step: (_reviewRunId, categoryId): ReviewRunDriveStep => categoryId === 'plot-consistency'
+        ? (written.has(categoryId) ? { kind: 'done' } : { kind: 'write' })
+        : (calls.includes('admitAndDispatch') ? { kind: 'done' } : { kind: 'dispatch', runRecordId: 'run-1', ledger: LEDGER }),
+      start: () => null,
+      recordDispatch: () => { calls.push('recordDispatch'); },
+      refuseDispatch: () => undefined,
+      settle: () => undefined,
+      write: (_reviewRunId, categoryId) => { calls.push(`write:${categoryId}`); written.add(categoryId); },
+      fail: (_reviewRunId, categoryId) => { calls.push(`fail:${categoryId}`); },
+      waitingForPlace: () => undefined,
+    };
+    const owner: ReviewRunExecutionOwner = {
+      busy: false,
+      admitAndDispatch: () => { calls.push('admitAndDispatch'); },
+      whenPlaceFree: async () => undefined,
+      whenDone: async () => undefined,
+    };
+    return { calls, driver: new ReviewRunDriver(steps, owner) };
+  }
+
+  it('writes the local leads and takes the free place for the next category before drive returns', async () => {
+    const { calls, driver } = localFirst();
+    const driven = driver.drive('review-run');
+    expect(calls).toEqual(['write:plot-consistency', 'admitAndDispatch', 'recordDispatch']);
+    await driven;
+  });
+
+  it('records a local category that fails and goes on to the next, as before', async () => {
+    const calls: string[] = [];
+    const failing = new ReviewRunDriver({
+      begin: () => ['plot-consistency', 'literary-expression'],
+      end: () => undefined,
+      step: (_reviewRunId, categoryId): ReviewRunDriveStep => {
+        if (categoryId === 'plot-consistency') throw Object.assign(new Error('读取失败'), { code: 'REVIEW_STEP_FAILED' });
+        return { kind: 'done' };
+      },
+      start: () => null,
+      recordDispatch: () => undefined,
+      refuseDispatch: () => undefined,
+      settle: () => undefined,
+      write: () => undefined,
+      fail: (_reviewRunId, categoryId) => { calls.push(`fail:${categoryId}`); },
+      waitingForPlace: () => undefined,
+    }, { busy: false, admitAndDispatch: () => undefined, whenPlaceFree: async () => undefined, whenDone: async () => undefined });
+    await failing.drive('review-run');
+    expect(calls).toEqual(['fail:plot-consistency']);
+  });
+});

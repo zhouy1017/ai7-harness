@@ -82,7 +82,7 @@ export class ReviewRunDriver {
     if (existing !== undefined) return existing;
     if (this.#stopping) return Promise.resolve();
     const categoryIds = this.#steps.begin(reviewRunId);
-    const loop = this.#run(reviewRunId, categoryIds).finally(() => {
+    const loop = this.#pump(this.#run(reviewRunId, categoryIds)).finally(() => {
       this.#loops.delete(reviewRunId);
       try {
         this.#steps.end(reviewRunId);
@@ -118,11 +118,27 @@ export class ReviewRunDriver {
     await Promise.allSettled(Array.from(this.#loops.values()));
   }
 
-  async #run(reviewRunId: string, categoryIds: ReadonlyArray<string>): Promise<void> {
+  /**
+   * Runs the loop's steps in this same turn of the event loop up to the first thing it must wait for, and from there on as each
+   * awaited promise settles (Issue #764): a category that needs no place — the leads of 情节逻辑与前后一致 are written at once —
+   * is passed through without yielding, so the first category that needs a place takes a free one before `drive` returns.
+   * Reconnect Preflight hands several waiting Runs over in one pass, oldest first, and a Run handed over must hold its place
+   * before the next is admitted, or a later Run of another kind would take it first.
+   */
+  #pump(steps: Generator<Promise<void>, void, void>): Promise<void> {
+    const advance = (resume: () => IteratorResult<Promise<void>, void>): Promise<void> => {
+      const next = resume();
+      if (next.done === true) return Promise.resolve();
+      return next.value.then(() => advance(() => steps.next()), (error: unknown) => advance(() => steps.throw(error)));
+    };
+    return advance(() => steps.next());
+  }
+
+  *#run(reviewRunId: string, categoryIds: ReadonlyArray<string>): Generator<Promise<void>, void, void> {
     for (const categoryId of categoryIds) {
       if (this.#stopping) return;
       try {
-        await this.#category(reviewRunId, categoryId);
+        yield* this.#category(reviewRunId, categoryId);
       } catch (error) {
         try {
           this.#steps.fail(reviewRunId, categoryId, codeOf(error), messageOf(error));
@@ -140,7 +156,7 @@ export class ReviewRunDriver {
    * a Run the owner interrupted is settled as interrupted, and one that completed is put on the
    * manuscript, which is the manuscript's own quick write and loses nothing a restart would redo.
    */
-  async #category(reviewRunId: string, categoryId: string): Promise<void> {
+  *#category(reviewRunId: string, categoryId: string): Generator<Promise<void>, void, void> {
     for (;;) {
       const step = this.#steps.step(reviewRunId, categoryId);
       switch (step.kind) {
@@ -156,23 +172,22 @@ export class ReviewRunDriver {
           if (this.#stopping) return;
           // A place first, then the ledger's authorization: while other Runs hold every place the category waits,
           // and the authorization is written only once it can be handed over at once.
-          // A place that is free is taken in this same turn, never after an await (Issue #764): Reconnect Preflight hands several
-          // waiting Runs over in one pass, oldest first, and a Run handed over must hold its place before the next is admitted.
-          if (this.#owner.busy !== false) await this.#place(reviewRunId, categoryId);
+          // A place that is free is taken in this same turn, never after an await (Issue #764).
+          if (this.#owner.busy !== false) yield this.#place(reviewRunId, categoryId);
           if (this.#stopping) return;
           const handOff = this.#steps.start(reviewRunId, categoryId);
-          if (handOff !== null) await this.#dispatch(reviewRunId, categoryId, handOff);
+          if (handOff !== null) yield this.#dispatch(reviewRunId, categoryId, handOff);
           break;
         }
         case 'dispatch': {
           if (this.#stopping) return;
-          if (this.#owner.busy !== false) await this.#place(reviewRunId, categoryId);
+          if (this.#owner.busy !== false) yield this.#place(reviewRunId, categoryId);
           if (this.#stopping) return;
           // What the category needs is read again after the wait (Issue #64 review): a Run stopped meanwhile — a Series
           // Retrieval Exclusion recorded, its start blocked — dispatches nothing, and the next step reads what was recorded.
           const again = this.#steps.step(reviewRunId, categoryId);
           if (again.kind !== 'dispatch' || again.runRecordId !== step.runRecordId) break;
-          await this.#dispatch(reviewRunId, categoryId, again);
+          yield this.#dispatch(reviewRunId, categoryId, again);
           break;
         }
       }
