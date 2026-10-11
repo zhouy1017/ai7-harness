@@ -2139,10 +2139,8 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
         '来源版本结果',
         record.sourceVersionDisposition === 'reused-same-book' ? '复用已明确选择的同图书来源版本' : '创建图书拥有的新来源版本',
       );
-      // The boundary claims a parse only where one happened (ADR 0072 §2).
-      appendRecordField(values, '保留边界', record.retainedBoundary.contentDigest === null
-        ? '完整所选原始文件及其精确身份；未进行本地解析'
-        : '完整所选 DOCX 文件及本地解析出的完整内容与结构身份');
+      // The boundary claims a parse only where one happened, and says so when a converter did it (ADR 0072 §2; Issue #583).
+      appendRecordField(values, '保留边界', record.retainedBoundary.label.replace(/^保留/, ''));
       appendRecordField(values, '保留文件名', record.retainedBoundary.displayName);
       appendRecordField(values, '保留格式', record.retainedBoundary.format);
       appendRecordField(values, '保留字节数', String(record.retainedBoundary.sourceBytes));

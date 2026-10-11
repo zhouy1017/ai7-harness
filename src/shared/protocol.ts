@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 122 as const;
+export const SERVICE_PROTOCOL_VERSION = 123 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -502,6 +502,7 @@ export type BookRecordPresentation =
       sourceVersionDisposition: 'created' | 'reused-same-book';
       retainedBoundary: {
         kind: 'complete-local-file';
+        label: SourceImportRetainedBoundaryLabel;
         format: SourceFormat;
         displayName: string;
         sourceSha256: string;
@@ -825,12 +826,48 @@ export interface BookCreationCommitProjection {
 export type SourceFormat = 'DOCX' | 'DOC' | 'PDF' | 'ODT' | 'RTF' | 'TXT' | 'MD' | 'UNKNOWN';
 
 /**
- * What a source-only import retained. The second label belongs to an original the product kept
- * whole without parsing, so it claims no content or structure identity it did not derive.
+ * What a source-only import retained. The first label belongs to a DOCX the product parsed itself. The next three
+ * belong to a TXT, Markdown or `.doc` file it read through a converter: each names the original format and says it was
+ * converted (Issue #583). The last belongs to an original the product kept whole without parsing, so it claims no
+ * content or structure identity it did not derive.
  */
 export type SourceImportRetainedBoundaryLabel =
   | '保留完整所选 DOCX 文件及本地解析出的完整内容与结构身份'
+  | '保留完整所选 TXT 文件及本地转换出的完整内容与结构身份（已转换）'
+  | '保留完整所选 MD 文件及本地转换出的完整内容与结构身份（已转换）'
+  | '保留完整所选 DOC 文件及本地转换出的完整内容与结构身份（已转换）'
   | '保留完整所选原始文件及其精确身份；未进行本地解析';
+
+/** The label a new Source Import Record carries for a file of this format, parsed or kept whole (Issue #583). */
+export function sourceImportRetainedBoundaryLabel(
+  format: SourceFormat,
+  parsed: boolean,
+): SourceImportRetainedBoundaryLabel {
+  if (!parsed) return '保留完整所选原始文件及其精确身份；未进行本地解析';
+  switch (format) {
+    case 'TXT':
+    case 'MD':
+    case 'DOC':
+      return `保留完整所选 ${format} 文件及本地转换出的完整内容与结构身份（已转换）`;
+    default:
+      return '保留完整所选 DOCX 文件及本地解析出的完整内容与结构身份';
+  }
+}
+
+/**
+ * The labels a stored Source Import Record of this format may carry. A record written before Issue #583 labelled a
+ * converted TXT, Markdown or `.doc` file with the DOCX label, and the label is part of the record digest, so both
+ * stay valid on those formats; nothing else is accepted.
+ */
+export function acceptedSourceImportRetainedBoundaryLabels(
+  format: SourceFormat,
+  parsed: boolean,
+): ReadonlyArray<SourceImportRetainedBoundaryLabel> {
+  const current = sourceImportRetainedBoundaryLabel(format, parsed);
+  return parsed && (format === 'TXT' || format === 'MD' || format === 'DOC')
+    ? [current, sourceImportRetainedBoundaryLabel('DOCX', true)]
+    : [current];
+}
 
 /**
  * The converter a format is read through, and the format it was read from. A format with no

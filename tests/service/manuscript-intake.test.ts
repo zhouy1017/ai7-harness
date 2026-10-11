@@ -3,6 +3,7 @@ import { readdir, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { canonicalJson } from '../../src/service/analysis/canonical.js';
 import { EditorialStore } from '../../src/service/store.js';
 import {
   MANUSCRIPT_INTAKE_SCHEMA_VERSION,
@@ -485,6 +486,155 @@ describe('multi-format intake over the real store', () => {
       database.close();
     }
     expect(await openRefusal()).toEqual(['SCHEMA_INVALID', '来源版本的格式不能带有转换记录。']);
+  }, 120_000);
+
+  /** Synthetic text in each format the product converts to a working representation that a test can author. */
+  const LABELLED_INPUTS = [
+    { format: 'TXT', fileName: '合成纯文本.txt', text: '第一段。\n\n第二段。\n' },
+    { format: 'MD', fileName: '合成标记.md', text: '# 合成标题\n\n一段正文。\n' },
+  ] as const;
+  const OLD_PARSED_LABEL = '保留完整所选 DOCX 文件及本地解析出的完整内容与结构身份';
+
+  /** The label a converted record carries since Issue #583: its original format, and that it was converted. */
+  const convertedLabel = (format: string): string => `保留完整所选 ${format} 文件及本地转换出的完整内容与结构身份（已转换）`;
+
+  /**
+   * Writes `label` into every stored Source Import Record's boundary and, when asked, seals the record digest over it
+   * again, so that the label check alone stands between the row and a clean open.
+   */
+  function rewriteRecordLabel(label: string, resealDigest: boolean): void {
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      for (const row of tableRows(database, 'source_import_records')) {
+        const boundary = { ...(JSON.parse(String(row.retained_boundary_json)) as Record<string, unknown>), label };
+        const digest = resealDigest
+          ? createHash('sha256').update(canonicalJson({
+              schema: 'ai7.source-import-record/1',
+              sourceImportRecordId: row.source_import_record_id,
+              commitId: row.commit_id,
+              bookId: row.book_id,
+              sourceVersionId: row.source_version_id,
+              provenanceId: row.provenance_id,
+              targetKind: row.target_kind,
+              sourceVersionDisposition: row.source_version_disposition,
+              retainedBoundary: boundary,
+              namedNonEffects: JSON.parse(String(row.named_non_effects_json)),
+              importedAt: row.imported_at,
+            })).digest('hex')
+          : String(row.record_digest);
+        database.prepare(
+          'UPDATE source_import_records SET retained_boundary_json = ?, record_digest = ? WHERE source_import_record_id = ?',
+        ).run(canonicalJson(boundary), digest, String(row.source_import_record_id));
+      }
+    } finally {
+      database.close();
+    }
+  }
+
+  it.each(LABELLED_INPUTS)(
+    'labels a new converted $format source with its original format and says it was converted (Issue #583)',
+    async ({ format, fileName, text }) => {
+      const selectedPath = join(roots.inputRoot, fileName);
+      await writeFile(selectedPath, concat(text));
+      const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      try {
+        const staged = await store.stageSelectedManuscript(randomUUID(), selectedPath);
+        const review = store.prepareSourceImportReview(staged.draftId, staged.draftVersion, {
+          kind: 'new-book', choiceId: 'new-book', confirmedTitle: `来源材料 ${format}`, relationship: 'source-only',
+        });
+        expect(review.retainedBoundary.format).toBe(format);
+        expect(review.retainedBoundary.label).toBe(convertedLabel(format));
+        const commitId = randomUUID();
+        const commit = await store.commitSourceImport({
+          draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest, commitId,
+        });
+        expect(commit.retainedBoundary.label).toBe(convertedLabel(format));
+        expect(commit.receipt.record.retainedBoundary).toMatchObject({ format, label: convertedLabel(format) });
+        expect(await store.acknowledgeImportCompletion(commitId)).toEqual({ state: 'acknowledged' });
+        store.markCleanShutdown();
+      } finally {
+        store.close();
+      }
+      const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        const [record] = tableRows(database, 'source_import_records', 'retained_boundary_json');
+        expect(JSON.parse(String(record?.retained_boundary_json))).toMatchObject({ format, label: convertedLabel(format) });
+      } finally {
+        database.close();
+      }
+      await expectStoreReopens();
+    },
+    120_000,
+  );
+
+  it.each(LABELLED_INPUTS)(
+    'still opens and reads a stored $format source record that carries the label it was written with before (Issue #583)',
+    async ({ format, fileName, text }) => {
+      const selectedPath = join(roots.inputRoot, fileName);
+      await writeFile(selectedPath, concat(text));
+      let bookId: string;
+      const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      try {
+        bookId = (await commitSourceOnlyNewBook(store, selectedPath, `来源材料 ${format}`)).bookId;
+        store.markCleanShutdown();
+      } finally {
+        store.close();
+      }
+      // A record from before the label named its format: the DOCX label on a converted source, its digest sealed over it.
+      rewriteRecordLabel(OLD_PARSED_LABEL, true);
+      const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      try {
+        const record = reopened.getBookOverview(bookId).records.find((candidate) => candidate.kind === 'source-import-record');
+        // Nothing rewrote it: the record reads with the label it was stored with.
+        expect(record).toMatchObject({ retainedBoundary: { format, label: OLD_PARSED_LABEL } });
+        reopened.markCleanShutdown();
+      } finally {
+        reopened.close();
+      }
+    },
+    120_000,
+  );
+
+  it('keeps the DOCX label on a DOCX source and refuses the converted label there (Issue #583)', async () => {
+    await requireExactSample1(roots.codeRoot);
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const staged = await store.stageSelectedManuscript(randomUUID(), sample1Path(roots.codeRoot));
+      const review = store.prepareSourceImportReview(staged.draftId, staged.draftVersion, {
+        kind: 'new-book', choiceId: 'new-book', confirmedTitle: '来源材料 DOCX', relationship: 'source-only',
+      });
+      expect(review.retainedBoundary).toMatchObject({ format: 'DOCX', label: OLD_PARSED_LABEL });
+      const commitId = randomUUID();
+      await store.commitSourceImport({
+        draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest, commitId,
+      });
+      expect(await store.acknowledgeImportCompletion(commitId)).toEqual({ state: 'acknowledged' });
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    await expectStoreReopens();
+    rewriteRecordLabel(convertedLabel('DOCX'), true);
+    expect((await openRefusal())[0]).toBe('SCHEMA_INVALID');
+  }, 120_000);
+
+  it.each([
+    ['another format’s converted label', convertedLabel('MD'), true],
+    ['the label of an unparsed original', '保留完整所选原始文件及其精确身份；未进行本地解析', true],
+    ['a label the product never wrote', '保留完整所选 TXT 文件', true],
+    ['a changed label under the digest it was sealed with', convertedLabel('MD'), false],
+  ] as const)('refuses at open a converted TXT source record carrying %s (Issue #583)', async (_name, label, resealDigest) => {
+    const textPath = join(roots.inputRoot, '来源说明.txt');
+    await writeFile(textPath, '第一段说明。\n\n第二段说明。\n');
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect((await commitSourceOnlyNewBook(store, textPath, '来源材料 TXT')).format).toBe('TXT');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+    rewriteRecordLabel(label, resealDigest);
+    expect((await openRefusal())[0]).toBe('SCHEMA_INVALID');
   }, 120_000);
 
   it('keeps refusing a hostile archive instead of retaining it', async () => {
