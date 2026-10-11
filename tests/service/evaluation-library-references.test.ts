@@ -84,10 +84,11 @@ function removeBuild(id: string): void {
     for (const sql of Object.values(MATERIAL_INDEX_TRIGGER_SQL)) db.exec(sql);
   }, true);
 }
-function breakSegments(id: string): void {
+function breakIndex(id: string, record: 'segments' | 'build'): void {
   database((db) => {
     for (const name of Object.keys(MATERIAL_INDEX_TRIGGER_SQL)) db.exec(`DROP TRIGGER ${name}`);
-    db.prepare("UPDATE material_index_segments SET sha256 = ? WHERE index_id IN (SELECT index_id FROM material_index_builds WHERE material_id = ?)").run('f'.repeat(64), id);
+    if (record === 'segments') db.prepare("UPDATE material_index_segments SET sha256 = ? WHERE index_id IN (SELECT index_id FROM material_index_builds WHERE material_id = ?)").run('f'.repeat(64), id);
+    else db.prepare("UPDATE material_index_builds SET canonical_json = '{}' WHERE material_id = ?").run(id);
     for (const sql of Object.values(MATERIAL_INDEX_TRIGGER_SQL)) db.exec(sql);
   }, true);
 }
@@ -259,15 +260,20 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
     const c = await material('丙'.repeat(1001));
     expect(() => prepare(kind, [a, b, c])).toThrow('6,000');
   });
-  it('degrades a corrupt index record to that reference, named plainly, and still reads the editor\u2019s own records', async () => {
+  it.each(['segments', 'build'] as const)('degrades corrupt index %s to that reference, named plainly, and still reads the editor\u2019s own records', async (record) => {
     const id = await material();
+    const healthy = await material('另一份可读取的合成资料。');
     const prepared = prepare(kind, [id]);
     const before = store.inspectEvaluation(bookId, null);
-    breakSegments(id);
+    breakIndex(id, record);
     // The page no longer fails whole: its versions and the open record read as they did.
     const page = store.inspectEvaluation(bookId, null);
     expect(page.records).toEqual(before.records);
     expect(page.record).toEqual(before.record);
+    expect(page.materials!.items.some((item) => item.materialId === healthy && item.selectable)).toBe(true);
+    if (record === 'build') expect(page.materials!.items.some((item) => item.materialId === id)).toBe(false);
+    await close(); await open();
+    expect(store.inspectEvaluation(bookId, null).records).toEqual(before.records);
     expect(frozenRows(kind).blocked).toBe(true);
     expect(frozenRows(kind).lines).toEqual([expect.stringContaining('资料《合成背景资料》的索引记录已损坏')]);
     expect(frozenRows(kind).lines.join(' ')).toContain('可以在「评估」重新准备计划');

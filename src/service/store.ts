@@ -5147,11 +5147,17 @@ export class EditorialStore {
     return references;
   }
 
-  #taskMaterialOffers(bookId: string): NonNullable<ReviewWorkspaceProjection['materials']> {
+  #taskMaterialOffers(bookId: string, surface: '审阅' | '评估' = '审阅'): NonNullable<ReviewWorkspaceProjection['materials']> {
     const live = this.#baselineAnalysis.launch.live !== null;
     const indexed = this.#libraryCall(() => this.#libraryMaterials.referable(bookId)).flatMap((item) => {
-      const build = this.#materialIndexCall(() => this.#materialIndex.current(item.materialId));
-      return build === null || build.state !== 'complete' ? [] : [{ ...item, characters: build.metadata.characters }];
+      try {
+        const build = this.#materialIndexCall(() => this.#materialIndex.current(item.materialId));
+        return build === null || build.state !== 'complete' ? [] : [{ ...item, characters: build.metadata.characters }];
+      } catch (error) {
+        // A damaged build cannot be offered again; 评估's frozen reference row carries its named refusal (#795).
+        if (surface === '评估' && error instanceof StoreError && error.code === 'MATERIAL_INDEX_RECORD_INVALID') return [];
+        throw error;
+      }
     });
     return {
       statement: live ? TASK_MATERIAL_LIVE_UNAVAILABLE : indexed.length === 0 ? TASK_MATERIALS_NONE : TASK_MATERIALS_STATEMENT,
@@ -8602,7 +8608,7 @@ export class EditorialStore {
     };
     const initial = frozenOf(page.initial.task);
     const readersReport = frozenOf(page.readersReport.task);
-    return { ...page, materials: this.#taskMaterialOffers(page.bookId), materialReferences: {
+    return { ...page, materials: this.#taskMaterialOffers(page.bookId, '评估'), materialReferences: {
       initial: initial.lines, readersReport: readersReport.lines, blocked: { initial: initial.blocked, readersReport: readersReport.blocked },
     } };
   }
