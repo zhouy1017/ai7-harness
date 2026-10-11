@@ -910,6 +910,15 @@ export class ReviewRunStore {
    * 联网后开始任务 begins, and only for the moment of that hand-off. In memory only.
    */
   readonly #preflightAdmitted = new Set<string>();
+  /**
+   * The approvals to start once online that may still wait (Issue #764), by Review Run: built from the records on the first read
+   * of this store's lifetime — every approval of that kind then recorded, so rows written while the store was closed (an import,
+   * a merge, a replaced database) are all in it — and kept by the one writer of an approval. It is a superset the records decide:
+   * a candidate that began or was settled is dropped when a read finds it so, outside a transaction, and one a rolled-back write
+   * added is dropped when a read finds no approval behind it. So a wait is never lost to a rollback, none is invented, and
+   * a read costs the candidates and not the history of settled approvals.
+   */
+  #unsettledApprovals: Map<string, { bookId: string; authorizedAt: string }> | null = null;
 
   constructor(
     db: DatabaseSync,
@@ -1272,6 +1281,7 @@ export class ReviewRunStore {
     });
     this.#db.prepare('INSERT INTO review_run_authorizations(review_run_id, authorized_at, canonical_json, sha256) VALUES (?, ?, ?, ?)')
       .run(reviewRunId, authorizedAt, record.json, record.digest);
+    if (start === 'when-online') this.#unsettledApprovals?.set(reviewRunId, { bookId, authorizedAt });
   }
 
   // ---- reading the records ------------------------------------------------------------------------
@@ -1516,30 +1526,51 @@ export class ReviewRunStore {
    */
   #waits(snapshot: RunSnapshot, authorization: RunView['authorization'] = this.#authorizationOf(snapshot.reviewRunId)): boolean {
     if (authorization === null || !authorization.whenOnline || this.#driving.has(snapshot.reviewRunId)) return false;
-    if (this.#db.prepare('SELECT 1 FROM review_run_category_events WHERE review_run_id = ? LIMIT 1').get(snapshot.reviewRunId) !== undefined) return false;
-    return snapshot.categories.every((category) => category.task === null || this.#runRecordOf(category.task.taskIntentId) === null);
+    return !this.#begun(snapshot);
+  }
+
+  /** Whether anything of the Run began: a category has an event, or a category's ledger holds a Run of its Task. It never undoes. */
+  #begun(snapshot: RunSnapshot): boolean {
+    if (this.#db.prepare('SELECT 1 FROM review_run_category_events WHERE review_run_id = ? LIMIT 1').get(snapshot.reviewRunId) !== undefined) return true;
+    return !snapshot.categories.every((category) => category.task === null || this.#runRecordOf(category.task.taskIntentId) === null);
   }
 
   // ---- Connectivity Wait (Issue #760, plan slice S74c) ----------------------------------------------------------
 
   /**
-   * Every Review Run waiting in Connectivity Wait, oldest approval first, with its Book — or the Book's alone. Only unsettled
-   * approvals are read (Issue #764): a Run with any category event has begun, been cancelled or been blocked and never waits
-   * again, so the history of settled approvals costs one index probe each and none of their records is parsed.
+   * Every Review Run waiting in Connectivity Wait, oldest approval first, with its Book — or the Book's alone. Only the
+   * unsettled approvals are read (Issue #764): the history of settled ones is never scanned, however long it has grown.
    */
   waitingRuns(bookId?: string): Array<{ bookId: string; reviewRunId: string; authorizedAt: string }> {
-    const rows = this.#db.prepare(
-      `SELECT r.*, a.authorized_at approved_at FROM review_run_authorizations a JOIN review_runs r ON r.review_run_id = a.review_run_id
-       WHERE NOT EXISTS (SELECT 1 FROM review_run_category_events e WHERE e.review_run_id = a.review_run_id)
-         AND json_extract(a.canonical_json, '$.start') = 'when-online' AND (? IS NULL OR r.book_id = ?)
-       ORDER BY a.authorized_at, r.review_run_id`,
-    ).all(bookId ?? null, bookId ?? null) as SqlRow[];
+    const candidates = this.#unsettledApprovals ??= this.#whenOnlineApprovals();
     const waiting: Array<{ bookId: string; reviewRunId: string; authorizedAt: string }> = [];
-    for (const row of rows) {
+    const settled: string[] = [];
+    for (const [reviewRunId, candidate] of candidates) {
+      if (bookId !== undefined && candidate.bookId !== bookId) continue;
+      const row = this.#db.prepare(
+        `SELECT r.*, a.authorized_at approved_at FROM review_run_authorizations a JOIN review_runs r ON r.review_run_id = a.review_run_id
+         WHERE a.review_run_id = ?`,
+      ).get(reviewRunId) as SqlRow | undefined;
+      if (row === undefined) {
+        settled.push(reviewRunId);
+        continue;
+      }
       const snapshot = this.#snapshotOf(row);
-      if (this.#waits(snapshot)) waiting.push({ bookId: snapshot.bookId, reviewRunId: snapshot.reviewRunId, authorizedAt: text(row.approved_at) });
+      if (this.#waits(snapshot)) waiting.push({ bookId: snapshot.bookId, reviewRunId, authorizedAt: text(row.approved_at) });
+      else if (this.#begun(snapshot)) settled.push(reviewRunId);
     }
-    return waiting;
+    // Dropped only outside a transaction: what a surrounding write recorded may still be rolled back.
+    if (!this.#db.isTransaction) for (const reviewRunId of settled) candidates.delete(reviewRunId);
+    return waiting.sort((a, b) => (a.authorizedAt < b.authorizedAt ? -1 : a.authorizedAt > b.authorizedAt ? 1 : a.reviewRunId < b.reviewRunId ? -1 : 1));
+  }
+
+  /** Every approval to start once online the records hold: the one read of the history this store's lifetime makes. */
+  #whenOnlineApprovals(): Map<string, { bookId: string; authorizedAt: string }> {
+    const rows = this.#db.prepare(
+      `SELECT a.review_run_id, a.authorized_at, r.book_id FROM review_run_authorizations a JOIN review_runs r ON r.review_run_id = a.review_run_id
+       WHERE json_extract(a.canonical_json, '$.start') = 'when-online'`,
+    ).all() as SqlRow[];
+    return new Map(rows.map((row) => [text(row.review_run_id), { bookId: text(row.book_id), authorizedAt: text(row.authorized_at) }] as const));
   }
 
   /** Whether this Run still waits: Reconnect Preflight reads it again before it acts. */

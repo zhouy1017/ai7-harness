@@ -214,46 +214,144 @@ describe('a local-first Review Run keeps its place in the order (Issue #764 revi
   }, 300_000);
 });
 
+/** How many statements over the approvals ran while `read` did, counted where they are executed. */
+function approvalStatements<T>(read: () => T): { result: T; ran: number; sql: Set<string> } {
+  let ran = 0;
+  const sql = new Set<string>();
+  const prepare = DatabaseSync.prototype.prepare;
+  const spy = vi.spyOn(DatabaseSync.prototype, 'prepare').mockImplementation(function (this: DatabaseSync, statementSql: string) {
+    const statement = prepare.call(this, statementSql);
+    if (!statementSql.includes('review_run_authorizations')) return statement;
+    return new Proxy(statement, {
+      get: (target, property) => property === 'all' || property === 'get'
+        ? (...parameters: unknown[]) => {
+            ran += 1;
+            sql.add(statementSql);
+            return (Reflect.get(target, property, target) as (...values: unknown[]) => unknown).apply(target, parameters);
+          }
+        : Reflect.get(target, property, target) as unknown,
+    });
+  });
+  try {
+    return { result: read(), ran, sql };
+  } finally {
+    spy.mockRestore();
+  }
+}
+
 describe('ReviewRunStore.waitingRuns reads unsettled approvals only (Issue #764, item 2)', () => {
-  it('does not read a settled approval again, however many were recorded before', async () => {
+  it('scans the history of approvals once per store lifetime, not on every read', async () => {
+    let waiting = '';
+    let bookId = '';
     await withSession('sample1-review-authored', async (session) => {
       const { store } = session;
-      const bookId = await sample1Book(store, '等待记录增长');
-      // Five approvals to start once online, each cancelled before anything was sent: settled for good.
-      for (let round = 0; round < 5; round += 1) {
+      bookId = await sample1Book(store, '等待记录增长');
+      // Settled for good, two ways: cancelled before anything was sent, and blocked by Reconnect Preflight. A read costs two statements per candidate: its records, and its approval.
+      for (const how of ['cancel', 'block', 'cancel', 'block'] as const) {
         const settled = prepareReview(store, bookId);
         await reviewWaitsOnline(store, bookId, settled);
-        store.cancelWaitingTask({ bookId, kind: 'review-run', ref: settled });
+        if (how === 'cancel') store.cancelWaitingTask({ bookId, kind: 'review-run', ref: settled });
+        else store.blockWaitingTaskRun(store.waitingTaskRuns(bookId)[0]!, ['这次启动不能开始审阅。'], 'launch');
       }
-      const waiting = prepareReview(store, bookId);
+      waiting = prepareReview(store, bookId);
       await reviewWaitsOnline(store, bookId, waiting);
-      expect(withDatabase((database) => (database.prepare(
-        "SELECT count(*) count FROM review_run_authorizations WHERE json_extract(canonical_json, '$.start') = 'when-online'",
-      ).get() as { count: number }).count)).toBe(6);
-
-      // Every row `waitingRuns` reads out of the authorizations is counted.
-      const read: number[] = [];
-      const prepare = DatabaseSync.prototype.prepare;
-      vi.spyOn(DatabaseSync.prototype, 'prepare').mockImplementation(function (this: DatabaseSync, sql: string) {
-        const statement = prepare.call(this, sql);
-        if (!sql.includes('FROM review_run_authorizations a JOIN review_runs r')) return statement;
-        return new Proxy(statement, {
-          get: (target, property) => property === 'all'
-            ? (...parameters: unknown[]) => {
-                const rows = (target.all as (...values: unknown[]) => unknown[])(...parameters);
-                read.push(rows.length);
-                return rows;
-              }
-            : Reflect.get(target, property, target) as unknown,
-        });
-      });
-      // The waiting Runs and the reads that ask for them (the workspace, 待我处理 and the Book 任务 panel).
       expect(store.waitingTaskRuns(null).map((run) => run.ref)).toEqual([waiting]);
-      store.inspectReviewWorkspace(bookId, waiting);
-      store.inspectGlobalAttention(() => null, false, 'network');
-      store.inspectBookTasks(bookId, () => null, 'network');
-      expect(read.length).toBeGreaterThanOrEqual(2);
-      expect(read.every((rows) => rows === 1)).toBe(true);
+    });
+    // A later lifetime of the same store: the history is read once, and every read after it asks about the one that waits.
+    await withSession('sample1-review-authored', async (session) => {
+      const { store } = session;
+      const first = approvalStatements(() => store.waitingTaskRuns(null));
+      expect(first.result.map((run) => run.ref)).toEqual([waiting]);
+      expect(first.ran).toBeGreaterThan(4);
+      const one = approvalStatements(() => store.waitingTaskRuns(null));
+      expect(one.ran).toBe(2);
+      // Every statement over the approvals is keyed by the one Run: none scans them, whatever the history holds.
+      expect([...one.sql].every((statement) => /review_run_id = \?/u.test(statement))).toBe(true);
+      expect([...first.sql].some((statement) => !/review_run_id = \?/u.test(statement))).toBe(true);
+      const book = approvalStatements(() => store.waitingTaskRuns(bookId));
+      expect(book.ran).toBe(2);
+      // The reads of the workspace, 待我处理 and the 任务 panel ask for the waiting Runs as well: what they cost does not grow with a read.
+      const readPanels = (): number => approvalStatements(() => {
+        store.inspectReviewWorkspace(bookId, waiting);
+        store.inspectGlobalAttention(() => null, false, 'network');
+        store.inspectBookTasks(bookId, () => null, 'network');
+      }).ran;
+      const panels = readPanels();
+      expect(readPanels()).toBe(panels);
+      // A new 审阅 is still not prepared over it.
+      expect(() => prepareReview(store, bookId)).toThrow('这本书有一次审阅在等待联网后开始');
+    });
+  }, 300_000);
+
+  it('keeps a Run that began its ledger Run before any category event out of the waiting, across a restart', async () => {
+    let reviewRunId = '';
+    await withSession('sample1-review-authored', async (session) => {
+      const { store } = session;
+      const bookId = await sample1Book(store, '授权后未记事件');
+      reviewRunId = prepareReview(store, bookId);
+      await reviewWaitsOnline(store, bookId, reviewRunId);
+      expect(store.waitingTaskRuns(null).map((run) => run.ref)).toEqual([reviewRunId]);
+      // The category's ledger authorized by its turn and the service stopped before the category recorded anything.
+      expect(store.reviewRunDriveSteps.start(reviewRunId, TYPOS)).not.toBeNull();
+      expect(reviewStates(reviewRunId)).toEqual([]);
+      expect(store.waitingTaskRuns(null)).toEqual([]);
+    });
+    await withSession('sample1-review-authored', async (session) => {
+      expect(session.store.waitingTaskRuns(null)).toEqual([]);
+      expect(approvalStatements(() => session.store.waitingTaskRuns(null)).ran).toBe(0);
+    });
+  }, 300_000);
+
+  it('finds an approval written while the store was closed, as an import or a merge writes it', async () => {
+    let imported = '';
+    await withSession('sample1-review-authored', async (session) => {
+      const { store } = session;
+      const bookId = await sample1Book(store, '关闭时写入');
+      const sibling = prepareReview(store, bookId);
+      await reviewWaitsOnline(store, bookId, sibling);
+      store.cancelWaitingTask({ bookId, kind: 'review-run', ref: sibling });
+      imported = prepareReview(store, bookId);
+      expect(store.waitingTaskRuns(null)).toEqual([]);
+      // The sibling's approval, copied for the prepared Run.
+      withDatabase((database) => {
+        database.prepare(
+          `INSERT INTO review_run_authorizations(review_run_id, authorized_at, canonical_json, sha256)
+           SELECT ?, authorized_at, canonical_json, sha256 FROM review_run_authorizations WHERE review_run_id = ?`,
+        ).run(imported, sibling);
+      }, false);
+    });
+    await withSession('sample1-review-authored', async (session) => {
+      expect(session.store.waitingTaskRuns(null).map((run) => run.ref)).toEqual([imported]);
+    });
+  }, 300_000);
+
+  it('loses no wait to a write that rolls back, and invents none', async () => {
+    await withSession('sample1-review-authored', async (session) => {
+      const { store } = session;
+      const bookId = await sample1Book(store, '回滚');
+      const reviewRunId = prepareReview(store, bookId);
+      // An approval whose surrounding write rolls back leaves no wait behind…
+      withDatabase((database) => database.exec(
+        "CREATE TRIGGER induce_approval_rollback AFTER INSERT ON review_run_authorizations BEGIN SELECT RAISE(ABORT, 'induced'); END",
+      ), false);
+      await expect(reviewWaitsOnline(store, bookId, reviewRunId)).rejects.toThrow();
+      expect(withDatabase((database) => (database.prepare('SELECT count(*) count FROM review_run_authorizations').get() as { count: number }).count)).toBe(0);
+      expect(store.waitingTaskRuns(null)).toEqual([]);
+      withDatabase((database) => database.exec('DROP TRIGGER induce_approval_rollback'), false);
+      // …and the same approval, recorded after it, waits.
+      await reviewWaitsOnline(store, bookId, reviewRunId);
+      expect(store.waitingTaskRuns(null).map((run) => run.ref)).toEqual([reviewRunId]);
+      // A cancellation that rolls back leaves the wait where it was…
+      withDatabase((database) => database.exec(
+        "CREATE TRIGGER induce_cancel_rollback BEFORE INSERT ON review_run_category_events BEGIN SELECT RAISE(ABORT, 'induced'); END",
+      ), false);
+      expect(() => store.cancelWaitingTask({ bookId, kind: 'review-run', ref: reviewRunId })).toThrow();
+      expect(reviewStates(reviewRunId)).toEqual([]);
+      expect(store.waitingTaskRuns(null).map((run) => run.ref)).toEqual([reviewRunId]);
+      withDatabase((database) => database.exec('DROP TRIGGER induce_cancel_rollback'), false);
+      // …and the one that commits settles it.
+      store.cancelWaitingTask({ bookId, kind: 'review-run', ref: reviewRunId });
+      expect(store.waitingTaskRuns(null)).toEqual([]);
     });
   }, 300_000);
 });
