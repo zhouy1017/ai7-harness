@@ -3212,13 +3212,15 @@ function registerRendererHandlers(
   );
   // AI7 初评 (Issue #429, S81b1): prepared and started within the route's Book, as the baseline analysis is; the renderer
   // never names the Book, and every answer must be that Book's.
-  ipcMain.handle(IPC_CHANNELS.prepareInitialEvaluation, (event) =>
+  ipcMain.handle(IPC_CHANNELS.prepareInitialEvaluation, (event, input: Parameters<RendererApi['prepareInitialEvaluation']>[0]) =>
     envelope(async () => {
       const owned = requireSender(event);
+      requireDesktop(input === undefined || (input !== null && typeof input === 'object' &&
+        (input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= 16 && input.materialIds.every((id) => typeof id === 'string' && id.length <= 64)))), 'AI7_RENDERER_BOUNDARY_INVALID');
       return serializeEffect(async () => {
         requireAuthority();
         const route = requireCurrentBookRoute(owned);
-        const result = await service.call('prepareInitialEvaluation', { bookId: route.bookId });
+        const result = await service.call('prepareInitialEvaluation', { bookId: route.bookId, ...(input?.materialIds === undefined ? {} : { materialIds: input.materialIds }) });
         const prepared = result.result;
         if (result.kind !== 'initial-evaluation-preparation' ||
             (prepared !== null && !('recordCount' in prepared && 'initial' in prepared && prepared.bookId === route.bookId))) {
@@ -3258,11 +3260,12 @@ function registerRendererHandlers(
   ipcMain.handle(IPC_CHANNELS.prepareReadersReport, (event, input: Parameters<RendererApi['prepareReadersReport']>[0]) =>
     envelope(async () => {
       const owned = requireSender(event);
-      requireDesktop(input !== null && typeof input === 'object' && (input.template === 'author' || input.template === 'editorial'), 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireDesktop(input !== null && typeof input === 'object' && (input.template === 'author' || input.template === 'editorial') &&
+        (input.materialIds === undefined || (Array.isArray(input.materialIds) && input.materialIds.length <= 16 && input.materialIds.every((id) => typeof id === 'string' && id.length <= 64))), 'AI7_RENDERER_BOUNDARY_INVALID');
       return serializeEffect(async () => {
         requireAuthority();
         const route = requireCurrentBookRoute(owned);
-        const result = await service.call('prepareReadersReport', { bookId: route.bookId, template: input.template });
+        const result = await service.call('prepareReadersReport', { bookId: route.bookId, template: input.template, ...(input.materialIds === undefined ? {} : { materialIds: input.materialIds }) });
         const prepared = result.result;
         if (result.kind !== 'readers-report-preparation' ||
             (prepared !== null && !('recordCount' in prepared && 'initial' in prepared && prepared.bookId === route.bookId))) {
