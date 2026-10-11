@@ -1,3 +1,5 @@
+import { taskMaterialReferenceLine, type TaskMaterialReading } from './task-material-references.js';
+
 import type {
   AnalysisReusePlanCounts,
   BaselineAnalysisPlanRevisionProjection,
@@ -886,6 +888,27 @@ const INITIAL_EVALUATION_GOAL_SENTENCES: Readonly<Record<InitialEvaluationTaskMo
   'evaluation-again': '重新做 AI7 初评：按当前稿件重读全书，重新给出各评分项的初评分数与评语',
 };
 
+/** Evaluation's optional background references: preserve every no-reference projection byte. */
+export function evaluationMaterialPlan(plan: TaskPlanProjection, materials: ReadonlyArray<TaskMaterialReading>): TaskPlanProjection {
+  if (materials.length === 0) return plan;
+  const refusal = materials.find((material) => material.refusal !== null)?.refusal ?? null;
+  const names = materials.map(({ source }) => `《${source.title}》`).join('、');
+  const sending = plan.scope.send === '不发送任何内容'
+    ? `不发送任何内容；资料库资料${names}的提取文字也只在本机读取，只参照，不照抄`
+    : `${plan.scope.send}；资料库资料${names}的提取文字随稿件一并发往，只参照，不照抄`;
+  return {
+    ...plan,
+    state: refusal === null ? plan.state : { key: 'changed', label: '参考资料已不可用' },
+    scope: { ...plan.scope, reference: [...plan.scope.reference, ...materials.map(taskMaterialReferenceLine),
+      '资料库资料只提供背景，不改变本社评估方案，也不覆盖定稿的分数、评语与结论。'], send: sending },
+    notDo: { ...plan.notDo, editorial: plan.notDo.editorial.map((line) => line === '不读这本书以外的内容' ? '不读允许参考以外的资料' : line) },
+    technical: [...plan.technical, { key: 'material-references', label: '资料库参考版本',
+      value: materials.map(({ source }) => `《${source.title}》 · ${source.materialId} · 索引版本 ${source.indexDigest} · ${source.characters} 字`).join('；') }],
+    start: refusal === null ? plan.start : { ...plan.start, readiness: 'changed', planEnvelopeDigest: null },
+    drift: refusal === null ? plan.drift : { reasons: [...(plan.drift?.reasons ?? []), refusal.message], entries: plan.drift?.entries ?? [],
+      resolution: '可以在「评估」重新准备计划。' },
+  };
+}
 /**
  * The plan of the Book's AI7 初评 Task: the evaluation kind's ledger read in the editor's words, as the baseline plan is. Its
  * steps are what the kind does — read each range for the evidence of each scored item, then score the items — and what it
@@ -1227,6 +1250,7 @@ export function writingMaterialCopyNotDo(): string {
 export const WRITING_EXEMPLAR_GONE_LABEL = '不能开始 · 范例已不在本机' as const;
 /** A writing Task one of whose 资料库 items no longer reads at the build its plan pinned (Issue #428). */
 export const WRITING_MATERIAL_GONE_LABEL = '不能开始 · 参考资料已不在本机' as const;
+export const WRITING_MATERIAL_UNAVAILABLE_LABEL = '不能开始 · 参考资料现在不能列进「允许参考」' as const;
 
 /**
  * One 资料库 item a writing plan lists under 允许参考 (Issue #428): its pin and the facts the plan names it by, and why it does
@@ -1246,7 +1270,11 @@ function writingMaterialGone(projection: WritingProjection, materials: ReadonlyA
 export function writingMaterialReferenceLine(material: WritingPlanMaterial): string {
   const line = `资料库资料《${material.source.title}》：已提取 ${groupedCount(material.source.characters)} 字，按计划冻结的索引版本读取（只参照，不照抄）`;
   return material.refusal === null ? line : `${line}——${material.refusal.code === 'MATERIAL_REFERENCE_UNAVAILABLE'
-    ? '这份资料现在不能列进这本书任务的「允许参考」' : '计划冻结的索引版本已不在本机'}，这次起草不能开始`;
+    ? '这份资料现在不能列进这本书任务的「允许参考」' : '计划冻结的索引版本已不在本机'}，这次起草不能再开始`;
+}
+
+function writingMaterialRefusalLabel(material: WritingPlanMaterial): string {
+  return material.refusal?.code === 'MATERIAL_REFERENCE_UNAVAILABLE' ? WRITING_MATERIAL_UNAVAILABLE_LABEL : WRITING_MATERIAL_GONE_LABEL;
 }
 
 /** Whether a writing Task can never start because its 范例 is no longer here: not yet started, its exemplars' text gone. */
@@ -1260,7 +1288,8 @@ function writingExemplarGone(projection: WritingProjection, exemplarsHere: boole
  */
 export function writingTaskStateLabel(projection: WritingProjection, exemplarsHere: boolean, materials: ReadonlyArray<WritingPlanMaterial> = []): string {
   if (writingExemplarGone(projection, exemplarsHere)) return WRITING_EXEMPLAR_GONE_LABEL;
-  return writingMaterialGone(projection, materials) !== null ? WRITING_MATERIAL_GONE_LABEL : writingState(projection).label;
+  const material = writingMaterialGone(projection, materials);
+  return material !== null ? writingMaterialRefusalLabel(material) : writingState(projection).label;
 }
 export const WRITING_EXEMPLAR_GONE_SUFFIX = '——这些范例已不在本机，这次起草不能再开始' as const;
 
@@ -1341,7 +1370,7 @@ export function writingPlan(input: {
   // never started.
   const materialGone = writingExemplarGone(projection, exemplarsHere) ? null : writingMaterialGone(projection, materials);
   const gone = writingExemplarGone(projection, exemplarsHere) || materialGone !== null;
-  const state = gone ? { key: 'ready' as const, label: materialGone === null ? WRITING_EXEMPLAR_GONE_LABEL : WRITING_MATERIAL_GONE_LABEL } : writingState(projection);
+  const state = gone ? { key: 'ready' as const, label: materialGone === null ? WRITING_EXEMPLAR_GONE_LABEL : writingMaterialRefusalLabel(materialGone) } : writingState(projection);
   const needsModelConnection = route.kind === 'opencode-go';
   // A Task whose 范例 is no longer here is never started (#688 re-review): the bar says why, and offers nothing that starts it.
   const start: TaskPlanStartProjection = gone
@@ -1885,7 +1914,11 @@ function baselineRunControl(projection: BaselineAnalysisProjection, stopped?: Ba
     unitsSettled: stopped.unitsSettled, unitsTotal: stopped.unitsTotal, bindingHolds: stopped.bindingHolds, waiting: stopped.waiting,
     unconfirmed: stopped.outcomeUnknown?.units.map((unit) => unit.unitOrdinal) ?? [],
   };
-  const continuation = kept !== null && (run.state === 'paused' || run.state === 'resumable' || waitsForAnswer) ? { unitsSettled: kept.unitsSettled, unitsTotal: kept.unitsTotal } : null;
+  const continuation = kept !== null && (run.state === 'paused' || run.state === 'resumable' || waitsForAnswer) ? {
+    unitsSettled: kept.unitsSettled, unitsTotal: kept.unitsTotal,
+    // Ranges the editor answered that no checkpoint has settled since: 续行 carries those answers out first (Issue #784).
+    pendingAnswerUnits: (kept.waiting ?? []).filter((entry) => entry.answered).map((entry) => entry.unitOrdinal),
+  } : null;
   const counts = projection.update?.reusePlan?.counts ?? null;
   const update = counts === null ? null : { manuscriptUnits: projection.coverageManifest?.units.length ?? counts.recomputed + counts.reused, reusedUnits: counts.reused };
   return {
@@ -2141,6 +2174,7 @@ export function reviewRunPlan(input: {
     : scope.selectedRange !== null ? readRange(blocks, scope.selectedRange) : null;
   const position = scope.kind === 'changed' ? '改动过的章' : reading === null ? scope.label : positionLabel(reading);
   const categories = facts.categories;
+  const materials = facts.materials ?? [];
   const tasks = categories.filter((category) => category.task !== null);
   const procedures = [...new Set(categories.map((category) => category.procedure.title))];
   const firstProcedure = procedures[0] ?? '审阅工序';
@@ -2200,12 +2234,13 @@ export function reviewRunPlan(input: {
     scope: {
       process: `《${bookTitle}》${position}${reading === null ? '' : ` · ${groupedCount(reading.graphemes)} 字`} · ${categories.length} 个类别` +
         (spans === null ? (selection ? '；只在所选段落上标出发现' : '') : selection ? `；读取 ${spans} 作为上下文，只在所选段落上标出发现` : `；读取 ${spans}`),
-      reference: categories.map((category) => category.modelFree
+      reference: [...categories.map((category) => category.modelFree
         ? `${category.label}：基线分析的前后不一致线索与未决事项`
         : category.guidelineDocuments.length === 0
           ? `${category.label}：${category.procedure.title}（第 ${category.procedure.version} 版）`
-          : `${category.label}：${category.guidelineDocuments.map((document) => `${document.issuer}《${document.title}》第 ${document.version} 版`).join('、')}`),
-      send: tasks.length === 0 || !live ? '不发送任何内容' : `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款`,
+          : `${category.label}：${category.guidelineDocuments.map((document) => `${document.issuer}《${document.title}》第 ${document.version} 版`).join('、')}`), ...materials.map(taskMaterialReferenceLine),
+        ...(materials.length === 0 ? [] : ['资料库资料只供调用模型的审阅类别参考；事实核查与只读已有线索的类别不参考这些资料。'])],
+      send: (live || facts.materialsRefusedLive === true) && materials.length > 0 ? '不发送任何内容；这份计划列了资料库资料，当前运行范围不能把它们发送给模型，这份计划不能开始' : tasks.length === 0 || !live ? materials.length === 0 ? '不发送任何内容' : '不发送任何内容；上面列出的资料库资料也只在本机读取' : `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${materials.length === 0 ? '' : '，以及上面列出的资料库资料原文'}`,
       notRead: scope.kind === 'whole' ? NOT_READ : spans === null ? `所选范围以外的正文；${NOT_READ}` : `${spans}以外的正文；${NOT_READ}`,
     },
     steps: [
@@ -2248,7 +2283,7 @@ export function reviewRunPlan(input: {
     notDo: {
       editorial: [
         ...EDITORIAL_NOT_DO,
-        scope.kind === 'whole' ? '不读这本书以外的内容' : spans === null ? '不读所选范围以外的正文' : `不读${spans}以外的正文`,
+        scope.kind === 'whole' ? materials.length === 0 ? '不读这本书以外的内容' : '不读允许参考以外的资料' : spans === null ? '不读所选范围以外的正文' : `不读${spans}以外的正文`,
         ...(selection ? ['不在所选段落以外标出发现：所读范围里别处的发现只计数，不标在稿件上'] : []),
         ...(riskPoints ? ['不给出合规、查重或政策结论'] : []),
       ],
@@ -2267,6 +2302,7 @@ export function reviewRunPlan(input: {
         : '没有开始的类别可以在「审阅」里新建一次审阅再审。',
     },
     technical: [
+      ...(materials.length === 0 ? [] : [{ key: 'material-references', label: '资料库参考版本', value: materials.map(({ source }) => `《${source.title}》 · ${source.materialId} · 索引版本 ${source.indexDigest}`).join('；') }]),
       { key: 'review-run', label: '审阅记录', value: `${facts.label} · ${facts.reviewRunId} · ${facts.createdAt}` },
       { key: 'manuscript', label: '稿件 pin', value: `${facts.manuscript.revisionLabel} · ${facts.manuscript.revisionId} · 修订日志序号 ${facts.manuscript.journalSequence} · ${facts.manuscript.workingDigest}` },
       { key: 'task-input-revision', label: '任务输入修订版', value: `${facts.inputRevision.revisionLabel} · ${facts.inputRevision.revisionId}` },

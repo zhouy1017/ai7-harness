@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -8,10 +8,13 @@ import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execu
 import type { TaskPlanConnectivity } from '../../src/service/connectivity.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { MATERIAL_INDEX_TRIGGER_SQL } from '../../src/service/material-index.js';
+import { LIBRARY_MATERIAL_TRIGGER_SQL } from '../../src/service/library-materials.js';
+import { readPendingReplacement, replacementStagingFor } from '../../src/service/database-replacement.js';
+import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
 import { loadModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { WRITING_MATERIAL_GONE_LABEL, writingMaterialCopyNotDo, writingMaterialReferenceLine } from '../../src/service/task-plan.js';
+import { WRITING_MATERIAL_GONE_LABEL, WRITING_MATERIAL_UNAVAILABLE_LABEL, writingMaterialCopyNotDo, writingMaterialReferenceLine } from '../../src/service/task-plan.js';
 import {
   WRITING_MATERIALS_NONE,
   WRITING_MATERIALS_STATEMENT,
@@ -24,6 +27,7 @@ import {
   writingMaterialOverBoundNamed,
   writingMaterialUnavailable,
   writingMaterialsOverTotal,
+  WritingTasks,
 } from '../../src/service/writing-tasks.js';
 import { WRITING_PROMPT_CONTRACT_SCHEMA_V3, writingContract, writingContractDigest } from '../../src/service/writing/writing-contract.js';
 import { WRITING_MATERIAL_REFUSAL_PREFIX } from '../../src/service/writing/writing-kind.js';
@@ -91,9 +95,9 @@ interface Session {
   readonly owner: BaselineAnalysisExecutionOwner;
 }
 
-async function withSession(fixture: ResolvedModelFixture, body: (session: Session) => Promise<void>): Promise<void> {
+async function withSession(fixture: ResolvedModelFixture, body: (session: Session) => Promise<void>, dataRoot = roots.dataRoot): Promise<void> {
   await requireExactSample1(roots.codeRoot);
-  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
+  const store = await EditorialStore.open(dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false,
     persistLegacyReviewedDraft: false,
     induceReimportProofTamper: false,
@@ -226,6 +230,102 @@ const ONLINE = (): { credentialReadiness: () => Promise<null>; connectivity: Tas
 });
 
 describe('写作任务 lists 资料库 items under 允许参考 and reads them through the Material Index', () => {
+  it('shows no pre-start refusal after authorization when an item becomes unavailable', async () => {
+    const { fixture } = await memoryFixture();
+    await withSession(fixture, async ({ store }) => {
+      const bookId = await sample1Book(store, WRITING_BOOK_TITLE);
+      const listed = await put(store, '参考资料甲.txt', LISTED_TEXT, '参考资料甲');
+      decide(store, listed.materialId, { scope: 'book', bookId }, 'book');
+      store.startMaterialIndexing();
+      await store.settleMaterialIndexing();
+      const prepared = prepare(store, bookId, { ...WRITING_REQUEST, materialIds: [listed.materialId] });
+      store.authorizeWriting(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+      store.decideLibraryMaterial({ materialId: listed.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+      expect(store.inspectWriting(bookId)!.authorization).not.toBeNull();
+      expect(store.inspectWritingTask(bookId).task!.refusal).toBeNull();
+      expect(store.inspectTaskPlan({ bookId, kind: 'writing', ref: prepared.taskIntent!.taskIntentId }).state.label).not.toBe(WRITING_MATERIAL_UNAVAILABLE_LABEL);
+    });
+  }, 300_000);
+
+  it.each([
+    ['material_index_segments', MATERIAL_INDEX_TRIGGER_SQL, 'MATERIAL_INDEX_RECORD_INVALID'],
+    ['library_materials', LIBRARY_MATERIAL_TRIGGER_SQL, 'LIBRARY_MATERIAL_RECORD_INVALID'],
+  ] as const)('surfaces corruption in %s without describing a missing build', async (table, triggers, code) => {
+    const { fixture } = await memoryFixture();
+    await withSession(fixture, async ({ store }) => {
+      const bookId = await sample1Book(store, WRITING_BOOK_TITLE);
+      const listed = await put(store, '参考资料甲.txt', LISTED_TEXT, '参考资料甲');
+      decide(store, listed.materialId, { scope: 'book', bookId }, 'book');
+      store.startMaterialIndexing();
+      await store.settleMaterialIndexing();
+      const prepared = prepare(store, bookId, { ...WRITING_REQUEST, materialIds: [listed.materialId] });
+      withDatabase((database) => {
+        const ledger = new WritingTasks(database, () => ({ refusal: { code, message: '资料的记录已损坏。' } }));
+        expect(() => ledger.task(prepared.taskIntent!.taskIntentId)).toThrowError(expect.objectContaining({ code }));
+      });
+      withDatabase((database) => {
+        database.exec(`DROP TRIGGER ${table}_no_update`);
+        database.exec(`UPDATE ${table} SET canonical_json = '{}'`);
+        database.exec(triggers[`${table}_no_update`]!);
+      }, false);
+      expect(() => store.inspectTaskPlan({ bookId, kind: 'writing', ref: prepared.taskIntent!.taskIntentId }))
+        .toThrowError(expect.objectContaining({ code, message: expect.stringContaining('已损坏') }));
+    });
+  }, 300_000);
+
+  it('warns of derived material builds on merge and keeps completed `/3` drafts readable and openable', async () => {
+    const { fixture, entries } = await memoryFixture();
+    const otherRoot = join(dirname(roots.dataRoot), 'merged-writing');
+    const packagePath = join(roots.inputRoot, '参考资料写作.ai7db');
+    let bookId = '';
+    let revisionId = '';
+    let preparedId = '';
+    await withSession(fixture, async (session) => {
+      const { store } = session;
+      bookId = await sample1Book(store, WRITING_BOOK_TITLE);
+      const listed = await put(store, '参考资料甲.txt', LISTED_TEXT, '参考资料甲');
+      decide(store, listed.materialId, { scope: 'book', bookId }, 'book');
+      store.startMaterialIndexing();
+      await store.settleMaterialIndexing();
+      const prepared = prepare(store, bookId, { ...WRITING_REQUEST, materialIds: [listed.materialId] });
+      answerWriting(entries, prepared, AUTHORED_WRITING_DRAFT);
+      const settled = await run(session, bookId, prepared);
+      revisionId = settled.resultSetRevision!.revisionId;
+      answerWritingReflection(entries, settled.taskOutcome!.report!.accountingDigest);
+      preparedId = prepare(store, bookId, { ...WRITING_REQUEST, typeId: 'news-release', materialIds: [listed.materialId] }).taskIntent!.taskIntentId;
+      const exported = await store.prepareDatabaseExport(packagePath, true);
+      expect((await store.approveDatabaseExport(exported.preparationId, true)).outcome).toBe('created');
+    });
+    await withSession(fixture, async ({ store }) => {
+      const preview = await store.inspectDatabaseImport(packagePath);
+      expect(preview.mergeNotices).toEqual(['writing-material']);
+      await store.prepareDatabaseMerge(preview.previewId, new Date(2026, 9, 11, 12, 0, 0));
+      const pending = await readPendingReplacement(otherRoot);
+      expect(pending!.mergeNotices).toEqual(['writing-material']);
+      const intentPath = join(replacementStagingFor(otherRoot), 'intent.json');
+      const originalIntent = readFileSync(intentPath, 'utf8');
+      const stored = JSON.parse(originalIntent) as { json: string };
+      const invalid = canonicalRecord({ ...JSON.parse(stored.json), mergeNotices: ['unknown-notice'] });
+      writeFileSync(intentPath, JSON.stringify({ json: invalid.json, sha256: invalid.digest }));
+      expect(await readPendingReplacement(otherRoot)).toBeNull();
+      writeFileSync(intentPath, originalIntent);
+    }, otherRoot);
+    await withSession(fixture, async ({ store }) => {
+      await store.settleMaterialIndexing();
+      expect((await store.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'merge', outcome: 'applied' });
+      recordMissingCredentialConnection(store, 'L2 合并后的连接');
+      expect(store.inspectWritingTask(bookId).unavailable).toBeNull();
+      expect(store.inspectWritingTask(bookId).task).toMatchObject({ taskIntentId: preparedId, refusal: writingMaterialMoved('参考资料甲') });
+      expect(store.inspectTaskPlan({ bookId, kind: 'writing', ref: preparedId }).scope.reference[3]).toContain('这次起草不能再开始');
+      expect(store.inspectWritingTask(bookId).types.find((type) => type.typeId === WRITING_REQUEST.typeId)!.drafted!.revisionId).toBe(revisionId);
+      const opened = store.createWritingDraft(bookId, revisionId);
+      expect(opened.document.origin.drafted).toBe(true);
+      const window = store.getManuscriptWindow(opened.document.documentId, opened.document.branchId, null);
+      expect(window.blocks.map((block) => block.text).join('\n')).toContain(AUTHORED_WRITING_DRAFT.sections[0]!.paragraphs[0]!);
+      expect((await store.inspectDatabaseImport(packagePath)).mergeNotices).toEqual([]);
+    }, otherRoot);
+  }, 300_000);
+
   it('drafts J-07\'s 评论文章 with its 资料库 item from the authored fixture, as the Journey\'s last Task', async () => {
     const fixture = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
     await withSession(fixture, async (session) => {
@@ -361,6 +461,11 @@ describe('写作任务 lists 资料库 items under 允许参考 and reads them t
       expect(stored.materialSources).toEqual(sources);
       expect(stored.input.materials).toEqual([]);
       expect(row.canonical_json).not.toContain('青铜器');
+      // The same request and pins revise the prepared Task in place, with one reference row.
+      const revised = prepare(store, bookId, { ...news, materialIds: [listed.materialId, house.materialId] });
+      expect(revised.taskIntent!.taskIntentId).toBe(prepared.taskIntent!.taskIntentId);
+      expect(revised.planEnvelope!.digest).toBe(prepared.planEnvelope!.digest);
+      expect(withDatabase((database) => (database.prepare('SELECT count(*) AS count FROM writing_tasks').get() as { count: number }).count)).toBe(1);
 
       // Reading the plan and the page again reads the items through the index's Task seam and commits nothing.
       const watch = watcher();
@@ -388,7 +493,7 @@ describe('写作任务 lists 资料库 items under 允许参考 and reads them t
     });
   }, 300_000);
 
-  it('refuses a draft that copies an item, and a start whose pinned build is gone or whose item may no longer be listed — 改计划重做 pins it again', async () => {
+  it('refuses a copied draft and unavailable references; 新建文档 prepares new pins', async () => {
     const { fixture, entries } = await memoryFixture();
     let bookId = '';
     let listedId = '';
@@ -424,10 +529,11 @@ describe('写作任务 lists 资料库 items under 允许参考 and reads them t
       taskIntentId = next.taskIntent!.taskIntentId;
       planEnvelopeDigest = next.planEnvelope!.digest;
 
-      // The item may no longer be listed by this Book's Tasks: the start is refused in words naming it and 改计划重做.
+      // The item remains on this machine but may no longer be listed by this Book's Tasks.
       store.decideLibraryMaterial({ materialId: listed.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
       const unavailable = store.inspectWritingTask(bookId).task!;
-      expect([unavailable.label, unavailable.refusal]).toEqual([WRITING_MATERIAL_GONE_LABEL, writingMaterialUnavailable('参考资料甲')]);
+      expect([unavailable.label, unavailable.refusal]).toEqual([WRITING_MATERIAL_UNAVAILABLE_LABEL, writingMaterialUnavailable('参考资料甲')]);
+      expect(store.inspectTaskPlan({ bookId, kind: 'writing', ref: taskIntentId }).state.label).toBe(WRITING_MATERIAL_UNAVAILABLE_LABEL);
       expect(await refusal(() => store.authorizeWriting(bookId, taskIntentId, planEnvelopeDigest)))
         .toBe(`MATERIAL_REFERENCE_UNAVAILABLE:${writingMaterialUnavailable('参考资料甲')}`);
       store.decideLibraryMaterial({ materialId: listed.materialId, expectedDecisions: 3, decision: { kind: 'eligibility', choice: 'book', reason: null } });
@@ -453,9 +559,9 @@ describe('写作任务 lists 资料库 items under 允许参考 and reads them t
       const plan = store.inspectTaskPlan({ bookId, kind: 'writing', ref: taskIntentId });
       expect(plan.state.label).toBe(WRITING_MATERIAL_GONE_LABEL);
       expect(plan.start).toMatchObject({ readiness: 'unavailable', planEnvelopeDigest: null, unavailableReason: writingMaterialMoved('参考资料甲') });
-      expect(plan.scope.reference[3]).toBe('资料库资料《参考资料甲》：已提取 60 字，按计划冻结的索引版本读取（只参照，不照抄）——计划冻结的索引版本已不在本机，这次起草不能开始');
+      expect(plan.scope.reference[3]).toBe('资料库资料《参考资料甲》：已提取 60 字，按计划冻结的索引版本读取（只参照，不照抄）——计划冻结的索引版本已不在本机，这次起草不能再开始');
       expect(await refusal(() => store.authorizeWriting(bookId, taskIntentId, planEnvelopeDigest))).toBe(`MATERIAL_INDEX_MOVED:${writingMaterialMoved('参考资料甲')}`);
-      // 改计划重做: the plan prepared again pins the item as it is now, and runs.
+      // 新建文档: the plan prepared again pins the item as it is now, and runs.
       const redone = prepare(store, bookId, { ...WRITING_REQUEST, requirements: '再写一版', materialIds: [listedId] });
       // The same words at another build are the same contract: the redone plan is a Task of its own, never the gone one revised.
       expect(redone.taskIntent!.taskIntentId).not.toBe(taskIntentId);

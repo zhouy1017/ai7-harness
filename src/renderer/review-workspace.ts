@@ -1,3 +1,4 @@
+import { taskMaterialSelection, taskMaterialSelectionReason } from './task-material-selection.js';
 import {
   MAX_BATCH_APPLY_SUGGESTIONS,
   REVIEW_FINDING_SEVERITIES,
@@ -20,6 +21,7 @@ import {
   type ReviewWorkspaceProjection,
   type RendererApi,
   type ServiceJobProjection,
+  type WritingTaskMaterialProjection,
 } from '../shared/protocol.js';
 import { reportExportLabel } from '../shared/report-wording.js';
 import { applyOnce } from './manuscript-apply.js';
@@ -263,6 +265,7 @@ interface BatchStrip {
 type SheetSelection = { readonly fromBlockId: string; readonly toBlockId: string };
 
 interface SheetState {
+  readonly materialIds: Set<string>;
   readonly categories: Set<string>;
   /**
    * The selection the sheet holds: a 当前选区 Run's paragraphs, kept for 返回修改 and 修改计划并重新授权 (P2-4). The sheet holds no
@@ -481,6 +484,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       renderCard(next);
     }
     updateLive(previous, next);
+    if (sheet.open) sheetUpdate();
     // A Run waiting to start once online is read again too (Issue #760, S74c), so 审阅 follows it into running.
     if (next.run?.state === 'running' || next.run?.state === 'waiting') schedulePoll();
     followFocus(next);
@@ -1636,6 +1640,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     if (destroyed || projection === null || sheet.open) return;
     sheetState = {
       categories: new Set(prefill?.categories ?? []),
+      materialIds: new Set(),
       selection: prefill?.selection ?? null,
       scope: prefill?.scope ?? null,
       from: prefill?.from ?? null,
@@ -1835,6 +1840,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const toSelect = chapterSelect('to');
     scopes.append(range);
 
+    const { field: materialField, inputs: materialInputs, items: materialItems } = reviewMaterialsField(workspace.materials, state, updateSheet);
+
     const consequences = el('dl', 'review-consequences');
     const consequenceValues = REVIEW_CONSEQUENCE_TERMS.map((term) => {
       const value = el('dd');
@@ -1863,7 +1870,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const close = actionButton('close-sheet', 'quiet', () => sheet.close());
     const actions = el('div', 'button-row review-sheet-actions');
     actions.append(prepare, quick, cancelPreparation, close);
-    form.append(categories, scopes, consequences, problem, progress, actions, quickReason);
+    form.append(categories, scopes, materialField, consequences, problem, progress, actions, quickReason);
     form.addEventListener('submit', (event) => event.preventDefault());
 
     // Everything that follows from the choices, redrawn in place so a choice never moves the focus.
@@ -1900,6 +1907,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         }
       }
       for (const [kind, input] of scopeInputs) input.disabled = !scopeAvailability(workspace, state, kind).available || preparing || (filled !== null && kind !== filled.scopeSlot);
+      const currentOffers = projection?.materials?.items ?? materialItems;
+      const acceptsMaterials = syncReviewMaterials(materialInputs, currentOffers, state, workspace.categories, preparing || loading);
       const notes = reviewChangedScopeNotes(workspace.coverage, state.categories);
       changedNote.textContent = notes.join(' ');
       changedNote.hidden = notes.length === 0;
@@ -1911,12 +1920,14 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const from = chapterOptions.find((chapter) => chapter.blockId === state.from) ?? null;
       const to = chapterOptions.find((chapter) => chapter.blockId === state.to) ?? null;
       readValue.textContent = reviewReadConsequence(state.scope, workspace.manuscript, { from, to });
-      sendValue.textContent = reviewSendConsequence(workspace.categories.filter((entry) => state.categories.has(entry.categoryId)));
+      const send = reviewSendConsequence(workspace.categories.filter((entry) => state.categories.has(entry.categoryId)));
+      sendValue.textContent = state.materialIds.size === 0 || !acceptsMaterials ? send
+        : `${send.replace(/。$/u, '')}；所选资料库资料的文字随稿件一并发往，只参照，不照抄。`;
       problem.textContent = state.problem ?? '';
       problem.hidden = state.problem === null;
       progress.hidden = state.job === null;
       progress.textContent = state.job === null ? '' : reviewPreparationLine(state.job.progress);
-      prepare.disabled = preparing || loading;
+      prepare.disabled = preparing || loading || (state.materialIds.size > 0 && !acceptsMaterials);
       close.disabled = preparing;
       cancelPreparation.hidden = !preparing;
       cancelPreparation.disabled = !preparing;
@@ -1974,6 +1985,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const initial = await api.prepareReviewRun({
         categoryIds,
         scope,
+        ...(state.materialIds.size === 0 ? {} : { materialIds: taskMaterialSelection(projection.materials?.items ?? [], state.materialIds) }),
         ...(choice.pin === null ? {} : { capturedProcedure: choice.pin }),
       });
       state.job = initial;
@@ -2064,6 +2076,76 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       exporter.destroy();
     },
   };
+}
+
+type ReviewMaterialInput = { item: WritingTaskMaterialProjection; input: HTMLInputElement; reason: HTMLElement };
+
+/** 新建审阅's 允许参考 fieldset: one choice per offered 资料库 item, ticking one is the sheet's to refresh (Issue #428). */
+export function reviewMaterialsField(
+  offers: ReviewWorkspaceProjection['materials'],
+  state: { materialIds: Set<string>; problem: string | null },
+  updateSheet: () => void,
+): { field: HTMLElement; inputs: ReviewMaterialInput[]; items: ReadonlyArray<WritingTaskMaterialProjection> } {
+  const field = el('fieldset', 'review-materials');
+  field.append(el('legend', undefined, '允许参考 · 资料库'));
+  field.append(el('p', 'field-note', offers?.statement ?? '暂无可参考的资料库资料。'));
+  const items = offers?.items ?? [];
+  const inputs = items.map((item) => {
+    const label = el('label', 'review-category-option');
+    const input = el('input');
+    input.type = 'checkbox';
+    input.dataset['reviewMaterial'] = item.materialId;
+    input.addEventListener('change', () => {
+      if (input.checked) state.materialIds.add(item.materialId);
+      else state.materialIds.delete(item.materialId);
+      state.problem = null;
+      updateSheet();
+    });
+    const reason = el('small', 'field-note');
+    reason.id = uid('material-reason');
+    input.setAttribute('aria-describedby', reason.id);
+    label.append(input, el('span', undefined, `《${item.title}》 · ${item.scope === 'book' ? '这本书' : '社级'} · 已提取 ${item.characters.toLocaleString('en-US')} 字`), reason);
+    field.append(label);
+    return { item, input, reason };
+  });
+  if ((offers?.more ?? 0) > 0) field.append(el('p', 'field-note', `还有 ${offers!.more} 份资料未列出；这里显示最近到来的 50 份。`));
+  field.append(el('p', 'field-note', '资料只供调用模型的审阅类别参考；事实核查与只读已有线索的类别不参考这些资料。'));
+  return { field, inputs, items };
+}
+
+/** Bring the fieldset up to the offers now: keep the still-offered ticks, name why a choice is off, and say whether a category here reads them. */
+export function syncReviewMaterials(
+  inputs: ReadonlyArray<ReviewMaterialInput>,
+  currentOffers: ReadonlyArray<WritingTaskMaterialProjection>,
+  state: { materialIds: Set<string>; categories: ReadonlySet<string> },
+  categories: ReadonlyArray<Pick<ReviewWorkspaceCategoryProjection, 'categoryId' | 'materialReferencesAllowed'>>,
+  busy: boolean,
+): boolean {
+  const retained = taskMaterialSelection(currentOffers, state.materialIds);
+  state.materialIds.clear();
+  for (const id of retained) state.materialIds.add(id);
+  const acceptsMaterials = categories.some((entry) => state.categories.has(entry.categoryId) && entry.materialReferencesAllowed === true);
+  for (const { item, input, reason } of inputs) {
+    const offered = currentOffers.find((entry) => entry.materialId === item.materialId);
+    const why = reviewMaterialChoiceReason(offered, currentOffers, state.materialIds, acceptsMaterials);
+    input.checked = state.materialIds.has(item.materialId);
+    input.disabled = busy || (why !== null && !input.checked);
+    reason.textContent = why ?? '';
+    reason.hidden = why === null;
+  }
+  return acceptsMaterials;
+}
+
+/** Why one 允许参考 choice of 新建审阅 cannot be ticked now, or `null` when it can: the sheet shows it under the choice. */
+export function reviewMaterialChoiceReason(
+  offered: WritingTaskMaterialProjection | undefined,
+  offers: ReadonlyArray<WritingTaskMaterialProjection>,
+  selected: ReadonlySet<string>,
+  acceptsMaterials: boolean,
+): string | null {
+  if (offered === undefined) return '这份资料现在不在可参考的清单中。';
+  if (!acceptsMaterials) return '请先选择调用模型的审阅类别；事实核查与只读已有线索的类别不参考资料库。';
+  return taskMaterialSelectionReason(offered, offers, selected);
 }
 
 /**

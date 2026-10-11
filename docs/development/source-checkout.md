@@ -683,3 +683,34 @@ Extracted text for the four formats S80a left at 「AI7 还不能提取这种格
 - **The indexer.** `MATERIAL_INDEXER_IDENTITY` is `ai7-material-index/2+ai7-docx-fflate-saxes/3`, and each build records its reader (`ai7-html-text/1`, `ai7-epub-text/1`, `ai7-odt-text/1`, `ai7-rtf-text/1`, each `+` the parser). A `/1` build stands for `/2` — it is what `/2` would build — except one refused as `format-unsupported`, so at the next start exactly the HTML, EPUB, ODT and RTF items are built again beside their `/1` refusals, and no other item's build, digest or 写作任务 pin moves; 最近完成 lists the standing builds.
 - **Not provided.** PDF text, text recognition, machine 来源译文 and similarity vectors stay deferred under the Owner's option 乙 (S80a). The readers run synchronously on the service's thread, as the DOC and text converters do: a 32 MB RTF of Unicode escapes took about 0.2 s on the developer host, and a 12 MB page about 0.01 s.
 - **Tests and J-15.** `tests/unit/material-formats.test.ts` holds each format's paragraphs, Chinese in each encoding, nested structure, and the bomb, ratio, entry-count, nesting, tag, text, paragraph, entity, DRM and password refusals; `tests/unit/material-index.test.ts` the `/1` builds that stand and the ones built again; `tests/service/material-index.test.ts` one imported item of each format yielding its segments, and a DRM EPUB and an entity-declaring page refused with their reasons. J-15 gains `knowledge-library-index-formats`: the runner's synthetic EPUB arrives through the real picker and its card reads `中文 · 3 段 · 1 个标题 · 文件自带标题「合成电子书」`, `已提取 30 字`, and three paragraphs of anchors in spine order. `GATE_JOURNEYS` is unchanged, and no `window.ai7` member was added.
+
+The writing reference follow-ups (Issue #759) add the writing-material database merge notice in service protocol version **122**, following protocol 121, with schema revision 68 unchanged.
+
+## 来源导入记录的保留边界：已转换的来源
+
+A TXT, Markdown or `.doc` file kept as source material now records a retained-boundary label that names its original format and says it was converted (Issue #583; Owner decision 2026-10-11): 「保留完整所选 <F> 文件及本地转换出的完整内容与结构身份（已转换）」, where `<F>` is the format name the receipt shows beside it in 「格式 <F>」. This is service protocol version **123** (following protocol 122, #759) and no schema revision: the label union gained three members and the source-import-record presentation carries its stored `label`. A DOCX keeps 「保留完整所选 DOCX 文件及本地解析出的完整内容与结构身份」, and an unparsed original keeps 「保留完整所选原始文件及其精确身份；未进行本地解析」.
+
+- **Old records still open.** The label is part of the record digest and nothing rewrites a stored record, so the record check (`bounded-manuscript.ts`) and the store's two readers accept, on a converted format, both the new label and the DOCX label an earlier record carries; on a DOCX or an unparsed file only its own label is accepted, and any other label refuses (`acceptedSourceImportRetainedBoundaryLabels`, `src/shared/protocol.ts`). The receipt shows the label the record was stored with.
+- **#594's two review P3s were already in `dev`.** The conversion-column check (a working object only on TXT, MD and DOC, and set together with its converter) and the ADR 0072 §2 citation landed with #732.
+
+## Earlier published Books in 范例 (Issue #427)
+
+Service protocol 124 follows 123 (#583); additive schema revision 69 follows 68 and keeps Data Version 1.
+The editor imports DOCX/TXT/MD, names the Book, authors and responsible editors, and chooses a deliverable type.
+Three append-only ledgers hold earlier-Book provenance, immutable document versions and exact-version Learning Eligibility decisions.
+Earlier Books are Knowledge Base identities, never AI7 Book projects. Imports default to 仅本社; the editor may exclude or defer a version.
+Writing Tasks pin exact versions and digests; 审稿意见 retains its existing frozen-word contract.
+Full database export/replacement includes these ledgers and originals. Book-only merges leave this house knowledge behind:
+a writing Task whose referenced exemplar is absent keeps readable results/drafts but cannot start again.
+
+## 资料库 references for 审阅 (Issue #428, slice 1)
+
+Service protocol 125 follows 124 (#427) and adds optional `materialIds` to review preparation and bounded reference offers to 审阅. Only model-calling review-category contracts consume references; factual review and model-free consistency leads do not. The Run and each consuming Task freeze exact Material Index pins in canonical JSON without a schema revision (69 unchanged), and their plans disclose the references separately from manuscript scope. Up to four whole items, 3,000 extracted characters each and 6,000 in total, are read through the read-only Material Index boundary. Reference-aware prompts use `ai7.editorial-review.materials.prompt-contract/1`; Tasks without references retain their existing contract bytes and fixtures. Unavailable pins block a new authorization with a precise reason, while completed results remain readable. References remain unavailable in developer-live; evaluation references are deferred to a separate slice.
+
+A Run an answered Clarification Request is still waiting to be carried out is told apart in its continuation point (Issue #784): `continuation.pendingAnswerUnits` lists the reading ranges whose answer was recorded and not yet carried out, so the stopped-Run note says where 续行 really starts. This is service protocol version **126**, following 125 (#428 slice 1), and no schema revision.
+
+## 资料库 references for 评估 (Issue #428, slice 2)
+
+Service protocol 127 follows 126 (#784) and adds optional `materialIds` to AI7 初评 and 审稿意见 preparation, with bounded offers and frozen reference rows on 评估. Both kinds reuse the exact Material Index pins in execution-plan canonical JSON; schema 69 and their SQL contract versions stay unchanged. Reference-bearing Tasks use `ai7.initial-evaluation.materials.prompt-contract/1` or `ai7.readers-report.materials.prompt-contract/1` for unit and full-book synthesis; Tasks without references keep their original bytes. The materials provide background only and never override the house Evaluation Profile or finalized scores and conclusion. Plans name selected items and disclose their extracted text separately from manuscript scope and house exemplars, without printing it. Missing pins block preparation/authorization with a 评估 recovery path; developer-live remains refused. 按我的评分重写评语 and evaluation output copy detection are outside this slice.
+
+Provider Processing v8 with active-policy-set v6 (Issue #473, S87-f3b; #742, the Owner's policy PR) is service protocol version **128** and no schema revision: it follows protocol 127 (#428 slice 2) and keeps schema revision 69. The policy bytes under `docs/policies/` are unchanged by every refresh onto `dev`.

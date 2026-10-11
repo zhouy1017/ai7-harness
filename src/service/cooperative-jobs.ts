@@ -146,9 +146,10 @@ export class CooperativeJobOwner {
   startInitialEvaluationPreparation(
     bookId: string,
     launchPolicy: Parameters<EditorialStore['createInitialEvaluationPreparationWork']>[1],
+    materialIds: ReadonlyArray<string> = [],
   ): ServiceJobProjection {
     this.#requireCapacity();
-    const work = this.#store.createInitialEvaluationPreparationWork(bookId, launchPolicy);
+    const work = this.#store.createInitialEvaluationPreparationWork(bookId, launchPolicy, materialIds);
     const jobId = randomUUID();
     const job: JobRecord = {
       subjectId: work.workId ?? bookId,
@@ -184,9 +185,10 @@ export class CooperativeJobOwner {
     bookId: string,
     template: Parameters<EditorialStore['createReadersReportPreparationWork']>[1],
     launchPolicy: Parameters<EditorialStore['createReadersReportPreparationWork']>[2],
+    materialIds: ReadonlyArray<string> = [],
   ): ServiceJobProjection {
     this.#requireCapacity();
-    const work = this.#store.createReadersReportPreparationWork(bookId, template, launchPolicy);
+    const work = this.#store.createReadersReportPreparationWork(bookId, template, launchPolicy, materialIds);
     const jobId = randomUUID();
     const job: JobRecord = {
       subjectId: work.workId ?? bookId,
@@ -337,9 +339,10 @@ export class CooperativeJobOwner {
     scope: Parameters<EditorialStore['createReviewRunPreparationWork']>[2],
     launchPolicy: Parameters<EditorialStore['createReviewRunPreparationWork']>[3],
     capturedProcedure: Parameters<EditorialStore['createReviewRunPreparationWork']>[4] = null,
+    materialIds: ReadonlyArray<string> = [],
   ): ServiceJobProjection {
     this.#requireCapacity();
-    const work = this.#store.createReviewRunPreparationWork(bookId, categoryIds, scope, launchPolicy, capturedProcedure);
+    const work = this.#store.createReviewRunPreparationWork(bookId, categoryIds, scope, launchPolicy, capturedProcedure, materialIds);
     const jobId = randomUUID();
     const job: JobRecord = {
       subjectId: work.workId ?? bookId,

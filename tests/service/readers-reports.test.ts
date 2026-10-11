@@ -26,7 +26,7 @@ import {
   ANALYSIS_LEDGER_SCHEMA_SQL,
   ANALYSIS_LEDGER_TRIGGER_SQL,
   INITIAL_EVALUATION_SCHEMA_VERSION,
-  OUTCOME_RESOLUTION_SCHEMA_VERSION,
+  IMPORTED_EXEMPLAR_SCHEMA_VERSION,
   DIALOGUE_SCHEMA_VERSION,
   SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
@@ -422,6 +422,35 @@ describe('审稿意见 over the real store on exact sample1', () => {
     });
   }, 300_000);
 
+  it('names a damaged admitted 审稿意见 exemplar as damaged instead of blanking 评估 (Issue #778)', async () => {
+    await withBook(async (book) => {
+      const { bookId } = book;
+      await runInitialEvaluationToEnd(book.store, book.owner, bookId, launchPolicy);
+      finalizeAsJ11(book.store, bookId);
+      await draftReport(book, 'author');
+      const settled = book.store.inspectReadersReport(bookId)!;
+      const draft = book.store.createReadersReportDraft(bookId, settled.resultSetRevision!.revisionId).readersReport.templates[0]!.draft!.document;
+      const milestone = await book.store.saveMilestone(book.manuscriptId, book.branchId, '三审稿', 'stage-archive', null, '');
+      book.store.designatePublicationVersion({ bookId, milestoneId: milestone.milestoneId, scope: '纸质版首印', basis: '三审通过' });
+      book.store.admitReadersReportExemplar({ bookId, template: 'author', revisionDigest: draft.versions[0]!.revisionDigest, expectedDecisions: 0 });
+      const other = await importSample1Book(book.store, roots.codeRoot, '评估另一本书');
+      expect(book.store.inspectEvaluation(other.bookId, null).readersReport.exemplars)
+        .toEqual({ count: 1, statement: '参考本社 1 份审稿意见范例：《审稿意见之书 · 审稿意见 · 给作者的修改意见》' });
+      // The admitted decision record no longer reads: this one 范例 is named as damaged, and 评估 still reads.
+      const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try {
+        database.exec('DROP TRIGGER learning_eligibility_decisions_no_update');
+        database.prepare("UPDATE learning_eligibility_decisions SET canonical_json = '{}' WHERE material_key LIKE 'readers-report-exemplar:%'").run();
+      } finally { database.close(); }
+      const workspace = book.store.inspectEvaluation(other.bookId, null).readersReport;
+      expect(workspace.templates.map((entry) => entry.template)).toEqual(['author', 'editorial']);
+      expect(workspace.exemplars).toEqual({
+        count: 0,
+        statement: '本社没有可以读取的审稿意见范例，本次不参考范例；另有 1 份范例记录已损坏，无法读取：《审稿意见之书 · 审稿意见 · 给作者的修改意见》',
+      });
+    });
+  }, 300_000);
+
   it('seeds a draft with at most two admitted 审稿意见, by Book title, each its opening past the contract\'s bound (Issue #429)', async () => {
     await withBook(async (book) => {
       // Three Books drafted first — before any admission, so each contract asks the fixture the same question — then each
@@ -538,7 +567,7 @@ describe('审稿意见 over the real store on exact sample1', () => {
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(OUTCOME_RESOLUTION_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(IMPORTED_EXEMPLAR_SCHEMA_VERSION);
       expect(rows(after)).toBe(before!);
       for (const table of KIND_COUPLED_ANALYSIS_RELATIONS) {
         expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(ANALYSIS_LEDGER_SCHEMA_SQL[table]);

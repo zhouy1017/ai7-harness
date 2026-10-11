@@ -1,5 +1,5 @@
 import { strToU8, zipSync, type Zippable } from 'fflate';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   MATERIAL_FORMAT_BOUNDS,
   MATERIAL_FORMAT_CONVERTER_IDENTITIES,
@@ -570,5 +570,71 @@ describe('what the third review of #761 found', () => {
     // A hidden item inside a cell ends with the cell, never by closing the list around the table: the next cell is read.
     expect(read('<ul><li>外<table><tr><td><li hidden>藏</td><td>格</td></tr></table></ul>', 'HTML').paragraphs)
       .toEqual([[undefined, ['外']], [undefined, ['格']]]);
+  });
+});
+
+describe('what Issue #766 found', () => {
+  it('reads many blocks under deep inline nesting with constant work per block rather than a walk of the open elements (#766, item 1)', () => {
+    // `<ul>`, 120 open spans, then many items: every item's start found the ends its tag implies by walking the open
+    // elements, and every flush ran the heading pattern over the whole stack. The work is counted as operations, so the
+    // reading is pinned to a constant per block: about 10 set lookups and 3 pattern executions per block now, against
+    // about 733 and 246 before #766.
+    const blocks = 20_000;
+    const bytes = strToU8(`<ul>${'<span>'.repeat(120)}${'<li></li>'.repeat(blocks)}字</ul>`);
+    const originalHas = Set.prototype.has;
+    const originalExec = RegExp.prototype.exec;
+    let lookups = 0;
+    let executions = 0;
+    const hasSpy = vi.spyOn(Set.prototype, 'has').mockImplementation(function (this: Set<unknown>, value: unknown): boolean {
+      lookups += 1;
+      return originalHas.call(this, value);
+    });
+    const execSpy = vi.spyOn(RegExp.prototype, 'exec').mockImplementation(function (this: RegExp, value: string): RegExpExecArray | null {
+      executions += 1;
+      return originalExec.call(this, value);
+    });
+    let paragraphs: Paragraphs;
+    try {
+      paragraphs = read(bytes, 'HTML').paragraphs;
+    } finally {
+      hasSpy.mockRestore();
+      execSpy.mockRestore();
+    }
+    expect(paragraphs).toEqual([[undefined, ['字']]]);
+    expect(lookups).toBeLessThan(blocks * 32);
+    expect(executions).toBeLessThan(blocks * 16);
+  });
+
+  it('replaces a same-named common style with a content.xml automatic style at the 10,000-style cap, so shown text is not dropped (#766, item 2)', () => {
+    const style = 'xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" ' +
+      'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"';
+    // The common part holds exactly the cap's 10,000 styles, two of them hidden and named as the automatic ones are; the
+    // automatic styles are shown, and the automatic style is the one that applies.
+    const common = `<?xml version="1.0"?><office:document-styles ${style}><office:styles>` +
+      Array.from({ length: 9_998 }, (_, index) => `<style:style style:name="S${index}" style:family="text"/>`).join('') +
+      '<style:style style:name="T1" style:family="text"><style:text-properties text:display="none"/></style:style>' +
+      '<style:style style:name="P1" style:family="paragraph"><style:text-properties text:display="none"/></style:style>' +
+      '</office:styles></office:document-styles>';
+    const content = `<?xml version="1.0"?><office:document-content ${style}><office:automatic-styles>` +
+      '<style:style style:name="T1" style:family="text"/><style:style style:name="P1" style:family="paragraph"/>' +
+      '</office:automatic-styles><office:body><office:text>' +
+      '<text:p>可见<text:span text:style-name="T1">一</text:span>的字</text:p>' +
+      '<text:p text:style-name="P1">整段显示</text:p>' +
+      '</office:text></office:body></office:document-content>';
+    const file = archive({
+      mimetype: [strToU8('application/vnd.oasis.opendocument.text'), { level: 0 }],
+      'content.xml': strToU8(content),
+      'styles.xml': strToU8(common),
+    });
+    expect(read(file, 'ODT').paragraphs).toEqual([[undefined, ['可见一的字']], [undefined, ['整段显示']]]);
+  });
+
+  it('refuses an entity declaration in an XML part ahead of saxes, the pre-check standing as defence in depth (#766, item 4)', () => {
+    // `saxes` alone would refuse this part as a syntax error (`unreadable`); the pre-check is what names the entity.
+    const withEntity = archive({
+      mimetype: [strToU8('application/vnd.oasis.opendocument.text'), { level: 0 }],
+      'content.xml': strToU8(ODT_CONTENT('<text:p>字</text:p>').replace('<office:document-content', '<!ENTITY x "y"><office:document-content')),
+    });
+    expect(refusal(withEntity, 'ODT')).toBe('external-entity');
   });
 });

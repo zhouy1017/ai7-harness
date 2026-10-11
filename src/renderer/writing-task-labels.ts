@@ -18,6 +18,12 @@ export const WRITING_REFERENCE_TERMS = ['梗概与人物', '评估结论与营�
 export function writingMaterialLabel(item: Pick<WritingTaskMaterialProjection, 'title' | 'characters' | 'scope'>): string {
   return `《${item.title}》 · 已提取 ${item.characters.toLocaleString('en-US')} 字 · ${item.scope === 'book' ? '本书资料' : '社级资料'}`;
 }
+/** Why a further item cannot be ticked once four are (the service's own bound, MAX_WRITING_MATERIALS). */
+export const WRITING_MATERIALS_AT_LIMIT = '写作任务最多参考 4 份资料库资料；请少选几份。';
+/** Why a further item cannot be ticked when it would take the extracted text past the total bound. */
+export function writingMaterialsOverTotalNote(total: number): string {
+  return `所选资料合计已提取 ${total.toLocaleString('en-US')} 字，超过合计 6,000 字的上限；请少选几份。`;
+}
 /** The items the row did not list. */
 export function writingMaterialsMore(count: number): string {
   return `另有 ${count} 份资料没有列出：这里只列最近收进的几份。`;

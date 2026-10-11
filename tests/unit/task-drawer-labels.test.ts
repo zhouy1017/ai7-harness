@@ -3,6 +3,7 @@ import type { TaskPlanProjection, TaskPlanStartProjection, TaskPlanStateKey } fr
 import { IPC_CHANNELS, TASK_PLAN_KINDS } from '../../src/shared/protocol.js';
 import {
   TASK_BAR_CANCEL_FAILED,
+  TASK_BAR_BLOCKED_CANCEL_NOTE,
   TASK_BAR_CANCEL_WAIT,
   TASK_BAR_CANCELLED,
   TASK_BAR_CONNECT,
@@ -602,7 +603,7 @@ describe('the authorization bar (S74a)', () => {
       resume: { reason: null },
       redo: { reason: null },
       activity: null, executingSince: null,
-      continuation: { unitsSettled: 3, unitsTotal: 8 }, update: null,
+      continuation: { unitsSettled: 3, unitsTotal: 8, pendingAnswerUnits: [] }, update: null,
       accountLimit: null, outcomeUnknown: null,
     };
     expect(TASK_BAR_RESUME).toBe('续行');
@@ -622,6 +623,10 @@ describe('the authorization bar (S74a)', () => {
     expect(blocked.status).toBe('任务已中断 · 可续行');
     expect(blocked.actions[0]).toEqual({ name: 'resume', label: '续行', tone: 'primary', disabledReason: '运行名额已满：正在运行的任务结束后再续行。' });
     expect(taskBarContinuationNote(8, 8)).toBe('已读完全部 8 个阅读范围，结果都已保存；续行时接着做之后的归纳与抽样');
+    // An answer recorded and not yet carried out is handled first; with none, today's words stand (Issue #784).
+    expect(taskBarContinuationNote(7, 8, [5])).toBe('已读完 7 / 8 个阅读范围，结果都已保存；续行时先按你的回答处理第 5 个，再继续未完成的部分，不重复已读完的部分');
+    expect(taskBarContinuationNote(7, 8, [5, 6])).toContain('先按你的回答处理第 5、6 个，再继续未完成的部分');
+    expect(taskBarContinuationNote(3, 8, [])).toBe('已读完 3 / 8 个阅读范围，结果都已保存；续行时从第 4 个接着读，不重复已读完的部分');
     // Kept progress that no longer reads back is never stated as a count.
     expect(taskBarContinuationNote(null, 8)).toBe('已保存的阅读进度无法核对，这次运行不能续行；可以取消它，再重新开始');
   });
@@ -850,7 +855,7 @@ describe('模型服务账户限额 in the drawer (S16b)', () => {
       resume: { reason: null },
       redo: { reason: null },
       activity: null, executingSince: null,
-      continuation: { unitsSettled: 3, unitsTotal: 8 }, update: null,
+      continuation: { unitsSettled: 3, unitsTotal: 8, pendingAnswerUnits: [] }, update: null,
       accountLimit: { unitOrdinal: 4, condition }, outcomeUnknown: null,
     };
     const limited = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'account-limit', label: '模型服务账户限额' }, runControl: control }));
@@ -881,7 +886,7 @@ describe('结果待确认 in the drawer (S16c)', () => {
     resume: null,
     redo: { reason: null },
     activity: null, executingSince: null,
-    continuation: { unitsSettled: 8, unitsTotal: 8 }, update: null,
+    continuation: { unitsSettled: 8, unitsTotal: 8, pendingAnswerUnits: [] }, update: null,
     accountLimit: null, outcomeUnknown: { units: [{ unitOrdinal: 4, attempts: 1 }], stopped: true },
   };
 
@@ -901,7 +906,7 @@ describe('结果待确认 in the drawer (S16c)', () => {
     ]);
     // A kept progress that does not read back is never a count.
     const unread = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, {
-      state: { key: 'outcome-unknown', label: '结果待确认' }, runControl: { ...control, continuation: { unitsSettled: null, unitsTotal: 8 } },
+      state: { key: 'outcome-unknown', label: '结果待确认' }, runControl: { ...control, continuation: { unitsSettled: null, unitsTotal: 8, pendingAnswerUnits: [] } },
     }));
     expect(unread.note).toBeNull();
   });
@@ -909,7 +914,7 @@ describe('结果待确认 in the drawer (S16c)', () => {
   it('lets a paused Run that holds an unconfirmed range go on with the others, and say which range it holds', () => {
     const paused = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, {
       state: { key: 'paused', label: '已暂停' },
-      runControl: { ...control, resume: { reason: null }, continuation: { unitsSettled: 4, unitsTotal: 8 }, outcomeUnknown: { units: [{ unitOrdinal: 4, attempts: 1 }], stopped: false } },
+      runControl: { ...control, resume: { reason: null }, continuation: { unitsSettled: 4, unitsTotal: 8, pendingAnswerUnits: [] }, outcomeUnknown: { units: [{ unitOrdinal: 4, attempts: 1 }], stopped: false } },
     }));
     expect(paused.actions.map((entry) => [entry.name, entry.tone])).toEqual([
       ['resume', 'primary'], ['cancel-run', 'secondary'], ['redo', 'secondary'], ['view-unconfirmed', 'secondary'], ['run-link', 'secondary'],
@@ -940,7 +945,7 @@ describe('Clarification Requests in the drawer (S76d)', () => {
     const control = {
       runRecordId: 'run', cancelling: false, pausing: false,
       cancel: { reason: null, impact: [] }, pause: { reason: '这项任务现在没有在运行，不能暂停；可以取消它' }, resume: null, redo: { reason: null },
-      activity: null, executingSince: null, continuation: { unitsSettled: 7, unitsTotal: 8 }, accountLimit: null, outcomeUnknown: null,
+      activity: null, executingSince: null, continuation: { unitsSettled: 7, unitsTotal: 8, pendingAnswerUnits: [] }, accountLimit: null, outcomeUnknown: null,
     };
     const waiting = taskBarView(plan({
       state: { key: 'awaiting-clarification', label: '任务等待你的说明' },
@@ -1000,12 +1005,24 @@ describe('the drawer bar for a waiting Run of every other kind', () => {
       const view = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, {
         kind, state: { key: 'plan-moved', label: '需要重新确认计划' }, reprepare: null, planMovedReason: reason,
       }));
+      // A ledger kind's Run that never started can be cancelled, which takes its item out of 待我处理 (Issue #764).
+      const cancellable = kind !== 'review-run';
       expect([view.status, view.note, view.actions.map((entry) => [entry.name, entry.label])], kind)
-        .toEqual(['需要重新确认计划', `${reason}${where}`, [['run-link', link]]]);
+        .toEqual(['需要重新确认计划', `${reason}${where}${cancellable ? TASK_BAR_BLOCKED_CANCEL_NOTE : ''}`,
+          [...(cancellable ? [['cancel-wait', TASK_BAR_CANCEL_WAIT]] : []), ['run-link', link]]]);
     }
     // A plan that carries no reason still says the state, then where.
     const bare = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { kind: 'writing', state: { key: 'plan-moved', label: '需要重新确认计划' }, reprepare: null }));
-    expect(bare.note).toBe(`需要重新确认计划。${TASK_BAR_PLAN_MOVED_ELSEWHERE.writing}`);
+    expect(bare.note).toBe(`需要重新确认计划。${TASK_BAR_PLAN_MOVED_ELSEWHERE.writing}${TASK_BAR_BLOCKED_CANCEL_NOTE}`);
+  });
+
+  it('offers 取消 on a blocked ledger-kind Run that never started, and on no other kind (Issue #764)', () => {
+    for (const kind of ['initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing'] as const) {
+      const view = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { kind, state: { key: 'blocked', label: '派发前已阻止' } }));
+      expect([view.note, view.actions.map((entry) => entry.name)], kind).toEqual([TASK_BAR_BLOCKED_CANCEL_NOTE, ['cancel-wait', 'run-link']]);
+    }
+    const review = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { kind: 'review-run', state: { key: 'blocked', label: '派发前已阻止' } }));
+    expect(review.actions.map((entry) => entry.name)).not.toContain('cancel-wait');
   });
 
   it('shows a waiting Run of every kind what it waits for, with its direct 取消 and the way to the Run (OFF-006, OFF-010)', () => {

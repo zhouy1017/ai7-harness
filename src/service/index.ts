@@ -1,3 +1,4 @@
+import { ImportedExemplarError } from './imported-exemplars.js';
 import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -92,7 +93,7 @@ function failureResponse(
   error: unknown,
   StoreErrorClass?: typeof import('./store.js').StoreError,
 ): ServiceFailureResponse {
-  if ((StoreErrorClass && error instanceof StoreErrorClass) || error instanceof ProtocolError) {
+  if ((StoreErrorClass && error instanceof StoreErrorClass) || error instanceof ProtocolError || error instanceof ImportedExemplarError) {
     return { id: requestId, ok: false, error: { code: error.code, message: error.message } };
   }
   return { id: requestId, ok: false, error: { code: 'SERVICE_REQUEST_FAILED', message: '服务请求失败。' } };
@@ -609,6 +610,12 @@ async function dispatch(
     case 'importReviewGuidelineVersion':
       return { id: request.id, ok: true, op: request.op, result: store.importReviewGuidelineVersion(request.input.previewId) };
     // 知识库 › 范例 (Issue #427, S79b).
+    case 'previewImportedExemplar':
+      return { id: request.id, ok: true, op: request.op, result: await store.previewImportedExemplar(request.input.path) };
+    case 'importEarlierExemplar':
+      return { id: request.id, ok: true, op: request.op, result: await store.importEarlierExemplar(request.input) };
+    case 'decideImportedExemplar':
+      return { id: request.id, ok: true, op: request.op, result: store.decideImportedExemplar(request.input) };
     case 'inspectExemplars':
       return { id: request.id, ok: true, op: request.op, result: store.inspectExemplars(request.input.after) };
     case 'admitReadersReportExemplar':
@@ -773,12 +780,12 @@ async function dispatch(
     // AI7 初评 (Issue #429, S81b1): prepared as a cooperative job whose plan the Task Drawer opens, and started from its bar
     // through the governor exactly as the baseline analysis is — admitted while a place is free, else waiting for one.
     case 'prepareInitialEvaluation':
-      return { id: request.id, ok: true, op: request.op, result: jobs.startInitialEvaluationPreparation(request.input.bookId, launchPolicy) };
+      return { id: request.id, ok: true, op: request.op, result: jobs.startInitialEvaluationPreparation(request.input.bookId, launchPolicy, request.input.materialIds) };
     case 'authorizeInitialEvaluation': {
       const authorized = store.authorizeInitialEvaluation(request.input.bookId, request.input.taskIntentId, request.input.planEnvelopeDigest);
       if (authorized.dispatchRunRecordId !== null) {
         try {
-          analysisExecution.admitOrQueue(authorized.dispatchRunRecordId, store.initialEvaluationLedger);
+          analysisExecution.admitOrQueue(authorized.dispatchRunRecordId, authorized.ledger);
         } catch (error) {
           const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
           throw new StoreErrorClass(code, error instanceof Error ? error.message : '运行未能进入调度。');
@@ -789,7 +796,7 @@ async function dispatch(
     // 审稿意见 (Issue #429, S81c): drafted from the Book's latest 定稿 version, prepared as a cooperative job whose plan the Task
     // Drawer opens, and started from its bar through the governor on the ledger of the plan's contract, as 初评 is.
     case 'prepareReadersReport':
-      return { id: request.id, ok: true, op: request.op, result: jobs.startReadersReportPreparation(request.input.bookId, request.input.template, launchPolicy) };
+      return { id: request.id, ok: true, op: request.op, result: jobs.startReadersReportPreparation(request.input.bookId, request.input.template, launchPolicy, request.input.materialIds) };
     case 'authorizeReadersReport': {
       const authorized = store.authorizeReadersReport(request.input.bookId, request.input.taskIntentId, request.input.planEnvelopeDigest);
       if (authorized.dispatchRunRecordId !== null) {
@@ -919,7 +926,7 @@ async function dispatch(
         ok: true,
         op: request.op,
         result: jobs.startReviewRunPreparation(request.input.bookId, request.input.categoryIds, request.input.scope, launchPolicy,
-          request.input.capturedProcedure ?? null),
+          request.input.capturedProcedure ?? null, request.input.materialIds ?? []),
       };
     case 'authorizeReviewRun':
       // The one approval, then the drive loop at once: an approved Run nobody drives reads `partial`, so
@@ -1692,16 +1699,9 @@ async function run(): Promise<void> {
         // The Run stays 正在取消 and is offered 取消任务 again, which settles it.
       }
     }
-    // A Run the editor had answered before AI7 closed goes on now, one after another through the slot (Issue #422, S76d).
-    for (const runRecordId of reconciled.answered) {
-      try {
-        analysisExecution.continueAnswered(runRecordId, store.baselineAnalysisLedger);
-      } catch {
-        // It stays 任务等待你的说明 with its answer; the next launch takes it on again.
-      }
-    }
     // Starts the governor had not admitted when AI7 closed were blocked with why by the reconciliation: nothing starts by
-    // itself after a restart (ADR 0034), and the editor starts them again when they choose.
+    // itself after a restart (ADR 0034), and the editor starts them again when they choose. A Run the editor had answered before
+    // AI7 closed, and that was not yet taken on, is left 可续行 with its answer the same way (Issue #767).
     // AI7 初评 has no 续行 (Issue #429 review, P1): one left under way ends 已中断 with its outcome, and one left waiting for a
     // place is blocked with why, so 评估 offers 重新初评 instead of reading a Run under way for good.
     store.reconcileStoppedInitialEvaluationRuns();

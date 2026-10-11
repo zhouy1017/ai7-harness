@@ -335,6 +335,12 @@ export const TASK_BAR_SAVE_DRAFT_ONLY = '仅保存任务草稿';
 export const TASK_BAR_CANCEL_WAIT = '取消';
 /** A cancelled wait, as the status line states it: nothing was sent. */
 export const TASK_BAR_CANCELLED = '已取消 · 未发送任何内容';
+/** The sentence beside 取消 on a Run that never started (Issue #764): blocked after it waited, so nothing ran or was sent. */
+export const TASK_BAR_BLOCKED_CANCEL_NOTE = '这项任务没有开始，也没有发送任何内容；取消后不再提醒。';
+/** A kind whose blocked Run the bar can cancel: a ledger kind's, which no other surface may be able to prepare again (Issue #764). */
+function blockedRunCancellable(plan: TaskPlanProjection): boolean {
+  return plan.kind === 'initial-evaluation' || plan.kind === 'readers-report' || plan.kind === 'evaluation-rewrite' || plan.kind === 'writing';
+}
 /** The fallback when 取消 is refused for a reason the service does not word. */
 export const TASK_BAR_CANCEL_FAILED = '无法取消这项任务。';
 /** What a waiting Run needs the editor for (OFF-009): the connection, fixed in 设置 — the one wait with an action beside it. */
@@ -461,9 +467,15 @@ export function unconfirmedLine(entry: { unitOrdinal?: number; earlierText?: boo
   return `${entry.category === null ? '' : `「${entry.category}」`}${what} · 请求已发出 · 回答没有完整传回`;
 }
 
-/** A stopped Run's continuation point, as the bar states it beside 续行; `null` when its kept progress no longer reads back. */
-export function taskBarContinuationNote(unitsSettled: number | null, unitsTotal: number): string {
+/**
+ * A stopped Run's continuation point, as the bar states it beside 续行; `null` when its kept progress no longer reads back.
+ * Ranges whose answer the editor gave and nothing has carried out yet are handled first (Issue #784).
+ */
+export function taskBarContinuationNote(unitsSettled: number | null, unitsTotal: number, pendingAnswerUnits: ReadonlyArray<number> = []): string {
   if (unitsSettled === null) return '已保存的阅读进度无法核对，这次运行不能续行；可以取消它，再重新开始';
+  if (pendingAnswerUnits.length > 0 && unitsSettled < unitsTotal) {
+    return `已读完 ${unitsSettled} / ${unitsTotal} 个阅读范围，结果都已保存；续行时先按你的回答处理第 ${pendingAnswerUnits.join('、')} 个，再继续未完成的部分，不重复已读完的部分`;
+  }
   return unitsSettled >= unitsTotal
     ? `已读完全部 ${unitsTotal} 个阅读范围，结果都已保存；续行时接着做之后的归纳与抽样`
     : `已读完 ${unitsSettled} / ${unitsTotal} 个阅读范围，结果都已保存；续行时从第 ${unitsSettled + 1} 个接着读，不重复已读完的部分`;
@@ -798,7 +810,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
           readiness,
           summary,
           statement: null,
-          note: continuation === null ? null : taskBarContinuationNote(continuation.unitsSettled, continuation.unitsTotal),
+          note: continuation === null ? null : taskBarContinuationNote(continuation.unitsSettled, continuation.unitsTotal, continuation.pendingAnswerUnits),
           status: plan.state.label,
           actions: [
             { name: 'resume', label: TASK_BAR_RESUME, tone: 'primary', disabledReason: control.resume.reason },
@@ -844,9 +856,20 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         readiness,
         summary,
         statement: null,
-        note: `${plan.planMovedReason ?? `${plan.state.label}。`}${TASK_BAR_PLAN_MOVED_ELSEWHERE[plan.kind]}`,
+        note: `${plan.planMovedReason ?? `${plan.state.label}。`}${TASK_BAR_PLAN_MOVED_ELSEWHERE[plan.kind]}${blockedRunCancellable(plan) ? TASK_BAR_BLOCKED_CANCEL_NOTE : ''}`,
         status: plan.state.label,
-        actions: [runLink],
+        actions: blockedRunCancellable(plan) ? [{ name: 'cancel-wait', label: TASK_BAR_CANCEL_WAIT, tone: 'secondary', disabledReason: null }, runLink] : [runLink],
+      };
+    }
+    // 派发前已阻止 of a ledger kind (Issue #764): it never started; 取消 ends it and takes its item out of 待我处理.
+    if (plan.state.key === 'blocked' && blockedRunCancellable(plan)) {
+      return {
+        readiness,
+        summary,
+        statement: null,
+        note: TASK_BAR_BLOCKED_CANCEL_NOTE,
+        status: plan.state.label,
+        actions: [{ name: 'cancel-wait', label: TASK_BAR_CANCEL_WAIT, tone: 'secondary', disabledReason: null }, runLink],
       };
     }
     // Run Budget Ceiling Reached (Issue #51, S16a): what the Run read and used, 调整预算并重做, and the partial results.

@@ -1,3 +1,4 @@
+import { IMPORTED_EXEMPLAR_OBJECT_DIRECTORY } from './imported-exemplars.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, open, opendir, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -333,7 +334,7 @@ export async function verifyCopiedPayloads(
   const incomplete = (): never => { throw new DatabaseExportError('DATABASE_PACKAGE_INCOMPLETE', '数据文件在打包期间发生变化或已损坏；没有生成完整备份，请重试。'); };
   const copy = openPackageStore(path);
   const packed = new Map(members.map((member) => [member.path, member]));
-  const damaged: Record<DamagedPayloadKind, number> = { manuscript: 0, recovery: 0, library: 0, profile: 0 };
+  const damaged: Record<DamagedPayloadKind, number> = { manuscript: 0, recovery: 0, library: 0, exemplar: 0, profile: 0 };
   let checked = 0;
   const compare = async (
     key: string,
@@ -379,6 +380,18 @@ export async function verifyCopiedPayloads(
       await compare(`${LIBRARY_OBJECT_DIRECTORY}/${material.objectKey}`, material.source.sha256, material.source.bytes, 'library',
         () => held('SELECT 1 FROM library_materials WHERE material_id = ? AND sha256 = ?', materialId as SQLInputValue, sha256 as SQLInputValue));
     }
+    if (schemaRevision >= 69 && present('earlier_exemplar_versions')) {
+      for (const row of copy.prepare('SELECT revision_id, canonical_json, sha256 FROM earlier_exemplar_versions').iterate()) {
+        if (typeof row.canonical_json !== 'string' || sha256Hex(row.canonical_json) !== row.sha256) incomplete();
+        const value = JSON.parse(String(row.canonical_json)) as unknown;
+        if (!isRecord(value) || !isRecord(value.source) || typeof value.source.sha256 !== 'string' ||
+            !/^[0-9a-f]{64}$/u.test(value.source.sha256) || !['DOCX', 'TXT', 'MD'].includes(String(value.source.format)) ||
+            value.source.objectKey !== `${value.source.sha256}.${String(value.source.format).toLowerCase()}`) incomplete();
+        const source = (value as Record<string, unknown>).source as Record<string, unknown>;
+        await compare(`${IMPORTED_EXEMPLAR_OBJECT_DIRECTORY}/${String(source.objectKey)}`, source.sha256 as string, source.bytes as number, 'exemplar',
+          () => held('SELECT 1 FROM earlier_exemplar_versions WHERE revision_id = ? AND sha256 = ?', row.revision_id as SQLInputValue, row.sha256 as SQLInputValue));
+      }
+    }
     let installations = 0;
     if (present('native_artifact_installations')) for (const row of copy.prepare('SELECT retained_key, content_sha256, byte_length FROM native_artifact_installations').iterate()) {
       installations += 1;
@@ -398,12 +411,13 @@ export async function verifyCopiedPayloads(
 }
 
 /** The kinds of external file a package carries, as a refusal names them (Issue #434 review). */
-type DamagedPayloadKind = 'manuscript' | 'recovery' | 'library' | 'profile';
-const DAMAGED_PAYLOAD_KINDS: ReadonlyArray<DamagedPayloadKind> = ['manuscript', 'recovery', 'library', 'profile'];
+type DamagedPayloadKind = 'manuscript' | 'recovery' | 'library' | 'exemplar' | 'profile';
+const DAMAGED_PAYLOAD_KINDS: ReadonlyArray<DamagedPayloadKind> = ['manuscript', 'recovery', 'library', 'exemplar', 'profile'];
 const DAMAGED_PAYLOAD_LABELS: Readonly<Record<DamagedPayloadKind, string>> = {
   manuscript: '稿件文件',
   recovery: '恢复快照',
   library: '资料库原件',
+  exemplar: '范例原件',
   profile: '编辑工作区方案',
 };
 

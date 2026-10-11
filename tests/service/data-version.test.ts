@@ -9,9 +9,10 @@ import {
   DataVersionLedger,
   initializeDataVersionSchema,
   MAX_STORE_VERSIONS_LISTED,
+  readUpgrade,
 } from '../../src/service/data-version.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { SERIES_KNOWLEDGE_SCHEMA_VERSION, OUTCOME_RESOLUTION_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
+import { SERIES_KNOWLEDGE_SCHEMA_VERSION, IMPORTED_EXEMPLAR_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 
@@ -66,9 +67,9 @@ describe('数据版本 over the real store', () => {
       softwareVersion: version,
       dataVersion: 1,
       frozen: false,
-      schemaRevision: OUTCOME_RESOLUTION_SCHEMA_VERSION,
+      schemaRevision: IMPORTED_EXEMPLAR_SCHEMA_VERSION,
       update: null,
-      history: [{ softwareVersion: version, dataVersion: 1, schemaRevision: OUTCOME_RESOLUTION_SCHEMA_VERSION, recordedAt: first.history[0]!.recordedAt }],
+      history: [{ softwareVersion: version, dataVersion: 1, schemaRevision: IMPORTED_EXEMPLAR_SCHEMA_VERSION, recordedAt: first.history[0]!.recordedAt }],
       historyTruncated: false,
       upgrades: [],
       backupLocation: `${roots.dataRoot}-backups`,
@@ -85,10 +86,10 @@ describe('数据版本 over the real store', () => {
       const recordedAt = '2026-09-01T00:00:00.000Z';
       const earlier = canonicalRecord({
         schema: 'ai7.store-version/1', recordId: '00000000-0000-4000-8000-000000000001', ordinal: 1, softwareVersion: '0.0.9', dataVersion: 1,
-        schemaRevision: OUTCOME_RESOLUTION_SCHEMA_VERSION, supersedes: null, recordedAt,
+        schemaRevision: IMPORTED_EXEMPLAR_SCHEMA_VERSION, supersedes: null, recordedAt,
       });
       database.prepare(`INSERT INTO store_versions(record_id, ordinal, software_version, data_version, schema_revision, supersedes_record_id, recorded_at, canonical_json, sha256)
-        VALUES (?, 1, '0.0.9', 1, ?, NULL, ?, ?, ?)`).run('00000000-0000-4000-8000-000000000001', OUTCOME_RESOLUTION_SCHEMA_VERSION, recordedAt, earlier.json, earlier.digest);
+        VALUES (?, 1, '0.0.9', 1, ?, NULL, ?, ?, ?)`).run('00000000-0000-4000-8000-000000000001', IMPORTED_EXEMPLAR_SCHEMA_VERSION, recordedAt, earlier.json, earlier.digest);
     } finally {
       database.close();
     }
@@ -194,7 +195,7 @@ describe('数据版本 over the real store', () => {
       const store = new DatabaseSync(databasePath());
       try {
         const ledger = new DataVersionLedger(store);
-        for (let patch = from; patch <= to; patch += 1) ledger.recordOpen({ softwareVersion: `0.0.${patch}`, dataVersion: 1, schemaRevision: OUTCOME_RESOLUTION_SCHEMA_VERSION });
+        for (let patch = from; patch <= to; patch += 1) ledger.recordOpen({ softwareVersion: `0.0.${patch}`, dataVersion: 1, schemaRevision: IMPORTED_EXEMPLAR_SCHEMA_VERSION });
       } finally {
         store.close();
       }
@@ -234,6 +235,36 @@ describe('数据版本 over the real store', () => {
     }
   });
 
+  it('reads a rollback only when it names a strictly earlier Data Version and schema revision than the upgrade it belongs to (Issue #644)', () => {
+    const backup = { fileName: 'AI7 升级前备份 2026-09-26 10-00-00.ai7db', byteLength: 1, sha256: 'a'.repeat(64) };
+    const upgrade = (rollback: { dataVersion: number; schemaRevision: number }): unknown => ({
+      fromDataVersion: 3, fromSchemaRevision: 60, fromSoftwareVersion: '0.0.10', changes: ['替换记录'], backup,
+      rollback: { softwareVersion: '0.0.9', ...rollback, backup },
+    });
+    const refusedCode = (rollback: { dataVersion: number; schemaRevision: number }): string | null => {
+      try { readUpgrade(upgrade(rollback), 4); return null; } catch (error) { return error instanceof DataVersionError ? error.code : String(error); }
+    };
+    // The middle state an unfinished upgrade left does not share the Data Version it fell back from.
+    expect(refusedCode({ dataVersion: 3, schemaRevision: 59 })).toBe('STORE_VERSION_RECORD_INVALID');
+    expect(refusedCode({ dataVersion: 4, schemaRevision: 59 })).toBe('STORE_VERSION_RECORD_INVALID');
+    expect(refusedCode({ dataVersion: 1, schemaRevision: 60 })).toBe('STORE_VERSION_RECORD_INVALID');
+    expect(refusedCode({ dataVersion: 1, schemaRevision: 61 })).toBe('STORE_VERSION_RECORD_INVALID');
+    expect(refusedCode({ dataVersion: 2, schemaRevision: 59 })).toBeNull();
+    expect(readUpgrade(upgrade({ dataVersion: 2, schemaRevision: 59 }), 4).rollback).toMatchObject({ dataVersion: 2, schemaRevision: 59 });
+    // The ledger refuses to record the same rollback, and records the strictly earlier one.
+    const database = new DatabaseSync(':memory:');
+    try {
+      initializeDataVersionSchema(database);
+      const ledger = new DataVersionLedger(database);
+      ledger.recordOpen({ softwareVersion: '0.0.9', dataVersion: 3, schemaRevision: 60 });
+      expect(() => ledger.recordOpen({ softwareVersion: '0.0.10', dataVersion: 4, schemaRevision: 61, upgrade: upgrade({ dataVersion: 3, schemaRevision: 59 }) as never }))
+        .toThrowError(expect.objectContaining({ code: 'STORE_VERSION_RECORD_INVALID' }));
+      expect(ledger.recordOpen({ softwareVersion: '0.0.10', dataVersion: 4, schemaRevision: 61, upgrade: upgrade({ dataVersion: 2, schemaRevision: 59 }) as never })).toBe(true);
+    } finally {
+      database.close();
+    }
+  });
+
   it('adds revision 54 to a revision-53 store, recording the versions that open it from then on', async () => {
     await reopened(() => undefined);
     const plant = new DatabaseSync(databasePath());
@@ -244,10 +275,10 @@ describe('数据版本 over the real store', () => {
       plant.close();
     }
     const migrated = await reopened((store) => store.inspectDataVersion());
-    expect([migrated.schemaRevision, migrated.history.length, migrated.update]).toEqual([OUTCOME_RESOLUTION_SCHEMA_VERSION, 1, null]);
+    expect([migrated.schemaRevision, migrated.history.length, migrated.update]).toEqual([IMPORTED_EXEMPLAR_SCHEMA_VERSION, 1, null]);
     const database = new DatabaseSync(databasePath(), { readOnly: true });
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(OUTCOME_RESOLUTION_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(IMPORTED_EXEMPLAR_SCHEMA_VERSION);
     } finally {
       database.close();
     }

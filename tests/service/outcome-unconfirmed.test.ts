@@ -2,7 +2,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaselineAnalysisExecutionOwner, OUTCOME_UNKNOWN_NOT_RESENT } from '../../src/service/analysis/execution.js';
 import { RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, runReportReflectionRequestDigest } from '../../src/service/analysis/run-report-contract.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
@@ -23,7 +23,12 @@ import {
 import { TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { MATERIAL_INDEX_SCHEMA_VERSION, OUTCOME_RESOLUTION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { MATERIAL_INDEX_SCHEMA_VERSION, IMPORTED_EXEMPLAR_SCHEMA_VERSION, OUTCOME_RESOLUTION_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
+import { OUTCOME_UNKNOWN_CARRIED } from '../../src/service/analysis/outcome-unknown.js';
+import { OutcomeResolutionLedger } from '../../src/service/analysis/outcome-resolutions.js';
+import { canonicalRecord } from '../../src/service/analysis/canonical.js';
+import { randomUUID } from 'node:crypto';
 
 // Service-integration suite (L2) for 结果待确认 a completed Run left (Issue #757; V2-UX-ATTN-002, NOTIF-004, CTRL-007, CONT-011;
 // execution CONTEXT.md, Manual Outcome Resolution): the real store on a temporary Agent Data Root, exact `sample1` imported
@@ -81,12 +86,27 @@ async function refusal(operation: () => unknown): Promise<string> {
   return 'no-error';
 }
 
-async function book(store: EditorialStore, title: string): Promise<string> {
+async function bookWithManuscript(store: EditorialStore, title: string): Promise<{ bookId: string; manuscriptId: string; branchId: string }> {
   await requireExactSample1(roots.codeRoot);
   const imported = await importSample1Book(store, roots.codeRoot, title);
   await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
   recordMissingCredentialConnection(store, 'L2 主编辑连接');
-  return imported.bookId;
+  return imported;
+}
+
+async function book(store: EditorialStore, title: string): Promise<string> {
+  return (await bookWithManuscript(store, title)).bookId;
+}
+
+/** One confirmed edit at the start of the first paragraph, as the editor's typing makes one. */
+function edit(store: EditorialStore, manuscript: { manuscriptId: string; branchId: string }, text: string): void {
+  const window = store.getManuscriptWindow(manuscript.manuscriptId, manuscript.branchId, null);
+  const block = window.blocks.find((candidate) => candidate.kind === 'paragraph')!;
+  store.flushJournalEdit({
+    clientEditId: randomUUID(), manuscriptId: manuscript.manuscriptId, branchId: manuscript.branchId, baseRevisionId: window.revisionId,
+    blockId: block.blockId, windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: block.digest,
+    expectedJournalSequence: window.journalSequence, fromGrapheme: 0, toGrapheme: 0, insertText: text,
+  });
 }
 
 function unconfirmedItem(store: EditorialStore, bookId: string, surface: string): GlobalAttentionItemProjection | undefined {
@@ -115,6 +135,223 @@ function resolutionRows(): Array<{ book_id: string; canonical_json: string }> {
 }
 
 describe('结果待确认 a completed Run left (Issue #757)', () => {
+  it('lists unresolved pairs after more than 500 resolved pairs through the real walk, derives once per relevant write, and rebuilds on restart (#765, #773)', async () => {
+    const fixture = dropping(await loadModelFixture(FIXTURES_ROOT, 'sample1-evaluation-authored'), (entry) => entry.unitOrdinal === 3);
+    let store = await open(fixture);
+    const execution = ownerOf(store, fixture);
+    try {
+      const bookId = await book(store, 'L2 sample1 大量已确认结果');
+      let work = store.createInitialEvaluationPreparationWork(bookId, launchPolicy);
+      while (!work.done) work = store.advanceInitialEvaluationPreparationWork(work.workId!);
+      const prepared = work.projection!;
+      execution.admitOrQueue(store.authorizeInitialEvaluation(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!, store.initialEvaluationLedger);
+      await execution.whenIdle();
+      const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      const kinds: string[] = [];
+      try {
+        const template = database.prepare('SELECT * FROM analysis_result_set_revisions LIMIT 1').get()!;
+        const templateBody = JSON.parse(String(template.canonical_json)) as Record<string, unknown>;
+        // Synthetic category histories cross the 500 bound without a ledger-seam fake: each clones the authored Run's own
+        // revision — its canonical gaps, its plan chain, its Task Outcome — under its own kind, so the walk reads them all.
+        for (let index = 0; index < 501; index += 1) {
+          const kind = `editorial-review/synthetic-${index.toString().padStart(3, '0')}`;
+          const setId = randomUUID();
+          const revisionId = randomUUID();
+          const set = canonicalRecord({ resultSetId: setId, bookId, kind, createdAt: String(template.created_at) });
+          database.prepare('INSERT INTO analysis_result_sets VALUES (?, ?, ?, ?, ?, ?)').run(setId, bookId, kind, String(template.created_at), set.json, set.digest);
+          const record = canonicalRecord({ ...templateBody, kind, resultSetId: setId, revisionId });
+          const row = { ...template, result_set_id: setId, revision_id: revisionId, canonical_json: record.json, sha256: record.digest };
+          database.prepare(`INSERT INTO analysis_result_set_revisions (${Object.keys(row).join(',')}) VALUES (${Object.keys(row).map(() => '?').join(',')})`)
+            .run(...Object.values(row));
+          kinds.push(kind);
+        }
+        // The keys are the real walk's own, read through the ledger the resolutions must settle them by.
+        const keys = kinds.map((kind) => store.baselineAnalysisLedger.unconfirmedOutcomesOf(bookId, kind).ranges[0]!.key);
+        const resolutions = new OutcomeResolutionLedger(database);
+        resolutions.record(bookId, 'review-run', keys.slice(0, 500));
+        resolutions.record(bookId, 'review-run', keys.slice(500));
+      } finally { database.close(); }
+      const instrument = () => vi.spyOn(store.baselineAnalysisLedger, 'unconfirmedOutcomesOf');
+      let reads = instrument();
+      expect(unconfirmedItem(store, bookId, 'initial-evaluation')).toMatchObject({ object: { ranges: 1 } });
+      const count = reads.mock.calls.length;
+      expect(count).toBeGreaterThan(500);
+      for (let poll = 0; poll < 3; poll += 1) {
+        expect(unconfirmedItem(store, bookId, 'initial-evaluation')).toBeDefined();
+        expect(store.inspectTaskPlan({ bookId, kind: 'initial-evaluation', ref: null }).unconfirmed?.ranges).toHaveLength(1);
+      }
+      expect(reads.mock.calls).toHaveLength(count);
+      const plan = store.inspectTaskPlan({ bookId, kind: 'initial-evaluation', ref: null });
+      store.resolveUnconfirmedOutcomes(bookId, 'initial-evaluation', plan.unconfirmed!.digest);
+      expect(unconfirmedItem(store, bookId, 'initial-evaluation')).toBeUndefined();
+      expect(reads.mock.calls.length).toBeGreaterThan(count);
+      reads.mockRestore();
+      store.markCleanShutdown();
+      store.close();
+      store = await open(fixture);
+      reads = instrument();
+      expect(unconfirmedItem(store, bookId, 'initial-evaluation')).toBeUndefined();
+      expect(reads.mock.calls.length).toBeGreaterThan(500);
+      reads.mockRestore();
+      store.markCleanShutdown();
+    } finally { await execution.dispose(); store.close(); }
+  }, 300_000);
+
+  it('reads the derivation only of its own relations: an edit and a progress row leave the reading, a resolution or a new gap moves it (#773)', async () => {
+    const authored = await loadModelFixture(FIXTURES_ROOT, 'sample1-evaluation-authored');
+    const droppingUnit3 = dropping(authored, (entry) => entry.unitOrdinal === 3);
+    let store = await open(authored);
+    const runEvaluation = async (bookId: string, route: ResolvedModelFixture): Promise<void> => {
+      let work = store.createInitialEvaluationPreparationWork(bookId, launchPolicy);
+      while (!work.done) work = store.advanceInitialEvaluationPreparationWork(work.workId!);
+      const prepared = work.projection!;
+      const execution = ownerOf(store, route);
+      try {
+        const authorized = store.authorizeInitialEvaluation(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+        expect(execution.admitOrQueue(authorized.dispatchRunRecordId!, store.initialEvaluationLedger)).toBe('admitted');
+        await execution.whenIdle();
+      } finally {
+        await execution.dispose();
+      }
+    };
+    try {
+      const imported = await bookWithManuscript(store, 'L2 sample1 待确认缓存');
+      await runEvaluation(imported.bookId, droppingUnit3);
+      const first = store.inspectInitialEvaluation(imported.bookId);
+      expect(first.taskOutcome?.classification).toBe('completed-with-gaps');
+      const reads = vi.spyOn(store.baselineAnalysisLedger, 'unconfirmedOutcomesOf');
+      const item = () => unconfirmedItem(store, imported.bookId, 'initial-evaluation');
+      const plan = () => store.inspectTaskPlan({ bookId: imported.bookId, kind: 'initial-evaluation', ref: null });
+      expect(item()).toMatchObject({ group: 'exceptions', object: { kind: 'unconfirmed', ranges: 1, steps: [] } });
+      const count = reads.mock.calls.length;
+      expect(count).toBeGreaterThan(0);
+
+      // An editor's typing and a Run's progress row are not the derivation's relations: the reading stands, un-walked.
+      edit(store, imported, '〔缓存之外的改动〕');
+      store.baselineAnalysisLedger.recordRunState(first.run!.runRecordId, 'completed-with-gaps', { detail: '合成：进度行。' });
+      expect(item()).toMatchObject({ object: { ranges: 1 } });
+      expect(plan().unconfirmed?.ranges).toHaveLength(1);
+      expect(reads.mock.calls).toHaveLength(count);
+
+      // 保留为缺口 appends a resolution: the digest moves, so the walk runs again and the item is seen settled.
+      store.resolveUnconfirmedOutcomes(imported.bookId, 'initial-evaluation', plan().unconfirmed!.digest);
+      expect(item()).toBeUndefined();
+      expect(reads.mock.calls.length).toBeGreaterThan(count);
+
+      // A new Run leaves the range 结果待确认 again: its revision moves the reading, and the new gap is listed.
+      const settled = reads.mock.calls.length;
+      await runEvaluation(imported.bookId, droppingUnit3);
+      expect(store.inspectInitialEvaluation(imported.bookId).resultSetRevision?.gaps.filter((gap) => gap.code === 'outcome-unknown')).toHaveLength(1);
+      expect(item()).toMatchObject({ object: { ranges: 1 } });
+      expect(reads.mock.calls.length).toBeGreaterThan(settled);
+      reads.mockRestore();
+
+      // A reopen derives again from the data it opens: nothing of the closed store's readings rides in.
+      store.markCleanShutdown();
+      store.close();
+      store = await open(authored);
+      const reopened = vi.spyOn(store.baselineAnalysisLedger, 'unconfirmedOutcomesOf');
+      expect(unconfirmedItem(store, imported.bookId, 'initial-evaluation')).toMatchObject({ object: { ranges: 1 } });
+      expect(reopened.mock.calls.length).toBeGreaterThan(0);
+      reopened.mockRestore();
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  }, 300_000);
+
+  it('never keeps a reading derived inside a transaction: a rollback cannot leave a reading of state that never was (#773)', async () => {
+    const fixture = dropping(await loadModelFixture(FIXTURES_ROOT, 'sample1-evaluation-authored'), (entry) => entry.unitOrdinal === 3);
+    const store = await open(fixture);
+    const execution = ownerOf(store, fixture);
+    try {
+      const bookId = await book(store, 'L2 sample1 回滚读数');
+      let work = store.createInitialEvaluationPreparationWork(bookId, launchPolicy);
+      while (!work.done) work = store.advanceInitialEvaluationPreparationWork(work.workId!);
+      const prepared = work.projection!;
+      execution.admitOrQueue(store.authorizeInitialEvaluation(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!, store.initialEvaluationLedger);
+      await execution.whenIdle();
+      const key = store.baselineAnalysisLedger.unconfirmedOutcomesOf(bookId, store.inspectInitialEvaluation(bookId).kind).ranges[0]!.key;
+      const digest = store.inspectTaskPlan({ bookId, kind: 'initial-evaluation', ref: null }).unconfirmed!.digest;
+      // Another handle settles the range meanwhile, so the digest the editor read is stale and 保留为缺口 is refused.
+      const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try { new OutcomeResolutionLedger(database).record(bookId, 'initial-evaluation', [key]); } finally { database.close(); }
+      const reads = vi.spyOn(store.baselineAnalysisLedger, 'unconfirmedOutcomesOf');
+      expect(await refusal(() => store.resolveUnconfirmedOutcomes(bookId, 'initial-evaluation', digest))).toBe('UNCONFIRMED_CHANGED');
+      const inside = reads.mock.calls.length;
+      // The refused transaction rolled back without keeping what it derived there: the next ask walks again and reads
+      // the settled range from the data that stands.
+      expect(unconfirmedItem(store, bookId, 'initial-evaluation')).toBeUndefined();
+      expect(reads.mock.calls.length).toBeGreaterThan(inside);
+      expect(resolutionRows()).toHaveLength(1);
+      store.markCleanShutdown();
+    } finally { await execution.dispose(); store.close(); }
+  }, 300_000);
+
+  it('keeps an out-of-scope review gap outcome-unknown across repeated chapter reviews (#765)', async () => {
+    const fixture = dropping(await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored'), (entry) => entry.unitOrdinal === 3);
+    const store = await open(fixture);
+    const execution = ownerOf(store, fixture);
+    const driver = new ReviewRunDriver(store.reviewRunDriveSteps, execution);
+    try {
+      const bookId = await book(store, 'L2 sample1 未确认缺口延续');
+      const run = async (scope: ReviewRunScopeRequest) => {
+        let work = store.createReviewRunPreparationWork(bookId, [TYPOS_AND_USAGE.categoryId], scope, launchPolicy);
+        while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
+        const review = work.projection!.run!;
+        store.authorizeReviewRun(bookId, review.reviewRunId, review.categories.map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.planEnvelopeDigest! })));
+        await driver.drive(review.reviewRunId);
+      };
+      await run(WHOLE);
+      const original = store.baselineAnalysisLedger.unconfirmedOutcomesOf(bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE).kind).ranges[0]!;
+      const chapter = store.inspectReviewWorkspace(bookId, null).scopeOptions.chapters.chapters.find((entry) => entry.position === 76)!;
+      for (let count = 0; count < 2; count += 1) {
+        await run({ kind: 'chapters', fromChapterBlockId: chapter.blockId, toChapterBlockId: chapter.blockId });
+        const gap = store.inspectReviewCategory(bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE)).resultSetRevision!.gaps.find((entry) => entry.unitOrdinal === 3)!;
+        expect(gap).toMatchObject({ code: 'outcome-unknown', reason: expect.stringContaining(OUTCOME_UNKNOWN_CARRIED) });
+        expect(gap.reason.split(OUTCOME_UNKNOWN_CARRIED)).toHaveLength(2);
+        expect(store.baselineAnalysisLedger.unconfirmedOutcomesOf(bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE).kind).ranges[0]!.key).toBe(original.key);
+      }
+      store.markCleanShutdown();
+    } finally {
+      await driver.dispose();
+      await execution.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it.each(['digest', 'json'])('skips a damaged resolution (%s), keeps plans readable, and can resolve again (#765)', async (damage) => {
+    const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-outcome-unknown');
+    const store = await open(fixture);
+    const execution = ownerOf(store, fixture);
+    try {
+      const bookId = await book(store, 'L2 sample1 人工确认损坏');
+      let work = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_TASK_GOAL, null, launchPolicy);
+      while (!work.done) work = store.advanceBaselineAnalysisPreparationWork(work.workId!);
+      const prepared = work.projection!;
+      const runRecordId = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
+      execution.admitAndDispatch(runRecordId);
+      await execution.whenIdle();
+      store.requestBaselineAnalysisCancel(bookId, prepared.taskIntent!.taskIntentId);
+      execution.cancelRun(runRecordId, store.baselineAnalysisLedger);
+      await execution.whenIdle();
+      const plan = () => store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: null });
+      store.resolveUnconfirmedOutcomes(bookId, 'baseline-analysis', plan().unconfirmed!.digest);
+      expect(unconfirmedItem(store, bookId, 'baseline-analysis')).toBeUndefined();
+      const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try {
+        database.exec('DROP TRIGGER analysis_outcome_resolutions_no_update');
+        database.prepare(damage === 'digest' ? 'UPDATE analysis_outcome_resolutions SET sha256 = ?' : 'UPDATE analysis_outcome_resolutions SET canonical_json = ?')
+          .run(damage === 'digest' ? 'f'.repeat(64) : '{');
+      } finally { database.close(); }
+      expect(plan().unconfirmed?.ranges).toMatchObject([{ unitOrdinal: 4 }]);
+      expect(unconfirmedItem(store, bookId, 'baseline-analysis')).toMatchObject({ group: 'exceptions', object: { ranges: 1 } });
+      store.resolveUnconfirmedOutcomes(bookId, 'baseline-analysis', plan().unconfirmed!.digest);
+      expect(plan().unconfirmed).toBeNull();
+      expect(unconfirmedItem(store, bookId, 'baseline-analysis')).toBeUndefined();
+      expect(resolutionRows()).toHaveLength(2);
+      store.markCleanShutdown();
+    } finally { await execution.dispose(); store.close(); }
+  }, 300_000);
+
   it('lists a range a completed Review Run left 结果待确认, discloses its re-send, and keeps it as a gap on 保留为缺口', async () => {
     const fixture = dropping(await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored'), (entry) => entry.unitOrdinal === 3);
     const store = await open(fixture);
@@ -299,7 +536,7 @@ describe('结果待确认 a completed Run left (Issue #757)', () => {
     }
     const database = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(OUTCOME_RESOLUTION_SCHEMA_VERSION);
+      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(IMPORTED_EXEMPLAR_SCHEMA_VERSION);
       expect(OUTCOME_RESOLUTION_SCHEMA_VERSION).toBe(MATERIAL_INDEX_SCHEMA_VERSION + 1);
       const after = schemaOf(database);
       expect(after.filter((entry) => !entry.name.startsWith('analysis_outcome_resolutions'))).toEqual(before!);

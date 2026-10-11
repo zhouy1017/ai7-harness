@@ -1299,6 +1299,39 @@ async function main() {
     await clickSelector(renderer, '[data-library-action="confirm-attribution"]', 'library-books-commit');
     await readLibrary(renderer, (page) => page.cards[0]?.attribution === 'book' && page.cards[0].chooser === null, 'library-books-committed');
 
+    at('knowledge-earlier-exemplar-import');
+    await closeBrowser();
+    const exemplarPath = resolve(runRoot, 'earlier-exemplar.txt');
+    await writeFile(exemplarPath, '用于验证以前图书范例导入的虚构新闻稿。', 'utf8');
+    manager = await launch(exemplarPath);
+    renderer = await waitForRenderer(manager, 'earlier-exemplar-window');
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'earlier-exemplar-ready');
+    await click(renderer, '知识库', 'earlier-exemplar-knowledge');
+    await click(renderer, '范例', 'earlier-exemplar-tab');
+    await waitFor(renderer, `document.querySelector('[data-exemplar-action="import"]')`, 'earlier-exemplar-open-ready');
+    await click(renderer, '导入以前图书的范例', 'earlier-exemplar-open');
+    await fill(renderer, '.exemplar-import-form label:nth-child(1) input', '以前出版的测试图书', 'earlier-exemplar-title');
+    await fill(renderer, '.exemplar-import-form label:nth-child(2) input', '测试作者', 'earlier-exemplar-author');
+    await fill(renderer, '.exemplar-import-form label:nth-child(3) input', '测试责编', 'earlier-exemplar-editor');
+    await click(renderer, '选择文件', 'earlier-exemplar-file');
+    await waitFor(renderer, `document.querySelector('.exemplar-import-form select')?.disabled===false`, 'earlier-exemplar-preview');
+    // No type is preselected and 导入范例 waits for the editor's choice (Issue #778); the choice is made as the editor makes it.
+    await assertRenderer(renderer, `(() => { const form = document.querySelector('.exemplar-import-form'); const select = form?.querySelector('select'); const submit = Array.from(form?.querySelectorAll('button') ?? []).find((button) => button.textContent === '导入范例'); return select?.value === '' && select.options[0]?.textContent === '请选择文档类型' && submit?.disabled === true; })()`, 'earlier-exemplar-type-unchosen');
+    await assertRenderer(renderer, `(() => { const select = document.querySelector('.exemplar-import-form select'); select.value='news-release'; select.dispatchEvent(new Event('change', { bubbles: true })); return select.value==='news-release'; })()`, 'earlier-exemplar-type');
+    await waitFor(renderer, `Array.from(document.querySelectorAll('.exemplar-import-form button')).find((button) => button.textContent === '导入范例')?.disabled === false`, 'earlier-exemplar-type-chosen');
+    await click(renderer, '导入范例', 'earlier-exemplar-confirm');
+    await waitFor(renderer, `document.querySelector('.exemplar-book .exemplar-designation')?.textContent.startsWith('以前出版的图书 · 导入于')`, 'earlier-exemplar-imported');
+    await assertRenderer(renderer, `(() => {
+      const card = document.querySelector('.exemplar-book');
+      return card.querySelector('h3')?.textContent==='《以前出版的测试图书》' &&
+        card.querySelector('.exemplar-attribution')?.textContent==='作者：测试作者 · 责编：测试责编' &&
+        card.querySelector('[data-exemplar-type="news-release"]')?.textContent.includes('版本 1') &&
+        card.querySelector('[data-exemplar-type="news-release"]')?.textContent.includes('仅本社');
+    })()`, 'earlier-exemplar-grouped');
+    await assertRenderer(renderer, `(() => { const select = document.querySelector('.exemplar-items select'); select.value='excluded'; return true; })()`, 'earlier-exemplar-exclude');
+    await click(renderer, '记录学习准入', 'earlier-exemplar-eligibility');
+    await waitFor(renderer, `document.querySelector('.exemplar-items li')?.textContent.includes('学习准入：明确排除')`, 'earlier-exemplar-excluded');
+
     at('zero-activity');
     await assertRenderer(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && !Object.keys(window.ai7).some((key)=>/provider|session/i.test(key))`, 'exact-service-readiness-remained-zero');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-network-provider-session');
