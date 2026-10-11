@@ -5383,7 +5383,7 @@ export interface TaskPlanRunControlProjection {
   /**
    * A stopped Run's continuation point (S76b): how many of the units it submits it has kept — `unitsSettled` is `null`
    * when that progress no longer reads back — and `null` while it runs. `pendingAnswerUnits` are the reading ranges whose
-   * Clarification answer is recorded and not yet carried out (Issue #784): 续行 handles those first, then goes on after the kept ones.
+   * Clarification answer is recorded and not yet carried out (Issue #784): 续行 handles those first, then continues the unfinished work.
    */
   continuation: { unitsSettled: number | null; unitsTotal: number; pendingAnswerUnits: ReadonlyArray<number> } | null;
   /**

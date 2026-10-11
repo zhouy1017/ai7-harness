@@ -537,12 +537,16 @@ describe('Clarification Requests over the real store', () => {
       // The answer is recorded and not yet carried out, so the continuation point names its range: 续行 starts there (Issue #784).
       expect(resumable.runControl?.continuation?.pendingAnswerUnits).toEqual([5]);
       expect(taskBarContinuationNote(resumable.runControl!.continuation!.unitsSettled, resumable.runControl!.continuation!.unitsTotal, resumable.runControl!.continuation!.pendingAnswerUnits))
-        .toContain('续行时先按你的回答处理第 5 个，再从第 ');
+        .toBe('已读完 7 / 8 个阅读范围，结果都已保存；续行时先按你的回答处理第 5 个，再继续未完成的部分，不重复已读完的部分');
+      const beforeResumeTurns = turns(waiting);
+      expect(store.baselineAnalysisLedger.unitCheckpoints(asking.runRecordId).map((checkpoint) => checkpoint.unit.unitOrdinal)).toEqual([1, 2, 3, 4, 6, 7, 8]);
       next.admitAndDispatch(asking.runRecordId, store.baselineAnalysisLedger, { resume: true });
       await next.whenIdle();
       const settled = store.inspectBaselineAnalysis(first, () => null);
       expect(settled.run!.state).toBe('completed-with-gaps');
       expect(turns(settled).filter(([unit]) => unit === 5)).toEqual([[5, 1], [5, 2]]);
+      expect(turns(settled).slice(beforeResumeTurns.length)).toEqual([[5, 2]]);
+      expect(store.inspectTaskPlan({ bookId: first, kind: 'baseline-analysis', ref: asking.taskIntentId }).runControl).toBeNull();
       store.markCleanShutdown();
     } finally {
       await execution.dispose();

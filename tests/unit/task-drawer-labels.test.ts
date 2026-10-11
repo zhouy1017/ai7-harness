@@ -623,8 +623,8 @@ describe('the authorization bar (S74a)', () => {
     expect(blocked.actions[0]).toEqual({ name: 'resume', label: '续行', tone: 'primary', disabledReason: '运行名额已满：正在运行的任务结束后再续行。' });
     expect(taskBarContinuationNote(8, 8)).toBe('已读完全部 8 个阅读范围，结果都已保存；续行时接着做之后的归纳与抽样');
     // An answer recorded and not yet carried out is handled first; with none, today's words stand (Issue #784).
-    expect(taskBarContinuationNote(7, 8, [5])).toBe('已读完 7 / 8 个阅读范围，结果都已保存；续行时先按你的回答处理第 5 个，再从第 8 个接着读，不重复已读完的部分');
-    expect(taskBarContinuationNote(7, 8, [5, 6])).toContain('先按你的回答处理第 5、6 个，再从第 8 个接着读');
+    expect(taskBarContinuationNote(7, 8, [5])).toBe('已读完 7 / 8 个阅读范围，结果都已保存；续行时先按你的回答处理第 5 个，再继续未完成的部分，不重复已读完的部分');
+    expect(taskBarContinuationNote(7, 8, [5, 6])).toContain('先按你的回答处理第 5、6 个，再继续未完成的部分');
     expect(taskBarContinuationNote(3, 8, [])).toBe('已读完 3 / 8 个阅读范围，结果都已保存；续行时从第 4 个接着读，不重复已读完的部分');
     // Kept progress that no longer reads back is never stated as a count.
     expect(taskBarContinuationNote(null, 8)).toBe('已保存的阅读进度无法核对，这次运行不能续行；可以取消它，再重新开始');

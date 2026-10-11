@@ -468,7 +468,7 @@ export function unconfirmedLine(entry: { unitOrdinal?: number; earlierText?: boo
 export function taskBarContinuationNote(unitsSettled: number | null, unitsTotal: number, pendingAnswerUnits: ReadonlyArray<number> = []): string {
   if (unitsSettled === null) return '已保存的阅读进度无法核对，这次运行不能续行；可以取消它，再重新开始';
   if (pendingAnswerUnits.length > 0 && unitsSettled < unitsTotal) {
-    return `已读完 ${unitsSettled} / ${unitsTotal} 个阅读范围，结果都已保存；续行时先按你的回答处理第 ${pendingAnswerUnits.join('、')} 个，再从第 ${unitsSettled + 1} 个接着读，不重复已读完的部分`;
+    return `已读完 ${unitsSettled} / ${unitsTotal} 个阅读范围，结果都已保存；续行时先按你的回答处理第 ${pendingAnswerUnits.join('、')} 个，再继续未完成的部分，不重复已读完的部分`;
   }
   return unitsSettled >= unitsTotal
     ? `已读完全部 ${unitsTotal} 个阅读范围，结果都已保存；续行时接着做之后的归纳与抽样`
