@@ -37,7 +37,8 @@ import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState
 // retry-safe — the safe retry is moved into 先问你 before the Run starts. Unit 5 then asks instead of retrying: the
 // question card says only that step waits while the others are read, 暂不回答 sets it aside recording nothing, and once
 // the rest are read the Run waits, 任务等待你的说明, holding nothing. The question outlives AI7 closing; answered by
-// keyboard alone — 再试一次 with a note — the Run goes on, retrying unit 5 as its second attempt, to its end.
+// keyboard alone — 再试一次 with a note — while two other Runs hold every place, the answer stays unapplied. After
+// another restart the Run reads 任务已中断 · 可续行 and sends nothing; 续行 retries unit 5 as its second attempt to its end.
 //
 // On the fifth Book, launched over the happy fixture again, 设置上限… in the plan's ⑤ refuses what is not a count of tokens
 // and takes 5,000, which 更新计划 freezes into version 2. The Run spends 6,620 tokens on four ranges and stops before the
@@ -372,6 +373,34 @@ async function openAnalysisOf(renderer, bookId, name) {
   await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookId)}]')`, `${name}-manuscript`);
   await assertRenderer(renderer, `(() => { const group=document.querySelector('.editor-shell nav.book-records-group'); const open=group?.querySelector('button[data-records-destination="analysis"]'); if(!(open instanceof HTMLButtonElement)||open.disabled||open.textContent!=='分析')return false; open.click(); return true; })()`, `${name}-analysis-entry`);
   await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookId)}] .baseline-analysis-card')`, `${name}-analysis`);
+}
+
+/** Return through 待我处理 to the library without stopping another Book's Run. */
+async function toLibrary(renderer, name) {
+  await clickSelector(renderer, '#global-attention-entry', `${name}-attention`);
+  await waitFor(renderer, `document.querySelector('[data-screen="global-attention"] .global-attention-host')`, `${name}-attention-ready`);
+  await click(renderer, '返回图书列表', `${name}-library`);
+  await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
+}
+
+/** Reuse an already analysed Book as a holder of one place, using only its own reanalysis controls. */
+async function holdReanalysis(renderer, bookId, name) {
+  await toLibrary(renderer, name);
+  await openAnalysisOf(renderer, bookId, name);
+  await clickSelector(renderer, '.baseline-analysis-card [data-analysis-tab="history"]', `${name}-history`);
+  await clickSelector(renderer, '.baseline-analysis-card [data-analysis-action="choose-reanalyze-book"]', `${name}-choose`);
+  await clickSelector(renderer, '.baseline-analysis-card [data-analysis-action="reanalyze-book"]', `${name}-prepare`);
+  await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, `${name}-prepared`);
+  const showing = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskDrawer==='open' && document.querySelector('#task-drawer')?.dataset.taskPlanRef===document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId`);
+  if (!showing) await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', `${name}-open-plan`);
+  await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId && document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, `${name}-ready`);
+  await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', `${name}-start`);
+  await waitFor(renderer, runningWith(0), `${name}-held`);
+  const held = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+  requireJourney(held?.bookId === bookId && held.taskIntent?.mode === 'reanalyze-book' && held.run?.state === 'executing' &&
+    held.run.progress?.unitsSettled === 0 && held.run.progress.currentUnitOrdinal === 1 &&
+    UUID_PATTERN.test(held.run.runRecordId ?? ''), `${name}-record`);
+  return held;
 }
 
 /**
@@ -1278,6 +1307,24 @@ async function main() {
     const restarted = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(restarted?.run?.state === 'awaiting-clarification' && JSON.stringify(restarted.run.transitions) === JSON.stringify(waitingRun.run.transitions), 'nothing-since-restart');
 
+    at('clarification-places-held');
+    // development-ci has two places. Hold both with existing Books, so answering cannot dispatch the retry. The hold
+    // stays in force through closing AI7; there is no capacity override, extra import, or product hook (Issue #779).
+    const holdersStartedAt = performance.now();
+    await writeFile(holdPath, '0', 'utf8');
+    const firstHolder = await holdReanalysis(renderer, bookId, 'clarification-holder-a');
+    const secondHolder = await holdReanalysis(renderer, secondBookId, 'clarification-holder-b');
+    const holders = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
+    requireJourney(firstHolder.run.runRecordId !== secondHolder.run.runRecordId && [bookId, secondBookId].every((id) =>
+      holders?.groups?.find((group) => group.key === 'active')?.items?.some((item) =>
+        item.book?.bookId === id && item.state === 'analysis-running' && item.facts?.progress?.unitsSettled === 0) === true),
+    'clarification-every-place-held');
+    await toLibrary(renderer, 'clarification-return');
+    await openAnalysisOf(renderer, fourthBookId, 'clarification-return');
+    await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'clarification-return-plan');
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-drawer-questions [data-clarification-state="open"]')`, 'clarification-return-question');
+    const holdersSetupMs = performance.now() - holdersStartedAt;
+
     at('j14-clarification-keyboard');
     // Without a pointer: from the card's heading, Tab reaches 再试一次 and Space chooses it; Tab reaches 自行说明…, and
     // Enter opens the note, which takes the words — Enter there is a new line and submits nothing — and Tab reaches
@@ -1303,14 +1350,60 @@ async function main() {
     await waitFor(renderer, `document.activeElement?.dataset?.taskDrawerControl?.startsWith('clarification-submit:') === true && document.activeElement.matches(':focus-visible')`, 'keyboard-submit-reached', 10_000);
 
     at('clarification-answered');
-    // Enter on 提交回答: the answer is recorded — 再试一次 and the note — and the Run goes on inside its unchanged envelope,
-    // retrying unit 5 as its second attempt, to its end; the drawer keeps what was asked and answered.
+    // Enter on 提交回答 records 再试一次 and the note while both places are busy; unit 5 is not retried yet.
     await pressEnter(renderer);
-    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>(analysis?.run?.transitions?.length ?? 0) > 4 && !['awaiting-clarification','admitted','executing'].includes(analysis.run.state))`, 'answered-run-ended', 180_000);
+    await waitFor(renderer, `window.ai7.inspectTaskPlan({ kind: 'baseline-analysis', ref: ${JSON.stringify(fourthIntentId)} }).then((plan)=>plan?.clarifications?.[0]?.state==='answered')`, 'queued-answer-recorded');
+    const queuedAnswer = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'baseline-analysis', ref: ${JSON.stringify(fourthIntentId)} })`);
+    const queuedRun = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(queuedAnswer.clarifications[0].answer?.optionId === 'retry' && queuedAnswer.clarifications[0].answer.note === QUESTION_NOTE &&
+      queuedRun?.run?.runRecordId === waitingRun.run.runRecordId && queuedRun.run.state === 'awaiting-clarification' &&
+      JSON.stringify(queuedRun.run.transitions) === JSON.stringify(waitingRun.run.transitions) &&
+      JSON.stringify(queuedRun.run.attempt) === JSON.stringify(waitingRun.run.attempt), 'queued-answer-sends-nothing');
+
+    at('answered-clarification-survives-restart');
+    const answeredRestartStartedAt = performance.now();
+    await closeOwnedBrowser();
+    cancellation.throwIfRequested();
+    // On close both holders stop as resumable. Release the hold before launch, so a forbidden automatic continuation
+    // cannot hide behind it: a retry would record a ninth span or finish, failing the checks below.
+    await writeFile(holdPath, 'release', 'utf8');
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'answered-restart-ready');
+    const stoppedHolders = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
+    requireJourney([firstHolder, secondHolder].every((held) => stoppedHolders?.groups?.find((group) => group.key === 'active')?.items?.some((item) =>
+      item.itemId === `analysis:${held.taskIntent.taskIntentId}` && item.book?.bookId === held.bookId && item.state === 'analysis-resumable') === true),
+    'answered-restart-holders-stopped');
+    await openAnalysisOf(renderer, fourthBookId, 'answered-restart');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='resumable' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='任务已中断 · 可续行'`, 'answered-restart-card');
+    await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'answered-restart-plan');
+    await waitForBar(renderer, {
+      state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · 可续行',
+      note: '已读完 7 / 8 个阅读范围，结果都已保存；续行时从第 8 个接着读，不重复已读完的部分', actions: STOPPED_ACTIONS,
+    }, 'answered-restart-bar');
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-clarification-record li[data-clarification-state="answered"] .task-plan-clarification-answer')?.textContent?.startsWith(${JSON.stringify(`你已回答：再试一次 · 说明：${QUESTION_NOTE}（`)}) === true && document.querySelector('#task-drawer .task-drawer-questions [data-task-plan-clarification]')===null`, 'answered-restart-answer-shown');
+    const answeredRestart = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const keptAnswer = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'baseline-analysis', ref: ${JSON.stringify(fourthIntentId)} })`);
+    requireJourney(answeredRestart?.run?.state === 'resumable' && answeredRestart.run.runRecordId === queuedRun.run.runRecordId &&
+      JSON.stringify(answeredRestart.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'awaiting-clarification', 'resumable']) &&
+      JSON.stringify(answeredRestart.run.attempt) === JSON.stringify(queuedRun.run.attempt) &&
+      JSON.stringify(keptAnswer.clarifications[0].answer) === JSON.stringify(queuedAnswer.clarifications[0].answer) &&
+      answeredRestart.planEnvelope?.digest === queuedRun.planEnvelope?.digest && (answeredRestart.taskOutcome ?? null) === null,
+    'answered-restart-keeps-answer-and-attempt');
+    await new Promise((settle) => setTimeout(settle, 500));
+    const noSend = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(noSend?.run?.state === 'resumable' && JSON.stringify(noSend.run.transitions) === JSON.stringify(answeredRestart.run.transitions) &&
+      JSON.stringify(noSend.run.attempt) === JSON.stringify(queuedRun.run.attempt), 'answered-restart-sends-nothing');
+    recordDebugDetail('J-10', `answered-clarification-added-ms ${Math.round(holdersSetupMs + performance.now() - answeredRestartStartedAt)}`);
+
+    at('answered-clarification-resumed');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="resume"]', 'answered-restart-resume');
+    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>(analysis?.run?.transitions?.length ?? 0) > ${answeredRestart.run.transitions.length} && !['resumable','awaiting-clarification','admitted','executing'].includes(analysis.run.state))`, 'answered-run-ended', 180_000);
     const answeredRun = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const answeredRevision = answeredRun?.resultSetRevision;
     requireJourney(answeredRun?.state === 'settled' && answeredRun.run?.state === 'completed-with-gaps' &&
-      JSON.stringify(answeredRun.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'awaiting-clarification', 'admitted', 'executing', 'completed-with-gaps']) &&
+      answeredRun.run.runRecordId === queuedRun.run.runRecordId && answeredRun.run.attempt?.attemptId === queuedRun.run.attempt.attemptId &&
+      answeredRun.planEnvelope?.digest === queuedRun.planEnvelope?.digest &&
+      JSON.stringify(answeredRun.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'awaiting-clarification', 'resumable', 'admitted', 'executing', 'completed-with-gaps']) &&
       JSON.stringify(answeredRun.run.attempt?.spans?.map((span) => [span.unitOrdinal, span.attemptIndex])) === JSON.stringify([[1, 1], [2, 1], [3, 1], [4, 1], [5, 1], [6, 1], [7, 1], [8, 1], [5, 2]]) &&
       answeredRevision?.coverage?.unitsClosed === 7 && JSON.stringify(answeredRevision.gaps.map((gap) => gap.unitOrdinal)) === '[2]' &&
       answeredRun.run.adaptations?.length === 1 && answeredRun.run.adaptations[0].unitOrdinal === 5 && typeof answeredRun.run.adaptations[0].clarificationAnswerId === 'string',
