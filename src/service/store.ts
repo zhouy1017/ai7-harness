@@ -17227,17 +17227,52 @@ export class EditorialStore {
 
   #unconfirmedReadVersion: string | null = null;
   #unconfirmedPairs: SqlRow[] | null = null;
-  readonly #unconfirmedLists = new Map<string, { ranges: UnconfirmedOutcomeRecord[]; steps: UnconfirmedOutcomeRecord[] }>();
+  readonly #unconfirmedLists = new Map<string, {
+    resolved: string;
+    listed: { ranges: UnconfirmedOutcomeRecord[]; steps: UnconfirmedOutcomeRecord[] };
+  }>();
 
-  /** Lazily derived, never persisted: local writes and commits by another handle invalidate the readings. */
+  /**
+   * The read version of exactly the relations the derivation reads (Issue #773): one Result Set Revision or one
+   * Task Outcome appended — by this handle or another, gap or no gap — moves it; an editor's edit, a Run's
+   * progress row or any other write leaves it standing, so the 5 s 待我处理 poll reads on. A revision without a
+   * gap still counts: a later revision that reads a range to a result closes it, which only a re-walk sees. The
+   * editor's resolutions are read with the Book at every ask instead, so a resolution appended or damaged beyond
+   * reading changes the reading itself. A database replace, merge or reopen builds a new store, whose readings
+   * are derived from the data it opens.
+   */
   #refreshUnconfirmedIndex(): void {
-    const changes = this.#authority.prepare('SELECT total_changes() AS changes').get() as SqlRow;
-    const external = this.#authority.prepare('PRAGMA data_version').get() as SqlRow;
-    const version = `${changes.changes}:${external.data_version}`;
+    const row = this.#authority.prepare(
+      `SELECT (SELECT count(*) FROM analysis_result_set_revisions) AS revisions,
+              (SELECT count(*) FROM analysis_task_outcomes) AS outcomes`,
+    ).get() as SqlRow;
+    const version = `${row.revisions}:${row.outcomes}`;
     if (this.#unconfirmedReadVersion === version) return;
     this.#unconfirmedReadVersion = version;
     this.#unconfirmedPairs = null;
     this.#unconfirmedLists.clear();
+  }
+
+  /**
+   * Whether a derivation may be kept: never while this connection is inside a transaction (Issue #773). A
+   * reading derived there may describe state a rollback removes; callers answer from it and store nothing, so
+   * no rollback can leave the caches describing data that never was.
+   */
+  #unconfirmedMayKeep(): boolean {
+    return !this.#authority.isTransaction;
+  }
+
+  /** The `(book, kind)` pairs the pairs query returns: revisions holding an `outcome-unknown` gap, and outcomes naming an unresent one. */
+  #unconfirmedPairRows(): SqlRow[] {
+    return this.#authority.prepare(
+      `SELECT DISTINCT book_id, kind FROM (
+         SELECT s.book_id, s.kind FROM analysis_result_set_revisions r JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
+         WHERE instr(r.canonical_json, '"outcome-unknown"') > 0
+         UNION
+         SELECT t.book_id, t.kind FROM analysis_task_outcomes o JOIN analysis_task_intents t ON t.task_intent_id = o.task_intent_id
+         WHERE o.classification IN ('completed', 'completed-with-gaps') AND instr(o.canonical_json, ?) > 0
+       ) ORDER BY book_id, kind`,
+    ).all(OUTCOME_UNKNOWN_NOT_RESENT) as SqlRow[];
   }
 
   /**
@@ -17251,11 +17286,14 @@ export class EditorialStore {
   #unconfirmedListed(bookId: string, surface: TaskPlanKind): { ranges: UnconfirmedOutcomeRecord[]; steps: UnconfirmedOutcomeRecord[] } {
     this.#refreshUnconfirmedIndex();
     const cacheKey = `${bookId}\n${surface}`;
+    // The editor's resolutions are read whether or not the walk is re-run: a settled key and a damaged row both
+    // move this digest, and the reading that answers is the reading as it is now.
+    const resolved = this.#analysisCall(() => this.#outcomeResolutions.resolvedKeys(bookId));
+    const resolvedDigest = sha256(canonicalJson([...resolved].sort()));
     const cached = this.#unconfirmedLists.get(cacheKey);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined && cached.resolved === resolvedDigest) return cached.listed;
     const kinds = (this.#authority.prepare('SELECT DISTINCT kind FROM analysis_result_sets WHERE book_id = ? ORDER BY kind').all(bookId) as SqlRow[])
       .map((row) => asString(row.kind)).filter((kind) => unconfirmedSurfaceOf(kind) === surface);
-    const resolved = this.#analysisCall(() => this.#outcomeResolutions.resolvedKeys(bookId));
     const ranges: UnconfirmedOutcomeRecord[] = [];
     const steps: UnconfirmedOutcomeRecord[] = [];
     for (const kind of kinds) {
@@ -17264,7 +17302,7 @@ export class EditorialStore {
       steps.push(...found.steps.filter((step) => !resolved.has(step.key)));
     }
     const listed = { ranges, steps };
-    this.#unconfirmedLists.set(cacheKey, listed);
+    if (this.#unconfirmedMayKeep()) this.#unconfirmedLists.set(cacheKey, { resolved: resolvedDigest, listed });
     return listed;
   }
 
@@ -17344,15 +17382,8 @@ export class EditorialStore {
    */
   #unconfirmedAttention(limit: number, bookId: string | null = null): UnconfirmedAttentionReading[] {
     this.#refreshUnconfirmedIndex();
-    const pairs = this.#unconfirmedPairs ??= this.#authority.prepare(
-      `SELECT DISTINCT book_id, kind FROM (
-         SELECT s.book_id, s.kind FROM analysis_result_set_revisions r JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
-         WHERE instr(r.canonical_json, '"outcome-unknown"') > 0
-         UNION
-         SELECT t.book_id, t.kind FROM analysis_task_outcomes o JOIN analysis_task_intents t ON t.task_intent_id = o.task_intent_id
-         WHERE o.classification IN ('completed', 'completed-with-gaps') AND instr(o.canonical_json, ?) > 0
-       ) ORDER BY book_id, kind`,
-    ).all(OUTCOME_UNKNOWN_NOT_RESENT) as SqlRow[];
+    const pairs = this.#unconfirmedPairs ?? this.#unconfirmedPairRows();
+    if (this.#unconfirmedPairs === null && this.#unconfirmedMayKeep()) this.#unconfirmedPairs = pairs;
     const surfaces = new Map<string, { bookId: string; surface: TaskPlanKind }>();
     for (const pair of pairs) {
       if (bookId !== null && asString(pair.book_id) !== bookId) continue;
