@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
@@ -148,6 +148,17 @@ function plantRevisionBefore62(plant: DatabaseSync, version: (typeof REVISIONS_B
   ];
   plant.exec(`${later.map((table) => `DROP TABLE ${table};`).join(' ')} PRAGMA user_version = ${version};`);
   downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_59_SQL);
+}
+
+/** 导入范例 one earlier Book's 审稿意见, synthetic, and answer its exact version (Issue #792). */
+async function importReadersReportExemplar(store: EditorialStore, bookTitle: string, text: string): Promise<string> {
+  const path = join(roots.inputRoot, `${randomUUID()}.txt`);
+  await writeFile(path, text);
+  const preview = await store.previewImportedExemplar(path);
+  const imported = await store.importEarlierExemplar({
+    previewId: preview.previewId, bookId: null, bookTitle, authors: ['测试作者'], editors: ['测试责编'], typeId: 'readers-report-author', expectedVersion: 0,
+  });
+  return imported.exemplars[0]!.revisionId;
 }
 
 /** A reader's report contract of the shape a 定稿 version gives, its words told apart by `version`. */
@@ -446,8 +457,41 @@ describe('审稿意见 over the real store on exact sample1', () => {
       expect(workspace.templates.map((entry) => entry.template)).toEqual(['author', 'editorial']);
       expect(workspace.exemplars).toEqual({
         count: 0,
-        statement: '本社没有可以读取的审稿意见范例，本次不参考范例；另有 1 份范例记录已损坏，无法读取：《审稿意见之书 · 审稿意见 · 给作者的修改意见》',
+        statement: '本社有 1 份审稿意见范例记录已损坏，无法读取，本次不参考范例：《审稿意见之书 · 审稿意见 · 给作者的修改意见》',
       });
+    });
+  }, 300_000);
+
+  it('names a skipped damaged exemplar on the drafted plan as 评估 names it, frozen at preparation (Issue #792)', async () => {
+    await withBook(async (book) => {
+      const { bookId } = book;
+      await runInitialEvaluationToEnd(book.store, book.owner, bookId, launchPolicy);
+      finalizeAsJ11(book.store, bookId);
+      const readable = await importReadersReportExemplar(book.store, '以前出版的书甲', '虚构审稿意见甲。');
+      const damaged = await importReadersReportExemplar(book.store, '以前出版的书乙', '虚构审稿意见乙。');
+      const tamper = (revisionId: string): void => {
+        const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+        try {
+          database.exec('DROP TRIGGER IF EXISTS earlier_exemplar_versions_no_update');
+          database.prepare("UPDATE earlier_exemplar_versions SET canonical_json = '{}' WHERE revision_id = ?").run(revisionId);
+        } finally { database.close(); }
+      };
+      tamper(damaged);
+      const statement = '参考本社 1 份审稿意见范例：《以前出版的书甲 · 审稿意见 · 给作者的修改意见 · 版本 1》；'
+        + '另有 1 份范例记录已损坏，无法读取，本次不参考：《以前出版的书乙 · 审稿意见 · 给作者的修改意见 · 版本 1》';
+      expect(book.store.inspectEvaluation(bookId, null).readersReport.exemplars).toEqual({ count: 1, statement });
+      let progress = book.store.createReadersReportPreparationWork(bookId, 'author', launchPolicy);
+      while (!progress.done) progress = book.store.advanceReadersReportPreparationWork(progress.workId!);
+      const ref = progress.projection!.taskIntent!.taskIntentId;
+      const planLine = (): string => book.store.inspectTaskPlan({ bookId, kind: 'readers-report', ref }).scope.reference[1]!;
+      expect(planLine()).toBe(statement);
+      // The plan is a frozen record: a record damaged after it was prepared does not rewrite its line, while 评估 names it now.
+      tamper(readable);
+      expect(planLine()).toBe(statement);
+      expect(book.store.inspectEvaluation(bookId, null).readersReport.exemplars.statement).toBe(
+        '本社有 2 份审稿意见范例记录已损坏，无法读取，本次不参考范例：'
+        + '《以前出版的书乙 · 审稿意见 · 给作者的修改意见 · 版本 1》、《以前出版的书甲 · 审稿意见 · 给作者的修改意见 · 版本 1》',
+      );
     });
   }, 300_000);
 
@@ -644,6 +688,41 @@ describe('审稿意见 over the real store on exact sample1', () => {
       expect(await refusal(() => book.store.advanceReadersReportPreparationWork(workId)))
         .toBe('ANALYSIS_PREPARATION_NOT_FOUND:审稿意见的计划准备已不存在。');
     });
+  }, 300_000);
+
+  it('reads a 审稿意见 Task row recorded before Issue #792 as skipping nothing, under its own digest', async () => {
+    let bookId = '';
+    let ref = '';
+    await withBook(async (book) => {
+      bookId = book.bookId;
+      await runInitialEvaluationToEnd(book.store, book.owner, book.bookId, launchPolicy);
+      finalizeAsJ11(book.store, book.bookId);
+      let progress = book.store.createReadersReportPreparationWork(book.bookId, 'author', launchPolicy);
+      while (!progress.done) progress = book.store.advanceReadersReportPreparationWork(progress.workId!);
+      ref = progress.projection!.taskIntent!.taskIntentId;
+    });
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      // The row as a store before Issue #792 wrote it: no skippedExemplars key, its digest over those very bytes.
+      const row = database.prepare('SELECT task_intent_id, canonical_json FROM readers_report_tasks').get() as { task_intent_id: string; canonical_json: string };
+      const json = row.canonical_json.replace('"skippedExemplars":[],', '');
+      expect(json).not.toBe(row.canonical_json);
+      const { createHash } = await import('node:crypto');
+      database.exec('DROP TRIGGER readers_report_tasks_no_update');
+      database.prepare('UPDATE readers_report_tasks SET canonical_json = ?, sha256 = ? WHERE task_intent_id = ?')
+        .run(json, createHash('sha256').update(json).digest('hex'), row.task_intent_id);
+      database.exec(READERS_REPORT_TRIGGER_SQL.readers_report_tasks_no_update!);
+    } finally {
+      database.close();
+    }
+    const reopened = await openStore();
+    try {
+      expect(reopened.inspectReadersReport(bookId)?.taskIntent?.taskIntentId).toBe(ref);
+      expect(reopened.inspectTaskPlan({ bookId, kind: 'readers-report', ref }).scope.reference[1]).toBe('本社暂无审稿意见范例，本次不参考范例');
+      reopened.markCleanShutdown();
+    } finally {
+      reopened.close();
+    }
   }, 300_000);
 
   it('refuses a 审稿意见 Task record rewritten whole', async () => {
