@@ -90,6 +90,8 @@ export function exemplarImportButton(surface: Surface, book: ExemplarBookProject
       submit.disabled = true;
       choose.disabled = true;
       cancel.disabled = true;
+      // Choosing a type while it imports must not offer 导入范例 again (the change listener would): one import per choice.
+      type.disabled = true;
       surface.status('正在导入范例…', 'busy');
       const names = (value: string): string[] => value.split(/[、,，]/u).map((name) => name.trim()).filter(Boolean);
       try {
@@ -105,6 +107,7 @@ export function exemplarImportButton(surface: Surface, book: ExemplarBookProject
         submit.disabled = false;
         choose.disabled = false;
         cancel.disabled = false;
+        type.disabled = false;
       }
     });
     root.append(form);

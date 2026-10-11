@@ -79,13 +79,15 @@ function importFormHarness() {
     types: [{ typeId: 'news-release', label: '新闻稿' }, { typeId: 'promotion-article', label: '宣传文章' }],
   };
   let imported: Record<string, unknown> | null = null;
+  let select: FormElement | null = null;
+  let selectDisabledDuringImport: boolean | null = null;
   const statuses: string[] = [];
   const context = createContext({
     document: { createElement: (tag: string) => new FormElement(tag) },
     surface: {
       api: {
         previewImportedExemplar: async () => preview,
-        importEarlierExemplar: async (input: Record<string, unknown>) => { imported = input; return {}; },
+        importEarlierExemplar: async (input: Record<string, unknown>) => { imported = input; selectDisabledDuringImport = select?.disabled ?? null; return {}; },
       },
       refresh: async () => {},
       status: (message: string) => { statuses.push(message); },
@@ -99,11 +101,13 @@ function importFormHarness() {
   open.listeners.get('click')!();
   const form = root.children[1]!;
   const type = form.all().find((element) => element.tag === 'select')!;
+  select = type;
   const choose = form.all().find((element) => element.tag === 'button' && element.textContent === '选择文件')!;
   const submit = form.all().find((element) => element.tag === 'button' && element.textContent === '导入范例')!;
   return {
     type, choose, submit, statuses,
     imported: () => imported,
+    selectDisabledDuringImport: () => selectDisabledDuringImport,
     submitNow: async () => { await form.listeners.get('submit')!({ preventDefault: () => {} }); },
   };
 }
@@ -124,6 +128,8 @@ describe('earlier-Book exemplar import form', () => {
     expect(view.submit.disabled).toBe(false);
     await view.submitNow();
     expect(view.imported()).toMatchObject({ previewId: 'preview-1', bookId: null, typeId: 'promotion-article', expectedVersion: 0 });
+    // While it imports, the type cannot be changed — the change listener would otherwise offer 导入范例 a second time.
+    expect(view.selectDisabledDuringImport()).toBe(true);
     expect(view.statuses).toContain('范例已导入');
   });
 });
