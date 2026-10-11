@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalRecord, parseCanonicalJson } from '../../src/service/analysis/canonical.js';
+import { RECONCILED_RESUMABLE_DETAIL } from '../../src/service/analysis/baseline-analysis-store.js';
 import {
   CLARIFICATION_CANCELLED_ANSWERED,
   CLARIFICATION_CANCELLED_UNANSWERED,
@@ -490,7 +491,7 @@ describe('Clarification Requests over the real store', () => {
     }
   }, 300_000);
 
-  it('takes a Run answered while another holds the slot on once it is free, and after AI7 closes before that', async () => {
+  it('takes a Run answered while another holds the slot on once it is free, and after AI7 closes before that it waits for 续行', async () => {
     const store = await openWithRoute(transient);
     const execution = owner(store, transient, true, 1);
     let next: BaselineAnalysisExecutionOwner | null = null;
@@ -511,15 +512,28 @@ describe('Clarification Requests over the real store', () => {
       const answered = store.answerBaselineAnalysisClarification({ bookId: first, taskIntentId: asking.taskIntentId, requestId: card.requestId, optionId: 'retry', note: null });
       expect(execution.continueAnswered(answered.runRecordId, store.baselineAnalysisLedger)).toBe('queued');
       expect(store.inspectTaskPlan({ bookId: first, kind: 'baseline-analysis', ref: asking.taskIntentId }).clarifications.map((entry) => entry.state)).toEqual(['answered']);
-      // AI7 closes before the slot is free: the answer stays recorded, and the next launch takes the Run on.
+      // AI7 closes before the slot is free: the answer stays recorded, and the next launch sends nothing by itself (Issue #767; ADR 0034).
       await execution.dispose();
       expect(store.inspectBaselineAnalysis(first, () => null).run!.state).toBe('awaiting-clarification');
       expect(store.inspectBaselineAnalysis(second, () => null).run!.state).toBe('resumable');
       writeFileSync(holdPath, 'release');
       next = owner(store, transient);
-      const reconciled = store.reconcileStoppedBaselineAnalysisRuns();
-      expect(reconciled.answered).toEqual([asking.runRecordId]);
-      for (const runRecordId of reconciled.answered) next.continueAnswered(runRecordId, store.baselineAnalysisLedger);
+      expect(store.reconcileStoppedBaselineAnalysisRuns()).toEqual({ settled: 1, cancelling: [] });
+      await next.whenIdle();
+      const waiting = store.inspectBaselineAnalysis(first, () => null);
+      // Left 任务已中断 · 可续行 with the words every restart uses, the answer kept, and nothing admitted or sent.
+      expect(waiting.run!.state).toBe('resumable');
+      expect(waiting.run!.transitions.at(-1)).toMatchObject({ state: 'resumable', detail: RECONCILED_RESUMABLE_DETAIL });
+      expect(next.progressFor(asking.runRecordId)).toBeNull();
+      expect(store.inspectTaskPlan({ bookId: first, kind: 'baseline-analysis', ref: asking.taskIntentId }).clarifications.map((entry) => entry.state)).toEqual(['answered']);
+      expect(waiting.run!.transitions.slice(-2).map((transition) => transition.state)).toEqual(['awaiting-clarification', 'resumable']);
+      // 续行 — the editor's own act — is offered by the drawer's revalidation, and goes on from the answer, the question not asked again.
+      const carrier = next;
+      const resumable = await store.inspectTaskPlanWithConnection({ bookId: first, kind: 'baseline-analysis', ref: asking.taskIntentId }, async () => null, {
+        reading: () => 'online', reachesNetwork: () => false, slotBusy: () => false, carriesStoppedRun: (id) => carrier.carriesStoppedRun(id),
+      }, () => null);
+      expect(resumable.runControl?.resume?.reason).toBeNull();
+      next.admitAndDispatch(asking.runRecordId, store.baselineAnalysisLedger, { resume: true });
       await next.whenIdle();
       const settled = store.inspectBaselineAnalysis(first, () => null);
       expect(settled.run!.state).toBe('completed-with-gaps');
