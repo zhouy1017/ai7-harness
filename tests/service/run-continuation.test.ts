@@ -440,7 +440,7 @@ describe('暂停 and 续行 over the real store', () => {
     const secondOwner = owner(second);
     try {
       const plan = await second.inspectTaskPlanWithConnection({ bookId, kind: 'baseline-analysis', ref: taskIntentId }, async () => null, ONLINE, () => null);
-      expect(plan.runControl?.continuation).toEqual({ unitsSettled: null, unitsTotal: SAMPLE1_UNITS });
+      expect(plan.runControl?.continuation).toEqual({ unitsSettled: null, unitsTotal: SAMPLE1_UNITS, pendingAnswerUnits: [] });
       expect(plan.runControl?.resume?.reason).toContain('已保存的阅读进度无法核对');
       expect(plan.runControl?.cancel.impact[0]).toBe('这项任务已经停下，它已保存的阅读进度无法核对；取消后不会发送任何内容，也不会形成结果集修订版。');
       // 取消任务 still ends it: nothing of it can be gathered, so it is cancelled with no revision, and says why.

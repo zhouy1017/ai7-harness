@@ -154,7 +154,7 @@ describe('结果待确认 over the real store', () => {
       expect(plan.state).toEqual({ key: 'outcome-unknown', label: '结果待确认' });
       // Neither 续行 nor 改计划重做 (CONT-011): 取消任务 settles it first.
       expect(plan.runControl).toMatchObject({
-        resume: null, redo: { reason: OUTCOME_UNKNOWN_NO_REDO }, continuation: { unitsSettled: SAMPLE1_UNITS, unitsTotal: SAMPLE1_UNITS }, accountLimit: null,
+        resume: null, redo: { reason: OUTCOME_UNKNOWN_NO_REDO }, continuation: { unitsSettled: SAMPLE1_UNITS, unitsTotal: SAMPLE1_UNITS, pendingAnswerUnits: [] }, accountLimit: null,
         outcomeUnknown: { units: [{ unitOrdinal: 4, attempts: 1 }], stopped: true },
       });
       expect(plan.redo).toBeNull();
