@@ -422,6 +422,28 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // 知识库 › 范例 (Issue #427, S79b) reads the published Books a page at a time, so it names none: only where the page
     // starts, as 书库's does.
+    case 'previewImportedExemplar': {
+      const input = requireInput(value.input, ['path'], tentativeId);
+      if (!isBoundedString(input.path, 32768) || !isAbsolute(input.path)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'importEarlierExemplar': {
+      const input = requireInput(value.input, ['previewId', 'bookId', 'bookTitle', 'authors', 'editors', 'typeId', 'expectedVersion'], tentativeId);
+      if (!validUuid(input.previewId) || !(input.bookId === null || validUuid(input.bookId)) ||
+          !isBoundedString(input.bookTitle, 180) || !isBoundedString(input.typeId, 64) ||
+          !Array.isArray(input.authors) || !Array.isArray(input.editors) ||
+          input.authors.length > 20 || input.editors.length > 20 ||
+          ![...input.authors, ...input.editors].every((name) => isBoundedString(name, 200)) ||
+          !Number.isSafeInteger(input.expectedVersion) || (input.expectedVersion as number) < 0) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'decideImportedExemplar': {
+      const input = requireInput(value.input, ['revisionId', 'revisionDigest', 'expectedDecisions', 'choice'], tentativeId);
+      if (!validUuid(input.revisionId) || !isBoundedString(input.revisionDigest, 64) || !HEX_DIGEST_PATTERN.test(input.revisionDigest) ||
+          !Number.isSafeInteger(input.expectedDecisions) || (input.expectedDecisions as number) < 0 ||
+          !['house', 'excluded', 'deferred'].includes(String(input.choice))) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'inspectExemplars': {
       const after = requireInput(value.input, ['after'], tentativeId).after;
       if (!(after === null || (isRecord(after) && hasExactKeys(after, ['title', 'bookId']) &&

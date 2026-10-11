@@ -683,3 +683,14 @@ Extracted text for the four formats S80a left at 「AI7 还不能提取这种格
 - **The indexer.** `MATERIAL_INDEXER_IDENTITY` is `ai7-material-index/2+ai7-docx-fflate-saxes/3`, and each build records its reader (`ai7-html-text/1`, `ai7-epub-text/1`, `ai7-odt-text/1`, `ai7-rtf-text/1`, each `+` the parser). A `/1` build stands for `/2` — it is what `/2` would build — except one refused as `format-unsupported`, so at the next start exactly the HTML, EPUB, ODT and RTF items are built again beside their `/1` refusals, and no other item's build, digest or 写作任务 pin moves; 最近完成 lists the standing builds.
 - **Not provided.** PDF text, text recognition, machine 来源译文 and similarity vectors stay deferred under the Owner's option 乙 (S80a). The readers run synchronously on the service's thread, as the DOC and text converters do: a 32 MB RTF of Unicode escapes took about 0.2 s on the developer host, and a 12 MB page about 0.01 s.
 - **Tests and J-15.** `tests/unit/material-formats.test.ts` holds each format's paragraphs, Chinese in each encoding, nested structure, and the bomb, ratio, entry-count, nesting, tag, text, paragraph, entity, DRM and password refusals; `tests/unit/material-index.test.ts` the `/1` builds that stand and the ones built again; `tests/service/material-index.test.ts` one imported item of each format yielding its segments, and a DRM EPUB and an entity-declaring page refused with their reasons. J-15 gains `knowledge-library-index-formats`: the runner's synthetic EPUB arrives through the real picker and its card reads `中文 · 3 段 · 1 个标题 · 文件自带标题「合成电子书」`, `已提取 30 字`, and three paragraphs of anchors in spine order. `GATE_JOURNEYS` is unchanged, and no `window.ai7` member was added.
+
+
+## Earlier published Books in 范例 (Issue #427)
+
+Service protocol 122 follows 121; additive schema revision 69 follows 68 and keeps Data Version 1.
+The editor imports DOCX/TXT/MD, names the Book, authors and responsible editors, and chooses a deliverable type.
+Three append-only ledgers hold earlier-Book provenance, immutable document versions and exact-version Learning Eligibility decisions.
+Earlier Books are Knowledge Base identities, never AI7 Book projects. Imports default to 仅本社; the editor may exclude or defer a version.
+Writing Tasks pin exact versions and digests; 审稿意见 retains its existing frozen-word contract.
+Full database export/replacement includes these ledgers and originals. Book-only merges leave this house knowledge behind:
+a writing Task whose referenced exemplar is absent keeps readable results/drafts but cannot start again.

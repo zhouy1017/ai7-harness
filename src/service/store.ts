@@ -64,6 +64,9 @@ import type {
   ReviewGuidelinePreviewProjection,
   ReviewGuidelinesProjection,
   ExemplarBookCursor,
+  ImportedExemplarInput,
+  ImportedExemplarPreview,
+  ImportedExemplarDecisionInput,
   LibraryMaterialCursor,
   LibraryMaterialDecisionInput,
   LibraryMaterialKind,
@@ -792,7 +795,9 @@ import {
   type StoredProvenance,
   type StoredRevision,
 } from './series-knowledge.js';
-import { readExemplarBook, readExemplars, type ExemplarSources } from './exemplars.js';
+import { MAX_EXEMPLAR_BOOKS_PAGE } from '../shared/protocol.js';
+import { ImportedExemplars, ImportedExemplarError, initializeImportedExemplarSchema } from './imported-exemplars.js';
+import { readExemplarBook, type ExemplarSources } from './exemplars.js';
 import { readKnowledgeProcedures } from './knowledge-procedures.js';
 import {
   CapturedProcedureError,
@@ -942,6 +947,7 @@ import {
   BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
   MATERIAL_INDEX_SCHEMA_VERSION,
   OUTCOME_RESOLUTION_SCHEMA_VERSION,
+  IMPORTED_EXEMPLAR_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -2220,7 +2226,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION,
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2284,7 +2290,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION)
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2662,7 +2668,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      version === OUTCOME_RESOLUTION_SCHEMA_VERSION,
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2715,7 +2721,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      version === OUTCOME_RESOLUTION_SCHEMA_VERSION) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION)) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2860,7 +2866,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      version === OUTCOME_RESOLUTION_SCHEMA_VERSION,
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2912,7 +2918,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      version === OUTCOME_RESOLUTION_SCHEMA_VERSION) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION)) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -3205,7 +3211,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== OUTCOME_RESOLUTION_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== IMPORTED_EXEMPLAR_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -3339,7 +3345,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      version === OUTCOME_RESOLUTION_SCHEMA_VERSION,
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3391,7 +3397,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      version === OUTCOME_RESOLUTION_SCHEMA_VERSION) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION)) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -4318,6 +4324,7 @@ export class EditorialStore {
   readonly #writingExemplarCache = new Map<string, Map<string, Array<{ input: WritingExemplarInput; source: WritingExemplarSource }>>>();
   #writingTasks!: WritingTasks;
   #readersReports!: ReadersReports;
+  #importedExemplars!: ImportedExemplars;
   /** 按我的评分重写评语 (Issue #429, S81b2): one ledger per frozen rewrite contract, made when first asked for; bounded. */
   readonly #evaluationRewriteLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
   /** The ledger each rewrite preparation in flight belongs to, by its work. */
@@ -4447,13 +4454,13 @@ export class EditorialStore {
     this.#dialogueHistory = harnessHistoryReader(join(dataRoot, HARNESS_SESSION_LOG_DIRECTORY));
     this.#dataVersions = new DataVersionLedger(authority);
     this.#databaseExports = new DatabaseExports(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: OUTCOME_RESOLUTION_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: IMPORTED_EXEMPLAR_SCHEMA_VERSION }),
     });
     this.#scheduledBackups = new ScheduledBackups(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: OUTCOME_RESOLUTION_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: IMPORTED_EXEMPLAR_SCHEMA_VERSION }),
     });
     this.#databaseReplacements = new DatabaseReplacements(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: OUTCOME_RESOLUTION_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: IMPORTED_EXEMPLAR_SCHEMA_VERSION }),
       // A package's data opens as a store of its own, with no launch control: brought to this revision and checked whole.
       openPackage: async (root) => {
         const opened = await EditorialStore.open(root, this.#codeRoot, {
@@ -4469,6 +4476,7 @@ export class EditorialStore {
       },
     });
     this.#readersReports = new ReadersReports(authority);
+    this.#importedExemplars = new ImportedExemplars(authority, dataRoot);
     this.#evaluationRewrites = new EvaluationRewrites(authority);
     // A writing Task's 资料库 items are read through the Material Index's Task seam alone, at the builds its plan pinned (Issue #428).
     this.#writingTasks = new WritingTasks(authority, (bookId, source) => this.#readWritingMaterial(bookId, source));
@@ -4650,7 +4658,7 @@ export class EditorialStore {
       // the backup location before anything migrates it, and a backup that cannot be made opens nothing.
       const classes = control.schemaRevisionClasses ?? SCHEMA_REVISION_CLASSES;
       const { upgrade, earlier } = await backUpBeforeUpgrade(authority, dataRoot, {
-        terminalRevision: OUTCOME_RESOLUTION_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
+        terminalRevision: IMPORTED_EXEMPLAR_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
       }).catch((error: unknown) => {
         if (error instanceof DataVersionError) throw new StoreError(error.code, error.message);
         throw error;
@@ -4758,6 +4766,7 @@ export class EditorialStore {
       initializeMaterialIndexSchema(authority);
       // Revision 68 (Issue #757): the editor's 人工结果确认 over requests whose results cannot be known.
       initializeOutcomeResolutionSchema(authority);
+      initializeImportedExemplarSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -4807,7 +4816,7 @@ export class EditorialStore {
       // Every store records the versions that open it (Issue #433, S85a; DSTO-016): a new record only when one changed.
       store.#softwareVersion = softwareVersion;
       store.#codeRoot = codeRoot;
-      store.#dataVersion = dataVersionAt(OUTCOME_RESOLUTION_SCHEMA_VERSION, classes);
+      store.#dataVersion = dataVersionAt(IMPORTED_EXEMPLAR_SCHEMA_VERSION, classes);
       if (control.interruptUpgradeAt === 'before-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在记录版本之前停止。');
       // The open that raised the Data Version records the upgrade it made with the backup (S85b), and only then clears the note
       // that let an open stopped before this record it (Issue #433 review).
@@ -4815,7 +4824,7 @@ export class EditorialStore {
         // Upgrades other opens made and never recorded go first, oldest first, as those opens would have recorded them; one a
         // record already holds is not recorded again (Issue #433 review).
         for (const carried of earlier) store.#dataVersions.recordCarried(carried);
-        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: OUTCOME_RESOLUTION_SCHEMA_VERSION, upgrade });
+        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: IMPORTED_EXEMPLAR_SCHEMA_VERSION, upgrade });
       }));
       if (control.interruptUpgradeAt === 'after-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在清除升级记录之前停止。');
       await completeUpgrade(dataRoot).catch(() => undefined);
@@ -7477,7 +7486,38 @@ export class EditorialStore {
     if (after !== null) {
       requireStore(UUID_PATTERN.test(after.bookId) && after.title === safeTitle(after.title), 'EXEMPLAR_CURSOR_INVALID', '范例列表位置无效。');
     }
-    return this.#documentCall(() => this.#publicationCall(() => readExemplars(this.#exemplarSources(), after)));
+    const sources = this.#exemplarSources();
+    const archived = sources.books(after, MAX_EXEMPLAR_BOOKS_PAGE + 1);
+    const imported = this.#importedExemplars.books(after, MAX_EXEMPLAR_BOOKS_PAGE + 1);
+    const importedIds = new Set(imported.map((book) => book.bookId));
+    const page = [...archived, ...imported].sort((a, b) => a.title < b.title ? -1 : a.title > b.title ? 1 : a.bookId < b.bookId ? -1 : a.bookId > b.bookId ? 1 : 0);
+    const books = page.slice(0, MAX_EXEMPLAR_BOOKS_PAGE).map((book) => importedIds.has(book.bookId)
+      ? this.#importedExemplars.book(book.bookId)
+      : this.#documentCall(() => this.#publicationCall(() => readExemplarBook(sources, book))));
+    const last = books.at(-1);
+    return { books, nextCursor: page.length > MAX_EXEMPLAR_BOOKS_PAGE && last !== undefined ? { title: last.bookTitle, bookId: last.bookId } : null };
+  }
+
+  async previewImportedExemplar(path: string): Promise<ImportedExemplarPreview> {
+    this.#assertAvailable();
+    try { return await this.#importedExemplars.preview(path); } catch (error) {
+      if (error instanceof ImportedExemplarError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
+  }
+  async importEarlierExemplar(input: ImportedExemplarInput): Promise<ExemplarBookProjection> {
+    this.#assertAvailable();
+    try { return await this.#importedExemplars.import(input); } catch (error) {
+      if (error instanceof ImportedExemplarError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
+  }
+  decideImportedExemplar(input: ImportedExemplarDecisionInput): ExemplarBookProjection {
+    this.#assertAvailable();
+    try { return this.#importedExemplars.decide(input); } catch (error) {
+      if (error instanceof ImportedExemplarError) throw new StoreError(error.code, error.message);
+      throw error;
+    }
   }
 
   #exemplarSources(): ExemplarSources {
@@ -8622,7 +8662,20 @@ export class EditorialStore {
       if (words.length === 0) continue;
       exemplars.push({ title: boundedGraphemes(`${asString(row.title)} · ${pin.typeLabel}`, 200), text: boundedGraphemes(words, MAX_EXEMPLAR_GRAPHEMES) });
     }
-    return exemplars;
+    let after: ExemplarBookCursor | null = null;
+    do {
+      const page = this.inspectExemplars(after);
+      for (const book of page.books) {
+        if (!book.imported) continue;
+        for (const entry of book.exemplars) {
+          if (!entry.typeId.startsWith('readers-report-') || entry.eligibility !== 'house-only') continue;
+          const words = readWritingExemplarWords(this.#authority, entry.revisionId);
+          if (words !== null) exemplars.push({ title: boundedGraphemes(`${book.bookTitle} · ${entry.typeLabel} · 版本 ${entry.version}`, 200), text: words.text });
+        }
+      }
+      after = page.nextCursor;
+    } while (after !== null && exemplars.length < MAX_READERS_REPORT_EXEMPLARS);
+    return exemplars.slice(0, MAX_READERS_REPORT_EXEMPLARS);
   }
 
   /**
@@ -9136,7 +9189,7 @@ export class EditorialStore {
         for (const [typeId, list] of found) {
           if (list.length >= MAX_WRITING_EXEMPLARS) continue;
           const exemplar = book.exemplars.find((entry) => entry.typeId === typeId);
-          if (exemplar === undefined) continue;
+          if (exemplar === undefined || exemplar.eligibility !== 'house-only') continue;
           // Its text as the contract takes it, read from its own revision, and the reference that pins it with the facts the
           // plan names it by.
           const words = readWritingExemplarWords(this.#authority, exemplar.revisionId);

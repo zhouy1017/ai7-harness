@@ -662,6 +662,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'knowledge-library-index-translation',
     // 资料索引 of HTML, EPUB, ODT and RTF (Issue #428).
     'knowledge-library-index-formats',
+    'knowledge-earlier-exemplar-import',
     'zero-activity',
   ]),
   'J-03': Object.freeze([

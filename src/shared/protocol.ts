@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 121 as const;
+export const SERVICE_PROTOCOL_VERSION = 122 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -86,6 +86,9 @@ export const IPC_CHANNELS = {
   inspectReviewGuidelines: 'ai7:j15:inspect-review-guidelines',
   previewReviewGuidelineVersion: 'ai7:j15:preview-review-guideline-version',
   importReviewGuidelineVersion: 'ai7:j15:import-review-guideline-version',
+  previewImportedExemplar: 'ai7:kb:preview-imported-exemplar',
+  importEarlierExemplar: 'ai7:kb:import-earlier-exemplar',
+  decideImportedExemplar: 'ai7:kb:decide-imported-exemplar',
   inspectExemplars: 'ai7:j07:inspect-exemplars',
   admitReadersReportExemplar: 'ai7:j07:admit-readers-report-exemplar',
   inspectKnowledgeProcedures: 'ai7:j15:inspect-knowledge-procedures',
@@ -5925,6 +5928,31 @@ export interface ExemplarBookCursor {
 }
 
 /** One exemplar: the version of one delivered document of a published Book that stands in 范例. */
+export interface ImportedExemplarPreview {
+  readonly previewId: string;
+  readonly displayName: string;
+  readonly format: 'DOCX' | 'TXT' | 'MD';
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly excerpt: string;
+  readonly types: ReadonlyArray<{ readonly typeId: string; readonly label: string }>;
+}
+export interface ImportedExemplarInput {
+  readonly previewId: string;
+  readonly bookId: string | null;
+  readonly bookTitle: string;
+  readonly authors: ReadonlyArray<string>;
+  readonly editors: ReadonlyArray<string>;
+  readonly typeId: string;
+  readonly expectedVersion: number;
+}
+export interface ImportedExemplarDecisionInput {
+  readonly revisionId: string;
+  readonly revisionDigest: string;
+  readonly expectedDecisions: number;
+  readonly choice: 'house' | 'excluded' | 'deferred';
+}
+
 export interface ExemplarProjection {
   readonly documentId: string;
   readonly typeId: string;
@@ -5945,11 +5973,13 @@ export interface ExemplarProjection {
   /** The latest of them, oldest first, at most `MAX_EXEMPLAR_EARLIER_VERSIONS`. */
   readonly earlierVersions: ReadonlyArray<number>;
   /** The Learning Eligibility it came in with: `仅本社`, the default, asked of no one. */
-  readonly eligibility: 'house-only';
+  readonly eligibility: 'house-only' | 'excluded' | 'deferred';
+  readonly imported?: { readonly decisions: number; readonly sourceName: string };
 }
 
 /** A published Book in 范例: who it is attributed to, its latest 发稿版本, and its exemplars by document type. */
 export interface ExemplarBookProjection {
+  readonly imported?: true;
   readonly bookId: string;
   readonly bookTitle: string;
   /** As the Book's 人员 read now. */
@@ -11089,6 +11119,18 @@ export interface ServiceOperationMap {
     output: ReviewGuidelinesProjection;
   };
   /** 知识库 › 范例 (Issue #427, S79b): the published Books' delivered documents, by Book and type, a page at a time. */
+  previewImportedExemplar: {
+    input: { path: string };
+    output: ImportedExemplarPreview;
+  };
+  importEarlierExemplar: {
+    input: ImportedExemplarInput;
+    output: ExemplarBookProjection;
+  };
+  decideImportedExemplar: {
+    input: ImportedExemplarDecisionInput;
+    output: ExemplarBookProjection;
+  };
   inspectExemplars: {
     input: { after: ExemplarBookCursor | null };
     output: ExemplarsProjection;
@@ -11747,6 +11789,9 @@ export interface RendererApi {
   previewReviewGuidelineVersion(input: { documentId: string; previewId?: string; clausePage?: number }): Promise<ReviewGuidelinePreviewProjection | null>;
   importReviewGuidelineVersion(input: { previewId: string }): Promise<ReviewGuidelinesProjection>;
   /** 知识库 › 范例 (Issue #427, S79b): names no Book; it reads the published Books' delivered documents, a page at a time. */
+  previewImportedExemplar(): Promise<ImportedExemplarPreview | null>;
+  importEarlierExemplar(input: ImportedExemplarInput): Promise<ExemplarBookProjection>;
+  decideImportedExemplar(input: ImportedExemplarDecisionInput): Promise<ExemplarBookProjection>;
   inspectExemplars(input?: { after: ExemplarBookCursor | null }): Promise<ExemplarsProjection>;
   /** 知识库 › 范例 › 归入范例 (Issue #429): names its Book; the window's route is not involved. */
   admitReadersReportExemplar(input: AdmitReadersReportExemplarInput): Promise<ExemplarBookProjection>;

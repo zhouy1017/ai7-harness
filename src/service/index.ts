@@ -1,3 +1,4 @@
+import { ImportedExemplarError } from './imported-exemplars.js';
 import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -91,7 +92,7 @@ function failureResponse(
   error: unknown,
   StoreErrorClass?: typeof import('./store.js').StoreError,
 ): ServiceFailureResponse {
-  if ((StoreErrorClass && error instanceof StoreErrorClass) || error instanceof ProtocolError) {
+  if ((StoreErrorClass && error instanceof StoreErrorClass) || error instanceof ProtocolError || error instanceof ImportedExemplarError) {
     return { id: requestId, ok: false, error: { code: error.code, message: error.message } };
   }
   return { id: requestId, ok: false, error: { code: 'SERVICE_REQUEST_FAILED', message: '服务请求失败。' } };
@@ -608,6 +609,12 @@ async function dispatch(
     case 'importReviewGuidelineVersion':
       return { id: request.id, ok: true, op: request.op, result: store.importReviewGuidelineVersion(request.input.previewId) };
     // 知识库 › 范例 (Issue #427, S79b).
+    case 'previewImportedExemplar':
+      return { id: request.id, ok: true, op: request.op, result: await store.previewImportedExemplar(request.input.path) };
+    case 'importEarlierExemplar':
+      return { id: request.id, ok: true, op: request.op, result: await store.importEarlierExemplar(request.input) };
+    case 'decideImportedExemplar':
+      return { id: request.id, ok: true, op: request.op, result: store.decideImportedExemplar(request.input) };
     case 'inspectExemplars':
       return { id: request.id, ok: true, op: request.op, result: store.inspectExemplars(request.input.after) };
     case 'admitReadersReportExemplar':
