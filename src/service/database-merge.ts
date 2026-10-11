@@ -333,7 +333,7 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
 };
 
 /** What stays behind when a Book merges, said to the editor. */
-export type MergeNotice = 'series' | 'internal-number' | 'writing-exemplar';
+export type MergeNotice = 'series' | 'internal-number' | 'writing-exemplar' | 'writing-material';
 
 const EXCLUSION_NOTICES: Readonly<Record<string, { notice: MergeNotice; bookColumn: string }>> = {
   series_membership_changes: { notice: 'series', bookColumn: 'book_id' },
@@ -458,6 +458,18 @@ function writingExemplarLeftBehind(db: DatabaseSync): boolean {
   ).get() !== undefined;
 }
 
+/** Material Index builds are derived: a merged writing Task keeps its pins, but a missing pinned build is rebuilt locally. */
+function writingMaterialLeftBehind(db: DatabaseSync): boolean {
+  if (!tableExists(db, 'src', 'writing_tasks')) return false;
+  return db.prepare(
+    `SELECT 1 FROM src.writing_tasks t, json_each(t.canonical_json, '$.materialSources') m
+     WHERE t.book_id IN (SELECT b.book_id FROM src.books b WHERE ${MERGING_BOOK})
+       AND NOT EXISTS (SELECT 1 FROM main.material_index_builds i
+         WHERE i.material_id = json_extract(m.value, '$.materialId') AND i.sha256 = json_extract(m.value, '$.indexDigest'))
+     LIMIT 1`,
+  ).get() !== undefined;
+}
+
 /** At most this many of a package's Books are listed in a preview or a waiting merge; the rest are counted (Issue #434 review). */
 export const MAX_MERGE_BOOKS_LISTED = 50;
 
@@ -522,6 +534,7 @@ export function planMerge(db: DatabaseSync, listed = MAX_MERGE_BOOKS_LISTED, mer
   }
   if (numberCleared) notices.add('internal-number');
   if (counts.new + counts.sameTitle > 0 && writingExemplarLeftBehind(db)) notices.add('writing-exemplar');
+  if (counts.new + counts.sameTitle > 0 && writingMaterialLeftBehind(db)) notices.add('writing-material');
   const refusal = counts.new + counts.sameTitle === 0 ? null : libraryRefusal(db, `SELECT b.book_id FROM src.books b WHERE ${MERGING_BOOK}`);
   return { books, counts, notices: [...notices].sort(), refusal };
 }

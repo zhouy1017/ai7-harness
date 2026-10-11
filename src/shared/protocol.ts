@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 121 as const;
+export const SERVICE_PROTOCOL_VERSION = 122 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -8336,7 +8336,7 @@ export interface DatabaseImportBookProjection {
  * What stays behind when a package's Books merge: Series, 资料库 items, the 编辑工作区方案's enablement, a 内部编号 taken here — and
  * the 范例 of other Books a merging Book's writing Tasks referenced, when neither merges nor is here (Issue #432 re-review).
  */
-export type DatabaseMergeNotice = 'series' | 'internal-number' | 'writing-exemplar';
+export type DatabaseMergeNotice = 'series' | 'internal-number' | 'writing-exemplar' | 'writing-material';
 
 /**
  * Whether this AI7 can take a package's data: the same Data Version, and a schema revision it knows. A package from a newer
