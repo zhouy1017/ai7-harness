@@ -564,6 +564,46 @@ describe('结果待确认 after 取消任务', () => {
 // 4 forward as its own outcome-unknown gap — never `not-attempted` — so the next plan still names it and the dispatcher still
 // waits; and the dispatcher's own start refuses a plan that would re-send it, whatever changed since its look.
 describe('结果待确认 carried forward', () => {
+  it('discloses a baseline re-send after the unknown range is edited and then reverted (#765)', async () => {
+    const store = await openWithRoute();
+    const execution = owner(store);
+    try {
+      const stopped = await stoppedRun(store, execution, 'L2 sample1 改后还原');
+      const { bookId } = stopped;
+      store.requestBaselineAnalysisCancel(bookId, stopped.taskIntentId);
+      execution.cancelRun(stopped.runRecordId, store.baselineAnalysisLedger);
+      await execution.whenIdle();
+      const initial = store.inspectBaselineAnalysis(bookId, () => null);
+      const checkpoint = initial.checkpoint!;
+      const blockId = initial.coverageManifest!.units[3]!.blockIds.find((id) => store.baselineAnalysisLedger.readWorkingBlocks(checkpoint.branchId).find((block) => block.blockId === id)?.kind === 'paragraph')!;
+      const edit = (revert: boolean) => {
+        const window = store.getManuscriptWindowAt(checkpoint.manuscriptId, checkpoint.branchId, { kind: 'block', blockId });
+        const block = window.blocks.find((entry) => entry.blockId === blockId)!;
+        store.flushJournalEdit({
+          clientEditId: randomUUID(), manuscriptId: checkpoint.manuscriptId, branchId: checkpoint.branchId, baseRevisionId: window.revisionId,
+          blockId, windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: block.digest, expectedJournalSequence: window.journalSequence,
+          fromGrapheme: 0, toGrapheme: revert ? 1 : 0, insertText: revert ? '' : '改',
+        });
+      };
+      const sync = () => {
+        let work = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_MODE_GOALS['sync-current'], { mode: 'sync-current', selectedRange: null }, launchPolicy);
+        while (!work.done) work = store.advanceBaselineAnalysisPreparationWork(work.workId!);
+        return work.projection!;
+      };
+      edit(false);
+      const changed = sync();
+      expect(store.baselineAnalysisLedger.resendUnitsOf(changed)).not.toContain(4);
+      execution.admitAndDispatch(store.authorizeBaselineAnalysis(bookId, changed.taskIntent!.taskIntentId, changed.planEnvelope!.digest).dispatchRunRecordId!);
+      await execution.whenIdle();
+      expect(store.inspectBaselineAnalysis(bookId, () => null).resultSetRevision!.gaps.some((gap) => gap.code === 'outcome-unknown')).toBe(false);
+      edit(true);
+      const reverted = sync();
+      expect(store.baselineAnalysisLedger.resendUnitsOf(reverted)).toContain(4);
+      expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: reverted.taskIntent!.taskIntentId }).resend?.units).toContain(4);
+      store.markCleanShutdown();
+    } finally { await execution.dispose(); store.close(); }
+  }, 300_000);
+
   it('keeps unit 4 outcome-unknown through a later Task cancelled before it, and the dispatcher never re-sends it', async () => {
     const store = await openWithRoute();
     const execution = owner(store);
