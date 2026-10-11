@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { readWritingExemplarWords } from '../../src/service/writing-tasks.js';
-import { readImportedExemplar, IMPORTED_EXEMPLAR_OBJECT_DIRECTORY, IMPORTED_EXEMPLAR_SCHEMA_SQL, IMPORTED_EXEMPLAR_TRIGGER_SQL } from '../../src/service/imported-exemplars.js';
+import { readImportedExemplar, ImportedExemplars, IMPORTED_EXEMPLAR_OBJECT_DIRECTORY, IMPORTED_EXEMPLAR_SCHEMA_SQL, IMPORTED_EXEMPLAR_TRIGGER_SQL } from '../../src/service/imported-exemplars.js';
 import { buildManuscriptPackage } from '../../src/service/text-manuscript.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
@@ -314,8 +314,49 @@ describe('earlier published Books in 范例', () => {
     const nothingReads = store.inspectEvaluation(bookId, null).readersReport.exemplars;
     expect(nothingReads.count).toBe(0);
     expect(nothingReads.statement).toBe(
-      '本社没有可以读取的审稿意见范例，本次不参考范例；另有 2 份范例记录已损坏，无法读取：'
+      '本社有 2 份审稿意见范例记录已损坏，无法读取，本次不参考范例：'
       + '《以前出版的测试图书 · 审稿意见 · 给编辑部 / 选题会的审读报告 · 版本 1》、《另一本以前出版的书 · 审稿意见 · 给作者的修改意见 · 版本 1》',
+    );
+  });
+
+  it('stops reading imported Books once the two-exemplar cap is reached (Issue #792)', async () => {
+    const first = await store.importEarlierExemplar({ ...await input('虚构的审稿意见，用于读取上限测试（丙书）。'), bookTitle: '丙书', typeId: 'readers-report-author' });
+    for (const title of ['乙书', '甲书']) {
+      await store.importEarlierExemplar({ ...await input(`虚构的审稿意见，用于读取上限测试（${title}）。`), bookTitle: title, typeId: 'readers-report-author' });
+    }
+    const database = db();
+    try {
+      const candidates = new ImportedExemplars(database, roots.dataRoot);
+      // BINARY title order is 丙 (U+4E19), 乙 (U+4E59), 甲 (U+7532): a scan takes at most the cap's two readable items,
+      // so the third Book is never read.
+      expect(candidates.readersReportExemplarCandidates(2).map((entry) => [entry.title, entry.revisionId !== null, entry.reason])).toEqual([
+        ['丙书 · 审稿意见 · 给作者的修改意见 · 版本 1', true, null],
+        ['乙书 · 审稿意见 · 给作者的修改意见 · 版本 1', true, null],
+      ]);
+      expect(candidates.readersReportExemplarCandidates(3)).toHaveLength(3);
+      // A damaged item before the cap is still named, and the cap still bounds the readable ones behind it.
+      database.exec('DROP TRIGGER earlier_exemplar_versions_no_update');
+      database.prepare("UPDATE earlier_exemplar_versions SET canonical_json = '{}' WHERE revision_id = ?").run(first.exemplars[0]!.revisionId);
+      expect(candidates.readersReportExemplarCandidates(1).map((entry) => [entry.title, entry.reason])).toEqual([
+        ['丙书 · 审稿意见 · 给作者的修改意见 · 版本 1', 'record'],
+        ['乙书 · 审稿意见 · 给作者的修改意见 · 版本 1', null],
+      ]);
+    } finally { database.close(); }
+  });
+
+  it('names a damaged imported 审稿意见 exemplar\'s unreadable decision ledger under its own plain reason (Issue #792)', async () => {
+    const imported = await store.importEarlierExemplar({ ...await input('虚构的审稿意见，用于学习准入损坏测试。'), typeId: 'readers-report-editorial' });
+    const bookId = await projectBook();
+    const database = db();
+    try {
+      database.exec('DROP TRIGGER earlier_exemplar_eligibility_no_update');
+      database.prepare("UPDATE earlier_exemplar_eligibility SET canonical_json = '{}' WHERE revision_id = ?").run(imported.exemplars[0]!.revisionId);
+    } finally { database.close(); }
+    const workspace = store.inspectEvaluation(bookId, null).readersReport;
+    expect(workspace.exemplars.count).toBe(0);
+    expect(workspace.exemplars.statement).toBe(
+      '本社有 1 份审稿意见范例的学习准入记录已损坏，无法读取，本次不参考范例：'
+      + '《以前出版的测试图书 · 审稿意见 · 给编辑部 / 选题会的审读报告 · 版本 1》',
     );
   });
 
