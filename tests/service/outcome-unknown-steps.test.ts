@@ -1,6 +1,5 @@
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { writeFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BaselineAnalysisExecutionOwner, OUTCOME_UNKNOWN_NOT_RESENT, assuranceSamplingTurnGapReason } from '../../src/service/analysis/execution.js';
 import { saysOutcomeUnknown } from '../../src/service/analysis/outcome-unknown.js';
@@ -35,7 +34,6 @@ beforeEach(async () => {
   roots = await createServiceTestRoots('ai7-service-outcome-unknown-steps-');
   launchPolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
   expect(launchPolicy.integrityState).toBe('verified');
-  writeFileSync(join(roots.dataRoot, '..', 'j10-unit-hold.txt'), 'release');
 });
 
 afterEach(async () => {
@@ -159,6 +157,36 @@ describe('结果待确认 in non-unit steps (Issue #757, item 3)', () => {
       const failure = settled.taskOutcome!.report!.failures.find((entry) => entry.stage === 'assurance-sampling');
       expect(failure).toEqual({ stage: 'assurance-sampling', code: 'gap', reason: expected });
       expect(saysOutcomeUnknown(failure!.reason)).toBe(true);
+      expect(settled.taskOutcome!.report!.usagePerStage['assurance-sampling'].requests).toBe(1);
+      expect(sent.filter((stage) => stage === 'assurance-sampling')).toHaveLength(1);
+      expect(entries.unknownServed).toBe(1);
+      store.markCleanShutdown();
+    } finally {
+      await execution.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it('stops at the first ambiguous turn of a two-turn sample, never dispatching the second', async () => {
+    // From disk: the reduction's second finding is anchored in unit 3, so the draw has two turns — unit 1's, then unit 3's.
+    const { fixture, entries } = counted(await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-sampling-two-turns'));
+    const store = await open(fixture);
+    const sent: Array<'cross-unit-reduction' | 'assurance-sampling'> = [];
+    const execution = ownerOf(store, fixture, sent);
+    try {
+      const bookId = await book(store, 'L2 sample1 抽样两轮结果待确认');
+      const settled = await run(store, execution, bookId);
+      expect(settled.taskOutcome?.classification).toMatch(/^completed/);
+      expect(settled.run?.state).toMatch(/^completed/);
+      // The sample was drawn over both findings and stopped at unit 1's ambiguous turn: a gap with nothing judged, never continued
+      // into unit 3's turn, whose entry no dispatch reached.
+      expect(settled.resultSetRevision?.assuranceSample).toMatchObject({ state: 'gap', size: 2, candidateCount: 2, dispositions: [] });
+      const expected = assuranceSamplingTurnGapReason(1, UNKNOWN_STEP_REASON);
+      expect(settled.resultSetRevision?.assuranceSample?.reason).toBe(expected);
+      const failure = settled.taskOutcome!.report!.failures.find((entry) => entry.stage === 'assurance-sampling');
+      expect(failure).toEqual({ stage: 'assurance-sampling', code: 'gap', reason: expected });
+      expect(saysOutcomeUnknown(failure!.reason)).toBe(true);
+      // One dispatched turn, one answered entry, no re-send: the second turn's finding was never read, let alone judged.
       expect(settled.taskOutcome!.report!.usagePerStage['assurance-sampling'].requests).toBe(1);
       expect(sent.filter((stage) => stage === 'assurance-sampling')).toHaveLength(1);
       expect(entries.unknownServed).toBe(1);

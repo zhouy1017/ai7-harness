@@ -1017,7 +1017,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // J-09 (Issue #424, plan slice S78): 待我处理 — the cross-Book attention view, its four groups and its count,
   // made from two Books of exact `sample1`; then concurrent Book work (Issue #49, plan slice S14) over a third — two
   // Runs at once, a third start 等待运行名额, 暂停 handing its place over without taking focus, 取消任务, and each Run's
-  // records kept to its own Book. Each stage is one thing an editor does or finds, so a hosted failure names the
+  // records kept to its own Book; two Book windows show the same attention state without taking manuscript focus (#632).
+  // Each stage is one thing an editor does or finds, so a hosted failure names the
   // behaviour that broke.
   'J-09': Object.freeze([
     'entry',
@@ -1051,8 +1052,12 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'concurrent-queued-run',
     'j14-queued-forced-colors',
     'concurrent-attention',
+    'concurrent-second-window',
+    'concurrent-attention-in-both-windows',
     'concurrent-pause',
     'concurrent-no-focus-theft',
+    'concurrent-attention-updated-in-both-windows',
+    'concurrent-observer-close',
     // A 修改建议 accepted and applied on 丙 while its Run holds a range in flight (Issue #632).
     'concurrent-apply-effect',
     'concurrent-cancel',

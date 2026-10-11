@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 127 as const;
+export const SERVICE_PROTOCOL_VERSION = 128 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -7036,6 +7036,17 @@ export interface EvaluationInitialCalibrationProjection {
 
 /** ②C 评估 of one Book: its versions newest first, the one on show, and whether a version can begin. */
 export interface EvaluationWorkspaceProjection {
+  /** Locally indexed 资料库 choices, separate from the manuscript and house exemplars (#428). */
+  readonly materials?: TaskMaterialOffersProjection;
+  /**
+   * The latest Tasks' frozen reference rows, never their extracted words; `blocked` names a prepared plan that can no longer
+   * start because a frozen reference went away, which 评估 then lets the editor prepare again.
+   */
+  readonly materialReferences?: {
+    readonly initial: ReadonlyArray<string>;
+    readonly readersReport: ReadonlyArray<string>;
+    readonly blocked: { readonly initial: boolean; readonly readersReport: boolean };
+  };
   readonly bookId: string;
   readonly bookTitle: string;
   /** The Book's manuscript as a new version would bind it, or `null` when the Book has none. */
@@ -11303,7 +11314,7 @@ export interface ServiceOperationMap {
    * once one settled. The completed job's result is 评估 with the prepared Task named, whose plan the Task Drawer opens.
    */
   prepareInitialEvaluation: {
-    input: { bookId: string };
+    input: { bookId: string; materialIds?: ReadonlyArray<string> };
     output: ServiceJobProjection;
   };
   /** 开始任务 in the drawer's bar: the Run Authorization and the Run, admitted at once or waiting for a place. */
@@ -11316,7 +11327,7 @@ export interface ServiceOperationMap {
    * template, prepared as one cooperative job. The completed job's result is 评估 with the prepared Task named.
    */
   prepareReadersReport: {
-    input: { bookId: string; template: ReadersReportTemplate };
+    input: { bookId: string; template: ReadersReportTemplate; materialIds?: ReadonlyArray<string> };
     output: ServiceJobProjection;
   };
   /** 开始任务 in the drawer's bar for 审稿意见. */
@@ -11908,11 +11919,11 @@ export interface RendererApi {
   startEvaluation(input?: StartEvaluationInput): Promise<EvaluationWorkspaceProjection>;
   saveEvaluation(input: { recordId: string; expectedEntries: number; content: EvaluationContent; finalize: boolean }): Promise<EvaluationWorkspaceProjection>;
   /** 准备 AI7 初评: an `initial-evaluation-preparation` job, followed with `pollServiceJob`; its plan opens in the Task Drawer. */
-  prepareInitialEvaluation(): Promise<ServiceJobProjection>;
+  prepareInitialEvaluation(input?: { materialIds?: ReadonlyArray<string> }): Promise<ServiceJobProjection>;
   /** The Task Drawer bar's 开始任务 for AI7's 初评. */
   authorizeInitialEvaluation(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<EvaluationWorkspaceProjection>;
   /** 起草审稿意见 (Issue #429, S81c): a `readers-report-preparation` job; its plan opens in the Task Drawer. */
-  prepareReadersReport(input: { template: ReadersReportTemplate }): Promise<ServiceJobProjection>;
+  prepareReadersReport(input: { template: ReadersReportTemplate; materialIds?: ReadonlyArray<string> }): Promise<ServiceJobProjection>;
   /** The Task Drawer bar's 开始任务 for 审稿意见. */
   authorizeReadersReport(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<EvaluationWorkspaceProjection>;
   /** 打开草稿: the drafted result made the template's draft document; the renderer then opens it on the editing surface. */

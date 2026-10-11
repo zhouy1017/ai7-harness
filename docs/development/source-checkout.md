@@ -709,4 +709,8 @@ Service protocol 125 follows 124 (#427) and adds optional `materialIds` to revie
 
 A Run an answered Clarification Request is still waiting to be carried out is told apart in its continuation point (Issue #784): `continuation.pendingAnswerUnits` lists the reading ranges whose answer was recorded and not yet carried out, so the stopped-Run note says where 续行 really starts. This is service protocol version **126**, following 125 (#428 slice 1), and no schema revision.
 
-知识库的评估方案现在保存为不可改写的新版本，初评任务与评估记录各自保留使用的方案快照（#427）；service protocol **127** follows 126, schema revision **70** follows 69.
+## 资料库 references for 评估 (Issue #428, slice 2)
+
+Service protocol 127 follows 126 (#784) and adds optional `materialIds` to AI7 初评 and 审稿意见 preparation, with bounded offers and frozen reference rows on 评估. Both kinds reuse the exact Material Index pins in execution-plan canonical JSON; schema 69 and their SQL contract versions stay unchanged. Reference-bearing Tasks use `ai7.initial-evaluation.materials.prompt-contract/1` or `ai7.readers-report.materials.prompt-contract/1` for unit and full-book synthesis; Tasks without references keep their original bytes. The materials provide background only and never override the house Evaluation Profile or finalized scores and conclusion. Plans name selected items and disclose their extracted text separately from manuscript scope and house exemplars, without printing it. Missing pins block preparation/authorization with a 评估 recovery path; developer-live remains refused. 按我的评分重写评语 and evaluation output copy detection are outside this slice.
+
+知识库的评估方案现在保存为不可改写的新版本，初评任务与评估记录各自保留使用的方案快照（#427）；service protocol **128** follows 127 (#428 slice 2), schema revision **70** follows 69. A 初评 Task resolves both its frozen profile snapshot and its frozen 资料库 pins from its own plan; its profile snapshot is keyed by the profile contract the pins wrap.

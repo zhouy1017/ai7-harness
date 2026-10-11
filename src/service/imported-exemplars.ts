@@ -279,6 +279,44 @@ export class ImportedExemplars {
     return (this.db.prepare('SELECT book_id, title FROM earlier_exemplar_books WHERE (? IS NULL OR title > ? COLLATE BINARY OR (title = ? AND book_id > ?)) ORDER BY title COLLATE BINARY, book_id LIMIT ?')
       .all(after?.title ?? null, after?.title ?? '', after?.title ?? '', after?.bookId ?? '', limit) as Row[]).map((row) => ({ bookId: String(row.book_id), title: String(row.title) }));
   }
+  /**
+   * The imported 审稿意见 exemplars a draft may seed from, by Book title as 范例 lists them, one item at a time and each
+   * exact version read on its own (Issue #778): a damaged Book or version record, or a damaged decision ledger, makes only
+   * that item's `revisionId` `null` — listed as damaged with its Book, type and version named — while the rest still read.
+   */
+  readersReportExemplarCandidates(): Array<{ title: string; revisionId: string | null }> {
+    if (this.db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'earlier_exemplar_versions'").get() === undefined) return [];
+    const candidates: Array<{ title: string; revisionId: string | null }> = [];
+    for (const book of this.db.prepare('SELECT book_id, title FROM earlier_exemplar_books ORDER BY title COLLATE BINARY, book_id').iterate() as Iterable<Row>) {
+      const bookId = String(book.book_id);
+      let bookReads = true;
+      try { this.#book(bookId); } catch (error) {
+        if (!(error instanceof ImportedExemplarError)) throw error;
+        bookReads = false;
+      }
+      for (const type of IMPORTED_EXEMPLAR_TYPES) {
+        if (!type.typeId.startsWith('readers-report-')) continue;
+        const latest = this.db.prepare('SELECT revision_id, version FROM earlier_exemplar_versions WHERE book_id = ? AND type_id = ? ORDER BY version DESC, revision_id LIMIT 1')
+          .get(bookId, type.typeId) as Row | undefined;
+        if (latest === undefined) continue;
+        const title = `${String(book.title)} · ${type.label} · 版本 ${String(latest.version)}`;
+        let revisionId: string | null = String(latest.revision_id);
+        try {
+          requireExemplar(bookReads, CORRUPT, 'EXEMPLAR_RECORD_INVALID');
+          const versions = this.#versions(bookId, type.typeId);
+          requireExemplar(versions.latest?.revision_id === revisionId, CORRUPT, 'EXEMPLAR_RECORD_INVALID');
+          const decisions = this.#decisions(revisionId);
+          requireExemplar(decisions.length > 0, CORRUPT, 'EXEMPLAR_RECORD_INVALID');
+          if (decisions.at(-1)?.choice !== 'house') continue;
+        } catch (error) {
+          if (!(error instanceof ImportedExemplarError)) throw error;
+          revisionId = null;
+        }
+        candidates.push({ title, revisionId });
+      }
+    }
+    return candidates;
+  }
   book(bookId: string): ExemplarBookProjection {
     const book = this.#book(bookId);
     return { bookId, bookTitle: book.title, authors: book.authors, editors: book.editors, imported: true, publicationOrdinal: 0, designatedAt: book.recordedAt, withdrawn: false, readersReports: [],
