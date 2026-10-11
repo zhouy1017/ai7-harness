@@ -1,4 +1,4 @@
-import { TASK_MATERIALS_NONE, TASK_MATERIALS_STATEMENT, TASK_MATERIAL_LIVE_UNAVAILABLE, REVIEW_MATERIAL_CATEGORY_REQUIRED, taskMaterialKindDefinition, taskMaterialSources, taskMaterialWords, taskMaterialRefusal, type TaskMaterialBoundary, type TaskMaterialReading, type TaskMaterialSource } from './task-material-references.js';
+import { TASK_MATERIALS_NONE, TASK_MATERIALS_STATEMENT, TASK_MATERIAL_LIVE_UNAVAILABLE, REVIEW_MATERIAL_CATEGORY_REQUIRED, taskMaterialReferenceLine, taskMaterialKindDefinition, taskMaterialSources, taskMaterialWords, taskMaterialRefusal, type TaskMaterialBoundary, type TaskMaterialReading, type TaskMaterialSource } from './task-material-references.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
@@ -464,6 +464,7 @@ import { RecentCache } from './recent-cache.js';
 import {
   baselineAnalysisPlan,
   initialEvaluationPlan,
+  evaluationMaterialPlan,
   analysisTaskStateLabel,
   readersReportPlan,
   readersReportTaskStateLabel,
@@ -4292,10 +4293,14 @@ export class EditorialStore {
   readonly #factualReview: BaselineAnalysisStore;
   /** AI7 初评 (Issue #429, S81b1): the evaluation kind's own ledger over the same Book database. */
   readonly #initialEvaluation: BaselineAnalysisStore;
+  readonly #initialEvaluationLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
+  readonly #initialEvaluationWork = new Map<string, BaselineAnalysisStore>();
   /** One ledger per review-category kind and frozen category contract, made when first asked for (Issue #417); bounded (#649). */
   readonly #reviewCategoryLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
   /** The kind definition of each configured category a Review Run snapshotted, by its contract input; bounded (#649). */
   readonly #reviewCategoryDefinitions = new RecentCache<AnalysisKindDefinition>(REVIEW_CATEGORY_CACHE_CAPACITY);
+  // 资料库 reference texts of the 审阅 workspace, by pin: at most four items per Run, a few Runs recent.
+  readonly #taskMaterialTexts = new RecentCache<ReadonlyArray<string>>(REVIEW_CATEGORY_CACHE_CAPACITY);
   /**
    * 审稿意见 (Issue #429, S81c): one ledger per frozen reader's report contract, made when first asked for; bounded as the
    * category ledgers are (#672), and a preparation in flight is found on the ledger that holds it.
@@ -5059,7 +5064,9 @@ export class EditorialStore {
           // Its ordinary ledger projection already knows how to offer a fresh preparation under that contract.
           if (frozenBase !== base.promptContractDigest) return this.reviewCategoryLedger(base);
           materials = { bookId: latestForBook, references: this.#analysisCall(() => taskMaterialSources(pins)) };
-          frozenPromptDigest = asString(components.get('plan-envelope')!.promptContractDigest as SqlRow[string]);
+          const envelope = components.get('plan-envelope');
+          requireStore(envelope !== undefined, 'ANALYSIS_RECORD_INVALID', '任务计划记录不完整。');
+          frozenPromptDigest = asString(envelope.promptContractDigest as SqlRow[string]);
         }
       }
     }
@@ -5071,18 +5078,25 @@ export class EditorialStore {
     return this.reviewCategoryLedger(definition, readings.every((reading) => reading.refusal === null));
   }
 
-  #taskMaterialReadings(boundary: TaskMaterialBoundary): ReadonlyArray<TaskMaterialReading> {
+  #taskMaterialReadings(boundary: TaskMaterialBoundary, surface: '审阅' | '评估' = '审阅'): ReadonlyArray<TaskMaterialReading> {
     return this.#analysisCall(() => taskMaterialSources(boundary.references)).map((source) => {
-      const paragraphs: string[] = [];
+      let paragraphs: ReadonlyArray<string>;
       try {
-        for (let from: number | null = 1; from !== null;) {
-          const page = this.readMaterialIndexForTask(boundary, source.materialId, from);
-          paragraphs.push(...page.segments.map((segment) => segment.text));
-          from = page.next;
-        }
+        // The first page is always read: it re-checks that the pin is still referable and its index version still local.
+        // The text of an index version never changes, so the remaining pages are read once per pin and kept.
+        const first = this.readMaterialIndexForTask(boundary, source.materialId, 1);
+        paragraphs = this.#taskMaterialTexts.obtain(`${boundary.bookId}|${source.materialId}|${source.indexDigest}|${source.sha256}`, () => {
+          const texts = first.segments.map((segment) => segment.text);
+          for (let from = first.next; from !== null;) {
+            const page = this.readMaterialIndexForTask(boundary, source.materialId, from);
+            texts.push(...page.segments.map((segment) => segment.text));
+            from = page.next;
+          }
+          return texts;
+        });
       } catch (error) {
         if (error instanceof StoreError && (error.code === 'MATERIAL_INDEX_MOVED' || error.code === 'MATERIAL_REFERENCE_UNAVAILABLE')) {
-          return taskMaterialRefusal(source, error.code);
+          return taskMaterialRefusal(source, error.code, surface);
         }
         throw error;
       }
@@ -5091,6 +5105,8 @@ export class EditorialStore {
   }
 
   #prepareTaskMaterials(bookId: string, materialIds: ReadonlyArray<string>): ReadonlyArray<TaskMaterialSource> {
+    requireStore(materialIds.length <= MAX_WRITING_MATERIALS && new Set(materialIds).size === materialIds.length && materialIds.every((id) => UUID_PATTERN.test(id)),
+      'TASK_MATERIAL_INVALID', '最多参考 4 份资料，且不能重复选择。');
     let total = 0;
     const references = materialIds.map((materialId) => {
       const material = this.#libraryCall(() => this.#libraryMaterials.original(materialId));
@@ -5160,8 +5176,7 @@ export class EditorialStore {
       'TASK_MATERIALS_INVALID', '请选择不重复的资料库资料，最多 4 份。');
     if (materialIds.length > 0) {
       requireStore(this.#baselineAnalysis.launch.live === null, 'REVIEW_MATERIAL_UNAVAILABLE', TASK_MATERIAL_LIVE_UNAVAILABLE);
-      const categories = this.inspectReviewWorkspace(bookId, null).categories;
-      requireStore(categories.some((category) => categoryIds.includes(category.categoryId) && category.materialReferencesAllowed === true),
+      requireStore(this.#reviewCall(() => this.#reviewRuns.materialReferencesAllowed(bookId, categoryIds)),
         'REVIEW_MATERIAL_CATEGORY_REQUIRED', REVIEW_MATERIAL_CATEGORY_REQUIRED);
     }
     const references = this.#prepareTaskMaterials(bookId, materialIds);
@@ -5354,7 +5369,7 @@ export class EditorialStore {
           exemplars: readersReportExemplarLine(latest.task.input.exemplars),
         },
       }));
-      return { plan: withPlanMovedReason(withResend(plan, this.#analysisCall(() => latest.ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(withResend(evaluationMaterialPlan(plan, this.#evaluationPlanMaterials(latest.ledger, input.bookId, projection.authorization !== null)), this.#analysisCall(() => latest.ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     if (input.kind === 'evaluation-rewrite') {
       // 按我的评分重写评语 (Issue #429, S81b2): the rewrite kind's latest Task, on the ledger of the contract its plan froze.
@@ -5394,14 +5409,15 @@ export class EditorialStore {
     }
     if (input.kind === 'initial-evaluation') {
       // AI7 初评 (Issue #429, S81b1): the evaluation kind's latest Task, read as the baseline's is.
+      const ledger = this.initialEvaluationLedgerForBook(input.bookId);
       const projection = this.inspectInitialEvaluation(input.bookId, progress);
       const checkpoint = projection.checkpoint;
       requireStore(projection.taskIntent !== null && checkpoint !== null, 'TASK_PLAN_UNAVAILABLE', 'AI7 初评还没有准备计划。');
       current(projection.taskIntent.taskIntentId);
-      const blocks = this.#analysisCall(() => this.#initialEvaluation.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
+      const blocks = this.#analysisCall(() => ledger.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
       const profile = this.#evaluations.profile();
       const plan = this.#taskPlanCall(() => initialEvaluationPlan({ projection, bookTitle, blocks, profile }));
-      return { plan: withPlanMovedReason(withResend(plan, this.#analysisCall(() => this.#initialEvaluation.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(withResend(evaluationMaterialPlan(plan, this.#evaluationPlanMaterials(ledger, input.bookId, projection.authorization !== null)), this.#analysisCall(() => ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     const reviewRunId = input.ref;
     requireStore(reviewRunId !== null, 'TASK_PLAN_INVALID', '审阅的计划要指明是哪一次审阅。');
@@ -5842,9 +5858,11 @@ export class EditorialStore {
   #requireLedgerKindScope(kind: LedgerTaskKind, bookId: string, taskIntentId: string): void {
     switch (kind) {
       case 'initial-evaluation':
+        this.#requireEvaluationMaterialScope(this.#evaluationMaterialPlan(taskIntentId) !== null);
         this.#requireInitialEvaluationScope();
         return;
       case 'readers-report':
+        this.#requireEvaluationMaterialScope(this.#evaluationMaterialPlan(taskIntentId) !== null);
         this.#requireReadersReportScope();
         return;
       case 'evaluation-rewrite':
@@ -5869,12 +5887,16 @@ export class EditorialStore {
   #ledgerTaskOf(kind: LedgerTaskKind, bookId: string, taskIntentId: string): BaselineAnalysisStore {
     this.#assertAvailable();
     switch (kind) {
-      case 'initial-evaluation':
+      case 'initial-evaluation': {
         // The ledger itself refuses a Task that is not the Book's current one, as its authorization always did.
-        return this.#initialEvaluation;
+        const ledger = this.initialEvaluationLedgerForBook(bookId);
+        this.#requireEvaluationMaterialReadings(ledger, bookId);
+        return ledger;
+      }
       case 'readers-report': {
         const latest = this.#latestReadersReport(bookId);
         requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT', TASK_PLAN_NOT_CURRENT_REASON);
+        this.#requireEvaluationMaterialReadings(latest.ledger, bookId);
         return latest.ledger;
       }
       case 'evaluation-rewrite': {
@@ -5929,7 +5951,7 @@ export class EditorialStore {
   #currentLedgerOf(kind: LedgerTaskKind, bookId: string, taskIntentId: string): BaselineAnalysisStore {
     this.#assertAvailable();
     // The ledger itself refuses a 初评 that is not the Book's current Task, as its cancellation always did.
-    if (kind === 'initial-evaluation') return this.#initialEvaluation;
+    if (kind === 'initial-evaluation') return this.initialEvaluationLedgerForBook(bookId);
     const latest = kind === 'readers-report' ? this.#latestReadersReport(bookId)
       : kind === 'evaluation-rewrite' ? this.#latestEvaluationRewrite(bookId) : this.#latestWriting(bookId);
     requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT', TASK_PLAN_NOT_CURRENT_REASON);
@@ -6651,6 +6673,8 @@ export class EditorialStore {
     this.#baselineAnalysis.prepare({ phase: 'cancel-all' });
     this.#factualReview.prepare({ phase: 'cancel-all' });
     this.#initialEvaluation.prepare({ phase: 'cancel-all' });
+    for (const ledger of this.#initialEvaluationLedgers.values()) ledger.prepare({ phase: 'cancel-all' });
+    this.#initialEvaluationWork.clear();
     for (const ledger of this.#reviewCategoryLedgers.values()) ledger.prepare({ phase: 'cancel-all' });
     for (const ledger of this.#readersReportLedgers.values()) ledger.prepare({ phase: 'cancel-all' });
     for (const ledger of this.#evaluationRewriteLedgers.values()) ledger.prepare({ phase: 'cancel-all' });
@@ -7588,7 +7612,22 @@ export class EditorialStore {
     const archived = sources.books(after, MAX_EXEMPLAR_BOOKS_PAGE + 1);
     const imported = this.#importedCall(() => this.#importedExemplars.books(after, MAX_EXEMPLAR_BOOKS_PAGE + 1));
     const importedIds = new Set(imported.map((book) => book.bookId));
-    const page = [...archived, ...imported].sort((a, b) => a.title < b.title ? -1 : a.title > b.title ? 1 : a.bookId < b.bookId ? -1 : a.bookId > b.bookId ? 1 : 0);
+    // One collation for the cursor (Issue #778): both sources page in SQLite's BINARY order — UTF-8 bytes, which is code point
+    // order — so the merge of their pages must order exactly as the queries that continue them do. JS's `<` compares UTF-16
+    // code units and disagrees for a supplementary-plane character against a BMP character above U+DBFF (e.g. 𠀀 against Ａ).
+    const compareTitles = (left: string, right: string): number => {
+      let i = 0;
+      let j = 0;
+      while (i < left.length && j < right.length) {
+        const a = left.codePointAt(i)!;
+        const b = right.codePointAt(j)!;
+        if (a !== b) return a < b ? -1 : 1;
+        i += a > 0xffff ? 2 : 1;
+        j += b > 0xffff ? 2 : 1;
+      }
+      return (left.length - i) - (right.length - j);
+    };
+    const page = [...archived, ...imported].sort((a, b) => compareTitles(a.title, b.title) || (a.bookId < b.bookId ? -1 : a.bookId > b.bookId ? 1 : 0));
     const books = page.slice(0, MAX_EXEMPLAR_BOOKS_PAGE).map((book) => importedIds.has(book.bookId)
       ? this.#importedCall(() => this.#importedExemplars.book(book.bookId))
       : this.#documentCall(() => this.#publicationCall(() => readExemplarBook(sources, book))));
@@ -8511,7 +8550,7 @@ export class EditorialStore {
 
   /** ②C 评估 of one Book (Issue #429, S81a; EVAL-001, EVAL-012): its versions, one on show, and whether one can begin. */
   inspectEvaluation(bookId: string, recordId: string | null, recordsBefore?: number | null): EvaluationWorkspaceProjection {
-    return this.#evaluationCall(() => this.#evaluations.workspace(bookId, this.#evaluationBookTitle(bookId), recordId, recordsBefore));
+    return this.#withEvaluationMaterials(this.#evaluationCall(() => this.#evaluations.workspace(bookId, this.#evaluationBookTitle(bookId), recordId, recordsBefore)));
   }
 
   /**
@@ -8523,11 +8562,73 @@ export class EditorialStore {
     return this.#evaluationCall(() => {
       const title = this.#evaluationBookTitle(bookId);
       const recordId = this.#transaction(this.#authority, () => this.#evaluations.start(bookId, fromInitial, skipDamaged));
-      return this.#evaluations.workspace(bookId, title, recordId);
+      return this.#withEvaluationMaterials(this.#evaluations.workspace(bookId, title, recordId));
     });
   }
 
   // ---- AI7 初评 (Issue #429, plan slice S81b1; V2-UX-EVAL-001, EVAL-005 to EVAL-007) ----------------------------------------
+
+  #withEvaluationMaterials(page: EvaluationWorkspaceProjection): EvaluationWorkspaceProjection {
+    // Only a plan not yet started can be refused for a reference that went away; a started one read it as it was.
+    const frozenOf = (task: { taskIntentId: string; state: string } | null): { lines: string[]; blocked: boolean } => {
+      const frozen = task === null ? null : this.#evaluationMaterialPlan(task.taskIntentId);
+      if (frozen === null) return { lines: [], blocked: false };
+      const readings = this.#taskMaterialReadings(frozen.boundary, '评估')
+        .map((reading) => task!.state === 'prepared' ? reading : { source: reading.source, refusal: null });
+      return { lines: readings.map(taskMaterialReferenceLine), blocked: readings.some((reading) => reading.refusal !== null) };
+    };
+    const initial = frozenOf(page.initial.task);
+    const readersReport = frozenOf(page.readersReport.task);
+    return { ...page, materials: this.#taskMaterialOffers(page.bookId), materialReferences: {
+      initial: initial.lines, readersReport: readersReport.lines, blocked: { initial: initial.blocked, readersReport: readersReport.blocked },
+    } };
+  }
+
+  #evaluationPlanMaterials(ledger: BaselineAnalysisStore, bookId: string, authorized: boolean): ReadonlyArray<TaskMaterialReading> {
+    const references = ledger.definition.materialReferences?.sources;
+    if (references === undefined) return [];
+    const readings = this.#taskMaterialReadings({ bookId, references }, '评估');
+    return authorized ? readings.map((reading) => ({ source: reading.source, paragraphs: reading.paragraphs ?? [], refusal: null })) : readings;
+  }
+
+  #evaluationMaterialPlan(taskIntentId: string): { boundary: TaskMaterialBoundary; baseDigest: string; promptDigest: string } | null {
+    const records = this.#authority.prepare("SELECT component, canonical_json, sha256 FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = (SELECT max(plan_version) FROM analysis_plan_records WHERE task_intent_id = ?) AND component IN ('execution-plan', 'plan-envelope')").all(taskIntentId, taskIntentId) as SqlRow[];
+    const components = new Map(records.map((record) => {
+      const json = asString(record.canonical_json);
+      requireStore(sha256(json) === record.sha256, 'ANALYSIS_RECORD_INVALID', '任务计划记录与摘要不一致。');
+      return [asString(record.component), JSON.parse(json) as Record<string, unknown>] as const;
+    }));
+    const execution = components.get('execution-plan');
+    if (execution?.materialReferences === undefined) return null;
+    const envelope = components.get('plan-envelope');
+    const row = this.#authority.prepare('SELECT book_id FROM analysis_task_intents WHERE task_intent_id = ?').get(taskIntentId) as SqlRow | undefined;
+    requireStore(row !== undefined && typeof execution.materialReferenceBasePromptContractDigest === 'string' && DIGEST_PATTERN.test(execution.materialReferenceBasePromptContractDigest) &&
+      typeof envelope?.promptContractDigest === 'string' && DIGEST_PATTERN.test(envelope.promptContractDigest), 'ANALYSIS_RECORD_INVALID', '任务参考资料的基础契约记录无效。');
+    return { boundary: { bookId: asString(row.book_id), references: this.#analysisCall(() => taskMaterialSources(execution.materialReferences)) },
+      baseDigest: execution.materialReferenceBasePromptContractDigest, promptDigest: envelope.promptContractDigest };
+  }
+
+  initialEvaluationLedgerForBook(bookId: string, materials?: TaskMaterialBoundary): BaselineAnalysisStore {
+    const base = this.#initialEvaluation.definition;
+    let frozen: { boundary: TaskMaterialBoundary; baseDigest: string; promptDigest: string } | null = null;
+    if (materials === undefined) {
+      const row = this.#authority.prepare("SELECT task_intent_id FROM analysis_task_intents WHERE book_id = ? AND kind = 'evaluation' ORDER BY created_at DESC, rowid DESC LIMIT 1").get(bookId) as SqlRow | undefined;
+      frozen = row === undefined ? null : this.#evaluationMaterialPlan(asString(row.task_intent_id));
+      if (frozen !== null) {
+        requireStore(frozen.baseDigest === base.promptContractDigest, 'ANALYSIS_RECORD_INVALID', '初评参考资料的基础契约与计划不一致。');
+        materials = frozen.boundary;
+      }
+    }
+    if (materials === undefined || materials.references.length === 0) return this.#initialEvaluation;
+    const readings = this.#taskMaterialReadings(materials, '评估');
+    const definition = this.#analysisCall(() => taskMaterialKindDefinition(base, materials!, readings, frozen?.promptDigest));
+    const make = (): BaselineAnalysisStore => {
+      const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
+      ledger.bindLaunch(this.#initialEvaluation.launch);
+      return ledger;
+    };
+    return readings.some((reading) => reading.refusal !== null) ? make() : this.#initialEvaluationLedgers.obtain(definition.promptContractDigest, make);
+  }
 
   /** The evaluation kind's append-only ledger, which its execution owner writes through; service-internal. */
   get initialEvaluationLedger(): BaselineAnalysisStore {
@@ -8537,35 +8638,46 @@ export class EditorialStore {
 
   /** The Book's AI7 初评 Task, latest Result Set Revision and history, as the evaluation kind's ledger holds them. */
   inspectInitialEvaluation(bookId: string, progress?: ProgressReader, revisionId: string | null = null): InitialEvaluationProjection {
-    return this.#analysisCall(() => this.#initialEvaluation.inspect(bookId, progress, revisionId)) as InitialEvaluationProjection;
+    return this.#analysisCall(() => this.initialEvaluationLedgerForBook(bookId).inspect(bookId, progress, revisionId)) as InitialEvaluationProjection;
   }
 
   /**
    * 准备 AI7 初评: the evaluation kind's Task in the mode that applies — the first 初评, or 重新初评 once one settled — whose
    * goal is the kind's own fixed text. The preparation is a cooperative job; its plan opens in the Task Drawer.
    */
-  createInitialEvaluationPreparationWork(bookId: string, launchPolicy: LaunchPolicyProjection): AnalysisPreparationResult<InitialEvaluationProjection> {
+  createInitialEvaluationPreparationWork(bookId: string, launchPolicy: LaunchPolicyProjection, materialIds: ReadonlyArray<string> = []): AnalysisPreparationResult<InitialEvaluationProjection> {
+    this.#requireEvaluationMaterialScope(materialIds.length > 0);
     this.#requireInitialEvaluationScope();
     const current = this.inspectInitialEvaluation(bookId);
+    const ledger = this.initialEvaluationLedgerForBook(bookId, { bookId, references: this.#prepareTaskMaterials(bookId, materialIds) });
     const mode = current.resultSetRevision === null ? 'evaluation-first' : 'evaluation-again';
-    const result = this.#analysisCall(() => this.#initialEvaluation.prepare({
+    const result = this.#analysisCall(() => ledger.prepare({
       phase: 'start',
       bookId,
       goal: INITIAL_EVALUATION_MODE_GOALS[mode],
       update: mode === 'evaluation-first' ? null : { mode, selectedRange: null },
       reconfirm: false,
       launchPolicy,
+      ...(canonicalJson(this.initialEvaluationLedgerForBook(bookId).definition.materialReferences?.sources ?? []) === canonicalJson(ledger.definition.materialReferences?.sources ?? []) ? {} : { newTask: true }),
     }));
+    if (result.workId !== null) this.#initialEvaluationWork.set(result.workId, ledger);
     return { ...result, projection: result.projection as InitialEvaluationProjection | null };
   }
 
   advanceInitialEvaluationPreparationWork(workId: string): AnalysisPreparationResult<InitialEvaluationProjection> {
-    const result = this.#analysisCall(() => this.#initialEvaluation.prepare({ phase: 'advance', workId }));
+    const ledger = this.#initialEvaluationWork.get(workId);
+    requireStore(ledger !== undefined, 'ANALYSIS_PREPARATION_NOT_FOUND', '初评计划准备已不存在。');
+    const result = this.#analysisCall(() => ledger.prepare({ phase: 'advance', workId }));
+    if (result.done) this.#initialEvaluationWork.delete(workId);
     return { ...result, projection: result.projection as InitialEvaluationProjection | null };
   }
 
   cancelInitialEvaluationPreparationWork(workId: string): boolean {
-    this.#analysisCall(() => this.#initialEvaluation.prepare({ phase: 'cancel', workId }));
+    // As the reader's report's: a preparation already settled or let go has nothing left to cancel.
+    const ledger = this.#initialEvaluationWork.get(workId);
+    if (ledger === undefined) return false;
+    this.#analysisCall(() => ledger.prepare({ phase: 'cancel', workId }));
+    this.#initialEvaluationWork.delete(workId);
     return true;
   }
 
@@ -8575,17 +8687,28 @@ export class EditorialStore {
     taskIntentId: string,
     planEnvelopeDigest: string,
     start: 'now' | 'when-online' = 'now',
-  ): { dispatchRunRecordId: string | null } {
+  ): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore } {
     this.#requireLedgerKindScope('initial-evaluation', bookId, taskIntentId);
     const ledger = this.#ledgerTaskOf('initial-evaluation', bookId, taskIntentId);
     const authorized = this.#analysisCall(() => ledger.authorize(bookId, taskIntentId, planEnvelopeDigest, start));
-    return { dispatchRunRecordId: authorized.dispatchRunRecordId };
+    return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger };
   }
 
   /**
    * 初评 runs only where its book-level synthesis may be sent (Issue #429 review, P2): under a live scope the active policy does
    * not name it, so nothing is prepared or started there, and 评估 says why. The provider-free scope is unaffected.
    */
+  #requireEvaluationMaterialScope(hasReferences: boolean): void {
+    if (hasReferences && this.#baselineAnalysis.launch.live !== null) throw new StoreError('TASK_MATERIAL_UNAVAILABLE', TASK_MATERIAL_LIVE_UNAVAILABLE);
+  }
+
+  #requireEvaluationMaterialReadings(ledger: BaselineAnalysisStore, bookId: string): void {
+    const sources = ledger.definition.materialReferences?.sources;
+    if (sources === undefined) return;
+    const refusal = this.#taskMaterialReadings({ bookId, references: sources }, '评估').find((reading) => reading.refusal !== null)?.refusal;
+    if (refusal !== undefined) throw new StoreError(refusal.code, refusal.message);
+  }
+
   #requireInitialEvaluationScope(): void {
     this.#assertAvailable();
     if (this.#initialEvaluation.launch.live !== null) throw new StoreError('EVALUATION_INITIAL_UNAVAILABLE', INITIAL_EVALUATION_LIVE_UNAVAILABLE);
@@ -8595,7 +8718,7 @@ export class EditorialStore {
   #initialEvaluationFacts(bookId: string): InitialEvaluationFacts | null {
     let projection: InitialEvaluationProjection;
     try {
-      projection = this.#initialEvaluation.inspect(bookId) as InitialEvaluationProjection;
+      projection = this.initialEvaluationLedgerForBook(bookId).inspect(bookId) as InitialEvaluationProjection;
     } catch (error) {
       if (error instanceof AnalysisError) return null;
       throw error;
@@ -8639,7 +8762,7 @@ export class EditorialStore {
   #initialEvaluationTask(bookId: string): Pick<EvaluationInitialProjection, 'task' | 'prepare'> {
     let projection: InitialEvaluationProjection;
     try {
-      projection = this.#initialEvaluation.inspect(bookId) as InitialEvaluationProjection;
+      projection = this.initialEvaluationLedgerForBook(bookId).inspect(bookId) as InitialEvaluationProjection;
     } catch (error) {
       if (error instanceof AnalysisError) return { task: null, prepare: { allowed: false, reason: `AI7 初评暂不可用：${error.message}` } };
       throw error;
@@ -8663,14 +8786,17 @@ export class EditorialStore {
    * in flight, which only that instance holds (Issue #672); any other is made afresh from the Book database and reads exactly
    * what the one let go would have. It takes the launch the baseline ledger was bound to.
    */
-  readersReportLedger(input: ReadersReportContractInput): BaselineAnalysisStore {
+  readersReportLedger(input: ReadersReportContractInput, materials?: TaskMaterialBoundary, frozenPromptDigest?: string): BaselineAnalysisStore {
     this.#assertAvailable();
-    const definition = this.#analysisCall(() => readersReportKindDefinition(input));
-    return this.#readersReportLedgers.obtain(definition.promptContractDigest, () => {
+    const base = this.#analysisCall(() => readersReportKindDefinition(input));
+    const readings = materials === undefined || materials.references.length === 0 ? [] : this.#taskMaterialReadings(materials, '评估');
+    const definition = materials === undefined ? base : this.#analysisCall(() => taskMaterialKindDefinition(base, materials, readings, frozenPromptDigest));
+    const make = (): BaselineAnalysisStore => {
       const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
       ledger.bindLaunch(this.#baselineAnalysis.launch);
       return ledger;
-    });
+    };
+    return readings.some((reading) => reading.refusal !== null) ? make() : this.#readersReportLedgers.obtain(definition.promptContractDigest, make);
   }
 
   /** The kept reader's report ledger that holds the preparation `workId`, if one does: a ledger preparing is never let go. */
@@ -8693,16 +8819,14 @@ export class EditorialStore {
 
   /** One Task's 定稿 version and template — the one its frozen plan names when it froze one. */
   #readersReportTaskOf(taskIntentId: string): { task: StoredReadersReportTask; ledger: BaselineAnalysisStore } | null {
-    let task = this.#readersReportCall(() => this.#readersReports.task(taskIntentId));
-    if (task === null) return null;
-    let ledger = this.readersReportLedger(task.input);
-    const planContract = this.#readersReportCall(() => this.#readersReports.planContract(taskIntentId));
-    if (planContract !== null && planContract !== task.promptContractSha256) {
-      task = this.#readersReportCall(() => this.#readersReports.task(taskIntentId, planContract));
-      requireStore(task !== null, 'READERS_REPORT_RECORD_INVALID', '审稿意见任务的计划与它的记录不一致。');
-      ledger = this.readersReportLedger(task.input);
+    const frozen = this.#evaluationMaterialPlan(taskIntentId);
+    const planContract = frozen?.baseDigest ?? this.#readersReportCall(() => this.#readersReports.planContract(taskIntentId));
+    const task = this.#readersReportCall(() => this.#readersReports.task(taskIntentId, planContract));
+    if (task === null) {
+      requireStore(planContract === null, 'READERS_REPORT_RECORD_INVALID', '审稿意见任务的计划与它的记录不一致。');
+      return null;
     }
-    return { task, ledger };
+    return { task, ledger: this.readersReportLedger(task.input, frozen?.boundary, frozen?.promptDigest) };
   }
 
   /** The Book's latest 审稿意见 Task with its ledger and projection; `null` before the first, or for one no record names. */
@@ -8742,46 +8866,69 @@ export class EditorialStore {
    * Book title, at most `MAX_READERS_REPORT_EXEMPLARS`; each is its Book's title with the template, and the pinned version's own
    * words, their opening when longer than the contract takes. A Book's own 审稿意见 never seeds its own draft. Before any
    * admission every plan says 「本社暂无审稿意见范例，本次不参考范例」 and the draft is written without one.
+   *
+   * A damaged record is named rather than raised (Issue #778): the item is listed in `damaged` as it would be listed if it
+   * read, and every other exemplar — and the rest of 评估 — still reads.
    */
-  #readersReportExemplars(bookId: string): ReadersReportExemplarInput[] {
+  #readersReportExemplars(bookId: string): { exemplars: ReadersReportExemplarInput[]; damaged: string[] } {
     const rows = this.#authority.prepare(
       `SELECT DISTINCT d.book_id, d.material_key, b.title FROM learning_eligibility_decisions d JOIN books b ON b.book_id = d.book_id
        WHERE d.material_key LIKE ? AND d.book_id <> ? ORDER BY b.title COLLATE BINARY, d.book_id, d.material_key`,
     ).all(`${READERS_REPORT_EXEMPLAR_KEY_PREFIX}%`, bookId) as SqlRow[];
     const exemplars: ReadersReportExemplarInput[] = [];
+    const damaged: string[] = [];
     for (const row of rows) {
       if (exemplars.length === MAX_READERS_REPORT_EXEMPLARS) break;
       const otherBookId = asString(row.book_id);
       const template = asString(row.material_key).slice(READERS_REPORT_EXEMPLAR_KEY_PREFIX.length) as ReadersReportTemplate;
       if (!READERS_REPORT_TEMPLATES.includes(template)) continue;
-      const current = this.#publicationCall(() => this.#publicationVersions.current(otherBookId));
-      if (current === null || current.withdrawn) continue;
-      const pin = this.#readersReportPins(otherBookId, current.projection.createdAt).find((entry) => entry.template === template);
-      if (pin === undefined) continue;
-      const candidate = this.#readersReportExemplarCandidate(pin);
-      const latest = this.#learningCall(() => this.#learningEligibility.history(otherBookId, candidate.materialKey)).at(-1);
-      if (latest === undefined || latest.choice !== 'house' || latest.materialDigest !== learningMaterialDigest(candidate)) continue;
-      const words = (this.#authority.prepare('SELECT text FROM manuscript_block_versions WHERE revision_id = ? ORDER BY position').all(pin.revisionId) as SqlRow[])
-        .map((block) => asString(block.text).replace(/\r\n?/gu, '\n').replace(/[\t\f\v]/gu, ' ').trim()).filter((line) => line.length > 0).join('\n');
-      if (words.length === 0) continue;
-      exemplars.push({ title: boundedGraphemes(`${asString(row.title)} · ${pin.typeLabel}`, 200), text: boundedGraphemes(words, MAX_EXEMPLAR_GRAPHEMES) });
-    }
-    // Then earlier Books' imported 审稿意见 (Issue #427), by title as 范例 lists them: only those Books are read, a page at a time.
-    let after: ExemplarBookCursor | null = null;
-    while (exemplars.length < MAX_READERS_REPORT_EXEMPLARS) {
-      const page = this.#importedCall(() => this.#importedExemplars.books(after, MAX_EXEMPLAR_BOOKS_PAGE));
-      for (const earlier of page) {
-        const book = this.#importedCall(() => this.#importedExemplars.book(earlier.bookId));
-        for (const entry of book.exemplars) {
-          if (!entry.typeId.startsWith('readers-report-') || entry.eligibility !== 'house-only') continue;
-          const words = this.#importedCall(() => readWritingExemplarWords(this.#authority, entry.revisionId));
-          if (words !== null) exemplars.push({ title: boundedGraphemes(`${book.bookTitle} · ${entry.typeLabel} · 版本 ${entry.version}`, 200), text: words.text });
-        }
+      // Named as 范例 lists it, so a damaged record is still named by its Book and template.
+      const title = boundedGraphemes(`${asString(row.title)} · ${readersReportDocumentType(readersReportDocumentTypeId(template))!.label}`, 200);
+      try {
+        const current = this.#publicationCall(() => this.#publicationVersions.current(otherBookId));
+        if (current === null || current.withdrawn) continue;
+        const pin = this.#readersReportPins(otherBookId, current.projection.createdAt).find((entry) => entry.template === template);
+        if (pin === undefined) continue;
+        const candidate = this.#readersReportExemplarCandidate(pin);
+        const latest = this.#learningCall(() => this.#learningEligibility.history(otherBookId, candidate.materialKey)).at(-1);
+        if (latest === undefined || latest.choice !== 'house' || latest.materialDigest !== learningMaterialDigest(candidate)) continue;
+        const words = (this.#authority.prepare('SELECT text FROM manuscript_block_versions WHERE revision_id = ? ORDER BY position').all(pin.revisionId) as SqlRow[])
+          .map((block) => asString(block.text).replace(/\r\n?/gu, '\n').replace(/[\t\f\v]/gu, ' ').trim()).filter((line) => line.length > 0).join('\n');
+        if (words.length === 0) continue;
+        exemplars.push({ title, text: boundedGraphemes(words, MAX_EXEMPLAR_GRAPHEMES) });
+      } catch (error) {
+        if (!(error instanceof StoreError)) throw error;
+        damaged.push(title);
       }
-      if (page.length < MAX_EXEMPLAR_BOOKS_PAGE) break;
-      after = { title: page.at(-1)!.title, bookId: page.at(-1)!.bookId };
     }
-    return exemplars.slice(0, MAX_READERS_REPORT_EXEMPLARS);
+    // Then earlier Books' imported 审稿意见 (Issue #427), by title as 范例 lists them: only those Books are read, one item at a
+    // time, so a damaged record leaves out only itself (Issue #778).
+    for (const item of this.#importedCall(() => this.#importedExemplars.readersReportExemplarCandidates())) {
+      if (exemplars.length === MAX_READERS_REPORT_EXEMPLARS) break;
+      const title = boundedGraphemes(item.title, 200);
+      if (item.revisionId === null) { damaged.push(title); continue; }
+      try {
+        const words = readWritingExemplarWords(this.#authority, item.revisionId);
+        if (words !== null) exemplars.push({ title, text: words.text });
+      } catch (error) {
+        if (!(error instanceof ImportedExemplarError)) throw error;
+        damaged.push(title);
+      }
+    }
+    return { exemplars, damaged };
+  }
+
+  /**
+   * What 评估 says of the house's 审稿意见 exemplars (Issue #778): the ones that read, and any damaged record named as it would
+   * be listed, so one damaged record leaves only itself out.
+   */
+  #readersReportExemplarStatement(readings: { exemplars: ReadersReportExemplarInput[]; damaged: string[] }): string {
+    if (readings.damaged.length === 0) return readersReportExemplarLine(readings.exemplars);
+    const names = readings.damaged.map((title) => `《${title}》`).join('、');
+    const damaged = `另有 ${readings.damaged.length} 份范例记录已损坏，无法读取`;
+    return readings.exemplars.length === 0
+      ? `本社没有可以读取的审稿意见范例，本次不参考范例；${damaged}：${names}`
+      : `${readersReportExemplarLine(readings.exemplars)}；${damaged}，本次不参考：${names}`;
   }
 
   /**
@@ -8789,15 +8936,16 @@ export class EditorialStore {
    * the mode that applies — the first draft, or another once one settled. Refused under a live scope, while no version is
    * 定稿, or once the template has its draft document. Its plan opens in the Task Drawer.
    */
-  createReadersReportPreparationWork(bookId: string, template: ReadersReportTemplate, launchPolicy: LaunchPolicyProjection): AnalysisPreparationResult<ReadersReportProjection> {
+  createReadersReportPreparationWork(bookId: string, template: ReadersReportTemplate, launchPolicy: LaunchPolicyProjection, materialIds: ReadonlyArray<string> = []): AnalysisPreparationResult<ReadersReportProjection> {
+    this.#requireEvaluationMaterialScope(materialIds.length > 0);
     this.#requireReadersReportScope();
     requireStore(UUID_PATTERN.test(bookId) && READERS_REPORT_TEMPLATES.includes(template), 'READERS_REPORT_INVALID', '审稿意见参数无效。');
     const basis = this.#evaluationCall(() => this.#evaluations.latestFinalized(bookId));
     requireStore(basis !== null, 'READERS_REPORT_NEEDS_FINALIZED', READERS_REPORT_NEEDS_FINALIZED);
     requireStore(this.#documentCall(() => this.#productionDocuments.documentOfType(bookId, readersReportDocumentTypeId(template))) === undefined,
       'READERS_REPORT_DRAFT_EXISTS', `这本书已经有「${READERS_REPORT_TEMPLATE_LABELS[template]}」的草稿；请打开它继续修改。`);
-    const input = this.#readersReportCall(() => readersReportContractInput(template, basis, this.#readersReportExemplars(bookId)));
-    const ledger = this.readersReportLedger(input);
+    const input = this.#readersReportCall(() => readersReportContractInput(template, basis, this.#readersReportExemplars(bookId).exemplars));
+    const ledger = this.readersReportLedger(input, { bookId, references: this.#prepareTaskMaterials(bookId, materialIds) });
     const latest = this.#latestReadersReport(bookId);
     const mode = latest === null || latest.projection.resultSetRevision === null ? 'readers-report-first' : 'readers-report-again';
     const result = this.#analysisCall(() => ledger.prepare({
@@ -8807,6 +8955,7 @@ export class EditorialStore {
       update: mode === 'readers-report-first' ? null : { mode, selectedRange: null },
       reconfirm: false,
       launchPolicy,
+      ...(canonicalJson(latest?.ledger.definition.materialReferences?.sources ?? []) === canonicalJson(ledger.definition.materialReferences?.sources ?? []) ? {} : { newTask: true }),
     }));
     // Which 定稿 version and template the Task drafts from, recorded once for it and this contract.
     const taskIntentId = this.#readersReportCall(() => this.#readersReports.latestTaskIntentId(bookId));
@@ -8817,7 +8966,7 @@ export class EditorialStore {
       recordId: basis.recordId,
       finalizedEntrySha256: basis.entrySha256,
       contract: input,
-      promptContractSha256: ledger.definition.promptContractDigest,
+      promptContractSha256: ledger.definition.materialReferences?.basePromptContractDigest ?? ledger.definition.promptContractDigest,
     })));
     return { ...result, projection: result.projection as ReadersReportProjection | null };
   }
@@ -8868,7 +9017,7 @@ export class EditorialStore {
    * drafted, its newest result not yet opened, and its draft document.
    */
   #readersReportWorkspace(bookId: string, basis: FinalizedEvaluation | null, unreadable: string | null): EvaluationReadersReportProjection {
-    const exemplars = this.#readersReportExemplars(bookId);
+    const readings = this.#readersReportExemplars(bookId);
     let latest: { task: StoredReadersReportTask; ledger: BaselineAnalysisStore; projection: ReadersReportProjection } | null = null;
     let unavailable: string | null = unreadable;
     try {
@@ -8916,7 +9065,7 @@ export class EditorialStore {
     const task = latest?.projection.taskIntent ?? null;
     return {
       basis: basis === null ? null : { recordId: basis.recordId, ordinal: basis.ordinal, revisionLabel: basis.revisionLabel, finalizedAt: basis.finalizedAt },
-      exemplars: { count: exemplars.length, statement: readersReportExemplarLine(exemplars) },
+      exemplars: { count: readings.exemplars.length, statement: this.#readersReportExemplarStatement(readings) },
       task: latest === null || task === null ? null : {
         taskIntentId: task.taskIntentId,
         template: latest.task.template,
@@ -10251,7 +10400,7 @@ export class EditorialStore {
     return this.#evaluationCall(() => {
       const title = this.#evaluationBookTitle(input.bookId);
       this.#transaction(this.#authority, () => this.#evaluations.save(input.bookId, input.recordId, input.expectedEntries, input.content, input.finalize));
-      return this.#evaluations.workspace(input.bookId, title, input.recordId);
+      return this.#withEvaluationMaterials(this.#evaluations.workspace(input.bookId, title, input.recordId));
     });
   }
 

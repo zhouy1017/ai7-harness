@@ -779,12 +779,12 @@ async function dispatch(
     // AI7 初评 (Issue #429, S81b1): prepared as a cooperative job whose plan the Task Drawer opens, and started from its bar
     // through the governor exactly as the baseline analysis is — admitted while a place is free, else waiting for one.
     case 'prepareInitialEvaluation':
-      return { id: request.id, ok: true, op: request.op, result: jobs.startInitialEvaluationPreparation(request.input.bookId, launchPolicy) };
+      return { id: request.id, ok: true, op: request.op, result: jobs.startInitialEvaluationPreparation(request.input.bookId, launchPolicy, request.input.materialIds) };
     case 'authorizeInitialEvaluation': {
       const authorized = store.authorizeInitialEvaluation(request.input.bookId, request.input.taskIntentId, request.input.planEnvelopeDigest);
       if (authorized.dispatchRunRecordId !== null) {
         try {
-          analysisExecution.admitOrQueue(authorized.dispatchRunRecordId, store.initialEvaluationLedger);
+          analysisExecution.admitOrQueue(authorized.dispatchRunRecordId, authorized.ledger);
         } catch (error) {
           const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
           throw new StoreErrorClass(code, error instanceof Error ? error.message : '运行未能进入调度。');
@@ -795,7 +795,7 @@ async function dispatch(
     // 审稿意见 (Issue #429, S81c): drafted from the Book's latest 定稿 version, prepared as a cooperative job whose plan the Task
     // Drawer opens, and started from its bar through the governor on the ledger of the plan's contract, as 初评 is.
     case 'prepareReadersReport':
-      return { id: request.id, ok: true, op: request.op, result: jobs.startReadersReportPreparation(request.input.bookId, request.input.template, launchPolicy) };
+      return { id: request.id, ok: true, op: request.op, result: jobs.startReadersReportPreparation(request.input.bookId, request.input.template, launchPolicy, request.input.materialIds) };
     case 'authorizeReadersReport': {
       const authorized = store.authorizeReadersReport(request.input.bookId, request.input.taskIntentId, request.input.planEnvelopeDigest);
       if (authorized.dispatchRunRecordId !== null) {

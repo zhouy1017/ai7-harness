@@ -1,4 +1,5 @@
-import { taskMaterialReferenceLine } from './task-material-references.js';
+import { taskMaterialReferenceLine, type TaskMaterialReading } from './task-material-references.js';
+
 import type {
   AnalysisReusePlanCounts,
   BaselineAnalysisPlanRevisionProjection,
@@ -887,6 +888,27 @@ const INITIAL_EVALUATION_GOAL_SENTENCES: Readonly<Record<InitialEvaluationTaskMo
   'evaluation-again': '重新做 AI7 初评：按当前稿件重读全书，重新给出各评分项的初评分数与评语',
 };
 
+/** Evaluation's optional background references: preserve every no-reference projection byte. */
+export function evaluationMaterialPlan(plan: TaskPlanProjection, materials: ReadonlyArray<TaskMaterialReading>): TaskPlanProjection {
+  if (materials.length === 0) return plan;
+  const refusal = materials.find((material) => material.refusal !== null)?.refusal ?? null;
+  const names = materials.map(({ source }) => `《${source.title}》`).join('、');
+  const sending = plan.scope.send === '不发送任何内容'
+    ? `不发送任何内容；资料库资料${names}的提取文字也只在本机读取，只参照，不照抄`
+    : `${plan.scope.send}；资料库资料${names}的提取文字随稿件一并发往，只参照，不照抄`;
+  return {
+    ...plan,
+    state: refusal === null ? plan.state : { key: 'changed', label: '参考资料已不可用' },
+    scope: { ...plan.scope, reference: [...plan.scope.reference, ...materials.map(taskMaterialReferenceLine),
+      '资料库资料只提供背景，不改变本社评估方案，也不覆盖定稿的分数、评语与结论。'], send: sending },
+    notDo: { ...plan.notDo, editorial: plan.notDo.editorial.map((line) => line === '不读这本书以外的内容' ? '不读允许参考以外的资料' : line) },
+    technical: [...plan.technical, { key: 'material-references', label: '资料库参考版本',
+      value: materials.map(({ source }) => `《${source.title}》 · ${source.materialId} · 索引版本 ${source.indexDigest} · ${source.characters} 字`).join('；') }],
+    start: refusal === null ? plan.start : { ...plan.start, readiness: 'changed', planEnvelopeDigest: null },
+    drift: refusal === null ? plan.drift : { reasons: [...(plan.drift?.reasons ?? []), refusal.message], entries: plan.drift?.entries ?? [],
+      resolution: '可以在「评估」重新准备计划。' },
+  };
+}
 /**
  * The plan of the Book's AI7 初评 Task: the evaluation kind's ledger read in the editor's words, as the baseline plan is. Its
  * steps are what the kind does — read each range for the evidence of each scored item, then score the items — and what it
@@ -2218,7 +2240,7 @@ export function reviewRunPlan(input: {
           ? `${category.label}：${category.procedure.title}（第 ${category.procedure.version} 版）`
           : `${category.label}：${category.guidelineDocuments.map((document) => `${document.issuer}《${document.title}》第 ${document.version} 版`).join('、')}`), ...materials.map(taskMaterialReferenceLine),
         ...(materials.length === 0 ? [] : ['资料库资料只供调用模型的审阅类别参考；事实核查与只读已有线索的类别不参考这些资料。'])],
-      send: tasks.length === 0 || !live ? materials.length === 0 ? '不发送任何内容' : '不发送任何内容；上面列出的资料库资料也只在本机读取' : `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${materials.length === 0 ? '' : '，以及上面列出的资料库资料原文'}`,
+      send: (live || facts.materialsRefusedLive === true) && materials.length > 0 ? '不发送任何内容；这份计划列了资料库资料，当前运行范围不能把它们发送给模型，这份计划不能开始' : tasks.length === 0 || !live ? materials.length === 0 ? '不发送任何内容' : '不发送任何内容；上面列出的资料库资料也只在本机读取' : `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${materials.length === 0 ? '' : '，以及上面列出的资料库资料原文'}`,
       notRead: scope.kind === 'whole' ? NOT_READ : spans === null ? `所选范围以外的正文；${NOT_READ}` : `${spans}以外的正文；${NOT_READ}`,
     },
     steps: [

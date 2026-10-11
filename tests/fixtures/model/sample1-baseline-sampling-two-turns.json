@@ -1,0 +1,36 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-baseline-sampling-two-turns",
+  "description": "Hand-written synthetic shape (x) over shape (i): identical to sample1-baseline-happy except that the cross-unit reduction's second finding is stated with its unit-3 side first, so the drawn sample has two turns — one anchored in unit 1, one in unit 3. The first turn (unit 1) is sent and its answer never comes back whole (结果待确认, Issue #789 item 1), and the second turn (unit 3) carries a conforming entry a wrongly continuing Run would serve; the sample must stop at the first ambiguous turn and nothing may be sent again. Only J-10's launch may bind it (`outcomeUnknownFixtureAllowed`). The two descriptions are the base's own public synthetic text, restated with the second finding's sides swapped; no manuscript content.",
+  "basedOn": "sample1-baseline-happy",
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "3e6c2262e197cb0179a4f49ab26d8bb54ca14e2eae81af26ed62f28eb039c336",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.baseline-manuscript-analysis.cross-unit-result/1\",\"findings\":[{\"kind\":\"chronology-conflict\",\"description\":\"合成时序冲突：单元 1 把人物甲抵达合成之城记为「开端」，单元 3 让人物乙回望该城却不给出时序，两处对同一段行程的先后无法同时成立。\",\"sides\":[{\"unitOrdinal\":1,\"sourceRanges\":[{\"blockId\":\"{{unit:1:block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"unitOrdinal\":3,\"sourceRanges\":[{\"blockId\":\"{{unit:3:block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"confidence\":\"medium\"},{\"kind\":\"continuity-break\",\"description\":\"合成连续性断裂：单元 1 让人物甲抵达合成之城之后，单元 3 只写人物乙的视角，未交代人物甲的去向。\",\"sides\":[{\"unitOrdinal\":3,\"sourceRanges\":[{\"blockId\":\"{{unit:3:block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]},{\"unitOrdinal\":1,\"sourceRanges\":[{\"blockId\":\"{{unit:1:block:2}}\",\"fromGrapheme\":null,\"toGrapheme\":null}]}],\"confidence\":\"low\"}],\"notes\":[\"合成备注：其余单元未再提及这两处。\"]}",
+        "usage": { "inputTokens": 2000, "outputTokens": 300 }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "493c19561888d834be98fde18904eeb51d6737a686ccd1ae9d096d75270fda6b",
+      "response": {
+        "kind": "outcome-unknown",
+        "message": "Synthetic dropped answer for the sample's first turn, anchored in unit 1: the request was sent and its answer never came back whole (fixture shape x)."
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "727f3f587186fc9629d39f78d8c925f77feafc9ba6cf26312a1349ca2aace750",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"重读单元 3 的内容块：唯一一条锚定在单元 3 的发现按原样成立；这一轮本不应再发送。\"}]}",
+        "usage": { "inputTokens": 1500, "outputTokens": 200 }
+      }
+    }
+  ]
+}
