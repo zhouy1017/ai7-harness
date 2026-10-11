@@ -42,6 +42,12 @@ export function exemplarImportButton(surface: Surface, book: ExemplarBookProject
     const type = node('select');
     type.required = true;
     type.disabled = true;
+    // No deliverable type is preselected (Issue #778): until the editor chooses one, the prompt is the only option and
+    // 导入范例 stays disabled.
+    const unchosen = node('option', '请选择文档类型');
+    unchosen.value = '';
+    type.replaceChildren(unchosen);
+    type.addEventListener('change', () => { submit.disabled = preview === null || type.value === ''; });
     typeLabel.append(type);
     const choose = node('button', '选择文件');
     choose.type = 'button';
@@ -64,16 +70,17 @@ export function exemplarImportButton(surface: Surface, book: ExemplarBookProject
       try {
         preview = await surface.api.previewImportedExemplar();
         if (preview === null) { surface.status('已取消选择'); return; }
-        type.replaceChildren(...preview.types.map((entry) => {
+        type.replaceChildren(unchosen, ...preview.types.map((entry) => {
           const option = node('option', entry.label);
           option.value = entry.typeId;
           return option;
         }));
+        type.value = '';
         type.disabled = false;
         previewLine.textContent = `${preview.displayName} · ${preview.format}`;
         excerpt.textContent = preview.excerpt;
-        submit.disabled = false;
-        surface.status('范例文件已读取，请填写图书信息后导入');
+        submit.disabled = true;
+        surface.status('范例文件已读取，请填写图书信息、选择文档类型后导入');
       } catch (error) { surface.status(surface.error(error, '无法读取范例文件。'), 'error'); }
       finally { choose.disabled = false; }
     });
