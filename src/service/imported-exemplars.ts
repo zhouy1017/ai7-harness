@@ -319,18 +319,45 @@ export class ImportedExemplars {
   }
   book(bookId: string): ExemplarBookProjection {
     const book = this.#book(bookId);
-    return { bookId, bookTitle: book.title, authors: book.authors, editors: book.editors, imported: true, publicationOrdinal: 0, designatedAt: book.recordedAt, withdrawn: false, readersReports: [],
-      exemplars: IMPORTED_EXEMPLAR_TYPES.flatMap((type) => {
-        const versions = this.#versions(bookId, type.typeId);
-        const row = versions.latest;
-        if (row === undefined) return [];
-        const decisions = this.#decisions(String(row.revision_id));
-        requireExemplar(decisions.length > 0, CORRUPT, 'EXEMPLAR_RECORD_INVALID');
-        const choice = decisions.at(-1)!.choice;
-        return [{ documentId: String(row.document_id), typeId: type.typeId, typeLabel: type.label, revisionId: String(row.revision_id), revisionDigest: String(row.sha256), version: Number(row.version),
-          deliveredTo: '', deliveredAt: String(row.recorded_at), archivedAt: String(row.recorded_at), earlierVersionCount: versions.count - 1, earlierVersions: versions.earlier,
-          eligibility: choice === 'house' ? 'house-only' as const : choice === 'excluded' ? 'excluded' as const : 'deferred' as const,
-          imported: { decisions: decisions.length, sourceName: String((record(row).source as Record<string, unknown>).displayName) } }];
-      }) };
+    return this.#projection(bookId, book, IMPORTED_EXEMPLAR_TYPES.flatMap((type) => this.#exemplar(bookId, type)));
+  }
+  /**
+   * The Book as the 写作任务 scan reads it, one item at a time (Issue #789, as #778 did for 审稿意见): a type whose versions or
+   * decision ledger no longer read — or any type of a Book whose own record does not — is left out of `book.exemplars` and named in
+   * `damaged` by Book and type, while every other type of the Book still reads. `title` is the Book's listed title.
+   */
+  bookForWriting(bookId: string, title: string): { book: ExemplarBookProjection; damaged: Array<{ typeId: string; title: string }> } {
+    let head: { title: string; authors: string[]; editors: string[]; recordedAt: string } | null = null;
+    try { head = this.#book(bookId); } catch (error) { if (!(error instanceof ImportedExemplarError)) throw error; }
+    const exemplars: Array<ExemplarBookProjection['exemplars'][number]> = [];
+    const damaged: Array<{ typeId: string; title: string }> = [];
+    for (const type of IMPORTED_EXEMPLAR_TYPES) {
+      const latest = this.db.prepare('SELECT version FROM earlier_exemplar_versions WHERE book_id = ? AND type_id = ? ORDER BY version DESC LIMIT 1').get(bookId, type.typeId);
+      if (latest === undefined) continue;
+      try {
+        requireExemplar(head !== null, CORRUPT, 'EXEMPLAR_RECORD_INVALID');
+        exemplars.push(...this.#exemplar(bookId, type));
+      } catch (error) {
+        if (!(error instanceof ImportedExemplarError)) throw error;
+        // The broken link can be an older version or the Book/decision record; do not blame the latest version.
+        damaged.push({ typeId: type.typeId, title: `${title} · ${type.label}` });
+      }
+    }
+    return { book: this.#projection(bookId, head ?? { title, authors: [], editors: [], recordedAt: '' }, exemplars), damaged };
+  }
+  #projection(bookId: string, book: { title: string; authors: string[]; editors: string[]; recordedAt: string }, exemplars: ExemplarBookProjection['exemplars']): ExemplarBookProjection {
+    return { bookId, bookTitle: book.title, authors: book.authors, editors: book.editors, imported: true, publicationOrdinal: 0, designatedAt: book.recordedAt, withdrawn: false, readersReports: [], exemplars };
+  }
+  #exemplar(bookId: string, type: (typeof IMPORTED_EXEMPLAR_TYPES)[number]): ExemplarBookProjection['exemplars'] {
+    const versions = this.#versions(bookId, type.typeId);
+    const row = versions.latest;
+    if (row === undefined) return [];
+    const decisions = this.#decisions(String(row.revision_id));
+    requireExemplar(decisions.length > 0, CORRUPT, 'EXEMPLAR_RECORD_INVALID');
+    const choice = decisions.at(-1)!.choice;
+    return [{ documentId: String(row.document_id), typeId: type.typeId, typeLabel: type.label, revisionId: String(row.revision_id), revisionDigest: String(row.sha256), version: Number(row.version),
+      deliveredTo: '', deliveredAt: String(row.recorded_at), archivedAt: String(row.recorded_at), earlierVersionCount: versions.count - 1, earlierVersions: versions.earlier,
+      eligibility: choice === 'house' ? 'house-only' as const : choice === 'excluded' ? 'excluded' as const : 'deferred' as const,
+      imported: { decisions: decisions.length, sourceName: String((record(row).source as Record<string, unknown>).displayName) } }];
   }
 }

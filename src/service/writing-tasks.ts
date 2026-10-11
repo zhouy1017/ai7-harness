@@ -1,5 +1,5 @@
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
-import { readImportedExemplar } from './imported-exemplars.js';
+import { ImportedExemplarError, readImportedExemplar } from './imported-exemplars.js';
 import { WRITING_KIND, type WritingDraftWordsProjection } from '../shared/protocol.js';
 import { UUID_PATTERN, canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
 import { graphemeCount } from './analysis/factual-review-contract.js';
@@ -432,7 +432,12 @@ export class WritingTasks {
     const key = `${source.revisionId}:${source.sha256}`;
     const known = this.#exemplarWords.get(key);
     if (known !== undefined) return known;
-    const words = readWritingExemplarWords(this.#db, source.revisionId);
+    // A pinned version that no longer reads is a version that is not here (Issue #789): the Task's results and drafts stay
+    // readable and only starting it again is refused, as for any exemplar the data no longer holds.
+    let words: ReturnType<typeof readWritingExemplarWords> = null;
+    try { words = readWritingExemplarWords(this.#db, source.revisionId); } catch (error) {
+      if (!(error instanceof ImportedExemplarError)) throw error;
+    }
     const pinned = words !== null && writingExemplarDigest(words.text) === source.sha256 ? words.text : null;
     if (this.#exemplarWords.size >= 64) this.#exemplarWords.clear();
     this.#exemplarWords.set(key, pinned);
