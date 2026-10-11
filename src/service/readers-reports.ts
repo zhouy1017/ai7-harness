@@ -176,6 +176,12 @@ export function readersReportContractInput(
   };
 }
 
+/** One preparation's skipped exemplar, as 评估 and the frozen plan name it (Issue #792): a damaged record, or a ledger. */
+export interface ReadersReportSkippedExemplar {
+  readonly title: string;
+  readonly reason: 'record' | 'ledger';
+}
+
 /** One 审稿意见 Task as its row holds it, verified. */
 export interface StoredReadersReportTask {
   readonly taskIntentId: string;
@@ -185,6 +191,11 @@ export interface StoredReadersReportTask {
   readonly finalizedEntrySha256: string;
   readonly template: ReadersReportTemplate;
   readonly input: ReadersReportContractInput;
+  /**
+   * What the preparation skipped for damage, as 评估 named it then: a frozen plan carries the note, and a row recorded before
+   * Issue #792 names none.
+   */
+  readonly skippedExemplars: ReadonlyArray<ReadersReportSkippedExemplar>;
   readonly recordedAt: string;
 }
 
@@ -260,6 +271,11 @@ export class ReadersReports {
       isRecord(stored.input) && stored.input.template === row.template,
     'READERS_REPORT_RECORD_INVALID', CORRUPT);
     const input = stored.input as unknown as ReadersReportContractInput;
+    // What the preparation skipped for damage (Issue #792): a row recorded before it names none.
+    const skipped = stored.skippedExemplars === undefined ? [] : stored.skippedExemplars;
+    requireReport(Array.isArray(skipped) && skipped.every((entry) => isRecord(entry) && typeof entry.title === 'string' && entry.title.isWellFormed() &&
+      entry.title.length > 0 && graphemeCount(entry.title) <= 200 && (entry.reason === 'record' || entry.reason === 'ledger')),
+    'READERS_REPORT_RECORD_INVALID', CORRUPT);
     // The frozen input is the contract: its digest must be the one the row names.
     let digest: string;
     try {
@@ -276,6 +292,7 @@ export class ReadersReports {
       finalizedEntrySha256: text(row.finalized_entry_sha256),
       template: template(row.template),
       input,
+      skippedExemplars: (skipped as ReadersReportSkippedExemplar[]).map((entry) => ({ title: entry.title, reason: entry.reason })),
       recordedAt: text(row.recorded_at),
     };
   }
@@ -290,10 +307,14 @@ export class ReadersReports {
     recordId: string;
     finalizedEntrySha256: string;
     contract: ReadersReportContractInput;
+    /** What the preparation skipped for damage, so the frozen plan's exemplar line can name it (Issue #792). */
+    skippedExemplars: ReadonlyArray<ReadersReportSkippedExemplar>;
     promptContractSha256: string;
   }): void {
-    requireReport(UUID_PATTERN.test(input.taskIntentId) && UUID_PATTERN.test(input.bookId) && UUID_PATTERN.test(input.recordId),
-      'READERS_REPORT_INVALID', '审稿意见参数无效。');
+    requireReport(UUID_PATTERN.test(input.taskIntentId) && UUID_PATTERN.test(input.bookId) && UUID_PATTERN.test(input.recordId) &&
+      input.skippedExemplars.every((entry) => typeof entry.title === 'string' && entry.title.isWellFormed() && entry.title.length > 0 &&
+        graphemeCount(entry.title) <= 200 && (entry.reason === 'record' || entry.reason === 'ledger')),
+    'READERS_REPORT_INVALID', '审稿意见参数无效。');
     const intent = this.#db.prepare('SELECT book_id, kind FROM analysis_task_intents WHERE task_intent_id = ?').get(input.taskIntentId) as SqlRow | undefined;
     requireReport(intent !== undefined && intent.book_id === input.bookId && intent.kind === READERS_REPORT_KIND, 'READERS_REPORT_INVALID', '审稿意见任务无效。');
     const existing = this.#db.prepare('SELECT 1 FROM readers_report_tasks WHERE task_intent_id = ? AND prompt_contract_sha256 = ?')
@@ -309,6 +330,7 @@ export class ReadersReports {
       finalizedEntrySha256: input.finalizedEntrySha256,
       template: input.contract.template,
       input: input.contract,
+      skippedExemplars: input.skippedExemplars.map((entry) => ({ title: entry.title, reason: entry.reason })),
       recordedAt,
     });
     this.#db.prepare(

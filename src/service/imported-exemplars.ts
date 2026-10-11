@@ -282,12 +282,20 @@ export class ImportedExemplars {
   /**
    * The imported 审稿意见 exemplars a draft may seed from, by Book title as 范例 lists them, one item at a time and each
    * exact version read on its own (Issue #778): a damaged Book or version record, or a damaged decision ledger, makes only
-   * that item's `revisionId` `null` — listed as damaged with its Book, type and version named — while the rest still read.
+   * that item's `revisionId` `null` — listed as damaged with its Book, type and version named, `reason` telling its record
+   * from a ledger that will not read (Issue #792) — while the rest still read.
+   *
+   * `limit` is how many readable exemplars the caller can still take: Books stop being read once that many are found, so
+   * an 评估 inspection past the two-exemplar cap reads no further Book (Issue #792). Damaged items found before the cap are
+   * still returned, so they are still named.
    */
-  readersReportExemplarCandidates(): Array<{ title: string; revisionId: string | null }> {
+  readersReportExemplarCandidates(limit: number): Array<{ title: string; revisionId: string | null; reason: 'record' | 'ledger' | null }> {
+    if (limit <= 0) return [];
     if (this.db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'earlier_exemplar_versions'").get() === undefined) return [];
-    const candidates: Array<{ title: string; revisionId: string | null }> = [];
+    const candidates: Array<{ title: string; revisionId: string | null; reason: 'record' | 'ledger' | null }> = [];
+    let readable = 0;
     for (const book of this.db.prepare('SELECT book_id, title FROM earlier_exemplar_books ORDER BY title COLLATE BINARY, book_id').iterate() as Iterable<Row>) {
+      if (readable >= limit) break;
       const bookId = String(book.book_id);
       let bookReads = true;
       try { this.#book(bookId); } catch (error) {
@@ -296,23 +304,34 @@ export class ImportedExemplars {
       }
       for (const type of IMPORTED_EXEMPLAR_TYPES) {
         if (!type.typeId.startsWith('readers-report-')) continue;
+        if (readable >= limit) break;
         const latest = this.db.prepare('SELECT revision_id, version FROM earlier_exemplar_versions WHERE book_id = ? AND type_id = ? ORDER BY version DESC, revision_id LIMIT 1')
           .get(bookId, type.typeId) as Row | undefined;
         if (latest === undefined) continue;
         const title = `${String(book.title)} · ${type.label} · 版本 ${String(latest.version)}`;
         let revisionId: string | null = String(latest.revision_id);
+        let reason: 'record' | 'ledger' | null = null;
         try {
           requireExemplar(bookReads, CORRUPT, 'EXEMPLAR_RECORD_INVALID');
           const versions = this.#versions(bookId, type.typeId);
           requireExemplar(versions.latest?.revision_id === revisionId, CORRUPT, 'EXEMPLAR_RECORD_INVALID');
-          const decisions = this.#decisions(revisionId);
-          requireExemplar(decisions.length > 0, CORRUPT, 'EXEMPLAR_RECORD_INVALID');
-          if (decisions.at(-1)?.choice !== 'house') continue;
         } catch (error) {
           if (!(error instanceof ImportedExemplarError)) throw error;
-          revisionId = null;
+          reason = 'record';
         }
-        candidates.push({ title, revisionId });
+        if (reason === null) {
+          try {
+            const decisions = this.#decisions(revisionId);
+            requireExemplar(decisions.length > 0, CORRUPT, 'EXEMPLAR_RECORD_INVALID');
+            if (decisions.at(-1)?.choice !== 'house') continue;
+          } catch (error) {
+            if (!(error instanceof ImportedExemplarError)) throw error;
+            reason = 'ledger';
+          }
+        }
+        if (reason !== null) revisionId = null;
+        else readable += 1;
+        candidates.push({ title, revisionId, reason });
       }
     }
     return candidates;
