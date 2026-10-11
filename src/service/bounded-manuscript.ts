@@ -1,6 +1,8 @@
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import {
+  acceptedSourceImportRetainedBoundaryLabels,
+  type SourceFormat,
   MAX_BLOCK_CODE_UNITS,
   MAX_BLOCK_GRAPHEMES,
   MAX_EDIT_CODE_UNITS,
@@ -3120,9 +3122,6 @@ function validateSourceImportRecordTruth(db: DatabaseSync): void {
       : asString(row.provenance_parser_identity);
     const contentDigest = row.content_digest === null ? null : asString(row.content_digest);
     const structureDigest = row.structure_digest === null ? null : asString(row.structure_digest);
-    const retainedLabel = parserIdentity === null
-      ? '保留完整所选原始文件及其精确身份；未进行本地解析'
-      : '保留完整所选 DOCX 文件及本地解析出的完整内容与结构身份';
     // Parsed exactly when it is a DOCX or was read through its converter, as the store writes a Source Version and as
     // `validateStagedDraftInventory` holds a draft to (Issue #583): an unparsed DOCX, a parsed PDF, RTF, ODT or unknown
     // file, or a parsed file with no working representation is none the store wrote.
@@ -3166,7 +3165,8 @@ function validateSourceImportRecordTruth(db: DatabaseSync): void {
         (disposition === 'created' || disposition === 'reused-same-book') &&
         asString(row.object_digest) === asString(row.source_digest) &&
         boundary.kind === 'complete-local-file' &&
-        boundary.label === retainedLabel &&
+        acceptedSourceImportRetainedBoundaryLabels(format as SourceFormat, parserIdentity !== null)
+          .some((label) => label === boundary.label) &&
         boundary.format === asString(row.format) && boundary.displayName === asString(row.sanitized_identity) &&
         boundary.sourceSha256 === asString(row.source_digest) &&
         boundary.sourceBytes === asNumber(row.byte_length) &&
