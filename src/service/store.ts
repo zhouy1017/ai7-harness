@@ -1491,6 +1491,18 @@ const SOURCE_IMPORT_REBUILT_TRIGGER_SQL = `
 `;
 
 type SqlRow = Record<string, SQLOutputValue>;
+/** The house's 范例 a writing draft may reference, by type, and the damaged imported versions the scan named and skipped (Issue #789). */
+interface WritingExemplarScan {
+  readonly found: Map<string, Array<{ input: WritingExemplarInput; source: WritingExemplarSource }>>;
+  readonly damaged: Map<string, string[]>;
+}
+/** What 写作任务 says of a type's 范例: the line as it reads, and any damaged record named as 评估 names it (Issue #778, #789). */
+function writingExemplarStatement(line: string, readable: number, damaged: ReadonlyArray<string>): string {
+  if (damaged.length === 0) return line;
+  const names = damaged.map((title) => `《${title}》`).join('、');
+  const unread = `另有 ${damaged.length} 份范例记录已损坏，无法读取`;
+  return readable === 0 ? `本社没有可以读取的这类范例，本次不参考范例；${unread}：${names}` : `${line}；${unread}，本次不参考：${names}`;
+}
 type StoredImportCommitProjection =
   | Omit<ManuscriptImportCommitProjection, 'firstWindow'>
   | SourceImportCommitProjection
@@ -4315,7 +4327,7 @@ export class EditorialStore {
    * The house's 范例 each Book's page last read, by type (#688 review): while a writing Task is under way the page is read on
    * every poll and no type can be drafted, so the scan is not repeated then. Bounded by the Books whose page was read.
    */
-  readonly #writingExemplarCache = new Map<string, Map<string, Array<{ input: WritingExemplarInput; source: WritingExemplarSource }>>>();
+  readonly #writingExemplarCache = new Map<string, WritingExemplarScan>();
   #writingTasks!: WritingTasks;
   #readersReports!: ReadersReports;
   #importedExemplars!: ImportedExemplars;
@@ -7590,7 +7602,7 @@ export class EditorialStore {
    * 知识库 › 范例 (Issue #427, S79b; KB-004, KB-006): one page of the published Books' delivered documents, each record read
    * through its owner — the designations and their 撤回 through 发稿版本's, the Delivery Records through the documents'.
    */
-  inspectExemplars(after: ExemplarBookCursor | null): ExemplarsProjection {
+  inspectExemplars(after: ExemplarBookCursor | null, damaged?: Array<{ typeId: string; title: string }>): ExemplarsProjection {
     if (after !== null) {
       requireStore(UUID_PATTERN.test(after.bookId) && after.title === safeTitle(after.title), 'EXEMPLAR_CURSOR_INVALID', '范例列表位置无效。');
     }
@@ -7614,8 +7626,15 @@ export class EditorialStore {
       return (left.length - i) - (right.length - j);
     };
     const page = [...archived, ...imported].sort((a, b) => compareTitles(a.title, b.title) || (a.bookId < b.bookId ? -1 : a.bookId > b.bookId ? 1 : 0));
+    // With a sink (the 写作任务 scan, Issue #789) an imported Book reads one type at a time and a damaged one is named there.
     const books = page.slice(0, MAX_EXEMPLAR_BOOKS_PAGE).map((book) => importedIds.has(book.bookId)
-      ? this.#importedCall(() => this.#importedExemplars.book(book.bookId))
+      ? damaged === undefined
+        ? this.#importedCall(() => this.#importedExemplars.book(book.bookId))
+        : this.#importedCall(() => {
+          const read = this.#importedExemplars.bookForWriting(book.bookId, book.title);
+          damaged.push(...read.damaged);
+          return read.book;
+        })
       : this.#documentCall(() => this.#publicationCall(() => readExemplarBook(sources, book))));
     const last = books.at(-1);
     return { books, nextCursor: page.length > MAX_EXEMPLAR_BOOKS_PAGE && last !== undefined ? { title: last.bookTitle, bookId: last.bookId } : null };
@@ -9330,16 +9349,24 @@ export class EditorialStore {
    * contract takes — and the version it is, never copied (the contract's bound refuses a copy).
    */
   #writingExemplars(bookId: string, typeId: string): Array<{ input: WritingExemplarInput; source: WritingExemplarSource }> {
-    return this.#writingExemplarsByType(bookId, [typeId]).get(typeId) ?? [];
+    return this.#writingExemplarsByType(bookId, [typeId]).found.get(typeId) ?? [];
   }
 
   /** The same for several types in one pass over 范例's pages, which stops once every type holds its two. */
-  #writingExemplarsByType(bookId: string, typeIds: ReadonlyArray<string>): Map<string, Array<{ input: WritingExemplarInput; source: WritingExemplarSource }>> {
+  #writingExemplarsByType(bookId: string, typeIds: ReadonlyArray<string>): WritingExemplarScan {
+    const damaged = new Map(typeIds.map((typeId) => [typeId, [] as string[]]));
     const found = new Map(typeIds.map((typeId) => [typeId, [] as Array<{ input: WritingExemplarInput; source: WritingExemplarSource }>]));
     const full = (): boolean => [...found.values()].every((list) => list.length >= MAX_WRITING_EXEMPLARS);
     let after: ExemplarBookCursor | null = null;
     do {
-      const page: ExemplarsProjection = this.inspectExemplars(after);
+      // A damaged imported version is named and skipped, never raised (Issue #789): the rest of the Book stays offered.
+      const unread: Array<{ typeId: string; title: string }> = [];
+      const page: ExemplarsProjection = this.inspectExemplars(after, unread);
+      for (const entry of unread) {
+        if (!damaged.has(entry.typeId)) continue;
+        const names = damaged.get(entry.typeId)!;
+        if (!names.includes(entry.title)) names.push(entry.title);
+      }
       for (const book of page.books) {
         if (book.bookId === bookId) continue;
         for (const [typeId, list] of found) {
@@ -9362,7 +9389,7 @@ export class EditorialStore {
       }
       after = page.nextCursor;
     } while (after !== null && !full());
-    return found;
+    return { found, damaged };
   }
 
   /** The editor's own words for one field, as the contract freezes them, or why they cannot be taken. */
@@ -9579,7 +9606,7 @@ export class EditorialStore {
     const runState = latest?.projection.run?.state ?? null;
     // The house's 范例 of every type in one pass — read again only when no writing Task is under way; a record that no longer
     // reads says so, as any other part does.
-    let exemplarsByType = new Map<string, Array<{ input: WritingExemplarInput; source: WritingExemplarSource }>>();
+    let exemplarsByType: WritingExemplarScan = { found: new Map(), damaged: new Map() };
     const cached = runIsActive(runState) ? this.#writingExemplarCache.get(bookId) : undefined;
     if (cached !== undefined) exemplarsByType = cached;
     else {
@@ -9616,7 +9643,8 @@ export class EditorialStore {
         cost: WRITING_COST_BEFORE_PLAN,
       },
       types: documents.types.map((type): WritingTaskTypeProjection => {
-        const exemplars: WritingExemplarInput[] = (exemplarsByType.get(type.typeId) ?? []).map((exemplar) => exemplar.input);
+        const exemplars: WritingExemplarInput[] = (exemplarsByType.found.get(type.typeId) ?? []).map((exemplar) => exemplar.input);
+        const unread = exemplarsByType.damaged.get(type.typeId) ?? [];
         const prepare: WritingTaskTypeProjection['prepare'] =
           unavailable !== null ? { allowed: false, reason: unavailable }
           : type.document !== null ? { allowed: false, reason: writingDocumentExists(type.label) }
@@ -9627,7 +9655,7 @@ export class EditorialStore {
           typeId: type.typeId,
           label: type.label,
           prepare,
-          exemplars: { count: exemplars.length, statement: writingExemplarLine(type.label, exemplars) },
+          exemplars: { count: exemplars.length, statement: writingExemplarStatement(writingExemplarLine(type.label, exemplars), exemplars.length, unread) },
           drafted: type.document === null ? drafted.get(type.typeId) ?? null : null,
           quickStart: this.#writingQuickStart(bookId, type.typeId, prepare, facts),
         };

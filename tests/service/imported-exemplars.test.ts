@@ -203,7 +203,51 @@ describe('earlier published Books in 范例', () => {
     } finally { database.close(); }
     // Every reader of 范例 says so as it says any other unreadable part, rather than failing whole.
     expect(() => store.inspectExemplars(null)).toThrow(expect.objectContaining({ name: 'StoreError', code: 'EXEMPLAR_RECORD_INVALID' }));
-    expect(store.inspectWritingTask(bookId).unavailable).toBe('写作任务暂不可用：以前图书的范例记录无法读取。');
+    // 写作任务 degrades per item instead (Issue #789): the one damaged exemplar is named, and nothing else is blanked.
+    const writing = store.inspectWritingTask(bookId);
+    expect(writing.unavailable).toBeNull();
+    expect(writing.types.find((entry) => entry.typeId === 'news-release')!.exemplars.count).toBe(0);
+  });
+
+  it('skips and names a damaged imported version in 写作任务 while other earlier Books stay offered (Issue #789)', async () => {
+    const damaged = await store.importEarlierExemplar(await input());
+    const other = await store.importEarlierExemplar({ ...await input('另一本书的虚构新闻稿。'), bookTitle: '另一本以前出版的书' });
+    const bookId = await projectBook();
+    const news = () => store.inspectWritingTask(bookId).types.find((entry) => entry.typeId === 'news-release')!;
+    expect(news().exemplars.count).toBe(2);
+    const database = db();
+    try {
+      database.exec('DROP TRIGGER earlier_exemplar_versions_no_update');
+      database.prepare("UPDATE earlier_exemplar_versions SET canonical_json = '{}' WHERE revision_id = ?").run(damaged.exemplars[0]!.revisionId);
+    } finally { database.close(); }
+    const writing = store.inspectWritingTask(bookId);
+    expect(writing.unavailable).toBeNull();
+    expect(news().prepare.allowed).toBe(true);
+    expect(news().exemplars).toEqual({
+      count: 1,
+      statement: expect.stringContaining('另有 1 份范例记录已损坏，无法读取，本次不参考：《以前出版的测试图书 · 新闻稿 · 版本 1》'),
+    });
+    expect(news().exemplars.statement).toContain('另一本以前出版的书');
+    expect(other.bookId).not.toBe(damaged.bookId);
+  });
+
+  it('keeps a frozen writing Task readable when a pinned imported version is damaged, and refuses starting it in plain words (Issue #789)', async () => {
+    const earlier = await store.importEarlierExemplar(await input());
+    const bookId = await projectBook();
+    const launch = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
+    let progress = store.createWritingPreparationWork(bookId, { typeId: 'news-release', audience: '测试读者', channel: '测试渠道', requirements: null, materialIds: [] }, launch);
+    while (!progress.done) progress = store.advanceWritingPreparationWork(progress.workId!);
+    const prepared = progress.projection!;
+    const database = db();
+    try {
+      database.exec('DROP TRIGGER earlier_exemplar_versions_no_update');
+      database.prepare("UPDATE earlier_exemplar_versions SET canonical_json = '{}' WHERE revision_id = ?").run(earlier.exemplars[0]!.revisionId);
+    } finally { database.close(); }
+    const writing = store.inspectWritingTask(bookId);
+    expect(writing.unavailable).toBeNull();
+    expect(writing.task).not.toBeNull();
+    expect(writing.task!.refusal).toContain('范例');
+    expect(() => store.authorizeWriting(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest)).toThrow('范例');
   });
 
   it('lists a damaged imported 审稿意见 exemplar as damaged while 评估 reads the rest (Issue #778)', async () => {
