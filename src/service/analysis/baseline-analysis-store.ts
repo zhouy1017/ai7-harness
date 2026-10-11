@@ -4030,7 +4030,7 @@ export class BaselineAnalysisStore {
      * leaves as it is: a Review Run's category, which 继续审阅 dispatches (Issue #657 review).
      */
     readonly leaveAuthorized?: (runRecordId: string) => boolean;
-  } = {}): { settled: number; cancelling: ReadonlyArray<string>; answered: ReadonlyArray<string> } {
+  } = {}): { settled: number; cancelling: ReadonlyArray<string> } {
     const rows = this.#db.prepare(
       `SELECT r.run_record_id,
               (SELECT s.state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1) last_state
@@ -4044,9 +4044,6 @@ export class BaselineAnalysisStore {
     const resumable = this.#definition.kind === BASELINE_ANALYSIS_KIND;
     let settled = 0;
     const cancelling: string[] = [];
-    // A Run that waits for an answer the editor has already given (Issue #422, S76d) — answered while another Run held
-    // the slot, before AI7 closed — is named for the owner to take on, as CLAR-006 goes on without being asked again.
-    const answered: string[] = [];
     for (const row of rows) {
       const runRecordId = asString(row.run_record_id);
       const state = row.last_state === null ? null : asString(row.last_state);
@@ -4063,7 +4060,10 @@ export class BaselineAnalysisStore {
       } else if (state === 'cancelling') {
         cancelling.push(runRecordId);
       } else if (state === 'awaiting-clarification' && this.clarificationsOf(runRecordId).every((entry) => entry.answer !== null)) {
-        answered.push(runRecordId);
+        // The editor answered while another Run held the slot, and AI7 closed before it went on (Issue #767; ADR 0034): the answer
+        // stays recorded, and the Run waits for the editor's 续行 like every Run a restart left, so nothing is sent by itself.
+        this.recordRunState(runRecordId, 'resumable', { detail: RECONCILED_RESUMABLE_DETAIL, reconciled: true });
+        settled += 1;
       } else if (state === 'authorized' && options.leaveAuthorized?.(runRecordId) !== true) {
         // A start the governor had not admitted yet (Issue #49, S14) — or one a service stopped on between its
         // authorization and its admission — never began: blocked with why, it waits for the editor, not for a place.
@@ -4071,7 +4071,7 @@ export class BaselineAnalysisStore {
         settled += 1;
       }
     }
-    return { settled, cancelling, answered };
+    return { settled, cancelling };
   }
 
   /**

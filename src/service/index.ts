@@ -1688,16 +1688,9 @@ async function run(): Promise<void> {
         // The Run stays 正在取消 and is offered 取消任务 again, which settles it.
       }
     }
-    // A Run the editor had answered before AI7 closed goes on now, one after another through the slot (Issue #422, S76d).
-    for (const runRecordId of reconciled.answered) {
-      try {
-        analysisExecution.continueAnswered(runRecordId, store.baselineAnalysisLedger);
-      } catch {
-        // It stays 任务等待你的说明 with its answer; the next launch takes it on again.
-      }
-    }
     // Starts the governor had not admitted when AI7 closed were blocked with why by the reconciliation: nothing starts by
-    // itself after a restart (ADR 0034), and the editor starts them again when they choose.
+    // itself after a restart (ADR 0034), and the editor starts them again when they choose. A Run the editor had answered before
+    // AI7 closed, and that was not yet taken on, is left 可续行 with its answer the same way (Issue #767).
     // AI7 初评 has no 续行 (Issue #429 review, P1): one left under way ends 已中断 with its outcome, and one left waiting for a
     // place is blocked with why, so 评估 offers 重新初评 instead of reading a Run under way for good.
     store.reconcileStoppedInitialEvaluationRuns();
