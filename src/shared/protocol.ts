@@ -7024,8 +7024,15 @@ export interface EvaluationInitialCalibrationProjection {
 export interface EvaluationWorkspaceProjection {
   /** Locally indexed 资料库 choices, separate from the manuscript and house exemplars (#428). */
   readonly materials?: TaskMaterialOffersProjection;
-  /** The latest Tasks' frozen reference rows, never their extracted words. */
-  readonly materialReferences?: { readonly initial: ReadonlyArray<string>; readonly readersReport: ReadonlyArray<string> };
+  /**
+   * The latest Tasks' frozen reference rows, never their extracted words; `blocked` names a prepared plan that can no longer
+   * start because a frozen reference went away, which 评估 then lets the editor prepare again.
+   */
+  readonly materialReferences?: {
+    readonly initial: ReadonlyArray<string>;
+    readonly readersReport: ReadonlyArray<string>;
+    readonly blocked: { readonly initial: boolean; readonly readersReport: boolean };
+  };
   readonly bookId: string;
   readonly bookTitle: string;
   /** The Book's manuscript as a new version would bind it, or `null` when the Book has none. */

@@ -8544,12 +8544,18 @@ export class EditorialStore {
   // ---- AI7 初评 (Issue #429, plan slice S81b1; V2-UX-EVAL-001, EVAL-005 to EVAL-007) ----------------------------------------
 
   #withEvaluationMaterials(page: EvaluationWorkspaceProjection): EvaluationWorkspaceProjection {
-    const lines = (taskIntentId: string | undefined): string[] => {
-      const frozen = taskIntentId === undefined ? null : this.#evaluationMaterialPlan(taskIntentId);
-      return frozen === null ? [] : this.#taskMaterialReadings(frozen.boundary, '评估').map(taskMaterialReferenceLine);
+    // Only a plan not yet started can be refused for a reference that went away; a started one read it as it was.
+    const frozenOf = (task: { taskIntentId: string; state: string } | null): { lines: string[]; blocked: boolean } => {
+      const frozen = task === null ? null : this.#evaluationMaterialPlan(task.taskIntentId);
+      if (frozen === null) return { lines: [], blocked: false };
+      const readings = this.#taskMaterialReadings(frozen.boundary, '评估')
+        .map((reading) => task!.state === 'prepared' ? reading : { source: reading.source, refusal: null });
+      return { lines: readings.map(taskMaterialReferenceLine), blocked: readings.some((reading) => reading.refusal !== null) };
     };
+    const initial = frozenOf(page.initial.task);
+    const readersReport = frozenOf(page.readersReport.task);
     return { ...page, materials: this.#taskMaterialOffers(page.bookId), materialReferences: {
-      initial: lines(page.initial.task?.taskIntentId), readersReport: lines(page.readersReport.task?.taskIntentId),
+      initial: initial.lines, readersReport: readersReport.lines, blocked: { initial: initial.blocked, readersReport: readersReport.blocked },
     } };
   }
 
@@ -8642,8 +8648,9 @@ export class EditorialStore {
   }
 
   cancelInitialEvaluationPreparationWork(workId: string): boolean {
+    // As the reader's report's: a preparation already settled or let go has nothing left to cancel.
     const ledger = this.#initialEvaluationWork.get(workId);
-    requireStore(ledger !== undefined, 'ANALYSIS_PREPARATION_NOT_FOUND', '初评计划准备已不存在。');
+    if (ledger === undefined) return false;
     this.#analysisCall(() => ledger.prepare({ phase: 'cancel', workId }));
     this.#initialEvaluationWork.delete(workId);
     return true;

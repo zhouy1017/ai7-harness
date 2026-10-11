@@ -11,6 +11,7 @@ import { MATERIAL_INDEX_TRIGGER_SQL } from '../../src/service/material-index.js'
 import { IMPORTED_EXEMPLAR_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { fixtureEntryKey, loadModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { TASK_MATERIAL_LIVE_UNAVAILABLE, type TaskMaterialSource } from '../../src/service/task-material-references.js';
+import { NOTHING_SENT } from '../../src/service/task-plan.js';
 import type { LaunchPolicyProjection, InitialEvaluationProjection, ReadersReportProjection } from '../../src/shared/protocol.js';
 import { INITIAL_EVALUATION_UNIT_RESULT_SCHEMA, INITIAL_EVALUATION_SYNTHESIS_RESULT_SCHEMA } from '../../src/service/evaluation/initial-evaluation-contract.js';
 import { READERS_REPORT_UNIT_RESULT_SCHEMA, READERS_REPORT_SYNTHESIS_RESULT_SCHEMA } from '../../src/service/evaluation/readers-report-contract.js';
@@ -115,6 +116,11 @@ function ledger(kind: Kind) {
   return store.readersReportLedger(task.input, { bookId, references: pins(taskId) }, current.planEnvelope!.promptContractDigest);
 }
 function plan(kind: Kind, taskId: string) { return store.inspectTaskPlan({ bookId, kind, ref: taskId }); }
+function frozenRows(kind: Kind): { lines: ReadonlyArray<string>; blocked: boolean } {
+  const references = store.inspectEvaluation(bookId, null).materialReferences!;
+  const key = kind === 'initial-evaluation' ? 'initial' : 'readersReport';
+  return { lines: references[key], blocked: references.blocked[key] };
+}
 function authorize(kind: Kind, prepared: InitialEvaluationProjection | ReadersReportProjection) {
   return kind === 'initial-evaluation' ? store.authorizeInitialEvaluation(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest)
     : store.authorizeReadersReport(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
@@ -156,6 +162,10 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
     expect(firstPlan.scope.send).toContain('只参照，不照抄');
     expect(firstPlan.technical.find((row) => row.key === 'material-references')?.value).toContain(pins(taskId)[0]!.indexDigest);
     expect(firstPlan.start.readiness).toBe('ready');
+    // The references add to the disclosure; they never take away what the plan already said it does not read or send.
+    expect(firstPlan.scope.notRead).toContain('其他图书');
+    expect(firstPlan.service.send).toBe(NOTHING_SENT);
+    expect(frozenRows(kind)).toEqual({ lines: [expect.stringContaining('《合成背景资料》')], blocked: false });
     const digest = ledger(kind).definition.promptContractDigest;
     await close(); await open();
     expect(ledger(kind).definition.promptContractDigest).toBe(digest);
@@ -198,6 +208,9 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
     await close(); await open();
     const after = kind === 'initial-evaluation' ? store.inspectInitialEvaluation(bookId) : store.inspectReadersReport(bookId)!;
     expect(after.resultSetRevision!.revisionId).toBe(projection.resultSetRevision!.revisionId);
+    // A started Task read its reference as it was: 评估 never says it can no longer start.
+    expect(frozenRows(kind).blocked).toBe(false);
+    expect(frozenRows(kind).lines.join(' ')).not.toContain('不能再开始');
     expect(plan(kind, prepared.taskIntent!.taskIntentId).start.readiness).toBe('started');
   });
   it('blocks missing or no-longer-admitted references, and a fresh preparation can remove references', async () => {
@@ -207,7 +220,11 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
     expect(plan(kind, prepared.taskIntent!.taskIntentId).drift?.reasons.join(' ')).toContain('「评估」重新准备计划');
     expect(plan(kind, prepared.taskIntent!.taskIntentId).start.readiness).toBe('changed');
     expect(() => authorize(kind, prepared)).toThrow('不能再开始');
+    // 评估 offers the preparation again that the plan points to, beside the reason.
+    expect(frozenRows(kind).blocked).toBe(true);
+    expect(frozenRows(kind).lines.join(' ')).toContain('「评估」重新准备计划');
     const next = prepare(kind);
+    expect(frozenRows(kind)).toEqual({ lines: [], blocked: false });
     expect(next.taskIntent!.taskIntentId).not.toBe(prepared.taskIntent!.taskIntentId);
     expect(component(next.taskIntent!.taskIntentId).materialReferences).toBeUndefined();
     const second = await material('后续合成资料。');
@@ -218,6 +235,7 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
   it('refuses excess, duplicate, wrong-book and unadmitted selections before any reference plan is made', async () => {
     const id = await material();
     expect(() => prepare(kind, [id, id])).toThrow('不能重复');
+    if (kind === 'initial-evaluation') expect(store.cancelInitialEvaluationPreparationWork(randomUUID())).toBe(false);
     expect(() => prepare(kind, Array.from({ length: 5 }, () => randomUUID()))).toThrow('4 份');
     const targetBook = bookId;
     const other = await importSample1Book(store, roots.codeRoot, '合成其他图书');

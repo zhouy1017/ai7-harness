@@ -288,7 +288,9 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     section.append(el('p', 'field-note readers-report-exemplars', `${report.exemplars.statement}。`));
     const task = report.task;
     if (task !== null) section.append(el('p', 'readers-report-task', readersReportTaskLine(task, READERS_REPORT_TEMPLATE_LABELS[task.template])));
-    section.append(materialsNode(page, 'readersReport', reportMaterialIds, report.templates.some((entry) => entry.prepare.allowed) && report.task?.state !== 'prepared'));
+    // A prepared plan whose frozen reference went away can never start: 评估 offers its preparation again, as the plan says.
+    const reportBlocked = page.materialReferences?.blocked.readersReport === true;
+    section.append(materialsNode(page, 'readersReport', reportMaterialIds, report.templates.some((entry) => entry.prepare.allowed) && (report.task?.state !== 'prepared' || reportBlocked)));
     const list = el('ul', 'readers-report-templates');
     for (const entry of report.templates) {
       const item = el('li');
@@ -322,7 +324,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         create.dataset['readersReportAction'] = 'create-draft';
         create.disabled = busy;
         row.append(create);
-      } else if (own && task.state === 'prepared') {
+      } else if (own && task.state === 'prepared' && !reportBlocked) {
         const open = action(READERS_REPORT_ACTIONS.openPlan, 'primary', 'open-readers-report-plan', () => options.openReadersReportPlan(task.taskIntentId));
         open.dataset['readersReportAction'] = 'open-plan';
         open.disabled = busy;
@@ -336,7 +338,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       } else {
         item.append(el('p', 'field-note readers-report-reason', entry.prepare.reason));
       }
-      if (own && task.state !== 'prepared') {
+      if (own && (task.state !== 'prepared' || reportBlocked)) {
         const open = action(READERS_REPORT_ACTIONS.openTask, 'quiet', 'open-readers-report-task', () => options.openReadersReportPlan(task.taskIntentId));
         open.dataset['readersReportAction'] = 'open-task';
         open.disabled = busy;
@@ -429,7 +431,8 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const heading = el('h3', undefined, EVALUATION_AI7_HEADING);
     heading.tabIndex = -1;
     section.append(heading, el('p', 'field-note', EVALUATION_AI7_LEDE));
-    section.append(materialsNode(page, 'initial', initialMaterialIds, initial.prepare.allowed && initial.task?.state !== 'prepared'));
+    const initialBlocked = page.materialReferences?.blocked.initial === true;
+    section.append(materialsNode(page, 'initial', initialMaterialIds, initial.prepare.allowed && (initial.task?.state !== 'prepared' || initialBlocked)));
     if (initial.task !== null) section.append(el('p', 'evaluation-initial-task', evaluationAi7TaskLine(initial.task)));
     const latest = initial.latest;
     if (latest === null) {
@@ -463,7 +466,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     }
     const row = el('div', 'button-row evaluation-initial-actions');
     const task = initial.task;
-    if (task !== null && task.state === 'prepared') {
+    if (task !== null && task.state === 'prepared' && !initialBlocked) {
       const open = action(EVALUATION_AI7_OPEN_PLAN, 'primary', 'open-initial-plan', () => options.openPlan(task.taskIntentId));
       open.disabled = busy;
       open.setAttribute('aria-controls', 'task-drawer');
