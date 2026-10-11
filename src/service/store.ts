@@ -3,7 +3,7 @@ import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSyn
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
-import { BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_MODE_LABELS, CAPTURED_PROCEDURE_CAPTURE_SLOTS, CAPTURED_PROCEDURE_STATE_LABELS, MAX_CAPTURED_PROCEDURE_RUNS_SHOWN, MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_BOOK_CHOICES, MAX_LEARNING_AUDIT_PAGE, MAX_LEARNING_AUDIT_SERIES_CHOICES, MAX_LEARNING_LINEAGE_DECISIONS, MAX_LEARNING_REMEDIATION_ITEMS, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
+import { acceptedSourceImportRetainedBoundaryLabels, sourceImportRetainedBoundaryLabel, BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_MODE_LABELS, CAPTURED_PROCEDURE_CAPTURE_SLOTS, CAPTURED_PROCEDURE_STATE_LABELS, MAX_CAPTURED_PROCEDURE_RUNS_SHOWN, MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_BOOK_CHOICES, MAX_LEARNING_AUDIT_PAGE, MAX_LEARNING_AUDIT_SERIES_CHOICES, MAX_LEARNING_LINEAGE_DECISIONS, MAX_LEARNING_REMEDIATION_ITEMS, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
   CoverageManifestProjection,
   InspectSeriesKnowledgeReviewInput,
@@ -1033,15 +1033,6 @@ const EMPTY_BOOK_NON_EFFECTS = [
 ] as const;
 const DEGRADATION_DECISION_SCHEMA = 'ai7.import-degradation-decision/1';
 const SOURCE_IMPORT_RECORD_SCHEMA = 'ai7.source-import-record/1';
-const SOURCE_IMPORT_RETAINED_BOUNDARY_LABEL =
-  '保留完整所选 DOCX 文件及本地解析出的完整内容与结构身份' as const;
-/** An original kept whole with no local parse claims no content or structure identity (ADR 0072 §2). */
-const SOURCE_IMPORT_RETAINED_ORIGINAL_BOUNDARY_LABEL =
-  '保留完整所选原始文件及其精确身份；未进行本地解析' as const;
-
-function retainedBoundaryLabel(parsed: boolean): SourceImportRetainedBoundaryLabel {
-  return parsed ? SOURCE_IMPORT_RETAINED_BOUNDARY_LABEL : SOURCE_IMPORT_RETAINED_ORIGINAL_BOUNDARY_LABEL;
-}
 const SOURCE_IMPORT_NON_EFFECTS = [
   '不创建稿件',
   '不创建稿件修订版',
@@ -4018,7 +4009,7 @@ function sourceImportRecordsToCreate(
 function sourceImportRetainedBoundary(snapshot: DraftSnapshot): ReviewBeforeSourceImportProjection['retainedBoundary'] {
   return {
     kind: 'complete-local-file',
-    label: retainedBoundaryLabel(snapshot.parserIdentity !== null),
+    label: sourceImportRetainedBoundaryLabel(snapshot.sourceFormat, snapshot.parserIdentity !== null),
     format: snapshot.sourceFormat,
     displayName: snapshot.displayName,
     sourceSha256: snapshot.sourceDigest,
@@ -7324,7 +7315,8 @@ export class EditorialStore {
       const structureDigest = row.structure_digest === null ? null : asString(row.structure_digest);
       const format = requireSourceFormat(asString(row.format));
       requireStore(
-        boundary.kind === 'complete-local-file' && boundary.label === retainedBoundaryLabel(parserIdentity !== null) &&
+        boundary.kind === 'complete-local-file' &&
+          acceptedSourceImportRetainedBoundaryLabels(format, parserIdentity !== null).some((label) => label === boundary.label) &&
           boundary.format === format && boundary.displayName === asString(row.sanitized_identity) &&
           boundary.sourceSha256 === asString(row.source_digest) &&
           (boundary.contentDigest ?? null) === contentDigest &&
@@ -7381,6 +7373,7 @@ export class EditorialStore {
         sourceVersionDisposition: disposition,
         retainedBoundary: {
           kind: 'complete-local-file',
+          label: boundary.label as SourceImportRetainedBoundaryLabel,
           format,
           displayName: asString(row.sanitized_identity),
           sourceSha256: asString(row.source_digest),
@@ -20349,7 +20342,8 @@ export class EditorialStore {
     const boundary = retained as ReviewBeforeSourceImportProjection['retainedBoundary'];
     requireStore(
       boundary.kind === 'complete-local-file' &&
-        boundary.label === retainedBoundaryLabel(row.parser_identity !== null) &&
+        acceptedSourceImportRetainedBoundaryLabels(requireSourceFormat(asString(row.format)), row.parser_identity !== null)
+          .some((label) => label === boundary.label) &&
         boundary.format === asString(row.format) && boundary.displayName === asString(row.sanitized_identity) &&
         boundary.sourceSha256 === asString(row.source_digest) &&
         boundary.sourceBytes === asNumber(row.byte_length) &&
