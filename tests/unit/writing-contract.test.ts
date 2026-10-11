@@ -49,6 +49,7 @@ import {
   WRITING_MATERIAL_ABSENT_TEXT,
   writingMaterialDigest,
   writingMaterialMoved,
+  writingMaterialUnavailable,
   writingMaterialOverBound,
   writingMaterialParagraph,
   writingMaterialsOverTotal,
@@ -779,9 +780,9 @@ describe('资料库 under 允许参考 — `ai7.writing.prompt-contract/3` (Issu
     expect(writingMaterialLine([MATERIAL])).toBe('参照资料库的 1 份资料（只参照，不照抄）：《参考资料甲》');
     expect(writingMaterialReferenceLine({ source, refusal: null })).toBe('资料库资料《参考资料甲》：已提取 1,234 字，按计划冻结的索引版本读取（只参照，不照抄）');
     expect(writingMaterialReferenceLine({ source, refusal: { code: 'MATERIAL_INDEX_MOVED', message: 'x' } }))
-      .toBe('资料库资料《参考资料甲》：已提取 1,234 字，按计划冻结的索引版本读取（只参照，不照抄）——计划冻结的索引版本已不在本机，这次起草不能开始');
+      .toBe('资料库资料《参考资料甲》：已提取 1,234 字，按计划冻结的索引版本读取（只参照，不照抄）——计划冻结的索引版本已不在本机，这次起草不能再开始');
     expect(writingMaterialReferenceLine({ source, refusal: { code: 'MATERIAL_REFERENCE_UNAVAILABLE', message: 'x' } }))
-      .toBe('资料库资料《参考资料甲》：已提取 1,234 字，按计划冻结的索引版本读取（只参照，不照抄）——这份资料现在不能列进这本书任务的「允许参考」，这次起草不能开始');
+      .toBe('资料库资料《参考资料甲》：已提取 1,234 字，按计划冻结的索引版本读取（只参照，不照抄）——这份资料现在不能列进这本书任务的「允许参考」，这次起草不能再开始');
     // The item's line follows the 范例's, and a plan without items has none.
     const lines = writingReferenceLines(withMaterials([MATERIAL]), true, [{ source, refusal: null }]);
     expect(lines[3]).toBe(writingMaterialReferenceLine({ source, refusal: null }));
@@ -789,7 +790,8 @@ describe('资料库 under 允许参考 — `ai7.writing.prompt-contract/3` (Issu
     expect(lines).toHaveLength(6);
     expect(writingMaterialCopyNotDo()).toBe(`不照抄资料库资料：与任何一份资料有连续 ${EXEMPLAR_COPY_WINDOW} 个字以上相同（规则与范例相同，每份资料各自比较）的草稿不予采用`);
     expect(WRITING_MATERIAL_GONE_LABEL).toBe('不能开始 · 参考资料已不在本机');
-    expect(writingMaterialMoved('参考资料甲')).toBe('这次起草参考的资料《参考资料甲》，计划冻结的索引版本已不在本机，不能开始；请改计划重做：在「交付物」的新建文档 · 写作任务里重新准备计划。');
+    expect(writingMaterialMoved('参考资料甲')).toBe('这次起草参考的资料《参考资料甲》，计划冻结的索引版本已不在本机，不能再开始；可以用「新建文档…」重新准备。');
+    expect(writingMaterialUnavailable('参考资料甲')).toBe('这次起草参考的资料《参考资料甲》现在不能列进这本书任务的「允许参考」，不能再开始；可以用「新建文档…」重新准备。');
     expect(WRITING_MATERIALS_STATEMENT).toBe('勾选的资料列进这次计划的「允许参考」，按计划冻结的索引版本读取：每份不超过 3,000 字，合计不超过 6,000 字，最多 4 份；只参照，不照抄。');
     expect(writingMaterialOverBound(12_345)).toBe('这份资料已提取 12,345 字，超过每份 3,000 字的上限，不能列进「允许参考」。');
     expect(writingMaterialsOverTotal(6_001)).toBe('所选资料合计已提取 6,001 字，超过合计 6,000 字的上限；请少选几份。');

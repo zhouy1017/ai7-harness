@@ -8975,7 +8975,9 @@ export class EditorialStore {
         from = page.next;
       }
     } catch (error) {
-      if (error instanceof StoreError && /^(?:MATERIAL_|LIBRARY_MATERIAL_)/u.test(error.code)) return { refusal: { code: error.code, message: error.message } };
+      if (error instanceof StoreError && ['MATERIAL_INDEX_MOVED', 'MATERIAL_REFERENCE_UNAVAILABLE', 'LIBRARY_MATERIAL_NOT_FOUND'].includes(error.code)) {
+        return { refusal: { code: error.code, message: error.message } };
+      }
       throw error;
     }
     return { paragraphs };
@@ -9431,7 +9433,7 @@ export class EditorialStore {
         label: writingTaskStateLabel(latest.projection, latest.task.exemplarsReadable, latest.task.materials),
         // A Task not yet run whose exemplar — or 资料库 item's pinned build (Issue #428) — is no longer here says it cannot start;
         // one that ran says why it wrote no draft.
-        refusal: latest.projection.taskOutcome !== null ? this.#writingRefusal(latest.projection)
+        refusal: latest.projection.authorization !== null ? this.#writingRefusal(latest.projection)
           : !latest.task.exemplarsReadable ? WRITING_EXEMPLAR_MOVED
             : latest.task.materials.find((material) => material.refusal !== null)?.refusal?.message ?? this.#writingRefusal(latest.projection),
         planEnvelopeDigest: latest.projection.planEnvelope?.digest ?? null,

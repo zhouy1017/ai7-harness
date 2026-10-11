@@ -1227,6 +1227,7 @@ export function writingMaterialCopyNotDo(): string {
 export const WRITING_EXEMPLAR_GONE_LABEL = '不能开始 · 范例已不在本机' as const;
 /** A writing Task one of whose 资料库 items no longer reads at the build its plan pinned (Issue #428). */
 export const WRITING_MATERIAL_GONE_LABEL = '不能开始 · 参考资料已不在本机' as const;
+export const WRITING_MATERIAL_UNAVAILABLE_LABEL = '不能开始 · 参考资料现在不能列进「允许参考」' as const;
 
 /**
  * One 资料库 item a writing plan lists under 允许参考 (Issue #428): its pin and the facts the plan names it by, and why it does
@@ -1246,7 +1247,11 @@ function writingMaterialGone(projection: WritingProjection, materials: ReadonlyA
 export function writingMaterialReferenceLine(material: WritingPlanMaterial): string {
   const line = `资料库资料《${material.source.title}》：已提取 ${groupedCount(material.source.characters)} 字，按计划冻结的索引版本读取（只参照，不照抄）`;
   return material.refusal === null ? line : `${line}——${material.refusal.code === 'MATERIAL_REFERENCE_UNAVAILABLE'
-    ? '这份资料现在不能列进这本书任务的「允许参考」' : '计划冻结的索引版本已不在本机'}，这次起草不能开始`;
+    ? '这份资料现在不能列进这本书任务的「允许参考」' : '计划冻结的索引版本已不在本机'}，这次起草不能再开始`;
+}
+
+function writingMaterialRefusalLabel(material: WritingPlanMaterial): string {
+  return material.refusal?.code === 'MATERIAL_REFERENCE_UNAVAILABLE' ? WRITING_MATERIAL_UNAVAILABLE_LABEL : WRITING_MATERIAL_GONE_LABEL;
 }
 
 /** Whether a writing Task can never start because its 范例 is no longer here: not yet started, its exemplars' text gone. */
@@ -1260,7 +1265,8 @@ function writingExemplarGone(projection: WritingProjection, exemplarsHere: boole
  */
 export function writingTaskStateLabel(projection: WritingProjection, exemplarsHere: boolean, materials: ReadonlyArray<WritingPlanMaterial> = []): string {
   if (writingExemplarGone(projection, exemplarsHere)) return WRITING_EXEMPLAR_GONE_LABEL;
-  return writingMaterialGone(projection, materials) !== null ? WRITING_MATERIAL_GONE_LABEL : writingState(projection).label;
+  const material = writingMaterialGone(projection, materials);
+  return material !== null ? writingMaterialRefusalLabel(material) : writingState(projection).label;
 }
 export const WRITING_EXEMPLAR_GONE_SUFFIX = '——这些范例已不在本机，这次起草不能再开始' as const;
 
@@ -1341,7 +1347,7 @@ export function writingPlan(input: {
   // never started.
   const materialGone = writingExemplarGone(projection, exemplarsHere) ? null : writingMaterialGone(projection, materials);
   const gone = writingExemplarGone(projection, exemplarsHere) || materialGone !== null;
-  const state = gone ? { key: 'ready' as const, label: materialGone === null ? WRITING_EXEMPLAR_GONE_LABEL : WRITING_MATERIAL_GONE_LABEL } : writingState(projection);
+  const state = gone ? { key: 'ready' as const, label: materialGone === null ? WRITING_EXEMPLAR_GONE_LABEL : writingMaterialRefusalLabel(materialGone) } : writingState(projection);
   const needsModelConnection = route.kind === 'opencode-go';
   // A Task whose 范例 is no longer here is never started (#688 re-review): the bar says why, and offers nothing that starts it.
   const start: TaskPlanStartProjection = gone
