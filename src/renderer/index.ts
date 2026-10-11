@@ -1,3 +1,4 @@
+import { exemplarImportButton, exemplarEligibility } from './imported-exemplars.js';
 import { consumeReturnPlace, preserveReturnPlace, readReturnPlace, type ReadingPlace } from './reading-return.js';
 import type {
   AnalysisReusePlanCounts,
@@ -4972,6 +4973,16 @@ function renderEvaluationProfiles(root: HTMLElement, projection: EvaluationProfi
  * Books come a page at a time; moving forward or back to the first page replaces the current bounded page.
  */
 function renderExemplars(root: HTMLElement, projection: ExemplarsProjection): void {
+  const surface = {
+    api: window.ai7, status: setStatus, error: rendererErrorMessage,
+    refresh: async () => {
+      const next = await window.ai7.inspectExemplars({ after: null });
+      if (!root.isConnected) return;
+      root.replaceChildren();
+      renderExemplars(root, next);
+    },
+  };
+  root.append(exemplarImportButton(surface));
   if (projection.books.length === 0) root.append(element('p', 'field-note exemplars-empty', EXEMPLARS_EMPTY));
   const list = element('div', 'exemplar-list');
   const append = (books: ExemplarsProjection['books']): HTMLElement | null => {
@@ -4997,10 +5008,12 @@ function renderExemplars(root: HTMLElement, projection: ExemplarsProjection): vo
         item.dataset['exemplarDocument'] = exemplar.documentId;
         item.dataset['exemplarType'] = exemplar.typeId;
         item.dataset['exemplarVersion'] = String(exemplar.version);
+        if (exemplar.imported) item.append(exemplarEligibility(surface, exemplar));
         items.append(item);
       }
       if (book.exemplars.length > 0) card.append(items);
       card.append(readersReportExemplars(book));
+      if (book.imported) card.append(exemplarImportButton(surface, book));
       list.append(card);
     }
     root.dataset['exemplarBooks'] = String(list.children.length);

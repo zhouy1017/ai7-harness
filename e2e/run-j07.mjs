@@ -2409,9 +2409,9 @@ async function main() {
       exemplarPage[0].items[0][0] === 'news-release' && exemplarPage[0].items[0][1] === String(exemplarNews.version) &&
       exemplarPage[0].items[0][2].startsWith(`新闻稿 · 版本 ${exemplarNews.version} · 交付给`) &&
       exemplarPage[0].items[0][2].includes(` · 学习准入：仅本社 · 此前还交付过版本 ${exemplarNews.earlierVersions[0]}`) &&
-      // This Book has no 审稿意见 (Issue #429): 范例 offers none, and says only that earlier Books' exemplars are still to come.
+      // This Book has no 审稿意见; earlier Books can now be imported through the KB.
       exemplarBook.readersReports.length === 0 && exemplarPage[0].readersReports === 0 &&
-      JSON.stringify(exemplarPage[0].later) === JSON.stringify(['以前出版的书的范例由编辑导入并标明图书、作者、责编：尚未提供。']),
+      JSON.stringify(exemplarPage[0].later) === JSON.stringify([]),
     'exemplars-news-release', { service: exemplars?.books?.map((entry) => entry.exemplars.map((exemplar) => [exemplar.typeId, exemplar.version, exemplar.earlierVersions])), page: exemplarPage });
 
     at('publication-actuals');

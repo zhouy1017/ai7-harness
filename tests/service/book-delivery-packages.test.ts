@@ -9,7 +9,7 @@ import {
   type PackageReviewRunReading,
 } from '../../src/service/book-delivery-packages.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { OUTCOME_RESOLUTION_SCHEMA_VERSION, PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
+import { IMPORTED_EXEMPLAR_SCHEMA_VERSION, PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { PUBLICATION_FORBIDDEN_WORDS, type BookDeliveryPackageProjection } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx, type SourceSpan } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -322,7 +322,7 @@ describe('图书交付包 (S67a)', () => {
     }
     const after = new DatabaseSync(path, { readOnly: true });
     try {
-      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(OUTCOME_RESOLUTION_SCHEMA_VERSION);
+      expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(IMPORTED_EXEMPLAR_SCHEMA_VERSION);
       expect((after.prepare('SELECT count(*) count FROM book_delivery_package_versions').get() as { count: number }).count).toBe(0);
     } finally {
       after.close();

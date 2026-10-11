@@ -143,7 +143,7 @@ describe('范例 (Issue #427, S79b)', () => {
     expect(exemplarLine({ ...exemplar, version: 14, earlierVersionCount: 12, earlierVersions: [12, 13] }, (iso) => iso))
       .toBe('新闻稿 · 版本 14 · 交付给编辑部于 t1 · 归入于 t2 · 学习准入：仅本社 · 此前还交付过 12 个版本，最近的是版本 12、13');
     // The 审稿意见 now come in (Issue #429); only the import of earlier Books is still to come.
-    expect(EXEMPLARS_LATER).toEqual(['以前出版的书的范例由编辑导入并标明图书、作者、责编：尚未提供。']);
+    expect(EXEMPLARS_LATER).toEqual([]);
   });
 
   it('offers a Book\'s 审稿意见 at the version 图书交付包 pins, under 仅本社, and says where its admission stands (Issue #429)', () => {
