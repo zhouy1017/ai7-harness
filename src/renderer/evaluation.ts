@@ -130,6 +130,7 @@ import {
   evaluationUnsavedLine,
   evaluationVersionLine,
 } from './evaluation-labels.js';
+import { taskMaterialSelection, taskMaterialSelectionReason, taskMaterialSendLine } from './task-material-selection.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 
 /**
@@ -210,6 +211,8 @@ function radio(name: string, value: string, label: string, checked: boolean, dis
 export function mountEvaluation(options: MountEvaluationOptions): { load(): Promise<void>; refresh(): void } {
   const { root, api, setStatus, errorMessage, technicalDetails } = options;
   root.classList.add('evaluation');
+  const initialMaterialIds = new Set<string>();
+  const reportMaterialIds = new Set<string>();
   let busy = false;
   let workspace: EvaluationWorkspaceProjection | null = null;
   let refusal: string | null = null;
@@ -231,6 +234,44 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       : null,
   });
 
+  const materialsNode = (page: EvaluationWorkspaceProjection, kind: 'initial' | 'readersReport', selected: Set<string>, available: boolean): HTMLElement => {
+    const fieldset = el('fieldset', 'evaluation-materials');
+    fieldset.dataset['evaluationMaterials'] = kind;
+    fieldset.append(el('legend', undefined, '允许参考 · 资料库'));
+    fieldset.append(el('p', 'field-note', page.materials?.statement ?? '暂无可参考的资料库资料。'));
+    fieldset.append(el('p', 'field-note', '资料只提供背景，不改变本社评估方案，也不覆盖定稿的分数、评语与结论。'));
+    const items = page.materials?.items ?? [];
+    const retained = taskMaterialSelection(items, selected);
+    selected.clear();
+    for (const id of retained) selected.add(id);
+    for (const item of items) {
+      const label = el('label', 'evaluation-choice');
+      const input = el('input');
+      input.type = 'checkbox';
+      input.dataset['evaluationMaterial'] = item.materialId;
+      input.checked = selected.has(item.materialId);
+      const reason = taskMaterialSelectionReason(item, items, selected);
+      input.disabled = busy || !available || (reason !== null && !input.checked);
+      input.addEventListener('change', () => {
+        if (input.checked) selected.add(item.materialId);
+        else selected.delete(item.materialId);
+        paint(`[data-evaluation-materials="${kind}"] [data-evaluation-material="${item.materialId}"]`, true);
+      });
+      label.append(input, el('span', undefined, `《${item.title}》 · 已提取 ${item.characters.toLocaleString('en-US')} 字`));
+      if (reason !== null) label.append(el('span', 'field-note', reason));
+      fieldset.append(label);
+    }
+    if ((page.materials?.more ?? 0) > 0) fieldset.append(el('p', 'field-note', `另有 ${page.materials!.more} 份资料未列出。`));
+    const sending = taskMaterialSendLine(items, selected);
+    if (sending !== null) fieldset.append(el('p', 'field-note evaluation-material-send', sending));
+    const frozen = page.materialReferences?.[kind] ?? [];
+    if (frozen.length > 0) {
+      fieldset.append(el('p', 'field-note', '这份计划允许参考：'));
+      for (const line of frozen) fieldset.append(el('p', 'field-note evaluation-material-pin', line));
+    }
+    return fieldset;
+  };
+
   /**
    * 审稿意见 (Issue #429, S81c; EVAL-013): the 定稿 version it drafts from, that the house has no 审稿意见 among its 范例 yet,
    * the latest Task, and per template — 起草, its plan, its drafted result to open, or its draft with its versions and 导出….
@@ -247,6 +288,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     section.append(el('p', 'field-note readers-report-exemplars', `${report.exemplars.statement}。`));
     const task = report.task;
     if (task !== null) section.append(el('p', 'readers-report-task', readersReportTaskLine(task, READERS_REPORT_TEMPLATE_LABELS[task.template])));
+    section.append(materialsNode(page, 'readersReport', reportMaterialIds, report.templates.some((entry) => entry.prepare.allowed) && report.task?.state !== 'prepared'));
     const list = el('ul', 'readers-report-templates');
     for (const entry of report.templates) {
       const item = el('li');
@@ -316,7 +358,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     setStatus(READERS_REPORT_STATUS.preparing, 'busy');
     paint(null, true);
     try {
-      const job = await api.prepareReadersReport({ template });
+      const job = await api.prepareReadersReport({ template, ...(reportMaterialIds.size === 0 ? {} : { materialIds: taskMaterialSelection(workspace.materials?.items ?? [], reportMaterialIds) }) });
       const completed = await options.awaitServiceJob(job, (next) => setStatus(next.progress.label, 'busy'));
       busy = false;
       if (completed.state === 'cancelled') {
@@ -387,6 +429,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const heading = el('h3', undefined, EVALUATION_AI7_HEADING);
     heading.tabIndex = -1;
     section.append(heading, el('p', 'field-note', EVALUATION_AI7_LEDE));
+    section.append(materialsNode(page, 'initial', initialMaterialIds, initial.prepare.allowed && initial.task?.state !== 'prepared'));
     if (initial.task !== null) section.append(el('p', 'evaluation-initial-task', evaluationAi7TaskLine(initial.task)));
     const latest = initial.latest;
     if (latest === null) {
@@ -819,7 +862,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     setStatus(EVALUATION_AI7_STATUS.preparing, 'busy');
     paint(null, true);
     try {
-      const job = await api.prepareInitialEvaluation();
+      const job = await api.prepareInitialEvaluation(initialMaterialIds.size === 0 ? undefined : { materialIds: taskMaterialSelection(workspace.materials?.items ?? [], initialMaterialIds) });
       const completed = await options.awaitServiceJob(job, (next) => setStatus(next.progress.label, 'busy'));
       busy = false;
       if (completed.state === 'cancelled') {

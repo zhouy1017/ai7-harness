@@ -324,7 +324,7 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['startEvaluation']['output']>(IPC_CHANNELS.startEvaluation, input),
   saveEvaluation: (input: Omit<ServiceOperationMap['saveEvaluation']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['saveEvaluation']['output']>(IPC_CHANNELS.saveEvaluation, input),
-  prepareInitialEvaluation: () => invoke<ServiceOperationMap['prepareInitialEvaluation']['output']>(IPC_CHANNELS.prepareInitialEvaluation),
+  prepareInitialEvaluation: (input?: { materialIds?: ReadonlyArray<string> }) => invoke<ServiceOperationMap['prepareInitialEvaluation']['output']>(IPC_CHANNELS.prepareInitialEvaluation, input),
   authorizeInitialEvaluation: (input: Omit<ServiceOperationMap['authorizeInitialEvaluation']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['authorizeInitialEvaluation']['output']>(IPC_CHANNELS.authorizeInitialEvaluation, input),
   prepareReadersReport: (input: Omit<ServiceOperationMap['prepareReadersReport']['input'], 'bookId'>) =>

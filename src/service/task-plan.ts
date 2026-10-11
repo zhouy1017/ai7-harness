@@ -1,4 +1,5 @@
-import { taskMaterialReferenceLine } from './task-material-references.js';
+import { taskMaterialReferenceLine, type TaskMaterialReading } from './task-material-references.js';
+
 import type {
   AnalysisReusePlanCounts,
   BaselineAnalysisPlanRevisionProjection,
@@ -887,6 +888,29 @@ const INITIAL_EVALUATION_GOAL_SENTENCES: Readonly<Record<InitialEvaluationTaskMo
   'evaluation-again': '重新做 AI7 初评：按当前稿件重读全书，重新给出各评分项的初评分数与评语',
 };
 
+/** Evaluation's optional background references: preserve every no-reference projection byte. */
+export function evaluationMaterialPlan(plan: TaskPlanProjection, materials: ReadonlyArray<TaskMaterialReading>): TaskPlanProjection {
+  if (materials.length === 0) return plan;
+  const refusal = materials.find((material) => material.refusal !== null)?.refusal ?? null;
+  const names = materials.map(({ source }) => `《${source.title}》`).join('、');
+  const sending = plan.scope.send === '不发送任何内容'
+    ? `不发送任何内容；资料库资料${names}的提取文字也只在本机读取，只参照，不照抄`
+    : `${plan.scope.send}；资料库资料${names}的提取文字随稿件一并发往，只参照，不照抄`;
+  return {
+    ...plan,
+    state: refusal === null ? plan.state : { key: 'changed', label: '参考资料已不可用' },
+    scope: { ...plan.scope, reference: [...plan.scope.reference, ...materials.map(taskMaterialReferenceLine),
+      '资料库资料只提供背景，不改变本社评估方案，也不覆盖定稿的分数、评语与结论。'], send: sending,
+      notRead: '不读允许参考以外的资料' },
+    service: { ...plan.service, send: sending },
+    notDo: { ...plan.notDo, editorial: plan.notDo.editorial.map((line) => line === '不读这本书以外的内容' ? '不读允许参考以外的资料' : line) },
+    technical: [...plan.technical, { key: 'material-references', label: '资料库参考版本',
+      value: materials.map(({ source }) => `《${source.title}》 · ${source.materialId} · 索引版本 ${source.indexDigest} · ${source.characters} 字`).join('；') }],
+    start: refusal === null ? plan.start : { ...plan.start, readiness: 'changed', planEnvelopeDigest: null },
+    drift: refusal === null ? plan.drift : { reasons: [...(plan.drift?.reasons ?? []), refusal.message], entries: plan.drift?.entries ?? [],
+      resolution: '可以在「评估」重新准备计划。' },
+  };
+}
 /**
  * The plan of the Book's AI7 初评 Task: the evaluation kind's ledger read in the editor's words, as the baseline plan is. Its
  * steps are what the kind does — read each range for the evidence of each scored item, then score the items — and what it
