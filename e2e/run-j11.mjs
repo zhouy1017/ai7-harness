@@ -3163,6 +3163,31 @@ async function main() {
     const onAgain = await renderer.evaluate(`window.ai7.inspectEvaluationCalibration({ after: null, focusBookId: null }).then((before) => window.ai7.setEvaluationPreferences({ expectedEntries: before.preferenceEntries, predictionEnabled: before.prediction.enabled, calibrationEnabled: true })).then((answer) => JSON.stringify([answer.calibration.enabled, answer.calibration.active, answer.calibration.offset?.basisBooks ?? null, answer.preferenceEntries]))`);
     requireJourney(onAgain === JSON.stringify([true, true, 1, 2]), 'calibration-on-again', onAgain);
 
+    at('evaluation-profile-editing');
+    // Last, after every authored-fixture turn: changing the house profile must never reinterpret an existing Record or 初评.
+    const profileSnapshots = await renderer.evaluate(`window.ai7.inspectEvaluation({recordId:null}).then((page)=>JSON.stringify([page.record.profile,page.initial.latest.profile]))`);
+    await toLanding('profile-editing');
+    await click(renderer, '知识库', 'profile-editing-knowledge');
+    await click(renderer, '评估方案', 'profile-editing-tab');
+    await waitFor(renderer, `document.querySelector('[data-profile-action="new-version"]')`, 'profile-editing-ready');
+    await clickSelector(renderer, '[data-profile-action="new-version"]', 'profile-editing-new');
+    await fill(renderer, '[data-profile-edit] [data-profile-field="label"]', '作品品质', 'profile-editing-name');
+    await fill(renderer, '[data-profile-edit] [data-profile-field="description"]', '（旅程示例）看作者声音与文学品质。', 'profile-editing-description');
+    await fill(renderer, '[data-profile-edit] [data-profile-field="readiness"]', '（旅程示例）完成来源复核。', 'profile-editing-readiness');
+    await clickSelector(renderer, '[data-profile-edit] .evaluation-profile-edit-item:last-child [data-profile-action="remove-item"]', 'profile-editing-remove');
+    await clickSelector(renderer, '[data-profile-action="save"]', 'profile-editing-save');
+    await waitFor(renderer, `document.querySelector('.evaluation-profile[data-profile-version="2"]') && !document.querySelector('[data-profile-edit]')`, 'profile-editing-saved');
+    const editedProfiles = await renderer.evaluate(`window.ai7.inspectEvaluationProfiles().then((page)=>({versions:page.profiles.map(p=>p.version),items:page.profiles[0].items.map(i=>[i.label,i.fullMarks]),readiness:page.profiles[0].readiness,description:page.profiles[0].items[0].description}))`);
+    requireJourney(JSON.stringify(editedProfiles.versions) === JSON.stringify(['2','1']) && editedProfiles.items.length === 4 && editedProfiles.items.every(([,max])=>max===25) && editedProfiles.items[0][0] === '作品品质' && editedProfiles.description.includes('作者声音') && editedProfiles.readiness.length === 1, 'profile-editing-version', editedProfiles);
+    await click(renderer, '返回', 'profile-editing-back');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'profile-editing-library');
+    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(calibrationBookId)}]`, 'profile-editing-book');
+    await waitFor(renderer, `document.querySelector('.book-evaluation-summary [data-evaluation-action="open"]')`, 'profile-editing-overview');
+    await clickSelector(renderer, '.book-evaluation-summary [data-evaluation-action="open"]', 'profile-editing-old-record');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-evaluation"] .evaluation-item')`, 'profile-editing-old-ready');
+    const keptProfiles = await renderer.evaluate(`window.ai7.inspectEvaluation({recordId:null}).then((page)=>JSON.stringify([page.record.profile,page.initial.latest.profile]))`);
+    requireJourney(keptProfiles === profileSnapshots, 'profile-editing-old-snapshots');
+
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');
 
