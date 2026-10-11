@@ -1315,7 +1315,10 @@ async function main() {
     await fill(renderer, '.exemplar-import-form label:nth-child(3) input', '测试责编', 'earlier-exemplar-editor');
     await click(renderer, '选择文件', 'earlier-exemplar-file');
     await waitFor(renderer, `document.querySelector('.exemplar-import-form select')?.disabled===false`, 'earlier-exemplar-preview');
-    await assertRenderer(renderer, `(() => { const select = document.querySelector('.exemplar-import-form select'); select.value='news-release'; return select.value==='news-release'; })()`, 'earlier-exemplar-type');
+    // No type is preselected and 导入范例 waits for the editor's choice (Issue #778); the choice is made as the editor makes it.
+    await assertRenderer(renderer, `(() => { const form = document.querySelector('.exemplar-import-form'); const select = form?.querySelector('select'); const submit = Array.from(form?.querySelectorAll('button') ?? []).find((button) => button.textContent === '导入范例'); return select?.value === '' && select.options[0]?.textContent === '请选择文档类型' && submit?.disabled === true; })()`, 'earlier-exemplar-type-unchosen');
+    await assertRenderer(renderer, `(() => { const select = document.querySelector('.exemplar-import-form select'); select.value='news-release'; select.dispatchEvent(new Event('change', { bubbles: true })); return select.value==='news-release'; })()`, 'earlier-exemplar-type');
+    await waitFor(renderer, `Array.from(document.querySelectorAll('.exemplar-import-form button')).find((button) => button.textContent === '导入范例')?.disabled === false`, 'earlier-exemplar-type-chosen');
     await click(renderer, '导入范例', 'earlier-exemplar-confirm');
     await waitFor(renderer, `document.querySelector('.exemplar-book .exemplar-designation')?.textContent.startsWith('以前出版的图书 · 导入于')`, 'earlier-exemplar-imported');
     await assertRenderer(renderer, `(() => {
