@@ -1522,13 +1522,18 @@ export class ReviewRunStore {
 
   // ---- Connectivity Wait (Issue #760, plan slice S74c) ----------------------------------------------------------
 
-  /** Every Review Run waiting in Connectivity Wait, oldest approval first, with its Book. */
-  waitingRuns(): Array<{ bookId: string; reviewRunId: string; authorizedAt: string }> {
+  /**
+   * Every Review Run waiting in Connectivity Wait, oldest approval first, with its Book — or the Book's alone. Only unsettled
+   * approvals are read (Issue #764): a Run with any category event has begun, been cancelled or been blocked and never waits
+   * again, so the history of settled approvals costs one index probe each and none of their records is parsed.
+   */
+  waitingRuns(bookId?: string): Array<{ bookId: string; reviewRunId: string; authorizedAt: string }> {
     const rows = this.#db.prepare(
       `SELECT r.*, a.authorized_at approved_at FROM review_run_authorizations a JOIN review_runs r ON r.review_run_id = a.review_run_id
-       WHERE json_extract(a.canonical_json, '$.start') = 'when-online'
+       WHERE NOT EXISTS (SELECT 1 FROM review_run_category_events e WHERE e.review_run_id = a.review_run_id)
+         AND json_extract(a.canonical_json, '$.start') = 'when-online' AND (? IS NULL OR r.book_id = ?)
        ORDER BY a.authorized_at, r.review_run_id`,
-    ).all() as SqlRow[];
+    ).all(bookId ?? null, bookId ?? null) as SqlRow[];
     const waiting: Array<{ bookId: string; reviewRunId: string; authorizedAt: string }> = [];
     for (const row of rows) {
       const snapshot = this.#snapshotOf(row);
@@ -1544,7 +1549,7 @@ export class ReviewRunStore {
 
   /** Whether one of the Book's Runs waits to start once online: no new 审阅 is prepared over it. */
   #bookWaits(bookId: string): boolean {
-    return this.waitingRuns().some((run) => run.bookId === bookId);
+    return this.waitingRuns(bookId).length > 0;
   }
 
   /**
@@ -1590,8 +1595,22 @@ export class ReviewRunStore {
     const detail = reasons.join(' ');
     const code = cause === 'plan-moved' ? REVIEW_RUN_PLAN_MOVED : REVIEW_RUN_LAUNCH_BLOCKED;
     transact(this.#db, () => {
+      // A Series Retrieval Exclusion that reaches a category stops the Run in SER-024's words, exactly as the exclusion stops a
+      // waiting Run when it is recorded (Issue #764): 书系检索范围已变化, never the plan drift the same exclusion also causes.
+      if (cause === 'plan-moved' && this.#stopForSeriesScopeWhileWaiting(snapshot)) return;
       for (const category of snapshot.categories) this.#recordEvent(reviewRunId, category.categoryId, 'refused', detail, { extra: { code } });
     });
+  }
+
+  /** The stop `stopForSeriesScope` records for the first category an exclusion in force reaches, for a Run that waits. */
+  #stopForSeriesScopeWhileWaiting(snapshot: RunSnapshot): boolean {
+    for (const category of snapshot.categories) {
+      const excluded = this.#unverifiedTargets(category, snapshot.createdAt);
+      if (excluded === null) continue;
+      this.#recordEvent(snapshot.reviewRunId, category.categoryId, 'refused', seriesScopeStopDetail(excluded), { extra: { code: SERIES_RETRIEVAL_SCOPE_CHANGED } });
+      return true;
+    }
+    return false;
   }
 
   /**

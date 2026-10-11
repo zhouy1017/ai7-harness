@@ -156,7 +156,9 @@ export class ReviewRunDriver {
           if (this.#stopping) return;
           // A place first, then the ledger's authorization: while other Runs hold every place the category waits,
           // and the authorization is written only once it can be handed over at once.
-          await this.#place(reviewRunId, categoryId);
+          // A place that is free is taken in this same turn, never after an await (Issue #764): Reconnect Preflight hands several
+          // waiting Runs over in one pass, oldest first, and a Run handed over must hold its place before the next is admitted.
+          if (this.#owner.busy !== false) await this.#place(reviewRunId, categoryId);
           if (this.#stopping) return;
           const handOff = this.#steps.start(reviewRunId, categoryId);
           if (handOff !== null) await this.#dispatch(reviewRunId, categoryId, handOff);
@@ -164,7 +166,7 @@ export class ReviewRunDriver {
         }
         case 'dispatch': {
           if (this.#stopping) return;
-          await this.#place(reviewRunId, categoryId);
+          if (this.#owner.busy !== false) await this.#place(reviewRunId, categoryId);
           if (this.#stopping) return;
           // What the category needs is read again after the wait (Issue #64 review): a Run stopped meanwhile — a Series
           // Retrieval Exclusion recorded, its start blocked — dispatches nothing, and the next step reads what was recorded.

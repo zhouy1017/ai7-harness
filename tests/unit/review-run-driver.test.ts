@@ -53,3 +53,43 @@ describe('the drive loop\'s wait for a place', () => {
     expect(calls).toEqual(['admitAndDispatch', 'recordDispatch']);
   });
 });
+
+describe('the drive loop takes a free place in the turn it is handed a Run (Issue #764)', () => {
+  function drivenWith(busy: boolean | undefined): { calls: string[]; driver: ReviewRunDriver } {
+    const calls: string[] = [];
+    const steps: ReviewRunDriveSteps = {
+      begin: () => ['typos-and-usage'],
+      end: () => undefined,
+      step: (): ReviewRunDriveStep => calls.includes('admitAndDispatch') ? { kind: 'done' } : { kind: 'dispatch', runRecordId: 'run-1', ledger: LEDGER },
+      start: () => null,
+      recordDispatch: () => { calls.push('recordDispatch'); },
+      refuseDispatch: () => undefined,
+      settle: () => undefined,
+      write: () => undefined,
+      fail: () => undefined,
+      waitingForPlace: () => undefined,
+    };
+    const owner: ReviewRunExecutionOwner = {
+      ...(busy === undefined ? {} : { busy }),
+      admitAndDispatch: () => { calls.push('admitAndDispatch'); },
+      whenPlaceFree: async () => undefined,
+      whenDone: async () => undefined,
+    };
+    return { calls, driver: new ReviewRunDriver(steps, owner) };
+  }
+
+  it('hands the category to the owner before drive returns when a place is free, so a Run admitted next sees it taken', async () => {
+    const { calls, driver } = drivenWith(false);
+    const driven = driver.drive('review-run');
+    expect(calls).toEqual(['admitAndDispatch', 'recordDispatch']);
+    await driven;
+  });
+
+  it('still waits through the owner for an owner that does not say whether a place is free', async () => {
+    const { calls, driver } = drivenWith(undefined);
+    const driven = driver.drive('review-run');
+    expect(calls).toEqual([]);
+    await driven;
+    expect(calls).toEqual(['admitAndDispatch', 'recordDispatch']);
+  });
+});
