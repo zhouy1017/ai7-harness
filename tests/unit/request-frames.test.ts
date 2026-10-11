@@ -1302,6 +1302,7 @@ describe('decodeRequest rejects malformed frames', () => {
       { op: 'prepareWritingTask', input: { bookId, typeId: 'news-release', audience: '', channel: '', requirements: '一千字以内' } },
       { op: 'prepareWritingTask', input: { bookId, typeId: 'news-release', audience: '读者', channel: '公众号', requirements: null, materialIds: [randomUUID(), randomUUID()] } },
       { op: 'prepareWritingTask', input: { bookId, typeId: 'news-release', audience: '读者', channel: '公众号', requirements: null, materialIds: [] } },
+      { op: 'prepareWritingTask', input: { bookId, typeId: 'news-release', audience: '读者', channel: '公众号', requirements: null, materialIds: Array.from({ length: 16 }, () => randomUUID()) } },
       { op: 'authorizeWritingTask', input: { bookId, taskIntentId: recordId, planEnvelopeDigest: 'c'.repeat(64) } },
       { op: 'createWritingDraft', input: { bookId, revisionId: recordId } },
       // 快速开始 of a writing Task (S84b): the Task just prepared, its exact plan, and the rule version.
