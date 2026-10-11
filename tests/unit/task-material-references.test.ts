@@ -1,10 +1,13 @@
+import { initialEvaluationKindDefinition } from '../../src/service/evaluation/initial-evaluation-kind.js';
+import { readersReportKindDefinition } from '../../src/service/evaluation/readers-report-kind.js';
+import { BUILTIN_EVALUATION_PROFILE, evaluationProfileDigest } from '../../src/service/evaluation-records.js';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { taskMaterialKindDefinition, taskMaterialRefusal, taskMaterialSources, taskMaterialWords } from '../../src/service/task-material-references.js';
 import { writingMaterialDigest } from '../../src/service/writing-tasks.js';
 import { ProtocolError, decodeRequest } from '../../src/service/request-frames.js';
-import { taskMaterialSelection, taskMaterialSelectionReason } from '../../src/renderer/task-material-selection.js';
+import { taskMaterialSelection, taskMaterialSelectionReason, taskMaterialSendLine } from '../../src/renderer/task-material-selection.js';
 import type { ServiceRequest, WritingTaskMaterialProjection } from '../../src/shared/protocol.js';
 import { TYPOS_AND_USAGE } from '../support/review-categories.js';
 
@@ -82,5 +85,65 @@ describe('review materialIds wire boundary', () => {
   });
   it.each([Array.from({ length: 17 }, () => randomUUID()), ['not-a-uuid'], 'not-an-array', null])('rejects invalid reference frames', (materialIds) => {
     expect(() => decodeRequest(frame(materialIds))).toThrow(ProtocolError);
+  });
+});
+
+const evaluationBase = initialEvaluationKindDefinition({ ...BUILTIN_EVALUATION_PROFILE, sha256: evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE) });
+const reportBase = readersReportKindDefinition({ template: 'author', record: { profile: { title: '合成方案', version: '1' },
+  items: [{ label: '合成评分项', fullMarks: 100, score: 80, notRated: null, comment: '合成评语', ai7: null }],
+  total: { score: 80, fullMarks: 100 }, strengths: ['合成优点'], weaknesses: ['合成问题'],
+  risks: [], readiness: [], verdict: '合成总评', conclusion: '修改后再议' }, exemplars: [{ title: '合成本社范例', text: '合成范例段落，只用于测试。' }] });
+
+describe.each([evaluationBase, reportBase])('evaluation reference contracts ($kind)', (definition) => {
+  it('preserves the exact no-reference definition and binds both execution stages to the selected background', () => {
+    expect(taskMaterialKindDefinition(definition, { ...boundary, references: [] }, [])).toBe(definition);
+    const wrapped = taskMaterialKindDefinition(definition, boundary, [taskMaterialWords(source, paragraphs)]);
+    expect(wrapped.contractVersion).toBe(definition.contractVersion);
+    expect(wrapped.systemPrompt).toContain('不改变本社评估方案');
+    expect(wrapped.systemPrompt).toContain('不覆盖编辑定稿的分数、评语与结论');
+    expect(wrapped.systemPrompt).toContain(paragraphs[0]);
+    expect(wrapped.systemPrompt.startsWith(definition.systemPrompt)).toBe(true);
+    expect(wrapped.reduce).toBe(definition.reduce);
+    expect(wrapped.buildUnitMessage).toBe(definition.buildUnitMessage);
+    expect(wrapped.parseUnitResult).toBe(definition.parseUnitResult);
+    expect(wrapped.crossUnit!.step!.parse).toBe(definition.crossUnit!.step!.parse);
+    expect(wrapped.crossUnit!.step!.buildMessage).toBe(definition.crossUnit!.step!.buildMessage);
+    expect(wrapped.crossUnit!.promptContractDigest).toBe(wrapped.promptContractDigest);
+    expect(wrapped.crossUnit!.step!.requestDigest([])).not.toBe(definition.crossUnit!.step!.requestDigest([]));
+    const changed = { ...source, indexDigest: 'b'.repeat(64) };
+    const another = taskMaterialKindDefinition(definition, { ...boundary, references: [changed] }, [taskMaterialWords(changed, paragraphs)]);
+    expect(another.crossUnit!.step!.requestDigest([])).not.toBe(wrapped.crossUnit!.step!.requestDigest([]));
+  });
+  it('blocks unit and synthesis requests when a frozen index goes away, using the 评估 recovery path', () => {
+    const wrapped = taskMaterialKindDefinition(definition, boundary, [taskMaterialWords(source, paragraphs)]);
+    const missing = taskMaterialKindDefinition(definition, boundary, [taskMaterialRefusal(source, 'MATERIAL_INDEX_MOVED', '评估')], wrapped.promptContractDigest);
+    expect(missing.promptContractDigest).toBe(wrapped.promptContractDigest);
+    expect(missing.schemaDigest).toBe(wrapped.schemaDigest);
+    expect(() => missing.crossUnit!.step!.buildMessage([], 0)).toThrow('「评估」重新准备计划');
+  });
+});
+
+describe.each(['prepareInitialEvaluation', 'prepareReadersReport'] as const)('evaluation reference wire boundary (%s)', (op) => {
+  const frame = (materialIds: unknown) => new TextEncoder().encode(JSON.stringify({ id: randomUUID(), op,
+    input: { bookId: boundary.bookId, ...(op === 'prepareReadersReport' ? { template: 'author' } : {}), materialIds } }));
+  it('admits opt-in ids while refusing malformed reference input', () => {
+    expect(decodeRequest(frame([source.materialId])).input).toMatchObject({ materialIds: [source.materialId] });
+    for (const invalid of [null, 'bad', ['bad'], Array.from({ length: 17 }, () => randomUUID())]) {
+      expect(() => decodeRequest(frame(invalid))).toThrow(ProtocolError);
+    }
+  });
+});
+
+describe('evaluation preparation disclosure', () => {
+  it('names only selectable bounded choices and keeps empty and stale selection silent', () => {
+    const items = [offer('a', 3000), offer('b', 3000), offer('too-much', 1), offer('unavailable', 1, false)];
+    const line = taskMaterialSendLine(items, new Set(['a', 'b', 'too-much', 'unavailable', 'missing']));
+    expect(line).toContain('《a》、《b》');
+    expect(line).toContain('提取文字随稿件一并发往，只参照，不照抄');
+    expect(line).toContain('本机确定性运行不发送');
+    expect(line).not.toContain('too-much');
+    expect(line).not.toContain('unavailable');
+    expect(taskMaterialSendLine(items, new Set(['missing', 'unavailable']))).toBeNull();
+    expect(taskMaterialSendLine(items, new Set())).toBeNull();
   });
 });
