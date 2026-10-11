@@ -212,7 +212,10 @@ const MAX_UPGRADE_CHANGE_CHARACTERS = 200;
 
 /**
  * An upgrade as a record carries it, whole: its fields and no others, each of its kind, and below the record's Data Version. The
- * note an open leaves beside the store is read the same way (`upgrade-backup.ts`).
+ * note an open leaves beside the store is read the same way (`upgrade-backup.ts`). A `rollback` names the earlier complete backup
+ * that an unfinished upgrade's middle state falls back to, and that middle state does not share the Data Version (Issue #644):
+ * the rollback's Data Version and schema revision are each strictly below the upgrade's own `fromDataVersion` and
+ * `fromSchemaRevision`, as `predecessor` in `upgrade-backup.ts` always writes them.
  */
 export function readUpgrade(value: unknown, dataVersion: number): DataVersionUpgrade {
   const keys = ['backup', 'changes', 'fromDataVersion', 'fromSchemaRevision', 'fromSoftwareVersion'];
@@ -232,8 +235,8 @@ export function readUpgrade(value: unknown, dataVersion: number): DataVersionUpg
   if (Object.hasOwn(value, 'rollback')) {
     const prior = value.rollback;
     requireDataVersion(isRecord(prior) && Object.keys(prior).sort().join(',') === 'backup,dataVersion,schemaRevision,softwareVersion' &&
-      typeof prior.dataVersion === 'number' && Number.isSafeInteger(prior.dataVersion) && prior.dataVersion >= 1 && prior.dataVersion <= fromDataVersion &&
-      typeof prior.schemaRevision === 'number' && Number.isSafeInteger(prior.schemaRevision) && prior.schemaRevision >= 1 && prior.schemaRevision <= fromSchemaRevision &&
+      typeof prior.dataVersion === 'number' && Number.isSafeInteger(prior.dataVersion) && prior.dataVersion >= 1 && prior.dataVersion < fromDataVersion &&
+      typeof prior.schemaRevision === 'number' && Number.isSafeInteger(prior.schemaRevision) && prior.schemaRevision >= 1 && prior.schemaRevision < fromSchemaRevision &&
       (prior.softwareVersion === null || (typeof prior.softwareVersion === 'string' && SOFTWARE_VERSION.test(prior.softwareVersion))) &&
       isRecord(prior.backup) && Object.keys(prior.backup).sort().join(',') === 'byteLength,fileName,sha256' &&
       typeof prior.backup.fileName === 'string' && PRE_UPGRADE_BACKUP_NAME.test(prior.backup.fileName) &&

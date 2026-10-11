@@ -9,6 +9,7 @@ import {
   DataVersionLedger,
   initializeDataVersionSchema,
   MAX_STORE_VERSIONS_LISTED,
+  readUpgrade,
 } from '../../src/service/data-version.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { SERIES_KNOWLEDGE_SCHEMA_VERSION, OUTCOME_RESOLUTION_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
@@ -229,6 +230,36 @@ describe('数据版本 over the real store', () => {
       database.exec("UPDATE store_versions SET software_version = '0.0.9' WHERE ordinal = 1");
       expect(() => ledger.standing()).toThrowError(DataVersionError);
       expect(() => ledger.recordOpen({ softwareVersion: '0.2.0', dataVersion: 1, schemaRevision: 65 })).toThrowError(DataVersionError);
+    } finally {
+      database.close();
+    }
+  });
+
+  it('reads a rollback only when it names a strictly earlier Data Version and schema revision than the upgrade it belongs to (Issue #644)', () => {
+    const backup = { fileName: 'AI7 升级前备份 2026-09-26 10-00-00.ai7db', byteLength: 1, sha256: 'a'.repeat(64) };
+    const upgrade = (rollback: { dataVersion: number; schemaRevision: number }): unknown => ({
+      fromDataVersion: 3, fromSchemaRevision: 60, fromSoftwareVersion: '0.0.10', changes: ['替换记录'], backup,
+      rollback: { softwareVersion: '0.0.9', ...rollback, backup },
+    });
+    const refusedCode = (rollback: { dataVersion: number; schemaRevision: number }): string | null => {
+      try { readUpgrade(upgrade(rollback), 4); return null; } catch (error) { return error instanceof DataVersionError ? error.code : String(error); }
+    };
+    // The middle state an unfinished upgrade left does not share the Data Version it fell back from.
+    expect(refusedCode({ dataVersion: 3, schemaRevision: 59 })).toBe('STORE_VERSION_RECORD_INVALID');
+    expect(refusedCode({ dataVersion: 4, schemaRevision: 59 })).toBe('STORE_VERSION_RECORD_INVALID');
+    expect(refusedCode({ dataVersion: 1, schemaRevision: 60 })).toBe('STORE_VERSION_RECORD_INVALID');
+    expect(refusedCode({ dataVersion: 1, schemaRevision: 61 })).toBe('STORE_VERSION_RECORD_INVALID');
+    expect(refusedCode({ dataVersion: 2, schemaRevision: 59 })).toBeNull();
+    expect(readUpgrade(upgrade({ dataVersion: 2, schemaRevision: 59 }), 4).rollback).toMatchObject({ dataVersion: 2, schemaRevision: 59 });
+    // The ledger refuses to record the same rollback, and records the strictly earlier one.
+    const database = new DatabaseSync(':memory:');
+    try {
+      initializeDataVersionSchema(database);
+      const ledger = new DataVersionLedger(database);
+      ledger.recordOpen({ softwareVersion: '0.0.9', dataVersion: 3, schemaRevision: 60 });
+      expect(() => ledger.recordOpen({ softwareVersion: '0.0.10', dataVersion: 4, schemaRevision: 61, upgrade: upgrade({ dataVersion: 3, schemaRevision: 59 }) as never }))
+        .toThrowError(expect.objectContaining({ code: 'STORE_VERSION_RECORD_INVALID' }));
+      expect(ledger.recordOpen({ softwareVersion: '0.0.10', dataVersion: 4, schemaRevision: 61, upgrade: upgrade({ dataVersion: 2, schemaRevision: 59 }) as never })).toBe(true);
     } finally {
       database.close();
     }
