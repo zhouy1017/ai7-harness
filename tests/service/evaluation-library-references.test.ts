@@ -3,7 +3,7 @@ import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
@@ -81,6 +81,14 @@ function removeBuild(id: string): void {
     }
     db.prepare('DELETE FROM material_index_segments WHERE index_id IN (SELECT index_id FROM material_index_builds WHERE material_id = ?)').run(id);
     db.prepare('DELETE FROM material_index_builds WHERE material_id = ?').run(id);
+    for (const sql of Object.values(MATERIAL_INDEX_TRIGGER_SQL)) db.exec(sql);
+  }, true);
+}
+function breakIndex(id: string, record: 'segments' | 'build'): void {
+  database((db) => {
+    for (const name of Object.keys(MATERIAL_INDEX_TRIGGER_SQL)) db.exec(`DROP TRIGGER ${name}`);
+    if (record === 'segments') db.prepare("UPDATE material_index_segments SET sha256 = ? WHERE index_id IN (SELECT index_id FROM material_index_builds WHERE material_id = ?)").run('f'.repeat(64), id);
+    else db.prepare("UPDATE material_index_builds SET canonical_json = '{}' WHERE material_id = ?").run(id);
     for (const sql of Object.values(MATERIAL_INDEX_TRIGGER_SQL)) db.exec(sql);
   }, true);
 }
@@ -252,26 +260,69 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
     const c = await material('丙'.repeat(1001));
     expect(() => prepare(kind, [a, b, c])).toThrow('6,000');
   });
-  it('does not turn corrupt index records into an unavailable-reference explanation', async () => {
+  it.each(['segments', 'build'] as const)('degrades corrupt index %s to that reference, named plainly, and still reads the editor\u2019s own records', async (record) => {
     const id = await material();
+    const healthy = await material('另一份可读取的合成资料。');
     const prepared = prepare(kind, [id]);
-    database((db) => {
-      for (const name of Object.keys(MATERIAL_INDEX_TRIGGER_SQL)) db.exec(`DROP TRIGGER ${name}`);
-      db.prepare("UPDATE material_index_segments SET sha256 = ? WHERE index_id IN (SELECT index_id FROM material_index_builds WHERE material_id = ?)").run('f'.repeat(64), id);
-      for (const sql of Object.values(MATERIAL_INDEX_TRIGGER_SQL)) db.exec(sql);
-    }, true);
-    expect(() => plan(kind, prepared.taskIntent!.taskIntentId)).toThrow();
+    const before = store.inspectEvaluation(bookId, null);
+    breakIndex(id, record);
+    // The page no longer fails whole: its versions and the open record read as they did.
+    const page = store.inspectEvaluation(bookId, null);
+    expect(page.records).toEqual(before.records);
+    expect(page.record).toEqual(before.record);
+    expect(page.materials!.items.some((item) => item.materialId === healthy && item.selectable)).toBe(true);
+    if (record === 'build') expect(page.materials!.items.some((item) => item.materialId === id)).toBe(false);
+    await close(); await open();
+    expect(store.inspectEvaluation(bookId, null).records).toEqual(before.records);
+    expect(frozenRows(kind).blocked).toBe(true);
+    expect(frozenRows(kind).lines).toEqual([expect.stringContaining('资料《合成背景资料》的索引记录已损坏')]);
+    expect(frozenRows(kind).lines.join(' ')).toContain('可以在「评估」重新准备计划');
+    const blockedPlan = plan(kind, prepared.taskIntent!.taskIntentId);
+    expect(blockedPlan.state.label).toBe('参考资料已不可用');
+    expect(blockedPlan.start.readiness).toBe('changed');
+    expect(blockedPlan.scope.send).toContain('也只在本机读取');
+    expect(blockedPlan.drift?.reasons.join(' ')).toContain('的索引记录已损坏');
     try { authorize(kind, prepared); throw new Error('accepted corrupt records'); } catch (error) {
       expect(error).toBeInstanceOf(StoreError);
+      expect((error as StoreError).code).toBe('MATERIAL_INDEX_RECORD_INVALID');
       expect((error as StoreError).code).not.toBe('MATERIAL_INDEX_MOVED');
       expect((error as StoreError).code).not.toBe('MATERIAL_REFERENCE_UNAVAILABLE');
+      expect((error as StoreError).message).toContain('资料《合成背景资料》的索引记录已损坏');
+      expect((error as StoreError).message).toContain('不能再开始');
     }
+    // The editor prepares again without the damaged reference, and the rows clear.
+    const next = prepare(kind);
+    expect(frozenRows(kind)).toEqual({ lines: [], blocked: false });
+    expect(next.taskIntent!.taskIntentId).not.toBe(prepared.taskIntent!.taskIntentId);
+    expect(component(next.taskIntent!.taskIntentId).materialReferences).toBeUndefined();
   });
-  it('rejects reference-bearing preparation and frozen-plan authorization in developer-live', async () => {
+  it('reads each pinned item whole once, then only re-checks its first page on later 评估 reads and polls', async () => {
+    const id = await material(Array.from({ length: 40 }, (_, index) => `第 ${index + 1} 段。`).join('\n\n'));
+    const prepared = prepare(kind, [id]);
+    const pages = vi.spyOn(store, 'readMaterialIndexForTask');
+    try {
+      store.inspectEvaluation(bookId, null);
+      expect(pages.mock.calls.length).toBeGreaterThan(1);
+      pages.mockClear();
+      store.inspectEvaluation(bookId, null);
+      if (kind === 'initial-evaluation') store.inspectInitialEvaluation(bookId);
+      // Every later read re-checks only the pin's first page; the kept pages are never read again.
+      expect(pages.mock.calls.length).toBeGreaterThan(0);
+      expect(pages.mock.calls.every((call) => call[2] === 1)).toBe(true);
+      // A reference withdrawn since still refuses: the kept text never stands in for the pin's availability.
+      store.decideLibraryMaterial({ materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+      expect(frozenRows(kind).lines.some((line) => line.includes('现在不能列进'))).toBe(true);
+      expect(component(prepared.taskIntent!.taskIntentId).materialReferences).toBeDefined();
+    } finally { pages.mockRestore(); }
+  });
+  it('rejects reference-bearing preparation and frozen-plan authorization in developer-live, and the plan says nothing would be sent', async () => {
     const id = await material();
     const prepared = prepare(kind, [id]);
+    expect(plan(kind, prepared.taskIntent!.taskIntentId).scope.send).toContain('也只在本机读取');
     const live = { operationalScope: 'developer-live', live: { route: 'opencode-go', model: 'deepseek-v4-flash', endpoint: 'https://example.invalid/v1', credentialSlot: 'opencode-go', credentialReference: randomUUID(), runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 100_000 } } } as const;
     store.baselineAnalysisLedger.bindLaunch(live);
+    // The plan prepared provider-free, read under developer-live, names the refusal instead of claiming the references would go.
+    expect(plan(kind, prepared.taskIntent!.taskIntentId).scope.send).toBe('不发送任何内容；这份计划列了资料库资料，当前运行范围不能把它们发送给模型，这份计划不能开始');
     expect(() => prepare(kind, [id])).toThrow(TASK_MATERIAL_LIVE_UNAVAILABLE);
     expect(() => authorize(kind, prepared)).toThrow(TASK_MATERIAL_LIVE_UNAVAILABLE);
     expect(store.inspectEvaluation(bookId, null).materials!.items.every((item) => !item.selectable)).toBe(true);
