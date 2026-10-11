@@ -692,3 +692,13 @@ A TXT, Markdown or `.doc` file kept as source material now records a retained-bo
 
 - **Old records still open.** The label is part of the record digest and nothing rewrites a stored record, so the record check (`bounded-manuscript.ts`) and the store's two readers accept, on a converted format, both the new label and the DOCX label an earlier record carries; on a DOCX or an unparsed file only its own label is accepted, and any other label refuses (`acceptedSourceImportRetainedBoundaryLabels`, `src/shared/protocol.ts`). The receipt shows the label the record was stored with.
 - **#594's two review P3s were already in `dev`.** The conversion-column check (a working object only on TXT, MD and DOC, and set together with its converter) and the ADR 0072 §2 citation landed with #732.
+
+## Earlier published Books in 范例 (Issue #427)
+
+Service protocol 124 follows 123 (#583); additive schema revision 69 follows 68 and keeps Data Version 1.
+The editor imports DOCX/TXT/MD, names the Book, authors and responsible editors, and chooses a deliverable type.
+Three append-only ledgers hold earlier-Book provenance, immutable document versions and exact-version Learning Eligibility decisions.
+Earlier Books are Knowledge Base identities, never AI7 Book projects. Imports default to 仅本社; the editor may exclude or defer a version.
+Writing Tasks pin exact versions and digests; 审稿意见 retains its existing frozen-word contract.
+Full database export/replacement includes these ledgers and originals. Book-only merges leave this house knowledge behind:
+a writing Task whose referenced exemplar is absent keeps readable results/drafts but cannot start again.

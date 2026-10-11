@@ -267,6 +267,11 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['previewReviewGuidelineVersion']['output'] | null>(IPC_CHANNELS.previewReviewGuidelineVersion, input),
   importReviewGuidelineVersion: (input: ServiceOperationMap['importReviewGuidelineVersion']['input']) =>
     invoke<ServiceOperationMap['importReviewGuidelineVersion']['output']>(IPC_CHANNELS.importReviewGuidelineVersion, input),
+  previewImportedExemplar: () => invoke<ServiceOperationMap['previewImportedExemplar']['output'] | null>(IPC_CHANNELS.previewImportedExemplar),
+  importEarlierExemplar: (input: ServiceOperationMap['importEarlierExemplar']['input']) =>
+    invoke<ServiceOperationMap['importEarlierExemplar']['output']>(IPC_CHANNELS.importEarlierExemplar, input),
+  decideImportedExemplar: (input: ServiceOperationMap['decideImportedExemplar']['input']) =>
+    invoke<ServiceOperationMap['decideImportedExemplar']['output']>(IPC_CHANNELS.decideImportedExemplar, input),
   inspectExemplars: (input?: ServiceOperationMap['inspectExemplars']['input']) =>
     invoke<ServiceOperationMap['inspectExemplars']['output']>(IPC_CHANNELS.inspectExemplars, input ?? { after: null }),
   admitReadersReportExemplar: (input: ServiceOperationMap['admitReadersReportExemplar']['input']) =>

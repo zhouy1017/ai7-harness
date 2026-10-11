@@ -1,4 +1,5 @@
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
+import { readImportedExemplar } from './imported-exemplars.js';
 import { WRITING_KIND, type WritingDraftWordsProjection } from '../shared/protocol.js';
 import { UUID_PATTERN, canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
 import { graphemeCount } from './analysis/factual-review-contract.js';
@@ -156,7 +157,7 @@ export function writingExemplarDigest(text: string): string {
  * the contract takes, which `excerpt` says. `null` when the revision holds no words here.
  */
 export function readWritingExemplarWords(db: DatabaseSync, revisionId: string): { text: string; excerpt: boolean } | null {
-  const whole = (db.prepare('SELECT text FROM manuscript_block_versions WHERE revision_id = ? ORDER BY position').all(revisionId) as SqlRow[])
+  const whole = readImportedExemplar(db, revisionId)?.text ?? (db.prepare('SELECT text FROM manuscript_block_versions WHERE revision_id = ? ORDER BY position').all(revisionId) as SqlRow[])
     .map((block) => String(block.text)).join('\n');
   const words = writingWords(whole, MAX_EXEMPLAR_GRAPHEMES);
   return words.length === 0 ? null : { text: words, excerpt: graphemeLength(whole.trim()) > MAX_EXEMPLAR_GRAPHEMES };

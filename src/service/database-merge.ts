@@ -98,6 +98,9 @@ export type MergeTablePolicy = 'seed' | 'owned' | 'dependent' | 'shared' | 'excl
 
 export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   books: 'seed',
+  earlier_exemplar_books: 'house',
+  earlier_exemplar_versions: 'house',
+  earlier_exemplar_eligibility: 'house',
   // The Book's manuscripts and their history.
   manuscripts: 'owned',
   manuscript_branches: 'owned',
@@ -449,11 +452,15 @@ export interface MergeBookPlan {
 function writingExemplarLeftBehind(db: DatabaseSync): boolean {
   if (!tableExists(db, 'src', 'writing_tasks')) return false;
   const merging = `SELECT b.book_id FROM src.books b WHERE ${MERGING_BOOK}`;
+  const importedHere = tableExists(db, 'main', 'earlier_exemplar_versions')
+    ? `AND NOT EXISTS (SELECT 1 FROM main.earlier_exemplar_versions v WHERE v.revision_id = json_extract(e.value, '$.revisionId'))`
+    : '';
   return db.prepare(
     `SELECT 1 FROM src.writing_tasks t, json_each(t.canonical_json, '$.exemplarSources') e
      WHERE t.book_id IN (${merging})
        AND json_extract(e.value, '$.bookId') NOT IN (${merging})
        AND NOT EXISTS (SELECT 1 FROM main.manuscript_block_versions v WHERE v.revision_id = json_extract(e.value, '$.revisionId'))
+       ${importedHere}
      LIMIT 1`,
   ).get() !== undefined;
 }
