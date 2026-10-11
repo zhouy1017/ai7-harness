@@ -8,7 +8,7 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { MATERIAL_INDEX_TRIGGER_SQL } from '../../src/service/material-index.js';
-import { IMPORTED_EXEMPLAR_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { fixtureEntryKey, loadModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { TASK_MATERIAL_LIVE_UNAVAILABLE, type TaskMaterialSource } from '../../src/service/task-material-references.js';
 import { NOTHING_SENT } from '../../src/service/task-plan.js';
@@ -125,7 +125,7 @@ function authorize(kind: Kind, prepared: InitialEvaluationProjection | ReadersRe
   return kind === 'initial-evaluation' ? store.authorizeInitialEvaluation(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest)
     : store.authorizeReadersReport(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
 }
-function answer(kind: Kind, prepared: InitialEvaluationProjection | ReadersReportProjection): void {
+function answer(kind: Kind, prepared: InitialEvaluationProjection | ReadersReportProjection, itemIds?: ReadonlyArray<string>): void {
   const definition = ledger(kind).definition;
   const closed = prepared.coverageManifest!.units.map((unit) => {
     const result = kind === 'initial-evaluation' ? { schema: INITIAL_EVALUATION_UNIT_RESULT_SCHEMA, unitOrdinal: unit.ordinal, observations: [] }
@@ -137,7 +137,7 @@ function answer(kind: Kind, prepared: InitialEvaluationProjection | ReadersRepor
   });
   const profile = store.inspectEvaluation(bookId, null).profile;
   const response = kind === 'initial-evaluation' ? { schema: INITIAL_EVALUATION_SYNTHESIS_RESULT_SCHEMA,
-    items: profile.items.map((item) => ({ itemId: item.itemId, score: 12, comment: '合成初评评语' })), strengths: [], weaknesses: [],
+    items: (itemIds ?? profile.items.map((item) => item.itemId)).map((itemId) => ({ itemId, score: 12, comment: '合成初评评语' })), strengths: [], weaknesses: [],
     nextStep: null, suggestedConclusion: 'revise', market: null }
     : { schema: READERS_REPORT_SYNTHESIS_RESULT_SCHEMA, overall: '合成总体评价', strengths: [], problems: [], suggestions: [], conclusion: '修改后再议' };
   const requestDigest = definition.crossUnit!.step!.requestDigest(closed);
@@ -179,7 +179,7 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
     expect(pins(taskId)[0]!.materialId).toBe(firstId);
     expect(ledger(kind).definition.materialReferences!.sources[0]!.materialId).toBe(secondId);
     expect(indexRows()).toBe(before);
-    expect(database((db) => db.prepare('PRAGMA user_version').get()!.user_version)).toBe(IMPORTED_EXEMPLAR_SCHEMA_VERSION);
+    expect(database((db) => db.prepare('PRAGMA user_version').get()!.user_version)).toBe(LATEST_SCHEMA_VERSION);
   });
   it('executes units and whole-book synthesis under the wrapper, keeps finalized semantics, and reads settled output with missing pins', async () => {
     const id = await material();
@@ -275,5 +275,42 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
     expect(() => prepare(kind, [id])).toThrow(TASK_MATERIAL_LIVE_UNAVAILABLE);
     expect(() => authorize(kind, prepared)).toThrow(TASK_MATERIAL_LIVE_UNAVAILABLE);
     expect(store.inspectEvaluation(bookId, null).materials!.items.every((item) => !item.selectable)).toBe(true);
+  });
+});
+
+describe('初评 references under a house Evaluation Profile version (Issues #427, #428)', () => {
+  it('runs a Task with its frozen profile and its frozen pins after the house profile changes and the store reopens', async () => {
+    const id = await material();
+    const builtin = store.inspectEvaluationProfiles().profiles[0]!;
+    // The Task is prepared under house version 2: four items, the first renamed and described.
+    const older = store.saveEvaluationProfile({ expectedSha256: builtin.sha256, readiness: [],
+      items: builtin.items.slice(0, 4).map((item, index) => ({ itemId: item.itemId, label: index === 0 ? '作品品质' : item.label, description: index === 0 ? '合成评分说明。' : '' })) }).profiles[0]!;
+    const prepared = prepare('initial-evaluation', [id]) as InitialEvaluationProjection;
+    const taskId = prepared.taskIntent!.taskIntentId;
+    const frozenPins = pins(taskId);
+    const base = component(taskId).materialReferenceBasePromptContractDigest;
+    const digest = ledger('initial-evaluation').definition.promptContractDigest;
+    const firstPlan = plan('initial-evaluation', taskId);
+    expect(firstPlan.scope.reference.some((line) => line.includes('合成背景资料'))).toBe(true);
+    // Then the house moves on to version 3: five items, one new, and a readiness default.
+    store.saveEvaluationProfile({ expectedSha256: older.sha256, readiness: ['合成就绪项。'],
+      items: [...older.items.map((item) => ({ itemId: item.itemId, label: item.label, description: item.description ?? '' })), { itemId: null, label: '合成新增项', description: '' }] });
+    await close(); await open();
+    expect(store.inspectEvaluationProfiles().profiles[0]!.items).toHaveLength(5);
+    expect(plan('initial-evaluation', taskId)).toEqual(firstPlan);
+    const frozen = ledger('initial-evaluation').definition;
+    expect([frozen.promptContractDigest, frozen.materialReferences!.basePromptContractDigest, frozen.materialReferences!.sources]).toEqual([digest, base, frozenPins]);
+    answer('initial-evaluation', prepared, older.items.map((item) => item.itemId));
+    const accepted = authorize('initial-evaluation', prepared);
+    expect(accepted.ledger.definition.promptContractDigest).toBe(digest);
+    expect(store.initialEvaluationLedgerForRun(accepted.dispatchRunRecordId!).definition.promptContractDigest).toBe(digest);
+    owner.admitAndDispatch(accepted.dispatchRunRecordId!, accepted.ledger);
+    await owner.whenIdle();
+    const settled = store.inspectInitialEvaluation(bookId);
+    expect([settled.state, settled.run!.state, settled.resultSetRevision!.gaps.length]).toEqual(['settled', 'completed', 0]);
+    const latest = store.inspectEvaluation(bookId, null).initial.latest!;
+    expect(latest.profile!.sha256).toBe(older.sha256);
+    expect(latest.items.map((item) => item.itemId)).toEqual(older.items.map((item) => item.itemId));
+    expect(pins(taskId)).toEqual(frozenPins);
   });
 });

@@ -769,7 +769,9 @@ async function dispatch(
     case 'recordSeriesExclusion':
       return { id: request.id, ok: true, op: request.op, result: store.recordSeriesExclusion(request.input) };
     case 'inspectEvaluationProfiles':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluationProfiles() };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluationProfiles(request.input.before ?? null) };
+    case 'saveEvaluationProfile':
+      return { id: request.id, ok: true, op: request.op, result: store.saveEvaluationProfile(request.input) };
     case 'inspectEvaluation':
       return { id: request.id, ok: true, op: request.op, result: store.inspectEvaluation(request.input.bookId, request.input.recordId, request.input.recordsBefore) };
     case 'startEvaluation':

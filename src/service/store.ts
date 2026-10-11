@@ -75,6 +75,8 @@ import type {
   LibraryMaterialProjection,
   LibraryMaterialsProjection,
   EvaluationProfilesProjection,
+  EvaluationProfileProjection,
+  SaveEvaluationProfileInput,
   EvaluationWorkspaceProjection,
   AnalysisFeedbackProjection,
   RecordAnalysisFeedbackInput,
@@ -251,6 +253,7 @@ import type {
   TaskAuthorizationProjection,
   BaselineAnalysisGoal,
   BaselineAnalysisProjection,
+  AnalysisProjection,
   BaselineAnalysisResultSetRevisionProjection,
   BaselineAnalysisRunState,
   BaselineAnalysisQuickStartProjection,
@@ -798,6 +801,7 @@ import {
   type StoredRevision,
 } from './series-knowledge.js';
 import { MAX_EXEMPLAR_BOOKS_PAGE } from '../shared/protocol.js';
+import { EvaluationProfiles, initializeEvaluationProfileSchema } from './evaluation-profiles.js';
 import { ImportedExemplars, ImportedExemplarError, initializeImportedExemplarSchema } from './imported-exemplars.js';
 import { readExemplarBook, type ExemplarSources } from './exemplars.js';
 import { readKnowledgeProcedures } from './knowledge-procedures.js';
@@ -950,6 +954,8 @@ import {
   MATERIAL_INDEX_SCHEMA_VERSION,
   OUTCOME_RESOLUTION_SCHEMA_VERSION,
   IMPORTED_EXEMPLAR_SCHEMA_VERSION,
+  EVALUATION_PROFILE_SCHEMA_VERSION,
+  LATEST_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -2231,7 +2237,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION),
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2295,7 +2301,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION)
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION)
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2673,7 +2679,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2726,7 +2732,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION)) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2871,7 +2877,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2923,7 +2929,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION)) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -3216,7 +3222,7 @@ function validateModelServiceSchema(
   const version = asNumber(
     one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
   );
-  if (validateStoreTruth || version !== IMPORTED_EXEMPLAR_SCHEMA_VERSION) {
+  if (validateStoreTruth || version !== LATEST_SCHEMA_VERSION) {
     validateManuscriptReimportSchemaTruth(
       db,
       profile,
@@ -3350,7 +3356,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3402,7 +3408,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION)) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -4305,8 +4311,11 @@ export class EditorialStore {
   readonly #factualReview: BaselineAnalysisStore;
   /** AI7 初评 (Issue #429, S81b1): the evaluation kind's own ledger over the same Book database. */
   readonly #initialEvaluation: BaselineAnalysisStore;
+  readonly #evaluationProfiles: EvaluationProfiles;
+  /** 初评 ledgers of a house profile or of a plan's 资料库 references (Issue #427, #428), one per contract; bounded. */
   readonly #initialEvaluationLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
-  readonly #initialEvaluationWork = new Map<string, BaselineAnalysisStore>();
+  /** Each 初评 preparation's ledger and the profile it snapshots for its Task. */
+  readonly #initialEvaluationWork = new Map<string, { ledger: BaselineAnalysisStore; profile: EvaluationProfileProjection }>();
   /** One ledger per review-category kind and frozen category contract, made when first asked for (Issue #417); bounded (#649). */
   readonly #reviewCategoryLedgers = new RecentCache<BaselineAnalysisStore>(REVIEW_CATEGORY_CACHE_CAPACITY, (ledger) => ledger.preparing);
   /** The kind definition of each configured category a Review Run snapshotted, by its contract input; bounded (#649). */
@@ -4444,6 +4453,7 @@ export class EditorialStore {
     this.#baselineAnalysis = baselineAnalysis;
     this.#factualReview = factualReview;
     this.#initialEvaluation = initialEvaluation;
+    this.#evaluationProfiles = new EvaluationProfiles(authority);
     this.#editorialMarks = new EditorialMarkStore(authority);
     this.#rules = new DefaultExecutionRuleLedger(authority);
     this.#enrollments = new BackgroundAnalysisEnrollmentLedger(authority);
@@ -4463,13 +4473,13 @@ export class EditorialStore {
     this.#dialogueHistory = harnessHistoryReader(join(dataRoot, HARNESS_SESSION_LOG_DIRECTORY));
     this.#dataVersions = new DataVersionLedger(authority);
     this.#databaseExports = new DatabaseExports(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: IMPORTED_EXEMPLAR_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: LATEST_SCHEMA_VERSION }),
     });
     this.#scheduledBackups = new ScheduledBackups(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: IMPORTED_EXEMPLAR_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: LATEST_SCHEMA_VERSION }),
     });
     this.#databaseReplacements = new DatabaseReplacements(authority, dataRoot, {
-      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: IMPORTED_EXEMPLAR_SCHEMA_VERSION }),
+      facts: () => ({ dataVersion: this.#dataVersion, softwareVersion: this.#softwareVersion, schemaRevision: LATEST_SCHEMA_VERSION }),
       // A package's data opens as a store of its own, with no launch control: brought to this revision and checked whole.
       openPackage: async (root) => {
         const opened = await EditorialStore.open(root, this.#codeRoot, {
@@ -4518,7 +4528,7 @@ export class EditorialStore {
       // The house's calibration switch (EVAL-011a): a version begun from AI7's 初评 applies the offset only while it is on. A
       // preferences chain that cannot be read refuses that start with the ledger's own words (`#evaluationCall`).
       calibrationEnabled: () => this.#evaluationCalibration.preferences().calibrationEnabled,
-    }, control.calibrationMinAdjustments ?? CALIBRATION_MIN_ADJUSTMENTS);
+    }, control.calibrationMinAdjustments ?? CALIBRATION_MIN_ADJUSTMENTS, () => this.#evaluationProfiles.current());
     this.#analysisFeedback = new AnalysisFeedbackLedger(authority);
     this.#outcomeResolutions = new OutcomeResolutionLedger(authority);
     this.#capturedProcedures = new CapturedProcedures(authority);
@@ -4669,7 +4679,7 @@ export class EditorialStore {
       // the backup location before anything migrates it, and a backup that cannot be made opens nothing.
       const classes = control.schemaRevisionClasses ?? SCHEMA_REVISION_CLASSES;
       const { upgrade, earlier } = await backUpBeforeUpgrade(authority, dataRoot, {
-        terminalRevision: IMPORTED_EXEMPLAR_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
+        terminalRevision: LATEST_SCHEMA_VERSION, classes, softwareVersion, now: new Date(),
       }).catch((error: unknown) => {
         if (error instanceof DataVersionError) throw new StoreError(error.code, error.message);
         throw error;
@@ -4779,6 +4789,7 @@ export class EditorialStore {
       initializeOutcomeResolutionSchema(authority);
       // Revision 69 (Issue #427): earlier published Books' imported 范例, their exact versions and Learning Eligibility.
       initializeImportedExemplarSchema(authority);
+      initializeEvaluationProfileSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -4830,7 +4841,7 @@ export class EditorialStore {
       // Every store records the versions that open it (Issue #433, S85a; DSTO-016): a new record only when one changed.
       store.#softwareVersion = softwareVersion;
       store.#codeRoot = codeRoot;
-      store.#dataVersion = dataVersionAt(IMPORTED_EXEMPLAR_SCHEMA_VERSION, classes);
+      store.#dataVersion = dataVersionAt(LATEST_SCHEMA_VERSION, classes);
       if (control.interruptUpgradeAt === 'before-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在记录版本之前停止。');
       // The open that raised the Data Version records the upgrade it made with the backup (S85b), and only then clears the note
       // that let an open stopped before this record it (Issue #433 review).
@@ -4838,7 +4849,7 @@ export class EditorialStore {
         // Upgrades other opens made and never recorded go first, oldest first, as those opens would have recorded them; one a
         // record already holds is not recorded again (Issue #433 review).
         for (const carried of earlier) store.#dataVersions.recordCarried(carried);
-        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: IMPORTED_EXEMPLAR_SCHEMA_VERSION, upgrade });
+        store.#dataVersions.recordOpen({ softwareVersion, dataVersion: store.#dataVersion, schemaRevision: LATEST_SCHEMA_VERSION, upgrade });
       }));
       if (control.interruptUpgradeAt === 'after-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在清除升级记录之前停止。');
       await completeUpgrade(dataRoot).catch(() => undefined);
@@ -5427,7 +5438,8 @@ export class EditorialStore {
       requireStore(projection.taskIntent !== null && checkpoint !== null, 'TASK_PLAN_UNAVAILABLE', 'AI7 初评还没有准备计划。');
       current(projection.taskIntent.taskIntentId);
       const blocks = this.#analysisCall(() => ledger.readRevisionBlocks(checkpoint.manuscriptId, checkpoint.revisionId));
-      const profile = this.#evaluations.profile();
+      // The profile the Task froze (Issue #427), never the house's current one, beside the references its plan froze (#428).
+      const profile = this.#initialProfileForTask(projection.taskIntent.taskIntentId);
       const plan = this.#taskPlanCall(() => initialEvaluationPlan({ projection, bookTitle, blocks, profile }));
       return { plan: withPlanMovedReason(withResend(evaluationMaterialPlan(plan, this.#evaluationPlanMaterials(ledger, input.bookId, projection.authorization !== null)), this.#analysisCall(() => ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
@@ -6572,7 +6584,7 @@ export class EditorialStore {
     try {
       return defaultExecutionRuleBindingOf(this.#baselineAnalysis.currentRuleFacts(bookId, 'first-baseline'));
     } catch (error) {
-      if (error instanceof AnalysisError) return null;
+      if (error instanceof AnalysisError || error instanceof StoreError) return null;
       throw error;
     }
   }
@@ -6601,7 +6613,7 @@ export class EditorialStore {
         try {
           return defaultExecutionRuleDrift(record!.version.binding, this.#baselineAnalysis.currentRuleFacts(bookId, 'first-baseline'));
         } catch (error) {
-          if (error instanceof AnalysisError) return null;
+          if (error instanceof AnalysisError || error instanceof StoreError) return null;
           throw error;
         }
       }),
@@ -8563,8 +8575,21 @@ export class EditorialStore {
   }
 
   /** 知识库 › 评估方案 (Issue #429, S81a; KB-001, EVAL-003): the profile a new 评估 version snapshots, and its use. */
-  inspectEvaluationProfiles(): EvaluationProfilesProjection {
-    return this.#evaluationCall(() => this.#evaluations.profiles());
+  inspectEvaluationProfiles(before: number | null = null): EvaluationProfilesProjection {
+    return this.#evaluationCall(() => {
+      requireStore(before === null || (Number.isSafeInteger(before) && before > 0), 'EVALUATION_PROFILE_PAGE_INVALID', '评估方案版本页码无效。');
+      const page = this.#evaluationProfiles.page(before);
+      return { activeSha256: this.#evaluationProfiles.current().sha256, nextBefore: page.nextBefore,
+        profiles: page.profiles.map((profile) => {
+          const use = this.#authority.prepare('SELECT count(*) AS records, count(DISTINCT book_id) AS books FROM evaluation_records WHERE profile_sha256 = ?').get(profile.sha256)!;
+          return { ...profile, records: Number(use.records), books: Number(use.books) };
+        }) };
+    });
+  }
+
+  saveEvaluationProfile(input: SaveEvaluationProfileInput): EvaluationProfilesProjection {
+    this.#evaluationCall(() => this.#transaction(this.#authority, () => this.#evaluationProfiles.save(input)));
+    return this.inspectEvaluationProfiles();
   }
 
   /** ②C 评估 of one Book (Issue #429, S81a; EVAL-001, EVAL-012): its versions, one on show, and whether one can begin. */
@@ -8627,20 +8652,20 @@ export class EditorialStore {
       baseDigest: execution.materialReferenceBasePromptContractDigest, promptDigest: envelope.promptContractDigest };
   }
 
-  initialEvaluationLedgerForBook(bookId: string, materials?: TaskMaterialBoundary): BaselineAnalysisStore {
-    const base = this.#initialEvaluation.definition;
-    let frozen: { boundary: TaskMaterialBoundary; baseDigest: string; promptDigest: string } | null = null;
-    if (materials === undefined) {
-      const row = this.#authority.prepare("SELECT task_intent_id FROM analysis_task_intents WHERE book_id = ? AND kind = 'evaluation' ORDER BY created_at DESC, rowid DESC LIMIT 1").get(bookId) as SqlRow | undefined;
-      frozen = row === undefined ? null : this.#evaluationMaterialPlan(asString(row.task_intent_id));
-      if (frozen !== null) {
-        requireStore(frozen.baseDigest === base.promptContractDigest, 'ANALYSIS_RECORD_INVALID', '初评参考资料的基础契约与计划不一致。');
-        materials = frozen.boundary;
-      }
-    }
-    if (materials === undefined || materials.references.length === 0) return this.#initialEvaluation;
-    const readings = this.#taskMaterialReadings(materials, '评估');
-    const definition = this.#analysisCall(() => taskMaterialKindDefinition(base, materials!, readings, frozen?.promptDigest));
+  /** The 初评 contract of one profile: the built-in ledger's own for AI7's default profile, else the house version's (Issue #427). */
+  #initialBaseDefinition(profile: EvaluationProfileProjection): AnalysisKindDefinition {
+    return profile.sha256 === evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE) ? this.#initialEvaluation.definition : initialEvaluationKindDefinition(profile);
+  }
+
+  /**
+   * The 初评 ledger of one profile and the 资料库 references a plan lists (Issue #427, #428): the built-in ledger for AI7's default
+   * profile with none, else one kept per contract — made afresh when a reference no longer reads, as #428's always was.
+   */
+  #initialLedger(profile: EvaluationProfileProjection, materials?: TaskMaterialBoundary, frozenPromptDigest?: string): BaselineAnalysisStore {
+    const base = this.#initialBaseDefinition(profile);
+    const readings = materials === undefined || materials.references.length === 0 ? [] : this.#taskMaterialReadings(materials, '评估');
+    if (readings.length === 0 && base === this.#initialEvaluation.definition) return this.#initialEvaluation;
+    const definition = readings.length === 0 ? base : this.#analysisCall(() => taskMaterialKindDefinition(base, materials!, readings, frozenPromptDigest));
     const make = (): BaselineAnalysisStore => {
       const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
       ledger.bindLaunch(this.#initialEvaluation.launch);
@@ -8649,7 +8674,70 @@ export class EditorialStore {
     return readings.some((reading) => reading.refusal !== null) ? make() : this.#initialEvaluationLedgers.obtain(definition.promptContractDigest, make);
   }
 
-  /** The evaluation kind's append-only ledger, which its execution owner writes through; service-internal. */
+  /** The profile contract a ledger's Task snapshots its profile under: the base a plan's references wrap, or the contract itself. */
+  #initialBaseDigest(ledger: BaselineAnalysisStore): string {
+    return ledger.definition.materialReferences?.basePromptContractDigest ?? ledger.definition.promptContractDigest;
+  }
+
+  /**
+   * The profile a 初评 Task froze (Issue #427): its snapshot under the profile contract its plan names — the base its 资料库
+   * references wrap (#428), or the plan's own contract — and AI7's built-in profile for a Task from before house versions.
+   */
+  #initialProfileForTask(taskIntentId: string): EvaluationProfileProjection {
+    const row = this.#authority.prepare("SELECT component, canonical_json, sha256 FROM analysis_plan_records WHERE task_intent_id = ? AND component = 'plan-envelope' ORDER BY plan_version DESC LIMIT 1").get(taskIntentId) as SqlRow | undefined;
+    if (row === undefined) {
+      const pin = this.#authority.prepare('SELECT prompt_contract_sha256 FROM initial_evaluation_tasks WHERE task_intent_id = ? ORDER BY rowid DESC LIMIT 1').get(taskIntentId);
+      return pin === undefined ? this.#evaluationProfiles.current() : this.#evaluationProfiles.taskProfile(taskIntentId, asString(pin.prompt_contract_sha256))!;
+    }
+    requireStore(sha256(asString(row.canonical_json)) === row.sha256, 'EVALUATION_PROFILE_DAMAGED', '初评任务计划已损坏。');
+    const envelope = parseStoredJson(asString(row.canonical_json), '初评任务计划已损坏。');
+    requireStore(isRecord(envelope) && typeof envelope.promptContractDigest === 'string', 'EVALUATION_PROFILE_DAMAGED', '初评任务方案快照缺失。');
+    const baseDigest = this.#evaluationMaterialPlan(taskIntentId)?.baseDigest ?? envelope.promptContractDigest;
+    const snapshot = this.#evaluationProfiles.taskProfile(taskIntentId, baseDigest);
+    if (snapshot !== null) return snapshot;
+    requireStore(baseDigest === this.#initialEvaluation.definition.promptContractDigest, 'EVALUATION_PROFILE_DAMAGED', '初评任务方案快照缺失。');
+    return { ...BUILTIN_EVALUATION_PROFILE, sha256: evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE) };
+  }
+
+  /** One 初评 Task's ledger: its frozen profile and its frozen 资料库 references, both from its own plan (Issue #427, #428). */
+  #initialLedgerForTask(taskIntentId: string): BaselineAnalysisStore {
+    const profile = this.#initialProfileForTask(taskIntentId);
+    const frozen = this.#evaluationMaterialPlan(taskIntentId);
+    if (frozen !== null) {
+      requireStore(frozen.baseDigest === this.#initialBaseDefinition(profile).promptContractDigest, 'ANALYSIS_RECORD_INVALID', '初评参考资料的基础契约与计划不一致。');
+    }
+    return this.#initialLedger(profile, frozen?.boundary, frozen?.promptDigest);
+  }
+
+  /**
+   * The ledger of the Book's latest 初评 Task — or, with `materials`, the one a new preparation under the house's current profile
+   * lists them on; with no Task yet, the current profile's.
+   */
+  initialEvaluationLedgerForBook(bookId: string, materials?: TaskMaterialBoundary): BaselineAnalysisStore {
+    if (materials !== undefined) return this.#initialLedger(this.#evaluationProfiles.current(), materials);
+    const row = this.#authority.prepare("SELECT task_intent_id FROM analysis_task_intents WHERE book_id = ? AND kind = 'evaluation' ORDER BY created_at DESC, rowid DESC LIMIT 1").get(bookId) as SqlRow | undefined;
+    return row === undefined ? this.#initialLedger(this.#evaluationProfiles.current()) : this.#initialLedgerForTask(asString(row.task_intent_id));
+  }
+
+  initialEvaluationLedgerForRun(runRecordId: string): BaselineAnalysisStore {
+    this.#assertAvailable();
+    const row = this.#authority.prepare("SELECT r.task_intent_id FROM analysis_run_records r JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id WHERE r.run_record_id = ? AND t.kind = 'evaluation'").get(runRecordId);
+    requireStore(row !== undefined, 'TASK_PLAN_NOT_CURRENT', TASK_PLAN_NOT_CURRENT_REASON);
+    return this.#initialLedgerForTask(asString(row.task_intent_id));
+  }
+
+  #snapshotInitialPreparation(result: AnalysisPreparationResult<AnalysisProjection>, profile: EvaluationProfileProjection, ledger: BaselineAnalysisStore): void {
+    const projection = result.projection;
+    if (result.done && projection?.taskIntent !== null && projection?.taskIntent !== undefined && projection.planEnvelope !== null) {
+      this.#evaluationCall(() => this.#transaction(this.#authority, () => this.#evaluationProfiles.snapshotTask(projection.taskIntent!.taskIntentId, this.#initialBaseDigest(ledger), profile)));
+    }
+    if (result.workId !== null) this.#initialEvaluationWork.set(result.workId, { ledger, profile });
+  }
+
+  /**
+   * The built-in profile's 初评 ledger, which the launch is bound through; service-internal. A house profile's or a plan's
+   * references' ledger takes that binding when made, and a Run is admitted on its own Task's ledger, never on the last one used.
+   */
   get initialEvaluationLedger(): BaselineAnalysisStore {
     this.#assertAvailable();
     return this.#initialEvaluation;
@@ -8668,7 +8756,9 @@ export class EditorialStore {
     this.#requireEvaluationMaterialScope(materialIds.length > 0);
     this.#requireInitialEvaluationScope();
     const current = this.inspectInitialEvaluation(bookId);
-    const ledger = this.initialEvaluationLedgerForBook(bookId, { bookId, references: this.#prepareTaskMaterials(bookId, materialIds) });
+    // One reading of the house profile gives both the contract the Task is prepared under and the snapshot it keeps (Issue #427).
+    const profile = this.#evaluationProfiles.current();
+    const ledger = this.#initialLedger(profile, { bookId, references: this.#prepareTaskMaterials(bookId, materialIds) });
     const mode = current.resultSetRevision === null ? 'evaluation-first' : 'evaluation-again';
     const result = this.#analysisCall(() => ledger.prepare({
       phase: 'start',
@@ -8679,23 +8769,26 @@ export class EditorialStore {
       launchPolicy,
       ...(canonicalJson(this.initialEvaluationLedgerForBook(bookId).definition.materialReferences?.sources ?? []) === canonicalJson(ledger.definition.materialReferences?.sources ?? []) ? {} : { newTask: true }),
     }));
-    if (result.workId !== null) this.#initialEvaluationWork.set(result.workId, ledger);
+    const intent = this.#authority.prepare("SELECT task_intent_id FROM analysis_task_intents WHERE book_id = ? AND kind = 'evaluation' ORDER BY created_at DESC, rowid DESC LIMIT 1").get(bookId);
+    if (intent !== undefined) this.#evaluationCall(() => this.#transaction(this.#authority, () => this.#evaluationProfiles.snapshotTask(asString(intent.task_intent_id), this.#initialBaseDigest(ledger), profile)));
+    this.#snapshotInitialPreparation(result, profile, ledger);
     return { ...result, projection: result.projection as InitialEvaluationProjection | null };
   }
 
   advanceInitialEvaluationPreparationWork(workId: string): AnalysisPreparationResult<InitialEvaluationProjection> {
-    const ledger = this.#initialEvaluationWork.get(workId);
-    requireStore(ledger !== undefined, 'ANALYSIS_PREPARATION_NOT_FOUND', '初评计划准备已不存在。');
-    const result = this.#analysisCall(() => ledger.prepare({ phase: 'advance', workId }));
+    const work = this.#initialEvaluationWork.get(workId);
+    requireStore(work !== undefined, 'ANALYSIS_PREPARATION_NOT_FOUND', '初评计划准备已不存在。');
+    const result = this.#analysisCall(() => work.ledger.prepare({ phase: 'advance', workId }));
+    this.#snapshotInitialPreparation(result, work.profile, work.ledger);
     if (result.done) this.#initialEvaluationWork.delete(workId);
     return { ...result, projection: result.projection as InitialEvaluationProjection | null };
   }
 
   cancelInitialEvaluationPreparationWork(workId: string): boolean {
     // As the reader's report's: a preparation already settled or let go has nothing left to cancel.
-    const ledger = this.#initialEvaluationWork.get(workId);
-    if (ledger === undefined) return false;
-    this.#analysisCall(() => ledger.prepare({ phase: 'cancel', workId }));
+    const work = this.#initialEvaluationWork.get(workId);
+    if (work === undefined) return false;
+    this.#analysisCall(() => work.ledger.prepare({ phase: 'cancel', workId }));
     this.#initialEvaluationWork.delete(workId);
     return true;
   }
@@ -8737,9 +8830,9 @@ export class EditorialStore {
   #initialEvaluationFacts(bookId: string): InitialEvaluationFacts | null {
     let projection: InitialEvaluationProjection;
     try {
-      projection = this.initialEvaluationLedgerForBook(bookId).inspect(bookId) as InitialEvaluationProjection;
+      projection = this.inspectInitialEvaluation(bookId);
     } catch (error) {
-      if (error instanceof AnalysisError) return null;
+      if (error instanceof AnalysisError || error instanceof StoreError) return null;
       throw error;
     }
     const revision = projection.resultSetRevision;
@@ -8771,6 +8864,7 @@ export class EditorialStore {
       manuscriptRevisionId: revision.manuscriptPin.revisionId,
       current: revision.freshness.state === 'current',
       profileSha256: evaluation.profile.sha256,
+      profile: this.#initialProfileForTask(asString(this.#authority.prepare('SELECT task_intent_id FROM analysis_result_set_revisions WHERE revision_id = ?').get(revision.revisionId)!.task_intent_id)),
     };
   }
 
@@ -8781,9 +8875,9 @@ export class EditorialStore {
   #initialEvaluationTask(bookId: string): Pick<EvaluationInitialProjection, 'task' | 'prepare'> {
     let projection: InitialEvaluationProjection;
     try {
-      projection = this.initialEvaluationLedgerForBook(bookId).inspect(bookId) as InitialEvaluationProjection;
+      projection = this.inspectInitialEvaluation(bookId);
     } catch (error) {
-      if (error instanceof AnalysisError) return { task: null, prepare: { allowed: false, reason: `AI7 初评暂不可用：${error.message}` } };
+      if (error instanceof AnalysisError || error instanceof StoreError) return { task: null, prepare: { allowed: false, reason: `AI7 初评暂不可用：${error.message}` } };
       throw error;
     }
     const runState = projection.run?.state ?? null;

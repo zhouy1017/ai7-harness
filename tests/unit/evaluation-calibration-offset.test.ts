@@ -8,11 +8,12 @@ import {
   EVALUATION_RECORD_TRIGGER_SQL,
   EvaluationError,
   EvaluationRecords,
+  evaluationProfileDigest,
   initializeEvaluationInitialDraftSchema,
   initializeEvaluationRecordSchema,
   type InitialEvaluationFacts,
 } from '../../src/service/evaluation-records.js';
-import type { EvaluationContent } from '../../src/shared/protocol.js';
+import type { EvaluationContent, EvaluationProfileProjection } from '../../src/shared/protocol.js';
 
 // The house calibration offset (Issue #429, EVAL-011a; V2-UX-EVAL-011, §8.6 「10 本调分记录」) over the record owner on an
 // in-memory database, AI7's 初评 and the house switch stubbed: below ten adjusted Books no offset exists and a version begun
@@ -30,6 +31,7 @@ const RAW = [16.5, 15, 15.5, 14, 12];
 
 let db: DatabaseSync;
 let records: EvaluationRecords;
+let activeProfile: EvaluationProfileProjection;
 let calibrationOn: boolean;
 /** Each Book's manuscript revision, stable per Book. */
 let revisions: Map<string, string>;
@@ -76,6 +78,7 @@ beforeEach(() => {
   db = new DatabaseSync(':memory:', { enableForeignKeyConstraints: false });
   initializeEvaluationRecordSchema(db);
   initializeEvaluationInitialDraftSchema(db);
+  activeProfile = { ...BUILTIN_EVALUATION_PROFILE, sha256: evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE) };
   calibrationOn = true;
   revisions = new Map();
   rawOf = new Map();
@@ -85,6 +88,7 @@ beforeEach(() => {
     { latest: (bookId) => facts(bookId), task: () => ({ task: null, prepare: { allowed: false, reason: '' } }) },
     undefined, undefined, undefined,
     { calibrationEnabled: () => calibrationOn },
+    10, () => activeProfile,
   );
 });
 
@@ -286,5 +290,22 @@ describe('the house calibration offset (EVAL-011a)', () => {
     expect(records.calibration()).toMatchObject({ adjustments: 10, unreadable: 0, basisBooks: 10, booksWithoutBasis: 1 });
     // Without the first Book: four +0.5 and the eleventh's over ten → 0.25 → 0.5; ten +6 → 6; ten −2 → −2; 主题 now over ten.
     expect(offsetsOf()).toEqual({ [LITERARY]: [0.5, 10], [THEME]: [0, 10], [ITEMS[2]!]: [0, 10], [CHINESE]: [6, 10], [READERS]: [-2, 10] });
+  });
+});
+
+
+describe('profile identities and calibration scales (KB-002)', () => {
+  it('retains renamed identities, excludes removed items, rescales offsets, and gives new items no historic basis', () => {
+    for (let n = 0; n < 10; n += 1) finalizeFromInitial(`book-${n}`, { [LITERARY]: 18.5 });
+    expect(records.calibration().offsets!.get(LITERARY)).toEqual({ offset: 2, books: 10 });
+    const before = activeProfile;
+    activeProfile = { ...before, version: '2', items: before.items.slice(0, 4).map((item, index) => ({ ...item, fullMarks: 25, ...(index === 0 ? { label: '作品品质', description: '本社说明。' } : {}) })) };
+    expect(records.calibration().offsets!.get(LITERARY)).toEqual({ offset: 2.5, books: 10 });
+    expect(records.calibration().offsets!.has(READERS)).toBe(false);
+    activeProfile = { ...activeProfile, version: '3', items: [...activeProfile.items.map((item) => ({ ...item, fullMarks: 20 })), { itemId: 'new-item', label: '新的项', fullMarks: 20 }] };
+    expect(records.calibration().offsets!.get(LITERARY)).toEqual({ offset: 2, books: 10 });
+    expect(records.calibration().offsets!.has('new-item')).toBe(false);
+    expect(records.calibration().adjustments).toBe(10);
+    expect(records.workspace('book-0', '书', null).record!.profile).toEqual(before);
   });
 });
