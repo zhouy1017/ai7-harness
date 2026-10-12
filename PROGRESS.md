@@ -1,6 +1,6 @@
 # Current checkpoint
 
-Implementation baseline: `dev@afaf74657004e1cf1849f70457abd294d2768fef`, verified on 2026-10-12. This documentation update, tracked by [#805](https://github.com/zhouy1017/ai7-harness/issues/805), changes accepted development guidance and task slicing without changing the product, selected policies or CI implementation.
+Checkpoint for the [#806 integration tree](https://github.com/zhouy1017/ai7-harness/pull/817), based on actual `dev@634b0ab3ed11702e6eb0033b93b1fb3995dc80be` fetched on 2026-10-12. The existing Gate and nightly queue now implement the Orca delivery controls. PR #817 owns the exact final dev merge, cumulative verification and protection activation; a slice merged only into its wave is not dev delivery. Product execution and selected policies remain unchanged.
 
 The [development plan](docs/development/development-plan.md) owns delivery order. [Orca dispatch](docs/agents/orca-dispatch.md) owns repository roles and integration; [ADR 0089](docs/adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md) owns the development-test/business boundary and Go model target. The replaced checkpoint and its instructions remain in Git history, not a duplicate active archive.
 
@@ -32,18 +32,18 @@ These are complete; #427/#429 track remaining consumers and real execution, not 
 | Non-web AI | Review/writing/evaluation/dialogue surfaces and fixture contracts; several live kinds unavailable | #52/#429/#809/#810 admit and execute real contracts |
 | Ordinary production | Policy records exist, but no source-checkout ordinary-production launch | #811 local analysis with the user's own credential/data, isolated from developer caches |
 | Web evidence | Tool plumbing exists; selected policy does not enable it | #473 / draft #742 reconciles with #807, then #744/#425 complete declarations/retention |
-| Repository delivery | Dev-only Gate/nightly; green non-draft PRs may auto-merge without the new role checks | #806 wave routing and exact-candidate Reviewer/Commander release |
-| Orca host | Command unavailable during this documentation task | Resolve actual installation/read its guides before runtime dispatch; no successful Orca run claimed |
+| Repository delivery | Existing Gate/nightly routes waves and dev; authenticated PR receipts bind cross-channel review, tests and Commander release to exact head/base; privileged control uses trusted dev code | #817 records final bootstrap verification and strict required aggregate protection activation; subsequent waves use those controls |
+| Orca host | Installed Orca 1.4.224 performed actual isolated-workspace dispatch, independent review/fixes and slice merge for #816 | Recheck effective channel/model/effort for every assignment; actual identities and writer records remain in Orca and the Issue/PR |
 
 The [policy index](docs/policies/README.md) owns exact selections. Accepting the new design does not activate policy or relabel V4 evidence as V4.1. Product model support and repository coding-agent selection are separate.
 
 ## In flight and next action
 
-[#805](https://github.com/zhouy1017/ai7-harness/issues/805) creates #806–#814 and reconciles existing remainder Issues. Their existence and the Owner's accepted design do not establish implementation or live validation.
+[#805](https://github.com/zhouy1017/ai7-harness/issues/805) and PR #815 established the current development guidance. [#816](https://github.com/zhouy1017/ai7-harness/pull/816) implements #806 and includes independent Reviewer corrections; its exact-candidate guest02 ladder and [paired hosted full Gate](https://github.com/zhouy1017/ai7-harness/actions/runs/38218649906) passed. The guest ran all 15 Journeys without a disclosed skip; both hosted platforms disclosed the expected local-only `.doc` absence. Final dev delivery and cumulative checks are recorded by #817, not inferred from that slice result.
 
 [PR #742](https://github.com/zhouy1017/ai7-harness/pull/742) remains Draft, at `598329399dda5d1ad8f59280536eee5f8251264d` when read for this update. Its policy proposal needs reconciliation with #807 and the independent web slice #473. This task changed its description, not its code/head. Historical policy-version reservations and a combined attended web/#387 appointment no longer determine delivery order.
 
-Take the next eligible Issue from the development plan: #806 infrastructure bootstrap, then #808 and #807, followed by eligible real-use slices. Necessary autonomous developer-live validation is authorized within current material, credential and executable-policy boundaries. Similar-test reuse applies only to development; new actual user Tasks execute real model work.
+After #817's dev merge and protection activation, take #808 from the updated dev, then #807, followed by eligible real-use slices. No V4.1 product call is claimed by the Orca/CI wave. Necessary autonomous developer-live validation is authorized within current material, credential and executable-policy boundaries. Similar-test reuse applies only to development; new actual user Tasks execute real model work.
 
 ## Remaining macro risks
 
@@ -51,7 +51,7 @@ Take the next eligible Issue from the development plan: #806 infrastructure boot
 - Cost/recovery: exact replay does not prevent equivalent tests or retransmission after a lost answer. #808 needs durable claims without suppressing legitimate repeated business requests.
 - Document integrity: untouched-file preservation does not prove edited complex DOCX fidelity. #814 and #766 retain distinct export and material-read scope.
 - Cross-artifact correctness: cross-deliverable review currently cannot deliver its intended result; #813 must preserve exact version/source authority.
-- Execution authority: Orca/CI must enforce new roles; selected policy/configuration must match actual model/task execution. Documentation changes neither runtime.
+- Execution authority: the new Gate projection needs its recorded strict branch protection; policy/configuration still needs #807's actual model migration. Green tests alone do not release a candidate, and repository-agent model use is not product validation.
 - Scope growth: vectors, learning, cross-Book orchestration and release follow usable core workflows; records and inert profiles alone do not establish working consumers.
 
 ## Resume
