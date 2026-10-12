@@ -1,6 +1,6 @@
 # AI7 development plan
 
-Status: Owner-approved order of 2026-10-12 under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md); #808 integration is based on actual `dev@c7b646bfba910ba4c7c932d8fbc41e268a459379`, after #806's delivery and protection activation. This is the sole delivery-order owner. [PROGRESS](../../PROGRESS.md) reports implementation; each Issue owns bounded acceptance. [PR #820](https://github.com/zhouy1017/ai7-harness/pull/820) owns #808's final dev delivery and cumulative verification, still pending at this checkpoint.
+Status: Owner-approved order of 2026-10-12 under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md); #808 integration is based on actual `dev@c7b646bfba910ba4c7c932d8fbc41e268a459379`, after #806's delivery and protection activation. This is the sole delivery-order owner. [PROGRESS](../../PROGRESS.md) reports implementation; each Issue owns bounded acceptance. [PR #820](https://github.com/zhouy1017/ai7-harness/pull/820) records #808's exact final dev delivery and cumulative verification.
 
 ## Delivery approach
 
