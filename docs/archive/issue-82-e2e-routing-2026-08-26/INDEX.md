@@ -7,7 +7,7 @@
 | Original paths | [`PROGRESS.md`](PROGRESS.md); [`HANDOFF.md`](HANDOFF.md) |
 | Final status | consumed |
 | Reason | Issue #82 / PR #83 is integrated and its active routing is replaced by the current root routers; the outgoing checkpoint and handoff remain historical evidence. |
-| Current replacement | Root [`PROGRESS.md`](../../../PROGRESS.md) and [`HANDOFF.md`](../../../HANDOFF.md) on the current development line |
+| Current replacement | [PROGRESS](../../../PROGRESS.md) and [Orca dispatch](../../agents/orca-dispatch.md) own current routing and operation. |
 | Retrieval condition | Read when reconstructing the Issue #82 / PR #83 closure routing or auditing the exact pre-archive snapshots. |
 | Validation evidence | Run `32962139952`; unchanged Windows/macOS J-01 passed for the YAML pull request. |
 | Boundary | Repository-process only; no Claude; the tracer remains not full J-01. |

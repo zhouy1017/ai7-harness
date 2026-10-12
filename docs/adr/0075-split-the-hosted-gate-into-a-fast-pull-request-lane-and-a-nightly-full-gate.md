@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-> Amended by [ADR 0081](./0081-run-the-nightly-full-gate-over-every-open-pull-request-merge-the-ones-that-pass-and-then-over-dev.md): the nightly `schedule` now falls on a serial merge queue that runs this full Gate over every open pull request against `dev`, merges the ones that pass, and then runs it once more over the final `dev` tip. §2's pull-request lane and what each occurrence is evidence of are unchanged; this ADR's nightly trigger and its statement that the Commander alone integrates are not.
+> Gate occurrence topology is retained. Candidate routing and release authority follow [ADR 0089](./0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md) and [Orca dispatch](../agents/orca-dispatch.md); the existing dev-only nightly queue is a disclosed P0 adaptation, not the new wave integration procedure.
 
 # Split the hosted E2E gate into a fast pull-request lane and a nightly full Gate
 
@@ -26,7 +26,7 @@ J-01 and J-02 are 82 % of the Windows journey time. Fixed per-occurrence overhea
 
 Three minutes therefore cannot include J-01, which exceeds the whole budget by itself, and cannot include J-02, whose Windows range reaches 332 seconds. No ordering, caching, or parallel-shard arrangement changes that: the constraint is a single Journey's own duration. Splitting J-01 internally was considered and rejected below.
 
-The two expensive Journeys are also the two unreliable ones. [`PROGRESS.md`](../../PROGRESS.md) records #345's J-02 intermittency — 2 failures in 5 sequenced local runs on a diff that touched neither runner nor product — and three J-01 intermittencies, two on the developer host without a stage name and one hosted at `review` on macOS during PR #399, a change that does not touch J-01 and had passed all seven Journeys locally at the same head. Every one of those false reds cost a Draft transition, a re-run, and Commander attention. Moving J-01 and J-02 to a scheduled occurrence keeps their coverage while taking them off the path that blocks an individual change.
+The two expensive Journeys are also the two unreliable ones. [`PROGRESS.md`](../../PROGRESS.md) records #345's J-02 intermittency — 2 failures in 5 sequenced local runs on a diff that touched neither runner nor product — and three J-01 intermittencies, two on the developer host without a stage name and one hosted at `review` on macOS during PR #399, a change that does not touch J-01 and had passed every then-current admitted Journey locally at the same head. Every one of those false reds cost a Draft transition, a re-run, and Commander attention. Moving J-01 and J-02 to a scheduled occurrence keeps their coverage while taking them off the path that blocks an individual change.
 
 [ADR 0027](./0027-concentrate-ci-on-e2e-functionality.md), as amended by [ADR 0049](./0049-bound-hosted-actions-consumption-inside-the-e2e-gate.md), [ADR 0057](./0057-restore-hosted-gate-under-observed-actions-usage.md), and [ADR 0058](./0058-remove-actions-usage-observation-from-development-gating.md), states the exclusions this change crosses: no schedule or nightly activation path, and no secondary fast lane or weaker single-platform substitute. Those exclusions exist to stop engineering-proof machinery accumulating beside the one functional gate. This ADR is the Owner's explicit reversal of exactly two of them, for exactly this topology, and nothing else in ADR 0027 moves.
 
@@ -53,9 +53,9 @@ A pull-request pass is never reported as a full or paired-platform Gate. `run-ga
 
 Three surfaces carry it, and the first is unchanged and mandatory:
 
-- The **Local Verification Ladder** of [ADR 0062](./0062-adopt-a-local-verification-ladder-with-ci-as-delivery-gate.md) is untouched. `pnpm run e2e:all` on an actual Windows host at the exact head, all seven Journeys, still precedes Ready. This ADR moves a hosted occurrence; it grants no relief from local completion, and the Change closure still records every available layer. A Worker who has not run J-01 locally has not finished.
-- The **nightly** runs all seven on both platforms daily.
-- The **Commander** may dispatch the nightly workflow against an exact ref before integrating a change that touches manuscript import, reimport, the J-01 or J-02 runners, or the renderer, service, or domain paths they alone reach. `workflow_dispatch` exists for that judgment and for re-running a red nightly; it is not a per-pull-request step and does not become one.
+- The **Local Verification Ladder** of [ADR 0062](./0062-adopt-a-local-verification-ladder-with-ci-as-delivery-gate.md) is untouched. `pnpm run e2e:all` on an actual Windows host at the exact head, every then-current admitted Journey, still precedes Ready. This ADR moves a hosted occurrence; it grants no relief from local completion, and the Change closure still records every available layer. A Worker who has not run J-01 locally has not finished.
+- The **nightly** runs every currently admitted Journey on both platforms daily.
+- The responsible integration role under Orca dispatch may dispatch the nightly workflow against an exact ref before integrating a change that touches manuscript import, reimport, the J-01 or J-02 runners, or the renderer, service, or domain paths they alone reach. `workflow_dispatch` exists for that judgment and for re-running a red nightly; it is not a per-pull-request step and does not become one.
 
 ### 4 · A red nightly
 
@@ -65,7 +65,7 @@ A red nightly is triaged by the Commander the morning it lands, against `dev` ra
 
 ### 5 · What does not change
 
-Every provider-free boundary, public-test-material rule, product-subject and platform contract, payload-safe diagnostic rule, scenario-admission rule, and Commander-only integration rule stands exactly as written. No unit, lint, type-check, coverage, performance, security, packaging, or release gate is created; ADR 0027's other exclusions are unreversed. The nightly is not a release gate, a `main`-promotion authorization, or an Actions-usage instrument, and [ADR 0058](./0058-remove-actions-usage-observation-from-development-gating.md) continues to forbid querying, estimating, or considering Actions usage in any development decision.
+Provider-free execution, public test material, product/platform contracts, payload-safe diagnostics and scenario admission remain; integration roles follow Orca dispatch. No unit, lint, type-check, coverage, performance, security, packaging, or release gate is created; ADR 0027's other exclusions are unreversed. The nightly is not a release gate, a `main`-promotion authorization, or an Actions-usage instrument, and [ADR 0058](./0058-remove-actions-usage-observation-from-development-gating.md) continues to forbid querying, estimating, or considering Actions usage in any development decision.
 
 ## Consequences
 
@@ -73,7 +73,7 @@ Every provider-free boundary, public-test-material rule, product-subject and pla
 - The two Journeys responsible for every recorded intermittency no longer fail individual pull requests. #345 and the three J-01 occurrences become nightly triage rather than per-change re-runs.
 - Manuscript import and reimport regressions, and every macOS-specific regression, can now reach `dev` and be caught up to a day later by the nightly rather than at the pull request. This is the cost the Owner accepted for the latency. The Local Verification Ladder is the control that keeps the window small, which is why this ADR strengthens rather than relaxes it.
 - `dev` is the default branch, so the schedule fires from it without a `main` promotion.
-- The pull-request gate's name no longer describes the full admitted set, and neither do its Change closures. Any statement that all seven Journeys passed on both platforms must now name the nightly run or a local completion, not the pull-request check.
+- The pull-request gate's name no longer describes the full admitted set, and neither do its Change closures. Any statement that every then-current admitted Journey passed on both platforms must now name the nightly run or a local completion, not the pull-request check.
 
 ## Rejected alternatives
 

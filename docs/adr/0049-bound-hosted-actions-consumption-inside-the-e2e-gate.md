@@ -1,43 +1,13 @@
 ---
-status: accepted
+status: accepted; obsolete cadence and role clauses removed under ADR 0089
 ---
 
 # Bound hosted Actions consumption inside the E2E Gate
 
-This ADR records the Owner-approved GitHub Actions consumption boundary from Issue #111. It amends only the invocation cadence, local feedback loop, and current routing default of [ADR 0027](./0027-concentrate-ci-on-e2e-functionality.md). It does not revive the superseded tiered-verification programme or create a second gate. It is repository-current only from an exact integrated `dev` commit containing this revision; its workflow implementation requires a separate exact Issue, branch, pull request, and Commander integration. [ADR 0053](./0053-preserve-local-first-development-through-a-bounded-ci-degraded-mode.md) later amends this ADR's local-completion, hosted-consumption, and unavailable-hosted-integration clauses.
+Hosted CI supplies integration evidence; local development supplies the debugging loop. [ADR 0027](./0027-concentrate-ci-on-e2e-functionality.md) retains one logical provider-free E2E Gate and its product/platform boundary. A failing product, build or Journey is reproduced and repaired locally before integration.
 
-## One integration-ready hosted occurrence
+The original single-occurrence cadence, dormant-Journey list and exhaustion instructions are removed. [ADR 0075](./0075-split-the-hosted-gate-into-a-fast-pull-request-lane-and-a-nightly-full-gate.md) and [ADR 0081](./0081-run-the-nightly-full-gate-over-every-open-pull-request-merge-the-ones-that-pass-and-then-over-dev.md) describe the current PR/nightly implementation; [CI and test boundaries](../agents/ci-test-boundaries.md) owns verification practice. [Orca dispatch](../agents/orca-dispatch.md) alone assigns authoring, review, Ready and merge authority. [#806](https://github.com/zhouy1017/ai7-harness/issues/806) adapts that implementation to wave branches and explicit integration release.
 
-A pull request starts and remains Draft while its change is being written, debugged, reviewed, rebased, or locally validated. Draft activity consumes no hosted Actions. After the change is locally complete and the Commander has re-resolved target authority, the Commander—not a Worker—changes the pull request to Ready for review. That transition starts the one logical E2E Functional Gate.
+[ADR 0053](./0053-preserve-local-first-development-through-a-bounded-ci-degraded-mode.md) owns the bounded response to a recorded external CI outage. [ADR 0058](./0058-remove-actions-usage-observation-from-development-gating.md) excludes Actions-usage queries from development decisions. Neither an outage nor local success creates a fabricated green Gate.
 
-A newer push while the pull request remains Ready starts the newest occurrence and cancels any superseded in-progress occurrence for that same pull request. This cancellation controls duplicate consumption; it is not exact-head proof and does not create a same-SHA admission rule. The workflow keeps the complete pull-request-diff Markdown router even though a Markdown-only Ready pull request consumes a small routing job, because GitHub trigger-level path filtering can omit files from large diffs. There is no label-, author-, component-catalog-, manual-dispatch-, direct-push-event, schedule-, nightly-, release-, package-, or exact-head activation path.
-
-[ADR 0051](./0051-admit-j-12-as-the-fourth-supported-e2e-journey.md) records the historical fourth-Journey decision. [ADR 0055](./0055-stage-the-bounded-provider-free-j-03-authorization-journey.md) admits Issue #47's bounded J-03 slice, and [ADR 0056](./0056-stage-the-bounded-provider-free-j-15-artifact-lifecycle-journey.md) admits Issue #88's bounded J-15 slice ahead of it. The real executable set remains J-01, J-02, J-08 and J-12 until Issue #88 supplies the real J-15 runner/dispatcher and atomically adds J-15 to local orchestration; J-03 remains dormant during that cutover. Issue #47 later supplies the real J-03 runner/dispatcher and atomically adds J-03 to the resulting orchestration. Every later product-affecting Ready occurrence runs every then-current executable admitted Journey on both Windows and macOS; shared and unclassified changes fail closed to that same set, and either platform failure fails the one logical gate. No phase fixes a permanent total, and any further admission still requires an explicit Owner decision and separate CI-governance integration.
-
-The resource objective is qualitative: normally one completed paired-platform Gate occurrence per integration-ready product change. No speculative billed-minute ceiling, second fast lane, or weaker single-platform substitute is created.
-
-Within each applicable platform occurrence, checkout, exact tool selection, bootstrap, and build happen once before every then-current executable admitted Journey runs sequentially. ADR 0053 permits the narrow integrity-reverified Electron download cache and failure early-stop; a successful occurrence still completes the whole then-current set on both platforms. The disabled workflow may project dormant J-15 after J-12 and dormant J-03 after J-15 before their respective product cutovers, but neither dormant projection may execute or become evidence.
-
-## Local development is the debugging loop
-
-Hosted CI is integration evidence, not an iterative debugger. On the actual supported development host, a Worker restores only existing declared pins and runs `doctor`, `bootstrap`, `build`, and the Issue-applicable journey while implementing. Existing declared caches may accelerate iteration but are never authoritative inputs. Before reporting local completion, the Worker clears the change's build outputs, reruns `build` and the applicable journey, and reports the host, commands, and outcomes without committing logs, receipts, proof artifacts, private inputs, Provider payloads, or credentials.
-
-A Worker may restore already accepted pinned dependencies. A new dependency still requires exact Issue authority. Provider calls, private manuscripts, private sample Books, untracked application inputs, personal dependency stores, and ambient generated outputs remain prohibited.
-
-If the hosted Gate exposes a product, build, bootstrap, or journey failure, the Commander returns the pull request to Draft and the change is reproduced and fixed locally before another Ready transition. Only a clearly external GitHub runner, network, or infrastructure transient may be rerun once without a code change, and only by the Commander. A second occurrence or an ambiguous failure returns to Draft. Neither local validation nor advisory review substitutes for the formal paired-platform occurrence when that occurrence is required.
-
-## Unavailable hosted execution
-
-The Owner suspended every GitHub-hosted Actions test on 2026-08-28 after confirming that the account's Actions minutes were exhausted. Exact workflow `342459594` remains disabled until a separately authorized restoration action.
-
-ADR 0053 now owns the only CI-degraded activation, Local completion, affected-platform stop, one-at-a-time integration, disclosure, and exit rules. Its path waives only the missing hosted occurrence and never claims a green, paired-platform, single-platform, or substitute Gate. A product/bootstrap/build/Journey failure cannot enter that path.
-
-Pure documentation, design, and CI-governance changes may integrate while the workflow is disabled only when their exact Change Brief permits it and after applicable local validation. Optional independent review remains advisory and non-gating. No workflow is enabled, dispatched, rerun, or replaced to probe availability, and no retrospective result is manufactured.
-
-## Consequences
-
-The Gate's admitted scenarios, provider-free execution interval, public-test-material rules, fresh subject construction, platform parity, failure semantics, and exclusions remain owned by ADR 0027 and the CI boundary. Normal Commander-only external action and integration authority is unchanged. Superseded ADR and Question 24 history remains intact as history; none of its old lanes, receipts, budgets, catalogs, or release gates becomes current again.
-
-[ADR 0057](./0057-restore-hosted-gate-under-observed-actions-usage.md) records the later authoritative capacity restoration, safe enablement sequence, then-required actual-usage observation, J-15 executable set, and removal of dormant J-03 from the active workflow before Issue #47's later cutover. Its restored lifecycle resumed this ADR's Draft-first, integration-ready, normally one-occurrence operation without reviving any excluded lane. [ADR 0058](./0058-remove-actions-usage-observation-from-development-gating.md) supersedes only the repository-development usage-query, estimate, reporting, and meter-gating duties while preserving that lifecycle and this ADR's historical capacity facts.
-
-[ADR 0062](./0062-adopt-a-local-verification-ladder-with-ci-as-delivery-gate.md) amends the local feedback loop in this decision: the Local Verification Ladder and full-fidelity local debug artifacts under ignored `test-results/` become the reproduction path for a red Gate, and CI-parity reproduction precedes any diagnostic-marker change. The hosted cadence above is unchanged.
+Retain exact dependency restoration, provider-free CI, public test material and payload-safe reports. Necessary developer-live work is separately governed by [ADR 0089](./0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md); this Gate boundary does not prohibit it. Earlier normative text is available through Git history.

@@ -7,7 +7,7 @@
 | Original path | Root `PROGRESS.md`. |
 | Final status | Consumed. |
 | Reason | Issue #46's product outcome and Windows validation conclusion are integrated, so its pre-integration checkpoint no longer belongs in the active reading path. |
-| Current replacement | Current routing lives in root [`PROGRESS.md`](../../../PROGRESS.md) and [`HANDOFF.md`](../../../HANDOFF.md); product authority remains in the integrated implementation and accepted repository owners. |
+| Current replacement | [PROGRESS](../../../PROGRESS.md) and [Orca dispatch](../../agents/orca-dispatch.md) own current routing and operation. |
 | Retrieval condition | Read this node only when a current authority record or Change Brief names the exact Issue #46 pre-integration checkpoint as necessary to resolve a concrete historical gap that current material cannot answer. |
 
 ## Preserved artifact
@@ -19,3 +19,5 @@
 The outgoing root `HANDOFF.md` was replaced as a stable current router and was not copied into this node. Its outgoing form is retained in Git history only at `5adeadb5adfeed134d60ddb22046b747b5884374:HANDOFF.md`.
 
 Return to the [documentation archive index](../README.md). The archive disposition follows the [document lifecycle](../../agents/document-lifecycle.md); macOS evidence timing remains governed by [ADR 0054](../../adr/0054-defer-macos-evidence-until-after-initial-v1-0-0-development-milestone.md).
+
+Snapshot bodies have been retired under [ADR 0089](../../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). Use Git history for the original wording; current operation follows [Orca dispatch](../../agents/orca-dispatch.md).

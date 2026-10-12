@@ -11,7 +11,7 @@ At task start record:
 - intended integration target as an exact commit, not only a moving branch name;
 - whether that target is canonical, candidate, or historical; and
 - the exact owner authorization and, separately, any Commander dispatch/execution instruction for the requested class of action; and
-- for a Worker or Reviewer, the canonical Issue revision/body hash, role-specific start commit (Worker exact base; Reviewer immutable `reviewed_head`), and immutable launch expectations during no-write bootstrap, followed by the verified `Issue + role + attempt` Launch Receipt, in whichever harness and launch mode carried the attempt, before controlled-file work.
+- the assigned Issue, exact baseline or incoming PR head, and current writer recorded under [Orca dispatch](orca-dispatch.md).
 
 During development, `dev` is the current integration and implementation-facing design line; `main` is the stable/release-promotion line. Frozen `design-doc@6895f02d2983865516d267809d8cdda77026f62c` is an allowlist source only. A file being visible, newer, longer, merged, review-clean, frozen, or internally labeled `accepted-candidate` does not promote it to an intended target.
 
@@ -36,7 +36,7 @@ Root `GLOSSARY.md` and `UBIQUITOUS_LANGUAGE.md` are reading aids. The canonical 
 
 1. Check scope, status, branch, and explicit supersession; never choose by recency or merge order.
 2. Canonical beats candidate. A candidate must name every accepted decision it proposes to supersede.
-3. Explicit supersession changes only the named clauses. Unaffected obligations remain.
+3. Record the named clauses a decision replaces. Remove conflicting obsolete instructions from current reading paths under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md); Git retains their history. Unaffected obligations remain.
 4. A current implementation/design contradiction does not authorize either preserving the defect or rewriting the system. Record the smallest conflict and stop for the applicable owner.
 5. Two canonical records that conflict without an explicit relationship require an owner decision. Do not construct a compromise design.
 6. A historical gap, retired proof task, or archived recommendation never reopens work by itself.
@@ -48,23 +48,15 @@ Treat these as separate checks:
 - **Design authority:** what result and constraint are accepted?
 - **Action authorization:** may this task plan, research, copy, install, implement, mutate external state, integrate, or release?
 
-Permission for one class does not imply another. In particular, accepted architecture does not authorize implementation planning; readable predecessor source does not authorize wholesale copying; configured provider processing does not grant external export or Public Release Permission; a Worker brief never grants Commander or external-action authority.
+Permission for one class does not imply another. In particular, accepted architecture does not authorize implementation planning; readable predecessor source does not authorize wholesale copying; configured provider processing does not grant external export or Public Release Permission; repository actions follow the assigned permissions in [Orca dispatch](orca-dispatch.md).
 
-## Action-authorization matrix
+## Repository action authority
 
-Design truth precedence above does not grant action. Apply this matrix after resolving the target-qualified design baseline.
+[Orca dispatch](orca-dispatch.md) is the single owner of Commander, Coding Worker and Reviewer permissions, model pairings, branch ownership, review and merge. Apply it after resolving the design baseline and the assigned Issue scope.
 
-| Role | May authorize or execute | May not do |
-| --- | --- | --- |
-| **Owner** | Grant or expand product and design scope; authorize architecture or semantic change, implementation planning/start, Foundation Replacement, software/repository release or repository-publication scope, and other owner-reserved decisions | A decision is not integrated merely because it was stated; durable changes still enter their authority-owning record and normal integration path |
-| **Commander** | Within owner-authorized scope, shape T0 Change Briefs, launch fresh Worker/Reviewer Task Sessions on either harness in an applicable launch mode (a hand-created top-level session, a Claude Code Agent-tool subagent, or a CLI-launched session), authorize a bounded internal replacement that preserves every listed boundary, accept reports, integrate through pull requests, and execute approved repository external actions | Perform T1–T3 product work inline (mechanical documentation edits through its own pull request are allowed under ADR 0064) or edit a subagent or CLI-launched attempt's worktree or branch; expand product/design/implementation scope; authorize Foundation Replacement; convert candidate material into canonical truth; transfer authority through a model/binding change |
-| **Worker** | After verifying its Issue and Launch Receipt, execute the exact brief in its own fresh Task Session, worktree and branch; stop and report when the envelope is insufficient | Expand scope, reuse another role/attempt, self-authorize replacement, integrate, push, publish, or take external actions |
-| **Independent Reviewer** | After verifying its Issue, immutable `reviewed_head`, and Launch Receipt, perform bounded fresh-context, strictly read-only, non-author advisory review in a separate fresh Task Session at that head | Reuse the Worker session/transcript; author the reviewed change; dispatch, delegate to, or spawn another agent; turn advice into a gate; integrate; or take external actions |
+The Owner reserves expansion of product/design scope, Foundation Replacement, credential/material admission, release and promotion to main. Existing scoped authorization applies without repeated permission requests; necessary developer-live calls follow ADR 0089 and their current policy/binding constraints.
 
-Owner authorization defines the allowed purpose and outer scope. Commander authority controls repository dispatch, integration, and external execution inside that scope. Neither substitutes for the other.
-
-This repository-development matrix never grants AI7 Public Release Permission, Editorial Signoff, Review Decision, or permission to publish manuscript or Editorial Deliverable content. Those remain separate product-domain authorities bound to their exact material and channel.
-
+Repository role permissions never grant AI7 Public Release Permission, Editorial Signoff, Review Decision or permission to publish manuscript content. Product-domain authorities remain bound to their exact material and channel.
 ## Open-item classification
 
 Classify an unresolved point before acting:

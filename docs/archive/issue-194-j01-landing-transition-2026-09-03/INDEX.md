@@ -7,5 +7,5 @@
 | Original path | Root `PROGRESS.md`, preserved as [PROGRESS.md](PROGRESS.md). |
 | Final status | consumed |
 | Reason | Integration and paired Gate completion closed the Issue #194 working node, so its checkpoint no longer belongs in the active reading path. |
-| Current replacement | Root [PROGRESS.md](../../../PROGRESS.md) and [HANDOFF.md](../../../HANDOFF.md) route current work to existing Issue #91 / Draft PR #193. |
+| Current replacement | [PROGRESS](../../../PROGRESS.md) and [Orca dispatch](../../agents/orca-dispatch.md) own current routing and operation. |
 | Retrieval condition | Read only when reconstructing Issue #194 / PR #195 closure evidence or the exact routing state that preceded the Issue #91 rebase. |

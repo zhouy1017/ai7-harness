@@ -7,5 +7,5 @@
 | Original path | `handoff20260817/KICKOFF-PROMPT.md`, `handoff20260817/PROJECT-OVERVIEW.md`, `handoff20260817/SESSION-HANDOFF.md`, `handoff20260817/STATE-RECONSTRUCTION.md`, `handoff20260817/raw-conversation.md` |
 | Final status | consumed |
 | Reason | The bundle recorded a 2026-08-17 session handoff that the 2026-08-25 agent-guidance baseline (root `AGENTS.md` and its linked runbooks) and the Issue #20 normalized `dev` baseline fully absorbed and superseded; it is historical Git evidence, not current implementation-facing guidance |
-| Current replacement | Root `AGENTS.md` and its linked runbooks under `docs/agents/`, plus root `PROGRESS.md` / `HANDOFF.md` for current integration-line routing |
+| Current replacement | [PROGRESS](../../../PROGRESS.md) and [Orca dispatch](../../agents/orca-dispatch.md) own current routing and operation. |
 | Retrieval condition | A future task needs the exact 2026-08-17 session record to reconstruct pre-2026-08-25 agent-guidance history or to audit the Issue #20 normalization's fixed-base provenance |

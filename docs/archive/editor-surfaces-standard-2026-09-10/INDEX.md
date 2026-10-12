@@ -7,7 +7,9 @@
 | Original path | `PROGRESS.md`, `docs/development/development-plan.md` |
 | Final status | superseded |
 | Reason | Both routed renderer work to a handoff document that will never exist (`docs/ui-ux-v2/HANDOFF-editor-surfaces-*.md`), carried the S-series order that ADR 0077 §6 and §11 re-cut (S15, S18b/c, S19, S20, S21, S23, S24, S25, S44b, S45, S55), and `PROGRESS.md` held sixteen waves of per-attempt chronology that the lifecycle rules keep out of the router. |
-| Current replacement | Root `PROGRESS.md`; `docs/development/development-plan.md`; ADR 0077; ADR 0078; `docs/ui-ux-v2/editor-surfaces.md` §11. |
-| Retrieval condition | A Commander needs the wave-by-wave record of 2026-09-07 to 2026-09-09 (attempt classes, bindings, pull-request numbers, Brief revisions, the process lessons and their derivations), the exact wording of the decisions of 2026-09-06 to 2026-09-08, the pre-re-cut S-series order, or the old Resume Prompt. |
+| Current replacement | [PROGRESS](../../../PROGRESS.md) and [Orca dispatch](../../agents/orca-dispatch.md) own current routing and operation. |
+| Retrieval condition | Historical feature/landing identity is needed; the former dispatch/model/body directives are read only from Git history. |
 
 The tracker's superseded Issues (#50, #53, #54, #55, #56, #58, #59, #60, #277, #322) keep their historical planning text on GitHub; each closing comment names its successor. Nothing else moved: the frozen references changed in place under ADR 0077 and ADR 0078, and Git history carries their previous text.
+
+Snapshot bodies have been retired under [ADR 0089](../../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). Use Git history for the original wording; current operation follows [Orca dispatch](../../agents/orca-dispatch.md).

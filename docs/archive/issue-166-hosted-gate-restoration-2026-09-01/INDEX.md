@@ -7,7 +7,7 @@
 | Original path | `PROGRESS.md` |
 | Final status | consumed |
 | Reason | PR #167 integrated ADR 0057, its runbook projections, and the truthful five-Journey workflow configuration; the implementation checkpoint no longer belongs in the active root reading path. |
-| Current replacement | ADR 0057 owns durable restoration/usage policy; root `PROGRESS.md` and `HANDOFF.md` route the live-state-conditional external cutover and the next Owner decision in Issue #165. |
+| Current replacement | [PROGRESS](../../../PROGRESS.md) and [Orca dispatch](../../agents/orca-dispatch.md) own current routing and operation. |
 | Retrieval condition | Read only when auditing Issue #166's pre-integration workflow state, validation record, or the exact implementation-to-external-cutover boundary. |
 
 The outgoing root `HANDOFF.md` is retained in Git history only. No scratch, diagnostic, credential, billing response, workflow log, or other artifact entered this archive.

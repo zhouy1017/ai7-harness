@@ -4,7 +4,7 @@ status: accepted
 
 # Use sample1 as the compatibility and recording baseline
 
-This ADR partially supersedes [ADR 0043](./0043-allow-public-samplebooks-in-repository-and-ci.md) only for exact [`SampleBooks/sample1.docx`](../../SampleBooks/sample1.docx). It makes that exact file the standing development compatibility baseline and permits a separately governed local manual recording plus reviewed-fixture path. ADR 0043 continues to govern every other Public SampleBook, and [ADR 0016](./0016-proprietary-license-and-local-only-sample-manuscripts.md) continues to govern ordinary and private manuscripts.
+This ADR partially supersedes [ADR 0043](./0043-allow-public-samplebooks-in-repository-and-ci.md) only for exact [`SampleBooks/sample1.docx`](../../SampleBooks/sample1.docx). It makes that exact file the standing development compatibility baseline and permits a governed local development capture plus reviewed-fixture path. ADR 0043 continues to govern every other Public SampleBook, and [ADR 0016](./0016-proprietary-license-and-local-only-sample-manuscripts.md) continues to govern ordinary and private manuscripts.
 
 The Owner accepted this decision for intended integration target `dev`, and Commander integration made it repository-current there. A later task branch inherits this target-qualified design authority without gaining adjacent implementation authority. The decision authorizes canonical design and policy records only. It performs and authorizes no immediate Provider call, credential setup, fixture generation, product implementation, CI-workflow change, export, learning, publication, release, or `main` promotion.
 
@@ -37,19 +37,11 @@ Correct processing means:
 
 A newly observed fidelity signal in this exact file is implementation evidence, not a new Owner-admission trigger. If current code cannot truthfully preserve or disclose it, the consuming Issue must revise the implementation boundary rather than silently replacing or rejecting the standing baseline. This is a cross-Issue invariant, not one giant scenario, a requirement that every module parse the source file, or a claim that full J-01 or every PRD outcome is complete.
 
-### One narrow future recording eligibility rule
+### Runtime predecessor and current development capture
 
-[Provider Processing Policy v2](../policies/provider-processing-policy.v2.json) remains default-deny and adds exactly one eligible-only rule: `sample1-manual-model-fixture-recording`. The rule applies only when all of these are exact and frozen before transmission:
+[Provider Processing Policy v2](../policies/provider-processing-policy.v2.json) retains the immutable `sample1-manual-model-fixture-recording` rule as an existing runtime asset; the source checkout does not select its recording scope. Those bytes are not the operational instructions for new development validation.
 
-- the source identity above and its imported Book / primary Manuscript / Manuscript Revision lineage;
-- a human-confirmed public recording instruction containing no private material;
-- one exact Task and one human-confirmed Provider Binding, including Provider, model, endpoint, adapter/config revision, Model Role and opaque Credential Reference, with no fallback;
-- one Provider Preflight, Run Authorization and Plan Envelope whose Run Budget Ceiling is explicit and non-`unset`;
-- a maximum of one Provider call for the authorized recording; and
-- the actual AI7 product path through the Primary Agent Harness, Provider adapter, Credential Broker and final Provider Payload/Egress Gate.
-
-The recording is local-only, human-attended, manually started and forbidden in CI, scheduled work, background work, `curl`, a side script, or a general network tool. Policy eligibility does not create an implementation, configure a credential, dispatch a Run, or substitute for the exact preflight and authorization records. Immediately before the future recording, the Commander must request human intervention to select and confirm every deferred binding, budget, credential enrollment, prompt contract and then-current Provider term.
-
+Necessary development capture follows [ADR 0067](./0067-authorize-the-opencode-go-development-credential-with-live-once-testing.md) under [ADR 0089](./0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md): admitted material, the authorized product path, protected credentials and budget, saved evidence and reviewed fixture admission. Agents execute necessary new questions autonomously within those rules; repeated attendance, a one-call manual ceremony or immediate human intervention is not a prerequisite. Runtime policy migration remains a separate coherent implementation change.
 ### Protected recording and fixture admission
 
 The recording-specific raw request and response remain in protected local staging outside every repository, working tree, log, diagnostic, uploaded artifact and distribution. Raw staging is deleted after the candidate fixture is admitted or the recording effort is abandoned.
@@ -59,7 +51,7 @@ A Recorded Deterministic Model Fixture is not the raw response. Admission requir
 - declared normalization;
 - sanitization of secrets, account identifiers, private material, unnecessary source echo and other unnecessary Provider metadata;
 - provenance and review of the Provider's then-current retention, test-reuse and redistribution terms;
-- human content review;
+- content and sanitization review through the assigned Reviewer;
 - immutable digests for the exact source, Provider, model, prompt contract, active policy, raw response and final fixture; and
 - confirmation that only the reviewed fixture bytes, not raw staging, enter the repository.
 
@@ -76,7 +68,6 @@ Ordinary Windows and macOS CI remains provider-free and network-disabled with id
 - Exact `sample1.docx` remains stable across later Issues even as its truthful fidelity classifications become more complete.
 - Provider Processing v1 remains immutable history. V2 is its default-deny successor with one narrow eligible-only rule.
 - External Export Policy v1 remains byte-for-byte unchanged and separately authoritative. Recording permission is not export, delivery, publication, learning, or Public Release Permission.
-- A future abandoned or failed recording consumes the one authorized call attempt unless a new exact recording authorization is established; fallback and automatic retry are not permitted.
 - Rollback selects a reviewed predecessor through the active-policy-set owner. It never mutates an immutable policy version.
 
 ## Rejected alternatives
@@ -85,11 +76,9 @@ Ordinary Windows and macOS CI remains provider-free and network-disabled with id
 - **Require one giant all-component sample1 test.** Rejected because the baseline is a cross-Issue invariant consumed at existing seams, not a second test architecture.
 - **Record through a script or direct Provider request.** Rejected because that would bypass the actual AI7 Harness, Provider Binding, credential and payload-egress path that the fixture is meant to serve.
 - **Record in CI or make live Provider access a gate.** Rejected because the standing Windows/macOS gate is provider-free and network-disabled.
-- **Commit raw Provider request/response material.** Rejected because only normalized, sanitized, rights-reviewed and human-reviewed fixture bytes may be separately admitted.
+- **Commit raw Provider request/response material.** Rejected because only normalized, sanitized, rights-reviewed and content-reviewed fixture bytes may be separately admitted.
 - **Rewrite ADR 0043 or Provider Processing v1.** Rejected because successor records preserve history and supersede only the named narrow clauses.
 
 ## Authority and stop boundary
 
-This decision records the Owner clarification in Issue #73. Stop if the exception cannot remain exact-source, local-only, human-attended, non-CI, one-call, non-`unset`-budget, exact-binding and no-fallback; if a Credential Reference cannot remain opaque until the Credential Broker supplies the final adapter; or if raw recording material would enter Git, logs, artifacts or distributions.
-
-Issue #36's bounded compatibility/degraded-import implementation is complete. Any later implementation must proceed only through its own authorized bounded Change Brief against the then-current exact `dev`. The actual recording remains deferred until a model-dependent product path exists and the Commander requests immediate human intervention.
+Stop if protected material or credentials would leave the authorized path, if exact source/binding evidence cannot be preserved, or if raw capture would enter Git, logs, hosted artifacts or distributions. Unknown sent outcomes remain potentially processed and billed under ADR 0067 rather than silently becoming new live work. [Orca dispatch](../agents/orca-dispatch.md) owns repository assignment, review and integration; fixture use grants no product Effect or public-release authority.

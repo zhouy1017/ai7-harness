@@ -264,24 +264,26 @@ _中文_: 模型角色
 _Avoid_: Model Provider, model name, Provider Binding
 
 **Fast Interaction Role**:
-The Model Role for quick interaction, low-risk candidate generation, and latency-sensitive assistance. Its accepted default binding is DeepSeek V4 Flash.
+The Model Role for quick interaction, low-risk candidate generation, and latency-sensitive assistance.
 _中文_: 快速交互角色
 _Avoid_: Cheap model, draft-only model, factual authority
 
 **Main Editorial Role**:
-The Model Role for Chinese long-form writing, editorial proposals, cross-source synthesis, factual research, and complex instruction following. Its accepted default binding is DeepSeek V4 Pro High.
+The Model Role for Chinese long-form writing, editorial proposals, cross-source synthesis, factual research, and complex instruction following.
 _中文_: 主编辑角色
 _Avoid_: Default model, editor, decision maker, factual authority
 
 **Difficult Escalation Role**:
-The Model Role for difficult or unusually consequential work that exceeds the Main Editorial Role's expected capability. Its accepted default binding is DeepSeek V4 Pro Max; escalation is an AI7 policy and plan decision, never a model's own choice.
+The Model Role for difficult or unusually consequential work that exceeds the Main Editorial Role's expected capability. Escalation is an AI7 policy and plan decision, never a model's own choice.
 _中文_: 疑难升级角色
 _Avoid_: Retry model, automatic fallback, authority upgrade
 
 **Frontier Model Role**:
-The Model Role for challenge or explicitly authorized high-consequence work. Its accepted default binding is DeepSeek V4 Pro Max; an explicitly configured eligible alternative enters the same one-loop topology, Provider Resolution Plan, Credential Broker, Run Budget Ceiling state, and egress boundary.
+The Model Role for challenge or explicitly authorized high-consequence work. An explicitly configured eligible alternative enters the same one-loop topology, Provider Resolution Plan, Credential Broker, Run Budget Ceiling state, and egress boundary.
 _中文_: 前沿模型角色
 _Avoid_: Second harness, silent fallback, escape hatch, truth oracle
+
+Concrete provider/model defaults are configuration decisions owned by [ADR 0080](../../adr/0080-assign-a-provider-route-and-model-to-every-task-that-transmits.md) and [ADR 0089](../../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md), not part of these role definitions.
 
 These four named roles remain Model Roles: Task Intents, native DSH artifacts, and DSH Analysis Contracts may declare hard requirements and soft preferences, never a provider, model, endpoint, or credential. A default binding is a configuration fact, never factual authority; output remains a proposal or research lead.
 

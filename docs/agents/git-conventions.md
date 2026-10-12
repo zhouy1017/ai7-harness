@@ -1,98 +1,55 @@
 # Git conventions
 
-Binding for every agent and every human working in this repository. These rules keep every Issue-bound Task Session uniform.
+[Development lines](development-lines.md) owns line roles. [Orca dispatch](orca-dispatch.md) owns branch assignment, writer handoff, role permissions, PR release and wave integration. These rules govern Git formatting, validation references and release boundaries.
 
 ## Branches
 
-See [Development lines](./development-lines.md) for the authorized line roles and current protection facts.
-
-`dev` is the long-lived development integration line. Start every task branch from current `dev` and target its pull request to `dev`. **Nothing is pushed directly to `dev` or `main`**, including by the Commander; both protected lines receive changes through pull requests.
-
-`main` is the protected stable and release-promotion line. No task branch or pull request targets it unless the Owner has separately authorized that exact promotion. Frozen `design-doc@6895f02d2983865516d267809d8cdda77026f62c` is an allowlist source, not a branch to merge into development.
-
-Branch names are `<type>/<issue>-<slug>`:
-
-```
-feat/42-manuscript-block-store
-fix/108-stale-retrieval-hit
-docs/17-glossary-collision-guard
-```
-
-- `<type>` is one of the commit types below.
-- `<issue>` is the GitHub issue number. GitHub Issues is the canonical tracker, so work without an issue is work nobody can find later.
-- `<slug>` is two to five lowercase words, hyphen-separated, describing the outcome rather than the method.
-
-One Issue, one branch, one pull request, and one writable Worker. Every Worker attempt runs in a fresh Task Session on the harness the Commander selects for it, in an applicable launch mode, under the verified Issue/Launch Receipt identity defined by Repository Development Dispatch.
-
-Before work is labeled `ready-for-agent` or dispatched, the Issue contains the one-page [Change Brief](change-brief.md). A Worker never enlarges that brief itself.
+Protected `dev` and `main` receive changes through PRs; direct pushes remain prohibited. Use the wave and Issue-bound slice names assigned by Orca dispatch. A slice targets its wave; final development integration targets dev. The [Change Brief](change-brief.md) fixes the bounded outcome and allowed paths.
 
 ## Commits
 
-Conventional Commits: `type(scope): subject`.
+Use Conventional Commits: `type(scope): subject`.
 
-| Type | Use for |
+| Type | Use |
 | --- | --- |
-| `feat` | New user-visible capability |
+| `feat` | User-visible capability |
 | `fix` | Corrected behavior |
-| `docs` | Documentation and design records |
+| `docs` | Documentation or design |
 | `refactor` | Behavior-preserving change |
-| `test` | Tests only |
-| `build` | Packaging, dependencies, pins |
-| `ci` | Workflow changes |
-| `chore` | Everything else |
+| `test` | Tests |
+| `build` | Dependencies, pins or packaging |
+| `ci` | Workflow |
+| `chore` | Other maintenance |
 
-Subject in the imperative, lowercase, no trailing period, under 72 characters. The body explains **why**, not what — the diff already shows what. State rejected alternatives when a choice was contested, and name any accepted decision the change implements or revises.
+Use an imperative lowercase subject, no trailing period, under 72 characters. Explain the reason in the body; name implemented decisions and meaningful tradeoffs.
 
-Agent-authored commits carry the stable product-level trailer of the attempt's own harness, the harness of the session that authored the commit: `Co-authored-by: OpenAI Codex <codex@openai.com>` for a Codex attempt or `Co-Authored-By: Claude <noreply@anthropic.com>` for a Claude Code attempt, regardless of the Commander's harness. Task class, requested binding, launch acceptance, and inferred execution binding belong only in Issue receipts; a commit trailer never names a model or claims effective runtime-model attestation.
+Use truthful tool attribution for agent-authored commits. A Codex session may use `Co-authored-by: OpenAI Codex <codex@openai.com>`; a Claude Code session may use `Co-Authored-By: Claude <noreply@anthropic.com>`. Actual subscription channel, model and effort belong in the assigned task/Issue/PR records, not in a trailer claiming runtime-model verification.
 
-## Pull requests
+## Pull requests and evidence
 
-Pull requests open as Draft and remain Draft during authoring, debugging, review, rebase, and local validation. Workers never push or change pull-request state. Once the change is locally complete and target authority has been re-resolved, the Commander pushes the branch and changes the pull request to Ready. While exact workflow `342459594` is active and applicable under [ADR 0058](../adr/0058-remove-actions-usage-observation-from-development-gating.md) after its [ADR 0057](../adr/0057-restore-hosted-gate-under-observed-actions-usage.md) restoration, that transition starts the one hosted E2E occurrence. The Gate binds to the pull request itself — its workflow triggers on `opened`, `reopened`, `ready_for_review`, and `synchronize`, gated only by the pull request's own draft state — not to the convention of opening as Draft first and marking Ready later; a pull request created directly as Ready runs it just the same. Before a changing or repair push, return the pull request to Draft; same-PR cancellation is a last-resort duplicate-occurrence control, not permission to iterate while Ready.
+- Title describes the resulting change; body links the Issue and includes [Change closure](change-brief.md#pull-request-closure).
+- Keep a PR Draft while its current candidate has unresolved authoring, repair or validation. Release and merge permissions are exclusively defined by Orca dispatch.
+- Record checks at the final candidate's exact head and target base; changes invalidate evidence according to that rulebook.
+- [CI and test boundaries](ci-test-boundaries.md) owns the applicable Local Verification Ladder, Journey admission, guest execution and provider-free hosted Gate. Documentation-only work uses the applicable documentation checks.
+- [ADR 0058](../adr/0058-remove-actions-usage-observation-from-development-gating.md) excludes Actions usage, billing, balances and estimates from development gating. Read check conclusions needed for validation, not usage views.
+- Existing workflow behavior is a runtime fact, not role authorization. The rulebook's runtime/CI readiness task owns adaptation to wave branches and released final candidates.
 
-- Title matches the primary commit subject.
-- Body links the Issue and states the user-visible outcome or exact non-product outcome.
-- Body records the Change closure defined in [`change-brief.md`](change-brief.md), including the Local Verification Ladder attestation for product work and whether `PROGRESS.md` was updated in the same pull request.
-- The Commander may open its own documentation-only pull request for root `PROGRESS.md`, the development plan, archive indexes, link repairs, and status lines without an Issue, Worker, or receipts ([ADR 0064](../adr/0064-reweight-repository-development-toward-value-first-delivery.md)); branch protection still requires the pull request.
-- For an implementation change affecting a supported Journey or observed-bug outcome, Local completion—every available Local Verification Ladder layer under ADR 0062, recorded in the Change closure—precedes Ready and the one logical E2E Functional Gate passes the same applicable Journey IDs on Windows and macOS. Before the exact Initial v1.0.0 Development Milestone Boundary, fresh exact-head Windows `doctor` → `bootstrap` → `build` → `e2e:all` remains required before Ready; while the restored workflow is active, its paired Hosted Gate must then succeed before merge. During an exact ADR 0053 degraded interval only, [ADR 0054](../adr/0054-defer-macos-evidence-until-after-initial-v1-0-0-development-milestone.md) permits the Windows-only route with truthful macOS deferral. A required product/bootstrap/build/Journey failure or unknown returns the pull request to Draft.
-- Documentation-only and design-only changes do not create automated proof work. Lint, type-check, format, build, package, signing, release, same-SHA, or formal-review checks are not additional required pull-request gates; the Local Verification Ladder layers are local requirements, not hosted checks.
-- Independent review is optional for every class and advisory; it is recommended for a T3 product slice. When requested, the Commander launches a fresh read-only, non-author Reviewer Task Session at the immutable completed authoring commit `reviewed_head` on the harness it selects; a Reviewer never dispatches, delegates to, or spawns another agent.
-- The Reviewer's schema-v5 Launch and Return Receipts record `reviewed_head` and `class_match`, which on `codex` says whether the binding matched the reviewed class and on `claude-code` reads `fixed-reviewer-binding` with the reviewed class named, because ADR 0068 fixes the Reviewer binding by route. A verdict never becomes a pull-request, CI, branch, exact-head, zero-finding, or re-review gate.
-- **Only the Commander merges.** Workers and Reviewers never do.
+Use squash merges so each slice and final integration has a bounded closure record. The PR body carries its outcome and validation. A green check does not grant publication or `main` promotion authority.
 
-The E2E scenario admission, data, subject, and platform rules live in [`ci-test-boundaries.md`](ci-test-boundaries.md).
+## Branch and workspace retirement
 
-Before the Initial v1.0.0 Development Milestone Boundary, ADR 0057 suspends ADR 0054's prospective macOS deferral while the restored Gate is active and usable. Under ADR 0058, repository-development agents and the Commander do not query, estimate, report, or consider Actions minutes, balance, allowance, cost, billing, or usage attribution for continued work, Ready, or merge; unknown, unreadable, or apparently insufficient usage is not a blocker. The Owner monitors independently and may later intervene explicitly. The Commander still reads workflow, run, check, and job status and conclusions needed for Gate evidence, without consulting billing or run/job Usage views. During exact ADR 0053 degraded operation, the Commander records every workflow-state, no-run, external-condition, and ADR 0054 disclosure fact; Windows completion then supplies the bounded integration route while macOS remains truthfully deferred. Integrate one product pull request at a time. Pure documentation, design, and CI-governance work follows its Change Brief's applicable local validation; optional advisory read-only review remains non-gating.
+After merge or abandonment, record the final commit and preserve needed work before retirement. Use Orca's documented managed-workspace lifecycle; do not replace it with raw worktree deletion. GitHub branch deletion and local workspace retirement are separate operations: verify both rather than assuming a merge command removed a checked-out branch. An abandoned branch's closing record retains its tip for Git recovery.
 
-ADR 0057 is the separate exact restoration authority for workflow `342459594` after Issue #166 integrates; ADR 0058 supersedes only its usage-observation conditions. Neither authorizes dispatch, probe, rerun beyond the single clearly external-transient exception, or backfill. A future disabled/degraded interval requires a new authoritative external-CI fact and Commander action. At the milestone boundary ADR 0054's separate consolidated Windows/macOS re-entry still completes before later product or release-path integration.
-
-Integrate product pull requests serially. After each integration, remaining branches re-resolve authority/base, rebase and revalidate; the changed exact base/target ends the old attempt and requires a fresh Task Session before further controlled-file work.
-
-**Squash merge.** Each task merge to `dev` is one complete task, so history reads as a sequence of finished outcomes rather than agent scratch work. The pull-request body becomes the squashed commit body. A `dev` to `main` promotion remains subject to its separate Owner authorization.
-
-**Retire the branch at merge.** Squash merging means `git branch --merged dev` never lists a landed task branch, so nothing retires by itself, and `gh pr merge --squash --delete-branch` alone is not enough: `gh` 2.93.0 deletes the local branch before the remote one and stops on the first error, and every Worker branch is checked out in a linked worktree at merge time, so `git branch -D <branch>` fails with `error: cannot delete branch '<branch>' used by worktree at '<path>'` and the remote branch is silently left behind after a successful merge. Retire a merged branch with this sequence instead:
-
-1. Post the Return Receipt; keep the attempt's worktree until step 3 under the [Dispatch Register](dispatch-register.md) retention rule.
-2. `gh pr merge <n> --squash --delete-branch` — keep the flag; it works whenever no worktree holds the branch.
-3. `git worktree remove <path>` for the attempt's worktree.
-4. `git branch -D <branch>` and `git push origin --delete <branch>` — idempotent when step 2 already did the work.
-5. Verify with `git ls-remote --heads origin <branch>`; the rule is not followed until it prints nothing.
-
-An abandoned branch is deleted when its Issue closes, with its tip recorded in the closing comment so the commits stay reachable by SHA.
-
-After merge, closure, or abandonment, run the applicable [documentation archive sweep](document-lifecycle.md). This is lifecycle maintenance, not an additional merge or review gate.
+Run the scoped [document lifecycle](document-lifecycle.md) sweep at completion. Obsolete conflicting instructions are removed from the current tree; Git preserves history.
 
 ## Tags and releases
 
-Reserved tag syntax is `vX.Y.Z` for releases and `vX.Y.Z-rc.N` for release candidates. This syntax is defined independently of automation and does not assert that a release workflow or `v*` trigger exists.
+Reserved syntax is `vX.Y.Z` and `vX.Y.Z-rc.N`. It does not assert that release automation exists. Release, tagging, packaging, signing, notarization, publication and promotion to `main` each require their separate exact Owner scope. This development procedure adds no release authorization or hosted gate.
 
-No release workflow is implemented or authorized by this baseline. Any release automation requires its own exact Owner authorization and task scope. Tags are created only by the Commander, only on `main`, and only after the separately authorized promotion path. Tagging or later release automation creates no separate release, receipt, packaging, signing, reproducibility, provenance, or same-SHA proof gate.
+The Initial v1.0.0 Development Milestone Boundary remains the exact record defined by [ADR 0054](../adr/0054-defer-macos-evidence-until-after-initial-v1-0-0-development-milestone.md); its separately authorized consolidated platform re-entry precedes release-path work. Earlier PRs receive no retrospective evidence.
 
-ADR 0054's temporary pre-boundary evidence rule cannot carry into release work. At the exact Initial v1.0.0 Development Milestone Boundary, complete the separately authorized consolidated Windows/macOS re-entry before any later product integration and before any `dev` to `main` promotion, `v1.0.0` tag, package, signing, notarization, publication, or release action. No prior pull request receives retrospective macOS evidence.
+## Protected material and fixtures
 
-## Protected material and the narrow test-input exception
+[AGENTS](../../AGENTS.md#protected-material) and [project constraints](project-constraints.md) own manuscript and credential boundaries. Owner admission under [ADR 0043](../adr/0043-allow-public-samplebooks-in-repository-and-ci.md) is required for exact-root Public SampleBooks; location or an ignore exception alone grants nothing.
 
-Credentials, secret values, private sample Books, and ordinary manuscripts or derivatives—including retrieval indexes and embeddings—never enter the repository. Document formats remain ignored by pattern everywhere by default.
-
-[ADR 0043](../adr/0043-allow-public-samplebooks-in-repository-and-ci.md) permits only exact-root `SampleBooks/` files explicitly designated by the Owner through an authorized Issue and pull request to be tracked as provider-free local/hosted-CI test inputs. Placement in that directory alone is not authority. The `.gitignore` exception makes such an authorized commit technically possible; it does not admit a file. Public SampleBooks remain excluded from raw logs and uploaded artifacts, distributions, production learning, export, publication and public-release authority.
-
-[ADR 0044](../adr/0044-use-sample1-as-compatibility-and-recording-baseline.md) creates the only live-provider exception: a future local, human-attended, one-call, exact-binding, no-fallback recording over exact `SampleBooks/sample1.docx` under Provider Processing v2. Raw request/response material remains outside Git. Only normalized, sanitized, rights-reviewed and human-reviewed fixture bytes may later be tracked through a separate authorized Issue and pull request; such a fixture never ships or enters learning, export, publication or release assets.
+Necessary development calls and cache reuse follow [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md) and [ADR 0067](../adr/0067-authorize-the-opencode-go-development-credential-with-live-once-testing.md). Raw Provider payloads remain outside Git. Repository fixture admission follows [ADR 0044](../adr/0044-use-sample1-as-compatibility-and-recording-baseline.md) and the applicable generation/review procedure; development authorization is not fixture, learning, export, publication or release authority.

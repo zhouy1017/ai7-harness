@@ -16,16 +16,10 @@ AI7 retains sole ownership of product requirements, Books and manuscripts, workf
 
 **DeepSeek is the primary but not the exclusive model provider.** Every configured model—including an optional alternative frontier provider—enters through the same DSH loop and the same AI7-owned Provider Resolution Plan, Plan Envelope, Credential Broker, Run Source Scope, budget, and egress boundaries. An alternative provider never creates a second harness, a silent runtime fallback, or a separate authority path.
 
-The accepted default Model Role bindings are:
+Product Model Roles remain provider-independent capability requirements. [ADR 0080](./0080-assign-a-provider-route-and-model-to-every-task-that-transmits.md) owns task assignments; [ADR 0089](./0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md) sets the first Go DeepSeek V4.1 Flash target with the official route retained. Current executable bindings stay in their selected configuration until #807 migrates them.
 
-| Model Role | Default binding | Intended work |
-| --- | --- | --- |
-| Fast Interaction Role | DeepSeek V4 Flash | Quick interaction, low-risk candidate generation, and latency-sensitive assistance. |
-| Main Editorial Role | DeepSeek V4 Pro High | Chinese long-form writing, editorial proposals, cross-source synthesis, factual research, and complex instruction following. |
-| Difficult Escalation Role | DeepSeek V4 Pro Max | Difficult or unusually consequential work that exceeds the main role's expected capability. |
-| Frontier Model Role | DeepSeek V4 Pro Max | Default frontier binding for challenge or explicitly authorized high-consequence work; the user may explicitly configure another eligible provider/model without changing the one-loop topology. |
 
-These are default bindings, not factual authority. Model output remains a proposal or a research lead. Factual Verification still requires admissible evidence, provenance, and Exact Fetch where applicable. Task Skills declare Model Roles, never a provider, model, endpoint, or credential.
+A role or binding grants no factual authority. Model output remains a proposal or a research lead. Factual Verification still requires admissible evidence, provenance, and Exact Fetch where applicable. Task Skills declare Model Roles, never a provider, model, endpoint, or credential.
 
 **Codex is not a production runtime.** It remains the **Codex Interaction Model Reference**: a non-runtime interaction and engineering reference for task capture, context, progress, interruption, clarification, history, review, host/runtime boundaries, extension design, and secondary-development ideas. AI7 copies no Codex branding, GUI source, layout, assets, coding presets, or coding-agent purpose, and ships no Codex package, process, technical Session, adapter target, provider invoker, fallback, or source build.
 
@@ -65,7 +59,7 @@ Engineering CI consists only of one logical provider-free E2E Functional Gate, e
 | ADR 0024 | Unchanged: three AI7 process roles, no TCP listener, composed Harness runtime inside the Node service. |
 | ADR 0027 | Keep as the engineering-verification authority. |
 | ADR 0028 | Apply the one-product Windows-and-macOS contract without changing harness ownership. |
-| `AGENTS.md` and dependent `kick-in/` notes | Preserve the DSH production language; add the accepted Model Role defaults, the primary-not-exclusive provider boundary, and Codex's reference-only role. |
+| `AGENTS.md` and dependent `kick-in/` notes | Preserve the DSH production language; link the current Model Role binding decision, the primary-not-exclusive provider boundary, and Codex's reference-only role. |
 
 ## Rejected alternatives
 

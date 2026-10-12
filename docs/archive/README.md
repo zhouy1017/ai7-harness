@@ -32,3 +32,5 @@ Archived lifecycle nodes are historical records excluded from ordinary current-s
 - [Issue #262 agent-guidance baseline — 2026-08-25](agent-guidance-baseline-2026-08-25/INDEX.md): consumed 2026-08-17 handoff bundle superseded by the current `AGENTS.md` router baseline.
 - [Value-first reorganization — 2026-09-06](reorg-value-first-2026-09-06/INDEX.md): the pre-reorganization root routers superseded by ADR 0064, the development plan, and the new `PROGRESS.md`.
 - [Editor-facing surface specification adopted — 2026-09-10](editor-surfaces-standard-2026-09-10/INDEX.md): the `PROGRESS.md` and development plan superseded when ADR 0077 was integrated and ADR 0078 re-cut the order and the tracker from `editor-surfaces.md` §11.
+
+Conflicting repository-dispatch and live-test instructions have been physically removed from archived bodies under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). Original wording is available in Git history only. Current operation follows [Orca dispatch](../agents/orca-dispatch.md).

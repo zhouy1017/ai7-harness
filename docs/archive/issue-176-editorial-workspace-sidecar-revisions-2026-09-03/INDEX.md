@@ -7,7 +7,9 @@
 | Original path | `PROGRESS.md` |
 | Final status | consumed |
 | Reason | Stable sidecar, migration, pin, presentation, and Journey behavior is now owned by the integrated implementation and current documentation; the implementation checkpoint no longer belongs in the active root reading path. |
-| Current replacement | The integrated profile/store/protocol/renderer/J-15 owners and current README/source-checkout own stable behavior; root `PROGRESS.md` and `HANDOFF.md` route the authorized Issue #47 refresh and provider-free implementation. |
+| Current replacement | [PROGRESS](../../../PROGRESS.md) and [Orca dispatch](../../agents/orca-dispatch.md) own current routing and operation. |
 | Retrieval condition | Read only when auditing Issue #176's predecessor migration, immutable sidecar/pin semantics, review repairs, overlap preservation, local completion, or paired Gate evidence. |
 
 The outgoing root `HANDOFF.md` is retained in Git history only. No database, build log, E2E stream, screenshot, trace, video, manuscript/source payload, credential material, Provider payload, fixture, workflow artifact, or other protected material entered this archive.
+
+Snapshot bodies have been retired under [ADR 0089](../../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). Use Git history for the original wording; current operation follows [Orca dispatch](../../agents/orca-dispatch.md).

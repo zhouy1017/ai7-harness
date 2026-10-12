@@ -1,64 +1,54 @@
 # Change Brief
 
-The GitHub Issue body is the Change Brief. It is one page. It links to the plan slice, ADRs, contexts, and predecessor Issues instead of restating them, and it never carries a target-commit-qualified authority list; the read-by-task table in [`README.md`](./README.md) owns that. Template narrative and filler are prohibited.
+The GitHub Issue body is the bounded brief. Link the plan slice, accepted ADRs, contexts and predecessor work instead of repeating their rules. [Orca dispatch](orca-dispatch.md) owns assignment, actual model pairing, startup, handoff and merge records.
 
-## Header
-
-Every work-ready Issue body begins with:
+## Work-ready Issue
 
 ```md
 Brief revision: <n>
 Class: T1 | T2 | T3
-Binding (codex): `<model> @ <effort>` · Binding (claude-code): `<model> @ <effort>`
-Base: `dev@<sha>` · Branch: `<type>/<issue>-<slug>` · Target: `dev`
-Plan slice: <Sxx> · Journey: <J-xx | N/A>
-```
+Plan slice: <existing slice or named follow-up> · Journey: <J-xx | N/A>
+Dependencies: <Issue/PR links>
+Wave / slice / exact base: <recorded assignment or assignment link>
 
-The bindings are the fixed class bindings in [Repository Development Dispatch](../../kick-in/27-repository-development-dispatch.md). The Commander selects the attempt's harness and launch mode at launch; the body does not.
-
-## Body
-
-```md
 ## Outcome
-One paragraph: the user-visible result or exact non-product outcome, and the current behavior it replaces.
+One user-visible result or exact non-product outcome; describe current and resulting behavior.
 
 ## Acceptance criteria
-- [ ] Each criterion observable in the product, at a test layer, or in the Journey.
+- [ ] Observable result and its appropriate check.
 
 ## Allowed to change
-Owners, modules, schemas, runners, and documents this slice may touch, including every hidden cross-Journey pin named as a synchronized delta. Everything else is a non-goal.
+Named owners, paths, schemas and synchronized projections.
 
-## Non-goals and no-change guarantees
+## Non-goals
+Boundaries this slice does not expand.
 
 ## Journey and Gate disposition
-`exact reuse — checked unchanged` | `synchronized delta: <runner and stages>` | `N/A — documentation only`
+`exact reuse — checked unchanged` | `synchronized delta: <runner/stages>` | `N/A — documentation only`
 
 ## Stop when
-Conditions that end the attempt with `needs-commander`, and the decision owner.
+An insufficient scope, authority conflict or missing dependency requires Commander re-slicing.
 
 ## Authority
-Links only: plan slice, ADRs and context sections the slice depends on, predecessor Issues and pull requests.
+Links to the plan, ADRs, context sections and predecessor work.
 ```
 
-## Revision and hash
+Increment the brief revision when outcome, class, scope, dependencies or acceptance changes. The Commander resolves material changes through Orca dispatch; routine base movement follows its candidate revalidation rule. Historical body hashes and receipts are evidence, not new launch prerequisites.
 
-A T3 body is hashed: SHA-256 over the exact UTF-8 bytes of the GitHub API `body` string, without a CLI-added newline. T1 and T2 bodies record only the Brief revision. A material change to outcome, class, binding, base, allowed change, non-goals, Journey disposition, or stop conditions increments the revision; after a Launch Receipt a material change requires a new attempt. A base-only drift after integration does not: the same Task Session continues after one Commander message naming the new base.
+## Assignment prompt
 
-## First prompt to a Task Session
-
-Send only: the Issue URL, the preallocated `dispatch_id`, the Brief revision (and hash for T3), Commander harness, attempt harness, launch mode, role, class, binding, branch, the exact base for a Worker or `reviewed_head` for a Reviewer, and the no-write preflight instruction (report actual cwd, worktree, and branch or detached state; in the `subagent` mode leave the retention marker). Never send transcripts, archives, or a duplicated brief.
+Give the Issue URL, brief revision and the exact assigned workspace/base or incoming PR head. Include the role assignment link from Orca dispatch. The agent verifies those records before editing; an author's full transcript is not the review brief.
 
 ## Pull-request closure
 
 ```md
 ### Change closure
-- Outcome delivered; Journey and Gate disposition
-- Planned vs actual change: owners touched, new owner and why, synchronized deltas
-- Local Verification Ladder: exact head, host (for agent-run work the background test guest that ran it, ADR 0083), outcome per available layer, and every disclosed skip (product work); `N/A` for documentation only
-- Migration and cleanup; unresolved matters; safe next action
-- `PROGRESS.md` updated in this pull request: yes | no
+- Outcome and linked Issue
+- Planned versus actual change; owners touched; new owner and reason
+- Incoming reviewed head, final corrected/tested head and target base, as applicable
+- Applicable checks, guest/host, results and disclosed skips; documentation checks for documentation-only work
+- Migration, cleanup, unresolved matters and next action
+- Integration status: slice in wave | final wave in dev
 ```
 
-For agent-run work the ladder line's host is the background test guest that ran it; [CI and test boundaries](./ci-test-boundaries.md#where-the-ladder-runs) owns the rule under [ADR 0083](../adr/0083-run-every-agent-s-electron-journeys-on-the-background-test-guests.md).
-
-Work that exceeds the allowed change is not ready for integration until the Issue is re-scoped.
+Product validation and guest requirements are owned by [CI and test boundaries](ci-test-boundaries.md); release responsibility and exact-candidate acceptance by Orca dispatch. Work that exceeds its brief returns for re-scoping before acceptance.

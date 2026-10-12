@@ -1,50 +1,36 @@
 ---
-status: accepted
+status: accepted — reuse and autonomous execution clarified by ADR 0089
 ---
 
 # Authorize the OpenCode Go development credential with live-once provider testing
 
-On 2026-09-06 the Owner placed an OpenCode Go subscription key in the main checkout root as `opencodego.key.txt` and authorized development agents to use it for Provider-related testing and integration while its quota remains, on one condition: the same or a similar test item is executed live at most once, and its result is saved and reused afterwards. This decision records that authorization and the rules that make it safe. It amends the binding and capture clauses of [ADR 0065](./0065-admit-a-developer-live-provider-processing-scope.md) and changes nothing about CI, the Gate, production defaults, or [ADR 0044](./0044-use-sample1-as-compatibility-and-recording-baseline.md) recording.
+The Owner authorizes necessary OpenCode Go tests within the current rules, existing product Run budget semantics and subscription limits, executed autonomously by the assigned agents. [ADR 0089](./0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md) and [Orca dispatch](../agents/orca-dispatch.md) own dispatch and review; this decision owns credential protection and development-only evidence reuse. It grants no live access to CI.
 
-## Facts about the Provider
+## Credential boundary
 
-OpenCode Go is a fixed-price subscription over the OpenCode Zen gateway. Its OpenAI-compatible chat-completions endpoint is `https://opencode.ai/zen/go/v1/chat/completions` with `Authorization: Bearer <key>`; DeepSeek, GLM, and Kimi models use that endpoint, while Qwen and MiniMax use the Anthropic-compatible `/messages` path and GPT and Grok models use `/responses`. The plan includes `deepseek-v4-flash` and `deepseek-v4-pro`. Usage is capped by rolling dollar limits (about $12 per five hours, $30 per week, $60 per month); when a limit is exhausted, requests are blocked until it resets. These facts were read from the OpenCode documentation on 2026-09-06 and are re-verified by the slice that implements the route.
+The untracked `opencodego.key.txt` at the main checkout root is read only by `tools/enroll-dev-credential.mjs`. The helper enrolls the value into the Protected Secret Store under the `opencode-go` slot and reports only `present`, `absent` or `unavailable` when checked. No agent reads, prints, hashes, copies or exposes a key in prompts, environments, commands, diagnostics, Issues, logs or repository files. The Credential Broker supplies it only to an authorized final adapter. Ad hoc key-bearing scripts and general network tools are outside this path.
 
-## Decision
+## Live once, then reuse
 
-### The credential
+The existing Provider Test Ledger and Provider Result Cache remain the single host-local development evidence owner, outside every checkout. Each live item records a stated validation question, model/route, prompt contract, request identity, usage, time and outcome. Raw request and response bytes remain protected local capture; repository admission uses reviewed, sanitized fixture tooling.
 
-- The key lives only in the untracked file `opencodego.key.txt` at the main checkout root; `.gitignore` excludes `*.key.txt`. It is never committed, copied into a worktree, or moved into any repository path.
-- No agent reads, prints, echoes, hashes, quotes, or copies the value, and no command line, environment dump, Issue, receipt, log, diagnostic, or tool result may contain it. The only reader is the developer credential helper the implementing slice adds (`tools/enroll-dev-credential.mjs`), which reads the file, stores the value in the product's Protected Secret Store under the `opencode-go` slot without any output, and answers `--check` with exactly one of `present`, `absent`, or `unavailable`, never anything else. `unavailable` means the check itself could not be performed (carrier unresolvable, unsupported platform or architecture, a native-carrier override, or a CI host) and never means the credential is missing — that is `absent`. Ad hoc `curl` or script calls that carry the key are prohibited.
-- The Credential Broker releases the value only against a `transmit-remote` ticket for a bound Run under the `developer-live` scope, exactly as ADR 0065 already requires.
+Two reuse boundaries are distinct:
 
-### The binding
+- **Exact response reuse:** the same configured route/model and exact canonical request may replay its saved response. The response retains its original capture identity and date; replay is never fresh evidence about the current remote model.
+- **Similar validation reuse:** the same capability or business question under an unchanged semantic contract, with only technical identities or other immaterial differences, reuses prior fixtures and regression evidence. A different actual input is not answered with the old response. Changing a Run UUID, sequence, worktree, title or display wording does not by itself justify a new live item.
 
-Under the `developer-live` scope the Main Editorial Role binds route `opencode-go`, endpoint `https://opencode.ai/zen/go/v1/chat/completions`, model `deepseek-v4-flash`, through the existing OpenAI-compatible adapter generalized by route and endpoint. The `deepseek-open-platform` route remains the production binding and is unchanged. A second Go model reachable through the same chat-completions endpoint may be used only as a separately named comparison test item; models behind the `/messages` or `/responses` paths are out of scope until an adapter exists. The optional `x-opencode-session` header may carry the opaque technical Session identity and nothing else.
+Necessary new semantic evidence may be collected autonomously: state what the existing evidence cannot answer, use the smallest representative admitted input, execute only the required delta, save the result, and reuse it thereafter. New behavior, a material prompt/contract change, a new input class, a changed route/model/protocol, or an unproven failure mode may justify it. Deterministic UI, storage, projection, recovery and bookkeeping changes normally reuse fixtures. Each test report distinguishes live capture, exact cache replay and fixture regression, together with the original model/contract/date. No additional per-call approval, daily quota or fixed test-count cap is introduced.
 
-### Live once, then replay
+A request already sent with an unknown result is possibly processed and billed. It is retained as unknown rather than reset by a cache miss, renamed item or new Run. A repeat requires a stated necessary retry/new-evidence reason within existing product Run budget semantics and subscription limits; it must not be silently resent. Invalidated evidence keeps its reason and original identity. Cache loss, corruption, concurrent misses and restart must not manufacture permission to pay for the same test again.
 
-- Every live call is a **test item** with an identifier `<slice>/<purpose>/<n>`, a one-line purpose, the model, the prompt-contract digest, and the request digest.
-- A host-level **Provider Result Cache** at `C:\Users\Chooo\Playground\ai7-harness-provider-cache\` (outside every checkout and worktree, never committed, never uploaded) stores each raw response, its usage, and timestamps keyed by model and request digest, beside a **Provider Test Ledger** (`ledger.jsonl`) listing every test item.
-- Before any live call the tooling consults both: an identical request (same model and request digest) replays from the cache; a test item whose identifier already has a result is refused unless the Owner has marked it stale in the ledger. "Similar" means the same purpose under the same contract version with only trivially different inputs; an agent that needs a variation names a new item and justifies it in its report.
-- The cache is the one permitted capture under the `developer-live` scope; ADR 0065's "no capture" clause is amended accordingly. Cache entries reach the repository only through the S41 fixture-generation tool with human review of every free-text field.
+The current implementation mechanically replays byte-identical `(model, request digest)` hits and refuses reuse of an occupied item id. It does not yet enforce validation-family equivalence, persistent pre-send reservation or namespace the key by endpoint. It also permits a later identical request after an uncached unknown answer. The P0 reuse slice [#808](https://github.com/zhouy1017/ai7-harness/issues/808) extends these existing owners rather than adding a second status ledger. Until it lands, agents apply this preflight to the existing evidence and serialize live tests.
 
-### Quota
+## Spend and account limits
 
-A limit response (HTTP 429 or the gateway's limit error) is classified `quota-exhausted`, recorded in the ledger with the reset window when the response states one, and ends the Run as a Provider Account Limit; no retry loop, no fallback to Zen balance, no second model. Agents report the state and stop. The ADR 0065 Run Budget Ceiling still applies per Run, and the ledger's cumulative usage lets the Commander see spend before dispatching another live item.
+Use the existing product Run Budget Ceiling and the subscription's account limits; avoid duplicate work and unproductive loops while completing the task. Record actual live usage separately from replayed usage. The gateway's stated account-limit response ends the live attempt as `quota-exhausted`; keep any stated reset window, report it, and stop without fallback to Zen balance or another paid route. No numeric subscription allowance is asserted by this document.
 
-### Who may run live
+## Development and production
 
-A Worker whose Brief names provider testing, and the Commander for a smoke check, only through the tooling above. CI, the E2E Gate, and every hosted execution never receive the key.
+Development reuse applies only to tests and fixtures. Every newly authorized product Task uses its own manuscript, selection, question and current sources through the product's processing scope; similar earlier user questions are not a business-response cache hit. A fresh user Task is not a repeated development test.
 
-## Consequences
-
-- Plan slice S40 implements the `opencode-go` route, the endpoint generalization, the enrollment helper, the ledger, the cache, and the quota classification; S41 promotes cache entries into fixtures. Until S40 integrates, no live route exists and the key stays unused.
-- The ledger and cache make every live test reproducible and countable; the Owner's constraint becomes a mechanical check, not an agent's memory.
-- The development-interval binding no longer depends on a DeepSeek open-platform key; the DeepSeek route stays available for production.
-
-## Rejected alternatives
-
-- **Read the key from the file at run time with an environment variable.** Rejected: the value would enter generic environments and tool output, which every existing rule forbids.
-- **Let agents decide case by case whether a test is "similar".** Rejected: the ledger makes the decision visible and the refusal automatic.
-- **Use the key from CI.** Rejected: the Gate stays provider-free.
+The runtime currently binds `opencode-go/deepseek-v4-flash` under active-policy-set v5. The target `deepseek-v4.1-flash` and ordinary-production local controlled trial require the P0 runtime migration [#807](https://github.com/zhouy1017/ai7-harness/issues/807) in the development plan. The official DeepSeek route is retained. Repository-development agents use the subscriptions and models selected by Orca dispatch; those orchestration bindings are distinct from the product's Model Roles.

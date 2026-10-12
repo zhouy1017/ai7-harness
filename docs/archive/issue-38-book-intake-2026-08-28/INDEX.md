@@ -6,7 +6,7 @@
 | Archive scope | The outgoing root Issue #38 implementation checkpoint and cold-start handoff present at exact target `a5fcfb567ae573f5c9934b612efbbd7c702a07d8`. |
 | Final status | Consumed historical evidence. |
 | Reason | Issue #38 is integrated, so its task-specific next actions must no longer guide current work. |
-| Current replacement | Current routing lives in root [`PROGRESS.md`](../../../PROGRESS.md) and [`HANDOFF.md`](../../../HANDOFF.md); exact merged implementation authority is `dev@a5fcfb567ae573f5c9934b612efbbd7c702a07d8`. |
+| Current replacement | [PROGRESS](../../../PROGRESS.md) and [Orca dispatch](../../agents/orca-dispatch.md) own current routing and operation. |
 | Retrieval condition | Read this node only when a task must audit Issue #38's final pre-integration validation, waived-hosted-Gate disclosure, or consumed Commander handoff and current sources plus Git history are insufficient. |
 
 ## Preserved artifacts
@@ -16,4 +16,6 @@
 | `PROGRESS.md` | [`PROGRESS.md`](PROGRESS.md) | `a5fcfb567ae573f5c9934b612efbbd7c702a07d8:PROGRESS.md`, blob `9cc3f3c2504c1c95907a2b713d3bbb17209b366b` | consumed |
 | `HANDOFF.md` | [`HANDOFF.md`](HANDOFF.md) | `a5fcfb567ae573f5c9934b612efbbd7c702a07d8:HANDOFF.md`, blob `b8e73102630f4e7a7260569d429158169f74254a` | consumed |
 
-Archive contents preserve the outgoing files byte-for-byte; they are evidence, not current authority.
+Original snapshot bodies are retained in Git history; current bodies are retirement pointers.
+
+Snapshot bodies have been retired under [ADR 0089](../../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). Use Git history for the original wording; current operation follows [Orca dispatch](../../agents/orca-dispatch.md).

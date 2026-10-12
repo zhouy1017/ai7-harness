@@ -7,7 +7,7 @@
 | Original path | Root `PROGRESS.md`. |
 | Final status | Consumed historical evidence. |
 | Reason | Issue #88 / PR #162 is integrated and its active routing is replaced by the current root routers; the outgoing checkpoint remains a byte-exact historical record. |
-| Current replacement | Root [`PROGRESS.md`](../../../PROGRESS.md) and [`HANDOFF.md`](../../../HANDOFF.md) provide current routing; integrated `dev@51156b17d092374f947e81439f2cf2a3cc65f52e` and accepted authorities carry the live conclusion. |
+| Current replacement | [PROGRESS](../../../PROGRESS.md) and [Orca dispatch](../../agents/orca-dispatch.md) own current routing and operation. |
 | Retrieval condition | Read only when a current authority record or Change Brief names the exact Issue #88 pre-sweep checkpoint as necessary to reconstruct the integration boundary or resolve a concrete historical gap that current routing cannot answer. |
 
 ## Preserved artifact

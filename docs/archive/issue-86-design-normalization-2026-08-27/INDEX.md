@@ -7,7 +7,7 @@
 | Original paths | Root `PROGRESS.md`; root `HANDOFF.md` |
 | Final status | Consumed integration checkpoint and consumed task handoff; historical evidence only |
 | Reason | Stable ADR, Policy, domain, architecture and UI owners now contain the live Issue #86 conclusions; PRD #28 and Issues #37/#38/#46–#49/#51–#59/#61–#66/#88–#95 now carry the downstream planning route |
-| Current replacement | Current root `PROGRESS.md` and `HANDOFF.md`; integrated `dev@ec623a6...`; refreshed PRD #28; next target Issue #37; post-#86 backlog Issues #88–#95 |
+| Current replacement | [PROGRESS](../../../PROGRESS.md) and [Orca dispatch](../../agents/orca-dispatch.md) own current routing and operation. |
 | Retrieval condition | Read only to reconstruct the exact pre-merge validation, authorization sequence, or cold handoff consumed by the Issue #86 integration lifecycle |
 
 ## Preserved files

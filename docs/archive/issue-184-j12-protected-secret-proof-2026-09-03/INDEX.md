@@ -7,7 +7,7 @@
 | Original path | `PROGRESS.md` |
 | Final status | consumed |
 | Reason | Current J-12 truth is now owned by `README.md`, `docs/development/source-checkout.md`, and the integrated implementation; the documentation-sync checkpoint no longer belongs in the active root reading path. |
-| Current replacement | `README.md` and `docs/development/source-checkout.md` own the stable nonsecret proof; root `PROGRESS.md` and `HANDOFF.md` route Issue #176 / Draft PR #177. |
+| Current replacement | [PROGRESS](../../../PROGRESS.md) and [Orca dispatch](../../agents/orca-dispatch.md) own current routing and operation. |
 | Retrieval condition | Read only when auditing Issue #184's stale exact-value claims, exact wording replacements, implementation comparison, or documentation validation. |
 
 The outgoing root `HANDOFF.md` is retained in Git history only. No product artifact, diagnostic, secret, credential value, manuscript payload, screenshot, trace, video, workflow artifact, or other protected material entered this archive.

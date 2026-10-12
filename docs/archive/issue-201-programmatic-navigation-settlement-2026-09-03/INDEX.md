@@ -7,5 +7,5 @@
 | Original path | Root `PROGRESS.md`, preserved as [PROGRESS.md](PROGRESS.md). The outgoing root `HANDOFF.md` remains in Git history only. |
 | Final status | Consumed. |
 | Reason | Issue #201's repair and paired-platform Gate conclusion are integrated; active routing now moves through Issue #203 to existing Issue #198 / Draft PR #199. |
-| Current replacement | Current routing lives in root [PROGRESS.md](../../../PROGRESS.md) and [HANDOFF.md](../../../HANDOFF.md). |
+| Current replacement | [PROGRESS](../../../PROGRESS.md) and [Orca dispatch](../../agents/orca-dispatch.md) own current routing and operation. |
 | Retrieval condition | Read this node only when a future authorized task must inspect the exact Issue #201 / PR #202 closure checkpoint or trace why its outgoing root routing was consumed. |
