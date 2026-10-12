@@ -208,7 +208,7 @@ function enroll(store: EditorialStore, bookId: string, startingPoint: 'prospecti
 const LIVE: LaunchBinding = {
   operationalScope: 'developer-live',
   live: {
-    route: 'opencode-go', model: 'deepseek-v4-flash', endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
+    route: 'opencode-go', model: 'deepseek-v4.1-flash', endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
     credentialSlot: 'opencode-go', credentialReference: randomUUID(), runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 240_000 },
   },
 };
@@ -425,7 +425,7 @@ describe('后台分析登记 over the real store on exact sample1', () => {
       enroll(store, book.bookId, 'prospective');
       edit(store, book, '〔改动〕');
       expect(store.backgroundAnalysisDecisionFor(book.bookId, runtime({ routeExecutable: false })).decision).toEqual({ kind: 'stopped', reason: BACKGROUND_NO_ROUTE });
-      // Developer-live: neither an Enrollment nor a start (Provider Processing v5: backgroundAnalysisEnrollmentAllowed false).
+      // Developer-live: neither an Enrollment nor a start (Provider Processing v9: backgroundAnalysisEnrollmentAllowed false).
       store.baselineAnalysisLedger.bindLaunch(LIVE);
       const live = store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime());
       expect(live.next).toEqual({ kind: 'stopped', reason: BACKGROUND_DEVELOPER_LIVE });

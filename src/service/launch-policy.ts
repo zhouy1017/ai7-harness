@@ -5,19 +5,19 @@ import { LAUNCH_SELECTABLE_SCOPES, isTrustedOperationalScope, type DeveloperLive
 
 /**
  * The source-checkout launch authority (ADR 0046, ADR 0065): the build-embedded carrier pins active
- * policy set v5, the sole active set for all four Provider Processing scopes, and names the two
+ * policy set v7, the sole active set for all four Provider Processing scopes, and names the two
  * scopes the built entry may bind from its launch form. `development-ci` is the default and binds
  * Provider Processing v1 (zero live transmissions); `developer-live` is bound only by the launch
  * argument `--trusted-operational-scope developer-live` on a developer host and binds the immutable
- * Provider Processing v5. `fixture-recording` and `ordinary-production` are pinned by the active set
+ * Provider Processing v9. `fixture-recording` and `ordinary-production` are pinned by the active set
  * but are not selectable from the source checkout. No environment variable or product setting
  * selects a scope; every invalid state resolves to the zero-transmission denial.
  */
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
 const CARRIER_VERSION = 2;
-export const ACTIVE_SET_VERSION = 'v5' as const;
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v5.json';
-const ACTIVE_SET_SHA256 = '8329eda368d4870c552bdc792a74f0035a2dc8da818c37617902fa0af7368f8a';
+export const ACTIVE_SET_VERSION = 'v7' as const;
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v7.json';
+const ACTIVE_SET_SHA256 = '4df66f504eadc65d605d5b78648b635985cf2304cb3ffa08073943f7a8d846bb';
 const PROVIDER_PINS = {
   'development-ci': {
     version: 'v1',
@@ -35,9 +35,9 @@ const PROVIDER_PINS = {
     sha256: '10e69a5d7b027d077728ec1bc7393dc0583b99a05246b4e883098b9d96b221a4',
   },
   'developer-live': {
-    version: 'v5',
-    canonicalPath: 'docs/policies/provider-processing-policy.v5.json',
-    sha256: '4b7356aaa36a75b3085d6eecb593fb3bd765682073e37fa21b5abf7bc78ea0bb',
+    version: 'v9',
+    canonicalPath: 'docs/policies/provider-processing-policy.v9.json',
+    sha256: '6f1f5377bb3b58694025521e8aeb10f4be12e57ae7377e4d8f6fce06d142ed84',
   },
 } as const;
 const EXTERNAL_PIN = {
@@ -46,13 +46,13 @@ const EXTERNAL_PIN = {
   sha256: '162441cc3e5d30b0cafb00a0d04ca5ab32b64c5039baafc8952a9925bd7984b6',
 } as const;
 
-/** The exact developer-live binding Provider Processing v5 declares; the resolver verifies the policy bytes say the same. */
+/** The exact developer-live binding Provider Processing v9 declares; the resolver verifies the policy bytes say the same. */
 export const DEVELOPER_LIVE_POLICY_BINDING = {
   ruleId: 'developer-live-public-samplebook-analysis',
   launchArgument: '--trusted-operational-scope developer-live',
   route: 'opencode-go',
   endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
-  model: 'deepseek-v4-flash',
+  model: 'deepseek-v4.1-flash',
   credentialSlot: 'opencode-go',
   defaultRunBudgetCeilingTokensPerFrozenUnit: 30_000,
   providerAccountLimitClassification: 'quota-exhausted',
@@ -215,13 +215,13 @@ function verifyDevelopmentCiPolicy(policy: Record<string, unknown>): void {
 }
 
 /**
- * Provider Processing v5: default deny with exactly the one developer-live eligible-only rule and its
+ * Provider Processing v9: default deny with exactly the one developer-live eligible-only rule and its
  * exact binding, the three declared suboperations of ADR 0066, the per-frozen-unit Run Budget Ceiling
- * default of ADR 0070, and the house-people redaction rule of ADR 0079 §4.4. v5 names all three
+ * default of ADR 0070, and the house-people redaction rule of ADR 0079 §4.4. v9 names all three
  * suboperations `true` and the web-search flag `false`; the projection reads exactly those bytes, and
  * a field that does not match is a policy the launch cannot read — the zero-transmission denial.
  *
- * Exported so the reading of the rule's exact fields can be pinned against the real v5 bytes with one
+ * Exported so the reading of the rule's exact fields can be pinned against the real v9 bytes with one
  * field varied. The document digests this resolver checks are constants of this module, so a policy
  * revision could not be fed through `resolveSourceCheckoutLaunchPolicy` at all — which is the point
  * of the pins, and why the reading is tested here instead.
@@ -247,6 +247,17 @@ export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
   requirePolicy(isRecord(decision) && decision['default'] === 'deny' && Array.isArray(decision['providerAllowRules']) && decision['providerAllowRules'].length === 1);
   const rule: unknown = decision['providerAllowRules'][0];
   requirePolicy(isRecord(rule) && rule['ruleId'] === DEVELOPER_LIVE_POLICY_BINDING.ruleId && rule['policyResult'] === 'eligible-only');
+  requirePolicy(Array.isArray(rule['allowedTaskKinds']) && rule['allowedTaskKinds'].length === 1 &&
+    rule['allowedTaskKinds'][0] === 'baseline-manuscript-analysis');
+  const origin = rule['authorityOrigin'];
+  const mode = rule['executionMode'];
+  requirePolicy(isRecord(origin) && origin['newlyUserInitiatedTaskRequired'] === true &&
+    origin['directRunAuthorizationAllowed'] === true && origin['matchingActiveDefaultExecutionRuleAllowed'] === false &&
+    origin['backgroundAnalysisEnrollmentAllowed'] === false && origin['idleScheduledImportTriggeredOrCrossRunDispatchAllowed'] === false);
+  requirePolicy(isRecord(mode) && mode['humanAttended'] === false && mode['developerHostOnly'] === true &&
+    mode['ciAllowed'] === false && mode['hostedAllowed'] === false && mode['scheduledAllowed'] === false && mode['backgroundAllowed'] === false);
+  requirePolicy(Array.isArray(rule['allowedOutboundDataCategories']) && rule['allowedOutboundDataCategories'].length === 1 &&
+    rule['allowedOutboundDataCategories'][0] === 'public-or-synthetic');
   // The house-people redaction rule (ADR 0079 §4.4): the identity of the house's people never leaves,
   // while the author's information and the house name may.
   const redaction = rule['redaction'];
@@ -286,7 +297,7 @@ export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
       // assignment design, so a document that enabled it would be one this launch cannot read.
       transmissions['webSearchToolAllowed'] === false,
   );
-  // The three suboperations ADR 0066 declares, which v5 names `true`. An absent or non-`true` key is
+  // The three suboperations ADR 0066 declares, which v9 names `true`. An absent or non-`true` key is
   // not the pinned document; reading anything but the exact bytes is the zero-transmission denial.
   requirePolicy(
     transmissions['crossUnitReductionAllowed'] === true &&
@@ -449,7 +460,7 @@ export async function resolveSourceCheckoutLaunchPolicy(
         operationalScope: 'developer-live',
         activePolicySetVersion: ACTIVE_SET_VERSION,
         providerProcessing: {
-          version: 'v5',
+          version: 'v9',
           decision: 'eligible-only',
           authorizedLiveTransmissionCount: 'bounded-by-run',
           liveTransmissionAllowed: true,

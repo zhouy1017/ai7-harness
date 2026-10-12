@@ -580,7 +580,7 @@ describe('the market section and 按我的评分重写评语 over the real store
         operationalScope: 'developer-live',
         live: {
           route: 'opencode-go',
-          model: 'deepseek-v4-flash',
+          model: 'deepseek-v4.1-flash',
           endpoint: 'https://example.invalid/v1',
           credentialSlot: 'opencode-go',
           credentialReference: randomUUID(),

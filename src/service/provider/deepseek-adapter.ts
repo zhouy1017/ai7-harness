@@ -28,8 +28,8 @@ import { normalizeModelResponse, type CanonicalModelResult, type NormalizeOption
  * §2, Issue #435): the endpoint, the credential slot and its header form, the limit reading and the
  * output cap are configuration, never constants of this module. `deepseek-open-platform` is the
  * unchanged production route (model `deepseek-v4-pro`, thinking enabled at high reasoning effort).
- * `opencode-go` is the developer-live route of Provider Processing v5 (bare model id
- * `deepseek-v4-flash`, a standard chat-completions body with no DeepSeek-specific parameters, and the
+ * `opencode-go` is the developer-live route of Provider Processing v9 (bare model id
+ * `deepseek-v4.1-flash`, a standard chat-completions body with no DeepSeek-specific parameters, and the
  * technical Session id in `x-opencode-session` for the gateway's prompt cache). Every other
  * configured route — the Go plan's `/messages` and `/responses` paths and every provider document's
  * route — is declared and inert: no Provider Resolution Plan may bind it (`ExecutionRoute` in
@@ -114,7 +114,7 @@ export const PROVIDER_ROUTE_PROFILES: Readonly<Record<RemoteExecutionRoute, Prov
 
 /** The production connection's route, as `config/providers/deepseek-open-platform.json` declares it. */
 export const DEEPSEEK_ROUTE_PROFILE: ProviderRouteProfile = PROVIDER_ROUTE_PROFILES[DEEPSEEK_ROUTE];
-/** Provider Processing v5's developer-live route, as `config/providers/opencode-go.json` declares it. */
+/** Provider Processing v9's developer-live route, as `config/providers/opencode-go.json` declares it. */
 export const OPENCODE_GO_ROUTE_PROFILE: ProviderRouteProfile = PROVIDER_ROUTE_PROFILES[OPENCODE_GO_ROUTE];
 
 export interface DeepSeekRequestAssembly {

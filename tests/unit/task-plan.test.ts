@@ -119,8 +119,8 @@ describe('the words the ceiling, the account limit and the boundary are fixed to
     // Captured from the J-03 card's plan preview before the plan moved into the drawer (Issue #418).
     expect(pinReading({ operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0 }))
       .toBe('development-ci · v1 · 拒绝 · 0 次实时传输');
-    expect(pinReading({ operationalScope: 'developer-live', version: 'v5', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' }))
-      .toBe('developer-live · v5 · eligible-only · bounded-by-run 次实时传输');
+    expect(pinReading({ operationalScope: 'developer-live', version: 'v9', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' }))
+      .toBe('developer-live · v9 · eligible-only · bounded-by-run 次实时传输');
   });
 
   it('locks the three groups the authorization rules fix (PLAN-004)', () => {
@@ -142,7 +142,7 @@ describe('route-aware readiness of the authorization bar (S74a A3; AUTH-005, MOD
       scope: { process: '《合成书名》全书', reference: [], send: '所读阅读范围的稿件正文（8 个）', notRead: '其他图书' },
       steps: [],
       participation: { during: '预计无需中途参与', after: null },
-      service: { role: '主编辑角色', provider: 'opencode-go · deepseek-v4-flash', decision: '开发者实时', send: '发往 opencode-go', sendCategory: '公开或合成材料', usage: '至多 240,000 tokens（8 个阅读范围）', usageIsCeiling: true, duration: '暂无可靠估计', budgetCeiling: '任务运行预算上限：240,000 tokens', accountLimit: ACCOUNT_LIMIT_UNKNOWN },
+      service: { role: '主编辑角色', provider: 'opencode-go · deepseek-v4.1-flash', decision: '开发者实时', send: '发往 opencode-go', sendCategory: '公开或合成材料', usage: '至多 240,000 tokens（8 个阅读范围）', usageIsCeiling: true, duration: '暂无可靠估计', budgetCeiling: '任务运行预算上限：240,000 tokens', accountLimit: ACCOUNT_LIMIT_UNKNOWN },
       outcomes: ['一份基线分析'],
       notDo: { editorial: [], technical: [] },
       boundary: { adaptable: [], askFirst: [...LOCKED_BOUNDARY] },

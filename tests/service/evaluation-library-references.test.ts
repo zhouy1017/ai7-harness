@@ -319,7 +319,7 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
     const id = await material();
     const prepared = prepare(kind, [id]);
     expect(plan(kind, prepared.taskIntent!.taskIntentId).scope.send).toContain('也只在本机读取');
-    const live = { operationalScope: 'developer-live', live: { route: 'opencode-go', model: 'deepseek-v4-flash', endpoint: 'https://example.invalid/v1', credentialSlot: 'opencode-go', credentialReference: randomUUID(), runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 100_000 } } } as const;
+    const live = { operationalScope: 'developer-live', live: { route: 'opencode-go', model: 'deepseek-v4.1-flash', endpoint: 'https://example.invalid/v1', credentialSlot: 'opencode-go', credentialReference: randomUUID(), runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 100_000 } } } as const;
     store.baselineAnalysisLedger.bindLaunch(live);
     // The plan prepared provider-free, read under developer-live, names the refusal instead of claiming the references would go.
     expect(plan(kind, prepared.taskIntent!.taskIntentId).scope.send).toBe('不发送任何内容；这份计划列了资料库资料，当前运行范围不能把它们发送给模型，这份计划不能开始');
