@@ -44,7 +44,7 @@ const LIVE_LAUNCH = {
   operationalScope: 'developer-live',
   live: {
     route: 'opencode-go',
-    model: 'deepseek-v4-flash',
+    model: 'deepseek-v4.1-flash',
     endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
     credentialSlot: 'opencode-go',
     credentialReference: '00000000-0000-4000-8000-000000000000',

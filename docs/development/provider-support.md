@@ -393,11 +393,12 @@ Open:
 | OpenCode session header | sent — `vendor-documentation`, OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/, read 2026-09-08 |
 | Per-turn output cap | none |
 
-The developer-live route of Provider Processing v5 (ADR 0065, ADR 0067). On this gateway a 429, a 402 or a body naming the usage limit is the development account's limit, so it ends the Run. The Session header carries the technical Session id for the gateway's prompt cache. Named by the documentation and deliberately absent, because the Zen table states no id for them: LongCat-2.0, Hy4 preview, Hy3, Omen Alpha, MiMo-V2.5, MiMo-V2.5-Pro.
+The developer-live route of Provider Processing v9 (ADR 0065, ADR 0067). On this gateway a 429, a 402 or a body naming the usage limit is the development account's limit, so it ends the Run. The Session header carries the technical Session id for the gateway's prompt cache. Named by the documentation and deliberately absent, because the Zen table states no id for them: LongCat-2.0, Hy4 preview, Hy3, Omen Alpha, MiMo-V2.5, MiMo-V2.5-Pro.
 
 | Model id | Display name | Context | Tool calling | Web search tool |
 | --- | --- | --- | --- | --- |
 | `deepseek-v4-flash` | DeepSeek V4 Flash | none | `none` | `none` |
+| `deepseek-v4.1-flash` | DeepSeek V4.1 Flash | none | `none` | `none` |
 | `deepseek-v4-pro` | DeepSeek V4 Pro（OpenCode Go） | none | `none` | `none` |
 | `glm-5.3-flash` | GLM-5.3-Flash（OpenCode Go） | none | `none` | `none` |
 | `glm-5.3` | GLM-5.3（OpenCode Go） | none | `none` | `none` |
@@ -408,7 +409,7 @@ The developer-live route of Provider Processing v5 (ADR 0065, ADR 0067). On this
 | `kimi-k2.6` | Kimi K2.6（OpenCode Go） | none | `none` | `none` |
 | `deepseek-v4-flash-vision-exp` | DeepSeek V4 Flash Vision Exp（OpenCode Go） | none | `none` | `none` |
 
-Inert: 9 of 10 (no declared answer channel). Established:
+Inert: 9 of 11 (no declared answer channel). Established:
 
 - `deepseek-v4-flash`, `deepseek-v4-pro` · `requestShape: openai-chat-completions` — `vendor-documentation`, ADR 0067 · OpenCode Go documentation, read 2026-09-06
 - `deepseek-v4-flash` · `structuredOutput: json-object` — `live-test-item` `S40/reanalyze-range/1`, observed 2026-09-08
@@ -416,8 +417,11 @@ Inert: 9 of 10 (no declared answer channel). Established:
 - `deepseek-v4-flash` · `reasoningChannel: message-reasoning-content` — `live-test-item` `S40/first-baseline/1`, `S40/first-baseline/2`, `S40/first-baseline/3`, `S40/first-baseline/4`, `S40/first-baseline/5`, `S40/first-baseline/6`, `S40/first-baseline/7`, `S40/first-baseline/8`, observed 2026-09-07
 - `deepseek-v4-flash` · `usageAttribution: includes-reasoning` — `live-test-item` `S40/first-baseline/1`, `S40/first-baseline/2`, `S40/first-baseline/3`, `S40/first-baseline/4`, `S40/first-baseline/5`, `S40/first-baseline/6`, `S40/first-baseline/7`, `S40/first-baseline/8`, observed 2026-09-07
 - every model · `webSearchTool: none` — `vendor-documentation`, OpenCode Go https://opencode.ai/docs/go/ · Zen https://opencode.ai/docs/zen/ · Tools https://opencode.ai/docs/tools/, read 2026-09-11
+- `deepseek-v4.1-flash` · `requestShape: openai-chat-completions` — `vendor-documentation`, OpenCode Go endpoint table https://github.com/anomalyco/opencode/blob/25053bbdc7df908bb066f7616b871d443085ae27/packages/web/src/content/docs/go.mdx; @ai-sdk/openai-compatible response contract https://github.com/vercel/ai/blob/2c6996ec621b677e902038b1b834d8ffaa0b307d/packages/openai-compatible/src/chat/openai-compatible-chat-language-model.ts, read 2026-10-12
+- `deepseek-v4.1-flash` · `answerChannel: message-content-string` — `vendor-documentation`, OpenCode Go endpoint table https://github.com/anomalyco/opencode/blob/25053bbdc7df908bb066f7616b871d443085ae27/packages/web/src/content/docs/go.mdx; @ai-sdk/openai-compatible response contract https://github.com/vercel/ai/blob/2c6996ec621b677e902038b1b834d8ffaa0b307d/packages/openai-compatible/src/chat/openai-compatible-chat-language-model.ts, read 2026-10-12
 - `glm-5.3-flash`, `glm-5.3`, `glm-5.2`, `glm-5.1`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.6`, `deepseek-v4-flash-vision-exp` · `requestShape: openai-chat-completions` — `vendor-documentation`, OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/, read 2026-09-08
-- `deepseek-v4-flash`: The developer-live model, the one profile that requires a JSON answer. It sends no DeepSeek-specific parameter. Its toolCalling stays none: the Owner's own session observed a client tool call through this gateway (ADR 0080 §5.3), which is not yet a recorded live-test item.
+- `deepseek-v4-flash`: Historical V4 profile, retained with its original evidence; no current product binding selects it. It sends no DeepSeek-specific parameter. Its toolCalling stays none: the Owner's own session observed a client tool call through this gateway (ADR 0080 §5.3), which is not yet a recorded live-test item.
+- `deepseek-v4.1-flash`: The baseline-only developer-live product binding of Provider Processing v9. Declared vendor wire contract, not observed capability. Sends no unverified format, reasoning or tool parameters. Old V4 items establish none of this model's capabilities.
 - `deepseek-v4-pro`: The same model id as the production route's, behind a different route: a different profile, and no capability carries across.
 
 ### `opencode-go-messages`
@@ -479,6 +483,7 @@ Readings:
 - `go-plan-docs` — `vendor-documentation`, OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/, read 2026-09-08. The Go page for which path the gateway serves each model on, the Zen model table for the exact id it answers to: both facts or no row. Where the pages disagree the Go page decides and the disagreement is recorded. The Go page also prints the `x-opencode-session` header for session stability (ADR 0080 §3), which is why the Go routes send it and no other route does.
 - `go-responses-docs` — `vendor-documentation`, OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/ · OpenAI Node SDK src/resources/responses/responses.ts@eecbebe294be7e657c99a34eb104a6a4b507335c, read 2026-09-08. The same pair, plus the source the Responses shape's own contract came from: the vendor's platform reference refuses an unauthenticated fetch, so the shape is read from the published SDK at an exact commit.
 - `gateway-no-search-tool` — `vendor-documentation`, OpenCode Go https://opencode.ai/docs/go/ · Zen https://opencode.ai/docs/zen/ · Tools https://opencode.ai/docs/tools/, read 2026-09-11. Neither gateway page prints a capability table or mentions tools, web search or web fetch; the opencode source shows `websearch` / `webfetch` are client-side tools of the opencode agent, not of the gateway wire API (ADR 0080 §3, §5.2).
+- `v41-go-wire-contract` — `vendor-documentation`, OpenCode Go endpoint table https://github.com/anomalyco/opencode/blob/25053bbdc7df908bb066f7616b871d443085ae27/packages/web/src/content/docs/go.mdx; @ai-sdk/openai-compatible response contract https://github.com/vercel/ai/blob/2c6996ec621b677e902038b1b834d8ffaa0b307d/packages/openai-compatible/src/chat/openai-compatible-chat-language-model.ts, read 2026-10-12. The exact Go model/endpoint/SDK identity and the SDK choices[0].message.content response contract establish declared wire compatibility only. No V4.1 live capability is inferred from V4 evidence. JSON-object format, reasoning channel, usage attribution, tools and context remain unverified until named actual product evidence.
 
 Open:
 

@@ -3,10 +3,13 @@
   "version": 2,
   "runtimeForm": "source-checkout",
   "trustedOperationalScope": "development-ci",
-  "launchSelectableScopes": ["development-ci", "developer-live"],
+  "launchSelectableScopes": [
+    "development-ci",
+    "developer-live"
+  ],
   "activePolicySet": {
-    "version": "v5",
-    "canonicalPath": "docs/policies/active-policy-set.v5.json",
-    "sha256": "8329eda368d4870c552bdc792a74f0035a2dc8da818c37617902fa0af7368f8a"
+    "version": "v7",
+    "canonicalPath": "docs/policies/active-policy-set.v7.json",
+    "sha256": "4df66f504eadc65d605d5b78648b635985cf2304cb3ffa08073943f7a8d846bb"
   }
 }

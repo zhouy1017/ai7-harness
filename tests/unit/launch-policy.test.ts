@@ -9,7 +9,7 @@ import type { LaunchPolicyProjection, TrustedOperationalScope } from '../../src/
 
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v5.json';
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v7.json';
 const CARRIED_PATHS = [
   CARRIER_PATH,
   ACTIVE_SET_PATH,
@@ -17,21 +17,21 @@ const CARRIED_PATHS = [
   'docs/policies/provider-processing-policy.v2.json',
   'docs/policies/provider-processing-policy.v3.json',
   'docs/policies/provider-processing-policy.v4.json',
-  'docs/policies/provider-processing-policy.v5.json',
+  'docs/policies/provider-processing-policy.v9.json',
   'docs/policies/provider-processing-policy.v6.json',
   'docs/policies/external-export-policy.v1.json',
   'docs/policies/external-export-policy.v2.json',
 ] as const;
-/** The exact pins active-set v5 records; the resolver and the carrier must agree with the bytes. */
+/** The exact pins active-set v7 records; the resolver and the carrier must agree with the bytes. */
 const EXPECTED_PINS = {
   'development-ci': ['v1', 'docs/policies/provider-processing-policy.v1.json', 'd9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a'],
   'fixture-recording': ['v2', 'docs/policies/provider-processing-policy.v2.json', 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc'],
   'ordinary-production': ['v6', 'docs/policies/provider-processing-policy.v6.json', '10e69a5d7b027d077728ec1bc7393dc0583b99a05246b4e883098b9d96b221a4'],
-  'developer-live': ['v5', 'docs/policies/provider-processing-policy.v5.json', '4b7356aaa36a75b3085d6eecb593fb3bd765682073e37fa21b5abf7bc78ea0bb'],
+  'developer-live': ['v9', 'docs/policies/provider-processing-policy.v9.json', '6f1f5377bb3b58694025521e8aeb10f4be12e57ae7377e4d8f6fce06d142ed84'],
 } as const;
-/** ADR 0079 §3 decides External Export v2; active-set v5 pins its exact bytes. */
+/** ADR 0079 §3 decides External Export v2; active-set v7 pins its exact bytes. */
 const EXPECTED_EXTERNAL_PIN = ['v2', 'docs/policies/external-export-policy.v2.json', '162441cc3e5d30b0cafb00a0d04ca5ab32b64c5039baafc8952a9925bd7984b6'] as const;
-const ACTIVE_SET_SHA256 = '8329eda368d4870c552bdc792a74f0035a2dc8da818c37617902fa0af7368f8a';
+const ACTIVE_SET_SHA256 = '4df66f504eadc65d605d5b78648b635985cf2304cb3ffa08073943f7a8d846bb';
 
 let sandbox: string;
 let codeRoot: string;
@@ -46,7 +46,7 @@ async function placeValidCheckout(): Promise<void> {
   for (const relativePath of CARRIED_PATHS) await placeBuiltFile(relativePath);
 }
 
-const V5_PATH = 'docs/policies/provider-processing-policy.v5.json';
+const V5_PATH = 'docs/policies/provider-processing-policy.v9.json';
 
 /**
  * The exact v5 document with the given rule fields overridden. The digests the resolver checks are
@@ -97,7 +97,7 @@ afterEach(async () => {
   await rm(sandbox, { recursive: true, force: true });
 });
 
-describe('active policy set v5', () => {
+describe('active policy set v7', () => {
   it('is the sole active set: the carrier pins it, it maps all four scopes, and every pin matches the exact bytes', async () => {
     const carrier = JSON.parse(await readFile(join(REPO_ROOT, ...CARRIER_PATH.split('/')), 'utf8')) as Record<string, unknown>;
     expect(carrier).toEqual({
@@ -106,7 +106,7 @@ describe('active policy set v5', () => {
       runtimeForm: 'source-checkout',
       trustedOperationalScope: 'development-ci',
       launchSelectableScopes: ['development-ci', 'developer-live'],
-      activePolicySet: { version: 'v5', canonicalPath: ACTIVE_SET_PATH, sha256: ACTIVE_SET_SHA256 },
+      activePolicySet: { version: 'v7', canonicalPath: ACTIVE_SET_PATH, sha256: ACTIVE_SET_SHA256 },
     });
     expect(await sha256Of(ACTIVE_SET_PATH)).toBe(ACTIVE_SET_SHA256);
     const activeSet = JSON.parse(await readFile(join(REPO_ROOT, ...ACTIVE_SET_PATH.split('/')), 'utf8')) as {
@@ -116,7 +116,7 @@ describe('active policy set v5', () => {
         'external-export-policy': { version: string; canonicalPath: string; sha256: string };
       };
     };
-    expect(activeSet.version).toBe('v5');
+    expect(activeSet.version).toBe('v7');
     const pins = activeSet.activePolicies['provider-processing-policy'].scopePins;
     expect(Object.keys(pins)).toEqual(Object.keys(EXPECTED_PINS));
     for (const [scope, [version, canonicalPath, sha256]] of Object.entries(EXPECTED_PINS)) {
@@ -134,7 +134,7 @@ describe('active policy set v5', () => {
 
   it('declares the exact developer-live binding the v5 policy bytes carry', () => {
     expect(DEVELOPER_LIVE_POLICY_BINDING.route).toBe('opencode-go');
-    expect(DEVELOPER_LIVE_POLICY_BINDING.model).toBe('deepseek-v4-flash');
+    expect(DEVELOPER_LIVE_POLICY_BINDING.model).toBe('deepseek-v4.1-flash');
     expect(DEVELOPER_LIVE_POLICY_BINDING.endpoint).toBe('https://opencode.ai/zen/go/v1/chat/completions');
     expect(DEVELOPER_LIVE_POLICY_BINDING.credentialSlot).toBe('opencode-go');
     // ADR 0070 as ADR 0079 §2.3 lands it: 30,000 tokens per frozen unit, never the flat 500,000.
@@ -150,7 +150,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(projection.integrityState).toBe('verified');
     expect(projection.denialReason).toBeNull();
     expect(projection.operationalScope).toBe('development-ci');
-    expect(projection.activePolicySetVersion).toBe('v5');
+    expect(projection.activePolicySetVersion).toBe('v7');
     expect(projection.providerProcessing.version).toBe('v1');
     expect(projection.providerProcessing.label).toBe('开发与持续集成：零次实时传输');
     expect(projection.externalExport.version).toBe('v2');
@@ -158,16 +158,16 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(await resolveSourceCheckoutLaunchPolicy(codeRoot, 'development-ci')).toEqual(projection);
   });
 
-  it('binds the developer-live scope to Provider Processing v5 as eligible-only with the three named suboperations', async () => {
+  it('binds the developer-live scope to Provider Processing v9 as eligible-only with the three named suboperations', async () => {
     await placeValidCheckout();
     const projection = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'developer-live');
 
     expect(projection.integrityState).toBe('verified');
     expect(projection.denialReason).toBeNull();
     expect(projection.operationalScope).toBe('developer-live');
-    expect(projection.activePolicySetVersion).toBe('v5');
+    expect(projection.activePolicySetVersion).toBe('v7');
     expect(projection.providerProcessing).toEqual({
-      version: 'v5',
+      version: 'v9',
       decision: 'eligible-only',
       authorizedLiveTransmissionCount: 'bounded-by-run',
       liveTransmissionAllowed: true,
@@ -286,7 +286,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
 
   it('denies a developer-live launch whose v5 policy bytes drifted, while development-ci still verifies', async () => {
     await placeValidCheckout();
-    const target = join(codeRoot, 'docs', 'policies', 'provider-processing-policy.v5.json');
+    const target = join(codeRoot, 'docs', 'policies', 'provider-processing-policy.v9.json');
     await writeFile(target, `${await readFile(target, 'utf8')}\n`);
 
     const live = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'developer-live');

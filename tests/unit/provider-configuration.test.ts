@@ -24,6 +24,7 @@ import { DEEPSEEK_ROUTE, OPENCODE_GO_ROUTE, type RemoteExecutionRoute } from '..
 import {
   DEEPSEEK_V4_PRO_PROFILE,
   OPENCODE_GO_V4_FLASH_PROFILE,
+  OPENCODE_GO_V41_FLASH_PROFILE,
   PROVIDER_MODEL_PROFILES,
   modelProfileFor,
   type ProviderModelProfile,
@@ -523,7 +524,7 @@ describe('the generated configuration (ADR 0073 §3, §4)', () => {
     expect(DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE).toBe('a7c0de00-5040-4f27-9e13-6b1f2c8d4a55');
   });
 
-  it('moves the two bound routes into configuration without moving a byte of either', () => {
+  it('retains official and historical profile bytes while binding the exact V4.1 profile', () => {
     // The route profiles exactly as they were hand-written before Issue #435, plus the two fields it adds.
     expect(DEEPSEEK_ROUTE_PROFILE).toEqual({
       route: 'deepseek-open-platform', endpoint: 'https://api.deepseek.com/chat/completions', credentialSlot: 'deepseek-api-key',
@@ -544,14 +545,14 @@ describe('the generated configuration (ADR 0073 §3, §4)', () => {
     expect(OPENCODE_GO_ROUTE_PROFILE.route).toBe(DEVELOPER_LIVE_POLICY_BINDING.route);
     expect(OPENCODE_GO_ROUTE_PROFILE.endpoint).toBe(DEVELOPER_LIVE_POLICY_BINDING.endpoint);
     expect(OPENCODE_GO_ROUTE_PROFILE.credentialSlot).toBe(DEVELOPER_LIVE_POLICY_BINDING.credentialSlot);
-    expect(modelProfileFor(DEVELOPER_LIVE_POLICY_BINDING.route, DEVELOPER_LIVE_POLICY_BINDING.model)).toBe(OPENCODE_GO_V4_FLASH_PROFILE);
+    expect(modelProfileFor(DEVELOPER_LIVE_POLICY_BINDING.route, DEVELOPER_LIVE_POLICY_BINDING.model)).toBe(OPENCODE_GO_V41_FLASH_PROFILE);
     expect(DEEPSEEK_V4_PRO_PROFILE.context).toEqual({ tokens: 1_000_000, evidence: expect.objectContaining({ kind: 'vendor-documentation', readOn: '2026-09-10' }) });
     expect(OPENCODE_GO_V4_FLASH_PROFILE.context).toEqual({ tokens: null, evidence: { kind: 'unverified' } });
   });
 
-  it('declares every configured model inert except the two active ones, and no configured route bindable', () => {
+  it('declares every other configured model inert beside the three readable profiles, and no configured route bindable', () => {
     for (const profile of Object.values(PROVIDER_MODEL_PROFILES)) {
-      if (profile === DEEPSEEK_V4_PRO_PROFILE || profile === OPENCODE_GO_V4_FLASH_PROFILE) continue;
+      if (profile === DEEPSEEK_V4_PRO_PROFILE || profile === OPENCODE_GO_V4_FLASH_PROFILE || profile === OPENCODE_GO_V41_FLASH_PROFILE) continue;
       // A declared format is a claim about the request shape and nothing else (ADR 0073 §3).
       expect(profile.capabilities.answerChannel, profile.key).toBe('none');
       expect(profile.capabilities.reasoningChannel, profile.key).toBe('none');

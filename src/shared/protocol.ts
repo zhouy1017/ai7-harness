@@ -1812,14 +1812,12 @@ export interface ModelServiceConnectionProjection {
  */
 export type TrustedOperationalScope = 'development-ci' | 'developer-live';
 /**
- * The `developer-live` Provider Processing versions a pin may name: v5, selected by active-policy-set v5, and v8, the
- * platform-tools successor that will carry the dialogue rule too (ADR 0088 §3, Issue #473). v8 is admitted by the type so
- * that its selection (S87-f3b, an Owner byte review) moves no union; nothing selects it, and every persisted row says v5.
- * v7 is reviewed history that no active set will select.
+ * Historical v5 and reserved web successor v8 remain readable identities; selected v9 is the
+ * baseline-only V4.1 successor. A type member does not select or activate a policy.
  */
-export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8';
-/** The active policy set versions a pin may name: v5, selected, and its successor v6 (S87-f3b), selected by nothing yet. */
-export type ActivePolicySetVersion = 'v5' | 'v6';
+export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9';
+/** Historical v5, reserved web v6, and selected baseline-only v7. */
+export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7';
 export type ProviderProcessingVersion = 'v1' | DeveloperLiveProviderProcessingVersion;
 /** Exact Run Budget Ceiling state: `unset` under development-ci, an explicit total-token ceiling under developer-live. */
 export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: number };
@@ -2016,20 +2014,20 @@ export interface LaunchPolicyProjection {
     liveTransmissionAllowed: boolean;
     /**
      * Whether the active Provider Processing policy names the cross-unit reduction's transmission
-     * (ADR 0066). Optional so a denial can carry the same reading; under the verified v5 document it
+     * (ADR 0066). Optional so a denial can carry the same reading; under the verified v9 document it
      * is `true`, and anything else — absent included — means the reduction does not dispatch.
      */
     crossUnitReductionAllowed?: boolean;
     /**
      * Whether the active Provider Processing policy names the assurance sampling suboperation's
-     * transmissions (ADR 0066). Read exactly as `crossUnitReductionAllowed` is: under the verified v5
+     * transmissions (ADR 0066). Read exactly as `crossUnitReductionAllowed` is: under the verified v9
      * document it is `true`; anything else — absent included — means the suboperation does not
      * dispatch at all.
      */
     assuranceSamplingAllowed?: boolean;
     /**
      * Whether the active Provider Processing policy names the Run Report's reflection turn (ADR
-     * 0066 §Run Report). Read exactly as the two keys above are: under the verified v5 document it is
+     * 0066 §Run Report). Read exactly as the two keys above are: under the verified v9 document it is
      * `true`; anything else — absent included — means the turn does not dispatch and the report
      * records `policy-bounded` with its reason.
      */
@@ -3541,7 +3539,7 @@ export interface BaselineAnalysisProjection {
     capabilities: readonly [];
     remoteBinding: {
       providerId: RemoteProviderId;
-      modelId: 'deepseek-v4-pro' | 'deepseek-v4-flash';
+      modelId: 'deepseek-v4-pro' | 'deepseek-v4.1-flash';
       adapterRevision: 1;
       configurationRevision: 1;
       approvedFallbackChain: readonly [];
@@ -3553,7 +3551,7 @@ export interface BaselineAnalysisProjection {
     executionRoute:
       | { kind: 'ai7-local-deterministic'; model: 'ai7-deterministic-fixture'; fixtureIdentity: string; fixtureSha256: string; fixtureLineage: ReadonlyArray<{ identity: string; sha256: string }> }
       /** The developer-live route replays no fixture: its identity is the endpoint it transmits to. */
-      | { kind: 'opencode-go'; model: 'deepseek-v4-flash'; endpoint: string }
+      | { kind: 'opencode-go'; model: 'deepseek-v4.1-flash'; endpoint: string }
       | { kind: 'none'; reason: 'j04-model-adapter-control-absent' };
     outboundDataCategory: 'public-or-synthetic';
     runBudgetCeiling: RunBudgetCeilingState;

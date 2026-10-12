@@ -123,7 +123,7 @@ describe('a Task\'s range reads as its latest plan version (Issue #288 甲)', ()
       operationalScope: 'developer-live',
       live: {
         route: 'opencode-go',
-        model: 'deepseek-v4-flash',
+        model: 'deepseek-v4.1-flash',
         endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
         credentialSlot: 'opencode-go',
         credentialReference: randomUUID(),

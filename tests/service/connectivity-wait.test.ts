@@ -395,7 +395,7 @@ describe('联网后开始任务 and Connectivity Wait over the real store', () =
         operationalScope: 'developer-live',
         live: {
           route: 'opencode-go',
-          model: 'deepseek-v4-flash',
+          model: 'deepseek-v4.1-flash',
           endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
           credentialSlot: 'opencode-go',
           credentialReference: randomUUID(),

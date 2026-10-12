@@ -48,6 +48,7 @@ import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/p
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
   BASELINE_ANALYSIS_TASK_GOAL,
+  FACTUAL_REVIEW_TASK_GOAL,
   type BaselineAnalysisProjection,
   type DeveloperLiveCeiling,
   type LaunchPolicyProjection,
@@ -73,8 +74,8 @@ type Ceiling = DeveloperLiveCeiling;
 const CEILING: Ceiling = { kind: 'tokens', maxTotalTokens: 500_000 };
 /** The development validation every live Run here belongs to (Issue #808). */
 const VALIDATION: DevelopmentValidationIntent = { family: 'baseline-analysis', case: 'sample1-whole-book', delta: null };
-/** The developer-live composition digest dev pinned before the platform tools (Issue #473): zero tools, no Session log. */
-const DEV_LIVE_COMPOSITION_DIGEST = '5dee37754ddb1ee8b20c04fe76fca80afbe99d632cd36e69e601f5dc64a30d98';
+/** The V4.1 developer-live composition: zero tools, no Session log; model identity changes its digest. */
+const DEV_LIVE_COMPOSITION_DIGEST = '836ad3246198b3793d5664b53a15af8134d6fc0cdb1d0a8b62eba58f4f19bb6d';
 /** What a developer-live launch binds when the form names no ceiling: 30,000 tokens per frozen unit. */
 const POLICY_DEFAULT_CEILING: Ceiling = {
   kind: 'tokens-per-frozen-unit',
@@ -365,7 +366,28 @@ async function ledgerLines(root: string): Promise<Array<Record<string, unknown>>
 vi.setConfig({ hookTimeout: 60_000 });
 
 describe('the developer-live scope over exact sample1 with a stub transport', { timeout: 60_000 }, () => {
-  it('freezes the v5 plan and transmits the full declared chain through the gate', async () => {
+  it('refuses undispatched analysis kinds and non-direct origins before a plan or authorization is recorded', async () => {
+    const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
+    const factual = store.factualReviewLedger;
+    factual.bindLaunch(liveBinding(CEILING));
+    expect(refusalCode(() => factual.prepare({ phase: 'start', bookId,
+      goal: FACTUAL_REVIEW_TASK_GOAL, update: null, reconfirm: false, launchPolicy,
+    }))).toBe('ANALYSIS_KIND_NOT_ADMITTED');
+    expect(factual.inspect(bookId).taskIntent).toBeNull();
+    for (const origin of [
+      { kind: 'default-execution-rule', ruleVersionId: randomUUID() },
+      { kind: 'background-analysis-enrollment', enrollmentVersionId: randomUUID() },
+    ] as const) {
+      expect(refusalCode(() => store.baselineAnalysisLedger.authorize(bookId, prepared.taskIntent!.taskIntentId,
+        prepared.planEnvelope!.digest, 'now', origin))).toBe('ANALYSIS_ORIGIN_NOT_ADMITTED');
+    }
+    expect(store.inspectBaselineAnalysis(bookId).authorization).toBeNull();
+    expect(refusalCode(() => store.baselineAnalysisLedger.prepare({ phase: 'start', bookId,
+      goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false, launchPolicy,
+      background: { enrollmentVersionId: randomUUID() },
+    }))).toBe('ANALYSIS_ORIGIN_NOT_ADMITTED');
+  });
+  it('freezes the v9 plan and transmits the full declared chain through the gate', async () => {
     const calls: StubCall[] = [];
     const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
     const { units: responses, named } = await unitAnswers(prepared);
@@ -376,12 +398,12 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     const provider = settled.providerResolutionPlan!;
     expect(provider.remoteBinding).toMatchObject({
       providerId: 'opencode-go',
-      modelId: 'deepseek-v4-flash',
+      modelId: 'deepseek-v4.1-flash',
       credentialSlot: 'opencode-go',
       credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
-      providerProcessing: { operationalScope: 'developer-live', version: 'v5', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
+      providerProcessing: { operationalScope: 'developer-live', version: 'v9', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
     });
-    expect(provider.executionRoute).toEqual({ kind: 'opencode-go', model: 'deepseek-v4-flash', endpoint: OPENCODE_GO_ROUTE_PROFILE.endpoint });
+    expect(provider.executionRoute).toEqual({ kind: 'opencode-go', model: 'deepseek-v4.1-flash', endpoint: OPENCODE_GO_ROUTE_PROFILE.endpoint });
     expect(provider.runBudgetCeiling).toEqual(CEILING);
     expect(settled.planEnvelope!.providerStatus).toBe('remote-eligible-developer-live');
     expect(settled.planEnvelope!.dispatchAllowed).toBe(true);
@@ -395,12 +417,12 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
       expect(call.headers['user-agent']).toBe(OPENCODE_GO_USER_AGENT);
       expect(call.headers[OPENCODE_GO_SESSION_HEADER]).toMatch(/^[0-9a-f-]{36}$/u);
       const body = JSON.parse(call.body) as Record<string, unknown>;
-      expect(body.model).toBe('deepseek-v4-flash');
+      expect(body.model).toBe('deepseek-v4.1-flash');
       // The profile's declared constraint reaches the wire on the real path, not only at assembly.
-      expect(body.response_format).toEqual({ type: 'json_object' });
+      expect(body).not.toHaveProperty('response_format');
       expect(body).not.toHaveProperty('thinking');
       expect(body).not.toHaveProperty('reasoning_effort');
-      // Provider Processing v5's rule names no platform tools (Issue #473): no request offers the model a tool.
+      // Provider Processing v9's rule names no platform tools (Issue #473): no request offers the model a tool.
       expect(body).not.toHaveProperty('tools');
       expect(JSON.stringify(body.messages)).not.toContain('tool_calls');
       // The credential never enters the body or its digest.
@@ -420,9 +442,9 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
 
     // The revision records the live route and the v5 policy pin, through the existing real path.
     const revision = settled.resultSetRevision!;
-    expect(revision.adapterPin).toEqual({ route: 'opencode-go', model: 'deepseek-v4-flash', fixtureIdentity: null, fixtureSha256: null });
+    expect(revision.adapterPin).toEqual({ route: 'opencode-go', model: 'deepseek-v4.1-flash', fixtureIdentity: null, fixtureSha256: null });
     expect(revision.policyPin).toEqual({
-      operationalScope: 'developer-live', providerProcessingVersion: 'v5', activePolicySetVersion: 'v5', liveTransmissions: 'bounded-by-run',
+      operationalScope: 'developer-live', providerProcessingVersion: 'v9', activePolicySetVersion: 'v7', liveTransmissions: 'bounded-by-run',
     });
     // The revision counts the three revision-facing stages: eight unit turns, the reduction turn and
     // the sampling turn. The reflection turn is dispatched after the revision is persisted, so its
@@ -459,7 +481,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     // The frozen composition registers zero tools: its digest is the one every plan without platform tools pins, the
     // literal dev froze before the platform tools existed (dev@29a9831a), so a change to the tool-less body moves it.
     expect(settled.planEnvelope!.behaviorCompositionDigest).toBe(DEV_LIVE_COMPOSITION_DIGEST);
-    expect(describeComposition('opencode-go', 'deepseek-v4-flash', BASELINE_PROMPT_CONTRACT_DIGEST).digest).toBe(DEV_LIVE_COMPOSITION_DIGEST);
+    expect(describeComposition('opencode-go', 'deepseek-v4.1-flash', BASELINE_PROMPT_CONTRACT_DIGEST).digest).toBe(DEV_LIVE_COMPOSITION_DIGEST);
     await store.close();
   });
 
@@ -735,9 +757,9 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     const line = {
       itemId: 'S40/smoke/1',
       purpose: 'smoke',
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-v4.1-flash',
       promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
-      requestDigest: providerRequestDigest('{"model":"deepseek-v4-flash"}'),
+      requestDigest: providerRequestDigest('{"model":"deepseek-v4.1-flash"}'),
       outcome: 'transmitted' as const,
       status: 200,
       usage: { inputTokens: 1, outputTokens: 1 },
@@ -794,7 +816,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     expect(gaps[0]!.code).toBe('contract-invalid');
     // What an editor actually reads: what came back, and whether re-running this unit is likely to help.
     expect(gaps[0]!.reason).toBe(
-      '模型完成了推理，但没有给出答案：答案通道为空，推理通道有内容。这不是稿件或契约的问题；重新分析本单元通常会得到结果。',
+      '模型没有给出答案：答案通道与推理通道都为空。重新分析本单元可能有帮助；如反复出现，请检查模型服务状态。',
     );
     // The mislabel this replaces: an empty answer is not a model that produced something unparseable.
     expect(gaps[0]!.reason).not.toContain('不是 JSON');
@@ -1114,12 +1136,12 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
 
     // The scope, the version, the bound route, and the ceiling as the number the launch froze.
     const scopeStatement = settled.namedNonEffects.find((statement) => statement.includes('Provider Processing'))!;
-    expect(scopeStatement).toContain('developer-live · Provider Processing v5');
+    expect(scopeStatement).toContain('developer-live · Provider Processing v9');
     expect(scopeStatement).toContain('任务运行预算上限 500000 tokens');
-    expect(scopeStatement).toContain('opencode-go · deepseek-v4-flash');
-    expect(consequence).toContain('developer-live · Provider Processing v5');
+    expect(scopeStatement).toContain('opencode-go · deepseek-v4.1-flash');
+    expect(consequence).toContain('developer-live · Provider Processing v9');
     expect(consequence).toContain('任务运行预算上限 500000 tokens');
-    expect(consequence).toContain('opencode-go · deepseek-v4-flash');
+    expect(consequence).toContain('opencode-go · deepseek-v4.1-flash');
     // The transmission count an update states is the recomputed unit count, never zero.
     expect(consequence).toContain('每个重算单元形成一次实时传输并计入用量');
     // A developer-live plan always dispatches, so a blocked Run is unreachable under this scope.

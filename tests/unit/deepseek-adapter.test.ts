@@ -21,6 +21,7 @@ import {
 import {
   DEEPSEEK_V4_PRO_PROFILE,
   OPENCODE_GO_V4_FLASH_PROFILE,
+  OPENCODE_GO_V41_FLASH_PROFILE,
   OPENCODE_GO_V4_PRO_PROFILE,
   PROVIDER_MODEL_PROFILES,
   modelProfileFor,
@@ -163,7 +164,7 @@ describe('provider route generalization', () => {
   const SESSION = randomUUID();
 
   function liveRequest(): GenerateOptions {
-    return { ...request(), provider: OPENCODE_GO_ROUTE, model: OPENCODE_GO_MODEL };
+    return { ...request(), provider: OPENCODE_GO_ROUTE, model: 'deepseek-v4-flash' };
   }
 
   it('keys every remote route by how it is reached, and never by a model', () => {
@@ -213,7 +214,7 @@ describe('provider route generalization', () => {
       attribution: attributionHeaders(), promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST, sessionId: SESSION,
     }).requestDigest).toBe(OPENCODE_GO_REQUEST_DIGEST);
     // The bare Go model id: no provider prefix of any kind.
-    expect(OPENCODE_GO_MODEL).toBe('deepseek-v4-flash');
+    expect(OPENCODE_GO_MODEL).toBe('deepseek-v4.1-flash');
     expect(OPENCODE_GO_ENDPOINT).toBe('https://opencode.ai/zen/go/v1/chat/completions');
   });
 
@@ -300,6 +301,22 @@ describe('provider route generalization', () => {
 });
 
 describe('model capability profiles', () => {
+  it('declares V4.1 from its exact vendor wire contract without borrowing historical V4 capabilities', () => {
+    expect(OPENCODE_GO_V41_FLASH_PROFILE.model).toBe('deepseek-v4.1-flash');
+    expect(OPENCODE_GO_V41_FLASH_PROFILE.capabilities).toMatchObject({
+      requestShape: 'openai-chat-completions', answerChannel: 'message-content-string',
+      structuredOutput: 'none', reasoningChannel: 'none', usageAttribution: 'unknown', toolCalling: 'none',
+    });
+    expect(OPENCODE_GO_V41_FLASH_PROFILE.evidence.answerChannel.kind).toBe('vendor-documentation');
+    expect(OPENCODE_GO_V4_FLASH_PROFILE.evidence.answerChannel.kind).toBe('live-test-item');
+    const assembly = assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_V41_FLASH_PROFILE,
+      { ...request(), provider: OPENCODE_GO_ROUTE, model: OPENCODE_GO_MODEL },
+      { attribution: {}, promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST, sessionId: randomUUID() });
+    expect(JSON.parse(assembly.body)).toEqual({
+      messages: [{ content: SYSTEM, role: 'system' }, { content: UNIT, role: 'user' }],
+      model: 'deepseek-v4.1-flash', stream: false,
+    });
+  });
   /** A test-local profile: the live one with some capabilities restated, so a case may declare what no shipped profile does. */
   const shape = (capabilities: Partial<ProviderModelProfile['capabilities']>): ProviderModelProfile => ({
     ...OPENCODE_GO_V4_FLASH_PROFILE,
@@ -319,12 +336,12 @@ describe('model capability profiles', () => {
       // The same plan's `/responses` models, keyed by the third route (S54c).
       'opencode-go-responses/gpt-5.6-luna', 'opencode-go-responses/grok-4.6',
       // The OpenCode Go plan's chat-completions models, each keyed by the id the Zen table states (S54a).
-      'opencode-go/deepseek-v4-flash', 'opencode-go/deepseek-v4-flash-vision-exp', 'opencode-go/deepseek-v4-pro',
+      'opencode-go/deepseek-v4-flash', 'opencode-go/deepseek-v4-flash-vision-exp', 'opencode-go/deepseek-v4-pro', 'opencode-go/deepseek-v4.1-flash',
       'opencode-go/glm-5.1', 'opencode-go/glm-5.2', 'opencode-go/glm-5.3', 'opencode-go/glm-5.3-flash',
       'opencode-go/kimi-k2.6', 'opencode-go/kimi-k2.7-code', 'opencode-go/kimi-k3',
     ]);
     expect(modelProfileFor(DEEPSEEK_ROUTE, DEEPSEEK_MODEL)).toBe(DEEPSEEK_V4_PRO_PROFILE);
-    expect(modelProfileFor(OPENCODE_GO_ROUTE, OPENCODE_GO_MODEL)).toBe(OPENCODE_GO_V4_FLASH_PROFILE);
+    expect(modelProfileFor(OPENCODE_GO_ROUTE, OPENCODE_GO_MODEL)).toBe(OPENCODE_GO_V41_FLASH_PROFILE);
     expect(modelProfileFor(OPENCODE_GO_ROUTE, 'a-model-nobody-declared')).toBeNull();
     // The same model id, two routes, two different sets of capabilities: the reason the key is composite.
     expect(OPENCODE_GO_V4_PRO_PROFILE.model).toBe(DEEPSEEK_V4_PRO_PROFILE.model);
@@ -361,7 +378,7 @@ describe('model capability profiles', () => {
     // Exactly these two are active, and the table's size is pinned beside them so that declaring a
     // model cannot enlarge the active set: a new row arrives inert or the count moves and this fails.
     expect(Object.values(PROVIDER_MODEL_PROFILES).filter((profile) => profile.capabilities.answerChannel !== 'none'))
-      .toEqual([DEEPSEEK_V4_PRO_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE]);
+      .toEqual([DEEPSEEK_V4_PRO_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE, OPENCODE_GO_V41_FLASH_PROFILE]);
     // Every generated row is in the table once: building it dropped nothing.
     expect(Object.keys(PROVIDER_MODEL_PROFILES)).toHaveLength(GENERATED_MODEL_PROFILES.length);
   });
@@ -424,10 +441,10 @@ describe('model capability profiles', () => {
       .toEqual({ kind: 'malformed', reason: 'answer-channel-not-declared' });
   });
 
-  it('declares every model but the two active ones inert, whichever path reaches it', () => {
+  it('declares every other model inert beside official, historical V4 and current V4.1 profiles, whichever path reaches it', () => {
     // The OpenCode Go plan's rows; every other document's rows are pinned inert in provider-configuration.test.ts.
     const inert = Object.values(PROVIDER_MODEL_PROFILES)
-      .filter((profile) => profile.route.startsWith('opencode-go') && profile.key !== OPENCODE_GO_V4_FLASH_PROFILE.key);
+      .filter((profile) => profile.route.startsWith('opencode-go') && profile.key !== OPENCODE_GO_V4_FLASH_PROFILE.key && profile.key !== OPENCODE_GO_V41_FLASH_PROFILE.key);
     // #310's third model, the eight the documentation pair admitted on chat completions (S54a), the
     // five it admits on `/messages` (S54b), and the two on `/responses` (S54c).
     expect(inert).toHaveLength(16);
@@ -471,7 +488,7 @@ describe('model capability profiles', () => {
     const live = { ...request(), provider: OPENCODE_GO_ROUTE, model: OPENCODE_GO_MODEL };
     const flash = assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE, live, context);
     const inert = Object.values(PROVIDER_MODEL_PROFILES)
-      .filter((profile) => profile.route === OPENCODE_GO_ROUTE && profile.key !== OPENCODE_GO_V4_FLASH_PROFILE.key);
+      .filter((profile) => profile.route === OPENCODE_GO_ROUTE && profile.key !== OPENCODE_GO_V4_FLASH_PROFILE.key && profile.key !== OPENCODE_GO_V41_FLASH_PROFILE.key);
     expect(inert).toHaveLength(9);
 
     for (const profile of inert) {

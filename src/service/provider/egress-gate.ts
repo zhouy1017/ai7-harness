@@ -25,7 +25,7 @@ export const LOCAL_DETERMINISTIC_ROUTE = 'ai7-local-deterministic' as const;
 export const LOCAL_DETERMINISTIC_MODEL = 'ai7-deterministic-fixture' as const;
 /*
  * The two bindings this gate admits today: the production connection's pair and Provider Processing
- * v5's developer-live pair. Which pairs are bindable is the policy's statement, not the provider
+ * v9's developer-live pair. Which pairs are bindable is the policy's statement, not the provider
  * documents' (ADR 0073 §3), and moving these four from source constants to a read of the policy's
  * pinned binding is #452's gate share (S87-f3b). Until then each route is checked against the
  * configured set, so a document that renamed or dropped one fails `check` here instead of leaving a
@@ -33,9 +33,9 @@ export const LOCAL_DETERMINISTIC_MODEL = 'ai7-deterministic-fixture' as const;
  */
 export const DEEPSEEK_ROUTE = 'deepseek-open-platform' as const satisfies ConfiguredRouteId;
 export const DEEPSEEK_MODEL = 'deepseek-v4-pro' as const;
-/** The developer-live route of Provider Processing v5 (ADR 0065, ADR 0067): OpenCode Go with the bare model id. */
+/** The developer-live route of Provider Processing v9 (ADR 0065, ADR 0067): OpenCode Go with the bare model id. */
 export const OPENCODE_GO_ROUTE = 'opencode-go' as const satisfies ConfiguredRouteId;
-export const OPENCODE_GO_MODEL = 'deepseek-v4-flash' as const;
+export const OPENCODE_GO_MODEL = 'deepseek-v4.1-flash' as const;
 
 /**
  * Every route a Provider Resolution Plan may bind. No configured route beyond these two is here —
@@ -56,10 +56,8 @@ export type RemoteExecutionRoute = ConfiguredRouteId;
 export type CredentialSlot = ConfiguredCredentialSlot;
 
 /**
- * The trusted scope's Provider Processing pin, as the gate sees it. v1 denies every remote route; v5
- * admits exactly one, and only while the Run's own bounds still hold. `v8` is the `developer-live`
- * successor the platform-tools revision will be (S87-f3b, Issue #473): admitted by the type so that
- * its selection moves no gate code, and selected by nothing today.
+ * The trusted scope's Provider Processing pin: selected v9 admits baseline-only V4.1.
+ * Historical v5 and reserved web v8 are readable identities, not launch selections.
  */
 export type EgressPolicyPin =
   | {
@@ -70,14 +68,14 @@ export type EgressPolicyPin =
     }
   | {
       readonly operationalScope: 'developer-live';
-      readonly providerProcessingVersion: 'v5' | 'v8';
+      readonly providerProcessingVersion: 'v5' | 'v8' | 'v9';
       readonly liveTransmissionAllowed: true;
       readonly authorizedLiveTransmissionCount: 'bounded-by-run';
     };
 
 /**
  * The Run Budget Ceiling as the gate must see it immediately before a transmission: `unset` is a
- * refusal under v5, because Provider Processing v5 requires a non-`unset` ceiling, and `reached`
+ * refusal under v9, because Provider Processing v9 requires a non-`unset` ceiling, and `reached`
  * refuses because the Run has spent its bound.
  */
 export type EgressCeilingState = 'unset' | 'within' | 'reached';
@@ -101,7 +99,7 @@ export interface EgressBindingFacts {
   readonly admittedUserMessages: ReadonlySet<string>;
   /**
    * The platform tools the binding's Provider Processing rule names (ADR 0080 §7.5), read from the rule by
-   * `readPlatformToolsRule`; absent or `null` when the rule names none — as Provider Processing v5's one rule names none —
+   * `readPlatformToolsRule`; absent or `null` when the rule names none — as Provider Processing v9's one rule names none —
    * and then every tool, tool call, tool result, search call, and fetch is refused exactly as before.
    */
   readonly platformTools?: PlatformToolsRule | null;
@@ -228,7 +226,7 @@ export class EgressTicketBook {
 
   /**
    * Open the ticket book of one attempt: for this binding, whose rule must name the platform tools under developer-live, and
-   * this scope, whose current binding every redemption re-reads. Under Provider Processing v5 no rule names them, so no
+   * this scope, whose current binding every redemption re-reads. Under Provider Processing v9 no rule names them, so no
    * book can be opened at all.
    */
   static open(binding: EgressBindingFacts, scope: Pick<EgressAttemptScope, 'currentBindingDigest'>): EgressTicketBook {
@@ -390,7 +388,7 @@ export function evaluateEgress(
   if (payload.provider !== binding.route) return refuse('route-mismatch', '请求路由与执行绑定不一致；未发送任何内容。');
   if (payload.model !== binding.model) return refuse('model-mismatch', '请求模型与执行绑定不一致；未发送任何内容。');
   // ADR 0080 §7.2: a payload may expose tools only when its tool set equals exactly the platform tools the binding's rule
-  // names. A rule that names none — Provider Processing v5's — matches no tool set, so every tool is refused as before.
+  // names. A rule that names none — Provider Processing v9's — matches no tool set, so every tool is refused as before.
   const rule = platformToolsOf(binding);
   if (payload.tools !== undefined && payload.tools.length > 0 && !toolSetEqualsRule(payload.tools, rule)) {
     return refuse('tools-present', '组合运行时向模型暴露了规则未命名的工具；未发送任何内容。');
@@ -438,11 +436,11 @@ export function evaluateEgress(
   if (binding.policy.operationalScope === 'development-ci') {
     return refuse('remote-route-denied-under-v1', 'development-ci · Provider Processing v1 允许 0 次实时传输；未发送任何内容。');
   }
-  // Under v5 the ceiling is a precondition of the decision itself, evaluated here from accumulated
+  // Under v9 the ceiling is a precondition of the decision itself, evaluated here from accumulated
   // usage, so no dispatch can precede it and no ceiling state can be assumed from an earlier turn.
   const ceiling = scope.ceilingState?.() ?? 'unset';
   if (ceiling === 'unset') {
-    return refuse('run-budget-ceiling-unset', 'Provider Processing v5 要求非 unset 的任务运行预算上限；未发送任何内容。');
+    return refuse('run-budget-ceiling-unset', 'Provider Processing v9 要求非 unset 的任务运行预算上限；未发送任何内容。');
   }
   if (ceiling === 'reached') {
     return refuse('run-budget-ceiling-reached', '任务运行预算上限已达到；未发送任何内容。');

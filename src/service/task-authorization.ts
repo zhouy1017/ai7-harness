@@ -1382,7 +1382,7 @@ function transact<T>(db: DatabaseSync, body: () => T): T {
  */
 const PROVIDER_PROCESSING_PINS: Readonly<Record<TrustedOperationalScope, ProviderProcessingPin>> = {
   'development-ci': { operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0 },
-  'developer-live': { operationalScope: 'developer-live', version: 'v5', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
+  'developer-live': { operationalScope: 'developer-live', version: 'v9', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
 };
 
 /**
@@ -1395,7 +1395,10 @@ function providerProcessingPinOf(value: unknown): ProviderProcessingPin | null {
   const scope = (value as { operationalScope?: unknown }).operationalScope;
   if (typeof scope !== 'string' || !isTrustedOperationalScope(scope)) return null;
   const pin = PROVIDER_PROCESSING_PINS[scope];
-  return canonicalJson(value) === canonicalJson(pin) ? pin : null;
+  if (canonicalJson(value) === canonicalJson(pin)) return pin;
+  // Retained records keep their original immutable policy identity; only new plans use the current pin.
+  const predecessor: ProviderProcessingPin = { operationalScope: 'developer-live', version: 'v5', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' };
+  return scope === 'developer-live' && canonicalJson(value) === canonicalJson(predecessor) ? predecessor : null;
 }
 
 /**
@@ -2738,7 +2741,7 @@ export class TaskAuthorizationStore {
 
   #requireDeniedPolicy(policy: LaunchPolicyProjection): void {
     requireTask(policy.integrityState === 'verified' && policy.denialReason === null &&
-      policy.operationalScope === 'development-ci' && policy.activePolicySetVersion === 'v5' &&
+      policy.operationalScope === 'development-ci' && policy.activePolicySetVersion === 'v7' &&
       policy.providerProcessing.version === 'v1' && policy.providerProcessing.decision === 'deny' &&
       policy.providerProcessing.authorizedLiveTransmissionCount === 0 &&
       policy.providerProcessing.liveTransmissionAllowed === false,
