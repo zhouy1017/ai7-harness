@@ -7,7 +7,9 @@
 | Original path | `PROGRESS.md`, `HANDOFF.md` |
 | Final status | superseded |
 | Reason | `HANDOFF.md` was removed as a root router; `PROGRESS.md` was replaced by the value-first status and routing text. The old S-series order, the recording-deferral wording, and the follow-up candidate list are preserved here. |
-| Current replacement | Root `PROGRESS.md`; `docs/development/development-plan.md`; ADR 0064. |
+| Current replacement | [PROGRESS](../../../PROGRESS.md) and [Orca dispatch](../../agents/orca-dispatch.md) own current routing and operation. |
 | Retrieval condition | A Commander needs the pre-reorganization follow-up candidate list, the exact wording of the 2026-09-06 recording decisions, or the old resume prompt. |
 
 The Issue #28 PRD body was moved to `docs/prd/ai7-v2-prd.md` with its stale implementation paragraphs removed; the Issue keeps a pointer body. The README Journey narratives moved to `docs/development/e2e-journeys.md`. Neither move needs a snapshot here because Git history and the destination files carry the text.
+
+Snapshot bodies have been retired under [ADR 0089](../../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). Use Git history for the original wording; current operation follows [Orca dispatch](../../agents/orca-dispatch.md).

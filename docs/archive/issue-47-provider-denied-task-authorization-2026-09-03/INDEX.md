@@ -7,5 +7,5 @@
 | Original path | Root `PROGRESS.md` at exact base `dev@eabde83728cfa142b6085222cd2f2ad283f53e5e`; outgoing root `HANDOFF.md` is retained in Git history only. |
 | Final status | consumed |
 | Reason | Issue #47 is integrated and its live conclusion now routes to the authorized in-place Issue #91 refresh, so the outgoing checkpoint must no longer guide current work. |
-| Current replacement | Current [root PROGRESS](../../../PROGRESS.md), [root HANDOFF](../../../HANDOFF.md), [ADR 0055](../../adr/0055-stage-the-bounded-provider-free-j-03-authorization-journey.md), and [Issue #91](https://github.com/zhouy1017/ai7-harness/issues/91). |
+| Current replacement | [PROGRESS](../../../PROGRESS.md) and [Orca dispatch](../../agents/orca-dispatch.md) own current routing and operation. |
 | Retrieval condition | Read this node only if Issue #91 or a later authorized lifecycle task must reconstruct the exact pre-integration J-03 closure checkpoint and current authority, Issue, PR, and Git history are insufficient. |

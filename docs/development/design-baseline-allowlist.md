@@ -302,7 +302,7 @@ Reason: their fixed-base forms remain current root-owned product/domain decision
 
 The accepted source files intentionally differ from their frozen blobs only in these bounded semantic categories:
 
-1. **Development-line governance:** preserve Issue #18's `dev` integration target, protected `main` promotion line, Commander-only integration/external actions, and frozen-source-only `design-doc` role across `AGENTS.md`, Git/design/dispatch runbooks, `HANDOFF.md`, and `PROGRESS.md`.
+1. **Development-line governance:** preserve Issue #18's `dev` integration target, protected `main` promotion line and frozen-source-only `design-doc` role. The former role/external-action rules have been removed under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md); [Orca dispatch](../agents/orca-dispatch.md) is the current owner.
 2. **Authority promotion and routing:** mark the V2 architecture/UI packages as the accepted `dev` baseline; promote the two architecture ADRs to root 0041/0042; absorb local glossary/Execution semantics into root owners; remove active routes into excluded trees.
 3. **Current verification boundary:** retain product behavior but supersede Windows-only, two-workflow, request-fingerprint, replay/package/performance/editor-sufficiency, private-sample, formal-review, and other separate proof programmes with the one logical provider-free complete-journey E2E boundary on Windows and macOS.
 4. **Current implementation route:** replace “UI not started” and frozen-candidate handoffs with the accepted V2 UI/UX baseline and replace the old read-only grounded-Q&A first tracer with the bounded provider-free J-01 new-Book happy path, explicitly not complete J-01.

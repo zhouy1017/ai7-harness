@@ -7,7 +7,7 @@
 | Original path | Root `PROGRESS.md` at `dev@28e541922cb14a8b0c92468b6092e30c2663c109` |
 | Final status | consumed historical evidence |
 | Reason | The testing-framework node is integrated; its outgoing working-state checkpoint no longer belongs in the active reading path. |
-| Current replacement | Root [`PROGRESS.md`](../../../PROGRESS.md) and [`HANDOFF.md`](../../../HANDOFF.md), accepted [ADR 0053](../../adr/0053-preserve-local-first-development-through-a-bounded-ci-degraded-mode.md), and the live [CI and test boundary](../../agents/ci-test-boundaries.md) |
+| Current replacement | [PROGRESS](../../../PROGRESS.md) and [Orca dispatch](../../agents/orca-dispatch.md) own current routing and operation. |
 | Retrieval condition | Read this snapshot only when reconstructing Issue #138 integration or auditing its exact pre-sweep closure state; do not use it as current instructions. |
 
 ## Preservation and disposition

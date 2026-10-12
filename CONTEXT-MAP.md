@@ -20,6 +20,9 @@ When current at such a qualifying target, Provider Processing Policy and Externa
 
 ## Successor authority routes
 
+- [ADR 0089](./docs/adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md) separates repository Orca dispatch, development-only evidence reuse and ordinary business inference, and sets the pending Go V4.1 target. The selected policy versions described above remain current runtime facts until their migration; they are not a second repository-dispatch rulebook.
+
+
 - [ADR 0045](./docs/adr/0045-preserve-native-dsh-artifacts-behind-ai7-authority-sidecars.md) preserves native DSH Skill/Plugin/Bundle/Profile/Agent Preset carriers behind AI7 provenance, compatibility, scope, authority, audit, rollback, staged activation, update, and Apply seams.
 - [ADR 0046](./docs/adr/0046-separate-provider-processing-by-operational-scope.md) owns the trusted Provider operational-scope split.
 - [ADR 0047](./docs/adr/0047-separate-targeted-retrieval-from-covered-manuscript-analysis.md) separates ranked retrieval candidates plus Exact Fetch from deterministic covered manuscript analysis and durable result sets.

@@ -14,7 +14,7 @@ On 2026-09-04 the Owner reviewed the development test process and found it inver
 
 ### Local Verification Ladder
 
-Development runs a **Local Verification Ladder** on the actual supported development host. Its layers are required developer-run surfaces, maintained with the code, and never CI or merge gates:
+Development runs a **Local Verification Ladder** on the actual supported development host. Its layers are required developer-run surfaces, maintained with the code, and do not create additional hosted gates. The final candidate records this local validation under [Orca dispatch](../agents/orca-dispatch.md):
 
 | Layer | Command | Content |
 | --- | --- | --- |
@@ -28,7 +28,7 @@ Development runs a **Local Verification Ladder** on the actual supported develop
 
 `build`, `e2e`, `e2e:all`, `e2e:diagnose`, `check`, `test`, `test:service`, `e2e:debug`, and `e2e:repeat` all exist and are available under the ladder table above. `check` and `test` landed through PR #236 (#235, `dev@abcb6989`), `e2e:debug` and `e2e:repeat` landed through PR #238 (#237, `dev@16fd4d01`), and `test:service` landed through PR #254 (#243, `dev@17402d70`).
 
-ADR 0027's exclusion list continues to govern CI and merge evidence: no unit, integration, coverage, lint, type-check, or other standing gate is added to the hosted workflow. ADR 0027's statement that the Owner accepts lower engineering rigor no longer applies to local development. vitest is the accepted local test runner and is admitted through its own dependency Issue under the exact-pin and provenance rules.
+ADR 0027's exclusion list continues to govern hosted CI: no unit, integration, coverage, lint, type-check, or other standing gate is added to the hosted workflow. ADR 0027's statement that the Owner accepts lower engineering rigor no longer applies to local development. vitest is the accepted local test runner and is admitted through its own dependency Issue under the exact-pin and provenance rules.
 
 ### Local debug fidelity
 
@@ -36,7 +36,7 @@ On the developer host, `e2e:debug` and `e2e:repeat` may emit complete errors, st
 
 ### Ready precondition and red-Gate handling
 
-A product pull request records `Local Verification Ladder` in its Change closure with the exact head, host, and the outcome of every existing layer before the Commander marks it Ready. A missing attestation blocks Ready.
+A product pull request records `Local Verification Ladder` in its Change closure with the exact head, host, and the outcome of every existing layer before the responsible integration role releases the candidate under [Orca dispatch](../agents/orca-dispatch.md). A missing attestation blocks Ready.
 
 A red Gate returns the pull request to Draft. The change is reproduced locally with `e2e:debug` and `e2e:repeat`. When a failure does not reproduce locally, the next step is reproduction in a CI-parity environment (a Windows Server 2025 virtual machine or sandbox, or a resource-constrained local run), not another diagnostic-marker Issue; marker-only changes are the last resort after that. Only a clearly external runner, network, or infrastructure transient may be rerun once without a code change, as before.
 
@@ -46,13 +46,12 @@ A new owner ships with its unit tests in the same Issue. An observed bug first r
 
 ### Model-dependent testing
 
-Model-dependent paths use two fixture tiers. Synthetic deterministic fixtures, authored by hand and covering error, budget, account-limit, and interruption shapes, are the default for tests and for CI. The Recorded Deterministic Model Fixture under [ADR 0044](./0044-use-sample1-as-compatibility-and-recording-baseline.md) is a realism anchor replayed only in the journey it was recorded for; replay asserts the assembled request digest against the fixture's prompt-contract digest so drift is detected without transmission. Recording tooling is unit-tested with synthetic raw responses before the single authorized recording. ADR 0044, Provider Processing Policy v2, and the manual recording runbook remain the recording authority; this decision adds no call, credential, or provider path.
-
+Synthetic deterministic fixtures cover application behavior, errors, budgets, account limits and interruptions without a Provider. Recorded fixtures add labeled real-output regression evidence under [ADR 0067](./0067-authorize-the-opencode-go-development-credential-with-live-once-testing.md) and [ADR 0089](./0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). A recorded fixture preserves its original model, contract and capture identity; replay is neither a new live call nor current model-quality evidence. Exact requests may reuse saved responses; similar development questions reuse fixtures and evidence without substituting another actual input's answer. Tooling and ordinary regression use synthetic or recorded material without credentials; CI remains provider-free.
 ## Rejected alternatives and consequences
 
 - **Keep the E2E-only surface and add more diagnostic markers.** Rejected: markers cannot replace a reproducible local loop, and the last five marker Issues did not find a cause.
-- **Make unit or integration tests a hosted gate.** Rejected: the Owner wants CI as the delivery gate only; local surfaces are required but not merge evidence.
+- **Make unit or integration tests a hosted gate.** Rejected: the Owner wants CI as the delivery gate only; local validation remains required and is recorded separately from hosted Gate evidence.
 - **Run the Gate only before `dev` → `main` promotion, or only on macOS.** Rejected: macOS regressions would surface late, and the Windows Server runner is exactly where the intermittent failure appears.
 - **Keep payload-safe-only output on the developer host.** Rejected: the redaction protects CI logs and artifacts, not the developer's own machine over public inputs.
 
-ADR 0027's Gate identity, provider-free and network-denied interval, platform parity, failure semantics, and CI exclusion list are unchanged. ADR 0049's Draft-first, Ready-only, one-occurrence cadence and ADR 0053's three verification states remain; Local diagnostic now includes the full-fidelity local debug artifacts described above. Repository-development dispatch, receipts, and every product-runtime authority are unaffected. The detailed rules live in [`docs/agents/ci-test-boundaries.md`](../agents/ci-test-boundaries.md).
+ADR 0027's Gate identity, provider-free and network-denied interval, platform parity, failure semantics, and CI exclusion list are unchanged. The current cadence follows ADRs 0075 and 0081; ADR 0053’s three verification states remain; Local diagnostic now includes the full-fidelity local debug artifacts described above. Repository-development dispatch and candidate release follow ADR 0089; product-runtime authority is unchanged. The detailed rules live in [`docs/agents/ci-test-boundaries.md`](../agents/ci-test-boundaries.md).

@@ -1,27 +1,19 @@
-# Development Lines
+# Development lines
 
-Status: **Owner-authorized repository-development governance**
+These lines govern repository development, not AI7 product workflow state. [Orca dispatch](orca-dispatch.md) owns wave/slice construction and role permissions; [Git conventions](git-conventions.md) owns Git formatting and release boundaries.
 
-## Scope
+| Line | Role |
+| --- | --- |
+| `dev` | Canonical development integration line and GitHub default branch; changes enter through the final integration PR. |
+| `codex/integration-<wave>` | Temporary cumulative integration branch defined by Orca dispatch; a wave is candidate work until it reaches dev. |
+| `codex/<issue>-<slug>` | Issue-bound slice branch targeting its assigned wave. |
+| `main` | Protected release-promotion line, reached only under separate exact Owner authorization. |
+| `design-doc@6895f02d2983865516d267809d8cdda77026f62c` | Frozen allowlist provenance, never an integration target. |
 
-These lines govern repository development only. They are not AI7 product-domain vocabulary, product workflow state, or shipped runtime behavior. The Git rules in [Git conventions](./git-conventions.md) and the role rules in [Repository development dispatch](../../kick-in/27-repository-development-dispatch.md) apply to them.
+## Repository protection
 
-## Authorized lines
-
-| Line | Role | Rule |
-| --- | --- | --- |
-| `dev` | Long-lived development integration line | Start task branches from current `dev`; target their pull requests to `dev`. It is the GitHub default branch for development work. |
-| `main` | Protected stable and release-promotion line | No task branch or pull request targets `main` without a separate, exact Owner authorization for that promotion. |
-| `design-doc@6895f02d2983865516d267809d8cdda77026f62c` | Frozen allowlist source | It is evidence for the allowlist only, never a mechanically mergeable development line. |
-
-## Current repository facts
-
-- `origin/dev` was created at `c8cbe26c4cccc4a912b3bbc05bd5b23fbf5468b9`.
-- GitHub's default branch is `dev`.
-- Both `main` and `dev` are PR-only protected lines: administrator enforcement is on, mandatory approvals are zero, linear history is required, and force pushes and deletion are disabled.
-
-These facts record the Owner-authorized state as performed by the Commander. They do not authorize a Worker to change repository settings, create pull requests, merge, push, or take other external actions.
+The recorded protection of `dev` and `main` is PR-only, administrator-enforced, linear-history required, with zero mandatory GitHub approvals and force pushes/deletion disabled. Verify actual settings when a task depends on them; recording these facts does not authorize changing repository settings. The project review requirement is owned by Orca dispatch independently of GitHub's approval count.
 
 ## Promotion boundary
 
-Ordinary task integration ends at `dev`. A future `dev` to `main` promotion is a separate Owner decision with its own exact authorization; it is not implied by task completion, a green gate, review, or a release intention.
+Development integration ends at `dev`. A green check, completed wave, review or release intention does not authorize promotion to `main`, tagging, packaging or publication. Those actions need their own exact Owner scope.

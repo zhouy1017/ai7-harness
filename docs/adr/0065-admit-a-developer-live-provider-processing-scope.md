@@ -1,40 +1,22 @@
 ---
-status: accepted
+status: accepted — development operations amended by ADRs 0070 and 0089
 ---
-
-> Amended by [ADR 0088](./0088-carry-the-editorial-dialogue-under-developer-live.md): the scope also carries one user-initiated editorial dialogue turn, without a Plan Envelope, Run Authorization or Run Budget Ceiling, on the terms that record states; its rule lands in the platform-tools revision of S87-f3. The Inputs clause below is a development and testing rule — `ordinary-production` transmits the editor's own manuscripts under its own policy — and a tester's edits of `sample1` may be sent.
 
 # Admit a developer-live Provider Processing scope
 
-On 2026-09-06 the Owner decided that prompt contracts and the analysis pipeline must be tuned on real model output before any recording, and that the existing `fixture-recording` scope is the wrong instrument for that purpose: it exists to freeze one reviewed fixture, it allows one call, and every contract change invalidates what it recorded. This decision extends [ADR 0046](./0046-separate-provider-processing-by-operational-scope.md) with a fourth trusted operational scope. It changes no production default, no Model Role binding outside the development interval, and none of the recording rules of [ADR 0044](./0044-use-sample1-as-compatibility-and-recording-baseline.md).
+`developer-live` separates necessary real-model development from provider-free CI and ordinary product use. [ADR 0089](./0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md) and [Orca dispatch](../agents/orca-dispatch.md) own repository execution and the new delivery order. [ADR 0067](./0067-authorize-the-opencode-go-development-credential-with-live-once-testing.md) owns development-test reuse and the credential boundary.
 
-## Decision
+## Effective scope rules
 
-A new trusted operational scope, **`developer-live`**, maps to immutable **Provider Processing Policy v4**. Its rules:
+- A trusted developer-host launch selects the scope. Necessary tests may be run autonomously within the Owner's authorized rules, existing product Run budget semantics and subscription limits; no per-call attendance or fresh batch approval is required. CI, hosted execution and background test guests stay provider-free.
+- Development uses only admitted Public SampleBooks, including permitted tester edits of `sample1`. Private user manuscripts remain outside development tests and captures.
+- Each planned Run retains its exact Plan Envelope, Run Authorization, declared transmissions and explicit Run Budget Ceiling. The dialogue exception remains [ADR 0088](./0088-carry-the-editorial-dialogue-under-developer-live.md). Repository authorization does not bypass a product authority seam.
+- Credentials enter the Protected Secret Store through the enrollment helper and leave the Credential Broker only against the bound remote-transmission ticket. Agents never read or expose key values.
+- The existing host-local Provider Test Ledger and Provider Result Cache, outside every repository, retain authorized captures. Raw bytes never enter logs, hosted artifacts or Git. Reviewed fixture generation carries only admitted, sanitized deterministic material into the repository.
+- Development reuse is separate from ordinary production: each new user Task is processed according to its own current input and product authority. A cached development result is never substituted for the user's new manuscript or question.
 
-- **Human-attended, developer host only.** The scope binds only through a trusted launch form on a developer host, never through a product setting, environment variable, Provider, artifact, Plugin, or fallback. CI, the E2E Gate, and every hosted execution stay on `development-ci` / v1.
-- **Origin.** Live transmission is eligible only for a newly user-initiated Task under standard Run Authorization. No Default Execution Rule, Background Analysis Enrollment, idle, scheduled, import-triggered, or cross-Run dispatch is eligible.
-- **Bounded transmissions.** A Run's transmission count is bounded by its frozen Coverage Manifest unit count plus the declared `safe-retry` adaptations of its Plan Envelope. One technical Session per Analysis Unit; the accumulating single-session composition is not used under this scope.
-- **Hard ceiling.** The Plan Envelope must bind an explicit Run Budget Ceiling; `unset` is refused. The development default is 500,000 total tokens. Reaching it ends the Run with the existing `Run Budget Ceiling Reached` outcome.
-- **Inputs.** Only admitted Public SampleBooks under [ADR 0043](./0043-allow-public-samplebooks-in-repository-and-ci.md) may be transmitted. Private manuscripts stay prohibited in every development scope.
-- **No fixture, no upload, one capture.** The scope emits no fixture by itself. Its only capture is the Provider Result Cache of [ADR 0067](./0067-authorize-the-opencode-go-development-credential-with-live-once-testing.md) in protected local staging outside every repository working tree; raw request and response bytes are never logged, uploaded, or committed, and reach the repository only through the S41 fixture-generation tool with human review.
-- **Credential.** The value is entered only through the product's Protected Secret Store and released by the Credential Broker against a `transmit-remote` ticket for the bound Run. It never appears in a chat, prompt, Issue, log, diagnostic, or repository file.
-- **Development-interval binding.** Under this scope the Main Editorial Role binds `deepseek-v4-flash`, by default through the `opencode-go` route with the Owner's OpenCode Go credential ([ADR 0067](./0067-authorize-the-opencode-go-development-credential-with-live-once-testing.md)). [ADR 0041](./0041-dsh-first-deepseek-primary-architecture.md)'s production defaults are unchanged; the production `ordinary-production` scope keeps V4 Pro High on the `deepseek-open-platform` route.
+## Runtime migration boundary
 
-The Egress Gate returns `transmit-remote` under v4 only when the assembled payload matches the immutable Execution Binding, the Run Source Scope, the manifest unit message set, and the ceiling state; everything else refuses as today.
+The source-checkout runtime still selects active-policy-set v5, whose `developer-live` pin is Provider Processing v5 with `opencode-go/deepseek-v4-flash`. The initial v4 policy and its later immutable successors remain unchanged bytes. ADR 0089 targets configurable OpenCode Go `deepseek-v4.1-flash` for the first real product chain while preserving the official DeepSeek adapter. Updating the model declaration, policy selection, launch binding and generated projection is a P0 implementation change; this documentation does not make that runtime migration or ordinary-production launch selectable.
 
-## Purpose and boundary
-
-The scope exists to learn what the Baseline Manuscript Analysis Contract, the cross-unit reduction contract, and the factual-verification prompts actually produce on `sample1`, and to generate deterministic fixtures from real output through tooling. It produces no CI evidence, no product-eligibility claim, and no Recorded Deterministic Model Fixture. ADR 0044's human-attended recording remains the route to a reviewed fixture and stays deferred until the contracts stabilize.
-
-## Consequences
-
-- Provider Processing v4, its schema, its human projection, and active-policy-set v4 enter through one implementation slice (plan slice S40) together with the trusted launch form, the launch-policy pins, the per-unit Session composition, ceiling enforcement, and the gate decision. Until that slice integrates, no live route exists.
-- The launch policy code, the Egress Gate, the DeepSeek adapter, the three runner pins, and the ledger CHECKs that hard-code `deepseek-v4-pro` change inside that slice for the development interval only.
-- Development runs under this scope are the cheapest way to obtain the quality evidence the prompt-only practice obtained; they cost model usage, which the ceiling bounds.
-
-## Rejected alternatives
-
-- **Use `fixture-recording` v2 for tuning.** Rejected: one call per authorization, mandatory fixture emission, and normalization/review obligations make every tuning iteration a recording ceremony.
-- **Widen `development-ci` v1.** Rejected: CI and the Gate must stay provider-free and network-denied.
-- **Tune with hand-written fixtures.** Rejected: a fixture the developer wrote cannot tell the developer what the model does.
+[ADR 0070](./0070-run-developer-live-unattended-and-size-the-ceiling-per-unit.md) retains the implemented per-frozen-unit ceiling calculation. Task completion and prevention of waste govern necessary validation; no new daily allowance, test-count quota or per-operation budget is created here.

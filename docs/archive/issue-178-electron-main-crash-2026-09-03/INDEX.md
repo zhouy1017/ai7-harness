@@ -7,7 +7,9 @@
 | Original path | `PROGRESS.md` |
 | Final status | consumed |
 | Reason | PR #180 integrated the accepted repair and its synchronized existing-Journey evidence; the implementation checkpoint no longer belongs in the active root reading path. |
-| Current replacement | The integrated production/E2E owners preserve the repair; root `PROGRESS.md` and `HANDOFF.md` route the separate credential-documentation sync and then Issue #176 / PR #177. |
+| Current replacement | [PROGRESS](../../../PROGRESS.md) and [Orca dispatch](../../agents/orca-dispatch.md) own current routing and operation. |
 | Retrieval condition | Read only when auditing Issue #178's pre-integration diagnosis, exact scope amendments, validation sequence, or P0 crash/teardown evidence. |
 
 The outgoing root `HANDOFF.md` is retained in Git history only. All issue-specific probes and diagnostics were removed before integration; no crash log, raw exception, credential, manuscript payload, screenshot, trace, video, workflow artifact, or other protected material entered this archive.
+
+Snapshot bodies have been retired under [ADR 0089](../../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). Use Git history for the original wording; current operation follows [Orca dispatch](../../agents/orca-dispatch.md).

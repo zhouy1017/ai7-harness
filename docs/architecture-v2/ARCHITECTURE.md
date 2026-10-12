@@ -4,6 +4,8 @@ Status: **frozen design reference as of `dev@4c50ce31b0f15ff2bfadd2af17fc914c317
 
 AI7 V2 is one Chinese-first desktop publishing product on Windows and macOS. Both platforms share product identity, domain and authority semantics, workflows, core features, document fidelity, data meaning, and UI/UX outcomes while native OS adapters handle platform conventions. AI7 owns the product, its business truth, and every consequential action. **DeepSeek Harness (DSH)** supplies the one generic agent loop, composed inside the AI7 Node service behind an AI7-owned boundary. **DeepSeek is the primary but not the exclusive model provider**, and every configured model—including an optional alternative frontier provider—runs through that same loop and the same AI7 provider, scope, Run Budget Ceiling, and egress boundaries.
 
+Product Model Roles remain provider-independent capability requirements. [ADR 0080](../adr/0080-assign-a-provider-route-and-model-to-every-task-that-transmits.md) owns task assignments; [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md) sets the first Go DeepSeek V4.1 Flash target with the official route retained. Current executable bindings stay in their selected configuration until #807 migrates them.
+
 Windows retains its zip-portable and NSIS distribution adapters. The selected macOS V1 adapter is macOS 15+ on Apple Silicon arm64 with bundle `io.github.zhouy1017.ai7`, delivered as a direct-download Developer ID-signed, hardened-runtime, notarized DMG and updated by manual application replacement that preserves product data. Source-checkout execution reports its actual form and performs none of those packaging or release actions.
 
 Codex is not part of the product. It remains the **Codex Interaction Model Reference**: a non-runtime interaction and engineering reference for task capture, progress, interruption, clarification, history, review, host boundaries, and extension design.
@@ -115,14 +117,8 @@ Indexing, Exact Fetch, deterministic policy evaluation, persistence, and other m
 
 Task Intents, native DSH artifacts, DSH Analysis Contracts, and AI7 services declare **Model Roles** with hard requirements and soft preferences. They never name a provider, model, endpoint, or credential. Provider Preflight resolves roles to exact bindings and freezes them in the Plan Envelope before Run Authorization.
 
-| Model Role | Default binding | Intended work |
-| --- | --- | --- |
-| Fast Interaction Role | DeepSeek V4 Flash | Quick interaction, low-risk candidate generation, and latency-sensitive assistance. |
-| Main Editorial Role | DeepSeek V4 Pro High | Chinese long-form writing, editorial proposals, cross-source synthesis, factual research, and complex instruction following. |
-| Difficult Escalation Role | DeepSeek V4 Pro Max | Difficult or unusually consequential work that exceeds the main role's expected capability. |
-| Frontier Model Role | DeepSeek V4 Pro Max | Default frontier binding for challenge or explicitly authorized high-consequence work; the user may explicitly configure another eligible provider/model without changing the one-loop topology. |
 
-These are default bindings, not factual authority. No model, DeepSeek or otherwise, becomes a source of truth: output remains a proposal or a research lead, and Factual Verification still requires admissible evidence, provenance, and Exact Fetch where applicable.
+A role or binding grants no factual authority. No model, DeepSeek or otherwise, becomes a source of truth: output remains a proposal or a research lead, and Factual Verification still requires admissible evidence, provenance, and Exact Fetch where applicable.
 
 Configuring an alternative frontier provider changes the binding inside one Provider Resolution Plan. It does not change the harness, the ledgers, the capability surface, the authority model, or the egress rules. Escalation between roles is an AI7 policy and plan decision, not something a model or a DSH default may perform for itself.
 

@@ -7,5 +7,7 @@
 | Original path | `PROGRESS.md`; `HANDOFF.md` |
 | Final status | consumed historical evidence |
 | Reason | The outgoing roots directed readers to complete and merge #43 / PR #102 after that work was already integrated. Root entry points must instead carry concise current routing. |
-| Current replacement | Root `PROGRESS.md` and `HANDOFF.md`; PRD #28 and selected Issue #45 carry the next product route. |
+| Current replacement | [PROGRESS](../../../PROGRESS.md) and [Orca dispatch](../../agents/orca-dispatch.md) own current routing and operation. |
 | Retrieval condition | Read only when a task needs the exact pre-merge #43 checkpoint or handoff as historical evidence; do not use it as current product, policy, or dispatch authority. |
+
+Snapshot bodies have been retired under [ADR 0089](../../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). Use Git history for the original wording; current operation follows [Orca dispatch](../../agents/orca-dispatch.md).

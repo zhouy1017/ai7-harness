@@ -8,12 +8,12 @@ This ADR records the Owner-approved Provider Processing correction for Issue #86
 
 ## Decision
 
-Development/CI provider-free execution, exact human-attended fixture recording and ordinary production Provider Processing use separate immutable policy selections. Trusted build/launch authority binds exactly one operational scope for a launch. An ordinary product setting, environment variable, Provider, DSH artifact or Plugin cannot select or switch scope, and cross-scope fallback is forbidden.
+Development/CI provider-free execution, protected local fixture capture and ordinary production Provider Processing use separate immutable policy selections. Trusted build/launch authority binds exactly one operational scope for a launch. An ordinary product setting, environment variable, Provider, DSH artifact or Plugin cannot select or switch scope, and cross-scope fallback is forbidden.
 
-The three selected Provider policy records are:
+The original scope selections below are immutable predecessor records. Current selected pins are described by [the policy index](../policies/README.md); ADR 0089 changes development operations and the product target without editing those bytes. The original three records were:
 
 - `development-ci` → immutable Provider Processing v1, which permits no live transmission;
-- `fixture-recording` → immutable Provider Processing v2, whose sole eligible-only rule remains exact `sample1` local human-attended recording; and
+- `fixture-recording` → immutable Provider Processing v2, the retained predecessor recording policy for exact `sample1`; current development capture follows ADRs 0067 and 0089; and
 - `ordinary-production` → new immutable Provider Processing v3 for exact production Runs.
 
 The v1/v2 policy and active-set bytes remain unchanged history. Active policy set v3 serializes the closed trusted scope-to-pin map plus unchanged External Export v1. This is a selection contract, not a runtime mode predicate inside one Provider policy, and it does not claim the executable selector exists.

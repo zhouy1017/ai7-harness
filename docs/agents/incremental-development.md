@@ -4,9 +4,9 @@ This is the binding implementation loop: add one accepted outcome to the current
 
 ## 1. Admit one bounded outcome
 
-Work starts from one plan slice in the [development plan](../development/development-plan.md), one GitHub Issue carrying the one-page [Change Brief](./change-brief.md), one branch, one pull request, and one writable Worker in a fresh Task Session. Product work states one user-visible outcome or one observed defect; documentation, dependency, and repository work states one exact decision or operational outcome. Layer-only activity ("rewrite the service", "port all tests", "clean the architecture") is not an outcome.
+Work starts from one plan slice in the [development plan](../development/development-plan.md), one GitHub Issue carrying the one-page [Change Brief](./change-brief.md), one slice branch and pull request under [Orca dispatch](orca-dispatch.md). That rulebook owns assignments, handoff, review and integration. Product work states one user-visible outcome or one observed defect; documentation, dependency, and repository work states one exact decision or operational outcome. Layer-only activity ("rewrite the service", "port all tests", "clean the architecture") is not an outcome.
 
-Before dispatch the Commander resolves design authority and action authorization. T0 ambiguity, an unaccepted dependency, or a missing Owner decision stays with the Commander or Owner. A Worker starts only after verifying its Issue and Launch Receipt.
+Before dispatch the Commander resolves design authority and action authorization. T0 ambiguity, an unaccepted dependency, or a missing Owner decision stays with the Commander or Owner. The assigned writer verifies the Issue, exact baseline and current branch ownership before editing.
 
 ## 2. Map the existing state narrowly
 
@@ -41,13 +41,15 @@ Stop and report `needs-commander` when the brief is wrong, the allowed change mu
 
 ## 6. Verify the outcome
 
-Follow [CI and test boundaries](./ci-test-boundaries.md) and [ADR 0062](../adr/0062-adopt-a-local-verification-ladder-with-ci-as-delivery-gate.md). A supported feature uses its complete Journey; an observed bug adds the smallest regression at the nearest unit or service layer, and an E2E variation only when the user-visible outcome requires it; a new owner ships with its unit tests. Before Ready, product work passes the complete Local Verification Ladder at the exact rebased head on the supported Windows host — for an agent a background test guest, under [ADR 0083](../adr/0083-run-every-agent-s-electron-journeys-on-the-background-test-guests.md) — (`doctor` → `bootstrap` → `check` → `test` → `test:service` → `build` → `e2e:all`), and the paired Windows and macOS Hosted Gate must then succeed before merge. A red Gate returns the pull request to Draft for local, then CI-parity, reproduction. A local result never becomes Gate evidence. Documentation-only work creates no automated proof task.
+Follow [CI and test boundaries](./ci-test-boundaries.md) for applicable checks, supported Journeys and guest execution. [Orca dispatch](orca-dispatch.md) owns validation of each slice candidate and the cumulative final candidate. Documentation-only work uses documentation checks; product checks stay provider-free.
 
 Research answers one named blocking question; a spike is allowed only when the current seams cannot answer it and has a stated exit and deletion disposition. Issue-specific probes are deleted before integration; full-fidelity debug output stays under ignored `test-results/` and, for a guest run, in the runner's results directories outside every repository.
 
 ## 7. Return a finished unit
 
-The Worker reports from its verified identity: launch-accepted binding, planned versus actual change, owners reused, any new owner and why, data, migration, and authority impact, Journey or bug outcome, cleanup, each ladder layer's outcome, unresolved matters, and one safe next action. No logs, proof artifacts, credentials, payloads, or private material. The Commander audits the report and branch, posts the Return Receipt, integrates serially, updates `PROGRESS.md` in the same or its own pull request, and runs the [archive sweep](./document-lifecycle.md) when a lifecycle node completes.
+Record the outcome, planned versus actual change, owners reused or added, migration and authority impact, exact checks and disclosed skips, cleanup and unresolved matters in the existing Issue/PR. [Orca dispatch](orca-dispatch.md) owns Worker-to-Reviewer handoff, Reviewer corrections and slice merge, and Commander cumulative dev integration. Report each state truthfully; a slice in a wave is not yet integrated into dev.
+
+At completion run the scoped [document lifecycle](document-lifecycle.md) sweep. Keep payloads, secrets and protected material out of reports.
 
 ## Version iteration
 

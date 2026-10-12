@@ -1,100 +1,40 @@
-# Document lifecycle and archiving
+# Document lifecycle
 
-Documentation is active working state only while it helps the current development node converge. Archiving is triggered by lifecycle completion, never by elapsed time.
+Keep current documentation focused on the active outcome and its single authority owner. [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md) requires conflicting obsolete rules to be removed from the current tree; Git preserves their history. A superseded label is not a reason to leave misleading instructions in an ordinary reading path.
 
-## Archive-triggering lifecycle nodes
+## Lifecycle triggers
 
-Run one archive sweep when:
+Run a scoped sweep when a decision integrates, an Issue/PR closes or is abandoned, a phase completes, a rule is replaced, a handoff is consumed, or a task freezes behind a unique resume entry. Individual commands and elapsed calendar time are not triggers.
 
-1. a design decision is accepted and integrated;
-2. an Issue or pull request is merged, closed, or abandoned;
-3. an implementation phase or release milestone completes;
-4. a design, plan, or rule is formally superseded;
-5. a successor task confirms it has consumed a handoff; or
-6. a long-running task freezes behind a new unique resume entry.
+## Dispositions
 
-Individual commands, minor edits, ordinary small sub-tasks, and calendar dates are not triggers. The date in an archive node name is an identifier, not a schedule.
-
-## Four dispositions
-
-### Keep current
-
-Keep stable authority owners and active entry points at stable paths:
-
-- root `AGENTS.md`, `PROGRESS.md`, `CLAUDE.md`, and `LICENSE`, plus `docs/development/development-plan.md`;
-- accepted and superseded root ADRs;
-- canonical context definitions, `CONTEXT-MAP.md`, current Policy Documents, and the root glossary index;
-- active agent runbooks;
-- the current Issue/Change Brief and supported-journey definitions; and
-- active implementation documentation that still owns current behavior.
-
-Keep the root entry concise; move detail behind task-routed links rather than duplicating it.
-
-### Archive
-
-Archive consumed working material only after its live conclusion has been promoted to a stable authority owner, explicitly rejected, or explicitly superseded. Eligible material includes:
-
-- prior `PROGRESS.md` checkpoints and replaced root handoff text;
-- consumed session/freeze handoffs;
-- candidate or superseded design packages;
-- review packets, legacy repository-local dispatch records, phase plans, issue-local analysis, and prototype notes; and
-- historical migration or verification plans that must remain available as evidence but must not guide current work.
-
-### Delete
-
-Delete disposable scratch, raw diagnostics, generated logs, temporary screenshots, failed intermediate drafts, local caches, and prototype outputs with no durable evidence value. They do not become archival clutter. Follow repository destructive-action safeguards and never delete an unclear target.
-
-After material deletion, record exactly what was removed and whether Git, trash, or another named source can recover it.
-
-### Retain externally or in Git history only
-
-Do not copy protected or unnecessary external material into the repository for archival convenience. Manuscripts, derivatives, credentials, private sample Books, provider payloads, and secrets remain prohibited. Git history may be the sufficient record for an ordinary superseded edit when no reader needs a named artifact.
-
-## Archive layout
-
-Use:
-
-```text
-docs/archive/<node-slug>-<yyyy-mm-dd>/
-├── INDEX.md
-└── <preserved files and directories>
-```
-
-The node slug names the completed outcome, not a generic “old” bucket. `docs/archive/README.md` lists nodes. Ordinary agents exclude the whole directory from default search and context assembly.
-
-Each `INDEX.md` records:
-
-| Field | Meaning |
+| Disposition | Material |
 | --- | --- |
-| Lifecycle node | The accepted/integrated/closed/superseded/consumed/frozen event that triggered the sweep |
-| Archive scope | The Issue, phase, branch, or handoff boundary inspected |
-| Original path | Where each artifact lived while active |
-| Final status | consumed, superseded, rejected, frozen-reference, or historical evidence |
-| Reason | Why it no longer belongs in the active reading path |
-| Current replacement | Stable authority or current router that now carries its live conclusion |
-| Retrieval condition | The concrete reason a future task may read it |
+| Keep current | Root routers, applicable ADR clauses, canonical contexts, current Policy Documents, active runbooks, the current Issue/brief and supported Journeys |
+| Remove; retain in Git | Conflicting superseded instructions, obsolete dispatch/model tables, replaced progress chronology, consumed routine handoffs and unnecessary duplicate working records |
+| Retain named evidence | A non-conflicting artifact needed for a specific future historical question, with current replacement and retrieval condition identified |
+| Delete disposable material | Scratch, generated logs, temporary screenshots, failed intermediate drafts and outputs with no durable evidence value |
+| Keep external | Credentials, private manuscripts/derivatives and raw Provider payloads; repository archiving is never an admission path |
 
-Archive contents preserve historical meaning. Do not edit an archived document to make it current; add clarification to the node index and change the current authority owner instead.
+A stable old path may hold a concise pointer to its current owner when links still need it. Preserve still-valid independent clauses; remove the obsolete conflicting clauses rather than copying their entire prior file to an archive. Current immutable Policy Documents remain governed by their own version/selection rules; changing prose is not changing a runtime policy pin.
 
 ## Sweep procedure
 
-1. Name the lifecycle node and exact scope. Do not launch an unbounded whole-repository cleanup from an ordinary Issue.
-2. Identify current entry points, authority owners, working documents, handoffs, scratch, and links inside that scope.
-3. Confirm every conclusion worth keeping has a current owner, or mark the source explicitly rejected/superseded.
-4. Classify each artifact as keep current, archive, delete, or external/Git-only.
-5. If there is nothing to archive or delete, record `archive sweep: none` in the existing closure record and stop. Do not create an empty archive directory or index.
-6. If material moves, place it in one node directory and write its index. Preserve original paths in the index.
-7. Replace stable root entry points with concise current versions; update ordinary links so they do not route through archives.
-8. Delete approved disposable material and report what was removed and recoverability.
-9. The Commander updates root `PROGRESS.md` when integration routing changes, inside the integrating pull request or through its own documentation pull request. When the outgoing router represents the completed, consumed, superseded, or frozen node and a named snapshot is needed, archive exactly that one node-level version. Issue receipts, pull requests, accepted decisions, and Git history carry attempt detail.
-10. Run lightweight documentation checks: local links outside archives, root wrappers/routers, archive-index completeness for moved files, and `git diff --check`. This is maintenance, not a new proof gate.
+1. Name the lifecycle event and exact Issue/phase/document scope.
+2. Identify current owners, duplicate rules, obsolete working material and affected links.
+3. Move each valid conclusion to its existing owner; identify the accepted replacement for a changed rule.
+4. Remove obsolete conflicting prose and record changed paths plus Git recoverability in the closure record.
+5. Update current links and routers. Keep historical material out of default agent reading.
+6. For a specific named evidence need, preserve only the required non-conflicting artifact and its retrieval information. If an archive node is justified, its index names the lifecycle event, original path, scope, current replacement and retrieval condition. Do not create an empty archive node.
+7. Delete only clearly identified disposable material inside the authorized scope, observing filesystem safeguards.
+8. Check local links, root wrappers and directive consistency; run `git diff --check`.
 
-## Progress and handoff rules
+Existing archive nodes are historical evidence, excluded from default search. Consult them only for a current record's named historical question. Do not rewrite archived evidence as current authority or create new full copies of obsolete conflicting rulebooks.
 
-`PROGRESS.md` is the Commander-owned integration-line router. It contains durable current status, the next plan slice, and one safe Resume Prompt, not per-attempt chronology, transient Task status, or a universal Worker/Reviewer startup packet. The Commander replaces it when the integration route changes; parallel Workers and Reviewers use their Issue, Launch/Return Receipts, and Task Session instead.
+## Progress and handoff
 
-When a Change Brief explicitly makes a root-router transition part of one atomic outcome, that Worker may edit only the authorized router paths; the edit remains an integration projection rather than the Worker's progress ledger. At a triggering node, archive at most one outgoing node-level snapshot under Sweep step 9. A task-specific historical handoff is archived only after its successor confirms consumption or the task is frozen/closed.
+[PROGRESS](../../PROGRESS.md) is the integration-line router: current status, next plan slice and one safe Resume Prompt. [Development plan](../development/development-plan.md) owns delivery order. Existing Orca task/Issue/PR records hold live attempts, writer handoff and validation evidence; [Orca dispatch](orca-dispatch.md) owns their lifecycle and role permissions.
 
-No parallel `MEMORY.md`, duplicate progress ledger, or archive-derived current-state summary is created.
+Update PROGRESS when integration routing changes. An explicitly scoped router edit belongs to the integrating change, not a separate status ledger. Remove consumed chronology from the active router and rely on Git/Issue/PR history unless a specific evidence artifact is required. Create no parallel MEMORY, progress ledger or archive-derived current-state summary.
 
-Task Session retention is separate. The Commander keeps completed Worker/Reviewer Task Sessions visible through Issue merge, close, or abandonment, leaves `needs-commander` visible, and immediately archives a `cancelled` or `superseded` Task Session after its Return Receipt. See the [Dispatch Register](dispatch-register.md); session archival creates no `docs/archive/` node.
+Workspace retention is separate from prose lifecycle. Follow Orca dispatch and the installed runtime's documented cleanup after final merge, closure or abandonment; do not delete a worktree containing needed work or treat session cleanup as a repository archive event.

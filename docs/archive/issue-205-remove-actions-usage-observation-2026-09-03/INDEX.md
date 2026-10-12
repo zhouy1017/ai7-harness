@@ -7,5 +7,7 @@
 | Original path | Root [`PROGRESS.md`](PROGRESS.md). |
 | Final status | Consumed. |
 | Reason | Issue #205's CI-governance conclusion is integrated, and its working checkpoint no longer belongs in the active routing path. |
-| Current replacement | Accepted [`ADR 0058`](../../adr/0058-remove-actions-usage-observation-from-development-gating.md) at exact `dev@9b13f25dba0c7c8b2bc7aadc511e8a39b48c7ea0`, plus current root [`PROGRESS.md`](../../../PROGRESS.md) and [`HANDOFF.md`](../../../HANDOFF.md) for the Issue #198 / Draft PR #199 route. |
+| Current replacement | [PROGRESS](../../../PROGRESS.md) and [Orca dispatch](../../agents/orca-dispatch.md) own current routing and operation. |
 | Retrieval condition | Read only to inspect the exact consumed Issue #205 checkpoint or its lifecycle evidence; do not use it as current development direction. |
+
+Snapshot bodies have been retired under [ADR 0089](../../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). Use Git history for the original wording; current operation follows [Orca dispatch](../../agents/orca-dispatch.md).
