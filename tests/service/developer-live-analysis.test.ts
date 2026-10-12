@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { describeComposition } from '../../src/service/harness/primary-agent-harness.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import type { DevelopmentValidationIntent } from '../../src/shared/protocol.js';
 import { BaselineAnalysisExecutionOwner, DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS } from '../../src/service/analysis/execution.js';
 import {
   SAMPLE1_SOURCE_DIGEST,
@@ -39,6 +40,7 @@ import {
 import {
   PROVIDER_LEDGER_FILE,
   ProviderResultCache,
+  isItemLine,
   providerRequestDigest,
 } from '../../src/service/provider/provider-result-cache.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
@@ -68,6 +70,8 @@ const FIXTURES_ROOT = resolve(fileURLToPath(new URL('../fixtures/model/', import
 /** Either bound form: an explicit launch total, or the policy's per-frozen-unit default (ADR 0070). */
 type Ceiling = DeveloperLiveCeiling;
 const CEILING: Ceiling = { kind: 'tokens', maxTotalTokens: 500_000 };
+/** The development validation every live Run here belongs to (Issue #808). */
+const VALIDATION: DevelopmentValidationIntent = { family: 'baseline-analysis', case: 'sample1-whole-book', delta: null };
 /** The developer-live composition digest dev pinned before the platform tools (Issue #473): zero tools, no Session log. */
 const DEV_LIVE_COMPOSITION_DIGEST = '5dee37754ddb1ee8b20c04fe76fca80afbe99d632cd36e69e601f5dc64a30d98';
 /** What a developer-live launch binds when the form names no ceiling: 30,000 tokens per frozen unit. */
@@ -275,6 +279,7 @@ function owner(
   nativeFetch: typeof fetch,
   ceiling: Ceiling = CEILING,
   policy: LaunchPolicyProjection = launchPolicy,
+  validation: DevelopmentValidationIntent | null = VALIDATION,
 ): BaselineAnalysisExecutionOwner {
   return new BaselineAnalysisExecutionOwner({
     ledger: store.baselineAnalysisLedger,
@@ -282,7 +287,7 @@ function owner(
     fixture: null,
     // A local placeholder: the broker releases it to the transmit step and nothing else ever sees it.
     secretResolver: { resolve: async () => 'placeholder-development-key' },
-    developerLive: { launch: { runBudgetCeiling: ceiling, providerCacheRoot: cacheRoot }, nativeFetch },
+    developerLive: { launch: { runBudgetCeiling: ceiling, providerCacheRoot: cacheRoot, validation }, nativeFetch },
   });
 }
 
@@ -584,7 +589,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
       launchPolicy,
       fixture: null,
       secretResolver: { resolve: async () => credential },
-      developerLive: { launch: { runBudgetCeiling: CEILING, providerCacheRoot: cacheRoot }, nativeFetch: held.transport },
+      developerLive: { launch: { runBudgetCeiling: CEILING, providerCacheRoot: cacheRoot, validation: VALIDATION }, nativeFetch: held.transport },
     });
     const taskIntentId = prepared.taskIntent!.taskIntentId;
     const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
@@ -633,6 +638,9 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
 
     expect(settled.run!.state).toBe('completed');
     expect(settled.resultSetRevision!.usage.requests).toBe(FULL_CHAIN_TURNS - 1);
+    // A replay sends nothing and incurs nothing (Issue #808): the Run counts no tokens for its replayed turns, and the ledger
+    // keeps what each capture originally recorded beside it.
+    expect(settled.resultSetRevision!.usage.inputTokens + settled.resultSetRevision!.usage.outputTokens).toBe(0);
 
     // The reduction and sampling turns are byte-identical to the first Run's and replay from the
     // cache; the reflection turn's message carries this Run's own Run Record identity, which no
@@ -644,12 +652,78 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     const lines = await ledgerLines(cacheRoot);
     expect(lines.filter((line) => line.outcome === 'transmitted')).toHaveLength(FULL_CHAIN_TURNS + 1);
     expect(lines.filter((line) => line.outcome === 'replayed')).toHaveLength(FULL_CHAIN_TURNS - 1);
+    for (const line of lines.filter((candidate) => candidate.outcome === 'replayed')) {
+      expect(line.incurredUsage).toEqual({ inputTokens: 0, outputTokens: 0 });
+      expect(line.usage).not.toBeNull();
+      expect(line.validation).toMatchObject({ family: 'baseline-analysis', case: 'sample1-whole-book', decision: 'exact-replay' });
+    }
     // The replayed calls are named under their own Task mode, numbered from one.
     expect(lines.slice(FULL_CHAIN_TURNS).map((line) => line.itemId)).toEqual(
       Array.from({ length: FULL_CHAIN_TURNS }, (_unused, index) => `S40/reanalyze-book/${index + 1}`),
     );
     // The reflection is the last line, its own transmission replayed from nothing.
     expect(lines.at(-1)).toMatchObject({ outcome: 'transmitted', status: 200 });
+    await store.close();
+  });
+
+  // ADR 0089 · Issue #808: the development checks apply to development validation only. A live Run outside it is business —
+  // the same user Task asked twice reaches the transport twice — and the developer cache and ledger are neither read nor written.
+  it('sends every model step of two identical business Tasks to the transport and never touches the developer cache or ledger', async () => {
+    const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
+    const { units: responses, named } = await unitAnswers(prepared);
+    const firstCalls: StubCall[] = [];
+    const first = await runLive(store, bookId, prepared, owner(store, stubTransport({ calls: firstCalls, responses, named }), CEILING, launchPolicy, null));
+    expect(first.run!.state).toBe('completed');
+    expect(firstCalls).toHaveLength(FULL_CHAIN_TURNS);
+    let progress = store.createBaselineAnalysisPreparationWork(
+      bookId, BASELINE_ANALYSIS_MODE_GOALS['reanalyze-book'], { mode: 'reanalyze-book', selectedRange: null }, launchPolicy,
+    );
+    while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
+    const secondCalls: StubCall[] = [];
+    const second = await runLive(store, bookId, progress.projection!, owner(store, stubTransport({ calls: secondCalls, responses, named }), CEILING, launchPolicy, null));
+    expect(second.run!.state).toBe('completed');
+    // Byte-identical unit, reduction and sampling requests, every one sent again: no replay, no refusal, no substitution.
+    expect(secondCalls).toHaveLength(FULL_CHAIN_TURNS);
+    expect(secondCalls.slice(0, SAMPLE1_UNITS).map((call) => call.body)).toEqual(firstCalls.slice(0, SAMPLE1_UNITS).map((call) => call.body));
+    expect(second.resultSetRevision!.usage.inputTokens).toBeGreaterThan(0);
+    expect(await readdir(cacheRoot)).toEqual([]);
+    await store.close();
+  });
+
+  it('refuses to resend what valid evidence of the same purpose already answers, and names that evidence (Issue #808)', async () => {
+    const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
+    const { units: responses, named } = await unitAnswers(prepared);
+    const firstCalls: StubCall[] = [];
+    await runLive(store, bookId, prepared, owner(store, stubTransport({ calls: firstCalls, responses, named })));
+    expect(firstCalls).toHaveLength(FULL_CHAIN_TURNS);
+    // The same manuscript imported again as another Book: every block identity is new, so no request is byte-identical, and
+    // every one asks what the first import's evidence already answers. Nothing is sent; the refusal is each unit's gap.
+    const reimported = await importSample1Book(store, roots.codeRoot, 'developer-live sample1');
+    await pinEditorialWorkspaceProfileRevision2(store, reimported.bookId);
+    let progress = store.createBaselineAnalysisPreparationWork(reimported.bookId, BASELINE_ANALYSIS_TASK_GOAL, null, launchPolicy);
+    while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
+    const secondCalls: StubCall[] = [];
+    const refused = await runLive(store, reimported.bookId, progress.projection!, owner(store, stubTransport({ calls: secondCalls, responses, named })));
+    expect(secondCalls).toHaveLength(0);
+    const unitGaps = refused.resultSetRevision!.gaps.filter((gap) => gap.unitOrdinal !== null);
+    expect(unitGaps.map((gap) => gap.unitOrdinal)).toEqual(Array.from({ length: SAMPLE1_UNITS }, (_unused, index) => index + 1));
+    const lines = await ledgerLines(cacheRoot);
+    expect(lines.slice(0, FULL_CHAIN_TURNS).every((line) => (line.validation as { decision: string }).decision === 'first-capture')).toBe(true);
+    // Every later line is a refusal that sent nothing, incurred nothing, and names the capture it rests on: each unit — and its
+    // safe retry — is the first import's question asked again; this Run's reflection reflects on other accounting (every
+    // range a gap), so it is the same step with a different input, which only a declared input delta could send.
+    const refusals = lines.slice(FULL_CHAIN_TURNS);
+    for (const line of refusals) {
+      expect(line).toMatchObject({ outcome: 'refused', status: null, usage: null, incurredUsage: { inputTokens: 0, outputTokens: 0 } });
+    }
+    const refusalOf = (line: Record<string, unknown>) => line.validation as { step: string; refusal: string; evidence: string[] };
+    expect(refusals.map((line) => [refusalOf(line).step, refusalOf(line).refusal, refusalOf(line).evidence])).toEqual([
+      ...Array.from({ length: SAMPLE1_UNITS }, (_unused, index) => [
+        [`first-baseline/unit-${index + 1}`, 'PROVIDER_VALIDATION_EVIDENCE_EXISTS', [`S40/first-baseline/${index + 1}`]],
+        [`first-baseline/unit-${index + 1}/turn-2`, 'PROVIDER_VALIDATION_EVIDENCE_EXISTS', [`S40/first-baseline/${index + 1}`]],
+      ]).flat(),
+      ['first-baseline/reflection', 'PROVIDER_VALIDATION_SIMILAR_EVIDENCE', [`S40/first-baseline/${FULL_CHAIN_TURNS}`]],
+    ]);
     await store.close();
   });
 
@@ -685,7 +759,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     // A fresh reader sees exactly the lines that were appended, in order.
     const fresh = new ProviderResultCache(cacheRoot);
     await fresh.open();
-    expect(fresh.lines.map((entry) => entry.itemId)).toEqual(['S40/smoke/1', 'S40/smoke/9', 'S40/smoke/1']);
+    expect(fresh.lines.filter(isItemLine).map((entry) => entry.itemId)).toEqual(['S40/smoke/1', 'S40/smoke/9', 'S40/smoke/1']);
     expect(fresh.nextItemId('smoke')).toBe('S40/smoke/10');
   });
 
@@ -966,8 +1040,9 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     const lines = await ledgerLines(cacheRoot);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({ outcome: 'failed', status: 429, classification: 'quota-exhausted', resetWindow: '2026-09-08T00:00:00Z' });
-    // A limit response is never cached: the same request must be asked again later.
-    expect(await new ProviderResultCache(cacheRoot).lookup('deepseek-v4-flash', String(lines[0]!.requestDigest))).toBeNull();
+    // A limit response is never cached, and its claim is released: the same request must be asked again later.
+    expect(await new ProviderResultCache(cacheRoot).readEntry(String(lines[0]!.cacheKey))).toEqual({ state: 'absent' });
+    expect(await new ProviderResultCache(cacheRoot).readClaim(String(lines[0]!.cacheKey))).toEqual({ state: 'absent' });
     await store.close();
   });
 
@@ -1002,7 +1077,9 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     const unknown = lines.filter((line) => line.classification === 'outcome-unknown');
     expect(unknown).toHaveLength(1);
     expect(unknown[0]).toMatchObject({ outcome: 'failed', status: 200, usage: null });
-    expect(await new ProviderResultCache(cacheRoot).lookup('deepseek-v4-flash', String(unknown[0]!.requestDigest))).toBeNull();
+    // Nothing is cached, and the request stays held as possibly billed for every later reader (Issue #808).
+    expect(await new ProviderResultCache(cacheRoot).readEntry(String(unknown[0]!.cacheKey))).toEqual({ state: 'absent' });
+    expect(await new ProviderResultCache(cacheRoot).readClaim(String(unknown[0]!.cacheKey))).toMatchObject({ state: 'outcome-unknown' });
 
     // 续行 is refused, and 取消任务 keeps what was read with unit 4 its own gap: nothing more is transmitted.
     expect(() => execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true })).toThrowError(/结果待确认/u);
@@ -1094,7 +1171,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
       launchPolicy,
       fixture: null,
       secretResolver: { resolve: async () => null },
-      developerLive: { launch: { runBudgetCeiling: CEILING, providerCacheRoot: cacheRoot }, nativeFetch: stubTransport({ calls, responses: new Map() }) },
+      developerLive: { launch: { runBudgetCeiling: CEILING, providerCacheRoot: cacheRoot, validation: VALIDATION }, nativeFetch: stubTransport({ calls, responses: new Map() }) },
     });
     try {
       expect(await present.liveCredentialReadiness()).toBe('present');
