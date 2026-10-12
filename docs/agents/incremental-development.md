@@ -50,6 +50,7 @@ Research answers one named blocking question; a spike is allowed only when the c
 Record the outcome, planned versus actual change, owners reused or added, migration and authority impact, exact checks and disclosed skips, cleanup and unresolved matters in the existing Issue/PR. [Orca dispatch](orca-dispatch.md) owns Worker-to-Reviewer handoff, Reviewer corrections and slice merge, and Commander cumulative dev integration. Report each state truthfully; a slice in a wave is not yet integrated into dev.
 
 At completion run the scoped [document lifecycle](document-lifecycle.md) sweep. Keep payloads, secrets and protected material out of reports.
+
 ## Version iteration
 
 Every release starts from the last integrated implementation, never a new bootstrap. Build it from independently accepted slices; keep incomplete work out of the release line rather than adding permanent flags or parallel implementations; change one dependency or Harness pin at a time with the prior pin as rollback; make data and schema migration explicit in the owning brief; a version number never authorizes destructive migration. The Initial v1.0.0 Development Milestone Boundary is the exact repository record defined by [ADR 0054](../adr/0054-defer-macos-evidence-until-after-initial-v1-0-0-development-milestone.md); the separately authorized consolidated Windows and macOS re-entry precedes any `dev` to `main` promotion, tag, package, signing, notarization, or release action.

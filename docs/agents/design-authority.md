@@ -57,6 +57,7 @@ Permission for one class does not imply another. In particular, accepted archite
 The Owner reserves expansion of product/design scope, Foundation Replacement, credential/material admission, release and promotion to main. Existing scoped authorization applies without repeated permission requests; necessary developer-live calls follow ADR 0089 and their current policy/binding constraints.
 
 Repository role permissions never grant AI7 Public Release Permission, Editorial Signoff, Review Decision or permission to publish manuscript content. Product-domain authorities remain bound to their exact material and channel.
+
 ## Open-item classification
 
 Classify an unresolved point before acting:
