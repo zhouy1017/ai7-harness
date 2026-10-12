@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -6,8 +7,37 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { BASELINE_PROMPT_CONTRACT, BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitMessageHeader, unitRequestDigest } from '../../src/service/analysis/contract.js';
-import { ownBlockIdsOf, ownBlockTextsOf, unitContentDigest } from '../../src/service/provider/local-deterministic-adapter.js';
+import {
+  ASSURANCE_SAMPLING_PROMPT_CONTRACT,
+  ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST,
+  assuranceSamplingRequestDigest,
+  parseAssuranceSamplingListedRefs,
+  parseAssuranceSamplingMessageHeader,
+} from '../../src/service/analysis/assurance-sampling-contract.js';
+import {
+  BASELINE_CROSS_UNIT_PROMPT_CONTRACT,
+  BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
+  crossUnitRequestDigest,
+  parseCrossUnitCitedBlocks,
+  parseCrossUnitMessageHeader,
+} from '../../src/service/analysis/cross-unit-contract.js';
+import {
+  RUN_REPORT_REFLECTION_PROMPT_CONTRACT,
+  RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST,
+  parseRunReportReflectionMessageHeader,
+  runReportReflectionRequestDigest,
+} from '../../src/service/analysis/run-report-contract.js';
+import { OPENCODE_GO_ROUTE_PROFILE } from '../../src/service/provider/deepseek-adapter.js';
+import { transmitOnce, type LiveModelFetch } from '../../src/service/provider/live-transmission.js';
+import {
+  ownBlockIdsOf,
+  ownBlockTextsOf,
+  substituteAssuranceSamplingRefPlaceholders,
+  substituteCrossUnitBlockPlaceholders,
+  unitContentDigest,
+} from '../../src/service/provider/local-deterministic-adapter.js';
 import { parseModelFixture } from '../../src/service/provider/model-fixture.js';
+import { ProviderResultCache, providerCacheKey } from '../../src/service/provider/provider-result-cache.js';
 
 // The S41 generation tool, proven on a cache the tests build in a temporary directory. The real
 // Provider Result Cache of ADR 0067 is never named, read, or listed here, and no generated fixture
@@ -43,6 +73,18 @@ type Tool = {
   redactUnitResultText: (text: string, ownBlockTexts: ReadonlyArray<string>) => string;
   mapCachedResponse: (entry: unknown, selection: unknown, ownBlockTexts: ReadonlyArray<string>) => Record<string, unknown>;
   generateModelFixture: (request: Request, now?: Date) => Promise<Record<string, unknown>>;
+  BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST: string;
+  ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST: string;
+  RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST: string;
+  crossUnitRequestDigest: (promptContractDigest: string, setDigest: string) => string;
+  assuranceSamplingRequestDigest: (promptContractDigest: string, unitOrdinal: number, unitDigest: string, sampleDigest: string) => string;
+  runReportReflectionRequestDigest: (promptContractDigest: string, accountingDigest: string) => string;
+  parseCrossUnitMessageHeader: (text: string) => unknown;
+  parseCrossUnitCitedBlocks: (text: string) => Map<number, string[]>;
+  parseAssuranceSamplingMessageHeader: (text: string) => unknown;
+  parseAssuranceSamplingListedRefs: (text: string) => string[];
+  parseRunReportReflectionMessageHeader: (text: string) => unknown;
+  namespacedCacheKey: (namespace: { route: string; endpoint: string; requestShape: string; model: string }, requestDigest: string) => string;
 };
 
 // @ts-expect-error tools/*.mjs carry no declarations; the tool is exercised as the plain module it is.
@@ -473,5 +515,196 @@ describe('generate-model-fixture agreement with the owning modules', () => {
     expect(source).toContain(`const OWN_BLOCKS_HEADER = '${BASELINE_PROMPT_CONTRACT.ownHeader}';`);
     // The tool imports nothing from the built or the source tree: the duplication is the whole point.
     expect(source).not.toMatch(/from '[^']*(?:src|dist)\//u);
+  });
+});
+
+// Issue #808: the converter reads what the real cache writes — namespaced entries captured through `transmitOnce` — and
+// converts the reduction, a sampling turn and the reflection beside the unit, each under its own contract's key, with every
+// minted identity remapped to the placeholder the deterministic adapter fills and the capture's provenance kept.
+const ENDPOINT = 'https://x.invalid/v1/chat/completions';
+const VALIDATION = { family: 'baseline-analysis', case: 'sample1-whole-book', delta: null } as const;
+const BLOCKS = [`blk_${'3'.repeat(24)}`, `blk_${'4'.repeat(24)}`, `blk_${'5'.repeat(24)}`];
+
+function reductionMessage(setDigest = 'd'.repeat(64)): string {
+  return [
+    BASELINE_CROSS_UNIT_PROMPT_CONTRACT.messageHeader.replace('{closed}', '2').replace('{total}', '3').replace('{unitSetDigest}', setDigest),
+    '合成单元结果占位。',
+    BASELINE_CROSS_UNIT_PROMPT_CONTRACT.citedBlocksHeader,
+    `单元 1：${BLOCKS[0]!}${BASELINE_CROSS_UNIT_PROMPT_CONTRACT.blockIdSeparator}${BLOCKS[1]!}`,
+    `单元 2：${BLOCKS[2]!}`,
+  ].join('\n');
+}
+
+function samplingMessage(): string {
+  return [
+    ASSURANCE_SAMPLING_PROMPT_CONTRACT.messageHeader.replace('{unitOrdinal}', '2').replace('{totalUnits}', '3')
+      .replace('{unitDigest}', 'a'.repeat(64)).replace('{sampleDigest}', 'b'.repeat(64)),
+    ASSURANCE_SAMPLING_PROMPT_CONTRACT.ownHeader,
+    `[${BLOCKS[0]!}] (paragraph) ${OWN_TEXTS[0]!}`,
+    ASSURANCE_SAMPLING_PROMPT_CONTRACT.findingHeader,
+    '- [f1]（主要）合成发现一。',
+    '- [f12]（次要）合成发现二。',
+  ].join('\n');
+}
+
+function reflectionMessage(runRecordId: string): string {
+  return [RUN_REPORT_REFLECTION_PROMPT_CONTRACT.messageHeader.replace('{runRecordId}', runRecordId).replace('{accountingDigest}', 'c'.repeat(64)), '{"stages":[]}'].join('\n');
+}
+
+const answer = (content: string): LiveModelFetch => async () => ({
+  status: 200, json: async () => ({ choices: [{ message: { content } }], usage: { prompt_tokens: 900, completion_tokens: 120 } }),
+});
+
+async function capture(root: string, message: string, content: string, step: string): Promise<string> {
+  const cache = new ProviderResultCache(root);
+  await cache.open();
+  const promptContractDigest = message.startsWith('跨单元') ? BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST
+    : message.startsWith('保证抽样') ? ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST
+    : message.startsWith('运行反思') ? RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST : BASELINE_PROMPT_CONTRACT_DIGEST;
+  await transmitOnce(cache, answer(content), { purpose: 'first-baseline', promptContractDigest, taskPromptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST },
+    { intent: VALIDATION, step, requestShape: 'openai-chat-completions' }, OPENCODE_GO_ROUTE_PROFILE, MODEL, ENDPOINT,
+    { method: 'POST', headers: { authorization: 'Bearer placeholder' }, body: chatBody(message) });
+  return chatBody(message);
+}
+
+describe('generate-model-fixture over the namespaced cache (Issue #808)', () => {
+  let root: string;
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'ai7-fixture-gen-808-'));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const request = (selector: string): Request => ({ selector, cacheRoot: root, identity: 'generated-808', description: '合成生成夹具', out: join(root, 'out.json') });
+
+  it('converts a reduction under the cross-unit contract, remapping its cited blocks and keeping the capture provenance', async () => {
+    const content = JSON.stringify({ findings: [{ claim: '合成跨单元发现。', sourceRanges: [{ blockId: BLOCKS[1]! }, { blockId: BLOCKS[2]! }] }] });
+    const body = await capture(root, reductionMessage(), content, 'first-baseline/reduction');
+    const fixture = parseModelFixture(await tool.generateModelFixture(request('S40/first-baseline/1'), new Date('2026-10-12T00:00:00.000Z')));
+    const entry = fixture.entries[0]!;
+    expect(entry).toMatchObject({ unitOrdinal: 0, requestDigest: crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, 'd'.repeat(64)), contentDigest: null });
+    const text = (entry.response as { text: string }).text;
+    expect(text).not.toMatch(/blk_/u);
+    // The deterministic adapter fills the placeholders from the message it answers and gets the captured answer back.
+    expect(substituteCrossUnitBlockPlaceholders(text, parseCrossUnitCitedBlocks(reductionMessage()))).toBe(content);
+    expect(entry.capture).toMatchObject({
+      subject: 'reduction', itemId: 'S40/first-baseline/1', selectedItemId: 'S40/first-baseline/1', evidenceScope: 'namespaced',
+      route: 'opencode-go', endpoint: ENDPOINT, requestShape: 'openai-chat-completions', model: MODEL,
+      promptContractDigest: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, capturedAt: expect.any(String) as string,
+      providerRequestDigest: sha256Hex(body),
+      providerResponseDigest: sha256Hex(JSON.stringify({ choices: [{ message: { content } }], usage: { prompt_tokens: 900, completion_tokens: 120 } })),
+      validation: { family: 'baseline-analysis', case: 'sample1-whole-book', step: 'first-baseline/reduction' },
+      identityMap: [{ placeholder: '{{unit:1:block:2}}', identity: BLOCKS[1]! }, { placeholder: '{{unit:2:block:1}}', identity: BLOCKS[2]! }],
+    });
+    // The capture's request carried a stand-in credential header; nothing of a header reaches the cache or the fixture.
+    expect(JSON.stringify(fixture)).not.toMatch(/Bearer|authorization/u);
+    // Naming the replay of the capture converts the same capture, and says which item was named.
+    await capture(root, reductionMessage(), content, 'reanalyze-book/reduction');
+    const viaReplay = parseModelFixture(await tool.generateModelFixture(request('S40/first-baseline/2'), new Date('2026-10-12T00:00:00.000Z')));
+    expect(viaReplay.entries[0]!.capture).toMatchObject({ itemId: 'S40/first-baseline/1', selectedItemId: 'S40/first-baseline/2' });
+    expect(viaReplay.entries[0]!.response).toEqual(entry.response);
+  });
+
+  it('converts a sampling turn, remapping its listed findings as whole tokens only', async () => {
+    const content = JSON.stringify([{ ref: 'f1', disposition: '成立', reason: '合成理由一。' }, { ref: 'f12', disposition: '需降级', reason: '合成理由二，提到 f1。' }]);
+    await capture(root, samplingMessage(), content, 'first-baseline/sampling-1-unit-2');
+    const entry = parseModelFixture(await tool.generateModelFixture(request('S40/first-baseline/1'))).entries[0]!;
+    expect(entry).toMatchObject({ unitOrdinal: 0, requestDigest: assuranceSamplingRequestDigest(ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, 2, 'a'.repeat(64), 'b'.repeat(64)) });
+    const text = (entry.response as { text: string }).text;
+    expect(text).toContain('"ref":"{{ref:1}}"');
+    expect(text).toContain('"ref":"{{ref:2}}"');
+    expect(substituteAssuranceSamplingRefPlaceholders(text, parseAssuranceSamplingListedRefs(samplingMessage()))).toBe(content);
+    expect(entry.capture!.identityMap).toEqual([{ placeholder: '{{ref:1}}', identity: 'f1' }, { placeholder: '{{ref:2}}', identity: 'f12' }]);
+  });
+
+  it('converts the reflection under its own contract, keyed by the accounting and nothing minted', async () => {
+    await capture(root, reflectionMessage(randomUUID()), JSON.stringify({ ifRedone: [{ change: '合成改进。' }] }), 'first-baseline/reflection');
+    const entry = parseModelFixture(await tool.generateModelFixture(request('S40/first-baseline/1'))).entries[0]!;
+    expect(entry).toMatchObject({ unitOrdinal: 0, requestDigest: runReportReflectionRequestDigest(RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, 'c'.repeat(64)), contentDigest: null });
+    expect(entry.capture).toMatchObject({ subject: 'reflection', identityMap: [] });
+  });
+
+  it('converts a unit with its own blocks remapped, so the entry answers a fresh import through its content digest', async () => {
+    const content = UNIT_RESULT('合成概述：本单元交代人物甲的出场。', `合成注记：见 ${IDENTITIES[1]!}。`);
+    await capture(root, unitMessage(), content, 'first-baseline/unit-1');
+    const entry = parseModelFixture(await tool.generateModelFixture(request('S40/first-baseline/1'))).entries[0]!;
+    expect(entry).toMatchObject({ unitOrdinal: 1, contentDigest: unitContentDigest(OWN_TEXTS) });
+    expect((entry.response as { text: string }).text).toContain('{{block:2}}');
+    expect(entry.capture!.identityMap).toEqual([{ placeholder: '{{block:2}}', identity: IDENTITIES[1]! }]);
+  });
+
+  it('refuses a retired capture, a refused call, and an identity the request never named, writing nothing', async () => {
+    const stray = JSON.stringify({ findings: [{ claim: '合成发现。', sourceRanges: [{ blockId: `blk_${'9'.repeat(24)}` }] }] });
+    await capture(root, reductionMessage(), stray, 'first-baseline/reduction');
+    await expect(tool.generateModelFixture(request('S40/first-baseline/1'))).rejects.toMatchObject({ code: 'FIXTURE_GEN/identity-unmapped' });
+    const cache = new ProviderResultCache(root);
+    await cache.open();
+    await cache.invalidate({ itemId: 'S40/first-baseline/1' }, 'captured-with-stray-identity');
+    await expect(tool.generateModelFixture(request('S40/first-baseline/1'))).rejects.toMatchObject({ code: 'FIXTURE_GEN/item-retired' });
+    // A capture retired with its whole validation case converts to nothing either, and neither does a refusal's line.
+    await capture(root, reflectionMessage(randomUUID()), '{}', 'first-baseline/reflection');
+    await cache.invalidate({ family: 'baseline-analysis', case: 'sample1-whole-book' }, 'sample-edited-by-tester');
+    await expect(tool.generateModelFixture(request('S40/first-baseline/2'))).rejects.toMatchObject({ code: 'FIXTURE_GEN/item-retired' });
+    const lines = await tool.readLedgerLines(root);
+    expect(() => tool.resolveLedgerSelection([...lines, { ...lines[0]!, itemId: 'S40/first-baseline/9', outcome: 'refused' }], 'S40/first-baseline/9'))
+      .toThrowError(/FIXTURE_GEN\/item-unknown/u);
+    expect(await absent(join(root, 'out.json'))).toBe(true);
+  });
+
+  it('says a capture cached before #808 is legacy, with no route, endpoint or request shape recorded', async () => {
+    await buildCache(root);
+    const entry = parseModelFixture(await tool.generateModelFixture(request(ITEM_ID))).entries[0]!;
+    expect(entry.capture).toMatchObject({ subject: 'unit', itemId: ITEM_ID, evidenceScope: 'legacy-unnamespaced', route: null, endpoint: null, requestShape: null, validation: null });
+  });
+
+  it('refuses a capture record the schema does not admit', () => {
+    const base = {
+      schema: 'ai7.model-fixture/1', identity: 'x', description: '合成', basedOn: null, provider: 'ai7-local-deterministic', model: 'ai7-deterministic-fixture',
+    };
+    const capture = {
+      subject: 'unit', itemId: 'S40/first-baseline/1', selectedItemId: 'S40/first-baseline/1', evidenceScope: 'namespaced', route: 'opencode-go',
+      endpoint: ENDPOINT, requestShape: 'openai-chat-completions', model: MODEL, promptContractDigest: 'a'.repeat(64), taskPromptContractDigest: 'a'.repeat(64), capturedAt: '2026-10-12T00:00:00.000Z',
+      providerRequestDigest: 'b'.repeat(64), providerResponseDigest: 'c'.repeat(64),
+      responseDigestOrigin: 'recorded',
+      cacheKey: tool.namespacedCacheKey({ route: 'opencode-go', endpoint: ENDPOINT, requestShape: 'openai-chat-completions', model: MODEL }, 'b'.repeat(64)),
+      generation: sha256Hex(JSON.stringify(['opencode-go', ENDPOINT, 'openai-chat-completions', MODEL, 'a'.repeat(64)])),
+      fixtureResponseDigest: sha256Hex(canonicalJson({ kind: 'interrupted', message: '合成' })),
+      validation: { family: 'a', case: 'b', step: 'unit-1' }, identityMap: [],
+    };
+    const entry = (overrides: Record<string, unknown>) => ({ ...base, entries: [{ unitOrdinal: 1, requestDigest: 'd'.repeat(64), response: { kind: 'interrupted', message: '合成' }, capture: { ...capture, ...overrides } }] });
+    expect(parseModelFixture(entry({})).entries[0]!.capture).toEqual(capture);
+    for (const overrides of [{ subject: 'unknown' }, { identityMap: [{ placeholder: '{{other:1}}', identity: 'x' }] }, { evidenceScope: 'legacy-unnamespaced' },
+      { providerRequestDigest: 'short' }, { extra: true }, { validation: { family: 'a', case: 'b' } }]) {
+      expect(() => parseModelFixture(entry(overrides)), JSON.stringify(overrides)).toThrowError(/夹具/u);
+    }
+  });
+});
+
+describe('generate-model-fixture agreement with the #808 owners', () => {
+  it('duplicates the three suboperation contract digests and their request-digest formulas exactly', () => {
+    expect(tool.BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST).toBe(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST);
+    expect(tool.ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST).toBe(ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST);
+    expect(tool.RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST).toBe(RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST);
+    expect(tool.crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, 'e'.repeat(64))).toBe(crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, 'e'.repeat(64)));
+    expect(tool.assuranceSamplingRequestDigest(ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, 3, 'a'.repeat(64), 'b'.repeat(64)))
+      .toBe(assuranceSamplingRequestDigest(ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, 3, 'a'.repeat(64), 'b'.repeat(64)));
+    expect(tool.runReportReflectionRequestDigest(RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, 'c'.repeat(64)))
+      .toBe(runReportReflectionRequestDigest(RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, 'c'.repeat(64)));
+  });
+
+  it('reads the reduction, sampling and reflection messages exactly as their contracts do', () => {
+    for (const message of [reductionMessage(), samplingMessage(), reflectionMessage(randomUUID()), unitMessage(), '没有消息头']) {
+      expect(tool.parseCrossUnitMessageHeader(message)).toEqual(parseCrossUnitMessageHeader(message));
+      expect(tool.parseCrossUnitCitedBlocks(message)).toEqual(parseCrossUnitCitedBlocks(message));
+      expect(tool.parseAssuranceSamplingMessageHeader(message)).toEqual(parseAssuranceSamplingMessageHeader(message));
+      expect(tool.parseAssuranceSamplingListedRefs(message)).toEqual(parseAssuranceSamplingListedRefs(message));
+      expect(tool.parseRunReportReflectionMessageHeader(message)).toEqual(parseRunReportReflectionMessageHeader(message));
+    }
+  });
+
+  it('keys a namespaced entry by the same formula the cache writes it with', () => {
+    const namespace = { route: 'opencode-go', endpoint: ENDPOINT, requestShape: 'openai-chat-completions', model: MODEL };
+    expect(tool.namespacedCacheKey(namespace, 'f'.repeat(64))).toBe(providerCacheKey(namespace, 'f'.repeat(64)));
   });
 });

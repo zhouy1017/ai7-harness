@@ -127,7 +127,12 @@ export type FixtureResolution = 'request-digest' | 'content-digest';
 /** The own blocks of a unit message, in order: the `[blk_…]` lines after the own-blocks header. */
 function ownBlockLinesOf(unitMessage: string): Array<{ id: string; rest: string }> {
   const lines = unitMessage.split('\n');
-  const start = lines.indexOf(BASELINE_PROMPT_CONTRACT.ownHeader);
+  const start = lines.findIndex((line) => [
+    BASELINE_PROMPT_CONTRACT.ownHeader,
+    '以下为本单元需要核查的内容块：',
+    '以下为本单元需要审阅的内容块：',
+    '以下为本单元的内容块：',
+  ].includes(line));
   if (start === -1) return [];
   const blocks: Array<{ id: string; rest: string }> = [];
   for (const line of lines.slice(start + 1)) {
@@ -242,7 +247,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     const attempt = (this.#servedByKey.get(pairKey) ?? 0) + 1;
     this.#servedByKey.set(pairKey, attempt);
     const entry = resolveFixtureEntry(this.#entries, 0, requestDigest, attempt);
-    if (entry === undefined) {
+    if (entry === undefined || (entry.capture?.taskPromptContractDigest != null && entry.capture.taskPromptContractDigest !== this.#promptContractDigest)) {
       yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, `夹具 ${this.#fixture.identity} 没有这个提问（问题摘要 ${header.questionDigest}）的对应回答。`);
       return;
     }
@@ -382,7 +387,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     const attempt = (this.#servedByKey.get(pairKey) ?? (ordinal > 0 ? this.#attemptsBefore.get(ordinal) ?? 0 : 0)) + 1;
     this.#servedByKey.set(pairKey, attempt);
     const entry = resolveFixtureEntry(this.#entries, ordinal, expectedDigest, attempt);
-    if (entry === undefined) {
+    if (entry === undefined || (entry.capture?.taskPromptContractDigest != null && entry.capture.taskPromptContractDigest !== this.#promptContractDigest)) {
       const label =!named && this.#resolveBy === 'content-digest' ? '内容摘要' : '请求摘要';
       const subject = crossUnit !== null ? '跨单元归纳'
         : synthesis !== null ? 'AI7 初评的全书综合'

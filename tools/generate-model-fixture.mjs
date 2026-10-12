@@ -4,7 +4,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
- * Turn one Provider Result Cache entry (ADR 0067) into an `ai7.model-fixture/1` file.
+ * Turn one Provider Result Cache entry (ADR 0067, ADR 0089) into an `ai7.model-fixture/1` file.
  *
  *   node tools/generate-model-fixture.mjs --from-cache <test item id | request digest> \
  *     --cache-root <dir> --identity <id> --description <text> --out <file>
@@ -13,25 +13,41 @@ import { fileURLToPath } from 'node:url';
  * checkout, and a tool that guessed where would be one flag away from reading it by accident.
  *
  * The point of the tool is that a cached live result becomes a deterministic fixture without anyone
- * hand-copying a digest, and without manuscript text riding along. The entry is keyed twice. Its
- * `requestDigest` is the same function of the frozen prompt contract and the manifest unit that the
- * live request was keyed by, so the generated entry answers exactly the import it came from. Its
- * `contentDigest` is taken over the unit's own block texts alone, so the same entry also answers a
- * fresh import of the same manuscript, whose block identities are new — that is the resolution mode
- * `tests/` uses, and the one reason the fixture schema grew an optional key.
+ * hand-copying a digest, and without manuscript text riding along. Existing request subjects convert, each
+ * keyed the way the deterministic adapter resolves it (Issue #808): an Analysis Unit, under its unit
+ * ordinal and the request digest of its frozen prompt contract and manifest unit, and additionally a
+ * `contentDigest` over its own block texts alone, so the same entry also answers a fresh import of the
+ * same manuscript; and the Run's cross-unit reduction, an assurance sampling turn and the Run Report
+ * reflection, each under ordinal `0` and its own contract's request digest. Factual/review/evaluation/
+ * writing units, their existing syntheses and dialogue retain the keys their adapters already consume;
+ * recognizing a header grants no live capability. Dialogue chunk boundaries are deterministic conversion,
+ * not evidence of the original stream's timing.
+ *
+ * Identities a capture carries are minted per import or per Run, so they are remapped, explicitly: a
+ * unit's own block identities become `{{block:N}}`, the reduction's cited blocks `{{unit:U:block:N}}`,
+ * a sampling turn's listed findings `{{ref:N}}` — the placeholders the deterministic adapter fills from
+ * the request it is answering — and the fixture entry's `capture` lists each replacement. A block
+ * identity the request never named cannot be remapped, and refuses as `FIXTURE_GEN/identity-unmapped`.
+ * The same `capture` keeps the provenance: the item that captured the response (when a replay of it was
+ * named, both), the route, endpoint, request shape, model and prompt contract it was captured under, the
+ * capture time, the digests of the exact request and response, and the development validation it
+ * belonged to. An entry cached before #808 says it is legacy and leaves route, endpoint and shape null.
  *
  * Nothing is written until every check has passed: the fixture is assembled in memory and the single
  * write is the last thing that happens, so a refusal leaves no file behind. The refusals are the
- * interesting part of the tool. A free-text field that still shares a run of
- * MANUSCRIPT_ECHO_THRESHOLD characters with an own block after placeholder substitution refuses as
- * `FIXTURE_GEN/manuscript-echo`, naming the JSON path and the run length and never the characters
- * themselves. An `--out` under `tests/fixtures/` refuses outright: a fixture enters that directory
- * only through a reviewed pull request, which is where a human reads every free-text field.
+ * interesting part of the tool. A capture the ledger retired — a stale line, or an invalidation of its
+ * item or its validation case — refuses as `FIXTURE_GEN/item-retired`: retired evidence answers
+ * nothing. A free-text field that still shares a run of MANUSCRIPT_ECHO_THRESHOLD characters with a
+ * block the request carried, after placeholder substitution, refuses as `FIXTURE_GEN/manuscript-echo`,
+ * naming a bounded JSON path and the run length and never the characters themselves. Earlier model
+ * results and other carried user text are checked too; a reviewer still reads every free-text field. An `--out`
+ * under `tests/fixtures/` refuses outright: a fixture enters that directory only through a reviewed
+ * pull request, which is where a human reads every free-text field.
  *
- * One shape only: `openai-chat-completions` request bodies. Note that `execution.ts` caches an entry
- * only for HTTP 200, so from the real cache a limit or a server error refuses `entry-missing` before
- * the non-200 mappings below are reached; they exist for entries that carry such a status, and the
- * unit suite drives them from a synthetic cache.
+ * One body shape only: `openai-chat-completions`. Note that the cache keeps an entry only for HTTP 200,
+ * so from the real cache a limit or a server error refuses `entry-missing` before the non-200 mappings
+ * below are reached; they exist for entries that carry such a status, and the unit suite drives them
+ * from a synthetic cache.
  *
  * This file is plain ESM run by `node` directly, before and outside any TypeScript build, so it
  * imports nothing from `src/` or `dist/` and duplicates the few constants and pure functions it
@@ -48,6 +64,22 @@ const BLOCK_LINE = /^\[(blk_[0-9a-f]{24})\] /u;
 const BLOCK_KIND_MARKER = /^\((?:title|heading|paragraph)(?: h[1-6])?\) /u;
 const PROVIDER_LEDGER_FILE = 'ledger.jsonl';
 const PROVIDER_CACHE_DIRECTORY = 'entries';
+
+// --- Duplicated from src/service/analysis/{cross-unit,assurance-sampling,run-report}-contract.ts (Issue #808) ---------------
+export const BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST = '8298dc9db1b95f26072cabb00a8c9a14997f68ebe7bf07d01181985f848e66cb';
+export const ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST = '4c05e66ba8077c85aa1334b53e98155566fcd9f51d9bd3343e95e7b14ddc03db';
+export const RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST = '96456fc99625e12014633439564f17a54cdb1f4f0a05b8076c10a4b03bbd7676';
+const CROSS_UNIT_HEADER = /^跨单元归纳 (\d+)\/(\d+) · 单元集摘要 ([0-9a-f]{64})$/u;
+const CITED_BLOCKS_HEADER = '各单元引用的内容块标识（按首次引用顺序）：';
+const CITED_BLOCKS_LINE = /^单元 (\d+)：(.+)$/u;
+const CITED_BLOCK_SEPARATOR = '、';
+const SAMPLING_HEADER = /^保证抽样 (\d+)\/(\d+) · 单元摘要 ([0-9a-f]{64}) · 抽样摘要 ([0-9a-f]{64})$/u;
+const SAMPLING_FINDING_HEADER = '以下为需要复核的发现：';
+const SAMPLING_FINDING_LINE = /^- \[([A-Za-z0-9_-]{1,64})\]（/u;
+const REFLECTION_HEADER = /^运行反思 ([A-Za-z0-9_-]{1,64}) · 账目摘要 ([0-9a-f]{64})$/u;
+// --- Duplicated from src/service/provider/provider-result-cache.ts --------------------------------------------------------
+const PROVIDER_CACHE_NAMESPACE = 'ai7.provider-cache/2';
+const ANY_BLOCK_IDENTITY = /blk_[0-9a-f]{24}/gu;
 
 /**
  * How many consecutive characters a free-text field may share with an own block before the tool
@@ -113,9 +145,84 @@ export function unitRequestDigest(promptContractDigest, unitOrdinal, unitDigest)
   return sha256Hex(canonicalJson({ promptContractDigest, unitOrdinal, unitDigest }));
 }
 
+/** The reduction's identity: how many units it closes over, of how many, and the digest of that closed set; `null` otherwise. */
+export function parseCrossUnitMessageHeader(text) {
+  const match = CROSS_UNIT_HEADER.exec(text.split('\n', 1)[0] ?? '');
+  if (match === null) return null;
+  const closed = Number(match[1]);
+  const total = Number(match[2]);
+  if (!Number.isSafeInteger(closed) || closed < 2 || !Number.isSafeInteger(total) || total < closed) return null;
+  return { closed, total, unitSetDigest: match[3] };
+}
+
+/** The reduction's request-digest key: the frozen cross-unit contract and the closed unit set. */
+export function crossUnitRequestDigest(promptContractDigest, setDigest) {
+  if (!DIGEST_PATTERN.test(promptContractDigest) || !DIGEST_PATTERN.test(setDigest)) throw new Error('ANALYSIS_REQUEST_DIGEST_INVALID');
+  return sha256Hex(canonicalJson({ promptContractDigest, unitSetDigest: setDigest }));
+}
+
+/** The reduction message's cited-blocks section: each unit's cited block identities, in the order the section lists them. */
+export function parseCrossUnitCitedBlocks(text) {
+  const lines = text.split('\n');
+  const start = lines.indexOf(CITED_BLOCKS_HEADER);
+  const cited = new Map();
+  if (start === -1) return cited;
+  for (const line of lines.slice(start + 1)) {
+    const match = CITED_BLOCKS_LINE.exec(line);
+    if (match === null) continue;
+    cited.set(Number(match[1]), match[2].split(CITED_BLOCK_SEPARATOR).filter((blockId) => /^blk_[0-9a-f]{24}$/u.test(blockId)));
+  }
+  return cited;
+}
+
+/** A sampling turn's identity: its anchor unit, the total, the unit's digest and the digest of the findings listed; `null` otherwise. */
+export function parseAssuranceSamplingMessageHeader(text) {
+  const match = SAMPLING_HEADER.exec(text.split('\n', 1)[0] ?? '');
+  if (match === null) return null;
+  const unitOrdinal = Number(match[1]);
+  const totalUnits = Number(match[2]);
+  if (!Number.isSafeInteger(unitOrdinal) || unitOrdinal < 1 || !Number.isSafeInteger(totalUnits) || totalUnits < unitOrdinal) return null;
+  return { unitOrdinal, totalUnits, unitDigest: match[3], sampleDigest: match[4] };
+}
+
+/** A sampling turn's request-digest key: the frozen sampling contract, the anchor unit, its digest and the findings listed. */
+export function assuranceSamplingRequestDigest(promptContractDigest, unitOrdinal, unitDigest, sampleDigest) {
+  if (!DIGEST_PATTERN.test(promptContractDigest) || !DIGEST_PATTERN.test(unitDigest) || !DIGEST_PATTERN.test(sampleDigest)) {
+    throw new Error('ANALYSIS_REQUEST_DIGEST_INVALID');
+  }
+  if (!Number.isSafeInteger(unitOrdinal) || unitOrdinal < 1) throw new Error('ANALYSIS_REQUEST_DIGEST_INVALID');
+  return sha256Hex(canonicalJson({ promptContractDigest, unitOrdinal, unitDigest, sampleDigest }));
+}
+
+/** The findings a sampling turn listed, by reference, in order. */
+export function parseAssuranceSamplingListedRefs(text) {
+  const lines = text.split('\n');
+  const start = lines.indexOf(SAMPLING_FINDING_HEADER);
+  if (start === -1) return [];
+  const refs = [];
+  for (const line of lines.slice(start + 1)) {
+    const match = SAMPLING_FINDING_LINE.exec(line);
+    if (match !== null) refs.push(match[1]);
+  }
+  return refs;
+}
+
+/** The reflection's identity: the Run it reflects on and the digest of that Run's accounting; `null` otherwise. */
+export function parseRunReportReflectionMessageHeader(text) {
+  const match = REFLECTION_HEADER.exec(text.split('\n', 1)[0] ?? '');
+  if (match === null) return null;
+  return { runRecordId: match[1], accountingDigest: match[2] };
+}
+
+/** The reflection's request-digest key: the frozen reflection contract and the Run's accounting alone. */
+export function runReportReflectionRequestDigest(promptContractDigest, accountingDigest) {
+  if (!DIGEST_PATTERN.test(promptContractDigest) || !DIGEST_PATTERN.test(accountingDigest)) throw new Error('ANALYSIS_REQUEST_DIGEST_INVALID');
+  return sha256Hex(canonicalJson({ promptContractDigest, accountingDigest }));
+}
+
 function ownBlockLinesOf(unitMessage) {
   const lines = unitMessage.split('\n');
-  const start = lines.indexOf(OWN_BLOCKS_HEADER);
+  const start = lines.findIndex((line) => [OWN_BLOCKS_HEADER, '以下为本单元需要核查的内容块：', '以下为本单元需要审阅的内容块：', '以下为本单元的内容块：'].includes(line));
   if (start === -1) return [];
   const blocks = [];
   for (const line of lines.slice(start + 1)) {
@@ -133,6 +240,14 @@ export function ownBlockIdsOf(unitMessage) {
 /** Own block texts of a unit message, in order: identity and kind marker stripped, text and nothing else. */
 export function ownBlockTextsOf(unitMessage) {
   return ownBlockLinesOf(unitMessage).map((block) => block.rest.replace(BLOCK_KIND_MARKER, ''));
+}
+
+/** Every block text a message carries, under whichever header: what a response may not echo. */
+function carriedBlockTextsOf(message) {
+  return message.split('\n').flatMap((line) => {
+    const match = BLOCK_LINE.exec(line);
+    return match === null ? [] : [line.slice(match[0].length).replace(BLOCK_KIND_MARKER, '')];
+  });
 }
 
 /** The content-digest key: SHA-256 over the own block texts joined by a newline. */
@@ -185,7 +300,10 @@ export function parseGenerationArguments(argv) {
 
 // --- Ledger and cache -------------------------------------------------------------------------
 
-/** The append-only Provider Test Ledger as parsed lines; a malformed line refuses, never silently skips. */
+/**
+ * The append-only Provider Test Ledger as parsed lines; a malformed line refuses, never silently skips. An invalidation line
+ * (Issue #808) names what it retires instead of carrying an item of its own.
+ */
 export async function readLedgerLines(cacheRoot) {
   let raw;
   try {
@@ -202,52 +320,119 @@ export async function readLedgerLines(cacheRoot) {
     } catch {
       throw new FixtureGenerationError('FIXTURE_GEN/ledger-unreadable', 'Provider Test Ledger 含有无法解析的记录。');
     }
-    refuse(parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) && typeof parsed.itemId === 'string',
-      'FIXTURE_GEN/ledger-unreadable', 'Provider Test Ledger 记录缺少测试项标识。');
+    refuse(parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) &&
+      (typeof parsed.itemId === 'string' || (parsed.kind === 'invalidation' && parsed.target !== null && typeof parsed.target === 'object')),
+    'FIXTURE_GEN/ledger-unreadable', 'Provider Test Ledger 记录缺少测试项标识。');
+    if (parsed.kind === 'invalidation') {
+      const target = parsed.target;
+      refuse(!Array.isArray(target) && (Object.keys(target).length === 1 && LEDGER_ITEM_ID_PATTERN.test(target.itemId) ||
+        Object.keys(target).length === 2 && typeof target.family === 'string' && typeof target.case === 'string'),
+      'FIXTURE_GEN/ledger-unreadable', '作废记录的目标无效。');
+    }
     lines.push(parsed);
   }
   return lines;
 }
 
+function isModelCallLine(line) {
+  return typeof line.itemId === 'string' && (line.kind === undefined || line.kind === 'model-call');
+}
+
+/**
+ * Whether the ledger retired a capture, by the same rule the cache follows: every line of the item stale, an invalidation
+ * naming it, or an invalidation of its validation family and case appended after its capture line.
+ */
+export function captureRetired(lines, itemId) {
+  const own = lines.filter((line) => line.kind !== 'invalidation' && line.itemId === itemId);
+  if (own.length > 0 && own.every((line) => line.stale === true)) return true;
+  const captured = lines.findIndex((line) => line.itemId === itemId && line.outcome === 'transmitted');
+  const purpose = captured === -1 ? undefined : lines[captured].validation;
+  return lines.some((line, index) => {
+    if (line.kind !== 'invalidation') return false;
+    if (typeof line.target.itemId === 'string') return line.target.itemId === itemId;
+    return purpose !== undefined && line.target.family === purpose.family && line.target.case === purpose.case && index > captured;
+  });
+}
+
 /**
  * Which cached result the selector names. A test item id resolves to its latest non-stale line; a
  * request digest resolves through every line carrying it. Either way the lines must agree on one
- * model: two models under one digest are two different cached results, and picking one of them
- * silently is exactly the mistake this tool exists to prevent.
+ * model and, since #808, on one exact namespace: two models, or two endpoints, under one digest are
+ * two different cached results, and picking one of them silently is exactly the mistake this tool
+ * exists to prevent. A replay resolves to the capture it replayed; a capture the ledger retired, or a
+ * call it refused, answers nothing.
  */
 export function resolveLedgerSelection(lines, selector) {
+  const models = lines.filter(isModelCallLine);
   const carrying = DIGEST_PATTERN.test(selector)
-    ? lines.filter((line) => line.requestDigest === selector)
-    : lines.filter((line) => line.itemId === selector);
-  const live = carrying.filter((line) => line.stale !== true);
+    ? models.filter((line) => line.requestDigest === selector)
+    : models.filter((line) => line.itemId === selector);
+  const live = carrying.filter((line) => line.stale !== true && line.outcome !== 'refused');
   refuse(live.length > 0, 'FIXTURE_GEN/item-unknown', 'Provider Test Ledger 中没有该测试项或请求摘要的未作废记录。');
-  const models = new Set(live.map((line) => line.model));
-  refuse(models.size === 1, 'FIXTURE_GEN/model-ambiguous', `该请求摘要在 Provider Test Ledger 中对应 ${models.size} 个模型。`);
+  const modelIds = new Set(live.map((line) => line.model));
+  refuse(modelIds.size === 1, 'FIXTURE_GEN/model-ambiguous', `该请求摘要在 Provider Test Ledger 中对应 ${modelIds.size} 个模型。`);
+  const keys = new Set(live.map((line) => line.cacheKey ?? null));
+  refuse(keys.size === 1, 'FIXTURE_GEN/namespace-ambiguous', `该请求摘要在 Provider Test Ledger 中对应 ${keys.size} 个请求命名空间。`);
   const chosen = live[live.length - 1];
   refuse(typeof chosen.model === 'string' && chosen.model.length > 0, 'FIXTURE_GEN/item-unknown', '账本记录缺少模型标识。');
   refuse(typeof chosen.requestDigest === 'string' && DIGEST_PATTERN.test(chosen.requestDigest),
     'FIXTURE_GEN/item-unknown', '账本记录缺少有效的请求摘要。');
   refuse(typeof chosen.promptContractDigest === 'string' && DIGEST_PATTERN.test(chosen.promptContractDigest),
     'FIXTURE_GEN/item-unknown', '账本记录缺少有效的提示契约摘要。');
+  const replayedFrom = chosen.outcome === 'replayed' && Array.isArray(chosen.validation?.evidence) ? chosen.validation.evidence[0] : undefined;
+  const captureItemId = typeof replayedFrom === 'string' && LEDGER_ITEM_ID_PATTERN.test(replayedFrom) ? replayedFrom : chosen.itemId;
+  refuse(!captureRetired(lines, captureItemId), 'FIXTURE_GEN/item-retired', `测试项 ${captureItemId} 的捕获已被作废，不再生成夹具。`);
+  const captured = models.find((line) => line.itemId === captureItemId && ['transmitted', 'failed'].includes(line.outcome));
+  refuse(captured !== undefined && captured.stale !== true && captured.classification !== 'outcome-unknown' &&
+    captured.model === chosen.model && captured.requestDigest === chosen.requestDigest &&
+    captured.promptContractDigest === chosen.promptContractDigest && Number.isSafeInteger(captured.status) &&
+    typeof captured.recordedAt === 'string' && !Number.isNaN(Date.parse(captured.recordedAt)) && LEDGER_ITEM_ID_PATTERN.test(chosen.itemId),
+  'FIXTURE_GEN/capture-unproven', '账本没有该请求的可确认捕获。');
+  const legacyReplay = chosen.evidenceScope === 'legacy-unnamespaced';
+  const namespaceFields = ['route', 'endpoint', 'requestShape', 'cacheKey', 'generation'];
+  const scoped = !legacyReplay && namespaceFields.some((key) => key in chosen);
+  refuse(!scoped || namespaceFields.every((key) => typeof chosen[key] === 'string' && chosen[key].length > 0),
+    'FIXTURE_GEN/capture-unproven', '请求命名空间记录不完整。');
+  refuse(!scoped || (chosen.cacheKey === namespacedCacheKey(chosen, chosen.requestDigest) &&
+    chosen.generation === evidenceGeneration(chosen, chosen.promptContractDigest) &&
+    namespaceFields.every((key) => chosen[key] === captured[key]) &&
+    typeof chosen.taskPromptContractDigest === 'string' && DIGEST_PATTERN.test(chosen.taskPromptContractDigest) &&
+    chosen.taskPromptContractDigest === captured.taskPromptContractDigest),
+  'FIXTURE_GEN/capture-unproven', '请求命名空间或证据代次不一致。');
   return {
     itemId: chosen.itemId,
+    captureItemId,
     model: chosen.model,
     requestDigest: chosen.requestDigest,
     promptContractDigest: chosen.promptContractDigest,
     quotaExhausted: chosen.classification === 'quota-exhausted',
+    cacheKey: scoped ? chosen.cacheKey : null,
+    generation: scoped ? chosen.generation : null,
+    taskPromptContractDigest: scoped ? chosen.taskPromptContractDigest : null,
+    captured,
+    validation: chosen.validation === undefined ? null : { family: chosen.validation.family, case: chosen.validation.case, step: chosen.validation.step },
   };
 }
 
-/** The entry file of one (model, request digest) pair: the same formula `ProviderResultCache` writes. */
+/** The entry file of one (model, request digest) pair under the legacy key: the formula every entry before #808 was written by. */
 export function cacheEntryPath(cacheRoot, model, requestDigest) {
   const key = sha256Hex(JSON.stringify([model, requestDigest]));
   return join(cacheRoot, PROVIDER_CACHE_DIRECTORY, `${key}.json`);
 }
 
-export async function readCacheEntry(cacheRoot, model, requestDigest) {
+/** The namespaced key of one exact request: the same formula `ProviderResultCache` keys every #808 entry by. */
+export function namespacedCacheKey(namespace, requestDigest) {
+  return sha256Hex(JSON.stringify([PROVIDER_CACHE_NAMESPACE, namespace.route, namespace.endpoint, namespace.requestShape, namespace.model, requestDigest]));
+}
+
+export function evidenceGeneration(namespace, promptContractDigest) {
+  return sha256Hex(JSON.stringify([namespace.route, namespace.endpoint, namespace.requestShape, namespace.model, promptContractDigest]));
+}
+
+async function readEntryFile(path) {
   let raw;
   try {
-    raw = await readFile(cacheEntryPath(cacheRoot, model, requestDigest), 'utf8');
+    raw = await readFile(path, 'utf8');
   } catch {
     throw new FixtureGenerationError('FIXTURE_GEN/entry-missing', 'Provider Result Cache 中没有该模型与请求摘要的条目。');
   }
@@ -262,6 +447,40 @@ export async function readCacheEntry(cacheRoot, model, requestDigest) {
     typeof parsed.requestBody === 'string' && Number.isSafeInteger(parsed.status) && parsed.status >= 100,
   'FIXTURE_GEN/entry-invalid', '缓存条目缺少请求体或状态。');
   return parsed;
+}
+
+/** The legacy entry of one (model, request digest) pair. */
+export async function readCacheEntry(cacheRoot, model, requestDigest) {
+  return readEntryFile(cacheEntryPath(cacheRoot, model, requestDigest));
+}
+
+/**
+ * The entry a selection names: under its namespaced key when its line carries one — the entry must then say it is that exact
+ * request — and under the legacy key otherwise.
+ */
+export async function readSelectedEntry(cacheRoot, selection) {
+  const entry = selection.cacheKey === null
+    ? await readCacheEntry(cacheRoot, selection.model, selection.requestDigest)
+    : await readEntryFile(join(cacheRoot, PROVIDER_CACHE_DIRECTORY, `${selection.cacheKey}.json`));
+  refuse(entry.model === selection.model && entry.requestDigest === selection.requestDigest && sha256Hex(entry.requestBody) === selection.requestDigest &&
+    entry.status === selection.captured.status && typeof entry.transmittedAt === 'string' && !Number.isNaN(Date.parse(entry.transmittedAt)),
+  'FIXTURE_GEN/entry-invalid', '缓存条目与账本记录的请求不一致。');
+  const responseDigest = sha256Hex(JSON.stringify(entry.response) ?? 'null');
+  refuse(!('responseDigest' in entry) || entry.responseDigest === responseDigest, 'FIXTURE_GEN/entry-invalid', '缓存响应摘要不一致。');
+  if (selection.cacheKey !== null) {
+    refuse(entry.cacheKey === selection.cacheKey && namespacedCacheKey(entry, selection.requestDigest) === selection.cacheKey &&
+      entry.generation === selection.generation && entry.promptContractDigest === selection.promptContractDigest &&
+      entry.taskPromptContractDigest === selection.taskPromptContractDigest &&
+      entry.itemId === selection.captureItemId && entry.responseDigest === responseDigest &&
+      ['route', 'endpoint', 'requestShape'].every((key) => entry[key] === selection.captured[key]) &&
+      entry.validation !== undefined && ['family', 'case', 'step'].every((key) =>
+        typeof entry.validation[key] === 'string' && entry.validation[key] === selection.captured.validation?.[key]),
+    'FIXTURE_GEN/entry-invalid', '缓存捕获身份、契约或证据代次不一致。');
+  } else {
+    refuse(!['cacheKey', 'route', 'endpoint', 'requestShape', 'generation'].some((key) => key in entry),
+      'FIXTURE_GEN/entry-invalid', '旧式缓存条目含有未经证明的命名空间。');
+  }
+  return entry;
 }
 
 // --- The request ------------------------------------------------------------------------------
@@ -279,11 +498,12 @@ function chatMessageText(content) {
 }
 
 /**
- * The Analysis Unit the cached request asked about: the last `user` message of an
- * `openai-chat-completions` body, with its header and its own blocks read exactly as the prompt
- * contract wrote them. Any other request shape refuses rather than being guessed at.
+ * What the cached request asked about: the last `user` message of an `openai-chat-completions` body, read as an Analysis Unit,
+ * the reduction, a sampling turn or the reflection by the header only that subject writes. Its fixture key is that subject's
+ * own: a unit's ordinal with its request and content digests, or ordinal `0` with the digest of the subject's own contract.
+ * Any other request shape refuses rather than being guessed at.
  */
-export function parseCachedRequest(requestBody) {
+export function parseCachedRequest(requestBody, promptContractDigest) {
   let body;
   try {
     body = JSON.parse(requestBody);
@@ -293,19 +513,91 @@ export function parseCachedRequest(requestBody) {
   refuse(body !== null && typeof body === 'object' && !Array.isArray(body) && Array.isArray(body.messages) && body.messages.length > 0,
     'FIXTURE_GEN/request-shape-unsupported', '缓存条目不是 openai-chat-completions 请求体。');
   let unitMessage = null;
+  const carriedMessages = [];
   for (const message of body.messages) {
     refuse(message !== null && typeof message === 'object' && !Array.isArray(message) && typeof message.role === 'string',
       'FIXTURE_GEN/request-shape-unsupported', '请求体中的消息缺少角色。');
     const text = chatMessageText(message.content);
     refuse(text !== null, 'FIXTURE_GEN/request-shape-unsupported', '请求体中的消息内容既不是字符串也不是文本块序列。');
-    if (message.role === 'user') unitMessage = text;
+    if (message.role === 'user') { unitMessage = text; carriedMessages.push(text); }
   }
   refuse(unitMessage !== null, 'FIXTURE_GEN/request-shape-unsupported', '请求体不含任何 user 消息。');
-  const header = parseUnitMessageHeader(unitMessage);
-  refuse(header !== null, 'FIXTURE_GEN/unit-message-unrecognized', '最后一条 user 消息不含可识别的分析单元消息头。');
-  const ownBlockTexts = ownBlockTextsOf(unitMessage);
-  refuse(ownBlockTexts.length > 0, 'FIXTURE_GEN/unit-message-unrecognized', '分析单元消息不含任何本单元内容块。');
-  return { unitMessage, header, ownBlockTexts };
+  const carriedBlockTexts = carriedBlockTextsOf(unitMessage);
+  // Every carried user input, including prior model results and selected dialogue text, participates in
+  // sanitization. The exact request remains only in the external cache.
+  carriedBlockTexts.push(...carriedMessages);
+  const task = parseTaskHeader(unitMessage, promptContractDigest);
+  const header = parseUnitMessageHeader(unitMessage) ?? task?.header ?? null;
+  if (header !== null) {
+    const ownBlockTexts = ownBlockTextsOf(unitMessage);
+    refuse(ownBlockTexts.length > 0, 'FIXTURE_GEN/unit-message-unrecognized', '分析单元消息不含任何本单元内容块。');
+    return {
+      subject: task?.subject ?? 'unit', unitMessage, header, ownBlockTexts, carriedBlockTexts,
+      unitOrdinal: header.ordinal,
+      requestDigest: task?.requestDigest ?? (promptContractDigest === undefined ? null : unitRequestDigest(promptContractDigest, header.ordinal, header.unitDigest)),
+      contentDigest: unitContentDigest(ownBlockTexts),
+      identities: ownBlockIdsOf(unitMessage).map((identity, index) => ({ placeholder: `{{block:${index + 1}}}`, identity })),
+    };
+  }
+  if (task !== null) return { ...task, unitMessage, ownBlockTexts: [], carriedBlockTexts, contentDigest: null, identities: [] };
+  const reduction = parseCrossUnitMessageHeader(unitMessage);
+  if (reduction !== null) {
+    refuse(promptContractDigest === BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, 'FIXTURE_GEN/contract-mismatch', '归纳捕获契约不一致。');
+    const identities = [...parseCrossUnitCitedBlocks(unitMessage)].flatMap(([unit, blockIds]) =>
+      blockIds.map((identity, index) => ({ placeholder: `{{unit:${unit}:block:${index + 1}}}`, identity })));
+    return {
+      subject: 'reduction', unitMessage, header: null, ownBlockTexts: [], carriedBlockTexts, unitOrdinal: 0, contentDigest: null, identities,
+      requestDigest: crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, reduction.unitSetDigest),
+    };
+  }
+  const sampling = parseAssuranceSamplingMessageHeader(unitMessage);
+  if (sampling !== null) {
+    refuse(promptContractDigest === ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, 'FIXTURE_GEN/contract-mismatch', '抽样捕获契约不一致。');
+    return {
+      subject: 'sampling', unitMessage, header: null, ownBlockTexts: [], carriedBlockTexts, unitOrdinal: 0, contentDigest: null,
+      identities: parseAssuranceSamplingListedRefs(unitMessage).map((identity, index) => ({ placeholder: `{{ref:${index + 1}}}`, identity })),
+      requestDigest: assuranceSamplingRequestDigest(ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, sampling.unitOrdinal, sampling.unitDigest, sampling.sampleDigest),
+    };
+  }
+  const reflection = parseRunReportReflectionMessageHeader(unitMessage);
+  if (reflection !== null) {
+    refuse(promptContractDigest === RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, 'FIXTURE_GEN/contract-mismatch', '反思捕获契约不一致。');
+    return {
+      subject: 'reflection', unitMessage, header: null, ownBlockTexts: [], carriedBlockTexts, unitOrdinal: 0, contentDigest: null, identities: [],
+      requestDigest: runReportReflectionRequestDigest(RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, reflection.accountingDigest),
+    };
+  }
+  throw new FixtureGenerationError('FIXTURE_GEN/unit-message-unrecognized', '最后一条 user 消息不是可识别的分析单元、跨单元归纳、保证抽样或运行反思消息。');
+}
+
+/** Closed header families already consumed by the deterministic adapter; no new Task support. */
+export function parseTaskHeader(text, promptContractDigest) {
+  const first = text.split('\n', 1)[0] ?? '';
+  const unit = /^(事实核查|审阅|评估|审稿意见|评语重写|写作)单元 (\d+)\/(\d+) · (?:类别 ([a-z][a-z0-9]*(?:-[a-z0-9]+)*) · )?单元摘要 ([0-9a-f]{64})$/u.exec(first);
+  if (unit !== null) {
+    const ordinal = Number(unit[2]);
+    const total = Number(unit[3]);
+    if (!Number.isSafeInteger(ordinal) || ordinal < 1 || !Number.isSafeInteger(total) || total < ordinal ||
+      ((unit[1] === '审阅') !== (unit[4] !== undefined)) || (unit[4]?.length ?? 0) > 48) return null;
+    const subject = { 事实核查: 'factual-unit', 审阅: 'review-unit', 评估: 'evaluation-unit', 审稿意见: 'readers-unit', 评语重写: 'rewrite-unit', 写作: 'writing-unit' }[unit[1]];
+    const body = { promptContractDigest, ...(unit[4] === undefined ? {} : { categoryId: unit[4] }),
+      ...(['评估', '审稿意见', '评语重写', '写作'].includes(unit[1]) ? { step: 'unit' } : {}), unitOrdinal: ordinal, unitDigest: unit[5] };
+    return { subject, header: { ordinal, total, unitDigest: unit[5] }, unitOrdinal: ordinal, requestDigest: sha256Hex(canonicalJson(body)) };
+  }
+  const synthesis = /^(评估|审稿意见|评语重写|写作)综合 (\d+)\/(\d+) · (依据|段落)摘要 ([0-9a-f]{64})$/u.exec(first);
+  if (synthesis !== null) {
+    const closed = Number(synthesis[2]);
+    const total = Number(synthesis[3]);
+    const passage = ['审稿意见', '写作'].includes(synthesis[1]);
+    if (!Number.isSafeInteger(closed) || closed < 1 || !Number.isSafeInteger(total) || total < closed ||
+      synthesis[4] !== (passage ? '段落' : '依据')) return null;
+    return { subject: 'task-synthesis', header: null, unitOrdinal: 0,
+      requestDigest: sha256Hex(canonicalJson({ promptContractDigest, step: 'synthesis', [passage ? 'passageSetDigest' : 'observationSetDigest']: synthesis[5] })) };
+  }
+  const dialogue = /^AI7 编辑对话 · (提问|接着回答) · 问题摘要 ([0-9a-f]{64})$/u.exec(first);
+  if (dialogue !== null) return { subject: 'dialogue', header: null, unitOrdinal: 0,
+    requestDigest: sha256Hex(`ai7.editorial-dialogue/1\u0000${promptContractDigest}\u0000${dialogue[1] === '提问' ? 'ask' : 'continue'}\u0000${dialogue[2]}`) };
+  return null;
 }
 
 // --- Manuscript echo --------------------------------------------------------------------------
@@ -326,6 +618,22 @@ export function replaceOwnBlockTexts(text, ownBlockTexts) {
   let replaced = text;
   for (const block of ordered) replaced = replaced.split(block.value).join(block.placeholder);
   return replaced;
+}
+
+/**
+ * Replace every captured identity with the placeholder the deterministic adapter fills from the request it answers, longest
+ * identity first and only as a whole token, so a short finding reference never rewrites a longer word that contains it. A
+ * block identity left over afterwards is one the request never named — another import's, or invented — and no request could
+ * ever fill it, so it refuses rather than being kept.
+ */
+export function remapIdentities(text, identities) {
+  let remapped = text;
+  for (const { placeholder, identity } of [...identities].sort((left, right) => right.identity.length - left.identity.length)) {
+    remapped = remapped.replace(identityToken(identity), placeholder);
+  }
+  const stray = remapped.match(ANY_BLOCK_IDENTITY);
+  refuse(stray === null, 'FIXTURE_GEN/identity-unmapped', `响应含有 ${stray?.length ?? 0} 个请求中没有的内容块标识。`);
+  return remapped;
 }
 
 /**
@@ -366,8 +674,11 @@ export function findManuscriptEcho(value, ownBlockTexts) {
       return null;
     }
     if (node !== null && typeof node === 'object') {
-      for (const [key, item] of Object.entries(node)) {
-        const found = visit(item, `${path}.${key}`);
+      for (const [index, [key, item]] of Object.entries(node).entries()) {
+        const keyRun = longestEchoRun(key, collapsedBlocks);
+        if (keyRun !== null) return { path: `${path}.[key:${index + 1}]`, runLength: keyRun };
+        const label = /^[a-zA-Z_][a-zA-Z0-9_]{0,63}$/u.test(key) ? key : `[field:${index + 1}]`;
+        const found = visit(item, `${path}.${label}`);
         if (found !== null) return found;
       }
       return null;
@@ -375,6 +686,20 @@ export function findManuscriptEcho(value, ownBlockTexts) {
     return null;
   };
   return visit(value, '$');
+}
+
+/**
+ * One identity as a whole token: not preceded or followed by another identity character. Identities are `[A-Za-z0-9_-]` only
+ * (block identities and finding references alike), none of which is special in a pattern outside a class.
+ */
+function identityToken(identity) {
+  return new RegExp(`(?<![A-Za-z0-9_-])${identity}(?![A-Za-z0-9_-])`, 'gu');
+}
+
+/** The answer text of an `openai-chat-completions` response, or `null`. */
+function responseText(response) {
+  const message = response !== null && typeof response === 'object' && Array.isArray(response.choices) ? response.choices[0]?.message : undefined;
+  return message !== null && typeof message === 'object' && typeof message.content === 'string' ? message.content : null;
 }
 
 function mapStrings(node, map) {
@@ -389,9 +714,10 @@ function mapStrings(node, map) {
 /**
  * The unit-result text as a fixture may carry it: every string value with whole own blocks replaced
  * by their placeholders, refused outright if anything manuscript-shaped survives. A text that is not
- * JSON is treated as one field, which is the honest reading of a response that did not parse.
+ * JSON is treated as one field, which is the honest reading of a response that did not parse. The
+ * echo is measured against every block text the request carried, under whichever header.
  */
-export function redactUnitResultText(text, ownBlockTexts) {
+export function redactUnitResultText(text, ownBlockTexts, carriedBlockTexts = ownBlockTexts) {
   let parsed;
   try {
     parsed = JSON.parse(text);
@@ -401,7 +727,7 @@ export function redactUnitResultText(text, ownBlockTexts) {
   const replaced = parsed === undefined
     ? replaceOwnBlockTexts(text, ownBlockTexts)
     : mapStrings(parsed, (field) => replaceOwnBlockTexts(field, ownBlockTexts));
-  const echo = findManuscriptEcho(replaced, ownBlockTexts);
+  const echo = findManuscriptEcho(replaced, carriedBlockTexts);
   if (echo !== null) {
     throw new FixtureGenerationError('FIXTURE_GEN/manuscript-echo',
       `字段 ${echo.path} 与本单元内容块仍有 ${echo.runLength} 个字符重合。`);
@@ -414,10 +740,11 @@ export function redactUnitResultText(text, ownBlockTexts) {
 /**
  * One cached result as a fixture response. A limit is a limit whichever way the ledger and the
  * status say so; any other non-200 becomes an adapter failure named after its status; and a 200 must
- * actually carry a unit result, with the usage the ceiling is measured against. Absent usage refuses
- * rather than being written as zeros, which would silently make the fixture free to replay.
+ * actually carry a result, with the usage the ceiling is measured against. Absent usage refuses
+ * rather than being written as zeros, which would silently make the fixture free to replay. The
+ * captured identities are remapped before the echo check, so the check reads what the file will say.
  */
-export function mapCachedResponse(entry, selection, ownBlockTexts) {
+export function mapCachedResponse(entry, selection, ownBlockTexts, request = { identities: [], carriedBlockTexts: ownBlockTexts }) {
   if (selection.quotaExhausted || entry.status === 429) {
     return { kind: 'quota-exceeded', message: QUOTA_MESSAGE, status: entry.status };
   }
@@ -436,12 +763,20 @@ export function mapCachedResponse(entry, selection, ownBlockTexts) {
   const outputTokens = usage === null || typeof usage !== 'object' ? undefined : usage.completion_tokens;
   refuse(Number.isSafeInteger(inputTokens) && inputTokens >= 0 && Number.isSafeInteger(outputTokens) && outputTokens >= 0,
     'FIXTURE_GEN/usage-absent', '缓存条目的响应不含可用的 usage 计数。');
-  return { kind: 'unit-result', text: redactUnitResultText(text, ownBlockTexts), usage: { inputTokens, outputTokens } };
+  const remapped = remapIdentities(text, request.identities);
+  const sanitized = redactUnitResultText(remapped, ownBlockTexts, request.carriedBlockTexts);
+  refuse(sanitized.isWellFormed() && sanitized.length > 0 && sanitized.length <= 64 * 1024, 'FIXTURE_GEN/response-shape-unsupported', '归一化响应超出夹具文本边界。');
+  const points = Array.from(sanitized);
+  const chunks = [];
+  for (let index = 0; index < points.length; index += 2_048) chunks.push(points.slice(index, index + 2_048).join(''));
+  return request.subject === 'dialogue'
+    ? { kind: 'answer-chunks', chunks, usage: { inputTokens, outputTokens } }
+    : { kind: 'unit-result', text: sanitized, usage: { inputTokens, outputTokens } };
 }
 
 // --- Assembly ---------------------------------------------------------------------------------
 
-/** The fixture document. Its description carries the provenance a reviewer needs to trace it back. */
+/** The fixture document. Its description carries the provenance a reviewer needs to trace it back; its entry, all of it. */
 export function assembleFixture(parts) {
   return {
     schema: MODEL_FIXTURE_SCHEMA,
@@ -453,27 +788,80 @@ export function assembleFixture(parts) {
     entries: [{
       unitOrdinal: parts.unitOrdinal,
       requestDigest: parts.requestDigest,
-      contentDigest: parts.contentDigest,
+      ...(parts.contentDigest === null || parts.contentDigest === undefined ? {} : { contentDigest: parts.contentDigest }),
       response: parts.response,
+      ...(parts.capture === undefined ? {} : { capture: parts.capture }),
     }],
+  };
+}
+
+/**
+ * Where the converted entry came from, as `ai7.model-fixture/1` keeps it: the capture's identity and conditions, the digests of
+ * its exact request and response, its development validation, and the identities the response's placeholders replace.
+ */
+export function captureProvenance(entry, selection, request) {
+  const namespaced = typeof entry.cacheKey === 'string';
+  const answered = responseText(entry.response) ?? '';
+  const identityMap = request.identities.filter(({ identity }) => identityToken(identity).test(answered));
+  return {
+    subject: request.subject,
+    itemId: typeof entry.itemId === 'string' ? entry.itemId : selection.captureItemId,
+    selectedItemId: selection.itemId,
+    evidenceScope: namespaced ? 'namespaced' : 'legacy-unnamespaced',
+    route: namespaced ? entry.route : null,
+    endpoint: namespaced ? entry.endpoint : null,
+    requestShape: namespaced ? entry.requestShape : null,
+    model: selection.model,
+    promptContractDigest: selection.promptContractDigest,
+    taskPromptContractDigest: namespaced ? entry.taskPromptContractDigest : null,
+    capturedAt: entry.transmittedAt,
+    providerRequestDigest: sha256Hex(entry.requestBody),
+    providerResponseDigest: typeof entry.responseDigest === 'string' ? entry.responseDigest : sha256Hex(JSON.stringify(entry.response) ?? 'null'),
+    responseDigestOrigin: namespaced ? 'recorded' : 'computed-legacy',
+    cacheKey: namespaced ? entry.cacheKey : null,
+    generation: namespaced ? entry.generation : null,
+    validation: namespaced ? entry.validation : null,
+    identityMap,
   };
 }
 
 /** Everything but the write: a caller that refuses here has left nothing on disk. */
 export async function generateModelFixture(request, now = new Date()) {
   const selection = resolveLedgerSelection(await readLedgerLines(request.cacheRoot), request.selector);
-  const entry = await readCacheEntry(request.cacheRoot, selection.model, selection.requestDigest);
-  const { header, ownBlockTexts } = parseCachedRequest(entry.requestBody);
+  const entry = await readSelectedEntry(request.cacheRoot, selection);
+  const parsed = parseCachedRequest(entry.requestBody, selection.promptContractDigest);
+  if (selection.cacheKey !== null && (parsed.unitOrdinal > 0 || ['task-synthesis', 'dialogue'].includes(parsed.subject))) {
+    refuse(selection.taskPromptContractDigest === selection.promptContractDigest, 'FIXTURE_GEN/contract-mismatch', '任务捕获契约与阶段契约不一致。');
+  }
+  refuse(JSON.parse(entry.requestBody).model === selection.model, 'FIXTURE_GEN/entry-invalid', '请求体模型与捕获模型不一致。');
+  refuse(/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,127}$/u.test(selection.model), 'FIXTURE_GEN/entry-invalid', '模型标识无效。');
+  if (selection.cacheKey !== null) {
+    let endpoint;
+    try { endpoint = new URL(entry.endpoint); } catch { /* Refuse below without echoing the URL. */ }
+    refuse(endpoint !== undefined && endpoint.protocol === 'https:' && endpoint.username === '' && endpoint.password === '' &&
+      endpoint.search === '' && endpoint.hash === '' && /^[a-z][a-z0-9-]{0,63}$/u.test(entry.route) &&
+      entry.requestShape === 'openai-chat-completions', 'FIXTURE_GEN/entry-invalid', '捕获路由或请求形态无效。');
+  }
+  refuse(findManuscriptEcho(request.description, parsed.carriedBlockTexts) === null, 'FIXTURE_GEN/manuscript-echo', '夹具描述仍包含请求内容。');
+  const response = mapCachedResponse(entry, selection, parsed.ownBlockTexts, parsed);
+  const capture = captureProvenance(entry, selection, parsed);
+  capture.identityMap = parsed.identities.filter(({ placeholder }) => JSON.stringify(response).includes(placeholder));
+  const placeholders = JSON.stringify(response).match(/\{\{[^{}]+\}\}/gu) ?? [];
+  refuse(placeholders.every((placeholder) => capture.identityMap.some((mapping) => mapping.placeholder === placeholder)) &&
+    new Set(capture.identityMap.map((mapping) => mapping.identity)).size === capture.identityMap.length && capture.identityMap.length <= 4_096,
+  'FIXTURE_GEN/identity-unmapped', '响应含有未经映射或不唯一的占位符。');
+  capture.fixtureResponseDigest = sha256Hex(canonicalJson(response));
   return assembleFixture({
     identity: request.identity,
     description: request.description,
     itemId: selection.itemId,
     model: selection.model,
     generatedOn: now.toISOString().slice(0, 10),
-    unitOrdinal: header.ordinal,
-    requestDigest: unitRequestDigest(selection.promptContractDigest, header.ordinal, header.unitDigest),
-    contentDigest: unitContentDigest(ownBlockTexts),
-    response: mapCachedResponse(entry, selection, ownBlockTexts),
+    unitOrdinal: parsed.unitOrdinal,
+    requestDigest: parsed.requestDigest,
+    contentDigest: parsed.contentDigest,
+    response,
+    capture,
   });
 }
 

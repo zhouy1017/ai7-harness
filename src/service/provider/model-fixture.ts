@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import { DIGEST_PATTERN, hasExactKeys, isRecord, sha256Hex } from '../analysis/canonical.js';
+import { canonicalJson, DIGEST_PATTERN, hasExactKeys, isRecord, sha256Hex } from '../analysis/canonical.js';
 
 /**
  * Hand-written synthetic deterministic model fixtures (`tests/fixtures/model/<identity>.json`): one
@@ -26,6 +26,12 @@ import { DIGEST_PATTERN, hasExactKeys, isRecord, sha256Hex } from '../analysis/c
  * import of the same manuscript. Nothing production-facing reads it — the deterministic adapter
  * resolves by content digest only when a test constructs it that way — so the key set of every
  * request-digest entry, and the schema version, are unchanged.
+ *
+ * An entry the fixture converter wrote from a Provider Test Ledger capture (Issue #808) additionally carries its `capture`:
+ * the item that captured it, which subject it answers (a unit, the reduction, a sampling turn or the reflection), the route,
+ * endpoint, request shape, model and prompt contract it was captured under, when, the digests of the exact provider request
+ * and response, the development validation it belonged to, and every identity the converter replaced with a placeholder. It
+ * is provenance only: nothing resolves by it, and an entry without it reads exactly as before.
  */
 export const MODEL_FIXTURE_SCHEMA = 'ai7.model-fixture/1' as const;
 export const FIXTURE_IDENTITY_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -35,7 +41,16 @@ const MAX_FIXTURE_ATTEMPT = 8;
 /** The most text deltas one dialogue answer streams. */
 const MAX_ANSWER_CHUNKS = 64;
 /** The keys an entry may carry beside the three it must; every other key is still refused. */
-const OPTIONAL_ENTRY_KEYS = ['attempt', 'contentDigest'] as const;
+const OPTIONAL_ENTRY_KEYS = ['attempt', 'contentDigest', 'capture'] as const;
+const CAPTURE_KEYS = [
+  'subject', 'itemId', 'selectedItemId', 'evidenceScope', 'route', 'endpoint', 'requestShape', 'model', 'promptContractDigest', 'taskPromptContractDigest',
+  'capturedAt', 'providerRequestDigest', 'providerResponseDigest', 'validation', 'identityMap', 'cacheKey', 'generation', 'fixtureResponseDigest', 'responseDigestOrigin',
+] as const;
+const CAPTURE_SUBJECTS = ['unit', 'reduction', 'sampling', 'reflection', 'factual-unit', 'review-unit', 'evaluation-unit', 'readers-unit', 'rewrite-unit', 'writing-unit', 'task-synthesis', 'dialogue'] as const;
+const CAPTURE_ITEM_PATTERN = /^[A-Za-z0-9]+\/[a-z0-9-]+\/[1-9][0-9]{0,5}$/u;
+const CAPTURE_PLACEHOLDER_PATTERN = /^\{\{(?:block:[1-9][0-9]{0,3}|unit:[1-9][0-9]{0,3}:block:[1-9][0-9]{0,3}|ref:[1-9][0-9]{0,3})\}\}$/u;
+const CAPTURE_IDENTITY_PATTERN = /^[A-Za-z0-9_-]{1,64}$/u;
+const MAX_IDENTITY_MAP = 4_096;
 /** The keys a fixture may carry beside the seven it must; every other key is still refused. */
 const OPTIONAL_FIXTURE_KEYS = ['provenance'] as const;
 
@@ -65,6 +80,39 @@ export type ModelFixtureResponse =
    */
   | { readonly kind: 'outcome-unknown'; readonly message: string };
 
+/**
+ * Where a converted entry came from (Issue #808): the capture's identity and conditions, never its content. A legacy capture —
+ * cached before the cache recorded its route, endpoint and request shape — says so and leaves those `null`.
+ */
+export interface ModelFixtureCapture {
+  readonly subject: (typeof CAPTURE_SUBJECTS)[number];
+  /** The test item that captured the response. */
+  readonly itemId: string;
+  /** The test item the converter was pointed at: the capture itself, or a replay of it. */
+  readonly selectedItemId: string;
+  readonly evidenceScope: 'namespaced' | 'legacy-unnamespaced';
+  readonly route: string | null;
+  readonly endpoint: string | null;
+  readonly requestShape: string | null;
+  readonly model: string;
+  readonly promptContractDigest: string;
+  readonly taskPromptContractDigest: string | null;
+  readonly capturedAt: string;
+  /** SHA-256 over the exact canonical request body that was sent. */
+  readonly providerRequestDigest: string;
+  /** SHA-256 over the response as the cache entry keeps it. */
+  readonly providerResponseDigest: string;
+  /** Legacy caches did not record a response hash; conversion computes it without claiming historical integrity. */
+  readonly responseDigestOrigin: 'recorded' | 'computed-legacy';
+  readonly cacheKey: string | null;
+  readonly generation: string | null;
+  /** Integrity of the sanitized response; distinct from the original Provider response digest. */
+  readonly fixtureResponseDigest: string;
+  readonly validation: { readonly family: string; readonly case: string; readonly step: string } | null;
+  /** Every captured identity the converter replaced, with the placeholder that stands for it in the response. */
+  readonly identityMap: ReadonlyArray<{ readonly placeholder: string; readonly identity: string }>;
+}
+
 export interface ModelFixtureEntry {
   /** The Analysis Unit this entry answers, or `0` for the Run's one cross-unit reduction. */
   readonly unitOrdinal: number;
@@ -74,6 +122,8 @@ export interface ModelFixtureEntry {
   /** The digest over this unit's own block texts, or `null` for an entry keyed by request digest alone. */
   readonly contentDigest: string | null;
   readonly response: ModelFixtureResponse;
+  /** Present only on an entry converted from a captured response. */
+  readonly capture?: ModelFixtureCapture;
 }
 
 export interface ModelFixture {
@@ -170,6 +220,72 @@ function parseResponse(value: unknown): ModelFixtureResponse {
   }
 }
 
+function boundedText(value: unknown, maximum: number): value is string {
+  return wellFormed(value, maximum) && value.length > 0;
+}
+
+function parseCapture(value: unknown): ModelFixtureCapture {
+  requireFixture(isRecord(value) && hasExactKeys(value, CAPTURE_KEYS), '夹具条目的捕获来源键集合无效。');
+  requireFixture((CAPTURE_SUBJECTS as ReadonlyArray<unknown>).includes(value.subject) &&
+    typeof value.itemId === 'string' && CAPTURE_ITEM_PATTERN.test(value.itemId) &&
+    typeof value.selectedItemId === 'string' && CAPTURE_ITEM_PATTERN.test(value.selectedItemId) &&
+    (value.evidenceScope === 'namespaced' || value.evidenceScope === 'legacy-unnamespaced'), '夹具条目的捕获来源无效。');
+  const namespaced = value.evidenceScope === 'namespaced';
+  requireFixture(namespaced ? typeof value.taskPromptContractDigest === 'string' && DIGEST_PATTERN.test(value.taskPromptContractDigest)
+    : value.taskPromptContractDigest === null, '夹具条目的任务契约来源无效。');
+  requireFixture(value.responseDigestOrigin === (namespaced ? 'recorded' : 'computed-legacy'), '夹具条目的响应摘要来源无效。');
+  for (const key of ['route', 'endpoint', 'requestShape'] as const) {
+    requireFixture(namespaced ? boundedText(value[key], 512) : value[key] === null, '夹具条目的捕获路由、端点或请求形态无效。');
+  }
+  requireFixture(boundedText(value.model, 128) && typeof value.promptContractDigest === 'string' && DIGEST_PATTERN.test(value.promptContractDigest) &&
+    boundedText(value.capturedAt, 64) && !Number.isNaN(Date.parse(value.capturedAt)) &&
+    typeof value.providerRequestDigest === 'string' && DIGEST_PATTERN.test(value.providerRequestDigest) &&
+    typeof value.providerResponseDigest === 'string' && DIGEST_PATTERN.test(value.providerResponseDigest) &&
+    typeof value.fixtureResponseDigest === 'string' && DIGEST_PATTERN.test(value.fixtureResponseDigest), '夹具条目的捕获摘要无效。');
+  requireFixture(namespaced ? (typeof value.cacheKey === 'string' && value.cacheKey === sha256Hex(JSON.stringify([
+    'ai7.provider-cache/2', value.route, value.endpoint, value.requestShape, value.model, value.providerRequestDigest,
+  ])) && typeof value.generation === 'string' && value.generation === sha256Hex(JSON.stringify([
+    value.route, value.endpoint, value.requestShape, value.model, value.promptContractDigest,
+  ]))) : value.cacheKey === null && value.generation === null, '夹具条目的捕获命名空间或代次无效。');
+  const validation = value.validation;
+  requireFixture((!namespaced && validation === null) || (isRecord(validation) && hasExactKeys(validation, ['family', 'case', 'step']) &&
+    boundedText(validation.family, 48) && boundedText(validation.case, 48) && boundedText(validation.step, 128)), '夹具条目的验证用途无效。');
+  if (namespaced) {
+    let endpoint: URL | undefined;
+    try { endpoint = new URL(value.endpoint as string); } catch { /* Refuse without printing a payload field. */ }
+    requireFixture(endpoint !== undefined && endpoint.protocol === 'https:' && endpoint.username === '' && endpoint.password === '' &&
+      endpoint.search === '' && endpoint.hash === '' && /^[a-z][a-z0-9-]{0,63}$/u.test(value.route as string) &&
+      value.requestShape === 'openai-chat-completions', '夹具条目的捕获路由或形态无效。');
+  }
+  requireFixture(Array.isArray(value.identityMap) && value.identityMap.length <= MAX_IDENTITY_MAP && value.identityMap.every((mapping) =>
+    isRecord(mapping) && hasExactKeys(mapping, ['placeholder', 'identity']) &&
+    typeof mapping.placeholder === 'string' && CAPTURE_PLACEHOLDER_PATTERN.test(mapping.placeholder) &&
+    typeof mapping.identity === 'string' && CAPTURE_IDENTITY_PATTERN.test(mapping.identity)), '夹具条目的标识映射无效。');
+  requireFixture(new Set(value.identityMap.map((mapping) => mapping.placeholder)).size === value.identityMap.length &&
+    new Set(value.identityMap.map((mapping) => mapping.identity)).size === value.identityMap.length, '夹具条目的标识映射重复。');
+  return {
+    subject: value.subject as ModelFixtureCapture['subject'],
+    itemId: value.itemId,
+    selectedItemId: value.selectedItemId,
+    evidenceScope: value.evidenceScope as ModelFixtureCapture['evidenceScope'],
+    route: value.route as string | null,
+    endpoint: value.endpoint as string | null,
+    requestShape: value.requestShape as string | null,
+    model: value.model,
+    promptContractDigest: value.promptContractDigest,
+    taskPromptContractDigest: value.taskPromptContractDigest as string | null,
+    capturedAt: value.capturedAt,
+    providerRequestDigest: value.providerRequestDigest,
+    providerResponseDigest: value.providerResponseDigest,
+    responseDigestOrigin: value.responseDigestOrigin as ModelFixtureCapture['responseDigestOrigin'],
+    cacheKey: value.cacheKey as string | null,
+    generation: value.generation as string | null,
+    fixtureResponseDigest: value.fixtureResponseDigest,
+    validation: validation === null ? null : { family: validation.family as string, case: validation.case as string, step: validation.step as string },
+    identityMap: (value.identityMap as Array<{ placeholder: string; identity: string }>).map((mapping) => ({ placeholder: mapping.placeholder, identity: mapping.identity })),
+  };
+}
+
 export function parseModelFixture(value: unknown): ModelFixture {
   // The seven required keys, plus whichever optional key this fixture actually carries: a fixture
   // naming none is the exact key set the schema has always accepted, and an unknown key is refused.
@@ -201,12 +317,31 @@ export function parseModelFixture(value: unknown): ModelFixture {
     const key = fixtureEntryKey(entry.unitOrdinal as number, entry.requestDigest, attempt as number | null);
     requireFixture(!seen.has(key), '夹具条目单元序号与请求摘要重复（含尝试序号）。');
     seen.add(key);
+    const response = parseResponse(entry.response);
+    const capture = 'capture' in entry ? parseCapture(entry.capture) : undefined;
+    if (capture !== undefined) {
+      requireFixture(capture.fixtureResponseDigest === sha256Hex(canonicalJson(response)), '夹具条目的响应与捕获摘要不一致。');
+      const unitSubject = capture.subject === 'unit' || capture.subject.endsWith('-unit');
+      requireFixture(capture.taskPromptContractDigest === null || !(unitSubject || ['task-synthesis', 'dialogue'].includes(capture.subject)) ||
+        capture.taskPromptContractDigest === capture.promptContractDigest, '夹具条目的任务与阶段契约不一致。');
+      requireFixture(unitSubject ? (entry.unitOrdinal as number) > 0 : entry.unitOrdinal === 0, '夹具条目的捕获契约序号不一致。');
+      requireFixture(capture.subject === 'dialogue' ? response.kind !== 'unit-result' : response.kind !== 'answer-chunks', '夹具条目的捕获响应契约不一致。');
+      const serializedResponse = JSON.stringify(response);
+      const placeholders = serializedResponse.match(/\{\{[^{}]+\}\}/gu) ?? [];
+      requireFixture(!/blk_[0-9a-f]{24}/u.test(serializedResponse) && placeholders.every((placeholder) =>
+        capture.identityMap.some((mapping) => mapping.placeholder === placeholder)), '夹具条目的响应标识未经映射。');
+      requireFixture(capture.identityMap.every((mapping) => serializedResponse.includes(mapping.placeholder) &&
+        (unitSubject ? /^\{\{block:/u.test(mapping.placeholder)
+          : capture.subject === 'reduction' ? /^\{\{unit:/u.test(mapping.placeholder)
+            : capture.subject === 'sampling' && /^\{\{ref:/u.test(mapping.placeholder))), '夹具条目的标识映射与捕获契约不一致。');
+    }
     return {
       unitOrdinal: entry.unitOrdinal as number,
       requestDigest: entry.requestDigest,
       attempt: attempt as number | null,
       contentDigest: contentDigest as string | null,
-      response: parseResponse(entry.response),
+      response,
+      ...(capture === undefined ? {} : { capture }),
     };
   });
   return {
