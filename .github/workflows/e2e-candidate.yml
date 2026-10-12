@@ -26,7 +26,7 @@ on:
 
 jobs:
   prepare:
-    name: Build the tree that would land
+    name: Build the tree that would land on the current target
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -37,10 +37,12 @@ jobs:
       commit: ${{ steps.prepare.outputs.commit }}
       head: ${{ steps.prepare.outputs.head }}
       dev_tip: ${{ steps.prepare.outputs.devTip }}
+      target: ${{ steps.prepare.outputs.dev }}
     steps:
       - name: Check out exact source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: refs/heads/dev
           # The squash needs the merge base between the candidate and dev; a shallow checkout has
           # none and would report every candidate as a conflict.
           fetch-depth: 0
@@ -52,7 +54,7 @@ jobs:
           architecture: x64
           check-latest: false
 
-      - name: Squash the candidate onto the current dev tip
+      - name: Squash the candidate onto its current target tip
         id: prepare
         env:
           GH_TOKEN: ${{ github.token }}
@@ -65,6 +67,8 @@ jobs:
     needs: prepare
     runs-on: windows-2025
     timeout-minutes: 60
+    permissions:
+      contents: read
     env:
       AI7_CI_WINDOWS_SERVER_2025: '1'
       NPM_CONFIG_PREFIX: ''
@@ -141,6 +145,8 @@ jobs:
     needs: prepare
     runs-on: macos-15
     timeout-minutes: 60
+    permissions:
+      contents: read
     env:
       AI7_CI_WINDOWS_SERVER_2025: '0'
       NPM_CONFIG_PREFIX: ''
@@ -222,11 +228,13 @@ jobs:
       contents: write
       pull-requests: write
       issues: write
+      actions: read
     steps:
       - name: Check out exact source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          fetch-depth: 1
+          ref: refs/heads/dev
+          fetch-depth: 0
 
       - name: Select exact Node
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
@@ -270,15 +278,17 @@ jobs:
           --pr "${{ inputs.pr }}" --repo "$GITHUB_REPOSITORY"
           --head "${{ needs.prepare.outputs.head }}"
           --expected-dev-tip "${{ needs.prepare.outputs.dev_tip }}"
+          --candidate "${{ needs.prepare.outputs.commit }}"
+          --gate-run "${{ github.run_id }}"
 
-      - name: Leave an Owner-reserved candidate open
+      - name: Leave an unreleased or Owner-reserved candidate open
         if: ${{ !inputs.merge && needs.windows.result == 'success' && needs.macos.result == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
           node tools/nightly-queue.mjs report
           --pr "${{ inputs.pr }}" --repo "$GITHUB_REPOSITORY"
-          --reason reserved
+          --reason unreleased
 
   cleanup:
     name: Delete the temporary ref
@@ -292,6 +302,7 @@ jobs:
       - name: Check out exact source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: refs/heads/dev
           fetch-depth: 1
 
       - name: Select exact Node

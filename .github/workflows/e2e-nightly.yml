@@ -1,4 +1,5 @@
 name: E2E Nightly Full Gate
+run-name: E2E Nightly Full Gate · ${{ inputs.ref || github.sha }}
 
 # The daily `schedule` moved to `e2e-nightly-queue.yml` under ADR 0081, which runs this full Gate
 # over each open pull request and then calls this workflow once for the final `dev` tip. What this
@@ -61,6 +62,18 @@ jobs:
           node-version: 24.18.1
           architecture: ${{ matrix.architecture }}
           check-latest: false
+
+      - name: Require an immutable manually selected candidate
+        # Inside a called workflow the `github` context is the caller's, so a manually dispatched
+        # queue calling this file for the moving final `dev` also reads `workflow_dispatch`. Only a
+        # direct dispatch of this file records a candidate in its run name.
+        if: ${{ github.event_name == 'workflow_dispatch' && contains(github.workflow_ref, '/.github/workflows/e2e-nightly.yml@') }}
+        shell: bash
+        env:
+          SELECTED_REF: ${{ inputs.ref }}
+        run: |
+          [[ "$SELECTED_REF" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$(git rev-parse HEAD)" == "$SELECTED_REF" ]]
 
       - name: Activate repository-pinned pnpm
         shell: bash

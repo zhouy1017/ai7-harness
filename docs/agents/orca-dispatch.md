@@ -47,7 +47,7 @@ Record in the Issue/PR and Orca task record:
 
 Reuse these existing records; keep live attempt chronology out of PROGRESS. A model fallback, changed class or material scope change returns to the Commander for a newly recorded assignment and a valid pair. Routine reassignment among approved pairs needs no new Owner approval. Subscription exhaustion means reassign or wait; it never authorizes extra paid credits, another billing route or a weaker Reviewer.
 
-**Environment prerequisite:** at the 2026-10-12 documentation bootstrap, `orca` was unavailable on the editing host. No Orca dispatch was validated. [#806](https://github.com/zhouy1017/ai7-harness/issues/806) owns runtime and CI adaptation. An unavailable executable is reported with its exact error; another orchestration mechanism is not reported as Orca.
+**Environment prerequisite:** the #805 documentation bootstrap did not validate Orca. [#806](https://github.com/zhouy1017/ai7-harness/issues/806) uses real Orca runtime/task/workspace records and adapts the existing Gate/queue; the Issue/PR records its verified launch, subscriptions, messaging and validation. An unavailable executable is still reported with its exact error; another orchestration mechanism is not reported as Orca.
 
 #806 itself is the first infrastructure wave once a real Orca runtime is available. It establishes CI readiness rather than depending on its own completion. Use the existing exact-ref provider-free verification path to validate its candidate and enforce Reviewer/Commander release explicitly during that bootstrap; do not start a product implementation wave until the adaptation integrates. If the existing check path cannot validate the candidate, record the missing prerequisite instead of skipping it.
 
@@ -81,7 +81,7 @@ The Commander checks cumulative behavior, dependency completion, outstanding fin
 
 The final integration candidate passes the appropriate checks and existing provider-free dev Gate at its current head/base. Any cumulative or base-changing correction invalidates earlier candidate evidence and is revalidated. The Commander releases and merges this final PR, records the resulting dev commit, updates the plan/PROGRESS and closes implemented slices. A slice merged only into a wave is not yet integrated into dev.
 
-The current nightly queue can merge green dev PRs and does not implement the new role checks. Until #806 enforces exact-candidate Commander release, keep final integration PRs Draft while unapproved. Do not claim this documentation changed the queue. An automation may execute an expressly released merge; green CI alone is never that authorization.
+The existing nightly queue and guarded manual helper enforce current role completion and exact-candidate Commander release through the [existing Gate projection and PR receipts](ci-test-boundaries.md#role-receipts-in-existing-pr-records). The Commander attests actual Orca identities/bindings in existing PR records, configures strict standing-Gate protection and preserves disabled native GitHub auto-merge. Final integration stays Draft until its actual cumulative tests pass and the Commander releases it. Test execution precedes merge release; the trusted comment refresh can then project authority without rerunning Journeys. During #806 bootstrap use the pre-adaptation exact-ref path and explicit release. An automation may execute an expressly released merge; green CI alone is never that authorization.
 
 Promotion to `main`, release and manuscript publication remain separate decisions.
 

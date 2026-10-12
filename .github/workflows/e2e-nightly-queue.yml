@@ -21,7 +21,8 @@ concurrency:
 
 jobs:
   list:
-    name: List open pull requests against dev
+    name: List open slice and integration pull requests
+    if: ${{ github.ref == 'refs/heads/dev' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -33,7 +34,8 @@ jobs:
       - name: Check out exact source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          fetch-depth: 1
+          ref: refs/heads/dev
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Select exact Node
@@ -52,7 +54,7 @@ jobs:
   candidates:
     name: Candidate #${{ matrix.number }}
     needs: list
-    if: ${{ needs.list.outputs.count != '0' }}
+    if: ${{ github.ref == 'refs/heads/dev' && needs.list.outputs.count != '0' }}
     # A called workflow can only restrict the caller's token, never widen it: `contents: read` here
     # would stop `prepare` pushing the candidate ref and `merge` commenting, and a permission the
     # called workflow asks for and this call site withholds refuses the whole run before any job
@@ -63,6 +65,7 @@ jobs:
       contents: write
       pull-requests: write
       issues: write
+      actions: read
     strategy:
       fail-fast: false
       # Candidates are independent runs: one failing never stops the queue, and a merge changes
@@ -78,7 +81,7 @@ jobs:
   dev:
     name: Full Gate over the final dev
     needs: candidates
-    if: ${{ always() }}
+    if: ${{ always() && github.ref == 'refs/heads/dev' }}
     permissions:
       contents: read
     uses: ./.github/workflows/e2e-nightly.yml
