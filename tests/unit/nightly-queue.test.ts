@@ -9,6 +9,8 @@ type QueueRecord = {
   mergeable: string;
   baseRefName: string;
   headRefOid: string;
+  headRefName?: string;
+  authorization?: { allowed: boolean } | undefined;
   files?: readonly { path: string; text?: string }[];
 };
 type Candidate = { number: number; title: string; head: string; merge: boolean; reserved: unknown };
@@ -59,6 +61,7 @@ const queue = (await import(new URL('../../tools/nightly-queue.mjs', import.meta
   candidateRef: (pr: number, runId: string) => string;
   linkedIssues: (references: unknown, repo: string) => number[];
   closingComment: (options: { pr: number; dev: string; commit: string }) => string;
+  main: (argv: string[]) => number;
 };
 
 const record = (overrides: Partial<QueueRecord> = {}): QueueRecord => ({
@@ -68,8 +71,19 @@ const record = (overrides: Partial<QueueRecord> = {}): QueueRecord => ({
   mergeable: 'MERGEABLE',
   baseRefName: 'dev',
   headRefOid: 'a'.repeat(40),
+  headRefName: 'codex/integration-100',
+  authorization: { allowed: true },
   files: [],
   ...overrides,
+});
+
+describe('the merge helper cannot silently bypass its release inputs', () => {
+  it('requires exact tested candidate and actual Gate occurrence before remote work', () => {
+    expect(() => queue.main(['merge', '--pr', '806', '--head', 'a'.repeat(40), '--expected-dev-tip', 'b'.repeat(40), '--dry-run'])).toThrow('merge needs --candidate');
+  });
+  it('restricts cleanup to the temporary candidate namespace', () => {
+    expect(() => queue.main(['cleanup', '--ref', 'refs/heads/main', '--dry-run'])).toThrow('cleanup-ref-outside-candidate-scope');
+  });
 });
 
 // PR #449 as the live repository reports it: an ADR whose own status line reads `proposed`.
@@ -158,6 +172,15 @@ describe('waiting for GitHub to state mergeability', () => {
 });
 
 describe('the nightly merge queue filter', () => {
+  it('tests an unreleased candidate without giving a green result merge authority', () => {
+    expect(queue.selectCandidates([record({ authorization: undefined })])[0]?.merge).toBe(false);
+    expect(queue.selectCandidates([record({ headRefName: 'codex/100-legacy-direct-dev' })])[0]?.merge).toBe(false);
+  });
+
+  it('includes slice targets and serializes them with final integrations', () => {
+    const set = queue.assembleCandidateSet([record({ number: 9 }), record({ number: 7, baseRefName: 'codex/integration-editor' })]);
+    expect(queue.toMatrix(set).include.map((entry) => entry.number)).toEqual([7, 9]);
+  });
   it('lists an open, mergeable, non-draft pull request against dev', () => {
     expect(queue.selectCandidates([record()])).toEqual([
       { number: 100, title: 'a pull request', head: 'a'.repeat(40), merge: true, reserved: null },
@@ -482,5 +505,86 @@ describe('the orchestrator grants every scope the workflows it calls ask for', (
       }
     }
     expect(withheld).toEqual([]);
+  });
+
+  it('keeps candidate tests read-only and privileged code on trusted dev', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const candidate = await readFile(new URL('e2e-candidate.yml', WORKFLOWS), 'utf8');
+    const windows = candidate.split('\n  windows:')[1]!.split('\n  macos:')[0]!;
+    const macos = candidate.split('\n  macos:')[1]!.split('\n  merge:')[0]!;
+    for (const platform of [windows, macos]) {
+      expect(platform).toContain('permissions:\n      contents: read');
+      expect(platform).toContain('persist-credentials: false');
+      expect(platform).not.toContain('statuses: write');
+      expect(platform).not.toContain('pull-requests: write');
+    }
+    for (const job of ['prepare', 'merge', 'cleanup']) {
+      const body = candidate.split(`\n  ${job}:`)[1]!.split(/\n  [a-z]+:/)[0]!;
+      expect(body).toContain('ref: refs/heads/dev');
+      expect(body).not.toContain('ref: ${{ needs.prepare.outputs.ref }}');
+    }
+    const queueWorkflow = await readFile(new URL('e2e-nightly-queue.yml', WORKFLOWS), 'utf8');
+    expect(queueWorkflow).toContain('max-parallel: 1');
+    expect(queueWorkflow).toContain("github.ref == 'refs/heads/dev'");
+    expect(candidate).toContain('--candidate "${{ needs.prepare.outputs.commit }}"');
+    expect(candidate).toContain('--gate-run "${{ github.run_id }}"');
+  });
+
+  it('publishes the existing Gate only from trusted control, with head/base attribution', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const gate = await readFile(new URL('e2e.yml', WORKFLOWS), 'utf8');
+    expect(gate).toContain('pull_request_target:');
+    expect(gate).toContain("- 'codex/integration-*'");
+    const route = gate.split('\n  route:')[1]!.split('\n  gate:')[0]!;
+    const journey = gate.split('\n  gate:')[1]!.split('\n  result:')[0]!;
+    const result = gate.split('\n  result:')[1]!;
+    expect(route).toContain('ref: refs/heads/dev');
+    expect(route).toContain('gate-reuse');
+    expect(route).not.toContain('gate-authorize');
+    expect(journey).toContain('ref: ${{ github.event.pull_request.head.sha }}');
+    expect(journey).not.toContain('statuses: write');
+    expect(result).toContain('ref: refs/heads/dev');
+    expect(result).toContain('statuses: write');
+    expect(result).toContain('gate-status');
+    expect(result).toContain('--expected-dev-tip "$BASE_SHA"');
+    const refresh = gate.split('\n  authorization:')[1]!;
+    expect(refresh).toContain('ref: refs/heads/dev');
+    expect(refresh).toContain('gate-refresh');
+    expect(refresh).not.toContain('pnpm run e2e:');
+    expect(refresh).toContain('github.event.comment.author_association');
+    const nightly = await readFile(new URL('e2e-nightly.yml', WORKFLOWS), 'utf8');
+    expect(nightly).toContain('run-name: E2E Nightly Full Gate · ${{ inputs.ref || github.sha }}');
+    expect(nightly).toContain('[[ "$SELECTED_REF" =~ ^[a-f0-9]{40}$ ]]');
+  });
+
+  it('never runs a fork candidate under pull_request_target and gives its Journey job no other scope', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const gate = await readFile(new URL('e2e.yml', WORKFLOWS), 'utf8');
+    const route = gate.split('\n  route:')[1]!.split('\n  gate:')[0]!;
+    const journey = gate.split('\n  gate:')[1]!.split('\n  result:')[0]!;
+    expect(route).toContain('github.event.pull_request.head.repo.full_name == github.repository');
+    expect(journey).toContain("needs.route.outputs.run_gate == 'true'");
+    expect(journey).toContain('permissions:\n      contents: read\n    env:');
+  });
+
+  it('lets neither a comment refresh nor a title/body edit rerun or cancel the Journeys', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const gate = await readFile(new URL('e2e.yml', WORKFLOWS), 'utf8');
+    const concurrency = gate.split('\nconcurrency:')[1]!.split('\njobs:')[0]!;
+    expect(concurrency).toContain("(github.event_name == 'issue_comment' && 'refresh')");
+    expect(concurrency).toContain("(github.event.action == 'edited' && !github.event.changes.base && 'edit')");
+    for (const job of ['route', 'result']) {
+      const body = gate.split(`\n  ${job}:`)[1]!.split(/\n {2}[a-z]+:\n/u)[0]!;
+      expect(body).toContain("(github.event.action != 'edited' || github.event.changes.base)");
+    }
+  });
+
+  it('holds only a direct manual dispatch, not a queue-called final dev Gate, to an immutable commit', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const nightly = await readFile(new URL('e2e-nightly.yml', WORKFLOWS), 'utf8');
+    const guard = nightly.split('- name: Require an immutable manually selected candidate')[1]!.split('\n      - name:')[0]!;
+    expect(guard).toContain("contains(github.workflow_ref, '/.github/workflows/e2e-nightly.yml@')");
+    const queueWorkflow = await readFile(new URL('e2e-nightly-queue.yml', WORKFLOWS), 'utf8');
+    expect(queueWorkflow).toContain('ref: ${{ github.ref }}');
   });
 });

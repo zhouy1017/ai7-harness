@@ -1,36 +1,61 @@
 name: E2E Functional Gate
+run-name: E2E Functional Gate · ${{ github.event.pull_request.head.sha }} · ${{ github.event.pull_request.base.sha }}
 
 on:
-  pull_request:
+  # Authorization and status publication execute trusted control code. Candidate code runs only
+  # in the read-only Journey job; it cannot publish the required aggregate Gate status.
+  pull_request_target:
     branches:
       - dev
+      - 'codex/integration-*'
     types:
       - opened
       - reopened
       - ready_for_review
       - synchronize
+      - edited
+  # This only refreshes role authorization from already completed Gate jobs. It never runs a
+  # Journey, introduces another test occurrence or executes comment/candidate code.
+  issue_comment:
+    types: [created, edited, deleted]
 
 permissions:
   contents: read
+  pull-requests: read
+  actions: read
 
+# One Journey occurrence per pull request. A retarget (`edited` with a base change) is a new
+# candidate; a title/body edit or a comment refresh must neither rerun nor cancel the Journeys.
 concurrency:
-  group: e2e-pr-${{ github.event.pull_request.number }}
+  group: e2e-pr-${{ github.event.pull_request.number || github.event.issue.number }}-${{ (github.event_name == 'issue_comment' && 'refresh') || (github.event.action == 'edited' && !github.event.changes.base && 'edit') || 'gate' }}
   cancel-in-progress: true
 
 jobs:
   route:
     name: Route E2E
-    if: ${{ !github.event.pull_request.draft }}
+    # pull_request_target runs with this repository's cache scope, so a fork's code never runs
+    # here; a fork candidate has no Orca assignment and its result job publishes a failure.
+    if: >-
+      ${{ github.event_name == 'pull_request_target' && !github.event.pull_request.draft &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (github.event.action != 'edited' || github.event.changes.base) }}
     runs-on: ubuntu-24.04
     outputs:
       run_gate: ${{ steps.route.outputs.run_gate }}
+      proof_reused: ${{ steps.route.outputs.proof_reused }}
     steps:
       - name: Check out exact source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: refs/heads/dev
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Select exact Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.18.1
+          check-latest: false
 
       - name: Route complete pull-request diff
         id: route
@@ -38,8 +63,11 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          git fetch --no-tags origin "$HEAD_SHA"
           changes_file="${RUNNER_TEMP:?}/ai7-e2e-route-paths-$$"
           trap 'rm -f "$changes_file"' EXIT
           git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" > "$changes_file"
@@ -53,6 +81,8 @@ jobs:
           done < "$changes_file"
 
           printf 'run_gate=%s\n' "$run_gate" >> "$GITHUB_OUTPUT"
+          node tools/nightly-queue.mjs gate-reuse --pr "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --head "$HEAD_SHA" --expected-dev-tip "$BASE_SHA" --output "$GITHUB_OUTPUT"
 
   gate:
     needs: route
@@ -60,6 +90,9 @@ jobs:
     name: J-08 + J-12 + J-15 + J-03 + J-04 (Windows Server 2025 x64 CI)
     runs-on: windows-2025
     timeout-minutes: 15
+    # The only job that executes candidate code: no status, pull-request or Actions scope.
+    permissions:
+      contents: read
     env:
       AI7_CI_WINDOWS_SERVER_2025: '1'
       NPM_CONFIG_PREFIX: ''
@@ -67,6 +100,7 @@ jobs:
       - name: Check out exact source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
           persist-credentials: false
 
@@ -108,3 +142,70 @@ jobs:
 
       - name: Run the bounded pull-request Journey set
         run: pnpm run e2e:gate
+
+  result:
+    name: Publish E2E Functional Gate result
+    needs: [route, gate]
+    if: >-
+      ${{ always() && github.event_name == 'pull_request_target' && !github.event.pull_request.draft &&
+      (github.event.action != 'edited' || github.event.changes.base) }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+      actions: read
+    steps:
+      - name: Check out trusted control source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: refs/heads/dev
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select exact Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.18.1
+          check-latest: false
+      - name: Recheck release and project the existing Gate onto the exact head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GATE_RESULT: ${{ needs.route.result == 'success' && (needs.route.outputs.proof_reused == 'true' && 'reused' || needs.gate.result) || 'failure' }}
+        run: >-
+          node tools/nightly-queue.mjs gate-status
+          --pr "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"
+          --head "$HEAD_SHA" --expected-dev-tip "$BASE_SHA"
+          --gate-result "$GATE_RESULT"
+
+  authorization:
+    name: Refresh existing Gate authorization
+    # Only a receipt publisher must be authenticated; an outside comment cannot queue refreshes.
+    if: >-
+      ${{ github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+      statuses: write
+    steps:
+      - name: Check out trusted control source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: refs/heads/dev
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select exact Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.18.1
+          check-latest: false
+      - name: Refresh from authenticated receipts and actual completed tests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: node tools/nightly-queue.mjs gate-refresh --pr "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"

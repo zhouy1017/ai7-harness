@@ -1,6 +1,6 @@
 # AI7 development plan
 
-Status: Owner-approved order of 2026-10-12 under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md), based on `dev@afaf74657004e1cf1849f70457abd294d2768fef`. This is the sole delivery-order owner. [PROGRESS](../../PROGRESS.md) reports implementation; each Issue owns bounded acceptance. #805 changes documentation and tracker records, not product behavior.
+Status: Owner-approved order of 2026-10-12 under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md); #806 integration is based on actual `dev@634b0ab3ed11702e6eb0033b93b1fb3995dc80be`. This is the sole delivery-order owner. [PROGRESS](../../PROGRESS.md) reports implementation; each Issue owns bounded acceptance. [PR #817](https://github.com/zhouy1017/ai7-harness/pull/817) records #806's final dev delivery and protection activation.
 
 ## Delivery approach
 
@@ -14,7 +14,7 @@ Issue references in this table refer to the [GitHub tracker](https://github.com/
 
 | Priority | Issue / retained slice | Outcome | Dependencies and current disposition |
 | --- | --- | --- | --- |
-| P0 | #806 Orca/CI | Executable wave dispatch and explicit Reviewer/Commander merge release | #805, actual Orca runtime, existing exact-ref provider-free bootstrap validation. Current dev-only queue lacks these release checks. |
+| P0 | #806 Orca/CI | Executable wave dispatch and explicit Reviewer/Commander merge release | Implemented and independently corrected in #816; final dev delivery, cumulative bootstrap evidence and strict aggregate protection activation belong to #817. |
 | P0 | #808 test reuse | Necessary live development checks without repeatedly paying for the same question | #806; extend existing Ledger/Result Cache. Family reuse, endpoint namespace and durable send claims remain. |
 | P0 | #807 model migration | Configurable Go DeepSeek V4.1 Flash with its own capability evidence | #808 before new live evidence; relevant #452 configuration residue. Current selected model remains V4 Flash. |
 | P0 | #387 S41-f1 | Labeled recorded-model regression in J-04 | Inventory/convert existing captures independently; new V4.1 evidence follows #808/#807. Verify missing units; no web dependency. |
@@ -46,7 +46,7 @@ Issue bodies retain exact acceptance and dependencies. Fix defects blocking an a
 
 [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md) and [ADR 0067](../adr/0067-authorize-the-opencode-go-development-credential-with-live-once-testing.md) own autonomous necessary development validation and reuse. Record a new question's substantive delta and save its evidence. CI/Gate/ordinary regression stays provider-free. New actual business Tasks perform real model steps even for repeated input; continuation/incremental reuse retains its own semantics. No new daily/batch/call-count ceiling is added.
 
-The Go target is V4.1 Flash; old V4 evidence stays labeled V4. Go's repository-agent GLM allowlist does not register GLM in AI7. Migration, real execution and CI adaptation remain implementation follow-ups.
+The Go target is V4.1 Flash; old V4 evidence stays labeled V4. Go's repository-agent GLM allowlist does not register GLM in AI7. Migration and real product execution remain #807 follow-ups after #808. The #806 CI adaptation does not establish either result.
 
 ## Completed foundation
 
@@ -71,4 +71,4 @@ Completed Issues stay closed. Superseded S15, S18b/c, S19–S25, S44b, S45 and S
 
 The [policy index](../policies/README.md) owns current runtime selection and immutable predecessors. #807 creates coherent successors; #473 reconciles its draft instead of assuming an old policy-version sequence. Production uses the user's credential/data, never the developer key/cache.
 
-Orca dispatch defines validation and merge responsibility. Read the installed version's guides before actual dispatch; this documentation did not validate Orca runtime. Main promotion, packaging, signing, notarization and release remain separate work. Protected manuscripts remain excluded from development repositories and CI.
+Orca dispatch defines validation and merge responsibility. Orca 1.4.224 was verified and used for #806's Worker/Reviewer handoff, fixes, validation and slice merge; read the installed version's guides and verify effective bindings for later assignments too. Main promotion, packaging, signing, notarization and release remain separate work. Protected manuscripts remain excluded from development repositories and CI.
