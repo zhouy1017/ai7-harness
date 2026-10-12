@@ -1,6 +1,6 @@
 # Current checkpoint
 
-Checkpoint for the [#808 integration tree](https://github.com/zhouy1017/ai7-harness/pull/820), merged to `dev` at `c194482eb09479299a9c95fea173ea0bcd17db53` (tree `e27e9e864d3fe1fd1e7d57d1a0eae29f07df3976`) from `c7b646bf` after #806's delivery. Development validation now records its purpose, reuses verified evidence and preserves possibly billed unknown sends. The Issue and PR own its exact dev acceptance; a slice merged only into a wave is not dev delivery. Product model selection and immutable policies remain unchanged.
+Candidate checkpoint for [#807](https://github.com/zhouy1017/ai7-harness/issues/807), based on actual `dev@c194482eb09479299a9c95fea173ea0bcd17db53` after [#808's delivery](https://github.com/zhouy1017/ai7-harness/pull/820). The product candidate selects Go `deepseek-v4.1-flash` through Provider Processing v9 / active-set v7 and has produced a durable real baseline-analysis result with one disclosed contract gap. Product review, wave merge and final cumulative dev acceptance remain pending; current dev still selects V4 Flash. The final integration PR will own exact delivery and acceptance; a slice merged only into a wave is not dev delivery.
 
 The [development plan](docs/development/development-plan.md) owns delivery order. [Orca dispatch](docs/agents/orca-dispatch.md) owns repository roles and integration; [ADR 0089](docs/adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md) owns the development-test/business boundary and Go model target. The replaced checkpoint and its instructions remain in Git history, not a duplicate active archive.
 
@@ -27,8 +27,8 @@ These are complete; #427/#429 track remaining consumers and real execution, not 
 
 | Area | Current implementation | Next result |
 | --- | --- | --- |
-| Product Provider | Source checkout selects development-ci/developer-live; selected Go model is `deepseek-v4-flash`, with analysis-only developer-live policy | #807 migrates to configurable V4.1 Flash; official route retained |
-| Development evidence | Explicit validation family/case, full request namespace and prompt generation, durable pre-send claims, retained unknown outcomes, provenance-aware fixture conversion, separate recorded/incurred usage | #807 records fresh V4.1 evidence through these existing owners; old V4 evidence cannot establish a new model's capability |
+| Product Provider | Integrated dev selects `deepseek-v4-flash`; #807 candidate selects Go `deepseek-v4.1-flash` for baseline-only developer-live under Provider Processing v9 / active-set v7 | Independently review and integrate the exact candidate; official route remains independent and optional |
+| Development evidence | #808's purpose/namespace, durable claims and provenance-aware reuse are integrated; #807 candidate has fresh V4.1 real-path evidence and a durable completed-with-gaps result | Final-head semantic comparison and cumulative acceptance; old V4 evidence remains historical, and #812 owns editorial quality |
 | Non-web AI | Review/writing/evaluation/dialogue surfaces and fixture contracts; several live kinds unavailable | #52/#429/#809/#810 admit and execute real contracts |
 | Ordinary production | Policy records exist, but no source-checkout ordinary-production launch | #811 local analysis with the user's own credential/data, isolated from developer caches |
 | Web evidence | Tool plumbing exists; selected policy does not enable it | #473 / draft #742 reconciles with #807, then #744/#425 complete declarations/retention |
@@ -45,7 +45,9 @@ The [policy index](docs/policies/README.md) owns exact selections. Accepting the
 
 [PR #742](https://github.com/zhouy1017/ai7-harness/pull/742) remains Draft, at `598329399dda5d1ad8f59280536eee5f8251264d` when read for this update. Its policy proposal needs reconciliation with #807 and the independent web slice #473. Historical policy-version reservations and a combined attended web/#387 appointment no longer determine delivery order.
 
-[#807](https://github.com/zhouy1017/ai7-harness/issues/807) now starts from fresh `c194482e` with its coherent model/configuration/policy migration and representative real V4.1 product analysis; the Issue and its final integration PR own that exact acceptance and will link it when available. The current selected model remains V4 Flash and V4.1 product execution remains unverified until that specific evidence arrives. Necessary autonomous developer-live validation is authorized within current material, credential and executable-policy boundaries. Similar-test reuse applies only to development; new actual user Tasks execute real model work.
+[#807's actual product evidence](https://github.com/zhouy1017/ai7-harness/issues/807#issuecomment-6124340363) records code `39c5ac4113d5b5c09e96e23585ddca8f7b4959c0`, exact admitted `SampleBooks/sample1.docx`, and 12 fresh Go `deepseek-v4.1-flash` responses through the selected `zen/go` endpoint. The durable baseline result is `completed-with-gaps`: 7/8 units closed, with cross-unit reduction, assurance and reflection closed. Unit 1 correctly failed the unchanged schema because seven unresolved entries were strings instead of required objects; this proves representative real-path execution, not gap-free analysis or editorial quality. [#812](https://github.com/zhouy1017/ai7-harness/issues/812) owns that quality follow-up. Sanitized result and diagnosis metadata remain outside every checkout; raw captures stay protected.
+
+The candidate's Provider Processing v9 / active-set v7 preserves all 39 immutable predecessor policy assets. Baseline-only developer-live is the bounded selection; ordinary-production launch, web and other task-kind authority remain unavailable. The newly documented `inference/go` endpoint is untested; the Issue records the tested route and exact policy/configuration digests. Final runtime semantics must be compared with the live head before evidence reuse. Product review, actual wave merge and the final integration PR are still pending; this checkpoint makes no #807 dev-delivery claim. Necessary autonomous developer-live validation remains within material, credential and executable-policy boundaries. Similar-test reuse applies only to development; new actual user Tasks execute real model work.
 
 ## Remaining macro risks
 
@@ -53,7 +55,7 @@ The [policy index](docs/policies/README.md) owns exact selections. Accepting the
 - Cost/recovery: retained claims and evidence prevent silent repeat sends; corrupt or unprovable state fails closed and can require reconciliation. Loss of the entire external evidence root cannot reconstruct prior transmission history. A substantive new validation question still needs developer judgment.
 - Document integrity: untouched-file preservation does not prove edited complex DOCX fidelity. #814 and #766 retain distinct export and material-read scope.
 - Cross-artifact correctness: cross-deliverable review currently cannot deliver its intended result; #813 must preserve exact version/source authority.
-- Execution authority: strict Gate protection is active, while policy/configuration still needs #807's actual model migration. Green tests alone do not release a candidate, and repository-agent model use is not product validation.
+- Execution authority: strict Gate protection is active; #807's candidate policy/configuration and real-path evidence still require independent review and exact final dev acceptance. Green tests alone do not release a candidate, and repository-agent model use is not product validation.
 - Scope growth: vectors, learning, cross-Book orchestration and release follow usable core workflows; records and inert profiles alone do not establish working consumers.
 
 ## Resume

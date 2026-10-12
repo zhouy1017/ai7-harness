@@ -16,7 +16,7 @@ Issue references in this table refer to the [GitHub tracker](https://github.com/
 | --- | --- | --- | --- |
 | P0 | #806 Orca/CI | Executable wave dispatch and explicit Reviewer/Commander merge release | Delivered through #817 at `c7b646bf`; exact-candidate guest/paired hosted verification and strict aggregate protection are complete. |
 | P0 | #808 test reuse | Necessary live development checks without repeatedly paying for the same question | Core #818, fixture #819 and checkpoint #821 extended existing owners with purpose/namespace/generation, durable unknown-send claims and auditable conversion. #820 delivered cumulative acceptance to dev at `c194482e`. |
-| P0 | #807 model migration | Configurable Go DeepSeek V4.1 Flash with its own capability evidence | Starts from fresh `c194482e`. Includes relevant #452 configuration residue and real product verification. Current selected model remains V4 Flash until V4.1 evidence arrives. |
+| P0 | #807 model migration | Configurable Go DeepSeek V4.1 Flash with its own capability evidence | Candidate from `c194482e` selects Provider Processing v9 / active-set v7 and has [actual V4.1 product evidence](https://github.com/zhouy1017/ai7-harness/issues/807#issuecomment-6124340363): completed-with-gaps, 7/8 units closed. Includes relevant #452 configuration residue. Independent product review, wave merge and final cumulative dev acceptance remain pending; current dev still selects V4 Flash. |
 | P0 | #387 S41-f1 | Labeled recorded-model regression in J-04 | Inventory/convert existing captures independently; new V4.1 evidence follows #808/#807. Verify missing units; no web dependency. |
 | P0 | #52 S17 live dialogue | Real streamed discussion of the selected passage | #807/#808 and existing S17a surface. S17b structured follow-up waits for #423's future composer. |
 | P0 | #809 review follow-up | Real non-web review findings and usable marks | #807/#808; #759 only for optional material references. Completed S69/#417 stays closed. |
@@ -46,7 +46,7 @@ Issue bodies retain exact acceptance and dependencies. Fix defects blocking an a
 
 [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md) and [ADR 0067](../adr/0067-authorize-the-opencode-go-development-credential-with-live-once-testing.md) own autonomous necessary development validation and reuse. Record a new question's substantive delta and save its evidence. CI/Gate/ordinary regression stays provider-free. New actual business Tasks perform real model steps even for repeated input; continuation/incremental reuse retains its own semantics. No new daily/batch/call-count ceiling is added.
 
-The Go target is V4.1 Flash; old V4 evidence stays labeled V4. Go's repository-agent GLM allowlist does not register GLM in AI7. Migration and real product execution remain #807 follow-ups after #808's dev delivery. Provider-free evidence-reuse tests do not establish either result.
+The Go target is V4.1 Flash; old V4 evidence stays labeled V4. Go's repository-agent GLM allowlist does not register GLM in AI7. #807 has representative real-path candidate evidence, with a correctly rejected unit schema gap; #812 owns editorial quality. Final-head semantic comparison, independent review and exact cumulative dev acceptance remain required. The tested `zen/go` endpoint does not establish the newly documented `inference/go` endpoint. Provider-free evidence-reuse tests do not establish live execution or quality.
 
 ## Completed foundation
 
@@ -69,6 +69,6 @@ Completed Issues stay closed. Superseded S15, S18b/c, S19–S25, S44b, S45 and S
 
 ## Scope and activation
 
-The [policy index](../policies/README.md) owns current runtime selection and immutable predecessors. #807 creates coherent successors; #473 reconciles its draft instead of assuming an old policy-version sequence. Production uses the user's credential/data, never the developer key/cache.
+The [policy index](../policies/README.md) owns runtime selection and immutable predecessors. #807's candidate creates Provider Processing v9 / active-set v7, preserving all 39 immutable predecessor assets; activation on dev requires coherent final integration. #473 reconciles its separate draft instead of assuming an old policy-version sequence. Ordinary-production launch remains #811; production uses the user's credential/data, never the developer key/cache.
 
 Orca dispatch defines validation and merge responsibility. Orca 1.4.224 was verified and used for #806's Worker/Reviewer handoff, fixes, validation and slice merge; read the installed version's guides and verify effective bindings for later assignments too. Main promotion, packaging, signing, notarization and release remain separate work. Protected manuscripts remain excluded from development repositories and CI.
