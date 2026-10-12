@@ -157,24 +157,29 @@ export async function transmitOnce(
       family: claim.claim.family, case: claim.claim.case, capturedAt: claim.claim.claimedAt,
       ...(claim.claim.evidencePosition === undefined ? {} : { evidencePosition: claim.claim.evidencePosition }),
     });
-    const held = claim.state !== 'absent' && claim.state !== 'failed' &&
-      !(claim.state === 'completed' && (retiredClaim || claim.claim.generation !== generation));
+    // A lost claim is not proof of an unsent request. A surviving settled unknown line remains
+    // authoritative, including legacy exact requests whose original namespace was never recorded.
+    const sameRequest = cache.lines.filter(isModelCallLine).filter((line) => line.model === model &&
+      (line.cacheKey === undefined ? line.requestDigest === requestDigest :
+        line.route === namespace.route && line.endpoint === namespace.endpoint && line.requestShape === namespace.requestShape &&
+        line.semanticDigest === semanticDigest));
+    const ledgerUnknown = claim.state === 'absent' ? sameRequest.filter((line) => line.classification === 'outcome-unknown') : [];
+    const held = ledgerUnknown.length > 0 || (claim.state !== 'absent' && claim.state !== 'failed' &&
+      !(claim.state === 'completed' && (retiredClaim || claim.claim.generation !== generation)));
     if (held) {
-      const heldItem = 'claim' in claim ? claim.claim.itemId : null;
-      const held = [heldItem ?? 'unreadable'];
+      const heldItems = 'claim' in claim ? [claim.claim.itemId] : ledgerUnknown.length > 0 ? items(ledgerUnknown) : ['unreadable'];
       const delta = intent.delta;
-      if (delta?.kind !== 'retry-unknown' || !retryableClaim(claim)) {
+      if (delta?.kind !== 'retry-unknown' || !(ledgerUnknown.length > 0 || retryableClaim(claim))) {
         throw await refusal('PROVIDER_VALIDATION_OUTCOME_UNKNOWN',
-          `这个请求${heldItem === null ? '' : `（${heldItem}）`}可能已处理并计费，或者发送方尚未退出；未再次发送。仅已停止且结果未知的发送可声明必要重试。`, held);
+          `这个请求（${heldItems.slice(0, 4).join('、')}）可能已处理并计费，或者发送方尚未退出；未再次发送。仅已停止且结果未知的发送可声明必要重试。`, heldItems);
       }
-      // The retry statement binds this observed unknown attempt. Renaming a rationale cannot repeat the same decision.
-      const attempted = cache.lines.filter(isModelCallLine).some((line) => line.generation === generation &&
-        line.semanticDigest === identity.semanticDigest && line.validation?.decision === 'retry-unknown' &&
+      // A repeated rationale does not grant another retry, even when the prompt contract changed.
+      const attempted = sameRequest.some((line) => line.validation?.decision === 'retry-unknown' &&
         line.validation.delta?.rationale === delta.rationale);
       if (attempted || ('claim' in claim && claim.claim.retryRationales?.includes(delta.rationale))) {
-        throw await refusal('PROVIDER_VALIDATION_RETRY_SPENT', '同一必要重试问题已有发送记录；请先核查其结果，不重复派发。', held);
+        throw await refusal('PROVIDER_VALIDATION_RETRY_SPENT', '同一必要重试问题已有发送记录；请先核查其结果，不重复派发。', heldItems);
       }
-      record = decided('retry-unknown', held);
+      record = decided('retry-unknown', heldItems);
     } else {
       // 4 and 5. The purpose and step.
       // Case/family labels cannot grant another send. A new input class for an already covered stage needs a stated delta,

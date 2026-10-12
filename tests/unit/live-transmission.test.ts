@@ -370,6 +370,70 @@ describe('transmitOnce under development validation', () => {
     expect(calls).toHaveLength(1);
   });
 
+  it('keeps a surviving unknown ledger record authoritative when its claim file is lost', async () => {
+    const body = unitBody(BLOCK_A, '雨落在旧城。');
+    const calls: string[] = [];
+    await call(await opened(), dropped(calls), body);
+    await rm(join(root, PROVIDER_CLAIM_DIRECTORY, `${claimKey(body)}.json`));
+    const reminted = unitBody(BLOCK_B, '雨落在旧城。', 'e');
+    expect(await refusal(call(await opened(), modelFetch(calls), reminted))).toBe('PROVIDER_VALIDATION_OUTCOME_UNKNOWN');
+    expect(calls).toHaveLength(1);
+    const intent: DevelopmentValidationIntent = { ...SAMPLE_CASE, delta: { kind: 'retry-unknown', rationale: 'verified-gateway-recovery' } };
+    await call(await opened(), dropped(calls), reminted, { intent });
+    await rm(join(root, PROVIDER_CLAIM_DIRECTORY, `${claimKey(reminted)}.json`));
+    expect(await refusal(call(await opened(), modelFetch(calls), reminted, { intent }))).toBe('PROVIDER_VALIDATION_RETRY_SPENT');
+    expect(calls).toHaveLength(2);
+  });
+
+  it('does not turn a legacy unknown ledger item with no cached response into a fresh request', async () => {
+    const body = unitBody(BLOCK_A, '雨落在旧城。');
+    await writeFile(join(root, PROVIDER_LEDGER_FILE), JSON.stringify({
+      itemId: 'S40/first-baseline/1', purpose: 'first-baseline', model: 'deepseek-v4-flash', promptContractDigest: CONTRACT,
+      requestDigest: providerRequestDigest(body), outcome: 'failed', status: 200, classification: 'outcome-unknown',
+      usage: null, recordedAt: '2026-09-06T00:00:00.000Z',
+    }) + '\n');
+    const calls: string[] = [];
+    expect(await refusal(call(await opened(), modelFetch(calls), body))).toBe('PROVIDER_VALIDATION_OUTCOME_UNKNOWN');
+    expect(calls).toHaveLength(0);
+  });
+
+  it.each(['entry', 'claim', 'ledger', 'entry-and-claim', 'ledger-and-claim', 'corrupt-ledger', 'corrupt-claim'])(
+    'recovers a completed capture with %s loss only from surviving verified provenance', async (damage) => {
+      const cache = await opened();
+      const calls: string[] = [];
+      const body = unitBody(BLOCK_A, '雨落在旧城。');
+      await call(cache, modelFetch(calls), body);
+      const line = modelLines(cache)[0]!;
+      const entry = join(root, PROVIDER_CACHE_DIRECTORY, `${line.cacheKey}.json`);
+      const claim = join(root, PROVIDER_CLAIM_DIRECTORY, `${claimKey(body)}.json`);
+      const ledger = join(root, PROVIDER_LEDGER_FILE);
+      if (damage === 'entry' || damage === 'entry-and-claim') await rm(entry);
+      if (damage === 'claim' || damage.endsWith('-and-claim')) await rm(claim);
+      if (damage === 'ledger' || damage === 'ledger-and-claim') await rm(ledger);
+      if (damage === 'corrupt-ledger') await writeFile(ledger, '{torn');
+      if (damage === 'corrupt-claim') await writeFile(claim, '{torn');
+      if (damage === 'corrupt-ledger') {
+        await expect(opened()).rejects.toMatchObject({ code: 'PROVIDER_LEDGER_CORRUPT' });
+      } else if (damage === 'entry' || damage.endsWith('-and-claim')) {
+        expect(await refusal(call(await opened(), modelFetch(calls), body))).toBe('PROVIDER_VALIDATION_EVIDENCE_UNAVAILABLE');
+      } else {
+        expect((await call(await opened(), modelFetch(calls), body)).replayed).toBe(true);
+      }
+      expect(calls).toHaveLength(1);
+    },
+  );
+
+  it('retains an unknown claim after ledger loss and does not release it through invalidation', async () => {
+    const calls: string[] = [];
+    const body = unitBody(BLOCK_A, '雨落在旧城。');
+    await call(await opened(), dropped(calls), body);
+    await rm(join(root, PROVIDER_LEDGER_FILE));
+    const cache = await opened();
+    await cache.invalidate({ family: SAMPLE_CASE.family, case: SAMPLE_CASE.case }, 'question-revised-after-timeout');
+    expect(await refusal(call(cache, modelFetch(calls), body))).toBe('PROVIDER_VALIDATION_OUTCOME_UNKNOWN');
+    expect(calls).toHaveLength(1);
+  });
+
   it('does not replay tampered or transplanted JSON entries and does not resend after complete cache loss', async () => {
     const body = unitBody(BLOCK_A, '雨落在旧城。');
     const cache = await opened();
