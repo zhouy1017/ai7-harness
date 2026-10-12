@@ -115,6 +115,7 @@ async function compose(recorded: RecordedLoop, options: {
   };
   const tickets: TransmitTicket[] = [];
   const decisions: string[] = [];
+  let modelTurns = 0;
   let adapter: DeepSeekOpenAiCompatibleAdapter | null = null;
   const sessionId = randomUUID();
   const handle = await prepareExecution({
@@ -134,8 +135,13 @@ async function compose(recorded: RecordedLoop, options: {
         codes,
         profile: DEEPSEEK_ROUTE_PROFILE,
         modelProfile: DEEPSEEK_V4_PRO_PROFILE,
-        transport: (url, init) => transmitOnce(cache, modelFetch, { purpose: 'factual-review', promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST },
-          DEEPSEEK_ROUTE_PROFILE, DEEPSEEK_MODEL, url, init),
+        // Each model turn of the loop is its own validation step (Issue #808): the second is the first's next turn.
+        transport: (url, init) => {
+          modelTurns += 1;
+          return transmitOnce(cache, modelFetch, { purpose: 'factual-review', promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST },
+            { intent: RECORDED_LOOP_CASE, step: modelTurns === 1 ? 'factual-review/unit-1' : `factual-review/unit-1/turn-${modelTurns}`, requestShape: DEEPSEEK_V4_PRO_PROFILE.capabilities.requestShape },
+            DEEPSEEK_ROUTE_PROFILE, DEEPSEEK_MODEL, url, init);
+        },
       });
       return adapter;
     },
@@ -253,6 +259,9 @@ describe('the remote route with platform tool calls, over recorded exchanges', (
     }
   });
 });
+
+/** The development validation the recorded loop's model calls are filed under. */
+const RECORDED_LOOP_CASE = { family: 'factual-review', case: 'recorded-search-loop', delta: null } as const;
 
 async function ledgerLines(): Promise<Array<Record<string, unknown>>> {
   return (await readFile(join(root, PROVIDER_LEDGER_FILE), 'utf8')).split('\n').filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);

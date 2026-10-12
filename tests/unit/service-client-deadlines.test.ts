@@ -56,7 +56,7 @@ describe('serial service request execution deadlines', () => {
     peer = new Peer();
     childProcess.spawn.mockReturnValue(peer);
     client = await ServiceClient.start(resolve('node'), resolve('service.js'), resolve('data'),
-      { trustedOperationalScope: 'development-ci', runBudgetCeiling: null, providerCacheRoot: null });
+      { trustedOperationalScope: 'development-ci', runBudgetCeiling: null, providerCacheRoot: null, validation: null });
     peer.requests.length = 0;
   });
   afterEach(() => { peer.kill(); vi.useRealTimers(); vi.clearAllMocks(); });

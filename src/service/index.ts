@@ -7,6 +7,8 @@ import {
   PROVIDER_CACHE_ROOT_ARGUMENT,
   RUN_BUDGET_CEILING_ARGUMENT,
   TRUSTED_SCOPE_ARGUMENT,
+  VALIDATION_CASE_ARGUMENT,
+  VALIDATION_DELTA_ARGUMENT,
   BACKGROUND_QUIET_ARGUMENT,
   CALIBRATION_MIN_BOOKS_ARGUMENT,
   calibrationMinBooksForLaunch,
@@ -1430,7 +1432,7 @@ function parseArguments(argv: string[]): {
         key !== '--j03-foreground-execution-control' && key !== '--j08-recovery-control' &&
         key !== '--j04-model-adapter' && key !== '--j04-connectivity-path' && key !== '--j10-unit-hold-path' && key !== '--j16-answer-hold-path' &&
         key !== BACKGROUND_QUIET_ARGUMENT && key !== CALIBRATION_MIN_BOOKS_ARGUMENT && key !== TRUSTED_SCOPE_ARGUMENT && key !== RUN_BUDGET_CEILING_ARGUMENT &&
-        key !== PROVIDER_CACHE_ROOT_ARGUMENT)
+        key !== PROVIDER_CACHE_ROOT_ARGUMENT && key !== VALIDATION_CASE_ARGUMENT && key !== VALIDATION_DELTA_ARGUMENT)
     ) {
       throw new ProtocolError();
     }
@@ -1441,6 +1443,8 @@ function parseArguments(argv: string[]): {
     trustedOperationalScope: values.get(TRUSTED_SCOPE_ARGUMENT),
     runBudgetCeiling: values.get(RUN_BUDGET_CEILING_ARGUMENT),
     providerCacheRoot: values.get(PROVIDER_CACHE_ROOT_ARGUMENT),
+    validationCase: values.get(VALIDATION_CASE_ARGUMENT),
+    validationDelta: values.get(VALIDATION_DELTA_ARGUMENT),
   });
   if (launchForm === null || (launchForm.providerCacheRoot !== null && !isAbsolute(launchForm.providerCacheRoot))) throw new ProtocolError();
   const dataRoot = values.get('--data-root');

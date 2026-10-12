@@ -66,6 +66,7 @@ import {
 import { CARRIED_GAP_REASON, OUT_OF_SCOPE_GAP_REASON } from './reuse-plan.js';
 import { SERIES_SCOPE_STOP_SUMMARY } from '../series-exclusions.js';
 import {
+  RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST,
   buildRunReportReflectionMessage,
   parseRunReportReflectionResult,
   type RunReportReflectionParseFailureCode,
@@ -184,6 +185,12 @@ interface ActiveRun {
   transmissions: (() => number) | null;
   /** What that counter read when the attempt in flight was dispatched. */
   transmissionsAtDispatch: number;
+  /**
+   * The turn in flight as a development validation step (Issue #808): `unit-<n>`, `reduction`, `sampling-<k>-unit-<n>` or
+   * `reflection`, set before each turn is submitted. The transport files a live call under the Task mode and this, which no
+   * import, Run or attempt renumbers, so evidence of one turn is never mistaken for another's.
+   */
+  validationStep: string;
   harness: PrimaryAgentHarnessHandle | null;
   interrupted: boolean;
   /**
@@ -686,6 +693,7 @@ export class BaselineAnalysisExecutionOwner {
       },
       transmissions: null,
       transmissionsAtDispatch: 0,
+      validationStep: '',
       harness: null,
       interrupted: false,
       cancelRequested: options.cancel === true,
@@ -959,6 +967,7 @@ export class BaselineAnalysisExecutionOwner {
     // other refusal — route, model, system prompt, tools, prior outputs — is untouched.
     context.admittedUserMessages.add(message);
     active.progress.stage = 'run-report-reflection';
+    active.validationStep = 'reflection';
     active.progress.currentUnitOrdinal = null;
     active.progress.currentUnitStartedAt = new Date().toISOString();
     active.progress.attemptState = 'dispatched';
@@ -1026,8 +1035,17 @@ export class BaselineAnalysisExecutionOwner {
     // live calls separately and a repeated purpose can never collide with an unrelated test. A Task
     // without a plan is the kind's own whole first mode — `first-baseline` for the baseline kind.
     const testItemPurpose = facts.update === null ? definition.initialMode : facts.update.mode;
+    // The Provider Test Ledger and Result Cache serve development validation only (ADR 0089, Issue #808). A live Run outside it
+    // is business: every model step reaches the transport itself, and nothing reads or writes the developer cache or ledger.
+    const validation = live?.launch.validation ?? null;
+    const validationContractOf = (): string => {
+      if (active.validationStep === 'reflection') return RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST;
+      if (active.validationStep === 'reduction') return definition.crossUnit!.promptContractDigest;
+      if (active.validationStep.startsWith('sampling-')) return definition.assurance!.promptContractDigest;
+      return promptContractDigest;
+    };
     let cache: ProviderResultCache | null = null;
-    if (live !== null) {
+    if (live !== null && validation !== null) {
       cache = new ProviderResultCache(live.launch.providerCacheRoot);
       await cache.open();
     }
@@ -1108,11 +1126,19 @@ export class BaselineAnalysisExecutionOwner {
           profile: OPENCODE_GO_ROUTE_PROFILE,
           modelProfile: OPENCODE_GO_V4_FLASH_PROFILE,
           sessionId: () => harness.currentSessionId(),
-          // The captured native `fetch`, reached only through the cache: an identical request
-          // replays without transmitting, and a live call happens at most once per test item. The
-          // bound route profile travels with the call, so the cache step reads a limit the way this
-          // route declares limits are read rather than by knowing which route it is serving.
-          transport: (url, init) => transmitOnce(cache!, live.nativeFetch, { purpose: testItemPurpose, promptContractDigest }, OPENCODE_GO_ROUTE_PROFILE, model, url, init),
+          // Under development validation the captured native `fetch` is reached only through the cache: an identical request
+          // replays without transmitting, evidence that already answers the purpose refuses the send, and a live call happens
+          // at most once. The bound route profile travels with the call, so the cache step reads a limit the way this route
+          // declares limits are read rather than by knowing which route it is serving. Outside it, the call goes straight out.
+          transport: validation === null
+            ? (url, init) => live.nativeFetch(url, init)
+            : (url, init) => transmitOnce(cache!, live.nativeFetch, {
+              purpose: testItemPurpose, promptContractDigest: validationContractOf(), taskPromptContractDigest: promptContractDigest,
+            }, {
+              intent: validation,
+              step: `${testItemPurpose}/${active.validationStep}`,
+              requestShape: OPENCODE_GO_V4_FLASH_PROFILE.capabilities.requestShape,
+            }, OPENCODE_GO_ROUTE_PROFILE, model, url, init),
         });
         return liveAdapter.instance;
       },
@@ -1393,6 +1419,7 @@ export class BaselineAnalysisExecutionOwner {
         // can enter the transport, so the reading belongs to this attempt and not the previous one.
         active.transmissionsAtDispatch = active.transmissions?.() ?? 0;
         active.progress.attemptState = attemptState;
+        active.validationStep = `unit-${unit.ordinal}`;
         const message = unitMessages.get(unit.ordinal)!;
         const unitMessageDigest = sha256Hex(message);
         const turn = await harness.submitUnit(message);
@@ -1984,6 +2011,7 @@ export class BaselineAnalysisExecutionOwner {
           // ceiling never dispatched, and a stage that never ran reports no time at all.
           clock.open('cross-unit-reduction');
           active.progress.stage = 'cross-unit-reduction';
+          active.validationStep = 'reduction';
           active.progress.currentUnitOrdinal = null;
           active.progress.currentUnitStartedAt = new Date().toISOString();
           active.progress.attemptState = 'dispatched';
@@ -2230,7 +2258,9 @@ export class BaselineAnalysisExecutionOwner {
       // is exactly the policy-bounded case this guard exists for.
       return assuranceSampleOutcome(draw, [], null, [ASSURANCE_SAMPLING_POLICY_BOUNDED]);
     }
+    let sampleTurn = 0;
     for (const turn of assuranceSamplingTurns(draw.sampled)) {
+      sampleTurn += 1;
       if (active.interrupted) {
         gapReasons.push(assuranceSamplingTurnGapReason(turn.unitOrdinal, '运行已中断，本轮未派发。'));
         break;
@@ -2260,6 +2290,7 @@ export class BaselineAnalysisExecutionOwner {
       // per turn keeps the segments contiguous from the first dispatch to the last turn's settlement.
       context.clock.open('assurance-sampling');
       active.progress.stage = 'assurance-sampling';
+      active.validationStep = `sampling-${sampleTurn}-unit-${turn.unitOrdinal}`;
       // The unit loop is over; a sampling turn is about a unit but is not one of its attempts, so the
       // reader sees the stage rather than a unit ordinal, exactly as it does for the reduction.
       active.progress.currentUnitOrdinal = null;

@@ -10,10 +10,14 @@ const MAX_READINESS_PREFIX_BYTES = 4;
 const READINESS_TIMEOUT_MS = 30_000;
 const STARTUP_LOCATION_PATTERN = /AI7_STARTUP_FAILED\/(network-denial|application-import|runtime|arguments|data-root|shell-root|single-instance|electron-ready|service-ready|renderer-first-paint|readiness-signal)/;
 // The launch form (ADR 0065, Issue #272): `--data-root` is required; the trusted operational scope
-// defaults to `development-ci`, and the ceiling and cache root are accepted only with `developer-live`.
+// defaults to `development-ci`, and the ceiling and cache root are accepted only with `developer-live`, which must name its
+// development validation (`--validation-case <family>/<case>`, optionally `--validation-delta <kind>:<rationale>`; Issue #808).
+// Main and the service parse those two exactly; this launcher checks their shape and the scope they need.
 // The form travels as argv through Electron main to the service; no environment variable carries it.
-const LAUNCH_ARGUMENTS = new Set(['--data-root', '--trusted-operational-scope', '--run-budget-ceiling', '--provider-cache-root']);
+const LAUNCH_ARGUMENTS = new Set(['--data-root', '--trusted-operational-scope', '--run-budget-ceiling', '--provider-cache-root', '--validation-case', '--validation-delta']);
 const RUN_BUDGET_CEILING_PATTERN = /^[1-9][0-9]{0,11}$/u;
+const VALIDATION_CASE_SHAPE = /^[a-z][a-z0-9-]{0,47}\/[a-z][a-z0-9-]{0,47}$/u;
+const VALIDATION_DELTA_SHAPE = /^(?:input|retry-unknown):[a-z][a-z0-9-]{0,47}$/u;
 let childFailureLocation;
 
 function requireLaunch(condition) {
@@ -36,13 +40,20 @@ export function parseBuiltLaunchArguments(args) {
   requireLaunch(scope === 'development-ci' || scope === 'developer-live');
   const ceiling = values.get('--run-budget-ceiling');
   const cacheRoot = values.get('--provider-cache-root');
-  requireLaunch(scope === 'developer-live' || (ceiling === undefined && cacheRoot === undefined));
+  const validationCase = values.get('--validation-case');
+  const validationDelta = values.get('--validation-delta');
+  requireLaunch(scope === 'developer-live' || (ceiling === undefined && cacheRoot === undefined && validationCase === undefined && validationDelta === undefined));
+  requireLaunch(scope !== 'developer-live' || validationCase !== undefined);
   requireLaunch(ceiling === undefined || RUN_BUDGET_CEILING_PATTERN.test(ceiling));
   requireLaunch(cacheRoot === undefined || isAbsolute(cacheRoot));
+  requireLaunch(validationCase === undefined || VALIDATION_CASE_SHAPE.test(validationCase));
+  requireLaunch(validationDelta === undefined || VALIDATION_DELTA_SHAPE.test(validationDelta));
   const forwarded = [];
   if (values.has('--trusted-operational-scope')) forwarded.push('--trusted-operational-scope', scope);
   if (ceiling !== undefined) forwarded.push('--run-budget-ceiling', ceiling);
   if (cacheRoot !== undefined) forwarded.push('--provider-cache-root', cacheRoot);
+  if (validationCase !== undefined) forwarded.push('--validation-case', validationCase);
+  if (validationDelta !== undefined) forwarded.push('--validation-delta', validationDelta);
   return { dataRoot, trustedOperationalScope: scope, runBudgetCeiling: ceiling ?? null, providerCacheRoot: cacheRoot ?? null, forwarded };
 }
 
