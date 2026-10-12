@@ -284,8 +284,8 @@ function requiredElement(selector: string): HTMLElement {
 
 const screen = requiredElement('#screen');
 const persistenceStatus = requiredElement('#persistence-status');
-/** How many lines the status line has said: a line said late asks whether a newer one has been said since it was due. */
-let statusLines = 0;
+/** Incremented on every status update so a delayed completion cannot overwrite a newer message. */
+let statusRevision = 0;
 if (!window.ai7) throw new Error('AI7_RENDERER_BOOTSTRAP_INVALID');
 
 /**
@@ -848,7 +848,7 @@ function instantValue(iso: string): HTMLElement {
 }
 
 function setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void {
-  statusLines += 1;
+  statusRevision += 1;
   persistenceStatus.textContent = message;
   if (tone) persistenceStatus.dataset['tone'] = tone;
   else delete persistenceStatus.dataset['tone'];
@@ -7103,12 +7103,11 @@ function renderImported(result: ImportCommitProjection, recoveryReturn?: Recover
     // A reimport returns to the manuscript (V2-UX-IMP-056; Issue #412, S63): the first import of a manuscript ends in
     // the Book Work Overview once, an update of it does not.
     renderEditorWindow(result.window, result.overview.book.title, recoveryReturn?.attentionId, undefined, undefined, result);
-    // The completion is said again once acknowledged only while nothing has been said since the landing: the acknowledgement
-    // waits for presented frames, and a window that presents none acknowledges after the editor has acted — a refused
-    // 跳到所选文字's line must not be replaced by an older success (Issue #807). The landing's notice keeps the completion.
-    const landed = statusLines;
+    // Frame presentation and acknowledgement IPC can finish after a newer status, including a refused 跳到所选文字
+    // (Issue #807). Repeat the completion only if the status has not changed; the landing notice also keeps the result.
+    const landingStatusRevision = statusRevision;
     void acknowledgeCompletionAfterPaint(result).then((acknowledged) => {
-      if (acknowledged && statusLines === landed) setStatus(result.completionLabel, 'success');
+      if (acknowledged && statusRevision === landingStatusRevision) setStatus(result.completionLabel, 'success');
     });
     return;
   }

@@ -1589,10 +1589,9 @@ async function main() {
       requireJourney(await renderer.evaluate(`document.querySelector('#persistence-status')?.dataset.tone !== 'error'`), 'selection-task-gone-resolution-valid');
     }
     await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportCommitReady === 'true'`, 'selection-task-gone-commit-ready', 60_000);
-    // The reimport's completion is acknowledged only once two frames of the landing have been presented. A window that presents
-    // none — a hosted macOS runner's — acknowledged it after the refused jump below, and its late line took the refusal's place
-    // (Issue #807, Full Gate 38257148642). Frames are held from the commit until the jump has been refused, as J-01 holds them, so
-    // every platform meets that order.
+    // Force the reimport acknowledgement to finish after the refused jump by holding its presentation frames, as J-01 does.
+    // This reproduces a stale status overwrite consistent with Issue #807's failure marker; the hosted macOS ordering was
+    // not observed. Releasing the frames below proves the refusal survives that late acknowledgement on any platform.
     await assertRenderer(renderer, HOLD_FRAMES, 'selection-task-gone-frames-held');
     await assertRenderer(renderer, `(() => { const commit = document.querySelector('[data-commit-manuscript-reimport=${JSON.stringify(bookId)}]'); if (!(commit instanceof HTMLButtonElement) || commit.disabled) return false; commit.click(); return true; })()`, 'selection-task-gone-commit');
     // A reimport lands in the manuscript (Issue #412).
@@ -1623,7 +1622,9 @@ async function main() {
     await assertRenderer(renderer, `globalThis.__ai7HeldCompletionFrames?.length > 0 && document.documentElement.dataset.ai7ImportCompletionAcknowledged === undefined`, 'selection-task-gone-unacknowledged-at-jump');
     await assertRenderer(renderer, RELEASE_FRAMES, 'selection-task-gone-frames-released');
     await waitFor(renderer, `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`, 'selection-task-gone-acknowledged', 60_000);
-    await assertRenderer(renderer, `new Promise((settle) => setTimeout(settle, 0)).then(() => (document.querySelector('#persistence-status')?.textContent ?? '') === '所选文字所在的段落已不在当前稿件中，无法跳到。' && document.querySelector('#persistence-status')?.dataset.tone === 'error')`, 'selection-task-gone-said-stands');
+    await assertRenderer(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '') === '所选文字所在的段落已不在当前稿件中，无法跳到。' && document.querySelector('#persistence-status')?.dataset.tone === 'error'`, 'selection-task-gone-said-stands');
+    const acknowledgedAfter = await renderer.evaluate(`(() => ({ chip: ${CHIP}?.dataset.returnChip ?? null, loads: document.querySelector('[data-screen="editor"] [data-window-loads]')?.dataset.windowLoads ?? '', panel: document.querySelector('#task-drawer')?.dataset.taskDrawerView ?? null }))()`);
+    requireJourney(acknowledgedAfter.chip === null && await renderer.evaluate(READ_RETURN_ENTRY) === null && acknowledgedAfter.loads === goneLoadsBefore && acknowledgedAfter.panel === 'panel', 'selection-task-gone-acknowledged-nothing-moved');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'selection-task-gone-panel-close');
 
     at('zero-loopback-requests');
