@@ -9,6 +9,8 @@ import {
   BACKGROUND_QUIET_ARGUMENT,
   CALIBRATION_MIN_BOOKS_ARGUMENT,
   TRUSTED_SCOPE_ARGUMENT,
+  VALIDATION_CASE_ARGUMENT,
+  VALIDATION_DELTA_ARGUMENT,
   type J01ImportControl,
   type J03ForegroundExecutionControl,
   type J04ModelAdapterControl,
@@ -235,6 +237,11 @@ export class ServiceClient {
     if (launchForm.trustedOperationalScope !== 'development-ci') args.push(TRUSTED_SCOPE_ARGUMENT, launchForm.trustedOperationalScope);
     if (launchForm.runBudgetCeiling !== null) args.push(RUN_BUDGET_CEILING_ARGUMENT, String(launchForm.runBudgetCeiling));
     if (launchForm.providerCacheRoot !== null) args.push(PROVIDER_CACHE_ROOT_ARGUMENT, launchForm.providerCacheRoot);
+    if (launchForm.validation !== null) {
+      args.push(VALIDATION_CASE_ARGUMENT, `${launchForm.validation.family}/${launchForm.validation.case}`);
+      const delta = launchForm.validation.delta;
+      if (delta !== null) args.push(VALIDATION_DELTA_ARGUMENT, `${delta.kind}:${delta.rationale}`);
+    }
     if (importControl) args.push('--j01-import-control', importControl);
     if (foregroundExecutionControl) {
       args.push('--j03-foreground-execution-control', foregroundExecutionControl);

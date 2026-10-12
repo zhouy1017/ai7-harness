@@ -61,8 +61,11 @@ import {
 // Fixtures (iii)–(v) are hand-written synthetic shapes consumed here only; their request digests are
 // the deterministic function of the frozen prompt contract and a synthetic all-zero unit digest.
 
-import { FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST, factualReviewRequestDigest } from '../../src/service/analysis/factual-review-contract.js';
-import { initialEvaluationRequestDigest, initialEvaluationSynthesisRequestDigest } from '../../src/service/evaluation/initial-evaluation-contract.js';
+import { FACTUAL_REVIEW_PROMPT_CONTRACT, FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST, factualReviewRequestDigest } from '../../src/service/analysis/factual-review-contract.js';
+import { initialEvaluationContract, initialEvaluationRequestDigest, initialEvaluationSynthesisRequestDigest } from '../../src/service/evaluation/initial-evaluation-contract.js';
+import { BUILTIN_EVALUATION_PROFILE, evaluationProfileDigest } from '../../src/service/evaluation-records.js';
+import { reviewCategoryContractInput, reviewCategoryEntry } from '../../src/service/review/category-configuration.js';
+import { reviewCategoryContract } from '../../src/service/review/review-category-contract.js';
 
 const FIXTURES_ROOT = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url)));
 const codes = { QUOTA_EXCEEDED_CODE, INVALID_CREDENTIAL_CODE, CONTEXT_WINDOW_EXCEEDED_CODE };
@@ -848,6 +851,25 @@ describe('content-digest resolution', () => {
     ]) {
       const committed = await loadModelFixture(FIXTURES_ROOT, identity);
       expect(Array.from(committed.entries.values()).every((item) => item.contentDigest === null), identity).toBe(true);
+    }
+  });
+});
+
+describe('own blocks under every kind\'s own header (Issue #808)', () => {
+  it('reads the own blocks each unit contract writes, so a converted {{block:N}} is filled for any kind', () => {
+    const evaluationProfile = { ...BUILTIN_EVALUATION_PROFILE, sha256: evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE) };
+    const review = reviewCategoryEntry('typos-and-usage');
+    const ownHeaders = [
+      BASELINE_PROMPT_CONTRACT.ownHeader,
+      FACTUAL_REVIEW_PROMPT_CONTRACT.ownHeader,
+      reviewCategoryContract(reviewCategoryContractInput(review!)).ownHeader,
+      initialEvaluationContract(evaluationProfile).ownHeader,
+    ];
+    const ids = [`blk_${'a'.repeat(24)}`, `blk_${'b'.repeat(24)}`];
+    for (const ownHeader of ownHeaders) {
+      const message = [`合成单元 1/1 · 单元摘要 ${'c'.repeat(64)}`, ownHeader, `[${ids[0]!}] (paragraph) 合成一。`, `[${ids[1]!}] (heading h2) 合成二`].join('\n');
+      expect(ownBlockIdsOf(message), ownHeader).toEqual(ids);
+      expect(ownBlockTextsOf(message), ownHeader).toEqual(['合成一。', '合成二']);
     }
   });
 });
