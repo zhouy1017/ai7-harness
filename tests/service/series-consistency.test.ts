@@ -45,7 +45,7 @@ const LIVE: LaunchBinding = {
   operationalScope: 'developer-live',
   live: {
     route: 'opencode-go',
-    model: 'deepseek-v4-flash',
+    model: 'deepseek-v4.1-flash',
     endpoint: 'https://example.invalid/v1/chat/completions',
     credentialSlot: 'opencode-go',
     credentialReference: randomUUID(),

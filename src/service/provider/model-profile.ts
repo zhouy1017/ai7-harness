@@ -196,8 +196,11 @@ function declaredProfile(route: RemoteExecutionRoute, model: string): ProviderMo
  */
 export const DEEPSEEK_V4_PRO_PROFILE: ProviderModelProfile = declaredProfile(DEEPSEEK_ROUTE, DEEPSEEK_MODEL);
 
-/** The developer-live model of Provider Processing v5, as `config/providers/opencode-go.json` declares it. */
-export const OPENCODE_GO_V4_FLASH_PROFILE: ProviderModelProfile = declaredProfile(OPENCODE_GO_ROUTE, OPENCODE_GO_MODEL);
+/** The developer-live model of Provider Processing v9, as `config/providers/opencode-go.json` declares it. */
+export const OPENCODE_GO_V41_FLASH_PROFILE: ProviderModelProfile = declaredProfile(OPENCODE_GO_ROUTE, OPENCODE_GO_MODEL);
+
+/** Historical V4 profile: original evidence stays attributable to its exact model. */
+export const OPENCODE_GO_V4_FLASH_PROFILE: ProviderModelProfile = declaredProfile(OPENCODE_GO_ROUTE, 'deepseek-v4-flash');
 
 /**
  * The production model's id behind the developer-live gateway: a different profile with different

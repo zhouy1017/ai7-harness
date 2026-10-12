@@ -6,19 +6,21 @@ Versioned JSON policies, their schemas and their human projections are immutable
 
 ## Current runtime selection
 
-At the integrated `dev@afaf7465` baseline, [active-policy-set v5](active-policy-set.v5.json) is selected:
+The #807 migration selects [active-policy-set v7](active-policy-set.v7.json); its selection becomes integrated only at the exact dev commit carrying this coherent migration:
 
 | Scope | Canonical JSON | Schema | Human projection |
 | --- | --- | --- | --- |
 | `development-ci` | [Provider Processing v1](provider-processing-policy.v1.json) | [schema](provider-processing-policy.v1.schema.json) | [projection](provider-processing-policy.md) |
 | `fixture-recording` | [Provider Processing v2](provider-processing-policy.v2.json) | [schema](provider-processing-policy.v2.schema.json) | [projection](provider-processing-policy.v2.md) |
 | `ordinary-production` | [Provider Processing v6](provider-processing-policy.v6.json) | [schema](provider-processing-policy.v6.schema.json) | [projection](provider-processing-policy.v6.md) |
-| `developer-live` | [Provider Processing v5](provider-processing-policy.v5.json) | [schema](provider-processing-policy.v5.schema.json) | [projection](provider-processing-policy.v5.md) |
+| `developer-live` | [Provider Processing v9](provider-processing-policy.v9.json) | [schema](provider-processing-policy.v9.schema.json) | [projection](provider-processing-policy.v9.md) |
 | External Export, all scopes | [External Export v2](external-export-policy.v2.json) | [schema](external-export-policy.v2.schema.json) | [projection](external-export-policy.v2.md) |
 
-The source checkout selects `development-ci` by default or `developer-live` through its trusted launch argument. It does not select fixture-recording or ordinary-production. The developer-live executable pin remains analysis-only Go `deepseek-v4-flash`, required explicit Run ceiling, admitted sample lineage and protected capture. Provider Processing v7 is written but selected by no active set. Policy files describe the exact capabilities of their versions; any old attendance/model wording in a pinned human projection is retained for byte fidelity, not a new repository-agent operating instruction.
+The source checkout selects `development-ci` by default or `developer-live` through its trusted launch argument. It does not select fixture-recording or ordinary-production. The developer-live executable pin remains baseline-analysis-only Go `deepseek-v4.1-flash`, required explicit Run ceiling, admitted sample lineage and protected capture. Provider Processing v7 is written but selected by no active set. Policy files describe the exact capabilities of their versions; any old attendance/model wording in a pinned human projection is retained for byte fidelity, not a new repository-agent operating instruction.
 
-The Owner-approved target is configurable OpenCode Go `deepseek-v4.1-flash`, with the official DeepSeek route retained and first production delivery as a local controlled trial using the user's credential. [#807](https://github.com/zhouy1017/ai7-harness/issues/807) owns the coherent model/configuration/generated-projection/policy/launch migration, [#808](https://github.com/zhouy1017/ai7-harness/issues/808) extends the existing development reuse owners, and [#806](https://github.com/zhouy1017/ai7-harness/issues/806) adapts CI/Orca routing. None is implemented by this documentation change. [Provider support](../development/provider-support.md) remains an unchanged generated view of the current provider declarations; its legacy-model evidence does not prove the target model's capability or quality.
+OpenCode Go `deepseek-v4.1-flash` is the exact developer-live product binding. [#807](https://github.com/zhouy1017/ai7-harness/issues/807) migrates its configuration, declared/observed evidence and exact activation together; [#808](https://github.com/zhouy1017/ai7-harness/issues/808) supplies existing development-only reuse. The official DeepSeek route stays independent and optional. User-credential local production launch remains #811, unavailable here. Old V4 live items remain historical evidence for their actual model. [Provider support](../development/provider-support.md) distinguishes the declared wire contract from named live observations.
+
+Provider Processing v9 directly succeeds selected developer-live v5; active-set v7 directly succeeds selected v5. The unselected v7 policy is not a predecessor activation, and PR #742 reserves proposed Provider Processing v8 / active-set v6 for its separate web work. That proposal must reconcile this non-web migration and grants no current web authority. The unchanged development-ci v1, fixture-recording v2, ordinary-production v6 and External Export v2 pins retain their exact bytes. Direct user-initiated baseline Tasks, including existing updates and continuation, may execute; default-rule/background/scheduled/import/cross-Run origins, other task kinds and unpublished categories remain refused.
 
 ## Operational boundaries
 

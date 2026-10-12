@@ -477,7 +477,7 @@ describe('快速开始 over the real store (TASK-017, TASK-020, TASK-026, TASK-0
         operationalScope: 'developer-live',
         live: {
           route: 'opencode-go',
-          model: 'deepseek-v4-flash',
+          model: 'deepseek-v4.1-flash',
           endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
           credentialSlot: 'opencode-go',
           credentialReference: randomUUID(),

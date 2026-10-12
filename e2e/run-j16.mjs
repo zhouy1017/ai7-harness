@@ -415,6 +415,35 @@ async function cardAction(renderer, state, action, name) {
 
 const blockInView = (blockId) => `document.querySelector('[data-screen="editor"] .ProseMirror [data-block-id=${JSON.stringify(blockId)}]') !== null`;
 const CHIP = `document.querySelector('[data-screen="editor"] .return-chip-host [data-return-chip]')`;
+/**
+ * A window that presents no frames, as J-01 holds them: every animation frame asked for is kept, unrun, until RELEASE_FRAMES
+ * restores the page's own and asks each kept one of it, in order; a kept frame cancelled meanwhile is dropped.
+ */
+const HOLD_FRAMES = `(() => {
+  if (globalThis.__ai7HeldCompletionFrames !== undefined) return false;
+  globalThis.__ai7HeldCompletionFrames = [];
+  globalThis.__ai7HeldCompletionOriginalAnimationFrame = globalThis.requestAnimationFrame.bind(globalThis);
+  globalThis.__ai7HeldCompletionOriginalCancelAnimationFrame = globalThis.cancelAnimationFrame.bind(globalThis);
+  let id = 0;
+  globalThis.requestAnimationFrame = (callback) => { id -= 1; globalThis.__ai7HeldCompletionFrames.push({ id, callback }); return id; };
+  globalThis.cancelAnimationFrame = (handle) => {
+    const index = globalThis.__ai7HeldCompletionFrames.findIndex((frame) => frame.id === handle);
+    if (index >= 0) globalThis.__ai7HeldCompletionFrames.splice(index, 1);
+    else globalThis.__ai7HeldCompletionOriginalCancelAnimationFrame(handle);
+  };
+  return true;
+})()`;
+const RELEASE_FRAMES = `(() => {
+  const held = globalThis.__ai7HeldCompletionFrames;
+  if (!Array.isArray(held)) return false;
+  globalThis.requestAnimationFrame = globalThis.__ai7HeldCompletionOriginalAnimationFrame;
+  globalThis.cancelAnimationFrame = globalThis.__ai7HeldCompletionOriginalCancelAnimationFrame;
+  delete globalThis.__ai7HeldCompletionFrames;
+  delete globalThis.__ai7HeldCompletionOriginalAnimationFrame;
+  delete globalThis.__ai7HeldCompletionOriginalCancelAnimationFrame;
+  for (const frame of held) requestAnimationFrame(frame.callback);
+  return true;
+})()`;
 
 // ---- 就这段提问… (Issue #52, plan slice S17a): a selection, its question, and the dialogue as the editor reads it ---------
 
@@ -1560,6 +1589,10 @@ async function main() {
       requireJourney(await renderer.evaluate(`document.querySelector('#persistence-status')?.dataset.tone !== 'error'`), 'selection-task-gone-resolution-valid');
     }
     await waitFor(renderer, `document.querySelector('[data-import-review-kind="reimport"]')?.dataset.reimportCommitReady === 'true'`, 'selection-task-gone-commit-ready', 60_000);
+    // Force the reimport acknowledgement to finish after the refused jump by holding its presentation frames, as J-01 does.
+    // This reproduces a stale status overwrite consistent with Issue #807's failure marker; the hosted macOS ordering was
+    // not observed. Releasing the frames below proves the refusal survives that late acknowledgement on any platform.
+    await assertRenderer(renderer, HOLD_FRAMES, 'selection-task-gone-frames-held');
     await assertRenderer(renderer, `(() => { const commit = document.querySelector('[data-commit-manuscript-reimport=${JSON.stringify(bookId)}]'); if (!(commit instanceof HTMLButtonElement) || commit.disabled) return false; commit.click(); return true; })()`, 'selection-task-gone-commit');
     // A reimport lands in the manuscript (Issue #412).
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookId)}] .ProseMirror [data-block-id]') !== null`, 'selection-task-gone-landed', 180_000);
@@ -1584,6 +1617,14 @@ async function main() {
     const goneAfter = await renderer.evaluate(`(() => ({ chip: ${CHIP}?.dataset.returnChip ?? null, loads: document.querySelector('[data-screen="editor"] [data-window-loads]')?.dataset.windowLoads ?? '', panel: document.querySelector('#task-drawer')?.dataset.taskDrawerView ?? null }))()`);
     const returnAfter = await renderer.evaluate(READ_RETURN_ENTRY);
     requireJourney(goneAfter.chip === null && returnAfter === null && goneAfter.loads === goneLoadsBefore && goneAfter.panel === 'panel', 'selection-task-gone-nothing-moved', { loadsBefore: goneLoadsBefore, returnAfter, after: goneAfter });
+    // The held frames are presented now: the reimport's completion is acknowledged after the refusal, and the refusal is still what
+    // the status line says.
+    await assertRenderer(renderer, `globalThis.__ai7HeldCompletionFrames?.length > 0 && document.documentElement.dataset.ai7ImportCompletionAcknowledged === undefined`, 'selection-task-gone-unacknowledged-at-jump');
+    await assertRenderer(renderer, RELEASE_FRAMES, 'selection-task-gone-frames-released');
+    await waitFor(renderer, `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`, 'selection-task-gone-acknowledged', 60_000);
+    await assertRenderer(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '') === '所选文字所在的段落已不在当前稿件中，无法跳到。' && document.querySelector('#persistence-status')?.dataset.tone === 'error'`, 'selection-task-gone-said-stands');
+    const acknowledgedAfter = await renderer.evaluate(`(() => ({ chip: ${CHIP}?.dataset.returnChip ?? null, loads: document.querySelector('[data-screen="editor"] [data-window-loads]')?.dataset.windowLoads ?? '', panel: document.querySelector('#task-drawer')?.dataset.taskDrawerView ?? null }))()`);
+    requireJourney(acknowledgedAfter.chip === null && await renderer.evaluate(READ_RETURN_ENTRY) === null && acknowledgedAfter.loads === goneLoadsBefore && acknowledgedAfter.panel === 'panel', 'selection-task-gone-acknowledged-nothing-moved');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'selection-task-gone-panel-close');
 
     at('zero-loopback-requests');

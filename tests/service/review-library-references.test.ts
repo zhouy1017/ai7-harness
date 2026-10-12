@@ -289,7 +289,7 @@ describe('review categories reference exact local library versions', () => {
     const id = await material();
     const run = prepare([id]);
     const free = store.baselineAnalysisLedger.launch;
-    store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'developer-live', live: { route: 'opencode-go', model: 'deepseek-v4-flash', endpoint: 'https://example.invalid/v1', credentialSlot: 'opencode-go', credentialReference: randomUUID(), runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 100_000 } } });
+    store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'developer-live', live: { route: 'opencode-go', model: 'deepseek-v4.1-flash', endpoint: 'https://example.invalid/v1', credentialSlot: 'opencode-go', credentialReference: randomUUID(), runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 100_000 } } });
     try {
       const offers = store.inspectReviewWorkspace(bookId, null).materials!;
       expect(offers.statement).toBe(TASK_MATERIAL_LIVE_UNAVAILABLE);
@@ -321,7 +321,7 @@ describe('review categories reference exact local library versions', () => {
     const run = prepare([id]);
     expect(plan(run).scope.send).toContain('也只在本机读取');
     const free = store.baselineAnalysisLedger.launch;
-    store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'developer-live', live: { route: 'opencode-go', model: 'deepseek-v4-flash', endpoint: 'https://example.invalid/v1', credentialSlot: 'opencode-go', credentialReference: randomUUID(), runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 100_000 } } });
+    store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'developer-live', live: { route: 'opencode-go', model: 'deepseek-v4.1-flash', endpoint: 'https://example.invalid/v1', credentialSlot: 'opencode-go', credentialReference: randomUUID(), runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 100_000 } } });
     try {
       const send = plan(run).scope.send;
       expect(send.startsWith('不发送任何内容')).toBe(true);

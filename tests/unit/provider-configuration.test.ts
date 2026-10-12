@@ -24,6 +24,7 @@ import { DEEPSEEK_ROUTE, OPENCODE_GO_ROUTE, type RemoteExecutionRoute } from '..
 import {
   DEEPSEEK_V4_PRO_PROFILE,
   OPENCODE_GO_V4_FLASH_PROFILE,
+  OPENCODE_GO_V41_FLASH_PROFILE,
   PROVIDER_MODEL_PROFILES,
   modelProfileFor,
   type ProviderModelProfile,
@@ -204,7 +205,7 @@ describe('provider documents and the generator (ADR 0073 §2)', () => {
         (documentOf(input, 'minimax').evidence as any)['invented'] = { kind: 'live-test-item', itemIds: ['NOPE/1'], observedOn: '2026-10-09' };
         route(documentOf(input, 'minimax')).models[0].capabilities = { answerChannel: { value: 'message-content-string', evidence: 'invented' } };
       }],
-      ['live-item-unrecorded', (input) => { (documentOf(input, 'opencode-go').evidence as any)['first-live-run'].itemIds = ['S40/first-baseline/9']; }],
+      ['live-item-unrecorded', (input) => { (documentOf(input, 'opencode-go').evidence as any)['first-live-run'].itemIds = ['S40/first-baseline/999']; }],
       ['live-item-unrecorded', (input) => {
         (documentOf(input, 'minimax').evidence as any)['borrowed'] = { kind: 'live-test-item', itemIds: ['S40/first-baseline/1'], observedOn: '2026-09-07' };
         route(documentOf(input, 'minimax')).models[0].capabilities = { answerChannel: { value: 'message-content-string', evidence: 'borrowed' } };
@@ -333,17 +334,18 @@ describe('recorded evidence and the Provider Test Ledger (Issue #715, ADR 0067)'
     return env;
   };
 
-  it('records the nine live items and the one baseline on declared rows, and every generated profile cites them from its own row only', () => {
+  it('retains nine historical V4 items and records V4.1 items on their own declared rows, and every generated profile cites them from its own row only', () => {
     const { recordedEvidence } = freshInput();
-    expect(recordedEvidence.data.liveTestItems.map((item) => item.itemId)).toEqual(NINE_ITEMS);
-    for (const item of recordedEvidence.data.liveTestItems) {
+    expect(recordedEvidence.data.liveTestItems.filter((item) => item.model === 'deepseek-v4-flash').map((item) => item.itemId)).toEqual(NINE_ITEMS);
+    for (const item of recordedEvidence.data.liveTestItems.filter((item) => item.model === 'deepseek-v4-flash')) {
       expect(item.route, item.itemId).toBe('opencode-go');
       expect(item.model, item.itemId).toBe('deepseek-v4-flash');
       expect(item.observedOn, item.itemId).toBe(item.itemId === 'S40/reanalyze-range/1' ? '2026-09-08' : '2026-09-07');
     }
     expect(recordedEvidence.data.frozenRequestBaselines).toEqual([{ since: 'adapter revision 1', route: 'deepseek-open-platform', models: ['deepseek-v4-pro'], issue: '#310' }]);
     const resolved = generator.resolveProviderConfiguration(freshInput());
-    expect(resolved.recordedEvidence.liveTestItems.map((item) => item.itemId)).toEqual(NINE_ITEMS);
+    expect(resolved.recordedEvidence.liveTestItems.map((item) => item.itemId)).toEqual(recordedEvidence.data.liveTestItems.map((item) => item.itemId));
+    expect(recordedEvidence.data.liveTestItems.filter((item) => item.model === 'deepseek-v4.1-flash')).toHaveLength(12);
     // In the generated profiles, an item or a baseline appears as evidence only on the row the record names for it.
     const itemRow = new Map(recordedEvidence.data.liveTestItems.map((item) => [item.itemId, `${item.route}/${item.model}`]));
     const baselineRows = new Map(recordedEvidence.data.frozenRequestBaselines.map((baseline) => [baseline.since, baseline.models.map((model) => `${baseline.route}/${model}`)]));
@@ -361,7 +363,7 @@ describe('recorded evidence and the Provider Test Ledger (Issue #715, ADR 0067)'
       }
     }
     // The developer-live model's four ledger-backed capabilities; the production model's two and its inherited shape.
-    expect(ledgerBacked).toBe(7);
+    expect(ledgerBacked).toBe(9);
     expect(Object.values(GENERATED_ROUTE_PROFILES).filter((profile) => profile.credentialHeaderEvidence.kind === 'frozen-request-baseline').map((profile) => profile.route)).toEqual(['deepseek-open-platform']);
     // The support page renders the record, and the generated TypeScript does not: nothing the product runs reads it.
     const support = readFileSync(`${ROOT}docs/development/provider-support.md`, 'utf8');
@@ -444,14 +446,14 @@ describe('recorded evidence and the Provider Test Ledger (Issue #715, ADR 0067)'
       { itemId: 'S87/search/1', kind: 'websearch', outcome: 'transmitted', recordedAt: '2026-10-08T00:00:00.000Z' },
     ])).toEqual([]);
     expect(compare(agreeingLines().slice(1))).toEqual(['S40/first-baseline/1 is recorded but the ledger holds no transmitted line for it']);
-    expect(compare([...agreeingLines().slice(0, 8), ledgerLine('S40/reanalyze-range/1', 'deepseek-v4-pro', '2026-09-08T10:00:00.000Z')]))
+    expect(compare([...agreeingLines().filter((line) => line.itemId !== 'S40/reanalyze-range/1'), ledgerLine('S40/reanalyze-range/1', 'deepseek-v4-pro', '2026-09-08T10:00:00.000Z')]))
       .toEqual(['S40/reanalyze-range/1 is recorded for deepseek-v4-flash but the ledger transmitted it to deepseek-v4-pro']);
     // The day is the UTC day of `recordedAt`: 2026-09-08 01:00 in UTC+8 is still 2026-09-07 to the ledger.
-    expect(compare([...agreeingLines().slice(0, 8), ledgerLine('S40/reanalyze-range/1', 'deepseek-v4-flash', '2026-09-07T17:00:00.000Z')]))
+    expect(compare([...agreeingLines().filter((line) => line.itemId !== 'S40/reanalyze-range/1'), ledgerLine('S40/reanalyze-range/1', 'deepseek-v4-flash', '2026-09-07T17:00:00.000Z')]))
       .toEqual(['S40/reanalyze-range/1 is recorded as observed on 2026-09-08 but the ledger recorded it on 2026-09-07']);
-    expect(compare([...agreeingLines().slice(0, 8), ledgerLine('S40/reanalyze-range/1', 'deepseek-v4-flash', '2026-09-08T01:00:00+08:00')]))
+    expect(compare([...agreeingLines().filter((line) => line.itemId !== 'S40/reanalyze-range/1'), ledgerLine('S40/reanalyze-range/1', 'deepseek-v4-flash', '2026-09-08T01:00:00+08:00')]))
       .toEqual(['S40/reanalyze-range/1 is recorded as observed on 2026-09-08 but the ledger recorded it on 2026-09-07']);
-    expect(compare([...agreeingLines().slice(0, 8), ledgerLine('S40/reanalyze-range/1', 'deepseek-v4-flash', 'not a time')]))
+    expect(compare([...agreeingLines().filter((line) => line.itemId !== 'S40/reanalyze-range/1'), ledgerLine('S40/reanalyze-range/1', 'deepseek-v4-flash', 'not a time')]))
       .toEqual(['S40/reanalyze-range/1 is recorded as observed on 2026-09-08 but the ledger recorded it on no day']);
     expect(compare([...agreeingLines(), ledgerLine('S99/unrecorded/1', 'glm-5.3', '2026-10-09T00:00:00.000Z')])).toEqual(['S99/unrecorded/1 was transmitted but is not recorded']);
     // Where CI is present there is no ledger and must never need to be one.
@@ -473,8 +475,8 @@ describe('recorded evidence and the Provider Test Ledger (Issue #715, ADR 0067)'
     try {
       const write = (lines: LedgerLine[]) => writeFileSync(join(scratch, 'ledger.jsonl'), `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`);
       write(agreeingLines());
-      expect(run(['--ledger', scratch], developerEnv())).toEqual({ status: 0, stdout: 'PROVIDER_CONFIGURATION/ledger-agrees: 9 items\n', stderr: '' });
-      write([...agreeingLines().slice(0, 8), ledgerLine('S40/reanalyze-range/1', 'deepseek-v4-pro', '2026-09-08T10:00:00.000Z'), ledgerLine('S99/unrecorded/1', 'glm-5.3', '2026-10-09T00:00:00.000Z')]);
+      expect(run(['--ledger', scratch], developerEnv())).toEqual({ status: 0, stdout: `PROVIDER_CONFIGURATION/ledger-agrees: ${agreeingLines().length} items\n`, stderr: '' });
+      write([...agreeingLines().filter((line) => line.itemId !== 'S40/reanalyze-range/1'), ledgerLine('S40/reanalyze-range/1', 'deepseek-v4-pro', '2026-09-08T10:00:00.000Z'), ledgerLine('S99/unrecorded/1', 'glm-5.3', '2026-10-09T00:00:00.000Z')]);
       const differing = run(['--ledger', scratch], developerEnv());
       expect(differing.status).toBe(1);
       expect(differing.stdout).toBe('');
@@ -523,7 +525,7 @@ describe('the generated configuration (ADR 0073 §3, §4)', () => {
     expect(DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE).toBe('a7c0de00-5040-4f27-9e13-6b1f2c8d4a55');
   });
 
-  it('moves the two bound routes into configuration without moving a byte of either', () => {
+  it('retains official and historical profile bytes while binding the exact V4.1 profile', () => {
     // The route profiles exactly as they were hand-written before Issue #435, plus the two fields it adds.
     expect(DEEPSEEK_ROUTE_PROFILE).toEqual({
       route: 'deepseek-open-platform', endpoint: 'https://api.deepseek.com/chat/completions', credentialSlot: 'deepseek-api-key',
@@ -544,14 +546,14 @@ describe('the generated configuration (ADR 0073 §3, §4)', () => {
     expect(OPENCODE_GO_ROUTE_PROFILE.route).toBe(DEVELOPER_LIVE_POLICY_BINDING.route);
     expect(OPENCODE_GO_ROUTE_PROFILE.endpoint).toBe(DEVELOPER_LIVE_POLICY_BINDING.endpoint);
     expect(OPENCODE_GO_ROUTE_PROFILE.credentialSlot).toBe(DEVELOPER_LIVE_POLICY_BINDING.credentialSlot);
-    expect(modelProfileFor(DEVELOPER_LIVE_POLICY_BINDING.route, DEVELOPER_LIVE_POLICY_BINDING.model)).toBe(OPENCODE_GO_V4_FLASH_PROFILE);
+    expect(modelProfileFor(DEVELOPER_LIVE_POLICY_BINDING.route, DEVELOPER_LIVE_POLICY_BINDING.model)).toBe(OPENCODE_GO_V41_FLASH_PROFILE);
     expect(DEEPSEEK_V4_PRO_PROFILE.context).toEqual({ tokens: 1_000_000, evidence: expect.objectContaining({ kind: 'vendor-documentation', readOn: '2026-09-10' }) });
     expect(OPENCODE_GO_V4_FLASH_PROFILE.context).toEqual({ tokens: null, evidence: { kind: 'unverified' } });
   });
 
-  it('declares every configured model inert except the two active ones, and no configured route bindable', () => {
+  it('declares every other configured model inert beside the three readable profiles, and no configured route bindable', () => {
     for (const profile of Object.values(PROVIDER_MODEL_PROFILES)) {
-      if (profile === DEEPSEEK_V4_PRO_PROFILE || profile === OPENCODE_GO_V4_FLASH_PROFILE) continue;
+      if (profile === DEEPSEEK_V4_PRO_PROFILE || profile === OPENCODE_GO_V4_FLASH_PROFILE || profile === OPENCODE_GO_V41_FLASH_PROFILE) continue;
       // A declared format is a claim about the request shape and nothing else (ADR 0073 §3).
       expect(profile.capabilities.answerChannel, profile.key).toBe('none');
       expect(profile.capabilities.reasoningChannel, profile.key).toBe('none');
