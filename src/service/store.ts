@@ -5123,6 +5123,10 @@ export class EditorialStore {
         if (error instanceof StoreError && (error.code === 'MATERIAL_INDEX_MOVED' || error.code === 'MATERIAL_REFERENCE_UNAVAILABLE')) {
           return taskMaterialRefusal(source, error.code, surface);
         }
+        // A corrupt index record degrades 评估 to that reference, named plainly (Issue #795); 审阅 keeps it propagating.
+        if (surface === '评估' && error instanceof StoreError && error.code === 'MATERIAL_INDEX_RECORD_INVALID') {
+          return taskMaterialRefusal(source, error.code, surface);
+        }
         throw error;
       }
       return this.#analysisCall(() => taskMaterialWords(source, paragraphs));
@@ -5156,11 +5160,17 @@ export class EditorialStore {
     return references;
   }
 
-  #taskMaterialOffers(bookId: string): NonNullable<ReviewWorkspaceProjection['materials']> {
+  #taskMaterialOffers(bookId: string, surface: '审阅' | '评估' = '审阅'): NonNullable<ReviewWorkspaceProjection['materials']> {
     const live = this.#baselineAnalysis.launch.live !== null;
     const indexed = this.#libraryCall(() => this.#libraryMaterials.referable(bookId)).flatMap((item) => {
-      const build = this.#materialIndexCall(() => this.#materialIndex.current(item.materialId));
-      return build === null || build.state !== 'complete' ? [] : [{ ...item, characters: build.metadata.characters }];
+      try {
+        const build = this.#materialIndexCall(() => this.#materialIndex.current(item.materialId));
+        return build === null || build.state !== 'complete' ? [] : [{ ...item, characters: build.metadata.characters }];
+      } catch (error) {
+        // A damaged build cannot be offered again; 评估's frozen reference row carries its named refusal (#795).
+        if (surface === '评估' && error instanceof StoreError && error.code === 'MATERIAL_INDEX_RECORD_INVALID') return [];
+        throw error;
+      }
     });
     return {
       statement: live ? TASK_MATERIAL_LIVE_UNAVAILABLE : indexed.length === 0 ? TASK_MATERIALS_NONE : TASK_MATERIALS_STATEMENT,
@@ -5391,10 +5401,16 @@ export class EditorialStore {
           template: latest.task.template,
           recordOrdinal: this.#evaluationRecordOrdinal(latest.task.recordId),
           profile: latest.task.input.record.profile,
-          exemplars: readersReportExemplarLine(latest.task.input.exemplars),
+          // The frozen plan's own line (Issue #792): the exemplars this draft kept, and — as 评估 names them — the damaged
+          // records and the decision ledgers that were skipped when it was prepared.
+          exemplars: this.#readersReportExemplarStatement({
+            exemplars: latest.task.input.exemplars,
+            damaged: latest.task.skippedExemplars.filter((entry) => entry.reason === 'record').map((entry) => entry.title),
+            ledgerDamaged: latest.task.skippedExemplars.filter((entry) => entry.reason === 'ledger').map((entry) => entry.title),
+          }),
         },
       }));
-      return { plan: withPlanMovedReason(withResend(evaluationMaterialPlan(plan, this.#evaluationPlanMaterials(latest.ledger, input.bookId, projection.authorization !== null)), this.#analysisCall(() => latest.ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(withResend(evaluationMaterialPlan(plan, this.#evaluationPlanMaterials(latest.ledger, input.bookId, projection.authorization !== null), this.#baselineAnalysis.launch.live !== null), this.#analysisCall(() => latest.ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     if (input.kind === 'evaluation-rewrite') {
       // 按我的评分重写评语 (Issue #429, S81b2): the rewrite kind's latest Task, on the ledger of the contract its plan froze.
@@ -5443,7 +5459,7 @@ export class EditorialStore {
       // The profile the Task froze (Issue #427), never the house's current one, beside the references its plan froze (#428).
       const profile = this.#initialProfileForTask(projection.taskIntent.taskIntentId);
       const plan = this.#taskPlanCall(() => initialEvaluationPlan({ projection, bookTitle, blocks, profile }));
-      return { plan: withPlanMovedReason(withResend(evaluationMaterialPlan(plan, this.#evaluationPlanMaterials(ledger, input.bookId, projection.authorization !== null)), this.#analysisCall(() => ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(withResend(evaluationMaterialPlan(plan, this.#evaluationPlanMaterials(ledger, input.bookId, projection.authorization !== null), this.#baselineAnalysis.launch.live !== null), this.#analysisCall(() => ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
     }
     const reviewRunId = input.ref;
     requireStore(reviewRunId !== null, 'TASK_PLAN_INVALID', '审阅的计划要指明是哪一次审阅。');
@@ -8625,7 +8641,7 @@ export class EditorialStore {
     };
     const initial = frozenOf(page.initial.task);
     const readersReport = frozenOf(page.readersReport.task);
-    return { ...page, materials: this.#taskMaterialOffers(page.bookId), materialReferences: {
+    return { ...page, materials: this.#taskMaterialOffers(page.bookId, '评估'), materialReferences: {
       initial: initial.lines, readersReport: readersReport.lines, blocked: { initial: initial.blocked, readersReport: readersReport.blocked },
     } };
   }
@@ -8983,15 +8999,17 @@ export class EditorialStore {
    * admission every plan says 「本社暂无审稿意见范例，本次不参考范例」 and the draft is written without one.
    *
    * A damaged record is named rather than raised (Issue #778): the item is listed in `damaged` as it would be listed if it
-   * read, and every other exemplar — and the rest of 评估 — still reads.
+   * read, and every other exemplar — and the rest of 评估 — still reads. An imported version whose decision ledger alone will
+   * not read is listed in `ledgerDamaged` instead, under its own plain reason (Issue #792).
    */
-  #readersReportExemplars(bookId: string): { exemplars: ReadersReportExemplarInput[]; damaged: string[] } {
+  #readersReportExemplars(bookId: string): { exemplars: ReadersReportExemplarInput[]; damaged: string[]; ledgerDamaged: string[] } {
     const rows = this.#authority.prepare(
       `SELECT DISTINCT d.book_id, d.material_key, b.title FROM learning_eligibility_decisions d JOIN books b ON b.book_id = d.book_id
        WHERE d.material_key LIKE ? AND d.book_id <> ? ORDER BY b.title COLLATE BINARY, d.book_id, d.material_key`,
     ).all(`${READERS_REPORT_EXEMPLAR_KEY_PREFIX}%`, bookId) as SqlRow[];
     const exemplars: ReadersReportExemplarInput[] = [];
     const damaged: string[] = [];
+    const ledgerDamaged: string[] = [];
     for (const row of rows) {
       if (exemplars.length === MAX_READERS_REPORT_EXEMPLARS) break;
       const otherBookId = asString(row.book_id);
@@ -9017,11 +9035,14 @@ export class EditorialStore {
       }
     }
     // Then earlier Books' imported 审稿意见 (Issue #427), by title as 范例 lists them: only those Books are read, one item at a
-    // time, so a damaged record leaves out only itself (Issue #778).
-    for (const item of this.#importedCall(() => this.#importedExemplars.readersReportExemplarCandidates())) {
+    // time and only while the cap has room (Issue #792), so a damaged record leaves out only itself (Issue #778).
+    for (const item of this.#importedCall(() => this.#importedExemplars.readersReportExemplarCandidates(MAX_READERS_REPORT_EXEMPLARS - exemplars.length))) {
       if (exemplars.length === MAX_READERS_REPORT_EXEMPLARS) break;
       const title = boundedGraphemes(item.title, 200);
-      if (item.revisionId === null) { damaged.push(title); continue; }
+      if (item.revisionId === null) {
+        (item.reason === 'ledger' ? ledgerDamaged : damaged).push(title);
+        continue;
+      }
       try {
         const words = readWritingExemplarWords(this.#authority, item.revisionId);
         if (words !== null) exemplars.push({ title, text: words.text });
@@ -9030,20 +9051,29 @@ export class EditorialStore {
         damaged.push(title);
       }
     }
-    return { exemplars, damaged };
+    return { exemplars, damaged, ledgerDamaged };
   }
 
   /**
-   * What 评估 says of the house's 审稿意见 exemplars (Issue #778): the ones that read, and any damaged record named as it would
-   * be listed, so one damaged record leaves only itself out.
+   * What 评估 says of the house's 审稿意见 exemplars (Issue #778, #792): the ones that read, then what cannot be read — a
+   * damaged record, or one whose decision ledger alone will not read, each under its own plain reason and named as it would
+   * be listed, so one damaged record leaves only itself out. When nothing readable precedes the damage, 「另有」 is not used.
    */
-  #readersReportExemplarStatement(readings: { exemplars: ReadersReportExemplarInput[]; damaged: string[] }): string {
-    if (readings.damaged.length === 0) return readersReportExemplarLine(readings.exemplars);
-    const names = readings.damaged.map((title) => `《${title}》`).join('、');
-    const damaged = `另有 ${readings.damaged.length} 份范例记录已损坏，无法读取`;
+  #readersReportExemplarStatement(readings: { exemplars: ReadonlyArray<ReadersReportExemplarInput>; damaged: ReadonlyArray<string>; ledgerDamaged: ReadonlyArray<string> }): string {
+    const clauses: string[] = [];
+    const clause = (count: number, subject: string, titles: ReadonlyArray<string>): void => {
+      if (count === 0) return;
+      const names = titles.map((title) => `《${title}》`).join('、');
+      clauses.push(clauses.length === 0 && readings.exemplars.length === 0
+        ? `本社有 ${count} 份审稿意见范例${subject}已损坏，无法读取，本次不参考范例：${names}`
+        : `另有 ${count} 份范例${subject}已损坏，无法读取，本次不参考：${names}`);
+    };
+    clause(readings.damaged.length, '记录', readings.damaged);
+    clause(readings.ledgerDamaged.length, '的学习准入记录', readings.ledgerDamaged);
+    if (clauses.length === 0) return readersReportExemplarLine(readings.exemplars);
     return readings.exemplars.length === 0
-      ? `本社没有可以读取的审稿意见范例，本次不参考范例；${damaged}：${names}`
-      : `${readersReportExemplarLine(readings.exemplars)}；${damaged}，本次不参考：${names}`;
+      ? clauses.join('；')
+      : `${readersReportExemplarLine(readings.exemplars)}；${clauses.join('；')}`;
   }
 
   /**
@@ -9059,7 +9089,8 @@ export class EditorialStore {
     requireStore(basis !== null, 'READERS_REPORT_NEEDS_FINALIZED', READERS_REPORT_NEEDS_FINALIZED);
     requireStore(this.#documentCall(() => this.#productionDocuments.documentOfType(bookId, readersReportDocumentTypeId(template))) === undefined,
       'READERS_REPORT_DRAFT_EXISTS', `这本书已经有「${READERS_REPORT_TEMPLATE_LABELS[template]}」的草稿；请打开它继续修改。`);
-    const input = this.#readersReportCall(() => readersReportContractInput(template, basis, this.#readersReportExemplars(bookId).exemplars));
+    const readings = this.#readersReportExemplars(bookId);
+    const input = this.#readersReportCall(() => readersReportContractInput(template, basis, readings.exemplars));
     const ledger = this.readersReportLedger(input, { bookId, references: this.#prepareTaskMaterials(bookId, materialIds) });
     const latest = this.#latestReadersReport(bookId);
     const mode = latest === null || latest.projection.resultSetRevision === null ? 'readers-report-first' : 'readers-report-again';
@@ -9072,7 +9103,8 @@ export class EditorialStore {
       launchPolicy,
       ...(canonicalJson(latest?.ledger.definition.materialReferences?.sources ?? []) === canonicalJson(ledger.definition.materialReferences?.sources ?? []) ? {} : { newTask: true }),
     }));
-    // Which 定稿 version and template the Task drafts from, recorded once for it and this contract.
+    // Which 定稿 version and template the Task drafts from, recorded once for it and this contract, and what that preparation
+    // left out for damage: a plan is frozen, so its exemplar line names what was skipped when it was drafted (Issue #792).
     const taskIntentId = this.#readersReportCall(() => this.#readersReports.latestTaskIntentId(bookId));
     requireStore(taskIntentId !== null, 'READERS_REPORT_RECORD_INVALID', '审稿意见任务没有准备出来。');
     this.#readersReportCall(() => this.#transaction(this.#authority, () => this.#readersReports.recordTask({
@@ -9081,6 +9113,10 @@ export class EditorialStore {
       recordId: basis.recordId,
       finalizedEntrySha256: basis.entrySha256,
       contract: input,
+      skippedExemplars: [
+        ...readings.damaged.map((title) => ({ title, reason: 'record' as const })),
+        ...readings.ledgerDamaged.map((title) => ({ title, reason: 'ledger' as const })),
+      ],
       promptContractSha256: ledger.definition.materialReferences?.basePromptContractDigest ?? ledger.definition.promptContractDigest,
     })));
     return { ...result, projection: result.projection as ReadersReportProjection | null };
