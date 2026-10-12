@@ -1,6 +1,6 @@
 # AI7 development plan
 
-Status: Owner-approved order of 2026-10-12 under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md); #808 integration is based on actual `dev@c7b646bfba910ba4c7c932d8fbc41e268a459379`, after #806's delivery and protection activation. This is the sole delivery-order owner. [PROGRESS](../../PROGRESS.md) reports implementation; each Issue owns bounded acceptance. [PR #820](https://github.com/zhouy1017/ai7-harness/pull/820) records #808's exact final dev delivery and cumulative verification.
+Status: Owner-approved order of 2026-10-12 under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md); #808 delivered to dev at `c194482eb09479299a9c95fea173ea0bcd17db53` (tree `e27e9e86`), built on `c7b646bf`, after #806's delivery and protection activation. This is the sole delivery-order owner. [PROGRESS](../../PROGRESS.md) reports implementation; each Issue owns bounded acceptance. [PR #820](https://github.com/zhouy1017/ai7-harness/pull/820) records #808's cumulative verification and dev delivery; [#807](https://github.com/zhouy1017/ai7-harness/issues/807) owns the next model migration from that tip.
 
 ## Delivery approach
 
@@ -15,8 +15,8 @@ Issue references in this table refer to the [GitHub tracker](https://github.com/
 | Priority | Issue / retained slice | Outcome | Dependencies and current disposition |
 | --- | --- | --- | --- |
 | P0 | #806 Orca/CI | Executable wave dispatch and explicit Reviewer/Commander merge release | Delivered through #817 at `c7b646bf`; exact-candidate guest/paired hosted verification and strict aggregate protection are complete. |
-| P0 | #808 test reuse | Necessary live development checks without repeatedly paying for the same question | Core #818 and fixture #819 extend existing owners with purpose/namespace/generation, durable unknown-send claims and auditable conversion. #820 owns cumulative acceptance and final dev delivery. |
-| P0 | #807 model migration | Configurable Go DeepSeek V4.1 Flash with its own capability evidence | Next after #820 reaches dev; fetch the actual new tip. Includes relevant #452 configuration residue and real product verification. Current selected model remains V4 Flash. |
+| P0 | #808 test reuse | Necessary live development checks without repeatedly paying for the same question | Core #818, fixture #819 and checkpoint #821 extended existing owners with purpose/namespace/generation, durable unknown-send claims and auditable conversion. #820 delivered cumulative acceptance to dev at `c194482e`. |
+| P0 | #807 model migration | Configurable Go DeepSeek V4.1 Flash with its own capability evidence | Starts from fresh `c194482e`. Includes relevant #452 configuration residue and real product verification. Current selected model remains V4 Flash until V4.1 evidence arrives. |
 | P0 | #387 S41-f1 | Labeled recorded-model regression in J-04 | Inventory/convert existing captures independently; new V4.1 evidence follows #808/#807. Verify missing units; no web dependency. |
 | P0 | #52 S17 live dialogue | Real streamed discussion of the selected passage | #807/#808 and existing S17a surface. S17b structured follow-up waits for #423's future composer. |
 | P0 | #809 review follow-up | Real non-web review findings and usable marks | #807/#808; #759 only for optional material references. Completed S69/#417 stays closed. |
@@ -46,7 +46,7 @@ Issue bodies retain exact acceptance and dependencies. Fix defects blocking an a
 
 [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md) and [ADR 0067](../adr/0067-authorize-the-opencode-go-development-credential-with-live-once-testing.md) own autonomous necessary development validation and reuse. Record a new question's substantive delta and save its evidence. CI/Gate/ordinary regression stays provider-free. New actual business Tasks perform real model steps even for repeated input; continuation/incremental reuse retains its own semantics. No new daily/batch/call-count ceiling is added.
 
-The Go target is V4.1 Flash; old V4 evidence stays labeled V4. Go's repository-agent GLM allowlist does not register GLM in AI7. Migration and real product execution remain #807 follow-ups after #808. Provider-free evidence-reuse tests do not establish either result.
+The Go target is V4.1 Flash; old V4 evidence stays labeled V4. Go's repository-agent GLM allowlist does not register GLM in AI7. Migration and real product execution remain #807 follow-ups after #808's dev delivery. Provider-free evidence-reuse tests do not establish either result.
 
 ## Completed foundation
 
