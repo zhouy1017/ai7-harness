@@ -124,7 +124,11 @@ const BLOCK_KIND_MARKER = /^\((?:title|heading|paragraph)(?: h[1-6])?\) /u;
 /** How a request is matched to a fixture entry: by the request digest, or by the unit's own text alone. */
 export type FixtureResolution = 'request-digest' | 'content-digest';
 
-/** The own blocks of a unit message, in order: the `[blk_…]` lines after the own-blocks header. */
+/**
+ * The own blocks of a unit message, in order: the `[blk_…]` lines after its kind's own-blocks header — the baseline's, the
+ * factual and review kinds' own, or the one the evaluation and writing kinds share — so a `{{block:N}}` a converted capture of
+ * any of them carries is filled from the unit it answers (Issue #808).
+ */
 function ownBlockLinesOf(unitMessage: string): Array<{ id: string; rest: string }> {
   const lines = unitMessage.split('\n');
   const start = lines.findIndex((line) => [
@@ -236,6 +240,16 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     return this.#served;
   }
 
+  /**
+   * The entry, unless it was converted from a capture made inside another task (Issue #808): a reduction, sampling turn or
+   * reflection is keyed by its own contract alone, so the enclosing task contract its capture recorded is what keeps one
+   * task's captured answer from answering another's.
+   */
+  #answering(entry: ModelFixtureEntry | undefined): ModelFixtureEntry | undefined {
+    const task = entry?.capture?.taskPromptContractDigest ?? null;
+    return task === null || task === this.#promptContractDigest ? entry : undefined;
+  }
+
   /** One dialogue turn, answered from the fixture by its request key; an `answer-chunks` answer streams chunk by chunk. */
   async *#dialogue(
     header: { kind: 'ask' | 'continue'; questionDigest: string },
@@ -246,8 +260,8 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     const pairKey = fixtureEntryKey(0, requestDigest);
     const attempt = (this.#servedByKey.get(pairKey) ?? 0) + 1;
     this.#servedByKey.set(pairKey, attempt);
-    const entry = resolveFixtureEntry(this.#entries, 0, requestDigest, attempt);
-    if (entry === undefined || (entry.capture?.taskPromptContractDigest != null && entry.capture.taskPromptContractDigest !== this.#promptContractDigest)) {
+    const entry = this.#answering(resolveFixtureEntry(this.#entries, 0, requestDigest, attempt));
+    if (entry === undefined) {
       yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, `夹具 ${this.#fixture.identity} 没有这个提问（问题摘要 ${header.questionDigest}）的对应回答。`);
       return;
     }
@@ -386,8 +400,8 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     const pairKey = fixtureEntryKey(ordinal, expectedDigest);
     const attempt = (this.#servedByKey.get(pairKey) ?? (ordinal > 0 ? this.#attemptsBefore.get(ordinal) ?? 0 : 0)) + 1;
     this.#servedByKey.set(pairKey, attempt);
-    const entry = resolveFixtureEntry(this.#entries, ordinal, expectedDigest, attempt);
-    if (entry === undefined || (entry.capture?.taskPromptContractDigest != null && entry.capture.taskPromptContractDigest !== this.#promptContractDigest)) {
+    const entry = this.#answering(resolveFixtureEntry(this.#entries, ordinal, expectedDigest, attempt));
+    if (entry === undefined) {
       const label =!named && this.#resolveBy === 'content-digest' ? '内容摘要' : '请求摘要';
       const subject = crossUnit !== null ? '跨单元归纳'
         : synthesis !== null ? 'AI7 初评的全书综合'

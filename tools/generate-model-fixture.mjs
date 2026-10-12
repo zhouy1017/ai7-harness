@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -25,24 +25,29 @@ import { fileURLToPath } from 'node:url';
  *
  * Identities a capture carries are minted per import or per Run, so they are remapped, explicitly: a
  * unit's own block identities become `{{block:N}}`, the reduction's cited blocks `{{unit:U:block:N}}`,
- * a sampling turn's listed findings `{{ref:N}}` — the placeholders the deterministic adapter fills from
- * the request it is answering — and the fixture entry's `capture` lists each replacement. A block
- * identity the request never named cannot be remapped, and refuses as `FIXTURE_GEN/identity-unmapped`.
+ * a sampling turn's listed findings `{{ref:N}}` where its result names them — the placeholders the
+ * deterministic adapter fills from the request it is answering — and the fixture entry's `capture`
+ * lists each replacement. A block
+ * identity the request never named cannot be remapped, and refuses as `FIXTURE_GEN/identity-unmapped`;
+ * so does a response that already carried placeholder-shaped text of its own.
  * The same `capture` keeps the provenance: the item that captured the response (when a replay of it was
- * named, both), the route, endpoint, request shape, model and prompt contract it was captured under, the
- * capture time, the digests of the exact request and response, and the development validation it
- * belonged to. An entry cached before #808 says it is legacy and leaves route, endpoint and shape null.
+ * named, both), the route, endpoint, request shape and model, the stage's own prompt contract and the
+ * enclosing task's, the capture time, the digests of the exact request and response, and the development
+ * validation it belonged to. An entry cached before #808 says it is legacy and leaves route, endpoint,
+ * shape and task contract null; such a line recorded only the enclosing task's contract, so a legacy
+ * reduction, sampling turn or reflection cannot prove its stage contract and refuses.
  *
  * Nothing is written until every check has passed: the fixture is assembled in memory and the single
  * write is the last thing that happens, so a refusal leaves no file behind. The refusals are the
- * interesting part of the tool. A capture the ledger retired — a stale line, or an invalidation of its
- * item or its validation case — refuses as `FIXTURE_GEN/item-retired`: retired evidence answers
- * nothing. A free-text field that still shares a run of MANUSCRIPT_ECHO_THRESHOLD characters with a
- * block the request carried, after placeholder substitution, refuses as `FIXTURE_GEN/manuscript-echo`,
- * naming a bounded JSON path and the run length and never the characters themselves. Earlier model
- * results and other carried user text are checked too; a reviewer still reads every free-text field. An `--out`
- * under `tests/fixtures/` refuses outright: a fixture enters that directory only through a reviewed
- * pull request, which is where a human reads every free-text field.
+ * interesting part of the tool. A capture the ledger retired — a stale line, an invalidation of its
+ * item, or an invalidation of its validation case at or after the ledger position the call observed
+ * before it was claimed — refuses as `FIXTURE_GEN/item-retired`: retired evidence answers nothing. A
+ * free-text field that still shares a run of MANUSCRIPT_ECHO_THRESHOLD characters with a block the
+ * request carried, after placeholder substitution, refuses as `FIXTURE_GEN/manuscript-echo`, naming a
+ * bounded JSON path and the run length and never the characters themselves. Earlier model results,
+ * tool results and other carried user text are checked too; a reviewer still reads every free-text
+ * field. An `--out` under `tests/fixtures/` refuses outright: a fixture enters that directory only
+ * through a reviewed pull request, which is where a human reads every free-text field.
  *
  * One body shape only: `openai-chat-completions`. Note that the cache keeps an entry only for HTTP 200,
  * so from the real cache a limit or a server error refuses `entry-missing` before the non-200 mappings
@@ -77,9 +82,11 @@ const SAMPLING_HEADER = /^保证抽样 (\d+)\/(\d+) · 单元摘要 ([0-9a-f]{64
 const SAMPLING_FINDING_HEADER = '以下为需要复核的发现：';
 const SAMPLING_FINDING_LINE = /^- \[([A-Za-z0-9_-]{1,64})\]（/u;
 const REFLECTION_HEADER = /^运行反思 ([A-Za-z0-9_-]{1,64}) · 账目摘要 ([0-9a-f]{64})$/u;
-// --- Duplicated from src/service/provider/provider-result-cache.ts --------------------------------------------------------
+// --- Duplicated from src/service/provider/provider-result-cache.ts (its key, generation and usage formulas below too) ------
 const PROVIDER_CACHE_NAMESPACE = 'ai7.provider-cache/2';
 const ANY_BLOCK_IDENTITY = /blk_[0-9a-f]{24}/gu;
+/** Anything shaped like a placeholder the deterministic adapter or a fixture author could fill. */
+const PLACEHOLDER_SHAPE = /\{\{[^{}]+\}\}/gu;
 
 /**
  * How many consecutive characters a free-text field may share with an own block before the tool
@@ -326,8 +333,14 @@ export async function readLedgerLines(cacheRoot) {
     if (parsed.kind === 'invalidation') {
       const target = parsed.target;
       refuse(!Array.isArray(target) && (Object.keys(target).length === 1 && LEDGER_ITEM_ID_PATTERN.test(target.itemId) ||
-        Object.keys(target).length === 2 && typeof target.family === 'string' && typeof target.case === 'string'),
-      'FIXTURE_GEN/ledger-unreadable', '作废记录的目标无效。');
+        Object.keys(target).length === 2 && typeof target.family === 'string' && typeof target.case === 'string') &&
+        typeof parsed.reason === 'string' && parsed.reason.length > 0 && typeof parsed.recordedAt === 'string',
+      'FIXTURE_GEN/ledger-unreadable', '作废记录的目标或原因无效。');
+    } else {
+      // The ledger length a call observed before it was claimed can only point at lines already written.
+      refuse(parsed.evidencePosition === undefined ||
+        (Number.isSafeInteger(parsed.evidencePosition) && parsed.evidencePosition >= 0 && parsed.evidencePosition <= lines.length),
+      'FIXTURE_GEN/ledger-unreadable', 'Provider Test Ledger 证据位置无效。');
     }
     lines.push(parsed);
   }
@@ -338,29 +351,56 @@ function isModelCallLine(line) {
   return typeof line.itemId === 'string' && (line.kind === undefined || line.kind === 'model-call');
 }
 
+/** The line that captured an item's response: its latest non-stale send, or `undefined`. */
+function captureLineOf(lines, itemId) {
+  return lines.filter((line) => isModelCallLine(line) && line.itemId === itemId && line.stale !== true &&
+    ['transmitted', 'failed'].includes(line.outcome)).at(-1);
+}
+
 /**
- * Whether the ledger retired a capture, by the same rule the cache follows: every line of the item stale, an invalidation
- * naming it, or an invalidation of its validation family and case appended after its capture line.
+ * Whether the ledger retired a capture, by the rule `ProviderResultCache.isRetired` follows: every line of the item stale, an
+ * invalidation naming it, or an invalidation of its validation family and case at or after the ledger position the call
+ * observed before it was claimed — so an invalidation recorded while the call was in flight retires it even though its
+ * capture line lands later. A capture line without that position falls back to the invalidation following it.
  */
 export function captureRetired(lines, itemId) {
   const own = lines.filter((line) => line.kind !== 'invalidation' && line.itemId === itemId);
   if (own.length > 0 && own.every((line) => line.stale === true)) return true;
-  const captured = lines.findIndex((line) => line.itemId === itemId && line.outcome === 'transmitted');
-  const purpose = captured === -1 ? undefined : lines[captured].validation;
+  const capture = captureLineOf(lines, itemId);
+  const captured = capture === undefined ? -1 : lines.indexOf(capture);
+  const purpose = capture?.validation;
   return lines.some((line, index) => {
     if (line.kind !== 'invalidation') return false;
     if (typeof line.target.itemId === 'string') return line.target.itemId === itemId;
-    return purpose !== undefined && line.target.family === purpose.family && line.target.case === purpose.case && index > captured;
+    if (purpose === undefined || line.target.family !== purpose.family || line.target.case !== purpose.case) return false;
+    return capture.evidencePosition === undefined ? index > captured : index >= capture.evidencePosition;
   });
 }
 
 /**
- * Which cached result the selector names. A test item id resolves to its latest non-stale line; a
- * request digest resolves through every line carrying it. Either way the lines must agree on one
- * model and, since #808, on one exact namespace: two models, or two endpoints, under one digest are
- * two different cached results, and picking one of them silently is exactly the mistake this tool
- * exists to prevent. A replay resolves to the capture it replayed; a capture the ledger retired, or a
- * call it refused, answers nothing.
+ * The item whose capture a line answered with. A send is its own capture; an #808 replay names the capture it replayed as its
+ * one piece of evidence; a replay written before #808 names nothing, and the legacy cache answered it by model and request
+ * digest alone, so its capture is the latest earlier legacy send of that pair. `null` when nothing proves which it was.
+ */
+function captureItemOf(lines, chosen) {
+  if (chosen.outcome !== 'replayed') return chosen.itemId;
+  if (chosen.validation !== undefined) {
+    const evidence = chosen.validation.evidence;
+    return chosen.validation.decision === 'exact-replay' && Array.isArray(evidence) && evidence.length === 1 &&
+      typeof evidence[0] === 'string' && LEDGER_ITEM_ID_PATTERN.test(evidence[0]) ? evidence[0] : null;
+  }
+  if (chosen.cacheKey !== undefined) return null;
+  const earlier = lines.slice(0, lines.indexOf(chosen)).filter((line) => isModelCallLine(line) && line.cacheKey === undefined &&
+    line.outcome === 'transmitted' && line.stale !== true && line.model === chosen.model && line.requestDigest === chosen.requestDigest);
+  return earlier.at(-1)?.itemId ?? null;
+}
+
+/**
+ * Which capture the selector names. A test item id resolves to its latest non-stale line; a request digest resolves through
+ * every line carrying it. Either way the lines must agree on one model and, since #808, on one exact namespace: two models, or
+ * two endpoints, under one digest are two different cached results, and picking one of them silently is exactly the mistake
+ * this tool exists to prevent. A replay resolves to the capture it replayed; a capture the ledger retired, a result it never
+ * proved, or a call it refused, answers nothing.
  */
 export function resolveLedgerSelection(lines, selector) {
   const models = lines.filter(isModelCallLine);
@@ -379,11 +419,11 @@ export function resolveLedgerSelection(lines, selector) {
     'FIXTURE_GEN/item-unknown', '账本记录缺少有效的请求摘要。');
   refuse(typeof chosen.promptContractDigest === 'string' && DIGEST_PATTERN.test(chosen.promptContractDigest),
     'FIXTURE_GEN/item-unknown', '账本记录缺少有效的提示契约摘要。');
-  const replayedFrom = chosen.outcome === 'replayed' && Array.isArray(chosen.validation?.evidence) ? chosen.validation.evidence[0] : undefined;
-  const captureItemId = typeof replayedFrom === 'string' && LEDGER_ITEM_ID_PATTERN.test(replayedFrom) ? replayedFrom : chosen.itemId;
+  const captureItemId = captureItemOf(lines, chosen);
+  refuse(captureItemId !== null, 'FIXTURE_GEN/capture-unproven', '账本没有该回放所用的可确认捕获。');
   refuse(!captureRetired(lines, captureItemId), 'FIXTURE_GEN/item-retired', `测试项 ${captureItemId} 的捕获已被作废，不再生成夹具。`);
-  const captured = models.find((line) => line.itemId === captureItemId && ['transmitted', 'failed'].includes(line.outcome));
-  refuse(captured !== undefined && captured.stale !== true && captured.classification !== 'outcome-unknown' &&
+  const captured = captureLineOf(lines, captureItemId);
+  refuse(captured !== undefined && captured.classification !== 'outcome-unknown' &&
     captured.model === chosen.model && captured.requestDigest === chosen.requestDigest &&
     captured.promptContractDigest === chosen.promptContractDigest && Number.isSafeInteger(captured.status) &&
     typeof captured.recordedAt === 'string' && !Number.isNaN(Date.parse(captured.recordedAt)) && LEDGER_ITEM_ID_PATTERN.test(chosen.itemId),
@@ -393,10 +433,12 @@ export function resolveLedgerSelection(lines, selector) {
   const scoped = !legacyReplay && namespaceFields.some((key) => key in chosen);
   refuse(!scoped || namespaceFields.every((key) => typeof chosen[key] === 'string' && chosen[key].length > 0),
     'FIXTURE_GEN/capture-unproven', '请求命名空间记录不完整。');
-  refuse(!scoped || (chosen.cacheKey === namespacedCacheKey(chosen, chosen.requestDigest) &&
-    chosen.generation === evidenceGeneration(chosen, chosen.promptContractDigest) &&
-    namespaceFields.every((key) => chosen[key] === captured[key]) &&
+  // The cache keeps an #808 capture only for a 200 it could keep whole; anything else under a namespaced key is not one.
+  refuse(!scoped || (captured.outcome === 'transmitted' && captured.status === 200 &&
+    chosen.cacheKey === namespacedCacheKey(chosen, chosen.requestDigest) &&
     typeof chosen.taskPromptContractDigest === 'string' && DIGEST_PATTERN.test(chosen.taskPromptContractDigest) &&
+    chosen.generation === evidenceGeneration(chosen, chosen.promptContractDigest, chosen.taskPromptContractDigest) &&
+    namespaceFields.every((key) => chosen[key] === captured[key]) &&
     chosen.taskPromptContractDigest === captured.taskPromptContractDigest),
   'FIXTURE_GEN/capture-unproven', '请求命名空间或证据代次不一致。');
   return {
@@ -405,12 +447,13 @@ export function resolveLedgerSelection(lines, selector) {
     model: chosen.model,
     requestDigest: chosen.requestDigest,
     promptContractDigest: chosen.promptContractDigest,
-    quotaExhausted: chosen.classification === 'quota-exhausted',
+    quotaExhausted: captured.classification === 'quota-exhausted',
     cacheKey: scoped ? chosen.cacheKey : null,
     generation: scoped ? chosen.generation : null,
     taskPromptContractDigest: scoped ? chosen.taskPromptContractDigest : null,
     captured,
-    validation: chosen.validation === undefined ? null : { family: chosen.validation.family, case: chosen.validation.case, step: chosen.validation.step },
+    // A replay says when the response it answered with was captured; the entry must say the same.
+    replayCapturedAt: chosen.outcome === 'replayed' && typeof chosen.capturedAt === 'string' ? chosen.capturedAt : null,
   };
 }
 
@@ -425,8 +468,30 @@ export function namespacedCacheKey(namespace, requestDigest) {
   return sha256Hex(JSON.stringify([PROVIDER_CACHE_NAMESPACE, namespace.route, namespace.endpoint, namespace.requestShape, namespace.model, requestDigest]));
 }
 
-export function evidenceGeneration(namespace, promptContractDigest) {
-  return sha256Hex(JSON.stringify([namespace.route, namespace.endpoint, namespace.requestShape, namespace.model, promptContractDigest]));
+/**
+ * The configuration a capture answers for, by the formula `providerEvidenceGeneration` writes: route, endpoint, request shape,
+ * model and the stage's own prompt contract, joined by the enclosing task's contract only when that differs.
+ */
+export function evidenceGeneration(namespace, promptContractDigest, taskPromptContractDigest) {
+  const task = taskPromptContractDigest === undefined || taskPromptContractDigest === null || taskPromptContractDigest === promptContractDigest
+    ? []
+    : [taskPromptContractDigest];
+  return sha256Hex(JSON.stringify([namespace.route, namespace.endpoint, namespace.requestShape, namespace.model, promptContractDigest, ...task]));
+}
+
+/** The two usage counts an OpenAI-compatible response states, or `null`: what `usageOfResponse` reads. */
+function usageOfResponse(response) {
+  const usage = response !== null && typeof response === 'object' ? response.usage : undefined;
+  if (usage === null || typeof usage !== 'object') return null;
+  const { prompt_tokens: inputTokens, completion_tokens: outputTokens } = usage;
+  return Number.isSafeInteger(inputTokens) && inputTokens >= 0 && Number.isSafeInteger(outputTokens) && outputTokens >= 0
+    ? { inputTokens, outputTokens }
+    : null;
+}
+
+function sameUsage(left, right) {
+  if (left === null || left === undefined || right === null || right === undefined) return (left ?? null) === (right ?? null);
+  return left.inputTokens === right.inputTokens && left.outputTokens === right.outputTokens;
 }
 
 async function readEntryFile(path) {
@@ -455,15 +520,43 @@ export async function readCacheEntry(cacheRoot, model, requestDigest) {
 }
 
 /**
+ * The namespaced entry an item captured. A later capture of the same exact request — another generation, or a resend after an
+ * invalidation — moves the earlier entry aside under `<key>.superseded-…` rather than overwriting it, so a capture that is no
+ * longer the current file is looked for there; an unreadable archive is skipped, never guessed at.
+ */
+async function readCapturedEntry(cacheRoot, cacheKey, itemId) {
+  const directory = join(cacheRoot, PROVIDER_CACHE_DIRECTORY);
+  const current = await readEntryFile(join(directory, `${cacheKey}.json`));
+  if (current.itemId === itemId) return current;
+  let names = [];
+  try {
+    names = await readdir(directory);
+  } catch {
+    return current;
+  }
+  for (const name of names.filter((file) => file.startsWith(`${cacheKey}.superseded-`) && file.endsWith('.json')).sort()) {
+    try {
+      const archived = await readEntryFile(join(directory, name));
+      if (archived.itemId === itemId) return archived;
+    } catch (error) {
+      if (!(error instanceof FixtureGenerationError)) throw error;
+    }
+  }
+  return current;
+}
+
+/**
  * The entry a selection names: under its namespaced key when its line carries one — the entry must then say it is that exact
- * request — and under the legacy key otherwise.
+ * request, captured by that item under that generation, with the usage the ledger recorded — and under the legacy key otherwise.
  */
 export async function readSelectedEntry(cacheRoot, selection) {
   const entry = selection.cacheKey === null
     ? await readCacheEntry(cacheRoot, selection.model, selection.requestDigest)
-    : await readEntryFile(join(cacheRoot, PROVIDER_CACHE_DIRECTORY, `${selection.cacheKey}.json`));
+    : await readCapturedEntry(cacheRoot, selection.cacheKey, selection.captureItemId);
   refuse(entry.model === selection.model && entry.requestDigest === selection.requestDigest && sha256Hex(entry.requestBody) === selection.requestDigest &&
-    entry.status === selection.captured.status && typeof entry.transmittedAt === 'string' && !Number.isNaN(Date.parse(entry.transmittedAt)),
+    entry.status === selection.captured.status && typeof entry.transmittedAt === 'string' && !Number.isNaN(Date.parse(entry.transmittedAt)) &&
+    (selection.replayCapturedAt === null || selection.replayCapturedAt === entry.transmittedAt) &&
+    (!('usage' in entry) || sameUsage(entry.usage, usageOfResponse(entry.response))),
   'FIXTURE_GEN/entry-invalid', '缓存条目与账本记录的请求不一致。');
   const responseDigest = sha256Hex(JSON.stringify(entry.response) ?? 'null');
   refuse(!('responseDigest' in entry) || entry.responseDigest === responseDigest, 'FIXTURE_GEN/entry-invalid', '缓存响应摘要不一致。');
@@ -472,6 +565,8 @@ export async function readSelectedEntry(cacheRoot, selection) {
       entry.generation === selection.generation && entry.promptContractDigest === selection.promptContractDigest &&
       entry.taskPromptContractDigest === selection.taskPromptContractDigest &&
       entry.itemId === selection.captureItemId && entry.responseDigest === responseDigest &&
+      entry.evidencePosition === selection.captured.evidencePosition &&
+      sameUsage(entry.usage, selection.captured.usage) &&
       ['route', 'endpoint', 'requestShape'].every((key) => entry[key] === selection.captured[key]) &&
       entry.validation !== undefined && ['family', 'case', 'step'].every((key) =>
         typeof entry.validation[key] === 'string' && entry.validation[key] === selection.captured.validation?.[key]),
@@ -500,8 +595,9 @@ function chatMessageText(content) {
 /**
  * What the cached request asked about: the last `user` message of an `openai-chat-completions` body, read as an Analysis Unit,
  * the reduction, a sampling turn or the reflection by the header only that subject writes. Its fixture key is that subject's
- * own: a unit's ordinal with its request and content digests, or ordinal `0` with the digest of the subject's own contract.
- * Any other request shape refuses rather than being guessed at.
+ * own: a unit's ordinal with its request and content digests, or ordinal `0` with the digest of the subject's own contract,
+ * which a reduction, a sampling turn or the reflection names as its `stageContractDigest` for the caller to prove against the
+ * capture. Any other request shape refuses rather than being guessed at.
  */
 export function parseCachedRequest(requestBody, promptContractDigest) {
   let body;
@@ -519,12 +615,13 @@ export function parseCachedRequest(requestBody, promptContractDigest) {
       'FIXTURE_GEN/request-shape-unsupported', '请求体中的消息缺少角色。');
     const text = chatMessageText(message.content);
     refuse(text !== null, 'FIXTURE_GEN/request-shape-unsupported', '请求体中的消息内容既不是字符串也不是文本块序列。');
-    if (message.role === 'user') { unitMessage = text; carriedMessages.push(text); }
+    if (message.role === 'user') unitMessage = text;
+    if (message.role !== 'system') carriedMessages.push(text);
   }
   refuse(unitMessage !== null, 'FIXTURE_GEN/request-shape-unsupported', '请求体不含任何 user 消息。');
   const carriedBlockTexts = carriedBlockTextsOf(unitMessage);
-  // Every carried user input, including prior model results and selected dialogue text, participates in
-  // sanitization. The exact request remains only in the external cache.
+  // Everything the request carried but its frozen system prompt — user input, earlier model results, tool results and selected
+  // dialogue text — participates in sanitization. The exact request remains only in the external cache.
   carriedBlockTexts.push(...carriedMessages);
   const task = parseTaskHeader(unitMessage, promptContractDigest);
   const header = parseUnitMessageHeader(unitMessage) ?? task?.header ?? null;
@@ -542,28 +639,28 @@ export function parseCachedRequest(requestBody, promptContractDigest) {
   if (task !== null) return { ...task, unitMessage, ownBlockTexts: [], carriedBlockTexts, contentDigest: null, identities: [] };
   const reduction = parseCrossUnitMessageHeader(unitMessage);
   if (reduction !== null) {
-    refuse(promptContractDigest === BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, 'FIXTURE_GEN/contract-mismatch', '归纳捕获契约不一致。');
     const identities = [...parseCrossUnitCitedBlocks(unitMessage)].flatMap(([unit, blockIds]) =>
       blockIds.map((identity, index) => ({ placeholder: `{{unit:${unit}:block:${index + 1}}}`, identity })));
     return {
-      subject: 'reduction', unitMessage, header: null, ownBlockTexts: [], carriedBlockTexts, unitOrdinal: 0, contentDigest: null, identities,
+      subject: 'reduction', stageContractDigest: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, unitMessage, header: null, ownBlockTexts: [],
+      carriedBlockTexts, unitOrdinal: 0, contentDigest: null, identities,
       requestDigest: crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, reduction.unitSetDigest),
     };
   }
   const sampling = parseAssuranceSamplingMessageHeader(unitMessage);
   if (sampling !== null) {
-    refuse(promptContractDigest === ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, 'FIXTURE_GEN/contract-mismatch', '抽样捕获契约不一致。');
     return {
-      subject: 'sampling', unitMessage, header: null, ownBlockTexts: [], carriedBlockTexts, unitOrdinal: 0, contentDigest: null,
+      subject: 'sampling', stageContractDigest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, unitMessage, header: null, ownBlockTexts: [],
+      carriedBlockTexts, unitOrdinal: 0, contentDigest: null,
       identities: parseAssuranceSamplingListedRefs(unitMessage).map((identity, index) => ({ placeholder: `{{ref:${index + 1}}}`, identity })),
       requestDigest: assuranceSamplingRequestDigest(ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, sampling.unitOrdinal, sampling.unitDigest, sampling.sampleDigest),
     };
   }
   const reflection = parseRunReportReflectionMessageHeader(unitMessage);
   if (reflection !== null) {
-    refuse(promptContractDigest === RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, 'FIXTURE_GEN/contract-mismatch', '反思捕获契约不一致。');
     return {
-      subject: 'reflection', unitMessage, header: null, ownBlockTexts: [], carriedBlockTexts, unitOrdinal: 0, contentDigest: null, identities: [],
+      subject: 'reflection', stageContractDigest: RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, unitMessage, header: null, ownBlockTexts: [],
+      carriedBlockTexts, unitOrdinal: 0, contentDigest: null, identities: [],
       requestDigest: runReportReflectionRequestDigest(RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, reflection.accountingDigest),
     };
   }
@@ -637,6 +734,28 @@ export function remapIdentities(text, identities) {
 }
 
 /**
+ * A sampling turn's finding references, remapped only where its result uses them as references — the `ref` of a disposition.
+ * The baseline kind's references are bare indices, and the result's schema name and its free text carry digits too; remapped
+ * there, a replay listing other references would rewrite them. A response that is not JSON is remapped as any other text.
+ */
+export function remapSamplingRefs(text, identities) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return remapIdentities(text, identities);
+  }
+  const placeholders = new Map(identities.map(({ placeholder, identity }) => [identity, placeholder]));
+  const visit = (node, key) => {
+    if (typeof node === 'string') return key === 'ref' ? placeholders.get(node) ?? node : node;
+    if (Array.isArray(node)) return node.map((item) => visit(item, undefined));
+    if (node !== null && typeof node === 'object') return Object.fromEntries(Object.entries(node).map(([name, item]) => [name, visit(item, name)]));
+    return node;
+  };
+  return remapIdentities(JSON.stringify(visit(parsed, undefined)), []);
+}
+
+/**
  * The length of the first run of MANUSCRIPT_ECHO_THRESHOLD characters or more that this field shares
  * with any own block, or `null`. Whitespace is collapsed on both sides and the comparison walks code
  * points, not code units, so a surrogate pair is never cut in half. The run itself is measured and
@@ -694,12 +813,6 @@ export function findManuscriptEcho(value, ownBlockTexts) {
  */
 function identityToken(identity) {
   return new RegExp(`(?<![A-Za-z0-9_-])${identity}(?![A-Za-z0-9_-])`, 'gu');
-}
-
-/** The answer text of an `openai-chat-completions` response, or `null`. */
-function responseText(response) {
-  const message = response !== null && typeof response === 'object' && Array.isArray(response.choices) ? response.choices[0]?.message : undefined;
-  return message !== null && typeof message === 'object' && typeof message.content === 'string' ? message.content : null;
 }
 
 function mapStrings(node, map) {
@@ -763,7 +876,10 @@ export function mapCachedResponse(entry, selection, ownBlockTexts, request = { i
   const outputTokens = usage === null || typeof usage !== 'object' ? undefined : usage.completion_tokens;
   refuse(Number.isSafeInteger(inputTokens) && inputTokens >= 0 && Number.isSafeInteger(outputTokens) && outputTokens >= 0,
     'FIXTURE_GEN/usage-absent', '缓存条目的响应不含可用的 usage 计数。');
-  const remapped = remapIdentities(text, request.identities);
+  // A placeholder the model itself wrote would be filled on replay like one the converter wrote, and the replay would no
+  // longer say what the capture said; so every placeholder in a fixture must be one this conversion put there.
+  refuse(text.match(PLACEHOLDER_SHAPE) === null, 'FIXTURE_GEN/identity-unmapped', '原始响应已含有占位符形式的文字，回放无法与捕获区分。');
+  const remapped = request.subject === 'sampling' ? remapSamplingRefs(text, request.identities) : remapIdentities(text, request.identities);
   const sanitized = redactUnitResultText(remapped, ownBlockTexts, request.carriedBlockTexts);
   refuse(sanitized.isWellFormed() && sanitized.length > 0 && sanitized.length <= 64 * 1024, 'FIXTURE_GEN/response-shape-unsupported', '归一化响应超出夹具文本边界。');
   const points = Array.from(sanitized);
@@ -797,15 +913,15 @@ export function assembleFixture(parts) {
 
 /**
  * Where the converted entry came from, as `ai7.model-fixture/1` keeps it: the capture's identity and conditions, the digests of
- * its exact request and response, its development validation, and the identities the response's placeholders replace.
+ * its exact request and response, its development validation, and, for every placeholder the fixture response carries, the
+ * identity in the captured request it stands for.
  */
-export function captureProvenance(entry, selection, request) {
-  const namespaced = typeof entry.cacheKey === 'string';
-  const answered = responseText(entry.response) ?? '';
-  const identityMap = request.identities.filter(({ identity }) => identityToken(identity).test(answered));
+export function captureProvenance(entry, selection, request, response) {
+  const namespaced = selection.cacheKey !== null;
+  const serialized = JSON.stringify(response);
   return {
     subject: request.subject,
-    itemId: typeof entry.itemId === 'string' ? entry.itemId : selection.captureItemId,
+    itemId: selection.captureItemId,
     selectedItemId: selection.itemId,
     evidenceScope: namespaced ? 'namespaced' : 'legacy-unnamespaced',
     route: namespaced ? entry.route : null,
@@ -813,16 +929,34 @@ export function captureProvenance(entry, selection, request) {
     requestShape: namespaced ? entry.requestShape : null,
     model: selection.model,
     promptContractDigest: selection.promptContractDigest,
-    taskPromptContractDigest: namespaced ? entry.taskPromptContractDigest : null,
+    taskPromptContractDigest: namespaced ? selection.taskPromptContractDigest : null,
     capturedAt: entry.transmittedAt,
     providerRequestDigest: sha256Hex(entry.requestBody),
-    providerResponseDigest: typeof entry.responseDigest === 'string' ? entry.responseDigest : sha256Hex(JSON.stringify(entry.response) ?? 'null'),
+    providerResponseDigest: namespaced ? entry.responseDigest : sha256Hex(JSON.stringify(entry.response) ?? 'null'),
     responseDigestOrigin: namespaced ? 'recorded' : 'computed-legacy',
-    cacheKey: namespaced ? entry.cacheKey : null,
-    generation: namespaced ? entry.generation : null,
-    validation: namespaced ? entry.validation : null,
-    identityMap,
+    cacheKey: namespaced ? selection.cacheKey : null,
+    generation: namespaced ? selection.generation : null,
+    validation: namespaced ? { family: entry.validation.family, case: entry.validation.case, step: entry.validation.step } : null,
+    identityMap: request.identities.filter(({ placeholder }) => serialized.includes(placeholder)),
+    fixtureResponseDigest: sha256Hex(canonicalJson(response)),
   };
+}
+
+/**
+ * The prompt contract a capture was answered under, proved against what its request is. A unit, a synthesis or a dialogue turn
+ * is its own task, so its stage and task contracts are one. A reduction, a sampling turn or the reflection runs under its own
+ * frozen contract inside an enclosing task: an #808 line records both, and the stage's must be the one its header implies. A
+ * line written before #808 recorded only the enclosing task's contract for every call, so it cannot prove which contract such
+ * a stage ran under and is refused rather than relabeled.
+ */
+function requireStageContract(selection, parsed) {
+  if (parsed.stageContractDigest === undefined) {
+    refuse(selection.cacheKey === null || selection.taskPromptContractDigest === selection.promptContractDigest,
+      'FIXTURE_GEN/contract-mismatch', '任务捕获契约与阶段契约不一致。');
+    return;
+  }
+  refuse(selection.cacheKey !== null, 'FIXTURE_GEN/capture-unproven', '旧式捕获只记录了所属任务的契约，不能证明归纳、抽样或反思阶段所用的契约。');
+  refuse(selection.promptContractDigest === parsed.stageContractDigest, 'FIXTURE_GEN/contract-mismatch', '捕获的阶段契约与请求消息不一致。');
 }
 
 /** Everything but the write: a caller that refuses here has left nothing on disk. */
@@ -830,9 +964,7 @@ export async function generateModelFixture(request, now = new Date()) {
   const selection = resolveLedgerSelection(await readLedgerLines(request.cacheRoot), request.selector);
   const entry = await readSelectedEntry(request.cacheRoot, selection);
   const parsed = parseCachedRequest(entry.requestBody, selection.promptContractDigest);
-  if (selection.cacheKey !== null && (parsed.unitOrdinal > 0 || ['task-synthesis', 'dialogue'].includes(parsed.subject))) {
-    refuse(selection.taskPromptContractDigest === selection.promptContractDigest, 'FIXTURE_GEN/contract-mismatch', '任务捕获契约与阶段契约不一致。');
-  }
+  requireStageContract(selection, parsed);
   refuse(JSON.parse(entry.requestBody).model === selection.model, 'FIXTURE_GEN/entry-invalid', '请求体模型与捕获模型不一致。');
   refuse(/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,127}$/u.test(selection.model), 'FIXTURE_GEN/entry-invalid', '模型标识无效。');
   if (selection.cacheKey !== null) {
@@ -844,13 +976,11 @@ export async function generateModelFixture(request, now = new Date()) {
   }
   refuse(findManuscriptEcho(request.description, parsed.carriedBlockTexts) === null, 'FIXTURE_GEN/manuscript-echo', '夹具描述仍包含请求内容。');
   const response = mapCachedResponse(entry, selection, parsed.ownBlockTexts, parsed);
-  const capture = captureProvenance(entry, selection, parsed);
-  capture.identityMap = parsed.identities.filter(({ placeholder }) => JSON.stringify(response).includes(placeholder));
-  const placeholders = JSON.stringify(response).match(/\{\{[^{}]+\}\}/gu) ?? [];
+  const capture = captureProvenance(entry, selection, parsed, response);
+  const placeholders = JSON.stringify(response).match(PLACEHOLDER_SHAPE) ?? [];
   refuse(placeholders.every((placeholder) => capture.identityMap.some((mapping) => mapping.placeholder === placeholder)) &&
     new Set(capture.identityMap.map((mapping) => mapping.identity)).size === capture.identityMap.length && capture.identityMap.length <= 4_096,
   'FIXTURE_GEN/identity-unmapped', '响应含有未经映射或不唯一的占位符。');
-  capture.fixtureResponseDigest = sha256Hex(canonicalJson(response));
   return assembleFixture({
     identity: request.identity,
     description: request.description,

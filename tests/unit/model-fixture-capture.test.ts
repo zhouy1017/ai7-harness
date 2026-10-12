@@ -23,7 +23,7 @@ import { loadModelFixture, parseModelFixture } from '../../src/service/provider/
 const tool = await import('../../tools/generate-model-fixture.mjs') as {
   generateModelFixture(request: { selector: string; cacheRoot: string; identity: string; description: string; out: string }): Promise<Record<string, unknown>>;
   namespacedCacheKey(namespace: Record<string, string>, digest: string): string;
-  evidenceGeneration(namespace: Record<string, string>, contract: string): string;
+  evidenceGeneration(namespace: Record<string, string>, contract: string, taskContract?: string): string;
   parseCachedRequest(body: string, contract: string): { requestDigest: string; subject: string };
 };
 const MODEL = 'deepseek-v4-flash';
@@ -42,18 +42,20 @@ describe('converted capture proof and replay', () => {
   beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'ai7-capture-proof-')); });
   afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
-  async function synthetic(message: string, contract = BASELINE_PROMPT_CONTRACT_DIGEST, content = '{"note":"独立合成响应。"}') {
-    const requestBody = body(message);
+  async function synthetic(message: string | ReadonlyArray<{ role: string; content: string }>, contract = BASELINE_PROMPT_CONTRACT_DIGEST, content = '{"note":"独立合成响应。"}') {
+    const requestBody = typeof message === 'string' ? body(message) : canonicalJson({ model: MODEL, messages: message });
+    const lastUser = typeof message === 'string' ? message : message.filter((turn) => turn.role === 'user').at(-1)!.content;
     const requestDigest = sha256Hex(requestBody);
     const cacheKey = tool.namespacedCacheKey(NAMESPACE, requestDigest);
-    const generation = tool.evidenceGeneration(NAMESPACE, contract);
     const response = { choices: [{ message: { content } }], usage: { prompt_tokens: 20, completion_tokens: 5 } };
+    const usage = { inputTokens: 20, outputTokens: 5 };
     const validation = { family: 'capture-proof', case: 'synthetic', step: 'contract' };
-    const taskPromptContractDigest = message.startsWith('AI7 编辑对话') ? contract : BASELINE_PROMPT_CONTRACT_DIGEST;
-    const entry = { ...NAMESPACE, itemId: ITEM, requestBody, requestDigest, cacheKey, generation, promptContractDigest: contract, taskPromptContractDigest,
-      validation, transmittedAt: AT, status: 200, response, responseDigest: sha256Hex(JSON.stringify(response)) };
-    const line = { ...NAMESPACE, itemId: ITEM, requestDigest, cacheKey, generation, promptContractDigest: contract, taskPromptContractDigest,
-      validation: { ...validation, decision: 'first-capture', evidence: [], delta: null }, outcome: 'transmitted', status: 200, recordedAt: AT };
+    const taskPromptContractDigest = lastUser.startsWith('AI7 编辑对话') ? contract : BASELINE_PROMPT_CONTRACT_DIGEST;
+    const generation = tool.evidenceGeneration(NAMESPACE, contract, taskPromptContractDigest);
+    const entry = { ...NAMESPACE, itemId: ITEM, requestBody, requestDigest, cacheKey, generation, evidencePosition: 0, promptContractDigest: contract,
+      taskPromptContractDigest, validation, transmittedAt: AT, status: 200, response, usage, responseDigest: sha256Hex(JSON.stringify(response)) };
+    const line = { ...NAMESPACE, itemId: ITEM, requestDigest, cacheKey, generation, evidencePosition: 0, promptContractDigest: contract, taskPromptContractDigest,
+      validation: { ...validation, decision: 'first-capture', evidence: [], delta: null }, outcome: 'transmitted', status: 200, usage, recordedAt: AT };
     await mkdir(join(root, 'entries'), { recursive: true });
     const path = join(root, 'entries', `${cacheKey}.json`);
     await writeFile(path, JSON.stringify(entry));
@@ -175,6 +177,52 @@ describe('converted capture proof and replay', () => {
     await expect(generate()).rejects.toMatchObject({ code: 'FIXTURE_GEN/capture-unproven' });
     await writeFile(join(root, 'ledger.jsonl'), `${JSON.stringify(line)}\n${JSON.stringify({ kind: 'invalidation', target: { family: 'capture-proof', case: 'synthetic' }, reason: 'retired', recordedAt: '2020-01-01T00:00:00Z' })}\n`);
     await expect(generate()).rejects.toMatchObject({ code: 'FIXTURE_GEN/item-retired' });
+  });
+
+  it('retires a capture by the ledger position its call observed before it was claimed', async () => {
+    const { line } = await synthetic(`分析单元 1/1 · 单元摘要 ${D}${blocks}`);
+    const invalidation = { kind: 'invalidation', target: { family: 'capture-proof', case: 'synthetic' }, reason: 'sample-edited', recordedAt: AT };
+    // Invalidated while in flight: the capture line lands after the invalidation, yet its call had observed an empty ledger.
+    await writeFile(join(root, 'ledger.jsonl'), `${JSON.stringify(invalidation)}\n${JSON.stringify(line)}\n`);
+    await expect(generate()).rejects.toMatchObject({ code: 'FIXTURE_GEN/item-retired' });
+    // Claimed after the invalidation: a later generation of the evidence, which converts.
+    const { entry, path } = await synthetic(`分析单元 1/1 · 单元摘要 ${D}${blocks}`);
+    await writeFile(path, JSON.stringify({ ...entry, evidencePosition: 1 }));
+    await writeFile(join(root, 'ledger.jsonl'), `${JSON.stringify(invalidation)}\n${JSON.stringify({ ...line, evidencePosition: 1 })}\n`);
+    expect(parseModelFixture(await generate()).entries[0]?.capture?.itemId).toBe(ITEM);
+    // A position past the line itself is a damaged ledger.
+    await writeFile(join(root, 'ledger.jsonl'), `${JSON.stringify({ ...line, evidencePosition: 1 })}\n`);
+    await expect(generate()).rejects.toMatchObject({ code: 'FIXTURE_GEN/ledger-unreadable' });
+  });
+
+  it('finds a capture a later capture of the same exact request moved aside', async () => {
+    const { entry, line, path } = await synthetic(`分析单元 1/1 · 单元摘要 ${D}${blocks}`);
+    const later = 'S40/fixture/2';
+    await writeFile(path.replace(/\.json$/u, '.superseded-1-synthetic.json'), JSON.stringify(entry));
+    await writeFile(path, JSON.stringify({ ...entry, itemId: later, evidencePosition: 1 }));
+    await writeFile(join(root, 'ledger.jsonl'), `${JSON.stringify(line)}\n${JSON.stringify({ ...line, itemId: later, evidencePosition: 1 })}\n`);
+    expect(parseModelFixture(await generate()).entries[0]?.capture).toMatchObject({ itemId: ITEM, selectedItemId: ITEM });
+    const current = await tool.generateModelFixture({ selector: later, cacheRoot: root, identity: 'converted', description: '合成证据', out: join(root, 'out.json') });
+    expect(parseModelFixture(current).entries[0]?.capture).toMatchObject({ itemId: later });
+  });
+
+  it.each(['position', 'entry usage', 'ledger usage', 'status'] as const)('refuses a capture whose %s disagrees between ledger and cache', async (damage) => {
+    const { entry, line, path } = await synthetic(`分析单元 1/1 · 单元摘要 ${D}${blocks}`);
+    if (damage === 'position') await writeFile(path, JSON.stringify({ ...entry, evidencePosition: 3 }));
+    if (damage === 'entry usage') await writeFile(path, JSON.stringify({ ...entry, usage: { inputTokens: 1, outputTokens: 1 } }));
+    if (damage === 'ledger usage') await writeFile(join(root, 'ledger.jsonl'), `${JSON.stringify({ ...line, usage: null })}\n`);
+    if (damage === 'status') await writeFile(join(root, 'ledger.jsonl'), `${JSON.stringify({ ...line, outcome: 'failed', status: 500 })}\n`);
+    await expect(generate()).rejects.toMatchObject({ code: damage === 'status' ? 'FIXTURE_GEN/capture-unproven' : 'FIXTURE_GEN/entry-invalid' });
+  });
+
+  it('refuses a placeholder the model wrote itself and an echo of an earlier model turn', async () => {
+    const message = `分析单元 1/1 · 单元摘要 ${D}${blocks}`;
+    await synthetic(message, BASELINE_PROMPT_CONTRACT_DIGEST, '{"blockId":"{{block:1}}"}');
+    await expect(generate()).rejects.toMatchObject({ code: 'FIXTURE_GEN/identity-unmapped' });
+    const earlier = '先前一轮模型给出的合成结论不能复制进夹具。';
+    await synthetic([{ role: 'user', content: message }, { role: 'assistant', content: earlier }, { role: 'user', content: message }],
+      BASELINE_PROMPT_CONTRACT_DIGEST, JSON.stringify({ note: earlier }));
+    await expect(generate()).rejects.toMatchObject({ code: 'FIXTURE_GEN/manuscript-echo' });
   });
 
   it('refuses carried derivative echoes and serialized fixtures damaged after conversion', async () => {

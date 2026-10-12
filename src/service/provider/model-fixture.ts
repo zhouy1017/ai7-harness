@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { canonicalJson, DIGEST_PATTERN, hasExactKeys, isRecord, sha256Hex } from '../analysis/canonical.js';
+import { providerCacheKey, providerEvidenceGeneration } from './provider-result-cache.js';
 
 /**
  * Hand-written synthetic deterministic model fixtures (`tests/fixtures/model/<identity>.json`): one
@@ -28,10 +29,12 @@ import { canonicalJson, DIGEST_PATTERN, hasExactKeys, isRecord, sha256Hex } from
  * request-digest entry, and the schema version, are unchanged.
  *
  * An entry the fixture converter wrote from a Provider Test Ledger capture (Issue #808) additionally carries its `capture`:
- * the item that captured it, which subject it answers (a unit, the reduction, a sampling turn or the reflection), the route,
- * endpoint, request shape, model and prompt contract it was captured under, when, the digests of the exact provider request
- * and response, the development validation it belonged to, and every identity the converter replaced with a placeholder. It
- * is provenance only: nothing resolves by it, and an entry without it reads exactly as before.
+ * the item that captured it, which subject it answers (a unit, the reduction, a sampling turn, the reflection, or a
+ * synthesis or dialogue turn the adapter already answers), the route, endpoint, request shape and model, the stage's own
+ * prompt contract and the enclosing task's, when, the digests of the exact provider request and response, the development
+ * validation it belonged to, and the captured identity each placeholder stands for. Nothing is keyed by it: the deterministic
+ * adapter only declines an entry whose recorded enclosing task contract is not the one it answers for, and an entry without
+ * it reads exactly as before.
  */
 export const MODEL_FIXTURE_SCHEMA = 'ai7.model-fixture/1' as const;
 export const FIXTURE_IDENTITY_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -95,7 +98,9 @@ export interface ModelFixtureCapture {
   readonly endpoint: string | null;
   readonly requestShape: string | null;
   readonly model: string;
+  /** The contract the captured call itself ran under: the reduction's, a sampling turn's or the reflection's own for those. */
   readonly promptContractDigest: string;
+  /** The enclosing task's contract; `null` for a legacy capture, which recorded only one contract for every call. */
   readonly taskPromptContractDigest: string | null;
   readonly capturedAt: string;
   /** SHA-256 over the exact canonical request body that was sent. */
@@ -109,7 +114,7 @@ export interface ModelFixtureCapture {
   /** Integrity of the sanitized response; distinct from the original Provider response digest. */
   readonly fixtureResponseDigest: string;
   readonly validation: { readonly family: string; readonly case: string; readonly step: string } | null;
-  /** Every captured identity the converter replaced, with the placeholder that stands for it in the response. */
+  /** Every placeholder the response carries, with the identity in the captured request it stands for. */
   readonly identityMap: ReadonlyArray<{ readonly placeholder: string; readonly identity: string }>;
 }
 
@@ -242,11 +247,11 @@ function parseCapture(value: unknown): ModelFixtureCapture {
     typeof value.providerRequestDigest === 'string' && DIGEST_PATTERN.test(value.providerRequestDigest) &&
     typeof value.providerResponseDigest === 'string' && DIGEST_PATTERN.test(value.providerResponseDigest) &&
     typeof value.fixtureResponseDigest === 'string' && DIGEST_PATTERN.test(value.fixtureResponseDigest), '夹具条目的捕获摘要无效。');
-  requireFixture(namespaced ? (typeof value.cacheKey === 'string' && value.cacheKey === sha256Hex(JSON.stringify([
-    'ai7.provider-cache/2', value.route, value.endpoint, value.requestShape, value.model, value.providerRequestDigest,
-  ])) && typeof value.generation === 'string' && value.generation === sha256Hex(JSON.stringify([
-    value.route, value.endpoint, value.requestShape, value.model, value.promptContractDigest,
-  ]))) : value.cacheKey === null && value.generation === null, '夹具条目的捕获命名空间或代次无效。');
+  const namespace = { route: value.route as string, endpoint: value.endpoint as string, requestShape: value.requestShape as string, model: value.model };
+  requireFixture(namespaced
+    ? value.cacheKey === providerCacheKey(namespace, value.providerRequestDigest) &&
+      value.generation === providerEvidenceGeneration(namespace, value.promptContractDigest, value.taskPromptContractDigest as string)
+    : value.cacheKey === null && value.generation === null, '夹具条目的捕获命名空间或代次无效。');
   const validation = value.validation;
   requireFixture((!namespaced && validation === null) || (isRecord(validation) && hasExactKeys(validation, ['family', 'case', 'step']) &&
     boundedText(validation.family, 48) && boundedText(validation.case, 48) && boundedText(validation.step, 128)), '夹具条目的验证用途无效。');
@@ -322,8 +327,10 @@ export function parseModelFixture(value: unknown): ModelFixture {
     if (capture !== undefined) {
       requireFixture(capture.fixtureResponseDigest === sha256Hex(canonicalJson(response)), '夹具条目的响应与捕获摘要不一致。');
       const unitSubject = capture.subject === 'unit' || capture.subject.endsWith('-unit');
-      requireFixture(capture.taskPromptContractDigest === null || !(unitSubject || ['task-synthesis', 'dialogue'].includes(capture.subject)) ||
-        capture.taskPromptContractDigest === capture.promptContractDigest, '夹具条目的任务与阶段契约不一致。');
+      const stageSubject = ['reduction', 'sampling', 'reflection'].includes(capture.subject);
+      // A legacy line recorded one contract for every call, so only a namespaced capture can say which contract a stage ran under.
+      requireFixture(stageSubject ? capture.evidenceScope === 'namespaced'
+        : capture.taskPromptContractDigest === null || capture.taskPromptContractDigest === capture.promptContractDigest, '夹具条目的任务与阶段契约不一致。');
       requireFixture(unitSubject ? (entry.unitOrdinal as number) > 0 : entry.unitOrdinal === 0, '夹具条目的捕获契约序号不一致。');
       requireFixture(capture.subject === 'dialogue' ? response.kind !== 'unit-result' : response.kind !== 'answer-chunks', '夹具条目的捕获响应契约不一致。');
       const serializedResponse = JSON.stringify(response);

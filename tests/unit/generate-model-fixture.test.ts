@@ -37,7 +37,15 @@ import {
   unitContentDigest,
 } from '../../src/service/provider/local-deterministic-adapter.js';
 import { parseModelFixture } from '../../src/service/provider/model-fixture.js';
-import { ProviderResultCache, providerCacheKey } from '../../src/service/provider/provider-result-cache.js';
+import { ProviderResultCache, providerCacheKey, providerEvidenceGeneration } from '../../src/service/provider/provider-result-cache.js';
+import { FACTUAL_REVIEW_PROMPT_CONTRACT, parseFactualReviewUnitMessageHeader } from '../../src/service/analysis/factual-review-contract.js';
+import { reviewCategoryContractInput, reviewCategoryEntry } from '../../src/service/review/category-configuration.js';
+import { parseReviewCategoryUnitMessageHeader, reviewCategoryContract } from '../../src/service/review/review-category-contract.js';
+import { parseInitialEvaluationSynthesisMessageHeader, parseInitialEvaluationUnitMessageHeader } from '../../src/service/evaluation/initial-evaluation-contract.js';
+import { parseReadersReportSynthesisMessageHeader, parseReadersReportUnitMessageHeader } from '../../src/service/evaluation/readers-report-contract.js';
+import { parseEvaluationRewriteSynthesisMessageHeader, parseEvaluationRewriteUnitMessageHeader } from '../../src/service/evaluation/evaluation-rewrite-contract.js';
+import { parseWritingSynthesisMessageHeader, parseWritingUnitMessageHeader } from '../../src/service/writing/writing-contract.js';
+import { parseDialogueMessageHeader } from '../../src/service/dialogue/contract.js';
 
 // The S41 generation tool, proven on a cache the tests build in a temporary directory. The real
 // Provider Result Cache of ADR 0067 is never named, read, or listed here, and no generated fixture
@@ -85,6 +93,10 @@ type Tool = {
   parseAssuranceSamplingListedRefs: (text: string) => string[];
   parseRunReportReflectionMessageHeader: (text: string) => unknown;
   namespacedCacheKey: (namespace: { route: string; endpoint: string; requestShape: string; model: string }, requestDigest: string) => string;
+  evidenceGeneration: (
+    namespace: { route: string; endpoint: string; requestShape: string; model: string }, promptContractDigest: string, taskPromptContractDigest?: string | null,
+  ) => string;
+  parseTaskHeader: (text: string, promptContractDigest: string) => { subject: string; unitOrdinal: number; requestDigest: string } | null;
 };
 
 // @ts-expect-error tools/*.mjs carry no declarations; the tool is exercised as the plain module it is.
@@ -152,8 +164,13 @@ async function buildCache(root: string, options: CacheOptions = {}): Promise<{ r
   await mkdir(join(root, 'entries'), { recursive: true });
   await writeFile(join(root, 'ledger.jsonl'), `${lines.map((item) => JSON.stringify(item)).join('\n')}\n`, 'utf8');
   if (options.omitEntry !== true) {
+    // The entry keeps the usage its response states, as the cache has always written it.
+    const counts = (response as { usage?: { prompt_tokens?: unknown; completion_tokens?: unknown } } | null)?.usage;
+    const usage = Number.isSafeInteger(counts?.prompt_tokens) && Number.isSafeInteger(counts?.completion_tokens)
+      ? { inputTokens: counts!.prompt_tokens as number, outputTokens: counts!.completion_tokens as number }
+      : null;
     await writeFile(tool.cacheEntryPath(root, model, requestDigest),
-      `${JSON.stringify({ model, requestDigest, requestBody, status, response, usage: null, transmittedAt: '2026-09-08T00:00:00.000Z' })}\n`, 'utf8');
+      `${JSON.stringify({ model, requestDigest, requestBody, status, response, usage, transmittedAt: '2026-09-08T00:00:00.000Z' })}\n`, 'utf8');
   }
   return { requestDigest, model };
 }
@@ -606,7 +623,23 @@ describe('generate-model-fixture over the namespaced cache (Issue #808)', () => 
     expect(viaReplay.entries[0]!.response).toEqual(entry.response);
   });
 
-  it('converts a sampling turn, remapping its listed findings as whole tokens only', async () => {
+  it('remaps bare-index finding references only where the sampling result uses them as references', async () => {
+    const message = samplingMessage().replace('[f1]', '[0]').replace('[f12]', '[1]');
+    const content = JSON.stringify({ schema: 'ai7.analysis.assurance-sampling-result/1', dispositions: [
+      { ref: '0', disposition: '成立', reason: '合成理由，第1处。' }, { ref: '1', disposition: '需降级', reason: '合成理由，见 0 号。' },
+    ] });
+    await capture(root, message, content, 'first-baseline/sampling-1-unit-2');
+    const text = (parseModelFixture(await tool.generateModelFixture(request('S40/first-baseline/1'))).entries[0]!.response as { text: string }).text;
+    expect(JSON.parse(text)).toMatchObject({ schema: 'ai7.analysis.assurance-sampling-result/1', dispositions: [
+      { ref: '{{ref:1}}', reason: '合成理由，第1处。' }, { ref: '{{ref:2}}', reason: '合成理由，见 0 号。' },
+    ] });
+    // A replay that lists other references fills only the references.
+    expect(JSON.parse(substituteAssuranceSamplingRefPlaceholders(text, ['4', '7']))).toMatchObject({
+      schema: 'ai7.analysis.assurance-sampling-result/1', dispositions: [{ ref: '4' }, { ref: '7' }],
+    });
+  });
+
+  it('converts a sampling turn, remapping its listed findings as references only', async () => {
     const content = JSON.stringify([{ ref: 'f1', disposition: '成立', reason: '合成理由一。' }, { ref: 'f12', disposition: '需降级', reason: '合成理由二，提到 f1。' }]);
     await capture(root, samplingMessage(), content, 'first-baseline/sampling-1-unit-2');
     const entry = parseModelFixture(await tool.generateModelFixture(request('S40/first-baseline/1'))).entries[0]!;
@@ -706,5 +739,104 @@ describe('generate-model-fixture agreement with the #808 owners', () => {
   it('keys a namespaced entry by the same formula the cache writes it with', () => {
     const namespace = { route: 'opencode-go', endpoint: ENDPOINT, requestShape: 'openai-chat-completions', model: MODEL };
     expect(tool.namespacedCacheKey(namespace, 'f'.repeat(64))).toBe(providerCacheKey(namespace, 'f'.repeat(64)));
+  });
+
+  it('derives the evidence generation as the cache does, joining the enclosing task contract only when it differs', () => {
+    const namespace = { route: 'opencode-go', endpoint: ENDPOINT, requestShape: 'openai-chat-completions', model: MODEL };
+    for (const task of [undefined, BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, BASELINE_PROMPT_CONTRACT_DIGEST]) {
+      expect(tool.evidenceGeneration(namespace, BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, task))
+        .toBe(providerEvidenceGeneration(namespace, BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, task));
+    }
+    expect(tool.evidenceGeneration(namespace, BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, BASELINE_PROMPT_CONTRACT_DIGEST))
+      .not.toBe(tool.evidenceGeneration(namespace, BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST));
+  });
+
+  it('reads own blocks under every own-blocks header the deterministic adapter reads them under', () => {
+    const review = reviewCategoryContract(reviewCategoryContractInput(reviewCategoryEntry('typos-and-usage')!));
+    for (const ownHeader of [BASELINE_PROMPT_CONTRACT.ownHeader, FACTUAL_REVIEW_PROMPT_CONTRACT.ownHeader, review.ownHeader, ASSURANCE_SAMPLING_PROMPT_CONTRACT.ownHeader]) {
+      const message = [`合成单元 1/1 · 单元摘要 ${'c'.repeat(64)}`, ownHeader, `[${BLOCKS[0]!}] (paragraph) 合成一。`, `[${BLOCKS[1]!}] (heading h2) 合成二`].join('\n');
+      expect(tool.ownBlockIdsOf(message), ownHeader).toEqual(ownBlockIdsOf(message));
+      expect(tool.ownBlockTextsOf(message), ownHeader).toEqual(ownBlockTextsOf(message));
+      expect(tool.ownBlockIdsOf(message), ownHeader).toHaveLength(2);
+    }
+  });
+
+  it('recognizes exactly the task headers their owning contracts parse', () => {
+    const digest = 'e'.repeat(64);
+    const cases: Array<[string, (text: string) => unknown]> = [
+      [`事实核查单元 2/3 · 单元摘要 ${digest}`, parseFactualReviewUnitMessageHeader],
+      [`事实核查单元 0/3 · 单元摘要 ${digest}`, parseFactualReviewUnitMessageHeader],
+      [`审阅单元 1/1 · 类别 typos-and-usage · 单元摘要 ${digest}`, parseReviewCategoryUnitMessageHeader],
+      [`审阅单元 1/1 · 类别 ${'a'.repeat(49)} · 单元摘要 ${digest}`, parseReviewCategoryUnitMessageHeader],
+      [`审阅单元 1/1 · 类别 Typos · 单元摘要 ${digest}`, parseReviewCategoryUnitMessageHeader],
+      [`审阅单元 1/1 · 单元摘要 ${digest}`, parseReviewCategoryUnitMessageHeader],
+      [`评估单元 3/2 · 单元摘要 ${digest}`, parseInitialEvaluationUnitMessageHeader],
+      [`评估单元 1/2 · 类别 typos · 单元摘要 ${digest}`, parseInitialEvaluationUnitMessageHeader],
+      [`审稿意见单元 1/2 · 单元摘要 ${digest}`, parseReadersReportUnitMessageHeader],
+      [`评语重写单元 2/2 · 单元摘要 ${digest}`, parseEvaluationRewriteUnitMessageHeader],
+      [`写作单元 1/1 · 单元摘要 ${digest.slice(1)}`, parseWritingUnitMessageHeader],
+      [`评估综合 1/2 · 依据摘要 ${digest}`, parseInitialEvaluationSynthesisMessageHeader],
+      [`评估综合 1/2 · 段落摘要 ${digest}`, parseInitialEvaluationSynthesisMessageHeader],
+      [`审稿意见综合 2/2 · 段落摘要 ${digest}`, parseReadersReportSynthesisMessageHeader],
+      [`评语重写综合 0/2 · 依据摘要 ${digest}`, parseEvaluationRewriteSynthesisMessageHeader],
+      [`写作综合 2/2 · 段落摘要 ${digest}`, parseWritingSynthesisMessageHeader],
+      [`AI7 编辑对话 · 接着回答 · 问题摘要 ${digest}`, parseDialogueMessageHeader],
+      [`AI7 编辑对话 · 追问 · 问题摘要 ${digest}`, parseDialogueMessageHeader],
+    ];
+    for (const [header, owner] of cases) {
+      expect(tool.parseTaskHeader(`${header}\n合成正文`, BASELINE_PROMPT_CONTRACT_DIGEST) === null, header).toBe(owner(`${header}\n合成正文`) === null);
+    }
+  });
+});
+
+describe('generate-model-fixture provenance edges (Issue #808)', () => {
+  let root: string;
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'ai7-fixture-gen-edges-'));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const request = (selector: string): Request => ({ selector, cacheRoot: root, identity: 'generated-808', description: '合成生成夹具', out: join(root, 'out.json') });
+
+  it('retires a capture whose validation case was invalidated while its call was in flight', async () => {
+    const cache = new ProviderResultCache(root);
+    await cache.open();
+    // The invalidation lands between the claim and the capture line: by ledger order alone it would precede the capture.
+    const inFlight: LiveModelFetch = async () => {
+      const other = new ProviderResultCache(root);
+      await other.open();
+      await other.invalidate({ family: VALIDATION.family, case: VALIDATION.case }, 'sample-edited-in-flight');
+      return { status: 200, json: async () => ({ choices: [{ message: { content: '{"ifRedone":[]}' } }], usage: { prompt_tokens: 9, completion_tokens: 3 } }) };
+    };
+    await transmitOnce(cache, inFlight, { purpose: 'first-baseline', promptContractDigest: RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, taskPromptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST },
+      { intent: VALIDATION, step: 'first-baseline/reflection', requestShape: 'openai-chat-completions' }, OPENCODE_GO_ROUTE_PROFILE, MODEL, ENDPOINT,
+      { method: 'POST', headers: {}, body: chatBody(reflectionMessage(randomUUID())) });
+    const lines = await tool.readLedgerLines(root);
+    expect(lines.map((line) => line.kind ?? line.outcome)).toEqual(['invalidation', 'transmitted']);
+    await expect(tool.generateModelFixture(request('S40/first-baseline/1'))).rejects.toMatchObject({ code: 'FIXTURE_GEN/item-retired' });
+  });
+
+  it('resolves a replay written before #808 to the legacy capture of the same model and request', async () => {
+    const requestDigest = sha256Hex(chatBody(unitMessage()));
+    await buildCache(root, {
+      extraLines: [{
+        itemId: 'S40/fixture/2', purpose: 'fixture', model: MODEL, promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST, requestDigest,
+        outcome: 'replayed', status: 200, usage: { inputTokens: 1_400, outputTokens: 180 }, recordedAt: '2026-09-09T00:00:00.000Z',
+      }],
+    });
+    for (const selector of [requestDigest, 'S40/fixture/2']) {
+      const entry = parseModelFixture(await tool.generateModelFixture(request(selector))).entries[0]!;
+      expect(entry.capture, selector).toMatchObject({ itemId: ITEM_ID, selectedItemId: 'S40/fixture/2', evidenceScope: 'legacy-unnamespaced' });
+    }
+  });
+
+  it('refuses a legacy reduction, whose ledger line names only the enclosing task contract', async () => {
+    await buildCache(root, {
+      requestBody: chatBody(reductionMessage()),
+      response: { choices: [{ message: { content: '{"findings":[]}' } }], usage: { prompt_tokens: 10, completion_tokens: 2 } },
+    });
+    await expect(tool.generateModelFixture(request(ITEM_ID))).rejects.toMatchObject({ code: 'FIXTURE_GEN/capture-unproven' });
   });
 });
