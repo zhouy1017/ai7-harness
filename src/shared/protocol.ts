@@ -1823,7 +1823,7 @@ export type ProviderProcessingVersion = 'v1' | DeveloperLiveProviderProcessingVe
 export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: number };
 /**
  * The Run Budget Ceiling a developer-live launch binds: an explicit form ceiling as a total, or the
- * Provider Processing v5 default of 30,000 tokens per frozen Coverage Manifest unit (ADR 0070),
+ * Provider Processing v9 default of 30,000 tokens per frozen Coverage Manifest unit (ADR 0070),
  * resolved once the manifest freezes and before the plan does.
  */
 export type DeveloperLiveCeiling =

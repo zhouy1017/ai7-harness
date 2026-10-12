@@ -55,18 +55,18 @@ const V9_PATH = 'docs/policies/provider-processing-policy.v9.json';
  * against the verification function itself, over the real bytes with one field varied.
  */
 async function v9PolicyWithRule(overrides: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
-  const v5 = JSON.parse(await readFile(join(REPO_ROOT, ...V9_PATH.split('/')), 'utf8')) as Record<string, unknown>;
-  const rule = (v5.decision as { providerAllowRules: Array<Record<string, unknown>> }).providerAllowRules[0]!;
+  const v9 = JSON.parse(await readFile(join(REPO_ROOT, ...V9_PATH.split('/')), 'utf8')) as Record<string, unknown>;
+  const rule = (v9.decision as { providerAllowRules: Array<Record<string, unknown>> }).providerAllowRules[0]!;
   Object.assign(rule, overrides);
-  return v5;
+  return v9;
 }
 
 /** The exact v9 document with the given `transmissions` keys overridden. */
 async function v9PolicyWithTransmissions(overrides: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
-  const v5 = JSON.parse(await readFile(join(REPO_ROOT, ...V9_PATH.split('/')), 'utf8')) as Record<string, unknown>;
-  const rule = (v5.decision as { providerAllowRules: Array<Record<string, unknown>> }).providerAllowRules[0]!;
+  const v9 = JSON.parse(await readFile(join(REPO_ROOT, ...V9_PATH.split('/')), 'utf8')) as Record<string, unknown>;
+  const rule = (v9.decision as { providerAllowRules: Array<Record<string, unknown>> }).providerAllowRules[0]!;
   rule.transmissions = { ...(rule.transmissions as Record<string, unknown>), ...overrides };
-  return v5;
+  return v9;
 }
 
 function expectZeroTransmission(projection: LaunchPolicyProjection): void {
@@ -132,7 +132,7 @@ describe('active policy set v7', () => {
     expect(await sha256Of(externalPath)).toBe(externalSha256);
   });
 
-  it('declares the exact developer-live binding the v5 policy bytes carry', () => {
+  it('declares the exact developer-live binding the v9 policy bytes carry', () => {
     expect(DEVELOPER_LIVE_POLICY_BINDING.route).toBe('opencode-go');
     expect(DEVELOPER_LIVE_POLICY_BINDING.model).toBe('deepseek-v4.1-flash');
     expect(DEVELOPER_LIVE_POLICY_BINDING.endpoint).toBe('https://opencode.ai/zen/go/v1/chat/completions');
@@ -181,7 +181,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
       decision: 'eligible-only',
       authorizedLiveTransmissionCount: 'bounded-by-run',
       liveTransmissionAllowed: true,
-      // ADR 0079 §2.1: v5 names all three declared suboperations (ADR 0066) `true`; the reduction,
+      // v9 names all three declared suboperations (ADR 0066) `true`, as ADR 0079 §2.1 settled for v5; the reduction,
       // the assurance sample and the reflection turn each dispatch inside the bound of §2.2.
       crossUnitReductionAllowed: true,
       assuranceSamplingAllowed: true,
@@ -199,7 +199,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     for (const scope of ['development-ci', 'developer-live'] as const) {
       const projection = await resolveSourceCheckoutLaunchPolicy(codeRoot, scope);
       expect(projection.integrityState).toBe('verified');
-      // v1 authorizes zero transmissions; the v5 bytes name all three.
+      // v1 authorizes zero transmissions; the v9 bytes name all three.
       const named = scope === 'developer-live';
       expect(projection.providerProcessing.crossUnitReductionAllowed).toBe(named);
       expect(projection.providerProcessing.assuranceSamplingAllowed).toBe(named);
@@ -228,7 +228,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
           .rejects.toThrow('LAUNCH_POLICY_INVALID');
       }
     }
-    // The web-search allowance is `false` in v5 (ADR 0079 §4.2, §6); an enabled flag is unreadable.
+    // The web-search allowance is `false` in v9, as in v5 (ADR 0079 §4.2, §6); an enabled flag is unreadable.
     await expect(v9PolicyWithTransmissions({ webSearchToolAllowed: true }).then(verifyDeveloperLivePolicy))
       .rejects.toThrow('LAUNCH_POLICY_INVALID');
     // The house-people redaction rule is part of the pinned document too.
@@ -294,7 +294,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     }
   });
 
-  it('denies a developer-live launch whose v5 policy bytes drifted, while development-ci still verifies', async () => {
+  it('denies a developer-live launch whose v9 policy bytes drifted, while development-ci still verifies', async () => {
     await placeValidCheckout();
     const target = join(codeRoot, 'docs', 'policies', 'provider-processing-policy.v9.json');
     await writeFile(target, `${await readFile(target, 'utf8')}\n`);

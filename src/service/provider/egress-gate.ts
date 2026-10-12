@@ -504,7 +504,7 @@ function platformToolPreconditions(binding: EgressBindingFacts, scope: EgressAtt
  * arguments: the host and the category are derived here from the selected rule and the binding (#676), never taken from
  * the caller. One decision is one single-use ticket in the gate's own book; the forwarder sends with the `fetch` the service
  * captured before installing network denial. A binding whose rule names no platform tools — every binding under Provider
- * Processing v5 — is refused before anything else is read.
+ * Processing v9 — is refused before anything else is read.
  */
 export function evaluateSearchServiceCall(
   request: { readonly arguments: Extract<PlatformToolArguments, { tool: 'websearch' }> },

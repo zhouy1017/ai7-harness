@@ -152,7 +152,7 @@ async function openLiveStore(dataRoot: string, ceiling: Ceiling = CEILING): Prom
 interface StubAnswer extends UnitAnswer {}
 
 /**
- * The deterministic fixture's answers for the whole v5 chain: the eight unit results, and the
+ * The deterministic fixture's answers for the whole v9 chain: the eight unit results, and the
  * reduction and assurance-sampling entries keyed by the request digest the deterministic adapter
  * computes. The fixture carries no reflection entry, so the stub synthesizes a valid one — a
  * deterministic stand-in that keeps the chain closed without inventing fixture bytes.
@@ -171,7 +171,7 @@ const SYNTHETIC_REFLECTION: StubAnswer = {
 };
 
 /**
- * A stub transport standing in for the captured native `fetch`. It answers the whole v5 chain with
+ * A stub transport standing in for the captured native `fetch`. It answers the whole v9 chain with
  * the synthetic results the deterministic fixture already carries, so the contract, the reducers,
  * the reducers' suboperations, and the coverage axes see exactly the material they see on the local
  * route. Block and finding identities are minted per import, so the stub substitutes exactly as the
@@ -395,6 +395,16 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
       goal: FACTUAL_REVIEW_TASK_GOAL, update: null, reconfirm: false, launchPolicy,
     }))).toBe('ANALYSIS_KIND_NOT_ADMITTED');
     expect(factual.inspect(bookId).taskIntent).toBeNull();
+    // A plan another launch froze meets the same refusal at authorization and at admission, before either reads it.
+    expect(refusalCode(() => factual.authorize(bookId, randomUUID(), prepared.planEnvelope!.digest))).toBe('ANALYSIS_KIND_NOT_ADMITTED');
+    const calls: StubCall[] = [];
+    const execution = owner(store, stubTransport({ calls, responses: new Map() }));
+    try {
+      expect(refusalCode(() => execution.admitAndDispatch(randomUUID(), factual))).toBe('EXECUTION_KIND_NOT_ADMITTED');
+      expect(calls).toHaveLength(0);
+    } finally {
+      await execution.dispose();
+    }
     for (const origin of [
       { kind: 'default-execution-rule', ruleVersionId: randomUUID() },
       { kind: 'background-analysis-enrollment', enrollmentVersionId: randomUUID() },
@@ -439,7 +449,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
       expect(call.headers[OPENCODE_GO_SESSION_HEADER]).toMatch(/^[0-9a-f-]{36}$/u);
       const body = JSON.parse(call.body) as Record<string, unknown>;
       expect(body.model).toBe('deepseek-v4.1-flash');
-      // The profile's declared constraint reaches the wire on the real path, not only at assembly.
+      // The V4.1 profile declares no format constraint, so none reaches the wire on the real path either.
       expect(body).not.toHaveProperty('response_format');
       expect(body).not.toHaveProperty('thinking');
       expect(body).not.toHaveProperty('reasoning_effort');
@@ -461,7 +471,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     expect(spanSessions).not.toContain(attempt.executionBinding!.harnessSessionId);
     expect(attempt.credentialReadinessCheck).toMatchObject({ slot: 'opencode-go', readiness: 'present', valueReleased: false });
 
-    // The revision records the live route and the v5 policy pin, through the existing real path.
+    // The revision records the live route and the v9 policy pin, through the existing real path.
     const revision = settled.resultSetRevision!;
     expect(revision.adapterPin).toEqual({ route: 'opencode-go', model: 'deepseek-v4.1-flash', fixtureIdentity: null, fixtureSha256: null });
     expect(revision.policyPin).toEqual({
@@ -507,7 +517,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
   });
 
   /**
-   * The three declared suboperations are gated one key each. Under the verified v5 bytes all three
+   * The three declared suboperations are gated one key each. Under the verified v9 bytes all three
    * are named, so this is the fail-closed half: a projection that names the reduction and neither the
    * sample nor the reflection. The reduction closes, the sample is drawn but not dispatched, and the
    * report says exactly which policy stopped each step.

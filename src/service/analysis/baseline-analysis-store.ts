@@ -3500,8 +3500,11 @@ export class BaselineAnalysisStore {
     start: 'now' | 'when-online' = 'now',
     origin: AnalysisAuthorizationOrigin = STANDARD_DIRECT,
   ): { projection: AnalysisProjection; dispatchRunRecordId: string | null } {
+    // Provider Processing v9 admits one kind and one origin, each refused under its own code, as preparation refuses them.
     if (this.#launch.live !== null) {
-      requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND && origin.kind === 'standard-direct',
+      requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND,
+        'ANALYSIS_KIND_NOT_ADMITTED', 'developer-live 当前只允许基线稿件分析；该任务种类尚未获准实时执行。');
+      requireAnalysis(origin.kind === 'standard-direct',
         'ANALYSIS_ORIGIN_NOT_ADMITTED', 'developer-live 当前只允许直接授权的基线稿件分析。');
     }
     requireAnalysis(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest) &&
