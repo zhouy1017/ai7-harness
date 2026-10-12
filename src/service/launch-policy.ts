@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import { LAUNCH_SELECTABLE_SCOPES, isTrustedOperationalScope, type DeveloperLiveCeiling, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope } from '../shared/protocol.js';
+import { LAUNCH_SELECTABLE_SCOPES, isTrustedOperationalScope, type DeveloperLiveCeiling, type DevelopmentValidationIntent, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope } from '../shared/protocol.js';
 
 /**
  * The source-checkout launch authority (ADR 0046, ADR 0065): the build-embedded carrier pins active
@@ -61,11 +61,21 @@ export const DEVELOPER_LIVE_POLICY_BINDING = {
 /** The sibling directory of the checkout that holds the Provider Result Cache when no root is named. */
 export const DEFAULT_PROVIDER_CACHE_DIRECTORY = 'ai7-harness-provider-cache';
 
-/** The developer-live launch facts derived from the form: the required ceiling and the cache root outside the checkout. */
+/**
+ * The developer-live launch facts derived from the form: the required ceiling, the cache root outside the checkout, and the
+ * development validation the launch performs.
+ */
 export interface DeveloperLiveLaunch {
   /** The explicit form ceiling, or the policy's per-frozen-unit default when the form left it unset. */
   readonly runBudgetCeiling: DeveloperLiveCeiling;
   readonly providerCacheRoot: string;
+  /**
+   * The development validation every model call of this launch belongs to (Issue #808): the Provider Test Ledger and Result
+   * Cache answer, refuse or record a call by it. A resolved launch always names one. `null` is the business boundary — no
+   * launch selects it while ordinary production stays unselectable (#811) — under which a model call reaches the transport
+   * itself and nothing reads or writes the developer cache or ledger.
+   */
+  readonly validation: DevelopmentValidationIntent | null;
 }
 
 /**
@@ -102,7 +112,10 @@ export function resolveDeveloperLiveLaunch(form: TrustedLaunchForm, checkoutRoot
   if (form.providerCacheRoot !== null && !isAbsolute(form.providerCacheRoot)) throw new Error('LAUNCH_FORM_INVALID');
   const providerCacheRoot = resolve(form.providerCacheRoot ?? resolve(checkoutRoot, '..', DEFAULT_PROVIDER_CACHE_DIRECTORY));
   if (isInsideOrEqual(resolve(checkoutRoot), providerCacheRoot)) throw new Error('PROVIDER_CACHE_ROOT_INSIDE_CHECKOUT');
-  return { runBudgetCeiling, providerCacheRoot };
+  // developer-live is a developer-test scope: a launch that names no development validation fails closed here, before any
+  // Run could dispatch, rather than sending outside the ledger.
+  if (form.validation === null) throw new Error('LAUNCH_VALIDATION_INTENT_REQUIRED');
+  return { runBudgetCeiling, providerCacheRoot, validation: form.validation };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

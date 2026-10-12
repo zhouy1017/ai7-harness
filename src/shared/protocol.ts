@@ -1882,6 +1882,10 @@ export function calibrationMinBooksForLaunch(value: string | undefined, journey:
   return parseCalibrationMinBooks(value);
 }
 export const PROVIDER_CACHE_ROOT_ARGUMENT = '--provider-cache-root';
+/** The development validation a developer-live launch performs (Issue #808, ADR 0089): `<family>/<case>`, required under that scope. */
+export const VALIDATION_CASE_ARGUMENT = '--validation-case';
+/** The substantive delta a developer-live launch declares beside its validation case: `<kind>:<rationale>`, optional. */
+export const VALIDATION_DELTA_ARGUMENT = '--validation-delta';
 export const LAUNCH_SELECTABLE_SCOPES: ReadonlyArray<TrustedOperationalScope> = ['development-ci', 'developer-live'];
 /** A positive decimal token count without sign, separators, or leading zeros; twelve digits stay well inside the safe-integer range. */
 export const RUN_BUDGET_CEILING_PATTERN = /^[1-9][0-9]{0,11}$/u;
@@ -1894,12 +1898,70 @@ export interface TrustedLaunchForm {
   readonly runBudgetCeiling: number | null;
   /** The explicit absolute Provider Result Cache root, or `null` for the scope default. */
   readonly providerCacheRoot: string | null;
+  /** The development validation a developer-live launch performs; `null` under every other scope. */
+  readonly validation: DevelopmentValidationIntent | null;
 }
 
 export interface RawTrustedLaunchForm {
   readonly trustedOperationalScope?: string | undefined;
   readonly runBudgetCeiling?: string | undefined;
   readonly providerCacheRoot?: string | undefined;
+  readonly validationCase?: string | undefined;
+  readonly validationDelta?: string | undefined;
+}
+
+/**
+ * What a developer-live launch validates (Issue #808, ADR 0089): a stable family — the capability under test — and a case —
+ * the scenario — that name the purpose independently of any Issue, plan slice, Run or attempt number. The Provider Test Ledger
+ * reuses evidence by this purpose; renaming it changes no request, so it can never by itself make an answered request new.
+ */
+export interface DevelopmentValidationIntent {
+  readonly family: string;
+  readonly case: string;
+  readonly delta: DevelopmentValidationDelta | null;
+}
+
+/**
+ * The substantive difference a launch declares that existing evidence cannot answer. `input`: the same purpose and step over an
+ * input whose content actually differs from what was captured. `retry-unknown`: sending once more a request whose earlier result
+ * is unknown and possibly billed. Each is verified against the ledger before anything is sent; a route, endpoint, request shape,
+ * model or prompt contract that changed needs no declaration, because the ledger detects and records it itself.
+ */
+export interface DevelopmentValidationDelta {
+  readonly kind: 'input' | 'retry-unknown';
+  readonly rationale: string;
+}
+
+export const DEVELOPMENT_VALIDATION_DELTA_KINDS: ReadonlyArray<DevelopmentValidationDelta['kind']> = ['input', 'retry-unknown'];
+/** Lower-case words joined by single hyphens, at most 48 characters. */
+const VALIDATION_SLUG = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
+/**
+ * Words that are numbering rather than purpose: an Issue, a pull request, a plan slice (`s40`, `s87f3`), a Run, an attempt, a
+ * test item, a retry, or a bare number. A family or case naming one would make the same question look new when it is renumbered.
+ */
+const NUMBERING_WORD = /^(?:(?:issue|pr|run|attempt|item|retry)[0-9]+|s[0-9]+[a-z0-9]*|[0-9]+)$/u;
+
+function purposeSlug(value: string, minimumWords: number): boolean {
+  if (value.length > 48 || !VALIDATION_SLUG.test(value)) return false;
+  const words = value.split('-');
+  return words.length >= minimumWords && !words.some((word) => NUMBERING_WORD.test(word));
+}
+
+/** `<family>/<case>`, each a purpose slug free of numbering words; `null` for anything else. */
+export function parseValidationCase(value: string): Pick<DevelopmentValidationIntent, 'family' | 'case'> | null {
+  const parts = value.split('/');
+  if (parts.length !== 2 || !purposeSlug(parts[0]!, 1) || !purposeSlug(parts[1]!, 1)) return null;
+  return { family: parts[0]!, case: parts[1]! };
+}
+
+/** `<kind>:<rationale>`: a closed kind and a rationale of at least two words free of numbering words; `null` for anything else. */
+export function parseValidationDelta(value: string): DevelopmentValidationDelta | null {
+  const separator = value.indexOf(':');
+  if (separator === -1) return null;
+  const kind = value.slice(0, separator);
+  const rationale = value.slice(separator + 1);
+  if (!(DEVELOPMENT_VALIDATION_DELTA_KINDS as ReadonlyArray<string>).includes(kind) || !purposeSlug(rationale, 2)) return null;
+  return { kind: kind as DevelopmentValidationDelta['kind'], rationale };
 }
 
 export function isTrustedOperationalScope(value: string): value is TrustedOperationalScope {
@@ -1908,13 +1970,25 @@ export function isTrustedOperationalScope(value: string): value is TrustedOperat
 
 /**
  * Parse the launch form exactly as every process on the launch path does: an unknown scope, a
- * malformed ceiling, a relative cache root, or a ceiling or cache root without the developer-live
- * scope yields `null`, and the caller fails closed. Absent arguments select `development-ci`.
+ * malformed ceiling, a relative cache root, or a ceiling, cache root or validation argument without
+ * the developer-live scope yields `null`, and the caller fails closed. Absent arguments select
+ * `development-ci`. A developer-live launch must name the development validation it performs
+ * (Issue #808): that scope is a developer-test scope, and an unnamed purpose fails closed before
+ * anything could be dispatched rather than sending outside the Provider Test Ledger.
  */
 export function parseTrustedLaunchForm(raw: RawTrustedLaunchForm): TrustedLaunchForm | null {
   const scope = raw.trustedOperationalScope ?? 'development-ci';
   if (!isTrustedOperationalScope(scope)) return null;
-  if (scope !== 'developer-live' && (raw.runBudgetCeiling !== undefined || raw.providerCacheRoot !== undefined)) return null;
+  if (scope !== 'developer-live' && (raw.runBudgetCeiling !== undefined || raw.providerCacheRoot !== undefined ||
+    raw.validationCase !== undefined || raw.validationDelta !== undefined)) return null;
+  let validation: DevelopmentValidationIntent | null = null;
+  if (scope === 'developer-live') {
+    const named = raw.validationCase === undefined ? null : parseValidationCase(raw.validationCase);
+    if (named === null) return null;
+    const delta = raw.validationDelta === undefined ? null : parseValidationDelta(raw.validationDelta);
+    if (raw.validationDelta !== undefined && delta === null) return null;
+    validation = { ...named, delta };
+  }
   let runBudgetCeiling: number | null = null;
   if (raw.runBudgetCeiling !== undefined) {
     if (!RUN_BUDGET_CEILING_PATTERN.test(raw.runBudgetCeiling)) return null;
@@ -1926,7 +2000,7 @@ export function parseTrustedLaunchForm(raw: RawTrustedLaunchForm): TrustedLaunch
     if (!ABSOLUTE_PATH_SHAPE.test(raw.providerCacheRoot)) return null;
     providerCacheRoot = raw.providerCacheRoot;
   }
-  return { trustedOperationalScope: scope, runBudgetCeiling, providerCacheRoot };
+  return { trustedOperationalScope: scope, runBudgetCeiling, providerCacheRoot, validation };
 }
 
 export interface LaunchPolicyProjection {

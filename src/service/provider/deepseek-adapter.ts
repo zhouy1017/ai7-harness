@@ -524,6 +524,12 @@ export interface TransmitTicketSource {
 export interface DeepSeekTransportResponse {
   readonly status: number;
   json(): Promise<unknown>;
+  /**
+   * Set only by a development validation transport whose Provider Result Cache answered (Issue #808): the body is a captured
+   * response replayed, nothing was sent, and the turn incurred no usage — the usage the body records is the capture's own,
+   * which the Provider Test Ledger keeps, so it is never reported as this Run's.
+   */
+  readonly replayed?: true;
 }
 
 export type DeepSeekTransport = (
@@ -546,6 +552,12 @@ export interface DeepSeekAdapterDependencies {
   readonly modelProfile?: ProviderModelProfile;
   /** The technical Session id of the turn in flight; required by a profile that sends the Session header. */
   readonly sessionId?: () => string;
+}
+
+/** A replayed outcome as this turn incurred it: the same answer, and no usage spent sending it. */
+function withoutIncurredUsage(outcome: ProviderResponseOutcome): ProviderResponseOutcome {
+  if (!('usage' in outcome) || outcome.usage === null) return outcome;
+  return { ...outcome, usage: { inputTokens: 0, outputTokens: 0 } } as ProviderResponseOutcome;
 }
 
 export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
@@ -668,8 +680,9 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
           body = null;
         }
         // Tool calls are read only for a request that offered tools (Issue #473); to any other the response reads as before.
-        return parseProviderResponse(response.status, body, this.#deps.codes, this.#profile, this.#modelProfile,
+        const parsed = parseProviderResponse(response.status, body, this.#deps.codes, this.#profile, this.#modelProfile,
           { toolCallsOffered: (options.tools ?? []).length > 0 });
+        return 'replayed' in response && response.replayed === true ? withoutIncurredUsage(parsed) : parsed;
       });
     } catch (error) {
       const classified = classifyTransportError(error);

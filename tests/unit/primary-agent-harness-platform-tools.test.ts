@@ -12,7 +12,7 @@ import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE, evaluateEgress, t
 import { PLATFORM_TOOL_SCHEMAS, PLATFORM_TOOL_SCHEMA_DIGEST, PlatformToolBreaker, readPlatformToolsRule, type PlatformToolsRule } from '../../src/service/provider/platform-tools.js';
 import type { PlatformToolFetch } from '../../src/service/provider/platform-tool-http.js';
 import { PlatformToolSession } from '../../src/service/provider/platform-tool-session.js';
-import { PROVIDER_LEDGER_FILE, ProviderResultCache } from '../../src/service/provider/provider-result-cache.js';
+import { PROVIDER_LEDGER_FILE, ProviderResultCache, isItemLine } from '../../src/service/provider/provider-result-cache.js';
 import { ResearchSnapshotCache } from '../../src/service/provider/research-snapshot-cache.js';
 import { installNodeNetworkDenial } from '../../src/shared/network-denial.js';
 
@@ -357,7 +357,7 @@ describe('the platform tools inside the composition', () => {
     expect(opened).toEqual(['example.org']);
     expect(held).toBe(0);
     expect(sent).toEqual(['https://search.parallel.ai/mcp', 'https://example.org/source']);
-    expect(cache.lines.map((line) => [line.itemId, line.kind, line.outcome])).toEqual([
+    expect(cache.lines.filter(isItemLine).map((line) => [line.itemId, line.kind, line.outcome])).toEqual([
       ['S87/factual-review/1', 'search-call', 'transmitted'],
       ['S87/factual-review/2', 'fetch', 'transmitted'],
     ]);

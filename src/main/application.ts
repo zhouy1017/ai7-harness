@@ -27,6 +27,8 @@ import {
   calibrationMinBooksForLaunch,
   parseBackgroundQuietMs,
   TRUSTED_SCOPE_ARGUMENT,
+  VALIDATION_CASE_ARGUMENT,
+  VALIDATION_DELTA_ARGUMENT,
   parseTrustedLaunchForm,
   type AskAboutSelectionInput,
   type ConvertDialogueToChangeSuggestionInput,
@@ -225,17 +227,22 @@ function parseArguments(argv: string[]): LaunchArguments {
           key === '--launcher-pid' ||
           key === TRUSTED_SCOPE_ARGUMENT ||
           key === RUN_BUDGET_CEILING_ARGUMENT ||
-          key === PROVIDER_CACHE_ROOT_ARGUMENT),
+          key === PROVIDER_CACHE_ROOT_ARGUMENT ||
+          key === VALIDATION_CASE_ARGUMENT ||
+          key === VALIDATION_DELTA_ARGUMENT),
     );
     values.set(key, value);
   }
   const dataRoot = values.get('--data-root');
   requireDesktop(dataRoot !== undefined && isAbsolute(dataRoot));
-  // The trusted launch form: an unknown scope, a malformed ceiling, or a relative cache root denies startup.
+  // The trusted launch form: an unknown scope, a malformed ceiling, a relative cache root, or a developer-live launch that
+  // names no development validation denies startup.
   const launchForm = parseTrustedLaunchForm({
     trustedOperationalScope: values.get(TRUSTED_SCOPE_ARGUMENT),
     runBudgetCeiling: values.get(RUN_BUDGET_CEILING_ARGUMENT),
     providerCacheRoot: values.get(PROVIDER_CACHE_ROOT_ARGUMENT),
+    validationCase: values.get(VALIDATION_CASE_ARGUMENT),
+    validationDelta: values.get(VALIDATION_DELTA_ARGUMENT),
   });
   requireDesktop(launchForm !== null);
   requireDesktop(launchForm.providerCacheRoot === null || isAbsolute(launchForm.providerCacheRoot));

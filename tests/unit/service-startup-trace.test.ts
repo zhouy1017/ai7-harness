@@ -44,7 +44,7 @@ const settle = (): Promise<void> => new Promise((done) => setImmediate(done));
 function start(peer: Peer, onStartupStep?: (step: ServiceStartupStep) => void): Promise<ServiceClient> {
   childProcess.spawn.mockReturnValue(peer);
   return ServiceClient.start(resolve('node'), resolve('service.js'), resolve('data'),
-    { trustedOperationalScope: 'development-ci', runBudgetCeiling: null, providerCacheRoot: null },
+    { trustedOperationalScope: 'development-ci', runBudgetCeiling: null, providerCacheRoot: null, validation: null },
     undefined, undefined, undefined, undefined, undefined, undefined, undefined, onStartupStep);
 }
 
