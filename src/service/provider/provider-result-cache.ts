@@ -1,40 +1,21 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { appendFile, mkdir, open, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import type { DevelopmentValidationDelta } from '../../shared/protocol.js';
 
 /**
- * The Provider Test Ledger and the Provider Result Cache (ADR 0067, ADR 0089).
+ * Host-local development evidence under ADR 0067/0089. Exact responses, append-only ledger entries,
+ * invalidations and durable send claims share this existing owner outside every checkout. Credentials,
+ * headers and diagnostics never enter it. Ordinary business execution does not use it.
  *
- * Live Provider testing is expensive and, on a metered development account, effectively
- * irreversible: a request that has been paid for once should never be paid for twice. This owner
- * makes that a property of the code rather than of anyone's discipline. Every live call is a named
- * test item `<slice>/<purpose>/<n>`; the ledger is an append-only `ledger.jsonl` of those items, and
- * the cache holds one entry per exact request with the canonical request body beside the raw
- * response, its usage, and its timestamps.
- *
- * Since Issue #808 an entry is keyed by the request's whole namespace — route, endpoint, request
- * shape, model and the digest of the full canonical body — and each development validation call
- * records the purpose it belongs to (a family and a case that no Issue, Run or attempt number is part
- * of), its step, the digest of its request with every minted identity removed, and the evidence
- * generation it was captured under. `transmitOnce` decides by those records; this owner keeps them:
- * the entries, written whole or not at all; a durable pre-send claim per exact request, which a crash,
- * a torn file or a concurrent sender reads as possibly sent and billed rather than as a miss; the
- * append-only invalidations that actually stop a capture being reused; and, on every line, the usage
- * the captured response recorded apart from the usage this run incurred.
- *
- * Entries and lines written before #808 stay where they are and read as they always did: a legacy
- * entry is keyed by (model, request digest) alone, and a replay of it says so rather than pretending
- * its route and endpoint were recorded.
- *
- * Nothing here is a repository artifact. The root lives outside every checkout (the launch form
- * enforces that), and no cache entry, claim, ledger line, or response body is logged, uploaded,
- * projected, or committed. Credentials never reach this module at all: the adapter assembles the body
- * without the secret, and only the body is stored — never the headers that carried the bearer.
+ * Response keys bind route, endpoint, request shape, model and canonical request bytes. Capture hashes
+ * and the active prompt generation are checked before reuse. Legacy captures retain their unproved
+ * namespace and cannot be relabeled as current evidence. Normalized identities select evidence and
+ * durable claim chains only; they never select a response for another input.
  */
 export const PROVIDER_LEDGER_FILE = 'ledger.jsonl';
 export const PROVIDER_CACHE_DIRECTORY = 'entries';
-/** The durable pre-send claims, one file per exact request while it is in flight or its result is unknown. */
+/** Durable normalized-request attempt chains and exclusive item identity reservations. */
 export const PROVIDER_CLAIM_DIRECTORY = 'claims';
 /** The namespace version every #808 entry key is taken under; a legacy key never carries it. */
 export const PROVIDER_CACHE_NAMESPACE = 'ai7.provider-cache/2';
@@ -106,6 +87,8 @@ export interface ProviderLedgerLine {
   readonly purpose: string;
   readonly model: string;
   readonly promptContractDigest: string;
+  /** Enclosing task contract, distinct from a reduction/sampling/reflection call's actual prompt contract. */
+  readonly taskPromptContractDigest?: string;
   readonly requestDigest: string;
   /** `refused` (Issue #808): a development validation call that existing evidence or a hold answered, so nothing was sent. */
   readonly outcome: 'transmitted' | 'replayed' | 'failed' | 'refused';
@@ -137,10 +120,14 @@ export interface ProviderLedgerLine {
   readonly requestShape?: string;
   /** The namespaced entry key this call was answered or captured under. */
   readonly cacheKey?: string;
-  /** The digest of the request body with every minted identity removed (see {@link providerSemanticDigest}). */
+  /** Base key of the durable normalized-request attempt chain; distinct from the exact response key. */
+  readonly claimKey?: string;
+  /** The digest of the request body with recognized generated identity positions normalized (see {@link providerSemanticDigest}). */
   readonly semanticDigest?: string;
   /** The digest of the configuration the call ran under (see {@link providerEvidenceGeneration}). */
   readonly generation?: string;
+  /** Ledger length observed before claiming: later family invalidation also retires an in-flight capture. */
+  readonly evidencePosition?: number;
   readonly validation?: ProviderValidationRecord;
   /** What this run spent on the call: nothing for a replay, the recorded usage for a send, `null` when it cannot be known. */
   readonly incurredUsage?: ProviderUsageRecord | null;
@@ -221,9 +208,12 @@ export interface ProviderCacheEntry {
   readonly endpoint?: string;
   readonly requestShape?: string;
   readonly cacheKey?: string;
+  readonly claimKey?: string;
   readonly semanticDigest?: string;
   readonly generation?: string;
+  readonly evidencePosition?: number;
   readonly promptContractDigest?: string;
+  readonly taskPromptContractDigest?: string;
   readonly validation?: { readonly family: string; readonly case: string; readonly step: string };
   /** SHA-256 over the response as this entry keeps it (`JSON.stringify(response)`). */
   readonly responseDigest?: string;
@@ -240,22 +230,27 @@ export interface ProviderClaim {
   readonly schema: typeof PROVIDER_CLAIM_SCHEMA;
   readonly cacheKey: string;
   readonly itemId: string;
-  /** `claimed` while the request may be in flight; `outcome-unknown` once it was sent and its answer never came back whole. */
-  readonly state: 'claimed' | 'outcome-unknown';
+  /** An attempt stays recorded through settlement; only a terminal or provably stopped attempt may have a successor. */
+  readonly state: 'claimed' | 'outcome-unknown' | 'completed' | 'failed';
   readonly claimedAt: string;
   readonly family: string;
   readonly case: string;
   readonly step: string;
+  readonly processId?: number;
+  readonly generation?: string;
+  readonly evidencePosition?: number;
+  readonly semanticDigest?: string;
+  readonly retryRationales?: ReadonlyArray<string>;
 }
 
 /**
- * A claim as a reader finds it. Any claim on disk holds its request: a `claimed` one is in flight in some process or was left
- * by one that died after claiming — sent or not, nobody can tell — and an unreadable one may be either. Only `absent` is free.
+ * The newest attempt in a durable chain. Claimed/corrupt attempts fail closed; a terminal result retains
+ * what happened even if the response is later lost. storageKey identifies this exact attempt, not the response.
  */
 export type ProviderClaimRead =
-  | { readonly state: 'absent' }
-  | { readonly state: 'claimed' | 'outcome-unknown'; readonly claim: ProviderClaim }
-  | { readonly state: 'corrupt' };
+  | { readonly state: 'absent'; readonly storageKey: string }
+  | { readonly state: ProviderClaim['state']; readonly claim: ProviderClaim; readonly storageKey: string }
+  | { readonly state: 'corrupt'; readonly storageKey: string };
 
 export class ProviderResultCacheError extends Error {
   constructor(readonly code: string, message: string) {
@@ -287,24 +282,46 @@ export function legacyProviderCacheKey(model: string, requestDigest: string): st
   return createHash('sha256').update(JSON.stringify([model, requestDigest]), 'utf8').digest('hex');
 }
 
-const BLOCK_IDENTITY = /blk_[0-9a-f]{24}/gu;
-const MINTED_UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/giu;
-const DIGEST_RUN = /(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])/gu;
-
 /**
- * The digest of a request body with every minted identity removed: block identities, UUIDs (a Run Record's, a Session's), and
- * 64-hex digests, each replaced by a fixed marker. Two requests with the same semantic digest differ only in identities a
- * fresh import, a new Run or a renumbered attempt mints — the same question asked again — so one never justifies a new send
- * when the other is valid evidence. The text, the instructions and every count stay in, so any change to what is asked moves it.
+ * Normalize only generated positions in the admitted message contracts, preserving manuscript UUIDs/digests and identity
+ * relationships. This is a conservative evidence selector, never a response key or a general semantic equivalence test.
  */
 export function providerSemanticDigest(body: string): string {
-  return providerRequestDigest(body.replace(BLOCK_IDENTITY, 'blk_*').replace(MINTED_UUID, '<id>').replace(DIGEST_RUN, '<digest>'));
+  const identities = new Map<string, string>();
+  const identity = (value: string): string => {
+    if (!identities.has(value)) identities.set(value, `<identity-${identities.size}>`);
+    return identities.get(value)!;
+  };
+  const message = (text: string): string => {
+    const lines = text.split('\n');
+    if (!/^(?:分析单元 |保证抽样 |跨单元归纳 |运行反思 )/u.test(lines[0] ?? '')) return text;
+    lines[0] = lines[0]!.replace(/(?<= · (?:单元摘要|单元集摘要|抽样摘要|账目摘要) )[0-9a-f]{64}/gu, '<digest>')
+      .replace(/(?<=^运行反思 )[A-Za-z0-9_-]{1,64}(?= · )/u, '<run>');
+    return lines.map((line, index) => {
+      if (index === 0) return line;
+      if (/^单元 \d+：blk_[0-9a-f]{24}/u.test(line)) return line.replace(/blk_[0-9a-f]{24}/gu, identity);
+      return line.replace(/^(\[)(blk_[0-9a-f]{24})(\])/u, (_match, before: string, id: string, after: string) => `${before}${identity(id)}${after}`)
+        .replace(/^(- \[)([A-Za-z0-9_-]{1,64})(\]（)/u, (_match, before: string, id: string, after: string) => `${before}${identity(id)}${after}`);
+    }).join('\n');
+  };
+  try {
+    const canonical = (value: unknown, key = ''): unknown => {
+      if (typeof value === 'string') return key === 'content' ? message(value) : value;
+      if (Array.isArray(value)) return value.map((part) => canonical(part));
+      if (value !== null && typeof value === 'object') return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([name, part]) => [name, canonical(part, name)]));
+      return value;
+    };
+    return providerRequestDigest(JSON.stringify(canonical(JSON.parse(body))));
+  } catch {
+    return providerRequestDigest(body);
+  }
 }
 
 /** The configuration a capture answers for: route, endpoint, request shape, model and the frozen prompt contract. */
-export function providerEvidenceGeneration(namespace: ProviderRequestNamespace, promptContractDigest: string): string {
+export function providerEvidenceGeneration(namespace: ProviderRequestNamespace, promptContractDigest: string, taskPromptContractDigest?: string): string {
   return createHash('sha256').update(JSON.stringify([
     namespace.route, namespace.endpoint, namespace.requestShape, namespace.model, promptContractDigest,
+    ...(taskPromptContractDigest === undefined || taskPromptContractDigest === promptContractDigest ? [] : [taskPromptContractDigest]),
   ]), 'utf8').digest('hex');
 }
 
@@ -320,7 +337,7 @@ export function usageOfResponse(body: unknown): ProviderUsageRecord | null {
   if (usage === null || typeof usage !== 'object') return null;
   const prompt = (usage as { prompt_tokens?: unknown }).prompt_tokens;
   const completion = (usage as { completion_tokens?: unknown }).completion_tokens;
-  if (!Number.isSafeInteger(prompt) || !Number.isSafeInteger(completion)) return null;
+  if (!Number.isSafeInteger(prompt) || !Number.isSafeInteger(completion) || (prompt as number) < 0 || (completion as number) < 0) return null;
   return { inputTokens: prompt as number, outputTokens: completion as number };
 }
 
@@ -344,7 +361,7 @@ function isCode(error: unknown, code: string): boolean {
 /**
  * The per-request turn of every cache instance in this process. Two Runs of one service share no instance, yet a request both
  * miss must still be sent once: the second waits for the first to settle and then reads what it left. Across processes the
- * claim file does the same work.
+ * exclusive claim file excludes a competing process, which fails closed instead of waiting on a possibly dead sender.
  */
 const requestTurns = new Map<string, Promise<void>>();
 
@@ -366,6 +383,20 @@ function parseLedgerLine(line: string): ProviderLedgerEntry {
   requireCache(typeof (parsed as { itemId?: unknown }).itemId === 'string', 'PROVIDER_LEDGER_CORRUPT', 'Provider Test Ledger 记录缺少测试项标识。');
   requireCache(kind === undefined || kind === 'model-call' || kind === 'search-call' || kind === 'fetch',
     'PROVIDER_LEDGER_CORRUPT', 'Provider Test Ledger 记录的测试项类别无效。');
+  const item = parsed as Partial<ProviderLedgerLine>;
+  requireCache(ITEM_ID_PATTERN.test(item.itemId!) && typeof item.purpose === 'string' &&
+    typeof item.recordedAt === 'string' && Number.isFinite(Date.parse(item.recordedAt)) &&
+    (item.stale === undefined || typeof item.stale === 'boolean') &&
+    ['transmitted', 'replayed', 'failed', 'refused'].includes(item.outcome ?? ''),
+  'PROVIDER_LEDGER_CORRUPT', 'Provider Test Ledger 测试项字段无效。');
+  if (kind === undefined || kind === 'model-call') {
+    requireCache(typeof item.model === 'string' && DIGEST_PATTERN.test(item.requestDigest ?? '') &&
+      DIGEST_PATTERN.test(item.promptContractDigest ?? '') && (item.usage === null || validUsage(item.usage)) &&
+      (item.incurredUsage === undefined || item.incurredUsage === null || validUsage(item.incurredUsage)) &&
+      (item.status === null || Number.isSafeInteger(item.status)), 'PROVIDER_LEDGER_CORRUPT', 'Provider Test Ledger 模型记录无效。');
+    requireCache(item.evidencePosition === undefined || (Number.isSafeInteger(item.evidencePosition) && item.evidencePosition >= 0),
+      'PROVIDER_LEDGER_CORRUPT', 'Provider Test Ledger 证据位置无效。');
+  }
   return parsed as ProviderItemLine;
 }
 
@@ -387,7 +418,12 @@ function parseClaim(raw: string, cacheKey: string): ProviderClaim | null {
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
   const claim = parsed as Partial<ProviderClaim>;
   if (claim.schema !== PROVIDER_CLAIM_SCHEMA || claim.cacheKey !== cacheKey || typeof claim.itemId !== 'string' ||
-    (claim.state !== 'claimed' && claim.state !== 'outcome-unknown') || typeof claim.claimedAt !== 'string') return null;
+    !['claimed', 'outcome-unknown', 'completed', 'failed'].includes(claim.state ?? '') || typeof claim.claimedAt !== 'string') return null;
+  if (!ITEM_ID_PATTERN.test(claim.itemId) || !Number.isFinite(Date.parse(claim.claimedAt)) ||
+    typeof claim.family !== 'string' || typeof claim.case !== 'string' || typeof claim.step !== 'string' ||
+    !Number.isSafeInteger(claim.processId) || claim.processId! <= 0 || !DIGEST_PATTERN.test(claim.generation ?? '') ||
+    !DIGEST_PATTERN.test(claim.semanticDigest ?? '') || !Array.isArray(claim.retryRationales) ||
+    !claim.retryRationales.every((reason) => typeof reason === 'string' && reason.length > 0)) return null;
   return claim as ProviderClaim;
 }
 
@@ -430,7 +466,12 @@ export class ProviderResultCache {
     } catch (error) {
       if (!isCode(error, 'ENOENT')) throw error;
     }
-    this.#lines = raw.split('\n').filter((line) => line.trim().length > 0).map(parseLedgerLine);
+    this.#lines = raw.split('\n').filter((line) => line.trim().length > 0).map((text, index) => {
+      const line = parseLedgerLine(text);
+      requireCache(!isModelCallLine(line) || line.evidencePosition === undefined || line.evidencePosition <= index,
+        'PROVIDER_LEDGER_CORRUPT', 'Provider Test Ledger 证据顺序无效。');
+      return line;
+    });
   }
 
   /**
@@ -448,6 +489,26 @@ export class ProviderResultCache {
       return Number.isSafeInteger(ordinal) && ordinal > max ? ordinal : max;
     }, 0);
     return `${prefix}${highest + 1}`;
+  }
+
+  /** Exclusive identity reservation, also for concurrent different requests and replay/refusal records. */
+  async reserveItemId(purpose: string, slice: ProviderTestItemSlice = PROVIDER_TEST_ITEM_SLICE): Promise<string> {
+    let itemId = this.nextItemId(purpose, slice);
+    for (;;) {
+      try {
+        const handle = await open(join(this.#root, PROVIDER_CLAIM_DIRECTORY, `item-${providerRequestDigest(itemId)}.json`), 'wx');
+        try {
+          await handle.writeFile(JSON.stringify({ itemId }), 'utf8');
+          await handle.sync();
+        } finally { await handle.close(); }
+        return itemId;
+      } catch (error) {
+        if (!isCode(error, 'EEXIST')) throw error;
+        const ordinal = Number(itemId.slice(itemId.lastIndexOf('/') + 1)) + 1;
+        itemId = `${slice}/${purpose}/${ordinal}`;
+        requireCache(ITEM_ID_PATTERN.test(itemId), 'PROVIDER_TEST_ITEM_INVALID', '测试项标识已超出支持的表示范围。');
+      }
+    }
   }
 
   /**
@@ -490,7 +551,25 @@ export class ProviderResultCache {
 
   /** The entry of one exact namespaced request, as a reader finds it. */
   async readEntry(cacheKey: string): Promise<ProviderEntryRead> {
-    return readEntryFile(this.#entryPath(cacheKey));
+    return this.#readNamespacedEntry(this.#entryPath(cacheKey), cacheKey);
+  }
+
+  async #readNamespacedEntry(path: string, cacheKey: string): Promise<ProviderEntryRead> {
+    const read = await readEntryFile(path);
+    if (read.state !== 'present') return read;
+    const entry = read.entry;
+    if (entry.cacheKey !== cacheKey || typeof entry.route !== 'string' || typeof entry.endpoint !== 'string' ||
+      typeof entry.requestShape !== 'string' || typeof entry.itemId !== 'string' || !ITEM_ID_PATTERN.test(entry.itemId) ||
+      typeof entry.promptContractDigest !== 'string' || !DIGEST_PATTERN.test(entry.promptContractDigest) ||
+      entry.validation === undefined || typeof entry.validation.family !== 'string' || typeof entry.validation.case !== 'string' ||
+      typeof entry.validation.step !== 'string' || entry.responseDigest !== providerResponseDigest(entry.response) ||
+      entry.semanticDigest !== providerSemanticDigest(entry.requestBody) ||
+      (entry.claimKey !== undefined && entry.claimKey !== providerCacheKey({ ...entry, route: entry.route, endpoint: entry.endpoint, requestShape: entry.requestShape }, entry.semanticDigest)) ||
+      (entry.taskPromptContractDigest !== undefined && !DIGEST_PATTERN.test(entry.taskPromptContractDigest)) ||
+      (entry.evidencePosition !== undefined && (!Number.isSafeInteger(entry.evidencePosition) || entry.evidencePosition < 0)) ||
+      entry.generation !== providerEvidenceGeneration({ ...entry, route: entry.route, endpoint: entry.endpoint, requestShape: entry.requestShape }, entry.promptContractDigest, entry.taskPromptContractDigest) ||
+      providerCacheKey({ ...entry, route: entry.route, endpoint: entry.endpoint, requestShape: entry.requestShape }, entry.requestDigest) !== cacheKey) return { state: 'corrupt' };
+    return read;
   }
 
   /** The legacy entry of one (model, request digest) pair, as a reader finds it. */
@@ -520,15 +599,26 @@ export class ProviderResultCache {
 
   /** The claim of one exact request, as a reader finds it. */
   async readClaim(cacheKey: string): Promise<ProviderClaimRead> {
+    let storageKey = cacheKey;
+    let previous: ProviderClaimRead = { state: 'absent', storageKey };
+    for (;;) {
+      const current = await this.#readClaimAt(storageKey);
+      if (current.state === 'absent') return previous;
+      previous = current;
+      storageKey = providerRequestDigest(`successor:${storageKey}`);
+    }
+  }
+
+  async #readClaimAt(storageKey: string): Promise<ProviderClaimRead> {
     let raw: string;
     try {
-      raw = await readFile(this.#claimPath(cacheKey), 'utf8');
+      raw = await readFile(this.#claimPath(storageKey), 'utf8');
     } catch (error) {
-      if (isCode(error, 'ENOENT')) return { state: 'absent' };
+      if (isCode(error, 'ENOENT')) return { state: 'absent', storageKey };
       throw error;
     }
-    const claim = parseClaim(raw, cacheKey);
-    return claim === null ? { state: 'corrupt' } : { state: claim.state, claim };
+    const claim = parseClaim(raw, storageKey);
+    return claim === null ? { state: 'corrupt', storageKey } : { state: claim.state, claim, storageKey };
   }
 
   /**
@@ -558,22 +648,14 @@ export class ProviderResultCache {
     await writeWhole(this.#claimPath(claim.cacheKey), `${JSON.stringify({ schema: PROVIDER_CLAIM_SCHEMA, ...claim, state: 'outcome-unknown' })}\n`);
   }
 
-  /** Release a claim whose request settled for certain: answered and kept, or refused with a status. */
-  async release(cacheKey: string): Promise<void> {
-    try {
-      await unlink(this.#claimPath(cacheKey));
-    } catch (error) {
-      if (!isCode(error, 'ENOENT')) throw error;
-    }
+  /** Keep the terminal claim as evidence even if its cache entry or ledger is subsequently lost. */
+  async settle(claim: Omit<ProviderClaim, 'schema' | 'state'>, state: 'completed' | 'failed'): Promise<void> {
+    await writeWhole(this.#claimPath(claim.cacheKey), `${JSON.stringify({ schema: PROVIDER_CLAIM_SCHEMA, ...claim, state })}\n`);
   }
 
-  /**
-   * Move a held request's claim — and an unreadable entry, if that is what holds it — aside, keeping both, so a declared
-   * `retry-unknown` may claim it afresh. `false` when another sender moved it first, which then sends nothing here.
-   */
-  async setAsideHold(cacheKey: string, entryCorrupt: boolean): Promise<boolean> {
-    if (entryCorrupt) return this.#setAside(this.#entryPath(cacheKey));
-    return this.#setAside(this.#claimPath(cacheKey));
+  /** A successor has a fixed exclusive path. Concurrent retry/invalidation decisions can create only one. */
+  successorKey(previous: ProviderClaimRead): string {
+    return previous.state === 'absent' ? previous.storageKey : providerRequestDigest(`successor:${previous.storageKey}`);
   }
 
   /**
@@ -598,8 +680,7 @@ export class ProviderResultCache {
   /** Append one ledger line. The ledger records identities, counts, and timestamps — never content. */
   async record(line: ProviderItemLine): Promise<void> {
     requireCache(ITEM_ID_PATTERN.test(line.itemId), 'PROVIDER_TEST_ITEM_INVALID', '测试项标识不符合 <slice>/<purpose>/<n> 形式。');
-    this.#lines = [...this.#lines, line];
-    await appendFile(join(this.#root, PROVIDER_LEDGER_FILE), `${JSON.stringify(line)}\n`, 'utf8');
+    await this.#append(line);
   }
 
   /**
@@ -610,17 +691,24 @@ export class ProviderResultCache {
     requireCache(validInvalidationTarget(target) && /^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/u.test(reason) && reason.length <= 64,
       'PROVIDER_INVALIDATION_INVALID', '作废对象或原因无效。');
     const line: ProviderInvalidationLine = { kind: 'invalidation', target, reason, recordedAt: new Date().toISOString() };
+    await this.#append(line);
+  }
+
+  async #append(line: ProviderLedgerEntry): Promise<void> {
+    const handle = await open(join(this.#root, PROVIDER_LEDGER_FILE), 'a');
+    try {
+      await handle.writeFile(`${JSON.stringify(line)}\n`, 'utf8');
+      await handle.sync();
+    } finally { await handle.close(); }
     this.#lines = [...this.#lines, line];
-    await appendFile(join(this.#root, PROVIDER_LEDGER_FILE), `${JSON.stringify(line)}\n`, 'utf8');
   }
 
   /**
    * Whether the capture by `itemId` is retired: every line of that item stale — the rule that frees its id — an invalidation
-   * naming it, or an invalidation of its family and case appended after its capture line — or, for a capture whose line never
-   * reached the ledger, recorded at or after the capture's time. Order on the append-only ledger decides, never two clocks
-   * that may read the same instant.
+   * naming it, or a family/case invalidation at or after its pre-send evidencePosition. That position also covers an
+   * in-flight capture whose completion line lands later. Older captures fall back to their ledger order or timestamp.
    */
-  isRetired(itemId: string, scope: { readonly family: string; readonly case: string; readonly capturedAt: string } | null): boolean {
+  isRetired(itemId: string, scope: { readonly family: string; readonly case: string; readonly capturedAt: string; readonly evidencePosition?: number } | null): boolean {
     const own = this.#lines.filter(isItemLine).filter((line) => line.itemId === itemId);
     if (own.length > 0 && own.every((line) => line.stale === true)) return true;
     const captured = this.#lines.findIndex((line) => isItemLine(line) && line.itemId === itemId && line.outcome === 'transmitted');
@@ -628,20 +716,46 @@ export class ProviderResultCache {
       if (isItemLine(line)) return false;
       if ('itemId' in line.target) return line.target.itemId === itemId;
       return scope !== null && line.target.family === scope.family && line.target.case === scope.case &&
-        (captured === -1 ? line.recordedAt >= scope.capturedAt : index > captured);
+        (scope.evidencePosition !== undefined ? index >= scope.evidencePosition : captured === -1 ? line.recordedAt >= scope.capturedAt : index > captured);
     });
   }
 
   /**
    * The valid development evidence: every #808 model-call capture that was answered with a kept result and is not retired.
-   * Lines written before #808 carry no purpose, so they answer exact replays only and are never evidence of a purpose.
+   * Lines written before #808 carry no validation scope and cannot prove current namespaced evidence.
    */
-  validEvidence(): ProviderLedgerLine[] {
-    return this.#lines.filter(isModelCallLine).filter((line) =>
+  async validEvidence(): Promise<ProviderLedgerLine[]> {
+    const evidence = this.#lines.filter(isModelCallLine).filter((line) =>
       line.outcome === 'transmitted' && line.validation !== undefined && line.semanticDigest !== undefined &&
       line.generation !== undefined && !this.isRetired(line.itemId, {
         family: line.validation.family, case: line.validation.case, capturedAt: line.recordedAt,
+        ...(line.evidencePosition === undefined ? {} : { evidencePosition: line.evidencePosition }),
       }));
+    for (const line of evidence) {
+      requireCache(typeof line.cacheKey === 'string', 'PROVIDER_LEDGER_CORRUPT', '验证证据缺少缓存身份。');
+      let read = await this.readEntry(line.cacheKey);
+      // A different prompt generation may have superseded the exact key, but its capture stays immutable beside it.
+      if (read.state !== 'present' || read.entry.itemId !== line.itemId) {
+        const paths = (await readdir(join(this.#root, PROVIDER_CACHE_DIRECTORY)))
+          .filter((name) => name.startsWith(`${line.cacheKey}.superseded-`) && name.endsWith('.json'));
+        for (const path of paths) {
+          const archived = await this.#readNamespacedEntry(join(this.#root, PROVIDER_CACHE_DIRECTORY, path), line.cacheKey);
+          if (archived.state === 'present' && archived.entry.itemId === line.itemId) { read = archived; break; }
+        }
+      }
+      requireCache(read.state === 'present' && read.entry.itemId === line.itemId &&
+        read.entry.generation === line.generation && read.entry.semanticDigest === line.semanticDigest &&
+        sameUsage(read.entry.usage, line.usage) &&
+        read.entry.requestDigest === line.requestDigest && read.entry.model === line.model &&
+        read.entry.promptContractDigest === line.promptContractDigest && read.entry.route === line.route &&
+        read.entry.taskPromptContractDigest === line.taskPromptContractDigest &&
+        read.entry.evidencePosition === line.evidencePosition &&
+        read.entry.endpoint === line.endpoint && read.entry.requestShape === line.requestShape &&
+        read.entry.validation?.family === line.validation!.family && read.entry.validation.case === line.validation!.case &&
+        read.entry.validation.step === line.validation!.step,
+      'PROVIDER_VALIDATION_EVIDENCE_UNAVAILABLE', '已记录的验证证据缺失、损坏或身份不一致；请核查并作废，未将其当作新请求。');
+    }
+    return evidence;
   }
 
   /**
@@ -690,13 +804,27 @@ async function readEntryFile(path: string): Promise<ProviderEntryRead> {
   }
   try {
     const entry = JSON.parse(raw) as ProviderCacheEntry;
-    if (entry === null || typeof entry !== 'object' || typeof entry.requestBody !== 'string' || !Number.isSafeInteger(entry.status)) {
+    if (entry === null || typeof entry !== 'object' || typeof entry.requestBody !== 'string' || entry.status !== 200 ||
+      typeof entry.model !== 'string' || entry.requestDigest !== providerRequestDigest(entry.requestBody) ||
+      typeof entry.transmittedAt !== 'string' || !Number.isFinite(Date.parse(entry.transmittedAt)) ||
+      !Object.hasOwn(entry, 'response') || (entry.usage !== null && (!validUsage(entry.usage))) ||
+      !sameUsage(entry.usage, usageOfResponse(entry.response))) {
       return { state: 'corrupt' };
     }
     return { state: 'present', entry };
   } catch {
     return { state: 'corrupt' };
   }
+}
+
+function sameUsage(left: ProviderUsageRecord | null, right: ProviderUsageRecord | null): boolean {
+  return left === null || right === null ? left === right : left.inputTokens === right.inputTokens && left.outputTokens === right.outputTokens;
+}
+
+function validUsage(value: unknown): value is ProviderUsageRecord {
+  if (value === null || typeof value !== 'object') return false;
+  const usage = value as Partial<ProviderUsageRecord>;
+  return Number.isSafeInteger(usage.inputTokens) && usage.inputTokens! >= 0 && Number.isSafeInteger(usage.outputTokens) && usage.outputTokens! >= 0;
 }
 
 function tally(lines: ReadonlyArray<ProviderItemLine>): { transmitted: number; replayed: number; failed: number } {

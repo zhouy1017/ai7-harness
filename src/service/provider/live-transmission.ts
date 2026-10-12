@@ -14,6 +14,7 @@ import {
   usageOfResponse,
   type ProviderCacheEntry,
   type ProviderClaim,
+  type ProviderClaimRead,
   type ProviderLedgerLine,
   type ProviderRequestNamespace,
   type ProviderTestItemSlice,
@@ -41,6 +42,7 @@ export interface LiveModelCallItem {
   /** S40 unless named: the analysis path's slice, and every line its ledger already carries. */
   readonly slice?: ProviderTestItemSlice;
   readonly promptContractDigest: string;
+  readonly taskPromptContractDigest?: string;
 }
 
 /** The development validation one live model call belongs to (Issue #808): the launch's purpose, this call's step and shape. */
@@ -60,10 +62,10 @@ export interface LiveModelResponse {
   readonly replayed?: true;
 }
 
-type RequestIdentity = Pick<Required<ProviderLedgerLine>, 'route' | 'endpoint' | 'requestShape' | 'cacheKey' | 'semanticDigest' | 'generation'>;
+type RequestIdentity = Pick<Required<ProviderLedgerLine>, 'route' | 'endpoint' | 'requestShape' | 'cacheKey' | 'claimKey' | 'semanticDigest' | 'generation' | 'evidencePosition'>;
 type ClaimFacts = Omit<ProviderClaim, 'schema' | 'state'>;
 
-const CONFIGURATION_FIELDS = ['route', 'endpoint', 'requestShape', 'model', 'promptContractDigest'] as const;
+const CONFIGURATION_FIELDS = ['route', 'endpoint', 'requestShape', 'model', 'promptContractDigest', 'taskPromptContractDigest'] as const;
 
 function items(lines: ReadonlyArray<{ readonly itemId: string }>): string[] {
   return [...new Set(lines.map((line) => line.itemId))];
@@ -74,29 +76,12 @@ function itemList(lines: ReadonlyArray<{ readonly itemId: string }>): string {
 }
 
 /**
- * One development validation call, sent at most once and only when existing evidence cannot answer it (ADR 0067, ADR 0089,
- * Issue #808). The request is keyed by its whole namespace — route, endpoint, request shape, model and the digest of its full
- * canonical body, the same bytes the gate admitted and the only part of the request that ever reaches the cache, since the
- * headers carry the credential. Inside its request's turn, against the ledger as it stands:
- *
- * 1. An identical request whose capture is not retired replays from the cache and transmits nothing. Its line records the
- *    capture's original usage beside this call's incurred usage, which is none. An entry written before #808 replays the same
- *    way, its line saying its route and endpoint were never recorded.
- * 2. A request that differs from valid evidence only in minted identities — the same semantic digest under the same
- *    configuration, whatever family, case or delta it is filed under — is the same question asked again: it is refused and
- *    names that evidence. Renaming the purpose never makes it new.
- * 3. A request that is held — claimed and never settled (in flight elsewhere, or left by a process that died), sent with an
- *    unknown result, or kept in an entry that no longer reads — is possibly processed and billed. It is refused, unless the
- *    launch declares `retry-unknown`, which resends it once per rationale and records which item it resends.
- * 4. Valid evidence for the same purpose and step under the same configuration, with a different input, is similar evidence:
- *    the request is refused unless the launch declares an `input` delta, which the semantic digest has just verified.
- * 5. Evidence for the purpose and step under another configuration cannot answer this one: the call is sent and the line names
- *    what changed. With no evidence at all, the call is the first capture.
- *
- * A send claims the request durably before anything leaves the host, keeps a 200 whole under its key before releasing the
- * claim, and turns the claim into a lasting hold when the answer never comes back whole. A refusal sends nothing: its line
- * records why and which items it rests on, and the turn fails with that reason. Similarity only ever chooses which evidence
- * answers or refuses a request: a request is never answered with another request's response.
+ * Decide one development validation call against verified capture provenance and the current ledger.
+ * Exact requests replay only under their original namespace and active generation. Equivalent or
+ * similar validation selects prior evidence, never another input's response. A substantive declared
+ * delta permits new evidence; a possibly billed request instead needs a necessary retry reason and a
+ * stopped sender. Claims are never moved out from under an active process: each attempt exclusively
+ * creates the fixed successor of the attempt it observed. Original and incurred usage remain distinct.
  */
 export async function transmitOnce(
   cache: ProviderResultCache,
@@ -108,14 +93,17 @@ export async function transmitOnce(
   url: string,
   init: { method: 'POST'; headers: Record<string, string>; body: string; signal?: AbortSignal },
 ): Promise<LiveModelResponse> {
-  const { intent, step } = validation;
+  const { intent } = validation;
+  const step = validationStep(validation.step, init.body);
   const namespace: ProviderRequestNamespace = { route: profile.route, endpoint: url, requestShape: validation.requestShape, model };
   const requestDigest = providerRequestDigest(init.body);
   const cacheKey = providerCacheKey(namespace, requestDigest);
-  const generation = providerEvidenceGeneration(namespace, item.promptContractDigest);
-  const identity: RequestIdentity = {
-    route: namespace.route, endpoint: namespace.endpoint, requestShape: namespace.requestShape, cacheKey,
-    semanticDigest: providerSemanticDigest(init.body), generation,
+  const generation = providerEvidenceGeneration(namespace, item.promptContractDigest, item.taskPromptContractDigest);
+  const semanticDigest = providerSemanticDigest(init.body);
+  const claimKey = providerCacheKey(namespace, semanticDigest);
+  let identity: RequestIdentity = {
+    route: namespace.route, endpoint: namespace.endpoint, requestShape: namespace.requestShape, cacheKey, claimKey,
+    semanticDigest, generation, evidencePosition: 0,
   };
   const decided = (decision: ProviderValidationRecord['decision'], evidence: ReadonlyArray<string>, changed?: ReadonlyArray<string>): ProviderValidationRecord => ({
     family: intent.family, case: intent.case, step, delta: intent.delta, decision, evidence, ...(changed === undefined ? {} : { changed }),
@@ -124,30 +112,39 @@ export async function transmitOnce(
   // answered from one that was captured or replayed. The error carries the same reason to the turn.
   const refusal = async (code: string, message: string, evidence: ReadonlyArray<string>): Promise<ProviderResultCacheError> => {
     await cache.record({
-      itemId: cache.nextItemId(item.purpose, item.slice), purpose: item.purpose, model, promptContractDigest: item.promptContractDigest,
+      itemId: await cache.reserveItemId(item.purpose, item.slice), purpose: item.purpose, model, promptContractDigest: item.promptContractDigest,
+      ...(item.taskPromptContractDigest === undefined ? {} : { taskPromptContractDigest: item.taskPromptContractDigest }),
       requestDigest, outcome: 'refused', status: null, usage: null, incurredUsage: NO_INCURRED_USAGE, ...identity,
       validation: { ...decided('refused', evidence), refusal: code }, recordedAt: new Date().toISOString(),
     });
     return new ProviderResultCacheError(code, message);
   };
 
-  return cache.withRequestTurn(cacheKey, async () => {
+  return cache.withRequestTurn(claimKey, async () => {
     await cache.refresh();
+    identity = { ...identity, evidencePosition: cache.lines.length };
     // 1. The exact request.
     const exact = await cache.readEntry(cacheKey);
-    if (exact.state === 'present' && !retiredCapture(cache, exact.entry)) {
+    if (exact.state === 'corrupt') {
+      throw await refusal('PROVIDER_VALIDATION_OUTCOME_UNKNOWN', '缓存证据无法核实；未重新发送可能已经计费的请求。', []);
+    }
+    const evidence = await cache.validEvidence();
+    const claim = await cache.readClaim(claimKey);
+    if (exact.state === 'present' && exact.entry.generation === generation && !retiredCapture(cache, exact.entry)) {
+      const recorded = evidence.some((line) => line.itemId === exact.entry.itemId && line.cacheKey === cacheKey);
+      const claimed = 'claim' in claim && claim.claim.itemId === exact.entry.itemId && claim.claim.generation === generation &&
+        claim.claim.semanticDigest === identity.semanticDigest;
+      if (!recorded && !claimed) throw await refusal('PROVIDER_VALIDATION_EVIDENCE_UNAVAILABLE', '缓存没有可核实的原始记录或发送认领；未回放或重发。', []);
       return replay(cache, item, model, requestDigest, identity, exact.entry, decided('exact-replay', [exact.entry.itemId!]), null);
     }
-    let legacyCorrupt = false;
     if (exact.state === 'absent') {
       const legacy = await cache.readLegacyEntry(model, requestDigest);
-      legacyCorrupt = legacy.state === 'corrupt';
       const captured = legacyCaptures(cache, model, requestDigest);
-      if (legacy.state === 'present' && legacy.entry.requestBody === init.body && !captured.some((line) => cache.isRetired(line.itemId, null))) {
-        return replay(cache, item, model, requestDigest, identity, legacy.entry, decided('exact-replay', captured.map((line) => line.itemId)), 'legacy-unnamespaced');
+      if (legacy.state !== 'absent' && (captured.length === 0 || captured.some((line) => !cache.isRetired(line.itemId, null)))) {
+        throw await refusal('PROVIDER_VALIDATION_LEGACY_UNSCOPED',
+          '旧证据没有可核实的路由、端点和请求格式，不能当作当前配置的答案或新请求许可；请核查并明确作废后再验证。', items(captured));
       }
     }
-    const evidence = cache.validEvidence();
     // 2. The same question asked again under the same configuration.
     const repeated = evidence.filter((line) => line.generation === generation && line.semanticDigest === identity.semanticDigest);
     if (repeated.length > 0) {
@@ -155,29 +152,34 @@ export async function transmitOnce(
         `已有验证证据（${itemList(repeated)}）回答同一请求，只差系统生成的标识；未发送任何内容。请改用回放或由它生成的夹具。`, items(repeated));
     }
     // 3. A held request: possibly processed and billed.
-    const claim = await cache.readClaim(cacheKey);
     let record: ProviderValidationRecord;
-    if (claim.state !== 'absent' || exact.state === 'corrupt' || legacyCorrupt) {
-      const heldItem = claim.state === 'claimed' || claim.state === 'outcome-unknown' ? claim.claim.itemId : null;
+    const retiredClaim = 'claim' in claim && cache.isRetired(claim.claim.itemId, {
+      family: claim.claim.family, case: claim.claim.case, capturedAt: claim.claim.claimedAt,
+      ...(claim.claim.evidencePosition === undefined ? {} : { evidencePosition: claim.claim.evidencePosition }),
+    });
+    const held = claim.state !== 'absent' && claim.state !== 'failed' &&
+      !(claim.state === 'completed' && (retiredClaim || claim.claim.generation !== generation));
+    if (held) {
+      const heldItem = 'claim' in claim ? claim.claim.itemId : null;
       const held = [heldItem ?? 'unreadable'];
       const delta = intent.delta;
-      if (delta?.kind !== 'retry-unknown') {
+      if (delta?.kind !== 'retry-unknown' || !retryableClaim(claim)) {
         throw await refusal('PROVIDER_VALIDATION_OUTCOME_UNKNOWN',
-          `这个请求${heldItem === null ? '' : `（${heldItem}）`}已经发出或正在发送，结果未知，可能已被处理并计费；未再次发送。确需重发时，请声明 retry-unknown 及其理由。`, held);
+          `这个请求${heldItem === null ? '' : `（${heldItem}）`}可能已处理并计费，或者发送方尚未退出；未再次发送。仅已停止且结果未知的发送可声明必要重试。`, held);
       }
-      const spent = cache.lines.filter(isModelCallLine).some((line) => line.cacheKey === cacheKey &&
-        line.validation?.decision === 'retry-unknown' && line.validation.delta?.rationale === delta.rationale);
-      if (spent) throw await refusal('PROVIDER_VALIDATION_RETRY_SPENT', '这项 retry-unknown 理由已经重发过这个请求一次；未再次发送。', held);
-      // The hold is moved aside, kept, so this send can claim afresh; an unreadable legacy entry stays where it is, and the
-      // namespaced entry this send keeps answers before it from now on.
-      const movable = claim.state !== 'absent' || exact.state === 'corrupt';
-      if (movable && !(await cache.setAsideHold(cacheKey, claim.state === 'absent'))) {
-        throw await refusal('PROVIDER_VALIDATION_OUTCOME_UNKNOWN', '另一个发送方刚刚接手了这个结果未知的请求；未再次发送。', held);
+      // The retry statement binds this observed unknown attempt. Renaming a rationale cannot repeat the same decision.
+      const attempted = cache.lines.filter(isModelCallLine).some((line) => line.generation === generation &&
+        line.semanticDigest === identity.semanticDigest && line.validation?.decision === 'retry-unknown' &&
+        line.validation.delta?.rationale === delta.rationale);
+      if (attempted || ('claim' in claim && claim.claim.retryRationales?.includes(delta.rationale))) {
+        throw await refusal('PROVIDER_VALIDATION_RETRY_SPENT', '同一必要重试问题已有发送记录；请先核查其结果，不重复派发。', held);
       }
       record = decided('retry-unknown', held);
     } else {
       // 4 and 5. The purpose and step.
-      const slot = evidence.filter((line) => line.validation!.family === intent.family && line.validation!.case === intent.case && line.validation!.step === step);
+      // Case/family labels cannot grant another send. A new input class for an already covered stage needs a stated delta,
+      // even when a tester renames the case, task mode or retry turn. Distinct generated unit/stage positions remain distinct.
+      const slot = evidence.filter((line) => evidenceStep(line.validation!.step) === evidenceStep(step));
       const sameConfiguration = slot.filter((line) => line.generation === generation);
       if (sameConfiguration.length > 0) {
         if (intent.delta?.kind !== 'input') {
@@ -188,7 +190,9 @@ export async function transmitOnce(
         record = decided('input-delta', items(sameConfiguration));
       } else if (slot.length > 0) {
         // Measured against the nearest evidence: the capture that differs from this call in the fewest configuration fields.
-        const now: Record<(typeof CONFIGURATION_FIELDS)[number], string | undefined> = { ...namespace, promptContractDigest: item.promptContractDigest };
+        const now: Record<(typeof CONFIGURATION_FIELDS)[number], string | undefined> = {
+          ...namespace, promptContractDigest: item.promptContractDigest, taskPromptContractDigest: item.taskPromptContractDigest,
+        };
         const changed = slot.map((line) => CONFIGURATION_FIELDS.filter((field) => now[field] !== line[field]))
           .reduce((nearest, fields) => (fields.length < nearest.length ? fields : nearest));
         record = decided('config-delta', items(slot), changed);
@@ -196,14 +200,50 @@ export async function transmitOnce(
         record = decided('first-capture', []);
       }
     }
-    const itemId = cache.nextItemId(item.purpose, item.slice);
+    const itemId = await cache.reserveItemId(item.purpose, item.slice);
     cache.claimItem(itemId);
-    const claimFacts: ClaimFacts = { cacheKey, itemId, claimedAt: new Date().toISOString(), family: intent.family, case: intent.case, step };
+    const claimFacts: ClaimFacts = {
+      cacheKey: cache.successorKey(claim), itemId, claimedAt: new Date().toISOString(), family: intent.family, case: intent.case, step,
+      processId: process.pid, generation, semanticDigest: identity.semanticDigest,
+      evidencePosition: identity.evidencePosition,
+      retryRationales: [
+        ...('claim' in claim ? claim.claim.retryRationales ?? [] : []),
+        ...(record.decision === 'retry-unknown' ? [intent.delta!.rationale] : []),
+      ],
+    };
     if (!(await cache.claim(claimFacts))) {
       throw await refusal('PROVIDER_VALIDATION_OUTCOME_UNKNOWN', '另一个发送方已经认领了这个请求，结果未知；未再次发送。', []);
     }
     return send(cache, nativeFetch, item, profile, model, url, init, { itemId, requestDigest, identity, record, claimFacts });
   });
+}
+
+/** A live sender, an unreadable claim, or an unproved legacy sender is never displaced by a retry. */
+function retryableClaim(read: ProviderClaimRead): boolean {
+  if (read.state === 'outcome-unknown') return true;
+  if (read.state !== 'claimed' || !Number.isSafeInteger(read.claim.processId) || read.claim.processId! <= 0) return false;
+  try {
+    process.kill(read.claim.processId!, 0);
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH';
+  }
+}
+
+function evidenceStep(step: string): string {
+  return step.replace(/^[^/]+\/(?=(?:unit-\d+|reduction|sampling-\d+-unit-\d+|reflection)(?:\/|$))/u, '').replace(/\/turn-\d+$/u, '');
+}
+
+/** A retry counter is bookkeeping; a follow-up consuming actual tool results is another model-dependent stage. */
+function validationStep(step: string, body: string): string {
+  const base = step.replace(/\/(?:turn|tool-turn)-\d+$/u, '');
+  try {
+    const request: unknown = JSON.parse(body);
+    if (request === null || typeof request !== 'object' || !('messages' in request) || !Array.isArray(request.messages)) return base;
+    const tools = request.messages.filter((message: unknown) => message !== null && typeof message === 'object' &&
+      'role' in message && message.role === 'tool').length;
+    return tools === 0 ? base : `${base}/tool-turn-${tools}`;
+  } catch { return base; }
 }
 
 async function send(
@@ -219,6 +259,7 @@ async function send(
   const { itemId, requestDigest, identity, record, claimFacts } = facts;
   const line = (settled: Pick<ProviderLedgerLine, 'outcome' | 'status' | 'usage' | 'incurredUsage' | 'classification' | 'resetWindow'>): ProviderLedgerLine => ({
     itemId, purpose: item.purpose, model, promptContractDigest: item.promptContractDigest, requestDigest,
+    ...(item.taskPromptContractDigest === undefined ? {} : { taskPromptContractDigest: item.taskPromptContractDigest }),
     ...settled, ...identity, validation: record, recordedAt: new Date().toISOString(),
   });
   const transmittedAt = new Date().toISOString();
@@ -226,9 +267,9 @@ async function send(
   try {
     response = await nativeFetch(url, init);
   } catch (error) {
-    // A transport rejection settles as it always has: failed, no status, and the request free to be asked again later.
-    await cache.record(line({ outcome: 'failed', status: null, usage: null, incurredUsage: null }));
-    await cache.release(identity.cacheKey);
+    // Fetch rejection/abort does not prove that the server received or billed nothing.
+    await cache.holdUnknown(claimFacts);
+    await cache.record(line({ outcome: 'failed', status: null, usage: null, incurredUsage: null, classification: 'outcome-unknown' }));
     throw error;
   }
   let body: unknown = null;
@@ -245,15 +286,17 @@ async function send(
     body = null;
   }
   const usage = usageOfResponse(body);
-  // Only a result worth replaying is kept: a limit or a server error must be asked again later. The entry is kept before the
-  // claim is released; a crash between the two leaves both, and the entry answers. A 200 that cannot be kept leaves its claim
+  // Only a 200 is kept. Explicit refusals settle; uncertain timeout/server outcomes remain held. The entry is kept before the
+  // claim is settled; a crash between the two leaves both, and verified evidence answers. A 200 that cannot be kept leaves its claim
   // standing, so an answer that was paid for is never paid for again by accident.
-  let kept = response.status !== 200;
+  const uncertainStatus = response.status >= 500 || response.status === 408;
+  let kept = response.status !== 200 && !uncertainStatus;
   if (response.status === 200) {
     try {
       await cache.keep({
         model, requestDigest, requestBody: init.body, status: response.status, response: body, usage, transmittedAt,
         itemId, ...identity, promptContractDigest: item.promptContractDigest,
+        ...(item.taskPromptContractDigest === undefined ? {} : { taskPromptContractDigest: item.taskPromptContractDigest }),
         validation: { family: record.family, case: record.case, step: record.step },
         responseDigest: providerResponseDigest(body),
       });
@@ -262,6 +305,7 @@ async function send(
       kept = false;
     }
   }
+  if (!kept) await cache.holdUnknown(claimFacts);
   const accountLimit = isProviderAccountLimit(profile, response.status, body);
   const resetWindow = accountLimit ? providerResetWindow(body) : null;
   await cache.record(line({
@@ -270,9 +314,10 @@ async function send(
     usage,
     incurredUsage: usage,
     ...(accountLimit ? { classification: 'quota-exhausted' as const } : {}),
+    ...(uncertainStatus ? { classification: 'outcome-unknown' as const } : {}),
     ...(resetWindow === null ? {} : { resetWindow }),
   }));
-  if (kept) await cache.release(identity.cacheKey);
+  if (kept) await cache.settle(claimFacts, response.status === 200 ? 'completed' : 'failed');
   return { status: response.status, json: () => Promise.resolve(body) };
 }
 
@@ -287,10 +332,11 @@ async function replay(
   evidenceScope: 'legacy-unnamespaced' | null,
 ): Promise<LiveModelResponse> {
   await cache.record({
-    itemId: cache.nextItemId(item.purpose, item.slice),
+    itemId: await cache.reserveItemId(item.purpose, item.slice),
     purpose: item.purpose,
     model,
     promptContractDigest: item.promptContractDigest,
+    ...(item.taskPromptContractDigest === undefined ? {} : { taskPromptContractDigest: item.taskPromptContractDigest }),
     requestDigest,
     outcome: 'replayed',
     status: entry.status,
@@ -308,7 +354,10 @@ async function replay(
 /** Whether a namespaced entry's capture is retired, by its own item or by its purpose. */
 function retiredCapture(cache: ProviderResultCache, entry: ProviderCacheEntry): boolean {
   if (entry.itemId === undefined) return false;
-  return cache.isRetired(entry.itemId, entry.validation === undefined ? null : { ...entry.validation, capturedAt: entry.transmittedAt });
+  return cache.isRetired(entry.itemId, entry.validation === undefined ? null : {
+    ...entry.validation, capturedAt: entry.transmittedAt,
+    ...(entry.evidencePosition === undefined ? {} : { evidencePosition: entry.evidencePosition }),
+  });
 }
 
 /** The lines that transmitted a legacy entry — lines written before #808, which carry no namespaced key. */

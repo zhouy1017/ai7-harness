@@ -16,6 +16,7 @@ import {
   providerConsequence,
 } from '../../src/service/analysis/baseline-analysis-store.js';
 import { BASELINE_PROMPT_CONTRACT_DIGEST, unitRequestDigest } from '../../src/service/analysis/contract.js';
+import { RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/run-report-contract.js';
 import {
   ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST,
   assuranceSamplingRequestDigest,
@@ -438,11 +439,15 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
 
     // Every live call is a named test item, numbered by the ledger under the Task mode's purpose.
     const lines = await ledgerLines(cacheRoot);
+    expect(lines.map((line) => line.promptContractDigest)).toEqual([
+      ...Array.from({ length: SAMPLE1_UNITS }, () => BASELINE_PROMPT_CONTRACT_DIGEST),
+      BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST,
+    ]);
+    expect(lines.every((line) => line.taskPromptContractDigest === BASELINE_PROMPT_CONTRACT_DIGEST)).toBe(true);
     expect(lines.map((line) => line.itemId)).toEqual(
       Array.from({ length: FULL_CHAIN_TURNS }, (_unused, index) => `S40/first-baseline/${index + 1}`),
     );
     expect(new Set(lines.map((line) => line.outcome))).toEqual(new Set(['transmitted']));
-    expect(lines.every((line) => line.promptContractDigest === BASELINE_PROMPT_CONTRACT_DIGEST)).toBe(true);
     // The ledger records identities and counts, never content.
     for (const line of lines) {
       expect(JSON.stringify(line)).not.toContain('placeholder-development-key');
@@ -643,14 +648,12 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     expect(settled.resultSetRevision!.usage.inputTokens + settled.resultSetRevision!.usage.outputTokens).toBe(0);
 
     // The reduction and sampling turns are byte-identical to the first Run's and replay from the
-    // cache; the reflection turn's message carries this Run's own Run Record identity, which no
-    // fixture or previous request can pin, so exactly that one turn transmits again.
-    expect(secondCalls).toHaveLength(1);
-    expect(secondCalls[0]!.body).toContain('运行反思');
-    expect(secondCalls[0]!.body).toContain('账目摘要');
+    // cache. The reflection's different Run identity/accounting and task mode do not justify paying
+    // for the same validation stage again; it records a gap and points to the existing evidence.
+    expect(secondCalls).toHaveLength(0);
 
     const lines = await ledgerLines(cacheRoot);
-    expect(lines.filter((line) => line.outcome === 'transmitted')).toHaveLength(FULL_CHAIN_TURNS + 1);
+    expect(lines.filter((line) => line.outcome === 'transmitted')).toHaveLength(FULL_CHAIN_TURNS);
     expect(lines.filter((line) => line.outcome === 'replayed')).toHaveLength(FULL_CHAIN_TURNS - 1);
     for (const line of lines.filter((candidate) => candidate.outcome === 'replayed')) {
       expect(line.incurredUsage).toEqual({ inputTokens: 0, outputTokens: 0 });
@@ -661,8 +664,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     expect(lines.slice(FULL_CHAIN_TURNS).map((line) => line.itemId)).toEqual(
       Array.from({ length: FULL_CHAIN_TURNS }, (_unused, index) => `S40/reanalyze-book/${index + 1}`),
     );
-    // The reflection is the last line, its own transmission replayed from nothing.
-    expect(lines.at(-1)).toMatchObject({ outcome: 'transmitted', status: 200 });
+    expect(lines.at(-1)).toMatchObject({ outcome: 'refused', status: null, validation: { refusal: 'PROVIDER_VALIDATION_SIMILAR_EVIDENCE' } });
     await store.close();
   });
 
@@ -720,7 +722,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     expect(refusals.map((line) => [refusalOf(line).step, refusalOf(line).refusal, refusalOf(line).evidence])).toEqual([
       ...Array.from({ length: SAMPLE1_UNITS }, (_unused, index) => [
         [`first-baseline/unit-${index + 1}`, 'PROVIDER_VALIDATION_EVIDENCE_EXISTS', [`S40/first-baseline/${index + 1}`]],
-        [`first-baseline/unit-${index + 1}/turn-2`, 'PROVIDER_VALIDATION_EVIDENCE_EXISTS', [`S40/first-baseline/${index + 1}`]],
+        [`first-baseline/unit-${index + 1}`, 'PROVIDER_VALIDATION_EVIDENCE_EXISTS', [`S40/first-baseline/${index + 1}`]],
       ]).flat(),
       ['first-baseline/reflection', 'PROVIDER_VALIDATION_SIMILAR_EVIDENCE', [`S40/first-baseline/${FULL_CHAIN_TURNS}`]],
     ]);
@@ -1040,9 +1042,9 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     const lines = await ledgerLines(cacheRoot);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({ outcome: 'failed', status: 429, classification: 'quota-exhausted', resetWindow: '2026-09-08T00:00:00Z' });
-    // A limit response is never cached, and its claim is released: the same request must be asked again later.
+    // A limit response is never cached; its terminal claim permits another attempt after replenishment.
     expect(await new ProviderResultCache(cacheRoot).readEntry(String(lines[0]!.cacheKey))).toEqual({ state: 'absent' });
-    expect(await new ProviderResultCache(cacheRoot).readClaim(String(lines[0]!.cacheKey))).toEqual({ state: 'absent' });
+    expect(await new ProviderResultCache(cacheRoot).readClaim(String(lines[0]!.claimKey))).toMatchObject({ state: 'failed' });
     await store.close();
   });
 
@@ -1079,7 +1081,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     expect(unknown[0]).toMatchObject({ outcome: 'failed', status: 200, usage: null });
     // Nothing is cached, and the request stays held as possibly billed for every later reader (Issue #808).
     expect(await new ProviderResultCache(cacheRoot).readEntry(String(unknown[0]!.cacheKey))).toEqual({ state: 'absent' });
-    expect(await new ProviderResultCache(cacheRoot).readClaim(String(unknown[0]!.cacheKey))).toMatchObject({ state: 'outcome-unknown' });
+    expect(await new ProviderResultCache(cacheRoot).readClaim(String(unknown[0]!.claimKey))).toMatchObject({ state: 'outcome-unknown' });
 
     // 续行 is refused, and 取消任务 keeps what was read with unit 4 its own gap: nothing more is transmitted.
     expect(() => execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true })).toThrowError(/结果待确认/u);

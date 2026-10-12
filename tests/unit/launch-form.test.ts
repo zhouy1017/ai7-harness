@@ -48,6 +48,7 @@ describe('parseTrustedLaunchForm', () => {
     expect(parseTrustedLaunchForm({ trustedOperationalScope: 'developer-live', validationCase: VALIDATION_CASE, validationDelta: 'retry-unknown:gateway-dropped-answer' })!.validation!.delta)
       .toEqual({ kind: 'retry-unknown', rationale: 'gateway-dropped-answer' });
     expect(RUN_BUDGET_CEILING_PATTERN.test('500000')).toBe(true);
+    expect(parseValidationCase('run-report/unknown-retry')).toEqual({ family: 'run-report', case: 'unknown-retry' });
   });
 
   it('refuses a developer-live launch that names no validation, a purpose named by numbering, or a delta without substance (Issue #808)', () => {

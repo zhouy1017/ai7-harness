@@ -66,6 +66,7 @@ import {
 import { CARRIED_GAP_REASON, OUT_OF_SCOPE_GAP_REASON } from './reuse-plan.js';
 import { SERIES_SCOPE_STOP_SUMMARY } from '../series-exclusions.js';
 import {
+  RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST,
   buildRunReportReflectionMessage,
   parseRunReportReflectionResult,
   type RunReportReflectionParseFailureCode,
@@ -1037,14 +1038,11 @@ export class BaselineAnalysisExecutionOwner {
     // The Provider Test Ledger and Result Cache serve development validation only (ADR 0089, Issue #808). A live Run outside it
     // is business: every model step reaches the transport itself, and nothing reads or writes the developer cache or ledger.
     const validation = live?.launch.validation ?? null;
-    // How many model calls each validation step of this execution has made: a turn of a tool loop, or a second attempt, is
-    // filed as the step's own next turn rather than as the same turn asked differently.
-    const stepTurns = new Map<string, number>();
-    const validationStepOf = (): string => {
-      const step = `${testItemPurpose}/${active.validationStep}`;
-      const turn = (stepTurns.get(step) ?? 0) + 1;
-      stepTurns.set(step, turn);
-      return turn === 1 ? step : `${step}/turn-${turn}`;
+    const validationContractOf = (): string => {
+      if (active.validationStep === 'reflection') return RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST;
+      if (active.validationStep === 'reduction') return definition.crossUnit!.promptContractDigest;
+      if (active.validationStep.startsWith('sampling-')) return definition.assurance!.promptContractDigest;
+      return promptContractDigest;
     };
     let cache: ProviderResultCache | null = null;
     if (live !== null && validation !== null) {
@@ -1134,9 +1132,11 @@ export class BaselineAnalysisExecutionOwner {
           // declares limits are read rather than by knowing which route it is serving. Outside it, the call goes straight out.
           transport: validation === null
             ? (url, init) => live.nativeFetch(url, init)
-            : (url, init) => transmitOnce(cache!, live.nativeFetch, { purpose: testItemPurpose, promptContractDigest }, {
+            : (url, init) => transmitOnce(cache!, live.nativeFetch, {
+              purpose: testItemPurpose, promptContractDigest: validationContractOf(), taskPromptContractDigest: promptContractDigest,
+            }, {
               intent: validation,
-              step: validationStepOf(),
+              step: `${testItemPurpose}/${active.validationStep}`,
               requestShape: OPENCODE_GO_V4_FLASH_PROFILE.capabilities.requestShape,
             }, OPENCODE_GO_ROUTE_PROFILE, model, url, init),
         });

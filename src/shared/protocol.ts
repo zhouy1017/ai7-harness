@@ -1939,7 +1939,7 @@ const VALIDATION_SLUG = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
  * Words that are numbering rather than purpose: an Issue, a pull request, a plan slice (`s40`, `s87f3`), a Run, an attempt, a
  * test item, a retry, or a bare number. A family or case naming one would make the same question look new when it is renumbered.
  */
-const NUMBERING_WORD = /^(?:issue|pr|run|attempt|item|retry|s[0-9]+[a-z0-9]*|[0-9]+)$/u;
+const NUMBERING_WORD = /^(?:(?:issue|pr|run|attempt|item|retry)[0-9]+|s[0-9]+[a-z0-9]*|[0-9]+)$/u;
 
 function purposeSlug(value: string, minimumWords: number): boolean {
   if (value.length > 48 || !VALIDATION_SLUG.test(value)) return false;

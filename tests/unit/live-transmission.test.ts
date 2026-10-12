@@ -3,6 +3,8 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { spawn } from 'node:child_process';
+import { build } from 'esbuild';
 import { OPENCODE_GO_ROUTE_PROFILE } from '../../src/service/provider/deepseek-adapter.js';
 import { randomUUID } from 'node:crypto';
 import type { DevelopmentValidationIntent } from '../../src/shared/protocol.js';
@@ -110,6 +112,10 @@ const dropped = (calls: string[]): LiveModelFetch => async (_url, init) => {
   return { status: 200, json: async () => { throw new Error('socket hang up'); } };
 };
 
+function claimKey(body: string): string {
+  return providerCacheKey({ route: 'opencode-go', endpoint: ENDPOINT, requestShape: SHAPE, model: 'deepseek-v4-flash' }, providerSemanticDigest(body));
+}
+
 describe('transmitOnce under development validation', () => {
   it('replays an identical request under its full namespace and records the capture usage apart from what the replay incurred', async () => {
     const cache = await opened();
@@ -136,8 +142,8 @@ describe('transmitOnce under development validation', () => {
     expect(entry).toMatchObject({ state: 'present', entry: { itemId: 'S40/first-baseline/1', route: 'opencode-go', endpoint: ENDPOINT, requestShape: SHAPE } });
     expect(replayed!.capturedAt).toBe(entry.state === 'present' ? entry.entry.transmittedAt : null);
     expect(cache.usageTotals()).toEqual({ recorded: { inputTokens: 6, outputTokens: 4 }, incurred: { inputTokens: 3, outputTokens: 2 } });
-    // The claim was released once the answer was kept; nothing anywhere carries the credential header.
-    expect(await readdir(join(root, PROVIDER_CLAIM_DIRECTORY))).toEqual([]);
+    // The terminal claim survives cache loss; nothing anywhere carries the credential header.
+    expect(await cache.readClaim(claimKey(body))).toMatchObject({ state: 'completed' });
     expect((await rawLedger()).join('\n')).not.toContain('placeholder');
     expect(JSON.stringify(entry)).not.toContain('placeholder');
   });
@@ -259,20 +265,18 @@ describe('transmitOnce under development validation', () => {
     const calls: string[] = [];
     const body = unitBody(BLOCK_A, '雨落在旧城。');
     const namespace = { route: 'opencode-go', endpoint: ENDPOINT, requestShape: SHAPE, model: 'deepseek-v4-flash' };
-    const cacheKey = providerCacheKey(namespace, providerRequestDigest(body));
+    const cacheKey = providerCacheKey(namespace, providerSemanticDigest(body));
     // Another process claimed the request and died — or is still waiting on the answer. Nobody can tell which.
     expect(await (await opened()).claim({ cacheKey, itemId: 'S40/first-baseline/1', claimedAt: new Date().toISOString(), family: 'baseline-analysis', case: 'sample1-whole-book', step: 'first-baseline/unit-1' })).toBe(true);
     expect(await refusal(call(await opened(), modelFetch(calls), body))).toBe('PROVIDER_VALIDATION_OUTCOME_UNKNOWN');
     await writeFile(join(root, PROVIDER_CLAIM_DIRECTORY, `${cacheKey}.json`), '{"schema":"ai7.provider-cl', 'utf8');
     expect(await refusal(call(await opened(), modelFetch(calls), body))).toBe('PROVIDER_VALIDATION_OUTCOME_UNKNOWN');
     expect(calls).toHaveLength(0);
-    // A declared retry resends it once, names the hold it replaces, and keeps the unreadable claim aside.
+    // A rationale cannot displace an unreadable claim or prove the sender exited.
     const retry: DevelopmentValidationIntent = { ...SAMPLE_CASE, delta: { kind: 'retry-unknown', rationale: 'sender-died-mid-request' } };
     const resent = await opened();
-    await call(resent, modelFetch(calls), body, { intent: retry });
-    expect(calls).toHaveLength(1);
-    expect(modelLines(resent).at(-1)).toMatchObject({ outcome: 'transmitted', validation: { decision: 'retry-unknown', evidence: ['unreadable'] } });
-    expect((await readdir(join(root, PROVIDER_CLAIM_DIRECTORY))).filter((name) => name.includes('.superseded-'))).toHaveLength(1);
+    expect(await refusal(call(resent, modelFetch(calls), body, { intent: retry }))).toBe('PROVIDER_VALIDATION_OUTCOME_UNKNOWN');
+    expect(calls).toHaveLength(0);
   });
 
   it('keeps an answer that never came back whole as a lasting hold, resent once per declared rationale', async () => {
@@ -314,11 +318,11 @@ describe('transmitOnce under development validation', () => {
     expect(await refusal(call(await opened(), modelFetch(calls), body))).toBe('PROVIDER_VALIDATION_OUTCOME_UNKNOWN');
     const legacyBody = unitBody(BLOCK_B, '风吹过河岸。');
     await writeFile(join(root, PROVIDER_CACHE_DIRECTORY, `${legacyProviderCacheKey('deepseek-v4-flash', providerRequestDigest(legacyBody))}.json`), 'not json', 'utf8');
-    expect(await refusal(call(await opened(), modelFetch(calls), legacyBody, { step: 'first-baseline/unit-2' }))).toBe('PROVIDER_VALIDATION_OUTCOME_UNKNOWN');
+    expect(await refusal(call(await opened(), modelFetch(calls), legacyBody, { step: 'first-baseline/unit-2' }))).toBe('PROVIDER_VALIDATION_LEGACY_UNSCOPED');
     expect(calls).toHaveLength(1);
   });
 
-  it('replays an entry written before #808 under its own scope until its line is retired', async () => {
+  it('preserves legacy evidence without assigning it an unproved namespace, until explicitly retired', async () => {
     const body = unitBody(BLOCK_A, '雨落在旧城。');
     const requestDigest = providerRequestDigest(body);
     const legacyLine = { itemId: 'S40/first-baseline/1', purpose: 'first-baseline', model: 'deepseek-v4-flash', promptContractDigest: CONTRACT, requestDigest, outcome: 'transmitted', status: 200, usage: { inputTokens: 5, outputTokens: 1 }, recordedAt: '2026-09-06T00:00:00.000Z' };
@@ -326,11 +330,11 @@ describe('transmitOnce under development validation', () => {
     const cache = await opened();
     await cache.store({ model: 'deepseek-v4-flash', requestDigest, requestBody: body, status: 200, response: { choices: [] }, usage: { inputTokens: 5, outputTokens: 1 }, transmittedAt: '2026-09-06T00:00:00.000Z' });
     const calls: string[] = [];
-    expect((await call(cache, modelFetch(calls), body)).replayed).toBe(true);
-    expect(modelLines(cache).at(-1)).toMatchObject({
-      outcome: 'replayed', evidenceScope: 'legacy-unnamespaced', usage: { inputTokens: 5, outputTokens: 1 }, incurredUsage: { inputTokens: 0, outputTokens: 0 },
-      capturedAt: '2026-09-06T00:00:00.000Z', validation: { decision: 'exact-replay', evidence: ['S40/first-baseline/1'] },
-    });
+    for (const options of [{}, { url: `${ENDPOINT}?different-route=true` }, { shape: 'anthropic-messages' }]) {
+      expect(await refusal(call(cache, modelFetch(calls), body, options))).toBe('PROVIDER_VALIDATION_LEGACY_UNSCOPED');
+    }
+    expect(calls).toHaveLength(0);
+    expect(modelLines(cache)).toEqual([legacyLine]);
     // The legacy line is no purpose's evidence, and once stale its entry answers nothing.
     const ledgerText = await readFile(join(root, PROVIDER_LEDGER_FILE), 'utf8');
     await writeFile(join(root, PROVIDER_LEDGER_FILE), ledgerText.replace(JSON.stringify(legacyLine), JSON.stringify({ ...legacyLine, stale: true })), 'utf8');
@@ -346,11 +350,164 @@ describe('transmitOnce under development validation', () => {
       { intent: SAMPLE_CASE, step: 'dialogue/ask', requestShape: SHAPE }, OPENCODE_GO_ROUTE_PROFILE, 'deepseek-v4-flash', ENDPOINT,
       { method: 'POST', headers: {}, body: '{"q":1}' });
     expect(cache.lines).toMatchObject([{ itemId: 'S17c/dialogue/1', outcome: 'failed', status: 429, classification: 'quota-exhausted', incurredUsage: { inputTokens: 3, outputTokens: 2 } }]);
-    expect(await readdir(join(root, PROVIDER_CLAIM_DIRECTORY))).toEqual([]);
+    expect(await cache.readClaim(claimKey('{"q":1}'))).toMatchObject({ state: 'failed' });
     await transmitOnce(cache, modelFetch(calls), { purpose: 'dialogue', slice: 'S17c', promptContractDigest: CONTRACT },
       { intent: SAMPLE_CASE, step: 'dialogue/ask', requestShape: SHAPE }, OPENCODE_GO_ROUTE_PROFILE, 'deepseek-v4-flash', ENDPOINT,
       { method: 'POST', headers: {}, body: '{"q":1}' });
     expect(calls).toHaveLength(2);
+  });
+
+  it('retains an aborted or rejected fetch across restart and freshly minted input identities', async () => {
+    const body = unitBody(BLOCK_A, '雨落在旧城。');
+    const calls: string[] = [];
+    const aborted: LiveModelFetch = async (_url, init) => { calls.push(init.body); throw new Error('connection closed after send'); };
+    await expect(call(await opened(), aborted, body)).rejects.toThrow('connection closed');
+    const reopened = await opened();
+    expect(modelLines(reopened)[0]).toMatchObject({ classification: 'outcome-unknown', incurredUsage: null });
+    expect(await refusal(call(reopened, modelFetch(calls), unitBody(BLOCK_B, '雨落在旧城。', 'e'), {
+      intent: { ...SAMPLE_CASE, case: 'renamed-case' }, step: 'reanalyze-book/unit-1/turn-2',
+    }))).toBe('PROVIDER_VALIDATION_OUTCOME_UNKNOWN');
+    expect(calls).toHaveLength(1);
+  });
+
+  it('does not replay tampered or transplanted JSON entries and does not resend after complete cache loss', async () => {
+    const body = unitBody(BLOCK_A, '雨落在旧城。');
+    const cache = await opened();
+    const calls: string[] = [];
+    await call(cache, modelFetch(calls), body);
+    const key = modelLines(cache)[0]!.cacheKey!;
+    const path = join(root, PROVIDER_CACHE_DIRECTORY, `${key}.json`);
+    const raw = await readFile(path, 'utf8');
+    for (const changed of [
+      { response: { choices: [] } }, { route: 'another-route' }, { requestBody: '{}' }, { responseDigest: 'f'.repeat(64) },
+      { itemId: null }, { generation: 'f'.repeat(64) }, { usage: { inputTokens: -3, outputTokens: 2 } },
+    ]) {
+      await writeFile(path, JSON.stringify({ ...JSON.parse(raw), ...changed }), 'utf8');
+      expect(await refusal(call(await opened(), modelFetch(calls), body))).toBe('PROVIDER_VALIDATION_OUTCOME_UNKNOWN');
+    }
+    await rm(path);
+    await rm(join(root, PROVIDER_LEDGER_FILE));
+    expect(await refusal(call(await opened(), modelFetch(calls), body))).toBe('PROVIDER_VALIDATION_OUTCOME_UNKNOWN');
+    expect(calls).toHaveLength(1);
+  });
+
+  it('invalidates exact replay when the prompt generation changes even when the bytes are identical', async () => {
+    const cache = await opened();
+    const calls: string[] = [];
+    const body = unitBody(BLOCK_A, '雨落在旧城。');
+    await call(cache, modelFetch(calls), body);
+    expect((await call(cache, modelFetch(calls), body, { contract: 'b'.repeat(64) })).replayed).toBeUndefined();
+    expect(calls).toHaveLength(2);
+    expect(modelLines(cache).at(-1)).toMatchObject({ validation: { decision: 'config-delta', changed: ['promptContractDigest'] } });
+  });
+
+  it('does not turn renamed cases, modes or retry turns into a new validation purpose', async () => {
+    const cache = await opened();
+    const calls: string[] = [];
+    await call(cache, modelFetch(calls), unitBody(BLOCK_A, '雨落在旧城。'));
+    expect(await refusal(call(cache, modelFetch(calls), unitBody(BLOCK_B, '另一部稿件。'), {
+      intent: { family: 'renamed-family', case: 'renamed-case', delta: null }, step: 'reanalyze-book/unit-1/turn-2',
+    }))).toBe('PROVIDER_VALIDATION_SIMILAR_EVIDENCE');
+    expect(calls).toHaveLength(1);
+  });
+
+  it('keeps distinct concurrent captures under distinct immutable item identities', async () => {
+    const calls: string[] = [];
+    await Promise.all([
+      call(await opened(), modelFetch(calls), unitBody(BLOCK_A, '雨落在旧城。')),
+      call(await opened(), modelFetch(calls), unitBody(BLOCK_B, '风吹过河岸。'), { step: 'first-baseline/unit-2' }),
+    ]);
+    const lines = modelLines(await opened());
+    expect(calls).toHaveLength(2);
+    expect(new Set(lines.map((line) => line.itemId)).size).toBe(2);
+    for (const line of lines) expect(await (await opened()).readEntry(line.cacheKey!)).toMatchObject({ entry: { itemId: line.itemId } });
+  });
+
+  it('retires a capture invalidated while in flight even when its ledger line settles later', async () => {
+    const calls: string[] = [];
+    const body = unitBody(BLOCK_A, '雨落在旧城。');
+    let started!: () => void;
+    const sent = new Promise<void>((resolveSent) => { started = resolveSent; });
+    let finish!: () => void;
+    const waiting = new Promise<void>((resolveWait) => { finish = resolveWait; });
+    const pending = call(await opened(), async (url, init) => {
+      started(); await waiting; return modelFetch(calls)(url, init);
+    }, body);
+    await sent;
+    await (await opened()).invalidate({ family: SAMPLE_CASE.family, case: SAMPLE_CASE.case }, 'question-revised-during-capture');
+    finish(); await pending;
+    const next = await call(await opened(), modelFetch(calls), body);
+    expect(next.replayed).toBeUndefined();
+    expect(calls).toHaveLength(2);
+    expect((await call(await opened(), modelFetch(calls), body)).replayed).toBe(true);
+    expect(calls).toHaveLength(2);
+  });
+
+  it('atomically excludes real competing processes and never steals a live claim for retry', async () => {
+    const file = join(root, 'synthetic-claim-child.mjs');
+    // Bundle the actual owner, then coordinate children through IPC. No sockets, Provider or external input.
+    await build({ stdin: { contents: `
+      import { ProviderResultCache } from './src/service/provider/provider-result-cache.ts';
+      import { transmitOnce } from './src/service/provider/live-transmission.ts';
+      import { OPENCODE_GO_ROUTE_PROFILE } from './src/service/provider/deepseek-adapter.ts';
+      process.once('message', async ({ root, body, retry }) => {
+        const cache = new ProviderResultCache(root); await cache.open();
+        try {
+          await transmitOnce(cache, async () => {
+            process.send('sent'); await new Promise(resolve => process.once('message', resolve));
+            return { status: 200, json: async () => ({ usage: { prompt_tokens: 3, completion_tokens: 2 } }) };
+          }, { purpose: 'first-baseline', promptContractDigest: '${CONTRACT}' }, {
+            intent: { family: 'baseline-analysis', case: 'sample1-whole-book', delta: retry ? { kind: 'retry-unknown', rationale: 'gateway-dropped-the-answer' } : null },
+            step: 'first-baseline/unit-1', requestShape: '${SHAPE}'
+          }, OPENCODE_GO_ROUTE_PROFILE, 'deepseek-v4-flash', '${ENDPOINT}', { method: 'POST', headers: {}, body });
+          process.send('done');
+        } catch (error) { process.send(error.code ?? 'failed'); }
+        process.disconnect();
+      });`, resolveDir: process.cwd(), loader: 'ts' }, bundle: true, platform: 'node', format: 'esm', outfile: file, logLevel: 'silent' });
+    const children: ReturnType<typeof spawn>[] = [];
+    const launch = () => {
+      const child = spawn(process.execPath, [file], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+      children.push(child);
+      const messages: unknown[] = [];
+      const waiters: Array<(value: unknown) => void> = [];
+      child.on('message', (value) => { const next = waiters.shift(); if (next) next(value); else messages.push(value); });
+      const exited = new Promise<number | null>((resolveExit) => child.once('exit', resolveExit));
+      return { child, exited, next: () => messages.length ? Promise.resolve(messages.shift()) : new Promise((resolveMessage) => waiters.push(resolveMessage)) };
+    };
+    const body = unitBody(BLOCK_A, '雨落在旧城。');
+    try {
+      const first = launch();
+      first.child.send!({ root, body, retry: false });
+      expect(await first.next()).toBe('sent');
+      const second = launch();
+      second.child.send!({ root, body: unitBody(BLOCK_B, '雨落在旧城。', 'e'), retry: true });
+      expect(await second.next()).toBe('PROVIDER_VALIDATION_OUTCOME_UNKNOWN');
+      expect(await second.exited).toBe(0);
+      // Kill the actual claimant after the simulated send but before any ledger/response settlement.
+      first.child.kill();
+      await first.exited;
+      const automatic = launch();
+      automatic.child.send!({ root, body, retry: false });
+      expect(await automatic.next()).toBe('PROVIDER_VALIDATION_OUTCOME_UNKNOWN');
+      expect(await automatic.exited).toBe(0);
+      const deliberate = launch();
+      deliberate.child.send!({ root, body, retry: true });
+      expect(await deliberate.next()).toBe('sent');
+      const competingRetry = launch();
+      competingRetry.child.send!({ root, body, retry: true });
+      expect(await competingRetry.next()).toBe('PROVIDER_VALIDATION_OUTCOME_UNKNOWN');
+      expect(await competingRetry.exited).toBe(0);
+      deliberate.child.send!('finish');
+      expect(await deliberate.next()).toBe('done');
+      expect(await deliberate.exited).toBe(0);
+      const calls: string[] = [];
+      expect((await call(await opened(), modelFetch(calls), body)).replayed).toBe(true);
+      expect(calls).toHaveLength(0);
+    } finally {
+      await Promise.all(children.map((child) => child.exitCode !== null || child.signalCode !== null ? Promise.resolve() : new Promise<void>((resolveExit) => {
+        child.once('exit', () => resolveExit()); child.kill();
+      })));
+    }
   });
 });
 
@@ -363,6 +520,17 @@ describe('the semantic digest and the evidence generation', () => {
     const namespace = { route: 'opencode-go', endpoint: ENDPOINT, requestShape: SHAPE, model: 'deepseek-v4-flash' };
     expect(providerEvidenceGeneration(namespace, CONTRACT)).not.toBe(providerEvidenceGeneration({ ...namespace, model: 'deepseek-v4.1-flash' }, CONTRACT));
     expect(providerCacheKey(namespace, CONTRACT)).not.toBe(legacyProviderCacheKey('deepseek-v4-flash', CONTRACT));
+  });
+
+  it('preserves literal manuscript identities and block-reference relationships while ignoring JSON formatting', () => {
+    const literal = randomUUID();
+    const base = unitBody(BLOCK_A, `密码示例 ${literal}，摘要 ${'a'.repeat(64)}。`);
+    expect(providerSemanticDigest(base.replace(literal, randomUUID()))).not.toBe(providerSemanticDigest(base));
+    expect(providerSemanticDigest(base.replace(`摘要 ${'a'.repeat(64)}`, `摘要 ${'b'.repeat(64)}`))).not.toBe(providerSemanticDigest(base));
+    expect(providerSemanticDigest(JSON.stringify(JSON.parse(base), null, 2))).toBe(providerSemanticDigest(base));
+    const sameBlock = unitBody(BLOCK_A, `第一行\n[${BLOCK_A}] 第二行`);
+    const anotherBlock = unitBody(BLOCK_A, `第一行\n[${BLOCK_B}] 第二行`);
+    expect(providerSemanticDigest(sameBlock)).not.toBe(providerSemanticDigest(anotherBlock));
   });
 });
 
