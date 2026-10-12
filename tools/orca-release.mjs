@@ -5,6 +5,15 @@ const SHA = /^[a-f0-9]{40}$/u;
 const WAVE = /^codex\/integration-[a-z0-9][a-z0-9-]*$/u;
 const SLICE = /^codex\/[1-9][0-9]*-[a-z0-9-]+$/u;
 const LADDER = ['doctor', 'bootstrap', 'check', 'test', 'service', 'build', 'e2e:all'];
+// A Windows publisher may send CRLF. A trusted comment that starts with the marker in any other
+// shape is a malformed receipt, never ordinary prose: ignoring it could silently drop a revoke.
+const RECEIPT_MARK = 'AI7_ORCA_V1';
+const RECEIPT_HEADER = /^AI7_ORCA_V1\r?\n/u;
+
+/** Whether a comment claims to be a receipt, so its publisher must be authenticated. */
+export function receiptCandidate(body) {
+  return typeof body === 'string' && body.startsWith(RECEIPT_MARK);
+}
 
 export function candidateKind(record) {
   if (record.baseRefName === 'dev' && WAVE.test(record.headRefName ?? '')) return 'integration';
@@ -73,10 +82,12 @@ export function approvedPair(tier, worker, reviewer) {
 export function roleReceipts(comments) {
   const receipts = [];
   for (const comment of comments) {
-    if (comment.trusted !== true || !comment.body?.startsWith(RECEIPT_PREFIX)) continue;
+    if (comment.trusted !== true || !receiptCandidate(comment.body)) continue;
     if (!Number.isSafeInteger(comment.id) || comment.updated_at !== comment.created_at) throw new Error('edited-role-receipt');
+    const header = RECEIPT_HEADER.exec(comment.body);
+    if (header === null) throw new Error('malformed-role-receipt');
     let value;
-    try { value = JSON.parse(comment.body.slice(RECEIPT_PREFIX.length)); } catch { throw new Error('malformed-role-receipt'); }
+    try { value = JSON.parse(comment.body.slice(header[0].length)); } catch { throw new Error('malformed-role-receipt'); }
     if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('malformed-role-receipt');
     receipts.push({ ...value, id: comment.id, publisher: comment.user.login, at: comment.created_at });
   }
@@ -121,11 +132,13 @@ export function mergeAuthorization(candidate, receipts) {
   const release = events.filter((entry) => entry.kind === 'release').at(-1);
   if (!complete || !matches(complete, candidate) || !localTests(complete.tests, candidate)) return deny('missing-current-completion');
   if (kind === 'slice') {
+    // The handoff records the writer change and the base it happened on. A wave that moves on
+    // afterwards needs a fresh completion and release at the new base, not a second handoff.
     const handoff = events.filter((entry) => entry.kind === 'handoff').at(-1);
     if (!handoff || handoff.id >= complete.id || complete.handoff !== handoff.id ||
         handoff.from !== assignment.worker.dispatchId || handoff.to !== assignment.reviewer.dispatchId ||
         handoff.workerReleased !== true || handoff.reviewerAcknowledged !== true ||
-        !SHA.test(handoff.incomingHead ?? '') || handoff.base !== candidate.baseRefOid ||
+        !SHA.test(handoff.incomingHead ?? '') || !SHA.test(handoff.base ?? '') ||
         complete.dispatch !== assignment.reviewer.dispatchId || complete.writer !== assignment.reviewer.dispatchId) return deny('invalid-handoff');
   } else if (complete.coordinator !== assignment.commander.terminal || complete.writer !== assignment.commander.terminal ||
       !Array.isArray(complete.slices) || complete.slices.length === 0 ||
@@ -140,6 +153,10 @@ export function mergeAuthorization(candidate, receipts) {
   return { allowed: true, reason: 'released', assignment, complete, release };
 }
 
+// The trusted projection jobs publish authority; they are not test evidence and may legitimately
+// finish after the release they read.
+const PROJECTION_JOBS = new Set(['Publish E2E Functional Gate result', 'Refresh existing Gate authorization']);
+
 /** The actual hosted result, separate from role authority and from any receipt's claim. */
 export function hostedGatePassed({ run, jobs, pr, candidate, head, base, docs = false, currentRun, candidateRefHead }) {
   if (!SHA.test(run?.head_sha ?? '') || run.repository?.full_name === undefined) return false;
@@ -149,8 +166,7 @@ export function hostedGatePassed({ run, jobs, pr, candidate, head, base, docs = 
       jobs.some((job) => job.name === 'Route E2E' && job.status === 'completed' && job.conclusion === 'success') &&
       jobs.some((job) => job.name === 'J-08 + J-12 + J-15 + J-03 + J-04 (Windows Server 2025 x64 CI)' &&
         job.status === 'completed' && (job.conclusion === 'success' || (docs && job.conclusion === 'skipped'))) &&
-      jobs.every((job) => ['Publish E2E Functional Gate result', 'Refresh existing Gate authorization'].includes(job.name) ||
-        ['success', 'skipped'].includes(job.conclusion));
+      jobs.every((job) => PROJECTION_JOBS.has(job.name) || ['success', 'skipped'].includes(job.conclusion));
   }
   if (run.head_branch !== 'dev') return false;
   if (run.path === '.github/workflows/e2e-nightly.yml' && run.event === 'workflow_dispatch') {
@@ -170,7 +186,8 @@ export function hostedGatePassed({ run, jobs, pr, candidate, head, base, docs = 
 
 export function testsPrecedeRelease(jobs, releasedAt) {
   const at = Date.parse(releasedAt);
-  return Number.isFinite(at) && jobs.some((job) => job.conclusion === 'success') &&
-    jobs.every((job) => job.conclusion !== 'success' ||
+  const tests = jobs.filter((job) => !PROJECTION_JOBS.has(job.name));
+  return Number.isFinite(at) && tests.some((job) => job.conclusion === 'success') &&
+    tests.every((job) => job.conclusion !== 'success' ||
       (Number.isFinite(Date.parse(job.completed_at)) && Date.parse(job.completed_at) <= at));
 }

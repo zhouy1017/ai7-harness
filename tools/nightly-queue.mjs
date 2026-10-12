@@ -3,7 +3,7 @@ import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'n
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { candidateKind, queueTarget, documentationOnly, roleReceipts, mergeAuthorization, hostedGatePassed, testsPrecedeRelease } from './orca-release.mjs';
+import { candidateKind, queueTarget, documentationOnly, receiptCandidate, roleReceipts, mergeAuthorization, hostedGatePassed, testsPrecedeRelease } from './orca-release.mjs';
 
 // The nightly merge queue of ADR 0081: the scheduled orchestrator lists the candidates, builds the
 // tree each one would land, and merges the ones the full Gate passed. Every pull-request-touching
@@ -350,7 +350,7 @@ function receiptsFor(repo, pr) {
   const comments = pagedApi(repo, `issues/${pr}/comments?per_page=100`);
   const permissions = new Map();
   for (const comment of comments) {
-    if (!comment.body?.startsWith('AI7_ORCA_V1\n')) continue;
+    if (!receiptCandidate(comment.body)) continue;
     const login = comment.user?.login;
     if (!login || comment.user.type !== 'User') continue;
     if (!permissions.has(login)) {
@@ -410,12 +410,13 @@ function verifySliceClosures(repo, authorization, waveHead) {
     const completion = receipts.find((entry) => entry.id === slice.completion);
     const release = receipts.find((entry) => entry.id === slice.release);
     if (!completion || !release || release.completion !== completion.id) throw new Error('integration-slice-closure-missing');
-    const historical = mergeAuthorization({ ...record, repo, files: pullRequestFiles(repo, slice.pr, record), state: 'OPEN', isDraft: false,
-      headRefOid: completion.head, baseRefOid: completion.base }, receipts);
+    // Judge the slice exactly as it was released: its completed head/base and that diff.
+    const exact = { ...record, headRefOid: completion.head, baseRefOid: completion.base };
+    const historical = mergeAuthorization({ ...exact, repo, files: pullRequestFiles(repo, slice.pr, exact), state: 'OPEN', isDraft: false }, receipts);
     if (!historical.allowed || historical.complete.id !== slice.completion || historical.release.id !== slice.release) {
       throw new Error('integration-slice-closure-invalid');
     }
-    verifyHostedRelease(repo, { ...record, headRefOid: completion.head, baseRefOid: completion.base }, historical);
+    verifyHostedRelease(repo, exact, historical);
     if (run('git', ['merge-base', '--is-ancestor', slice.merge, waveHead]).status !== 0) throw new Error('integration-slice-not-in-candidate');
   }
 }
@@ -791,15 +792,13 @@ function mergeCommand(options) {
 
 // ---- Existing PR Gate projection, executed only by its trusted control jobs -----------------
 
-function gateCommand(options) {
+/** Whether the current candidate is tested and released, or `null` for a target outside the flow. */
+function gateDecision(options) {
   const { repo, pr, head, expectedDevTip } = options;
   const record = pullRequest(repo, pr);
-  if (!queueTarget(record.baseRefName)) {
-    process.stdout.write('E2E_GATE/unsupported-target\n');
-    return 0;
-  }
+  if (!queueTarget(record.baseRefName)) return null;
   const sameCandidate = record.headRefOid === head && record.baseRefOid === expectedDevTip &&
-    queueTarget(record.baseRefName) && record.headRepository?.nameWithOwner === repo;
+    record.headRepository?.nameWithOwner === repo;
   const authorization = sameCandidate ? authorizationFor(repo, record) : { allowed: false };
   let currentTree = false;
   if (sameCandidate) {
@@ -817,13 +816,31 @@ function gateCommand(options) {
     } catch { /* Never replace missing proof with a receipt's claim. */ }
   }
   const tested = (proven && ['success', 'reused'].includes(options['gate-result'])) || (docs && options['gate-result'] === 'skipped');
-  const allowed = sameCandidate && currentTree && authorization.allowed && tested;
+  return sameCandidate && currentTree && authorization.allowed && tested;
+}
+
+function gateCommand(options) {
+  const { repo, head } = options;
+  const first = gateDecision(options);
+  if (first === null) {
+    process.stdout.write('E2E_GATE/unsupported-target\n');
+    return 0;
+  }
+  publishGateStatus(repo, head, first);
+  // Results and refreshes run concurrently and a commit status is last-writer-wins. Decide again
+  // after publishing: a receipt, head or base change that a concurrent occurrence saw before this
+  // one published is then reflected here too, in either direction.
+  const settled = gateDecision(options) === true;
+  if (settled !== first) publishGateStatus(repo, head, settled);
+  if (!settled) throw new Error('gate-candidate-not-authorized');
+  process.stdout.write('E2E_GATE/current-candidate-released\n');
+  return 0;
+}
+
+function publishGateStatus(repo, head, allowed) {
   ghOrThrow(['api', '--method', 'POST', `repos/${repo}/statuses/${head}`,
     '-f', `state=${allowed ? 'success' : 'failure'}`, '-f', 'context=E2E Functional Gate',
     '-f', `target_url=${runUrl()}`, '-f', `description=${allowed ? 'Current candidate tested and expressly released' : 'Current candidate lacks tests or role release'}`]);
-  if (!allowed) throw new Error('gate-candidate-not-authorized');
-  process.stdout.write('E2E_GATE/current-candidate-released\n');
-  return 0;
 }
 
 function reuseGateCommand(options) {
@@ -863,7 +880,17 @@ function cleanupCommand(options) {
  * after both platforms passed, and one the queue refused to merge says why.
  */
 function reportCommand(options) {
-  const { repo, pr, reason, platform, log } = options;
+  const { repo, pr, platform, log } = options;
+  let { reason } = options;
+  let reservedPath = options['reserved-path'];
+  if (reason === 'unreleased') {
+    // ADR 0081 §4 still names the Owner-reserved record, whatever the role receipts say.
+    const reservation = ownerReservation(pullRequestFiles(repo, pr));
+    if (reservation !== null) {
+      reason = 'reserved';
+      reservedPath = reservation.path;
+    }
+  }
   const marker =
     reason === 'unreleased'
       ? 'this candidate has no current role release'
@@ -884,7 +911,7 @@ function reportCommand(options) {
       reason,
       dev: options.dev,
       devTip: options.devTip,
-      reservedPath: reservationPath(repo, pr, options['reserved-path']),
+      reservedPath: reservationPath(repo, pr, reservedPath),
     });
   }
   postComment(repo, pr, lines, { dryRun: options.dryRun, marker });
@@ -904,13 +931,17 @@ function reservationPath(repo, pr, explicit) {
 const USAGE = `usage: node tools/nightly-queue.mjs <command> [options]
 
   list      [--repo <owner/name>] [--output <github-output file>]
-  prepare   --pr <n> [--repo <…>] [--remote origin] [--dev dev] [--output <github-output file>]
-  merge     --pr <n> --head <sha> --expected-dev-tip <sha> --candidate <sha> --gate-run <id> [--dry-run]
-  cleanup   --ref <refs/heads/…> [--remote origin] [--dry-run]
-  report    --pr <n> [--platform <label> --log <file> | --reason conflict|moved|reserved
+  prepare   --pr <n> [--repo <…>] [--remote origin] [--dev <its target>] [--output <github-output file>]
+  merge     --pr <n> --head <sha> --expected-dev-tip <target sha> --candidate <prepared sha> --gate-run <id> [--dry-run]
+  cleanup   --ref <refs/heads/nightly/candidate-…> [--remote origin] [--dry-run]
+  report    --pr <n> [--platform <label> --log <file> | --reason conflict|moved|reserved|unreleased
             [--dev <branch> --dev-tip <sha> --reserved-path <path>]] [--dry-run]
+  gate-reuse|gate-status --pr <n> --head <sha> --expected-dev-tip <sha> [--gate-result <result>] [--output <file>]
+  gate-refresh --pr <n>
 
-  --dry-run prints what would be pushed and merged and touches no remote.`;
+  The gate-* commands run only in the PR Gate's trusted control jobs. --dev never retargets a pull
+  request; it only has to name its actual target. --dry-run prints what would be pushed and merged
+  and touches no remote.`;
 
 const VALUE_FLAGS = new Set([
   'repo',
@@ -967,6 +998,11 @@ export function main(argv) {
   if (command === 'gate-refresh') {
     if (options.pr === undefined) throw new Error('gate-refresh needs --pr');
     const record = pullRequest(options.repo, Number(options.pr));
+    // A comment on a merged or closed pull request has nothing left to authorize.
+    if (record.state !== 'OPEN') {
+      process.stdout.write('E2E_GATE/closed-candidate\n');
+      return 0;
+    }
     return gateCommand({ ...options, pr: record.number, head: record.headRefOid, expectedDevTip: record.baseRefOid,
       'gate-result': documentationOnly(pullRequestFiles(options.repo, record.number, record)) ? 'skipped' : 'reused' });
   }

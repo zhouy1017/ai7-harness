@@ -24,14 +24,21 @@ permissions:
   pull-requests: read
   actions: read
 
+# One Journey occurrence per pull request. A retarget (`edited` with a base change) is a new
+# candidate; a title/body edit or a comment refresh must neither rerun nor cancel the Journeys.
 concurrency:
-  group: e2e-pr-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event_name }}
+  group: e2e-pr-${{ github.event.pull_request.number || github.event.issue.number }}-${{ (github.event_name == 'issue_comment' && 'refresh') || (github.event.action == 'edited' && !github.event.changes.base && 'edit') || 'gate' }}
   cancel-in-progress: true
 
 jobs:
   route:
     name: Route E2E
-    if: ${{ github.event_name == 'pull_request_target' && !github.event.pull_request.draft }}
+    # pull_request_target runs with this repository's cache scope, so a fork's code never runs
+    # here; a fork candidate has no Orca assignment and its result job publishes a failure.
+    if: >-
+      ${{ github.event_name == 'pull_request_target' && !github.event.pull_request.draft &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (github.event.action != 'edited' || github.event.changes.base) }}
     runs-on: ubuntu-24.04
     outputs:
       run_gate: ${{ steps.route.outputs.run_gate }}
@@ -83,6 +90,9 @@ jobs:
     name: J-08 + J-12 + J-15 + J-03 + J-04 (Windows Server 2025 x64 CI)
     runs-on: windows-2025
     timeout-minutes: 15
+    # The only job that executes candidate code: no status, pull-request or Actions scope.
+    permissions:
+      contents: read
     env:
       AI7_CI_WINDOWS_SERVER_2025: '1'
       NPM_CONFIG_PREFIX: ''
@@ -136,7 +146,9 @@ jobs:
   result:
     name: Publish E2E Functional Gate result
     needs: [route, gate]
-    if: ${{ always() && github.event_name == 'pull_request_target' && !github.event.pull_request.draft }}
+    if: >-
+      ${{ always() && github.event_name == 'pull_request_target' && !github.event.pull_request.draft &&
+      (github.event.action != 'edited' || github.event.changes.base) }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -170,7 +182,10 @@ jobs:
 
   authorization:
     name: Refresh existing Gate authorization
-    if: ${{ github.event_name == 'issue_comment' && github.event.issue.pull_request }}
+    # Only a receipt publisher must be authenticated; an outside comment cannot queue refreshes.
+    if: >-
+      ${{ github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read

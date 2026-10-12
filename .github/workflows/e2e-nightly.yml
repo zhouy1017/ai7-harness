@@ -64,7 +64,10 @@ jobs:
           check-latest: false
 
       - name: Require an immutable manually selected candidate
-        if: ${{ github.event_name == 'workflow_dispatch' }}
+        # Inside a called workflow the `github` context is the caller's, so a manually dispatched
+        # queue calling this file for the moving final `dev` also reads `workflow_dispatch`. Only a
+        # direct dispatch of this file records a candidate in its run name.
+        if: ${{ github.event_name == 'workflow_dispatch' && contains(github.workflow_ref, '/.github/workflows/e2e-nightly.yml@') }}
         shell: bash
         env:
           SELECTED_REF: ${{ inputs.ref }}

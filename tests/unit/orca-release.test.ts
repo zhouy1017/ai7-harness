@@ -46,6 +46,13 @@ describe('actual subscription and effective launch pairings', () => {
     expect(release.approvedPair('T2', { ...reviewer, model: 'claude-sonnet-5-5', effort: 'high' }, worker)).toBe(true);
   });
 
+  it('rejects a Worker and Reviewer on the same subscription channel, whatever the models', () => {
+    expect(release.approvedPair('T3', { ...reviewer, taskId: 'task_other', dispatchId: 'ctx_other', terminal: 'term_other',
+      effort: 'high' }, reviewer)).toBe(false);
+    expect(release.approvedPair('T2', { ...worker, effort: 'medium' }, { ...worker, taskId: 'task_other', dispatchId: 'ctx_other',
+      terminal: 'term_other', model: 'gpt-6-astra', effort: 'xhigh' })).toBe(false);
+  });
+
   it('rejects two Go models on the same subscription and unsupported aliases', () => {
     const go = { ...worker, channel: 'OpenCode Go', client: 'OpenCode', model: 'opencode-go/deepseek-v4.1-flash', effort: 'low' };
     expect(release.approvedPair('T1', go, { ...reviewer, channel: 'OpenCode Go', client: 'OpenCode', model: 'opencode-go/glm-5.3-flash', effort: 'low' })).toBe(false);
@@ -71,6 +78,14 @@ describe('authenticated existing PR records', () => {
     expect(() => release.roleReceipts([{ ...comment, updated_at: '2026-10-13T00:00:00Z' }])).toThrow('edited-role-receipt');
     expect(() => release.roleReceipts([{ ...comment, body: release.RECEIPT_PREFIX + '{' }])).toThrow('malformed-role-receipt');
   });
+  it('reads a CRLF receipt and never silently drops a near-miss trusted one, such as a revoke', () => {
+    const revoke = JSON.stringify(event(2, 'revoke', { assignment: 1 }));
+    expect(release.roleReceipts([{ ...comment, body: `AI7_ORCA_V1\r\n${JSON.stringify(assignment)}` }])[0]?.kind).toBe('assignment');
+    for (const body of [`AI7_ORCA_V1 ${revoke}`, `AI7_ORCA_V1${revoke}`, `AI7_ORCA_V1\r${revoke}`]) {
+      expect(() => release.roleReceipts([{ ...comment, id: 2, body }])).toThrow('malformed-role-receipt');
+      expect(release.roleReceipts([{ ...comment, id: 2, body, trusted: false }])).toEqual([]);
+    }
+  });
 });
 
 describe('single-writer exact-candidate merge release', () => {
@@ -94,6 +109,14 @@ describe('single-writer exact-candidate merge release', () => {
     expect(release.mergeAuthorization(candidate, [assignment, { ...handoff, workerReleased: false }, complete, released]).allowed).toBe(false);
     expect(release.mergeAuthorization(candidate, [assignment, handoff, { ...complete, writer: 'ctx_worker' }, released]).allowed).toBe(false);
     expect(release.mergeAuthorization(candidate, [...receipts(), { ...handoff, id: 5 }]).allowed).toBe(false);
+  });
+  it('keeps the handoff when the wave moves, but needs completion and release at the new base', () => {
+    const moved = { ...candidate, baseRefOid: CORRECTED };
+    const atNewBase = [assignment, handoff, { ...complete, base: CORRECTED, tests: { ...tests, base: CORRECTED } },
+      { ...released, base: CORRECTED }];
+    expect(release.mergeAuthorization(moved, atNewBase).allowed).toBe(true);
+    expect(release.mergeAuthorization(moved, receipts()).allowed).toBe(false);
+    expect(release.mergeAuthorization(moved, [assignment, { ...handoff, base: 'stale' }, ...atNewBase.slice(2)]).allowed).toBe(false);
   });
   it('rejects failed, incomplete, stale or host-desktop tests', () => {
     for (const change of [{ conclusion: 'failure' }, { head: CORRECTED }, { base: CORRECTED }, { guest: 'host' }, { layers: ['build'] }]) {
@@ -185,5 +208,8 @@ describe('real hosted Gate results independent of role receipts', () => {
     expect(release.testsPrecedeRelease(passed, '2026-10-12T00:01:00Z')).toBe(false);
     expect(release.testsPrecedeRelease([{ conclusion: 'success' }], '2026-10-12T00:03:00Z')).toBe(false);
     expect(release.testsPrecedeRelease(passed, 'unknown')).toBe(false);
+    const projected = [...passed, { name: 'Publish E2E Functional Gate result', conclusion: 'success', completed_at: '2026-10-12T00:09:00Z' }];
+    expect(release.testsPrecedeRelease(projected, '2026-10-12T00:03:00Z')).toBe(true);
+    expect(release.testsPrecedeRelease([projected[1]!], '2026-10-12T00:10:00Z')).toBe(false);
   });
 });

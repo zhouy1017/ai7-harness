@@ -551,8 +551,40 @@ describe('the orchestrator grants every scope the workflows it calls ask for', (
     expect(refresh).toContain('ref: refs/heads/dev');
     expect(refresh).toContain('gate-refresh');
     expect(refresh).not.toContain('pnpm run e2e:');
+    expect(refresh).toContain('github.event.comment.author_association');
     const nightly = await readFile(new URL('e2e-nightly.yml', WORKFLOWS), 'utf8');
     expect(nightly).toContain('run-name: E2E Nightly Full Gate · ${{ inputs.ref || github.sha }}');
     expect(nightly).toContain('[[ "$SELECTED_REF" =~ ^[a-f0-9]{40}$ ]]');
+  });
+
+  it('never runs a fork candidate under pull_request_target and gives its Journey job no other scope', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const gate = await readFile(new URL('e2e.yml', WORKFLOWS), 'utf8');
+    const route = gate.split('\n  route:')[1]!.split('\n  gate:')[0]!;
+    const journey = gate.split('\n  gate:')[1]!.split('\n  result:')[0]!;
+    expect(route).toContain('github.event.pull_request.head.repo.full_name == github.repository');
+    expect(journey).toContain("needs.route.outputs.run_gate == 'true'");
+    expect(journey).toContain('permissions:\n      contents: read\n    env:');
+  });
+
+  it('lets neither a comment refresh nor a title/body edit rerun or cancel the Journeys', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const gate = await readFile(new URL('e2e.yml', WORKFLOWS), 'utf8');
+    const concurrency = gate.split('\nconcurrency:')[1]!.split('\njobs:')[0]!;
+    expect(concurrency).toContain("(github.event_name == 'issue_comment' && 'refresh')");
+    expect(concurrency).toContain("(github.event.action == 'edited' && !github.event.changes.base && 'edit')");
+    for (const job of ['route', 'result']) {
+      const body = gate.split(`\n  ${job}:`)[1]!.split(/\n {2}[a-z]+:\n/u)[0]!;
+      expect(body).toContain("(github.event.action != 'edited' || github.event.changes.base)");
+    }
+  });
+
+  it('holds only a direct manual dispatch, not a queue-called final dev Gate, to an immutable commit', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const nightly = await readFile(new URL('e2e-nightly.yml', WORKFLOWS), 'utf8');
+    const guard = nightly.split('- name: Require an immutable manually selected candidate')[1]!.split('\n      - name:')[0]!;
+    expect(guard).toContain("contains(github.workflow_ref, '/.github/workflows/e2e-nightly.yml@')");
+    const queueWorkflow = await readFile(new URL('e2e-nightly-queue.yml', WORKFLOWS), 'utf8');
+    expect(queueWorkflow).toContain('ref: ${{ github.ref }}');
   });
 });
