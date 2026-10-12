@@ -1785,7 +1785,7 @@ export class BaselineAnalysisStore {
   /**
    * The facts a 默认执行规则 binds, as the Book's durable state reads now (Issue #421): the re-derivation Reconnect
    * Preflight compares a waiting Run's plan with, for an update of the whole Book. No rule is ever used under
-   * developer-live (Provider Processing v9 to v7: `matchingActiveDefaultExecutionRuleAllowed: false`), so this is
+   * developer-live (Provider Processing v5 through v9: `matchingActiveDefaultExecutionRuleAllowed: false`), so this is
    * read only outside it, where the ceiling depends on no unit count.
    */
   currentRuleFacts(bookId: string, mode: AnalysisTaskMode): MaterialPlanInputsProjection {
@@ -4772,7 +4772,7 @@ export class BaselineAnalysisStore {
 
   /**
    * A plan may be frozen only under a verified launch policy that matches the bound launch: the
-   * provider-free `development-ci` v1 denial, or the `developer-live` v5 eligibility whose live
+   * provider-free `development-ci` v1 denial, or the `developer-live` v9 eligibility whose live
    * binding this store already holds. An unverified or mismatched policy freezes nothing.
    */
   #requireDeniedPolicy(policy: LaunchPolicyProjection): void {

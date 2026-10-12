@@ -52,6 +52,16 @@ describe('parseUnitResult (Baseline Manuscript Analysis Contract v1)', () => {
     expect(parsed.ok).toBe(true);
   });
 
+  it('rejects unanchored unresolved strings instead of accepting them as typed notes (#807)', () => {
+    const invalid = { ...validResult(), unresolved: ['合成未确定事项。'] };
+    expect(parseUnitResult(JSON.stringify(invalid), expected)).toEqual({
+      ok: false, code: 'schema-invalid', detail: '未解决事项不符合契约 v1。',
+    });
+    expect(parseUnitResult(JSON.stringify({ ...invalid,
+      unresolved: [{ description: '合成未确定事项。', sourceRanges: [] }],
+    }), expected).ok).toBe(true);
+  });
+
   it('rejects non-JSON, an extra or missing key, a wrong schema, and an unknown confidence', () => {
     expect(parseUnitResult('这不是 JSON', expected)).toEqual({ ok: false, code: 'not-json', detail: '模型输出不是 JSON。' });
     expect(parseUnitResult(JSON.stringify({ ...validResult(), extra: 1 }), expected)).toMatchObject({ ok: false, code: 'schema-invalid' });

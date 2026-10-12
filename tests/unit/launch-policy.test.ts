@@ -46,24 +46,24 @@ async function placeValidCheckout(): Promise<void> {
   for (const relativePath of CARRIED_PATHS) await placeBuiltFile(relativePath);
 }
 
-const V5_PATH = 'docs/policies/provider-processing-policy.v9.json';
+const V9_PATH = 'docs/policies/provider-processing-policy.v9.json';
 
 /**
- * The exact v5 document with the given rule fields overridden. The digests the resolver checks are
+ * The exact v9 document with the given rule fields overridden. The digests the resolver checks are
  * constants of `launch-policy.ts`, so a policy revision could never be fed through
  * `resolveSourceCheckoutLaunchPolicy`; the reading of the rule's exact fields is therefore pinned
  * against the verification function itself, over the real bytes with one field varied.
  */
-async function v5PolicyWithRule(overrides: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
-  const v5 = JSON.parse(await readFile(join(REPO_ROOT, ...V5_PATH.split('/')), 'utf8')) as Record<string, unknown>;
+async function v9PolicyWithRule(overrides: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
+  const v5 = JSON.parse(await readFile(join(REPO_ROOT, ...V9_PATH.split('/')), 'utf8')) as Record<string, unknown>;
   const rule = (v5.decision as { providerAllowRules: Array<Record<string, unknown>> }).providerAllowRules[0]!;
   Object.assign(rule, overrides);
   return v5;
 }
 
-/** The exact v5 document with the given `transmissions` keys overridden. */
-async function v5PolicyWithTransmissions(overrides: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
-  const v5 = JSON.parse(await readFile(join(REPO_ROOT, ...V5_PATH.split('/')), 'utf8')) as Record<string, unknown>;
+/** The exact v9 document with the given `transmissions` keys overridden. */
+async function v9PolicyWithTransmissions(overrides: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
+  const v5 = JSON.parse(await readFile(join(REPO_ROOT, ...V9_PATH.split('/')), 'utf8')) as Record<string, unknown>;
   const rule = (v5.decision as { providerAllowRules: Array<Record<string, unknown>> }).providerAllowRules[0]!;
   rule.transmissions = { ...(rule.transmissions as Record<string, unknown>), ...overrides };
   return v5;
@@ -143,6 +143,16 @@ describe('active policy set v7', () => {
 });
 
 describe('resolveSourceCheckoutLaunchPolicy', () => {
+  it('refuses widening the v9 task, origin, material or attendance matrix', async () => {
+    for (const override of [
+      { allowedTaskKinds: ['baseline-manuscript-analysis', 'factual-review'] },
+      { allowedOutboundDataCategories: ['public-or-synthetic', 'unpublished-excerpts'] },
+      { authorityOrigin: { newlyUserInitiatedTaskRequired: false } },
+      { executionMode: { humanAttended: true } },
+    ]) {
+      await expect(v9PolicyWithRule(override).then(verifyDeveloperLivePolicy)).rejects.toThrow('LAUNCH_POLICY_INVALID');
+    }
+  });
   it('verifies a complete source-checkout carrier and pins the development-ci scope by default', async () => {
     await placeValidCheckout();
     const projection = await resolveSourceCheckoutLaunchPolicy(codeRoot);
@@ -203,30 +213,30 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(denied.providerProcessing.runReportReflectionAllowed).toBe(false);
   });
 
-  it('refuses any v5 reading whose named fields are not the pinned bytes', async () => {
+  it('refuses any v9 reading whose named fields are not the pinned bytes', async () => {
     // The exact document names all three suboperations and refuses web search.
-    const asIs = JSON.parse(await readFile(join(REPO_ROOT, ...V5_PATH.split('/')), 'utf8')) as Record<string, unknown>;
+    const asIs = JSON.parse(await readFile(join(REPO_ROOT, ...V9_PATH.split('/')), 'utf8')) as Record<string, unknown>;
     expect(verifyDeveloperLivePolicy(asIs)).toEqual({
       crossUnitReductionAllowed: true, assuranceSamplingAllowed: true, runReportReflectionAllowed: true,
     });
 
     // Every one of the three, falsified or made unreadable, is a policy the launch cannot read: the
-    // reading is the exact v5 bytes, never a permissive default.
+    // reading is the exact v9 bytes, never a permissive default.
     for (const key of ['crossUnitReductionAllowed', 'assuranceSamplingAllowed', 'runReportReflectionAllowed'] as const) {
       for (const value of [false, undefined, 'true', 1, null, {}, []]) {
-        await expect(v5PolicyWithTransmissions({ [key]: value }).then(verifyDeveloperLivePolicy))
+        await expect(v9PolicyWithTransmissions({ [key]: value }).then(verifyDeveloperLivePolicy))
           .rejects.toThrow('LAUNCH_POLICY_INVALID');
       }
     }
     // The web-search allowance is `false` in v5 (ADR 0079 §4.2, §6); an enabled flag is unreadable.
-    await expect(v5PolicyWithTransmissions({ webSearchToolAllowed: true }).then(verifyDeveloperLivePolicy))
+    await expect(v9PolicyWithTransmissions({ webSearchToolAllowed: true }).then(verifyDeveloperLivePolicy))
       .rejects.toThrow('LAUNCH_POLICY_INVALID');
     // The house-people redaction rule is part of the pinned document too.
-    await expect(v5PolicyWithRule({ redaction: undefined }).then(verifyDeveloperLivePolicy)).rejects.toThrow('LAUNCH_POLICY_INVALID');
-    await expect(v5PolicyWithRule({ redaction: { housePeopleNamesAndRolesStripped: false, remarksAndInternalNotesStripped: true, authorInformationAllowed: true, houseNameAllowed: true } }).then(verifyDeveloperLivePolicy))
+    await expect(v9PolicyWithRule({ redaction: undefined }).then(verifyDeveloperLivePolicy)).rejects.toThrow('LAUNCH_POLICY_INVALID');
+    await expect(v9PolicyWithRule({ redaction: { housePeopleNamesAndRolesStripped: false, remarksAndInternalNotesStripped: true, authorInformationAllowed: true, houseNameAllowed: true } }).then(verifyDeveloperLivePolicy))
       .rejects.toThrow('LAUNCH_POLICY_INVALID');
     // And the per-frozen-unit default is the one ADR 0070 derives, not the replaced flat 500,000.
-    const flat = JSON.parse(await readFile(join(REPO_ROOT, ...V5_PATH.split('/')), 'utf8')) as Record<string, unknown>;
+    const flat = JSON.parse(await readFile(join(REPO_ROOT, ...V9_PATH.split('/')), 'utf8')) as Record<string, unknown>;
     const flatRule = (flat.decision as { providerAllowRules: Array<Record<string, unknown>> }).providerAllowRules[0]!;
     (flatRule.authorizationPreconditions as Record<string, unknown>)['defaultRunBudgetCeilingTokensPerFrozenUnit'] = 500_000;
     expect(() => verifyDeveloperLivePolicy(flat)).toThrow('LAUNCH_POLICY_INVALID');

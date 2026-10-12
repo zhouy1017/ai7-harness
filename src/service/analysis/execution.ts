@@ -135,7 +135,7 @@ export interface ExecutionOwnerDependencies {
   readonly launchPolicy: LaunchPolicyProjection;
   readonly fixture: ResolvedModelFixture | null;
   readonly secretResolver: SecretResolver;
-  /** The developer-live launch facts and captured transport; present exactly when the policy bound v5. */
+  /** The developer-live launch facts and captured transport; present exactly when the policy bound v9. */
   readonly developerLive?: DeveloperLiveRuntime | null;
   /** J-10's unit hold (Issue #422); absent in every other launch, where a unit settles as soon as its turn returns. */
   readonly unitHold?: UnitHold | null;

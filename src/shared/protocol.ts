@@ -3539,7 +3539,7 @@ export interface BaselineAnalysisProjection {
     capabilities: readonly [];
     remoteBinding: {
       providerId: RemoteProviderId;
-      modelId: 'deepseek-v4-pro' | 'deepseek-v4.1-flash';
+      modelId: 'deepseek-v4-pro' | 'deepseek-v4-flash' | 'deepseek-v4.1-flash';
       adapterRevision: 1;
       configurationRevision: 1;
       approvedFallbackChain: readonly [];
@@ -3551,7 +3551,7 @@ export interface BaselineAnalysisProjection {
     executionRoute:
       | { kind: 'ai7-local-deterministic'; model: 'ai7-deterministic-fixture'; fixtureIdentity: string; fixtureSha256: string; fixtureLineage: ReadonlyArray<{ identity: string; sha256: string }> }
       /** The developer-live route replays no fixture: its identity is the endpoint it transmits to. */
-      | { kind: 'opencode-go'; model: 'deepseek-v4.1-flash'; endpoint: string }
+      | { kind: 'opencode-go'; model: 'deepseek-v4-flash' | 'deepseek-v4.1-flash'; endpoint: string }
       | { kind: 'none'; reason: 'j04-model-adapter-control-absent' };
     outboundDataCategory: 'public-or-synthetic';
     runBudgetCeiling: RunBudgetCeilingState;

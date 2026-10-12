@@ -301,13 +301,16 @@ describe('provider route generalization', () => {
 });
 
 describe('model capability profiles', () => {
-  it('declares V4.1 from its exact vendor wire contract without borrowing historical V4 capabilities', () => {
+  it('binds V4.1 to its exact vendor request contract and its own observed response channels', () => {
     expect(OPENCODE_GO_V41_FLASH_PROFILE.model).toBe('deepseek-v4.1-flash');
     expect(OPENCODE_GO_V41_FLASH_PROFILE.capabilities).toMatchObject({
       requestShape: 'openai-chat-completions', answerChannel: 'message-content-string',
-      structuredOutput: 'none', reasoningChannel: 'none', usageAttribution: 'unknown', toolCalling: 'none',
+      structuredOutput: 'none', reasoningChannel: 'message-reasoning-content', usageAttribution: 'unknown', toolCalling: 'none',
     });
-    expect(OPENCODE_GO_V41_FLASH_PROFILE.evidence.answerChannel.kind).toBe('vendor-documentation');
+    expect(OPENCODE_GO_V41_FLASH_PROFILE.evidence.requestShape.kind).toBe('vendor-documentation');
+    expect(OPENCODE_GO_V41_FLASH_PROFILE.evidence.answerChannel).toMatchObject({ kind: 'live-test-item', observedOn: '2026-10-12' });
+    expect(OPENCODE_GO_V41_FLASH_PROFILE.evidence.reasoningChannel).toEqual(OPENCODE_GO_V41_FLASH_PROFILE.evidence.answerChannel);
+    expect(OPENCODE_GO_V41_FLASH_PROFILE.evidence.answerChannel).not.toEqual(OPENCODE_GO_V4_FLASH_PROFILE.evidence.answerChannel);
     expect(OPENCODE_GO_V4_FLASH_PROFILE.evidence.answerChannel.kind).toBe('live-test-item');
     const assembly = assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_V41_FLASH_PROFILE,
       { ...request(), provider: OPENCODE_GO_ROUTE, model: OPENCODE_GO_MODEL },

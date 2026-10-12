@@ -507,7 +507,7 @@ describe('task authorization over the real store on exact sample1', () => {
   // one store holds at most one prepared J-03 plan. Each scope is therefore observed in its own
   // store: the `development-ci` row above, read back after a reopen, and the `developer-live` row
   // here. Neither is ever validated against the scope the launch reading it happens to bind.
-  it('reads a stored plan against the pin that plan itself froze', async () => {
+  it.each([DEVELOPER_LIVE_PIN, { ...DEVELOPER_LIVE_PIN, version: 'v5' as const }])('reads a stored plan against its own immutable pin ($version)', async (pin) => {
     await requireExactSample1();
     let bookId: string;
 
@@ -523,21 +523,21 @@ describe('task authorization over the real store on exact sample1', () => {
 
     const database = new DatabaseSync(storeDatabasePath());
     try {
-      writePreparedPlan(database, bookId, DEVELOPER_LIVE_PIN);
+      writePreparedPlan(database, bookId, pin);
     } finally {
       database.close();
     }
 
-    // Opening validates every stored row, and this one is validated against its own v4 pin under a
+    // Opening validates every stored row, and this one is validated against its own historical or current pin under a
     // launch that binds `development-ci`: the guard still refuses to write such a plan, but the read
     // side keeps one valid, which is what a relaunch under another scope needs.
     const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       const live = reopened.inspectTaskAuthorization(bookId);
       expect(live.state).toBe('prepared');
-      expect(live.providerResolutionPlan?.providerProcessing).toEqual(DEVELOPER_LIVE_PIN);
-      expect(live.executionPlan?.stopCondition).toBe(planStopCondition(DEVELOPER_LIVE_PIN));
-      expect(live.planEnvelope?.summary).toBe(planEnvelopeSummary(DEVELOPER_LIVE_PIN));
+      expect(live.providerResolutionPlan?.providerProcessing).toEqual(pin);
+      expect(live.executionPlan?.stopCondition).toBe(planStopCondition(pin));
+      expect(live.planEnvelope?.summary).toBe(planEnvelopeSummary(pin));
       expect(live.executionPlan?.stopCondition).not.toContain('v1');
       expect(live.planEnvelope?.summary).not.toContain('v1');
       reopened.markCleanShutdown();

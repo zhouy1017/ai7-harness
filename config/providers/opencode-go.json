@@ -48,9 +48,28 @@
     },
     "v41-go-wire-contract": {
       "kind": "vendor-documentation",
-      "source": "OpenCode Go endpoint table https://github.com/anomalyco/opencode/blob/25053bbdc7df908bb066f7616b871d443085ae27/packages/web/src/content/docs/go.mdx; @ai-sdk/openai-compatible response contract https://github.com/vercel/ai/blob/2c6996ec621b677e902038b1b834d8ffaa0b307d/packages/openai-compatible/src/chat/openai-compatible-chat-language-model.ts",
+      "source": "OpenCode Go endpoint table https://github.com/anomalyco/opencode/blob/a34961825be13a31daa76f33a8b47efcd198cfef/packages/web/src/content/docs/go.mdx; @ai-sdk/openai-compatible response contract https://github.com/vercel/ai/blob/2c6996ec621b677e902038b1b834d8ffaa0b307d/packages/openai-compatible/src/chat/openai-compatible-chat-language-model.ts",
       "readOn": "2026-10-12",
-      "note": "The exact Go model/endpoint/SDK identity and the SDK choices[0].message.content response contract establish declared wire compatibility only. No V4.1 live capability is inferred from V4 evidence. JSON-object format, reasoning channel, usage attribution, tools and context remain unverified until named actual product evidence."
+      "note": "The pinned pre-move Go table and SDK choices[0].message.content contract establish declared wire compatibility only. On 2026-10-12 OpenCode moved its docs; current https://github.com/anomalyco/opencode/blob/bcf23b6775c79a429b1511b255d6d88ab0248d4a/services/www/src/docs/content/console/go.mdx publishes /inference/go instead. This binding retains explicitly selected /zen/go, whose named V4.1 product captures observe compatibility; no inference/go equivalence or validation is claimed. No V4.1 live capability is inferred from V4 evidence. JSON-object format, reasoning channel, usage attribution, tools and context remain unverified until named actual product evidence."
+    },
+    "v41-product-channels": {
+      "kind": "live-test-item",
+      "itemIds": [
+        "S40/first-baseline/9",
+        "S40/first-baseline/10",
+        "S40/first-baseline/11",
+        "S40/first-baseline/12",
+        "S40/first-baseline/13",
+        "S40/first-baseline/14",
+        "S40/first-baseline/15",
+        "S40/first-baseline/16",
+        "S40/first-baseline/17",
+        "S40/first-baseline/18",
+        "S40/first-baseline/19",
+        "S40/first-baseline/20"
+      ],
+      "observedOn": "2026-10-12",
+      "note": "Actual built AI7 baseline analysis under v9/v7 on exact Public sample1, code head 39c5ac4113d5b5c09e96e23585ddca8f7b4959c0 (#807). All 12 responses name deepseek-v4.1-flash and contain message.content and reasoning_content strings. Seven of eight unit contracts closed; unit 1 retained a schema-invalid gap. Cross-unit reduction, assurance sampling and reflection closed. This observes response channels only, not a format guarantee, usage attribution, tools, context or universal editorial quality. Protected captures and durable business result remain in the original external cache root."
     },
     "unverified": { "kind": "unverified" }
   },
@@ -96,14 +115,18 @@
             },
             "answerChannel": {
               "value": "message-content-string",
-              "evidence": "v41-go-wire-contract"
+              "evidence": "v41-product-channels"
+            },
+            "reasoningChannel": {
+              "value": "message-reasoning-content",
+              "evidence": "v41-product-channels"
             }
           },
           "context": {
             "tokens": null,
             "evidence": "unverified"
           },
-          "note": "The baseline-only developer-live product binding of Provider Processing v9. Declared vendor wire contract, not observed capability. Sends no unverified format, reasoning or tool parameters. Old V4 items establish none of this model's capabilities."
+          "note": "The baseline-only developer-live product binding of Provider Processing v9. Request shape is a declared vendor wire contract; answer and reasoning channels have their own named V4.1 product observations. Sends no unverified format, reasoning-control or tool parameters. Old V4 items establish none of this model's capabilities."
         },
         {
           "modelId": "deepseek-v4-pro",

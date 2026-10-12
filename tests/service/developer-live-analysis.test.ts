@@ -366,6 +366,27 @@ async function ledgerLines(root: string): Promise<Array<Record<string, unknown>>
 vi.setConfig({ hookTimeout: 60_000 });
 
 describe('the developer-live scope over exact sample1 with a stub transport', { timeout: 60_000 }, () => {
+  it('keeps a frozen old-model plan readable and refuses its execution after the V4.1 rebind', async () => {
+    const store = await openLiveStore(roots.dataRoot);
+    const legacyLaunch = liveBinding(CEILING);
+    // Simulate a predecessor launcher creating the retained plan; the current launch type deliberately excludes V4.
+    // @ts-expect-error historical launcher model, used only to construct provider-free compatibility input
+    legacyLaunch.live.model = 'deepseek-v4-flash';
+    store.baselineAnalysisLedger.bindLaunch(legacyLaunch);
+    const { bookId } = await importSample1Book(store, roots.codeRoot, 'historical-model plan');
+    await pinEditorialWorkspaceProfileRevision2(store, bookId);
+    recordMissingCredentialConnection(store, 'historical-model metadata');
+    let progress = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_TASK_GOAL, null, launchPolicy);
+    while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
+    const oldPlan = progress.projection!;
+    const authorized = store.authorizeBaselineAnalysis(bookId, oldPlan.taskIntent!.taskIntentId, oldPlan.planEnvelope!.digest);
+    store.baselineAnalysisLedger.bindLaunch(liveBinding(CEILING));
+    const retained = store.inspectBaselineAnalysis(bookId);
+    expect(retained.providerResolutionPlan!.remoteBinding.modelId).toBe('deepseek-v4-flash');
+    expect(retained.providerResolutionPlan!.executionRoute).toMatchObject({ model: 'deepseek-v4-flash' });
+    expect(refusalCode(() => store.baselineAnalysisLedger.loadExecutionPlan(authorized.dispatchRunRecordId!)))
+      .toBe('ANALYSIS_ROUTE_STALE');
+  });
   it('refuses undispatched analysis kinds and non-direct origins before a plan or authorization is recorded', async () => {
     const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
     const factual = store.factualReviewLedger;
@@ -816,7 +837,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     expect(gaps[0]!.code).toBe('contract-invalid');
     // What an editor actually reads: what came back, and whether re-running this unit is likely to help.
     expect(gaps[0]!.reason).toBe(
-      '模型没有给出答案：答案通道与推理通道都为空。重新分析本单元可能有帮助；如反复出现，请检查模型服务状态。',
+      '模型完成了推理，但没有给出答案：答案通道为空，推理通道有内容。这不是稿件或契约的问题；重新分析本单元通常会得到结果。',
     );
     // The mislabel this replaces: an empty answer is not a model that produced something unparseable.
     expect(gaps[0]!.reason).not.toContain('不是 JSON');
