@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { TASK_MATERIAL_LIVE_UNAVAILABLE, taskMaterialSources, type TaskMaterialBoundary, type TaskMaterialReading } from '../task-material-references.js';
+import { liveReviewRule, liveReviewUnavailableReason } from './live-review-admission.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   EDITORIAL_REVIEW_KIND_PREFIX,
@@ -992,6 +993,9 @@ export class ReviewRunStore {
     const planned = configuration.categories
       .filter((entry) => input.categoryIds.includes(entry.categoryId))
       .map((entry, position): PlannedCategory => {
+        if (this.#ledgers.baseline().launch.live !== null && entry.executor !== 'baseline-leads') {
+          requireReview(liveReviewRule(input.launchPolicy, entry) !== null, 'REVIEW_CATEGORY_UNAVAILABLE', `「${entry.label}」：${liveReviewUnavailableReason(entry)}`);
+        }
         const reading = this.#readCategory(bookId, head, entry, baseline, undefined);
         requireReview(reading.unavailableReason === null, 'REVIEW_CATEGORY_UNAVAILABLE', `「${entry.label}」：${reading.unavailableReason ?? ''}`);
         const plan = reviewCategoryScopePlan(entry.executor, entry.unavailableReason, scope, reading.facts);
@@ -2115,6 +2119,10 @@ export class ReviewRunStore {
       excludedCount = factual.excluded.filter((excluded) => recomputed.has(excluded.unitOrdinal)).length;
     } else {
       const review = revision as ReviewCategoryResultSetRevisionProjection;
+      // #809: the live non-web route has no external evidence. The label follows the recorded
+      // result into both its finding and its mark; model confidence cannot turn it into verification.
+      const unverified = revision.policyPin.operationalScope === 'developer-live';
+      const disclosure = unverified ? '【未联网核查】' : '';
       findings = review.findings.filter(read).map((finding) => ({
         kindRef: finding.findingId,
         severity: finding.severity,
@@ -2123,11 +2131,11 @@ export class ReviewRunStore {
         toGrapheme: finding.sourceRange.toGrapheme,
         pinnedText: pinned(finding.sourceRange.blockId, finding.sourceRange.fromGrapheme, finding.sourceRange.toGrapheme),
         quote: finding.quote,
-        note: finding.note,
+        note: `${disclosure}${finding.note}`,
         replacement: finding.replacement,
         clauseId: finding.clauseId,
-        stateLine: null,
-        body: category.entry.riskPointsOnly ? `${RISK_POINT_PREFIX}${finding.note}` : finding.note,
+        stateLine: unverified ? '未联网核查' : null,
+        body: `${disclosure}${category.entry.riskPointsOnly ? RISK_POINT_PREFIX : ''}${finding.note}`,
         basis: this.#clauseBasis(category.entry, finding.clauseId),
       }));
       excludedCount = review.excluded.filter((excluded) => recomputed.has(excluded.unitOrdinal)).length;

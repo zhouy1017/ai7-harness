@@ -15,6 +15,9 @@ import {
   BASELINE_PROMPT_CONTRACT_V1_DIGEST,
 } from '../../src/service/analysis/contract.js';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
+import { reviewCategoryContract, reviewCategoryContractDigest, buildReviewCategoryUnitMessage } from '../../src/service/review/review-category-contract.js';
+import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryContractInput } from '../../src/service/review/category-configuration.js';
+import type { CoverageManifestProjection } from '../../src/shared/protocol.js';
 
 // Source admission regression (#387): public sample1 plus an external temporary synthetic product
 // record. No protected cache, ledger, credential or actual business store is read by this test.
@@ -108,6 +111,40 @@ describe('exact sample1 fixture exemption source proof', () => {
     expect(() => tool.parseGenerationArguments([...args, '--sample1-task', request.sample1Task])).toThrowError(/FIXTURE_GEN\/arguments-invalid/);
     expect(await tool.verifySample1Capture({}, selection, parsed())).toBe(false);
     await expect(tool.verifySample1Capture({ ...request, sample1Store: resolve(root, 'synthetic.sqlite') }, selection, parsed())).rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved' });
+  });
+
+  it('proves review captures against the frozen category and refuses a changed category or material references (#809)', async () => {
+    const row = database.prepare("SELECT canonical_json FROM analysis_plan_records WHERE component='coverage-manifest'").get()!;
+    const manifest = JSON.parse(String(row.canonical_json)) as CoverageManifestProjection;
+    const blocks: ManifestBlockInput[] = [];
+    await parseDocx(resolve(root, 'SampleBooks/sample1.docx'), 'sample1.docx', (block) => blocks.push({ ...block, graphemes: block.graphemeLength }), { digest: sourceDigest, bytes: 29_550 });
+    const ids = manifest.units.flatMap((unit) => unit.blockIds);
+    const byId = new Map(blocks.map((block, index) => [ids[index]!, { ...block, blockId: ids[index]! }]));
+    const entry = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories[0]!;
+    const contract = reviewCategoryContract(reviewCategoryContractInput(entry));
+    const digest = reviewCategoryContractDigest(contract);
+    const envelope = { promptContractDigest: digest };
+    const json = canonicalJson(envelope);
+    database.prepare("UPDATE analysis_plan_records SET canonical_json=?,sha256=? WHERE component='plan-envelope'").run(json, sha256Hex(json));
+    const revision = canonicalJson({ coverageManifestDigest: manifest.digest, adapterPin: { model: selection.model, route: selection.captured.route }, bindingPin: { promptContractDigest: digest } });
+    database.prepare('UPDATE analysis_result_set_revisions SET canonical_json=?,sha256=?').run(revision, sha256Hex(revision));
+    database.exec('CREATE TABLE review_runs (canonical_json TEXT, sha256 TEXT)');
+    const category = { executor: entry.executor, entry, task: { taskIntentId: request.sample1Task, kind: `editorial-review/${entry.categoryId}`, planEnvelopeDigest: sha256Hex(json) } };
+    const snapshot = { categories: [category] };
+    const save = (value: unknown) => {
+      database.exec('DELETE FROM review_runs');
+      const encoded = canonicalJson(value);
+      database.prepare('INSERT INTO review_runs VALUES (?,?)').run(encoded, sha256Hex(encoded));
+    };
+    save(snapshot);
+    const reviewSelection = { ...selection, taskPromptContractDigest: digest };
+    const reviewMessage = buildReviewCategoryUnitMessage(contract, manifest.units[0]!, manifest.units.length, byId);
+    const candidate = tool.parseCachedRequest(JSON.stringify({ messages: [{ role: 'system', content: contract.systemPrompt }, { role: 'user', content: reviewMessage }] }), digest);
+    expect(await tool.verifySample1Capture(request, reviewSelection, candidate)).toBe(true);
+    save({ categories: [{ ...category, entry: { ...entry, label: '另一审阅类别' } }] });
+    await expect(tool.verifySample1Capture(request, reviewSelection, candidate)).rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved' });
+    save({ ...snapshot, materialReferences: { bookId: randomUUID(), references: [] } });
+    await expect(tool.verifySample1Capture(request, reviewSelection, candidate)).rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved' });
   });
 
   it('refuses carried foreign turns even when the final unit message matches sample1', async () => {
