@@ -9,13 +9,15 @@ import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/review-category-contract.js';
 import { reviewCategoryEntry, reviewCategoryContractInput } from '../../src/service/review/category-configuration.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
+import { LEADS_ABSENT_REASON } from '../../src/service/review/review-scope.js';
+import { SERIES_CONSISTENCY_NO_SERIES_REASON } from '../../src/service/review/series-consistency.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { normalizedQuotation, sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { ownBlockTextsOf, ownBlockIdsOf, unitContentDigest, substituteBlockPlaceholders } from '../../src/service/provider/local-deterministic-adapter.js';
 import { ProviderResultCache, isModelCallLine } from '../../src/service/provider/provider-result-cache.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
-import type { LaunchPolicyProjection, ReviewRunProjection } from '../../src/shared/protocol.js';
+import type { LaunchPolicyProjection, ReviewCategoryResultSetRevisionProjection, ReviewRunProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 
@@ -29,7 +31,7 @@ let owner: BaselineAnalysisExecutionOwner;
 let driver: ReviewRunDriver;
 let sent: number;
 let failure: 'none' | 'unknown' | 'quota';
-let holdTurn: boolean;
+let holdTurn: number | null;
 let arrived: Promise<void>;
 let announce: () => void;
 let release: () => void;
@@ -54,15 +56,15 @@ beforeEach(async () => {
   store.baselineAnalysisLedger.bindLaunch(launch);
   sent = 0;
   failure = 'none';
-  holdTurn = false;
+  holdTurn = null;
   recorded = new Map();
   arrived = new Promise<void>((resolve) => { announce = resolve; });
   const held = new Promise<void>((resolve) => { release = resolve; });
   const nativeFetch: typeof fetch = async (_url, init) => {
     sent += 1;
-    if (sent === 1) {
+    if (sent === (holdTurn ?? 1)) {
       announce();
-      if (holdTurn) await held;
+      if (holdTurn !== null) await held;
       if (init?.signal?.aborted) throw new DOMException('Synthetic aborted transport', 'AbortError');
     }
     if (sent === 1 && failure === 'unknown') return new Response('{', { status: 200 });
@@ -149,6 +151,15 @@ describe('reference-free review on the Go execution path', () => {
     expect(settled.categories.map((category) => category.state)).toEqual(['settled', 'settled', 'settled']);
     const findings = settled.findings;
     expect(findings.length).toBeGreaterThanOrEqual(source === 'recorded' ? 1 : 3);
+    if (source === 'recorded') {
+      // The evidence item's persisted outcome replays exactly: 11 typos and 8 style findings grounded. The others
+      // name a block that does not hold their quotation and stay excluded, never relocated to a neighbouring block.
+      const counts = (id: string) => (store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry(id)!)))
+        .resultSetRevision as ReviewCategoryResultSetRevisionProjection).findingCounts;
+      expect(counts('typos-and-usage')).toMatchObject({ listed: 27, located: 11, excluded: 16 });
+      expect(counts('style-and-format')).toMatchObject({ listed: 9, located: 8, excluded: 1 });
+      expect(['typos-and-usage', 'style-and-format'].map((id) => findings.filter((candidate) => candidate.categoryId === id).length)).toEqual([11, 8]);
+    }
     for (const finding of findings) {
       const block = original.find((candidate) => candidate.blockId === finding.blockId)!;
       expect(normalizedQuotation(sliceGraphemes(block.text, finding.fromGrapheme, finding.toGrapheme)) === normalizedQuotation(finding.quote)).toBe(true);
@@ -176,6 +187,24 @@ describe('reference-free review on the Go execution path', () => {
     for (const category of ['factual-review', 'academic-integrity', 'publication-risk']) {
       expect(() => store.createReviewRunPreparationWork(book.bookId, [category], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy)).toThrowError(/涉及联网核查/u);
     }
+    expect(sent).toBe(0);
+  });
+
+  it('offers exactly the admitted model categories while every other category keeps its own reason', async () => {
+    const book = await importSample1Book(store, roots.codeRoot, 'L2 sample1 review matrix');
+    await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
+    recordMissingCredentialConnection(store, 'L2 主编辑角色连接');
+    const categories = store.inspectReviewWorkspace(book.bookId, null).categories;
+    expect(categories.filter((category) => category.available).map((category) => category.categoryId)).toEqual(['typos-and-usage', 'style-and-format', 'literary-expression']);
+    const reason = (id: string) => categories.find((category) => category.categoryId === id)!.unavailableReason;
+    for (const id of ['factual-review', 'academic-integrity', 'publication-risk']) expect(reason(id)).toMatch(/涉及联网核查/u);
+    // The model-free leads stay on their baseline path (here: no baseline yet), never behind the live rule;
+    // 书系一致性 and 跨交付物一致性 keep their own configured reasons.
+    expect(reason('plot-consistency')).toBe(LEADS_ABSENT_REASON);
+    expect(reason('series-consistency')).toBe(SERIES_CONSISTENCY_NO_SERIES_REASON);
+    expect(reason('cross-deliverable-consistency')).toBe(reviewCategoryEntry('cross-deliverable-consistency')!.unavailableReason);
+    expect(() => store.createReviewRunPreparationWork(book.bookId, ['cross-deliverable-consistency'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy))
+      .toThrowError(/跨交付物一致性/u);
     expect(sent).toBe(0);
   });
 
@@ -207,8 +236,8 @@ describe('reference-free review on the Go execution path', () => {
     expect(sent).toBe(before);
   });
 
-  it.each(['cancel', 'interrupt'] as const)('carries %s and the spent turn through the existing category execution controls', async (mode) => {
-    holdTurn = true;
+  it.each([['cancel', 1], ['cancel', 2], ['interrupt', 1]] as const)('carries %s at turn %i and the spent turn through the existing category execution controls', async (mode, turn) => {
+    holdTurn = turn;
     const book = await importSample1Book(store, roots.codeRoot, 'L2 sample1 stopped review');
     await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
     recordMissingCredentialConnection(store, 'L2 主编辑角色连接');
@@ -232,8 +261,16 @@ describe('reference-free review on the Go execution path', () => {
     const outcome = store.inspectReviewCategory(book.bookId, definition);
     expect(outcome.taskOutcome!.classification).toBe(mode === 'cancel' ? 'cancelled' : 'interrupted');
     expect(outcome.run!.state).toBe(mode === 'cancel' ? 'cancelled' : 'interrupted');
-    expect(sent).toBe(1);
-    expect(outcome.resultSetRevision!.usage.inputTokens + outcome.resultSetRevision!.usage.outputTokens).toBe(mode === 'cancel' ? 60 : 0);
+    expect(sent).toBe(turn);
+    // A cancellation takes effect between reading ranges: the turn in flight and every unit before it stay
+    // closed with their findings and usage; only the units never sent become not-attempted gaps.
+    const revision = outcome.resultSetRevision as ReviewCategoryResultSetRevisionProjection;
+    const closed = mode === 'cancel' ? turn : 0;
+    expect(revision.usage.inputTokens + revision.usage.outputTokens).toBe(closed * 60);
+    expect(revision.units.filter((unit) => unit.state === 'closed').map((unit) => unit.unitOrdinal)).toEqual(Array.from({ length: closed }, (_, index) => index + 1));
+    expect(revision.findings.length).toBe(closed === 0 ? 0 : 1);
+    expect(revision.coverage.unitsClosed + revision.gaps.length).toBe(revision.coverage.unitsTotal);
+    expect(revision.gaps.every((gap) => gap.code === (mode === 'interrupt' && gap.unitOrdinal === 1 ? 'interrupted' : 'not-attempted'))).toBe(true);
     const view = store.inspectReviewWorkspace(book.bookId, run.reviewRunId).run!;
     expect(view.categories[0]!.detail?.includes('ANALYSIS_STATE')).not.toBe(true);
   });
