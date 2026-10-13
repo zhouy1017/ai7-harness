@@ -993,11 +993,11 @@ export class ReviewRunStore {
     const planned = configuration.categories
       .filter((entry) => input.categoryIds.includes(entry.categoryId))
       .map((entry, position): PlannedCategory => {
+        const reading = this.#readCategory(bookId, head, entry, baseline, undefined);
+        requireReview(reading.unavailableReason === null, 'REVIEW_CATEGORY_UNAVAILABLE', `「${entry.label}」：${reading.unavailableReason ?? ''}`);
         if (this.#ledgers.baseline().launch.live !== null && entry.executor !== 'baseline-leads') {
           requireReview(liveReviewRule(input.launchPolicy, entry) !== null, 'REVIEW_CATEGORY_UNAVAILABLE', `「${entry.label}」：${liveReviewUnavailableReason(entry)}`);
         }
-        const reading = this.#readCategory(bookId, head, entry, baseline, undefined);
-        requireReview(reading.unavailableReason === null, 'REVIEW_CATEGORY_UNAVAILABLE', `「${entry.label}」：${reading.unavailableReason ?? ''}`);
         const plan = reviewCategoryScopePlan(entry.executor, entry.unavailableReason, scope, reading.facts);
         requireReview(plan.kind !== 'refused', 'REVIEW_SCOPE_UNAVAILABLE', `「${entry.label}」：${plan.kind === 'refused' ? plan.reason : ''}`);
         return { position: position + 1, entry, plan };
