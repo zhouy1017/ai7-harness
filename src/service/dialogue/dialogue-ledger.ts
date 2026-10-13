@@ -19,6 +19,10 @@ import type { DialogueMessageInput } from './contract.js';
  * - `dialogue_attempt_outcomes`: how the attempt settled — completed, stopped, interrupted or failed — and where its turn
  *   ends in the Session;
  * - `dialogue_conversions`: the 修改建议 an editor made of a completed answer with 转为修改建议 (DIALOG-016).
+ *
+ * Revision 71 (Issue #52, S17c) widens `dialogue_execution_bindings` for the live route: an attempt bound to the Go route
+ * under developer-live names no fixture and instead the Provider Processing version and allow rule that admitted it; one
+ * bound to the local deterministic fixture names the fixture and neither of them, exactly as revision 60 recorded it.
  */
 export const DIALOGUE_SCHEMA_SQL = {
   dialogue_tasks: `CREATE TABLE dialogue_tasks (
@@ -55,15 +59,21 @@ export const DIALOGUE_SCHEMA_SQL = {
   dialogue_execution_bindings: `CREATE TABLE dialogue_execution_bindings (
   attempt_id TEXT PRIMARY KEY REFERENCES dialogue_attempts(attempt_id),
   harness_session_id TEXT NOT NULL UNIQUE,
-  route TEXT NOT NULL CHECK(route = 'ai7-local-deterministic'),
+  route TEXT NOT NULL CHECK(route IN ('ai7-local-deterministic', 'opencode-go')),
   model TEXT NOT NULL CHECK(length(model) BETWEEN 1 AND 128),
-  operational_scope TEXT NOT NULL CHECK(operational_scope = 'development-ci'),
+  operational_scope TEXT NOT NULL CHECK(operational_scope IN ('development-ci', 'developer-live')),
   behavior_composition_sha256 TEXT NOT NULL CHECK(length(behavior_composition_sha256) = 64),
   prompt_contract_sha256 TEXT NOT NULL CHECK(length(prompt_contract_sha256) = 64),
-  fixture_sha256 TEXT NOT NULL CHECK(length(fixture_sha256) = 64),
+  fixture_sha256 TEXT CHECK(fixture_sha256 IS NULL OR length(fixture_sha256) = 64),
   bound_at TEXT NOT NULL,
   canonical_json TEXT NOT NULL,
-  sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)
+  sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
+  provider_processing_version TEXT CHECK(provider_processing_version IS NULL OR length(provider_processing_version) BETWEEN 2 AND 16),
+  policy_rule_id TEXT CHECK(policy_rule_id IS NULL OR length(policy_rule_id) BETWEEN 1 AND 128),
+  CHECK((route = 'opencode-go') = (operational_scope = 'developer-live')),
+  CHECK((route = 'opencode-go') = (fixture_sha256 IS NULL)),
+  CHECK((route = 'opencode-go') = (provider_processing_version IS NOT NULL)),
+  CHECK((provider_processing_version IS NULL) = (policy_rule_id IS NULL))
 ) STRICT`,
   dialogue_harness_spans: `CREATE TABLE dialogue_harness_spans (
   attempt_id TEXT PRIMARY KEY REFERENCES dialogue_execution_bindings(attempt_id),
@@ -131,19 +141,106 @@ export const DIALOGUE_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string
   ],
 };
 
-/** Revision 60's relations, created once: a store that predates them gains six empty relations and nothing existing moves. */
+/** `dialogue_execution_bindings` as revision 60 created it: the local deterministic route only. Kept to recognise such a store. */
+export const DIALOGUE_EXECUTION_BINDINGS_REVISION_60_SQL = `CREATE TABLE dialogue_execution_bindings (
+  attempt_id TEXT PRIMARY KEY REFERENCES dialogue_attempts(attempt_id),
+  harness_session_id TEXT NOT NULL UNIQUE,
+  route TEXT NOT NULL CHECK(route = 'ai7-local-deterministic'),
+  model TEXT NOT NULL CHECK(length(model) BETWEEN 1 AND 128),
+  operational_scope TEXT NOT NULL CHECK(operational_scope = 'development-ci'),
+  behavior_composition_sha256 TEXT NOT NULL CHECK(length(behavior_composition_sha256) = 64),
+  prompt_contract_sha256 TEXT NOT NULL CHECK(length(prompt_contract_sha256) = 64),
+  fixture_sha256 TEXT NOT NULL CHECK(length(fixture_sha256) = 64),
+  bound_at TEXT NOT NULL,
+  canonical_json TEXT NOT NULL,
+  sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)
+) STRICT`;
+
+/** A relation's text with its whitespace folded, the way the other ledgers compare exact texts. */
+function foldedSql(value: string): string {
+  return value.trim().replace(/\s+/gu, ' ');
+}
+
+/**
+ * Which of its two texts `dialogue_execution_bindings` holds: revision 60's, or revision 71's that admits the live route.
+ * No other text was ever created, so any other is refused.
+ */
+export function dialogueExecutionBindingsShape(db: DatabaseSync): 'revision-60' | 'current' {
+  const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'dialogue_execution_bindings'").get() as SqlRow | undefined;
+  const sql = row === undefined ? '' : foldedSql(text(row.sql));
+  if (sql === foldedSql(DIALOGUE_SCHEMA_SQL.dialogue_execution_bindings)) return 'current';
+  requireDialogue(sql === foldedSql(DIALOGUE_EXECUTION_BINDINGS_REVISION_60_SQL), 'SCHEMA_MIGRATION_FAILED', '对话执行绑定表结构不兼容。');
+  return 'revision-60';
+}
+
+/**
+ * Revision 60 → 71 for `dialogue_execution_bindings` (Issue #52, S17c): the relation is rebuilt from its current text, every
+ * row copied byte for byte, rowid included, in rowid order — the two new columns stay empty, as a local binding's always are
+ * — and its two ledger triggers re-armed from their own texts. It runs in the caller's transaction with foreign keys off,
+ * so the spans that name a binding keep their rows while the relation they reference is re-created.
+ */
+function widenDialogueExecutionBindings(db: DatabaseSync): void {
+  requireDialogue(
+    db.isTransaction && integer((db.prepare('PRAGMA foreign_keys').get() as SqlRow).foreign_keys) === 0,
+    'SCHEMA_MIGRATION_FAILED',
+    '对话执行绑定表只能在停用引用校验的事务中重建。',
+  );
+  const columnsOf = (): string[] => (db.prepare("SELECT name FROM pragma_table_info('dialogue_execution_bindings') ORDER BY cid").all() as SqlRow[])
+    .map((row) => text(row.name));
+  const rows = (): number => integer((db.prepare('SELECT count(*) total FROM dialogue_execution_bindings').get() as SqlRow).total);
+  const columns = columnsOf();
+  const before = rows();
+  const attached = (db.prepare(
+    "SELECT sql FROM sqlite_schema WHERE tbl_name = 'dialogue_execution_bindings' AND type IN ('index', 'trigger') AND sql IS NOT NULL ORDER BY type, name",
+  ).all() as SqlRow[]).map((row) => text(row.sql));
+  db.exec('CREATE TEMP TABLE migrate_dialogue_execution_bindings AS SELECT rowid AS migrate_rowid, * FROM dialogue_execution_bindings');
+  db.exec('DROP TABLE dialogue_execution_bindings');
+  db.exec(DIALOGUE_SCHEMA_SQL.dialogue_execution_bindings);
+  requireDialogue(columnsOf().join(', ') === [...columns, 'provider_processing_version', 'policy_rule_id'].join(', '),
+    'SCHEMA_MIGRATION_FAILED', '对话执行绑定表迁移前后的列不一致。');
+  const list = columns.join(', ');
+  db.exec(`INSERT INTO dialogue_execution_bindings(rowid, ${list})
+    SELECT migrate_rowid, ${list} FROM temp.migrate_dialogue_execution_bindings ORDER BY migrate_rowid`);
+  db.exec('DROP TABLE temp.migrate_dialogue_execution_bindings');
+  for (const sql of attached) db.exec(sql);
+  requireDialogue(rows() === before, 'SCHEMA_MIGRATION_FAILED', '对话执行绑定表迁移未保留全部记录。');
+}
+
+/**
+ * Revision 60's relations, created once: a store that predates them gains six empty relations and nothing existing moves.
+ * A store that has them at revision 60's text has `dialogue_execution_bindings` widened for revision 71, in one transaction.
+ */
 export function initializeDialogueSchema(db: DatabaseSync): void {
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'dialogue_tasks'").get() !== undefined) return;
-  db.exec('BEGIN IMMEDIATE');
+  const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'dialogue_tasks'").get() !== undefined;
+  if (existing && dialogueExecutionBindingsShape(db) === 'current') return;
+  const foreignKeys = (): number => integer((db.prepare('PRAGMA foreign_keys').get() as SqlRow).foreign_keys);
+  const restoreForeignKeys = existing && foreignKeys() === 1;
+  if (existing) {
+    db.exec('PRAGMA foreign_keys = OFF');
+    requireDialogue(foreignKeys() === 0, 'SCHEMA_MIGRATION_FAILED', '无法暂时停用引用校验以迁移数据库。');
+  }
   try {
-    for (const sql of Object.values(DIALOGUE_SCHEMA_SQL)) db.exec(sql);
-    for (const sql of Object.values(DIALOGUE_TRIGGER_SQL)) db.exec(sql);
-    db.exec('COMMIT');
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Dialogue schema rollback failed.');
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      if (existing) {
+        widenDialogueExecutionBindings(db);
+        requireDialogue(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
+      } else {
+        for (const sql of Object.values(DIALOGUE_SCHEMA_SQL)) db.exec(sql);
+        for (const sql of Object.values(DIALOGUE_TRIGGER_SQL)) db.exec(sql);
+      }
+      db.exec('COMMIT');
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch (rollbackError) {
+        throw new AggregateError([error, rollbackError], 'Dialogue schema rollback failed.');
+      }
+      throw error;
     }
-    throw error;
+  } finally {
+    if (restoreForeignKeys) {
+      db.exec('PRAGMA foreign_keys = ON');
+      requireDialogue(foreignKeys() === 1, 'SCHEMA_MIGRATION_FAILED', '无法恢复引用校验。');
+    }
   }
 }
 
@@ -200,16 +297,30 @@ export interface StoredDialogueTask {
   readonly askedAt: string;
 }
 
-export interface StoredDialogueBinding {
+interface DialogueBindingBase {
   readonly harnessSessionId: string;
-  readonly route: 'ai7-local-deterministic';
   readonly model: string;
-  readonly operationalScope: 'development-ci';
   readonly behaviorCompositionSha256: string;
   readonly promptContractSha256: string;
-  readonly fixtureSha256: string;
   readonly boundAt: string;
 }
+
+/** An attempt answered by the J-04 deterministic fixture under development-ci, recorded exactly as revision 60 did. */
+export interface StoredLocalDialogueBinding extends DialogueBindingBase {
+  readonly route: 'ai7-local-deterministic';
+  readonly operationalScope: 'development-ci';
+  readonly fixtureSha256: string;
+}
+
+/** An attempt sent on the Go route under developer-live (S17c): the policy version and allow rule that admitted it. */
+export interface StoredLiveDialogueBinding extends DialogueBindingBase {
+  readonly route: 'opencode-go';
+  readonly operationalScope: 'developer-live';
+  readonly providerProcessingVersion: string;
+  readonly policyRuleId: string;
+}
+
+export type StoredDialogueBinding = StoredLocalDialogueBinding | StoredLiveDialogueBinding;
 
 export interface StoredDialogueAttempt {
   readonly attemptId: string;
@@ -246,6 +357,14 @@ function nullableInteger(value: SQLOutputValue | undefined): number | null {
 function sealed(record: Record<string, unknown>): { json: string; sha256: string } {
   const json = canonicalJson(record);
   return { json, sha256: sha256Hex(json) };
+}
+
+/**
+ * A binding's canonical record. A local binding's is exactly revision 60's, so every binding that revision wrote reads back
+ * under its own digest; a live binding's carries the policy version and rule id in place of the fixture.
+ */
+function bindingRecord(attemptId: string, binding: StoredDialogueBinding): Record<string, unknown> {
+  return { schema: BINDING_SCHEMA, attemptId, ...binding };
 }
 
 /** A row read back: its record must be exactly the canonical form of what its columns say, under its digest. */
@@ -366,17 +485,26 @@ export class DialogueLedger {
     const bindingRow = this.#db.prepare('SELECT * FROM dialogue_execution_bindings WHERE attempt_id = ?').get(base.attemptId) as SqlRow | undefined;
     let binding: StoredDialogueBinding | null = null;
     if (bindingRow !== undefined) {
-      binding = {
+      const route = text(bindingRow.route);
+      const scope = text(bindingRow.operational_scope);
+      const shared = {
         harnessSessionId: text(bindingRow.harness_session_id),
-        route: text(bindingRow.route) as 'ai7-local-deterministic',
         model: text(bindingRow.model),
-        operationalScope: text(bindingRow.operational_scope) as 'development-ci',
         behaviorCompositionSha256: text(bindingRow.behavior_composition_sha256),
         promptContractSha256: text(bindingRow.prompt_contract_sha256),
-        fixtureSha256: text(bindingRow.fixture_sha256),
         boundAt: text(bindingRow.bound_at),
       };
-      verified(bindingRow, { schema: BINDING_SCHEMA, attemptId: base.attemptId, ...binding });
+      if (route === 'ai7-local-deterministic' && scope === 'development-ci') {
+        requireDialogue(bindingRow.provider_processing_version === null && bindingRow.policy_rule_id === null, 'DIALOGUE_RECORD_INVALID', INVALID);
+        binding = { ...shared, route, operationalScope: scope, fixtureSha256: text(bindingRow.fixture_sha256) };
+      } else {
+        requireDialogue(route === 'opencode-go' && scope === 'developer-live' && bindingRow.fixture_sha256 === null, 'DIALOGUE_RECORD_INVALID', INVALID);
+        binding = {
+          ...shared, route, operationalScope: scope,
+          providerProcessingVersion: text(bindingRow.provider_processing_version), policyRuleId: text(bindingRow.policy_rule_id),
+        };
+      }
+      verified(bindingRow, bindingRecord(base.attemptId, binding));
     }
     const spanRow = this.#db.prepare('SELECT * FROM dialogue_harness_spans WHERE attempt_id = ?').get(base.attemptId) as SqlRow | undefined;
     let span: StoredDialogueAttempt['span'] = null;
@@ -433,15 +561,22 @@ export class DialogueLedger {
   }
 
   bind(attemptId: string, binding: StoredDialogueBinding): void {
+    const live = binding.route === 'opencode-go';
     requireDialogue(UUID_PATTERN.test(binding.harnessSessionId) && DIGEST_PATTERN.test(binding.behaviorCompositionSha256) &&
-      DIGEST_PATTERN.test(binding.promptContractSha256) && DIGEST_PATTERN.test(binding.fixtureSha256), 'DIALOGUE_INVALID', '对话的执行绑定无效。');
-    const seal = sealed({ schema: BINDING_SCHEMA, attemptId, ...binding });
+      DIGEST_PATTERN.test(binding.promptContractSha256) &&
+      (live
+        ? binding.operationalScope === 'developer-live' && /^v[1-9][0-9]{0,14}$/u.test(binding.providerProcessingVersion) &&
+          binding.policyRuleId.length > 0 && binding.policyRuleId.length <= 128
+        : binding.operationalScope === 'development-ci' && DIGEST_PATTERN.test(binding.fixtureSha256)),
+    'DIALOGUE_INVALID', '对话的执行绑定无效。');
+    const seal = sealed(bindingRecord(attemptId, binding));
     this.#db.prepare(
       `INSERT INTO dialogue_execution_bindings (attempt_id, harness_session_id, route, model, operational_scope, behavior_composition_sha256,
-         prompt_contract_sha256, fixture_sha256, bound_at, canonical_json, sha256)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         prompt_contract_sha256, fixture_sha256, bound_at, canonical_json, sha256, provider_processing_version, policy_rule_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(attemptId, binding.harnessSessionId, binding.route, binding.model, binding.operationalScope, binding.behaviorCompositionSha256,
-      binding.promptContractSha256, binding.fixtureSha256, binding.boundAt, seal.json, seal.sha256);
+      binding.promptContractSha256, live ? null : binding.fixtureSha256, binding.boundAt, seal.json, seal.sha256,
+      live ? binding.providerProcessingVersion : null, live ? binding.policyRuleId : null);
   }
 
   openSpan(attemptId: string, harnessSessionId: string, startSeq: number, now: Date): void {

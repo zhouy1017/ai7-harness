@@ -47,7 +47,7 @@ import { parseInitialEvaluationSynthesisMessageHeader, parseInitialEvaluationUni
 import { parseReadersReportSynthesisMessageHeader, parseReadersReportUnitMessageHeader } from '../../src/service/evaluation/readers-report-contract.js';
 import { parseEvaluationRewriteSynthesisMessageHeader, parseEvaluationRewriteUnitMessageHeader } from '../../src/service/evaluation/evaluation-rewrite-contract.js';
 import { parseWritingSynthesisMessageHeader, parseWritingUnitMessageHeader } from '../../src/service/writing/writing-contract.js';
-import { parseDialogueMessageHeader } from '../../src/service/dialogue/contract.js';
+import { DIALOGUE_PROMPT_CONTRACT_DIGEST, buildDialogueMessage, dialogueQuestionDigest, dialogueRequestDigest, parseDialogueMessageHeader } from '../../src/service/dialogue/contract.js';
 
 // The S41 generation tool, proven on a cache the tests build in a temporary directory. The real
 // Provider Result Cache of ADR 0067 is never named, read, or listed here, and no generated fixture
@@ -601,6 +601,46 @@ describe('generate-model-fixture over the namespaced cache (Issue #808)', () => 
   });
 
   const request = (selector: string): Request => ({ selector, cacheRoot: root, identity: 'generated-808', description: '合成生成夹具', out: join(root, 'out.json') });
+
+  it('reads a dialogue capture that names no task contract as its own task, and nothing else (Issue #52, S17c)', async () => {
+    const question = '这段的叙述视角是否一致？';
+    const message = buildDialogueMessage({ kind: 'ask', selection: '合成的所选文字。', question, kept: null });
+    const body = chatBody(message);
+    const content = '合成回答一。合成回答二。';
+    const send = async (taskPromptContractDigest: string | undefined, step: string): Promise<void> => {
+      const cache = new ProviderResultCache(root);
+      await cache.open();
+      await transmitOnce(cache, answer(content), {
+        purpose: 'editorial-dialogue', slice: 'S17c', promptContractDigest: DIALOGUE_PROMPT_CONTRACT_DIGEST,
+        ...(taskPromptContractDigest === undefined ? {} : { taskPromptContractDigest }),
+      }, { intent: { family: 'editorial-dialogue', case: 'sample1-selected-paragraph', delta: null }, step, requestShape: 'openai-chat-completions' },
+      OPENCODE_GO_ROUTE_PROFILE, MODEL, ENDPOINT, { method: 'POST', headers: { authorization: 'Bearer placeholder' }, body });
+    };
+    // The capture the first live dialogue took, before its transport named the task contract.
+    await send(undefined, 'editorial-dialogue/ask');
+    const fixture = parseModelFixture(await tool.generateModelFixture({ ...request('S17c/editorial-dialogue/1'), identity: 'generated-dialogue' },
+      new Date('2026-10-13T00:00:00.000Z')));
+    const entry = fixture.entries[0]!;
+    expect(entry).toMatchObject({
+      unitOrdinal: 0,
+      requestDigest: dialogueRequestDigest(DIALOGUE_PROMPT_CONTRACT_DIGEST, 'ask', dialogueQuestionDigest(question)),
+      response: { kind: 'answer-chunks', chunks: [content] },
+    });
+    expect(entry.capture).toMatchObject({
+      subject: 'dialogue', itemId: 'S17c/editorial-dialogue/1', promptContractDigest: DIALOGUE_PROMPT_CONTRACT_DIGEST,
+      taskPromptContractDigest: DIALOGUE_PROMPT_CONTRACT_DIGEST,
+      generation: providerEvidenceGeneration({ route: 'opencode-go', endpoint: ENDPOINT, requestShape: 'openai-chat-completions', model: MODEL }, DIALOGUE_PROMPT_CONTRACT_DIGEST),
+    });
+    // A replay that names the task contract is the same evidence and converts the same capture.
+    await send(DIALOGUE_PROMPT_CONTRACT_DIGEST, 'editorial-dialogue/ask');
+    const viaReplay = parseModelFixture(await tool.generateModelFixture({ ...request('S17c/editorial-dialogue/2'), identity: 'generated-dialogue' },
+      new Date('2026-10-13T00:00:00.000Z')));
+    expect(viaReplay.entries[0]!.response).toEqual(entry.response);
+    // Only the equality is inferred: a line naming another task contract than the capture's is not proven by it.
+    const lines = await tool.readLedgerLines(root);
+    const forged = lines.map((line: Record<string, unknown>) => (line['itemId'] === 'S17c/editorial-dialogue/2' ? { ...line, taskPromptContractDigest: 'f'.repeat(64) } : line));
+    expect(() => tool.resolveLedgerSelection(forged, 'S17c/editorial-dialogue/2')).toThrowError(/FIXTURE_GEN\/capture-unproven/u);
+  });
 
   it('converts a reduction under the cross-unit contract, remapping its cited blocks and keeping the capture provenance', async () => {
     const content = JSON.stringify({ findings: [{ claim: '合成跨单元发现。', sourceRanges: [{ blockId: BLOCKS[1]! }, { blockId: BLOCKS[2]! }] }] });

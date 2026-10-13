@@ -1,0 +1,49 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-dialogue-recorded-v41",
+  "description": "Recorded developer-live Interactive Editorial Dialogue answer (Issue #52, S17c): one 就这段提问 on exact sample1 under Provider Processing v10's dialogue rule, Go deepseek-v4.1-flash, frozen dialogue contract ai7.editorial-dialogue/1 · 来源测试项 S17c/editorial-dialogue/5 · 模型 deepseek-v4.1-flash · 生成于 2026-10-13",
+  "basedOn": null,
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "99d222cfa2aac85a27b6839fed74ea01b00f602a19028cc903f0872c33a206ed",
+      "response": {
+        "kind": "answer-chunks",
+        "chunks": [
+          "仅就所选文字看，叙述视角是一致的：它采用第三人称，以姓名“曾本之”指称人物，没有出现第一人称或第二人称的切换。不过，这句话本身不完整，末尾“累”字也使语义不清，因此单凭这一句无法确认前后整段的视角是否始终统一；若要下判断，还需结合上下文的人称和叙述者位置。"
+        ],
+        "usage": {
+          "inputTokens": 203,
+          "outputTokens": 1997
+        }
+      },
+      "capture": {
+        "subject": "dialogue",
+        "itemId": "S17c/editorial-dialogue/5",
+        "selectedItemId": "S17c/editorial-dialogue/5",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "81cf644d1c52f63aa5db1e1a84c24e5256e96686fea0c8b69e4d1d71fe0d09ee",
+        "taskPromptContractDigest": "81cf644d1c52f63aa5db1e1a84c24e5256e96686fea0c8b69e4d1d71fe0d09ee",
+        "capturedAt": "2026-10-13T12:04:43.876Z",
+        "providerRequestDigest": "a592ba70641b4b8d0de2aecd3fe64ad18ee1ba789a97e5752182fcb5b1ecd40f",
+        "providerResponseDigest": "a9b49642708c82a30e92194cde921f931fab1cb8320e0e0a302aa4fdfff7a337",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "47f6f3a4fc6ed721fc2ee14cb0c1669ca6ad0d055f6797983ec2a951181c32eb",
+        "generation": "974386d12d1efb3faee3bdf93ffaf0af3a151125640dda289d93786bea2e3c60",
+        "validation": {
+          "family": "editorial-dialogue",
+          "case": "sample1-selected-paragraph",
+          "step": "editorial-dialogue/ask"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "e116b9bb31ee943805f3f73f695727e1ab6db35286ba9156ada85668b7febbc9"
+      }
+    }
+  ]
+}
