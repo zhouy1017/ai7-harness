@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
@@ -18,6 +18,7 @@ import {
 import { fixtureEntryKey, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { assuranceContractMoved, type BaselineAnalysisRouteFacts } from '../../src/service/analysis/baseline-analysis-store.js';
 import {
+  ASSURANCE_SAMPLING_PROMPT_CONTRACT,
   ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST,
   ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST,
 } from '../../src/service/analysis/assurance-sampling-contract.js';
@@ -325,6 +326,54 @@ describe('baseline prompt contract /1 → /2 on the real store (Issue #826)', ()
 });
 
 describe('the sampling contract a baseline plan froze (Issue #826 stage pin)', () => {
+  it('refuses stopped-run continuation when only the sampling contract changes, before recording a state or span', async () => {
+    await requireExactSample1(roots.codeRoot);
+    const store = await open(HISTORICAL_ROUTE);
+    const ledger = store.baselineAnalysisLedger;
+    let owner: BaselineAnalysisExecutionOwner | undefined;
+    const definition = ledger.definition;
+    const binding = vi.spyOn(ledger, 'definition', 'get');
+    try {
+      const bookId = await newBook(store, 'L2 sample1 仅抽样契约变化', true);
+      const runRecordId = await pausedRun(store, bookId, BASELINE_PROMPT_CONTRACT_DIGEST);
+      const stopped = store.inspectBaselineAnalysis(bookId);
+      const facts = ledger.loadExecutionPlan(runRecordId);
+      const recordedBinding = ledger.executionBindingOf(runRecordId);
+      expect(stopped.run?.state).toBe('paused');
+      expect(stopped.run?.attempt?.spans.map((span) => span.unitOrdinal)).toEqual([1, 2, 3]);
+      expect(recordedBinding).not.toBeNull();
+      expect(facts.assurancePromptContractDigest).toBe(ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST);
+      owner = new BaselineAnalysisExecutionOwner({
+        ledger, launchPolicy, fixture: syntheticFixture(facts.manifest, BASELINE_PROMPT_CONTRACT_DIGEST, new Set()),
+        secretResolver: fakeSecretResolver(),
+      });
+      expect(owner.carriesStoppedRun(runRecordId)).toBe(true);
+
+      // Change only the currently bound sampling contract through the existing definition getter. The actual paused Run,
+      // its frozen /2 plan, unit prompt, composition, route and persisted Execution Binding remain byte-for-byte unchanged.
+      binding.mockReturnValue({
+        ...definition,
+        assurance: { ...definition.assurance!, prompt: ASSURANCE_SAMPLING_PROMPT_CONTRACT, promptContractDigest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST },
+      });
+      expect(ledger.definition.promptContractDigest).toBe(definition.promptContractDigest);
+      expect(ledger.definition.systemPrompt).toBe(definition.systemPrompt);
+      expect(ledger.loadExecutionPlan(runRecordId)).toEqual(facts);
+      expect(owner.carriesStoppedRun(runRecordId)).toBe(false);
+      expect(() => owner!.admitAndDispatch(runRecordId, ledger, { resume: true }))
+        .toThrowError(expect.objectContaining({ code: 'EXECUTION_RESUME_BINDING_DRIFT' }));
+      expect(owner.idle).toBe(true);
+      expect(store.inspectBaselineAnalysis(bookId).run).toEqual(stopped.run);
+      expect(ledger.executionBindingOf(runRecordId)).toEqual(recordedBinding);
+
+      binding.mockRestore();
+      expect(owner.carriesStoppedRun(runRecordId)).toBe(true);
+    } finally {
+      binding.mockRestore();
+      await owner?.dispose();
+      store.close();
+    }
+  });
+
   it('pins sampling /2 on a current plan, reuses it unchanged, and replaces or refuses a plan frozen without the pin', async () => {
     await requireExactSample1(roots.codeRoot);
     let store = await open(HISTORICAL_ROUTE);

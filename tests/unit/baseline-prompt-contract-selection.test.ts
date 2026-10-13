@@ -13,6 +13,7 @@ import {
   ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST,
 } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/cross-unit-contract.js';
+import { RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/run-report-contract.js';
 import {
   BASELINE_SCHEMA_DIGEST,
   RETAINED_V1_JOURNEY,
@@ -56,10 +57,10 @@ function capture(overrides: Partial<ModelFixtureCapture> = {}): ModelFixtureCapt
   };
 }
 
-function entry(unitOrdinal: number, recorded: ModelFixtureCapture | undefined): ModelFixtureEntry {
+function entry(unitOrdinal: number, recorded: ModelFixtureCapture | undefined, requestDigest?: string): ModelFixtureEntry {
   return {
     unitOrdinal,
-    requestDigest: unitRequestDigest(recorded?.taskPromptContractDigest ?? BASELINE_PROMPT_CONTRACT_DIGEST, Math.max(unitOrdinal, 1), UNIT_DIGEST),
+    requestDigest: requestDigest ?? unitRequestDigest(recorded?.taskPromptContractDigest ?? BASELINE_PROMPT_CONTRACT_DIGEST, Math.max(unitOrdinal, 1), UNIT_DIGEST),
     attempt: null,
     contentDigest: null,
     response: { kind: 'unit-result', text: '{}', usage: { inputTokens: 1, outputTokens: 1 } },
@@ -79,7 +80,10 @@ function fixture(identity: string, entries: ReadonlyArray<ModelFixtureEntry>, ba
 function historicalEntries(): ModelFixtureEntry[] {
   return [
     ...[1, 2, 3, 4, 5, 6, 7, 8].map((ordinal) => entry(ordinal, capture())),
-    entry(0, capture({ subject: 'reduction', promptContractDigest: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST })),
+    entry(0, capture({ subject: 'reduction', promptContractDigest: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST }), '1'.repeat(64)),
+    entry(0, capture({ subject: 'sampling', promptContractDigest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST }), '2'.repeat(64)),
+    entry(0, capture({ subject: 'sampling', promptContractDigest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST }), '3'.repeat(64)),
+    entry(0, capture({ subject: 'reflection', promptContractDigest: RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST }), '4'.repeat(64)),
   ];
 }
 
@@ -145,8 +149,30 @@ describe('baselinePromptContractForLaunch (Issue #826)', () => {
   });
 
   it('retains /1 for exactly the admitted recorded fixture alone, bound by a development-ci J-04 launch', () => {
-    expect(baselinePromptContractForLaunch({ ...J04, fixture: fixture(RETAINED_V1_RECORDED_FIXTURE_IDENTITY, historicalEntries()) }))
-      .toBe('retained-v1');
+    const historical = fixture(RETAINED_V1_RECORDED_FIXTURE_IDENTITY, historicalEntries());
+    expect(historical.entries.size).toBe(12);
+    expect(baselinePromptContractForLaunch({ ...J04, fixture: historical })).toBe('retained-v1');
+  });
+
+  it.each([
+    ['unit', BASELINE_PROMPT_CONTRACT_DIGEST],
+    ['reduction', ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST],
+    ['sampling', ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST],
+    ['reflection', BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST],
+  ] as const)('refuses a historical %s capture with another or unknown stage contract', (subject, mismatched) => {
+    for (const promptContractDigest of [mismatched, 'f'.repeat(64)]) {
+      const entries = historicalEntries().map((item) => item.capture?.subject === subject
+        ? { ...item, capture: { ...item.capture, promptContractDigest } }
+        : item);
+      expect(() => baselinePromptContractForLaunch({ ...J04, fixture: fixture(RETAINED_V1_RECORDED_FIXTURE_IDENTITY, entries) }))
+        .toThrowError(expect.objectContaining({ code: 'MODEL_FIXTURE_REFUSED' }));
+    }
+  });
+
+  it('refuses a capture from another task subject even when it claims the historical baseline task contract', () => {
+    const entries = [...historicalEntries(), entry(9, capture({ subject: 'factual-unit' }), '5'.repeat(64))];
+    expect(() => baselinePromptContractForLaunch({ ...J04, fixture: fixture(RETAINED_V1_RECORDED_FIXTURE_IDENTITY, entries) }))
+      .toThrowError(expect.objectContaining({ code: 'MODEL_FIXTURE_REFUSED' }));
   });
 
   it('refuses the historical fixture outside a development-ci J-04 launch', () => {

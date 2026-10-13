@@ -75,11 +75,11 @@ const PROVIDER_CACHE_DIRECTORY = 'entries';
 export const BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST = '8298dc9db1b95f26072cabb00a8c9a14997f68ebe7bf07d01181985f848e66cb';
 export const ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST = '4c05e66ba8077c85aa1334b53e98155566fcd9f51d9bd3343e95e7b14ddc03db';
 /**
- * Sampling prompt contract /2 (Issue #826), which only the current baseline binds, and the SHA-256 of its nine-line instruction
- * as a sampling message carries it after its header: a turn whose message carries exactly that instruction was written under
- * /2, any other under /1, and the capture's recorded stage contract must agree with the message either way.
+ * The two admitted sampling contracts (Issue #826) and the SHA-256 of each nine-line instruction as a message carries it
+ * after its header. The instruction must match one exactly, and the capture's recorded stage contract must agree.
  */
 export const ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST = '1bfd29ecb6ba5d9bdbd1e1d097da4de6a0d1c9e6319c5f2318d2ca8c5eeb112c';
+export const ASSURANCE_SAMPLING_V1_INSTRUCTION_SHA256 = 'aa072ff68b48dcb124cf7eff205c3c5630118a55d46aa137bbe414efa6d805d4';
 export const ASSURANCE_SAMPLING_V2_INSTRUCTION_SHA256 = '522b3a3c19b5d456ec9d9611720cca0eab7d042e92cc47bd0a18eaa20b89b262';
 const ASSURANCE_SAMPLING_INSTRUCTION_LINES = 9;
 export const RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST = '96456fc99625e12014633439564f17a54cdb1f4f0a05b8076c10a4b03bbd7676';
@@ -88,6 +88,8 @@ const CITED_BLOCKS_HEADER = '各单元引用的内容块标识（按首次引用
 const CITED_BLOCKS_LINE = /^单元 (\d+)：(.+)$/u;
 const CITED_BLOCK_SEPARATOR = '、';
 const SAMPLING_HEADER = /^保证抽样 (\d+)\/(\d+) · 单元摘要 ([0-9a-f]{64}) · 抽样摘要 ([0-9a-f]{64})$/u;
+const SAMPLING_OVERLAP_HEADER = '以下为承接上一单元的重叠上下文（仅供理解）：';
+const SAMPLING_OWN_HEADER = '以下为本单元的内容块：';
 const SAMPLING_FINDING_HEADER = '以下为需要复核的发现：';
 const SAMPLING_FINDING_LINE = /^- \[([A-Za-z0-9_-]{1,64})\]（/u;
 const REFLECTION_HEADER = /^运行反思 ([A-Za-z0-9_-]{1,64}) · 账目摘要 ([0-9a-f]{64})$/u;
@@ -738,6 +740,7 @@ export function parseCachedRequest(requestBody, promptContractDigest) {
   refuse(body !== null && typeof body === 'object' && !Array.isArray(body) && Array.isArray(body.messages) && body.messages.length > 0,
     'FIXTURE_GEN/request-shape-unsupported', '缓存条目不是 openai-chat-completions 请求体。');
   let unitMessage = null;
+  let unitMessageIndex = -1;
   const carriedMessages = [];
   const systemMessages = [];
   for (const message of body.messages) {
@@ -745,12 +748,16 @@ export function parseCachedRequest(requestBody, promptContractDigest) {
       'FIXTURE_GEN/request-shape-unsupported', '请求体中的消息缺少角色。');
     const text = chatMessageText(message.content);
     refuse(text !== null, 'FIXTURE_GEN/request-shape-unsupported', '请求体中的消息内容既不是字符串也不是文本块序列。');
-    if (message.role === 'user') unitMessage = text;
+    if (message.role === 'user') {
+      unitMessage = text;
+      unitMessageIndex = carriedMessages.length;
+    }
     if (message.role !== 'system') carriedMessages.push(text);
     else systemMessages.push(text);
   }
   refuse(unitMessage !== null, 'FIXTURE_GEN/request-shape-unsupported', '请求体不含任何 user 消息。');
   const carriedBlockTexts = carriedBlockTextsOf(unitMessage);
+  const unitMessageScanIndex = carriedBlockTexts.length + unitMessageIndex;
   // Everything the request carried but its frozen system prompt — user input, earlier model results, tool results and selected
   // dialogue text — participates in sanitization. The exact request remains only in the external cache.
   carriedBlockTexts.push(...carriedMessages);
@@ -781,9 +788,14 @@ export function parseCachedRequest(requestBody, promptContractDigest) {
   const sampling = parseAssuranceSamplingMessageHeader(unitMessage);
   if (sampling !== null) {
     const stageContractDigest = samplingStageContractOf(unitMessage);
+    // The exact public instruction has just been proved, like the frozen system prompt above. Keep every block, finding
+    // and other carried turn in the echo scan, but do not mistake its required result-schema literal for manuscript text.
+    const messageLines = unitMessage.split('\n');
+    const messageWithoutInstruction = [messageLines[0], ...messageLines.slice(1 + ASSURANCE_SAMPLING_INSTRUCTION_LINES)].join('\n');
     return {
       subject: 'sampling', stageContractDigest, unitMessage, header: null, ownBlockTexts: [],
-      carriedBlockTexts, carriedMessageCount: carriedMessages.length, systemMessages, unitOrdinal: 0, contentDigest: null,
+      carriedBlockTexts: carriedBlockTexts.map((text, index) => index === unitMessageScanIndex ? messageWithoutInstruction : text),
+      carriedMessageCount: carriedMessages.length, systemMessages, unitOrdinal: 0, contentDigest: null,
       identities: [
         ...parseAssuranceSamplingListedRefs(unitMessage).map((identity, index) => ({ placeholder: `{{ref:${index + 1}}}`, identity })),
         ...unitMessage.split('\n').flatMap((line) => { const match = BLOCK_LINE.exec(line); return match === null ? [] : [match[1]]; })
@@ -803,10 +815,16 @@ export function parseCachedRequest(requestBody, promptContractDigest) {
   throw new FixtureGenerationError('FIXTURE_GEN/unit-message-unrecognized', '最后一条 user 消息不是可识别的分析单元、跨单元归纳、保证抽样或运行反思消息。');
 }
 
-/** The sampling contract a sampling message was written under: /2 when it carries exactly /2's instruction, else /1. */
+/** Only an exact /1 or /2 instruction establishes a sampling contract; unknown text is never historical evidence. */
 function samplingStageContractOf(unitMessage) {
-  const instruction = unitMessage.split('\n').slice(1, 1 + ASSURANCE_SAMPLING_INSTRUCTION_LINES).join('\n');
-  return sha256Hex(instruction) === ASSURANCE_SAMPLING_V2_INSTRUCTION_SHA256 ? ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST : ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST;
+  const lines = unitMessage.split('\n');
+  const instructionDigest = sha256Hex(lines.slice(1, 1 + ASSURANCE_SAMPLING_INSTRUCTION_LINES).join('\n'));
+  const following = lines[1 + ASSURANCE_SAMPLING_INSTRUCTION_LINES];
+  refuse(following === SAMPLING_OVERLAP_HEADER || following === SAMPLING_OWN_HEADER,
+    'FIXTURE_GEN/contract-mismatch', '保证抽样指令不是完整的已知契约。');
+  if (instructionDigest === ASSURANCE_SAMPLING_V1_INSTRUCTION_SHA256) return ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST;
+  if (instructionDigest === ASSURANCE_SAMPLING_V2_INSTRUCTION_SHA256) return ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST;
+  throw new FixtureGenerationError('FIXTURE_GEN/contract-mismatch', '保证抽样指令不匹配任何已知契约。');
 }
 
 /** Closed header families already consumed by the deterministic adapter; no new Task support. */

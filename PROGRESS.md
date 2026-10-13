@@ -54,18 +54,20 @@ Provider Processing v9 / active-set v7 preserves all 39 immutable predecessor po
 [#387](https://github.com/zhouy1017/ai7-harness/issues/387) replays the reviewed 12 original V4.1 captures in J-04 as recorded-model regression. Unit 1's malformed answer remains a schema-invalid gap, and the other stages remain recorded evidence. The replay incurs no new transmission and establishes neither an 8/8 live result nor editorial quality.
 
 The user-directed [#826](https://github.com/zhouy1017/ai7-harness/issues/826) closes that unit schema gap with versioned instructions:
+
 - baseline prompt contract /2 gives each unit note a literal object shape;
 - the baseline's sampling contract /2 requires string finding refs;
 - the analysis contract, result schemas and strict parsers are unchanged.
 
-Prompt contract /1 and sampling /1 are retained exactly for J-04's historical replay and nothing else. A plan pins the sampling contract it froze, and drift is refused before any Provider effect.
+The baseline's prompt contract /1 and sampling /1 are retained exactly for J-04's historical replay. Every current baseline uses /2; factual review and every Review Category continue to use sampling /1. A current baseline plan pins the sampling contract it froze, and drift is refused before any Provider effect.
 
 Product evidence:
+
 - **Original:** the 7/8 result remains historical.
 - **[First repair](https://github.com/zhouy1017/ai7-harness/issues/826#issuecomment-6138564926):** 重新分析所选范围 over unit 1 on the existing Book closed all eight units. Two newly computed unit responses plus six business-lineage reuses underpin it. It also exposed two schema-invalid sampling answers.
 - **[Final prompt checkpoint](https://github.com/zhouy1017/ai7-harness/issues/826#issuecomment-6138730918):** coverage, reduction, sampling and reflection all closed. The sampling follow-up used three exact development-cache replays and four new transmissions.
 
-Neither run sent eight new unit requests, and neither establishes editorial quality. J-04 now also replays the six identity-matching real captures of that recomputation: two units, the reduction and three sampling /2 turns. The replay discloses its reflection as unrecorded. Both earlier results and every raw capture remain outside the repository.
+Neither run sent eight new unit requests, and neither establishes editorial quality. J-04 now also replays the six identity-matching real captures of that recomputation: two units, the reduction and three sampling /2 turns. Its reflection explicitly ends in an `AI7_FIXTURE_MISMATCH` gap because no recorded reflection matches the replay's accounting; this is not a replay of all-stage success. Both earlier results and every raw capture remain outside the repository.
 
 ## Remaining macro risks
 

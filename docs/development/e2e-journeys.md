@@ -91,15 +91,17 @@ Since #95 (S39, PR #713) the closing `no-execution-surface` check admits 后台�
 
 Since #387 (S41-f1), after those closing checks, J-04 relaunches and appends a separate unedited sample1 Book, imported as a distinct work through the existing product path, using the reviewed `sample1-recorded-v41-baseline` fixture generated from `S40/first-baseline/9..20`. The 2026-10-12 capture is explicitly `opencode-go/deepseek-v4.1-flash`; legacy V4 items are excluded. Import, profile enabling, plan preparation and starting run through the product. Unit 1 remains a `contract-invalid` / `schema-invalid` gap, seven units close, and the durable synthesis contains 84 entities, 64 events, 55 relationships and 70 setting claims. The reduction closes with three findings; two sampling turns downgrade two findings and recommend deleting one; the reflection closes with nine suggestions. Restart preserves the Result Set Revision and Run Report. The assertions reconcile all twelve calls' source-recorded 38,287 input / 113,041 output tokens separately from zero new incurred Provider transmissions, established by the local deterministic execution pin, no credential value released and denied networking. This is recorded regression evidence, not fresh model validation or editorial-quality proof; all existing authored/synthetic retry and incremental assertions remain.
 
-That replay binds the retained baseline prompt contract /1 the recorded Run was asked under (#826); its plan pins no sampling contract, so it samples under sampling /1 as recorded. Every other J-04 Run, and every other Journey, asks under the current prompt contract /2 and the baseline's sampling contract /2.
+That replay binds the retained baseline prompt contract /1 the recorded Run was asked under (#826); its plan pins no sampling contract, so it samples under sampling /1 as recorded. Every other baseline Run in J-04 or another Journey asks under the current prompt contract /2 and the baseline's sampling contract /2.
 
 #826 then relaunches the same Book under the current contracts with the reviewed `sample1-recorded-v41-range` fixture and runs 重新分析所选范围 over unit 1. The closure recomputes units 1 and 2; unit 2 reads unit 1's last block as overlap. The plan reuses the other six /1 results by lineage: reused 6, recomputed 2, invalidated 1, bypassed 1. Its plan pins sampling /2.
 
 The six replayed entries are real 2026-10-13 captures, converted with the exact-sample1 source proof:
+
 - units 1 and 2 and the cross-unit reduction, `S40/reanalyze-range/2..4`;
 - three sampling /2 turns, `/12..14`.
 
 Results:
+
 - Unit 1, schema-invalid under /1, closes with its six unresolved items as objects, and all eight units close.
 - The reduction closes with three findings.
 - All three sampling dispositions are `应删除`.

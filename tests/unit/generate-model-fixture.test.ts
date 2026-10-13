@@ -86,6 +86,7 @@ type Tool = {
   BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST: string;
   ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST: string;
   ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST: string;
+  ASSURANCE_SAMPLING_V1_INSTRUCTION_SHA256: string;
   ASSURANCE_SAMPLING_V2_INSTRUCTION_SHA256: string;
   RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST: string;
   crossUnitRequestDigest: (promptContractDigest: string, setDigest: string) => string;
@@ -556,12 +557,12 @@ function reductionMessage(setDigest = 'd'.repeat(64)): string {
   ].join('\n');
 }
 
-/** A sampling turn's message; with an instruction, written under that sampling contract as the product writes it (Issue #826). */
-function samplingMessage(instruction?: string): string {
+/** A sampling turn's message under an exact contract; tests may replace its instruction to exercise refusal (Issue #826). */
+function samplingMessage(instruction = ASSURANCE_SAMPLING_PROMPT_CONTRACT.instruction): string {
   return [
     ASSURANCE_SAMPLING_PROMPT_CONTRACT.messageHeader.replace('{unitOrdinal}', '2').replace('{totalUnits}', '3')
       .replace('{unitDigest}', 'a'.repeat(64)).replace('{sampleDigest}', 'b'.repeat(64)),
-    ...(instruction === undefined ? [] : [instruction]),
+    ...(instruction === '' ? [] : [instruction]),
     ASSURANCE_SAMPLING_PROMPT_CONTRACT.ownHeader,
     `[${BLOCKS[0]!}] (paragraph) ${OWN_TEXTS[0]!}`,
     ASSURANCE_SAMPLING_PROMPT_CONTRACT.findingHeader,
@@ -657,10 +658,10 @@ describe('generate-model-fixture over the namespaced cache (Issue #808)', () => 
     expect(entry.capture!.identityMap).toEqual([{ placeholder: '{{ref:1}}', identity: 'f1' }, { placeholder: '{{ref:2}}', identity: 'f12' }]);
   });
 
-  it('converts a sampling turn written under sampling /2 with its /2 key, and refuses one whose recorded contract disagrees (#826)', async () => {
-    // A bare array, as the /1 case above: the instruction the message carries names the result keys, and the converter bounds
-    // echoes of carried text outside the proved sample1 exemption.
-    const content = JSON.stringify([{ ref: 'f1', disposition: '成立', reason: '合成理由一。' }, { ref: 'f12', disposition: '需降级', reason: '合成理由二。' }]);
+  it('converts a sampling turn written under sampling /2 with its /2 key (#826)', async () => {
+    const content = JSON.stringify({ schema: ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2.responseSchema, dispositions: [
+      { ref: 'f1', disposition: '成立', reason: '合成理由一。' }, { ref: 'f12', disposition: '需降级', reason: '合成理由二。' },
+    ] });
     const message = samplingMessage(ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2.instruction);
     await capture(root, message, content, 'reanalyze-range/sampling-1-unit-2', ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST);
     const entry = parseModelFixture(await tool.generateModelFixture(request('S40/first-baseline/1'))).entries[0]!;
@@ -671,9 +672,16 @@ describe('generate-model-fixture over the namespaced cache (Issue #808)', () => 
   it.each([
     ['a /2 message recorded as /1', () => samplingMessage(ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2.instruction), ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST],
     ['a /1 message recorded as /2', () => samplingMessage(ASSURANCE_SAMPLING_PROMPT_CONTRACT.instruction), ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST],
+    ['a missing instruction recorded as /1', () => samplingMessage(''), ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST],
+    ['an unknown instruction recorded as /1', () => samplingMessage('未知抽样指令。'), ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST],
+    ['a modified /1 instruction recorded as /1', () => samplingMessage(ASSURANCE_SAMPLING_PROMPT_CONTRACT.instruction.replace('200', '201')), ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST],
+    ['a modified /2 instruction recorded as /1', () => samplingMessage(ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2.instruction.replace('200', '201')), ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST],
+    ['an extended /1 instruction recorded as /1', () => samplingMessage(`${ASSURANCE_SAMPLING_PROMPT_CONTRACT.instruction}\n额外指令。`), ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST],
+    ['an extended /2 instruction recorded as /2', () => samplingMessage(`${ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2.instruction}\n额外指令。`), ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST],
   ])('refuses %s rather than relabel its sampling contract (#826)', async (_label, message, recorded) => {
     await capture(root, message(), JSON.stringify({ dispositions: [] }), 'reanalyze-range/sampling-1-unit-2', recorded);
     await expect(tool.generateModelFixture(request('S40/first-baseline/1'))).rejects.toThrowError(/FIXTURE_GEN\/contract-mismatch/u);
+    await expect(stat(join(root, 'out.json'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('converts the reflection under its own contract, keyed by the accounting and nothing minted', async () => {
@@ -744,6 +752,7 @@ describe('generate-model-fixture agreement with the #808 owners', () => {
     expect(tool.BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST).toBe(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST);
     expect(tool.ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST).toBe(ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST);
     expect(tool.ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST).toBe(ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST);
+    expect(tool.ASSURANCE_SAMPLING_V1_INSTRUCTION_SHA256).toBe(sha256Hex(ASSURANCE_SAMPLING_PROMPT_CONTRACT.instruction));
     expect(tool.ASSURANCE_SAMPLING_V2_INSTRUCTION_SHA256).toBe(sha256Hex(ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2.instruction));
     expect(tool.RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST).toBe(RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST);
     expect(tool.crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, 'e'.repeat(64))).toBe(crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, 'e'.repeat(64)));

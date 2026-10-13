@@ -86,6 +86,7 @@ import {
   type UnitOutcome,
 } from './reducers.js';
 import type { CrossUnitOutcome } from './reducers.js';
+import { RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST } from './run-report-contract.js';
 import { ModelFixtureError, type ResolvedModelFixture } from '../provider/model-fixture.js';
 
 /**
@@ -388,7 +389,7 @@ const RETAINED_V1_RECORDED_MODEL = 'deepseek-v4.1-flash';
 /**
  * The prompt contract a launch's baseline ledger asks under, decided once at service startup from what the launch bound.
  * `retained-v1` exactly when a development-ci J-04 launch binds the admitted recorded fixture alone — no base — and every one
- * of its entries is a capture of the V4.1 model made inside a /1 baseline Task, its unit answers under /1 itself. Any other
+ * of its entries is a capture of the V4.1 model made inside a /1 baseline Task, under that Task's exact unit or stage contract. Any other
  * fixture carrying a /1 baseline capture, that fixture under another Journey or scope, or that identity with another, mixed
  * or missing provenance is refused before the store opens; a launch with no fixture, developer-live included, asks under the
  * current contract. Nothing here relaxes the adapter's own guard: a /1 Run is answered only because it asks /1's questions.
@@ -412,10 +413,18 @@ export function baselinePromptContractForLaunch(launch: {
     refuse(`只在 development-ci 的 ${RETAINED_V1_JOURNEY} 启动中按基线提示契约 v1 重放。`);
   }
   if (fixture.lineage.length !== 1 || fixture.lineage[0]!.identity !== fixture.identity) refuse('按 v1 重放时不得叠加其他夹具。');
-  const exact = entries.length > 0 && entries.every((entry) => entry.capture !== undefined &&
-    entry.capture.taskPromptContractDigest === BASELINE_PROMPT_CONTRACT_V1_DIGEST &&
-    entry.capture.model === RETAINED_V1_RECORDED_MODEL &&
-    (entry.capture.subject !== 'unit' || entry.capture.promptContractDigest === BASELINE_PROMPT_CONTRACT_V1_DIGEST));
+  const exact = entries.length > 0 && entries.every((entry) => {
+    const capture = entry.capture;
+    if (capture === undefined || capture.taskPromptContractDigest !== BASELINE_PROMPT_CONTRACT_V1_DIGEST ||
+      capture.model !== RETAINED_V1_RECORDED_MODEL) return false;
+    switch (capture.subject) {
+      case 'unit': return capture.promptContractDigest === BASELINE_PROMPT_CONTRACT_V1_DIGEST;
+      case 'reduction': return capture.promptContractDigest === BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST;
+      case 'sampling': return capture.promptContractDigest === ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST;
+      case 'reflection': return capture.promptContractDigest === RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST;
+      default: return false;
+    }
+  });
   if (!exact) refuse('的录制来源不全是基线提示契约 v1 下的 V4.1 捕获。');
   return 'retained-v1';
 }
