@@ -4,14 +4,19 @@ import {
   ASSURANCE_DISPOSITIONS,
   ASSURANCE_SAMPLING_PROMPT_CONTRACT,
   ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST,
+  ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2,
+  ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST,
+  ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_SCHEMA,
   ASSURANCE_SAMPLING_RESULT_SCHEMA,
   assuranceSampleDigest,
   assuranceSamplingRequestDigest,
   buildAssuranceSamplingMessage,
+  parseAssuranceSamplingListedRefs,
   parseAssuranceSamplingMessageHeader,
   parseAssuranceSamplingResult,
   type AssuranceSamplingCandidate,
 } from '../../src/service/analysis/assurance-sampling-contract.js';
+import { canonicalJson } from '../../src/service/analysis/canonical.js';
 import { BASELINE_PROMPT_CONTRACT } from '../../src/service/analysis/contract.js';
 import type { CoverageManifestUnitProjection } from '../../src/shared/protocol.js';
 
@@ -99,6 +104,57 @@ describe('the Assurance Sampling Contract v1 message', () => {
       '- [fnd_0123456789abcdef01234567]（A）合成发现二：该断言引用了本单元的一处内容。',
     ]);
     expect(message).not.toMatch(/\{[a-zA-Z]+\}/u);
+  });
+});
+
+describe('the Assurance Sampling prompt contract /2 (Issue #826)', () => {
+  /** The /1 line that named a `ref` only as 「发现编号」, and the one that listed the keys without their shape. */
+  const V1_REF_LINES = [
+    'dispositions（数组；每项含 ref、disposition、reason）。',
+    'ref 必须是本消息列出的发现编号；本消息列出的每个编号恰好出现一次，不得遗漏，也不得多出。',
+  ];
+
+  it('retains /1 byte for byte under the digest the recorded sampling captures name', () => {
+    expect(ASSURANCE_SAMPLING_PROMPT_CONTRACT.schema).toBe('ai7.analysis.assurance-sampling-prompt-contract/1');
+    expect(ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST).toBe('4c05e66ba8077c85aa1334b53e98155566fcd9f51d9bd3343e95e7b14ddc03db');
+    for (const line of V1_REF_LINES) expect(ASSURANCE_SAMPLING_PROMPT_CONTRACT.instruction.split('\n')).toContain(line);
+  });
+
+  it('differs from /1 only in the instruction, which states the disposition object and the exact ref form', () => {
+    expect(ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2.schema).toBe(ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_SCHEMA);
+    expect(ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_SCHEMA).toBe('ai7.analysis.assurance-sampling-prompt-contract/2');
+    expect(ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST).not.toBe(ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST);
+    const { schema: _v2Schema, instruction: v2Instruction, ...v2Rest } = ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2;
+    const { schema: _v1Schema, instruction: v1Instruction, ...v1Rest } = ASSURANCE_SAMPLING_PROMPT_CONTRACT;
+    // The same contract version, result schema, headers and finding line: the message and its key read the same.
+    expect(canonicalJson(v2Rest)).toBe(canonicalJson(v1Rest));
+    const v2Lines = v2Instruction.split('\n');
+    for (const line of v1Instruction.split('\n').filter((candidate) => !V1_REF_LINES.includes(candidate))) expect(v2Lines).toContain(line);
+    for (const line of V1_REF_LINES) expect(v2Lines).not.toContain(line);
+    expect(v2Instruction).toContain('{"ref": 发现编号字符串, "disposition": 判定, "reason": 理由字符串}');
+    expect(v2Instruction).not.toMatch(/tool|工具调用/u);
+  });
+
+  it('shows in /2 a ref the unchanged parser admits and the two forms it still refuses', () => {
+    const shown = /应写 "ref": "(.*?)"，不得写 (.*?) 或 "(.*?)"。/u.exec(ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2.instruction);
+    expect(shown?.slice(1)).toEqual(['0', '0', '[0]']);
+    const listed = { refs: ['0'] };
+    const body = (ref: unknown) => JSON.stringify({ schema: ASSURANCE_SAMPLING_RESULT_SCHEMA, dispositions: [{ ref, disposition: '成立', reason: '合成理由。' }] });
+    expect(parseAssuranceSamplingResult(body('0'), listed).ok).toBe(true);
+    // The two V4.1 answers of #826: the JSON number and the bracketed string. Neither is coerced.
+    expect(parseAssuranceSamplingResult(body(0), listed)).toEqual({ ok: false, code: 'schema-invalid', detail: '第 1 项判定的发现编号无效。' });
+    expect(parseAssuranceSamplingResult(body('[0]'), listed)).toEqual({ ok: false, code: 'schema-invalid', detail: '第 1 项判定的发现编号无效。' });
+  });
+
+  it('writes the bound contract’s instruction into the message and nothing else of it differs', () => {
+    const v1 = buildAssuranceSamplingMessage(unit([BLOCK_C]), 8, BLOCKS, FINDINGS);
+    const v2 = buildAssuranceSamplingMessage(unit([BLOCK_C]), 8, BLOCKS, FINDINGS, ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2);
+    expect(buildAssuranceSamplingMessage(unit([BLOCK_C]), 8, BLOCKS, FINDINGS, ASSURANCE_SAMPLING_PROMPT_CONTRACT)).toBe(v1);
+    expect(v2).toContain(ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2.instruction);
+    expect(v2).not.toContain(ASSURANCE_SAMPLING_PROMPT_CONTRACT.instruction);
+    expect(v2.replace(ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2.instruction, ASSURANCE_SAMPLING_PROMPT_CONTRACT.instruction)).toBe(v1);
+    expect(parseAssuranceSamplingMessageHeader(v2)).toEqual(parseAssuranceSamplingMessageHeader(v1));
+    expect(parseAssuranceSamplingListedRefs(v2)).toEqual(FINDINGS.map((finding) => finding.ref));
   });
 });
 

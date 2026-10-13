@@ -51,7 +51,7 @@ import { lastUserMessageText } from './payload.js';
 import { fixtureEntryKey, resolveFixtureEntry, type ModelFixtureEntry, type ResolvedModelFixture } from './model-fixture.js';
 
 /**
- * The AI7 local deterministic model adapter: replays a hand-written synthetic fixture in-process and
+ * The AI7 local deterministic model adapter: replays an admitted fixture in-process and
  * transmits nothing. It is the bound adapter in every supported development launch and in the E2E
  * Gate. Each request is matched by the pair of the unit ordinal parsed from the unit message header
  * and the request digest recomputed from the frozen prompt contract and the manifest unit digest, so
@@ -117,6 +117,7 @@ import { fixtureEntryKey, resolveFixtureEntry, type ModelFixtureEntry, type Reso
 const BLOCK_PLACEHOLDER = /\{\{block:(\d+)\}\}/gu;
 const CROSS_UNIT_BLOCK_PLACEHOLDER = /\{\{unit:(\d+):block:(\d+)\}\}/gu;
 const SAMPLING_REF_PLACEHOLDER = /\{\{ref:(\d+)\}\}/gu;
+const SAMPLING_BLOCK_PLACEHOLDER = /\{\{sample-block:(\d+)\}\}/gu;
 const BLOCK_LINE = /^\[(blk_[0-9a-f]{24})\] /u;
 /** The `({kind}{level})` marker the prompt contract writes between a block's identity and its text. */
 const BLOCK_KIND_MARKER = /^\((?:title|heading|paragraph)(?: h[1-6])?\) /u;
@@ -194,12 +195,20 @@ export function substituteAssuranceSamplingRefPlaceholders(text: string, listedR
   return text.replace(SAMPLING_REF_PLACEHOLDER, (placeholder, index: string) => listedRefs[Number(index) - 1] ?? placeholder);
 }
 
+/** Sampling can cite its own and overlap blocks in free-text reasons; neither identity survives re-import. */
+export function substituteAssuranceSamplingBlockPlaceholders(text: string, message: string): string {
+  const ids = message.split('\n').flatMap((line) => { const match = BLOCK_LINE.exec(line); return match === null ? [] : [match[1]!]; });
+  return text.replace(SAMPLING_BLOCK_PLACEHOLDER, (placeholder, index: string) => ids[Number(index) - 1] ?? placeholder);
+}
+
 /** J-16's answer hold: awaited before a dialogue chunk with how many were streamed and whether the turn was interrupted. */
 export type AnswerHold = (chunksStreamed: number, interrupted: () => boolean) => Promise<void>;
 
 export class Ai7LocalDeterministicAdapter implements LlmAdapter {
   readonly #fixture: ResolvedModelFixture;
   readonly #promptContractDigest: string;
+  /** The sampling contract the Run's kind binds (Issue #826): its turns are keyed by it, never by another's. */
+  readonly #assurancePromptContractDigest: string;
   readonly #codes: DshFailureCodes;
   readonly #resolveBy: FixtureResolution;
   readonly #entries: ReadonlyMap<string, ModelFixtureEntry>;
@@ -224,10 +233,17 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
        * resolves at once when the turn is interrupted.
        */
       readonly answerHold?: AnswerHold | null;
+      /**
+       * The assurance sampling contract the Run's kind binds (Issue #826): the current baseline's /2, else /1. A sampling turn
+       * is keyed by it, so an entry recorded or authored under one sampling contract never answers a question asked under
+       * another. Absent, /1 — the contract every other kind binds.
+       */
+      readonly assurancePromptContractDigest?: string;
     } = {},
   ) {
     this.#fixture = fixture;
     this.#promptContractDigest = promptContractDigest;
+    this.#assurancePromptContractDigest = options.assurancePromptContractDigest ?? ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST;
     this.#codes = codes;
     this.#attemptsBefore = options.attemptsBefore ?? new Map();
     this.#answerHold = options.answerHold ?? null;
@@ -381,7 +397,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
         : drafting !== null
           ? writingSynthesisRequestDigest(this.#promptContractDigest, drafting.setDigest)
         : sampling !== null
-          ? assuranceSamplingRequestDigest(ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, sampling.unitOrdinal, sampling.unitDigest, sampling.sampleDigest)
+          ? assuranceSamplingRequestDigest(this.#assurancePromptContractDigest, sampling.unitOrdinal, sampling.unitDigest, sampling.sampleDigest)
           : reflection !== null
             ? runReportReflectionRequestDigest(RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, reflection.accountingDigest)
             : this.#resolveBy === 'content-digest'
@@ -427,7 +443,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
         const replay = reflection !== null || synthesis !== null || report !== null || rewrite !== null
           ? response.text
           : sampling !== null
-            ? substituteAssuranceSamplingRefPlaceholders(response.text, parseAssuranceSamplingListedRefs(text!))
+            ? substituteAssuranceSamplingBlockPlaceholders(substituteAssuranceSamplingRefPlaceholders(response.text, parseAssuranceSamplingListedRefs(text!)), text!)
             : crossUnit === null
               ? substituteBlockPlaceholders(response.text, ownBlockIdsOf(text!))
               : substituteCrossUnitBlockPlaceholders(response.text, parseCrossUnitCitedBlocks(text!));

@@ -1,20 +1,22 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
-import { isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
  * Turn one Provider Result Cache entry (ADR 0067, ADR 0089) into an `ai7.model-fixture/1` file.
  *
  *   node tools/generate-model-fixture.mjs --from-cache <test item id | request digest> \
- *     --cache-root <dir> --identity <id> --description <text> --out <file>
+ *     --cache-root <dir> --identity <id> --description <text> --out <file> \
+ *     [--sample1-store <external ai7.sqlite> --sample1-task <task intent id>]
  *
- * Every argument is required and nothing defaults to any host's paths: the cache lives outside every
- * checkout, and a tool that guessed where would be one flag away from reading it by accident.
+ * Every argument but the optional sample1 pair is required, and nothing defaults to any host's paths:
+ * the cache lives outside every checkout, and a tool that guessed where would be one flag away from
+ * reading it by accident.
  *
  * The point of the tool is that a cached live result becomes a deterministic fixture without anyone
- * hand-copying a digest, and without manuscript text riding along. Existing request subjects convert, each
- * keyed the way the deterministic adapter resolves it (Issue #808): an Analysis Unit, under its unit
+ * hand-copying a digest. Only proved exact sample1 may retain manuscript free text (ADR 0079 §5).
+ * Existing request subjects convert, each keyed the way the deterministic adapter resolves it (Issue #808): an Analysis Unit, under its unit
  * ordinal and the request digest of its frozen prompt contract and manifest unit, and additionally a
  * `contentDigest` over its own block texts alone, so the same entry also answers a fresh import of the
  * same manuscript; and the Run's cross-unit reduction, an assurance sampling turn and the Run Report
@@ -42,8 +44,8 @@ import { fileURLToPath } from 'node:url';
  * interesting part of the tool. A capture the ledger retired — a stale line, an invalidation of its
  * item, or an invalidation of its validation case at or after the ledger position the call observed
  * before it was claimed — refuses as `FIXTURE_GEN/item-retired`: retired evidence answers nothing. A
- * free-text field that still shares a run of MANUSCRIPT_ECHO_THRESHOLD characters with a block the
- * request carried, after placeholder substitution, refuses as `FIXTURE_GEN/manuscript-echo`, naming a
+ * free-text field outside the proved sample1 exemption that still shares a run of MANUSCRIPT_ECHO_THRESHOLD
+ * characters with a block the request carried, after placeholder substitution, refuses as `FIXTURE_GEN/manuscript-echo`, naming a
  * bounded JSON path and the run length and never the characters themselves. Earlier model results,
  * tool results and other carried user text are checked too; a reviewer still reads every free-text
  * field. An `--out` under `tests/fixtures/` refuses outright: a fixture enters that directory only
@@ -54,10 +56,9 @@ import { fileURLToPath } from 'node:url';
  * below are reached; they exist for entries that carry such a status, and the unit suite drives them
  * from a synthetic cache.
  *
- * This file is plain ESM run by `node` directly, before and outside any TypeScript build, so it
- * imports nothing from `src/` or `dist/` and duplicates the few constants and pure functions it
- * needs. `tests/unit/generate-model-fixture.test.ts` imports these exports beside the owning modules'
- * and asserts they agree; drift is caught there rather than prevented by an import that cannot exist.
+ * Ordinary conversion is plain ESM run before a TypeScript build and duplicates the small pure
+ * constants its agreement suite checks. Exact sample1 admission additionally bundles the existing
+ * source extraction/manifest/message owners in memory after normal bootstrap; no built output is read.
  */
 const MODEL_FIXTURE_SCHEMA = 'ai7.model-fixture/1';
 const FIXTURE_IDENTITY_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -73,12 +74,22 @@ const PROVIDER_CACHE_DIRECTORY = 'entries';
 // --- Duplicated from src/service/analysis/{cross-unit,assurance-sampling,run-report}-contract.ts (Issue #808) ---------------
 export const BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST = '8298dc9db1b95f26072cabb00a8c9a14997f68ebe7bf07d01181985f848e66cb';
 export const ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST = '4c05e66ba8077c85aa1334b53e98155566fcd9f51d9bd3343e95e7b14ddc03db';
+/**
+ * The two admitted sampling contracts (Issue #826) and the SHA-256 of each nine-line instruction as a message carries it
+ * after its header. The instruction must match one exactly, and the capture's recorded stage contract must agree.
+ */
+export const ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST = '1bfd29ecb6ba5d9bdbd1e1d097da4de6a0d1c9e6319c5f2318d2ca8c5eeb112c';
+export const ASSURANCE_SAMPLING_V1_INSTRUCTION_SHA256 = 'aa072ff68b48dcb124cf7eff205c3c5630118a55d46aa137bbe414efa6d805d4';
+export const ASSURANCE_SAMPLING_V2_INSTRUCTION_SHA256 = '522b3a3c19b5d456ec9d9611720cca0eab7d042e92cc47bd0a18eaa20b89b262';
+const ASSURANCE_SAMPLING_INSTRUCTION_LINES = 9;
 export const RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST = '96456fc99625e12014633439564f17a54cdb1f4f0a05b8076c10a4b03bbd7676';
 const CROSS_UNIT_HEADER = /^跨单元归纳 (\d+)\/(\d+) · 单元集摘要 ([0-9a-f]{64})$/u;
 const CITED_BLOCKS_HEADER = '各单元引用的内容块标识（按首次引用顺序）：';
 const CITED_BLOCKS_LINE = /^单元 (\d+)：(.+)$/u;
 const CITED_BLOCK_SEPARATOR = '、';
 const SAMPLING_HEADER = /^保证抽样 (\d+)\/(\d+) · 单元摘要 ([0-9a-f]{64}) · 抽样摘要 ([0-9a-f]{64})$/u;
+const SAMPLING_OVERLAP_HEADER = '以下为承接上一单元的重叠上下文（仅供理解）：';
+const SAMPLING_OWN_HEADER = '以下为本单元的内容块：';
 const SAMPLING_FINDING_HEADER = '以下为需要复核的发现：';
 const SAMPLING_FINDING_LINE = /^- \[([A-Za-z0-9_-]{1,64})\]（/u;
 const REFLECTION_HEADER = /^运行反思 ([A-Za-z0-9_-]{1,64}) · 账目摘要 ([0-9a-f]{64})$/u;
@@ -265,6 +276,7 @@ export function unitContentDigest(ownBlockTexts) {
 // --- Arguments --------------------------------------------------------------------------------
 
 const ARGUMENT_KEYS = ['--from-cache', '--cache-root', '--identity', '--description', '--out'];
+const SAMPLE1_PROOF_KEYS = ['--sample1-store', '--sample1-task'];
 
 /**
  * A path is reserved when any two consecutive segments are `tests` and `fixtures`. The check is on
@@ -282,7 +294,7 @@ export function parseGenerationArguments(argv) {
   const values = new Map();
   for (let index = 0; index < argv.length; index += 1) {
     const key = argv[index];
-    refuse(ARGUMENT_KEYS.includes(key), 'FIXTURE_GEN/arguments-invalid', `无法识别的参数 ${String(key)}。`);
+    refuse([...ARGUMENT_KEYS, ...SAMPLE1_PROOF_KEYS].includes(key), 'FIXTURE_GEN/arguments-invalid', `无法识别的参数 ${String(key)}。`);
     const value = argv[index + 1];
     refuse(typeof value === 'string' && value.length > 0 && !values.has(key), 'FIXTURE_GEN/arguments-invalid', `参数 ${key} 缺少值或重复出现。`);
     values.set(key, value);
@@ -302,7 +314,126 @@ export function parseGenerationArguments(argv) {
   const out = resolve(values.get('--out'));
   refuse(!withinReservedFixtures(out), 'FIXTURE_GEN/out-path-reserved',
     '生成的夹具只能经过评审的拉取请求进入 tests/fixtures/。');
-  return { selector, cacheRoot, identity, description, out };
+  const proofCount = SAMPLE1_PROOF_KEYS.filter((key) => values.has(key)).length;
+  refuse(proofCount === 0 || proofCount === 2, 'FIXTURE_GEN/arguments-invalid', 'sample1 来源证明参数必须成对提供。');
+  if (proofCount === 0) return { selector, cacheRoot, identity, description, out };
+  const sample1Store = resolve(values.get('--sample1-store'));
+  const sample1Task = values.get('--sample1-task');
+  refuse(/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/u.test(sample1Task), 'FIXTURE_GEN/arguments-invalid', 'sample1 任务身份无效。');
+  return { selector, cacheRoot, identity, description, out, sample1Store, sample1Task };
+}
+
+const SAMPLE1_SOURCE_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
+const TOOL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+let sample1Owners;
+
+/** Load the existing extraction and message owners before a build, without writing a second extractor or generated code. */
+async function loadSample1Owners() {
+  sample1Owners ??= (async () => {
+    const { build } = await import('esbuild');
+    const result = await build({
+      stdin: { contents: [
+        "export { parseDocx } from './src/service/docx.ts';",
+        "export { deriveCoverageManifest } from './src/service/analysis/coverage-manifest.ts';",
+        "export { buildUnitMessage, BASELINE_PROMPT_CONTRACT, BASELINE_PROMPT_CONTRACT_DIGEST, BASELINE_PROMPT_CONTRACT_V1, BASELINE_PROMPT_CONTRACT_V1_DIGEST } from './src/service/analysis/contract.ts';",
+        "export { buildCrossUnitMessage } from './src/service/analysis/cross-unit-contract.ts';",
+        "export { buildAssuranceSamplingMessage, drawAssuranceSample, assuranceSamplingTurns } from './src/service/analysis/assurance-sampling-contract.ts';",
+        "export { baselineAnalysisKindDefinition } from './src/service/analysis/kind-definition.ts';",
+        "export { buildRunReportReflectionMessage } from './src/service/analysis/run-report-contract.ts';",
+        "export { runReportAccountingOf } from './src/service/analysis/run-report.ts';",
+      ].join('\n'), resolveDir: TOOL_ROOT, loader: 'ts' },
+      bundle: true, platform: 'node', format: 'esm', write: false, logLevel: 'silent',
+    });
+    return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
+  })();
+  return sample1Owners;
+}
+
+/**
+ * ADR 0079 §5: only the exact admitted carrier is exempt. Its frozen product manifest is checked
+ * against the existing DOCX extractor; the entire selected stage message is rebuilt from that
+ * task's integrity-checked records. A flag, filename, declared digest or validation label is never proof.
+ * Protected records stay in the external read-only store, and only the sanitized candidate is emitted.
+ */
+export async function verifySample1Capture(request, selection, parsed) {
+  if (request.sample1Store === undefined && request.sample1Task === undefined) return false;
+  let step = 'source';
+  const fail = () => { throw new FixtureGenerationError('FIXTURE_GEN/sample1-source-unproved', step); };
+  let database;
+  try {
+    if (typeof request.sample1Store !== 'string' || typeof request.sample1Task !== 'string') fail();
+    const relation = relative(TOOL_ROOT, resolve(request.sample1Store));
+    if (!relation.startsWith('..') && !isAbsolute(relation)) fail();
+    const source = join(TOOL_ROOT, 'SampleBooks', 'sample1.docx');
+    if (sha256Hex(await readFile(source)) !== SAMPLE1_SOURCE_SHA256) fail();
+    const owners = await loadSample1Owners();
+    // The task contract the capture was made under (Issue #826): the current /2, or /1 for a capture of the original Run. Its
+    // system prompt, plan, revision and sampling contract are all that contract's; another contract proves nothing.
+    const contracts = [
+      { selection: 'current', prompt: owners.BASELINE_PROMPT_CONTRACT, digest: owners.BASELINE_PROMPT_CONTRACT_DIGEST },
+      { selection: 'retained-v1', prompt: owners.BASELINE_PROMPT_CONTRACT_V1, digest: owners.BASELINE_PROMPT_CONTRACT_V1_DIGEST },
+    ];
+    const contract = contracts.find((candidate) => candidate.digest === selection.taskPromptContractDigest);
+    if (contract === undefined || parsed.carriedMessageCount !== 1 || parsed.systemMessages.length !== 1 ||
+      parsed.systemMessages[0] !== contract.prompt.systemPrompt) fail();
+    const definition = owners.baselineAnalysisKindDefinition(contract.selection);
+    step = 'records';
+    const { DatabaseSync } = await import('node:sqlite');
+    database = new DatabaseSync(request.sample1Store, { readOnly: true });
+    const checked = (row) => {
+      if (row === undefined || sha256Hex(row.canonical_json) !== row.sha256) fail();
+      return JSON.parse(row.canonical_json);
+    };
+    const plan = (component) => checked(database.prepare('SELECT canonical_json, sha256 FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = 1 AND component = ?').get(request.sample1Task, component));
+    const pin = plan('manuscript-pin');
+    const manifest = plan('coverage-manifest');
+    const envelope = plan('plan-envelope');
+    if (pin.sourceDigest !== SAMPLE1_SOURCE_SHA256 || pin.revisionDigest !== manifest.manuscript.revisionDigest ||
+      pin.revisionId !== manifest.manuscript.revisionId || envelope.promptContractDigest !== contract.digest) fail();
+    step = 'extract';
+    const blocks = [];
+    await owners.parseDocx(source, 'sample1.docx', (block) => blocks.push({ ...block, graphemes: block.graphemeLength }),
+      { digest: SAMPLE1_SOURCE_SHA256, bytes: 29_550 });
+    const ids = manifest.units.flatMap((unit) => unit.blockIds);
+    if (ids.length !== blocks.length) fail();
+    const frozenBlocks = blocks.map((block, index) => ({ ...block, blockId: ids[index] }));
+    const rebuilt = owners.deriveCoverageManifest({ ...manifest.manuscript, blocks: frozenBlocks });
+    step = 'manifest';
+    if (canonicalJson(rebuilt) !== canonicalJson(manifest)) fail();
+    const byId = new Map(frozenBlocks.map((block) => [block.blockId, block]));
+    const revision = checked(database.prepare('SELECT canonical_json, sha256 FROM analysis_result_set_revisions WHERE task_intent_id = ? ORDER BY ordinal LIMIT 1').get(request.sample1Task));
+    step = 'binding';
+    if (revision.coverageManifestDigest !== manifest.digest || revision.adapterPin.model !== selection.model ||
+      revision.adapterPin.route !== selection.captured.route || revision.bindingPin.promptContractDigest !== selection.taskPromptContractDigest) fail();
+    step = 'message';
+    let expected;
+    if (parsed.subject === 'unit') {
+      const unit = manifest.units[parsed.unitOrdinal - 1];
+      if (unit === undefined) fail();
+      expected = owners.buildUnitMessage(unit, manifest.units.length, byId);
+    } else if (parsed.subject === 'reduction') {
+      const rows = database.prepare("SELECT canonical_json, sha256 FROM analysis_unit_results WHERE revision_id = ? AND state = 'closed' ORDER BY unit_ordinal").all(revision.revisionId);
+      const closed = rows.map((row) => {
+        const result = checked(row);
+        const { state: _state, requestDigest: _request, responseDigest: _response, usage: _usage, ...fields } = result;
+        return { unitOrdinal: result.unitOrdinal, result: { schema: 'ai7.baseline-manuscript-analysis.unit-result/1', ...fields } };
+      });
+      expected = owners.buildCrossUnitMessage(closed, manifest.units.length);
+    } else if (parsed.subject === 'sampling') {
+      const candidates = definition.assurance.candidates({ components: { crossUnitFindings: revision.crossUnitFindings } });
+      const draw = owners.drawAssuranceSample(manifest, candidates);
+      const messages = owners.assuranceSamplingTurns(draw.sampled).map((turn) =>
+        owners.buildAssuranceSamplingMessage(manifest.units[turn.unitOrdinal - 1], manifest.units.length, byId, turn.findings, definition.assurance.prompt));
+      if (selection.promptContractDigest !== definition.assurance.promptContractDigest) fail();
+      expected = messages.find((message) => message === parsed.unitMessage);
+    } else if (parsed.subject === 'reflection') {
+      const outcome = checked(database.prepare('SELECT canonical_json, sha256 FROM analysis_task_outcomes WHERE task_intent_id = ?').get(request.sample1Task));
+      if (outcome.resultSetRevisionId !== revision.revisionId) fail();
+      expected = owners.buildRunReportReflectionMessage(outcome.runRecordId, owners.runReportAccountingOf(outcome.report));
+    } else fail();
+    if (expected === undefined || expected !== parsed.unitMessage) fail();
+    return true;
+  } catch { fail(); } finally { database?.close(); }
 }
 
 // --- Ledger and cache -------------------------------------------------------------------------
@@ -609,17 +740,24 @@ export function parseCachedRequest(requestBody, promptContractDigest) {
   refuse(body !== null && typeof body === 'object' && !Array.isArray(body) && Array.isArray(body.messages) && body.messages.length > 0,
     'FIXTURE_GEN/request-shape-unsupported', '缓存条目不是 openai-chat-completions 请求体。');
   let unitMessage = null;
+  let unitMessageIndex = -1;
   const carriedMessages = [];
+  const systemMessages = [];
   for (const message of body.messages) {
     refuse(message !== null && typeof message === 'object' && !Array.isArray(message) && typeof message.role === 'string',
       'FIXTURE_GEN/request-shape-unsupported', '请求体中的消息缺少角色。');
     const text = chatMessageText(message.content);
     refuse(text !== null, 'FIXTURE_GEN/request-shape-unsupported', '请求体中的消息内容既不是字符串也不是文本块序列。');
-    if (message.role === 'user') unitMessage = text;
+    if (message.role === 'user') {
+      unitMessage = text;
+      unitMessageIndex = carriedMessages.length;
+    }
     if (message.role !== 'system') carriedMessages.push(text);
+    else systemMessages.push(text);
   }
   refuse(unitMessage !== null, 'FIXTURE_GEN/request-shape-unsupported', '请求体不含任何 user 消息。');
   const carriedBlockTexts = carriedBlockTextsOf(unitMessage);
+  const unitMessageScanIndex = carriedBlockTexts.length + unitMessageIndex;
   // Everything the request carried but its frozen system prompt — user input, earlier model results, tool results and selected
   // dialogue text — participates in sanitization. The exact request remains only in the external cache.
   carriedBlockTexts.push(...carriedMessages);
@@ -629,42 +767,64 @@ export function parseCachedRequest(requestBody, promptContractDigest) {
     const ownBlockTexts = ownBlockTextsOf(unitMessage);
     refuse(ownBlockTexts.length > 0, 'FIXTURE_GEN/unit-message-unrecognized', '分析单元消息不含任何本单元内容块。');
     return {
-      subject: task?.subject ?? 'unit', unitMessage, header, ownBlockTexts, carriedBlockTexts,
+      subject: task?.subject ?? 'unit', unitMessage, header, ownBlockTexts, carriedBlockTexts, carriedMessageCount: carriedMessages.length, systemMessages,
       unitOrdinal: header.ordinal,
       requestDigest: task?.requestDigest ?? (promptContractDigest === undefined ? null : unitRequestDigest(promptContractDigest, header.ordinal, header.unitDigest)),
       contentDigest: unitContentDigest(ownBlockTexts),
       identities: ownBlockIdsOf(unitMessage).map((identity, index) => ({ placeholder: `{{block:${index + 1}}}`, identity })),
     };
   }
-  if (task !== null) return { ...task, unitMessage, ownBlockTexts: [], carriedBlockTexts, contentDigest: null, identities: [] };
+  if (task !== null) return { ...task, unitMessage, ownBlockTexts: [], carriedBlockTexts, carriedMessageCount: carriedMessages.length, systemMessages, contentDigest: null, identities: [] };
   const reduction = parseCrossUnitMessageHeader(unitMessage);
   if (reduction !== null) {
     const identities = [...parseCrossUnitCitedBlocks(unitMessage)].flatMap(([unit, blockIds]) =>
       blockIds.map((identity, index) => ({ placeholder: `{{unit:${unit}:block:${index + 1}}}`, identity })));
     return {
       subject: 'reduction', stageContractDigest: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, unitMessage, header: null, ownBlockTexts: [],
-      carriedBlockTexts, unitOrdinal: 0, contentDigest: null, identities,
+      carriedBlockTexts, carriedMessageCount: carriedMessages.length, systemMessages, unitOrdinal: 0, contentDigest: null, identities,
       requestDigest: crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, reduction.unitSetDigest),
     };
   }
   const sampling = parseAssuranceSamplingMessageHeader(unitMessage);
   if (sampling !== null) {
+    const stageContractDigest = samplingStageContractOf(unitMessage);
+    // The exact public instruction has just been proved, like the frozen system prompt above. Keep every block, finding
+    // and other carried turn in the echo scan, but do not mistake its required result-schema literal for manuscript text.
+    const messageLines = unitMessage.split('\n');
+    const messageWithoutInstruction = [messageLines[0], ...messageLines.slice(1 + ASSURANCE_SAMPLING_INSTRUCTION_LINES)].join('\n');
     return {
-      subject: 'sampling', stageContractDigest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, unitMessage, header: null, ownBlockTexts: [],
-      carriedBlockTexts, unitOrdinal: 0, contentDigest: null,
-      identities: parseAssuranceSamplingListedRefs(unitMessage).map((identity, index) => ({ placeholder: `{{ref:${index + 1}}}`, identity })),
-      requestDigest: assuranceSamplingRequestDigest(ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, sampling.unitOrdinal, sampling.unitDigest, sampling.sampleDigest),
+      subject: 'sampling', stageContractDigest, unitMessage, header: null, ownBlockTexts: [],
+      carriedBlockTexts: carriedBlockTexts.map((text, index) => index === unitMessageScanIndex ? messageWithoutInstruction : text),
+      carriedMessageCount: carriedMessages.length, systemMessages, unitOrdinal: 0, contentDigest: null,
+      identities: [
+        ...parseAssuranceSamplingListedRefs(unitMessage).map((identity, index) => ({ placeholder: `{{ref:${index + 1}}}`, identity })),
+        ...unitMessage.split('\n').flatMap((line) => { const match = BLOCK_LINE.exec(line); return match === null ? [] : [match[1]]; })
+          .map((identity, index) => ({ placeholder: `{{sample-block:${index + 1}}}`, identity })),
+      ],
+      requestDigest: assuranceSamplingRequestDigest(stageContractDigest, sampling.unitOrdinal, sampling.unitDigest, sampling.sampleDigest),
     };
   }
   const reflection = parseRunReportReflectionMessageHeader(unitMessage);
   if (reflection !== null) {
     return {
       subject: 'reflection', stageContractDigest: RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, unitMessage, header: null, ownBlockTexts: [],
-      carriedBlockTexts, unitOrdinal: 0, contentDigest: null, identities: [],
+      carriedBlockTexts, carriedMessageCount: carriedMessages.length, systemMessages, unitOrdinal: 0, contentDigest: null, identities: [],
       requestDigest: runReportReflectionRequestDigest(RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, reflection.accountingDigest),
     };
   }
   throw new FixtureGenerationError('FIXTURE_GEN/unit-message-unrecognized', '最后一条 user 消息不是可识别的分析单元、跨单元归纳、保证抽样或运行反思消息。');
+}
+
+/** Only an exact /1 or /2 instruction establishes a sampling contract; unknown text is never historical evidence. */
+function samplingStageContractOf(unitMessage) {
+  const lines = unitMessage.split('\n');
+  const instructionDigest = sha256Hex(lines.slice(1, 1 + ASSURANCE_SAMPLING_INSTRUCTION_LINES).join('\n'));
+  const following = lines[1 + ASSURANCE_SAMPLING_INSTRUCTION_LINES];
+  refuse(following === SAMPLING_OVERLAP_HEADER || following === SAMPLING_OWN_HEADER,
+    'FIXTURE_GEN/contract-mismatch', '保证抽样指令不是完整的已知契约。');
+  if (instructionDigest === ASSURANCE_SAMPLING_V1_INSTRUCTION_SHA256) return ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST;
+  if (instructionDigest === ASSURANCE_SAMPLING_V2_INSTRUCTION_SHA256) return ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST;
+  throw new FixtureGenerationError('FIXTURE_GEN/contract-mismatch', '保证抽样指令不匹配任何已知契约。');
 }
 
 /** Closed header families already consumed by the deterministic adapter; no new Task support. */
@@ -745,14 +905,14 @@ export function remapSamplingRefs(text, identities) {
   } catch {
     return remapIdentities(text, identities);
   }
-  const placeholders = new Map(identities.map(({ placeholder, identity }) => [identity, placeholder]));
+  const placeholders = new Map(identities.filter(({ placeholder }) => placeholder.startsWith('{{ref:')).map(({ placeholder, identity }) => [identity, placeholder]));
   const visit = (node, key) => {
     if (typeof node === 'string') return key === 'ref' ? placeholders.get(node) ?? node : node;
     if (Array.isArray(node)) return node.map((item) => visit(item, undefined));
     if (node !== null && typeof node === 'object') return Object.fromEntries(Object.entries(node).map(([name, item]) => [name, visit(item, name)]));
     return node;
   };
-  return remapIdentities(JSON.stringify(visit(parsed, undefined)), []);
+  return remapIdentities(JSON.stringify(visit(parsed, undefined)), identities.filter(({ placeholder }) => placeholder.startsWith('{{sample-block:')));
 }
 
 /**
@@ -830,7 +990,10 @@ function mapStrings(node, map) {
  * JSON is treated as one field, which is the honest reading of a response that did not parse. The
  * echo is measured against every block text the request carried, under whichever header.
  */
-export function redactUnitResultText(text, ownBlockTexts, carriedBlockTexts = ownBlockTexts) {
+export function redactUnitResultText(text, ownBlockTexts, carriedBlockTexts = ownBlockTexts, sample1Verified = false) {
+  // Exact sample1 is exempt entirely: replacing a quoted full block with a block identity would change
+  // the recorded meaning and the later reduction's content key. Citation identities are still remapped.
+  if (sample1Verified) return text;
   let parsed;
   try {
     parsed = JSON.parse(text);
@@ -880,7 +1043,7 @@ export function mapCachedResponse(entry, selection, ownBlockTexts, request = { i
   // longer say what the capture said; so every placeholder in a fixture must be one this conversion put there.
   refuse(text.match(PLACEHOLDER_SHAPE) === null, 'FIXTURE_GEN/identity-unmapped', '原始响应已含有占位符形式的文字，回放无法与捕获区分。');
   const remapped = request.subject === 'sampling' ? remapSamplingRefs(text, request.identities) : remapIdentities(text, request.identities);
-  const sanitized = redactUnitResultText(remapped, ownBlockTexts, request.carriedBlockTexts);
+  const sanitized = redactUnitResultText(remapped, ownBlockTexts, request.carriedBlockTexts, request.sample1Verified === true);
   refuse(sanitized.isWellFormed() && sanitized.length > 0 && sanitized.length <= 64 * 1024, 'FIXTURE_GEN/response-shape-unsupported', '归一化响应超出夹具文本边界。');
   const points = Array.from(sanitized);
   const chunks = [];
@@ -965,6 +1128,7 @@ export async function generateModelFixture(request, now = new Date()) {
   const entry = await readSelectedEntry(request.cacheRoot, selection);
   const parsed = parseCachedRequest(entry.requestBody, selection.promptContractDigest);
   requireStageContract(selection, parsed);
+  parsed.sample1Verified = await verifySample1Capture(request, selection, parsed);
   refuse(JSON.parse(entry.requestBody).model === selection.model, 'FIXTURE_GEN/entry-invalid', '请求体模型与捕获模型不一致。');
   refuse(/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,127}$/u.test(selection.model), 'FIXTURE_GEN/entry-invalid', '模型标识无效。');
   if (selection.cacheKey !== null) {

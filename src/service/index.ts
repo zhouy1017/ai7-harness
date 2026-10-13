@@ -1583,6 +1583,7 @@ async function run(): Promise<void> {
     { ReviewRunDriver },
     { DialogueExecutionOwner },
     { BackgroundAnalysisDispatcher: BackgroundAnalysisDispatcherClass },
+    { baselinePromptContractForLaunch },
   ] =
     await Promise.all([
       import('./store.js'),
@@ -1595,6 +1596,7 @@ async function run(): Promise<void> {
       import('./review/review-run-driver.js'),
       import('./dialogue/dialogue-execution.js'),
       import('./background-analysis.js'),
+      import('./analysis/kind-definition.js'),
     ]);
   StoreErrorClass = StoreError;
   let stopping = false;
@@ -1637,6 +1639,11 @@ async function run(): Promise<void> {
       // 结果待确认's stimulus (Issue #51, S16c): a fixture that ends a turn ambiguously binds only J-10's launch, and every
       // other launch naming one is refused here, before the store opens.
       : await loadLaunchFixture(resolve(codeRoot, '..', 'tests', 'fixtures', 'model'), modelAdapterControl, process.env.AI7_E2E_JOURNEY);
+    // The baseline prompt contract this launch asks under (Issue #826): the current one, unless J-04 binds the recorded /1
+    // Run's fixture, whose replay asks /1's questions; a fixture carrying /1 captures any other way is refused here.
+    const baselinePromptContract = baselinePromptContractForLaunch({
+      operationalScope: launchForm.trustedOperationalScope, journey: process.env.AI7_E2E_JOURNEY, fixture,
+    });
     // The software version the store records beside its Data Version (Issue #433, S85a) is the package the product ships
     // in: the carrier holds no package manifest, so it is read from the source checkout that contains `dist/`.
     const softwareVersion = await readSoftwareVersion(resolve(codeRoot, '..'));
@@ -1651,6 +1658,7 @@ async function run(): Promise<void> {
       baselineAnalysisRoute: fixture === null
         ? null
         : { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
+      baselinePromptContract,
       // J-11's calibration gate (Issue #429, EVAL-011a): the product's ten Books in every other launch.
       ...(calibrationMinBooks === undefined ? {} : { calibrationMinAdjustments: calibrationMinBooks }),
     });

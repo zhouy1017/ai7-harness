@@ -17,8 +17,9 @@ import {
 } from '../../src/service/analysis/baseline-analysis-store.js';
 import { BASELINE_PROMPT_CONTRACT_DIGEST, unitRequestDigest } from '../../src/service/analysis/contract.js';
 import { RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/run-report-contract.js';
+// The current baseline samples under sampling contract /2 (Issue #826).
 import {
-  ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST,
+  ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST,
   assuranceSamplingRequestDigest,
   parseAssuranceSamplingListedRefs,
   parseAssuranceSamplingMessageHeader,
@@ -74,8 +75,11 @@ type Ceiling = DeveloperLiveCeiling;
 const CEILING: Ceiling = { kind: 'tokens', maxTotalTokens: 500_000 };
 /** The development validation every live Run here belongs to (Issue #808). */
 const VALIDATION: DevelopmentValidationIntent = { family: 'baseline-analysis', case: 'sample1-whole-book', delta: null };
-/** The V4.1 developer-live composition: zero tools, no Session log; model identity changes its digest. */
-const DEV_LIVE_COMPOSITION_DIGEST = '836ad3246198b3793d5664b53a15af8134d6fc0cdb1d0a8b62eba58f4f19bb6d';
+/**
+ * The V4.1 developer-live composition: zero tools, no Session log; model identity changes its digest, and so does the baseline
+ * prompt contract (/2 since Issue #826) — the digest the #826 developer-live checkpoint recorded.
+ */
+const DEV_LIVE_COMPOSITION_DIGEST = 'f4971b9178724fba7ca95434996fb424d58ae24d20d21cbb2127d681c2346ca0';
 /** What a developer-live launch binds when the form names no ceiling: 30,000 tokens per frozen unit. */
 const POLICY_DEFAULT_CEILING: Ceiling = {
   kind: 'tokens-per-frozen-unit',
@@ -199,7 +203,7 @@ function stubTransport(options: {
         ? options.reflection ?? SYNTHETIC_REFLECTION
         : options.named?.get(crossUnit !== null
           ? crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, crossUnit.unitSetDigest)
-          : assuranceSamplingRequestDigest(ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, sampling!.unitOrdinal, sampling!.unitDigest, sampling!.sampleDigest));
+          : assuranceSamplingRequestDigest(ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST, sampling!.unitOrdinal, sampling!.unitDigest, sampling!.sampleDigest));
       if (answer === undefined) return { status: 500, json: async () => ({ error: { message: 'no synthetic named answer' } }) };
       const content = crossUnit !== null
         ? substituteCrossUnitBlockPlaceholders(answer.text, parseCrossUnitCitedBlocks(text))
@@ -494,7 +498,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     const lines = await ledgerLines(cacheRoot);
     expect(lines.map((line) => line.promptContractDigest)).toEqual([
       ...Array.from({ length: SAMPLE1_UNITS }, () => BASELINE_PROMPT_CONTRACT_DIGEST),
-      BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST,
+      BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST, RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST,
     ]);
     expect(lines.every((line) => line.taskPromptContractDigest === BASELINE_PROMPT_CONTRACT_DIGEST)).toBe(true);
     expect(lines.map((line) => line.itemId)).toEqual(

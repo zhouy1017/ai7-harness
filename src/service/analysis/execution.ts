@@ -29,7 +29,7 @@ import {
   type AssuranceSamplingParseFailureCode,
 } from './assurance-sampling-contract.js';
 import { canonicalRecord, sha256Hex } from './canonical.js';
-import { CARRIED_STAGES, OUTCOME_UNKNOWN_NO_RESUME, SAMPLE1_SOURCE_DIGEST, type BaselineAnalysisStore, type CarriedStages, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitCheckpoint, type UnitResultRecord } from './baseline-analysis-store.js';
+import { assuranceContractMoved, CARRIED_STAGES, OUTCOME_UNKNOWN_NO_RESUME, SAMPLE1_SOURCE_DIGEST, type BaselineAnalysisStore, type CarriedStages, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitCheckpoint, type UnitResultRecord } from './baseline-analysis-store.js';
 import type { BaselineUnitResult } from './contract.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
 import { ExecutionAdmissionError } from './execution-error.js';
@@ -724,7 +724,7 @@ export class BaselineAnalysisExecutionOwner {
       facts, definition: ledger.definition, live, fixture: this.#deps.fixture, attemptId: stored.attemptId,
       harnessSessionId: stored.binding.harnessSessionId, boundAt: stored.binding.boundAt, compositionDigest: composition.digest,
     });
-    return canonicalRecord(rebuilt).digest !== stored.bindingDigest;
+    return canonicalRecord(rebuilt).digest !== stored.bindingDigest || assuranceContractMoved(ledger.definition, facts.assurancePromptContractDigest);
   }
 
   /**
@@ -1115,7 +1115,10 @@ export class BaselineAnalysisExecutionOwner {
         // A continuation's retry is the unit's second attempt however many executions it took to reach it (Issue #422,
         // S76d): the deterministic fixture serves attempts in order, so it is told what each unit attempted before.
         if (live === null) {
-          return new Ai7LocalDeterministicAdapter(fixture!, promptContractDigest, codes, continuation === null ? {} : { attemptsBefore: ledger.unitAttemptsOf(facts.runRecordId) });
+          // Sampling turns are keyed by the sampling contract this kind binds (Issue #826), as the unit turns are by its prompt.
+          const assurance = definition.assurance === null ? {} : { assurancePromptContractDigest: definition.assurance.promptContractDigest };
+          return new Ai7LocalDeterministicAdapter(fixture!, promptContractDigest, codes,
+            continuation === null ? assurance : { ...assurance, attemptsBefore: ledger.unitAttemptsOf(facts.runRecordId) });
         }
         liveAdapter.instance = new DeepSeekOpenAiCompatibleAdapter({
           broker: this.#broker,
@@ -1174,6 +1177,7 @@ export class BaselineAnalysisExecutionOwner {
     } | null = null;
     try {
       requireCompositionMatch(harness.composition.digest, facts.behaviorCompositionDigest);
+      requireAssuranceContractMatch(definition, facts.assurancePromptContractDigest);
       const bindingRecord: ExecutionBindingRecord = executionBindingRecordOf({
         facts, definition, live, fixture, attemptId, harnessSessionId, boundAt, compositionDigest: harness.composition.digest,
       });
@@ -2284,7 +2288,7 @@ export class BaselineAnalysisExecutionOwner {
       // 暂停 between two sampling turns (S76b): no further one is sent; the Run waits, and 续行 draws the sample again.
       if (active.pauseRequested) break;
       const unit = manifest.units[turn.unitOrdinal - 1]!;
-      const message = buildAssuranceSamplingMessage(unit, manifest.units.length, context.blocksById, turn.findings);
+      const message = buildAssuranceSamplingMessage(unit, manifest.units.length, context.blocksById, turn.findings, definition.assurance.prompt);
       // The same set the gate reads: exactly one further user message becomes admissible per turn, and
       // every other refusal — route, model, system prompt, tools, prior outputs — is untouched.
       context.admittedUserMessages.add(message);
@@ -2666,6 +2670,13 @@ export function runReportUnitRows(
       gapCode: record.closed.state === 'gap' ? record.closed.gap.code : null,
     };
   });
+}
+
+/** The sampling contract a Run would sample under must be the one its plan froze (Issue #826); nothing is sent otherwise. */
+function requireAssuranceContractMatch(definition: AnalysisKindDefinition, frozenDigest: string): void {
+  if (assuranceContractMoved(definition, frozenDigest)) {
+    throw new ExecutionAdmissionError('EXECUTION_STAGE_CONTRACT_DRIFT', '保证抽样契约与冻结计划不一致；未开始执行。');
+  }
 }
 
 function requireCompositionMatch(actual: string, planned: string): void {

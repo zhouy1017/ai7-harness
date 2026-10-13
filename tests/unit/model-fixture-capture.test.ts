@@ -6,7 +6,7 @@ import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { BASELINE_PROMPT_CONTRACT_DIGEST, unitRequestDigest } from '../../src/service/analysis/contract.js';
 import { BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, crossUnitRequestDigest } from '../../src/service/analysis/cross-unit-contract.js';
-import { ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, assuranceSamplingRequestDigest, parseAssuranceSamplingResult } from '../../src/service/analysis/assurance-sampling-contract.js';
+import { ASSURANCE_SAMPLING_PROMPT_CONTRACT, ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, assuranceSamplingRequestDigest, parseAssuranceSamplingResult } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, runReportReflectionRequestDigest } from '../../src/service/analysis/run-report-contract.js';
 import { factualReviewRequestDigest } from '../../src/service/analysis/factual-review-contract.js';
 import { initialEvaluationRequestDigest, initialEvaluationSynthesisRequestDigest } from '../../src/service/evaluation/initial-evaluation-contract.js';
@@ -108,7 +108,7 @@ describe('converted capture proof and replay', () => {
   });
 
   it('round-trips sampling through the adapter and actual response contract after finding identities change', async () => {
-    const message = `保证抽样 1/1 · 单元摘要 ${D} · 抽样摘要 ${D}${blocks}\n以下为需要复核的发现：\n- [old_finding]（主要）合成发现。`;
+    const message = `保证抽样 1/1 · 单元摘要 ${D} · 抽样摘要 ${D}\n${ASSURANCE_SAMPLING_PROMPT_CONTRACT.instruction}${blocks}\n以下为需要复核的发现：\n- [old_finding]（主要）合成发现。`;
     const content = '{"schema":"ai7.analysis.assurance-sampling-result/1","dispositions":[{"ref":"old_finding","disposition":"成立","reason":"独立理由。"}]}';
     await synthetic(message, ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, content);
     const fixture = parseModelFixture(await generate());
@@ -117,6 +117,46 @@ describe('converted capture proof and replay', () => {
     const delta = chunks.find((chunk) => chunk.type === 'text-delta');
     expect(delta).toMatchObject({ text: content.replace('old_finding', 'new_finding') });
     if (delta?.type === 'text-delta') expect(parseAssuranceSamplingResult(delta.text, { refs: ['new_finding'] }).ok).toBe(true);
+  });
+
+  it('preserves sampling reasons while remapping carried block citations and finding references', async () => {
+    const overlap = `blk_${'3'.repeat(24)}`;
+    const freshOverlap = `blk_${'4'.repeat(24)}`;
+    const message = `保证抽样 1/1 · 单元摘要 ${D} · 抽样摘要 ${D}\n${ASSURANCE_SAMPLING_PROMPT_CONTRACT.instruction}\n${ASSURANCE_SAMPLING_PROMPT_CONTRACT.overlapHeader}\n[${overlap}] (paragraph) 合成重叠段落。${blocks}\n以下为需要复核的发现：\n- [0]（主要）合成发现。`;
+    const content = JSON.stringify({ schema: 'ai7.analysis.assurance-sampling-result/1', dispositions: [
+      { ref: '0', disposition: '需降级', reason: `合成理由：${B} 与 ${overlap}，数字 0 保留。` },
+    ] });
+    await synthetic(message, ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, content);
+    const fixture = parseModelFixture(await generate());
+    expect(fixture.entries[0]?.capture?.identityMap).toEqual([
+      { placeholder: '{{ref:1}}', identity: '0' },
+      { placeholder: '{{sample-block:1}}', identity: overlap },
+      { placeholder: '{{sample-block:2}}', identity: B },
+    ]);
+    const changed = message.replace(B, FRESH).replace(overlap, freshOverlap).replace('[0]', '[new_ref]');
+    const delta = (await replay(changed, BASELINE_PROMPT_CONTRACT_DIGEST)).find((chunk) => chunk.type === 'text-delta');
+    expect(delta).toMatchObject({ text: content.replace('"ref":"0"', '"ref":"new_ref"').replace(B, FRESH).replace(overlap, freshOverlap) });
+    if (delta?.type === 'text-delta') expect(parseAssuranceSamplingResult(delta.text, { refs: ['new_ref'] }).ok).toBe(true);
+    await synthetic(message, ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, content.replace(B, FRESH));
+    await expect(generate()).rejects.toMatchObject({ code: 'FIXTURE_GEN/identity-unmapped' });
+  });
+
+  it('still refuses sampling echoes from source blocks, findings and other carried turns after recognizing the public instruction', async () => {
+    const finding = '这是需要保留在受保护扫描内的合成发现。';
+    const earlier = '这是之前模型回答里的一段受保护合成文字。';
+    const appended = '这是消息末尾追加的一段受保护合成文字。';
+    const message = `保证抽样 1/1 · 单元摘要 ${D} · 抽样摘要 ${D}\n${ASSURANCE_SAMPLING_PROMPT_CONTRACT.instruction}${blocks}\n以下为需要复核的发现：\n- [0]（主要）${finding}\n${appended}`;
+    for (const reason of [TEXT, finding, appended, earlier]) {
+      await synthetic([{ role: 'assistant', content: earlier }, { role: 'user', content: message }],
+        ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, JSON.stringify({
+          schema: 'ai7.analysis.assurance-sampling-result/1', dispositions: [{ ref: '0', disposition: '成立', reason }],
+        }));
+      await expect(generate()).rejects.toMatchObject({ code: 'FIXTURE_GEN/manuscript-echo' });
+    }
+    // An identical earlier turn is still carried evidence, not the selected message's validated public segment.
+    await synthetic([{ role: 'assistant', content: message }, { role: 'user', content: message }],
+      ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, '{"schema":"ai7.analysis.assurance-sampling-result/1","dispositions":[]}');
+    await expect(generate()).rejects.toMatchObject({ code: 'FIXTURE_GEN/manuscript-echo' });
   });
 
   it('replays reduction and reflection from their own contract keys', async () => {
