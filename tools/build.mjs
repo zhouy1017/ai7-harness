@@ -101,7 +101,7 @@ async function ensureClosedOutputs() {
     'config/dsh-profiles/manuscript-editorial/package.json',
     'config/native-artifact-sources/editorial-workspace-profile/package.json',
     'config/source-checkout-launch-authority.json',
-    'docs/policies/active-policy-set.v7.json',
+    'docs/policies/active-policy-set.v8.json',
     'docs/policies/external-export-policy.v1.json',
     'docs/policies/external-export-policy.v2.json',
     'docs/policies/provider-processing-policy.v1.json',
@@ -111,6 +111,7 @@ async function ensureClosedOutputs() {
     'docs/policies/provider-processing-policy.v5.json',
     'docs/policies/provider-processing-policy.v6.json',
     'docs/policies/provider-processing-policy.v9.json',
+    'docs/policies/provider-processing-policy.v10.json',
     'notices/ELECTRON_LICENSE',
     'notices/ELECTRON_LICENSES.chromium.html',
     'notices/THIRD_PARTY_NOTICES.md',
@@ -183,7 +184,7 @@ async function ensureClosedOutputs() {
   );
   const exactPolicyCarriers = [
     'config/source-checkout-launch-authority.json',
-    'docs/policies/active-policy-set.v7.json',
+    'docs/policies/active-policy-set.v8.json',
     'docs/policies/external-export-policy.v1.json',
     'docs/policies/external-export-policy.v2.json',
     'docs/policies/provider-processing-policy.v1.json',
@@ -193,6 +194,7 @@ async function ensureClosedOutputs() {
     'docs/policies/provider-processing-policy.v5.json',
     'docs/policies/provider-processing-policy.v6.json',
     'docs/policies/provider-processing-policy.v9.json',
+    'docs/policies/provider-processing-policy.v10.json',
   ];
   for (const path of exactPolicyCarriers) {
     const built = await readFile(outputPath(...path.split('/')));
@@ -377,7 +379,7 @@ async function main() {
   );
   for (const path of [
     'config/source-checkout-launch-authority.json',
-    'docs/policies/active-policy-set.v7.json',
+    'docs/policies/active-policy-set.v8.json',
     'docs/policies/external-export-policy.v1.json',
     'docs/policies/external-export-policy.v2.json',
     'docs/policies/provider-processing-policy.v1.json',
@@ -387,6 +389,7 @@ async function main() {
     'docs/policies/provider-processing-policy.v5.json',
     'docs/policies/provider-processing-policy.v6.json',
     'docs/policies/provider-processing-policy.v9.json',
+    'docs/policies/provider-processing-policy.v10.json',
   ]) {
     await copyFile(resolve(ROOT, ...path.split('/')), outputPath(...path.split('/')));
   }

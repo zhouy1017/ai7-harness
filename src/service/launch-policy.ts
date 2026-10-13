@@ -1,23 +1,23 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import { LAUNCH_SELECTABLE_SCOPES, isTrustedOperationalScope, type DeveloperLiveCeiling, type DevelopmentValidationIntent, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope } from '../shared/protocol.js';
+import { LAUNCH_SELECTABLE_SCOPES, isTrustedOperationalScope, type AdmittedProviderRule, type DeveloperLiveCeiling, type DevelopmentValidationIntent, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope } from '../shared/protocol.js';
 
 /**
  * The source-checkout launch authority (ADR 0046, ADR 0065): the build-embedded carrier pins active
- * policy set v7, the sole active set for all four Provider Processing scopes, and names the two
+ * policy set v8, the sole active set for all four Provider Processing scopes, and names the two
  * scopes the built entry may bind from its launch form. `development-ci` is the default and binds
  * Provider Processing v1 (zero live transmissions); `developer-live` is bound only by the launch
  * argument `--trusted-operational-scope developer-live` on a developer host and binds the immutable
- * Provider Processing v9. `fixture-recording` and `ordinary-production` are pinned by the active set
+ * Provider Processing v10. `fixture-recording` and `ordinary-production` are pinned by the active set
  * but are not selectable from the source checkout. No environment variable or product setting
  * selects a scope; every invalid state resolves to the zero-transmission denial.
  */
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
 const CARRIER_VERSION = 2;
-export const ACTIVE_SET_VERSION = 'v7' as const;
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v7.json';
-const ACTIVE_SET_SHA256 = '4df66f504eadc65d605d5b78648b635985cf2304cb3ffa08073943f7a8d846bb';
+export const ACTIVE_SET_VERSION = 'v8' as const;
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v8.json';
+const ACTIVE_SET_SHA256 = 'd3ad3aa86eb0129d8e4b936d35f24ba6bc1533944c7197f39e16b2488df45462';
 const PROVIDER_PINS = {
   'development-ci': {
     version: 'v1',
@@ -35,18 +35,27 @@ const PROVIDER_PINS = {
     sha256: '10e69a5d7b027d077728ec1bc7393dc0583b99a05246b4e883098b9d96b221a4',
   },
   'developer-live': {
-    version: 'v9',
-    canonicalPath: 'docs/policies/provider-processing-policy.v9.json',
-    sha256: '6f1f5377bb3b58694025521e8aeb10f4be12e57ae7377e4d8f6fce06d142ed84',
+    version: 'v10',
+    canonicalPath: 'docs/policies/provider-processing-policy.v10.json',
+    sha256: '1f2e1381b40ce2a91eba2c92af3cd883d6df5f574980d6f182e49d02856d86e9',
   },
 } as const;
+/**
+ * The Provider Processing version the active set pins for `developer-live`. Code that records or checks the developer-live
+ * pin compares against this, and against `ACTIVE_SET_VERSION`, rather than a literal, so a successor set edits only this module.
+ */
+export const DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION = PROVIDER_PINS['developer-live'].version;
 const EXTERNAL_PIN = {
   version: 'v2',
   canonicalPath: 'docs/policies/external-export-policy.v2.json',
   sha256: '162441cc3e5d30b0cafb00a0d04ca5ab32b64c5039baafc8952a9925bd7984b6',
 } as const;
 
-/** The exact developer-live binding Provider Processing v9 declares; the resolver verifies the policy bytes say the same. */
+/**
+ * The exact developer-live binding every rule of Provider Processing v10 declares, and the one rule v9 declared; the resolver
+ * verifies the policy bytes say the same. `ruleId` is the baseline analysis rule, whose reading the projection's suboperation
+ * flags come from.
+ */
 export const DEVELOPER_LIVE_POLICY_BINDING = {
   ruleId: 'developer-live-public-samplebook-analysis',
   launchArgument: '--trusted-operational-scope developer-live',
@@ -164,6 +173,7 @@ function deny(reason: string): LaunchPolicyProjection {
       crossUnitReductionAllowed: false,
       assuranceSamplingAllowed: false,
       runReportReflectionAllowed: false,
+      admittedRules: [],
       label: '开发与持续集成：零次实时传输',
     },
     externalExport: {
@@ -214,22 +224,189 @@ function verifyDevelopmentCiPolicy(policy: Record<string, unknown>): void {
   );
 }
 
+/** Every outbound key a Provider Processing allow rule's binding must state exactly: one route, no fallback, no second model. */
+function verifyRuleBinding(rule: Record<string, unknown>, modelRole: string): void {
+  const binding = rule['providerBinding'];
+  requirePolicy(
+    isRecord(binding) &&
+      binding['modelRole'] === modelRole &&
+      binding['route'] === DEVELOPER_LIVE_POLICY_BINDING.route &&
+      binding['endpoint'] === DEVELOPER_LIVE_POLICY_BINDING.endpoint &&
+      binding['model'] === DEVELOPER_LIVE_POLICY_BINDING.model &&
+      binding['credentialSlot'] === DEVELOPER_LIVE_POLICY_BINDING.credentialSlot &&
+      binding['fallbackAllowed'] === false &&
+      binding['secondModelAllowed'] === false &&
+      binding['productionDefaultsChanged'] === false,
+  );
+}
+
+function exactStrings(value: unknown, expected: readonly string[]): value is string[] {
+  return Array.isArray(value) && value.length === expected.length && value.every((item, index) => item === expected[index]);
+}
+
 /**
- * Provider Processing v9: default deny with exactly the one developer-live eligible-only rule and its
- * exact binding, the three declared suboperations of ADR 0066, the per-frozen-unit Run Budget Ceiling
- * default of ADR 0070, and the house-people redaction rule of ADR 0079 §4.4. v9 names all three
- * suboperations `true` and the web-search flag `false`; the projection reads exactly those bytes, and
- * a field that does not match is a policy the launch cannot read — the zero-transmission denial.
+ * What every developer-live allow rule shares, whatever it admits: eligibility only, the developer host and no hosted, CI,
+ * scheduled or background execution, admitted sample sources only, the house-people redaction rule of ADR 0079 §4.4, no web
+ * tool, the protected local capture, and no extra privacy prompt.
+ */
+function verifyRuleCommon(rule: Record<string, unknown>): void {
+  requirePolicy(rule['policyResult'] === 'eligible-only');
+  const mode = rule['executionMode'];
+  requirePolicy(isRecord(mode) && mode['humanAttended'] === false && mode['developerHostOnly'] === true &&
+    mode['ciAllowed'] === false && mode['hostedAllowed'] === false && mode['scheduledAllowed'] === false && mode['backgroundAllowed'] === false);
+  // The house-people redaction rule (ADR 0079 §4.4): the identity of the house's people never leaves,
+  // while the author's information and the house name may.
+  const redaction = rule['redaction'];
+  requirePolicy(
+    isRecord(redaction) &&
+      redaction['housePeopleNamesAndRolesStripped'] === true &&
+      redaction['remarksAndInternalNotesStripped'] === true &&
+      redaction['authorInformationAllowed'] === true &&
+      redaction['houseNameAllowed'] === true,
+  );
+  const source = rule['source'];
+  requirePolicy(isRecord(source) && source['privateManuscriptAllowed'] === false && source['otherBookRefusedBeforeDispatch'] === true);
+  // No web-search allowance (ADR 0079 §4.2, §6): a document that enabled it would be one this launch cannot read.
+  const transmissions = rule['transmissions'];
+  requirePolicy(isRecord(transmissions) && transmissions['webSearchToolAllowed'] === false &&
+    transmissions['identicalRequestReplaysFromProviderResultCache'] === true && transmissions['repeatedTestItemIdentifierAllowed'] === false);
+  const capture = rule['capture'];
+  requirePolicy(isRecord(capture) && capture['fixtureEmissionAllowed'] === false && capture['uploadAllowed'] === false && capture['providerResultCacheAllowed'] === true);
+  const limit = rule['providerAccountLimit'];
+  requirePolicy(
+    isRecord(limit) &&
+      limit['classification'] === DEVELOPER_LIVE_POLICY_BINDING.providerAccountLimitClassification &&
+      limit['retryAllowed'] === false &&
+      limit['fallbackAllowed'] === false &&
+      limit['secondModelAllowed'] === false,
+  );
+}
+
+/** A planned Run's origin: a newly user-initiated Task under direct Run Authorization, never a rule, enrollment or schedule. */
+function verifyPlannedRunOrigin(rule: Record<string, unknown>): void {
+  const origin = rule['authorityOrigin'];
+  requirePolicy(isRecord(origin) && origin['newlyUserInitiatedTaskRequired'] === true &&
+    origin['directRunAuthorizationAllowed'] === true && origin['matchingActiveDefaultExecutionRuleAllowed'] === false &&
+    origin['backgroundAnalysisEnrollmentAllowed'] === false && origin['idleScheduledImportTriggeredOrCrossRunDispatchAllowed'] === false);
+  const preconditions = rule['authorizationPreconditions'];
+  requirePolicy(
+    isRecord(preconditions) &&
+      preconditions['unsetRunBudgetCeilingAllowed'] === false &&
+      preconditions['defaultRunBudgetCeilingTokensPerFrozenUnit'] === DEVELOPER_LIVE_POLICY_BINDING.defaultRunBudgetCeilingTokensPerFrozenUnit &&
+      preconditions['defaultRunBudgetCeilingComputedAfterCoverageManifestFreeze'] === true &&
+      preconditions['ceilingEvaluatedBeforeEveryDispatch'] === true &&
+      preconditions['finalProviderPayloadEgressGateRequired'] === true,
+  );
+  const limit = rule['providerAccountLimit'] as Record<string, unknown>;
+  requirePolicy(limit['endsRunAsProviderAccountLimit'] === true);
+  const transmissions = rule['transmissions'] as Record<string, unknown>;
+  // The transmission bound of ADR 0079 §2.2, term by term, shared by every planned kind.
+  requirePolicy(
+    transmissions['boundedByCoverageManifestUnitCount'] === true &&
+      transmissions['plusDeclaredSafeRetryAdaptations'] === true &&
+      transmissions['plusAssuranceSampleAnchorUnits'] === true &&
+      transmissions['plusOneRunReportReflectionTurn'] === true &&
+      transmissions['oneTechnicalSessionPerAnalysisUnit'] === true &&
+      transmissions['accumulatingSingleSessionAllowed'] === false,
+  );
+}
+
+/**
+ * One developer-live allow rule this launch can read, by its rule id: the Model Role it binds, the exact task kinds and
+ * outbound categories it admits, and the reading of everything particular to it. A rule id outside this table is a policy
+ * the launch cannot read — the zero-transmission denial.
+ */
+interface DeveloperLiveRuleReading {
+  readonly modelRole: string;
+  readonly taskKinds: readonly string[];
+  readonly outboundDataCategories: readonly string[];
+  readonly verify: (rule: Record<string, unknown>) => void;
+}
+
+const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> = {
+  // Baseline manuscript analysis, unchanged since v9, including its three ADR 0066 suboperations.
+  [DEVELOPER_LIVE_POLICY_BINDING.ruleId]: {
+    modelRole: 'Main Editorial Role',
+    taskKinds: ['baseline-manuscript-analysis'],
+    outboundDataCategories: ['public-or-synthetic'],
+    verify: (rule) => {
+      verifyPlannedRunOrigin(rule);
+      const transmissions = rule['transmissions'] as Record<string, unknown>;
+      // The three suboperations ADR 0066 declares, which v9 and v10 name `true`. An absent or non-`true` key is
+      // not the pinned document; reading anything but the exact bytes is the zero-transmission denial.
+      requirePolicy(
+        transmissions['plusCrossUnitReductionTopicSections'] === true &&
+          transmissions['crossUnitReductionAllowed'] === true &&
+          transmissions['assuranceSamplingAllowed'] === true &&
+          transmissions['runReportReflectionAllowed'] === true,
+      );
+    },
+  },
+  // The Interactive Editorial Dialogue of ADR 0088: one foreground attempt from an exact selection and question, one session
+  // and one bounded payload, no Run and so no Run ceiling; the account limit still ends the attempt.
+  'developer-live-public-samplebook-editorial-dialogue': {
+    modelRole: 'Fast Interaction Role',
+    taskKinds: ['editorial-dialogue'],
+    outboundDataCategories: ['editor-selected-manuscript-excerpt'],
+    verify: (rule) => {
+      const origin = rule['authorityOrigin'];
+      requirePolicy(isRecord(origin) && origin['foregroundEditorSelectionAndQuestionRequired'] === true &&
+        exactStrings(origin['admittedAttemptActions'], ['ask', 'continue', 'regenerate']) &&
+        origin['planEnvelopeOrRunAuthorizationRequired'] === false && origin['matchingActiveDefaultExecutionRuleAllowed'] === false &&
+        origin['backgroundAnalysisEnrollmentAllowed'] === false && origin['idleScheduledImportTriggeredOrCrossRunDispatchAllowed'] === false);
+      const source = rule['source'] as Record<string, unknown>;
+      requirePolicy(source['editorSelectedPassageOnly'] === true);
+      const transmissions = rule['transmissions'] as Record<string, unknown>;
+      requirePolicy(
+        transmissions['oneTechnicalSessionPerAttempt'] === true &&
+          transmissions['oneBoundedPayloadPerAttempt'] === true &&
+          transmissions['payloadLimitedToFrozenContractSelectionQuestionAndRetainedFragments'] === true &&
+          transmissions['continueAndRegenerateAreNewAttempts'] === true &&
+          transmissions['automaticResendInsideStoppedSessionAllowed'] === false,
+      );
+      const preconditions = rule['authorizationPreconditions'];
+      requirePolicy(isRecord(preconditions) && preconditions['exactProviderBindingRequired'] === true &&
+        preconditions['runBudgetCeilingApplies'] === false && preconditions['finalProviderPayloadEgressGateRequired'] === true &&
+        preconditions['frozenBeforeTransmission'] === true);
+      const limit = rule['providerAccountLimit'] as Record<string, unknown>;
+      requirePolicy(limit['endsAttemptAsProviderAccountLimit'] === true);
+    },
+  },
+  // The reference-free, non-web review categories: planned Runs like the baseline, without a cross-unit reduction, and
+  // never with Material References, Series Knowledge or editorial deliverables.
+  'developer-live-public-samplebook-reference-free-review': {
+    modelRole: 'Main Editorial Role',
+    taskKinds: ['editorial-review/typos-and-usage', 'editorial-review/style-and-format', 'editorial-review/literary-expression'],
+    outboundDataCategories: ['public-or-synthetic'],
+    verify: (rule) => {
+      verifyPlannedRunOrigin(rule);
+      const source = rule['source'] as Record<string, unknown>;
+      requirePolicy(source['materialReferencesAllowed'] === false && source['seriesKnowledgeAllowed'] === false &&
+        source['editorialDeliverablesAllowed'] === false);
+      const transmissions = rule['transmissions'] as Record<string, unknown>;
+      requirePolicy(transmissions['crossUnitReductionAllowed'] === false && transmissions['plusCrossUnitReductionTopicSections'] === undefined);
+    },
+  },
+};
+
+/**
+ * Provider Processing v10 (and v9 before it): default deny with developer-live eligible-only allow rules, each one this
+ * launch can read and each bound exactly to the one Go route. The baseline analysis rule must be among them; its three
+ * declared suboperations of ADR 0066, the per-frozen-unit Run Budget Ceiling default of ADR 0070, and the house-people
+ * redaction rule of ADR 0079 §4.4 are read as v9 read them. Every other rule is read from its own entry of
+ * `DEVELOPER_LIVE_RULES`; a rule id outside it, a repeated id, or any field that does not match is a policy the launch
+ * cannot read — the zero-transmission denial. A Model Role a rule binds other than the Main Editorial Role must be bound to
+ * the same route in the policy's `roleBindings`.
  *
- * Exported so the reading of the rule's exact fields can be pinned against the real v9 bytes with one
- * field varied. The document digests this resolver checks are constants of this module, so a policy
- * revision could not be fed through `resolveSourceCheckoutLaunchPolicy` at all — which is the point
- * of the pins, and why the reading is tested here instead.
+ * Exported so the reading of the rules' exact fields can be pinned against the real policy bytes with one field varied.
+ * The document digests this resolver checks are constants of this module, so a policy revision could not be fed through
+ * `resolveSourceCheckoutLaunchPolicy` at all — which is the point of the pins, and why the reading is tested here instead.
  */
 export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
   crossUnitReductionAllowed: boolean;
   assuranceSamplingAllowed: boolean;
   runReportReflectionAllowed: boolean;
+  admittedRules: AdmittedProviderRule[];
 } {
   requirePolicy(policy['operationalScope'] === 'developer-live' && policy['lifecycleStatus'] === 'active');
   const selection = policy['trustedSelection'];
@@ -244,92 +421,46 @@ export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
       selection['crossScopeFallbackAllowed'] === false,
   );
   const decision = policy['decision'];
-  requirePolicy(isRecord(decision) && decision['default'] === 'deny' && Array.isArray(decision['providerAllowRules']) && decision['providerAllowRules'].length === 1);
-  const rule: unknown = decision['providerAllowRules'][0];
-  requirePolicy(isRecord(rule) && rule['ruleId'] === DEVELOPER_LIVE_POLICY_BINDING.ruleId && rule['policyResult'] === 'eligible-only');
-  requirePolicy(Array.isArray(rule['allowedTaskKinds']) && rule['allowedTaskKinds'].length === 1 &&
-    rule['allowedTaskKinds'][0] === 'baseline-manuscript-analysis');
-  const origin = rule['authorityOrigin'];
-  const mode = rule['executionMode'];
-  requirePolicy(isRecord(origin) && origin['newlyUserInitiatedTaskRequired'] === true &&
-    origin['directRunAuthorizationAllowed'] === true && origin['matchingActiveDefaultExecutionRuleAllowed'] === false &&
-    origin['backgroundAnalysisEnrollmentAllowed'] === false && origin['idleScheduledImportTriggeredOrCrossRunDispatchAllowed'] === false);
-  requirePolicy(isRecord(mode) && mode['humanAttended'] === false && mode['developerHostOnly'] === true &&
-    mode['ciAllowed'] === false && mode['hostedAllowed'] === false && mode['scheduledAllowed'] === false && mode['backgroundAllowed'] === false);
-  requirePolicy(Array.isArray(rule['allowedOutboundDataCategories']) && rule['allowedOutboundDataCategories'].length === 1 &&
-    rule['allowedOutboundDataCategories'][0] === 'public-or-synthetic');
-  // The house-people redaction rule (ADR 0079 §4.4): the identity of the house's people never leaves,
-  // while the author's information and the house name may.
-  const redaction = rule['redaction'];
-  requirePolicy(
-    isRecord(redaction) &&
-      redaction['housePeopleNamesAndRolesStripped'] === true &&
-      redaction['remarksAndInternalNotesStripped'] === true &&
-      redaction['authorInformationAllowed'] === true &&
-      redaction['houseNameAllowed'] === true,
-  );
-  const binding = rule['providerBinding'];
-  requirePolicy(
-    isRecord(binding) &&
-      binding['modelRole'] === 'Main Editorial Role' &&
-      binding['route'] === DEVELOPER_LIVE_POLICY_BINDING.route &&
-      binding['endpoint'] === DEVELOPER_LIVE_POLICY_BINDING.endpoint &&
-      binding['model'] === DEVELOPER_LIVE_POLICY_BINDING.model &&
-      binding['credentialSlot'] === DEVELOPER_LIVE_POLICY_BINDING.credentialSlot &&
-      binding['fallbackAllowed'] === false &&
-      binding['secondModelAllowed'] === false &&
-      binding['productionDefaultsChanged'] === false,
-  );
-  const transmissions = rule['transmissions'];
-  requirePolicy(
-    isRecord(transmissions) &&
-      // The transmission bound of ADR 0079 §2.2, term by term.
-      transmissions['boundedByCoverageManifestUnitCount'] === true &&
-      transmissions['plusDeclaredSafeRetryAdaptations'] === true &&
-      transmissions['plusCrossUnitReductionTopicSections'] === true &&
-      transmissions['plusAssuranceSampleAnchorUnits'] === true &&
-      transmissions['plusOneRunReportReflectionTurn'] === true &&
-      transmissions['oneTechnicalSessionPerAnalysisUnit'] === true &&
-      transmissions['accumulatingSingleSessionAllowed'] === false &&
-      transmissions['identicalRequestReplaysFromProviderResultCache'] === true &&
-      transmissions['repeatedTestItemIdentifierAllowed'] === false &&
-      // No web-search allowance yet (ADR 0079 §4.2, §6): the model-tool path waits for the provider
-      // assignment design, so a document that enabled it would be one this launch cannot read.
-      transmissions['webSearchToolAllowed'] === false,
-  );
-  // The three suboperations ADR 0066 declares, which v9 names `true`. An absent or non-`true` key is
-  // not the pinned document; reading anything but the exact bytes is the zero-transmission denial.
-  requirePolicy(
-    transmissions['crossUnitReductionAllowed'] === true &&
-      transmissions['assuranceSamplingAllowed'] === true &&
-      transmissions['runReportReflectionAllowed'] === true,
-  );
-  const preconditions = rule['authorizationPreconditions'];
-  requirePolicy(
-    isRecord(preconditions) &&
-      preconditions['unsetRunBudgetCeilingAllowed'] === false &&
-      preconditions['defaultRunBudgetCeilingTokensPerFrozenUnit'] === DEVELOPER_LIVE_POLICY_BINDING.defaultRunBudgetCeilingTokensPerFrozenUnit &&
-      preconditions['defaultRunBudgetCeilingComputedAfterCoverageManifestFreeze'] === true &&
-      preconditions['ceilingEvaluatedBeforeEveryDispatch'] === true &&
-      preconditions['finalProviderPayloadEgressGateRequired'] === true,
-  );
-  const limit = rule['providerAccountLimit'];
-  requirePolicy(
-    isRecord(limit) &&
-      limit['classification'] === DEVELOPER_LIVE_POLICY_BINDING.providerAccountLimitClassification &&
-      limit['endsRunAsProviderAccountLimit'] === true &&
-      limit['retryAllowed'] === false &&
-      limit['fallbackAllowed'] === false &&
-      limit['secondModelAllowed'] === false,
-  );
-  const source = rule['source'];
-  requirePolicy(isRecord(source) && source['privateManuscriptAllowed'] === false && source['otherBookRefusedBeforeDispatch'] === true);
-  const capture = rule['capture'];
-  requirePolicy(isRecord(capture) && capture['fixtureEmissionAllowed'] === false && capture['uploadAllowed'] === false && capture['providerResultCacheAllowed'] === true);
+  requirePolicy(isRecord(decision) && decision['default'] === 'deny' && Array.isArray(decision['providerAllowRules']) && decision['providerAllowRules'].length > 0);
+  const roleBindings = policy['roleBindings'];
+  requirePolicy(roleBindings === undefined || isRecord(roleBindings));
+  const seen = new Set<string>();
+  const admittedRules: AdmittedProviderRule[] = [];
+  for (const rule of decision['providerAllowRules'] as unknown[]) {
+    requirePolicy(isRecord(rule) && typeof rule['ruleId'] === 'string' && !seen.has(rule['ruleId']) && Object.hasOwn(DEVELOPER_LIVE_RULES, rule['ruleId']));
+    const ruleId = rule['ruleId'] as string;
+    seen.add(ruleId);
+    const reading = DEVELOPER_LIVE_RULES[ruleId]!;
+    requirePolicy(exactStrings(rule['allowedTaskKinds'], reading.taskKinds) &&
+      exactStrings(rule['allowedOutboundDataCategories'], reading.outboundDataCategories));
+    verifyRuleCommon(rule);
+    verifyRuleBinding(rule, reading.modelRole);
+    if (roleBindings === undefined) {
+      requirePolicy(reading.modelRole === 'Main Editorial Role');
+    } else {
+      const role = roleBindings[reading.modelRole];
+      requirePolicy(isRecord(role) && role['bindingState'] === 'bound' &&
+        role['route'] === DEVELOPER_LIVE_POLICY_BINDING.route && role['endpoint'] === DEVELOPER_LIVE_POLICY_BINDING.endpoint &&
+        role['model'] === DEVELOPER_LIVE_POLICY_BINDING.model && role['credentialSlot'] === DEVELOPER_LIVE_POLICY_BINDING.credentialSlot);
+    }
+    reading.verify(rule);
+    admittedRules.push({
+      ruleId,
+      taskKinds: [...reading.taskKinds],
+      modelRole: reading.modelRole,
+      route: DEVELOPER_LIVE_POLICY_BINDING.route,
+      endpoint: DEVELOPER_LIVE_POLICY_BINDING.endpoint,
+      model: DEVELOPER_LIVE_POLICY_BINDING.model,
+      credentialSlot: DEVELOPER_LIVE_POLICY_BINDING.credentialSlot,
+      outboundDataCategories: [...reading.outboundDataCategories],
+    });
+  }
+  requirePolicy(seen.has(DEVELOPER_LIVE_POLICY_BINDING.ruleId));
   return {
     crossUnitReductionAllowed: true,
     assuranceSamplingAllowed: true,
     runReportReflectionAllowed: true,
+    admittedRules,
   };
 }
 
@@ -453,20 +584,21 @@ export async function resolveSourceCheckoutLaunchPolicy(
     };
     const publicReleasePermission = { present: false as const, label: '公开发布许可：不存在' as const };
     if (requestedScope === 'developer-live') {
-      const suboperations = verifyDeveloperLivePolicy(selectedPolicy);
+      const reading = verifyDeveloperLivePolicy(selectedPolicy);
       return {
         integrityState: 'verified',
         denialReason: null,
         operationalScope: 'developer-live',
         activePolicySetVersion: ACTIVE_SET_VERSION,
         providerProcessing: {
-          version: 'v9',
+          version: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION,
           decision: 'eligible-only',
           authorizedLiveTransmissionCount: 'bounded-by-run',
           liveTransmissionAllowed: true,
-          crossUnitReductionAllowed: suboperations.crossUnitReductionAllowed,
-          assuranceSamplingAllowed: suboperations.assuranceSamplingAllowed,
-          runReportReflectionAllowed: suboperations.runReportReflectionAllowed,
+          crossUnitReductionAllowed: reading.crossUnitReductionAllowed,
+          assuranceSamplingAllowed: reading.assuranceSamplingAllowed,
+          runReportReflectionAllowed: reading.runReportReflectionAllowed,
+          admittedRules: reading.admittedRules,
           label: '开发者实时：实时传输受运行边界约束',
         },
         externalExport,
@@ -488,6 +620,8 @@ export async function resolveSourceCheckoutLaunchPolicy(
         crossUnitReductionAllowed: false,
         assuranceSamplingAllowed: false,
         runReportReflectionAllowed: false,
+        // v1 names no allow rule.
+        admittedRules: [],
         label: '开发与持续集成：零次实时传输',
       },
       externalExport,

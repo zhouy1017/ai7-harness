@@ -3,6 +3,7 @@ import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import {
   J03_TASK_GOAL,
   isTrustedOperationalScope,
+  type DeveloperLiveProviderProcessingVersion,
   type ForegroundExecutionBoundaryProjection,
   type LaunchPolicyProjection,
   type ProviderProcessingPin,
@@ -36,6 +37,7 @@ import {
   MAX_REVIEW_CATEGORY_GOAL_LENGTH,
 } from '../shared/protocol.js';
 import { canonicalRecord as analysisCanonicalRecord } from './analysis/canonical.js';
+import { ACTIVE_SET_VERSION, DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION } from './launch-policy.js';
 import {
   ANALYSIS_RESULT_SET_REVISION_58_SQL,
   ANALYSIS_RESULT_SET_REVISION_59_SQL,
@@ -1382,8 +1384,11 @@ function transact<T>(db: DatabaseSync, body: () => T): T {
  */
 const PROVIDER_PROCESSING_PINS: Readonly<Record<TrustedOperationalScope, ProviderProcessingPin>> = {
   'development-ci': { operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0 },
-  'developer-live': { operationalScope: 'developer-live', version: 'v9', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
+  'developer-live': { operationalScope: 'developer-live', version: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
 };
+
+/** The developer-live versions earlier launches selected, whose retained records stay readable after a successor is selected. */
+const RETAINED_DEVELOPER_LIVE_VERSIONS: readonly DeveloperLiveProviderProcessingVersion[] = ['v5', 'v9'];
 
 /**
  * The pin a stored value carries, or `null` when it is not exactly the pin of the scope it names.
@@ -1397,8 +1402,12 @@ function providerProcessingPinOf(value: unknown): ProviderProcessingPin | null {
   const pin = PROVIDER_PROCESSING_PINS[scope];
   if (canonicalJson(value) === canonicalJson(pin)) return pin;
   // Retained records keep their original immutable policy identity; only new plans use the current pin.
-  const predecessor: ProviderProcessingPin = { operationalScope: 'developer-live', version: 'v5', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' };
-  return scope === 'developer-live' && canonicalJson(value) === canonicalJson(predecessor) ? predecessor : null;
+  if (scope !== 'developer-live') return null;
+  for (const version of RETAINED_DEVELOPER_LIVE_VERSIONS) {
+    const predecessor: ProviderProcessingPin = { operationalScope: 'developer-live', version, decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' };
+    if (canonicalJson(value) === canonicalJson(predecessor)) return predecessor;
+  }
+  return null;
 }
 
 /**
@@ -2741,7 +2750,7 @@ export class TaskAuthorizationStore {
 
   #requireDeniedPolicy(policy: LaunchPolicyProjection): void {
     requireTask(policy.integrityState === 'verified' && policy.denialReason === null &&
-      policy.operationalScope === 'development-ci' && policy.activePolicySetVersion === 'v7' &&
+      policy.operationalScope === 'development-ci' && policy.activePolicySetVersion === ACTIVE_SET_VERSION &&
       policy.providerProcessing.version === 'v1' && policy.providerProcessing.decision === 'deny' &&
       policy.providerProcessing.authorizedLiveTransmissionCount === 0 &&
       policy.providerProcessing.liveTransmissionAllowed === false,

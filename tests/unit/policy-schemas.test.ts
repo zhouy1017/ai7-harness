@@ -22,12 +22,12 @@ function readPair(policyFile: string, schemaFile: string) {
 }
 
 describe('validateAllPolicies', () => {
-  it('discovers all sixteen current and historical pairs and validates every one at this base', () => {
+  it('discovers all eighteen current and historical pairs and validates every one at this base', () => {
     const pairs = discoverPolicyPairs(POLICIES_DIR);
-    expect(pairs).toHaveLength(16);
+    expect(pairs).toHaveLength(18);
 
     const results = validateAllPolicies(POLICIES_DIR);
-    expect(results).toHaveLength(16);
+    expect(results).toHaveLength(18);
     for (const result of results) {
       expect(result.ok, `${result.policyFile}: ${result.reason ?? ''}`).toBe(true);
     }
@@ -94,6 +94,48 @@ describe('validatePolicyDocument mutation failures', () => {
     expect(() => validatePolicyDocument(mutated, schemaData)).toThrowError(
       /Value at #\/definitions\/developerLiveRule\/properties\/transmissions does not equal the required const\./,
     );
+  });
+});
+
+describe('Provider Processing v10 and active-set v8 schemas', () => {
+  type Rules = { decision: { providerAllowRules: Array<Record<string, unknown>> } };
+
+  it('rejects a v10 document with a fourth allow rule or without the dialogue rule', () => {
+    const { policyData, schemaData } = readPair('provider-processing-policy.v10.json', 'provider-processing-policy.v10.schema.json');
+    const widened = JSON.parse(JSON.stringify(policyData)) as Rules;
+    widened.decision.providerAllowRules.push(JSON.parse(JSON.stringify(widened.decision.providerAllowRules[2])));
+    expect(() => validatePolicyDocument(widened, schemaData)).toThrowError(/has more than 3 allowed items/);
+
+    const narrowed = JSON.parse(JSON.stringify(policyData)) as Rules;
+    narrowed.decision.providerAllowRules.splice(1, 1);
+    expect(() => validatePolicyDocument(narrowed, schemaData)).toThrowError();
+  });
+
+  it('rejects a v10 review rule that admits a web-bearing category, and a dialogue rule that turns web search on', () => {
+    const { policyData, schemaData } = readPair('provider-processing-policy.v10.json', 'provider-processing-policy.v10.schema.json');
+    const review = JSON.parse(JSON.stringify(policyData)) as Rules;
+    (review.decision.providerAllowRules[2]!.allowedTaskKinds as string[]).push('editorial-review/factual-review');
+    expect(() => validatePolicyDocument(review, schemaData)).toThrowError(/developerLiveReviewRule\/properties\/allowedTaskKinds does not equal the required const/);
+
+    const dialogue = JSON.parse(JSON.stringify(policyData)) as Rules;
+    (dialogue.decision.providerAllowRules[1]!.transmissions as Record<string, unknown>).webSearchToolAllowed = true;
+    expect(() => validatePolicyDocument(dialogue, schemaData)).toThrowError(/developerLiveDialogueRule\/properties\/transmissions does not equal the required const/);
+  });
+
+  it('rejects a v10 document that binds the escalation role by default', () => {
+    const { policyData, schemaData } = readPair('provider-processing-policy.v10.json', 'provider-processing-policy.v10.schema.json');
+    const mutated = JSON.parse(JSON.stringify(policyData)) as { roleBindings: Record<string, Record<string, unknown>> };
+    mutated.roleBindings['Difficult Escalation Role']!.bindingState = 'bound';
+    expect(() => validatePolicyDocument(mutated, schemaData)).toThrowError(/roleBindings does not equal the required const/);
+  });
+
+  it('rejects an active-set v8 whose developer-live pin is not the exact v10 digest', () => {
+    const { policyData, schemaData } = readPair('active-policy-set.v8.json', 'active-policy-set.v8.schema.json');
+    const mutated = JSON.parse(JSON.stringify(policyData)) as {
+      activePolicies: { 'provider-processing-policy': { scopePins: Record<string, Record<string, unknown>> } };
+    };
+    mutated.activePolicies['provider-processing-policy'].scopePins['developer-live']!.version = 'v9';
+    expect(() => validatePolicyDocument(mutated, schemaData)).toThrowError(/does not equal the required const/);
   });
 });
 
