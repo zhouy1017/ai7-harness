@@ -56,8 +56,8 @@ export type RemoteExecutionRoute = ConfiguredRouteId;
 export type CredentialSlot = ConfiguredCredentialSlot;
 
 /**
- * The trusted scope's Provider Processing pin: selected v9 admits baseline-only V4.1.
- * Historical v5 and reserved web v8 are readable identities, not launch selections.
+ * The trusted scope's Provider Processing pin: selected v10 admits baseline analysis, editorial dialogue and reference-free
+ * review on V4.1. Historical v5 and v9 and the superseded web reservation v8 are readable identities, not launch selections.
  */
 export type EgressPolicyPin =
   | {
@@ -68,7 +68,7 @@ export type EgressPolicyPin =
     }
   | {
       readonly operationalScope: 'developer-live';
-      readonly providerProcessingVersion: 'v5' | 'v8' | 'v9';
+      readonly providerProcessingVersion: 'v5' | 'v8' | 'v9' | 'v10';
       readonly liveTransmissionAllowed: true;
       readonly authorizedLiveTransmissionCount: 'bounded-by-run';
     };
