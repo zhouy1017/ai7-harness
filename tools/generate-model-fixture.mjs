@@ -13,7 +13,8 @@ import { fileURLToPath } from 'node:url';
  * checkout, and a tool that guessed where would be one flag away from reading it by accident.
  *
  * The point of the tool is that a cached live result becomes a deterministic fixture without anyone
- * hand-copying a digest, and without manuscript text riding along. Existing request subjects convert, each
+ * hand-copying a digest. Only proved exact sample1 may retain manuscript free text (ADR 0079 §5).
+ * Existing request subjects convert, each
  * keyed the way the deterministic adapter resolves it (Issue #808): an Analysis Unit, under its unit
  * ordinal and the request digest of its frozen prompt contract and manifest unit, and additionally a
  * `contentDigest` over its own block texts alone, so the same entry also answers a fresh import of the
@@ -42,7 +43,7 @@ import { fileURLToPath } from 'node:url';
  * interesting part of the tool. A capture the ledger retired — a stale line, an invalidation of its
  * item, or an invalidation of its validation case at or after the ledger position the call observed
  * before it was claimed — refuses as `FIXTURE_GEN/item-retired`: retired evidence answers nothing. A
- * free-text field that still shares a run of MANUSCRIPT_ECHO_THRESHOLD characters with a block the
+ * free-text field outside the proved sample1 exemption that shares MANUSCRIPT_ECHO_THRESHOLD characters with a block the
  * request carried, after placeholder substitution, refuses as `FIXTURE_GEN/manuscript-echo`, naming a
  * bounded JSON path and the run length and never the characters themselves. Earlier model results,
  * tool results and other carried user text are checked too; a reviewer still reads every free-text

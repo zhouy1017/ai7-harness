@@ -51,7 +51,7 @@ import { lastUserMessageText } from './payload.js';
 import { fixtureEntryKey, resolveFixtureEntry, type ModelFixtureEntry, type ResolvedModelFixture } from './model-fixture.js';
 
 /**
- * The AI7 local deterministic model adapter: replays a hand-written synthetic fixture in-process and
+ * The AI7 local deterministic model adapter: replays an admitted fixture in-process and
  * transmits nothing. It is the bound adapter in every supported development launch and in the E2E
  * Gate. Each request is matched by the pair of the unit ordinal parsed from the unit message header
  * and the request digest recomputed from the frozen prompt contract and the manifest unit digest, so

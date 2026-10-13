@@ -13,8 +13,8 @@ import { providerCacheKey, providerEvidenceGeneration } from './provider-result-
  * same unit and request digest differently (the `safe-retry` Plan Adaptation of Issue #48); an
  * entry without `attempt` answers every attempt the attempt-specific entries do not. A fixture may
  * be based on another so a variant (one failing unit) restates only the entries it changes.
- * Fixtures carry public synthetic text only and echo no manuscript content beyond exact block
- * identities.
+ * Synthetic fixtures carry public stand-ins. Reviewed recorded fixtures may retain exact sample1
+ * free text under ADR 0079 §5; actual recorded replay remains confined to the complete Journey.
  *
  * Unit ordinal `0` is not an Analysis Unit: it is the Run's one cross-unit reduction (ADR 0066),
  * whose request digest is a function of the frozen cross-unit prompt contract and the exact closed
