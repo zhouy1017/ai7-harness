@@ -3,18 +3,30 @@ import { describe, expect, it } from 'vitest';
 import {
   BASELINE_PROMPT_CONTRACT,
   BASELINE_PROMPT_CONTRACT_DIGEST,
+  BASELINE_PROMPT_CONTRACT_SCHEMA,
+  BASELINE_PROMPT_CONTRACT_V1,
+  BASELINE_PROMPT_CONTRACT_V1_DIGEST,
+  BASELINE_PROMPT_CONTRACT_V1_SCHEMA,
   BASELINE_UNIT_RESULT_SCHEMA,
   buildUnitMessage,
   parseUnitMessageHeader,
   parseUnitResult,
   unitRequestDigest,
 } from '../../src/service/analysis/contract.js';
+import { canonicalJson } from '../../src/service/analysis/canonical.js';
 import type { CoverageManifestUnitProjection } from '../../src/shared/protocol.js';
 
 const BLOCK_A = `blk_${'a'.repeat(24)}`;
 const BLOCK_B = `blk_${'b'.repeat(24)}`;
 const BLOCK_C = `blk_${'c'.repeat(24)}`;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
+/** Prompt contract /1's digest as every recorded V4.1 capture of #807 names it (`capture.promptContractDigest`). */
+const RECORDED_V1_DIGEST = '4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5';
+/** The two /1 lines that described the note elements in prose alone; /2 replaces exactly these. */
+const V1_NOTE_LINES = [
+  'conflicts（数组；每项含 description、sourceRanges，用于本单元内部发现的矛盾）、',
+  'unresolved（数组；每项含 description、sourceRanges，用于无法在本单元内确定的事项）、',
+];
 
 function validResult(unitOrdinal = 3): Record<string, unknown> {
   return {
@@ -120,6 +132,42 @@ describe('prompt contract', () => {
     expect(BASELINE_PROMPT_CONTRACT_DIGEST).toMatch(DIGEST_PATTERN);
     expect(BASELINE_PROMPT_CONTRACT.systemPrompt).toContain(BASELINE_UNIT_RESULT_SCHEMA);
     expect(BASELINE_PROMPT_CONTRACT.systemPrompt).not.toMatch(/tool|工具调用/u);
+  });
+
+  it('retains prompt contract /1 byte for byte under the digest its recorded captures name (#826)', () => {
+    expect(BASELINE_PROMPT_CONTRACT_V1.schema).toBe(BASELINE_PROMPT_CONTRACT_V1_SCHEMA);
+    expect(BASELINE_PROMPT_CONTRACT_V1_SCHEMA).toBe('ai7.baseline-manuscript-analysis.prompt-contract/1');
+    expect(BASELINE_PROMPT_CONTRACT_V1_DIGEST).toBe(RECORDED_V1_DIGEST);
+    for (const line of V1_NOTE_LINES) expect(BASELINE_PROMPT_CONTRACT_V1.systemPrompt.split('\n')).toContain(line);
+  });
+
+  it('makes /2 differ from /1 only in the system section, which states each note element as an object (#826)', () => {
+    expect(BASELINE_PROMPT_CONTRACT_SCHEMA).toBe('ai7.baseline-manuscript-analysis.prompt-contract/2');
+    expect(BASELINE_PROMPT_CONTRACT_DIGEST).not.toBe(BASELINE_PROMPT_CONTRACT_V1_DIGEST);
+    const { schema: _v2Schema, systemPrompt: v2Prompt, ...v2Rest } = BASELINE_PROMPT_CONTRACT;
+    const { schema: _v1Schema, systemPrompt: v1Prompt, ...v1Rest } = BASELINE_PROMPT_CONTRACT_V1;
+    // The same analysis contract, result schema, unit message headers and block line: one unit message serves both.
+    expect(canonicalJson(v2Rest)).toBe(canonicalJson(v1Rest));
+    // Every /1 line but the two prose note lines stands in /2 unchanged; /2 adds only the note shapes and their rule.
+    const v2Lines = v2Prompt.split('\n');
+    for (const line of v1Prompt.split('\n').filter((candidate) => !V1_NOTE_LINES.includes(candidate))) expect(v2Lines).toContain(line);
+    for (const line of V1_NOTE_LINES) expect(v2Lines).not.toContain(line);
+    expect(v2Prompt).toContain('{"description": 矛盾说明字符串, "sourceRanges": sourceRanges 数组}');
+    expect(v2Prompt).toContain('{"description": 事项说明字符串, "sourceRanges": sourceRanges 数组}');
+    expect(v2Prompt).toContain('绝不能是裸字符串');
+    expect(v2Prompt).not.toMatch(/tool|工具调用/u);
+  });
+
+  it('shows in /2 a note the unchanged parser admits and a bare string it still refuses (#826)', () => {
+    const allowed = /应写 (\[\{.*?\}\])，/u.exec(BASELINE_PROMPT_CONTRACT.systemPrompt)?.[1];
+    const forbidden = /不得写 (\[".*?"\])。/u.exec(BASELINE_PROMPT_CONTRACT.systemPrompt)?.[1];
+    expect(allowed).toBe('[{"description": "说明", "sourceRanges": []}]');
+    expect(forbidden).toBe('["说明"]');
+    for (const key of ['conflicts', 'unresolved'] as const) {
+      expect(parseUnitResult(JSON.stringify({ ...validResult(), [key]: JSON.parse(allowed!) as unknown }), expected).ok).toBe(true);
+      expect(parseUnitResult(JSON.stringify({ ...validResult(), [key]: JSON.parse(forbidden!) as unknown }), expected))
+        .toMatchObject({ ok: false, code: 'schema-invalid' });
+    }
   });
 
   it('builds the unit message with a parseable header, overlap context, then own blocks', () => {

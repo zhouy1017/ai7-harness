@@ -36,6 +36,8 @@ import { canonicalJson, sha256Hex } from './canonical.js';
 import {
   BASELINE_PROMPT_CONTRACT,
   BASELINE_PROMPT_CONTRACT_DIGEST,
+  BASELINE_PROMPT_CONTRACT_V1,
+  BASELINE_PROMPT_CONTRACT_V1_DIGEST,
   BASELINE_UNIT_RESULT_SCHEMA,
   buildUnitMessage,
   parseUnitMessageHeader,
@@ -80,6 +82,7 @@ import {
   type UnitOutcome,
 } from './reducers.js';
 import type { CrossUnitOutcome } from './reducers.js';
+import { ModelFixtureError, type ResolvedModelFixture } from '../provider/model-fixture.js';
 
 /**
  * What one analysis kind is, as data the shared owners read.
@@ -333,13 +336,73 @@ export const BASELINE_REDUCER_DESCRIPTOR = {
 } as const;
 
 export const BASELINE_REDUCER_DIGEST = sha256Hex(canonicalJson(BASELINE_REDUCER_DESCRIPTOR));
-export const BASELINE_SCHEMA_DIGEST = sha256Hex(canonicalJson({
-  contractVersion: BASELINE_ANALYSIS_CONTRACT_VERSION,
-  unitResultSchema: BASELINE_UNIT_RESULT_SCHEMA,
-  promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
-  crossUnitResultSchema: BASELINE_CROSS_UNIT_RESULT_SCHEMA,
-  crossUnitPromptContractDigest: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
-}));
+function baselineSchemaDigest(promptContractDigest: string): string {
+  return sha256Hex(canonicalJson({
+    contractVersion: BASELINE_ANALYSIS_CONTRACT_VERSION,
+    unitResultSchema: BASELINE_UNIT_RESULT_SCHEMA,
+    promptContractDigest,
+    crossUnitResultSchema: BASELINE_CROSS_UNIT_RESULT_SCHEMA,
+    crossUnitPromptContractDigest: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST,
+  }));
+}
+
+export const BASELINE_SCHEMA_DIGEST = baselineSchemaDigest(BASELINE_PROMPT_CONTRACT_DIGEST);
+
+/**
+ * Which frozen prompt contract a baseline ledger asks its units under (Issue #826): the current /2, or /1 retained for the
+ * one historical replay that must ask what was asked then. A closed pair, not a version selector: no other contract exists
+ * to name, and every launch but the one {@link baselinePromptContractForLaunch} admits asks under the current one.
+ */
+export type BaselinePromptContractSelection = 'current' | 'retained-v1';
+
+const BASELINE_PROMPT_CONTRACTS = {
+  current: { prompt: BASELINE_PROMPT_CONTRACT, digest: BASELINE_PROMPT_CONTRACT_DIGEST },
+  'retained-v1': { prompt: BASELINE_PROMPT_CONTRACT_V1, digest: BASELINE_PROMPT_CONTRACT_V1_DIGEST },
+} as const;
+
+/**
+ * The recorded fixture of the one /1 Run AI7 keeps replaying (Issues #807, #387): the DeepSeek V4.1 Flash first baseline of
+ * exact `sample1`, whose unit 1 answered its notes as bare strings. Its every entry was captured inside a /1 baseline Task.
+ */
+export const RETAINED_V1_RECORDED_FIXTURE_IDENTITY = 'sample1-recorded-v41-baseline' as const;
+/** The only Journey that replays it (ADR 0044 §Replay: inside a complete Journey, never a service or unit suite). */
+export const RETAINED_V1_JOURNEY = 'J-04' as const;
+const RETAINED_V1_RECORDED_MODEL = 'deepseek-v4.1-flash';
+
+/**
+ * The prompt contract a launch's baseline ledger asks under, decided once at service startup from what the launch bound.
+ * `retained-v1` exactly when a development-ci J-04 launch binds the admitted recorded fixture alone — no base — and every one
+ * of its entries is a capture of the V4.1 model made inside a /1 baseline Task, its unit answers under /1 itself. Any other
+ * fixture carrying a /1 baseline capture, that fixture under another Journey or scope, or that identity with another, mixed
+ * or missing provenance is refused before the store opens; a launch with no fixture, developer-live included, asks under the
+ * current contract. Nothing here relaxes the adapter's own guard: a /1 Run is answered only because it asks /1's questions.
+ */
+export function baselinePromptContractForLaunch(launch: {
+  readonly operationalScope: 'development-ci' | 'developer-live';
+  readonly journey: string | undefined;
+  readonly fixture: Pick<ResolvedModelFixture, 'identity' | 'lineage' | 'entries'> | null;
+}): BaselinePromptContractSelection {
+  const { fixture } = launch;
+  if (fixture === null) return 'current';
+  const refuse = (detail: string): never => {
+    throw new ModelFixtureError('MODEL_FIXTURE_REFUSED', `夹具 ${fixture.identity} ${detail}`);
+  };
+  const entries = [...fixture.entries.values()];
+  const carriesV1 = entries.some((entry) => entry.capture?.taskPromptContractDigest === BASELINE_PROMPT_CONTRACT_V1_DIGEST);
+  const historical = fixture.identity === RETAINED_V1_RECORDED_FIXTURE_IDENTITY;
+  if (!historical && !carriesV1) return 'current';
+  if (!historical) refuse('含基线提示契约 v1 下的录制条目；只有已准入的历史录制夹具按 v1 重放。');
+  if (launch.operationalScope !== 'development-ci' || launch.journey !== RETAINED_V1_JOURNEY) {
+    refuse(`只在 development-ci 的 ${RETAINED_V1_JOURNEY} 启动中按基线提示契约 v1 重放。`);
+  }
+  if (fixture.lineage.length !== 1 || fixture.lineage[0]!.identity !== fixture.identity) refuse('按 v1 重放时不得叠加其他夹具。');
+  const exact = entries.length > 0 && entries.every((entry) => entry.capture !== undefined &&
+    entry.capture.taskPromptContractDigest === BASELINE_PROMPT_CONTRACT_V1_DIGEST &&
+    entry.capture.model === RETAINED_V1_RECORDED_MODEL &&
+    (entry.capture.subject !== 'unit' || entry.capture.promptContractDigest === BASELINE_PROMPT_CONTRACT_V1_DIGEST));
+  if (!exact) refuse('的录制来源不全是基线提示契约 v1 下的 V4.1 捕获。');
+  return 'retained-v1';
+}
 
 const BASELINE_EXECUTION_STEPS = ['派生覆盖清单', '逐单元执行基线稿件分析契约 v1', '章节归约', '跨单元矛盾与连续性核对', '全书综合', '形成结果集修订版'] as const;
 const BASELINE_UPDATE_EXECUTION_STEPS = ['派生覆盖清单并计算复用计划', '按血缘复用兼容单元', '仅对重算单元逐单元执行基线稿件分析契约 v1', '章节归约', '跨单元矛盾与连续性核对', '全书综合', '追加后继结果集修订版'] as const;
@@ -363,7 +426,10 @@ const BASELINE_MODES: ReadonlyArray<AnalysisModeDefinition> = BASELINE_ANALYSIS_
   recompute: mode === 'sync-current' ? 'changed' : mode === 'reanalyze-range' ? 'selected-range' : 'everything',
 }));
 
-export function baselineAnalysisKindDefinition(): AnalysisKindDefinition {
+export function baselineAnalysisKindDefinition(promptContract: BaselinePromptContractSelection = 'current'): AnalysisKindDefinition {
+  const contract = Object.hasOwn(BASELINE_PROMPT_CONTRACTS, promptContract) ? BASELINE_PROMPT_CONTRACTS[promptContract] : null;
+  if (contract === null) throw new Error('ANALYSIS_PROMPT_CONTRACT_UNKNOWN');
+  const promptContractDigest = contract.digest;
   return {
     kind: BASELINE_ANALYSIS_KIND,
     contractVersion: BASELINE_ANALYSIS_CONTRACT_VERSION,
@@ -374,12 +440,12 @@ export function baselineAnalysisKindDefinition(): AnalysisKindDefinition {
     updateModes: BASELINE_ANALYSIS_UPDATE_MODES,
     // A baseline revision always covers the whole manuscript: a unit no predecessor result serves is read.
     outOfScope: 'recompute',
-    systemPrompt: BASELINE_PROMPT_CONTRACT.systemPrompt,
-    promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
+    systemPrompt: contract.prompt.systemPrompt,
+    promptContractDigest,
     unitResultSchema: BASELINE_UNIT_RESULT_SCHEMA,
     revisionSchema: 'ai7.baseline-manuscript-analysis.result-set-revision/1',
     successorRevisionSchema: 'ai7.baseline-manuscript-analysis.result-set-revision/2',
-    schemaDigest: BASELINE_SCHEMA_DIGEST,
+    schemaDigest: baselineSchemaDigest(promptContractDigest),
     reducerDigest: BASELINE_REDUCER_DIGEST,
     reducerStages: BASELINE_REDUCER_STAGES,
     executionSteps: BASELINE_EXECUTION_STEPS,
@@ -418,7 +484,7 @@ export function baselineAnalysisKindDefinition(): AnalysisKindDefinition {
     ],
     buildUnitMessage,
     parseUnitMessageHeader,
-    requestDigest: (unitOrdinal, unitDigest) => unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, unitOrdinal, unitDigest),
+    requestDigest: (unitOrdinal, unitDigest) => unitRequestDigest(promptContractDigest, unitOrdinal, unitDigest),
     parseUnitResult: (text, unit) => parseUnitResult(text, { unitOrdinal: unit.ordinal, blockIds: [...unit.blockIds, ...unit.overlapBlockIds] }),
     reduce: (input) => {
       const reduction = reduceBaselineAnalysis(

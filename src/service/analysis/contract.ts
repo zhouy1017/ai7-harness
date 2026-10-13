@@ -19,7 +19,8 @@ import type { ManifestBlockInput } from './coverage-manifest.js';
  * fixture key; changing one character of it changes every request digest, which is the intent.
  */
 export const BASELINE_UNIT_RESULT_SCHEMA = 'ai7.baseline-manuscript-analysis.unit-result/1' as const;
-export const BASELINE_PROMPT_CONTRACT_SCHEMA = 'ai7.baseline-manuscript-analysis.prompt-contract/1' as const;
+export const BASELINE_PROMPT_CONTRACT_SCHEMA = 'ai7.baseline-manuscript-analysis.prompt-contract/2' as const;
+export const BASELINE_PROMPT_CONTRACT_V1_SCHEMA = 'ai7.baseline-manuscript-analysis.prompt-contract/1' as const;
 
 const ENTITY_KINDS: ReadonlyArray<AnalysisEntityKind> = ['person', 'place', 'organization', 'object', 'term', 'other'];
 const CONFIDENCE_LEVELS = ['high', 'medium', 'low'] as const;
@@ -192,9 +193,14 @@ export function parseUnitResult(
   return { ok: true, result, canonicalJson: canonical, digest: sha256Hex(canonical) };
 }
 
-/** The frozen prompt contract. Every field is model-facing text or a fixed format; none is manuscript content. */
-export const BASELINE_PROMPT_CONTRACT = {
-  schema: BASELINE_PROMPT_CONTRACT_SCHEMA,
+/**
+ * Prompt contract /1, retained byte for byte as it was frozen before Issue #826 (digest `4ba25b2f…7eb5`). It describes the
+ * `conflicts` and `unresolved` elements in prose alone, and a DeepSeek V4.1 Flash answer to it (S40/first-baseline/9) gave
+ * them as bare strings, which {@link parseUnitResult} rightly refuses. It binds nothing new: only the J-04 replay of the
+ * recorded `sample1-recorded-v41-baseline` capture asks it again, so that historical Run asks what was asked then.
+ */
+export const BASELINE_PROMPT_CONTRACT_V1 = {
+  schema: BASELINE_PROMPT_CONTRACT_V1_SCHEMA,
   contractVersion: BASELINE_ANALYSIS_CONTRACT_VERSION,
   responseSchema: BASELINE_UNIT_RESULT_SCHEMA,
   systemPrompt: [
@@ -216,6 +222,41 @@ export const BASELINE_PROMPT_CONTRACT = {
   overlapHeader: '以下为承接上一单元的重叠上下文（仅供理解，不属于本单元的覆盖范围）：',
   ownHeader: '以下为本单元需要归纳的内容块：',
   blockLine: '[{blockId}] ({kind}{level}) {text}',
+} as const;
+
+export const BASELINE_PROMPT_CONTRACT_V1_DIGEST = sha256Hex(canonicalJson(BASELINE_PROMPT_CONTRACT_V1));
+
+/**
+ * The current frozen prompt contract, /2 (Issue #826). It asks for the same unit result under the same analysis contract
+ * and result schema as /1; only the system section changes. Each `conflicts` and `unresolved` element is given its literal
+ * object shape, a bare string is ruled out, and an item no block of the unit anchors carries the empty `sourceRanges` the
+ * schema already admits rather than an invented one. The unit message is /1's, header for header. Every field is
+ * model-facing text or a fixed format; none is manuscript content.
+ */
+export const BASELINE_PROMPT_CONTRACT = {
+  schema: BASELINE_PROMPT_CONTRACT_SCHEMA,
+  contractVersion: BASELINE_ANALYSIS_CONTRACT_VERSION,
+  responseSchema: BASELINE_UNIT_RESULT_SCHEMA,
+  systemPrompt: [
+    '你是 AI7 的基线稿件分析组件。你只处理用户消息中给出的一个分析单元，逐块阅读并输出一份结构化归纳。',
+    '不进行事实核查、不评审文学质量、不改写稿件、不给出修改建议、不引用外部知识、不调用任何工具。',
+    '只输出一个 JSON 对象，不加说明文字，不加代码围栏。JSON 必须精确包含以下键，且不得多出任何键：',
+    'schema（固定为 "ai7.baseline-manuscript-analysis.unit-result/1"）、unitOrdinal（与用户消息头部的单元序号一致）、synopsis（本单元结构概述，字符串）、',
+    'entities（数组；每项含 name、kind、aliases、note、sourceRanges；kind 取 person/place/organization/object/term/other 之一；note 可为 null）、',
+    'events（数组；每项含 ordinal、summary、chronology、participants、sourceRanges；chronology 可为 null）、',
+    'relationships（数组；每项含 subject、object、relation、sourceRanges）、',
+    'settingClaims（数组；每项含 subject、claim、sourceRanges，用于稿件内部设定声明）、',
+    'conflicts（数组，用于本单元内部发现的矛盾；每项都是对象 {"description": 矛盾说明字符串, "sourceRanges": sourceRanges 数组}）、',
+    'unresolved（数组，用于无法在本单元内确定的事项；每项都是对象 {"description": 事项说明字符串, "sourceRanges": sourceRanges 数组}）、',
+    'confidence（取 high/medium/low 之一）。',
+    '每个 sourceRanges 元素为 {"blockId": 本单元给出的内容块标识, "fromGrapheme": 起始字素或 null, "toGrapheme": 结束字素或 null}，只能引用本单元列出的内容块。',
+    'conflicts 与 unresolved 的元素绝不能是裸字符串：应写 [{"description": "说明", "sourceRanges": []}]，不得写 ["说明"]。某一事项在本单元列出的内容块中找不到依据时，其 sourceRanges 为空数组 []，不要编造引用。',
+    '找不到的类别输出空数组。不要编造稿件中不存在的内容。',
+  ].join('\n'),
+  unitMessageHeader: BASELINE_PROMPT_CONTRACT_V1.unitMessageHeader,
+  overlapHeader: BASELINE_PROMPT_CONTRACT_V1.overlapHeader,
+  ownHeader: BASELINE_PROMPT_CONTRACT_V1.ownHeader,
+  blockLine: BASELINE_PROMPT_CONTRACT_V1.blockLine,
 } as const;
 
 export const BASELINE_PROMPT_CONTRACT_DIGEST = sha256Hex(canonicalJson(BASELINE_PROMPT_CONTRACT));
