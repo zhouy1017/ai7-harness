@@ -16,9 +16,11 @@ import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState
 // Adaptation, and a prepared `重新分析所选范围` Task whose range changes before authorization is
 // superseded by a Plan Revision, refuses its stale version, takes the way back to the version it froze,
 // and is reconfirmed as version 2.
-// Inputs: exact ADR 0043 SampleBooks/sample1.docx plus the hand-written synthetic model fixtures under
-// tests/fixtures/model/. The product executes every Run over the in-process ai7-local-deterministic route;
-// the remote DeepSeek binding stays denied under Provider Processing v1 and no socket is opened.
+// Issue #387 adds a separate fresh Book replaying the reviewed 2026-10-12 V4.1 capture, including its
+// truthful schema-invalid unit 1 gap. Existing authored/synthetic retry and incremental scenarios remain intact.
+// Inputs: exact ADR 0079 §5 SampleBooks/sample1.docx and reviewed fixtures under tests/fixtures/model/.
+// Every Run uses the in-process ai7-local-deterministic route; recorded tokens are replayed accounting,
+// and neither the product nor this Journey makes a new Provider transmission.
 
 // The Book's title as the import confirms it, and the 审阅报告's exported file (Issue #500, S64b part 2).
 const J04_BOOK_TITLE = 'J-04 sample1 基线稿件分析';
@@ -143,6 +145,7 @@ const RETRY_FIXTURE_IDENTITY = 'sample1-baseline-transient-retry';
 // every request the earlier stages froze and the review categories' requests over the manuscript as this
 // Journey leaves it — both of its edits in the first block.
 const REVIEW_FIXTURE_IDENTITY = 'sample1-review-authored';
+const RECORDED_FIXTURE_IDENTITY = 'sample1-recorded-v41-baseline';
 /** The material fields of the Plan Boundary Split, in the order the canonical envelope lists them. */
 const PLAN_MATERIAL_FIELDS = [
   'providerBinding.providerId', 'providerBinding.modelId', 'providerBinding.adapterRevision', 'providerBinding.configurationRevision', 'providerBinding.credentialReference',
@@ -580,11 +583,11 @@ async function waitFor(renderer, expression, name, timeout = 60_000) {
   throw journeyCheckFailure('J-04', name);
 }
 
-async function importSample1(renderer, cancellation) {
+async function importSample1(renderer, cancellation, distinct = false) {
   await click(renderer, '导入稿件', 'import-open');
   await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'import-target');
   at('sample1-import-target');
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'import-target-explicit');
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector(${JSON.stringify(`input[aria-label="${distinct ? '新建图书（作为不同作品）' : '新建图书'}"]`)}); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'import-target-explicit');
   await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, 'import-relationship-screen');
   at('sample1-import-relationship');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'import-relationship-explicit');
@@ -3061,6 +3064,89 @@ async function main() {
     // The old `/enrol/` guard's intent kept (#713 review, P3-9): this Book was never enrolled, and nothing was started by an Enrollment.
     await assertRenderer(renderer, `window.ai7.inspectBackgroundAnalysisEnrollment().then((enrollment) => enrollment.state === 'none' && enrollment.enrollment === null && enrollment.startedRunCount === 0 && enrollment.historyCount === 0)`, 'no-background-enrollment');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-network-provider-session');
+
+    // S41-f1 (#387): a fresh, unedited sample1 Book keeps the real recorded result independent of
+    // every synthetic retry/update above. Launch, import, prepare and start all use the product path.
+    at('sample1-import');
+    await closeOwnedBrowser();
+    modelAdapterIdentity = RECORDED_FIXTURE_IDENTITY;
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'recorded-launch-ready');
+    const recordedFixture = JSON.parse(await readFile(resolve(FIXTURES_ROOT, `${RECORDED_FIXTURE_IDENTITY}.json`), 'utf8'));
+    const recordedFixtureDigest = await expectedFixtureDigest([RECORDED_FIXTURE_IDENTITY]);
+    const sourceRecordedUsage = recordedFixture.entries.reduce((sum, entry) => ({
+      requests: sum.requests + 1, inputTokens: sum.inputTokens + entry.response.usage.inputTokens,
+      outputTokens: sum.outputTokens + entry.response.usage.outputTokens,
+    }), { requests: 0, inputTokens: 0, outputTokens: 0 });
+    requireJourney(recordedFixture.entries.length === 12 && recordedFixture.entries.every((entry, index) =>
+      entry.capture.itemId === `S40/first-baseline/${index + 9}` && entry.capture.model === 'deepseek-v4.1-flash' &&
+      entry.capture.route === 'opencode-go' && entry.capture.evidenceScope === 'namespaced' &&
+      entry.capture.capturedAt.startsWith('2026-10-12') && entry.capture.taskPromptContractDigest === PROMPT_CONTRACT_DIGEST) &&
+      sameRecord(sourceRecordedUsage, { requests: 12, inputTokens: 38287, outputTokens: 113041 }), 'recorded-source-provenance');
+    const recordedBook = await importSample1(renderer, cancellation, true);
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'recorded-artifact-ready');
+    await click(renderer, '审阅并为本图书启用 Revision 2', 'recorded-artifact-enable');
+    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'recorded-artifact-enabled');
+    await click(renderer, '返回图书列表', 'recorded-return-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'recorded-library');
+    await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(recordedBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'recorded-open-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(recordedBook.bookId)}]')`, 'recorded-manuscript-ready');
+    await openAnalysisDestination(renderer, 'recorded-open-analysis');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card[data-analysis-state="available"]')`, 'recorded-analysis-available');
+    await reviewAction(renderer, '[data-analysis-action="prepare"]', 'recorded-prepare');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'recorded-prepared', 120_000);
+    const recordedPrepared = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(recordedPrepared?.bookId === recordedBook.bookId && recordedPrepared.coverageManifest?.units?.length === 8 &&
+      recordedPrepared.providerResolutionPlan?.executionRoute?.fixtureIdentity === RECORDED_FIXTURE_IDENTITY, 'recorded-prepared-binding');
+    await startFromBar(renderer, 'recorded-start');
+    await waitFor(renderer, `['settled','failed','interrupted'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState)`, 'recorded-settled', 180_000);
+    await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'recorded-settled-state');
+    at('result-set-revision');
+    const recorded = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const realRevision = recorded?.resultSetRevision;
+    const realReport = recorded?.taskOutcome?.report;
+    requireJourney(recorded?.run?.state === 'completed-with-gaps' && recorded.taskOutcome?.classification === 'completed-with-gaps' &&
+      realRevision?.ordinal === 1 && realRevision.units.filter((unit) => unit.state === 'closed').length === 7 &&
+      realRevision.units[0].state === 'gap' && realRevision.gaps.length === 1 &&
+      realRevision.gaps[0].unitOrdinal === 1 && realRevision.gaps[0].code === 'contract-invalid' &&
+      realRevision.gaps[0].reason.includes('schema-invalid') && realRevision.coverage.state === 'partial' &&
+      realRevision.coverage.unitsClosed === 7 && realRevision.coverage.unitsTotal === 8, 'recorded-truthful-schema-gap');
+    requireJourney(realRevision.synthesis?.synopsis?.includes('曾本之') && realRevision.synthesis.entities.length === 84 &&
+      realRevision.synthesis.events.length === 64 && realRevision.synthesis.relationships.length === 55 &&
+      realRevision.synthesis.settingClaims.length === 70 && realRevision.synthesis.entities.some((entity) => entity.name === '郑雄') &&
+      realRevision.synthesis.relationships.some((relationship) => relationship.subject === '郑雄' && relationship.object === '曾本之') &&
+      realRevision.crossUnitFindings.length === 3 && realRevision.crossUnitReduction?.state === 'closed' &&
+      realRevision.assuranceSample?.state === 'closed' && realRevision.assuranceSample.dispositions.length === 3 &&
+      realRevision.assuranceSample.dispositions.filter((item) => item.disposition === '需降级').length === 2 &&
+      realRevision.assuranceSample.dispositions.filter((item) => item.disposition === '应删除').length === 1,
+    'recorded-durable-business-results');
+    requireJourney(sameRecord(realRevision.usage, { requests: 11, inputTokens: 37205, outputTokens: 110667 }) &&
+      realReport?.usagePerStage?.units?.requests === 8 && realReport.usagePerStage['cross-unit-reduction']?.requests === 1 &&
+      realReport.usagePerStage['assurance-sampling']?.requests === 2 && realReport.usagePerStage['run-report-reflection']?.requests === 1 &&
+      realReport.ifRedone?.state === 'closed' && realReport.ifRedone.items.length === 9 &&
+      sameRecord(Object.values(realReport.usagePerStage).reduce((sum, usage) => ({ requests: sum.requests + usage.requests,
+        inputTokens: sum.inputTokens + usage.inputTokens, outputTokens: sum.outputTokens + usage.outputTokens }),
+      { requests: 0, inputTokens: 0, outputTokens: 0 }), sourceRecordedUsage), 'recorded-source-usage-replayed');
+    // Source-recorded usage above remains nonzero. The actual execution pin and denied networking
+    // establish zero newly incurred remote transmissions; replay is never another live validation.
+    requireJourney(recorded.run.attempt?.executionBinding?.route === 'ai7-local-deterministic' &&
+      recorded.run.attempt.executionBinding.model === 'ai7-deterministic-fixture' &&
+      realRevision.adapterPin?.fixtureIdentity === RECORDED_FIXTURE_IDENTITY &&
+      realRevision.adapterPin.fixtureSha256 === recordedFixtureDigest &&
+      recorded.run.attempt.credentialReadinessCheck?.valueReleased === false && loopback.observedRequests() === 0,
+    'recorded-zero-new-incurred-transmissions');
+    await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.runState==='completed-with-gaps' && document.querySelector('[data-analysis-unit="1"][data-analysis-unit-state="gap"]') && document.querySelectorAll('[data-analysis-unit][data-analysis-unit-state="closed"]').length===7`, 'recorded-visible-gap');
+    at('restart-immutable');
+    await closeOwnedBrowser();
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'recorded-restart-ready');
+    await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(recordedBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'recorded-restart-open');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(recordedBook.bookId)}]')`, 'recorded-restart-manuscript');
+    await openAnalysisDestination(renderer, 'recorded-restart-analysis');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'recorded-restart-visible');
+    const recordedReopened = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(JSON.stringify(recordedReopened) === JSON.stringify(recorded) && loopback.healthy() && loopback.observedRequests() === 0,
+      'recorded-restart-preserves-result-and-report');
   } finally {
     finalCleanupRequested = true;
     try { await cancellation.cleanup(); } finally { cancellation.dispose(); }
