@@ -560,6 +560,7 @@ export function resolveLedgerSelection(lines, selector) {
     typeof captured.recordedAt === 'string' && !Number.isNaN(Date.parse(captured.recordedAt)) && LEDGER_ITEM_ID_PATTERN.test(chosen.itemId),
   'FIXTURE_GEN/capture-unproven', '账本没有该请求的可确认捕获。');
   const legacyReplay = chosen.evidenceScope === 'legacy-unnamespaced';
+  const chosenTask = taskContractOf(chosen);
   const namespaceFields = ['route', 'endpoint', 'requestShape', 'cacheKey', 'generation'];
   const scoped = !legacyReplay && namespaceFields.some((key) => key in chosen);
   refuse(!scoped || namespaceFields.every((key) => typeof chosen[key] === 'string' && chosen[key].length > 0),
@@ -567,10 +568,10 @@ export function resolveLedgerSelection(lines, selector) {
   // The cache keeps an #808 capture only for a 200 it could keep whole; anything else under a namespaced key is not one.
   refuse(!scoped || (captured.outcome === 'transmitted' && captured.status === 200 &&
     chosen.cacheKey === namespacedCacheKey(chosen, chosen.requestDigest) &&
-    typeof chosen.taskPromptContractDigest === 'string' && DIGEST_PATTERN.test(chosen.taskPromptContractDigest) &&
-    chosen.generation === evidenceGeneration(chosen, chosen.promptContractDigest, chosen.taskPromptContractDigest) &&
+    typeof chosenTask === 'string' && DIGEST_PATTERN.test(chosenTask) &&
+    chosen.generation === evidenceGeneration(chosen, chosen.promptContractDigest, chosenTask) &&
     namespaceFields.every((key) => chosen[key] === captured[key]) &&
-    chosen.taskPromptContractDigest === captured.taskPromptContractDigest),
+    chosenTask === taskContractOf(captured)),
   'FIXTURE_GEN/capture-unproven', '请求命名空间或证据代次不一致。');
   return {
     itemId: chosen.itemId,
@@ -581,11 +582,21 @@ export function resolveLedgerSelection(lines, selector) {
     quotaExhausted: captured.classification === 'quota-exhausted',
     cacheKey: scoped ? chosen.cacheKey : null,
     generation: scoped ? chosen.generation : null,
-    taskPromptContractDigest: scoped ? chosen.taskPromptContractDigest : null,
+    taskPromptContractDigest: scoped ? chosenTask : null,
     captured,
     // A replay says when the response it answered with was captured; the entry must say the same.
     replayCapturedAt: chosen.outcome === 'replayed' && typeof chosen.capturedAt === 'string' ? chosen.capturedAt : null,
   };
+}
+
+/**
+ * The enclosing task's contract a line or entry names. A dialogue item (the `S17c` slice) is its own task, and the first live
+ * dialogue captures (Issue #52) named no task contract: such a one reads as its stage contract, which is the evidence
+ * generation it was keyed under. Any other item that names none stays unproven.
+ */
+export function taskContractOf(record) {
+  const dialogue = typeof record.itemId === 'string' && record.itemId.startsWith('S17c/');
+  return record.taskPromptContractDigest === undefined && dialogue ? record.promptContractDigest : record.taskPromptContractDigest;
 }
 
 /** The entry file of one (model, request digest) pair under the legacy key: the formula every entry before #808 was written by. */
@@ -694,7 +705,7 @@ export async function readSelectedEntry(cacheRoot, selection) {
   if (selection.cacheKey !== null) {
     refuse(entry.cacheKey === selection.cacheKey && namespacedCacheKey(entry, selection.requestDigest) === selection.cacheKey &&
       entry.generation === selection.generation && entry.promptContractDigest === selection.promptContractDigest &&
-      entry.taskPromptContractDigest === selection.taskPromptContractDigest &&
+      taskContractOf(entry) === selection.taskPromptContractDigest &&
       entry.itemId === selection.captureItemId && entry.responseDigest === responseDigest &&
       entry.evidencePosition === selection.captured.evidencePosition &&
       sameUsage(entry.usage, selection.captured.usage) &&

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { DIALOGUE_PROMPT_CONTRACT, buildDialogueMessage } from '../../src/service/dialogue/contract.js';
+import { DIALOGUE_PROMPT_CONTRACT, DIALOGUE_PROMPT_CONTRACT_DIGEST, buildDialogueMessage } from '../../src/service/dialogue/contract.js';
 import { DialogueExecutionOwner, dialogueLiveRoute, dialogueRouteRefusal, type DialogueLiveRoute } from '../../src/service/dialogue/dialogue-execution.js';
 import {
   DIALOGUE_EXECUTION_BINDINGS_REVISION_60_SQL,
@@ -284,6 +284,8 @@ describe('就这段提问… on the live route (provider-free)', () => {
       const lines = await ledgerLines();
       expect(lines).toHaveLength(1);
       expect(lines[0]).toMatchObject({ itemId: 'S17c/editorial-dialogue/1', purpose: 'editorial-dialogue', outcome: 'transmitted', status: 200, model: OPENCODE_GO_MODEL });
+      // A dialogue turn is its own task: the fixture generator proves its capture by the one contract named twice.
+      expect(lines[0]!.taskPromptContractDigest).toBe(lines[0]!.promptContractDigest);
       expect(lines[0]!.validation).toMatchObject({ family: VALIDATION.family, case: VALIDATION.case, step: 'editorial-dialogue/ask', decision: 'first-capture' });
       // The ledger records identities and counts, never content.
       expect(JSON.stringify(lines)).not.toContain(selection.selectedText);
@@ -432,6 +434,39 @@ describe('就这段提问… on the live route (provider-free)', () => {
       expect(await ledgerLines()).toHaveLength(0);
     } finally {
       await dialogues.dispose();
+    }
+  });
+});
+
+describe('the recorded live answer (Issue #52, S17c fixture)', () => {
+  it('replays the Go capture through the real dialogue path: one ask, one 重新回答, complete fragments, no authority', async () => {
+    const { loadModelFixture } = await import('../../src/service/provider/model-fixture.js');
+    const { resolve } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const recorded = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-dialogue-recorded-v41');
+    const recordedEntry = [...recorded.entries.values()][0]!;
+    expect(recorded.entries.size).toBe(1);
+    const capture = recordedEntry.capture as unknown as Record<string, unknown>;
+    expect(capture).toMatchObject({
+      subject: 'dialogue', itemId: 'S17c/editorial-dialogue/5', route: 'opencode-go', model: OPENCODE_GO_MODEL,
+      promptContractDigest: DIALOGUE_PROMPT_CONTRACT_DIGEST, validation: { family: 'editorial-dialogue', case: 'sample1-selected-paragraph', step: 'editorial-dialogue/ask' },
+    });
+    const answer = (recordedEntry.response as unknown as { chunks: string[] }).chunks.join('');
+    const store = await openStore();
+    const book = await importSample1Book(store, roots.codeRoot, '实录回放');
+    const local = new DialogueExecutionOwner({ records: store, fixture: recorded, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null, answerHold: null });
+    try {
+      const { dialogueId, projection } = await ask(store, local, book.bookId, selectionOf(store, book));
+      expect(projection.attempts[0]!.state).toBe('completed');
+      // The real answer, read by complete fragment: three sentences, nothing lost or broken.
+      expect(projection.attempts[0]!.fragments.length).toBe(3);
+      expect(texts(projection).join('')).toBe(answer.replace(/\s+/gu, ''));
+      const again = await next(store, local, book.bookId, dialogueId, 'regenerate');
+      expect(texts(again, 1)).toEqual(texts(again, 0));
+      expect(again.attempts.map((attempt) => attempt.convertedMarkIds.length)).toEqual([0, 0]);
+      expect(again.actions.convert).toBe(true);
+    } finally {
+      await local.dispose();
     }
   });
 });

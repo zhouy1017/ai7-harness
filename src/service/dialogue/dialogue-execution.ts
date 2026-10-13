@@ -251,7 +251,8 @@ export class DialogueExecutionOwner {
               ? (url, init) => nativeFetch(url, init)
               // 重新回答 sends the very request the ask sent, so under the same validation the cache replays the captured
               // answer instead of paying for it twice; 继续回答 asks a different question and is its own step.
-              : (url, init) => transmitOnce(cache!, nativeFetch, { purpose: DIALOGUE_TEST_ITEM_PURPOSE, slice: 'S17c', promptContractDigest }, {
+              // A dialogue turn is its own task: its stage contract and its task contract are the one dialogue contract.
+              : (url, init) => transmitOnce(cache!, nativeFetch, { purpose: DIALOGUE_TEST_ITEM_PURPOSE, slice: 'S17c', promptContractDigest, taskPromptContractDigest: promptContractDigest }, {
                 intent: validation,
                 step: `${DIALOGUE_TEST_ITEM_PURPOSE}/${turn.message.kind}`,
                 requestShape: route.modelProfile.capabilities.requestShape,
