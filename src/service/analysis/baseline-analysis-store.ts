@@ -113,6 +113,7 @@ import {
   type UnreadWalkCut,
 } from './unread-changes.js';
 import { TASK_INPUT_CHECKPOINT_PURPOSE } from './identity.js';
+import { ACTIVE_SET_VERSION, DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION } from '../launch-policy.js';
 import type { AnalysisKindDefinition, AnalysisReductionResult } from './kind-definition.js';
 import {
   deriveReusePlan,
@@ -820,7 +821,7 @@ export function activeRunReason(state: BaselineAnalysisRunState | null, kind: st
  * The launch facts a Run's plan must freeze, handed to the ledger once by the service entry. Under
  * `development-ci` the plan stays exactly what it was: the denied production binding, the local
  * deterministic route when one is bound, and an `unset` ceiling. Under `developer-live` the plan
- * freezes the v9 binding — the `opencode-go` route, its bare model id, its fixed development
+ * freezes the selected developer-live binding — the `opencode-go` route, its bare model id, its fixed development
  * Credential Reference, and the required token ceiling, explicit or the policy's per-frozen-unit
  * default — because every one of those is a material plan input that must be pinned before
  * authorization, not chosen at dispatch.
@@ -890,7 +891,7 @@ export function namedNonEffects(live: LaunchBinding['live'], unitCount: number |
     '只读取当前图书的任务输入修订版，不读取其他图书',
     live === null
       ? 'development-ci · Provider Processing v1：0 次实时传输，远程绑定被拒绝'
-      : `developer-live · Provider Processing v9：实时传输受运行边界约束（任务运行预算上限 ${ceilingReading(live.runBudgetCeiling, unitCount)}），远程绑定 ${live.route} · ${live.model} 已获准`,
+      : `developer-live · Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION}：实时传输受运行边界约束（任务运行预算上限 ${ceilingReading(live.runBudgetCeiling, unitCount)}），远程绑定 ${live.route} · ${live.model} 已获准`,
     '凭据值不进入任务账本、协议帧、日志、诊断或 Session 内容',
   ];
 }
@@ -900,7 +901,7 @@ export function blockedReasons(live: LaunchBinding['live'], unitCount: number | 
   return [
     live === null
       ? '当前可信启动范围为 development-ci，Provider Processing v1 允许 0 次实时传输；远程 DeepSeek 绑定被拒绝。'
-      : `当前可信启动范围为 developer-live，Provider Processing v9 允许的实时传输受运行边界约束（任务运行预算上限 ${ceilingReading(live.runBudgetCeiling, unitCount)}）；远程绑定 ${live.route} · ${live.model} 已获准。`,
+      : `当前可信启动范围为 developer-live，Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION} 允许的实时传输受运行边界约束（任务运行预算上限 ${ceilingReading(live.runBudgetCeiling, unitCount)}）；远程绑定 ${live.route} · ${live.model} 已获准。`,
     '未提供 J-04 专用的本地确定性模型适配器控制，因此没有可执行的本地路由。',
     '运行授权已记录；派发前阻止，未创建 Session、未构造 Provider payload、未访问网络。',
   ];
@@ -914,7 +915,7 @@ export function blockedReasons(live: LaunchBinding['live'], unitCount: number | 
 export function providerConsequence(live: LaunchBinding['live'], unitCount: number | null = null, firstTaskLabel = '首次基线分析'): string {
   return live === null
     ? `与${firstTaskLabel}相同：远程 DeepSeek 绑定被 development-ci · Provider Processing v1 拒绝（0 次实时传输），只有 J-04 控制绑定的 AI7 本地确定性模型适配器可执行；外发数据类别 public-or-synthetic；未设置任务预算上限；只有重算单元形成模型请求并计入用量，复用单元不形成任何模型负载。`
-    : `与${firstTaskLabel}相同：远程绑定 ${live.route} · ${live.model} 在 developer-live · Provider Processing v9 下可执行，实时传输受运行边界约束；外发数据类别 public-or-synthetic；任务运行预算上限 ${ceilingReading(live.runBudgetCeiling, unitCount)}；每个重算单元形成一次实时传输并计入用量，复用单元不形成任何模型负载。`;
+    : `与${firstTaskLabel}相同：远程绑定 ${live.route} · ${live.model} 在 developer-live · Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION} 下可执行，实时传输受运行边界约束；外发数据类别 public-or-synthetic；任务运行预算上限 ${ceilingReading(live.runBudgetCeiling, unitCount)}；每个重算单元形成一次实时传输并计入用量，复用单元不形成任何模型负载。`;
 }
 
 /**
@@ -1811,7 +1812,7 @@ export class BaselineAnalysisStore {
   /**
    * The facts a 默认执行规则 binds, as the Book's durable state reads now (Issue #421): the re-derivation Reconnect
    * Preflight compares a waiting Run's plan with, for an update of the whole Book. No rule is ever used under
-   * developer-live (Provider Processing v5 through v9: `matchingActiveDefaultExecutionRuleAllowed: false`), so this is
+   * developer-live (Provider Processing v5 through v10: `matchingActiveDefaultExecutionRuleAllowed: false`), so this is
    * read only outside it, where the ceiling depends on no unit count.
    */
   currentRuleFacts(bookId: string, mode: AnalysisTaskMode): MaterialPlanInputsProjection {
@@ -3376,7 +3377,7 @@ export class BaselineAnalysisStore {
       },
     };
     // The plan freezes whichever binding the launch bound: the denied production binding on the
-    // deterministic route, or the v9 live binding. Both are frozen before authorization, never chosen
+    // deterministic route, or the selected developer-live binding. Both are frozen before authorization, never chosen
     // at dispatch, so an authorized Run can never transmit somewhere its plan did not name.
     const live = this.#launch.live;
     // The editor's ceiling is the plan's own outside developer-live (Issue #51, S16a); under it the launch sets the
@@ -3410,7 +3411,7 @@ export class BaselineAnalysisStore {
             credentialSlot: live.credentialSlot,
             credentialReference: live.credentialReference,
             credentialReadiness: input.credentialReadiness ?? facts.credentialOperationState,
-            providerProcessing: { operationalScope: 'developer-live', version: 'v9', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
+            providerProcessing: { operationalScope: 'developer-live', version: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
           },
       executionRoute: live !== null
         ? { kind: live.route, model: live.model, endpoint: live.endpoint }
@@ -3428,7 +3429,7 @@ export class BaselineAnalysisStore {
     };
     const dispatchAllowed = live !== null || this.#route !== null;
     const stopCondition = live !== null
-      ? 'Provider Processing v9 binds opencode-go under developer-live; the Run Budget Ceiling and the Coverage Manifest unit count bound every transmission'
+      ? `Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION} binds opencode-go under developer-live; the Run Budget Ceiling and the Coverage Manifest unit count bound every transmission`
       : dispatchAllowed
         ? 'Provider Processing v1 denies the remote route; execution binds only ai7-local-deterministic'
         : 'Provider Processing v1 denies the remote route and no local deterministic route is bound';
@@ -3472,7 +3473,7 @@ export class BaselineAnalysisStore {
         : dispatchAllowed ? 'remote-denied-local-deterministic' : 'remote-denied-no-route',
       dispatchAllowed,
       summary: live !== null
-        ? `计划已冻结；developer-live · Provider Processing v9 允许绑定 ${live.route} · ${live.model}，实时传输受运行边界约束`
+        ? `计划已冻结；developer-live · Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION} 允许绑定 ${live.route} · ${live.model}，实时传输受运行边界约束`
         : dispatchAllowed
           ? '计划已冻结；远程绑定被 Provider Processing v1 拒绝，执行绑定至 AI7 本地确定性模型适配器'
           : '计划已冻结；远程绑定被 Provider Processing v1 拒绝，且没有可执行的本地路由',
@@ -3535,7 +3536,7 @@ export class BaselineAnalysisStore {
     start: 'now' | 'when-online' = 'now',
     origin: AnalysisAuthorizationOrigin = STANDARD_DIRECT,
   ): { projection: AnalysisProjection; dispatchRunRecordId: string | null } {
-    // Provider Processing v9 admits one kind and one origin, each refused under its own code, as preparation refuses them.
+    // The baseline rule of the selected Provider Processing admits one kind and one origin, each refused under its own code, as preparation refuses them.
     if (this.#launch.live !== null) {
       requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND,
         'ANALYSIS_KIND_NOT_ADMITTED', 'developer-live 当前只允许基线稿件分析；该任务种类尚未获准实时执行。');
@@ -4666,8 +4667,8 @@ export class BaselineAnalysisStore {
           promptContractDigest: facts.promptContractDigest,
         },
         policyPin: live === null
-          ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v7', liveTransmissions: 0 }
-          : { operationalScope: 'developer-live', providerProcessingVersion: 'v9', activePolicySetVersion: 'v7', liveTransmissions: 'bounded-by-run' },
+          ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 0 }
+          : { operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 'bounded-by-run' },
         provenance: {
           taskIntentId: facts.taskIntentId,
           runRecordId: facts.runRecordId,
@@ -4811,17 +4812,17 @@ export class BaselineAnalysisStore {
 
   /**
    * A plan may be frozen only under a verified launch policy that matches the bound launch: the
-   * provider-free `development-ci` v1 denial, or the `developer-live` v9 eligibility whose live
+   * provider-free `development-ci` v1 denial, or the selected `developer-live` eligibility whose live
    * binding this store already holds. An unverified or mismatched policy freezes nothing.
    */
   #requireDeniedPolicy(policy: LaunchPolicyProjection): void {
     requireAnalysis(policy.integrityState === 'verified' && policy.denialReason === null &&
-      policy.operationalScope === this.#launch.operationalScope && policy.activePolicySetVersion === 'v7',
+      policy.operationalScope === this.#launch.operationalScope && policy.activePolicySetVersion === ACTIVE_SET_VERSION,
     'ANALYSIS_POLICY_UNAVAILABLE', '可信启动策略与已绑定的可信区间不一致。');
     if (this.#launch.live !== null) {
-      requireAnalysis(policy.providerProcessing.version === 'v9' && policy.providerProcessing.decision === 'eligible-only' &&
+      requireAnalysis(policy.providerProcessing.version === DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION && policy.providerProcessing.decision === 'eligible-only' &&
         policy.providerProcessing.authorizedLiveTransmissionCount === 'bounded-by-run' && policy.providerProcessing.liveTransmissionAllowed === true,
-      'ANALYSIS_POLICY_UNAVAILABLE', '无法建立可信的 developer-live Provider Processing v9 记录。');
+      'ANALYSIS_POLICY_UNAVAILABLE', `无法建立可信的 developer-live Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION} 记录。`);
       return;
     }
     requireAnalysis(policy.providerProcessing.version === 'v1' && policy.providerProcessing.decision === 'deny' &&

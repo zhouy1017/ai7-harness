@@ -1,0 +1,227 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AI7 Active Policy Set v8",
+  "description": "Exact scope mapping: unchanged v1/v2/v6 and External Export v2; developer-live v10 (baseline analysis, editorial dialogue, reference-free non-web review). Supersedes the v6 numbering PR #742 reserved.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaDialect",
+    "schemaPath",
+    "manifestType",
+    "version",
+    "predecessorVersion",
+    "predecessorCanonicalPath",
+    "digestAlgorithm",
+    "trustedOperationalScopeSelection",
+    "activePolicies"
+  ],
+  "properties": {
+    "schemaDialect": {
+      "const": "http://json-schema.org/draft-07/schema#"
+    },
+    "schemaPath": {
+      "const": "docs/policies/active-policy-set.v8.schema.json"
+    },
+    "manifestType": {
+      "const": "ai7-active-policy-set"
+    },
+    "version": {
+      "const": "v8"
+    },
+    "predecessorVersion": {
+      "const": "v7"
+    },
+    "predecessorCanonicalPath": {
+      "const": "docs/policies/active-policy-set.v7.json"
+    },
+    "digestAlgorithm": {
+      "const": "sha256"
+    },
+    "trustedOperationalScopeSelection": {
+      "const": {
+        "exactlyOneProviderProcessingScopeBoundPerLaunch": true,
+        "selectionAuthorityClass": "trusted-build-or-launch-authority",
+        "ordinaryProductSettingAllowed": false,
+        "environmentVariableSelectorAllowed": false,
+        "providerSelectorAllowed": false,
+        "artifactOrPluginSelectorAllowed": false,
+        "crossScopeFallbackAllowed": false,
+        "missingOrUnknownScopeResult": "deny-provider-processing"
+      }
+    },
+    "activePolicies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider-processing-policy",
+        "external-export-policy"
+      ],
+      "properties": {
+        "provider-processing-policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "selectionType",
+            "scopePins"
+          ],
+          "properties": {
+            "selectionType": {
+              "const": "trusted-operational-scope-map"
+            },
+            "scopePins": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "development-ci",
+                "fixture-recording",
+                "ordinary-production",
+                "developer-live"
+              ],
+              "properties": {
+                "development-ci": {
+                  "$ref": "#/definitions/providerV1Pin"
+                },
+                "fixture-recording": {
+                  "$ref": "#/definitions/providerV2Pin"
+                },
+                "ordinary-production": {
+                  "$ref": "#/definitions/providerV6Pin"
+                },
+                "developer-live": {
+                  "const": {
+                    "policyId": "provider-processing-policy",
+                    "policyType": "provider-processing",
+                    "version": "v10",
+                    "canonicalPath": "docs/policies/provider-processing-policy.v10.json",
+                    "sha256": "1f2e1381b40ce2a91eba2c92af3cd883d6df5f574980d6f182e49d02856d86e9"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "external-export-policy": {
+          "$ref": "#/definitions/externalExportPin"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "providerV1Pin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policyId",
+        "policyType",
+        "version",
+        "canonicalPath",
+        "sha256"
+      ],
+      "properties": {
+        "policyId": {
+          "const": "provider-processing-policy"
+        },
+        "policyType": {
+          "const": "provider-processing"
+        },
+        "version": {
+          "const": "v1"
+        },
+        "canonicalPath": {
+          "const": "docs/policies/provider-processing-policy.v1.json"
+        },
+        "sha256": {
+          "$ref": "#/definitions/sha256"
+        }
+      }
+    },
+    "providerV2Pin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policyId",
+        "policyType",
+        "version",
+        "canonicalPath",
+        "sha256"
+      ],
+      "properties": {
+        "policyId": {
+          "const": "provider-processing-policy"
+        },
+        "policyType": {
+          "const": "provider-processing"
+        },
+        "version": {
+          "const": "v2"
+        },
+        "canonicalPath": {
+          "const": "docs/policies/provider-processing-policy.v2.json"
+        },
+        "sha256": {
+          "$ref": "#/definitions/sha256"
+        }
+      }
+    },
+    "providerV6Pin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policyId",
+        "policyType",
+        "version",
+        "canonicalPath",
+        "sha256"
+      ],
+      "properties": {
+        "policyId": {
+          "const": "provider-processing-policy"
+        },
+        "policyType": {
+          "const": "provider-processing"
+        },
+        "version": {
+          "const": "v6"
+        },
+        "canonicalPath": {
+          "const": "docs/policies/provider-processing-policy.v6.json"
+        },
+        "sha256": {
+          "$ref": "#/definitions/sha256"
+        }
+      }
+    },
+    "externalExportPin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policyId",
+        "policyType",
+        "version",
+        "canonicalPath",
+        "sha256"
+      ],
+      "properties": {
+        "policyId": {
+          "const": "external-export-policy"
+        },
+        "policyType": {
+          "const": "external-export"
+        },
+        "version": {
+          "const": "v2"
+        },
+        "canonicalPath": {
+          "const": "docs/policies/external-export-policy.v2.json"
+        },
+        "sha256": {
+          "$ref": "#/definitions/sha256"
+        }
+      }
+    }
+  }
+}
