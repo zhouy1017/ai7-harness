@@ -56,10 +56,10 @@ export function liveReviewRule(
 /** The shared execution owner admits only the exact reference-free built-in contract and binding. */
 export function liveReviewKindAdmitted(
   policy: ReviewLaunchPolicy | undefined,
-  definition: { readonly kind: string; readonly promptContractDigest: string },
+  definition: { readonly kind: string; readonly promptContractDigest: string; readonly materialReferences?: unknown },
   binding: { readonly route: string; readonly endpoint: string; readonly model: string; readonly credentialSlot: string },
 ): boolean {
-  if (policy === undefined) return false;
+  if (policy === undefined || definition.materialReferences !== undefined) return false;
   const entry = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((category) => reviewCategoryKindId(category.categoryId) === definition.kind);
   if (entry === undefined) return false;
   const rule = liveReviewRule(policy, entry);

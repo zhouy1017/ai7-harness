@@ -31,13 +31,14 @@ describe('reference-free live review admission (#809)', () => {
     expect(liveReviewKindAdmitted(policy, definition, rule)).toBe(true);
     expect(liveReviewKindAdmitted(undefined, definition, rule)).toBe(false);
     expect(liveReviewKindAdmitted(policy, { ...definition, promptContractDigest: 'a'.repeat(64) }, rule)).toBe(false);
+    expect(liveReviewKindAdmitted(policy, { ...definition, materialReferences: {} }, rule)).toBe(false);
     expect(liveReviewKindAdmitted(policy, definition, { ...rule, model: 'another-model' })).toBe(false);
     expect(liveReviewKindAdmitted(policy, definition, { ...rule, endpoint: 'https://other.example.test/' })).toBe(false);
   });
 
   it('fails closed without a selected rule, under a denied launch, or with ambiguous admission', () => {
     const category = entries[0]!;
-    expect(liveReviewRule(selected, category)).toBeNull();
+    expect(liveReviewRule({ ...selected, providerProcessing: { ...selected.providerProcessing, admittedRules: [] } }, category)).toBeNull();
     expect(liveReviewRule({ ...policy, integrityState: 'denied' }, category)).toBeNull();
     expect(liveReviewRule({ ...policy, operationalScope: 'development-ci' }, category)).toBeNull();
     expect(liveReviewRule({ ...policy, providerProcessing: { ...policy.providerProcessing, admittedRules: [rule, rule] } }, category)).toBeNull();

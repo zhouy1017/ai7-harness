@@ -26,6 +26,10 @@ let owner: BaselineAnalysisExecutionOwner;
 let driver: ReviewRunDriver;
 let sent: number;
 let failure: 'none' | 'unknown' | 'quota';
+let holdTurn: boolean;
+let arrived: Promise<void>;
+let announce: () => void;
+let release: () => void;
 
 beforeEach(async () => {
   roots = await createServiceTestRoots('ai7-live-review-');
@@ -46,8 +50,15 @@ beforeEach(async () => {
   store.baselineAnalysisLedger.bindLaunch(launch);
   sent = 0;
   failure = 'none';
+  holdTurn = false;
+  arrived = new Promise<void>((resolve) => { announce = resolve; });
+  const held = new Promise<void>((resolve) => { release = resolve; });
   const nativeFetch: typeof fetch = async (_url, init) => {
     sent += 1;
+    if (sent === 1) {
+      announce();
+      if (holdTurn) await held;
+    }
     if (sent === 1 && failure === 'unknown') return new Response('{', { status: 200 });
     if (sent === 1 && failure === 'quota') return new Response(JSON.stringify({ error: { message: 'synthetic account limit' } }), { status: 429 });
     const body = JSON.parse(String(init?.body)) as { messages: Array<{ role: string; content: string }> };
@@ -84,6 +95,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  release?.();
   const stopped = driver?.dispose();
   await owner?.dispose();
   await stopped;
@@ -167,5 +179,33 @@ describe('reference-free review on the Go execution path', () => {
     const before = sent;
     await driver.continue(run.reviewRunId);
     expect(sent).toBe(before);
+  });
+
+  it.each(['cancel', 'interrupt'] as const)('carries %s and the spent turn through the existing category execution controls', async (mode) => {
+    holdTurn = true;
+    const book = await importSample1Book(store, roots.codeRoot, 'L2 sample1 stopped review');
+    await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
+    recordMissingCredentialConnection(store, 'L2 主编辑角色连接');
+    const definition = reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry('typos-and-usage')!));
+    let progress = store.createReviewRunPreparationWork(book.bookId, ['typos-and-usage'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
+    while (!progress.done) progress = store.advanceReviewRunPreparationWork(progress.workId!);
+    const run = progress.projection!.run!;
+    store.authorizeReviewRun(book.bookId, run.reviewRunId, approvals(run));
+    const loop = driver.drive(run.reviewRunId);
+    await arrived;
+    const ledger = store.reviewCategoryLedger(definition);
+    const running = store.inspectReviewCategory(book.bookId, definition);
+    let stopped: Promise<void> | null = null;
+    if (mode === 'cancel') {
+      ledger.requestCancel(book.bookId, running.taskIntent!.taskIntentId);
+      owner.cancelRun(running.run!.runRecordId, ledger);
+    } else stopped = owner.dispose();
+    release();
+    await stopped;
+    await loop;
+    const outcome = store.inspectReviewCategory(book.bookId, definition);
+    expect(outcome.taskOutcome!.classification).toBe(mode === 'cancel' ? 'cancelled' : 'interrupted');
+    expect(sent).toBe(1);
+    expect(outcome.resultSetRevision!.usage.inputTokens + outcome.resultSetRevision!.usage.outputTokens).toBe(60);
   });
 });
