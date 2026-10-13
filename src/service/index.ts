@@ -1305,7 +1305,7 @@ async function dispatch(
     // dialogue Task and starts its answer at once, and the answer streams into the owner's memory whether anyone watches or
     // not; a read joins the records to the Harness Session Ledger, and to what the answer in flight has streamed so far.
     case 'askAboutSelection': {
-      dialogueReady(dialogues);
+      dialogueReady(dialogues, store.dialogueSourceDigest(request.input.bookId, request.input.selection));
       const turn = store.askAboutSelection(request.input.bookId, { selection: request.input.selection, question: request.input.question });
       dialogueBegin(dialogues, turn);
       return { id: request.id, ok: true, op: request.op, result: store.inspectDialogue(request.input.bookId, turn.dialogueId, 0, (attemptId) => dialogues.liveText(attemptId)) };
@@ -1322,7 +1322,7 @@ async function dispatch(
     }
     case 'continueDialogueAnswer':
     case 'regenerateDialogueAnswer': {
-      dialogueReady(dialogues);
+      dialogueReady(dialogues, store.dialogueSourceDigest(request.input.bookId, request.input));
       const turn = store.nextDialogueAttempt(request.input.bookId, request.input, request.op === 'continueDialogueAnswer' ? 'continue' : 'regenerate');
       dialogueBegin(dialogues, turn);
       return { id: request.id, ok: true, op: request.op, result: store.inspectDialogue(request.input.bookId, request.input.dialogueId, 0, (id) => dialogues.liveText(id)) };
@@ -1386,10 +1386,10 @@ async function dispatch(
   }
 }
 
-/** A dialogue refusal from the execution owner, said as the store says its own. */
-function dialogueReady(dialogues: DialogueExecutionOwner): void {
+/** A dialogue refusal from the execution owner, said as the store says its own; the Book's source decides a live route. */
+function dialogueReady(dialogues: DialogueExecutionOwner, sourceDigest: string | null): void {
   try {
-    dialogues.requireReady();
+    dialogues.requireReady(sourceDigest);
   } catch (error) {
     if (error instanceof DialogueError) throw new StoreErrorClass(error.code, error.message);
     throw error;
@@ -1581,7 +1581,7 @@ async function run(): Promise<void> {
     { loadLaunchFixture },
     { createKeyringSecretResolver },
     { ReviewRunDriver },
-    { DialogueExecutionOwner },
+    { DialogueExecutionOwner, dialogueLiveRoute },
     { BackgroundAnalysisDispatcher: BackgroundAnalysisDispatcherClass },
     { baselinePromptContractForLaunch },
   ] =
@@ -1751,7 +1751,8 @@ async function run(): Promise<void> {
       records: store,
       fixture,
       sessionLogRoot: await ensureCanonicalDataDirectory(dataRoot, HARNESS_SESSION_LOG_DIRECTORY),
-      developerLive: developerLive !== null,
+      // Under developer-live, the route the selected policy admits for the dialogue, if any (Issue #52, S17c).
+      live: developerLive === null ? null : dialogueLiveRoute(developerLive, launchPolicy, createKeyringSecretResolver()),
       answerHold: answerHoldPath === undefined ? null : controlledAnswerHold(answerHoldPath),
     });
     // Connectivity Wait (Issue #502). The reading is the device's own unless J-04's control names a file; the
