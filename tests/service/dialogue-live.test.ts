@@ -26,10 +26,10 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 import { importSample1Book, requireExactSample1 } from '../support/sample1-baseline.js';
 
 // Service-integration suite (L2) for the live editorial dialogue (Issue #52, plan slice S17c; ADR 0088; ADR 0089) over the
-// real store, the real PrimaryAgentHarness composition, Egress Gate, Credential Broker, Provider Test Ledger and Result Cache.
-// Only the transport is a stub, so no socket is opened and no credential value beyond a local placeholder exists. The admitted
-// rule is a test-only projection of the planned Provider Processing successor's dialogue rule (Issue #831): its exact ids
-// arrive with that successor, and the reading under test takes whatever the selected policy names.
+// real store, the real PrimaryAgentHarness composition, Egress Gate, Credential Broker, Provider Test Ledger and Result Cache,
+// under the real selected developer-live policy (Provider Processing v10, Issue #831) and its dialogue allow rule. Only the
+// transport is a stub, so no socket is opened and no credential value beyond a local placeholder exists. Hand-built rules
+// serve only the refusals: the reading takes whatever the selected policy names.
 
 const QUESTION = '这段的叙述视角是否一致？';
 /** The synthetic answer the stub gives: the fixture's own words, quoting nothing of the Book. */
@@ -37,7 +37,7 @@ const ANSWER = '这段一直用第三人称限知视角叙述。人物的心理�
 const CONTINUED = '末句可以把语气放缓，与前文的节奏一致。';
 const VALIDATION: DevelopmentValidationIntent = { family: 'editorial-dialogue', case: 'sample1-selected-paragraph', delta: null };
 
-/** The planned dialogue allow rule, as the verified projection will list it beside the baseline rule. */
+/** The selected policy's dialogue allow rule, as the verified projection lists it (Issue #831); varied for the refusals. */
 function dialogueRule(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     ruleId: 'developer-live-public-samplebook-editorial-dialogue',
@@ -106,7 +106,7 @@ beforeEach(async () => {
   opened = [];
   const verified = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
   expect(verified.integrityState).toBe('verified');
-  livePolicy = withRules(verified, [BASELINE_RULE, dialogueRule()]);
+  livePolicy = verified;
 });
 
 afterEach(async () => {
@@ -202,6 +202,8 @@ function refusalCode(operation: () => unknown): string {
 
 describe('the admitted dialogue route, read from the selected policy', () => {
   it('takes exactly the one rule naming the dialogue and the selected excerpt, and nothing else', () => {
+    // The selected policy names it exactly so, beside the baseline and review rules.
+    expect(livePolicy.providerProcessing.admittedRules.filter((rule) => rule.taskKinds.includes('editorial-dialogue'))).toEqual([dialogueRule()]);
     const route = admittedDialogueRoute(livePolicy)!;
     expect(route).not.toBeNull();
     expect(route.ruleId).toBe('developer-live-public-samplebook-editorial-dialogue');
@@ -210,7 +212,7 @@ describe('the admitted dialogue route, read from the selected policy', () => {
     expect(route.profile).toBe(OPENCODE_GO_ROUTE_PROFILE);
     expect(route.modelProfile.model).toBe(OPENCODE_GO_MODEL);
     expect([...route.outboundDataCategories]).toEqual(['editor-selected-manuscript-excerpt']);
-    // Today's selected policy lists no rules in its projection: no live dialogue.
+    // A projection that lists no rules admits no live dialogue.
     const withoutList = { ...livePolicy.providerProcessing } as Record<string, unknown>;
     delete withoutList['admittedRules'];
     expect(admittedDialogueRoute({ ...livePolicy, providerProcessing: withoutList as LaunchPolicyProjection['providerProcessing'] })).toBeNull();

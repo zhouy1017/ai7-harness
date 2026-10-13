@@ -1,4 +1,4 @@
-import type { LaunchPolicyProjection } from '../../shared/protocol.js';
+import type { DeveloperLiveProviderProcessingVersion, LaunchPolicyProjection } from '../../shared/protocol.js';
 import type { CredentialSlotBinding } from '../provider/credential-broker.js';
 import { PROVIDER_ROUTE_PROFILES, type ProviderRouteProfile } from '../provider/deepseek-adapter.js';
 import { OPENCODE_GO_ROUTE, type OutboundDataCategory, type RemoteExecutionRoute } from '../provider/egress-gate.js';
@@ -20,7 +20,7 @@ export const DIALOGUE_OUTBOUND_CATEGORY = 'editor-selected-manuscript-excerpt' a
 /** The live route one admitted rule binds, resolved against the declared route and model profiles. */
 export interface AdmittedDialogueRoute {
   readonly ruleId: string;
-  readonly providerProcessingVersion: string;
+  readonly providerProcessingVersion: DeveloperLiveProviderProcessingVersion;
   readonly modelRole: CredentialSlotBinding['modelRole'];
   readonly profile: ProviderRouteProfile;
   readonly modelProfile: ProviderModelProfile;
@@ -45,10 +45,10 @@ function strings(value: unknown): ReadonlyArray<string> | null {
 export function admittedDialogueRoute(policy: LaunchPolicyProjection): AdmittedDialogueRoute | null {
   const processing = policy.providerProcessing;
   if (policy.integrityState !== 'verified' || policy.operationalScope !== 'developer-live' ||
-      processing.decision !== 'eligible-only' || processing.liveTransmissionAllowed !== true || processing.version === null) return null;
-  // Read structurally: the list is the selected policy's, and a projection that carries none admits nothing.
-  const rules = (processing as { readonly admittedRules?: unknown }).admittedRules;
-  if (!Array.isArray(rules)) return null;
+      processing.decision !== 'eligible-only' || processing.liveTransmissionAllowed !== true ||
+      processing.version === null || processing.version === 'v1') return null;
+  // The selected policy's allow rules, as the launch verified them; a projection that carries none admits nothing.
+  const rules: ReadonlyArray<unknown> = processing.admittedRules ?? [];
   const dialogueRules = rules.filter((rule) => isRecord(rule) &&
     (strings(rule['taskKinds']) ?? []).includes(DIALOGUE_TASK_KIND) &&
     (strings(rule['outboundDataCategories']) ?? []).includes(DIALOGUE_OUTBOUND_CATEGORY));

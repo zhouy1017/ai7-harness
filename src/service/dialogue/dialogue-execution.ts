@@ -13,7 +13,6 @@ import {
   LOCAL_DETERMINISTIC_ROUTE,
   evaluateEgress,
   type EgressBindingFacts,
-  type EgressPolicyPin,
   type ExecutionRoute,
   type TransmitTicket,
 } from '../provider/egress-gate.js';
@@ -211,7 +210,7 @@ export class DialogueExecutionOwner {
         policy: route === null
           ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }
           // The selected version, as the verified projection names it.
-          : { operationalScope: 'developer-live', providerProcessingVersion: route.providerProcessingVersion as Extract<EgressPolicyPin, { operationalScope: 'developer-live' }>['providerProcessingVersion'], liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+          : { operationalScope: 'developer-live', providerProcessingVersion: route.providerProcessingVersion, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
         // The one message this attempt may send: the selected words and the question, and what a stopped answer kept.
         admittedUserMessages: new Set([message]),
         ...(route === null ? {} : { ruleOutboundCategories: route.outboundDataCategories }),
