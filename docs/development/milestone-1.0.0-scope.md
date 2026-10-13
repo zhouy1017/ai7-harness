@@ -14,7 +14,7 @@ The Owner defines 1.0.0 as **every designed capability** in the PRD, `docs/ui-ux
 | Reference consumption | Withdrawal re-check at consumption; reference-bearing review/writing/evaluation | #759 |
 | Task controls | Background analysis transmits in production with mandatory ceiling, Series and all-Books scopes; model-initiated clarification (one per unit); Run controls on Review Runs; plan editing for every task kind; 审阅 快速开始 and default rules for all kinds; 停止 as an alias of 取消 | D8, D11, D12 |
 | Editorial-value evidence and fidelity | #812 measured case set; #814 edited-DOCX contract; #766 readers | P1 rows |
-| Web evidence chain | Every usable search backend shipped in the product (development evaluation only excludes clearly unusable ones and ranks the rest); the user selects a backend in settings, can run a built-in 测试检索 per backend, and each Run freezes the backend used; keys and per-call fees accepted; AI7-owned webfetch; declarations aligned; external evidence retention with 来源译文 and staleness | #473, #744, #425; D24 |
+| Web evidence chain | Every usable search backend shipped in the product (development evaluation only excludes clearly unusable ones and ranks the rest); the user selects a backend in settings, can run a built-in 测试检索 per backend, and each Run freezes the backend used; keys and per-call fees accepted; AI7-owned webfetch; declarations aligned; external evidence retention with 来源译文 and staleness | #473, #744, #425; D24, D24⁵ |
 | Retrieval | Similarity vectors with a local embedding model, PDF text layer, 来源译文; targeted retrieval + Exact Fetch as a tool for every model task | #428; D5, D20 |
 | Factual verification, second half | Evidence comparison, three assurance levels (default 标准核查; offline degrades to 快速整理 with disclosure), verification review decisions, correction proposals | D9 |
 | Proposal and Apply chain surfaces | Dedicated review workspace above 20 suggestions, draft decisions, filtered batch decisions, atomic groups, four-state Apply cards | D10 |
@@ -38,6 +38,6 @@ The Owner defines 1.0.0 as **every designed capability** in the PRD, `docs/ui-ux
 - Code signing, notarization, release, `main` promotion, auto-update.
 - Providers other than OpenCode Go and DeepSeek official remain declared documents marked 尚未支持; Doubao waits for official documentation (#719).
 
-## TODO after 1.0.0
+## TODO after 1.0.0 (Issues to open in wave 14)
 
 OCR for the Material Index; auto-update via GitHub Releases; plugin analysis kinds; 结构调整模式; Detached Manuscript Window; workflow-definition branch; Skill catalog/trust/sandbox; S66d when a house profile exists; Rewind/Replay reconsideration.
