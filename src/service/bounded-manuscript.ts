@@ -128,6 +128,7 @@ import {
   OUTCOME_RESOLUTION_SCHEMA_VERSION,
   IMPORTED_EXEMPLAR_SCHEMA_VERSION,
   EVALUATION_PROFILE_SCHEMA_VERSION,
+  DIALOGUE_LIVE_BINDING_SCHEMA_VERSION,
   LATEST_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
@@ -209,7 +210,7 @@ import { SCHEDULED_BACKUP_FOREIGN_KEYS, SCHEDULED_BACKUP_SCHEMA_SQL, SCHEDULED_B
 import { DATABASE_REPLACEMENT_FOREIGN_KEYS, DATABASE_REPLACEMENT_SCHEMA_SQL, DATABASE_REPLACEMENT_TRIGGER_SQL } from './database-replacement.js';
 import { DATABASE_MERGE_FOREIGN_KEYS, DATABASE_MERGE_SCHEMA_SQL, DATABASE_MERGE_TRIGGER_SQL } from './database-merge.js';
 import { EVALUATION_INITIAL_DRAFT_FOREIGN_KEYS, EVALUATION_INITIAL_DRAFT_SCHEMA_SQL, EVALUATION_INITIAL_DRAFT_TRIGGER_SQL } from './evaluation-records.js';
-import { DIALOGUE_FOREIGN_KEYS, DIALOGUE_SCHEMA_SQL, DIALOGUE_TRIGGER_SQL } from './dialogue/dialogue-ledger.js';
+import { DIALOGUE_EXECUTION_BINDINGS_REVISION_60_SQL, DIALOGUE_FOREIGN_KEYS, DIALOGUE_SCHEMA_SQL, DIALOGUE_TRIGGER_SQL } from './dialogue/dialogue-ledger.js';
 import { CAPTURED_PROCEDURE_FOREIGN_KEYS, CAPTURED_PROCEDURE_SCHEMA_SQL, CAPTURED_PROCEDURE_TRIGGER_SQL } from './captured-procedures.js';
 import { EVALUATION_REWRITE_FOREIGN_KEYS, EVALUATION_REWRITE_SCHEMA_SQL, EVALUATION_REWRITE_TRIGGER_SQL } from './evaluation-rewrites.js';
 import { WRITING_TASK_FOREIGN_KEYS, WRITING_TASK_SCHEMA_SQL, WRITING_TASK_TRIGGER_SQL } from './writing-tasks.js';
@@ -2781,8 +2782,12 @@ function requireManuscriptReimportTargetSchema(
       ...(includeDatabaseMergeTables ? DATABASE_MERGE_SCHEMA_SQL : {}),
       // Revision 59 (Issue #429, S81b1) adds the AI7 初评 each Evaluation Record version began from.
       ...(includeEvaluationInitialDraftTables ? EVALUATION_INITIAL_DRAFT_SCHEMA_SQL : {}),
-      // Revision 60 (Issue #52, S17a) adds the dialogue Tasks, their attempts, bindings, spans, outcomes and conversions.
+      // Revision 60 (Issue #52, S17a) adds the dialogue Tasks, their attempts, bindings, spans, outcomes and conversions, and
+      // revision 71 (S17c) widens the bindings for the live route: a store below it may still hold revision 60's text.
       ...(includeDialogueTables ? DIALOGUE_SCHEMA_SQL : {}),
+      ...(includeDialogueTables && Number(db.prepare('PRAGMA user_version').get()?.user_version) < DIALOGUE_LIVE_BINDING_SCHEMA_VERSION
+        ? { dialogue_execution_bindings: [DIALOGUE_EXECUTION_BINDINGS_REVISION_60_SQL, DIALOGUE_SCHEMA_SQL.dialogue_execution_bindings] }
+        : {}),
       // Revision 61 (Issue #64, S29b) adds the revisions of the Series Retrieval Exclusions.
       ...(includeSeriesRetrievalExclusionTables ? SERIES_RETRIEVAL_EXCLUSION_SCHEMA_SQL : {}),
       // Revision 62 (Issue #429, S81c) adds which 定稿 version each 审稿意见 Task drafts from, and which result became a draft.
@@ -5778,7 +5783,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5829,7 +5834,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION)) {
     transact(db, () => {
       if (validateStoreTruth || version !== LATEST_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(

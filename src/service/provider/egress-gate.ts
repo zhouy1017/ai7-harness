@@ -76,14 +76,17 @@ export type EgressPolicyPin =
 /**
  * The Run Budget Ceiling as the gate must see it immediately before a transmission: `unset` is a
  * refusal under v9, because Provider Processing v9 requires a non-`unset` ceiling, and `reached`
- * refuses because the Run has spent its bound.
+ * refuses because the Run has spent its bound. `not-applicable` is an Interactive Editorial Dialogue's
+ * (ADR 0088 §4): a dialogue has no Run, so no per-Run ceiling applies and its single bounded payload is
+ * its bound. It is admitted only for a binding whose rule names the editor's selected excerpt; for any
+ * other binding it refuses as `unset` does.
  */
-export type EgressCeilingState = 'unset' | 'within' | 'reached';
+export type EgressCeilingState = 'unset' | 'within' | 'reached' | 'not-applicable';
 
 /**
  * What a Run may send. Analysis sends the admitted public or synthetic material it was planned over; an Interactive Editorial
  * Dialogue (Issue #52, S17a) sends the words the editor selected in their own manuscript, and its question. A dialogue's
- * excerpt reaches only the local deterministic route until a dialogue-purpose Provider Processing revision admits it (S17c).
+ * excerpt reaches the local deterministic route, or a remote one only under an allow rule that names it (S17c).
  */
 export type OutboundDataCategory = 'public-or-synthetic' | 'editor-selected-manuscript-excerpt';
 
@@ -97,6 +100,13 @@ export interface EgressBindingFacts {
   readonly policy: EgressPolicyPin;
   /** Every admitted user-role message text, exactly as the Run Source Scope permits it to be sent. */
   readonly admittedUserMessages: ReadonlySet<string>;
+  /**
+   * The outbound categories the binding's Provider Processing allow rule names (Issue #52, S17c), read from the selected
+   * policy's rule; absent for every binding whose rule names only public or synthetic material — baseline analysis and
+   * review — which then reads exactly as before. The editor's selected excerpt reaches a remote route only when this set
+   * holds it.
+   */
+  readonly ruleOutboundCategories?: ReadonlySet<OutboundDataCategory>;
   /**
    * The platform tools the binding's Provider Processing rule names (ADR 0080 §7.5), read from the rule by
    * `readPlatformToolsRule`; absent or `null` when the rule names none — as Provider Processing v9's one rule names none —
@@ -373,6 +383,12 @@ function toolResultSourceAdmitted(admitted: AdmittedToolResult, rule: PlatformTo
   return canonical !== null && canonical === admitted.sourceUrl && (scope.citationAdmits?.(canonical) ?? false);
 }
 
+/** Whether the binding sends the editor's selected excerpt under a rule that names it (Issue #52, S17c). */
+function excerptAdmittedByRule(binding: EgressBindingFacts): boolean {
+  return binding.outboundDataCategory === 'editor-selected-manuscript-excerpt' &&
+    (binding.ruleOutboundCategories?.has('editor-selected-manuscript-excerpt') ?? false);
+}
+
 export function evaluateEgress(
   payload: AssembledModelPayload,
   binding: EgressBindingFacts,
@@ -381,8 +397,8 @@ export function evaluateEgress(
   if (!DIGEST_PATTERN.test(binding.bindingDigest) || scope.currentBindingDigest() !== binding.bindingDigest) {
     return refuse('binding-stale', '执行绑定已不是当前绑定；未发送任何内容。');
   }
-  if (binding.outboundDataCategory !== 'public-or-synthetic' &&
-      !(binding.outboundDataCategory === 'editor-selected-manuscript-excerpt' && binding.route === LOCAL_DETERMINISTIC_ROUTE)) {
+  if (binding.outboundDataCategory !== 'public-or-synthetic' && !(binding.outboundDataCategory === 'editor-selected-manuscript-excerpt' &&
+      (binding.route === LOCAL_DETERMINISTIC_ROUTE || excerptAdmittedByRule(binding)))) {
     return refuse('outbound-category-mismatch', '外发数据类别不允许经这条路由发送；未发送任何内容。');
   }
   if (payload.provider !== binding.route) return refuse('route-mismatch', '请求路由与执行绑定不一致；未发送任何内容。');
@@ -439,7 +455,7 @@ export function evaluateEgress(
   // Under v9 the ceiling is a precondition of the decision itself, evaluated here from accumulated
   // usage, so no dispatch can precede it and no ceiling state can be assumed from an earlier turn.
   const ceiling = scope.ceilingState?.() ?? 'unset';
-  if (ceiling === 'unset') {
+  if (ceiling === 'unset' || (ceiling === 'not-applicable' && !excerptAdmittedByRule(binding))) {
     return refuse('run-budget-ceiling-unset', 'Provider Processing v9 要求非 unset 的任务运行预算上限；未发送任何内容。');
   }
   if (ceiling === 'reached') {
@@ -490,7 +506,7 @@ function platformToolPreconditions(binding: EgressBindingFacts, scope: EgressAtt
     return refuseTool('circuit-breaker-tripped', '本单元的工具往返已触发熔断；未发送任何内容。');
   }
   const ceiling = scope.ceilingState?.() ?? 'unset';
-  if (ceiling === 'unset') {
+  if (ceiling === 'unset' || ceiling === 'not-applicable') {
     return refuseTool('run-budget-ceiling-unset', '平台工具要求非 unset 的任务运行预算上限；未发送任何内容。');
   }
   if (ceiling === 'reached') return refuseTool('run-budget-ceiling-reached', '任务运行预算上限已达到；未发送任何内容。');

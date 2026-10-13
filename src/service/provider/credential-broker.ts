@@ -17,7 +17,7 @@ export interface SecretResolver {
 
 export interface CredentialSlotBinding {
   readonly bindingDigest: string;
-  readonly modelRole: 'Main Editorial Role';
+  readonly modelRole: 'Main Editorial Role' | 'Fast Interaction Role';
   readonly slot: CredentialSlot;
   readonly credentialReference: string;
 }
@@ -39,7 +39,7 @@ export class CredentialBrokerError extends Error {
 const CREDENTIAL_SLOTS: ReadonlySet<CredentialSlot> = new Set<CredentialSlot>(CONFIGURED_CREDENTIAL_SLOTS);
 
 function requireBinding(binding: CredentialSlotBinding): void {
-  if (!DIGEST_PATTERN.test(binding.bindingDigest) || binding.modelRole !== 'Main Editorial Role' ||
+  if (!DIGEST_PATTERN.test(binding.bindingDigest) || (binding.modelRole !== 'Main Editorial Role' && binding.modelRole !== 'Fast Interaction Role') ||
       !CREDENTIAL_SLOTS.has(binding.slot) || !CREDENTIAL_REFERENCE_PATTERN.test(binding.credentialReference)) {
     throw new CredentialBrokerError('CREDENTIAL_BINDING_INVALID', '凭据槽位绑定无效。');
   }

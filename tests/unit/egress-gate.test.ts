@@ -74,6 +74,32 @@ describe('evaluateEgress', () => {
     expect(evaluateEgress(remotePayload, remote, scope())).toMatchObject({ decision: 'refuse', reason: 'outbound-category-mismatch' });
   });
 
+  it('lets the excerpt reach a remote route only under a rule that names it, with no Run ceiling (Issue #52, S17c)', () => {
+    const live = {
+      ...binding(DEEPSEEK_ROUTE),
+      outboundDataCategory: 'editor-selected-manuscript-excerpt' as const,
+      policy: { operationalScope: 'developer-live' as const, providerProcessingVersion: 'v9' as const, liveTransmissionAllowed: true as const, authorizedLiveTransmissionCount: 'bounded-by-run' as const },
+    };
+    const remotePayload = payload({ provider: DEEPSEEK_ROUTE, model: DEEPSEEK_MODEL, messages: [user(UNIT_1)] });
+    const dialogueScope = { ...scope(), ceilingState: () => 'not-applicable' as const };
+    // A rule that names only public or synthetic material — every baseline and review binding — admits no excerpt.
+    expect(evaluateEgress(remotePayload, live, dialogueScope)).toMatchObject({ decision: 'refuse', reason: 'outbound-category-mismatch' });
+    expect(evaluateEgress(remotePayload, { ...live, ruleOutboundCategories: new Set(['public-or-synthetic'] as const) }, dialogueScope))
+      .toMatchObject({ decision: 'refuse', reason: 'outbound-category-mismatch' });
+    const admitted = { ...live, ruleOutboundCategories: new Set(['editor-selected-manuscript-excerpt'] as const) };
+    expect(evaluateEgress(remotePayload, admitted, dialogueScope)).toMatchObject({
+      decision: 'transmit-remote',
+      ticket: { decision: 'transmit-remote', bindingDigest: BINDING_DIGEST, payloadDigest: payloadDigest(remotePayload) },
+    });
+    // The dialogue still needs the exact one message it was admitted for.
+    expect(evaluateEgress(payload({ provider: DEEPSEEK_ROUTE, model: DEEPSEEK_MODEL, messages: [user('另一段文字')] }), admitted, dialogueScope))
+      .toMatchObject({ decision: 'refuse', reason: 'payload-out-of-scope' });
+    // `not-applicable` belongs to the excerpt rule alone: a public-or-synthetic binding reads it as an unset ceiling.
+    const analysis = { ...live, outboundDataCategory: 'public-or-synthetic' as const };
+    expect(evaluateEgress(remotePayload, analysis, dialogueScope)).toMatchObject({ decision: 'refuse', reason: 'run-budget-ceiling-unset' });
+    expect(evaluateEgress(remotePayload, analysis, { ...scope(), ceilingState: () => 'within' as const })).toMatchObject({ decision: 'transmit-remote' });
+  });
+
   it('refuses an out-of-scope block in a user message and sends nothing', () => {
     const foreign = `分析单元 2/2 · 单元摘要 ${'2'.repeat(64)}\n[blk_${'f'.repeat(24)}] (paragraph) 越界段落。`;
     expect(evaluateEgress(payload({ messages: [user(UNIT_1), assistant(OUTPUT_1), user(foreign)] }), binding(), scope()))
