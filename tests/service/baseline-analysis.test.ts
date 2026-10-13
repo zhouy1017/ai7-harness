@@ -324,6 +324,44 @@ function downgradeToRevision15(databasePath: string): void {
 }
 
 describe('baseline manuscript analysis over the real store on exact sample1', () => {
+  it('replays the original V4.1 7/8 business result with source-recorded usage and no secret released', async () => {
+    const recordedFixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-recorded-v41-baseline');
+    const resolver = fakeSecretResolver();
+    const store = await openWithRoute(roots.dataRoot, recordedFixture);
+    const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture: recordedFixture, secretResolver: resolver });
+    let bookId: string;
+    let result: BaselineAnalysisProjection;
+    try {
+      const imported = await importSample1Book(store, roots.codeRoot, 'Recorded sample1 baseline');
+      bookId = imported.bookId;
+      await pinEditorialWorkspaceProfileRevision2(store, bookId);
+      recordMissingCredentialConnection(store, 'Recorded fixture connection');
+      result = (await runToSettled(store, owner, bookId, null)).settled;
+      expect(result.run?.state).toBe('completed-with-gaps');
+      const revision = result.resultSetRevision!;
+      expect(revision.gaps).toMatchObject([{ unitOrdinal: 1, code: 'contract-invalid' }]);
+      expect(revision.gaps[0]!.reason).toContain('schema-invalid');
+      expect(revision.units.map((unit) => unit.state)).toEqual(['gap', 'closed', 'closed', 'closed', 'closed', 'closed', 'closed', 'closed']);
+      expect(revision.synthesis.entities).toHaveLength(84);
+      expect(revision.synthesis.events).toHaveLength(64);
+      expect(revision.synthesis.relationships).toHaveLength(55);
+      expect(revision.synthesis.settingClaims).toHaveLength(70);
+      expect(revision.crossUnitReduction.state).toBe('closed');
+      expect(revision.crossUnitFindings).toHaveLength(3);
+      expect(revision.assuranceSample.dispositions.map((item) => item.disposition)).toEqual(['需降级', '需降级', '应删除']);
+      expect(revision.usage).toEqual({ requests: 11, inputTokens: 37205, outputTokens: 110667 });
+      const report = result.taskOutcome!.report!;
+      expect(report.ifRedone.state).toBe('closed');
+      expect(report.ifRedone.items).toHaveLength(9);
+      expect(report.usagePerStage['run-report-reflection']).toEqual({ requests: 1, inputTokens: 1082, outputTokens: 2374 });
+      expect(result.run?.attempt?.executionBinding?.route).toBe('ai7-local-deterministic');
+      expect(resolver.reads).toHaveLength(1); // Readiness checks the slot; the fake resolver releases no value.
+      expect(result.run?.attempt?.credentialReadinessCheck?.valueReleased).toBe(false);
+    } finally { store.close(); }
+    const reopened = await openWithRoute(roots.dataRoot, recordedFixture);
+    try { expect(reopened.inspectBaselineAnalysis(bookId)).toEqual(result); } finally { reopened.close(); }
+  });
+
   it('executes the authorized Run through the real path and reaches one immutable Result Set Revision', async () => {
     await requireExactSample1(roots.codeRoot);
     const resolver = fakeSecretResolver();

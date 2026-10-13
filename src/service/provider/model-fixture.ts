@@ -51,7 +51,7 @@ const CAPTURE_KEYS = [
 ] as const;
 const CAPTURE_SUBJECTS = ['unit', 'reduction', 'sampling', 'reflection', 'factual-unit', 'review-unit', 'evaluation-unit', 'readers-unit', 'rewrite-unit', 'writing-unit', 'task-synthesis', 'dialogue'] as const;
 const CAPTURE_ITEM_PATTERN = /^[A-Za-z0-9]+\/[a-z0-9-]+\/[1-9][0-9]{0,5}$/u;
-const CAPTURE_PLACEHOLDER_PATTERN = /^\{\{(?:block:[1-9][0-9]{0,3}|unit:[1-9][0-9]{0,3}:block:[1-9][0-9]{0,3}|ref:[1-9][0-9]{0,3})\}\}$/u;
+const CAPTURE_PLACEHOLDER_PATTERN = /^\{\{(?:block:[1-9][0-9]{0,3}|unit:[1-9][0-9]{0,3}:block:[1-9][0-9]{0,3}|ref:[1-9][0-9]{0,3}|sample-block:[1-9][0-9]{0,3})\}\}$/u;
 const CAPTURE_IDENTITY_PATTERN = /^[A-Za-z0-9_-]{1,64}$/u;
 const MAX_IDENTITY_MAP = 4_096;
 /** The keys a fixture may carry beside the seven it must; every other key is still refused. */
@@ -340,7 +340,7 @@ export function parseModelFixture(value: unknown): ModelFixture {
       requireFixture(capture.identityMap.every((mapping) => serializedResponse.includes(mapping.placeholder) &&
         (unitSubject ? /^\{\{block:/u.test(mapping.placeholder)
           : capture.subject === 'reduction' ? /^\{\{unit:/u.test(mapping.placeholder)
-            : capture.subject === 'sampling' && /^\{\{ref:/u.test(mapping.placeholder))), '夹具条目的标识映射与捕获契约不一致。');
+            : capture.subject === 'sampling' && /^\{\{(?:ref|sample-block):/u.test(mapping.placeholder))), '夹具条目的标识映射与捕获契约不一致。');
     }
     return {
       unitOrdinal: entry.unitOrdinal as number,
