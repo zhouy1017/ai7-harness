@@ -29,6 +29,7 @@ import type { ManifestBlockInput } from './coverage-manifest.js';
  */
 export const ASSURANCE_SAMPLING_RESULT_SCHEMA = 'ai7.analysis.assurance-sampling-result/1' as const;
 export const ASSURANCE_SAMPLING_PROMPT_CONTRACT_SCHEMA = 'ai7.analysis.assurance-sampling-prompt-contract/1' as const;
+export const ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_SCHEMA = 'ai7.analysis.assurance-sampling-prompt-contract/2' as const;
 export const ASSURANCE_SAMPLING_CONTRACT_VERSION = 'ai7.analysis.assurance-sampling/1' as const;
 
 /** The closed disposition set ADR 0066 names; never widened, and never reduced to a boolean. */
@@ -80,7 +81,10 @@ export type AssuranceSamplingResultParse =
   | { ok: true; result: AssuranceSamplingResult; canonicalJson: string; digest: string }
   | { ok: false; code: AssuranceSamplingParseFailureCode; detail: string };
 
-/** The frozen prompt contract. Every field is model-facing text or a fixed format; none is manuscript content. */
+/**
+ * The frozen prompt contract /1. Every field is model-facing text or a fixed format; none is manuscript content. The
+ * factual kind and every Review Category ask under it, and so does the baseline kind's retained /1 (Issue #826).
+ */
 export const ASSURANCE_SAMPLING_PROMPT_CONTRACT = {
   schema: ASSURANCE_SAMPLING_PROMPT_CONTRACT_SCHEMA,
   contractVersion: ASSURANCE_SAMPLING_CONTRACT_VERSION,
@@ -105,6 +109,41 @@ export const ASSURANCE_SAMPLING_PROMPT_CONTRACT = {
 } as const;
 
 export const ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST = sha256Hex(canonicalJson(ASSURANCE_SAMPLING_PROMPT_CONTRACT));
+
+/**
+ * Prompt contract /2 (Issue #826), which the baseline kind's current definition asks under. The same contract version,
+ * result schema, headers and finding line as /1; only the instruction changes. /1 names a disposition's `ref` only as
+ * 「发现编号」 beside findings listed as `- [0]（…）`, and DeepSeek V4.1 Flash answered it as the JSON number `0` and as the
+ * bracketed `"[1]"`, both of which {@link parseAssuranceSamplingResult} rightly refuses. /2 gives each disposition its literal
+ * object shape and the `ref` its exact form: a JSON string holding the text inside the brackets, without them.
+ */
+export const ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2 = {
+  schema: ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_SCHEMA,
+  contractVersion: ASSURANCE_SAMPLING_CONTRACT_VERSION,
+  responseSchema: ASSURANCE_SAMPLING_RESULT_SCHEMA,
+  instruction: [
+    '以下是某个分析单元的全部内容块，以及此前由本次运行得出、锚定在该单元的若干发现。请以对抗的态度重读这些内容块，逐条判定每条发现是否被它们支持。',
+    '只依据本消息给出的内容块判断，不进行事实核查、不引用外部知识、不改写稿件、不给出修改建议、不调用任何工具。',
+    '不评判本消息未列出的发现，不新增发现，也不修改任何发现的文字。',
+    '只输出一个 JSON 对象，不加说明文字，不加代码围栏。JSON 必须精确包含以下键，且不得多出任何键：',
+    'schema（固定为 "ai7.analysis.assurance-sampling-result/1"）、',
+    'dispositions（数组；每项都是对象 {"ref": 发现编号字符串, "disposition": 判定, "reason": 理由字符串}）。',
+    'ref 必须是本消息列出的发现编号，写成 JSON 字符串，取发现行方括号内的文字本身、不含方括号：发现行「- [0]（…）」应写 "ref": "0"，不得写 0 或 "[0]"。本消息列出的每个编号恰好出现一次，不得遗漏，也不得多出。',
+    'disposition 取 成立/需降级/应删除 之一：内容块按原样支持该发现取「成立」，只支持其较弱的说法取「需降级」，内容块不支持该发现取「应删除」。',
+    'reason 说明判定依据，不超过 200 个字素。',
+  ].join('\n'),
+  messageHeader: ASSURANCE_SAMPLING_PROMPT_CONTRACT.messageHeader,
+  overlapHeader: ASSURANCE_SAMPLING_PROMPT_CONTRACT.overlapHeader,
+  ownHeader: ASSURANCE_SAMPLING_PROMPT_CONTRACT.ownHeader,
+  blockLine: ASSURANCE_SAMPLING_PROMPT_CONTRACT.blockLine,
+  findingHeader: ASSURANCE_SAMPLING_PROMPT_CONTRACT.findingHeader,
+  findingLine: ASSURANCE_SAMPLING_PROMPT_CONTRACT.findingLine,
+} as const;
+
+export const ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST = sha256Hex(canonicalJson(ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2));
+
+/** The sampling prompt contract a kind binds: /1, or the baseline kind's current /2. */
+export type AssuranceSamplingPromptContract = typeof ASSURANCE_SAMPLING_PROMPT_CONTRACT | typeof ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2;
 
 /**
  * The header carries every part of the request key that is not the frozen contract itself: the anchor
@@ -150,16 +189,16 @@ export function assuranceSampleDigest(findings: ReadonlyArray<AssuranceSamplingC
 }
 
 /**
- * The exact user-role message for one sampling turn: header, the frozen instruction text, the anchor
- * unit's blocks exactly as the unit contract writes them, then the findings anchored there.
+ * The exact user-role message for one sampling turn: header, the frozen instruction text of the contract the kind binds,
+ * the anchor unit's blocks exactly as the unit contract writes them, then the findings anchored there.
  */
 export function buildAssuranceSamplingMessage(
   unit: CoverageManifestUnitProjection,
   totalUnits: number,
   blocksById: ReadonlyMap<string, Pick<ManifestBlockInput, 'blockId' | 'kind' | 'level' | 'text'>>,
   findings: ReadonlyArray<AssuranceSamplingCandidate>,
+  contract: AssuranceSamplingPromptContract = ASSURANCE_SAMPLING_PROMPT_CONTRACT,
 ): string {
-  const contract = ASSURANCE_SAMPLING_PROMPT_CONTRACT;
   const lines = [
     fill(contract.messageHeader, {
       unitOrdinal: String(unit.ordinal),

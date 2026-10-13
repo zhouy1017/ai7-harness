@@ -2284,7 +2284,7 @@ export class BaselineAnalysisExecutionOwner {
       // 暂停 between two sampling turns (S76b): no further one is sent; the Run waits, and 续行 draws the sample again.
       if (active.pauseRequested) break;
       const unit = manifest.units[turn.unitOrdinal - 1]!;
-      const message = buildAssuranceSamplingMessage(unit, manifest.units.length, context.blocksById, turn.findings);
+      const message = buildAssuranceSamplingMessage(unit, manifest.units.length, context.blocksById, turn.findings, definition.assurance.prompt);
       // The same set the gate reads: exactly one further user message becomes admissible per turn, and
       // every other refusal — route, model, system prompt, tools, prior outputs — is untouched.
       context.admittedUserMessages.add(message);

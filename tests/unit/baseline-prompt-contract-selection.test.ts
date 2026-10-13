@@ -6,6 +6,12 @@ import {
   BASELINE_PROMPT_CONTRACT_V1_DIGEST,
   unitRequestDigest,
 } from '../../src/service/analysis/contract.js';
+import {
+  ASSURANCE_SAMPLING_PROMPT_CONTRACT,
+  ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST,
+  ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2,
+  ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST,
+} from '../../src/service/analysis/assurance-sampling-contract.js';
 import { BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/cross-unit-contract.js';
 import {
   BASELINE_SCHEMA_DIGEST,
@@ -13,6 +19,7 @@ import {
   RETAINED_V1_RECORDED_FIXTURE_IDENTITY,
   baselineAnalysisKindDefinition,
   baselinePromptContractForLaunch,
+  factualReviewKindDefinition,
   type BaselinePromptContractSelection,
 } from '../../src/service/analysis/kind-definition.js';
 import { fixtureEntryKey, type ModelFixtureCapture, type ModelFixtureEntry } from '../../src/service/provider/model-fixture.js';
@@ -96,7 +103,12 @@ describe('baselineAnalysisKindDefinition (Issue #826)', () => {
       expect(retained[key]).toEqual(current[key]);
     }
     expect(retained.crossUnit).toEqual(current.crossUnit);
-    expect(retained.assurance?.promptContractDigest).toBe(current.assurance?.promptContractDigest);
+    // Each selection binds its sampling contract with it: the current baseline samples under /2, the retained /1 under
+    // sampling /1 as the recorded Run did, and the factual kind stays on sampling /1.
+    expect(current.assurance).toMatchObject({ prompt: ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2, promptContractDigest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST });
+    expect(retained.assurance).toMatchObject({ prompt: ASSURANCE_SAMPLING_PROMPT_CONTRACT, promptContractDigest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST });
+    expect(factualReviewKindDefinition().assurance).toMatchObject({ prompt: ASSURANCE_SAMPLING_PROMPT_CONTRACT, promptContractDigest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST });
+    expect(retained.assurance?.resultSchema).toBe(current.assurance?.resultSchema);
   });
 
   it('parses a unit result identically under either contract: the parser and result schema are unchanged', () => {

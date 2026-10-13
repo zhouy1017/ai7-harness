@@ -28,9 +28,13 @@ import {
 } from '../../shared/protocol.js';
 import { FixtureReplayResearchCapability, type ResearchCapability } from '../capabilities/research.js';
 import {
+  ASSURANCE_SAMPLING_PROMPT_CONTRACT,
   ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST,
+  ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2,
+  ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST,
   ASSURANCE_SAMPLING_RESULT_SCHEMA,
   type AssuranceSamplingCandidate,
+  type AssuranceSamplingPromptContract,
 } from './assurance-sampling-contract.js';
 import { canonicalJson, sha256Hex } from './canonical.js';
 import {
@@ -194,6 +198,8 @@ export interface CrossUnitStep {
  * sampleable and how each one reads as a candidate.
  */
 export interface AssuranceSamplingBinding {
+  /** The frozen sampling prompt contract the kind's turns are written under, and its digest. */
+  readonly prompt: AssuranceSamplingPromptContract;
   readonly promptContractDigest: string;
   readonly resultSchema: string;
   /** The sampleable findings of one reduction, in the order their `ref`s were assigned. */
@@ -355,9 +361,19 @@ export const BASELINE_SCHEMA_DIGEST = baselineSchemaDigest(BASELINE_PROMPT_CONTR
  */
 export type BaselinePromptContractSelection = 'current' | 'retained-v1';
 
+/**
+ * Each selection binds the unit prompt contract and the assurance sampling one together: the current baseline asks its
+ * sampling turns under sampling /2, and the retained /1 under sampling /1, exactly as the recorded Run asked them.
+ */
 const BASELINE_PROMPT_CONTRACTS = {
-  current: { prompt: BASELINE_PROMPT_CONTRACT, digest: BASELINE_PROMPT_CONTRACT_DIGEST },
-  'retained-v1': { prompt: BASELINE_PROMPT_CONTRACT_V1, digest: BASELINE_PROMPT_CONTRACT_V1_DIGEST },
+  current: {
+    prompt: BASELINE_PROMPT_CONTRACT, digest: BASELINE_PROMPT_CONTRACT_DIGEST,
+    sampling: { prompt: ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2, digest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST },
+  },
+  'retained-v1': {
+    prompt: BASELINE_PROMPT_CONTRACT_V1, digest: BASELINE_PROMPT_CONTRACT_V1_DIGEST,
+    sampling: { prompt: ASSURANCE_SAMPLING_PROMPT_CONTRACT, digest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST },
+  },
 } as const;
 
 /**
@@ -453,7 +469,8 @@ export function baselineAnalysisKindDefinition(promptContract: BaselinePromptCon
     crossUnit: { promptContractDigest: BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, resultSchema: BASELINE_CROSS_UNIT_RESULT_SCHEMA },
     crossUnitAbsentReason: '',
     assurance: {
-      promptContractDigest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST,
+      prompt: contract.sampling.prompt,
+      promptContractDigest: contract.sampling.digest,
       resultSchema: ASSURANCE_SAMPLING_RESULT_SCHEMA,
       // The baseline kind's sampleable findings are the model-driven cross-unit ones: the deterministic
       // conflicts are a string-matching pass whose reading a re-read of one unit could not settle. A
@@ -607,6 +624,7 @@ export function factualReviewKindDefinition(research: ResearchCapability = new F
     crossUnit: null,
     crossUnitAbsentReason: FACTUAL_REVIEW_CROSS_UNIT_ABSENT_REASON,
     assurance: {
+      prompt: ASSURANCE_SAMPLING_PROMPT_CONTRACT,
       promptContractDigest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST,
       resultSchema: ASSURANCE_SAMPLING_RESULT_SCHEMA,
       // The factual kind's sampleable findings are the ones Reference Integrity located: an excluded
