@@ -2993,6 +2993,10 @@ export class ReviewRunStore {
     }
     const withheld = houseGuidelineRefusal(entry, this.#ledgers.baseline().launch.live !== null);
     if (withheld !== null) return { entry, unavailableReason: withheld, facts: none, projection: null };
+    const launch = this.#ledgers.baseline().launch;
+    if (launch.live !== null && (launch.policy === undefined || liveReviewRule(launch.policy, entry) === null)) {
+      return { entry, unavailableReason: liveReviewUnavailableReason(entry), facts: none, projection: null };
+    }
     let projection: AnalysisProjection;
     try {
       projection = this.#ledgers.ledgerOf(entry, undefined, undefined, bookId).inspect(bookId, progress);

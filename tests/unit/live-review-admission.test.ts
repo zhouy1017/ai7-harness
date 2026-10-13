@@ -1,21 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryContractInput } from '../../src/service/review/category-configuration.js';
-import { liveReviewRule, liveReviewKindAdmitted, type ReviewProviderRule } from '../../src/service/review/live-review-admission.js';
+import { liveReviewRule, liveReviewKindAdmitted } from '../../src/service/review/live-review-admission.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { reviewCategoryKindId } from '../../src/shared/protocol.js';
 import { fileURLToPath } from 'node:url';
 
-// #809: test-only planned admission until #831 supplies the verified projection. No transport,
-// credential, manuscript or policy byte is involved. The version pin does not grant kind admission.
+// #809: consume the real selected policy projection. Damaged projections exercise refusals;
+// no transport, credential, manuscript or policy byte is involved.
 const selected = await resolveSourceCheckoutLaunchPolicy(fileURLToPath(new URL('../../', import.meta.url)), 'developer-live');
-const rule: ReviewProviderRule = {
-  ruleId: 'test-reference-free-review',
-  taskKinds: ['typos-and-usage', 'style-and-format', 'literary-expression'].map(reviewCategoryKindId),
-  modelRole: 'Main Editorial Role', route: 'opencode-go', endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
-  model: 'deepseek-v4.1-flash', credentialSlot: 'opencode-go', outboundDataCategories: ['public-or-synthetic'],
-};
-const policy = { ...selected, providerProcessing: { ...selected.providerProcessing, admittedRules: [rule] } };
+const rule = selected.providerProcessing.admittedRules.find((candidate) => candidate.taskKinds.includes(reviewCategoryKindId('typos-and-usage')))!;
+const policy = selected;
 const entries = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories;
 
 describe('reference-free live review admission (#809)', () => {

@@ -1669,6 +1669,7 @@ async function run(): Promise<void> {
       ? { operationalScope: 'development-ci', live: null }
       : {
           operationalScope: 'developer-live',
+          policy: launchPolicy,
           live: {
             route: DEVELOPER_LIVE_POLICY_BINDING.route,
             model: DEVELOPER_LIVE_POLICY_BINDING.model,

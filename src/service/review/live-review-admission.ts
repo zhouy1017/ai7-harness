@@ -1,25 +1,10 @@
-import type { LaunchPolicyProjection } from '../../shared/protocol.js';
+import type { AdmittedProviderRule, LaunchPolicyProjection } from '../../shared/protocol.js';
 import { reviewCategoryKindId } from '../../shared/protocol.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryContractInput, type ReviewCategoryConfigurationEntry } from './category-configuration.js';
 import { reviewCategoryKindDefinition } from './review-category-kind.js';
 
 /** The verified policy projection supplied by the policy-selection owner (#831). */
-export interface ReviewProviderRule {
-  readonly ruleId: string;
-  readonly taskKinds: ReadonlyArray<string>;
-  readonly modelRole: string;
-  readonly route: string;
-  readonly endpoint: string;
-  readonly model: string;
-  readonly credentialSlot: string;
-  readonly outboundDataCategories: ReadonlyArray<string>;
-}
-
-type ReviewLaunchPolicy = Omit<LaunchPolicyProjection, 'providerProcessing'> & {
-  readonly providerProcessing: LaunchPolicyProjection['providerProcessing'] & {
-    readonly admittedRules?: ReadonlyArray<ReviewProviderRule>;
-  };
-};
+export type ReviewProviderRule = AdmittedProviderRule;
 
 export const LIVE_REVIEW_UNAVAILABLE = '当前处理策略尚未允许这一审阅类别实时执行。';
 
@@ -37,7 +22,7 @@ export function liveReviewUnavailableReason(entry: ReviewCategoryConfigurationEn
  * Model-free leads keep their existing path and never acquire a Provider rule here.
  */
 export function liveReviewRule(
-  policy: ReviewLaunchPolicy,
+  policy: LaunchPolicyProjection,
   entry: ReviewCategoryConfigurationEntry,
 ): ReviewProviderRule | null {
   if (policy.integrityState !== 'verified' || policy.denialReason !== null ||
@@ -55,7 +40,7 @@ export function liveReviewRule(
 
 /** The shared execution owner admits only the exact reference-free built-in contract and binding. */
 export function liveReviewKindAdmitted(
-  policy: ReviewLaunchPolicy | undefined,
+  policy: LaunchPolicyProjection | undefined,
   definition: { readonly kind: string; readonly promptContractDigest: string; readonly materialReferences?: unknown },
   binding: { readonly route: string; readonly endpoint: string; readonly model: string; readonly credentialSlot: string },
 ): boolean {

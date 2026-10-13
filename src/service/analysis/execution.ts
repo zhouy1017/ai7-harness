@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { BASELINE_ANALYSIS_KIND } from '../../shared/protocol.js';
+import { liveReviewKindAdmitted } from '../review/live-review-admission.js';
 import type { AnalysisAssuranceSampleDispositionProjection, AnalysisGapProjection, AnalysisReusePlanUnitProjection, CoverageManifestProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection, ReviewScopePlanUnitProjection, RunAttemptState, RunReportStageId } from '../../shared/protocol.js';
 import { describeComposition, prepareExecution, type HarnessExecutionSpan, type HarnessSignal, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
@@ -570,7 +571,8 @@ export class BaselineAnalysisExecutionOwner {
    */
   #requireLaunchOf(ledger: BaselineAnalysisStore): DeveloperLiveRuntime | null {
     const live = this.#deps.developerLive ?? null;
-    if (live !== null && ledger.definition.kind !== BASELINE_ANALYSIS_KIND) {
+    if (live !== null && ledger.definition.kind !== BASELINE_ANALYSIS_KIND &&
+        (ledger.launch.live === null || !liveReviewKindAdmitted(ledger.launch.policy, ledger.definition, ledger.launch.live))) {
       throw new ExecutionAdmissionError('EXECUTION_KIND_NOT_ADMITTED', 'developer-live 当前只允许基线稿件分析；该任务种类尚未获准实时执行。');
     }
     if (live === null && this.#deps.fixture === null) throw new ExecutionAdmissionError('EXECUTION_ROUTE_ABSENT', '没有可执行的本地确定性路由。');

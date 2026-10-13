@@ -58,6 +58,7 @@ beforeEach(async () => {
     if (sent === 1) {
       announce();
       if (holdTurn) await held;
+      if (init?.signal?.aborted) throw new DOMException('Synthetic aborted transport', 'AbortError');
     }
     if (sent === 1 && failure === 'unknown') return new Response('{', { status: 200 });
     if (sent === 1 && failure === 'quota') return new Response(JSON.stringify({ error: { message: 'synthetic account limit' } }), { status: 429 });
@@ -174,7 +175,7 @@ describe('reference-free review on the Go execution path', () => {
       expect(await cache.readClaim(failed.claimKey!)).toMatchObject({ state: 'outcome-unknown' });
     } else {
       expect(sent).toBe(1);
-      expect(projection.taskOutcome!.classification).toBe('failed');
+      expect(projection.taskOutcome!.classification).toBe('interrupted');
     }
     const before = sent;
     await driver.continue(run.reviewRunId);
@@ -206,6 +207,8 @@ describe('reference-free review on the Go execution path', () => {
     const outcome = store.inspectReviewCategory(book.bookId, definition);
     expect(outcome.taskOutcome!.classification).toBe(mode === 'cancel' ? 'cancelled' : 'interrupted');
     expect(sent).toBe(1);
-    expect(outcome.resultSetRevision!.usage.inputTokens + outcome.resultSetRevision!.usage.outputTokens).toBe(60);
+    expect(outcome.resultSetRevision!.usage.inputTokens + outcome.resultSetRevision!.usage.outputTokens).toBe(mode === 'cancel' ? 60 : 0);
+    const view = store.inspectReviewWorkspace(book.bookId, run.reviewRunId).run!;
+    expect(view.categories[0]!.detail?.includes('ANALYSIS_STATE')).not.toBe(true);
   });
 });
