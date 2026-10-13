@@ -7,15 +7,16 @@ import { fileURLToPath } from 'node:url';
  * Turn one Provider Result Cache entry (ADR 0067, ADR 0089) into an `ai7.model-fixture/1` file.
  *
  *   node tools/generate-model-fixture.mjs --from-cache <test item id | request digest> \
- *     --cache-root <dir> --identity <id> --description <text> --out <file>
+ *     --cache-root <dir> --identity <id> --description <text> --out <file> \
+ *     [--sample1-store <external ai7.sqlite> --sample1-task <task intent id>]
  *
- * Every argument is required and nothing defaults to any host's paths: the cache lives outside every
- * checkout, and a tool that guessed where would be one flag away from reading it by accident.
+ * Every argument but the optional sample1 pair is required, and nothing defaults to any host's paths:
+ * the cache lives outside every checkout, and a tool that guessed where would be one flag away from
+ * reading it by accident.
  *
  * The point of the tool is that a cached live result becomes a deterministic fixture without anyone
  * hand-copying a digest. Only proved exact sample1 may retain manuscript free text (ADR 0079 §5).
- * Existing request subjects convert, each
- * keyed the way the deterministic adapter resolves it (Issue #808): an Analysis Unit, under its unit
+ * Existing request subjects convert, each keyed the way the deterministic adapter resolves it (Issue #808): an Analysis Unit, under its unit
  * ordinal and the request digest of its frozen prompt contract and manifest unit, and additionally a
  * `contentDigest` over its own block texts alone, so the same entry also answers a fresh import of the
  * same manuscript; and the Run's cross-unit reduction, an assurance sampling turn and the Run Report
@@ -43,8 +44,8 @@ import { fileURLToPath } from 'node:url';
  * interesting part of the tool. A capture the ledger retired — a stale line, an invalidation of its
  * item, or an invalidation of its validation case at or after the ledger position the call observed
  * before it was claimed — refuses as `FIXTURE_GEN/item-retired`: retired evidence answers nothing. A
- * free-text field outside the proved sample1 exemption that shares MANUSCRIPT_ECHO_THRESHOLD characters with a block the
- * request carried, after placeholder substitution, refuses as `FIXTURE_GEN/manuscript-echo`, naming a
+ * free-text field outside the proved sample1 exemption that still shares a run of MANUSCRIPT_ECHO_THRESHOLD
+ * characters with a block the request carried, after placeholder substitution, refuses as `FIXTURE_GEN/manuscript-echo`, naming a
  * bounded JSON path and the run length and never the characters themselves. Earlier model results,
  * tool results and other carried user text are checked too; a reviewer still reads every free-text
  * field. An `--out` under `tests/fixtures/` refuses outright: a fixture enters that directory only
@@ -961,7 +962,7 @@ export function redactUnitResultText(text, ownBlockTexts, carriedBlockTexts = ow
   const replaced = parsed === undefined
     ? replaceOwnBlockTexts(text, ownBlockTexts)
     : mapStrings(parsed, (field) => replaceOwnBlockTexts(field, ownBlockTexts));
-  const echo = sample1Verified ? null : findManuscriptEcho(replaced, carriedBlockTexts);
+  const echo = findManuscriptEcho(replaced, carriedBlockTexts);
   if (echo !== null) {
     throw new FixtureGenerationError('FIXTURE_GEN/manuscript-echo',
       `字段 ${echo.path} 与本单元内容块仍有 ${echo.runLength} 个字符重合。`);

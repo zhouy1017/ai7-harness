@@ -3088,6 +3088,7 @@ async function main() {
     await click(renderer, '审阅并为本图书启用 Revision 2', 'recorded-artifact-enable');
     await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'recorded-artifact-enabled');
     await click(renderer, '返回图书列表', 'recorded-return-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'recorded-library');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(recordedBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'recorded-open-book');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(recordedBook.bookId)}]')`, 'recorded-manuscript-ready');
     await openAnalysisDestination(renderer, 'recorded-open-analysis');
@@ -3095,43 +3096,44 @@ async function main() {
     await reviewAction(renderer, '[data-analysis-action="prepare"]', 'recorded-prepare');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'recorded-prepared', 120_000);
     const recordedPrepared = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
-    requireJourney(recordedPrepared.bookId === recordedBook.bookId && recordedPrepared.coverageManifest.units.length === 8 &&
-      recordedPrepared.providerResolutionPlan.executionRoute.fixtureIdentity === RECORDED_FIXTURE_IDENTITY, 'recorded-prepared-binding');
+    requireJourney(recordedPrepared?.bookId === recordedBook.bookId && recordedPrepared.coverageManifest?.units?.length === 8 &&
+      recordedPrepared.providerResolutionPlan?.executionRoute?.fixtureIdentity === RECORDED_FIXTURE_IDENTITY, 'recorded-prepared-binding');
     await startFromBar(renderer, 'recorded-start');
-    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'recorded-settled', 180_000);
+    await waitFor(renderer, `['settled','failed','interrupted'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState)`, 'recorded-settled', 180_000);
+    await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'recorded-settled-state');
     at('result-set-revision');
     const recorded = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
-    const realRevision = recorded.resultSetRevision;
-    const realReport = recorded.taskOutcome?.report;
-    requireJourney(recorded.run.state === 'completed-with-gaps' && recorded.taskOutcome.classification === 'completed-with-gaps' &&
-      realRevision.ordinal === 1 && realRevision.units.filter((unit) => unit.state === 'closed').length === 7 &&
+    const realRevision = recorded?.resultSetRevision;
+    const realReport = recorded?.taskOutcome?.report;
+    requireJourney(recorded?.run?.state === 'completed-with-gaps' && recorded.taskOutcome?.classification === 'completed-with-gaps' &&
+      realRevision?.ordinal === 1 && realRevision.units.filter((unit) => unit.state === 'closed').length === 7 &&
       realRevision.units[0].state === 'gap' && realRevision.gaps.length === 1 &&
       realRevision.gaps[0].unitOrdinal === 1 && realRevision.gaps[0].code === 'contract-invalid' &&
       realRevision.gaps[0].reason.includes('schema-invalid') && realRevision.coverage.state === 'partial' &&
       realRevision.coverage.unitsClosed === 7 && realRevision.coverage.unitsTotal === 8, 'recorded-truthful-schema-gap');
-    requireJourney(realRevision.synthesis.synopsis.includes('曾本之') && realRevision.synthesis.entities.length === 84 &&
+    requireJourney(realRevision.synthesis?.synopsis?.includes('曾本之') && realRevision.synthesis.entities.length === 84 &&
       realRevision.synthesis.events.length === 64 && realRevision.synthesis.relationships.length === 55 &&
       realRevision.synthesis.settingClaims.length === 70 && realRevision.synthesis.entities.some((entity) => entity.name === '郑雄') &&
       realRevision.synthesis.relationships.some((relationship) => relationship.subject === '郑雄' && relationship.object === '曾本之') &&
-      realRevision.crossUnitFindings.length === 3 && realRevision.crossUnitReduction.state === 'closed' &&
-      realRevision.assuranceSample.state === 'closed' && realRevision.assuranceSample.dispositions.length === 3 &&
+      realRevision.crossUnitFindings.length === 3 && realRevision.crossUnitReduction?.state === 'closed' &&
+      realRevision.assuranceSample?.state === 'closed' && realRevision.assuranceSample.dispositions.length === 3 &&
       realRevision.assuranceSample.dispositions.filter((item) => item.disposition === '需降级').length === 2 &&
       realRevision.assuranceSample.dispositions.filter((item) => item.disposition === '应删除').length === 1,
     'recorded-durable-business-results');
     requireJourney(sameRecord(realRevision.usage, { requests: 11, inputTokens: 37205, outputTokens: 110667 }) &&
-      realReport.usagePerStage.units.requests === 8 && realReport.usagePerStage['cross-unit-reduction'].requests === 1 &&
-      realReport.usagePerStage['assurance-sampling'].requests === 2 && realReport.usagePerStage['run-report-reflection'].requests === 1 &&
-      realReport.ifRedone.state === 'closed' && realReport.ifRedone.items.length === 9 &&
+      realReport?.usagePerStage?.units?.requests === 8 && realReport.usagePerStage['cross-unit-reduction']?.requests === 1 &&
+      realReport.usagePerStage['assurance-sampling']?.requests === 2 && realReport.usagePerStage['run-report-reflection']?.requests === 1 &&
+      realReport.ifRedone?.state === 'closed' && realReport.ifRedone.items.length === 9 &&
       sameRecord(Object.values(realReport.usagePerStage).reduce((sum, usage) => ({ requests: sum.requests + usage.requests,
         inputTokens: sum.inputTokens + usage.inputTokens, outputTokens: sum.outputTokens + usage.outputTokens }),
       { requests: 0, inputTokens: 0, outputTokens: 0 }), sourceRecordedUsage), 'recorded-source-usage-replayed');
     // Source-recorded usage above remains nonzero. The actual execution pin and denied networking
     // establish zero newly incurred remote transmissions; replay is never another live validation.
-    requireJourney(recorded.run.attempt.executionBinding.route === 'ai7-local-deterministic' &&
+    requireJourney(recorded.run.attempt?.executionBinding?.route === 'ai7-local-deterministic' &&
       recorded.run.attempt.executionBinding.model === 'ai7-deterministic-fixture' &&
-      realRevision.adapterPin.fixtureIdentity === RECORDED_FIXTURE_IDENTITY &&
+      realRevision.adapterPin?.fixtureIdentity === RECORDED_FIXTURE_IDENTITY &&
       realRevision.adapterPin.fixtureSha256 === recordedFixtureDigest &&
-      recorded.run.attempt.credentialReadinessCheck.valueReleased === false && loopback.observedRequests() === 0,
+      recorded.run.attempt.credentialReadinessCheck?.valueReleased === false && loopback.observedRequests() === 0,
     'recorded-zero-new-incurred-transmissions');
     await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.runState==='completed-with-gaps' && document.querySelector('[data-analysis-unit="1"][data-analysis-unit-state="gap"]') && document.querySelectorAll('[data-analysis-unit][data-analysis-unit-state="closed"]').length===7`, 'recorded-visible-gap');
     at('restart-immutable');
@@ -3141,6 +3143,7 @@ async function main() {
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(recordedBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'recorded-restart-open');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(recordedBook.bookId)}]')`, 'recorded-restart-manuscript');
     await openAnalysisDestination(renderer, 'recorded-restart-analysis');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'recorded-restart-visible');
     const recordedReopened = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(JSON.stringify(recordedReopened) === JSON.stringify(recorded) && loopback.healthy() && loopback.observedRequests() === 0,
       'recorded-restart-preserves-result-and-report');
