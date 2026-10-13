@@ -29,7 +29,7 @@ import {
   type AssuranceSamplingParseFailureCode,
 } from './assurance-sampling-contract.js';
 import { canonicalRecord, sha256Hex } from './canonical.js';
-import { CARRIED_STAGES, OUTCOME_UNKNOWN_NO_RESUME, SAMPLE1_SOURCE_DIGEST, type BaselineAnalysisStore, type CarriedStages, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitCheckpoint, type UnitResultRecord } from './baseline-analysis-store.js';
+import { assuranceContractMoved, CARRIED_STAGES, OUTCOME_UNKNOWN_NO_RESUME, SAMPLE1_SOURCE_DIGEST, type BaselineAnalysisStore, type CarriedStages, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitCheckpoint, type UnitResultRecord } from './baseline-analysis-store.js';
 import type { BaselineUnitResult } from './contract.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
 import { ExecutionAdmissionError } from './execution-error.js';
@@ -724,7 +724,7 @@ export class BaselineAnalysisExecutionOwner {
       facts, definition: ledger.definition, live, fixture: this.#deps.fixture, attemptId: stored.attemptId,
       harnessSessionId: stored.binding.harnessSessionId, boundAt: stored.binding.boundAt, compositionDigest: composition.digest,
     });
-    return canonicalRecord(rebuilt).digest !== stored.bindingDigest;
+    return canonicalRecord(rebuilt).digest !== stored.bindingDigest || assuranceContractMoved(ledger.definition, facts.assurancePromptContractDigest);
   }
 
   /**
@@ -1174,6 +1174,7 @@ export class BaselineAnalysisExecutionOwner {
     } | null = null;
     try {
       requireCompositionMatch(harness.composition.digest, facts.behaviorCompositionDigest);
+      requireAssuranceContractMatch(definition, facts.assurancePromptContractDigest);
       const bindingRecord: ExecutionBindingRecord = executionBindingRecordOf({
         facts, definition, live, fixture, attemptId, harnessSessionId, boundAt, compositionDigest: harness.composition.digest,
       });
@@ -2666,6 +2667,13 @@ export function runReportUnitRows(
       gapCode: record.closed.state === 'gap' ? record.closed.gap.code : null,
     };
   });
+}
+
+/** The sampling contract a Run would sample under must be the one its plan froze (Issue #826); nothing is sent otherwise. */
+function requireAssuranceContractMatch(definition: AnalysisKindDefinition, frozenDigest: string): void {
+  if (assuranceContractMoved(definition, frozenDigest)) {
+    throw new ExecutionAdmissionError('EXECUTION_STAGE_CONTRACT_DRIFT', '保证抽样契约与冻结计划不一致；未开始执行。');
+  }
 }
 
 function requireCompositionMatch(actual: string, planned: string): void {

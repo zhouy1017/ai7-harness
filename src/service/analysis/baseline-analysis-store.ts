@@ -134,6 +134,7 @@ import {
 } from './run-report.js';
 import { assuranceSampleNotRun } from './reducers.js';
 import { baselineAnalysisKindDefinition } from './kind-definition.js';
+import { ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST } from './assurance-sampling-contract.js';
 import { describeComposition } from '../harness/primary-agent-harness.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../provider/egress-gate.js';
 import type { AnalysisOutcomeAttentionReading, AnalysisTaskAttentionReading } from '../global-attention.js';
@@ -352,6 +353,28 @@ function runStopOf(value: unknown): RunStop | null {
 /** Whether a Run began executing its units: the one fact that tells a started cancellation from a wait cancelled. */
 function runBegan(transitions: ReadonlyArray<{ state: BaselineAnalysisRunState }>): boolean {
   return transitions.some((transition) => transition.state === 'executing');
+}
+
+/**
+ * The assurance sampling contract a frozen execution plan names (Issue #826). A plan records it only when its kind binds a
+ * sampling contract other than /1 — today the current baseline's /2 — so a plan without it was frozen under sampling /1:
+ * every plan recorded before #826, and every factual, Review Category and retained /1 baseline plan since, whose bytes are
+ * therefore unchanged.
+ */
+export function frozenAssurancePromptContractDigest(executionPlan: Readonly<Record<string, unknown>>): string {
+  const recorded = executionPlan.assurancePromptContractDigest;
+  if (recorded === undefined) return ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST;
+  requireAnalysis(typeof recorded === 'string' && DIGEST_PATTERN.test(recorded), 'ANALYSIS_RECORD_INVALID', '计划记录的保证抽样契约无效。');
+  return recorded;
+}
+
+/**
+ * Whether a kind now samples under another contract than the one its frozen plan names (Issue #826). The Execution Binding and
+ * the composition pin only the unit prompt contract, so this is what keeps a plan frozen under one sampling contract from being
+ * sampled under another. A kind that samples nothing never moves.
+ */
+export function assuranceContractMoved(definition: Pick<AnalysisKindDefinition, 'assurance'>, frozenDigest: string): boolean {
+  return definition.assurance !== null && definition.assurance.promptContractDigest !== frozenDigest;
 }
 
 export interface BaselineAnalysisRouteFacts {
@@ -622,6 +645,8 @@ export interface ExecutionPlanFacts {
   readonly artifactPin: { nativeCarrierSha256: string; sidecarRevision: 2; sidecarSha256: string };
   readonly promptContractDigest: string;
   readonly behaviorCompositionDigest: string;
+  /** The assurance sampling contract the plan froze ({@link frozenAssurancePromptContractDigest}). */
+  readonly assurancePromptContractDigest: string;
   /** The ceiling the frozen Provider Resolution Plan carries, already resolved against the frozen unit count. */
   readonly runBudgetCeiling: RunBudgetCeilingState;
   /** `null` for the first baseline; the verified reuse plan for an update Task. */
@@ -3121,7 +3146,10 @@ export class BaselineAnalysisStore {
     // Nor is a Task whose plan froze another prompt contract of this kind — a review category whose guideline clauses were
     // imported anew since (Issue #427 review): its plan could never execute under this contract, so the preparation is a
     // new Task Intent under the contract that applies now.
-    const contractCurrent = existing.planEnvelope === null || existing.planEnvelope.promptContractDigest === this.#definition.promptContractDigest;
+    // So is one whose plan froze another assurance sampling contract (Issue #826): the composition does not pin it.
+    const contractCurrent = existing.planEnvelope === null || (existing.planEnvelope.promptContractDigest === this.#definition.promptContractDigest &&
+      (existing.executionPlan === null ||
+        !assuranceContractMoved(this.#definition, frozenAssurancePromptContractDigest(existing.executionPlan as unknown as Record<string, unknown>))));
     // Nor is a Task whose frozen scope plan the chain no longer derives (#711 review P3-4): 重新准备 makes it anew.
     const planDerives = existing.coverageManifest === null || existing.authorization !== null || this.#frozenPlanDerives(existing.update, existing.coverageManifest);
     // A Task the 后台分析登记 dispatcher prepared is never the editor's to revise or resume, and the dispatcher never takes up any
@@ -3418,14 +3446,20 @@ export class BaselineAnalysisStore {
           stopCondition,
           ...editorEdits,
         };
+    // The sampling contract, only when it is not /1 (Issue #826): every other plan's record reads exactly as before.
+    const assurance = this.#definition.assurance;
+    const samplingPin = assurance !== null && assurance.promptContractDigest !== ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST
+      ? { assurancePromptContractDigest: assurance.promptContractDigest }
+      : {};
     const records: Record<string, { json: string; digest: string }> = {
       'manuscript-pin': canonicalRecord(manuscriptPin),
       'artifact-pin': canonicalRecord(artifactPin),
       'run-source-scope': canonicalRecord(sourceScope),
       'coverage-manifest': canonicalRecord(manifest),
       'provider-resolution-plan': canonicalRecord(providerPlan),
-      'execution-plan': canonicalRecord(this.#definition.materialReferences === undefined ? executionPlan : {
+      'execution-plan': canonicalRecord(this.#definition.materialReferences === undefined ? { ...executionPlan, ...samplingPin } : {
         ...executionPlan,
+        ...samplingPin,
         materialReferences: this.#definition.materialReferences.sources,
         materialReferenceBasePromptContractDigest: this.#definition.materialReferences.basePromptContractDigest,
       }),
@@ -4384,6 +4418,7 @@ export class BaselineAnalysisStore {
       artifactPin: { nativeCarrierSha256: artifactPin.nativeCarrierSha256, sidecarRevision: 2, sidecarSha256: artifactPin.sidecarSha256 },
       promptContractDigest: asString(envelope.promptContractDigest),
       behaviorCompositionDigest: asString(envelope.behaviorCompositionDigest),
+      assurancePromptContractDigest: frozenAssurancePromptContractDigest(plan['execution-plan'] as Record<string, unknown>),
       runBudgetCeiling,
       update,
       editorEdits,

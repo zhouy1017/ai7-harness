@@ -22,6 +22,7 @@ import {
   factualReviewKindDefinition,
   type BaselinePromptContractSelection,
 } from '../../src/service/analysis/kind-definition.js';
+import { assuranceContractMoved, frozenAssurancePromptContractDigest } from '../../src/service/analysis/baseline-analysis-store.js';
 import { fixtureEntryKey, type ModelFixtureCapture, type ModelFixtureEntry } from '../../src/service/provider/model-fixture.js';
 
 // Issue #826: which baseline prompt contract a launch asks under. Every fixture here is synthetic and in memory — captures
@@ -180,5 +181,27 @@ describe('baselinePromptContractForLaunch (Issue #826)', () => {
     refused(fixture(RETAINED_V1_RECORDED_FIXTURE_IDENTITY, [...historicalEntries(), entry(9, capture({ promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST }))]));
     refused(fixture(RETAINED_V1_RECORDED_FIXTURE_IDENTITY, [...historicalEntries(), entry(9, capture({ model: 'deepseek-v4-flash' }))]));
     refused(fixture(RETAINED_V1_RECORDED_FIXTURE_IDENTITY, []));
+  });
+});
+
+describe('the sampling contract a frozen plan names (Issue #826 stage pin)', () => {
+  it('reads a plan without the pin as sampling /1, and refuses a malformed pin', () => {
+    expect(frozenAssurancePromptContractDigest({ steps: [] })).toBe(ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST);
+    expect(frozenAssurancePromptContractDigest({ assurancePromptContractDigest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST }))
+      .toBe(ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST);
+    for (const malformed of [null, 7, 'short', 'F'.repeat(64)]) {
+      expect(() => frozenAssurancePromptContractDigest({ assurancePromptContractDigest: malformed })).toThrowError(expect.objectContaining({ code: 'ANALYSIS_RECORD_INVALID' }));
+    }
+  });
+
+  it('moves only when the kind samples under another contract than the plan froze; a kind that samples nothing never moves', () => {
+    const current = baselineAnalysisKindDefinition();
+    const retained = baselineAnalysisKindDefinition('retained-v1');
+    expect(assuranceContractMoved(current, ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST)).toBe(false);
+    expect(assuranceContractMoved(current, ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST)).toBe(true);
+    expect(assuranceContractMoved(retained, ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST)).toBe(false);
+    expect(assuranceContractMoved(retained, ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST)).toBe(true);
+    expect(assuranceContractMoved(factualReviewKindDefinition(), ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST)).toBe(false);
+    expect(assuranceContractMoved({ assurance: null }, ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST)).toBe(false);
   });
 });

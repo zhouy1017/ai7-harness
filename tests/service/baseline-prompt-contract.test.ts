@@ -1,3 +1,6 @@
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
@@ -13,7 +16,13 @@ import {
   type BaselinePromptContractSelection,
 } from '../../src/service/analysis/kind-definition.js';
 import { fixtureEntryKey, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
-import type { BaselineAnalysisRouteFacts } from '../../src/service/analysis/baseline-analysis-store.js';
+import { assuranceContractMoved, type BaselineAnalysisRouteFacts } from '../../src/service/analysis/baseline-analysis-store.js';
+import {
+  ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST,
+  ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST,
+} from '../../src/service/analysis/assurance-sampling-contract.js';
+import { canonicalRecord } from '../../src/service/analysis/canonical.js';
+import { controlledUnitHold } from '../../src/service/unit-hold.js';
 import type { SecretResolver } from '../../src/service/provider/credential-broker.js';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
@@ -50,11 +59,14 @@ const HISTORICAL_ROUTE: BaselineAnalysisRouteFacts = {
 
 let roots: ServiceTestRoots;
 let launchPolicy: LaunchPolicyProjection;
+let holdPath: string;
 
 beforeEach(async () => {
   roots = await createServiceTestRoots('ai7-service-prompt-contract-');
   launchPolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
   expect(launchPolicy.integrityState).toBe('verified');
+  holdPath = join(roots.dataRoot, '..', 'j10-unit-hold.txt');
+  writeFileSync(holdPath, 'release');
 });
 
 afterEach(async () => {
@@ -110,6 +122,82 @@ function syntheticFixture(manifest: CoverageManifestProjection, promptContractDi
   };
 }
 
+function withDatabase<T>(operation: (database: DatabaseSync) => T): T {
+  const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+  try {
+    return operation(database);
+  } finally {
+    database.close();
+  }
+}
+
+/**
+ * The plan the A2 candidate (bc20548f) froze for the same preparation, before plans recorded a sampling pin: the same
+ * execution-plan record without `assurancePromptContractDigest`, and so an envelope and a plan version naming that record's
+ * digest. Rewritten in place with the store closed; the ledger's own triggers are put back exactly as they were.
+ */
+function rewriteToPrePinPlan(taskIntentId: string): void {
+  withDatabase((database) => {
+    const names = ['analysis_plan_records_no_update', 'analysis_plan_versions_no_update'];
+    const triggers = names.map((name) => (database.prepare("SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND name = ?").get(name) as { sql: string }).sql);
+    for (const name of names) database.exec(`DROP TRIGGER ${name}`);
+    const component = (name: string) => JSON.parse((database.prepare(
+      'SELECT canonical_json FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = 1 AND component = ?',
+    ).get(taskIntentId, name) as { canonical_json: string }).canonical_json) as Record<string, unknown>;
+    const { assurancePromptContractDigest, ...prePin } = component('execution-plan');
+    expect(assurancePromptContractDigest).toBe(ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST);
+    const execution = canonicalRecord(prePin);
+    const envelope = canonicalRecord({ ...component('plan-envelope'), executionPlanDigest: execution.digest });
+    const rewrite = database.prepare('UPDATE analysis_plan_records SET canonical_json = ?, sha256 = ? WHERE task_intent_id = ? AND plan_version = 1 AND component = ?');
+    rewrite.run(execution.json, execution.digest, taskIntentId, 'execution-plan');
+    rewrite.run(envelope.json, envelope.digest, taskIntentId, 'plan-envelope');
+    const versionJson = (database.prepare('SELECT canonical_json FROM analysis_plan_versions WHERE task_intent_id = ? AND ordinal = 1')
+      .get(taskIntentId) as { canonical_json: string }).canonical_json;
+    const version = canonicalRecord({ ...(JSON.parse(versionJson) as Record<string, unknown>), planEnvelopeDigest: envelope.digest });
+    database.prepare('UPDATE analysis_plan_versions SET plan_envelope_sha256 = ?, canonical_json = ?, sha256 = ? WHERE task_intent_id = ? AND ordinal = 1')
+      .run(envelope.digest, version.json, version.digest, taskIntentId);
+    for (const sql of triggers) database.exec(sql);
+  });
+}
+
+async function newBook(store: EditorialStore, title: string, connect: boolean): Promise<string> {
+  const imported = await importSample1Book(store, roots.codeRoot, title);
+  await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
+  if (connect) recordMissingCredentialConnection(store, 'L2 主编辑连接');
+  return imported.bookId;
+}
+
+async function until(condition: () => boolean, label: string): Promise<void> {
+  const deadline = Date.now() + 60_000;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${label}`);
+    await new Promise((settle) => setTimeout(settle, 5));
+  }
+}
+
+/** A first baseline Run held in flight at unit 3, then paused: a stopped Run that kept units 1 and 2. */
+async function pausedRun(store: EditorialStore, bookId: string, promptContractDigest: string): Promise<string> {
+  const prepared = prepare(store, bookId);
+  const owner = new BaselineAnalysisExecutionOwner({
+    ledger: store.baselineAnalysisLedger, launchPolicy, fixture: syntheticFixture(prepared.coverageManifest!, promptContractDigest, new Set()),
+    secretResolver: fakeSecretResolver(), unitHold: controlledUnitHold(holdPath, { pollMs: 5 }),
+  });
+  try {
+    writeFileSync(holdPath, '2');
+    const runRecordId = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
+    owner.admitAndDispatch(runRecordId);
+    await until(() => owner.progressFor(runRecordId)?.currentUnitOrdinal === 3, 'unit 3 in flight');
+    store.requestBaselineAnalysisPause(bookId, prepared.taskIntent!.taskIntentId);
+    owner.pauseRun(runRecordId, store.baselineAnalysisLedger);
+    writeFileSync(holdPath, 'release');
+    await owner.whenIdle();
+    expect(store.inspectBaselineAnalysis(bookId, () => null).run?.state).toBe('paused');
+    return runRecordId;
+  } finally {
+    await owner.dispose();
+  }
+}
+
 async function authorizeAndSettle(store: EditorialStore, owner: BaselineAnalysisExecutionOwner, bookId: string, prepared: BaselineAnalysisProjection) {
   const authorized = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
   owner.admitAndDispatch(authorized.dispatchRunRecordId!);
@@ -163,6 +251,8 @@ describe('baseline prompt contract /1 → /2 on the real store (Issue #826)', ()
       manifest = prepared.coverageManifest!;
       expect(manifest.units).toHaveLength(SAMPLE1_UNITS);
       expect(prepared.planEnvelope?.promptContractDigest).toBe(BASELINE_PROMPT_CONTRACT_V1_DIGEST);
+      // Sampling /1, as the recorded Run sampled: the plan records no pin, so its bytes are those of every plan before #826.
+      expect(prepared.executionPlan).not.toHaveProperty('assurancePromptContractDigest');
       const owner = new BaselineAnalysisExecutionOwner({
         ledger: store.baselineAnalysisLedger, launchPolicy, fixture: syntheticFixture(manifest, BASELINE_PROMPT_CONTRACT_V1_DIGEST, new Set([1])),
         secretResolver: fakeSecretResolver(),
@@ -208,6 +298,7 @@ describe('baseline prompt contract /1 → /2 on the real store (Issue #826)', ()
       const interior = manifest.units[0]!.blockIds[1]!;
       const prepared = prepare(store, bookId, { mode: 'reanalyze-range', selectedRange: null, selectedBlocks: { fromBlockId: interior, toBlockId: interior } });
       expect(prepared.planEnvelope?.promptContractDigest).toBe(BASELINE_PROMPT_CONTRACT_DIGEST);
+      expect(prepared.executionPlan).toMatchObject({ assurancePromptContractDigest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST });
       expect(prepared.update?.predecessor?.revisionId).toBe(revision1.revisionId);
       const plan = prepared.update!.reusePlan!;
       const recomputed = plan.units.filter((unit) => unit.disposition === 'recomputed').map((unit) => unit.unitOrdinal);
@@ -228,6 +319,104 @@ describe('baseline prompt contract /1 → /2 on the real store (Issue #826)', ()
       expect(revision2.coverage).toMatchObject({ unitsTotal: SAMPLE1_UNITS, unitsClosed: SAMPLE1_UNITS, gapCount: 0 });
       await owner.dispose();
     } finally {
+      store.close();
+    }
+  });
+});
+
+describe('the sampling contract a baseline plan froze (Issue #826 stage pin)', () => {
+  it('pins sampling /2 on a current plan, reuses it unchanged, and replaces or refuses a plan frozen without the pin', async () => {
+    await requireExactSample1(roots.codeRoot);
+    let store = await open(HISTORICAL_ROUTE);
+    let stale: { bookId: string; taskIntentId: string };
+    let authorized: { bookId: string; taskIntentId: string; manifest: CoverageManifestProjection };
+    try {
+      const bookA = await newBook(store, 'L2 sample1 抽样契约 甲', true);
+      const prepared = prepare(store, bookA);
+      expect(prepared.executionPlan).toMatchObject({ assurancePromptContractDigest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST });
+      // An unchanged preparation is the same Task under the same frozen plan.
+      const again = prepare(store, bookA);
+      expect(again.taskIntent?.taskIntentId).toBe(prepared.taskIntent!.taskIntentId);
+      expect(again.planEnvelope?.digest).toBe(prepared.planEnvelope!.digest);
+      stale = { bookId: bookA, taskIntentId: prepared.taskIntent!.taskIntentId };
+      const bookB = await newBook(store, 'L2 sample1 抽样契约 乙', false);
+      const preparedB = prepare(store, bookB);
+      authorized = { bookId: bookB, taskIntentId: preparedB.taskIntent!.taskIntentId, manifest: preparedB.coverageManifest! };
+    } finally {
+      store.close();
+    }
+    rewriteToPrePinPlan(stale.taskIntentId);
+    rewriteToPrePinPlan(authorized.taskIntentId);
+
+    store = await open(HISTORICAL_ROUTE);
+    const owner = new BaselineAnalysisExecutionOwner({
+      ledger: store.baselineAnalysisLedger, launchPolicy, fixture: syntheticFixture(authorized.manifest, BASELINE_PROMPT_CONTRACT_DIGEST, new Set()),
+      secretResolver: fakeSecretResolver(),
+    });
+    try {
+      // The pre-pin plan still reads, as sampling /1, the only contract there was when it was frozen.
+      const read = store.inspectBaselineAnalysis(stale.bookId);
+      expect(read.taskIntent?.taskIntentId).toBe(stale.taskIntentId);
+      expect(read.executionPlan).not.toHaveProperty('assurancePromptContractDigest');
+      // Preparing again replaces it with a new Task whose plan pins the contract it will sample under.
+      const replaced = prepare(store, stale.bookId);
+      expect(replaced.taskIntent?.taskIntentId).not.toBe(stale.taskIntentId);
+      expect(replaced.executionPlan).toMatchObject({ assurancePromptContractDigest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST });
+
+      // A pre-pin plan authorized and never dispatched is refused at execution: nothing is sent and no revision forms.
+      const prePin = store.inspectBaselineAnalysis(authorized.bookId);
+      expect(prePin.executionPlan).not.toHaveProperty('assurancePromptContractDigest');
+      const runRecordId = store.authorizeBaselineAnalysis(authorized.bookId, authorized.taskIntentId, prePin.planEnvelope!.digest).dispatchRunRecordId!;
+      expect(store.baselineAnalysisLedger.loadExecutionPlan(runRecordId).assurancePromptContractDigest).toBe(ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST);
+      owner.admitAndDispatch(runRecordId);
+      await owner.whenIdle();
+      const refused = store.inspectBaselineAnalysis(authorized.bookId, (id) => owner.progressFor(id));
+      expect(refused.run?.state).toBe('failed');
+      expect(JSON.stringify(refused.run)).toContain('EXECUTION_STAGE_CONTRACT_DRIFT');
+      expect(JSON.stringify(refused.run)).not.toContain('EXECUTION_COMPOSITION_DRIFT');
+      expect(refused.run?.attempt?.spans ?? []).toEqual([]);
+      expect(refused.resultSetRevision).toBeNull();
+    } finally {
+      await owner.dispose();
+      store.close();
+    }
+  });
+
+  it('carries a stopped Run whose plan still names the bound sampling contract, and no stopped Run across a change', async () => {
+    await requireExactSample1(roots.codeRoot);
+    // A /1 Run paused under the retained contracts: baseline /1 and sampling /1, no pin recorded.
+    let store = await open(HISTORICAL_ROUTE, 'retained-v1');
+    let retainedRun: string;
+    try {
+      retainedRun = await pausedRun(store, await newBook(store, 'L2 sample1 停下的 /1 运行', true), BASELINE_PROMPT_CONTRACT_V1_DIGEST);
+    } finally {
+      store.close();
+    }
+    // A current Run paused under baseline /2 and sampling /2, pinned.
+    store = await open(HISTORICAL_ROUTE);
+    let currentRun: string;
+    let manifest: CoverageManifestProjection;
+    try {
+      const bookId = await newBook(store, 'L2 sample1 停下的 /2 运行', false);
+      currentRun = await pausedRun(store, bookId, BASELINE_PROMPT_CONTRACT_DIGEST);
+      manifest = store.inspectBaselineAnalysis(bookId).coverageManifest!;
+    } finally {
+      store.close();
+    }
+    store = await open(HISTORICAL_ROUTE);
+    const owner = new BaselineAnalysisExecutionOwner({
+      ledger: store.baselineAnalysisLedger, launchPolicy, fixture: syntheticFixture(manifest, BASELINE_PROMPT_CONTRACT_DIGEST, new Set()),
+      secretResolver: fakeSecretResolver(),
+    });
+    try {
+      expect(owner.carriesStoppedRun(currentRun)).toBe(true);
+      expect(owner.carriesStoppedRun(retainedRun)).toBe(false);
+      const facts = store.baselineAnalysisLedger.loadExecutionPlan(retainedRun);
+      expect(facts.assurancePromptContractDigest).toBe(ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST);
+      expect(assuranceContractMoved(store.baselineAnalysisLedger.definition, facts.assurancePromptContractDigest)).toBe(true);
+      expect(store.baselineAnalysisLedger.loadExecutionPlan(currentRun).assurancePromptContractDigest).toBe(ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST);
+    } finally {
+      await owner.dispose();
       store.close();
     }
   });
