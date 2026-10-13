@@ -6,7 +6,7 @@ import type { DeveloperLiveRuntime } from '../launch-policy.js';
 import type { LaunchPolicyProjection } from '../../shared/protocol.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
-import { DeepSeekOpenAiCompatibleAdapter } from '../provider/deepseek-adapter.js';
+import { DeepSeekOpenAiCompatibleAdapter, type DeepSeekTransport } from '../provider/deepseek-adapter.js';
 import { Ai7LocalDeterministicAdapter, type AnswerHold } from '../provider/local-deterministic-adapter.js';
 import {
   LOCAL_DETERMINISTIC_MODEL,
@@ -237,6 +237,15 @@ export class DialogueExecutionOwner {
             return new Ai7LocalDeterministicAdapter(this.#deps.fixture!, promptContractDigest, codes, { answerHold: this.#deps.answerHold ?? null });
           }
           const nativeFetch = live.runtime.nativeFetch;
+          // A stop during cache/session/credential setup can precede the Harness turn, when interrupt() is still idle.
+          // Check again at both transport boundaries so that neither a cache claim nor an actual send starts after it.
+          const requireRunning = (signal?: AbortSignal): void => {
+            if (active.stopRequested || this.#disposed || signal?.aborted === true) throw new DOMException('Dialogue interrupted.', 'AbortError');
+          };
+          const send: DeepSeekTransport = async (url, init) => {
+            requireRunning(init.signal);
+            return nativeFetch(url, init);
+          };
           return new DeepSeekOpenAiCompatibleAdapter({
             broker: live.broker,
             slotBinding,
@@ -247,16 +256,19 @@ export class DialogueExecutionOwner {
             profile: route.profile,
             modelProfile: route.modelProfile,
             sessionId: () => harness.currentSessionId(),
-            transport: cache === null || validation === null
-              ? (url, init) => nativeFetch(url, init)
-              // 重新回答 sends the very request the ask sent, so under the same validation the cache replays the captured
-              // answer instead of paying for it twice; 继续回答 asks a different question and is its own step.
-              // A dialogue turn is its own task: its stage contract and its task contract are the one dialogue contract.
-              : (url, init) => transmitOnce(cache!, nativeFetch, { purpose: DIALOGUE_TEST_ITEM_PURPOSE, slice: 'S17c', promptContractDigest, taskPromptContractDigest: promptContractDigest }, {
-                intent: validation,
-                step: `${DIALOGUE_TEST_ITEM_PURPOSE}/${turn.message.kind}`,
-                requestShape: route.modelProfile.capabilities.requestShape,
-              }, route.profile, model, url, init),
+            transport: async (url, init) => {
+              requireRunning(init.signal);
+              return cache === null || validation === null
+                ? send(url, init)
+                // 重新回答 sends the very request the ask sent, so under the same validation the cache replays the captured
+                // answer instead of paying for it twice; 继续回答 asks a different question and is its own step.
+                // A dialogue turn is its own task: its stage contract and its task contract are the one dialogue contract.
+                : transmitOnce(cache, send, { purpose: DIALOGUE_TEST_ITEM_PURPOSE, slice: 'S17c', promptContractDigest, taskPromptContractDigest: promptContractDigest }, {
+                  intent: validation,
+                  step: `${DIALOGUE_TEST_ITEM_PURPOSE}/${turn.message.kind}`,
+                  requestShape: route.modelProfile.capabilities.requestShape,
+                }, route.profile, model, url, init);
+            },
           });
         },
         gate: (payload) => evaluateEgress(payload, bindingFacts, {

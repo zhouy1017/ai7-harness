@@ -1305,7 +1305,7 @@ async function dispatch(
     // dialogue Task and starts its answer at once, and the answer streams into the owner's memory whether anyone watches or
     // not; a read joins the records to the Harness Session Ledger, and to what the answer in flight has streamed so far.
     case 'askAboutSelection': {
-      dialogueReady(dialogues, store.dialogueSourceDigest(request.input.bookId));
+      dialogueReady(dialogues, store.dialogueSourceDigest(request.input.bookId, request.input.selection));
       const turn = store.askAboutSelection(request.input.bookId, { selection: request.input.selection, question: request.input.question });
       dialogueBegin(dialogues, turn);
       return { id: request.id, ok: true, op: request.op, result: store.inspectDialogue(request.input.bookId, turn.dialogueId, 0, (attemptId) => dialogues.liveText(attemptId)) };
@@ -1322,7 +1322,7 @@ async function dispatch(
     }
     case 'continueDialogueAnswer':
     case 'regenerateDialogueAnswer': {
-      dialogueReady(dialogues, store.dialogueSourceDigest(request.input.bookId));
+      dialogueReady(dialogues, store.dialogueSourceDigest(request.input.bookId, request.input));
       const turn = store.nextDialogueAttempt(request.input.bookId, request.input, request.op === 'continueDialogueAnswer' ? 'continue' : 'regenerate');
       dialogueBegin(dialogues, turn);
       return { id: request.id, ok: true, op: request.op, result: store.inspectDialogue(request.input.bookId, request.input.dialogueId, 0, (id) => dialogues.liveText(id)) };

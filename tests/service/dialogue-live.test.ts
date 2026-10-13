@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,18 +13,24 @@ import {
 } from '../../src/service/dialogue/dialogue-ledger.js';
 import { admittedDialogueRoute } from '../../src/service/dialogue/dialogue-route.js';
 import { SAMPLE1_SOURCE_DIGEST } from '../../src/service/analysis/baseline-analysis-store.js';
+import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { HARNESS_SESSION_LOG_DIRECTORY } from '../../src/service/harness/session-log.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_SESSION_HEADER } from '../../src/service/provider/deepseek-adapter.js';
 import { OPENCODE_GO_MODEL } from '../../src/service/provider/egress-gate.js';
 import { PROVIDER_LEDGER_FILE, isItemLine, type ProviderLedgerLine } from '../../src/service/provider/provider-result-cache.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { ANALYSIS_LEDGER_REVISION_59_SQL, LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { READERS_REPORT_SCHEMA_SQL } from '../../src/service/readers-reports.js';
+import { CAPTURED_PROCEDURE_SCHEMA_SQL } from '../../src/service/captured-procedures.js';
+import { EVALUATION_REWRITE_SCHEMA_SQL } from '../../src/service/evaluation-rewrites.js';
+import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
+import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx } from '../support/composed-fixture.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
 import type { DevelopmentValidationIntent, DialogueProjection, DialogueSelectionInput, LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { importSample1Book, requireExactSample1 } from '../support/sample1-baseline.js';
+import { importSample1Book, requireExactSample1, sample1Path } from '../support/sample1-baseline.js';
 
 // Service-integration suite (L2) for the live editorial dialogue (Issue #52, plan slice S17c; ADR 0088; ADR 0089) over the
 // real store, the real PrimaryAgentHarness composition, Egress Gate, Credential Broker, Provider Test Ledger and Result Cache,
@@ -159,7 +166,7 @@ async function waitFor<T>(read: () => T, done: (value: T) => boolean, label: str
   for (;;) {
     const value = read();
     if (done(value)) return value;
-    if (Date.now() > until) throw new Error(`timed out: ${label} ${JSON.stringify(value)}`);
+    if (Date.now() > until) throw new Error(`timed out: ${label}`);
     await new Promise((resolveWait) => setTimeout(resolveWait, 10));
   }
 }
@@ -175,7 +182,7 @@ async function ledgerLines(): Promise<ProviderLedgerLine[]> {
 
 /** Ask on the Book through the owner, as the service entry does, and wait for the answer to settle. */
 async function ask(store: EditorialStore, dialogues: DialogueExecutionOwner, bookId: string, selection: DialogueSelectionInput): Promise<{ dialogueId: string; projection: DialogueProjection }> {
-  dialogues.requireReady(store.dialogueSourceDigest(bookId));
+  dialogues.requireReady(store.dialogueSourceDigest(bookId, selection));
   const turn = store.askAboutSelection(bookId, { selection, question: QUESTION });
   dialogues.begin(turn);
   const projection = await waitFor(() => store.inspectDialogue(bookId, turn.dialogueId, 0, (id) => dialogues.liveText(id)), settled, 'ask settled');
@@ -184,7 +191,7 @@ async function ask(store: EditorialStore, dialogues: DialogueExecutionOwner, boo
 
 async function next(store: EditorialStore, dialogues: DialogueExecutionOwner, bookId: string, dialogueId: string, kind: 'continue' | 'regenerate'): Promise<DialogueProjection> {
   const latest = store.inspectDialogue(bookId, dialogueId, 0, () => null).attempts.at(-1)!;
-  dialogues.requireReady(store.dialogueSourceDigest(bookId));
+  dialogues.requireReady(store.dialogueSourceDigest(bookId, { dialogueId }));
   const turn = store.nextDialogueAttempt(bookId, { dialogueId, attemptId: latest.attemptId }, kind);
   dialogues.begin(turn);
   return waitFor(() => store.inspectDialogue(bookId, dialogueId, 0, (id) => dialogues.liveText(id)), settled, `${kind} settled`);
@@ -201,6 +208,60 @@ function refusalCode(operation: () => unknown): string {
 }
 
 describe('the admitted dialogue route, read from the selected policy', () => {
+  it('checks the frozen dialogue source after reimport, never a later admitted source in the same Book', async () => {
+    const store = await openStore();
+    const path = join(roots.inputRoot, 'composed-dialogue.docx');
+    const bytes = await composeManuscriptDocx(path, { source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 30, title: '对话来源' });
+    const composedDigest = sha256Hex(bytes);
+    const staged = await store.stageSelectedManuscript(randomUUID(), path);
+    const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+      { kind: 'new-book', choiceId: 'new-book', confirmedTitle: '对话来源' }, false);
+    const book = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion,
+      reviewDigest: review.reviewDigest!, commitId: randomUUID() });
+    const selection = selectionOf(store, book);
+    const { loadModelFixture } = await import('../../src/service/provider/model-fixture.js');
+    const fixture = await loadModelFixture(join(roots.codeRoot, 'tests', 'fixtures', 'model'), 'sample1-dialogue');
+    const local = new DialogueExecutionOwner({ records: store, fixture, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null });
+    const { dialogueId } = await ask(store, local, book.bookId, selection);
+    await local.dispose();
+
+    const replacement = await store.stageSelectedManuscript(randomUUID(), sample1Path(roots.codeRoot));
+    const work = store.createManuscriptReimportPreparationWork(replacement.draftId, replacement.draftVersion, {
+      kind: 'existing-book', bookId: book.bookId, relationship: 'reimport', lineage: { kind: 'unconfirmed' }, reuseSourceVersionId: null,
+    });
+    let prepared = store.advanceManuscriptReimportPreparationWork(work.workId);
+    while (!prepared.done) prepared = store.advanceManuscriptReimportPreparationWork(work.workId);
+    let reimport = prepared.review!;
+    while (reimport.comparison.unresolvedGroups > 0) {
+      const group = store.getReimportMappingPage(reimport.draftId, reimport.draftVersion, null).items.find((item) => item.verb === null)!;
+      const resolution = store.createReimportResolutionWork(reimport.draftId, reimport.draftVersion, group.groupId, group.verbs[0]!);
+      let progress = store.advanceReimportResolutionWork(resolution.workId);
+      while (!progress.done) progress = store.advanceReimportResolutionWork(resolution.workId);
+      reimport = progress.review!;
+    }
+    const commit = await store.createManuscriptReimportCommitWork({ draftId: reimport.draftId, expectedDraftVersion: reimport.draftVersion,
+      reviewDigest: reimport.reviewDigest, commitId: randomUUID() });
+    let committed = commit.result;
+    while (committed === null) {
+      await new Promise((resolveWait) => setTimeout(resolveWait, 5));
+      committed = (await store.advanceManuscriptReimportCommitWork(commit.workId!)).result;
+    }
+    const calls: StubCall[] = [];
+    const live = liveOwner(store, liveRoute(stubTransport(calls, () => ANSWER)));
+    try {
+      const frozenDigest = store.dialogueSourceDigest(book.bookId, { dialogueId });
+      expect(frozenDigest).toBe(composedDigest);
+      expect(store.dialogueSourceDigest(book.bookId, selectionOf(store, book))).toBe(SAMPLE1_SOURCE_DIGEST);
+      expect(refusalCode(() => live.requireReady(frozenDigest))).toBe('DIALOGUE_ROUTE_UNAVAILABLE');
+      await expect(next(store, live, book.bookId, dialogueId, 'regenerate')).rejects.toMatchObject({ code: 'DIALOGUE_ROUTE_UNAVAILABLE' });
+      expect(store.inspectDialogue(book.bookId, dialogueId, 0, () => null).attempts).toHaveLength(1);
+      expect(calls).toHaveLength(0);
+      expect(await ledgerLines()).toHaveLength(0);
+    } finally {
+      await live.dispose();
+    }
+  });
+
   it('takes exactly the one rule naming the dialogue and the selected excerpt, and nothing else', () => {
     // The selected policy names it exactly so, beside the baseline and review rules.
     expect(livePolicy.providerProcessing.admittedRules.filter((rule) => rule.taskKinds.includes('editorial-dialogue'))).toEqual([dialogueRule()]);
@@ -243,8 +304,8 @@ describe('the admitted dialogue route, read from the selected policy', () => {
     expect(dialogueRouteRefusal({ fixture: null, live: admitted }, null)).toMatch(/公开样书范围/u);
     const store = await openStore();
     const book = await importSample1Book(store, roots.codeRoot, '实时拒绝');
-    expect(store.dialogueSourceDigest(book.bookId)).toBe(SAMPLE1_SOURCE_DIGEST);
-    expect(refusalCode(() => liveOwner(store, unadmitted).requireReady(store.dialogueSourceDigest(book.bookId)))).toBe('DIALOGUE_ROUTE_UNAVAILABLE');
+    expect(store.dialogueSourceDigest(book.bookId, selectionOf(store, book))).toBe(SAMPLE1_SOURCE_DIGEST);
+    expect(refusalCode(() => liveOwner(store, unadmitted).requireReady(store.dialogueSourceDigest(book.bookId, selectionOf(store, book))))).toBe('DIALOGUE_ROUTE_UNAVAILABLE');
     expect(refusalCode(() => liveOwner(store, admitted).requireReady('0'.repeat(64)))).toBe('DIALOGUE_ROUTE_UNAVAILABLE');
     const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
     try {
@@ -277,10 +338,10 @@ describe('就这段提问… on the live route (provider-free)', () => {
       expect(body.stream).toBe(false);
       expect(body.tools).toBeUndefined();
       // Exactly the frozen contract and the one message: the selected words and the question, nothing else of the Book.
-      expect(body.messages).toEqual([
+      expect(sha256Hex(canonicalJson(body.messages))).toBe(sha256Hex(canonicalJson([
         { role: 'system', content: DIALOGUE_PROMPT_CONTRACT.systemPrompt },
         { role: 'user', content: buildDialogueMessage({ kind: 'ask', selection: selection.selectedText, question: QUESTION, kept: null }) },
-      ]);
+      ])));
       const lines = await ledgerLines();
       expect(lines).toHaveLength(1);
       expect(lines[0]).toMatchObject({ itemId: 'S17c/editorial-dialogue/1', purpose: 'editorial-dialogue', outcome: 'transmitted', status: 200, model: OPENCODE_GO_MODEL });
@@ -288,7 +349,7 @@ describe('就这段提问… on the live route (provider-free)', () => {
       expect(lines[0]!.taskPromptContractDigest).toBe(lines[0]!.promptContractDigest);
       expect(lines[0]!.validation).toMatchObject({ family: VALIDATION.family, case: VALIDATION.case, step: 'editorial-dialogue/ask', decision: 'first-capture' });
       // The ledger records identities and counts, never content.
-      expect(JSON.stringify(lines)).not.toContain(selection.selectedText);
+      expect(JSON.stringify(lines).includes(selection.selectedText)).toBe(false);
       expect(JSON.stringify(lines)).not.toContain(QUESTION);
       // The attempt is bound to the rule that admitted it, with no fixture.
       const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
@@ -303,7 +364,7 @@ describe('就这段提问… on the live route (provider-free)', () => {
       }
       // The answer has no Apply, export or publication authority: the manuscript is as it was, and nothing was applied.
       expect(projection.attempts[0]!.convertedMarkIds).toHaveLength(0);
-      expect(store.inspectDialogue(book.bookId, dialogueId, 0, () => null)).toEqual(projection);
+      expect(sha256Hex(JSON.stringify(store.inspectDialogue(book.bookId, dialogueId, 0, () => null)))).toBe(sha256Hex(JSON.stringify(projection)));
     } finally {
       await dialogues.dispose();
     }
@@ -342,8 +403,8 @@ describe('就这段提问… on the live route (provider-free)', () => {
       const again = await next(store, dialogues, book.bookId, business.dialogueId, 'regenerate');
       expect(again.attempts.map((attempt) => attempt.state)).toEqual(['completed', 'completed']);
       expect(businessCalls).toHaveLength(2);
-      expect(businessCalls[1]!.body).toBe(businessCalls[0]!.body);
-      expect(businessCalls[0]!.body).toBe(devCalls[0]!.body);
+      expect(sha256Hex(businessCalls[1]!.body)).toBe(sha256Hex(businessCalls[0]!.body));
+      expect(sha256Hex(businessCalls[0]!.body)).toBe(sha256Hex(devCalls[0]!.body));
     } finally {
       await dialogues.dispose();
     }
@@ -356,7 +417,7 @@ describe('就这段提问… on the live route (provider-free)', () => {
     const calls: StubCall[] = [];
     const dialogues = liveOwner(store, liveRoute(stubTransport(calls, () => ANSWER, { hold: true })));
     try {
-      dialogues.requireReady(store.dialogueSourceDigest(book.bookId));
+      dialogues.requireReady(store.dialogueSourceDigest(book.bookId, selectionOf(store, book)));
       const turn = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
       dialogues.begin(turn);
       await waitFor(() => calls.length, (count) => count === 1, 'request in flight');
@@ -370,6 +431,30 @@ describe('就这段提问… on the live route (provider-free)', () => {
       expect(lines.map((line) => [line.outcome, line.classification])).toEqual([['failed', 'outcome-unknown']]);
       expect(refusalCode(() => store.nextDialogueAttempt(book.bookId, { dialogueId: turn.dialogueId, attemptId: turn.attemptId }, 'continue')))
         .toBe('DIALOGUE_NOTHING_KEPT');
+      const again = await next(store, dialogues, book.bookId, turn.dialogueId, 'regenerate');
+      expect(again.attempts.at(-1)!.state).toBe('failed');
+      expect(calls).toHaveLength(1);
+    } finally {
+      await dialogues.dispose();
+    }
+  });
+
+  it.each(['stop', 'dispose'] as const)('%s during live setup never transmits and preserves the question for an explicit retry', async (action) => {
+    const store = await openStore();
+    const book = await importSample1Book(store, roots.codeRoot, '发送前停止');
+    const calls: StubCall[] = [];
+    const dialogues = liveOwner(store, liveRoute(stubTransport(calls, () => ANSWER)));
+    const turn = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
+    try {
+      dialogues.begin(turn);
+      if (action === 'stop') await dialogues.stop(turn.attemptId);
+      else await dialogues.dispose();
+      const projection = store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null);
+      expect(calls).toHaveLength(0);
+      expect(await ledgerLines()).toHaveLength(0);
+      expect(projection.attempts[0]!.state).toBe(action === 'stop' ? 'stopped' : 'interrupted');
+      expect(projection.question).toBe(QUESTION);
+      expect(projection.attempts[0]!.fragments).toHaveLength(0);
     } finally {
       await dialogues.dispose();
     }
@@ -411,7 +496,7 @@ describe('就这段提问… on the live route (provider-free)', () => {
       // A 继续回答 reads as what the stopped answer kept, then its own.
       expect(texts(continued, 1)).toEqual([...kept, '末句可以把语气放缓，与前文的节奏一致。']);
       const body = JSON.parse(calls[0]!.body) as { messages: Array<{ role: string; content: string }> };
-      expect(body.messages.at(-1)!.content).toBe(buildDialogueMessage({ kind: 'continue', selection: selection.selectedText, question: QUESTION, kept: kept.join('') }));
+      expect(sha256Hex(body.messages.at(-1)!.content)).toBe(sha256Hex(buildDialogueMessage({ kind: 'continue', selection: selection.selectedText, question: QUESTION, kept: kept.join('') })));
       const lines = await ledgerLines();
       expect(lines.map((line) => [line.itemId, line.outcome, line.validation?.step])).toEqual([
         ['S17c/editorial-dialogue/1', 'transmitted', 'editorial-dialogue/continue'],
@@ -472,7 +557,7 @@ describe('the recorded live answer (Issue #52, S17c fixture)', () => {
 });
 
 describe('revision 71', () => {
-  it('widens a revision-60 bindings relation in place: every binding reads back under its own digest', async () => {
+  it.each([60, 70])('migrates schema %i with revision-60 bindings: every binding reads back under its own digest', async (version) => {
     const { DialogueExecutionOwner: Owner } = await import('../../src/service/dialogue/dialogue-execution.js');
     const { loadModelFixture } = await import('../../src/service/provider/model-fixture.js');
     const { resolve } = await import('node:path');
@@ -490,34 +575,44 @@ describe('revision 71', () => {
     let database = new DatabaseSync(path);
     let rows: unknown[];
     try {
-      rows = database.prepare('SELECT attempt_id, canonical_json, sha256 FROM dialogue_execution_bindings ORDER BY rowid').all();
       database.exec('PRAGMA foreign_keys = OFF');
       database.exec('BEGIN');
       database.exec('CREATE TEMP TABLE keep AS SELECT * FROM dialogue_execution_bindings');
       database.exec('DROP TABLE dialogue_execution_bindings');
       database.exec(DIALOGUE_EXECUTION_BINDINGS_REVISION_60_SQL);
-      database.exec(`INSERT INTO dialogue_execution_bindings SELECT attempt_id, harness_session_id, route, model, operational_scope,
+      database.exec(`INSERT INTO dialogue_execution_bindings(rowid, attempt_id, harness_session_id, route, model, operational_scope,
+        behavior_composition_sha256, prompt_contract_sha256, fixture_sha256, bound_at, canonical_json, sha256)
+        SELECT 42, attempt_id, harness_session_id, route, model, operational_scope,
         behavior_composition_sha256, prompt_contract_sha256, fixture_sha256, bound_at, canonical_json, sha256 FROM temp.keep`);
+      rows = database.prepare('SELECT rowid, attempt_id, canonical_json, sha256 FROM dialogue_execution_bindings ORDER BY rowid').all();
       database.exec(DIALOGUE_TRIGGER_SQL.dialogue_execution_bindings_no_update!);
       database.exec(DIALOGUE_TRIGGER_SQL.dialogue_execution_bindings_no_delete!);
-      database.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION - 1}`);
+      database.exec(`PRAGMA user_version = ${version}`);
       database.exec('COMMIT');
+      if (version === 60) {
+        for (const schema of [EVALUATION_REWRITE_SCHEMA_SQL, CAPTURED_PROCEDURE_SCHEMA_SQL, READERS_REPORT_SCHEMA_SQL]) {
+          for (const table of Object.keys(schema).reverse()) database.exec(`DROP TABLE ${table}`);
+        }
+        downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_59_SQL);
+      }
     } finally {
       database.close();
     }
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     opened.push(store);
-    expect(store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null)).toEqual(before);
+    expect(sha256Hex(JSON.stringify(store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null)))).toBe(sha256Hex(JSON.stringify(before)));
     store.close();
-    database = new DatabaseSync(path, { readOnly: true });
+    database = new DatabaseSync(path);
     try {
       expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
       const sql = (database.prepare("SELECT sql FROM sqlite_schema WHERE name = 'dialogue_execution_bindings'").get() as { sql: string }).sql;
       expect(sql.replace(/\s+/gu, ' ')).toBe(DIALOGUE_SCHEMA_SQL.dialogue_execution_bindings.replace(/\s+/gu, ' '));
-      expect(database.prepare('SELECT attempt_id, canonical_json, sha256 FROM dialogue_execution_bindings ORDER BY rowid').all()).toEqual(rows);
+      expect(database.prepare('SELECT rowid, attempt_id, canonical_json, sha256 FROM dialogue_execution_bindings ORDER BY rowid').all()).toEqual(rows);
+      expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
       expect(database.prepare('SELECT provider_processing_version, policy_rule_id FROM dialogue_execution_bindings').all())
         .toEqual([{ provider_processing_version: null, policy_rule_id: null }]);
-      expect(() => database.prepare('UPDATE dialogue_execution_bindings SET bound_at = bound_at').run()).toThrowError();
+      expect(() => database.prepare('UPDATE dialogue_execution_bindings SET bound_at = bound_at').run()).toThrowError('DIALOGUE_LEDGER_IMMUTABLE');
+      expect(() => database.prepare('DELETE FROM dialogue_execution_bindings').run()).toThrowError('DIALOGUE_LEDGER_IMMUTABLE');
     } finally {
       database.close();
     }

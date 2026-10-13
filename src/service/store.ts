@@ -17820,20 +17820,22 @@ export class EditorialStore {
   }
 
   /**
-   * The source digest of the Book's primary manuscript as its working state stands (Issue #52, S17c), or `null` when it was
-   * imported from no source: what decides whether a live dialogue may send its words, read before anything is recorded.
+   * The source of the exact selected revision, or the frozen revision an existing dialogue sends again (Issue #52, S17c).
+   * A later reimport or another manuscript in the Book cannot authorize these words. Read before anything is recorded.
    */
-  dialogueSourceDigest(bookId: string): string | null {
+  dialogueSourceDigest(bookId: string, target: AskAboutSelectionInput['selection'] | Pick<DialogueAttemptInput, 'dialogueId'>): string | null {
     return this.#dialogueCall(() => {
       requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+      const source = 'dialogueId' in target ? this.#requireDialogueTask(bookId, target.dialogueId) : {
+        manuscriptId: target.manuscriptId, branchId: target.branchId, revisionId: target.baseRevisionId,
+      };
       const row = this.#authority.prepare(
         `SELECT sv.source_digest FROM manuscripts m
          JOIN manuscript_branches mb ON mb.manuscript_id = m.manuscript_id
-         JOIN branch_working_state bws ON bws.branch_id = mb.branch_id
-         JOIN manuscript_revisions mr ON mr.revision_id = bws.base_revision_id
+         JOIN manuscript_revisions mr ON mr.manuscript_id = m.manuscript_id AND mr.branch_id = mb.branch_id
          JOIN source_versions sv ON sv.source_version_id = mr.source_version_id AND sv.book_id = m.book_id
-         WHERE m.book_id = ? AND m.role = 'primary'`,
-      ).get(bookId) as SqlRow | undefined;
+         WHERE m.book_id = ? AND m.manuscript_id = ? AND mb.branch_id = ? AND mr.revision_id = ?`,
+      ).get(bookId, source.manuscriptId, source.branchId, source.revisionId) as SqlRow | undefined;
       return row === undefined ? null : asString(row.source_digest);
     });
   }
