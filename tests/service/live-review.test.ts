@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
@@ -9,7 +10,9 @@ import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/r
 import { reviewCategoryEntry, reviewCategoryContractInput } from '../../src/service/review/category-configuration.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
-import { sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
+import { normalizedQuotation, sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
+import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { ownBlockTextsOf, ownBlockIdsOf, unitContentDigest, substituteBlockPlaceholders } from '../../src/service/provider/local-deterministic-adapter.js';
 import { ProviderResultCache, isModelCallLine } from '../../src/service/provider/provider-result-cache.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
 import type { LaunchPolicyProjection, ReviewRunProjection } from '../../src/shared/protocol.js';
@@ -30,6 +33,7 @@ let holdTurn: boolean;
 let arrived: Promise<void>;
 let announce: () => void;
 let release: () => void;
+let recorded: Map<string, ResolvedModelFixture>;
 
 beforeEach(async () => {
   roots = await createServiceTestRoots('ai7-live-review-');
@@ -51,6 +55,7 @@ beforeEach(async () => {
   sent = 0;
   failure = 'none';
   holdTurn = false;
+  recorded = new Map();
   arrived = new Promise<void>((resolve) => { announce = resolve; });
   const held = new Promise<void>((resolve) => { release = resolve; });
   const nativeFetch: typeof fetch = async (_url, init) => {
@@ -66,7 +71,16 @@ beforeEach(async () => {
     const message = body.messages.at(-1)!.content;
     const header = parseReviewCategoryUnitMessageHeader(message);
     let result: unknown;
-    if (header !== null) {
+    let capturedText: string | null = null;
+    let responseUsage = { inputTokens: 40, outputTokens: 20 };
+    const fixture = header === null ? undefined : recorded.get(header.categoryId);
+    if (header !== null && fixture !== undefined) {
+      const digest = unitContentDigest(ownBlockTextsOf(message));
+      const entry = [...fixture.entries.values()].find((candidate) => candidate.unitOrdinal === header.ordinal && candidate.contentDigest === digest);
+      if (entry?.response.kind !== 'unit-result') throw new Error('RECORDED_REVIEW_UNIT_MISSING');
+      capturedText = substituteBlockPlaceholders(entry.response.text, ownBlockIdsOf(message));
+      responseUsage = entry.response.usage;
+    } else if (header !== null) {
       const blocks = message.split('\n').flatMap((line) => {
         const match = /^\[blk_[0-9a-f]{24}\] \((?:title|heading|paragraph)(?: h[1-6])?\) (.*)$/u.exec(line);
         return match === null ? [] : [match[1]!];
@@ -85,7 +99,7 @@ beforeEach(async () => {
     } else {
       result = { schema: 'ai7.analysis.run-report-reflection-result/1', items: [{ suggestion: '复查已定位发现。', basis: '合成回归账目。' }] };
     }
-    return new Response(JSON.stringify({ model: launch.live.model, choices: [{ message: { content: JSON.stringify(result), reasoning_content: '合成推理通道。' }, finish_reason: 'stop' }], usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 });
+    return new Response(JSON.stringify({ model: launch.live.model, choices: [{ message: { content: capturedText ?? JSON.stringify(result), reasoning_content: '合成推理通道。' }, finish_reason: 'stop' }], usage: { prompt_tokens: responseUsage.inputTokens, completion_tokens: responseUsage.outputTokens } }), { status: 200 });
   };
   owner = new BaselineAnalysisExecutionOwner({
     ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
@@ -109,7 +123,18 @@ function approvals(run: ReviewRunProjection) {
 }
 
 describe('reference-free review on the Go execution path', () => {
-  it('dispatches all admitted categories, grounds findings, accounts for usage and carries a mark through Apply and reversal', async () => {
+  it.each(['synthetic', 'recorded'] as const)('dispatches all admitted categories with %s unit answers, grounds findings and carries a mark through Apply and reversal', async (source) => {
+    if (source === 'recorded') {
+      // Completed typos/style unit answers are recorded. Literary units, sampling/reflection and the
+      // HTTP envelope remain synthetic; literary had no persisted live revision before timeout.
+      // This regression sends nothing and asserts no current editorial quality.
+      for (const id of ['typos-and-usage', 'style-and-format']) {
+        const fixture = await loadModelFixture(fileURLToPath(new URL('../fixtures/model/', import.meta.url)), `sample1-recorded-v41-review-${id}`);
+        expect(fixture.provenance).toBe('recorded');
+        expect([...fixture.entries.values()].every((entry) => entry.capture?.model === DEVELOPER_LIVE_POLICY_BINDING.model)).toBe(true);
+        recorded.set(id, fixture);
+      }
+    }
     const book = await importSample1Book(store, roots.codeRoot, 'L2 sample1 live review');
     await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
     recordMissingCredentialConnection(store, 'L2 主编辑角色连接');
@@ -123,10 +148,10 @@ describe('reference-free review on the Go execution path', () => {
     const settled = store.inspectReviewWorkspace(book.bookId, run.reviewRunId).run!;
     expect(settled.categories.map((category) => category.state)).toEqual(['settled', 'settled', 'settled']);
     const findings = settled.findings;
-    expect(findings.length).toBeGreaterThanOrEqual(3);
+    expect(findings.length).toBeGreaterThanOrEqual(source === 'recorded' ? 1 : 3);
     for (const finding of findings) {
       const block = original.find((candidate) => candidate.blockId === finding.blockId)!;
-      expect(sliceGraphemes(block.text, finding.fromGrapheme, finding.toGrapheme) === finding.quote).toBe(true);
+      expect(normalizedQuotation(sliceGraphemes(block.text, finding.fromGrapheme, finding.toGrapheme)) === normalizedQuotation(finding.quote)).toBe(true);
       expect(finding.markId).not.toBeNull();
       expect(finding.stateLine).toBe('未联网核查');
     }
