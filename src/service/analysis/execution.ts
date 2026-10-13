@@ -1115,7 +1115,10 @@ export class BaselineAnalysisExecutionOwner {
         // A continuation's retry is the unit's second attempt however many executions it took to reach it (Issue #422,
         // S76d): the deterministic fixture serves attempts in order, so it is told what each unit attempted before.
         if (live === null) {
-          return new Ai7LocalDeterministicAdapter(fixture!, promptContractDigest, codes, continuation === null ? {} : { attemptsBefore: ledger.unitAttemptsOf(facts.runRecordId) });
+          // Sampling turns are keyed by the sampling contract this kind binds (Issue #826), as the unit turns are by its prompt.
+          const assurance = definition.assurance === null ? {} : { assurancePromptContractDigest: definition.assurance.promptContractDigest };
+          return new Ai7LocalDeterministicAdapter(fixture!, promptContractDigest, codes,
+            continuation === null ? assurance : { ...assurance, attemptsBefore: ledger.unitAttemptsOf(facts.runRecordId) });
         }
         liveAdapter.instance = new DeepSeekOpenAiCompatibleAdapter({
           broker: this.#broker,

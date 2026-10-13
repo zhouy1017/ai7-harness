@@ -74,6 +74,14 @@ const PROVIDER_CACHE_DIRECTORY = 'entries';
 // --- Duplicated from src/service/analysis/{cross-unit,assurance-sampling,run-report}-contract.ts (Issue #808) ---------------
 export const BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST = '8298dc9db1b95f26072cabb00a8c9a14997f68ebe7bf07d01181985f848e66cb';
 export const ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST = '4c05e66ba8077c85aa1334b53e98155566fcd9f51d9bd3343e95e7b14ddc03db';
+/**
+ * Sampling prompt contract /2 (Issue #826), which only the current baseline binds, and the SHA-256 of its nine-line instruction
+ * as a sampling message carries it after its header: a turn whose message carries exactly that instruction was written under
+ * /2, any other under /1, and the capture's recorded stage contract must agree with the message either way.
+ */
+export const ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST = '1bfd29ecb6ba5d9bdbd1e1d097da4de6a0d1c9e6319c5f2318d2ca8c5eeb112c';
+export const ASSURANCE_SAMPLING_V2_INSTRUCTION_SHA256 = '522b3a3c19b5d456ec9d9611720cca0eab7d042e92cc47bd0a18eaa20b89b262';
+const ASSURANCE_SAMPLING_INSTRUCTION_LINES = 9;
 export const RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST = '96456fc99625e12014633439564f17a54cdb1f4f0a05b8076c10a4b03bbd7676';
 const CROSS_UNIT_HEADER = /^跨单元归纳 (\d+)\/(\d+) · 单元集摘要 ([0-9a-f]{64})$/u;
 const CITED_BLOCKS_HEADER = '各单元引用的内容块标识（按首次引用顺序）：';
@@ -325,7 +333,7 @@ async function loadSample1Owners() {
       stdin: { contents: [
         "export { parseDocx } from './src/service/docx.ts';",
         "export { deriveCoverageManifest } from './src/service/analysis/coverage-manifest.ts';",
-        "export { buildUnitMessage, BASELINE_PROMPT_CONTRACT, BASELINE_PROMPT_CONTRACT_DIGEST } from './src/service/analysis/contract.ts';",
+        "export { buildUnitMessage, BASELINE_PROMPT_CONTRACT, BASELINE_PROMPT_CONTRACT_DIGEST, BASELINE_PROMPT_CONTRACT_V1, BASELINE_PROMPT_CONTRACT_V1_DIGEST } from './src/service/analysis/contract.ts';",
         "export { buildCrossUnitMessage } from './src/service/analysis/cross-unit-contract.ts';",
         "export { buildAssuranceSamplingMessage, drawAssuranceSample, assuranceSamplingTurns } from './src/service/analysis/assurance-sampling-contract.ts';",
         "export { baselineAnalysisKindDefinition } from './src/service/analysis/kind-definition.ts';",
@@ -357,8 +365,16 @@ export async function verifySample1Capture(request, selection, parsed) {
     const source = join(TOOL_ROOT, 'SampleBooks', 'sample1.docx');
     if (sha256Hex(await readFile(source)) !== SAMPLE1_SOURCE_SHA256) fail();
     const owners = await loadSample1Owners();
-    if (parsed.carriedMessageCount !== 1 || parsed.systemMessages.length !== 1 ||
-      parsed.systemMessages[0] !== owners.BASELINE_PROMPT_CONTRACT.systemPrompt) fail();
+    // The task contract the capture was made under (Issue #826): the current /2, or /1 for a capture of the original Run. Its
+    // system prompt, plan, revision and sampling contract are all that contract's; another contract proves nothing.
+    const contracts = [
+      { selection: 'current', prompt: owners.BASELINE_PROMPT_CONTRACT, digest: owners.BASELINE_PROMPT_CONTRACT_DIGEST },
+      { selection: 'retained-v1', prompt: owners.BASELINE_PROMPT_CONTRACT_V1, digest: owners.BASELINE_PROMPT_CONTRACT_V1_DIGEST },
+    ];
+    const contract = contracts.find((candidate) => candidate.digest === selection.taskPromptContractDigest);
+    if (contract === undefined || parsed.carriedMessageCount !== 1 || parsed.systemMessages.length !== 1 ||
+      parsed.systemMessages[0] !== contract.prompt.systemPrompt) fail();
+    const definition = owners.baselineAnalysisKindDefinition(contract.selection);
     step = 'records';
     const { DatabaseSync } = await import('node:sqlite');
     database = new DatabaseSync(request.sample1Store, { readOnly: true });
@@ -371,8 +387,7 @@ export async function verifySample1Capture(request, selection, parsed) {
     const manifest = plan('coverage-manifest');
     const envelope = plan('plan-envelope');
     if (pin.sourceDigest !== SAMPLE1_SOURCE_SHA256 || pin.revisionDigest !== manifest.manuscript.revisionDigest ||
-      pin.revisionId !== manifest.manuscript.revisionId || envelope.promptContractDigest !== owners.BASELINE_PROMPT_CONTRACT_DIGEST ||
-      selection.taskPromptContractDigest !== owners.BASELINE_PROMPT_CONTRACT_DIGEST) fail();
+      pin.revisionId !== manifest.manuscript.revisionId || envelope.promptContractDigest !== contract.digest) fail();
     step = 'extract';
     const blocks = [];
     await owners.parseDocx(source, 'sample1.docx', (block) => blocks.push({ ...block, graphemes: block.graphemeLength }),
@@ -403,10 +418,11 @@ export async function verifySample1Capture(request, selection, parsed) {
       });
       expected = owners.buildCrossUnitMessage(closed, manifest.units.length);
     } else if (parsed.subject === 'sampling') {
-      const candidates = owners.baselineAnalysisKindDefinition().assurance.candidates({ components: { crossUnitFindings: revision.crossUnitFindings } });
+      const candidates = definition.assurance.candidates({ components: { crossUnitFindings: revision.crossUnitFindings } });
       const draw = owners.drawAssuranceSample(manifest, candidates);
       const messages = owners.assuranceSamplingTurns(draw.sampled).map((turn) =>
-        owners.buildAssuranceSamplingMessage(manifest.units[turn.unitOrdinal - 1], manifest.units.length, byId, turn.findings));
+        owners.buildAssuranceSamplingMessage(manifest.units[turn.unitOrdinal - 1], manifest.units.length, byId, turn.findings, definition.assurance.prompt));
+      if (selection.promptContractDigest !== definition.assurance.promptContractDigest) fail();
       expected = messages.find((message) => message === parsed.unitMessage);
     } else if (parsed.subject === 'reflection') {
       const outcome = checked(database.prepare('SELECT canonical_json, sha256 FROM analysis_task_outcomes WHERE task_intent_id = ?').get(request.sample1Task));
@@ -764,15 +780,16 @@ export function parseCachedRequest(requestBody, promptContractDigest) {
   }
   const sampling = parseAssuranceSamplingMessageHeader(unitMessage);
   if (sampling !== null) {
+    const stageContractDigest = samplingStageContractOf(unitMessage);
     return {
-      subject: 'sampling', stageContractDigest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, unitMessage, header: null, ownBlockTexts: [],
+      subject: 'sampling', stageContractDigest, unitMessage, header: null, ownBlockTexts: [],
       carriedBlockTexts, carriedMessageCount: carriedMessages.length, systemMessages, unitOrdinal: 0, contentDigest: null,
       identities: [
         ...parseAssuranceSamplingListedRefs(unitMessage).map((identity, index) => ({ placeholder: `{{ref:${index + 1}}}`, identity })),
         ...unitMessage.split('\n').flatMap((line) => { const match = BLOCK_LINE.exec(line); return match === null ? [] : [match[1]]; })
           .map((identity, index) => ({ placeholder: `{{sample-block:${index + 1}}}`, identity })),
       ],
-      requestDigest: assuranceSamplingRequestDigest(ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, sampling.unitOrdinal, sampling.unitDigest, sampling.sampleDigest),
+      requestDigest: assuranceSamplingRequestDigest(stageContractDigest, sampling.unitOrdinal, sampling.unitDigest, sampling.sampleDigest),
     };
   }
   const reflection = parseRunReportReflectionMessageHeader(unitMessage);
@@ -784,6 +801,12 @@ export function parseCachedRequest(requestBody, promptContractDigest) {
     };
   }
   throw new FixtureGenerationError('FIXTURE_GEN/unit-message-unrecognized', '最后一条 user 消息不是可识别的分析单元、跨单元归纳、保证抽样或运行反思消息。');
+}
+
+/** The sampling contract a sampling message was written under: /2 when it carries exactly /2's instruction, else /1. */
+function samplingStageContractOf(unitMessage) {
+  const instruction = unitMessage.split('\n').slice(1, 1 + ASSURANCE_SAMPLING_INSTRUCTION_LINES).join('\n');
+  return sha256Hex(instruction) === ASSURANCE_SAMPLING_V2_INSTRUCTION_SHA256 ? ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST : ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST;
 }
 
 /** Closed header families already consumed by the deterministic adapter; no new Task support. */

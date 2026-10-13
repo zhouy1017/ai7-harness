@@ -357,9 +357,10 @@ function runBegan(transitions: ReadonlyArray<{ state: BaselineAnalysisRunState }
 
 /**
  * The assurance sampling contract a frozen execution plan names (Issue #826). A plan records it only when its kind binds a
- * sampling contract other than /1 — today the current baseline's /2 — so a plan without it was frozen under sampling /1:
- * every plan recorded before #826, and every factual, Review Category and retained /1 baseline plan since, whose bytes are
- * therefore unchanged.
+ * sampling contract other than /1 — today the current baseline's /2 — so every factual, Review Category and retained /1
+ * baseline plan keeps the bytes it always had. A plan without it is read conservatively as /1: that is what every delivered
+ * plan recorded before #826 was frozen under. (An unpinned plan of the #826 development candidate that sampled /2 reads as /1
+ * too; the reading only refuses to execute such a plan again, and never relabels a Run already recorded.)
  */
 export function frozenAssurancePromptContractDigest(executionPlan: Readonly<Record<string, unknown>>): string {
   const recorded = executionPlan.assurancePromptContractDigest;

@@ -7,7 +7,13 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseDocx } from '../../src/service/docx.js';
 import { deriveCoverageManifest, type ManifestBlockInput } from '../../src/service/analysis/coverage-manifest.js';
-import { buildUnitMessage, BASELINE_PROMPT_CONTRACT, BASELINE_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/contract.js';
+import {
+  buildUnitMessage,
+  BASELINE_PROMPT_CONTRACT,
+  BASELINE_PROMPT_CONTRACT_DIGEST,
+  BASELINE_PROMPT_CONTRACT_V1,
+  BASELINE_PROMPT_CONTRACT_V1_DIGEST,
+} from '../../src/service/analysis/contract.js';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 
 // Source admission regression (#387): public sample1 plus an external temporary synthetic product
@@ -77,6 +83,24 @@ describe('exact sample1 fixture exemption source proof', () => {
     else if (damage === 'model') selection.model = 'other-model';
     else message = message.replace(own[5]!, '完全不同的合成稿件段落。');
     await expect(tool.verifySample1Capture(request, selection, parsed())).rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved' });
+  });
+
+  it('proves a capture of the original /1 Run under /1 alone, and no task contract under another (#826)', async () => {
+    const asV1 = (component: string, value: unknown) => {
+      const json = canonicalJson(value);
+      database.prepare('UPDATE analysis_plan_records SET canonical_json=?,sha256=? WHERE component=?').run(json, sha256Hex(json), component);
+    };
+    asV1('plan-envelope', { promptContractDigest: BASELINE_PROMPT_CONTRACT_V1_DIGEST });
+    const row = database.prepare('SELECT canonical_json FROM analysis_result_set_revisions').get()!;
+    const revision = canonicalJson({ ...(JSON.parse(row.canonical_json as string) as Record<string, unknown>), bindingPin: { promptContractDigest: BASELINE_PROMPT_CONTRACT_V1_DIGEST } });
+    database.prepare('UPDATE analysis_result_set_revisions SET canonical_json=?,sha256=?').run(revision, sha256Hex(revision));
+    const v1 = { ...selection, taskPromptContractDigest: BASELINE_PROMPT_CONTRACT_V1_DIGEST };
+    const under = (system: string) => tool.parseCachedRequest(JSON.stringify({ messages: [{ role: 'system', content: system }, { role: 'user', content: message }] }), BASELINE_PROMPT_CONTRACT_V1_DIGEST);
+    expect(await tool.verifySample1Capture(request, v1, under(BASELINE_PROMPT_CONTRACT_V1.systemPrompt))).toBe(true);
+    // The /2 system prompt is not the /1 task's, and a /2 selection does not match the /1 Task's records.
+    await expect(tool.verifySample1Capture(request, v1, under(BASELINE_PROMPT_CONTRACT.systemPrompt))).rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved' });
+    await expect(tool.verifySample1Capture(request, selection, parsed())).rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved' });
+    await expect(tool.verifySample1Capture(request, { ...selection, taskPromptContractDigest: 'f'.repeat(64) }, parsed())).rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved' });
   });
 
   it('requires the external store and task as a pair, and leaves ordinary conversion bounded', async () => {

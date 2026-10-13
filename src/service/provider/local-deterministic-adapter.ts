@@ -207,6 +207,8 @@ export type AnswerHold = (chunksStreamed: number, interrupted: () => boolean) =>
 export class Ai7LocalDeterministicAdapter implements LlmAdapter {
   readonly #fixture: ResolvedModelFixture;
   readonly #promptContractDigest: string;
+  /** The sampling contract the Run's kind binds (Issue #826): its turns are keyed by it, never by another's. */
+  readonly #assurancePromptContractDigest: string;
   readonly #codes: DshFailureCodes;
   readonly #resolveBy: FixtureResolution;
   readonly #entries: ReadonlyMap<string, ModelFixtureEntry>;
@@ -231,10 +233,17 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
        * resolves at once when the turn is interrupted.
        */
       readonly answerHold?: AnswerHold | null;
+      /**
+       * The assurance sampling contract the Run's kind binds (Issue #826): the current baseline's /2, else /1. A sampling turn
+       * is keyed by it, so an entry recorded or authored under one sampling contract never answers a question asked under
+       * another. Absent, /1 — the contract every other kind binds.
+       */
+      readonly assurancePromptContractDigest?: string;
     } = {},
   ) {
     this.#fixture = fixture;
     this.#promptContractDigest = promptContractDigest;
+    this.#assurancePromptContractDigest = options.assurancePromptContractDigest ?? ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST;
     this.#codes = codes;
     this.#attemptsBefore = options.attemptsBefore ?? new Map();
     this.#answerHold = options.answerHold ?? null;
@@ -388,7 +397,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
         : drafting !== null
           ? writingSynthesisRequestDigest(this.#promptContractDigest, drafting.setDigest)
         : sampling !== null
-          ? assuranceSamplingRequestDigest(ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, sampling.unitOrdinal, sampling.unitDigest, sampling.sampleDigest)
+          ? assuranceSamplingRequestDigest(this.#assurancePromptContractDigest, sampling.unitOrdinal, sampling.unitDigest, sampling.sampleDigest)
           : reflection !== null
             ? runReportReflectionRequestDigest(RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, reflection.accountingDigest)
             : this.#resolveBy === 'content-digest'
