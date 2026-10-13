@@ -530,8 +530,8 @@ describe('generate-model-fixture agreement with the owning modules', () => {
   it('duplicates the own-blocks header literal exactly as the prompt contract declares it', async () => {
     const source = await readFile(TOOL_PATH, 'utf8');
     expect(source).toContain(`const OWN_BLOCKS_HEADER = '${BASELINE_PROMPT_CONTRACT.ownHeader}';`);
-    // The tool imports nothing from the built or the source tree: the duplication is the whole point.
-    expect(source).not.toMatch(/from '[^']*(?:src|dist)\//u);
+    // Ordinary conversion stays build-independent; exact sample1 proof bundles the existing source owners in memory.
+    expect(source).not.toMatch(/^import .*from '[^']*(?:src|dist)\//mu);
   });
 });
 

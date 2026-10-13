@@ -119,6 +119,28 @@ describe('converted capture proof and replay', () => {
     if (delta?.type === 'text-delta') expect(parseAssuranceSamplingResult(delta.text, { refs: ['new_finding'] }).ok).toBe(true);
   });
 
+  it('preserves sampling reasons while remapping carried block citations and finding references', async () => {
+    const overlap = `blk_${'3'.repeat(24)}`;
+    const freshOverlap = `blk_${'4'.repeat(24)}`;
+    const message = `保证抽样 1/1 · 单元摘要 ${D} · 抽样摘要 ${D}\n重叠上下文：\n[${overlap}] (paragraph) 合成重叠段落。${blocks}\n以下为需要复核的发现：\n- [0]（主要）合成发现。`;
+    const content = JSON.stringify({ schema: 'ai7.analysis.assurance-sampling-result/1', dispositions: [
+      { ref: '0', disposition: '需降级', reason: `合成理由：${B} 与 ${overlap}，数字 0 保留。` },
+    ] });
+    await synthetic(message, ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, content);
+    const fixture = parseModelFixture(await generate());
+    expect(fixture.entries[0]?.capture?.identityMap).toEqual([
+      { placeholder: '{{ref:1}}', identity: '0' },
+      { placeholder: '{{sample-block:1}}', identity: overlap },
+      { placeholder: '{{sample-block:2}}', identity: B },
+    ]);
+    const changed = message.replace(B, FRESH).replace(overlap, freshOverlap).replace('[0]', '[new_ref]');
+    const delta = (await replay(changed, BASELINE_PROMPT_CONTRACT_DIGEST)).find((chunk) => chunk.type === 'text-delta');
+    expect(delta).toMatchObject({ text: content.replace('"ref":"0"', '"ref":"new_ref"').replace(B, FRESH).replace(overlap, freshOverlap) });
+    if (delta?.type === 'text-delta') expect(parseAssuranceSamplingResult(delta.text, { refs: ['new_ref'] }).ok).toBe(true);
+    await synthetic(message, ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, content.replace(B, FRESH));
+    await expect(generate()).rejects.toMatchObject({ code: 'FIXTURE_GEN/identity-unmapped' });
+  });
+
   it('replays reduction and reflection from their own contract keys', async () => {
     const reduction = `跨单元归纳 2/2 · 单元集摘要 ${D}\n各单元引用的内容块标识（按首次引用顺序）：\n单元 1：${B}`;
     await synthetic(reduction, BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, `{"blockId":"${B}"}`);
