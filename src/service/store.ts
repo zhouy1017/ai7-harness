@@ -418,7 +418,13 @@ import {
   type ResendPlan,
   type UnconfirmedOutcomeRecord,
 } from './analysis/baseline-analysis-store.js';
-import { factualReviewKindDefinition, type AnalysisKindDefinition } from './analysis/kind-definition.js';
+import {
+  baselineAnalysisKindDefinition,
+  factualReviewKindDefinition,
+  RETAINED_V1_RECORDED_FIXTURE_IDENTITY,
+  type AnalysisKindDefinition,
+  type BaselinePromptContractSelection,
+} from './analysis/kind-definition.js';
 import { convertDocManuscript, isDocConversionRefusal } from './doc-manuscript.js';
 import {
   buildFidelityReport,
@@ -3521,6 +3527,12 @@ interface StoreControl {
   /** The J-04-only local deterministic route resolved at service startup; `null` in every other launch. */
   baselineAnalysisRoute: BaselineAnalysisRouteFacts | null;
   /**
+   * The prompt contract the baseline ledger asks under (Issue #826): the service entry sets `retained-v1` only as
+   * `baselinePromptContractForLaunch` decides it, for J-04's replay of the recorded /1 Run; absent, the current one. The
+   * store refuses it beside any route but that recorded fixture alone.
+   */
+  baselinePromptContract?: BaselinePromptContractSelection;
+  /**
    * The adjusted Books the house calibration offset waits on (Issue #429, EVAL-011a): `CALIBRATION_MIN_ADJUSTMENTS` unless a
    * development-ci J-11 launch lowers it with `--j11-calibration-min-books`, so the Journey proves the gate with two Books.
    */
@@ -4624,6 +4636,11 @@ export class EditorialStore {
     },
   ): Promise<EditorialStore> {
     requireStore(isAbsolute(dataRootInput), 'DATA_ROOT_INVALID', 'Agent Data Root 必须是绝对路径。');
+    const route = control.baselineAnalysisRoute;
+    requireStore((control.baselinePromptContract ?? 'current') === 'current' || (control.baselinePromptContract === 'retained-v1' &&
+      route !== null && route.fixtureIdentity === RETAINED_V1_RECORDED_FIXTURE_IDENTITY && route.fixtureLineage.length === 1 &&
+      route.fixtureLineage[0]!.identity === RETAINED_V1_RECORDED_FIXTURE_IDENTITY),
+    'ANALYSIS_PROMPT_CONTRACT_REFUSED', '基线提示契约 v1 只随已准入的历史录制夹具重放。');
     const workflowProfile = await loadBuiltInManuscriptProfile(codeRoot);
     // The software version the store records beside its Data Version (Issue #433, S85a).
     const softwareVersion = control.softwareVersion ?? await readSoftwareVersion(codeRoot).catch((error: unknown) => {
@@ -4811,7 +4828,8 @@ export class EditorialStore {
         recoveryObjects,
         editorialWorkspaceProfile,
         new TaskAuthorizationStore(authority, boundedAuthority),
-        new BaselineAnalysisStore(authority, boundedAuthority, control.baselineAnalysisRoute),
+        new BaselineAnalysisStore(authority, boundedAuthority, control.baselineAnalysisRoute,
+          baselineAnalysisKindDefinition(control.baselinePromptContract ?? 'current')),
         new BaselineAnalysisStore(authority, boundedAuthority, control.baselineAnalysisRoute, factualReviewKindDefinition()),
         // AI7 初评 (Issue #429, S81b1): the evaluation kind under the profile a new 评估 version snapshots.
         new BaselineAnalysisStore(authority, boundedAuthority, control.baselineAnalysisRoute,

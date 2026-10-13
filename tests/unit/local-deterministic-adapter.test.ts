@@ -24,6 +24,7 @@ import {
 } from '../../src/service/analysis/cross-unit-contract.js';
 import {
   ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST,
+  ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST,
   ASSURANCE_SAMPLING_RESULT_SCHEMA,
   assuranceSampleDigest,
   assuranceSamplingRequestDigest,
@@ -256,8 +257,8 @@ describe('model fixture loading', () => {
   it('(vi) sample1-baseline-transient-retry layers a first-attempt PROVIDER_ERROR 503 for unit 5 over shape (ii)', async () => {
     const transient = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-transient-retry');
     expect(transient.lineage.map((link) => link.identity)).toEqual(['sample1-baseline-transient-retry', 'sample1-baseline-one-unit-failure', 'sample1-baseline-happy']);
-    const unit5 = '8d32b61042d075334c910da1d6fc6887b2c6f84c3034707c721070399fba328f';
-    const unit2 = 'cbc613c1c72be55aa803ab03658fa4e70638719764daf6a3a2ceef1034496295';
+    const unit5 = '8abcb377378be04322959cc962315565229946cc6a76496e45b7cbc1697094a9';
+    const unit2 = '6d3c892f661c0d2b10edad6cf29ffa9d6cc522057b7cc1fcff0ab5c0e89af00b';
     expect(resolveFixtureEntry(transient.entries, 5, unit5, 1)?.response).toMatchObject({ kind: 'adapter-failure', code: 'PROVIDER_ERROR', status: 503 });
     expect(resolveFixtureEntry(transient.entries, 5, unit5, 2)?.response).toMatchObject({ kind: 'unit-result', usage: { inputTokens: 1400, outputTokens: 180 } });
     expect(classifyModelFailure({ code: 'PROVIDER_ERROR', message: '', status: 503 }, codes).retrySafe).toBe(true);
@@ -305,7 +306,7 @@ describe('model fixture loading', () => {
     // The J-10 fixture: unit 4's first attempt only, over the happy fixture, which answers its second.
     const journey = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-outcome-unknown');
     expect(journey.lineage.map((link) => link.identity)).toEqual(['sample1-baseline-outcome-unknown', 'sample1-baseline-happy']);
-    const unit4 = 'd7eef03bffc2df6e4b39f8d430a9841f00a3f83feb7ab68e8a96700326433c46';
+    const unit4 = '8c845a19c7d2490d4161288d9b74985e297941b9141767b155069340ae10e4e2';
     expect(resolveFixtureEntry(journey.entries, 4, unit4, 1)?.response.kind).toBe('outcome-unknown');
     expect(resolveFixtureEntry(journey.entries, 4, unit4, 2)?.response.kind).toBe('unit-result');
     expect(journey.entries.size).toBe(happy.entries.size + 1);
@@ -618,6 +619,26 @@ describe('assurance sampling replay', () => {
       .toMatchObject([{ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.FIXTURE_MISMATCH, message: expect.stringContaining('单元 4 的保证抽样') } } }]);
     const otherFindings = buildAssuranceSamplingMessage(UNIT, 8, BLOCKS, [FINDINGS[0]!]);
     expect(await collect(adapter.stream(samplingRequest(otherFindings))))
+      .toMatchObject([{ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.FIXTURE_MISMATCH } } }]);
+  });
+
+  it('keys a sampling turn by the sampling contract the Run binds, so a /1 entry never answers a /2 question (#826)', async () => {
+    const bound = new Ai7LocalDeterministicAdapter(await loadModelFixture(root, 'sampling'), BASELINE_PROMPT_CONTRACT_DIGEST, codes,
+      { assurancePromptContractDigest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST });
+    expect(await collect(bound.stream(samplingRequest(MESSAGE))))
+      .toMatchObject([{ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.FIXTURE_MISMATCH } } }]);
+    const v2Digest = assuranceSamplingRequestDigest(ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST, UNIT.ordinal, UNIT_DIGEST, assuranceSampleDigest(FINDINGS));
+    await writeFile(join(root, 'sampling-v2.json'), JSON.stringify({
+      schema: 'ai7.model-fixture/1', identity: 'sampling-v2', description: '合成测试夹具', basedOn: null,
+      provider: 'ai7-local-deterministic', model: 'ai7-deterministic-fixture',
+      entries: [{ unitOrdinal: 0, requestDigest: v2Digest, response: { kind: 'unit-result', text: RESPONSE, usage: { inputTokens: 400, outputTokens: 60 } } }],
+    }));
+    const v2Fixture = await loadModelFixture(root, 'sampling-v2');
+    const answered = await collect(new Ai7LocalDeterministicAdapter(v2Fixture, BASELINE_PROMPT_CONTRACT_DIGEST, codes,
+      { assurancePromptContractDigest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST }).stream(samplingRequest(MESSAGE)));
+    expect(answered.find((chunk) => chunk.type === 'usage')).toEqual({ type: 'usage', usage: { inputTokens: 400, outputTokens: 60 } });
+    // Absent, the adapter keys by /1, the contract every other kind binds: the /2 entry answers nothing there.
+    expect(await collect(new Ai7LocalDeterministicAdapter(v2Fixture, BASELINE_PROMPT_CONTRACT_DIGEST, codes).stream(samplingRequest(MESSAGE))))
       .toMatchObject([{ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.FIXTURE_MISMATCH } } }]);
   });
 

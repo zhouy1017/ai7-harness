@@ -12,7 +12,11 @@ import {
   type ReviewCategoryIdentityProjection,
   type ReviewCategoryTaskMode,
 } from '../../shared/protocol.js';
-import { ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, ASSURANCE_SAMPLING_RESULT_SCHEMA } from '../analysis/assurance-sampling-contract.js';
+import {
+  ASSURANCE_SAMPLING_PROMPT_CONTRACT,
+  ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST,
+  ASSURANCE_SAMPLING_RESULT_SCHEMA,
+} from '../analysis/assurance-sampling-contract.js';
 import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { countByClass, modeIndex, type AnalysisKindDefinition, type AnalysisModeDefinition, type ModeRecomputeScope } from '../analysis/kind-definition.js';
 import { PRE_ASSURANCE_SAMPLE } from '../analysis/reducers.js';
@@ -136,6 +140,7 @@ export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput)
     crossUnit: null,
     crossUnitAbsentReason: REVIEW_CATEGORY_CROSS_UNIT_ABSENT_REASON,
     assurance: {
+      prompt: ASSURANCE_SAMPLING_PROMPT_CONTRACT,
       promptContractDigest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST,
       resultSchema: ASSURANCE_SAMPLING_RESULT_SCHEMA,
       // A category's sampleable findings are the ones Reference Integrity located: an excluded finding

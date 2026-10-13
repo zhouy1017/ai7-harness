@@ -17,7 +17,7 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "493c19561888d834be98fde18904eeb51d6737a686ccd1ae9d096d75270fda6b",
+      "requestDigest": "8d7199f97a4189ad8c2e5f622f511fc7e70824a6b61a286c09ac375e7108578e",
       "response": {
         "kind": "outcome-unknown",
         "message": "Synthetic dropped answer for the sample's first turn, anchored in unit 1: the request was sent and its answer never came back whole (fixture shape x)."
@@ -25,7 +25,7 @@
     },
     {
       "unitOrdinal": 0,
-      "requestDigest": "727f3f587186fc9629d39f78d8c925f77feafc9ba6cf26312a1349ca2aace750",
+      "requestDigest": "344bc2117c3a2436f4fb76fa611c100a359f0483db1731cb0f956962548ae4be",
       "response": {
         "kind": "unit-result",
         "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"重读单元 3 的内容块：唯一一条锚定在单元 3 的发现按原样成立；这一轮本不应再发送。\"}]}",

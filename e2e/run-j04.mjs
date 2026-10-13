@@ -17,7 +17,10 @@ import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState
 // superseded by a Plan Revision, refuses its stale version, takes the way back to the version it froze,
 // and is reconfirmed as version 2.
 // Issue #387 adds a separate fresh Book replaying the reviewed 2026-10-12 V4.1 capture, including its
-// truthful schema-invalid unit 1 gap. Existing authored/synthetic retry and incremental scenarios remain intact.
+// truthful schema-invalid unit 1 gap, under the retained prompt contract /1 it was asked under. Issue #826 then
+// relaunches that Book under the current contracts and replays the reviewed 2026-10-13 range recomputation of units
+// 1 and 2: eight units closed, six of them reused from the /1 revision. Existing authored/synthetic retry and
+// incremental scenarios remain intact.
 // Inputs: exact ADR 0079 §5 SampleBooks/sample1.docx and reviewed fixtures under tests/fixtures/model/.
 // Every Run uses the in-process ai7-local-deterministic route; recorded tokens are replayed accounting,
 // and neither the product nor this Journey makes a new Provider transmission.
@@ -34,7 +37,12 @@ const SAMPLE1_UNITS = 8;
 const SAMPLE1_UNIT_RANGES = [[1, 15], [16, 25], [26, 43], [44, 59], [60, 68], [69, 75], [76, 92], [93, 97]];
 const SIDECAR_REVISION_2_DIGEST = '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff';
 const NATIVE_CARRIER_DIGEST = 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d';
-const PROMPT_CONTRACT_DIGEST = '4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5';
+/** The baseline prompt contract every current Run asks under (/2, Issue #826). */
+const PROMPT_CONTRACT_DIGEST = '89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386';
+/** Prompt contract /1, which the recorded 2026-10-12 Run was asked under and its replay asks again. */
+const RECORDED_PROMPT_CONTRACT_DIGEST = '4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5';
+/** The baseline's sampling contract /2 (Issue #826), which a current plan pins. */
+const SAMPLING_CONTRACT_DIGEST = '1bfd29ecb6ba5d9bdbd1e1d097da4de6a0d1c9e6319c5f2318d2ca8c5eeb112c';
 const TASK_GOAL = '对当前书稿执行基线稿件分析，形成覆盖全部结构单元的结果集修订版。';
 const SYNC_GOAL = '将基线稿件分析同步到当前稿件：复用内容一致的兼容单元，仅重算失效闭包，追加一个结果集修订版。';
 const RANGE_GOAL = '重新分析所选范围：绕过所选内容块范围及其重叠闭包的既有模型结果，复用其余兼容单元，追加一个结果集修订版。';
@@ -146,6 +154,8 @@ const RETRY_FIXTURE_IDENTITY = 'sample1-baseline-transient-retry';
 // Journey leaves it — both of its edits in the first block.
 const REVIEW_FIXTURE_IDENTITY = 'sample1-review-authored';
 const RECORDED_FIXTURE_IDENTITY = 'sample1-recorded-v41-baseline';
+/** The reviewed recorded range recomputation of units 1 and 2 under the current contracts (Issue #826). */
+const RECORDED_RANGE_FIXTURE_IDENTITY = 'sample1-recorded-v41-range';
 /** The material fields of the Plan Boundary Split, in the order the canonical envelope lists them. */
 const PLAN_MATERIAL_FIELDS = [
   'providerBinding.providerId', 'providerBinding.modelId', 'providerBinding.adapterRevision', 'providerBinding.configurationRevision', 'providerBinding.credentialReference',
@@ -3081,7 +3091,7 @@ async function main() {
     requireJourney(recordedFixture.entries.length === 12 && recordedFixture.entries.every((entry, index) =>
       entry.capture.itemId === `S40/first-baseline/${index + 9}` && entry.capture.model === 'deepseek-v4.1-flash' &&
       entry.capture.route === 'opencode-go' && entry.capture.evidenceScope === 'namespaced' &&
-      entry.capture.capturedAt.startsWith('2026-10-12') && entry.capture.taskPromptContractDigest === PROMPT_CONTRACT_DIGEST) &&
+      entry.capture.capturedAt.startsWith('2026-10-12') && entry.capture.taskPromptContractDigest === RECORDED_PROMPT_CONTRACT_DIGEST) &&
       sameRecord(sourceRecordedUsage, { requests: 12, inputTokens: 38287, outputTokens: 113041 }), 'recorded-source-provenance');
     const recordedBook = await importSample1(renderer, cancellation, true);
     await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'recorded-artifact-ready');
@@ -3096,8 +3106,11 @@ async function main() {
     await reviewAction(renderer, '[data-analysis-action="prepare"]', 'recorded-prepare');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'recorded-prepared', 120_000);
     const recordedPrepared = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    // The replay asks what the recorded Run asked: prompt contract /1, whose plan pins no sampling contract (sampling /1).
     requireJourney(recordedPrepared?.bookId === recordedBook.bookId && recordedPrepared.coverageManifest?.units?.length === 8 &&
-      recordedPrepared.providerResolutionPlan?.executionRoute?.fixtureIdentity === RECORDED_FIXTURE_IDENTITY, 'recorded-prepared-binding');
+      recordedPrepared.providerResolutionPlan?.executionRoute?.fixtureIdentity === RECORDED_FIXTURE_IDENTITY &&
+      recordedPrepared.planEnvelope?.promptContractDigest === RECORDED_PROMPT_CONTRACT_DIGEST &&
+      recordedPrepared.executionPlan !== null && !('assurancePromptContractDigest' in recordedPrepared.executionPlan), 'recorded-prepared-binding');
     await startFromBar(renderer, 'recorded-start');
     await waitFor(renderer, `['settled','failed','interrupted'].includes(document.querySelector('.baseline-analysis-card')?.dataset.analysisState)`, 'recorded-settled', 180_000);
     await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'recorded-settled-state');
@@ -3129,6 +3142,9 @@ async function main() {
       { requests: 0, inputTokens: 0, outputTokens: 0 }), sourceRecordedUsage), 'recorded-source-usage-replayed');
     // Source-recorded usage above remains nonzero. The actual execution pin and denied networking
     // establish zero newly incurred remote transmissions; replay is never another live validation.
+    requireJourney(recorded.run.attempt?.executionBinding?.promptContractDigest === RECORDED_PROMPT_CONTRACT_DIGEST &&
+      realRevision.bindingPin?.promptContractDigest === RECORDED_PROMPT_CONTRACT_DIGEST,
+    'recorded-binds-prompt-contract-1');
     requireJourney(recorded.run.attempt?.executionBinding?.route === 'ai7-local-deterministic' &&
       recorded.run.attempt.executionBinding.model === 'ai7-deterministic-fixture' &&
       realRevision.adapterPin?.fixtureIdentity === RECORDED_FIXTURE_IDENTITY &&
@@ -3147,6 +3163,120 @@ async function main() {
     const recordedReopened = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(JSON.stringify(recordedReopened) === JSON.stringify(recorded) && loopback.healthy() && loopback.observedRequests() === 0,
       'recorded-restart-preserves-result-and-report');
+
+    // Issue #826: the same Book under the current contracts. 重新分析所选范围 over unit 1 recomputes its closure, units 1
+    // and 2 (unit 2 reads unit 1's last block as overlap), and reuses the other six /1 results by lineage. The six entries
+    // replayed are the reviewed real captures of that recomputation — units 1 and 2 and the reduction from the first
+    // repair, the three sampling /2 turns from the second — so unit 1, schema-invalid under /1, now closes. No recorded
+    // reflection was ever asked with this replay's accounting (the real Run replayed its units from the development cache
+    // and recorded no usage for them), so the reflection settles as the disclosed fixture mismatch it is.
+    at('reanalyze-range-select');
+    await closeOwnedBrowser();
+    modelAdapterIdentity = RECORDED_RANGE_FIXTURE_IDENTITY;
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'range-recorded-launch-ready');
+    const rangeFixture = JSON.parse(await readFile(resolve(FIXTURES_ROOT, `${RECORDED_RANGE_FIXTURE_IDENTITY}.json`), 'utf8'));
+    const rangeFixtureDigest = await expectedFixtureDigest([RECORDED_RANGE_FIXTURE_IDENTITY]);
+    const rangeSourceUsage = (subjects) => rangeFixture.entries.filter((entry) => subjects.includes(entry.capture.subject)).reduce((sum, entry) => ({
+      requests: sum.requests + 1, inputTokens: sum.inputTokens + entry.response.usage.inputTokens,
+      outputTokens: sum.outputTokens + entry.response.usage.outputTokens,
+    }), { requests: 0, inputTokens: 0, outputTokens: 0 });
+    requireJourney(rangeFixture.basedOn === null && rangeFixture.entries.length === 6 &&
+      JSON.stringify(rangeFixture.entries.map((entry) => entry.capture.itemId)) ===
+        JSON.stringify([2, 3, 4, 12, 13, 14].map((item) => `S40/reanalyze-range/${item}`)) &&
+      JSON.stringify(rangeFixture.entries.map((entry) => entry.capture.subject)) === JSON.stringify(['unit', 'unit', 'reduction', 'sampling', 'sampling', 'sampling']) &&
+      rangeFixture.entries.every((entry) => entry.capture.model === 'deepseek-v4.1-flash' && entry.capture.route === 'opencode-go' &&
+        entry.capture.evidenceScope === 'namespaced' && entry.capture.capturedAt.startsWith('2026-10-13') &&
+        entry.capture.taskPromptContractDigest === PROMPT_CONTRACT_DIGEST) &&
+      rangeFixture.entries.filter((entry) => entry.capture.subject === 'sampling').every((entry) => entry.capture.promptContractDigest === SAMPLING_CONTRACT_DIGEST),
+    'range-recorded-source-provenance');
+    await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(recordedBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'range-recorded-open-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(recordedBook.bookId)}]')`, 'range-recorded-manuscript');
+    await openAnalysisDestination(renderer, 'range-recorded-analysis');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'range-recorded-predecessor-visible');
+    const rangeBefore = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    // The /1 revision reads exactly as it was recorded under the launch that asks /2.
+    const recordedRangeOption = rangeBefore?.updateControls?.actions?.['reanalyze-range']?.options?.[0];
+    requireJourney(JSON.stringify(rangeBefore?.resultSetRevision) === JSON.stringify(realRevision) &&
+      rangeBefore.updateControls?.target?.revisionId === realRevision.revisionId && recordedRangeOption?.unitOrdinal === 1 &&
+      recordedRangeOption.startPosition === SAMPLE1_UNIT_RANGES[0][0] && recordedRangeOption.endPosition === SAMPLE1_UNIT_RANGES[0][1] &&
+      sameRecord(recordedRangeOption.expected, { reused: 6, recomputed: 2, invalidated: 1, bypassed: 1 }), 'range-recorded-predecessor-readable');
+    const recordedSelectedRange = { startPosition: recordedRangeOption.startPosition, endPosition: recordedRangeOption.endPosition };
+    await assertRenderer(renderer, `(() => {
+      const block=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"]');
+      const radio=block?.querySelector('#analysis-range-1');
+      if(!(radio instanceof HTMLInputElement)) return false;
+      radio.click();
+      return radio.checked && block.dataset.selectedRange===${JSON.stringify(`${SAMPLE1_UNIT_RANGES[0][0]}-${SAMPLE1_UNIT_RANGES[0][1]}`)};
+    })()`, 'range-recorded-select');
+
+    at('reanalyze-range-prepare');
+    await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'range-recorded-click');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'range-recorded-prepared', 120_000);
+    const rangeRecordedPrepared = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    const rangeRecordedPlan = rangeRecordedPrepared?.update?.reusePlan;
+    requireJourney(rangeRecordedPrepared?.state === 'prepared' && rangeRecordedPrepared.taskIntent?.mode === 'reanalyze-range' &&
+      sameRecord(rangeRecordedPrepared.update?.selectedRange, recordedSelectedRange) &&
+      rangeRecordedPrepared.update.predecessor?.revisionId === realRevision.revisionId && rangeRecordedPrepared.update.predecessorCurrent === true &&
+      JSON.stringify(rangeRecordedPlan?.recomputeClosure) === JSON.stringify([1, 2]) &&
+      sameRecord(rangeRecordedPlan.counts, { reused: 6, recomputed: 2, invalidated: 1, bypassed: 1 }) &&
+      JSON.stringify(rangeRecordedPlan.units.map((unit) => unit.disposition)) ===
+        JSON.stringify(['recomputed', 'recomputed', 'reused', 'reused', 'reused', 'reused', 'reused', 'reused']) &&
+      rangeRecordedPrepared.providerResolutionPlan?.executionRoute?.fixtureIdentity === RECORDED_RANGE_FIXTURE_IDENTITY &&
+      rangeRecordedPrepared.planEnvelope?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
+      rangeRecordedPrepared.executionPlan?.assurancePromptContractDigest === SAMPLING_CONTRACT_DIGEST &&
+      rangeRecordedPrepared.actions?.canAuthorize === true, 'range-recorded-prepared-plan');
+
+    at('reanalyze-range-dispatch');
+    const rangeRecorded = await settleAuthorizedRun(renderer, 'range-recorded');
+
+    at('reanalyze-range-revision');
+    const rangeRevision = rangeRecorded?.resultSetRevision;
+    const rangeReport = rangeRecorded?.taskOutcome?.report;
+    requireJourney(rangeRecorded?.run?.state === 'completed' && rangeRecorded.taskOutcome?.classification === 'completed' &&
+      rangeRevision?.ordinal === 2 && rangeRecorded.taskOutcome.resultSetRevisionId === rangeRevision.revisionId &&
+      JSON.stringify(rangeRecorded.run.attempt?.spans?.map((span) => span.unitOrdinal)) === JSON.stringify([1, 2]) &&
+      rangeRecorded.run.attempt?.executionBinding?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
+      rangeRevision.adapterPin?.fixtureIdentity === RECORDED_RANGE_FIXTURE_IDENTITY && rangeRevision.adapterPin.fixtureSha256 === rangeFixtureDigest,
+    'range-recorded-settled-run');
+    // Eight units closed: units 1 and 2 recomputed from the recorded /2 answers, the other six reused from the /1 revision.
+    requireJourney(rangeRevision.units.every((unit) => unit.state === 'closed') && rangeRevision.gaps.length === 0 &&
+      rangeRevision.coverage.unitsClosed === 8 && rangeRevision.coverage.unitsTotal === 8 &&
+      JSON.stringify(rangeRevision.units.map((unit) => unit.lineage.kind)) ===
+        JSON.stringify(['recomputed', 'recomputed', 'reused', 'reused', 'reused', 'reused', 'reused', 'reused']) &&
+      rangeRevision.units.slice(2).every((unit, index) => unit.lineage.revisionId === realRevision.revisionId && unit.lineage.unitOrdinal === index + 3) &&
+      rangeRevision.units[0].unresolved.length === 6 && rangeRevision.units[0].unresolved.every((note) => typeof note.description === 'string' && Array.isArray(note.sourceRanges)),
+    'range-recorded-unit1-closed');
+    requireJourney(rangeRevision.crossUnitReduction?.state === 'closed' && rangeRevision.crossUnitReduction.findingCount === 3 &&
+      rangeRevision.crossUnitFindings.length === 3 && rangeRevision.assuranceSample?.state === 'closed' &&
+      rangeRevision.assuranceSample.dispositions.length === 3 &&
+      rangeRevision.assuranceSample.dispositions.every((item) => item.disposition === '应删除'), 'range-recorded-reduction-and-sampling');
+    // The reflection was asked and has no recorded answer for this accounting: a disclosed gap, never an authored stand-in.
+    requireJourney(rangeReport?.ifRedone?.state === 'gap' && rangeReport.ifRedone.items.length === 0 &&
+      rangeReport.ifRedone.reason.includes('AI7_FIXTURE_MISMATCH') && rangeReport.usagePerStage['run-report-reflection']?.requests === 1 &&
+      rangeReport.usagePerStage['run-report-reflection'].inputTokens === 0 && rangeReport.usagePerStage['run-report-reflection'].outputTokens === 0 &&
+      sameRecord(rangeReport.units, { submitted: 2, reused: 6, recomputed: 2, gaps: 0, retried: 0 }),
+    'range-recorded-reflection-not-recorded');
+    requireJourney(sameRecord(rangeReport.usagePerStage.units, rangeSourceUsage(['unit'])) &&
+      sameRecord(rangeReport.usagePerStage['cross-unit-reduction'], rangeSourceUsage(['reduction'])) &&
+      sameRecord(rangeReport.usagePerStage['assurance-sampling'], rangeSourceUsage(['sampling'])) &&
+      sameRecord(rangeRevision.usage, rangeSourceUsage(['unit', 'reduction', 'sampling'])) &&
+      rangeRecorded.run.attempt?.executionBinding?.route === 'ai7-local-deterministic' &&
+      rangeRecorded.run.attempt.credentialReadinessCheck?.valueReleased === false && loopback.observedRequests() === 0,
+    'range-recorded-source-usage-replayed');
+
+    at('restart-immutable');
+    await closeOwnedBrowser();
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'range-recorded-restart-ready');
+    await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(recordedBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'range-recorded-restart-open');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(recordedBook.bookId)}]')`, 'range-recorded-restart-manuscript');
+    await openAnalysisDestination(renderer, 'range-recorded-restart-analysis');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='settled'`, 'range-recorded-restart-visible');
+    const rangeReopened = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    requireJourney(JSON.stringify(rangeReopened?.resultSetRevision) === JSON.stringify(rangeRevision) &&
+      JSON.stringify(rangeReopened.taskOutcome) === JSON.stringify(rangeRecorded.taskOutcome) && loopback.healthy() && loopback.observedRequests() === 0,
+    'range-recorded-restart-preserves-result');
   } finally {
     finalCleanupRequested = true;
     try { await cancellation.cleanup(); } finally { cancellation.dispose(); }
