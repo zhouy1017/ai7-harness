@@ -1955,10 +1955,10 @@ export class ReviewRunStore {
           state === 'completed' ? '已形成结果集修订版。' : '已形成结果集修订版 · 有缺口单元。', { runRecordId, resultSetRevisionId: revisionId });
       } else if (state === 'failed') {
         this.#recordEvent(reviewRunId, categoryId, 'failed', outcomeSummary ?? '运行失败。', { runRecordId });
-      } else if (state === 'interrupted') {
+      } else if (state === 'interrupted' || state === 'cancelled') {
         // The guard stopped it between its reading ranges (Issue #64, S29b): the category carries the stop, and the Run with it.
         const scope = outcomeSummary?.startsWith(SERIES_SCOPE_STOP_SUMMARY) === true;
-        this.#recordEvent(reviewRunId, categoryId, 'interrupted', outcomeSummary ?? '运行已中断。',
+        this.#recordEvent(reviewRunId, categoryId, 'interrupted', outcomeSummary ?? (state === 'cancelled' ? '这一类的运行已取消。' : '运行已中断。'),
           { runRecordId, ...(scope ? { extra: { code: SERIES_RETRIEVAL_SCOPE_CHANGED } } : {}) });
         if (scope) this.#blockUndispatchedStarts(this.#run(reviewRunId), SERIES_SCOPE_STOP_SUMMARY);
       } else if (state === 'blocked-before-dispatch') {

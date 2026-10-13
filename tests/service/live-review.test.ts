@@ -206,6 +206,7 @@ describe('reference-free review on the Go execution path', () => {
     await loop;
     const outcome = store.inspectReviewCategory(book.bookId, definition);
     expect(outcome.taskOutcome!.classification).toBe(mode === 'cancel' ? 'cancelled' : 'interrupted');
+    expect(outcome.run!.state).toBe(mode === 'cancel' ? 'cancelled' : 'interrupted');
     expect(sent).toBe(1);
     expect(outcome.resultSetRevision!.usage.inputTokens + outcome.resultSetRevision!.usage.outputTokens).toBe(mode === 'cancel' ? 60 : 0);
     const view = store.inspectReviewWorkspace(book.bookId, run.reviewRunId).run!;
