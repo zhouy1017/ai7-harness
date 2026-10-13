@@ -156,7 +156,7 @@ async function openLiveStore(dataRoot: string, ceiling: Ceiling = CEILING): Prom
 interface StubAnswer extends UnitAnswer {}
 
 /**
- * The deterministic fixture's answers for the whole v9 chain: the eight unit results, and the
+ * The deterministic fixture's answers for the whole v10 baseline chain: the eight unit results, and the
  * reduction and assurance-sampling entries keyed by the request digest the deterministic adapter
  * computes. The fixture carries no reflection entry, so the stub synthesizes a valid one — a
  * deterministic stand-in that keeps the chain closed without inventing fixture bytes.
@@ -175,7 +175,7 @@ const SYNTHETIC_REFLECTION: StubAnswer = {
 };
 
 /**
- * A stub transport standing in for the captured native `fetch`. It answers the whole v9 chain with
+ * A stub transport standing in for the captured native `fetch`. It answers the whole v10 baseline chain with
  * the synthetic results the deterministic fixture already carries, so the contract, the reducers,
  * the reducers' suboperations, and the coverage axes see exactly the material they see on the local
  * route. Block and finding identities are minted per import, so the stub substitutes exactly as the
@@ -422,7 +422,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
       background: { enrollmentVersionId: randomUUID() },
     }))).toBe('ANALYSIS_ORIGIN_NOT_ADMITTED');
   });
-  it('freezes the v9 plan and transmits the full declared chain through the gate', async () => {
+  it('freezes the v10 plan and transmits the full declared chain through the gate', async () => {
     const calls: StubCall[] = [];
     const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
     const { units: responses, named } = await unitAnswers(prepared);
@@ -436,7 +436,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
       modelId: 'deepseek-v4.1-flash',
       credentialSlot: 'opencode-go',
       credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
-      providerProcessing: { operationalScope: 'developer-live', version: 'v9', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
+      providerProcessing: { operationalScope: 'developer-live', version: 'v10', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
     });
     expect(provider.executionRoute).toEqual({ kind: 'opencode-go', model: 'deepseek-v4.1-flash', endpoint: OPENCODE_GO_ROUTE_PROFILE.endpoint });
     expect(provider.runBudgetCeiling).toEqual(CEILING);
@@ -457,7 +457,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
       expect(body).not.toHaveProperty('response_format');
       expect(body).not.toHaveProperty('thinking');
       expect(body).not.toHaveProperty('reasoning_effort');
-      // Provider Processing v9's rule names no platform tools (Issue #473): no request offers the model a tool.
+      // Provider Processing v10's baseline rule names no platform tools (Issue #473): no request offers the model a tool.
       expect(body).not.toHaveProperty('tools');
       expect(JSON.stringify(body.messages)).not.toContain('tool_calls');
       // The credential never enters the body or its digest.
@@ -475,11 +475,11 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     expect(spanSessions).not.toContain(attempt.executionBinding!.harnessSessionId);
     expect(attempt.credentialReadinessCheck).toMatchObject({ slot: 'opencode-go', readiness: 'present', valueReleased: false });
 
-    // The revision records the live route and the v9 policy pin, through the existing real path.
+    // The revision records the live route and the v10 policy pin, through the existing real path.
     const revision = settled.resultSetRevision!;
     expect(revision.adapterPin).toEqual({ route: 'opencode-go', model: 'deepseek-v4.1-flash', fixtureIdentity: null, fixtureSha256: null });
     expect(revision.policyPin).toEqual({
-      operationalScope: 'developer-live', providerProcessingVersion: 'v9', activePolicySetVersion: 'v7', liveTransmissions: 'bounded-by-run',
+      operationalScope: 'developer-live', providerProcessingVersion: 'v10', activePolicySetVersion: 'v8', liveTransmissions: 'bounded-by-run',
     });
     // The revision counts the three revision-facing stages: eight unit turns, the reduction turn and
     // the sampling turn. The reflection turn is dispatched after the revision is persisted, so its
@@ -521,7 +521,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
   });
 
   /**
-   * The three declared suboperations are gated one key each. Under the verified v9 bytes all three
+   * The three declared suboperations are gated one key each. Under the verified v10 bytes all three
    * are named, so this is the fail-closed half: a projection that names the reduction and neither the
    * sample nor the reflection. The reduction closes, the sample is drawn but not dispatched, and the
    * report says exactly which policy stopped each step.
@@ -1171,10 +1171,10 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
 
     // The scope, the version, the bound route, and the ceiling as the number the launch froze.
     const scopeStatement = settled.namedNonEffects.find((statement) => statement.includes('Provider Processing'))!;
-    expect(scopeStatement).toContain('developer-live · Provider Processing v9');
+    expect(scopeStatement).toContain('developer-live · Provider Processing v10');
     expect(scopeStatement).toContain('任务运行预算上限 500000 tokens');
     expect(scopeStatement).toContain('opencode-go · deepseek-v4.1-flash');
-    expect(consequence).toContain('developer-live · Provider Processing v9');
+    expect(consequence).toContain('developer-live · Provider Processing v10');
     expect(consequence).toContain('任务运行预算上限 500000 tokens');
     expect(consequence).toContain('opencode-go · deepseek-v4.1-flash');
     // The transmission count an update states is the recomputed unit count, never zero.

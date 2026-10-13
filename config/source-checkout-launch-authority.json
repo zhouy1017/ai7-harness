@@ -8,8 +8,8 @@
     "developer-live"
   ],
   "activePolicySet": {
-    "version": "v7",
-    "canonicalPath": "docs/policies/active-policy-set.v7.json",
-    "sha256": "4df66f504eadc65d605d5b78648b635985cf2304cb3ffa08073943f7a8d846bb"
+    "version": "v8",
+    "canonicalPath": "docs/policies/active-policy-set.v8.json",
+    "sha256": "d3ad3aa86eb0129d8e4b936d35f24ba6bc1533944c7197f39e16b2488df45462"
   }
 }

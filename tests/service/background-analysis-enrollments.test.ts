@@ -425,7 +425,7 @@ describe('后台分析登记 over the real store on exact sample1', () => {
       enroll(store, book.bookId, 'prospective');
       edit(store, book, '〔改动〕');
       expect(store.backgroundAnalysisDecisionFor(book.bookId, runtime({ routeExecutable: false })).decision).toEqual({ kind: 'stopped', reason: BACKGROUND_NO_ROUTE });
-      // Developer-live: neither an Enrollment nor a start (Provider Processing v9: backgroundAnalysisEnrollmentAllowed false).
+      // Developer-live: neither an Enrollment nor a start (Provider Processing v10: backgroundAnalysisEnrollmentAllowed false).
       store.baselineAnalysisLedger.bindLaunch(LIVE);
       const live = store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime());
       expect(live.next).toEqual({ kind: 'stopped', reason: BACKGROUND_DEVELOPER_LIVE });

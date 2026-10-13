@@ -1812,18 +1812,18 @@ export interface ModelServiceConnectionProjection {
  */
 export type TrustedOperationalScope = 'development-ci' | 'developer-live';
 /**
- * Historical v5 and reserved web successor v8 remain readable identities; selected v9 is the
- * baseline-only V4.1 successor. A type member does not select or activate a policy.
+ * Historical v5, v9 and the superseded web reservation v8 remain readable identities; selected v10 admits baseline
+ * analysis, editorial dialogue and reference-free review on V4.1. A type member does not select or activate a policy.
  */
-export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9';
-/** Historical v5, reserved web v6, and selected baseline-only v7. */
-export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7';
+export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10';
+/** Historical v5 and v7, the superseded web reservation v6, and selected v8. */
+export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8';
 export type ProviderProcessingVersion = 'v1' | DeveloperLiveProviderProcessingVersion;
 /** Exact Run Budget Ceiling state: `unset` under development-ci, an explicit total-token ceiling under developer-live. */
 export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: number };
 /**
  * The Run Budget Ceiling a developer-live launch binds: an explicit form ceiling as a total, or the
- * Provider Processing v9 default of 30,000 tokens per frozen Coverage Manifest unit (ADR 0070),
+ * Provider Processing v10 default (unchanged since v9) of 30,000 tokens per frozen Coverage Manifest unit (ADR 0070),
  * resolved once the manifest freezes and before the plan does.
  */
 export type DeveloperLiveCeiling =
@@ -2001,6 +2001,22 @@ export function parseTrustedLaunchForm(raw: RawTrustedLaunchForm): TrustedLaunch
   return { trustedOperationalScope: scope, runBudgetCeiling, providerCacheRoot, validation };
 }
 
+/**
+ * One allow rule of the selected Provider Processing policy, as the launch verified it from the pinned bytes: the task kinds it
+ * admits, the Model Role it binds, that role's exact route, endpoint, model and credential slot, and the outbound data categories
+ * it permits. Eligibility only — a rule authorizes no Run, dispatch or Apply on its own.
+ */
+export interface AdmittedProviderRule {
+  readonly ruleId: string;
+  readonly taskKinds: readonly string[];
+  readonly modelRole: string;
+  readonly route: string;
+  readonly endpoint: string;
+  readonly model: string;
+  readonly credentialSlot: string;
+  readonly outboundDataCategories: readonly string[];
+}
+
 export interface LaunchPolicyProjection {
   integrityState: 'verified' | 'denied';
   denialReason: string | null;
@@ -2014,24 +2030,26 @@ export interface LaunchPolicyProjection {
     liveTransmissionAllowed: boolean;
     /**
      * Whether the active Provider Processing policy names the cross-unit reduction's transmission
-     * (ADR 0066). Optional so a denial can carry the same reading; under the verified v9 document it
+     * (ADR 0066). Optional so a denial can carry the same reading; under the verified v10 document it
      * is `true`, and anything else — absent included — means the reduction does not dispatch.
      */
     crossUnitReductionAllowed?: boolean;
     /**
      * Whether the active Provider Processing policy names the assurance sampling suboperation's
-     * transmissions (ADR 0066). Read exactly as `crossUnitReductionAllowed` is: under the verified v9
+     * transmissions (ADR 0066). Read exactly as `crossUnitReductionAllowed` is: under the verified v10
      * document it is `true`; anything else — absent included — means the suboperation does not
      * dispatch at all.
      */
     assuranceSamplingAllowed?: boolean;
     /**
      * Whether the active Provider Processing policy names the Run Report's reflection turn (ADR
-     * 0066 §Run Report). Read exactly as the two keys above are: under the verified v9 document it is
+     * 0066 §Run Report). Read exactly as the two keys above are: under the verified v10 document it is
      * `true`; anything else — absent included — means the turn does not dispatch and the report
      * records `policy-bounded` with its reason.
      */
     runReportReflectionAllowed?: boolean;
+    /** One entry per allow rule of the verified policy, in policy order; empty under development-ci and every denial. */
+    readonly admittedRules: readonly AdmittedProviderRule[];
     label: '开发与持续集成：零次实时传输' | '开发者实时：实时传输受运行边界约束';
   };
   externalExport: {
