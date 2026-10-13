@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { liveReviewKindAdmitted } from '../review/live-review-admission.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   BASELINE_ANALYSIS_KIND,
@@ -827,6 +828,8 @@ export function activeRunReason(state: BaselineAnalysisRunState | null, kind: st
  * authorization, not chosen at dispatch.
  */
 export interface LaunchBinding {
+  /** Verified runtime policy for review admission; never persisted as a new record or IPC member. */
+  readonly policy?: LaunchPolicyProjection;
   readonly operationalScope: 'development-ci' | 'developer-live';
   readonly live: {
     readonly route: 'opencode-go';
@@ -3039,7 +3042,7 @@ export class BaselineAnalysisStore {
     }
     if (input.phase === 'advance') return this.#advance(input.workId);
     if (this.#launch.live !== null) {
-      requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND,
+      requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND || liveReviewKindAdmitted(input.launchPolicy, this.#definition, this.#launch.live),
         'ANALYSIS_KIND_NOT_ADMITTED', 'developer-live 当前只允许基线稿件分析；该任务种类尚未获准实时执行。');
       requireAnalysis(input.background == null,
         'ANALYSIS_ORIGIN_NOT_ADMITTED', 'developer-live 当前只允许直接发起的分析任务。');
@@ -3538,7 +3541,7 @@ export class BaselineAnalysisStore {
   ): { projection: AnalysisProjection; dispatchRunRecordId: string | null } {
     // The baseline rule of the selected Provider Processing admits one kind and one origin, each refused under its own code, as preparation refuses them.
     if (this.#launch.live !== null) {
-      requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND,
+      requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND || liveReviewKindAdmitted(this.#launch.policy, this.#definition, this.#launch.live),
         'ANALYSIS_KIND_NOT_ADMITTED', 'developer-live 当前只允许基线稿件分析；该任务种类尚未获准实时执行。');
       requireAnalysis(origin.kind === 'standard-direct',
         'ANALYSIS_ORIGIN_NOT_ADMITTED', 'developer-live 当前只允许直接授权的基线稿件分析。');
