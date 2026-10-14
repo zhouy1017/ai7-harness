@@ -36,6 +36,8 @@ let sent: number;
 let failure: 'none' | 'unknown' | 'quota';
 let mismatchConclusion: boolean;
 let authored: { initial: ResolvedModelFixture; readers: ResolvedModelFixture; rewrite: ResolvedModelFixture };
+/** The live captures of #429 (2026-10-14), answering 初评 and 审稿意见 in place of the authored texts when set. */
+let recorded: { initial: ResolvedModelFixture; readers: ResolvedModelFixture; rewrite: ResolvedModelFixture } | null;
 const owners: BaselineAnalysisExecutionOwner[] = [];
 const ceiling = { kind: 'tokens' as const, maxTotalTokens: 500_000 };
 
@@ -63,11 +65,15 @@ function answerOf(message: string): { text: string; usage: { inputTokens: number
     return { text: JSON.stringify({ schema: 'ai7.analysis.run-report-reflection-result/1', items: [{ suggestion: '复查依据不足的评分项。', basis: '合成回归账目。' }] }), usage: { inputTokens: 40, outputTokens: 20 } };
   }
   const contract = header[1] as keyof typeof CONTRACTS;
-  const fixture = contract === '评估' ? authored.initial : contract === '审稿意见' ? authored.readers : authored.rewrite;
   const synthesis = header[2] === '综合';
+  const live = contract === '评估' ? recorded?.initial : contract === '审稿意见' ? recorded?.readers : recorded?.rewrite;
+  // A recorded capture says what it answered; an authored fixture is read by its contract's schema, since it also holds
+  // the baseline entries it is based on.
   const schema = `{"schema":"${CONTRACTS[contract]}.${synthesis ? 'synthesis' : 'unit'}-result/`;
+  const fixture = live ?? (contract === '评估' ? authored.initial : contract === '审稿意见' ? authored.readers : authored.rewrite);
   const entry = [...fixture.entries.values()].find((candidate) => candidate.response.kind === 'unit-result' &&
-    candidate.response.text.startsWith(schema) && candidate.unitOrdinal === (synthesis ? 0 : Number(header[3])));
+    (live === undefined ? candidate.response.text.startsWith(schema) : candidate.capture?.subject === (synthesis ? 'task-synthesis' : contract === '评估' ? 'evaluation-unit' : contract === '审稿意见' ? 'readers-unit' : 'rewrite-unit')) &&
+    candidate.unitOrdinal === (synthesis ? 0 : Number(header[3])));
   if (entry?.response.kind !== 'unit-result') throw new Error('AUTHORED_EVALUATION_ANSWER_MISSING');
   const text = synthesis && mismatchConclusion && header[1] === '审稿意见' ? entry.response.text.replace('修改后再议', '同意出版') : entry.response.text;
   return { text, usage: entry.response.usage };
@@ -160,6 +166,7 @@ beforeEach(async () => {
   sent = 0;
   failure = 'none';
   mismatchConclusion = false;
+  recorded = null;
   const book = await importSample1Book(store, roots.codeRoot, 'L2 sample1 live evaluation');
   bookId = book.bookId;
   await pinEditorialWorkspaceProfileRevision2(store, bookId);
@@ -244,6 +251,49 @@ describe('evaluation on the Go execution path (#429)', () => {
     const purposes = new Set((await ledgerLines()).map((line) => line.itemId.split('/')[1]));
     expect(purposes).toEqual(new Set(['evaluation-first', 'readers-report-first', 'evaluation-rewrite-first']));
     expect(ruleFor(selected, 'evaluation').ruleId).toBe('developer-live-public-samplebook-evaluation');
+  }, 300_000);
+
+  it('replays the recorded live 初评, 审稿意见 and rewrite through the same contracts, outcomes and usage (#429 evidence)', async () => {
+    // Recorded units, syntheses and reflections answer; this regression sends nothing and asserts no editorial quality.
+    recorded = {
+      initial: await loadModelFixture(FIXTURES_ROOT, 'sample1-recorded-v41-evaluation-initial'),
+      readers: await loadModelFixture(FIXTURES_ROOT, 'sample1-recorded-v41-evaluation-readers-report'),
+      rewrite: await loadModelFixture(FIXTURES_ROOT, 'sample1-recorded-v41-evaluation-rewrite'),
+    };
+    for (const fixture of Object.values(recorded)) {
+      expect(fixture.provenance).toBe('recorded');
+      expect([...fixture.entries.values()].every((entry) => entry.capture?.model === DEVELOPER_LIVE_POLICY_BINDING.model)).toBe(true);
+    }
+    await runInitial(selected);
+    const initial = store.inspectInitialEvaluation(bookId);
+    expect(initial.planEnvelope!.promptContractDigest).toBe('3e8bb0c639321075afd59c108bfffd3ea8f796a1d1d6b685b141d752e38a86da');
+    expect(initial.resultSetRevision!.coverage).toMatchObject({ state: 'complete', unitsTotal: 8, unitsClosed: 8 });
+    expect(initial.resultSetRevision!.evaluation.items.map((item) => [item.score, item.sufficiency]))
+      .toEqual([[16.5, 'sufficient'], [17, 'sufficient'], [15.5, 'sufficient'], [16, 'sufficient'], [14.5, 'sufficient']]);
+    expect(initial.resultSetRevision!.usage).toEqual({ requests: 9, inputTokens: 19_982, outputTokens: 25_910 });
+    finalizeAsJ11(store, bookId);
+    await draftReport(selected);
+    const report = store.inspectReadersReport(bookId)!;
+    expect(report.planEnvelope!.promptContractDigest).toBe('d3f82693cdae4751b30272640ef284c71fde6c57e8a485cb94b7d6a85fe7922b');
+    const revision = report.resultSetRevision!;
+    // The live unit 1 answer did not meet the contract and stays a gap; the synthesis drafted from the other seven.
+    expect(revision.coverage).toMatchObject({ state: 'partial', unitsTotal: 8, unitsClosed: 7 });
+    expect(revision.gaps.map((gap) => [gap.unitOrdinal, gap.code])).toEqual([[1, 'contract-invalid']]);
+    expect(revision.readersReport.synthesis.state).toBe('closed');
+    expect(revision.readersReport.sections!.conclusion).toContain('修改后再议');
+    expect(revision.usage).toEqual({ requests: 9, inputTokens: 78_768, outputTokens: 37_931 });
+    expect(sent).toBe(20);
+    // The rewrite after a saved departing score, from the declared retry's settled Run: every unit and the synthesis.
+    const adjusted = beginRewriteAsJ11(store, bookId);
+    await rewrite(selected, adjusted.recordId);
+    const rewritten = store.inspectEvaluationRewrite(bookId)!;
+    expect(rewritten.planEnvelope!.promptContractDigest).toBe('87f0f8fc3c809b23acde2323017c7543c364dfb976d7907669db6074c686b0e6');
+    expect(rewritten.resultSetRevision!.coverage).toMatchObject({ state: 'complete', unitsTotal: 8, unitsClosed: 8 });
+    expect(rewritten.resultSetRevision!.rewrite.synthesis.state).toBe('closed');
+    const shown = store.inspectEvaluation(bookId, adjusted.recordId);
+    expect(shown.record!.content).toEqual(adjusted.content);
+    expect(shown.rewrite.proposal!.items.length).toBeGreaterThan(0);
+    expect(sent).toBe(30);
   }, 300_000);
 
   it('never sends the book-level synthesis under a rule that does not name it', async () => {
