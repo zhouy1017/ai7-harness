@@ -1239,17 +1239,30 @@ async function main() {
       JSON.stringify(stopped.actions) === JSON.stringify([['continue', '继续回答', 'enabled'], ['regenerate', '重新回答', 'enabled'], ['convert', '转为修改建议', 'disabled']]), 'dialogue-stopped-words', stopped);
     await assertRenderer(renderer, `document.querySelector('#task-drawer .dialogue [data-dialogue-action="convert"]')?.title === '内容不完整的回答不能转为修改建议。'`, 'dialogue-stopped-convert-why');
 
+    at('dialogue-continue-after-mid-stream-stop');
+    // Issue #833 synchronized J-16 delta: the held answer is stopped with complete fragments and an
+    // unfinished tail. Continue is a new attempt carrying only those fragments; provider-free here,
+    // with real SSE stop/continue established separately by the named host capture on #833.
+    await writeAnswerHold(99);
+    await dialogueAction(renderer, 'continue', 'dialogue-continue');
+    const continued = await waitForDialogue(renderer, (dialogue) => dialogue.attempts.length === 2 && dialogue.attempts[1].state === 'completed', 'dialogue-continued', 60_000);
+    requireJourney(continued.attempts[0].state === 'stopped' && continued.attempts[1].kind === 'continue' &&
+      continued.attempts[1].heading === '第 2 次 · 继续回答' && continued.attempts[1].label === '回答完成' &&
+      JSON.stringify(continued.attempts[1].fragments.slice(0, 2)) === JSON.stringify(stopped.attempts[0].fragments) &&
+      continued.attempts[1].fragments.length > 2 && continued.attempts[1].incomplete === null,
+      'dialogue-continued-from-kept-fragments', continued);
+
     at('dialogue-regenerate');
     // 重新回答 is a new attempt linked to the one before, asking the same question about the same words again (DIALOG-014).
     await writeAnswerHold(99);
     await dialogueAction(renderer, 'regenerate', 'dialogue-regenerate');
-    const regenerated = await waitForDialogue(renderer, (dialogue) => dialogue.attempts.length === 2 && dialogue.attempts[1].state === 'completed', 'dialogue-regenerated', 60_000);
+    const regenerated = await waitForDialogue(renderer, (dialogue) => dialogue.attempts.length === 3 && dialogue.attempts[2].state === 'completed', 'dialogue-regenerated', 60_000);
     requireJourney(regenerated.attempts[0].state === 'stopped' && JSON.stringify(regenerated.attempts[0].fragments) === JSON.stringify([ANSWER_FIRST, ANSWER_SECOND]) &&
-      regenerated.attempts[1].kind === 'regenerate' && regenerated.attempts[1].heading === '第 2 次 · 重新回答' && regenerated.attempts[1].label === '回答完成' &&
-      JSON.stringify(regenerated.attempts[1].fragments) === JSON.stringify([ANSWER_FIRST, ANSWER_SECOND, ANSWER_TAIL]) && regenerated.attempts[1].incomplete === null &&
+      regenerated.attempts[2].kind === 'regenerate' && regenerated.attempts[2].heading === '第 3 次 · 重新回答' && regenerated.attempts[2].label === '回答完成' &&
+      JSON.stringify(regenerated.attempts[2].fragments) === JSON.stringify([ANSWER_FIRST, ANSWER_SECOND, ANSWER_TAIL]) && regenerated.attempts[2].incomplete === null &&
       JSON.stringify(regenerated.actions) === JSON.stringify([['continue', '继续回答', 'disabled'], ['regenerate', '重新回答', 'enabled'], ['convert', '转为修改建议', 'enabled']]), 'dialogue-regenerated-words', regenerated);
     const attempts = await renderer.evaluate(`window.ai7.inspectDialogue({ dialogueId: ${JSON.stringify(dialogueId)}, afterFragment: 0 }).then((dialogue) => dialogue.attempts.map((attempt) => [attempt.ordinal, attempt.kind, attempt.state, attempt.source]))`);
-    requireJourney(JSON.stringify(attempts) === JSON.stringify([[1, 'ask', 'stopped', 'ledger'], [2, 'regenerate', 'completed', 'ledger']]), 'dialogue-attempts-linked', attempts);
+    requireJourney(JSON.stringify(attempts) === JSON.stringify([[1, 'ask', 'stopped', 'ledger'], [2, 'continue', 'completed', 'ledger'], [3, 'regenerate', 'completed', 'ledger']]), 'dialogue-attempts-linked', attempts);
 
     at('dialogue-panel-answer');
     // In 最近完成 the card says 已回答 and offers 回答 and 打开对话 (TASK-044); 回答 shows the latest answer in the window.
@@ -1281,7 +1294,7 @@ async function main() {
     // At 200% the dialogue — its words, each attempt and its actions — reflows into the slot without sideways scroll.
     await openPanel(renderer, 'dialogue-reflow');
     await cardAction(renderer, 'dialogue-answered', 'next', 'dialogue-reflow-open');
-    await waitForDialogue(renderer, (dialogue) => dialogue.state === 'ready' && dialogue.attempts.length === 2, 'dialogue-reflow-ready');
+    await waitForDialogue(renderer, (dialogue) => dialogue.state === 'ready' && dialogue.attempts.length === 3, 'dialogue-reflow-ready');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await waitFor(renderer, `(() => { const root = document.documentElement; const parts = [...document.querySelectorAll('#task-drawer .dialogue, #task-drawer .dialogue-attempt, #task-drawer .dialogue-actions, #task-drawer .dialogue-context')]; return parts.length >= 5 && parts.every((part) => part.scrollWidth <= part.clientWidth + 2) && root.scrollWidth <= root.clientWidth + 2; })()`, 'dialogue-reflow-at-200', 10_000);
@@ -1319,7 +1332,7 @@ async function main() {
     const dialogueAfter = await renderer.evaluate(`window.ai7.inspectDialogue({ dialogueId: ${JSON.stringify(dialogueId)}, afterFragment: 0 }).then((dialogue) => JSON.stringify(dialogue))`);
     requireJourney(typeof dialogueBefore === 'string' && dialogueAfter === dialogueBefore, 'dialogue-history-unmoved');
     await cardAction(renderer, 'dialogue-answered', 'next', 'dialogue-recovered-open');
-    const recoveredDialogue = await waitForDialogue(renderer, (dialogue) => dialogue.state === 'ready' && dialogue.attempts.length === 2, 'dialogue-recovered');
+    const recoveredDialogue = await waitForDialogue(renderer, (dialogue) => dialogue.state === 'ready' && dialogue.attempts.length === 3, 'dialogue-recovered');
     const shape = (dialogue) => JSON.stringify([dialogue.question, dialogue.selection, dialogue.attempts.map((attempt) => [attempt.kind, attempt.state, attempt.label, attempt.fragments, attempt.incomplete])]);
     requireJourney(shape(recoveredDialogue) === shape(regenerated), 'dialogue-recovered-words', recoveredDialogue);
     const storeBytes = [];
@@ -1329,7 +1342,7 @@ async function main() {
     }
     requireJourney(storeBytes.length >= 1 && [DIALOGUE_QUESTION, ANSWER_FIRST, ANSWER_SECOND, ANSWER_TAIL].every((words) => storeBytes.every((bytes) => !bytes.includes(Buffer.from(words, 'utf8')))), 'dialogue-no-transcript-copy');
     const ledgerFiles = (await readdir(resolve(dataRoot, 'harness-sessions'))).filter((name) => name.endsWith('.jsonl'));
-    requireJourney(ledgerFiles.length === 2, 'dialogue-ledger-sessions', ledgerFiles);
+    requireJourney(ledgerFiles.length === 3, 'dialogue-ledger-sessions', ledgerFiles);
     const ledgerText = (await Promise.all(ledgerFiles.map((name) => readFile(resolve(dataRoot, 'harness-sessions', name), 'utf8')))).join('\n');
     requireJourney(ledgerText.includes(DIALOGUE_QUESTION) && ledgerText.includes(ANSWER_TAIL.slice(-12)), 'dialogue-ledger-holds-history');
 
@@ -1344,14 +1357,14 @@ async function main() {
     await clickSelector(renderer, '#task-drawer .dialogue-convert [data-dialogue-action="convert-submit"]', 'dialogue-convert-submit');
     await waitFor(renderer, `(() => { const card = document.querySelector('.editorial-mark-layer [data-mark-card]'); return card instanceof HTMLElement && card.dataset.markKind === 'change-suggestion' && (card.querySelector('.editorial-mark-source')?.textContent ?? '').startsWith('AI7 · 任务「对话回答」'); })()`, 'dialogue-converted-card', 60_000);
     const converted = await renderer.evaluate(`window.ai7.inspectDialogue({ dialogueId: ${JSON.stringify(dialogueId)}, afterFragment: 0 })`);
-    const markId = converted?.attempts?.[1]?.convertedMarkIds?.[0] ?? null;
-    requireJourney(UUID_PATTERN.test(markId ?? '') && converted.attempts[1].convertedMarkIds.length === 1 && converted.attempts[0].convertedMarkIds.length === 0, 'dialogue-conversion-recorded', converted);
+    const markId = converted?.attempts?.[2]?.convertedMarkIds?.[0] ?? null;
+    requireJourney(UUID_PATTERN.test(markId ?? '') && converted.attempts[2].convertedMarkIds.length === 1 && converted.attempts[0].convertedMarkIds.length === 0, 'dialogue-conversion-recorded', converted);
     const markCard = await renderer.evaluate(`window.ai7.getEditorialMarkCard({ manuscriptId: ${JSON.stringify(recorded.manuscriptId)}, branchId: ${JSON.stringify(recorded.branchId)}, markId: ${JSON.stringify(markId)} })`);
     requireJourney(markCard?.kind === 'change-suggestion' && markCard.source?.kind === 'ai7' && markCard.source.origin === 'task' && markCard.source.label === '对话回答' &&
       markCard.source.taskId === dialogueId && markCard.suggestion?.currentText === selectedWords && markCard.suggestion.proposedText === DIALOGUE_PROPOSAL &&
       markCard.suggestion.decision === null && markCard.suggestion.application === null, 'dialogue-mark', markCard);
     requireJourney((await workingDigest()) === digestBefore, 'dialogue-manuscript-unchanged');
-    await waitForDialogue(renderer, (dialogue) => dialogue.attempts[1]?.converted === '已从这次回答新建 1 条修改建议。', 'dialogue-converted-line');
+    await waitForDialogue(renderer, (dialogue) => dialogue.attempts[2]?.converted === '已从这次回答新建 1 条修改建议。', 'dialogue-converted-line');
 
     // ---- 就这段发起任务… (Issue #423, plan slice S77b; TASK-001 to 004, TASK-044, TASK-046) -------------------------------
     at('selection-task-menu');
@@ -1386,10 +1399,10 @@ async function main() {
     const paragraphBefore = await paragraphText();
     const windowLoads = () => renderer.evaluate(`document.querySelector('[data-screen="editor"] [data-window-loads]')?.dataset.windowLoads ?? ''`);
     // On a selection of that paragraph the menu's 就这段发起任务… acts; the house's 可复用工序 would be listed here (S77 deferred item a,
-    // J-13's) — this house has none, which the group says once its read answers — 润色这段 alone waits with its reason, the other two
-    // prototype presets are gone, and 再选一段加入 is refused in words.
+    // J-13's) — this house has none, which the group says once its read answers — 润色这段 is enabled, this launch binding a model
+    // fixture (Issue #842), the other two prototype presets are gone, and 再选一段加入 is refused in words.
     await openSelectionMenu(renderer, taskBlock, 0, wordsTo, 'selection-task-open-menu');
-    await assertRenderer(renderer, `(() => { const item = window.__j16.item('task-on-selection'); const polish = window.__j16.item('preset-polish'); return item instanceof HTMLButtonElement && !item.disabled && item.textContent.startsWith('就这段发起任务…') && polish instanceof HTMLButtonElement && polish.disabled && polish.title === '润色这段尚未接通：要有一项生成修改建议的润色工序' && window.__j16.item('preset-names') === null && window.__j16.item('preset-continuity') === null && window.__j16.menu().textContent.includes('不提供「再选一段加入」'); })()`, 'selection-task-menu-items');
+    await assertRenderer(renderer, `(() => { const item = window.__j16.item('task-on-selection'); const polish = window.__j16.item('preset-polish'); return item instanceof HTMLButtonElement && !item.disabled && item.textContent.startsWith('就这段发起任务…') && polish instanceof HTMLButtonElement && !polish.disabled && window.__j16.item('preset-names') === null && window.__j16.item('preset-continuity') === null && window.__j16.menu().textContent.includes('不提供「再选一段加入」'); })()`, 'selection-task-menu-items');
     await waitFor(renderer, `window.__j16.menu()?.textContent.includes('本社还没有启用的可复用工序。') && window.__j16.menu().querySelectorAll('[data-mark-action^="procedure:"]').length === 0 && window.__j16.item('task-on-selection') instanceof HTMLButtonElement`, 'selection-task-menu-procedures-none', 15_000);
     await assertRenderer(renderer, `(() => { window.__j16.item('task-on-selection').click(); return true; })()`, 'selection-task-choose');
 

@@ -28,6 +28,16 @@ import {
 } from '../evaluation/initial-evaluation-contract.js';
 import { DIALOGUE_PROMPT_CONTRACT_DIGEST, dialogueRequestDigest, parseDialogueMessageHeader } from '../dialogue/contract.js';
 import {
+  EDITORIAL_POLISH_PROMPT_CONTRACT_DIGEST,
+  editorialPolishRequestDigest,
+  parseEditorialPolishMessageHeader,
+} from '../fast-role/polish-contract.js';
+import {
+  CONFLICT_REGENERATE_PROMPT_CONTRACT_DIGEST,
+  conflictRegenerateRequestDigest,
+  parseConflictRegenerateMessageHeader,
+} from '../fast-role/conflict-regenerate-contract.js';
+import {
   parseReadersReportSynthesisMessageHeader,
   parseReadersReportUnitMessageHeader,
   readersReportRequestDigest,
@@ -110,6 +120,11 @@ import { fixtureEntryKey, resolveFixtureEntry, type ModelFixtureEntry, type Reso
  * turn asks or goes on with a stopped answer, and the question — never the selected words, whose identities are the Book's.
  * Its `answer-chunks` response streams one text delta per chunk, and a launch that names J-16's answer hold waits before a
  * chunk the hold has not released yet, so the Journey can watch an answer in flight with a sentence cut in two.
+ *
+ * 润色这段 and 基于当前稿件重新生成建议 (Issue #842) are recognized by the header only their messages write and matched under
+ * unit ordinal `0` as well: a polish request digest is a function of its frozen contract, the selected words' digest and their
+ * context's, and a regeneration's of its frozen contract and the conflict unit's digest. Each answers one `unit-result` text —
+ * the contract's JSON — or a failure, and `outcome-unknown` stands for a request sent whose answer never came back whole.
  *
  * Structurally an `LlmAdapter`; the class is not extended so that no DSH runtime value is imported
  * before the service installs network denial.
@@ -312,6 +327,47 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     yield { type: 'finish', reason: { kind: 'stop' } };
   }
 
+  /** One fast-role request (Issue #842), answered from the fixture by its request key under ordinal `0`. */
+  async *#fastRole(
+    requestDigest: string,
+    subject: string,
+    failure: (code: string, message: string, status?: number) => StreamChunk,
+  ): AsyncIterable<StreamChunk> {
+    const pairKey = fixtureEntryKey(0, requestDigest);
+    const attempt = (this.#servedByKey.get(pairKey) ?? 0) + 1;
+    this.#servedByKey.set(pairKey, attempt);
+    const entry = this.#answering(resolveFixtureEntry(this.#entries, 0, requestDigest, attempt));
+    if (entry === undefined) {
+      yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, `夹具 ${this.#fixture.identity} 没有这次${subject}（请求摘要 ${requestDigest}）的对应响应。`);
+      return;
+    }
+    const response = entry.response;
+    switch (response.kind) {
+      case 'unit-result':
+        yield { type: 'block-start', index: 0, blockType: 'text' };
+        yield { type: 'text-delta', index: 0, text: response.text };
+        yield { type: 'block-end', index: 0, block: { type: 'text', text: response.text } };
+        yield { type: 'usage', usage: { inputTokens: response.usage.inputTokens, outputTokens: response.usage.outputTokens } };
+        yield { type: 'finish', reason: { kind: 'stop' } };
+        return;
+      case 'answer-chunks':
+        yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '分段回答只答复编辑对话。');
+        return;
+      case 'adapter-failure':
+        yield failure(response.code, response.message, response.status ?? undefined);
+        return;
+      case 'quota-exceeded':
+        yield failure(this.#codes.QUOTA_EXCEEDED_CODE, response.message, response.status);
+        return;
+      case 'interrupted':
+        yield failure(AI7_FAILURE_CODES.INTERRUPTED, response.message);
+        return;
+      case 'outcome-unknown':
+        yield failure(AI7_FAILURE_CODES.OUTCOME_UNKNOWN, response.message);
+        return;
+    }
+  }
+
   providerInfo(provider: string): LlmProviderInfo {
     return { id: provider, name: 'AI7 本地确定性模型适配器' };
   }
@@ -342,6 +398,16 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     const dialogue = text === null ? null : parseDialogueMessageHeader(text);
     if (dialogue !== null) {
       yield* this.#dialogue(dialogue, options, failure);
+      return;
+    }
+    const polish = text === null ? null : parseEditorialPolishMessageHeader(text);
+    if (polish !== null) {
+      yield* this.#fastRole(editorialPolishRequestDigest(EDITORIAL_POLISH_PROMPT_CONTRACT_DIGEST, polish.selectionDigest, polish.contextDigest), '润色', failure);
+      return;
+    }
+    const regeneration = text === null ? null : parseConflictRegenerateMessageHeader(text);
+    if (regeneration !== null) {
+      yield* this.#fastRole(conflictRegenerateRequestDigest(CONFLICT_REGENERATE_PROMPT_CONTRACT_DIGEST, regeneration.regionDigest), '重新生成建议', failure);
       return;
     }
     // The headers are disjoint and are tried in turn, so a unit message of one analysis kind can never

@@ -1,7 +1,7 @@
 import type { AdmittedProviderRule, LaunchPolicyProjection } from '../../shared/protocol.js';
 import { reviewCategoryKindId } from '../../shared/protocol.js';
-import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryContractInput, type ReviewCategoryConfigurationEntry } from './category-configuration.js';
-import { reviewCategoryKindDefinition } from './review-category-kind.js';
+import { liveKindAdmission, liveKindRule } from '../analysis/live-kind-admission.js';
+import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, type ReviewCategoryConfigurationEntry } from './category-configuration.js';
 
 /** The verified policy projection supplied by the policy-selection owner (#831). */
 export type ReviewProviderRule = AdmittedProviderRule;
@@ -25,17 +25,10 @@ export function liveReviewRule(
   policy: LaunchPolicyProjection,
   entry: ReviewCategoryConfigurationEntry,
 ): ReviewProviderRule | null {
-  if (policy.integrityState !== 'verified' || policy.denialReason !== null ||
-      policy.operationalScope !== 'developer-live' || !policy.providerProcessing.liveTransmissionAllowed ||
-      policy.providerProcessing.decision !== 'eligible-only' ||
-      policy.providerProcessing.authorizedLiveTransmissionCount !== 'bounded-by-run' ||
-      entry.executor !== 'review-category-contract' || entry.searchEngine ||
-      entry.seriesKnowledge !== undefined) return null;
+  if (entry.executor !== 'review-category-contract' || entry.searchEngine || entry.seriesKnowledge !== undefined) return null;
   const implemented = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((category) => category.categoryId === entry.categoryId);
   if (implemented?.executor !== 'review-category-contract' || implemented.searchEngine) return null;
-  const rules = (policy.providerProcessing.admittedRules ?? []).filter((rule) =>
-    rule.taskKinds.includes(reviewCategoryKindId(entry.categoryId)) && rule.outboundDataCategories.includes('public-or-synthetic'));
-  return rules.length === 1 ? rules[0]! : null;
+  return liveKindRule(policy, reviewCategoryKindId(entry.categoryId), ['public-or-synthetic']);
 }
 
 /** The shared execution owner admits only the exact reference-free built-in contract and binding. */
@@ -44,13 +37,10 @@ export function liveReviewKindAdmitted(
   definition: { readonly kind: string; readonly promptContractDigest: string; readonly materialReferences?: unknown },
   binding: { readonly route: string; readonly endpoint: string; readonly model: string; readonly credentialSlot: string },
 ): boolean {
-  if (policy === undefined || definition.materialReferences !== undefined) return false;
   const entry = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((category) => reviewCategoryKindId(category.categoryId) === definition.kind);
   if (entry === undefined) return false;
-  const rule = liveReviewRule(policy, entry);
-  if (rule === null || rule.modelRole !== 'Main Editorial Role' || rule.route !== binding.route ||
-      rule.endpoint !== binding.endpoint || rule.model !== binding.model || rule.credentialSlot !== binding.credentialSlot) return false;
-  // A material-reference or house-guideline wrapper changes the contract digest. The live rule
-  // admits neither, even when a direct caller bypasses the Review Run's material-refusal checks.
-  return reviewCategoryKindDefinition(reviewCategoryContractInput(entry)).promptContractDigest === definition.promptContractDigest;
+  // The shared admission (#429) re-derives the contract from the built-in configuration: a material-reference or
+  // house-guideline wrapper changes the digest, and the live rule admits neither, even for a direct caller that bypasses
+  // the Review Run's material-refusal checks.
+  return liveKindAdmission(policy, definition, binding)?.modelRole === 'Main Editorial Role';
 }

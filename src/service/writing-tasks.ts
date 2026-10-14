@@ -216,6 +216,9 @@ export function writingMaterialMoved(title: string): string {
 export function writingMaterialUnavailable(title: string): string {
   return `这次起草参考的资料《${title}》现在不能列进这本书任务的「允许参考」，不能再开始；可以用「新建文档…」重新准备。`;
 }
+export function writingMaterialCorrupt(title: string): string {
+  return `这次起草参考的资料《${title}》的索引记录已损坏，不能再开始；可以用「新建文档…」重新准备。`;
+}
 
 /** A count as the editor reads a bound: `3,000`. */
 function grouped(value: number): string {
@@ -324,11 +327,17 @@ export const MAX_WRITING_EXEMPLAR_GRAPHEMES = MAX_EXEMPLAR_GRAPHEMES;
 export const WRITING_FIELD_CONTROL = /[\p{Cc}\p{Zl}\p{Zp}]/u;
 export const WRITING_NEEDS_MANUSCRIPT = '这本书还没有稿件：写作任务要读稿件，先导入稿件。' as const;
 /**
- * 会发送 before any plan exists (editor-surfaces §9: 四行后果), as S84a is (#688 review): a writing Task runs only where nothing
- * is sent — under a live scope it is refused — so nothing leaves the machine. When a sending route arrives, this line names what
- * would be sent, 其他图书的范例原文 among it, since that is other Books' text leaving the machine.
+ * The provider-free 会发送 line (editor-surfaces §9: 四行后果), pinned by J-07. An admitted live writing Task reads the line
+ * below instead.
  */
 export const WRITING_SEND_CONSEQUENCE = '不发送任何内容：写作任务目前只在不连接模型服务的运行范围内起草。' as const;
+/**
+ * 会发送 where the selected policy admits writing (#810): what the writing rule's categories carry, at full rank — the
+ * manuscript by reading unit, the synthesis basis, the editor's own words and the listed references, 其他图书的范例原文 among
+ * them — and the house people its redaction strips.
+ */
+export const WRITING_LIVE_SEND_CONSEQUENCE =
+  '当前稿件的阅读单元、全书综合依据、你填写的读者、渠道与要求，以及上面列出的参考材料（包括其他图书的范例原文），发往为写作配置的模型服务；不发送本社人员姓名。' as const;
 /** 不会做 in the editor's words; the plan's technical half is in 查看技术详情. */
 export const WRITING_NOT_DO = '不改稿件；不照抄范例；不交付、不发送；草稿由你在稿件编辑面上修改后才用。' as const;
 export const WRITING_COST_BEFORE_PLAN = '先看计划后显示' as const;
@@ -417,6 +426,7 @@ export class WritingTasks {
   #pinnedMaterial(bookId: string, source: WritingMaterialSource): { paragraphs: string[] } | { refusal: { code: string; message: string } } {
     const read = this.#readMaterial(bookId, source);
     if ('refusal' in read) {
+      if (read.refusal.code === 'MATERIAL_INDEX_RECORD_INVALID') return { refusal: { code: read.refusal.code, message: writingMaterialCorrupt(source.title) } };
       if (read.refusal.code === 'MATERIAL_REFERENCE_UNAVAILABLE') return { refusal: { code: read.refusal.code, message: writingMaterialUnavailable(source.title) } };
       if (read.refusal.code === 'MATERIAL_INDEX_MOVED' || read.refusal.code === 'LIBRARY_MATERIAL_NOT_FOUND') {
         return { refusal: { code: 'MATERIAL_INDEX_MOVED', message: writingMaterialMoved(source.title) } };
@@ -602,6 +612,18 @@ export class WritingTasks {
     const envelope = JSON.parse(json) as unknown;
     requireWriting(isRecord(envelope) && typeof envelope.promptContractDigest === 'string', 'WRITING_RECORD_INVALID', CORRUPT);
     return envelope.promptContractDigest;
+  }
+
+  /** The recorded material boundary only: consuming a cached ledger must not rebuild its writing contract. */
+  materialBoundary(taskIntentId: string, promptContractDigest: string): { bookId: string; references: ReadonlyArray<WritingMaterialSource> } {
+    const row = this.#db.prepare('SELECT book_id, canonical_json, sha256 FROM writing_tasks WHERE task_intent_id = ? AND prompt_contract_sha256 = ?').get(taskIntentId, promptContractDigest) as SqlRow | undefined;
+    requireWriting(row !== undefined, 'WRITING_RECORD_INVALID', CORRUPT);
+    const json = text(row.canonical_json);
+    requireWriting(sha256Hex(json) === text(row.sha256), 'WRITING_RECORD_INVALID', CORRUPT);
+    const stored = JSON.parse(json) as unknown;
+    requireWriting(isRecord(stored) && (stored.materialSources === undefined ||
+      (Array.isArray(stored.materialSources) && stored.materialSources.every(isMaterialSource))), 'WRITING_RECORD_INVALID', CORRUPT);
+    return { bookId: text(row.book_id), references: (stored.materialSources as WritingMaterialSource[] | undefined) ?? [] };
   }
 
   /** The Book's latest writing Task by its intent, as the analysis ledger orders them; `null` before the first. */

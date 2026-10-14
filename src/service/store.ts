@@ -1,4 +1,4 @@
-import { TASK_MATERIALS_NONE, TASK_MATERIALS_STATEMENT, TASK_MATERIAL_LIVE_UNAVAILABLE, REVIEW_MATERIAL_CATEGORY_REQUIRED, taskMaterialReferenceLine, taskMaterialKindDefinition, taskMaterialSources, taskMaterialWords, taskMaterialRefusal, type TaskMaterialBoundary, type TaskMaterialReading, type TaskMaterialSource } from './task-material-references.js';
+import { TASK_MATERIALS_NONE, TASK_MATERIALS_STATEMENT, TASK_MATERIAL_LIVE_UNAVAILABLE, REVIEW_MATERIAL_CATEGORY_REQUIRED, taskMaterialReferenceLine, taskMaterialKindDefinition, taskMaterialSources, taskMaterialWords, taskMaterialRefusal, type MaterialGuardRefusal, type TaskMaterialBoundary, type TaskMaterialReading, type TaskMaterialSource } from './task-material-references.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
@@ -324,6 +324,8 @@ import {
   WRITING_MODE_GOALS,
 } from '../shared/protocol.js';
 import { INITIAL_EVALUATION_LIVE_UNAVAILABLE, initialEvaluationKindDefinition } from './evaluation/initial-evaluation-kind.js';
+import { EVALUATION_PAYLOAD_CATEGORIES, liveKindRule } from './analysis/live-kind-admission.js';
+import { producedUnverified } from './evaluation/unverified-disclosure.js';
 import { readersReportKindDefinition } from './evaluation/readers-report-kind.js';
 import { evaluationRewriteKindDefinition } from './evaluation/evaluation-rewrite-kind.js';
 import { evaluationRewriteScoredItems, type EvaluationRewriteContractInput } from './evaluation/evaluation-rewrite-contract.js';
@@ -368,6 +370,7 @@ import {
   WRITING_NEEDS_MANUSCRIPT,
   WRITING_NOT_DO,
   WRITING_SEND_CONSEQUENCE,
+  WRITING_LIVE_SEND_CONSEQUENCE,
   WRITING_MATERIALS_NONE,
   WRITING_MATERIALS_STATEMENT,
   WRITING_MATERIALS_TOO_MANY,
@@ -395,6 +398,7 @@ import {
   type WritingMaterialSource,
 } from './writing-tasks.js';
 import { writingKindDefinition, writingRecordedKindDefinition } from './writing/writing-kind.js';
+import { liveWritingRule } from './writing/live-writing-admission.js';
 import {
   WRITING_COPY_RULES,
   writingExemplarLine,
@@ -503,7 +507,7 @@ import {
   RESUME_BLOCKED_SLOT,
   type BaselineStoppedRunFacts,
 } from './task-plan.js';
-import { decisionResolvesConflict, initializeProposalConflictSchema, ProposalConflictError, ProposalConflictStore, readConflictAttention } from './proposal-conflicts.js';
+import { decisionResolvesConflict, initializeProposalConflictSchema, ProposalConflictError, ProposalConflictStore, readConflictAttention, type ProposalConflictRegenerationLineage } from './proposal-conflicts.js';
 import {
   ImportRetentionError,
   initializeImportRetentionSchema,
@@ -4306,6 +4310,7 @@ const WAITING_TASK_MOVED_LABELS: Readonly<Record<string, string>> = {
   WRITING_EXEMPLAR_MOVED: '范例',
   MATERIAL_INDEX_MOVED: '参考资料',
   MATERIAL_REFERENCE_UNAVAILABLE: '参考资料',
+  MATERIAL_INDEX_RECORD_INVALID: '参考资料',
 };
 const WAITING_TASK_MOVED_FALLBACK = '计划依据的内容';
 
@@ -4515,6 +4520,8 @@ export class EditorialStore {
     this.#evaluations = new EvaluationRecords(authority, { current: (bookId) => this.#evaluationManuscript(bookId) }, {
       latest: (bookId) => this.#initialEvaluationFacts(bookId),
       task: (bookId) => this.#initialEvaluationTask(bookId),
+      producedUnverified: (revisionId) => producedUnverified((this.#authority.prepare(
+        "SELECT json_extract(canonical_json, '$.policyPin.operationalScope') AS scope FROM analysis_result_set_revisions WHERE revision_id = ?").get(revisionId) as SqlRow | undefined)?.scope),
     }, {
       workspace: (bookId, basis, unreadable) => this.#readersReportWorkspace(bookId, basis, unreadable),
     }, {
@@ -5137,11 +5144,7 @@ export class EditorialStore {
           return texts;
         });
       } catch (error) {
-        if (error instanceof StoreError && (error.code === 'MATERIAL_INDEX_MOVED' || error.code === 'MATERIAL_REFERENCE_UNAVAILABLE')) {
-          return taskMaterialRefusal(source, error.code, surface);
-        }
-        // A corrupt index record degrades 评估 to that reference, named plainly (Issue #795); 审阅 keeps it propagating.
-        if (surface === '评估' && error instanceof StoreError && error.code === 'MATERIAL_INDEX_RECORD_INVALID') {
+        if (error instanceof StoreError && (error.code === 'MATERIAL_INDEX_MOVED' || error.code === 'MATERIAL_REFERENCE_UNAVAILABLE' || error.code === 'MATERIAL_INDEX_RECORD_INVALID')) {
           return taskMaterialRefusal(source, error.code, surface);
         }
         throw error;
@@ -6139,7 +6142,8 @@ export class EditorialStore {
     };
     const reason = kindReason !== null
       ? kindReason
-      : envelope.providerStatus === 'remote-eligible-developer-live'
+      // #810: an admitted writing plan may set its own rule; other live kinds keep the existing refusal.
+      : envelope.providerStatus === 'remote-eligible-developer-live' && !(defaultExecutionRuleKind(pattern) === 'writing' && !this.#writingLiveUnavailable())
         ? SET_RULE_DEVELOPER_LIVE
         : plan.planRevision !== null
           ? SET_RULE_CHANGED
@@ -8842,8 +8846,8 @@ export class EditorialStore {
   }
 
   /**
-   * 初评 runs only where its book-level synthesis may be sent (Issue #429 review, P2): under a live scope the active policy does
-   * not name it, so nothing is prepared or started there, and 评估 says why. The provider-free scope is unaffected.
+   * A plan that lists 资料库 materials stays provider-free (Issue #429, wave 2): no rule of the selected policy names frozen
+   * material, so under a live scope it is refused before it is prepared or started.
    */
   #requireEvaluationMaterialScope(hasReferences: boolean): void {
     if (hasReferences && this.#baselineAnalysis.launch.live !== null) throw new StoreError('TASK_MATERIAL_UNAVAILABLE', TASK_MATERIAL_LIVE_UNAVAILABLE);
@@ -8856,9 +8860,21 @@ export class EditorialStore {
     if (refusal !== undefined) throw new StoreError(refusal.code, refusal.message);
   }
 
+  /**
+   * 初评 runs only where it may be sent (Issue #429): under a live scope the selected policy must name the kind in one rule that
+   * carries every category its contract sends; the ledger then admits its exact contract and binding. Without that rule nothing
+   * is prepared or started there, and 评估 says why. The provider-free scope is unaffected.
+   */
   #requireInitialEvaluationScope(): void {
     this.#assertAvailable();
-    if (this.#initialEvaluation.launch.live !== null) throw new StoreError('EVALUATION_INITIAL_UNAVAILABLE', INITIAL_EVALUATION_LIVE_UNAVAILABLE);
+    if (this.#evaluationLiveRefused(INITIAL_EVALUATION_KIND)) throw new StoreError('EVALUATION_INITIAL_UNAVAILABLE', INITIAL_EVALUATION_LIVE_UNAVAILABLE);
+  }
+
+  /** Whether the launch is live and its selected policy names no rule that admits this evaluation kind (Issue #429). */
+  #evaluationLiveRefused(kind: typeof INITIAL_EVALUATION_KIND | typeof READERS_REPORT_KIND | typeof EVALUATION_REWRITE_KIND): boolean {
+    // 初评's ledgers take the launch the built-in profile's ledger is bound through; 审稿意见's and the rewrite's, the baseline's.
+    const launch = kind === INITIAL_EVALUATION_KIND ? this.#initialEvaluation.launch : this.#baselineAnalysis.launch;
+    return launch.live !== null && liveKindRule(launch.policy, kind, EVALUATION_PAYLOAD_CATEGORIES[kind]) === null;
   }
 
   /** AI7's latest settled 初评 as 评估 snapshots it; `null` while there is none, or the Book cannot be evaluated by AI7 at all. */
@@ -8918,7 +8934,7 @@ export class EditorialStore {
     const runState = projection.run?.state ?? null;
     return {
       task: projection.taskIntent === null ? null : { taskIntentId: projection.taskIntent.taskIntentId, state: projection.state, label: analysisTaskStateLabel(projection) },
-      prepare: this.#initialEvaluation.launch.live !== null
+      prepare: this.#evaluationLiveRefused(INITIAL_EVALUATION_KIND)
         ? { allowed: false, reason: INITIAL_EVALUATION_LIVE_UNAVAILABLE }
         : runIsActive(runState)
         ? { allowed: false, reason: activeRunReason(runState, INITIAL_EVALUATION_KIND) }
@@ -9000,12 +9016,13 @@ export class EditorialStore {
   }
 
   /**
-   * 审稿意见 runs only where it may be sent (EVAL-013, as 初评): under a live scope no Provider Processing policy names it, so
-   * nothing is prepared or started there, and 评估 says why. The provider-free scope is unaffected.
+   * 审稿意见 runs only where it may be sent (EVAL-013, as 初评): under a live scope only a rule naming the kind with the editor's
+   * record and the house exemplars admits it; otherwise nothing is prepared or started there, and 评估 says why. The
+   * provider-free scope is unaffected.
    */
   #requireReadersReportScope(): void {
     this.#assertAvailable();
-    if (this.#baselineAnalysis.launch.live !== null) throw new StoreError('READERS_REPORT_UNAVAILABLE', READERS_REPORT_LIVE_UNAVAILABLE);
+    if (this.#evaluationLiveRefused(READERS_REPORT_KIND)) throw new StoreError('READERS_REPORT_UNAVAILABLE', READERS_REPORT_LIVE_UNAVAILABLE);
   }
 
   /**
@@ -9222,7 +9239,7 @@ export class EditorialStore {
         }
       }
       const prepare: EvaluationReadersReportProjection['templates'][number]['prepare'] =
-        this.#baselineAnalysis.launch.live !== null ? { allowed: false, reason: READERS_REPORT_LIVE_UNAVAILABLE }
+        this.#evaluationLiveRefused(READERS_REPORT_KIND) ? { allowed: false, reason: READERS_REPORT_LIVE_UNAVAILABLE }
         : unavailable !== null ? { allowed: false, reason: unavailable }
         : basis === null ? { allowed: false, reason: READERS_REPORT_NEEDS_FINALIZED }
         : draft !== null ? { allowed: false, reason: `这本书已经有「${label}」的草稿；请打开它继续修改。` }
@@ -9417,18 +9434,21 @@ export class EditorialStore {
   }
 
   /**
-   * 写作任务 runs only where it may be sent (as 审稿意见): under a live scope no Provider Processing policy names it, so nothing is
-   * prepared or started there, and 交付物 says why. The provider-free scope is unaffected.
+   * 写作任务 runs only where the selected policy admits its exact binding. The provider-free scope is unaffected.
    */
   #requireWritingScope(): void {
     this.#assertAvailable();
-    if (this.#baselineAnalysis.launch.live !== null) throw new StoreError('WRITING_UNAVAILABLE', WRITING_LIVE_UNAVAILABLE);
+    if (this.#writingLiveUnavailable()) throw new StoreError('WRITING_UNAVAILABLE', WRITING_LIVE_UNAVAILABLE);
+  }
+
+  /** Whether the launch is live and its selected policy admits no writing on the bound route; never under the provider-free scope. */
+  #writingLiveUnavailable(): boolean {
+    const launch = this.#baselineAnalysis.launch;
+    return launch.live !== null && liveWritingRule(launch.policy, launch.live) === null;
   }
 
   /**
-   * A 资料库 item under a live scope (Issue #428): the item is the editor's own material, and no Provider Processing policy admits
-   * it — developer-live transmits only the Owner-designated Public SampleBooks — so a plan that lists one is refused there in
-   * its own words, before the writing kind's.
+   * Reference-bearing live writing awaits wave 3's successor policy; retain its precise refusal before kind admission.
    */
   #requireWritingMaterialScope(listsMaterials: boolean): void {
     this.#assertAvailable();
@@ -9655,7 +9675,7 @@ export class EditorialStore {
   /**
    * 先看计划 of a writing Task (DELIV-007): the writing kind's Task for one house type of the Book, from the editor's audience,
    * channel and requirements and the reference set as it stands now, in the mode that applies — the Book's first writing Task,
-   * or another once one settled. Refused under a live scope, without a manuscript, for a type the Book has a document of or
+   * or another once one settled. Refused without live admission, without a manuscript, for a type the Book has a document of or
    * marks 本书不做, and while a writing Task is under way. Its plan opens in the Task Drawer.
    */
   createWritingPreparationWork(
@@ -9691,7 +9711,8 @@ export class EditorialStore {
     const materials = this.#writingMaterials(bookId, materialIds);
     const input: WritingContractInput = {
       type: { typeId: type.typeId, label: type.label },
-      book: this.#writingBook(bookId),
+      // The writing policy retains house-person redaction. Freeze no editor names into a live prompt.
+      book: { ...this.#writingBook(bookId), ...(this.#baselineAnalysis.launch.live === null ? {} : { editors: [] }) },
       audience,
       channel,
       requirements,
@@ -9831,7 +9852,7 @@ export class EditorialStore {
        JOIN manuscripts m ON m.manuscript_id = mb.manuscript_id AND m.role = 'primary' WHERE m.book_id = ?`,
     ).get(bookId) as SqlRow;
     const blocks = asNumber(manuscript.blocks);
-    let unavailable: string | null = this.#baselineAnalysis.launch.live !== null ? WRITING_LIVE_UNAVAILABLE
+    let unavailable: string | null = this.#writingLiveUnavailable() ? WRITING_LIVE_UNAVAILABLE
       : blocks === 0 ? WRITING_NEEDS_MANUSCRIPT : null;
     let latest: { task: StoredWritingTask; ledger: BaselineAnalysisStore; projection: WritingProjection } | null = null;
     let drafted = new Map<string, { revisionId: string; createdAt: string }>();
@@ -9888,7 +9909,7 @@ export class EditorialStore {
       },
       consequences: {
         read: blocks === 0 ? '这本书还没有稿件。' : `当前稿件的全部 ${blocks} 个内容块，以及上面列出的参考材料`,
-        send: WRITING_SEND_CONSEQUENCE,
+        send: this.#baselineAnalysis.launch.live === null || this.#writingLiveUnavailable() ? WRITING_SEND_CONSEQUENCE : WRITING_LIVE_SEND_CONSEQUENCE,
         notDo: WRITING_NOT_DO,
         cost: WRITING_COST_BEFORE_PLAN,
       },
@@ -9932,17 +9953,17 @@ export class EditorialStore {
    * The drawer's `设为快速开始默认…` on a writing plan (AUTH-009, TASK-019; S84b), and the rule its Task was started under. A
    * writing rule covers only the house type of the plan it is set from (Commander ruling on #701: TASK-026, no widened source),
    * so each type of a Book has its own; the editor's audience, channel and requirements are each Task's own, as a range is. A
-   * plan may set its type's rule on the same terms as a baseline plan; never under a live scope, nor from a Task whose 范例 is no
-   * longer here, never started.
+   * plan may set its type's rule on the same terms as a baseline plan; live writing requires its selected admission. A Task whose
+   * 范例 is no longer here cannot set one before starting.
    */
   #writingDefaultRule(projection: WritingProjection, task: StoredWritingTask): TaskPlanDefaultRuleProjection {
     const envelope = projection.planEnvelope;
     const version = projection.planVersion;
     if (projection.taskIntent === null || envelope === null || version === null) return noDefaultRule(QUICK_START_NOT_READY);
     const startedBy = this.#ruleStartedBy(projection.bookId, 'writing', projection.authorization, writingRulePattern(task.typeId));
-    // A writing Task runs nowhere under a live scope (S84a), so no rule is set there, from whatever plan was frozen before.
+    // A live writing rule requires the selected writing admission, as preparation does.
     // A rule binds no 资料库 item (Issue #428; TASK-023, TASK-026): a plan that lists one sets none.
-    const kindReason = this.#baselineAnalysis.launch.live !== null ? SET_RULE_DEVELOPER_LIVE
+    const kindReason = this.#writingLiveUnavailable() ? SET_RULE_DEVELOPER_LIVE
       : !task.exemplarsReadable && projection.authorization === null ? WRITING_EXEMPLAR_MOVED
         : task.materials.length > 0 ? WRITING_RULE_MATERIALS : null;
     return this.#ruleOffer(projection.bookId, writingRulePattern(task.typeId), { planEnvelope: envelope, planVersion: version, planRevision: projection.planRevision }, kindReason, startedBy);
@@ -10012,7 +10033,7 @@ export class EditorialStore {
     }
     if (rule === null) return { available: false, reason: quickStartNoRuleReason(pattern), rule: null };
     const reference = defaultExecutionRuleReference(rule, rule.version);
-    if (this.#baselineAnalysis.launch.live !== null) return { available: false, reason: QUICK_START_DEVELOPER_LIVE, rule: reference };
+    if (this.#writingLiveUnavailable()) return { available: false, reason: QUICK_START_DEVELOPER_LIVE, rule: reference };
     // The page's own terms first — no manuscript, a document of the type, 本书不做, a Run under way — as 先看计划 is held to them.
     if (!prepare.allowed) return { available: false, reason: prepare.reason, rule: reference };
     const read = facts();
@@ -10026,7 +10047,7 @@ export class EditorialStore {
    * 快速开始 of a writing Task (TASK-017, TASK-020, TASK-026; S84b): the Task the caller has just prepared exactly as 先看计划
    * prepares it is started exactly as 开始任务 would start it, on the ledger of its plan's contract, its authorization naming
    * the writing rule version the editor started under. Whatever would make the start differ from the rule — a rule of another
-   * house type, the rule changed or was turned off, developer-live, a 范例 no longer here, the plan's key content or what the
+   * house type, the rule changed or was turned off, a refused live binding, a 范例 no longer here, the plan's key content or what the
    * rule binds moved, the model service not connected, no network, a busy slot — leaves the Task at its plan with the reason,
    * and nothing is recorded.
    */
@@ -10063,7 +10084,7 @@ export class EditorialStore {
     }
     const rule = this.#ruleCall(() => this.#rules.activeFor(bookId, pattern));
     if (rule === null || rule.version.ruleVersionId !== ruleVersionId) return fellBack(QUICK_START_RULE_CHANGED);
-    if (this.#baselineAnalysis.launch.live !== null) return fellBack(QUICK_START_DEVELOPER_LIVE);
+    if (this.#writingLiveUnavailable()) return fellBack(QUICK_START_DEVELOPER_LIVE);
     if (!latest.task.exemplarsReadable) return fellBack(WRITING_EXEMPLAR_MOVED);
     // A rule binds no 资料库 item, so a plan that lists one never starts under it (Issue #428; TASK-026: no widened source).
     if (latest.task.materials.length > 0) return fellBack(WRITING_QUICK_START_MATERIALS);
@@ -10360,12 +10381,13 @@ export class EditorialStore {
   }
 
   /**
-   * 按我的评分重写评语 runs only where it may be sent (EVAL-008, as 初评): under a live scope no Provider Processing policy names it,
-   * so nothing is prepared or started there, and 评估 says why. The provider-free scope is unaffected.
+   * 按我的评分重写评语 runs only where it may be sent (EVAL-008, as 初评): under a live scope only a rule naming the kind with the
+   * editor's saved words admits it; otherwise nothing is prepared or started there, and 评估 says why. The provider-free scope
+   * is unaffected.
    */
   #requireEvaluationRewriteScope(): void {
     this.#assertAvailable();
-    if (this.#baselineAnalysis.launch.live !== null) throw new StoreError('EVALUATION_REWRITE_UNAVAILABLE', EVALUATION_REWRITE_LIVE_UNAVAILABLE);
+    if (this.#evaluationLiveRefused(EVALUATION_REWRITE_KIND)) throw new StoreError('EVALUATION_REWRITE_UNAVAILABLE', EVALUATION_REWRITE_LIVE_UNAVAILABLE);
   }
 
   /**
@@ -10461,6 +10483,8 @@ export class EditorialStore {
     task: StoredEvaluationRewriteTask;
     words: NonNullable<NonNullable<EvaluationRewriteProjection['inspectedRevision']>['revision']['rewrite']['words']> | null;
     observations: NonNullable<EvaluationRewriteProjection['inspectedRevision']>['revision']['rewrite']['observations'];
+    /** Produced under the live route: its notes show 未联网核查 (Issue #429). */
+    unverified: boolean;
     reading: { unitsTotal: number; unitsRead: number };
   } {
     for (const revision of this.#evaluationRewriteCall(() => this.#evaluationRewrites.revisions(bookId))) {
@@ -10473,6 +10497,7 @@ export class EditorialStore {
         task: found.task,
         words: read?.rewrite.words ?? null,
         observations: read?.rewrite.observations ?? [],
+        unverified: producedUnverified(read?.policyPin.operationalScope),
         reading: { unitsTotal: read?.coverage.unitsTotal ?? 0, unitsRead: read?.coverage.unitsClosed ?? 0 },
       };
     }
@@ -10503,7 +10528,7 @@ export class EditorialStore {
             current: newest.task.entryOrdinal === version.entryOrdinal && newest.task.entrySha256 === version.entrySha256 && version.state !== 'finalized',
             reading: newest.reading,
             // Each beside the version's own, with at most a frame's share of its notes and how many in all (Issue #689).
-            items: rewriteProposalItems(words.items, newest.observations, version.content),
+            items: rewriteProposalItems(words.items, newest.observations, version.content, newest.unverified),
             verdict: words.verdict === null ? null : { before: version.content.verdict, after: words.verdict },
             withheld: words.withheld.map((entry) => entry.reason),
           };
@@ -10531,7 +10556,7 @@ export class EditorialStore {
     };
     const refusal = version === null ? '先打开一版评估。' : evaluationRewriteRefusal(version);
     const prepare: EvaluationRewriteWorkspaceProjection['prepare'] =
-      this.#baselineAnalysis.launch.live !== null ? { allowed: false, reason: EVALUATION_REWRITE_LIVE_UNAVAILABLE }
+      this.#evaluationLiveRefused(EVALUATION_REWRITE_KIND) ? { allowed: false, reason: EVALUATION_REWRITE_LIVE_UNAVAILABLE }
       : unavailable !== null ? { allowed: false, reason: unavailable }
       : refusal !== null ? { allowed: false, reason: refusal }
       : runIsActive(runState) ? { allowed: false, reason: activeRunReason(runState, EVALUATION_REWRITE_KIND) }
@@ -15479,6 +15504,14 @@ export class EditorialStore {
     return this.#markCall(() => this.#editorialMarks.createProduced(input));
   }
 
+  /**
+   * Several marks AI7 produces in one transaction (润色这段, Issue #842), each verified as one is: an input whose words no longer
+   * stand at its range is `null` in the list, and `record` receives the list inside the same transaction.
+   */
+  createProducedEditorialMarks<T>(inputs: ReadonlyArray<ProducedEditorialMarkInput>, record: (markIds: ReadonlyArray<string | null>) => T): T {
+    return this.#markCall(() => this.#editorialMarks.createProducedMany(inputs, record));
+  }
+
   listPriorWork(): ReadonlyArray<PriorWorkItemProjection> {
     return this.#boundedCall(() => this.#bounded.listPriorWork());
   }
@@ -16297,6 +16330,30 @@ export class EditorialStore {
       if (error instanceof ReviewRunError || error instanceof SeriesExclusionError) return '无法读取的书系检索排除记录';
       throw error;
     }
+  }
+
+  /** Verify the consuming ledger's frozen material boundary; no material paragraphs are paged or composed here. */
+  materialGuard(runRecordId: string, ledger: BaselineAnalysisStore): MaterialGuardRefusal | null {
+    this.#assertAvailable();
+    const intent = this.#authority.prepare('SELECT t.task_intent_id, t.book_id FROM analysis_run_records r JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id WHERE r.run_record_id = ?').get(runRecordId) as SqlRow | undefined;
+    requireStore(intent !== undefined, 'ANALYSIS_RUN_INVALID', '运行记录不存在。');
+    const boundary = ledger.definition.kind === 'writing'
+      ? this.#writingCall(() => this.#writingTasks.materialBoundary(asString(intent.task_intent_id), ledger.definition.promptContractDigest))
+      : { bookId: asString(intent.book_id), references: ledger.definition.materialReferences?.sources ?? [] };
+    for (const source of boundary.references) {
+      try {
+        this.#materialIndexCall(() => this.#materialIndex.verifyForTask(boundary, source.materialId,
+          (id, book) => this.#libraryMaterials.available(id, book)));
+      } catch (error) {
+        if (!(error instanceof StoreError) || !['MATERIAL_INDEX_MOVED', 'MATERIAL_REFERENCE_UNAVAILABLE', 'MATERIAL_INDEX_RECORD_INVALID', 'MATERIAL_INDEX_NO_TEXT', 'LIBRARY_MATERIAL_NOT_FOUND'].includes(error.code)) throw error;
+        const code = error.code === 'MATERIAL_INDEX_NO_TEXT' ? 'MATERIAL_INDEX_RECORD_INVALID'
+          : error.code === 'LIBRARY_MATERIAL_NOT_FOUND' ? 'MATERIAL_INDEX_MOVED' : error.code;
+        const reading = taskMaterialRefusal(source, code, ledger.definition.kind === 'writing' ? '写作'
+          : ledger.definition.kind === 'evaluation' || ledger.definition.kind === 'readers-report' ? '评估' : '审阅');
+        return { code, materialTitle: source.title, message: reading.refusal!.message };
+      }
+    }
+    return null;
   }
 
   /**
@@ -17512,6 +17569,11 @@ export class EditorialStore {
   /** Save the Resolution Draft on exactly the basis the editor saw; the manuscript is untouched. */
   saveProposalConflictDraft(input: SaveProposalConflictDraftInput): ProposalConflictDraftSaveProjection {
     return this.#conflictCall(() => this.#proposalConflicts.saveDraft(input));
+  }
+
+  /** 基于当前稿件重新生成建议 (Issue #842): its Resolution Draft, saved as any other with the regeneration's lineage beside it. */
+  saveRegeneratedProposalConflictDraft(input: SaveProposalConflictDraftInput, lineage: ProposalConflictRegenerationLineage): ProposalConflictDraftSaveProjection {
+    return this.#conflictCall(() => this.#proposalConflicts.saveDraft(input, lineage));
   }
 
   /** 保留当前稿件, 暂不处理, or 保存为新提案版本 — none of which writes the manuscript. */

@@ -1,0 +1,91 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-dialogue-recorded-v41-stream",
+  "description": "Recorded V4.1 SSE continuation on exact sample1 through the repository dialogue gate, broker and durable cache; Issue #833, 2026-10-14, S17c/editorial-dialogue/3, contract 81cf644d1c52f63aa5db1e1a84c24e5256e96686fea0c8b69e4d1d71fe0d09ee. The preceding ask was deliberately stopped with two kept fragments and remains outcome-unknown; this fixture admits only the completed continuation aggregate and does not reproduce network timing or establish editorial quality. · 来源测试项 S17c/editorial-dialogue/3 · 模型 deepseek-v4.1-flash · 生成于 2026-10-14",
+  "basedOn": null,
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "4d0d357ec9549aca74d0548e65236038fb375b33c58132366eaa708df9394220",
+      "response": {
+        "kind": "answer-chunks",
+        "chunks": [
+          "语气",
+          "：整体",
+          "偏",
+          "克制，主要",
+          "靠动作和状态",
+          "呈现人物",
+          "，但",
+          "后文对收信人",
+          "身份的判断",
+          "带入了",
+          "主观",
+          "推测。这种",
+          "克制与推测相",
+          "混合，使语气",
+          "既显得",
+          "旁观冷静，又透出",
+          "同情和保留",
+          "，没有",
+          "直接抒情。\n\n节奏：前半",
+          "以",
+          "密集动作快速",
+          "推进，疲惫",
+          "、书写、弃",
+          "笔、毁",
+          "纸连成一体",
+          "，形成由压抑",
+          "到爆发的加速感。",
+          "后半转为",
+          "推断与说明",
+          "，速度",
+          "明显放缓，在动作",
+          "高潮之后留下",
+          "停顿和",
+          "余",
+          "味。\n\n修改方向",
+          "：建议",
+          "统一叙述",
+          "者权限，或将收",
+          "信人身份的推断改写",
+          "为可观察的外部",
+          "线索，使",
+          "语气与节奏更统一",
+          "。"
+        ],
+        "usage": {
+          "inputTokens": 363,
+          "outputTokens": 1544
+        }
+      },
+      "capture": {
+        "subject": "dialogue",
+        "itemId": "S17c/editorial-dialogue/3",
+        "selectedItemId": "S17c/editorial-dialogue/3",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "editorial-dialogue-sse",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "81cf644d1c52f63aa5db1e1a84c24e5256e96686fea0c8b69e4d1d71fe0d09ee",
+        "taskPromptContractDigest": "81cf644d1c52f63aa5db1e1a84c24e5256e96686fea0c8b69e4d1d71fe0d09ee",
+        "capturedAt": "2026-10-14T04:48:38.551Z",
+        "providerRequestDigest": "c152a59c8cb396e055cef40703b70d59274fa3497507b6441d235a5ce22d22af",
+        "providerResponseDigest": "d648a6c592b6bede4bea951cd4340f81d8de61babf3c8a4a2856861f49040f74",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "7b059cf34c5216d301769bf30b41a0804461f2c76cd87ade887121d44dad5342",
+        "generation": "099da90eeb44dcd44ae1a165b520ff5692d3eb7b09a465e2d6c9a3ab2b8459f3",
+        "validation": {
+          "family": "editorial-dialogue-stream",
+          "case": "sample1-stop-continue",
+          "step": "editorial-dialogue/continue"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "ed043972b6d3ae27613bd9f0eadf6476fb206786d6fb311e6f68c869cc54f671"
+      }
+    }
+  ]
+}

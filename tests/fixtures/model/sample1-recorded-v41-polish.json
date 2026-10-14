@@ -1,0 +1,47 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-recorded-v41-polish",
+  "description": "Recorded 润色这段 answer (Issue #842) on one sentence of exact sample1 under developer-live Provider Processing v11, Go route deepseek-v4.1-flash, converted from the Provider Result Cache; keyed under unit ordinal 0 by the ai7.editorial-polish/1 request digest · 来源测试项 S30/editorial-polish/1 · 模型 deepseek-v4.1-flash · 生成于 2026-10-14",
+  "basedOn": null,
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "fe63b62969f3caa2a172afe8d692479d2aad28815553ef0d08d51e2ce21b1f49",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-polish.result/1\",\"suggestions\":[{\"original\":\"也不是所有男人都是如此\",\"replacement\":\"也不是所有男人都如此\",\"reason\":\"“是”与“如此”语义重复，删去后更简洁。\"},{\"original\":\"一种比较特别卜算\",\"replacement\":\"一种比较特别的卜算\",\"reason\":\"定语与中心语之间缺“的”，“特别卜算”搭配不通顺。\"},{\"original\":\"，确定能在六十五岁时做七十小寿的男人，都是\",\"replacement\":\"确定：能在六十五岁时做七十小寿的男人，都是\",\"reason\":\"原句“确定”被逗号割断，主谓关系含混；改用冒号让“确定”统领后一小句，结构更清楚。\"}]}",
+        "usage": {
+          "inputTokens": 576,
+          "outputTokens": 4297
+        }
+      },
+      "capture": {
+        "subject": "editorial-polish",
+        "itemId": "S30/editorial-polish/1",
+        "selectedItemId": "S30/editorial-polish/1",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "7078415b8216761fca5c85a68d9b25e153dccd5d910dcafbdc447e3f4ff93e8a",
+        "taskPromptContractDigest": "7078415b8216761fca5c85a68d9b25e153dccd5d910dcafbdc447e3f4ff93e8a",
+        "capturedAt": "2026-10-14T05:26:38.217Z",
+        "providerRequestDigest": "28df71fb28354f9af5aac444fcc4f6752d09a93953fcd58439e6d52eed977961",
+        "providerResponseDigest": "e30c00c0b50ddfded664ab045944e2c37733b0deefe5e935d82e9e59ea7e19b2",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "4fea1e5077e3a07dba1c3097d503875d192ae7af5dbe9445ad1fe3734aaf5681",
+        "generation": "9e4cd81d723e0f1e42060e40c984f1cdad9fbb9d8435d81588c092cef1b8d64c",
+        "validation": {
+          "family": "editorial-polish",
+          "case": "sample1-selected-sentence",
+          "step": "editorial-polish/ask"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "e8c8b6773c6879dca1e9fc52c6210fa53cbd4dfd29102e3abcff01384d1c70ea"
+      }
+    }
+  ]
+}

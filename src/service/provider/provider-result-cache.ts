@@ -25,12 +25,14 @@ export const PROVIDER_TEST_ITEM_SLICE = 'S40';
 /**
  * Every plan slice a test item id may name (Issue #473, S87-f3a). S40 owns the analysis path's model calls and every line
  * the ledger already carries; S87 owns the platform tools' search and fetch items (ADR 0080 §7.6); S17c owns the live
- * dialogue's items (ADR 0088 §1.8). A slice outside this closed set is not a test item, so no id can be minted for it. The
- * slice only numbers records: the purpose a call answers is its validation family and case, never this.
+ * dialogue's items (ADR 0088 §1.8); S84 owns writing's items (#810); S30 owns 润色这段's and S22 稿件冲突 › 基于当前稿件重新生成建议's
+ * (Issue #842). A slice outside this closed set is not a test item, so no id can be minted for it, and a ledger line naming one
+ * refuses the whole shared ledger. The slice only numbers records: the purpose a call answers is its validation family and case,
+ * never this.
  */
-export const PROVIDER_TEST_ITEM_SLICES = ['S40', 'S87', 'S17c'] as const;
+export const PROVIDER_TEST_ITEM_SLICES = ['S40', 'S87', 'S17c', 'S84', 'S30', 'S22'] as const;
 export type ProviderTestItemSlice = (typeof PROVIDER_TEST_ITEM_SLICES)[number];
-const ITEM_ID_PATTERN = /^(?:S40|S87|S17c)\/[a-z0-9-]+\/[1-9][0-9]{0,5}$/u;
+const ITEM_ID_PATTERN = /^(?:S40|S87|S17c|S84|S30|S22)\/[a-z0-9-]+\/[1-9][0-9]{0,5}$/u;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
 /**
  * What one ledger line records the sending of. A line without `kind` is a model call: every line written before the
@@ -217,6 +219,8 @@ export interface ProviderCacheEntry {
   readonly validation?: { readonly family: string; readonly case: string; readonly step: string };
   /** SHA-256 over the response as this entry keeps it (`JSON.stringify(response)`). */
   readonly responseDigest?: string;
+  /** SSE answer assembled once. A partial entry is evidence of an unknown outcome, never a replayable answer. */
+  readonly streamedAnswer?: { readonly complete: boolean; readonly chunks: ReadonlyArray<string> };
 }
 
 /** A cache entry as a reader finds it: absent, whole, or present and unreadable — which is never a miss. */
@@ -808,7 +812,14 @@ async function readEntryFile(path: string): Promise<ProviderEntryRead> {
       typeof entry.model !== 'string' || entry.requestDigest !== providerRequestDigest(entry.requestBody) ||
       typeof entry.transmittedAt !== 'string' || !Number.isFinite(Date.parse(entry.transmittedAt)) ||
       !Object.hasOwn(entry, 'response') || (entry.usage !== null && (!validUsage(entry.usage))) ||
-      !sameUsage(entry.usage, usageOfResponse(entry.response))) {
+      !sameUsage(entry.usage, usageOfResponse(entry.response)) ||
+      (entry.streamedAnswer !== undefined && (typeof entry.streamedAnswer.complete !== 'boolean' ||
+        !Array.isArray(entry.streamedAnswer.chunks) || !entry.streamedAnswer.chunks.every((chunk) => typeof chunk === 'string') ||
+        !entry.response || typeof entry.response !== 'object' ||
+        (entry.response as { choices?: { message?: { content?: unknown } }[] }).choices?.[0]?.message?.content !== entry.streamedAnswer.chunks.join('') ||
+        (entry.streamedAnswer.complete
+          ? typeof (entry.response as { choices?: { finish_reason?: unknown }[] }).choices?.[0]?.finish_reason !== 'string'
+          : (entry.response as { choices?: { finish_reason?: unknown }[] }).choices?.[0]?.finish_reason !== null)))) {
       return { state: 'corrupt' };
     }
     return { state: 'present', entry };

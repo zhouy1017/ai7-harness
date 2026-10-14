@@ -63,12 +63,18 @@ export function selectionProcedureStepReason(label: string, reason: string): str
 /** The menu says so while the house has no enabled 可复用工序 to offer. */
 export const SELECTION_PROCEDURES_NONE = '本社还没有启用的可复用工序。';
 /**
- * 润色这段 — the one prototype preset kept — waits for a polishing 工序 that yields 修改建议, which no review category of the
- * house does; said as its reason until one exists.
+ * 润色这段 (Issue #842) — the one prototype preset kept — runs the built-in polishing 工序 on the selected words at once: no plan
+ * and no 开始任务, and what it yields is 修改建议 the editor decides on. Whether this launch can run it is the service's to say,
+ * in its own words; until the service has said, the menu says it is finding out.
  */
 export const SELECTION_POLISH_LABEL = '润色这段';
 export const SELECTION_POLISH_HINT = '常用工序 · 生成修改建议';
-export const SELECTION_POLISH_REASON = '润色这段尚未接通：要有一项生成修改建议的润色工序';
+export const SELECTION_POLISH_READING = '正在确认润色这段能否使用…';
+export const SELECTION_POLISH_STATUS = {
+  requesting: '正在润色所选文字…只发送所选文字和它所在段落的前后文。',
+  failed: '润色这段没有完成。',
+  unreadable: '无法读取润色的结果；已生成的修改建议仍在稿件里。',
+} as const;
 /** 再选一段加入 is refused (PR #700's reading): joining a second range would widen the Task to text never selected. */
 export const SELECTION_JOIN_REFUSED = '只就这一段发起；不提供「再选一段加入」，合并两段会把范围扩大到没有选中的文字。';
 /** Steps whose Series material the editor chooses apart at each run (REUSE-049, REUSE-050): unticked, the editor's to tick. */

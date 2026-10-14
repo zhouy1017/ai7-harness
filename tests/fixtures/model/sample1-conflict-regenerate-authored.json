@@ -1,0 +1,23 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-conflict-regenerate-authored",
+  "description": "Authored 基于当前稿件重新生成建议 answer (Issue #842) for the one conflict unit of a Three-way Proposal Conflict constructed from tester edits of exact sample1 (a 修改建议 on one phrase, then typing over part of it), keyed under unit ordinal 0 by the ai7.conflict-regenerate/1 request digest of that unit.",
+  "basedOn": null,
+  "provenance": "authored",
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "e94b8f89617ed00f79e22511493abddfd8ba8e23a8ac845ae0f883eaeca4e584",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.conflict-regenerate.result/1\",\"text\":\"比较特别的占卜\"}",
+        "usage": {
+          "inputTokens": 320,
+          "outputTokens": 60
+        }
+      }
+    }
+  ]
+}

@@ -31,6 +31,8 @@ import {
   VALIDATION_DELTA_ARGUMENT,
   parseTrustedLaunchForm,
   type AskAboutSelectionInput,
+  type InspectFastInteractionRequestInput,
+  type PolishSelectionInput,
   type ConvertDialogueToChangeSuggestionInput,
   type DialogueAttemptInput,
   type DialogueProjection,
@@ -2161,6 +2163,22 @@ function registerRendererHandlers(
         requireManuscriptCapability(owned, input);
         const result = await service.call('resolveProposalConflict', input);
         if (result.markId !== input.markId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '处理结果不属于这处冲突。');
+        return result;
+      });
+    }),
+  );
+  // 基于当前稿件重新生成建议 (Issue #842): gated as 保存解决草稿 is; the service checks it at once and answers it beside its loop,
+  // so this returns the request in flight, which the surface reads again through inspectFastInteractionRequest.
+  ipcMain.handle(IPC_CHANNELS.regenerateProposalConflictUnit, (event, input: ServiceOperationMap['regenerateProposalConflictUnit']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const capability = requireManuscriptCapability(owned, input);
+        const result = await service.call('regenerateProposalConflictUnit', input);
+        if (result.markId !== input.markId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '重新生成的结果不属于这处冲突。');
+        requireConflictOfCapability(capability, result);
         return result;
       });
     }),
@@ -4477,6 +4495,52 @@ function registerRendererHandlers(
         requireDialogueOfRoute(route, result.dialogue);
         return result;
       });
+    }),
+  );
+  // 润色这段 (Issue #842): the exact selection of the manuscript this window holds, of the route's Book; the renderer names
+  // neither the Book nor anything sent. Its request, and a regeneration's, are read again bound to the route's Book.
+  ipcMain.handle(IPC_CHANNELS.inspectFastInteractionRoutes, (event) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const routeGeneration = owned.routeGeneration;
+      const routeRequestSequence = owned.routeRequestSequence;
+      const result = await service.call('inspectFastInteractionRoutes', { bookId: route.bookId });
+      requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+      if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '润色和重新生成的可用情况不属于当前图书工作台。');
+      return result;
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.polishSelection, (event, input: PolishSelectionInput) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object' && input.selection !== null && typeof input.selection === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      return serializeEffect(async () => {
+        requireAuthority();
+        const route = requireCurrentBookRoute(owned);
+        const routeGeneration = owned.routeGeneration;
+        requireManuscriptCapability(owned, input.selection);
+        const result = await service.call('polishSelection', { bookId: route.bookId, selection: input.selection });
+        requireCurrentRouteGeneration(owned, routeGeneration);
+        if (result.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '润色不属于当前图书工作台。');
+        return result;
+      });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectFastInteractionRequest, (event, input: InspectFastInteractionRequestInput) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      const route = requireCurrentBookRoute(owned);
+      const routeGeneration = owned.routeGeneration;
+      const routeRequestSequence = owned.routeRequestSequence;
+      const result = await service.call('inspectFastInteractionRequest', { bookId: route.bookId, requestId: input.requestId });
+      requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
+      const bookId = result.kind === 'editorial-polish' ? result.polish.bookId : result.regeneration.bookId;
+      if (bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '这次请求不属于当前图书工作台。');
+      return result;
     }),
   );
   ipcMain.handle(IPC_CHANNELS.inspectProductionDocuments, (event) =>

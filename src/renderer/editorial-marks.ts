@@ -1,5 +1,5 @@
 import { MAX_DIALOGUE_QUESTION_CHARACTERS, SERIES_KNOWLEDGE_CLASSES, SERIES_KNOWLEDGE_CLASS_LABELS } from '../shared/protocol.js';
-import type { AskAboutSelectionInput, DialogueProjection } from '../shared/protocol.js';
+import type { AskAboutSelectionInput, DialogueProjection, EditorialPolishProjection, FastInteractionRoutesProjection, PolishSelectionInput } from '../shared/protocol.js';
 import {
   DIALOGUE_ASK,
   DIALOGUE_COMPOSER_TITLE,
@@ -64,7 +64,8 @@ import { sheetChosenApartLine } from './captured-procedure-labels.js';
 import {
   SELECTION_POLISH_HINT,
   SELECTION_POLISH_LABEL,
-  SELECTION_POLISH_REASON,
+  SELECTION_POLISH_READING,
+  SELECTION_POLISH_STATUS,
   SELECTION_TASK_CHOSEN_APART_LEGEND,
   SELECTION_TASK_DOCUMENT_REASON,
   SELECTION_TASK_FIELD,
@@ -142,6 +143,17 @@ interface MountOptions {
   /** The question was asked: its dialogue comes to the foreground beside the manuscript. */
   onAsked?(dialogue: DialogueProjection): void;
   /**
+   * 润色这段 (Issue #842): whether this launch can run it, the request on the selected words — no plan and no 开始任务 — read
+   * again until it settles, and the window's marks read again once it placed its 修改建议. Without it (a Production Document)
+   * the item stays disabled with its reason.
+   */
+  polish?: {
+    routes(): Promise<FastInteractionRoutesProjection>;
+    polish(input: PolishSelectionInput): Promise<EditorialPolishProjection>;
+    inspect(taskId: string): Promise<EditorialPolishProjection>;
+    marks(): Promise<{ readonly journalSequence: number; readonly marks: ReadonlyArray<EditorialMarkAnchorProjection>; readonly truncated: boolean } | null>;
+  };
+  /**
    * 就这段发起任务… (Issue #423, S77b; TASK-001, TASK-046): the Tasks the selected words' paragraph can start now, and the one
    * the editor chose prepared on that paragraph — its plan opened beside the manuscript. `prepare` answers whether the plan was
    * prepared. Without it (a Production Document) the item stays disabled with its reason.
@@ -170,6 +182,9 @@ interface MountOptions {
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
 }
+
+/** How often 润色这段 reads its request again while it is in flight (Issue #842). */
+const POLISH_READ_AGAIN_MS = 400;
 
 /** A composer whose paragraph left the window as another one was loaded (Issue #423 review, P2-3). */
 export const COMPOSER_LEFT_WINDOW = '撰写框所在的段落已不在当前稿件窗口中，撰写框已关闭；没有记下任何内容。';
@@ -1424,6 +1439,20 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     ...(options.startTaskOnSelection === undefined ? { disabledReason: AI7_TASK_REASON }
       : selectionReason !== undefined ? { disabledReason: selectionReason } : { run }),
   });
+  /** Whether this launch can run 润色这段 (Issue #842), as the service says it: read again for each selection menu. */
+  const polishOptions = options.polish;
+  const polishRoute = polishOptions === undefined ? null : latestAnswer(() => polishOptions.routes(), () => !destroyed);
+  void polishRoute?.refresh();
+  const polishItem = (selectionReason: string | undefined): MenuItem => {
+    const route = polishRoute?.current()?.editorialPolish ?? null;
+    return {
+      action: 'preset-polish', label: SELECTION_POLISH_LABEL, hint: SELECTION_POLISH_HINT,
+      ...(polishOptions === undefined ? { disabledReason: AI7_TASK_REASON }
+        : selectionReason !== undefined ? { disabledReason: selectionReason }
+          : route === null ? { disabledReason: SELECTION_POLISH_READING }
+            : !route.available ? { disabledReason: route.reason ?? SELECTION_POLISH_READING } : { run: () => void polishSelection() }),
+    };
+  };
   /** The house's 可复用工序 as they apply to a selection of this Book: read again for each selection menu, drawn once read. */
   const startOnSelection = options.startTaskOnSelection;
   const houseProcedures = startOnSelection === undefined ? null : latestAnswer(() => startOnSelection.procedures(), () => !destroyed);
@@ -1446,9 +1475,59 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         ...(selectionReason !== undefined ? { disabledReason: selectionReason }
           : entry.disabledReason !== null ? { disabledReason: entry.disabledReason } : { run: () => void composeTask(entry.value) }),
       })),
-      { action: 'preset-polish', label: SELECTION_POLISH_LABEL, hint: SELECTION_POLISH_HINT, disabledReason: SELECTION_POLISH_REASON },
+      polishItem(selectionReason),
     ],
   });
+
+  /**
+   * 润色这段 (Issue #842; the Owner's decision 18 of 2026-10-13): the selected words go to the model at once with their paragraph's
+   * context, and what comes back is 修改建议 on those words — open, attributed to the polish, never accepted or applied. The
+   * request is read again until it settles; the editor keeps working meanwhile, and a suggestion whose words changed is not placed.
+   */
+  const polishSelection = async (): Promise<void> => {
+    if (refuseWhileBusy() || polishOptions === undefined) return;
+    const range = await settledRange();
+    if (range === null || destroyed) return;
+    closeMenu();
+    const current = editor.currentWindow();
+    options.setStatus(SELECTION_POLISH_STATUS.requesting, 'busy');
+    let settled: EditorialPolishProjection;
+    try {
+      settled = await polishOptions.polish({
+        selection: {
+          ...binding(),
+          baseRevisionId: current.revisionId,
+          expectedJournalSequence: current.journalSequence,
+          blockId: range.blockId,
+          baseBlockDigest: range.blockDigest,
+          fromGrapheme: range.fromGrapheme,
+          toGrapheme: range.toGrapheme,
+          selectedText: range.text,
+        },
+      });
+    } catch (error) {
+      options.setStatus(options.errorMessage(error, SELECTION_POLISH_STATUS.failed), 'error');
+      return;
+    }
+    try {
+      while (settled.state === 'requesting' && !destroyed) {
+        await new Promise((resolve) => window.setTimeout(resolve, POLISH_READ_AGAIN_MS));
+        settled = await polishOptions.inspect(settled.taskId);
+      }
+    } catch (error) {
+      if (!destroyed) options.setStatus(options.errorMessage(error, SELECTION_POLISH_STATUS.unreadable), 'error');
+      return;
+    }
+    if (destroyed) return;
+    options.setStatus(settled.label, settled.state === 'suggested' || settled.state === 'nothing-to-suggest' ? 'success' : 'error');
+    if (settled.markIds.length === 0) return;
+    // The new 修改建议 are drawn from the window as the service holds it once the editor's own typing is written.
+    await editor.flush();
+    const read = await polishOptions.marks().catch(() => null);
+    if (read === null || destroyed || read.journalSequence !== editor.currentWindow().journalSequence) return;
+    editor.setMarks(read.marks, read.truncated);
+    options.marksChanged?.();
+  };
 
   /**
    * 就这段发起任务… (Issue #423, S77b; TASK-001 to 003, TASK-046): the composer anchored to the selected words' paragraph, which
@@ -1729,12 +1808,15 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       aiTaskGroup(range.kind === 'range' ? undefined : why ?? selectionMenuReason(range.kind), shownProcedures),
       ...(knowledge === null ? [] : [knowledge]),
     ], at);
-    if (!reread || (inSeries === null && houseProcedures === null)) return;
+    if (!reread || (inSeries === null && houseProcedures === null && polishRoute === null)) return;
     const drawn = menu;
-    // The Book's Series and the house's procedures are read again together; the menu is drawn again once when either moved.
-    void Promise.all([inSeries?.refresh(), houseProcedures?.refresh()]).then(() => {
+    const shownPolish = JSON.stringify(polishRoute?.current()?.editorialPolish ?? null);
+    // The Book's Series, the house's procedures and whether 润色这段 can run are read again together; the menu is drawn again once
+    // when any of them moved.
+    void Promise.all([inSeries?.refresh(), houseProcedures?.refresh(), polishRoute?.refresh()]).then(() => {
       if (drawn === undefined || menu !== drawn) return;
-      if (sameSeriesGroup(shown, inSeries?.current() ?? null) && sameProcedureEntries(shownProcedures, houseProcedures?.current() ?? null)) return;
+      if (sameSeriesGroup(shown, inSeries?.current() ?? null) && sameProcedureEntries(shownProcedures, houseProcedures?.current() ?? null) &&
+        shownPolish === JSON.stringify(polishRoute?.current()?.editorialPolish ?? null)) return;
       // The answer differs from what this menu shows: draw it again from the corner it stands at — it moves only if it no
       // longer fits the window — keeping the item the editor is on, a 书系 entry by its Series (Issue #642 review).
       const active = document.activeElement;

@@ -1,0 +1,47 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-recorded-v41-conflict-regenerate",
+  "description": "Recorded 基于当前稿件重新生成建议 answer (Issue #842) for the one conflict unit of a conflict constructed from tester edits of exact sample1, under developer-live Provider Processing v11, Go route deepseek-v4.1-flash, converted from the Provider Result Cache; keyed under unit ordinal 0 by the ai7.conflict-regenerate/1 request digest · 来源测试项 S22/conflict-regenerate/1 · 模型 deepseek-v4.1-flash · 生成于 2026-10-14",
+  "basedOn": null,
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "e94b8f89617ed00f79e22511493abddfd8ba8e23a8ac845ae0f883eaeca4e584",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.conflict-regenerate.result/1\",\"text\":\"比较特别的占卜\"}",
+        "usage": {
+          "inputTokens": 355,
+          "outputTokens": 362
+        }
+      },
+      "capture": {
+        "subject": "conflict-regenerate",
+        "itemId": "S22/conflict-regenerate/1",
+        "selectedItemId": "S22/conflict-regenerate/1",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "c3a6b351cc1af5bfe2947da5b3f720c2162f65d1c0a5d4b8bca8dd7a91033789",
+        "taskPromptContractDigest": "c3a6b351cc1af5bfe2947da5b3f720c2162f65d1c0a5d4b8bca8dd7a91033789",
+        "capturedAt": "2026-10-14T05:27:26.409Z",
+        "providerRequestDigest": "394c415751f6233ff6b73e1313dab7b80ea75a070ca288d1e5b5e34896bf9a4f",
+        "providerResponseDigest": "2c28d27f9a06230f6e34dc075a0dc2bb1560446b0612c99d04289abbfbe5e877",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "afa7f9247b53f14962884afb078554a21ac13038de04966360e271d5fb392d80",
+        "generation": "cbb6100152c3087385198a0316905dc79c710203dbb203ad483ff8aa5112c530",
+        "validation": {
+          "family": "conflict-regenerate",
+          "case": "sample1-edited-phrase",
+          "step": "conflict-regenerate/unit"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "874b2ac605581ba88e1adca1baf0cb4b07a3b2a42c30573d10f0f9e90a776626"
+      }
+    }
+  ]
+}

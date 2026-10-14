@@ -54,8 +54,23 @@ export const CONFLICT_PATH_LABELS: Readonly<Record<ConflictPath, string>> = {
   regenerate: '基于当前稿件重新生成建议',
   defer: '暂不处理',
 };
-/** 基于当前稿件重新生成建议 waits for a Task started on a selection, as every AI7 task entry on the manuscript does. */
-export const CONFLICT_REGENERATE_REASON = '重新生成建议尚未接通';
+/**
+ * 基于当前稿件重新生成建议 (Issue #842): one 冲突 unit's words go to the model, and what comes back is put into the Resolution Draft
+ * for the editor to resolve. Whether this launch can run it is the service's to say, in its own words; until the service has
+ * said, the path says it is finding out.
+ */
+export const CONFLICT_REGENERATE_READING = '正在确认能否重新生成建议…';
+export const CONFLICT_REGENERATE_NOTE = '把一处冲突的三段文字和原提议的理由交给模型，重新写这一处的建议放进解决草稿；稿件和这条修改建议都不会改动，是否保存为新提案版本由你决定。';
+export function conflictRegenerateUnitLabel(ordinal: number): string {
+  return `重新生成第 ${ordinal} 处`;
+}
+/** The draft unit whose words AI7 regenerated, said beside it until the editor changes them. */
+export const CONFLICT_REGENERATED_TAG = 'AI7 重新生成';
+export const CONFLICT_REGENERATE_STATUS = {
+  requesting: '正在基于当前稿件重新生成这一处的建议…',
+  failed: '重新生成建议没有完成。',
+  unreadable: '无法读取重新生成的结果。',
+} as const;
 
 /** What choosing a path will do, said before the button that does it. */
 export function conflictPathNote(path: ConflictPath, kind: ProposalConflictKind): string {
@@ -67,7 +82,7 @@ export function conflictPathNote(path: ConflictPath, kind: ProposalConflictKind)
     case 'edit-draft':
       return '在下面的解决草稿里逐处选定，再保存为新提案版本；稿件不会改动。';
     case 'regenerate':
-      return CONFLICT_REGENERATE_REASON;
+      return CONFLICT_REGENERATE_NOTE;
     case 'defer':
       return '记下「暂不处理」；这处冲突仍未解决，仍列在这里，解决草稿保留，也仍不能应用。';
   }

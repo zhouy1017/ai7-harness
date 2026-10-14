@@ -28,6 +28,7 @@ import {
 } from '../shared/protocol.js';
 import { CALIBRATION_MIN_ADJUSTMENTS, PREDICTION_MIN_BOOKS_WITH_ACTUALS, calibratedScore, calibrationOffset } from '../shared/evaluation-calibration.js';
 import { boundedEvidenceSet, contentWithRewrite, type RewritableEvaluation } from './evaluation-rewrites.js';
+import { disclosedNote } from './evaluation/unverified-disclosure.js';
 import {
   EVALUATION_ADJUSTMENT_REASONS,
   EVALUATION_FINALIZE_NEEDS_SCORE,
@@ -775,10 +776,20 @@ export type EvaluationInitialDraft = Omit<EvaluationInitialDraftProjection, 'ite
   readonly items: ReadonlyArray<Omit<EvaluationInitialDraftProjection['items'][number], 'evidenceCount'>>;
 };
 
-/** AI7's 初评 as 评估 shows it: each item's notes bounded, with their count. */
-function initialDraftProjection<T extends EvaluationInitialDraft>(draft: T): Omit<T, 'items'> & Pick<EvaluationInitialDraftProjection, 'items'> {
+/**
+ * AI7's 初评 as 评估 shows it: each item's notes bounded, with their count, and 未联网核查 on each when the 初评 was produced under
+ * the live route (Issue #429). Only the shown notes carry it: the snapshot a version keeps, and the record 审稿意见 and a
+ * rewrite read, hold AI7's notes exactly as written.
+ */
+function initialDraftProjection<T extends EvaluationInitialDraft>(draft: T, unverified: boolean): Omit<T, 'items'> & Pick<EvaluationInitialDraftProjection, 'items'> {
   const evidence = boundedEvidenceSet(draft.items.map((item) => item.evidence));
-  return { ...draft, items: draft.items.map((item, index) => ({ ...item, ...evidence[index]! })) };
+  return {
+    ...draft,
+    items: draft.items.map((item, index) => {
+      const shown = evidence[index]!;
+      return { ...item, ...shown, evidence: shown.evidence.map((note) => ({ ...note, note: disclosedNote(note.note, unverified) })) };
+    }),
+  };
 }
 
 /** Where a new version binds: the Book's primary manuscript at its current revision, and whether edits wait in its journal. */
@@ -801,6 +812,8 @@ export interface InitialEvaluationFacts {
 export interface InitialEvaluationReader {
   latest(bookId: string): InitialEvaluationFacts | null;
   task(bookId: string): Pick<EvaluationInitialProjection, 'task' | 'prepare'>;
+  /** Whether a 初评 revision was produced under the live route (Issue #429): its notes then show 未联网核查. */
+  producedUnverified?(revisionId: string): boolean;
 }
 
 /** One 定稿 version as 审稿意见 drafts from it (S81c): its words, the entry that closed it, and the 初评 it began from. */
@@ -936,6 +949,11 @@ export class EvaluationRecords {
   readonly #kept = new Map<string, { readonly stamp: string; readonly chain: Chain | null; readonly left: Carried }>();
   /** The rewrites the editor accepted, as read once (Issue #708): a decision and the words it took never change. */
   readonly #accepted = new Map<string, AcceptedEvaluationRewrite>();
+
+  /** Whether AI7's 初评 revision was produced under the live route, by the policy pin it recorded (Issue #429). */
+  #producedUnverified(revisionId: string): boolean {
+    return this.#initial.producedUnverified?.(revisionId) ?? false;
+  }
 
   constructor(
     db: DatabaseSync,
@@ -1893,7 +1911,7 @@ export class EvaluationRecords {
         finalized: last.kind === 'finalized' ? { actor: EVALUATION_ACTOR, at: last.recordedAt } : null,
         recommendationBlocked: recommendationBlocked(last.content.risks),
         comparison: this.#comparison(previous, { record: shown.record, content: last.content }),
-        initial: snapshot === null ? null : initialDraftProjection(snapshot.draft),
+        initial: snapshot === null ? null : initialDraftProjection(snapshot.draft, this.#producedUnverified(snapshot.draft.revisionId)),
         calibration: snapshot?.calibration ?? null,
         ai7WordsNotice: shown.notice,
         skippedRecords: shown.record.skipped.map((entry) => entry.ordinal),
@@ -1942,7 +1960,7 @@ export class EvaluationRecords {
       initial: {
         ...initialTask,
         latest: latestInitial === null ? null
-          : { ...initialDraftProjection({ ...latestInitial.draft, total: totalOfScores(latestInitial.profile ?? profile, latestInitial.draft.items) }), current: latestInitial.current, profile: latestInitial.profile ?? profile },
+          : { ...initialDraftProjection({ ...latestInitial.draft, total: totalOfScores(latestInitial.profile ?? profile, latestInitial.draft.items) }, this.#producedUnverified(latestInitial.draft.revisionId)), current: latestInitial.current, profile: latestInitial.profile ?? profile },
       },
       readersReport,
       market: this.#extras.market(bookId),

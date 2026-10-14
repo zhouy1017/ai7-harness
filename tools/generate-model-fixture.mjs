@@ -324,6 +324,9 @@ export function parseGenerationArguments(argv) {
 }
 
 const SAMPLE1_SOURCE_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
+/** #429: the table each evaluation kind freezes its contract input in, and the unit subject its messages parse as. */
+const EVALUATION_TASK_TABLES = { evaluation: 'initial_evaluation_tasks', 'readers-report': 'readers_report_tasks', 'evaluation-rewrite': 'evaluation_rewrite_tasks' };
+const EVALUATION_UNIT_SUBJECTS = { evaluation: 'evaluation-unit', 'readers-report': 'readers-unit', 'evaluation-rewrite': 'rewrite-unit' };
 const TOOL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 let sample1Owners;
 
@@ -342,8 +345,18 @@ async function loadSample1Owners() {
         "export { reviewCategoryKindDefinition } from './src/service/review/review-category-kind.ts';",
         "export { reviewCategoryContract, reviewCategoryContractDigest } from './src/service/review/review-category-contract.ts';",
         "export { reviewCategoryContractInput } from './src/service/review/category-configuration.ts';",
+        "export { initialEvaluationKindDefinition } from './src/service/evaluation/initial-evaluation-kind.ts';",
+        "export { readersReportKindDefinition } from './src/service/evaluation/readers-report-kind.ts';",
+        "export { evaluationRewriteKindDefinition } from './src/service/evaluation/evaluation-rewrite-kind.ts';",
+        "export { BUILTIN_EVALUATION_PROFILE, evaluationProfileDigest } from './src/service/evaluation-records.ts';",
+        // #810: the writing Task's own owners, read back from its frozen row.
+        "export { writingKindDefinition } from './src/service/writing/writing-kind.ts';",
+        "export { writingContract, writingContractDigest } from './src/service/writing/writing-contract.ts';",
+        "export { WritingTasks } from './src/service/writing-tasks.ts';",
         "export { buildRunReportReflectionMessage } from './src/service/analysis/run-report-contract.ts';",
         "export { runReportAccountingOf } from './src/service/analysis/run-report.ts';",
+        "export { EDITORIAL_POLISH_PROMPT_CONTRACT, parseEditorialPolishMessage } from './src/service/fast-role/polish-contract.ts';",
+        "export { CONFLICT_REGENERATE_PROMPT_CONTRACT, parseConflictRegenerateMessage } from './src/service/fast-role/conflict-regenerate-contract.ts';",
       ].join('\n'), resolveDir: TOOL_ROOT, loader: 'ts' },
       bundle: true, platform: 'node', format: 'esm', write: false, logLevel: 'silent',
     });
@@ -353,12 +366,46 @@ async function loadSample1Owners() {
 }
 
 /**
+ * The two Fast Interaction Role subjects of Issue #842 carry no Task record to rebuild their message from: what proves them
+ * is the words themselves. A 润色这段 message is exempt only when its context, selection and context read contiguously in one
+ * block of exact `sample1` as the existing DOCX extractor reads the hash-checked file; a 重新生成建议 message only when its
+ * context, 提案基准 and context do, its 当前稿件 and 原提议 — the tester's edits of `sample1` — being bounded beside them. The
+ * system prompt must be the kind's frozen contract and the message must read back exactly. Anything else is not proven, and
+ * the ordinary echo rule then decides.
+ */
+const FAST_ROLE_SUBJECTS = ['editorial-polish', 'conflict-regenerate'];
+/** How far a conflict unit's 当前稿件 or 原提议 may exceed its 提案基准 and still read as an edit of it. */
+const MAX_TESTER_EDIT_EXCESS = 64;
+
+async function verifySample1FastRoleExcerpt(parsed) {
+  try {
+    const source = join(TOOL_ROOT, 'SampleBooks', 'sample1.docx');
+    if (sha256Hex(await readFile(source)) !== SAMPLE1_SOURCE_SHA256) return false;
+    const owners = await loadSample1Owners();
+    const polish = parsed.subject === 'editorial-polish';
+    const contract = polish ? owners.EDITORIAL_POLISH_PROMPT_CONTRACT : owners.CONFLICT_REGENERATE_PROMPT_CONTRACT;
+    if (parsed.carriedMessageCount !== 1 || parsed.systemMessages.length !== 1 || parsed.systemMessages[0] !== contract.systemPrompt) return false;
+    const words = polish ? owners.parseEditorialPolishMessage(parsed.unitMessage) : owners.parseConflictRegenerateMessage(parsed.unitMessage);
+    if (words === null || (polish ? words.selection : words.base).length === 0) return false;
+    if (!polish && [words.current, words.proposed].some((edited) => edited.length > words.base.length + MAX_TESTER_EDIT_EXCESS)) return false;
+    const excerpt = polish ? `${words.before}${words.selection}${words.after}` : `${words.before}${words.base}${words.after}`;
+    const blocks = [];
+    await owners.parseDocx(source, 'sample1.docx', (block) => blocks.push(block.text), { digest: SAMPLE1_SOURCE_SHA256, bytes: 29_550 });
+    return blocks.some((text) => text.includes(excerpt));
+  } catch {
+    // An excerpt that cannot be proved is not exempt: the ordinary echo rule decides, and refuses manuscript text.
+    return false;
+  }
+}
+
+/**
  * ADR 0079 §5: only the exact admitted carrier is exempt. Its frozen product manifest is checked
  * against the existing DOCX extractor; the entire selected stage message is rebuilt from that
  * task's integrity-checked records. A flag, filename, declared digest or validation label is never proof.
  * Protected records stay in the external read-only store, and only the sanitized candidate is emitted.
  */
 export async function verifySample1Capture(request, selection, parsed) {
+  if (FAST_ROLE_SUBJECTS.includes(parsed.subject)) return verifySample1FastRoleExcerpt(parsed);
   if (request.sample1Store === undefined && request.sample1Task === undefined) return false;
   let step = 'source';
   const fail = () => { throw new FixtureGenerationError('FIXTURE_GEN/sample1-source-unproved', step); };
@@ -389,7 +436,46 @@ export async function verifySample1Capture(request, selection, parsed) {
     const envelope = plan('plan-envelope');
     let contract = contracts.find((candidate) => candidate.digest === selection.taskPromptContractDigest);
     let definition;
-    if (contract === undefined) {
+    // A Task's kind is read only when no baseline contract matched; a store without Task Intents holds no evaluation Task.
+    const kind = contract !== undefined || database.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'analysis_task_intents'").get() === undefined
+      ? undefined : database.prepare('SELECT kind FROM analysis_task_intents WHERE task_intent_id = ?').get(request.sample1Task)?.kind;
+    const evaluation = typeof kind === 'string' && Object.hasOwn(EVALUATION_TASK_TABLES, kind)
+      ? { table: EVALUATION_TASK_TABLES[kind], subject: EVALUATION_UNIT_SUBJECTS[kind] } : null;
+    let writingTask;
+    if (contract === undefined && kind === 'writing') {
+      // #810: a writing contract is the exact input its Task froze, its 范例 rebuilt from their pinned delivered revisions — never
+      // today's metadata or words. A plan listing 资料库 material, or a Task carrying house people, proves nothing.
+      const snapshot = checked(database.prepare('SELECT canonical_json, sha256 FROM writing_tasks WHERE task_intent_id = ? AND prompt_contract_sha256 = ?')
+        .get(request.sample1Task, selection.taskPromptContractDigest));
+      if (snapshot.taskIntentId !== request.sample1Task || snapshot.materialSources !== undefined || snapshot.input.materials !== undefined) fail();
+      writingTask = new owners.WritingTasks(database).task(request.sample1Task, selection.taskPromptContractDigest);
+      if (writingTask === null || !writingTask.exemplarsReadable || writingTask.materials.length !== 0 ||
+          writingTask.bookId !== manifest.manuscript.bookId || writingTask.input.book.editors.length !== 0) fail();
+      const prompt = owners.writingContract(writingTask.input, writingTask.copyRules);
+      contract = { prompt, digest: owners.writingContractDigest(prompt) };
+      definition = owners.writingKindDefinition(writingTask.input, writingTask.copyRules);
+    } else if (contract === undefined && evaluation !== null) {
+      // #429: an evaluation contract is the exact input its Task froze — the house profile it was prepared under, or the 定稿
+      // record or saved entry with its exemplars — never today's profile or record. A plan listing 资料库 material proves nothing.
+      if (plan('execution-plan').materialReferences !== undefined) fail();
+      const rows = database.prepare(`SELECT canonical_json, sha256, prompt_contract_sha256 FROM ${evaluation.table} WHERE task_intent_id = ?`).all(request.sample1Task);
+      if (rows.length !== 1) fail();
+      const snapshot = checked(rows[0]);
+      if (snapshot.taskIntentId !== request.sample1Task || snapshot.promptContractSha256 !== rows[0].prompt_contract_sha256) fail();
+      if (kind === 'evaluation') {
+        // The snapshot's profile reads as its own digest, as the store checks it; the built-in profile's contract is the one the
+        // store builds from its own constant, as `#initialBaseDefinition` does.
+        const { sha256: profileSha256, ...profile } = snapshot.profile ?? {};
+        if (owners.evaluationProfileDigest(profile) !== profileSha256) fail();
+        const builtin = owners.evaluationProfileDigest(owners.BUILTIN_EVALUATION_PROFILE);
+        definition = owners.initialEvaluationKindDefinition(snapshot.profile.sha256 === builtin
+          ? { ...owners.BUILTIN_EVALUATION_PROFILE, sha256: builtin } : snapshot.profile);
+      } else {
+        definition = kind === 'readers-report' ? owners.readersReportKindDefinition(snapshot.input) : owners.evaluationRewriteKindDefinition(snapshot.input);
+      }
+      if (definition.kind !== kind || definition.promptContractDigest !== rows[0].prompt_contract_sha256) fail();
+      contract = { prompt: { systemPrompt: definition.systemPrompt }, digest: definition.promptContractDigest };
+    } else if (contract === undefined) {
       // #809: a review contract is the exact category configuration the Review Run froze, never
       // today's defaults or a category inferred from a filename. Only one Run may own this Task.
       const rows = database.prepare("SELECT DISTINCT r.canonical_json, r.sha256 FROM review_runs r, json_each(r.canonical_json, '$.categories') c WHERE json_extract(c.value, '$.task.taskIntentId') = ?").all(request.sample1Task);
@@ -427,10 +513,21 @@ export async function verifySample1Capture(request, selection, parsed) {
       revision.adapterPin.route !== selection.captured.route || revision.bindingPin.promptContractDigest !== selection.taskPromptContractDigest) fail();
     step = 'message';
     let expected;
-    if (parsed.subject === 'unit' || parsed.subject === 'review-unit') {
+    if (parsed.subject === 'unit' || parsed.subject === 'review-unit' ||
+        (evaluation !== null && parsed.subject === evaluation.subject) || (writingTask !== undefined && parsed.subject === 'writing-unit')) {
       const unit = manifest.units[parsed.unitOrdinal - 1];
       if (unit === undefined) fail();
       expected = definition.buildUnitMessage(unit, manifest.units.length, byId);
+    } else if (parsed.subject === 'task-synthesis' && (evaluation !== null || writingTask !== undefined)) {
+      // The kind's book-level synthesis over the closed units the revision kept, read back by the kind's own record reader.
+      const rows = database.prepare("SELECT canonical_json, sha256, unit_ordinal FROM analysis_unit_results WHERE revision_id = ? AND state = 'closed' ORDER BY unit_ordinal").all(revision.revisionId);
+      const closed = rows.map((row) => {
+        const record = checked(row);
+        if (record.unitOrdinal !== row.unit_ordinal) fail();
+        return { unitOrdinal: record.unitOrdinal, result: definition.unitResultOfRecord(record, record.unitOrdinal) };
+      });
+      if (selection.promptContractDigest !== definition.crossUnit?.promptContractDigest) fail();
+      expected = definition.crossUnit.step.buildMessage(closed, manifest.units.length);
     } else if (parsed.subject === 'reduction') {
       const rows = database.prepare("SELECT canonical_json, sha256 FROM analysis_unit_results WHERE revision_id = ? AND state = 'closed' ORDER BY unit_ordinal").all(revision.revisionId);
       const closed = rows.map((row) => {
@@ -885,6 +982,13 @@ export function parseTaskHeader(text, promptContractDigest) {
   const dialogue = /^AI7 编辑对话 · (提问|接着回答) · 问题摘要 ([0-9a-f]{64})$/u.exec(first);
   if (dialogue !== null) return { subject: 'dialogue', header: null, unitOrdinal: 0,
     requestDigest: sha256Hex(`ai7.editorial-dialogue/1\u0000${promptContractDigest}\u0000${dialogue[1] === '提问' ? 'ask' : 'continue'}\u0000${dialogue[2]}`) };
+  // 润色这段 and 基于当前稿件重新生成建议 (Issue #842), keyed as the deterministic adapter keys them under ordinal 0.
+  const polish = /^AI7 润色这段 · 选段摘要 ([0-9a-f]{64}) · 上下文摘要 ([0-9a-f]{64})$/u.exec(first);
+  if (polish !== null) return { subject: 'editorial-polish', header: null, unitOrdinal: 0,
+    requestDigest: sha256Hex(`ai7.editorial-polish/1\u0000${promptContractDigest}\u0000${polish[1]}\u0000${polish[2]}`) };
+  const regeneration = /^AI7 冲突重新生成 · 冲突单元摘要 ([0-9a-f]{64})$/u.exec(first);
+  if (regeneration !== null) return { subject: 'conflict-regenerate', header: null, unitOrdinal: 0,
+    requestDigest: sha256Hex(`ai7.conflict-regenerate/1\u0000${promptContractDigest}\u0000${regeneration[1]}`) };
   return null;
 }
 
@@ -1078,6 +1182,16 @@ export function mapCachedResponse(entry, selection, ownBlockTexts, request = { i
   refuse(sanitized.isWellFormed() && sanitized.length > 0 && sanitized.length <= 64 * 1024, 'FIXTURE_GEN/response-shape-unsupported', '归一化响应超出夹具文本边界。');
   const points = Array.from(sanitized);
   const chunks = [];
+  if (request.subject === 'dialogue' && entry.streamedAnswer !== undefined) {
+    const stream = entry.streamedAnswer;
+    refuse(stream.complete === true && Array.isArray(stream.chunks) && stream.chunks.every((chunk) => typeof chunk === 'string') &&
+      stream.chunks.join('') === text, 'FIXTURE_GEN/response-shape-unsupported', '流式回答不是可确认的完整聚合。');
+    // Preserve observed delta boundaries when sanitization leaves them intact and the fixture bounds
+    // admit them. Large streams are coalesced below; replay makes no claim about network timing.
+    if (sanitized === text && stream.chunks.length <= 64 && stream.chunks.every((chunk) => chunk.length > 0 && chunk.length <= 4 * 1024)) {
+      return { kind: 'answer-chunks', chunks: [...stream.chunks], usage: { inputTokens, outputTokens } };
+    }
+  }
   for (let index = 0; index < points.length; index += 2_048) chunks.push(points.slice(index, index + 2_048).join(''));
   return request.subject === 'dialogue'
     ? { kind: 'answer-chunks', chunks, usage: { inputTokens, outputTokens } }
@@ -1167,7 +1281,9 @@ export async function generateModelFixture(request, now = new Date()) {
     try { endpoint = new URL(entry.endpoint); } catch { /* Refuse below without echoing the URL. */ }
     refuse(endpoint !== undefined && endpoint.protocol === 'https:' && endpoint.username === '' && endpoint.password === '' &&
       endpoint.search === '' && endpoint.hash === '' && /^[a-z][a-z0-9-]{0,63}$/u.test(entry.route) &&
-      entry.requestShape === 'openai-chat-completions', 'FIXTURE_GEN/entry-invalid', '捕获路由或请求形态无效。');
+      (entry.requestShape === 'openai-chat-completions' ||
+        (entry.requestShape === 'editorial-dialogue-sse' && parsed.subject === 'dialogue' && entry.route === 'opencode-go')),
+      'FIXTURE_GEN/entry-invalid', '捕获路由或请求形态无效。');
   }
   refuse(findManuscriptEcho(request.description, parsed.carriedBlockTexts) === null, 'FIXTURE_GEN/manuscript-echo', '夹具描述仍包含请求内容。');
   const response = mapCachedResponse(entry, selection, parsed.ownBlockTexts, parsed);

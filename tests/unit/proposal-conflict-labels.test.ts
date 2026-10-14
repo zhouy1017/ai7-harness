@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { RESOLVE_CONFLICT_LABEL, SAFE_MERGE_LINE, markSourceLine, markStateLabel } from '../../src/renderer/editorial-mark-labels.js';
 import type { EditorialMarkCardProjection } from '../../src/shared/protocol.js';
+import { fastRoleRouteRefusal } from '../../src/service/fast-role/fast-role-execution.js';
 import {
   CONFLICT_COMPLETION,
   CONFLICT_CONFIRM_LABELS,
@@ -12,7 +13,10 @@ import {
   CONFLICT_PATH_LABELS,
   CONFLICT_QUICK_ACTIONS,
   CONFLICT_REBASED_NOTICE,
-  CONFLICT_REGENERATE_REASON,
+  CONFLICT_REGENERATED_TAG,
+  CONFLICT_REGENERATE_NOTE,
+  CONFLICT_REGENERATE_READING,
+  CONFLICT_REGENERATE_STATUS,
   CONFLICT_RESOLUTION_LABELS,
   CONFLICT_UNIT_KIND_LABELS,
   PROPOSAL_CONFLICT_CLASSIFICATION,
@@ -26,6 +30,7 @@ import {
   conflictPaneLabels,
   conflictPathNote,
   conflictPositionLine,
+  conflictRegenerateUnitLabel,
   conflictSaveReason,
   conflictUnitHeading,
 } from '../../src/renderer/proposal-conflict-labels.js';
@@ -67,15 +72,23 @@ describe('the words of 稿件冲突', () => {
     expect(conflictPositionLine(4, 200, true)).toBe('第 5 处，共 200 处以上未解决');
   });
 
-  it('offers the four paths in their order, none preselected, and regenerating waits for the Task surface', () => {
+  it('offers the four paths in their order, none preselected, and says what regenerating sends and does (Issue #842)', () => {
     expect(CONFLICT_PATHS).toEqual(['keep-current', 'edit-draft', 'regenerate', 'defer']);
     expect(CONFLICT_PATHS.map((path) => CONFLICT_PATH_LABELS[path])).toEqual(['保留当前稿件', '自行编辑解决草稿', '基于当前稿件重新生成建议', '暂不处理']);
-    expect(CONFLICT_REGENERATE_REASON).toBe('重新生成建议尚未接通');
+    expect(CONFLICT_REGENERATE_READING).toBe('正在确认能否重新生成建议…');
+    expect(CONFLICT_REGENERATE_NOTE).toBe('把一处冲突的三段文字和原提议的理由交给模型，重新写这一处的建议放进解决草稿；稿件和这条修改建议都不会改动，是否保存为新提案版本由你决定。');
+    expect(conflictRegenerateUnitLabel(2)).toBe('重新生成第 2 处');
+    expect(CONFLICT_REGENERATED_TAG).toBe('AI7 重新生成');
+    expect(CONFLICT_REGENERATE_STATUS).toEqual({
+      requesting: '正在基于当前稿件重新生成这一处的建议…',
+      failed: '重新生成建议没有完成。',
+      unreadable: '无法读取重新生成的结果。',
+    });
     expect(CONFLICT_CONFIRM_LABELS).toEqual({ keepCurrent: '确认保留当前稿件', defer: '暂不处理，返回稿件' });
     expect(conflictPathNote('keep-current', 'suggestion')).toBe('稿件不变；这条修改建议记为拒绝，原因「保留当前稿件」。');
     expect(conflictPathNote('keep-current', 'reversal')).toBe('稿件不变；这次应用保持有效，只记下这处冲突已按「保留当前稿件」处理。');
     expect(conflictPathNote('defer', 'suggestion')).toContain('仍未解决');
-    expect(conflictPathNote('regenerate', 'suggestion')).toBe(CONFLICT_REGENERATE_REASON);
+    expect(conflictPathNote('regenerate', 'suggestion')).toBe(CONFLICT_REGENERATE_NOTE);
   });
 
   it('names every quick action with its full words, and no action resolves everything at once', () => {
@@ -121,7 +134,8 @@ describe('the words of 稿件冲突', () => {
       REVERSAL_LINE: REVERSAL_CONFLICT_LINE,
       REVERSAL_PROPOSED_LABEL: conflictPaneLabels('reversal').proposed,
       CONTEXT_NOTE: CONFLICT_CONTEXT_NOTE,
-      REGENERATE_REASON: CONFLICT_REGENERATE_REASON,
+      // Service-owned (Issue #842): J-06's launch binds no fixture, so the service says regenerating cannot run there.
+      REGENERATE_REASON: fastRoleRouteRefusal({ fixture: null, live: null }, 'conflict-regenerate')!,
       RESOLVE_CONFLICT: RESOLVE_CONFLICT_LABEL,
       SAFE_MERGE: SAFE_MERGE_LINE,
       DRAFT_SAVED: CONFLICT_DRAFT_STATUS.saved,

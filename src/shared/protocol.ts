@@ -2,7 +2,7 @@ import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './anal
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from './provider-configuration.generated.js';
 
-export const SERVICE_PROTOCOL_VERSION = 128 as const;
+export const SERVICE_PROTOCOL_VERSION = 129 as const;
 export const MAX_FRAME_BYTES = 512 * 1024;
 export const MAX_WINDOW_BLOCKS = 32;
 export const MAX_BLOCK_GRAPHEMES = 2_048;
@@ -215,6 +215,7 @@ export const IPC_CHANNELS = {
   inspectProposalConflict: 'ai7:j06:inspect-proposal-conflict',
   saveProposalConflictDraft: 'ai7:j06:save-proposal-conflict-draft',
   resolveProposalConflict: 'ai7:j06:resolve-proposal-conflict',
+  regenerateProposalConflictUnit: 'ai7:j06:regenerate-proposal-conflict-unit',
   getManuscriptRail: 'ai7:j02:get-manuscript-rail',
   runEditorClipboardCommand: 'ai7:j05:run-editor-clipboard-command',
   listPriorWork: 'ai7:j02:list-prior-work',
@@ -257,6 +258,9 @@ export const IPC_CHANNELS = {
   continueDialogueAnswer: 'ai7:j16:continue-dialogue-answer',
   regenerateDialogueAnswer: 'ai7:j16:regenerate-dialogue-answer',
   convertDialogueToChangeSuggestion: 'ai7:j16:convert-dialogue-to-change-suggestion',
+  inspectFastInteractionRoutes: 'ai7:j05:inspect-fast-interaction-routes',
+  polishSelection: 'ai7:j05:polish-selection',
+  inspectFastInteractionRequest: 'ai7:j05:inspect-fast-interaction-request',
   reviewManuscriptExport: 'ai7:j07:review-manuscript-export',
   chooseManuscriptExportDestination: 'ai7:j07:choose-manuscript-export-destination',
   approveManuscriptExport: 'ai7:j07:approve-manuscript-export',
@@ -1630,6 +1634,11 @@ export interface ProposalConflictDraftProjection {
   /** Every changed unit has a resolution; only then can it be saved as a new Proposal version. */
   complete: boolean;
   savedAt: string;
+  /**
+   * 基于当前稿件重新生成建议 saved this draft (Issue #842): the conflict unit whose words AI7 regenerated, and when. `null` for a
+   * draft the editor saved; a later save of the editor's own carries none, and the regenerated draft stays as it was saved.
+   */
+  regeneration: { unitIndex: number; regeneratedAt: string } | null;
 }
 
 /**
@@ -1697,6 +1706,77 @@ export interface ProposalConflictResolutionProjection {
   blockId: string;
   recordedAt: string;
 }
+
+// ---- 润色这段 and 稿件冲突 › 基于当前稿件重新生成建议 on the Fast Interaction Role (Issue #842) ----------------------------
+
+/** Whether one fast-role action can be asked under this launch for this Book, and why not, in the editor's words. */
+export interface FastInteractionRouteProjection {
+  readonly available: boolean;
+  /** `null` exactly when it is available. */
+  readonly reason: string | null;
+}
+
+/** The two fast-role actions of the Book this window shows: a read; it sends nothing. */
+export interface FastInteractionRoutesProjection {
+  readonly bookId: string;
+  readonly editorialPolish: FastInteractionRouteProjection;
+  readonly conflictRegenerate: FastInteractionRouteProjection;
+}
+
+/** 润色这段: the exact words the editor selected in one block of the Book's manuscript. */
+export interface PolishSelectionInput {
+  readonly selection: DialogueSelectionInput;
+}
+
+/**
+ * What 润色这段 came to: `requesting` while its one request is in flight, then the 修改建议 it placed on the selected words —
+ * AI7-produced, attributed to this polish task, open and never accepted or applied — and each suggestion of the answer it did
+ * not place, with why. `failed` and `withheld` placed nothing; `outcomeUnknown` is a request that may have been sent and whose
+ * answer never came back whole. `taskId` is also the request the surface reads again until it settles.
+ */
+export interface EditorialPolishProjection {
+  readonly bookId: string;
+  readonly taskId: string;
+  readonly state: 'requesting' | 'suggested' | 'nothing-to-suggest' | 'withheld' | 'failed';
+  readonly markIds: ReadonlyArray<string>;
+  readonly withheld: ReadonlyArray<{ readonly ordinal: number; readonly reason: string }>;
+  readonly outcomeUnknown: boolean;
+  /** What happened, in the editor's words. */
+  readonly label: string;
+}
+
+/** 基于当前稿件重新生成建议 for one `conflict` unit of the comparison the editor sees, on exactly its basis. */
+export interface RegenerateProposalConflictUnitInput extends ProposalConflictBindingInput {
+  readonly basisDigest: string;
+  readonly unitIndex: number;
+}
+
+/**
+ * What a regeneration came to: `requesting` while its one request is in flight; then `drafted` saved the regenerated words as
+ * the unit's resolution in a new Resolution Draft, which the editor resolves through the existing paths; `same-as-current` and
+ * `same-as-proposed` saved nothing, the words being the current manuscript's or the old proposal's; `withheld` and `failed`
+ * saved nothing. The surface reads the conflict again once it settles.
+ */
+export interface ProposalConflictRegenerationProjection {
+  readonly requestId: string;
+  readonly bookId: string;
+  readonly manuscriptId: string;
+  readonly branchId: string;
+  readonly markId: string;
+  readonly unitIndex: number;
+  readonly outcome: 'requesting' | 'drafted' | 'same-as-current' | 'same-as-proposed' | 'withheld' | 'failed';
+  readonly outcomeUnknown: boolean;
+  readonly label: string;
+}
+
+/** One fast-role request of this service's lifetime, read again until it settles: a read; it sends nothing. */
+export interface InspectFastInteractionRequestInput {
+  readonly requestId: string;
+}
+
+export type FastInteractionRequestProjection =
+  | { readonly kind: 'editorial-polish'; readonly polish: EditorialPolishProjection }
+  | { readonly kind: 'conflict-regenerate'; readonly regeneration: ProposalConflictRegenerationProjection };
 
 /** The text-processing commands of the selection menu, run by the window that owns the clipboard. */
 export type EditorClipboardCommand = 'cut' | 'copy' | 'paste' | 'paste-plain-text';
@@ -1812,18 +1892,19 @@ export interface ModelServiceConnectionProjection {
  */
 export type TrustedOperationalScope = 'development-ci' | 'developer-live';
 /**
- * Historical v5, v9 and the superseded web reservation v8 remain readable identities; selected v10 admits baseline
- * analysis, editorial dialogue and reference-free review on V4.1. A type member does not select or activate a policy.
+ * Historical v5, v9, v10 and the superseded web reservation v8 remain readable identities; selected v11 admits baseline
+ * analysis, editorial dialogue, reference-free review, writing, the three evaluation contracts, and 润色 and conflict
+ * regeneration Suggestions on V4.1. A type member does not select or activate a policy.
  */
-export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10';
-/** Historical v5 and v7, the superseded web reservation v6, and selected v8. */
-export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8';
+export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11';
+/** Historical v5, v7 and v8, the superseded web reservation v6, and selected v9. */
+export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9';
 export type ProviderProcessingVersion = 'v1' | DeveloperLiveProviderProcessingVersion;
 /** Exact Run Budget Ceiling state: `unset` under development-ci, an explicit total-token ceiling under developer-live. */
 export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: number };
 /**
  * The Run Budget Ceiling a developer-live launch binds: an explicit form ceiling as a total, or the
- * Provider Processing v10 default (unchanged since v9) of 30,000 tokens per frozen Coverage Manifest unit (ADR 0070),
+ * Provider Processing v11 default (unchanged since v9) of 30,000 tokens per frozen Coverage Manifest unit (ADR 0070),
  * resolved once the manifest freezes and before the plan does.
  */
 export type DeveloperLiveCeiling =
@@ -2002,6 +2083,20 @@ export function parseTrustedLaunchForm(raw: RawTrustedLaunchForm): TrustedLaunch
 }
 
 /**
+ * The outbound data categories a Provider Processing rule may name (Issue #841). The Egress Gate recognises these identifiers;
+ * naming one in a rule declares what the gate must accept, and the consuming slices decide when a binding carries it.
+ * `public-or-synthetic` and `editor-selected-manuscript-excerpt` are the original two; the other four arrive with Provider
+ * Processing v11 for writing, evaluation and conflict regeneration (frozen inputs and manuscript excerpts).
+ */
+export type OutboundDataCategoryId =
+  | 'public-or-synthetic'
+  | 'editor-selected-manuscript-excerpt'
+  | 'editor-authored-evaluation-text'
+  | 'house-exemplar-excerpt'
+  | 'book-metadata-and-synopsis'
+  | 'manuscript-conflict-region-excerpt';
+
+/**
  * One allow rule of the selected Provider Processing policy, as the launch verified it from the pinned bytes: the task kinds it
  * admits, the Model Role it binds, that role's exact route, endpoint, model and credential slot, and the outbound data categories
  * it permits. Eligibility only — a rule authorizes no Run, dispatch or Apply on its own.
@@ -2014,7 +2109,13 @@ export interface AdmittedProviderRule {
   readonly endpoint: string;
   readonly model: string;
   readonly credentialSlot: string;
-  readonly outboundDataCategories: readonly string[];
+  readonly outboundDataCategories: readonly OutboundDataCategoryId[];
+  /**
+   * Whether the rule names the kind's one book-level synthesis turn (全书综合 / 综合) as a transmission (Provider Processing
+   * v11). `true` only for writing and the three evaluation contracts; `false` for every rule that does not name the turn,
+   * including the v10 rules, which name their own reduction and reflection steps instead.
+   */
+  readonly crossUnitSynthesisAllowed: boolean;
 }
 
 export interface LaunchPolicyProjection {
@@ -2030,20 +2131,20 @@ export interface LaunchPolicyProjection {
     liveTransmissionAllowed: boolean;
     /**
      * Whether the active Provider Processing policy names the cross-unit reduction's transmission
-     * (ADR 0066). Optional so a denial can carry the same reading; under the verified v10 document it
+     * (ADR 0066). Optional so a denial can carry the same reading; under the verified v11 document it
      * is `true`, and anything else — absent included — means the reduction does not dispatch.
      */
     crossUnitReductionAllowed?: boolean;
     /**
      * Whether the active Provider Processing policy names the assurance sampling suboperation's
-     * transmissions (ADR 0066). Read exactly as `crossUnitReductionAllowed` is: under the verified v10
+     * transmissions (ADR 0066). Read exactly as `crossUnitReductionAllowed` is: under the verified v11
      * document it is `true`; anything else — absent included — means the suboperation does not
      * dispatch at all.
      */
     assuranceSamplingAllowed?: boolean;
     /**
      * Whether the active Provider Processing policy names the Run Report's reflection turn (ADR
-     * 0066 §Run Report). Read exactly as the two keys above are: under the verified v10 document it is
+     * 0066 §Run Report). Read exactly as the two keys above are: under the verified v11 document it is
      * `true`; anything else — absent included — means the turn does not dispatch and the report
      * records `policy-bounded` with its reason.
      */
@@ -11686,6 +11787,11 @@ export interface ServiceOperationMap {
   inspectProposalConflict: { input: ProposalConflictBindingInput; output: ProposalConflictProjection };
   saveProposalConflictDraft: { input: SaveProposalConflictDraftInput; output: ProposalConflictDraftSaveProjection };
   resolveProposalConflict: { input: ResolveProposalConflictInput; output: ProposalConflictResolutionProjection };
+  /**
+   * 基于当前稿件重新生成建议 (Issue #842): one `conflict` unit's words to the Fast Interaction Role; the answer becomes the unit's
+   * resolution in a new Resolution Draft, or is reported when it is the current or the old words. Nothing is applied.
+   */
+  regenerateProposalConflictUnit: { input: RegenerateProposalConflictUnitInput; output: ProposalConflictRegenerationProjection };
   getManuscriptRail: { input: { manuscriptId: string; branchId: string }; output: ManuscriptRailProjection };
   /**
    * Remember where the editor is, so the next entry into this Book returns there (V2-UX-RET-002).
@@ -11793,6 +11899,12 @@ export interface ServiceOperationMap {
   regenerateDialogueAnswer: { input: DialogueAttemptInput & { bookId: string }; output: DialogueProjection };
   /** 转为修改建议: an AI7-produced 修改建议 on the dialogue's selected words, from a completed answer; never applied. */
   convertDialogueToChangeSuggestion: { input: ConvertDialogueToChangeSuggestionInput & { bookId: string }; output: DialogueConversionProjection };
+  /** Whether 润色这段 and 基于当前稿件重新生成建议 can be asked for the Book under this launch (Issue #842): a read. */
+  inspectFastInteractionRoutes: { input: { bookId: string }; output: FastInteractionRoutesProjection };
+  /** 润色这段 (Issue #842): the selected words to the Fast Interaction Role; its answer becomes open 修改建议, never applied. */
+  polishSelection: { input: PolishSelectionInput & { bookId: string }; output: EditorialPolishProjection };
+  /** A 润色这段 or 基于当前稿件重新生成建议 request of the Book, read again until it settles (Issue #842): a read. */
+  inspectFastInteractionRequest: { input: InspectFastInteractionRequestInput & { bookId: string }; output: FastInteractionRequestProjection };
   reviewManuscriptExport: { input: ReviewManuscriptExportInput; output: ManuscriptExportReviewProjection };
   prepareManuscriptExport: { input: PrepareManuscriptExportInput; output: ManuscriptExportPreparationProjection };
   approveManuscriptExport: { input: ApproveManuscriptExportInput; output: ManuscriptExportReceiptProjection };
@@ -12142,6 +12254,8 @@ export interface RendererApi {
   saveProposalConflictDraft(input: SaveProposalConflictDraftInput): Promise<ProposalConflictDraftSaveProjection>;
   /** 确认保留当前稿件, 暂不处理, or 保存为新提案版本; none of them writes the manuscript. */
   resolveProposalConflict(input: ResolveProposalConflictInput): Promise<ProposalConflictResolutionProjection>;
+  /** 基于当前稿件重新生成建议 for one conflict unit (Issue #842); it saves a Resolution Draft at most and writes no manuscript. */
+  regenerateProposalConflictUnit(input: RegenerateProposalConflictUnitInput): Promise<ProposalConflictRegenerationProjection>;
   getManuscriptRail(input: ServiceOperationMap['getManuscriptRail']['input']): Promise<ManuscriptRailProjection>;
   /** Cut, copy or paste in the focused editor through the window itself; the page has no clipboard permission. */
   runEditorClipboardCommand(input: { command: EditorClipboardCommand }): Promise<{ state: 'done' }>;
@@ -12208,6 +12322,12 @@ export interface RendererApi {
   continueDialogueAnswer(input: DialogueAttemptInput): Promise<DialogueProjection>;
   regenerateDialogueAnswer(input: DialogueAttemptInput): Promise<DialogueProjection>;
   convertDialogueToChangeSuggestion(input: ConvertDialogueToChangeSuggestionInput): Promise<DialogueConversionProjection>;
+  /** Whether 润色这段 and 基于当前稿件重新生成建议 can be asked for the Book this window shows (Issue #842): a read. */
+  inspectFastInteractionRoutes(): Promise<FastInteractionRoutesProjection>;
+  /** 润色这段 on the Book this window shows (Issue #842): only the selected words and their paragraph's context are sent. */
+  polishSelection(input: PolishSelectionInput): Promise<EditorialPolishProjection>;
+  /** A 润色这段 or 基于当前稿件重新生成建议 request of the Book this window shows, read again until it settles: a read. */
+  inspectFastInteractionRequest(input: InspectFastInteractionRequestInput): Promise<FastInteractionRequestProjection>;
   /**
    * ④ 导出 (Issue #413): the Export Fidelity Review of one exact version of that Book's Manuscript. A current
    * revision with unsaved edits is saved as a revision first.

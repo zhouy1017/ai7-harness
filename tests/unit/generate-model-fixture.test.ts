@@ -48,6 +48,21 @@ import { parseReadersReportSynthesisMessageHeader, parseReadersReportUnitMessage
 import { parseEvaluationRewriteSynthesisMessageHeader, parseEvaluationRewriteUnitMessageHeader } from '../../src/service/evaluation/evaluation-rewrite-contract.js';
 import { parseWritingSynthesisMessageHeader, parseWritingUnitMessageHeader } from '../../src/service/writing/writing-contract.js';
 import { DIALOGUE_PROMPT_CONTRACT_DIGEST, buildDialogueMessage, dialogueQuestionDigest, dialogueRequestDigest, parseDialogueMessageHeader } from '../../src/service/dialogue/contract.js';
+import {
+  EDITORIAL_POLISH_PROMPT_CONTRACT,
+  EDITORIAL_POLISH_PROMPT_CONTRACT_DIGEST,
+  buildEditorialPolishMessage,
+  editorialPolishContextDigest,
+  editorialPolishRequestDigest,
+  editorialPolishSelectionDigest,
+} from '../../src/service/fast-role/polish-contract.js';
+import {
+  CONFLICT_REGENERATE_PROMPT_CONTRACT,
+  CONFLICT_REGENERATE_PROMPT_CONTRACT_DIGEST,
+  buildConflictRegenerateMessage,
+  conflictRegenerateRegionDigest,
+  conflictRegenerateRequestDigest,
+} from '../../src/service/fast-role/conflict-regenerate-contract.js';
 
 // The S41 generation tool, proven on a cache the tests build in a temporary directory. The real
 // Provider Result Cache of ADR 0067 is never named, read, or listed here, and no generated fixture
@@ -81,7 +96,7 @@ type Tool = {
   longestEchoRun: (field: string, collapsedBlocks: ReadonlyArray<string>) => number | null;
   findManuscriptEcho: (value: unknown, ownBlockTexts: ReadonlyArray<string>) => { path: string; runLength: number } | null;
   redactUnitResultText: (text: string, ownBlockTexts: ReadonlyArray<string>) => string;
-  mapCachedResponse: (entry: unknown, selection: unknown, ownBlockTexts: ReadonlyArray<string>) => Record<string, unknown>;
+  mapCachedResponse: (entry: unknown, selection: unknown, ownBlockTexts: ReadonlyArray<string>, request?: unknown) => Record<string, unknown>;
   generateModelFixture: (request: Request, now?: Date) => Promise<Record<string, unknown>>;
   BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST: string;
   ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST: string;
@@ -602,6 +617,15 @@ describe('generate-model-fixture over the namespaced cache (Issue #808)', () => 
 
   const request = (selector: string): Request => ({ selector, cacheRoot: root, identity: 'generated-808', description: '合成生成夹具', out: join(root, 'out.json') });
 
+  it('maps only complete streamed dialogue aggregates to bounded answer chunks (Issue #833)', () => {
+    const chunks = ['合成回答一。', '合成回答二。'];
+    const response = { choices: [{ message: { content: chunks.join('') } }], usage: { prompt_tokens: 8, completion_tokens: 4 } };
+    const entry = { status: 200, response, streamedAnswer: { complete: true, chunks } };
+    const reading = { subject: 'dialogue', identities: [], carriedBlockTexts: [] };
+    expect(tool.mapCachedResponse(entry, { itemId: ITEM_ID, model: MODEL, requestDigest: UNIT_DIGEST, promptContractDigest: DIALOGUE_PROMPT_CONTRACT_DIGEST, quotaExhausted: false }, [], reading)).toEqual({ kind: 'answer-chunks', chunks, usage: { inputTokens: 8, outputTokens: 4 } });
+    expect(() => tool.mapCachedResponse({ ...entry, streamedAnswer: { complete: false, chunks } }, { itemId: ITEM_ID, model: MODEL, requestDigest: UNIT_DIGEST, promptContractDigest: DIALOGUE_PROMPT_CONTRACT_DIGEST, quotaExhausted: false }, [], reading)).toThrow(/FIXTURE_GEN\/response-shape-unsupported/u);
+  });
+
   it('reads a dialogue capture that names no task contract as its own task, and nothing else (Issue #52, S17c)', async () => {
     const question = '这段的叙述视角是否一致？';
     const message = buildDialogueMessage({ kind: 'ask', selection: '合成的所选文字。', question, kept: null });
@@ -914,5 +938,95 @@ describe('generate-model-fixture provenance edges (Issue #808)', () => {
       response: { choices: [{ message: { content: '{"findings":[]}' } }], usage: { prompt_tokens: 10, completion_tokens: 2 } },
     });
     await expect(tool.generateModelFixture(request(ITEM_ID))).rejects.toMatchObject({ code: 'FIXTURE_GEN/capture-unproven' });
+  });
+});
+
+// Issue #842: 润色这段 and 基于当前稿件重新生成建议 convert under ordinal 0 by the keys the deterministic adapter answers them by.
+// Their manuscript text stays only when the words read contiguously in one block of exact `sample1`; anything else is
+// sanitized as every other capture is, and an echo refuses.
+describe('generate-model-fixture for the Fast Interaction Role kinds (Issue #842)', () => {
+  let root: string;
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'ai7-fixture-gen-842-'));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const request = (selector: string): Request => ({ selector, cacheRoot: root, identity: 'generated-842', description: '合成生成夹具', out: join(root, 'out.json') });
+
+  async function sample1Block(): Promise<string> {
+    const { parseDocx } = await import('../../src/service/docx.js');
+    const texts: string[] = [];
+    await parseDocx(join(REPOSITORY_ROOT, 'SampleBooks', 'sample1.docx'), 'sample1.docx', (block) => texts.push(block.text));
+    return texts.find((text) => text.includes('比较特别卜算'))!;
+  }
+
+  async function send(kind: 'editorial-polish' | 'conflict-regenerate', systemPrompt: string, digest: string, message: string, content: string, step = 'one'): Promise<void> {
+    const cache = new ProviderResultCache(root);
+    await cache.open();
+    const body = canonicalJson({ model: MODEL, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: message }], stream: false });
+    await transmitOnce(cache, answer(content), { purpose: kind, slice: kind === 'editorial-polish' ? 'S30' : 'S22', promptContractDigest: digest, taskPromptContractDigest: digest },
+      { intent: { family: 'fast-interaction-suggestions', case: 'sample1-selected-sentence', delta: null }, step: `${kind}/${step}`, requestShape: 'openai-chat-completions' },
+      OPENCODE_GO_ROUTE_PROFILE, MODEL, ENDPOINT, { method: 'POST', headers: { authorization: 'Bearer placeholder' }, body });
+  }
+
+  it('keys both headers exactly as the contracts do', () => {
+    const polish = buildEditorialPolishMessage({ before: '前文。', selection: '合成的所选文字。', after: '后文。' });
+    expect(tool.parseTaskHeader(polish, EDITORIAL_POLISH_PROMPT_CONTRACT_DIGEST)).toEqual({
+      subject: 'editorial-polish', header: null, unitOrdinal: 0,
+      requestDigest: editorialPolishRequestDigest(EDITORIAL_POLISH_PROMPT_CONTRACT_DIGEST, editorialPolishSelectionDigest('合成的所选文字。'), editorialPolishContextDigest('前文。', '后文。')),
+    });
+    const region = { intent: '合成理由。', base: '甲乙', current: '甲丙', proposed: '甲丁', before: '前文。', after: '后文。' };
+    expect(tool.parseTaskHeader(buildConflictRegenerateMessage(region), CONFLICT_REGENERATE_PROMPT_CONTRACT_DIGEST)).toEqual({
+      subject: 'conflict-regenerate', header: null, unitOrdinal: 0,
+      requestDigest: conflictRegenerateRequestDigest(CONFLICT_REGENERATE_PROMPT_CONTRACT_DIGEST, conflictRegenerateRegionDigest(region)),
+    });
+  });
+
+  it('keeps an exact sample1 polish answer verbatim and refuses an unproved one that echoes the selection', async () => {
+    const block = await sample1Block();
+    const start = block.indexOf('当然，也不是所有男人');
+    const end = block.indexOf('都是众人眼里的有福之人。') + '都是众人眼里的有福之人。'.length;
+    const words = { before: block.slice(Math.max(0, start - 30), start), selection: block.slice(start, end), after: block.slice(end, end + 30) };
+    const content = JSON.stringify({ schema: 'ai7.editorial-polish.result/1', suggestions: [
+      { original: '比较特别卜算', replacement: '比较特别的卜算', reason: '补上「的」。' },
+      { original: '都是众人眼里的有福之人', replacement: '都被众人视为有福之人', reason: '更凝练。' },
+      // A longer quotation, past the echo threshold: what an unproved capture may not keep.
+      { original: words.selection.slice(0, 16), replacement: '合成的改写。', reason: '合成理由。' },
+    ] });
+    await send('editorial-polish', EDITORIAL_POLISH_PROMPT_CONTRACT.systemPrompt, EDITORIAL_POLISH_PROMPT_CONTRACT_DIGEST, buildEditorialPolishMessage(words), content);
+    const fixture = parseModelFixture(await tool.generateModelFixture(request('S30/editorial-polish/1'), new Date('2026-10-14T00:00:00.000Z')));
+    expect(fixture.entries[0]).toMatchObject({
+      unitOrdinal: 0,
+      requestDigest: editorialPolishRequestDigest(EDITORIAL_POLISH_PROMPT_CONTRACT_DIGEST, editorialPolishSelectionDigest(words.selection),
+        editorialPolishContextDigest(words.before, words.after)),
+      response: { kind: 'unit-result', text: content },
+    });
+    expect(fixture.entries[0]!.capture).toMatchObject({ subject: 'editorial-polish', itemId: 'S30/editorial-polish/1', promptContractDigest: EDITORIAL_POLISH_PROMPT_CONTRACT_DIGEST });
+    // The same answer on words that are not exact sample1's is not exempt, and its echo of the selection refuses.
+    const forged = { ...words, selection: `${words.selection}合成的补句。` };
+    await send('editorial-polish', EDITORIAL_POLISH_PROMPT_CONTRACT.systemPrompt, EDITORIAL_POLISH_PROMPT_CONTRACT_DIGEST, buildEditorialPolishMessage(forged), content, 'forged');
+    await expect(tool.generateModelFixture(request('S30/editorial-polish/2'))).rejects.toThrowError(/FIXTURE_GEN\/manuscript-echo/u);
+  });
+
+  it('keeps a regeneration on a conflict made from tester edits of sample1, its context and 提案基准 sample1\'s own', async () => {
+    const block = await sample1Block();
+    const at = block.indexOf('比较特别卜算');
+    const region = { intent: '补上结构助词「的」。', base: '比较特别卜算', current: '比较特别占卜', proposed: '比较特别的卜算', before: block.slice(at - 30, at), after: block.slice(at + 6, at + 36) };
+    const content = JSON.stringify({ schema: 'ai7.conflict-regenerate.result/1', text: '比较特别的占卜' });
+    await send('conflict-regenerate', CONFLICT_REGENERATE_PROMPT_CONTRACT.systemPrompt, CONFLICT_REGENERATE_PROMPT_CONTRACT_DIGEST, buildConflictRegenerateMessage(region), content);
+    const fixture = parseModelFixture(await tool.generateModelFixture(request('S22/conflict-regenerate/1'), new Date('2026-10-14T00:00:00.000Z')));
+    expect(fixture.entries[0]).toMatchObject({
+      unitOrdinal: 0,
+      requestDigest: conflictRegenerateRequestDigest(CONFLICT_REGENERATE_PROMPT_CONTRACT_DIGEST, conflictRegenerateRegionDigest(region)),
+      response: { kind: 'unit-result', text: content },
+    });
+    expect(fixture.entries[0]!.capture).toMatchObject({ subject: 'conflict-regenerate', itemId: 'S22/conflict-regenerate/1' });
+    // An edit far longer than the words it edits is not read as a tester's edit of them, and the echo then refuses.
+    const pasted = { ...region, current: `${region.current}${'合成的长段文字。'.repeat(12)}` };
+    await send('conflict-regenerate', CONFLICT_REGENERATE_PROMPT_CONTRACT.systemPrompt, CONFLICT_REGENERATE_PROMPT_CONTRACT_DIGEST, buildConflictRegenerateMessage(pasted),
+      JSON.stringify({ schema: 'ai7.conflict-regenerate.result/1', text: pasted.before.slice(0, 20) }), 'pasted');
+    await expect(tool.generateModelFixture(request('S22/conflict-regenerate/2'))).rejects.toThrowError(/FIXTURE_GEN\/manuscript-echo/u);
   });
 });

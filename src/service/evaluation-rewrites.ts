@@ -9,6 +9,7 @@ import {
 import type { EvaluationInitialDraft } from './evaluation-records.js';
 import { EVALUATION_ADJUSTMENT_REASON_WORDS, evaluationItemAdjusted } from '../shared/evaluation-scoring.js';
 import { UUID_PATTERN, canonicalRecord, isRecord, parseStoredJson, sha256Hex } from './analysis/canonical.js';
+import { disclosedNote } from './evaluation/unverified-disclosure.js';
 import {
   evaluationRewriteContract,
   evaluationRewriteContractDigest,
@@ -260,9 +261,11 @@ export function rewriteProposalItems(
   words: ReadonlyArray<{ readonly itemId: string; readonly comment: string }>,
   observations: ReadonlyArray<{ readonly itemId: string; readonly unitOrdinal: number; readonly note: string; readonly blockIds: ReadonlyArray<string> }>,
   content: EvaluationContent,
+  // A rewrite produced under the live route shows 未联网核查 on the notes, never on its words (Issue #429).
+  unverified = false,
 ): NonNullable<EvaluationRewriteWorkspaceProjection['proposal']>['items'] {
   const evidence = boundedEvidenceSet(words.map((item) => observations.filter((observation) => observation.itemId === item.itemId)
-    .map((observation) => ({ unitOrdinal: observation.unitOrdinal, note: observation.note, blockIds: [...observation.blockIds] }))));
+    .map((observation) => ({ unitOrdinal: observation.unitOrdinal, note: disclosedNote(observation.note, unverified), blockIds: [...observation.blockIds] }))));
   return words.map((item, index) => ({
     itemId: item.itemId,
     before: content.items.find((entry) => entry.itemId === item.itemId)?.comment ?? null,
