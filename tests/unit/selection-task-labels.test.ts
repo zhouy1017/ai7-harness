@@ -4,7 +4,8 @@ import {
   SELECTION_JOIN_REFUSED,
   SELECTION_POLISH_HINT,
   SELECTION_POLISH_LABEL,
-  SELECTION_POLISH_REASON,
+  SELECTION_POLISH_READING,
+  SELECTION_POLISH_STATUS,
   SELECTION_PROCEDURES_NONE,
   SELECTION_PROCEDURE_NO_VERSION,
   SELECTION_TASK_CHOSEN_APART_LEGEND,
@@ -94,7 +95,12 @@ describe('the words of 就这段发起任务…', () => {
       .toBe('「事实核查」不能就所选文字运行：事实核查暂只能核查全书；就所选文字核查随事实核查的更新方式接入。');
     expect(SELECTION_PROCEDURE_NO_VERSION).toBe('现在没有可以运行的版本');
     expect(SELECTION_PROCEDURES_NONE).toBe('本社还没有启用的可复用工序。');
-    expect([SELECTION_POLISH_LABEL, SELECTION_POLISH_HINT, SELECTION_POLISH_REASON]).toEqual(['润色这段', '常用工序 · 生成修改建议', '润色这段尚未接通：要有一项生成修改建议的润色工序']);
+    expect([SELECTION_POLISH_LABEL, SELECTION_POLISH_HINT, SELECTION_POLISH_READING]).toEqual(['润色这段', '常用工序 · 生成修改建议', '正在确认润色这段能否使用…']);
+    expect(SELECTION_POLISH_STATUS).toEqual({
+      requesting: '正在润色所选文字…只发送所选文字和它所在段落的前后文。',
+      failed: '润色这段没有完成。',
+      unreadable: '无法读取润色的结果；已生成的修改建议仍在稿件里。',
+    });
     expect(SELECTION_JOIN_REFUSED).toBe('只就这一段发起；不提供「再选一段加入」，合并两段会把范围扩大到没有选中的文字。');
     expect(SELECTION_TASK_CHOSEN_APART_LEGEND).toBe('要另行勾选的类别');
     // The group's note: no procedures yet is said only once the house's are known; the refusal always.

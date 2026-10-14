@@ -507,7 +507,7 @@ import {
   RESUME_BLOCKED_SLOT,
   type BaselineStoppedRunFacts,
 } from './task-plan.js';
-import { decisionResolvesConflict, initializeProposalConflictSchema, ProposalConflictError, ProposalConflictStore, readConflictAttention } from './proposal-conflicts.js';
+import { decisionResolvesConflict, initializeProposalConflictSchema, ProposalConflictError, ProposalConflictStore, readConflictAttention, type ProposalConflictRegenerationLineage } from './proposal-conflicts.js';
 import {
   ImportRetentionError,
   initializeImportRetentionSchema,
@@ -15504,6 +15504,14 @@ export class EditorialStore {
     return this.#markCall(() => this.#editorialMarks.createProduced(input));
   }
 
+  /**
+   * Several marks AI7 produces in one transaction (润色这段, Issue #842), each verified as one is: an input whose words no longer
+   * stand at its range is `null` in the list, and `record` receives the list inside the same transaction.
+   */
+  createProducedEditorialMarks<T>(inputs: ReadonlyArray<ProducedEditorialMarkInput>, record: (markIds: ReadonlyArray<string | null>) => T): T {
+    return this.#markCall(() => this.#editorialMarks.createProducedMany(inputs, record));
+  }
+
   listPriorWork(): ReadonlyArray<PriorWorkItemProjection> {
     return this.#boundedCall(() => this.#bounded.listPriorWork());
   }
@@ -17561,6 +17569,11 @@ export class EditorialStore {
   /** Save the Resolution Draft on exactly the basis the editor saw; the manuscript is untouched. */
   saveProposalConflictDraft(input: SaveProposalConflictDraftInput): ProposalConflictDraftSaveProjection {
     return this.#conflictCall(() => this.#proposalConflicts.saveDraft(input));
+  }
+
+  /** 基于当前稿件重新生成建议 (Issue #842): its Resolution Draft, saved as any other with the regeneration's lineage beside it. */
+  saveRegeneratedProposalConflictDraft(input: SaveProposalConflictDraftInput, lineage: ProposalConflictRegenerationLineage): ProposalConflictDraftSaveProjection {
+    return this.#conflictCall(() => this.#proposalConflicts.saveDraft(input, lineage));
   }
 
   /** 保留当前稿件, 暂不处理, or 保存为新提案版本 — none of which writes the manuscript. */

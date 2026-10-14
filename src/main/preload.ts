@@ -517,6 +517,8 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['saveProposalConflictDraft']['output']>(IPC_CHANNELS.saveProposalConflictDraft, input),
   resolveProposalConflict: (input: ServiceOperationMap['resolveProposalConflict']['input']) =>
     invoke<ServiceOperationMap['resolveProposalConflict']['output']>(IPC_CHANNELS.resolveProposalConflict, input),
+  regenerateProposalConflictUnit: (input: ServiceOperationMap['regenerateProposalConflictUnit']['input']) =>
+    invoke<ServiceOperationMap['regenerateProposalConflictUnit']['output']>(IPC_CHANNELS.regenerateProposalConflictUnit, input),
   getManuscriptRail: (input: ServiceOperationMap['getManuscriptRail']['input']) =>
     invoke<ServiceOperationMap['getManuscriptRail']['output']>(IPC_CHANNELS.getManuscriptRail, input),
   runEditorClipboardCommand: (input: { command: EditorClipboardCommand }) =>
@@ -568,6 +570,12 @@ const api: RendererApi = Object.freeze({
     invoke<ServiceOperationMap['regenerateDialogueAnswer']['output']>(IPC_CHANNELS.regenerateDialogueAnswer, input),
   convertDialogueToChangeSuggestion: (input: Parameters<RendererApi['convertDialogueToChangeSuggestion']>[0]) =>
     invoke<ServiceOperationMap['convertDialogueToChangeSuggestion']['output']>(IPC_CHANNELS.convertDialogueToChangeSuggestion, input),
+  inspectFastInteractionRoutes: () =>
+    invoke<ServiceOperationMap['inspectFastInteractionRoutes']['output']>(IPC_CHANNELS.inspectFastInteractionRoutes),
+  polishSelection: (input: Parameters<RendererApi['polishSelection']>[0]) =>
+    invoke<ServiceOperationMap['polishSelection']['output']>(IPC_CHANNELS.polishSelection, input),
+  inspectFastInteractionRequest: (input: Parameters<RendererApi['inspectFastInteractionRequest']>[0]) =>
+    invoke<ServiceOperationMap['inspectFastInteractionRequest']['output']>(IPC_CHANNELS.inspectFastInteractionRequest, input),
   inspectBookDeliveryPackage: () =>
     invoke<ServiceOperationMap['inspectBookDeliveryPackage']['output']>(IPC_CHANNELS.inspectBookDeliveryPackage),
   prepareBookDeliveryPackage: (input: Omit<ServiceOperationMap['prepareBookDeliveryPackage']['input'], 'bookId'>) =>

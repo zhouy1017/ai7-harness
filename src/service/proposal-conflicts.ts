@@ -58,6 +58,11 @@ import type { ConflictAttentionReading } from './global-attention.js';
  * Nothing here writes the manuscript. A new version is a new mark on the current words, not accepted and
  * not applied; it goes through 接受并应用 like any other 修改建议.
  *
+ * 基于当前稿件重新生成建议 (Issue #842) saves its answer as one more Resolution Draft: the regenerated words are one conflict
+ * unit's 编辑合并结果, and the draft's canonical JSON carries the regeneration's lineage — the contract, the request and the
+ * route that answered it — so the regenerated words stay traceable and replayable (V2-UX-CONFLICT-011). The relations, their
+ * columns and their checks are unchanged: the editor asked for it, so the draft is the editor's like any other.
+ *
  * Nothing existing moves (ADR 0079). The relations are created shape-detected in `EditorialStore.open`
  * before the version is stamped, exactly as revisions 21 to 25 add theirs, and join the exact-schema
  * validator the same way.
@@ -197,6 +202,7 @@ const DRAFT_SCHEMA = 'ai7.proposal-conflict.draft/1' as const;
 const DEFERRAL_SCHEMA = 'ai7.proposal-conflict.deferral/1' as const;
 const OUTCOME_SCHEMA = 'ai7.proposal-conflict.outcome/1' as const;
 const BASIS_SCHEMA = 'ai7.proposal-conflict.basis/1' as const;
+const REGENERATION_SCHEMA = 'ai7.proposal-conflict.regeneration/1' as const;
 const ACTOR = 'editor' as const;
 /** The reason 保留当前稿件 records with its rejection, so later counts can tell it from an ordinary one (ADR 0085 §3). */
 export const KEEP_CURRENT_REASON = '保留当前稿件' as const;
@@ -247,6 +253,43 @@ function requireRecord(json: SQLOutputValue | undefined, digest: SQLOutputValue 
     '冲突记录与其字段不一致。',
   );
   return record;
+}
+
+/**
+ * Where a regenerated draft's words came from (Issue #842): the conflict unit, the frozen contract and exact request that asked
+ * for them, and the route that answered — the selected policy's rule under developer-live, the fixture on the local route.
+ */
+export interface ProposalConflictRegenerationLineage {
+  readonly schema: typeof REGENERATION_SCHEMA;
+  readonly kindId: 'conflict-regenerate';
+  readonly contractVersion: string;
+  readonly promptContractDigest: string;
+  readonly requestDigest: string;
+  readonly unitIndex: number;
+  readonly route: string;
+  readonly model: string;
+  readonly operationalScope: 'development-ci' | 'developer-live';
+  readonly policyRuleId: string | null;
+  readonly fixtureSha256: string | null;
+  readonly regeneratedAt: string;
+}
+
+export const PROPOSAL_CONFLICT_REGENERATION_SCHEMA = REGENERATION_SCHEMA;
+
+function isRegenerationLineage(value: unknown, units: ReadonlyArray<StoredUnit>): value is ProposalConflictRegenerationLineage {
+  if (!isRecord(value)) return false;
+  const nullableText = (field: unknown): boolean => field === null || (typeof field === 'string' && field.length > 0 && field.length <= 256);
+  const unit = typeof value.unitIndex === 'number' && Number.isSafeInteger(value.unitIndex) ? units[value.unitIndex] : undefined;
+  return value.schema === REGENERATION_SCHEMA && value.kindId === 'conflict-regenerate' &&
+    typeof value.contractVersion === 'string' && value.contractVersion.length > 0 && value.contractVersion.length <= 64 &&
+    typeof value.promptContractDigest === 'string' && DIGEST_PATTERN.test(value.promptContractDigest) &&
+    typeof value.requestDigest === 'string' && DIGEST_PATTERN.test(value.requestDigest) &&
+    unit !== undefined && unit.kind === 'conflict' && unit.resolution === 'edited' &&
+    typeof value.route === 'string' && value.route.length > 0 && value.route.length <= 64 &&
+    typeof value.model === 'string' && value.model.length > 0 && value.model.length <= 128 &&
+    (value.operationalScope === 'development-ci' || value.operationalScope === 'developer-live') &&
+    nullableText(value.policyRuleId) && (value.fixtureSha256 === null || (typeof value.fixtureSha256 === 'string' && DIGEST_PATTERN.test(value.fixtureSha256))) &&
+    typeof value.regeneratedAt === 'string' && value.regeneratedAt.length > 0;
 }
 
 /** A unit of a stored draft: the comparison's words and the editor's resolution, index for index. */
@@ -484,8 +527,12 @@ export class ProposalConflictStore {
    * Save the Resolution Draft (V2-UX-CONFLICT-008, CONFLICT-012): one entry per unit of the comparison the
    * editor saw, on exactly the basis they saw it on. A save that repeats the latest draft appends nothing.
    * The manuscript, the 修改建议 and its decisions are untouched.
+   *
+   * `regeneration`: the draft 基于当前稿件重新生成建议 saves (Issue #842), whose regenerated unit is a `conflict` unit resolved
+   * `edited`; its lineage is recorded in the draft's canonical JSON and it is always appended, so the regeneration stays a
+   * record of its own.
    */
-  saveDraft(input: SaveProposalConflictDraftInput): ProposalConflictDraftSaveProjection {
+  saveDraft(input: SaveProposalConflictDraftInput, regeneration: ProposalConflictRegenerationLineage | null = null): ProposalConflictDraftSaveProjection {
     requireBinding(input);
     requireConflict(typeof input.basisDigest === 'string' && DIGEST_PATTERN.test(input.basisDigest), 'PROPOSAL_CONFLICT_INVALID', '冲突请求无效。');
     requireConflict(Array.isArray(input.units), 'PROPOSAL_CONFLICT_INVALID', '解决草稿无效。');
@@ -505,8 +552,9 @@ export class ProposalConflictStore {
       const words = draftText(read.units, resolutions);
       requireConflict(words.length <= MAX_MARK_BODY_CODE_UNITS, 'PROPOSAL_CONFLICT_DRAFT_INVALID', '解决草稿超过长度上限。');
       const units = storedUnits(read.units, resolutions);
+      requireConflict(regeneration === null || isRegenerationLineage(regeneration, units), 'PROPOSAL_CONFLICT_DRAFT_INVALID', '重新生成的草稿与这处冲突不一致。');
       const latest = this.#latestDraft(read.markId, null);
-      if (latest !== null && latest.basisDigest === read.basisDigest && canonicalJson(latest.units) === canonicalJson(units)) {
+      if (regeneration === null && latest !== null && latest.basisDigest === read.basisDigest && canonicalJson(latest.units) === canonicalJson(units)) {
         return { markId: read.markId, basisDigest: read.basisDigest, draft: draftProjection(latest, read.units) };
       }
       const ordinal = latest === null ? 1 : latest.ordinal + 1;
@@ -524,6 +572,7 @@ export class ProposalConflictStore {
         draftText: words,
         actor: ACTOR,
         createdAt,
+        ...(regeneration === null ? {} : { regeneration }),
       });
       this.#db.prepare(
         `INSERT INTO proposal_conflict_drafts(
@@ -533,7 +582,7 @@ export class ProposalConflictStore {
       return {
         markId: read.markId,
         basisDigest: read.basisDigest,
-        draft: draftProjection({ draftId, ordinal, units, text: words, createdAt }, read.units),
+        draft: draftProjection({ draftId, ordinal, units, text: words, createdAt, regeneration }, read.units),
       };
     });
   }
@@ -777,6 +826,7 @@ interface StoredDraft {
   units: StoredUnit[];
   text: string;
   createdAt: string;
+  regeneration: ProposalConflictRegenerationLineage | null;
 }
 
 /** A saved draft read back whole: its record verifies, its units parse, and its text is what they make. */
@@ -798,7 +848,12 @@ function readDraftRow(row: SqlRow): StoredDraft {
   requireConflict(Array.isArray(units) && units.every(isStoredUnit), 'PROPOSAL_CONFLICT_RECORD_INVALID', '解决草稿无效。');
   const stored = units as StoredUnit[];
   requireConflict(resolutionsFit(stored, stored) && draftText(stored, stored) === facts.draftText, 'PROPOSAL_CONFLICT_RECORD_INVALID', '解决草稿无效。');
-  return { draftId: facts.draftId, ordinal: facts.ordinal, basisDigest: facts.basisDigest, units: stored, text: facts.draftText, createdAt: facts.createdAt };
+  const regeneration = record.regeneration === undefined ? null : record.regeneration;
+  requireConflict(regeneration === null || isRegenerationLineage(regeneration, stored), 'PROPOSAL_CONFLICT_RECORD_INVALID', '解决草稿的重新生成记录无效。');
+  return {
+    draftId: facts.draftId, ordinal: facts.ordinal, basisDigest: facts.basisDigest, units: stored, text: facts.draftText, createdAt: facts.createdAt,
+    regeneration: regeneration as ProposalConflictRegenerationLineage | null,
+  };
 }
 
 function isStoredUnit(value: unknown): value is StoredUnit {
@@ -813,7 +868,7 @@ function sameUnit(left: ConflictUnit, right: ConflictUnit): boolean {
 }
 
 function draftProjection(
-  draft: { draftId: string; ordinal: number; units: ReadonlyArray<StoredUnit>; text: string; createdAt: string },
+  draft: { draftId: string; ordinal: number; units: ReadonlyArray<StoredUnit>; text: string; createdAt: string; regeneration: ProposalConflictRegenerationLineage | null },
   units: ReadonlyArray<ConflictUnit>,
 ): ProposalConflictDraftProjection {
   const resolutions = draft.units.map((unit) => ({ resolution: unit.resolution, text: unit.text }));
@@ -824,6 +879,7 @@ function draftProjection(
     text: draft.text,
     complete: unresolvedUnits(units, resolutions).length === 0,
     savedAt: draft.createdAt,
+    regeneration: draft.regeneration === null ? null : { unitIndex: draft.regeneration.unitIndex, regeneratedAt: draft.regeneration.regeneratedAt },
   };
 }
 

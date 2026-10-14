@@ -355,6 +355,8 @@ async function loadSample1Owners() {
         "export { WritingTasks } from './src/service/writing-tasks.ts';",
         "export { buildRunReportReflectionMessage } from './src/service/analysis/run-report-contract.ts';",
         "export { runReportAccountingOf } from './src/service/analysis/run-report.ts';",
+        "export { EDITORIAL_POLISH_PROMPT_CONTRACT, parseEditorialPolishMessage } from './src/service/fast-role/polish-contract.ts';",
+        "export { CONFLICT_REGENERATE_PROMPT_CONTRACT, parseConflictRegenerateMessage } from './src/service/fast-role/conflict-regenerate-contract.ts';",
       ].join('\n'), resolveDir: TOOL_ROOT, loader: 'ts' },
       bundle: true, platform: 'node', format: 'esm', write: false, logLevel: 'silent',
     });
@@ -364,12 +366,46 @@ async function loadSample1Owners() {
 }
 
 /**
+ * The two Fast Interaction Role subjects of Issue #842 carry no Task record to rebuild their message from: what proves them
+ * is the words themselves. A 润色这段 message is exempt only when its context, selection and context read contiguously in one
+ * block of exact `sample1` as the existing DOCX extractor reads the hash-checked file; a 重新生成建议 message only when its
+ * context, 提案基准 and context do, its 当前稿件 and 原提议 — the tester's edits of `sample1` — being bounded beside them. The
+ * system prompt must be the kind's frozen contract and the message must read back exactly. Anything else is not proven, and
+ * the ordinary echo rule then decides.
+ */
+const FAST_ROLE_SUBJECTS = ['editorial-polish', 'conflict-regenerate'];
+/** How far a conflict unit's 当前稿件 or 原提议 may exceed its 提案基准 and still read as an edit of it. */
+const MAX_TESTER_EDIT_EXCESS = 64;
+
+async function verifySample1FastRoleExcerpt(parsed) {
+  try {
+    const source = join(TOOL_ROOT, 'SampleBooks', 'sample1.docx');
+    if (sha256Hex(await readFile(source)) !== SAMPLE1_SOURCE_SHA256) return false;
+    const owners = await loadSample1Owners();
+    const polish = parsed.subject === 'editorial-polish';
+    const contract = polish ? owners.EDITORIAL_POLISH_PROMPT_CONTRACT : owners.CONFLICT_REGENERATE_PROMPT_CONTRACT;
+    if (parsed.carriedMessageCount !== 1 || parsed.systemMessages.length !== 1 || parsed.systemMessages[0] !== contract.systemPrompt) return false;
+    const words = polish ? owners.parseEditorialPolishMessage(parsed.unitMessage) : owners.parseConflictRegenerateMessage(parsed.unitMessage);
+    if (words === null || (polish ? words.selection : words.base).length === 0) return false;
+    if (!polish && [words.current, words.proposed].some((edited) => edited.length > words.base.length + MAX_TESTER_EDIT_EXCESS)) return false;
+    const excerpt = polish ? `${words.before}${words.selection}${words.after}` : `${words.before}${words.base}${words.after}`;
+    const blocks = [];
+    await owners.parseDocx(source, 'sample1.docx', (block) => blocks.push(block.text), { digest: SAMPLE1_SOURCE_SHA256, bytes: 29_550 });
+    return blocks.some((text) => text.includes(excerpt));
+  } catch {
+    // An excerpt that cannot be proved is not exempt: the ordinary echo rule decides, and refuses manuscript text.
+    return false;
+  }
+}
+
+/**
  * ADR 0079 §5: only the exact admitted carrier is exempt. Its frozen product manifest is checked
  * against the existing DOCX extractor; the entire selected stage message is rebuilt from that
  * task's integrity-checked records. A flag, filename, declared digest or validation label is never proof.
  * Protected records stay in the external read-only store, and only the sanitized candidate is emitted.
  */
 export async function verifySample1Capture(request, selection, parsed) {
+  if (FAST_ROLE_SUBJECTS.includes(parsed.subject)) return verifySample1FastRoleExcerpt(parsed);
   if (request.sample1Store === undefined && request.sample1Task === undefined) return false;
   let step = 'source';
   const fail = () => { throw new FixtureGenerationError('FIXTURE_GEN/sample1-source-unproved', step); };
@@ -946,6 +982,13 @@ export function parseTaskHeader(text, promptContractDigest) {
   const dialogue = /^AI7 编辑对话 · (提问|接着回答) · 问题摘要 ([0-9a-f]{64})$/u.exec(first);
   if (dialogue !== null) return { subject: 'dialogue', header: null, unitOrdinal: 0,
     requestDigest: sha256Hex(`ai7.editorial-dialogue/1\u0000${promptContractDigest}\u0000${dialogue[1] === '提问' ? 'ask' : 'continue'}\u0000${dialogue[2]}`) };
+  // 润色这段 and 基于当前稿件重新生成建议 (Issue #842), keyed as the deterministic adapter keys them under ordinal 0.
+  const polish = /^AI7 润色这段 · 选段摘要 ([0-9a-f]{64}) · 上下文摘要 ([0-9a-f]{64})$/u.exec(first);
+  if (polish !== null) return { subject: 'editorial-polish', header: null, unitOrdinal: 0,
+    requestDigest: sha256Hex(`ai7.editorial-polish/1\u0000${promptContractDigest}\u0000${polish[1]}\u0000${polish[2]}`) };
+  const regeneration = /^AI7 冲突重新生成 · 冲突单元摘要 ([0-9a-f]{64})$/u.exec(first);
+  if (regeneration !== null) return { subject: 'conflict-regenerate', header: null, unitOrdinal: 0,
+    requestDigest: sha256Hex(`ai7.conflict-regenerate/1\u0000${promptContractDigest}\u0000${regeneration[1]}`) };
   return null;
 }
 

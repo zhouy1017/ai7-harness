@@ -18,17 +18,21 @@ export const DIALOGUE_TASK_KIND = 'editorial-dialogue' as const;
 export const DIALOGUE_OUTBOUND_CATEGORY = 'editor-selected-manuscript-excerpt' as const;
 
 /** The live route one admitted rule binds, resolved against the declared route and model profiles. */
-export interface AdmittedDialogueRoute {
+export interface AdmittedFastRoleRoute {
   readonly ruleId: string;
   readonly providerProcessingVersion: DeveloperLiveProviderProcessingVersion;
   readonly modelRole: CredentialSlotBinding['modelRole'];
   readonly profile: ProviderRouteProfile;
   readonly modelProfile: ProviderModelProfile;
-  /** The outbound categories the rule names, as the Egress Gate reads them; the selected excerpt among them. */
+  /** The outbound categories the rule names, as the Egress Gate reads them; the kind's own excerpt category among them. */
   readonly outboundDataCategories: ReadonlySet<OutboundDataCategory>;
 }
 
-const OUTBOUND_CATEGORIES: ReadonlyArray<OutboundDataCategory> = ['public-or-synthetic', DIALOGUE_OUTBOUND_CATEGORY];
+/** The dialogue's admitted route: the fast-role route its rule binds. */
+export type AdmittedDialogueRoute = AdmittedFastRoleRoute;
+
+/** The categories the Egress Gate reads; a rule naming any other carries it to no binding. */
+const OUTBOUND_CATEGORIES: ReadonlyArray<OutboundDataCategory> = ['public-or-synthetic', 'editor-selected-manuscript-excerpt', 'manuscript-conflict-region-excerpt'];
 
 /** The roles the Credential Broker binds a slot for; a rule naming any other cannot release a credential. */
 const BINDABLE_ROLES: ReadonlyArray<CredentialSlotBinding['modelRole']> = ['Fast Interaction Role', 'Main Editorial Role'];
@@ -43,18 +47,27 @@ function strings(value: unknown): ReadonlyArray<string> | null {
 
 /** Read the admitted dialogue route from the verified launch projection, or `null` when the selected policy admits none. */
 export function admittedDialogueRoute(policy: LaunchPolicyProjection): AdmittedDialogueRoute | null {
+  return admittedFastRoleRoute(policy, DIALOGUE_TASK_KIND, DIALOGUE_OUTBOUND_CATEGORY);
+}
+
+/**
+ * Read the route the selected policy admits for one foreground kind on the Fast Interaction Role — the dialogue, 润色这段 or
+ * 基于当前稿件重新生成建议 (Issue #842) — or `null` when it admits none: exactly one rule must name the kind id together with
+ * the kind's own outbound category, read as the dialogue's rule is read.
+ */
+export function admittedFastRoleRoute(policy: LaunchPolicyProjection, kindId: string, category: OutboundDataCategory): AdmittedFastRoleRoute | null {
   const processing = policy.providerProcessing;
   if (policy.integrityState !== 'verified' || policy.operationalScope !== 'developer-live' ||
       processing.decision !== 'eligible-only' || processing.liveTransmissionAllowed !== true ||
       processing.version === null || processing.version === 'v1') return null;
   // The selected policy's allow rules, as the launch verified them; a projection that carries none admits nothing.
   const rules: ReadonlyArray<unknown> = processing.admittedRules ?? [];
-  const dialogueRules = rules.filter((rule) => isRecord(rule) &&
-    (strings(rule['taskKinds']) ?? []).includes(DIALOGUE_TASK_KIND) &&
-    (strings(rule['outboundDataCategories']) ?? []).includes(DIALOGUE_OUTBOUND_CATEGORY));
+  const kindRules = rules.filter((rule) => isRecord(rule) &&
+    (strings(rule['taskKinds']) ?? []).includes(kindId) &&
+    (strings(rule['outboundDataCategories']) ?? []).includes(category));
   // Two rules for the same kind would leave the binding to an accident of order: neither is taken.
-  if (dialogueRules.length !== 1) return null;
-  const rule = dialogueRules[0] as Record<string, unknown>;
+  if (kindRules.length !== 1) return null;
+  const rule = kindRules[0] as Record<string, unknown>;
   const { ruleId, modelRole, route, endpoint, model, credentialSlot } = rule;
   if (typeof ruleId !== 'string' || ruleId.length === 0 || ruleId.length > 128 || typeof route !== 'string' ||
       typeof endpoint !== 'string' || typeof model !== 'string' || typeof credentialSlot !== 'string') return null;
