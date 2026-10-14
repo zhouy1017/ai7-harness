@@ -16,7 +16,6 @@ import { EditorialStore } from '../../src/service/store.js';
 import type { DevelopmentValidationIntent, FastInteractionRequestProjection, LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, requireExactSample1 } from '../support/sample1-baseline.js';
-import { withV11FastRoleRules } from '../support/policy-v11-stand-in.js';
 import {
   AUTHORED_POLISH_ANSWER,
   AUTHORED_REGENERATION,
@@ -31,7 +30,7 @@ import {
 
 // Service-integration suite (L2) for 润色这段 and 基于当前稿件重新生成建议 on the live route (Issue #842; ADR 0089; ADR 0067):
 // the real store, PrimaryAgentHarness composition, Egress Gate, Credential Broker, Provider Test Ledger and Result Cache, under
-// the verified developer-live policy with the two Fast Interaction Role rules of v11 (Issue #841) from the test-local stand-in.
+// the selected developer-live Provider Processing v11 (Issue #841) and its two Fast Interaction Role rules.
 // Only the transport is a stub, so no socket is opened and no credential value beyond a local placeholder exists.
 
 const VALIDATION: DevelopmentValidationIntent = { family: 'fast-interaction-suggestions', case: 'sample1-selected-sentence', delta: null };
@@ -86,7 +85,7 @@ function live(nativeFetch: typeof fetch, options: { validation?: DevelopmentVali
   const credential = options.credential === undefined ? 'placeholder-development-key' : options.credential;
   return fastRoleLiveRoutes(
     { launch: { runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 500_000 }, providerCacheRoot: cacheRoot, validation }, nativeFetch },
-    options.policy ?? withV11FastRoleRules(livePolicy),
+    options.policy ?? livePolicy,
     { resolve: async () => credential },
   );
 }
@@ -114,8 +113,11 @@ describe('the fast-role routes under developer-live', () => {
     expect(fastRoleRouteRefusal({ fixture: null, live: admitted }, 'editorial-polish', SAMPLE1_SOURCE_DIGEST)).toBeNull();
     expect(fastRoleRouteRefusal({ fixture: null, live: admitted }, 'editorial-polish', '0'.repeat(64)))
       .toBe('当前运行范围未允许润色这段：这本书不在开发者实时可发送的公开样书范围内。');
-    // The selected v10 policy names neither kind: both refuse with the route-aware reason.
-    const unadmitted = live(stubTransport(calls, () => AUTHORED_POLISH_ANSWER), { policy: livePolicy });
+    // A policy that names neither kind — v10's rules, here — refuses both with the route-aware reason.
+    const withoutFastRules = livePolicy.providerProcessing.admittedRules.filter((rule) => !rule.taskKinds.some((kind) => kind === 'editorial-polish' || kind === 'conflict-regenerate'));
+    const unadmitted = live(stubTransport(calls, () => AUTHORED_POLISH_ANSWER), {
+      policy: { ...livePolicy, providerProcessing: { ...livePolicy.providerProcessing, admittedRules: withoutFastRules } },
+    });
     const owner = new FastRoleExecutionOwner({ fixture: null, live: unadmitted });
     expect(fastInteractionRoutes(owner, book.bookId)).toEqual({
       bookId: book.bookId,
