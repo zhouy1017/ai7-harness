@@ -48,8 +48,8 @@ import { reduceWriting, type WritingUnitOutcome } from './writing-reducers.js';
  *
  * It reads the manuscript, as 审稿意见 does, because the analysis path's one way to a book-level turn is through its units, and
  * because a document about a book draws on what is in it: its highlights, its people, its themes. Its book-level synthesis is a
- * transmission no Provider Processing policy names yet, so it is never prepared or started under a live scope; it declares no
- * assurance sample, since a draft the editor rewrites is not a finding a re-read could uphold.
+ * transmission admitted only by the selected writing rule; it declares no assurance sample, since a draft the editor rewrites
+ * is not a finding a re-read could uphold.
  */
 export const WRITING_REDUCER_DESCRIPTOR = {
   schema: 'ai7.writing.reducers/1',
@@ -150,6 +150,11 @@ export function writingKindDefinition(input: WritingContractInput, rules: Writin
   const exemplars = { count: frozen.exemplars.length, statement: writingExemplarLine(frozen.type.label, frozen.exemplars) };
   return {
     kind: WRITING_KIND,
+    // Live validation items are numbered under writing's own slice (#810), and live admission re-derives the frozen contract. A
+    // contract carrying 资料库 text offers no derivation: no rule of this wave names frozen material (v11
+    // `materialReferencesAllowed: false`), so the shared admission refuses it beside the store's own refusal.
+    liveItemSlice: 'S84',
+    ...(frozen.materials === undefined ? { livePromptContractDigest: () => writingContractDigest(contract) } : {}),
     contractVersion: WRITING_CONTRACT_VERSION,
     expectedOutcome: WRITING_EXPECTED_OUTCOME,
     taskGoal: WRITING_MODE_GOALS['writing-first'],

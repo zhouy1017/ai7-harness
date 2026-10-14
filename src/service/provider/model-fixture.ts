@@ -260,7 +260,9 @@ function parseCapture(value: unknown): ModelFixtureCapture {
     try { endpoint = new URL(value.endpoint as string); } catch { /* Refuse without printing a payload field. */ }
     requireFixture(endpoint !== undefined && endpoint.protocol === 'https:' && endpoint.username === '' && endpoint.password === '' &&
       endpoint.search === '' && endpoint.hash === '' && /^[a-z][a-z0-9-]{0,63}$/u.test(value.route as string) &&
-      value.requestShape === 'openai-chat-completions', '夹具条目的捕获路由或形态无效。');
+      (value.requestShape === 'openai-chat-completions' ||
+        (value.requestShape === 'editorial-dialogue-sse' && value.subject === 'dialogue' && value.route === 'opencode-go')),
+      '夹具条目的捕获路由或形态无效。');
   }
   requireFixture(Array.isArray(value.identityMap) && value.identityMap.length <= MAX_IDENTITY_MAP && value.identityMap.every((mapping) =>
     isRecord(mapping) && hasExactKeys(mapping, ['placeholder', 'identity']) &&

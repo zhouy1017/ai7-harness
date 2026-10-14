@@ -327,11 +327,17 @@ export const MAX_WRITING_EXEMPLAR_GRAPHEMES = MAX_EXEMPLAR_GRAPHEMES;
 export const WRITING_FIELD_CONTROL = /[\p{Cc}\p{Zl}\p{Zp}]/u;
 export const WRITING_NEEDS_MANUSCRIPT = '这本书还没有稿件：写作任务要读稿件，先导入稿件。' as const;
 /**
- * 会发送 before any plan exists (editor-surfaces §9: 四行后果), as S84a is (#688 review): a writing Task runs only where nothing
- * is sent — under a live scope it is refused — so nothing leaves the machine. When a sending route arrives, this line names what
- * would be sent, 其他图书的范例原文 among it, since that is other Books' text leaving the machine.
+ * The provider-free 会发送 line (editor-surfaces §9: 四行后果), pinned by J-07. An admitted live writing Task reads the line
+ * below instead.
  */
 export const WRITING_SEND_CONSEQUENCE = '不发送任何内容：写作任务目前只在不连接模型服务的运行范围内起草。' as const;
+/**
+ * 会发送 where the selected policy admits writing (#810): what the writing rule's categories carry, at full rank — the
+ * manuscript by reading unit, the synthesis basis, the editor's own words and the listed references, 其他图书的范例原文 among
+ * them — and the house people its redaction strips.
+ */
+export const WRITING_LIVE_SEND_CONSEQUENCE =
+  '当前稿件的阅读单元、全书综合依据、你填写的读者、渠道与要求，以及上面列出的参考材料（包括其他图书的范例原文），发往为写作配置的模型服务；不发送本社人员姓名。' as const;
 /** 不会做 in the editor's words; the plan's technical half is in 查看技术详情. */
 export const WRITING_NOT_DO = '不改稿件；不照抄范例；不交付、不发送；草稿由你在稿件编辑面上修改后才用。' as const;
 export const WRITING_COST_BEFORE_PLAN = '先看计划后显示' as const;

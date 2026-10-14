@@ -96,7 +96,7 @@ type Tool = {
   longestEchoRun: (field: string, collapsedBlocks: ReadonlyArray<string>) => number | null;
   findManuscriptEcho: (value: unknown, ownBlockTexts: ReadonlyArray<string>) => { path: string; runLength: number } | null;
   redactUnitResultText: (text: string, ownBlockTexts: ReadonlyArray<string>) => string;
-  mapCachedResponse: (entry: unknown, selection: unknown, ownBlockTexts: ReadonlyArray<string>) => Record<string, unknown>;
+  mapCachedResponse: (entry: unknown, selection: unknown, ownBlockTexts: ReadonlyArray<string>, request?: unknown) => Record<string, unknown>;
   generateModelFixture: (request: Request, now?: Date) => Promise<Record<string, unknown>>;
   BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST: string;
   ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST: string;
@@ -616,6 +616,15 @@ describe('generate-model-fixture over the namespaced cache (Issue #808)', () => 
   });
 
   const request = (selector: string): Request => ({ selector, cacheRoot: root, identity: 'generated-808', description: '合成生成夹具', out: join(root, 'out.json') });
+
+  it('maps only complete streamed dialogue aggregates to bounded answer chunks (Issue #833)', () => {
+    const chunks = ['合成回答一。', '合成回答二。'];
+    const response = { choices: [{ message: { content: chunks.join('') } }], usage: { prompt_tokens: 8, completion_tokens: 4 } };
+    const entry = { status: 200, response, streamedAnswer: { complete: true, chunks } };
+    const reading = { subject: 'dialogue', identities: [], carriedBlockTexts: [] };
+    expect(tool.mapCachedResponse(entry, { itemId: ITEM_ID, model: MODEL, requestDigest: UNIT_DIGEST, promptContractDigest: DIALOGUE_PROMPT_CONTRACT_DIGEST, quotaExhausted: false }, [], reading)).toEqual({ kind: 'answer-chunks', chunks, usage: { inputTokens: 8, outputTokens: 4 } });
+    expect(() => tool.mapCachedResponse({ ...entry, streamedAnswer: { complete: false, chunks } }, { itemId: ITEM_ID, model: MODEL, requestDigest: UNIT_DIGEST, promptContractDigest: DIALOGUE_PROMPT_CONTRACT_DIGEST, quotaExhausted: false }, [], reading)).toThrow(/FIXTURE_GEN\/response-shape-unsupported/u);
+  });
 
   it('reads a dialogue capture that names no task contract as its own task, and nothing else (Issue #52, S17c)', async () => {
     const question = '这段的叙述视角是否一致？';
