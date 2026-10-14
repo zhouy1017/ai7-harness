@@ -217,6 +217,8 @@ export interface ProviderCacheEntry {
   readonly validation?: { readonly family: string; readonly case: string; readonly step: string };
   /** SHA-256 over the response as this entry keeps it (`JSON.stringify(response)`). */
   readonly responseDigest?: string;
+  /** SSE answer assembled once. A partial entry is evidence of an unknown outcome, never a replayable answer. */
+  readonly streamedAnswer?: { readonly complete: boolean; readonly chunks: ReadonlyArray<string> };
 }
 
 /** A cache entry as a reader finds it: absent, whole, or present and unreadable — which is never a miss. */
@@ -808,7 +810,14 @@ async function readEntryFile(path: string): Promise<ProviderEntryRead> {
       typeof entry.model !== 'string' || entry.requestDigest !== providerRequestDigest(entry.requestBody) ||
       typeof entry.transmittedAt !== 'string' || !Number.isFinite(Date.parse(entry.transmittedAt)) ||
       !Object.hasOwn(entry, 'response') || (entry.usage !== null && (!validUsage(entry.usage))) ||
-      !sameUsage(entry.usage, usageOfResponse(entry.response))) {
+      !sameUsage(entry.usage, usageOfResponse(entry.response)) ||
+      (entry.streamedAnswer !== undefined && (typeof entry.streamedAnswer.complete !== 'boolean' ||
+        !Array.isArray(entry.streamedAnswer.chunks) || !entry.streamedAnswer.chunks.every((chunk) => typeof chunk === 'string') ||
+        !entry.response || typeof entry.response !== 'object' ||
+        (entry.response as { choices?: { message?: { content?: unknown } }[] }).choices?.[0]?.message?.content !== entry.streamedAnswer.chunks.join('') ||
+        (entry.streamedAnswer.complete
+          ? typeof (entry.response as { choices?: { finish_reason?: unknown }[] }).choices?.[0]?.finish_reason !== 'string'
+          : (entry.response as { choices?: { finish_reason?: unknown }[] }).choices?.[0]?.finish_reason !== null)))) {
       return { state: 'corrupt' };
     }
     return { state: 'present', entry };
