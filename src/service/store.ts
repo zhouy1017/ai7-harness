@@ -395,6 +395,7 @@ import {
   type WritingMaterialSource,
 } from './writing-tasks.js';
 import { writingKindDefinition, writingRecordedKindDefinition } from './writing/writing-kind.js';
+import { liveWritingRule, WRITING_LIVE_SEND_CONSEQUENCE } from './writing/live-writing-admission.js';
 import {
   WRITING_COPY_RULES,
   writingExemplarLine,
@@ -6139,7 +6140,8 @@ export class EditorialStore {
     };
     const reason = kindReason !== null
       ? kindReason
-      : envelope.providerStatus === 'remote-eligible-developer-live'
+      // #810: an admitted writing plan may set its own rule; other live kinds keep the existing refusal.
+      : envelope.providerStatus === 'remote-eligible-developer-live' && !(pattern.startsWith('writing:') && !this.#writingLiveUnavailable())
         ? SET_RULE_DEVELOPER_LIVE
         : plan.planRevision !== null
           ? SET_RULE_CHANGED
@@ -9417,18 +9419,20 @@ export class EditorialStore {
   }
 
   /**
-   * 写作任务 runs only where it may be sent (as 审稿意见): under a live scope no Provider Processing policy names it, so nothing is
-   * prepared or started there, and 交付物 says why. The provider-free scope is unaffected.
+   * 写作任务 runs only where the selected policy admits its exact binding. The provider-free scope is unaffected.
    */
   #requireWritingScope(): void {
     this.#assertAvailable();
-    if (this.#baselineAnalysis.launch.live !== null) throw new StoreError('WRITING_UNAVAILABLE', WRITING_LIVE_UNAVAILABLE);
+    if (this.#writingLiveUnavailable()) throw new StoreError('WRITING_UNAVAILABLE', WRITING_LIVE_UNAVAILABLE);
+  }
+
+  #writingLiveUnavailable(): boolean {
+    const launch = this.#baselineAnalysis.launch;
+    return launch.live !== null && liveWritingRule(launch.policy, launch.live) === null;
   }
 
   /**
-   * A 资料库 item under a live scope (Issue #428): the item is the editor's own material, and no Provider Processing policy admits
-   * it — developer-live transmits only the Owner-designated Public SampleBooks — so a plan that lists one is refused there in
-   * its own words, before the writing kind's.
+   * Reference-bearing live writing awaits wave 3's successor policy; retain its precise refusal before kind admission.
    */
   #requireWritingMaterialScope(listsMaterials: boolean): void {
     this.#assertAvailable();
@@ -9655,7 +9659,7 @@ export class EditorialStore {
   /**
    * 先看计划 of a writing Task (DELIV-007): the writing kind's Task for one house type of the Book, from the editor's audience,
    * channel and requirements and the reference set as it stands now, in the mode that applies — the Book's first writing Task,
-   * or another once one settled. Refused under a live scope, without a manuscript, for a type the Book has a document of or
+   * or another once one settled. Refused without live admission, without a manuscript, for a type the Book has a document of or
    * marks 本书不做, and while a writing Task is under way. Its plan opens in the Task Drawer.
    */
   createWritingPreparationWork(
@@ -9691,7 +9695,8 @@ export class EditorialStore {
     const materials = this.#writingMaterials(bookId, materialIds);
     const input: WritingContractInput = {
       type: { typeId: type.typeId, label: type.label },
-      book: this.#writingBook(bookId),
+      // The writing policy retains house-person redaction. Freeze no editor names into a live prompt.
+      book: { ...this.#writingBook(bookId), ...(this.#baselineAnalysis.launch.live === null ? {} : { editors: [] }) },
       audience,
       channel,
       requirements,
@@ -9831,7 +9836,7 @@ export class EditorialStore {
        JOIN manuscripts m ON m.manuscript_id = mb.manuscript_id AND m.role = 'primary' WHERE m.book_id = ?`,
     ).get(bookId) as SqlRow;
     const blocks = asNumber(manuscript.blocks);
-    let unavailable: string | null = this.#baselineAnalysis.launch.live !== null ? WRITING_LIVE_UNAVAILABLE
+    let unavailable: string | null = this.#writingLiveUnavailable() ? WRITING_LIVE_UNAVAILABLE
       : blocks === 0 ? WRITING_NEEDS_MANUSCRIPT : null;
     let latest: { task: StoredWritingTask; ledger: BaselineAnalysisStore; projection: WritingProjection } | null = null;
     let drafted = new Map<string, { revisionId: string; createdAt: string }>();
@@ -9888,7 +9893,7 @@ export class EditorialStore {
       },
       consequences: {
         read: blocks === 0 ? '这本书还没有稿件。' : `当前稿件的全部 ${blocks} 个内容块，以及上面列出的参考材料`,
-        send: WRITING_SEND_CONSEQUENCE,
+        send: this.#baselineAnalysis.launch.live === null || this.#writingLiveUnavailable() ? WRITING_SEND_CONSEQUENCE : WRITING_LIVE_SEND_CONSEQUENCE,
         notDo: WRITING_NOT_DO,
         cost: WRITING_COST_BEFORE_PLAN,
       },
@@ -9932,17 +9937,17 @@ export class EditorialStore {
    * The drawer's `设为快速开始默认…` on a writing plan (AUTH-009, TASK-019; S84b), and the rule its Task was started under. A
    * writing rule covers only the house type of the plan it is set from (Commander ruling on #701: TASK-026, no widened source),
    * so each type of a Book has its own; the editor's audience, channel and requirements are each Task's own, as a range is. A
-   * plan may set its type's rule on the same terms as a baseline plan; never under a live scope, nor from a Task whose 范例 is no
-   * longer here, never started.
+   * plan may set its type's rule on the same terms as a baseline plan; live writing requires its selected admission. A Task whose
+   * 范例 is no longer here cannot set one before starting.
    */
   #writingDefaultRule(projection: WritingProjection, task: StoredWritingTask): TaskPlanDefaultRuleProjection {
     const envelope = projection.planEnvelope;
     const version = projection.planVersion;
     if (projection.taskIntent === null || envelope === null || version === null) return noDefaultRule(QUICK_START_NOT_READY);
     const startedBy = this.#ruleStartedBy(projection.bookId, 'writing', projection.authorization, writingRulePattern(task.typeId));
-    // A writing Task runs nowhere under a live scope (S84a), so no rule is set there, from whatever plan was frozen before.
+    // A live writing rule requires the selected writing admission, as preparation does.
     // A rule binds no 资料库 item (Issue #428; TASK-023, TASK-026): a plan that lists one sets none.
-    const kindReason = this.#baselineAnalysis.launch.live !== null ? SET_RULE_DEVELOPER_LIVE
+    const kindReason = this.#writingLiveUnavailable() ? SET_RULE_DEVELOPER_LIVE
       : !task.exemplarsReadable && projection.authorization === null ? WRITING_EXEMPLAR_MOVED
         : task.materials.length > 0 ? WRITING_RULE_MATERIALS : null;
     return this.#ruleOffer(projection.bookId, writingRulePattern(task.typeId), { planEnvelope: envelope, planVersion: version, planRevision: projection.planRevision }, kindReason, startedBy);
@@ -10012,7 +10017,7 @@ export class EditorialStore {
     }
     if (rule === null) return { available: false, reason: quickStartNoRuleReason(pattern), rule: null };
     const reference = defaultExecutionRuleReference(rule, rule.version);
-    if (this.#baselineAnalysis.launch.live !== null) return { available: false, reason: QUICK_START_DEVELOPER_LIVE, rule: reference };
+    if (this.#writingLiveUnavailable()) return { available: false, reason: QUICK_START_DEVELOPER_LIVE, rule: reference };
     // The page's own terms first — no manuscript, a document of the type, 本书不做, a Run under way — as 先看计划 is held to them.
     if (!prepare.allowed) return { available: false, reason: prepare.reason, rule: reference };
     const read = facts();
@@ -10026,7 +10031,7 @@ export class EditorialStore {
    * 快速开始 of a writing Task (TASK-017, TASK-020, TASK-026; S84b): the Task the caller has just prepared exactly as 先看计划
    * prepares it is started exactly as 开始任务 would start it, on the ledger of its plan's contract, its authorization naming
    * the writing rule version the editor started under. Whatever would make the start differ from the rule — a rule of another
-   * house type, the rule changed or was turned off, developer-live, a 范例 no longer here, the plan's key content or what the
+   * house type, the rule changed or was turned off, a refused live binding, a 范例 no longer here, the plan's key content or what the
    * rule binds moved, the model service not connected, no network, a busy slot — leaves the Task at its plan with the reason,
    * and nothing is recorded.
    */
@@ -10063,7 +10068,7 @@ export class EditorialStore {
     }
     const rule = this.#ruleCall(() => this.#rules.activeFor(bookId, pattern));
     if (rule === null || rule.version.ruleVersionId !== ruleVersionId) return fellBack(QUICK_START_RULE_CHANGED);
-    if (this.#baselineAnalysis.launch.live !== null) return fellBack(QUICK_START_DEVELOPER_LIVE);
+    if (this.#writingLiveUnavailable()) return fellBack(QUICK_START_DEVELOPER_LIVE);
     if (!latest.task.exemplarsReadable) return fellBack(WRITING_EXEMPLAR_MOVED);
     // A rule binds no 资料库 item, so a plan that lists one never starts under it (Issue #428; TASK-026: no widened source).
     if (latest.task.materials.length > 0) return fellBack(WRITING_QUICK_START_MATERIALS);

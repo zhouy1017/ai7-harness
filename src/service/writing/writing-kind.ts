@@ -48,8 +48,8 @@ import { reduceWriting, type WritingUnitOutcome } from './writing-reducers.js';
  *
  * It reads the manuscript, as 审稿意见 does, because the analysis path's one way to a book-level turn is through its units, and
  * because a document about a book draws on what is in it: its highlights, its people, its themes. Its book-level synthesis is a
- * transmission no Provider Processing policy names yet, so it is never prepared or started under a live scope; it declares no
- * assurance sample, since a draft the editor rewrites is not a finding a re-read could uphold.
+ * transmission admitted only by the selected writing rule; it declares no assurance sample, since a draft the editor rewrites
+ * is not a finding a re-read could uphold.
  */
 export const WRITING_REDUCER_DESCRIPTOR = {
   schema: 'ai7.writing.reducers/1',
@@ -143,13 +143,15 @@ export function writingRecordedKindDefinition(
  * The writing kind of one frozen contract, under the copy rules it was recorded with: `/2` for every Task prepared now, `/1` for
  * a Task recorded under #688's contract, which its parse keeps judging under `/1`'s sizes (the Commander's ruling on #704 P2-2).
  */
-export function writingKindDefinition(input: WritingContractInput, rules: WritingCopyRules = WRITING_COPY_RULES): AnalysisKindDefinition {
+export function writingKindDefinition(input: WritingContractInput, rules: WritingCopyRules = WRITING_COPY_RULES): AnalysisKindDefinition & { readonly liveItemSlice: 'S84' } {
   const contract = writingContract(input, rules);
   const promptContractDigest = writingContractDigest(contract);
   const frozen = contract.input;
   const exemplars = { count: frozen.exemplars.length, statement: writingExemplarLine(frozen.type.label, frozen.exemplars) };
   return {
     kind: WRITING_KIND,
+    // #429 forwards this member in its owned adapter-build hunk; other kinds keep S40.
+    liveItemSlice: 'S84',
     contractVersion: WRITING_CONTRACT_VERSION,
     expectedOutcome: WRITING_EXPECTED_OUTCOME,
     taskGoal: WRITING_MODE_GOALS['writing-first'],

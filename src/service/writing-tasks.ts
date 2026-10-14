@@ -324,9 +324,8 @@ export const MAX_WRITING_EXEMPLAR_GRAPHEMES = MAX_EXEMPLAR_GRAPHEMES;
 export const WRITING_FIELD_CONTROL = /[\p{Cc}\p{Zl}\p{Zp}]/u;
 export const WRITING_NEEDS_MANUSCRIPT = '这本书还没有稿件：写作任务要读稿件，先导入稿件。' as const;
 /**
- * 会发送 before any plan exists (editor-surfaces §9: 四行后果), as S84a is (#688 review): a writing Task runs only where nothing
- * is sent — under a live scope it is refused — so nothing leaves the machine. When a sending route arrives, this line names what
- * would be sent, 其他图书的范例原文 among it, since that is other Books' text leaving the machine.
+ * The provider-free 会发送 line (editor-surfaces §9: 四行后果), pinned by J-07. An admitted live writing Task uses the
+ * writing admission owner's separate consequence, including 其他图书的范例原文.
  */
 export const WRITING_SEND_CONSEQUENCE = '不发送任何内容：写作任务目前只在不连接模型服务的运行范围内起草。' as const;
 /** 不会做 in the editor's words; the plan's technical half is in 查看技术详情. */
