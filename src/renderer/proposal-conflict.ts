@@ -483,6 +483,8 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
   /** The four paths, unselected (V2-UX-CONFLICT-005). */
   function paths(next: ProposalConflictProjection): HTMLElement {
     const fieldset = el('fieldset', 'proposal-conflict-paths');
+    // A pending answer will reload this draft. Keep local edits and resolution commands from racing that reload.
+    fieldset.disabled = regenerating;
     fieldset.dataset['conflictPaths'] = 'true';
     fieldset.append(el('legend', undefined, CONFLICT_PATH_HEADING));
     const group = uid('path');
@@ -511,7 +513,7 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
         note.dataset['conflictUnavailable'] = 'edit-draft';
       }
       radio.addEventListener('change', () => {
-        if (!radio.checked) return;
+        if (!radio.checked || regenerating) return;
         path = choice;
         renderPathDetail(null);
       });
@@ -575,7 +577,7 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
     const next = projection;
     if (next === null || regenerating || working || destroyed) return;
     regenerating = true;
-    renderPathDetail(null);
+    render();
     try {
       if (dirty() && !(await saveNow())) {
         options.setStatus(saveState.kind === 'failed' ? conflictDraftUnsaved(saveState.reason) : CONFLICT_REGENERATE_STATUS.failed, 'error');
@@ -599,7 +601,7 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
       if (!destroyed) options.setStatus(options.errorMessage(error, CONFLICT_REGENERATE_STATUS.failed), 'error');
     } finally {
       regenerating = false;
-      if (!destroyed && path === 'regenerate') renderPathDetail(null);
+      if (!destroyed) render();
     }
   }
 

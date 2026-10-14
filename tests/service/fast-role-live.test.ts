@@ -199,6 +199,45 @@ describe('润色这段 on the live route (provider-free)', () => {
 });
 
 describe('基于当前稿件重新生成建议 on the live route (provider-free)', () => {
+  it('replays S22 validation and sends fresh business requests without recording them as tests', async () => {
+    const { markId } = constructSample1Conflict(store, book);
+    const conflict = conflictOf(store, book, markId);
+    const input = { manuscriptId: book.manuscriptId, branchId: book.branchId, markId, basisDigest: conflict.basisDigest, unitIndex: conflictUnitIndex(conflict) };
+    const calls: StubCall[] = [];
+    const fast = requests(live(stubTransport(calls, () => AUTHORED_REGENERATION_ANSWER)));
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const result = await settled(fast, fast.regenerate(input).requestId);
+      expect(result.kind === 'conflict-regenerate' && result.regeneration.outcome).toBe('drafted');
+    }
+    expect(calls).toHaveLength(1);
+    expect((await ledgerLines()).map((line) => [line.itemId, line.outcome, line.validation?.decision])).toEqual([
+      ['S22/conflict-regenerate/1', 'transmitted', 'first-capture'],
+      ['S22/conflict-regenerate/2', 'replayed', 'exact-replay'],
+    ]);
+    const before = await readFile(join(cacheRoot, PROVIDER_LEDGER_FILE), 'utf8');
+    const businessCalls: StubCall[] = [];
+    const business = requests(live(stubTransport(businessCalls, () => AUTHORED_REGENERATION_ANSWER), { validation: null }));
+    await settled(business, business.regenerate(input).requestId);
+    expect(businessCalls).toHaveLength(1);
+    expect(await readFile(join(cacheRoot, PROVIDER_LEDGER_FILE), 'utf8')).toBe(before);
+  });
+
+  it('retains an S22 unknown outcome without resending or saving a draft', async () => {
+    const { markId } = constructSample1Conflict(store, book);
+    const conflict = conflictOf(store, book, markId);
+    const unknownInput = { manuscriptId: book.manuscriptId, branchId: book.branchId, markId, basisDigest: conflict.basisDigest, unitIndex: conflictUnitIndex(conflict) };
+    const unknownCalls: StubCall[] = [];
+    const unknown = requests(live(stubTransport(unknownCalls, () => AUTHORED_REGENERATION_ANSWER, { unknown: true }), {
+      validation: { ...VALIDATION, case: 'sample1-conflict-unknown' },
+    }));
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const result = await settled(unknown, unknown.regenerate(unknownInput).requestId);
+      expect(result.kind === 'conflict-regenerate' && result.regeneration).toMatchObject({ outcome: 'failed', outcomeUnknown: true });
+    }
+    expect(unknownCalls).toHaveLength(1);
+    expect(conflictOf(store, book, markId).draft).toBeNull();
+  });
+
   it('sends the conflict unit under its own rule and category, files it as S22, and saves the draft with the rule as lineage', async () => {
     const { markId } = constructSample1Conflict(store, book);
     const conflict = conflictOf(store, book, markId);
