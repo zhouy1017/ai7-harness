@@ -107,6 +107,7 @@ export function initialEvaluationKindDefinition(profile: InitialEvaluationProfil
   const itemIds = contract.profile.items.map((item) => item.itemId);
   return {
     kind: INITIAL_EVALUATION_KIND,
+    livePromptContractDigest: () => initialEvaluationContractDigest(contract),
     contractVersion: INITIAL_EVALUATION_CONTRACT_VERSION,
     expectedOutcome: INITIAL_EVALUATION_EXPECTED_OUTCOME,
     taskGoal: INITIAL_EVALUATION_MODE_GOALS['evaluation-first'],

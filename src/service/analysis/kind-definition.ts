@@ -238,6 +238,8 @@ export interface AnalysisKindDefinition {
   readonly kind: AnalysisKindId;
   /** The Provider Test Ledger slice the kind's live validation items are numbered under; S40 when absent (#810 names S84). */
   readonly liveItemSlice?: ProviderTestItemSlice;
+  /** Re-derive the live contract from the kind owner's frozen input, independently of the declared digest. */
+  readonly livePromptContractDigest?: () => string;
   readonly contractVersion: string;
   readonly expectedOutcome: string;
   /** The goal text of the kind's initial mode: what `prepare` without an update request must carry. */

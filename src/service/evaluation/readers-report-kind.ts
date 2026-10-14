@@ -103,6 +103,7 @@ export function readersReportKindDefinition(input: ReadersReportContractInput): 
   const exemplars = { count: contract.input.exemplars.length, statement: readersReportExemplarLine(contract.input.exemplars) };
   return {
     kind: READERS_REPORT_KIND,
+    livePromptContractDigest: () => readersReportContractDigest(contract),
     contractVersion: READERS_REPORT_CONTRACT_VERSION,
     expectedOutcome: READERS_REPORT_EXPECTED_OUTCOME,
     taskGoal: READERS_REPORT_MODE_GOALS['readers-report-first'],

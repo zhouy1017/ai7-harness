@@ -2,6 +2,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
+import type { BaselineAnalysisStore } from '../../src/service/analysis/baseline-analysis-store.js';
 import { runReportUsageReconciles } from '../../src/service/analysis/run-report.js';
 import { INITIAL_EVALUATION_LIVE_UNAVAILABLE } from '../../src/service/evaluation/initial-evaluation-kind.js';
 import { EVALUATION_UNVERIFIED_DISCLOSURE } from '../../src/service/evaluation/unverified-disclosure.js';
@@ -35,6 +36,13 @@ let bookId: string;
 let sent: number;
 let failure: 'none' | 'unknown' | 'quota';
 let mismatchConclusion: boolean;
+let holdTurn: number | null;
+let arrived: Promise<void>;
+let held: Promise<void>;
+let announce: () => void;
+let release: () => void;
+let activeRun: { owner: BaselineAnalysisExecutionOwner; ledger: BaselineAnalysisStore; runRecordId: string; taskIntentId: string };
+let activeFamily: string;
 let authored: { initial: ResolvedModelFixture; readers: ResolvedModelFixture; rewrite: ResolvedModelFixture };
 /** The live captures of #429 (2026-10-14), answering 初评 and 审稿意见 in place of the authored texts when set. */
 let recorded: { initial: ResolvedModelFixture; readers: ResolvedModelFixture; rewrite: ResolvedModelFixture } | null;
@@ -62,6 +70,10 @@ const CONTRACTS = { 评估: 'ai7.evaluation', 审稿意见: 'ai7.readers-report'
 function answerOf(message: string): { text: string; usage: { inputTokens: number; outputTokens: number } } {
   const header = /^(评估|审稿意见|评语重写)(单元|综合) (\d+)\//u.exec(message);
   if (header === null) {
+    const fixture = activeFamily === 'evaluation-initial' ? recorded?.initial : activeFamily === 'evaluation-readers-report' ? recorded?.readers : recorded?.rewrite;
+    const reflection = [...(fixture?.entries.values() ?? [])].find((entry) => entry.capture?.subject === 'reflection');
+    if (reflection?.response.kind === 'unit-result') return { text: reflection.response.text, usage: reflection.response.usage };
+    // The rewrite retry captured no reflection; its reflection and authored runs use synthetic accounting text.
     return { text: JSON.stringify({ schema: 'ai7.analysis.run-report-reflection-result/1', items: [{ suggestion: '复查依据不足的评分项。', basis: '合成回归账目。' }] }), usage: { inputTokens: 40, outputTokens: 20 } };
   }
   const contract = header[1] as keyof typeof CONTRACTS;
@@ -81,9 +93,15 @@ function answerOf(message: string): { text: string; usage: { inputTokens: number
 
 const nativeFetch: typeof fetch = async (_url, init) => {
   sent += 1;
+  if (sent === holdTurn) {
+    announce();
+    await held;
+    if (init?.signal?.aborted) throw new DOMException('Synthetic aborted transport', 'AbortError');
+  }
   if (sent === 1 && failure === 'unknown') return new Response('{', { status: 200 });
   if (sent === 1 && failure === 'quota') return new Response(JSON.stringify({ error: { message: 'synthetic account limit' } }), { status: 429 });
   const body = JSON.parse(String(init?.body)) as { messages: Array<{ role: string; content: string }> };
+  expect(body.messages.some((message) => message.content.includes(EVALUATION_UNVERIFIED_DISCLOSURE))).toBe(false);
   const answer = answerOf(body.messages.at(-1)!.content);
   return new Response(JSON.stringify({
     model: DEVELOPER_LIVE_POLICY_BINDING.model,
@@ -94,6 +112,7 @@ const nativeFetch: typeof fetch = async (_url, init) => {
 
 /** One owner per contract, as each live evidence launch names its own validation family. */
 function liveOwner(policy: LaunchPolicyProjection, family: string): BaselineAnalysisExecutionOwner {
+  activeFamily = family;
   const owner = new BaselineAnalysisExecutionOwner({
     ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
     secretResolver: { resolve: async () => 'placeholder-development-key' },
@@ -125,6 +144,7 @@ async function runInitial(policy: LaunchPolicyProjection): Promise<void> {
   while (!progress.done) progress = store.advanceInitialEvaluationPreparationWork(progress.workId!);
   const prepared = progress.projection!;
   const authorized = store.authorizeInitialEvaluation(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+  activeRun = { owner, ledger: store.initialEvaluationLedger, runRecordId: authorized.dispatchRunRecordId!, taskIntentId: prepared.taskIntent!.taskIntentId };
   expect(owner.admitOrQueue(authorized.dispatchRunRecordId!, store.initialEvaluationLedger)).toBe('admitted');
   await owner.whenIdle();
 }
@@ -135,6 +155,7 @@ async function draftReport(policy: LaunchPolicyProjection): Promise<void> {
   while (!progress.done) progress = store.advanceReadersReportPreparationWork(progress.workId!);
   const prepared = progress.projection!;
   const authorized = store.authorizeReadersReport(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+  activeRun = { owner, ledger: authorized.ledger, runRecordId: authorized.dispatchRunRecordId!, taskIntentId: prepared.taskIntent!.taskIntentId };
   expect(owner.admitOrQueue(authorized.dispatchRunRecordId!, authorized.ledger)).toBe('admitted');
   await owner.whenIdle();
 }
@@ -145,6 +166,7 @@ async function rewrite(policy: LaunchPolicyProjection, recordId: string): Promis
   while (!progress.done) progress = store.advanceEvaluationRewritePreparationWork(progress.workId!);
   const prepared = progress.projection!;
   const authorized = store.authorizeEvaluationRewrite(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+  activeRun = { owner, ledger: authorized.ledger, runRecordId: authorized.dispatchRunRecordId!, taskIntentId: prepared.taskIntent!.taskIntentId };
   expect(owner.admitOrQueue(authorized.dispatchRunRecordId!, authorized.ledger)).toBe('admitted');
   await owner.whenIdle();
 }
@@ -167,6 +189,9 @@ beforeEach(async () => {
   failure = 'none';
   mismatchConclusion = false;
   recorded = null;
+  holdTurn = null;
+  arrived = new Promise<void>((resolve) => { announce = resolve; });
+  held = new Promise<void>((resolve) => { release = resolve; });
   const book = await importSample1Book(store, roots.codeRoot, 'L2 sample1 live evaluation');
   bookId = book.bookId;
   await pinEditorialWorkspaceProfileRevision2(store, bookId);
@@ -174,10 +199,26 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  release?.();
   for (const owner of owners.splice(0)) await owner.dispose();
   store?.close();
   await roots?.dispose();
 });
+
+/** Reach each contract's own prerequisite through the product, then measure that contract alone. */
+async function contractCase(kind: 'initial' | 'readers' | 'rewrite') {
+  if (kind !== 'initial') {
+    await runInitial(selected);
+    finalizeAsJ11(store, bookId);
+  }
+  const recordId = kind === 'rewrite' ? beginRewriteAsJ11(store, bookId).recordId : null;
+  sent = 0;
+  return {
+    run: () => kind === 'initial' ? runInitial(selected) : kind === 'readers' ? draftReport(selected) : rewrite(selected, recordId!),
+    inspect: () => kind === 'initial' ? store.inspectInitialEvaluation(bookId) : kind === 'readers' ? store.inspectReadersReport(bookId)! : store.inspectEvaluationRewrite(bookId)!,
+    purpose: kind === 'initial' ? 'evaluation-first' : kind === 'readers' ? 'readers-report-first' : 'evaluation-rewrite-first',
+  };
+}
 
 describe('evaluation on the Go execution path (#429)', () => {
   it('offers none of the three contracts under a selected policy that names no evaluation rule, and sends nothing', async () => {
@@ -308,6 +349,22 @@ describe('evaluation on the Go execution path (#429)', () => {
     expect((await ledgerLines()).some((line) => line.validation?.step === 'evaluation-first/reduction')).toBe(false);
   }, 300_000);
 
+  it('follows the policy-level reflection flag independently of synthesis admission', async () => {
+    const policy = { ...selected, providerProcessing: { ...selected.providerProcessing, runReportReflectionAllowed: false } };
+    bindLive(policy);
+    await runInitial(policy);
+    expect(store.inspectInitialEvaluation(bookId).resultSetRevision!.evaluation.synthesis.state).toBe('closed');
+    expect(sent).toBe(9);
+    expect((await ledgerLines()).some((line) => line.validation?.step === 'evaluation-first/reflection')).toBe(false);
+  }, 300_000);
+
+  it('refuses an evaluation rule on another role before preparing or sending', async () => {
+    const policy = withRuleFor(selected, 'evaluation', { modelRole: 'Light Editorial Role' });
+    bindLive(policy);
+    await expect(runInitial(policy)).rejects.toMatchObject({ code: 'ANALYSIS_KIND_NOT_ADMITTED' });
+    expect(sent).toBe(0);
+  });
+
   it('keeps the conclusion-mismatch rule: a live report that does not state the editor\'s conclusion writes no draft', async () => {
     const policy = selected;
     await runInitial(policy);
@@ -319,30 +376,68 @@ describe('evaluation on the Go execution path (#429)', () => {
     expect(drafted.synthesis.state).toBe('gap');
   }, 300_000);
 
-  it.each(['unknown', 'quota'] as const)('retains %s without retrying or resending the unit', async (mode) => {
+  it.each((['initial', 'readers', 'rewrite'] as const).flatMap((kind) => (['unknown', 'quota'] as const).map((mode) => ({ kind, mode }))))('retains $kind $mode without retrying or resending the unit', async ({ kind, mode }) => {
+    const target = await contractCase(kind);
     failure = mode;
-    await runInitial(selected);
-    const initial = store.inspectInitialEvaluation(bookId);
+    await target.run();
+    const initial = target.inspect();
     const lines = await ledgerLines();
     const failed = lines.find((line) => line.classification === (mode === 'unknown' ? 'outcome-unknown' : 'quota-exhausted'))!;
     expect(failed).toBeDefined();
-    expect(lines.filter((line) => line.validation?.step === 'evaluation-first/unit-1')).toHaveLength(1);
+    expect(lines.filter((line) => line.validation?.step === `${target.purpose}/unit-1`)).toHaveLength(1);
     if (mode === 'unknown') {
       expect(initial.resultSetRevision!.gaps.some((gap) => gap.code === 'outcome-unknown')).toBe(true);
+      const cache = new ProviderResultCache(join(roots.inputRoot, 'cache'));
+      expect(await cache.readClaim(failed.claimKey!)).toMatchObject({ state: 'outcome-unknown' });
+      const before = sent;
+      failure = 'none';
+      await target.run();
+      expect(sent).toBe(before);
+      expect(await cache.readClaim(failed.claimKey!)).toMatchObject({ state: 'outcome-unknown' });
     } else {
       expect(sent).toBe(1);
       expect(initial.taskOutcome!.classification).toBe('interrupted');
     }
   }, 300_000);
 
-  it('replays an identical 初评 from the Provider Result Cache without sending again', async () => {
-    const policy = selected;
-    await runInitial(policy);
+  it.each(['initial', 'readers', 'rewrite'] as const)('replays an identical %s from the Provider Result Cache without sending again', async (kind) => {
+    const target = await contractCase(kind);
+    await target.run();
     expect(sent).toBe(10);
-    await runInitial(policy);
-    const again = store.inspectInitialEvaluation(bookId);
+    const before = target.inspect().resultSetRevision!;
+    await target.run();
+    const again = target.inspect();
     expect(again.state).toBe('settled');
-    expect(again.resultSetRevision!.evaluation.items.map((item) => item.score)).toEqual([16.5, 15, 15.5, 14, 12]);
+    expect(again.resultSetRevision!.coverage).toEqual(before.coverage);
+    // Exact cache replay incurs no tokens, while retaining the nine logical contract requests.
+    expect(again.resultSetRevision!.usage).toEqual({ requests: 9, inputTokens: 0, outputTokens: 0 });
     expect(sent).toBe(10);
+  }, 300_000);
+
+  it.each((['initial', 'readers', 'rewrite'] as const).flatMap((kind) => (['cancel', 'interrupt'] as const).map((mode) => ({ kind, mode }))))('keeps completed $kind units and usage on $mode', async ({ kind, mode }) => {
+    const target = await contractCase(kind);
+    holdTurn = 2;
+    const running = target.run();
+    await arrived;
+    let stopped: Promise<void> | null = null;
+    if (mode === 'cancel') {
+      activeRun.ledger.requestCancel(bookId, activeRun.taskIntentId);
+      activeRun.owner.cancelRun(activeRun.runRecordId, activeRun.ledger);
+    } else stopped = activeRun.owner.dispose();
+    release();
+    await stopped;
+    await running;
+    const result = target.inspect();
+    expect(result.taskOutcome!.classification).toBe(mode === 'cancel' ? 'cancelled' : 'interrupted');
+    expect(sent).toBe(2);
+    const revision = result.resultSetRevision!;
+    const closed = mode === 'cancel' ? 2 : 1;
+    expect(revision.coverage.unitsClosed).toBe(closed);
+    expect(revision.units.filter((unit) => unit.state === 'closed').map((unit) => unit.unitOrdinal)).toEqual(Array.from({ length: closed }, (_, index) => index + 1));
+    // The interrupted second request was sent; its unreported tokens are not invented.
+    expect(revision.usage.requests).toBe(2);
+    expect(revision.usage.inputTokens + revision.usage.outputTokens).toBeGreaterThan(0);
+    expect(revision.gaps.every((gap) => gap.code === (mode === 'interrupt' && gap.unitOrdinal === 2 ? 'interrupted' : 'not-attempted'))).toBe(true);
+    expect(runReportUsageReconciles(result.taskOutcome!.report!, revision.usage)).toBe(true);
   }, 300_000);
 });

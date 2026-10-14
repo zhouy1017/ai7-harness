@@ -100,6 +100,7 @@ export function evaluationRewriteKindDefinition(input: EvaluationRewriteContract
   const itemIds = evaluationRewriteScoredItems(contract.input).map((item) => item.itemId);
   return {
     kind: EVALUATION_REWRITE_KIND,
+    livePromptContractDigest: () => evaluationRewriteContractDigest(contract),
     contractVersion: EVALUATION_REWRITE_CONTRACT_VERSION,
     expectedOutcome: EVALUATION_REWRITE_EXPECTED_OUTCOME,
     taskGoal: EVALUATION_REWRITE_MODE_GOALS['evaluation-rewrite-first'],

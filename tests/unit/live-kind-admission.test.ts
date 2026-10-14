@@ -4,6 +4,7 @@ import { liveKindAdmission, liveKindAdmitted, liveKindContractCategories, liveKi
 import { BASELINE_ANALYSIS_KIND } from '../../src/shared/protocol.js';
 import { initialEvaluationKindDefinition } from '../../src/service/evaluation/initial-evaluation-kind.js';
 import { readersReportKindDefinition } from '../../src/service/evaluation/readers-report-kind.js';
+import { evaluationRewriteKindDefinition } from '../../src/service/evaluation/evaluation-rewrite-kind.js';
 import { BUILTIN_EVALUATION_PROFILE, evaluationProfileDigest } from '../../src/service/evaluation-records.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryContractInput } from '../../src/service/review/category-configuration.js';
@@ -21,8 +22,23 @@ const report = readersReportKindDefinition({ template: 'author', record: { profi
   items: [{ label: '合成评分项', fullMarks: 100, score: 80, notRated: null, comment: '合成评语', ai7: null }],
   total: { score: 80, fullMarks: 100 }, strengths: ['合成优点'], weaknesses: ['合成问题'],
   risks: [], readiness: [], verdict: '合成总评', conclusion: '修改后再议' }, exemplars: [{ title: '合成本社范例', text: '合成范例段落，只用于测试。' }] });
+const rewrite = evaluationRewriteKindDefinition({ profile: { title: '合成方案', version: '1' },
+  items: [{ itemId: 'literary-quality', label: '文学品质', fullMarks: 20, score: 13, notRated: null,
+    comment: null, ai7: { score: 16.5, comment: '合成评语。' }, adjustment: { reasons: ['打分偏高'], note: null } }],
+  strengths: [], weaknesses: [], verdict: null, conclusions: ['修改后再议'] });
 
 describe('live kind admission (#429)', () => {
+  it.each([initial, report, rewrite])('re-derives $kind admission from its frozen contract instead of trusting a replaced digest', (definition) => {
+    expect(liveKindAdmission(policy, definition, binding)).not.toBeNull();
+    expect(liveKindAdmission(policy, { ...definition, promptContractDigest: 'a'.repeat(64) }, binding)).toBeNull();
+    const { livePromptContractDigest: _derive, ...withoutDerivation } = definition;
+    expect(liveKindAdmission(policy, withoutDerivation, binding)).toBeNull();
+    expect(liveKindAdmission(policy, { ...definition, materialReferences: {} }, binding)).toBeNull();
+    for (const field of ['route', 'endpoint', 'model', 'credentialSlot'] as const) {
+      expect(liveKindAdmission(policy, definition, { ...binding, [field]: 'different' })).toBeNull();
+    }
+  });
+
   it('admits an evaluation contract under its one rule, returning the rule facts the execution owner reads', () => {
     expect(liveKindAdmission(policy, initial, binding)).toEqual({
       ruleId: 'developer-live-public-samplebook-evaluation',

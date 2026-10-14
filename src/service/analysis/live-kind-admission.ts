@@ -25,6 +25,7 @@ export interface LiveKindBinding {
 export interface LiveKindDefinition {
   readonly kind: string;
   readonly promptContractDigest: string;
+  readonly livePromptContractDigest?: () => string;
   readonly materialReferences?: unknown;
 }
 
@@ -93,8 +94,8 @@ export const EVALUATION_PAYLOAD_CATEGORIES: Readonly<Record<string, readonly Out
 
 /**
  * What a kind's live contract must be, by kind. A review category is re-derived from the built-in configuration, exactly as
- * #809 admitted it. An evaluation contract is built by the store only from the Task's frozen profile, record and exemplar
- * inputs, which no configuration here can rebuild, so its expectation is the unwrapped definition's own digest. Any other
+ * #809 admitted it. An evaluation owner re-derives its contract from the Task's frozen profile, record and exemplar
+ * inputs; a missing owner derivation or a changed declared digest refuses admission. Any other
  * kind has no row and is not admitted.
  */
 function liveKindExpectation(definition: LiveKindDefinition): LiveKindExpectation | null {
@@ -107,7 +108,7 @@ function liveKindExpectation(definition: LiveKindDefinition): LiveKindExpectatio
     };
   }
   const evaluation = EVALUATION_PAYLOAD_CATEGORIES[definition.kind];
-  if (evaluation !== undefined) return { promptContractDigest: definition.promptContractDigest, payloadCategories: evaluation };
+  if (evaluation !== undefined) return { promptContractDigest: definition.livePromptContractDigest?.() ?? null, payloadCategories: evaluation };
   return null;
 }
 
