@@ -1386,10 +1386,10 @@ async function main() {
     const paragraphBefore = await paragraphText();
     const windowLoads = () => renderer.evaluate(`document.querySelector('[data-screen="editor"] [data-window-loads]')?.dataset.windowLoads ?? ''`);
     // On a selection of that paragraph the menu's 就这段发起任务… acts; the house's 可复用工序 would be listed here (S77 deferred item a,
-    // J-13's) — this house has none, which the group says once its read answers — 润色这段 alone waits with its reason, the other two
-    // prototype presets are gone, and 再选一段加入 is refused in words.
+    // J-13's) — this house has none, which the group says once its read answers — 润色这段 is enabled, this launch binding a model
+    // fixture (Issue #842), the other two prototype presets are gone, and 再选一段加入 is refused in words.
     await openSelectionMenu(renderer, taskBlock, 0, wordsTo, 'selection-task-open-menu');
-    await assertRenderer(renderer, `(() => { const item = window.__j16.item('task-on-selection'); const polish = window.__j16.item('preset-polish'); return item instanceof HTMLButtonElement && !item.disabled && item.textContent.startsWith('就这段发起任务…') && polish instanceof HTMLButtonElement && polish.disabled && polish.title === '润色这段尚未接通：要有一项生成修改建议的润色工序' && window.__j16.item('preset-names') === null && window.__j16.item('preset-continuity') === null && window.__j16.menu().textContent.includes('不提供「再选一段加入」'); })()`, 'selection-task-menu-items');
+    await assertRenderer(renderer, `(() => { const item = window.__j16.item('task-on-selection'); const polish = window.__j16.item('preset-polish'); return item instanceof HTMLButtonElement && !item.disabled && item.textContent.startsWith('就这段发起任务…') && polish instanceof HTMLButtonElement && !polish.disabled && window.__j16.item('preset-names') === null && window.__j16.item('preset-continuity') === null && window.__j16.menu().textContent.includes('不提供「再选一段加入」'); })()`, 'selection-task-menu-items');
     await waitFor(renderer, `window.__j16.menu()?.textContent.includes('本社还没有启用的可复用工序。') && window.__j16.menu().querySelectorAll('[data-mark-action^="procedure:"]').length === 0 && window.__j16.item('task-on-selection') instanceof HTMLButtonElement`, 'selection-task-menu-procedures-none', 15_000);
     await assertRenderer(renderer, `(() => { window.__j16.item('task-on-selection').click(); return true; })()`, 'selection-task-choose');
 

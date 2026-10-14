@@ -43,7 +43,7 @@ const CLASSIFICATION = '需要解决冲突';
 const REVERSAL_LINE = '撤销这次应用时遇到冲突：应用后的文字又改过';
 const REVERSAL_PROPOSED_LABEL = '提议内容 · 撤销后会恢复的原文';
 const CONTEXT_NOTE = '前后文为当前稿件';
-const REGENERATE_REASON = '重新生成建议尚未接通';
+const REGENERATE_REASON = '当前运行范围未允许重新生成建议：这次启动没有可用的模型。';
 const RESOLVE_CONFLICT = '解决冲突…';
 const SAFE_MERGE = '本段后来改过别处，没有碰到这条建议的原文';
 const DRAFT_SAVED = '草稿已保存';
@@ -814,7 +814,8 @@ async function main() {
 
     at('conflict-three-texts');
     // 稿件冲突: where it is, what it is, the three texts exactly and persistently labelled, the current paragraph's
-    // context, the four paths unselected, and regenerating unavailable with its reason.
+    // context, the four paths unselected, and regenerating unavailable with the service's route-aware reason (Issue #842: this
+    // launch binds no model fixture).
     await assertRenderer(renderer, `(() => {
       const section = window.__j06.conflict();
       const texts = window.__j06Texts;

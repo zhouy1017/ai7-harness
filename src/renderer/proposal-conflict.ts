@@ -9,7 +9,7 @@ import {
   type ConflictUnit,
   type ConflictUnitResolution,
 } from '../shared/conflict-units.js';
-import type { ProposalConflictProjection, RendererApi } from '../shared/protocol.js';
+import type { FastInteractionRouteProjection, ProposalConflictProjection, RendererApi } from '../shared/protocol.js';
 import { markSourceLine } from './editorial-mark-labels.js';
 import {
   CONFLICT_COMPLETION,
@@ -29,7 +29,10 @@ import {
   CONFLICT_PATH_LABELS,
   CONFLICT_QUICK_ACTIONS,
   CONFLICT_REBASED_NOTICE,
-  CONFLICT_REGENERATE_REASON,
+  CONFLICT_REGENERATE_READING,
+  CONFLICT_REGENERATE_STATUS,
+  CONFLICT_REGENERATED_TAG,
+  conflictRegenerateUnitLabel,
   CONFLICT_RETURN_LABEL,
   CONFLICT_STATUS_LINES,
   CONFLICT_UNIT_KIND_LABELS,
@@ -73,7 +76,11 @@ export interface ProposalConflictSurface {
   settle(): Promise<boolean>;
 }
 
-type ConflictApi = Pick<RendererApi, 'inspectProposalConflict' | 'saveProposalConflictDraft' | 'resolveProposalConflict'>;
+type ConflictApi = Pick<RendererApi, 'inspectProposalConflict' | 'saveProposalConflictDraft' | 'resolveProposalConflict' |
+  'inspectFastInteractionRoutes' | 'regenerateProposalConflictUnit' | 'inspectFastInteractionRequest'>;
+
+/** How often 基于当前稿件重新生成建议 reads its request again while it is in flight (Issue #842). */
+const REGENERATION_READ_AGAIN_MS = 400;
 
 export interface MountProposalConflictOptions {
   /** The workspace's panel: the surface appends everything it shows. */
@@ -146,6 +153,9 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
   let saving: Promise<boolean> | null = null;
   let working = false;
   let bulkSummary: string | null = null;
+  /** Whether this launch can run 基于当前稿件重新生成建议, as the service said it with the first read (Issue #842). */
+  let regenerateRoute: FastInteractionRouteProjection | null = null;
+  let regenerating = false;
 
   const host = el('div', 'proposal-conflict-host');
   host.dataset['conflictMarkId'] = markId;
@@ -167,8 +177,14 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
 
   async function load(): Promise<void> {
     try {
-      const next = await api.inspectProposalConflict(binding);
+      const [next, routes] = await Promise.all([
+        api.inspectProposalConflict(binding),
+        regenerateRoute === null ? api.inspectFastInteractionRoutes().catch(() => null) : Promise.resolve(null),
+      ]);
       if (destroyed) return;
+      if (regenerateRoute === null) {
+        regenerateRoute = routes?.conflictRegenerate ?? { available: false, reason: CONFLICT_REGENERATE_STATUS.unreadable };
+      }
       if (next.markId !== markId || next.manuscriptId !== options.manuscriptId || next.branchId !== options.branchId) {
         throw new Error('稿件冲突不属于这条修改建议。');
       }
@@ -481,9 +497,10 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
       const note = el('small', 'muted', conflictPathNote(choice, next.conflictKind));
       note.id = uid('path-note');
       radio.setAttribute('aria-describedby', note.id);
-      if (choice === 'regenerate') {
+      // 基于当前稿件重新生成建议 is the service's to offer (Issue #842): unavailable, it says why in the service's own words.
+      if (choice === 'regenerate' && regenerateRoute?.available !== true) {
         radio.disabled = true;
-        note.textContent = CONFLICT_REGENERATE_REASON;
+        note.textContent = regenerateRoute?.reason ?? CONFLICT_REGENERATE_READING;
         note.dataset['conflictUnavailable'] = 'regenerate';
       }
       // Where the words were deleted there is nothing a new version could stand on: the draft path is
@@ -530,8 +547,59 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
       draftHost = el('section', 'proposal-conflict-draft');
       pathDetail.replaceChildren(draftHost);
       renderDraft(focus);
+    } else if (path === 'regenerate') {
+      // One action per 冲突 unit: its three texts and the suggestion's reason are what is sent, and only for that unit.
+      const actions = el('div', 'button-row');
+      let ordinal = 0;
+      next.units.forEach((unit, unitIndex) => {
+        if (!isChangeUnit(unit)) return;
+        ordinal += 1;
+        if (unit.kind !== 'conflict') return;
+        const control = button('regenerate-unit', conflictRegenerateUnitLabel(ordinal), 'secondary', () => void regenerateUnit(unitIndex));
+        control.dataset['unit'] = String(unitIndex);
+        control.disabled = regenerating || working;
+        actions.append(control);
+      });
+      pathDetail.replaceChildren(el('p', 'proposal-conflict-consequence', conflictPathNote('regenerate', next.conflictKind)), actions);
     } else {
       pathDetail.replaceChildren();
+    }
+  }
+
+  /**
+   * 基于当前稿件重新生成建议 for one 冲突 unit (Issue #842): the draft on screen is saved first, so the regenerated words join
+   * exactly it; the request is read again until it settles, and its words, when they are new, arrive in the draft as that
+   * unit's 编辑合并结果 — shown at once on the draft path. Nothing is accepted or applied.
+   */
+  async function regenerateUnit(unitIndex: number): Promise<void> {
+    const next = projection;
+    if (next === null || regenerating || working || destroyed) return;
+    regenerating = true;
+    renderPathDetail(null);
+    try {
+      if (dirty() && !(await saveNow())) {
+        options.setStatus(saveState.kind === 'failed' ? conflictDraftUnsaved(saveState.reason) : CONFLICT_REGENERATE_STATUS.failed, 'error');
+        return;
+      }
+      options.setStatus(CONFLICT_REGENERATE_STATUS.requesting, 'busy');
+      let settled = await api.regenerateProposalConflictUnit({ ...binding, basisDigest: next.basisDigest, unitIndex });
+      while (settled.outcome === 'requesting' && !destroyed) {
+        await new Promise((resolve) => window.setTimeout(resolve, REGENERATION_READ_AGAIN_MS));
+        const read = await api.inspectFastInteractionRequest({ requestId: settled.requestId });
+        if (read.kind !== 'conflict-regenerate' || read.regeneration.markId !== markId) throw new Error(CONFLICT_REGENERATE_STATUS.unreadable);
+        settled = read.regeneration;
+      }
+      if (destroyed) return;
+      if (settled.outcome === 'drafted') {
+        path = 'edit-draft';
+        await load();
+      }
+      options.setStatus(settled.label, settled.outcome === 'withheld' || settled.outcome === 'failed' ? 'error' : 'success');
+    } catch (error) {
+      if (!destroyed) options.setStatus(options.errorMessage(error, CONFLICT_REGENERATE_STATUS.failed), 'error');
+    } finally {
+      regenerating = false;
+      if (!destroyed && path === 'regenerate') renderPathDetail(null);
     }
   }
 
@@ -620,6 +688,14 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
     heading.tabIndex = -1;
     heading.dataset['draftUnitHeading'] = 'true';
     item.append(heading);
+    // Words AI7 regenerated for this unit, said so while they stand as they were saved (Issue #842; V2-UX-CONFLICT-011).
+    const regenerated = projection?.draft?.regeneration ?? null;
+    const saved = projection?.draft?.resolutions[unitIndex];
+    if (regenerated !== null && regenerated.unitIndex === unitIndex && saved !== undefined && saved.resolution === entry.resolution && saved.text === entry.text) {
+      const tag = el('small', 'muted', CONFLICT_REGENERATED_TAG);
+      tag.dataset['draftUnitRegenerated'] = 'true';
+      item.append(tag);
+    }
     const resolvedWords = el('p', 'proposal-conflict-words proposal-conflict-resolved-words', wordsOf(resolvedUnitText(unit, entry)));
     resolvedWords.dataset['draftUnitWords'] = 'true';
     if (resolution !== 'unresolved') item.append(resolvedWords);

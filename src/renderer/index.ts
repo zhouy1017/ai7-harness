@@ -27,6 +27,7 @@ import type {
   BookWorkOverviewProjection,
   ProposeSeriesKnowledgeInput,
   AskAboutSelectionInput,
+  PolishSelectionInput,
   DialogueProjection,
   FidelityCategoryProjection,
   ContinueImportProjection,
@@ -8895,6 +8896,24 @@ function renderEditorWindow(
     ...(isDocument ? {} : {
       askAboutSelection: (input: AskAboutSelectionInput) => window.ai7.askAboutSelection(input),
       onAsked: (dialogue: DialogueProjection) => taskDrawer.openDialogue(dialogue.bookId, dialogue.dialogueId, () => editorHost.querySelector<HTMLElement>('.ProseMirror')),
+      // 润色这段 (Issue #842): the Book's manuscript only; the request is read again until it settles, and the new 修改建议 are
+      // drawn from the window as the service holds it then.
+      polish: {
+        routes: () => window.ai7.inspectFastInteractionRoutes(),
+        polish: (input: PolishSelectionInput) => window.ai7.polishSelection(input),
+        inspect: async (taskId: string) => {
+          const read = await window.ai7.inspectFastInteractionRequest({ requestId: taskId });
+          if (read.kind !== 'editorial-polish') throw new Error('润色的结果不属于这次请求。');
+          return read.polish;
+        },
+        marks: async () => {
+          const shown = currentWindow;
+          const read = await window.ai7.getManuscriptWindowAt({
+            manuscriptId: shown.manuscriptId, branchId: shown.branchId, target: { kind: 'window-start', blockId: shown.blocks[0]!.blockId },
+          });
+          return read.blocks[0]?.blockId === shown.blocks[0]?.blockId ? { journalSequence: read.journalSequence, marks: read.marks, truncated: read.marksTruncated } : null;
+        },
+      },
       // 就这段发起任务… (Issue #423, S77b): the Book's manuscript only; the prepared Task's plan opens in the side slot.
       startTaskOnSelection: {
         bookTitle,
