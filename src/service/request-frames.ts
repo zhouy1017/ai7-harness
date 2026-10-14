@@ -2107,6 +2107,34 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    // 润色这段 and 基于当前稿件重新生成建议 (Issue #842): the route's Book and the exact span as a mark names one; a conflict unit by
+    // its index on the basis the read answered; either request read again by its identity within the route's Book.
+    case 'inspectFastInteractionRoutes': {
+      const input = requireInput(value.input, ['bookId'], tentativeId);
+      if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'polishSelection': {
+      const input = requireInput(value.input, ['bookId', 'selection'], tentativeId);
+      if (!validUuid(input.bookId) || input.selection === null || !validKnowledgeSpan(input.selection)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'inspectFastInteractionRequest': {
+      const input = requireInput(value.input, ['bookId', 'requestId'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.requestId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'regenerateProposalConflictUnit': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'markId', 'basisDigest', 'unitIndex'], tentativeId);
+      if (
+        !validUuid(input.manuscriptId) || !validUuid(input.branchId) || !validUuid(input.markId) ||
+        !isBoundedString(input.basisDigest, 64) || !HEX_DIGEST_PATTERN.test(input.basisDigest) ||
+        !isSafeInteger(input.unitIndex, 0) || input.unitIndex >= MAX_PROPOSAL_CONFLICT_UNITS
+      ) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     case 'inspectBookTasks':
     case 'inspectProductionDocuments': {
       const input = requireInput(value.input, ['bookId'], tentativeId);
