@@ -10,6 +10,7 @@ import {
   type ReadersReportResultProjection,
 } from '../../shared/protocol.js';
 import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
+import { disclosedNote, producedUnverified } from './unverified-disclosure.js';
 import { countByClass, modeIndex, type AnalysisKindDefinition, type AnalysisModeDefinition } from '../analysis/kind-definition.js';
 import { PRE_ASSURANCE_SAMPLE, type ClosedUnitOutcome } from '../analysis/reducers.js';
 import { carryPositionalResult } from '../analysis/reused-result.js';
@@ -46,8 +47,8 @@ import { reduceReadersReport, type ReadersReportUnitOutcome } from './readers-re
  * Why it reads the manuscript at all, when its synthesis could have read the record alone: the analysis path's one way to a
  * book-level turn is through its units, and a second, unit-less execution path — its own states, cancellation and reports —
  * would be far more than this slice. Reading each range for the passages the report can point to is also what makes 主要问题
- * and 修改建议 something an author can find. Like 初评, its book-level synthesis is a transmission no Provider Processing policy
- * names yet, so it is never prepared or started under a live scope; it declares no assurance sample, since a draft the editor
+ * and 修改建议 something an author can find. Like 初评, it is prepared or started under a live scope only when the selected
+ * policy's rule names the kind, the editor's record, the house exemplars and its synthesis; it declares no assurance sample, since a draft the editor
  * rewrites is not a finding a re-read could uphold.
  */
 export const READERS_REPORT_REDUCER_DESCRIPTOR = {
@@ -169,7 +170,14 @@ export function readersReportKindDefinition(input: ReadersReportContractInput): 
     }),
     // The contract names a block by its position in the unit message, which a reused unit keeps.
     remapReusedResult: (result, predecessorUnit, newUnit) => carryPositionalResult(result as ReadersReportUnitResult, predecessorUnit, newUnit),
-    revisionComponents: (body) => ({ readersReport: body.readersReport, assuranceSample: body.assuranceSample ?? PRE_ASSURANCE_SAMPLE }),
+    // A report drafted under the live route shows 未联网核查 on the passages it rests on (Issue #429); its sections stay as written.
+    revisionComponents: (body) => ({
+      readersReport: producedUnverified((body.policyPin as { operationalScope?: unknown } | undefined)?.operationalScope)
+        ? { ...(body.readersReport as ReadersReportResultProjection), passages: (body.readersReport as ReadersReportResultProjection).passages
+          .map((passage) => ({ ...passage, note: disclosedNote(passage.note, true) })) }
+        : body.readersReport,
+      assuranceSample: body.assuranceSample ?? PRE_ASSURANCE_SAMPLE,
+    }),
     conflictCountOf: () => 0,
     mode: modeIndex(MODES),
   };
