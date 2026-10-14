@@ -368,6 +368,7 @@ import {
   WRITING_NEEDS_MANUSCRIPT,
   WRITING_NOT_DO,
   WRITING_SEND_CONSEQUENCE,
+  WRITING_LIVE_SEND_CONSEQUENCE,
   WRITING_MATERIALS_NONE,
   WRITING_MATERIALS_STATEMENT,
   WRITING_MATERIALS_TOO_MANY,
@@ -395,7 +396,7 @@ import {
   type WritingMaterialSource,
 } from './writing-tasks.js';
 import { writingKindDefinition, writingRecordedKindDefinition } from './writing/writing-kind.js';
-import { liveWritingRule, WRITING_LIVE_SEND_CONSEQUENCE } from './writing/live-writing-admission.js';
+import { liveWritingRule } from './writing/live-writing-admission.js';
 import {
   WRITING_COPY_RULES,
   writingExemplarLine,
@@ -6141,7 +6142,7 @@ export class EditorialStore {
     const reason = kindReason !== null
       ? kindReason
       // #810: an admitted writing plan may set its own rule; other live kinds keep the existing refusal.
-      : envelope.providerStatus === 'remote-eligible-developer-live' && !(pattern.startsWith('writing:') && !this.#writingLiveUnavailable())
+      : envelope.providerStatus === 'remote-eligible-developer-live' && !(defaultExecutionRuleKind(pattern) === 'writing' && !this.#writingLiveUnavailable())
         ? SET_RULE_DEVELOPER_LIVE
         : plan.planRevision !== null
           ? SET_RULE_CHANGED
@@ -9426,6 +9427,7 @@ export class EditorialStore {
     if (this.#writingLiveUnavailable()) throw new StoreError('WRITING_UNAVAILABLE', WRITING_LIVE_UNAVAILABLE);
   }
 
+  /** Whether the launch is live and its selected policy admits no writing on the bound route; never under the provider-free scope. */
   #writingLiveUnavailable(): boolean {
     const launch = this.#baselineAnalysis.launch;
     return launch.live !== null && liveWritingRule(launch.policy, launch.live) === null;

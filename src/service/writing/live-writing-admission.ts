@@ -37,6 +37,3 @@ export function liveWritingKindAdmitted(policy: LaunchPolicyProjection | undefin
   return rule === null ? null : { ruleId: rule.ruleId, modelRole: rule.modelRole,
     outboundDataCategories: rule.outboundDataCategories, crossUnitSynthesisAllowed: true };
 }
-
-export const WRITING_LIVE_SEND_CONSEQUENCE =
-  '发送当前稿件的阅读单元、全书综合依据与上面列出的参考材料（包括其他图书的范例原文）；不发送本社人员姓名。';
