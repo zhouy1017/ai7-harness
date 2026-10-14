@@ -17,7 +17,7 @@ const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
 const CARRIER_VERSION = 2;
 export const ACTIVE_SET_VERSION = 'v9' as const;
 const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v9.json';
-const ACTIVE_SET_SHA256 = '0a638bf74ad80858a2a856aa99063436b6ef133c5af0296fd6271f0d145157ca';
+const ACTIVE_SET_SHA256 = 'c3c6069d9b476a311c424343a3321fe7efbcbbb116f878dc51bb2236662b7c10';
 const PROVIDER_PINS = {
   'development-ci': {
     version: 'v1',
@@ -37,7 +37,7 @@ const PROVIDER_PINS = {
   'developer-live': {
     version: 'v11',
     canonicalPath: 'docs/policies/provider-processing-policy.v11.json',
-    sha256: '3682c59b4815a291f495ecd7b9c8552f00616a1c2513f472a1e988d16b824f91',
+    sha256: '64178786e62473e043afd4c699380c5e71ee95e2d7c42c2630a697072c36ac14',
   },
 } as const;
 /**
@@ -332,13 +332,12 @@ interface DeveloperLiveRuleReading {
 /**
  * A planned Run over the Book's units that ends in the kind's one book-level synthesis turn — writing and the three evaluation
  * contracts (Provider Processing v11). The planned-Run origin and bound of baseline analysis, with the synthesis turn named,
- * no assurance sample, no reduction topic sections, and no Series Knowledge or editorial deliverables. Material References are
- * admitted only with the consumption re-check (Issue #759, item 1), never as a bare allowance.
+ * no assurance sample, no reduction topic sections, and no Material References, Series Knowledge or editorial deliverables.
  */
 function verifySynthesisRule(rule: Record<string, unknown>): void {
   verifyPlannedRunOrigin(rule, false);
   const source = rule['source'];
-  requirePolicy(isRecord(source) && source['materialReferencesAllowed'] === true && source['materialReferenceConsumptionRecheckRequired'] === true &&
+  requirePolicy(isRecord(source) && source['materialReferencesAllowed'] === false && source['materialReferenceConsumptionRecheckRequired'] === undefined &&
     source['seriesKnowledgeAllowed'] === false && source['editorialDeliverablesAllowed'] === false);
   const transmissions = rule['transmissions'] as Record<string, unknown>;
   requirePolicy(
@@ -349,6 +348,36 @@ function verifySynthesisRule(rule: Record<string, unknown>): void {
       transmissions['assuranceSamplingAllowed'] === false &&
       transmissions['runReportReflectionAllowed'] === true,
   );
+}
+
+/** One foreground manuscript Suggestion request, with no synthesis, reflection, assurance sample or Run ceiling. */
+function verifySuggestionRule(rule: Record<string, unknown>, sourceKey: 'editorSelectedPassageOnly' | 'singleManuscriptConflictRegionOnly'): void {
+  const origin = rule['authorityOrigin'];
+  requirePolicy(isRecord(origin) && origin['foregroundEditorActionRequired'] === true &&
+    origin['matchingActiveDefaultExecutionRuleAllowed'] === false && origin['backgroundAnalysisEnrollmentAllowed'] === false &&
+    origin['idleScheduledImportTriggeredOrCrossRunDispatchAllowed'] === false);
+  const source = rule['source'] as Record<string, unknown>;
+  requirePolicy(source[sourceKey] === true && source['materialReferencesAllowed'] === false &&
+    source['seriesKnowledgeAllowed'] === false && source['editorialDeliverablesAllowed'] === false);
+  const transmissions = rule['transmissions'] as Record<string, unknown>;
+  requirePolicy(
+    transmissions['oneTechnicalSessionPerAttempt'] === true &&
+      transmissions['oneBoundedPayloadPerAttempt'] === true &&
+      transmissions['payloadLimitedToFrozenContractAndEditorManuscriptExcerpts'] === true &&
+      transmissions['crossUnitSynthesisAllowed'] === false &&
+      transmissions['crossUnitReductionAllowed'] === false &&
+      transmissions['assuranceSamplingAllowed'] === false &&
+      transmissions['runReportReflectionAllowed'] === false &&
+      transmissions['automaticResendInsideStoppedSessionAllowed'] === false,
+  );
+  const preconditions = rule['authorizationPreconditions'];
+  requirePolicy(isRecord(preconditions) && preconditions['exactProviderBindingRequired'] === true &&
+    preconditions['finalProviderPayloadEgressGateRequired'] === true && preconditions['frozenBeforeTransmission'] === true && preconditions['runBudgetCeilingApplies'] === false);
+  const limit = rule['providerAccountLimit'] as Record<string, unknown>;
+  requirePolicy(limit['endsAttemptAsProviderAccountLimit'] === true);
+  // The output is a Suggestion the editor decides on, never a manuscript change.
+  const output = rule['output'];
+  requirePolicy(isRecord(output) && output['suggestionsOnly'] === true && output['appliesManuscriptChange'] === false);
 }
 
 const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> = {
@@ -419,11 +448,11 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
     },
   },
   // 写作任务 (S84): the `writing` kind, drafted over the Book's units and one book-level synthesis turn from the frozen metadata and
-  // synopsis, the house's 范例 and the editor's own brief. Reference-bearing only through the consumption re-check.
+  // synopsis, the house's 范例 and the editor's own brief. Material-bearing writing remains refused this wave.
   'developer-live-public-samplebook-writing': {
     modelRole: 'Main Editorial Role',
     taskKinds: ['writing'],
-    outboundDataCategories: ['public-or-synthetic', 'book-metadata-and-synopsis', 'house-exemplar-excerpt', 'frozen-material-reference-excerpt'],
+    outboundDataCategories: ['public-or-synthetic', 'book-metadata-and-synopsis', 'house-exemplar-excerpt'],
     crossUnitSynthesisAllowed: true,
     verify: verifySynthesisRule,
   },
@@ -431,42 +460,24 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
   'developer-live-public-samplebook-evaluation': {
     modelRole: 'Main Editorial Role',
     taskKinds: ['evaluation', 'readers-report', 'evaluation-rewrite'],
-    outboundDataCategories: ['public-or-synthetic', 'editor-authored-evaluation-text', 'house-exemplar-excerpt', 'frozen-material-reference-excerpt'],
+    outboundDataCategories: ['public-or-synthetic', 'editor-authored-evaluation-text', 'house-exemplar-excerpt'],
     crossUnitSynthesisAllowed: true,
     verify: verifySynthesisRule,
   },
-  // 润色这段 and 稿件冲突 › 基于当前稿件重新生成建议: one foreground editor action on the editor's own manuscript words, one session and one
-  // bounded payload per attempt, Suggestions only. No synthesis turn, and no Material References, Series Knowledge or deliverables.
-  'developer-live-public-samplebook-selection-suggestions': {
+  // Each Fast kind has its own rule and excerpt category (Issue #841 revision 5); outputs remain Suggestions only.
+  'developer-live-public-samplebook-editorial-polish': {
     modelRole: 'Fast Interaction Role',
-    taskKinds: ['editorial-polish', 'conflict-regenerate'],
+    taskKinds: ['editorial-polish'],
     outboundDataCategories: ['editor-selected-manuscript-excerpt'],
     crossUnitSynthesisAllowed: false,
-    verify: (rule) => {
-      const origin = rule['authorityOrigin'];
-      requirePolicy(isRecord(origin) && origin['foregroundEditorActionRequired'] === true &&
-        origin['matchingActiveDefaultExecutionRuleAllowed'] === false && origin['backgroundAnalysisEnrollmentAllowed'] === false &&
-        origin['idleScheduledImportTriggeredOrCrossRunDispatchAllowed'] === false);
-      const source = rule['source'] as Record<string, unknown>;
-      requirePolicy(source['editorSelectedPassageOrConflictRegionOnly'] === true && source['materialReferencesAllowed'] === false &&
-        source['seriesKnowledgeAllowed'] === false && source['editorialDeliverablesAllowed'] === false);
-      const transmissions = rule['transmissions'] as Record<string, unknown>;
-      requirePolicy(
-        transmissions['oneTechnicalSessionPerAttempt'] === true &&
-          transmissions['oneBoundedPayloadPerAttempt'] === true &&
-          transmissions['payloadLimitedToFrozenContractAndEditorManuscriptExcerpts'] === true &&
-          transmissions['crossUnitSynthesisAllowed'] === false &&
-          transmissions['automaticResendInsideStoppedSessionAllowed'] === false,
-      );
-      const preconditions = rule['authorizationPreconditions'];
-      requirePolicy(isRecord(preconditions) && preconditions['exactProviderBindingRequired'] === true &&
-        preconditions['finalProviderPayloadEgressGateRequired'] === true && preconditions['frozenBeforeTransmission'] === true);
-      const limit = rule['providerAccountLimit'] as Record<string, unknown>;
-      requirePolicy(limit['endsAttemptAsProviderAccountLimit'] === true);
-      // The output is a Suggestion the editor decides on, never a manuscript change.
-      const output = rule['output'];
-      requirePolicy(isRecord(output) && output['suggestionsOnly'] === true && output['appliesManuscriptChange'] === false);
-    },
+    verify: (rule) => verifySuggestionRule(rule, 'editorSelectedPassageOnly'),
+  },
+  'developer-live-public-samplebook-conflict-regenerate': {
+    modelRole: 'Fast Interaction Role',
+    taskKinds: ['conflict-regenerate'],
+    outboundDataCategories: ['manuscript-conflict-region-excerpt'],
+    crossUnitSynthesisAllowed: false,
+    verify: (rule) => verifySuggestionRule(rule, 'singleManuscriptConflictRegionOnly'),
   },
 };
 

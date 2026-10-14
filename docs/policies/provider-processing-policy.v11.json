@@ -372,16 +372,14 @@
           "transmittableSetFixedByImplementingSlice": true,
           "privateManuscriptAllowed": false,
           "otherBookRefusedBeforeDispatch": true,
-          "materialReferencesAllowed": true,
-          "materialReferenceConsumptionRecheckRequired": true,
+          "materialReferencesAllowed": false,
           "seriesKnowledgeAllowed": false,
           "editorialDeliverablesAllowed": false
         },
         "allowedOutboundDataCategories": [
           "public-or-synthetic",
           "book-metadata-and-synopsis",
-          "house-exemplar-excerpt",
-          "frozen-material-reference-excerpt"
+          "house-exemplar-excerpt"
         ],
         "redaction": {
           "housePeopleNamesAndRolesStripped": true,
@@ -482,16 +480,14 @@
           "transmittableSetFixedByImplementingSlice": true,
           "privateManuscriptAllowed": false,
           "otherBookRefusedBeforeDispatch": true,
-          "materialReferencesAllowed": true,
-          "materialReferenceConsumptionRecheckRequired": true,
+          "materialReferencesAllowed": false,
           "seriesKnowledgeAllowed": false,
           "editorialDeliverablesAllowed": false
         },
         "allowedOutboundDataCategories": [
           "public-or-synthetic",
           "editor-authored-evaluation-text",
-          "house-exemplar-excerpt",
-          "frozen-material-reference-excerpt"
+          "house-exemplar-excerpt"
         ],
         "redaction": {
           "housePeopleNamesAndRolesStripped": true,
@@ -571,7 +567,7 @@
         ]
       },
       {
-        "ruleId": "developer-live-public-samplebook-selection-suggestions",
+        "ruleId": "developer-live-public-samplebook-editorial-polish",
         "policyResult": "eligible-only",
         "purpose": "developer-live-prompt-and-pipeline-tuning",
         "authorityOrigin": {
@@ -593,10 +589,10 @@
           "transmittableSetFixedByImplementingSlice": true,
           "privateManuscriptAllowed": false,
           "otherBookRefusedBeforeDispatch": true,
-          "editorSelectedPassageOrConflictRegionOnly": true,
           "materialReferencesAllowed": false,
           "seriesKnowledgeAllowed": false,
-          "editorialDeliverablesAllowed": false
+          "editorialDeliverablesAllowed": false,
+          "editorSelectedPassageOnly": true
         },
         "allowedOutboundDataCategories": [
           "editor-selected-manuscript-excerpt"
@@ -627,14 +623,18 @@
           "automaticResendInsideStoppedSessionAllowed": false,
           "identicalRequestReplaysFromProviderResultCache": true,
           "repeatedTestItemIdentifierAllowed": false,
-          "webSearchToolAllowed": false
+          "webSearchToolAllowed": false,
+          "crossUnitReductionAllowed": false,
+          "assuranceSamplingAllowed": false,
+          "runReportReflectionAllowed": false
         },
         "authorizationPreconditions": {
           "eligibleConfiguredProviderRequired": true,
           "providerPreflightRequired": true,
           "exactProviderBindingRequired": true,
           "finalProviderPayloadEgressGateRequired": true,
-          "frozenBeforeTransmission": true
+          "frozenBeforeTransmission": true,
+          "runBudgetCeilingApplies": false
         },
         "providerAccountLimit": {
           "classification": "quota-exhausted",
@@ -662,7 +662,105 @@
           "appliesManuscriptChange": false
         },
         "allowedTaskKinds": [
-          "editorial-polish",
+          "editorial-polish"
+        ]
+      },
+      {
+        "ruleId": "developer-live-public-samplebook-conflict-regenerate",
+        "policyResult": "eligible-only",
+        "purpose": "developer-live-prompt-and-pipeline-tuning",
+        "authorityOrigin": {
+          "foregroundEditorActionRequired": true,
+          "matchingActiveDefaultExecutionRuleAllowed": false,
+          "backgroundAnalysisEnrollmentAllowed": false,
+          "idleScheduledImportTriggeredOrCrossRunDispatchAllowed": false
+        },
+        "executionMode": {
+          "humanAttended": false,
+          "developerHostOnly": true,
+          "ciAllowed": false,
+          "hostedAllowed": false,
+          "scheduledAllowed": false,
+          "backgroundAllowed": false
+        },
+        "source": {
+          "admittedInputs": "owner-designated-public-samplebooks-under-adr-0043",
+          "transmittableSetFixedByImplementingSlice": true,
+          "privateManuscriptAllowed": false,
+          "otherBookRefusedBeforeDispatch": true,
+          "materialReferencesAllowed": false,
+          "seriesKnowledgeAllowed": false,
+          "editorialDeliverablesAllowed": false,
+          "singleManuscriptConflictRegionOnly": true
+        },
+        "allowedOutboundDataCategories": [
+          "manuscript-conflict-region-excerpt"
+        ],
+        "redaction": {
+          "housePeopleNamesAndRolesStripped": true,
+          "remarksAndInternalNotesStripped": true,
+          "authorInformationAllowed": true,
+          "houseNameAllowed": true
+        },
+        "providerBinding": {
+          "modelRole": "Fast Interaction Role",
+          "route": "opencode-go",
+          "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+          "model": "deepseek-v4.1-flash",
+          "credentialSlot": "opencode-go",
+          "exactProviderBindingRequired": true,
+          "fallbackAllowed": false,
+          "approvedFallbackChainMaximumItems": 0,
+          "secondModelAllowed": false,
+          "productionDefaultsChanged": false
+        },
+        "transmissions": {
+          "oneTechnicalSessionPerAttempt": true,
+          "oneBoundedPayloadPerAttempt": true,
+          "payloadLimitedToFrozenContractAndEditorManuscriptExcerpts": true,
+          "crossUnitSynthesisAllowed": false,
+          "automaticResendInsideStoppedSessionAllowed": false,
+          "identicalRequestReplaysFromProviderResultCache": true,
+          "repeatedTestItemIdentifierAllowed": false,
+          "webSearchToolAllowed": false,
+          "crossUnitReductionAllowed": false,
+          "assuranceSamplingAllowed": false,
+          "runReportReflectionAllowed": false
+        },
+        "authorizationPreconditions": {
+          "eligibleConfiguredProviderRequired": true,
+          "providerPreflightRequired": true,
+          "exactProviderBindingRequired": true,
+          "finalProviderPayloadEgressGateRequired": true,
+          "frozenBeforeTransmission": true,
+          "runBudgetCeilingApplies": false
+        },
+        "providerAccountLimit": {
+          "classification": "quota-exhausted",
+          "endsAttemptAsProviderAccountLimit": true,
+          "retryAllowed": false,
+          "fallbackAllowed": false,
+          "secondModelAllowed": false
+        },
+        "capture": {
+          "fixtureEmissionAllowed": false,
+          "uploadAllowed": false,
+          "providerResultCacheAllowed": true,
+          "cacheLocation": "protected-local-staging-outside-every-checkout",
+          "rawBytesInLogsDiagnosticsOrRepositoryAllowed": false,
+          "repositoryEntryOnlyThroughReviewedFixtureGeneration": true
+        },
+        "additionalPrivacyPrompts": {
+          "perBookRequired": false,
+          "firstUseRequired": false,
+          "perCallRequired": false,
+          "perChunkRequired": false
+        },
+        "output": {
+          "suggestionsOnly": true,
+          "appliesManuscriptChange": false
+        },
+        "allowedTaskKinds": [
           "conflict-regenerate"
         ]
       }
@@ -723,8 +821,8 @@
     "book-metadata-and-synopsis": {
       "labelZh": "图书元数据与内容简介"
     },
-    "frozen-material-reference-excerpt": {
-      "labelZh": "冻结的资料引用选段"
+    "manuscript-conflict-region-excerpt": {
+      "labelZh": "稿件冲突区域选段"
     }
   },
   "credentialBoundary": {

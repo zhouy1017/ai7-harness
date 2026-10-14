@@ -33,11 +33,11 @@ const EXPECTED_PINS = {
   'development-ci': ['v1', 'docs/policies/provider-processing-policy.v1.json', 'd9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a'],
   'fixture-recording': ['v2', 'docs/policies/provider-processing-policy.v2.json', 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc'],
   'ordinary-production': ['v6', 'docs/policies/provider-processing-policy.v6.json', '10e69a5d7b027d077728ec1bc7393dc0583b99a05246b4e883098b9d96b221a4'],
-  'developer-live': ['v11', 'docs/policies/provider-processing-policy.v11.json', '3682c59b4815a291f495ecd7b9c8552f00616a1c2513f472a1e988d16b824f91'],
+  'developer-live': ['v11', 'docs/policies/provider-processing-policy.v11.json', '64178786e62473e043afd4c699380c5e71ee95e2d7c42c2630a697072c36ac14'],
 } as const;
 /** ADR 0079 §3 decides External Export v2; active-set v9 pins its exact bytes, unchanged since v7. */
 const EXPECTED_EXTERNAL_PIN = ['v2', 'docs/policies/external-export-policy.v2.json', '162441cc3e5d30b0cafb00a0d04ca5ab32b64c5039baafc8952a9925bd7984b6'] as const;
-const ACTIVE_SET_SHA256 = '0a638bf74ad80858a2a856aa99063436b6ef133c5af0296fd6271f0d145157ca';
+const ACTIVE_SET_SHA256 = 'c3c6069d9b476a311c424343a3321fe7efbcbbb116f878dc51bb2236662b7c10';
 
 const GO_BINDING = {
   route: 'opencode-go',
@@ -72,14 +72,14 @@ const V10_ADMITTED_RULES: AdmittedProviderRule[] = [
     crossUnitSynthesisAllowed: false,
   },
 ];
-/** The three rules v11 adds (posted on Issue #841): kind ids, roles, categories and the synthesis flag. */
+/** The four rules v11 adds (posted on Issue #841): kind ids, roles, categories and the synthesis flag. */
 const V11_NEW_ADMITTED_RULES: AdmittedProviderRule[] = [
   {
     ruleId: 'developer-live-public-samplebook-writing',
     taskKinds: ['writing'],
     modelRole: 'Main Editorial Role',
     ...GO_BINDING,
-    outboundDataCategories: ['public-or-synthetic', 'book-metadata-and-synopsis', 'house-exemplar-excerpt', 'frozen-material-reference-excerpt'],
+    outboundDataCategories: ['public-or-synthetic', 'book-metadata-and-synopsis', 'house-exemplar-excerpt'],
     crossUnitSynthesisAllowed: true,
   },
   {
@@ -87,15 +87,23 @@ const V11_NEW_ADMITTED_RULES: AdmittedProviderRule[] = [
     taskKinds: ['evaluation', 'readers-report', 'evaluation-rewrite'],
     modelRole: 'Main Editorial Role',
     ...GO_BINDING,
-    outboundDataCategories: ['public-or-synthetic', 'editor-authored-evaluation-text', 'house-exemplar-excerpt', 'frozen-material-reference-excerpt'],
+    outboundDataCategories: ['public-or-synthetic', 'editor-authored-evaluation-text', 'house-exemplar-excerpt'],
     crossUnitSynthesisAllowed: true,
   },
   {
-    ruleId: 'developer-live-public-samplebook-selection-suggestions',
-    taskKinds: ['editorial-polish', 'conflict-regenerate'],
+    ruleId: 'developer-live-public-samplebook-editorial-polish',
+    taskKinds: ['editorial-polish'],
     modelRole: 'Fast Interaction Role',
     ...GO_BINDING,
     outboundDataCategories: ['editor-selected-manuscript-excerpt'],
+    crossUnitSynthesisAllowed: false,
+  },
+  {
+    ruleId: 'developer-live-public-samplebook-conflict-regenerate',
+    taskKinds: ['conflict-regenerate'],
+    modelRole: 'Fast Interaction Role',
+    ...GO_BINDING,
+    outboundDataCategories: ['manuscript-conflict-region-excerpt'],
     crossUnitSynthesisAllowed: false,
   },
 ];
@@ -122,7 +130,8 @@ const DIALOGUE = 1;
 const REVIEW = 2;
 const WRITING = 3;
 const EVALUATION = 4;
-const SUGGESTIONS = 5;
+const POLISH = 5;
+const CONFLICT = 6;
 
 async function readPolicy(path: string = V11_PATH): Promise<Record<string, unknown>> {
   return JSON.parse(await readFile(join(REPO_ROOT, ...path.split('/')), 'utf8')) as Record<string, unknown>;
@@ -251,7 +260,7 @@ describe('active policy set v9', () => {
     expect(v11.trustedSelection).toEqual(v10.trustedSelection);
     expect(v11.outboundDataCategories).toMatchObject(v10.outboundDataCategories as Record<string, unknown>);
     expect(Object.keys(v11.outboundDataCategories as Record<string, unknown>).slice(Object.keys(v10.outboundDataCategories as Record<string, unknown>).length)).toEqual([
-      'editor-authored-evaluation-text', 'house-exemplar-excerpt', 'book-metadata-and-synopsis', 'frozen-material-reference-excerpt',
+      'editor-authored-evaluation-text', 'house-exemplar-excerpt', 'book-metadata-and-synopsis', 'manuscript-conflict-region-excerpt',
     ]);
     expect(rulesOf(v11).map((rule) => rule.ruleId)).toEqual(V11_ADMITTED_RULES.map((rule) => rule.ruleId));
   });
@@ -268,7 +277,7 @@ describe('active policy set v9', () => {
 
 describe('resolveSourceCheckoutLaunchPolicy', () => {
   it('refuses widening any v11 rule\'s task, origin, material or attendance matrix', async () => {
-    for (const index of [BASELINE, DIALOGUE, REVIEW, WRITING, EVALUATION, SUGGESTIONS]) {
+    for (const index of [BASELINE, DIALOGUE, REVIEW, WRITING, EVALUATION, POLISH, CONFLICT]) {
       for (const override of [
         { allowedTaskKinds: [...(rulesOf(await readPolicy())[index]!.allowedTaskKinds as string[]), 'fact-check'] },
         { allowedOutboundDataCategories: ['public-or-synthetic', 'unpublished-excerpts'] },
@@ -302,7 +311,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(await resolveSourceCheckoutLaunchPolicy(codeRoot, 'development-ci')).toEqual(projection);
   });
 
-  it('binds the developer-live scope to Provider Processing v11 as eligible-only with its six admitted rules', async () => {
+  it('binds the developer-live scope to Provider Processing v11 as eligible-only with its seven admitted rules', async () => {
     await placeValidCheckout();
     const projection = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'developer-live');
 
@@ -349,7 +358,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(denied.providerProcessing.admittedRules).toEqual([]);
   });
 
-  it('reads N allow rules: the exact v11 bytes yield six, v10 three, the immutable v9 bytes the baseline rule alone', async () => {
+  it('reads N allow rules: the exact v11 bytes yield seven, v10 three, the immutable v9 bytes the baseline rule alone', async () => {
     expect(verifyDeveloperLivePolicy(await readPolicy())).toEqual({
       crossUnitReductionAllowed: true, assuranceSamplingAllowed: true, runReportReflectionAllowed: true,
       admittedRules: V11_ADMITTED_RULES,
@@ -521,7 +530,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
   });
 });
 
-describe('the three rules Provider Processing v11 adds (Issue #841)', () => {
+describe('the four rules Provider Processing v11 adds (Issue #841)', () => {
   it('names each new rule\'s kinds, role, categories and book-level synthesis flag exactly', async () => {
     const reading = verifyDeveloperLivePolicy(await readPolicy());
     expect(reading.admittedRules.slice(3)).toEqual(V11_NEW_ADMITTED_RULES);
@@ -529,11 +538,11 @@ describe('the three rules Provider Processing v11 adds (Issue #841)', () => {
       .toEqual(['writing', 'evaluation', 'readers-report', 'evaluation-rewrite']);
   });
 
-  it('admits reference-bearing writing and evaluation only with the consumption re-check, never a bare allowance', async () => {
+  it('refuses material-bearing writing and evaluation this wave', async () => {
     for (const index of [WRITING, EVALUATION]) {
-      await expect(v11PolicyWithBlock(index, 'source', { materialReferenceConsumptionRecheckRequired: false }).then(verifyDeveloperLivePolicy))
+      await expect(v11PolicyWithBlock(index, 'source', { materialReferencesAllowed: true }).then(verifyDeveloperLivePolicy))
         .rejects.toThrow('LAUNCH_POLICY_INVALID');
-      await expect(v11PolicyWithBlock(index, 'source', { materialReferencesAllowed: false }).then(verifyDeveloperLivePolicy))
+      await expect(v11PolicyWithBlock(index, 'source', { materialReferenceConsumptionRecheckRequired: true }).then(verifyDeveloperLivePolicy))
         .rejects.toThrow('LAUNCH_POLICY_INVALID');
     }
   });
@@ -567,26 +576,32 @@ describe('the three rules Provider Processing v11 adds (Issue #841)', () => {
   });
 
   it('keeps 润色 and conflict regeneration to Suggestions on the Fast Interaction Role over the editor\'s own words', async () => {
-    for (const [block, overrides] of [
-      ['output', { suggestionsOnly: false }],
-      ['output', { appliesManuscriptChange: true }],
-      ['transmissions', { crossUnitSynthesisAllowed: true }],
-      ['transmissions', { oneBoundedPayloadPerAttempt: false }],
-      ['transmissions', { automaticResendInsideStoppedSessionAllowed: true }],
-      ['transmissions', { webSearchToolAllowed: true }],
-      ['source', { editorSelectedPassageOrConflictRegionOnly: false }],
-      ['source', { materialReferencesAllowed: true }],
-      ['source', { seriesKnowledgeAllowed: true }],
-      ['source', { editorialDeliverablesAllowed: true }],
-      ['authorityOrigin', { foregroundEditorActionRequired: false }],
-      ['authorityOrigin', { backgroundAnalysisEnrollmentAllowed: true }],
-      ['authorizationPreconditions', { finalProviderPayloadEgressGateRequired: false }],
-      ['providerBinding', { modelRole: 'Main Editorial Role' }],
-    ] as const) {
-      await expect(v11PolicyWithBlock(SUGGESTIONS, block, overrides).then(verifyDeveloperLivePolicy)).rejects.toThrow('LAUNCH_POLICY_INVALID');
+    for (const index of [POLISH, CONFLICT]) {
+      for (const [block, overrides] of [
+        ['output', { suggestionsOnly: false }],
+        ['output', { appliesManuscriptChange: true }],
+        ['transmissions', { crossUnitSynthesisAllowed: true }],
+        ['transmissions', { crossUnitReductionAllowed: true }],
+        ['transmissions', { assuranceSamplingAllowed: true }],
+        ['transmissions', { runReportReflectionAllowed: true }],
+        ['authorizationPreconditions', { runBudgetCeilingApplies: true }],
+        ['transmissions', { oneBoundedPayloadPerAttempt: false }],
+        ['transmissions', { automaticResendInsideStoppedSessionAllowed: true }],
+        ['transmissions', { webSearchToolAllowed: true }],
+        ['source', { [index === POLISH ? 'editorSelectedPassageOnly' : 'singleManuscriptConflictRegionOnly']: false }],
+        ['source', { materialReferencesAllowed: true }],
+        ['source', { seriesKnowledgeAllowed: true }],
+        ['source', { editorialDeliverablesAllowed: true }],
+        ['authorityOrigin', { foregroundEditorActionRequired: false }],
+        ['authorityOrigin', { backgroundAnalysisEnrollmentAllowed: true }],
+        ['authorizationPreconditions', { finalProviderPayloadEgressGateRequired: false }],
+        ['providerBinding', { modelRole: 'Main Editorial Role' }],
+      ] as const) {
+        await expect(v11PolicyWithBlock(index, block, overrides).then(verifyDeveloperLivePolicy)).rejects.toThrow('LAUNCH_POLICY_INVALID');
+      }
+      await expect(v11PolicyWithRule(index, { output: undefined }).then(verifyDeveloperLivePolicy)).rejects.toThrow('LAUNCH_POLICY_INVALID');
+      await expect(v11PolicyWithRule(index, { allowedTaskKinds: [index === POLISH ? 'conflict-regenerate' : 'editorial-polish'] }).then(verifyDeveloperLivePolicy)).rejects.toThrow('LAUNCH_POLICY_INVALID');
     }
-    await expect(v11PolicyWithRule(SUGGESTIONS, { output: undefined }).then(verifyDeveloperLivePolicy)).rejects.toThrow('LAUNCH_POLICY_INVALID');
-    await expect(v11PolicyWithRule(SUGGESTIONS, { allowedTaskKinds: ['editorial-polish'] }).then(verifyDeveloperLivePolicy)).rejects.toThrow('LAUNCH_POLICY_INVALID');
   });
 
   it('keeps the carried review rule free of the four new categories and of any synthesis turn', async () => {

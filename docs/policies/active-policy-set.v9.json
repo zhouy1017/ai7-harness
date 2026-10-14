@@ -46,7 +46,7 @@
           "policyType": "provider-processing",
           "version": "v11",
           "canonicalPath": "docs/policies/provider-processing-policy.v11.json",
-          "sha256": "3682c59b4815a291f495ecd7b9c8552f00616a1c2513f472a1e988d16b824f91"
+          "sha256": "64178786e62473e043afd4c699380c5e71ee95e2d7c42c2630a697072c36ac14"
         }
       }
     },

@@ -10,6 +10,6 @@
   "activePolicySet": {
     "version": "v9",
     "canonicalPath": "docs/policies/active-policy-set.v9.json",
-    "sha256": "0a638bf74ad80858a2a856aa99063436b6ef133c5af0296fd6271f0d145157ca"
+    "sha256": "c3c6069d9b476a311c424343a3321fe7efbcbbb116f878dc51bb2236662b7c10"
   }
 }

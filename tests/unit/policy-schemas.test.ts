@@ -162,25 +162,25 @@ describe('Provider Processing v11 and active-set v9 schemas', () => {
   const pair = () => readPair('provider-processing-policy.v11.json', 'provider-processing-policy.v11.schema.json');
   const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
-  it('validates the six-rule tuple and rejects a seventh rule or a missing one', () => {
+  it('validates the seven-rule tuple and rejects an eighth rule or a missing one', () => {
     const { policyData, schemaData } = pair();
     expect(() => validatePolicyDocument(policyData, schemaData)).not.toThrow();
     const widened = clone(policyData) as Rules;
     widened.decision.providerAllowRules.push(clone(widened.decision.providerAllowRules[5]!));
-    expect(() => validatePolicyDocument(widened, schemaData)).toThrowError(/has more than 6 allowed items/);
+    expect(() => validatePolicyDocument(widened, schemaData)).toThrowError(/has more than 7 allowed items/);
     const narrowed = clone(policyData) as Rules;
     narrowed.decision.providerAllowRules.splice(3, 1);
     expect(() => validatePolicyDocument(narrowed, schemaData)).toThrowError();
   });
 
-  it('rejects a writing or evaluation rule that adds a task kind, drops the re-check or turns web search on', () => {
+  it('rejects a writing or evaluation rule that adds a task kind, admits materials or turns web search on', () => {
     const { policyData, schemaData } = pair();
     const writing = clone(policyData) as Rules;
     (writing.decision.providerAllowRules[3]!.allowedTaskKinds as string[]).push('factual-review');
     expect(() => validatePolicyDocument(writing, schemaData)).toThrowError(/developerLiveWritingRule\/properties\/allowedTaskKinds does not equal the required const/);
 
     const evaluation = clone(policyData) as Rules;
-    (evaluation.decision.providerAllowRules[4]!.source as Record<string, unknown>).materialReferenceConsumptionRecheckRequired = false;
+    (evaluation.decision.providerAllowRules[4]!.source as Record<string, unknown>).materialReferencesAllowed = true;
     expect(() => validatePolicyDocument(evaluation, schemaData)).toThrowError(/developerLiveEvaluationRule\/properties\/source does not equal the required const/);
 
     const web = clone(policyData) as Rules;
@@ -192,15 +192,15 @@ describe('Provider Processing v11 and active-set v9 schemas', () => {
     const { policyData, schemaData } = pair();
     const apply = clone(policyData) as Rules;
     (apply.decision.providerAllowRules[5]!.output as Record<string, unknown>).appliesManuscriptChange = true;
-    expect(() => validatePolicyDocument(apply, schemaData)).toThrowError(/developerLiveSelectionSuggestionsRule\/properties\/output does not equal the required const/);
+    expect(() => validatePolicyDocument(apply, schemaData)).toThrowError(/developerLivePolishRule\/properties\/output does not equal the required const/);
 
     const role = clone(policyData) as Rules;
     (role.decision.providerAllowRules[5]!.providerBinding as Record<string, unknown>).modelRole = 'Main Editorial Role';
-    expect(() => validatePolicyDocument(role, schemaData)).toThrowError(/developerLiveSelectionSuggestionsRule\/properties\/providerBinding does not equal the required const/);
+    expect(() => validatePolicyDocument(role, schemaData)).toThrowError(/developerLivePolishRule\/properties\/providerBinding does not equal the required const/);
 
     const kinds = clone(policyData) as Rules;
     (kinds.decision.providerAllowRules[5]!.allowedTaskKinds as string[]).push('editorial-dialogue');
-    expect(() => validatePolicyDocument(kinds, schemaData)).toThrowError(/developerLiveSelectionSuggestionsRule\/properties\/allowedTaskKinds does not equal the required const/);
+    expect(() => validatePolicyDocument(kinds, schemaData)).toThrowError(/developerLivePolishRule\/properties\/allowedTaskKinds does not equal the required const/);
   });
 
   it('rejects a v11 document that drops one of the four new outbound categories or binds the frontier role', () => {

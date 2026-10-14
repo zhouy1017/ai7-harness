@@ -2006,7 +2006,7 @@ export function parseTrustedLaunchForm(raw: RawTrustedLaunchForm): TrustedLaunch
  * The outbound data categories a Provider Processing rule may name (Issue #841). The Egress Gate recognises these identifiers;
  * naming one in a rule declares what the gate must accept, and the consuming slices decide when a binding carries it.
  * `public-or-synthetic` and `editor-selected-manuscript-excerpt` are the original two; the other four arrive with Provider
- * Processing v11 for writing and evaluation (frozen inputs and permitted references).
+ * Processing v11 for writing, evaluation and conflict regeneration (frozen inputs and manuscript excerpts).
  */
 export type OutboundDataCategoryId =
   | 'public-or-synthetic'
@@ -2014,7 +2014,7 @@ export type OutboundDataCategoryId =
   | 'editor-authored-evaluation-text'
   | 'house-exemplar-excerpt'
   | 'book-metadata-and-synopsis'
-  | 'frozen-material-reference-excerpt';
+  | 'manuscript-conflict-region-excerpt';
 
 /**
  * One allow rule of the selected Provider Processing policy, as the launch verified it from the pinned bytes: the task kinds it

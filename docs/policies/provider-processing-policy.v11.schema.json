@@ -110,8 +110,8 @@
         },
         "providerAllowRules": {
           "type": "array",
-          "minItems": 6,
-          "maxItems": 6,
+          "minItems": 7,
+          "maxItems": 7,
           "additionalItems": false,
           "items": [
             {
@@ -130,7 +130,10 @@
               "$ref": "#/definitions/developerLiveEvaluationRule"
             },
             {
-              "$ref": "#/definitions/developerLiveSelectionSuggestionsRule"
+              "$ref": "#/definitions/developerLivePolishRule"
+            },
+            {
+              "$ref": "#/definitions/developerLiveConflictRegenerateRule"
             }
           ]
         }
@@ -194,8 +197,8 @@
         "book-metadata-and-synopsis": {
           "labelZh": "图书元数据与内容简介"
         },
-        "frozen-material-reference-excerpt": {
-          "labelZh": "冻结的资料引用选段"
+        "manuscript-conflict-region-excerpt": {
+          "labelZh": "稿件冲突区域选段"
         }
       }
     },
@@ -748,8 +751,7 @@
             "transmittableSetFixedByImplementingSlice": true,
             "privateManuscriptAllowed": false,
             "otherBookRefusedBeforeDispatch": true,
-            "materialReferencesAllowed": true,
-            "materialReferenceConsumptionRecheckRequired": true,
+            "materialReferencesAllowed": false,
             "seriesKnowledgeAllowed": false,
             "editorialDeliverablesAllowed": false
           }
@@ -758,8 +760,7 @@
           "const": [
             "public-or-synthetic",
             "book-metadata-and-synopsis",
-            "house-exemplar-excerpt",
-            "frozen-material-reference-excerpt"
+            "house-exemplar-excerpt"
           ]
         },
         "redaction": {
@@ -800,7 +801,8 @@
             "assuranceSamplingAllowed": false,
             "runReportReflectionAllowed": true,
             "webSearchToolAllowed": false
-          }
+          },
+          "description": "The Coverage Manifest bounds unit requests and safe retries; plusOneCrossUnitSynthesisTurn adds exactly one book-level synthesis request (全书综合 / 综合). crossUnitSynthesisAllowed is true only for writing and the three evaluation contracts and is carried into the per-rule launch projection. No assurance sample; one Run Report reflection turn remains separate from synthesis."
         },
         "authorizationPreconditions": {
           "const": {
@@ -909,8 +911,7 @@
             "transmittableSetFixedByImplementingSlice": true,
             "privateManuscriptAllowed": false,
             "otherBookRefusedBeforeDispatch": true,
-            "materialReferencesAllowed": true,
-            "materialReferenceConsumptionRecheckRequired": true,
+            "materialReferencesAllowed": false,
             "seriesKnowledgeAllowed": false,
             "editorialDeliverablesAllowed": false
           }
@@ -919,8 +920,7 @@
           "const": [
             "public-or-synthetic",
             "editor-authored-evaluation-text",
-            "house-exemplar-excerpt",
-            "frozen-material-reference-excerpt"
+            "house-exemplar-excerpt"
           ]
         },
         "redaction": {
@@ -961,7 +961,8 @@
             "assuranceSamplingAllowed": false,
             "runReportReflectionAllowed": true,
             "webSearchToolAllowed": false
-          }
+          },
+          "description": "The Coverage Manifest bounds unit requests and safe retries; plusOneCrossUnitSynthesisTurn adds exactly one book-level synthesis request (全书综合 / 综合). crossUnitSynthesisAllowed is true only for writing and the three evaluation contracts and is carried into the per-rule launch projection. No assurance sample; one Run Report reflection turn remains separate from synthesis."
         },
         "authorizationPreconditions": {
           "const": {
@@ -1017,7 +1018,7 @@
         }
       }
     },
-    "developerLiveSelectionSuggestionsRule": {
+    "developerLivePolishRule": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -1040,7 +1041,7 @@
       ],
       "properties": {
         "ruleId": {
-          "const": "developer-live-public-samplebook-selection-suggestions"
+          "const": "developer-live-public-samplebook-editorial-polish"
         },
         "policyResult": {
           "const": "eligible-only"
@@ -1072,10 +1073,10 @@
             "transmittableSetFixedByImplementingSlice": true,
             "privateManuscriptAllowed": false,
             "otherBookRefusedBeforeDispatch": true,
-            "editorSelectedPassageOrConflictRegionOnly": true,
             "materialReferencesAllowed": false,
             "seriesKnowledgeAllowed": false,
-            "editorialDeliverablesAllowed": false
+            "editorialDeliverablesAllowed": false,
+            "editorSelectedPassageOnly": true
           }
         },
         "allowedOutboundDataCategories": {
@@ -1114,8 +1115,12 @@
             "automaticResendInsideStoppedSessionAllowed": false,
             "identicalRequestReplaysFromProviderResultCache": true,
             "repeatedTestItemIdentifierAllowed": false,
-            "webSearchToolAllowed": false
-          }
+            "webSearchToolAllowed": false,
+            "crossUnitReductionAllowed": false,
+            "assuranceSamplingAllowed": false,
+            "runReportReflectionAllowed": false
+          },
+          "description": "One request per foreground invocation: one technical session and one bounded payload. crossUnitSynthesisAllowed is false; no cross-unit reduction, assurance sample or Run Report reflection. The Run ceiling does not apply, as for editorial dialogue."
         },
         "authorizationPreconditions": {
           "const": {
@@ -1123,7 +1128,8 @@
             "providerPreflightRequired": true,
             "exactProviderBindingRequired": true,
             "finalProviderPayloadEgressGateRequired": true,
-            "frozenBeforeTransmission": true
+            "frozenBeforeTransmission": true,
+            "runBudgetCeilingApplies": false
           }
         },
         "providerAccountLimit": {
@@ -1161,7 +1167,160 @@
         },
         "allowedTaskKinds": {
           "const": [
-            "editorial-polish",
+            "editorial-polish"
+          ]
+        }
+      }
+    },
+    "developerLiveConflictRegenerateRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ruleId",
+        "policyResult",
+        "purpose",
+        "authorityOrigin",
+        "executionMode",
+        "source",
+        "allowedOutboundDataCategories",
+        "redaction",
+        "providerBinding",
+        "transmissions",
+        "authorizationPreconditions",
+        "providerAccountLimit",
+        "capture",
+        "additionalPrivacyPrompts",
+        "output",
+        "allowedTaskKinds"
+      ],
+      "properties": {
+        "ruleId": {
+          "const": "developer-live-public-samplebook-conflict-regenerate"
+        },
+        "policyResult": {
+          "const": "eligible-only"
+        },
+        "purpose": {
+          "const": "developer-live-prompt-and-pipeline-tuning"
+        },
+        "authorityOrigin": {
+          "const": {
+            "foregroundEditorActionRequired": true,
+            "matchingActiveDefaultExecutionRuleAllowed": false,
+            "backgroundAnalysisEnrollmentAllowed": false,
+            "idleScheduledImportTriggeredOrCrossRunDispatchAllowed": false
+          }
+        },
+        "executionMode": {
+          "const": {
+            "humanAttended": false,
+            "developerHostOnly": true,
+            "ciAllowed": false,
+            "hostedAllowed": false,
+            "scheduledAllowed": false,
+            "backgroundAllowed": false
+          }
+        },
+        "source": {
+          "const": {
+            "admittedInputs": "owner-designated-public-samplebooks-under-adr-0043",
+            "transmittableSetFixedByImplementingSlice": true,
+            "privateManuscriptAllowed": false,
+            "otherBookRefusedBeforeDispatch": true,
+            "materialReferencesAllowed": false,
+            "seriesKnowledgeAllowed": false,
+            "editorialDeliverablesAllowed": false,
+            "singleManuscriptConflictRegionOnly": true
+          }
+        },
+        "allowedOutboundDataCategories": {
+          "const": [
+            "manuscript-conflict-region-excerpt"
+          ]
+        },
+        "redaction": {
+          "const": {
+            "housePeopleNamesAndRolesStripped": true,
+            "remarksAndInternalNotesStripped": true,
+            "authorInformationAllowed": true,
+            "houseNameAllowed": true
+          }
+        },
+        "providerBinding": {
+          "const": {
+            "modelRole": "Fast Interaction Role",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "model": "deepseek-v4.1-flash",
+            "credentialSlot": "opencode-go",
+            "exactProviderBindingRequired": true,
+            "fallbackAllowed": false,
+            "approvedFallbackChainMaximumItems": 0,
+            "secondModelAllowed": false,
+            "productionDefaultsChanged": false
+          }
+        },
+        "transmissions": {
+          "const": {
+            "oneTechnicalSessionPerAttempt": true,
+            "oneBoundedPayloadPerAttempt": true,
+            "payloadLimitedToFrozenContractAndEditorManuscriptExcerpts": true,
+            "crossUnitSynthesisAllowed": false,
+            "automaticResendInsideStoppedSessionAllowed": false,
+            "identicalRequestReplaysFromProviderResultCache": true,
+            "repeatedTestItemIdentifierAllowed": false,
+            "webSearchToolAllowed": false,
+            "crossUnitReductionAllowed": false,
+            "assuranceSamplingAllowed": false,
+            "runReportReflectionAllowed": false
+          },
+          "description": "One request per foreground invocation: one technical session and one bounded payload. crossUnitSynthesisAllowed is false; no cross-unit reduction, assurance sample or Run Report reflection. The Run ceiling does not apply, as for editorial dialogue."
+        },
+        "authorizationPreconditions": {
+          "const": {
+            "eligibleConfiguredProviderRequired": true,
+            "providerPreflightRequired": true,
+            "exactProviderBindingRequired": true,
+            "finalProviderPayloadEgressGateRequired": true,
+            "frozenBeforeTransmission": true,
+            "runBudgetCeilingApplies": false
+          }
+        },
+        "providerAccountLimit": {
+          "const": {
+            "classification": "quota-exhausted",
+            "endsAttemptAsProviderAccountLimit": true,
+            "retryAllowed": false,
+            "fallbackAllowed": false,
+            "secondModelAllowed": false
+          }
+        },
+        "capture": {
+          "const": {
+            "fixtureEmissionAllowed": false,
+            "uploadAllowed": false,
+            "providerResultCacheAllowed": true,
+            "cacheLocation": "protected-local-staging-outside-every-checkout",
+            "rawBytesInLogsDiagnosticsOrRepositoryAllowed": false,
+            "repositoryEntryOnlyThroughReviewedFixtureGeneration": true
+          }
+        },
+        "additionalPrivacyPrompts": {
+          "const": {
+            "perBookRequired": false,
+            "firstUseRequired": false,
+            "perCallRequired": false,
+            "perChunkRequired": false
+          }
+        },
+        "output": {
+          "const": {
+            "suggestionsOnly": true,
+            "appliesManuscriptChange": false
+          }
+        },
+        "allowedTaskKinds": {
+          "const": [
             "conflict-regenerate"
           ]
         }
