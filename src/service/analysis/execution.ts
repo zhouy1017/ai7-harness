@@ -66,6 +66,7 @@ import {
 } from './reducers.js';
 import { CARRIED_GAP_REASON, OUT_OF_SCOPE_GAP_REASON } from './reuse-plan.js';
 import { SERIES_SCOPE_STOP_SUMMARY } from '../series-exclusions.js';
+import { materialInterruptionMessage, type MaterialGuardRefusal } from '../task-material-references.js';
 import {
   RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST,
   buildRunReportReflectionMessage,
@@ -153,6 +154,8 @@ export interface ExecutionOwnerDependencies {
    * exclusion, and that never lets a further read go on. Absent, nothing is guarded: no Series material exists for the Run.
    */
   readonly readGuard?: ((runRecordId: string) => string | null) | null;
+  /** Re-check the consuming ledger's frozen materials before admission and every further model step. */
+  readonly materialGuard?: ((runRecordId: string, ledger: BaselineAnalysisStore) => MaterialGuardRefusal | null) | null;
 }
 
 /**
@@ -327,6 +330,11 @@ const LIVE_INTERRUPTIONS = {
     detail: '书系检索范围已变化：这次运行所依据的书系材料已排除在书系检索之外；已完成单元的结果与缺口均已保留，未再发起任何传输。',
     summary: SERIES_SCOPE_STOP_SUMMARY,
     safeNextAction: '修改计划并重新授权，或取消任务；这次运行不能续行、重试，也不会改用别的材料。',
+  },
+  'material-reference-changed': {
+    detail: '参考资料在任务运行中已不可用，任务已中断；已完成的单元保留。',
+    summary: '参考资料在任务运行中已不可用，任务已中断；已完成的单元保留。',
+    safeNextAction: '核对参考资料，重新准备计划并授权；已完成的单元保留。',
   },
 } as const;
 
@@ -522,6 +530,7 @@ export class BaselineAnalysisExecutionOwner {
     // transmit — is blocked now with the reason, never left reading 等待运行名额 for a turn it cannot take (Issue #49 review).
     this.#blockOnRefusal(runRecordId, ledger, () => {
       this.#requireStartable(runRecordId, ledger);
+      this.#requireMaterials(runRecordId, ledger);
       if (this.#queued.length >= this.#waitingCapacity) {
         throw new ExecutionAdmissionError('EXECUTION_WAITING_QUEUE_FULL', `等待运行的队列已满（最多 ${this.#waitingCapacity} 项）；没有开始这项任务。请等已有任务开始或取消后，再重新准备并开始。`);
       }
@@ -550,6 +559,19 @@ export class BaselineAnalysisExecutionOwner {
       }
       throw error;
     }
+  }
+
+  #requireMaterials(runRecordId: string, ledger: BaselineAnalysisStore): void {
+    const refusal = this.#deps.materialGuard?.(runRecordId, ledger);
+    if (refusal == null) return;
+    const state = ledger.currentRunState(runRecordId);
+    const midRun = state === 'paused' || state === 'resumable' || state === 'awaiting-clarification';
+    ledger.recordRunState(runRecordId, midRun ? 'interrupted' : 'blocked-before-dispatch', {
+      detail: midRun ? materialInterruptionMessage(refusal) : refusal.message,
+      reasons: [refusal.message], cause: refusal.code,
+      ...(midRun ? { interruption: 'material-reference-changed' } : {}),
+    });
+    throw new ExecutionAdmissionError(refusal.code, midRun ? materialInterruptionMessage(refusal) : refusal.message);
   }
 
   /**
@@ -651,6 +673,7 @@ export class BaselineAnalysisExecutionOwner {
           ? '等待中的运行只有通过重新联网预检后才能进入调度。'
           : '只有刚记录授权的运行可以进入调度。');
     }
+    if (options.cancel !== true) this.#requireMaterials(runRecordId, ledger);
     // 结果待确认 (Issue #51, S16c; ADR 0034, CONT-011, CONT-016): a Run stopped there never goes on — only its cancellation runs.
     if (resuming && options.cancel !== true && ledger.outcomeUnknownOf(runRecordId) !== null) {
       throw new ExecutionAdmissionError('EXECUTION_OUTCOME_UNKNOWN', OUTCOME_UNKNOWN_NO_RESUME);
@@ -1169,6 +1192,7 @@ export class BaselineAnalysisExecutionOwner {
     // Which of the two developer-live interruptions settled this Run, when one did; the closed CHECK
     // sets record both as `interrupted`, so the distinction lives in the detail, summary, and action.
     let liveInterruption: LiveInterruption | null = null;
+    let materialRefusal: MaterialGuardRefusal | null = null;
     // 模型服务账户限额 met under a Run that keeps its progress (Issue #51, S16b): the provider's words, and the unit it
     // refused — `null` for the reduction or a sampling turn — with what that refused attempt cost. The Run stops resumable
     // at the next boundary. Under developer-live ADR 0067 §Quota ends the Run instead, as it always has.
@@ -1582,7 +1606,14 @@ export class BaselineAnalysisExecutionOwner {
        * stops there as the scope changed. A cancellation, or a stop already decided, outranks it.
        */
       const scopeChanged = (): boolean => {
-        if (active.cancelRequested || liveInterruption !== null || this.#deps.readGuard?.(facts.runRecordId) == null) return false;
+        if (active.cancelRequested || liveInterruption !== null) return false;
+        materialRefusal = this.#deps.materialGuard?.(facts.runRecordId, ledger) ?? null;
+        if (materialRefusal !== null) {
+          liveInterruption = 'material-reference-changed';
+          terminalClassification = 'interrupted';
+          return true;
+        }
+        if (this.#deps.readGuard?.(facts.runRecordId) == null) return false;
         liveInterruption = 'series-retrieval-scope-changed';
         terminalClassification = 'interrupted';
         return true;
@@ -1636,10 +1667,10 @@ export class BaselineAnalysisExecutionOwner {
           // — once every other answer given is applied too, each as the editor chose. The ceiling is read before a pause or
           // AI7 stopping, as at every boundary (Issue #541): a retry it keeps back is never left for a pause to hide.
           // 再试一次 once the scope changed (Issue #64, S29b): the retry is not sent, and the Run stops as the scope changed.
-          if (retry && (liveInterruption === 'series-retrieval-scope-changed' || scopeChanged())) {
+          if (retry && (liveInterruption === 'series-retrieval-scope-changed' || liveInterruption === 'material-reference-changed' || scopeChanged())) {
             waiting.delete(entry.unitOrdinal);
             settleGap(w.unit, w.requestDigest, { unitOrdinal: w.unit.ordinal, attempts: w.attempts, wallMs: w.wallMs, usage: w.usage },
-              'adapter-failure', `${w.failure.reason}（${w.failure.code}）；${SAFE_RETRY_SCOPE_CHANGED}`);
+              'adapter-failure', `${w.failure.reason}（${w.failure.code}）；${materialRefusal === null ? SAFE_RETRY_SCOPE_CHANGED : materialInterruptionMessage(materialRefusal)}`);
             keepSettled(w.unit, w.wallMs);
             spent = true;
             continue;
@@ -1705,7 +1736,7 @@ export class BaselineAnalysisExecutionOwner {
         // The current-read guard (Issue #64, S29b; SER-023): an exclusion recorded since the last range stops the Run before this
         // one forms a request — before a pause or AI7 stopping, which would leave it to be continued past the exclusion.
         // A scope stop decided anywhere since — a retry it kept back included — ends the ranges too (Issue #64 review).
-        if ((liveInterruption as LiveInterruption | null) === 'series-retrieval-scope-changed' || scopeChanged()) {
+        if ((liveInterruption as LiveInterruption | null) === 'series-retrieval-scope-changed' || (liveInterruption as LiveInterruption | null) === 'material-reference-changed' || scopeChanged()) {
           unitsEnded = true;
           break;
         }
@@ -1778,7 +1809,7 @@ export class BaselineAnalysisExecutionOwner {
             // An exclusion recorded while the first attempt was out keeps the retry back (Issue #64, S29b).
             if (withheld === null && mode === 'automatic' && scopeChanged()) {
               firstFailure = failed.failure;
-              withheld = SAFE_RETRY_SCOPE_CHANGED;
+              withheld = materialRefusal === null ? SAFE_RETRY_SCOPE_CHANGED : materialInterruptionMessage(materialRefusal);
             }
             if (withheld === null && mode === 'automatic') {
               firstFailure = failed.failure;
@@ -2123,6 +2154,7 @@ export class BaselineAnalysisExecutionOwner {
         onAccountLimit: (condition) => {
           if (active.resumableOnInterrupt && live === null) accountLimit = { unitOrdinal: null, condition };
         },
+        scopeChanged,
       });
       if (stopWithoutEnding()) return;
       // The second reducer pass: the sample joins the revision and re-labels the assurance axis, and
@@ -2157,10 +2189,18 @@ export class BaselineAnalysisExecutionOwner {
         terminalClassification = 'cancelled';
         liveInterruption = null;
       }
-      const interruption = liveInterruption === null ? null : LIVE_INTERRUPTIONS[liveInterruption];
+      // The reflection consumes the same frozen system prompt; check once more before recording the final outcome.
+      scopeChanged();
+      const interruptionKey = liveInterruption as LiveInterruption | null;
+      const materialStop = materialRefusal as MaterialGuardRefusal | null;
+      const interruption = interruptionKey === null ? null : interruptionKey === 'material-reference-changed' && materialStop !== null
+        ? { ...LIVE_INTERRUPTIONS[interruptionKey], detail: materialInterruptionMessage(materialStop), summary: materialInterruptionMessage(materialStop) }
+        : LIVE_INTERRUPTIONS[interruptionKey];
       ledger.recordRunState(facts.runRecordId, terminalClassification, {
         detail: terminalClassification === 'cancelled'
           ? `运行终态：cancelled；按你的取消在阅读范围之间停止，已完成的结果与缺口均已保留，没有读到的阅读范围记为未尝试；结果集修订版 ${revision.revisionId}（Revision ${revision.ordinal}）。`
+          : interruptionKey === 'material-reference-changed' && materialStop !== null
+            ? materialInterruptionMessage(materialStop)
           : interruption === null
             ? `运行终态：${terminalClassification}；结果集修订版 ${revision.revisionId}（Revision ${revision.ordinal}）。`
             : `运行终态：${terminalClassification} · ${liveInterruption}；${interruption.detail}结果集修订版 ${revision.revisionId}（Revision ${revision.ordinal}）。`,
@@ -2171,6 +2211,7 @@ export class BaselineAnalysisExecutionOwner {
         unitsTotal: reduction.coverage.unitsTotal,
         gapCount: reduction.gaps.length,
         conflictCount: reduction.conflictCount,
+        ...(interruptionKey === 'material-reference-changed' && materialStop !== null ? { cause: materialStop.code } : {}),
       });
       // The Run Report (ADR 0066 §Run Report). Its facts are the ones this Run already recorded, and
       // its accounting is the persisted revision's, because the revision is persisted above.
@@ -2277,6 +2318,10 @@ export class BaselineAnalysisExecutionOwner {
       // 取消任务 between two sampling turns: the one out finished, and no further one is sent.
       if (active.cancelRequested) {
         gapReasons.push(assuranceSamplingTurnGapReason(turn.unitOrdinal, '运行已按你的要求取消，本轮未派发。'));
+        break;
+      }
+      if (context.scopeChanged()) {
+        gapReasons.push(assuranceSamplingTurnGapReason(turn.unitOrdinal, '参考范围已变化，本轮未派发。'));
         break;
       }
       // The ceiling is evaluated before every dispatch exactly as before a unit's, so a Run that has
@@ -2595,6 +2640,7 @@ interface AssuranceSamplingContext {
   readonly onCeilingReached: () => void;
   /** The provider refused a sampling turn on the account's limit (Issue #51, S16b), in its own words. */
   readonly onAccountLimit: (condition: string) => void;
+  readonly scopeChanged: () => boolean;
 }
 
 /** What two attempts of one unit cost together; `null` only when neither reported any usage at all. */

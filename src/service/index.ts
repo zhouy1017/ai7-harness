@@ -1698,6 +1698,7 @@ async function run(): Promise<void> {
       unitHold: unitHoldPath === undefined ? null : controlledUnitHold(unitHoldPath),
       // The current-read guard over Series material (Issue #64, S29b; SER-023): asked before each reading range of every Run.
       readGuard: (runRecordId) => guardedStore.seriesReadGuard(runRecordId),
+      materialGuard: (runRecordId, ledger) => guardedStore.materialGuard(runRecordId, ledger),
     });
     // Startup reconciliation (Issue #422, S76b; CONT-014): a baseline Run this service's predecessor left under way has
     // nothing running it now. It settles 已暂停 or 任务已中断 · 可续行 before any request is read; one left cancelling is
