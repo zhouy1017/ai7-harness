@@ -327,6 +327,41 @@ describe('Clarification Requests over the real store', () => {
     }
   }, 300_000);
 
+  it('ends an answered Run whose material was withdrawn while it waited, sending no retry and keeping what it read (Issue #759)', async () => {
+    const store = await openWithRoute(transient);
+    let withdrawn = false;
+    const execution = new BaselineAnalysisExecutionOwner({
+      ledger: store.baselineAnalysisLedger, launchPolicy, fixture: transient, secretResolver: { resolve: async () => null },
+      materialGuard: () => (withdrawn ? { code: 'MATERIAL_REFERENCE_UNAVAILABLE', materialTitle: '合成资料', message: '资料《合成资料》现在不能列进这本书任务的「允许参考」。' } : null),
+    });
+    try {
+      const bookId = await importedBook(store, 'L2 sample1 澄清后资料撤回');
+      const { taskIntentId, runRecordId } = askingRun(store, bookId);
+      execution.admitAndDispatch(runRecordId);
+      await execution.whenIdle();
+      expect(store.inspectBaselineAnalysis(bookId, () => null).state).toBe('awaiting-clarification');
+      const card = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }).clarifications[0]!;
+      store.answerBaselineAnalysisClarification({ bookId, taskIntentId, requestId: card.requestId, optionId: 'retry', note: null });
+      withdrawn = true;
+      // The continuation is admitted and its execution asks the guard before the retry: nothing more is sent, and the
+      // units the Run read before it waited are formed into its partial revision rather than dropped.
+      expect(execution.continueAnswered(runRecordId, store.baselineAnalysisLedger)).toBe('continuing');
+      await execution.whenIdle();
+      const settled = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(states(settled)).toEqual(['authorized', 'admitted', 'executing', 'awaiting-clarification', 'admitted', 'executing', 'interrupted']);
+      expect(turns(settled)).toEqual([[1, 1], [2, 1], [3, 1], [4, 1], [5, 1], [6, 1], [7, 1], [8, 1]]);
+      expect(settled.run!.adaptations).toEqual([]);
+      expect(settled.run!.transitions.at(-1)!.detail).toBe('资料《合成资料》在任务运行中已撤回允许参考，任务已中断；已完成的单元保留。');
+      expect(settled.resultSetRevision!.units.map((unit) => unit.state)).toEqual(['closed', 'gap', 'closed', 'closed', 'gap', 'closed', 'closed', 'closed']);
+      expect(settled.taskOutcome!.classification).toBe('interrupted');
+      expect(settled.taskOutcome!.safeNextAction).toBe('核对参考资料，重新准备计划并授权；已完成的单元保留。');
+      store.markCleanShutdown();
+    } finally {
+      await execution.dispose();
+      store.close();
+    }
+  }, 300_000);
+
   it('sends no retry that would not repeat what the first attempt sent, and settles the unit as the gap it is', async () => {
     const store = await openWithRoute(transient);
     const execution = owner(store, transient);

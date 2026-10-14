@@ -629,7 +629,33 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     }
   }, 300_000);
 
-  it('ends the ranges once the current-read guard keeps a safe retry back, and sends no range after it (Issue #64 review)', async () => {
+  it.each(['cross-unit-reduction', 'assurance-sampling'] as const)('checks material consumption after %s before the next model step', async (stage) => {
+    const happy = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-happy');
+    const store = await openWithRoute(roots.dataRoot, happy);
+    let withdrawn = false;
+    const owner = new BaselineAnalysisExecutionOwner({
+      ledger: store.baselineAnalysisLedger, launchPolicy, fixture: happy, secretResolver: fakeSecretResolver(),
+      materialGuard: () => withdrawn ? { code: 'MATERIAL_INDEX_MOVED', materialTitle: '合成资料', message: '资料《合成资料》的索引版本已不在本机。' } : null,
+      stageHold: async (current) => { if (current === stage) withdrawn = true; },
+    });
+    try {
+      const bookId = (await importSample1Book(store, roots.codeRoot, 'L2 合成资料守卫')).bookId;
+      await pinEditorialWorkspaceProfileRevision2(store, bookId);
+      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+      const prepared = prepare(store, bookId);
+      const accepted = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+      owner.admitAndDispatch(accepted.dispatchRunRecordId!);
+      const settled = await settle(owner, store, bookId);
+      expect(settled.run!.state).toBe('interrupted');
+      expect(settled.run!.transitions.at(-1)!.detail).toBe('资料《合成资料》在任务运行中的索引版本已不在本机，任务已中断；已完成的单元保留。');
+      expect(settled.resultSetRevision!.coverage.unitsClosed).toBe(SAMPLE1_UNITS);
+      expect(settled.taskOutcome!.report!.usagePerStage['assurance-sampling'].requests).toBe(stage === 'cross-unit-reduction' ? 0 : 1);
+      expect(settled.taskOutcome!.report!.usagePerStage['run-report-reflection'].requests).toBe(0);
+      store.markCleanShutdown();
+    } finally { await owner.dispose(); store.close(); }
+  }, 300_000);
+
+  it.each(['series', 'material'] as const)('ends the ranges once the %s guard keeps a safe retry back, and sends no range after it', async (guard) => {
     await requireExactSample1(roots.codeRoot);
     const transient = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-transient-retry');
     const store = await openWithRoute(roots.dataRoot, transient);
@@ -637,7 +663,8 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     let calls = 0;
     const owner = new BaselineAnalysisExecutionOwner({
       ledger: store.baselineAnalysisLedger, launchPolicy, fixture: transient, secretResolver: fakeSecretResolver(),
-      readGuard: () => (++calls >= 6 ? '书系知识条目「海边小城」（地点）' : null),
+      ...(guard === 'series' ? { readGuard: () => (++calls >= 6 ? '书系知识条目「海边小城」（地点）' : null) }
+        : { materialGuard: () => (++calls >= 7 ? { code: 'MATERIAL_REFERENCE_UNAVAILABLE', materialTitle: '合成资料', message: '资料《合成资料》现在不能允许参考。' } : null) }),
     });
     try {
       const bookId = (await importSample1Book(store, roots.codeRoot, 'L2 sample1 检索排除挡住重试')).bookId;
@@ -651,7 +678,10 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       // Units 1 to 5 once each: the retry was kept back, and no range after unit 5 was sent.
       expect(settled.run!.attempt!.spans.map((span) => [span.unitOrdinal, span.attemptIndex])).toEqual([[1, 1], [2, 1], [3, 1], [4, 1], [5, 1]]);
       expect(settled.run!.adaptations).toEqual([]);
-      expect([settled.taskOutcome?.classification, settled.taskOutcome?.safeNextAction]).toEqual(['interrupted', '修改计划并重新授权，或取消任务；这次运行不能续行、重试，也不会改用别的材料。']);
+      expect(settled.taskOutcome?.classification).toBe('interrupted');
+      expect(settled.taskOutcome?.safeNextAction).toBe(guard === 'series'
+        ? '修改计划并重新授权，或取消任务；这次运行不能续行、重试，也不会改用别的材料。'
+        : '核对参考资料，重新准备计划并授权；已完成的单元保留。');
       store.markCleanShutdown();
     } finally {
       await owner.dispose();
