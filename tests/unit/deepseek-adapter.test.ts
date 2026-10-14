@@ -403,10 +403,11 @@ describe('model capability profiles', () => {
   it('records how every capability was established, and calls every absent one unverified', () => {
     for (const profile of Object.values(PROVIDER_MODEL_PROFILES)) {
       const capabilities = Object.entries(profile.capabilities) as Array<[keyof typeof profile.capabilities, string]>;
-      expect(capabilities).toHaveLength(8);
+      expect(capabilities).toHaveLength(profile.capabilities.streaming === undefined ? 8 : 9);
       for (const [capability, value] of capabilities) {
         const evidence = profile.evidence[capability];
         expect(evidence, `${profile.key} · ${capability}`).toBeDefined();
+        if (evidence === undefined) throw new Error('Capability evidence missing.');
         // An absent capability is absent because nobody verified it; a present one names a source.
         // `webSearchTool` is the one exception (ADR 0080 §2, §3): a vendor page may affirmatively
         // establish that no search tool exists, which is stronger than nobody having looked.

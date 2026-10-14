@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -18,7 +18,8 @@ import { HARNESS_SESSION_LOG_DIRECTORY } from '../../src/service/harness/session
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_SESSION_HEADER } from '../../src/service/provider/deepseek-adapter.js';
 import { OPENCODE_GO_MODEL } from '../../src/service/provider/egress-gate.js';
-import { PROVIDER_LEDGER_FILE, isItemLine, type ProviderLedgerLine } from '../../src/service/provider/provider-result-cache.js';
+import { PROVIDER_LEDGER_FILE, ProviderResultCache, isItemLine, type ProviderCacheEntry, type ProviderLedgerLine } from '../../src/service/provider/provider-result-cache.js';
+import { transmitOnce } from '../../src/service/provider/live-transmission.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { ANALYSIS_LEDGER_REVISION_59_SQL, LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { READERS_REPORT_SCHEMA_SQL } from '../../src/service/readers-reports.js';
@@ -91,6 +92,15 @@ function stubTransport(calls: StubCall[], answer: (body: string) => string, opti
     }
     return {
       status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: new ReadableStream<Uint8Array>({ start(controller) {
+        const event = (value: unknown): void => { controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(value)}\n\n`)); };
+        for (const text of [...answer(init.body)]) event({ model: OPENCODE_GO_MODEL, choices: [{ index: 0, delta: { content: text } }] });
+        event({ model: OPENCODE_GO_MODEL, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] });
+        event({ model: OPENCODE_GO_MODEL, choices: [], usage: { prompt_tokens: 210, completion_tokens: 48 } });
+        controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+        controller.close();
+      } }),
       json: async () => ({
         model: OPENCODE_GO_MODEL,
         choices: [{ message: { content: answer(init.body), reasoning_content: '合成推理内容。' }, finish_reason: 'stop' }],
@@ -319,6 +329,50 @@ describe('the admitted dialogue route, read from the selected policy', () => {
 });
 
 describe('就这段提问… on the live route (provider-free)', () => {
+  it('streams before completion, keeps only complete stopped fragments, continues live, and holds an aborted request across cache reopen', async () => {
+    const calls: StubCall[] = [];
+    const first = '完整的第一句。';
+    const tail = '未完的第二';
+    const completeTransport = stubTransport(calls, () => CONTINUED);
+    const transport: typeof fetch = (async (url: string, init: { headers: Record<string, string>; body: string; signal?: AbortSignal }) => {
+      if (JSON.parse(init.body).messages[1].content.includes('接着回答')) return completeTransport(url, init);
+      calls.push({ url, headers: init.headers, body: init.body });
+      return new Response(new ReadableStream<Uint8Array>({ start(controller) {
+        for (const text of [first, tail]) controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ model: OPENCODE_GO_MODEL, choices: [{ index: 0, delta: { content: text } }] })}\n\n`));
+        init.signal?.addEventListener('abort', () => controller.error(new DOMException('stopped', 'AbortError')), { once: true });
+      } }), { headers: { 'content-type': 'text/event-stream' } });
+    }) as typeof fetch;
+    const store = await openStore();
+    const book = await importSample1Book(store, roots.codeRoot, '实时停止与继续');
+    const selection = selectionOf(store, book);
+    const dialogues = liveOwner(store, liveRoute(transport));
+    try {
+      const turn = store.askAboutSelection(book.bookId, { selection, question: QUESTION });
+      dialogues.begin(turn);
+      const held = await waitFor(() => store.inspectDialogue(book.bookId, turn.dialogueId, 0, (id) => dialogues.liveText(id)), (projection) => projection.attempts[0]!.fragmentTotal === 1, 'live fragment before finish');
+      expect(held.attempts[0]!.state).toBe('answering');
+      expect(texts(held)).toEqual([first]);
+      await dialogues.stop(turn.attemptId);
+      const stopped = store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null);
+      expect(stopped.attempts[0]!.state).toBe('stopped');
+      expect(texts(stopped)).toEqual([first]);
+      const continued = await next(store, dialogues, book.bookId, turn.dialogueId, 'continue');
+      expect(continued.attempts[1]!.state).toBe('completed');
+      expect(texts(continued)).toEqual([first, CONTINUED]);
+      expect(calls).toHaveLength(2);
+      expect(calls[1]!.body).toContain(first);
+      expect(calls[1]!.body).not.toContain(tail);
+      const entries: ProviderCacheEntry[] = await Promise.all((await readdir(join(cacheRoot, 'entries'))).filter((name) => name.endsWith('.json')).map(async (name) => JSON.parse(await readFile(join(cacheRoot, 'entries', name), 'utf8')) as ProviderCacheEntry));
+      expect(entries).toHaveLength(2);
+      expect(entries.find((entry) => entry.streamedAnswer?.complete === false)).toMatchObject({ usage: null, streamedAnswer: { complete: false, chunks: [first, tail] } });
+      expect(entries.find((entry) => entry.streamedAnswer?.complete === true)?.streamedAnswer?.chunks.join('')).toBe(CONTINUED);
+      expect((await ledgerLines()).map((line) => [line.outcome, line.classification])).toEqual([['failed', 'outcome-unknown'], ['transmitted', undefined]]);
+      const reopened = new ProviderResultCache(cacheRoot);
+      await reopened.open();
+      await expect(transmitOnce(reopened, async () => { throw new Error('duplicate send'); }, { purpose: 'editorial-dialogue', slice: 'S17c', promptContractDigest: DIALOGUE_PROMPT_CONTRACT_DIGEST, taskPromptContractDigest: DIALOGUE_PROMPT_CONTRACT_DIGEST }, { intent: VALIDATION, step: 'editorial-dialogue/ask', requestShape: 'editorial-dialogue-sse' }, OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_MODEL, calls[0]!.url, { method: 'POST', ...calls[0]! })).rejects.toMatchObject({ code: 'PROVIDER_VALIDATION_OUTCOME_UNKNOWN' });
+      expect(calls).toHaveLength(2);
+    } finally { await dialogues.dispose(); }
+  });
   it('sends the one bounded message once, shows the answer by complete fragment, records the binding and the ledger item', async () => {
     const calls: StubCall[] = [];
     const store = await openStore();
@@ -335,7 +389,7 @@ describe('就这段提问… on the live route (provider-free)', () => {
       expect(call.headers[OPENCODE_GO_SESSION_HEADER]).toMatch(/^[0-9a-f-]{36}$/u);
       const body = JSON.parse(call.body) as { model: string; stream: boolean; tools?: unknown; messages: Array<{ role: string; content: string }> };
       expect(body.model).toBe(OPENCODE_GO_MODEL);
-      expect(body.stream).toBe(false);
+      expect(body.stream).toBe(true);
       expect(body.tools).toBeUndefined();
       // Exactly the frozen contract and the one message: the selected words and the question, nothing else of the Book.
       expect(sha256Hex(canonicalJson(body.messages))).toBe(sha256Hex(canonicalJson([

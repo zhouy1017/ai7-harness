@@ -123,6 +123,8 @@ export interface ModelCapabilities {
   readonly usageAttribution: UsageAttribution;
   readonly toolCalling: ToolCalling;
   readonly webSearchTool: WebSearchTool;
+  /** Absent unless this exact route/model has observed chat-completions SSE support. */
+  readonly streaming?: 'none' | 'chat-completions-sse';
 }
 
 /**

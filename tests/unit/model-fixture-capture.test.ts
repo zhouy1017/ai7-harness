@@ -78,6 +78,27 @@ describe('converted capture proof and replay', () => {
     return chunks;
   }
 
+  it('admits an SSE namespace only for dialogue on opencode-go; every other subject keeps the JSON shape', async () => {
+    await synthetic(`AI7 编辑对话 · 提问 · 问题摘要 ${D}\n【所选文字】\n合成选区。\n【问题】\n合成问题。`, DIALOGUE_PROMPT_CONTRACT_DIGEST, '合成回答。');
+    const document = await generate();
+    const entry = (document.entries as Array<{ capture: Record<string, unknown> }>)[0]!;
+    const capture = entry.capture;
+    const shape = (route: string): void => {
+      capture.requestShape = 'editorial-dialogue-sse'; capture.route = route;
+      const namespace = { route, endpoint: String(capture.endpoint), requestShape: 'editorial-dialogue-sse', model: String(capture.model) };
+      capture.cacheKey = tool.namespacedCacheKey(namespace, String(capture.providerRequestDigest));
+      capture.generation = tool.evidenceGeneration(namespace, String(capture.promptContractDigest), String(capture.taskPromptContractDigest));
+    };
+    shape('opencode-go');
+    expect(parseModelFixture(document).entries[0]!.capture?.requestShape).toBe('editorial-dialogue-sse');
+    for (const subject of ['unit', 'reduction', 'sampling', 'reflection', 'factual-unit', 'review-unit', 'evaluation-unit', 'readers-unit', 'rewrite-unit', 'writing-unit', 'task-synthesis']) {
+      capture.subject = subject;
+      expect(() => parseModelFixture(document)).toThrow('夹具条目的捕获路由或形态无效。');
+    }
+    capture.subject = 'dialogue'; shape('another-route');
+    expect(() => parseModelFixture(document)).toThrow('夹具条目的捕获路由或形态无效。');
+  });
+
   it.each([
     ['unit', `分析单元 1/1 · 单元摘要 ${D}`, (c: string) => unitRequestDigest(c, 1, D)],
     ['factual-unit', `事实核查单元 1/1 · 单元摘要 ${D}`, (c: string) => factualReviewRequestDigest(c, 1, D)],

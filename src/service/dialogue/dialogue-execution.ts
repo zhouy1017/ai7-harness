@@ -36,8 +36,8 @@ import { DIALOGUE_OUTBOUND_CATEGORY, DIALOGUE_TASK_KIND, admittedDialogueRoute, 
  * `admittedDialogueRoute`, never written here — with the credential the broker releases to the final adapter alone. A launch
  * whose policy admits no dialogue, or a Book that is not an admitted Public SampleBook, refuses before anything is recorded.
  *
- * The live route answers non-streaming: the model's whole answer arrives as one delta after the model has finished, and
- * the fragment reading shows it by complete sentence at once. 停止回答 before it arrives keeps nothing.
+ * The live dialogue alone asks for SSE (Issue #833). Text deltas reach the Harness as they arrive;
+ * the existing fragment reading preserves complete sentences after 停止回答 for a new 继续回答 attempt.
  *
  * Every ask, 继续回答 and 重新回答 is a new attempt that sends its own request. Under a launch that names a development
  * validation (ADR 0089, Issue #808), that request goes through the Provider Test Ledger and Result Cache: an identical request
@@ -255,6 +255,7 @@ export class DialogueExecutionOwner {
             codes,
             profile: route.profile,
             modelProfile: route.modelProfile,
+            requestShape: 'editorial-dialogue-sse',
             sessionId: () => harness.currentSessionId(),
             transport: async (url, init) => {
               requireRunning(init.signal);
@@ -266,7 +267,7 @@ export class DialogueExecutionOwner {
                 : transmitOnce(cache, send, { purpose: DIALOGUE_TEST_ITEM_PURPOSE, slice: 'S17c', promptContractDigest, taskPromptContractDigest: promptContractDigest }, {
                   intent: validation,
                   step: `${DIALOGUE_TEST_ITEM_PURPOSE}/${turn.message.kind}`,
-                  requestShape: route.modelProfile.capabilities.requestShape,
+                  requestShape: 'editorial-dialogue-sse',
                 }, route.profile, model, url, init);
             },
           });
