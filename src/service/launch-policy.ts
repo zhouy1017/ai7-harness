@@ -1,23 +1,23 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import { LAUNCH_SELECTABLE_SCOPES, isTrustedOperationalScope, type AdmittedProviderRule, type DeveloperLiveCeiling, type DevelopmentValidationIntent, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope } from '../shared/protocol.js';
+import { LAUNCH_SELECTABLE_SCOPES, isTrustedOperationalScope, type AdmittedProviderRule, type DeveloperLiveCeiling, type OutboundDataCategoryId, type DevelopmentValidationIntent, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope } from '../shared/protocol.js';
 
 /**
  * The source-checkout launch authority (ADR 0046, ADR 0065): the build-embedded carrier pins active
- * policy set v8, the sole active set for all four Provider Processing scopes, and names the two
+ * policy set v9, the sole active set for all four Provider Processing scopes, and names the two
  * scopes the built entry may bind from its launch form. `development-ci` is the default and binds
  * Provider Processing v1 (zero live transmissions); `developer-live` is bound only by the launch
  * argument `--trusted-operational-scope developer-live` on a developer host and binds the immutable
- * Provider Processing v10. `fixture-recording` and `ordinary-production` are pinned by the active set
+ * Provider Processing v11. `fixture-recording` and `ordinary-production` are pinned by the active set
  * but are not selectable from the source checkout. No environment variable or product setting
  * selects a scope; every invalid state resolves to the zero-transmission denial.
  */
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
 const CARRIER_VERSION = 2;
-export const ACTIVE_SET_VERSION = 'v8' as const;
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v8.json';
-const ACTIVE_SET_SHA256 = 'd3ad3aa86eb0129d8e4b936d35f24ba6bc1533944c7197f39e16b2488df45462';
+export const ACTIVE_SET_VERSION = 'v9' as const;
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v9.json';
+const ACTIVE_SET_SHA256 = '0a638bf74ad80858a2a856aa99063436b6ef133c5af0296fd6271f0d145157ca';
 const PROVIDER_PINS = {
   'development-ci': {
     version: 'v1',
@@ -35,9 +35,9 @@ const PROVIDER_PINS = {
     sha256: '10e69a5d7b027d077728ec1bc7393dc0583b99a05246b4e883098b9d96b221a4',
   },
   'developer-live': {
-    version: 'v10',
-    canonicalPath: 'docs/policies/provider-processing-policy.v10.json',
-    sha256: '1f2e1381b40ce2a91eba2c92af3cd883d6df5f574980d6f182e49d02856d86e9',
+    version: 'v11',
+    canonicalPath: 'docs/policies/provider-processing-policy.v11.json',
+    sha256: '3682c59b4815a291f495ecd7b9c8552f00616a1c2513f472a1e988d16b824f91',
   },
 } as const;
 /**
@@ -52,7 +52,7 @@ const EXTERNAL_PIN = {
 } as const;
 
 /**
- * The exact developer-live binding every rule of Provider Processing v10 declares, and the one rule v9 declared; the resolver
+ * The exact developer-live binding every rule of Provider Processing v11 declares, and the one rule v9 declared; the resolver
  * verifies the policy bytes say the same. `ruleId` is the baseline analysis rule, whose reading the projection's suboperation
  * flags come from.
  */
@@ -282,8 +282,12 @@ function verifyRuleCommon(rule: Record<string, unknown>): void {
   );
 }
 
-/** A planned Run's origin: a newly user-initiated Task under direct Run Authorization, never a rule, enrollment or schedule. */
-function verifyPlannedRunOrigin(rule: Record<string, unknown>): void {
+/**
+ * A planned Run's origin: a newly user-initiated Task under direct Run Authorization, never a rule, enrollment or schedule.
+ * `assuranceAnchors` is whether the kind samples a result for assurance (baseline analysis and review do; writing and the
+ * evaluation contracts declare no sample), which the rule's transmission bound must state either way.
+ */
+function verifyPlannedRunOrigin(rule: Record<string, unknown>, assuranceAnchors = true): void {
   const origin = rule['authorityOrigin'];
   requirePolicy(isRecord(origin) && origin['newlyUserInitiatedTaskRequired'] === true &&
     origin['directRunAuthorizationAllowed'] === true && origin['matchingActiveDefaultExecutionRuleAllowed'] === false &&
@@ -304,7 +308,7 @@ function verifyPlannedRunOrigin(rule: Record<string, unknown>): void {
   requirePolicy(
     transmissions['boundedByCoverageManifestUnitCount'] === true &&
       transmissions['plusDeclaredSafeRetryAdaptations'] === true &&
-      transmissions['plusAssuranceSampleAnchorUnits'] === true &&
+      transmissions['plusAssuranceSampleAnchorUnits'] === assuranceAnchors &&
       transmissions['plusOneRunReportReflectionTurn'] === true &&
       transmissions['oneTechnicalSessionPerAnalysisUnit'] === true &&
       transmissions['accumulatingSingleSessionAllowed'] === false,
@@ -319,8 +323,32 @@ function verifyPlannedRunOrigin(rule: Record<string, unknown>): void {
 interface DeveloperLiveRuleReading {
   readonly modelRole: string;
   readonly taskKinds: readonly string[];
-  readonly outboundDataCategories: readonly string[];
+  readonly outboundDataCategories: readonly OutboundDataCategoryId[];
+  /** Whether the rule names the kind's one book-level synthesis turn (Provider Processing v11); `verify` reads the policy's own say. */
+  readonly crossUnitSynthesisAllowed: boolean;
   readonly verify: (rule: Record<string, unknown>) => void;
+}
+
+/**
+ * A planned Run over the Book's units that ends in the kind's one book-level synthesis turn — writing and the three evaluation
+ * contracts (Provider Processing v11). The planned-Run origin and bound of baseline analysis, with the synthesis turn named,
+ * no assurance sample, no reduction topic sections, and no Series Knowledge or editorial deliverables. Material References are
+ * admitted only with the consumption re-check (Issue #759, item 1), never as a bare allowance.
+ */
+function verifySynthesisRule(rule: Record<string, unknown>): void {
+  verifyPlannedRunOrigin(rule, false);
+  const source = rule['source'];
+  requirePolicy(isRecord(source) && source['materialReferencesAllowed'] === true && source['materialReferenceConsumptionRecheckRequired'] === true &&
+    source['seriesKnowledgeAllowed'] === false && source['editorialDeliverablesAllowed'] === false);
+  const transmissions = rule['transmissions'] as Record<string, unknown>;
+  requirePolicy(
+    transmissions['plusOneCrossUnitSynthesisTurn'] === true &&
+      transmissions['crossUnitSynthesisAllowed'] === true &&
+      transmissions['crossUnitReductionAllowed'] === false &&
+      transmissions['plusCrossUnitReductionTopicSections'] === undefined &&
+      transmissions['assuranceSamplingAllowed'] === false &&
+      transmissions['runReportReflectionAllowed'] === true,
+  );
 }
 
 const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> = {
@@ -329,6 +357,7 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
     modelRole: 'Main Editorial Role',
     taskKinds: ['baseline-manuscript-analysis'],
     outboundDataCategories: ['public-or-synthetic'],
+    crossUnitSynthesisAllowed: false,
     verify: (rule) => {
       verifyPlannedRunOrigin(rule);
       const transmissions = rule['transmissions'] as Record<string, unknown>;
@@ -348,6 +377,7 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
     modelRole: 'Fast Interaction Role',
     taskKinds: ['editorial-dialogue'],
     outboundDataCategories: ['editor-selected-manuscript-excerpt'],
+    crossUnitSynthesisAllowed: false,
     verify: (rule) => {
       const origin = rule['authorityOrigin'];
       requirePolicy(isRecord(origin) && origin['foregroundEditorSelectionAndQuestionRequired'] === true &&
@@ -378,6 +408,7 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
     modelRole: 'Main Editorial Role',
     taskKinds: ['editorial-review/typos-and-usage', 'editorial-review/style-and-format', 'editorial-review/literary-expression'],
     outboundDataCategories: ['public-or-synthetic'],
+    crossUnitSynthesisAllowed: false,
     verify: (rule) => {
       verifyPlannedRunOrigin(rule);
       const source = rule['source'] as Record<string, unknown>;
@@ -387,10 +418,60 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
       requirePolicy(transmissions['crossUnitReductionAllowed'] === false && transmissions['plusCrossUnitReductionTopicSections'] === undefined);
     },
   },
+  // 写作任务 (S84): the `writing` kind, drafted over the Book's units and one book-level synthesis turn from the frozen metadata and
+  // synopsis, the house's 范例 and the editor's own brief. Reference-bearing only through the consumption re-check.
+  'developer-live-public-samplebook-writing': {
+    modelRole: 'Main Editorial Role',
+    taskKinds: ['writing'],
+    outboundDataCategories: ['public-or-synthetic', 'book-metadata-and-synopsis', 'house-exemplar-excerpt', 'frozen-material-reference-excerpt'],
+    crossUnitSynthesisAllowed: true,
+    verify: verifySynthesisRule,
+  },
+  // The three implemented evaluation contracts (S81): AI7 初评 scores, 审稿意见 and 按我的评分重写评语, non-web.
+  'developer-live-public-samplebook-evaluation': {
+    modelRole: 'Main Editorial Role',
+    taskKinds: ['evaluation', 'readers-report', 'evaluation-rewrite'],
+    outboundDataCategories: ['public-or-synthetic', 'editor-authored-evaluation-text', 'house-exemplar-excerpt', 'frozen-material-reference-excerpt'],
+    crossUnitSynthesisAllowed: true,
+    verify: verifySynthesisRule,
+  },
+  // 润色这段 and 稿件冲突 › 基于当前稿件重新生成建议: one foreground editor action on the editor's own manuscript words, one session and one
+  // bounded payload per attempt, Suggestions only. No synthesis turn, and no Material References, Series Knowledge or deliverables.
+  'developer-live-public-samplebook-selection-suggestions': {
+    modelRole: 'Fast Interaction Role',
+    taskKinds: ['editorial-polish', 'conflict-regenerate'],
+    outboundDataCategories: ['editor-selected-manuscript-excerpt'],
+    crossUnitSynthesisAllowed: false,
+    verify: (rule) => {
+      const origin = rule['authorityOrigin'];
+      requirePolicy(isRecord(origin) && origin['foregroundEditorActionRequired'] === true &&
+        origin['matchingActiveDefaultExecutionRuleAllowed'] === false && origin['backgroundAnalysisEnrollmentAllowed'] === false &&
+        origin['idleScheduledImportTriggeredOrCrossRunDispatchAllowed'] === false);
+      const source = rule['source'] as Record<string, unknown>;
+      requirePolicy(source['editorSelectedPassageOrConflictRegionOnly'] === true && source['materialReferencesAllowed'] === false &&
+        source['seriesKnowledgeAllowed'] === false && source['editorialDeliverablesAllowed'] === false);
+      const transmissions = rule['transmissions'] as Record<string, unknown>;
+      requirePolicy(
+        transmissions['oneTechnicalSessionPerAttempt'] === true &&
+          transmissions['oneBoundedPayloadPerAttempt'] === true &&
+          transmissions['payloadLimitedToFrozenContractAndEditorManuscriptExcerpts'] === true &&
+          transmissions['crossUnitSynthesisAllowed'] === false &&
+          transmissions['automaticResendInsideStoppedSessionAllowed'] === false,
+      );
+      const preconditions = rule['authorizationPreconditions'];
+      requirePolicy(isRecord(preconditions) && preconditions['exactProviderBindingRequired'] === true &&
+        preconditions['finalProviderPayloadEgressGateRequired'] === true && preconditions['frozenBeforeTransmission'] === true);
+      const limit = rule['providerAccountLimit'] as Record<string, unknown>;
+      requirePolicy(limit['endsAttemptAsProviderAccountLimit'] === true);
+      // The output is a Suggestion the editor decides on, never a manuscript change.
+      const output = rule['output'];
+      requirePolicy(isRecord(output) && output['suggestionsOnly'] === true && output['appliesManuscriptChange'] === false);
+    },
+  },
 };
 
 /**
- * Provider Processing v10 (and v9 before it): default deny with developer-live eligible-only allow rules, each one this
+ * Provider Processing v11 (and v10, v9 before it): default deny with developer-live eligible-only allow rules, each one this
  * launch can read and each bound exactly to the one Go route. The baseline analysis rule must be among them; its three
  * declared suboperations of ADR 0066, the per-frozen-unit Run Budget Ceiling default of ADR 0070, and the house-people
  * redaction rule of ADR 0079 §4.4 are read as v9 read them. Every other rule is read from its own entry of
@@ -453,6 +534,7 @@ export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
       model: DEVELOPER_LIVE_POLICY_BINDING.model,
       credentialSlot: DEVELOPER_LIVE_POLICY_BINDING.credentialSlot,
       outboundDataCategories: [...reading.outboundDataCategories],
+      crossUnitSynthesisAllowed: reading.crossUnitSynthesisAllowed,
     });
   }
   requirePolicy(seen.has(DEVELOPER_LIVE_POLICY_BINDING.ruleId));
