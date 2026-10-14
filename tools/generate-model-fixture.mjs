@@ -1078,6 +1078,16 @@ export function mapCachedResponse(entry, selection, ownBlockTexts, request = { i
   refuse(sanitized.isWellFormed() && sanitized.length > 0 && sanitized.length <= 64 * 1024, 'FIXTURE_GEN/response-shape-unsupported', '归一化响应超出夹具文本边界。');
   const points = Array.from(sanitized);
   const chunks = [];
+  if (request.subject === 'dialogue' && entry.streamedAnswer !== undefined) {
+    const stream = entry.streamedAnswer;
+    refuse(stream.complete === true && Array.isArray(stream.chunks) && stream.chunks.every((chunk) => typeof chunk === 'string') &&
+      stream.chunks.join('') === text, 'FIXTURE_GEN/response-shape-unsupported', '流式回答不是可确认的完整聚合。');
+    // Preserve observed delta boundaries when sanitization leaves them intact and the fixture bounds
+    // admit them. Large streams are coalesced below; replay makes no claim about network timing.
+    if (sanitized === text && stream.chunks.length <= 64 && stream.chunks.every((chunk) => chunk.length > 0 && chunk.length <= 4 * 1024)) {
+      return { kind: 'answer-chunks', chunks: [...stream.chunks], usage: { inputTokens, outputTokens } };
+    }
+  }
   for (let index = 0; index < points.length; index += 2_048) chunks.push(points.slice(index, index + 2_048).join(''));
   return request.subject === 'dialogue'
     ? { kind: 'answer-chunks', chunks, usage: { inputTokens, outputTokens } }
@@ -1167,7 +1177,9 @@ export async function generateModelFixture(request, now = new Date()) {
     try { endpoint = new URL(entry.endpoint); } catch { /* Refuse below without echoing the URL. */ }
     refuse(endpoint !== undefined && endpoint.protocol === 'https:' && endpoint.username === '' && endpoint.password === '' &&
       endpoint.search === '' && endpoint.hash === '' && /^[a-z][a-z0-9-]{0,63}$/u.test(entry.route) &&
-      entry.requestShape === 'openai-chat-completions', 'FIXTURE_GEN/entry-invalid', '捕获路由或请求形态无效。');
+      (entry.requestShape === 'openai-chat-completions' ||
+        (entry.requestShape === 'editorial-dialogue-sse' && parsed.subject === 'dialogue' && entry.route === 'opencode-go')),
+      'FIXTURE_GEN/entry-invalid', '捕获路由或请求形态无效。');
   }
   refuse(findManuscriptEcho(request.description, parsed.carriedBlockTexts) === null, 'FIXTURE_GEN/manuscript-echo', '夹具描述仍包含请求内容。');
   const response = mapCachedResponse(entry, selection, parsed.ownBlockTexts, parsed);

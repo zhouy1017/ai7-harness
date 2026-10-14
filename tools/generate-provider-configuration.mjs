@@ -66,6 +66,7 @@ export const CAPABILITY_VALUES = Object.freeze({
   usageAttribution: ['includes-reasoning', 'separate', 'unknown'],
   toolCalling: ['none', 'function'],
   webSearchTool: ['none', 'provider-tool'],
+  streaming: ['none', 'chat-completions-sse'],
 });
 const CAPABILITIES = Object.keys(CAPABILITY_VALUES);
 const ABSENT = Object.freeze({
@@ -76,6 +77,7 @@ const ABSENT = Object.freeze({
   usageAttribution: 'unknown',
   toolCalling: 'none',
   webSearchTool: 'none',
+  streaming: 'none',
 });
 
 /**
@@ -346,6 +348,8 @@ export function resolveProviderConfiguration({ schema, documents, recordedEviden
         const capabilityEvidence = {};
         for (const capability of CAPABILITIES) {
           const entry = declared[capability];
+          // Optional additive capability: existing profile bytes stay unchanged (Issue #833).
+          if (capability === 'streaming' && entry === undefined) continue;
           if (capability === 'requestShape') {
             refuse(entry === undefined || entry.value === route.requestShape,
               `PROVIDER_CONFIGURATION/request-shape: ${modelWhere} (a model speaks its route's shape)`);
@@ -376,6 +380,8 @@ export function resolveProviderConfiguration({ schema, documents, recordedEviden
         }
         refuse(capabilities.reasoningControl !== 'deepseek-thinking' || DEEPSEEK_ONLY_PROVIDERS.has(data.providerId),
           `PROVIDER_CONFIGURATION/deepseek-thinking: ${modelWhere} (DeepSeek's thinking parameters are sent to DeepSeek official alone)`);
+        refuse(capabilities.streaming !== 'chat-completions-sse' || route.requestShape === 'openai-chat-completions',
+          `PROVIDER_CONFIGURATION/shape-capability: ${modelWhere} (streaming needs chat completions)`);
         refuse(capabilities.answerChannel === 'none' || capabilities.answerChannel === shape.answerChannel,
           `PROVIDER_CONFIGURATION/answer-channel: ${modelWhere} (${route.requestShape} answers on ${shape.answerChannel})`);
         refuse(capabilities.reasoningChannel === 'none' || capabilities.reasoningChannel === shape.reasoningChannel,
@@ -714,6 +720,7 @@ function renderSupport({ providers, recordedEvidence }) {
       for (const model of route.models) {
         for (const capability of CAPABILITIES) {
           const evidence = model.evidence[capability];
+          if (evidence === undefined) continue;
           if (evidence.kind === 'unverified') continue;
           record(model.model, `\`${capability}: ${model.capabilities[capability]}\` — ${describeEvidence(evidence)}`);
         }

@@ -1,5 +1,6 @@
 import type { CallId, GenerateOptions, LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { canonicalJson, isRecord, sha256Hex } from '../analysis/canonical.js';
+import { DIALOGUE_PROMPT_CONTRACT, DIALOGUE_PROMPT_CONTRACT_DIGEST, parseDialogueMessage } from '../dialogue/contract.js';
 import { AI7_FAILURE_CODES, type DshFailureCodes } from './classification.js';
 import type { CredentialBroker, CredentialSlotBinding } from './credential-broker.js';
 import {
@@ -133,6 +134,8 @@ export interface ProviderRequestContext {
   readonly promptContractDigest: string;
   /** The technical Session id of the turn in flight; required by a profile that sends the Session header. */
   readonly sessionId?: string;
+  /** Only the frozen editorial dialogue contract may select SSE (Issue #833). */
+  readonly requestShape?: 'editorial-dialogue-sse';
 }
 
 /** The turn's user and assistant messages as both shapes carry them; where the system prompt goes is each shape's own business. */
@@ -402,7 +405,17 @@ export function assembleProviderRequest(
   if (model.route !== profile.route) throw new Error('PROVIDER_MODEL_ROUTE_MISMATCH');
   // The address before the payload: a model that cannot be reached has no request to assemble.
   const url = providerRequestUrl(profile, model);
-  const body = providerRequestBody(profile, model, payload);
+  let body = providerRequestBody(profile, model, payload);
+  const dialogueStream = context.requestShape === 'editorial-dialogue-sse';
+  if (dialogueStream) {
+    const message = payload.messages[0];
+    if (profile.route !== OPENCODE_GO_ROUTE || model.capabilities.requestShape !== 'openai-chat-completions' ||
+      model.capabilities.streaming !== 'chat-completions-sse' ||
+      context.promptContractDigest !== DIALOGUE_PROMPT_CONTRACT_DIGEST || payload.system !== DIALOGUE_PROMPT_CONTRACT.systemPrompt ||
+      payload.messages.length !== 1 || message?.role !== 'user' || parseDialogueMessage(messageText(message) ?? '') === null ||
+      (payload.tools ?? []).length > 0) throw new Error('PROVIDER_DIALOGUE_STREAM_SHAPE_INVALID');
+    body = canonicalJson({ ...JSON.parse(body), stream: true, stream_options: { include_usage: true } });
+  }
   if (profile.sessionHeader && (context.sessionId === undefined || context.sessionId.length === 0)) {
     throw new Error('PROVIDER_REQUEST_SESSION_ABSENT');
   }
@@ -411,7 +424,7 @@ export function assembleProviderRequest(
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      accept: 'application/json',
+      accept: dialogueStream ? 'text/event-stream' : 'application/json',
       ...(profile.dshAttribution ? context.attribution : {}),
       ...(profile.sessionHeader ? { [OPENCODE_GO_SESSION_HEADER]: context.sessionId!, 'user-agent': OPENCODE_GO_USER_AGENT } : {}),
       // Only the `x-api-key` form names a version beside the key; every other route sends no such header,
@@ -524,12 +537,90 @@ export interface TransmitTicketSource {
 export interface DeepSeekTransportResponse {
   readonly status: number;
   json(): Promise<unknown>;
+  /** Native fetch's SSE body; absent on the unchanged JSON transport. */
+  readonly body?: ReadableStream<Uint8Array> | null;
+  readonly headers?: { get(name: string): string | null };
+  /** Dialogue-only parsed deltas followed by one JSON-equivalent aggregate. */
+  stream?(): AsyncIterable<DialogueStreamEvent>;
   /**
    * Set only by a development validation transport whose Provider Result Cache answered (Issue #808): the body is a captured
    * response replayed, nothing was sent, and the turn incurred no usage — the usage the body records is the capture's own,
    * which the Provider Test Ledger keeps, so it is never reported as this Run's.
    */
   readonly replayed?: true;
+}
+
+export type DialogueStreamEvent =
+  | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'complete'; readonly response: unknown };
+
+/**
+ * Read the chat-completions SSE wire without exposing reasoning. UTF-8 and event boundaries may fall
+ * anywhere in a network chunk. Only [DONE] after a finish marker proves a whole response; EOF,
+ * malformed data and an aborted reader remain outcome-unknown (Issue #833).
+ */
+export async function* dialogueSseEvents(response: DeepSeekTransportResponse, model: string): AsyncIterable<DialogueStreamEvent> {
+  if (response.body == null || !response.headers?.get('content-type')?.toLowerCase().startsWith('text/event-stream')) {
+    throw new Error('AI7_OUTCOME_UNKNOWN');
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  let pending = '';
+  let content = '';
+  let finish: string | null = null;
+  let usage: unknown = null;
+  let done = false;
+  const readEvent = (event: string): DialogueStreamEvent | null => {
+    const data = event.split(/\r?\n/u).filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).replace(/^ /u, '')).join('\n');
+    if (data.length === 0) return null;
+    if (data === '[DONE]') {
+      if (finish === null) throw new Error('AI7_OUTCOME_UNKNOWN');
+      done = true;
+      return { kind: 'complete', response: { model, choices: [{ message: { content }, finish_reason: finish }], usage } };
+    }
+    const value: unknown = JSON.parse(data);
+    if (!isRecord(value) || (value.model !== undefined && value.model !== model) || !Array.isArray(value.choices)) {
+      throw new Error('AI7_OUTCOME_UNKNOWN');
+    }
+    if (value.usage !== undefined && value.usage !== null) usage = value.usage;
+    if (value.choices.length === 0) return null;
+    if (value.choices.length !== 1 || !isRecord(value.choices[0])) throw new Error('AI7_OUTCOME_UNKNOWN');
+    const choice = value.choices[0];
+    if (choice.index !== undefined && choice.index !== 0) throw new Error('AI7_OUTCOME_UNKNOWN');
+    const alreadyFinished = finish !== null;
+    if (choice.finish_reason !== undefined && choice.finish_reason !== null) {
+      if (typeof choice.finish_reason !== 'string') throw new Error('AI7_OUTCOME_UNKNOWN');
+      finish = choice.finish_reason;
+    }
+    if (!isRecord(choice.delta)) throw new Error('AI7_OUTCOME_UNKNOWN');
+    const text = choice.delta.content;
+    if (text === undefined || text === null || text === '') return null;
+    if (typeof text !== 'string' || alreadyFinished) throw new Error('AI7_OUTCOME_UNKNOWN');
+    content += text;
+    return { kind: 'text', text };
+  };
+  try {
+    while (!done) {
+      const chunk = await reader.read();
+      pending += chunk.done ? decoder.decode() : decoder.decode(chunk.value, { stream: true });
+      if (pending.length > 1024 * 1024) throw new Error('AI7_OUTCOME_UNKNOWN');
+      let boundary: RegExpExecArray | null;
+      while ((boundary = /\r?\n\r?\n/u.exec(pending)) !== null) {
+        const event = readEvent(pending.slice(0, boundary.index));
+        pending = pending.slice(boundary.index + boundary[0].length);
+        if (event !== null) yield event;
+        if (done) break;
+      }
+      if (chunk.done && !done) throw new Error('AI7_OUTCOME_UNKNOWN');
+    }
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') throw error;
+    throw new Error('AI7_OUTCOME_UNKNOWN');
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
 }
 
 export type DeepSeekTransport = (
@@ -552,6 +643,7 @@ export interface DeepSeekAdapterDependencies {
   readonly modelProfile?: ProviderModelProfile;
   /** The technical Session id of the turn in flight; required by a profile that sends the Session header. */
   readonly sessionId?: () => string;
+  readonly requestShape?: 'editorial-dialogue-sse';
 }
 
 /** A replayed outcome as this turn incurred it: the same answer, and no usage spent sending it. */
@@ -645,6 +737,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
         attribution: this.#deps.attribution(),
         promptContractDigest: this.#deps.promptContractDigest,
         ...(this.#deps.sessionId === undefined ? {} : { sessionId: this.#deps.sessionId() }),
+        ...(this.#deps.requestShape === undefined ? {} : { requestShape: this.#deps.requestShape }),
       });
     } catch {
       yield fail(AI7_FAILURE_CODES.INVALID_RESPONSE, '无法为本步骤组装请求；未发送任何内容。');
@@ -657,17 +750,35 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       return;
     }
     let outcome: ProviderResponseOutcome;
+    let streamed = '';
+    let blockStarted = false;
     try {
-      outcome = await this.#deps.broker.releaseTo(this.#deps.slotBinding, ticket, async (secret) => {
+      const response: DeepSeekTransportResponse = await this.#deps.broker.releaseTo(this.#deps.slotBinding, ticket, async (secret) => {
         this.#transmissions += 1;
         const transport = this.#deps.transport ?? ((url, init) => fetch(url, init));
-        const response = await transport(assembly.url, {
+        return transport(assembly.url, {
           method: assembly.method,
           headers: { ...assembly.headers, ...credentialHeaders(this.#profile, secret) },
           body: assembly.body,
           ...(options.signal === undefined ? {} : { signal: options.signal }),
         });
-        let body: unknown = null;
+      });
+      let body: unknown = null;
+      const dialogueStream = this.#deps.requestShape === 'editorial-dialogue-sse';
+      if (dialogueStream && response.status === 200 && response.replayed !== true) {
+        let completed = false;
+        // Nothing is yielded before the stream reads: a stop that ends this turn at any chunk then ends a stream already
+        // reading, so the transmission still records its possibly billed request as unknown.
+        for await (const event of response.stream?.() ?? dialogueSseEvents(response, this.#modelProfile.model)) {
+          if (event.kind === 'text') {
+            if (!blockStarted) yield { type: 'block-start', index: 0, blockType: 'text' };
+            blockStarted = true;
+            streamed += event.text;
+            yield { type: 'text-delta', index: 0, text: event.text };
+          } else { body = event.response; completed = true; }
+        }
+        if (!completed) throw new Error('AI7_OUTCOME_UNKNOWN');
+      } else {
         try {
           body = await response.json();
         } catch {
@@ -675,18 +786,20 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
           // connection dropped mid-answer, or what arrived does not read — so whether it was processed and billed cannot be
           // known. It is no failure to retry and no answer to read. A refusal's unreadable body is still that refusal.
           if (response.status === 200) {
-            return { kind: 'failure', code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN, message: '模型服务已接受请求，但回答没有完整传回。', status: 200 };
+            throw new Error('AI7_OUTCOME_UNKNOWN');
           }
           body = null;
         }
-        // Tool calls are read only for a request that offered tools (Issue #473); to any other the response reads as before.
-        const parsed = parseProviderResponse(response.status, body, this.#deps.codes, this.#profile, this.#modelProfile,
-          { toolCallsOffered: (options.tools ?? []).length > 0 });
-        return 'replayed' in response && response.replayed === true ? withoutIncurredUsage(parsed) : parsed;
-      });
+      }
+      // Tool calls are read only for a request that offered tools (Issue #473); to any other the response reads as before.
+      const parsed = parseProviderResponse(response.status, body, this.#deps.codes, this.#profile, this.#modelProfile,
+        { toolCallsOffered: (options.tools ?? []).length > 0 });
+      outcome = response.replayed === true ? withoutIncurredUsage(parsed) : parsed;
     } catch (error) {
-      const classified = classifyTransportError(error);
-      yield fail(classified.code, classified.message);
+      const classified = error instanceof Error && error.message === 'AI7_OUTCOME_UNKNOWN'
+        ? { code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN, message: '模型服务已接受请求，但回答没有完整传回。' }
+        : classifyTransportError(error);
+      yield fail(classified.code, classified.message, classified.code === AI7_FAILURE_CODES.OUTCOME_UNKNOWN ? 200 : undefined);
       return;
     }
     if (outcome.kind === 'failure') {
@@ -731,8 +844,8 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
     // Journey above it see an unchanged event shape — and the fact that the answer channel was empty
     // travels out of band, where a string cannot lose it.
     const text = outcome.kind === 'answer' ? outcome.text : '';
-    yield { type: 'block-start', index: 0, blockType: 'text' };
-    yield { type: 'text-delta', index: 0, text };
+    if (!blockStarted) yield { type: 'block-start', index: 0, blockType: 'text' };
+    if (streamed.length === 0) yield { type: 'text-delta', index: 0, text };
     yield { type: 'block-end', index: 0, block: { type: 'text', text } };
     if (outcome.usage !== null) yield { type: 'usage', usage: { ...outcome.usage } };
     yield { type: 'finish', reason: { kind: 'stop' } };

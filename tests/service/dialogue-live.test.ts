@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -18,7 +18,8 @@ import { HARNESS_SESSION_LOG_DIRECTORY } from '../../src/service/harness/session
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_SESSION_HEADER } from '../../src/service/provider/deepseek-adapter.js';
 import { OPENCODE_GO_MODEL } from '../../src/service/provider/egress-gate.js';
-import { PROVIDER_LEDGER_FILE, isItemLine, type ProviderLedgerLine } from '../../src/service/provider/provider-result-cache.js';
+import { PROVIDER_LEDGER_FILE, ProviderResultCache, isItemLine, type ProviderCacheEntry, type ProviderLedgerLine } from '../../src/service/provider/provider-result-cache.js';
+import { transmitOnce } from '../../src/service/provider/live-transmission.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { ANALYSIS_LEDGER_REVISION_59_SQL, LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { READERS_REPORT_SCHEMA_SQL } from '../../src/service/readers-reports.js';
@@ -93,6 +94,15 @@ function stubTransport(calls: StubCall[], answer: (body: string) => string, opti
     }
     return {
       status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: new ReadableStream<Uint8Array>({ start(controller) {
+        const event = (value: unknown): void => { controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(value)}\n\n`)); };
+        for (const text of [...answer(init.body)]) event({ model: OPENCODE_GO_MODEL, choices: [{ index: 0, delta: { content: text } }] });
+        event({ model: OPENCODE_GO_MODEL, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] });
+        event({ model: OPENCODE_GO_MODEL, choices: [], usage: { prompt_tokens: 210, completion_tokens: 48 } });
+        controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+        controller.close();
+      } }),
       json: async () => ({
         model: OPENCODE_GO_MODEL,
         choices: [{ message: { content: answer(init.body), reasoning_content: '合成推理内容。' }, finish_reason: 'stop' }],
@@ -321,6 +331,69 @@ describe('the admitted dialogue route, read from the selected policy', () => {
 });
 
 describe('就这段提问… on the live route (provider-free)', () => {
+  it('streams before completion, keeps only complete stopped fragments, continues live, and holds an aborted request across cache reopen', async () => {
+    const calls: StubCall[] = [];
+    const first = '完整的第一句。';
+    const tail = '未完的第二';
+    const completeTransport = stubTransport(calls, () => CONTINUED);
+    const transport: typeof fetch = (async (url: string, init: { headers: Record<string, string>; body: string; signal?: AbortSignal }) => {
+      if (JSON.parse(init.body).messages[1].content.includes('接着回答')) return completeTransport(url, init);
+      calls.push({ url, headers: init.headers, body: init.body });
+      return new Response(new ReadableStream<Uint8Array>({ start(controller) {
+        for (const text of [first, tail]) controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ model: OPENCODE_GO_MODEL, choices: [{ index: 0, delta: { content: text } }] })}\n\n`));
+        init.signal?.addEventListener('abort', () => controller.error(new DOMException('stopped', 'AbortError')), { once: true });
+      } }), { headers: { 'content-type': 'text/event-stream' } });
+    }) as typeof fetch;
+    const store = await openStore();
+    const book = await importSample1Book(store, roots.codeRoot, '实时停止与继续');
+    const selection = selectionOf(store, book);
+    const dialogues = liveOwner(store, liveRoute(transport));
+    try {
+      const turn = store.askAboutSelection(book.bookId, { selection, question: QUESTION });
+      dialogues.begin(turn);
+      const held = await waitFor(() => store.inspectDialogue(book.bookId, turn.dialogueId, 0, (id) => dialogues.liveText(id)), (projection) => projection.attempts[0]!.fragmentTotal === 1, 'live fragment before finish');
+      expect(held.attempts[0]!.state).toBe('answering');
+      expect(texts(held)).toEqual([first]);
+      await dialogues.stop(turn.attemptId);
+      const stopped = store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null);
+      expect(stopped.attempts[0]!.state).toBe('stopped');
+      expect(texts(stopped)).toEqual([first]);
+      const continued = await next(store, dialogues, book.bookId, turn.dialogueId, 'continue');
+      expect(continued.attempts[1]!.state).toBe('completed');
+      expect(texts(continued)).toEqual([first, CONTINUED]);
+      expect(calls).toHaveLength(2);
+      expect(calls[1]!.body).toContain(first);
+      expect(calls[1]!.body).not.toContain(tail);
+      const entries: ProviderCacheEntry[] = await Promise.all((await readdir(join(cacheRoot, 'entries'))).filter((name) => name.endsWith('.json')).map(async (name) => JSON.parse(await readFile(join(cacheRoot, 'entries', name), 'utf8')) as ProviderCacheEntry));
+      expect(entries).toHaveLength(2);
+      expect(entries.find((entry) => entry.streamedAnswer?.complete === false)).toMatchObject({ usage: null, streamedAnswer: { complete: false, chunks: [first, tail] } });
+      expect(entries.find((entry) => entry.streamedAnswer?.complete === true)?.streamedAnswer?.chunks.join('')).toBe(CONTINUED);
+      expect((await ledgerLines()).map((line) => [line.outcome, line.classification])).toEqual([['failed', 'outcome-unknown'], ['transmitted', undefined]]);
+      const reopened = new ProviderResultCache(cacheRoot);
+      await reopened.open();
+      await expect(transmitOnce(reopened, async () => { throw new Error('duplicate send'); }, { purpose: 'editorial-dialogue', slice: 'S17c', promptContractDigest: DIALOGUE_PROMPT_CONTRACT_DIGEST, taskPromptContractDigest: DIALOGUE_PROMPT_CONTRACT_DIGEST }, { intent: VALIDATION, step: 'editorial-dialogue/ask', requestShape: 'editorial-dialogue-sse' }, OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_MODEL, calls[0]!.url, { method: 'POST', ...calls[0]! })).rejects.toMatchObject({ code: 'PROVIDER_VALIDATION_OUTCOME_UNKNOWN' });
+      expect(calls).toHaveLength(2);
+    } finally { await dialogues.dispose(); }
+  });
+  it('keeps the whole-answer JSON request for an admitted model whose profile declares no streaming (Issue #833)', async () => {
+    const calls: StubCall[] = [];
+    const store = await openStore();
+    const book = await importSample1Book(store, roots.codeRoot, '整段回答');
+    const selection = selectionOf(store, book);
+    const live = liveRoute(stubTransport(calls, () => ANSWER));
+    const { streaming: _declared, ...capabilities } = live.route!.modelProfile.capabilities;
+    const dialogues = liveOwner(store, { ...live, route: { ...live.route!, modelProfile: { ...live.route!.modelProfile, capabilities } } });
+    try {
+      const { projection } = await ask(store, dialogues, book.bookId, selection);
+      expect(projection.attempts[0]!.state).toBe('completed');
+      expect(texts(projection)).toEqual(['这段一直用第三人称限知视角叙述。', '人物的心理只写到主人公为止，没有越界。', '末句的语气可以改得更平缓些。']);
+      expect(calls).toHaveLength(1);
+      expect(JSON.parse(calls[0]!.body)).toMatchObject({ stream: false });
+      expect(calls[0]!.body).not.toContain('stream_options');
+      expect(calls[0]!.headers.accept).toBe('application/json');
+      expect((await ledgerLines()).map((line) => [line.outcome, line.requestShape])).toEqual([['transmitted', 'openai-chat-completions']]);
+    } finally { await dialogues.dispose(); }
+  });
   it('sends the one bounded message once, shows the answer by complete fragment, records the binding and the ledger item', async () => {
     const calls: StubCall[] = [];
     const store = await openStore();
@@ -337,7 +410,7 @@ describe('就这段提问… on the live route (provider-free)', () => {
       expect(call.headers[OPENCODE_GO_SESSION_HEADER]).toMatch(/^[0-9a-f-]{36}$/u);
       const body = JSON.parse(call.body) as { model: string; stream: boolean; tools?: unknown; messages: Array<{ role: string; content: string }> };
       expect(body.model).toBe(OPENCODE_GO_MODEL);
-      expect(body.stream).toBe(false);
+      expect(body.stream).toBe(true);
       expect(body.tools).toBeUndefined();
       // Exactly the frozen contract and the one message: the selected words and the question, nothing else of the Book.
       expect(sha256Hex(canonicalJson(body.messages))).toBe(sha256Hex(canonicalJson([
@@ -555,6 +628,23 @@ describe('the recorded live answer (Issue #52, S17c fixture)', () => {
     } finally {
       await local.dispose();
     }
+  });
+  it('loads the streamed continuation capture under its SSE namespace with the provenance #833 recorded (Issue #833)', async () => {
+    // The admitted stream fixture is the completed live 继续回答 alone; the stopped ask before it is no fixture entry.
+    const { loadModelFixture } = await import('../../src/service/provider/model-fixture.js');
+    const { resolve } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const recorded = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-dialogue-recorded-v41-stream');
+    expect(recorded.entries.size).toBe(1);
+    const entry = [...recorded.entries.values()][0]!;
+    expect(entry.capture as unknown as Record<string, unknown>).toMatchObject({
+      subject: 'dialogue', itemId: 'S17c/editorial-dialogue/3', selectedItemId: 'S17c/editorial-dialogue/3', evidenceScope: 'namespaced',
+      route: 'opencode-go', endpoint: OPENCODE_GO_ROUTE_PROFILE.endpoint, requestShape: 'editorial-dialogue-sse', model: OPENCODE_GO_MODEL,
+      promptContractDigest: DIALOGUE_PROMPT_CONTRACT_DIGEST, taskPromptContractDigest: DIALOGUE_PROMPT_CONTRACT_DIGEST,
+      providerRequestDigest: 'c152a59c8cb396e055cef40703b70d59274fa3497507b6441d235a5ce22d22af',
+      validation: { step: 'editorial-dialogue/continue' },
+    });
+    expect(entry.response).toMatchObject({ kind: 'answer-chunks', usage: { inputTokens: 363, outputTokens: 1544 } });
   });
 });
 

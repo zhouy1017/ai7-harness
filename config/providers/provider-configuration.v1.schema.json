@@ -122,7 +122,8 @@
         "reasoningChannel": { "$ref": "#/definitions/capability" },
         "usageAttribution": { "$ref": "#/definitions/capability" },
         "toolCalling": { "$ref": "#/definitions/capability" },
-        "webSearchTool": { "$ref": "#/definitions/capability" }
+        "webSearchTool": { "$ref": "#/definitions/capability" },
+        "streaming": { "$ref": "#/definitions/capability" }
       }
     },
     "context": {
