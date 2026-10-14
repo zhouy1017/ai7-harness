@@ -17,6 +17,11 @@ import {
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { reviewCategoryContract, reviewCategoryContractDigest, buildReviewCategoryUnitMessage } from '../../src/service/review/review-category-contract.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryContractInput } from '../../src/service/review/category-configuration.js';
+import { initialEvaluationKindDefinition } from '../../src/service/evaluation/initial-evaluation-kind.js';
+import { readersReportKindDefinition } from '../../src/service/evaluation/readers-report-kind.js';
+import { evaluationRewriteKindDefinition } from '../../src/service/evaluation/evaluation-rewrite-kind.js';
+import { BUILTIN_EVALUATION_PROFILE, evaluationProfileDigest } from '../../src/service/evaluation-records.js';
+import type { AnalysisKindDefinition } from '../../src/service/analysis/kind-definition.js';
 import type { CoverageManifestProjection } from '../../src/shared/protocol.js';
 
 // Source admission regression (#387): public sample1 plus an external temporary synthetic product
@@ -145,6 +150,90 @@ describe('exact sample1 fixture exemption source proof', () => {
     await expect(tool.verifySample1Capture(request, reviewSelection, candidate)).rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved' });
     save({ ...snapshot, materialReferences: { bookId: randomUUID(), references: [] } });
     await expect(tool.verifySample1Capture(request, reviewSelection, candidate)).rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved' });
+  });
+
+  describe('evaluation captures against the input their Task froze (#429)', () => {
+    const profile = { ...BUILTIN_EVALUATION_PROFILE, sha256: evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE) };
+    const reportInput = { template: 'author' as const, record: { profile: { title: '合成方案', version: '1' },
+      items: [{ label: '合成评分项', fullMarks: 100, score: 80, notRated: null, comment: '合成评语', ai7: null }],
+      total: { score: 80, fullMarks: 100 }, strengths: ['合成优点'], weaknesses: ['合成问题'],
+      risks: [], readiness: [], verdict: '合成总评', conclusion: '修改后再议' }, exemplars: [{ title: '合成本社范例', text: '合成范例段落，只用于测试。' }] };
+    const rewriteInput = {
+      profile: { title: '合成方案', version: '1' },
+      items: [{ itemId: 'literary-quality', label: '文学品质', fullMarks: 20, score: 13, notRated: null, comment: '合成评语。', ai7: { score: 16.5, comment: '合成评语。' }, adjustment: { reasons: ['打分偏高'], note: null } }],
+      strengths: ['合成优点'], weaknesses: ['合成问题'], verdict: null, conclusions: ['推荐出版', '修改后再议', '暂缓', '不推荐'],
+    };
+    const kinds = {
+      evaluation: { table: 'initial_evaluation_tasks', definition: initialEvaluationKindDefinition(profile), frozen: { profile } },
+      'readers-report': { table: 'readers_report_tasks', definition: readersReportKindDefinition(reportInput), frozen: { input: reportInput } },
+      'evaluation-rewrite': { table: 'evaluation_rewrite_tasks', definition: evaluationRewriteKindDefinition(rewriteInput), frozen: { input: rewriteInput } },
+    } as const;
+
+    /** The Task's records as the store freezes them: its kind, plan, contract input and first revision. */
+    async function freeze(kind: keyof typeof kinds, definition: AnalysisKindDefinition, frozen: Record<string, unknown>, execution: Record<string, unknown> = {}) {
+      const row = database.prepare("SELECT canonical_json FROM analysis_plan_records WHERE component='coverage-manifest'").get()!;
+      const manifest = JSON.parse(String(row.canonical_json)) as CoverageManifestProjection;
+      const blocks: ManifestBlockInput[] = [];
+      await parseDocx(resolve(root, 'SampleBooks/sample1.docx'), 'sample1.docx', (block) => blocks.push({ ...block, graphemes: block.graphemeLength }), { digest: sourceDigest, bytes: 29_550 });
+      const ids = manifest.units.flatMap((unit) => unit.blockIds);
+      const byId = new Map(blocks.map((block, index) => [ids[index]!, { ...block, blockId: ids[index]! }]));
+      const digest = definition.promptContractDigest;
+      const put = (component: string, value: unknown) => {
+        const json = canonicalJson(value);
+        database.prepare('DELETE FROM analysis_plan_records WHERE component=?').run(component);
+        database.prepare('INSERT INTO analysis_plan_records VALUES (?,1,?,?,?)').run(request.sample1Task, component, json, sha256Hex(json));
+      };
+      put('plan-envelope', { promptContractDigest: digest });
+      put('execution-plan', execution);
+      const revisionId = randomUUID();
+      const revision = canonicalJson({ revisionId, coverageManifestDigest: manifest.digest, adapterPin: { model: selection.model, route: selection.captured.route }, bindingPin: { promptContractDigest: digest } });
+      database.prepare('UPDATE analysis_result_set_revisions SET canonical_json=?,sha256=?').run(revision, sha256Hex(revision));
+      database.exec(`CREATE TABLE IF NOT EXISTS analysis_task_intents (task_intent_id TEXT, kind TEXT); DELETE FROM analysis_task_intents;
+        CREATE TABLE IF NOT EXISTS ${kinds[kind].table} (task_intent_id TEXT, prompt_contract_sha256 TEXT, canonical_json TEXT, sha256 TEXT); DELETE FROM ${kinds[kind].table};
+        CREATE TABLE IF NOT EXISTS analysis_unit_results (revision_id TEXT, unit_ordinal INTEGER, state TEXT, canonical_json TEXT, sha256 TEXT)`);
+      database.prepare('INSERT INTO analysis_task_intents VALUES (?,?)').run(request.sample1Task, kind);
+      const record = canonicalJson({ taskIntentId: request.sample1Task, promptContractSha256: digest, ...frozen });
+      database.prepare(`INSERT INTO ${kinds[kind].table} VALUES (?,?,?,?)`).run(request.sample1Task, digest, record, sha256Hex(record));
+      return { manifest, byId, digest, revisionId };
+    }
+    const capture = (system: string, user: string, digest: string) =>
+      tool.parseCachedRequest(JSON.stringify({ messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }), digest);
+
+    it.each(Object.keys(kinds) as Array<keyof typeof kinds>)('proves a %s unit capture and refuses another frozen input or material references', async (kind) => {
+      const { definition, frozen } = kinds[kind];
+      const { manifest, byId, digest } = await freeze(kind, definition, frozen);
+      const unit = capture(definition.systemPrompt, definition.buildUnitMessage(manifest.units[0]!, manifest.units.length, byId), digest);
+      const chosen = { ...selection, taskPromptContractDigest: digest, promptContractDigest: digest };
+      expect(await tool.verifySample1Capture(request, chosen, unit)).toBe(true);
+      // Another frozen input names another contract: the capture is not proved by today's profile or record.
+      const renamed = { ...BUILTIN_EVALUATION_PROFILE, items: BUILTIN_EVALUATION_PROFILE.items.map((item, index) => (index === 0 ? { ...item, label: '另一评分项' } : item)) };
+      const other = kind === 'evaluation' ? { profile: { ...renamed, sha256: evaluationProfileDigest(renamed) } }
+        : kind === 'readers-report' ? { input: { ...reportInput, record: { ...reportInput.record, verdict: '另一总评' } } }
+        : { input: { ...rewriteInput, strengths: ['另一优点'] } };
+      await freeze(kind, definition, other);
+      await expect(tool.verifySample1Capture(request, chosen, unit)).rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved' });
+      // A snapshot whose profile does not read as its own digest proves nothing either.
+      if (kind === 'evaluation') {
+        await freeze(kind, definition, { profile: { ...renamed, sha256: profile.sha256 } });
+        await expect(tool.verifySample1Capture(request, chosen, unit)).rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved' });
+      }
+      await freeze(kind, definition, frozen, { materialReferences: [] });
+      await expect(tool.verifySample1Capture(request, chosen, unit)).rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved' });
+    });
+
+    it('proves an evaluation synthesis capture from the closed units the revision kept', async () => {
+      const { definition, frozen } = kinds.evaluation;
+      const { manifest, digest, revisionId } = await freeze('evaluation', definition, frozen);
+      const observations = [{ itemId: profile.items[0]!.itemId, note: '合成依据。', blockOrdinals: [1] }];
+      const record = canonicalJson({ state: 'closed', unitOrdinal: 1, requestDigest: 'a'.repeat(64), responseDigest: 'b'.repeat(64), usage: null, observations });
+      database.prepare("INSERT INTO analysis_unit_results VALUES (?,1,'closed',?,?)").run(revisionId, record, sha256Hex(record));
+      const closed = [{ unitOrdinal: 1, result: definition.unitResultOfRecord(JSON.parse(record) as Record<string, unknown>, 1) }];
+      const message = definition.crossUnit!.step!.buildMessage(closed as never, manifest.units.length);
+      const chosen = { ...selection, taskPromptContractDigest: digest, promptContractDigest: digest };
+      expect(await tool.verifySample1Capture(request, chosen, capture(definition.systemPrompt, message, digest))).toBe(true);
+      const altered = definition.crossUnit!.step!.buildMessage([{ ...closed[0]!, result: { ...closed[0]!.result as object, observations: [] } }] as never, manifest.units.length);
+      await expect(tool.verifySample1Capture(request, chosen, capture(definition.systemPrompt, altered, digest))).rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved' });
+    });
   });
 
   it('refuses carried foreign turns even when the final unit message matches sample1', async () => {
