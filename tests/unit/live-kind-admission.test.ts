@@ -65,8 +65,9 @@ describe('live kind admission (#429)', () => {
     expect(liveKindAdmission(policy, { ...initial, materialReferences: {} }, binding)).toBeNull();
     expect(liveKindAdmitted(policy, 'evaluation', initial, binding, { promptContractDigest: 'a'.repeat(64), payloadCategories: ['public-or-synthetic'] })).toBeNull();
     expect(liveKindAdmitted(policy, 'evaluation', initial, binding, { promptContractDigest: null, payloadCategories: ['public-or-synthetic'] })).toBeNull();
-    // A kind with no row (the baseline is admitted by the policy-level terms, writing by #810) is never admitted here.
-    expect(liveKindAdmission(selected, { ...initial, kind: 'writing' }, binding)).toBeNull();
+    // A kind with no row (the baseline is admitted by the policy-level terms) is never admitted here; writing's row is #810's
+    // (tests/service/live-writing.test.ts).
+    expect(liveKindAdmission(selected, { ...initial, kind: BASELINE_ANALYSIS_KIND }, binding)).toBeNull();
   });
 
   it('keeps review admission exactly as #809 admitted it', () => {

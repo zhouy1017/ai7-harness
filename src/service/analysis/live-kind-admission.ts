@@ -1,5 +1,5 @@
 import type { AdmittedProviderRule, LaunchPolicyProjection } from '../../shared/protocol.js';
-import { EVALUATION_REWRITE_KIND, INITIAL_EVALUATION_KIND, READERS_REPORT_KIND, reviewCategoryKindId } from '../../shared/protocol.js';
+import { EVALUATION_REWRITE_KIND, INITIAL_EVALUATION_KIND, READERS_REPORT_KIND, WRITING_KIND, reviewCategoryKindId } from '../../shared/protocol.js';
 import type { OutboundDataCategory } from '../provider/egress-gate.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryContractInput } from '../review/category-configuration.js';
 import { reviewCategoryKindDefinition } from '../review/review-category-kind.js';
@@ -93,9 +93,21 @@ export const EVALUATION_PAYLOAD_CATEGORIES: Readonly<Record<string, readonly Out
 };
 
 /**
+ * The outbound categories the writing contract's payload carries (#810, the v11 writing rule): the manuscript, the Book's frozen
+ * metadata and synopsis with the editor's audience, channel and requirements, and the house's 范例 of the type. No frozen
+ * material this wave.
+ */
+export const WRITING_PAYLOAD_CATEGORIES: readonly OutboundDataCategory[] = ['public-or-synthetic', 'book-metadata-and-synopsis', 'house-exemplar-excerpt'];
+
+/** Every outbound category a planned kind's payload carries; `undefined` for a kind with no row. */
+function plannedPayloadCategories(kind: string): readonly OutboundDataCategory[] | undefined {
+  return kind === WRITING_KIND ? WRITING_PAYLOAD_CATEGORIES : EVALUATION_PAYLOAD_CATEGORIES[kind];
+}
+
+/**
  * What a kind's live contract must be, by kind. A review category is re-derived from the built-in configuration, exactly as
- * #809 admitted it. An evaluation owner re-derives its contract from the Task's frozen profile, record and exemplar
- * inputs; a missing owner derivation or a changed declared digest refuses admission. Any other
+ * #809 admitted it. An evaluation or writing owner re-derives its contract from the Task's frozen inputs (profile, record,
+ * metadata, words and exemplars); a missing owner derivation or a changed declared digest refuses admission. Any other
  * kind has no row and is not admitted.
  */
 function liveKindExpectation(definition: LiveKindDefinition): LiveKindExpectation | null {
@@ -107,8 +119,8 @@ function liveKindExpectation(definition: LiveKindDefinition): LiveKindExpectatio
       payloadCategories: ['public-or-synthetic'],
     };
   }
-  const evaluation = EVALUATION_PAYLOAD_CATEGORIES[definition.kind];
-  if (evaluation !== undefined) return { promptContractDigest: definition.livePromptContractDigest?.() ?? null, payloadCategories: evaluation };
+  const planned = plannedPayloadCategories(definition.kind);
+  if (planned !== undefined) return { promptContractDigest: definition.livePromptContractDigest?.() ?? null, payloadCategories: planned };
   return null;
 }
 
@@ -124,5 +136,5 @@ export function liveKindAdmission(
 
 /** The categories a kind's payload carries besides the binding's own public or synthetic material. */
 export function liveKindContractCategories(kind: string): readonly OutboundDataCategory[] {
-  return (EVALUATION_PAYLOAD_CATEGORIES[kind] ?? []).filter((category) => category !== 'public-or-synthetic');
+  return (plannedPayloadCategories(kind) ?? []).filter((category) => category !== 'public-or-synthetic');
 }

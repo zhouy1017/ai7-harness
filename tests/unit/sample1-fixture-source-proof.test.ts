@@ -22,6 +22,8 @@ import { readersReportKindDefinition } from '../../src/service/evaluation/reader
 import { evaluationRewriteKindDefinition } from '../../src/service/evaluation/evaluation-rewrite-kind.js';
 import { BUILTIN_EVALUATION_PROFILE, evaluationProfileDigest } from '../../src/service/evaluation-records.js';
 import type { AnalysisKindDefinition } from '../../src/service/analysis/kind-definition.js';
+import { WritingTasks } from '../../src/service/writing-tasks.js';
+import { buildWritingUnitMessage, buildWritingSynthesisMessage, writingContract, writingContractDigest, type WritingContractInput } from '../../src/service/writing/writing-contract.js';
 import type { CoverageManifestProjection } from '../../src/shared/protocol.js';
 
 // Source admission regression (#387): public sample1 plus an external temporary synthetic product
@@ -243,5 +245,50 @@ describe('exact sample1 fixture exemption source proof', () => {
       { role: 'user', content: message },
     ] }), BASELINE_PROMPT_CONTRACT_DIGEST);
     await expect(tool.verifySample1Capture(request, selection, candidate)).rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved' });
+  });
+
+  it.each(['unit', 'synthesis'] as const)('proves writing %s from the frozen writing row and refuses altered inputs or source records (#810)', async (stage) => {
+    const row = database.prepare("SELECT canonical_json FROM analysis_plan_records WHERE component='coverage-manifest'").get()!;
+    const manifest = JSON.parse(String(row.canonical_json)) as CoverageManifestProjection;
+    const blocks: ManifestBlockInput[] = [];
+    await parseDocx(resolve(root, 'SampleBooks/sample1.docx'), 'sample1.docx', (block) => blocks.push({ ...block, graphemes: block.graphemeLength }), { digest: sourceDigest, bytes: 29_550 });
+    const ids = manifest.units.flatMap((unit) => unit.blockIds);
+    const byId = new Map(blocks.map((block, index) => [ids[index]!, { ...block, blockId: ids[index]! }]));
+    const input: WritingContractInput = { type: { typeId: 'promotion-article', label: '宣传文章' },
+      book: { title: '合成图书', authors: [], editors: [], series: [] }, audience: '读者', channel: '纸面', requirements: null,
+      synopsis: null, evaluation: null, exemplars: [] };
+    const contract = writingContract(input);
+    const digest = writingContractDigest(contract);
+    const envelope = canonicalJson({ promptContractDigest: digest });
+    database.prepare("UPDATE analysis_plan_records SET canonical_json=?,sha256=? WHERE component='plan-envelope'").run(envelope, sha256Hex(envelope));
+    const revisionId = randomUUID();
+    const revision = canonicalJson({ revisionId, coverageManifestDigest: manifest.digest, adapterPin: { model: selection.model, route: selection.captured.route }, bindingPin: { promptContractDigest: digest } });
+    database.prepare('UPDATE analysis_result_set_revisions SET canonical_json=?,sha256=?').run(revision, sha256Hex(revision));
+    database.exec('CREATE TABLE writing_tasks (task_intent_id TEXT, prompt_contract_sha256 TEXT, book_id TEXT, type_id TEXT, evaluation_record_id TEXT, baseline_revision_id TEXT, recorded_at TEXT, canonical_json TEXT, sha256 TEXT); CREATE TABLE analysis_task_intents (task_intent_id TEXT, book_id TEXT, kind TEXT); CREATE TABLE analysis_unit_results (revision_id TEXT, unit_ordinal INTEGER, state TEXT, canonical_json TEXT, sha256 TEXT)');
+    database.prepare('INSERT INTO analysis_task_intents VALUES (?,?,?)').run(request.sample1Task, manifest.manuscript.bookId, 'writing');
+    new WritingTasks(database).recordTask({ taskIntentId: request.sample1Task, bookId: manifest.manuscript.bookId,
+      evaluationRecordId: null, baselineRevisionId: null, exemplarSources: [], contract: input, promptContractSha256: digest, copyRules: 2 });
+    const closed = manifest.units.map((unit) => ({ unitOrdinal: unit.ordinal, result: { schema: 'ai7.writing.unit-result/1' as const, unitOrdinal: unit.ordinal,
+      passages: [{ kind: 'highlight' as const, note: '合成看点。', blockOrdinals: [1] }] } }));
+    for (const unit of closed) {
+      const json = canonicalJson({ state: 'closed', unitOrdinal: unit.unitOrdinal, passages: unit.result.passages });
+      database.prepare('INSERT INTO analysis_unit_results VALUES (?,?,?,?,?)').run(revisionId, unit.unitOrdinal, 'closed', json, sha256Hex(json));
+    }
+    const writingMessage = stage === 'unit' ? buildWritingUnitMessage(contract, manifest.units[0]!, manifest.units.length, byId)
+      : buildWritingSynthesisMessage(contract, closed, manifest.units.length);
+    const candidate = tool.parseCachedRequest(JSON.stringify({ messages: [{ role: 'system', content: contract.systemPrompt }, { role: 'user', content: writingMessage }] }), digest);
+    // The writing synthesis turn's stage contract is the Task's own, as the execution owner records it.
+    const writingSelection = { ...selection, taskPromptContractDigest: digest, promptContractDigest: digest };
+    expect(await tool.verifySample1Capture(request, writingSelection, candidate)).toBe(true);
+    if (stage === 'synthesis') {
+      database.exec("UPDATE analysis_unit_results SET sha256='damaged'");
+      await expect(tool.verifySample1Capture(request, writingSelection, candidate)).rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved' });
+    } else {
+      const row = database.prepare('SELECT canonical_json FROM writing_tasks').get()!;
+      const record = JSON.parse(String(row.canonical_json)) as { input: WritingContractInput };
+      const json = canonicalJson({ ...record, input: { ...record.input, audience: '另一受众' } });
+      database.prepare('UPDATE writing_tasks SET canonical_json=?,sha256=?').run(json, sha256Hex(json));
+      await expect(tool.verifySample1Capture(request, writingSelection, candidate)).rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved' });
+    }
   });
 });

@@ -349,6 +349,10 @@ async function loadSample1Owners() {
         "export { readersReportKindDefinition } from './src/service/evaluation/readers-report-kind.ts';",
         "export { evaluationRewriteKindDefinition } from './src/service/evaluation/evaluation-rewrite-kind.ts';",
         "export { BUILTIN_EVALUATION_PROFILE, evaluationProfileDigest } from './src/service/evaluation-records.ts';",
+        // #810: the writing Task's own owners, read back from its frozen row.
+        "export { writingKindDefinition } from './src/service/writing/writing-kind.ts';",
+        "export { writingContract, writingContractDigest } from './src/service/writing/writing-contract.ts';",
+        "export { WritingTasks } from './src/service/writing-tasks.ts';",
         "export { buildRunReportReflectionMessage } from './src/service/analysis/run-report-contract.ts';",
         "export { runReportAccountingOf } from './src/service/analysis/run-report.ts';",
       ].join('\n'), resolveDir: TOOL_ROOT, loader: 'ts' },
@@ -401,7 +405,20 @@ export async function verifySample1Capture(request, selection, parsed) {
       ? undefined : database.prepare('SELECT kind FROM analysis_task_intents WHERE task_intent_id = ?').get(request.sample1Task)?.kind;
     const evaluation = typeof kind === 'string' && Object.hasOwn(EVALUATION_TASK_TABLES, kind)
       ? { table: EVALUATION_TASK_TABLES[kind], subject: EVALUATION_UNIT_SUBJECTS[kind] } : null;
-    if (contract === undefined && evaluation !== null) {
+    let writingTask;
+    if (contract === undefined && kind === 'writing') {
+      // #810: a writing contract is the exact input its Task froze, its 范例 rebuilt from their pinned delivered revisions — never
+      // today's metadata or words. A plan listing 资料库 material, or a Task carrying house people, proves nothing.
+      const snapshot = checked(database.prepare('SELECT canonical_json, sha256 FROM writing_tasks WHERE task_intent_id = ? AND prompt_contract_sha256 = ?')
+        .get(request.sample1Task, selection.taskPromptContractDigest));
+      if (snapshot.taskIntentId !== request.sample1Task || snapshot.materialSources !== undefined || snapshot.input.materials !== undefined) fail();
+      writingTask = new owners.WritingTasks(database).task(request.sample1Task, selection.taskPromptContractDigest);
+      if (writingTask === null || !writingTask.exemplarsReadable || writingTask.materials.length !== 0 ||
+          writingTask.bookId !== manifest.manuscript.bookId || writingTask.input.book.editors.length !== 0) fail();
+      const prompt = owners.writingContract(writingTask.input, writingTask.copyRules);
+      contract = { prompt, digest: owners.writingContractDigest(prompt) };
+      definition = owners.writingKindDefinition(writingTask.input, writingTask.copyRules);
+    } else if (contract === undefined && evaluation !== null) {
       // #429: an evaluation contract is the exact input its Task froze — the house profile it was prepared under, or the 定稿
       // record or saved entry with its exemplars — never today's profile or record. A plan listing 资料库 material proves nothing.
       if (plan('execution-plan').materialReferences !== undefined) fail();
@@ -461,11 +478,11 @@ export async function verifySample1Capture(request, selection, parsed) {
     step = 'message';
     let expected;
     if (parsed.subject === 'unit' || parsed.subject === 'review-unit' ||
-        (evaluation !== null && parsed.subject === evaluation.subject)) {
+        (evaluation !== null && parsed.subject === evaluation.subject) || (writingTask !== undefined && parsed.subject === 'writing-unit')) {
       const unit = manifest.units[parsed.unitOrdinal - 1];
       if (unit === undefined) fail();
       expected = definition.buildUnitMessage(unit, manifest.units.length, byId);
-    } else if (parsed.subject === 'task-synthesis' && evaluation !== null) {
+    } else if (parsed.subject === 'task-synthesis' && (evaluation !== null || writingTask !== undefined)) {
       // The kind's book-level synthesis over the closed units the revision kept, read back by the kind's own record reader.
       const rows = database.prepare("SELECT canonical_json, sha256, unit_ordinal FROM analysis_unit_results WHERE revision_id = ? AND state = 'closed' ORDER BY unit_ordinal").all(revision.revisionId);
       const closed = rows.map((row) => {
