@@ -561,17 +561,15 @@ export class BaselineAnalysisExecutionOwner {
     }
   }
 
+  /**
+   * The material guard at admission (Issue #759): a start whose frozen 资料库 reference no longer reads as its plan pinned is
+   * blocked before dispatch with the material's own reason, and the refusal thrown; nothing of it was sent.
+   */
   #requireMaterials(runRecordId: string, ledger: BaselineAnalysisStore): void {
     const refusal = this.#deps.materialGuard?.(runRecordId, ledger);
     if (refusal == null) return;
-    const state = ledger.currentRunState(runRecordId);
-    const midRun = state === 'paused' || state === 'resumable' || state === 'awaiting-clarification';
-    ledger.recordRunState(runRecordId, midRun ? 'interrupted' : 'blocked-before-dispatch', {
-      detail: midRun ? materialInterruptionMessage(refusal) : refusal.message,
-      reasons: [refusal.message], cause: refusal.code,
-      ...(midRun ? { interruption: 'material-reference-changed' } : {}),
-    });
-    throw new ExecutionAdmissionError(refusal.code, midRun ? materialInterruptionMessage(refusal) : refusal.message);
+    ledger.recordRunState(runRecordId, 'blocked-before-dispatch', { detail: refusal.message, reasons: [refusal.message], cause: refusal.code });
+    throw new ExecutionAdmissionError(refusal.code, refusal.message);
   }
 
   /**
@@ -673,7 +671,10 @@ export class BaselineAnalysisExecutionOwner {
           ? '等待中的运行只有通过重新联网预检后才能进入调度。'
           : '只有刚记录授权的运行可以进入调度。');
     }
-    if (options.cancel !== true) this.#requireMaterials(runRecordId, ledger);
+    // A start not yet begun is refused here. A continuation — 续行, or a Run the editor answered — is asked by its execution
+    // before its first request instead, so a reference withdrawn meanwhile ends it 任务已中断 with its kept units formed into
+    // the partial revision, never one that drops them (Issue #759).
+    if (options.cancel !== true && !resuming) this.#requireMaterials(runRecordId, ledger);
     // 结果待确认 (Issue #51, S16c; ADR 0034, CONT-011, CONT-016): a Run stopped there never goes on — only its cancellation runs.
     if (resuming && options.cancel !== true && ledger.outcomeUnknownOf(runRecordId) !== null) {
       throw new ExecutionAdmissionError('EXECUTION_OUTCOME_UNKNOWN', OUTCOME_UNKNOWN_NO_RESUME);
@@ -1601,19 +1602,25 @@ export class BaselineAnalysisExecutionOwner {
        * first attempt's digests, and the retry's span names the record (Issue #286).
        */
       /**
+       * The material guard (Issue #759), asked with the current-read guard below and alone before each sampling turn and the
+       * reflection: a frozen 资料库 reference that no longer reads as the plan pinned stops the Run there, what it read kept.
+       */
+      const materialChanged = (): boolean => {
+        if (active.cancelRequested || liveInterruption !== null) return false;
+        materialRefusal = this.#deps.materialGuard?.(facts.runRecordId, ledger) ?? null;
+        if (materialRefusal === null) return false;
+        liveInterruption = 'material-reference-changed';
+        terminalClassification = 'interrupted';
+        return true;
+      };
+      /**
        * The current-read guard (Issue #64, S29b; SER-023, SER-028), asked before every further transmission of this Run — a range,
        * a retry, the reduction, the sample and the reflection: once an exclusion in force reaches what the plan froze, the Run
        * stops there as the scope changed. A cancellation, or a stop already decided, outranks it.
        */
       const scopeChanged = (): boolean => {
-        if (active.cancelRequested || liveInterruption !== null) return false;
-        materialRefusal = this.#deps.materialGuard?.(facts.runRecordId, ledger) ?? null;
-        if (materialRefusal !== null) {
-          liveInterruption = 'material-reference-changed';
-          terminalClassification = 'interrupted';
-          return true;
-        }
-        if (this.#deps.readGuard?.(facts.runRecordId) == null) return false;
+        if (materialChanged()) return true;
+        if (active.cancelRequested || liveInterruption !== null || this.#deps.readGuard?.(facts.runRecordId) == null) return false;
         liveInterruption = 'series-retrieval-scope-changed';
         terminalClassification = 'interrupted';
         return true;
@@ -2154,7 +2161,7 @@ export class BaselineAnalysisExecutionOwner {
         onAccountLimit: (condition) => {
           if (active.resumableOnInterrupt && live === null) accountLimit = { unitOrdinal: null, condition };
         },
-        scopeChanged,
+        materialChanged,
       });
       if (stopWithoutEnding()) return;
       // The second reducer pass: the sample joins the revision and re-labels the assurance axis, and
@@ -2190,7 +2197,7 @@ export class BaselineAnalysisExecutionOwner {
         liveInterruption = null;
       }
       // The reflection consumes the same frozen system prompt; check once more before recording the final outcome.
-      scopeChanged();
+      materialChanged();
       const interruptionKey = liveInterruption as LiveInterruption | null;
       const materialStop = materialRefusal as MaterialGuardRefusal | null;
       const interruption = interruptionKey === null ? null : interruptionKey === 'material-reference-changed' && materialStop !== null
@@ -2320,8 +2327,8 @@ export class BaselineAnalysisExecutionOwner {
         gapReasons.push(assuranceSamplingTurnGapReason(turn.unitOrdinal, '运行已按你的要求取消，本轮未派发。'));
         break;
       }
-      if (context.scopeChanged()) {
-        gapReasons.push(assuranceSamplingTurnGapReason(turn.unitOrdinal, '参考范围已变化，本轮未派发。'));
+      if (context.materialChanged()) {
+        gapReasons.push(assuranceSamplingTurnGapReason(turn.unitOrdinal, '参考资料已不可用，本轮未派发。'));
         break;
       }
       // The ceiling is evaluated before every dispatch exactly as before a unit's, so a Run that has
@@ -2640,7 +2647,8 @@ interface AssuranceSamplingContext {
   readonly onCeilingReached: () => void;
   /** The provider refused a sampling turn on the account's limit (Issue #51, S16b), in its own words. */
   readonly onAccountLimit: (condition: string) => void;
-  readonly scopeChanged: () => boolean;
+  /** The material guard (Issue #759), asked before each turn: a reference no longer readable as pinned sends no further turn. */
+  readonly materialChanged: () => boolean;
 }
 
 /** What two attempts of one unit cost together; `null` only when neither reported any usage at all. */
