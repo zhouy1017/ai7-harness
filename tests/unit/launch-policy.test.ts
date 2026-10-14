@@ -33,11 +33,11 @@ const EXPECTED_PINS = {
   'development-ci': ['v1', 'docs/policies/provider-processing-policy.v1.json', 'd9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a'],
   'fixture-recording': ['v2', 'docs/policies/provider-processing-policy.v2.json', 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc'],
   'ordinary-production': ['v6', 'docs/policies/provider-processing-policy.v6.json', '10e69a5d7b027d077728ec1bc7393dc0583b99a05246b4e883098b9d96b221a4'],
-  'developer-live': ['v11', 'docs/policies/provider-processing-policy.v11.json', '64178786e62473e043afd4c699380c5e71ee95e2d7c42c2630a697072c36ac14'],
+  'developer-live': ['v11', 'docs/policies/provider-processing-policy.v11.json', '38cc8044f10517bd3c152237256cd0cd7fe6cf8a4ef7ad340099a087ac8a8634'],
 } as const;
 /** ADR 0079 §3 decides External Export v2; active-set v9 pins its exact bytes, unchanged since v7. */
 const EXPECTED_EXTERNAL_PIN = ['v2', 'docs/policies/external-export-policy.v2.json', '162441cc3e5d30b0cafb00a0d04ca5ab32b64c5039baafc8952a9925bd7984b6'] as const;
-const ACTIVE_SET_SHA256 = 'c3c6069d9b476a311c424343a3321fe7efbcbbb116f878dc51bb2236662b7c10';
+const ACTIVE_SET_SHA256 = 'b13013bbd0b9b1cb0fdd7b88d0d349d9c010d3043e867c547a81f37ed3d5cb0b';
 
 const GO_BINDING = {
   route: 'opencode-go',
@@ -531,6 +531,18 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
 });
 
 describe('the four rules Provider Processing v11 adds (Issue #841)', () => {
+  it('admits matching Default Execution Rules only for writing quick start, with no background origin', async () => {
+    const rules = rulesOf(await readPolicy());
+    for (const index of [BASELINE, DIALOGUE, REVIEW, WRITING, EVALUATION, POLISH, CONFLICT]) {
+      const expected = index === WRITING;
+      expect((rules[index]!.authorityOrigin as Record<string, unknown>).matchingActiveDefaultExecutionRuleAllowed).toBe(expected);
+      await expect(v11PolicyWithBlock(index, 'authorityOrigin', { matchingActiveDefaultExecutionRuleAllowed: !expected }).then(verifyDeveloperLivePolicy))
+        .rejects.toThrow('LAUNCH_POLICY_INVALID');
+      await expect(v11PolicyWithBlock(index, 'authorityOrigin', { backgroundAnalysisEnrollmentAllowed: true }).then(verifyDeveloperLivePolicy))
+        .rejects.toThrow('LAUNCH_POLICY_INVALID');
+    }
+  });
+
   it('names each new rule\'s kinds, role, categories and book-level synthesis flag exactly', async () => {
     const reading = verifyDeveloperLivePolicy(await readPolicy());
     expect(reading.admittedRules.slice(3)).toEqual(V11_NEW_ADMITTED_RULES);

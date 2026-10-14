@@ -17,7 +17,7 @@ const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
 const CARRIER_VERSION = 2;
 export const ACTIVE_SET_VERSION = 'v9' as const;
 const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v9.json';
-const ACTIVE_SET_SHA256 = 'c3c6069d9b476a311c424343a3321fe7efbcbbb116f878dc51bb2236662b7c10';
+const ACTIVE_SET_SHA256 = 'b13013bbd0b9b1cb0fdd7b88d0d349d9c010d3043e867c547a81f37ed3d5cb0b';
 const PROVIDER_PINS = {
   'development-ci': {
     version: 'v1',
@@ -37,7 +37,7 @@ const PROVIDER_PINS = {
   'developer-live': {
     version: 'v11',
     canonicalPath: 'docs/policies/provider-processing-policy.v11.json',
-    sha256: '64178786e62473e043afd4c699380c5e71ee95e2d7c42c2630a697072c36ac14',
+    sha256: '38cc8044f10517bd3c152237256cd0cd7fe6cf8a4ef7ad340099a087ac8a8634',
   },
 } as const;
 /**
@@ -283,14 +283,15 @@ function verifyRuleCommon(rule: Record<string, unknown>): void {
 }
 
 /**
- * A planned Run's origin: a newly user-initiated Task under direct Run Authorization, never a rule, enrollment or schedule.
+ * A planned Run's origin: a newly user-initiated Task, authorized directly or, for writing quick start only, by its matching
+ * active Default Execution Rule. Enrollment and scheduled origins stay refused.
  * `assuranceAnchors` is whether the kind samples a result for assurance (baseline analysis and review do; writing and the
  * evaluation contracts declare no sample), which the rule's transmission bound must state either way.
  */
-function verifyPlannedRunOrigin(rule: Record<string, unknown>, assuranceAnchors = true): void {
+function verifyPlannedRunOrigin(rule: Record<string, unknown>, assuranceAnchors = true, defaultExecutionRuleAllowed = false): void {
   const origin = rule['authorityOrigin'];
   requirePolicy(isRecord(origin) && origin['newlyUserInitiatedTaskRequired'] === true &&
-    origin['directRunAuthorizationAllowed'] === true && origin['matchingActiveDefaultExecutionRuleAllowed'] === false &&
+    origin['directRunAuthorizationAllowed'] === true && origin['matchingActiveDefaultExecutionRuleAllowed'] === defaultExecutionRuleAllowed &&
     origin['backgroundAnalysisEnrollmentAllowed'] === false && origin['idleScheduledImportTriggeredOrCrossRunDispatchAllowed'] === false);
   const preconditions = rule['authorizationPreconditions'];
   requirePolicy(
@@ -334,8 +335,8 @@ interface DeveloperLiveRuleReading {
  * contracts (Provider Processing v11). The planned-Run origin and bound of baseline analysis, with the synthesis turn named,
  * no assurance sample, no reduction topic sections, and no Material References, Series Knowledge or editorial deliverables.
  */
-function verifySynthesisRule(rule: Record<string, unknown>): void {
-  verifyPlannedRunOrigin(rule, false);
+function verifySynthesisRule(rule: Record<string, unknown>, defaultExecutionRuleAllowed = false): void {
+  verifyPlannedRunOrigin(rule, false, defaultExecutionRuleAllowed);
   const source = rule['source'];
   requirePolicy(isRecord(source) && source['materialReferencesAllowed'] === false && source['materialReferenceConsumptionRecheckRequired'] === undefined &&
     source['seriesKnowledgeAllowed'] === false && source['editorialDeliverablesAllowed'] === false);
@@ -454,7 +455,7 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
     taskKinds: ['writing'],
     outboundDataCategories: ['public-or-synthetic', 'book-metadata-and-synopsis', 'house-exemplar-excerpt'],
     crossUnitSynthesisAllowed: true,
-    verify: verifySynthesisRule,
+    verify: (rule) => verifySynthesisRule(rule, true),
   },
   // The three implemented evaluation contracts (S81): AI7 初评 scores, 审稿意见 and 按我的评分重写评语, non-web.
   'developer-live-public-samplebook-evaluation': {

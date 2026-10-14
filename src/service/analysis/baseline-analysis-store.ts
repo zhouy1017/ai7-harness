@@ -1815,7 +1815,7 @@ export class BaselineAnalysisStore {
   /**
    * The facts a 默认执行规则 binds, as the Book's durable state reads now (Issue #421): the re-derivation Reconnect
    * Preflight compares a waiting Run's plan with, for an update of the whole Book. No rule is ever used under
-   * developer-live (Provider Processing v5 through v11: `matchingActiveDefaultExecutionRuleAllowed: false`), so this is
+   * developer-live baseline analysis (Provider Processing v5 through v11: `matchingActiveDefaultExecutionRuleAllowed: false`), so this is
    * read only outside it, where the ceiling depends on no unit count.
    */
   currentRuleFacts(bookId: string, mode: AnalysisTaskMode): MaterialPlanInputsProjection {

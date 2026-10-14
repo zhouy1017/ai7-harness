@@ -730,10 +730,11 @@
           "const": {
             "newlyUserInitiatedTaskRequired": true,
             "directRunAuthorizationAllowed": true,
-            "matchingActiveDefaultExecutionRuleAllowed": false,
+            "matchingActiveDefaultExecutionRuleAllowed": true,
             "backgroundAnalysisEnrollmentAllowed": false,
             "idleScheduledImportTriggeredOrCrossRunDispatchAllowed": false
-          }
+          },
+          "description": "Writing alone admits standard-direct and default-execution-rule origins: a newly user-initiated Task may use writing quick start under its matching active Default Execution Rule. Background enrollment, schedules, import triggers and cross-Run dispatch remain refused."
         },
         "executionMode": {
           "const": {

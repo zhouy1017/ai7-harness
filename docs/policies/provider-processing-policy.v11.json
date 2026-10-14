@@ -355,7 +355,7 @@
         "authorityOrigin": {
           "newlyUserInitiatedTaskRequired": true,
           "directRunAuthorizationAllowed": true,
-          "matchingActiveDefaultExecutionRuleAllowed": false,
+          "matchingActiveDefaultExecutionRuleAllowed": true,
           "backgroundAnalysisEnrollmentAllowed": false,
           "idleScheduledImportTriggeredOrCrossRunDispatchAllowed": false
         },
