@@ -275,3 +275,33 @@ describe('基于当前稿件重新生成建议 on the authored fixture', () => {
     expect(conflictOf(store, book, markId).draft).toBeNull();
   });
 });
+
+describe('the recorded Go captures, replayed through the real path (provider-free)', () => {
+  it('places the recorded polish suggestions and drafts the recorded regeneration, nothing applied', async () => {
+    const polishFixture = await loadModelFixture(FIXTURES, 'sample1-recorded-v41-polish');
+    expect([...polishFixture.entries.values()][0]!.capture).toMatchObject({ subject: 'editorial-polish', itemId: 'S30/editorial-polish/1', model: 'deepseek-v4.1-flash' });
+    const polishing = requests(polishFixture);
+    const { block } = typoBlock(store, book);
+    const polished = await settledPolish(polishing, polishing.requests.polish(book.bookId, { selection: polishSelectionOf(store, book) }));
+    expect(polished).toMatchObject({ state: 'suggested', withheld: [], outcomeUnknown: false });
+    expect(polished.markIds).toHaveLength(3);
+    for (const markId of polished.markIds) {
+      const card = store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId);
+      expect(card.source).toEqual({ kind: 'ai7', origin: 'task', label: '润色这段', taskId: polished.taskId });
+      expect(card.suggestion!.decision).toBeNull();
+    }
+    expect(typoBlock(store, book).block.digest).toBe(block.digest);
+    const regenerateFixture = await loadModelFixture(FIXTURES, 'sample1-recorded-v41-conflict-regenerate');
+    const { markId } = constructSample1Conflict(store, book);
+    const conflict = conflictOf(store, book, markId);
+    const unitIndex = conflictUnitIndex(conflict);
+    const regenerating = requests(regenerateFixture);
+    const regenerated = await settledRegeneration(regenerating, regenerating.requests.regenerate({
+      manuscriptId: book.manuscriptId, branchId: book.branchId, markId, basisDigest: conflict.basisDigest, unitIndex,
+    }));
+    expect(regenerated.outcome).toBe('drafted');
+    const recorded = JSON.parse(([...regenerateFixture.entries.values()][0]!.response as { text: string }).text) as { text: string };
+    expect(conflictOf(store, book, markId).draft!.resolutions[unitIndex]).toEqual({ resolution: 'edited', text: recorded.text });
+  });
+});
+
