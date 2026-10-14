@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { liveReviewKindAdmitted } from '../review/live-review-admission.js';
+import { liveKindAdmission } from './live-kind-admission.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   BASELINE_ANALYSIS_KIND,
@@ -3042,7 +3042,7 @@ export class BaselineAnalysisStore {
     }
     if (input.phase === 'advance') return this.#advance(input.workId);
     if (this.#launch.live !== null) {
-      requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND || liveReviewKindAdmitted(input.launchPolicy, this.#definition, this.#launch.live),
+      requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND || liveKindAdmission(input.launchPolicy, this.#definition, this.#launch.live) !== null,
         'ANALYSIS_KIND_NOT_ADMITTED', 'developer-live 当前只允许基线稿件分析；该任务种类尚未获准实时执行。');
       requireAnalysis(input.background == null,
         'ANALYSIS_ORIGIN_NOT_ADMITTED', 'developer-live 当前只允许直接发起的分析任务。');
@@ -3541,9 +3541,12 @@ export class BaselineAnalysisStore {
   ): { projection: AnalysisProjection; dispatchRunRecordId: string | null } {
     // The baseline rule of the selected Provider Processing admits one kind and one origin, each refused under its own code, as preparation refuses them.
     if (this.#launch.live !== null) {
-      requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND || liveReviewKindAdmitted(this.#launch.policy, this.#definition, this.#launch.live),
+      const admitted = this.#definition.kind === BASELINE_ANALYSIS_KIND ? null : liveKindAdmission(this.#launch.policy, this.#definition, this.#launch.live);
+      requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND || admitted !== null,
         'ANALYSIS_KIND_NOT_ADMITTED', 'developer-live 当前只允许基线稿件分析；该任务种类尚未获准实时执行。');
-      requireAnalysis(origin.kind === 'standard-direct',
+      // Every admitted kind starts by a direct authorization; writing's quick start also starts under its default execution
+      // rule (#810). Background enrollment stays refused live.
+      requireAnalysis(origin.kind === 'standard-direct' || (origin.kind === 'default-execution-rule' && admitted !== null && this.#definition.kind === WRITING_KIND),
         'ANALYSIS_ORIGIN_NOT_ADMITTED', 'developer-live 当前只允许直接授权的基线稿件分析。');
     }
     requireAnalysis(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest) &&

@@ -88,6 +88,7 @@ import {
 import type { CrossUnitOutcome } from './reducers.js';
 import { RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST } from './run-report-contract.js';
 import { ModelFixtureError, type ResolvedModelFixture } from '../provider/model-fixture.js';
+import type { ProviderTestItemSlice } from '../provider/provider-result-cache.js';
 
 /**
  * What one analysis kind is, as data the shared owners read.
@@ -235,6 +236,8 @@ export interface AnalysisKindDefinition {
     readonly basePromptContractDigest: string;
   };
   readonly kind: AnalysisKindId;
+  /** The Provider Test Ledger slice the kind's live validation items are numbered under; S40 when absent (#810 names S84). */
+  readonly liveItemSlice?: ProviderTestItemSlice;
   readonly contractVersion: string;
   readonly expectedOutcome: string;
   /** The goal text of the kind's initial mode: what `prepare` without an update request must carry. */

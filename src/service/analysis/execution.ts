@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { BASELINE_ANALYSIS_KIND } from '../../shared/protocol.js';
-import { liveReviewKindAdmitted } from '../review/live-review-admission.js';
+import { liveKindAdmission, liveKindContractCategories, type LiveKindRule } from './live-kind-admission.js';
 import type { AnalysisAssuranceSampleDispositionProjection, AnalysisGapProjection, AnalysisReusePlanUnitProjection, CoverageManifestProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection, ReviewScopePlanUnitProjection, RunAttemptState, RunReportStageId } from '../../shared/protocol.js';
 import { describeComposition, prepareExecution, type HarnessExecutionSpan, type HarnessSignal, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
@@ -571,8 +571,7 @@ export class BaselineAnalysisExecutionOwner {
    */
   #requireLaunchOf(ledger: BaselineAnalysisStore): DeveloperLiveRuntime | null {
     const live = this.#deps.developerLive ?? null;
-    if (live !== null && ledger.definition.kind !== BASELINE_ANALYSIS_KIND &&
-        (ledger.launch.live === null || !liveReviewKindAdmitted(ledger.launch.policy, ledger.definition, ledger.launch.live))) {
+    if (live !== null && ledger.definition.kind !== BASELINE_ANALYSIS_KIND && liveRuleOf(ledger) === null) {
       throw new ExecutionAdmissionError('EXECUTION_KIND_NOT_ADMITTED', 'developer-live 当前只允许基线稿件分析；该任务种类尚未获准实时执行。');
     }
     if (live === null && this.#deps.fixture === null) throw new ExecutionAdmissionError('EXECUTION_ROUTE_ABSENT', '没有可执行的本地确定性路由。');
@@ -1032,6 +1031,11 @@ export class BaselineAnalysisExecutionOwner {
       throw new ExecutionAdmissionError('EXECUTION_POLICY_INVALID', `当前可信策略不是 developer-live · Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION}。`);
     }
     const fixture = this.#deps.fixture;
+    // The one selected rule that admitted a non-baseline kind live (Issue #429): its Model Role, its outbound categories and
+    // whether the kind's own synthesis may be sent. `null` for the baseline, whose rule the policy-level terms read, and on
+    // the deterministic route.
+    const admitted = live === null || definition.kind === BASELINE_ANALYSIS_KIND ? null : liveRuleOf(ledger);
+    const modelRole = admitted === null ? 'Main Editorial Role' : admitted.modelRole as CredentialSlotBinding['modelRole'];
     // The route the plan froze, resolved once — the deterministic fixture, or the live route profile — and the
     // ceiling it carries, already resolved: an explicit launch total, or the policy's per-frozen-unit default
     // against this Run's own frozen unit count. Never re-derived at dispatch.
@@ -1125,7 +1129,7 @@ export class BaselineAnalysisExecutionOwner {
         liveAdapter.instance = new DeepSeekOpenAiCompatibleAdapter({
           broker: this.#broker,
           get slotBinding(): CredentialSlotBinding {
-            return { bindingDigest: bindingDigestForSlot, modelRole: 'Main Editorial Role', slot: credentialSlot, credentialReference };
+            return { bindingDigest: bindingDigestForSlot, modelRole, slot: credentialSlot, credentialReference };
           },
           tickets: { take: () => { const current = pendingTicket; pendingTicket = null; return current; } },
           attribution: () => ({}),
@@ -1141,7 +1145,9 @@ export class BaselineAnalysisExecutionOwner {
           transport: validation === null
             ? (url, init) => live.nativeFetch(url, init)
             : (url, init) => transmitOnce(cache!, live.nativeFetch, {
-              purpose: testItemPurpose, promptContractDigest: validationContractOf(), taskPromptContractDigest: promptContractDigest,
+              // S40 unless the kind names its own slice (S84 for writing, #810).
+              purpose: testItemPurpose, ...(definition.liveItemSlice === undefined ? {} : { slice: definition.liveItemSlice }),
+              promptContractDigest: validationContractOf(), taskPromptContractDigest: promptContractDigest,
             }, {
               intent: validation,
               step: `${testItemPurpose}/${active.validationStep}`,
@@ -1187,7 +1193,7 @@ export class BaselineAnalysisExecutionOwner {
       // Readiness only: the product path reaches the Protected Secret Store and releases no value.
       const credentialReadiness = await this.#broker.checkReadiness({
         bindingDigest,
-        modelRole: 'Main Editorial Role',
+        modelRole,
         slot: credentialSlot,
         credentialReference,
       });
@@ -1211,6 +1217,12 @@ export class BaselineAnalysisExecutionOwner {
         model,
         systemPrompt: definition.systemPrompt,
         outboundDataCategory: 'public-or-synthetic',
+        // The admitted rule's categories, and those the kind's contract carries beside the SampleBook (Issue #429): the gate
+        // sends an evaluation's editor-authored record or house exemplars only where the rule names them.
+        ...(admitted === null ? {} : {
+          ruleOutboundCategories: new Set(admitted.outboundDataCategories),
+          contractCategories: new Set(liveKindContractCategories(definition.kind)),
+        }),
         policy: live === null
           ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }
           : { operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
@@ -1997,12 +2009,12 @@ export class BaselineAnalysisExecutionOwner {
           : step.requestDigest(closedOutcomes);
         const gap = (code: Extract<CrossUnitOutcome, { state: 'gap' }>['code'], reason: string): CrossUnitOutcome =>
           ({ state: 'gap', code, reason, requestDigest });
-        if (live !== null && (step !== null || policy.providerProcessing.crossUnitReductionAllowed !== true)) {
+        if (live !== null && (step !== null ? admitted?.crossUnitSynthesisAllowed !== true : policy.providerProcessing.crossUnitReductionAllowed !== true)) {
           // The reduction is a transmission the active Provider Processing policy does not name, so it
           // never forms a request at all. The verified developer-live document names the baseline's reduction; a
           // projection that does not is exactly the policy-bounded case this guard exists for. Another
-          // kind's book-level step is a transmission no policy names yet (Issue #429 review): under a live
-          // scope it is never sent under the baseline's term, whatever that term reads.
+          // kind's book-level step is never sent under the baseline's term, whatever that term reads: only the rule that
+          // admitted the kind can name it (Issue #429, Provider Processing v11's synthesis term).
           crossUnit = gap('policy-bounded', named('跨单元归纳未派发：当前 Provider Processing 策略仅授权单元数内的传输'));
         } else if (ceilingState() === 'reached') {
           // The ceiling is evaluated before this dispatch exactly as before a unit's, so a Run that has
@@ -2373,6 +2385,16 @@ export class BaselineAnalysisExecutionOwner {
     const usage = sampled.turnsWithUsage === 0 ? null : { inputTokens: sampled.inputTokens, outputTokens: sampled.outputTokens };
     return assuranceSampleOutcome(draw, dispositions, usage, gapReasons);
   }
+}
+
+/**
+ * The rule that admits a ledger's non-baseline kind under its launch (Issue #429), or `null`: the shared admission, on a
+ * Model Role a credential slot can bind. A ledger bound to no live launch is admitted by none.
+ */
+function liveRuleOf(ledger: BaselineAnalysisStore): LiveKindRule | null {
+  if (ledger.launch.live === null) return null;
+  const rule = liveKindAdmission(ledger.launch.policy, ledger.definition, ledger.launch.live);
+  return rule !== null && (rule.modelRole === 'Main Editorial Role' || rule.modelRole === 'Fast Interaction Role') ? rule : null;
 }
 
 /** The route facts a Run's Execution Binding names, from its frozen plan and the launch the owner runs under. */
