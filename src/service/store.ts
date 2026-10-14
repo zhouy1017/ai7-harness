@@ -1,4 +1,4 @@
-import { TASK_MATERIALS_NONE, TASK_MATERIALS_STATEMENT, TASK_MATERIAL_LIVE_UNAVAILABLE, REVIEW_MATERIAL_CATEGORY_REQUIRED, taskMaterialReferenceLine, taskMaterialKindDefinition, taskMaterialSources, taskMaterialWords, taskMaterialRefusal, type TaskMaterialBoundary, type TaskMaterialReading, type TaskMaterialSource } from './task-material-references.js';
+import { TASK_MATERIALS_NONE, TASK_MATERIALS_STATEMENT, TASK_MATERIAL_LIVE_UNAVAILABLE, REVIEW_MATERIAL_CATEGORY_REQUIRED, taskMaterialReferenceLine, taskMaterialKindDefinition, taskMaterialSources, taskMaterialWords, taskMaterialRefusal, type MaterialGuardRefusal, type TaskMaterialBoundary, type TaskMaterialReading, type TaskMaterialSource } from './task-material-references.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
@@ -4306,6 +4306,7 @@ const WAITING_TASK_MOVED_LABELS: Readonly<Record<string, string>> = {
   WRITING_EXEMPLAR_MOVED: '范例',
   MATERIAL_INDEX_MOVED: '参考资料',
   MATERIAL_REFERENCE_UNAVAILABLE: '参考资料',
+  MATERIAL_INDEX_RECORD_INVALID: '参考资料',
 };
 const WAITING_TASK_MOVED_FALLBACK = '计划依据的内容';
 
@@ -5137,11 +5138,7 @@ export class EditorialStore {
           return texts;
         });
       } catch (error) {
-        if (error instanceof StoreError && (error.code === 'MATERIAL_INDEX_MOVED' || error.code === 'MATERIAL_REFERENCE_UNAVAILABLE')) {
-          return taskMaterialRefusal(source, error.code, surface);
-        }
-        // A corrupt index record degrades 评估 to that reference, named plainly (Issue #795); 审阅 keeps it propagating.
-        if (surface === '评估' && error instanceof StoreError && error.code === 'MATERIAL_INDEX_RECORD_INVALID') {
+        if (error instanceof StoreError && (error.code === 'MATERIAL_INDEX_MOVED' || error.code === 'MATERIAL_REFERENCE_UNAVAILABLE' || error.code === 'MATERIAL_INDEX_RECORD_INVALID')) {
           return taskMaterialRefusal(source, error.code, surface);
         }
         throw error;
@@ -16297,6 +16294,30 @@ export class EditorialStore {
       if (error instanceof ReviewRunError || error instanceof SeriesExclusionError) return '无法读取的书系检索排除记录';
       throw error;
     }
+  }
+
+  /** Verify the consuming ledger's frozen material boundary; no material paragraphs are paged or composed here. */
+  materialGuard(runRecordId: string, ledger: BaselineAnalysisStore): MaterialGuardRefusal | null {
+    this.#assertAvailable();
+    const intent = this.#authority.prepare('SELECT t.task_intent_id, t.book_id FROM analysis_run_records r JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id WHERE r.run_record_id = ?').get(runRecordId) as SqlRow | undefined;
+    requireStore(intent !== undefined, 'ANALYSIS_RUN_INVALID', '运行记录不存在。');
+    const boundary = ledger.definition.kind === 'writing'
+      ? this.#writingCall(() => this.#writingTasks.materialBoundary(asString(intent.task_intent_id), ledger.definition.promptContractDigest))
+      : { bookId: asString(intent.book_id), references: ledger.definition.materialReferences?.sources ?? [] };
+    for (const source of boundary.references) {
+      try {
+        this.#materialIndexCall(() => this.#materialIndex.verifyForTask(boundary, source.materialId,
+          (id, book) => this.#libraryMaterials.available(id, book)));
+      } catch (error) {
+        if (!(error instanceof StoreError) || !['MATERIAL_INDEX_MOVED', 'MATERIAL_REFERENCE_UNAVAILABLE', 'MATERIAL_INDEX_RECORD_INVALID', 'MATERIAL_INDEX_NO_TEXT', 'LIBRARY_MATERIAL_NOT_FOUND'].includes(error.code)) throw error;
+        const code = error.code === 'MATERIAL_INDEX_NO_TEXT' ? 'MATERIAL_INDEX_RECORD_INVALID'
+          : error.code === 'LIBRARY_MATERIAL_NOT_FOUND' ? 'MATERIAL_INDEX_MOVED' : error.code;
+        const reading = taskMaterialRefusal(source, code, ledger.definition.kind === 'writing' ? '写作'
+          : ledger.definition.kind === 'evaluation' || ledger.definition.kind === 'readers-report' ? '评估' : '审阅');
+        return { code, materialTitle: source.title, message: reading.refusal!.message };
+      }
+    }
+    return null;
   }
 
   /**

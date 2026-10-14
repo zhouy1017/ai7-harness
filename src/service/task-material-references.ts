@@ -19,6 +19,18 @@ export interface TaskMaterialBoundary {
   readonly references: ReadonlyArray<TaskMaterialSource>;
 }
 
+export interface MaterialGuardRefusal {
+  readonly code: string;
+  readonly materialTitle: string;
+  readonly message: string;
+}
+
+export function materialInterruptionMessage(refusal: MaterialGuardRefusal): string {
+  const why = refusal.code === 'MATERIAL_INDEX_MOVED' ? '的索引版本已不在本机'
+    : refusal.code === 'MATERIAL_INDEX_RECORD_INVALID' ? '的索引记录已损坏' : '已撤回允许参考';
+  return `资料《${refusal.materialTitle}》在任务运行中${why}，任务已中断；已完成的单元保留。`;
+}
+
 export type TaskMaterialReading =
   | { readonly source: TaskMaterialSource; readonly paragraphs: ReadonlyArray<string>; readonly refusal: null }
   | { readonly source: TaskMaterialSource; readonly paragraphs: null; readonly refusal: { readonly code: string; readonly message: string } };
@@ -55,12 +67,13 @@ export function taskMaterialWords(source: TaskMaterialSource, paragraphs: Readon
   return { source, paragraphs: normalized, refusal: null };
 }
 
-export function taskMaterialRefusal(source: TaskMaterialSource, code: string, surface: '审阅' | '评估' = '审阅'): TaskMaterialReading {
+export function taskMaterialRefusal(source: TaskMaterialSource, code: string, surface: '审阅' | '评估' | '写作' = '审阅'): TaskMaterialReading {
   requireAnalysis(code === 'MATERIAL_INDEX_MOVED' || code === 'MATERIAL_REFERENCE_UNAVAILABLE' || code === 'MATERIAL_INDEX_RECORD_INVALID',
     'TASK_MATERIAL_RECORD_INVALID', '任务参考资料记录无法核对。');
   const why = code === 'MATERIAL_INDEX_MOVED' ? '计划冻结的索引版本已不在本机'
     : code === 'MATERIAL_INDEX_RECORD_INVALID' ? '的索引记录已损坏' : '现在不能列进这本书任务的「允许参考」';
-  return { source, paragraphs: null, refusal: { code, message: `资料《${source.title}》${why}，这份计划不能再开始；可以在「${surface}」重新准备计划。` } };
+  const next = surface === '写作' ? '可以用「新建文档…」重新准备。' : `可以在「${surface}」重新准备计划。`;
+  return { source, paragraphs: null, refusal: { code, message: `资料《${source.title}》${why}，这份计划不能再开始；${next}` } };
 }
 
 export function taskMaterialReferenceLine(material: Pick<TaskMaterialReading, 'source' | 'refusal'>): string {

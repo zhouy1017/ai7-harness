@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
+import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { MATERIAL_INDEX_TRIGGER_SQL } from '../../src/service/material-index.js';
 import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
@@ -28,11 +29,13 @@ let entries: Map<string, ModelFixtureEntry>;
 let fixture: ResolvedModelFixture;
 let bookId: string;
 let opened = false;
+let unitBoundary: ((settled: number) => void | Promise<void>) | null = null;
 async function open(): Promise<void> {
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false,
     induceReimportProofTamper: false, induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false,
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage } });
-  owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, capacity: 1, secretResolver: { resolve: async () => null },
+    materialGuard: (id, ledger) => store.materialGuard(id, ledger), unitHold: async (settled) => { await unitBoundary?.(settled); } });
   opened = true;
 }
 async function close(): Promise<void> {
@@ -54,7 +57,7 @@ beforeEach(async () => {
   await pinEditorialWorkspaceProfileRevision2(store, bookId);
   recordMissingCredentialConnection(store, '参考测试连接');
 });
-afterEach(async () => { await close(); await roots.dispose(); });
+afterEach(async () => { unitBoundary = null; await close(); await roots.dispose(); });
 
 async function material(text = TEXT, scope: 'book' | 'house' = 'book', choice: 'book' | 'house' | 'deferred' = 'book'): Promise<string> {
   const path = join(roots.inputRoot, `${randomUUID()}.txt`);
@@ -115,7 +118,7 @@ function prepare(kind: Kind, ids: ReadonlyArray<string> = []): InitialEvaluation
 function component(taskId: string, name = 'execution-plan'): Record<string, unknown> {
   return database((db) => JSON.parse(String(db.prepare('SELECT canonical_json FROM analysis_plan_records WHERE task_intent_id = ? AND component = ? ORDER BY plan_version DESC LIMIT 1').get(taskId, name)!.canonical_json)));
 }
-function pins(taskId: string): TaskMaterialSource[] { return component(taskId).materialReferences as TaskMaterialSource[]; }
+function pins(taskId: string): TaskMaterialSource[] { return (component(taskId).materialReferences as TaskMaterialSource[] | undefined) ?? []; }
 function ledger(kind: Kind) {
   if (kind === 'initial-evaluation') return store.initialEvaluationLedgerForBook(bookId);
   const current = store.inspectReadersReport(bookId)!;
@@ -155,6 +158,87 @@ function answer(kind: Kind, prepared: InitialEvaluationProjection | ReadersRepor
 
 describe.each(['initial-evaluation', 'readers-report'] as const)('评估 reference boundaries (%s)', (kind) => {
   beforeEach(() => { if (kind === 'readers-report') finalize(); });
+  it('re-checks a queued ledger when a place becomes free after withdrawal', async () => {
+    const targetBook = bookId;
+    const firstBook = await importSample1Book(store, roots.codeRoot, '合成排队占位图书');
+    await pinEditorialWorkspaceProfileRevision2(store, firstBook.bookId);
+    bookId = firstBook.bookId;
+    if (kind === 'readers-report') finalize();
+    const first = prepare(kind);
+    answer(kind, first);
+    const firstAccepted = authorize(kind, first);
+    bookId = targetBook;
+    let release!: () => void;
+    let reached!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const boundary = new Promise<void>((resolve) => { reached = resolve; });
+    let holding = true;
+    unitBoundary = async () => { if (holding) { holding = false; reached(); await held; } };
+    owner.admitOrQueue(firstAccepted.dispatchRunRecordId!, firstAccepted.ledger);
+    await boundary;
+    try {
+      const id = await material();
+      const prepared = prepare(kind, [id]);
+      answer(kind, prepared);
+      const accepted = authorize(kind, prepared);
+      expect(owner.admitOrQueue(accepted.dispatchRunRecordId!, accepted.ledger)).toBe('queued');
+      store.decideLibraryMaterial({ materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+      release();
+      await owner.whenIdle();
+      expect(accepted.ledger.currentRunState(accepted.dispatchRunRecordId!)).toBe('blocked-before-dispatch');
+      const last = database((db) => JSON.parse(String(db.prepare('SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? ORDER BY rowid DESC LIMIT 1').get(accepted.dispatchRunRecordId!)!.canonical_json)));
+      expect(last.detail).toContain('资料《合成背景资料》');
+      expect(accepted.ledger.unitCheckpoints(accepted.dispatchRunRecordId!)).toHaveLength(0);
+    } finally { release(); }
+  });
+  it.each(['withdrawn', 'missing', 'corrupt', 'drift'] as const)('blocks a cached authorized ledger when its material is %s', async (change) => {
+    const id = await material();
+    const prepared = prepare(kind, [id]);
+    answer(kind, prepared);
+    const accepted = authorize(kind, prepared);
+    if (change === 'withdrawn') store.decideLibraryMaterial({ materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+    else if (change === 'corrupt') breakIndex(id, 'segments');
+    else if (change === 'missing') removeBuild(id);
+    else {
+      // A replacement has a different build digest; the cached ledger must still verify its exact original pin.
+      database((db) => {
+        for (const name of Object.keys(MATERIAL_INDEX_TRIGGER_SQL)) db.exec(`DROP TRIGGER ${name}`);
+        const row = db.prepare('SELECT index_id, canonical_json FROM material_index_builds WHERE material_id = ?').get(id)!;
+        const record = canonicalRecord({ ...JSON.parse(String(row.canonical_json)), recordedAt: '2026-10-14T01:00:00.000Z' });
+        db.prepare('UPDATE material_index_builds SET canonical_json = ?, sha256 = ? WHERE index_id = ?').run(record.json, record.digest, String(row.index_id));
+        for (const sql of Object.values(MATERIAL_INDEX_TRIGGER_SQL)) db.exec(sql);
+      }, true);
+    }
+    const code = change === 'withdrawn' ? 'MATERIAL_REFERENCE_UNAVAILABLE' : change === 'corrupt' ? 'MATERIAL_INDEX_RECORD_INVALID' : 'MATERIAL_INDEX_MOVED';
+    expect(() => owner.admitAndDispatch(accepted.dispatchRunRecordId!, accepted.ledger)).toThrowError(expect.objectContaining({ code }));
+    expect(accepted.ledger.currentRunState(accepted.dispatchRunRecordId!)).toBe('blocked-before-dispatch');
+    expect(accepted.ledger.unitCheckpoints(accepted.dispatchRunRecordId!)).toHaveLength(0);
+  });
+
+  it.each(['between-units', 'before-synthesis'] as const)('interrupts with completed units kept when withdrawn %s', async (when) => {
+    const id = await material();
+    const prepared = prepare(kind, [id]);
+    answer(kind, prepared);
+    const accepted = authorize(kind, prepared);
+    const total = prepared.coverageManifest!.units.length;
+    expect(total).toBeGreaterThan(1);
+    let withdrawn = false;
+    unitBoundary = (settled) => {
+      if (!withdrawn && (when === 'between-units' ? settled === 0 : settled === total - 1)) {
+        withdrawn = true;
+        store.decideLibraryMaterial({ materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+      }
+    };
+    owner.admitAndDispatch(accepted.dispatchRunRecordId!, accepted.ledger);
+    await owner.whenIdle();
+    const projection = kind === 'initial-evaluation' ? store.inspectInitialEvaluation(bookId) : store.inspectReadersReport(bookId)!;
+    expect(projection.run!.state).toBe('interrupted');
+    const state = database((db) => JSON.parse(String(db.prepare('SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? ORDER BY rowid DESC LIMIT 1').get(accepted.dispatchRunRecordId!)!.canonical_json)));
+    expect(state.detail).toContain('资料《合成背景资料》在任务运行中已撤回允许参考');
+    expect(state.detail).toContain('已完成的单元保留');
+    expect(state.cause).toBe('MATERIAL_REFERENCE_UNAVAILABLE');
+    expect(projection.resultSetRevision!.coverage.unitsClosed).toBe(when === 'between-units' ? 1 : total);
+  });
   it('pins selected items without text, discloses them separately, survives restart and preserves old pins after re-preparation', async () => {
     const firstId = await material();
     const secondId = await material('另一份合成背景资料。');

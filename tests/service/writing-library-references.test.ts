@@ -105,7 +105,7 @@ async function withSession(fixture: ResolvedModelFixture, body: (session: Sessio
     interruptAfterAbandonObjectRemoval: false,
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
   });
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null }, materialGuard: (id, ledger) => store.materialGuard(id, ledger) });
   try {
     await body({ store, owner });
     store.markCleanShutdown();
@@ -231,18 +231,20 @@ const ONLINE = (): { credentialReadiness: () => Promise<null>; connectivity: Tas
 describe('写作任务 lists 资料库 items under 允许参考 and reads them through the Material Index', () => {
   it('shows no pre-start refusal after authorization when an item becomes unavailable', async () => {
     const { fixture } = await memoryFixture();
-    await withSession(fixture, async ({ store }) => {
+    await withSession(fixture, async ({ store, owner }) => {
       const bookId = await sample1Book(store, WRITING_BOOK_TITLE);
       const listed = await put(store, '参考资料甲.txt', LISTED_TEXT, '参考资料甲');
       decide(store, listed.materialId, { scope: 'book', bookId }, 'book');
       store.startMaterialIndexing();
       await store.settleMaterialIndexing();
       const prepared = prepare(store, bookId, { ...WRITING_REQUEST, materialIds: [listed.materialId] });
-      store.authorizeWriting(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+      const accepted = store.authorizeWriting(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
       store.decideLibraryMaterial({ materialId: listed.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
       expect(store.inspectWriting(bookId)!.authorization).not.toBeNull();
       expect(store.inspectWritingTask(bookId).task!.refusal).toBeNull();
       expect(store.inspectTaskPlan({ bookId, kind: 'writing', ref: prepared.taskIntent!.taskIntentId }).state.label).not.toBe(WRITING_MATERIAL_UNAVAILABLE_LABEL);
+      expect(() => owner.admitAndDispatch(accepted.dispatchRunRecordId!, accepted.ledger)).toThrowError(expect.objectContaining({ code: 'MATERIAL_REFERENCE_UNAVAILABLE' }));
+      expect(accepted.ledger.currentRunState(accepted.dispatchRunRecordId!)).toBe('blocked-before-dispatch');
     });
   }, 300_000);
 
@@ -260,14 +262,19 @@ describe('写作任务 lists 资料库 items under 允许参考 and reads them t
       const prepared = prepare(store, bookId, { ...WRITING_REQUEST, materialIds: [listed.materialId] });
       withDatabase((database) => {
         const ledger = new WritingTasks(database, () => ({ refusal: { code, message: '资料的记录已损坏。' } }));
-        expect(() => ledger.task(prepared.taskIntent!.taskIntentId)).toThrowError(expect.objectContaining({ code }));
+        if (code === 'MATERIAL_INDEX_RECORD_INVALID') expect(ledger.task(prepared.taskIntent!.taskIntentId)!.materials[0]!.refusal?.code).toBe(code);
+        else expect(() => ledger.task(prepared.taskIntent!.taskIntentId)).toThrowError(expect.objectContaining({ code }));
       });
       withDatabase((database) => {
         database.exec(`DROP TRIGGER ${table}_no_update`);
         database.exec(`UPDATE ${table} SET canonical_json = '{}'`);
         database.exec(triggers[`${table}_no_update`]!);
       }, false);
-      expect(() => store.inspectTaskPlan({ bookId, kind: 'writing', ref: prepared.taskIntent!.taskIntentId }))
+      if (code === 'MATERIAL_INDEX_RECORD_INVALID') {
+        const blocked = store.inspectTaskPlan({ bookId, kind: 'writing', ref: prepared.taskIntent!.taskIntentId });
+        expect(blocked.start.readiness).toBe('unavailable');
+        expect(blocked.scope.reference.join(' ')).toContain('索引记录已损坏');
+      } else expect(() => store.inspectTaskPlan({ bookId, kind: 'writing', ref: prepared.taskIntent!.taskIntentId }))
         .toThrowError(expect.objectContaining({ code, message: expect.stringContaining('已损坏') }));
     });
   }, 300_000);
