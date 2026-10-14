@@ -9,12 +9,12 @@ import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-poli
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryContractInput } from '../../src/service/review/category-configuration.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { liveReviewKindAdmitted } from '../../src/service/review/live-review-admission.js';
-import { V11_EVALUATION_RULE_ID, withV11EvaluationRule } from '../support/policy-v11-stand-in.js';
+import { withRepeatedRuleFor, withRuleFor, withoutRuleFor } from '../support/policy-rules.js';
 
-// #429: the generic admission every live non-baseline kind passes. The real selected projection, with the v11 evaluation
-// rule added by the test stand-in until the wave carries Provider Processing v11; no transport, credential or manuscript.
+// #429: the generic admission every live non-baseline kind passes, over the real selected Provider Processing v11 projection
+// and in-memory variants of it; no transport, credential or manuscript.
 const selected = await resolveSourceCheckoutLaunchPolicy(fileURLToPath(new URL('../../', import.meta.url)), 'developer-live');
-const policy = withV11EvaluationRule(selected);
+const policy = selected;
 const binding = selected.providerProcessing.admittedRules.find((rule) => rule.taskKinds.includes(BASELINE_ANALYSIS_KIND))!;
 const initial = initialEvaluationKindDefinition({ ...BUILTIN_EVALUATION_PROFILE, sha256: evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE) });
 const report = readersReportKindDefinition({ template: 'author', record: { profile: { title: '合成方案', version: '1' },
@@ -25,32 +25,32 @@ const report = readersReportKindDefinition({ template: 'author', record: { profi
 describe('live kind admission (#429)', () => {
   it('admits an evaluation contract under its one rule, returning the rule facts the execution owner reads', () => {
     expect(liveKindAdmission(policy, initial, binding)).toEqual({
-      ruleId: V11_EVALUATION_RULE_ID,
+      ruleId: 'developer-live-public-samplebook-evaluation',
       modelRole: 'Main Editorial Role',
       outboundDataCategories: ['public-or-synthetic', 'editor-authored-evaluation-text', 'house-exemplar-excerpt'],
       crossUnitSynthesisAllowed: true,
     });
-    expect(liveKindAdmission(policy, report, binding)?.ruleId).toBe(V11_EVALUATION_RULE_ID);
+    expect(liveKindAdmission(policy, report, binding)?.ruleId).toBe('developer-live-public-samplebook-evaluation');
     // A rule that does not name the synthesis term admits the kind's units but never its synthesis.
-    const silent = withV11EvaluationRule(selected, { crossUnitSynthesisAllowed: undefined as unknown as boolean });
+    const silent = withRuleFor(selected, 'evaluation', { crossUnitSynthesisAllowed: false });
     expect(liveKindAdmission(silent, initial, binding)?.crossUnitSynthesisAllowed).toBe(false);
   });
 
   it('refuses under the wave-1 projection, a missing category, an ambiguous rule, another binding or a wrapped contract', () => {
-    expect(liveKindAdmission(selected, initial, binding)).toBeNull();
+    expect(liveKindAdmission(withoutRuleFor(selected, 'evaluation'), initial, binding)).toBeNull();
     expect(liveKindAdmission(undefined, initial, binding)).toBeNull();
     expect(liveKindAdmission({ ...policy, operationalScope: 'development-ci' }, initial, binding)).toBeNull();
     expect(liveKindAdmission({ ...policy, integrityState: 'denied' }, initial, binding)).toBeNull();
     // The report carries the editor's record and house exemplars: a rule without them admits it nowhere.
-    expect(liveKindAdmission(withV11EvaluationRule(selected, { outboundDataCategories: ['public-or-synthetic', 'editor-authored-evaluation-text'] }), report, binding)).toBeNull();
-    expect(liveKindAdmission(withV11EvaluationRule(withV11EvaluationRule(selected)), initial, binding)).toBeNull();
+    expect(liveKindAdmission(withRuleFor(selected, 'evaluation', { outboundDataCategories: ['public-or-synthetic', 'editor-authored-evaluation-text'] }), report, binding)).toBeNull();
+    expect(liveKindAdmission(withRepeatedRuleFor(selected, 'evaluation'), initial, binding)).toBeNull();
     expect(liveKindAdmission(policy, initial, { ...binding, model: 'another-model' })).toBeNull();
     expect(liveKindAdmission(policy, initial, { ...binding, endpoint: 'https://other.example.test/' })).toBeNull();
     expect(liveKindAdmission(policy, { ...initial, materialReferences: {} }, binding)).toBeNull();
     expect(liveKindAdmitted(policy, 'evaluation', initial, binding, { promptContractDigest: 'a'.repeat(64), payloadCategories: ['public-or-synthetic'] })).toBeNull();
     expect(liveKindAdmitted(policy, 'evaluation', initial, binding, { promptContractDigest: null, payloadCategories: ['public-or-synthetic'] })).toBeNull();
     // A kind with no row (the baseline is admitted by the policy-level terms, writing by #810) is never admitted here.
-    expect(liveKindAdmission(withV11EvaluationRule(selected, { taskKinds: ['writing'] }), { ...initial, kind: 'writing' }, binding)).toBeNull();
+    expect(liveKindAdmission(selected, { ...initial, kind: 'writing' }, binding)).toBeNull();
   });
 
   it('keeps review admission exactly as #809 admitted it', () => {

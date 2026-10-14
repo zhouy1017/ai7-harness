@@ -7,7 +7,7 @@ import { EditorialStore } from '../../src/service/store.js';
 import { writingKindDefinition } from '../../src/service/writing/writing-kind.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
 import type { LaunchPolicyProjection } from '../../src/shared/protocol.js';
-import { V11_WRITING_RULE, withV11EvaluationRule } from '../support/policy-v11-stand-in.js';
+import { withoutRuleFor } from '../support/policy-rules.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
@@ -76,8 +76,7 @@ describe('default execution rule facts under developer-live (#810)', () => {
     const ledger = new BaselineAnalysisStore(database, {} as never, null, writing);
     // Provider-free: the reading it always had, with no unit-count ceiling.
     expect(ledger.currentRuleFacts(bookId, 'writing-first').runBudgetCeiling).toBe('unset');
-    const withWriting = withV11EvaluationRule(selected, V11_WRITING_RULE);
-    ledger.bindLaunch(live(withWriting));
+    ledger.bindLaunch(live(selected));
     const facts = ledger.currentRuleFacts(bookId, 'writing-first');
     expect(facts.providerBinding).toMatchObject({ providerId: DEVELOPER_LIVE_POLICY_BINDING.route, modelId: DEVELOPER_LIVE_POLICY_BINDING.model });
     // Exact sample1 freezes eight units: the per-frozen-unit default over them.
@@ -85,13 +84,12 @@ describe('default execution rule facts under developer-live (#810)', () => {
   });
 
   it('refuses every other kind live, and writing under a policy that names no writing rule', () => {
-    const withWriting = withV11EvaluationRule(selected, V11_WRITING_RULE);
     const baseline = new BaselineAnalysisStore(database, {} as never, null);
     expect(baseline.currentRuleFacts(bookId, 'first-baseline').runBudgetCeiling).toBe('unset');
-    baseline.bindLaunch(live(withWriting));
+    baseline.bindLaunch(live(selected));
     expect(refusedCode(() => baseline.currentRuleFacts(bookId, 'first-baseline'))).toBe('ANALYSIS_RULE_FACTS_INVALID');
     const ledger = new BaselineAnalysisStore(database, {} as never, null, writing);
-    ledger.bindLaunch(live(selected));
+    ledger.bindLaunch(live(withoutRuleFor(selected, 'writing')));
     expect(refusedCode(() => ledger.currentRuleFacts(bookId, 'writing-first'))).toBe('ANALYSIS_RULE_FACTS_INVALID');
   });
 });

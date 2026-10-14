@@ -30,12 +30,13 @@ let entries: Map<string, ModelFixtureEntry>;
 let fixture: ResolvedModelFixture;
 let bookId: string;
 let opened = false;
+let unitBoundary: (() => void) | null = null;
 
 async function open(): Promise<void> {
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false, induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false, baselineAnalysisRoute: {
     fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage,
   } });
-  owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null }, materialGuard: (id, ledger) => store.materialGuard(id, ledger), unitHold: async () => { unitBoundary?.(); } });
   driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
   opened = true;
 }
@@ -125,6 +126,23 @@ function answerEveryUnit(run: ReviewRunProjection, id: string): void {
 }
 
 describe('review categories reference exact local library versions', () => {
+  it('interrupts review consumption after withdrawal and keeps the completed unit', async () => {
+    const id = await material();
+    const run = prepare([id]);
+    answerEveryUnit(run, id);
+    store.authorizeReviewRun(bookId, run.reviewRunId, approvals(run));
+    unitBoundary = () => {
+      unitBoundary = null;
+      store.decideLibraryMaterial({ materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+    };
+    await driver.drive(run.reviewRunId);
+    const stopped = database((db) => db.prepare("SELECT canonical_json FROM analysis_run_states WHERE state = 'interrupted' ORDER BY rowid DESC LIMIT 1").get());
+    const state = JSON.parse(String(stopped!.canonical_json));
+    expect(state.detail).toContain('在任务运行中已撤回允许参考');
+    expect(database((db) => db.prepare('SELECT count(*) AS n FROM analysis_harness_spans').get()!.n)).toBe(1);
+    expect(state.detail).toContain('已完成的单元保留');
+    expect(state.cause).toBe('MATERIAL_REFERENCE_UNAVAILABLE');
+  });
   it('offers eligible items and freezes read-only pins in the Run and consuming Task plans, across reopen', async () => {
     const id = await material();
     const before = indexRows();
@@ -301,7 +319,7 @@ describe('review categories reference exact local library versions', () => {
     } finally { store.baselineAnalysisLedger.bindLaunch(free); }
   });
 
-  it('propagates corrupt index records instead of calling them moved', async () => {
+  it('refuses corrupt index records by their material-specific reason', async () => {
     const id = await material();
     const run = prepare([id]);
     await close();
@@ -311,9 +329,9 @@ describe('review categories reference exact local library versions', () => {
       for (const sql of Object.values(MATERIAL_INDEX_TRIGGER_SQL)) db.exec(sql);
     }, true);
     await open();
-    try { plan(run); throw new Error('corruption not refused'); } catch (error) {
-      expect(error instanceof StoreError && error.code === 'MATERIAL_INDEX_RECORD_INVALID').toBe(true);
-    }
+    const blocked = plan(run);
+    expect(blocked.start.readiness).toBe('changed');
+    expect(blocked.scope.reference.join(' ')).toContain('索引记录已损坏');
   });
 
   it('says nothing would be sent when a plan listing library items is read under developer-live', async () => {

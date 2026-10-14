@@ -16,14 +16,14 @@ import {
   type LaunchPolicyProjection,
 } from '../../src/shared/protocol.js';
 import { AUTHORED_REWRITE_WORDS, beginRewriteAsJ11 } from '../support/evaluation-rewrite.js';
-import { V11_EVALUATION_RULE_ID, withV11EvaluationRule } from '../support/policy-v11-stand-in.js';
+import { ruleFor, withRuleFor, withoutRuleFor } from '../support/policy-rules.js';
 import { AUTHORED_SECTIONS, finalizeAsJ11 } from '../support/readers-report.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // #429 / J-11: AI7 初评, 审稿意见 and 按我的评分重写评语 on the Go execution path — the real store, ledger, execution owner, broker,
-// adapter, Egress Gate, accounting and Provider Test Ledger — under developer-live with the v11 evaluation rule (the stand-in
-// until the wave selects Provider Processing v11). The transport answers with the authored J-11 fixtures' texts in the real
+// adapter, Egress Gate, accounting and Provider Test Ledger — under developer-live with the selected Provider Processing v11
+// evaluation rule. The transport answers with the authored J-11 fixtures' texts in the real
 // route's JSON shape, without a socket or credential; nothing asserts editorial quality and nothing prints manuscript text.
 
 const FIXTURES_ROOT = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url)));
@@ -156,7 +156,7 @@ beforeEach(async () => {
     induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false, baselineAnalysisRoute: null,
   });
-  bindLive(withV11EvaluationRule(selected));
+  bindLive(selected);
   sent = 0;
   failure = 'none';
   mismatchConclusion = false;
@@ -174,25 +174,25 @@ afterEach(async () => {
 
 describe('evaluation on the Go execution path (#429)', () => {
   it('offers none of the three contracts under a selected policy that names no evaluation rule, and sends nothing', async () => {
-    bindLive(selected);
+    bindLive(withoutRuleFor(selected, 'evaluation'));
     const workspace = store.inspectEvaluation(bookId, null);
     expect(workspace.initial.prepare).toEqual({ allowed: false, reason: INITIAL_EVALUATION_LIVE_UNAVAILABLE });
     expect(workspace.readersReport.templates.map((template) => template.prepare))
       .toEqual(workspace.readersReport.templates.map(() => ({ allowed: false, reason: READERS_REPORT_LIVE_UNAVAILABLE })));
     expect(workspace.rewrite.prepare).toEqual({ allowed: false, reason: EVALUATION_REWRITE_LIVE_UNAVAILABLE });
-    expect(await refusal(() => store.createInitialEvaluationPreparationWork(bookId, selected)))
+    expect(await refusal(() => store.createInitialEvaluationPreparationWork(bookId, withoutRuleFor(selected, 'evaluation'))))
       .toBe(`EVALUATION_INITIAL_UNAVAILABLE:${INITIAL_EVALUATION_LIVE_UNAVAILABLE}`);
-    expect(await refusal(() => store.createReadersReportPreparationWork(bookId, 'author', selected)))
+    expect(await refusal(() => store.createReadersReportPreparationWork(bookId, 'author', withoutRuleFor(selected, 'evaluation'))))
       .toBe(`READERS_REPORT_UNAVAILABLE:${READERS_REPORT_LIVE_UNAVAILABLE}`);
     // A rule that names the report but not the house exemplars it carries admits 初评 alone.
-    bindLive(withV11EvaluationRule(selected, { outboundDataCategories: ['public-or-synthetic', 'editor-authored-evaluation-text'] }));
+    bindLive(withRuleFor(selected, 'evaluation', { outboundDataCategories: ['public-or-synthetic', 'editor-authored-evaluation-text'] }));
     expect(store.inspectEvaluation(bookId, null).initial.prepare).toEqual({ allowed: true, mode: 'evaluation-first' });
     expect(store.inspectEvaluation(bookId, null).readersReport.templates[0]!.prepare).toEqual({ allowed: false, reason: READERS_REPORT_LIVE_UNAVAILABLE });
     expect(sent).toBe(0);
   });
 
   it('runs 初评, 审稿意见 and 按我的评分重写评语 live, keeps the editor\'s scores and conclusion, and discloses 未联网核查 on the notes only', async () => {
-    const policy = withV11EvaluationRule(selected);
+    const policy = selected;
     await runInitial(policy);
     const initial = store.inspectInitialEvaluation(bookId);
     expect(initial.state).toBe('settled');
@@ -243,11 +243,11 @@ describe('evaluation on the Go execution path (#429)', () => {
     expect(sent).toBe(30);
     const purposes = new Set((await ledgerLines()).map((line) => line.itemId.split('/')[1]));
     expect(purposes).toEqual(new Set(['evaluation-first', 'readers-report-first', 'evaluation-rewrite-first']));
-    expect(V11_EVALUATION_RULE_ID).toBe('developer-live-public-samplebook-evaluation');
+    expect(ruleFor(selected, 'evaluation').ruleId).toBe('developer-live-public-samplebook-evaluation');
   }, 300_000);
 
   it('never sends the book-level synthesis under a rule that does not name it', async () => {
-    const policy = withV11EvaluationRule(selected, { crossUnitSynthesisAllowed: false });
+    const policy = withRuleFor(selected, 'evaluation', { crossUnitSynthesisAllowed: false });
     bindLive(policy);
     await runInitial(policy);
     const initial = store.inspectInitialEvaluation(bookId);
@@ -259,7 +259,7 @@ describe('evaluation on the Go execution path (#429)', () => {
   }, 300_000);
 
   it('keeps the conclusion-mismatch rule: a live report that does not state the editor\'s conclusion writes no draft', async () => {
-    const policy = withV11EvaluationRule(selected);
+    const policy = selected;
     await runInitial(policy);
     finalizeAsJ11(store, bookId);
     mismatchConclusion = true;
@@ -271,7 +271,7 @@ describe('evaluation on the Go execution path (#429)', () => {
 
   it.each(['unknown', 'quota'] as const)('retains %s without retrying or resending the unit', async (mode) => {
     failure = mode;
-    await runInitial(withV11EvaluationRule(selected));
+    await runInitial(selected);
     const initial = store.inspectInitialEvaluation(bookId);
     const lines = await ledgerLines();
     const failed = lines.find((line) => line.classification === (mode === 'unknown' ? 'outcome-unknown' : 'quota-exhausted'))!;
@@ -286,7 +286,7 @@ describe('evaluation on the Go execution path (#429)', () => {
   }, 300_000);
 
   it('replays an identical 初评 from the Provider Result Cache without sending again', async () => {
-    const policy = withV11EvaluationRule(selected);
+    const policy = selected;
     await runInitial(policy);
     expect(sent).toBe(10);
     await runInitial(policy);

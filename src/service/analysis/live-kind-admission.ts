@@ -75,9 +75,9 @@ export function liveKindAdmitted(
   return {
     ruleId: rule.ruleId,
     modelRole: rule.modelRole,
-    outboundDataCategories: rule.outboundDataCategories as readonly OutboundDataCategory[],
-    // Provider Processing v11 declares the flag (#841); a rule that does not name it never admits a kind's synthesis.
-    crossUnitSynthesisAllowed: (rule as { readonly crossUnitSynthesisAllowed?: boolean }).crossUnitSynthesisAllowed === true,
+    outboundDataCategories: rule.outboundDataCategories,
+    // Provider Processing v11's synthesis term (#841); a rule that does not name it never admits a kind's synthesis.
+    crossUnitSynthesisAllowed: rule.crossUnitSynthesisAllowed === true,
   };
 }
 
