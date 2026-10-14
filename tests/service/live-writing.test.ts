@@ -1,14 +1,14 @@
-// Install the Phase 1 shared-admission stand-in before loading the service owners.
-import { LIVE_WRITING_RULE, withLiveWritingRule, stub429WritingCurrentRuleFactsGuard, restore429WritingCurrentRuleFactsGuard } from '../support/live-writing-policy.js';
-import { existsSync } from 'node:fs';
+// #810: reference-free writing on the real selected Provider Processing v11 projection and the shared admission (#429), over a
+// synthetic socket-free transport; no credential, key or manuscript text beyond exact sample1.
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { resolveSourceCheckoutLaunchPolicy, DEVELOPER_LIVE_POLICY_BINDING } from '../../src/service/launch-policy.js';
 import { liveWritingRule } from '../../src/service/writing/live-writing-admission.js';
-import { writingKindDefinition } from '../../src/service/writing/writing-kind.js';
+import { liveKindAdmission, liveKindContractCategories } from '../../src/service/analysis/live-kind-admission.js';
+import { ruleFor, withRepeatedRuleFor, withRuleFor, withoutRuleFor } from '../support/policy-rules.js';
+import { writingKindDefinition, writingRecordedKindDefinition } from '../../src/service/writing/writing-kind.js';
 import { parseWritingUnitMessageHeader, type WritingContractInput } from '../../src/service/writing/writing-contract.js';
 import { WRITING_LIVE_SEND_CONSEQUENCE, WRITING_SEND_CONSEQUENCE } from '../../src/service/writing-tasks.js';
 import { ProviderResultCache, isModelCallLine } from '../../src/service/provider/provider-result-cache.js';
@@ -22,7 +22,6 @@ import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissing
 import { WRITING_REQUEST } from '../support/writing-task.js';
 import { SET_RULE_DEVELOPER_LIVE, SET_RULE_FIRST_BASELINE } from '../../src/service/default-execution-rules.js';
 
-const sharedOwnerLanded = existsSync(fileURLToPath(new URL('../../src/service/analysis/live-kind-admission.ts', import.meta.url)));
 let roots: ServiceTestRoots;
 let policy: LaunchPolicyProjection;
 let store: EditorialStore;
@@ -36,9 +35,8 @@ let announce: () => void;
 let release: () => void;
 
 beforeEach(async () => {
-  if (!sharedOwnerLanded) stub429WritingCurrentRuleFactsGuard();
   roots = await createServiceTestRoots('ai7-live-writing-');
-  policy = withLiveWritingRule(await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live'));
+  policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
     induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
@@ -76,7 +74,7 @@ beforeEach(async () => {
     } });
 });
 
-afterEach(async () => { release?.(); await owner?.dispose(); store?.close(); await roots?.dispose(); restore429WritingCurrentRuleFactsGuard(); });
+afterEach(async () => { release?.(); await owner?.dispose(); store?.close(); await roots?.dispose(); });
 
 async function book() {
   const imported = await importSample1Book(store, roots.codeRoot, 'L2 sample1 live writing');
@@ -101,11 +99,11 @@ async function run(bookId: string, prepared: WritingProjection) {
 describe('reference-free writing on the Go execution path (#810)', () => {
   it('admits exactly one verified writing rule and its binding, failing closed for missing or ambiguous rules', async () => {
     const imported = await book();
-    expect(liveWritingRule(policy, DEVELOPER_LIVE_POLICY_BINDING)?.ruleId).toBe(LIVE_WRITING_RULE.ruleId);
+    expect(liveWritingRule(policy, DEVELOPER_LIVE_POLICY_BINDING)?.ruleId).toBe('developer-live-public-samplebook-writing');
     expect(store.inspectWritingTask(imported.bookId)).toMatchObject({ unavailable: null, consequences: { send: WRITING_LIVE_SEND_CONSEQUENCE } });
-    for (const rules of [[], [LIVE_WRITING_RULE, LIVE_WRITING_RULE], [{ ...LIVE_WRITING_RULE, model: 'other' }],
-      [{ ...LIVE_WRITING_RULE, crossUnitSynthesisAllowed: false }], [{ ...LIVE_WRITING_RULE, outboundDataCategories: ['public-or-synthetic'] }]]) {
-      const denied = { ...policy, providerProcessing: { ...policy.providerProcessing, admittedRules: rules } };
+    for (const denied of [withoutRuleFor(policy, 'writing'), withRepeatedRuleFor(policy, 'writing'), withRuleFor(policy, 'writing', { model: 'other' }),
+      withRuleFor(policy, 'writing', { crossUnitSynthesisAllowed: false }), withRuleFor(policy, 'writing', { modelRole: 'Fast Interaction Role' }),
+      withRuleFor(policy, 'writing', { outboundDataCategories: ['public-or-synthetic', 'book-metadata-and-synopsis'] })]) {
       expect(liveWritingRule(denied, DEVELOPER_LIVE_POLICY_BINDING)).toBeNull();
       store.baselineAnalysisLedger.bindLaunch({ ...store.baselineAnalysisLedger.launch, policy: denied });
       expect(store.inspectWritingTask(imported.bookId).unavailable).toBe(WRITING_LIVE_UNAVAILABLE);
@@ -135,8 +133,9 @@ describe('reference-free writing on the Go execution path (#810)', () => {
     expect(settled.resultSetRevision!.coverage.unitsClosed).toBe(prepared.coverageManifest!.units.length);
     expect(settled.resultSetRevision!.usage.inputTokens).toBeGreaterThan(0);
     expect(store.baselineAnalysisLedger.readWorkingBlocks(imported.branchId).map((block) => block.digest)).toEqual(before.map((block) => block.digest));
-    if (sharedOwnerLanded) expect(settled.resultSetRevision!.writing.draft?.title).toBe('合成草稿');
-    else expect(settled.resultSetRevision!.writing.synthesis.reason).toMatch(/当前 Provider Processing/u);
+    // The admitted rule names the synthesis turn, so the draft is written live; the reflection follows it.
+    expect(settled.resultSetRevision!.writing.draft?.title).toBe('合成草稿');
+    expect(sent).toBe(prepared.coverageManifest!.units.length + 2);
     const cache = new ProviderResultCache(join(roots.inputRoot, 'cache'));
     await cache.refresh();
     expect(cache.lines.filter(isModelCallLine).filter((line) => line.outcome === 'transmitted').length).toBe(sent);
@@ -160,7 +159,7 @@ describe('reference-free writing on the Go execution path (#810)', () => {
       .toMatchObject({ canSet: false, reason: SET_RULE_FIRST_BASELINE });
   });
 
-  it.skipIf(!sharedOwnerLanded)('records every writing transmitOnce item under S84 (#429 owner forwarding pending in Phase 1)', async () => {
+  it('records every writing transmitOnce item under S84, forwarded by the shared owner', async () => {
     const imported = await book();
     await run(imported.bookId, prepare(imported.bookId));
     const cache = new ProviderResultCache(join(roots.inputRoot, 'cache'));
@@ -230,6 +229,27 @@ describe('reference-free writing on the Go execution path (#810)', () => {
     const before = sent;
     await owner.whenIdle();
     expect(sent).toBe(before);
+  });
+
+  it('admits a frozen writing contract through the shared dispatcher row only as its owner re-derives it, on the exact binding', () => {
+    const input: WritingContractInput = { type: { typeId: 'promotion-article', label: '宣传文章' }, book: { title: '合成图书', authors: [], editors: [], series: [] },
+      audience: '读者', channel: '纸面', requirements: null, synopsis: null, evaluation: null, exemplars: [] };
+    const definition = writingKindDefinition(input);
+    const binding = ruleFor(policy, 'writing');
+    expect(liveKindAdmission(policy, definition, DEVELOPER_LIVE_POLICY_BINDING)).toEqual({ ruleId: 'developer-live-public-samplebook-writing',
+      modelRole: 'Main Editorial Role', outboundDataCategories: ['public-or-synthetic', 'book-metadata-and-synopsis', 'house-exemplar-excerpt'],
+      crossUnitSynthesisAllowed: true });
+    expect(liveKindContractCategories('writing')).toEqual(['book-metadata-and-synopsis', 'house-exemplar-excerpt']);
+    // A replaced digest, a recorded contract the owner cannot rebuild, a missing derivation, a 资料库-bearing contract or a
+    // material wrapper refuse; so do a rule without the writing categories and another binding.
+    expect(liveKindAdmission(policy, { ...definition, promptContractDigest: 'a'.repeat(64) }, binding)).toBeNull();
+    expect(liveKindAdmission(policy, writingRecordedKindDefinition(input, 'b'.repeat(64), 2), binding)).toBeNull();
+    const { livePromptContractDigest: _derive, ...withoutDerivation } = definition;
+    expect(liveKindAdmission(policy, withoutDerivation, binding)).toBeNull();
+    expect(liveKindAdmission(policy, writingKindDefinition({ ...input, materials: [{ title: '合成资料', paragraphs: ['合成资料段落。'] }] }), binding)).toBeNull();
+    expect(liveKindAdmission(policy, { ...definition, materialReferences: {} }, binding)).toBeNull();
+    expect(liveKindAdmission(withRuleFor(policy, 'writing', { outboundDataCategories: ['public-or-synthetic', 'book-metadata-and-synopsis'] }), definition, binding)).toBeNull();
+    expect(liveKindAdmission(policy, definition, { ...binding, model: 'another-model' })).toBeNull();
   });
 
   it('withholds copied real-format synthesis output under the existing exemplar and material rules', () => {

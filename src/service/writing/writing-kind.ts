@@ -143,15 +143,18 @@ export function writingRecordedKindDefinition(
  * The writing kind of one frozen contract, under the copy rules it was recorded with: `/2` for every Task prepared now, `/1` for
  * a Task recorded under #688's contract, which its parse keeps judging under `/1`'s sizes (the Commander's ruling on #704 P2-2).
  */
-export function writingKindDefinition(input: WritingContractInput, rules: WritingCopyRules = WRITING_COPY_RULES): AnalysisKindDefinition & { readonly liveItemSlice: 'S84' } {
+export function writingKindDefinition(input: WritingContractInput, rules: WritingCopyRules = WRITING_COPY_RULES): AnalysisKindDefinition {
   const contract = writingContract(input, rules);
   const promptContractDigest = writingContractDigest(contract);
   const frozen = contract.input;
   const exemplars = { count: frozen.exemplars.length, statement: writingExemplarLine(frozen.type.label, frozen.exemplars) };
   return {
     kind: WRITING_KIND,
-    // #429 forwards this member in its owned adapter-build hunk; other kinds keep S40.
+    // Live validation items are numbered under writing's own slice (#810), and live admission re-derives the frozen contract. A
+    // contract carrying 资料库 text offers no derivation: no rule of this wave names frozen material (v11
+    // `materialReferencesAllowed: false`), so the shared admission refuses it beside the store's own refusal.
     liveItemSlice: 'S84',
+    ...(frozen.materials === undefined ? { livePromptContractDigest: () => writingContractDigest(contract) } : {}),
     contractVersion: WRITING_CONTRACT_VERSION,
     expectedOutcome: WRITING_EXPECTED_OUTCOME,
     taskGoal: WRITING_MODE_GOALS['writing-first'],
