@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { ACTIVE_SET_VERSION, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { BASELINE_PROMPT_CONTRACT_DIGEST, unitRequestDigest } from '../../src/service/analysis/contract.js';
 import { fixtureEntryKey, loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -414,7 +414,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(revision.manuscriptPin.revisionId).toBe(imported.revisionId);
       expect(revision.coverageManifestDigest).toBe(manifest.digest);
       expect(revision.bindingPin).toMatchObject({ attemptId, bindingDigest: binding.bindingDigest, harnessSessionId: binding.harnessSessionId });
-      expect(revision.policyPin).toEqual({ operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v8', liveTransmissions: 0 });
+      expect(revision.policyPin).toEqual({ operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 0 });
       // Synchronized delta (#274, #275): eight unit turns, the one cross-unit reduction turn after
       // them, and one assurance sampling turn — both cross-unit findings are anchored in unit 1, so
       // the sample of this Run is one turn.
