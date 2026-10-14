@@ -10,6 +10,7 @@ import {
   planStopCondition,
   providerResolutionPlanValue,
 } from '../../src/service/task-authorization.js';
+import { ACTIVE_SET_VERSION, DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION } from '../../src/service/launch-policy.js';
 import type { LaunchPolicyProjection } from '../../src/shared/protocol.js';
 
 // Unit suite (L1) for the readings the provider-denied Task kind derives from its bound launch.
@@ -25,9 +26,9 @@ function launch(scope: 'development-ci' | 'developer-live'): LaunchPolicyProject
     integrityState: 'verified',
     denialReason: null,
     operationalScope: scope,
-    activePolicySetVersion: 'v8',
+    activePolicySetVersion: ACTIVE_SET_VERSION,
     providerProcessing: {
-      version: live ? 'v10' : 'v1',
+      version: live ? DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION : 'v1',
       decision: live ? 'eligible-only' : 'deny',
       authorizedLiveTransmissionCount: live ? 'bounded-by-run' : 0,
       liveTransmissionAllowed: live,
@@ -76,7 +77,7 @@ describe('the denied Task kind reads its statements from the bound launch', () =
     const pin = planProviderProcessingPin(launch('developer-live'));
     expect(pin).toEqual({
       operationalScope: 'developer-live',
-      version: 'v10',
+      version: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION,
       decision: 'eligible-only',
       authorizedLiveTransmissionCount: 'bounded-by-run',
     });
@@ -93,11 +94,11 @@ describe('the denied Task kind reads its statements from the bound launch', () =
     // that authorizes them: no reading of a second scope may carry a first scope's facts.
     for (const reading of readings) {
       expect(reading).not.toContain('development-ci');
-      // v1 as a whole token: the selected developer-live version v10 is not the development-ci v1.
+      // v1 as a whole token: the selected developer-live version is not the development-ci v1.
       expect(reading).not.toMatch(/\bv1(?!\d)/);
       expect(reading).not.toContain('0 次');
     }
-    expect(planStopCondition(pin)).toContain('v10');
+    expect(planStopCondition(pin)).toContain(DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION);
     expect(foregroundDenialReasons(pin)[1]).toContain('developer-live');
     expect(foregroundDenialReasons(pin)[1]).toContain('bounded-by-run');
     // The plan and its envelope carry the second scope's pin and the readings of that pin.

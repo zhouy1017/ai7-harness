@@ -44,8 +44,8 @@ import { reduceEvaluationRewrite, type EvaluationRewriteUnitOutcome } from './ev
  *
  * It reads the manuscript for the reason 审稿意见 does: the analysis path's one way to a book-level turn is through its units —
  * and a 评语 rewritten to the editor's score is one that can point to what bears that score out (EVAL-006: a comment citing
- * sources). Like 初评, its book-level synthesis is a transmission no Provider Processing policy names yet, so it is never
- * prepared or started under a live scope; it declares no assurance sample, since a proposal the editor 采用 or 放弃 is not a
+ * sources). Like 初评, it is prepared or started under a live scope only when the selected
+ * policy's rule names the kind and its synthesis; it declares no assurance sample, since a proposal the editor 采用 or 放弃 is not a
  * finding a re-read could uphold.
  */
 export const EVALUATION_REWRITE_REDUCER_DESCRIPTOR = {
@@ -100,6 +100,7 @@ export function evaluationRewriteKindDefinition(input: EvaluationRewriteContract
   const itemIds = evaluationRewriteScoredItems(contract.input).map((item) => item.itemId);
   return {
     kind: EVALUATION_REWRITE_KIND,
+    livePromptContractDigest: () => evaluationRewriteContractDigest(contract),
     contractVersion: EVALUATION_REWRITE_CONTRACT_VERSION,
     expectedOutcome: EVALUATION_REWRITE_EXPECTED_OUTCOME,
     taskGoal: EVALUATION_REWRITE_MODE_GOALS['evaluation-rewrite-first'],

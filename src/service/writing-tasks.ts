@@ -216,6 +216,9 @@ export function writingMaterialMoved(title: string): string {
 export function writingMaterialUnavailable(title: string): string {
   return `这次起草参考的资料《${title}》现在不能列进这本书任务的「允许参考」，不能再开始；可以用「新建文档…」重新准备。`;
 }
+export function writingMaterialCorrupt(title: string): string {
+  return `这次起草参考的资料《${title}》的索引记录已损坏，不能再开始；可以用「新建文档…」重新准备。`;
+}
 
 /** A count as the editor reads a bound: `3,000`. */
 function grouped(value: number): string {
@@ -423,6 +426,7 @@ export class WritingTasks {
   #pinnedMaterial(bookId: string, source: WritingMaterialSource): { paragraphs: string[] } | { refusal: { code: string; message: string } } {
     const read = this.#readMaterial(bookId, source);
     if ('refusal' in read) {
+      if (read.refusal.code === 'MATERIAL_INDEX_RECORD_INVALID') return { refusal: { code: read.refusal.code, message: writingMaterialCorrupt(source.title) } };
       if (read.refusal.code === 'MATERIAL_REFERENCE_UNAVAILABLE') return { refusal: { code: read.refusal.code, message: writingMaterialUnavailable(source.title) } };
       if (read.refusal.code === 'MATERIAL_INDEX_MOVED' || read.refusal.code === 'LIBRARY_MATERIAL_NOT_FOUND') {
         return { refusal: { code: 'MATERIAL_INDEX_MOVED', message: writingMaterialMoved(source.title) } };
@@ -608,6 +612,18 @@ export class WritingTasks {
     const envelope = JSON.parse(json) as unknown;
     requireWriting(isRecord(envelope) && typeof envelope.promptContractDigest === 'string', 'WRITING_RECORD_INVALID', CORRUPT);
     return envelope.promptContractDigest;
+  }
+
+  /** The recorded material boundary only: consuming a cached ledger must not rebuild its writing contract. */
+  materialBoundary(taskIntentId: string, promptContractDigest: string): { bookId: string; references: ReadonlyArray<WritingMaterialSource> } {
+    const row = this.#db.prepare('SELECT book_id, canonical_json, sha256 FROM writing_tasks WHERE task_intent_id = ? AND prompt_contract_sha256 = ?').get(taskIntentId, promptContractDigest) as SqlRow | undefined;
+    requireWriting(row !== undefined, 'WRITING_RECORD_INVALID', CORRUPT);
+    const json = text(row.canonical_json);
+    requireWriting(sha256Hex(json) === text(row.sha256), 'WRITING_RECORD_INVALID', CORRUPT);
+    const stored = JSON.parse(json) as unknown;
+    requireWriting(isRecord(stored) && (stored.materialSources === undefined ||
+      (Array.isArray(stored.materialSources) && stored.materialSources.every(isMaterialSource))), 'WRITING_RECORD_INVALID', CORRUPT);
+    return { bookId: text(row.book_id), references: (stored.materialSources as WritingMaterialSource[] | undefined) ?? [] };
   }
 
   /** The Book's latest writing Task by its intent, as the analysis ledger orders them; `null` before the first. */

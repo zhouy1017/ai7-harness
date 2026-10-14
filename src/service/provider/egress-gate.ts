@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from '../../shared/provider-configuration.generated.js';
+import type { OutboundDataCategoryId } from '../../shared/protocol.js';
 import { DIGEST_PATTERN, canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { assistantToolCalls, messageText, toolResultOf, type AssembledContentBlock, type AssembledModelPayload } from './payload.js';
 import {
@@ -56,8 +57,9 @@ export type RemoteExecutionRoute = ConfiguredRouteId;
 export type CredentialSlot = ConfiguredCredentialSlot;
 
 /**
- * The trusted scope's Provider Processing pin: selected v10 admits baseline analysis, editorial dialogue and reference-free
- * review on V4.1. Historical v5 and v9 and the superseded web reservation v8 are readable identities, not launch selections.
+ * The trusted scope's Provider Processing pin: selected v11 admits baseline analysis, editorial dialogue, reference-free
+ * review, writing, evaluation, and 润色 and conflict-regeneration Suggestions on V4.1. Historical v5, v9 and v10 and the
+ * superseded web reservation v8 are readable identities, not launch selections.
  */
 export type EgressPolicyPin =
   | {
@@ -68,7 +70,7 @@ export type EgressPolicyPin =
     }
   | {
       readonly operationalScope: 'developer-live';
-      readonly providerProcessingVersion: 'v5' | 'v8' | 'v9' | 'v10';
+      readonly providerProcessingVersion: 'v5' | 'v8' | 'v9' | 'v10' | 'v11';
       readonly liveTransmissionAllowed: true;
       readonly authorizedLiveTransmissionCount: 'bounded-by-run';
     };
@@ -86,9 +88,11 @@ export type EgressCeilingState = 'unset' | 'within' | 'reached' | 'not-applicabl
 /**
  * What a Run may send. Analysis sends the admitted public or synthetic material it was planned over; an Interactive Editorial
  * Dialogue (Issue #52, S17a) sends the words the editor selected in their own manuscript, and its question. A dialogue's
- * excerpt reaches the local deterministic route, or a remote one only under an allow rule that names it (S17c).
+ * excerpt reaches the local deterministic route, or a remote one only under an allow rule that names it (S17c). The four
+ * further identifiers Provider Processing v11 names (Issue #841) never stand as a binding's own category: a contract that
+ * carries one beside the SampleBook names it in `contractCategories`, sent remotely only under a rule naming each (#429).
  */
-export type OutboundDataCategory = 'public-or-synthetic' | 'editor-selected-manuscript-excerpt';
+export type OutboundDataCategory = OutboundDataCategoryId;
 
 /** The binding facts the gate compares against; a frozen subset of the persisted Execution Binding. */
 export interface EgressBindingFacts {
@@ -107,6 +111,13 @@ export interface EgressBindingFacts {
    * holds it.
    */
   readonly ruleOutboundCategories?: ReadonlySet<OutboundDataCategory>;
+  /**
+   * The further categories the frozen prompt contract carries besides the binding's own (Issue #429): an evaluation
+   * contract's editor-authored record or house 审稿意见 exemplars beside the public SampleBook. On a remote route the rule must
+   * name each; the local deterministic route sends nothing out. Their bound is the Run's, never `not-applicable`. Absent for
+   * every other binding, which then reads exactly as before.
+   */
+  readonly contractCategories?: ReadonlySet<OutboundDataCategory>;
   /**
    * The platform tools the binding's Provider Processing rule names (ADR 0080 §7.5), read from the rule by
    * `readPlatformToolsRule`; absent or `null` when the rule names none — as Provider Processing v9's one rule names none —
@@ -399,6 +410,10 @@ export function evaluateEgress(
   }
   if (binding.outboundDataCategory !== 'public-or-synthetic' && !(binding.outboundDataCategory === 'editor-selected-manuscript-excerpt' &&
       (binding.route === LOCAL_DETERMINISTIC_ROUTE || excerptAdmittedByRule(binding)))) {
+    return refuse('outbound-category-mismatch', '外发数据类别不允许经这条路由发送；未发送任何内容。');
+  }
+  if (binding.route !== LOCAL_DETERMINISTIC_ROUTE && [...(binding.contractCategories ?? [])].some((category) =>
+    !(binding.ruleOutboundCategories?.has(category) ?? false))) {
     return refuse('outbound-category-mismatch', '外发数据类别不允许经这条路由发送；未发送任何内容。');
   }
   if (payload.provider !== binding.route) return refuse('route-mismatch', '请求路由与执行绑定不一致；未发送任何内容。');

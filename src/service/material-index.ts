@@ -812,6 +812,25 @@ export class MaterialIndexLedger {
     };
   }
 
+  /**
+   * A Task's re-check of a frozen pin before it consumes the material again (Issue #759): the read `readForTask` makes, without
+   * reading a segment's text. The pinned build is matched as `#pinned` does, and its segment rows' digests — ordinals and digest
+   * columns only, never the cached verification — against the digest the build names, so a row replaced or lost since is seen.
+   */
+  verifyForTask(boundary: MaterialReferenceBoundary, materialId: string, available: MaterialReferenceAvailability): void {
+    const pin = boundary.references.find((reference) => reference.materialId === materialId);
+    requireIndex(pin !== undefined, 'MATERIAL_OUTSIDE_PLAN', '这份资料不在这项任务计划的「允许参考」里。');
+    requireIndex(available(materialId, boundary.bookId), 'MATERIAL_REFERENCE_UNAVAILABLE', '这份资料现在不能列进这本书任务的「允许参考」。');
+    const build = this.#pinned(materialId, pin.indexDigest);
+    const digests: string[] = [];
+    for (const row of this.#db.prepare('SELECT ordinal, sha256 FROM material_index_segments WHERE index_id = ? ORDER BY ordinal').iterate(build.indexId) as IterableIterator<SqlRow>) {
+      requireIndex(row.ordinal === digests.length + 1 && typeof row.sha256 === 'string', 'MATERIAL_INDEX_RECORD_INVALID', '资料索引的分段记录已损坏。');
+      digests.push(row.sha256);
+    }
+    requireIndex(digests.length === build.segmentCount && sha256Hex(digests.join('\n')) === build.segmentsSha256,
+      'MATERIAL_INDEX_RECORD_INVALID', '资料索引的分段记录已损坏。');
+  }
+
   /** The builds standing for the current indexer recorded since `since`, newest first, at most `limit` (索引完成, ATTN-009). */
   completions(since: string, limit: number): MaterialIndexCompletion[] {
     requireIndex(Number.isSafeInteger(limit) && limit >= 0, 'MATERIAL_INDEX_CURSOR_INVALID', '资料索引列表数量无效。');

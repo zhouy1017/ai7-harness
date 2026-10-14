@@ -1318,6 +1318,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'dialogue-background',
     'dialogue-return',
     'dialogue-stop',
+    'dialogue-continue-after-mid-stream-stop',
     'dialogue-regenerate',
     'dialogue-panel-answer',
     'j14-dialogue-keyboard',

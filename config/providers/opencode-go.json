@@ -71,6 +71,12 @@
       "observedOn": "2026-10-12",
       "note": "Actual built AI7 baseline analysis under v9/v7 on exact Public sample1, code head 39c5ac4113d5b5c09e96e23585ddca8f7b4959c0 (#807). All 12 responses name deepseek-v4.1-flash and contain message.content and reasoning_content strings. Seven of eight unit contracts closed; unit 1 retained a schema-invalid gap. Cross-unit reduction, assurance sampling and reflection closed. This observes response channels only, not a format guarantee, usage attribution, tools, context or universal editorial quality. Protected captures and durable business result remain in the original external cache root."
     },
+    "v41-dialogue-sse": {
+      "kind": "live-test-item",
+      "itemIds": ["S17c/editorial-dialogue/1", "S17c/editorial-dialogue/3"],
+      "observedOn": "2026-10-14",
+      "note": "Issue #833: one minimal frozen-dialogue-contract probe on exact sample1 through the repository gate, broker and durable pre-send claim returned HTTP 200 text/event-stream with deepseek-v4.1-flash, 69 events, finish_reason stop and DONE. The completed live continuation after a mid-stream stop also observed SSE; the aborted ask /2 remains outcome-unknown and is not mirrored as a transmitted result. This establishes SSE transport capability only. External protected capture root: 833-stream/probe-cache."
+    },
     "unverified": { "kind": "unverified" }
   },
   "routes": [
@@ -90,7 +96,7 @@
       "routeCapabilities": {
         "webSearchTool": { "value": "none", "evidence": "gateway-no-search-tool" }
       },
-      "note": "The developer-live route of Provider Processing v10 (ADR 0065, ADR 0067), selected by active-policy-set v8. On this gateway a 429, a 402 or a body naming the usage limit is the development account's limit, so it ends the Run or dialogue attempt. The Session header carries the technical Session id for the gateway's prompt cache. Named by the documentation and deliberately absent, because the Zen table states no id for them: LongCat-2.0, Hy4 preview, Hy3, Omen Alpha, MiMo-V2.5, MiMo-V2.5-Pro.",
+      "note": "The developer-live route of Provider Processing v11 (ADR 0065, ADR 0067), selected by active-policy-set v9. On this gateway a 429, a 402 or a body naming the usage limit is the development account's limit, so it ends the Run or dialogue attempt. The Session header carries the technical Session id for the gateway's prompt cache. Named by the documentation and deliberately absent, because the Zen table states no id for them: LongCat-2.0, Hy4 preview, Hy3, Omen Alpha, MiMo-V2.5, MiMo-V2.5-Pro.",
       "models": [
         {
           "modelId": "deepseek-v4-flash",
@@ -109,6 +115,7 @@
           "modelId": "deepseek-v4.1-flash",
           "displayName": "DeepSeek V4.1 Flash",
           "capabilities": {
+            "streaming": { "value": "chat-completions-sse", "evidence": "v41-dialogue-sse" },
             "requestShape": {
               "value": "openai-chat-completions",
               "evidence": "v41-go-wire-contract"
@@ -126,7 +133,7 @@
             "tokens": null,
             "evidence": "unverified"
           },
-          "note": "The developer-live product binding of Provider Processing v10 for baseline analysis, editorial dialogue and reference-free non-web review eligibility. Request shape is a declared vendor wire contract; answer and reasoning channels have their own named V4.1 product observations. Sends no unverified format, reasoning-control or tool parameters. Old V4 items establish none of this model's capabilities."
+          "note": "The developer-live product binding of Provider Processing v11 for baseline analysis, editorial dialogue, reference-free non-web review, writing, the three evaluation contracts, and 润色 and conflict-regeneration Suggestions eligibility. Request shape is a declared vendor wire contract; answer and reasoning channels have their own named V4.1 product observations. Sends no unverified format, reasoning-control or tool parameters. Old V4 items establish none of this model's capabilities."
         },
         {
           "modelId": "deepseek-v4-pro",

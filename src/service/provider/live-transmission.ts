@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { DevelopmentValidationIntent } from '../../shared/protocol.js';
-import { isProviderAccountLimit, type ProviderRouteProfile } from './deepseek-adapter.js';
+import { dialogueSseEvents, isProviderAccountLimit, type DeepSeekTransportResponse, type DialogueStreamEvent, type ProviderRouteProfile } from './deepseek-adapter.js';
 import {
   NO_INCURRED_USAGE,
   ProviderResultCache,
@@ -34,7 +34,7 @@ import type { ResearchSnapshot, ResearchSnapshotCache } from './research-snapsho
 export type LiveModelFetch = (
   url: string,
   init: { method: 'POST'; headers: Record<string, string>; body: string; signal?: AbortSignal },
-) => Promise<{ status: number; json(): Promise<unknown> }>;
+) => Promise<DeepSeekTransportResponse>;
 
 /** The named test item one live model call belongs to. */
 export interface LiveModelCallItem {
@@ -60,6 +60,7 @@ export interface LiveModelResponse {
   json(): Promise<unknown>;
   /** Set only when the cache answered: the response is the capture's, and this call incurred no usage. */
   readonly replayed?: true;
+  stream?(): AsyncIterable<DialogueStreamEvent>;
 }
 
 type RequestIdentity = Pick<Required<ProviderLedgerLine>, 'route' | 'endpoint' | 'requestShape' | 'cacheKey' | 'claimKey' | 'semanticDigest' | 'generation' | 'evidencePosition'>;
@@ -130,7 +131,7 @@ export async function transmitOnce(
     }
     const evidence = await cache.validEvidence();
     const claim = await cache.readClaim(claimKey);
-    if (exact.state === 'present' && exact.entry.generation === generation && !retiredCapture(cache, exact.entry)) {
+    if (exact.state === 'present' && exact.entry.streamedAnswer?.complete !== false && exact.entry.generation === generation && !retiredCapture(cache, exact.entry)) {
       const recorded = evidence.some((line) => line.itemId === exact.entry.itemId && line.cacheKey === cacheKey);
       const claimed = 'claim' in claim && claim.claim.itemId === exact.entry.itemId && claim.claim.generation === generation &&
         claim.claim.semanticDigest === identity.semanticDigest;
@@ -268,7 +269,7 @@ async function send(
     ...settled, ...identity, validation: record, recordedAt: new Date().toISOString(),
   });
   const transmittedAt = new Date().toISOString();
-  let response: { status: number; json(): Promise<unknown> };
+  let response: DeepSeekTransportResponse;
   try {
     response = await nativeFetch(url, init);
   } catch (error) {
@@ -276,6 +277,49 @@ async function send(
     await cache.holdUnknown(claimFacts);
     await cache.record(line({ outcome: 'failed', status: null, usage: null, incurredUsage: null, classification: 'outcome-unknown' }));
     throw error;
+  }
+  if (identity.requestShape === 'editorial-dialogue-sse' && response.status === 200) {
+    let consumed = false;
+    return { status: response.status, json: () => Promise.reject(new Error('AI7_OUTCOME_UNKNOWN')), stream: async function* () {
+      if (consumed) throw new Error('AI7_OUTCOME_UNKNOWN');
+      consumed = true;
+      const chunks: string[] = [];
+      let aggregate: unknown = { model, choices: [{ message: { content: '' }, finish_reason: null }], usage: null };
+      let complete = false;
+      let kept = false;
+      try {
+        for await (const event of response.stream?.() ?? dialogueSseEvents(response, model)) {
+          if (event.kind === 'text') chunks.push(event.text);
+          else { aggregate = event.response; complete = true; }
+          if (event.kind === 'text') yield event;
+        }
+        if (!complete) throw new Error('AI7_OUTCOME_UNKNOWN');
+      } finally {
+        if (!complete) {
+          aggregate = { model, choices: [{ message: { content: chunks.join('') }, finish_reason: null }], usage: null };
+          // Hold before keeping partial content: a saved prefix must never become permission to replay
+          // or send again. The Harness alone owns the editor's preserved complete fragments.
+          await cache.holdUnknown(claimFacts);
+        }
+        const usage = usageOfResponse(aggregate);
+        try {
+          await cache.keep({
+            model, requestDigest, requestBody: init.body, status: response.status, response: aggregate, usage, transmittedAt,
+            itemId, ...identity, promptContractDigest: item.promptContractDigest,
+            ...(item.taskPromptContractDigest === undefined ? {} : { taskPromptContractDigest: item.taskPromptContractDigest }),
+            validation: { family: record.family, case: record.case, step: record.step },
+            responseDigest: providerResponseDigest(aggregate), streamedAnswer: { complete, chunks },
+          });
+          kept = true;
+        } catch { kept = false; }
+        if (!kept) await cache.holdUnknown(claimFacts);
+        await cache.record(line({ outcome: complete ? 'transmitted' : 'failed', status: response.status, usage, incurredUsage: usage,
+          ...(!complete || !kept ? { classification: 'outcome-unknown' as const } : {}) }));
+        if (complete && kept) await cache.settle(claimFacts, 'completed');
+      }
+      // A complete event reaches the adapter only after its protected capture and ledger are durable.
+      yield { kind: 'complete', response: aggregate };
+    } };
   }
   let body: unknown = null;
   try {
