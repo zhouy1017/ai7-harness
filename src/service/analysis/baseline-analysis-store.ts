@@ -3062,7 +3062,7 @@ export class BaselineAnalysisStore {
     }
     if (input.phase === 'advance') return this.#advance(input.workId);
     if (this.#launch.live !== null) {
-      requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND || liveKindAdmission(input.launchPolicy, this.#definition, this.#launch.live) !== null,
+      requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND || plannedRunAdmission(input.launchPolicy, this.#definition, this.#launch.live) !== null,
         'ANALYSIS_KIND_NOT_ADMITTED', 'developer-live 当前只允许基线稿件分析；该任务种类尚未获准实时执行。');
       requireAnalysis(input.background == null,
         'ANALYSIS_ORIGIN_NOT_ADMITTED', 'developer-live 当前只允许直接发起的分析任务。');
@@ -3561,7 +3561,7 @@ export class BaselineAnalysisStore {
   ): { projection: AnalysisProjection; dispatchRunRecordId: string | null } {
     // The baseline rule of the selected Provider Processing admits one kind and one origin, each refused under its own code, as preparation refuses them.
     if (this.#launch.live !== null) {
-      const admitted = this.#definition.kind === BASELINE_ANALYSIS_KIND ? null : liveKindAdmission(this.#launch.policy, this.#definition, this.#launch.live);
+      const admitted = this.#definition.kind === BASELINE_ANALYSIS_KIND ? null : plannedRunAdmission(this.#launch.policy, this.#definition, this.#launch.live);
       requireAnalysis(this.#definition.kind === BASELINE_ANALYSIS_KIND || admitted !== null,
         'ANALYSIS_KIND_NOT_ADMITTED', 'developer-live 当前只允许基线稿件分析；该任务种类尚未获准实时执行。');
       // Every admitted kind starts by a direct authorization; writing's quick start also starts under its default execution
@@ -4855,6 +4855,12 @@ export class BaselineAnalysisStore {
       policy.providerProcessing.authorizedLiveTransmissionCount === 0 && policy.providerProcessing.liveTransmissionAllowed === false,
     'ANALYSIS_POLICY_UNAVAILABLE', '无法建立可信的 development-ci Provider Processing v1 拒绝记录。');
   }
+}
+
+/** The shared live admission of a planned Run's kind (Issue #429), on the Main Editorial Role its Execution Binding names. */
+function plannedRunAdmission(...args: Parameters<typeof liveKindAdmission>): ReturnType<typeof liveKindAdmission> {
+  const rule = liveKindAdmission(...args);
+  return rule?.modelRole === 'Main Editorial Role' ? rule : null;
 }
 
 export { AnalysisError, isRecord };

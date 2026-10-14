@@ -2388,13 +2388,13 @@ export class BaselineAnalysisExecutionOwner {
 }
 
 /**
- * The rule that admits a ledger's non-baseline kind under its launch (Issue #429), or `null`: the shared admission, on a
- * Model Role a credential slot can bind. A ledger bound to no live launch is admitted by none.
+ * The rule that admits a ledger's non-baseline kind under its launch (Issue #429), or `null`: the shared admission, on the
+ * Main Editorial Role a planned Run's persisted Execution Binding names. A ledger bound to no live launch is admitted by none.
  */
 function liveRuleOf(ledger: BaselineAnalysisStore): LiveKindRule | null {
   if (ledger.launch.live === null) return null;
   const rule = liveKindAdmission(ledger.launch.policy, ledger.definition, ledger.launch.live);
-  return rule !== null && (rule.modelRole === 'Main Editorial Role' || rule.modelRole === 'Fast Interaction Role') ? rule : null;
+  return rule?.modelRole === 'Main Editorial Role' ? rule : null;
 }
 
 /** The route facts a Run's Execution Binding names, from its frozen plan and the launch the owner runs under. */
