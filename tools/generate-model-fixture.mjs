@@ -324,6 +324,9 @@ export function parseGenerationArguments(argv) {
 }
 
 const SAMPLE1_SOURCE_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483';
+/** #429: the table each evaluation kind freezes its contract input in, and the unit subject its messages parse as. */
+const EVALUATION_TASK_TABLES = { evaluation: 'initial_evaluation_tasks', 'readers-report': 'readers_report_tasks', 'evaluation-rewrite': 'evaluation_rewrite_tasks' };
+const EVALUATION_UNIT_SUBJECTS = { evaluation: 'evaluation-unit', 'readers-report': 'readers-unit', 'evaluation-rewrite': 'rewrite-unit' };
 const TOOL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 let sample1Owners;
 
@@ -342,6 +345,10 @@ async function loadSample1Owners() {
         "export { reviewCategoryKindDefinition } from './src/service/review/review-category-kind.ts';",
         "export { reviewCategoryContract, reviewCategoryContractDigest } from './src/service/review/review-category-contract.ts';",
         "export { reviewCategoryContractInput } from './src/service/review/category-configuration.ts';",
+        "export { initialEvaluationKindDefinition } from './src/service/evaluation/initial-evaluation-kind.ts';",
+        "export { readersReportKindDefinition } from './src/service/evaluation/readers-report-kind.ts';",
+        "export { evaluationRewriteKindDefinition } from './src/service/evaluation/evaluation-rewrite-kind.ts';",
+        "export { BUILTIN_EVALUATION_PROFILE, evaluationProfileDigest } from './src/service/evaluation-records.ts';",
         "export { buildRunReportReflectionMessage } from './src/service/analysis/run-report-contract.ts';",
         "export { runReportAccountingOf } from './src/service/analysis/run-report.ts';",
       ].join('\n'), resolveDir: TOOL_ROOT, loader: 'ts' },
@@ -389,7 +396,33 @@ export async function verifySample1Capture(request, selection, parsed) {
     const envelope = plan('plan-envelope');
     let contract = contracts.find((candidate) => candidate.digest === selection.taskPromptContractDigest);
     let definition;
-    if (contract === undefined) {
+    // A Task's kind is read only when no baseline contract matched; a store without Task Intents holds no evaluation Task.
+    const kind = contract !== undefined || database.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'analysis_task_intents'").get() === undefined
+      ? undefined : database.prepare('SELECT kind FROM analysis_task_intents WHERE task_intent_id = ?').get(request.sample1Task)?.kind;
+    const evaluation = typeof kind === 'string' && Object.hasOwn(EVALUATION_TASK_TABLES, kind)
+      ? { table: EVALUATION_TASK_TABLES[kind], subject: EVALUATION_UNIT_SUBJECTS[kind] } : null;
+    if (contract === undefined && evaluation !== null) {
+      // #429: an evaluation contract is the exact input its Task froze — the house profile it was prepared under, or the 定稿
+      // record or saved entry with its exemplars — never today's profile or record. A plan listing 资料库 material proves nothing.
+      if (plan('execution-plan').materialReferences !== undefined) fail();
+      const rows = database.prepare(`SELECT canonical_json, sha256, prompt_contract_sha256 FROM ${evaluation.table} WHERE task_intent_id = ?`).all(request.sample1Task);
+      if (rows.length !== 1) fail();
+      const snapshot = checked(rows[0]);
+      if (snapshot.taskIntentId !== request.sample1Task || snapshot.promptContractSha256 !== rows[0].prompt_contract_sha256) fail();
+      if (kind === 'evaluation') {
+        // The snapshot's profile reads as its own digest, as the store checks it; the built-in profile's contract is the one the
+        // store builds from its own constant, as `#initialBaseDefinition` does.
+        const { sha256: profileSha256, ...profile } = snapshot.profile ?? {};
+        if (owners.evaluationProfileDigest(profile) !== profileSha256) fail();
+        const builtin = owners.evaluationProfileDigest(owners.BUILTIN_EVALUATION_PROFILE);
+        definition = owners.initialEvaluationKindDefinition(snapshot.profile.sha256 === builtin
+          ? { ...owners.BUILTIN_EVALUATION_PROFILE, sha256: builtin } : snapshot.profile);
+      } else {
+        definition = kind === 'readers-report' ? owners.readersReportKindDefinition(snapshot.input) : owners.evaluationRewriteKindDefinition(snapshot.input);
+      }
+      if (definition.kind !== kind || definition.promptContractDigest !== rows[0].prompt_contract_sha256) fail();
+      contract = { prompt: { systemPrompt: definition.systemPrompt }, digest: definition.promptContractDigest };
+    } else if (contract === undefined) {
       // #809: a review contract is the exact category configuration the Review Run froze, never
       // today's defaults or a category inferred from a filename. Only one Run may own this Task.
       const rows = database.prepare("SELECT DISTINCT r.canonical_json, r.sha256 FROM review_runs r, json_each(r.canonical_json, '$.categories') c WHERE json_extract(c.value, '$.task.taskIntentId') = ?").all(request.sample1Task);
@@ -427,10 +460,21 @@ export async function verifySample1Capture(request, selection, parsed) {
       revision.adapterPin.route !== selection.captured.route || revision.bindingPin.promptContractDigest !== selection.taskPromptContractDigest) fail();
     step = 'message';
     let expected;
-    if (parsed.subject === 'unit' || parsed.subject === 'review-unit') {
+    if (parsed.subject === 'unit' || parsed.subject === 'review-unit' ||
+        (evaluation !== null && parsed.subject === evaluation.subject)) {
       const unit = manifest.units[parsed.unitOrdinal - 1];
       if (unit === undefined) fail();
       expected = definition.buildUnitMessage(unit, manifest.units.length, byId);
+    } else if (parsed.subject === 'task-synthesis' && evaluation !== null) {
+      // The kind's book-level synthesis over the closed units the revision kept, read back by the kind's own record reader.
+      const rows = database.prepare("SELECT canonical_json, sha256, unit_ordinal FROM analysis_unit_results WHERE revision_id = ? AND state = 'closed' ORDER BY unit_ordinal").all(revision.revisionId);
+      const closed = rows.map((row) => {
+        const record = checked(row);
+        if (record.unitOrdinal !== row.unit_ordinal) fail();
+        return { unitOrdinal: record.unitOrdinal, result: definition.unitResultOfRecord(record, record.unitOrdinal) };
+      });
+      if (selection.promptContractDigest !== definition.crossUnit?.promptContractDigest) fail();
+      expected = definition.crossUnit.step.buildMessage(closed, manifest.units.length);
     } else if (parsed.subject === 'reduction') {
       const rows = database.prepare("SELECT canonical_json, sha256 FROM analysis_unit_results WHERE revision_id = ? AND state = 'closed' ORDER BY unit_ordinal").all(revision.revisionId);
       const closed = rows.map((row) => {
