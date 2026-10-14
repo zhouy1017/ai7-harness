@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from '../../shared/provider-configuration.generated.js';
+import type { OutboundDataCategoryId } from '../../shared/protocol.js';
 import { DIGEST_PATTERN, canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { assistantToolCalls, messageText, toolResultOf, type AssembledContentBlock, type AssembledModelPayload } from './payload.js';
 import {
@@ -56,8 +57,9 @@ export type RemoteExecutionRoute = ConfiguredRouteId;
 export type CredentialSlot = ConfiguredCredentialSlot;
 
 /**
- * The trusted scope's Provider Processing pin: selected v10 admits baseline analysis, editorial dialogue and reference-free
- * review on V4.1. Historical v5 and v9 and the superseded web reservation v8 are readable identities, not launch selections.
+ * The trusted scope's Provider Processing pin: selected v11 admits baseline analysis, editorial dialogue, reference-free
+ * review, writing, evaluation, and 润色 and conflict-regeneration Suggestions on V4.1. Historical v5, v9 and v10 and the
+ * superseded web reservation v8 are readable identities, not launch selections.
  */
 export type EgressPolicyPin =
   | {
@@ -68,7 +70,7 @@ export type EgressPolicyPin =
     }
   | {
       readonly operationalScope: 'developer-live';
-      readonly providerProcessingVersion: 'v5' | 'v8' | 'v9' | 'v10';
+      readonly providerProcessingVersion: 'v5' | 'v8' | 'v9' | 'v10' | 'v11';
       readonly liveTransmissionAllowed: true;
       readonly authorizedLiveTransmissionCount: 'bounded-by-run';
     };
@@ -86,9 +88,11 @@ export type EgressCeilingState = 'unset' | 'within' | 'reached' | 'not-applicabl
 /**
  * What a Run may send. Analysis sends the admitted public or synthetic material it was planned over; an Interactive Editorial
  * Dialogue (Issue #52, S17a) sends the words the editor selected in their own manuscript, and its question. A dialogue's
- * excerpt reaches the local deterministic route, or a remote one only under an allow rule that names it (S17c).
+ * excerpt reaches the local deterministic route, or a remote one only under an allow rule that names it (S17c). The four
+ * further identifiers Provider Processing v11 names (Issue #841) are declarations only: the gate still transmits a binding
+ * whose category is `public-or-synthetic`, or the editor's excerpt under a rule that names it, and refuses any other.
  */
-export type OutboundDataCategory = 'public-or-synthetic' | 'editor-selected-manuscript-excerpt';
+export type OutboundDataCategory = OutboundDataCategoryId;
 
 /** The binding facts the gate compares against; a frozen subset of the persisted Execution Binding. */
 export interface EgressBindingFacts {

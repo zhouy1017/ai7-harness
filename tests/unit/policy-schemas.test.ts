@@ -22,12 +22,12 @@ function readPair(policyFile: string, schemaFile: string) {
 }
 
 describe('validateAllPolicies', () => {
-  it('discovers all eighteen current and historical pairs and validates every one at this base', () => {
+  it('discovers all twenty current and historical pairs and validates every one at this base', () => {
     const pairs = discoverPolicyPairs(POLICIES_DIR);
-    expect(pairs).toHaveLength(18);
+    expect(pairs).toHaveLength(20);
 
     const results = validateAllPolicies(POLICIES_DIR);
-    expect(results).toHaveLength(18);
+    expect(results).toHaveLength(20);
     for (const result of results) {
       expect(result.ok, `${result.policyFile}: ${result.reason ?? ''}`).toBe(true);
     }
@@ -154,5 +154,77 @@ describe('validatePolicyDocument unsupported keywords', () => {
     expect(() => validatePolicyDocument({ name: 'example' }, schemaData)).toThrowError(
       /Unsupported schema keyword "oneOf" at #\./,
     );
+  });
+});
+
+describe('Provider Processing v11 and active-set v9 schemas', () => {
+  type Rules = { decision: { providerAllowRules: Array<Record<string, unknown>> } };
+  const pair = () => readPair('provider-processing-policy.v11.json', 'provider-processing-policy.v11.schema.json');
+  const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
+  it('validates the seven-rule tuple and rejects an eighth rule or a missing one', () => {
+    const { policyData, schemaData } = pair();
+    expect(() => validatePolicyDocument(policyData, schemaData)).not.toThrow();
+    const widened = clone(policyData) as Rules;
+    widened.decision.providerAllowRules.push(clone(widened.decision.providerAllowRules[5]!));
+    expect(() => validatePolicyDocument(widened, schemaData)).toThrowError(/has more than 7 allowed items/);
+    const narrowed = clone(policyData) as Rules;
+    narrowed.decision.providerAllowRules.splice(3, 1);
+    expect(() => validatePolicyDocument(narrowed, schemaData)).toThrowError();
+  });
+
+  it('rejects a writing or evaluation rule that adds a task kind, admits materials or turns web search on', () => {
+    const { policyData, schemaData } = pair();
+    const writing = clone(policyData) as Rules;
+    (writing.decision.providerAllowRules[3]!.allowedTaskKinds as string[]).push('factual-review');
+    expect(() => validatePolicyDocument(writing, schemaData)).toThrowError(/developerLiveWritingRule\/properties\/allowedTaskKinds does not equal the required const/);
+
+    const evaluation = clone(policyData) as Rules;
+    (evaluation.decision.providerAllowRules[4]!.source as Record<string, unknown>).materialReferencesAllowed = true;
+    expect(() => validatePolicyDocument(evaluation, schemaData)).toThrowError(/developerLiveEvaluationRule\/properties\/source does not equal the required const/);
+
+    const web = clone(policyData) as Rules;
+    (web.decision.providerAllowRules[3]!.transmissions as Record<string, unknown>).webSearchToolAllowed = true;
+    expect(() => validatePolicyDocument(web, schemaData)).toThrowError(/developerLiveWritingRule\/properties\/transmissions does not equal the required const/);
+  });
+
+  it('rejects a suggestions rule that applies a change, binds the Main Editorial Role or names a further kind', () => {
+    const { policyData, schemaData } = pair();
+    const apply = clone(policyData) as Rules;
+    (apply.decision.providerAllowRules[5]!.output as Record<string, unknown>).appliesManuscriptChange = true;
+    expect(() => validatePolicyDocument(apply, schemaData)).toThrowError(/developerLivePolishRule\/properties\/output does not equal the required const/);
+
+    const role = clone(policyData) as Rules;
+    (role.decision.providerAllowRules[5]!.providerBinding as Record<string, unknown>).modelRole = 'Main Editorial Role';
+    expect(() => validatePolicyDocument(role, schemaData)).toThrowError(/developerLivePolishRule\/properties\/providerBinding does not equal the required const/);
+
+    const kinds = clone(policyData) as Rules;
+    (kinds.decision.providerAllowRules[5]!.allowedTaskKinds as string[]).push('editorial-dialogue');
+    expect(() => validatePolicyDocument(kinds, schemaData)).toThrowError(/developerLivePolishRule\/properties\/allowedTaskKinds does not equal the required const/);
+  });
+
+  it('rejects a v11 document that drops one of the four new outbound categories or binds the frontier role', () => {
+    const { policyData, schemaData } = pair();
+    const categories = clone(policyData) as { outboundDataCategories: Record<string, unknown> };
+    delete categories.outboundDataCategories['house-exemplar-excerpt'];
+    expect(() => validatePolicyDocument(categories, schemaData)).toThrowError(/outboundDataCategories does not equal the required const/);
+
+    const frontier = clone(policyData) as { roleBindings: Record<string, Record<string, unknown>> };
+    frontier.roleBindings['Frontier Model Role']!.bindingState = 'bound';
+    expect(() => validatePolicyDocument(frontier, schemaData)).toThrowError(/roleBindings does not equal the required const/);
+  });
+
+  it('rejects an active-set v9 whose developer-live pin is not the exact v11 digest, and a v8 whose pin is v11', () => {
+    const { policyData, schemaData } = readPair('active-policy-set.v9.json', 'active-policy-set.v9.schema.json');
+    expect(() => validatePolicyDocument(policyData, schemaData)).not.toThrow();
+    for (const [field, value] of [['version', 'v10'], ['sha256', '1f2e1381b40ce2a91eba2c92af3cd883d6df5f574980d6f182e49d02856d86e9']] as const) {
+      const mutated = clone(policyData) as { activePolicies: { 'provider-processing-policy': { scopePins: Record<string, Record<string, unknown>> } } };
+      mutated.activePolicies['provider-processing-policy'].scopePins['developer-live']![field] = value;
+      expect(() => validatePolicyDocument(mutated, schemaData)).toThrowError(/does not equal the required const/);
+    }
+    const v8 = readPair('active-policy-set.v8.json', 'active-policy-set.v8.schema.json');
+    const pinned = clone(v8.policyData) as { activePolicies: { 'provider-processing-policy': { scopePins: Record<string, Record<string, unknown>> } } };
+    pinned.activePolicies['provider-processing-policy'].scopePins['developer-live']!.version = 'v11';
+    expect(() => validatePolicyDocument(pinned, v8.schemaData)).toThrowError(/does not equal the required const/);
   });
 });

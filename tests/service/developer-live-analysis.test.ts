@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { describeComposition } from '../../src/service/harness/primary-agent-harness.js';
-import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { ACTIVE_SET_VERSION, DEVELOPER_LIVE_POLICY_BINDING, DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import type { DevelopmentValidationIntent } from '../../src/shared/protocol.js';
 import { BaselineAnalysisExecutionOwner, DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS } from '../../src/service/analysis/execution.js';
 import {
@@ -422,7 +422,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
       background: { enrollmentVersionId: randomUUID() },
     }))).toBe('ANALYSIS_ORIGIN_NOT_ADMITTED');
   });
-  it('freezes the v10 plan and transmits the full declared chain through the gate', async () => {
+  it('freezes the selected plan and transmits the full declared chain through the gate', async () => {
     const calls: StubCall[] = [];
     const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
     const { units: responses, named } = await unitAnswers(prepared);
@@ -436,7 +436,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
       modelId: 'deepseek-v4.1-flash',
       credentialSlot: 'opencode-go',
       credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
-      providerProcessing: { operationalScope: 'developer-live', version: 'v10', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
+      providerProcessing: { operationalScope: 'developer-live', version: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
     });
     expect(provider.executionRoute).toEqual({ kind: 'opencode-go', model: 'deepseek-v4.1-flash', endpoint: OPENCODE_GO_ROUTE_PROFILE.endpoint });
     expect(provider.runBudgetCeiling).toEqual(CEILING);
@@ -475,11 +475,11 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     expect(spanSessions).not.toContain(attempt.executionBinding!.harnessSessionId);
     expect(attempt.credentialReadinessCheck).toMatchObject({ slot: 'opencode-go', readiness: 'present', valueReleased: false });
 
-    // The revision records the live route and the v10 policy pin, through the existing real path.
+    // The revision records the live route and the selected policy pin, through the existing real path.
     const revision = settled.resultSetRevision!;
     expect(revision.adapterPin).toEqual({ route: 'opencode-go', model: 'deepseek-v4.1-flash', fixtureIdentity: null, fixtureSha256: null });
     expect(revision.policyPin).toEqual({
-      operationalScope: 'developer-live', providerProcessingVersion: 'v10', activePolicySetVersion: 'v8', liveTransmissions: 'bounded-by-run',
+      operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 'bounded-by-run',
     });
     // The revision counts the three revision-facing stages: eight unit turns, the reduction turn and
     // the sampling turn. The reflection turn is dispatched after the revision is persisted, so its
@@ -1171,10 +1171,10 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
 
     // The scope, the version, the bound route, and the ceiling as the number the launch froze.
     const scopeStatement = settled.namedNonEffects.find((statement) => statement.includes('Provider Processing'))!;
-    expect(scopeStatement).toContain('developer-live · Provider Processing v10');
+    expect(scopeStatement).toContain(`developer-live · Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION}`);
     expect(scopeStatement).toContain('任务运行预算上限 500000 tokens');
     expect(scopeStatement).toContain('opencode-go · deepseek-v4.1-flash');
-    expect(consequence).toContain('developer-live · Provider Processing v10');
+    expect(consequence).toContain(`developer-live · Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION}`);
     expect(consequence).toContain('任务运行预算上限 500000 tokens');
     expect(consequence).toContain('opencode-go · deepseek-v4.1-flash');
     // The transmission count an update states is the recomputed unit count, never zero.
