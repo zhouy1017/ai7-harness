@@ -49,7 +49,7 @@ const CAPTURE_KEYS = [
   'subject', 'itemId', 'selectedItemId', 'evidenceScope', 'route', 'endpoint', 'requestShape', 'model', 'promptContractDigest', 'taskPromptContractDigest',
   'capturedAt', 'providerRequestDigest', 'providerResponseDigest', 'validation', 'identityMap', 'cacheKey', 'generation', 'fixtureResponseDigest', 'responseDigestOrigin',
 ] as const;
-const CAPTURE_SUBJECTS = ['unit', 'reduction', 'sampling', 'reflection', 'factual-unit', 'review-unit', 'evaluation-unit', 'readers-unit', 'rewrite-unit', 'writing-unit', 'task-synthesis', 'dialogue'] as const;
+const CAPTURE_SUBJECTS = ['unit', 'reduction', 'sampling', 'reflection', 'factual-unit', 'review-unit', 'evaluation-unit', 'readers-unit', 'rewrite-unit', 'writing-unit', 'task-synthesis', 'dialogue', 'editorial-polish', 'conflict-regenerate'] as const;
 const CAPTURE_ITEM_PATTERN = /^[A-Za-z0-9]+\/[a-z0-9-]+\/[1-9][0-9]{0,5}$/u;
 const CAPTURE_PLACEHOLDER_PATTERN = /^\{\{(?:block:[1-9][0-9]{0,3}|unit:[1-9][0-9]{0,3}:block:[1-9][0-9]{0,3}|ref:[1-9][0-9]{0,3}|sample-block:[1-9][0-9]{0,3})\}\}$/u;
 const CAPTURE_IDENTITY_PATTERN = /^[A-Za-z0-9_-]{1,64}$/u;
