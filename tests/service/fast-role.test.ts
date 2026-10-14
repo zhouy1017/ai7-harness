@@ -304,4 +304,3 @@ describe('the recorded Go captures, replayed through the real path (provider-fre
     expect(conflictOf(store, book, markId).draft!.resolutions[unitIndex]).toEqual({ resolution: 'edited', text: recorded.text });
   });
 });
-
