@@ -37,6 +37,9 @@ import type { WaitingFor } from './task-plan.js';
 import { controlledAnswerHold, controlledUnitHold } from './unit-hold.js';
 import type { DialogueExecutionOwner } from './dialogue/dialogue-execution.js';
 import { DialogueError } from './dialogue/dialogue-ledger.js';
+import type { FastRoleExecutionOwner } from './fast-role/fast-role-execution.js';
+import { FastRoleError } from './fast-role/fast-role-error.js';
+import type { FastRoleRequests } from './fast-role/fast-role-suggestions.js';
 import { HARNESS_SESSION_LOG_DIRECTORY } from './harness/session-log.js';
 import { ensureCanonicalDataDirectory } from '../shared/data-root.js';
 import { readBookTasks, readGlobalAttention } from './global-attention.js';
@@ -158,13 +161,21 @@ function requireNothingRunning(
   reviewRuns: ReviewRunDriver,
   dialogues: DialogueExecutionOwner,
   background: BackgroundAnalysisDispatcher,
+  fastRole: FastRoleContext,
 ): void {
-  // A dialogue answering writes its outcome when it settles (Issue #52, S17a), so it holds a replacement back as a Run does.
+  // A dialogue answering writes its outcome when it settles (Issue #52, S17a), so it holds a replacement back as a Run does;
+  // so does a 润色这段 or 重新生成建议 request in flight, which writes its marks or draft when its answer arrives (Issue #842).
   const blocked = replacementBlockedBy({
-    runsIdle: analysisExecution.idle && !dialogues.answering, reviewRunsDriving: reviewRuns.driving, jobsBusy: jobs.busy,
+    runsIdle: analysisExecution.idle && !dialogues.answering && !fastRole.owner.busy, reviewRunsDriving: reviewRuns.driving, jobsBusy: jobs.busy,
     exportRunning: store.databaseExportRunning(), backgroundBusy: background.busy, indexing: store.materialIndexing(),
   });
   if (blocked !== null) throw new StoreErrorClass('DATABASE_REPLACEMENT_BUSY', blocked);
+}
+
+/** 润色这段 and 基于当前稿件重新生成建议 (Issue #842): the launch's fast-role owner and the requests it has made. */
+interface FastRoleContext {
+  readonly owner: FastRoleExecutionOwner;
+  readonly requests: FastRoleRequests;
 }
 
 async function dispatch(
@@ -174,6 +185,7 @@ async function dispatch(
   analysisExecution: BaselineAnalysisExecutionOwner,
   reviewRuns: ReviewRunDriver,
   dialogues: DialogueExecutionOwner,
+  fastRole: FastRoleContext,
   request: ServiceRequest,
   importControl: J01ImportControl | undefined,
   launchPolicy: LaunchPolicyProjection,
@@ -732,14 +744,14 @@ async function dispatch(
     case 'inspectDatabaseImport':
       return { id: request.id, ok: true, op: request.op, result: await store.inspectDatabaseImport(request.input.source) };
     case 'prepareDatabaseReplacement':
-      requireNothingRunning(store, jobs, analysisExecution, reviewRuns, dialogues, background);
+      requireNothingRunning(store, jobs, analysisExecution, reviewRuns, dialogues, background, fastRole);
       return { id: request.id, ok: true, op: request.op, result: await store.prepareDatabaseReplacement(request.input.previewId) };
     case 'cancelDatabaseReplacement':
       return { id: request.id, ok: true, op: request.op, result: await store.cancelDatabaseReplacement(request.input.replacementId) };
     case 'inspectDatabaseReplacements':
       return { id: request.id, ok: true, op: request.op, result: await store.inspectDatabaseReplacements() };
     case 'rollBackDatabaseReplacement':
-      requireNothingRunning(store, jobs, analysisExecution, reviewRuns, dialogues, background);
+      requireNothingRunning(store, jobs, analysisExecution, reviewRuns, dialogues, background, fastRole);
       return { id: request.id, ok: true, op: request.op, result: await store.rollBackDatabaseReplacement(request.input.replacementId) };
     case 'prepareDatabaseMerge':
       return { id: request.id, ok: true, op: request.op, result: await store.prepareDatabaseMerge(request.input.previewId) };
@@ -1154,6 +1166,9 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.saveProposalConflictDraft(request.input) };
     case 'resolveProposalConflict':
       return { id: request.id, ok: true, op: request.op, result: store.resolveProposalConflict(request.input) };
+    // 基于当前稿件重新生成建议 (Issue #842): checked at once, its one request answered beside this loop and read again below.
+    case 'regenerateProposalConflictUnit':
+      return { id: request.id, ok: true, op: request.op, result: fastRoleCall(() => fastRole.requests.regenerate(request.input)) };
     case 'recordManuscriptEntryPosition':
       store.recordManuscriptEntryPosition(
         request.input.manuscriptId,
@@ -1329,6 +1344,14 @@ async function dispatch(
     }
     case 'convertDialogueToChangeSuggestion':
       return { id: request.id, ok: true, op: request.op, result: store.convertDialogueToChangeSuggestion(request.input.bookId, request.input) };
+    // 润色这段 and 基于当前稿件重新生成建议 on the Fast Interaction Role (Issue #842): whether this launch can ask them, the polish
+    // request — checked at once, answered beside this loop — and either request read again until it settles.
+    case 'inspectFastInteractionRoutes':
+      return { id: request.id, ok: true, op: request.op, result: fastRoleCall(() => fastInteractionRoutesOf(fastRole.owner, request.input.bookId)) };
+    case 'polishSelection':
+      return { id: request.id, ok: true, op: request.op, result: fastRoleCall(() => fastRole.requests.polish(request.input.bookId, { selection: request.input.selection })) };
+    case 'inspectFastInteractionRequest':
+      return { id: request.id, ok: true, op: request.op, result: fastRoleCall(() => fastRole.requests.inspect(request.input.bookId, request.input.requestId)) };
     // ① 任务面 (Issue #423, plan slice S77a): the Book's Tasks, read as 待我处理 reads them.
     case 'inspectBookTasks':
       return {
@@ -1392,6 +1415,16 @@ function dialogueReady(dialogues: DialogueExecutionOwner, sourceDigest: string |
     dialogues.requireReady(sourceDigest);
   } catch (error) {
     if (error instanceof DialogueError) throw new StoreErrorClass(error.code, error.message);
+    throw error;
+  }
+}
+
+/** A fast-role refusal (Issue #842), said as the store says its own. */
+function fastRoleCall<T>(operation: () => T): T {
+  try {
+    return operation();
+  } catch (error) {
+    if (error instanceof FastRoleError) throw new StoreErrorClass(error.code, error.message);
     throw error;
   }
 }
@@ -1545,6 +1578,8 @@ function parentIsAlive(parentPid: number): boolean {
 }
 
 let StoreErrorClass: typeof import('./store.js').StoreError;
+/** The fast-role routes' reading (Issue #842), loaded with the owners after network denial is installed. */
+let fastInteractionRoutesOf: typeof import('./fast-role/fast-role-suggestions.js').fastInteractionRoutes;
 
 /** How often Reconnect Preflight looks again while the service runs (Issue #502): a local read, then nothing, when no Run waits. */
 const RECONNECT_PREFLIGHT_INTERVAL_MS = 15_000;
@@ -1582,6 +1617,8 @@ async function run(): Promise<void> {
     { createKeyringSecretResolver },
     { ReviewRunDriver },
     { DialogueExecutionOwner, dialogueLiveRoute },
+    { FastRoleExecutionOwner, fastRoleLiveRoutes },
+    { FastRoleRequests: FastRoleRequestsClass, fastInteractionRoutes },
     { BackgroundAnalysisDispatcher: BackgroundAnalysisDispatcherClass },
     { baselinePromptContractForLaunch },
   ] =
@@ -1595,10 +1632,13 @@ async function run(): Promise<void> {
       import('./provider/keyring-secret-resolver.js'),
       import('./review/review-run-driver.js'),
       import('./dialogue/dialogue-execution.js'),
+      import('./fast-role/fast-role-execution.js'),
+      import('./fast-role/fast-role-suggestions.js'),
       import('./background-analysis.js'),
       import('./analysis/kind-definition.js'),
     ]);
   StoreErrorClass = StoreError;
+  fastInteractionRoutesOf = fastInteractionRoutes;
   let stopping = false;
   const stop = (): void => {
     if (stopping) return;
@@ -1618,6 +1658,7 @@ async function run(): Promise<void> {
   let analysisExecution: BaselineAnalysisExecutionOwner | undefined;
   let reviewRuns: ReviewRunDriver | undefined;
   let dialogues: DialogueExecutionOwner | undefined;
+  let fastRole: FastRoleContext | undefined;
   let preflightTimer: NodeJS.Timeout | undefined;
   let backupTimer: NodeJS.Timeout | undefined;
   let background: BackgroundAnalysisDispatcher | undefined;
@@ -1756,6 +1797,13 @@ async function run(): Promise<void> {
       live: developerLive === null ? null : dialogueLiveRoute(developerLive, launchPolicy, createKeyringSecretResolver()),
       answerHold: answerHoldPath === undefined ? null : controlledAnswerHold(answerHoldPath),
     });
+    // 润色这段 and 基于当前稿件重新生成建议 (Issue #842): the launch's fixture under development-ci, and under developer-live the
+    // route the selected policy admits for each kind, if any.
+    const fastRoleOwner = new FastRoleExecutionOwner({
+      fixture,
+      live: developerLive === null ? null : fastRoleLiveRoutes(developerLive, launchPolicy, createKeyringSecretResolver()),
+    });
+    fastRole = { owner: fastRoleOwner, requests: new FastRoleRequestsClass(fastRoleOwner, store) };
     // Connectivity Wait (Issue #502). The reading is the device's own unless J-04's control names a file; the
     // live route reaches its model over the network, and so — under that control only — does J-04's route.
     const owner = analysisExecution;
@@ -1839,7 +1887,7 @@ async function run(): Promise<void> {
       }
       let response: ServiceResponse;
       try {
-        response = await dispatch(store, harness, jobs, analysisExecution, reviewRuns, dialogues, request, importControl, launchPolicy, connectivity, background);
+        response = await dispatch(store, harness, jobs, analysisExecution, reviewRuns, dialogues, fastRole, request, importControl, launchPolicy, connectivity, background);
       } catch (error) {
         if (error instanceof StoreFatalError) {
           stop();
@@ -1887,6 +1935,9 @@ async function run(): Promise<void> {
       await jobs?.dispose();
       // A dialogue answering is interrupted and settles 回答中断 while the store is still open (Issue #52, S17a).
       await dialogues?.dispose();
+      // A 润色这段 or 重新生成建议 request in flight is interrupted and settles before the store closes (Issue #842).
+      fastRole?.owner.dispose();
+      await fastRole?.requests.settled();
       // The Review Run loop stops first and starts no further category; the owner then interrupts the
       // Run in flight, and the loop records what that Run came to before the store closes.
       const reviewRunsStopped = reviewRuns?.dispose();

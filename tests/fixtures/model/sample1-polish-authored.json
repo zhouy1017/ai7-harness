@@ -1,0 +1,23 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-polish-authored",
+  "description": "Authored 润色这段 answer (Issue #842) for one sentence of exact sample1, keyed under unit ordinal 0 by the ai7.editorial-polish/1 request digest of that selection and its paragraph context: two anchored replacements quoting the sentence and one whose words are not in it, which the service withholds.",
+  "basedOn": null,
+  "provenance": "authored",
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "fe63b62969f3caa2a172afe8d692479d2aad28815553ef0d08d51e2ce21b1f49",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-polish.result/1\",\"suggestions\":[{\"original\":\"比较特别卜算\",\"replacement\":\"比较特别的卜算\",\"reason\":\"「特别」与「卜算」之间缺少结构助词「的」。\"},{\"original\":\"都是众人眼里的有福之人\",\"replacement\":\"都被众人视为有福之人\",\"reason\":\"改用「被……视为」，说法更凝练。\"},{\"original\":\"这一句并不在所选文字之中\",\"replacement\":\"这一句也不在\",\"reason\":\"用来验证不在所选文字中的建议会被拦下。\"}]}",
+        "usage": {
+          "inputTokens": 320,
+          "outputTokens": 60
+        }
+      }
+    }
+  ]
+}
