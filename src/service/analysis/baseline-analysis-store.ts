@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { liveKindAdmission } from './live-kind-admission.js';
+import { liveKindAdmission, liveKindRule } from './live-kind-admission.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   BASELINE_ANALYSIS_KIND,
@@ -1814,14 +1814,34 @@ export class BaselineAnalysisStore {
 
   /**
    * The facts a 默认执行规则 binds, as the Book's durable state reads now (Issue #421): the re-derivation Reconnect
-   * Preflight compares a waiting Run's plan with, for an update of the whole Book. No rule is ever used under
-   * developer-live (Provider Processing v5 through v10: `matchingActiveDefaultExecutionRuleAllowed: false`), so this is
-   * read only outside it, where the ceiling depends on no unit count.
+   * Preflight compares a waiting Run's plan with, for an update of the whole Book. Outside developer-live the ceiling
+   * depends on no unit count. Under it a rule is read only for writing's quick start, whose selected rule admits the
+   * default-execution-rule origin (#810): every other kind is refused as before, and the writing ceiling resolves against
+   * the units the next checkpoint would freeze — the primary manuscript's working blocks — as the freeze resolves it.
    */
   currentRuleFacts(bookId: string, mode: AnalysisTaskMode): MaterialPlanInputsProjection {
-    requireAnalysis(UUID_PATTERN.test(bookId) && this.#launch.live === null && !this.#definition.mode(mode).rangeBound,
+    const live = this.#launch.live;
+    const liveWriting = live !== null && this.#definition.kind === WRITING_KIND && liveKindRule(this.#launch.policy, WRITING_KIND) !== null;
+    requireAnalysis(UUID_PATTERN.test(bookId) && (live === null || liveWriting) && !this.#definition.mode(mode).rangeBound,
       'ANALYSIS_RULE_FACTS_INVALID', '无法读取默认执行规则所需的当前事实。');
-    return this.#currentMaterialInputs(bookId, mode, null, 0);
+    return this.#currentMaterialInputs(bookId, mode, null, liveWriting ? this.#workingUnitCount(bookId) : 0);
+  }
+
+  /** How many units a checkpoint of the Book's primary manuscript would freeze now: its working blocks' manifest. */
+  #workingUnitCount(bookId: string): number {
+    const manuscript = this.#db.prepare("SELECT manuscript_id FROM manuscripts WHERE book_id = ? AND role = 'primary'").get(bookId) as SqlRow | undefined;
+    requireAnalysis(manuscript !== undefined, 'ANALYSIS_RULE_FACTS_INVALID', '无法读取默认执行规则所需的当前事实。');
+    const manuscriptId = asString(manuscript.manuscript_id);
+    const head = this.#workingHead(manuscriptId, bookId);
+    return deriveCoverageManifest({
+      bookId,
+      manuscriptId,
+      branchId: head.branchId,
+      revisionId: head.currentRevisionId,
+      revisionLabel: head.currentRevisionLabel,
+      revisionDigest: head.currentWorkingDigest,
+      blocks: this.readWorkingBlocks(head.branchId),
+    }).units.length;
   }
 
   /** The reuse-plan counts a version would derive for the given range against the latest revision; `null` for a mode that carries no plan. */
