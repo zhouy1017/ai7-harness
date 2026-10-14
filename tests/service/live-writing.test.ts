@@ -1,6 +1,7 @@
 // #810: reference-free writing on the real selected Provider Processing v11 projection and the shared admission (#429), over a
 // synthetic socket-free transport; no credential, key or manuscript text beyond exact sample1.
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
@@ -9,7 +10,9 @@ import { liveWritingRule } from '../../src/service/writing/live-writing-admissio
 import { liveKindAdmission, liveKindContractCategories } from '../../src/service/analysis/live-kind-admission.js';
 import { ruleFor, withRepeatedRuleFor, withRuleFor, withoutRuleFor } from '../support/policy-rules.js';
 import { writingKindDefinition, writingRecordedKindDefinition } from '../../src/service/writing/writing-kind.js';
-import { parseWritingUnitMessageHeader, type WritingContractInput } from '../../src/service/writing/writing-contract.js';
+import { parseWritingSynthesisMessageHeader, parseWritingUnitMessageHeader, writingSynthesisRequestDigest, type WritingContractInput } from '../../src/service/writing/writing-contract.js';
+import { fixtureEntryKey, loadModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { ownBlockTextsOf, unitContentDigest } from '../../src/service/provider/local-deterministic-adapter.js';
 import { WRITING_LIVE_SEND_CONSEQUENCE, WRITING_SEND_CONSEQUENCE } from '../../src/service/writing-tasks.js';
 import { ProviderResultCache, isModelCallLine } from '../../src/service/provider/provider-result-cache.js';
 import { transmitOnce } from '../../src/service/provider/live-transmission.js';
@@ -22,7 +25,10 @@ import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissing
 import { WRITING_REQUEST } from '../support/writing-task.js';
 import { SET_RULE_DEVELOPER_LIVE, SET_RULE_FIRST_BASELINE } from '../../src/service/default-execution-rules.js';
 
+const FIXTURES_ROOT = fileURLToPath(new URL('../fixtures/model/', import.meta.url));
 let roots: ServiceTestRoots;
+/** The recorded live answers a test binds, with the Task contract the synthesis request is keyed under; `null` answers synthetically. */
+let recorded: { fixture: ResolvedModelFixture; contract: string } | null;
 let policy: LaunchPolicyProjection;
 let store: EditorialStore;
 let owner: BaselineAnalysisExecutionOwner;
@@ -46,6 +52,7 @@ beforeEach(async () => {
   sent = 0;
   failure = 'none';
   hold = false;
+  recorded = null;
   arrived = new Promise<void>((resolve) => { announce = resolve; });
   const held = new Promise<void>((resolve) => { release = resolve; });
   const nativeFetch: typeof fetch = async (url, init) => {
@@ -60,6 +67,11 @@ beforeEach(async () => {
     const request = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> };
     expect(request.messages[0]!.content.includes('合成责编')).toBe(false);
     const message = request.messages.at(-1)!.content;
+    const replayed = recorded === null ? undefined : recordedEntry(recorded, message);
+    if (replayed?.response.kind === 'unit-result') {
+      return new Response(JSON.stringify({ model: launch.live.model, choices: [{ message: { content: replayed.response.text, reasoning_content: '合成推理通道。' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: replayed.response.usage.inputTokens, completion_tokens: replayed.response.usage.outputTokens } }), { status: 200 });
+    }
     const unit = parseWritingUnitMessageHeader(message);
     const result = unit !== null ? { schema: 'ai7.writing.unit-result/1', unitOrdinal: unit.ordinal,
       passages: [{ kind: 'highlight', note: '合成回归看点。', blockOrdinals: [1] }] }
@@ -94,6 +106,30 @@ async function run(bookId: string, prepared: WritingProjection) {
   owner.admitOrQueue(authorized.dispatchRunRecordId!, authorized.ledger);
   await owner.whenIdle();
   return store.inspectWriting(bookId)!;
+}
+
+/**
+ * The recorded live answer to this exact request: a unit by its ordinal and own block texts (a fresh import mints new block
+ * identities), the 全书综合 by the request digest its rebuilt passage set gives under the Task's contract. A unit or synthesis the
+ * fixture does not answer refuses; anything else — the reflection, which ended outcome-unknown live — stays synthetic.
+ */
+function recordedEntry(replay: { fixture: ResolvedModelFixture; contract: string }, message: string): ModelFixtureEntry | undefined {
+  const unit = parseWritingUnitMessageHeader(message);
+  const synthesis = parseWritingSynthesisMessageHeader(message);
+  if (unit === null && synthesis === null) return undefined;
+  const entry = unit !== null
+    ? [...replay.fixture.entries.values()].find((candidate) => candidate.unitOrdinal === unit.ordinal && candidate.contentDigest === unitContentDigest(ownBlockTextsOf(message)))
+    : replay.fixture.entries.get(fixtureEntryKey(0, writingSynthesisRequestDigest(replay.contract, synthesis!.setDigest)));
+  if (entry === undefined) throw new Error('RECORDED_WRITING_ENTRY_MISSING');
+  return entry;
+}
+
+/** The recorded draft's words, read from the reviewed fixture so no derivative of them is written here. */
+function recordedDraft(fixture: ResolvedModelFixture): { text: string; title: string; firstParagraph: string } {
+  const response = [...fixture.entries.values()].find((entry) => entry.unitOrdinal === 0)!.response;
+  if (response.kind !== 'unit-result') throw new Error('RECORDED_WRITING_SYNTHESIS_MISSING');
+  const draft = JSON.parse(response.text) as { title: string; sections: Array<{ paragraphs: string[] }> };
+  return { text: response.text, title: draft.title, firstParagraph: draft.sections[0]!.paragraphs[0]! };
 }
 
 describe('reference-free writing on the Go execution path (#810)', () => {
@@ -250,6 +286,54 @@ describe('reference-free writing on the Go execution path (#810)', () => {
     expect(liveKindAdmission(policy, { ...definition, materialReferences: {} }, binding)).toBeNull();
     expect(liveKindAdmission(withRuleFor(policy, 'writing', { outboundDataCategories: ['public-or-synthetic', 'book-metadata-and-synopsis'] }), definition, binding)).toBeNull();
     expect(liveKindAdmission(policy, definition, { ...binding, model: 'another-model' })).toBeNull();
+  });
+
+  it('replays the recorded live draft and revision through the same contracts, outcomes and usage (#810 evidence)', async () => {
+    // Recorded units and syntheses answer; both reflection turns ended outcome-unknown live and are answered synthetically
+    // here. This regression sends nothing and asserts no editorial quality.
+    const draftFixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-recorded-v41-writing-draft');
+    const revisionFixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-recorded-v41-writing-revision');
+    for (const fixture of [draftFixture, revisionFixture]) {
+      expect(fixture.provenance).toBe('recorded');
+      expect([...fixture.entries.values()].every((entry) => entry.capture?.model === DEVELOPER_LIVE_POLICY_BINDING.model && entry.capture.itemId.startsWith('S84/'))).toBe(true);
+    }
+    // The evidence Book's title and the editor's words of the live Tasks rebuild the exact recorded contracts.
+    const imported = await importSample1Book(store, roots.codeRoot, 'sample1 writing evidence');
+    await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
+    recordMissingCredentialConnection(store, 'L2 主编辑连接');
+    const draft = prepare(imported.bookId);
+    expect(draft.planEnvelope!.promptContractDigest).toBe('474768c3d789ff61b8c15ff04c8b659fcaf9fc6fe9378f67fcd0efad14a9bcf4');
+    recorded = { fixture: draftFixture, contract: draft.planEnvelope!.promptContractDigest };
+    const first = (await run(imported.bookId, draft)).resultSetRevision!;
+    expect(first.coverage).toMatchObject({ state: 'complete', unitsTotal: 8, unitsClosed: 8 });
+    expect(first.gaps).toEqual([]);
+    expect(first.writing.draft?.title).toBe(recordedDraft(draftFixture).title);
+    expect(first.usage).toEqual({ requests: 9, inputTokens: 16_974, outputTokens: 29_552 });
+    const revision = prepare(imported.bookId, '篇幅控制在八百字以内，开头先写故事的悬念，不剧透结局。');
+    expect(revision.taskIntent!.mode).toBe('writing-again');
+    expect(revision.planEnvelope!.promptContractDigest).toBe('9b2ef12ecd8d6927c19a3d49e66d7f1fffc9af9fffd3f85177ee4f2fcf8da282');
+    recorded = { fixture: revisionFixture, contract: revision.planEnvelope!.promptContractDigest };
+    const second = (await run(imported.bookId, revision)).resultSetRevision!;
+    expect(second.coverage).toMatchObject({ state: 'complete', unitsTotal: 8, unitsClosed: 8 });
+    expect(second.writing.draft?.title).toBe(recordedDraft(revisionFixture).title);
+    expect(second.update.predecessor?.revisionId).toBe(first.revisionId);
+    expect(second.usage).toEqual({ requests: 9, inputTokens: 16_719, outputTokens: 24_700 });
+    // Eight units, the synthesis and the reflection per Run; every item under S84.
+    expect(sent).toBe(20);
+    const cache = new ProviderResultCache(join(roots.inputRoot, 'cache'));
+    await cache.refresh();
+    expect(cache.lines.filter(isModelCallLine).every((line) => line.itemId.startsWith('S84/'))).toBe(true);
+  }, 120_000);
+
+  it('judges the recorded real draft by the copy rules: admitted as it is, withheld when a 范例 or 资料 holds its words', async () => {
+    const recordedWords = recordedDraft(await loadModelFixture(FIXTURES_ROOT, 'sample1-recorded-v41-writing-draft'));
+    const input: WritingContractInput = { type: { typeId: 'promotion-article', label: '宣传文章' }, book: { title: '合成图书', authors: [], editors: [], series: [] },
+      audience: '读者', channel: '纸面', requirements: null, synopsis: null, evaluation: null, exemplars: [] };
+    expect(writingKindDefinition(input).crossUnit!.step!.parse(recordedWords.text, [])).toMatchObject({ ok: true });
+    const exemplar = { bookTitle: '合成范例', version: 1, excerpt: false, text: recordedWords.firstParagraph };
+    expect(writingKindDefinition({ ...input, exemplars: [exemplar] }).crossUnit!.step!.parse(recordedWords.text, [])).toMatchObject({ ok: false, code: 'exemplar-copied' });
+    expect(writingKindDefinition({ ...input, materials: [{ title: '合成资料', paragraphs: [recordedWords.firstParagraph] }] }).crossUnit!.step!.parse(recordedWords.text, []))
+      .toMatchObject({ ok: false, code: 'material-copied' });
   });
 
   it('withholds copied real-format synthesis output under the existing exemplar and material rules', () => {
