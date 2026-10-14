@@ -766,11 +766,13 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       let body: unknown = null;
       const dialogueStream = this.#deps.requestShape === 'editorial-dialogue-sse';
       if (dialogueStream && response.status === 200 && response.replayed !== true) {
-        yield { type: 'block-start', index: 0, blockType: 'text' };
-        blockStarted = true;
         let completed = false;
+        // Nothing is yielded before the stream reads: a stop that ends this turn at any chunk then ends a stream already
+        // reading, so the transmission still records its possibly billed request as unknown.
         for await (const event of response.stream?.() ?? dialogueSseEvents(response, this.#modelProfile.model)) {
           if (event.kind === 'text') {
+            if (!blockStarted) yield { type: 'block-start', index: 0, blockType: 'text' };
+            blockStarted = true;
             streamed += event.text;
             yield { type: 'text-delta', index: 0, text: event.text };
           } else { body = event.response; completed = true; }

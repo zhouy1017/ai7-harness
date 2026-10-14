@@ -1,11 +1,24 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { describe, expect, it } from 'vitest';
-import { assembleProviderRequest, DeepSeekOpenAiCompatibleAdapter, dialogueSseEvents, OPENCODE_GO_ROUTE_PROFILE } from '../../src/service/provider/deepseek-adapter.js';
+import { assembleProviderRequest, DeepSeekOpenAiCompatibleAdapter, dialogueSseEvents, OPENCODE_GO_ROUTE_PROFILE, type DeepSeekTransport } from '../../src/service/provider/deepseek-adapter.js';
 import { CredentialBroker } from '../../src/service/provider/credential-broker.js';
 import { OPENCODE_GO_V41_FLASH_PROFILE } from '../../src/service/provider/model-profile.js';
 import { buildDialogueMessage, DIALOGUE_PROMPT_CONTRACT, DIALOGUE_PROMPT_CONTRACT_DIGEST } from '../../src/service/dialogue/contract.js';
-import { canonicalJson } from '../../src/service/analysis/canonical.js';
+import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
+import { BASELINE_PROMPT_CONTRACT, BASELINE_PROMPT_CONTRACT_DIGEST, buildUnitMessage } from '../../src/service/analysis/contract.js';
+import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryContractInput } from '../../src/service/review/category-configuration.js';
+import { buildReviewCategoryUnitMessage, reviewCategoryContract, reviewCategoryContractDigest } from '../../src/service/review/review-category-contract.js';
+import { transmitOnce } from '../../src/service/provider/live-transmission.js';
+import { ProviderResultCache, isModelCallLine, providerCacheKey, providerSemanticDigest } from '../../src/service/provider/provider-result-cache.js';
+import type { CoverageManifestUnitProjection } from '../../src/shared/protocol.js';
 
 const model = OPENCODE_GO_V41_FLASH_PROFILE;
+/** What the adapter at b32fb75b, before #833, sent for the synthetic baseline unit and review unit below. */
+const BASELINE_BYTES_SHA256 = '00e2583afeecfb79882410ef5bbdd4eb52602e280b600d0598b16076c3405d89';
+const REVIEW_BYTES_SHA256 = 'd7ebae3ad6ca7a71a8f60d77b0cfff9629536c2e9791472d37c12a366e3673d3';
 const event = (value: unknown): string => `data: ${JSON.stringify(value)}\r\n\r\n`;
 const delta = (text: string): string => event({ model: model.model, choices: [{ index: 0, delta: { content: text } }] });
 const finish = event({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] });
@@ -24,6 +37,19 @@ async function read(wire: string, bytewise = false): Promise<unknown[]> {
   for await (const item of dialogueSseEvents(response(wire, bytewise), model.model)) events.push(item);
   return events;
 }
+/** The Go V4.1 adapter over a stub transport; `requestShape` only as the dialogue owner sets it. */
+function adapter(transport: DeepSeekTransport, promptContractDigest: string, requestShape?: 'editorial-dialogue-sse'): DeepSeekOpenAiCompatibleAdapter {
+  return new DeepSeekOpenAiCompatibleAdapter({
+    broker: new CredentialBroker({ resolve: async () => 'placeholder' }),
+    slotBinding: { bindingDigest: 'a'.repeat(64), modelRole: 'Fast Interaction Role', slot: 'opencode-go', credentialReference: 'a7c0de00-5040-4f27-9e13-6b1f2c8d4a55' },
+    tickets: { take: () => ({ decision: 'transmit-remote', bindingDigest: 'a'.repeat(64), payloadDigest: 'b'.repeat(64) }) },
+    attribution: () => ({}), promptContractDigest, profile: OPENCODE_GO_ROUTE_PROFILE, modelProfile: model, sessionId: () => 'synthetic-session',
+    codes: { QUOTA_EXCEEDED_CODE: 'QUOTA', INVALID_CREDENTIAL_CODE: 'AUTH', CONTEXT_WINDOW_EXCEEDED_CODE: 'CONTEXT' },
+    transport, ...(requestShape === undefined ? {} : { requestShape }),
+  });
+}
+const turn = (system: string, text: string): GenerateOptions => ({ provider: model.route, model: model.model, system,
+  messages: [{ id: 'synthetic-message' as never, source: { kind: 'user' }, role: 'user', content: [{ type: 'text', text }] }] });
 
 describe('dialogue-only SSE transport (Issue #833)', () => {
   it('finishes an empty SSE answer with one text block and no duplicate block start', async () => {
@@ -79,5 +105,60 @@ describe('dialogue-only SSE transport (Issue #833)', () => {
     expect(await iterator.next()).toEqual({ done: false, value: { kind: 'text', text: '完整句。' } });
     await iterator.return?.();
     expect(cancelled).toBe(true);
+  });
+  it('holds the claim and records the unknown outcome when a stop ends the answer at its first event', async () => {
+    // The agent loop ends the adapter's stream at whichever chunk it holds when 停止回答 aborts. The transmission's stream is
+    // already reading by then, so the possibly billed request leaves its hold, its incomplete entry and its ledger line.
+    const root = await mkdtemp(join(tmpdir(), 'ai7-dialogue-sse-'));
+    try {
+      const cache = new ProviderResultCache(root);
+      await cache.open();
+      const sent: Array<{ url: string; body: string }> = [];
+      const instance = adapter((url, init) => transmitOnce(cache, async (target, request) => {
+        sent.push({ url: target, body: request.body });
+        return new Response(new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new TextEncoder().encode(delta('完整句。'))); } }),
+          { headers: { 'content-type': 'text/event-stream' } });
+      }, { purpose: 'editorial-dialogue', slice: 'S17c', promptContractDigest: DIALOGUE_PROMPT_CONTRACT_DIGEST, taskPromptContractDigest: DIALOGUE_PROMPT_CONTRACT_DIGEST },
+      { intent: { family: 'editorial-dialogue-stream', case: 'synthetic-stop', delta: null }, step: 'editorial-dialogue/ask', requestShape: 'editorial-dialogue-sse' },
+      OPENCODE_GO_ROUTE_PROFILE, model.model, url, init), DIALOGUE_PROMPT_CONTRACT_DIGEST, 'editorial-dialogue-sse');
+      const iterator = instance.stream(turn(DIALOGUE_PROMPT_CONTRACT.systemPrompt, buildDialogueMessage({ kind: 'ask', selection: '合成选区。', question: '合成问题？', kept: null })))[Symbol.asyncIterator]();
+      expect((await iterator.next()).value).toMatchObject({ type: 'block-start' });
+      await iterator.return?.(undefined);
+      expect(sent).toHaveLength(1);
+      const namespace = { route: model.route, endpoint: sent[0]!.url, requestShape: 'editorial-dialogue-sse', model: model.model };
+      const reopened = new ProviderResultCache(root);
+      await reopened.open();
+      expect(await reopened.readClaim(providerCacheKey(namespace, providerSemanticDigest(sent[0]!.body)))).toMatchObject({ state: 'outcome-unknown' });
+      expect(reopened.lines.filter(isModelCallLine).map((line) => [line.outcome, line.classification, line.usage])).toEqual([['failed', 'outcome-unknown', null]]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+  it('sends baseline analysis and review requests with their pre-#833 bytes and stream:false on the SSE-capable model', async () => {
+    // The real frozen contracts and message builders over synthetic blocks, through the adapter itself: an SSE-capable
+    // model changes nothing for any request that is not the dialogue's. Digests pinned from the adapter at b32fb75b.
+    const block = { blockId: `blk_${'d'.repeat(24)}`, kind: 'paragraph' as const, level: null, text: '合成段落。' };
+    const unit = { ordinal: 1, digest: 'e'.repeat(64), blockIds: [block.blockId], overlapBlockIds: [] } as unknown as CoverageManifestUnitProjection;
+    const blocks = new Map([[block.blockId, block]]);
+    const review = reviewCategoryContract(reviewCategoryContractInput(BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories[0]!));
+    const requests = [
+      { digest: BASELINE_PROMPT_CONTRACT_DIGEST, options: turn(BASELINE_PROMPT_CONTRACT.systemPrompt, buildUnitMessage(unit, 1, blocks)), pinned: BASELINE_BYTES_SHA256 },
+      { digest: reviewCategoryContractDigest(review), options: turn(review.systemPrompt, buildReviewCategoryUnitMessage(review, unit, 1, blocks)), pinned: REVIEW_BYTES_SHA256 },
+    ];
+    for (const request of requests) {
+      const sent: Array<{ headers: Record<string, string>; body: string }> = [];
+      const instance = adapter(async (_url, init) => {
+        sent.push({ headers: init.headers, body: init.body });
+        return { status: 200, json: async () => ({ model: model.model, choices: [{ message: { content: '{}' }, finish_reason: 'stop' }], usage: { prompt_tokens: 8, completion_tokens: 4 } }) };
+      }, request.digest);
+      const chunks: StreamChunk[] = [];
+      for await (const chunk of instance.stream(request.options)) chunks.push(chunk);
+      expect(chunks.map((chunk) => chunk.type)).toEqual(['block-start', 'text-delta', 'block-end', 'usage', 'finish']);
+      expect(sent).toHaveLength(1);
+      expect(sha256Hex(sent[0]!.body)).toBe(request.pinned);
+      expect(JSON.parse(sent[0]!.body)).toMatchObject({ stream: false });
+      expect(sent[0]!.body).not.toContain('stream_options');
+      expect(sent[0]!.headers.accept).toBe('application/json');
+    }
   });
 });
