@@ -375,6 +375,25 @@ describe('就这段提问… on the live route (provider-free)', () => {
       expect(calls).toHaveLength(2);
     } finally { await dialogues.dispose(); }
   });
+  it('keeps the whole-answer JSON request for an admitted model whose profile declares no streaming (Issue #833)', async () => {
+    const calls: StubCall[] = [];
+    const store = await openStore();
+    const book = await importSample1Book(store, roots.codeRoot, '整段回答');
+    const selection = selectionOf(store, book);
+    const live = liveRoute(stubTransport(calls, () => ANSWER));
+    const { streaming: _declared, ...capabilities } = live.route!.modelProfile.capabilities;
+    const dialogues = liveOwner(store, { ...live, route: { ...live.route!, modelProfile: { ...live.route!.modelProfile, capabilities } } });
+    try {
+      const { projection } = await ask(store, dialogues, book.bookId, selection);
+      expect(projection.attempts[0]!.state).toBe('completed');
+      expect(texts(projection)).toEqual(['这段一直用第三人称限知视角叙述。', '人物的心理只写到主人公为止，没有越界。', '末句的语气可以改得更平缓些。']);
+      expect(calls).toHaveLength(1);
+      expect(JSON.parse(calls[0]!.body)).toMatchObject({ stream: false });
+      expect(calls[0]!.body).not.toContain('stream_options');
+      expect(calls[0]!.headers.accept).toBe('application/json');
+      expect((await ledgerLines()).map((line) => [line.outcome, line.requestShape])).toEqual([['transmitted', 'openai-chat-completions']]);
+    } finally { await dialogues.dispose(); }
+  });
   it('sends the one bounded message once, shows the answer by complete fragment, records the binding and the ledger item', async () => {
     const calls: StubCall[] = [];
     const store = await openStore();
@@ -609,6 +628,23 @@ describe('the recorded live answer (Issue #52, S17c fixture)', () => {
     } finally {
       await local.dispose();
     }
+  });
+  it('loads the streamed continuation capture under its SSE namespace with the provenance #833 recorded (Issue #833)', async () => {
+    // The admitted stream fixture is the completed live 继续回答 alone; the stopped ask before it is no fixture entry.
+    const { loadModelFixture } = await import('../../src/service/provider/model-fixture.js');
+    const { resolve } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const recorded = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-dialogue-recorded-v41-stream');
+    expect(recorded.entries.size).toBe(1);
+    const entry = [...recorded.entries.values()][0]!;
+    expect(entry.capture as unknown as Record<string, unknown>).toMatchObject({
+      subject: 'dialogue', itemId: 'S17c/editorial-dialogue/3', selectedItemId: 'S17c/editorial-dialogue/3', evidenceScope: 'namespaced',
+      route: 'opencode-go', endpoint: OPENCODE_GO_ROUTE_PROFILE.endpoint, requestShape: 'editorial-dialogue-sse', model: OPENCODE_GO_MODEL,
+      promptContractDigest: DIALOGUE_PROMPT_CONTRACT_DIGEST, taskPromptContractDigest: DIALOGUE_PROMPT_CONTRACT_DIGEST,
+      providerRequestDigest: 'c152a59c8cb396e055cef40703b70d59274fa3497507b6441d235a5ce22d22af',
+      validation: { step: 'editorial-dialogue/continue' },
+    });
+    expect(entry.response).toMatchObject({ kind: 'answer-chunks', usage: { inputTokens: 363, outputTokens: 1544 } });
   });
 });
 
