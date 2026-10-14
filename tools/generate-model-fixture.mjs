@@ -339,6 +339,9 @@ async function loadSample1Owners() {
         "export { buildCrossUnitMessage } from './src/service/analysis/cross-unit-contract.ts';",
         "export { buildAssuranceSamplingMessage, drawAssuranceSample, assuranceSamplingTurns } from './src/service/analysis/assurance-sampling-contract.ts';",
         "export { baselineAnalysisKindDefinition } from './src/service/analysis/kind-definition.ts';",
+        "export { reviewCategoryKindDefinition } from './src/service/review/review-category-kind.ts';",
+        "export { reviewCategoryContract, reviewCategoryContractDigest } from './src/service/review/review-category-contract.ts';",
+        "export { reviewCategoryContractInput } from './src/service/review/category-configuration.ts';",
         "export { buildRunReportReflectionMessage } from './src/service/analysis/run-report-contract.ts';",
         "export { runReportAccountingOf } from './src/service/analysis/run-report.ts';",
       ].join('\n'), resolveDir: TOOL_ROOT, loader: 'ts' },
@@ -373,10 +376,6 @@ export async function verifySample1Capture(request, selection, parsed) {
       { selection: 'current', prompt: owners.BASELINE_PROMPT_CONTRACT, digest: owners.BASELINE_PROMPT_CONTRACT_DIGEST },
       { selection: 'retained-v1', prompt: owners.BASELINE_PROMPT_CONTRACT_V1, digest: owners.BASELINE_PROMPT_CONTRACT_V1_DIGEST },
     ];
-    const contract = contracts.find((candidate) => candidate.digest === selection.taskPromptContractDigest);
-    if (contract === undefined || parsed.carriedMessageCount !== 1 || parsed.systemMessages.length !== 1 ||
-      parsed.systemMessages[0] !== contract.prompt.systemPrompt) fail();
-    const definition = owners.baselineAnalysisKindDefinition(contract.selection);
     step = 'records';
     const { DatabaseSync } = await import('node:sqlite');
     database = new DatabaseSync(request.sample1Store, { readOnly: true });
@@ -388,6 +387,27 @@ export async function verifySample1Capture(request, selection, parsed) {
     const pin = plan('manuscript-pin');
     const manifest = plan('coverage-manifest');
     const envelope = plan('plan-envelope');
+    let contract = contracts.find((candidate) => candidate.digest === selection.taskPromptContractDigest);
+    let definition;
+    if (contract === undefined) {
+      // #809: a review contract is the exact category configuration the Review Run froze, never
+      // today's defaults or a category inferred from a filename. Only one Run may own this Task.
+      const rows = database.prepare("SELECT DISTINCT r.canonical_json, r.sha256 FROM review_runs r, json_each(r.canonical_json, '$.categories') c WHERE json_extract(c.value, '$.task.taskIntentId') = ?").all(request.sample1Task);
+      if (rows.length !== 1) fail();
+      const snapshot = checked(rows[0]);
+      const categories = snapshot.categories.filter((category) => category.task?.taskIntentId === request.sample1Task);
+      if (snapshot.materialReferences !== undefined || categories.length !== 1) fail();
+      const category = categories[0];
+      if (category.executor !== 'review-category-contract' || category.entry.searchEngine ||
+          category.entry.seriesKnowledge !== undefined || category.task.planEnvelopeDigest !== sha256Hex(canonicalJson(envelope))) fail();
+      const input = owners.reviewCategoryContractInput(category.entry);
+      const prompt = owners.reviewCategoryContract(input);
+      contract = { prompt, digest: owners.reviewCategoryContractDigest(prompt) };
+      definition = owners.reviewCategoryKindDefinition(input);
+      if (category.task.kind !== definition.kind) fail();
+    } else definition = owners.baselineAnalysisKindDefinition(contract.selection);
+    if (contract.digest !== selection.taskPromptContractDigest || parsed.carriedMessageCount !== 1 ||
+        parsed.systemMessages.length !== 1 || parsed.systemMessages[0] !== contract.prompt.systemPrompt) fail();
     if (pin.sourceDigest !== SAMPLE1_SOURCE_SHA256 || pin.revisionDigest !== manifest.manuscript.revisionDigest ||
       pin.revisionId !== manifest.manuscript.revisionId || envelope.promptContractDigest !== contract.digest) fail();
     step = 'extract';
@@ -407,10 +427,10 @@ export async function verifySample1Capture(request, selection, parsed) {
       revision.adapterPin.route !== selection.captured.route || revision.bindingPin.promptContractDigest !== selection.taskPromptContractDigest) fail();
     step = 'message';
     let expected;
-    if (parsed.subject === 'unit') {
+    if (parsed.subject === 'unit' || parsed.subject === 'review-unit') {
       const unit = manifest.units[parsed.unitOrdinal - 1];
       if (unit === undefined) fail();
-      expected = owners.buildUnitMessage(unit, manifest.units.length, byId);
+      expected = definition.buildUnitMessage(unit, manifest.units.length, byId);
     } else if (parsed.subject === 'reduction') {
       const rows = database.prepare("SELECT canonical_json, sha256 FROM analysis_unit_results WHERE revision_id = ? AND state = 'closed' ORDER BY unit_ordinal").all(revision.revisionId);
       const closed = rows.map((row) => {
@@ -420,7 +440,7 @@ export async function verifySample1Capture(request, selection, parsed) {
       });
       expected = owners.buildCrossUnitMessage(closed, manifest.units.length);
     } else if (parsed.subject === 'sampling') {
-      const candidates = definition.assurance.candidates({ components: { crossUnitFindings: revision.crossUnitFindings } });
+      const candidates = definition.assurance.candidates({ components: revision });
       const draw = owners.drawAssuranceSample(manifest, candidates);
       const messages = owners.assuranceSamplingTurns(draw.sampled).map((turn) =>
         owners.buildAssuranceSamplingMessage(manifest.units[turn.unitOrdinal - 1], manifest.units.length, byId, turn.findings, definition.assurance.prompt));
@@ -560,6 +580,7 @@ export function resolveLedgerSelection(lines, selector) {
     typeof captured.recordedAt === 'string' && !Number.isNaN(Date.parse(captured.recordedAt)) && LEDGER_ITEM_ID_PATTERN.test(chosen.itemId),
   'FIXTURE_GEN/capture-unproven', '账本没有该请求的可确认捕获。');
   const legacyReplay = chosen.evidenceScope === 'legacy-unnamespaced';
+  const chosenTask = taskContractOf(chosen);
   const namespaceFields = ['route', 'endpoint', 'requestShape', 'cacheKey', 'generation'];
   const scoped = !legacyReplay && namespaceFields.some((key) => key in chosen);
   refuse(!scoped || namespaceFields.every((key) => typeof chosen[key] === 'string' && chosen[key].length > 0),
@@ -567,10 +588,10 @@ export function resolveLedgerSelection(lines, selector) {
   // The cache keeps an #808 capture only for a 200 it could keep whole; anything else under a namespaced key is not one.
   refuse(!scoped || (captured.outcome === 'transmitted' && captured.status === 200 &&
     chosen.cacheKey === namespacedCacheKey(chosen, chosen.requestDigest) &&
-    typeof chosen.taskPromptContractDigest === 'string' && DIGEST_PATTERN.test(chosen.taskPromptContractDigest) &&
-    chosen.generation === evidenceGeneration(chosen, chosen.promptContractDigest, chosen.taskPromptContractDigest) &&
+    typeof chosenTask === 'string' && DIGEST_PATTERN.test(chosenTask) &&
+    chosen.generation === evidenceGeneration(chosen, chosen.promptContractDigest, chosenTask) &&
     namespaceFields.every((key) => chosen[key] === captured[key]) &&
-    chosen.taskPromptContractDigest === captured.taskPromptContractDigest),
+    chosenTask === taskContractOf(captured)),
   'FIXTURE_GEN/capture-unproven', '请求命名空间或证据代次不一致。');
   return {
     itemId: chosen.itemId,
@@ -581,11 +602,21 @@ export function resolveLedgerSelection(lines, selector) {
     quotaExhausted: captured.classification === 'quota-exhausted',
     cacheKey: scoped ? chosen.cacheKey : null,
     generation: scoped ? chosen.generation : null,
-    taskPromptContractDigest: scoped ? chosen.taskPromptContractDigest : null,
+    taskPromptContractDigest: scoped ? chosenTask : null,
     captured,
     // A replay says when the response it answered with was captured; the entry must say the same.
     replayCapturedAt: chosen.outcome === 'replayed' && typeof chosen.capturedAt === 'string' ? chosen.capturedAt : null,
   };
+}
+
+/**
+ * The enclosing task's contract a line or entry names. A dialogue item (the `S17c` slice) is its own task, and the first live
+ * dialogue captures (Issue #52) named no task contract: such a one reads as its stage contract, which is the evidence
+ * generation it was keyed under. Any other item that names none stays unproven.
+ */
+export function taskContractOf(record) {
+  const dialogue = typeof record.itemId === 'string' && record.itemId.startsWith('S17c/');
+  return record.taskPromptContractDigest === undefined && dialogue ? record.promptContractDigest : record.taskPromptContractDigest;
 }
 
 /** The entry file of one (model, request digest) pair under the legacy key: the formula every entry before #808 was written by. */
@@ -694,7 +725,7 @@ export async function readSelectedEntry(cacheRoot, selection) {
   if (selection.cacheKey !== null) {
     refuse(entry.cacheKey === selection.cacheKey && namespacedCacheKey(entry, selection.requestDigest) === selection.cacheKey &&
       entry.generation === selection.generation && entry.promptContractDigest === selection.promptContractDigest &&
-      entry.taskPromptContractDigest === selection.taskPromptContractDigest &&
+      taskContractOf(entry) === selection.taskPromptContractDigest &&
       entry.itemId === selection.captureItemId && entry.responseDigest === responseDigest &&
       entry.evidencePosition === selection.captured.evidencePosition &&
       sameUsage(entry.usage, selection.captured.usage) &&

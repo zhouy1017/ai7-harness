@@ -52,6 +52,17 @@ describe('CredentialBroker', () => {
     await expect(broker.releaseTo(binding, ticket, async () => 'never')).rejects.toMatchObject({ code: 'CREDENTIAL_MISSING' });
     await expect(broker.checkReadiness({ ...binding, slot: 'other' as 'deepseek-api-key' })).rejects.toBeInstanceOf(CredentialBrokerError);
     await expect(broker.checkReadiness({ ...binding, credentialReference: 'not-a-reference' })).rejects.toMatchObject({ code: 'CREDENTIAL_BINDING_INVALID' });
+    // The two Model Roles a slot may be bound for (Issue #52, S17c): the Main Editorial Role and the Fast Interaction Role.
+    await expect(broker.checkReadiness({ ...binding, modelRole: 'Frontier Model Role' as 'Main Editorial Role' })).rejects.toMatchObject({ code: 'CREDENTIAL_BINDING_INVALID' });
+  });
+
+  it('binds a slot for the Fast Interaction Role the dialogue runs on, releasing only against its own ticket (Issue #52, S17c)', async () => {
+    const broker = new CredentialBroker(fakeResolver({ [binding.credentialReference]: 'placeholder-secret' }));
+    const fast: CredentialSlotBinding = { ...binding, modelRole: 'Fast Interaction Role' };
+    await expect(broker.checkReadiness(fast)).resolves.toBe('present');
+    await expect(broker.releaseTo(fast, null, async () => 'never')).rejects.toMatchObject({ code: 'CREDENTIAL_RELEASE_REFUSED' });
+    await expect(broker.releaseTo(fast, ticket, async (value) => value.length)).resolves.toBe('placeholder-secret'.length);
+    expect(broker.releaseCount).toBe(1);
   });
 
   it('reads a plan\'s credential readiness before any binding exists, releasing nothing (Issue #420, S74a A3)', async () => {

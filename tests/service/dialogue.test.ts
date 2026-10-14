@@ -78,7 +78,7 @@ function owner(store: EditorialStore, hold: ((streamed: number, interrupted: () 
     records: store,
     fixture: withFixture ? fixture : null,
     sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY),
-    developerLive: false,
+    live: null,
     answerHold: hold,
   });
 }
@@ -389,9 +389,8 @@ describe('就这段提问… over the real store and harness', () => {
   });
 
   it('refuses before anything is recorded when no dialogue route is bound, and refuses words and questions it cannot take', async () => {
-    expect(dialogueRouteRefusal({ fixture: null, developerLive: false })).toBe('这次启动没有可用的对话模型；没有发送任何内容。');
-    expect(dialogueRouteRefusal({ fixture: {} as ResolvedModelFixture, developerLive: true })).toMatch(/对话还没有接入实时模型/u);
-    expect(dialogueRouteRefusal({ fixture: {} as ResolvedModelFixture, developerLive: false })).toBeNull();
+    expect(dialogueRouteRefusal({ fixture: null, live: null })).toBe('这次启动没有可用的对话模型；没有发送任何内容。');
+    expect(dialogueRouteRefusal({ fixture: {} as ResolvedModelFixture, live: null })).toBeNull();
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       expect(() => owner(store, null, false).requireReady()).toThrowError(/没有可用的对话模型/u);
@@ -515,7 +514,7 @@ describe('就这段提问… at its edges (PR #658 review)', () => {
       },
       fixture,
       sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY),
-      developerLive: false,
+      live: null,
       answerHold: null,
     });
     try {

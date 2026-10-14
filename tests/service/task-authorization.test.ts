@@ -52,7 +52,7 @@ const DEVELOPMENT_CI_PIN: ProviderProcessingPin = {
   operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0,
 };
 const DEVELOPER_LIVE_PIN: ProviderProcessingPin = {
-  operationalScope: 'developer-live', version: 'v9', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run',
+  operationalScope: 'developer-live', version: 'v10', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run',
 };
 
 let roots: ServiceTestRoots;
@@ -507,7 +507,7 @@ describe('task authorization over the real store on exact sample1', () => {
   // one store holds at most one prepared J-03 plan. Each scope is therefore observed in its own
   // store: the `development-ci` row above, read back after a reopen, and the `developer-live` row
   // here. Neither is ever validated against the scope the launch reading it happens to bind.
-  it.each([DEVELOPER_LIVE_PIN, { ...DEVELOPER_LIVE_PIN, version: 'v5' as const }])('reads a stored plan against its own immutable pin ($version)', async (pin) => {
+  it.each([DEVELOPER_LIVE_PIN, { ...DEVELOPER_LIVE_PIN, version: 'v9' as const }, { ...DEVELOPER_LIVE_PIN, version: 'v5' as const }])('reads a stored plan against its own immutable pin ($version)', async (pin) => {
     await requireExactSample1();
     let bookId: string;
 
@@ -538,8 +538,9 @@ describe('task authorization over the real store on exact sample1', () => {
       expect(live.providerResolutionPlan?.providerProcessing).toEqual(pin);
       expect(live.executionPlan?.stopCondition).toBe(planStopCondition(pin));
       expect(live.planEnvelope?.summary).toBe(planEnvelopeSummary(pin));
-      expect(live.executionPlan?.stopCondition).not.toContain('v1');
-      expect(live.planEnvelope?.summary).not.toContain('v1');
+      // v1 as a whole token: the selected developer-live version v10 is not the development-ci v1.
+      expect(live.executionPlan?.stopCondition).not.toMatch(/\bv1(?!\d)/);
+      expect(live.planEnvelope?.summary).not.toMatch(/\bv1(?!\d)/);
       reopened.markCleanShutdown();
     } finally {
       reopened.close();

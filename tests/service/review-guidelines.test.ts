@@ -570,11 +570,12 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
     // The same store opened under developer-live, bound before anything reads a category.
     const second = await openStore();
     try {
-      second.store.baselineAnalysisLedger.bindLaunch(LIVE);
+      const livePolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
+      second.store.baselineAnalysisLedger.bindLaunch({ ...LIVE, policy: livePolicy });
       // 新建审阅 says why the category cannot start, and preparing it is refused in the same words.
       const typos = second.store.inspectReviewWorkspace(bookId, null).categories.find((category) => category.categoryId === TYPOS)!;
       expect(typos).toMatchObject({ available: false, unavailableReason: WITHHELD });
-      expect(await refusal(() => second.store.createReviewRunPreparationWork(bookId, [TYPOS], WHOLE, launchPolicy)))
+      expect(await refusal(() => second.store.createReviewRunPreparationWork(bookId, [TYPOS], WHOLE, livePolicy)))
         .toBe(`REVIEW_CATEGORY_UNAVAILABLE:「错别字与规范用语」：${WITHHELD}`);
       // A category AI7 fixes applies no house text, so it is not held back.
       const style = second.store.inspectReviewWorkspace(bookId, null).categories.find((category) => category.categoryId === 'style-and-format')!;

@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { BASELINE_ANALYSIS_KIND } from '../../shared/protocol.js';
+import { liveReviewKindAdmitted } from '../review/live-review-admission.js';
 import type { AnalysisAssuranceSampleDispositionProjection, AnalysisGapProjection, AnalysisReusePlanUnitProjection, CoverageManifestProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection, ReviewScopePlanUnitProjection, RunAttemptState, RunReportStageId } from '../../shared/protocol.js';
 import { describeComposition, prepareExecution, type HarnessExecutionSpan, type HarnessSignal, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
-import type { DeveloperLiveRuntime } from '../launch-policy.js';
+import { ACTIVE_SET_VERSION, DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, type DeveloperLiveRuntime } from '../launch-policy.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
 import { evaluateRunBudgetCeiling, totalTokens, type ClassifiedModelFailure, type RunBudgetCeiling, type UsageFacts } from '../provider/classification.js';
 import { DeepSeekOpenAiCompatibleAdapter, OPENCODE_GO_ROUTE_PROFILE } from '../provider/deepseek-adapter.js';
@@ -135,7 +136,7 @@ export interface ExecutionOwnerDependencies {
   readonly launchPolicy: LaunchPolicyProjection;
   readonly fixture: ResolvedModelFixture | null;
   readonly secretResolver: SecretResolver;
-  /** The developer-live launch facts and captured transport; present exactly when the policy bound v9. */
+  /** The developer-live launch facts and captured transport; present exactly when the policy bound developer-live. */
   readonly developerLive?: DeveloperLiveRuntime | null;
   /** J-10's unit hold (Issue #422); absent in every other launch, where a unit settles as soon as its turn returns. */
   readonly unitHold?: UnitHold | null;
@@ -413,7 +414,7 @@ export function unparsableAssuranceSamplingAnswerGapReason(code: AssuranceSampli
 }
 
 /**
- * The transmittable set under v9: exact `sample1` and nothing else (settlement l). ADR 0065 admits
+ * The transmittable set under developer-live: exact `sample1` and nothing else (settlement l). ADR 0065 admits
  * only Owner-designated Public SampleBooks, and this slice fixes the set to the one Book whose
  * lineage the plan already pins. Any other Book refuses before dispatch rather than at the gate, so
  * no unadmitted manuscript is ever assembled into a payload at all.
@@ -443,7 +444,7 @@ export class BaselineAnalysisExecutionOwner {
   readonly #pendingAnswers: Array<{ runRecordId: string; ledger: BaselineAnalysisStore }> = [];
 
   constructor(deps: ExecutionOwnerDependencies) {
-    // The developer-live runtime and the bound scope are one fact: a v9 launch that reached this owner
+    // The developer-live runtime and the bound scope are one fact: a developer-live launch that reached this owner
     // without its launch facts and captured transport could never enforce the ceiling or the cache, and a
     // runtime under any other scope would be a transport nothing may use.
     const live = deps.developerLive ?? null;
@@ -570,7 +571,8 @@ export class BaselineAnalysisExecutionOwner {
    */
   #requireLaunchOf(ledger: BaselineAnalysisStore): DeveloperLiveRuntime | null {
     const live = this.#deps.developerLive ?? null;
-    if (live !== null && ledger.definition.kind !== BASELINE_ANALYSIS_KIND) {
+    if (live !== null && ledger.definition.kind !== BASELINE_ANALYSIS_KIND &&
+        (ledger.launch.live === null || !liveReviewKindAdmitted(ledger.launch.policy, ledger.definition, ledger.launch.live))) {
       throw new ExecutionAdmissionError('EXECUTION_KIND_NOT_ADMITTED', 'developer-live 当前只允许基线稿件分析；该任务种类尚未获准实时执行。');
     }
     if (live === null && this.#deps.fixture === null) throw new ExecutionAdmissionError('EXECUTION_ROUTE_ABSENT', '没有可执行的本地确定性路由。');
@@ -958,7 +960,7 @@ export class BaselineAnalysisExecutionOwner {
     if (context.stopped || active.interrupted) return runReportReflectionNotRun(RUN_REPORT_REFLECTION_NOT_REACHED);
     if (live !== null && policy.providerProcessing.runReportReflectionAllowed !== true) {
       // The reflection is a transmission the active Provider Processing policy does not name, so it
-      // never forms a request at all. The verified v9 document names it; a projection that does not
+      // never forms a request at all. The verified developer-live document names it; a projection that does not
       // is exactly the policy-bounded case this guard exists for.
       return { ifRedone: { state: 'policy-bounded', items: [], reason: RUN_REPORT_REFLECTION_POLICY_BOUNDED }, usage: RUN_REPORT_NO_USAGE };
     }
@@ -1025,9 +1027,9 @@ export class BaselineAnalysisExecutionOwner {
       if (policy.operationalScope !== 'development-ci' || policy.providerProcessing.version !== 'v1' || policy.providerProcessing.liveTransmissionAllowed !== false) {
         throw new ExecutionAdmissionError('EXECUTION_POLICY_INVALID', '当前可信策略不是 development-ci · Provider Processing v1。');
       }
-    } else if (policy.operationalScope !== 'developer-live' || policy.providerProcessing.version !== 'v9' ||
+    } else if (policy.operationalScope !== 'developer-live' || policy.providerProcessing.version !== DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION ||
         policy.providerProcessing.decision !== 'eligible-only' || policy.providerProcessing.liveTransmissionAllowed !== true) {
-      throw new ExecutionAdmissionError('EXECUTION_POLICY_INVALID', '当前可信策略不是 developer-live · Provider Processing v9。');
+      throw new ExecutionAdmissionError('EXECUTION_POLICY_INVALID', `当前可信策略不是 developer-live · Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION}。`);
     }
     const fixture = this.#deps.fixture;
     // The route the plan froze, resolved once — the deterministic fixture, or the live route profile — and the
@@ -1108,7 +1110,7 @@ export class BaselineAnalysisExecutionOwner {
       model,
       systemPrompt: definition.systemPrompt,
       promptContractDigest,
-      // One technical Session per Analysis Unit under v9; the deterministic route keeps its single
+      // One technical Session per Analysis Unit under developer-live; the deterministic route keeps its single
       // accumulating Session, so J-04's proven composition is untouched.
       ...(live === null ? {} : { sessionMode: 'per-unit' as const }),
       adapterFactory: (codes) => {
@@ -1211,7 +1213,7 @@ export class BaselineAnalysisExecutionOwner {
         outboundDataCategory: 'public-or-synthetic',
         policy: live === null
           ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }
-          : { operationalScope: 'developer-live', providerProcessingVersion: 'v9', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+          : { operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
         admittedUserMessages,
       };
       harness.bindExecution({ harnessSessionId, behaviorCompositionDigest: harness.composition.digest, promptContractDigest });
@@ -1997,7 +1999,7 @@ export class BaselineAnalysisExecutionOwner {
           ({ state: 'gap', code, reason, requestDigest });
         if (live !== null && (step !== null || policy.providerProcessing.crossUnitReductionAllowed !== true)) {
           // The reduction is a transmission the active Provider Processing policy does not name, so it
-          // never forms a request at all. The verified v9 document names the baseline's reduction; a
+          // never forms a request at all. The verified developer-live document names the baseline's reduction; a
           // projection that does not is exactly the policy-bounded case this guard exists for. Another
           // kind's book-level step is a transmission no policy names yet (Issue #429 review): under a live
           // scope it is never sent under the baseline's term, whatever that term reads.
@@ -2261,7 +2263,7 @@ export class BaselineAnalysisExecutionOwner {
     const sampled = { inputTokens: 0, outputTokens: 0, turnsWithUsage: 0 };
     if (live !== null && policy.providerProcessing.assuranceSamplingAllowed !== true) {
       // The sampling turns are transmissions the active Provider Processing policy does not name, so
-      // none of them forms a request. The verified v9 document names them; a projection that does not
+      // none of them forms a request. The verified developer-live document names them; a projection that does not
       // is exactly the policy-bounded case this guard exists for.
       return assuranceSampleOutcome(draw, [], null, [ASSURANCE_SAMPLING_POLICY_BOUNDED]);
     }
@@ -2436,8 +2438,8 @@ function executionBindingRecordOf(input: {
     credentialSlot: { modelRole: 'Main Editorial Role', slot: credentialSlot, credentialReference },
     outboundDataCategory: 'public-or-synthetic',
     policyPin: live === null
-      ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v7', liveTransmissions: 0 }
-      : { operationalScope: 'developer-live', providerProcessingVersion: 'v9', activePolicySetVersion: 'v7', liveTransmissions: 'bounded-by-run' },
+      ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 0 }
+      : { operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 'bounded-by-run' },
     runBudgetCeiling: runBudgetCeiling.kind === 'unset' ? 'unset' : runBudgetCeiling,
     dispatchAttribution: 'Dispatch',
     boundAt: input.boundAt,

@@ -10,8 +10,8 @@ import { DialogueError } from './dialogue-ledger.js';
  * 修改建议 only through the editor's own 转为修改建议.
  *
  * The contract is frozen text; its digest binds the deterministic fixture key, so changing one character of it changes
- * every request digest, which is the intent. The live OpenCode Go route is not bound to it in this slice: that needs a
- * dialogue-purpose Provider Processing revision the Owner reviews byte by byte (S17c).
+ * every request digest, which is the intent. The live route sends the same contract (S17c), under the dialogue rule the
+ * selected Provider Processing policy names; a 重新回答 sends exactly the request its ask sent.
  */
 export const DIALOGUE_PROMPT_CONTRACT_SCHEMA = 'ai7.dialogue-prompt-contract/1' as const;
 export const DIALOGUE_CONTRACT_VERSION = 'ai7.editorial-dialogue/1' as const;
