@@ -86,9 +86,14 @@ export type EgressCeilingState = 'unset' | 'within' | 'reached' | 'not-applicabl
 /**
  * What a Run may send. Analysis sends the admitted public or synthetic material it was planned over; an Interactive Editorial
  * Dialogue (Issue #52, S17a) sends the words the editor selected in their own manuscript, and its question. A dialogue's
- * excerpt reaches the local deterministic route, or a remote one only under an allow rule that names it (S17c).
+ * excerpt reaches the local deterministic route, or a remote one only under an allow rule that names it (S17c). 润色这段 sends
+ * the editor's selected words too, and 基于当前稿件重新生成建议 the three texts of one conflict unit of the editor's own
+ * manuscript (Issue #842), each under the same reading as the dialogue's excerpt.
  */
-export type OutboundDataCategory = 'public-or-synthetic' | 'editor-selected-manuscript-excerpt';
+export type OutboundDataCategory = 'public-or-synthetic' | 'editor-selected-manuscript-excerpt' | 'manuscript-conflict-region-excerpt';
+
+/** The categories that carry the editor's own manuscript words: never public, so a remote route needs a rule naming each. */
+const MANUSCRIPT_EXCERPT_CATEGORIES: ReadonlySet<OutboundDataCategory> = new Set(['editor-selected-manuscript-excerpt', 'manuscript-conflict-region-excerpt']);
 
 /** The binding facts the gate compares against; a frozen subset of the persisted Execution Binding. */
 export interface EgressBindingFacts {
@@ -383,10 +388,10 @@ function toolResultSourceAdmitted(admitted: AdmittedToolResult, rule: PlatformTo
   return canonical !== null && canonical === admitted.sourceUrl && (scope.citationAdmits?.(canonical) ?? false);
 }
 
-/** Whether the binding sends the editor's selected excerpt under a rule that names it (Issue #52, S17c). */
+/** Whether the binding sends a manuscript excerpt under a rule that names exactly its category (Issue #52, S17c; #842). */
 function excerptAdmittedByRule(binding: EgressBindingFacts): boolean {
-  return binding.outboundDataCategory === 'editor-selected-manuscript-excerpt' &&
-    (binding.ruleOutboundCategories?.has('editor-selected-manuscript-excerpt') ?? false);
+  return MANUSCRIPT_EXCERPT_CATEGORIES.has(binding.outboundDataCategory) &&
+    (binding.ruleOutboundCategories?.has(binding.outboundDataCategory) ?? false);
 }
 
 export function evaluateEgress(
@@ -397,7 +402,7 @@ export function evaluateEgress(
   if (!DIGEST_PATTERN.test(binding.bindingDigest) || scope.currentBindingDigest() !== binding.bindingDigest) {
     return refuse('binding-stale', '执行绑定已不是当前绑定；未发送任何内容。');
   }
-  if (binding.outboundDataCategory !== 'public-or-synthetic' && !(binding.outboundDataCategory === 'editor-selected-manuscript-excerpt' &&
+  if (binding.outboundDataCategory !== 'public-or-synthetic' && !(MANUSCRIPT_EXCERPT_CATEGORIES.has(binding.outboundDataCategory) &&
       (binding.route === LOCAL_DETERMINISTIC_ROUTE || excerptAdmittedByRule(binding)))) {
     return refuse('outbound-category-mismatch', '外发数据类别不允许经这条路由发送；未发送任何内容。');
   }

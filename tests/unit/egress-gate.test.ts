@@ -100,6 +100,31 @@ describe('evaluateEgress', () => {
     expect(evaluateEgress(remotePayload, analysis, { ...scope(), ceilingState: () => 'within' as const })).toMatchObject({ decision: 'transmit-remote' });
   });
 
+  it('reads a conflict region as it reads the selected excerpt, each category under a rule naming exactly it (Issue #842)', () => {
+    const region = { ...binding(), outboundDataCategory: 'manuscript-conflict-region-excerpt' as const };
+    expect(evaluateEgress(payload(), region, scope())).toEqual({ decision: 'transmit-local', payloadDigest: payloadDigest(payload()) });
+    const live = {
+      ...region,
+      ...binding(DEEPSEEK_ROUTE),
+      outboundDataCategory: 'manuscript-conflict-region-excerpt' as const,
+      policy: { operationalScope: 'developer-live' as const, providerProcessingVersion: 'v10' as const, liveTransmissionAllowed: true as const, authorizedLiveTransmissionCount: 'bounded-by-run' as const },
+    };
+    const remotePayload = payload({ provider: DEEPSEEK_ROUTE, model: DEEPSEEK_MODEL, messages: [user(UNIT_1)] });
+    const fastScope = { ...scope(), ceilingState: () => 'not-applicable' as const };
+    expect(evaluateEgress(remotePayload, live, fastScope)).toMatchObject({ decision: 'refuse', reason: 'outbound-category-mismatch' });
+    // The selected-excerpt rule does not name a conflict region, nor the other way round.
+    expect(evaluateEgress(remotePayload, { ...live, ruleOutboundCategories: new Set(['editor-selected-manuscript-excerpt'] as const) }, fastScope))
+      .toMatchObject({ decision: 'refuse', reason: 'outbound-category-mismatch' });
+    const excerpt = { ...live, outboundDataCategory: 'editor-selected-manuscript-excerpt' as const };
+    expect(evaluateEgress(remotePayload, { ...excerpt, ruleOutboundCategories: new Set(['manuscript-conflict-region-excerpt'] as const) }, fastScope))
+      .toMatchObject({ decision: 'refuse', reason: 'outbound-category-mismatch' });
+    const admitted = { ...live, ruleOutboundCategories: new Set(['manuscript-conflict-region-excerpt'] as const) };
+    expect(evaluateEgress(remotePayload, admitted, fastScope)).toMatchObject({ decision: 'transmit-remote' });
+    // Its not-applicable ceiling, like the dialogue's, holds only under the rule that names its own category.
+    expect(evaluateEgress(remotePayload, { ...admitted, ruleOutboundCategories: new Set(['public-or-synthetic'] as const) }, fastScope))
+      .toMatchObject({ decision: 'refuse', reason: 'outbound-category-mismatch' });
+  });
+
   it('refuses an out-of-scope block in a user message and sends nothing', () => {
     const foreign = `分析单元 2/2 · 单元摘要 ${'2'.repeat(64)}\n[blk_${'f'.repeat(24)}] (paragraph) 越界段落。`;
     expect(evaluateEgress(payload({ messages: [user(UNIT_1), assistant(OUTPUT_1), user(foreign)] }), binding(), scope()))
