@@ -183,7 +183,23 @@ describe('one model question per Run unit', () => {
     owner!.continueAnswered(run.runRecordId);
     await owner!.whenIdle();
     const done = store!.inspectBaselineAnalysis(run.bookId);
-    expect(done.taskOutcome!.report!.modelClarifications).toContainEqual(expect.objectContaining({ unitOrdinal: 1, outcome: 'no-answer', line: expect.stringContaining('不回答') }));
+    // The disclosure says the service clock answered, not the editor; the drawer card says the same.
+    expect(done.taskOutcome!.report!.modelClarifications).toEqual([expect.objectContaining({ unitOrdinal: 1, outcome: 'timed-out', line: expect.stringContaining('24 小时未回答') })]);
+    const card = store!.inspectTaskPlan({ bookId: run.bookId, kind: 'baseline-analysis', ref: run.taskIntentId }).clarifications[0]!;
+    expect(card.answer!.line).toContain('24 小时未回答');
+    expect(card.answer!.line).not.toContain('你已回答');
+  });
+  it('reports an editor-chosen 不回答 as the editor’s choice, never as the timeout', async () => {
+    const run = await start();
+    const request = store!.baselineAnalysisLedger.clarificationsOf(run.runRecordId)[0]!;
+    store!.answerBaselineAnalysisClarification({ ...run, requestId: request.requestId, optionId: 'no-answer', note: null });
+    expect(answerEntry(run)).toContain('"answer":"不回答"');
+    owner!.continueAnswered(run.runRecordId);
+    await owner!.whenIdle();
+    const done = store!.inspectBaselineAnalysis(run.bookId);
+    expect(done.taskOutcome!.report!.modelClarifications).toEqual([expect.objectContaining({ unitOrdinal: 1, outcome: 'no-answer', line: expect.stringContaining('你选择了不回答') })]);
+    expect(done.taskOutcome!.report!.modelClarifications![0]!.line).not.toContain('24 小时');
+    expect(store!.inspectTaskPlan({ bookId: run.bookId, kind: 'baseline-analysis', ref: run.taskIntentId }).clarifications[0]!.answer!.line).toBe('你已回答：不回答');
   });
   it('keeps completed units on cancel while the model question waits', async () => {
     const run = await start();

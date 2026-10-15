@@ -2735,7 +2735,7 @@ export type RunReportIfRedoneProjection =
 /** The Run Report as it is recorded inside the Task Outcome, before its own digest is taken. */
 export interface RunReportRecordProjection {
   /** Editorial choices only; no question or answer content enters the Run Report. */
-  modelClarifications?: ReadonlyArray<{ unitOrdinal: number; outcome: 'answered' | 'no-answer' | 'unanswered'; line: string }>;
+  modelClarifications?: ReadonlyArray<{ unitOrdinal: number; outcome: 'answered' | 'no-answer' | 'timed-out' | 'unanswered'; line: string }>;
   schema: 'ai7.analysis.run-report/1';
   runRecordId: string;
   taskIntentId: string;

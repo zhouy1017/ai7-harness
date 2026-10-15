@@ -4026,6 +4026,7 @@ export class BaselineAnalysisStore {
           optionId: record.optionId as AnyClarificationOptionId,
           note: record.note as string | null,
           answeredAt: record.answeredAt as string,
+          ...(modelQuestion !== null && record.actor === 'service-timeout' ? { timedOut: true as const } : {}),
         };
       }
       return {

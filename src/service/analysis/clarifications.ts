@@ -127,6 +127,8 @@ export interface ClarificationFacts {
     readonly optionId: AnyClarificationOptionId;
     readonly note: string | null;
     readonly answeredAt: string;
+    /** The service clock recorded 不回答 after 24 hours; absent when the editor answered. */
+    readonly timedOut?: true;
   };
 }
 

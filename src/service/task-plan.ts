@@ -1756,7 +1756,7 @@ export function baselineClarifications(
         note: { label: '自行说明…', hint: '直接回答这个问题，最多 500 字素。', maxLength: 500 },
         state: answered !== null ? 'answered' : open ? 'open' : 'unanswered',
         answer: answered === null ? null : { optionId: answered.optionId, label, note: answered.note, answeredAt: answered.answeredAt,
-          line: clarificationAnsweredLine(label, answered.note) },
+          line: answered.timedOut === true ? '24 小时未回答，已按「不回答」接着做。' : clarificationAnsweredLine(label, answered.note) },
         answerable: { reason: open ? blocked : answered !== null ? '这个问题已经回答过了' : CLARIFICATION_UNANSWERABLE_ENDED },
       };
     }

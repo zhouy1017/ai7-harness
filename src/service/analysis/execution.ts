@@ -2409,7 +2409,8 @@ export class BaselineAnalysisExecutionOwner {
         })),
         modelClarifications: ledger.clarificationsOf(facts.runRecordId).filter((entry) => entry.origin === 'model').map((entry) => ({
           unitOrdinal: entry.unitOrdinal, outcome: entry.answer === null ? 'unanswered' as const
-            : entry.answer.optionId === 'no-answer' ? 'no-answer' as const : 'answered' as const,
+            : entry.answer.timedOut === true ? 'timed-out' as const
+              : entry.answer.optionId === 'no-answer' ? 'no-answer' as const : 'answered' as const,
         })),
         gaps: reduction.gaps,
         crossUnit: { state: crossUnit.state, reason: crossUnit.state === 'closed' ? null : crossUnit.reason },
