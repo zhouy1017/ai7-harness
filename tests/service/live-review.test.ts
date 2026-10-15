@@ -221,7 +221,7 @@ describe('reference-free review on the Go execution path', () => {
     const runtime = { credentialReadiness: async () => 'present' as const, connectivity: ALWAYS_ONLINE };
     const definition = reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry('typos-and-usage')!));
     const ledger = store.reviewCategoryLedger(definition);
-    // The selected developer-live policy (v14 under active set v11) admits the default-rule origin for review.
+    // The selected developer-live policy (v16 under active set v12) admits the default-rule origin for review.
     expect(ledger.launch.policy?.providerProcessing.admittedRules?.find((rule) => rule.taskKinds.includes(definition.kind))
       ?.matchingActiveDefaultExecutionRuleAllowed).toBe(true);
     const first = prepare();

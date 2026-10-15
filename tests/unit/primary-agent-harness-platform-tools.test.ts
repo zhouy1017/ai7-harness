@@ -43,7 +43,7 @@ async function ruleOf(version: 'v5' | 'v7'): Promise<PlatformToolsRule | null> {
   const document = JSON.parse(await readFile(resolve(REPO_ROOT, `docs/policies/provider-processing-policy.${version}.json`), 'utf8')) as {
     decision: { providerAllowRules: unknown[] };
   };
-  return readPlatformToolsRule(document.decision.providerAllowRules[0]);
+  return readPlatformToolsRule(document.decision.providerAllowRules[0]) as PlatformToolsRule | null;
 }
 
 function bindingOf(rule: PlatformToolsRule | null, digest: string): EgressBindingFacts {

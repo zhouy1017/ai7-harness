@@ -60,7 +60,7 @@ async function v7Rule(): Promise<PlatformToolsRule> {
   const document = JSON.parse(await readFile(resolve(REPO_ROOT, 'docs/policies/provider-processing-policy.v7.json'), 'utf8')) as {
     decision: { providerAllowRules: unknown[] };
   };
-  return readPlatformToolsRule(document.decision.providerAllowRules[0])!;
+  return readPlatformToolsRule(document.decision.providerAllowRules[0]) as PlatformToolsRule;
 }
 
 /** The real composition on the remote route, its adapter answered only by the recorded exchanges. */

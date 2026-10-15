@@ -275,7 +275,8 @@ describe('reference-free writing on the Go execution path (#810)', () => {
     const definition = writingKindDefinition(input);
     const binding = ruleFor(policy, 'writing');
     expect(liveKindAdmission(policy, definition, DEVELOPER_LIVE_POLICY_BINDING)).toEqual({ ruleId: 'developer-live-public-samplebook-writing',
-      modelRole: 'Main Editorial Role', outboundDataCategories: ['public-or-synthetic', 'book-metadata-and-synopsis', 'house-exemplar-excerpt', 'frozen-material-reference-excerpt'],
+      modelRole: 'Main Editorial Role', outboundDataCategories: ['public-or-synthetic', 'book-metadata-and-synopsis', 'house-exemplar-excerpt', 'frozen-material-reference-excerpt',
+        'web-search-query', 'public-source-fetch'],
       crossUnitSynthesisAllowed: true });
     expect(liveKindContractCategories('writing')).toEqual(['book-metadata-and-synopsis', 'house-exemplar-excerpt']);
     // A replaced digest, a recorded contract the owner cannot rebuild, a missing derivation, a 资料库-bearing contract or a

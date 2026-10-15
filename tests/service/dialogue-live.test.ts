@@ -65,6 +65,8 @@ function dialogueRule(overrides: Record<string, unknown> = {}): Record<string, u
     clarificationTimeoutHours: null,
     backgroundOrigin: false,
     matchingActiveDefaultExecutionRuleAllowed: false,
+    webSearchToolAllowed: false,
+    platformTools: null,
     ...overrides,
   };
 }

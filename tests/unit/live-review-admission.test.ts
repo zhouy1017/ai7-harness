@@ -21,6 +21,18 @@ describe('reference-free live review admission (#809)', () => {
     expect(liveReviewRule(policy, entries[0]!)).toBe(rule);
   });
 
+  it('lists 事实核查 and 学术道德与引用 only under the platform-tools-carrying review rule, which this owner does not yet run (#473)', () => {
+    // Provider Processing v16 names the two web-bearing categories as kinds of the review rule, with the web switch and the platform
+    // tools; executing them belongs to the platform-tools slice, so the non-web owner still admits neither. 出版政策与风险 is in no rule.
+    for (const categoryId of ['factual-review', 'academic-integrity']) {
+      expect(rule.taskKinds).toContain(reviewCategoryKindId(categoryId));
+      expect(liveReviewRule(policy, entries.find((entry) => entry.categoryId === categoryId)!)).toBeNull();
+    }
+    expect(rule.webSearchToolAllowed).toBe(true);
+    expect(rule.platformTools).not.toBeNull();
+    expect(selected.providerProcessing.admittedRules.some((candidate) => candidate.taskKinds.includes(reviewCategoryKindId('publication-risk')))).toBe(false);
+  });
+
   it('rechecks the exact contract and Provider binding before direct category dispatch', () => {
     const definition = reviewCategoryKindDefinition(reviewCategoryContractInput(entries[0]!));
     expect(liveReviewKindAdmitted(policy, definition, rule)).toBe(true);
