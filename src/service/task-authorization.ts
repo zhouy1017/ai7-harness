@@ -1393,12 +1393,12 @@ function transact<T>(db: DatabaseSync, body: () => T): T {
 const PROVIDER_PROCESSING_PINS: Readonly<Record<TrustedOperationalScope, ProviderProcessingPin>> = {
   'development-ci': { operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0 },
   'developer-live': { operationalScope: 'developer-live', version: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
-  // The editor's own model service under the local production launch (Issue #811): Provider Processing v13, bounded by the Run.
+  // The editor's own model service under the local production launch (Issue #811): Provider Processing v15, bounded by the Run.
   'ordinary-production': { operationalScope: 'ordinary-production', version: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
 };
 
 /** The developer-live versions earlier launches selected, whose retained records stay readable after a successor is selected. */
-const RETAINED_DEVELOPER_LIVE_VERSIONS: readonly DeveloperLiveProviderProcessingVersion[] = ['v5', 'v9', 'v10', 'v11'];
+const RETAINED_DEVELOPER_LIVE_VERSIONS: readonly DeveloperLiveProviderProcessingVersion[] = ['v5', 'v9', 'v10', 'v11', 'v12'];
 
 /**
  * The pin a stored value carries, or `null` when it is not exactly the pin of the scope it names.

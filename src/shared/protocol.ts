@@ -1903,22 +1903,23 @@ export interface ModelServiceConnectionProjection {
  */
 export type TrustedOperationalScope = 'development-ci' | 'developer-live' | 'ordinary-production';
 /**
- * Historical v5, v9, v10, v11 and the superseded web reservation v8 remain readable identities; selected v12 admits baseline
- * analysis, editorial dialogue, review (with cross-deliverable consistency and frozen Material References), writing and the
- * three evaluation contracts (with frozen Material References), and 润色 and conflict regeneration Suggestions on V4.1. A type
- * member does not select or activate a policy.
+ * Historical v5, v9, v10, v11, v12 and the superseded web reservation v8 remain readable identities; selected v14 admits baseline
+ * analysis, enrolled background analysis within a mandatory ceiling, editorial dialogue, review (with cross-deliverable consistency
+ * and frozen Material References), writing and the three evaluation contracts (with frozen Material References), and 润色 and
+ * conflict regeneration Suggestions on V4.1, with one model question per unit on the Run-based rules. A type member does not
+ * select or activate a policy.
  */
-export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12';
+export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14';
 /** The ordinary-production version the active set selects: local production over the editor's own configured provider. */
-export type OrdinaryProductionProviderProcessingVersion = 'v13';
-/** Historical v5, v7, v8 and v9, the superseded web reservation v6, and selected v10. */
-export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10';
+export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15';
+/** Historical v5, v7, v8, v9 and v10, the superseded web reservation v6, and selected v11. */
+export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11';
 export type ProviderProcessingVersion = 'v1' | DeveloperLiveProviderProcessingVersion | OrdinaryProductionProviderProcessingVersion;
 /** Exact Run Budget Ceiling state: `unset` under development-ci, an explicit total-token ceiling under developer-live. */
 export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: number };
 /**
  * The Run Budget Ceiling a developer-live launch binds: an explicit form ceiling as a total, or the
- * Provider Processing v12 default (unchanged since v9) of 30,000 tokens per frozen Coverage Manifest unit (ADR 0070),
+ * Provider Processing v14 default (unchanged since v9) of 30,000 tokens per frozen Coverage Manifest unit (ADR 0070),
  * resolved once the manifest freezes and before the plan does.
  */
 export type DeveloperLiveCeiling =
@@ -2148,7 +2149,7 @@ export interface AdmittedProviderRule {
   /**
    * Whether the rule's `source` block admits frozen Material Reference excerpts (`source.materialReferencesAllowed`; `false` when the
    * rule's source does not name the term). A consuming kind admits a material-bearing contract only under a rule that states this
-   * and also lists `frozen-material-reference-excerpt` among its outbound categories (Provider Processing v12 and v13).
+   * and also lists `frozen-material-reference-excerpt` among its outbound categories (Provider Processing v12 to v15).
    */
   readonly materialReferencesAllowed: boolean;
   /**
@@ -2157,6 +2158,29 @@ export interface AdmittedProviderRule {
    * `editorial-deliverable-excerpt` among the rule's outbound categories.
    */
   readonly editorialDeliverablesAllowed: boolean;
+  /**
+   * Whether the rule lets the model ask the editor a clarification question while it works on a unit (`clarification.modelQuestionAllowed`,
+   * Provider Processing v14 and v15): `true` for every Run-based rule (baseline analysis, review, writing, the three evaluation contracts and
+   * enrolled background analysis), `false` for editorial dialogue, 润色 and conflict regeneration. One question per unit; the unit waits.
+   */
+  readonly clarificationQuestionAllowed: boolean;
+  /**
+   * Hours an unanswered question waits before it counts as unanswered and the Run continues with the Run Report disclosing it
+   * (`clarification.timeoutHours`); `null` when the rule allows no question.
+   */
+  readonly clarificationTimeoutHours: number | null;
+  /**
+   * Whether this is the enrolled-background rule (`enrolled-background-manuscript-analysis-processing`, Provider Processing v14 and v15):
+   * the one rule whose origin is an active matching Background Analysis Enrollment. `true` only for that rule, which lists its task
+   * kind (baseline analysis) truthfully; a foreground lookup skips it and a background lookup selects only it.
+   */
+  readonly backgroundOrigin: boolean;
+  /**
+   * Whether the rule's `authorityOrigin` admits the Task's matching active Default Execution Rule (快速开始) as its origin
+   * (`authorityOrigin.matchingActiveDefaultExecutionRuleAllowed`, Provider Processing v14 and v15): `true` for writing and, since v14
+   * and v15, review; `false` for every other rule. A newly user-initiated Task is still required, so a default rule never starts work alone.
+   */
+  readonly matchingActiveDefaultExecutionRuleAllowed: boolean;
 }
 
 export interface LaunchPolicyProjection {
@@ -2196,7 +2220,7 @@ export interface LaunchPolicyProjection {
      */
     readonly admittedRules: readonly AdmittedProviderRule[];
     /**
-     * Only under `ordinary-production` (Provider Processing v13): `setup-required` while the editor's own model service is not
+     * Only under `ordinary-production` (Provider Processing v15): `setup-required` while the editor's own model service is not
      * configured, so no rule is admitted; `configured` once the launch supplied a binding the policy allows, which fills every
      * admitted rule's route, endpoint, model and credential slot. Absent under every other scope.
      */

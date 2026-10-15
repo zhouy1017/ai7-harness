@@ -6,20 +6,20 @@ import { CREDENTIAL_REFERENCE_PATTERN, DEVELOPMENT_CREDENTIAL_REFERENCES } from 
 
 /**
  * The source-checkout launch authority (ADR 0046, ADR 0065): the build-embedded carrier pins active
- * policy set v10, the sole active set for all four Provider Processing scopes, and names the three
+ * policy set v11, the sole active set for all four Provider Processing scopes, and names the three
  * scopes the built entry may bind from its launch form. `development-ci` is the default and binds
  * Provider Processing v1 (zero live transmissions); `developer-live` is bound only by the launch
  * argument `--trusted-operational-scope developer-live` on a developer host and binds the immutable
- * Provider Processing v12; `ordinary-production` is bound only by `--trusted-operational-scope ordinary-production`
- * and binds v13, whose rules are filled from the editor's own configured provider binding. `fixture-recording`
+ * Provider Processing v14; `ordinary-production` is bound only by `--trusted-operational-scope ordinary-production`
+ * and binds v15, whose rules are filled from the editor's own configured provider binding. `fixture-recording`
  * is pinned by the active set but is not selectable from the source checkout. No environment variable or product
  * setting selects a scope; every invalid state resolves to the zero-transmission denial.
  */
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
 const CARRIER_VERSION = 2;
-export const ACTIVE_SET_VERSION = 'v10' as const;
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v10.json';
-const ACTIVE_SET_SHA256 = 'e1bb81956a46fc9dad3f761943d94f1b68802549ed6838fde7efa7e711584487';
+export const ACTIVE_SET_VERSION = 'v11' as const;
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v11.json';
+const ACTIVE_SET_SHA256 = 'fba12d9b8da7b826b620ac33c0b34eadd92da86d6da88f610e480af9aee5328c';
 const PROVIDER_PINS = {
   'development-ci': {
     version: 'v1',
@@ -32,14 +32,14 @@ const PROVIDER_PINS = {
     sha256: 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc',
   },
   'ordinary-production': {
-    version: 'v13',
-    canonicalPath: 'docs/policies/provider-processing-policy.v13.json',
-    sha256: '465f6bb3b43d522c2464f0589e6302600799192ee46ba17df23269f08f94ea3e',
+    version: 'v15',
+    canonicalPath: 'docs/policies/provider-processing-policy.v15.json',
+    sha256: '1f398f923d57a442fe6c410b5831c25f45c6983973ccfcf619472db8a8666b46',
   },
   'developer-live': {
-    version: 'v12',
-    canonicalPath: 'docs/policies/provider-processing-policy.v12.json',
-    sha256: '9bc27046af27c2967482c51ec4850668df13154a8c8e3ad94bdcb6fae3b47b2c',
+    version: 'v14',
+    canonicalPath: 'docs/policies/provider-processing-policy.v14.json',
+    sha256: '98ec1f93f26e896d1a6a37b3829eacffb7deb9b52f8966252aa3f7115717bb6d',
   },
 } as const;
 /**
@@ -56,7 +56,7 @@ const EXTERNAL_PIN = {
 } as const;
 
 /**
- * The exact developer-live binding every rule of Provider Processing v12 declares, and the one rule v9 declared; the resolver
+ * The exact developer-live binding every rule of Provider Processing v14 declares, and the one rule v9 declared; the resolver
  * verifies the policy bytes say the same. `ruleId` is the baseline analysis rule, whose reading the projection's suboperation
  * flags come from.
  */
@@ -300,13 +300,14 @@ function exactStrings(value: unknown, expected: readonly string[]): value is str
 /**
  * What every developer-live allow rule shares, whatever it admits: eligibility only, the developer host and no hosted, CI,
  * scheduled or background execution, admitted sample sources only, the house-people redaction rule of ADR 0079 §4.4, no web
- * tool, the protected local capture, and no extra privacy prompt.
+ * tool, the protected local capture, and no extra privacy prompt. Only the enrolled-background rule (`background`) is scheduled and
+ * background; every other rule states both `false`.
  */
-function verifyRuleCommon(rule: Record<string, unknown>): void {
+function verifyRuleCommon(rule: Record<string, unknown>, background = false): void {
   requirePolicy(rule['policyResult'] === 'eligible-only');
   const mode = rule['executionMode'];
   requirePolicy(isRecord(mode) && mode['humanAttended'] === false && mode['developerHostOnly'] === true &&
-    mode['ciAllowed'] === false && mode['hostedAllowed'] === false && mode['scheduledAllowed'] === false && mode['backgroundAllowed'] === false);
+    mode['ciAllowed'] === false && mode['hostedAllowed'] === false && mode['scheduledAllowed'] === background && mode['backgroundAllowed'] === background);
   // The house-people redaction rule (ADR 0079 §4.4): the identity of the house's people never leaves,
   // while the author's information and the house name may.
   const redaction = rule['redaction'];
@@ -357,8 +358,12 @@ function verifyPlannedRunOrigin(rule: Record<string, unknown>, assuranceAnchors 
   );
   const limit = rule['providerAccountLimit'] as Record<string, unknown>;
   requirePolicy(limit['endsRunAsProviderAccountLimit'] === true);
+  verifyPlannedBound(rule, assuranceAnchors);
+}
+
+/** The transmission bound of ADR 0079 §2.2, term by term, shared by every planned kind and by the enrolled background Run. */
+function verifyPlannedBound(rule: Record<string, unknown>, assuranceAnchors: boolean): void {
   const transmissions = rule['transmissions'] as Record<string, unknown>;
-  // The transmission bound of ADR 0079 §2.2, term by term, shared by every planned kind.
   requirePolicy(
     transmissions['boundedByCoverageManifestUnitCount'] === true &&
       transmissions['plusDeclaredSafeRetryAdaptations'] === true &&
@@ -367,6 +372,78 @@ function verifyPlannedRunOrigin(rule: Record<string, unknown>, assuranceAnchors 
       transmissions['oneTechnicalSessionPerAnalysisUnit'] === true &&
       transmissions['accumulatingSingleSessionAllowed'] === false,
   );
+}
+
+/** The rule id of the enrolled background analysis rule, the same in Provider Processing v14 and v15 (the one rule with a background origin). */
+export const BACKGROUND_ANALYSIS_RULE_ID = 'enrolled-background-manuscript-analysis-processing';
+/** A Run-based rule's model-initiated clarification (v14 and v15): one question per unit, the unit waits, an unanswered question times out at 24 hours. */
+const CLARIFICATION_ASKS = {
+  modelQuestionAllowed: true,
+  maxQuestionsPerUnit: 1,
+  unitWaitsOthersContinue: true,
+  timeoutHours: 24,
+  timeoutContinuesAs: 'unanswered-with-run-report-disclosure',
+} as const;
+/** The dialogue and the two fast-role rules: a foreground answer is never interrupted by a model question. */
+const CLARIFICATION_NONE = { modelQuestionAllowed: false } as const;
+/** The background origin: an active matching enrollment, one exact Run per dispatch, no Task, no default rule, no other trigger. */
+const BACKGROUND_ORIGIN = {
+  activeMatchingBackgroundAnalysisEnrollmentRequired: true,
+  newUserInitiatedTaskRequired: false,
+  providerSetupCreatesEnrollment: false,
+  manuscriptImportCreatesEnrollment: false,
+  artifactInstallOrEnablementCreatesEnrollment: false,
+  eachDispatchCreatesExactRun: true,
+  matchingActiveDefaultExecutionRuleAllowed: false,
+  importTriggeredOrUnenrolledCrossRunDispatchAllowed: false,
+} as const;
+const BACKGROUND_SCOPE_LIMITS = {
+  manuscriptAnalysisOnly: true,
+  formalManuscriptMutationAllowed: false,
+  externalEffectAllowed: false,
+  generalBackgroundLearningAllowed: false,
+  backgroundPolicyWorkAllowed: false,
+} as const;
+/** The mandatory enrollment ceiling: never unset, split equally across Books (remainder to the first), at most capacity minus one slots. */
+const BACKGROUND_PRECONDITIONS = {
+  eligibleConfiguredProviderRequired: true,
+  providerPreflightRequired: true,
+  exactProviderBindingRequired: true,
+  planEnvelopeRequired: true,
+  runAuthorizationRequired: true,
+  runSourceScopeRequired: true,
+  declaredOperationClassesRequired: true,
+  exactRunBudgetCeilingStateRequired: true,
+  unsetRunBudgetCeilingAllowed: false,
+  enrollmentCeilingRequired: true,
+  ceilingSplitAcrossBooks: 'equal-remainder-to-first',
+  backgroundSlotShare: 'capacity-minus-one',
+  ceilingEvaluatedBeforeEveryDispatch: true,
+  finalProviderPayloadEgressGateRequired: true,
+  frozenBeforeTransmission: true,
+} as const;
+
+/** The clarification block a rule must state, and the matching answer-turn term of its transmission bound. */
+function verifyClarification(rule: Record<string, unknown>, asks: boolean): void {
+  requirePolicy(sameBlock(rule['clarification'], asks ? CLARIFICATION_ASKS : CLARIFICATION_NONE));
+  const transmissions = rule['transmissions'];
+  requirePolicy(isRecord(transmissions) && (asks ? transmissions['plusClarificationAnswerTurns'] === true : transmissions['plusClarificationAnswerTurns'] === undefined));
+}
+
+/**
+ * The enrolled background analysis rule (v14): baseline analysis dispatched by an active matching enrollment as an exact Run, inside the
+ * enrollment's mandatory ceiling; baseline analysis' own transmission bound and suboperations.
+ */
+function verifyBackgroundRule(rule: Record<string, unknown>): void {
+  requirePolicy(sameBlock(rule['authorityOrigin'], BACKGROUND_ORIGIN) && sameBlock(rule['scopeLimits'], BACKGROUND_SCOPE_LIMITS) &&
+    sameBlock(rule['authorizationPreconditions'], BACKGROUND_PRECONDITIONS) &&
+    sameBlock(rule['executionMode'], { humanAttended: false, developerHostOnly: true, ciAllowed: false, hostedAllowed: false, scheduledAllowed: true, backgroundAllowed: true }));
+  const limit = rule['providerAccountLimit'] as Record<string, unknown>;
+  requirePolicy(limit['endsRunAsProviderAccountLimit'] === true);
+  verifyPlannedBound(rule, true);
+  const transmissions = rule['transmissions'] as Record<string, unknown>;
+  requirePolicy(transmissions['plusCrossUnitReductionTopicSections'] === true && transmissions['crossUnitReductionAllowed'] === true &&
+    transmissions['assuranceSamplingAllowed'] === true && transmissions['runReportReflectionAllowed'] === true);
 }
 
 /**
@@ -380,6 +457,10 @@ interface DeveloperLiveRuleReading {
   readonly outboundDataCategories: readonly OutboundDataCategoryId[];
   /** Whether the rule names the kind's one book-level synthesis turn (Provider Processing v11 and after); `verify` reads the policy's own say. */
   readonly crossUnitSynthesisAllowed: boolean;
+  /** Whether the rule lets the model ask a clarification question (Provider Processing v14); the rule's own `clarification` block must say the same. */
+  readonly clarification: boolean;
+  /** Whether this is the enrolled-background rule, the only one scheduled and background. */
+  readonly background?: true;
   readonly verify: (rule: Record<string, unknown>) => void;
 }
 
@@ -442,6 +523,7 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
     taskKinds: ['baseline-manuscript-analysis'],
     outboundDataCategories: ['public-or-synthetic'],
     crossUnitSynthesisAllowed: false,
+    clarification: true,
     verify: (rule) => {
       verifyPlannedRunOrigin(rule);
       const transmissions = rule['transmissions'] as Record<string, unknown>;
@@ -462,6 +544,7 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
     taskKinds: ['editorial-dialogue'],
     outboundDataCategories: ['editor-selected-manuscript-excerpt'],
     crossUnitSynthesisAllowed: false,
+    clarification: false,
     verify: (rule) => {
       const origin = rule['authorityOrigin'];
       requirePolicy(isRecord(origin) && origin['foregroundEditorSelectionAndQuestionRequired'] === true &&
@@ -494,8 +577,10 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
     taskKinds: ['editorial-review/typos-and-usage', 'editorial-review/style-and-format', 'editorial-review/literary-expression', 'editorial-review/cross-deliverable-consistency'],
     outboundDataCategories: ['public-or-synthetic', 'frozen-material-reference-excerpt', 'editorial-deliverable-excerpt'],
     crossUnitSynthesisAllowed: false,
+    clarification: true,
     verify: (rule) => {
-      verifyPlannedRunOrigin(rule);
+      // Since v14 the review kind also admits its matching active Default Execution Rule (审阅 快速开始), as writing does.
+      verifyPlannedRunOrigin(rule, true, true);
       const source = rule['source'] as Record<string, unknown>;
       requirePolicy(source['materialReferencesAllowed'] === true && source['seriesKnowledgeAllowed'] === false &&
         source['editorialDeliverablesAllowed'] === true);
@@ -510,6 +595,7 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
     taskKinds: ['writing'],
     outboundDataCategories: ['public-or-synthetic', 'book-metadata-and-synopsis', 'house-exemplar-excerpt', 'frozen-material-reference-excerpt'],
     crossUnitSynthesisAllowed: true,
+    clarification: true,
     verify: (rule) => verifySynthesisRule(rule, true),
   },
   // The three implemented evaluation contracts (S81): AI7 初评 scores, 审稿意见 and 按我的评分重写评语, non-web, with frozen
@@ -519,6 +605,7 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
     taskKinds: ['evaluation', 'readers-report', 'evaluation-rewrite'],
     outboundDataCategories: ['public-or-synthetic', 'editor-authored-evaluation-text', 'house-exemplar-excerpt', 'frozen-material-reference-excerpt'],
     crossUnitSynthesisAllowed: true,
+    clarification: true,
     verify: verifySynthesisRule,
   },
   // Each Fast kind has its own rule and excerpt category (Issue #841 revision 5); outputs remain Suggestions only.
@@ -527,6 +614,7 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
     taskKinds: ['editorial-polish'],
     outboundDataCategories: ['editor-selected-manuscript-excerpt'],
     crossUnitSynthesisAllowed: false,
+    clarification: false,
     verify: (rule) => verifySuggestionRule(rule, 'editorSelectedPassageOnly'),
   },
   'developer-live-public-samplebook-conflict-regenerate': {
@@ -534,13 +622,24 @@ const DEVELOPER_LIVE_RULES: Readonly<Record<string, DeveloperLiveRuleReading>> =
     taskKinds: ['conflict-regenerate'],
     outboundDataCategories: ['manuscript-conflict-region-excerpt'],
     crossUnitSynthesisAllowed: false,
+    clarification: false,
     verify: (rule) => verifySuggestionRule(rule, 'singleManuscriptConflictRegionOnly'),
+  },
+  // Enrolled background analysis (v14): the only scheduled and background rule, within the enrollment's mandatory ceiling.
+  [BACKGROUND_ANALYSIS_RULE_ID]: {
+    modelRole: 'Main Editorial Role',
+    taskKinds: ['baseline-manuscript-analysis'],
+    outboundDataCategories: ['public-or-synthetic'],
+    crossUnitSynthesisAllowed: false,
+    clarification: true,
+    background: true,
+    verify: verifyBackgroundRule,
   },
 };
 
 /**
- * Provider Processing v12 (and v11, v10, v9 before it): default deny with developer-live eligible-only allow rules, each one this
- * launch can read and each bound exactly to the one Go route. The baseline analysis rule must be among them; its three
+ * Provider Processing v14 (and v12, v11, v10, v9 before it): default deny with developer-live eligible-only allow rules, each one this
+ * launch can read and each bound exactly to the one Go route. All eight rules of v14 must be present. The baseline analysis rule must be among them; its three
  * declared suboperations of ADR 0066, the per-frozen-unit Run Budget Ceiling default of ADR 0070, and the house-people
  * redaction rule of ADR 0079 §4.4 are read as v9 read them. Every other rule is read from its own entry of
  * `DEVELOPER_LIVE_RULES`; a rule id outside it, a repeated id, or any field that does not match is a policy the launch
@@ -582,7 +681,7 @@ export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
     const reading = DEVELOPER_LIVE_RULES[ruleId]!;
     requirePolicy(exactStrings(rule['allowedTaskKinds'], reading.taskKinds) &&
       exactStrings(rule['allowedOutboundDataCategories'], reading.outboundDataCategories));
-    verifyRuleCommon(rule);
+    verifyRuleCommon(rule, reading.background === true);
     verifyRuleBinding(rule, reading.modelRole);
     if (roleBindings === undefined) {
       requirePolicy(reading.modelRole === 'Main Editorial Role');
@@ -593,6 +692,7 @@ export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
         role['model'] === DEVELOPER_LIVE_POLICY_BINDING.model && role['credentialSlot'] === DEVELOPER_LIVE_POLICY_BINDING.credentialSlot);
     }
     reading.verify(rule);
+    verifyClarification(rule, reading.clarification);
     admittedRules.push({
       ruleId,
       taskKinds: [...reading.taskKinds],
@@ -605,9 +705,13 @@ export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
       crossUnitSynthesisAllowed: reading.crossUnitSynthesisAllowed,
       materialReferencesAllowed: sourceFlag(rule, 'materialReferencesAllowed'),
       editorialDeliverablesAllowed: sourceFlag(rule, 'editorialDeliverablesAllowed'),
+      clarificationQuestionAllowed: reading.clarification,
+      clarificationTimeoutHours: reading.clarification ? CLARIFICATION_ASKS.timeoutHours : null,
+      backgroundOrigin: reading.background === true,
+      matchingActiveDefaultExecutionRuleAllowed: (rule['authorityOrigin'] as Record<string, unknown>)['matchingActiveDefaultExecutionRuleAllowed'] === true,
     });
   }
-  requirePolicy(seen.has(DEVELOPER_LIVE_POLICY_BINDING.ruleId));
+  requirePolicy(seen.has(DEVELOPER_LIVE_POLICY_BINDING.ruleId) && seen.size === Object.keys(DEVELOPER_LIVE_RULES).length);
   return {
     crossUnitReductionAllowed: true,
     assuranceSamplingAllowed: true,
@@ -617,7 +721,7 @@ export function verifyDeveloperLivePolicy(policy: Record<string, unknown>): {
 }
 
 /**
- * The editor's own model-service binding a launch supplies to `ordinary-production` (Provider Processing v13): one route,
+ * The editor's own model-service binding a launch supplies to `ordinary-production` (Provider Processing v15): one route,
  * endpoint, model and credential slot, with the opaque Credential Broker reference of the editor's own credential. One binding
  * per instance serves both bound roles (the Main Editorial and the Fast Interaction Role). The resolver only checks it against
  * the policy's allowed bindings and copies the four routing facts into every admitted rule; the credential reference never
@@ -631,7 +735,7 @@ export interface ConfiguredProviderBinding {
   readonly credentialReference: string;
 }
 
-/** One binding Provider Processing v13 allows a user-configurable role: the routing facts, read from the pinned bytes. */
+/** One binding Provider Processing v15 (and v13) allows a user-configurable role: the routing facts, read from the pinned bytes. */
 interface AllowedRoleBinding {
   readonly route: string;
   readonly endpoint: string;
@@ -654,6 +758,15 @@ const PRODUCTION_EXECUTION_MODE = {
   scheduledAllowed: false,
   backgroundAllowed: false,
 } as const;
+/** The enrolled background rule runs in idle or quiet time while the editor's application is open on their own computer: scheduled and background, never hosted or CI. */
+const PRODUCTION_BACKGROUND_EXECUTION_MODE = {
+  humanAttended: false,
+  developerHostOnly: false,
+  ciAllowed: false,
+  hostedAllowed: false,
+  scheduledAllowed: true,
+  backgroundAllowed: true,
+} as const;
 /** No cache, no fixture, no upload, no raw bytes outside the product, and nothing of the development credential, cache or ledger. */
 const PRODUCTION_CAPTURE = {
   fixtureEmissionAllowed: false,
@@ -669,6 +782,8 @@ const PRODUCTION_RUN_ORIGIN = {
   backgroundAnalysisEnrollmentAllowed: false,
   idleScheduledImportTriggeredOrCrossRunDispatchAllowed: false,
 } as const;
+/** Review alone also admits its matching active Default Execution Rule (审阅 快速开始, v15); the Task must still be newly user-initiated. */
+const PRODUCTION_REVIEW_ORIGIN = { ...PRODUCTION_RUN_ORIGIN, matchingActiveDefaultExecutionRuleAllowed: true } as const;
 const PRODUCTION_FOREGROUND_ORIGIN = {
   foregroundEditorActionRequired: true,
   matchingActiveDefaultExecutionRuleAllowed: false,
@@ -728,6 +843,7 @@ const PRODUCTION_BASELINE_TRANSMISSIONS = {
   plusCrossUnitReductionTopicSections: true,
   plusAssuranceSampleAnchorUnits: true,
   plusOneRunReportReflectionTurn: true,
+  plusClarificationAnswerTurns: true,
   oneTechnicalSessionPerAnalysisUnit: true,
   accumulatingSingleSessionAllowed: false,
   identicalRequestReplaysFromProviderResultCache: false,
@@ -741,6 +857,7 @@ const PRODUCTION_REVIEW_TRANSMISSIONS = {
   plusDeclaredSafeRetryAdaptations: true,
   plusAssuranceSampleAnchorUnits: true,
   plusOneRunReportReflectionTurn: true,
+  plusClarificationAnswerTurns: true,
   oneTechnicalSessionPerAnalysisUnit: true,
   accumulatingSingleSessionAllowed: false,
   identicalRequestReplaysFromProviderResultCache: false,
@@ -755,6 +872,7 @@ const PRODUCTION_SYNTHESIS_TRANSMISSIONS = {
   plusOneCrossUnitSynthesisTurn: true,
   plusAssuranceSampleAnchorUnits: false,
   plusOneRunReportReflectionTurn: true,
+  plusClarificationAnswerTurns: true,
   oneTechnicalSessionPerAnalysisUnit: true,
   accumulatingSingleSessionAllowed: false,
   identicalRequestReplaysFromProviderResultCache: false,
@@ -822,8 +940,15 @@ interface OrdinaryProductionRuleReading {
   /** All policy categories, including the unpublished classes, carried to the production Egress Gate. */
   readonly outboundDataCategories: readonly OutboundDataCategoryId[];
   readonly crossUnitSynthesisAllowed: boolean;
+  /** Whether the rule lets the model ask a clarification question (v15); its `clarification` block is compared whole either way. */
+  readonly clarification: boolean;
+  /** Whether this is the enrolled-background rule, the only one scheduled and background. */
+  readonly background: boolean;
   readonly blocks: {
     readonly authorityOrigin: Readonly<Record<string, unknown>>;
+    readonly executionMode: Readonly<Record<string, unknown>>;
+    readonly scopeLimits: Readonly<Record<string, unknown>> | null;
+    readonly clarification: Readonly<Record<string, unknown>>;
     readonly source: Readonly<Record<string, unknown>>;
     readonly transmissions: Readonly<Record<string, unknown>>;
     readonly authorizationPreconditions: Readonly<Record<string, unknown>>;
@@ -838,16 +963,24 @@ function productionReading(
   gateCategories: readonly OutboundDataCategoryId[],
   blocks: OrdinaryProductionRuleReading['blocks'],
   crossUnitSynthesisAllowed = false,
+  background = false,
 ): OrdinaryProductionRuleReading {
   const policyCategories = [...gateCategories, ...PRODUCTION_UNPUBLISHED_CLASSES];
-  return { modelRole, taskKinds, policyCategories, outboundDataCategories: policyCategories, crossUnitSynthesisAllowed, blocks };
+  return { modelRole, taskKinds, policyCategories, outboundDataCategories: policyCategories, crossUnitSynthesisAllowed,
+    clarification: blocks.clarification === CLARIFICATION_ASKS, background, blocks };
 }
 
-const RUN_BLOCKS = { authorityOrigin: PRODUCTION_RUN_ORIGIN, authorizationPreconditions: PRODUCTION_RUN_PRECONDITIONS, providerAccountLimit: PRODUCTION_RUN_ACCOUNT_LIMIT, output: null } as const;
-const FOREGROUND_BLOCKS = { authorizationPreconditions: PRODUCTION_FOREGROUND_PRECONDITIONS, providerAccountLimit: PRODUCTION_ATTEMPT_ACCOUNT_LIMIT } as const;
+const RUN_BLOCKS = {
+  authorityOrigin: PRODUCTION_RUN_ORIGIN, executionMode: PRODUCTION_EXECUTION_MODE, scopeLimits: null, clarification: CLARIFICATION_ASKS,
+  authorizationPreconditions: PRODUCTION_RUN_PRECONDITIONS, providerAccountLimit: PRODUCTION_RUN_ACCOUNT_LIMIT, output: null,
+} as const;
+const FOREGROUND_BLOCKS = {
+  executionMode: PRODUCTION_EXECUTION_MODE, scopeLimits: null, clarification: CLARIFICATION_NONE,
+  authorizationPreconditions: PRODUCTION_FOREGROUND_PRECONDITIONS, providerAccountLimit: PRODUCTION_ATTEMPT_ACCOUNT_LIMIT,
+} as const;
 
 /**
- * The seven ordinary-production rules of Provider Processing v13, by rule id: the same kinds as developer-live v12, each
+ * The eight ordinary-production rules of Provider Processing v15, by rule id: the same kinds as developer-live v14, each
  * `eligible-only`, bound to the editor's own configured role binding rather than to one fixed route, and each read whole.
  */
 const ORDINARY_PRODUCTION_RULES: Readonly<Record<string, OrdinaryProductionRuleReading>> = {
@@ -858,7 +991,7 @@ const ORDINARY_PRODUCTION_RULES: Readonly<Record<string, OrdinaryProductionRuleR
   'ordinary-production-review': productionReading('Main Editorial Role',
     ['editorial-review/typos-and-usage', 'editorial-review/style-and-format', 'editorial-review/literary-expression', 'editorial-review/cross-deliverable-consistency'],
     ['public-or-synthetic', 'frozen-material-reference-excerpt', 'editorial-deliverable-excerpt'],
-    { ...RUN_BLOCKS, source: productionSource(true, true), transmissions: PRODUCTION_REVIEW_TRANSMISSIONS }),
+    { ...RUN_BLOCKS, authorityOrigin: PRODUCTION_REVIEW_ORIGIN, source: productionSource(true, true), transmissions: PRODUCTION_REVIEW_TRANSMISSIONS }),
   'ordinary-production-writing': productionReading('Main Editorial Role', ['writing'],
     ['public-or-synthetic', 'book-metadata-and-synopsis', 'house-exemplar-excerpt', 'frozen-material-reference-excerpt'],
     { ...RUN_BLOCKS, source: productionSource(true, false), transmissions: PRODUCTION_SYNTHESIS_TRANSMISSIONS }, true),
@@ -869,11 +1002,15 @@ const ORDINARY_PRODUCTION_RULES: Readonly<Record<string, OrdinaryProductionRuleR
     { ...FOREGROUND_BLOCKS, authorityOrigin: PRODUCTION_FOREGROUND_ORIGIN, source: productionSource(false, false, 'editorSelectedPassageOnly'), transmissions: PRODUCTION_SUGGESTION_TRANSMISSIONS, output: PRODUCTION_SUGGESTION_OUTPUT }),
   'ordinary-production-conflict-regenerate': productionReading('Fast Interaction Role', ['conflict-regenerate'], ['manuscript-conflict-region-excerpt'],
     { ...FOREGROUND_BLOCKS, authorityOrigin: PRODUCTION_FOREGROUND_ORIGIN, source: productionSource(false, false, 'singleManuscriptConflictRegionOnly'), transmissions: PRODUCTION_SUGGESTION_TRANSMISSIONS, output: PRODUCTION_SUGGESTION_OUTPUT }),
+  // Enrolled background analysis (v15): baseline analysis dispatched by an active matching enrollment, within its mandatory ceiling.
+  [BACKGROUND_ANALYSIS_RULE_ID]: productionReading('Main Editorial Role', ['baseline-manuscript-analysis'], ['public-or-synthetic'],
+    { ...RUN_BLOCKS, authorityOrigin: BACKGROUND_ORIGIN, executionMode: PRODUCTION_BACKGROUND_EXECUTION_MODE, scopeLimits: BACKGROUND_SCOPE_LIMITS,
+      authorizationPreconditions: BACKGROUND_PRECONDITIONS, source: productionSource(false, false), transmissions: PRODUCTION_BASELINE_TRANSMISSIONS }, false, true),
 };
 /** The rule every ordinary-production policy must carry, whose reading the projection's suboperation flags come from. */
 const ORDINARY_PRODUCTION_BASELINE_RULE_ID = 'ordinary-production-baseline-analysis';
 
-/** The terms of a Provider Processing v13 document, root level: a document with any other root term is one this launch cannot read. */
+/** The terms of a Provider Processing v13 or v15 document, root level: a document with any other root term is one this launch cannot read. */
 const PRODUCTION_POLICY_TERMS = [
   'schemaDialect', 'schemaPath', 'documentType', 'policyId', 'policyType', 'version', 'lifecycleStatus', 'predecessorVersion',
   'predecessorCanonicalPath', 'canonicalPath', 'humanProjectionPath', 'operationalScope', 'authorityBasis', 'trustedSelection',
@@ -925,7 +1062,7 @@ function allowedBindingsOf(role: unknown): AllowedRoleBinding[] {
 }
 
 /**
- * Provider Processing v13 (ordinary-production): default deny with seven eligible-only rules this launch can read, each bound to
+ * Provider Processing v15 (ordinary-production): default deny with eight eligible-only rules this launch can read, each bound to
  * a user-configured role binding. Everything is read whole and fails closed: a missing term, an unknown term, a rule id outside
  * `ORDINARY_PRODUCTION_RULES`, a repeated id, or any value that differs from the reading is a policy the launch cannot read.
  * The routing values themselves (route, endpoint, model, credential slot) are never source constants here: they are read from
@@ -1000,17 +1137,20 @@ export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>):
     const blocks = reading.blocks;
     requirePolicy(exactKeys(rule, [
       'ruleId', 'policyResult', 'purpose', 'authorityOrigin', 'executionMode', 'source', 'allowedOutboundDataCategories', 'redaction', 'providerBinding',
-      'transmissions', 'authorizationPreconditions', 'providerAccountLimit', 'capture', 'additionalPrivacyPrompts', 'allowedTaskKinds',
+      'transmissions', 'clarification', 'authorizationPreconditions', 'providerAccountLimit', 'capture', 'additionalPrivacyPrompts', 'allowedTaskKinds',
       ...(blocks.output === null ? [] : ['output']),
+      ...(blocks.scopeLimits === null ? [] : ['scopeLimits']),
     ]));
     requirePolicy(rule['policyResult'] === 'eligible-only' && rule['purpose'] === 'ordinary-production-model-processing');
     requirePolicy(exactStrings(rule['allowedTaskKinds'], reading.taskKinds) && exactStrings(rule['allowedOutboundDataCategories'], reading.policyCategories));
-    requirePolicy(sameBlock(rule['authorityOrigin'], blocks.authorityOrigin) && sameBlock(rule['executionMode'], PRODUCTION_EXECUTION_MODE) &&
+    requirePolicy(sameBlock(rule['authorityOrigin'], blocks.authorityOrigin) && sameBlock(rule['executionMode'], blocks.executionMode) &&
+      sameBlock(rule['clarification'], blocks.clarification) &&
       sameBlock(rule['source'], blocks.source) && sameBlock(rule['redaction'], HOUSE_PEOPLE_REDACTION) &&
       sameBlock(rule['transmissions'], blocks.transmissions) && sameBlock(rule['authorizationPreconditions'], blocks.authorizationPreconditions) &&
       sameBlock(rule['providerAccountLimit'], blocks.providerAccountLimit) && sameBlock(rule['capture'], PRODUCTION_CAPTURE) &&
       sameBlock(rule['additionalPrivacyPrompts'], NO_EXTRA_PRIVACY_PROMPTS));
     if (blocks.output !== null) requirePolicy(sameBlock(rule['output'], blocks.output));
+    if (blocks.scopeLimits !== null) requirePolicy(sameBlock(rule['scopeLimits'], blocks.scopeLimits));
     // The rule names a role and the routes it may be configured with, not one route: the binding is the editor's.
     requirePolicy(sameBlock(rule['providerBinding'], {
       modelRole: reading.modelRole,
@@ -1056,6 +1196,10 @@ export function bindOrdinaryProductionRules(reading: OrdinaryProductionPolicyRea
       crossUnitSynthesisAllowed: kind.crossUnitSynthesisAllowed,
       materialReferencesAllowed: kind.blocks.source['materialReferencesAllowed'] === true,
       editorialDeliverablesAllowed: kind.blocks.source['editorialDeliverablesAllowed'] === true,
+      clarificationQuestionAllowed: kind.clarification,
+      clarificationTimeoutHours: kind.clarification ? CLARIFICATION_ASKS.timeoutHours : null,
+      backgroundOrigin: kind.background,
+      matchingActiveDefaultExecutionRuleAllowed: kind.blocks.authorityOrigin['matchingActiveDefaultExecutionRuleAllowed'] === true,
     });
   }
   return admitted;
@@ -1065,7 +1209,7 @@ export function bindOrdinaryProductionRules(reading: OrdinaryProductionPolicyRea
  * Resolve the build-embedded source-checkout selection for the requested scope. Only the launch-selectable scopes can
  * verify; every invalid state, including an unselectable or unknown scope, remains the zero-transmission denial.
  *
- * `configuredBinding` is read only under `ordinary-production` (Provider Processing v13) and is ignored under every other
+ * `configuredBinding` is read only under `ordinary-production` (Provider Processing v15) and is ignored under every other
  * scope. With `null` the policy still verifies but no rule is admitted: the projection reports `bindingState: 'setup-required'`.
  * With a binding that is exactly one the policy allows, every admitted rule's route, endpoint, model and credential slot are
  * filled from it; any other binding is the denial `binding-not-allowed`.
