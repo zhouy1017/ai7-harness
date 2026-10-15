@@ -40,7 +40,10 @@ import {
   RESUME_BLOCKED_OFFLINE,
   RESUME_BLOCKED_SLOT,
   baselineCancellationImpact,
+  evaluationMaterialPlan,
 } from '../../src/service/task-plan.js';
+import { taskMaterialWords } from '../../src/service/task-material-references.js';
+import { writingMaterialDigest } from '../../src/service/writing-tasks.js';
 
 // The pure half of the Task Drawer's plan projection (Issue #418, plan slice S72): the range a plan reads
 // and how it is named (D5), the diff relabelled by field key and never by the label a stored record
@@ -403,5 +406,28 @@ describe('a Clarification Request card (S76d)', () => {
     expect([CLARIFICATION_UNANSWERABLE_ENDED, CLARIFICATION_UNANSWERABLE_CANCELLING])
       .toEqual(['这次运行已经结束，这个问题不再等你回答', '任务正在取消，这个问题不再等你回答']);
     expect(RESUME_BLOCKED_BINDING.endsWith('请改计划重做。')).toBe(true);
+  });
+});
+
+describe('the background line a plan with references carries (Issue #795 item 3)', () => {
+  const paragraphs = ['这是一份合成背景资料。'];
+  const source = { materialId: 'a'.repeat(36), indexDigest: 'b'.repeat(64), title: '合成资料', characters: 12, sha256: writingMaterialDigest(paragraphs) };
+  const plan = {
+    kind: 'initial-evaluation',
+    state: { key: 'ready', label: '可开始' },
+    scope: { process: '《合成书》全书', reference: ['合成方案'], send: '不发送任何内容', notRead: '不读这本书以外的内容' },
+    notDo: { editorial: ['不读这本书以外的内容'], technical: [] },
+    technical: [],
+    start: { readiness: 'ready', needsModelConnection: false, planEnvelopeDigest: 'c'.repeat(64), categoryDigests: [], reconfirm: null },
+    drift: null,
+  } as unknown as TaskPlanProjection;
+  const reading = taskMaterialWords(source, paragraphs);
+  it('says references never override the 初评 scores, comments and conclusion', () => {
+    expect(evaluationMaterialPlan(plan, [reading]).scope.reference.at(-1))
+      .toBe('资料库资料只提供背景，不改变本社评估方案，也不覆盖初评的分数、评语与结论。');
+  });
+  it('keeps the 定稿 wording for 审稿意见, which drafts from a 定稿 record', () => {
+    expect(evaluationMaterialPlan({ ...plan, kind: 'readers-report' }, [reading]).scope.reference.at(-1))
+      .toBe('资料库资料只提供背景，不改变本社评估方案，也不覆盖定稿的分数、评语与结论。');
   });
 });

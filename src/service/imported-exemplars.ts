@@ -287,7 +287,9 @@ export class ImportedExemplars {
    *
    * `limit` is how many readable exemplars the caller can still take: Books stop being read once that many are found, so
    * an 评估 inspection past the two-exemplar cap reads no further Book (Issue #792). Damaged items found before the cap are
-   * still returned, so they are still named.
+   * still returned, so they are still named. A candidate is counted readable only after `#versions` has read it through
+   * `readImportedExemplar` — which verifies the exact version record and reads its words — and its decision ledger verifies;
+   * `import` refuses empty text, so a candidate counted here always yields words to the caller's own later read (Issue #803).
    */
   readersReportExemplarCandidates(limit: number): Array<{ title: string; revisionId: string | null; reason: 'record' | 'ledger' | null }> {
     if (limit <= 0) return [];
@@ -330,6 +332,8 @@ export class ImportedExemplars {
           }
         }
         if (reason !== null) revisionId = null;
+        // Readable only once `#versions` (which reads the words) and the ledger above both verified, so counting it here
+        // promises the caller's own read of its words will not come up empty (Issue #803).
         else readable += 1;
         candidates.push({ title, revisionId, reason });
       }

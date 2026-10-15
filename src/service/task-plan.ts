@@ -958,11 +958,15 @@ export function evaluationMaterialPlan(plan: TaskPlanProjection, materials: Read
     : plan.scope.send === '不发送任何内容'
     ? `不发送任何内容；资料库资料${names}的提取文字也只在本机读取，只参照，不照抄`
     : `${plan.scope.send}；资料库资料${names}的提取文字随稿件一并发往，只参照，不照抄`;
+  // 初评 has no 定稿 of its own, so it says what references never override there (Issue #795 item 3): the 初评's own scores,
+  // comments and conclusion, not a 定稿's. 审稿意见 drafts from the 定稿 record and keeps that wording.
+  const background = plan.kind === 'initial-evaluation'
+    ? '资料库资料只提供背景，不改变本社评估方案，也不覆盖初评的分数、评语与结论。'
+    : '资料库资料只提供背景，不改变本社评估方案，也不覆盖定稿的分数、评语与结论。';
   return {
     ...plan,
     state: refusal === null ? plan.state : { key: 'changed', label: '参考资料已不可用' },
-    scope: { ...plan.scope, reference: [...plan.scope.reference, ...materials.map(taskMaterialReferenceLine),
-      '资料库资料只提供背景，不改变本社评估方案，也不覆盖定稿的分数、评语与结论。'], send: sending },
+    scope: { ...plan.scope, reference: [...plan.scope.reference, ...materials.map(taskMaterialReferenceLine), background], send: sending },
     notDo: { ...plan.notDo, editorial: plan.notDo.editorial.map((line) => line === '不读这本书以外的内容' ? '不读允许参考以外的资料' : line) },
     technical: [...plan.technical, { key: 'material-references', label: '资料库参考版本',
       value: materials.map(({ source }) => `《${source.title}》 · ${source.materialId} · 索引版本 ${source.indexDigest} · ${source.characters} 字`).join('；') }],

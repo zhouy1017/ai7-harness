@@ -162,6 +162,40 @@ async function importReadersReportExemplar(store: EditorialStore, bookTitle: str
   return imported.exemplars[0]!.revisionId;
 }
 
+/** The store database, directly, for the tampering the tests do to a damaged exemplar (Issues #792, #803). */
+function exemplarDb(): DatabaseSync {
+  return new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+}
+
+/** Damage one imported exemplar's version record, so the candidate reads as a damaged record (Issues #792, #803). */
+function damageVersionRecord(revisionId: string): void {
+  const database = exemplarDb();
+  try {
+    database.exec('DROP TRIGGER IF EXISTS earlier_exemplar_versions_no_update');
+    database.prepare("UPDATE earlier_exemplar_versions SET canonical_json = '{}' WHERE revision_id = ?").run(revisionId);
+  } finally { database.close(); }
+}
+
+/** Restore a version record damaged by `damageVersionRecord`, from the bytes it held, and damage its decision ledger instead. */
+function replaceRecordDamageWithLedgerDamage(revisionId: string, canonicalJson: string, sha256: string): void {
+  const database = exemplarDb();
+  try {
+    database.exec('DROP TRIGGER IF EXISTS earlier_exemplar_versions_no_update');
+    database.prepare('UPDATE earlier_exemplar_versions SET canonical_json = ?, sha256 = ? WHERE revision_id = ?').run(canonicalJson, sha256, revisionId);
+    database.exec('DROP TRIGGER IF EXISTS earlier_exemplar_eligibility_no_update');
+    database.prepare("UPDATE earlier_exemplar_eligibility SET canonical_json = '{}' WHERE revision_id = ?").run(revisionId);
+  } finally { database.close(); }
+}
+
+/** Damage one imported exemplar's learning-admission ledger, so the candidate reads as a damaged ledger (Issues #792, #803). */
+function damageDecisionLedger(revisionId: string): void {
+  const database = exemplarDb();
+  try {
+    database.exec('DROP TRIGGER IF EXISTS earlier_exemplar_eligibility_no_update');
+    database.prepare("UPDATE earlier_exemplar_eligibility SET canonical_json = '{}' WHERE revision_id = ?").run(revisionId);
+  } finally { database.close(); }
+}
+
 /** A reader's report contract of the shape a 定稿 version gives, its words told apart by `version`. */
 function contractInput(version: number): ReadersReportContractInput {
   return {
@@ -507,6 +541,79 @@ describe('审稿意见 over the real store on exact sample1', () => {
         '本社有 2 份审稿意见范例记录已损坏，无法读取，本次不参考范例：'
         + '《以前出版的书乙 · 审稿意见 · 给作者的修改意见 · 版本 1》、《以前出版的书甲 · 审稿意见 · 给作者的修改意见 · 版本 1》',
       );
+    });
+  }, 300_000);
+
+  it('names a ledger-damaged skipped exemplar on the drafted plan under its own clause (Issue #803)', async () => {
+    await withBook(async (book) => {
+      const { bookId } = book;
+      await runInitialEvaluationToEnd(book.store, book.owner, bookId, launchPolicy);
+      finalizeAsJ11(book.store, bookId);
+      await importReadersReportExemplar(book.store, 'b书', '虚构审稿意见，可读。');
+      const ledgerDamaged = await importReadersReportExemplar(book.store, 'a书', '虚构审稿意见，学习准入记录不可读。');
+      damageDecisionLedger(ledgerDamaged);
+      const statement = '参考本社 1 份审稿意见范例：《b书 · 审稿意见 · 给作者的修改意见 · 版本 1》；'
+        + '另有 1 份范例的学习准入记录已损坏，无法读取，本次不参考：《a书 · 审稿意见 · 给作者的修改意见 · 版本 1》';
+      expect(book.store.inspectEvaluation(bookId, null).readersReport.exemplars).toEqual({ count: 1, statement });
+      let progress = book.store.createReadersReportPreparationWork(bookId, 'author', launchPolicy);
+      while (!progress.done) progress = book.store.advanceReadersReportPreparationWork(progress.workId!);
+      const ref = progress.projection!.taskIntent!.taskIntentId;
+      expect(book.store.inspectTaskPlan({ bookId, kind: 'readers-report', ref }).scope.reference[1]).toBe(statement);
+    });
+  }, 300_000);
+
+  it('puts the record and ledger clauses together on a drafted plan that skipped both (Issue #803)', async () => {
+    await withBook(async (book) => {
+      const { bookId } = book;
+      await runInitialEvaluationToEnd(book.store, book.owner, bookId, launchPolicy);
+      finalizeAsJ11(book.store, bookId);
+      await importReadersReportExemplar(book.store, 'c书', '虚构审稿意见，可读。');
+      const recordDamaged = await importReadersReportExemplar(book.store, 'a书', '虚构审稿意见，记录不可读。');
+      const ledgerDamaged = await importReadersReportExemplar(book.store, 'b书', '虚构审稿意见，学习准入记录不可读。');
+      damageVersionRecord(recordDamaged);
+      damageDecisionLedger(ledgerDamaged);
+      const statement = '参考本社 1 份审稿意见范例：《c书 · 审稿意见 · 给作者的修改意见 · 版本 1》；'
+        + '另有 1 份范例记录已损坏，无法读取，本次不参考：《a书 · 审稿意见 · 给作者的修改意见 · 版本 1》；'
+        + '另有 1 份范例的学习准入记录已损坏，无法读取，本次不参考：《b书 · 审稿意见 · 给作者的修改意见 · 版本 1》';
+      let progress = book.store.createReadersReportPreparationWork(bookId, 'author', launchPolicy);
+      while (!progress.done) progress = book.store.advanceReadersReportPreparationWork(progress.workId!);
+      const ref = progress.projection!.taskIntent!.taskIntentId;
+      expect(book.store.inspectTaskPlan({ bookId, kind: 'readers-report', ref }).scope.reference[1]).toBe(statement);
+    });
+  }, 300_000);
+
+  it('refreshes the frozen plan\'s skipped-exemplar note when re-preparing under a recorded contract whose damage changed (Issue #803)', async () => {
+    await withBook(async (book) => {
+      const { bookId } = book;
+      await runInitialEvaluationToEnd(book.store, book.owner, bookId, launchPolicy);
+      finalizeAsJ11(book.store, bookId);
+      await importReadersReportExemplar(book.store, 'b书', '虚构审稿意见，可读。');
+      const damaged = await importReadersReportExemplar(book.store, 'a书', '虚构审稿意见，先记录不可读。');
+      const database = exemplarDb();
+      let canonicalJson = '';
+      let sha256 = '';
+      try {
+        const row = database.prepare('SELECT canonical_json, sha256 FROM earlier_exemplar_versions WHERE revision_id = ?').get(damaged) as { canonical_json: string; sha256: string };
+        canonicalJson = row.canonical_json;
+        sha256 = row.sha256;
+        database.exec('DROP TRIGGER IF EXISTS earlier_exemplar_versions_no_update');
+        database.prepare("UPDATE earlier_exemplar_versions SET canonical_json = '{}' WHERE revision_id = ?").run(damaged);
+      } finally { database.close(); }
+      const prefix = '参考本社 1 份审稿意见范例：《b书 · 审稿意见 · 给作者的修改意见 · 版本 1》；另有 1 份范例';
+      const recordStatement = `${prefix}记录已损坏，无法读取，本次不参考：《a书 · 审稿意见 · 给作者的修改意见 · 版本 1》`;
+      const prepare = (): string => {
+        let progress = book.store.createReadersReportPreparationWork(bookId, 'author', launchPolicy);
+        while (!progress.done) progress = book.store.advanceReadersReportPreparationWork(progress.workId!);
+        return progress.projection!.taskIntent!.taskIntentId;
+      };
+      const planLine = (ref: string): string => book.store.inspectTaskPlan({ bookId, kind: 'readers-report', ref }).scope.reference[1]!;
+      const first = prepare();
+      expect(planLine(first)).toBe(recordStatement);
+      // The record is repaired and the same item's ledger damaged instead: the readable set is unchanged, only the damage is.
+      replaceRecordDamageWithLedgerDamage(damaged, canonicalJson, sha256);
+      const second = prepare();
+      expect(second).not.toBe(first);
+      expect(planLine(second)).toBe(`${prefix}的学习准入记录已损坏，无法读取，本次不参考：《a书 · 审稿意见 · 给作者的修改意见 · 版本 1》`);
     });
   }, 300_000);
 

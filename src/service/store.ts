@@ -9760,6 +9760,17 @@ export class EditorialStore {
     const ledger = this.readersReportLedger(input, { bookId, references: this.#prepareTaskMaterials(bookId, materialIds) });
     const latest = this.#latestReadersReport(bookId);
     const mode = latest === null || latest.projection.resultSetRevision === null ? 'readers-report-first' : 'readers-report-again';
+    // What this preparation skipped for damage, and the contract it is recorded under (Issue #792).
+    const skippedExemplars = [
+      ...readings.damaged.map((title) => ({ title, reason: 'record' as const })),
+      ...readings.ledgerDamaged.map((title) => ({ title, reason: 'ledger' as const })),
+    ];
+    const promptContractSha256 = ledger.definition.materialReferences?.basePromptContractDigest ?? ledger.definition.promptContractDigest;
+    // A row is written once per contract, so re-preparing under a digest already recorded would keep its first note. When only
+    // the damage set changed — a damaged exemplar repaired or replaced — prepare a new Task, whose fresh row names the current
+    // set, as the frozen plan's exemplar line must (Issue #803).
+    const noteChanged = latest !== null && latest.task.promptContractSha256 === promptContractSha256 &&
+      canonicalJson(latest.task.skippedExemplars) !== canonicalJson(skippedExemplars);
     const result = this.#analysisCall(() => ledger.prepare({
       phase: 'start',
       bookId,
@@ -9768,7 +9779,7 @@ export class EditorialStore {
       update: mode === 'readers-report-first' ? null : { mode, selectedRange: null },
       reconfirm: false,
       launchPolicy,
-      ...(canonicalJson(latest?.ledger.definition.materialReferences?.sources ?? []) === canonicalJson(ledger.definition.materialReferences?.sources ?? []) ? {} : { newTask: true }),
+      ...(noteChanged || canonicalJson(latest?.ledger.definition.materialReferences?.sources ?? []) !== canonicalJson(ledger.definition.materialReferences?.sources ?? []) ? { newTask: true } : {}),
     }));
     // Which 定稿 version and template the Task drafts from, recorded once for it and this contract, and what that preparation
     // left out for damage: a plan is frozen, so its exemplar line names what was skipped when it was drafted (Issue #792).
@@ -9780,11 +9791,8 @@ export class EditorialStore {
       recordId: basis.recordId,
       finalizedEntrySha256: basis.entrySha256,
       contract: input,
-      skippedExemplars: [
-        ...readings.damaged.map((title) => ({ title, reason: 'record' as const })),
-        ...readings.ledgerDamaged.map((title) => ({ title, reason: 'ledger' as const })),
-      ],
-      promptContractSha256: ledger.definition.materialReferences?.basePromptContractDigest ?? ledger.definition.promptContractDigest,
+      skippedExemplars,
+      promptContractSha256,
     })));
     return { ...result, projection: result.projection as ReadersReportProjection | null };
   }
