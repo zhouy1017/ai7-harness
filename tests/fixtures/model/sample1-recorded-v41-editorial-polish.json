@@ -1,0 +1,84 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-recorded-v41-editorial-polish",
+  "description": "Two 润色这段 answers of the #812 measured editorial-evidence pass on exact sample1, Go deepseek-v4.1-flash under developer-live Provider Processing v14 / active set v11, 2026-10-15, validation case editorial-evidence/sample1-polish-two-sentences with the declared delta input:editorial-evidence-two-new-sample1-sentences (two sentences other than #842's), capture head db58a668; items S30/editorial-polish/2 and 3, keyed under unit ordinal 0 by the ai7.editorial-polish/1 request digest. Each entry was emitted by tools/generate-model-fixture.mjs with exact sample1 source proof and keeps its original capture provenance. Measured-pass evidence for #812; replay proves application behaviour, not current model quality.",
+  "basedOn": null,
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "1cd588d1cb2d814aaa8dc9d04a0142dda74cc5c2b8e4a8ff8da6b25833097003",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-polish.result/1\",\"suggestions\":[{\"original\":\"马跃之说的每一个字和每一句话\",\"replacement\":\"马跃之的一字一句\",\"reason\":\"“每一个字和每一句话”层级混杂且冗长，用“一字一句”更凝练自然。\"},{\"original\":\"都像那把国宝级的越王勾践剑\",\"replacement\":\"都像国宝级的越王勾践剑\",\"reason\":\"前文未特指某一把剑，“那把”指代稍突兀，删除后更自然。\"},{\"original\":\"有诗意很优雅地\",\"replacement\":\"诗意而优雅地\",\"reason\":\"两个状语直接叠加生硬，改为并列状语更通顺。\"}]}",
+        "usage": {
+          "inputTokens": 487,
+          "outputTokens": 3130
+        }
+      },
+      "capture": {
+        "subject": "editorial-polish",
+        "itemId": "S30/editorial-polish/2",
+        "selectedItemId": "S30/editorial-polish/2",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "7078415b8216761fca5c85a68d9b25e153dccd5d910dcafbdc447e3f4ff93e8a",
+        "taskPromptContractDigest": "7078415b8216761fca5c85a68d9b25e153dccd5d910dcafbdc447e3f4ff93e8a",
+        "capturedAt": "2026-10-15T16:55:45.309Z",
+        "providerRequestDigest": "a4a86eeab4f03103abd06f67c6d1d6c71578ef030c975d7a8baa5813027e15f4",
+        "providerResponseDigest": "35189dd08da41b9450f8e74ee6e9b44efe3ed47add49e6ebeff64996839988b1",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "c0f3f2a63961cf55d47bb1f1b077f160cded0a462e3f1b405af6fe44d0145d2a",
+        "generation": "9e4cd81d723e0f1e42060e40c984f1cdad9fbb9d8435d81588c092cef1b8d64c",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-polish-two-sentences",
+          "step": "editorial-polish/ask"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "ced41159e6bb0cd5e134deccffd383acff1a0298b85aab6b94fc7c9d2cefd49f"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "8869854feceae24b6d9c47304e08468fc5a347a066d29b7a7c9434fc30ba9035",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-polish.result/1\",\"suggestions\":[{\"original\":\"将写信与收信作为日常对外联系方式\",\"replacement\":\"以写信、收信为日常对外联系方式\",\"reason\":\"“将……作为”较冗，改用“以……为”更简洁；两个并列动作间宜用顿号。\"},{\"original\":\"极端少数之人\",\"replacement\":\"极少数人\",\"reason\":\"无“极端少数”之说，“极少数”即可；后接“之人”也显累赘。\"}]}",
+        "usage": {
+          "inputTokens": 469,
+          "outputTokens": 1275
+        }
+      },
+      "capture": {
+        "subject": "editorial-polish",
+        "itemId": "S30/editorial-polish/3",
+        "selectedItemId": "S30/editorial-polish/3",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "7078415b8216761fca5c85a68d9b25e153dccd5d910dcafbdc447e3f4ff93e8a",
+        "taskPromptContractDigest": "7078415b8216761fca5c85a68d9b25e153dccd5d910dcafbdc447e3f4ff93e8a",
+        "capturedAt": "2026-10-15T16:56:05.275Z",
+        "providerRequestDigest": "a42ae824acd9f80467c61465bb31bc326815b28dbcd530fb65dc53382ba91ac4",
+        "providerResponseDigest": "a964cc763c544b2e6e4885d6b73fd340e2aae49df0db60f07262daeebacc2447",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "6364587a7d5ffd6adcb14aeb02f6ada37191dfd0d69b6603131a40b4ac7303f6",
+        "generation": "9e4cd81d723e0f1e42060e40c984f1cdad9fbb9d8435d81588c092cef1b8d64c",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-polish-two-sentences",
+          "step": "editorial-polish/ask"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "606dbf65e9fb60c893de4fafc881452161c636b0fb9d3bbe03c650e6594865c2"
+      }
+    }
+  ]
+}

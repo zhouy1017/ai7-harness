@@ -1,0 +1,351 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-recorded-v41-editorial-writing-draft",
+  "description": "Writing draft (宣传文章, audience 喜欢历史与悬疑小说的读者, channel 出版社微信公众号, a three-clause brief) of the #812 measured editorial-evidence pass on exact sample1, Go deepseek-v4.1-flash under developer-live Provider Processing v14 / active set v11, 2026-10-15, validation case editorial-evidence/sample1-writing-promotion-brief, capture head db58a668: the eight unit turns under the v14 model-question task contract and the book-level synthesis (S84/writing-first/21-29). The Run Report reflection S84/writing-first/30 ended outcome-unknown 1.0 s after the synthesis response (the #851 pattern) and has no capture. The synthesis entry is keyed under the Task's wrapped contract (generator branch of #812); each entry was emitted by tools/generate-model-fixture.mjs with exact sample1 source proof and keeps its original capture provenance. Measured-pass evidence for #812; replay proves application behaviour, not current model quality.",
+  "basedOn": null,
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "d09ccdf01646b78094b2eeeb64e556e7e84ff5cfa08df6b76ec142568e8fc535",
+      "contentDigest": "582fd4c3541fa6f2cfc613106f45b9713aeeeeacfb82ffbbcd940853533b9981",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.writing.unit-result/1\",\"unitOrdinal\":1,\"passages\":[{\"kind\":\"highlight\",\"note\":\"开篇两行对仗式格言「识时务者为俊杰／不识时务者为圣贤」，紧接着一句「用尽全身力气才写出这两句话」，是悬念的题眼：谁在写、写给谁、为何写得如此艰难，可直接用作标题或开头引语。\",\"blockOrdinals\":[5,6,7]},{\"kind\":\"highlight\",\"note\":\"刚过完六十五岁生日的老人，为写一封信累得又是喘气又是叹气，写满两张信笺后突然丢下毛笔，把纸撕到找不到一个完整的字；信是写给他钟爱的某位弟子——悬念由此起势。\",\"blockOrdinals\":[8]},{\"kind\":\"highlight\",\"note\":\"倒回八年前，这种级别的弟子有两位；另一位被一群文质彬彬的警察当面带走后，名字就从老人的话语体系里消失。收信人究竟是谁，构成核心悬念（写作时不可点破名字）。\",\"blockOrdinals\":[12,13]},{\"kind\":\"highlight\",\"note\":\"他一次次重写这封信，内容几乎一字不差，唯独临到要写下收信弟子的名字时陷入深深困惑，只好再次撕碎，只留满屋叹息——这叹息不像给信，更像给某个人。\",\"blockOrdinals\":[14]},{\"kind\":\"highlight\",\"note\":\"女婿操办寿宴，老人拗不过家人只好限制在两桌；「老省长」不请自来，评价这场寿宴是「曾侯乙尊盘级的」。地方习俗与国宝级比喻，为故事罩上青铜重器的光泽。\",\"blockOrdinals\":[9,10]},{\"kind\":\"theme\",\"note\":\"曾侯乙尊盘是王者盛酒温酒的器皿，被视为国宝中的国宝；以此作比，既点出书名《青铜重器》的意象，也暗示主人公在楚学界的地位。\",\"blockOrdinals\":[1,2,11]},{\"kind\":\"character\",\"note\":\"女婿郑雄精通老家那套六十五岁做「七十小寿」的卜算与讲究，办事格外得体：既有简朴温馨，又不失楚学界泰斗的端庄——他是不是那封信的收信人，正是悬念所在。\",\"blockOrdinals\":[9,10]},{\"kind\":\"theme\",\"note\":\"小说以「蟠虺」为题，出自《青铜重器》之一，背景落在楚学界与青铜国宝之间，学术考据与人心疑云交织，适合向同时爱历史与悬疑的读者强调其质地。\",\"blockOrdinals\":[1,2,3,4]},{\"kind\":\"highlight\",\"note\":\"手写书信在这个时代近乎绝迹：从邮筒到邮局再到邮递员，最后才到收信人手里、带着墨香墨彩的一封信，比花两元钱中大奖还稀罕。可用来铺垫「怎么会有人还在写信」的悬念。\",\"blockOrdinals\":[15]}]}",
+        "usage": {
+          "inputTokens": 1740,
+          "outputTokens": 3239
+        }
+      },
+      "capture": {
+        "subject": "writing-unit",
+        "itemId": "S84/writing-first/21",
+        "selectedItemId": "S84/writing-first/21",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "f42e3c60b476e1a081a7451210fce28e942a394b20909b5a5fd01c212a017083",
+        "taskPromptContractDigest": "f42e3c60b476e1a081a7451210fce28e942a394b20909b5a5fd01c212a017083",
+        "capturedAt": "2026-10-15T17:06:01.889Z",
+        "providerRequestDigest": "1589223bd5ae3054c936a4ecc55a66a8400947d65d39ba47bf26f95c535bb1a5",
+        "providerResponseDigest": "0fcb2efd816fac47406abf9254b432b2aec6b1ca1ed10c0838a0555bae36ed23",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "4e0461464855f1ef368a9ccc70679c2598ff63b4f0c0a8817bc85de0a0d57943",
+        "generation": "77a5cc85ea796eb5bdc57759fd3d439fad8b6b76399429f3b293b88f6808eca6",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-writing-promotion-brief",
+          "step": "writing-first/unit-1"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "e03147283f3d8323f079e24c152d5e0c2f14ccae327136814d7991e25c716034"
+      }
+    },
+    {
+      "unitOrdinal": 2,
+      "requestDigest": "9c94060fa24e6aedbf9ac63a7b89305498059fcb37e07e64142d38250f9032ee",
+      "contentDigest": "30b634d2e636a3bf1e188be27744461154be936fe298bf09e5daf5cda6037eef",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.writing.unit-result/1\",\"unitOrdinal\":2,\"passages\":[{\"kind\":\"highlight\",\"note\":\"曾本之刚收到一封信——正是这封信，将很平常的事情变得极不平常；这一次，他收到的竟是一封用甲骨文写的信。悬念由此开场。\",\"blockOrdinals\":[3,4,6]},{\"kind\":\"highlight\",\"note\":\"用甲骨文写信的人，死于一九八○年代最后的那个夏天；二十多年前那次没有仪式的生命告别，从灵魂放飞到清明立碑，曾本之从头到尾都在现场。死人来信，吊诡至极。\",\"blockOrdinals\":[7]},{\"kind\":\"highlight\",\"note\":\"信封地址不是他工作的楚学院，而是精确写明他固定时间、固定地点独坐之处——除家人外外人不应当知道；信封上的字却是打印机打印的标准楷体汉字。\",\"blockOrdinals\":[8,9]},{\"kind\":\"highlight\",\"note\":\"独坐之际，太阳将先月亭尖尖的阴影从曾本之身体的右边无声无息地移到左边。安静的场面，为突如其来的不寻常来信蓄势。\",\"blockOrdinals\":[10]},{\"kind\":\"character\",\"note\":\"曾本之：皓首苍颜，如今仍把写信与收信当作日常对外联系方式；不喜欢打电话，不习惯发电子邮件，手机短信只看不写、只收不发，回信坚持用繁体字。\",\"blockOrdinals\":[2,5]},{\"kind\":\"character\",\"note\":\"先月亭前的曾本之有些无聊，捡蚌壳随手一扔，三次精准命中亭影顶尖，又觉得用它打水漂更有意思；由蚌壳想起当年在随州擂鼓墩发掘曾侯乙大墓的往事。\",\"blockOrdinals\":[11]},{\"kind\":\"theme\",\"note\":\"手写书信几近绝迹：要收到一封从邮筒到邮局再到邮递员、带着墨香墨彩的书信，比只花两元钱买张彩票就中大奖还稀罕；纸质书信迟早变成珍稀之物。\",\"blockOrdinals\":[1,2]}]}",
+        "usage": {
+          "inputTokens": 1604,
+          "outputTokens": 1978
+        }
+      },
+      "capture": {
+        "subject": "writing-unit",
+        "itemId": "S84/writing-first/22",
+        "selectedItemId": "S84/writing-first/22",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "f42e3c60b476e1a081a7451210fce28e942a394b20909b5a5fd01c212a017083",
+        "taskPromptContractDigest": "f42e3c60b476e1a081a7451210fce28e942a394b20909b5a5fd01c212a017083",
+        "capturedAt": "2026-10-15T17:06:31.456Z",
+        "providerRequestDigest": "a73e23aab753d91ce6dadedfb4c982bdb8690db2c85eab65e1ede411cb6af885",
+        "providerResponseDigest": "02aca78431b6057baff1fe043b136c0b3c246035ae7203ce396c58791b5e67e5",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "aade1e5fd4b664690d2eb4248428a810fa12f0629ef0fc907b78982cde864528",
+        "generation": "77a5cc85ea796eb5bdc57759fd3d439fad8b6b76399429f3b293b88f6808eca6",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-writing-promotion-brief",
+          "step": "writing-first/unit-2"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "d855b47c3dca450fdbb35fb44a56dbd2eb6d28cb4afa1e9d1cb5246c2c318af1"
+      }
+    },
+    {
+      "unitOrdinal": 3,
+      "requestDigest": "f430408b2d4424ac42689ffb62d37f8805a567c5da63fcd110738fe033af6282",
+      "contentDigest": "a961d6dc02f89d79d932b93f7d23398f5ae6d205901f48adc2ba7e8b682b0d29",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.writing.unit-result/1\",\"unitOrdinal\":3,\"passages\":[{\"kind\":\"highlight\",\"note\":\"梦中的青铜重器与甲骨文被一声沉雷震散，睁眼只剩东湖碧水；每周一两次的甲骨文梦境反复造访，为来信埋下悬念。\",\"blockOrdinals\":[2,3,4,5]},{\"kind\":\"highlight\",\"note\":\"邮递员在东亭邮局干了三十几年，见惯文化单位的古怪信件，却认定这一封最古怪；同事都当恶作剧，他偏要来试——古怪的收信地址自带钩子。\",\"blockOrdinals\":[9,10]},{\"kind\":\"highlight\",\"note\":\"一句“你是不是姓曾”到核对身份证、当面拆信，陌生人递上旧得发黄的信笺，节奏紧、悬念足。\",\"blockOrdinals\":[6,7,8]},{\"kind\":\"highlight\",\"note\":\"信上只有四个字，邮递员看不出是画还是字，曾本之一眼认出是甲骨文，且字迹气韵与纸张气息熟悉得可怕。\",\"blockOrdinals\":[11,13,14,15,16]},{\"kind\":\"highlight\",\"note\":\"看清信的内容后，他立刻想到：世界上最后一片安宁之地终于不再属于自己——不祥预感把悬念推到顶点，却不点破写信人是谁。\",\"blockOrdinals\":[12]},{\"kind\":\"character\",\"note\":\"曾本之：能从甲骨文的字迹气韵与纸张气息辨认旧识的考古学者；面对追问不失方寸，以通信自由与隐私权挡回好奇。\",\"blockOrdinals\":[16,17,18]},{\"kind\":\"character\",\"note\":\"邮递员：话多而好奇的老邮政，想知道甲骨文写的什么、是否解开某个不解之谜，临走还嘟哝“别拿甲骨文吓唬人”。\",\"blockOrdinals\":[18,19]},{\"kind\":\"theme\",\"note\":\"考古现场与梦境反复纠缠：青铜重器、被黄土掩埋的甲骨文，与日常的湖畔春光互相切换，构成故事的悬念底色。\",\"blockOrdinals\":[2,5]}]}",
+        "usage": {
+          "inputTokens": 2017,
+          "outputTokens": 1926
+        }
+      },
+      "capture": {
+        "subject": "writing-unit",
+        "itemId": "S84/writing-first/23",
+        "selectedItemId": "S84/writing-first/23",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "f42e3c60b476e1a081a7451210fce28e942a394b20909b5a5fd01c212a017083",
+        "taskPromptContractDigest": "f42e3c60b476e1a081a7451210fce28e942a394b20909b5a5fd01c212a017083",
+        "capturedAt": "2026-10-15T17:06:48.786Z",
+        "providerRequestDigest": "1a4bd2c937564c79967212f6e9020ee0f7d43f7af9dbd732ea43031c24fe2c1b",
+        "providerResponseDigest": "8534ac9762b1cc4937105a46dc3ac7b2e513ecc5082b8a94ca7cf626e7ecf549",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "54c595690e10332998523bb4f0e65bcdb8e8f4982b9415b90867cc3df530c37e",
+        "generation": "77a5cc85ea796eb5bdc57759fd3d439fad8b6b76399429f3b293b88f6808eca6",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-writing-promotion-brief",
+          "step": "writing-first/unit-3"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "dd1bfe6a9c5154c725c61293e5875d13dcb58c0ff22d9e9d27c4179e720929a7"
+      }
+    },
+    {
+      "unitOrdinal": 4,
+      "requestDigest": "8b5d1e69ecfdeac88d5f5d71fbd10a85f3dc1e118597420a2fa7f9b060918fde",
+      "contentDigest": "12743a413d0267626854136350c016a039416f2f096dca9decfd5c7d4f8956cc",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.writing.unit-result/1\",\"unitOrdinal\":4,\"passages\":[{\"kind\":\"highlight\",\"note\":\"悬念起点：一封甲骨文书信像晴空霹雳般来到曾本之眼前，纸上文字罕见难识，意思却明白——某事要重新开始，或某种没说出口的话必须说了，从此要变样。\",\"blockOrdinals\":[2]},{\"kind\":\"highlight\",\"note\":\"信上只竖写四个字，言简意赅既合曾本之的职业习惯，也说明写信人有同样的职业素养——为后面认出内容留足张力。\",\"blockOrdinals\":[3,4,5]},{\"kind\":\"highlight\",\"note\":\"谜面揭晓一半：四个甲骨文是“拯之承启！”，用古文字直接发出召唤，可作全文最抓人的一句，但不宜解释太透。\",\"blockOrdinals\":[6]},{\"kind\":\"highlight\",\"note\":\"信件左下方还有一方红印章，印章上的名字与曾本之渊源极深：二十多年过去，他对此人名字的熟悉程度仅次于自己的名字。写信人身份是最大悬念，行文时不要写出这个名字。\",\"blockOrdinals\":[7,8]},{\"kind\":\"theme\",\"note\":\"可引的两句人生格言，为整件事定调：人身上若没一点古怪就不是人，人生若没遇上一两件奇异的事就不是人生。\",\"blockOrdinals\":[10,11]},{\"kind\":\"character\",\"note\":\"曾本之：揣着古怪信件在家等女婿回来说话，离下班还有半小时被老朋友电话改了主意；对电话麻木，家中的电话通常都是找安静。\",\"blockOrdinals\":[12,13]},{\"kind\":\"character\",\"note\":\"马跃之：楚学院栋梁，与曾本之同做楚学却方向不同，专攻漆器和丝绸，是这一方向上声名显赫的学术权威；两人各守边界，从不乱说对方领域的一个字。“知之者之之也，不知者之之乎”可作书斋气的注脚。\",\"blockOrdinals\":[14]},{\"kind\":\"character\",\"note\":\"两位老学者的往来方式：曾本之笑称“好久没听到马先生丝绸般的声音”，马跃之回敬“好久没有闻到曾先生满身的铜臭”，可见交情与职业身份的双关趣味。\",\"blockOrdinals\":[15,16]},{\"kind\":\"character\",\"note\":\"安静：曾本之的妻子，快人快语，当场拆穿两人所谓“好久”——上周马跃之还来家里冲着曾侯乙尊盘照片发呆，柳琴还打趣他是不是看出个大美人来。\",\"blockOrdinals\":[17]}]}",
+        "usage": {
+          "inputTokens": 1842,
+          "outputTokens": 2308
+        }
+      },
+      "capture": {
+        "subject": "writing-unit",
+        "itemId": "S84/writing-first/24",
+        "selectedItemId": "S84/writing-first/24",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "f42e3c60b476e1a081a7451210fce28e942a394b20909b5a5fd01c212a017083",
+        "taskPromptContractDigest": "f42e3c60b476e1a081a7451210fce28e942a394b20909b5a5fd01c212a017083",
+        "capturedAt": "2026-10-15T17:07:14.314Z",
+        "providerRequestDigest": "bb4ce65730f723a5a9690addd727adda2e9716e37490db82b059b7135a284f84",
+        "providerResponseDigest": "22d3f6a6d7fb961bba012d7e96be5ebfb3f82423e0b786f1521ab5d4be94724e",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "5b2d6de93857359f4b97c9e9048815c4c849ebd7f0d03bbd808de55a26398c91",
+        "generation": "77a5cc85ea796eb5bdc57759fd3d439fad8b6b76399429f3b293b88f6808eca6",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-writing-promotion-brief",
+          "step": "writing-first/unit-4"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "f72581054f0ad3f8f7a0d87c0433058d3c776d23f50b90e94f54d773c48c9dc7"
+      }
+    },
+    {
+      "unitOrdinal": 5,
+      "requestDigest": "861d0164252d3348624d54244d0da87e341432de1ce04f0c82987670e446029d",
+      "contentDigest": "48fb4b784e0dd65b543799e015af64f0abe448d8913011525d29bf328972394b",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.writing.unit-result/1\",\"unitOrdinal\":5,\"passages\":[{\"kind\":\"highlight\",\"note\":\"全篇悬念的起点：主人公揣着一封用甲骨文写成的信回家；一向只让女婿陪同出差的妻子，这次却破例要他带上老友同行。\",\"blockOrdinals\":[7]},{\"kind\":\"highlight\",\"note\":\"事情敲定后马跃之仍迟迟不挂电话，曾本之察觉他还有不便启齿的话——悬念被进一步收紧。\",\"blockOrdinals\":[9]},{\"kind\":\"highlight\",\"note\":\"通话以一句郑重的追问收尾：郑雄下午是不是参加了省里的一个会议？钩子就此留下。\",\"blockOrdinals\":[10]},{\"kind\":\"highlight\",\"note\":\"曾侯乙尊盘的照片成了斗嘴由头：彩色照片上比黑白照片多了皱纹，被扯成打翻醋坛子，历史器物与生活玩笑交织。\",\"blockOrdinals\":[2]},{\"kind\":\"character\",\"note\":\"马跃之与曾本之在电话两头大笑，几十年的交情容得下最难听的话；这种互损式的亲密是全书人物关系的底色。\",\"blockOrdinals\":[4,6]},{\"kind\":\"character\",\"note\":\"安静的出场：冲着话筒连珠炮似的调侃，说丈夫长着桃花眼、说两人成了一对老顽童，并替曾本之做主答应外出。\",\"blockOrdinals\":[1,3]},{\"kind\":\"character\",\"note\":\"曾本之当年在伴郎席上开玩笑，说研究青铜重器的自己要找个浑身铜臭的女人，结果一语成谶，半辈子光棍后娶了银行出纳。\",\"blockOrdinals\":[5]},{\"kind\":\"character\",\"note\":\"马跃之半真半假地说想患老年痴呆，痴痴呆呆说什么都可以，不必活得太明白——自嘲里透出老境与心事。\",\"blockOrdinals\":[8]},{\"kind\":\"theme\",\"note\":\"背景交代：两人分别研究丝绸与青铜重器，多年结伴同行，曾侯乙尊盘、出差由女婿郑雄陪同，构成他们的日常与笑料。\",\"blockOrdinals\":[2,5,7]},{\"kind\":\"theme\",\"note\":\"宁波活动的邀约成为引线：马跃之希望曾本之破例一次，不要带上随行多年的人，这个请求把故事推向后面的追问。\",\"blockOrdinals\":[6]}]}",
+        "usage": {
+          "inputTokens": 1668,
+          "outputTokens": 2571
+        }
+      },
+      "capture": {
+        "subject": "writing-unit",
+        "itemId": "S84/writing-first/25",
+        "selectedItemId": "S84/writing-first/25",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "f42e3c60b476e1a081a7451210fce28e942a394b20909b5a5fd01c212a017083",
+        "taskPromptContractDigest": "f42e3c60b476e1a081a7451210fce28e942a394b20909b5a5fd01c212a017083",
+        "capturedAt": "2026-10-15T17:07:35.099Z",
+        "providerRequestDigest": "4c936f946f3de46c454b34bb9f536173673a89dbf9d9367e4e42342354b26aed",
+        "providerResponseDigest": "9f41433921e9989a3436adcd65e96353b83686961730bc5526b9d7e0415c0cf0",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "c6517af8e29b9594ce232c364f234f8466cb2710da7003ba4861baf03786319f",
+        "generation": "77a5cc85ea796eb5bdc57759fd3d439fad8b6b76399429f3b293b88f6808eca6",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-writing-promotion-brief",
+          "step": "writing-first/unit-5"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "979b51445ea628351d22bfdad71d71ba5ba03d2c3ca46e49593915f8b72f773e"
+      }
+    },
+    {
+      "unitOrdinal": 6,
+      "requestDigest": "4ab04b0eefa2b32c09fd4cf47cc978cf7df77a73704d09a72b724e70a364d751",
+      "contentDigest": "81cda8000df69574b2084ed55f80191148b5a479aa2c9916d8c463f40555a804",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.writing.unit-result/1\",\"unitOrdinal\":6,\"passages\":[{\"kind\":\"highlight\",\"note\":\"悬念落点：听完马跃之的话，曾本之暗暗决定暂时不在郑雄面前提起那封用甲骨文写的信；秘密憋在心里难受，他约马跃之次日上午在楚学院见面，把读者的注意力引向这封信。\",\"blockOrdinals\":[7,8]},{\"kind\":\"highlight\",\"note\":\"郑雄在会上临时获准发言，一开口就把新上任的省长恭维成“二十一世纪的楚庄王”，一句惊人的比喻成为风波的起点。\",\"blockOrdinals\":[3]},{\"kind\":\"highlight\",\"note\":\"马跃之把郑雄的原话一字不落地转述给曾本之，还层层点评，指出这种比喻有僭越与礼坏之嫌，紧张感在转述中升温。\",\"blockOrdinals\":[3,4]},{\"kind\":\"character\",\"note\":\"曾本之对行政会议向来不感兴趣、记不住，偏偏记住这一场，只因郑雄在家提过这是新省长上任后的第一个会，侧面写他的疏离与在意。\",\"blockOrdinals\":[2]},{\"kind\":\"character\",\"note\":\"郑雄把楚学研究新书从头翻到尾，嫌它们炒剩饭，连马跃之关于春秋墓葬出土丝绸保护的专著也瞧不起；曾本之却提醒他这书水平很高，不读就会在楚学界掉队。\",\"blockOrdinals\":[2]},{\"kind\":\"character\",\"note\":\"郑雄既不答应读也不说不读，只说十本马跃之的书堆在一起也比不上曾本之的一本，一句话写出他的圆滑与师生间的微妙。\",\"blockOrdinals\":[2]},{\"kind\":\"character\",\"note\":\"马跃之修养深厚，说起话来像风一样顺畅、像水一样透彻；他甚至故意自贬，说妻子能干也不是好事，显出其处世分寸。\",\"blockOrdinals\":[5]},{\"kind\":\"character\",\"note\":\"在同样修养深厚的曾本之听来，马跃之的每句话都像越王勾践剑，诗意而优雅地戳着他的心窝，写出被转述刺痛的感受。\",\"blockOrdinals\":[5]},{\"kind\":\"character\",\"note\":\"曾本之不便显得太生气又不能不作表示，于是借“金戈铁马的楚庄王不知去了哪里，长袖善舞的溜须小吏车水马龙”含蓄宣泄不满。\",\"blockOrdinals\":[6]},{\"kind\":\"character\",\"note\":\"马跃之反过来劝导：新官上任说几句祝贺的话也无可厚非，别太责备郑雄，人家现在是副厅长，在家里也要留点面子。\",\"blockOrdinals\":[7]},{\"kind\":\"theme\",\"note\":\"楚学研究的学术圈层与评价标准构成背景：楚庄王、春秋五霸、越王勾践剑、春秋墓葬丝绸等意象，把学界人事纠葛放进历史纵深里看。\",\"blockOrdinals\":[2,4,5,6]}],\"passages_note\":\"\"}",
+        "usage": {
+          "inputTokens": 1641,
+          "outputTokens": 1261
+        }
+      },
+      "capture": {
+        "subject": "writing-unit",
+        "itemId": "S84/writing-first/26",
+        "selectedItemId": "S84/writing-first/26",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "f42e3c60b476e1a081a7451210fce28e942a394b20909b5a5fd01c212a017083",
+        "taskPromptContractDigest": "f42e3c60b476e1a081a7451210fce28e942a394b20909b5a5fd01c212a017083",
+        "capturedAt": "2026-10-15T17:08:03.074Z",
+        "providerRequestDigest": "eea713c391f715fa2e4cc7cfe7b367f4d91c16ecae85471aa749c23889762966",
+        "providerResponseDigest": "b863cce6592c1d22c4e0c6cdf35c2c90306bd9e41dfcf8ad1a29b28ba6461d88",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "8b98bec51f3175b233a370d6334f800d8a337cd44fddbda800ce85c5714e119c",
+        "generation": "77a5cc85ea796eb5bdc57759fd3d439fad8b6b76399429f3b293b88f6808eca6",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-writing-promotion-brief",
+          "step": "writing-first/unit-6"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "10836bd98359a10bf984106519926c470d06ae237c34819ed56190109fcd9bae"
+      }
+    },
+    {
+      "unitOrdinal": 7,
+      "requestDigest": "f896789d283c54dc93e7c14fe7da617a1494f30ea6b5b21b068ab8eef7da96b8",
+      "contentDigest": "ff158e0f8eec32fdf485f964e2c66d92fed84cbf57de527a97b67c515b9aad50",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.writing.unit-result/1\",\"unitOrdinal\":7,\"passages\":[{\"kind\":\"highlight\",\"note\":\"一封用甲骨文写来的信，让曾本之暗暗作了决定：暂不向郑雄提及，只约马跃之次日上午在楚学院见面。信是谁写的、写了什么，成为吊住读者的悬念。\",\"blockOrdinals\":[1]},{\"kind\":\"highlight\",\"note\":\"曾本之回到书房，对着曾侯乙尊盘的黑白照片呆坐，胸膛深处涌动的心潮比长江与汉水交汇处的暗流还汹涌；随后他取出放大镜，细看照片上复杂的透空蟠虺纹饰。\",\"blockOrdinals\":[2]},{\"kind\":\"character\",\"note\":\"曾本之：守着青铜重器过了一辈子的老学者，在家中沉默少言，任凭妻子抱怨，却独自在照片前用放大镜细看——学者的执拗与隐秘心事并存。\",\"blockOrdinals\":[2,4,5]},{\"kind\":\"character\",\"note\":\"安静：曾本之的妻子，抱怨他天天抱着青铜重器、回到家里还要用放大镜看照片，是家中热闹日常的发起者。\",\"blockOrdinals\":[4,6]},{\"kind\":\"highlight\",\"note\":\"女儿曾小安带着外孙楚楚推门进来，楚楚一个前扑挂在曾本之脖子上；安静说，天下万事万物只有这小东西能把外公的魂从那些破铜烂铁上找回来。\",\"blockOrdinals\":[5,6]},{\"kind\":\"highlight\",\"note\":\"楚楚冒出一句“管青铜的，就不要管丝绸，管甲骨文的，就不要管漆器”，把学术分工调侃成家中笑料，几个人正笑个不停，门铃又响了。\",\"blockOrdinals\":[7,8,9,10]},{\"kind\":\"character\",\"note\":\"郑雄：曾本之的学生，如今已是副厅长。他下班回家，家里的气氛就有了微妙变化；他认为守住位置比埋头做研究更重要。\",\"blockOrdinals\":[11,12,13,15,18]},{\"kind\":\"highlight\",\"note\":\"师徒当面交锋：曾本之质问他不抓紧搞研究，郑雄不慌不忙答“让青铜重器成为当代重器”，并说占住那个位置，才发现位置有多么重要。\",\"blockOrdinals\":[15,16,18]},{\"kind\":\"theme\",\"note\":\"故事落在楚学与青铜重器的研究圈：一九六六年出土的九鼎七簋为何不是礼制要求的八簋，一九六五年出土的天兽御尊为何孤零零埋在荒野，都是悬而未决的谜。\",\"blockOrdinals\":[17]}]}",
+        "usage": {
+          "inputTokens": 1888,
+          "outputTokens": 2455
+        }
+      },
+      "capture": {
+        "subject": "writing-unit",
+        "itemId": "S84/writing-first/27",
+        "selectedItemId": "S84/writing-first/27",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "f42e3c60b476e1a081a7451210fce28e942a394b20909b5a5fd01c212a017083",
+        "taskPromptContractDigest": "f42e3c60b476e1a081a7451210fce28e942a394b20909b5a5fd01c212a017083",
+        "capturedAt": "2026-10-15T17:08:11.425Z",
+        "providerRequestDigest": "b85f7f8d4e4a065f208a04c65eee78eaacc1b1ec9132bbcc40fe9a379702abe3",
+        "providerResponseDigest": "cecf4b1ea154509476f23650aa799396e94e8b8494bd10d69cc20c44b1dc7dbf",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "841b77c15bbb10446c3815c7f37493db3669616513e59648e3fe77f185fb8a92",
+        "generation": "77a5cc85ea796eb5bdc57759fd3d439fad8b6b76399429f3b293b88f6808eca6",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-writing-promotion-brief",
+          "step": "writing-first/unit-7"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "b36aefe4875d49e1d6062d53cc7682bb675225c13caa52183d330db102e04e35"
+      }
+    },
+    {
+      "unitOrdinal": 8,
+      "requestDigest": "13789d73e85cf157926016347aa0dcc36287b197e3430c632a5775291813b79a",
+      "contentDigest": "baa26a771e30cec986053cba5981096b238feef12305bd62e9312c133af4f3d0",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.writing.unit-result/1\",\"unitOrdinal\":8,\"passages\":[{\"kind\":\"highlight\",\"note\":\"下午在东湖边收到的那封信，曾本之几次将手伸进口袋想拿出来品一品，最终还是原样退出来——信还没被读，悬念已经吊起。\",\"blockOrdinals\":[2]},{\"kind\":\"highlight\",\"note\":\"家里彻底安静之后，曾本之才把那封古怪的来信取出来，摊在写字台上，用放大镜细细看了很久；信被留到全书最安静的时刻才亮出。\",\"blockOrdinals\":[6]},{\"kind\":\"highlight\",\"note\":\"书房像禁地：门一关，家人想在门外说话都得小声叫上几次才敢进，连小外孙女楚楚也要趴在门上反复叫外公。\",\"blockOrdinals\":[2]},{\"kind\":\"highlight\",\"note\":\"案头并置两样东西：曾侯乙尊盘照片，以及一片半个巴掌大小、上面有一串甲骨文的龟甲；后者把视线从器物引向更古老的文字。\",\"blockOrdinals\":[2]},{\"kind\":\"character\",\"note\":\"曾本之：学界权威，习惯独处，家中无人敢扰；收到信却迟迟不读，克制之下藏着不安。\",\"blockOrdinals\":[2,4]},{\"kind\":\"character\",\"note\":\"郑雄：与曾小安结婚八年，无论在家还是在外都称岳父为「先生」，从未叫过爸爸；一声称呼显出他在这个家里的分寸与位置。\",\"blockOrdinals\":[4]},{\"kind\":\"character\",\"note\":\"安静：每晚敲门，曾本之一定要站起来走上几步，正好在书房中央与她拥抱、脸贴脸互道晚安——这个家最后一道温暖的仪式。\",\"blockOrdinals\":[5]},{\"kind\":\"theme\",\"note\":\"家里的声音在渐次消失：郑雄的敲门晚安、安静的拥抱，各有各的仪式，直到彻底安静，曾本之才独自面对那封古怪来信。\",\"blockOrdinals\":[3,5,6]}]}",
+        "usage": {
+          "inputTokens": 1225,
+          "outputTokens": 1819
+        }
+      },
+      "capture": {
+        "subject": "writing-unit",
+        "itemId": "S84/writing-first/28",
+        "selectedItemId": "S84/writing-first/28",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "f42e3c60b476e1a081a7451210fce28e942a394b20909b5a5fd01c212a017083",
+        "taskPromptContractDigest": "f42e3c60b476e1a081a7451210fce28e942a394b20909b5a5fd01c212a017083",
+        "capturedAt": "2026-10-15T17:08:33.561Z",
+        "providerRequestDigest": "f43fc13300afd2aa9030c046d25b18d3652ddd8876da523271b516a78f8ef82c",
+        "providerResponseDigest": "bb501a0948292ce9a46f697e97c1a68a42e2852040b6db7e2b23e27740735c8f",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "bf9f05eaf9ffe8019f93d43ab51ba06b17dbdee7d8370e3531d304edced4b92a",
+        "generation": "77a5cc85ea796eb5bdc57759fd3d439fad8b6b76399429f3b293b88f6808eca6",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-writing-promotion-brief",
+          "step": "writing-first/unit-8"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "cae28999f75060921e63a60abdfabbb5378964e2e7eec53687691ce928c8af98"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "1ef8a7564d14f0327d5ce4fced80d1e3a7c6421a4d4f6cd47c03187802d7c3a2",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.writing.synthesis-result/1\",\"title\":\"一封甲骨文来信，寄自一个早已不在的人\",\"sections\":[{\"heading\":\"信还没有被读\",\"paragraphs\":[\"那天下午，曾本之在东湖边收到一封信。信封上的地址写得极精确——正是他固定时间、固定地点独坐之处，除家人之外，外人本不该知道。他几次把手伸进口袋，想取出信来品一品，最终还是原样退了出来。信还没拆，悬念已经吊起。\"]},{\"heading\":\"写字的人\",\"paragraphs\":[\"信上的字很难识——那不是画，是甲骨文。曾本之一眼认出，而且字迹的气韵、纸张的气息，熟悉得可怕。看得越清楚，他越明白：世界上最后一片安宁之地，终于不再属于自己了。\"]},{\"heading\":\"谁会这样写信\",\"paragraphs\":[\"手写书信在这个时代近乎绝迹。一封从邮筒到邮局、再经邮递员之手、带着墨香墨彩送到手上的信，比花两元钱中大奖还稀罕。而用甲骨文写信的那个人，死于一九八○年代最后的一个夏天。\"]},{\"heading\":\"书房里的静与闹\",\"paragraphs\":[\"书房像禁地，门一关，家人在门外说话都得小声。案头并置两样东西：曾侯乙尊盘的照片，和一片半个巴掌大、上面有一串甲骨文的龟甲。妻子安静抱怨他天天抱着青铜重器，女儿曾小安带着外孙楚楚推门进来，一句童言把满屋人逗笑——门铃又响了。\"]},{\"heading\":\"学界里的分寸\",\"paragraphs\":[\"他约老友马跃之次日上午见面，却暂时不向女婿郑雄提起。郑雄曾是他的学生，如今已是副厅长，主张守住位置比埋头做研究更重要；与曾小安结婚八年，他始终称岳父为「先生」，从未叫过爸爸。\"]},{\"heading\":\"剩下的悬念\",\"paragraphs\":[\"信上只有四个字，左下角还有一方红印章，印章上的名字与他渊源极深。信是谁写的，写了什么，为什么要用甲骨文——翻开书，自己去看。\"]}]}",
+        "usage": {
+          "inputTokens": 4315,
+          "outputTokens": 1294
+        }
+      },
+      "capture": {
+        "subject": "task-synthesis",
+        "itemId": "S84/writing-first/29",
+        "selectedItemId": "S84/writing-first/29",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "14345c76cf376ae03058e0460cf705d44177c2abf0480fe901f7ba9c19c3c43a",
+        "taskPromptContractDigest": "f42e3c60b476e1a081a7451210fce28e942a394b20909b5a5fd01c212a017083",
+        "capturedAt": "2026-10-15T17:08:50.047Z",
+        "providerRequestDigest": "c91154bf74da1a639bfad8d1473b84e8d6bf1cdcbf223be4146136da7e31c7ce",
+        "providerResponseDigest": "c42b84e65fa757a12264d7e160bbae27981285042d6cfa6208aa888fec10740b",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "f88b8b549caf603779227e74dc1397742dec073a4812cb73434f39818a015da1",
+        "generation": "62a76bd090779858d0dcfc9061e54f2b1d47c3afca63ff95e90367d7367f511c",
+        "validation": {
+          "family": "editorial-evidence",
+          "case": "sample1-writing-promotion-brief",
+          "step": "writing-first/reduction"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "c7cfa00fcbb20d99b74a9fb6f0e4d9c56c3f8bd4ec863a9903ca67540d04a86a"
+      }
+    }
+  ]
+}

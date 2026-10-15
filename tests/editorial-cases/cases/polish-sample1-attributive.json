@@ -1,0 +1,54 @@
+{
+  "schema": "ai7.editorial-case/1",
+  "id": "polish-sample1-attributive",
+  "kind": "polish",
+  "title": "润色这段 · 状语堆叠的一句",
+  "manuscript": {
+    "source": "sample1"
+  },
+  "bookTitle": "sample1 编辑价值证据 · 审阅",
+  "input": {
+    "selection": {
+      "paragraph": 72,
+      "start": "在修养同样深厚的曾本之听来",
+      "end": "戳着他的心窝。"
+    }
+  },
+  "fixture": "sample1-recorded-v41-editorial-polish",
+  "measuredPass": "polish",
+  "replay": {
+    "route": "deterministic"
+  },
+  "expectedConcerns": [
+    {
+      "id": "s1-polish-stacked-adverbials",
+      "category": "polish",
+      "paragraph": 72,
+      "words": "有诗意很优雅地",
+      "corrections": [
+        "诗意而优雅地",
+        "既有诗意又很优雅地",
+        "诗意、优雅地"
+      ],
+      "concern": "状语“有诗意很优雅地”堆叠生硬"
+    }
+  ],
+  "falsePositiveChecks": [
+    {
+      "id": "s1-polish-artifact-name",
+      "paragraph": 72,
+      "words": "越王勾践剑",
+      "reason": "文物名称不得改动"
+    },
+    {
+      "id": "s1-polish-protagonist",
+      "paragraph": 72,
+      "words": "曾本之听来",
+      "reason": "本次局部润色保留曾本之的听觉视角；此检查用唯一短语作为保守的文字代理。"
+    }
+  ],
+  "observations": {
+    "acceptance": "针对堆叠的状语给出保留比喻与原意的改写；文物名与人名不动。",
+    "rework": "改动文物名或人名、删去比喻，或改写后原意改变。"
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "schema": "ai7.editorial-case/1",
+  "id": "review-style-synthetic-museum",
+  "kind": "review",
+  "title": "体例与格式 · 合成稿乙《一座县城博物馆》",
+  "manuscript": {
+    "source": "synthetic",
+    "id": "synthetic-museum"
+  },
+  "bookTitle": "合成稿乙 · 一座县城博物馆",
+  "input": {
+    "categories": [
+      "style-and-format"
+    ],
+    "scope": "whole"
+  },
+  "fixture": "synthetic-editorial-review-authored",
+  "measuredPass": null,
+  "replay": {
+    "route": "deterministic"
+  },
+  "expectedConcerns": [
+    {
+      "id": "mu-half-width-comma",
+      "defect": "mu-half-width-comma"
+    },
+    {
+      "id": "mu-numeral-style",
+      "defect": "mu-numeral-style"
+    },
+    {
+      "id": "mu-quote-marks",
+      "defect": "mu-quote-marks"
+    },
+    {
+      "id": "mu-ellipsis",
+      "defect": "mu-ellipsis"
+    },
+    {
+      "id": "mu-institution-name",
+      "defect": "mu-institution-name"
+    },
+    {
+      "id": "mu-unit-symbol",
+      "defect": "mu-unit-symbol"
+    }
+  ],
+  "falsePositiveChecks": [
+    {
+      "id": "mu-case-number",
+      "trap": "mu-case-number"
+    },
+    {
+      "id": "mu-scale-ratio",
+      "trap": "mu-scale-ratio"
+    },
+    {
+      "id": "mu-recorded-year",
+      "trap": "mu-recorded-year"
+    },
+    {
+      "id": "mu-generic-gazetteer",
+      "trap": "mu-generic-gazetteer"
+    }
+  ],
+  "observations": {
+    "acceptance": "六处注入的体例问题以批注指出；展柜编号、比例尺、一致的年份写法与县志的泛称不被误报。",
+    "rework": "漏报体例不一致，或把合规的编号、比例尺写法当作体例错误。"
+  }
+}

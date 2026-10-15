@@ -1,0 +1,100 @@
+{
+  "schema": "ai7.editorial-case/1",
+  "id": "writing-draft-sample1",
+  "kind": "writing-draft",
+  "title": "写作任务 · sample1 宣传文章",
+  "manuscript": {
+    "source": "sample1"
+  },
+  "bookTitle": "sample1 编辑价值证据 · 写作",
+  "input": {
+    "typeId": "promotion-article",
+    "audience": "喜欢历史与悬疑小说的读者",
+    "channel": "出版社微信公众号",
+    "requirements": "突出甲骨文来信带来的悬念；不要透露写信人的名字；篇幅不超过六百字。"
+  },
+  "fixture": "sample1-recorded-v41-editorial-writing-draft",
+  "measuredPass": "writing-draft",
+  "replay": {
+    "route": "developer-live",
+    "modelQuestions": true
+  },
+  "expectedConcerns": [
+    {
+      "id": "w-book-title",
+      "section": "draft",
+      "keywords": [
+        "蟠虺"
+      ],
+      "concern": "文中出现书名"
+    },
+    {
+      "id": "w-oracle-letter",
+      "section": "draft",
+      "keywords": [
+        "甲骨文"
+      ],
+      "concern": "突出甲骨文来信的悬念"
+    },
+    {
+      "id": "w-letter-passages",
+      "paragraphs": [
+        20,
+        21,
+        22,
+        44,
+        45,
+        48,
+        49,
+        50
+      ],
+      "concern": "依据的段落包含来信情节"
+    },
+    {
+      "id": "w-length-bound",
+      "section": "draft",
+      "maxGraphemes": 600,
+      "concern": "标题、分节标题与正文合计不超过六百字素；不另加二百字余量。"
+    }
+  ],
+  "falsePositiveChecks": [
+    {
+      "id": "w-reveals-sender",
+      "section": "draft",
+      "keywords": [
+        "郝嘉"
+      ],
+      "reason": "要求不要透露写信人的名字"
+    },
+    {
+      "id": "w-invented-facts",
+      "section": "draft",
+      "keywords": [
+        "万册",
+        "销量",
+        "荣获",
+        "获奖"
+      ],
+      "reason": "书稿与要求中没有的销量或获奖事实"
+    },
+    {
+      "id": "w-letter-already-opened",
+      "section": "draft",
+      "paragraphs": [
+        35,
+        36,
+        48,
+        49
+      ],
+      "keywords": [
+        "信还没拆",
+        "信还没有被读"
+      ],
+      "reason": "书稿第35—36段已当面拆信并读信，回家后的场景不能改写为尚未拆读。"
+    }
+  ],
+  "observations": {
+    "acceptance": "草稿遵守要求、只依据书稿事实，编辑稍作修改即可交宣传部。",
+    "rework": "透露写信人、编造事实、照抄原文或篇幅明显超出要求。"
+  }
+}

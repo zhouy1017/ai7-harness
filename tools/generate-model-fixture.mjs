@@ -1324,6 +1324,33 @@ export function captureProvenance(entry, selection, request, response) {
   };
 }
 
+// --- Duplicated from src/service/provider/clarification-contract.ts (Issue #812; tests/unit/editorial-evidence.test.ts checks it) ---
+export const CLARIFICATION_INSTRUCTION = {
+  schema: 'ai7.provider.clarification-instruction/2',
+  systemPrompt: [
+    '以下是单元契约的澄清指令 /2；它只扩展单元回合，不适用于跨单元归纳、抽样或运行反思。',
+    '若本单元存在必须由编辑决定的歧义，你可以不输出单元结果，而只输出一个 JSON 对象：',
+    '{"question":"一个简短明确的问题","options":["简短选项，最多四个"],"freeTextAllowed":true}。options 可省略；无选项时必须允许自行说明。',
+    '问题最多 500 字素，每个选项最多 100 字素。只问一个问题；不要同时输出结果或其他键，不要为可从稿件判断的内容提问。',
+    '每个单元最多问一次。收到「澄清回答 /2」后必须按原单元结果契约完成，不得再问；回答为「不回答」时据已知信息完成并保留不确定性。',
+  ].join('\n'),
+};
+
+export function clarificationPromptContractDigest(basePromptContractDigest) {
+  return sha256Hex(canonicalJson({ schema: 'ai7.provider.clarification-prompt-contract/2', basePromptContractDigest, instruction: CLARIFICATION_INSTRUCTION }));
+}
+
+/**
+ * The one case family #812 adds: a book-level synthesis (评估, 审稿意见, 评语重写 or 写作综合) asked inside a Task whose contract is its own
+ * contract wrapped with the v14 model-question instruction. The wrapper extends unit turns only, so the synthesis runs under the
+ * base contract while the Task carries the wrapped one; the deterministic adapter of that Run keys the synthesis by the Task's
+ * contract. Nothing else is admitted: a synthesis whose two contracts differ in any other way still refuses.
+ */
+function modelQuestionSynthesis(selection, parsed) {
+  return parsed.subject === 'task-synthesis' && selection.cacheKey !== null && typeof selection.promptContractDigest === 'string' &&
+    selection.taskPromptContractDigest === clarificationPromptContractDigest(selection.promptContractDigest);
+}
+
 /**
  * The prompt contract a capture was answered under, proved against what its request is. A unit, a synthesis or a dialogue turn
  * is its own task, so its stage and task contracts are one. A reduction, a sampling turn or the reflection runs under its own
@@ -1333,6 +1360,7 @@ export function captureProvenance(entry, selection, request, response) {
  */
 function requireStageContract(selection, parsed) {
   if (parsed.stageContractDigest === undefined) {
+    if (modelQuestionSynthesis(selection, parsed)) return;
     refuse(selection.cacheKey === null || selection.taskPromptContractDigest === selection.promptContractDigest,
       'FIXTURE_GEN/contract-mismatch', '任务捕获契约与阶段契约不一致。');
     return;
@@ -1345,12 +1373,14 @@ function requireStageContract(selection, parsed) {
 export async function generateModelFixture(request, now = new Date()) {
   const selection = resolveLedgerSelection(await readLedgerLines(request.cacheRoot), request.selector);
   const entry = await readSelectedEntry(request.cacheRoot, selection);
-  const parsed = parseCachedRequest(entry.requestBody, selection.promptContractDigest);
+  let parsed = parseCachedRequest(entry.requestBody, selection.promptContractDigest);
   if (parsed.subject === 'review-unit' && parsed.unitMessage.split('\n', 1)[0].includes(' · 类别 cross-deliverable-consistency · ')) {
     parsed.contentDigest = null;
     parsed.exactParticipantsOnly = true;
   }
   requireStageContract(selection, parsed);
+  // Keyed as the deterministic adapter of the wrapped Task asks it: under the Task's contract (Issue #812).
+  if (modelQuestionSynthesis(selection, parsed)) parsed = parseCachedRequest(entry.requestBody, selection.taskPromptContractDigest);
   parsed.sample1Verified = await verifySample1Capture(request, selection, parsed);
   refuse(JSON.parse(entry.requestBody).model === selection.model, 'FIXTURE_GEN/entry-invalid', '请求体模型与捕获模型不一致。');
   refuse(/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,127}$/u.test(selection.model), 'FIXTURE_GEN/entry-invalid', '模型标识无效。');
