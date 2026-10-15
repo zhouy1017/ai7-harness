@@ -189,9 +189,9 @@ export function materialPlanInputsOfComponents(
   };
 }
 
-/** The outbound data category the frozen component names; the only category any scope declares today. */
+/** The outbound data category the frozen component names: public or synthetic, or the editor's own words under ordinary production (Issue #811). */
 function outboundDataCategoryOf(value: unknown): MaterialPlanInputsProjection['outboundDataCategory'] {
-  requireAnalysis(value === 'public-or-synthetic', 'ANALYSIS_RECORD_INVALID', '外发数据类别记录无效。');
+  requireAnalysis(value === 'public-or-synthetic' || value === 'unpublished-excerpts', 'ANALYSIS_RECORD_INVALID', '外发数据类别记录无效。');
   return value;
 }
 

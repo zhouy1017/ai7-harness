@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import type { OrdinaryProductionProviderProcessingVersion } from '../../shared/protocol.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from '../../shared/provider-configuration.generated.js';
 import type { OutboundDataCategoryId } from '../../shared/protocol.js';
+import { MAX_WRITING_MATERIALS, MAX_WRITING_MATERIAL_GRAPHEMES, MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES } from '../../shared/protocol.js';
+import { graphemeLength, writingMaterialDigest } from '../writing-tasks.js';
 import { DIGEST_PATTERN, canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { assistantToolCalls, messageText, toolResultOf, type AssembledContentBlock, type AssembledModelPayload } from './payload.js';
 import {
@@ -57,9 +60,9 @@ export type RemoteExecutionRoute = ConfiguredRouteId;
 export type CredentialSlot = ConfiguredCredentialSlot;
 
 /**
- * The trusted scope's Provider Processing pin: selected v11 admits baseline analysis, editorial dialogue, reference-free
- * review, writing, evaluation, and 润色 and conflict-regeneration Suggestions on V4.1. Historical v5, v9 and v10 and the
- * superseded web reservation v8 are readable identities, not launch selections.
+ * The trusted scope's Provider Processing pin: selected v12 admits baseline analysis, editorial dialogue, review (with
+ * cross-deliverable consistency), writing, evaluation, and 润色 and conflict-regeneration Suggestions on V4.1. Historical v5,
+ * v9, v10 and v11 and the superseded web reservation v8 are readable identities, not launch selections.
  */
 export type EgressPolicyPin =
   | {
@@ -70,7 +73,14 @@ export type EgressPolicyPin =
     }
   | {
       readonly operationalScope: 'developer-live';
-      readonly providerProcessingVersion: 'v5' | 'v8' | 'v9' | 'v10' | 'v11';
+      readonly providerProcessingVersion: 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12';
+      readonly liveTransmissionAllowed: true;
+      readonly authorizedLiveTransmissionCount: 'bounded-by-run';
+    }
+  // The editor's own model service under ordinary-production (Issue #811): the configured route, the Run's own ceiling.
+  | {
+      readonly operationalScope: 'ordinary-production';
+      readonly providerProcessingVersion: OrdinaryProductionProviderProcessingVersion;
       readonly liveTransmissionAllowed: true;
       readonly authorizedLiveTransmissionCount: 'bounded-by-run';
     };
@@ -123,6 +133,9 @@ export interface EgressBindingFacts {
    * every other binding, which then reads exactly as before.
    */
   readonly contractCategories?: ReadonlySet<OutboundDataCategory>;
+  /** Bounded material words assembled by the wrapper, checked against the Task's exact frozen pins. */
+  readonly materialExcerpts?: ReadonlyArray<{ readonly title: string; readonly paragraphs: ReadonlyArray<string> }>;
+  readonly frozenMaterialDigests?: ReadonlySet<string>;
   /**
    * The platform tools the binding's Provider Processing rule names (ADR 0080 §7.5), read from the rule by
    * `readPlatformToolsRule`; absent or `null` when the rule names none — as Provider Processing v9's one rule names none —
@@ -413,13 +426,32 @@ export function evaluateEgress(
   if (!DIGEST_PATTERN.test(binding.bindingDigest) || scope.currentBindingDigest() !== binding.bindingDigest) {
     return refuse('binding-stale', '执行绑定已不是当前绑定；未发送任何内容。');
   }
-  if (binding.outboundDataCategory !== 'public-or-synthetic' && !(MANUSCRIPT_EXCERPT_CATEGORIES.has(binding.outboundDataCategory) &&
-      (binding.route === LOCAL_DETERMINISTIC_ROUTE || excerptAdmittedByRule(binding)))) {
+  // Under ordinary-production (Issue #811) the editor's own unpublished words leave only under the rule that names their
+  // category; every other scope reads exactly as before.
+  const categoryAdmitted = binding.policy.operationalScope === 'ordinary-production'
+    ? (binding.ruleOutboundCategories?.has(binding.outboundDataCategory) ?? false)
+    : binding.outboundDataCategory === 'public-or-synthetic' || (MANUSCRIPT_EXCERPT_CATEGORIES.has(binding.outboundDataCategory) &&
+      (binding.route === LOCAL_DETERMINISTIC_ROUTE || excerptAdmittedByRule(binding)));
+  if (!categoryAdmitted) {
     return refuse('outbound-category-mismatch', '外发数据类别不允许经这条路由发送；未发送任何内容。');
   }
   if (binding.route !== LOCAL_DETERMINISTIC_ROUTE && [...(binding.contractCategories ?? [])].some((category) =>
     !(binding.ruleOutboundCategories?.has(category) ?? false))) {
     return refuse('outbound-category-mismatch', '外发数据类别不允许经这条路由发送；未发送任何内容。');
+  }
+  if (binding.contractCategories?.has('frozen-material-reference-excerpt') || binding.materialExcerpts !== undefined || binding.frozenMaterialDigests !== undefined) {
+    const materials = binding.materialExcerpts ?? [];
+    const pins = binding.frozenMaterialDigests ?? new Set<string>();
+    let total = 0;
+    if (!binding.contractCategories?.has('frozen-material-reference-excerpt') || materials.length < 1 || materials.length > MAX_WRITING_MATERIALS ||
+        pins.size < 1 || pins.size > MAX_WRITING_MATERIALS || materials.some((material) => {
+          const characters = material.paragraphs.reduce((count, paragraph) => count + graphemeLength(paragraph), 0);
+          total += characters;
+          return material.title.trim().length === 0 || characters < 1 || characters > MAX_WRITING_MATERIAL_GRAPHEMES ||
+            !pins.has(writingMaterialDigest(material.paragraphs));
+        }) || total > MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES) {
+      return refuse('payload-out-of-scope', '参考资料的文字不在计划冻结的资料摘要或字数范围内；未发送任何内容。');
+    }
   }
   if (payload.provider !== binding.route) return refuse('route-mismatch', '请求路由与执行绑定不一致；未发送任何内容。');
   if (payload.model !== binding.model) return refuse('model-mismatch', '请求模型与执行绑定不一致；未发送任何内容。');
@@ -474,8 +506,10 @@ export function evaluateEgress(
   }
   // Under v9 the ceiling is a precondition of the decision itself, evaluated here from accumulated
   // usage, so no dispatch can precede it and no ceiling state can be assumed from an earlier turn.
+  // Ordinary production leaves the per-Run ceiling to the editor (Issue #811; S16a): unset is a Run without one, not a refusal.
   const ceiling = scope.ceilingState?.() ?? 'unset';
-  if (ceiling === 'unset' || (ceiling === 'not-applicable' && !excerptAdmittedByRule(binding))) {
+  if ((ceiling === 'unset' && binding.policy.operationalScope !== 'ordinary-production') ||
+      (ceiling === 'not-applicable' && !excerptAdmittedByRule(binding))) {
     return refuse('run-budget-ceiling-unset', 'Provider Processing v9 要求非 unset 的任务运行预算上限；未发送任何内容。');
   }
   if (ceiling === 'reached') {

@@ -524,6 +524,7 @@ export function parseProviderResponse(
 export function classifyTransportError(error: unknown): { code: string; message: string } {
   const code = isRecord(error) && typeof error.code === 'string' ? error.code : null;
   const name = isRecord(error) && typeof error.name === 'string' ? error.name : null;
+  if (code === 'AI7_PROXY_UNREACHABLE') return { code, message: '代理不可达：请检查网络代理设置。' };
   if (code === AI7_FAILURE_CODES.NETWORK_DENIED) return { code, message: '出站网络在当前产品区间内被禁用。' };
   if (name === 'AbortError') return { code: AI7_FAILURE_CODES.INTERRUPTED, message: '请求被中断。' };
   return { code: AI7_FAILURE_CODES.TRANSPORT_FAILED, message: '模型服务传输失败。' };

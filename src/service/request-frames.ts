@@ -412,17 +412,32 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'saveModelServiceProxy': {
+      const input = value.input;
+      if (!isRecord(input) || !(input.mode === 'direct' && hasExactKeys(input, ['mode']) ||
+          input.mode === 'proxy' && hasExactKeys(input, ['mode', 'protocol', 'hostPort']) &&
+          (input.protocol === 'http' || input.protocol === 'https') && isBoundedString(input.hostPort, 300))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     case 'saveModelServiceConnection': {
       const input = requireInput(
         value.input,
-        ['connectionName', 'credentialReference', 'credentialOperationState'],
+        ['route', 'connectionName', 'credentialReference', 'credentialOperationState'],
         tentativeId,
       );
-      if (!isBoundedString(input.connectionName, 80) ||
-          !isBoundedString(input.credentialReference, 36) || !UUID_PATTERN.test(input.credentialReference) ||
+      if ((input.route !== 'opencode-go' && input.route !== 'deepseek-open-platform') || !isBoundedString(input.connectionName, 80) ||
+          !(input.credentialReference === null || (isBoundedString(input.credentialReference, 36) && UUID_PATTERN.test(input.credentialReference))) ||
           (input.credentialOperationState !== 'ready' && input.credentialOperationState !== 'needs-attention')) {
         throw new ProtocolError(tentativeId);
       }
+      break;
+    }
+    // The route new Tasks use (Issue #811): one of the two production routes.
+    case 'selectModelServiceRoute': {
+      const input = requireInput(value.input, ['route'], tentativeId);
+      if (input.route !== 'opencode-go' && input.route !== 'deepseek-open-platform') throw new ProtocolError(tentativeId);
       break;
     }
     case 'setModelServiceCredentialState': {

@@ -17,7 +17,7 @@ import {
   type DatabaseReplacementsProjection,
 } from '../shared/protocol.js';
 import { DIGEST_PATTERN, canonicalJson, canonicalRecord, isRecord, parseCanonicalJson, sha256Hex } from './analysis/canonical.js';
-import { DATABASE_PACKAGE_EXTENSION, DATABASE_PACKAGE_STORE_MEMBER, writeDatabasePackage, type DatabasePackageMember } from './database-exports.js';
+import { DATABASE_PACKAGE_EXTENSION, DATABASE_PACKAGE_STORE_MEMBER, writeDatabasePackage, isProxyEnvironmentMember, type DatabasePackageMember } from './database-exports.js';
 import { ensureCanonicalDataDirectory } from '../shared/data-root.js';
 import { MAX_MANIFEST_BYTES, verifyDatabasePackage, type DatabasePackageManifest } from './database-package-reader.js';
 import {
@@ -370,16 +370,20 @@ export async function extractReplacement(dataRoot: string, packagePath: string, 
   try {
     const verified = await verifyDatabasePackage(packagePath, { dataRoot, expectedSha256 }, {
       begin: async (member) => {
+        if (isProxyEnvironmentMember(member.path)) {
+          console.warn('已忽略导入数据库中的网络代理环境设置。');
+          return;
+        }
         const target = join(incoming, ...member.path.split('/'));
         await mkdir(dirname(target), { recursive: true });
         current = await open(target, 'wx');
       },
       data: async (chunk) => {
-        await current!.writeFile(chunk);
+        await current?.writeFile(chunk);
       },
       end: async () => {
-        await current!.sync();
-        await current!.close();
+        await current?.sync();
+        await current?.close();
         current = undefined;
       },
     });
@@ -397,7 +401,7 @@ export async function extractReplacement(dataRoot: string, packagePath: string, 
  * anything (Issue #434 review). Answers their digest, which the intent names.
  */
 export async function writeReplacementMembers(dataRoot: string, members: ReadonlyArray<DatabasePackageMember>): Promise<string> {
-  const record = canonicalRecord(members.map((member) => ({ path: member.path, bytes: member.bytes, sha256: member.sha256 })));
+  const record = canonicalRecord(members.filter((member) => !isProxyEnvironmentMember(member.path)).map((member) => ({ path: member.path, bytes: member.bytes, sha256: member.sha256 })));
   await writeAtomic(join(replacementStagingFor(dataRoot), 'members.json'), record.json);
   return record.digest;
 }
@@ -430,6 +434,7 @@ async function stagedAsVerified(
       for await (const entry of await opendir(directory)) {
         if (prefix === '' && kept.has(entry.name.toLowerCase())) continue;
         const member = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
+        if (isProxyEnvironmentMember(member)) continue;
         const path = join(directory, entry.name);
         if (entry.isDirectory()) {
           if (!(await visit(path, member, kept))) return false;
@@ -498,11 +503,17 @@ async function renameSteadily(from: string, to: string): Promise<void> {
 }
 
 /** Move every entry of `from` into `to`, except the kept places: one rename each, so an interruption leaves each entry whole. */
-async function moveEntries(from: string, to: string, keep: ReadonlySet<string>): Promise<void> {
+async function moveEntries(from: string, to: string, keep: ReadonlySet<string>, prefix = ''): Promise<void> {
   await mkdir(to, { recursive: true });
   if (!existsSync(from)) return;
   for (const entry of await readdir(from)) {
     if (keep.has(entry.toLowerCase())) continue;
+    const member = prefix === '' ? entry : `${prefix}/${entry}`;
+    if (isProxyEnvironmentMember(member)) continue;
+    if (prefix === '' && entry.toLowerCase() === 'settings' && (await lstat(join(from, entry))).isDirectory()) {
+      await moveEntries(join(from, entry), join(to, entry), new Set(), 'settings');
+      continue;
+    }
     await renameSteadily(join(from, entry), join(to, entry));
   }
 }

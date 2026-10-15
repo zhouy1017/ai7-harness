@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { EvaluationProfiles, builtinEvaluationProfile, EVALUATION_PROFILE_COUNT_REASON, initializeEvaluationProfileSchema } from '../../src/service/evaluation-profiles.js';
+import { EvaluationProfiles, builtinEvaluationProfile, EVALUATION_PROFILE_COUNT_REASON, EVALUATION_PROFILE_SCHEMA_SQL, initializeEvaluationProfileSchema } from '../../src/service/evaluation-profiles.js';
 import type { SaveEvaluationProfileInput } from '../../src/shared/protocol.js';
 
 let db: DatabaseSync;
@@ -36,21 +36,34 @@ describe('immutable house evaluation profile versions (KB-002, EVAL-014)', () =>
     expect(() => profiles.save(input())).toThrow('没有变化');
     expect(() => profiles.save({ ...input(), items: input().items.slice(0, 3) })).toThrow(EVALUATION_PROFILE_COUNT_REASON);
     expect(() => profiles.save({ ...input(), items: input().items.map((item) => ({ ...item, label: '重复' })) })).toThrow('不能重复');
-    expect(() => profiles.save({ ...input(), items: input().items.map((item) => ({ ...item, label: '' })) })).toThrow('有效的文字');
+    expect(() => profiles.save({ ...input(), items: input().items.map((item) => ({ ...item, label: '' })) })).toThrow('有效的名称');
     const stale = input();
     profiles.save({ ...input(), items: input().items.slice(0, 4) });
     expect(() => profiles.save(stale)).toThrow('另一个窗口');
-    expect(() => profiles.save({ ...input(), items: stale.items })).toThrow('标识无效');
+    expect(() => profiles.save({ ...input(), items: stale.items })).toThrow('编号无效');
     expect(profiles.page().profiles).toHaveLength(2);
   });
 
   it('refuses changes outside editable fields and bounded descriptions or readiness', () => {
     expect(() => profiles.save({ ...input(), risks: [] } as SaveEvaluationProfileInput)).toThrow('修改无效');
-    expect(() => profiles.save({ ...input(), items: input().items.map((item) => ({ ...item, fullMarks: 99 })) })).toThrow('标识无效');
-    expect(() => profiles.save({ ...input(), items: input().items.map((item) => ({ ...item, description: '字'.repeat(501) })) })).toThrow('500');
+    expect(() => profiles.save({ ...input(), items: input().items.map((item) => ({ ...item, fullMarks: 99 })) })).toThrow('编号无效');
+    expect(() => profiles.save({ ...input(), items: input().items.map((item) => ({ ...item, description: '字'.repeat(501) })) })).toThrow('有效的说明');
+    expect(() => profiles.save({ ...input(), readiness: ['字'.repeat(201)] })).toThrow('有效的就绪清单');
     expect(() => profiles.save({ ...input(), readiness: ['重复', '重复'] })).toThrow('不能重复');
     expect(() => profiles.save({ ...input(), readiness: Array.from({ length: 21 }, (_, index) => `第${index}项`) })).toThrow('20');
     expect(profiles.page().profiles).toEqual([builtinEvaluationProfile()]);
+  });
+
+  it('leaves a store holding only initial_evaluation_tasks for the exact-schema refusal, not a raw SQLite error (P3-3)', () => {
+    const partial = new DatabaseSync(':memory:');
+    try {
+      partial.exec('CREATE TABLE analysis_task_intents(task_intent_id TEXT PRIMARY KEY) STRICT');
+      partial.exec(EVALUATION_PROFILE_SCHEMA_SQL.initial_evaluation_tasks);
+      expect(() => initializeEvaluationProfileSchema(partial)).not.toThrow();
+      expect(partial.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'evaluation_profile_versions'").get()).toBeUndefined();
+    } finally {
+      partial.close();
+    }
   });
 
   it('keeps Task snapshots independently readable after house edits and bounds history pages', () => {

@@ -19,6 +19,31 @@ export interface TaskMaterialBoundary {
   readonly references: ReadonlyArray<TaskMaterialSource>;
 }
 
+/** Frozen words owned by the material wrapper, never the library's collector, owner or remarks. */
+export interface LiveMaterialContract {
+  readonly sources: ReadonlyArray<TaskMaterialSource>;
+  readonly materials: ReadonlyArray<{ readonly title: string; readonly paragraphs: ReadonlyArray<string> }>;
+  readonly basePromptContractDigest: string;
+  readonly promptContractDigest: string;
+  readonly systemPrompt: string;
+}
+
+// Keep the wrapper's derivation with its actual definition. A copied/replaced definition cannot claim its proof.
+const liveMaterialContracts = new WeakMap<object, () => LiveMaterialContract | null>();
+
+export function liveMaterialContract(definition: object): LiveMaterialContract | null {
+  return liveMaterialContracts.get(definition)?.() ?? null;
+}
+
+/** Register the writing owner's /3 contract, whose pins are stored separately from its prompt inputs. */
+export function materialContractDefinition(
+  definition: AnalysisKindDefinition,
+  derive: () => LiveMaterialContract | null,
+): AnalysisKindDefinition {
+  liveMaterialContracts.set(definition, derive);
+  return definition;
+}
+
 export interface MaterialGuardRefusal {
   readonly code: string;
   readonly materialTitle: string;
@@ -111,7 +136,7 @@ export function taskMaterialKindDefinition(
     'MATERIAL_INDEX_MOVED', refusal?.message ?? '计划冻结的资料已不可用。');
   const promptContractDigest = refusal === null ? digest : frozenPromptDigest!;
   const blocked = (): never => { throw new AnalysisError(refusal!.code, refusal!.message); };
-  return {
+  const definition: AnalysisKindDefinition = {
     ...base,
     materialReferences: { sources, basePromptContractDigest: base.promptContractDigest },
     systemPrompt: refusal === null ? [base.systemPrompt, contract.instruction, ...readings.flatMap((reading) =>
@@ -135,4 +160,15 @@ export function taskMaterialKindDefinition(
       ? base.kind === 'evaluation' ? initialEvaluationRequestDigest(promptContractDigest, ordinal, unitDigest) : readersReportRequestDigest(promptContractDigest, ordinal, unitDigest)
       : sha256Hex(canonicalJson({ promptContractDigest, baseRequestDigest: base.requestDigest(ordinal, unitDigest) })),
   };
+  return materialContractDefinition(definition, () => {
+    if (refusal !== null) return null;
+    const baseDigest = evaluation ? base.livePromptContractDigest?.() : base.promptContractDigest;
+    if (baseDigest === undefined || baseDigest !== base.promptContractDigest) return null;
+    return {
+      sources, materials: contract.materials, basePromptContractDigest: baseDigest,
+      promptContractDigest: sha256Hex(canonicalJson({ ...contract, basePromptContractDigest: baseDigest })),
+      systemPrompt: [base.systemPrompt, contract.instruction, ...readings.flatMap((reading) =>
+        reading.paragraphs!.map((paragraph, index) => `《${reading.source.title}》第 ${index + 1} 段：${paragraph}`))].join('\n'),
+    };
+  });
 }

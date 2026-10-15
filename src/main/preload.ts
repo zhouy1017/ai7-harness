@@ -636,10 +636,14 @@ const api: RendererApi = Object.freeze({
     invoke<Awaited<ReturnType<RendererApi['revealProductDataLocation']>>>(IPC_CHANNELS.revealProductDataLocation),
   getModelServiceSettings: () =>
     invoke<Awaited<ReturnType<RendererApi['getModelServiceSettings']>>>(IPC_CHANNELS.getModelServiceSettings),
-  saveModelServiceCredential: (input: { connectionName: string; secret: string }) =>
+  saveModelServiceProxy: (input: Parameters<RendererApi['saveModelServiceProxy']>[0]) =>
+    invoke<Awaited<ReturnType<RendererApi['saveModelServiceProxy']>>>(IPC_CHANNELS.saveModelServiceProxy, input),
+  saveModelServiceCredential: (input: Parameters<RendererApi['saveModelServiceCredential']>[0]) =>
     invoke<Awaited<ReturnType<RendererApi['saveModelServiceCredential']>>>(IPC_CHANNELS.saveModelServiceCredential, input),
-  removeModelServiceCredential: () =>
-    invoke<Awaited<ReturnType<RendererApi['removeModelServiceCredential']>>>(IPC_CHANNELS.removeModelServiceCredential),
+  removeModelServiceCredential: (input?: Parameters<RendererApi['removeModelServiceCredential']>[0]) =>
+    input === undefined
+      ? invoke<Awaited<ReturnType<RendererApi['removeModelServiceCredential']>>>(IPC_CHANNELS.removeModelServiceCredential)
+      : invoke<Awaited<ReturnType<RendererApi['removeModelServiceCredential']>>>(IPC_CHANNELS.removeModelServiceCredential, input),
 });
 
 contextBridge.exposeInMainWorld('ai7', api);

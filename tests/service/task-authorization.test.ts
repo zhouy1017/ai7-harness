@@ -507,7 +507,7 @@ describe('task authorization over the real store on exact sample1', () => {
   // one store holds at most one prepared J-03 plan. Each scope is therefore observed in its own
   // store: the `development-ci` row above, read back after a reopen, and the `developer-live` row
   // here. Neither is ever validated against the scope the launch reading it happens to bind.
-  it.each([DEVELOPER_LIVE_PIN, { ...DEVELOPER_LIVE_PIN, version: 'v9' as const }, { ...DEVELOPER_LIVE_PIN, version: 'v5' as const }])('reads a stored plan against its own immutable pin ($version)', async (pin) => {
+  it.each([DEVELOPER_LIVE_PIN, { ...DEVELOPER_LIVE_PIN, version: 'v11' as const }, { ...DEVELOPER_LIVE_PIN, version: 'v9' as const }, { ...DEVELOPER_LIVE_PIN, version: 'v5' as const }])('reads a stored plan against its own immutable pin ($version)', async (pin) => {
     await requireExactSample1();
     let bookId: string;
 

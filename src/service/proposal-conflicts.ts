@@ -268,7 +268,7 @@ export interface ProposalConflictRegenerationLineage {
   readonly unitIndex: number;
   readonly route: string;
   readonly model: string;
-  readonly operationalScope: 'development-ci' | 'developer-live';
+  readonly operationalScope: 'development-ci' | 'developer-live' | 'ordinary-production';
   readonly policyRuleId: string | null;
   readonly fixtureSha256: string | null;
   readonly regeneratedAt: string;
@@ -287,7 +287,7 @@ function isRegenerationLineage(value: unknown, units: ReadonlyArray<StoredUnit>)
     unit !== undefined && unit.kind === 'conflict' && unit.resolution === 'edited' &&
     typeof value.route === 'string' && value.route.length > 0 && value.route.length <= 64 &&
     typeof value.model === 'string' && value.model.length > 0 && value.model.length <= 128 &&
-    (value.operationalScope === 'development-ci' || value.operationalScope === 'developer-live') &&
+    (value.operationalScope === 'development-ci' || value.operationalScope === 'developer-live' || value.operationalScope === 'ordinary-production') &&
     nullableText(value.policyRuleId) && (value.fixtureSha256 === null || (typeof value.fixtureSha256 === 'string' && DIGEST_PATTERN.test(value.fixtureSha256))) &&
     typeof value.regeneratedAt === 'string' && value.regeneratedAt.length > 0;
 }

@@ -1,5 +1,9 @@
 import { TASK_MATERIALS_NONE, TASK_MATERIALS_STATEMENT, TASK_MATERIAL_LIVE_UNAVAILABLE, REVIEW_MATERIAL_CATEGORY_REQUIRED, taskMaterialReferenceLine, taskMaterialKindDefinition, taskMaterialSources, taskMaterialWords, taskMaterialRefusal, type MaterialGuardRefusal, type TaskMaterialBoundary, type TaskMaterialReading, type TaskMaterialSource } from './task-material-references.js';
 import { createHash, randomUUID } from 'node:crypto';
+import { readProxySetting, writeProxySetting } from './provider/proxy-setting.js';
+import { allowedProductionBindingOf, type ConfiguredProviderBinding } from './launch-policy.js';
+import { DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/protected-secret-identity.js';
+import { MODEL_SERVICE_ROUTE_BINDINGS, MODEL_SERVICE_ROUTES } from '../shared/protocol.js';
 import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
@@ -137,7 +141,10 @@ import type {
   ManuscriptEntryPositionProjection,
   ManuscriptWindowProjection,
   ModelCredentialOperationState,
+  ModelServiceBindingProjection,
+  ModelServiceConnectionId,
   ModelServiceConnectionProjection,
+  ModelServiceRouteId,
   RecordChangeSuggestionDecisionInput,
   RecordProposalDecisionFeedbackInput,
   DecideLearningMaterialInput,
@@ -324,7 +331,8 @@ import {
   WRITING_MODE_GOALS,
 } from '../shared/protocol.js';
 import { INITIAL_EVALUATION_LIVE_UNAVAILABLE, initialEvaluationKindDefinition } from './evaluation/initial-evaluation-kind.js';
-import { EVALUATION_PAYLOAD_CATEGORIES, liveKindRule } from './analysis/live-kind-admission.js';
+import { EVALUATION_PAYLOAD_CATEGORIES, liveKindRule, liveMaterialRule } from './analysis/live-kind-admission.js';
+import { reviewCategoryKindId } from '../shared/protocol.js';
 import { producedUnverified } from './evaluation/unverified-disclosure.js';
 import { readersReportKindDefinition } from './evaluation/readers-report-kind.js';
 import { evaluationRewriteKindDefinition } from './evaluation/evaluation-rewrite-kind.js';
@@ -546,6 +554,7 @@ import {
   SET_RULE_BUDGET,
   SET_RULE_CHANGED,
   SET_RULE_DEVELOPER_LIVE,
+  SET_RULE_ORDINARY_PRODUCTION,
   SET_RULE_EDITED,
   SET_RULE_FIRST_BASELINE,
   SET_RULE_RANGE,
@@ -882,6 +891,7 @@ import {
   BoundedStoreFatalError,
   initializeBoundedSchema,
   initializeManuscriptEntryPositionSchema,
+  MODEL_SERVICE_CONNECTION_REVISION_11_SQL,
   MODEL_SERVICE_CONNECTION_SCHEMA_SQL,
   validateManuscriptReimportSchemaTruth,
   validateSourceImportSchemaTruth,
@@ -966,6 +976,7 @@ import {
   IMPORTED_EXEMPLAR_SCHEMA_VERSION,
   EVALUATION_PROFILE_SCHEMA_VERSION,
   DIALOGUE_LIVE_BINDING_SCHEMA_VERSION,
+  MODEL_SERVICE_ROUTES_SCHEMA_VERSION,
   LATEST_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -2248,7 +2259,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION),
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2312,7 +2323,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION)
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION)
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2690,7 +2701,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2743,7 +2754,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION)) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -2888,7 +2899,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2940,7 +2951,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION)) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -3290,18 +3301,68 @@ function validateModelServiceSchema(
       version >= OUTCOME_RESOLUTION_SCHEMA_VERSION,
     );
   }
+  // Revision 11's one official row, or revision 72's two route rows (Issue #811): nothing outside either exact binding.
   const invalid = db.prepare(
     `SELECT 1 FROM model_service_connections
-     WHERE connection_id != 'main-editorial-deepseek-v4-pro'
+     WHERE NOT ((connection_id = 'main-editorial-deepseek-v4-pro' AND provider_id = 'deepseek-open-platform'
+              AND credential_slot = 'deepseek-api-key' AND model_id IN ('deepseek-v4-pro', 'deepseek-flash'))
+             OR (connection_id = 'main-editorial-opencode-go' AND provider_id = 'opencode-go'
+              AND credential_slot = 'opencode-go' AND model_id = 'deepseek-v4.1-flash'))
         OR role_id != 'main-editorial'
-        OR provider_id != 'deepseek-open-platform'
-        OR model_id != 'deepseek-v4-pro'
         OR adapter_revision != 1 OR configuration_revision != 1
         OR approved_fallback_chain != '[]'
-        OR credential_slot != 'deepseek-api-key'
      LIMIT 1`,
   ).get();
   requireStore(invalid === undefined, 'SCHEMA_INVALID', '模型服务连接记录超出当前固定绑定。');
+}
+
+/** The connection row of each production route (Issue #811); the official row keeps the identity Issue #712 gave it. */
+const MODEL_SERVICE_ROUTE_ROWS: Readonly<Record<ModelServiceRouteId, {
+  readonly connectionId: ModelServiceConnectionId;
+  readonly binding: ModelServiceBindingProjection;
+}>> = {
+  'opencode-go': { connectionId: 'main-editorial-opencode-go', binding: MODEL_SERVICE_ROUTE_BINDINGS['opencode-go'] },
+  'deepseek-open-platform': { connectionId: 'main-editorial-deepseek-v4-pro', binding: MODEL_SERVICE_ROUTE_BINDINGS['deepseek-open-platform'] },
+};
+const MODEL_SERVICE_ROW_COLUMNS = 'connection_id, role_id, connection_name, provider_id, model_id, adapter_revision, configuration_revision, ' +
+  'approved_fallback_chain, credential_slot, credential_reference, credential_operation_state, created_at, updated_at, credential_updated_at';
+
+/**
+ * Revision 11 → 72 for `model_service_connections` (Issue #811): the relation is rebuilt from its current text and its one
+ * official row copied byte for byte, rowid included — except that it now names the official route's current model id,
+ * `deepseek-flash`, and is the route in use, as the only one configured. Its Credential Reference and state are kept, so the
+ * protected credential behind it still answers. Nothing references this relation, so foreign keys stay as they are.
+ */
+function initializeModelServiceRoutesSchema(db: DatabaseSync): void {
+  const folded = (value: string): string => value.trim().replace(/\s+/gu, ' ');
+  const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'model_service_connections'").get() as SqlRow | undefined;
+  requireStore(row !== undefined, 'SCHEMA_MIGRATION_FAILED', '模型服务连接表缺失。');
+  const sql = folded(asString(row.sql));
+  if (sql === folded(MODEL_SERVICE_CONNECTION_SCHEMA_SQL)) return;
+  requireStore(sql === folded(MODEL_SERVICE_CONNECTION_REVISION_11_SQL), 'SCHEMA_MIGRATION_FAILED', '模型服务连接表结构不兼容。');
+  const total = (): number => asNumber((db.prepare('SELECT count(*) total FROM model_service_connections').get() as SqlRow).total);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const before = total();
+    db.exec('CREATE TEMP TABLE migrate_model_service_connections AS SELECT rowid AS migrate_rowid, * FROM model_service_connections');
+    db.exec('DROP TABLE model_service_connections');
+    db.exec(MODEL_SERVICE_CONNECTION_SCHEMA_SQL);
+    db.exec(`INSERT INTO model_service_connections(rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected)
+      SELECT migrate_rowid, connection_id, role_id, connection_name, provider_id, 'deepseek-flash', adapter_revision, configuration_revision,
+             approved_fallback_chain, credential_slot, credential_reference, credential_operation_state, created_at, updated_at,
+             credential_updated_at, 1
+      FROM temp.migrate_model_service_connections ORDER BY migrate_rowid`);
+    db.exec('DROP TABLE temp.migrate_model_service_connections');
+    requireStore(total() === before, 'SCHEMA_MIGRATION_FAILED', '模型服务连接表迁移未保留全部记录。');
+    db.exec('COMMIT');
+  } catch (error) {
+    try {
+      db.exec('ROLLBACK');
+    } catch (rollbackError) {
+      throw new AggregateError([error, rollbackError], 'SQLite model-service route migration rollback failed.');
+    }
+    throw error;
+  }
 }
 
 /**
@@ -3367,7 +3428,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3419,7 +3480,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION)) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3431,7 +3492,7 @@ function initializeModelServiceSchema(
   try {
     db.exec(`
       BEGIN IMMEDIATE;
-      ${MODEL_SERVICE_CONNECTION_SCHEMA_SQL};
+      ${MODEL_SERVICE_CONNECTION_REVISION_11_SQL};
       PRAGMA user_version = ${MODEL_SERVICE_SCHEMA_VERSION};
     `);
     validateModelServiceSchema(db, profile);
@@ -4313,6 +4374,13 @@ const WAITING_TASK_MOVED_LABELS: Readonly<Record<string, string>> = {
   MATERIAL_INDEX_RECORD_INVALID: '参考资料',
 };
 const WAITING_TASK_MOVED_FALLBACK = '计划依据的内容';
+/**
+ * Records merged from another house keep their own profile by value (KB-002), so they match none of this house's 评估方案
+ * versions. 知识库 › 评估方案 counts them under this labelled bucket (Issue #798, P3-6) instead of dropping them from every
+ * version's use count. The renderer holds the same id literal to label the card.
+ */
+export const EVALUATION_PROFILE_UNKNOWN_ID = 'unknown/merged-profile';
+export const EVALUATION_PROFILE_UNKNOWN_TITLE = '未知版本';
 
 export class EditorialStore {
   readonly #dataRoot: string;
@@ -4815,6 +4883,8 @@ export class EditorialStore {
       // Revision 69 (Issue #427): earlier published Books' imported 范例, their exact versions and Learning Eligibility.
       initializeImportedExemplarSchema(authority);
       initializeEvaluationProfileSchema(authority);
+      // Revision 72 (Issue #811): the model-service connections widen for the two ordinary-production routes.
+      initializeModelServiceRoutesSchema(authority);
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
@@ -5181,7 +5251,10 @@ export class EditorialStore {
   }
 
   #taskMaterialOffers(bookId: string, surface: '审阅' | '评估' = '审阅'): NonNullable<ReviewWorkspaceProjection['materials']> {
-    const live = this.#baselineAnalysis.launch.live !== null;
+    const launch = this.#baselineAnalysis.launch;
+    const kinds = surface === '评估' ? [INITIAL_EVALUATION_KIND, READERS_REPORT_KIND]
+      : BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.filter((entry) => entry.executor === 'review-category-contract').map((entry) => reviewCategoryKindId(entry.categoryId));
+    const live = launch.live !== null && !kinds.some((kind) => liveMaterialRule(launch.policy, kind) !== null);
     const indexed = this.#libraryCall(() => this.#libraryMaterials.referable(bookId)).flatMap((item) => {
       try {
         const build = this.#materialIndexCall(() => this.#materialIndex.current(item.materialId));
@@ -5230,7 +5303,7 @@ export class EditorialStore {
     requireStore(Array.isArray(materialIds) && materialIds.length <= MAX_WRITING_MATERIALS && materialIds.every((id) => typeof id === 'string' && UUID_PATTERN.test(id)) && new Set(materialIds).size === materialIds.length,
       'TASK_MATERIALS_INVALID', '请选择不重复的资料库资料，最多 4 份。');
     if (materialIds.length > 0) {
-      requireStore(this.#baselineAnalysis.launch.live === null, 'REVIEW_MATERIAL_UNAVAILABLE', TASK_MATERIAL_LIVE_UNAVAILABLE);
+      requireStore(this.#baselineAnalysis.launch.live === null || this.#reviewCall(() => this.#reviewRuns.materialReferencesLiveAllowed(bookId, categoryIds)), 'REVIEW_MATERIAL_UNAVAILABLE', TASK_MATERIAL_LIVE_UNAVAILABLE);
       requireStore(this.#reviewCall(() => this.#reviewRuns.materialReferencesAllowed(bookId, categoryIds)),
         'REVIEW_MATERIAL_CATEGORY_REQUIRED', REVIEW_MATERIAL_CATEGORY_REQUIRED);
     }
@@ -5361,7 +5434,7 @@ export class EditorialStore {
     input: InspectTaskPlanInput,
     progress?: ProgressReader,
     carriesStoppedRun: (runRecordId: string) => boolean = () => true,
-  ): { plan: TaskPlanProjection; routeKind: string | null } {
+  ): { plan: TaskPlanProjection; routeKind: string | null; provider?: NonNullable<BaselineAnalysisProjection['providerResolutionPlan']> } {
     const found = this.#taskPlanOfKind(input, progress, carriesStoppedRun);
     // 结果待确认 a completed Run of this kind left on the Book (Issue #757): listed on whichever of its plans is open.
     if (input.kind === 'fixed-task') return found;
@@ -5372,7 +5445,7 @@ export class EditorialStore {
     input: InspectTaskPlanInput,
     progress?: ProgressReader,
     carriesStoppedRun: (runRecordId: string) => boolean = () => true,
-  ): { plan: TaskPlanProjection; routeKind: string | null } {
+  ): { plan: TaskPlanProjection; routeKind: string | null; provider?: NonNullable<BaselineAnalysisProjection['providerResolutionPlan']> } {
     this.#assertAvailable();
     requireStore(typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId) && TASK_PLAN_KINDS.includes(input.kind) &&
       (input.ref === null || (typeof input.ref === 'string' && UUID_PATTERN.test(input.ref))), 'TASK_PLAN_INVALID', '任务计划请求无效。');
@@ -5403,7 +5476,7 @@ export class EditorialStore {
       // 结果待确认 (Issue #51, S16c): the ranges this Task would send again whose earlier result could not be known.
       const resendUnits = this.#analysisCall(() => this.#baselineAnalysis.resendUnitsOf(projection));
       const plan = this.#taskPlanCall(() => baselineAnalysisPlan({ projection, bookTitle, blocks, defaultRule, clarifications, resendUnits, ...(stopped === null ? {} : { stopped }) }));
-      return { plan: withPlanMovedReason(plan, projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(plan, projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null, ...(projection.providerResolutionPlan === null ? {} : { provider: projection.providerResolutionPlan }) };
     }
     if (input.kind === 'readers-report') {
       // 审稿意见 (Issue #429, S81c): the reader's report kind's latest Task, on the ledger of the contract its plan froze.
@@ -5430,7 +5503,7 @@ export class EditorialStore {
           }),
         },
       }));
-      return { plan: withPlanMovedReason(withResend(evaluationMaterialPlan(plan, this.#evaluationPlanMaterials(latest.ledger, input.bookId, projection.authorization !== null), this.#baselineAnalysis.launch.live !== null), this.#analysisCall(() => latest.ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(withResend(evaluationMaterialPlan(plan, this.#evaluationPlanMaterials(latest.ledger, input.bookId, projection.authorization !== null), this.#baselineAnalysis.launch.live !== null && liveMaterialRule(this.#baselineAnalysis.launch.policy, READERS_REPORT_KIND) === null), this.#analysisCall(() => latest.ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null, ...(projection.providerResolutionPlan === null ? {} : { provider: projection.providerResolutionPlan }) };
     }
     if (input.kind === 'evaluation-rewrite') {
       // 按我的评分重写评语 (Issue #429, S81b2): the rewrite kind's latest Task, on the ledger of the contract its plan froze.
@@ -5451,7 +5524,7 @@ export class EditorialStore {
           scored: evaluationRewriteScoredItems(latest.task.input).map((item) => ({ label: item.label, score: item.score!, fullMarks: item.fullMarks })),
         },
       }));
-      return { plan: withPlanMovedReason(withResend(plan, this.#analysisCall(() => latest.ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(withResend(plan, this.#analysisCall(() => latest.ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null, ...(projection.providerResolutionPlan === null ? {} : { provider: projection.providerResolutionPlan }) };
     }
     if (input.kind === 'writing') {
       // 写作任务 (Issue #432, S84a): the writing kind's latest Task, on the ledger of the contract its plan froze.
@@ -5466,7 +5539,7 @@ export class EditorialStore {
         projection, bookTitle, blocks, input: latest.task.input, exemplarsHere: latest.task.exemplarsReadable, copyRules: latest.task.copyRules, defaultRule,
         materials: latest.task.materials,
       }));
-      return { plan: withPlanMovedReason(withResend(plan, this.#analysisCall(() => latest.ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(withResend(plan, this.#analysisCall(() => latest.ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null, ...(projection.providerResolutionPlan === null ? {} : { provider: projection.providerResolutionPlan }) };
     }
     if (input.kind === 'initial-evaluation') {
       // AI7 初评 (Issue #429, S81b1): the evaluation kind's latest Task, read as the baseline's is.
@@ -5479,7 +5552,7 @@ export class EditorialStore {
       // The profile the Task froze (Issue #427), never the house's current one, beside the references its plan froze (#428).
       const profile = this.#initialProfileForTask(projection.taskIntent.taskIntentId);
       const plan = this.#taskPlanCall(() => initialEvaluationPlan({ projection, bookTitle, blocks, profile }));
-      return { plan: withPlanMovedReason(withResend(evaluationMaterialPlan(plan, this.#evaluationPlanMaterials(ledger, input.bookId, projection.authorization !== null), this.#baselineAnalysis.launch.live !== null), this.#analysisCall(() => ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null };
+      return { plan: withPlanMovedReason(withResend(evaluationMaterialPlan(plan, this.#evaluationPlanMaterials(ledger, input.bookId, projection.authorization !== null), this.#baselineAnalysis.launch.live !== null && liveMaterialRule(this.#baselineAnalysis.launch.policy, INITIAL_EVALUATION_KIND) === null), this.#analysisCall(() => ledger.resendUnitsByContentOf(projection))), projection.run?.blockedReasons), routeKind: projection.providerResolutionPlan?.executionRoute.kind ?? null, ...(projection.providerResolutionPlan === null ? {} : { provider: projection.providerResolutionPlan }) };
     }
     const reviewRunId = input.ref;
     requireStore(reviewRunId !== null, 'TASK_PLAN_INVALID', '审阅的计划要指明是哪一次审阅。');
@@ -5496,7 +5569,8 @@ export class EditorialStore {
       .find((kind): kind is string => typeof kind === 'string');
     // Whether the Run can be offline is its route's to say, as the baseline's (Issue #760, S74c): a route that reaches its model
     // over the network — and only one — waits for it. Whether it needs a credential is `needsModelConnection`'s, decided apart.
-    return { plan, routeKind: frozenRoute ?? null };
+    const provider = facts.categories.map((category) => category.task?.components['provider-resolution-plan']).find((value) => value !== undefined);
+    return { plan, routeKind: frozenRoute ?? null, ...(provider === undefined ? {} : { provider: provider as NonNullable<BaselineAnalysisProjection['providerResolutionPlan']> }) };
   }
 
   /**
@@ -5508,13 +5582,14 @@ export class EditorialStore {
    */
   async inspectTaskPlanWithConnection(
     input: InspectTaskPlanInput,
-    credentialReadiness: () => Promise<'present' | 'missing' | null>,
+    credentialReadiness: (binding?: ConfiguredProviderBinding | null) => Promise<'present' | 'missing' | null>,
     connectivity: TaskPlanConnectivity = ALWAYS_ONLINE,
     progress?: ProgressReader,
   ): Promise<TaskPlanProjection> {
-    const { plan: frozen, routeKind } = this.#taskPlanWithRoute(input, progress, (runRecordId) => connectivity.carriesStoppedRun?.(runRecordId) ?? true);
+    const { plan: frozen, routeKind, provider } = this.#taskPlanWithRoute(input, progress, (runRecordId) => connectivity.carriesStoppedRun?.(runRecordId) ?? true);
+    const binding = this.#productionCredentialBinding(provider);
     let plan = frozen;
-    if (plan.start.needsModelConnection && plan.start.readiness === 'ready') plan = withConnectionReadiness(plan, await credentialReadiness());
+    if (plan.start.needsModelConnection && plan.start.readiness === 'ready') plan = withConnectionReadiness(plan, await credentialReadiness(binding));
     // Connectivity (Issue #502): only a plan whose route reaches its model over the network can be offline,
     // and only once its credential is known to be there — 模型未连接 is decided first.
     const reaches = routeKind !== null && connectivity.reachesNetwork(routeKind);
@@ -5525,7 +5600,7 @@ export class EditorialStore {
     if (plan.runControl?.resume != null) {
       const blockers: string[] = [];
       if (connectivity.slotBusy()) blockers.push(RESUME_BLOCKED_SLOT);
-      if (plan.start.needsModelConnection && (await credentialReadiness()) === 'missing') blockers.push(RESUME_BLOCKED_CONNECTION);
+      if (plan.start.needsModelConnection && (await credentialReadiness(binding)) === 'missing') blockers.push(RESUME_BLOCKED_CONNECTION);
       if (reaches && connectivity.reading() === 'offline') blockers.push(RESUME_BLOCKED_OFFLINE);
       plan = withResumeBlockers(plan, blockers);
     }
@@ -5534,14 +5609,40 @@ export class EditorialStore {
     // model over the network. A busy slot only queues it.
     if (plan.state.key === 'awaiting-clarification') {
       const blockers: string[] = [];
-      if (plan.start.needsModelConnection && (await credentialReadiness()) === 'missing') blockers.push(ANSWER_BLOCKED_CONNECTION);
+      if (plan.start.needsModelConnection && (await credentialReadiness(binding)) === 'missing') blockers.push(ANSWER_BLOCKED_CONNECTION);
       if (reaches && connectivity.reading() === 'offline') blockers.push(ANSWER_BLOCKED_OFFLINE);
       plan = withAnswerBlockers(plan, blockers);
     }
     if (plan.state.key !== 'waiting') return plan;
     if (reaches && connectivity.reading() === 'offline') return withWaitingReason(plan, 'network');
-    if ((await credentialReadiness()) === 'missing') return withWaitingReason(plan, 'connection');
+    if ((await credentialReadiness(binding)) === 'missing') return withWaitingReason(plan, 'connection');
     return withWaitingReason(plan, connectivity.slotBusy() ? 'slot' : 'admitting');
+  }
+
+  /** The frozen plan's credential metadata for production readiness; other scopes keep their launch binding. */
+  #productionCredentialBinding(provider: NonNullable<BaselineAnalysisProjection['providerResolutionPlan']> | undefined): ConfiguredProviderBinding | null | undefined {
+    if (this.#baselineAnalysis.launch.operationalScope !== 'ordinary-production') return undefined;
+    if (provider === undefined || !('endpoint' in provider.executionRoute)) return null;
+    const binding = { route: provider.executionRoute.kind, endpoint: provider.executionRoute.endpoint,
+      model: provider.executionRoute.model, credentialSlot: provider.remoteBinding.credentialSlot,
+      credentialReference: provider.remoteBinding.credentialReference };
+    return allowedProductionBindingOf(binding) === null ? null : binding;
+  }
+
+  /** Reconnect asks about this Run's frozen plan, never the currently selected connection (#811 revision 9). */
+  taskCredentialBinding(input: InspectTaskPlanInput, runRecordId?: string): ConfiguredProviderBinding | null | undefined {
+    if (this.#baselineAnalysis.launch.operationalScope !== 'ordinary-production') return undefined;
+    if (runRecordId !== undefined && input.kind !== 'review-run') {
+      // Read the authorized version even if a newer Task replaced it: the drift check must still be able to block that Run.
+      const row = this.#authority.prepare(`SELECT p.canonical_json FROM analysis_run_records r
+        JOIN analysis_run_authorizations a ON a.authorization_id = r.authorization_id
+        JOIN analysis_plan_versions v ON v.plan_envelope_sha256 = a.plan_envelope_sha256
+        JOIN analysis_plan_records p ON p.task_intent_id = v.task_intent_id AND p.plan_version = v.ordinal
+        WHERE r.run_record_id = ? AND p.component = 'provider-resolution-plan'`).get(runRecordId) as SqlRow | undefined;
+      requireStore(row !== undefined, 'ANALYSIS_RECORD_INVALID', '运行授权绑定的模型服务计划缺失。');
+      return this.#productionCredentialBinding(parseStoredJson(asString(row.canonical_json), '运行授权绑定的模型服务计划无效。') as NonNullable<BaselineAnalysisProjection['providerResolutionPlan']>);
+    }
+    return this.#productionCredentialBinding(this.#taskPlanWithRoute(input).provider);
   }
 
   #taskPlanCall<T>(operation: () => T): T {
@@ -5920,11 +6021,11 @@ export class EditorialStore {
   #requireLedgerKindScope(kind: LedgerTaskKind, bookId: string, taskIntentId: string): void {
     switch (kind) {
       case 'initial-evaluation':
-        this.#requireEvaluationMaterialScope(this.#evaluationMaterialPlan(taskIntentId) !== null);
+        this.#requireEvaluationMaterialScope(this.#evaluationMaterialPlan(taskIntentId) !== null, INITIAL_EVALUATION_KIND);
         this.#requireInitialEvaluationScope();
         return;
       case 'readers-report':
-        this.#requireEvaluationMaterialScope(this.#evaluationMaterialPlan(taskIntentId) !== null);
+        this.#requireEvaluationMaterialScope(this.#evaluationMaterialPlan(taskIntentId) !== null, READERS_REPORT_KIND);
         this.#requireReadersReportScope();
         return;
       case 'evaluation-rewrite':
@@ -6143,6 +6244,8 @@ export class EditorialStore {
     const reason = kindReason !== null
       ? kindReason
       // #810: an admitted writing plan may set its own rule; other live kinds keep the existing refusal.
+      : envelope.providerStatus === 'remote-eligible-ordinary-production'
+        ? SET_RULE_ORDINARY_PRODUCTION
       : envelope.providerStatus === 'remote-eligible-developer-live' && !(defaultExecutionRuleKind(pattern) === 'writing' && !this.#writingLiveUnavailable())
         ? SET_RULE_DEVELOPER_LIVE
         : plan.planRevision !== null
@@ -6224,7 +6327,7 @@ export class EditorialStore {
     taskIntentId: string,
     planEnvelopeDigest: string,
     ruleVersionId: string,
-    runtime: { credentialReadiness: () => Promise<'present' | 'missing' | null>; connectivity: TaskPlanConnectivity },
+    runtime: { credentialReadiness: (binding?: ConfiguredProviderBinding | null) => Promise<'present' | 'missing' | null>; connectivity: TaskPlanConnectivity },
   ): Promise<{ outcome: 'started' | 'fell-back'; reasons: ReadonlyArray<string>; dispatchRunRecordId: string | null }> {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest) && UUID_PATTERN.test(ruleVersionId),
@@ -8618,11 +8721,27 @@ export class EditorialStore {
     return this.#evaluationCall(() => {
       requireStore(before === null || (Number.isSafeInteger(before) && before > 0), 'EVALUATION_PROFILE_PAGE_INVALID', '评估方案版本页码无效。');
       const page = this.#evaluationProfiles.page(before);
-      return { activeSha256: this.#evaluationProfiles.current().sha256, nextBefore: page.nextBefore,
-        profiles: page.profiles.map((profile) => {
-          const use = this.#authority.prepare('SELECT count(*) AS records, count(DISTINCT book_id) AS books FROM evaluation_records WHERE profile_sha256 = ?').get(profile.sha256)!;
-          return { ...profile, records: Number(use.records), books: Number(use.books) };
-        }) };
+      const profiles = page.profiles.map((profile) => {
+        const use = this.#authority.prepare('SELECT count(*) AS records, count(DISTINCT book_id) AS books FROM evaluation_records WHERE profile_sha256 = ?').get(profile.sha256)!;
+        return { ...profile, records: Number(use.records), books: Number(use.books) };
+      });
+      // The first page names the records that came from another house (Issue #798, P3-6). The known set is every house
+      // version, not just this page's, so a record from an earlier page's version is never mistaken for an unknown one.
+      if (before === null) {
+        const unknown = this.#authority.prepare(
+          `SELECT count(*) AS records, count(DISTINCT book_id) AS books FROM evaluation_records
+           WHERE profile_sha256 <> ?
+             AND profile_sha256 NOT IN (SELECT json_extract(canonical_json, '$.profile.sha256') FROM evaluation_profile_versions
+                                        WHERE json_extract(canonical_json, '$.profile.sha256') IS NOT NULL)`,
+        ).get(evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE))!;
+        if (Number(unknown.records) > 0) profiles.push({
+          profileId: EVALUATION_PROFILE_UNKNOWN_ID, title: EVALUATION_PROFILE_UNKNOWN_TITLE, version: '—', issuer: '',
+          total: 100, items: [], readiness: [], bands: BUILTIN_EVALUATION_PROFILE.bands, risks: BUILTIN_EVALUATION_PROFILE.risks,
+          conclusions: BUILTIN_EVALUATION_PROFILE.conclusions, sha256: '',
+          records: Number(unknown.records), books: Number(unknown.books),
+        });
+      }
+      return { activeSha256: this.#evaluationProfiles.current().sha256, nextBefore: page.nextBefore, profiles };
     });
   }
 
@@ -8792,7 +8911,7 @@ export class EditorialStore {
    * goal is the kind's own fixed text. The preparation is a cooperative job; its plan opens in the Task Drawer.
    */
   createInitialEvaluationPreparationWork(bookId: string, launchPolicy: LaunchPolicyProjection, materialIds: ReadonlyArray<string> = []): AnalysisPreparationResult<InitialEvaluationProjection> {
-    this.#requireEvaluationMaterialScope(materialIds.length > 0);
+    this.#requireEvaluationMaterialScope(materialIds.length > 0, INITIAL_EVALUATION_KIND);
     this.#requireInitialEvaluationScope();
     const current = this.inspectInitialEvaluation(bookId);
     // One reading of the house profile gives both the contract the Task is prepared under and the snapshot it keeps (Issue #427).
@@ -8808,8 +8927,8 @@ export class EditorialStore {
       launchPolicy,
       ...(canonicalJson(this.initialEvaluationLedgerForBook(bookId).definition.materialReferences?.sources ?? []) === canonicalJson(ledger.definition.materialReferences?.sources ?? []) ? {} : { newTask: true }),
     }));
-    const intent = this.#authority.prepare("SELECT task_intent_id FROM analysis_task_intents WHERE book_id = ? AND kind = 'evaluation' ORDER BY created_at DESC, rowid DESC LIMIT 1").get(bookId);
-    if (intent !== undefined) this.#evaluationCall(() => this.#transaction(this.#authority, () => this.#evaluationProfiles.snapshotTask(asString(intent.task_intent_id), this.#initialBaseDigest(ledger), profile)));
+    // The snapshot pins the Task the preparation returned, inside `#snapshotInitialPreparation`, never a separate
+    // "latest evaluation Task" query (Issue #798, P3-2): that query could pin an unrelated earlier row.
     this.#snapshotInitialPreparation(result, profile, ledger);
     return { ...result, projection: result.projection as InitialEvaluationProjection | null };
   }
@@ -8846,11 +8965,11 @@ export class EditorialStore {
   }
 
   /**
-   * A plan that lists 资料库 materials stays provider-free (Issue #429, wave 2): no rule of the selected policy names frozen
-   * material, so under a live scope it is refused before it is prepared or started.
+   * Material-bearing evaluation requires the same kind's selected rule to admit frozen material.
    */
-  #requireEvaluationMaterialScope(hasReferences: boolean): void {
-    if (hasReferences && this.#baselineAnalysis.launch.live !== null) throw new StoreError('TASK_MATERIAL_UNAVAILABLE', TASK_MATERIAL_LIVE_UNAVAILABLE);
+  #requireEvaluationMaterialScope(hasReferences: boolean, kind: string): void {
+    const launch = this.#baselineAnalysis.launch;
+    if (hasReferences && launch.live !== null && liveMaterialRule(launch.policy, kind) === null) throw new StoreError('TASK_MATERIAL_UNAVAILABLE', TASK_MATERIAL_LIVE_UNAVAILABLE);
   }
 
   #requireEvaluationMaterialReadings(ledger: BaselineAnalysisStore, bookId: string): void {
@@ -9116,7 +9235,7 @@ export class EditorialStore {
    * 定稿, or once the template has its draft document. Its plan opens in the Task Drawer.
    */
   createReadersReportPreparationWork(bookId: string, template: ReadersReportTemplate, launchPolicy: LaunchPolicyProjection, materialIds: ReadonlyArray<string> = []): AnalysisPreparationResult<ReadersReportProjection> {
-    this.#requireEvaluationMaterialScope(materialIds.length > 0);
+    this.#requireEvaluationMaterialScope(materialIds.length > 0, READERS_REPORT_KIND);
     this.#requireReadersReportScope();
     requireStore(UUID_PATTERN.test(bookId) && READERS_REPORT_TEMPLATES.includes(template), 'READERS_REPORT_INVALID', '审稿意见参数无效。');
     const basis = this.#evaluationCall(() => this.#evaluations.latestFinalized(bookId));
@@ -9363,9 +9482,10 @@ export class EditorialStore {
    * The writing ledger of one frozen contract — a house type, the editor's words and one reference set — made when first asked
    * for and kept while it prepares, as 审稿意见's is. It takes the launch the baseline ledger was bound to.
    */
-  #writingLedger(input: WritingContractInput, rules: WritingCopyRules = WRITING_COPY_RULES): BaselineAnalysisStore {
-    const definition = this.#analysisCall(() => writingKindDefinition(input, rules));
-    return this.#writingLedgers.obtain(definition.promptContractDigest, () => {
+  #writingLedger(input: WritingContractInput, rules: WritingCopyRules = WRITING_COPY_RULES, sources?: ReadonlyArray<TaskMaterialSource>): BaselineAnalysisStore {
+    const definition = this.#analysisCall(() => writingKindDefinition(input, rules, sources));
+    const key = sources === undefined ? definition.promptContractDigest : `${definition.promptContractDigest}:${canonicalJson(sources)}`;
+    return this.#writingLedgers.obtain(key, () => {
       const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
       ledger.bindLaunch(this.#baselineAnalysis.launch);
       return ledger;
@@ -9380,7 +9500,7 @@ export class EditorialStore {
   #writingLedgerOf(task: StoredWritingTask): BaselineAnalysisStore {
     // A Task recorded under `/1` is run and judged under `/1` (#704 P2-2).
     const material = task.materials.find((entry) => entry.refusal !== null)?.refusal ?? null;
-    if (task.exemplarsReadable && material === null) return this.#writingLedger(task.input, task.copyRules);
+    if (task.exemplarsReadable && material === null) return this.#writingLedger(task.input, task.copyRules, task.materials.length === 0 ? undefined : task.materials.map((entry) => entry.source));
     // …and one whose 资料库 item no longer reads at its pinned build refuses as one whose 范例 is gone does (Issue #428).
     const moved = task.exemplarsReadable && material !== null ? material : { code: 'WRITING_EXEMPLAR_MOVED', message: WRITING_EXEMPLAR_MOVED };
     const definition = this.#analysisCall(() => writingRecordedKindDefinition(task.input, task.promptContractSha256, task.copyRules, moved));
@@ -9448,11 +9568,12 @@ export class EditorialStore {
   }
 
   /**
-   * Reference-bearing live writing awaits wave 3's successor policy; retain its precise refusal before kind admission.
+   * Preserve the precise predecessor refusal unless the writing rule explicitly admits frozen material.
    */
   #requireWritingMaterialScope(listsMaterials: boolean): void {
     this.#assertAvailable();
-    if (listsMaterials && this.#baselineAnalysis.launch.live !== null) throw new StoreError('WRITING_UNAVAILABLE', WRITING_MATERIAL_LIVE_UNAVAILABLE);
+    const launch = this.#baselineAnalysis.launch;
+    if (listsMaterials && launch.live !== null && liveMaterialRule(launch.policy, WRITING_KIND) === null) throw new StoreError('WRITING_UNAVAILABLE', WRITING_MATERIAL_LIVE_UNAVAILABLE);
   }
 
   /**
@@ -9522,10 +9643,11 @@ export class EditorialStore {
   /**
    * 新建文档 · 写作任务's 资料库 row (Issue #428): every item this Book's Tasks may list under 允许参考 whose index extracted text,
    * the latest arrival first and at most {@link MAX_WRITING_MATERIAL_OFFERS} of them, each with whether it may be ticked — an
-   * item longer than one may be is shown, disabled, with why — and under a live scope none, with why.
+   * item longer than one may be is shown, disabled, with why. Live offers require the selected writing rule's material terms.
    */
   #writingMaterialOffer(bookId: string): WritingTaskProjection['references']['materials'] {
-    const live = this.#baselineAnalysis.launch.live !== null;
+    const launch = this.#baselineAnalysis.launch;
+    const live = launch.live !== null && liveMaterialRule(launch.policy, WRITING_KIND) === null;
     const indexed: Array<{ materialId: string; title: string; scope: 'book' | 'house'; characters: number }> = [];
     try {
       for (const entry of this.#libraryCall(() => this.#libraryMaterials.referable(bookId))) {
@@ -9724,7 +9846,7 @@ export class EditorialStore {
     };
     // `/2` for every Task prepared by the product; the suites may prepare one under `/1`, as software before #698 did (#707).
     const copyRules = this.#control.writingCopyRules ?? WRITING_COPY_RULES;
-    const ledger = this.#writingLedger(input, copyRules);
+    const ledger = this.#writingLedger(input, copyRules, materials.length === 0 ? undefined : materials.map((material) => material.source));
     const mode = latest === null || latest.projection.resultSetRevision === null ? 'writing-first' : 'writing-again';
     // The pins are no words of the contract (Issue #428): a prepared Task that froze other builds of the items — one whose build is
     // gone, say — is never revised in place to these, since its row would keep its own; 改计划重做 makes a Task of its own.
@@ -10056,7 +10178,7 @@ export class EditorialStore {
     taskIntentId: string,
     planEnvelopeDigest: string,
     ruleVersionId: string,
-    runtime: { credentialReadiness: () => Promise<'present' | 'missing' | null>; connectivity: TaskPlanConnectivity },
+    runtime: { credentialReadiness: (binding?: ConfiguredProviderBinding | null) => Promise<'present' | 'missing' | null>; connectivity: TaskPlanConnectivity },
   ): Promise<{ outcome: 'started' | 'fell-back'; reasons: ReadonlyArray<string>; dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore | null }> {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest) && UUID_PATTERN.test(ruleVersionId),
@@ -15542,16 +15664,31 @@ export class EditorialStore {
     return this.#boundedCall(() => this.#bounded.getHistoricalRevision(revisionId, cursor));
   }
 
-  getModelServiceConnection(): ModelServiceConnectionProjection | null {
+  getModelServiceProxy(): Promise<import('../shared/protocol.js').ModelServiceProxySetting> {
     this.#assertAvailable();
+    return readProxySetting(this.#dataRoot);
+  }
+
+  saveModelServiceProxy(input: import('../shared/protocol.js').ModelServiceProxySetting): Promise<import('../shared/protocol.js').ModelServiceProxySetting> {
+    this.#assertAvailable();
+    return writeProxySetting(this.#dataRoot, input);
+  }
+
+  /** The DeepSeek 开放平台（官方） connection, as Issue #712 has always read it. */
+  getModelServiceConnection(): ModelServiceConnectionProjection | null {
+    return this.getModelServiceRouteConnection('deepseek-open-platform');
+  }
+
+  /** One production route's connection (Issue #811), or `null` when that route has none. */
+  getModelServiceRouteConnection(route: ModelServiceRouteId): ModelServiceConnectionProjection | null {
+    this.#assertAvailable();
+    const target = MODEL_SERVICE_ROUTE_ROWS[route];
+    requireStore(target !== undefined, 'MODEL_SERVICE_CONNECTION_INVALID', '模型服务路线无效。');
     const row = this.#authority.prepare(
-      `SELECT connection_id, role_id, connection_name, provider_id, model_id,
-              adapter_revision, configuration_revision, approved_fallback_chain,
-              credential_slot, credential_reference, credential_operation_state,
-              created_at, updated_at, credential_updated_at
+      `SELECT ${MODEL_SERVICE_ROW_COLUMNS}, selected
        FROM model_service_connections
-       WHERE connection_id = 'main-editorial-deepseek-v4-pro'`,
-    ).get() as SqlRow | undefined;
+       WHERE connection_id = ?`,
+    ).get(target.connectionId) as SqlRow | undefined;
     if (row === undefined) return null;
     const state = asString(row.credential_operation_state);
     requireStore(
@@ -15561,80 +15698,89 @@ export class EditorialStore {
     );
     const credentialReference = asString(row.credential_reference);
     requireStore(
-      UUID_PATTERN.test(credentialReference),
+      UUID_PATTERN.test(credentialReference) && !DEVELOPMENT_CREDENTIAL_REFERENCES.has(credentialReference.toLowerCase()),
       'STORE_CORRUPT',
       '模型服务凭据引用无效。',
     );
     return {
-      connectionId: 'main-editorial-deepseek-v4-pro',
+      connectionId: target.connectionId,
       roleId: 'main-editorial',
       connectionName: asString(row.connection_name),
-      binding: {
-        providerId: 'deepseek-open-platform',
-        providerLabel: 'DeepSeek 开放平台（官方）',
-        modelId: 'deepseek-v4-pro',
-        modelLabel: 'DeepSeek V4 Pro High',
-        adapterRevision: 1,
-        configurationRevision: 1,
-        approvedFallbackChain: [],
-        credentialSlot: 'deepseek-api-key',
-      },
+      // A connection saved before revision 72 named `deepseek-v4-pro`; the migration moved it to the route's current model.
+      binding: { ...target.binding, approvedFallbackChain: [] },
       credentialReference,
       credentialOperationState: state,
       createdAt: asString(row.created_at),
       updatedAt: asString(row.updated_at),
       credentialUpdatedAt: asString(row.credential_updated_at),
+      selected: row.selected === 1,
     };
   }
 
+  /** Every route's connection, the default route first (Issue #811). */
+  getModelServiceConnections(): ModelServiceConnectionProjection[] {
+    return MODEL_SERVICE_ROUTES.map((route) => this.getModelServiceRouteConnection(route))
+      .filter((connection): connection is ModelServiceConnectionProjection => connection !== null);
+  }
+
+  /**
+   * Save one route's connection (Issue #811). A route with no connection gets a fresh Credential Reference minted here, per
+   * data root, never one a provider document fixes for development; an existing connection keeps its own. The first
+   * connection saved is the route in use until the editor chooses another.
+   */
   saveModelServiceConnection(
     connectionNameInput: string,
-    credentialReference: string,
+    credentialReferenceInput: string | null,
     credentialOperationState: 'ready' | 'needs-attention',
+    route: ModelServiceRouteId = 'deepseek-open-platform',
   ): ModelServiceConnectionProjection {
     this.#assertAvailable();
+    const target = MODEL_SERVICE_ROUTE_ROWS[route];
+    requireStore(target !== undefined, 'MODEL_SERVICE_CONNECTION_INVALID', '模型服务路线无效。');
     const connectionName = connectionNameInput.trim();
     requireStore(
       connectionName.length > 0 && connectionName.length <= 80 && connectionName.isWellFormed(),
       'MODEL_SERVICE_CONNECTION_INVALID',
       '连接名称必须为 1 至 80 个有效字符。',
     );
-    requireStore(UUID_PATTERN.test(credentialReference), 'MODEL_SERVICE_CONNECTION_INVALID', '凭据引用无效。');
-    const current = this.getModelServiceConnection();
+    // A connection's reference is never one a provider document fixes for development (Issue #811).
+    requireStore(credentialReferenceInput === null ||
+      (UUID_PATTERN.test(credentialReferenceInput) && !DEVELOPMENT_CREDENTIAL_REFERENCES.has(credentialReferenceInput.toLowerCase())),
+    'MODEL_SERVICE_CONNECTION_INVALID', '凭据引用无效。');
+    const current = this.getModelServiceRouteConnection(route);
     requireStore(
-      current === null || current.credentialReference === credentialReference,
+      current === null || current.credentialReference === credentialReferenceInput,
       'MODEL_SERVICE_CONNECTION_CONFLICT',
       '已存连接的凭据引用不可替换。',
     );
     const now = new Date().toISOString();
     this.#transaction(this.#authority, () => {
       if (current === null) {
+        // Minted here when the caller names none — as main always does — so the reference belongs to this data root alone.
+        let credentialReference = credentialReferenceInput ?? randomUUID();
+        while (DEVELOPMENT_CREDENTIAL_REFERENCES.has(credentialReference)) credentialReference = randomUUID();
+        const anySelected = this.#authority.prepare('SELECT 1 FROM model_service_connections WHERE selected = 1').get() !== undefined;
         this.#authority.prepare(
-          `INSERT INTO model_service_connections(
-             connection_id, role_id, connection_name, provider_id, model_id,
-             adapter_revision, configuration_revision, approved_fallback_chain,
-             credential_slot, credential_reference, credential_operation_state,
-             created_at, updated_at, credential_updated_at
-           ) VALUES (
-             'main-editorial-deepseek-v4-pro', 'main-editorial', ?, 'deepseek-open-platform', 'deepseek-v4-pro',
-             1, 1, '[]', 'deepseek-api-key', ?, ?, ?, ?, ?
-           )`,
-        ).run(connectionName, credentialReference, credentialOperationState, now, now, now);
+          `INSERT INTO model_service_connections(${MODEL_SERVICE_ROW_COLUMNS}, selected)
+           VALUES (?, 'main-editorial', ?, ?, ?, 1, 1, '[]', ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(target.connectionId, connectionName, target.binding.providerId, target.binding.modelId, target.binding.credentialSlot,
+          credentialReference, credentialOperationState, now, now, now, anySelected ? null : 1);
       } else {
         requireStore(
           this.#authority.prepare(
             `UPDATE model_service_connections
              SET connection_name = ?, credential_operation_state = ?, updated_at = ?, credential_updated_at = ?
-             WHERE connection_id = 'main-editorial-deepseek-v4-pro' AND credential_reference = ?`,
-          ).run(connectionName, credentialOperationState, now, now, credentialReference).changes === 1,
+             WHERE connection_id = ? AND credential_reference = ?`,
+          ).run(connectionName, credentialOperationState, now, now, target.connectionId, current.credentialReference).changes === 1,
           'MODEL_SERVICE_CONNECTION_CONFLICT',
           '模型服务连接状态已变化。',
         );
       }
     });
-    return this.getModelServiceConnection()!;
+    return this.getModelServiceRouteConnection(route)!;
   }
 
+  /** One connection's credential state, by its Credential Reference, whichever route it is on. */
   setModelServiceCredentialState(
     credentialReference: string,
     credentialOperationState: ModelCredentialOperationState,
@@ -15642,18 +15788,40 @@ export class EditorialStore {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(credentialReference), 'MODEL_SERVICE_CONNECTION_INVALID', '凭据引用无效。');
     const now = new Date().toISOString();
+    let connectionId = '';
     this.#transaction(this.#authority, () => {
+      const row = this.#authority.prepare('SELECT connection_id FROM model_service_connections WHERE credential_reference = ?')
+        .get(credentialReference) as SqlRow | undefined;
+      requireStore(row !== undefined, 'MODEL_SERVICE_CONNECTION_CONFLICT', '模型服务连接状态已变化。');
+      connectionId = asString(row.connection_id);
       requireStore(
         this.#authority.prepare(
           `UPDATE model_service_connections
            SET credential_operation_state = ?, updated_at = ?, credential_updated_at = ?
-           WHERE connection_id = 'main-editorial-deepseek-v4-pro' AND credential_reference = ?`,
-        ).run(credentialOperationState, now, now, credentialReference).changes === 1,
+           WHERE connection_id = ? AND credential_reference = ?`,
+        ).run(credentialOperationState, now, now, connectionId, credentialReference).changes === 1,
         'MODEL_SERVICE_CONNECTION_CONFLICT',
         '模型服务连接状态已变化。',
       );
     });
-    return this.getModelServiceConnection()!;
+    return this.getModelServiceRouteConnection(connectionId === MODEL_SERVICE_ROUTE_ROWS['opencode-go'].connectionId ? 'opencode-go' : 'deepseek-open-platform')!;
+  }
+
+  /**
+   * Choose the route new Tasks use (Issue #811): a settings change, never a fallback. The route must have a connection; a Run
+   * already planned keeps the binding its plan froze.
+   */
+  selectModelServiceRoute(route: ModelServiceRouteId): ModelServiceConnectionProjection {
+    this.#assertAvailable();
+    const target = MODEL_SERVICE_ROUTE_ROWS[route];
+    requireStore(target !== undefined, 'MODEL_SERVICE_CONNECTION_INVALID', '模型服务路线无效。');
+    requireStore(this.getModelServiceRouteConnection(route) !== null, 'MODEL_SERVICE_ROUTE_NOT_CONFIGURED', '这条路线还没有连接；请先保存它的连接名称与凭据。');
+    this.#transaction(this.#authority, () => {
+      this.#authority.prepare('UPDATE model_service_connections SET selected = NULL WHERE selected = 1 AND connection_id != ?').run(target.connectionId);
+      this.#authority.prepare('UPDATE model_service_connections SET selected = 1, updated_at = ? WHERE connection_id = ?')
+        .run(new Date().toISOString(), target.connectionId);
+    });
+    return this.getModelServiceRouteConnection(route)!;
   }
 
   getManuscriptWindowAt(
@@ -15864,7 +16032,7 @@ export class EditorialStore {
     // and past ten of them the house offset as the 定稿 evaluations give it now (EVAL-011a), recomputed at every read.
     const house = this.#evaluations.calibration();
     const { adjustments, unreadable: unreadableBooks } = house;
-    const profileItems = this.#evaluations.profile().items;
+    const profileItems = this.#evaluations.calibrationScale().items;
     const where = 'EXISTS (SELECT 1 FROM publication_versions p WHERE p.book_id = b.book_id)';
     const rows = (after === null
       ? this.#authority.prepare(`SELECT b.book_id, b.title FROM books b WHERE ${where} ORDER BY b.title, b.book_id LIMIT ?`).all(MAX_EVALUATION_CALIBRATION_BOOKS + 1)
@@ -16335,6 +16503,8 @@ export class EditorialStore {
   /** Verify the consuming ledger's frozen material boundary; no material paragraphs are paged or composed here. */
   materialGuard(runRecordId: string, ledger: BaselineAnalysisStore): MaterialGuardRefusal | null {
     this.#assertAvailable();
+    const deliverable = this.#reviewRuns.deliverableGuard(runRecordId, ledger.launch.live !== null);
+    if (deliverable !== null) return deliverable;
     const intent = this.#authority.prepare('SELECT t.task_intent_id, t.book_id FROM analysis_run_records r JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id WHERE r.run_record_id = ?').get(runRecordId) as SqlRow | undefined;
     requireStore(intent !== undefined, 'ANALYSIS_RUN_INVALID', '运行记录不存在。');
     const boundary = ledger.definition.kind === 'writing'

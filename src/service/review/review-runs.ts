@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { TASK_MATERIAL_LIVE_UNAVAILABLE, taskMaterialSources, type TaskMaterialBoundary, type TaskMaterialReading } from '../task-material-references.js';
+import { TASK_MATERIAL_LIVE_UNAVAILABLE, taskMaterialSources, type TaskMaterialBoundary, type TaskMaterialReading, type MaterialGuardRefusal } from '../task-material-references.js';
+import { liveMaterialRule } from '../analysis/live-kind-admission.js';
+import { reviewDeliverables, REVIEW_DELIVERABLE_CHANGED } from '../production-documents.js';
 import { liveReviewRule, liveReviewUnavailableReason } from './live-review-admission.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
@@ -7,6 +9,8 @@ import {
   HISTORICALLY_AFFECTED_RESULT_MARKER,
   HISTORICAL_MARKER_UNVERIFIABLE,
   SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL,
+  isReviewCategoryId,
+  reviewCategoryKindId,
   MAX_FRAME_BYTES,
   MAX_REVIEW_FINDING_REASON_CHARACTERS,
   MAX_REVIEW_FINDINGS_PER_PAGE,
@@ -58,6 +62,7 @@ import {
   DIGEST_PATTERN,
   UUID_PATTERN,
   canonicalRecord,
+  canonicalJson,
   hasExactKeys,
   isRecord,
   parseCanonicalJson,
@@ -85,6 +90,7 @@ import {
   houseGuidelineDocuments,
   reviewCategoryBasisStatement,
   reviewCategoryConfigurationDigest,
+  reviewCategoryEntryForBook,
   type ReviewCategoryConfiguration,
   type ReviewCategoryConfigurationEntry,
   type ReviewCategoryExecutor,
@@ -497,6 +503,7 @@ const PROVIDER_STATUS_LABELS: Readonly<Record<string, string>> = {
   'remote-denied-local-deterministic': '远程模型绑定被拒绝（0 次实时传输）；由 AI7 本地确定性模型适配器执行',
   'remote-denied-no-route': '远程模型绑定被拒绝，且没有可执行的本地路由；授权后会在派发前阻止',
   'remote-eligible-developer-live': 'developer-live：实时传输受运行边界约束',
+  'remote-eligible-ordinary-production': 'ordinary-production：经你配置的模型服务实时传输，受运行边界约束',
 };
 
 function text(value: SQLOutputValue | undefined): string {
@@ -1259,7 +1266,7 @@ export class ReviewRunStore {
       tasks.every((category) => approved.get(category.categoryId) === category.task!.planEnvelopeDigest),
     'REVIEW_AUTHORIZATION_STALE', '授权所依据的计划与这次审阅准备的计划不一致；请重新查看计划。');
     if (existing !== null) return;
-    requireReview(snapshot.materialReferences === undefined || this.#ledgers.baseline().launch.live === null, 'REVIEW_MATERIAL_UNAVAILABLE', TASK_MATERIAL_LIVE_UNAVAILABLE);
+    requireReview(!this.#materialsRefusedLive(snapshot), 'REVIEW_MATERIAL_UNAVAILABLE', TASK_MATERIAL_LIVE_UNAVAILABLE);
     const unavailableMaterial = this.#materialReadings(snapshot).find((reading) => reading.refusal !== null)?.refusal;
     requireReview(unavailableMaterial === undefined, unavailableMaterial?.code ?? 'REVIEW_PLAN_CHANGED', unavailableMaterial?.message ?? '');
     const latest = this.#db.prepare('SELECT review_run_id FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC LIMIT 1').get(bookId) as SqlRow;
@@ -1272,6 +1279,8 @@ export class ReviewRunStore {
     // A 当前选区 whose paragraphs were removed or reordered since it was prepared is chosen again, never started (P2-2).
     requireReview(!this.#selectionMoved(snapshot), 'REVIEW_PLAN_CHANGED', SELECTION_MOVED_REASON);
     for (const category of tasks) {
+      const moved = this.#deliverablesMoved(bookId, category.entry);
+      requireReview(moved === null, 'REVIEW_PLAN_CHANGED', moved ?? '');
       const projection = this.#categoryLedger(category).inspect(bookId);
       requireReview(projection.taskIntent?.taskIntentId === category.task!.taskIntentId && projection.state === 'prepared' &&
         projection.actions.canAuthorize && projection.planEnvelope?.digest === category.task!.planEnvelopeDigest,
@@ -1388,7 +1397,7 @@ export class ReviewRunStore {
     });
     const staleReasons: string[] = [];
     if (view.authorization === null) {
-      if (snapshot.materialReferences !== undefined && this.#ledgers.baseline().launch.live !== null) staleReasons.push(TASK_MATERIAL_LIVE_UNAVAILABLE);
+      if (this.#materialsRefusedLive(snapshot)) staleReasons.push(TASK_MATERIAL_LIVE_UNAVAILABLE);
       staleReasons.push(...this.#materialReadings(snapshot).flatMap((reading) => reading.refusal === null ? [] : [reading.refusal.message]));
       const latest = this.#db.prepare('SELECT review_run_id FROM review_runs WHERE book_id = ? ORDER BY ordinal DESC LIMIT 1').get(bookId) as SqlRow;
       if (text(latest.review_run_id) !== reviewRunId) {
@@ -1413,13 +1422,15 @@ export class ReviewRunStore {
           } else if (this.#seriesKnowledgeMoved(bookId, category)) {
             staleReasons.push(seriesKnowledgeMovedReason(category.entry.label));
           }
+          const deliverablesMoved = this.#deliverablesMoved(bookId, category.entry);
+          if (deliverablesMoved !== null) staleReasons.push(deliverablesMoved);
         }
       }
     }
     const firstCheckpoint = categories.find((category) => category.checkpoint !== null)?.checkpoint ?? null;
     const firstTask = snapshot.categories.find((category) => category.task !== null);
     return {
-      ...(snapshot.materialReferences !== undefined && this.#ledgers.baseline().launch.live !== null ? { materialsRefusedLive: true } : {}),
+      ...(this.#materialsRefusedLive(snapshot) ? { materialsRefusedLive: true } : {}),
       ...(snapshot.materialReferences === undefined ? {} : { materials: this.#materialReadings(snapshot).map((reading) => view.authorization === null ? reading : { ...reading, refusal: null }) }),
       reviewRunId: snapshot.reviewRunId,
       ordinal: snapshot.ordinal,
@@ -1652,7 +1663,8 @@ export class ReviewRunStore {
       const stands = current !== null && current.taskIntent?.taskIntentId === category.task.taskIntentId && current.state === 'prepared' &&
         current.actions.canAuthorize && current.planEnvelope?.digest === category.task.planEnvelopeDigest &&
         approvals.get(category.categoryId) === category.task.planEnvelopeDigest &&
-        this.#unverifiedTargets(category, snapshot.createdAt) === null && !this.#seriesKnowledgeMoved(snapshot.bookId, category);
+        this.#unverifiedTargets(category, snapshot.createdAt) === null && !this.#seriesKnowledgeMoved(snapshot.bookId, category) &&
+        this.#deliverablesMoved(snapshot.bookId, category.entry) === null;
       if (!stands) moved.push(`「${category.entry.label}」的计划`);
     }
     return moved;
@@ -2121,7 +2133,7 @@ export class ReviewRunStore {
       const review = revision as ReviewCategoryResultSetRevisionProjection;
       // #809: the live non-web route has no external evidence. The label follows the recorded
       // result into both its finding and its mark; model confidence cannot turn it into verification.
-      const unverified = revision.policyPin.operationalScope === 'developer-live';
+      const unverified = revision.policyPin.operationalScope === 'developer-live' || revision.policyPin.operationalScope === 'ordinary-production';
       const disclosure = unverified ? '【未联网核查】' : '';
       findings = review.findings.filter(read).map((finding) => ({
         kindRef: finding.findingId,
@@ -2163,6 +2175,9 @@ export class ReviewRunStore {
    * guideline documents its category applies.
    */
   #clauseBasis(entry: ReviewCategoryConfigurationEntry, clauseId: string | null): EditorialMarkBasisProjection[] {
+    const deliverable = this.#deliverableReference(entry, clauseId);
+    if (deliverable !== null) return [{ label: `交付物（只读） · ${deliverable.documentTitle} · ${deliverable.clauseId}`,
+      quote: deliverable.text, blockId: null, fromGrapheme: null, toGrapheme: null }];
     for (const document of entry.guidelineDocuments) {
       const clause = document.clauses.find((candidate) => candidate.clauseId === clauseId);
       if (clause !== undefined) {
@@ -2555,6 +2570,22 @@ export class ReviewRunStore {
     return this.#forBook(bookId, this.#configuration()).categories.some((entry) => categoryIds.includes(entry.categoryId) && entry.executor === 'review-category-contract');
   }
 
+  /** Only Task-backed readers transmit material; each must carry its own admitting rule. */
+  materialReferencesLiveAllowed(bookId: string, categoryIds: ReadonlyArray<string>): boolean {
+    const policy = this.#ledgers.baseline().launch.policy;
+    // A launch none of whose selected readers' rules admits material refuses before reading the Book, as before #809.
+    if (!Array.isArray(categoryIds) || !categoryIds.some((id) => isReviewCategoryId(id) && liveMaterialRule(policy, reviewCategoryKindId(id)) !== null)) return false;
+    this.#requireBook(bookId);
+    const readers = this.#forBook(bookId, this.#configuration()).categories.filter((entry) => categoryIds.includes(entry.categoryId) && entry.executor === 'review-category-contract');
+    return readers.length > 0 && readers.every((entry) => liveMaterialRule(this.#ledgers.baseline().launch.policy, reviewCategoryKindId(entry.categoryId)) !== null);
+  }
+
+  #materialsRefusedLive(snapshot: RunSnapshot): boolean {
+    const launch = this.#ledgers.baseline().launch;
+    return snapshot.materialReferences !== undefined && launch.live !== null && snapshot.categories.some((category) =>
+      category.entry.executor === 'review-category-contract' && liveMaterialRule(launch.policy, reviewCategoryKindId(category.categoryId)) === null);
+  }
+
   workspace(bookId: string, reviewRunId: string | null, progress?: ProgressReader, page: ReviewFindingPageRequest = FIRST_FINDING_PAGE): ReviewWorkspaceProjection {
     this.#requireBook(bookId);
     requireReview(reviewRunId === null || (typeof reviewRunId === 'string' && UUID_PATTERN.test(reviewRunId)), 'REVIEW_RUN_INVALID', '审阅记录标识无效。');
@@ -2711,12 +2742,52 @@ export class ReviewRunStore {
    * the Book is in now (Issue #64, S29a). The house's own digest still names the configuration a Run was prepared under.
    */
   #forBook(bookId: string, house: ReviewCategoryConfiguration, readings?: SeriesKnowledgeReadings): ReviewCategoryConfiguration {
-    if (!house.categories.some((entry) => entry.executor === 'series-knowledge')) return house;
-    const resolution = resolveSeriesConsistency(this.#db, bookId, readings);
+    const resolution = house.categories.some((entry) => entry.executor === 'series-knowledge') ? resolveSeriesConsistency(this.#db, bookId, readings) : null;
     return {
       ...house,
-      categories: house.categories.map((entry) => entry.executor === 'series-knowledge' ? seriesConsistencyEntry(entry, resolution) : entry),
+      categories: house.categories.map((entry) => entry.executor === 'series-knowledge' ? seriesConsistencyEntry(entry, resolution!) : reviewCategoryEntryForBook(entry, this.#db, bookId)),
     };
+  }
+
+  #deliverablesMoved(bookId: string, entry: ReviewCategoryConfigurationEntry): string | null {
+    if (entry.deliverables === undefined) return null;
+    const current = reviewDeliverables(this.#db, bookId);
+    if (current.unavailableReason !== null) return `${REVIEW_DELIVERABLE_CHANGED} ${current.unavailableReason}`;
+    const pins = (reading: typeof current): string => canonicalJson(reading.participants.map(({ documentId, revisionId, revisionDigest, sourceDigest, paragraphs }) =>
+      ({ documentId, revisionId, revisionDigest, sourceDigest, paragraphs })));
+    return pins(current) === pins(entry.deliverables) ? null : REVIEW_DELIVERABLE_CHANGED;
+  }
+
+  #deliverableReference(entry: ReviewCategoryConfigurationEntry, ref: string | null): ReviewFindingProjection['clauseRefs'][number] | null {
+    for (const document of entry.deliverables?.participants ?? []) {
+      const paragraph = document.paragraphs.find((candidate) => candidate.ref === ref);
+      if (paragraph !== undefined) return { documentTitle: `${document.typeLabel}《${document.title}》${document.versionLabel} · 文档 ${document.documentId} · 修订 ${document.revisionId} · 第 ${paragraph.position} 段（只读）`,
+        clauseId: paragraph.ref, text: paragraph.text };
+    }
+    return null;
+  }
+
+  /** Existing execution material-guard seam; finalized deliverables are compared again before every transmission. */
+  deliverableGuard(runRecordId: string, live: boolean): MaterialGuardRefusal | null {
+    // Asked before every transmission of every kind: only a cross-deliverable Run reaches its own Book's Review Run snapshots.
+    const row = this.#db.prepare(`SELECT rr.*, i.task_intent_id AS guarded_task_intent_id FROM analysis_run_records r
+      JOIN analysis_task_intents i ON i.task_intent_id = r.task_intent_id AND i.kind = ?
+      JOIN review_runs rr ON rr.book_id = i.book_id
+      JOIN json_each(rr.canonical_json, '$.categories') c ON json_extract(c.value, '$.task.taskIntentId') = i.task_intent_id
+      WHERE r.run_record_id = ? AND json_type(c.value, '$.entry.deliverables') = 'object' LIMIT 1`)
+      .get(reviewCategoryKindId('cross-deliverable-consistency'), runRecordId) as SqlRow | undefined;
+    if (row === undefined) return null;
+    const snapshot = this.#snapshotOf(row);
+    const category = snapshot.categories.find((candidate) => candidate.task?.taskIntentId === text(row.guarded_task_intent_id))!;
+    let message = this.#deliverablesMoved(snapshot.bookId, category.entry);
+    if (message === null && live) {
+      const manuscript = this.#db.prepare('SELECT sv.source_digest FROM manuscript_revisions mr JOIN source_versions sv ON sv.source_version_id = mr.source_version_id WHERE mr.revision_id = ?').get(snapshot.manuscript.revisionId) as SqlRow | undefined;
+      if (manuscript === undefined || category.entry.deliverables!.participants.some((participant) => participant.sourceDigest !== manuscript.source_digest)) {
+        message = '开发者实时模式只允许与本次获准稿件同源的交付物片段；交付物来源未获准，未发送任何内容。';
+      }
+    }
+    return message === null ? null : { code: 'REVIEW_DELIVERABLE_CHANGED', materialTitle: category.entry.label,
+      message: `${message} 运行已停止；已完成的单元保留。` };
   }
 
   /**
@@ -3494,6 +3565,8 @@ export class ReviewRunStore {
     });
     const clauseRefs = (categoryId: string, clauseId: string | null): ReviewFindingProjection['clauseRefs'] => {
       const entry = snapshot.categories.find((category) => category.categoryId === categoryId)?.entry;
+      const deliverable = entry === undefined ? null : this.#deliverableReference(entry, clauseId);
+      if (deliverable !== null) return [deliverable];
       for (const document of entry?.guidelineDocuments ?? []) {
         const clause = document.clauses.find((candidate) => candidate.clauseId === clauseId);
         if (clause !== undefined) return [{ documentTitle: document.title, clauseId: clause.clauseId, text: clause.text }];

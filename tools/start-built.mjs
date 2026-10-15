@@ -12,6 +12,7 @@ const STARTUP_LOCATION_PATTERN = /AI7_STARTUP_FAILED\/(network-denial|applicatio
 // The launch form (ADR 0065, Issue #272): `--data-root` is required; the trusted operational scope
 // defaults to `development-ci`, and the ceiling and cache root are accepted only with `developer-live`, which must name its
 // development validation (`--validation-case <family>/<case>`, optionally `--validation-delta <kind>:<rationale>`; Issue #808).
+// `ordinary-production` (Issue #811) takes none of those four: its data root is also kept apart from the developer caches.
 // Main and the service parse those two exactly; this launcher checks their shape and the scope they need.
 // The form travels as argv through Electron main to the service; no environment variable carries it.
 const LAUNCH_ARGUMENTS = new Set(['--data-root', '--trusted-operational-scope', '--run-budget-ceiling', '--provider-cache-root', '--validation-case', '--validation-delta']);
@@ -37,7 +38,7 @@ export function parseBuiltLaunchArguments(args) {
   const dataRoot = values.get('--data-root');
   requireLaunch(dataRoot !== undefined && isAbsolute(dataRoot));
   const scope = values.get('--trusted-operational-scope') ?? 'development-ci';
-  requireLaunch(scope === 'development-ci' || scope === 'developer-live');
+  requireLaunch(scope === 'development-ci' || scope === 'developer-live' || scope === 'ordinary-production');
   const ceiling = values.get('--run-budget-ceiling');
   const cacheRoot = values.get('--provider-cache-root');
   const validationCase = values.get('--validation-case');
@@ -86,10 +87,12 @@ async function main() {
   const entry = resolve(ROOT, 'dist', 'main', 'index.cjs');
   const dataRootEntry = resolve(ROOT, 'dist', 'shared', 'data-root.mjs');
   requireLaunch(existsSync(executable) && existsSync(entry) && existsSync(dataRootEntry));
-  const { createCanonicalExternalDataRoot, ensureCanonicalDataDirectory } = await import(
+  const { createCanonicalExternalDataRoot, createCanonicalProductionDataRoot, ensureCanonicalDataDirectory } = await import(
     pathToFileURL(dataRootEntry).href
   );
-  const dataRoot = await createCanonicalExternalDataRoot(launch.dataRoot, ROOT);
+  const dataRoot = launch.trustedOperationalScope === 'ordinary-production'
+    ? await createCanonicalProductionDataRoot(launch.dataRoot, ROOT)
+    : await createCanonicalExternalDataRoot(launch.dataRoot, ROOT);
   const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
   const child = spawn(executable, [
     '--disable-background-networking',

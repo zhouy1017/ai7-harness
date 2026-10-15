@@ -1,15 +1,26 @@
 import { randomUUID } from 'node:crypto';
-import { BASELINE_ANALYSIS_KIND } from '../../shared/protocol.js';
-import { liveKindAdmission, liveKindContractCategories, type LiveKindRule } from './live-kind-admission.js';
+import { BASELINE_ANALYSIS_KIND, MODEL_SERVICE_SETUP_REQUIRED_REASON } from '../../shared/protocol.js';
+import { liveKindAdmission, liveKindContractCategories, liveKindRule, type LiveKindRule } from './live-kind-admission.js';
+import { liveMaterialContract } from '../task-material-references.js';
 import type { AnalysisAssuranceSampleDispositionProjection, AnalysisGapProjection, AnalysisReusePlanUnitProjection, CoverageManifestProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection, ReviewScopePlanUnitProjection, RunAttemptState, RunReportStageId } from '../../shared/protocol.js';
 import { describeComposition, prepareExecution, type HarnessExecutionSpan, type HarnessSignal, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
-import { ACTIVE_SET_VERSION, DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, type DeveloperLiveRuntime } from '../launch-policy.js';
+import {
+  ACTIVE_SET_VERSION,
+  DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION,
+  ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION,
+  allowedProductionBindingOf,
+  isOrdinaryProductionRuntime,
+  type DeveloperLiveRuntime,
+  type LiveRuntime,
+  type OrdinaryProductionRuntime,
+  type ConfiguredProviderBinding,
+} from '../launch-policy.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
 import { evaluateRunBudgetCeiling, totalTokens, type ClassifiedModelFailure, type RunBudgetCeiling, type UsageFacts } from '../provider/classification.js';
-import { DeepSeekOpenAiCompatibleAdapter, OPENCODE_GO_ROUTE_PROFILE } from '../provider/deepseek-adapter.js';
+import { DeepSeekOpenAiCompatibleAdapter, OPENCODE_GO_ROUTE_PROFILE, PROVIDER_ROUTE_PROFILES, type ProviderRouteProfile } from '../provider/deepseek-adapter.js';
 import { transmitOnce } from '../provider/live-transmission.js';
-import { OPENCODE_GO_V41_FLASH_PROFILE } from '../provider/model-profile.js';
+import { OPENCODE_GO_V41_FLASH_PROFILE, modelProfileFor, type ProviderModelProfile } from '../provider/model-profile.js';
 import {
   LOCAL_DETERMINISTIC_MODEL,
   LOCAL_DETERMINISTIC_ROUTE,
@@ -66,7 +77,7 @@ import {
 } from './reducers.js';
 import { CARRIED_GAP_REASON, OUT_OF_SCOPE_GAP_REASON } from './reuse-plan.js';
 import { SERIES_SCOPE_STOP_SUMMARY } from '../series-exclusions.js';
-import { materialInterruptionMessage, type MaterialGuardRefusal } from '../task-material-references.js';
+import { materialInterruptionMessage as referenceInterruptionMessage, type MaterialGuardRefusal } from '../task-material-references.js';
 import {
   RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST,
   buildRunReportReflectionMessage,
@@ -117,6 +128,11 @@ import {
  */
 export { ExecutionAdmissionError };
 
+/** Deliverable guards supply their own stop reason; existing material and Series guard semantics stay with their owners. */
+function materialInterruptionMessage(refusal: MaterialGuardRefusal): string {
+  return refusal.code === 'REVIEW_DELIVERABLE_CHANGED' ? refusal.message : referenceInterruptionMessage(refusal);
+}
+
 /**
  * How many Runs the governor executes at once (Issue #49, S14; ADR 0021): two under development-ci. Under
  * developer-live the human-attended scope and its live-once Provider testing (ADR 0065, ADR 0067) keep one Run in
@@ -139,6 +155,18 @@ export interface ExecutionOwnerDependencies {
   readonly secretResolver: SecretResolver;
   /** The developer-live launch facts and captured transport; present exactly when the policy bound developer-live. */
   readonly developerLive?: DeveloperLiveRuntime | null;
+  /**
+   * The ordinary-production transport (Issue #811); present exactly when the policy bound ordinary-production. Under it a Run
+   * takes the route its plan froze from the editor's configured binding, and no cache, ledger or validation exists.
+   */
+  readonly production?: OrdinaryProductionRuntime | null;
+  /**
+   * The launch policy as it stands now (Issue #811): under ordinary-production it follows the editor's model-service settings.
+   * Absent, `launchPolicy` is the launch's for good, as under every other scope.
+   */
+  readonly currentLaunchPolicy?: () => LaunchPolicyProjection;
+  /** Re-resolve the verified policy for an authorized production Run's frozen connection, independently of settings. */
+  readonly productionPolicyFor?: (binding: ConfiguredProviderBinding) => Promise<LaunchPolicyProjection>;
   /** J-10's unit hold (Issue #422); absent in every other launch, where a unit settles as soon as its turn returns. */
   readonly unitHold?: UnitHold | null;
   /**
@@ -454,13 +482,17 @@ export class BaselineAnalysisExecutionOwner {
   constructor(deps: ExecutionOwnerDependencies) {
     // The developer-live runtime and the bound scope are one fact: a developer-live launch that reached this owner
     // without its launch facts and captured transport could never enforce the ceiling or the cache, and a
-    // runtime under any other scope would be a transport nothing may use.
-    const live = deps.developerLive ?? null;
-    if ((deps.launchPolicy.operationalScope === 'developer-live') !== (live !== null)) {
+    // runtime under any other scope would be a transport nothing may use. The same holds for ordinary production's.
+    const developerLive = deps.developerLive ?? null;
+    const production = deps.production ?? null;
+    if ((deps.launchPolicy.operationalScope === 'developer-live') !== (developerLive !== null) ||
+        (deps.launchPolicy.operationalScope === 'ordinary-production') !== (production !== null)) {
       throw new ExecutionAdmissionError('EXECUTION_DEVELOPER_LIVE_RUNTIME_MISMATCH', '开发者实时运行时与已绑定的可信区间不一致。');
     }
+    const live = developerLive ?? production;
     this.#deps = deps;
-    this.#broker = new CredentialBroker(deps.secretResolver);
+    // Under ordinary production the broker never reads a development Credential Reference (Issue #811).
+    this.#broker = new CredentialBroker(deps.secretResolver, { developmentReferences: production !== null ? 'refused' : 'admitted' });
     const capacity = deps.capacity ?? (live !== null ? 1 : EXECUTION_RUN_CAPACITY);
     if (!Number.isSafeInteger(capacity) || capacity < 1 || (live !== null && capacity !== 1)) {
       throw new ExecutionAdmissionError('EXECUTION_CAPACITY_INVALID', '运行名额设置无效。');
@@ -471,6 +503,16 @@ export class BaselineAnalysisExecutionOwner {
       throw new ExecutionAdmissionError('EXECUTION_CAPACITY_INVALID', '等待运行的名额设置无效。');
     }
     this.#waitingCapacity = waitingCapacity;
+  }
+
+  /** The live runtime this launch carries: developer-live's or ordinary production's; `null` under development-ci. */
+  #live(): LiveRuntime | null {
+    return this.#deps.developerLive ?? this.#deps.production ?? null;
+  }
+
+  /** The launch policy as it stands now: under ordinary-production it follows the editor's settings (Issue #811). */
+  #policy(): LaunchPolicyProjection {
+    return this.#deps.currentLaunchPolicy?.() ?? this.#deps.launchPolicy;
   }
 
   progressFor(runRecordId: string): RunProgress | null {
@@ -486,7 +528,7 @@ export class BaselineAnalysisExecutionOwner {
    * adapter's local deterministic one. Without either every start is blocked before dispatch, so 后台分析登记 starts nothing.
    */
   get routeExecutable(): boolean {
-    return !this.#disposed && ((this.#deps.developerLive ?? null) !== null || this.#deps.fixture !== null);
+    return !this.#disposed && (this.#live() !== null || this.#deps.fixture !== null);
   }
 
   /**
@@ -589,21 +631,27 @@ export class BaselineAnalysisExecutionOwner {
    * This launch has a route, and the ledger froze its plans under the same launch: one bound to another launch would
    * hand over a plan whose route this owner cannot honour. The live runtime, if any.
    */
-  #requireLaunchOf(ledger: BaselineAnalysisStore): DeveloperLiveRuntime | null {
-    const live = this.#deps.developerLive ?? null;
-    if (live !== null && ledger.definition.kind !== BASELINE_ANALYSIS_KIND && liveRuleOf(ledger) === null) {
-      throw new ExecutionAdmissionError('EXECUTION_KIND_NOT_ADMITTED', 'developer-live 当前只允许基线稿件分析；该任务种类尚未获准实时执行。');
+  #requireLaunchOf(ledger: BaselineAnalysisStore): LiveRuntime | null {
+    const live = this.#live();
+    const production = isOrdinaryProductionRuntime(live);
+    if (live !== null && !production && ledger.definition.kind !== BASELINE_ANALYSIS_KIND && liveRuleOf(ledger) === null) {
+      throw new ExecutionAdmissionError('EXECUTION_KIND_NOT_ADMITTED', production
+        ? (ledger.launch.live === null ? MODEL_SERVICE_SETUP_REQUIRED_REASON : 'ordinary-production 当前未准许该任务种类实时执行。')
+        : 'developer-live 当前只允许基线稿件分析；该任务种类尚未获准实时执行。');
     }
     if (live === null && this.#deps.fixture === null) throw new ExecutionAdmissionError('EXECUTION_ROUTE_ABSENT', '没有可执行的本地确定性路由。');
-    if ((ledger.launch.live !== null) !== (live !== null)) {
+    // Under ordinary-production a frozen plan keeps its own binding whatever is configured now (Issue #811): the ledger's
+    // current binding may be another route, or none, and the plan is checked by itself when it is loaded.
+    if (!production && (ledger.launch.live !== null) !== (live !== null)) {
       throw new ExecutionAdmissionError('EXECUTION_LEDGER_LAUNCH_MISMATCH', '该分析账本绑定的可信区间与执行所有者不一致；未开始执行。');
     }
     return live;
   }
 
   /** The Public SampleBook check precedes admission, so an unadmitted Book never reaches a payload. */
-  #requireTransmittable(facts: ExecutionPlanFacts, live: DeveloperLiveRuntime | null): void {
-    if (live !== null && !DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS.has(facts.sourceDigest)) {
+  #requireTransmittable(facts: ExecutionPlanFacts, live: LiveRuntime | null): void {
+    // Ordinary production sends the editor's own manuscript (Issue #811); only developer-live is held to the Public SampleBooks.
+    if (live !== null && !isOrdinaryProductionRuntime(live) && !DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS.has(facts.sourceDigest)) {
       throw new ExecutionAdmissionError('EXECUTION_SOURCE_NOT_TRANSMITTABLE', '当前图书不在 developer-live 可传输的 Public SampleBook 集合内；未发起任何传输。');
     }
   }
@@ -622,8 +670,15 @@ export class BaselineAnalysisExecutionOwner {
    * not start is never recorded. The value is resolved and discarded by the broker. `null` under
    * development-ci, whose routes transmit nothing and so need no credential.
    */
-  async liveCredentialReadiness(): Promise<'present' | 'missing' | null> {
-    if ((this.#deps.developerLive ?? null) === null) return null;
+  async liveCredentialReadiness(binding?: ConfiguredProviderBinding | null): Promise<'present' | 'missing' | null> {
+    const live = this.#live();
+    if (live === null) return null;
+    if (isOrdinaryProductionRuntime(live)) {
+      // The editor's configured connection (Issue #811); none configured reads as missing, which is 需设置.
+      const configured = binding === undefined ? this.#deps.ledger.launch.live : binding;
+      const allowed = allowedProductionBindingOf(configured);
+      return configured === null || allowed === null ? 'missing' : this.#broker.checkPlanReadiness(allowed.credentialSlot, configured.credentialReference);
+    }
     return this.#broker.checkPlanReadiness(OPENCODE_GO_ROUTE_PROFILE.credentialSlot, DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE);
   }
 
@@ -739,7 +794,7 @@ export class BaselineAnalysisExecutionOwner {
   }
 
   /** Whether the Execution Binding a Run persisted reads otherwise under this launch (CONT-015). */
-  #bindingMoved(stored: NonNullable<Continuation['stored']>, facts: ExecutionPlanFacts, live: DeveloperLiveRuntime | null, ledger: BaselineAnalysisStore): boolean {
+  #bindingMoved(stored: NonNullable<Continuation['stored']>, facts: ExecutionPlanFacts, live: LiveRuntime | null, ledger: BaselineAnalysisStore): boolean {
     // The composition this launch would execute under — its harness pins included — as `prepareExecution` will
     // describe it, never the one the plan froze: a harness a later release pins differently is seen here, before a
     // summary promises what the Run kept, and not first when the execution refuses it.
@@ -759,11 +814,12 @@ export class BaselineAnalysisExecutionOwner {
    * continues the Run nor forms what it kept into a revision: its cancellation settles without one.
    */
   carriesStoppedRun(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger): boolean {
-    const live = this.#deps.developerLive ?? null;
-    if (this.#disposed || (live === null && this.#deps.fixture === null) || (ledger.launch.live !== null) !== (live !== null)) return false;
+    const live = this.#live();
+    if (this.#disposed || (live === null && this.#deps.fixture === null) ||
+        (!isOrdinaryProductionRuntime(live) && (ledger.launch.live !== null) !== (live !== null))) return false;
     try {
       const facts = ledger.loadExecutionPlan(runRecordId);
-      if (live !== null && !DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS.has(facts.sourceDigest)) return false;
+      if (live !== null && !isOrdinaryProductionRuntime(live) && !DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS.has(facts.sourceDigest)) return false;
       const stored = ledger.executionBindingOf(runRecordId);
       return stored == null || !this.#bindingMoved(stored, facts, live, ledger);
     } catch {
@@ -1044,11 +1100,20 @@ export class BaselineAnalysisExecutionOwner {
     // suboperation at all. The owner itself is the same owner for every analysis kind.
     const definition: AnalysisKindDefinition = ledger.definition;
     const promptContractDigest = definition.promptContractDigest;
-    const policy = this.#deps.launchPolicy;
-    const live = this.#deps.developerLive ?? null;
+    const live = this.#live();
+    // Ordinary production (Issue #811): the Run's route is its plan's, from the editor's configured binding when it froze.
+    const production = isOrdinaryProductionRuntime(live) ? live : null;
+    const policy = production !== null && facts.productionBinding !== null && this.#deps.productionPolicyFor !== undefined
+      ? await this.#deps.productionPolicyFor({ ...facts.productionBinding, credentialReference: facts.credentialReference })
+      : this.#policy();
     if (live === null) {
       if (policy.operationalScope !== 'development-ci' || policy.providerProcessing.version !== 'v1' || policy.providerProcessing.liveTransmissionAllowed !== false) {
         throw new ExecutionAdmissionError('EXECUTION_POLICY_INVALID', '当前可信策略不是 development-ci · Provider Processing v1。');
+      }
+    } else if (production !== null) {
+      if (policy.operationalScope !== 'ordinary-production' || policy.providerProcessing.version !== ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION ||
+          policy.providerProcessing.decision !== 'eligible-only' || facts.productionBinding === null) {
+        throw new ExecutionAdmissionError('EXECUTION_POLICY_INVALID', `当前可信策略不是 ordinary-production · Provider Processing ${ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION}。`);
       }
     } else if (policy.operationalScope !== 'developer-live' || policy.providerProcessing.version !== DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION ||
         policy.providerProcessing.decision !== 'eligible-only' || policy.providerProcessing.liveTransmissionAllowed !== true) {
@@ -1058,19 +1123,29 @@ export class BaselineAnalysisExecutionOwner {
     // The one selected rule that admitted a non-baseline kind live (Issue #429): its Model Role, its outbound categories and
     // whether the kind's own synthesis may be sent. `null` for the baseline, whose rule the policy-level terms read, and on
     // the deterministic route.
-    const admitted = live === null || definition.kind === BASELINE_ANALYSIS_KIND ? null : liveRuleOf(ledger);
+    const admitted = live === null || definition.kind === BASELINE_ANALYSIS_KIND ? null
+      : production !== null && facts.productionBinding !== null ? liveKindAdmission(policy, definition, facts.productionBinding) : liveRuleOf(ledger);
+    if (live !== null && definition.kind !== BASELINE_ANALYSIS_KIND && (admitted === null || admitted.modelRole !== 'Main Editorial Role')) {
+      throw new ExecutionAdmissionError('EXECUTION_KIND_NOT_ADMITTED', '当前策略未准许该任务种类实时执行。');
+    }
     const modelRole = admitted === null ? 'Main Editorial Role' : admitted.modelRole as CredentialSlotBinding['modelRole'];
     // The route the plan froze, resolved once — the deterministic fixture, or the live route profile — and the
     // ceiling it carries, already resolved: an explicit launch total, or the policy's per-frozen-unit default
     // against this Run's own frozen unit count. Never re-derived at dispatch.
     const { route, model, credentialSlot, credentialReference, runBudgetCeiling } = routeFactsOf(facts, live);
+    // The live route's profiles: the Go route's under developer-live, the frozen route's under ordinary production.
+    const routeProfile: ProviderRouteProfile = production === null ? OPENCODE_GO_ROUTE_PROFILE : productionRouteProfile(route);
+    const liveModelProfile: ProviderModelProfile = production === null ? OPENCODE_GO_V41_FLASH_PROFILE : productionModelProfile(route, model);
+    // Under ordinary production the rule that admits the kind names the editor's unpublished words (Issue #811): the
+    // baseline's own rule included, read for its categories as any other kind's is.
+    const productionRule = production === null ? null : admitted ?? liveKindRule(policy, BASELINE_ANALYSIS_KIND, ['unpublished-excerpts']);
     // The test item purpose is the Task mode, so a first baseline and each update mode number their
     // live calls separately and a repeated purpose can never collide with an unrelated test. A Task
     // without a plan is the kind's own whole first mode — `first-baseline` for the baseline kind.
     const testItemPurpose = facts.update === null ? definition.initialMode : facts.update.mode;
     // The Provider Test Ledger and Result Cache serve development validation only (ADR 0089, Issue #808). A live Run outside it
     // is business: every model step reaches the transport itself, and nothing reads or writes the developer cache or ledger.
-    const validation = live?.launch.validation ?? null;
+    const validation = live === null || production !== null ? null : (live as DeveloperLiveRuntime).launch.validation;
     const validationContractOf = (): string => {
       if (active.validationStep === 'reflection') return RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST;
       if (active.validationStep === 'reduction') return definition.crossUnit!.promptContractDigest;
@@ -1078,8 +1153,8 @@ export class BaselineAnalysisExecutionOwner {
       return promptContractDigest;
     };
     let cache: ProviderResultCache | null = null;
-    if (live !== null && validation !== null) {
-      cache = new ProviderResultCache(live.launch.providerCacheRoot);
+    if (live !== null && production === null && validation !== null) {
+      cache = new ProviderResultCache((live as DeveloperLiveRuntime).launch.providerCacheRoot);
       await cache.open();
     }
     const blocks = ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId);
@@ -1159,8 +1234,8 @@ export class BaselineAnalysisExecutionOwner {
           attribution: () => ({}),
           promptContractDigest,
           codes,
-          profile: OPENCODE_GO_ROUTE_PROFILE,
-          modelProfile: OPENCODE_GO_V41_FLASH_PROFILE,
+          profile: routeProfile,
+          modelProfile: liveModelProfile,
           sessionId: () => harness.currentSessionId(),
           // Under development validation the captured native `fetch` is reached only through the cache: an identical request
           // replays without transmitting, evidence that already answers the purpose refuses the send, and a live call happens
@@ -1176,7 +1251,7 @@ export class BaselineAnalysisExecutionOwner {
               intent: validation,
               step: `${testItemPurpose}/${active.validationStep}`,
               requestShape: OPENCODE_GO_V41_FLASH_PROFILE.capabilities.requestShape,
-            }, OPENCODE_GO_ROUTE_PROFILE, model, url, init),
+            }, routeProfile, model, url, init),
         });
         return liveAdapter.instance;
       },
@@ -1199,6 +1274,7 @@ export class BaselineAnalysisExecutionOwner {
     // Which of the two developer-live interruptions settled this Run, when one did; the closed CHECK
     // sets record both as `interrupted`, so the distinction lives in the detail, summary, and action.
     let liveInterruption: LiveInterruption | null = null;
+    let proxyFailure: string | null = null;
     let materialRefusal: MaterialGuardRefusal | null = null;
     // 模型服务账户限额 met under a Run that keeps its progress (Issue #51, S16b): the provider's words, and the unit it
     // refused — `null` for the reduction or a sampling turn — with what that refused attempt cost. The Run stops resumable
@@ -1232,25 +1308,37 @@ export class BaselineAnalysisExecutionOwner {
       // and refusing here keeps the Run from spending Sessions to reach the same conclusion. A cancellation sends
       // nothing, so a stopped Run the editor cancelled still forms the partial revision of what it kept.
       if (live !== null && credentialReadiness !== 'present' && !active.cancelRequested) {
-        throw new ExecutionAdmissionError('EXECUTION_CREDENTIAL_ABSENT', '受保护凭据库中没有 opencode-go 开发凭据；未发起任何传输。');
+        throw new ExecutionAdmissionError('EXECUTION_CREDENTIAL_ABSENT', production !== null
+          ? `受保护凭据库中没有你为 ${route} 保存的凭据；请在 设置 › 模型服务 重新输入。未发起任何传输。`
+          : '受保护凭据库中没有 opencode-go 开发凭据；未发起任何传输。');
       }
       currentBindingDigest = bindingDigest;
       bindingDigestForSlot = bindingDigest;
+      const frozenMaterial = liveMaterialContract(definition);
       bindingFacts = {
         bindingDigest,
         route,
         model,
         systemPrompt: definition.systemPrompt,
-        outboundDataCategory: 'public-or-synthetic',
+        // The editor's own words under ordinary production (Issue #811): its units are unpublished excerpts, never public.
+        outboundDataCategory: production === null ? 'public-or-synthetic' : 'unpublished-excerpts',
         // The admitted rule's categories, and those the kind's contract carries beside the SampleBook (Issue #429): the gate
         // sends an evaluation's editor-authored record or house exemplars only where the rule names them.
         ...(admitted === null ? {} : {
           ruleOutboundCategories: new Set(admitted.outboundDataCategories),
-          contractCategories: new Set(liveKindContractCategories(definition.kind)),
+          contractCategories: new Set(liveKindContractCategories(definition.kind, definition)),
+          ...(frozenMaterial === null ? {} : {
+            materialExcerpts: frozenMaterial.materials,
+            frozenMaterialDigests: new Set(frozenMaterial.sources.map((source) => source.sha256)),
+          }),
         }),
+        // Under ordinary production the baseline's own rule names the categories its unit messages carry.
+        ...(production !== null && admitted === null && productionRule !== null ? { ruleOutboundCategories: new Set(productionRule.outboundDataCategories) } : {}),
         policy: live === null
           ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }
-          : { operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+          : production !== null
+            ? { operationalScope: 'ordinary-production', providerProcessingVersion: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' }
+            : { operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
         admittedUserMessages,
       };
       harness.bindExecution({ harnessSessionId, behaviorCompositionDigest: harness.composition.digest, promptContractDigest });
@@ -1566,7 +1654,8 @@ export class BaselineAnalysisExecutionOwner {
           const reason = failure?.kind === 'failed' ? `${failure.failure.reason}（${failure.failure.code}）` : '适配器失败。';
           // 模型服务账户限额 (Issue #51, S16b; MODEL-018): a Run that keeps its progress stops here with the unit unsettled —
           // no gap, no retry, no fallback, no second model — and 续行 reads it again once the limit clears.
-          if (failure?.kind === 'failed' && failure.failure.failureClass === 'provider-account-limit' && active.resumableOnInterrupt && live === null) {
+          if (failure?.kind === 'failed' && failure.failure.failureClass === 'provider-account-limit' && active.resumableOnInterrupt &&
+              (live === null || production !== null)) {
             accountLimit = { unitOrdinal: unit.ordinal, condition: reason, refused: { attempts: s.attempts, wallMs: s.wallMs, usage: s.usage } };
             return 'stop';
           }
@@ -1583,6 +1672,11 @@ export class BaselineAnalysisExecutionOwner {
           }
         } else if (turn.terminal === 'interrupted') {
           const failure = turn.signals.find((signal) => signal.kind === 'interrupted');
+          if (failure?.kind === 'interrupted' && failure.failure.failureClass === 'proxy-unreachable' && active.resumableOnInterrupt) {
+            proxyFailure = failure.failure.reason;
+            active.interrupted = true;
+            return 'stop';
+          }
           const egress = failure?.kind === 'interrupted' && failure.failure.failureClass === 'egress-refused';
           gap(egress ? 'egress-refused' : 'interrupted', failure?.kind === 'interrupted' ? failure.failure.reason : '请求被中断。');
           // An egress refusal that names the ceiling is the ceiling settlement, not a bare interruption.
@@ -1925,7 +2019,8 @@ export class BaselineAnalysisExecutionOwner {
         }
         if (stopping) {
           ledger.recordRunState(facts.runRecordId, active.pauseRequested ? 'paused' : 'resumable', {
-            detail: active.pauseRequested ? pausedDetail(settled, submittedUnits.length) : resumableDetail(settled, submittedUnits.length),
+            detail: proxyFailure ?? (active.pauseRequested ? pausedDetail(settled, submittedUnits.length) : resumableDetail(settled, submittedUnits.length)),
+            ...(proxyFailure === null ? {} : { connectivityClassification: 'proxy-unreachable', stopReason: 'proxy-unreachable' }),
             unitsSettled: settled,
             unitsTotal: submittedUnits.length,
             carriedUsage,
@@ -2063,6 +2158,9 @@ export class BaselineAnalysisExecutionOwner {
           terminalClassification = 'interrupted';
         } else {
           const message = step === null ? buildCrossUnitMessage(closedOutcomes, manifest.units.length) : step.buildMessage(closedOutcomes, manifest.units.length);
+          // A kind's book-level synthesis turn under ordinary production carries the whole Book's words (Issue #811): the gate
+          // reads it as unpublished full content, which the kind's rule must name; every other turn keeps the Run's category.
+          if (production !== null && step !== null && bindingFacts !== null) bindingFacts = { ...bindingFacts, outboundDataCategory: 'unpublished-full-content' };
           // The same set the gate reads: exactly one further user message becomes admissible, and every
           // other refusal — route, model, system prompt, tools, prior outputs — is untouched.
           admittedUserMessages.add(message);
@@ -2076,6 +2174,8 @@ export class BaselineAnalysisExecutionOwner {
           active.progress.attemptState = 'dispatched';
           active.transmissionsAtDispatch = active.transmissions?.() ?? 0;
           const turn = await harness.submitUnit(message);
+          // Every later turn of the Run keeps the Run's own category again.
+          if (production !== null && step !== null && bindingFacts !== null) bindingFacts = { ...bindingFacts, outboundDataCategory: 'unpublished-excerpts' };
           if (this.#deps.stageHold) await this.#deps.stageHold('cross-unit-reduction');
           const canonical = liveAdapter.instance?.lastCanonicalResult ?? null;
           // The reduction's turn is a model turn like any other: it counts as a request, its usage
@@ -2114,7 +2214,8 @@ export class BaselineAnalysisExecutionOwner {
             // No safe retry here: one attempt, and a retry-safe failure is a gap like any other.
             crossUnit = gap('adapter-failure', failure?.kind === 'failed' ? `${failure.failure.reason}（${failure.failure.code}）` : '适配器失败。');
             // 模型服务账户限额 (Issue #51, S16b): the Run stops before the reduction settles, and 续行 forms it again.
-            if (failure?.kind === 'failed' && failure.failure.failureClass === 'provider-account-limit' && active.resumableOnInterrupt && live === null) {
+            if (failure?.kind === 'failed' && failure.failure.failureClass === 'provider-account-limit' && active.resumableOnInterrupt &&
+                (live === null || production !== null)) {
               accountLimit = { unitOrdinal: null, condition: `${failure.failure.reason}（${failure.failure.code}）` };
             }
           } else if (ambiguousTurnReason(turn.signals) !== null) {
@@ -2171,7 +2272,7 @@ export class BaselineAnalysisExecutionOwner {
           terminalClassification = 'interrupted';
         },
         onAccountLimit: (condition) => {
-          if (active.resumableOnInterrupt && live === null) accountLimit = { unitOrdinal: null, condition };
+          if (active.resumableOnInterrupt && (live === null || production !== null)) accountLimit = { unitOrdinal: null, condition };
         },
         materialChanged,
       });
@@ -2270,7 +2371,7 @@ export class BaselineAnalysisExecutionOwner {
             : `${interruption.summary}${reduction.coverage.label}；${reduction.reducerClosure.label}；${reduction.assurance.label}。`,
         safeNextAction: interruption === null
           ? (definition.safeNextActions ?? SAFE_NEXT_ACTIONS)[terminalClassification]
-          : liveInterruption === 'run-budget-ceiling-reached' && live === null ? BUDGET_REACHED_NEXT_ACTION : interruption.safeNextAction,
+          : liveInterruption === 'run-budget-ceiling-reached' && (live === null || production !== null) ? BUDGET_REACHED_NEXT_ACTION : interruption.safeNextAction,
         // Run Budget Ceiling Reached, named (Issue #51, S16a; MODEL-016): the ceiling, what the Run used, and what it read.
         ...(liveInterruption === 'run-budget-ceiling-reached' && runBudgetCeiling.kind === 'tokens'
           ? {
@@ -2450,13 +2551,25 @@ function liveRuleOf(ledger: BaselineAnalysisStore): LiveKindRule | null {
 }
 
 /** The route facts a Run's Execution Binding names, from its frozen plan and the launch the owner runs under. */
-function routeFactsOf(facts: ExecutionPlanFacts, live: DeveloperLiveRuntime | null): {
+function routeFactsOf(facts: ExecutionPlanFacts, live: LiveRuntime | null): {
   route: ExecutionRouteId;
   model: string;
   credentialSlot: CredentialSlotBinding['slot'];
   credentialReference: string;
   runBudgetCeiling: RunBudgetCeiling;
 } {
+  // Ordinary production (Issue #811): the binding the plan froze, on the connection's own Credential Reference it named.
+  if (isOrdinaryProductionRuntime(live)) {
+    const binding = facts.productionBinding;
+    if (binding === null) throw new ExecutionAdmissionError('EXECUTION_ROUTE_ABSENT', '冻结计划没有正式使用下的模型服务路线。');
+    return {
+      route: binding.route,
+      model: binding.model,
+      credentialSlot: binding.credentialSlot,
+      credentialReference: facts.credentialReference,
+      runBudgetCeiling: facts.runBudgetCeiling === 'unset' ? { kind: 'unset' } : facts.runBudgetCeiling,
+    };
+  }
   return {
     route: live === null ? LOCAL_DETERMINISTIC_ROUTE : OPENCODE_GO_ROUTE,
     model: live === null ? LOCAL_DETERMINISTIC_MODEL : OPENCODE_GO_V41_FLASH_PROFILE.model,
@@ -2474,7 +2587,7 @@ function routeFactsOf(facts: ExecutionPlanFacts, live: DeveloperLiveRuntime | nu
 function executionBindingRecordOf(input: {
   facts: ExecutionPlanFacts;
   definition: AnalysisKindDefinition;
-  live: DeveloperLiveRuntime | null;
+  live: LiveRuntime | null;
   fixture: ResolvedModelFixture | null;
   attemptId: string;
   harnessSessionId: string;
@@ -2510,9 +2623,11 @@ function executionBindingRecordOf(input: {
     model,
     adapterPin: live === null ? { fixtureIdentity: fixture!.identity, fixtureSha256: fixture!.sha256 } : null,
     credentialSlot: { modelRole: 'Main Editorial Role', slot: credentialSlot, credentialReference },
-    outboundDataCategory: 'public-or-synthetic',
+    outboundDataCategory: isOrdinaryProductionRuntime(live) ? 'unpublished-excerpts' : 'public-or-synthetic',
     policyPin: live === null
       ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 0 }
+      : isOrdinaryProductionRuntime(live)
+      ? { operationalScope: 'ordinary-production', providerProcessingVersion: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 'bounded-by-run' }
       : { operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 'bounded-by-run' },
     runBudgetCeiling: runBudgetCeiling.kind === 'unset' ? 'unset' : runBudgetCeiling,
     dispatchAttribution: 'Dispatch',
@@ -2635,7 +2750,7 @@ interface RunReportReflectionContext {
   readonly liveAdapter: { instance: DeepSeekOpenAiCompatibleAdapter | null };
   readonly accumulated: UsageFacts[];
   readonly ceilingState: () => EgressCeilingState;
-  readonly live: DeveloperLiveRuntime | null;
+  readonly live: LiveRuntime | null;
   readonly policy: LaunchPolicyProjection;
   /** Whether the Run had already stopped; a stopped Run reflects on nothing. */
   readonly stopped: boolean;
@@ -2657,7 +2772,7 @@ interface AssuranceSamplingContext {
   /** The owner's own clock; the suboperation opens its stage only once a turn is actually dispatched. */
   readonly clock: RunStageClock;
   readonly ceilingState: () => EgressCeilingState;
-  readonly live: DeveloperLiveRuntime | null;
+  readonly live: LiveRuntime | null;
   readonly policy: LaunchPolicyProjection;
   /** Whether the Run had already stopped when the unit loop ended; a stopped Run samples nothing. */
   readonly stopped: boolean;
@@ -2761,3 +2876,16 @@ function requireCompositionMatch(actual: string, planned: string): void {
   if (actual !== planned) throw new ExecutionAdmissionError('EXECUTION_COMPOSITION_DRIFT', '组合摘要与冻结计划不一致；未开始执行。');
 }
 
+/** The route profile of an ordinary-production Run's frozen route (Issue #811): the provider document's, exactly. */
+function productionRouteProfile(route: ExecutionRouteId): ProviderRouteProfile {
+  const profile = (PROVIDER_ROUTE_PROFILES as Readonly<Record<string, ProviderRouteProfile>>)[route];
+  if (profile === undefined) throw new ExecutionAdmissionError('EXECUTION_ROUTE_ABSENT', '冻结计划的模型服务路线没有声明。');
+  return profile;
+}
+
+/** The model profile of an ordinary-production Run's frozen route and model (Issue #811). */
+function productionModelProfile(route: ExecutionRouteId, model: string): ProviderModelProfile {
+  const profile = route === LOCAL_DETERMINISTIC_ROUTE ? null : modelProfileFor(route, model);
+  if (profile === null) throw new ExecutionAdmissionError('EXECUTION_ROUTE_ABSENT', '冻结计划的模型没有声明。');
+  return profile;
+}

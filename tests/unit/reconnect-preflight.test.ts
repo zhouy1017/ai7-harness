@@ -71,6 +71,19 @@ function dependencies(state: World): ReconnectPreflightDependencies {
 }
 
 describe('Reconnect Preflight', () => {
+  it('checks each Run own credential, so one missing connection cannot block another frozen connection', async () => {
+    const state = world({ waiting: ['run-a', 'run-b'] });
+    const reads: string[] = [];
+    const deps = dependencies(state);
+    deps.credentialReadiness = async ({ runRecordId }) => {
+      reads.push(runRecordId);
+      return runRecordId === 'run-a' ? 'missing' : 'present';
+    };
+    expect(await reconnectPreflight(deps)).toEqual({ admitted: 1, blocked: 0, waiting: 1 });
+    expect(reads).toEqual(['run-a', 'run-b']);
+    expect(state.admitted).toEqual(['run-b']);
+  });
+
   it('does nothing at all while no Run waits', async () => {
     const state = world({ waiting: [] });
     expect(await reconnectPreflight(dependencies(state))).toEqual({ admitted: 0, blocked: 0, waiting: 0 });
