@@ -21,7 +21,7 @@ import { applyAndReverse, type EditingEffort, type FindingCounts, scoreTextFindi
 export interface PolishObservation {
   readonly outcome: { state: string; outcomeUnknown: boolean };
   readonly findings: FindingCounts;
-  readonly concerns: { met: ReadonlyArray<string>; missed: ReadonlyArray<string> };
+  readonly concerns: { met: ReadonlyArray<string>; missed: ReadonlyArray<string>; unmeasured: ReadonlyArray<string>; excludedOnly: ReadonlyArray<string> };
   readonly checks: { triggered: ReadonlyArray<string> };
   readonly effort: EditingEffort;
   /** The request key the fixture answers this selection by: only the entries under it belong to the case. */

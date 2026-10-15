@@ -54,7 +54,8 @@ export interface CaseMetrics {
   };
   readonly outcome: Readonly<Record<string, unknown>>;
   readonly findings: Readonly<Record<string, number>> | null;
-  readonly concerns: { total: number; met: ReadonlyArray<string>; missed: ReadonlyArray<string> };
+  /** `unmeasured`: in a unit the Run holds no answer for; `excludedOnly`: raised by the model in a quotation the product could not place. */
+  readonly concerns: { total: number; met: ReadonlyArray<string>; missed: ReadonlyArray<string>; unmeasured?: ReadonlyArray<string>; excludedOnly?: ReadonlyArray<string> };
   readonly checks: { total: number; triggered: ReadonlyArray<string> };
   readonly effort: Readonly<Record<string, number | boolean>> | null;
   readonly delivery: { kind: string; recorded: boolean } | null;
@@ -160,7 +161,7 @@ export async function runEditorialCase(request: RunCaseRequest): Promise<CaseMet
   const roots = await createCaseRoots();
   const store = await openStore(roots, codeRoot, deterministic ? fixture : null);
   let owner: ReturnType<typeof deterministicOwner> | null = null;
-  let reportOwner: ReturnType<typeof deterministicOwner> | null = null;
+  const reportOwners: Array<ReturnType<typeof deterministicOwner>> = [];
   try {
     const book = await importManuscript(store, codeRoot, roots, testCase.manuscript, testCase.bookTitle);
     const policy = deterministic ? await resolveSourceCheckoutLaunchPolicy(codeRoot) : replayPolicy(await resolveSourceCheckoutLaunchPolicy(codeRoot, 'developer-live'), testCase);
@@ -204,7 +205,7 @@ export async function runEditorialCase(request: RunCaseRequest): Promise<CaseMet
     }
     const observed = testCase.kind === 'initial-evaluation' ? await initialEvaluationCase(store, owner, book, policy, testCase)
       : testCase.kind === 'readers-report' ? await readersReportCase(store, owner,
-        () => (reportOwner = developerLiveReplayOwner(store, policy, [fixture], roots, testCase.id, tally)), book, policy, testCase)
+        () => { const created = developerLiveReplayOwner(store, policy, [fixture], roots, testCase.id, tally); reportOwners.push(created); return created; }, book, policy, testCase)
         : await writingDraftCase(store, owner, book, policy, testCase);
     return {
       ...base,
@@ -216,7 +217,7 @@ export async function runEditorialCase(request: RunCaseRequest): Promise<CaseMet
     };
   } finally {
     await owner?.dispose();
-    await reportOwner?.dispose();
+    for (const created of reportOwners) await created.dispose();
     store.markCleanShutdown();
     store.close();
     await roots.dispose();

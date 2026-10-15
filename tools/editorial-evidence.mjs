@@ -17,8 +17,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
  * Evidence source. In `--replay fixtures` every case is replayed, so by default each is labelled `fixture`. On the developer host,
  * `--ledger <provider-cache-root>` reads the Provider Test Ledger's metadata lines (never an entry or a claim) and labels each
  * recorded capture by the ledger line of the item that captured it: `fresh` (a transmitted first capture, configuration or input
- * delta, or declared retry) or `cache` (an exact replay); a case whose captures are all fresh is `fresh`. Authored fixtures have no
- * ledger item and stay `fixture`.
+ * delta, or declared retry) or `cache` (an exact replay); a case whose captures are all fresh is `fresh`. A capture made under
+ * another cache root reads `not-in-ledger`. Authored fixtures have no ledger item and stay `fixture`.
  *
  * Output carries counts, states, identities, digests, dates and case ids only — never manuscript or model text — so it is safe in
  * a log. The TypeScript runner (`tests/editorial-cases/runner/`) is bundled with the repository's pinned esbuild into the ignored
@@ -113,7 +113,7 @@ export function captureSource(capture, ledgerItems) {
   const lines = ledgerItems.get(capture.itemId) ?? [];
   if (lines.some((line) => line.outcome === 'transmitted' && FRESH_DECISIONS.has(line.decision))) return 'fresh';
   if (lines.some((line) => line.outcome === 'replayed')) return 'cache';
-  return 'unknown';
+  return lines.length === 0 ? 'not-in-ledger' : 'unknown';
 }
 
 export function caseSource(metrics, ledgerItems) {
@@ -164,7 +164,8 @@ export function markdownTable(report) {
   lines.push('', 'Missed concerns and triggered checks:', '');
   for (const entry of report.cases) {
     if (entry.error !== undefined) continue;
-    lines.push(`- \`${entry.id}\`: missed ${entry.concerns.missed.length === 0 ? 'none' : entry.concerns.missed.map((id) => `\`${id}\``).join(', ')}; triggered ${entry.checks.triggered.length === 0 ? 'none' : entry.checks.triggered.map((id) => `\`${id}\``).join(', ')}`);
+    const ids = (list) => (list === undefined || list.length === 0 ? 'none' : list.map((id) => `\`${id}\``).join(', '));
+    lines.push(`- \`${entry.id}\`: missed ${ids(entry.concerns.missed)} (raised by the model but excluded by the product: ${ids(entry.concerns.excludedOnly)}); unmeasured ${ids(entry.concerns.unmeasured)}; triggered ${ids(entry.checks.triggered)}`);
   }
   return `${lines.join('\n')}\n`;
 }

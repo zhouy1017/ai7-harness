@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { StreamChunk } from '@deepseek-ai/dsh-llm';
@@ -15,7 +15,7 @@ import { AI7_FAILURE_CODES } from '../../../src/service/provider/classification.
 import type { MaterialGuardRefusal } from '../../../src/service/task-material-references.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../../src/shared/protected-secret-identity.js';
 import type { LaunchPolicyProjection } from '../../../src/shared/protocol.js';
-import { buildSyntheticDocx } from '../../support/synthetic-docx.js';
+import { graphemesOf } from '../../../src/shared/mark-anchor.js';
 import { generateSyntheticManuscript } from '../synthetic-manuscripts.mjs';
 
 /**
@@ -60,17 +60,16 @@ export async function openStore(roots: CaseRoots, codeRoot: string, fixture: Res
 }
 
 /**
- * Import the case's manuscript as a new Book through the product's own import, pin the workspace profile at Revision 2 and record
- * a Main Editorial Role connection whose credential was never present, as `tests/support/sample1-baseline.ts` does. A synthetic
- * manuscript is generated into the case's input root first; its DOCX carries no styles part, so its import asks for and receives
- * the Import Degradation Decision an editor would give.
+ * Import exact `sample1` as a new Book through the product's own import, pin the workspace profile at Revision 2 and record a Main
+ * Editorial Role connection whose credential was never present, as `tests/support/sample1-baseline.ts` does.
+ *
+ * A synthetic manuscript is realized on that Book (Commander decision, 2026-10-15): every analysis kind reads only exact sample1's
+ * lineage (ADR 0044), so the generated paragraphs are typed over blocks 1..n through the editor's own journal edits and every
+ * later block is cleared — a tester's edits of sample1, carrying only the in-repo generator's synthetic prose. Such a Book runs on
+ * the provider-free deterministic route only; nothing of it is transmitted or recorded.
  */
-export async function importManuscript(store: EditorialStore, codeRoot: string, roots: CaseRoots, manuscript: CaseManuscript, title: string): Promise<ImportedBook> {
-  let path = join(codeRoot, 'SampleBooks', 'sample1.docx');
-  if (manuscript.source === 'synthetic') {
-    path = join(roots.inputRoot, `${manuscript.id}.docx`);
-    await writeFile(path, buildSyntheticDocx({ paragraphs: generateSyntheticManuscript(manuscript.id).paragraphs }));
-  }
+export async function importManuscript(store: EditorialStore, codeRoot: string, _roots: CaseRoots, manuscript: CaseManuscript, title: string): Promise<ImportedBook> {
+  const path = join(codeRoot, 'SampleBooks', 'sample1.docx');
   const staged = await store.stageSelectedManuscript(randomUUID(), path);
   const choice = staged.targetChoices.find((entry) => entry.kind === 'new-book');
   if (choice === undefined) throw new Error('EDITORIAL_CASE/import-choice-absent');
@@ -86,7 +85,28 @@ export async function importManuscript(store: EditorialStore, codeRoot: string, 
   const reference = randomUUID();
   store.saveModelServiceConnection('编辑价值证据', reference, 'needs-attention');
   store.setModelServiceCredentialState(reference, 'missing');
-  return { bookId: commit.bookId, manuscriptId: commit.manuscriptId, branchId: commit.branchId, revisionId: commit.revisionId };
+  const book = { bookId: commit.bookId, manuscriptId: commit.manuscriptId, branchId: commit.branchId, revisionId: commit.revisionId };
+  if (manuscript.source === 'synthetic') realizeSynthetic(store, book, generateSyntheticManuscript(manuscript.id).paragraphs.map((paragraph) => paragraph.text));
+  return book;
+}
+
+/** The editor's bounded edits, at most 256 graphemes each: clear a block, then type its new words. */
+function realizeSynthetic(store: EditorialStore, book: ImportedBook, paragraphs: ReadonlyArray<string>): void {
+  const blocks = store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
+  if (blocks.length < paragraphs.length) throw new Error('EDITORIAL_CASE/synthetic-too-long');
+  for (const [index, block] of blocks.entries()) {
+    const replace = (from: number, to: number, insertText: string): void => {
+      const window = store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: block.blockId });
+      const current = window.blocks.find((candidate) => candidate.blockId === block.blockId)!;
+      store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: window.revisionId,
+        windowStartBlockId: window.blocks[0]!.blockId, expectedJournalSequence: window.journalSequence,
+        blockId: block.blockId, baseBlockDigest: current.digest, fromGrapheme: from, toGrapheme: to, insertText });
+    };
+    let remaining = graphemesOf(block.text).length;
+    while (remaining > 0) { const from = Math.max(0, remaining - 256); replace(from, remaining, ''); remaining = from; }
+    const words = paragraphs[index];
+    if (words !== undefined) replace(0, 0, words);
+  }
 }
 
 /** The Book's blocks in order, as the analysis ledger reads them; block `n` is paragraph `n` of a case. */

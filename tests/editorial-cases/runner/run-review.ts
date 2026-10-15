@@ -18,7 +18,7 @@ import { applyAndReverse, type EditingEffort, type FindingCounts, scoreTextFindi
 export interface ReviewObservation {
   readonly outcome: { state: string; categories: ReadonlyArray<{ categoryId: string; state: string }>; unitsClosed: number; unitsTotal: number; gaps: ReadonlyArray<string> };
   readonly findings: FindingCounts;
-  readonly concerns: { met: ReadonlyArray<string>; missed: ReadonlyArray<string> };
+  readonly concerns: { met: ReadonlyArray<string>; missed: ReadonlyArray<string>; unmeasured: ReadonlyArray<string>; excludedOnly: ReadonlyArray<string> };
   readonly checks: { triggered: ReadonlyArray<string> };
   readonly effort: EditingEffort;
 }
@@ -70,6 +70,9 @@ export async function runReviewCase(
   let unitsClosed = 0;
   let unitsTotal = 0;
   const gaps: string[] = [];
+  const unreadParagraphs = new Set<number>();
+  const excludedQuotes: Array<{ categoryId: string; quote: string }> = [];
+  const positions = new Map(workingBlocks(store, book).map((block) => [block.blockId, block.position]));
   let listed = 0;
   let located = 0;
   let excluded = 0;
@@ -80,10 +83,22 @@ export async function runReviewCase(
     if (builtIn === null || builtIn === undefined) continue;
     const entry = reviewCategoryEntryForBook(builtIn, database, book.bookId);
     let revision: ReviewCategoryResultSetRevisionProjection | null = null;
+    let manifest: { units: ReadonlyArray<{ ordinal: number; blockIds: ReadonlyArray<string> }> } | null = null;
     try {
-      revision = store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(reviewCategoryContractInput(entry))).resultSetRevision as ReviewCategoryResultSetRevisionProjection | null;
+      const category = store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(reviewCategoryContractInput(entry)));
+      revision = category.resultSetRevision as ReviewCategoryResultSetRevisionProjection | null;
+      manifest = category.coverageManifest;
     } catch { revision = null; }
     if (revision === null) continue;
+    // A unit the Run holds no answer for leaves its own blocks unread: a concern there is unmeasured, not missed.
+    for (const gap of revision.gaps) {
+      if (gap.code === 'out-of-scope') continue;
+      for (const blockId of manifest?.units.find((unit) => unit.ordinal === gap.unitOrdinal)?.blockIds ?? []) {
+        const position = positions.get(blockId);
+        if (position !== undefined) unreadParagraphs.add(position);
+      }
+    }
+    excludedQuotes.push(...revision.excluded.map((finding) => ({ categoryId, quote: finding.quote })));
     unitsClosed += revision.coverage.unitsClosed;
     unitsTotal += revision.coverage.unitsTotal;
     gaps.push(...revision.gaps.map((gap) => `${categoryId}/${gap.unitOrdinal}:${gap.code}`));
@@ -96,7 +111,7 @@ export async function runReviewCase(
   const scored = scoreTextFindings(findings.map((finding) => ({
     key: finding.findingId, categoryId: finding.categoryId, paragraph: finding.blockPosition, from: finding.fromGrapheme, to: finding.toGrapheme,
     quote: finding.quote, replacement: finding.replacement, markId: finding.markId,
-  })), resolution);
+  })), resolution, { unreadParagraphs, excluded: excludedQuotes });
   const effort = await applyAndReverse(store, book, scored, resolution, {
     resolveAnnotation: (finding) => {
       const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);

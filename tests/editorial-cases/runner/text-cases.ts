@@ -83,7 +83,10 @@ export function resolveTextAnchors(store: EditorialStore, book: ImportedBook, te
     if (check.trap !== undefined) {
       const trap = synthetic?.traps.find((candidate) => candidate.id === check.trap);
       if (trap === undefined) throw new Error(`EDITORIAL_CASE/trap-unknown: ${testCase.id}/${check.id}`);
-      return { id: check.id, paragraph: trap.paragraph, from: trap.from, to: trap.to, words: '', corrections: [], category: null };
+      const text = blockText(trap.paragraph, check.id);
+      const words = [...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(text)].slice(trap.from, trap.to).map((part) => part.segment).join('');
+      if (sha256Hex(words) !== trap.spanSha256) throw new Error(`EDITORIAL_CASE/trap-drifted: ${testCase.id}/${check.id}`);
+      return { id: check.id, paragraph: trap.paragraph, from: trap.from, to: trap.to, words, corrections: [], category: null };
     }
     const range = locateOnce(blockText(check.paragraph!, check.id), check.words!, `${testCase.id}/${check.id}`);
     return { id: check.id, paragraph: check.paragraph!, ...range, words: check.words!, corrections: [], category: null };
@@ -91,10 +94,18 @@ export function resolveTextAnchors(store: EditorialStore, book: ImportedBook, te
   return { concerns, checks, blocks };
 }
 
-export function scoreTextFindings(findings: ReadonlyArray<TextFinding>, resolution: TextResolution): {
+/**
+ * Score located findings. Two kinds of open concern are kept apart from a miss: one whose paragraph lies in a unit the Run has no
+ * answer for (`unmeasured`), and one the model raised in a quotation the product could not place (`excludedOnly`: an excluded
+ * finding of the concern's category whose quotation contains the concern's words) — a location loss, not a model miss.
+ */
+export function scoreTextFindings(findings: ReadonlyArray<TextFinding>, resolution: TextResolution, context: {
+  readonly unreadParagraphs?: ReadonlySet<number>;
+  readonly excluded?: ReadonlyArray<{ categoryId: string; quote: string }>;
+} = {}): {
   scored: ReadonlyArray<ScoredFinding>;
   counts: Omit<FindingCounts, 'listed' | 'located' | 'excluded'>;
-  concerns: { met: ReadonlyArray<string>; missed: ReadonlyArray<string> };
+  concerns: { met: ReadonlyArray<string>; missed: ReadonlyArray<string>; unmeasured: ReadonlyArray<string>; excludedOnly: ReadonlyArray<string> };
   checks: { triggered: ReadonlyArray<string> };
 } {
   const scored = findings.map((finding) => {
@@ -112,9 +123,26 @@ export function scoreTextFindings(findings: ReadonlyArray<TextFinding>, resoluti
       unclassified: scored.filter(({ verdict }) => verdict.kind === 'unclassified').length,
       falsePositives: scored.filter(({ verdict }) => verdict.kind === 'false-positive').length,
     },
-    concerns: { met: resolution.concerns.filter((concern) => met.has(concern.id)).map((concern) => concern.id),
-      missed: resolution.concerns.filter((concern) => !met.has(concern.id)).map((concern) => concern.id) },
+    concerns: openConcerns(resolution, met, context),
     checks: { triggered: resolution.checks.filter((check) => triggered.has(check.id)).map((check) => check.id) },
+  };
+}
+
+function openConcerns(
+  resolution: TextResolution,
+  met: ReadonlySet<string>,
+  context: { readonly unreadParagraphs?: ReadonlySet<number>; readonly excluded?: ReadonlyArray<{ categoryId: string; quote: string }> },
+) {
+  const open = resolution.concerns.filter((concern) => !met.has(concern.id));
+  const unmeasured = open.filter((concern) => context.unreadParagraphs?.has(concern.paragraph) === true);
+  const measured = open.filter((concern) => !unmeasured.includes(concern));
+  const excludedOnly = measured.filter((concern) => concern.words.length > 0 && (context.excluded ?? []).some((finding) =>
+    (concern.category === null || concern.category === finding.categoryId) && finding.quote.includes(concern.words)));
+  return {
+    met: resolution.concerns.filter((concern) => met.has(concern.id)).map((concern) => concern.id),
+    missed: measured.map((concern) => concern.id),
+    unmeasured: unmeasured.map((concern) => concern.id),
+    excludedOnly: excludedOnly.map((concern) => concern.id),
   };
 }
 

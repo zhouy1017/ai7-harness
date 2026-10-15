@@ -15,8 +15,12 @@ ground truth, and a finding that matches none of them is reported as *unclassifi
   anchors; no other manuscript text appears here.
 - **Two synthetic manuscripts** — `synthetic-manuscripts.mjs` generates them deterministically from authored public synthetic
   prose and a declared injection table (`synthetic-lighthouse`: injected 错别字与规范用语 defects; `synthetic-museum`: injected
-  体例与格式 defects), each with traps that are correct as written. Developer-live transmits exact `sample1` only, so the
-  synthetic cases run on authored fixtures and measure the harness and the product path, never a model.
+  体例与格式 defects), each with traps that are correct as written. Every analysis kind reads only exact `sample1`'s lineage
+  (ADR 0044), so a synthetic case's Book is an exact `sample1` import whose blocks 1..12 the runner overwrites with the generated
+  paragraphs, and whose later blocks it clears, through the editor's own journal edits — a tester's edits of `sample1` carrying
+  only the generator's prose (Commander decision, 2026-10-15). These cases run on the provider-free deterministic route over the
+  authored fixture `synthetic-editorial-review-authored`: nothing of them is transmitted or recorded, and they measure the
+  harness and the product path, never a model.
 
 ## Files
 
@@ -38,6 +42,7 @@ ground truth, and a finding that matches none of them is reported as *unclassifi
 | `input` | Kind-specific Task input (below) |
 | `fixture` | The model fixture identity `--replay fixtures` replays |
 | `measuredPass` | The kind of the one developer-live pass that produced the fixture (`review`, `polish`, `initial-evaluation`, `readers-report`, `writing-draft`), or `null` when the case replays earlier evidence or an authored fixture |
+| `replay` | `{ "route": "deterministic" }` (the product's fixture route), or `{ "route": "developer-live", "modelQuestions": true | false }` — the developer-live owner whose transport is the product's deterministic adapter, with the v14 model-question wrapper on for a capture made under it and off for an earlier one |
 | `expectedConcerns` | What an editor expects the Task to raise; each is a false-negative check (a *miss* when nothing matches it) |
 | `falsePositiveChecks` | Words or results that must not be raised as problems; a finding that touches one is a *false positive* |
 | `observations` | `acceptance` and `rework`: what the editor would accept as useful, and what would send the result back |
@@ -48,8 +53,9 @@ ground truth, and a finding that matches none of them is reported as *unclassifi
   one-paragraph selection). `material-review` adds `material: "sample1-derived-library-item"`, the #809 library item.
 - `polish`: `selection: { paragraph, start, end }` — the selection runs from the first occurrence of `start` to the end of the
   first occurrence of `end` after it, in that paragraph.
-- `initial-evaluation`: `{}`. `readers-report`: `template` (`author` or `editorial`) and `evaluationRecord: "j11"` (the
-  finalized Evaluation Record the report drafts from, as J-11 writes it).
+- `initial-evaluation`: `{}`. `readers-report`: `template` (`author` or `editorial`), `evaluationRecord: "j11"` (the
+  finalized Evaluation Record the report drafts from, as J-11 writes it) and `evaluationFixture`, the fixture its basis 初评
+  replays from on its own owner.
 - `writing-draft`: `typeId`, `audience`, `channel`, `requirements` (the editor's brief).
 - `clarification`: `fixtures: { normal, ambiguous }` — the same baseline analysis asked normally and with the declared
   ambiguous-focus instruction.
@@ -69,10 +75,12 @@ of its `keywords`. Keyword checks are a coarse proxy; the report says so.
 ## Metrics (per case)
 
 `tools/editorial-evidence.mjs` matches a located finding to a concern when it lies in the concern's paragraph and its range
-overlaps the concern's words; it is **precise** when it covers them. It reports:
+overlaps the concern's words; it is **precise** when it covers them. A false-positive check fires when a finding flags its
+protected words (a 批注) or proposes text in which they no longer stand (a 修改建议). It reports:
 
-- **useful findings** (matched a concern), **unclassified** (matched nothing), **false positives** (touched a check) and
-  **misses** (concerns nothing matched);
+- **useful findings** (matched a concern), **unclassified** (matched nothing), **false positives** (fired a check) and
+  **misses** (concerns nothing matched). Two open concerns are kept apart from a miss: **unmeasured** — in a unit the Run holds
+  no answer for — and **raised but excluded** — the model quoted the concern's words in a finding the product could not place;
 - **location correctness**: listed, located and excluded findings as the product counted them, and precise / matched;
 - **editing effort**: what a simulated editor did with the resulting marks — *adopted* (the proposal already yields an
   acceptable correction), *edited* (the right place but another wording, corrected to the preferred form), *rejected* (a false
@@ -81,6 +89,9 @@ overlaps the concern's words; it is **precise** when it covers them. It reports:
 - for evaluation, report and writing: whether the result closed, which concerns its citations or words met, and whether the
   delivery record was made;
 - **evidence source**: `fixture` by default; with `--ledger <provider-cache-root>` on the developer host, each fixture entry's
-  original Provider Test Ledger item labels it `fresh` (a transmitted first capture or declared delta) or `cache` (an exact
-  replay);
+  original Provider Test Ledger item labels it `fresh` (a transmitted first capture, configuration or input delta) or
+  `cache` (an exact replay), and `not-in-ledger` when it was captured under another cache root;
+- for a developer-live replay, the task contracts the replayed Runs froze and whether every answering capture's contract is
+  among them (`contractsAgree`): the deterministic adapter answers by unit header and digest, so a capture whose contract has
+  since drifted still answers, and the metric says so;
 - model, route, contract digests, capture date, recorded usage and replay elapsed time.

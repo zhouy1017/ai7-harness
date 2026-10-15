@@ -71,9 +71,10 @@ export function overlaps(a: { from: number; to: number }, b: { from: number; to:
 }
 
 /**
- * A located finding meets a false-positive check when it lies in the check's paragraph and its range overlaps the check's words
- * — the editor would have to refuse it — and otherwise meets the first concern of its category whose words it overlaps. A
- * check wins over a concern, because a finding that rewrites protected words is not made useful by also touching a defect.
+ * A located finding meets a false-positive check when it touches the check's protected words in the check's paragraph and either
+ * flags them (a 批注) or proposes text in which they no longer stand (a 修改建议) — the editor would have to refuse it. Otherwise it
+ * meets the first concern of its category whose words it overlaps. A check wins over a concern, because a finding that rewrites
+ * protected words is not made useful by also touching a defect.
  */
 export function classifyFinding(
   finding: TextFinding,
@@ -81,7 +82,8 @@ export function classifyFinding(
   checks: ReadonlyArray<Omit<TextAnchor, 'corrections' | 'category'>>,
 ): FindingVerdict {
   if (finding.paragraph === null) return { kind: 'unclassified' };
-  const check = checks.find((candidate) => candidate.paragraph === finding.paragraph && overlaps(candidate, finding));
+  const check = checks.find((candidate) => candidate.paragraph === finding.paragraph && overlaps(candidate, finding) &&
+    (finding.replacement === null || !finding.replacement.includes(candidate.words)));
   if (check !== undefined) return { kind: 'false-positive', checkId: check.id };
   const concern = concerns.find((candidate) => candidate.paragraph === finding.paragraph && overlaps(candidate, finding) &&
     (candidate.category === null || candidate.category === finding.categoryId));
