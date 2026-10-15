@@ -77,24 +77,6 @@ afterEach(async () => {
 
 vi.setConfig({ hookTimeout: 60_000 });
 
-/**
- * The projection #853 brief revision 5 makes v13 state: each production rule names the editor's unpublished words beside its
- * kind's own categories. Until that revision is restacked under this slice the test states them itself; afterwards this is a
- * no-op.
- */
-function withUnpublished(policy: LaunchPolicyProjection): LaunchPolicyProjection {
-  return {
-    ...policy,
-    providerProcessing: {
-      ...policy.providerProcessing,
-      admittedRules: policy.providerProcessing.admittedRules.map((rule) => ({
-        ...rule,
-        outboundDataCategories: [...new Set([...rule.outboundDataCategories, 'unpublished-metadata', 'unpublished-excerpts', 'unpublished-full-content'] as const)],
-      })),
-    },
-  };
-}
-
 /** The launch the service composes under ordinary-production: the configured binding and the policy it resolves, read live. */
 interface ProductionLaunch {
   readonly launch: LaunchBinding;
@@ -120,7 +102,7 @@ async function productionLaunch(): Promise<ProductionLaunch> {
     launch: undefined as unknown as LaunchBinding,
     async rebind(store) {
       const configured = configuredOf(store);
-      state.policy = withUnpublished(await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured));
+      state.policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured);
       const allowed = allowedProductionBindingOf(configured);
       state.live = allowed === null || configured === null ? null : {
         scope: 'ordinary-production', ...allowed, credentialReference: configured.credentialReference, runBudgetCeiling: 'unset',
@@ -282,6 +264,10 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     const { store, production } = await openProductionStore();
     const reference = await configure(store, production, 'deepseek-open-platform');
     expect(production.live).toMatchObject({ route: 'deepseek-open-platform', model: 'deepseek-flash', credentialReference: reference });
+    // v13 names the editor's unpublished words in every admitted rule (#853 revision 5), which is what the gate admits them by.
+    for (const rule of production.policy.providerProcessing.admittedRules) {
+      expect(rule.outboundDataCategories).toEqual(expect.arrayContaining(['unpublished-metadata', 'unpublished-excerpts', 'unpublished-full-content']));
+    }
     const bookId = await sample1Book(store, 'L2 官方路线');
     const prepared = prepare(store, bookId, production.policy);
     expect(prepared.planEnvelope).toMatchObject({ providerStatus: 'remote-eligible-ordinary-production', dispatchAllowed: true });
