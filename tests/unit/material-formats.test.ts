@@ -620,12 +620,14 @@ describe('what Issue #766 found', () => {
         executions += 1;
         return originalExec.call(this, value);
       });
+      let paragraphs: Paragraphs;
       try {
-        expect(read(bytes, 'HTML').paragraphs).toEqual([[undefined, ['字']]]);
+        paragraphs = read(bytes, 'HTML').paragraphs;
       } finally {
         hasSpy.mockRestore();
         execSpy.mockRestore();
       }
+      expect(paragraphs).toEqual([[undefined, ['字']]]);
       return { lookups, executions };
     };
     const blocks = 10_000;
@@ -673,7 +675,7 @@ describe('what Issue #766 found', () => {
     expect(refusal(withEntity, 'ODT')).toBe('external-entity');
   });
 
-  it('has the pre-check and saxes each refuse a DTD or an entity declaration on its own (#766, item 4)', () => {
+  it('refuses a DTD as external-entity and a bare ENTITY as unreadable with the XML pre-check off (#766, item 4)', () => {
     const part = (declaration: string): Uint8Array => archive({
       mimetype: [strToU8('application/vnd.oasis.opendocument.text'), { level: 0 }],
       'content.xml': strToU8(ODT_CONTENT('<text:p>字</text:p>').replace('<office:document-content', `${declaration}<office:document-content`)),

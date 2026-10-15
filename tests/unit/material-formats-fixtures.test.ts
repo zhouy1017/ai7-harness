@@ -39,6 +39,27 @@ function read(bytes: Uint8Array, format: MaterialTextFormat): Read {
   return { title: result.title, paragraphs: result.paragraphs.map((paragraph) => [paragraph.style, paragraph.lines]) };
 }
 
+const CHAPTER_ONE: Read['paragraphs'] = [
+  ['Heading1', ['第一章']],
+  ['Heading2', ['一、起风']],
+  [undefined, ['夜里风从海面上慢慢地吹过来，[1]灯塔的窗口亮着。']],
+  [undefined, ['守灯人合上书，说：“明天要涨潮。”']],
+  [undefined, ['图一　灯塔的外形']],
+  ['Heading3', ['灯塔的第一盏灯']],
+  [undefined, ['第一盏灯是在春天点起来的。', '它很小，却一直没有熄过。']],
+  [undefined, ['层层嵌套的行内元素里的字也被读到。']],
+  [undefined, ['准备油和灯芯']],
+  [undefined, ['擦亮玻璃']],
+  [undefined, ['先擦里面']],
+  [undefined, ['再擦外面']],
+  [undefined, ['时辰']],
+  [undefined, ['潮位']],
+  [undefined, ['清晨']],
+  [undefined, ['低']],
+  [undefined, ['黄昏']],
+  [undefined, ['高']],
+];
+
 describe('the synthetic EPUB', () => {
   const book = treeArchive('epub');
 
@@ -60,24 +81,7 @@ describe('the synthetic EPUB', () => {
         ['Heading1', ['前言']],
         [undefined, ['这是一本合成的样书，它只用来检验阅读器。']],
         [undefined, ['书里的人物、地名和句子都是编出来的，与任何真实稿件无关。']],
-        ['Heading1', ['第一章']],
-        ['Heading2', ['一、起风']],
-        [undefined, ['夜里风从海面上慢慢地吹过来，[1]灯塔的窗口亮着。']],
-        [undefined, ['守灯人合上书，说：“明天要涨潮。”']],
-        [undefined, ['图一　灯塔的外形']],
-        ['Heading3', ['灯塔的第一盏灯']],
-        [undefined, ['第一盏灯是在春天点起来的。', '它很小，却一直没有熄过。']],
-        [undefined, ['层层嵌套的行内元素里的字也被读到。']],
-        [undefined, ['准备油和灯芯']],
-        [undefined, ['擦亮玻璃']],
-        [undefined, ['先擦里面']],
-        [undefined, ['再擦外面']],
-        [undefined, ['时辰']],
-        [undefined, ['潮位']],
-        [undefined, ['清晨']],
-        [undefined, ['低']],
-        [undefined, ['黄昏']],
-        [undefined, ['高']],
+        ...CHAPTER_ONE,
         ['Heading1', ['第二章']],
         [undefined, ['清晨，海面平静。她把昨夜的记录抄在本子上。']],
         [undefined, ['“灯不灭，船就不会迷路。”']],
@@ -89,16 +93,11 @@ describe('the synthetic EPUB', () => {
     });
   });
 
-  it('reads a chapter on its own as HTML, as the web-page reader does, with the same headings and a skipped navigation', () => {
+  it('reads the complete HTML chapter past absent images, preserving blocks and headings and excluding hidden text', () => {
     const chapter = readFileSync(join(ROOT, 'epub/OEBPS/text/chapter01.xhtml'));
     const { title, paragraphs } = read(chapter, 'HTML');
     expect(title).toBe('第一章');
-    expect(paragraphs.slice(0, 3)).toEqual([
-      ['Heading1', ['第一章']],
-      ['Heading2', ['一、起风']],
-      [undefined, ['夜里风从海面上慢慢地吹过来，[1]灯塔的窗口亮着。']],
-    ]);
-    expect(paragraphs.flatMap(([, lines]) => lines).join('')).not.toMatch(/隐藏|脚本里/u);
+    expect(paragraphs).toEqual(CHAPTER_ONE);
     const navigation = read(readFileSync(join(ROOT, 'epub/OEBPS/nav.xhtml')), 'HTML').paragraphs;
     // The navigation document is a page of its own to the HTML reader: its lists read as one paragraph per item, the
     // landmarks hidden. (As part of the EPUB it is left out.)
@@ -156,7 +155,7 @@ describe('the synthetic RTF', () => {
     expect(text).toMatch(/\{\\stylesheet/u);
   });
 
-  it('reads headings, GBK and Unicode text, hidden runs, fields and rows, and not headers, footers, notes, pictures or tables', () => {
+  it('reads headings, GBK and Unicode text, field results and table rows, excluding hidden runs, headers, footers, notes and pictures', () => {
     expect(read(sample, 'RTF')).toEqual({
       title: 'Synthetic RTF: Harbour and Bell Tower',
       paragraphs: [
