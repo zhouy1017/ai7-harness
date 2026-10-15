@@ -1,7 +1,7 @@
 import { PlatformToolSession, platformToolModelProfile } from '../provider/platform-tool-session.js';
 import { ResearchSnapshotCache } from '../provider/research-snapshot-cache.js';
 import { platformToolsFromProjection } from '../provider/search-service.js';
-import { searchBackend } from '../provider/search-backends/index.js';
+import { searchBackend, searchBackendConfigurationDigest } from '../provider/search-backends/index.js';
 import { admitTicketHost } from '../../shared/network-denial.js';
 import { randomUUID } from 'node:crypto';
 import { backgroundAnalysisShare, backgroundShareFullReason } from '../background-analysis-enrollments.js';
@@ -1461,7 +1461,7 @@ export class BaselineAnalysisExecutionOwner {
         const tools = platformToolsFromProjection(selectedRule);
         if (tools === null) throw new ExecutionAdmissionError('PLATFORM_TOOLS_NOT_NAMED', '本任务的规则未声明联网工具。');
         const backend = searchBackend(facts.webToolsBackend.backendId);
-        if (backend.declaration.host !== facts.webToolsBackend.host || facts.searchCredentialReference === undefined) throw new ExecutionAdmissionError('PLATFORM_TOOL_BACKEND_DRIFT', '冻结的联网检索配置无效。');
+        if (backend.declaration.host !== facts.webToolsBackend.host || searchBackendConfigurationDigest(backend.declaration.id) !== facts.webToolsBackend.configurationDigest || facts.searchCredentialReference === undefined) throw new ExecutionAdmissionError('PLATFORM_TOOL_BACKEND_DRIFT', '冻结的联网检索配置无效。');
         bindingFacts = { ...bindingFacts, platformTools: tools, searchBackend: { backendId: facts.webToolsBackend.backendId,
           host: facts.webToolsBackend.host, endpoint: backend.declaration.endpoint!, credentialSlot: backend.declaration.credentialSlot, credentialReference: facts.searchCredentialReference } };
         const snapshots = cache === null ? null : new ResearchSnapshotCache((live as DeveloperLiveRuntime).launch.providerCacheRoot);

@@ -451,7 +451,7 @@ export const MODEL_CLARIFICATION_SCHEMA_VERSION = 73;
 export const SEARCH_BACKEND_CONNECTIONS_SQL = `CREATE TABLE search_backend_connections (
   backend_id TEXT PRIMARY KEY CHECK(backend_id IN ('search-tinyfish', 'search-deepseek', 'search-brave', 'search-parallel', 'search-bochaai')),
   credential_reference TEXT UNIQUE CHECK(credential_reference IS NULL OR length(credential_reference) = 36),
-  credential_operation_state TEXT NOT NULL CHECK(credential_operation_state IN ('ready', 'missing', 'needs-attention')),
+  credential_operation_state TEXT NOT NULL CHECK(credential_operation_state IN ('ready', 'missing', 'needs-attention')) CHECK(credential_reference IS NOT NULL OR credential_operation_state = 'missing'),
   selected INTEGER UNIQUE CHECK(selected IS NULL OR selected = 1),
   selected_at TEXT NOT NULL
 ) STRICT`;

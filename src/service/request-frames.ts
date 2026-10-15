@@ -366,6 +366,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'getImportStartup':
     case 'listPriorWork':
     case 'getModelServiceStoredState':
+    case 'getSearchBackendSettings':
     // 待我处理 (Issue #424) reads across every Book, so it names none.
     case 'inspectGlobalAttention':
     case 'runReconnectPreflight':
@@ -421,6 +422,20 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           (input.protocol === 'http' || input.protocol === 'https') && isBoundedString(input.hostPort, 300))) {
         throw new ProtocolError(tentativeId);
       }
+      break;
+    }
+    case 'selectSearchBackend':
+    case 'probeSearchBackend':
+    case 'removeSearchBackendCredential': {
+      const input = requireInput(value.input, ['backendId'], tentativeId);
+      if (!isBoundedString(input.backendId, 80) || !/^search-[a-z][a-z0-9-]*$/u.test(input.backendId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'saveSearchBackendCredential': {
+      const input = requireInput(value.input, ['backendId', 'credentialReference', 'credentialOperationState'], tentativeId);
+      if (!isBoundedString(input.backendId, 80) || !/^search-[a-z][a-z0-9-]*$/u.test(input.backendId) ||
+          !(input.credentialReference === null || (isBoundedString(input.credentialReference, 36) && UUID_PATTERN.test(input.credentialReference))) ||
+          !['ready', 'missing', 'needs-attention'].includes(input.credentialOperationState as string)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'saveModelServiceConnection': {

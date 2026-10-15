@@ -1900,7 +1900,7 @@ async function run(): Promise<void> {
         // Provider-free settings probe: the same adapter reads a synthetic public title and URL; no credential, host or native fetch.
         const hit = { title: 'World Book and Copyright Day', name: 'World Book and Copyright Day', url: 'https://www.unesco.org/en/days/world-book-and-copyright' };
         const hits = adapter.readResults(200, 'application/json', JSON.stringify({ results: [hit], web: { results: [hit] }, webPages: { value: [hit] }, content: [{ type: 'web_search_tool_result', content: [{ ...hit, type: 'web_search_result' }] }] }));
-        return { backendId: id, reachable: true, latencyMs: 0, resultCount: hits?.length ?? 0, results: hits ?? [], failure: null };
+        return { backendId: id, reachable: true, latencyMs: 0, resultCount: hits?.length ?? 0, results: (hits ?? []).slice(0, 3).map((hit) => ({ title: hit.title, url: hit.url })), failure: null };
       }
       if (launchForm.trustedOperationalScope !== 'developer-live' && launchForm.trustedOperationalScope !== 'ordinary-production') throw new StoreError('SEARCH_PROBE_NOT_ADMITTED', '当前环境不允许测试检索。');
       const rule = launchPolicy.providerProcessing.admittedRules.find((entry) => 'platformTools' in entry && entry.platformTools !== null);

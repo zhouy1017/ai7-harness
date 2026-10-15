@@ -3374,7 +3374,7 @@ function initializeSearchBackendSchema(db: DatabaseSync): void {
   const fold = (sql: string): string => sql.trim().replace(/\s+/gu, ' ');
   if (row !== undefined) {
     requireStore(fold(asString(row.sql)) === fold(SEARCH_BACKEND_CONNECTIONS_SQL), 'SCHEMA_INVALID', '联网检索连接表结构不兼容。');
-    requireStore(asNumber((db.prepare('SELECT count(*) total FROM search_backend_connections').get() as SqlRow).total) === 5, 'SCHEMA_INVALID', '联网检索连接记录不完整。');
+    requireStore(asNumber((db.prepare('SELECT count(*) total FROM search_backend_connections').get() as SqlRow).total) === 5 && db.prepare('SELECT 1 FROM search_backend_connections WHERE selected = 1').all().length === 1, 'SCHEMA_INVALID', '联网检索连接记录不完整。');
     return;
   }
   requireStore(asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version) < SEARCH_BACKEND_SCHEMA_VERSION, 'SCHEMA_INVALID', '联网检索连接表缺失。');

@@ -2373,6 +2373,13 @@ export class BaselineAnalysisStore {
     for (const component of required) {
       requireAnalysis(records[component] !== undefined, 'ANALYSIS_RECORD_INVALID', '任务计划记录图不完整。');
     }
+    const envelope = records['plan-envelope'] as Record<string, unknown>;
+    if (envelope.webToolsBackendDigest !== undefined) {
+      const backend = records['web-tools-backend'];
+      const provider = records['provider-resolution-plan'] as Record<string, unknown>;
+      requireAnalysis(isRecord(backend) && canonicalRecord(backend).digest === envelope.webToolsBackendDigest && canonicalJson(backend) === canonicalJson(provider.webToolsBackend),
+        'ANALYSIS_RECORD_INVALID', '联网检索冻结记录与计划信封不一致。');
+    }
     return records;
   }
 
