@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -218,7 +219,15 @@ describe('cross-deliverable participants and revision lineage', () => {
     const doc = await create();
     await finalize(doc.documentId);
     const definition = reviewCategoryKindDefinition(reviewCategoryContractInput(entry()));
-    const v11 = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
+    const selected = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
+    const legacy = JSON.parse(await readFile(join(roots.codeRoot, 'docs/policies/provider-processing-policy.v11.json'), 'utf8')) as {
+      decision: { providerAllowRules: Array<{ ruleId: string; allowedTaskKinds: string[]; allowedOutboundDataCategories: string[] }> };
+    };
+    const v11: LaunchPolicyProjection = { ...selected, providerProcessing: { ...selected.providerProcessing, version: 'v11',
+      admittedRules: selected.providerProcessing.admittedRules!.map((rule) => {
+        const previous = legacy.decision.providerAllowRules.find((candidate) => candidate.ruleId === rule.ruleId)!;
+        return { ...rule, taskKinds: previous.allowedTaskKinds, outboundDataCategories: rule.outboundDataCategories.filter((category) => previous.allowedOutboundDataCategories.includes(category)) };
+      }) } };
     expect(liveKindAdmission(v11, definition, DEVELOPER_LIVE_POLICY_BINDING)).toBeNull();
     const allowed = await syntheticPolicy();
     expect(liveKindAdmission(allowed, definition, DEVELOPER_LIVE_POLICY_BINDING)).not.toBeNull();

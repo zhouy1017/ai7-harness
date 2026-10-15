@@ -52,7 +52,7 @@ export function liveKindRule(
       policy.providerProcessing.decision !== 'eligible-only' ||
       policy.providerProcessing.authorizedLiveTransmissionCount !== 'bounded-by-run') return null;
   const rules = (policy.providerProcessing.admittedRules ?? []).filter((rule) =>
-    rule.taskKinds.includes(kind) && requiredCategories.every((category) => rule.outboundDataCategories.some((named) => named === category)));
+    rule.taskKinds.includes(kind) && requiredCategories.every((category) => rule.outboundDataCategories.includes(category)));
   return rules.length === 1 ? rules[0]! : null;
 }
 

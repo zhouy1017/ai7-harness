@@ -94,7 +94,7 @@ export type EgressCeilingState = 'unset' | 'within' | 'reached' | 'not-applicabl
  * Processing v11 names (Issue #841) never stand as a binding's own category: a contract that
  * carries one beside the SampleBook names it in `contractCategories`, sent remotely only under a rule naming each (#429).
  */
-export type OutboundDataCategory = OutboundDataCategoryId | 'editorial-deliverable-excerpt';
+export type OutboundDataCategory = OutboundDataCategoryId;
 
 /** The categories that carry the editor's own manuscript words: never public, so a remote route needs a rule naming each. */
 const MANUSCRIPT_EXCERPT_CATEGORIES: ReadonlySet<OutboundDataCategory> = new Set(['editor-selected-manuscript-excerpt', 'manuscript-conflict-region-excerpt']);
