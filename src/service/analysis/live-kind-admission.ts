@@ -162,7 +162,7 @@ export function liveKindAdmission(
   if (wrapped.clarificationBase !== undefined) {
     const expected = withModelClarification(wrapped.clarificationBase);
     const rule = liveKindRule(policy, definition.kind);
-    if ((rule as { clarificationQuestionAllowed?: boolean } | null)?.clarificationQuestionAllowed !== true ||
+    if (rule?.clarificationQuestionAllowed !== true ||
         expected.promptContractDigest !== definition.promptContractDigest || expected.systemPrompt !== definition.systemPrompt) return null;
     return liveKindAdmission(policy, wrapped.clarificationBase, binding);
   }

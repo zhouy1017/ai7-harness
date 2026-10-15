@@ -342,7 +342,7 @@ async function loadSample1Owners() {
         "export { buildCrossUnitMessage } from './src/service/analysis/cross-unit-contract.ts';",
         "export { buildAssuranceSamplingMessage, drawAssuranceSample, assuranceSamplingTurns } from './src/service/analysis/assurance-sampling-contract.ts';",
         "export { baselineAnalysisKindDefinition } from './src/service/analysis/kind-definition.ts';",
-        "export { withModelClarification, buildClarificationAnswerMessage } from './src/service/provider/clarification-contract.ts';",
+        "export { withModelClarification, withAmbiguousClarificationValidation, buildClarificationAnswerMessage } from './src/service/provider/clarification-contract.ts';",
         "export { reviewCategoryKindDefinition } from './src/service/review/review-category-kind.ts';",
         "export { reviewCategoryContract, reviewCategoryContractDigest } from './src/service/review/review-category-contract.ts';",
         "export { reviewCategoryContractInput } from './src/service/review/category-configuration.ts';",
@@ -441,8 +441,8 @@ export async function verifySample1Capture(request, selection, parsed) {
     const manifest = plan('coverage-manifest');
     const envelope = plan('plan-envelope');
     const clarification = /^AI7 单元指令\/2 · 请求摘要 [0-9a-f]{64}$/mu.test(parsed.unitMessage);
-    if (clarification) {
-      const wrapped = owners.withModelClarification(owners.baselineAnalysisKindDefinition());
+    for (const wrap of [owners.withModelClarification, owners.withAmbiguousClarificationValidation]) {
+      const wrapped = wrap(owners.baselineAnalysisKindDefinition());
       contracts.push({ selection: 'current', prompt: { systemPrompt: wrapped.systemPrompt }, digest: wrapped.promptContractDigest });
     }
     let contract = contracts.find((candidate) => candidate.digest === selection.taskPromptContractDigest);
@@ -482,7 +482,8 @@ export async function verifySample1Capture(request, selection, parsed) {
     if (contract === undefined && kind === 'writing') {
       // #810: a writing contract is the exact input its Task froze, its 范例 rebuilt from their pinned delivered revisions — never
       // today's metadata or words. Material words must also prove their exact sample1 source and frozen index pins.
-      const snapshotRow = database.prepare('SELECT canonical_json, sha256, prompt_contract_sha256 FROM writing_tasks WHERE task_intent_id = ?').get(request.sample1Task);
+      const snapshotRow = database.prepare('SELECT canonical_json, sha256, prompt_contract_sha256 FROM writing_tasks WHERE task_intent_id = ? AND prompt_contract_sha256 = ?')
+        .get(request.sample1Task, selection.taskPromptContractDigest);
       const snapshot = checked(snapshotRow);
       if (snapshot.taskIntentId !== request.sample1Task) fail();
       const readings = snapshot.materialSources === undefined ? [] : materialReadings(snapshot.materialSources);
@@ -513,7 +514,8 @@ export async function verifySample1Capture(request, selection, parsed) {
       } else {
         definition = kind === 'readers-report' ? owners.readersReportKindDefinition(snapshot.input) : owners.evaluationRewriteKindDefinition(snapshot.input);
       }
-      if (definition.kind !== kind || definition.promptContractDigest !== rows[0].prompt_contract_sha256) fail();
+      if (definition.kind !== kind || (definition.promptContractDigest !== rows[0].prompt_contract_sha256 &&
+          owners.withModelClarification(definition).promptContractDigest !== rows[0].prompt_contract_sha256)) fail();
       definition = wrapMaterials(definition);
       contract = { prompt: { systemPrompt: definition.systemPrompt }, digest: definition.promptContractDigest };
     } else if (contract === undefined) {
@@ -551,8 +553,10 @@ export async function verifySample1Capture(request, selection, parsed) {
       definition = wrapMaterials(definition);
       contract = { prompt: { systemPrompt: definition.systemPrompt }, digest: definition.promptContractDigest };
     } else definition = owners.baselineAnalysisKindDefinition(contract.selection);
-    if (clarification) {
-      definition = owners.withModelClarification(definition);
+    const wrapped = owners.withModelClarification(definition);
+    const variant = owners.withAmbiguousClarificationValidation(definition);
+    if (wrapped.promptContractDigest === selection.taskPromptContractDigest || variant.promptContractDigest === selection.taskPromptContractDigest) {
+      definition = wrapped.promptContractDigest === selection.taskPromptContractDigest ? wrapped : variant;
       contract = { prompt: { systemPrompt: definition.systemPrompt }, digest: definition.promptContractDigest };
     }
     if (contract.digest !== selection.taskPromptContractDigest || parsed.carriedMessageCount !== 1 ||

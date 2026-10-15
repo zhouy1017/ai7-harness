@@ -785,7 +785,7 @@ export class BaselineAnalysisExecutionOwner {
       interrupted: false,
       cancelRequested: options.cancel === true,
       pauseRequested: false,
-      resumableOnInterrupt: ledger.definition.kind === BASELINE_ANALYSIS_KIND || ledger.definition.clarificationBase !== undefined,
+      resumableOnInterrupt: ledger.definition.kind === BASELINE_ANALYSIS_KIND,
       done: Promise.resolve(),
     };
     this.#active.set(runRecordId, active);
@@ -1584,7 +1584,7 @@ export class BaselineAnalysisExecutionOwner {
       // reader sees the count move and nothing in flight.
       const keepSettled = (unit: CoverageManifestUnitProjection, wallMs: number): void => {
         const settledRecord = unitRecords.find((record) => record.unitOrdinal === unit.ordinal);
-        if (active.resumableOnInterrupt && settledRecord !== undefined) {
+        if ((active.resumableOnInterrupt || definition.clarificationBase !== undefined) && settledRecord !== undefined) {
           ledger.recordUnitCheckpoint({ runRecordId: facts.runRecordId, attemptId, unit: settledRecord, observation: unitObservations.get(unit.ordinal) ?? null });
         }
         active.progress.unitsSettled += 1;
@@ -1640,10 +1640,10 @@ export class BaselineAnalysisExecutionOwner {
           const question = parseModelClarification(candidate.text);
           if (question !== null) {
             acceptedOutputDigests.add(candidate.digest);
-            const rule = live === null ? null : liveKindRule(policy, definition.kind);
+            const origin = ledger.inspect(facts.manifest.manuscript.bookId).authorization?.origin === 'background-analysis-enrollment' ? 'background' : 'foreground';
+            const rule = live === null ? null : liveKindRule(policy, definition.kind, [], origin);
             const allowed = live === null ? definition.clarificationBase !== undefined
-              : (rule as { clarificationQuestionAllowed?: boolean; clarificationTimeoutHours?: number } | null)?.clarificationQuestionAllowed === true &&
-                (rule as { clarificationTimeoutHours?: number }).clarificationTimeoutHours === 24;
+              : rule?.clarificationQuestionAllowed === true && rule.clarificationTimeoutHours === 24;
             if (!allowed || ledger.clarificationsOf(facts.runRecordId).some((entry) => entry.unitOrdinal === unit.ordinal)) {
               gap('contract-invalid', allowed ? '同一阅读范围只能提问一次；模型再次提问，记为契约无效缺口。' : '该任务的准许规则不允许模型提问，记为契约无效缺口。');
               keepSettled(unit, s.wallMs);

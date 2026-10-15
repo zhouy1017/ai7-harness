@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { clarificationPlanBaseDigest } from '../provider/clarification-contract.js';
 import { TASK_MATERIAL_LIVE_UNAVAILABLE, taskMaterialSources, type TaskMaterialBoundary, type TaskMaterialReading, type MaterialGuardRefusal } from '../task-material-references.js';
 import { liveMaterialRule } from '../analysis/live-kind-admission.js';
 import { reviewDeliverables, REVIEW_DELIVERABLE_CHANGED } from '../production-documents.js';
@@ -1543,7 +1544,9 @@ export class ReviewRunStore {
     const references = taskMaterialSources(execution.materialReferences);
     const envelope = frozen.components['plan-envelope'] as Record<string, unknown>;
     const intent = this.#db.prepare('SELECT book_id FROM analysis_task_intents WHERE task_intent_id = ?').get(category.task.taskIntentId) as SqlRow;
-    return this.#ledgers.ledgerOf(category.entry, { bookId: text(intent.book_id), references }, String(envelope.promptContractDigest));
+    const materialPromptDigest = clarificationPlanBaseDigest(execution, envelope);
+    requireReview(materialPromptDigest !== null, 'REVIEW_RECORD_INVALID', '任务澄清指令的基础契约与计划不一致。');
+    return this.#ledgers.ledgerOf(category.entry, { bookId: text(intent.book_id), references }, materialPromptDigest);
   }
 
   #materialReadings(snapshot: RunSnapshot): ReadonlyArray<TaskMaterialReading> {

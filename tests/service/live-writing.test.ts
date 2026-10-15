@@ -291,6 +291,9 @@ describe('reference-free writing on the Go execution path (#810)', () => {
   });
 
   it('replays the recorded live draft and revision through the same contracts, outcomes and usage (#810 evidence)', async () => {
+    // Historical capture: retain its original instruction rather than answering a new /2 question with old output.
+    const retained = withRuleFor(policy, 'writing', { clarificationQuestionAllowed: false, clarificationTimeoutHours: null });
+    store.baselineAnalysisLedger.bindLaunch({ ...store.baselineAnalysisLedger.launch, policy: retained });
     // Recorded units and syntheses answer; both reflection turns ended outcome-unknown live and are answered synthetically
     // here. This regression sends nothing and asserts no editorial quality.
     const draftFixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-recorded-v41-writing-draft');

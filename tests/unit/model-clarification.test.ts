@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { clarificationGraphemes, parseModelClarification } from '../../src/service/analysis/clarifications.js';
 import { baselineAnalysisKindDefinition } from '../../src/service/analysis/kind-definition.js';
-import { withModelClarification, CLARIFICATION_INSTRUCTION } from '../../src/service/provider/clarification-contract.js';
+import { withModelClarification, withAmbiguousClarificationValidation, CLARIFICATION_INSTRUCTION } from '../../src/service/provider/clarification-contract.js';
 import { liveKindAdmission } from '../../src/service/analysis/live-kind-admission.js';
 
 describe('model clarification contract alternative', () => {
@@ -31,5 +32,16 @@ describe('model clarification contract alternative', () => {
     expect(withModelClarification(wrapped)).toBe(wrapped);
     // A wrapped non-baseline contract never bypasses the single admitted-rule check.
     expect(liveKindAdmission(undefined, wrapped, { route: 'none', endpoint: '', model: '', credentialSlot: '' })).toBeNull();
+  });
+  it('keeps the declared ambiguous retry separate from every product launch selection', () => {
+    const base = baselineAnalysisKindDefinition();
+    const normal = withModelClarification(base);
+    const variant = withAmbiguousClarificationValidation(base);
+    expect(variant.promptContractDigest).not.toBe(normal.promptContractDigest);
+    expect(variant.systemPrompt).toContain('本次分析的阅读重点尚未决定：人物或事件');
+    expect(normal.systemPrompt).not.toContain('本次分析的阅读重点尚未决定：人物或事件');
+    for (const path of ['src/service/analysis/baseline-analysis-store.ts', 'src/service/index.ts', 'src/main/application.ts', 'tools/start-built.mjs']) {
+      expect(readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8')).not.toContain('withAmbiguousClarificationValidation');
+    }
   });
 });

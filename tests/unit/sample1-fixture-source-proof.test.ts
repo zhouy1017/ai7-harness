@@ -22,7 +22,7 @@ import { readersReportKindDefinition } from '../../src/service/evaluation/reader
 import { evaluationRewriteKindDefinition } from '../../src/service/evaluation/evaluation-rewrite-kind.js';
 import { BUILTIN_EVALUATION_PROFILE, evaluationProfileDigest } from '../../src/service/evaluation-records.js';
 import { baselineAnalysisKindDefinition, type AnalysisKindDefinition } from '../../src/service/analysis/kind-definition.js';
-import { withModelClarification, buildClarificationAnswerMessage } from '../../src/service/provider/clarification-contract.js';
+import { withModelClarification, withAmbiguousClarificationValidation, buildClarificationAnswerMessage } from '../../src/service/provider/clarification-contract.js';
 import { WritingTasks } from '../../src/service/writing-tasks.js';
 import { buildWritingUnitMessage, buildWritingSynthesisMessage, writingContract, writingContractDigest, type WritingContractInput } from '../../src/service/writing/writing-contract.js';
 import type { CoverageManifestProjection } from '../../src/shared/protocol.js';
@@ -79,8 +79,8 @@ describe('exact sample1 fixture exemption source proof', () => {
     expect(() => tool.redactUnitResultText(text, own, own)).toThrowError(/FIXTURE_GEN\/manuscript-echo/);
   });
 
-  it('proves instruction /2 and its one recorded answer turn, refusing a changed answer', async () => {
-    const definition = withModelClarification(baselineAnalysisKindDefinition());
+  it.each(['normal', 'ambiguous'] as const)('proves %s instruction /2 and its one recorded answer turn, refusing a changed answer', async (variant) => {
+    const definition = (variant === 'normal' ? withModelClarification : withAmbiguousClarificationValidation)(baselineAnalysisKindDefinition());
     const digest = definition.promptContractDigest;
     const row = database.prepare("SELECT canonical_json FROM analysis_plan_records WHERE component='coverage-manifest'").get()!;
     const manifest = JSON.parse(String(row.canonical_json)) as CoverageManifestProjection;
@@ -259,6 +259,14 @@ describe('exact sample1 fixture exemption source proof', () => {
       }
       await freeze(kind, definition, frozen, { materialReferences: [] });
       await expect(tool.verifySample1Capture(request, chosen, unit)).rejects.toMatchObject({ code: 'FIXTURE_GEN/sample1-source-unproved' });
+    });
+
+    it.each(Object.keys(kinds) as Array<keyof typeof kinds>)('proves the %s clarification wrapper from its frozen input', async (kind) => {
+      const { definition: base, frozen } = kinds[kind];
+      const definition = withModelClarification(base);
+      const { manifest, byId, digest } = await freeze(kind, definition, frozen);
+      const unit = capture(definition.systemPrompt, definition.buildUnitMessage(manifest.units[0]!, manifest.units.length, byId), digest);
+      expect(await tool.verifySample1Capture(request, { ...selection, taskPromptContractDigest: digest }, unit)).toBe(true);
     });
 
     it('proves an evaluation synthesis capture from the closed units the revision kept', async () => {

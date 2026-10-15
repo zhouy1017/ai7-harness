@@ -1082,10 +1082,10 @@ export class BaselineAnalysisStore {
 
   #refreshClarificationDefinition(): void {
     const launch = this.#launch;
-    const rules = launch.policy?.providerProcessing.admittedRules?.filter((rule) => rule.taskKinds.includes(this.#definition.kind)) ?? [];
-    // Absent terms deny. The policy owner declares these fields in slice 4d; this local structural mirror is temporary.
+    const rule = liveKindRule(launch.policy, this.#definition.kind);
+    // The one origin-qualified admitted rule owns eligibility; missing terms deny.
     if (this.#route?.fixtureIdentity.startsWith('sample1-model-clarification') === true ||
-        (rules.length === 1 && (rules[0] as { clarificationQuestionAllowed?: boolean }).clarificationQuestionAllowed === true)) {
+        rule?.clarificationQuestionAllowed === true) {
       this.#definition = withModelClarification(this.#definition);
     } else this.#definition = this.#definition.clarificationBase ?? this.#definition;
   }
@@ -3572,15 +3572,19 @@ export class BaselineAnalysisStore {
     const samplingPin = assurance !== null && assurance.promptContractDigest !== ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST
       ? { assurancePromptContractDigest: assurance.promptContractDigest }
       : {};
+    const clarificationPin = this.#definition.clarificationBase === undefined ? {} : {
+      clarificationBasePromptContractDigest: this.#definition.clarificationBase.promptContractDigest,
+    };
     const records: Record<string, { json: string; digest: string }> = {
       'manuscript-pin': canonicalRecord(manuscriptPin),
       'artifact-pin': canonicalRecord(artifactPin),
       'run-source-scope': canonicalRecord(sourceScope),
       'coverage-manifest': canonicalRecord(manifest),
       'provider-resolution-plan': canonicalRecord(providerPlan),
-      'execution-plan': canonicalRecord(this.#definition.materialReferences === undefined ? { ...executionPlan, ...samplingPin } : {
+      'execution-plan': canonicalRecord(this.#definition.materialReferences === undefined ? { ...executionPlan, ...samplingPin, ...clarificationPin } : {
         ...executionPlan,
         ...samplingPin,
+        ...clarificationPin,
         materialReferences: this.#definition.materialReferences.sources,
         materialReferenceBasePromptContractDigest: this.#definition.materialReferences.basePromptContractDigest,
       }),

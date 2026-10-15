@@ -615,6 +615,7 @@ import {
   type BackgroundAnalysisEnrollmentRecord,
 } from './background-analysis-enrollments.js';
 import { initializeClarificationSchema } from './analysis/clarifications.js';
+import { clarificationPlanBaseDigest } from './provider/clarification-contract.js';
 import { initializeReimportGroupSchema } from './reimport-group-ledger.js';
 import { initializeProductionDocumentDeliverySchema, initializeProductionDocumentSchema } from './production-document-ledger.js';
 import {
@@ -1594,6 +1595,14 @@ function unconfirmedSurfaceOf(kind: string): TaskPlanKind | null {
   if (kind === EVALUATION_REWRITE_KIND) return 'evaluation-rewrite';
   if (kind === WRITING_KIND) return 'writing';
   return null;
+}
+
+/** Material readers rebuild the exact inner contract before the optional clarification instruction is restored. */
+function unwrappedPlanPromptDigest(execution: Record<string, unknown>, envelope: Record<string, unknown>): string {
+  const base = clarificationPlanBaseDigest(execution, envelope);
+  requireStore(base !== null,
+  'ANALYSIS_RECORD_INVALID', '任务澄清指令的基础契约与计划不一致。');
+  return base;
 }
 
 /** What 保留为缺口 names: the digest of exactly the outcomes listed, in key order (Issue #757). */
@@ -5187,7 +5196,7 @@ export class EditorialStore {
           materials = { bookId: latestForBook, references: this.#analysisCall(() => taskMaterialSources(pins)) };
           const envelope = components.get('plan-envelope');
           requireStore(envelope !== undefined, 'ANALYSIS_RECORD_INVALID', '任务计划记录不完整。');
-          frozenPromptDigest = asString(envelope.promptContractDigest as SqlRow[string]);
+          frozenPromptDigest = unwrappedPlanPromptDigest(components.get('execution-plan')!, envelope);
         }
       }
     }
@@ -8881,12 +8890,13 @@ export class EditorialStore {
     requireStore(row !== undefined && typeof execution.materialReferenceBasePromptContractDigest === 'string' && DIGEST_PATTERN.test(execution.materialReferenceBasePromptContractDigest) &&
       typeof envelope?.promptContractDigest === 'string' && DIGEST_PATTERN.test(envelope.promptContractDigest), 'ANALYSIS_RECORD_INVALID', '任务参考资料的基础契约记录无效。');
     return { boundary: { bookId: asString(row.book_id), references: this.#analysisCall(() => taskMaterialSources(execution.materialReferences)) },
-      baseDigest: execution.materialReferenceBasePromptContractDigest, promptDigest: envelope.promptContractDigest };
+      baseDigest: execution.materialReferenceBasePromptContractDigest, promptDigest: unwrappedPlanPromptDigest(execution, envelope) };
   }
 
   /** The 初评 contract of one profile: the built-in ledger's own for AI7's default profile, else the house version's (Issue #427). */
   #initialBaseDefinition(profile: EvaluationProfileProjection): AnalysisKindDefinition {
-    return profile.sha256 === evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE) ? this.#initialEvaluation.definition : initialEvaluationKindDefinition(profile);
+    const builtIn = this.#initialEvaluation.definition;
+    return profile.sha256 === evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE) ? builtIn.clarificationBase ?? builtIn : initialEvaluationKindDefinition(profile);
   }
 
   /**
@@ -8896,7 +8906,7 @@ export class EditorialStore {
   #initialLedger(profile: EvaluationProfileProjection, materials?: TaskMaterialBoundary, frozenPromptDigest?: string): BaselineAnalysisStore {
     const base = this.#initialBaseDefinition(profile);
     const readings = materials === undefined || materials.references.length === 0 ? [] : this.#taskMaterialReadings(materials, '评估');
-    if (readings.length === 0 && base === this.#initialEvaluation.definition) return this.#initialEvaluation;
+    if (readings.length === 0 && base === (this.#initialEvaluation.definition.clarificationBase ?? this.#initialEvaluation.definition)) return this.#initialEvaluation;
     const definition = readings.length === 0 ? base : this.#analysisCall(() => taskMaterialKindDefinition(base, materials!, readings, frozenPromptDigest));
     const make = (): BaselineAnalysisStore => {
       const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);

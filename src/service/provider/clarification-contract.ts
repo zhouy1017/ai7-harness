@@ -15,6 +15,12 @@ export const CLARIFICATION_INSTRUCTION = {
   ].join('\n'),
 } as const;
 export const CLARIFICATION_INSTRUCTION_DIGEST = sha256Hex(canonicalJson(CLARIFICATION_INSTRUCTION));
+/** One declared live-validation retry, not a launch option or a product-selected instruction. */
+export const AMBIGUOUS_CLARIFICATION_VALIDATION_INSTRUCTION = {
+  ...CLARIFICATION_INSTRUCTION,
+  validationVariant: 'ambiguous-editorial-focus',
+  systemPrompt: `${CLARIFICATION_INSTRUCTION.systemPrompt}\n本次分析的阅读重点尚未决定：人物或事件；必须先问编辑确认重点，收到回答后再按原单元结果契约完成。`,
+} as const;
 const MARKER = /^AI7 单元指令\/2 · 请求摘要 ([0-9a-f]{64})$/mu;
 
 export function clarificationMessageRequestDigest(message: string): string | null {
@@ -24,22 +30,51 @@ export function clarificationMessageRequestDigest(message: string): string | nul
 /** Every Run kind shares this alternative; no dialogue or fast-role definition enters this seam. */
 export function withModelClarification(definition: AnalysisKindDefinition): AnalysisKindDefinition {
   if (definition.clarificationBase !== undefined) return definition;
-  const promptContractDigest = sha256Hex(canonicalJson({
-    schema: 'ai7.provider.clarification-prompt-contract/2',
-    basePromptContractDigest: definition.promptContractDigest,
-    instruction: CLARIFICATION_INSTRUCTION,
-  }));
+  return wrapClarification(definition, CLARIFICATION_INSTRUCTION);
+}
+
+/** Called only by the external, declared live-validation driver and by its exact fixture source proof. */
+export function withAmbiguousClarificationValidation(definition: AnalysisKindDefinition): AnalysisKindDefinition {
+  return wrapClarification(definition.clarificationBase ?? definition, AMBIGUOUS_CLARIFICATION_VALIDATION_INSTRUCTION);
+}
+
+function wrapClarification(
+  definition: AnalysisKindDefinition,
+  instruction: typeof CLARIFICATION_INSTRUCTION | typeof AMBIGUOUS_CLARIFICATION_VALIDATION_INSTRUCTION,
+): AnalysisKindDefinition {
+  const promptContractDigest = clarificationPromptContractDigest(definition.promptContractDigest, instruction);
   const requestDigest = (ordinal: number, digest: string): string => unitRequestDigest(promptContractDigest, ordinal, digest);
   return {
     ...definition,
     clarificationBase: definition,
-    systemPrompt: `${definition.systemPrompt}\n\n${CLARIFICATION_INSTRUCTION.systemPrompt}`,
+    systemPrompt: `${definition.systemPrompt}\n\n${instruction.systemPrompt}`,
     promptContractDigest,
     schemaDigest: sha256Hex(canonicalJson({ baseSchemaDigest: definition.schemaDigest, promptContractDigest })),
     requestDigest,
     buildUnitMessage: (unit, total, blocks) => definition.buildUnitMessage(unit, total, blocks)
       .replace('\n', `\nAI7 单元指令/2 · 请求摘要 ${requestDigest(unit.ordinal, unit.digest)}\n`),
   };
+}
+
+/** Re-derived by frozen input readers; this validates an instruction binding and grants no eligibility. */
+export function clarificationPromptContractDigest(
+  basePromptContractDigest: string,
+  instruction: typeof CLARIFICATION_INSTRUCTION | typeof AMBIGUOUS_CLARIFICATION_VALIDATION_INSTRUCTION = CLARIFICATION_INSTRUCTION,
+): string {
+  return sha256Hex(canonicalJson({
+    schema: 'ai7.provider.clarification-prompt-contract/2',
+    basePromptContractDigest,
+    instruction,
+  }));
+}
+
+/** The exact inner contract a frozen material reader reconstructs; invalid provenance never unwraps. */
+export function clarificationPlanBaseDigest(execution: Record<string, unknown>, envelope: Record<string, unknown>): string | null {
+  const outer = envelope.promptContractDigest;
+  if (typeof outer !== 'string' || !/^[0-9a-f]{64}$/u.test(outer)) return null;
+  const base = execution.clarificationBasePromptContractDigest;
+  if (base === undefined) return outer;
+  return typeof base === 'string' && /^[0-9a-f]{64}$/u.test(base) && clarificationPromptContractDigest(base) === outer ? base : null;
 }
 
 /** One isolated follow-up includes the frozen unit, its one question, and the exact recorded answer. */
