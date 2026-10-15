@@ -1,6 +1,8 @@
 import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import type { ReviewCategoryOutputKind } from '../../shared/protocol.js';
 import type { ReviewCategoryContractInput } from './review-category-contract.js';
+import type { DatabaseSync } from 'node:sqlite';
+import { REVIEW_DELIVERABLES_ABSENT, reviewDeliverables, type ReviewDeliverableReading } from '../production-documents.js';
 
 /**
  * The built-in Review Category configuration (Issue #417, plan slice S69; V2-UX-REV-002, REV-003,
@@ -76,6 +78,8 @@ export interface ReviewCategoryConfigurationEntry {
   readonly procedure: { readonly procedureId: string; readonly title: string; readonly version: string };
   /** Present exactly on a 书系一致性 entry resolved for a Book whose Series Knowledge it executes. */
   readonly seriesKnowledge?: SeriesKnowledgePins;
+  /** Book-resolved finalized deliverables and exclusions; frozen with the Run, never a write target. */
+  readonly deliverables?: ReviewDeliverableReading;
 }
 
 export interface ReviewCategoryConfiguration {
@@ -255,6 +259,19 @@ export function reviewCategoryEntry(
   return configuration.categories.find((entry) => entry.categoryId === categoryId) ?? null;
 }
 
+/** Resolve only this Book-dependent category; the house configuration and its digest remain unchanged (#813). */
+export function reviewCategoryEntryForBook(entry: ReviewCategoryConfigurationEntry, db: DatabaseSync, bookId: string): ReviewCategoryConfigurationEntry {
+  if (entry.categoryId !== 'cross-deliverable-consistency') return entry;
+  const deliverables = reviewDeliverables(db, bookId);
+  // A Book with no deliverable at all keeps the built-in entry exactly: its reason and basis read as they did before.
+  if (deliverables.unavailableReason === REVIEW_DELIVERABLES_ABSENT) return entry;
+  return { ...entry, executor: deliverables.unavailableReason === null ? 'review-category-contract' : 'unavailable',
+    unavailableReason: deliverables.unavailableReason, deliverables,
+    guidelineDocuments: [builtinDocument('ai7-builtin/cross-deliverable-consistency', '跨交付物比对规则', [
+      { clauseId: 'cross-deliverable-consistency/1', text: '比较所选稿件与给出的交付物定稿片段，指出人物、事件、数量、时间及其他说法之间的矛盾；不判断哪一处正确，不修改交付物。每条发现必须引用一处交付物段落编号。' },
+    ])] };
+}
+
 /**
  * What one category gives the Editorial Review Contract: its documents' clauses in document order, and
  * nothing the model does not need — no description, no issuer, no executor. Only a category the contract
@@ -269,6 +286,7 @@ export function reviewCategoryContractInput(entry: ReviewCategoryConfigurationEn
     riskPointsOnly: entry.riskPointsOnly,
     clauses: entry.guidelineDocuments.flatMap((document) => document.clauses.map((clause) => ({ clauseId: clause.clauseId, text: clause.text }))),
     procedure: { procedureId: entry.procedure.procedureId, title: entry.procedure.title, version: entry.procedure.version },
+    ...(entry.deliverables === undefined ? {} : { deliverables: entry.deliverables.participants }),
   };
 }
 
@@ -289,6 +307,13 @@ export function houseGuidelineDocuments(entry: ReviewCategoryConfigurationEntry)
  */
 export function reviewCategoryBasisStatement(entry: ReviewCategoryConfigurationEntry): string {
   const procedure = `工序：${entry.procedure.title}（第 ${entry.procedure.version} 版）`;
+  if (entry.deliverables !== undefined) {
+    const named = entry.deliverables.participants.map((document) => `${document.typeLabel}《${document.title}》${document.versionLabel}（文档 ${document.documentId} · 修订 ${document.revisionId}）`
+      + (document.laterSaves === 0 ? '' : `；定稿后另有 ${document.laterSaves} 次保存，未参与`)
+      + (document.omittedParagraphs === 0 && !document.paragraphs.some((paragraph) => paragraph.truncated) ? '' : '；仅比较标明的有界片段'));
+    return `依据：所选稿件与${named.length === 0 ? '这本书的编辑交付物' : named.join('、')}`
+      + entry.deliverables.leftOut.map((document) => `；未参与《${document.title}》：${document.reason}`).join('') + ` · ${procedure} · 交付物只读 · 不使用搜索引擎`;
+  }
   if (entry.executor === 'baseline-leads') return `依据：这本书最新的基线分析结果 · ${procedure} · 不调用模型，不使用搜索引擎`;
   if (entry.executor === 'unavailable' || entry.executor === 'series-knowledge') {
     const source = entry.categoryId === 'series-consistency' ? '依据：书系知识' : '依据：这本书的编辑交付物';

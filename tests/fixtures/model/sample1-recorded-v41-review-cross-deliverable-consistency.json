@@ -1,0 +1,163 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-recorded-v41-review-cross-deliverable-consistency",
+  "description": "Recorded comparison; editorial yield remains pending issue 812. Exact request key only: a manuscript-only content key could replay against different deliverable text; fresh-import regression uses controlled recorded-response transport with the same sample1-derived document words. Participant excerpt digest: 0dceafb676b0c44e90d498eda79ee4d52fb7452ffced6fc5d0785febe3cc0a88. · 来源测试项 S40/review-first-range/1–4 · 模型 deepseek-v4.1-flash · 生成于 2026-10-15 · Capture head 1f83358d8d87677caed174ee8bb2d96e74033486; one selected-scope Run, two units, one synthetic finalized participant; content admission remains with the assigned Reviewer.",
+  "basedOn": null,
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "6a7a85e4875380d4e0f25b9819caed46aad349cb69a731be991081abca282b4d",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/1\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"刚刚过完六十五岁生日\",\"blockOrdinal\":6,\"severity\":\"must\",\"note\":\"稿件称曾本之刚过完六十五岁生日，交付物定稿同一句写作“九十五岁生日”，两处年龄说法相矛盾。稿件后文（七十小寿、六十五岁生日）与稿件自洽，此处差异需编辑核对确认。\",\"clauseId\":\"deliverable/news-release/1\"}]}",
+        "usage": {
+          "inputTokens": 1986,
+          "outputTokens": 460
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first-range/1",
+        "selectedItemId": "S40/review-first-range/1",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "c6f1ca705875aba2d4073f73e69e16c6e85ef590167ea4042e2b45348798c742",
+        "taskPromptContractDigest": "c6f1ca705875aba2d4073f73e69e16c6e85ef590167ea4042e2b45348798c742",
+        "capturedAt": "2026-10-15T05:00:04.790Z",
+        "providerRequestDigest": "f0893774690749a3046e8fa5a047bcf0993e087773ed136cc32138cb9057aba0",
+        "providerResponseDigest": "935e565cc17da57c1fe5bc71b1d9901a51e88d0432c3c8f745af9831ebcd3d5e",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "c4228c95db38978aac652781f6816888bcaa911308674f25ee8c5fae8db17935",
+        "generation": "19b69f12d98a83efa5e3f8cf83de6c306ca9e753c6d007a519ff7e82c04cfbaf",
+        "validation": {
+          "family": "cross-deliverable-consistency",
+          "case": "sample1-finalized-document",
+          "step": "review-first-range/unit-1"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "b572ea079ff00a2ff9b397d8255bb8cf183d242e1d63aa1bec453cf644c58f65"
+      }
+    },
+    {
+      "unitOrdinal": 2,
+      "requestDigest": "27336cc9597c0b92c0dc6cd68d4c5323b2231404e3ddadd50822a075672162c0",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\n  \"schema\": \"ai7.editorial-review.unit-result/1\",\n  \"unitOrdinal\": 2,\n  \"findings\": [\n    {\n      \"quote\": \"这一次，曾本之收到的是一封用甲骨文写的信。\",\n      \"blockOrdinal\": 6,\n      \"severity\": \"should\",\n      \"note\": \"交付物称这封信由曾本之亲笔写满两张信笺、寄给钟爱弟子郑雄；稿件此处说这封信是曾本之收到的、用甲骨文写成，并称写信人二十多年前已去世，信封收件人也是曾本之。两处对这封信的书写者、文字与收信人的交代互相矛盾，请核对是否指同一封信。\",\n      \"clauseId\": \"deliverable/news-release/1\"\n    }\n  ]\n}",
+        "usage": {
+          "inputTokens": 1858,
+          "outputTokens": 31095
+        }
+      },
+      "capture": {
+        "subject": "review-unit",
+        "itemId": "S40/review-first-range/2",
+        "selectedItemId": "S40/review-first-range/2",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "c6f1ca705875aba2d4073f73e69e16c6e85ef590167ea4042e2b45348798c742",
+        "taskPromptContractDigest": "c6f1ca705875aba2d4073f73e69e16c6e85ef590167ea4042e2b45348798c742",
+        "capturedAt": "2026-10-15T05:00:08.541Z",
+        "providerRequestDigest": "0c2f887fb56b6e6163ce992d6f66d1c50aa3d24167c498dad4993de7eda68a63",
+        "providerResponseDigest": "4da6b5fdd072b821b110c347f7ea991d91ab2072d903edaa4567b97b333514a5",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "2be1859736da88a485a3067dfe1f92dd043f4877b691e8bd9e21e573c51df27a",
+        "generation": "19b69f12d98a83efa5e3f8cf83de6c306ca9e753c6d007a519ff7e82c04cfbaf",
+        "validation": {
+          "family": "cross-deliverable-consistency",
+          "case": "sample1-finalized-document",
+          "step": "review-first-range/unit-2"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "a2ffcfc8ba59cb16126fb803795e33502f6881c85e5e9277b655560c25604d78"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "e1185a6a4851e3b182ee182fbad002162da9689384c1fff2a0a1f69ab4a79e91",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"内容块明确写这封信是曾本之收到的甲骨文信，写信人二十多年前已死，信封上写明由曾本之亲启；交付物 deliverable/news-release/1 则称曾本之亲笔写满两张信笺、意在给钟爱弟子郑雄。两处对写信人与收信人的交代确有出入，发现被支持。\"}]}",
+        "usage": {
+          "inputTokens": 2235,
+          "outputTokens": 1564
+        }
+      },
+      "capture": {
+        "subject": "sampling",
+        "itemId": "S40/review-first-range/3",
+        "selectedItemId": "S40/review-first-range/3",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "4c05e66ba8077c85aa1334b53e98155566fcd9f51d9bd3343e95e7b14ddc03db",
+        "taskPromptContractDigest": "c6f1ca705875aba2d4073f73e69e16c6e85ef590167ea4042e2b45348798c742",
+        "capturedAt": "2026-10-15T05:03:08.042Z",
+        "providerRequestDigest": "9ddaf4c0f0ee06c904b2a2824c1cdb6f188ad902d901d34750a67b537966e023",
+        "providerResponseDigest": "ccc06a8fd998e902799bc2e43b67f1e3288550253579d6d5657991b2c0203704",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "733fa335de164116f05e5ca84f1094362ff0f2e07812a4cf7b9f4ebd9ebf39a4",
+        "generation": "f3fbeff450b69d22c14d4905db380203e3d8adf34112a97a036885f78e4137f1",
+        "validation": {
+          "family": "cross-deliverable-consistency",
+          "case": "sample1-finalized-document",
+          "step": "review-first-range/sampling-1-unit-2"
+        },
+        "identityMap": [
+          {
+            "placeholder": "{{ref:1}}",
+            "identity": "rfd_1f2cca04ae03f8696d814e8b"
+          }
+        ],
+        "fixtureResponseDigest": "cc81f03ac604b2ec83812d8eabdecc83b8061259d52d6417872165539701b864"
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "c741a161a49812a8f5e2ecfb908777a04054807c29da3b2d272245f439a7f23c",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"下次运行把单元预算从已提交的 2 个提升到覆盖全部 8 个单元（已提交 2 加未审 6），或在 adaptationCount 为 0 时主动触发计划调整扩预算，避免再次留下 6 个单元未审。\",\"basis\":\"units.submitted=2，units.unreviewed=6，adaptationCount=0。\"},{\"suggestion\":\"对 quote-not-found 排除项先重试一次再排除，并重读产生该引文的单元；把 retried 从 0 至少提高到 1，不要直接以排除结束。\",\"basis\":\"findingCounts 含 excluded:quote-not-found=1，units.retried=0，failureCodes 为空。\"},{\"suggestion\":\"下次运行明确执行 cross-unit-reduction，或若本就不在该运行范围内，则在计划中标注跳过，避免阶段 not-run 与 classification completed 并列。\",\"basis\":\"stages.cross-unit-reduction=not-run，requests=0，outputTokens=0，classification=completed。\"},{\"suggestion\":\"把 assurance 抽样规模提高到多于 1 个候选，或在候选仅 1 时明确记录“全量即样本”，降低对 should 层精度估计的信任。\",\"basis\":\"assurance.candidateCount=1，size=1，precision 中 should sampled=1、upheld=1。\"},{\"suggestion\":\"下次运行降低对 should 类别发现的信任，只有经更大样本保证或跨单元复核后才考虑升级处理优先级。\",\"basis\":\"finding:should=1，assurance 仅抽样 1 个 should 候选且 upheld=1。\"},{\"suggestion\":\"用范围预检或收紧范围定义来减少 out-of-scope 缺口；下次运行可先让单元输出范围判定，再决定是否提交 gap。\",\"basis\":\"gapCodes 中 out-of-scope=6，units.gaps=0。\"},{\"suggestion\":\"下次运行按单元拆分请求并设置单请求输出上限，避免 2 个单元请求消耗 31555 输出 token；剩余预算优先留给未审单元。\",\"basis\":\"usagePerStage.units 的 outputTokens=31555、requests=2，units.unreviewed=6。\"},{\"suggestion\":\"下次运行把未审单元列入重读清单，优先重读 unreviewed=6 对应的单元，而不是复用或重算已提交单元。\",\"basis\":\"units.unreviewed=6，units.reused=0，units.recomputed=2。\"},{\"suggestion\":\"对 out-of-scope 缺口不占正式 finding 配额；下次运行为其预留少量额度，避免 6 次缺口查询挤占审查单元预算。\",\"basis\":\"gapCodes 中 out-of-scope=6，units.gaps=0，finding:should=1。\"}]}",
+        "usage": {
+          "inputTokens": 1212,
+          "outputTokens": 2554
+        }
+      },
+      "capture": {
+        "subject": "reflection",
+        "itemId": "S40/review-first-range/4",
+        "selectedItemId": "S40/review-first-range/4",
+        "evidenceScope": "namespaced",
+        "route": "opencode-go",
+        "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+        "requestShape": "openai-chat-completions",
+        "model": "deepseek-v4.1-flash",
+        "promptContractDigest": "96456fc99625e12014633439564f17a54cdb1f4f0a05b8076c10a4b03bbd7676",
+        "taskPromptContractDigest": "c6f1ca705875aba2d4073f73e69e16c6e85ef590167ea4042e2b45348798c742",
+        "capturedAt": "2026-10-15T05:03:18.410Z",
+        "providerRequestDigest": "2d1ea9d8223b8dc7ed82d73ebb5ad6a2cc75f882e532b67021d253d5d0ead517",
+        "providerResponseDigest": "5bd9953d7f7ca1d9053fb0792d8f004fa5e8c3cfc61bbfa1399e2a7fee08b701",
+        "responseDigestOrigin": "recorded",
+        "cacheKey": "e382aac2b2382ab861b3028522f22da6ba49d360672bf403371c4b2d3d56e8e1",
+        "generation": "fca6cbb3db20d908571ad5f9dbd47abbef6c855eb67358a6785e440aca2a4902",
+        "validation": {
+          "family": "cross-deliverable-consistency",
+          "case": "sample1-finalized-document",
+          "step": "review-first-range/reflection"
+        },
+        "identityMap": [],
+        "fixtureResponseDigest": "91c5b76cd4f372171c4cdf618a673594d2db8cf35f275e5aa2bc530be22830f1"
+      }
+    }
+  ]
+}
