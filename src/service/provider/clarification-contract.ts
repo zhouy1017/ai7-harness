@@ -33,7 +33,7 @@ export function withModelClarification(definition: AnalysisKindDefinition): Anal
   return wrapClarification(definition, CLARIFICATION_INSTRUCTION);
 }
 
-/** Called only by the external, declared live-validation driver and by its exact fixture source proof. */
+/** Used by the declared external live-validation driver and its provider-free capture proof/replay. */
 export function withAmbiguousClarificationValidation(definition: AnalysisKindDefinition): AnalysisKindDefinition {
   return wrapClarification(definition.clarificationBase ?? definition, AMBIGUOUS_CLARIFICATION_VALIDATION_INSTRUCTION);
 }
