@@ -1109,7 +1109,7 @@ describe('后台分析登记 over the real store on exact sample1', () => {
     }
   }, 300_000);
 
-  it('data rolled back to the backup a replacement took never brings an Enrollment back into force either (re-review P2-2)', async () => {
+  it.each([false, true])('rollback keeps an imported Enrollment suspended, including paused=%s (#864)', async (paused) => {
     const T = new Date(2026, 8, 25, 10, 0, 0);
     const LATER = new Date(2026, 8, 25, 11, 0, 0);
     let bookId = '';
@@ -1117,7 +1117,8 @@ describe('后台分析登记 over the real store on exact sample1', () => {
     try {
       recordMissingCredentialConnection(store, 'L2 主编辑连接');
       bookId = (await importedBook(store, 'L2 sample1 回退数据')).bookId;
-      enroll(store, bookId, 'backfill');
+      const enrolled = enroll(store, bookId, 'backfill');
+      if (paused) store.holdBackgroundAnalysisEnrollment(bookId, enrolled.enrollment!.enrollmentId, 'pause', runtime());
       const destination = join(roots.inputRoot, 'AI7 数据库.ai7db');
       const preparation = await store.prepareDatabaseExport(destination, true);
       expect((await store.approveDatabaseExport(preparation.preparationId, true)).outcome).toBe('created');
@@ -1143,6 +1144,18 @@ describe('后台分析登记 over the real store on exact sample1', () => {
       expect((await store.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'roll-back', outcome: 'applied' });
       const read = store.inspectBackgroundAnalysisEnrollment(bookId, runtime());
       expect([read.state, read.next]).toEqual(['suspended', { kind: 'stopped', reason: BACKGROUND_SUSPENDED }]);
+      expect(read.hold).toEqual({ canPause: false, canResume: false });
+      const execution = ownerOf(store);
+      const dispatcher = new BackgroundAnalysisDispatcher({ store, execution, launchPolicy, now: () => runtime().now });
+      try {
+        dispatcher.nudge();
+        await dispatcher.settled();
+        await execution.whenIdle();
+        expect(store.inspectBaselineAnalysis(bookId, () => null).taskIntent).toBeNull();
+      } finally {
+        await dispatcher.dispose();
+        await execution.dispose();
+      }
       store.markCleanShutdown();
     } finally {
       store.close();

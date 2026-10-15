@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { backgroundAnalysisShare, backgroundShareFullReason } from '../background-analysis-enrollments.js';
 import { BASELINE_ANALYSIS_KIND, MODEL_SERVICE_SETUP_REQUIRED_REASON } from '../../shared/protocol.js';
 import { liveKindAdmission, liveKindContractCategories, liveKindRule, type LiveKindRule } from './live-kind-admission.js';
 import { liveMaterialContract } from '../task-material-references.js';
@@ -551,6 +552,17 @@ export class BaselineAnalysisExecutionOwner {
     return this.#active.size >= this.#capacity;
   }
 
+  /** Starts and continuations consume the same origin's share; a waiting Run owns no place (Issue #864 revision 5). */
+  #placeForOrigin(origin: ExecutionPlanFacts['origin']): boolean {
+    return origin === 'background-analysis-enrollment'
+      ? !this.full && this.#backgroundActive.size < backgroundAnalysisShare(this.#capacity)
+      : !this.busy;
+  }
+
+  #placeForRun(runRecordId: string, ledger: BaselineAnalysisStore): boolean {
+    return this.#placeForOrigin(ledger.loadExecutionPlan(runRecordId).origin);
+  }
+
   /** Whether nothing runs, waits for a place, or waits to finish its cancellation: no Run will write until another starts. */
   get idle(): boolean {
     return this.#active.size === 0 && this.#queued.length === 0 && this.#pendingCancels.length === 0;
@@ -581,7 +593,9 @@ export class BaselineAnalysisExecutionOwner {
     if (this.#disposed) throw new ExecutionAdmissionError('EXECUTION_STOPPING', '本地业务服务正在停止。');
     if (this.#active.has(runRecordId)) return 'admitted';
     if (this.#queued.some((entry) => entry.runRecordId === runRecordId)) return 'queued';
-    if (origin === 'background' ? !this.full : !this.busy && this.#queued.length === 0) {
+    // Read the persisted origin even when a caller supplies a scheduling hint: it cannot borrow the other origin's place.
+    const placeFree = this.#blockOnRefusal(runRecordId, ledger, () => this.#placeForRun(runRecordId, ledger));
+    if (placeFree && (origin === 'background' || this.#queued.length === 0)) {
       this.#admitInTurn(runRecordId, ledger);
       return 'admitted';
     }
@@ -608,9 +622,9 @@ export class BaselineAnalysisExecutionOwner {
   }
 
   /** A start refused while it is still `authorized` is blocked before dispatch with the reason, and the refusal thrown. */
-  #blockOnRefusal(runRecordId: string, ledger: BaselineAnalysisStore, attempt: () => void): void {
+  #blockOnRefusal<T>(runRecordId: string, ledger: BaselineAnalysisStore, attempt: () => T): T {
     try {
-      attempt();
+      return attempt();
     } catch (error) {
       if (ledger.currentRunState(runRecordId) === 'authorized') {
         const reason = error instanceof Error ? error.message : '运行未能进入调度。';
@@ -681,13 +695,16 @@ export class BaselineAnalysisExecutionOwner {
    * ordinary production), on that rule's exact route, model and credential slot. v12 and v13 have no such rule, so under them
    * it is refused before anything is sent; development-ci's local route admits it as it admits every Run.
    */
-  #requireOrigin(facts: ExecutionPlanFacts, live: LiveRuntime | null, ledger: BaselineAnalysisStore, policy: LaunchPolicyProjection): void {
+  #requireOrigin(facts: ExecutionPlanFacts, live: LiveRuntime | null, ledger: BaselineAnalysisStore, policy: LaunchPolicyProjection, resolvedForRun = false): void {
     if (facts.origin !== 'background-analysis-enrollment' || live === null) return;
     const production = isOrdinaryProductionRuntime(live);
     const rule = ledger.definition.kind !== BASELINE_ANALYSIS_KIND ? null
       : liveKindRule(policy, BASELINE_ANALYSIS_KIND, [production ? 'unpublished-excerpts' : 'public-or-synthetic'], 'background');
     const { route, model, credentialSlot } = routeFactsOf(facts, live);
-    if (rule === null || rule.route !== route || rule.model !== model || rule.credentialSlot !== credentialSlot) {
+    // Settings select the next Task's connection. Production resolves this Run's frozen binding before execution and checks it
+    // below again; comparing it with the newly selected connection here would refuse an otherwise unchanged authorized Run.
+    const checkBinding = !production || resolvedForRun || this.#deps.productionPolicyFor === undefined;
+    if (rule === null || (checkBinding && (rule.route !== route || rule.model !== model || rule.credentialSlot !== credentialSlot))) {
       throw new ExecutionAdmissionError('EXECUTION_ORIGIN_NOT_ADMITTED', '当前策略没有准许后台分析登记开始的运行发送内容；什么都没有发送。');
     }
   }
@@ -749,7 +766,9 @@ export class BaselineAnalysisExecutionOwner {
     const facts = ledger.loadExecutionPlan(runRecordId);
     // The background place takes only a Run a 后台分析登记 started; the editor's take their own (Issue #864).
     const background = facts.origin === 'background-analysis-enrollment';
-    if (!background && this.busy) throw new ExecutionAdmissionError('EXECUTION_BUSY', `运行名额已满：本实例一次执行 ${this.#capacity} 个运行。`);
+    if (!this.#placeForOrigin(facts.origin)) throw new ExecutionAdmissionError('EXECUTION_BUSY', background
+      ? backgroundShareFullReason(backgroundAnalysisShare(this.#capacity))
+      : `运行名额已满：本实例一次执行 ${this.#capacity} 个运行。`);
     this.#requireTransmittable(facts, live);
     this.#requireOrigin(facts, live, ledger, this.#policy());
     const state = ledger.currentRunState(runRecordId);
@@ -876,33 +895,52 @@ export class BaselineAnalysisExecutionOwner {
    * meanwhile, then the queued starts in their order — each while the governor has a place.
    */
   #drain(): void {
-    while (!this.busy && !this.#disposed && this.#pendingCancels.length > 0) {
-      const next = this.#pendingCancels.shift()!;
+    for (let index = 0; !this.full && !this.#disposed && index < this.#pendingCancels.length;) {
+      const next = this.#pendingCancels[index]!;
       try {
-        if (next.ledger.currentRunState(next.runRecordId) !== 'cancelling') continue;
+        if (next.ledger.currentRunState(next.runRecordId) !== 'cancelling') {
+          this.#pendingCancels.splice(index, 1);
+          continue;
+        }
+        if (!this.#placeForRun(next.runRecordId, next.ledger)) { index += 1; continue; }
+        this.#pendingCancels.splice(index, 1);
         this.admitAndDispatch(next.runRecordId, next.ledger, { resume: true, cancel: true });
       } catch {
+        if (this.#pendingCancels[index] === next) this.#pendingCancels.splice(index, 1);
         settleCancelWithoutRevision(next.ledger, next.runRecordId, CANCELLED_WITHOUT_REVISION);
       }
     }
     // Then a Run the editor answered while every place was taken (Issue #422, S76d), if it still waits for that answer.
-    while (!this.busy && !this.#disposed && this.#pendingAnswers.length > 0) {
-      const next = this.#pendingAnswers.shift()!;
-      if (next.ledger.currentRunState(next.runRecordId) !== 'awaiting-clarification') continue;
+    for (let index = 0; !this.full && !this.#disposed && index < this.#pendingAnswers.length;) {
+      const next = this.#pendingAnswers[index]!;
       try {
+        if (next.ledger.currentRunState(next.runRecordId) !== 'awaiting-clarification') {
+          this.#pendingAnswers.splice(index, 1);
+          continue;
+        }
+        if (!this.#placeForRun(next.runRecordId, next.ledger)) { index += 1; continue; }
+        this.#pendingAnswers.splice(index, 1);
         this.admitAndDispatch(next.runRecordId, next.ledger, { resume: true });
       } catch {
+        if (this.#pendingAnswers[index] === next) this.#pendingAnswers.splice(index, 1);
         // It stays 任务等待你的说明 with its answer recorded; 续行 is not needed, but the answer's next look finds it.
       }
     }
     // Then the starts waiting on the governor, in their order (CONC-007). One cancelled meanwhile is skipped; one that
     // can no longer be admitted is blocked before dispatch with the reason, never left waiting for a turn it cannot take.
-    while (!this.busy && !this.#disposed && this.#queued.length > 0) {
-      const next = this.#queued.shift()!;
+    for (let index = 0; !this.full && !this.#disposed && index < this.#queued.length;) {
+      const next = this.#queued[index]!;
       try {
-        if (next.ledger.currentRunState(next.runRecordId) !== 'authorized') continue;
+        if (next.ledger.currentRunState(next.runRecordId) !== 'authorized') {
+          this.#queued.splice(index, 1);
+          continue;
+        }
+        const placeFree = this.#blockOnRefusal(next.runRecordId, next.ledger, () => this.#placeForRun(next.runRecordId, next.ledger));
+        if (!placeFree) { index += 1; continue; }
+        this.#queued.splice(index, 1);
         this.#admitInTurn(next.runRecordId, next.ledger);
       } catch {
+        if (this.#queued[index] === next) this.#queued.splice(index, 1);
         // Blocked before dispatch with its reason; the next start in the queue takes the place.
       }
     }
@@ -913,7 +951,7 @@ export class BaselineAnalysisExecutionOwner {
    * envelope — a new span of the same attempt, as 续行 is — at once when the governor has a place, or as soon as it has.
    */
   continueAnswered(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger): 'continuing' | 'queued' {
-    if (!this.busy && !this.#disposed) {
+    if (!this.#disposed && this.#placeForRun(runRecordId, ledger)) {
       this.admitAndDispatch(runRecordId, ledger, { resume: true });
       return 'continuing';
     }
@@ -980,7 +1018,7 @@ export class BaselineAnalysisExecutionOwner {
     // AI7 is closing: the Run stays 正在取消, and the next start's reconciliation finishes it.
     if (this.#disposed) return 'stopping';
     try {
-      if (!this.busy) {
+      if (this.#placeForRun(runRecordId, ledger)) {
         this.admitAndDispatch(runRecordId, ledger, { resume: true, cancel: true });
       } else if (!this.#pendingCancels.some((entry) => entry.runRecordId === runRecordId)) {
         this.#pendingCancels.push({ runRecordId, ledger, progress: stoppedRunProgress(ledger.loadExecutionPlan(runRecordId), checkpoints) });
@@ -1183,7 +1221,7 @@ export class BaselineAnalysisExecutionOwner {
     // Under ordinary production the rule that admits the kind names the editor's unpublished words (Issue #811): the
     // baseline's own rule included, read for its categories as any other kind's is.
     // A Run a 后台分析登记 started is read under the enrolled-background rule, checked again here against the policy it executes under (Issue #864).
-    this.#requireOrigin(facts, live, ledger, policy);
+    this.#requireOrigin(facts, live, ledger, policy, true);
     const productionRule = production === null ? null : admitted ?? liveKindRule(policy, BASELINE_ANALYSIS_KIND, ['unpublished-excerpts'],
       facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground');
     // The test item purpose is the Task mode, so a first baseline and each update mode number their

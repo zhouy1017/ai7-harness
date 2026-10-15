@@ -272,6 +272,8 @@ describe('后台分析登记 with a mandatory ceiling, Series and all-Books scop
 
   it('enrolls every Book of the house in the order they were made, the remainder to the first', async () => {
     const store = await openWithRoute();
+    const owner = ownerOf(store);
+    const dispatcher = dispatcherOf(store, owner, { now: Date.now() + 2 * QUIET_MS });
     try {
       recordMissingCredentialConnection(store, 'L2 主编辑连接');
       const first = await importedBook(store, 'L2 全部甲');
@@ -282,8 +284,20 @@ describe('后台分析登记 with a mandatory ceiling, Series and all-Books scop
       store.enrollBackgroundAnalysis(second.bookId, shown.offer.disclosureDigest!, 'backfill', { kind: 'all-books', seriesId: null }, 1001, runtime());
       expect([first, second].map((book) => store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime()).enrollment!.shareTokens)).toEqual([501, 500]);
       expect(store.inspectBackgroundAnalysisEnrollment(first.bookId, runtime()).enrollment!.scope.label).toBe('全部 2 本图书');
+      expect(store.backgroundAnalysisBooks()).toEqual([first.bookId, second.bookId]);
+      await pass(dispatcher, owner);
+      await pass(dispatcher, owner);
+      expect([first, second].map((book) => {
+        const run = store.inspectBaselineAnalysis(book.bookId, () => null);
+        return [run.authorization!.origin, run.planVersion!.materialInputs.runBudgetCeiling];
+      })).toEqual([
+        ['background-analysis-enrollment', { kind: 'tokens', maxTotalTokens: 501 }],
+        ['background-analysis-enrollment', { kind: 'tokens', maxTotalTokens: 500 }],
+      ]);
       store.markCleanShutdown();
     } finally {
+      await dispatcher.dispose();
+      await owner.dispose();
       store.close();
     }
   }, 300_000);
@@ -345,6 +359,133 @@ describe('后台分析登记 with a mandatory ceiling, Series and all-Books scop
       expect(store.backgroundAnalysisDecisionFor(two.bookId, runtime()).decision.kind).toBe('start');
       store.markCleanShutdown();
     } finally {
+      await owner.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it('keeps the foreground place when a paused background Run resumes beside another background Run', async () => {
+    const store = await openWithRoute();
+    const holdPath = join(roots.inputRoot, 'background-resume-hold.txt');
+    const owner = ownerOf(store, holdPath);
+    const dispatcher = dispatcherOf(store, owner, { now: Date.now() + 2 * QUIET_MS });
+    try {
+      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+      const first = await importedBook(store, 'L2 暂停的后台');
+      const second = await importedBook(store, 'L2 运行的后台');
+      const foreground = await importedBook(store, 'L2 前台保留名额');
+      enroll(store, first.bookId, 'backfill', 1_000_000);
+      writeFileSync(holdPath, '0');
+      dispatcher.nudge();
+      await dispatcher.settled();
+      const paused = store.inspectBaselineAnalysis(first.bookId, () => null);
+      const firstRun = paused.run!.runRecordId;
+      store.requestBaselineAnalysisPause(first.bookId, paused.taskIntent!.taskIntentId);
+      owner.pauseRun(firstRun);
+      writeFileSync(holdPath, '99');
+      await owner.whenIdle();
+      expect(store.baselineAnalysisLedger.currentRunState(firstRun)).toBe('paused');
+      const single = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, capacity: 1,
+        secretResolver: { resolve: async () => null } });
+      try {
+        expect(() => single.admitAndDispatch(firstRun, undefined, { resume: true })).toThrowError(/后台分析最多同时占用 0/u);
+      } finally {
+        await single.dispose();
+      }
+
+      enroll(store, second.bookId, 'backfill', 1_000_000);
+      writeFileSync(holdPath, '0');
+      dispatcher.nudge();
+      await dispatcher.settled();
+      const secondRun = store.inspectBaselineAnalysis(second.bookId, () => null).run!.runRecordId;
+      expect(owner.progressFor(secondRun)).not.toBeNull();
+      expect(() => owner.admitAndDispatch(firstRun, undefined, { resume: true })).toThrowError(/后台分析最多同时占用/u);
+      expect(store.baselineAnalysisLedger.currentRunState(firstRun)).toBe('paused');
+      const plan = prepare(store, foreground.bookId);
+      const foregroundRun = store.authorizeBaselineAnalysis(foreground.bookId, plan.taskIntent!.taskIntentId, plan.planEnvelope!.digest).dispatchRunRecordId!;
+      expect(owner.admitOrQueue(foregroundRun)).toBe('admitted');
+      expect(owner.full).toBe(true);
+      writeFileSync(holdPath, '99');
+      await owner.whenIdle();
+      owner.admitAndDispatch(firstRun, undefined, { resume: true });
+      await owner.whenIdle();
+      expect(store.inspectBaselineAnalysis(first.bookId, () => null).state).toBe('settled');
+      store.markCleanShutdown();
+    } finally {
+      await dispatcher.dispose();
+      await owner.dispose();
+      store.close();
+    }
+  }, 300_000);
+
+  it.each(['answer', 'cancel'] as const)('retains a background %s while its share is full, including after a foreground Run frees its place', async (action) => {
+    fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-transient-retry');
+    const store = await openWithRoute();
+    let holdNext = false;
+    let held = false;
+    let released = false;
+    const owner = new BaselineAnalysisExecutionOwner({
+      ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
+      unitHold: async (_units, interrupted) => {
+        if (!holdNext) return;
+        holdNext = false;
+        held = true;
+        while (!released && !interrupted()) await new Promise((resolveWait) => setTimeout(resolveWait, 5));
+      },
+    });
+    const dispatcher = dispatcherOf(store, owner, { now: Date.now() + 2 * QUIET_MS });
+    try {
+      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+      const first = await importedBook(store, 'L2 后台等说明');
+      const second = await importedBook(store, 'L2 后台占用名额');
+      const foreground = await importedBook(store, 'L2 前台释放名额');
+      const enrolled = enroll(store, first.bookId, 'backfill', 1_000_000);
+      const version = enrolled.enrollment!.enrollmentVersionId;
+      let work = store.createBackgroundBaselineAnalysisPreparationWork(first.bookId, 'first-baseline', version, launchPolicy);
+      while (!work.done) work = store.advanceBaselineAnalysisPreparationWork(work.workId!);
+      const prepared = work.projection!;
+      const taskIntentId = prepared.taskIntent!.taskIntentId;
+      const asking = store.editBaselineAnalysisPlan({ bookId: first.bookId, taskIntentId, planEnvelopeDigest: prepared.planEnvelope!.digest,
+        removedSteps: [], disallowedAdaptations: [], askFirstAdaptations: ['safe-retry'] });
+      const firstRun = store.startEnrolledBaselineAnalysis(first.bookId, taskIntentId, asking.planEnvelope!.digest, version, 'first-baseline', runtime()).dispatchRunRecordId!;
+      owner.admitAndDispatch(firstRun);
+      await owner.whenIdle();
+      expect(store.baselineAnalysisLedger.currentRunState(firstRun)).toBe('awaiting-clarification');
+      expect(owner.idle).toBe(true);
+      const kept = store.baselineAnalysisLedger.unitCheckpoints(firstRun).length;
+      expect(kept).toBe(7);
+      enroll(store, second.bookId, 'backfill', 1_000_000);
+      expect(store.backgroundAnalysisDecisionFor(second.bookId, runtime()).decision.kind).toBe('start');
+      holdNext = true;
+      dispatcher.nudge();
+      await dispatcher.settled();
+      for (let tries = 0; !held && tries < 2000; tries += 1) await new Promise((resolveWait) => setTimeout(resolveWait, 5));
+      expect(held).toBe(true);
+      if (action === 'answer') {
+        const request = store.baselineAnalysisLedger.clarificationsOf(firstRun)[0]!;
+        store.answerBaselineAnalysisClarification({ bookId: first.bookId, taskIntentId, requestId: request.requestId, optionId: 'retry', note: null });
+        expect(owner.continueAnswered(firstRun)).toBe('queued');
+      } else {
+        store.requestBaselineAnalysisCancel(first.bookId, taskIntentId);
+        expect(owner.cancelRun(firstRun)).toBe('stopping');
+      }
+      expect(owner.progressFor(firstRun)?.stage ?? null).toBe(action === 'answer' ? null : 'units');
+      const plan = prepare(store, foreground.bookId);
+      const foregroundRun = store.authorizeBaselineAnalysis(foreground.bookId, plan.taskIntent!.taskIntentId, plan.planEnvelope!.digest).dispatchRunRecordId!;
+      expect(owner.admitOrQueue(foregroundRun)).toBe('admitted');
+      await owner.whenDone(foregroundRun);
+      expect(store.baselineAnalysisLedger.currentRunState(firstRun)).toBe(action === 'answer' ? 'awaiting-clarification' : 'cancelling');
+      expect(store.baselineAnalysisLedger.unitCheckpoints(firstRun)).toHaveLength(kept);
+      released = true;
+      await owner.whenIdle();
+      const settled = store.inspectBaselineAnalysis(first.bookId, () => null);
+      expect(settled.run!.state).toBe(action === 'answer' ? 'completed-with-gaps' : 'cancelled');
+      expect(settled.resultSetRevision!.coverage.unitsClosed).toBe(action === 'answer' ? 7 : 6);
+      if (action === 'answer') expect(store.baselineAnalysisLedger.clarificationsOf(firstRun)[0]!.answer?.optionId).toBe('retry');
+      store.markCleanShutdown();
+    } finally {
+      released = true;
+      await dispatcher.dispose();
       await owner.dispose();
       store.close();
     }

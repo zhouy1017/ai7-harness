@@ -1366,10 +1366,10 @@ describe('后台分析登记 under developer-live with a stub transport (Issue #
     }
   });
 
-  it('starts an enrolled background Run only under the enrolled-background rule, held to the lower of its share and the launch ceiling', async () => {
+  it.each([900_000, 400_000])('starts an enrolled background Run under its rule, held to the lower of share %i and the launch ceiling', async (share) => {
     // The selected developer-live policy (v14) projects the enrolled-background rule.
     const v14 = launchPolicy;
-    const { store, bookId, answers } = await enrolledLive(v14, 900_000);
+    const { store, bookId, answers } = await enrolledLive(v14, share);
     const calls: StubCall[] = [];
     const execution = owner(store, stubTransport({ calls, responses: answers.units, named: answers.named }), CEILING, v14);
     const dispatcher = new BackgroundAnalysisDispatcher({ store, execution, launchPolicy: v14, quietMs: 30_000, now: () => BACKGROUND_RUNTIME.now });
@@ -1379,12 +1379,16 @@ describe('后台分析登记 under developer-live with a stub transport (Issue #
       await execution.whenIdle();
       const after = store.inspectBaselineAnalysis(bookId, (runRecordId) => execution.progressFor(runRecordId));
       expect([after.taskIntent!.mode, after.authorization!.origin]).toEqual(['first-baseline', 'background-analysis-enrollment']);
-      // The share is 900,000 tokens; the launch holds every Run to 500,000, and the lower one is frozen.
-      expect(after.planVersion!.materialInputs.runBudgetCeiling).toEqual({ kind: 'tokens', maxTotalTokens: 500_000 });
+      const frozen = { kind: 'tokens', maxTotalTokens: Math.min(share, 500_000) };
+      expect(after.planVersion!.materialInputs.runBudgetCeiling).toEqual(frozen);
+      expect(store.baselineAnalysisLedger.loadExecutionPlan(after.run!.runRecordId).runBudgetCeiling).toEqual(frozen);
       expect(['completed', 'completed-with-gaps']).toContain(after.run!.state);
       expect(calls.length).toBeGreaterThan(0);
-      expect(after.taskOutcome!.report!.background!.slice(0, 2)).toEqual(['由后台分析登记开始 · 按第 1 版登记', '范围：《developer-live 后台分析》这一本书；登记上限 900000 tokens']);
-      expect(after.taskOutcome!.report!.background![2]).toMatch(/这次运行的上限 500000 tokens$/u);
+      expect(after.taskOutcome!.report!.background!.slice(0, 2)).toEqual(['由后台分析登记开始 · 按第 1 版登记', `范围：《developer-live 后台分析》这一本书；登记上限 ${share} tokens`]);
+      expect(after.taskOutcome!.report!.background![2]).toContain(`这次运行的上限 ${frozen.maxTotalTokens} tokens`);
+      // The loader independently re-checks the lower bound; changing the launch cannot silently execute the old plan.
+      store.baselineAnalysisLedger.bindLaunch({ ...liveBinding({ kind: 'tokens', maxTotalTokens: 100 }), policy: v14 });
+      expect(refusalCode(() => store.baselineAnalysisLedger.loadExecutionPlan(after.run!.runRecordId))).toBe('ANALYSIS_ROUTE_STALE');
     } finally {
       await dispatcher.dispose();
       await execution.dispose();
