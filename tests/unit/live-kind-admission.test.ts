@@ -43,7 +43,7 @@ describe('live kind admission (#429)', () => {
     expect(liveKindAdmission(policy, initial, binding)).toEqual({
       ruleId: 'developer-live-public-samplebook-evaluation',
       modelRole: 'Main Editorial Role',
-      outboundDataCategories: ['public-or-synthetic', 'editor-authored-evaluation-text', 'house-exemplar-excerpt'],
+      outboundDataCategories: ['public-or-synthetic', 'editor-authored-evaluation-text', 'house-exemplar-excerpt', 'frozen-material-reference-excerpt'],
       crossUnitSynthesisAllowed: true,
     });
     expect(liveKindAdmission(policy, report, binding)?.ruleId).toBe('developer-live-public-samplebook-evaluation');

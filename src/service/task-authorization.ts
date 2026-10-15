@@ -1384,13 +1384,13 @@ function transact<T>(db: DatabaseSync, body: () => T): T {
  * is a row here and a branch in the four readings below, not a hunt through the seven statements
  * that used to spell `development-ci`, `v1`, and `0` out for themselves.
  */
-const PROVIDER_PROCESSING_PINS: Readonly<Record<TrustedOperationalScope, ProviderProcessingPin>> = {
+const PROVIDER_PROCESSING_PINS: Readonly<Record<Exclude<TrustedOperationalScope, 'ordinary-production'>, ProviderProcessingPin>> = {
   'development-ci': { operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0 },
   'developer-live': { operationalScope: 'developer-live', version: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
 };
 
 /** The developer-live versions earlier launches selected, whose retained records stay readable after a successor is selected. */
-const RETAINED_DEVELOPER_LIVE_VERSIONS: readonly DeveloperLiveProviderProcessingVersion[] = ['v5', 'v9', 'v10'];
+const RETAINED_DEVELOPER_LIVE_VERSIONS: readonly DeveloperLiveProviderProcessingVersion[] = ['v5', 'v9', 'v10', 'v11'];
 
 /**
  * The pin a stored value carries, or `null` when it is not exactly the pin of the scope it names.
@@ -1401,6 +1401,9 @@ function providerProcessingPinOf(value: unknown): ProviderProcessingPin | null {
   if (value === null || typeof value !== 'object') return null;
   const scope = (value as { operationalScope?: unknown }).operationalScope;
   if (typeof scope !== 'string' || !isTrustedOperationalScope(scope)) return null;
+  // An ordinary-production plan carries no pin yet: the scope is launch-selectable (Provider Processing v13) but this Task
+  // kind admits no ordinary-production plan until the production launch path supplies one.
+  if (scope === 'ordinary-production') return null;
   const pin = PROVIDER_PROCESSING_PINS[scope];
   if (canonicalJson(value) === canonicalJson(pin)) return pin;
   // Retained records keep their original immutable policy identity; only new plans use the current pin.
@@ -1419,6 +1422,8 @@ function providerProcessingPinOf(value: unknown): ProviderProcessingPin | null {
 export function planProviderProcessingPin(policy: LaunchPolicyProjection): ProviderProcessingPin {
   const scope = policy.operationalScope;
   requireTask(scope !== null, 'TASK_POLICY_UNAVAILABLE', '可信启动范围缺失。');
+  // Refused until the production launch path gives ordinary-production plans a real pin (Provider Processing v13).
+  requireTask(scope !== 'ordinary-production', 'TASK_POLICY_UNAVAILABLE', '本机生产范围尚未提供任务计划。');
   const pin = PROVIDER_PROCESSING_PINS[scope];
   requireTask(policy.providerProcessing.version === pin.version &&
     policy.providerProcessing.decision === pin.decision &&
