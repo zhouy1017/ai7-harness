@@ -1087,7 +1087,8 @@ export class BaselineAnalysisStore {
     if (this.#route?.fixtureIdentity.startsWith('sample1-model-clarification') === true ||
         rule?.clarificationQuestionAllowed === true) {
       this.#definition = withModelClarification(this.#definition);
-    } else this.#definition = this.#definition.clarificationBase ?? this.#definition;
+    // An unconfigured production route has no current rule, but a stopped Run still owns its frozen binding.
+    } else if (rule !== null) this.#definition = this.#definition.clarificationBase ?? this.#definition;
   }
 
   /** The launch's binding as its sentences read it: under ordinary-production without a route, 模型服务需设置. */
