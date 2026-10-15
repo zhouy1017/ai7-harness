@@ -1565,8 +1565,10 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="global-attention"]')?.textContent.includes('模型有一个需要你决定的问题')`, 'model-question-own-reason', 30_000);
     await waitFor(renderer, `document.querySelector('[data-attention-item=${JSON.stringify(`analysis:${questionTask}`)}]') || document.querySelector('[data-attention-open=${JSON.stringify(`analysis:${questionTask}`)}]')`, 'model-question-item-visible', 30_000);
     const questionAttention = await readSettledAttention(renderer);
-    const questionItem = questionAttention.groups.find((group) => group.key === 'decisions').items.find((item) => item.book.bookId === questionBook);
-    requireJourney(questionItem?.state === 'analysis-clarification' && questionItem.nextStep === 'answer-clarification' && questionItem.blocked === true &&
+    const questionItem = questionAttention.groups.find((group) => group.key === 'decisions').items.find((item) => item.bookId === questionBook);
+    const questionPage = await renderer.evaluate(READ_PAGE);
+    const shownQuestion = questionPage.groups.find((group) => group.key === 'decisions').items.find((item) => item.itemId === questionItem?.itemId);
+    requireJourney(questionItem?.state === 'analysis-clarification' && questionItem.nextStep === 'answer-clarification' && shownQuestion?.blocked === 'true' &&
       JSON.stringify(questionAttention.groups.find((group) => group.key === 'recent').items.map((item) => item.itemId)) === JSON.stringify(recentBeforeQuestion), 'model-question-decision-and-completed-counts');
     await openItem(renderer, questionItem.itemId, 'model-question-open');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawer==='open' && document.querySelector('.task-plan-clarification-question')?.textContent==='本范围按哪个阅读重点处理？'`, 'model-question-drawer', 30_000);
