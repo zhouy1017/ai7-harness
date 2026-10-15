@@ -61,6 +61,10 @@ function dialogueRule(overrides: Record<string, unknown> = {}): Record<string, u
     crossUnitSynthesisAllowed: false,
     materialReferencesAllowed: false,
     editorialDeliverablesAllowed: false,
+    clarificationQuestionAllowed: false,
+    clarificationTimeoutHours: null,
+    backgroundOrigin: false,
+    matchingActiveDefaultExecutionRuleAllowed: false,
     ...overrides,
   };
 }
