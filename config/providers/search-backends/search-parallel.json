@@ -39,19 +39,19 @@
   "evidence": {
     "parallel-search-reference": {
       "kind": "vendor-documentation",
-      "source": "Parallel documentation: Search quickstart (docs.parallel.ai/search/search-quickstart) and Search API reference (docs.parallel.ai/api-reference/search/search)",
+      "source": "Parallel documentation: Search quickstart (https://docs.parallel.ai/search/search-quickstart) and Search API reference (https://docs.parallel.ai/api-reference/search/search)",
       "readOn": "2026-10-16",
       "note": "POST https://api.parallel.ai/v1/search (generally available; no beta header on /v1) with the `x-api-key` header; `search_queries` (required), `objective`, `mode` (turbo, fast, basic, advanced; default advanced), `max_chars_total`, `advanced_settings` (max_results default 10, excerpt settings, source policy, fetch policy, location); unknown fields are rejected. The response is `{search_id, results[], warnings, usage, session_id}`, each result `url`, `title` (nullable), `publish_date`, `excerpts[]`."
     },
     "parallel-pricing": {
       "kind": "vendor-documentation",
-      "source": "Parallel pricing page (parallel.ai/pricing) and rate limits page (docs.parallel.ai/resources/rate-limits)",
+      "source": "Parallel pricing page (https://parallel.ai/pricing) and rate limits page (https://docs.parallel.ai/resources/rate-limits)",
       "readOn": "2026-10-16",
       "note": "Search per 1,000 requests with 10 results: Turbo $1 (~200 ms), Fast $1 (~700 ms), Basic $5 (~1 s), Advanced $5 (~3 s); extra results $1 per 1,000; up to 5,000 requests a month free; 600 requests per minute. No regional statement."
     },
     "parallel-search-mcp": {
       "kind": "vendor-documentation",
-      "source": "Parallel Search MCP page, docs.parallel.ai/integrations/mcp/search-mcp",
+      "source": "Parallel Search MCP page, https://docs.parallel.ai/integrations/mcp/search-mcp",
       "readOn": "2026-10-16",
       "note": "https://search.parallel.ai/mcp, tools `web_search` and `web_fetch`, \"no API key required\" and free to use anonymously at lower rate limits in `fast` mode; with a key, `Authorization: Bearer`. This is the keyless service ADR 0080 §7 names and the existing search forwarder speaks."
     }

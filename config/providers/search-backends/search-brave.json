@@ -33,13 +33,13 @@
   "evidence": {
     "brave-web-search-reference": {
       "kind": "vendor-documentation",
-      "source": "Brave Search API documentation: web search get-started, query parameters and the GET /res/v1/web/search reference (api-dashboard.search.brave.com)",
+      "source": "Brave Web Search API reference, https://api-dashboard.search.brave.com/api-reference/web/search/get; overview, https://api-dashboard.search.brave.com/app/documentation/web-search/get-started",
       "readOn": "2026-10-16",
       "note": "GET https://api.search.brave.com/res/v1/web/search with the `X-Subscription-Token` header as the only required header; `q`, `count` (1–20, default 20), `offset`, `country` (includes CN), `search_lang` (includes zh-hans, zh-hant), `ui_lang`, `freshness`, `safesearch`; results at `web.results[]` with `title` and `url`."
     },
     "brave-search-api-pricing": {
       "kind": "vendor-documentation",
-      "source": "Brave Search API product and pricing page, brave.com/search/api",
+      "source": "Brave Search API product and pricing page, https://brave.com/search/api/",
       "readOn": "2026-10-16",
       "note": "Search: \"$5 per 1,000 requests\", \"Includes $5 in free credits every month\", \"50 queries per second\". The page says nothing about availability in China."
     }

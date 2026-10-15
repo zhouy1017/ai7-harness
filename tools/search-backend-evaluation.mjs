@@ -29,9 +29,9 @@ import { evaluationRequest, readEvaluationAnswer } from './search-backend-evalua
  * **Network.** The measurement runs with the proxy OFF for this process alone: the proxy environment variables are removed
  * from the process, every request goes through an explicit direct `undici` Agent (so neither `NODE_USE_ENV_PROXY` nor any
  * environment proxy applies; Node never reads the Windows system proxy), and the host's system proxy setting is read and
- * recorded, never changed. One call is one request: a transport error (no HTTP response) is retried once and disclosed,
- * and nothing is retried for a better answer. Calls are sequential, paced, and each backend is run once: a recorded run
- * is never overwritten.
+ * recorded, never changed. One call is one request, without automatic retries: a timeout or interrupted body may already
+ * have been processed and billed (ADR 0067). Calls are sequential and paced. An exclusive run record is persisted before
+ * any request and checkpointed after each answer; an interrupted or concurrent run cannot silently repeat the measurement.
  *
  * **Output.** The console shows the query id, the status class, the latency and hit or miss; the run record under the
  * ignored `.cache/search-evaluation/` keeps the top five titles and URLs per query and nothing else of a body. The report
@@ -235,39 +235,40 @@ async function readBounded(response) {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-/** One call, with one retry only when no HTTP response came back; the answer keeps titles and URLs alone. */
-async function measuredCall(transport, declaration, query, credential) {
+const TRANSPORT_ERROR_CODES = new Set([
+  'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_SOCKET',
+  'ECONNRESET', 'ENOTFOUND', 'ECONNREFUSED', 'EAI_AGAIN', 'ETIMEDOUT', 'AbortError', 'TimeoutError',
+]);
+
+/** One request only, including when its outcome is unknown; the answer keeps titles and URLs alone. */
+export async function measuredCall(transport, declaration, query, credential) {
   const timeout = CALL_TIMEOUT_MS[declaration.protocol] ?? CALL_TIMEOUT_MS.default;
-  let retried = false;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const request = evaluationRequest(declaration, query, credential);
-    const started = performance.now();
-    try {
-      const response = await transport.fetch(request.url, {
-        method: request.method, headers: request.headers, body: request.body ?? undefined, redirect: 'manual',
-        dispatcher: transport.agent, signal: AbortSignal.timeout(timeout),
-      });
-      const text = await readBounded(response);
-      const latencyMs = Math.round(performance.now() - started);
-      let answer = { hits: null, shape: null, costUsd: null };
-      if (response.status >= 200 && response.status < 300) {
-        try {
-          answer = readEvaluationAnswer(declaration, JSON.parse(text));
-        } catch {
-          answer = { hits: null, shape: 'unparsable', costUsd: null };
-        }
+  const request = evaluationRequest(declaration, query, credential);
+  const started = performance.now();
+  let status = null;
+  try {
+    const response = await transport.fetch(request.url, {
+      method: request.method, headers: request.headers, body: request.body ?? undefined, redirect: 'manual',
+      dispatcher: transport.agent, signal: AbortSignal.timeout(timeout),
+    });
+    status = response.status;
+    const text = await readBounded(response);
+    const latencyMs = Math.round(performance.now() - started);
+    let answer = { hits: null, shape: null, costUsd: null };
+    if (status >= 200 && status < 300) {
+      try {
+        answer = readEvaluationAnswer(declaration, JSON.parse(text));
+      } catch {
+        answer = { hits: null, shape: 'unparsable', costUsd: null };
       }
-      return { status: response.status, latencyMs, retried, transportError: null, ...answer };
-    } catch (error) {
-      if (attempt === 0) {
-        retried = true;
-        continue;
-      }
-      const code = error?.cause?.code ?? error?.name ?? 'transport-error';
-      return { status: null, latencyMs: Math.round(performance.now() - started), retried, transportError: String(code).slice(0, 64), hits: null, shape: null, costUsd: null };
     }
+    return { status, latencyMs, retried: false, transportError: null, ...answer };
+  } catch (error) {
+    const code = error?.cause?.code ?? error?.name;
+    const transportError = error instanceof SearchEvaluationError && error.code === 'SEARCH_EVALUATION/body-too-large'
+      ? error.code : TRANSPORT_ERROR_CODES.has(code) ? code : 'transport-error';
+    return { status, latencyMs: Math.round(performance.now() - started), retried: false, transportError, hits: null, shape: null, costUsd: null };
   }
-  throw new SearchEvaluationError('SEARCH_EVALUATION/unreachable-branch');
 }
 
 async function directTransport() {
@@ -286,6 +287,22 @@ const runPath = (backendId) => join(RUNS_DIRECTORY, `${backendId}.json`);
 /** What the measuring developer observed beside the runs (probes before a run, the host's routing), one sentence each. */
 const DISCLOSURES_PATH = join(RUNS_DIRECTORY, 'disclosures.json');
 
+/** Claim before sending; even an incomplete record fences a retry after interruption or a concurrent invocation. */
+export async function recordRunOnce(path, run, measure) {
+  await mkdir(dirname(path), { recursive: true });
+  const serialize = () => `${JSON.stringify(run, null, 2)}\n`;
+  try {
+    await writeFile(path, serialize(), { encoding: 'utf8', flag: 'wx', flush: true });
+  } catch (error) {
+    if (error?.code === 'EEXIST') throw new SearchEvaluationError('SEARCH_EVALUATION/already-run', run.backendId);
+    throw error;
+  }
+  const checkpoint = () => writeFile(path, serialize(), { encoding: 'utf8', flush: true });
+  await measure(checkpoint);
+  run.finishedAt = new Date().toISOString();
+  await checkpoint();
+}
+
 async function runBackend(backendId) {
   if (existsSync(runPath(backendId))) throw new SearchEvaluationError('SEARCH_EVALUATION/already-run', `${backendId} was measured once; its run record is kept`);
   const proxyEnvironment = clearProcessProxy();
@@ -295,25 +312,29 @@ async function runBackend(backendId) {
   const { querySet, sha256 } = await readQuerySet();
   const startedAt = new Date().toISOString();
   const run = { backendId, startedAt, finishedAt: null, querySetSha256: sha256, network: { proxyEnvironment, nodeEnvironmentProxy: 'off', systemProxy }, note: null, calls: [] };
-  if (declaration.support !== 'supported') {
-    run.note = 'not-supported: nothing was sent';
-  } else {
-    const credential = await credentialFor(owners, declaration);
-    const transport = await directTransport();
-    console.log(`${backendId}: ${querySet.queries.length} queries, proxy environment ${proxyEnvironment}, system proxy ${systemProxy}`);
-    for (const [index, query] of querySet.queries.entries()) {
-      if (index > 0) await pause(PACE_MS);
-      const call = await measuredCall(transport, declaration, query.query, credential);
-      const hits = call.hits === null ? null : call.hits.slice(0, TOP_K);
-      run.calls.push({ id: query.id, status: call.status, latencyMs: call.latencyMs, retried: call.retried, transportError: call.transportError, shape: call.shape, costUsd: call.costUsd, hits });
-      const judged = hits === null ? 'no results' : judgeQuery(query, querySet.referenceDomains, hits).hit ? 'hit' : 'miss';
-      console.log(`${backendId} ${query.id} ${statusClass(call.status)} ${call.latencyMs}ms ${judged}${call.retried ? ' (transport retry)' : ''}`);
-    }
-    await transport.agent.close();
+  const supported = declaration.support === 'supported';
+  const credential = supported ? await credentialFor(owners, declaration) : null;
+  const transport = supported ? await directTransport() : null;
+  try {
+    await recordRunOnce(runPath(backendId), run, async (checkpoint) => {
+      if (!supported) {
+        run.note = 'not-supported: nothing was sent';
+        return;
+      }
+      console.log(`${backendId}: ${querySet.queries.length} queries, proxy environment ${proxyEnvironment}, system proxy ${systemProxy}`);
+      for (const [index, query] of querySet.queries.entries()) {
+        if (index > 0) await pause(PACE_MS);
+        const call = await measuredCall(transport, declaration, query.query, credential);
+        const hits = call.hits === null ? null : call.hits.slice(0, TOP_K);
+        run.calls.push({ id: query.id, status: call.status, latencyMs: call.latencyMs, retried: call.retried, transportError: call.transportError, shape: call.shape, costUsd: call.costUsd, hits });
+        await checkpoint();
+        const judged = hits === null ? 'no results' : judgeQuery(query, querySet.referenceDomains, hits).hit ? 'hit' : 'miss';
+        console.log(`${backendId} ${query.id} ${statusClass(call.status)} ${call.latencyMs}ms ${judged}`);
+      }
+    });
+  } finally {
+    await transport?.agent.close();
   }
-  run.finishedAt = new Date().toISOString();
-  await mkdir(RUNS_DIRECTORY, { recursive: true });
-  await writeFile(runPath(backendId), `${JSON.stringify(run, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
   console.log(`${backendId}: run recorded`);
 }
 
@@ -330,8 +351,16 @@ async function probeBackend(backendId) {
   const transport = await directTransport();
   const call = await measuredCall(transport, declaration, querySet.probe.query, credential);
   await transport.agent.close();
-  console.log(`${backendId}: ${call.status === null ? `unreachable (${call.transportError})` : `reachable, HTTP ${statusClass(call.status)}`}, ${call.latencyMs}ms, ${call.hits === null ? 'no readable results' : `${call.hits.length} results`}${call.retried ? ', one transport retry' : ''}`);
-  for (const hit of (call.hits ?? []).slice(0, PROBE_TITLES)) console.log(`  ${hit.title.slice(0, 120)} — ${hit.url.slice(0, 200)}`);
+  console.log(formatProbeResult(backendId, call));
+}
+
+/** The bounded probe projection: counts and at most three titles/URLs, with no raw body or error detail. */
+export function formatProbeResult(backendId, call) {
+  const singleLine = (value, limit) => value.replace(/[\r\n\u0000-\u001f\u007f]/gu, ' ').slice(0, limit);
+  return [
+    `${backendId}: ${call.status === null ? `unreachable (${call.transportError})` : `reachable, HTTP ${statusClass(call.status)}`}, ${call.latencyMs}ms, ${call.hits === null ? 'no readable results' : `${call.hits.length} results`}`,
+    ...(call.hits ?? []).slice(0, PROBE_TITLES).map((hit) => `  ${singleLine(hit.title, 120)} — ${singleLine(hit.url, 200)}`),
+  ].join('\n');
 }
 
 async function readRuns(owners) {
@@ -350,6 +379,7 @@ async function writeReport() {
   if (runs.size === 0) throw new SearchEvaluationError('SEARCH_EVALUATION/no-runs');
   for (const [backendId, run] of runs) {
     if (run.querySetSha256 !== sha256) throw new SearchEvaluationError('SEARCH_EVALUATION/query-set-changed', backendId);
+    if (typeof run.finishedAt !== 'string') throw new SearchEvaluationError('SEARCH_EVALUATION/run-incomplete', backendId);
   }
   const profiles = [];
   for (const declaration of owners.SEARCH_BACKEND_DECLARATIONS) {
@@ -382,10 +412,11 @@ async function writeReport() {
   };
   const outcome = owners.searchBackendOutcome(owners.SEARCH_BACKEND_DECLARATIONS, profiles, CNY_PER_USD.rate);
   const record = { schemaVersion: 1, evaluation, profiles, outcome: { excluded: outcome.excluded, ranking: outcome.ranking, default: outcome.default } };
-  await writeFile(join(ROOT, PROFILES_PATH), `${JSON.stringify(record, null, 2)}\n`, 'utf8');
   const disclosures = existsSync(DISCLOSURES_PATH) ? JSON.parse(await readFile(DISCLOSURES_PATH, 'utf8')) : [];
   if (!Array.isArray(disclosures) || !disclosures.every((entry) => typeof entry === 'string')) throw new SearchEvaluationError('SEARCH_EVALUATION/disclosures-invalid');
-  await writeFile(join(ROOT, REPORT_PATH), renderReport({ owners, querySet, runs, record, disclosures }), 'utf8');
+  const report = renderReport({ owners, querySet, runs, record, disclosures });
+  await writeFile(join(ROOT, PROFILES_PATH), `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+  await writeFile(join(ROOT, REPORT_PATH), report, 'utf8');
   console.log(`wrote ${PROFILES_PATH} and ${REPORT_PATH}`);
 }
 
@@ -412,7 +443,7 @@ const cell = (text) => String(text).replaceAll('|', '\\|').replaceAll('\n', ' ')
 function priceText(declaration, profile) {
   const { amount, currency, per } = declaration.price;
   if (amount === null) return profile?.costPerCallUsd === null || profile === undefined ? 'tokens (not measured)' : `tokens, measured ${profile.costPerCallUsd} USD per call`;
-  return `${amount} ${currency} per ${per === 1 ? 'call' : `${per.toLocaleString('en-US')} calls`}`;
+  return `${amount} ${currency} per ${per === 1 ? 'call' : `${per.toLocaleString('en-US')} calls`}${declaration.priceSource.verified ? '' : ' (source unverified; re-verify before 设置 display)'}`;
 }
 
 function renderReport({ owners, querySet, runs, record, disclosures = [] }) {
@@ -441,6 +472,7 @@ function renderReport({ owners, querySet, runs, record, disclosures = [] }) {
     `- **Judgement rubric:** ${querySet.rubric.hit} ${querySet.rubric.primary} ${querySet.rubric.halves}`,
     `- **Network condition:** ${evaluation.network.condition} Observed: proxy environment \`${evaluation.network.proxyEnvironment}\`, Node environment proxy \`${evaluation.network.nodeEnvironmentProxy}\`, Windows system proxy \`${evaluation.network.systemProxy}\` (read, not changed; Node's fetch does not use it).`,
     `- **Procedure:** each backend run once over all ${evaluation.querySet.queries} queries, sequentially, ${PACE_MS / 1000} s apart, ${CALL_TIMEOUT_MS.default / 1000} s per call (${CALL_TIMEOUT_MS['anthropic-messages-web-search'] / 1000} s for the token-billed DeepSeek call); one retry only when no HTTP response came back, disclosed per backend; nothing retried for a better answer. Latency is the wall time to the full body of every call that got an HTTP response.`,
+    '- **Review correction after capture:** the original harness allowed an automatic transport retry and claimed a run only after completion. The reviewed harness sends each request once and persists an exclusive run claim before sending, checkpointing after each answer; interrupted or concurrent invocations refuse to repeat it. The historical profiles and probe disclosure below are unchanged; no measurement was repeated for this correction.',
     '- **Credentials:** each slot enrolled by path with `tools/enroll-dev-credential.mjs` under the ADR 0067 amendment clause of Issue #883; the tool asks the Credential Broker for readiness and reads the value through the broker\'s own read-only store resolver in-process, never from a file, and prints no key and no payload beyond titles and URLs.',
     `- **Price order:** USD as stated; CNY converted at ${CNY_PER_USD.rate} CNY per USD (${CNY_PER_USD.source}, read ${CNY_PER_USD.readOn}) for ordering only; DeepSeek bills tokens, so its price is the measured mean token cost per call at the documented peak price of \`deepseek-flash\`.`,
     '',
@@ -474,6 +506,9 @@ function renderReport({ owners, querySet, runs, record, disclosures = [] }) {
     lines.push('');
   }
   lines.push('## Readings', '');
+  for (const declaration of declarations.filter((entry) => !entry.priceSource.verified)) {
+    lines.push(`- **${declaration.displayName} price source unverified:** ${declaration.priceSource.note} The original price input is retained solely to reproduce the recorded ranking; slice 6b must surface the caveat and re-verify the source before presenting the price in 设置.`, '');
+  }
   for (const id of ['search-tinyfish', 'search-deepseek']) {
     const declaration = byId.get(id);
     if (declaration === undefined) continue;

@@ -45,6 +45,8 @@ export interface SearchBackendDeclaration {
   readonly keyRequired: boolean;
   /** The vendor page's price: `amount` in `currency` per `per` calls, or null amount where it bills otherwise (`basis`). */
   readonly price: { readonly amount: number | null; readonly currency: 'USD' | 'CNY'; readonly per: number; readonly basis: string };
+  /** The price's reading, including an explicit caveat when its original vendor source could not be retained. */
+  readonly priceSource: { readonly verified: boolean; readonly source: string | null; readonly readOn: string | null; readonly note: string | null };
 }
 
 /** What the evaluation measured for one backend: counts, rates and latencies only, never a result or a payload. */
@@ -149,6 +151,9 @@ export function searchBackendDeclarationOf(document: unknown): SearchBackendDecl
   const currency = price['currency'];
   requireConfiguration((amount === null || (typeof amount === 'number' && amount >= 0)) && (currency === 'USD' || currency === 'CNY') &&
     typeof price['per'] === 'number' && price['per'] >= 1 && typeof price['basis'] === 'string', `${id} price`);
+  const evidence = document['evidence'];
+  const priceEvidence = isRecord(evidence) && typeof price['evidence'] === 'string' ? evidence[price['evidence']] : null;
+  requireConfiguration(isRecord(priceEvidence) && (priceEvidence['kind'] === 'vendor-documentation' || priceEvidence['kind'] === 'unverified'), `${id} price evidence`);
   const anonymousRequest = document['anonymousRequest'];
   let anonymous: SearchBackendDeclaration['anonymous'] = null;
   if (anonymousRequest !== undefined) {
@@ -176,6 +181,12 @@ export function searchBackendDeclarationOf(document: unknown): SearchBackendDecl
     anthropicVersion: stringOrNull(credential['anthropicVersion']),
     keyRequired: credential['keyRequired'] as boolean,
     price: Object.freeze({ amount: amount as number | null, currency, per: price['per'] as number, basis: price['basis'] as string }),
+    priceSource: Object.freeze({
+      verified: priceEvidence['kind'] === 'vendor-documentation',
+      source: stringOrNull(priceEvidence['source']),
+      readOn: stringOrNull(priceEvidence['readOn']),
+      note: stringOrNull(priceEvidence['note']),
+    }),
   });
 }
 

@@ -9,7 +9,7 @@
     "endpoint": "https://api.bochaai.com/v1/web-search",
     "method": "POST",
     "protocol": "bocha-web-search",
-    "evidence": "bocha-product-document"
+    "evidence": "bocha-open-platform"
   },
   "credential": {
     "slot": "search-bochaai",
@@ -17,38 +17,33 @@
     "headerForm": "authorization-bearer",
     "anthropicVersion": null,
     "keyRequired": true,
-    "evidence": "bocha-product-document"
+    "evidence": "bocha-open-platform"
   },
   "price": {
     "amount": 0.036,
     "currency": "CNY",
     "per": 1,
-    "basis": "list price of Web Search per call, tiered down by average daily volume; AI Search (/v1/ai-search) is ¥0.060 per call and is not this interface",
-    "evidence": "bocha-product-document"
+    "basis": "historical list-price input retained from the evaluation; source unverified, re-verify before display in 设置",
+    "evidence": "bocha-price-unverified"
   },
   "reachability": {
-    "note": "A mainland-China service: the vendor states its data and results stay in China (数据不出海) and that it serves up to 2000 QPS at about one second. Reachability from outside China is not stated.",
-    "evidence": "bocha-product-document"
+    "note": "The public portal states no regional availability; reachability is the recorded host measurement, not a vendor promise.",
+    "evidence": "bocha-open-platform"
   },
   "evidence": {
-    "bocha-product-document": {
-      "kind": "vendor-documentation",
-      "source": "博查搜索API、排序API 产品服务文档 (杭州博查搜索科技有限公司, PDF of 2025-05-27, mkp-res.hc-cdn.com marketplace attachment 0000000000FE5A9696F)",
-      "readOn": "2026-10-16",
-      "note": "States 请求方式 POST, 请求接口 https://api.bochaai.com/v1/web-search, `Authorization: Bearer` with the API key, request fields `query`, `summary`, `freshness`, `count` (至多 50 条), a response compatible with the Bing Search API whose web results carry `name`, `url`, `snippet`, `summary`, `siteName`, and list prices Web Search ¥0.036 and AI Search ¥0.060 per call."
-    },
     "bocha-open-platform": {
       "kind": "vendor-documentation",
-      "source": "博查 AI 开放平台, open.bochaai.com and open.bochaai.com/overview",
+      "source": "Bocha open-platform interface documentation, https://open.bochaai.com/",
       "readOn": "2026-10-16",
-      "note": "The portal grants new users a free package of 1,000 calls and links its API documentation and pricing to Feishu wiki pages (bocha-ai.feishu.cn) that require a Feishu login, so the live documentation was not read and the product document above is the reading."
+      "note": "The public example uses POST https://api.bochaai.com/v1/web-search, Authorization Bearer authentication, query/freshness/summary/count fields and webPages.value results with name and url. The linked pricing page https://bocha-ai.feishu.cn/wiki/JYSbwzdPIiFnz4kDYPXcHSDrnZb and documentation page https://bocha-ai.feishu.cn/wiki/HmtOw1z6vik14Fkdu5uc9VaInBb were inaccessible at review time."
+    },
+    "bocha-price-unverified": {
+      "kind": "unverified",
+      "note": "Vendor PDF attachment read by the Worker on 2026-10-16, exact URL not retained; portal pricing page unreachable at review time (redirects to Feishu); re-verify before the price is shown in 设置."
     }
   },
   "openQuestions": [
-    "Whether the response wraps the Bing-compatible object in a `data` field is not stated in the product document; the evaluation reads `data.webPages.value` and `webPages.value` alike and records which one answered.",
-    "The live pricing page sits behind a Feishu login; the price is the product document's list price."
-  ],
-  "notes": [
-    "The vendor states it is DeepSeek's official web-search supplier; that is a statement, not evidence that DeepSeek's server-side search uses it."
+    "The public portal shows an unwrapped webPages object; the measured response used data.webPages.value, which the evaluation also reads.",
+    "Re-verify the historical ¥0.036 per-call price against a retrievable vendor pricing source before it is displayed in 设置."
   ]
 }

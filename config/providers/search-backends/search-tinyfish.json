@@ -33,19 +33,19 @@
   "evidence": {
     "tinyfish-search-api": {
       "kind": "vendor-documentation",
-      "source": "TinyFish documentation, Search API page, docs.tinyfish.ai/search-api",
+      "source": "TinyFish documentation, Search API page, https://docs.tinyfish.ai/search-api",
       "readOn": "2026-10-16",
       "note": "A synchronous web search: GET https://api.search.tinyfish.ai?query=… with optional `location`, `language`, `recency_minutes` or `after_date`/`before_date`, `domain_type` (web, news, research_paper) and `purpose`; JSON `{query, results[], total_results, page}`, each result `position`, `site_name`, `title`, `snippet`, `url`; the example returns 10 results. \"Search is free up to 12,000 requests per day.\""
     },
     "tinyfish-authentication": {
       "kind": "vendor-documentation",
-      "source": "TinyFish documentation, Authentication page, docs.tinyfish.ai/authentication",
+      "source": "TinyFish documentation, Authentication page, https://docs.tinyfish.ai/authentication",
       "readOn": "2026-10-16",
       "note": "\"All REST API requests require an API key passed in the `X-API-Key` header.\""
     },
     "tinyfish-pricing": {
       "kind": "vendor-documentation",
-      "source": "TinyFish pricing page, www.tinyfish.ai/pricing, with the Agent API and runs pages (docs.tinyfish.ai/agent-api, docs.tinyfish.ai/key-concepts/runs)",
+      "source": "TinyFish pricing page, https://www.tinyfish.ai/pricing, with the Agent API and runs pages (https://docs.tinyfish.ai/agent-api, https://docs.tinyfish.ai/key-concepts/runs)",
       "readOn": "2026-10-16",
       "note": "Search \"$0.00 per request\", \"30 requests / min · 500 requests / hour\"; Fetch (POST https://api.fetch.tinyfish.ai) free; the Agent API (POST https://agent.tinyfish.ai/v1/automation/run, run-async, run-sse; `url` + `goal`; 150 steps by default, 500 at most) $0.016 per step with 2 concurrent runs; Browser $0.002 per minute; new accounts receive $8 of wallet funds. No regional statement."
     }

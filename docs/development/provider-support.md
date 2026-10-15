@@ -815,7 +815,7 @@ Generated from the search backend documents under [`config/providers/search-back
 
 | Backend | Support | Endpoint | Key | Price | Slot | Development Credential Reference |
 | --- | --- | --- | --- | --- | --- | --- |
-| 博查 Bocha Web Search | supported | `POST https://api.bochaai.com/v1/web-search` (`bocha-web-search`) | required, `authorization: Bearer` | 0.036 CNY per 1 call — list price of Web Search per call, tiered down by average daily volume; AI Search (/v1/ai-search) is ¥0.060 per call and is not this interface | `search-bochaai` | `6e655b12-b3b0-430e-811c-911b5d0f2ccd` |
+| 博查 Bocha Web Search | supported | `POST https://api.bochaai.com/v1/web-search` (`bocha-web-search`) | required, `authorization: Bearer` | 0.036 CNY per 1 call — historical list-price input retained from the evaluation; source unverified, re-verify before display in 设置 (source unverified: Vendor PDF attachment read by the Worker on 2026-10-16, exact URL not retained; portal pricing page unreachable at review time (redirects to Feishu); re-verify before the price is shown in 设置.) | `search-bochaai` | `6e655b12-b3b0-430e-811c-911b5d0f2ccd` |
 | Brave Search API | supported | `GET https://api.search.brave.com/res/v1/web/search` (`brave-web-search`) | required, `x-subscription-token` | 5 USD per 1,000 calls — the Search plan's price per 1,000 requests, with $5 of free credit every month and 50 queries per second; the Answers plan ($4 per 1,000 plus tokens) is not this interface | `search-brave` | `3f0f367d-f343-4123-b86d-31d0bfac556e` |
 | DeepSeek 服务端搜索（官方） | supported | `POST https://api.deepseek.com/anthropic/v1/messages` (`anthropic-messages-web-search`) | required, `x-api-key` with `anthropic-version: 2023-06-01` | no per-call price — billed by tokens alone, with no per-search fee: deepseek-flash input $0.15 off-peak / $0.30 peak and output $0.60 / $1.20 per million tokens (cache hits $0.003 / $0.006); the search's own extra model requests are billed as tokens too, so the evaluation records the measured token cost per call | `search-deepseek` | `5d835534-e000-4b72-91c8-1dd986a6fcc7` |
 | Parallel Search | supported | `POST https://api.parallel.ai/v1/search` (`parallel-search`) | required, `x-api-key` | 5 USD per 1,000 calls — the default `advanced` mode with 10 results per request, which is what the evaluation sends; `basic` is also $5, `fast` and `turbo` $1 per 1,000, extra results $1 per 1,000; 5,000 requests a month are free | `search-parallel` | `983793e7-f281-4767-b5e6-9342a2d00202` |
@@ -824,18 +824,16 @@ Generated from the search backend documents under [`config/providers/search-back
 ### `search-bochaai`
 
 - Document: [`config/providers/search-backends/search-bochaai.json`](../../config/providers/search-backends/search-bochaai.json); service name `bochaai`.
-- Reachability as the vendor states it: A mainland-China service: the vendor states its data and results stay in China (数据不出海) and that it serves up to 2000 QPS at about one second. Reachability from outside China is not stated.
-- The vendor states it is DeepSeek's official web-search supplier; that is a statement, not evidence that DeepSeek's server-side search uses it.
+- Reachability as the vendor states it: The public portal states no regional availability; reachability is the recorded host measurement, not a vendor promise.
 
 Readings:
 
-- `bocha-product-document` — `vendor-documentation`, 博查搜索API、排序API 产品服务文档 (杭州博查搜索科技有限公司, PDF of 2025-05-27, mkp-res.hc-cdn.com marketplace attachment 0000000000FE5A9696F), read 2026-10-16. States 请求方式 POST, 请求接口 https://api.bochaai.com/v1/web-search, `Authorization: Bearer` with the API key, request fields `query`, `summary`, `freshness`, `count` (至多 50 条), a response compatible with the Bing Search API whose web results carry `name`, `url`, `snippet`, `summary`, `siteName`, and list prices Web Search ¥0.036 and AI Search ¥0.060 per call.
-- `bocha-open-platform` — `vendor-documentation`, 博查 AI 开放平台, open.bochaai.com and open.bochaai.com/overview, read 2026-10-16. The portal grants new users a free package of 1,000 calls and links its API documentation and pricing to Feishu wiki pages (bocha-ai.feishu.cn) that require a Feishu login, so the live documentation was not read and the product document above is the reading.
+- `bocha-open-platform` — `vendor-documentation`, Bocha open-platform interface documentation, https://open.bochaai.com/, read 2026-10-16. The public example uses POST https://api.bochaai.com/v1/web-search, Authorization Bearer authentication, query/freshness/summary/count fields and webPages.value results with name and url. The linked pricing page https://bocha-ai.feishu.cn/wiki/JYSbwzdPIiFnz4kDYPXcHSDrnZb and documentation page https://bocha-ai.feishu.cn/wiki/HmtOw1z6vik14Fkdu5uc9VaInBb were inaccessible at review time.
 
 Open:
 
-- Whether the response wraps the Bing-compatible object in a `data` field is not stated in the product document; the evaluation reads `data.webPages.value` and `webPages.value` alike and records which one answered.
-- The live pricing page sits behind a Feishu login; the price is the product document's list price.
+- The public portal shows an unwrapped webPages object; the measured response used data.webPages.value, which the evaluation also reads.
+- Re-verify the historical ¥0.036 per-call price against a retrievable vendor pricing source before it is displayed in 设置.
 
 ### `search-brave`
 
@@ -844,8 +842,8 @@ Open:
 
 Readings:
 
-- `brave-web-search-reference` — `vendor-documentation`, Brave Search API documentation: web search get-started, query parameters and the GET /res/v1/web/search reference (api-dashboard.search.brave.com), read 2026-10-16. GET https://api.search.brave.com/res/v1/web/search with the `X-Subscription-Token` header as the only required header; `q`, `count` (1–20, default 20), `offset`, `country` (includes CN), `search_lang` (includes zh-hans, zh-hant), `ui_lang`, `freshness`, `safesearch`; results at `web.results[]` with `title` and `url`.
-- `brave-search-api-pricing` — `vendor-documentation`, Brave Search API product and pricing page, brave.com/search/api, read 2026-10-16. Search: "$5 per 1,000 requests", "Includes $5 in free credits every month", "50 queries per second". The page says nothing about availability in China.
+- `brave-web-search-reference` — `vendor-documentation`, Brave Web Search API reference, https://api-dashboard.search.brave.com/api-reference/web/search/get; overview, https://api-dashboard.search.brave.com/app/documentation/web-search/get-started, read 2026-10-16. GET https://api.search.brave.com/res/v1/web/search with the `X-Subscription-Token` header as the only required header; `q`, `count` (1–20, default 20), `offset`, `country` (includes CN), `search_lang` (includes zh-hans, zh-hant), `ui_lang`, `freshness`, `safesearch`; results at `web.results[]` with `title` and `url`.
+- `brave-search-api-pricing` — `vendor-documentation`, Brave Search API product and pricing page, https://brave.com/search/api/, read 2026-10-16. Search: "$5 per 1,000 requests", "Includes $5 in free credits every month", "50 queries per second". The page says nothing about availability in China.
 
 Open:
 
@@ -860,9 +858,9 @@ Open:
 
 Readings:
 
-- `deepseek-anthropic-api` — `vendor-documentation`, DeepSeek official Anthropic API guide, api-docs.deepseek.com/guides/anthropic_api, read 2026-10-16. Base URL https://api.deepseek.com/anthropic; `x-api-key` Fully Supported and `anthropic-version` Ignored. The field-compatibility table lists the content blocks `server_tool_use` Supported and `web_search_tool_result` Supported (`search_result`, `mcp_tool_use`, `mcp_tool_result` Not Supported, `mcp_servers` Ignored); its `tools` rows cover `name`, `input_schema`, `description` (Fully Supported) and `cache_control` (Ignored) and name no tool `type`, so no server tool type string is stated on this page.
-- `deepseek-claude-code-web-search` — `vendor-documentation`, DeepSeek official Claude Code integration guide, api-docs.deepseek.com/quick_start/agent_integrations/claude_code, read 2026-10-16. "The DeepSeek API natively supports the Web Search feature in Claude Code … if the model determines that your question requires a web search, it will invoke the Web Search tool and perform the search through the API provided by DeepSeek. Because invoking the Web Search tool generates additional LLM API requests … additional model token costs will be incurred." The tool type Claude Code sends is not named.
-- `deepseek-pricing` — `vendor-documentation`, DeepSeek official models and pricing page, api-docs.deepseek.com/quick_start/pricing, read 2026-10-16. Token prices per million for deepseek-flash: cache-hit input $0.003 / $0.006, cache-miss input $0.15 / $0.30, output $0.60 / $1.20 (off-peak / peak); no per-search charge is listed.
+- `deepseek-anthropic-api` — `vendor-documentation`, DeepSeek official Anthropic API guide, https://api-docs.deepseek.com/guides/anthropic_api, read 2026-10-16. Base URL https://api.deepseek.com/anthropic; `x-api-key` Fully Supported and `anthropic-version` Ignored. The field-compatibility table lists the content blocks `server_tool_use` Supported and `web_search_tool_result` Supported (`search_result`, `mcp_tool_use`, `mcp_tool_result` Not Supported, `mcp_servers` Ignored); its `tools` rows cover `name`, `input_schema`, `description` (Fully Supported) and `cache_control` (Ignored) and name no tool `type`, so no server tool type string is stated on this page.
+- `deepseek-claude-code-web-search` — `vendor-documentation`, DeepSeek official Claude Code integration guide, https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code, read 2026-10-16. The guide states that Claude Code can invoke server-side Web Search through the DeepSeek API; model requests used to summarize retrieved results incur additional token charges. It does not name the server tool type.
+- `deepseek-pricing` — `vendor-documentation`, DeepSeek official models and pricing page, https://api-docs.deepseek.com/quick_start/pricing, read 2026-10-16. Token prices per million for deepseek-flash: cache-hit input $0.003 / $0.006, cache-miss input $0.15 / $0.30, output $0.60 / $1.20 (off-peak / peak); no per-search charge is listed.
 
 Open:
 
@@ -876,9 +874,9 @@ Open:
 
 Readings:
 
-- `parallel-search-reference` — `vendor-documentation`, Parallel documentation: Search quickstart (docs.parallel.ai/search/search-quickstart) and Search API reference (docs.parallel.ai/api-reference/search/search), read 2026-10-16. POST https://api.parallel.ai/v1/search (generally available; no beta header on /v1) with the `x-api-key` header; `search_queries` (required), `objective`, `mode` (turbo, fast, basic, advanced; default advanced), `max_chars_total`, `advanced_settings` (max_results default 10, excerpt settings, source policy, fetch policy, location); unknown fields are rejected. The response is `{search_id, results[], warnings, usage, session_id}`, each result `url`, `title` (nullable), `publish_date`, `excerpts[]`.
-- `parallel-pricing` — `vendor-documentation`, Parallel pricing page (parallel.ai/pricing) and rate limits page (docs.parallel.ai/resources/rate-limits), read 2026-10-16. Search per 1,000 requests with 10 results: Turbo $1 (~200 ms), Fast $1 (~700 ms), Basic $5 (~1 s), Advanced $5 (~3 s); extra results $1 per 1,000; up to 5,000 requests a month free; 600 requests per minute. No regional statement.
-- `parallel-search-mcp` — `vendor-documentation`, Parallel Search MCP page, docs.parallel.ai/integrations/mcp/search-mcp, read 2026-10-16. https://search.parallel.ai/mcp, tools `web_search` and `web_fetch`, "no API key required" and free to use anonymously at lower rate limits in `fast` mode; with a key, `Authorization: Bearer`. This is the keyless service ADR 0080 §7 names and the existing search forwarder speaks.
+- `parallel-search-reference` — `vendor-documentation`, Parallel documentation: Search quickstart (https://docs.parallel.ai/search/search-quickstart) and Search API reference (https://docs.parallel.ai/api-reference/search/search), read 2026-10-16. POST https://api.parallel.ai/v1/search (generally available; no beta header on /v1) with the `x-api-key` header; `search_queries` (required), `objective`, `mode` (turbo, fast, basic, advanced; default advanced), `max_chars_total`, `advanced_settings` (max_results default 10, excerpt settings, source policy, fetch policy, location); unknown fields are rejected. The response is `{search_id, results[], warnings, usage, session_id}`, each result `url`, `title` (nullable), `publish_date`, `excerpts[]`.
+- `parallel-pricing` — `vendor-documentation`, Parallel pricing page (https://parallel.ai/pricing) and rate limits page (https://docs.parallel.ai/resources/rate-limits), read 2026-10-16. Search per 1,000 requests with 10 results: Turbo $1 (~200 ms), Fast $1 (~700 ms), Basic $5 (~1 s), Advanced $5 (~3 s); extra results $1 per 1,000; up to 5,000 requests a month free; 600 requests per minute. No regional statement.
+- `parallel-search-mcp` — `vendor-documentation`, Parallel Search MCP page, https://docs.parallel.ai/integrations/mcp/search-mcp, read 2026-10-16. https://search.parallel.ai/mcp, tools `web_search` and `web_fetch`, "no API key required" and free to use anonymously at lower rate limits in `fast` mode; with a key, `Authorization: Bearer`. This is the keyless service ADR 0080 §7 names and the existing search forwarder speaks.
 
 Open:
 
@@ -892,9 +890,9 @@ Open:
 
 Readings:
 
-- `tinyfish-search-api` — `vendor-documentation`, TinyFish documentation, Search API page, docs.tinyfish.ai/search-api, read 2026-10-16. A synchronous web search: GET https://api.search.tinyfish.ai?query=… with optional `location`, `language`, `recency_minutes` or `after_date`/`before_date`, `domain_type` (web, news, research_paper) and `purpose`; JSON `{query, results[], total_results, page}`, each result `position`, `site_name`, `title`, `snippet`, `url`; the example returns 10 results. "Search is free up to 12,000 requests per day."
-- `tinyfish-authentication` — `vendor-documentation`, TinyFish documentation, Authentication page, docs.tinyfish.ai/authentication, read 2026-10-16. "All REST API requests require an API key passed in the `X-API-Key` header."
-- `tinyfish-pricing` — `vendor-documentation`, TinyFish pricing page, www.tinyfish.ai/pricing, with the Agent API and runs pages (docs.tinyfish.ai/agent-api, docs.tinyfish.ai/key-concepts/runs), read 2026-10-16. Search "$0.00 per request", "30 requests / min · 500 requests / hour"; Fetch (POST https://api.fetch.tinyfish.ai) free; the Agent API (POST https://agent.tinyfish.ai/v1/automation/run, run-async, run-sse; `url` + `goal`; 150 steps by default, 500 at most) $0.016 per step with 2 concurrent runs; Browser $0.002 per minute; new accounts receive $8 of wallet funds. No regional statement.
+- `tinyfish-search-api` — `vendor-documentation`, TinyFish documentation, Search API page, https://docs.tinyfish.ai/search-api, read 2026-10-16. A synchronous web search: GET https://api.search.tinyfish.ai?query=… with optional `location`, `language`, `recency_minutes` or `after_date`/`before_date`, `domain_type` (web, news, research_paper) and `purpose`; JSON `{query, results[], total_results, page}`, each result `position`, `site_name`, `title`, `snippet`, `url`; the example returns 10 results. "Search is free up to 12,000 requests per day."
+- `tinyfish-authentication` — `vendor-documentation`, TinyFish documentation, Authentication page, https://docs.tinyfish.ai/authentication, read 2026-10-16. "All REST API requests require an API key passed in the `X-API-Key` header."
+- `tinyfish-pricing` — `vendor-documentation`, TinyFish pricing page, https://www.tinyfish.ai/pricing, with the Agent API and runs pages (https://docs.tinyfish.ai/agent-api, https://docs.tinyfish.ai/key-concepts/runs), read 2026-10-16. Search "$0.00 per request", "30 requests / min · 500 requests / hour"; Fetch (POST https://api.fetch.tinyfish.ai) free; the Agent API (POST https://agent.tinyfish.ai/v1/automation/run, run-async, run-sse; `url` + `goal`; 150 steps by default, 500 at most) $0.016 per step with 2 concurrent runs; Browser $0.002 per minute; new accounts receive $8 of wallet funds. No regional statement.
 
 Open:
 

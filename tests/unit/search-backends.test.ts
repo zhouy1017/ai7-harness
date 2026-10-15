@@ -1,7 +1,10 @@
 import { readFileSync } from 'node:fs';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   SEARCH_BACKENDS,
   SEARCH_BACKEND_DECLARATIONS,
@@ -32,7 +35,11 @@ type Harness = {
   judgeQuery: (query: unknown, referenceDomains: unknown, hits: Array<{ title: string; url: string }>) => { hit: boolean; primaryHit: boolean; listed: number; results: number };
   profileOf: (backendId: string, run: unknown, querySet: unknown) => MeasuredSearchProfile;
   percentile: (values: number[], fraction: number) => number | null;
+  measuredCall: (transport: { fetch: (...args: unknown[]) => Promise<Response>; agent: unknown }, declaration: SearchBackendDeclaration, query: string, credential: string) => Promise<ProbeCall>;
+  formatProbeResult: (backendId: string, call: ProbeCall) => string;
+  recordRunOnce: (path: string, run: { backendId: string; finishedAt: string | null; calls: unknown[] }, measure: (checkpoint: () => Promise<void>) => Promise<void>) => Promise<void>;
 };
+type ProbeCall = { status: number | null; latencyMs: number; retried: boolean; transportError: string | null; hits: Array<{ title: string; url: string }> | null; shape: string | null; costUsd: number | null };
 type Validator = { validatePolicyDocument: (data: unknown, schema: unknown) => void };
 
 // @ts-expect-error tools/*.mjs carry no declarations; the harness is exercised as the plain module it is.
@@ -77,6 +84,11 @@ describe('the search backend registry (Issue #883)', () => {
     expect(anonymousSearchInterface('parallel')).toEqual({ endpoint: 'https://search.parallel.ai/mcp', host: 'search.parallel.ai', protocol: 'mcp-tools-call', tool: 'web_search' });
     expect(anonymousSearchInterface('brave')).toBeNull();
     expect(anonymousSearchInterface('exa')).toBeNull();
+    const bocha = SEARCH_BACKENDS.find((entry) => entry.id === 'search-bochaai')!;
+    expect(bocha.price.amount).toBe(0.036);
+    expect(bocha.priceSource).toMatchObject({ verified: false, source: null, readOn: null });
+    expect(bocha.priceSource.note).toContain('exact URL not retained');
+    expect(SEARCH_BACKENDS.filter((entry) => entry.id !== bocha.id).every((entry) => entry.priceSource.verified)).toBe(true);
   });
 
   it('refuses a document whose shape it does not know rather than guessing', () => {
@@ -180,6 +192,102 @@ describe("decision 24⁵'s exclusion and ranking rule", () => {
 });
 
 describe('the evaluation harness, provider-free', () => {
+  it('refuses CI and guest CLI invocations before loading the credential or transport owners', () => {
+    const runtimeGuard = "import { registerHooks, syncBuiltinESMExports } from 'node:module'; import os from 'node:os'; registerHooks({ resolve(s,c,next) { if (['esbuild','undici','@napi-rs/keyring'].includes(s)) throw new Error('runtime-loading-refused'); return next(s,c); } });";
+    const script = join(ROOT, 'tools/search-backend-evaluation.mjs');
+    for (const name of ['CI', 'GITHUB_ACTIONS', 'AI7_E2E_JOURNEY']) {
+      const child = spawnSync(process.execPath, ['--import', `data:text/javascript,${encodeURIComponent(runtimeGuard)}`, script, '--probe', 'search-brave'], {
+        encoding: 'utf8', env: { [name]: '' }, timeout: 10_000, windowsHide: true,
+      });
+      expect(child.status, name).toBe(1);
+      expect(child.stdout, name).toBe('');
+      expect(child.stderr.trim(), name).toBe('SEARCH_EVALUATION/ci-refused');
+    }
+    for (const host of ['ai7-testbed-01', 'AI7-TESTBED-02']) {
+      const preload = `${runtimeGuard} os.hostname = () => ${JSON.stringify(host)}; syncBuiltinESMExports();`;
+      const child = spawnSync(process.execPath, ['--import', `data:text/javascript,${encodeURIComponent(preload)}`, script, '--run', 'search-brave'], {
+        encoding: 'utf8', env: {}, timeout: 10_000, windowsHide: true,
+      });
+      expect(child.status, host).toBe(1);
+      expect(child.stdout, host).toBe('');
+      expect(child.stderr.trim(), host).toBe('SEARCH_EVALUATION/guest-refused');
+    }
+  });
+
+  it('sends once after a timeout or body failure, retaining an observed HTTP status without raw errors', async () => {
+    const declaration = SEARCH_BACKEND_DECLARATIONS.find((entry) => entry.id === 'search-tinyfish')!;
+    const failing = vi.fn(async () => { throw Object.assign(new Error('synthetic-private-detail'), { cause: { code: 'UND_ERR_CONNECT_TIMEOUT' } }); });
+    const timedOut = await harness.measuredCall({ fetch: failing, agent: {} }, declaration, 'public test query', 'unit-test-credential');
+    expect(failing).toHaveBeenCalledTimes(1);
+    expect(timedOut).toMatchObject({ status: null, retried: false, transportError: 'UND_ERR_CONNECT_TIMEOUT', hits: null });
+    const tooLarge = vi.fn(async () => new Response('x'.repeat(4 * 1024 * 1024 + 1), { status: 200 }));
+    const bounded = await harness.measuredCall({ fetch: tooLarge, agent: {} }, declaration, 'public test query', 'unit-test-credential');
+    expect(tooLarge).toHaveBeenCalledTimes(1);
+    expect(bounded).toMatchObject({ status: 200, retried: false, transportError: 'SEARCH_EVALUATION/body-too-large', hits: null });
+    const untrustedError = vi.fn(async () => { throw { name: 'synthetic-private-detail', cause: { code: 'synthetic-private-detail' } }; });
+    const redacted = await harness.measuredCall({ fetch: untrustedError, agent: {} }, declaration, 'public test query', 'unit-test-credential');
+    expect(untrustedError).toHaveBeenCalledTimes(1);
+    expect(redacted.transportError).toBe('transport-error');
+    expect(JSON.stringify([timedOut, bounded, redacted])).not.toContain('synthetic-private-detail');
+  });
+
+  it('projects the single-query probe to no more than three bounded title/URL lines', async () => {
+    const declaration = SEARCH_BACKEND_DECLARATIONS.find((entry) => entry.id === 'search-tinyfish')!;
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ results: Array.from({ length: 8 }, (_, i) => ({
+      title: `${i}\n${'t'.repeat(150)}`, url: `https://example.org/${i}/${'u'.repeat(250)}`, snippet: 'raw-payload-not-for-output',
+    })) }), { status: 200 }));
+    const call = await harness.measuredCall({ fetch, agent: {} }, declaration, QUERY_SET.probe.query, 'unit-test-credential');
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const output = harness.formatProbeResult(declaration.id, call);
+    expect(output.split('\n')).toHaveLength(4);
+    expect(output).toContain('8 results');
+    expect(output).not.toContain('raw-payload-not-for-output');
+    expect(output).not.toContain('unit-test-credential');
+    for (const line of output.split('\n').slice(1)) expect(line.length).toBeLessThanOrEqual(325);
+  });
+
+  it('persists the run before sending and retains completed calls when interrupted, refusing another invocation', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'ai7-search-evaluation-'));
+    const path = join(directory, 'run.json');
+    const run = { backendId: 'search-test', finishedAt: null, calls: [] as unknown[] };
+    try {
+      await expect(harness.recordRunOnce(path, run, async (checkpoint) => {
+        expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(run);
+        run.calls.push({ id: 'zh-01', status: 200 });
+        await checkpoint();
+        throw new Error('interrupted-before-next-answer');
+      })).rejects.toThrow('interrupted-before-next-answer');
+      expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(run);
+      const sendAgain = vi.fn(async () => undefined);
+      await expect(harness.recordRunOnce(path, run, sendAgain)).rejects.toMatchObject({ code: 'SEARCH_EVALUATION/already-run' });
+      expect(sendAgain).not.toHaveBeenCalled();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('lets only one concurrent invocation send, then finishes that same run record', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'ai7-search-evaluation-'));
+    const path = join(directory, 'run.json');
+    const entered = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const run = { backendId: 'search-test', finishedAt: null, calls: [] };
+    const first = harness.recordRunOnce(path, run, async () => { entered.resolve(); await finish.promise; });
+    try {
+      await entered.promise;
+      const concurrentSend = vi.fn(async () => undefined);
+      await expect(harness.recordRunOnce(path, run, concurrentSend)).rejects.toMatchObject({ code: 'SEARCH_EVALUATION/already-run' });
+      expect(concurrentSend).not.toHaveBeenCalled();
+      finish.resolve();
+      await first;
+      expect(JSON.parse(await readFile(path, 'utf8')).finishedAt).toMatch(/^20\d\d-/u);
+    } finally {
+      finish.resolve();
+      await first;
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('runs on a developer host only', () => {
     expect(harness.measuringHostRefusal({ CI: 'true' }, 'owner-pc')).toBe('SEARCH_EVALUATION/ci-refused');
     expect(harness.measuringHostRefusal({ GITHUB_ACTIONS: 'true' }, 'owner-pc')).toBe('SEARCH_EVALUATION/ci-refused');

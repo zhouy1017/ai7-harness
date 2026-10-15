@@ -33,19 +33,19 @@
   "evidence": {
     "deepseek-anthropic-api": {
       "kind": "vendor-documentation",
-      "source": "DeepSeek official Anthropic API guide, api-docs.deepseek.com/guides/anthropic_api",
+      "source": "DeepSeek official Anthropic API guide, https://api-docs.deepseek.com/guides/anthropic_api",
       "readOn": "2026-10-16",
       "note": "Base URL https://api.deepseek.com/anthropic; `x-api-key` Fully Supported and `anthropic-version` Ignored. The field-compatibility table lists the content blocks `server_tool_use` Supported and `web_search_tool_result` Supported (`search_result`, `mcp_tool_use`, `mcp_tool_result` Not Supported, `mcp_servers` Ignored); its `tools` rows cover `name`, `input_schema`, `description` (Fully Supported) and `cache_control` (Ignored) and name no tool `type`, so no server tool type string is stated on this page."
     },
     "deepseek-claude-code-web-search": {
       "kind": "vendor-documentation",
-      "source": "DeepSeek official Claude Code integration guide, api-docs.deepseek.com/quick_start/agent_integrations/claude_code",
+      "source": "DeepSeek official Claude Code integration guide, https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code",
       "readOn": "2026-10-16",
-      "note": "\"The DeepSeek API natively supports the Web Search feature in Claude Code … if the model determines that your question requires a web search, it will invoke the Web Search tool and perform the search through the API provided by DeepSeek. Because invoking the Web Search tool generates additional LLM API requests … additional model token costs will be incurred.\" The tool type Claude Code sends is not named."
+      "note": "The guide states that Claude Code can invoke server-side Web Search through the DeepSeek API; model requests used to summarize retrieved results incur additional token charges. It does not name the server tool type."
     },
     "deepseek-pricing": {
       "kind": "vendor-documentation",
-      "source": "DeepSeek official models and pricing page, api-docs.deepseek.com/quick_start/pricing",
+      "source": "DeepSeek official models and pricing page, https://api-docs.deepseek.com/quick_start/pricing",
       "readOn": "2026-10-16",
       "note": "Token prices per million for deepseek-flash: cache-hit input $0.003 / $0.006, cache-miss input $0.15 / $0.30, output $0.60 / $1.20 (off-peak / peak); no per-search charge is listed."
     }

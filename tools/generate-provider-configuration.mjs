@@ -245,7 +245,10 @@ function resolveSearchBackends({ schema, documents }, slots, references) {
     references.add(credential.developmentCredentialReference);
     documented(data.supportEvidence, 'supportEvidence');
     documented(credential.evidence, 'credential.evidence');
-    documented(data.price.evidence, 'price.evidence');
+    const priceEvidence = cite(data.price.evidence, 'price.evidence');
+    // #883 review ruling: keep the historical price input if its source was lost, with an explicit consumer caveat.
+    refuse(priceEvidence.kind === 'vendor-documentation' || typeof data.evidence[data.price.evidence].note === 'string',
+      `PROVIDER_CONFIGURATION/search-backend-unverified: ${where} price.evidence (an unverified price needs its source limitation)`);
     documented(data.reachability.evidence, 'reachability.evidence');
     const request = data.request;
     const declared = [request.endpoint, request.method, request.protocol];
@@ -286,7 +289,8 @@ function resolveSearchBackends({ schema, documents }, slots, references) {
         anthropicVersion: credential.anthropicVersion,
         keyRequired: credential.keyRequired,
       },
-      price: { amount: data.price.amount, currency: data.price.currency, per: data.price.per, basis: data.price.basis },
+      price: { amount: data.price.amount, currency: data.price.currency, per: data.price.per, basis: data.price.basis,
+        sourceVerified: priceEvidence.kind === 'vendor-documentation', sourceNote: data.evidence[data.price.evidence].note ?? null },
       reachability: data.reachability.note,
       readings: Object.entries(data.evidence)
         .filter(([, entry]) => entry.kind !== 'unverified')
@@ -789,7 +793,8 @@ const SEARCH_HEADER_FORM_TEXT = Object.freeze({
 
 /** A price as the vendor page states it: an amount per a number of calls, or what the vendor bills instead. */
 function searchPriceText(price) {
-  return price.amount === null ? `no per-call price — ${price.basis}` : `${price.amount} ${price.currency} per ${grouped(price.per)} ${price.per === 1 ? 'call' : 'calls'} — ${price.basis}`;
+  const amount = price.amount === null ? `no per-call price — ${price.basis}` : `${price.amount} ${price.currency} per ${grouped(price.per)} ${price.per === 1 ? 'call' : 'calls'} — ${price.basis}`;
+  return price.sourceVerified ? amount : `${amount} (source unverified: ${price.sourceNote})`;
 }
 
 /** The support page's search backend section (Issue #883): the documents, their slots, and what a slot does not authorize. */
