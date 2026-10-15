@@ -369,9 +369,9 @@ export function buildReviewCategoryUnitMessage(
   if (contract.category.deliverables !== undefined) {
     lines.push('以下为只读交付物定稿片段（与稿件内容块分开编号）：');
     for (const document of contract.category.deliverables) {
-      lines.push(JSON.stringify({ documentId: document.documentId, type: document.typeLabel, title: document.title, version: document.versionLabel,
+      lines.push(canonicalJson({ documentId: document.documentId, type: document.typeLabel, title: document.title, version: document.versionLabel,
         revisionId: document.revisionId, omittedParagraphs: document.omittedParagraphs }));
-      for (const paragraph of document.paragraphs) lines.push(JSON.stringify(paragraph));
+      for (const paragraph of document.paragraphs) lines.push(canonicalJson(paragraph));
     }
   }
   return lines.join('\n');

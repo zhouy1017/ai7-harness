@@ -13,6 +13,8 @@ import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/ass
 import { liveKindAdmission } from '../../src/service/analysis/live-kind-admission.js';
 import { reviewDeliverables, REVIEW_DELIVERABLES_ABSENT, REVIEW_DELIVERABLES_DRAFT, REVIEW_DELIVERABLE_CHANGED } from '../../src/service/production-documents.js';
 import { sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
+import { ProviderResultCache, isModelCallLine } from '../../src/service/provider/provider-result-cache.js';
+import { parseModelFixture } from '../../src/service/provider/model-fixture.js';
 import type { LaunchPolicyProjection, ReviewRunProjection, ReviewCategoryResultSetRevisionProjection, AdmittedProviderRule } from '../../src/shared/protocol.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -248,6 +250,24 @@ describe('cross-deliverable participants and revision lineage', () => {
     expect(finding.markId).not.toBeNull();
     expect(finding.clauseRefs[0]!.documentTitle.includes(pin.revisionId) && finding.clauseRefs[0]!.documentTitle.includes(doc.documentId)
       && finding.clauseRefs[0]!.documentTitle.includes('第 1 段（只读）')).toBe(true);
+    // Exercise the reviewed generator's source-proof branch on this synthetic, provider-free capture before any Apply.
+    const cache = new ProviderResultCache(join(roots.inputRoot, 'cache'));
+    await cache.refresh();
+    const captures = cache.lines.filter(isModelCallLine).filter((line) => line.validation?.step.endsWith('/unit-1') ||
+      line.validation?.step.includes('/sampling-') || line.validation?.step.endsWith('/reflection'));
+    const snapshot = JSON.parse(db.prepare('SELECT canonical_json FROM review_runs WHERE review_run_id = ?').get(run.reviewRunId)!.canonical_json as string);
+    // @ts-expect-error The plain fixture generator has no TypeScript declaration.
+    const tool = await import('../../tools/generate-model-fixture.mjs');
+    const subjects: string[] = [];
+    for (const captured of captures) {
+      const generated = parseModelFixture(await tool.generateModelFixture({ cacheRoot: join(roots.inputRoot, 'cache'), selector: captured.itemId,
+        identity: 'sample1-cross-deliverable-source-proof', description: 'Provider-free source-proof regression for finalized document comparison.',
+        sample1Store: join(roots.dataRoot, 'store', 'ai7.sqlite'), sample1Task: snapshot.categories[0].task.taskIntentId }));
+      expect(generated.provenance).toBe('recorded');
+      subjects.push(generated.entries[0]!.capture!.subject);
+    }
+    expect(subjects).toContain('review-unit');
+    expect(subjects).toContain('sampling');
     const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
     const block = window.blocks[0]!;
     const selectedText = sliceGraphemes(block.text, 0, 2);

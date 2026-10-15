@@ -159,7 +159,7 @@ export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput)
             : `「${finding.quote}」→「${finding.replacement}」${finding.note}`)
             + (category.deliverables === undefined ? '' : category.deliverables.flatMap((document) => document.paragraphs
               .filter((paragraph) => paragraph.ref === finding.clauseId)
-              .map((paragraph) => `\n交付物（只读比对数据）：${JSON.stringify({ documentId: document.documentId, title: document.title,
+              .map((paragraph) => `\n交付物（只读比对数据）：${canonicalJson({ documentId: document.documentId, title: document.title,
                 version: document.versionLabel, revisionId: document.revisionId, ...paragraph })}`)).join('')),
         })),
     },
