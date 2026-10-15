@@ -16,7 +16,7 @@ import { reviewDeliverables, REVIEW_DELIVERABLES_ABSENT, REVIEW_DELIVERABLES_DRA
 import { sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
 import { ProviderResultCache, isModelCallLine } from '../../src/service/provider/provider-result-cache.js';
 import { parseModelFixture } from '../../src/service/provider/model-fixture.js';
-import type { LaunchPolicyProjection, ReviewRunProjection, ReviewCategoryResultSetRevisionProjection, AdmittedProviderRule } from '../../src/shared/protocol.js';
+import type { LaunchPolicyProjection, ReviewRunProjection, ReviewCategoryResultSetRevisionProjection } from '../../src/shared/protocol.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
@@ -97,17 +97,8 @@ function prepare() {
 }
 function approvals(run: ReviewRunProjection) { return run.categories.map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.planEnvelopeDigest! })); }
 
-async function syntheticPolicy() {
-  const base = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
-  const rule = base.providerProcessing.admittedRules!.find((candidate) => candidate.taskKinds.includes('editorial-review/style-and-format'))!;
-  return { ...base, providerProcessing: { ...base.providerProcessing, admittedRules: base.providerProcessing.admittedRules!.map((candidate) => candidate === rule ? {
-    ...rule, taskKinds: [...rule.taskKinds, `editorial-review/${CATEGORY}`],
-    outboundDataCategories: [...rule.outboundDataCategories, 'editorial-deliverable-excerpt'], editorialDeliverablesAllowed: true,
-  } as unknown as AdmittedProviderRule : candidate) } };
-}
-
 async function execution(afterFirst?: () => Promise<void>) {
-  policy = await syntheticPolicy();
+  policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
   const live = { ...DEVELOPER_LIVE_POLICY_BINDING, credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
     runBudgetCeiling: { kind: 'tokens' as const, maxTotalTokens: 500_000 } };
   store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'developer-live', policy, live });
@@ -226,10 +217,11 @@ describe('cross-deliverable participants and revision lineage', () => {
     const v11: LaunchPolicyProjection = { ...selected, providerProcessing: { ...selected.providerProcessing, version: 'v11',
       admittedRules: selected.providerProcessing.admittedRules!.map((rule) => {
         const previous = legacy.decision.providerAllowRules.find((candidate) => candidate.ruleId === rule.ruleId)!;
-        return { ...rule, taskKinds: previous.allowedTaskKinds, outboundDataCategories: rule.outboundDataCategories.filter((category) => previous.allowedOutboundDataCategories.includes(category)) };
+        return { ...rule, taskKinds: previous.allowedTaskKinds, outboundDataCategories: rule.outboundDataCategories.filter((category) => previous.allowedOutboundDataCategories.includes(category)),
+          editorialDeliverablesAllowed: false, materialReferencesAllowed: false };
       }) } };
     expect(liveKindAdmission(v11, definition, DEVELOPER_LIVE_POLICY_BINDING)).toBeNull();
-    const allowed = await syntheticPolicy();
+    const allowed = selected;
     expect(liveKindAdmission(allowed, definition, DEVELOPER_LIVE_POLICY_BINDING)).not.toBeNull();
     for (const denial of ['kind', 'category', 'permission']) {
       const denied = { ...allowed, providerProcessing: { ...allowed.providerProcessing, admittedRules: allowed.providerProcessing.admittedRules!.map((rule) => ({ ...rule,

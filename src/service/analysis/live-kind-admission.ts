@@ -72,7 +72,7 @@ export function liveKindAdmitted(
       expectation.promptContractDigest !== definition.promptContractDigest) return null;
   const rule = liveKindRule(policy, kind, expectation.payloadCategories);
   if (kind === reviewCategoryKindId('cross-deliverable-consistency') &&
-      (rule === null || !('editorialDeliverablesAllowed' in rule) || rule.editorialDeliverablesAllowed !== true)) return null;
+      rule?.editorialDeliverablesAllowed !== true) return null;
   if (rule === null || rule.route !== binding.route || rule.endpoint !== binding.endpoint || rule.model !== binding.model ||
       rule.credentialSlot !== binding.credentialSlot) return null;
   return {
