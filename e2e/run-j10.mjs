@@ -1774,6 +1774,7 @@ async function main() {
     // #866 synchronized delta: the shared drawer controls a category Run inside a multi-category review.
     at('review-controls-prepare');
     await closeOwnedBrowser();
+    cancellation.throwIfRequested();
     adapterFixture = 'sample1-review-authored';
     await launchForCleanup();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'review-controls-ready');
@@ -1782,14 +1783,16 @@ async function main() {
     await click(renderer, '审阅并为本图书启用 Revision 2', 'review-controls-enable');
     await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'review-controls-enabled');
     await click(renderer, '返回图书列表', 'review-controls-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"] button[data-book-id=${JSON.stringify(reviewBookId)}]')`, 'review-controls-landing');
     await clickSelector(renderer, `button[data-book-id=${JSON.stringify(reviewBookId)}]`, 'review-controls-book');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(reviewBookId)}]')`, 'review-controls-editor');
-    await clickSelector(renderer, '[data-records-destination="review"]', 'review-controls-destination');
-    await waitFor(renderer, `document.querySelector('.review-workspace-card')`, 'review-controls-workspace');
+    // 审阅 is a 工作 destination, entered as J-04 enters it.
+    await assertRenderer(renderer, `(() => { const group=document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]'); const button=group?.querySelector('button[data-work-destination="review"]'); if(!(button instanceof HTMLButtonElement)||button.disabled||button.textContent!=='审阅')return false; button.click(); return true; })()`, 'review-controls-destination');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-review"] .book-review .review-workspace-card')`, 'review-controls-workspace');
     await clickSelector(renderer, '[data-review-action="new-review"]', 'review-controls-new');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'review-controls-sheet');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for (const id of ['typos-and-usage','style-and-format']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'review-controls-plan');
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanKind==='review-run' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')`, 'review-controls-drawer');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanKind==='review-run' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')`, 'review-controls-drawer', 120_000);
     const reviewRef = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanRef`);
     requireJourney(UUID_PATTERN.test(reviewRef ?? ''), 'review-controls-ref');
     await writeFile(holdPath, '0', 'utf8');
